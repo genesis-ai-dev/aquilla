@@ -139,20 +139,34 @@ function EditorRow({
 
   const healthValue = health ?? (cell.status === "validated" ? 100 : 0)
 
+  // Build tooltip detail
+  const lastEntry = cell.history[cell.history.length - 1]
+  const exampleIds = lastEntry?.examples || []
+  const healthTooltip = cell.status === "empty"
+    ? undefined
+    : cell.status === "validated"
+      ? `Health: ${healthValue}% — validated`
+      : exampleIds.length === 0
+        ? `Health: ${healthValue}% — no examples`
+        : `Health: ${healthValue}% — ${exampleIds.length} example${exampleIds.length !== 1 ? "s" : ""}`
+
   const validationIcon = cell.translated && cell.translated.trim() ? (
-    <HealthRing health={healthValue} size={22} strokeWidth={2.5}>
-      {cell.status === "validated" ? (
-        <Check className="h-3 w-3 text-green-500" />
-      ) : cell.status === "unvalidated" ? (
-        <button
-          className="flex h-full w-full items-center justify-center rounded-full text-amber-500 hover:text-green-500"
-          title="Click to validate"
-          onClick={handleValidate}
-        >
-          <Check className="h-3 w-3" />
-        </button>
-      ) : null}
-    </HealthRing>
+    <div className="flex flex-col items-center" title={healthTooltip}>
+      <HealthRing health={healthValue} size={22} strokeWidth={2.5}>
+        {cell.status === "validated" ? (
+          <Check className="h-3 w-3 text-green-500" />
+        ) : cell.status === "unvalidated" ? (
+          <button
+            className="flex h-full w-full items-center justify-center rounded-full text-amber-500 hover:text-green-500"
+            title="Click to validate"
+            onClick={handleValidate}
+          >
+            <Check className="h-3 w-3" />
+          </button>
+        ) : null}
+      </HealthRing>
+      <span className="mt-0.5 text-[9px] tabular-nums text-muted-foreground">{healthValue}%</span>
+    </div>
   ) : null
 
   // SECURITY: originalHtml is sanitized through DOMPurify.sanitize() at the
@@ -204,9 +218,7 @@ function EditorRow({
           />
           {error && <p className="mt-0.5 text-xs text-destructive">{error}</p>}
         </div>
-        <div className="flex flex-col items-center">
-          {validationIcon}
-        </div>
+        {validationIcon}
       </div>
     </div>
   )

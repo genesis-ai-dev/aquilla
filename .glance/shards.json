@@ -1,0 +1,140 @@
+[
+  {
+    "id": "fc7d2f576e1c",
+    "file": "/Users/ryderwishart/frontierrnd/codex-editor/webviews/codex-webviews/src/CodexCellEditor/index.tsx",
+    "anchor": {
+      "from_text": "const Index: React.FC = () => {",
+      "to_text": "ReactDOM.createRoot(document.getElementById(\"root\")!).render(<Index />);",
+      "function_anchor": null,
+      "start_line": 17,
+      "end_line": 80
+    },
+    "original_content": "const Index: React.FC = () => {\n    const [unsavedChanges, setUnsavedChanges] = useState<boolean>(false);\n    const [showFlashingBorder, setShowFlashingBorder] = useState<boolean>(false);\n    const [contentToScrollTo, setContentToScrollTo] = useState<string | null>(null);\n\n    const [sourceCellMap, setSourceCellMap] = useState<{\n        [k: string]: { content: string; versions: string[] };\n    }>({});\n\n    const toggleFlashingBorder = () => {\n        setShowFlashingBorder((prevState) => !prevState);\n    };\n\n    useEffect(() => {\n        if (showFlashingBorder) {\n            setTimeout(() => {\n                setShowFlashingBorder(false);\n            }, 2000);\n        }\n    }, [showFlashingBorder]);\n\n    // Memoize the context value\n    const scrollContextValue = useMemo(\n        () => ({\n            contentToScrollTo,\n            setContentToScrollTo,\n        }),\n        [contentToScrollTo]\n    );\n\n    const sourceContextValue = useMemo(\n        () => ({\n            sourceCellMap,\n            setSourceCellMap,\n        }),\n        [sourceCellMap]\n    );\n\n    const unsavedChangesContextValue = useMemo(\n        () => ({\n            unsavedChanges,\n            setUnsavedChanges,\n            showFlashingBorder,\n            toggleFlashingBorder,\n        }),\n        [unsavedChanges, showFlashingBorder]\n    );\n\n    return (\n        <SourceCellContext.Provider value={sourceContextValue}>\n            <UnsavedChangesContext.Provider value={unsavedChangesContextValue}>\n                <ScrollToContentContext.Provider value={scrollContextValue}>\n                    <TooltipProvider>\n                        <React.StrictMode>\n                            <App />\n                        </React.StrictMode>\n                    </TooltipProvider>\n                </ScrollToContentContext.Provider>\n            </UnsavedChangesContext.Provider>\n        </SourceCellContext.Provider>\n    );\n};\n\nReactDOM.createRoot(document.getElementById(\"root\")!).render(<Index />);",
+    "original_hash": "65ce6684e11835da",
+    "summary": "Root entry point for CodexCellEditor webview. Initializes VS Code API, creates 4 context providers (SourceCellContext, UnsavedChangesContext, ScrollToContentContext, TooltipProvider) with memoized values, and mounts the App component. Handles flashing border UI for unsaved changes.",
+    "tags": [
+      "codex-editor",
+      "root-entry",
+      "context-providers"
+    ],
+    "created_at": "2026-04-13T17:17:30.703633+00:00",
+    "updated_at": "2026-04-13T17:17:30.704866+00:00",
+    "last_viewed": null,
+    "stale_views": 0
+  },
+  {
+    "id": "09bb7e68e5ef",
+    "file": "/Users/ryderwishart/frontierrnd/codex-editor/webviews/codex-webviews/src/CodexCellEditor/Editor.tsx",
+    "anchor": {
+      "from_text": "const Editor = forwardRef<EditorHandles, EditorProps>((props, ref) => {",
+      "to_text": "    // Initialize Quill editor\n    useEffect(() => {\n        if (editorRef.current && !quillRef.current) {\n            const quill = new Quill(editorRef.current, {\n                theme: \"snow\",\n                placeholder: \"Start writing...\",\n                modules: {\n                    toolbar: {\n                        container: TOOLBAR_OPTIONS,\n                    },\n                    keyboard: {\n                        bindings: {\n                            \"list autofill\": false,\n                            tab: {\n                                key: \"tab\",\n                                handler: () => {\n                                    setSkipOnChange(true);\n                                    return true;\n                                },\n                            },\n                        },\n                    },\n                },\n            });",
+      "function_anchor": null,
+      "start_line": 246,
+      "end_line": 266
+    },
+    "original_content": "const Editor = forwardRef<EditorHandles, EditorProps>((props, ref) => {\n    const { setIsEditingFootnoteInline, isEditingFootnoteInline } = props;\n    const [isToolbarExpanded, setIsToolbarExpanded] = useState(false);\n    const [isToolbarVisible, setIsToolbarVisible] = useState(false);\n    const [isEditorEmpty, setIsEditorEmpty] = useState(true);\n    const [editHistory, setEditHistory] = useState<EditHistoryEntry[]>([]);\n    const initialContentRef = useRef<string>(\"\");\n    // Header selection now uses Quill's native dropdown; no local label state needed\n    const { setUnsavedChanges } = useContext(UnsavedChangesContext);\n    const quillRef = useRef<Quill | null>(null);\n    const editorRef = useRef<HTMLDivElement>(null);\n\n    const [currentAuthor, setCurrentAuthor] = useState<string>(\n        (window as any).initialData?.userInfo?.username || \"anonymous\"\n    );\n\n    const [showHistoryModal, setShowHistoryModal] = useState(false);\n    const [historyTab, setHistoryTab] = useState<\"history\" | \"llm-previews\">(\"history\");\n    const [editHistoryForCell, setEditHistoryForCell] = useState<EditHistory[]>(props.editHistory);\n\n    const [footnoteCount, setFootnoteCount] = useState(1);",
+    "original_hash": "0b3bc593f2af3109",
+    "summary": "Quill editor initialization in Editor component. Creates Quill instance with snow theme, custom toolbar options, keyboard bindings (list autofill disabled, tab handling), and paste event listeners. Registers custom formats (AutocompleteFormat, FootnoteFormat) as Quill blots.",
+    "tags": [
+      "quill-editor",
+      "editor-component",
+      "initialization"
+    ],
+    "created_at": "2026-04-13T17:17:34.778250+00:00",
+    "updated_at": "2026-04-13T17:17:34.778260+00:00",
+    "last_viewed": null,
+    "stale_views": 0
+  },
+  {
+    "id": "d29644d1d515",
+    "file": "/Users/ryderwishart/frontierrnd/codex-editor/webviews/codex-webviews/src/CodexCellEditor/CellList.tsx",
+    "anchor": {
+      "from_text": "const CellList: React.FC<CellListProps> = ({",
+      "to_text": "    // Filter out milestone cells from the view (they remain in JSON)\n        filtered = filtered.filter((unit) => unit.cellType !== CodexCellTypes.MILESTONE);\n\n        return filtered;\n    }, [translationUnits, isSourceText, isCorrectionEditorMode]);",
+      "function_anchor": null,
+      "start_line": 83,
+      "end_line": 103
+    },
+    "original_content": "const CellList: React.FC<CellListProps> = ({\n    translationUnits,\n    fullDocumentTranslationUnits,\n    contentBeingUpdated,\n    setContentBeingUpdated,\n    handleCloseEditor,\n    handleSaveHtml,\n    vscode,\n    textDirection,\n    isSourceText,\n    windowHeight,\n    headerHeight,\n    highlightedCellId,\n    scrollSyncEnabled,\n    translationQueue = [],\n    currentProcessingCellId,\n    cellsInAutocompleteQueue = [],\n    successfulCompletions = new Set(),\n    audioAttachments,\n    isSaving = false,\n    saveError = false,",
+    "original_hash": "8306e43ca43135d8",
+    "summary": "CellList component renders all translation units as cells. Maps QuillCellContent[] to either CellEditor (edit mode) or CellContentDisplay (read mode). Filters out milestone cells from view but keeps them in JSON. Props include text direction, audio attachments, validation counts, backtranslations, and milestone pagination state.",
+    "tags": [
+      "cell-list",
+      "cell-rendering",
+      "component-tree"
+    ],
+    "created_at": "2026-04-13T17:17:38.670019+00:00",
+    "updated_at": "2026-04-13T17:17:38.670070+00:00",
+    "last_viewed": null,
+    "stale_views": 0
+  },
+  {
+    "id": "bd994234a29f",
+    "file": "/Users/ryderwishart/frontierrnd/codex-editor/webviews/codex-webviews/src/CodexCellEditor/SourceTextDisplay.tsx",
+    "anchor": {
+      "from_text": "const SourceTextDisplay: React.FC<SourceTextDisplayProps>",
+      "to_text": "export default SourceTextDisplay;",
+      "function_anchor": null,
+      "start_line": 15,
+      "end_line": 77
+    },
+    "original_content": "const SourceTextDisplay: React.FC<SourceTextDisplayProps> = ({ content, footnoteOffset = 1 }) => {\n    const contentRef = useRef<HTMLDivElement>(null);\n    const { showTooltip, hideTooltip } = useTooltip();\n\n    // Effect to attach event listeners to footnote markers\n    useEffect(() => {\n        if (!contentRef.current) return;\n\n        // Find all footnote markers in the rendered content\n        const markers = contentRef.current.querySelectorAll(\"sup.footnote-marker\");\n\n        // Function to show tooltip on hover\n        const handleMarkerMouseEnter = (e: Event) => {\n            const marker = e.currentTarget as HTMLElement;\n            const content = marker.getAttribute(\"data-footnote\") || \"\";\n            const rect = marker.getBoundingClientRect();\n\n            // Position at the top center of the marker\n            const x = rect.left + rect.width / 2;\n            const y = rect.top;\n\n            showTooltip(<div dangerouslySetInnerHTML={{ __html: content }} />, x, y);\n        };\n\n        // Function to hide tooltip when mouse leaves\n        const handleMarkerMouseLeave = () => {\n            hideTooltip();\n        };\n\n        // Attach listeners to all markers\n        markers.forEach((marker) => {\n            marker.addEventListener(\"mouseenter\", handleMarkerMouseEnter);\n            marker.addEventListener(\"mouseleave\", handleMarkerMouseLeave);\n        });\n\n        // Use the proper footnote numbering utility\n        if (contentRef.current) {\n            updateFootnoteNumbering(contentRef.current, footnoteOffset, false);\n        }\n\n        // Clean up listeners when component unmounts\n        return () => {\n            markers.forEach((marker) => {\n                marker.removeEventListener(\"mouseenter\", handleMarkerMouseEnter);\n                marker.removeEventListener(\"mouseleave\", handleMarkerMouseLeave);\n            });\n        };\n    }, [content, showTooltip, hideTooltip, footnoteOffset]);\n\n    return (\n        <div className=\"content-section\">\n            <div\n                ref={contentRef}\n                className=\"prose prose-sm max-w-none\"\n                dangerouslySetInnerHTML={{\n                    __html: content || \"Loading source text...\",\n                }}\n            />\n        </div>\n    );\n};\n\nexport default SourceTextDisplay;",
+    "original_hash": "d2ef666e9e8aaf4f",
+    "summary": "SourceTextDisplay renders source text with footnote hover tooltips using TooltipContext. Attaches mouseenter/mouseleave listeners to footnote markers (sup.footnote-marker). Updates footnote numbering on mount. Content rendered via dangerouslySetInnerHTML with prose styling.",
+    "tags": [
+      "source-text-display",
+      "footnote-handling",
+      "tooltip-context"
+    ],
+    "created_at": "2026-04-13T17:17:53.163858+00:00",
+    "updated_at": "2026-04-13T17:17:53.163885+00:00",
+    "last_viewed": null,
+    "stale_views": 0
+  },
+  {
+    "id": "4d47e73b979c",
+    "file": "/Users/ryderwishart/frontierrnd/codex-editor/webviews/codex-webviews/src/CodexCellEditor/contextProviders/SourceCellContext.tsx",
+    "anchor": {
+      "from_text": "const SourceCellContext = React.createContext<SourceCellContextProps>({",
+      "to_text": "export default SourceCellContext;",
+      "function_anchor": null,
+      "start_line": 10,
+      "end_line": 15
+    },
+    "original_content": "const SourceCellContext = React.createContext<SourceCellContextProps>({\n    sourceCellMap: {},\n    setSourceCellMap: () => {},\n});\n\nexport default SourceCellContext;",
+    "original_hash": "de412c79c37bb790",
+    "summary": "SourceCellContext: React Context providing sourceCellMap state (cellId -> {content, versions[]}) and setter. Maps cell IDs to source text content and version history. Initialized with memoized value in index.tsx root component.",
+    "tags": [
+      "state-management",
+      "context-providers",
+      "source-cells"
+    ],
+    "created_at": "2026-04-13T17:18:01.659398+00:00",
+    "updated_at": "2026-04-13T17:18:01.659426+00:00",
+    "last_viewed": null,
+    "stale_views": 0
+  },
+  {
+    "id": "0c7477fa3142",
+    "file": "/Users/ryderwishart/frontierrnd/codex-editor/webviews/codex-webviews/src/CodexCellEditor/contextProviders/UnsavedChangesContext.tsx",
+    "anchor": {
+      "from_text": "interface UnsavedChangesContextProps {",
+      "to_text": "export default UnsavedChangesContext;",
+      "function_anchor": null,
+      "start_line": 3,
+      "end_line": 17
+    },
+    "original_content": "interface UnsavedChangesContextProps {\n    unsavedChanges: boolean;\n    setUnsavedChanges: React.Dispatch<React.SetStateAction<boolean>>;\n    showFlashingBorder: boolean;\n    toggleFlashingBorder: () => void;\n}\n\nconst UnsavedChangesContext = React.createContext<UnsavedChangesContextProps>({\n    unsavedChanges: false,\n    setUnsavedChanges: () => {},\n    showFlashingBorder: false,\n    toggleFlashingBorder: () => {},\n});\n\nexport default UnsavedChangesContext;",
+    "original_hash": "fc9f48fa7a97e47a",
+    "summary": "UnsavedChangesContext: Tracks unsavedChanges (boolean), setUnsavedChanges setter, showFlashingBorder (boolean), toggleFlashingBorder callback. Used to signal dirty state when user edits cells and display visual feedback with flashing border animation.",
+    "tags": [
+      "state-management",
+      "context-providers",
+      "unsaved-changes"
+    ],
+    "created_at": "2026-04-13T17:18:04.548647+00:00",
+    "updated_at": "2026-04-13T17:18:04.548658+00:00",
+    "last_viewed": null,
+    "stale_views": 0
+  }
+]

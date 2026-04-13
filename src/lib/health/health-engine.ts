@@ -7,9 +7,11 @@ export interface HealthStats {
   fileProgress: Map<string, { translated: number; validated: number; total: number }>
 }
 
+export const DEFAULT_LLM_HEALTH_MULTIPLIER = 0.9
+
 export function computeHealthMap(
-  // All cells across all files, keyed by fileId
-  fileCells: Map<string, CellData[]>
+  fileCells: Map<string, CellData[]>,
+  llmHealthMultiplier = DEFAULT_LLM_HEALTH_MULTIPLIER
 ): HealthStats {
   const healthMap = new Map<string, number>()
   const fileHealth = new Map<string, number>()
@@ -35,7 +37,7 @@ export function computeHealthMap(
       for (const exId of exampleIds) {
         sum += healthMap.get(exId) ?? 0
       }
-      healthMap.set(cell.id, Math.round(sum / exampleIds.length))
+      healthMap.set(cell.id, Math.round((sum / exampleIds.length) * llmHealthMultiplier))
     }
   }
 

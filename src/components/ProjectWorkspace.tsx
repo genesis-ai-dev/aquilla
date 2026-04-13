@@ -39,7 +39,10 @@ export function ProjectWorkspace() {
     return map
   }, [activeFileId, cells])
 
-  const { healthMap, fileHealth, projectHealth, fileProgress } = useHealth(fileCells)
+  const { healthMap, fileHealth, projectHealth, fileProgress } = useHealth(
+    fileCells,
+    project?.completionSettings?.llmHealthPenalty ?? 0.1
+  )
 
   if (loading || !project) return <div className="p-8 text-muted-foreground">Loading...</div>
 

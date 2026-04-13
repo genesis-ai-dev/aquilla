@@ -25,6 +25,7 @@ export function ProjectSettings() {
   const [maxTokens, setMaxTokens] = useState(512)
   const [temperature, setTemperature] = useState(0.3)
   const [systemPrompt, setSystemPrompt] = useState(DEFAULT_SYSTEM_PROMPT)
+  const [llmHealthPenalty, setLlmHealthPenalty] = useState(0.1)
 
   const [models, setModels] = useState<string[]>([])
   const [connecting, setConnecting] = useState(false)
@@ -46,6 +47,7 @@ export function ProjectSettings() {
         setMaxTokens(p.completionSettings.maxTokens)
         setTemperature(p.completionSettings.temperature)
         setSystemPrompt(p.completionSettings.systemPrompt)
+        setLlmHealthPenalty(p.completionSettings.llmHealthPenalty ?? 0.1)
       }
       setLoading(false)
     })
@@ -59,7 +61,7 @@ export function ProjectSettings() {
   }
 
   function saveCompletionSettings() {
-    save({ completionSettings: { endpoint: endpoint.trim(), model, maxTokens, temperature, systemPrompt } })
+    save({ completionSettings: { endpoint: endpoint.trim(), model, maxTokens, temperature, systemPrompt, llmHealthPenalty } })
   }
 
   async function handleConnect() {
@@ -150,6 +152,13 @@ export function ProjectSettings() {
                 <Label>Temperature ({temperature})</Label>
                 <input type="range" min="0" max="1" step="0.05" value={temperature} onChange={(e) => setTemperature(Number(e.target.value))} onMouseUp={saveCompletionSettings} className="mt-2 w-full" />
               </div>
+            </div>
+            <div>
+              <Label>LLM Health Penalty ({Math.round(llmHealthPenalty * 100)}%)</Label>
+              <input type="range" min="0" max="0.5" step="0.05" value={llmHealthPenalty} onChange={(e) => setLlmHealthPenalty(Number(e.target.value))} onMouseUp={saveCompletionSettings} className="mt-2 w-full" />
+              <p className="mt-1 text-xs text-muted-foreground">
+                LLM translations are penalized by this amount. 0% = full trust, 50% = heavy penalty. Default: 10%.
+              </p>
             </div>
             <div>
               <Label htmlFor="sp">System Prompt</Label>

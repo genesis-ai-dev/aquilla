@@ -50,6 +50,7 @@ export interface CompletionSettings {
   maxTokens: number
   temperature: number
   systemPrompt: string
+  llmHealthPenalty: number // 0-1, default 0.1 (10% penalty). Multiplier = 1 - penalty.
 }
 
 export interface CellHistoryEntry {

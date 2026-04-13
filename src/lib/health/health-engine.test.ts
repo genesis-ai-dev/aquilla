@@ -58,7 +58,8 @@ describe("computeHealthMap", () => {
       ] }),
     ]]])
     const result = computeHealthMap(cells)
-    expect(result.healthMap.get("c3")).toBe(100)
+    // avg(100, 100) * 0.9 = 90
+    expect(result.healthMap.get("c3")).toBe(90)
   })
 
   it("LLM cell with mixed examples has proportional health", () => {
@@ -74,8 +75,8 @@ describe("computeHealthMap", () => {
       ] }),
     ]]])
     const result = computeHealthMap(cells)
-    // c1=100, c2=0 (no examples), c3 = avg(100, 0) = 50
-    expect(result.healthMap.get("c3")).toBe(50)
+    // c1=100, c2=0 (no examples), c3 = avg(100, 0) * 0.9 = 45
+    expect(result.healthMap.get("c3")).toBe(45)
   })
 
   it("cascading health: LLM depends on LLM depends on validated", () => {
@@ -91,9 +92,9 @@ describe("computeHealthMap", () => {
       ] }),
     ]]])
     const result = computeHealthMap(cells)
-    // c1=100, c2=avg(100)=100, c3=avg(100)=100
-    expect(result.healthMap.get("c2")).toBe(100)
-    expect(result.healthMap.get("c3")).toBe(100)
+    // c1=100, c2=avg(100)*0.9=90, c3=avg(90)*0.9=81
+    expect(result.healthMap.get("c2")).toBe(90)
+    expect(result.healthMap.get("c3")).toBe(81)
   })
 
   it("computes file progress correctly", () => {
@@ -158,6 +159,20 @@ describe("computeHealthMap", () => {
       ]],
     ])
     const result = computeHealthMap(cells)
-    expect(result.healthMap.get("c2")).toBe(100) // references c1 from f1
+    expect(result.healthMap.get("c2")).toBe(90) // avg(100) * 0.9 = 90
+  })
+
+  it("respects custom LLM health multiplier", () => {
+    const cells = new Map([["f1", [
+      makeCell({ id: "c1", translated: "a", status: "validated", history: [
+        { timestamp: "t1", value: "a", source: "human", author: "user", validated: true },
+      ] }),
+      makeCell({ id: "c2", translated: "b", status: "unvalidated", history: [
+        { timestamp: "t2", value: "b", source: "llm", author: "model", validated: false, examples: ["c1"] },
+      ] }),
+    ]]])
+    // 50% penalty
+    const result = computeHealthMap(cells, 0.5)
+    expect(result.healthMap.get("c2")).toBe(50) // avg(100) * 0.5
   })
 })

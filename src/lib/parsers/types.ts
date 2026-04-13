@@ -19,6 +19,35 @@ export interface TranslatableString {
   type: CellType
 }
 
+export interface TranslationRule {
+  id: string
+  name: string
+  description: string
+  severity: "major" | "minor"
+  source: "algorithmic" | "llm" | "user"
+  scope: "project" | "org"
+  check: RuleCheck
+  enabled: boolean
+  createdAt: string
+}
+
+export type RuleCheck =
+  | { type: "source-requires-target"; sourcePattern: string; targetPattern: string }
+  | { type: "target-forbids"; targetPattern: string }
+  | { type: "source-target-match"; pattern: string }
+
+export interface RuleInfraction {
+  ruleId: string
+  cellId: string
+  fileId: string
+  message: string
+}
+
+export interface RulePenalties {
+  major: number  // default 15
+  minor: number  // default 5
+}
+
 export interface ProjectRecord {
   id: string
   name: string
@@ -29,6 +58,8 @@ export interface ProjectRecord {
   members: ProjectMember[]
   completionSettings?: CompletionSettings
   username?: string
+  rules?: TranslationRule[]
+  rulePenalties?: RulePenalties
 }
 
 export interface FileReference {

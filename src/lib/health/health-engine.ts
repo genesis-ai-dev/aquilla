@@ -1,17 +1,22 @@
 import type { CellData } from "@/hooks/useCells"
+import type { TranslationRule, RuleInfraction } from "@/lib/parsers/types"
+import { checkRules } from "@/lib/rules/rule-engine"
 
 export interface HealthStats {
   healthMap: Map<string, number>      // cellId → 0-100
   fileHealth: Map<string, number>     // fileId → average health 0-100
   projectHealth: number               // overall average 0-100
   fileProgress: Map<string, { translated: number; validated: number; total: number }>
+  infractions: Map<string, RuleInfraction[]>
 }
 
 export const DEFAULT_LLM_HEALTH_MULTIPLIER = 0.9
 
 export function computeHealthMap(
   fileCells: Map<string, CellData[]>,
-  llmHealthMultiplier = DEFAULT_LLM_HEALTH_MULTIPLIER
+  llmHealthMultiplier = DEFAULT_LLM_HEALTH_MULTIPLIER,
+  rules: TranslationRule[] = [],
+  rulePenalties: { major: number; minor: number } = { major: 15, minor: 5 }
 ): HealthStats {
   const healthMap = new Map<string, number>()
   const fileHealth = new Map<string, number>()
@@ -39,6 +44,25 @@ export function computeHealthMap(
       }
       healthMap.set(cell.id, Math.round((sum / exampleIds.length) * llmHealthMultiplier))
     }
+  }
+
+  // Rule infractions pass
+  const infractions = checkRules(fileCells, rules)
+
+  // Build rule severity lookup
+  const ruleSeverity = new Map<string, "major" | "minor">()
+  for (const rule of rules) ruleSeverity.set(rule.id, rule.severity)
+
+  // Apply penalties
+  for (const [cellId, cellInfractions] of infractions) {
+    const baseHealth = healthMap.get(cellId)
+    if (baseHealth === undefined) continue
+    let penalty = 0
+    for (const inf of cellInfractions) {
+      const severity = ruleSeverity.get(inf.ruleId) || "minor"
+      penalty += severity === "major" ? rulePenalties.major : rulePenalties.minor
+    }
+    healthMap.set(cellId, Math.max(0, baseHealth - penalty))
   }
 
   // Second pass: file-level stats
@@ -69,5 +93,5 @@ export function computeHealthMap(
 
   const projectHealth = projectCount > 0 ? Math.round(projectSum / projectCount) : 0
 
-  return { healthMap, fileHealth, projectHealth, fileProgress }
+  return { healthMap, fileHealth, projectHealth, fileProgress, infractions }
 }

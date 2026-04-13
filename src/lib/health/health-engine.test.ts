@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest"
 import { computeHealthMap } from "./health-engine"
 import type { CellData } from "@/hooks/useCells"
+import type { TranslationRule } from "@/lib/parsers/types"
 
 function makeCell(overrides: Partial<CellData> & { id: string }): CellData {
   return {
@@ -160,6 +161,23 @@ describe("computeHealthMap", () => {
     ])
     const result = computeHealthMap(cells)
     expect(result.healthMap.get("c2")).toBe(90) // avg(100) * 0.9 = 90
+  })
+
+  it("applies rule infraction penalties to health", () => {
+    const cells = new Map([["f1", [
+      makeCell({ id: "c1", original: "Chapter 5", translated: "Chapitre", status: "validated", history: [
+        { timestamp: "t1", value: "Chapitre", source: "human", author: "user", validated: true },
+      ] }),
+    ]]])
+    const rules: TranslationRule[] = [{
+      id: "r1", name: "Preserve numbers", description: "", severity: "major",
+      source: "user", scope: "project", enabled: true, createdAt: "t1",
+      check: { type: "source-requires-target", sourcePattern: "\\d+", targetPattern: "\\d+" },
+    }]
+    const result = computeHealthMap(cells, 0.9, rules, { major: 15, minor: 5 })
+    // base health = 100 (validated), minus 15 for major infraction = 85
+    expect(result.healthMap.get("c1")).toBe(85)
+    expect(result.infractions.get("c1")).toHaveLength(1)
   })
 
   it("respects custom LLM health multiplier", () => {

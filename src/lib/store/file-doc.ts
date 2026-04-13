@@ -29,7 +29,7 @@ export function createFileDoc(
     meta.set("targetLanguage", targetLanguage)
 
     for (const str of strings) {
-      const cell = new Y.Map<string>()
+      const cell = new Y.Map()
       cell.set("id", str.id)
       cell.set("original", str.original)
       if (str.originalHtml) cell.set("originalHtml", str.originalHtml)
@@ -37,6 +37,7 @@ export function createFileDoc(
       cell.set("context", str.context)
       cell.set("group", str.group)
       cell.set("type", str.type)
+      cell.set("history", new Y.Array())
       cells.set(str.id, cell)
       order.push([str.id])
     }

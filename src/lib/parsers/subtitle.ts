@@ -16,7 +16,7 @@ export function extractVttStrings(content: string): TranslatableString[] {
       results.push({
         id: uuid(),
         original: text,
-        translated: text,
+        translated: "",
         context: currentTimestamp,
         group: uuid(),
         type: "cue",
@@ -61,7 +61,7 @@ export function extractSrtStrings(content: string): TranslatableString[] {
       results.push({
         id: uuid(),
         original: text,
-        translated: text,
+        translated: "",
         context: currentTimestamp,
         group: uuid(),
         type: "cue",

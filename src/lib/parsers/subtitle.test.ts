@@ -43,7 +43,7 @@ Line two`
 Hello`
 
     const result = extractVttStrings(vtt)
-    expect(result[0].translated).toBe("Hello")
+    expect(result[0].translated).toBe("")
   })
 })
 

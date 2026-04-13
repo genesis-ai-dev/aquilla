@@ -34,7 +34,7 @@ function parseBookSection(section: string, bookId: string): UsfmBookResult {
       strings.push({
         id: uuid(),
         original: seg.text,
-        translated: seg.text,
+        translated: "",
         context,
         group: seg.group,
         type,
@@ -79,7 +79,6 @@ function parseBookSection(section: string, bookId: string): UsfmBookResult {
     if (!trimmed.startsWith("\\") && strings.length > 0) {
       const last = strings[strings.length - 1]
       last.original += " " + trimmed
-      last.translated = last.original
     }
   }
 

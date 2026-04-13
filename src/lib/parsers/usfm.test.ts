@@ -89,6 +89,6 @@ describe("extractUsfmStrings", () => {
 \\v 1 Test verse.`
 
     const result = extractUsfmStrings(usfm)
-    expect(result[0].strings[0].translated).toBe("Test verse.")
+    expect(result[0].strings[0].translated).toBe("")
   })
 })

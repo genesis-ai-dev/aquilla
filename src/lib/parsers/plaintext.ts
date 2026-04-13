@@ -14,7 +14,7 @@ export function extractPlaintextStrings(content: string): TranslatableString[] {
       results.push({
         id: uuid(),
         original: seg.text,
-        translated: seg.text,
+        translated: "",
         context: `Paragraph ${index + 1}`,
         group: seg.group,
         type: "text",

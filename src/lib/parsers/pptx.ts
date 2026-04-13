@@ -33,7 +33,7 @@ export async function extractPptxStrings(buffer: ArrayBuffer): Promise<Translata
           id: uuid(),
           original: seg.text,
           originalHtml: segments.length === 1 && hasFormatting ? html : undefined,
-          translated: seg.text,
+          translated: "",
           context,
           group: seg.group,
           type: "text",

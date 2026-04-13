@@ -88,6 +88,6 @@ describe("extractPptxStrings", () => {
       `,
     })
     const result = await extractPptxStrings(buffer)
-    expect(result[0].translated).toBe("Test")
+    expect(result[0].translated).toBe("")
   })
 })

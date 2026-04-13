@@ -24,7 +24,7 @@ export function extractMarkdownStrings(content: string): TranslatableString[] {
         id: uuid(),
         original: seg.text,
         originalHtml: segments.length === 1 && html !== plain ? html : undefined,
-        translated: seg.text,
+        translated: "",
         context,
         group: seg.group,
         type,

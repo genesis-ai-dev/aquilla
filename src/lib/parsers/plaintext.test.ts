@@ -15,7 +15,7 @@ describe("extractPlaintextStrings", () => {
 
   it("sets translated equal to original", () => {
     const result = extractPlaintextStrings("Hello")
-    expect(result[0].translated).toBe(result[0].original)
+    expect(result[0].translated).toBe("")
   })
 
   it("assigns unique IDs and group IDs", () => {

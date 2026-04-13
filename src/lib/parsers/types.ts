@@ -27,6 +27,8 @@ export interface ProjectRecord {
   createdAt: string
   files: FileReference[]
   members: ProjectMember[]
+  completionSettings?: CompletionSettings
+  username?: string
 }
 
 export interface FileReference {
@@ -40,6 +42,23 @@ export interface FileReference {
 export interface ProjectMember {
   userId: string
   role: "owner" | "translator" | "reviewer"
+}
+
+export interface CompletionSettings {
+  endpoint: string
+  model: string
+  maxTokens: number
+  temperature: number
+  systemPrompt: string
+}
+
+export interface CellHistoryEntry {
+  timestamp: string
+  value: string
+  source: "human" | "llm"
+  author: string
+  validated: boolean
+  examples?: string[]
 }
 
 export function detectFileType(fileName: string): FileType | null {

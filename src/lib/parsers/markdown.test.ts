@@ -79,6 +79,6 @@ describe("extractMarkdownStrings", () => {
   it("sets translated equal to original (plain text, no markdown)", () => {
     const md = "**Bold** text"
     const result = extractMarkdownStrings(md)
-    expect(result[0].translated).toBe("Bold text")
+    expect(result[0].translated).toBe("")
   })
 })

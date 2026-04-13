@@ -93,6 +93,6 @@ describe("extractDocxStrings", () => {
       <w:p><w:r><w:t>Hello</w:t></w:r></w:p>
     `)
     const result = await extractDocxStrings(buffer)
-    expect(result[0].translated).toBe("Hello")
+    expect(result[0].translated).toBe("")
   })
 })

@@ -1,20 +1,163 @@
+import { useEffect, useState } from "react"
 import { useParams, useNavigate } from "react-router-dom"
+import { ArrowLeft, CheckCircle, XCircle, Loader2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { getProject, updateProject } from "@/lib/store/project-index"
+import { fetchModels, DEFAULT_SYSTEM_PROMPT } from "@/lib/completion/completion-service"
+import type { ProjectRecord } from "@/lib/parsers/types"
 
 export function ProjectSettings() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
+  const [project, setProject] = useState<ProjectRecord | null>(null)
+  const [loading, setLoading] = useState(true)
+
+  const [name, setName] = useState("")
+  const [sourceLanguage, setSourceLanguage] = useState("")
+  const [targetLanguage, setTargetLanguage] = useState("")
+  const [username, setUsername] = useState("")
+
+  const [endpoint, setEndpoint] = useState("")
+  const [model, setModel] = useState("")
+  const [maxTokens, setMaxTokens] = useState(512)
+  const [temperature, setTemperature] = useState(0.3)
+  const [systemPrompt, setSystemPrompt] = useState(DEFAULT_SYSTEM_PROMPT)
+
+  const [models, setModels] = useState<string[]>([])
+  const [connecting, setConnecting] = useState(false)
+  const [connectionError, setConnectionError] = useState<string | null>(null)
+  const [connected, setConnected] = useState(false)
+
+  useEffect(() => {
+    if (!id) return
+    getProject(id).then((p) => {
+      if (!p) return
+      setProject(p)
+      setName(p.name)
+      setSourceLanguage(p.sourceLanguage)
+      setTargetLanguage(p.targetLanguage)
+      setUsername(p.username || "local")
+      if (p.completionSettings) {
+        setEndpoint(p.completionSettings.endpoint)
+        setModel(p.completionSettings.model)
+        setMaxTokens(p.completionSettings.maxTokens)
+        setTemperature(p.completionSettings.temperature)
+        setSystemPrompt(p.completionSettings.systemPrompt)
+      }
+      setLoading(false)
+    })
+  }, [id])
+
+  async function save(updates: Partial<ProjectRecord>) {
+    if (!project) return
+    const updated = { ...project, ...updates }
+    await updateProject(updated)
+    setProject(updated)
+  }
+
+  function saveCompletionSettings() {
+    save({ completionSettings: { endpoint: endpoint.trim(), model, maxTokens, temperature, systemPrompt } })
+  }
+
+  async function handleConnect() {
+    if (!endpoint.trim()) return
+    setConnecting(true)
+    setConnectionError(null)
+    setConnected(false)
+    try {
+      const list = await fetchModels(endpoint.trim())
+      setModels(list)
+      setConnected(true)
+      if (list.length > 0 && !model) setModel(list[0])
+    } catch (err) {
+      setConnectionError(err instanceof Error ? err.message : "Connection failed")
+    } finally {
+      setConnecting(false)
+    }
+  }
+
+  if (loading) return <div className="p-8 text-muted-foreground">Loading...</div>
 
   return (
     <div className="min-h-screen bg-background">
       <header className="flex items-center gap-4 border-b px-4 py-2">
         <Button variant="ghost" size="sm" onClick={() => navigate(`/project/${id}`)}>
-          ← Back to Editor
+          <ArrowLeft className="mr-1 h-4 w-4" /> Back to Editor
         </Button>
         <h2 className="font-semibold">Project Settings</h2>
       </header>
-      <main className="mx-auto max-w-2xl p-6">
-        <p className="text-muted-foreground">Settings form coming soon.</p>
+      <main className="mx-auto max-w-2xl space-y-6 p-6">
+        <Card>
+          <CardHeader><CardTitle>Project Info</CardTitle></CardHeader>
+          <CardContent className="space-y-4">
+            <div>
+              <Label htmlFor="pname">Project Name</Label>
+              <Input id="pname" value={name} onChange={(e) => setName(e.target.value)} onBlur={() => save({ name })} />
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <Label htmlFor="sl">Source Language</Label>
+                <Input id="sl" value={sourceLanguage} onChange={(e) => setSourceLanguage(e.target.value)} onBlur={() => save({ sourceLanguage })} />
+              </div>
+              <div>
+                <Label htmlFor="tl">Target Language</Label>
+                <Input id="tl" value={targetLanguage} onChange={(e) => setTargetLanguage(e.target.value)} onBlur={() => save({ targetLanguage })} />
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader><CardTitle>User</CardTitle></CardHeader>
+          <CardContent>
+            <Label htmlFor="un">Username</Label>
+            <Input id="un" value={username} onChange={(e) => setUsername(e.target.value)} onBlur={() => save({ username })} placeholder="local" />
+            <p className="mt-1 text-xs text-muted-foreground">Used as author name in translation history.</p>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader><CardTitle>LLM Completion</CardTitle></CardHeader>
+          <CardContent className="space-y-4">
+            <div>
+              <Label htmlFor="ep">Endpoint URL</Label>
+              <div className="flex gap-2">
+                <Input id="ep" value={endpoint} onChange={(e) => setEndpoint(e.target.value)} placeholder="http://localhost:8000" className="flex-1" />
+                <Button size="sm" onClick={handleConnect} disabled={connecting || !endpoint.trim()}>
+                  {connecting ? <Loader2 className="h-4 w-4 animate-spin" /> : "Connect"}
+                </Button>
+              </div>
+              {connected && <p className="mt-1 flex items-center gap-1 text-xs text-green-600"><CheckCircle className="h-3 w-3" /> Connected — {models.length} model(s)</p>}
+              {connectionError && <p className="mt-1 flex items-center gap-1 text-xs text-destructive"><XCircle className="h-3 w-3" /> {connectionError}</p>}
+            </div>
+            {models.length > 0 && (
+              <div>
+                <Label htmlFor="mdl">Model</Label>
+                <select id="mdl" value={model} onChange={(e) => { setModel(e.target.value); saveCompletionSettings() }} className="w-full rounded border bg-background px-3 py-2 text-sm">
+                  {models.map((m) => <option key={m} value={m}>{m}</option>)}
+                </select>
+              </div>
+            )}
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <Label htmlFor="mt">Max Tokens</Label>
+                <Input id="mt" type="number" value={maxTokens} onChange={(e) => setMaxTokens(Number(e.target.value))} onBlur={saveCompletionSettings} />
+              </div>
+              <div>
+                <Label>Temperature ({temperature})</Label>
+                <input type="range" min="0" max="1" step="0.05" value={temperature} onChange={(e) => setTemperature(Number(e.target.value))} onMouseUp={saveCompletionSettings} className="mt-2 w-full" />
+              </div>
+            </div>
+            <div>
+              <Label htmlFor="sp">System Prompt</Label>
+              <textarea id="sp" value={systemPrompt} onChange={(e) => setSystemPrompt(e.target.value)} onBlur={saveCompletionSettings} rows={4} className="w-full rounded border bg-background px-3 py-2 text-sm" />
+              <p className="mt-1 text-xs text-muted-foreground">Use {"{sourceLanguage}"} and {"{targetLanguage}"} as placeholders.</p>
+            </div>
+          </CardContent>
+        </Card>
       </main>
     </div>
   )

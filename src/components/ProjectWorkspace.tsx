@@ -8,6 +8,7 @@ import { Toolbar } from "./Toolbar"
 import { ProjectSidebar } from "./ProjectSidebar"
 import { StatusBar } from "./StatusBar"
 import { ImportDialog } from "./ImportDialog"
+import { EditorTable } from "./EditorTable"
 
 interface ProjectWorkspaceProps {
   projectId: string
@@ -54,9 +55,7 @@ export function ProjectWorkspace({ projectId, onBack }: ProjectWorkspaceProps) {
         <main className="flex-1 overflow-hidden">
           {activeFileId ? (
             doc ? (
-              <div className="p-4 text-sm text-muted-foreground">
-                Editor table coming in next task. {cells.length} cells loaded.
-              </div>
+              <EditorTable cells={cells} doc={doc} />
             ) : (
               <p className="p-4 text-muted-foreground">Loading file...</p>
             )

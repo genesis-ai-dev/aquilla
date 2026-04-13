@@ -1,16 +1,16 @@
 import { useState } from "react"
 import { Dashboard } from "@/components/Dashboard"
+import { ProjectWorkspace } from "@/components/ProjectWorkspace"
 
 export default function App() {
   const [activeProjectId, setActiveProjectId] = useState<string | null>(null)
 
   if (activeProjectId) {
     return (
-      <div className="p-8">
-        <button onClick={() => setActiveProjectId(null)}>← Back</button>
-        <p>Project: {activeProjectId}</p>
-        <p className="text-muted-foreground">Workspace coming in next task.</p>
-      </div>
+      <ProjectWorkspace
+        projectId={activeProjectId}
+        onBack={() => setActiveProjectId(null)}
+      />
     )
   }
 

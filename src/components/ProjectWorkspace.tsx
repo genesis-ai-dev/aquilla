@@ -6,6 +6,7 @@ import { useCells } from "@/hooks/useCells"
 import { useSearchIndex } from "@/hooks/useSearchIndex"
 import { useCompletion } from "@/hooks/useCompletion"
 import { useHealth } from "@/hooks/useHealth"
+import { useRules } from "@/hooks/useRules"
 import { updateProject } from "@/lib/store/project-index"
 import type { FileReference } from "@/lib/parsers/types"
 import type { CellData } from "@/hooks/useCells"
@@ -14,6 +15,7 @@ import { ProjectSidebar } from "./ProjectSidebar"
 import { StatusBar } from "./StatusBar"
 import { ImportDialog } from "./ImportDialog"
 import { EditorTable } from "./EditorTable"
+import { RuleDrawer } from "./RuleDrawer"
 
 export function ProjectWorkspace() {
   const { id: projectId } = useParams<{ id: string }>()
@@ -21,6 +23,7 @@ export function ProjectWorkspace() {
   const { project, loading, refresh } = useProject(projectId!)
   const [activeFileId, setActiveFileId] = useState<string | null>(null)
   const [importOpen, setImportOpen] = useState(false)
+  const [drawerRuleId, setDrawerRuleId] = useState<string | null>(null)
   const { doc } = useFileDoc(activeFileId)
   const cells = useCells(doc)
 
@@ -28,6 +31,8 @@ export function ProjectWorkspace() {
   const { completeSingle, completeBatch, isConfigured, completing, examples, errors } = useCompletion(
     doc, project?.completionSettings, project?.sourceLanguage || "", project?.targetLanguage || "", search
   )
+
+  const { rules, penalties } = useRules(project ?? null, refresh)
 
   // Build fileCells map for health computation
   // For now, only the active file's cells are loaded
@@ -39,10 +44,17 @@ export function ProjectWorkspace() {
     return map
   }, [activeFileId, cells])
 
-  const { healthMap, fileHealth, projectHealth, fileProgress } = useHealth(
+  const { healthMap, fileHealth, projectHealth, fileProgress, infractions } = useHealth(
     fileCells,
-    project?.completionSettings?.llmHealthPenalty ?? 0.1
+    project?.completionSettings?.llmHealthPenalty ?? 0.1,
+    rules,
+    penalties
   )
+
+  const drawerRule = rules.find((r) => r.id === drawerRuleId) || null
+  const drawerInfractions = drawerRuleId
+    ? Array.from(infractions.values()).flat().filter((i) => i.ruleId === drawerRuleId)
+    : []
 
   if (loading || !project) return <div className="p-8 text-muted-foreground">Loading...</div>
 
@@ -55,7 +67,13 @@ export function ProjectWorkspace() {
 
   return (
     <div className="flex h-screen flex-col">
-      <Toolbar project={project} onBack={() => navigate("/")} onImport={() => setImportOpen(true)} onSettings={() => navigate(`/project/${projectId}/settings`)} />
+      <Toolbar
+        project={project}
+        onBack={() => navigate("/")}
+        onImport={() => setImportOpen(true)}
+        onSettings={() => navigate(`/project/${projectId}/settings`)}
+        onRules={() => navigate(`/project/${projectId}/rules`)}
+      />
       <div className="flex flex-1 overflow-hidden">
         <ProjectSidebar
           files={project.files}
@@ -65,14 +83,30 @@ export function ProjectWorkspace() {
           fileProgress={fileProgress}
           projectHealth={projectHealth}
         />
-        <main className="flex-1 overflow-hidden">
-          {activeFileId ? (doc ? (
-            <EditorTable cells={cells} doc={doc} username={project.username || "local"}
-              isCompletionConfigured={isConfigured} completing={completing} examples={examples} errors={errors}
-              onCompleteSingle={completeSingle} onCompleteBatch={completeBatch}
-              healthMap={healthMap} />
-          ) : <p className="p-4 text-muted-foreground">Loading file...</p>) : (
-            <p className="p-4 text-muted-foreground">Select a file from the sidebar, or import files.</p>
+        <main className="flex flex-1 overflow-hidden">
+          <div className="flex-1 overflow-hidden">
+            {activeFileId ? (doc ? (
+              <EditorTable cells={cells} doc={doc} username={project.username || "local"}
+                isCompletionConfigured={isConfigured} completing={completing} examples={examples} errors={errors}
+                onCompleteSingle={completeSingle} onCompleteBatch={completeBatch}
+                healthMap={healthMap}
+                infractions={infractions}
+                rules={rules}
+                onInfractionClick={(ruleId) => setDrawerRuleId(ruleId)} />
+            ) : <p className="p-4 text-muted-foreground">Loading file...</p>) : (
+              <p className="p-4 text-muted-foreground">Select a file from the sidebar, or import files.</p>
+            )}
+          </div>
+          {drawerRuleId && (
+            <RuleDrawer
+              rule={drawerRule}
+              infractions={drawerInfractions}
+              cells={cells}
+              onClose={() => setDrawerRuleId(null)}
+              onNavigateToCell={(_cellId) => {
+                // TODO: scroll virtualizer to cell
+              }}
+            />
           )}
         </main>
       </div>

@@ -1,10 +1,11 @@
-import { useRef, useCallback } from "react"
+import { useRef, useCallback, useMemo } from "react"
 import { useVirtualizer } from "@tanstack/react-virtual"
 import * as Y from "yjs"
 import DOMPurify from "dompurify"
-import { Check } from "lucide-react"
+import { Check, AlertTriangle, AlertCircle } from "lucide-react"
 import type { CellData } from "@/hooks/useCells"
 import type { ScoredPair } from "@/lib/search/search-index"
+import type { TranslationRule, RuleInfraction } from "@/lib/parsers/types"
 import { appendCellHistory, validateCell } from "@/hooks/useCellHistory"
 import { SparkleButton } from "./SparkleButton"
 import { ExamplePanel } from "./ExamplePanel"
@@ -22,16 +23,22 @@ interface EditorTableProps {
   onCompleteSingle: (cell: CellData) => void
   onCompleteBatch: (cells: CellData[]) => void
   healthMap: Map<string, number>
+  infractions?: Map<string, RuleInfraction[]>
+  rules?: TranslationRule[]
+  onInfractionClick?: (ruleId: string) => void
 }
 
 export function EditorTable({
   cells, doc, username, isCompletionConfigured,
   completing, examples, errors,
   onCompleteSingle, onCompleteBatch, healthMap,
+  infractions = new Map(), rules = [], onInfractionClick,
 }: EditorTableProps) {
   const parentRef = useRef<HTMLDivElement>(null)
   const isDragging = useRef(false)
   const dragCells = useRef<Set<string>>(new Set())
+
+  const ruleMap = useMemo(() => new Map(rules.map((r) => [r.id, r])), [rules])
 
   const virtualizer = useVirtualizer({
     count: cells.length,
@@ -63,6 +70,7 @@ export function EditorTable({
           const completingState = completing.get(cell.id)
           const isLoading = completingState === "searching" || completingState === "generating"
           const highlights = buildHighlightsFromExamples(cellExamples)
+          const cellInfractions = infractions.get(cell.id) || []
 
           return (
             <div
@@ -87,7 +95,10 @@ export function EditorTable({
                 highlights={highlights}
                 error={errors.get(cell.id)}
                 health={healthMap.get(cell.id)}
+                cellInfractions={cellInfractions}
+                ruleMap={ruleMap}
                 onCompleteSingle={onCompleteSingle}
+                onInfractionClick={onInfractionClick}
                 onDragStart={() => {
                   isDragging.current = true
                   dragCells.current = new Set([cell.id])
@@ -114,7 +125,10 @@ interface EditorRowProps {
   highlights: ReturnType<typeof buildHighlightsFromExamples>
   error?: string
   health: number | undefined
+  cellInfractions: RuleInfraction[]
+  ruleMap: Map<string, TranslationRule>
   onCompleteSingle: (cell: CellData) => void
+  onInfractionClick?: (ruleId: string) => void
   onDragStart: () => void
   onDragEnter: () => void
 }
@@ -122,7 +136,8 @@ interface EditorRowProps {
 function EditorRow({
   cell, doc, username, isCompletionConfigured, isLoading,
   cellExamples, highlights, error, health,
-  onCompleteSingle, onDragStart, onDragEnter,
+  cellInfractions, ruleMap,
+  onCompleteSingle, onInfractionClick, onDragStart, onDragEnter,
 }: EditorRowProps) {
   function handleChange(e: React.ChangeEvent<HTMLTextAreaElement>) {
     appendCellHistory(doc, cell.id, {
@@ -166,6 +181,22 @@ function EditorRow({
         ) : null}
       </HealthRing>
       <span className="mt-0.5 text-[9px] tabular-nums text-muted-foreground">{healthValue}%</span>
+      {cellInfractions.length > 0 && (
+        <div className="mt-0.5 flex gap-0.5">
+          {cellInfractions.map((inf) => {
+            const rule = ruleMap.get(inf.ruleId)
+            const isMajor = rule?.severity === "major"
+            const Icon = isMajor ? AlertTriangle : AlertCircle
+            return (
+              <button key={inf.ruleId} onClick={() => onInfractionClick?.(inf.ruleId)}
+                title={inf.message}
+                className={isMajor ? "text-red-500 hover:text-red-700" : "text-amber-500 hover:text-amber-700"}>
+                <Icon className="h-3 w-3" />
+              </button>
+            )
+          })}
+        </div>
+      )}
     </div>
   ) : null
 

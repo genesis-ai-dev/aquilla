@@ -26,11 +26,18 @@ interface CellInput {
   type: string
 }
 
+const MIN_SCORE_THRESHOLD = 0.15
+
 export class SearchIndex {
   private pairs: Map<string, IndexedPair> = new Map()
+  // IDF: how many documents contain each token
+  private docFreq: Map<string, number> = new Map()
+  private docCount = 0
 
   buildFromProject(files: { fileId: string; cells: CellInput[] }[]): void {
     this.pairs.clear()
+    this.docFreq.clear()
+    this.docCount = 0
     for (const file of files) {
       for (const cell of file.cells) {
         if (cell.translated && cell.translated.trim()) {
@@ -41,10 +48,26 @@ export class SearchIndex {
   }
 
   addPair(cellId: string, source: string, target: string, fileId: string): void {
-    this.pairs.set(cellId, { cellId, source, target, fileId, tokens: new Set(tokenizeText(source)) })
+    const tokens = new Set(tokenizeText(source))
+    this.pairs.set(cellId, { cellId, source, target, fileId, tokens })
+    this.docCount += 1
+    for (const t of tokens) {
+      this.docFreq.set(t, (this.docFreq.get(t) || 0) + 1)
+    }
   }
 
-  removePair(cellId: string): void { this.pairs.delete(cellId) }
+  removePair(cellId: string): void {
+    const pair = this.pairs.get(cellId)
+    if (pair) {
+      for (const t of pair.tokens) {
+        const count = this.docFreq.get(t) || 1
+        if (count <= 1) this.docFreq.delete(t)
+        else this.docFreq.set(t, count - 1)
+      }
+      this.docCount -= 1
+    }
+    this.pairs.delete(cellId)
+  }
 
   search(query: string, limit = 5): ScoredPair[] {
     const cleanQuery = query.trim()
@@ -75,28 +98,48 @@ export class SearchIndex {
       for (let branchIdx = 0; branchIdx < queryBranches.length; branchIdx++) {
         const branchQuery = queryBranches[branchIdx]
         if (!branchQuery.trim()) continue
-        const branchTokenSet = new Set(tokenizeText(branchQuery))
+        const branchTokens = tokenizeText(branchQuery)
+        const branchTokenSet = new Set(branchTokens)
+
+        if (branchTokenSet.size === 0) continue
 
         for (const [, pair] of this.pairs) {
           if (usedCellIds.has(pair.cellId)) continue
           const matched: string[] = []
-          for (const t of branchTokenSet) { if (pair.tokens.has(t)) matched.push(t) }
+          let idfSum = 0
+
+          for (const t of branchTokenSet) {
+            if (pair.tokens.has(t)) {
+              matched.push(t)
+              // IDF weight: rarer tokens count more
+              const df = this.docFreq.get(t) || 1
+              idfSum += Math.log((this.docCount + 1) / (df + 1))
+            }
+          }
           if (matched.length === 0) continue
 
-          const coverage = branchTokenSet.size > 0 ? matched.length / branchTokenSet.size : 0
-          const score = coverage * (1 + coverageWeight * coverage)
+          // Normalize IDF by the max possible (if all query tokens matched with IDF=1)
+          const maxIdf = branchTokenSet.size * Math.log((this.docCount + 1) / 2)
+          const normalizedIdf = maxIdf > 0 ? idfSum / maxIdf : 0
+
+          const coverage = matched.length / branchTokenSet.size
+          // Score combines coverage with IDF weighting
+          const score = (0.3 * coverage + 0.7 * normalizedIdf) * (1 + coverageWeight * coverage)
 
           if (score > bestScore) {
             bestScore = score
             bestBranchIndex = branchIdx
             bestBranchQuery = branchQuery
             bestSourceText = pair.source
-            bestPair = { cellId: pair.cellId, source: pair.source, target: pair.target, fileId: pair.fileId, score, matchedTokens: matched }
+            bestPair = {
+              cellId: pair.cellId, source: pair.source, target: pair.target,
+              fileId: pair.fileId, score, matchedTokens: matched,
+            }
           }
         }
       }
 
-      if (!bestPair) break
+      if (!bestPair || bestScore < MIN_SCORE_THRESHOLD) break
       results.push(bestPair)
       usedCellIds.add(bestPair.cellId)
 

@@ -9,6 +9,7 @@ import { appendCellHistory, validateCell } from "@/hooks/useCellHistory"
 import { SparkleButton } from "./SparkleButton"
 import { ExamplePanel } from "./ExamplePanel"
 import { HighlightedText, buildHighlightsFromExamples } from "./HighlightedText"
+import { HealthRing } from "./HealthRing"
 
 interface EditorTableProps {
   cells: CellData[]
@@ -20,12 +21,13 @@ interface EditorTableProps {
   errors: Map<string, string>
   onCompleteSingle: (cell: CellData) => void
   onCompleteBatch: (cells: CellData[]) => void
+  healthMap: Map<string, number>
 }
 
 export function EditorTable({
   cells, doc, username, isCompletionConfigured,
   completing, examples, errors,
-  onCompleteSingle, onCompleteBatch,
+  onCompleteSingle, onCompleteBatch, healthMap,
 }: EditorTableProps) {
   const parentRef = useRef<HTMLDivElement>(null)
   const isDragging = useRef(false)
@@ -84,6 +86,7 @@ export function EditorTable({
                 cellExamples={cellExamples}
                 highlights={highlights}
                 error={errors.get(cell.id)}
+                health={healthMap.get(cell.id)}
                 onCompleteSingle={onCompleteSingle}
                 onDragStart={() => {
                   isDragging.current = true
@@ -110,6 +113,7 @@ interface EditorRowProps {
   cellExamples: ScoredPair[]
   highlights: ReturnType<typeof buildHighlightsFromExamples>
   error?: string
+  health: number | undefined
   onCompleteSingle: (cell: CellData) => void
   onDragStart: () => void
   onDragEnter: () => void
@@ -117,7 +121,7 @@ interface EditorRowProps {
 
 function EditorRow({
   cell, doc, username, isCompletionConfigured, isLoading,
-  cellExamples, highlights, error,
+  cellExamples, highlights, error, health,
   onCompleteSingle, onDragStart, onDragEnter,
 }: EditorRowProps) {
   function handleChange(e: React.ChangeEvent<HTMLTextAreaElement>) {
@@ -133,24 +137,22 @@ function EditorRow({
     validateCell(doc, cell.id, username)
   }
 
+  const healthValue = health ?? (cell.status === "validated" ? 100 : 0)
+
   const validationIcon = cell.translated && cell.translated.trim() ? (
-    cell.status === "validated" ? (
-      <button
-        className="mt-1 flex h-5 w-5 items-center justify-center rounded text-green-500"
-        title="Validated"
-        onClick={handleValidate}
-      >
-        <Check className="h-3.5 w-3.5" />
-      </button>
-    ) : cell.status === "unvalidated" ? (
-      <button
-        className="mt-1 flex h-5 w-5 items-center justify-center rounded text-amber-500 hover:text-green-500"
-        title="Click to validate"
-        onClick={handleValidate}
-      >
-        <Check className="h-3.5 w-3.5" />
-      </button>
-    ) : null
+    <HealthRing health={healthValue} size={22} strokeWidth={2.5}>
+      {cell.status === "validated" ? (
+        <Check className="h-3 w-3 text-green-500" />
+      ) : cell.status === "unvalidated" ? (
+        <button
+          className="flex h-full w-full items-center justify-center rounded-full text-amber-500 hover:text-green-500"
+          title="Click to validate"
+          onClick={handleValidate}
+        >
+          <Check className="h-3 w-3" />
+        </button>
+      ) : null}
+    </HealthRing>
   ) : null
 
   // SECURITY: originalHtml is sanitized through DOMPurify.sanitize() at the

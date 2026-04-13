@@ -1,0 +1,86 @@
+import { openDB, type DBSchema } from "idb"
+import type { ProjectRecord } from "../parsers/types"
+
+interface CodexDB extends DBSchema {
+  projects: {
+    key: string
+    value: ProjectRecord
+  }
+  originals: {
+    key: string
+    value: ArrayBuffer
+  }
+}
+
+const DB_NAME = "codex"
+const DB_VERSION = 1
+
+let dbPromise: ReturnType<typeof openDB<CodexDB>> | null = null
+
+function getDb() {
+  if (!dbPromise) {
+    dbPromise = openDB<CodexDB>(DB_NAME, DB_VERSION, {
+      upgrade(db) {
+        if (!db.objectStoreNames.contains("projects")) {
+          db.createObjectStore("projects", { keyPath: "id" })
+        }
+        if (!db.objectStoreNames.contains("originals")) {
+          db.createObjectStore("originals")
+        }
+      },
+      blocked() {
+        dbPromise = null
+      },
+      blocking() {
+        dbPromise = null
+      },
+      terminated() {
+        dbPromise = null
+      },
+    })
+  }
+  return dbPromise
+}
+
+export async function _resetDbForTesting(): Promise<void> {
+  if (dbPromise) {
+    const db = await dbPromise
+    db.close()
+    dbPromise = null
+  }
+}
+
+export async function listProjects(): Promise<ProjectRecord[]> {
+  const db = await getDb()
+  return db.getAll("projects")
+}
+
+export async function getProject(id: string): Promise<ProjectRecord | undefined> {
+  const db = await getDb()
+  return db.get("projects", id)
+}
+
+export async function createProject(project: ProjectRecord): Promise<void> {
+  const db = await getDb()
+  await db.put("projects", project)
+}
+
+export async function updateProject(project: ProjectRecord): Promise<void> {
+  const db = await getDb()
+  await db.put("projects", project)
+}
+
+export async function deleteProject(id: string): Promise<void> {
+  const db = await getDb()
+  await db.delete("projects", id)
+}
+
+export async function storeOriginalFile(fileId: string, buffer: ArrayBuffer): Promise<void> {
+  const db = await getDb()
+  await db.put("originals", buffer, `codex:original:${fileId}`)
+}
+
+export async function getOriginalFile(fileId: string): Promise<ArrayBuffer | undefined> {
+  const db = await getDb()
+  return db.get("originals", `codex:original:${fileId}`)
+}

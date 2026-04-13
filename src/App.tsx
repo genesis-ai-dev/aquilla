@@ -3,6 +3,7 @@ import { Dashboard } from "@/components/Dashboard"
 import { ProjectWorkspace } from "@/components/ProjectWorkspace"
 import { ProjectSettings } from "@/components/ProjectSettings"
 import { DebugView } from "@/components/DebugView"
+import { RulesPage } from "@/components/RulesPage"
 
 export default function App() {
   return (
@@ -13,6 +14,7 @@ export default function App() {
       <Route path="/project/:id/debug" element={<DebugView />} />
       <Route path="/project/:id/settings" element={<ProjectSettings />} />
       <Route path="/project/:id/settings/debug" element={<DebugView />} />
+      <Route path="/project/:id/rules" element={<RulesPage />} />
     </Routes>
   )
 }

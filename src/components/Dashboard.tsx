@@ -1,15 +1,13 @@
 import { useEffect, useState } from "react"
+import { useNavigate } from "react-router-dom"
 import type { ProjectRecord } from "@/lib/parsers/types"
 import { listProjects } from "@/lib/store/project-index"
 import { ProjectCard } from "./ProjectCard"
 import { ProjectCreateDialog } from "./ProjectCreateDialog"
 
-interface DashboardProps {
-  onSelectProject: (projectId: string) => void
-}
-
-export function Dashboard({ onSelectProject }: DashboardProps) {
+export function Dashboard() {
   const [projects, setProjects] = useState<ProjectRecord[]>([])
+  const navigate = useNavigate()
 
   useEffect(() => {
     listProjects().then(setProjects)
@@ -36,7 +34,7 @@ export function Dashboard({ onSelectProject }: DashboardProps) {
               <ProjectCard
                 key={p.id}
                 project={p}
-                onClick={() => onSelectProject(p.id)}
+                onClick={() => navigate(`/project/${p.id}`)}
               />
             ))}
           </div>

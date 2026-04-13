@@ -1,4 +1,5 @@
 import { useState } from "react"
+import { useParams, useNavigate } from "react-router-dom"
 import { useProject } from "@/hooks/useProject"
 import { useFileDoc } from "@/hooks/useFileDoc"
 import { useCells } from "@/hooks/useCells"
@@ -10,13 +11,10 @@ import { StatusBar } from "./StatusBar"
 import { ImportDialog } from "./ImportDialog"
 import { EditorTable } from "./EditorTable"
 
-interface ProjectWorkspaceProps {
-  projectId: string
-  onBack: () => void
-}
-
-export function ProjectWorkspace({ projectId, onBack }: ProjectWorkspaceProps) {
-  const { project, loading, refresh } = useProject(projectId)
+export function ProjectWorkspace() {
+  const { id: projectId } = useParams<{ id: string }>()
+  const navigate = useNavigate()
+  const { project, loading, refresh } = useProject(projectId!)
   const [activeFileId, setActiveFileId] = useState<string | null>(null)
   const [importOpen, setImportOpen] = useState(false)
   const { doc } = useFileDoc(activeFileId)
@@ -43,8 +41,9 @@ export function ProjectWorkspace({ projectId, onBack }: ProjectWorkspaceProps) {
     <div className="flex h-screen flex-col">
       <Toolbar
         project={project}
-        onBack={onBack}
+        onBack={() => navigate("/")}
         onImport={() => setImportOpen(true)}
+        onSettings={() => navigate(`/project/${projectId}/settings`)}
       />
       <div className="flex flex-1 overflow-hidden">
         <ProjectSidebar

@@ -146,6 +146,12 @@ export interface ShareInvite {
   createdBy: string
 }
 
+export interface VideoAttachment {
+  videoUrl?: string
+  videoLocalFileId?: string
+  videoFileName?: string
+}
+
 export function detectFileType(fileName: string): FileType | null {
   const ext = fileName.split(".").pop()?.toLowerCase()
   const map: Record<string, FileType> = {

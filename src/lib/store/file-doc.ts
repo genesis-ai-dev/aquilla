@@ -1,6 +1,14 @@
 import * as Y from "yjs"
 import { IndexeddbPersistence } from "y-indexeddb"
 import type { TranslatableString, FileType } from "../parsers/types"
+import { getPlainText, getFragmentHtml, setPlainText } from "@/lib/richtext/translated-xml"
+
+function extractCellTranslated(cell: Y.Map<unknown>): string {
+  const frag = cell.get("translatedXml") as Y.XmlFragment | undefined
+  if (frag) return getPlainText(frag)
+  // Legacy fallback for pre-M9 docs that somehow still exist
+  return (cell.get("translated") as string) || ""
+}
 
 export interface FileDocHandle {
   doc: Y.Doc
@@ -33,7 +41,9 @@ export function createFileDoc(
       cell.set("id", str.id)
       cell.set("original", str.original)
       if (str.originalHtml) cell.set("originalHtml", str.originalHtml)
-      cell.set("translated", str.translated)
+      const translatedXml = new Y.XmlFragment()
+      cell.set("translatedXml", translatedXml)
+      if (str.translated) setPlainText(translatedXml, str.translated)
       cell.set("context", str.context)
       cell.set("group", str.group)
       cell.set("type", str.type)
@@ -84,7 +94,7 @@ export async function collectValidatedPairs(fileIds: string[]): Promise<Validate
         const cell = cellsMap.get(cellId) as Y.Map<unknown> | undefined
         if (!cell) continue
 
-        const translated = (cell.get("translated") as string) || ""
+        const translated = extractCellTranslated(cell)
         if (!translated.trim()) continue
 
         const historyArr = cell.get("history") as Y.Array<{ validated: boolean; source: string }> | undefined
@@ -111,6 +121,7 @@ export interface ExportCell {
   id: string
   original: string
   translated: string
+  translatedHtml?: string
   context: string
   group: string
   type: string
@@ -148,7 +159,11 @@ export async function collectExportCells(fileId: string): Promise<ExportData> {
       cells.push({
         id: (cell.get("id") as string) || cellId,
         original: (cell.get("original") as string) || "",
-        translated: (cell.get("translated") as string) || "",
+        translated: extractCellTranslated(cell),
+        translatedHtml: (() => {
+          const frag = cell.get("translatedXml") as Y.XmlFragment | undefined
+          return frag ? getFragmentHtml(frag) : undefined
+        })(),
         context: (cell.get("context") as string) || "",
         group: (cell.get("group") as string) || "",
         type: (cell.get("type") as string) || "text",

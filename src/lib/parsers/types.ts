@@ -99,6 +99,25 @@ export interface CellHistoryEntry {
   examples?: string[]
 }
 
+export interface CommentMessage {
+  id: string
+  author: string
+  authorType: "user" | "anonymous"
+  text: string
+  timestamp: string
+  mentions?: string[]
+}
+
+export interface CommentThread {
+  id: string
+  status: "open" | "resolved"
+  createdAt: string
+  resolvedAt?: string
+  resolvedBy?: string
+  createdForTranslated: string
+  messages: CommentMessage[]
+}
+
 export function detectFileType(fileName: string): FileType | null {
   const ext = fileName.split(".").pop()?.toLowerCase()
   const map: Record<string, FileType> = {

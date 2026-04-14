@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react"
 import * as Y from "yjs"
-import type { CellHistoryEntry, SourceLocation } from "@/lib/parsers/types"
+import type { CellHistoryEntry, SourceLocation, CommentThread } from "@/lib/parsers/types"
+import { extractThreadsFromCell } from "./useComments"
 
 export interface CellData {
   id: string
@@ -12,6 +13,7 @@ export interface CellData {
   type: string
   status: "empty" | "unvalidated" | "validated"
   history: CellHistoryEntry[]
+  threads: CommentThread[]
   sourceLocation?: SourceLocation
   backtranslation?: string
   backtranslationUpdatedAt?: string
@@ -41,6 +43,7 @@ export function useCells(doc: Y.Doc | null): CellData[] {
         const translated = (cell.get("translated") as string) || ""
         const historyArr = cell.get("history") as Y.Array<CellHistoryEntry> | undefined
         const history: CellHistoryEntry[] = historyArr ? historyArr.toArray() : []
+        const threads = extractThreadsFromCell(cell)
         ordered.push({
           id: cell.get("id") as string,
           original: cell.get("original") as string,
@@ -51,6 +54,7 @@ export function useCells(doc: Y.Doc | null): CellData[] {
           type: cell.get("type") as string,
           status: deriveStatus(translated, history),
           history,
+          threads,
           sourceLocation: cell.get("sourceLocation") as SourceLocation | undefined,
           backtranslation: cell.get("backtranslation") as string | undefined,
           backtranslationUpdatedAt: cell.get("backtranslationUpdatedAt") as string | undefined,

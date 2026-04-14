@@ -201,9 +201,9 @@ function EditorRow({
   }
 
   // Called when the TipTap editor loses focus. Capture the current fragment
-  // text and append a history entry if it differs from the most recent
-  // recorded revision. (TipTap writes to the Y.XmlFragment as the user types;
-  // we debounce history entries to one per editing session via blur.)
+  // text and append a history entry if it differs meaningfully from the most
+  // recent entry. Focus-triggered (not keystroke-triggered) so each editing
+  // session produces at most one entry regardless of typing length.
   function handleEditorBlur() {
     const cellsMap = doc.getMap("cells")
     const yCell = cellsMap.get(cell.id) as Y.Map<unknown> | undefined
@@ -212,8 +212,39 @@ function EditorRow({
     if (!frag) return
     const currentText = getPlainText(frag)
     const lastEntry = cell.history[cell.history.length - 1]
+
+    // Don't record a no-op empty
+    if (!currentText.trim() && cell.history.length === 0) return
     if (lastEntry && lastEntry.value === currentText) return
-    if (!currentText.trim() && cell.history.length === 0) return  // don't record no-op empty
+
+    // Collapse rapid same-author edits: if the last entry is from the same
+    // author within the past 5 seconds and the text changed only slightly,
+    // OVERWRITE the last entry's value/timestamp in place instead of appending
+    // a new one. This guards against accidental rapid blur/focus cycles that
+    // would otherwise spam history.
+    if (
+      lastEntry &&
+      lastEntry.author === username &&
+      lastEntry.source === "human" &&
+      Date.now() - new Date(lastEntry.timestamp).getTime() < 5_000
+    ) {
+      // Update the last entry by removing + re-adding (Y.Array doesn't have set)
+      const historyArr = yCell.get("history") as Y.Array<import("@/lib/parsers/types").CellHistoryEntry> | undefined
+      if (historyArr && historyArr.length > 0) {
+        doc.transact(() => {
+          historyArr.delete(historyArr.length - 1, 1)
+          historyArr.push([{
+            value: currentText,
+            source: "human",
+            author: username,
+            validated: true,
+            timestamp: new Date().toISOString(),
+          }])
+        })
+        return
+      }
+    }
+
     recordHistoryEntry(doc, cell.id, {
       value: currentText,
       source: "human",

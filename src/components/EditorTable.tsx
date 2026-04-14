@@ -6,7 +6,8 @@ import { Check, AlertTriangle, AlertCircle, Languages, RefreshCw, MessageCircle,
 import type { CellData } from "@/hooks/useCells"
 import type { ScoredPair } from "@/lib/search/search-index"
 import type { TranslationRule, RuleInfraction } from "@/lib/parsers/types"
-import { appendCellHistory, validateCell } from "@/hooks/useCellHistory"
+import { appendCellHistory, recordHistoryEntry, validateCell } from "@/hooks/useCellHistory"
+import { getPlainText } from "@/lib/richtext/translated-xml"
 import { SparkleButton } from "./SparkleButton"
 import { ExamplePanel } from "./ExamplePanel"
 import { HighlightedText, buildHighlightsFromExamples } from "./HighlightedText"
@@ -199,6 +200,28 @@ function EditorRow({
     })
   }
 
+  // Called when the TipTap editor loses focus. Capture the current fragment
+  // text and append a history entry if it differs from the most recent
+  // recorded revision. (TipTap writes to the Y.XmlFragment as the user types;
+  // we debounce history entries to one per editing session via blur.)
+  function handleEditorBlur() {
+    const cellsMap = doc.getMap("cells")
+    const yCell = cellsMap.get(cell.id) as Y.Map<unknown> | undefined
+    if (!yCell) return
+    const frag = yCell.get("translatedXml") as Y.XmlFragment | undefined
+    if (!frag) return
+    const currentText = getPlainText(frag)
+    const lastEntry = cell.history[cell.history.length - 1]
+    if (lastEntry && lastEntry.value === currentText) return
+    if (!currentText.trim() && cell.history.length === 0) return  // don't record no-op empty
+    recordHistoryEntry(doc, cell.id, {
+      value: currentText,
+      source: "human",
+      author: username,
+      validated: true,
+    })
+  }
+
   function handleValidate() {
     validateCell(doc, cell.id, username)
   }
@@ -318,6 +341,7 @@ function EditorRow({
               className="w-full"
               syncProvider={syncProvider}
               user={collabUser}
+              onBlur={handleEditorBlur}
             />
           ) : (
             <textarea
@@ -373,11 +397,18 @@ function EditorRow({
               )}
             </button>
           )}
-          {onOpenHistory && cell.history.length > 0 && (
+          {onOpenHistory && (cell.history.length > 0 || (cell.translated && cell.translated.trim())) && (
             <button
-              className="mt-1 flex h-5 w-5 items-center justify-center rounded text-muted-foreground/60 hover:text-primary"
+              className={cn(
+                "mt-1 flex h-5 w-5 items-center justify-center rounded hover:text-primary",
+                cell.history.length > 0 ? "text-muted-foreground/80" : "text-muted-foreground/40"
+              )}
               onClick={() => onOpenHistory(cell.id)}
-              title={`Edit history (${cell.history.length} revision${cell.history.length !== 1 ? "s" : ""})`}
+              title={
+                cell.history.length > 0
+                  ? `Edit history (${cell.history.length} revision${cell.history.length !== 1 ? "s" : ""})`
+                  : "Edit history (empty)"
+              }
             >
               <History className="h-3 w-3" />
             </button>

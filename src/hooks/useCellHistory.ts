@@ -28,6 +28,28 @@ export function appendCellHistory(
   })
 }
 
+// Append a history entry WITHOUT modifying the fragment. Use this when the
+// fragment was already updated by the TipTap editor — we just want to record
+// the revision for audit without clobbering inline formatting via setPlainText.
+export function recordHistoryEntry(
+  doc: Y.Doc,
+  cellId: string,
+  entry: Omit<CellHistoryEntry, "timestamp">
+): void {
+  const cellsMap = doc.getMap("cells")
+  const cell = cellsMap.get(cellId) as Y.Map<unknown> | undefined
+  if (!cell) return
+
+  doc.transact(() => {
+    let historyArr = cell.get("history") as Y.Array<CellHistoryEntry> | undefined
+    if (!historyArr) {
+      historyArr = new Y.Array<CellHistoryEntry>()
+      cell.set("history", historyArr)
+    }
+    historyArr.push([{ ...entry, timestamp: new Date().toISOString() }])
+  })
+}
+
 export function validateCell(doc: Y.Doc, cellId: string, username: string): void {
   const cellsMap = doc.getMap("cells")
   const cell = cellsMap.get(cellId) as Y.Map<unknown> | undefined

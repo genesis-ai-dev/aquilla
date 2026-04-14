@@ -2,7 +2,7 @@ import { useRef, useCallback, useMemo, forwardRef, useImperativeHandle } from "r
 import { useVirtualizer } from "@tanstack/react-virtual"
 import * as Y from "yjs"
 import DOMPurify from "dompurify"
-import { Check, AlertTriangle, AlertCircle } from "lucide-react"
+import { Check, AlertTriangle, AlertCircle, Languages, RefreshCw } from "lucide-react"
 import type { CellData } from "@/hooks/useCells"
 import type { ScoredPair } from "@/lib/search/search-index"
 import type { TranslationRule, RuleInfraction } from "@/lib/parsers/types"
@@ -11,6 +11,7 @@ import { SparkleButton } from "./SparkleButton"
 import { ExamplePanel } from "./ExamplePanel"
 import { HighlightedText, buildHighlightsFromExamples } from "./HighlightedText"
 import { HealthRing } from "./HealthRing"
+import { cn } from "@/lib/utils"
 
 export interface EditorTableHandle {
   scrollToCellIndex: (index: number) => void
@@ -30,6 +31,10 @@ interface EditorTableProps {
   infractions?: Map<string, RuleInfraction[]>
   rules?: TranslationRule[]
   onInfractionClick?: (ruleId: string) => void
+  isBacktranslationConfigured?: boolean
+  onBacktranslate?: (cell: CellData) => void
+  backtranslating?: Set<string>
+  backtranslationErrors?: Map<string, string>
 }
 
 export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(function EditorTable({
@@ -37,6 +42,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   completing, examples, errors,
   onCompleteSingle, onCompleteBatch, healthMap,
   infractions = new Map(), rules = [], onInfractionClick,
+  isBacktranslationConfigured, onBacktranslate, backtranslating, backtranslationErrors,
 }, ref) {
   const parentRef = useRef<HTMLDivElement>(null)
   const isDragging = useRef(false)
@@ -111,6 +117,10 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
                 ruleMap={ruleMap}
                 onCompleteSingle={onCompleteSingle}
                 onInfractionClick={onInfractionClick}
+                isBacktranslationConfigured={isBacktranslationConfigured}
+                isBacktranslating={backtranslating?.has(cell.id)}
+                backtranslationError={backtranslationErrors?.get(cell.id)}
+                onBacktranslate={onBacktranslate}
                 onDragStart={() => {
                   isDragging.current = true
                   dragCells.current = new Set([cell.id])
@@ -141,6 +151,10 @@ interface EditorRowProps {
   ruleMap: Map<string, TranslationRule>
   onCompleteSingle: (cell: CellData) => void
   onInfractionClick?: (ruleId: string) => void
+  isBacktranslationConfigured?: boolean
+  isBacktranslating?: boolean
+  backtranslationError?: string
+  onBacktranslate?: (cell: CellData) => void
   onDragStart: () => void
   onDragEnter: () => void
 }
@@ -149,7 +163,9 @@ function EditorRow({
   cell, doc, username, isCompletionConfigured, isLoading,
   cellExamples, highlights, error, health,
   cellInfractions, ruleMap,
-  onCompleteSingle, onInfractionClick, onDragStart, onDragEnter,
+  onCompleteSingle, onInfractionClick,
+  isBacktranslationConfigured, isBacktranslating, backtranslationError, onBacktranslate,
+  onDragStart, onDragEnter,
 }: EditorRowProps) {
   function handleChange(e: React.ChangeEvent<HTMLTextAreaElement>) {
     appendCellHistory(doc, cell.id, {
@@ -209,6 +225,26 @@ function EditorRow({
           })}
         </div>
       )}
+      {isBacktranslationConfigured !== undefined && (
+        <button
+          className={cn(
+            "mt-1 flex h-5 w-5 items-center justify-center rounded",
+            isBacktranslating ? "animate-pulse text-primary" : "text-muted-foreground hover:text-primary",
+            !isBacktranslationConfigured && "cursor-not-allowed text-muted-foreground/30"
+          )}
+          disabled={!isBacktranslationConfigured || isBacktranslating}
+          onClick={() => onBacktranslate?.(cell)}
+          title={
+            !isBacktranslationConfigured
+              ? "Configure LLM in settings"
+              : isBacktranslating
+                ? "Generating..."
+                : cell.backtranslation ? "Regenerate backtranslation" : "Generate backtranslation"
+          }
+        >
+          <Languages className="h-3 w-3" />
+        </button>
+      )}
     </div>
   ) : null
 
@@ -260,6 +296,31 @@ function EditorRow({
             rows={Math.max(2, Math.ceil(cell.original.length / 50))}
           />
           {error && <p className="mt-0.5 text-xs text-destructive">{error}</p>}
+          {cell.backtranslation && (
+            <div className="mt-1 rounded border-l-2 border-blue-400 bg-muted/30 px-2 py-1 text-xs italic text-muted-foreground">
+              <div className="flex items-center gap-1.5 not-italic">
+                {cell.backtranslationForText !== cell.translated && (
+                  <span title="Translation has changed since backtranslation" className="flex items-center gap-0.5 text-amber-500">
+                    <AlertTriangle className="h-3 w-3" />
+                    stale
+                  </span>
+                )}
+                <button
+                  onClick={() => onBacktranslate?.(cell)}
+                  disabled={!isBacktranslationConfigured || isBacktranslating}
+                  className="text-muted-foreground hover:text-primary disabled:opacity-30"
+                  title="Regenerate"
+                >
+                  <RefreshCw className={cn("h-3 w-3", isBacktranslating && "animate-spin")} />
+                </button>
+                <span className="text-[10px] font-medium">backtranslation</span>
+              </div>
+              <div className="mt-0.5">{cell.backtranslation}</div>
+            </div>
+          )}
+          {backtranslationError && (
+            <p className="mt-0.5 text-xs text-destructive">BT: {backtranslationError}</p>
+          )}
         </div>
         {validationIcon}
       </div>

@@ -1,4 +1,4 @@
-import { useState, useMemo, useRef, useEffect } from "react"
+import { useState, useMemo, useRef, useEffect, useCallback } from "react"
 import { useParams, useNavigate } from "react-router-dom"
 import { useProject } from "@/hooks/useProject"
 import { useFileDoc } from "@/hooks/useFileDoc"
@@ -12,6 +12,7 @@ import { exportFile, downloadBlob } from "@/lib/export/export-service"
 import type { FileReference } from "@/lib/parsers/types"
 import type { CellData } from "@/hooks/useCells"
 import { useWorkspaceSearch } from "@/hooks/useWorkspaceSearch"
+import { useBacktranslation } from "@/hooks/useBacktranslation"
 import { SearchDialog } from "./SearchDialog"
 import type { EditorTableHandle } from "./EditorTable"
 import type { WorkspaceSearchResult } from "@/lib/search/workspace-index"
@@ -38,6 +39,26 @@ export function ProjectWorkspace() {
   const { search } = useSearchIndex(project?.files || [], cells)
   const { completeSingle, completeBatch, isConfigured, completing, examples, errors } = useCompletion(
     doc, project?.completionSettings, project?.sourceLanguage || "", project?.targetLanguage || "", search
+  )
+
+  const findBacktranslationExamples = useCallback((target: CellData) => {
+    return cells
+      .filter((c) => c.id !== target.id && c.backtranslation && c.backtranslationForText === c.translated)
+      .map((c) => ({ target: c.translated, backtranslation: c.backtranslation! }))
+      .slice(0, 3)
+  }, [cells])
+
+  const {
+    generate: runBacktranslation,
+    generating: backtranslating,
+    errors: backtranslationErrors,
+    isConfigured: isBacktranslationConfigured,
+  } = useBacktranslation(
+    doc,
+    project?.completionSettings,
+    project?.sourceLanguage || "",
+    project?.targetLanguage || "",
+    findBacktranslationExamples
   )
 
   const { rules, penalties } = useRules(project ?? null, refresh)
@@ -137,7 +158,11 @@ export function ProjectWorkspace() {
                 healthMap={healthMap}
                 infractions={infractions}
                 rules={rules}
-                onInfractionClick={(ruleId) => setDrawerRuleId(ruleId)} />
+                onInfractionClick={(ruleId) => setDrawerRuleId(ruleId)}
+                isBacktranslationConfigured={isBacktranslationConfigured}
+                onBacktranslate={runBacktranslation}
+                backtranslating={backtranslating}
+                backtranslationErrors={backtranslationErrors} />
             ) : <p className="p-4 text-muted-foreground">Loading file...</p>) : (
               <p className="p-4 text-muted-foreground">Select a file from the sidebar, or import files.</p>
             )}

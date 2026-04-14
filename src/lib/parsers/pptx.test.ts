@@ -90,4 +90,25 @@ describe("extractPptxStrings", () => {
     const result = await extractPptxStrings(buffer)
     expect(result[0].translated).toBe("")
   })
+
+  it("sets sourceLocation with shape and paragraph path", async () => {
+    const buffer = await makePptx({
+      "slide1.xml": `
+        <p:sp><p:txBody>
+          <a:p><a:r><a:t>First para</a:t></a:r></a:p>
+          <a:p><a:r><a:t>Second para</a:t></a:r></a:p>
+        </p:txBody></p:sp>
+      `,
+    })
+    const result = await extractPptxStrings(buffer)
+    expect(result).toHaveLength(2)
+    expect(result[0].sourceLocation).toEqual({
+      file: "ppt/slides/slide1.xml",
+      blockPath: "p:sp[1]/p:txBody/a:p[1]",
+    })
+    expect(result[1].sourceLocation).toEqual({
+      file: "ppt/slides/slide1.xml",
+      blockPath: "p:sp[1]/p:txBody/a:p[2]",
+    })
+  })
 })

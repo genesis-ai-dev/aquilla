@@ -16,28 +16,40 @@ export async function extractPptxStrings(buffer: ArrayBuffer): Promise<Translata
     })
 
   for (let slideIndex = 0; slideIndex < slideFiles.length; slideIndex++) {
-    const xmlStr = await zip.file(slideFiles[slideIndex])!.async("string")
+    const slideFile = slideFiles[slideIndex]
+    const xmlStr = await zip.file(slideFile)!.async("string")
     const doc = new DOMParser().parseFromString(xmlStr, "application/xml")
-    const paragraphs = doc.getElementsByTagName("a:p")
 
-    for (let i = 0; i < paragraphs.length; i++) {
-      const p = paragraphs[i]
-      const { plain, html, hasFormatting } = extractPptxRuns(p)
-      if (!plain.trim()) continue
+    const shapes = doc.getElementsByTagName("p:sp")
 
-      const context = `Slide ${slideIndex + 1}`
-      const segments = splitIntoSegments(plain)
+    for (let spIdx = 0; spIdx < shapes.length; spIdx++) {
+      const shape = shapes[spIdx]
+      const paragraphs = shape.getElementsByTagName("a:p")
 
-      for (const seg of segments) {
-        results.push({
-          id: uuid(),
-          original: seg.text,
-          originalHtml: segments.length === 1 && hasFormatting ? html : undefined,
-          translated: "",
-          context,
-          group: seg.group,
-          type: "text",
-        })
+      for (let pIdx = 0; pIdx < paragraphs.length; pIdx++) {
+        const p = paragraphs[pIdx]
+        const { plain, html, hasFormatting } = extractPptxRuns(p)
+        if (!plain.trim()) continue
+
+        const context = `Slide ${slideIndex + 1}`
+        const segments = splitIntoSegments(plain)
+        const sourceLocation = {
+          file: slideFile,
+          blockPath: `p:sp[${spIdx + 1}]/p:txBody/a:p[${pIdx + 1}]`,
+        }
+
+        for (const seg of segments) {
+          results.push({
+            id: uuid(),
+            original: seg.text,
+            originalHtml: segments.length === 1 && hasFormatting ? html : undefined,
+            translated: "",
+            context,
+            group: seg.group,
+            type: "text",
+            sourceLocation,
+          })
+        }
       }
     }
   }

@@ -95,4 +95,21 @@ describe("extractDocxStrings", () => {
     const result = await extractDocxStrings(buffer)
     expect(result[0].translated).toBe("")
   })
+
+  it("sets sourceLocation with block path", async () => {
+    const buffer = await makeDocx(`
+      <w:p><w:r><w:t>First paragraph</w:t></w:r></w:p>
+      <w:p><w:r><w:t>Second paragraph</w:t></w:r></w:p>
+    `)
+    const result = await extractDocxStrings(buffer)
+    expect(result).toHaveLength(2)
+    expect(result[0].sourceLocation).toEqual({
+      file: "word/document.xml",
+      blockPath: "w:p[1]",
+    })
+    expect(result[1].sourceLocation).toEqual({
+      file: "word/document.xml",
+      blockPath: "w:p[2]",
+    })
+  })
 })

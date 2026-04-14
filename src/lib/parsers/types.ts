@@ -9,6 +9,11 @@ export type CellType =
   | "verse"
   | "paratext"
 
+export interface SourceLocation {
+  file: string       // e.g. "word/document.xml", "ppt/slides/slide3.xml"
+  blockPath: string  // indexed path to block, e.g. "w:p[2]" or "p:sp[1]/p:txBody/a:p[3]"
+}
+
 export interface TranslatableString {
   id: string
   original: string
@@ -17,6 +22,7 @@ export interface TranslatableString {
   context: string
   group: string
   type: CellType
+  sourceLocation?: SourceLocation
 }
 
 export interface TranslationRule {

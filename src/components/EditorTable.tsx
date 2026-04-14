@@ -2,7 +2,7 @@ import { useRef, useCallback, useMemo, forwardRef, useImperativeHandle } from "r
 import { useVirtualizer } from "@tanstack/react-virtual"
 import * as Y from "yjs"
 import DOMPurify from "dompurify"
-import { Check, AlertTriangle, AlertCircle, Languages, RefreshCw, MessageCircle, History } from "lucide-react"
+import { Check, AlertTriangle, AlertCircle, Languages, RefreshCw, MessageCircle, History, Play } from "lucide-react"
 import type { CellData } from "@/hooks/useCells"
 import type { ScoredPair } from "@/lib/search/search-index"
 import type { TranslationRule, RuleInfraction } from "@/lib/parsers/types"
@@ -42,6 +42,8 @@ interface EditorTableProps {
   onOpenHistory?: (cellId: string) => void
   syncProvider?: import("y-websocket").WebsocketProvider | null
   collabUser?: { name: string; color: string }
+  activeCueIndex?: number
+  onSeekToCue?: (cellId: string) => void
 }
 
 export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(function EditorTable({
@@ -52,6 +54,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   isBacktranslationConfigured, onBacktranslate, backtranslating, backtranslationErrors,
   cellOpenCommentCount, onOpenComments, onOpenHistory,
   syncProvider, collabUser,
+  activeCueIndex, onSeekToCue,
 }, ref) {
   const parentRef = useRef<HTMLDivElement>(null)
   const isDragging = useRef(false)
@@ -100,6 +103,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           const cellInfractions = infractions.get(cell.id) || []
           const openCommentCount = cellOpenCommentCount?.get(cell.id) || 0
           const hasOpenComments = openCommentCount > 0
+          const isActiveCue = activeCueIndex !== undefined && activeCueIndex === virtualRow.index
 
           return (
             <div
@@ -113,7 +117,10 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
                 width: "100%",
                 transform: `translateY(${virtualRow.start}px)`,
               }}
-              className={cn(hasOpenComments && "border-l-2 border-l-blue-400")}
+              className={cn(
+                hasOpenComments && "border-l-2 border-l-blue-400",
+                isActiveCue && "bg-primary/5 ring-1 ring-primary/30"
+              )}
             >
               <EditorRow
                 cell={cell}
@@ -138,6 +145,8 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
                 onOpenHistory={onOpenHistory}
                 syncProvider={syncProvider}
                 collabUser={collabUser}
+                isActiveCue={isActiveCue}
+                onSeekToCue={onSeekToCue}
                 onDragStart={() => {
                   isDragging.current = true
                   dragCells.current = new Set([cell.id])
@@ -177,6 +186,8 @@ interface EditorRowProps {
   onOpenHistory?: (cellId: string) => void
   syncProvider?: import("y-websocket").WebsocketProvider | null
   collabUser?: { name: string; color: string }
+  isActiveCue?: boolean
+  onSeekToCue?: (cellId: string) => void
   onDragStart: () => void
   onDragEnter: () => void
 }
@@ -189,6 +200,7 @@ function EditorRow({
   isBacktranslationConfigured, isBacktranslating, backtranslationError, onBacktranslate,
   openCommentCount, onOpenComments, onOpenHistory,
   syncProvider, collabUser,
+  isActiveCue: _isActiveCue, onSeekToCue,
   onDragStart, onDragEnter,
 }: EditorRowProps) {
   function handleChange(e: React.ChangeEvent<HTMLTextAreaElement>) {
@@ -338,7 +350,7 @@ function EditorRow({
   return (
     <div className="grid grid-cols-[24px_1fr_1fr] gap-2 border-b px-4 py-2">
       {/* Sparkle column */}
-      <div className="flex flex-col items-center pt-5">
+      <div className="flex flex-col items-center gap-1 pt-5">
         <SparkleButton
           disabled={!isCompletionConfigured}
           loading={isLoading}
@@ -347,6 +359,15 @@ function EditorRow({
           onDragEnter={onDragEnter}
           tooltip={isCompletionConfigured ? "Generate translation" : "Configure LLM in settings"}
         />
+        {onSeekToCue && (
+          <button
+            onClick={() => onSeekToCue(cell.id)}
+            className="flex h-5 w-5 items-center justify-center rounded text-muted-foreground hover:text-primary"
+            title="Play from this cue"
+          >
+            <Play className="h-3 w-3" />
+          </button>
+        )}
       </div>
 
       {/* Source column */}

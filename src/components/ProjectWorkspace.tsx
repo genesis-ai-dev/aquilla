@@ -27,6 +27,11 @@ import { RuleDrawer } from "./RuleDrawer"
 import { CommentsDrawer } from "./CommentsDrawer"
 import { HistoryDrawer } from "./HistoryDrawer"
 import { SharePanel } from "./SharePanel"
+import { VideoPlayer, type VideoPlayerHandle } from "./VideoPlayer"
+import { ResizableVideoPanel } from "./ResizableVideoPanel"
+import { VideoAttachmentDialog } from "./VideoAttachmentDialog"
+import { useVideoAttachment } from "@/hooks/useVideoAttachment"
+import { generateVttFromCells, createVttBlobUrl, parseTimestampRange } from "@/lib/video/vtt-generator"
 import { useSync } from "@/hooks/useSync"
 import { peerColor as peerColorLocal } from "@/lib/sync/webrtc-provider"
 import { startBootstrapHost } from "@/lib/sync/bootstrap"
@@ -48,6 +53,56 @@ export function ProjectWorkspace() {
   const editorRef = useRef<EditorTableHandle>(null)
   const { doc } = useFileDoc(activeFileId)
   const cells = useCells(doc)
+
+  const activeFile = activeFileId ? project?.files.find((f) => f.id === activeFileId) : null
+  const isSubtitleFile = activeFile?.type === "vtt" || activeFile?.type === "srt"
+
+  const [videoDialogOpen, setVideoDialogOpen] = useState(false)
+  const [currentVideoTime, setCurrentVideoTime] = useState(0)
+  const videoPlayerRef = useRef<VideoPlayerHandle>(null)
+  const { attachment: videoAttachment, resolvedSrc: videoSrc, blobUnavailable, save: saveVideo } =
+    useVideoAttachment(isSubtitleFile ? doc : null)
+
+  const subtitleUrl = useMemo(() => {
+    if (!isSubtitleFile || !videoSrc || cells.length === 0) return undefined
+    const vtt = generateVttFromCells(cells)
+    return createVttBlobUrl(vtt)
+  }, [cells, isSubtitleFile, videoSrc])
+
+  useEffect(() => {
+    return () => {
+      if (subtitleUrl) URL.revokeObjectURL(subtitleUrl)
+    }
+  }, [subtitleUrl])
+
+  const activeCueIndex = useMemo(() => {
+    if (!isSubtitleFile) return -1
+    for (let i = 0; i < cells.length; i++) {
+      const range = parseTimestampRange(cells[i].context)
+      if (!range) continue
+      if (currentVideoTime >= range.start && currentVideoTime <= range.end) {
+        return i
+      }
+    }
+    return -1
+  }, [cells, currentVideoTime, isSubtitleFile])
+
+  useEffect(() => {
+    if (activeCueIndex < 0) return
+    const timer = setTimeout(() => {
+      editorRef.current?.scrollToCellIndex(activeCueIndex)
+    }, 500)
+    return () => clearTimeout(timer)
+  }, [activeCueIndex])
+
+  const handleCueSeek = useCallback((cellId: string) => {
+    const cell = cells.find((c) => c.id === cellId)
+    if (!cell) return
+    const range = parseTimestampRange(cell.context)
+    if (!range) return
+    videoPlayerRef.current?.seekTo(range.start)
+    videoPlayerRef.current?.play().catch(() => { /* autoplay blocked */ })
+  }, [cells])
 
   const { buildIndex, search: runSearch, results: searchResults, loading: searchLoading, ready: searchReady } = useWorkspaceSearch(project?.files || [])
   const { search } = useSearchIndex(project?.files || [], cells)
@@ -229,7 +284,26 @@ export function ProjectWorkspace() {
         onShare={() => setShareOpen(true)}
         peers={peers}
         exportEnabled={Boolean(activeFileId)}
+        onVideo={isSubtitleFile ? () => setVideoDialogOpen(true) : undefined}
       />
+      {isSubtitleFile && videoSrc && (
+        <ResizableVideoPanel>
+          {(height) => (
+            <VideoPlayer
+              ref={videoPlayerRef}
+              src={videoSrc}
+              subtitleUrl={subtitleUrl}
+              height={height}
+              onTimeUpdate={setCurrentVideoTime}
+            />
+          )}
+        </ResizableVideoPanel>
+      )}
+      {isSubtitleFile && blobUnavailable && !videoAttachment.videoUrl && (
+        <div className="bg-amber-50 px-4 py-2 text-xs text-amber-700 dark:bg-amber-950 dark:text-amber-400">
+          Video file not available on this device. Attach it locally or paste a URL via the Film icon.
+        </div>
+      )}
       <div className="flex flex-1 overflow-hidden">
         <ProjectSidebar
           files={project.files}
@@ -271,6 +345,8 @@ export function ProjectWorkspace() {
                 }}
                 syncProvider={syncProvider}
                 collabUser={collabUser}
+                activeCueIndex={activeCueIndex >= 0 ? activeCueIndex : undefined}
+                onSeekToCue={isSubtitleFile ? handleCueSeek : undefined}
               />
             ) : <p className="p-4 text-muted-foreground">Loading file...</p>) : (
               <p className="p-4 text-muted-foreground">Select a file from the sidebar, or import files.</p>
@@ -323,6 +399,12 @@ export function ProjectWorkspace() {
         projectId={projectId!}
         username={project.username || "anonymous"}
         onSharesChanged={() => setShareRefreshKey((k) => k + 1)}
+      />
+      <VideoAttachmentDialog
+        open={videoDialogOpen}
+        onOpenChange={setVideoDialogOpen}
+        current={videoAttachment}
+        onSave={saveVideo}
       />
     </div>
   )

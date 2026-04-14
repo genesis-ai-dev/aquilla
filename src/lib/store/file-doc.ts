@@ -38,6 +38,7 @@ export function createFileDoc(
       cell.set("group", str.group)
       cell.set("type", str.type)
       cell.set("history", new Y.Array())
+      if (str.sourceLocation) cell.set("sourceLocation", str.sourceLocation)
       cells.set(str.id, cell)
       order.push([str.id])
     }
@@ -104,4 +105,63 @@ export async function collectValidatedPairs(fileIds: string[]): Promise<Validate
   }
 
   return pairs
+}
+
+export interface ExportCell {
+  id: string
+  original: string
+  translated: string
+  context: string
+  group: string
+  type: string
+  sourceLocation?: { file: string; blockPath: string }
+}
+
+export interface ExportData {
+  fileId: string
+  fileName: string
+  fileType: string
+  sourceLanguage: string
+  targetLanguage: string
+  cells: ExportCell[]
+}
+
+export async function collectExportCells(fileId: string): Promise<ExportData> {
+  const handle = loadFileDoc(fileId)
+  try {
+    await new Promise<void>((resolve) => {
+      if (handle.persistence.synced) resolve()
+      else handle.persistence.once("synced", () => resolve())
+    })
+
+    const meta = handle.doc.getMap("meta")
+    const cellsMap = handle.doc.getMap("cells")
+    const orderArray = handle.doc.getArray<string>("order")
+
+    const cells: ExportCell[] = []
+    for (const cellId of orderArray.toArray()) {
+      const cell = cellsMap.get(cellId) as Y.Map<unknown> | undefined
+      if (!cell) continue
+      cells.push({
+        id: (cell.get("id") as string) || cellId,
+        original: (cell.get("original") as string) || "",
+        translated: (cell.get("translated") as string) || "",
+        context: (cell.get("context") as string) || "",
+        group: (cell.get("group") as string) || "",
+        type: (cell.get("type") as string) || "text",
+        sourceLocation: cell.get("sourceLocation") as { file: string; blockPath: string } | undefined,
+      })
+    }
+
+    return {
+      fileId,
+      fileName: (meta.get("fileName") as string) || "untitled",
+      fileType: (meta.get("fileType") as string) || "txt",
+      sourceLanguage: (meta.get("sourceLanguage") as string) || "",
+      targetLanguage: (meta.get("targetLanguage") as string) || "",
+      cells,
+    }
+  } finally {
+    destroyFileDoc(handle)
+  }
 }

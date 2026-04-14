@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react"
 import * as Y from "yjs"
-import type { CellHistoryEntry } from "@/lib/parsers/types"
+import type { CellHistoryEntry, SourceLocation } from "@/lib/parsers/types"
 
 export interface CellData {
   id: string
@@ -12,6 +12,7 @@ export interface CellData {
   type: string
   status: "empty" | "unvalidated" | "validated"
   history: CellHistoryEntry[]
+  sourceLocation?: SourceLocation
 }
 
 function deriveStatus(translated: string, history: CellHistoryEntry[]): "empty" | "unvalidated" | "validated" {
@@ -47,6 +48,7 @@ export function useCells(doc: Y.Doc | null): CellData[] {
           type: cell.get("type") as string,
           status: deriveStatus(translated, history),
           history,
+          sourceLocation: cell.get("sourceLocation") as SourceLocation | undefined,
         })
       }
       setCells(ordered)

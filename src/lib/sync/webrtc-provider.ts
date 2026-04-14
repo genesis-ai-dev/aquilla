@@ -1,41 +1,23 @@
-import { WebrtcProvider } from "y-webrtc"
+import { WebsocketProvider } from "y-websocket"
 import * as Y from "yjs"
 
-// Our own Cloudflare Durable Object signaling server.
-// The previous y-webrtc public servers (Heroku-hosted and y-webrtc-eu.fly.dev)
-// are no longer operational. This server is in `signaling/` and deployed via
-// `wrangler deploy` from that directory.
-const DEFAULT_SIGNALING = [
-  "wss://codex-signaling.ryderwishart.workers.dev",
-]
+// Cloudflare Durable Object relay. Each unique roomName is routed to its own
+// DO instance, which acts as a pub/sub for y-websocket protocol binary messages.
+// See signaling/src/index.ts for the server implementation.
+export const SIGNALING_URL = "wss://codex-signaling.ryderwishart.workers.dev"
 
 export interface SyncProviderHandle {
-  provider: WebrtcProvider
+  provider: WebsocketProvider
   roomName: string
 }
 
 export function createSyncProvider(doc: Y.Doc, roomName: string): SyncProviderHandle {
-  const provider = new WebrtcProvider(roomName, doc, {
-    signaling: DEFAULT_SIGNALING,
-    password: null,  // PIN is enforced at the app layer via handshake, not here
-    peerOpts: {
-      config: {
-        iceServers: [
-          { urls: "stun:stun.l.google.com:19302" },
-          // Free TURN fallback for symmetric NAT cases
-          {
-            urls: [
-              "turn:openrelay.metered.ca:80",
-              "turn:openrelay.metered.ca:443",
-              "turn:openrelay.metered.ca:443?transport=tcp",
-            ],
-            username: "openrelayproject",
-            credential: "openrelayproject",
-          },
-        ],
-      },
-    },
-  } as unknown as ConstructorParameters<typeof WebrtcProvider>[2])
+  // y-websocket connects to `${serverUrl}/${roomName}` and expects the server
+  // to broadcast binary sync messages to other peers.
+  const provider = new WebsocketProvider(SIGNALING_URL, roomName, doc, {
+    // Auto-connect on creation
+    connect: true,
+  })
 
   return { provider, roomName }
 }
@@ -55,7 +37,6 @@ export function peerColor(peerId: string): string {
     hash = (hash << 5) - hash + peerId.charCodeAt(i)
     hash |= 0
   }
-  // Map to a palette of pleasant colors
   const colors = [
     "#3b82f6", "#ef4444", "#22c55e", "#a855f7", "#f97316",
     "#14b8a6", "#eab308", "#ec4899", "#6366f1", "#84cc16",

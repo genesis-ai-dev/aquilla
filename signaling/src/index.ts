@@ -1,55 +1,51 @@
 /**
- * Cloudflare Worker + Durable Object implementing the y-webrtc signaling protocol.
+ * Cloudflare Worker + Durable Object that relays Yjs sync messages via WebSocket.
  *
- * y-webrtc uses a simple topic-based pub/sub over WebSocket:
- *   - { type: "subscribe", topics: string[] }    — join topics (rooms)
- *   - { type: "unsubscribe", topics: string[] }  — leave topics
- *   - { type: "publish", topic: string, ... }    — broadcast to all subscribers of topic
- *   - { type: "ping" } → server responds { type: "pong" }
+ * URL scheme: wss://<worker>/{roomName}
+ * Each unique roomName is routed to its own Durable Object instance.
  *
- * The server just relays "publish" messages to other subscribers of the same topic.
- * It never reads or stores any WebRTC payload content — that flows peer-to-peer.
+ * The DO simply broadcasts every binary message it receives to all other
+ * connected peers in the same room. The y-websocket protocol (sync + awareness)
+ * is opaque to us — we're just a message relay. Late joiners sync with peers
+ * already in the room via the standard y-websocket sync handshake.
+ *
+ * No server-side Y.Doc state for MVP. Data persists in each client's IndexedDB.
+ * If all peers disconnect, the room is effectively empty until someone rejoins.
  */
 
 export interface Env {
-  SIGNALING: DurableObjectNamespace
+  ROOM: DurableObjectNamespace
 }
 
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
-    if (request.headers.get("Upgrade") !== "websocket") {
+    const url = new URL(request.url)
+    // The pathname (minus leading slash) is the room name.
+    const roomName = decodeURIComponent(url.pathname.slice(1))
+
+    if (!roomName) {
       return new Response(
-        "y-webrtc signaling server. Connect via WebSocket.",
+        "Codex Yjs relay. Connect via WebSocket to /{roomName}",
         { status: 426, headers: { "Content-Type": "text/plain" } }
       )
     }
-    // Single global signaling DO. Cloudflare keeps it warm based on traffic.
-    // For scale, we could shard by topic prefix later.
-    const id = env.SIGNALING.idFromName("global")
-    const stub = env.SIGNALING.get(id)
+
+    if (request.headers.get("Upgrade") !== "websocket") {
+      return new Response(`Expected WebSocket for room "${roomName}"`, {
+        status: 426,
+        headers: { "Content-Type": "text/plain" },
+      })
+    }
+
+    const id = env.ROOM.idFromName(roomName)
+    const stub = env.ROOM.get(id)
     return stub.fetch(request)
   },
 }
 
-interface PublishMessage {
-  type: "publish"
-  topic: string
-  [key: string]: unknown
-}
-
-interface TopicMessage {
-  type: "subscribe" | "unsubscribe"
-  topics: string[]
-}
-
-type IncomingMessage = PublishMessage | TopicMessage | { type: "ping" }
-
-export class SignalingRoom {
+export class CodexRoom {
   private state: DurableObjectState
-  // topic -> Set of WebSockets subscribed to it
-  private subscriptions: Map<string, Set<WebSocket>> = new Map()
-  // WebSocket -> Set of topics it's subscribed to
-  private socketTopics: Map<WebSocket, Set<string>> = new Map()
+  private connections: Set<WebSocket> = new Set()
 
   constructor(state: DurableObjectState) {
     this.state = state
@@ -59,78 +55,38 @@ export class SignalingRoom {
     const pair = new WebSocketPair()
     const [client, server] = Object.values(pair)
     server.accept()
-
-    this.socketTopics.set(server, new Set())
+    this.connections.add(server)
+    console.log(`[connect] room sockets: ${this.connections.size}`)
 
     server.addEventListener("message", (event) => {
-      if (typeof event.data !== "string") return
-      let data: IncomingMessage
-      try {
-        data = JSON.parse(event.data)
-      } catch {
-        return
+      // Broadcast to all other peers. Binary messages come through as
+      // ArrayBuffer; string messages come through as string.
+      let broadcast = 0
+      for (const peer of this.connections) {
+        if (peer === server) continue
+        if (peer.readyState !== 1) continue
+        try {
+          // event.data is ArrayBuffer or string — forward as-is.
+          peer.send(event.data)
+          broadcast += 1
+        } catch (err) {
+          console.log(`[send-error] ${String(err)}`)
+        }
       }
-      this.handleMessage(server, data)
+      const size =
+        typeof event.data === "string"
+          ? event.data.length
+          : (event.data as ArrayBuffer).byteLength
+      console.log(`[msg] size=${size} relayed=${broadcast}`)
     })
 
-    const cleanup = () => this.handleClose(server)
+    const cleanup = () => {
+      this.connections.delete(server)
+      console.log(`[disconnect] room sockets: ${this.connections.size}`)
+    }
     server.addEventListener("close", cleanup)
     server.addEventListener("error", cleanup)
 
     return new Response(null, { status: 101, webSocket: client })
-  }
-
-  private handleMessage(ws: WebSocket, data: IncomingMessage) {
-    if (data.type === "subscribe") {
-      for (const topic of data.topics || []) {
-        let subs = this.subscriptions.get(topic)
-        if (!subs) {
-          subs = new Set()
-          this.subscriptions.set(topic, subs)
-        }
-        subs.add(ws)
-        this.socketTopics.get(ws)?.add(topic)
-      }
-    } else if (data.type === "unsubscribe") {
-      for (const topic of data.topics || []) {
-        this.subscriptions.get(topic)?.delete(ws)
-        this.socketTopics.get(ws)?.delete(topic)
-      }
-    } else if (data.type === "publish") {
-      const topic = data.topic
-      if (!topic) return
-      const subs = this.subscriptions.get(topic)
-      if (!subs) return
-      const message = JSON.stringify(data)
-      for (const sub of subs) {
-        if (sub !== ws && sub.readyState === WebSocket.READY_STATE_OPEN) {
-          try {
-            sub.send(message)
-          } catch {
-            // ignore send errors; cleanup happens on close event
-          }
-        }
-      }
-    } else if (data.type === "ping") {
-      try {
-        ws.send(JSON.stringify({ type: "pong" }))
-      } catch {
-        // ignore
-      }
-    }
-  }
-
-  private handleClose(ws: WebSocket) {
-    const topics = this.socketTopics.get(ws)
-    if (topics) {
-      for (const topic of topics) {
-        const subs = this.subscriptions.get(topic)
-        if (subs) {
-          subs.delete(ws)
-          if (subs.size === 0) this.subscriptions.delete(topic)
-        }
-      }
-    }
-    this.socketTopics.delete(ws)
   }
 }

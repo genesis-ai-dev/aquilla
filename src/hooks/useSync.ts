@@ -63,18 +63,21 @@ export function useSync(options: UseSyncOptions): {
     }
 
     function updateConnected() {
-      // Connected when we have at least one sync connection or peer
-      setConnected(provider.connected)
+      // y-websocket uses `wsconnected`; fall back to `connected` for other providers.
+      const anyProvider = provider as unknown as { wsconnected?: boolean; connected?: boolean }
+      setConnected(Boolean(anyProvider.wsconnected ?? anyProvider.connected))
     }
 
     provider.awareness.on("change", updatePeers)
     provider.on("status", updateConnected)
+    provider.on("sync", updateConnected)
     updatePeers()
     updateConnected()
 
     return () => {
       provider.awareness.off("change", updatePeers)
       provider.off("status", updateConnected)
+      provider.off("sync", updateConnected)
       destroySyncProvider(handle)
       handleRef.current = null
     }

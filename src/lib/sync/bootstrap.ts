@@ -1,5 +1,5 @@
 import * as Y from "yjs"
-import { WebrtcProvider } from "y-webrtc"
+import type { WebsocketProvider } from "y-websocket"
 import { createSyncProvider, destroySyncProvider } from "./webrtc-provider"
 import { createProject, getProject } from "@/lib/store/project-index"
 import { loadFileDoc, destroyFileDoc } from "@/lib/store/file-doc"
@@ -143,14 +143,14 @@ export async function joinViaBootstrap(
   })
 }
 
-// After bootstrap: sync each file by creating local file-doc and attaching y-webrtc to it.
+// After bootstrap: sync each file by creating local file-doc and attaching websocket provider to it.
 // Returns a cleanup function that destroys all file providers.
 export function syncFilesAfterBootstrap(
   token: string,
   fileIds: string[],
   onProgress: (synced: number, total: number) => void
 ): { stop: () => void } {
-  const handles: Array<{ provider: WebrtcProvider; persistenceHandle: ReturnType<typeof loadFileDoc>; roomName: string }> = []
+  const handles: Array<{ provider: WebsocketProvider; persistenceHandle: ReturnType<typeof loadFileDoc>; roomName: string }> = []
   let syncedCount = 0
 
   for (const fileId of fileIds) {
@@ -160,8 +160,8 @@ export function syncFilesAfterBootstrap(
 
     handles.push({ provider, persistenceHandle, roomName })
 
-    provider.on("synced", ({ synced }: { synced: boolean }) => {
-      if (synced) {
+    provider.on("sync", (isSynced: boolean) => {
+      if (isSynced) {
         syncedCount += 1
         onProgress(syncedCount, fileIds.length)
       }

@@ -56,6 +56,13 @@ export async function createShare(
   return invite
 }
 
+// Save a pre-existing invite (e.g. received by a joiner during bootstrap).
+// Used to persist the share locally so useSync can pick it up on the workspace.
+export async function saveShare(invite: ShareInvite): Promise<void> {
+  const db = await getDb()
+  await db.put("shares", invite)
+}
+
 export async function listShares(projectId: string): Promise<ShareInvite[]> {
   const db = await getDb()
   const all = await db.getAllFromIndex("shares", "by-project", projectId)

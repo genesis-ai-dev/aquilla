@@ -3,6 +3,7 @@ import type { WebsocketProvider } from "y-websocket"
 import { createSyncProvider, destroySyncProvider } from "./webrtc-provider"
 import { createProject, getProject } from "@/lib/store/project-index"
 import { loadFileDoc, destroyFileDoc } from "@/lib/store/file-doc"
+import { saveShare } from "./share-tokens"
 import type { ProjectRecord, ShareInvite } from "@/lib/parsers/types"
 
 interface BootstrapMessage {
@@ -191,6 +192,16 @@ export async function completeJoin(
   if (!existing) {
     await createProject(projectRecord)
   }
+
+  // Persist the share invite so the joiner's ProjectWorkspace picks it up
+  // (activeShareToken comes from listShares → useSync activates only with a token).
+  await saveShare({
+    token: invite.token,
+    projectId: projectRecord.id,
+    pinHash: invite.pinHash,
+    createdAt: invite.createdAt,
+    createdBy: invite.createdBy,
+  })
 
   // Sync files and wait briefly for initial data
   const handle = syncFilesAfterBootstrap(invite.token, fileIds, onProgress)

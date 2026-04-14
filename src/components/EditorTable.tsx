@@ -39,6 +39,8 @@ interface EditorTableProps {
   cellOpenCommentCount?: Map<string, number>
   onOpenComments?: (cellId: string) => void
   onOpenHistory?: (cellId: string) => void
+  syncProvider?: import("y-websocket").WebsocketProvider | null
+  collabUser?: { name: string; color: string }
 }
 
 export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(function EditorTable({
@@ -48,6 +50,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   infractions = new Map(), rules = [], onInfractionClick,
   isBacktranslationConfigured, onBacktranslate, backtranslating, backtranslationErrors,
   cellOpenCommentCount, onOpenComments, onOpenHistory,
+  syncProvider, collabUser,
 }, ref) {
   const parentRef = useRef<HTMLDivElement>(null)
   const isDragging = useRef(false)
@@ -132,6 +135,8 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
                 openCommentCount={openCommentCount}
                 onOpenComments={onOpenComments}
                 onOpenHistory={onOpenHistory}
+                syncProvider={syncProvider}
+                collabUser={collabUser}
                 onDragStart={() => {
                   isDragging.current = true
                   dragCells.current = new Set([cell.id])
@@ -169,6 +174,8 @@ interface EditorRowProps {
   openCommentCount: number
   onOpenComments?: (cellId: string) => void
   onOpenHistory?: (cellId: string) => void
+  syncProvider?: import("y-websocket").WebsocketProvider | null
+  collabUser?: { name: string; color: string }
   onDragStart: () => void
   onDragEnter: () => void
 }
@@ -180,6 +187,7 @@ function EditorRow({
   onCompleteSingle, onInfractionClick,
   isBacktranslationConfigured, isBacktranslating, backtranslationError, onBacktranslate,
   openCommentCount, onOpenComments, onOpenHistory,
+  syncProvider, collabUser,
   onDragStart, onDragEnter,
 }: EditorRowProps) {
   function handleChange(e: React.ChangeEvent<HTMLTextAreaElement>) {
@@ -308,6 +316,8 @@ function EditorRow({
             <TranslatedEditor
               fragment={cell.translatedXml}
               className="w-full"
+              syncProvider={syncProvider}
+              user={collabUser}
             />
           ) : (
             <textarea

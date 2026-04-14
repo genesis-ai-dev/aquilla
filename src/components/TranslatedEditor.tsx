@@ -3,7 +3,10 @@ import { BubbleMenu } from "@tiptap/react/menus"
 import StarterKit from "@tiptap/starter-kit"
 import Underline from "@tiptap/extension-underline"
 import Collaboration from "@tiptap/extension-collaboration"
+import { Extension } from "@tiptap/core"
+import { yCursorPlugin } from "@tiptap/y-tiptap"
 import * as Y from "yjs"
+import type { WebsocketProvider } from "y-websocket"
 import { Bold, Italic, Underline as UnderlineIcon, Strikethrough, Code } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { useRef, useEffect } from "react"
@@ -13,9 +16,13 @@ interface TranslatedEditorProps {
   onBlur?: () => void
   placeholder?: string
   className?: string
+  // When provided, remote cursors from other peers in this provider's awareness
+  // are rendered inline with the given user's name and color for their local cursor.
+  syncProvider?: WebsocketProvider | null
+  user?: { name: string; color: string }
 }
 
-export function TranslatedEditor({ fragment, onBlur, placeholder, className }: TranslatedEditorProps) {
+export function TranslatedEditor({ fragment, onBlur, placeholder, className, syncProvider, user }: TranslatedEditorProps) {
   const editor = useEditor({
     extensions: [
       StarterKit.configure({
@@ -34,6 +41,9 @@ export function TranslatedEditor({ fragment, onBlur, placeholder, className }: T
       Collaboration.configure({
         fragment,
       }),
+      ...(syncProvider && user
+        ? [createCollabCursorExtension(syncProvider, user)]
+        : []),
     ],
     editorProps: {
       attributes: {
@@ -50,7 +60,7 @@ export function TranslatedEditor({ fragment, onBlur, placeholder, className }: T
       },
     },
     onBlur: onBlur,
-  }, [fragment])
+  }, [fragment, syncProvider, user?.name, user?.color])
 
   // Reset editor when fragment identity changes (switching cells)
   const prevFragmentRef = useRef(fragment)
@@ -135,6 +145,33 @@ export function TranslatedEditor({ fragment, onBlur, placeholder, className }: T
       <EditorContent editor={editor} />
     </div>
   )
+}
+
+// Remote-cursor extension. Wraps y-tiptap's yCursorPlugin (TipTap v3 renamed the
+// old CollaborationCursor extension; this restores equivalent behavior).
+// Publishes the local user's cursor position to the provider's awareness under
+// `user: { name, color }`, and renders other peers' cursors as colored carets.
+function createCollabCursorExtension(
+  provider: WebsocketProvider,
+  user: { name: string; color: string }
+) {
+  return Extension.create({
+    name: "collaborationCursor",
+    onCreate() {
+      provider.awareness.setLocalStateField("user", user)
+    },
+    onDestroy() {
+      const current = provider.awareness.getLocalState()
+      if (current && current.user) {
+        const { user: _removed, ...rest } = current
+        void _removed
+        provider.awareness.setLocalState(rest)
+      }
+    },
+    addProseMirrorPlugins() {
+      return [yCursorPlugin(provider.awareness as unknown as Parameters<typeof yCursorPlugin>[0])]
+    },
+  })
 }
 
 // Strip pasted HTML to only the marks we support.

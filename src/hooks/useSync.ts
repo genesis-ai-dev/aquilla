@@ -1,5 +1,6 @@
 import { useEffect, useState, useMemo } from "react"
 import * as Y from "yjs"
+import type { WebsocketProvider } from "y-websocket"
 import { createSyncProvider, destroySyncProvider, peerColor, type SyncProviderHandle } from "@/lib/sync/webrtc-provider"
 
 export interface PeerState {
@@ -20,10 +21,12 @@ interface UseSyncOptions {
 export function useSync(options: UseSyncOptions): {
   peers: PeerState[]
   connected: boolean
+  provider: WebsocketProvider | null
 } {
   const { doc, roomName, username, currentFileId, enabled } = options
   const [peers, setPeers] = useState<PeerState[]>([])
   const [connected, setConnected] = useState(false)
+  const [provider, setProviderState] = useState<WebsocketProvider | null>(null)
 
   const handleRef = useMemo(() => ({ current: null as SyncProviderHandle | null }), [])
 
@@ -31,12 +34,14 @@ export function useSync(options: UseSyncOptions): {
     if (!enabled || !doc || !roomName) {
       setPeers([])
       setConnected(false)
+      setProviderState(null)
       return
     }
 
     const handle = createSyncProvider(doc, roomName)
     handleRef.current = handle
     const { provider } = handle
+    setProviderState(provider)
 
     // Publish our own awareness state
     const selfState: PeerState = {
@@ -80,6 +85,7 @@ export function useSync(options: UseSyncOptions): {
       provider.off("sync", updateConnected)
       destroySyncProvider(handle)
       handleRef.current = null
+      setProviderState(null)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [doc, roomName, enabled])
@@ -98,5 +104,5 @@ export function useSync(options: UseSyncOptions): {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [username, currentFileId])
 
-  return { peers, connected }
+  return { peers, connected, provider }
 }

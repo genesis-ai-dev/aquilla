@@ -27,6 +27,7 @@ import { CommentsDrawer } from "./CommentsDrawer"
 import { HistoryDrawer } from "./HistoryDrawer"
 import { SharePanel } from "./SharePanel"
 import { useSync } from "@/hooks/useSync"
+import { peerColor as peerColorLocal } from "@/lib/sync/webrtc-provider"
 import { startBootstrapHost } from "@/lib/sync/bootstrap"
 import { listShares } from "@/lib/sync/share-tokens"
 
@@ -140,13 +141,22 @@ export function ProjectWorkspace() {
   }, [project, activeShareToken])
 
   const syncRoom = activeShareToken && activeFileId ? `codex:share:${activeShareToken}:file:${activeFileId}` : null
-  const { peers } = useSync({
+  const { peers, provider: syncProvider } = useSync({
     doc,
     roomName: syncRoom,
     username: project?.username || "anonymous",
     currentFileId: activeFileId || undefined,
     enabled: Boolean(syncRoom),
   })
+
+  const collabUser = useMemo(() => {
+    if (!syncProvider) return undefined
+    const clientId = String(syncProvider.awareness.clientID)
+    return {
+      name: project?.username || "anonymous",
+      color: peerColorLocal(clientId),
+    }
+  }, [syncProvider, project?.username])
 
   async function handleSearchSelect(result: WorkspaceSearchResult) {
     if (result.fileId !== activeFileId) {
@@ -235,6 +245,8 @@ export function ProjectWorkspace() {
                   setCommentsCellId(null)
                   setHistoryCellId(cellId)
                 }}
+                syncProvider={syncProvider}
+                collabUser={collabUser}
               />
             ) : <p className="p-4 text-muted-foreground">Loading file...</p>) : (
               <p className="p-4 text-muted-foreground">Select a file from the sidebar, or import files.</p>

@@ -13,6 +13,9 @@ export interface CellData {
   status: "empty" | "unvalidated" | "validated"
   history: CellHistoryEntry[]
   sourceLocation?: SourceLocation
+  backtranslation?: string
+  backtranslationUpdatedAt?: string
+  backtranslationForText?: string
 }
 
 function deriveStatus(translated: string, history: CellHistoryEntry[]): "empty" | "unvalidated" | "validated" {
@@ -49,6 +52,9 @@ export function useCells(doc: Y.Doc | null): CellData[] {
           status: deriveStatus(translated, history),
           history,
           sourceLocation: cell.get("sourceLocation") as SourceLocation | undefined,
+          backtranslation: cell.get("backtranslation") as string | undefined,
+          backtranslationUpdatedAt: cell.get("backtranslationUpdatedAt") as string | undefined,
+          backtranslationForText: cell.get("backtranslationForText") as string | undefined,
         })
       }
       setCells(ordered)

@@ -29,3 +29,20 @@ export function validateCell(doc: Y.Doc, cellId: string, username: string): void
   if (!translated.trim()) return
   appendCellHistory(doc, cellId, { value: translated, source: "human", author: username, validated: true })
 }
+
+export function setCellBacktranslation(
+  doc: Y.Doc,
+  cellId: string,
+  backtranslation: string,
+  forText: string
+): void {
+  const cellsMap = doc.getMap("cells")
+  const cell = cellsMap.get(cellId) as Y.Map<unknown> | undefined
+  if (!cell) return
+
+  doc.transact(() => {
+    cell.set("backtranslation", backtranslation)
+    cell.set("backtranslationUpdatedAt", new Date().toISOString())
+    cell.set("backtranslationForText", forText)
+  })
+}

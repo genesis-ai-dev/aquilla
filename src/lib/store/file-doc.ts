@@ -115,6 +115,9 @@ export interface ExportCell {
   group: string
   type: string
   sourceLocation?: { file: string; blockPath: string }
+  backtranslation?: string
+  backtranslationUpdatedAt?: string
+  backtranslationForText?: string
 }
 
 export interface ExportData {
@@ -150,6 +153,9 @@ export async function collectExportCells(fileId: string): Promise<ExportData> {
         group: (cell.get("group") as string) || "",
         type: (cell.get("type") as string) || "text",
         sourceLocation: cell.get("sourceLocation") as { file: string; blockPath: string } | undefined,
+        backtranslation: cell.get("backtranslation") as string | undefined,
+        backtranslationUpdatedAt: cell.get("backtranslationUpdatedAt") as string | undefined,
+        backtranslationForText: cell.get("backtranslationForText") as string | undefined,
       })
     }
 

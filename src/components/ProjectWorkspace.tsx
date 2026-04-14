@@ -24,6 +24,10 @@ import { ImportDialog } from "./ImportDialog"
 import { EditorTable } from "./EditorTable"
 import { RuleDrawer } from "./RuleDrawer"
 import { CommentsDrawer } from "./CommentsDrawer"
+import { SharePanel } from "./SharePanel"
+import { useSync } from "@/hooks/useSync"
+import { startBootstrapHost } from "@/lib/sync/bootstrap"
+import { listShares } from "@/lib/sync/share-tokens"
 
 export function ProjectWorkspace() {
   const { id: projectId } = useParams<{ id: string }>()
@@ -34,6 +38,8 @@ export function ProjectWorkspace() {
   const [drawerRuleId, setDrawerRuleId] = useState<string | null>(null)
   const [commentsCellId, setCommentsCellId] = useState<string | null>(null)
   const [searchOpen, setSearchOpen] = useState(false)
+  const [shareOpen, setShareOpen] = useState(false)
+  const [activeShareToken, setActiveShareToken] = useState<string | null>(null)
   const editorRef = useRef<EditorTableHandle>(null)
   const { doc } = useFileDoc(activeFileId)
   const cells = useCells(doc)
@@ -101,6 +107,43 @@ export function ProjectWorkspace() {
     return () => document.removeEventListener("keydown", handler)
   }, [])
 
+  useEffect(() => {
+    if (!project) {
+      setActiveShareToken(null)
+      return
+    }
+    listShares(project.id).then((shares) => {
+      setActiveShareToken(shares[0]?.token || null)
+    })
+  }, [project?.id])
+
+  useEffect(() => {
+    if (!project || !activeShareToken) return
+    let stopFn: (() => void) | null = null
+    let cancelled = false
+    ;(async () => {
+      const shares = await listShares(project.id)
+      const activeShare = shares.find((s) => s.token === activeShareToken)
+      if (!activeShare || cancelled) return
+      const host = startBootstrapHost(activeShare, project)
+      stopFn = host.stop
+      if (cancelled) host.stop()
+    })()
+    return () => {
+      cancelled = true
+      if (stopFn) stopFn()
+    }
+  }, [project, activeShareToken])
+
+  const syncRoom = activeShareToken && activeFileId ? `codex:share:${activeShareToken}:file:${activeFileId}` : null
+  const { peers } = useSync({
+    doc,
+    roomName: syncRoom,
+    username: project?.username || "anonymous",
+    currentFileId: activeFileId || undefined,
+    enabled: Boolean(syncRoom),
+  })
+
   async function handleSearchSelect(result: WorkspaceSearchResult) {
     if (result.fileId !== activeFileId) {
       setActiveFileId(result.fileId)
@@ -145,6 +188,8 @@ export function ProjectWorkspace() {
         onSearch={() => setSearchOpen(true)}
         onComments={() => navigate(`/project/${projectId}/comments`)}
         onSnapshots={() => navigate(`/project/${projectId}/snapshots`)}
+        onShare={() => setShareOpen(true)}
+        peers={peers}
         exportEnabled={Boolean(activeFileId)}
       />
       <div className="flex flex-1 overflow-hidden">
@@ -218,6 +263,12 @@ export function ProjectWorkspace() {
         results={searchResults}
         onSearch={runSearch}
         onSelect={handleSearchSelect}
+      />
+      <SharePanel
+        open={shareOpen}
+        onOpenChange={setShareOpen}
+        projectId={projectId!}
+        username={project.username || "anonymous"}
       />
     </div>
   )

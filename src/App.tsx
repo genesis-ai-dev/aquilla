@@ -6,6 +6,7 @@ import { DebugView } from "@/components/DebugView"
 import { RulesPage } from "@/components/RulesPage"
 import { CommentsPage } from "@/components/CommentsPage"
 import { SnapshotsPage } from "@/components/SnapshotsPage"
+import { JoinPage } from "@/components/JoinPage"
 
 export default function App() {
   return (
@@ -21,6 +22,7 @@ export default function App() {
       <Route path="/project/:id/comments/debug" element={<DebugView />} />
       <Route path="/project/:id/snapshots" element={<SnapshotsPage />} />
       <Route path="/project/:id/snapshots/debug" element={<DebugView />} />
+      <Route path="/join/:token" element={<JoinPage />} />
     </Routes>
   )
 }

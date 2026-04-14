@@ -1,6 +1,8 @@
-import { Settings, Scale, Download, Search, MessagesSquare, Camera } from "lucide-react"
+import { Settings, Scale, Download, Search, MessagesSquare, Camera, Share2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import type { ProjectRecord } from "@/lib/parsers/types"
+import type { PeerState } from "@/hooks/useSync"
+import { PeerPresence } from "./PeerPresence"
 
 interface ToolbarProps {
   project: ProjectRecord
@@ -12,11 +14,14 @@ interface ToolbarProps {
   onSearch: () => void
   onComments: () => void
   onSnapshots: () => void
+  onShare: () => void
+  peers?: PeerState[]
   exportEnabled: boolean
 }
 
 export function Toolbar({
-  project, onBack, onImport, onSettings, onRules, onExport, onSearch, onComments, onSnapshots, exportEnabled,
+  project, onBack, onImport, onSettings, onRules, onExport,
+  onSearch, onComments, onSnapshots, onShare, peers = [], exportEnabled,
 }: ToolbarProps) {
   return (
     <header className="flex items-center gap-4 border-b px-4 py-2">
@@ -27,9 +32,13 @@ export function Toolbar({
       <span className="text-sm text-muted-foreground">
         {project.sourceLanguage} → {project.targetLanguage}
       </span>
+      <PeerPresence peers={peers} />
       <div className="flex-1" />
       <Button variant="ghost" size="sm" onClick={onSearch} title="Search (Cmd+K)">
         <Search className="h-4 w-4" />
+      </Button>
+      <Button variant="ghost" size="sm" onClick={onShare} title="Share project">
+        <Share2 className="h-4 w-4" />
       </Button>
       <Button variant="ghost" size="sm" onClick={onComments} title="Comments">
         <MessagesSquare className="h-4 w-4" />

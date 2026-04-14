@@ -8,6 +8,7 @@ import { createProject, _resetDbForTesting } from "./project-index"
 import { createFileDoc, loadFileDoc, destroyFileDoc } from "./file-doc"
 import { v4 as uuid } from "uuid"
 import type { ProjectRecord, TranslatableString } from "../parsers/types"
+import { getPlainText, setPlainText } from "@/lib/richtext/translated-xml"
 
 function makeProject(overrides: Partial<ProjectRecord> = {}): ProjectRecord {
   return {
@@ -135,9 +136,14 @@ describe("snapshots", () => {
     const cellsMap = handle2.doc.getMap("cells")
     const cell = cellsMap.get("c1") as Y.Map<unknown> | undefined
     if (cell) {
-      handle2.doc.transact(() => {
-        cell.set("translated", "MODIFIED")
-      })
+      const frag = cell.get("translatedXml") as Y.XmlFragment | undefined
+      if (frag) {
+        setPlainText(frag, "MODIFIED")
+      } else {
+        handle2.doc.transact(() => {
+          cell.set("translated", "MODIFIED")
+        })
+      }
     }
     destroyFileDoc(handle2)
 
@@ -151,7 +157,9 @@ describe("snapshots", () => {
       else handle3.persistence.once("synced", () => resolve())
     })
     const restoredCell = handle3.doc.getMap("cells").get("c1") as Y.Map<unknown> | undefined
-    expect(restoredCell?.get("translated")).toBe("Bonjour")
+    const frag = restoredCell?.get("translatedXml") as Y.XmlFragment | undefined
+    expect(frag).toBeDefined()
+    expect(frag ? getPlainText(frag) : "").toBe("Bonjour")
     destroyFileDoc(handle3)
   })
 

@@ -1,5 +1,6 @@
 import * as Y from "yjs"
 import type { CellHistoryEntry } from "@/lib/parsers/types"
+import { getPlainText, setPlainText } from "@/lib/richtext/translated-xml"
 
 export function appendCellHistory(
   doc: Y.Doc,
@@ -11,7 +12,13 @@ export function appendCellHistory(
   if (!cell) return
 
   doc.transact(() => {
-    cell.set("translated", entry.value)
+    const frag = cell.get("translatedXml") as Y.XmlFragment | undefined
+    if (frag) {
+      setPlainText(frag, entry.value)
+    } else {
+      // legacy fallback
+      cell.set("translated", entry.value)
+    }
     let historyArr = cell.get("history") as Y.Array<CellHistoryEntry> | undefined
     if (!historyArr) {
       historyArr = new Y.Array<CellHistoryEntry>()
@@ -25,7 +32,8 @@ export function validateCell(doc: Y.Doc, cellId: string, username: string): void
   const cellsMap = doc.getMap("cells")
   const cell = cellsMap.get(cellId) as Y.Map<unknown> | undefined
   if (!cell) return
-  const translated = (cell.get("translated") as string) || ""
+  const frag = cell.get("translatedXml") as Y.XmlFragment | undefined
+  const translated = frag ? getPlainText(frag) : ((cell.get("translated") as string) || "")
   if (!translated.trim()) return
   appendCellHistory(doc, cellId, { value: translated, source: "human", author: username, validated: true })
 }

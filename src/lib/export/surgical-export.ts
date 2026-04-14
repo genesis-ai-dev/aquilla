@@ -86,6 +86,11 @@ function getChildrenByTagName(parent: Element, tagName: string): Element[] {
   return result
 }
 
+// NOTE: Currently replaces each block with a single run containing the translated
+// plain text. Inline formatting (bold, italic) from the rich text editor is NOT
+// preserved on DOCX/PPTX export. This is a known M9 limitation; the translated
+// text IS preserved (just without inline styling). Future enhancement can convert
+// the fragment's HTML into multiple runs with appropriate rPr marks.
 function replaceBlockText(block: Element, newText: string, fileType: "docx" | "pptx"): void {
   const doc = block.ownerDocument!
   const runTag = fileType === "docx" ? "w:r" : "a:r"

@@ -11,6 +11,7 @@ import { SparkleButton } from "./SparkleButton"
 import { ExamplePanel } from "./ExamplePanel"
 import { HighlightedText, buildHighlightsFromExamples } from "./HighlightedText"
 import { HealthRing } from "./HealthRing"
+import { TranslatedEditor } from "./TranslatedEditor"
 import { cn } from "@/lib/utils"
 
 export interface EditorTableHandle {
@@ -300,12 +301,19 @@ function EditorRow({
       {/* Target column */}
       <div className="flex gap-1">
         <div className="flex-1">
-          <textarea
-            className="w-full resize-none rounded border bg-background px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
-            value={cell.translated}
-            onChange={handleChange}
-            rows={Math.max(2, Math.ceil(cell.original.length / 50))}
-          />
+          {cell.translatedXml ? (
+            <TranslatedEditor
+              fragment={cell.translatedXml}
+              className="w-full"
+            />
+          ) : (
+            <textarea
+              className="w-full resize-none rounded border bg-background px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
+              value={cell.translated}
+              onChange={handleChange}
+              rows={Math.max(2, Math.ceil(cell.original.length / 50))}
+            />
+          )}
           {error && <p className="mt-0.5 text-xs text-destructive">{error}</p>}
           {cell.backtranslation && (
             <div className="mt-1 rounded border-l-2 border-blue-400 bg-muted/30 px-2 py-1 text-xs italic text-muted-foreground">

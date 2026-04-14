@@ -1,6 +1,7 @@
 import { useState, useCallback } from "react"
 import * as Y from "yjs"
 import type { CompletionSettings } from "@/lib/parsers/types"
+import { setPlainText } from "@/lib/richtext/translated-xml"
 import type { ScoredPair } from "@/lib/search/search-index"
 import type { CellData } from "./useCells"
 import { buildPrompt, complete, DEFAULT_SYSTEM_PROMPT } from "@/lib/completion/completion-service"
@@ -41,7 +42,14 @@ export function useCompletion(
         onChunk: (text) => {
           const cells = doc.getMap("cells")
           const yCell = cells.get(cell.id) as Y.Map<unknown> | undefined
-          if (yCell) doc.transact(() => { yCell.set("translated", text) })
+          if (yCell) {
+            const frag = yCell.get("translatedXml") as Y.XmlFragment | undefined
+            if (frag) {
+              setPlainText(frag, text)
+            } else {
+              doc.transact(() => { yCell.set("translated", text) })
+            }
+          }
         },
       })
       appendCellHistory(doc, cell.id, {

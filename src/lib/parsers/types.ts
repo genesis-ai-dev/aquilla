@@ -133,6 +133,7 @@ export interface ProjectSnapshot {
   createdAt: string
   createdBy: string
   automatic: boolean
+  schemaVersion?: number  // NEW — omitted/1 = pre-M9, 2 = M9+
   files: SnapshotFile[]
   projectRecord: ProjectRecord
 }

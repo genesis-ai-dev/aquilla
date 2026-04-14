@@ -96,6 +96,7 @@ export async function createSnapshot(
     createdAt: new Date().toISOString(),
     createdBy: project.username || "anonymous",
     automatic,
+    schemaVersion: 2,
     files,
     projectRecord: JSON.parse(JSON.stringify(project)) as ProjectRecord,
   }
@@ -124,6 +125,9 @@ export async function deleteSnapshot(snapshotId: string): Promise<void> {
 export async function restoreSnapshot(snapshotId: string, username: string): Promise<void> {
   const snapshot = await getSnapshot(snapshotId)
   if (!snapshot) throw new Error(`Snapshot not found: ${snapshotId}`)
+  if (!snapshot.schemaVersion || snapshot.schemaVersion < 2) {
+    throw new Error("This snapshot was created before Milestone 9 and cannot be restored. Its schema is incompatible with the current editor. Please delete this snapshot.")
+  }
 
   // Create an automatic safety snapshot of current state first
   await createSnapshot(

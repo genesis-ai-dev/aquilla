@@ -2,12 +2,14 @@ import { useEffect, useState } from "react"
 import * as Y from "yjs"
 import type { CellHistoryEntry, SourceLocation, CommentThread } from "@/lib/parsers/types"
 import { extractThreadsFromCell } from "./useComments"
+import { getPlainText } from "@/lib/richtext/translated-xml"
 
 export interface CellData {
   id: string
   original: string
   originalHtml?: string
   translated: string
+  translatedXml?: Y.XmlFragment  // NEW — raw fragment for editor binding
   context: string
   group: string
   type: string
@@ -40,7 +42,8 @@ export function useCells(doc: Y.Doc | null): CellData[] {
       for (const id of orderArray.toArray()) {
         const cell = cellsMap.get(id) as Y.Map<unknown> | undefined
         if (!cell) continue
-        const translated = (cell.get("translated") as string) || ""
+        const frag = cell.get("translatedXml") as Y.XmlFragment | undefined
+        const translated = frag ? getPlainText(frag) : ((cell.get("translated") as string) || "")
         const historyArr = cell.get("history") as Y.Array<CellHistoryEntry> | undefined
         const history: CellHistoryEntry[] = historyArr ? historyArr.toArray() : []
         const threads = extractThreadsFromCell(cell)
@@ -49,6 +52,7 @@ export function useCells(doc: Y.Doc | null): CellData[] {
           original: cell.get("original") as string,
           originalHtml: cell.get("originalHtml") as string | undefined,
           translated,
+          ...(frag ? { translatedXml: frag } : {}),
           context: cell.get("context") as string,
           group: cell.get("group") as string,
           type: cell.get("type") as string,

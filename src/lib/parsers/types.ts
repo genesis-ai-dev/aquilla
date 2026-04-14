@@ -118,6 +118,25 @@ export interface CommentThread {
   messages: CommentMessage[]
 }
 
+export interface SnapshotFile {
+  fileId: string
+  fileName: string
+  fileType: FileType
+  ydocState: string  // base64 encoded Y.encodeStateAsUpdate output
+}
+
+export interface ProjectSnapshot {
+  id: string
+  projectId: string
+  name: string
+  description?: string
+  createdAt: string
+  createdBy: string
+  automatic: boolean
+  files: SnapshotFile[]
+  projectRecord: ProjectRecord
+}
+
 export function detectFileType(fileName: string): FileType | null {
   const ext = fileName.split(".").pop()?.toLowerCase()
   const map: Record<string, FileType> = {

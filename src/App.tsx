@@ -5,6 +5,7 @@ import { ProjectSettings } from "@/components/ProjectSettings"
 import { DebugView } from "@/components/DebugView"
 import { RulesPage } from "@/components/RulesPage"
 import { CommentsPage } from "@/components/CommentsPage"
+import { SnapshotsPage } from "@/components/SnapshotsPage"
 
 export default function App() {
   return (
@@ -18,6 +19,8 @@ export default function App() {
       <Route path="/project/:id/rules" element={<RulesPage />} />
       <Route path="/project/:id/comments" element={<CommentsPage />} />
       <Route path="/project/:id/comments/debug" element={<DebugView />} />
+      <Route path="/project/:id/snapshots" element={<SnapshotsPage />} />
+      <Route path="/project/:id/snapshots/debug" element={<DebugView />} />
     </Routes>
   )
 }

@@ -144,6 +144,7 @@ export function ProjectWorkspace() {
         onExport={handleExport}
         onSearch={() => setSearchOpen(true)}
         onComments={() => navigate(`/project/${projectId}/comments`)}
+        onSnapshots={() => navigate(`/project/${projectId}/snapshots`)}
         exportEnabled={Boolean(activeFileId)}
       />
       <div className="flex flex-1 overflow-hidden">

@@ -1,4 +1,4 @@
-import { Settings, Scale, Download, Search, MessagesSquare } from "lucide-react"
+import { Settings, Scale, Download, Search, MessagesSquare, Camera } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import type { ProjectRecord } from "@/lib/parsers/types"
 
@@ -11,10 +11,13 @@ interface ToolbarProps {
   onExport: () => void
   onSearch: () => void
   onComments: () => void
+  onSnapshots: () => void
   exportEnabled: boolean
 }
 
-export function Toolbar({ project, onBack, onImport, onSettings, onRules, onExport, onSearch, onComments, exportEnabled }: ToolbarProps) {
+export function Toolbar({
+  project, onBack, onImport, onSettings, onRules, onExport, onSearch, onComments, onSnapshots, exportEnabled,
+}: ToolbarProps) {
   return (
     <header className="flex items-center gap-4 border-b px-4 py-2">
       <Button variant="ghost" size="sm" onClick={onBack}>
@@ -30,6 +33,9 @@ export function Toolbar({ project, onBack, onImport, onSettings, onRules, onExpo
       </Button>
       <Button variant="ghost" size="sm" onClick={onComments} title="Comments">
         <MessagesSquare className="h-4 w-4" />
+      </Button>
+      <Button variant="ghost" size="sm" onClick={onSnapshots} title="Snapshots">
+        <Camera className="h-4 w-4" />
       </Button>
       <Button size="sm" onClick={onImport}>
         + Import

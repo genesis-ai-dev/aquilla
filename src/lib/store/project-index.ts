@@ -1,5 +1,5 @@
 import { openDB, type DBSchema } from "idb"
-import type { ProjectRecord, ProjectSnapshot } from "../parsers/types"
+import type { ProjectRecord, ProjectSnapshot, ShareInvite } from "../parsers/types"
 
 interface CodexDB extends DBSchema {
   projects: {
@@ -15,10 +15,15 @@ interface CodexDB extends DBSchema {
     value: ProjectSnapshot
     indexes: { "by-project": string }
   }
+  shares: {
+    key: string
+    value: ShareInvite
+    indexes: { "by-project": string }
+  }
 }
 
 const DB_NAME = "codex"
-const DB_VERSION = 2
+const DB_VERSION = 3
 
 let dbPromise: ReturnType<typeof openDB<CodexDB>> | null = null
 
@@ -34,6 +39,10 @@ export function getDb() {
         }
         if (oldVersion < 2 && !db.objectStoreNames.contains("snapshots")) {
           const store = db.createObjectStore("snapshots", { keyPath: "id" })
+          store.createIndex("by-project", "projectId")
+        }
+        if (oldVersion < 3 && !db.objectStoreNames.contains("shares")) {
+          const store = db.createObjectStore("shares", { keyPath: "token" })
           store.createIndex("by-project", "projectId")
         }
       },

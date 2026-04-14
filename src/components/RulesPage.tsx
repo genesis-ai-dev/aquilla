@@ -8,6 +8,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { getProject } from "@/lib/store/project-index"
 import { useRules } from "@/hooks/useRules"
 import { RuleCreateDialog } from "./RuleCreateDialog"
+import { RuleSuggestDialog } from "./RuleSuggestDialog"
 import type { ProjectRecord } from "@/lib/parsers/types"
 
 export function RulesPage() {
@@ -41,6 +42,11 @@ export function RulesPage() {
         </Button>
         <h2 className="font-semibold">Translation Rules</h2>
         <div className="flex-1" />
+        <RuleSuggestDialog
+          files={project?.files || []}
+          completionSettings={project?.completionSettings}
+          onAdd={addRule}
+        />
         <RuleCreateDialog onAdd={addRule} />
       </header>
 
@@ -71,7 +77,13 @@ export function RulesPage() {
           </CardHeader>
           <CardContent>
             {rules.length === 0 ? (
-              <p className="text-sm text-muted-foreground">No rules defined yet. Add one to get started.</p>
+              <div className="space-y-2 text-sm text-muted-foreground">
+                <p>No rules defined yet. You can:</p>
+                <ul className="list-disc pl-5 space-y-1 text-xs">
+                  <li><strong>Suggest from edits</strong> — let the LLM analyze your validated translations and propose rules</li>
+                  <li><strong>+ Add Rule</strong> — define a rule manually with a regex pattern</li>
+                </ul>
+              </div>
             ) : (
               <ul className="space-y-2">
                 {rules.map((rule) => {

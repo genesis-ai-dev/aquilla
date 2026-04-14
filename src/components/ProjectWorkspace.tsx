@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react"
+import { useState, useMemo, useRef, useEffect } from "react"
 import { useParams, useNavigate } from "react-router-dom"
 import { useProject } from "@/hooks/useProject"
 import { useFileDoc } from "@/hooks/useFileDoc"
@@ -11,6 +11,10 @@ import { updateProject } from "@/lib/store/project-index"
 import { exportFile, downloadBlob } from "@/lib/export/export-service"
 import type { FileReference } from "@/lib/parsers/types"
 import type { CellData } from "@/hooks/useCells"
+import { useWorkspaceSearch } from "@/hooks/useWorkspaceSearch"
+import { SearchDialog } from "./SearchDialog"
+import type { EditorTableHandle } from "./EditorTable"
+import type { WorkspaceSearchResult } from "@/lib/search/workspace-index"
 import { Toolbar } from "./Toolbar"
 import { ProjectSidebar } from "./ProjectSidebar"
 import { StatusBar } from "./StatusBar"
@@ -25,9 +29,12 @@ export function ProjectWorkspace() {
   const [activeFileId, setActiveFileId] = useState<string | null>(null)
   const [importOpen, setImportOpen] = useState(false)
   const [drawerRuleId, setDrawerRuleId] = useState<string | null>(null)
+  const [searchOpen, setSearchOpen] = useState(false)
+  const editorRef = useRef<EditorTableHandle>(null)
   const { doc } = useFileDoc(activeFileId)
   const cells = useCells(doc)
 
+  const { buildIndex, search: runSearch, results: searchResults, loading: searchLoading, ready: searchReady } = useWorkspaceSearch(project?.files || [])
   const { search } = useSearchIndex(project?.files || [], cells)
   const { completeSingle, completeBatch, isConfigured, completing, examples, errors } = useCompletion(
     doc, project?.completionSettings, project?.sourceLanguage || "", project?.targetLanguage || "", search
@@ -57,6 +64,30 @@ export function ProjectWorkspace() {
     ? Array.from(infractions.values()).flat().filter((i) => i.ruleId === drawerRuleId)
     : []
 
+  useEffect(() => {
+    function handler(e: KeyboardEvent) {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
+        e.preventDefault()
+        setSearchOpen(true)
+      }
+    }
+    document.addEventListener("keydown", handler)
+    return () => document.removeEventListener("keydown", handler)
+  }, [])
+
+  async function handleSearchSelect(result: WorkspaceSearchResult) {
+    if (result.fileId !== activeFileId) {
+      setActiveFileId(result.fileId)
+      setTimeout(() => {
+        const idx = cells.findIndex((c) => c.id === result.cellId)
+        if (idx >= 0) editorRef.current?.scrollToCellIndex(idx)
+      }, 400)
+    } else {
+      const idx = cells.findIndex((c) => c.id === result.cellId)
+      if (idx >= 0) editorRef.current?.scrollToCellIndex(idx)
+    }
+  }
+
   if (loading || !project) return <div className="p-8 text-muted-foreground">Loading...</div>
 
   async function handleImported(refs: FileReference[]) {
@@ -85,6 +116,7 @@ export function ProjectWorkspace() {
         onSettings={() => navigate(`/project/${projectId}/settings`)}
         onRules={() => navigate(`/project/${projectId}/rules`)}
         onExport={handleExport}
+        onSearch={() => setSearchOpen(true)}
         exportEnabled={Boolean(activeFileId)}
       />
       <div className="flex flex-1 overflow-hidden">
@@ -99,7 +131,7 @@ export function ProjectWorkspace() {
         <main className="flex flex-1 overflow-hidden">
           <div className="flex-1 overflow-hidden">
             {activeFileId ? (doc ? (
-              <EditorTable cells={cells} doc={doc} username={project.username || "local"}
+              <EditorTable ref={editorRef} cells={cells} doc={doc} username={project.username || "local"}
                 isCompletionConfigured={isConfigured} completing={completing} examples={examples} errors={errors}
                 onCompleteSingle={completeSingle} onCompleteBatch={completeBatch}
                 healthMap={healthMap}
@@ -125,6 +157,16 @@ export function ProjectWorkspace() {
       </div>
       <StatusBar cells={cells} projectHealth={projectHealth} />
       <ImportDialog open={importOpen} onOpenChange={setImportOpen} sourceLanguage={project.sourceLanguage} targetLanguage={project.targetLanguage} onImported={handleImported} />
+      <SearchDialog
+        open={searchOpen}
+        onOpenChange={setSearchOpen}
+        onReady={buildIndex}
+        loading={searchLoading}
+        ready={searchReady}
+        results={searchResults}
+        onSearch={runSearch}
+        onSelect={handleSearchSelect}
+      />
     </div>
   )
 }

@@ -1,4 +1,4 @@
-import { useRef, useCallback, useMemo } from "react"
+import { useRef, useCallback, useMemo, forwardRef, useImperativeHandle } from "react"
 import { useVirtualizer } from "@tanstack/react-virtual"
 import * as Y from "yjs"
 import DOMPurify from "dompurify"
@@ -11,6 +11,10 @@ import { SparkleButton } from "./SparkleButton"
 import { ExamplePanel } from "./ExamplePanel"
 import { HighlightedText, buildHighlightsFromExamples } from "./HighlightedText"
 import { HealthRing } from "./HealthRing"
+
+export interface EditorTableHandle {
+  scrollToCellIndex: (index: number) => void
+}
 
 interface EditorTableProps {
   cells: CellData[]
@@ -28,12 +32,12 @@ interface EditorTableProps {
   onInfractionClick?: (ruleId: string) => void
 }
 
-export function EditorTable({
+export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(function EditorTable({
   cells, doc, username, isCompletionConfigured,
   completing, examples, errors,
   onCompleteSingle, onCompleteBatch, healthMap,
   infractions = new Map(), rules = [], onInfractionClick,
-}: EditorTableProps) {
+}, ref) {
   const parentRef = useRef<HTMLDivElement>(null)
   const isDragging = useRef(false)
   const dragCells = useRef<Set<string>>(new Set())
@@ -45,6 +49,14 @@ export function EditorTable({
     getScrollElement: () => parentRef.current,
     estimateSize: () => 90,
   })
+
+  useImperativeHandle(ref, () => ({
+    scrollToCellIndex(index: number) {
+      if (index >= 0 && index < cells.length) {
+        virtualizer.scrollToIndex(index, { align: "center" })
+      }
+    },
+  }), [virtualizer, cells.length])
 
   const handleMouseUp = useCallback(() => {
     if (isDragging.current && dragCells.current.size > 1) {
@@ -113,7 +125,7 @@ export function EditorTable({
       </div>
     </div>
   )
-}
+})
 
 interface EditorRowProps {
   cell: CellData

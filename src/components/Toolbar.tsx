@@ -1,4 +1,4 @@
-import { Settings, Scale, Download } from "lucide-react"
+import { Settings, Scale, Download, Search } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import type { ProjectRecord } from "@/lib/parsers/types"
 
@@ -9,10 +9,11 @@ interface ToolbarProps {
   onSettings: () => void
   onRules: () => void
   onExport: () => void
+  onSearch: () => void
   exportEnabled: boolean
 }
 
-export function Toolbar({ project, onBack, onImport, onSettings, onRules, onExport, exportEnabled }: ToolbarProps) {
+export function Toolbar({ project, onBack, onImport, onSettings, onRules, onExport, onSearch, exportEnabled }: ToolbarProps) {
   return (
     <header className="flex items-center gap-4 border-b px-4 py-2">
       <Button variant="ghost" size="sm" onClick={onBack}>
@@ -23,6 +24,9 @@ export function Toolbar({ project, onBack, onImport, onSettings, onRules, onExpo
         {project.sourceLanguage} → {project.targetLanguage}
       </span>
       <div className="flex-1" />
+      <Button variant="ghost" size="sm" onClick={onSearch} title="Search (Cmd+K)">
+        <Search className="h-4 w-4" />
+      </Button>
       <Button size="sm" onClick={onImport}>
         + Import
       </Button>

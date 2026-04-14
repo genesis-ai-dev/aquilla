@@ -13,6 +13,7 @@ import type { FileReference } from "@/lib/parsers/types"
 import type { CellData } from "@/hooks/useCells"
 import { useWorkspaceSearch } from "@/hooks/useWorkspaceSearch"
 import { useBacktranslation } from "@/hooks/useBacktranslation"
+import { useComments } from "@/hooks/useComments"
 import { SearchDialog } from "./SearchDialog"
 import type { EditorTableHandle } from "./EditorTable"
 import type { WorkspaceSearchResult } from "@/lib/search/workspace-index"
@@ -22,6 +23,7 @@ import { StatusBar } from "./StatusBar"
 import { ImportDialog } from "./ImportDialog"
 import { EditorTable } from "./EditorTable"
 import { RuleDrawer } from "./RuleDrawer"
+import { CommentsDrawer } from "./CommentsDrawer"
 
 export function ProjectWorkspace() {
   const { id: projectId } = useParams<{ id: string }>()
@@ -30,6 +32,7 @@ export function ProjectWorkspace() {
   const [activeFileId, setActiveFileId] = useState<string | null>(null)
   const [importOpen, setImportOpen] = useState(false)
   const [drawerRuleId, setDrawerRuleId] = useState<string | null>(null)
+  const [commentsCellId, setCommentsCellId] = useState<string | null>(null)
   const [searchOpen, setSearchOpen] = useState(false)
   const editorRef = useRef<EditorTableHandle>(null)
   const { doc } = useFileDoc(activeFileId)
@@ -62,6 +65,8 @@ export function ProjectWorkspace() {
   )
 
   const { rules, penalties } = useRules(project ?? null, refresh)
+  const { addThread, addMessage, resolveThread, reopenThread } = useComments(doc, project?.username || "anonymous")
+  const commentsCell = commentsCellId ? cells.find((c) => c.id === commentsCellId) : null
 
   // Build fileCells map for health computation
   // For now, only the active file's cells are loaded
@@ -73,7 +78,7 @@ export function ProjectWorkspace() {
     return map
   }, [activeFileId, cells])
 
-  const { healthMap, fileHealth, projectHealth, fileProgress, infractions } = useHealth(
+  const { healthMap, fileHealth, projectHealth, fileProgress, infractions, openCommentCount, cellOpenCommentCount } = useHealth(
     fileCells,
     project?.completionSettings?.llmHealthPenalty ?? 0.1,
     rules,
@@ -138,6 +143,7 @@ export function ProjectWorkspace() {
         onRules={() => navigate(`/project/${projectId}/rules`)}
         onExport={handleExport}
         onSearch={() => setSearchOpen(true)}
+        onComments={() => navigate(`/project/${projectId}/comments`)}
         exportEnabled={Boolean(activeFileId)}
       />
       <div className="flex flex-1 overflow-hidden">
@@ -148,6 +154,7 @@ export function ProjectWorkspace() {
           fileHealth={fileHealth}
           fileProgress={fileProgress}
           projectHealth={projectHealth}
+          openCommentCount={openCommentCount}
         />
         <main className="flex flex-1 overflow-hidden">
           <div className="flex-1 overflow-hidden">
@@ -158,11 +165,20 @@ export function ProjectWorkspace() {
                 healthMap={healthMap}
                 infractions={infractions}
                 rules={rules}
-                onInfractionClick={(ruleId) => setDrawerRuleId(ruleId)}
+                onInfractionClick={(ruleId) => {
+                  setCommentsCellId(null)
+                  setDrawerRuleId(ruleId)
+                }}
                 isBacktranslationConfigured={isBacktranslationConfigured}
                 onBacktranslate={runBacktranslation}
                 backtranslating={backtranslating}
-                backtranslationErrors={backtranslationErrors} />
+                backtranslationErrors={backtranslationErrors}
+                cellOpenCommentCount={cellOpenCommentCount}
+                onOpenComments={(cellId) => {
+                  setDrawerRuleId(null)
+                  setCommentsCellId(cellId)
+                }}
+              />
             ) : <p className="p-4 text-muted-foreground">Loading file...</p>) : (
               <p className="p-4 text-muted-foreground">Select a file from the sidebar, or import files.</p>
             )}
@@ -176,6 +192,16 @@ export function ProjectWorkspace() {
               onNavigateToCell={(_cellId) => {
                 // TODO: scroll virtualizer to cell
               }}
+            />
+          )}
+          {commentsCell && (
+            <CommentsDrawer
+              cell={commentsCell}
+              onClose={() => setCommentsCellId(null)}
+              onNewThread={(text) => addThread(commentsCell.id, text)}
+              onReply={(threadId, text) => addMessage(commentsCell.id, threadId, text)}
+              onResolve={(threadId, msg) => resolveThread(commentsCell.id, threadId, msg)}
+              onReopen={(threadId) => reopenThread(commentsCell.id, threadId)}
             />
           )}
         </main>

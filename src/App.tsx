@@ -4,6 +4,7 @@ import { ProjectWorkspace } from "@/components/ProjectWorkspace"
 import { ProjectSettings } from "@/components/ProjectSettings"
 import { DebugView } from "@/components/DebugView"
 import { RulesPage } from "@/components/RulesPage"
+import { CommentsPage } from "@/components/CommentsPage"
 
 export default function App() {
   return (
@@ -15,6 +16,8 @@ export default function App() {
       <Route path="/project/:id/settings" element={<ProjectSettings />} />
       <Route path="/project/:id/settings/debug" element={<DebugView />} />
       <Route path="/project/:id/rules" element={<RulesPage />} />
+      <Route path="/project/:id/comments" element={<CommentsPage />} />
+      <Route path="/project/:id/comments/debug" element={<DebugView />} />
     </Routes>
   )
 }

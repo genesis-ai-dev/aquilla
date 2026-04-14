@@ -2,7 +2,7 @@ import { useRef, useCallback, useMemo, forwardRef, useImperativeHandle } from "r
 import { useVirtualizer } from "@tanstack/react-virtual"
 import * as Y from "yjs"
 import DOMPurify from "dompurify"
-import { Check, AlertTriangle, AlertCircle, Languages, RefreshCw } from "lucide-react"
+import { Check, AlertTriangle, AlertCircle, Languages, RefreshCw, MessageCircle } from "lucide-react"
 import type { CellData } from "@/hooks/useCells"
 import type { ScoredPair } from "@/lib/search/search-index"
 import type { TranslationRule, RuleInfraction } from "@/lib/parsers/types"
@@ -35,6 +35,8 @@ interface EditorTableProps {
   onBacktranslate?: (cell: CellData) => void
   backtranslating?: Set<string>
   backtranslationErrors?: Map<string, string>
+  cellOpenCommentCount?: Map<string, number>
+  onOpenComments?: (cellId: string) => void
 }
 
 export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(function EditorTable({
@@ -43,6 +45,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   onCompleteSingle, onCompleteBatch, healthMap,
   infractions = new Map(), rules = [], onInfractionClick,
   isBacktranslationConfigured, onBacktranslate, backtranslating, backtranslationErrors,
+  cellOpenCommentCount, onOpenComments,
 }, ref) {
   const parentRef = useRef<HTMLDivElement>(null)
   const isDragging = useRef(false)
@@ -89,6 +92,8 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           const isLoading = completingState === "searching" || completingState === "generating"
           const highlights = buildHighlightsFromExamples(cellExamples)
           const cellInfractions = infractions.get(cell.id) || []
+          const openCommentCount = cellOpenCommentCount?.get(cell.id) || 0
+          const hasOpenComments = openCommentCount > 0
 
           return (
             <div
@@ -102,6 +107,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
                 width: "100%",
                 transform: `translateY(${virtualRow.start}px)`,
               }}
+              className={cn(hasOpenComments && "border-l-2 border-l-blue-400")}
             >
               <EditorRow
                 cell={cell}
@@ -121,6 +127,8 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
                 isBacktranslating={backtranslating?.has(cell.id)}
                 backtranslationError={backtranslationErrors?.get(cell.id)}
                 onBacktranslate={onBacktranslate}
+                openCommentCount={openCommentCount}
+                onOpenComments={onOpenComments}
                 onDragStart={() => {
                   isDragging.current = true
                   dragCells.current = new Set([cell.id])
@@ -155,6 +163,8 @@ interface EditorRowProps {
   isBacktranslating?: boolean
   backtranslationError?: string
   onBacktranslate?: (cell: CellData) => void
+  openCommentCount: number
+  onOpenComments?: (cellId: string) => void
   onDragStart: () => void
   onDragEnter: () => void
 }
@@ -165,6 +175,7 @@ function EditorRow({
   cellInfractions, ruleMap,
   onCompleteSingle, onInfractionClick,
   isBacktranslationConfigured, isBacktranslating, backtranslationError, onBacktranslate,
+  openCommentCount, onOpenComments,
   onDragStart, onDragEnter,
 }: EditorRowProps) {
   function handleChange(e: React.ChangeEvent<HTMLTextAreaElement>) {
@@ -322,7 +333,26 @@ function EditorRow({
             <p className="mt-0.5 text-xs text-destructive">BT: {backtranslationError}</p>
           )}
         </div>
-        {validationIcon}
+        <div className="flex flex-col items-center">
+          {validationIcon}
+          {onOpenComments && (
+            <button
+              className={cn(
+                "mt-1 flex h-5 w-5 items-center justify-center rounded relative",
+                openCommentCount > 0 ? "text-primary" : "text-muted-foreground/50 hover:text-muted-foreground"
+              )}
+              onClick={() => onOpenComments(cell.id)}
+              title={openCommentCount > 0 ? `${openCommentCount} open comment${openCommentCount !== 1 ? "s" : ""}` : "Add comment"}
+            >
+              <MessageCircle className="h-3 w-3" />
+              {openCommentCount > 0 && (
+                <span className="absolute -top-1 -right-1 flex h-3 w-3 items-center justify-center rounded-full bg-primary text-[8px] font-bold text-primary-foreground">
+                  {openCommentCount}
+                </span>
+              )}
+            </button>
+          )}
+        </div>
       </div>
     </div>
   )

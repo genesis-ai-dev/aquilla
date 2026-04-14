@@ -8,6 +8,9 @@ export interface HealthStats {
   projectHealth: number               // overall average 0-100
   fileProgress: Map<string, { translated: number; validated: number; total: number }>
   infractions: Map<string, RuleInfraction[]>
+  openCommentCount: Map<string, number>
+  projectOpenCommentCount: number
+  cellOpenCommentCount: Map<string, number>
 }
 
 export const DEFAULT_LLM_HEALTH_MULTIPLIER = 0.9
@@ -93,5 +96,23 @@ export function computeHealthMap(
 
   const projectHealth = projectCount > 0 ? Math.round(projectSum / projectCount) : 0
 
-  return { healthMap, fileHealth, projectHealth, fileProgress, infractions }
+  const openCommentCount = new Map<string, number>()
+  const cellOpenCommentCount = new Map<string, number>()
+  let projectOpenCommentCount = 0
+
+  for (const [fileId, cellsList] of fileCells) {
+    let fileCount = 0
+    for (const cell of cellsList) {
+      const cellThreads = cell.threads || []
+      const openCount = cellThreads.filter((t) => t.status === "open").length
+      if (openCount > 0) {
+        cellOpenCommentCount.set(cell.id, openCount)
+        fileCount += openCount
+      }
+    }
+    openCommentCount.set(fileId, fileCount)
+    projectOpenCommentCount += fileCount
+  }
+
+  return { healthMap, fileHealth, projectHealth, fileProgress, infractions, openCommentCount, projectOpenCommentCount, cellOpenCommentCount }
 }

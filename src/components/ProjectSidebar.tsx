@@ -2,6 +2,7 @@ import type { FileReference } from "@/lib/parsers/types"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { cn } from "@/lib/utils"
 import { HealthRing } from "./HealthRing"
+import { MessageCircle } from "lucide-react"
 
 interface FileStats {
   translated: number
@@ -16,11 +17,12 @@ interface ProjectSidebarProps {
   fileHealth: Map<string, number>
   fileProgress: Map<string, FileStats>
   projectHealth: number
+  openCommentCount?: Map<string, number>
 }
 
 export function ProjectSidebar({
   files, activeFileId, onSelectFile,
-  fileHealth, fileProgress, projectHealth,
+  fileHealth, fileProgress, projectHealth, openCommentCount,
 }: ProjectSidebarProps) {
   return (
     <ScrollArea className="h-full w-56 border-r">
@@ -78,6 +80,12 @@ export function ProjectSidebar({
                     <div className="mt-0.5 text-[10px] text-muted-foreground">
                       {progress ? `${progress.translated}/${progress.total}` : `${file.cellCount} cells`}
                     </div>
+                    {openCommentCount && (openCommentCount.get(file.id) || 0) > 0 && (
+                      <div className="mt-0.5 flex items-center gap-1 text-[10px] text-blue-500">
+                        <MessageCircle className="h-2.5 w-2.5" />
+                        {openCommentCount.get(file.id)} open
+                      </div>
+                    )}
                   </button>
                 </li>
               )

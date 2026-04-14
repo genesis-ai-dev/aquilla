@@ -1,13 +1,12 @@
 import { WebrtcProvider } from "y-webrtc"
 import * as Y from "yjs"
 
-// Default public signaling servers provided by the Yjs team.
-// For production, swap to Cloudflare Durable Object URL.
+// Our own Cloudflare Durable Object signaling server.
+// The previous y-webrtc public servers (Heroku-hosted and y-webrtc-eu.fly.dev)
+// are no longer operational. This server is in `signaling/` and deployed via
+// `wrangler deploy` from that directory.
 const DEFAULT_SIGNALING = [
-  "wss://y-webrtc-eu.fly.dev",
-  "wss://signaling.yjs.dev",
-  "wss://y-webrtc-signaling-eu.herokuapp.com",
-  "wss://y-webrtc-signaling-us.herokuapp.com",
+  "wss://codex-signaling.ryderwishart.workers.dev",
 ]
 
 export interface SyncProviderHandle {

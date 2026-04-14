@@ -42,6 +42,7 @@ export function ProjectWorkspace() {
   const [searchOpen, setSearchOpen] = useState(false)
   const [shareOpen, setShareOpen] = useState(false)
   const [activeShareToken, setActiveShareToken] = useState<string | null>(null)
+  const [shareRefreshKey, setShareRefreshKey] = useState(0)
   const editorRef = useRef<EditorTableHandle>(null)
   const { doc } = useFileDoc(activeFileId)
   const cells = useCells(doc)
@@ -118,7 +119,7 @@ export function ProjectWorkspace() {
     listShares(project.id).then((shares) => {
       setActiveShareToken(shares[0]?.token || null)
     })
-  }, [project?.id])
+  }, [project?.id, shareRefreshKey])
 
   useEffect(() => {
     if (!project || !activeShareToken) return
@@ -285,6 +286,7 @@ export function ProjectWorkspace() {
         onOpenChange={setShareOpen}
         projectId={projectId!}
         username={project.username || "anonymous"}
+        onSharesChanged={() => setShareRefreshKey((k) => k + 1)}
       />
     </div>
   )

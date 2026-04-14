@@ -16,9 +16,10 @@ interface SharePanelProps {
   onOpenChange: (open: boolean) => void
   projectId: string
   username: string
+  onSharesChanged?: () => void
 }
 
-export function SharePanel({ open, onOpenChange, projectId, username }: SharePanelProps) {
+export function SharePanel({ open, onOpenChange, projectId, username, onSharesChanged }: SharePanelProps) {
   const [shares, setShares] = useState<ShareInvite[]>([])
   const [newShareForm, setNewShareForm] = useState(false)
   const [requirePin, setRequirePin] = useState(false)
@@ -30,7 +31,8 @@ export function SharePanel({ open, onOpenChange, projectId, username }: SharePan
   const refresh = useCallback(async () => {
     const list = await listShares(projectId)
     setShares(list)
-  }, [projectId])
+    onSharesChanged?.()
+  }, [projectId, onSharesChanged])
 
   useEffect(() => {
     if (open) refresh()

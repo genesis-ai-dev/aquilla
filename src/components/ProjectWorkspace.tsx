@@ -8,6 +8,7 @@ import { useCompletion } from "@/hooks/useCompletion"
 import { useHealth } from "@/hooks/useHealth"
 import { useRules } from "@/hooks/useRules"
 import { updateProject } from "@/lib/store/project-index"
+import { exportFile, downloadBlob } from "@/lib/export/export-service"
 import type { FileReference } from "@/lib/parsers/types"
 import type { CellData } from "@/hooks/useCells"
 import { Toolbar } from "./Toolbar"
@@ -65,6 +66,16 @@ export function ProjectWorkspace() {
     if (refs.length > 0) setActiveFileId(refs[0].id)
   }
 
+  async function handleExport() {
+    if (!activeFileId) return
+    try {
+      const { blob, filename } = await exportFile(activeFileId)
+      downloadBlob(blob, filename)
+    } catch (err) {
+      alert(`Export failed: ${err instanceof Error ? err.message : "Unknown error"}`)
+    }
+  }
+
   return (
     <div className="flex h-screen flex-col">
       <Toolbar
@@ -73,6 +84,8 @@ export function ProjectWorkspace() {
         onImport={() => setImportOpen(true)}
         onSettings={() => navigate(`/project/${projectId}/settings`)}
         onRules={() => navigate(`/project/${projectId}/rules`)}
+        onExport={handleExport}
+        exportEnabled={Boolean(activeFileId)}
       />
       <div className="flex flex-1 overflow-hidden">
         <ProjectSidebar

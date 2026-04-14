@@ -1,4 +1,4 @@
-import { Settings, Scale } from "lucide-react"
+import { Settings, Scale, Download } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import type { ProjectRecord } from "@/lib/parsers/types"
 
@@ -8,9 +8,11 @@ interface ToolbarProps {
   onImport: () => void
   onSettings: () => void
   onRules: () => void
+  onExport: () => void
+  exportEnabled: boolean
 }
 
-export function Toolbar({ project, onBack, onImport, onSettings, onRules }: ToolbarProps) {
+export function Toolbar({ project, onBack, onImport, onSettings, onRules, onExport, exportEnabled }: ToolbarProps) {
   return (
     <header className="flex items-center gap-4 border-b px-4 py-2">
       <Button variant="ghost" size="sm" onClick={onBack}>
@@ -23,6 +25,15 @@ export function Toolbar({ project, onBack, onImport, onSettings, onRules }: Tool
       <div className="flex-1" />
       <Button size="sm" onClick={onImport}>
         + Import
+      </Button>
+      <Button
+        variant="ghost"
+        size="sm"
+        onClick={onExport}
+        disabled={!exportEnabled}
+        title={exportEnabled ? "Export translated file" : "Select a file to export"}
+      >
+        <Download className="h-4 w-4" />
       </Button>
       <Button variant="ghost" size="sm" onClick={onRules} title="Translation rules">
         <Scale className="h-4 w-4" />

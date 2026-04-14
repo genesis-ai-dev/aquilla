@@ -100,6 +100,49 @@ describe("rebuildMarkdown", () => {
     ]
     expect(rebuildMarkdown(cells)).toBe("# H1\n\nPara\n\n### H3")
   })
+
+  it("preserves bold/italic/code from translatedHtml as markdown", () => {
+    const cells: ExportCell[] = [
+      makeCell({
+        id: "c1",
+        translated: "This is bold and italic and code",
+        translatedHtml: "<p>This is <b>bold</b> and <i>italic</i> and <code>code</code></p>",
+        context: "Paragraph", group: "g1", type: "text",
+      }),
+    ]
+    expect(rebuildMarkdown(cells)).toBe("This is **bold** and *italic* and `code`")
+  })
+
+  it("preserves strikethrough from translatedHtml", () => {
+    const cells: ExportCell[] = [
+      makeCell({
+        id: "c1",
+        translated: "try struck",
+        translatedHtml: "<p>try <s>struck</s></p>",
+        context: "Paragraph", group: "g1", type: "text",
+      }),
+    ]
+    expect(rebuildMarkdown(cells)).toBe("try ~~struck~~")
+  })
+
+  it("preserves underline as HTML tag (no markdown equivalent)", () => {
+    const cells: ExportCell[] = [
+      makeCell({
+        id: "c1",
+        translated: "here under",
+        translatedHtml: "<p>here <u>under</u></p>",
+        context: "Paragraph", group: "g1", type: "text",
+      }),
+    ]
+    expect(rebuildMarkdown(cells)).toBe("here <u>under</u>")
+  })
+
+  it("falls back to plain translated text when no translatedHtml", () => {
+    const cells: ExportCell[] = [
+      makeCell({ id: "c1", translated: "plain text", context: "Paragraph", group: "g1", type: "text" }),
+    ]
+    expect(rebuildMarkdown(cells)).toBe("plain text")
+  })
 })
 
 describe("rebuildVtt", () => {

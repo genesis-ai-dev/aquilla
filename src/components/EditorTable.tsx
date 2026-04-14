@@ -7,7 +7,7 @@ import type { CellData } from "@/hooks/useCells"
 import type { ScoredPair } from "@/lib/search/search-index"
 import type { TranslationRule, RuleInfraction } from "@/lib/parsers/types"
 import { appendCellHistory, recordHistoryEntry, validateCell } from "@/hooks/useCellHistory"
-import { getPlainText } from "@/lib/richtext/translated-xml"
+import { getPlainText, getFragmentHtml } from "@/lib/richtext/translated-xml"
 import { SparkleButton } from "./SparkleButton"
 import { ExamplePanel } from "./ExamplePanel"
 import { HighlightedText, buildHighlightsFromExamples } from "./HighlightedText"
@@ -226,6 +226,13 @@ function EditorRow({
     validateCell(doc, cell.id, username)
   }
 
+  // Detect formatting loss: source has inline style marks that the target doesn't.
+  const sourceHasFormatting = Boolean(cell.originalHtml && /<(b|strong|i|em|u|s|strike|del|code)\b/i.test(cell.originalHtml))
+  const targetHtml = cell.translatedXml ? getFragmentHtml(cell.translatedXml) : ""
+  const targetHasFormatting = /<(b|strong|i|em|u|s|strike|del|code)\b/i.test(targetHtml)
+  const showFormattingLossWarning =
+    sourceHasFormatting && !targetHasFormatting && cell.translated.trim().length > 0
+
   const healthValue = health ?? (cell.status === "validated" ? 100 : 0)
 
   // Build tooltip detail
@@ -313,7 +320,18 @@ function EditorRow({
 
       {/* Source column */}
       <div>
-        <span className="mb-1 block text-xs text-muted-foreground">{cell.context}</span>
+        <div className="mb-1 flex items-center gap-1 text-xs text-muted-foreground">
+          <span>{cell.context}</span>
+          {showFormattingLossWarning && (
+            <span
+              title="Source has inline formatting (bold, italic, etc.) that the target doesn't preserve. Formatting will be lost on export."
+              className="inline-flex items-center gap-0.5 rounded bg-amber-100 px-1 py-0.5 text-[9px] font-medium text-amber-700 dark:bg-amber-950 dark:text-amber-400"
+            >
+              <AlertTriangle className="h-2.5 w-2.5" />
+              formatting
+            </span>
+          )}
+        </div>
         {cell.originalHtml ? (
           <div
             className="text-sm"

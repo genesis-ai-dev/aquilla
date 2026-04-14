@@ -85,7 +85,53 @@ describe("surgicalExport DOCX", () => {
     ]
     const resultBuffer = await surgicalExport(buffer, cells, "docx")
     const xml = await readDocxXml(resultBuffer)
-    expect(xml).toContain("Long paragraphe avec deux parties")
+    // After rich-text export, segment cells emit as separate runs joined by a
+    // space run. Extract text content from <w:t> nodes to verify the reassembled
+    // sentence.
+    const texts = Array.from(xml.matchAll(/<w:t[^>]*>([^<]*)<\/w:t>/g)).map((m) => m[1])
+    expect(texts.join("")).toContain("Long paragraphe avec deux parties")
+  })
+
+  it("preserves inline bold/italic/underline from translatedHtml", async () => {
+    const buffer = await makeDocx(`<w:p><w:r><w:t>Hello world</w:t></w:r></w:p>`)
+    const cells: ExportCell[] = [
+      cell({
+        id: "c1",
+        original: "Hello world",
+        translated: "Hello world",
+        translatedHtml: "<p><b>Hello</b> <i>world</i></p>",
+        group: "g1",
+        sourceLocation: { file: "word/document.xml", blockPath: "w:p[1]" },
+      }),
+    ]
+    const resultBuffer = await surgicalExport(buffer, cells, "docx")
+    const xml = await readDocxXml(resultBuffer)
+    // Bold run wraps "Hello" with <w:b/>; italic run wraps "world" with <w:i/>
+    expect(xml).toMatch(/<w:r[^>]*><w:rPr[^>]*><w:b[\s/>]/)
+    expect(xml).toMatch(/<w:r[^>]*><w:rPr[^>]*><w:i[\s/>]/)
+    const texts = Array.from(xml.matchAll(/<w:t[^>]*>([^<]*)<\/w:t>/g)).map((m) => m[1])
+    expect(texts.join("")).toContain("Hello")
+    expect(texts.join("")).toContain("world")
+  })
+
+  it("preserves inline bold in PPTX as a:rPr attribute", async () => {
+    const buffer = await makePptx({
+      "slide1.xml": `<p:sp><p:txBody><a:p><a:r><a:t>Hi</a:t></a:r></a:p></p:txBody></p:sp>`,
+    })
+    const cells: ExportCell[] = [
+      cell({
+        id: "c1",
+        original: "Hi",
+        translated: "Hi",
+        translatedHtml: "<p><b>Bonjour</b></p>",
+        group: "g1",
+        sourceLocation: { file: "ppt/slides/slide1.xml", blockPath: "p:sp[1]/p:txBody/a:p[1]" },
+      }),
+    ]
+    const resultBuffer = await surgicalExport(buffer, cells, "pptx")
+    const xml = await readPptxXml(resultBuffer, "slide1.xml")
+    expect(xml).toMatch(/<a:rPr[^>]*b="1"/)
+    expect(xml).toContain("Bonjour")
   })
 
   it("preserves paragraph style (pPr)", async () => {

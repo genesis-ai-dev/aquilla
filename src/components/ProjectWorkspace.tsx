@@ -1,4 +1,5 @@
 import { useState, useMemo, useRef, useEffect, useCallback } from "react"
+import * as Y from "yjs"
 import { useParams, useNavigate } from "react-router-dom"
 import { useProject } from "@/hooks/useProject"
 import { useFileDoc } from "@/hooks/useFileDoc"
@@ -141,13 +142,36 @@ export function ProjectWorkspace() {
   }, [project, activeShareToken])
 
   const syncRoom = activeShareToken && activeFileId ? `codex:share:${activeShareToken}:file:${activeFileId}` : null
-  const { peers, provider: syncProvider } = useSync({
+  const { peers: fileLevelPeers, provider: syncProvider } = useSync({
     doc,
     roomName: syncRoom,
     username: project?.username || "anonymous",
     currentFileId: activeFileId || undefined,
     enabled: Boolean(syncRoom),
   })
+
+  // Project-wide presence room: everyone in the project joins regardless of
+  // which file they're viewing, so the toolbar can show peers who are online
+  // even when they're on different files.
+  const presenceDoc = useMemo(() => (activeShareToken ? new Y.Doc() : null), [activeShareToken])
+  const presenceRoom = activeShareToken ? `codex:share:${activeShareToken}:presence` : null
+  const { peers: presencePeers } = useSync({
+    doc: presenceDoc,
+    roomName: presenceRoom,
+    username: project?.username || "anonymous",
+    currentFileId: activeFileId || undefined,
+    enabled: Boolean(presenceRoom),
+  })
+
+  // Merge file-level peers (who are in the same file as us) with project-wide
+  // presence peers, deduping by peerId. File-level entries take precedence for
+  // richer awareness like cursor state.
+  const peers = useMemo(() => {
+    const byId = new Map<string, (typeof presencePeers)[number]>()
+    for (const p of presencePeers) byId.set(p.peerId, p)
+    for (const p of fileLevelPeers) byId.set(p.peerId, p)
+    return Array.from(byId.values())
+  }, [fileLevelPeers, presencePeers])
 
   const collabUser = useMemo(() => {
     if (!syncProvider) return undefined

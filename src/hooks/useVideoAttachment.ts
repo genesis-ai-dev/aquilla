@@ -25,6 +25,7 @@ export function useVideoAttachment(doc: Y.Doc | null) {
         videoUrl: (meta.get("videoUrl") as string | undefined) || undefined,
         videoLocalFileId: (meta.get("videoLocalFileId") as string | undefined) || undefined,
         videoFileName: (meta.get("videoFileName") as string | undefined) || undefined,
+        videoStartOffset: (meta.get("videoStartOffset") as number | undefined) ?? undefined,
       })
     }
     readAttachment()
@@ -73,6 +74,7 @@ export function useVideoAttachment(doc: Y.Doc | null) {
         meta.delete("videoUrl")
         meta.delete("videoLocalFileId")
         meta.delete("videoFileName")
+        meta.delete("videoStartOffset")
         return
       }
       if (next.videoUrl !== undefined) meta.set("videoUrl", next.videoUrl)
@@ -81,6 +83,11 @@ export function useVideoAttachment(doc: Y.Doc | null) {
       else meta.delete("videoLocalFileId")
       if (next.videoFileName !== undefined) meta.set("videoFileName", next.videoFileName)
       else meta.delete("videoFileName")
+      if (next.videoStartOffset !== undefined && next.videoStartOffset !== 0) {
+        meta.set("videoStartOffset", next.videoStartOffset)
+      } else {
+        meta.delete("videoStartOffset")
+      }
     })
   }, [doc])
 

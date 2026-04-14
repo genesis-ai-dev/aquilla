@@ -31,7 +31,7 @@ import { VideoPlayer, type VideoPlayerHandle } from "./VideoPlayer"
 import { ResizableVideoPanel } from "./ResizableVideoPanel"
 import { VideoAttachmentDialog } from "./VideoAttachmentDialog"
 import { useVideoAttachment } from "@/hooks/useVideoAttachment"
-import { generateVttFromCells, createVttBlobUrl, parseTimestampRange } from "@/lib/video/vtt-generator"
+import { parseTimestampRange, extractCuesFromCells } from "@/lib/video/vtt-generator"
 import { useSync } from "@/hooks/useSync"
 import { peerColor as peerColorLocal } from "@/lib/sync/webrtc-provider"
 import { startBootstrapHost } from "@/lib/sync/bootstrap"
@@ -63,29 +63,29 @@ export function ProjectWorkspace() {
   const { attachment: videoAttachment, resolvedSrc: videoSrc, blobUnavailable, save: saveVideo } =
     useVideoAttachment(isSubtitleFile ? doc : null)
 
-  const subtitleUrl = useMemo(() => {
-    if (!isSubtitleFile || !videoSrc || cells.length === 0) return undefined
-    const vtt = generateVttFromCells(cells)
-    return createVttBlobUrl(vtt)
+  // Live cues for the VideoPlayer's overlay (bypasses iframe CC). We drive
+  // rendering from cell data directly so edits appear immediately without a
+  // VTT blob round-trip.
+  const videoCues = useMemo(() => {
+    if (!isSubtitleFile || !videoSrc || cells.length === 0) return []
+    return extractCuesFromCells(cells)
   }, [cells, isSubtitleFile, videoSrc])
 
-  useEffect(() => {
-    return () => {
-      if (subtitleUrl) URL.revokeObjectURL(subtitleUrl)
-    }
-  }, [subtitleUrl])
+  const videoStartOffset = videoAttachment.videoStartOffset ?? 0
 
+  // Active cue is in cue-space (not raw video time). Adjust by offset.
+  const cueTime = currentVideoTime - videoStartOffset
   const activeCueIndex = useMemo(() => {
     if (!isSubtitleFile) return -1
     for (let i = 0; i < cells.length; i++) {
       const range = parseTimestampRange(cells[i].context)
       if (!range) continue
-      if (currentVideoTime >= range.start && currentVideoTime <= range.end) {
+      if (cueTime >= range.start && cueTime <= range.end) {
         return i
       }
     }
     return -1
-  }, [cells, currentVideoTime, isSubtitleFile])
+  }, [cells, cueTime, isSubtitleFile])
 
   useEffect(() => {
     if (activeCueIndex < 0) return
@@ -100,7 +100,8 @@ export function ProjectWorkspace() {
     if (!cell) return
     const range = parseTimestampRange(cell.context)
     if (!range) return
-    videoPlayerRef.current?.seekTo(range.start)
+    // Seek in raw video time = cue-space start + offset
+    videoPlayerRef.current?.seekTo(range.start + videoStartOffset)
     videoPlayerRef.current?.play().catch(() => { /* autoplay blocked */ })
   }, [cells])
 
@@ -292,7 +293,8 @@ export function ProjectWorkspace() {
             <VideoPlayer
               ref={videoPlayerRef}
               src={videoSrc}
-              subtitleUrl={subtitleUrl}
+              cues={videoCues}
+              startOffset={videoStartOffset}
               height={height}
               onTimeUpdate={setCurrentVideoTime}
             />

@@ -24,6 +24,9 @@ export function VideoAttachmentDialog({ open, onOpenChange, current, onSave }: V
   const [tab, setTab] = useState<Tab>(current.videoUrl ? "url" : "upload")
   const [urlInput, setUrlInput] = useState(current.videoUrl || "")
   const [fileNameInput, setFileNameInput] = useState(current.videoFileName || "")
+  const [offsetInput, setOffsetInput] = useState<string>(
+    current.videoStartOffset !== undefined ? String(current.videoStartOffset) : ""
+  )
   const [uploading, setUploading] = useState(false)
   const [dragOver, setDragOver] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -34,9 +37,18 @@ export function VideoAttachmentDialog({ open, onOpenChange, current, onSave }: V
       setTab(current.videoUrl ? "url" : "upload")
       setUrlInput(current.videoUrl || "")
       setFileNameInput(current.videoFileName || "")
+      setOffsetInput(current.videoStartOffset !== undefined ? String(current.videoStartOffset) : "")
       setError(null)
     }
   }, [open, current])
+
+  function parseOffset(): number | undefined {
+    const trimmed = offsetInput.trim()
+    if (!trimmed) return undefined
+    const n = Number(trimmed)
+    if (!isFinite(n)) return undefined
+    return n
+  }
 
   async function handleRemove() {
     if (current.videoLocalFileId) {
@@ -56,7 +68,11 @@ export function VideoAttachmentDialog({ open, onOpenChange, current, onSave }: V
     if (current.videoLocalFileId) {
       try { await deleteVideoBlob(current.videoLocalFileId) } catch { /* ignore */ }
     }
-    onSave({ videoUrl: trimmed, videoFileName: fileNameInput.trim() || undefined })
+    onSave({
+      videoUrl: trimmed,
+      videoFileName: fileNameInput.trim() || undefined,
+      videoStartOffset: parseOffset(),
+    })
     onOpenChange(false)
   }
 
@@ -70,7 +86,11 @@ export function VideoAttachmentDialog({ open, onOpenChange, current, onSave }: V
       }
       const id = uuid()
       await storeVideoBlob(id, file)
-      onSave({ videoLocalFileId: id, videoFileName: file.name })
+      onSave({
+        videoLocalFileId: id,
+        videoFileName: file.name,
+        videoStartOffset: parseOffset(),
+      })
       onOpenChange(false)
     } catch (err) {
       setError(err instanceof Error ? err.message : "Upload failed")
@@ -107,14 +127,50 @@ export function VideoAttachmentDialog({ open, onOpenChange, current, onSave }: V
         </DialogHeader>
 
         {currentLabel && (
-          <div className="flex items-center gap-2 rounded border bg-muted/30 p-2">
-            <div className="flex-1 min-w-0">
-              <p className="text-xs text-muted-foreground">Currently attached</p>
-              <p className="text-sm truncate">{currentLabel}</p>
+          <div className="space-y-2 rounded border bg-muted/30 p-2">
+            <div className="flex items-center gap-2">
+              <div className="flex-1 min-w-0">
+                <p className="text-xs text-muted-foreground">Currently attached</p>
+                <p className="text-sm truncate">{currentLabel}</p>
+              </div>
+              <Button variant="ghost" size="sm" onClick={handleRemove} title="Remove attachment">
+                <Trash2 className="h-3.5 w-3.5 text-destructive" />
+              </Button>
             </div>
-            <Button variant="ghost" size="sm" onClick={handleRemove} title="Remove attachment">
-              <Trash2 className="h-3.5 w-3.5 text-destructive" />
-            </Button>
+            <div className="flex items-center gap-2">
+              <Label htmlFor="vstart" className="text-xs whitespace-nowrap">
+                Start offset (s)
+              </Label>
+              <Input
+                id="vstart"
+                type="number"
+                step="0.1"
+                value={offsetInput}
+                onChange={(e) => setOffsetInput(e.target.value)}
+                placeholder="0"
+                className="h-7 w-24 text-xs"
+              />
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => {
+                  onSave({
+                    videoUrl: current.videoUrl,
+                    videoLocalFileId: current.videoLocalFileId,
+                    videoFileName: current.videoFileName,
+                    videoStartOffset: parseOffset(),
+                  })
+                  onOpenChange(false)
+                }}
+                className="h-7 text-xs"
+              >
+                Save offset
+              </Button>
+            </div>
+            <p className="text-[11px] text-muted-foreground">
+              Seconds to wait before cues align. If your video has an intro, set this
+              to the duration of the intro so subtitles line up correctly.
+            </p>
           </div>
         )}
 

@@ -54,3 +54,29 @@ export function createVttBlobUrl(vtt: string): string {
   const blob = new Blob([vtt], { type: "text/vtt" })
   return URL.createObjectURL(blob)
 }
+
+export interface CueForOverlay {
+  start: number
+  end: number
+  text: string
+}
+
+// Extract a plain list of cues from cells, suitable for driving a custom
+// subtitle overlay (bypassing iframe-based players that ignore <track> children).
+// Cells without a timestamp context are skipped; translated text preferred over
+// original; HTML stripped.
+export function extractCuesFromCells(cells: CellData[]): CueForOverlay[] {
+  const cues: CueForOverlay[] = []
+  for (const cell of cells) {
+    const range = parseTimestampRange(cell.context)
+    if (!range) continue
+    const raw = (cell.translated || cell.original || "").trim()
+    if (!raw) continue
+    cues.push({
+      start: range.start,
+      end: range.end,
+      text: stripHtml(raw),
+    })
+  }
+  return cues
+}

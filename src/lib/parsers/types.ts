@@ -150,6 +150,10 @@ export interface VideoAttachment {
   videoUrl?: string
   videoLocalFileId?: string
   videoFileName?: string
+  // Seconds to shift cue-space relative to raw video time. Example: if the
+  // video has 5s of intro before subtitles should start, set to 5 — a cue at
+  // "00:00:01" will display at video time 6s.
+  videoStartOffset?: number
 }
 
 export function detectFileType(fileName: string): FileType | null {

@@ -2,7 +2,7 @@ import { useRef, useCallback, useMemo, forwardRef, useImperativeHandle } from "r
 import { useVirtualizer } from "@tanstack/react-virtual"
 import * as Y from "yjs"
 import DOMPurify from "dompurify"
-import { Check, AlertTriangle, AlertCircle, Languages, RefreshCw, MessageCircle } from "lucide-react"
+import { Check, AlertTriangle, AlertCircle, Languages, RefreshCw, MessageCircle, History } from "lucide-react"
 import type { CellData } from "@/hooks/useCells"
 import type { ScoredPair } from "@/lib/search/search-index"
 import type { TranslationRule, RuleInfraction } from "@/lib/parsers/types"
@@ -38,6 +38,7 @@ interface EditorTableProps {
   backtranslationErrors?: Map<string, string>
   cellOpenCommentCount?: Map<string, number>
   onOpenComments?: (cellId: string) => void
+  onOpenHistory?: (cellId: string) => void
 }
 
 export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(function EditorTable({
@@ -46,7 +47,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   onCompleteSingle, onCompleteBatch, healthMap,
   infractions = new Map(), rules = [], onInfractionClick,
   isBacktranslationConfigured, onBacktranslate, backtranslating, backtranslationErrors,
-  cellOpenCommentCount, onOpenComments,
+  cellOpenCommentCount, onOpenComments, onOpenHistory,
 }, ref) {
   const parentRef = useRef<HTMLDivElement>(null)
   const isDragging = useRef(false)
@@ -130,6 +131,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
                 onBacktranslate={onBacktranslate}
                 openCommentCount={openCommentCount}
                 onOpenComments={onOpenComments}
+                onOpenHistory={onOpenHistory}
                 onDragStart={() => {
                   isDragging.current = true
                   dragCells.current = new Set([cell.id])
@@ -166,6 +168,7 @@ interface EditorRowProps {
   onBacktranslate?: (cell: CellData) => void
   openCommentCount: number
   onOpenComments?: (cellId: string) => void
+  onOpenHistory?: (cellId: string) => void
   onDragStart: () => void
   onDragEnter: () => void
 }
@@ -176,7 +179,7 @@ function EditorRow({
   cellInfractions, ruleMap,
   onCompleteSingle, onInfractionClick,
   isBacktranslationConfigured, isBacktranslating, backtranslationError, onBacktranslate,
-  openCommentCount, onOpenComments,
+  openCommentCount, onOpenComments, onOpenHistory,
   onDragStart, onDragEnter,
 }: EditorRowProps) {
   function handleChange(e: React.ChangeEvent<HTMLTextAreaElement>) {
@@ -358,6 +361,15 @@ function EditorRow({
                   {openCommentCount}
                 </span>
               )}
+            </button>
+          )}
+          {onOpenHistory && cell.history.length > 0 && (
+            <button
+              className="mt-1 flex h-5 w-5 items-center justify-center rounded text-muted-foreground/60 hover:text-primary"
+              onClick={() => onOpenHistory(cell.id)}
+              title={`Edit history (${cell.history.length} revision${cell.history.length !== 1 ? "s" : ""})`}
+            >
+              <History className="h-3 w-3" />
             </button>
           )}
         </div>

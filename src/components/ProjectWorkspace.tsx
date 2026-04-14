@@ -24,6 +24,7 @@ import { ImportDialog } from "./ImportDialog"
 import { EditorTable } from "./EditorTable"
 import { RuleDrawer } from "./RuleDrawer"
 import { CommentsDrawer } from "./CommentsDrawer"
+import { HistoryDrawer } from "./HistoryDrawer"
 import { SharePanel } from "./SharePanel"
 import { useSync } from "@/hooks/useSync"
 import { startBootstrapHost } from "@/lib/sync/bootstrap"
@@ -37,6 +38,7 @@ export function ProjectWorkspace() {
   const [importOpen, setImportOpen] = useState(false)
   const [drawerRuleId, setDrawerRuleId] = useState<string | null>(null)
   const [commentsCellId, setCommentsCellId] = useState<string | null>(null)
+  const [historyCellId, setHistoryCellId] = useState<string | null>(null)
   const [searchOpen, setSearchOpen] = useState(false)
   const [shareOpen, setShareOpen] = useState(false)
   const [activeShareToken, setActiveShareToken] = useState<string | null>(null)
@@ -73,6 +75,7 @@ export function ProjectWorkspace() {
   const { rules, penalties } = useRules(project ?? null, refresh)
   const { addThread, addMessage, resolveThread, reopenThread } = useComments(doc, project?.username || "anonymous")
   const commentsCell = commentsCellId ? cells.find((c) => c.id === commentsCellId) : null
+  const historyCell = historyCellId ? cells.find((c) => c.id === historyCellId) : null
 
   // Build fileCells map for health computation
   // For now, only the active file's cells are loaded
@@ -213,6 +216,7 @@ export function ProjectWorkspace() {
                 rules={rules}
                 onInfractionClick={(ruleId) => {
                   setCommentsCellId(null)
+                  setHistoryCellId(null)
                   setDrawerRuleId(ruleId)
                 }}
                 isBacktranslationConfigured={isBacktranslationConfigured}
@@ -222,7 +226,13 @@ export function ProjectWorkspace() {
                 cellOpenCommentCount={cellOpenCommentCount}
                 onOpenComments={(cellId) => {
                   setDrawerRuleId(null)
+                  setHistoryCellId(null)
                   setCommentsCellId(cellId)
+                }}
+                onOpenHistory={(cellId) => {
+                  setDrawerRuleId(null)
+                  setCommentsCellId(null)
+                  setHistoryCellId(cellId)
                 }}
               />
             ) : <p className="p-4 text-muted-foreground">Loading file...</p>) : (
@@ -248,6 +258,12 @@ export function ProjectWorkspace() {
               onReply={(threadId, text) => addMessage(commentsCell.id, threadId, text)}
               onResolve={(threadId, msg) => resolveThread(commentsCell.id, threadId, msg)}
               onReopen={(threadId) => reopenThread(commentsCell.id, threadId)}
+            />
+          )}
+          {historyCell && (
+            <HistoryDrawer
+              cell={historyCell}
+              onClose={() => setHistoryCellId(null)}
             />
           )}
         </main>

@@ -10,7 +10,7 @@ import type { FrontierSession, FrontierGroup, GitlabProject } from "@/lib/fronti
 import type { ProjectRecord } from "@/lib/parsers/types"
 import { cn } from "@/lib/utils"
 
-const PER_PAGE = 50
+const PER_PAGE = 20
 
 interface Props {
   session: FrontierSession
@@ -113,18 +113,26 @@ function GroupSection({
   group, session, sessionKey, isOpen, onToggle, filter, importedById, onImported,
 }: GroupSectionProps) {
   const q = useInfiniteQuery({
-    queryKey: ["frontier", sessionKey, "groupProjects", group.id],
+    queryKey: ["frontier", sessionKey, "groupProjects", group.id, PER_PAGE],
     queryFn: ({ pageParam }) => listGroupProjectsPage(session, group.id, pageParam, PER_PAGE),
     initialPageParam: 1,
-    getNextPageParam: (lastPage, _all, lastParam) =>
-      lastPage.length < PER_PAGE ? undefined : (lastParam as number) + 1,
+    // Prefer GitLab's X-Next-Page header (most reliable). Fall back to length
+    // heuristic if CORS doesn't expose it.
+    getNextPageParam: (lastPage, _all, lastParam) => {
+      if (lastPage.nextPage) return lastPage.nextPage
+      if (lastPage.totalPages != null) {
+        return (lastParam as number) < lastPage.totalPages ? (lastParam as number) + 1 : undefined
+      }
+      return lastPage.items.length < PER_PAGE ? undefined : (lastParam as number) + 1
+    },
     enabled: isOpen,
   })
 
   const allProjects = useMemo(
-    () => (q.data?.pages ?? []).flat(),
+    () => (q.data?.pages ?? []).flatMap(p => p.items),
     [q.data]
   )
+  const total = q.data?.pages[0]?.total
   const filtered = useMemo(() => {
     const f = filter.trim().toLowerCase()
     if (!f) return allProjects
@@ -149,7 +157,7 @@ function GroupSection({
         {q.error && <AlertCircle className="h-3 w-3 text-destructive" />}
         {totalLoaded > 0 && (
           <span className="text-xs text-muted-foreground">
-            {totalLoaded}{hasMore ? "+" : ""}
+            {total != null ? `${totalLoaded} / ${total}` : `${totalLoaded}${hasMore ? "+" : ""}`}
           </span>
         )}
       </button>

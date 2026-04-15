@@ -38,6 +38,7 @@ import { startBootstrapHost } from "@/lib/sync/bootstrap"
 import { listShares } from "@/lib/sync/share-tokens"
 import { useProjectPermissions } from "@/hooks/useProjectPermissions"
 import { useSyncProject } from "@/hooks/useSyncProject"
+import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { Lock } from "lucide-react"
 
 export function ProjectWorkspace() {
@@ -258,12 +259,30 @@ export function ProjectWorkspace() {
   const isReadOnly = !perms.canEditContent
 
   const { sync: runSync, phase: syncPhase, inFlight: syncInFlight, lastResult: syncLastResult } = useSyncProject()
+  const { session: frontierSession } = useFrontierSession()
 
   const handleProjectUpdated = useCallback(async (updated: typeof project) => {
     if (!updated) return
     await updateProject(updated)
     refresh()
   }, [refresh])
+
+  useEffect(() => {
+    function handler(e: KeyboardEvent) {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "s") {
+        if (!project || !perms.canPush || !frontierSession) return
+        e.preventDefault()
+        if (syncInFlight) return
+        runSync(project, frontierSession).then((r) => {
+          if (r?.status === "synced" && r.commitSha && project.origin?.kind === "git") {
+            handleProjectUpdated({ ...project, origin: { ...project.origin, headSha: r.commitSha } })
+          }
+        })
+      }
+    }
+    document.addEventListener("keydown", handler)
+    return () => document.removeEventListener("keydown", handler)
+  }, [project, perms.canPush, frontierSession, syncInFlight, runSync, handleProjectUpdated])
 
   if (loading || !project) return <div className="p-8 text-muted-foreground">Loading...</div>
 

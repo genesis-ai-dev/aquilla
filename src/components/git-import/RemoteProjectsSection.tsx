@@ -124,13 +124,14 @@ function GroupSection({
   const items = q.data?.items ?? []
   const total = q.data?.total
   const totalPages = q.data?.totalPages
-  // If the server doesn't expose totals, infer "has next" from page length.
+  // If the server doesn't expose pagination headers (CORS often hides them),
+  // assume more pages exist whenever we got at least PER_PAGE items.
   const hasNext = q.data
     ? (q.data.nextPage != null
         ? true
         : totalPages != null
           ? page < totalPages
-          : items.length === PER_PAGE)
+          : items.length >= PER_PAGE)
     : false
   const hasPrev = page > 1
 
@@ -184,29 +185,30 @@ function GroupSection({
                   ))}
                 </ul>
               )}
-              {(hasPrev || hasNext) && (
-                <div className="flex items-center justify-between border-t px-2 py-1.5">
-                  <Button
-                    size="sm" variant="ghost"
-                    disabled={!hasPrev || q.isFetching}
-                    onClick={() => setPage(p => Math.max(1, p - 1))}
-                    className="h-7 text-xs"
-                  >
-                    <ChevronLeft className="h-3.5 w-3.5 mr-1" /> Prev
-                  </Button>
-                  <span className="text-xs text-muted-foreground">
-                    Page {page}{totalPages != null ? ` of ${totalPages}` : ""}
-                  </span>
-                  <Button
-                    size="sm" variant="ghost"
-                    disabled={!hasNext || q.isFetching}
-                    onClick={() => setPage(p => p + 1)}
-                    className="h-7 text-xs"
-                  >
-                    Next <ChevronRight className="h-3.5 w-3.5 ml-1" />
-                  </Button>
-                </div>
-              )}
+              <div className="flex items-center justify-between border-t px-2 py-1.5">
+                <Button
+                  size="sm" variant="ghost"
+                  disabled={!hasPrev || q.isFetching}
+                  onClick={() => setPage(p => Math.max(1, p - 1))}
+                  className="h-7 text-xs"
+                >
+                  <ChevronLeft className="h-3.5 w-3.5 mr-1" /> Prev
+                </Button>
+                <span className="text-xs text-muted-foreground tabular-nums">
+                  Page {page}
+                  {totalPages != null ? ` of ${totalPages}` : ""}
+                  {" · "}
+                  showing {items.length} (per_page={PER_PAGE})
+                </span>
+                <Button
+                  size="sm" variant="ghost"
+                  disabled={!hasNext || q.isFetching}
+                  onClick={() => setPage(p => p + 1)}
+                  className="h-7 text-xs"
+                >
+                  Next <ChevronRight className="h-3.5 w-3.5 ml-1" />
+                </Button>
+              </div>
             </>
           )}
         </div>

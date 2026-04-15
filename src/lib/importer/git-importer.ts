@@ -167,12 +167,28 @@ export async function importFromOpfs(args: ImportArgs): Promise<ImportedProject>
       }
 
       // Layer in history per cell (createFileDoc gave each cell an empty history Y.Array).
+      // Also mark the high-water mark so the serializer treats all imported
+      // history as already-synced and won't re-emit it as new EditHistory.
       for (const [cellId, entries] of historyById) {
         const cell = cellsMap.get(cellId) as Y.Map<unknown> | undefined;
         if (!cell) continue;
         const histArr = cell.get("history") as Y.Array<unknown> | undefined;
         if (!histArr) continue;
         histArr.push(entries as unknown as object[]);
+        const maxTs = entries.reduce(
+          (m, e) => Math.max(m, Date.parse(e.timestamp)),
+          0,
+        );
+        cell.set("__lastSyncedHistoryAt", maxTs);
+      }
+      // Cells with no history still need the marker so future local edits
+      // are detected. Use 0 as the floor.
+      for (const sourceCell of nb.cells) {
+        const cell = cellsMap.get(sourceCell.metadata.id) as Y.Map<unknown> | undefined;
+        if (!cell) continue;
+        if (cell.get("__lastSyncedHistoryAt") === undefined) {
+          cell.set("__lastSyncedHistoryAt", 0);
+        }
       }
 
       // Layer in comment threads per cell. Schema: Y.Array<Y.Map<unknown>>.

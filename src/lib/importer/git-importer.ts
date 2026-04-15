@@ -11,6 +11,8 @@ import type {
   CommentThread,
 } from "@/lib/parsers/types";
 import { v4 as uuid } from "uuid";
+import { IndexeddbPersistence } from "y-indexeddb";
+import { createProject } from "@/lib/store/project-index";
 
 export interface ImportedProject {
   project: ProjectRecord;
@@ -136,4 +138,13 @@ export async function importFromOpfs(args: ImportArgs): Promise<ImportedProject>
   };
 
   return { project, docs };
+}
+
+export async function persistImportedProject(imported: ImportedProject): Promise<void> {
+  await createProject(imported.project);
+  for (const [fileId, doc] of Object.entries(imported.docs)) {
+    const persistence = new IndexeddbPersistence(`file-${fileId}`, doc);
+    await persistence.whenSynced;
+    persistence.destroy();
+  }
 }

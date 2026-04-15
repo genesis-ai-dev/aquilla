@@ -14,6 +14,7 @@ import { v4 as uuid } from "uuid";
 import { IndexeddbPersistence } from "y-indexeddb";
 import { createProject } from "@/lib/store/project-index";
 import { createFileDoc } from "@/lib/store/file-doc";
+import { setFragmentFromHtml } from "@/lib/richtext/translated-xml";
 import type { FrontierSession, GitlabProject } from "@/lib/frontier/types";
 import { cloneRepo } from "@/lib/git/clone";
 import { openOpfsRepoDir, createOpfsFs } from "@/lib/git/opfs-fs";
@@ -115,6 +116,18 @@ export async function importFromOpfs(args: ImportArgs): Promise<ImportedProject>
 
     doc.transact(() => {
       const cellsMap = doc.getMap("cells");
+
+      // codex-editor stores cell.value as HTML (e.g. "<p><span>...</span></p>").
+      // createFileDoc seeded translatedXml as plain text — re-parse as HTML so
+      // the editor doesn't render literal <span> tags as text.
+      for (const c of paired) {
+        if (!c.translated) continue;
+        const cell = cellsMap.get(c.id) as Y.Map<unknown> | undefined;
+        if (!cell) continue;
+        const frag = cell.get("translatedXml") as Y.XmlFragment | undefined;
+        if (!frag) continue;
+        setFragmentFromHtml(frag, c.translated);
+      }
 
       // Layer in history per cell (createFileDoc gave each cell an empty history Y.Array).
       for (const [cellId, entries] of historyById) {

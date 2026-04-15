@@ -96,7 +96,12 @@ export async function listMyProjectsPage(
     order_by: "last_activity_at",
     sort: "desc",
   });
-  if (search?.trim()) params.set("search", search.trim());
+  if (search?.trim()) {
+    params.set("search", search.trim());
+    // Include namespace paths in the server-side search (GitLab >= 9.5),
+    // so "writer" matches a project under group/writer/, not just project names.
+    params.set("search_namespaces", "true");
+  }
   const url = `${session.gitlabUrl}/api/v4/projects?${params}`;
   const res = await fetch(url, {
     headers: { "PRIVATE-TOKEN": session.gitlabToken },

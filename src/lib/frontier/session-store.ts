@@ -13,9 +13,22 @@ async function db() {
   });
 }
 
+type Listener = () => void;
+const listeners = new Set<Listener>();
+
+function notify() {
+  for (const l of listeners) l();
+}
+
+export function subscribeSession(listener: Listener): () => void {
+  listeners.add(listener);
+  return () => { listeners.delete(listener); };
+}
+
 export async function saveSession(s: FrontierSession): Promise<void> {
   const d = await db();
   await d.put(STORE, s, KEY);
+  notify();
 }
 
 export async function loadSession(): Promise<FrontierSession | null> {
@@ -27,4 +40,5 @@ export async function loadSession(): Promise<FrontierSession | null> {
 export async function clearSession(): Promise<void> {
   const d = await db();
   await d.delete(STORE, KEY);
+  notify();
 }

@@ -12,10 +12,10 @@ export function mapGitlabAccessLevel(level: number | undefined): ProjectPermissi
   const lvl = level ?? 0;
   return {
     source: "gitlab",
-    canEditContent: false, // Phase 1 always locks content
+    canEditContent: lvl >= 30,
     canEditComments: lvl >= 20,
     canResolveComments: lvl >= 30,
-    canPush: false,        // Phase 1 never pushes
+    canPush: lvl >= 30,
     accessLevel: level,
   };
 }

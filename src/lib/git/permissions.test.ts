@@ -10,19 +10,19 @@ describe("mapGitlabAccessLevel", () => {
     });
   });
 
-  it("reporter (20): comments yes, no resolve, no content", () => {
+  it("reporter (20): comments yes, no edits, no push", () => {
     const p = mapGitlabAccessLevel(20);
-    expect(p.canEditComments).toBe(true);
-    expect(p.canResolveComments).toBe(false);
     expect(p.canEditContent).toBe(false);
+    expect(p.canEditComments).toBe(true);
+    expect(p.canPush).toBe(false);
   });
 
-  it("developer (30)+: still no content edits in Phase 1 (push not wired)", () => {
+  it("developer (30)+: edits AND push enabled", () => {
     const p = mapGitlabAccessLevel(30);
-    expect(p.canEditContent).toBe(false);
+    expect(p.canEditContent).toBe(true);
     expect(p.canEditComments).toBe(true);
     expect(p.canResolveComments).toBe(true);
-    expect(p.canPush).toBe(false);
+    expect(p.canPush).toBe(true);
   });
 
   it("undefined defaults to guest", () => {

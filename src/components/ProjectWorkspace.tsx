@@ -39,6 +39,7 @@ import { listShares } from "@/lib/sync/share-tokens"
 import { useProjectPermissions } from "@/hooks/useProjectPermissions"
 import { useSyncProject } from "@/hooks/useSyncProject"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
+import { useAutoSync } from "@/hooks/useAutoSync"
 import { Lock } from "lucide-react"
 
 export function ProjectWorkspace() {
@@ -260,6 +261,8 @@ export function ProjectWorkspace() {
 
   const { sync: runSync, phase: syncPhase, inFlight: syncInFlight, lastResult: syncLastResult } = useSyncProject()
   const { session: frontierSession } = useFrontierSession()
+
+  useAutoSync(project ?? null, frontierSession)
 
   const handleProjectUpdated = useCallback(async (updated: typeof project) => {
     if (!updated) return

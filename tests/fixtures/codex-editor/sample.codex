@@ -1,0 +1,50 @@
+{
+  "cells": [
+    {
+      "kind": 2,
+      "languageId": "scripture",
+      "value": "<p>Im Anfang schuf Gott Himmel und Erde.</p>",
+      "metadata": {
+        "id": "GEN 1:1",
+        "type": "text",
+        "data": { "book": "GEN", "chapter": "1", "verse": "1" },
+        "edits": [
+          {
+            "author": "alice",
+            "timestamp": 1700000000000,
+            "type": "user-edit",
+            "editMap": ["value"],
+            "value": "<p>Im Anfang schuf Gott Himmel und Erde.</p>",
+            "validatedBy": [
+              { "username": "alice", "creationTimestamp": 1700000000000, "updatedTimestamp": 1700000000000, "isDeleted": false }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "kind": 2,
+      "languageId": "scripture",
+      "value": "<p>Und die Erde war wüst und leer.</p>",
+      "metadata": {
+        "id": "GEN 1:2",
+        "type": "text",
+        "data": { "book": "GEN", "chapter": "1", "verse": "2" },
+        "edits": [
+          {
+            "author": "bot",
+            "timestamp": 1700000100000,
+            "type": "llm-generation",
+            "editMap": ["value"],
+            "value": "<p>Und die Erde war wüst und leer.</p>"
+          }
+        ]
+      }
+    }
+  ],
+  "metadata": {
+    "id": "tgt-gen",
+    "originalName": "Genesis Target",
+    "videoUrl": "https://example.com/gen.mp4"
+  }
+}

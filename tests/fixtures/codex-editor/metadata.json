@@ -1,0 +1,5 @@
+{
+  "projectName": "Sample Genesis",
+  "sourceLanguage": { "tag": "en", "refName": "English" },
+  "targetLanguage": { "tag": "de", "refName": "German" }
+}

@@ -1,0 +1,18 @@
+{
+  "t1": {
+    "id": "t1",
+    "cellId": { "cellId": "GEN 1:1" },
+    "comments": [
+      {
+        "id": "c1",
+        "timestamp": 1700001000000,
+        "body": "Does 'schuf' feel right here?",
+        "mode": 0,
+        "deleted": false,
+        "author": { "name": "alice" }
+      }
+    ],
+    "collapsibleState": 0,
+    "canReply": true
+  }
+}

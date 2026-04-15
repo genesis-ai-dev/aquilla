@@ -1,5 +1,5 @@
 import { useState } from "react"
-import { GitBranch, LogIn, LogOut, User } from "lucide-react"
+import { LogIn, LogOut, User } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle,
@@ -7,11 +7,7 @@ import {
 import { FrontierLoginForm } from "./FrontierLoginForm"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 
-interface Props {
-  onImportClick: () => void
-}
-
-export function HeaderAuth({ onImportClick }: Props) {
+export function HeaderAuth() {
   const { session, loading, logout } = useFrontierSession()
   const [loginOpen, setLoginOpen] = useState(false)
   const [menuOpen, setMenuOpen] = useState(false)
@@ -44,13 +40,7 @@ export function HeaderAuth({ onImportClick }: Props) {
       {menuOpen && (
         <>
           <div className="fixed inset-0 z-10" onClick={() => setMenuOpen(false)} />
-          <div className="absolute right-0 mt-1 w-48 rounded-md border bg-popover p-1 shadow-md z-20">
-            <button
-              className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-sm hover:bg-accent"
-              onClick={() => { setMenuOpen(false); onImportClick() }}
-            >
-              <GitBranch className="h-4 w-4" /> Import from git…
-            </button>
+          <div className="absolute right-0 mt-1 w-40 rounded-md border bg-popover p-1 shadow-md z-20">
             <button
               className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-sm hover:bg-accent"
               onClick={() => { setMenuOpen(false); logout() }}

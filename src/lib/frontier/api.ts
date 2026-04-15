@@ -30,15 +30,21 @@ export async function listGroups(session: FrontierSession): Promise<FrontierGrou
   return unwrapList<FrontierGroup>(payload);
 }
 
-export async function listGroupProjects(
-  session: FrontierSession, groupId: number
+export async function listGroupProjectsPage(
+  session: FrontierSession, groupId: number, page: number, perPage = 50
 ): Promise<GitlabProject[]> {
   const res = await fetch(
-    `${session.gitlabUrl}/api/v4/groups/${groupId}/projects?per_page=100&include_subgroups=true`,
+    `${session.gitlabUrl}/api/v4/groups/${groupId}/projects?per_page=${perPage}&page=${page}&include_subgroups=true&order_by=path&sort=asc`,
     { headers: { "PRIVATE-TOKEN": session.gitlabToken } }
   );
   const payload = await json<unknown>(res);
   return unwrapList<GitlabProject>(payload);
+}
+
+export async function listGroupProjects(
+  session: FrontierSession, groupId: number
+): Promise<GitlabProject[]> {
+  return listGroupProjectsPage(session, groupId, 1, 100);
 }
 
 export async function listAllProjects(session: FrontierSession): Promise<GitlabProject[]> {
@@ -47,4 +53,51 @@ export async function listAllProjects(session: FrontierSession): Promise<GitlabP
   const all = batches.flat();
   const seen = new Set<number>();
   return all.filter(p => (seen.has(p.id) ? false : (seen.add(p.id), true)));
+}
+
+export interface StreamOptions {
+  signal?: AbortSignal;
+  concurrency?: number;     // default 4
+  perPage?: number;         // default 50
+}
+
+// Progressively emit every GitLab project the user can reach, paginating each
+// group and fanning out across groups. `onProject` is called once per unique
+// project id; duplicates across groups/subgroups are filtered internally.
+export async function streamAllProjects(
+  session: FrontierSession,
+  onProject: (project: GitlabProject) => void,
+  opts: StreamOptions = {}
+): Promise<void> {
+  const { signal, concurrency = 4, perPage = 50 } = opts;
+  const groups = await listGroups(session);
+  if (signal?.aborted) return;
+
+  const queue = [...groups];
+  const seen = new Set<number>();
+
+  async function worker() {
+    while (queue.length) {
+      if (signal?.aborted) return;
+      const g = queue.shift()!;
+      let page = 1;
+      while (!signal?.aborted) {
+        let batch: GitlabProject[] = [];
+        try {
+          batch = await listGroupProjectsPage(session, g.id, page, perPage);
+        } catch {
+          break;
+        }
+        for (const p of batch) {
+          if (seen.has(p.id)) continue;
+          seen.add(p.id);
+          onProject(p);
+        }
+        if (batch.length < perPage) break;
+        page++;
+      }
+    }
+  }
+
+  await Promise.all(Array.from({ length: concurrency }, worker));
 }

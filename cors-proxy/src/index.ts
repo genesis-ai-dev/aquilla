@@ -2,7 +2,9 @@
 // URL shape: https://{this-worker}/{targetUrl including protocol}
 // Example:   https://proxy.example/https://git.genesisrnd.com/g/r.git/info/refs?service=git-upload-pack
 
-const ALLOWED_HOSTS = ["git.genesisrnd.com"];
+// Exact host matches AND any subdomain of these suffixes are allowed.
+const ALLOWED_HOSTS: string[] = [];
+const ALLOWED_SUFFIXES = [".frontierrnd.com", ".genesisrnd.com"];
 
 function corsHeaders(extra: Record<string, string> = {}): HeadersInit {
   return {
@@ -17,7 +19,8 @@ function corsHeaders(extra: Record<string, string> = {}): HeadersInit {
 }
 
 function isAllowed(target: URL): boolean {
-  return ALLOWED_HOSTS.includes(target.host);
+  if (ALLOWED_HOSTS.includes(target.host)) return true;
+  return ALLOWED_SUFFIXES.some(s => target.host.endsWith(s));
 }
 
 export default {

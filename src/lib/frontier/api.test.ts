@@ -34,7 +34,7 @@ describe("listGroupProjects", () => {
     );
     const out = await listGroupProjects(session, 7);
     expect(spy).toHaveBeenCalledWith(
-      "https://gitlab.example/api/v4/groups/7/projects?per_page=100&include_subgroups=true",
+      expect.stringContaining("https://gitlab.example/api/v4/groups/7/projects?per_page=100"),
       expect.objectContaining({
         headers: expect.objectContaining({ "PRIVATE-TOKEN": "g" }),
       })

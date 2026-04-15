@@ -23,6 +23,32 @@ import { mapGitlabAccessLevel, bestAccessLevel } from "@/lib/git/permissions";
 const VTT_RE = /^\d{2}:\d{2}:\d{2}\.\d{3} --> \d{2}:\d{2}:\d{2}\.\d{3}$/;
 const SCRIPTURE_RE = /^[A-Z1-3]{3} \d+:\d+/;
 
+async function sha256Hex(bytes: Uint8Array): Promise<string> {
+  const buf = await crypto.subtle.digest("SHA-256", bytes as BufferSource);
+  return [...new Uint8Array(buf)].map(b => b.toString(16).padStart(2, "0")).join("");
+}
+
+async function buildFileListing(fs: OpfsFs, root: string): Promise<Record<string, string>> {
+  const out: Record<string, string> = {};
+  async function walk(dir: string): Promise<void> {
+    const names = await fs.promises.readdir(dir).catch(() => [] as string[]);
+    for (const name of names) {
+      if (name === ".git") continue;
+      const full = dir === "/" ? `/${name}` : `${dir}/${name}`;
+      const stat = await fs.promises.stat(full).catch(() => null);
+      if (!stat) continue;
+      if (stat.isDirectory()) {
+        await walk(full);
+      } else if (stat.isFile()) {
+        const bytes = (await fs.promises.readFile(full)) as Uint8Array;
+        out[full] = await sha256Hex(bytes);
+      }
+    }
+  }
+  await walk(root);
+  return out;
+}
+
 function inferFileType(paired: TranslatableString[]): FileType {
   for (const c of paired) {
     if (VTT_RE.test(c.context)) return "vtt";
@@ -198,6 +224,8 @@ export async function importFromOpfs(args: ImportArgs): Promise<ImportedProject>
   }
   onProgress?.(total, total, "done");
 
+  const originalFileListing = await buildFileListing(fs, repoDir);
+
   const project: ProjectRecord = {
     id: uuid(),
     name: projectName,
@@ -208,6 +236,7 @@ export async function importFromOpfs(args: ImportArgs): Promise<ImportedProject>
     members: [],
     origin: args.origin,
     permissions: args.permissions,
+    originalFileListing,
   };
 
   return { project, docs };

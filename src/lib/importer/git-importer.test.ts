@@ -83,6 +83,37 @@ describe("importFromOpfs __source stashing", () => {
   });
 });
 
+describe("importFromOpfs originalFileListing", () => {
+  it("records every file path in originalFileListing", async () => {
+    const root = new MemoryDirectoryHandle("r");
+    const fs = createOpfsFs(root as unknown as FileSystemDirectoryHandle);
+    await fs.promises.mkdir("/repo/files/target", { recursive: true });
+    await fs.promises.mkdir("/repo/.project/sourceTexts", { recursive: true });
+    await fs.promises.writeFile("/repo/metadata.json", readFix("metadata.json"));
+    await fs.promises.writeFile("/repo/files/target/sample.codex", readFix("sample.codex"));
+    await fs.promises.writeFile("/repo/.project/sourceTexts/sample.source", readFix("sample.source"));
+    await fs.promises.writeFile("/repo/.project/comments.json", readFix("comments.json"));
+
+    const { project } = await importFromOpfs({
+      fs, repoDir: "/repo",
+      origin: { kind: "git", cloneUrl: "u", gitlabProjectId: 1, branch: "main", headSha: "abc", importedAt: "now" },
+      permissions: { source: "gitlab", canEditContent: true, canEditComments: true, canResolveComments: true, canPush: true, accessLevel: 30 },
+    });
+    expect(project.originalFileListing).toBeDefined();
+    expect(Object.keys(project.originalFileListing!)).toEqual(
+      expect.arrayContaining([
+        "/repo/metadata.json",
+        "/repo/files/target/sample.codex",
+        "/repo/.project/sourceTexts/sample.source",
+        "/repo/.project/comments.json",
+      ])
+    );
+    for (const hash of Object.values(project.originalFileListing!)) {
+      expect(hash).toMatch(/^[a-f0-9]{64}$/);
+    }
+  });
+});
+
 describe("persistImportedProject", () => {
   it("persists the imported project into the project index", async () => {
     const root = new MemoryDirectoryHandle("r");

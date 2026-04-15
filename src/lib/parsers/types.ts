@@ -68,6 +68,12 @@ export interface ProjectRecord {
   rulePenalties?: RulePenalties
   origin?: ProjectOrigin
   permissions?: ProjectPermissions
+  /**
+   * Map: relative path -> SHA-256 of file content as cloned. Used by the
+   * serializer to skip non-managed files. Populated only for git-imported
+   * projects.
+   */
+  originalFileListing?: Record<string, string>
 }
 
 export interface FileReference {

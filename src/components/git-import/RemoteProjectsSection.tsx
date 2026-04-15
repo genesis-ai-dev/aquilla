@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { useNavigate } from "react-router-dom"
 import { useQuery, keepPreviousData } from "@tanstack/react-query"
 import { ChevronLeft, ChevronRight, GitBranch, Loader2, Download, Check } from "lucide-react"
@@ -22,17 +22,22 @@ export function RemoteProjectsSection({ session, localProjects, onImported }: Pr
   const [page, setPage] = useState(1)
   const [searchInput, setSearchInput] = useState("")
   const [search, setSearch] = useState("")
+  const debounceRef = useRef<number | null>(null)
 
-  // Debounce search input -> reset to page 1
-  function onSearchChange(v: string) {
-    setSearchInput(v)
-  }
-  function commitSearch() {
-    if (search !== searchInput) {
-      setSearch(searchInput)
-      setPage(1)
+  // Debounce search input -> server-side search, reset to page 1
+  useEffect(() => {
+    if (debounceRef.current != null) window.clearTimeout(debounceRef.current)
+    debounceRef.current = window.setTimeout(() => {
+      setSearch(prev => {
+        if (prev === searchInput) return prev
+        setPage(1)
+        return searchInput
+      })
+    }, 300)
+    return () => {
+      if (debounceRef.current != null) window.clearTimeout(debounceRef.current)
     }
-  }
+  }, [searchInput])
 
   const q = useQuery({
     queryKey: ["frontier", sessionKey, "myProjects", page, PER_PAGE, search],
@@ -66,11 +71,9 @@ export function RemoteProjectsSection({ session, localProjects, onImported }: Pr
         </h2>
         {q.isFetching && <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />}
         <Input
-          placeholder="Search… (press Enter)"
+          placeholder="Search Frontier…"
           value={searchInput}
-          onChange={e => onSearchChange(e.target.value)}
-          onKeyDown={e => { if (e.key === "Enter") commitSearch() }}
-          onBlur={commitSearch}
+          onChange={e => setSearchInput(e.target.value)}
           className="ml-auto h-8 max-w-xs"
         />
       </div>

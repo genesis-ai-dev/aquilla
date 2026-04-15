@@ -1,0 +1,54 @@
+{
+  "thread-1": {
+    "id": "thread-1",
+    "cellId": { "cellId": "GEN 1:1" },
+    "comments": [
+      {
+        "id": "c1",
+        "timestamp": 1700001000000,
+        "body": "Does 'schuf' feel right here?",
+        "mode": 0,
+        "deleted": false,
+        "author": { "name": "alice" }
+      },
+      {
+        "id": "c2",
+        "timestamp": 1700001100000,
+        "body": "Yes, it's the standard rendering.",
+        "mode": 0,
+        "deleted": false,
+        "author": { "name": "bob" }
+      },
+      {
+        "id": "c3",
+        "timestamp": 1700001200000,
+        "body": "Agreed, let's keep it.",
+        "mode": 0,
+        "deleted": false,
+        "author": { "name": "carol" }
+      }
+    ],
+    "collapsibleState": 0,
+    "canReply": true,
+    "threadTitle": "Word choice: schuf"
+  },
+  "thread-2": {
+    "id": "thread-2",
+    "cellId": { "cellId": "GEN 1:2" },
+    "comments": [
+      {
+        "id": "c4",
+        "timestamp": 1700002000000,
+        "body": "Consider 'öde' instead of 'wüst'.",
+        "mode": 0,
+        "deleted": false,
+        "author": { "name": "alice" }
+      }
+    ],
+    "collapsibleState": 1,
+    "canReply": true,
+    "resolvedEvent": [
+      { "timestamp": 1700002500000, "author": { "name": "bob" }, "resolved": true }
+    ]
+  }
+}

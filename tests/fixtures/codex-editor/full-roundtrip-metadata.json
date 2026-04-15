@@ -1,0 +1,14 @@
+{
+  "projectName": "Full Roundtrip Genesis",
+  "sourceLanguage": { "tag": "en", "refName": "English" },
+  "targetLanguage": { "tag": "de", "refName": "German" },
+  "videoUrl": "https://example.com/project-overview.mp4",
+  "navigation": [
+    { "fileId": "full-roundtrip", "label": "Genesis" }
+  ],
+  "structureMetadata": {
+    "originalUsfmContent": "\\id GEN\n\\c 1\n",
+    "bookCode": "GEN"
+  },
+  "customField": "preserve me"
+}

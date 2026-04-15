@@ -13,6 +13,10 @@ import type {
 import { v4 as uuid } from "uuid";
 import { IndexeddbPersistence } from "y-indexeddb";
 import { createProject } from "@/lib/store/project-index";
+import type { FrontierSession, GitlabProject } from "@/lib/frontier/types";
+import { cloneRepo } from "@/lib/git/clone";
+import { openOpfsRepoDir, createOpfsFs } from "@/lib/git/opfs-fs";
+import { mapGitlabAccessLevel, bestAccessLevel } from "@/lib/git/permissions";
 
 export interface ImportedProject {
   project: ProjectRecord;
@@ -147,4 +151,45 @@ export async function persistImportedProject(imported: ImportedProject): Promise
     await persistence.whenSynced;
     persistence.destroy();
   }
+}
+
+export async function importFromGitRepo(opts: {
+  session: FrontierSession;
+  project: GitlabProject;
+  onPhase?: (phase: "clone" | "parse" | "persist", done: number, total: number, label: string) => void;
+}): Promise<ImportedProject> {
+  const { session, project, onPhase } = opts;
+  const repoKey = `${project.id}-${project.path_with_namespace.replace(/\//g, "_")}`;
+  const dirHandle = await openOpfsRepoDir(repoKey);
+  const fs = createOpfsFs(dirHandle);
+
+  onPhase?.("clone", 0, 1, project.name);
+  const { headSha, branch } = await cloneRepo({
+    fs,
+    dir: "/",
+    url: project.http_url_to_repo,
+    gitlabToken: session.gitlabToken,
+    onProgress: (p) => onPhase?.("clone", p.loaded ?? 0, p.total ?? 100, p.phase ?? "clone"),
+  });
+  onPhase?.("clone", 1, 1, "done");
+
+  const permissions = mapGitlabAccessLevel(bestAccessLevel(project));
+  const imported = await importFromOpfs({
+    fs, repoDir: "/",
+    origin: {
+      kind: "git",
+      cloneUrl: project.http_url_to_repo,
+      gitlabProjectId: project.id,
+      branch,
+      headSha,
+      importedAt: new Date().toISOString(),
+    },
+    permissions,
+    onProgress: (done, total, label) => onPhase?.("parse", done, total, label),
+  });
+
+  onPhase?.("persist", 0, 1, "saving");
+  await persistImportedProject(imported);
+  onPhase?.("persist", 1, 1, "done");
+  return imported;
 }

@@ -47,57 +47,19 @@ export async function listGroupProjects(
   return listGroupProjectsPage(session, groupId, 1, 100);
 }
 
-export async function listAllProjects(session: FrontierSession): Promise<GitlabProject[]> {
-  const groups = await listGroups(session);
-  const batches = await Promise.all(groups.map(g => listGroupProjects(session, g.id).catch(() => [])));
-  const all = batches.flat();
-  const seen = new Set<number>();
-  return all.filter(p => (seen.has(p.id) ? false : (seen.add(p.id), true)));
-}
-
-export interface StreamOptions {
-  signal?: AbortSignal;
-  concurrency?: number;     // default 4
-  perPage?: number;         // default 50
-}
-
-// Progressively emit every GitLab project the user can reach, paginating each
-// group and fanning out across groups. `onProject` is called once per unique
-// project id; duplicates across groups/subgroups are filtered internally.
-export async function streamAllProjects(
-  session: FrontierSession,
-  onProject: (project: GitlabProject) => void,
-  opts: StreamOptions = {}
-): Promise<void> {
-  const { signal, concurrency = 4, perPage = 50 } = opts;
-  const groups = await listGroups(session);
-  if (signal?.aborted) return;
-
-  const queue = [...groups];
-  const seen = new Set<number>();
-
-  async function worker() {
-    while (queue.length) {
-      if (signal?.aborted) return;
-      const g = queue.shift()!;
-      let page = 1;
-      while (!signal?.aborted) {
-        let batch: GitlabProject[] = [];
-        try {
-          batch = await listGroupProjectsPage(session, g.id, page, perPage);
-        } catch {
-          break;
-        }
-        for (const p of batch) {
-          if (seen.has(p.id)) continue;
-          seen.add(p.id);
-          onProject(p);
-        }
-        if (batch.length < perPage) break;
-        page++;
-      }
-    }
+// Fetches every page of projects in a group and returns the merged array.
+export async function listAllGroupProjects(
+  session: FrontierSession, groupId: number, perPage = 50
+): Promise<GitlabProject[]> {
+  const out: GitlabProject[] = [];
+  let page = 1;
+  while (true) {
+    const batch = await listGroupProjectsPage(session, groupId, page, perPage);
+    out.push(...batch);
+    if (batch.length < perPage) break;
+    page++;
+    if (page > 100) break; // safety: 5000 projects per group cap
   }
-
-  await Promise.all(Array.from({ length: concurrency }, worker));
+  return out;
 }
+

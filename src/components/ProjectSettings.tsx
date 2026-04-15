@@ -27,6 +27,9 @@ export function ProjectSettings() {
   const [systemPrompt, setSystemPrompt] = useState(DEFAULT_SYSTEM_PROMPT)
   const [llmHealthPenalty, setLlmHealthPenalty] = useState(0.1)
 
+  const [autoSyncEnabled, setAutoSyncEnabled] = useState(false)
+  const [autoSyncInterval, setAutoSyncInterval] = useState(5)
+
   const [models, setModels] = useState<string[]>([])
   const [connecting, setConnecting] = useState(false)
   const [connectionError, setConnectionError] = useState<string | null>(null)
@@ -49,6 +52,8 @@ export function ProjectSettings() {
         setSystemPrompt(p.completionSettings.systemPrompt)
         setLlmHealthPenalty(p.completionSettings.llmHealthPenalty ?? 0.1)
       }
+      setAutoSyncEnabled(p.syncSettings?.autoSync.enabled ?? false)
+      setAutoSyncInterval(p.syncSettings?.autoSync.intervalMinutes ?? 5)
       setLoading(false)
     })
   }, [id])
@@ -167,6 +172,43 @@ export function ProjectSettings() {
             </div>
           </CardContent>
         </Card>
+
+        {project?.origin?.kind === "git" && (
+          <Card>
+            <CardHeader><CardTitle>Git Sync</CardTitle></CardHeader>
+            <CardContent className="space-y-3">
+              <p className="text-xs text-muted-foreground">
+                Origin: <span className="font-mono">{project.origin.cloneUrl}</span> (branch: <span className="font-mono">{project.origin.branch}</span>)
+              </p>
+              <div className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  id="auto-sync"
+                  checked={autoSyncEnabled}
+                  onChange={(e) => {
+                    const enabled = e.target.checked
+                    setAutoSyncEnabled(enabled)
+                    save({ syncSettings: { autoSync: { enabled, intervalMinutes: autoSyncInterval } } })
+                  }}
+                />
+                <Label htmlFor="auto-sync" className="text-sm">Auto-sync every</Label>
+                <Input
+                  type="number"
+                  min={1}
+                  max={60}
+                  className="h-8 w-20"
+                  value={autoSyncInterval}
+                  onChange={(e) => setAutoSyncInterval(Math.max(1, Number(e.target.value) || 1))}
+                  onBlur={() => save({ syncSettings: { autoSync: { enabled: autoSyncEnabled, intervalMinutes: Math.max(1, autoSyncInterval) } } })}
+                />
+                <span className="text-sm">minutes (only when there are changes)</span>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Interval is floored at 1 minute. Sync will only push when there are local changes.
+              </p>
+            </CardContent>
+          </Card>
+        )}
       </main>
     </div>
   )

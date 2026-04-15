@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react"
 import { useNavigate } from "react-router-dom"
-import { useQuery, useInfiniteQuery } from "@tanstack/react-query"
-import { ChevronRight, GitBranch, Loader2, Download, Check, AlertCircle } from "lucide-react"
+import { useQuery, keepPreviousData } from "@tanstack/react-query"
+import { ChevronLeft, ChevronRight, GitBranch, Loader2, Download, Check, AlertCircle } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { listGroups, listGroupProjectsPage } from "@/lib/frontier/api"
@@ -112,38 +112,36 @@ interface GroupSectionProps {
 function GroupSection({
   group, session, sessionKey, isOpen, onToggle, filter, importedById, onImported,
 }: GroupSectionProps) {
-  const q = useInfiniteQuery({
-    queryKey: ["frontier", sessionKey, "groupProjects", group.id, PER_PAGE],
-    queryFn: ({ pageParam }) => listGroupProjectsPage(session, group.id, pageParam, PER_PAGE),
-    initialPageParam: 1,
-    // Prefer GitLab's X-Next-Page header (most reliable). Fall back to length
-    // heuristic if CORS doesn't expose it.
-    getNextPageParam: (lastPage, _all, lastParam) => {
-      if (lastPage.nextPage) return lastPage.nextPage
-      if (lastPage.totalPages != null) {
-        return (lastParam as number) < lastPage.totalPages ? (lastParam as number) + 1 : undefined
-      }
-      return lastPage.items.length < PER_PAGE ? undefined : (lastParam as number) + 1
-    },
+  const [page, setPage] = useState(1)
+
+  const q = useQuery({
+    queryKey: ["frontier", sessionKey, "groupProjects", group.id, page, PER_PAGE],
+    queryFn: () => listGroupProjectsPage(session, group.id, page, PER_PAGE),
     enabled: isOpen,
+    placeholderData: keepPreviousData,
   })
 
-  const allProjects = useMemo(
-    () => (q.data?.pages ?? []).flatMap(p => p.items),
-    [q.data]
-  )
-  const total = q.data?.pages[0]?.total
+  const items = q.data?.items ?? []
+  const total = q.data?.total
+  const totalPages = q.data?.totalPages
+  // If the server doesn't expose totals, infer "has next" from page length.
+  const hasNext = q.data
+    ? (q.data.nextPage != null
+        ? true
+        : totalPages != null
+          ? page < totalPages
+          : items.length === PER_PAGE)
+    : false
+  const hasPrev = page > 1
+
   const filtered = useMemo(() => {
     const f = filter.trim().toLowerCase()
-    if (!f) return allProjects
-    return allProjects.filter(p =>
+    if (!f) return items
+    return items.filter(p =>
       p.path_with_namespace.toLowerCase().includes(f) ||
       (p.description ?? "").toLowerCase().includes(f)
     )
-  }, [allProjects, filter])
-
-  const totalLoaded = allProjects.length
-  const hasMore = !!q.hasNextPage
+  }, [items, filter])
 
   return (
     <div className="rounded border">
@@ -155,10 +153,8 @@ function GroupSection({
         <span className="text-sm font-medium">{group.path}</span>
         {q.isFetching && <Loader2 className="h-3 w-3 animate-spin text-muted-foreground" />}
         {q.error && <AlertCircle className="h-3 w-3 text-destructive" />}
-        {totalLoaded > 0 && (
-          <span className="text-xs text-muted-foreground">
-            {total != null ? `${totalLoaded} / ${total}` : `${totalLoaded}${hasMore ? "+" : ""}`}
-          </span>
+        {total != null && (
+          <span className="text-xs text-muted-foreground">{total}</span>
         )}
       </button>
       {isOpen && (
@@ -169,36 +165,45 @@ function GroupSection({
             </p>
           ) : q.isLoading ? (
             <p className="px-3 py-2 text-xs text-muted-foreground">Loading…</p>
-          ) : filtered.length === 0 ? (
-            <p className="px-3 py-2 text-xs text-muted-foreground">
-              {filter ? "No matches" : "No projects in this group"}
-            </p>
           ) : (
             <>
-              <ul className="divide-y">
-                {filtered.map(p => (
-                  <ProjectRow
-                    key={p.id}
-                    project={p}
-                    session={session}
-                    local={importedById.get(p.id)}
-                    onImported={onImported}
-                  />
-                ))}
-              </ul>
-              {hasMore && (
-                <div className="border-t p-2">
+              {filtered.length === 0 ? (
+                <p className="px-3 py-2 text-xs text-muted-foreground">
+                  {filter ? "No matches on this page" : "No projects in this group"}
+                </p>
+              ) : (
+                <ul className="divide-y">
+                  {filtered.map(p => (
+                    <ProjectRow
+                      key={p.id}
+                      project={p}
+                      session={session}
+                      local={importedById.get(p.id)}
+                      onImported={onImported}
+                    />
+                  ))}
+                </ul>
+              )}
+              {(hasPrev || hasNext) && (
+                <div className="flex items-center justify-between border-t px-2 py-1.5">
                   <Button
                     size="sm" variant="ghost"
-                    onClick={() => q.fetchNextPage()}
-                    disabled={q.isFetchingNextPage}
-                    className="w-full text-xs"
+                    disabled={!hasPrev || q.isFetching}
+                    onClick={() => setPage(p => Math.max(1, p - 1))}
+                    className="h-7 text-xs"
                   >
-                    {q.isFetchingNextPage ? (
-                      <><Loader2 className="h-3 w-3 mr-1.5 animate-spin" /> Loading…</>
-                    ) : (
-                      `Load more (page ${(q.data?.pages.length ?? 0) + 1})`
-                    )}
+                    <ChevronLeft className="h-3.5 w-3.5 mr-1" /> Prev
+                  </Button>
+                  <span className="text-xs text-muted-foreground">
+                    Page {page}{totalPages != null ? ` of ${totalPages}` : ""}
+                  </span>
+                  <Button
+                    size="sm" variant="ghost"
+                    disabled={!hasNext || q.isFetching}
+                    onClick={() => setPage(p => p + 1)}
+                    className="h-7 text-xs"
+                  >
+                    Next <ChevronRight className="h-3.5 w-3.5 ml-1" />
                   </Button>
                 </div>
               )}

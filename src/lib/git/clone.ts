@@ -22,7 +22,7 @@ export async function cloneRepo({
     http,
     dir,
     url,
-    corsProxy: `${GIT_CORS_PROXY}/`,
+    corsProxy: GIT_CORS_PROXY,
     singleBranch: true,
     depth: 1,
     onAuth: () => ({ username: "oauth2", password: gitlabToken }),

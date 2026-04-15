@@ -66,6 +66,8 @@ export interface ProjectRecord {
   username?: string
   rules?: TranslationRule[]
   rulePenalties?: RulePenalties
+  origin?: ProjectOrigin
+  permissions?: ProjectPermissions
 }
 
 export interface FileReference {
@@ -154,6 +156,24 @@ export interface VideoAttachment {
   // video has 5s of intro before subtitles should start, set to 5 — a cue at
   // "00:00:01" will display at video time 6s.
   videoStartOffset?: number
+}
+
+export interface ProjectOrigin {
+  kind: "git"
+  cloneUrl: string
+  gitlabProjectId: number
+  branch: string
+  headSha: string
+  importedAt: string
+}
+
+export interface ProjectPermissions {
+  source: "gitlab" | "local"
+  canEditContent: boolean
+  canEditComments: boolean
+  canResolveComments: boolean
+  canPush: boolean
+  accessLevel?: number
 }
 
 export function detectFileType(fileName: string): FileType | null {

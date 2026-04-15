@@ -34,10 +34,11 @@ export interface ProjectsPage {
   items: GitlabProject[];
   page: number;
   perPage: number;
-  total?: number;        // from X-Total header (when CORS exposes it)
+  total?: number;        // from X-Total header or wrapper.total
   totalPages?: number;   // from X-Total-Pages
-  nextPage?: number;     // from X-Next-Page (empty/missing on last page)
+  nextPage?: number;     // from X-Next-Page or derived from has_more
   prevPage?: number;
+  hasMore?: boolean;     // from wrapper.has_more (Frontier-style)
 }
 
 function parseNumHeader(res: Response, name: string): number | undefined {
@@ -45,6 +46,65 @@ function parseNumHeader(res: Response, name: string): number | undefined {
   if (!v) return undefined;
   const n = Number(v);
   return Number.isFinite(n) ? n : undefined;
+}
+
+interface PaginatedWrapper<T> {
+  total?: number;
+  page?: number;
+  per_page?: number;
+  has_more?: boolean;
+  data?: T[];
+  items?: T[];
+  results?: T[];
+  groups?: T[];
+  projects?: T[];
+}
+
+function readPagination<T>(payload: unknown, items: T[], res: Response, page: number, perPage: number): ProjectsPage {
+  const w = (payload && typeof payload === "object" && !Array.isArray(payload)
+    ? payload as PaginatedWrapper<T>
+    : {}) as PaginatedWrapper<T>;
+  const total = parseNumHeader(res, "x-total") ?? w.total;
+  const totalPages = parseNumHeader(res, "x-total-pages")
+    ?? (total != null ? Math.ceil(total / perPage) : undefined);
+  const nextPageHeader = parseNumHeader(res, "x-next-page");
+  const nextPage = nextPageHeader
+    ?? (w.has_more ? page + 1
+      : (totalPages != null && page < totalPages ? page + 1 : undefined));
+  return {
+    items: items as unknown as GitlabProject[],
+    page,
+    perPage,
+    total,
+    totalPages,
+    nextPage,
+    prevPage: parseNumHeader(res, "x-prev-page") ?? (page > 1 ? page - 1 : undefined),
+    hasMore: w.has_more,
+  };
+}
+
+// All projects the user can access, paginated. Server side: GitLab's
+// /api/v4/projects?membership=true. Much friendlier than walking groups.
+export async function listMyProjectsPage(
+  session: FrontierSession, page: number, perPage = 20, search?: string
+): Promise<ProjectsPage> {
+  const params = new URLSearchParams({
+    membership: "true",
+    simple: "true",
+    per_page: String(perPage),
+    page: String(page),
+    order_by: "last_activity_at",
+    sort: "desc",
+  });
+  if (search?.trim()) params.set("search", search.trim());
+  const url = `${session.gitlabUrl}/api/v4/projects?${params}`;
+  const res = await fetch(url, {
+    headers: { "PRIVATE-TOKEN": session.gitlabToken },
+  });
+  if (!res.ok) throw new Error(`HTTP ${res.status}: ${await res.text()}`);
+  const payload = (await res.json()) as unknown;
+  const items = unwrapList<GitlabProject>(payload);
+  return readPagination<GitlabProject>(payload, items, res, page, perPage);
 }
 
 export async function listGroupProjectsPage(
@@ -57,14 +117,6 @@ export async function listGroupProjectsPage(
   if (!res.ok) throw new Error(`HTTP ${res.status}: ${await res.text()}`);
   const payload = (await res.json()) as unknown;
   const items = unwrapList<GitlabProject>(payload);
-  return {
-    items,
-    page,
-    perPage,
-    total: parseNumHeader(res, "x-total"),
-    totalPages: parseNumHeader(res, "x-total-pages"),
-    nextPage: parseNumHeader(res, "x-next-page"),
-    prevPage: parseNumHeader(res, "x-prev-page"),
-  };
+  return readPagination<GitlabProject>(payload, items, res, page, perPage);
 }
 

@@ -1,0 +1,13 @@
+- generic [ref=e3]:
+  - banner [ref=e4]:
+    - generic [ref=e5]:
+      - heading "Codex Translator" [level=1] [ref=e6]
+      - generic [ref=e7]:
+        - button "Log in" [ref=e8]:
+          - img
+          - text: Log in
+        - button "+ New Project" [ref=e9]
+  - main [ref=e10]:
+    - generic [ref=e11]:
+      - heading "Your projects" [level=2] [ref=e12]
+      - paragraph [ref=e13]: No projects yet. Create one or log in to import from Frontier.

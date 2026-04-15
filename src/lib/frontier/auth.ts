@@ -4,7 +4,11 @@ import { saveSession } from "./session-store";
 export const FRONTIER_BASE = "https://api.frontierrnd.com";
 
 export class FrontierAuthError extends Error {
-  constructor(message: string, public status: number) { super(message); }
+  public status: number;
+  constructor(message: string, status: number) {
+    super(message);
+    this.status = status;
+  }
 }
 
 interface LoginArgs { username: string; password: string; }

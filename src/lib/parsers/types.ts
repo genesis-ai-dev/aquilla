@@ -74,6 +74,11 @@ export interface ProjectRecord {
    * projects.
    */
   originalFileListing?: Record<string, string>
+  syncSettings?: ProjectSyncSettings
+}
+
+export interface ProjectSyncSettings {
+  autoSync: { enabled: boolean; intervalMinutes: number }
 }
 
 export interface FileReference {

@@ -2,9 +2,12 @@ import { useState } from "react"
 import { X } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import type { CellData } from "@/hooks/useCells"
+import type { ProjectRecord } from "@/lib/parsers/types"
+import { useProjectPermissions } from "@/hooks/useProjectPermissions"
 import { CommentThread } from "./CommentThread"
 
 interface CommentsDrawerProps {
+  project: ProjectRecord
   cell: CellData
   onClose: () => void
   onNewThread: (firstMessage: string) => void
@@ -13,8 +16,9 @@ interface CommentsDrawerProps {
   onReopen: (threadId: string) => void
 }
 
-export function CommentsDrawer({ cell, onClose, onNewThread, onReply, onResolve, onReopen }: CommentsDrawerProps) {
+export function CommentsDrawer({ project, cell, onClose, onNewThread, onReply, onResolve, onReopen }: CommentsDrawerProps) {
   const [newThreadText, setNewThreadText] = useState("")
+  const permissions = useProjectPermissions(project)
 
   function handleCreate() {
     if (!newThreadText.trim()) return
@@ -53,6 +57,8 @@ export function CommentsDrawer({ cell, onClose, onNewThread, onReply, onResolve,
               key={thread.id}
               thread={thread}
               currentTranslated={cell.translated}
+              canReply={permissions.canEditComments}
+              canResolve={permissions.canResolveComments}
               onReply={(text) => onReply(thread.id, text)}
               onResolve={(msg) => onResolve(thread.id, msg)}
               onReopen={() => onReopen(thread.id)}
@@ -61,19 +67,25 @@ export function CommentsDrawer({ cell, onClose, onNewThread, onReply, onResolve,
         )}
       </div>
 
-      <div className="border-t p-3 space-y-1.5">
-        <p className="text-xs font-medium">New thread</p>
-        <textarea
-          value={newThreadText}
-          onChange={(e) => setNewThreadText(e.target.value)}
-          placeholder="Start a new comment thread..."
-          rows={2}
-          className="w-full resize-none rounded border bg-background px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-ring"
-        />
-        <Button size="sm" onClick={handleCreate} disabled={!newThreadText.trim()} className="w-full">
-          Post
-        </Button>
-      </div>
+      {permissions.canEditComments ? (
+        <div className="border-t p-3 space-y-1.5">
+          <p className="text-xs font-medium">New thread</p>
+          <textarea
+            value={newThreadText}
+            onChange={(e) => setNewThreadText(e.target.value)}
+            placeholder="Start a new comment thread..."
+            rows={2}
+            className="w-full resize-none rounded border bg-background px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-ring"
+          />
+          <Button size="sm" onClick={handleCreate} disabled={!newThreadText.trim()} className="w-full">
+            Post
+          </Button>
+        </div>
+      ) : !permissions.canResolveComments ? (
+        <div className="border-t p-3">
+          <p className="text-xs text-muted-foreground">Read-only (imported from git)</p>
+        </div>
+      ) : null}
     </div>
   )
 }

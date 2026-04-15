@@ -20,10 +20,12 @@ interface TranslatedEditorProps {
   // are rendered inline with the given user's name and color for their local cursor.
   syncProvider?: WebsocketProvider | null
   user?: { name: string; color: string }
+  editable?: boolean
 }
 
-export function TranslatedEditor({ fragment, onBlur, placeholder, className, syncProvider, user }: TranslatedEditorProps) {
+export function TranslatedEditor({ fragment, onBlur, placeholder, className, syncProvider, user, editable = true }: TranslatedEditorProps) {
   const editor = useEditor({
+    editable,
     extensions: [
       StarterKit.configure({
         // Turn off TipTap's own history — Yjs manages undo/redo via the collab plugin
@@ -67,6 +69,10 @@ export function TranslatedEditor({ fragment, onBlur, placeholder, className, syn
   useEffect(() => {
     prevFragmentRef.current = fragment
   }, [fragment])
+
+  useEffect(() => {
+    editor?.setEditable(editable)
+  }, [editor, editable])
 
   if (!editor) {
     return <div className={cn("min-h-[40px] px-2 py-1 text-sm border rounded bg-background", className)}>{placeholder}</div>

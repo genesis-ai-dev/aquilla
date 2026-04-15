@@ -5,7 +5,8 @@ import DOMPurify from "dompurify"
 import { Check, AlertTriangle, AlertCircle, Languages, RefreshCw, MessageCircle, History, Play } from "lucide-react"
 import type { CellData } from "@/hooks/useCells"
 import type { ScoredPair } from "@/lib/search/search-index"
-import type { TranslationRule, RuleInfraction } from "@/lib/parsers/types"
+import type { TranslationRule, RuleInfraction, ProjectRecord } from "@/lib/parsers/types"
+import { useProjectPermissions } from "@/hooks/useProjectPermissions"
 import { appendCellHistory, recordHistoryEntry, validateCell } from "@/hooks/useCellHistory"
 import { getPlainText, getFragmentHtml } from "@/lib/richtext/translated-xml"
 import { SparkleButton } from "./SparkleButton"
@@ -20,6 +21,7 @@ export interface EditorTableHandle {
 }
 
 interface EditorTableProps {
+  project: ProjectRecord
   cells: CellData[]
   doc: Y.Doc
   username: string
@@ -47,7 +49,7 @@ interface EditorTableProps {
 }
 
 export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(function EditorTable({
-  cells, doc, username, isCompletionConfigured,
+  project, cells, doc, username, isCompletionConfigured,
   completing, examples, errors,
   onCompleteSingle, onCompleteBatch, healthMap,
   infractions = new Map(), rules = [], onInfractionClick,
@@ -56,6 +58,8 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   syncProvider, collabUser,
   activeCueIndex, onSeekToCue,
 }, ref) {
+  const permissions = useProjectPermissions(project)
+  const canEdit = permissions.canEditContent
   const parentRef = useRef<HTMLDivElement>(null)
   const isDragging = useRef(false)
   const dragCells = useRef<Set<string>>(new Set())
@@ -126,6 +130,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
                 cell={cell}
                 doc={doc}
                 username={username}
+                editable={canEdit}
                 isCompletionConfigured={isCompletionConfigured}
                 isLoading={isLoading}
                 cellExamples={cellExamples}
@@ -167,6 +172,7 @@ interface EditorRowProps {
   cell: CellData
   doc: Y.Doc
   username: string
+  editable: boolean
   isCompletionConfigured: boolean
   isLoading: boolean
   cellExamples: ScoredPair[]
@@ -193,7 +199,7 @@ interface EditorRowProps {
 }
 
 function EditorRow({
-  cell, doc, username, isCompletionConfigured, isLoading,
+  cell, doc, username, editable, isCompletionConfigured, isLoading,
   cellExamples, highlights, error, health,
   cellInfractions, ruleMap,
   onCompleteSingle, onInfractionClick,
@@ -296,8 +302,9 @@ function EditorRow({
           <Check className="h-3 w-3 text-green-500" />
         ) : cell.status === "unvalidated" ? (
           <button
-            className="flex h-full w-full items-center justify-center rounded-full text-amber-500 hover:text-green-500"
-            title="Click to validate"
+            className="flex h-full w-full items-center justify-center rounded-full text-amber-500 hover:text-green-500 disabled:cursor-not-allowed disabled:opacity-50"
+            title={editable ? "Click to validate" : "Read-only (imported from git)"}
+            disabled={!editable}
             onClick={handleValidate}
           >
             <Check className="h-3 w-3" />
@@ -328,14 +335,16 @@ function EditorRow({
             isBacktranslating ? "animate-pulse text-primary" : "text-muted-foreground hover:text-primary",
             !isBacktranslationConfigured && "cursor-not-allowed text-muted-foreground/30"
           )}
-          disabled={!isBacktranslationConfigured || isBacktranslating}
+          disabled={!isBacktranslationConfigured || isBacktranslating || !editable}
           onClick={() => onBacktranslate?.(cell)}
           title={
-            !isBacktranslationConfigured
-              ? "Configure LLM in settings"
-              : isBacktranslating
-                ? "Generating..."
-                : cell.backtranslation ? "Regenerate backtranslation" : "Generate backtranslation"
+            !editable
+              ? "Read-only (imported from git)"
+              : !isBacktranslationConfigured
+                ? "Configure LLM in settings"
+                : isBacktranslating
+                  ? "Generating..."
+                  : cell.backtranslation ? "Regenerate backtranslation" : "Generate backtranslation"
           }
         >
           <Languages className="h-3 w-3" />
@@ -352,12 +361,12 @@ function EditorRow({
       {/* Sparkle column */}
       <div className="flex flex-col items-center gap-1 pt-5">
         <SparkleButton
-          disabled={!isCompletionConfigured}
+          disabled={!isCompletionConfigured || !editable}
           loading={isLoading}
           onComplete={() => onCompleteSingle(cell)}
           onDragStart={onDragStart}
           onDragEnter={onDragEnter}
-          tooltip={isCompletionConfigured ? "Generate translation" : "Configure LLM in settings"}
+          tooltip={!editable ? "Read-only (imported from git)" : isCompletionConfigured ? "Generate translation" : "Configure LLM in settings"}
         />
         {onSeekToCue && (
           <button
@@ -412,12 +421,14 @@ function EditorRow({
               syncProvider={syncProvider}
               user={collabUser}
               onBlur={handleEditorBlur}
+              editable={editable}
             />
           ) : (
             <textarea
-              className="w-full resize-none rounded border bg-background px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
+              className="w-full resize-none rounded border bg-background px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-ring disabled:cursor-not-allowed disabled:opacity-70"
               value={cell.translated}
               onChange={handleChange}
+              readOnly={!editable}
               rows={Math.max(2, Math.ceil(cell.original.length / 50))}
             />
           )}
@@ -433,9 +444,9 @@ function EditorRow({
                 )}
                 <button
                   onClick={() => onBacktranslate?.(cell)}
-                  disabled={!isBacktranslationConfigured || isBacktranslating}
+                  disabled={!isBacktranslationConfigured || isBacktranslating || !editable}
                   className="text-muted-foreground hover:text-primary disabled:opacity-30"
-                  title="Regenerate"
+                  title={!editable ? "Read-only (imported from git)" : "Regenerate"}
                 >
                   <RefreshCw className={cn("h-3 w-3", isBacktranslating && "animate-spin")} />
                 </button>

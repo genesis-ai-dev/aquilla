@@ -9,12 +9,14 @@ import { cn } from "@/lib/utils"
 interface CommentThreadProps {
   thread: ThreadData
   currentTranslated: string
+  canReply?: boolean
+  canResolve?: boolean
   onReply: (text: string) => void
   onResolve: (closingMessage?: string) => void
   onReopen: () => void
 }
 
-export function CommentThread({ thread, currentTranslated, onReply, onResolve, onReopen }: CommentThreadProps) {
+export function CommentThread({ thread, currentTranslated, canReply = true, canResolve = true, onReply, onResolve, onReopen }: CommentThreadProps) {
   const [replyText, setReplyText] = useState("")
   const isStale = thread.createdForTranslated !== currentTranslated
 
@@ -91,32 +93,44 @@ export function CommentThread({ thread, currentTranslated, onReply, onResolve, o
       </ul>
 
       {thread.status === "open" ? (
-        <div className="mt-2 space-y-1.5">
-          <textarea
-            value={replyText}
-            onChange={(e) => setReplyText(e.target.value)}
-            placeholder="Reply..."
-            rows={2}
-            className="w-full resize-none rounded border bg-background px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-ring"
-          />
-          <div className="flex flex-wrap gap-1">
-            <Button size="sm" variant="outline" onClick={handleReply} disabled={!replyText.trim()}>
-              <Send className="mr-1 h-3 w-3" /> Reply
-            </Button>
-            <Button size="sm" variant="outline" onClick={handleCloseWithReply} disabled={!replyText.trim()}>
-              <Check className="mr-1 h-3 w-3" /> Close with reply
-            </Button>
-            <Button size="sm" variant="ghost" onClick={() => onResolve()}>
-              Resolve
+        (canReply || canResolve) && (
+          <div className="mt-2 space-y-1.5">
+            {canReply && (
+              <textarea
+                value={replyText}
+                onChange={(e) => setReplyText(e.target.value)}
+                placeholder="Reply..."
+                rows={2}
+                className="w-full resize-none rounded border bg-background px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-ring"
+              />
+            )}
+            <div className="flex flex-wrap gap-1">
+              {canReply && (
+                <Button size="sm" variant="outline" onClick={handleReply} disabled={!replyText.trim()}>
+                  <Send className="mr-1 h-3 w-3" /> Reply
+                </Button>
+              )}
+              {canReply && canResolve && (
+                <Button size="sm" variant="outline" onClick={handleCloseWithReply} disabled={!replyText.trim()}>
+                  <Check className="mr-1 h-3 w-3" /> Close with reply
+                </Button>
+              )}
+              {canResolve && (
+                <Button size="sm" variant="ghost" onClick={() => onResolve()}>
+                  Resolve
+                </Button>
+              )}
+            </div>
+          </div>
+        )
+      ) : (
+        canResolve && (
+          <div className="mt-2">
+            <Button size="sm" variant="ghost" onClick={onReopen}>
+              <Undo2 className="mr-1 h-3 w-3" /> Reopen
             </Button>
           </div>
-        </div>
-      ) : (
-        <div className="mt-2">
-          <Button size="sm" variant="ghost" onClick={onReopen}>
-            <Undo2 className="mr-1 h-3 w-3" /> Reopen
-          </Button>
-        </div>
+        )
       )}
     </div>
   )

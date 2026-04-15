@@ -319,7 +319,7 @@ export function ProjectWorkspace() {
         <main className="flex flex-1 overflow-hidden">
           <div className="flex-1 overflow-hidden">
             {activeFileId ? (doc ? (
-              <EditorTable ref={editorRef} cells={cells} doc={doc} username={project.username || "local"}
+              <EditorTable ref={editorRef} project={project} cells={cells} doc={doc} username={project.username || "local"}
                 isCompletionConfigured={isConfigured} completing={completing} examples={examples} errors={errors}
                 onCompleteSingle={completeSingle} onCompleteBatch={completeBatch}
                 healthMap={healthMap}
@@ -367,6 +367,7 @@ export function ProjectWorkspace() {
           )}
           {commentsCell && (
             <CommentsDrawer
+              project={project}
               cell={commentsCell}
               onClose={() => setCommentsCellId(null)}
               onNewThread={(text) => addThread(commentsCell.id, text)}

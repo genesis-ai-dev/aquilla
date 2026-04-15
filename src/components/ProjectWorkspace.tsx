@@ -36,6 +36,8 @@ import { useSync } from "@/hooks/useSync"
 import { peerColor as peerColorLocal } from "@/lib/sync/webrtc-provider"
 import { startBootstrapHost } from "@/lib/sync/bootstrap"
 import { listShares } from "@/lib/sync/share-tokens"
+import { useProjectPermissions } from "@/hooks/useProjectPermissions"
+import { Lock } from "lucide-react"
 
 export function ProjectWorkspace() {
   const { id: projectId } = useParams<{ id: string }>()
@@ -251,6 +253,9 @@ export function ProjectWorkspace() {
     }
   }
 
+  const perms = useProjectPermissions(project)
+  const isReadOnly = !perms.canEditContent
+
   if (loading || !project) return <div className="p-8 text-muted-foreground">Loading...</div>
 
   async function handleImported(refs: FileReference[]) {
@@ -287,6 +292,12 @@ export function ProjectWorkspace() {
         exportEnabled={Boolean(activeFileId)}
         onVideo={isSubtitleFile ? () => setVideoDialogOpen(true) : undefined}
       />
+      {isReadOnly && (
+        <div className="flex items-center gap-2 border-b bg-amber-50 px-4 py-2 text-xs text-amber-900">
+          <Lock className="h-3.5 w-3.5" />
+          Read-only — imported from git. Push is coming in Phase 2.
+        </div>
+      )}
       {isSubtitleFile && videoSrc && (
         <ResizableVideoPanel>
           {(height) => (

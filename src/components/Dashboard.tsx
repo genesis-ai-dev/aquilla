@@ -2,11 +2,14 @@ import { useEffect, useState } from "react"
 import { useNavigate } from "react-router-dom"
 import type { ProjectRecord } from "@/lib/parsers/types"
 import { listProjects } from "@/lib/store/project-index"
+import { Button } from "@/components/ui/button"
 import { ProjectCard } from "./ProjectCard"
 import { ProjectCreateDialog } from "./ProjectCreateDialog"
+import { GitImportDialog } from "@/components/git-import/GitImportDialog"
 
 export function Dashboard() {
   const [projects, setProjects] = useState<ProjectRecord[]>([])
+  const [gitImportOpen, setGitImportOpen] = useState(false)
   const navigate = useNavigate()
 
   useEffect(() => {
@@ -18,9 +21,14 @@ export function Dashboard() {
       <header className="border-b">
         <div className="flex items-center justify-between px-6 py-4">
           <h1 className="text-xl font-semibold">Codex Translator</h1>
-          <ProjectCreateDialog
-            onCreated={(project) => setProjects((prev) => [...prev, project])}
-          />
+          <div className="flex items-center gap-2">
+            <Button variant="outline" onClick={() => setGitImportOpen(true)}>
+              Import from git…
+            </Button>
+            <ProjectCreateDialog
+              onCreated={(project) => setProjects((prev) => [...prev, project])}
+            />
+          </div>
         </div>
       </header>
       <main className="px-6 py-6">
@@ -40,6 +48,14 @@ export function Dashboard() {
           </div>
         )}
       </main>
+      <GitImportDialog
+        open={gitImportOpen}
+        onOpenChange={setGitImportOpen}
+        onImported={(projectId) => {
+          setGitImportOpen(false)
+          navigate(`/project/${projectId}`)
+        }}
+      />
     </div>
   )
 }

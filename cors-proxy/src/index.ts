@@ -1,8 +1,8 @@
 // Git smart-HTTP CORS shim: forwards GET/POST to an allow-listed host.
 // URL shape: https://{this-worker}/{targetUrl including protocol}
-// Example:   https://proxy.example/https://gitlab.frontierrnd.com/g/r.git/info/refs?service=git-upload-pack
+// Example:   https://proxy.example/https://git.genesisrnd.com/g/r.git/info/refs?service=git-upload-pack
 
-const ALLOWED_HOSTS = ["gitlab.frontierrnd.com"];
+const ALLOWED_HOSTS = ["git.genesisrnd.com"];
 
 function corsHeaders(extra: Record<string, string> = {}): HeadersInit {
   return {

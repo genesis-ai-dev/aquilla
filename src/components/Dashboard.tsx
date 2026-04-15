@@ -2,10 +2,10 @@ import { useEffect, useState } from "react"
 import { useNavigate } from "react-router-dom"
 import type { ProjectRecord } from "@/lib/parsers/types"
 import { listProjects } from "@/lib/store/project-index"
-import { Button } from "@/components/ui/button"
 import { ProjectCard } from "./ProjectCard"
 import { ProjectCreateDialog } from "./ProjectCreateDialog"
 import { GitImportDialog } from "@/components/git-import/GitImportDialog"
+import { HeaderAuth } from "@/components/git-import/HeaderAuth"
 
 export function Dashboard() {
   const [projects, setProjects] = useState<ProjectRecord[]>([])
@@ -22,9 +22,7 @@ export function Dashboard() {
         <div className="flex items-center justify-between px-6 py-4">
           <h1 className="text-xl font-semibold">Codex Translator</h1>
           <div className="flex items-center gap-2">
-            <Button variant="outline" onClick={() => setGitImportOpen(true)}>
-              Import from git…
-            </Button>
+            <HeaderAuth onImportClick={() => setGitImportOpen(true)} />
             <ProjectCreateDialog
               onCreated={(project) => setProjects((prev) => [...prev, project])}
             />

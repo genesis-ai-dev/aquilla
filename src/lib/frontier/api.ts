@@ -47,19 +47,3 @@ export async function listGroupProjects(
   return listGroupProjectsPage(session, groupId, 1, 100);
 }
 
-// Fetches every page of projects in a group and returns the merged array.
-export async function listAllGroupProjects(
-  session: FrontierSession, groupId: number, perPage = 50
-): Promise<GitlabProject[]> {
-  const out: GitlabProject[] = [];
-  let page = 1;
-  while (true) {
-    const batch = await listGroupProjectsPage(session, groupId, page, perPage);
-    out.push(...batch);
-    if (batch.length < perPage) break;
-    page++;
-    if (page > 100) break; // safety: 5000 projects per group cap
-  }
-  return out;
-}
-

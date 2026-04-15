@@ -21,6 +21,34 @@ describe("cors proxy", () => {
     expect(res.headers.get("Access-Control-Allow-Origin")).toBe("*");
   });
 
+  it("re-adds https:// when isomorphic-git strips the scheme", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response("ok", { status: 200 }),
+    );
+    const req = new Request(
+      "https://proxy/git.genesisrnd.com/group/repo.git/info/refs?service=git-upload-pack",
+    );
+    await worker.fetch(req, {} as any, {} as any);
+    expect(fetchSpy).toHaveBeenCalledWith(
+      "https://git.genesisrnd.com/group/repo.git/info/refs?service=git-upload-pack",
+      expect.anything(),
+    );
+  });
+
+  it("strips a leading double slash before re-adding scheme", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response("ok", { status: 200 }),
+    );
+    const req = new Request(
+      "https://proxy//git.genesisrnd.com/g/r.git/info/refs?service=git-upload-pack",
+    );
+    await worker.fetch(req, {} as any, {} as any);
+    expect(fetchSpy).toHaveBeenCalledWith(
+      "https://git.genesisrnd.com/g/r.git/info/refs?service=git-upload-pack",
+      expect.anything(),
+    );
+  });
+
   it("forwards GET to allowed host", async () => {
     const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
       new Response("packs", {

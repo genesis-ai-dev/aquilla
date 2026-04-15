@@ -30,8 +30,13 @@ function extractTarget(reqUrl: string): string | null {
   const prefix = `${u.protocol}//${u.host}/`;
   if (!reqUrl.startsWith(prefix)) return null;
   let rest = reqUrl.slice(prefix.length);
-  // Strip any leading slashes (some clients emit `proxy//https://...`).
+  // Strip any leading slashes (some clients emit `proxy//target`).
   while (rest.startsWith("/")) rest = rest.slice(1);
+  // isomorphic-git strips the scheme before concatenation, so the rest will
+  // be `host/path` not `https://host/path`. Re-add https:// if missing.
+  if (!rest.startsWith("http://") && !rest.startsWith("https://")) {
+    rest = "https://" + rest;
+  }
   return rest;
 }
 
@@ -49,7 +54,7 @@ export default {
     }
 
     const targetStr = extractTarget(req.url);
-    if (!targetStr || (!targetStr.startsWith("http://") && !targetStr.startsWith("https://"))) {
+    if (!targetStr) {
       return new Response(`Bad proxy URL: ${req.url}`, { status: 400, headers: corsHeaders() });
     }
 

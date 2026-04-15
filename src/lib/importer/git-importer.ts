@@ -8,15 +8,27 @@ import type { CodexCell } from "@/lib/codex-editor";
 import { listFilesMatching, basename } from "./opfs-paths";
 import type {
   ProjectRecord, FileReference, ProjectPermissions, ProjectOrigin,
-  CommentThread,
+  CommentThread, FileType, TranslatableString,
 } from "@/lib/parsers/types";
 import { v4 as uuid } from "uuid";
 import { IndexeddbPersistence } from "y-indexeddb";
 import { createProject } from "@/lib/store/project-index";
+import { createFileDoc } from "@/lib/store/file-doc";
 import type { FrontierSession, GitlabProject } from "@/lib/frontier/types";
 import { cloneRepo } from "@/lib/git/clone";
 import { openOpfsRepoDir, createOpfsFs } from "@/lib/git/opfs-fs";
 import { mapGitlabAccessLevel, bestAccessLevel } from "@/lib/git/permissions";
+
+const VTT_RE = /^\d{2}:\d{2}:\d{2}\.\d{3} --> \d{2}:\d{2}:\d{2}\.\d{3}$/;
+const SCRIPTURE_RE = /^[A-Z1-3]{3} \d+:\d+/;
+
+function inferFileType(paired: TranslatableString[]): FileType {
+  for (const c of paired) {
+    if (VTT_RE.test(c.context)) return "vtt";
+    if (SCRIPTURE_RE.test(c.context)) return "usfm";
+  }
+  return "txt";
+}
 
 export interface ImportedProject {
   project: ProjectRecord;
@@ -68,7 +80,9 @@ export async function importFromOpfs(args: ImportArgs): Promise<ImportedProject>
     commentsByCell = mapCodexCommentsToThreads(parseCodexComments(raw));
   } catch { /* no comments */ }
 
-  // 4. For each .codex, build a Y.Doc.
+  // 4. For each .codex, build a Y.Doc using the canonical createFileDoc shape
+  //    (cells = Y.Map<id, Y.Map>, order = Y.Array<id>, etc.) so the editor
+  //    can read it. Then layer history/threads/video on top.
   const files: FileReference[] = [];
   const docs: Record<string, Y.Doc> = {};
   const total = codexPaths.length;
@@ -85,32 +99,52 @@ export async function importFromOpfs(args: ImportArgs): Promise<ImportedProject>
 
     const sourceCells = sourceByStem.get(stem) ?? [];
     const paired = pairCells(sourceCells, nb.cells, stem);
-
+    const fileType = inferFileType(paired);
     const fileId = uuid();
-    const doc = new Y.Doc();
+
+    // Build edit-history map keyed by source cell id.
+    const historyById = new Map<string, ReturnType<typeof mapEditHistory>>();
+    for (const c of nb.cells) {
+      if (!c.metadata.edits?.length) continue;
+      const entries = mapEditHistory(c.metadata.edits);
+      if (entries.length) historyById.set(c.metadata.id, entries);
+    }
+
+    const handle = createFileDoc(fileId, stem, fileType, sourceLanguage, targetLanguage, paired);
+    const { doc } = handle;
+
     doc.transact(() => {
-      const cellsArr = doc.getArray("cells");
-      cellsArr.push(paired as unknown as object[]);
+      const cellsMap = doc.getMap("cells");
 
-      const historyMap = doc.getMap<Y.Array<unknown>>("history");
-      for (const c of nb.cells) {
-        if (!c.metadata.edits?.length) continue;
-        const entries = mapEditHistory(c.metadata.edits);
-        if (!entries.length) continue;
-        const arr = new Y.Array();
-        arr.push(entries as unknown as object[]);
-        historyMap.set(c.metadata.id, arr);
+      // Layer in history per cell (createFileDoc gave each cell an empty history Y.Array).
+      for (const [cellId, entries] of historyById) {
+        const cell = cellsMap.get(cellId) as Y.Map<unknown> | undefined;
+        if (!cell) continue;
+        const histArr = cell.get("history") as Y.Array<unknown> | undefined;
+        if (!histArr) continue;
+        histArr.push(entries as unknown as object[]);
       }
 
-      const commentsMap = doc.getMap<Y.Array<unknown>>("comments");
-      for (const c of paired) {
-        const threads = commentsByCell[c.id];
-        if (!threads?.length) continue;
-        const arr = new Y.Array();
-        arr.push(threads as unknown as object[]);
-        commentsMap.set(c.id, arr);
+      // Layer in comment threads per cell. Schema: Y.Array<Y.Map<unknown>>.
+      for (const cellId of Object.keys(commentsByCell)) {
+        const cell = cellsMap.get(cellId) as Y.Map<unknown> | undefined;
+        if (!cell) continue;
+        const threadsArr = new Y.Array<Y.Map<unknown>>();
+        for (const t of commentsByCell[cellId]) {
+          const tm = new Y.Map<unknown>();
+          tm.set("id", t.id);
+          tm.set("status", t.status);
+          tm.set("createdAt", t.createdAt);
+          if (t.resolvedAt) tm.set("resolvedAt", t.resolvedAt);
+          if (t.resolvedBy) tm.set("resolvedBy", t.resolvedBy);
+          tm.set("createdForTranslated", t.createdForTranslated);
+          tm.set("messages", t.messages);
+          threadsArr.push([tm]);
+        }
+        cell.set("threads", threadsArr);
       }
 
+      // Video metadata (cue-aligned files only).
       const metaMap = doc.getMap("meta");
       if (nb.metadata.videoUrl) {
         metaMap.set("videoUrl", nb.metadata.videoUrl);
@@ -119,10 +153,14 @@ export async function importFromOpfs(args: ImportArgs): Promise<ImportedProject>
     });
 
     docs[fileId] = doc;
+    // We hold the Y.Doc but release the persistence so the next loop iteration
+    // doesn't pile up open IDB handles. persistImportedProject reattaches.
+    handle.persistence.destroy();
+
     files.push({
       id: fileId,
       name: stem,
-      type: "txt", // TODO M13.2 — infer from content when USFM/subtitle signals available
+      type: fileType,
       createdAt: new Date().toISOString(),
       cellCount: paired.length,
     });
@@ -147,7 +185,7 @@ export async function importFromOpfs(args: ImportArgs): Promise<ImportedProject>
 export async function persistImportedProject(imported: ImportedProject): Promise<void> {
   await createProject(imported.project);
   for (const [fileId, doc] of Object.entries(imported.docs)) {
-    const persistence = new IndexeddbPersistence(`file-${fileId}`, doc);
+    const persistence = new IndexeddbPersistence(`codex:file:${fileId}`, doc);
     await persistence.whenSynced;
     persistence.destroy();
   }

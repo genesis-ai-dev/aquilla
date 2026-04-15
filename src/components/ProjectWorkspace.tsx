@@ -37,6 +37,7 @@ import { peerColor as peerColorLocal } from "@/lib/sync/webrtc-provider"
 import { startBootstrapHost } from "@/lib/sync/bootstrap"
 import { listShares } from "@/lib/sync/share-tokens"
 import { useProjectPermissions } from "@/hooks/useProjectPermissions"
+import { useSyncProject } from "@/hooks/useSyncProject"
 import { Lock } from "lucide-react"
 
 export function ProjectWorkspace() {
@@ -256,6 +257,14 @@ export function ProjectWorkspace() {
   const perms = useProjectPermissions(project)
   const isReadOnly = !perms.canEditContent
 
+  const { sync: runSync, phase: syncPhase, inFlight: syncInFlight, lastResult: syncLastResult } = useSyncProject()
+
+  const handleProjectUpdated = useCallback(async (updated: typeof project) => {
+    if (!updated) return
+    await updateProject(updated)
+    refresh()
+  }, [refresh])
+
   if (loading || !project) return <div className="p-8 text-muted-foreground">Loading...</div>
 
   async function handleImported(refs: FileReference[]) {
@@ -291,6 +300,11 @@ export function ProjectWorkspace() {
         peers={peers}
         exportEnabled={Boolean(activeFileId)}
         onVideo={isSubtitleFile ? () => setVideoDialogOpen(true) : undefined}
+        onProjectUpdated={handleProjectUpdated}
+        sync={runSync}
+        syncPhase={syncPhase}
+        syncInFlight={syncInFlight}
+        syncLastResult={syncLastResult}
       />
       {isReadOnly && (
         <div className="flex items-center gap-2 border-b bg-amber-50 px-4 py-2 text-xs text-amber-900">

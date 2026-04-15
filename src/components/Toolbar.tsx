@@ -2,7 +2,10 @@ import { Settings, Scale, Download, Search, MessagesSquare, Camera, Share2, Film
 import { Button } from "@/components/ui/button"
 import type { ProjectRecord } from "@/lib/parsers/types"
 import type { PeerState } from "@/hooks/useSync"
+import type { SyncPhase, SyncResult } from "@/lib/sync/git-sync"
+import type { FrontierSession } from "@/lib/frontier/types"
 import { PeerPresence } from "./PeerPresence"
+import { SyncButton } from "./SyncButton"
 
 interface ToolbarProps {
   project: ProjectRecord
@@ -18,11 +21,17 @@ interface ToolbarProps {
   peers?: PeerState[]
   exportEnabled: boolean
   onVideo?: () => void
+  onProjectUpdated: (p: ProjectRecord) => void
+  sync: (project: ProjectRecord, session: FrontierSession) => Promise<SyncResult | null>
+  syncPhase: SyncPhase
+  syncInFlight: boolean
+  syncLastResult: SyncResult | null
 }
 
 export function Toolbar({
   project, onBack, onImport, onSettings, onRules, onExport,
   onSearch, onComments, onSnapshots, onShare, peers = [], exportEnabled, onVideo,
+  onProjectUpdated, sync, syncPhase, syncInFlight, syncLastResult,
 }: ToolbarProps) {
   return (
     <header className="flex items-center gap-4 border-b px-4 py-2">
@@ -35,6 +44,14 @@ export function Toolbar({
       </span>
       <PeerPresence peers={peers} />
       <div className="flex-1" />
+      <SyncButton
+        project={project}
+        onUpdated={onProjectUpdated}
+        sync={sync}
+        phase={syncPhase}
+        inFlight={syncInFlight}
+        lastResult={syncLastResult}
+      />
       <Button variant="ghost" size="sm" onClick={onSearch} title="Search (Cmd+K)">
         <Search className="h-4 w-4" />
       </Button>

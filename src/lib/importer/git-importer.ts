@@ -4,7 +4,7 @@ import {
   parseCodexNotebook, parseCodexComments, parseCodexProjectMetadata,
   pairCells, mapEditHistory, mapCodexCommentsToThreads,
 } from "@/lib/codex-editor";
-import type { CodexCell } from "@/lib/codex-editor";
+import type { CodexCell, CodexCommentsFile } from "@/lib/codex-editor";
 import { listFilesMatching, basename } from "./opfs-paths";
 import type {
   ProjectRecord, FileReference, ProjectPermissions, ProjectOrigin,
@@ -74,11 +74,14 @@ export async function importFromOpfs(args: ImportArgs): Promise<ImportedProject>
     } catch { /* skip */ }
   }
 
-  // 3. Parse comments once, keyed by cellId.
+  // 3. Parse comments once, keyed by cellId. Also keep the raw file so we can
+  //    stash the original thread JSON on each Y.Map via __source.
   let commentsByCell: Record<string, CommentThread[]> = {};
+  let parsedComments: CodexCommentsFile | null = null;
   try {
     const raw = (await fs.promises.readFile(`${repoDir}/.project/comments.json`, { encoding: "utf8" })) as string;
-    commentsByCell = mapCodexCommentsToThreads(parseCodexComments(raw));
+    parsedComments = parseCodexComments(raw);
+    commentsByCell = mapCodexCommentsToThreads(parsedComments);
   } catch { /* no comments */ }
 
   // 4. For each .codex, build a Y.Doc using the canonical createFileDoc shape
@@ -129,6 +132,14 @@ export async function importFromOpfs(args: ImportArgs): Promise<ImportedProject>
         setFragmentFromHtml(frag, c.translated);
       }
 
+      // Stash the raw CodexCell source on each cell under __source so the
+      // serializer can round-trip unknown fields (attachments, data, etc.).
+      for (const sourceCell of nb.cells) {
+        const cell = cellsMap.get(sourceCell.metadata.id) as Y.Map<unknown> | undefined;
+        if (!cell) continue;
+        cell.set("__source", JSON.parse(JSON.stringify(sourceCell)));
+      }
+
       // Layer in history per cell (createFileDoc gave each cell an empty history Y.Array).
       for (const [cellId, entries] of historyById) {
         const cell = cellsMap.get(cellId) as Y.Map<unknown> | undefined;
@@ -152,6 +163,10 @@ export async function importFromOpfs(args: ImportArgs): Promise<ImportedProject>
           if (t.resolvedBy) tm.set("resolvedBy", t.resolvedBy);
           tm.set("createdForTranslated", t.createdForTranslated);
           tm.set("messages", t.messages);
+          const originalThreadJson = parsedComments?.[t.id];
+          if (originalThreadJson) {
+            tm.set("__source", JSON.parse(JSON.stringify(originalThreadJson)));
+          }
           threadsArr.push([tm]);
         }
         cell.set("threads", threadsArr);
@@ -163,6 +178,9 @@ export async function importFromOpfs(args: ImportArgs): Promise<ImportedProject>
         metaMap.set("videoUrl", nb.metadata.videoUrl);
         if (nb.metadata.originalName) metaMap.set("videoFileName", nb.metadata.originalName);
       }
+      // Stash the raw CodexNotebookMetadata under __source on the file meta so
+      // the serializer can round-trip unknown notebook-level fields.
+      metaMap.set("__source", JSON.parse(JSON.stringify(nb.metadata)));
     });
 
     docs[fileId] = doc;

@@ -51,6 +51,38 @@ describe("importFromOpfs", () => {
   });
 });
 
+describe("importFromOpfs __source stashing", () => {
+  it("stashes __source on every cell, on file metadata, and on threads", async () => {
+    const root = new MemoryDirectoryHandle("r");
+    const fs = createOpfsFs(root as unknown as FileSystemDirectoryHandle);
+    await fs.promises.mkdir("/repo/files/target", { recursive: true });
+    await fs.promises.mkdir("/repo/.project/sourceTexts", { recursive: true });
+    await fs.promises.writeFile("/repo/metadata.json", readFix("metadata.json"));
+    await fs.promises.writeFile("/repo/files/target/sample.codex", readFix("sample.codex"));
+    await fs.promises.writeFile("/repo/.project/sourceTexts/sample.source", readFix("sample.source"));
+    await fs.promises.writeFile("/repo/.project/comments.json", readFix("comments.json"));
+
+    const { project, docs } = await importFromOpfs({
+      fs, repoDir: "/repo",
+      origin: { kind: "git", cloneUrl: "u", gitlabProjectId: 1, branch: "main", headSha: "abc", importedAt: "now" },
+      permissions: { source: "gitlab", canEditContent: true, canEditComments: true, canResolveComments: true, canPush: true, accessLevel: 30 },
+    });
+
+    const doc = docs[project.files[0].id];
+    const cellsMap = doc.getMap("cells");
+    const cell1 = cellsMap.get("GEN 1:1") as Y.Map<unknown>;
+    const cellSource = cell1.get("__source") as Record<string, unknown>;
+    expect(cellSource).toBeDefined();
+    expect(cellSource.metadata).toBeDefined();
+
+    const meta = doc.getMap("meta");
+    expect(meta.get("__source")).toBeDefined();
+
+    const threadsArr = cell1.get("threads") as Y.Array<Y.Map<unknown>>;
+    expect(threadsArr.get(0).get("__source")).toBeDefined();
+  });
+});
+
 describe("persistImportedProject", () => {
   it("persists the imported project into the project index", async () => {
     const root = new MemoryDirectoryHandle("r");

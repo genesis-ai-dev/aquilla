@@ -57,6 +57,7 @@ export async function syncProject(
 
   onPhase?.("checking-dirty")
   const fs: OpfsFs = opts.fs ?? createOpfsFs(await openOpfsRepoDir(repoKey(project)))
+  const authHeader = `Basic ${btoa(`oauth2:${session.gitlabToken}`)}`
 
   // 1) Fetch + compare heads.
   try {
@@ -69,13 +70,10 @@ export async function syncProject(
       singleBranch: true,
       depth: 1,
       corsProxy: GIT_CORS_PROXY,
-      onAuth: () => {
-        console.debug("[sync] onAuth fired (retry with credentials)")
-        return { username: "oauth2", password: session.gitlabToken }
-      },
-      onAuthSuccess: () => console.debug("[sync] auth accepted"),
-      onAuthFailure: (_url, auth) => {
-        console.error("[sync] auth rejected — token may be expired. Log out and back in.", { authUser: auth?.username })
+      headers: { Authorization: authHeader },
+      onAuth: () => ({ username: "oauth2", password: session.gitlabToken }),
+      onAuthFailure: () => {
+        console.error("[sync] auth rejected by remote")
         return { cancel: true }
       },
     })
@@ -168,13 +166,10 @@ export async function syncProject(
       remote: "origin",
       ref: project.origin.branch,
       corsProxy: GIT_CORS_PROXY,
-      onAuth: () => {
-        console.debug("[sync] push onAuth fired")
-        return { username: "oauth2", password: session.gitlabToken }
-      },
-      onAuthSuccess: () => console.debug("[sync] push auth accepted"),
+      headers: { Authorization: authHeader },
+      onAuth: () => ({ username: "oauth2", password: session.gitlabToken }),
       onAuthFailure: () => {
-        console.error("[sync] push auth rejected")
+        console.error("[sync] push auth rejected by remote")
         return { cancel: true }
       },
     })

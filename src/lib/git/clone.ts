@@ -25,7 +25,9 @@ export async function cloneRepo({
     corsProxy: GIT_CORS_PROXY,
     singleBranch: true,
     depth: 1,
+    headers: { Authorization: `Basic ${btoa(`oauth2:${gitlabToken}`)}` },
     onAuth: () => ({ username: "oauth2", password: gitlabToken }),
+    onAuthFailure: () => ({ cancel: true }),
     onProgress,
     onMessage,
   });

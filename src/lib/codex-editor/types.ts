@@ -74,6 +74,7 @@ export interface CodexNotebookMetadata {
   sourceCreatedAt?: string;
   codexLastModified?: string;
   navigation?: unknown[];
+  edits?: EditHistory[];    // NEW — file-level edit ledger, same shape as cell edits
   [key: string]: unknown;
 }
 

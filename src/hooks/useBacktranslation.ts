@@ -4,10 +4,21 @@ import type { CompletionSettings } from "@/lib/parsers/types"
 import type { FrontierSession } from "@/lib/frontier/types"
 import type { CellData } from "./useCells"
 import { generateBacktranslation } from "@/lib/completion/backtranslation-service"
-import { resolveProvider } from "@/lib/completion/completion-service"
+import { resolveProvider, DEFAULT_SYSTEM_PROMPT } from "@/lib/completion/completion-service"
+import { useFrontierHealth } from "@/lib/completion/frontier-health"
 import { setCellBacktranslation } from "./useCellHistory"
 
 type FindExamples = (cell: CellData) => { target: string; backtranslation: string }[]
+
+const FALLBACK_SETTINGS: CompletionSettings = {
+  provider: "frontier",
+  endpoint: "",
+  model: "",
+  maxTokens: 512,
+  temperature: 0.3,
+  systemPrompt: DEFAULT_SYSTEM_PROMPT,
+  llmHealthPenalty: 0.1,
+}
 
 export function useBacktranslation(
   doc: Y.Doc | null,
@@ -20,14 +31,16 @@ export function useBacktranslation(
   const [generating, setGenerating] = useState<Set<string>>(new Set())
   const [errors, setErrors] = useState<Map<string, string>>(new Map())
 
-  const isConfigured = settings
-    ? resolveProvider(settings) === "frontier"
-      ? Boolean(session?.jwt)
-      : Boolean(settings.endpoint && settings.model)
-    : false
+  const effectiveSettings = settings ?? FALLBACK_SETTINGS
+  const provider = resolveProvider(effectiveSettings)
+  const { available: frontierAvailable } = useFrontierHealth()
+
+  const isConfigured = provider === "frontier"
+    ? Boolean(session?.jwt) && frontierAvailable
+    : Boolean(effectiveSettings.endpoint && effectiveSettings.model)
 
   const generate = useCallback(async (cell: CellData) => {
-    if (!doc || !settings || !isConfigured) return
+    if (!doc || !isConfigured) return
     const targetText = cell.translated.trim()
     if (!targetText) return
 
@@ -43,7 +56,7 @@ export function useBacktranslation(
         targetLanguage,
         targetText,
         examples,
-        settings,
+        settings: effectiveSettings,
         session,
         onChunk: (text) => {
           setCellBacktranslation(doc, cell.id, text, targetText)

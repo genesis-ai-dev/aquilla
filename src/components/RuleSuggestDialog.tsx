@@ -6,9 +6,20 @@ import {
 } from "@/components/ui/dialog"
 import { collectValidatedPairs } from "@/lib/store/file-doc"
 import { suggestRulesFromPairs, type RuleSuggestion } from "@/lib/rules/rule-suggester"
-import { resolveProvider } from "@/lib/completion/completion-service"
+import { resolveProvider, DEFAULT_SYSTEM_PROMPT } from "@/lib/completion/completion-service"
+import { useFrontierHealth } from "@/lib/completion/frontier-health"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import type { CompletionSettings, FileReference, TranslationRule } from "@/lib/parsers/types"
+
+const FALLBACK_SETTINGS: CompletionSettings = {
+  provider: "frontier",
+  endpoint: "",
+  model: "",
+  maxTokens: 512,
+  temperature: 0.3,
+  systemPrompt: DEFAULT_SYSTEM_PROMPT,
+  llmHealthPenalty: 0.1,
+}
 
 interface RuleSuggestDialogProps {
   files: FileReference[]
@@ -18,6 +29,7 @@ interface RuleSuggestDialogProps {
 
 export function RuleSuggestDialog({ files, completionSettings, onAdd }: RuleSuggestDialogProps) {
   const { session } = useFrontierSession()
+  const { available: frontierAvailable } = useFrontierHealth()
   const [open, setOpen] = useState(false)
   const [stage, setStage] = useState<"idle" | "loading" | "review">("idle")
   const [error, setError] = useState<string | null>(null)
@@ -25,14 +37,14 @@ export function RuleSuggestDialog({ files, completionSettings, onAdd }: RuleSugg
   const [suggestions, setSuggestions] = useState<RuleSuggestion[]>([])
   const [accepted, setAccepted] = useState<Set<number>>(new Set())
 
-  const isConfigured = completionSettings
-    ? resolveProvider(completionSettings) === "frontier"
-      ? Boolean(session?.jwt)
-      : Boolean(completionSettings.endpoint && completionSettings.model)
-    : false
+  const provider = completionSettings ? resolveProvider(completionSettings) : "frontier"
+  const isConfigured = provider === "frontier"
+    ? Boolean(session?.jwt) && frontierAvailable
+    : Boolean(completionSettings?.endpoint && completionSettings?.model)
 
   async function handleSuggest() {
-    if (!completionSettings || !isConfigured) return
+    if (!isConfigured) return
+    const effectiveSettings = completionSettings ?? FALLBACK_SETTINGS
     setStage("loading")
     setError(null)
     try {
@@ -45,7 +57,7 @@ export function RuleSuggestDialog({ files, completionSettings, onAdd }: RuleSugg
         return
       }
 
-      const result = await suggestRulesFromPairs(pairs, completionSettings, session)
+      const result = await suggestRulesFromPairs(pairs, effectiveSettings, session)
       if (result.length === 0) {
         setError("The LLM didn't find any testable patterns. Try validating more diverse translations.")
         setStage("idle")

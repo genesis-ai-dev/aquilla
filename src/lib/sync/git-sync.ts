@@ -90,6 +90,7 @@ export async function syncProject(
       }
     }
   } catch (e) {
+    console.error("[sync] fetch failed:", e)
     return {
       status: "error",
       message: `Fetch failed: ${e instanceof Error ? e.message : String(e)}`,
@@ -197,6 +198,12 @@ export async function syncProject(
 
     onPhase?.("done")
     return { status: "synced", commitSha, filesWritten }
+  } catch (e) {
+    console.error("[sync] serialize/commit/push failed:", e)
+    return {
+      status: "error",
+      message: e instanceof Error ? e.message : String(e),
+    }
   } finally {
     for (const { handle } of fileHandles) destroyFileDoc(handle)
   }

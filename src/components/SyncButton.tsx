@@ -66,39 +66,47 @@ export function SyncButton({ project, onUpdated, sync, phase, inFlight, lastResu
   }
 
   const isError = lastResult?.status === "error" && !inFlight
+  const errorMessage = isError ? (lastResult?.message ?? "unknown error") : null
 
   return (
-    <Button
-      size="sm"
-      variant={isError ? "destructive" : dirty ? "default" : "ghost"}
-      onClick={onClick}
-      disabled={inFlight}
-      title={
-        isError
-          ? `Sync failed: ${lastResult?.message ?? "unknown error"}`
-          : inFlight
-            ? PHASE_LABELS[phase]
+    <div className="flex items-center gap-2">
+      <Button
+        size="sm"
+        variant={isError ? "destructive" : dirty ? "default" : "ghost"}
+        onClick={onClick}
+        disabled={inFlight}
+        title={
+          isError
+            ? `Sync failed: ${errorMessage}`
+            : inFlight
+              ? PHASE_LABELS[phase]
+              : dirty
+                ? "Sync local changes (Cmd/Ctrl+S)"
+                : "All changes synced"
+        }
+      >
+        {inFlight ? (
+          <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />
+        ) : isError ? (
+          <AlertTriangle className="mr-1 h-3.5 w-3.5" />
+        ) : dirty ? (
+          <Cloud className="mr-1 h-3.5 w-3.5" />
+        ) : (
+          <Check className="mr-1 h-3.5 w-3.5 text-green-600" />
+        )}
+        {inFlight
+          ? PHASE_LABELS[phase]
+          : isError
+            ? "Sync failed — retry"
             : dirty
-              ? "Sync local changes (Cmd/Ctrl+S)"
-              : "All changes synced"
-      }
-    >
-      {inFlight ? (
-        <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />
-      ) : isError ? (
-        <AlertTriangle className="mr-1 h-3.5 w-3.5" />
-      ) : dirty ? (
-        <Cloud className="mr-1 h-3.5 w-3.5" />
-      ) : (
-        <Check className="mr-1 h-3.5 w-3.5 text-green-600" />
+              ? "Sync"
+              : "Synced"}
+      </Button>
+      {errorMessage && (
+        <span className="max-w-xs truncate text-xs text-destructive" title={errorMessage}>
+          {errorMessage}
+        </span>
       )}
-      {inFlight
-        ? PHASE_LABELS[phase]
-        : isError
-          ? "Sync failed — retry"
-          : dirty
-            ? "Sync"
-            : "Synced"}
-    </Button>
+    </div>
   )
 }

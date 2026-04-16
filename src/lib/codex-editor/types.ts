@@ -48,6 +48,15 @@ export interface CodexData {
   globalReferences?: string[];
 }
 
+export interface CodexCellAttachment {
+  url: string;
+  type: string;
+  createdAt?: number;
+  updatedAt?: number;
+  isDeleted?: boolean;
+  isMissing?: boolean;
+}
+
 export interface CodexCellMetadata {
   id: string;
   type: CodexCellType;
@@ -56,6 +65,8 @@ export interface CodexCellMetadata {
   cellLabel?: string;
   parentId?: string;
   isLocked?: boolean;
+  attachments?: Record<string, CodexCellAttachment>;
+  selectedAudioId?: string;
 }
 
 export interface CodexCell {

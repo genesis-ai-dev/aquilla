@@ -57,7 +57,7 @@ export function useCells(doc: Y.Doc | null): CellData[] {
         const source = cell.get("__source") as
           | { metadata?: { attachments?: Record<string, CodexCellAttachment>; selectedAudioId?: string; cellLabel?: string } }
           | undefined
-        const cellLabel = source?.metadata?.cellLabel || undefined
+        const cellLabel = source?.metadata?.cellLabel
         ordered.push({
           id: cell.get("id") as string,
           original: cell.get("original") as string,

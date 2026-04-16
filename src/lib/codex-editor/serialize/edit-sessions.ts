@@ -52,14 +52,28 @@ export function collapseToEditSessions(entries: CellHistoryEntry[]): EditSession
 /**
  * Serialize a collapsed EditSession as a single EditHistory entry suitable for
  * writing to a .codex notebook's metadata.edits array.
+ *
+ * When the session is validated, emit a `validatedBy` array carrying a single
+ * ValidationEntry for the session author. The desktop app reads `validatedBy`
+ * (not the legacy boolean) to render validation state — if we drop it here,
+ * validations made on the web never sync back.
  */
 export function sessionToEditEntry(session: EditSession): EditHistory {
   const type: EditTypeValue = session.source === "llm" ? "llm-edit" : "user-edit";
-  return {
+  const entry: EditHistory = {
     author: session.author,
     timestamp: session.endTimestamp,
     type,
     editMap: ["value"],
     value: session.finalValue,
   };
+  if (session.validated) {
+    entry.validatedBy = [{
+      username: session.author,
+      creationTimestamp: session.endTimestamp,
+      updatedTimestamp: session.endTimestamp,
+      isDeleted: false,
+    }];
+  }
+  return entry;
 }

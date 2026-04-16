@@ -69,4 +69,33 @@ describe("sessionToEditEntry", () => {
     };
     expect(sessionToEditEntry(session).type).toBe("llm-edit");
   });
+
+  it("emits validatedBy when session is validated", () => {
+    const session = {
+      author: "alice",
+      source: "human" as const,
+      validated: true,
+      startTimestamp: 100,
+      endTimestamp: 200,
+      finalValue: "v",
+      entries: [],
+    };
+    const edit = sessionToEditEntry(session);
+    expect(edit.validatedBy).toEqual([
+      { username: "alice", creationTimestamp: 200, updatedTimestamp: 200, isDeleted: false },
+    ]);
+  });
+
+  it("omits validatedBy when session is not validated", () => {
+    const session = {
+      author: "alice",
+      source: "human" as const,
+      validated: false,
+      startTimestamp: 100,
+      endTimestamp: 200,
+      finalValue: "v",
+      entries: [],
+    };
+    expect(sessionToEditEntry(session).validatedBy).toBeUndefined();
+  });
 });

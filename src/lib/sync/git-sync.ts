@@ -69,7 +69,15 @@ export async function syncProject(
       singleBranch: true,
       depth: 1,
       corsProxy: GIT_CORS_PROXY,
-      onAuth: () => ({ username: "oauth2", password: session.gitlabToken }),
+      onAuth: () => {
+        console.debug("[sync] onAuth fired (retry with credentials)")
+        return { username: "oauth2", password: session.gitlabToken }
+      },
+      onAuthSuccess: () => console.debug("[sync] auth accepted"),
+      onAuthFailure: (_url, auth) => {
+        console.error("[sync] auth rejected — token may be expired. Log out and back in.", { authUser: auth?.username })
+        return { cancel: true }
+      },
     })
     const remoteHead = await git.resolveRef({
       fs: fs as unknown as git.FsClient,
@@ -160,7 +168,15 @@ export async function syncProject(
       remote: "origin",
       ref: project.origin.branch,
       corsProxy: GIT_CORS_PROXY,
-      onAuth: () => ({ username: "oauth2", password: session.gitlabToken }),
+      onAuth: () => {
+        console.debug("[sync] push onAuth fired")
+        return { username: "oauth2", password: session.gitlabToken }
+      },
+      onAuthSuccess: () => console.debug("[sync] push auth accepted"),
+      onAuthFailure: () => {
+        console.error("[sync] push auth rejected")
+        return { cancel: true }
+      },
     })
 
     // 5) Bump __lastSyncedHistoryAt on every cell across every doc. Writes

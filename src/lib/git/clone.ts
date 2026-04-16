@@ -31,6 +31,12 @@ export async function cloneRepo({
     onProgress,
     onMessage,
   });
+  // clone({singleBranch}) can omit the wildcard refspec, which later breaks
+  // plain git.fetch({remote:"origin"}). Force a canonical refspec.
+  await git.addRemote({
+    fs: fs as unknown as git.FsClient,
+    dir, remote: "origin", url, force: true,
+  });
   const headSha = await git.resolveRef({
     fs: fs as unknown as git.FsClient,
     dir,

@@ -61,11 +61,22 @@ export async function syncProject(
 
   // 1) Fetch + compare heads.
   try {
+    // Ensure origin is registered with a wildcard refspec. clone({singleBranch})
+    // sometimes omits the refspec, which makes subsequent fetch() throw
+    // NoRefspecError. addRemote with force:true rewrites config idempotently.
+    await git.addRemote({
+      fs: fs as unknown as git.FsClient,
+      dir: "/",
+      remote: "origin",
+      url: project.origin.cloneUrl,
+      force: true,
+    })
+
     await git.fetch({
       fs: fs as unknown as git.FsClient,
       http,
       dir: "/",
-      url: project.origin.cloneUrl,
+      remote: "origin",
       ref: project.origin.branch,
       singleBranch: true,
       depth: 1,

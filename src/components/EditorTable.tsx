@@ -14,6 +14,7 @@ import { ExamplePanel } from "./ExamplePanel"
 import { HighlightedText, buildHighlightsFromExamples } from "./HighlightedText"
 import { HealthRing } from "./HealthRing"
 import { TranslatedEditor } from "./TranslatedEditor"
+import { CellAudioButton } from "./CellAudioButton"
 import { cn } from "@/lib/utils"
 
 export interface EditorTableHandle {
@@ -127,6 +128,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
               )}
             >
               <EditorRow
+                project={project}
                 cell={cell}
                 doc={doc}
                 username={username}
@@ -169,6 +171,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
 })
 
 interface EditorRowProps {
+  project: ProjectRecord
   cell: CellData
   doc: Y.Doc
   username: string
@@ -199,7 +202,7 @@ interface EditorRowProps {
 }
 
 function EditorRow({
-  cell, doc, username, editable, isCompletionConfigured, isLoading,
+  project, cell, doc, username, editable, isCompletionConfigured, isLoading,
   cellExamples, highlights, error, health,
   cellInfractions, ruleMap,
   onCompleteSingle, onInfractionClick,
@@ -283,6 +286,21 @@ function EditorRow({
     sourceHasFormatting && !targetHasFormatting && cell.translated.trim().length > 0
 
   const healthValue = health ?? (cell.status === "validated" ? 100 : 0)
+
+  // Minimal CodexCell shape for CellAudioButton — only the metadata fields
+  // the hook actually reads (selectedAudioId, attachments). Avoids plumbing
+  // the entire CodexCell through CellData.
+  const cellForButton = {
+    kind: 2 as const,
+    languageId: "html",
+    value: cell.translated ?? "",
+    metadata: {
+      id: cell.id,
+      type: (cell.type ?? "text") as "text",
+      attachments: cell.attachments,
+      selectedAudioId: cell.selectedAudioId,
+    },
+  } as unknown as import("@/lib/codex-editor/types").CodexCell
 
   // Build tooltip detail
   const lastEntry = cell.history[cell.history.length - 1]
@@ -461,6 +479,7 @@ function EditorRow({
         </div>
         <div className="flex flex-col items-center">
           {validationIcon}
+          <CellAudioButton project={project} cell={cellForButton} />
           {onOpenComments && (
             <button
               className={cn(

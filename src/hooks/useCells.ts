@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react"
 import * as Y from "yjs"
 import type { CellHistoryEntry, SourceLocation, CommentThread } from "@/lib/parsers/types"
+import type { CodexCellAttachment } from "@/lib/codex-editor/types"
 import { extractThreadsFromCell } from "./useComments"
 import { getPlainText } from "@/lib/richtext/translated-xml"
 
@@ -20,6 +21,8 @@ export interface CellData {
   backtranslation?: string
   backtranslationUpdatedAt?: string
   backtranslationForText?: string
+  attachments?: Record<string, CodexCellAttachment>
+  selectedAudioId?: string
 }
 
 function deriveStatus(translated: string, history: CellHistoryEntry[]): "empty" | "unvalidated" | "validated" {
@@ -47,6 +50,12 @@ export function useCells(doc: Y.Doc | null): CellData[] {
         const historyArr = cell.get("history") as Y.Array<CellHistoryEntry> | undefined
         const history: CellHistoryEntry[] = historyArr ? historyArr.toArray() : []
         const threads = extractThreadsFromCell(cell)
+        // Audio attachment data lives in __source — the round-trippable JSON
+        // stash that serializeCell reads from. Pull it out for the UI here so
+        // CellAudioButton can render without knowing about the stash layout.
+        const source = cell.get("__source") as
+          | { metadata?: { attachments?: Record<string, CodexCellAttachment>; selectedAudioId?: string } }
+          | undefined
         ordered.push({
           id: cell.get("id") as string,
           original: cell.get("original") as string,
@@ -63,6 +72,8 @@ export function useCells(doc: Y.Doc | null): CellData[] {
           backtranslation: cell.get("backtranslation") as string | undefined,
           backtranslationUpdatedAt: cell.get("backtranslationUpdatedAt") as string | undefined,
           backtranslationForText: cell.get("backtranslationForText") as string | undefined,
+          attachments: source?.metadata?.attachments,
+          selectedAudioId: source?.metadata?.selectedAudioId,
         })
       }
       return ordered

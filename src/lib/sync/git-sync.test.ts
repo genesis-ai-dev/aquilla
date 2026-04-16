@@ -16,7 +16,10 @@ vi.mock("isomorphic-git", async () => {
     ...actual,
     fetch: vi.fn(async () => ({ fetchHead: "abc", fetchHeadDescription: "" })),
     resolveRef: vi.fn(async () => "abc"),
+    addRemote: vi.fn(async () => {}),
+    statusMatrix: vi.fn(async () => [["files/target/sample.codex", 1, 2, 1]]),
     add: vi.fn(async () => {}),
+    remove: vi.fn(async () => {}),
     commit: vi.fn(async () => "newsha"),
     push: vi.fn(async () => ({ ok: true })),
   }

@@ -163,8 +163,22 @@ export async function syncProject(
     }
 
     // 4) Stage + commit + push.
+    //    git.add({filepath: "."}) isn't a documented no-op for "all changes";
+    //    use statusMatrix to find modified/new/deleted files and add/remove
+    //    each explicitly.
     onPhase?.("committing")
-    await git.add({ fs: fs as unknown as git.FsClient, dir: "/", filepath: "." })
+    const fsClient = fs as unknown as git.FsClient
+    const status = await git.statusMatrix({ fs: fsClient, dir: "/" })
+    for (const [filepath, head, workdir, stage] of status) {
+      if (workdir === stage) continue
+      if (workdir === 0) {
+        // deleted in working tree — remove from index
+        await git.remove({ fs: fsClient, dir: "/", filepath })
+      } else {
+        await git.add({ fs: fsClient, dir: "/", filepath })
+      }
+      void head
+    }
     const commitSha = await git.commit({
       fs: fs as unknown as git.FsClient,
       dir: "/",

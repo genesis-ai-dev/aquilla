@@ -94,10 +94,12 @@ export async function syncProject(
       ref: `refs/remotes/origin/${project.origin.branch}`,
     })
     if (remoteHead !== project.origin.headSha) {
+      console.warn("[sync] remote moved",
+        { local: project.origin.headSha, remote: remoteHead })
       onPhase?.("remote-moved")
       return {
         status: "remote-moved",
-        message: "Remote has new commits. Sync requires Phase 3 (merge).",
+        message: `Remote has new commits. local=${project.origin.headSha.slice(0, 7)} remote=${remoteHead.slice(0, 7)} — sync requires Phase 3 (merge).`,
       }
     }
   } catch (e) {

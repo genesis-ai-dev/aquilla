@@ -17,7 +17,7 @@ import { createFileDoc } from "@/lib/store/file-doc";
 import { setFragmentFromHtml } from "@/lib/richtext/translated-xml";
 import type { FrontierSession, GitlabProject } from "@/lib/frontier/types";
 import { cloneRepo } from "@/lib/git/clone";
-import { openOpfsRepoDir, createOpfsFs } from "@/lib/git/opfs-fs";
+import { resetOpfsRepoDir, createOpfsFs } from "@/lib/git/opfs-fs";
 import { mapGitlabAccessLevel, resolveAccessLevel } from "@/lib/git/permissions";
 import { getProject } from "@/lib/frontier/api";
 
@@ -275,7 +275,9 @@ export async function importFromGitRepo(opts: {
 }): Promise<ImportedProject> {
   const { session, project, onPhase } = opts;
   const repoKey = `${project.id}-${project.path_with_namespace.replace(/\//g, "_")}`;
-  const dirHandle = await openOpfsRepoDir(repoKey);
+  // Always start from a clean dir — if a previous import left .git behind,
+  // isomorphic-git's clone will silently no-op and we'd record a stale headSha.
+  const dirHandle = await resetOpfsRepoDir(repoKey);
   const fs = createOpfsFs(dirHandle);
 
   onPhase?.("clone", 0, 1, project.name);

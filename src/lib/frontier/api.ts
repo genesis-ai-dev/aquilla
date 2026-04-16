@@ -112,6 +112,19 @@ export async function listMyProjectsPage(
   return readPagination<GitlabProject>(payload, items, res, page, perPage);
 }
 
+// Fetch full project details (including .permissions) — simple=true in the
+// listing strips them, so we re-fetch on import.
+export async function getProject(
+  session: FrontierSession, projectId: number
+): Promise<GitlabProject> {
+  const res = await fetch(
+    `${session.gitlabUrl}/api/v4/projects/${projectId}`,
+    { headers: { "PRIVATE-TOKEN": session.gitlabToken } }
+  );
+  if (!res.ok) throw new Error(`HTTP ${res.status}: ${await res.text()}`);
+  return await res.json() as GitlabProject;
+}
+
 export async function listGroupProjectsPage(
   session: FrontierSession, groupId: number, page: number, perPage = 50
 ): Promise<ProjectsPage> {

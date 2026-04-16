@@ -25,4 +25,11 @@ export interface GitlabProject {
     project_access?: { access_level: number } | null;
     group_access?: { access_level: number } | null;
   };
+  namespace?: {
+    id: number;
+    path: string;
+    full_path: string;
+    kind: "user" | "group";
+  };
+  owner?: { id: number; username: string };
 }

@@ -18,7 +18,8 @@ import { setFragmentFromHtml } from "@/lib/richtext/translated-xml";
 import type { FrontierSession, GitlabProject } from "@/lib/frontier/types";
 import { cloneRepo } from "@/lib/git/clone";
 import { openOpfsRepoDir, createOpfsFs } from "@/lib/git/opfs-fs";
-import { mapGitlabAccessLevel, bestAccessLevel } from "@/lib/git/permissions";
+import { mapGitlabAccessLevel, resolveAccessLevel } from "@/lib/git/permissions";
+import { getProject } from "@/lib/frontier/api";
 
 const VTT_RE = /^\d{2}:\d{2}:\d{2}\.\d{3} --> \d{2}:\d{2}:\d{2}\.\d{3}$/;
 const SCRIPTURE_RE = /^[A-Z1-3]{3} \d+:\d+/;
@@ -287,7 +288,17 @@ export async function importFromGitRepo(opts: {
   });
   onPhase?.("clone", 1, 1, "done");
 
-  const permissions = mapGitlabAccessLevel(bestAccessLevel(project));
+  // Project listings use `?simple=true` which strips the permissions block,
+  // and `bestAccessLevel(simpleProject)` would therefore be undefined. Fetch
+  // the full project so we get `permissions` + `namespace` for the owner
+  // heuristic.
+  let fullProject = project;
+  try {
+    fullProject = await getProject(session, project.id);
+  } catch (e) {
+    console.warn("[import] getProject failed, falling back to listing row:", e);
+  }
+  const permissions = mapGitlabAccessLevel(resolveAccessLevel(fullProject, session));
   const imported = await importFromOpfs({
     fs, repoDir: "/",
     origin: {

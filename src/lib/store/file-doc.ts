@@ -14,6 +14,7 @@ function extractCellTranslated(cell: Y.Map<unknown>): string {
 export interface FileDocHandle {
   doc: Y.Doc
   persistence: IndexeddbPersistence
+  fileId: string
 }
 
 export function createFileDoc(
@@ -56,16 +57,44 @@ export function createFileDoc(
   })
 
   const persistence = new IndexeddbPersistence(`codex:file:${fileId}`, doc)
-  return { doc, persistence }
+  // createFileDoc is only called by the importer. It does NOT register with the
+  // shared registry — the importer owns the sole reference and destroys it
+  // after whenSynced. Registry kicks in for later loadFileDoc calls so editor
+  // and sync share one Y.Doc instance.
+  return { doc, persistence, fileId }
 }
 
+// Shared registry of live handles. Without this, sync's loadFileDoc returned
+// a fresh Y.Doc + persistence disjoint from the editor's doc, so syncProject's
+// rehydrate wrote through to IDB but the editor's Y.Doc in the same tab kept
+// showing pre-merge state. Ref-count so destroyFileDoc from one caller doesn't
+// tear down the handle another caller is still using.
+interface RegistryEntry {
+  handle: FileDocHandle
+  refcount: number
+}
+const registry = new Map<string, RegistryEntry>()
+
 export function loadFileDoc(fileId: string): FileDocHandle {
+  const existing = registry.get(fileId)
+  if (existing) {
+    existing.refcount++
+    return existing.handle
+  }
   const doc = new Y.Doc()
   const persistence = new IndexeddbPersistence(`codex:file:${fileId}`, doc)
-  return { doc, persistence }
+  const handle: FileDocHandle = { doc, persistence, fileId }
+  registry.set(fileId, { handle, refcount: 1 })
+  return handle
 }
 
 export function destroyFileDoc(handle: FileDocHandle): void {
+  const entry = registry.get(handle.fileId)
+  if (entry && entry.handle === handle) {
+    entry.refcount--
+    if (entry.refcount > 0) return
+    registry.delete(handle.fileId)
+  }
   handle.persistence.destroy()
   handle.doc.destroy()
 }

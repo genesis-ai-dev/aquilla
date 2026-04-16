@@ -140,6 +140,55 @@ export interface ExportData {
   cells: ExportCell[]
 }
 
+// --- Phase 3: rehydration from merged notebook bytes ---
+
+/**
+ * Replace a live Y.Doc's cell state from a parsed merged notebook, inside a
+ * single transact() so IndexeddbPersistence writes through once. Cells keep
+ * their Y.Map identity where possible (open editors don't blow away their
+ * bindings). `__source` is replaced with the merged cell JSON — future
+ * serializeCell calls will see the merged edit ledger as canonical.
+ */
+export function rehydrateFileDoc(
+  doc: Y.Doc,
+  merged: import("@/lib/codex-editor/types").CodexNotebookFile,
+  syncedAt: number,
+): void {
+  doc.transact(() => {
+    const cellsMap = doc.getMap("cells")
+    const order = doc.getArray<string>("order")
+    const meta = doc.getMap("meta")
+
+    const mergedIds = new Set(merged.cells.map((c) => c.metadata.id))
+    for (const id of [...cellsMap.keys()]) {
+      if (!mergedIds.has(id)) cellsMap.delete(id)
+    }
+
+    for (const cell of merged.cells) {
+      const id = cell.metadata.id
+      let yCell = cellsMap.get(id) as Y.Map<unknown> | undefined
+      if (!yCell) {
+        yCell = new Y.Map<unknown>()
+        yCell.set("history", new Y.Array<unknown>())
+        yCell.set("translatedXml", new Y.XmlFragment())
+        cellsMap.set(id, yCell)
+      }
+      // Replace the __source stash — serializeCell reads this as the canonical
+      // on-disk shape, so merged edits become the new baseline.
+      yCell.set("__source", JSON.parse(JSON.stringify(cell)))
+      // Clear unsynced history — everything's now captured in __source.edits.
+      const hist = yCell.get("history") as Y.Array<unknown> | undefined
+      if (hist && hist.length > 0) hist.delete(0, hist.length)
+      yCell.set("__lastSyncedHistoryAt", syncedAt)
+    }
+
+    order.delete(0, order.length)
+    for (const cell of merged.cells) order.push([cell.metadata.id])
+
+    meta.set("__source", merged.metadata)
+  })
+}
+
 export async function collectExportCells(fileId: string): Promise<ExportData> {
   const handle = loadFileDoc(fileId)
   try {

@@ -25,3 +25,6 @@ dist-ssr
 *.sw?
 .playwright-mcp/
 .claude/worktrees/
+
+# Glance memory shards
+.glance/

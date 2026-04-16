@@ -2,6 +2,7 @@ import * as git from "isomorphic-git"
 import http from "isomorphic-git/http/web"
 import { GIT_CORS_PROXY } from "@/lib/git/clone"
 import { openOpfsRepoDir, createOpfsFs, type OpfsFs } from "@/lib/git/opfs-fs"
+import { opfsRepoKey, pathWithNamespaceFromCloneUrl } from "@/lib/git/repo-key"
 import { loadFileDoc, destroyFileDoc, type FileDocHandle } from "@/lib/store/file-doc"
 import { serializeFile, serializeComments } from "@/lib/codex-editor/serialize"
 import { isFileDirty } from "./dirty"
@@ -42,7 +43,7 @@ export interface SyncOptions {
 
 function repoKey(p: ProjectRecord): string {
   if (p.origin?.kind !== "git") throw new Error("syncProject: project has no git origin")
-  return `${p.origin.gitlabProjectId}-${p.origin.cloneUrl.split("/").slice(-2).join("_")}`
+  return opfsRepoKey(p.origin.gitlabProjectId, pathWithNamespaceFromCloneUrl(p.origin.cloneUrl))
 }
 
 export async function syncProject(

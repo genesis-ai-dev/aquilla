@@ -1,7 +1,7 @@
 import * as git from "isomorphic-git"
 import http from "isomorphic-git/http/web"
 import { GIT_CORS_PROXY } from "@/lib/git/clone"
-import type { OpfsFs } from "@/lib/git/opfs-fs"
+import type { FsProvider } from "@/lib/fs"
 import { getFsProvider } from "@/lib/fs"
 import { opfsRepoKey, pathWithNamespaceFromCloneUrl } from "@/lib/git/repo-key"
 import { loadFileDoc, destroyFileDoc, rehydrateFileDoc, type FileDocHandle } from "@/lib/store/file-doc"
@@ -46,7 +46,7 @@ export interface SyncOptions {
    * plumb a MemoryDirectoryHandle-backed fs into syncProject without any
    * OPFS access.
    */
-  fs?: OpfsFs
+  fs?: FsProvider
 }
 
 function repoKey(p: ProjectRecord): string {
@@ -65,7 +65,7 @@ export async function syncProject(
   }
 
   onPhase?.("checking-dirty")
-  const fs: OpfsFs = opts.fs ?? await getFsProvider(repoKey(project))
+  const fs: FsProvider = opts.fs ?? await getFsProvider(repoKey(project))
   const authHeader = `Basic ${btoa(`oauth2:${session.gitlabToken}`)}`
 
   // 1) Fetch + detect remote movement (but don't early-return on it — Phase 3

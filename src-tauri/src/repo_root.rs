@@ -10,15 +10,15 @@ pub fn repo_dir(app: &AppHandle, repo_key: &str) -> Result<PathBuf, String> {
         .map(|c| if c.is_ascii_alphanumeric() || c == '.' || c == '_' || c == '-' { c } else { '_' })
         .collect();
     if safe.is_empty() || safe == "." || safe == ".." {
-        return Err(format!("invalid repo_key: {repo_key:?}"));
+        return Err(format!("EINVAL: invalid repo_key: {repo_key:?}"));
     }
     let base = app
         .path()
         .app_data_dir()
-        .map_err(|e| format!("app_data_dir: {e}"))?
+        .map_err(|e| format!("EIO: app_data_dir: {e}"))?
         .join("repos")
         .join(&safe);
-    std::fs::create_dir_all(&base).map_err(|e| format!("mkdir {base:?}: {e}"))?;
+    std::fs::create_dir_all(&base).map_err(|e| format!("EIO: mkdir {base:?}: {e}"))?;
     Ok(base)
 }
 
@@ -30,7 +30,7 @@ pub fn safe_join(root: &std::path::Path, rel: &str) -> Result<PathBuf, String> {
     for seg in rel.split('/') {
         if seg.is_empty() || seg == "." { continue; }
         if seg == ".." {
-            return Err(format!("path escapes repo root: {rel:?}"));
+            return Err(format!("EINVAL: path escapes repo root: {rel:?}"));
         }
         out.push(seg);
     }

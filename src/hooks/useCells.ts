@@ -7,6 +7,7 @@ import { getPlainText } from "@/lib/richtext/translated-xml"
 
 export interface CellData {
   id: string
+  cellLabel?: string  // From cell.__source.metadata.cellLabel (codex source); user-editable label like "Narrator", "5:12"
   original: string
   originalHtml?: string
   translated: string
@@ -54,8 +55,9 @@ export function useCells(doc: Y.Doc | null): CellData[] {
         // stash that serializeCell reads from. Pull it out for the UI here so
         // CellAudioButton can render without knowing about the stash layout.
         const source = cell.get("__source") as
-          | { metadata?: { attachments?: Record<string, CodexCellAttachment>; selectedAudioId?: string } }
+          | { metadata?: { attachments?: Record<string, CodexCellAttachment>; selectedAudioId?: string; cellLabel?: string } }
           | undefined
+        const cellLabel = source?.metadata?.cellLabel || undefined
         ordered.push({
           id: cell.get("id") as string,
           original: cell.get("original") as string,
@@ -74,6 +76,7 @@ export function useCells(doc: Y.Doc | null): CellData[] {
           backtranslationForText: cell.get("backtranslationForText") as string | undefined,
           attachments: source?.metadata?.attachments,
           selectedAudioId: source?.metadata?.selectedAudioId,
+          ...(cellLabel ? { cellLabel } : {}),
         })
       }
       return ordered

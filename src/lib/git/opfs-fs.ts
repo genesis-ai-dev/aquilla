@@ -5,7 +5,17 @@ type DirHandle = FileSystemDirectoryHandle;
 type FileHandle = FileSystemFileHandle;
 
 function splitPath(path: string): string[] {
-  return path.split("/").filter(Boolean);
+  const out: string[] = [];
+  for (const seg of path.split("/")) {
+    if (!seg || seg === ".") continue;
+    if (seg === "..") {
+      // pop the last real segment; if already at root, silently stay there
+      out.pop();
+      continue;
+    }
+    out.push(seg);
+  }
+  return out;
 }
 
 // isomorphic-git inspects err.code as a string ('ENOENT', 'ENOTDIR', etc.).
@@ -213,9 +223,15 @@ export function createOpfsFs(root: DirHandle): OpfsFs {
           const f = await fh.getFile();
           return makeStats("file", f.size, f.lastModified);
         } catch {
-          const dh = await parent.getDirectoryHandle(name);
-          void dh;
-          return makeStats("dir", 0, 0);
+          try {
+            await parent.getDirectoryHandle(name);
+            return makeStats("dir", 0, 0);
+          } catch (e) {
+            const wrapped = e instanceof Error ? e : new Error(String(e));
+            (wrapped as Error & { pathSegment?: string; fullPath?: string }).pathSegment = name;
+            (wrapped as Error & { fullPath?: string }).fullPath = path;
+            throw wrapped;
+          }
         }
       }),
 

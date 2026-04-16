@@ -1,7 +1,23 @@
+import type { CompletionSettings, CompletionProvider } from "@/lib/parsers/types"
+import type { FrontierSession } from "@/lib/frontier/types"
+
 export const DEFAULT_SYSTEM_PROMPT =
-  "You are a translation assistant. Translate from {sourceLanguage} to {targetLanguage}. Output ONLY the translation, nothing else. Do not include explanations, notes, or the original text."
+  "You are translating a project from {sourceLanguage} into {targetLanguage}.\n" +
+  "Match the tone and formality of the provided examples. Return only the translated text — no explanations, no source text, no commentary."
+
+export const FRONTIER_CHAT_URL = "https://api.frontierrnd.com/api/v1/chat/completions"
 
 interface ChatMessage { role: "system" | "user" | "assistant"; content: string }
+
+/**
+ * Pre-migration CompletionSettings records don't have `provider` set.
+ * Infer: empty endpoint → "frontier" (new default); populated → "custom"
+ * (preserves existing self-hosted/local setups). Saved-through on next write.
+ */
+export function resolveProvider(settings: CompletionSettings): CompletionProvider {
+  if (settings.provider) return settings.provider
+  return settings.endpoint.trim() ? "custom" : "frontier"
+}
 
 export function buildPrompt(options: {
   sourceLanguage: string; targetLanguage: string; systemPrompt: string
@@ -25,21 +41,37 @@ export async function fetchModels(endpoint: string): Promise<string[]> {
   return data.data.map((m: { id: string }) => m.id)
 }
 
-export async function complete(options: {
-  endpoint: string; model: string; messages: ChatMessage[]
-  maxTokens: number; temperature: number; stream?: boolean
+export interface CompleteOptions {
+  settings: CompletionSettings
+  session: FrontierSession | null
+  messages: ChatMessage[]
+  stream?: boolean
   onChunk?: (text: string) => void
-}): Promise<string> {
-  const res = await fetch(`${options.endpoint}/v1/chat/completions`, {
+}
+
+export async function complete(options: CompleteOptions): Promise<string> {
+  const provider = resolveProvider(options.settings)
+  const { url, headers } = await buildRequestTarget(provider, options.settings, options.session)
+
+  const res = await fetch(url, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", ...headers },
     body: JSON.stringify({
-      model: options.model, messages: options.messages,
-      max_tokens: options.maxTokens, temperature: options.temperature,
+      model: options.settings.model || "default",
+      messages: options.messages,
+      max_tokens: options.settings.maxTokens,
+      temperature: options.settings.temperature,
       stream: options.stream || false,
     }),
   })
-  if (!res.ok) { const t = await res.text().catch(() => ""); throw new Error(`Completion failed: ${res.status} ${t}`) }
+  if (!res.ok) {
+    const text = await res.text().catch(() => "")
+    // Frontier returns 402 when subscription/credits are exhausted; surface message.
+    if (provider === "frontier" && res.status === 402) {
+      throw new Error(`Frontier AI limit reached: ${text || "Out of credits."}`)
+    }
+    throw new Error(`Completion failed: ${res.status} ${text}`)
+  }
 
   if (options.stream && options.onChunk && res.body) {
     const reader = res.body.getReader()
@@ -59,4 +91,28 @@ export async function complete(options: {
 
   const data = await res.json()
   return data.choices[0]?.message?.content?.trim() || ""
+}
+
+async function buildRequestTarget(
+  provider: CompletionProvider,
+  settings: CompletionSettings,
+  session: FrontierSession | null,
+): Promise<{ url: string; headers: Record<string, string> }> {
+  if (provider === "frontier") {
+    if (!session?.jwt) {
+      throw new Error("Sign in to use Frontier AI.")
+    }
+    return {
+      url: FRONTIER_CHAT_URL,
+      headers: { Authorization: `Bearer ${session.jwt}` },
+    }
+  }
+  // custom
+  if (!settings.endpoint.trim()) {
+    throw new Error("No custom endpoint configured.")
+  }
+  return {
+    url: `${settings.endpoint}/v1/chat/completions`,
+    headers: {},
+  }
 }

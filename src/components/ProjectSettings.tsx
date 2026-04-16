@@ -1,13 +1,13 @@
 import { useEffect, useState } from "react"
 import { useParams, useNavigate } from "react-router-dom"
-import { ArrowLeft, CheckCircle, XCircle, Loader2 } from "lucide-react"
+import { ArrowLeft, CheckCircle, XCircle, Loader2, Sparkles } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { getProject, updateProject } from "@/lib/store/project-index"
-import { fetchModels, DEFAULT_SYSTEM_PROMPT } from "@/lib/completion/completion-service"
-import type { ProjectRecord } from "@/lib/parsers/types"
+import { fetchModels, DEFAULT_SYSTEM_PROMPT, resolveProvider } from "@/lib/completion/completion-service"
+import type { ProjectRecord, CompletionProvider } from "@/lib/parsers/types"
 
 export function ProjectSettings() {
   const { id } = useParams<{ id: string }>()
@@ -20,6 +20,7 @@ export function ProjectSettings() {
   const [targetLanguage, setTargetLanguage] = useState("")
   const [username, setUsername] = useState("")
 
+  const [provider, setProvider] = useState<CompletionProvider>("frontier")
   const [endpoint, setEndpoint] = useState("")
   const [model, setModel] = useState("")
   const [maxTokens, setMaxTokens] = useState(512)
@@ -45,6 +46,7 @@ export function ProjectSettings() {
       setTargetLanguage(p.targetLanguage)
       setUsername(p.username || "local")
       if (p.completionSettings) {
+        setProvider(resolveProvider(p.completionSettings))
         setEndpoint(p.completionSettings.endpoint)
         setModel(p.completionSettings.model)
         setMaxTokens(p.completionSettings.maxTokens)
@@ -65,8 +67,19 @@ export function ProjectSettings() {
     setProject(updated)
   }
 
-  function saveCompletionSettings() {
-    save({ completionSettings: { endpoint: endpoint.trim(), model, maxTokens, temperature, systemPrompt, llmHealthPenalty } })
+  function saveCompletionSettings(overrides: { provider?: CompletionProvider } = {}) {
+    const nextProvider = overrides.provider ?? provider
+    save({
+      completionSettings: {
+        provider: nextProvider,
+        endpoint: endpoint.trim(),
+        model,
+        maxTokens,
+        temperature,
+        systemPrompt,
+        llmHealthPenalty,
+      },
+    })
   }
 
   async function handleConnect() {
@@ -127,51 +140,131 @@ export function ProjectSettings() {
         </Card>
 
         <Card>
-          <CardHeader><CardTitle>LLM Completion</CardTitle></CardHeader>
-          <CardContent className="space-y-4">
-            <div>
-              <Label htmlFor="ep">Endpoint URL</Label>
-              <div className="flex gap-2">
-                <Input id="ep" value={endpoint} onChange={(e) => setEndpoint(e.target.value)} placeholder="http://localhost:8000" className="flex-1" />
-                <Button size="sm" onClick={handleConnect} disabled={connecting || !endpoint.trim()}>
-                  {connecting ? <Loader2 className="h-4 w-4 animate-spin" /> : "Connect"}
-                </Button>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Sparkles className="h-4 w-4 text-primary" />
+              AI Instructions
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <textarea
+              id="sp"
+              value={systemPrompt}
+              onChange={(e) => setSystemPrompt(e.target.value)}
+              onBlur={() => saveCompletionSettings()}
+              rows={6}
+              className="w-full rounded border bg-background px-3 py-2 font-mono text-sm"
+              placeholder={DEFAULT_SYSTEM_PROMPT}
+            />
+            <p className="text-xs text-muted-foreground">
+              Describe what this project is producing and how translations should read — the AI uses this on every
+              completion. Use <code className="rounded bg-muted px-1">{"{sourceLanguage}"}</code> and{" "}
+              <code className="rounded bg-muted px-1">{"{targetLanguage}"}</code> as placeholders.
+            </p>
+          </CardContent>
+        </Card>
+
+        <details className="group rounded-lg border bg-card">
+          <summary className="cursor-pointer select-none list-none px-6 py-4 text-sm font-medium marker:hidden">
+            <span className="flex items-center justify-between">
+              <span>Advanced LLM settings</span>
+              <span className="text-xs text-muted-foreground">
+                {provider === "frontier" ? "Frontier (default)" : `Custom: ${endpoint || "not set"}`}
+              </span>
+            </span>
+          </summary>
+          <div className="space-y-4 border-t px-6 py-4">
+            <div className="space-y-2">
+              <Label>Provider</Label>
+              <div className="flex flex-col gap-2">
+                <label className="flex items-start gap-2 text-sm">
+                  <input
+                    type="radio"
+                    name="provider"
+                    className="mt-1"
+                    checked={provider === "frontier"}
+                    onChange={() => { setProvider("frontier"); saveCompletionSettings({ provider: "frontier" }) }}
+                  />
+                  <span>
+                    <strong>Frontier</strong> (recommended) — calls <code className="rounded bg-muted px-1">api.frontierrnd.com</code>{" "}
+                    using your Frontier login. Works out of the box.
+                  </span>
+                </label>
+                <label className="flex items-start gap-2 text-sm">
+                  <input
+                    type="radio"
+                    name="provider"
+                    className="mt-1"
+                    checked={provider === "custom"}
+                    onChange={() => { setProvider("custom"); saveCompletionSettings({ provider: "custom" }) }}
+                  />
+                  <span>
+                    <strong>Custom endpoint</strong> — self-hosted or local OpenAI-compatible server (no auth).
+                  </span>
+                </label>
               </div>
-              {connected && <p className="mt-1 flex items-center gap-1 text-xs text-green-600"><CheckCircle className="h-3 w-3" /> Connected — {models.length} model(s)</p>}
-              {connectionError && <p className="mt-1 flex items-center gap-1 text-xs text-destructive"><XCircle className="h-3 w-3" /> {connectionError}</p>}
             </div>
-            {models.length > 0 && (
+
+            {provider === "custom" && (
+              <>
+                <div>
+                  <Label htmlFor="ep">Endpoint URL</Label>
+                  <div className="flex gap-2">
+                    <Input id="ep" value={endpoint} onChange={(e) => setEndpoint(e.target.value)} placeholder="http://localhost:8000" className="flex-1" />
+                    <Button size="sm" onClick={handleConnect} disabled={connecting || !endpoint.trim()}>
+                      {connecting ? <Loader2 className="h-4 w-4 animate-spin" /> : "Connect"}
+                    </Button>
+                  </div>
+                  {connected && <p className="mt-1 flex items-center gap-1 text-xs text-green-600"><CheckCircle className="h-3 w-3" /> Connected — {models.length} model(s)</p>}
+                  {connectionError && <p className="mt-1 flex items-center gap-1 text-xs text-destructive"><XCircle className="h-3 w-3" /> {connectionError}</p>}
+                </div>
+                {models.length > 0 && (
+                  <div>
+                    <Label htmlFor="mdl">Model</Label>
+                    <select id="mdl" value={model} onChange={(e) => { setModel(e.target.value); saveCompletionSettings() }} className="w-full rounded border bg-background px-3 py-2 text-sm">
+                      {models.map((m) => <option key={m} value={m}>{m}</option>)}
+                    </select>
+                  </div>
+                )}
+              </>
+            )}
+
+            {provider === "frontier" && (
               <div>
-                <Label htmlFor="mdl">Model</Label>
-                <select id="mdl" value={model} onChange={(e) => { setModel(e.target.value); saveCompletionSettings() }} className="w-full rounded border bg-background px-3 py-2 text-sm">
-                  {models.map((m) => <option key={m} value={m}>{m}</option>)}
-                </select>
+                <Label htmlFor="mdl-frontier">Model override (optional)</Label>
+                <Input
+                  id="mdl-frontier"
+                  value={model}
+                  onChange={(e) => setModel(e.target.value)}
+                  onBlur={() => saveCompletionSettings()}
+                  placeholder="Leave blank for Frontier's default"
+                />
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Optionally specify an OpenRouter model (e.g. <code className="rounded bg-muted px-1">anthropic/claude-3.5-sonnet</code>).
+                </p>
               </div>
             )}
+
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <Label htmlFor="mt">Max Tokens</Label>
-                <Input id="mt" type="number" value={maxTokens} onChange={(e) => setMaxTokens(Number(e.target.value))} onBlur={saveCompletionSettings} />
+                <Input id="mt" type="number" value={maxTokens} onChange={(e) => setMaxTokens(Number(e.target.value))} onBlur={() => saveCompletionSettings()} />
               </div>
               <div>
                 <Label>Temperature ({temperature})</Label>
-                <input type="range" min="0" max="1" step="0.05" value={temperature} onChange={(e) => setTemperature(Number(e.target.value))} onMouseUp={saveCompletionSettings} className="mt-2 w-full" />
+                <input type="range" min="0" max="1" step="0.05" value={temperature} onChange={(e) => setTemperature(Number(e.target.value))} onMouseUp={() => saveCompletionSettings()} className="mt-2 w-full" />
               </div>
             </div>
+
             <div>
               <Label>LLM Health Penalty ({Math.round(llmHealthPenalty * 100)}%)</Label>
-              <input type="range" min="0" max="0.5" step="0.05" value={llmHealthPenalty} onChange={(e) => setLlmHealthPenalty(Number(e.target.value))} onMouseUp={saveCompletionSettings} className="mt-2 w-full" />
+              <input type="range" min="0" max="0.5" step="0.05" value={llmHealthPenalty} onChange={(e) => setLlmHealthPenalty(Number(e.target.value))} onMouseUp={() => saveCompletionSettings()} className="mt-2 w-full" />
               <p className="mt-1 text-xs text-muted-foreground">
-                LLM translations are penalized by this amount. 0% = full trust, 50% = heavy penalty. Default: 10%.
+                LLM translations are penalized by this amount in health calculations. 0% = full trust, 50% = heavy penalty. Default: 10%.
               </p>
             </div>
-            <div>
-              <Label htmlFor="sp">System Prompt</Label>
-              <textarea id="sp" value={systemPrompt} onChange={(e) => setSystemPrompt(e.target.value)} onBlur={saveCompletionSettings} rows={4} className="w-full rounded border bg-background px-3 py-2 text-sm" />
-              <p className="mt-1 text-xs text-muted-foreground">Use {"{sourceLanguage}"} and {"{targetLanguage}"} as placeholders.</p>
-            </div>
-          </CardContent>
-        </Card>
+          </div>
+        </details>
 
         {project?.origin?.kind === "git" && (
           <Card>

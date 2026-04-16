@@ -1,10 +1,11 @@
 import { useState, useCallback } from "react"
 import * as Y from "yjs"
 import type { CompletionSettings } from "@/lib/parsers/types"
+import type { FrontierSession } from "@/lib/frontier/types"
 import { setPlainText } from "@/lib/richtext/translated-xml"
 import type { ScoredPair } from "@/lib/search/search-index"
 import type { CellData } from "./useCells"
-import { buildPrompt, complete, DEFAULT_SYSTEM_PROMPT } from "@/lib/completion/completion-service"
+import { buildPrompt, complete, resolveProvider, DEFAULT_SYSTEM_PROMPT } from "@/lib/completion/completion-service"
 import { appendCellHistory } from "./useCellHistory"
 
 export function useCompletion(
@@ -12,13 +13,20 @@ export function useCompletion(
   settings: CompletionSettings | undefined,
   sourceLanguage: string,
   targetLanguage: string,
-  search: (query: string, limit?: number) => ScoredPair[]
+  search: (query: string, limit?: number) => ScoredPair[],
+  session: FrontierSession | null = null,
 ) {
   const [completing, setCompleting] = useState<Map<string, string>>(new Map())
   const [examples, setExamples] = useState<Map<string, ScoredPair[]>>(new Map())
   const [errors, setErrors] = useState<Map<string, string>>(new Map())
 
-  const isConfigured = Boolean(settings?.endpoint && settings?.model)
+  // Frontier is configured whenever the user has a session (model can be blank
+  // to use the server default). Custom is configured when endpoint+model set.
+  const isConfigured = settings
+    ? resolveProvider(settings) === "frontier"
+      ? Boolean(session?.jwt)
+      : Boolean(settings.endpoint && settings.model)
+    : false
 
   const completeSingle = useCallback(async (cell: CellData) => {
     if (!doc || !settings || !isConfigured) return
@@ -36,8 +44,8 @@ export function useCompletion(
         examples: found.map((e) => ({ source: e.source, target: e.target })),
       })
       const result = await complete({
-        endpoint: settings.endpoint, model: settings.model,
-        messages, maxTokens: settings.maxTokens, temperature: settings.temperature,
+        settings, session,
+        messages,
         stream: true,
         onChunk: (text) => {
           const cells = doc.getMap("cells")
@@ -53,7 +61,7 @@ export function useCompletion(
         },
       })
       appendCellHistory(doc, cell.id, {
-        value: result, source: "llm", author: settings.model,
+        value: result, source: "llm", author: settings.model || "frontier-default",
         validated: false, examples: found.map((e) => e.cellId),
       })
       setCompleting((p) => new Map(p).set(cell.id, "done"))
@@ -61,7 +69,7 @@ export function useCompletion(
       setCompleting((p) => new Map(p).set(cell.id, "error"))
       setErrors((p) => new Map(p).set(cell.id, err instanceof Error ? err.message : "Failed"))
     }
-  }, [doc, settings, isConfigured, sourceLanguage, targetLanguage, search])
+  }, [doc, settings, isConfigured, sourceLanguage, targetLanguage, search, session])
 
   const completeBatch = useCallback(async (cells: CellData[]) => {
     if (!doc || !settings || !isConfigured) return
@@ -89,11 +97,11 @@ export function useCompletion(
             examples: found.map((e) => ({ source: e.source, target: e.target })),
           })
           const result = await complete({
-            endpoint: settings!.endpoint, model: settings!.model,
-            messages, maxTokens: settings!.maxTokens, temperature: settings!.temperature,
+            settings: settings!, session,
+            messages,
           })
           appendCellHistory(doc!, cell.id, {
-            value: result, source: "llm", author: settings!.model,
+            value: result, source: "llm", author: settings!.model || "frontier-default",
             validated: false, examples: found.map((e) => e.cellId),
           })
           setCompleting((p) => new Map(p).set(cell.id, "done"))
@@ -104,7 +112,7 @@ export function useCompletion(
       }
     }
     await Promise.all(Array.from({ length: 3 }, () => worker()))
-  }, [doc, settings, isConfigured, sourceLanguage, targetLanguage, search])
+  }, [doc, settings, isConfigured, sourceLanguage, targetLanguage, search, session])
 
   return { completeSingle, completeBatch, isConfigured, completing, examples, errors }
 }

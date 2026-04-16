@@ -40,5 +40,8 @@ export default defineConfig({
     environment: "happy-dom",
     setupFiles: ["./src/test-setup.ts"],
     passWithNoTests: true,
+    // Don't pick up tests in sibling git worktrees (Tauri shell, etc.) —
+    // those track other branches and may reference pre-current type shapes.
+    exclude: ["**/node_modules/**", "dist/**", ".worktrees/**", ".claude/worktrees/**", "cors-proxy/**"],
   },
 })

@@ -112,8 +112,9 @@ export function ProjectWorkspace() {
 
   const { buildIndex, search: runSearch, results: searchResults, loading: searchLoading, ready: searchReady } = useWorkspaceSearch(project?.files || [])
   const { search } = useSearchIndex(project?.files || [], cells)
+  const { session: frontierSession } = useFrontierSession()
   const { completeSingle, completeBatch, isConfigured, completing, examples, errors } = useCompletion(
-    doc, project?.completionSettings, project?.sourceLanguage || "", project?.targetLanguage || "", search
+    doc, project?.completionSettings, project?.sourceLanguage || "", project?.targetLanguage || "", search, frontierSession
   )
 
   const findBacktranslationExamples = useCallback((target: CellData) => {
@@ -133,7 +134,8 @@ export function ProjectWorkspace() {
     project?.completionSettings,
     project?.sourceLanguage || "",
     project?.targetLanguage || "",
-    findBacktranslationExamples
+    findBacktranslationExamples,
+    frontierSession,
   )
 
   const { rules, penalties } = useRules(project ?? null, refresh)
@@ -260,7 +262,6 @@ export function ProjectWorkspace() {
   const isReadOnly = !perms.canEditContent
 
   const { sync: runSync, phase: syncPhase, inFlight: syncInFlight, lastResult: syncLastResult } = useSyncProject()
-  const { session: frontierSession } = useFrontierSession()
 
   useAutoSync(project ?? null, frontierSession)
 

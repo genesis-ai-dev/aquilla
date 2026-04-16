@@ -1,8 +1,10 @@
 import { useCallback, useState } from "react"
 import * as Y from "yjs"
 import type { CompletionSettings } from "@/lib/parsers/types"
+import type { FrontierSession } from "@/lib/frontier/types"
 import type { CellData } from "./useCells"
 import { generateBacktranslation } from "@/lib/completion/backtranslation-service"
+import { resolveProvider } from "@/lib/completion/completion-service"
 import { setCellBacktranslation } from "./useCellHistory"
 
 type FindExamples = (cell: CellData) => { target: string; backtranslation: string }[]
@@ -12,12 +14,17 @@ export function useBacktranslation(
   settings: CompletionSettings | undefined,
   sourceLanguage: string,
   targetLanguage: string,
-  findExamples: FindExamples
+  findExamples: FindExamples,
+  session: FrontierSession | null = null,
 ) {
   const [generating, setGenerating] = useState<Set<string>>(new Set())
   const [errors, setErrors] = useState<Map<string, string>>(new Map())
 
-  const isConfigured = Boolean(settings?.endpoint && settings?.model)
+  const isConfigured = settings
+    ? resolveProvider(settings) === "frontier"
+      ? Boolean(session?.jwt)
+      : Boolean(settings.endpoint && settings.model)
+    : false
 
   const generate = useCallback(async (cell: CellData) => {
     if (!doc || !settings || !isConfigured) return
@@ -37,6 +44,7 @@ export function useBacktranslation(
         targetText,
         examples,
         settings,
+        session,
         onChunk: (text) => {
           setCellBacktranslation(doc, cell.id, text, targetText)
         },
@@ -48,7 +56,7 @@ export function useBacktranslation(
     } finally {
       setGenerating((p) => { const n = new Set(p); n.delete(cell.id); return n })
     }
-  }, [doc, settings, isConfigured, sourceLanguage, targetLanguage, findExamples])
+  }, [doc, settings, isConfigured, sourceLanguage, targetLanguage, findExamples, session])
 
   return { generate, generating, errors, isConfigured }
 }

@@ -1,5 +1,24 @@
-import { describe, it, expect, vi } from "vitest"
-import { buildPrompt, fetchModels, DEFAULT_SYSTEM_PROMPT } from "./completion-service"
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
+import { buildPrompt, complete, fetchModels, resolveProvider, DEFAULT_SYSTEM_PROMPT, FRONTIER_CHAT_URL } from "./completion-service"
+import type { CompletionSettings } from "@/lib/parsers/types"
+import type { FrontierSession } from "@/lib/frontier/types"
+
+const BASE: CompletionSettings = {
+  endpoint: "",
+  model: "",
+  maxTokens: 128,
+  temperature: 0.3,
+  systemPrompt: DEFAULT_SYSTEM_PROMPT,
+  llmHealthPenalty: 0.1,
+}
+
+const SESSION: FrontierSession = {
+  jwt: "jwt-abc",
+  gitlabToken: "glpat",
+  gitlabUrl: "https://git.genesisrnd.com",
+  username: "tester",
+  createdAt: new Date().toISOString(),
+}
 
 describe("buildPrompt", () => {
   it("builds a prompt with examples and source text", () => {
@@ -48,5 +67,92 @@ describe("fetchModels", () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false, status: 500, statusText: "Error" }))
     await expect(fetchModels("http://localhost:8000")).rejects.toThrow()
     vi.unstubAllGlobals()
+  })
+})
+
+describe("resolveProvider", () => {
+  it("returns explicit provider when set", () => {
+    expect(resolveProvider({ ...BASE, provider: "frontier", endpoint: "http://x" })).toBe("frontier")
+    expect(resolveProvider({ ...BASE, provider: "custom" })).toBe("custom")
+  })
+
+  it("infers 'frontier' when provider missing and endpoint blank (new default)", () => {
+    expect(resolveProvider({ ...BASE, endpoint: "" })).toBe("frontier")
+  })
+
+  it("infers 'custom' when provider missing but legacy endpoint is populated", () => {
+    expect(resolveProvider({ ...BASE, endpoint: "http://localhost:8000" })).toBe("custom")
+  })
+})
+
+describe("complete", () => {
+  const fetchMock = vi.fn()
+  beforeEach(() => { vi.stubGlobal("fetch", fetchMock); fetchMock.mockReset() })
+  afterEach(() => { vi.unstubAllGlobals() })
+
+  function okJson(body: unknown): Response {
+    return new Response(JSON.stringify(body), { status: 200, headers: { "Content-Type": "application/json" } })
+  }
+
+  const msg = [{ role: "user" as const, content: "hi" }]
+
+  it("frontier: POSTs to Frontier URL with Bearer JWT and model='default' when blank", async () => {
+    fetchMock.mockResolvedValueOnce(okJson({ choices: [{ message: { content: "translated" } }] }))
+    const out = await complete({ settings: { ...BASE, provider: "frontier" }, session: SESSION, messages: msg })
+    expect(out).toBe("translated")
+
+    const [url, init] = fetchMock.mock.calls[0]
+    expect(url).toBe(FRONTIER_CHAT_URL)
+    expect((init as RequestInit).method).toBe("POST")
+    expect((init as RequestInit).headers).toMatchObject({
+      Authorization: "Bearer jwt-abc",
+      "Content-Type": "application/json",
+    })
+    const body = JSON.parse((init as RequestInit).body as string)
+    expect(body.model).toBe("default")
+    expect(body.messages).toEqual(msg)
+  })
+
+  it("frontier: uses explicit model override when provided", async () => {
+    fetchMock.mockResolvedValueOnce(okJson({ choices: [{ message: { content: "ok" } }] }))
+    await complete({
+      settings: { ...BASE, provider: "frontier", model: "anthropic/claude-3.5-sonnet" },
+      session: SESSION, messages: msg,
+    })
+    const body = JSON.parse((fetchMock.mock.calls[0][1] as RequestInit).body as string)
+    expect(body.model).toBe("anthropic/claude-3.5-sonnet")
+  })
+
+  it("frontier: throws 'Sign in' when session is null", async () => {
+    await expect(
+      complete({ settings: { ...BASE, provider: "frontier" }, session: null, messages: msg }),
+    ).rejects.toThrow(/Sign in/i)
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it("frontier: surfaces 402 subscription-limit errors with server message", async () => {
+    fetchMock.mockResolvedValueOnce(new Response("Monthly credits exhausted", { status: 402 }))
+    await expect(
+      complete({ settings: { ...BASE, provider: "frontier" }, session: SESSION, messages: msg }),
+    ).rejects.toThrow(/Frontier AI limit reached: Monthly credits exhausted/)
+  })
+
+  it("custom: POSTs to {endpoint}/v1/chat/completions without auth", async () => {
+    fetchMock.mockResolvedValueOnce(okJson({ choices: [{ message: { content: "yes" } }] }))
+    await complete({
+      settings: { ...BASE, provider: "custom", endpoint: "http://localhost:8000", model: "gemma" },
+      session: null, messages: msg,
+    })
+    const [url, init] = fetchMock.mock.calls[0]
+    expect(url).toBe("http://localhost:8000/v1/chat/completions")
+    expect(((init as RequestInit).headers as Record<string, string>).Authorization).toBeUndefined()
+    const body = JSON.parse((init as RequestInit).body as string)
+    expect(body.model).toBe("gemma")
+  })
+
+  it("custom: throws when endpoint is blank", async () => {
+    await expect(
+      complete({ settings: { ...BASE, provider: "custom", endpoint: "" }, session: null, messages: msg }),
+    ).rejects.toThrow(/No custom endpoint/)
   })
 })

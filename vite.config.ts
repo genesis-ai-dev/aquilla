@@ -20,6 +20,22 @@ export default defineConfig({
       "@": path.resolve(__dirname, "./src"),
     },
   },
+  build: {
+    // Split large third-party deps out of the main bundle. Without this the
+    // app bundle balloons past 2 MB, which trips Cloudflare Pages' asset
+    // upload path (observed as repeated ECONNRESET at 26/27 files).
+    rolldownOptions: {
+      output: {
+        manualChunks: (id: string) => {
+          if (!id.includes("node_modules")) return
+          if (id.includes("/yjs/") || id.includes("/y-indexeddb/") || id.includes("/y-webrtc/")) return "yjs"
+          if (id.includes("/isomorphic-git/")) return "git"
+          if (id.includes("/@tiptap/")) return "tiptap"
+          if (id.includes("/react/") || id.includes("/react-dom/") || id.includes("/react-router")) return "react"
+        },
+      },
+    },
+  },
   test: {
     environment: "happy-dom",
     setupFiles: ["./src/test-setup.ts"],

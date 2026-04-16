@@ -67,3 +67,21 @@ You would need to **replace** the VS Code shell (workspace, custom editor, webvi
 - **Multimodal cells**: Quill HTML, attachments, audio/video pipelines.
 
 That is the high-level map: a **file-backed translation notebook** with **paired source**, **sidebar navigation and settings webviews**, **extension-hosted intelligence and persistence**, and a **React cell editor** as the primary surface for aligned, LLM-assisted translation work.
+---
+
+## Desktop target (Tauri)
+
+The same React/Vite source tree builds for two targets:
+- Web → Cloudflare Pages (`npm run build` → `dist/` → `npm run deploy`)
+- Desktop → Tauri 2.x (`npm run tauri:build` → signed platform binaries)
+
+A small `FsProvider` indirection (`src/lib/fs/`) routes git working-tree I/O to OPFS in the browser and to a Rust IPC bridge (`src-tauri/src/fs_bridge.rs`) on desktop. Implementation details and the multi-phase rollout plan live in `docs/superpowers/plans/2026-04-16-tauri-desktop-shell.md`.
+
+### Release secrets (GitHub repo settings)
+
+Required by `.github/workflows/tauri-release.yml`:
+
+- `APPLE_ID`, `APPLE_APP_SPECIFIC_PASSWORD`, `APPLE_TEAM_ID` — notarization (Apple Developer portal → app-specific password)
+- `APPLE_CERTIFICATE`, `APPLE_CERTIFICATE_PASSWORD`, `APPLE_SIGNING_IDENTITY` — Developer ID Application cert exported as base64 .p12
+- `WINDOWS_CERTIFICATE`, `WINDOWS_CERTIFICATE_PASSWORD` — code-signing cert as base64 .pfx
+- `TAURI_SIGNING_PRIVATE_KEY`, `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` — generated via `npx tauri signer generate`; store private key in 1Password and paste public key into `src-tauri/tauri.conf.json` under `plugins.updater.pubkey`

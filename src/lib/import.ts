@@ -9,6 +9,18 @@ import { extractDocxStrings } from "./parsers/docx"
 import { extractPptxStrings } from "./parsers/pptx"
 import { createFileDoc, destroyFileDoc } from "./store/file-doc"
 import { storeOriginalFile } from "./store/project-index"
+import {
+  fetchTranslationText,
+  parseEBibleCorpus,
+  type EBibleTranslation,
+} from "./parsers/ebible"
+
+export type EBibleImportPhase = "download" | "parse" | "save"
+export interface EBibleProgress {
+  phase: EBibleImportPhase
+  received?: number
+  total?: number
+}
 
 interface ImportResult {
   name: string
@@ -65,6 +77,59 @@ export async function importFile(
   return refs
 }
 
+export async function importEBible(
+  translation: EBibleTranslation,
+  sourceLanguage: string,
+  targetLanguage: string,
+  onProgress?: (p: EBibleProgress) => void,
+  signal?: AbortSignal
+): Promise<FileReference> {
+  onProgress?.({ phase: "download", received: 0, total: 0 })
+
+  const corpusText = await fetchTranslationText(
+    translation.id,
+    (received, total) => onProgress?.({ phase: "download", received, total }),
+    signal
+  )
+
+  onProgress?.({ phase: "parse" })
+  const strings = parseEBibleCorpus(corpusText)
+  if (strings.length === 0) {
+    throw new Error(`Translation '${translation.id}' produced no verses`)
+  }
+
+  onProgress?.({ phase: "save" })
+
+  const fileId = uuid()
+  const fileName = `${translation.title} (${translation.id})`
+  const handle = createFileDoc(
+    fileId,
+    fileName,
+    "ebible",
+    sourceLanguage,
+    targetLanguage,
+    strings
+  )
+
+  await new Promise<void>((resolve) => {
+    if (handle.persistence.synced) {
+      resolve()
+    } else {
+      handle.persistence.once("synced", () => resolve())
+    }
+  })
+
+  destroyFileDoc(handle)
+
+  return {
+    id: fileId,
+    name: fileName,
+    type: "ebible",
+    createdAt: new Date().toISOString(),
+    cellCount: strings.length,
+  }
+}
+
 async function parseFile(file: File, fileType: FileType): Promise<ImportResult[]> {
   switch (fileType) {
     case "txt": {
@@ -98,5 +163,7 @@ async function parseFile(file: File, fileType: FileType): Promise<ImportResult[]
       const strings = await extractPptxStrings(buffer)
       return [{ name: file.name, strings }]
     }
+    case "ebible":
+      throw new Error("eBible translations import via importEBible(), not importFile()")
   }
 }

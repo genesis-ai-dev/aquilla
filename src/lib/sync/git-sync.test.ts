@@ -25,6 +25,20 @@ vi.mock("isomorphic-git", async () => {
   }
 })
 
+// Phase 3 merge path — mock so remote-moved tests don't need a real git DAG.
+vi.mock("./git-merge", () => {
+  class MergeFailure extends Error {
+    backupRef?: string
+    constructor(msg: string, opts: { backupRef?: string } = {}) {
+      super(msg); this.name = "MergeFailure"; this.backupRef = opts.backupRef
+    }
+  }
+  return {
+    MergeFailure,
+    mergeRemoteIntoOurs: vi.fn(async () => ({ mergeSha: "mergesha", touchedPaths: [] })),
+  }
+})
+
 // Import after mock so syncProject picks up the mocked module.
 import { syncProject, findOriginalPath } from "./git-sync"
 
@@ -132,14 +146,15 @@ describe("syncProject", () => {
     expect(git.push).not.toHaveBeenCalled()
   })
 
-  it("returns remote-moved when fetched head differs", async () => {
+  it("merges when remote moved since last sync", async () => {
     const { project, docs, fs } = await setupProject()
     await persistImportedProject({ project, docs })
+    // fetched head differs from project.origin.headSha → Phase 3 merge path.
     vi.mocked(git.resolveRef).mockResolvedValueOnce("differentsha")
     const result = await syncProject(project, session, { fs })
-    expect(result.status).toBe("remote-moved")
-    expect(git.commit).not.toHaveBeenCalled()
-    expect(git.push).not.toHaveBeenCalled()
+    expect(result.status).toBe("merged")
+    expect(result.mergeSha).toBe("mergesha")
+    expect(git.push).toHaveBeenCalled()
   })
 
   it("returns synced and updates origin.headSha on a dirty file", async () => {

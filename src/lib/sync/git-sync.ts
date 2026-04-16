@@ -3,8 +3,10 @@ import http from "isomorphic-git/http/web"
 import { GIT_CORS_PROXY } from "@/lib/git/clone"
 import { openOpfsRepoDir, createOpfsFs, type OpfsFs } from "@/lib/git/opfs-fs"
 import { opfsRepoKey, pathWithNamespaceFromCloneUrl } from "@/lib/git/repo-key"
-import { loadFileDoc, destroyFileDoc, type FileDocHandle } from "@/lib/store/file-doc"
+import { loadFileDoc, destroyFileDoc, rehydrateFileDoc, type FileDocHandle } from "@/lib/store/file-doc"
 import { serializeFile, serializeComments } from "@/lib/codex-editor/serialize"
+import { parseCodexNotebook } from "@/lib/codex-editor/parse-codex"
+import { mergeRemoteIntoOurs, MergeFailure } from "./git-merge"
 import { isFileDirty } from "./dirty"
 import { buildCommitMessage } from "./commit-message"
 import { updateProject } from "@/lib/store/project-index"
@@ -18,15 +20,20 @@ export type SyncPhase =
   | "serializing"
   | "writing"
   | "committing"
+  | "merging"
+  | "rehydrating"
   | "pushing"
   | "done"
   | "error"
   | "remote-moved"
 
 export interface SyncResult {
-  status: "synced" | "no-changes" | "remote-moved" | "error"
+  status: "synced" | "no-changes" | "remote-moved" | "merged" | "error"
   commitSha?: string
+  mergeSha?: string
+  touchedPaths?: string[]
   filesWritten?: number
+  backupRef?: string
   message?: string
 }
 
@@ -60,11 +67,11 @@ export async function syncProject(
   const fs: OpfsFs = opts.fs ?? createOpfsFs(await openOpfsRepoDir(repoKey(project)))
   const authHeader = `Basic ${btoa(`oauth2:${session.gitlabToken}`)}`
 
-  // 1) Fetch + compare heads.
+  // 1) Fetch + detect remote movement (but don't early-return on it — Phase 3
+  //    resolves via mergeRemoteIntoOurs after we've committed ours locally).
+  let remoteHead: string
+  let remoteMoved: boolean
   try {
-    // Ensure origin is registered with a wildcard refspec. clone({singleBranch})
-    // sometimes omits the refspec, which makes subsequent fetch() throw
-    // NoRefspecError. addRemote with force:true rewrites config idempotently.
     await git.addRemote({
       fs: fs as unknown as git.FsClient,
       dir: "/",
@@ -80,7 +87,7 @@ export async function syncProject(
       remote: "origin",
       ref: project.origin.branch,
       singleBranch: true,
-      depth: 1,
+      depth: 50,
       corsProxy: GIT_CORS_PROXY,
       headers: { Authorization: authHeader },
       onAuth: () => ({ username: "oauth2", password: session.gitlabToken }),
@@ -89,19 +96,15 @@ export async function syncProject(
         return { cancel: true }
       },
     })
-    const remoteHead = await git.resolveRef({
+    remoteHead = await git.resolveRef({
       fs: fs as unknown as git.FsClient,
       dir: "/",
       ref: `refs/remotes/origin/${project.origin.branch}`,
     })
-    if (remoteHead !== project.origin.headSha) {
-      console.warn("[sync] remote moved",
+    remoteMoved = remoteHead !== project.origin.headSha
+    if (remoteMoved) {
+      console.warn("[sync] remote moved — will merge after local commit",
         { local: project.origin.headSha, remote: remoteHead })
-      onPhase?.("remote-moved")
-      return {
-        status: "remote-moved",
-        message: `Remote has new commits. local=${project.origin.headSha.slice(0, 7)} remote=${remoteHead.slice(0, 7)} — sync requires Phase 3 (merge).`,
-      }
     }
   } catch (e) {
     console.error("[sync] fetch failed:", e)
@@ -159,73 +162,130 @@ export async function syncProject(
       filesWritten++
     }
 
-    if (filesWritten === 0) {
+    if (filesWritten === 0 && !remoteMoved) {
       return { status: "no-changes" }
     }
 
-    // 4) Stage + commit + push.
-    //    git.add({filepath: "."}) isn't a documented no-op for "all changes";
-    //    use statusMatrix to find modified/new/deleted files and add/remove
-    //    each explicitly.
+    // 4) Stage + commit (skip commit if nothing was written locally; we'll
+    //    fast-forward to remoteHead in the merge step below).
     onPhase?.("committing")
     const fsClient = fs as unknown as git.FsClient
-    const status = await git.statusMatrix({ fs: fsClient, dir: "/" })
-    for (const [filepath, head, workdir, stage] of status) {
-      if (workdir === stage) continue
-      if (workdir === 0) {
-        // deleted in working tree — remove from index
-        await git.remove({ fs: fsClient, dir: "/", filepath })
-      } else {
-        await git.add({ fs: fsClient, dir: "/", filepath })
-      }
-      void head
-    }
-    const commitSha = await git.commit({
-      fs: fs as unknown as git.FsClient,
-      dir: "/",
-      message: buildCommitMessage(filesChanged),
-      author: { name: session.username, email: `${session.username}@frontier` },
-    })
-
-    onPhase?.("pushing")
-    await git.push({
-      fs: fs as unknown as git.FsClient,
-      http,
-      dir: "/",
-      remote: "origin",
-      ref: project.origin.branch,
-      corsProxy: GIT_CORS_PROXY,
-      headers: { Authorization: authHeader },
-      onAuth: () => ({ username: "oauth2", password: session.gitlabToken }),
-      onAuthFailure: () => {
-        console.error("[sync] push auth rejected by remote")
-        return { cancel: true }
-      },
-    })
-
-    // 5) Bump __lastSyncedHistoryAt on every cell across every doc. Writes
-    // through to IndexedDB via the open IndexeddbPersistence.
-    const now = Date.now()
-    for (const { handle } of fileHandles) {
-      const cellsMap = handle.doc.getMap("cells")
-      handle.doc.transact(() => {
-        for (const id of cellsMap.keys()) {
-          const c = cellsMap.get(id) as Y.Map<unknown> | undefined
-          if (!c) continue
-          c.set("__lastSyncedHistoryAt", now)
+    let oursSha = project.origin.headSha
+    if (filesWritten > 0) {
+      const status = await git.statusMatrix({ fs: fsClient, dir: "/" })
+      for (const [filepath, head, workdir, stage] of status) {
+        if (workdir === stage) continue
+        if (workdir === 0) {
+          await git.remove({ fs: fsClient, dir: "/", filepath })
+        } else {
+          await git.add({ fs: fsClient, dir: "/", filepath })
         }
+        void head
+      }
+      oursSha = await git.commit({
+        fs: fs as unknown as git.FsClient,
+        dir: "/",
+        message: buildCommitMessage(filesChanged),
+        author: { name: session.username, email: `${session.username}@frontier` },
       })
     }
 
-    // 6) Update ProjectRecord.origin.headSha.
+    // 5) Merge remote into ours if remote moved. mergeRemoteIntoOurs produces
+    //    a two-parent merge commit whose tree is ours+theirs per-path resolved.
+    let finalSha = oursSha
+    let mergeSha: string | undefined
+    let touchedPaths: string[] = []
+    if (remoteMoved) {
+      onPhase?.("merging")
+      try {
+        const result = await mergeRemoteIntoOurs({
+          fs, dir: "/",
+          oursSha, theirsSha: remoteHead,
+          author: { name: session.username, email: `${session.username}@frontier` },
+        })
+        mergeSha = result.mergeSha
+        touchedPaths = result.touchedPaths
+        finalSha = mergeSha
+      } catch (e) {
+        if (e instanceof MergeFailure) {
+          return { status: "error", message: e.message, backupRef: e.backupRef }
+        }
+        throw e
+      }
+    }
+
+    // 6) Push if we produced new commits locally.
+    if (filesWritten > 0 || mergeSha) {
+      onPhase?.("pushing")
+      await git.push({
+        fs: fs as unknown as git.FsClient,
+        http,
+        dir: "/",
+        remote: "origin",
+        ref: project.origin.branch,
+        corsProxy: GIT_CORS_PROXY,
+        headers: { Authorization: authHeader },
+        onAuth: () => ({ username: "oauth2", password: session.gitlabToken }),
+        onAuthFailure: () => {
+          console.error("[sync] push auth rejected by remote")
+          return { cancel: true }
+        },
+      })
+    }
+
+    // 7) Rehydrate touched Y.Docs from the merged tree's canonical bytes.
+    if (touchedPaths.length > 0) {
+      onPhase?.("rehydrating")
+      const syncedAt = Date.now()
+      for (const relpath of touchedPaths) {
+        if (!relpath.endsWith(".codex") && !relpath.endsWith(".source")) continue
+        const fullPath = "/" + relpath
+        const match = fileHandles.find(
+          (h) => findOriginalPath(project, h.ref.name) === fullPath,
+        )
+        if (!match) continue
+        try {
+          const { blob } = await git.readBlob({
+            fs: fs as unknown as git.FsClient,
+            dir: "/",
+            oid: finalSha,
+            filepath: relpath,
+          })
+          const merged = parseCodexNotebook(new TextDecoder().decode(blob))
+          rehydrateFileDoc(match.handle.doc, merged, syncedAt)
+        } catch (err) {
+          console.warn(`[sync] could not rehydrate ${relpath}:`, err)
+        }
+      }
+    }
+
+    // 8) Bump __lastSyncedHistoryAt on non-rehydrated docs so the next sync
+    //    doesn't re-serialize already-pushed edits.
+    if (touchedPaths.length === 0) {
+      const now = Date.now()
+      for (const { handle } of fileHandles) {
+        const cellsMap = handle.doc.getMap("cells")
+        handle.doc.transact(() => {
+          for (const id of cellsMap.keys()) {
+            const c = cellsMap.get(id) as Y.Map<unknown> | undefined
+            if (!c) continue
+            c.set("__lastSyncedHistoryAt", now)
+          }
+        })
+      }
+    }
+
+    // 9) Update ProjectRecord.origin.headSha.
     const updated: ProjectRecord = {
       ...project,
-      origin: { ...project.origin, headSha: commitSha },
+      origin: { ...project.origin, headSha: finalSha },
     }
     await updateProject(updated)
 
     onPhase?.("done")
-    return { status: "synced", commitSha, filesWritten }
+    return mergeSha
+      ? { status: "merged", commitSha: finalSha, mergeSha, touchedPaths, filesWritten }
+      : { status: "synced", commitSha: finalSha, filesWritten }
   } catch (e) {
     console.error("[sync] serialize/commit/push failed:", e)
     return {

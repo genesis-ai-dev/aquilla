@@ -23,6 +23,8 @@ const PHASE_LABELS: Record<SyncPhase, string> = {
   "serializing": "Serializing",
   "writing": "Writing",
   "committing": "Committing",
+  "merging": "Merging",
+  "rehydrating": "Rehydrating",
   "pushing": "Pushing",
   "done": "Done",
   "error": "Error",

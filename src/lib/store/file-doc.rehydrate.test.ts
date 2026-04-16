@@ -1,7 +1,9 @@
 import { describe, it, expect } from "vitest"
 import * as Y from "yjs"
 import { rehydrateFileDoc } from "./file-doc"
+import { getFragmentHtml, getPlainText } from "@/lib/richtext/translated-xml"
 import type { CodexCell, CodexNotebookFile } from "@/lib/codex-editor/types"
+import type { CellHistoryEntry } from "@/lib/parsers/types"
 
 function seedDoc(cells: CodexCell[]): Y.Doc {
   const doc = new Y.Doc()
@@ -82,6 +84,40 @@ describe("rehydrateFileDoc", () => {
     const c1 = doc.getMap("cells").get("c1") as Y.Map<unknown>
     expect(c1.get("__lastSyncedHistoryAt")).toBe(ts)
     expect((c1.get("history") as Y.Array<unknown>).length).toBe(0)
+  })
+
+  it("updates translatedXml fragment to reflect merged value", () => {
+    const doc = seedDoc([cell("c1", "<p>stale</p>")])
+    const merged: CodexNotebookFile = {
+      cells: [cell("c1", "<p>new merged value</p>", [
+        { editMap: ["value"], value: "<p>new merged value</p>", timestamp: 10, author: "a", type: "user-edit" },
+      ])],
+      metadata: { id: "f", originalName: "f" },
+    }
+    rehydrateFileDoc(doc, merged, Date.now())
+    const y = doc.getMap("cells").get("c1") as Y.Map<unknown>
+    const frag = y.get("translatedXml") as Y.XmlFragment
+    expect(getPlainText(frag)).toBe("new merged value")
+    // Ensure the fragment matches __source.value so isCellDirty returns false.
+    expect(getFragmentHtml(frag)).toBe((y.get("__source") as CodexCell).value)
+  })
+
+  it("re-seeds history Y.Array from merged metadata.edits", () => {
+    const doc = seedDoc([cell("c1", "<p>x</p>")])
+    const merged: CodexNotebookFile = {
+      cells: [cell("c1", "<p>merged</p>", [
+        { editMap: ["value"], value: "<p>merged</p>", timestamp: 100, author: "alice", type: "user-edit",
+          validatedBy: [{ username: "alice", creationTimestamp: 100, updatedTimestamp: 100, isDeleted: false }] },
+      ])],
+      metadata: { id: "f", originalName: "f" },
+    }
+    rehydrateFileDoc(doc, merged, Date.now())
+    const y = doc.getMap("cells").get("c1") as Y.Map<unknown>
+    const hist = (y.get("history") as Y.Array<CellHistoryEntry>).toArray()
+    expect(hist).toHaveLength(1)
+    expect(hist[0].value).toBe("<p>merged</p>")
+    expect(hist[0].author).toBe("alice")
+    expect(hist[0].validated).toBe(true)
   })
 
   it("updates meta __source to merged file metadata", () => {

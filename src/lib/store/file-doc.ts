@@ -1,7 +1,8 @@
 import * as Y from "yjs"
 import { IndexeddbPersistence } from "y-indexeddb"
-import type { TranslatableString, FileType } from "../parsers/types"
-import { getPlainText, getFragmentHtml, setPlainText } from "@/lib/richtext/translated-xml"
+import type { TranslatableString, FileType, CellHistoryEntry } from "../parsers/types"
+import { getPlainText, getFragmentHtml, setPlainText, setFragmentFromHtml } from "@/lib/richtext/translated-xml"
+import { mapEditHistory } from "@/lib/codex-editor/map-history"
 
 function extractCellTranslated(cell: Y.Map<unknown>): string {
   const frag = cell.get("translatedXml") as Y.XmlFragment | undefined
@@ -169,16 +170,38 @@ export function rehydrateFileDoc(
       let yCell = cellsMap.get(id) as Y.Map<unknown> | undefined
       if (!yCell) {
         yCell = new Y.Map<unknown>()
-        yCell.set("history", new Y.Array<unknown>())
+        yCell.set("history", new Y.Array<CellHistoryEntry>())
         yCell.set("translatedXml", new Y.XmlFragment())
         cellsMap.set(id, yCell)
       }
       // Replace the __source stash — serializeCell reads this as the canonical
       // on-disk shape, so merged edits become the new baseline.
       yCell.set("__source", JSON.parse(JSON.stringify(cell)))
-      // Clear unsynced history — everything's now captured in __source.edits.
-      const hist = yCell.get("history") as Y.Array<unknown> | undefined
-      if (hist && hist.length > 0) hist.delete(0, hist.length)
+
+      // Refresh the translatedXml fragment so the editor UI sees the merged
+      // value. Without this the fragment retains our pre-merge HTML and
+      // isCellDirty reports a false-positive on the next sync (fragment vs
+      // __source.value diverge).
+      let frag = yCell.get("translatedXml") as Y.XmlFragment | undefined
+      if (!frag) {
+        frag = new Y.XmlFragment()
+        yCell.set("translatedXml", frag)
+      }
+      frag.delete(0, frag.length)
+      if (cell.value) setFragmentFromHtml(frag, cell.value)
+
+      // Replace unsynced history with a derived ledger so the UI's status
+      // derivation (useCells → deriveStatus) reflects the merged validation
+      // state instead of defaulting to "validated" when the array is empty.
+      let hist = yCell.get("history") as Y.Array<CellHistoryEntry> | undefined
+      if (!hist) {
+        hist = new Y.Array<CellHistoryEntry>()
+        yCell.set("history", hist)
+      }
+      if (hist.length > 0) hist.delete(0, hist.length)
+      const historyEntries = mapEditHistory(cell.metadata.edits ?? [])
+      for (const entry of historyEntries) hist.push([entry])
+
       yCell.set("__lastSyncedHistoryAt", syncedAt)
     }
 

@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react"
-import { Cloud, CloudOff, Loader2, AlertTriangle, Check } from "lucide-react"
+import { Cloud, Loader2, AlertTriangle, Check } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { useProjectPermissions } from "@/hooks/useProjectPermissions"
@@ -51,20 +51,9 @@ export function SyncButton({ project, onUpdated, sync, phase, inFlight, lastResu
   async function onClick() {
     if (!session) return
     const r = await sync(project, session)
-    if (r?.status === "synced" && r.commitSha && project.origin?.kind === "git") {
+    if ((r?.status === "synced" || r?.status === "merged") && r.commitSha && project.origin?.kind === "git") {
       onUpdated({ ...project, origin: { ...project.origin, headSha: r.commitSha } })
     }
-  }
-
-  if (lastResult?.status === "remote-moved" && !inFlight) {
-    return (
-      <span
-        className="flex items-center gap-1.5 rounded-md bg-amber-50 px-2 py-1 text-xs text-amber-700"
-        title="Remote has new commits. Pull before syncing."
-      >
-        <CloudOff className="h-3.5 w-3.5" /> Remote has new commits — sync paused
-      </span>
-    )
   }
 
   const isError = lastResult?.status === "error" && !inFlight

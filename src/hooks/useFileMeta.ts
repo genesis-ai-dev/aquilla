@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react"
 import * as Y from "yjs"
 
-const RTL_LANGS = new Set(["ar", "arc", "dv", "fa", "ha", "he", "khw", "ks", "ku", "ps", "sd", "ur", "yi"])
+const RTL_LANGS = new Set(["ar", "arc", "dv", "fa", "he", "khw", "ks", "ku", "ps", "sd", "ur", "yi"])
 
 function detectDirection(lang: string | undefined): "ltr" | "rtl" {
   const code = (lang || "").toLowerCase().split(/[-_]/)[0]

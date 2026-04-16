@@ -6,6 +6,15 @@ import tailwindcss from "@tailwindcss/vite"
 import { nodePolyfills } from "vite-plugin-node-polyfills"
 
 export default defineConfig({
+  clearScreen: false,
+  envPrefix: ["VITE_", "TAURI_ENV_"],
+  server: {
+    port: 1420,
+    strictPort: true,
+    host: false,
+    hmr: { protocol: "ws", host: "localhost", port: 1421 },
+    watch: { ignored: ["**/src-tauri/**"] },
+  },
   plugins: [
     react(),
     tailwindcss(),

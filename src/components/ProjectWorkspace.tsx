@@ -33,6 +33,8 @@ import { VideoAttachmentDialog } from "./VideoAttachmentDialog"
 import { useVideoAttachment } from "@/hooks/useVideoAttachment"
 import { parseTimestampRange, extractCuesFromCells } from "@/lib/video/vtt-generator"
 import { useSync } from "@/hooks/useSync"
+import { useFileMeta } from "@/hooks/useFileMeta"
+import { useCellLabelsPreference } from "./ViewSettingsMenu"
 import { peerColor as peerColorLocal } from "@/lib/sync/webrtc-provider"
 import { startBootstrapHost } from "@/lib/sync/bootstrap"
 import { listShares } from "@/lib/sync/share-tokens"
@@ -58,6 +60,8 @@ export function ProjectWorkspace() {
   const editorRef = useRef<EditorTableHandle>(null)
   const { doc } = useFileDoc(activeFileId)
   const cells = useCells(doc)
+  const fileMeta = useFileMeta(doc, project?.targetLanguage)
+  const [cellLabelsEnabled, setCellLabelsEnabled] = useCellLabelsPreference(projectId!)
 
   const activeFile = activeFileId ? project?.files.find((f) => f.id === activeFileId) : null
   const isSubtitleFile = activeFile?.type === "vtt" || activeFile?.type === "srt"
@@ -322,6 +326,13 @@ export function ProjectWorkspace() {
         onShare={() => setShareOpen(true)}
         peers={peers}
         exportEnabled={Boolean(activeFileId)}
+        fileOpen={Boolean(activeFileId)}
+        lineNumbersEnabled={fileMeta.lineNumbersEnabled}
+        textDirection={fileMeta.textDirection}
+        cellLabelsEnabled={cellLabelsEnabled}
+        onLineNumbersChange={fileMeta.setLineNumbersEnabled}
+        onTextDirectionChange={fileMeta.setTextDirection}
+        onCellLabelsChange={setCellLabelsEnabled}
         onVideo={isSubtitleFile ? () => setVideoDialogOpen(true) : undefined}
         onProjectUpdated={handleProjectUpdated}
         sync={runSync}

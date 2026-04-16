@@ -87,6 +87,7 @@ export interface FileReference {
   type: FileType
   createdAt: string
   cellCount: number
+  corpusMarker?: string  // From notebook metadata.corpusMarker, OT/NT fallback for biblical book stems
 }
 
 export interface ProjectMember {

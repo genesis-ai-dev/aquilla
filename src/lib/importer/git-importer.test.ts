@@ -133,3 +133,47 @@ describe("persistImportedProject", () => {
     expect(all.find(p => p.id === imported.project.id)?.name).toBe("Sample Genesis");
   });
 });
+
+describe("importFromOpfs corpusMarker", () => {
+  it("derives OT/NT from the file stem for biblical books when notebook metadata omits corpusMarker", async () => {
+    const root = new MemoryDirectoryHandle("r");
+    const fs = createOpfsFs(root as unknown as FileSystemDirectoryHandle);
+    await fs.promises.mkdir("/repo/files/target", { recursive: true });
+    await fs.promises.mkdir("/repo/.project/sourceTexts", { recursive: true });
+    await fs.promises.writeFile("/repo/metadata.json", readFix("metadata.json"));
+    // sample.codex has metadata { id: "tgt-gen", originalName: "Genesis Target", videoUrl: ... } (no corpusMarker)
+    const codexRaw = readFix("sample.codex");
+    await fs.promises.writeFile("/repo/files/target/GEN.codex", codexRaw);
+    await fs.promises.writeFile("/repo/.project/sourceTexts/GEN.source", readFix("sample.source"));
+
+    const { project } = await importFromOpfs({
+      fs, repoDir: "/repo",
+      origin: { kind: "git", cloneUrl: "u", gitlabProjectId: 1, branch: "main", headSha: "abc", importedAt: "now" },
+      permissions: { source: "gitlab", canEditContent: true, canEditComments: true, canResolveComments: true, canPush: true, accessLevel: 30 },
+    });
+
+    expect(project.files[0].name).toBe("GEN");
+    expect(project.files[0].corpusMarker).toBe("OT");
+  });
+
+  it("uses notebook metadata.corpusMarker when present (overrides OT/NT fallback)", async () => {
+    const root = new MemoryDirectoryHandle("r");
+    const fs = createOpfsFs(root as unknown as FileSystemDirectoryHandle);
+    await fs.promises.mkdir("/repo/files/target", { recursive: true });
+    await fs.promises.mkdir("/repo/.project/sourceTexts", { recursive: true });
+    await fs.promises.writeFile("/repo/metadata.json", readFix("metadata.json"));
+    // Inject corpusMarker into the codex notebook metadata
+    const nb = JSON.parse(readFix("sample.codex"));
+    nb.metadata.corpusMarker = "Pentateuch";
+    await fs.promises.writeFile("/repo/files/target/GEN.codex", JSON.stringify(nb));
+    await fs.promises.writeFile("/repo/.project/sourceTexts/GEN.source", readFix("sample.source"));
+
+    const { project } = await importFromOpfs({
+      fs, repoDir: "/repo",
+      origin: { kind: "git", cloneUrl: "u", gitlabProjectId: 1, branch: "main", headSha: "abc", importedAt: "now" },
+      permissions: { source: "gitlab", canEditContent: true, canEditComments: true, canResolveComments: true, canPush: true, accessLevel: 30 },
+    });
+
+    expect(project.files[0].corpusMarker).toBe("Pentateuch");
+  });
+});

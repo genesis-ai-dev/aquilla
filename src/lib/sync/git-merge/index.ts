@@ -51,26 +51,42 @@ export async function mergeRemoteIntoOurs({
   const touchedPaths: string[] = []
   const failures: Array<{ path: string; reason: string }> = []
 
+  // theirs-only: no resolve needed, just adopt the blob.
   for (const entry of diff) {
-    if (entry.kind === "ours-only") continue
     if (entry.kind === "theirs-only") {
       overrides.push({ path: entry.path, oid: entry.theirsOid!, mode: entry.mode })
       touchedPaths.push(entry.path)
-      continue
     }
+  }
+
+  // both-differ: resolve in parallel. Each resolver is pure over its blob
+  // pair, so no cross-entry dependencies. Dominant cost is sequential OPFS
+  // blob reads + writes — parallelizing cuts merge time roughly N-fold.
+  const conflicting = diff.filter(e => e.kind === "both-differ")
+  const results = await Promise.all(conflicting.map(async (entry) => {
     try {
-      const ourText = await readBlobText(fs, dir, entry.oursOid!)
-      const theirText = await readBlobText(fs, dir, entry.theirsOid!)
+      const [ourText, theirText] = await Promise.all([
+        readBlobText(fs, dir, entry.oursOid!),
+        readBlobText(fs, dir, entry.theirsOid!),
+      ])
       const resolved = await resolveTwoWay(entry.path, ourText, theirText)
-      if (resolved === ourText) continue
+      if (resolved === ourText) return { kind: "skip" as const }
       const newOid = await writeBlobText(fs, dir, resolved)
-      overrides.push({ path: entry.path, oid: newOid, mode: entry.mode })
-      touchedPaths.push(entry.path)
+      return { kind: "override" as const, override: { path: entry.path, oid: newOid, mode: entry.mode } }
     } catch (e) {
-      failures.push({
-        path: entry.path,
-        reason: e instanceof Error ? e.message : String(e),
-      })
+      return {
+        kind: "fail" as const,
+        failure: { path: entry.path, reason: e instanceof Error ? e.message : String(e) },
+      }
+    }
+  }))
+
+  for (const r of results) {
+    if (r.kind === "override") {
+      overrides.push(r.override)
+      touchedPaths.push(r.override.path)
+    } else if (r.kind === "fail") {
+      failures.push(r.failure)
     }
   }
 

@@ -87,7 +87,8 @@ export async function syncProject(
       remote: "origin",
       ref: project.origin.branch,
       singleBranch: true,
-      depth: 50,
+      // Two-way merge doesn't need history; only the tip trees + blobs matter.
+      depth: 1,
       corsProxy: GIT_CORS_PROXY,
       headers: { Authorization: authHeader },
       onAuth: () => ({ username: "oauth2", password: session.gitlabToken }),
@@ -234,16 +235,18 @@ export async function syncProject(
     }
 
     // 7) Rehydrate touched Y.Docs from the merged tree's canonical bytes.
+    //    Done in parallel — each rehydrate is independent and reads a
+    //    different blob.
     if (touchedPaths.length > 0) {
       onPhase?.("rehydrating")
       const syncedAt = Date.now()
-      for (const relpath of touchedPaths) {
-        if (!relpath.endsWith(".codex") && !relpath.endsWith(".source")) continue
+      await Promise.all(touchedPaths.map(async (relpath) => {
+        if (!relpath.endsWith(".codex") && !relpath.endsWith(".source")) return
         const fullPath = "/" + relpath
         const match = fileHandles.find(
           (h) => findOriginalPath(project, h.ref.name) === fullPath,
         )
-        if (!match) continue
+        if (!match) return
         try {
           const { blob } = await git.readBlob({
             fs: fs as unknown as git.FsClient,
@@ -256,7 +259,7 @@ export async function syncProject(
         } catch (err) {
           console.warn(`[sync] could not rehydrate ${relpath}:`, err)
         }
-      }
+      }))
     }
 
     // 8) Bump __lastSyncedHistoryAt on non-rehydrated docs so the next sync

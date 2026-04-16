@@ -37,7 +37,7 @@ export function useCells(doc: Y.Doc | null): CellData[] {
     const cellsMap = doc.getMap("cells")
     const orderArray = doc.getArray<string>("order")
 
-    function update() {
+    function computeOrdered(): CellData[] {
       const ordered: CellData[] = []
       for (const id of orderArray.toArray()) {
         const cell = cellsMap.get(id) as Y.Map<unknown> | undefined
@@ -65,13 +65,26 @@ export function useCells(doc: Y.Doc | null): CellData[] {
           backtranslationForText: cell.get("backtranslationForText") as string | undefined,
         })
       }
-      setCells(ordered)
+      return ordered
     }
 
-    update()
-    cellsMap.observeDeep(update)
-    orderArray.observe(update)
-    return () => { cellsMap.unobserveDeep(update); orderArray.unobserve(update) }
+    // Initial read is safe inside useEffect — runs after the current render.
+    setCells(computeOrdered())
+
+    // Yjs observer callbacks can fire synchronously during another component's
+    // render (e.g. TipTap binding initialization triggers a Y op). Defer the
+    // setState via queueMicrotask so React doesn't warn about updating a
+    // different component mid-render.
+    function scheduleUpdate() {
+      queueMicrotask(() => { setCells(computeOrdered()) })
+    }
+
+    cellsMap.observeDeep(scheduleUpdate)
+    orderArray.observe(scheduleUpdate)
+    return () => {
+      cellsMap.unobserveDeep(scheduleUpdate)
+      orderArray.unobserve(scheduleUpdate)
+    }
   }, [doc])
 
   return cells

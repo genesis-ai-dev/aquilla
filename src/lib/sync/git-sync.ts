@@ -1,7 +1,8 @@
 import * as git from "isomorphic-git"
 import http from "isomorphic-git/http/web"
 import { GIT_CORS_PROXY } from "@/lib/git/clone"
-import { openOpfsRepoDir, createOpfsFs, type OpfsFs } from "@/lib/git/opfs-fs"
+import type { OpfsFs } from "@/lib/git/opfs-fs"
+import { getFsProvider } from "@/lib/fs"
 import { opfsRepoKey, pathWithNamespaceFromCloneUrl } from "@/lib/git/repo-key"
 import { loadFileDoc, destroyFileDoc, rehydrateFileDoc, type FileDocHandle } from "@/lib/store/file-doc"
 import { serializeFile, serializeComments } from "@/lib/codex-editor/serialize"
@@ -64,7 +65,7 @@ export async function syncProject(
   }
 
   onPhase?.("checking-dirty")
-  const fs: OpfsFs = opts.fs ?? createOpfsFs(await openOpfsRepoDir(repoKey(project)))
+  const fs: OpfsFs = opts.fs ?? await getFsProvider(repoKey(project))
   const authHeader = `Basic ${btoa(`oauth2:${session.gitlabToken}`)}`
 
   // 1) Fetch + detect remote movement (but don't early-return on it — Phase 3

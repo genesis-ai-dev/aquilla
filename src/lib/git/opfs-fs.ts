@@ -21,10 +21,16 @@ const DOM_TO_POSIX: Record<string, string> = {
 
 function translateError(err: unknown): never {
   if (err && typeof err === "object") {
-    const e = err as { name?: string; message?: string; code?: unknown };
+    const e = err as {
+      name?: string; message?: string; code?: unknown;
+      pathSegment?: string; fullPath?: string;
+    };
     const name = typeof e.name === "string" ? e.name : "";
     const posix = DOM_TO_POSIX[name] ?? (typeof e.code === "string" ? e.code : "EIO");
-    const wrapped = new Error(`${posix}: ${e.message ?? name ?? "fs error"}`) as Error & {
+    const ctx = e.pathSegment
+      ? ` (segment="${e.pathSegment}", path="${e.fullPath ?? ""}")`
+      : "";
+    const wrapped = new Error(`${posix}: ${e.message ?? name ?? "fs error"}${ctx}`) as Error & {
       code: string; errno: number;
     };
     wrapped.code = posix;
@@ -46,7 +52,14 @@ async function resolveDir(
 ): Promise<DirHandle> {
   let dir = root;
   for (const p of parts) {
-    dir = await dir.getDirectoryHandle(p, { create: !!opts?.create });
+    try {
+      dir = await dir.getDirectoryHandle(p, { create: !!opts?.create });
+    } catch (e) {
+      const wrapped = e instanceof Error ? e : new Error(String(e));
+      (wrapped as Error & { pathSegment?: string }).pathSegment = p;
+      (wrapped as Error & { fullPath?: string }).fullPath = "/" + parts.join("/");
+      throw wrapped;
+    }
   }
   return dir;
 }

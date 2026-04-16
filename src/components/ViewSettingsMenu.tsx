@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react"
+import { useCallback, useEffect, useState } from "react"
 import { Menu } from "@base-ui/react/menu"
 import { Eye } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -49,6 +49,7 @@ export function ViewSettingsMenu({
               <span>Show cell labels</span>
               <Pill on={cellLabelsEnabled} />
             </Menu.Item>
+            {/* @base-ui/react/menu does not re-export Menu.Separator from its main barrel — div with role="separator" until it does. */}
             <div className="-mx-1 my-1 h-px bg-border" role="separator" />
             <Menu.Item
               disabled={!fileOpen}
@@ -81,17 +82,27 @@ function Pill({ on }: { on: boolean }) {
 const STORAGE_KEY = "codex:cellLabelsEnabled:"
 
 export function useCellLabelsPreference(projectId: string): [boolean, (v: boolean) => void] {
-  const [enabled, setEnabled] = useState(true)
+  const [enabled, setEnabled] = useState<boolean>(() => readPreference(projectId))
 
   useEffect(() => {
-    const raw = localStorage.getItem(STORAGE_KEY + projectId)
-    setEnabled(raw === null ? true : raw === "true")
+    setEnabled(readPreference(projectId))
   }, [projectId])
 
-  const setAndPersist = (v: boolean) => {
+  const setAndPersist = useCallback((v: boolean) => {
     setEnabled(v)
-    localStorage.setItem(STORAGE_KEY + projectId, String(v))
-  }
+    try {
+      localStorage.setItem(STORAGE_KEY + projectId, String(v))
+    } catch { /* storage unavailable (e.g. Safari private) — keep in-memory */ }
+  }, [projectId])
 
   return [enabled, setAndPersist]
+}
+
+function readPreference(projectId: string): boolean {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY + projectId)
+    return raw === null ? true : raw === "true"
+  } catch {
+    return true
+  }
 }

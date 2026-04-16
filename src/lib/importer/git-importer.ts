@@ -233,7 +233,7 @@ export async function importFromOpfs(args: ImportArgs): Promise<ImportedProject>
     // doesn't pile up open IDB handles. persistImportedProject reattaches.
     handle.persistence.destroy();
 
-    const corpusMarker = (nb.metadata?.corpusMarker as string | undefined) || getTestament(stem);
+    const corpusMarker = nb.metadata.corpusMarker || getTestament(stem);
 
     files.push({
       id: fileId,

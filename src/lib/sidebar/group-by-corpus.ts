@@ -34,14 +34,13 @@ export function groupByCorpus<T extends { name: string; corpusMarker?: string }>
   ungrouped.sort((a, b) => a.name.localeCompare(b.name))
 
   const named = Array.from(groupsByKey.values()).sort((a, b) => {
-    if (a.label === "OT") return -1
-    if (b.label === "OT") return 1
-    if (a.label === "NT") return -1
-    if (b.label === "NT") return 1
+    if (a.label === "OT" && b.label !== "OT") return -1
+    if (b.label === "OT" && a.label !== "OT") return 1
+    if (a.label === "NT" && b.label !== "NT") return -1
+    if (b.label === "NT" && a.label !== "NT") return 1
     return a.label.localeCompare(b.label)
   })
 
-  const result: CorpusGroup<T>[] = named
-  if (ungrouped.length > 0) result.push({ label: "Ungrouped", files: ungrouped })
-  return result
+  if (ungrouped.length > 0) named.push({ label: "Ungrouped", files: ungrouped })
+  return named
 }

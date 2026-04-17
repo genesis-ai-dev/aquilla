@@ -15,10 +15,10 @@ export function Dashboard() {
   const navigate = useNavigate()
 
   useEffect(() => {
-    listProjects().then((p) => {
-      setProjects(p)
-      setLoading(false)
-    })
+    listProjects()
+      .then((p) => { setProjects(p) })
+      .catch(() => { /* IndexedDB unavailable — render with empty list */ })
+      .finally(() => setLoading(false))
   }, [])
 
   function upsert(project: ProjectRecord) {

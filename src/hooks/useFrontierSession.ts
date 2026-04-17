@@ -1,32 +1,18 @@
-import { useEffect, useState, useCallback } from "react";
-import {
-  loadSession, clearSession as clear, subscribeSession,
-} from "@/lib/frontier/session-store";
-import { login as doLogin } from "@/lib/frontier/auth";
-import type { FrontierSession } from "@/lib/frontier/types";
+import { useCallback } from "react"
+import { login as doLogin } from "@/lib/frontier/auth"
+import { clearSession } from "@/lib/frontier/session-store"
+import { useAccounts } from "@/hooks/useAccounts"
 
 export function useFrontierSession() {
-  const [session, setSession] = useState<FrontierSession | null>(null);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    let cancelled = false;
-    function refresh() {
-      loadSession().then((s) => { if (!cancelled) setSession(s); });
-    }
-    refresh();
-    setLoading(false);
-    const unsubscribe = subscribeSession(refresh);
-    return () => { cancelled = true; unsubscribe(); };
-  }, []);
+  const { active, loading } = useAccounts()
 
   const login = useCallback(async (username: string, password: string) => {
-    return doLogin({ username, password }); // saveSession() inside notifies all hook instances
-  }, []);
+    return doLogin({ username, password })
+  }, [])
 
   const logout = useCallback(async () => {
-    await clear();
-  }, []);
+    await clearSession()
+  }, [])
 
-  return { session, loading, login, logout };
+  return { session: active, loading, login, logout }
 }

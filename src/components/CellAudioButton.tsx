@@ -43,10 +43,12 @@ export function CellAudioButton({ project, cell }: Props) {
       disabled={state === "loading"}
       title={tooltip}
       className={cn(
-        "mt-1 flex h-5 w-5 items-center justify-center rounded",
+        "flex h-5 w-5 items-center justify-center rounded transition-[transform,color] duration-150 ease-out active:scale-[0.92] hover:bg-muted/60",
         state === "error"
           ? "text-destructive hover:text-destructive/80"
-          : "text-muted-foreground/60 hover:text-muted-foreground",
+          : isPlaying
+            ? "text-primary"
+            : "text-muted-foreground/50 hover:text-foreground",
       )}
     >
       {state === "loading" && <Loader2 className="h-3 w-3 animate-spin" />}

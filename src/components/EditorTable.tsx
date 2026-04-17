@@ -130,6 +130,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
                 transform: `translateY(${virtualRow.start}px)`,
               }}
               className={cn(
+                "transition-colors duration-150 ease-out hover:bg-muted/20",
                 hasOpenComments && "border-l-2 border-l-blue-400",
                 isActiveCue && "bg-primary/5 ring-1 ring-primary/30"
               )}
@@ -366,53 +367,59 @@ function EditorRow({
     // Don't close if user is interacting with the popover
   }
 
-  const validationIcon = cell.translated && cell.translated.trim() ? (
+  const ValidationIcon = vs === "full" ? CheckCheck : vs === "self" ? Check : vs === "others" ? CircleDot : Circle
+  const validationColorClass =
+    vs === "full" ? "text-emerald-500" :
+    vs === "self" ? "text-emerald-500" :
+    vs === "others" ? "text-muted-foreground/60" :
+    "text-muted-foreground/30"
+
+  const hasContent = Boolean(cell.translated && cell.translated.trim())
+
+  const validationButton = hasContent ? (
     <div
-      className="relative flex flex-col items-center"
-      title={healthTooltip}
+      className="relative"
       onMouseEnter={handleHoverEnter}
       onMouseLeave={handleHoverLeave}
     >
-      <HealthRing health={healthValue} size={22} strokeWidth={2.5}>
-        {vs === "empty" ? null : (
-          <button
-            className={cn(
-              "flex h-full w-full items-center justify-center rounded-full disabled:cursor-not-allowed disabled:opacity-50",
-              vs === "full" ? "text-green-500 hover:text-green-600" :
-              vs === "self" ? "text-green-500 hover:text-amber-500" :
-              vs === "others" ? "text-muted-foreground/60 hover:text-green-500" :
-              "text-muted-foreground/30 hover:text-green-500",
-            )}
-            disabled={!editable}
-            onClick={handleIconClick}
-          >
-            {vs === "full" ? (
-              <CheckCheck className="h-3 w-3" />
-            ) : vs === "self" ? (
-              <Check className="h-3 w-3" />
-            ) : vs === "others" ? (
-              <CircleDot className="h-3 w-3" />
-            ) : (
-              <Circle className="h-3 w-3" />
-            )}
-          </button>
+      <button
+        type="button"
+        className={cn(
+          "flex h-6 w-6 items-center justify-center rounded-full transition-[transform,color] duration-150 ease-out",
+          "active:scale-[0.92] disabled:cursor-not-allowed disabled:opacity-40",
+          "hover:bg-muted/60",
+          validationColorClass,
+          vs === "none" && "hover:text-emerald-500",
+          vs === "others" && "hover:text-emerald-500",
         )}
-      </HealthRing>
+        title={healthTooltip}
+        disabled={!editable}
+        onClick={handleIconClick}
+      >
+        <HealthRing health={healthValue} size={22} strokeWidth={2}>
+          <ValidationIcon className="h-3 w-3" strokeWidth={2.5} />
+        </HealthRing>
+      </button>
       {validationPopoverOpen && vs !== "empty" && (
         <div
           ref={popoverRef}
-          className="absolute right-6 top-0 z-50 w-48 rounded-md border bg-popover p-2 shadow-md"
-          onMouseLeave={() => setValidationPopoverOpen(false)}
+          className={cn(
+            "absolute right-7 top-0 z-50 w-48 origin-top-right rounded-lg border bg-popover p-2 shadow-lg",
+            "animate-in fade-in-0 zoom-in-95 duration-150",
+          )}
         >
           {cell.activeValidators.length > 0 ? (
-            <div className="space-y-1">
-              <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">Validated by</p>
+            <ul className="space-y-0.5">
+              <li className="mb-1 px-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+                Validated by
+              </li>
               {cell.activeValidators.map((v) => (
-                <div key={v} className="flex items-center justify-between text-xs">
+                <li key={v} className="flex items-center justify-between gap-2 rounded px-1 py-1 text-xs hover:bg-muted/50">
                   <span className="truncate">{v}{v === username ? " (you)" : ""}</span>
                   {v === username && editable && (
                     <button
-                      className="ml-2 flex-shrink-0 text-muted-foreground hover:text-destructive"
+                      type="button"
+                      className="flex-shrink-0 rounded p-0.5 text-muted-foreground/70 transition-colors hover:bg-destructive/10 hover:text-destructive"
                       title="Remove your validation"
                       onClick={() => {
                         toggleCellValidation(doc, cell.id, username, false)
@@ -422,52 +429,13 @@ function EditorRow({
                       <Trash2 className="h-3 w-3" />
                     </button>
                   )}
-                </div>
+                </li>
               ))}
-            </div>
+            </ul>
           ) : (
-            <p className="text-xs text-muted-foreground">No validations yet</p>
+            <p className="px-1 py-2 text-xs text-muted-foreground">No validations yet</p>
           )}
         </div>
-      )}
-      <span className="mt-0.5 text-[9px] tabular-nums text-muted-foreground">{healthValue}%</span>
-      {cellInfractions.length > 0 && (
-        <div className="mt-0.5 flex gap-0.5">
-          {cellInfractions.map((inf) => {
-            const rule = ruleMap.get(inf.ruleId)
-            const isMajor = rule?.severity === "major"
-            const Icon = isMajor ? AlertTriangle : AlertCircle
-            return (
-              <button key={inf.ruleId} onClick={() => onInfractionClick?.(inf.ruleId)}
-                title={inf.message}
-                className={isMajor ? "text-red-500 hover:text-red-700" : "text-amber-500 hover:text-amber-700"}>
-                <Icon className="h-3 w-3" />
-              </button>
-            )
-          })}
-        </div>
-      )}
-      {isBacktranslationConfigured !== undefined && (
-        <button
-          className={cn(
-            "mt-1 flex h-5 w-5 items-center justify-center rounded",
-            isBacktranslating ? "animate-pulse text-primary" : "text-muted-foreground hover:text-primary",
-            !isBacktranslationConfigured && "cursor-not-allowed text-muted-foreground/30"
-          )}
-          disabled={!isBacktranslationConfigured || isBacktranslating || !editable}
-          onClick={() => onBacktranslate?.(cell)}
-          title={
-            !editable
-              ? "Read-only (imported from git)"
-              : !isBacktranslationConfigured
-                ? "Configure LLM in settings"
-                : isBacktranslating
-                  ? "Generating..."
-                  : cell.backtranslation ? "Regenerate backtranslation" : "Generate backtranslation"
-          }
-        >
-          <Languages className="h-3 w-3" />
-        </button>
       )}
     </div>
   ) : null
@@ -475,43 +443,50 @@ function EditorRow({
   // SECURITY: originalHtml is sanitized through DOMPurify.sanitize() at the
   // render boundary. Parsers only produce safe inline tags (<b>, <i>, <u>,
   // <s>, <code>). DOMPurify provides defense-in-depth against XSS.
+  const showLineNumber = lineNumbersEnabled && cell.type !== "paratext"
+  const showCellLabel = cellLabelsEnabled && cell.cellLabel
+  const hasGutterMetadata = showLineNumber || showCellLabel
   return (
-    <div className={cn("grid gap-2 border-b px-4 py-2", gridCols)}>
-      {/* Sparkle column */}
-      <div className="flex flex-col items-center gap-1 pt-5">
-        {lineNumbersEnabled && (cell.type !== "paratext") && (
-          <span
-            className="text-[10px] tabular-nums text-muted-foreground/70"
-            title={`Line ${rowIndex + 1}`}
-          >
-            {rowIndex + 1}
-          </span>
+    <div className={cn("group grid gap-2 border-b px-4 py-2 transition-colors", gridCols)}>
+      {/* Gutter — metadata at top, generator action centered */}
+      <div className="flex flex-col items-center gap-1">
+        {hasGutterMetadata && (
+          <div className="flex h-4 items-center gap-1 text-[10px] leading-none text-muted-foreground/60">
+            {showLineNumber && (
+              <span className="tabular-nums" title={`Line ${rowIndex + 1}`}>
+                {rowIndex + 1}
+              </span>
+            )}
+            {showCellLabel && (
+              <span
+                className="rounded bg-muted/50 px-1 py-0.5 font-medium text-muted-foreground/80"
+                title="Cell label"
+              >
+                {cell.cellLabel}
+              </span>
+            )}
+          </div>
         )}
-        {cellLabelsEnabled && cell.cellLabel && (
-          <span
-            className="rounded bg-muted/40 px-1 text-[10px] text-muted-foreground"
-            title="Cell label"
-          >
-            {cell.cellLabel}
-          </span>
-        )}
-        <SparkleButton
-          disabled={!isCompletionConfigured || !editable}
-          loading={isLoading}
-          onComplete={() => onCompleteSingle(cell)}
-          onDragStart={onDragStart}
-          onDragEnter={onDragEnter}
-          tooltip={!editable ? "Read-only (imported from git)" : isCompletionConfigured ? "Generate translation" : "Configure LLM in settings"}
-        />
-        {onSeekToCue && (
-          <button
-            onClick={() => onSeekToCue(cell.id)}
-            className="flex h-5 w-5 items-center justify-center rounded text-muted-foreground hover:text-primary"
-            title="Play from this cue"
-          >
-            <Play className="h-3 w-3" />
-          </button>
-        )}
+        <div className={cn("flex flex-col items-center gap-1", hasGutterMetadata ? "pt-1" : "pt-5")}>
+          <SparkleButton
+            disabled={!isCompletionConfigured || !editable}
+            loading={isLoading}
+            onComplete={() => onCompleteSingle(cell)}
+            onDragStart={onDragStart}
+            onDragEnter={onDragEnter}
+            tooltip={!editable ? "Read-only (imported from git)" : isCompletionConfigured ? "Generate translation" : "Configure LLM in settings"}
+          />
+          {onSeekToCue && (
+            <button
+              type="button"
+              onClick={() => onSeekToCue(cell.id)}
+              className="flex h-5 w-5 items-center justify-center rounded text-muted-foreground/50 transition-[transform,color] duration-150 ease-out hover:bg-muted/60 hover:text-foreground active:scale-[0.92]"
+              title="Play from this cue"
+            >
+              <Play className="h-3 w-3" />
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Source column */}
@@ -569,56 +544,112 @@ function EditorRow({
           )}
           {error && <p className="mt-0.5 text-xs text-destructive">{error}</p>}
           {cell.backtranslation && (
-            <div className="mt-1 rounded border-l-2 border-blue-400 bg-muted/30 px-2 py-1 text-xs italic text-muted-foreground">
+            <div className="mt-1.5 rounded-md border-l-2 border-blue-400/70 bg-muted/30 px-2.5 py-1.5 text-xs italic text-muted-foreground">
               <div className="flex items-center gap-1.5 not-italic">
+                <span className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground/80">Backtranslation</span>
                 {cell.backtranslationForText !== cell.translated && (
-                  <span title="Translation has changed since backtranslation" className="flex items-center gap-0.5 text-amber-500">
-                    <AlertTriangle className="h-3 w-3" />
+                  <span title="Translation has changed since backtranslation" className="flex items-center gap-0.5 rounded bg-amber-500/10 px-1 py-0.5 text-[9px] font-medium text-amber-600 dark:text-amber-400">
+                    <AlertTriangle className="h-2.5 w-2.5" />
                     stale
                   </span>
                 )}
                 <button
+                  type="button"
                   onClick={() => onBacktranslate?.(cell)}
                   disabled={!isBacktranslationConfigured || isBacktranslating || !editable}
-                  className="text-muted-foreground hover:text-primary disabled:opacity-30"
+                  className="ml-auto flex h-4 w-4 items-center justify-center rounded text-muted-foreground/60 transition-[transform,color] duration-150 ease-out hover:bg-muted/60 hover:text-foreground active:scale-[0.92] disabled:cursor-not-allowed disabled:opacity-30"
                   title={!editable ? "Read-only (imported from git)" : "Regenerate"}
                 >
                   <RefreshCw className={cn("h-3 w-3", isBacktranslating && "animate-spin")} />
                 </button>
-                <span className="text-[10px] font-medium">backtranslation</span>
               </div>
-              <div className="mt-0.5">{cell.backtranslation}</div>
+              <div className="mt-1 leading-relaxed">{cell.backtranslation}</div>
             </div>
           )}
           {backtranslationError && (
             <p className="mt-0.5 text-xs text-destructive">BT: {backtranslationError}</p>
           )}
         </div>
-        <div className="flex flex-col items-center">
-          {validationIcon}
+        {/* Right actions — compact vertical stack with consistent rhythm */}
+        <div className="flex flex-col items-center gap-1">
+          {validationButton}
+
+          {cellInfractions.length > 0 && (
+            <div className="flex flex-col items-center gap-0.5">
+              {cellInfractions.map((inf) => {
+                const rule = ruleMap.get(inf.ruleId)
+                const isMajor = rule?.severity === "major"
+                const Icon = isMajor ? AlertTriangle : AlertCircle
+                return (
+                  <button
+                    key={inf.ruleId}
+                    type="button"
+                    onClick={() => onInfractionClick?.(inf.ruleId)}
+                    title={inf.message}
+                    className={cn(
+                      "flex h-5 w-5 items-center justify-center rounded transition-[transform,color] duration-150 ease-out active:scale-[0.92] hover:bg-muted/60",
+                      isMajor ? "text-red-500 hover:text-red-600" : "text-amber-500 hover:text-amber-600"
+                    )}
+                  >
+                    <Icon className="h-3 w-3" />
+                  </button>
+                )
+              })}
+            </div>
+          )}
+
           <CellAudioButton project={project} cell={cellForButton} />
+
+          {isBacktranslationConfigured !== undefined && (
+            <button
+              type="button"
+              className={cn(
+                "flex h-5 w-5 items-center justify-center rounded transition-[transform,color] duration-150 ease-out active:scale-[0.92] hover:bg-muted/60",
+                isBacktranslating && "animate-pulse text-primary",
+                !isBacktranslating && isBacktranslationConfigured && "text-muted-foreground/50 hover:text-foreground",
+                !isBacktranslationConfigured && "cursor-not-allowed text-muted-foreground/20",
+              )}
+              disabled={!isBacktranslationConfigured || isBacktranslating || !editable}
+              onClick={() => onBacktranslate?.(cell)}
+              title={
+                !editable
+                  ? "Read-only (imported from git)"
+                  : !isBacktranslationConfigured
+                    ? "Configure LLM in settings"
+                    : isBacktranslating
+                      ? "Generating…"
+                      : cell.backtranslation ? "Regenerate backtranslation" : "Generate backtranslation"
+              }
+            >
+              <Languages className="h-3 w-3" />
+            </button>
+          )}
+
           {onOpenComments && (
             <button
+              type="button"
               className={cn(
-                "mt-1 flex h-5 w-5 items-center justify-center rounded relative",
-                openCommentCount > 0 ? "text-primary" : "text-muted-foreground/50 hover:text-muted-foreground"
+                "relative flex h-5 w-5 items-center justify-center rounded transition-[transform,color] duration-150 ease-out active:scale-[0.92] hover:bg-muted/60",
+                openCommentCount > 0 ? "text-primary" : "text-muted-foreground/50 hover:text-foreground",
               )}
               onClick={() => onOpenComments(cell.id)}
               title={openCommentCount > 0 ? `${openCommentCount} open comment${openCommentCount !== 1 ? "s" : ""}` : "Add comment"}
             >
               <MessageCircle className="h-3 w-3" />
               {openCommentCount > 0 && (
-                <span className="absolute -top-1 -right-1 flex h-3 w-3 items-center justify-center rounded-full bg-primary text-[8px] font-bold text-primary-foreground">
+                <span className="absolute -right-0.5 -top-0.5 flex h-3 min-w-3 items-center justify-center rounded-full bg-primary px-0.5 text-[8px] font-semibold leading-none text-primary-foreground tabular-nums">
                   {openCommentCount}
                 </span>
               )}
             </button>
           )}
-          {onOpenHistory && (cell.history.length > 0 || (cell.translated && cell.translated.trim())) && (
+
+          {onOpenHistory && (cell.history.length > 0 || hasContent) && (
             <button
+              type="button"
               className={cn(
-                "mt-1 flex h-5 w-5 items-center justify-center rounded hover:text-primary",
-                cell.history.length > 0 ? "text-muted-foreground/80" : "text-muted-foreground/40"
+                "flex h-5 w-5 items-center justify-center rounded transition-[transform,color] duration-150 ease-out active:scale-[0.92] hover:bg-muted/60 hover:text-foreground",
+                cell.history.length > 0 ? "text-muted-foreground/70" : "text-muted-foreground/30",
               )}
               onClick={() => onOpenHistory(cell.id)}
               title={

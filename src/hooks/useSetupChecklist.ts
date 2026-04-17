@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback } from "react"
 import type { ProjectRecord, CompletionSettings } from "@/lib/parsers/types"
-import { updateProject } from "@/lib/store/project-index"
+import { getProject, updateProject } from "@/lib/store/project-index"
 import { listShares } from "@/lib/sync/share-tokens"
 
 export interface ChecklistState {
@@ -30,19 +30,27 @@ export function deriveChecklistState(
 
 export function useSetupChecklist(project: ProjectRecord | null) {
   const [shareCount, setShareCount] = useState(0)
-  const [dismissed, setDismissed] = useState(true)
+  const [dismissed, setDismissed] = useState(false)
 
   useEffect(() => {
     if (!project) return
+    let cancelled = false
     setDismissed(project.setupChecklistDismissed ?? false)
-    listShares(project.id).then((shares) => setShareCount(shares.length))
+    listShares(project.id).then((shares) => {
+      if (!cancelled) setShareCount(shares.length)
+    })
+    return () => { cancelled = true }
   }, [project])
 
   const state = deriveChecklistState(project?.completionSettings, shareCount)
 
   const dismiss = useCallback(async () => {
     if (!project) return
-    await updateProject({ ...project, setupChecklistDismissed: true })
+    // Re-read the latest project from the store so we don't clobber
+    // intervening writes (e.g. AI settings saved through the checklist).
+    const latest = await getProject(project.id)
+    const base = latest ?? project
+    await updateProject({ ...base, setupChecklistDismissed: true })
     setDismissed(true)
   }, [project])
 

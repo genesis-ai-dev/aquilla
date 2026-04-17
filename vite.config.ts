@@ -9,10 +9,12 @@ export default defineConfig({
   clearScreen: false,
   envPrefix: ["VITE_", "TAURI_ENV_"],
   server: {
+    // Bind to 127.0.0.1 explicitly; "localhost" can resolve to ::1 on macOS,
+    // which Vite then can't bind, leaving Tauri's HTTP probe hanging.
+    host: "127.0.0.1",
     port: 1420,
     strictPort: true,
-    host: false,
-    hmr: { protocol: "ws", host: "localhost", port: 1421 },
+    hmr: { protocol: "ws", host: "127.0.0.1", port: 1421 },
     watch: { ignored: ["**/src-tauri/**"] },
   },
   plugins: [

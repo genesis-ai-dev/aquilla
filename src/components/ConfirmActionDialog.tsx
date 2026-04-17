@@ -1,0 +1,51 @@
+import { useState, useEffect } from "react"
+import { Button } from "@/components/ui/button"
+import {
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter,
+} from "@/components/ui/dialog"
+
+interface ConfirmActionDialogProps {
+  open: boolean
+  onOpenChange: (open: boolean) => void
+  title: string
+  description: string
+  confirmLabel: string
+  checkboxLabel?: string
+  onConfirm: () => void
+}
+
+export function ConfirmActionDialog({
+  open, onOpenChange, title, description, confirmLabel,
+  checkboxLabel = "I understand this action.",
+  onConfirm,
+}: ConfirmActionDialogProps) {
+  const [checked, setChecked] = useState(false)
+  useEffect(() => { if (!open) setChecked(false) }, [open])
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>{title}</DialogTitle>
+          <DialogDescription>{description}</DialogDescription>
+        </DialogHeader>
+        <label className="flex items-start gap-2 py-2 text-sm">
+          <input
+            type="checkbox" checked={checked}
+            onChange={(e) => setChecked(e.target.checked)}
+            className="mt-0.5"
+          />
+          <span>{checkboxLabel}</span>
+        </label>
+        <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
+          <Button
+            disabled={!checked}
+            onClick={() => { onConfirm(); onOpenChange(false) }}
+          >
+            {confirmLabel}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}

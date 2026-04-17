@@ -26,7 +26,8 @@ export function buildUndo(
   const nextFiles = project.files.map((f) => {
     const s = byId.get(f.id)
     if (!s) return f
-    const { originalName: _unused, ...rest } = f
+    const rest = { ...f }
+    delete rest.originalName
     return {
       ...rest,
       name: s.currentName,

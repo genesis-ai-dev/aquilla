@@ -43,6 +43,8 @@ import { useSyncProject } from "@/hooks/useSyncProject"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { useAutoSync } from "@/hooks/useAutoSync"
 import { useCorpusBackfill } from "@/hooks/useCorpusBackfill"
+import { useSetupChecklist } from "@/hooks/useSetupChecklist"
+import { SetupChecklistDrawer } from "./onboarding/SetupChecklistDrawer"
 import { Lock } from "lucide-react"
 
 export function ProjectWorkspace() {
@@ -293,6 +295,13 @@ export function ProjectWorkspace() {
   useAutoSync(project ?? null, frontierSession)
   useCorpusBackfill(project ?? null, refresh)
 
+  const { state: checklistState, dismissed: checklistDismissed, dismiss: dismissChecklist, refreshShares: refreshChecklistShares } = useSetupChecklist(project ?? null)
+  const [checklistOpen, setChecklistOpen] = useState(!checklistDismissed)
+
+  useEffect(() => {
+    if (!checklistDismissed) setChecklistOpen(true)
+  }, [checklistDismissed])
+
   const handleProjectUpdated = useCallback(async (updated: typeof project) => {
     if (!updated) return
     await updateProject(updated)
@@ -367,6 +376,8 @@ export function ProjectWorkspace() {
         syncPhase={syncPhase}
         syncInFlight={syncInFlight}
         syncLastResult={syncLastResult}
+        checklistProgress={checklistDismissed ? undefined : { completed: checklistState.completedCount, total: checklistState.totalCount }}
+        onOpenChecklist={() => setChecklistOpen(true)}
       />
       {isReadOnly && (
         <div className="flex items-center gap-2 border-b bg-amber-50 px-4 py-2 text-xs text-amber-900">
@@ -440,6 +451,7 @@ export function ProjectWorkspace() {
                 cellLabelsEnabled={cellLabelsEnabled}
                 sourceTextDirection={fileMeta.sourceTextDirection}
                 targetTextDirection={fileMeta.targetTextDirection}
+                isAnonymous={!frontierSession}
               />
             ) : <p className="p-4 text-muted-foreground">Loading file...</p>) : (
               <p className="p-4 text-muted-foreground">Select a file from the sidebar, or import files.</p>
@@ -471,6 +483,16 @@ export function ProjectWorkspace() {
             <HistoryDrawer
               cell={historyCell}
               onClose={() => setHistoryCellId(null)}
+            />
+          )}
+          {checklistOpen && !checklistDismissed && project && (
+            <SetupChecklistDrawer
+              project={project}
+              state={checklistState}
+              onDismiss={() => { dismissChecklist(); setChecklistOpen(false) }}
+              onClose={() => setChecklistOpen(false)}
+              onProjectUpdated={handleProjectUpdated}
+              onSharesChanged={refreshChecklistShares}
             />
           )}
         </main>

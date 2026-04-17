@@ -108,6 +108,15 @@ export function ProjectSettings() {
           <ArrowLeft className="mr-1 h-4 w-4" /> Back to Editor
         </Button>
         <h2 className="font-semibold">Project Settings</h2>
+        <div className="ml-auto">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => navigate(`/project/${id}`)}
+          >
+            View Setup Checklist
+          </Button>
+        </div>
       </header>
       <main className="mx-auto max-w-2xl space-y-6 p-6">
         <Card>

@@ -1,0 +1,50 @@
+import { Button } from "@/components/ui/button"
+import { FrontierLoginForm } from "@/components/git-import/FrontierLoginForm"
+import { useFrontierSession } from "@/hooks/useFrontierSession"
+import { Check } from "lucide-react"
+
+export function SignInStep({ onNext, onBack }: { onNext: () => void; onBack: () => void }) {
+  const { session } = useFrontierSession()
+
+  if (session) {
+    return (
+      <div className="space-y-6">
+        <div className="text-center space-y-2">
+          <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-green-100 text-green-600">
+            <Check className="h-6 w-6" />
+          </div>
+          <h2 className="text-2xl font-semibold">Signed in as {session.username}</h2>
+          <p className="text-sm text-muted-foreground">
+            AI translations, sync, and cloud import are available.
+          </p>
+        </div>
+        <Button size="lg" onClick={onNext} className="w-full">
+          Continue
+        </Button>
+      </div>
+    )
+  }
+
+  return (
+    <div className="space-y-6">
+      <div className="text-center space-y-2">
+        <h2 className="text-2xl font-semibold">Sign in to Frontier</h2>
+        <p className="text-sm text-muted-foreground">
+          Unlock AI-powered translations, sync across devices, and import projects from the cloud.
+        </p>
+      </div>
+      <FrontierLoginForm onSuccess={onNext} />
+      <div className="text-center">
+        <button
+          onClick={onNext}
+          className="text-sm text-muted-foreground underline-offset-4 hover:underline"
+        >
+          Skip for now
+        </button>
+      </div>
+      <Button variant="ghost" size="sm" onClick={onBack} className="w-full">
+        ← Back
+      </Button>
+    </div>
+  )
+}

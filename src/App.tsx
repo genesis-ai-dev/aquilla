@@ -7,6 +7,7 @@ import { RulesPage } from "@/components/RulesPage"
 import { CommentsPage } from "@/components/CommentsPage"
 import { SnapshotsPage } from "@/components/SnapshotsPage"
 import { JoinPage } from "@/components/JoinPage"
+import { OnboardingWizard } from "@/components/onboarding/OnboardingWizard"
 import { SyncingProvider, useSyncing } from "@/context/SyncingContext"
 
 function SyncFreezeOverlay() {
@@ -44,6 +45,7 @@ function AppRoutes() {
       <Route path="/project/:id/snapshots" element={<SnapshotsPage />} />
       <Route path="/project/:id/snapshots/debug" element={<DebugView />} />
       <Route path="/join/:token" element={<JoinPage />} />
+      <Route path="/onboarding" element={<OnboardingWizard />} />
     </Routes>
   )
 }

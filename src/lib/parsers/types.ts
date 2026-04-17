@@ -76,6 +76,7 @@ export interface ProjectRecord {
   originalFileListing?: Record<string, string>
   syncSettings?: ProjectSyncSettings
   suggestionsDismissedAt?: string  // ISO timestamp; suggestion banner is hidden after this is set.
+  setupChecklistDismissed?: boolean
 }
 
 export interface ProjectSyncSettings {

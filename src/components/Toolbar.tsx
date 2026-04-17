@@ -7,6 +7,7 @@ import type { FrontierSession } from "@/lib/frontier/types"
 import { PeerPresence } from "./PeerPresence"
 import { SyncButton } from "./SyncButton"
 import { ViewSettingsMenu } from "./ViewSettingsMenu"
+import { HeaderAuth } from "@/components/git-import/HeaderAuth"
 
 interface ToolbarProps {
   project: ProjectRecord
@@ -33,6 +34,8 @@ interface ToolbarProps {
   onCellLabelsChange: (v: boolean) => void
   onDismissRtlHint?: () => void
   onVideo?: () => void
+  checklistProgress?: { completed: number; total: number }
+  onOpenChecklist?: () => void
   onProjectUpdated: (p: ProjectRecord) => void
   sync: (project: ProjectRecord, session: FrontierSession) => Promise<SyncResult | null>
   syncPhase: SyncPhase
@@ -46,6 +49,7 @@ export function Toolbar({
   fileOpen, lineNumbersEnabled, sourceTextDirection, targetTextDirection, cellLabelsEnabled, rtlHintDismissed,
   onLineNumbersChange, onSourceTextDirectionChange, onTargetTextDirectionChange, onCellLabelsChange, onDismissRtlHint,
   onVideo,
+  checklistProgress, onOpenChecklist,
   onProjectUpdated, sync, syncPhase, syncInFlight, syncLastResult,
 }: ToolbarProps) {
   return (
@@ -112,6 +116,16 @@ export function Toolbar({
       <Button variant="ghost" size="sm" onClick={onRules} title="Translation rules">
         <Scale className="h-4 w-4" />
       </Button>
+      {checklistProgress && checklistProgress.completed < checklistProgress.total && onOpenChecklist && (
+        <button
+          onClick={onOpenChecklist}
+          className="flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-medium text-muted-foreground hover:bg-accent"
+          title="Open setup checklist"
+        >
+          Setup: {checklistProgress.completed}/{checklistProgress.total}
+        </button>
+      )}
+      <HeaderAuth />
       <Button variant="ghost" size="sm" onClick={onSettings}>
         <Settings className="h-4 w-4" />
       </Button>

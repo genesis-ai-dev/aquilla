@@ -99,7 +99,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
 
   return (
     <div ref={parentRef} className="h-full overflow-auto" onMouseUp={handleMouseUp}>
-      <div className={`sticky top-0 z-10 grid ${gridCols} gap-2 border-b bg-background px-4 py-2 text-sm font-medium text-muted-foreground`}>
+      <div className={cn("sticky top-0 z-10 grid gap-2 border-b bg-background px-4 py-2 text-sm font-medium text-muted-foreground", gridCols)}>
         <div />
         <div>Source</div>
         <div>Target</div>
@@ -165,7 +165,6 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
                 lineNumbersEnabled={lineNumbersEnabled}
                 cellLabelsEnabled={cellLabelsEnabled}
                 textDirection={textDirection}
-                showGutterContent={showGutterContent}
                 gridCols={gridCols}
                 onDragStart={() => {
                   isDragging.current = true
@@ -216,8 +215,7 @@ interface EditorRowProps {
   lineNumbersEnabled: boolean
   cellLabelsEnabled: boolean
   textDirection: "ltr" | "rtl"
-  showGutterContent: boolean
-  gridCols: string
+  gridCols: "grid-cols-[24px_1fr_1fr]" | "grid-cols-[48px_1fr_1fr]"
 }
 
 function EditorRow({
@@ -230,7 +228,7 @@ function EditorRow({
   syncProvider, collabUser,
   isActiveCue: _isActiveCue, onSeekToCue,
   onDragStart, onDragEnter,
-  rowIndex, lineNumbersEnabled, cellLabelsEnabled, textDirection, showGutterContent: _showGutterContent, gridCols,
+  rowIndex, lineNumbersEnabled, cellLabelsEnabled, textDirection, gridCols,
 }: EditorRowProps) {
   function handleChange(e: React.ChangeEvent<HTMLTextAreaElement>) {
     appendCellHistory(doc, cell.id, {
@@ -395,7 +393,7 @@ function EditorRow({
   // render boundary. Parsers only produce safe inline tags (<b>, <i>, <u>,
   // <s>, <code>). DOMPurify provides defense-in-depth against XSS.
   return (
-    <div className={`grid ${gridCols} gap-2 border-b px-4 py-2`}>
+    <div className={cn("grid gap-2 border-b px-4 py-2", gridCols)}>
       {/* Sparkle column */}
       <div className="flex flex-col items-center gap-1 pt-5">
         {lineNumbersEnabled && (cell.type !== "paratext") && (

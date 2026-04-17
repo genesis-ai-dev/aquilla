@@ -46,10 +46,20 @@ import { useCorpusBackfill } from "@/hooks/useCorpusBackfill"
 import { Lock } from "lucide-react"
 
 export function ProjectWorkspace() {
-  const { id: projectId } = useParams<{ id: string }>()
+  const { id: projectId, fileId: routeFileId } = useParams<{ id: string; fileId?: string }>()
   const navigate = useNavigate()
   const { project, loading, refresh } = useProject(projectId!)
-  const [activeFileId, setActiveFileId] = useState<string | null>(null)
+
+  const activeFileId = routeFileId ?? null
+
+  const setActiveFileId = useCallback((fileId: string | null) => {
+    if (!projectId) return
+    if (fileId) {
+      navigate(`/project/${projectId}/file/${fileId}`)
+    } else {
+      navigate(`/project/${projectId}`)
+    }
+  }, [projectId, navigate])
   const [importOpen, setImportOpen] = useState(false)
   const [drawerRuleId, setDrawerRuleId] = useState<string | null>(null)
   const [commentsCellId, setCommentsCellId] = useState<string | null>(null)
@@ -180,6 +190,14 @@ export function ProjectWorkspace() {
     document.addEventListener("keydown", handler)
     return () => document.removeEventListener("keydown", handler)
   }, [])
+
+  useEffect(() => {
+    if (!project || !routeFileId) return
+    const exists = project.files.some((f) => f.id === routeFileId)
+    if (!exists) {
+      navigate(`/project/${projectId}`, { replace: true })
+    }
+  }, [project, routeFileId, projectId, navigate])
 
   useEffect(() => {
     if (!project) {

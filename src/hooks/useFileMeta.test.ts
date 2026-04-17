@@ -92,5 +92,17 @@ describe("useFileMeta", () => {
     expect(result.current.lineNumbersEnabled).toBe(true)
     expect(result.current.sourceTextDirection).toBe("ltr")
     expect(result.current.targetTextDirection).toBe("ltr")
+    expect(result.current.rtlHintDismissed).toBe(false)
+  })
+
+  it("dismissRtlHint sets rtlHintDismissed on __source", async () => {
+    const doc = buildDoc()
+    const { result } = renderHook(() => useFileMeta(doc, "he", "en"))
+    await waitFor(() => expect(result.current.sourceTextDirection).toBe("rtl"))
+    expect(result.current.rtlHintDismissed).toBe(false)
+    act(() => { result.current.dismissRtlHint() })
+    await waitFor(() => expect(result.current.rtlHintDismissed).toBe(true))
+    const src = doc.getMap("meta").get("__source") as Record<string, unknown>
+    expect(src.rtlHintDismissed).toBe(true)
   })
 })

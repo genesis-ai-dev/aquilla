@@ -26,10 +26,12 @@ interface ToolbarProps {
   sourceTextDirection: "ltr" | "rtl"
   targetTextDirection: "ltr" | "rtl"
   cellLabelsEnabled: boolean
+  rtlHintDismissed?: boolean
   onLineNumbersChange: (v: boolean) => void
   onSourceTextDirectionChange: (v: "ltr" | "rtl") => void
   onTargetTextDirectionChange: (v: "ltr" | "rtl") => void
   onCellLabelsChange: (v: boolean) => void
+  onDismissRtlHint?: () => void
   onVideo?: () => void
   onProjectUpdated: (p: ProjectRecord) => void
   sync: (project: ProjectRecord, session: FrontierSession) => Promise<SyncResult | null>
@@ -41,8 +43,8 @@ interface ToolbarProps {
 export function Toolbar({
   project, onBack, onImport, onSettings, onRules, onExport,
   onSearch, onComments, onSnapshots, onShare, peers = [], exportEnabled,
-  fileOpen, lineNumbersEnabled, sourceTextDirection, targetTextDirection, cellLabelsEnabled,
-  onLineNumbersChange, onSourceTextDirectionChange, onTargetTextDirectionChange, onCellLabelsChange,
+  fileOpen, lineNumbersEnabled, sourceTextDirection, targetTextDirection, cellLabelsEnabled, rtlHintDismissed,
+  onLineNumbersChange, onSourceTextDirectionChange, onTargetTextDirectionChange, onCellLabelsChange, onDismissRtlHint,
   onVideo,
   onProjectUpdated, sync, syncPhase, syncInFlight, syncLastResult,
 }: ToolbarProps) {
@@ -71,10 +73,12 @@ export function Toolbar({
         sourceTextDirection={sourceTextDirection}
         targetTextDirection={targetTextDirection}
         cellLabelsEnabled={cellLabelsEnabled}
+        rtlHintDismissed={rtlHintDismissed}
         onLineNumbersChange={onLineNumbersChange}
         onSourceTextDirectionChange={onSourceTextDirectionChange}
         onTargetTextDirectionChange={onTargetTextDirectionChange}
         onCellLabelsChange={onCellLabelsChange}
+        onDismissRtlHint={onDismissRtlHint}
       />
       <Button variant="ghost" size="sm" onClick={onSearch} title="Search (Cmd+K)">
         <Search className="h-4 w-4" />

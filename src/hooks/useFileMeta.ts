@@ -14,6 +14,7 @@ interface MetaSource {
   // backwards compat with existing Y.Docs that only had one direction.
   textDirection?: "ltr" | "rtl"
   sourceTextDirection?: "ltr" | "rtl"
+  rtlHintDismissed?: boolean
   [key: string]: unknown
 }
 
@@ -21,9 +22,11 @@ export interface FileMeta {
   lineNumbersEnabled: boolean
   sourceTextDirection: "ltr" | "rtl"
   targetTextDirection: "ltr" | "rtl"
+  rtlHintDismissed: boolean
   setLineNumbersEnabled: (v: boolean) => void
   setSourceTextDirection: (v: "ltr" | "rtl") => void
   setTargetTextDirection: (v: "ltr" | "rtl") => void
+  dismissRtlHint: () => void
 }
 
 function readSource(doc: Y.Doc): MetaSource | undefined {
@@ -46,6 +49,7 @@ export function useFileMeta(
   const [lineNumbersEnabled, setLineNumbersEnabledState] = useState(true)
   const [sourceTextDirection, setSourceTextDirectionState] = useState<"ltr" | "rtl">("ltr")
   const [targetTextDirection, setTargetTextDirectionState] = useState<"ltr" | "rtl">("ltr")
+  const [rtlHintDismissed, setRtlHintDismissedState] = useState(false)
 
   useEffect(() => {
     if (!doc) return
@@ -75,6 +79,10 @@ export function useFileMeta(
         setSourceTextDirectionState(detected)
         writeSource(doc!, { sourceTextDirection: detected })
       }
+
+      // RTL hint dismissal flag — sticky per-file. Once the user acknowledges
+      // the auto-detected direction, we don't pester them again.
+      setRtlHintDismissedState(Boolean(src?.rtlHintDismissed))
     }
 
     read()
@@ -99,12 +107,19 @@ export function useFileMeta(
     writeSource(doc, { textDirection: v })
   }, [doc])
 
+  const dismissRtlHint = useCallback(() => {
+    if (!doc) return
+    writeSource(doc, { rtlHintDismissed: true })
+  }, [doc])
+
   return {
     lineNumbersEnabled,
     sourceTextDirection,
     targetTextDirection,
+    rtlHintDismissed,
     setLineNumbersEnabled,
     setSourceTextDirection,
     setTargetTextDirection,
+    dismissRtlHint,
   }
 }

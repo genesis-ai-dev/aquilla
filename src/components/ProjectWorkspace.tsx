@@ -355,10 +355,12 @@ export function ProjectWorkspace() {
         sourceTextDirection={fileMeta.sourceTextDirection}
         targetTextDirection={fileMeta.targetTextDirection}
         cellLabelsEnabled={cellLabelsEnabled}
+        rtlHintDismissed={fileMeta.rtlHintDismissed}
         onLineNumbersChange={fileMeta.setLineNumbersEnabled}
         onSourceTextDirectionChange={fileMeta.setSourceTextDirection}
         onTargetTextDirectionChange={fileMeta.setTargetTextDirection}
         onCellLabelsChange={setCellLabelsEnabled}
+        onDismissRtlHint={fileMeta.dismissRtlHint}
         onVideo={isSubtitleFile ? () => setVideoDialogOpen(true) : undefined}
         onProjectUpdated={handleProjectUpdated}
         sync={runSync}

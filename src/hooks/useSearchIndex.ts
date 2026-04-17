@@ -1,10 +1,11 @@
 import { useEffect, useRef, useCallback } from "react"
-import { SearchIndex, type ScoredPair } from "@/lib/search/search-index"
+import { ContextBranchingSearchIndex } from "@/lib/search/context-branching-search"
+import type { ScoredPair } from "@/lib/search/search-index"
 import type { FileReference } from "@/lib/parsers/types"
 import type { CellData } from "./useCells"
 
 export function useSearchIndex(_files: FileReference[], currentCells: CellData[]) {
-  const indexRef = useRef(new SearchIndex())
+  const indexRef = useRef(new ContextBranchingSearchIndex())
 
   useEffect(() => {
     if (currentCells.length > 0) {

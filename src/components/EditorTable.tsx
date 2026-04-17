@@ -51,6 +51,7 @@ interface EditorTableProps {
   cellLabelsEnabled: boolean
   sourceTextDirection: "ltr" | "rtl"
   targetTextDirection: "ltr" | "rtl"
+  isAnonymous?: boolean
 }
 
 export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(function EditorTable({
@@ -63,6 +64,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   syncProvider, collabUser,
   activeCueIndex, onSeekToCue,
   lineNumbersEnabled, cellLabelsEnabled, sourceTextDirection, targetTextDirection,
+  isAnonymous,
 }, ref) {
   const permissions = useProjectPermissions(project)
   const canEdit = permissions.canEditContent
@@ -169,6 +171,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
                 sourceTextDirection={sourceTextDirection}
                 targetTextDirection={targetTextDirection}
                 gridCols={gridCols}
+                isAnonymous={isAnonymous}
                 onDragStart={() => {
                   isDragging.current = true
                   dragCells.current = new Set([cell.id])
@@ -220,6 +223,7 @@ interface EditorRowProps {
   sourceTextDirection: "ltr" | "rtl"
   targetTextDirection: "ltr" | "rtl"
   gridCols: "grid-cols-[24px_1fr_1fr]" | "grid-cols-[48px_1fr_1fr]"
+  isAnonymous?: boolean
 }
 
 function EditorRow({
@@ -233,6 +237,7 @@ function EditorRow({
   isActiveCue: _isActiveCue, onSeekToCue,
   onDragStart, onDragEnter,
   rowIndex, lineNumbersEnabled, cellLabelsEnabled, sourceTextDirection, targetTextDirection, gridCols,
+  isAnonymous,
 }: EditorRowProps) {
   function handleChange(e: React.ChangeEvent<HTMLTextAreaElement>) {
     appendCellHistory(doc, cell.id, {
@@ -472,12 +477,20 @@ function EditorRow({
         )}
         <div className={cn("flex flex-col items-center gap-1", hasGutterMetadata ? "pt-1" : "pt-5")}>
           <SparkleButton
-            disabled={!isCompletionConfigured || !editable}
+            disabled={!isCompletionConfigured || !editable || isAnonymous}
             loading={isLoading}
             onComplete={() => onCompleteSingle(cell)}
             onDragStart={onDragStart}
             onDragEnter={onDragEnter}
-            tooltip={!editable ? "Read-only (imported from git)" : isCompletionConfigured ? "Generate translation" : "Configure LLM in settings"}
+            tooltip={
+              isAnonymous
+                ? "Sign in for AI translations"
+                : !editable
+                  ? "Read-only (imported from git)"
+                  : isCompletionConfigured
+                    ? "Generate translation"
+                    : "Configure LLM in settings"
+            }
           />
           {onSeekToCue && (
             <button

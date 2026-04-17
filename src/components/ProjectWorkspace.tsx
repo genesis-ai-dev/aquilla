@@ -41,7 +41,7 @@ import { useSyncProject } from "@/hooks/useSyncProject"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { useAutoSync } from "@/hooks/useAutoSync"
 import { useCorpusBackfill } from "@/hooks/useCorpusBackfill"
-import { Film, Scale, MessagesSquare, Camera, Share2, Settings as SettingsIcon, Lock } from "lucide-react"
+import { Film, Scale, MessagesSquare, Camera, Share2, Settings as SettingsIcon, Lock, ClipboardList } from "lucide-react"
 import { AppShell } from "./AppShell"
 import { WorkspaceHeader } from "./WorkspaceHeader"
 import { WorkspaceStatusBar } from "./WorkspaceStatusBar"
@@ -64,6 +64,8 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog"
 import type { ProjectRecord } from "@/lib/parsers/types"
+import { useSetupChecklist } from "@/hooks/useSetupChecklist"
+import { SetupChecklistDrawer } from "./onboarding/SetupChecklistDrawer"
 
 export function ProjectWorkspace() {
   const { id: projectId, fileId: routeFileId } = useParams<{ id: string; fileId?: string }>()
@@ -313,6 +315,13 @@ export function ProjectWorkspace() {
   useAutoSync(project ?? null, frontierSession)
   useCorpusBackfill(project ?? null, refresh)
 
+  const { state: checklistState, dismissed: checklistDismissed, dismiss: dismissChecklist, refreshShares: refreshChecklistShares } = useSetupChecklist(project ?? null)
+  const [checklistOpen, setChecklistOpen] = useState(!checklistDismissed)
+
+  useEffect(() => {
+    if (!checklistDismissed) setChecklistOpen(true)
+  }, [checklistDismissed])
+
   const handleProjectUpdated = useCallback(async (updated: ProjectRecord | undefined) => {
     if (!updated) return
     await updateProject(updated)
@@ -505,6 +514,16 @@ export function ProjectWorkspace() {
                 <Film className="h-4 w-4" />
               </button>
             )}
+            {!checklistDismissed && checklistState.totalCount > 0 && checklistState.completedCount < checklistState.totalCount && (
+              <button
+                onClick={() => setChecklistOpen(true)}
+                className="flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-medium text-muted-foreground hover:bg-accent"
+                title="Open setup checklist"
+              >
+                <ClipboardList className="h-3 w-3" />
+                Setup: {checklistState.completedCount}/{checklistState.totalCount}
+              </button>
+            )}
             <PrimaryActionButton ctx={actionCtx} run={actionArgs} />
           </WorkspaceHeader>
         }
@@ -566,6 +585,7 @@ export function ProjectWorkspace() {
             cellLabelsEnabled={cellLabelsEnabled}
             sourceTextDirection={fileMeta.sourceTextDirection}
             targetTextDirection={fileMeta.targetTextDirection}
+            isAnonymous={!frontierSession}
           />
         ) : <p className="p-4 text-muted-foreground">Loading file...</p>) : (
           <p className="p-4 text-muted-foreground">Select a file from the sidebar, or use + Import.</p>
@@ -613,6 +633,16 @@ export function ProjectWorkspace() {
           </>
         }
       />
+      {checklistOpen && !checklistDismissed && project && (
+        <SetupChecklistDrawer
+          project={project}
+          state={checklistState}
+          onDismiss={() => { dismissChecklist(); setChecklistOpen(false) }}
+          onClose={() => setChecklistOpen(false)}
+          onProjectUpdated={handleProjectUpdated}
+          onSharesChanged={refreshChecklistShares}
+        />
+      )}
       <ImportDialog open={importOpen} onOpenChange={setImportOpen}
         sourceLanguage={project.sourceLanguage} targetLanguage={project.targetLanguage}
         onImported={handleImported} />

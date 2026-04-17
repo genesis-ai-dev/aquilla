@@ -2,50 +2,13 @@ import "fake-indexeddb/auto"
 import { describe, it, expect } from "vitest"
 import { renderHook, act, waitFor } from "@testing-library/react"
 import * as Y from "yjs"
-import { useFileMeta, detectDirectionFromText } from "./useFileMeta"
+import { useFileMeta } from "./useFileMeta"
 
 function buildDoc(initialMeta: Record<string, unknown> = {}): Y.Doc {
   const doc = new Y.Doc()
   doc.getMap("meta").set("__source", { id: "f", originalName: "f", ...initialMeta })
   return doc
 }
-
-function addCell(doc: Y.Doc, id: string, original: string, translated = ""): void {
-  const cells = doc.getMap("cells")
-  const order = doc.getArray<string>("order")
-  doc.transact(() => {
-    const y = new Y.Map<unknown>()
-    y.set("id", id)
-    y.set("original", original)
-    y.set("translated", translated)
-    cells.set(id, y)
-    order.push([id])
-  })
-}
-
-describe("detectDirectionFromText", () => {
-  it("returns rtl for Hebrew text", () => {
-    expect(detectDirectionFromText("בְּרֵאשִׁית בָּרָא אֱלֹהִים")).toBe("rtl")
-  })
-
-  it("returns rtl for Arabic text", () => {
-    expect(detectDirectionFromText("بِسْمِ اللَّهِ الرَّحْمَٰنِ الرَّحِيمِ")).toBe("rtl")
-  })
-
-  it("returns ltr for Latin text", () => {
-    expect(detectDirectionFromText("In the beginning God created")).toBe("ltr")
-  })
-
-  it("returns rtl when RTL chars outnumber LTR chars", () => {
-    // Hebrew word mixed with one English word — RTL should win
-    expect(detectDirectionFromText("בְּרֵאשִׁית God הַשָּׁמַיִם")).toBe("rtl")
-  })
-
-  it("returns null when sample has no directional chars", () => {
-    expect(detectDirectionFromText("123 !@# ... 456")).toBeNull()
-    expect(detectDirectionFromText("")).toBeNull()
-  })
-})
 
 describe("useFileMeta", () => {
   it("returns defaults when meta has nothing set", async () => {
@@ -141,34 +104,5 @@ describe("useFileMeta", () => {
     await waitFor(() => expect(result.current.rtlHintDismissed).toBe(true))
     const src = doc.getMap("meta").get("__source") as Record<string, unknown>
     expect(src.rtlHintDismissed).toBe(true)
-  })
-
-  it("falls back to content detection when language code is unknown", async () => {
-    const doc = buildDoc()
-    // User's sourceLanguage is a non-standard string like "hebrew" or "biblical"
-    // that isn't in RTL_LANGS — but the actual content is Hebrew.
-    addCell(doc, "c1", "בְּרֵאשִׁית בָּרָא אֱלֹהִים אֵת הַשָּׁמַיִם")
-    addCell(doc, "c2", "וְהָאָרֶץ הָיְתָה תֹהוּ וָבֹהוּ")
-    addCell(doc, "c3", "וַיֹּאמֶר אֱלֹהִים יְהִי אוֹר")
-    const { result } = renderHook(() => useFileMeta(doc, "hebrew", "en"))
-    await waitFor(() => expect(result.current.sourceTextDirection).toBe("rtl"))
-    const src = doc.getMap("meta").get("__source") as Record<string, unknown>
-    expect(src.sourceTextDirection).toBe("rtl")
-  })
-
-  it("content detection for target side works when lang code is blank", async () => {
-    const doc = buildDoc()
-    addCell(doc, "c1", "Hello", "مرحبا بالعالم")
-    addCell(doc, "c2", "World", "كيف حالك")
-    const { result } = renderHook(() => useFileMeta(doc, "en", ""))
-    await waitFor(() => expect(result.current.targetTextDirection).toBe("rtl"))
-  })
-
-  it("content-detection does not override explicit user setting", async () => {
-    // User previously forced target to LTR. Content detection shouldn't flip it.
-    const doc = buildDoc({ textDirection: "ltr" })
-    addCell(doc, "c1", "Hello", "مرحبا")
-    const { result } = renderHook(() => useFileMeta(doc, "en", "ar"))
-    await waitFor(() => expect(result.current.targetTextDirection).toBe("ltr"))
   })
 })

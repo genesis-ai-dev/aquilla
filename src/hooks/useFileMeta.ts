@@ -10,15 +10,20 @@ function detectDirection(lang: string | undefined): "ltr" | "rtl" {
 
 interface MetaSource {
   lineNumbersEnabled?: boolean
+  // Legacy: pre-split name. Still read/written as the TARGET direction for
+  // backwards compat with existing Y.Docs that only had one direction.
   textDirection?: "ltr" | "rtl"
+  sourceTextDirection?: "ltr" | "rtl"
   [key: string]: unknown
 }
 
 export interface FileMeta {
   lineNumbersEnabled: boolean
-  textDirection: "ltr" | "rtl"
+  sourceTextDirection: "ltr" | "rtl"
+  targetTextDirection: "ltr" | "rtl"
   setLineNumbersEnabled: (v: boolean) => void
-  setTextDirection: (v: "ltr" | "rtl") => void
+  setSourceTextDirection: (v: "ltr" | "rtl") => void
+  setTargetTextDirection: (v: "ltr" | "rtl") => void
 }
 
 function readSource(doc: Y.Doc): MetaSource | undefined {
@@ -33,9 +38,14 @@ function writeSource(doc: Y.Doc, patch: Partial<MetaSource>): void {
   })
 }
 
-export function useFileMeta(doc: Y.Doc | null, targetLanguage: string | undefined): FileMeta {
+export function useFileMeta(
+  doc: Y.Doc | null,
+  sourceLanguage: string | undefined,
+  targetLanguage: string | undefined,
+): FileMeta {
   const [lineNumbersEnabled, setLineNumbersEnabledState] = useState(true)
-  const [textDirection, setTextDirectionState] = useState<"ltr" | "rtl">("ltr")
+  const [sourceTextDirection, setSourceTextDirectionState] = useState<"ltr" | "rtl">("ltr")
+  const [targetTextDirection, setTargetTextDirectionState] = useState<"ltr" | "rtl">("ltr")
 
   useEffect(() => {
     if (!doc) return
@@ -45,14 +55,25 @@ export function useFileMeta(doc: Y.Doc | null, targetLanguage: string | undefine
       const src = readSource(doc!)
       const ln = src?.lineNumbersEnabled
       setLineNumbersEnabledState(ln === undefined ? true : Boolean(ln))
+
+      // Target direction: legacy textDirection field, fall back to detection.
       const td = src?.textDirection
       if (td === "ltr" || td === "rtl") {
-        setTextDirectionState(td)
+        setTargetTextDirectionState(td)
       } else {
         const detected = detectDirection(targetLanguage)
-        setTextDirectionState(detected)
-        // Seed only if the field was never set
+        setTargetTextDirectionState(detected)
         writeSource(doc!, { textDirection: detected })
+      }
+
+      // Source direction: new field, seed from sourceLanguage detection.
+      const sd = src?.sourceTextDirection
+      if (sd === "ltr" || sd === "rtl") {
+        setSourceTextDirectionState(sd)
+      } else {
+        const detected = detectDirection(sourceLanguage)
+        setSourceTextDirectionState(detected)
+        writeSource(doc!, { sourceTextDirection: detected })
       }
     }
 
@@ -61,17 +82,29 @@ export function useFileMeta(doc: Y.Doc | null, targetLanguage: string | undefine
     function onChange() { queueMicrotask(read) }
     meta.observeDeep(onChange)
     return () => { meta.unobserveDeep(onChange) }
-  }, [doc, targetLanguage])
+  }, [doc, sourceLanguage, targetLanguage])
 
   const setLineNumbersEnabled = useCallback((v: boolean) => {
     if (!doc) return
     writeSource(doc, { lineNumbersEnabled: v })
   }, [doc])
 
-  const setTextDirection = useCallback((v: "ltr" | "rtl") => {
+  const setSourceTextDirection = useCallback((v: "ltr" | "rtl") => {
+    if (!doc) return
+    writeSource(doc, { sourceTextDirection: v })
+  }, [doc])
+
+  const setTargetTextDirection = useCallback((v: "ltr" | "rtl") => {
     if (!doc) return
     writeSource(doc, { textDirection: v })
   }, [doc])
 
-  return { lineNumbersEnabled, textDirection, setLineNumbersEnabled, setTextDirection }
+  return {
+    lineNumbersEnabled,
+    sourceTextDirection,
+    targetTextDirection,
+    setLineNumbersEnabled,
+    setSourceTextDirection,
+    setTargetTextDirection,
+  }
 }

@@ -76,7 +76,7 @@ export function ProjectWorkspace() {
   const { session: frontierSession } = useFrontierSession()
   const currentUsername = frontierSession?.username || project?.username || "local"
   const cells = useCells(doc, currentUsername)
-  const fileMeta = useFileMeta(doc, project?.targetLanguage)
+  const fileMeta = useFileMeta(doc, project?.sourceLanguage, project?.targetLanguage)
   const [cellLabelsEnabled, setCellLabelsEnabled] = useCellLabelsPreference(projectId!)
 
   const activeFile = activeFileId ? project?.files.find((f) => f.id === activeFileId) : null
@@ -352,10 +352,12 @@ export function ProjectWorkspace() {
         exportEnabled={Boolean(activeFileId)}
         fileOpen={Boolean(activeFileId)}
         lineNumbersEnabled={fileMeta.lineNumbersEnabled}
-        textDirection={fileMeta.textDirection}
+        sourceTextDirection={fileMeta.sourceTextDirection}
+        targetTextDirection={fileMeta.targetTextDirection}
         cellLabelsEnabled={cellLabelsEnabled}
         onLineNumbersChange={fileMeta.setLineNumbersEnabled}
-        onTextDirectionChange={fileMeta.setTextDirection}
+        onSourceTextDirectionChange={fileMeta.setSourceTextDirection}
+        onTargetTextDirectionChange={fileMeta.setTargetTextDirection}
         onCellLabelsChange={setCellLabelsEnabled}
         onVideo={isSubtitleFile ? () => setVideoDialogOpen(true) : undefined}
         onProjectUpdated={handleProjectUpdated}
@@ -434,7 +436,8 @@ export function ProjectWorkspace() {
                 onSeekToCue={isSubtitleFile ? handleCueSeek : undefined}
                 lineNumbersEnabled={fileMeta.lineNumbersEnabled}
                 cellLabelsEnabled={cellLabelsEnabled}
-                textDirection={fileMeta.textDirection}
+                sourceTextDirection={fileMeta.sourceTextDirection}
+                targetTextDirection={fileMeta.targetTextDirection}
               />
             ) : <p className="p-4 text-muted-foreground">Loading file...</p>) : (
               <p className="p-4 text-muted-foreground">Select a file from the sidebar, or import files.</p>

@@ -49,7 +49,8 @@ interface EditorTableProps {
   onSeekToCue?: (cellId: string) => void
   lineNumbersEnabled: boolean
   cellLabelsEnabled: boolean
-  textDirection: "ltr" | "rtl"
+  sourceTextDirection: "ltr" | "rtl"
+  targetTextDirection: "ltr" | "rtl"
 }
 
 export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(function EditorTable({
@@ -61,7 +62,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   cellOpenCommentCount, onOpenComments, onOpenHistory,
   syncProvider, collabUser,
   activeCueIndex, onSeekToCue,
-  lineNumbersEnabled, cellLabelsEnabled, textDirection,
+  lineNumbersEnabled, cellLabelsEnabled, sourceTextDirection, targetTextDirection,
 }, ref) {
   const permissions = useProjectPermissions(project)
   const canEdit = permissions.canEditContent
@@ -165,7 +166,8 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
                 rowIndex={virtualRow.index}
                 lineNumbersEnabled={lineNumbersEnabled}
                 cellLabelsEnabled={cellLabelsEnabled}
-                textDirection={textDirection}
+                sourceTextDirection={sourceTextDirection}
+                targetTextDirection={targetTextDirection}
                 gridCols={gridCols}
                 onDragStart={() => {
                   isDragging.current = true
@@ -215,7 +217,8 @@ interface EditorRowProps {
   rowIndex: number
   lineNumbersEnabled: boolean
   cellLabelsEnabled: boolean
-  textDirection: "ltr" | "rtl"
+  sourceTextDirection: "ltr" | "rtl"
+  targetTextDirection: "ltr" | "rtl"
   gridCols: "grid-cols-[24px_1fr_1fr]" | "grid-cols-[48px_1fr_1fr]"
 }
 
@@ -229,7 +232,7 @@ function EditorRow({
   syncProvider, collabUser,
   isActiveCue: _isActiveCue, onSeekToCue,
   onDragStart, onDragEnter,
-  rowIndex, lineNumbersEnabled, cellLabelsEnabled, textDirection, gridCols,
+  rowIndex, lineNumbersEnabled, cellLabelsEnabled, sourceTextDirection, targetTextDirection, gridCols,
 }: EditorRowProps) {
   function handleChange(e: React.ChangeEvent<HTMLTextAreaElement>) {
     appendCellHistory(doc, cell.id, {
@@ -490,8 +493,8 @@ function EditorRow({
       </div>
 
       {/* Source column */}
-      <div>
-        <div className="mb-1 flex items-center gap-1 text-xs text-muted-foreground">
+      <div dir={sourceTextDirection}>
+        <div className="mb-1 flex items-center gap-1 text-xs text-muted-foreground" dir="ltr">
           <span>{cell.context}</span>
           {showFormattingLossWarning && (
             <span
@@ -522,7 +525,7 @@ function EditorRow({
       </div>
 
       {/* Target column */}
-      <div className="flex gap-1" dir={textDirection}>
+      <div className="flex gap-1" dir={targetTextDirection}>
         <div className="flex-1">
           {cell.translatedXml ? (
             <TranslatedEditor

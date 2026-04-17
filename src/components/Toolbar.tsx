@@ -23,10 +23,12 @@ interface ToolbarProps {
   exportEnabled: boolean
   fileOpen: boolean
   lineNumbersEnabled: boolean
-  textDirection: "ltr" | "rtl"
+  sourceTextDirection: "ltr" | "rtl"
+  targetTextDirection: "ltr" | "rtl"
   cellLabelsEnabled: boolean
   onLineNumbersChange: (v: boolean) => void
-  onTextDirectionChange: (v: "ltr" | "rtl") => void
+  onSourceTextDirectionChange: (v: "ltr" | "rtl") => void
+  onTargetTextDirectionChange: (v: "ltr" | "rtl") => void
   onCellLabelsChange: (v: boolean) => void
   onVideo?: () => void
   onProjectUpdated: (p: ProjectRecord) => void
@@ -39,8 +41,8 @@ interface ToolbarProps {
 export function Toolbar({
   project, onBack, onImport, onSettings, onRules, onExport,
   onSearch, onComments, onSnapshots, onShare, peers = [], exportEnabled,
-  fileOpen, lineNumbersEnabled, textDirection, cellLabelsEnabled,
-  onLineNumbersChange, onTextDirectionChange, onCellLabelsChange,
+  fileOpen, lineNumbersEnabled, sourceTextDirection, targetTextDirection, cellLabelsEnabled,
+  onLineNumbersChange, onSourceTextDirectionChange, onTargetTextDirectionChange, onCellLabelsChange,
   onVideo,
   onProjectUpdated, sync, syncPhase, syncInFlight, syncLastResult,
 }: ToolbarProps) {
@@ -66,10 +68,12 @@ export function Toolbar({
       <ViewSettingsMenu
         fileOpen={fileOpen}
         lineNumbersEnabled={lineNumbersEnabled}
-        textDirection={textDirection}
+        sourceTextDirection={sourceTextDirection}
+        targetTextDirection={targetTextDirection}
         cellLabelsEnabled={cellLabelsEnabled}
         onLineNumbersChange={onLineNumbersChange}
-        onTextDirectionChange={onTextDirectionChange}
+        onSourceTextDirectionChange={onSourceTextDirectionChange}
+        onTargetTextDirectionChange={onTargetTextDirectionChange}
         onCellLabelsChange={onCellLabelsChange}
       />
       <Button variant="ghost" size="sm" onClick={onSearch} title="Search (Cmd+K)">

@@ -75,6 +75,7 @@ export interface ProjectRecord {
    */
   originalFileListing?: Record<string, string>
   syncSettings?: ProjectSyncSettings
+  suggestionsDismissedAt?: string  // ISO timestamp; suggestion banner is hidden after this is set.
 }
 
 export interface ProjectSyncSettings {
@@ -88,6 +89,7 @@ export interface FileReference {
   createdAt: string
   cellCount: number
   corpusMarker?: string  // From notebook metadata.corpusMarker, OT/NT fallback for biblical book stems
+  originalName?: string  // Set the first time `name` is auto-rewritten by a suggestion or user rename. Enables hover-to-see-original. Never overwritten after set.
 }
 
 export interface ProjectMember {

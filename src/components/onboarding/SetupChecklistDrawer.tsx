@@ -33,6 +33,7 @@ function ChecklistItem({
       <button
         className="flex w-full items-center gap-3 p-3 text-left text-sm font-medium hover:bg-accent/50"
         onClick={() => setOpen(!open)}
+        aria-expanded={open}
       >
         <div
           className={
@@ -72,7 +73,7 @@ export function SetupChecklistDrawer({
             {state.completedCount}/{state.totalCount} complete
           </p>
         </div>
-        <Button variant="ghost" size="sm" onClick={onClose} className="h-6 w-6 p-0">
+        <Button variant="ghost" size="sm" onClick={onClose} className="h-6 w-6 p-0" aria-label="Close setup checklist">
           <X className="h-4 w-4" />
         </Button>
       </div>

@@ -44,13 +44,8 @@ export function ProjectSidebar({
           <p className="px-2 text-sm text-muted-foreground">No files imported yet.</p>
         ) : (
           <div className="space-y-2">
-            {groups.map((group) => (
-              <details key={group.label} open className="group">
-                {showHeaders && (
-                  <summary className="cursor-pointer list-none px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-                    {group.label}
-                  </summary>
-                )}
+            {groups.map((group) => {
+              const inner = (
                 <ul className="space-y-1">
                   {group.files.map((file) => {
                     const progress = fileProgress.get(file.id)
@@ -92,8 +87,19 @@ export function ProjectSidebar({
                     )
                   })}
                 </ul>
-              </details>
-            ))}
+              )
+
+              return showHeaders ? (
+                <details key={group.label} open className="group">
+                  <summary className="cursor-pointer select-none list-none marker:hidden px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                    {group.label}
+                  </summary>
+                  {inner}
+                </details>
+              ) : (
+                <div key={group.label}>{inner}</div>
+              )
+            })}
           </div>
         )}
       </div>

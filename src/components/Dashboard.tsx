@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react"
-import { useNavigate } from "react-router-dom"
+import { useNavigate, Navigate } from "react-router-dom"
 import type { ProjectRecord } from "@/lib/parsers/types"
 import { listProjects } from "@/lib/store/project-index"
 import { ProjectCard } from "./ProjectCard"
@@ -10,11 +10,15 @@ import { useFrontierSession } from "@/hooks/useFrontierSession"
 
 export function Dashboard() {
   const [projects, setProjects] = useState<ProjectRecord[]>([])
+  const [loading, setLoading] = useState(true)
   const { session } = useFrontierSession()
   const navigate = useNavigate()
 
   useEffect(() => {
-    listProjects().then(setProjects)
+    listProjects().then((p) => {
+      setProjects(p)
+      setLoading(false)
+    })
   }, [])
 
   function upsert(project: ProjectRecord) {
@@ -27,6 +31,11 @@ export function Dashboard() {
       }
       return [...prev, project]
     })
+  }
+
+  const onboardingComplete = localStorage.getItem("codex:onboardingComplete") === "true"
+  if (!loading && !onboardingComplete && projects.length === 0) {
+    return <Navigate to="/onboarding" replace />
   }
 
   return (

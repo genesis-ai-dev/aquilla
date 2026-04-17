@@ -70,7 +70,12 @@ export function ProjectWorkspace() {
   const [shareRefreshKey, setShareRefreshKey] = useState(0)
   const editorRef = useRef<EditorTableHandle>(null)
   const { doc } = useFileDoc(activeFileId)
-  const cells = useCells(doc, project?.username || "local")
+  // Prefer the Frontier session username (authenticated identity) over the
+  // project-level username setting. Validation entries and edit history
+  // should attribute to the actual signed-in user.
+  const { session: frontierSession } = useFrontierSession()
+  const currentUsername = frontierSession?.username || project?.username || "local"
+  const cells = useCells(doc, currentUsername)
   const fileMeta = useFileMeta(doc, project?.targetLanguage)
   const [cellLabelsEnabled, setCellLabelsEnabled] = useCellLabelsPreference(projectId!)
 
@@ -127,7 +132,6 @@ export function ProjectWorkspace() {
 
   const { buildIndex, search: runSearch, results: searchResults, loading: searchLoading, ready: searchReady } = useWorkspaceSearch(project?.files || [])
   const { search } = useSearchIndex(project?.files || [], cells)
-  const { session: frontierSession } = useFrontierSession()
   const { completeSingle, completeBatch, isConfigured, completing, examples, errors } = useCompletion(
     doc, project?.completionSettings, project?.sourceLanguage || "", project?.targetLanguage || "", search, frontierSession
   )
@@ -154,7 +158,7 @@ export function ProjectWorkspace() {
   )
 
   const { rules, penalties } = useRules(project ?? null, refresh)
-  const { addThread, addMessage, resolveThread, reopenThread } = useComments(doc, project?.username || "anonymous")
+  const { addThread, addMessage, resolveThread, reopenThread } = useComments(doc, currentUsername)
   const commentsCell = commentsCellId ? cells.find((c) => c.id === commentsCellId) : null
   const historyCell = historyCellId ? cells.find((c) => c.id === historyCellId) : null
 
@@ -231,7 +235,7 @@ export function ProjectWorkspace() {
   const { peers: fileLevelPeers, provider: syncProvider } = useSync({
     doc,
     roomName: syncRoom,
-    username: project?.username || "anonymous",
+    username: currentUsername,
     currentFileId: activeFileId || undefined,
     enabled: Boolean(syncRoom),
   })
@@ -244,7 +248,7 @@ export function ProjectWorkspace() {
   const { peers: presencePeers } = useSync({
     doc: presenceDoc,
     roomName: presenceRoom,
-    username: project?.username || "anonymous",
+    username: currentUsername,
     currentFileId: activeFileId || undefined,
     enabled: Boolean(presenceRoom),
   })
@@ -263,7 +267,7 @@ export function ProjectWorkspace() {
     if (!syncProvider) return undefined
     const clientId = String(syncProvider.awareness.clientID)
     return {
-      name: project?.username || "anonymous",
+      name: currentUsername,
       color: peerColorLocal(clientId),
     }
   }, [syncProvider, project?.username])
@@ -398,7 +402,7 @@ export function ProjectWorkspace() {
         <main className="flex flex-1 overflow-hidden">
           <div className="flex-1 overflow-hidden">
             {activeFileId ? (doc ? (
-              <EditorTable ref={editorRef} project={project} cells={cells} doc={doc} username={project.username || "local"}
+              <EditorTable ref={editorRef} project={project} cells={cells} doc={doc} username={currentUsername}
                 isCompletionConfigured={isConfigured} completing={completing} examples={examples} errors={errors}
                 onCompleteSingle={completeSingle} onCompleteBatch={completeBatch}
                 healthMap={healthMap}

@@ -42,6 +42,7 @@ import { useProjectPermissions } from "@/hooks/useProjectPermissions"
 import { useSyncProject } from "@/hooks/useSyncProject"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { useAutoSync } from "@/hooks/useAutoSync"
+import { useCorpusBackfill } from "@/hooks/useCorpusBackfill"
 import { Lock } from "lucide-react"
 
 export function ProjectWorkspace() {
@@ -268,6 +269,7 @@ export function ProjectWorkspace() {
   const { sync: runSync, phase: syncPhase, inFlight: syncInFlight, lastResult: syncLastResult } = useSyncProject()
 
   useAutoSync(project ?? null, frontierSession)
+  useCorpusBackfill(project ?? null, refresh)
 
   const handleProjectUpdated = useCallback(async (updated: typeof project) => {
     if (!updated) return

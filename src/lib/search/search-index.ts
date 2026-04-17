@@ -12,8 +12,13 @@ export interface ScoredPair extends TranslationPair {
   matchedTokens: string[]
 }
 
+export interface SearchOptions {
+  onlyValidated?: boolean
+}
+
 interface IndexedPair extends TranslationPair {
   tokens: Set<string>
+  validated: boolean
 }
 
 interface CellInput {
@@ -24,6 +29,7 @@ interface CellInput {
   context: string
   group: string
   type: string
+  status?: "empty" | "unvalidated" | "validated"
 }
 
 const MIN_SCORE_THRESHOLD = 0.15
@@ -32,27 +38,36 @@ export class SearchIndex {
   private pairs: Map<string, IndexedPair> = new Map()
   // IDF: how many documents contain each token
   private docFreq: Map<string, number> = new Map()
+  // Inverted index: token -> set of cellIds containing it
+  private tokenIndex: Map<string, Set<string>> = new Map()
   private docCount = 0
 
   buildFromProject(files: { fileId: string; cells: CellInput[] }[]): void {
     this.pairs.clear()
     this.docFreq.clear()
+    this.tokenIndex.clear()
     this.docCount = 0
     for (const file of files) {
       for (const cell of file.cells) {
-        if (cell.translated && cell.translated.trim()) {
-          this.addPair(cell.id, cell.original, cell.translated, file.fileId)
-        }
+        if (!cell.translated || !cell.translated.trim()) continue
+        if (!cell.original || !cell.original.trim()) continue
+        const validated = cell.status ? cell.status === "validated" : true
+        this.addPair(cell.id, cell.original, cell.translated, file.fileId, validated)
       }
     }
   }
 
-  addPair(cellId: string, source: string, target: string, fileId: string): void {
+  addPair(cellId: string, source: string, target: string, fileId: string, validated = true): void {
+    if (!source || !source.trim()) return
+    if (this.pairs.has(cellId)) this.removePair(cellId)
     const tokens = new Set(tokenizeText(source))
-    this.pairs.set(cellId, { cellId, source, target, fileId, tokens })
+    this.pairs.set(cellId, { cellId, source, target, fileId, tokens, validated })
     this.docCount += 1
     for (const t of tokens) {
       this.docFreq.set(t, (this.docFreq.get(t) || 0) + 1)
+      let bucket = this.tokenIndex.get(t)
+      if (!bucket) { bucket = new Set(); this.tokenIndex.set(t, bucket) }
+      bucket.add(cellId)
     }
   }
 
@@ -63,13 +78,18 @@ export class SearchIndex {
         const count = this.docFreq.get(t) || 1
         if (count <= 1) this.docFreq.delete(t)
         else this.docFreq.set(t, count - 1)
+        const bucket = this.tokenIndex.get(t)
+        if (bucket) {
+          bucket.delete(cellId)
+          if (bucket.size === 0) this.tokenIndex.delete(t)
+        }
       }
       this.docCount -= 1
     }
     this.pairs.delete(cellId)
   }
 
-  search(query: string, limit = 5): ScoredPair[] {
+  search(query: string, limit = 5, options: SearchOptions = {}): ScoredPair[] {
     const cleanQuery = query.trim()
     if (!cleanQuery) return []
 
@@ -103,8 +123,19 @@ export class SearchIndex {
 
         if (branchTokenSet.size === 0) continue
 
-        for (const [, pair] of this.pairs) {
-          if (usedCellIds.has(pair.cellId)) continue
+        // Candidate pre-filter via inverted index: only consider pairs
+        // that share at least one token with the branch query.
+        const candidateIds = new Set<string>()
+        for (const t of branchTokenSet) {
+          const bucket = this.tokenIndex.get(t)
+          if (bucket) for (const id of bucket) candidateIds.add(id)
+        }
+
+        for (const cellId of candidateIds) {
+          if (usedCellIds.has(cellId)) continue
+          const pair = this.pairs.get(cellId)
+          if (!pair) continue
+          if (options.onlyValidated && !pair.validated) continue
           const matched: string[] = []
           let idfSum = 0
 

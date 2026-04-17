@@ -66,4 +66,33 @@ describe("SearchIndex", () => {
     index.addPair("c1", "hello", "bonjour", "f1")
     expect(index.search("")).toHaveLength(0)
   })
+
+  it("skips pairs with empty source", () => {
+    index.addPair("c1", "", "bonjour", "f1")
+    expect(index.search("hello")).toHaveLength(0)
+    index.buildFromProject([{
+      fileId: "f1",
+      cells: [
+        { id: "c2", original: "   ", translated: "bonjour", context: "", group: "", type: "text" },
+        { id: "c3", original: "hello", translated: "bonjour", context: "", group: "", type: "text" },
+      ],
+    }])
+    const r = index.search("hello")
+    expect(r).toHaveLength(1)
+    expect(r[0].cellId).toBe("c3")
+  })
+
+  it("filters to validated pairs only when onlyValidated is set", () => {
+    index.buildFromProject([{
+      fileId: "f1",
+      cells: [
+        { id: "c1", original: "hello world", translated: "bonjour monde", context: "", group: "", type: "text", status: "validated" },
+        { id: "c2", original: "hello world", translated: "salut monde", context: "", group: "", type: "text", status: "unvalidated" },
+      ],
+    }])
+    const all = index.search("hello world", 5)
+    expect(all.map((r) => r.cellId).sort()).toEqual(["c1", "c2"])
+    const validated = index.search("hello world", 5, { onlyValidated: true })
+    expect(validated.map((r) => r.cellId)).toEqual(["c1"])
+  })
 })

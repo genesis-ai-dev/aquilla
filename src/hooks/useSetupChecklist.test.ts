@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest"
-import { deriveChecklistState, type ChecklistState } from "./useSetupChecklist"
+import { deriveChecklistState } from "./useSetupChecklist"
 
 describe("deriveChecklistState", () => {
   it("returns all incomplete when project has no settings", () => {

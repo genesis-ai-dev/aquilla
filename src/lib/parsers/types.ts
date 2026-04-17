@@ -75,6 +75,7 @@ export interface ProjectRecord {
    */
   originalFileListing?: Record<string, string>
   syncSettings?: ProjectSyncSettings
+  setupChecklistDismissed?: boolean
 }
 
 export interface ProjectSyncSettings {

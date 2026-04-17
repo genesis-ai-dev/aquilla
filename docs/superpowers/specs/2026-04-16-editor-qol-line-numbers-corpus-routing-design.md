@@ -67,7 +67,7 @@ Writes mutate `__source` in a single Y transaction so the serializer round-trips
 On first observation, if `textDirection` is unset, derive from the project's `targetLanguage` and write it back (so subsequent edits are user overrides):
 
 ```ts
-const RTL_LANGS = new Set(["ar", "arc", "dv", "fa", "ha", "he", "khw", "ks", "ku", "ps", "sd", "ur", "yi"])
+const RTL_LANGS = new Set(["ar", "arc", "dv", "fa", "he", "khw", "ks", "ku", "ps", "sd", "ur", "yi"])
 function detectDirection(lang?: string): "ltr" | "rtl" {
   const code = (lang || "").toLowerCase().split(/[-_]/)[0]
   return RTL_LANGS.has(code) ? "rtl" : "ltr"

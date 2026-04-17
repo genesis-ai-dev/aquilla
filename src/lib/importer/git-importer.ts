@@ -3,6 +3,7 @@ import type { OpfsFs } from "@/lib/git/opfs-fs";
 import {
   parseCodexNotebook, parseCodexComments, parseCodexProjectMetadata,
   pairCells, mapEditHistory, mapCodexCommentsToThreads,
+  getTestament,
 } from "@/lib/codex-editor";
 import type { CodexCell, CodexCommentsFile } from "@/lib/codex-editor";
 import { listFilesMatching, basename } from "./opfs-paths";
@@ -232,12 +233,15 @@ export async function importFromOpfs(args: ImportArgs): Promise<ImportedProject>
     // doesn't pile up open IDB handles. persistImportedProject reattaches.
     handle.persistence.destroy();
 
+    const corpusMarker = nb.metadata.corpusMarker || getTestament(stem);
+
     files.push({
       id: fileId,
       name: stem,
       type: fileType,
       createdAt: new Date().toISOString(),
       cellCount: paired.length,
+      ...(corpusMarker ? { corpusMarker } : {}),
     });
   }
   onProgress?.(total, total, "done");

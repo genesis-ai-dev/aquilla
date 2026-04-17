@@ -34,6 +34,7 @@ function AppRoutes() {
       <Route path="/" element={<Dashboard />} />
       <Route path="/debug" element={<DebugView />} />
       <Route path="/project/:id" element={<ProjectWorkspace />} />
+      <Route path="/project/:id/file/:fileId" element={<ProjectWorkspace />} />
       <Route path="/project/:id/debug" element={<DebugView />} />
       <Route path="/project/:id/settings" element={<ProjectSettings />} />
       <Route path="/project/:id/settings/debug" element={<DebugView />} />

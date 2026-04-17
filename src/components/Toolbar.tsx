@@ -6,6 +6,7 @@ import type { SyncPhase, SyncResult } from "@/lib/sync/git-sync"
 import type { FrontierSession } from "@/lib/frontier/types"
 import { PeerPresence } from "./PeerPresence"
 import { SyncButton } from "./SyncButton"
+import { ViewSettingsMenu } from "./ViewSettingsMenu"
 
 interface ToolbarProps {
   project: ProjectRecord
@@ -20,6 +21,13 @@ interface ToolbarProps {
   onShare: () => void
   peers?: PeerState[]
   exportEnabled: boolean
+  fileOpen: boolean
+  lineNumbersEnabled: boolean
+  textDirection: "ltr" | "rtl"
+  cellLabelsEnabled: boolean
+  onLineNumbersChange: (v: boolean) => void
+  onTextDirectionChange: (v: "ltr" | "rtl") => void
+  onCellLabelsChange: (v: boolean) => void
   onVideo?: () => void
   onProjectUpdated: (p: ProjectRecord) => void
   sync: (project: ProjectRecord, session: FrontierSession) => Promise<SyncResult | null>
@@ -30,7 +38,10 @@ interface ToolbarProps {
 
 export function Toolbar({
   project, onBack, onImport, onSettings, onRules, onExport,
-  onSearch, onComments, onSnapshots, onShare, peers = [], exportEnabled, onVideo,
+  onSearch, onComments, onSnapshots, onShare, peers = [], exportEnabled,
+  fileOpen, lineNumbersEnabled, textDirection, cellLabelsEnabled,
+  onLineNumbersChange, onTextDirectionChange, onCellLabelsChange,
+  onVideo,
   onProjectUpdated, sync, syncPhase, syncInFlight, syncLastResult,
 }: ToolbarProps) {
   return (
@@ -51,6 +62,15 @@ export function Toolbar({
         phase={syncPhase}
         inFlight={syncInFlight}
         lastResult={syncLastResult}
+      />
+      <ViewSettingsMenu
+        fileOpen={fileOpen}
+        lineNumbersEnabled={lineNumbersEnabled}
+        textDirection={textDirection}
+        cellLabelsEnabled={cellLabelsEnabled}
+        onLineNumbersChange={onLineNumbersChange}
+        onTextDirectionChange={onTextDirectionChange}
+        onCellLabelsChange={onCellLabelsChange}
       />
       <Button variant="ghost" size="sm" onClick={onSearch} title="Search (Cmd+K)">
         <Search className="h-4 w-4" />

@@ -33,6 +33,8 @@ import { VideoAttachmentDialog } from "./VideoAttachmentDialog"
 import { useVideoAttachment } from "@/hooks/useVideoAttachment"
 import { parseTimestampRange, extractCuesFromCells } from "@/lib/video/vtt-generator"
 import { useSync } from "@/hooks/useSync"
+import { useFileMeta } from "@/hooks/useFileMeta"
+import { useCellLabelsPreference } from "@/hooks/useCellLabelsPreference"
 import { peerColor as peerColorLocal } from "@/lib/sync/webrtc-provider"
 import { startBootstrapHost } from "@/lib/sync/bootstrap"
 import { listShares } from "@/lib/sync/share-tokens"
@@ -40,13 +42,24 @@ import { useProjectPermissions } from "@/hooks/useProjectPermissions"
 import { useSyncProject } from "@/hooks/useSyncProject"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { useAutoSync } from "@/hooks/useAutoSync"
+import { useCorpusBackfill } from "@/hooks/useCorpusBackfill"
 import { Lock } from "lucide-react"
 
 export function ProjectWorkspace() {
-  const { id: projectId } = useParams<{ id: string }>()
+  const { id: projectId, fileId: routeFileId } = useParams<{ id: string; fileId?: string }>()
   const navigate = useNavigate()
   const { project, loading, refresh } = useProject(projectId!)
-  const [activeFileId, setActiveFileId] = useState<string | null>(null)
+
+  const activeFileId = routeFileId ?? null
+
+  const setActiveFileId = useCallback((fileId: string | null) => {
+    if (!projectId) return
+    if (fileId) {
+      navigate(`/project/${projectId}/file/${fileId}`)
+    } else {
+      navigate(`/project/${projectId}`)
+    }
+  }, [projectId, navigate])
   const [importOpen, setImportOpen] = useState(false)
   const [drawerRuleId, setDrawerRuleId] = useState<string | null>(null)
   const [commentsCellId, setCommentsCellId] = useState<string | null>(null)
@@ -58,6 +71,8 @@ export function ProjectWorkspace() {
   const editorRef = useRef<EditorTableHandle>(null)
   const { doc } = useFileDoc(activeFileId)
   const cells = useCells(doc)
+  const fileMeta = useFileMeta(doc, project?.targetLanguage)
+  const [cellLabelsEnabled, setCellLabelsEnabled] = useCellLabelsPreference(projectId!)
 
   const activeFile = activeFileId ? project?.files.find((f) => f.id === activeFileId) : null
   const isSubtitleFile = activeFile?.type === "vtt" || activeFile?.type === "srt"
@@ -112,8 +127,9 @@ export function ProjectWorkspace() {
 
   const { buildIndex, search: runSearch, results: searchResults, loading: searchLoading, ready: searchReady } = useWorkspaceSearch(project?.files || [])
   const { search } = useSearchIndex(project?.files || [], cells)
+  const { session: frontierSession } = useFrontierSession()
   const { completeSingle, completeBatch, isConfigured, completing, examples, errors } = useCompletion(
-    doc, project?.completionSettings, project?.sourceLanguage || "", project?.targetLanguage || "", search
+    doc, project?.completionSettings, project?.sourceLanguage || "", project?.targetLanguage || "", search, frontierSession
   )
 
   const findBacktranslationExamples = useCallback((target: CellData) => {
@@ -133,7 +149,8 @@ export function ProjectWorkspace() {
     project?.completionSettings,
     project?.sourceLanguage || "",
     project?.targetLanguage || "",
-    findBacktranslationExamples
+    findBacktranslationExamples,
+    frontierSession,
   )
 
   const { rules, penalties } = useRules(project ?? null, refresh)
@@ -173,6 +190,14 @@ export function ProjectWorkspace() {
     document.addEventListener("keydown", handler)
     return () => document.removeEventListener("keydown", handler)
   }, [])
+
+  useEffect(() => {
+    if (!project || !routeFileId) return
+    const exists = project.files.some((f) => f.id === routeFileId)
+    if (!exists) {
+      navigate(`/project/${projectId}`, { replace: true })
+    }
+  }, [project, routeFileId, projectId, navigate])
 
   useEffect(() => {
     if (!project) {
@@ -260,9 +285,9 @@ export function ProjectWorkspace() {
   const isReadOnly = !perms.canEditContent
 
   const { sync: runSync, phase: syncPhase, inFlight: syncInFlight, lastResult: syncLastResult } = useSyncProject()
-  const { session: frontierSession } = useFrontierSession()
 
   useAutoSync(project ?? null, frontierSession)
+  useCorpusBackfill(project ?? null, refresh)
 
   const handleProjectUpdated = useCallback(async (updated: typeof project) => {
     if (!updated) return
@@ -321,6 +346,13 @@ export function ProjectWorkspace() {
         onShare={() => setShareOpen(true)}
         peers={peers}
         exportEnabled={Boolean(activeFileId)}
+        fileOpen={Boolean(activeFileId)}
+        lineNumbersEnabled={fileMeta.lineNumbersEnabled}
+        textDirection={fileMeta.textDirection}
+        cellLabelsEnabled={cellLabelsEnabled}
+        onLineNumbersChange={fileMeta.setLineNumbersEnabled}
+        onTextDirectionChange={fileMeta.setTextDirection}
+        onCellLabelsChange={setCellLabelsEnabled}
         onVideo={isSubtitleFile ? () => setVideoDialogOpen(true) : undefined}
         onProjectUpdated={handleProjectUpdated}
         sync={runSync}
@@ -396,6 +428,9 @@ export function ProjectWorkspace() {
                 collabUser={collabUser}
                 activeCueIndex={activeCueIndex >= 0 ? activeCueIndex : undefined}
                 onSeekToCue={isSubtitleFile ? handleCueSeek : undefined}
+                lineNumbersEnabled={fileMeta.lineNumbersEnabled}
+                cellLabelsEnabled={cellLabelsEnabled}
+                textDirection={fileMeta.textDirection}
               />
             ) : <p className="p-4 text-muted-foreground">Loading file...</p>) : (
               <p className="p-4 text-muted-foreground">Select a file from the sidebar, or import files.</p>

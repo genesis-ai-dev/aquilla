@@ -87,6 +87,7 @@ export interface FileReference {
   type: FileType
   createdAt: string
   cellCount: number
+  corpusMarker?: string  // From notebook metadata.corpusMarker, OT/NT fallback for biblical book stems
 }
 
 export interface ProjectMember {
@@ -94,9 +95,12 @@ export interface ProjectMember {
   role: "owner" | "translator" | "reviewer"
 }
 
+export type CompletionProvider = "frontier" | "custom"
+
 export interface CompletionSettings {
-  endpoint: string
-  model: string
+  provider?: CompletionProvider // "frontier" (default, uses api.frontierrnd.com) or "custom" (self-hosted/local endpoint)
+  endpoint: string              // only used when provider === "custom"
+  model: string                 // blank = provider's default (e.g. Frontier picks DEFAULT_LLM_MODEL server-side)
   maxTokens: number
   temperature: number
   systemPrompt: string

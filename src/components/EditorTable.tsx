@@ -47,6 +47,9 @@ interface EditorTableProps {
   collabUser?: { name: string; color: string }
   activeCueIndex?: number
   onSeekToCue?: (cellId: string) => void
+  lineNumbersEnabled: boolean
+  cellLabelsEnabled: boolean
+  textDirection: "ltr" | "rtl"
 }
 
 export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(function EditorTable({
@@ -58,6 +61,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   cellOpenCommentCount, onOpenComments, onOpenHistory,
   syncProvider, collabUser,
   activeCueIndex, onSeekToCue,
+  lineNumbersEnabled, cellLabelsEnabled, textDirection,
 }, ref) {
   const permissions = useProjectPermissions(project)
   const canEdit = permissions.canEditContent
@@ -81,6 +85,9 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     },
   }), [virtualizer, cells.length])
 
+  const showGutterContent = lineNumbersEnabled || cellLabelsEnabled
+  const gridCols = showGutterContent ? "grid-cols-[48px_1fr_1fr]" : "grid-cols-[24px_1fr_1fr]"
+
   const handleMouseUp = useCallback(() => {
     if (isDragging.current && dragCells.current.size > 1) {
       const selected = cells.filter((c) => dragCells.current.has(c.id))
@@ -92,7 +99,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
 
   return (
     <div ref={parentRef} className="h-full overflow-auto" onMouseUp={handleMouseUp}>
-      <div className="sticky top-0 z-10 grid grid-cols-[24px_1fr_1fr] gap-2 border-b bg-background px-4 py-2 text-sm font-medium text-muted-foreground">
+      <div className={cn("sticky top-0 z-10 grid gap-2 border-b bg-background px-4 py-2 text-sm font-medium text-muted-foreground", gridCols)}>
         <div />
         <div>Source</div>
         <div>Target</div>
@@ -154,6 +161,11 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
                 collabUser={collabUser}
                 isActiveCue={isActiveCue}
                 onSeekToCue={onSeekToCue}
+                rowIndex={virtualRow.index}
+                lineNumbersEnabled={lineNumbersEnabled}
+                cellLabelsEnabled={cellLabelsEnabled}
+                textDirection={textDirection}
+                gridCols={gridCols}
                 onDragStart={() => {
                   isDragging.current = true
                   dragCells.current = new Set([cell.id])
@@ -199,6 +211,11 @@ interface EditorRowProps {
   onSeekToCue?: (cellId: string) => void
   onDragStart: () => void
   onDragEnter: () => void
+  rowIndex: number
+  lineNumbersEnabled: boolean
+  cellLabelsEnabled: boolean
+  textDirection: "ltr" | "rtl"
+  gridCols: "grid-cols-[24px_1fr_1fr]" | "grid-cols-[48px_1fr_1fr]"
 }
 
 function EditorRow({
@@ -211,6 +228,7 @@ function EditorRow({
   syncProvider, collabUser,
   isActiveCue: _isActiveCue, onSeekToCue,
   onDragStart, onDragEnter,
+  rowIndex, lineNumbersEnabled, cellLabelsEnabled, textDirection, gridCols,
 }: EditorRowProps) {
   function handleChange(e: React.ChangeEvent<HTMLTextAreaElement>) {
     appendCellHistory(doc, cell.id, {
@@ -375,9 +393,25 @@ function EditorRow({
   // render boundary. Parsers only produce safe inline tags (<b>, <i>, <u>,
   // <s>, <code>). DOMPurify provides defense-in-depth against XSS.
   return (
-    <div className="grid grid-cols-[24px_1fr_1fr] gap-2 border-b px-4 py-2">
+    <div className={cn("grid gap-2 border-b px-4 py-2", gridCols)}>
       {/* Sparkle column */}
       <div className="flex flex-col items-center gap-1 pt-5">
+        {lineNumbersEnabled && (cell.type !== "paratext") && (
+          <span
+            className="text-[10px] tabular-nums text-muted-foreground/70"
+            title={`Line ${rowIndex + 1}`}
+          >
+            {rowIndex + 1}
+          </span>
+        )}
+        {cellLabelsEnabled && cell.cellLabel && (
+          <span
+            className="rounded bg-muted/40 px-1 text-[10px] text-muted-foreground"
+            title="Cell label"
+          >
+            {cell.cellLabel}
+          </span>
+        )}
         <SparkleButton
           disabled={!isCompletionConfigured || !editable}
           loading={isLoading}
@@ -430,7 +464,7 @@ function EditorRow({
       </div>
 
       {/* Target column */}
-      <div className="flex gap-1">
+      <div className="flex gap-1" dir={textDirection}>
         <div className="flex-1">
           {cell.translatedXml ? (
             <TranslatedEditor

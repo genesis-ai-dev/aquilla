@@ -1,5 +1,6 @@
 import { complete } from "@/lib/completion/completion-service"
 import type { CompletionSettings, RuleCheck } from "@/lib/parsers/types"
+import type { FrontierSession } from "@/lib/frontier/types"
 
 export interface RuleSuggestion {
   name: string
@@ -43,11 +44,11 @@ Output ONLY valid JSON. No markdown, no code fences, no explanation.`
 
 export async function suggestRulesFromPairs(
   pairs: { source: string; target: string }[],
-  settings: CompletionSettings
+  settings: CompletionSettings,
+  session: FrontierSession | null = null,
 ): Promise<RuleSuggestion[]> {
   if (pairs.length === 0) return []
 
-  // Limit to ~20 pairs to keep prompt reasonable
   const sample = pairs.slice(0, 20)
   const pairsText = sample
     .map((p, i) => `${i + 1}. Source: "${p.source}"\n   Target: "${p.target}"`)
@@ -56,14 +57,14 @@ export async function suggestRulesFromPairs(
   const userMessage = `Analyze these ${sample.length} human-validated translation pairs and propose rules:\n\n${pairsText}\n\nReturn a JSON array of rule suggestions.`
 
   const response = await complete({
-    endpoint: settings.endpoint,
-    model: settings.model,
+    // Rule suggestion overrides maxTokens and temperature; everything else flows
+    // from project settings (including the provider + JWT auth path).
+    settings: { ...settings, maxTokens: Math.min(settings.maxTokens, 2048), temperature: 0.2 },
+    session,
     messages: [
       { role: "system", content: RULE_SUGGESTION_SYSTEM_PROMPT },
       { role: "user", content: userMessage },
     ],
-    maxTokens: Math.min(settings.maxTokens, 2048),
-    temperature: 0.2,
   })
 
   return parseRuleSuggestions(response)

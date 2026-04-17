@@ -80,6 +80,7 @@ export interface CodexNotebookMetadata {
   id: string;
   originalName: string;
   corpusMarker?: string;
+  lineNumbersEnabled?: boolean;
   textDirection?: "ltr" | "rtl";
   videoUrl?: string;
   sourceCreatedAt?: string;

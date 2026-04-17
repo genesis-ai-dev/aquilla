@@ -1,5 +1,6 @@
 import { complete } from "./completion-service"
 import type { CompletionSettings } from "@/lib/parsers/types"
+import type { FrontierSession } from "@/lib/frontier/types"
 
 export const BACKTRANSLATION_SYSTEM_PROMPT = `You are a backtranslation assistant. You will be given text in {targetLanguage} that is a translation. Your job is to provide a word-for-word, literal translation of that text BACK into {sourceLanguage}.
 
@@ -37,6 +38,7 @@ export function buildBacktranslationPrompt(options: BuildOptions): ChatMessage[]
 
 export interface GenerateBacktranslationOptions extends BuildOptions {
   settings: CompletionSettings
+  session: FrontierSession | null
   onChunk?: (text: string) => void
 }
 
@@ -48,12 +50,11 @@ export async function generateBacktranslation(options: GenerateBacktranslationOp
     examples: options.examples,
   })
 
+  // Backtranslation uses a lower temperature for literal output.
   return complete({
-    endpoint: options.settings.endpoint,
-    model: options.settings.model,
+    settings: { ...options.settings, temperature: 0.1 },
+    session: options.session,
     messages,
-    maxTokens: options.settings.maxTokens,
-    temperature: 0.1,
     stream: Boolean(options.onChunk),
     onChunk: options.onChunk,
   })

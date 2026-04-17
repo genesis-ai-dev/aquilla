@@ -98,8 +98,9 @@ export interface ProjectMember {
 export type CompletionProvider = "frontier" | "custom"
 
 export interface CompletionSettings {
-  provider?: CompletionProvider // "frontier" (default, uses api.frontierrnd.com) or "custom" (self-hosted/local endpoint)
-  endpoint: string              // only used when provider === "custom"
+  provider?: CompletionProvider // "frontier" (default, uses api.frontierrnd.com) or "custom" (self-hosted, local, or third-party OpenAI-compatible endpoint like OpenRouter, OpenAI, Groq, etc.)
+  endpoint: string              // only used when provider === "custom". Base URL (e.g. "http://localhost:8000" or "https://openrouter.ai/api/v1"). Trailing "/v1" or "/chat/completions" is tolerated and normalized.
+  apiKey?: string               // only used when provider === "custom". Sent as "Authorization: Bearer <key>". Leave blank for unauthenticated local endpoints.
   model: string                 // blank = provider's default (e.g. Frontier picks DEFAULT_LLM_MODEL server-side)
   maxTokens: number
   temperature: number

@@ -37,10 +37,6 @@ describe("detectSuggestions — bible-book", () => {
     const s = detectSuggestions(p)
     expect(s[0]).toMatchObject({ suggestedName: "Psalms", suggestedCorpus: "OT" })
   })
-  it("does not suggest if name is already the canonical English name", () => {
-    const p = mkProject([mkFile({ id: "4", name: "Genesis", type: "usfm" })])
-    expect(detectSuggestions(p)).toHaveLength(0)
-  })
   it("does not suggest if corpus is already the canonical testament and name matches", () => {
     const p = mkProject([mkFile({
       id: "5", name: "Genesis", type: "usfm", corpusMarker: "OT",

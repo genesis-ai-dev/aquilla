@@ -20,18 +20,16 @@ function detectBibleBook(file: FileReference): RenameSuggestion | null {
   if (file.type !== "usfm" && file.type !== "ebible") return null
   const stem = stripExt(file.name)
 
-  // Try to extract a 3-char (or alphanumeric) book code from the stem.
-  // Priority: match at end (after optional numeric prefix like "40-MAT"),
-  // then match at start (bare codes like "gen" or "psa").
-  let codeMatch: string | null = null
+  // Try to extract a 3-char book code from the stem.
+  // Check end first (handles "40-MAT"), then front (handles "gen", "Genesis").
+  // A candidate is only accepted if it is a known book code.
+  const endCandidate = stem.match(/([A-Za-z0-9]{3})$/)?.[1]
+  const frontCandidate = stem.match(/^([A-Za-z0-9]{3})/)?.[1]
+  const codeMatch =
+    (endCandidate && isKnownBookCode(endCandidate) ? endCandidate : undefined)
+    ?? (frontCandidate && isKnownBookCode(frontCandidate) ? frontCandidate : undefined)
 
-  // Pattern: optional digits+separator then a book-code token
-  const prefixedMatch = stem.match(/^(?:\d+[-_])?([A-Za-z0-9]{2,3})$/)
-  if (prefixedMatch) {
-    codeMatch = prefixedMatch[1]
-  }
-
-  if (!codeMatch || !isKnownBookCode(codeMatch)) return null
+  if (!codeMatch) return null
 
   const name = getBookName(codeMatch)!
   const corpus = getTestament(codeMatch)!

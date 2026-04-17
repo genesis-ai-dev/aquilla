@@ -24,18 +24,22 @@ export function ProjectStep({
     e.preventDefault()
     if (!name.trim() || !sourceLanguage.trim() || !targetLanguage.trim()) return
     setBusy(true)
-    const project: ProjectRecord = {
-      id: uuid(),
-      name: name.trim(),
-      sourceLanguage: sourceLanguage.trim(),
-      targetLanguage: targetLanguage.trim(),
-      createdAt: new Date().toISOString(),
-      files: [],
-      members: [{ userId: "local", role: "owner" }],
-      username: displayName || "Anonymous",
+    try {
+      const project: ProjectRecord = {
+        id: uuid(),
+        name: name.trim(),
+        sourceLanguage: sourceLanguage.trim(),
+        targetLanguage: targetLanguage.trim(),
+        createdAt: new Date().toISOString(),
+        files: [],
+        members: [{ userId: "local", role: "owner" }],
+        username: displayName || "Anonymous",
+      }
+      await createProject(project)
+      onCreated(project)
+    } finally {
+      setBusy(false)
     }
-    await createProject(project)
-    onCreated(project)
   }
 
   return (

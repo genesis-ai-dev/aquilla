@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react"
 import { useParams, useNavigate } from "react-router-dom"
-import { ArrowLeft, CheckCircle, XCircle, Loader2, Sparkles } from "lucide-react"
+import { ArrowLeft, CheckCircle, XCircle, Loader2, Sparkles, Eye, EyeOff } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -8,6 +8,30 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { getProject, updateProject } from "@/lib/store/project-index"
 import { fetchModels, DEFAULT_SYSTEM_PROMPT, resolveProvider } from "@/lib/completion/completion-service"
 import type { ProjectRecord, CompletionProvider } from "@/lib/parsers/types"
+
+// Well-known OpenAI-compatible providers. Keys are stable IDs for the preset dropdown.
+// "local" is the default for self-hosted/localhost setups with no API key.
+const CUSTOM_PRESETS: { id: string; label: string; endpoint: string; requiresKey: boolean; keyHint?: string }[] = [
+  { id: "local", label: "Local / self-hosted (no key)", endpoint: "http://localhost:8000", requiresKey: false },
+  { id: "openrouter", label: "OpenRouter", endpoint: "https://openrouter.ai/api/v1", requiresKey: true, keyHint: "sk-or-..." },
+  { id: "openai", label: "OpenAI", endpoint: "https://api.openai.com/v1", requiresKey: true, keyHint: "sk-..." },
+  { id: "groq", label: "Groq", endpoint: "https://api.groq.com/openai/v1", requiresKey: true, keyHint: "gsk_..." },
+  { id: "together", label: "Together AI", endpoint: "https://api.together.xyz/v1", requiresKey: true },
+  { id: "mistral", label: "Mistral", endpoint: "https://api.mistral.ai/v1", requiresKey: true },
+  { id: "deepseek", label: "DeepSeek", endpoint: "https://api.deepseek.com/v1", requiresKey: true },
+  { id: "custom", label: "Other (enter URL manually)", endpoint: "", requiresKey: false },
+]
+
+function presetIdForEndpoint(endpoint: string): string {
+  const trimmed = endpoint.trim().replace(/\/+$/, "").toLowerCase()
+  if (!trimmed) return "local"
+  for (const p of CUSTOM_PRESETS) {
+    if (!p.endpoint) continue
+    const base = p.endpoint.toLowerCase()
+    if (trimmed === base || trimmed.startsWith(base)) return p.id
+  }
+  return "custom"
+}
 
 export function ProjectSettings() {
   const { id } = useParams<{ id: string }>()
@@ -22,6 +46,9 @@ export function ProjectSettings() {
 
   const [provider, setProvider] = useState<CompletionProvider>("frontier")
   const [endpoint, setEndpoint] = useState("")
+  const [apiKey, setApiKey] = useState("")
+  const [showApiKey, setShowApiKey] = useState(false)
+  const [presetId, setPresetId] = useState<string>("local")
   const [model, setModel] = useState("")
   const [maxTokens, setMaxTokens] = useState(512)
   const [temperature, setTemperature] = useState(0.3)
@@ -48,6 +75,8 @@ export function ProjectSettings() {
       if (p.completionSettings) {
         setProvider(resolveProvider(p.completionSettings))
         setEndpoint(p.completionSettings.endpoint)
+        setApiKey(p.completionSettings.apiKey ?? "")
+        setPresetId(presetIdForEndpoint(p.completionSettings.endpoint))
         setModel(p.completionSettings.model)
         setMaxTokens(p.completionSettings.maxTokens)
         setTemperature(p.completionSettings.temperature)
@@ -67,12 +96,19 @@ export function ProjectSettings() {
     setProject(updated)
   }
 
-  function saveCompletionSettings(overrides: { provider?: CompletionProvider } = {}) {
+  function saveCompletionSettings(overrides: {
+    provider?: CompletionProvider
+    endpoint?: string
+    apiKey?: string
+  } = {}) {
     const nextProvider = overrides.provider ?? provider
+    const nextEndpoint = (overrides.endpoint ?? endpoint).trim()
+    const nextApiKey = (overrides.apiKey ?? apiKey).trim()
     save({
       completionSettings: {
         provider: nextProvider,
-        endpoint: endpoint.trim(),
+        endpoint: nextEndpoint,
+        apiKey: nextApiKey || undefined,
         model,
         maxTokens,
         temperature,
@@ -82,13 +118,26 @@ export function ProjectSettings() {
     })
   }
 
+  function handlePresetChange(nextPresetId: string) {
+    setPresetId(nextPresetId)
+    const preset = CUSTOM_PRESETS.find((p) => p.id === nextPresetId)
+    if (!preset) return
+    // "custom" leaves the existing endpoint alone so the user can type their own.
+    const nextEndpoint = preset.id === "custom" ? endpoint : preset.endpoint
+    setEndpoint(nextEndpoint)
+    setConnected(false)
+    setConnectionError(null)
+    setModels([])
+    saveCompletionSettings({ endpoint: nextEndpoint })
+  }
+
   async function handleConnect() {
     if (!endpoint.trim()) return
     setConnecting(true)
     setConnectionError(null)
     setConnected(false)
     try {
-      const list = await fetchModels(endpoint.trim())
+      const list = await fetchModels(endpoint.trim(), apiKey.trim() || undefined)
       setModels(list)
       setConnected(true)
       if (list.length > 0 && !model) setModel(list[0])
@@ -208,35 +257,109 @@ export function ProjectSettings() {
                     onChange={() => { setProvider("custom"); saveCompletionSettings({ provider: "custom" }) }}
                   />
                   <span>
-                    <strong>Custom endpoint</strong> — self-hosted or local OpenAI-compatible server (no auth).
+                    <strong>Custom endpoint</strong> — localhost, self-hosted, or a third-party OpenAI-compatible
+                    API (OpenRouter, OpenAI, Groq, Together, ...). Bring your own key.
                   </span>
                 </label>
               </div>
             </div>
 
-            {provider === "custom" && (
-              <>
-                <div>
-                  <Label htmlFor="ep">Endpoint URL</Label>
-                  <div className="flex gap-2">
-                    <Input id="ep" value={endpoint} onChange={(e) => setEndpoint(e.target.value)} placeholder="http://localhost:8000" className="flex-1" />
-                    <Button size="sm" onClick={handleConnect} disabled={connecting || !endpoint.trim()}>
-                      {connecting ? <Loader2 className="h-4 w-4 animate-spin" /> : "Connect"}
-                    </Button>
-                  </div>
-                  {connected && <p className="mt-1 flex items-center gap-1 text-xs text-green-600"><CheckCircle className="h-3 w-3" /> Connected — {models.length} model(s)</p>}
-                  {connectionError && <p className="mt-1 flex items-center gap-1 text-xs text-destructive"><XCircle className="h-3 w-3" /> {connectionError}</p>}
-                </div>
-                {models.length > 0 && (
+            {provider === "custom" && (() => {
+              const preset = CUSTOM_PRESETS.find((p) => p.id === presetId) ?? CUSTOM_PRESETS[0]
+              return (
+                <>
                   <div>
-                    <Label htmlFor="mdl">Model</Label>
-                    <select id="mdl" value={model} onChange={(e) => { setModel(e.target.value); saveCompletionSettings() }} className="w-full rounded border bg-background px-3 py-2 text-sm">
-                      {models.map((m) => <option key={m} value={m}>{m}</option>)}
+                    <Label htmlFor="preset">Provider preset</Label>
+                    <select
+                      id="preset"
+                      value={presetId}
+                      onChange={(e) => handlePresetChange(e.target.value)}
+                      className="w-full rounded border bg-background px-3 py-2 text-sm"
+                    >
+                      {CUSTOM_PRESETS.map((p) => (
+                        <option key={p.id} value={p.id}>{p.label}</option>
+                      ))}
                     </select>
                   </div>
-                )}
-              </>
-            )}
+                  <div>
+                    <Label htmlFor="ep">Endpoint URL</Label>
+                    <div className="flex gap-2">
+                      <Input
+                        id="ep"
+                        value={endpoint}
+                        onChange={(e) => { setEndpoint(e.target.value); setPresetId(presetIdForEndpoint(e.target.value)) }}
+                        onBlur={() => saveCompletionSettings()}
+                        placeholder="http://localhost:8000"
+                        className="flex-1"
+                      />
+                      <Button size="sm" onClick={handleConnect} disabled={connecting || !endpoint.trim()}>
+                        {connecting ? <Loader2 className="h-4 w-4 animate-spin" /> : "Connect"}
+                      </Button>
+                    </div>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      Base URL. Trailing <code className="rounded bg-muted px-1">/v1</code> or
+                      {" "}<code className="rounded bg-muted px-1">/chat/completions</code> is accepted.
+                    </p>
+                    {connected && <p className="mt-1 flex items-center gap-1 text-xs text-green-600"><CheckCircle className="h-3 w-3" /> Connected — {models.length} model(s)</p>}
+                    {connectionError && <p className="mt-1 flex items-center gap-1 text-xs text-destructive"><XCircle className="h-3 w-3" /> {connectionError}</p>}
+                  </div>
+                  <div>
+                    <Label htmlFor="apikey">
+                      API key {preset.requiresKey ? <span className="text-destructive">*</span> : <span className="text-muted-foreground">(optional)</span>}
+                    </Label>
+                    <div className="flex gap-2">
+                      <Input
+                        id="apikey"
+                        type={showApiKey ? "text" : "password"}
+                        value={apiKey}
+                        onChange={(e) => setApiKey(e.target.value)}
+                        onBlur={() => saveCompletionSettings()}
+                        placeholder={preset.keyHint ?? (preset.requiresKey ? "Paste your API key" : "Leave blank for no auth")}
+                        autoComplete="off"
+                        spellCheck={false}
+                        className="flex-1 font-mono"
+                      />
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => setShowApiKey((v) => !v)}
+                        aria-label={showApiKey ? "Hide API key" : "Show API key"}
+                      >
+                        {showApiKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                      </Button>
+                    </div>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      Sent as <code className="rounded bg-muted px-1">Authorization: Bearer &lt;key&gt;</code>. Stored
+                      locally in your browser (IndexedDB) — never uploaded to Frontier.
+                    </p>
+                  </div>
+                  {models.length > 0 && (
+                    <div>
+                      <Label htmlFor="mdl">Model</Label>
+                      <select id="mdl" value={model} onChange={(e) => { setModel(e.target.value); saveCompletionSettings() }} className="w-full rounded border bg-background px-3 py-2 text-sm">
+                        {models.map((m) => <option key={m} value={m}>{m}</option>)}
+                      </select>
+                    </div>
+                  )}
+                  {models.length === 0 && (
+                    <div>
+                      <Label htmlFor="mdl-manual">Model (if not listed)</Label>
+                      <Input
+                        id="mdl-manual"
+                        value={model}
+                        onChange={(e) => setModel(e.target.value)}
+                        onBlur={() => saveCompletionSettings()}
+                        placeholder={presetId === "openrouter" ? "anthropic/claude-3.5-sonnet" : "Type a model id"}
+                      />
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        Click Connect to discover models, or type one manually (required for providers that don't expose <code className="rounded bg-muted px-1">/models</code>).
+                      </p>
+                    </div>
+                  )}
+                </>
+              )
+            })()}
 
             {provider === "frontier" && (
               <div>

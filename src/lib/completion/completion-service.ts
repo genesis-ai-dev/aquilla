@@ -34,8 +34,31 @@ export function buildPrompt(options: {
   return [{ role: "system", content: sys }, { role: "user", content: user.trim() }]
 }
 
-export async function fetchModels(endpoint: string): Promise<string[]> {
-  const res = await fetch(`${endpoint}/v1/models`)
+/**
+ * Normalize a user-supplied OpenAI-compatible base URL into endpoints for
+ * `/chat/completions` and `/models`. Accepts:
+ *   - "http://localhost:8000"                          (we append /v1/...)
+ *   - "https://openrouter.ai/api/v1"                   (already has /v1)
+ *   - "https://openrouter.ai/api/v1/chat/completions"  (full chat URL)
+ * Trailing slashes are ignored.
+ */
+export function normalizeOpenAIBaseUrl(endpoint: string): { chatUrl: string; modelsUrl: string } {
+  const trimmed = endpoint.trim().replace(/\/+$/, "")
+  if (trimmed.endsWith("/chat/completions")) {
+    const base = trimmed.slice(0, -"/chat/completions".length)
+    return { chatUrl: trimmed, modelsUrl: `${base}/models` }
+  }
+  if (/\/v\d+$/.test(trimmed)) {
+    return { chatUrl: `${trimmed}/chat/completions`, modelsUrl: `${trimmed}/models` }
+  }
+  return { chatUrl: `${trimmed}/v1/chat/completions`, modelsUrl: `${trimmed}/v1/models` }
+}
+
+export async function fetchModels(endpoint: string, apiKey?: string): Promise<string[]> {
+  const { modelsUrl } = normalizeOpenAIBaseUrl(endpoint)
+  const headers: Record<string, string> = {}
+  if (apiKey?.trim()) headers.Authorization = `Bearer ${apiKey.trim()}`
+  const res = await fetch(modelsUrl, { headers })
   if (!res.ok) throw new Error(`Failed to fetch models: ${res.status} ${res.statusText}`)
   const data = await res.json()
   return data.data.map((m: { id: string }) => m.id)
@@ -107,12 +130,12 @@ async function buildRequestTarget(
       headers: { Authorization: `Bearer ${session.jwt}` },
     }
   }
-  // custom
+  // custom: local, self-hosted, or third-party OpenAI-compatible (OpenRouter, OpenAI, Groq, ...)
   if (!settings.endpoint.trim()) {
     throw new Error("No custom endpoint configured.")
   }
-  return {
-    url: `${settings.endpoint}/v1/chat/completions`,
-    headers: {},
-  }
+  const { chatUrl } = normalizeOpenAIBaseUrl(settings.endpoint)
+  const headers: Record<string, string> = {}
+  if (settings.apiKey?.trim()) headers.Authorization = `Bearer ${settings.apiKey.trim()}`
+  return { url: chatUrl, headers }
 }

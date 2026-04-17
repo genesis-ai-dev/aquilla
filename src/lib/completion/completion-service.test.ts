@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
-import { buildPrompt, complete, fetchModels, resolveProvider, DEFAULT_SYSTEM_PROMPT, FRONTIER_CHAT_URL } from "./completion-service"
+import { buildPrompt, complete, fetchModels, normalizeOpenAIBaseUrl, resolveProvider, DEFAULT_SYSTEM_PROMPT, FRONTIER_CHAT_URL } from "./completion-service"
 import type { CompletionSettings } from "@/lib/parsers/types"
 import type { FrontierSession } from "@/lib/frontier/types"
 
@@ -53,6 +53,36 @@ describe("buildPrompt", () => {
   })
 })
 
+describe("normalizeOpenAIBaseUrl", () => {
+  it("appends /v1/... to a bare host", () => {
+    expect(normalizeOpenAIBaseUrl("http://localhost:8000")).toEqual({
+      chatUrl: "http://localhost:8000/v1/chat/completions",
+      modelsUrl: "http://localhost:8000/v1/models",
+    })
+  })
+
+  it("strips trailing slashes", () => {
+    expect(normalizeOpenAIBaseUrl("http://localhost:8000/")).toEqual({
+      chatUrl: "http://localhost:8000/v1/chat/completions",
+      modelsUrl: "http://localhost:8000/v1/models",
+    })
+  })
+
+  it("recognizes an existing /v1 suffix", () => {
+    expect(normalizeOpenAIBaseUrl("https://openrouter.ai/api/v1")).toEqual({
+      chatUrl: "https://openrouter.ai/api/v1/chat/completions",
+      modelsUrl: "https://openrouter.ai/api/v1/models",
+    })
+  })
+
+  it("recognizes a full chat/completions URL", () => {
+    expect(normalizeOpenAIBaseUrl("https://openrouter.ai/api/v1/chat/completions")).toEqual({
+      chatUrl: "https://openrouter.ai/api/v1/chat/completions",
+      modelsUrl: "https://openrouter.ai/api/v1/models",
+    })
+  })
+})
+
 describe("fetchModels", () => {
   it("extracts model IDs from /v1/models response", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
@@ -60,6 +90,29 @@ describe("fetchModels", () => {
     }))
     const models = await fetchModels("http://localhost:8000")
     expect(models).toEqual(["gemma-4-26B", "llama-3"])
+    vi.unstubAllGlobals()
+  })
+
+  it("sends API key as Bearer when provided", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true, json: () => Promise.resolve({ data: [{ id: "x" }] }),
+    })
+    vi.stubGlobal("fetch", fetchMock)
+    await fetchModels("https://openrouter.ai/api/v1", "sk-or-secret")
+    const [url, init] = fetchMock.mock.calls[0]
+    expect(url).toBe("https://openrouter.ai/api/v1/models")
+    expect((init as RequestInit).headers).toMatchObject({ Authorization: "Bearer sk-or-secret" })
+    vi.unstubAllGlobals()
+  })
+
+  it("omits Authorization when no API key", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true, json: () => Promise.resolve({ data: [] }),
+    })
+    vi.stubGlobal("fetch", fetchMock)
+    await fetchModels("http://localhost:8000")
+    const headers = (fetchMock.mock.calls[0][1] as RequestInit).headers as Record<string, string>
+    expect(headers.Authorization).toBeUndefined()
     vi.unstubAllGlobals()
   })
 
@@ -148,6 +201,42 @@ describe("complete", () => {
     expect(((init as RequestInit).headers as Record<string, string>).Authorization).toBeUndefined()
     const body = JSON.parse((init as RequestInit).body as string)
     expect(body.model).toBe("gemma")
+  })
+
+  it("custom: sends Bearer <apiKey> when configured (OpenRouter)", async () => {
+    fetchMock.mockResolvedValueOnce(okJson({ choices: [{ message: { content: "yes" } }] }))
+    await complete({
+      settings: {
+        ...BASE, provider: "custom",
+        endpoint: "https://openrouter.ai/api/v1", apiKey: "sk-or-secret",
+        model: "anthropic/claude-3.5-sonnet",
+      },
+      session: null, messages: msg,
+    })
+    const [url, init] = fetchMock.mock.calls[0]
+    expect(url).toBe("https://openrouter.ai/api/v1/chat/completions")
+    expect((init as RequestInit).headers).toMatchObject({ Authorization: "Bearer sk-or-secret" })
+  })
+
+  it("custom: trims whitespace from apiKey", async () => {
+    fetchMock.mockResolvedValueOnce(okJson({ choices: [{ message: { content: "yes" } }] }))
+    await complete({
+      settings: { ...BASE, provider: "custom", endpoint: "http://localhost:8000", apiKey: "  sk-123  " },
+      session: null, messages: msg,
+    })
+    expect((fetchMock.mock.calls[0][1] as RequestInit).headers).toMatchObject({
+      Authorization: "Bearer sk-123",
+    })
+  })
+
+  it("custom: blank apiKey does not add Authorization header", async () => {
+    fetchMock.mockResolvedValueOnce(okJson({ choices: [{ message: { content: "yes" } }] }))
+    await complete({
+      settings: { ...BASE, provider: "custom", endpoint: "http://localhost:8000", apiKey: "   " },
+      session: null, messages: msg,
+    })
+    const headers = (fetchMock.mock.calls[0][1] as RequestInit).headers as Record<string, string>
+    expect(headers.Authorization).toBeUndefined()
   })
 
   it("custom: throws when endpoint is blank", async () => {

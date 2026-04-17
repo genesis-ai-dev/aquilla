@@ -55,7 +55,7 @@ import { ConfirmActionDialog } from "./ConfirmActionDialog"
 import { PeerPresence } from "./PeerPresence"
 import { SyncButton } from "./SyncButton"
 import { ViewSettingsMenu } from "./ViewSettingsMenu"
-import { EditorScrollProvider } from "@/context/EditorScrollContext"
+import { EditorScrollProvider, useEditorScroll } from "@/context/EditorScrollContext"
 import { detectSuggestions, type RenameSuggestion } from "@/lib/file-labeling/detect"
 import { applySuggestions } from "@/lib/file-labeling/apply"
 import { renameFile, moveFileToCorpus, deleteFile } from "@/lib/store/file-operations"
@@ -449,6 +449,8 @@ export function ProjectWorkspace() {
 
   return (
     <EditorScrollProvider>
+      {/* ScrollToGroupHandler must live inside EditorScrollProvider so it can call useEditorScroll */}
+      <ScrollToGroupHandler cells={cells} editorRef={editorRef} />
       <AppShell
         sidebar={
           <>
@@ -675,4 +677,34 @@ export function ProjectWorkspace() {
       )}
     </EditorScrollProvider>
   )
+}
+
+// ── ScrollToGroupHandler ───────────────────────────────────────────────────
+// Must render inside <EditorScrollProvider> so useEditorScroll() has context.
+// Watches pendingGroup and scrolls the first matching cell into view via the
+// forwarded editorRef.
+
+interface ScrollToGroupHandlerProps {
+  cells: CellData[]
+  editorRef: React.RefObject<EditorTableHandle | null>
+}
+
+function ScrollToGroupHandler({ cells, editorRef }: ScrollToGroupHandlerProps) {
+  const editorScroll = useEditorScroll()
+
+  useEffect(() => {
+    const groupId = editorScroll.pendingGroup
+    if (!groupId) return
+    const idx = cells.findIndex((c) => (c.group ?? "Ungrouped") === groupId)
+    editorScroll.consume()
+    if (idx >= 0) {
+      // Defer a tick so the virtualizer has the latest cell list after any
+      // file-switch that preceded this request.
+      setTimeout(() => {
+        editorRef.current?.scrollToCellIndex(idx)
+      }, 0)
+    }
+  }, [cells, editorScroll, editorRef])
+
+  return null
 }

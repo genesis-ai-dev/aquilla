@@ -1,4 +1,3 @@
-import { useCallback, useEffect, useState } from "react"
 import { Menu } from "@base-ui/react/menu"
 import { Eye } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -77,32 +76,4 @@ function Pill({ on }: { on: boolean }) {
       {on ? "On" : "Off"}
     </span>
   )
-}
-
-const STORAGE_KEY = "codex:cellLabelsEnabled:"
-
-export function useCellLabelsPreference(projectId: string): [boolean, (v: boolean) => void] {
-  const [enabled, setEnabled] = useState<boolean>(() => readPreference(projectId))
-
-  useEffect(() => {
-    setEnabled(readPreference(projectId))
-  }, [projectId])
-
-  const setAndPersist = useCallback((v: boolean) => {
-    setEnabled(v)
-    try {
-      localStorage.setItem(STORAGE_KEY + projectId, String(v))
-    } catch { /* storage unavailable (e.g. Safari private) — keep in-memory */ }
-  }, [projectId])
-
-  return [enabled, setAndPersist]
-}
-
-function readPreference(projectId: string): boolean {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY + projectId)
-    return raw === null ? true : raw === "true"
-  } catch {
-    return true
-  }
 }

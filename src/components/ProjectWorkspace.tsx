@@ -18,8 +18,6 @@ import { useComments } from "@/hooks/useComments"
 import { SearchDialog } from "./SearchDialog"
 import type { EditorTableHandle } from "./EditorTable"
 import type { WorkspaceSearchResult } from "@/lib/search/workspace-index"
-import { Toolbar } from "./Toolbar"
-import { ProjectSidebar } from "./ProjectSidebar"
 import { StatusBar } from "./StatusBar"
 import { ImportDialog } from "./ImportDialog"
 import { EditorTable } from "./EditorTable"
@@ -43,7 +41,29 @@ import { useSyncProject } from "@/hooks/useSyncProject"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { useAutoSync } from "@/hooks/useAutoSync"
 import { useCorpusBackfill } from "@/hooks/useCorpusBackfill"
-import { Lock } from "lucide-react"
+import { Film, Scale, MessagesSquare, Camera, Share2, Settings as SettingsIcon, Lock } from "lucide-react"
+import { AppShell } from "./AppShell"
+import { WorkspaceHeader } from "./WorkspaceHeader"
+import { WorkspaceStatusBar } from "./WorkspaceStatusBar"
+import { PrimaryActionButton } from "./PrimaryActionButton"
+import { AccountSwitcher } from "./AccountSwitcher"
+import { ExpandableFileList } from "./ExpandableFileList"
+import { SidebarProjectSection } from "./SidebarProjectSection"
+import { SidebarCommandPaletteHint } from "./SidebarCommandPaletteHint"
+import { SuggestionBanner } from "./SuggestionBanner"
+import { ConfirmActionDialog } from "./ConfirmActionDialog"
+import { PeerPresence } from "./PeerPresence"
+import { SyncButton } from "./SyncButton"
+import { ViewSettingsMenu } from "./ViewSettingsMenu"
+import { EditorScrollProvider } from "@/context/EditorScrollContext"
+import { detectSuggestions, type RenameSuggestion } from "@/lib/file-labeling/detect"
+import { applySuggestions } from "@/lib/file-labeling/apply"
+import { renameFile, moveFileToCorpus, deleteFile } from "@/lib/store/file-operations"
+import { Button } from "@/components/ui/button"
+import {
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
+} from "@/components/ui/dialog"
+import type { ProjectRecord } from "@/lib/parsers/types"
 
 export function ProjectWorkspace() {
   const { id: projectId, fileId: routeFileId } = useParams<{ id: string; fileId?: string }>()
@@ -172,7 +192,7 @@ export function ProjectWorkspace() {
     return map
   }, [activeFileId, cells])
 
-  const { healthMap, fileHealth, projectHealth, fileProgress, infractions, openCommentCount, cellOpenCommentCount } = useHealth(
+  const { healthMap, fileHealth: _fileHealth, projectHealth, fileProgress, infractions, openCommentCount, cellOpenCommentCount } = useHealth(
     fileCells,
     project?.completionSettings?.llmHealthPenalty ?? 0.1,
     rules,
@@ -293,7 +313,7 @@ export function ProjectWorkspace() {
   useAutoSync(project ?? null, frontierSession)
   useCorpusBackfill(project ?? null, refresh)
 
-  const handleProjectUpdated = useCallback(async (updated: typeof project) => {
+  const handleProjectUpdated = useCallback(async (updated: ProjectRecord | undefined) => {
     if (!updated) return
     await updateProject(updated)
     refresh()
@@ -335,171 +355,324 @@ export function ProjectWorkspace() {
     }
   }
 
+  // ── New state and handlers ────────────────────────────────────────────────
+
+  const suggestions = useMemo(
+    () => detectSuggestions(project),
+    [project]
+  )
+  const bannerSuggestions = useMemo(() => {
+    if (project.suggestionsDismissedAt) return []
+    return suggestions
+  }, [project, suggestions])
+  const suggestionFileIds = useMemo(
+    () => new Set(suggestions.map((s) => s.fileId)),
+    [suggestions]
+  )
+
+  const [moveTargetId, setMoveTargetId] = useState<string | null>(null)
+  const [moveCorpus, setMoveCorpus] = useState("")
+  const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null)
+  const [undo, setUndo] = useState<{ project: ProjectRecord } | null>(null)
+
+  const handleRename = useCallback(async (fileId: string, newName: string) => {
+    if (!project) return
+    try {
+      const next = renameFile(project, fileId, newName)
+      await updateProject(next)
+      refresh()
+    } catch (e) {
+      alert(e instanceof Error ? e.message : "Rename failed")
+    }
+  }, [project, refresh])
+
+  const handleDeleteFile = useCallback(async (fileId: string) => {
+    if (!project) return
+    const next = deleteFile(project, fileId)
+    await updateProject(next)
+    refresh()
+    if (activeFileId === fileId) setActiveFileId(null)
+  }, [project, refresh, activeFileId, setActiveFileId])
+
+  const handleApplySuggestions = useCallback(async (chosen: RenameSuggestion[]) => {
+    if (!project) return
+    const before = project
+    const next = applySuggestions(project, chosen)
+    await updateProject(next)
+    refresh()
+    setUndo({ project: before })
+    setTimeout(() => setUndo((u) => (u?.project === before ? null : u)), 10000)
+  }, [project, refresh])
+
+  const handleDismissBanner = useCallback(async () => {
+    if (!project) return
+    const next = { ...project, suggestionsDismissedAt: new Date().toISOString() }
+    await updateProject(next)
+    refresh()
+  }, [project, refresh])
+
+  const projectNavItems = useMemo(() => ([
+    { id: "rules", label: "Rules", icon: Scale,
+      onClick: () => navigate(`/project/${projectId}/rules`) },
+    { id: "comments", label: "Comments", icon: MessagesSquare,
+      badge: Array.from(openCommentCount.values()).reduce((a, b) => a + b, 0),
+      onClick: () => navigate(`/project/${projectId}/comments`) },
+    { id: "snapshots", label: "Snapshots", icon: Camera,
+      onClick: () => navigate(`/project/${projectId}/snapshots`) },
+    { id: "share", label: "Share", icon: Share2,
+      onClick: () => setShareOpen(true) },
+    { id: "settings", label: "Settings", icon: SettingsIcon,
+      onClick: () => navigate(`/project/${projectId}/settings`) },
+  ]), [projectId, navigate, openCommentCount])
+
+  const actionCtx = useMemo(() => ({
+    project: project!,
+    activeFileId,
+    fileProgress,
+  }), [project, activeFileId, fileProgress])
+
+  const actionArgs = useMemo(() => ({
+    openImport: () => setImportOpen(true),
+    runCompletions: () => { if (activeFileId) completeBatch(cells) },
+    runExport: () => handleExport(),
+    runBatchValidate: () => {
+      console.info("batch-validate triggered (placeholder runner)")
+    },
+    runAgentInput: () => {
+      console.info("agent-input triggered (placeholder runner)")
+    },
+    runImportWip: () => setImportOpen(true),
+    navigate,
+  }), [activeFileId, completeBatch, navigate])
+
+  // ── Render ────────────────────────────────────────────────────────────────
+
   return (
-    <div className="flex h-screen flex-col">
-      <Toolbar
-        project={project}
-        onBack={() => navigate("/")}
-        onImport={() => setImportOpen(true)}
-        onSettings={() => navigate(`/project/${projectId}/settings`)}
-        onRules={() => navigate(`/project/${projectId}/rules`)}
-        onExport={handleExport}
-        onSearch={() => setSearchOpen(true)}
-        onComments={() => navigate(`/project/${projectId}/comments`)}
-        onSnapshots={() => navigate(`/project/${projectId}/snapshots`)}
-        onShare={() => setShareOpen(true)}
-        peers={peers}
-        exportEnabled={Boolean(activeFileId)}
-        fileOpen={Boolean(activeFileId)}
-        lineNumbersEnabled={fileMeta.lineNumbersEnabled}
-        sourceTextDirection={fileMeta.sourceTextDirection}
-        targetTextDirection={fileMeta.targetTextDirection}
-        cellLabelsEnabled={cellLabelsEnabled}
-        rtlHintDismissed={fileMeta.rtlHintDismissed}
-        onLineNumbersChange={fileMeta.setLineNumbersEnabled}
-        onSourceTextDirectionChange={fileMeta.setSourceTextDirection}
-        onTargetTextDirectionChange={fileMeta.setTargetTextDirection}
-        onCellLabelsChange={setCellLabelsEnabled}
-        onDismissRtlHint={fileMeta.dismissRtlHint}
-        onVideo={isSubtitleFile ? () => setVideoDialogOpen(true) : undefined}
-        onProjectUpdated={handleProjectUpdated}
-        sync={runSync}
-        syncPhase={syncPhase}
-        syncInFlight={syncInFlight}
-        syncLastResult={syncLastResult}
-      />
-      {isReadOnly && (
-        <div className="flex items-center gap-2 border-b bg-amber-50 px-4 py-2 text-xs text-amber-900">
-          <Lock className="h-3.5 w-3.5" />
-          Read-only — imported from git. Push is coming in Phase 2.
-        </div>
-      )}
-      {isSubtitleFile && videoSrc && (
-        <ResizableVideoPanel>
-          {(height) => (
-            <VideoPlayer
-              ref={videoPlayerRef}
-              src={videoSrc}
-              cues={videoCues}
-              startOffset={videoStartOffset}
-              height={height}
-              onTimeUpdate={setCurrentVideoTime}
+    <EditorScrollProvider>
+      <AppShell
+        sidebar={
+          <>
+            <div className="border-b p-2">
+              <AccountSwitcher />
+            </div>
+            <SuggestionBanner
+              suggestions={bannerSuggestions}
+              onApply={handleApplySuggestions}
+              onDismiss={handleDismissBanner}
             />
-          )}
-        </ResizableVideoPanel>
-      )}
-      {isSubtitleFile && blobUnavailable && !videoAttachment.videoUrl && (
-        <div className="bg-amber-50 px-4 py-2 text-xs text-amber-700 dark:bg-amber-950 dark:text-amber-400">
-          Video file not available on this device. Attach it locally or paste a URL via the Film icon.
-        </div>
-      )}
-      <div className="flex flex-1 overflow-hidden">
-        <ProjectSidebar
-          files={project.files}
-          activeFileId={activeFileId}
-          onSelectFile={setActiveFileId}
-          fileHealth={fileHealth}
-          fileProgress={fileProgress}
-          projectHealth={projectHealth}
-          openCommentCount={openCommentCount}
-        />
-        <main className="flex flex-1 overflow-hidden">
-          <div className="flex-1 overflow-hidden">
-            {activeFileId ? (doc ? (
-              <EditorTable ref={editorRef} project={project} cells={cells} doc={doc} username={currentUsername}
-                isCompletionConfigured={isConfigured} completing={completing} examples={examples} errors={errors}
-                onCompleteSingle={completeSingle} onCompleteBatch={completeBatch}
-                healthMap={healthMap}
-                infractions={infractions}
-                rules={rules}
-                onInfractionClick={(ruleId) => {
-                  setCommentsCellId(null)
-                  setHistoryCellId(null)
-                  setDrawerRuleId(ruleId)
-                }}
-                isBacktranslationConfigured={isBacktranslationConfigured}
-                onBacktranslate={runBacktranslation}
-                backtranslating={backtranslating}
-                backtranslationErrors={backtranslationErrors}
-                cellOpenCommentCount={cellOpenCommentCount}
-                onOpenComments={(cellId) => {
-                  setDrawerRuleId(null)
-                  setHistoryCellId(null)
-                  setCommentsCellId(cellId)
-                }}
-                onOpenHistory={(cellId) => {
-                  setDrawerRuleId(null)
-                  setCommentsCellId(null)
-                  setHistoryCellId(cellId)
-                }}
-                syncProvider={syncProvider}
-                collabUser={collabUser}
-                activeCueIndex={activeCueIndex >= 0 ? activeCueIndex : undefined}
-                onSeekToCue={isSubtitleFile ? handleCueSeek : undefined}
-                lineNumbersEnabled={fileMeta.lineNumbersEnabled}
-                cellLabelsEnabled={cellLabelsEnabled}
-                sourceTextDirection={fileMeta.sourceTextDirection}
-                targetTextDirection={fileMeta.targetTextDirection}
-              />
-            ) : <p className="p-4 text-muted-foreground">Loading file...</p>) : (
-              <p className="p-4 text-muted-foreground">Select a file from the sidebar, or import files.</p>
-            )}
-          </div>
-          {drawerRuleId && (
-            <RuleDrawer
-              rule={drawerRule}
-              infractions={drawerInfractions}
-              cells={cells}
-              onClose={() => setDrawerRuleId(null)}
-              onNavigateToCell={(_cellId) => {
-                // TODO: scroll virtualizer to cell
+            <ExpandableFileList
+              projectId={projectId!}
+              files={project.files}
+              activeFileId={activeFileId}
+              activeFileCells={cells}
+              fileProgress={fileProgress}
+              suggestionFileIds={suggestionFileIds}
+              onSelectFile={setActiveFileId}
+              onRename={handleRename}
+              onMove={(fileId) => {
+                setMoveTargetId(fileId)
+                setMoveCorpus(project.files.find((f) => f.id === fileId)?.corpusMarker ?? "")
               }}
+              onDelete={(fileId) => setPendingDeleteId(fileId)}
             />
-          )}
-          {commentsCell && (
-            <CommentsDrawer
-              project={project}
-              cell={commentsCell}
-              onClose={() => setCommentsCellId(null)}
-              onNewThread={(text) => addThread(commentsCell.id, text)}
-              onReply={(threadId, text) => addMessage(commentsCell.id, threadId, text)}
-              onResolve={(threadId, msg) => resolveThread(commentsCell.id, threadId, msg)}
-              onReopen={(threadId) => reopenThread(commentsCell.id, threadId)}
+            <SidebarProjectSection items={projectNavItems} />
+            <SidebarCommandPaletteHint onClick={() => setSearchOpen(true)} />
+          </>
+        }
+        header={
+          <WorkspaceHeader project={project} onBack={() => navigate("/")}>
+            <ViewSettingsMenu
+              fileOpen={Boolean(activeFileId)}
+              lineNumbersEnabled={fileMeta.lineNumbersEnabled}
+              sourceTextDirection={fileMeta.sourceTextDirection}
+              targetTextDirection={fileMeta.targetTextDirection}
+              cellLabelsEnabled={cellLabelsEnabled}
+              rtlHintDismissed={fileMeta.rtlHintDismissed}
+              onLineNumbersChange={fileMeta.setLineNumbersEnabled}
+              onSourceTextDirectionChange={fileMeta.setSourceTextDirection}
+              onTargetTextDirectionChange={fileMeta.setTargetTextDirection}
+              onCellLabelsChange={setCellLabelsEnabled}
+              onDismissRtlHint={fileMeta.dismissRtlHint}
             />
-          )}
-          {historyCell && (
-            <HistoryDrawer
-              cell={historyCell}
-              onClose={() => setHistoryCellId(null)}
+            {isSubtitleFile && (
+              <button
+                className="rounded p-1.5 hover:bg-accent"
+                onClick={() => setVideoDialogOpen(true)}
+                title="Attach video"
+              >
+                <Film className="h-4 w-4" />
+              </button>
+            )}
+            <PrimaryActionButton ctx={actionCtx} run={actionArgs} />
+          </WorkspaceHeader>
+        }
+        beforeMain={
+          <>
+            {isReadOnly && (
+              <div className="flex items-center gap-2 border-b bg-amber-50 px-4 py-2 text-xs text-amber-900">
+                <Lock className="h-3.5 w-3.5" />
+                Read-only — imported from git. Push is coming in Phase 2.
+              </div>
+            )}
+            {isSubtitleFile && videoSrc && (
+              <ResizableVideoPanel>
+                {(height) => (
+                  <VideoPlayer
+                    ref={videoPlayerRef}
+                    src={videoSrc}
+                    cues={videoCues}
+                    startOffset={videoStartOffset}
+                    height={height}
+                    onTimeUpdate={setCurrentVideoTime}
+                  />
+                )}
+              </ResizableVideoPanel>
+            )}
+            {isSubtitleFile && blobUnavailable && !videoAttachment.videoUrl && (
+              <div className="bg-amber-50 px-4 py-2 text-xs text-amber-700 dark:bg-amber-950 dark:text-amber-400">
+                Video file not available on this device. Attach it locally or paste a URL via the Film icon.
+              </div>
+            )}
+          </>
+        }
+        main={activeFileId ? (doc ? (
+          <EditorTable
+            ref={editorRef} project={project} cells={cells} doc={doc}
+            username={currentUsername}
+            isCompletionConfigured={isConfigured} completing={completing}
+            examples={examples} errors={errors}
+            onCompleteSingle={completeSingle} onCompleteBatch={completeBatch}
+            healthMap={healthMap} infractions={infractions} rules={rules}
+            onInfractionClick={(ruleId) => {
+              setCommentsCellId(null); setHistoryCellId(null); setDrawerRuleId(ruleId)
+            }}
+            isBacktranslationConfigured={isBacktranslationConfigured}
+            onBacktranslate={runBacktranslation}
+            backtranslating={backtranslating}
+            backtranslationErrors={backtranslationErrors}
+            cellOpenCommentCount={cellOpenCommentCount}
+            onOpenComments={(cellId) => {
+              setDrawerRuleId(null); setHistoryCellId(null); setCommentsCellId(cellId)
+            }}
+            onOpenHistory={(cellId) => {
+              setDrawerRuleId(null); setCommentsCellId(null); setHistoryCellId(cellId)
+            }}
+            syncProvider={syncProvider} collabUser={collabUser}
+            activeCueIndex={activeCueIndex >= 0 ? activeCueIndex : undefined}
+            onSeekToCue={isSubtitleFile ? handleCueSeek : undefined}
+            lineNumbersEnabled={fileMeta.lineNumbersEnabled}
+            cellLabelsEnabled={cellLabelsEnabled}
+            sourceTextDirection={fileMeta.sourceTextDirection}
+            targetTextDirection={fileMeta.targetTextDirection}
+          />
+        ) : <p className="p-4 text-muted-foreground">Loading file...</p>) : (
+          <p className="p-4 text-muted-foreground">Select a file from the sidebar, or use + Import.</p>
+        )}
+        aside={
+          <>
+            {drawerRuleId && (
+              <RuleDrawer
+                rule={drawerRule} infractions={drawerInfractions} cells={cells}
+                onClose={() => setDrawerRuleId(null)}
+                onNavigateToCell={() => {}}
+              />
+            )}
+            {commentsCell && (
+              <CommentsDrawer
+                project={project} cell={commentsCell}
+                onClose={() => setCommentsCellId(null)}
+                onNewThread={(text) => addThread(commentsCell.id, text)}
+                onReply={(threadId, text) => addMessage(commentsCell.id, threadId, text)}
+                onResolve={(threadId, msg) => resolveThread(commentsCell.id, threadId, msg)}
+                onReopen={(threadId) => reopenThread(commentsCell.id, threadId)}
+              />
+            )}
+            {historyCell && (
+              <HistoryDrawer cell={historyCell} onClose={() => setHistoryCellId(null)} />
+            )}
+          </>
+        }
+        statusBar={
+          <>
+            <WorkspaceStatusBar
+              left={<PeerPresence peers={peers} />}
+              right={
+                <SyncButton
+                  project={project}
+                  onUpdated={handleProjectUpdated}
+                  sync={runSync}
+                  phase={syncPhase}
+                  inFlight={syncInFlight}
+                  lastResult={syncLastResult}
+                />
+              }
             />
-          )}
-        </main>
-      </div>
-      <StatusBar cells={cells} projectHealth={projectHealth} />
-      <ImportDialog open={importOpen} onOpenChange={setImportOpen} sourceLanguage={project.sourceLanguage} targetLanguage={project.targetLanguage} onImported={handleImported} />
+            <StatusBar cells={cells} projectHealth={projectHealth} />
+          </>
+        }
+      />
+      <ImportDialog open={importOpen} onOpenChange={setImportOpen}
+        sourceLanguage={project.sourceLanguage} targetLanguage={project.targetLanguage}
+        onImported={handleImported} />
       <SearchDialog
-        open={searchOpen}
-        onOpenChange={setSearchOpen}
-        onReady={buildIndex}
-        loading={searchLoading}
-        ready={searchReady}
-        results={searchResults}
-        onSearch={runSearch}
-        onSelect={handleSearchSelect}
+        open={searchOpen} onOpenChange={setSearchOpen}
+        onReady={buildIndex} loading={searchLoading} ready={searchReady}
+        results={searchResults} onSearch={runSearch} onSelect={handleSearchSelect}
       />
       <SharePanel
-        open={shareOpen}
-        onOpenChange={setShareOpen}
+        open={shareOpen} onOpenChange={setShareOpen}
         projectId={projectId!}
         username={project.username || "anonymous"}
         onSharesChanged={() => setShareRefreshKey((k) => k + 1)}
       />
       <VideoAttachmentDialog
-        open={videoDialogOpen}
-        onOpenChange={setVideoDialogOpen}
-        current={videoAttachment}
-        onSave={saveVideo}
+        open={videoDialogOpen} onOpenChange={setVideoDialogOpen}
+        current={videoAttachment} onSave={saveVideo}
       />
-    </div>
+      <ConfirmActionDialog
+        open={pendingDeleteId !== null}
+        onOpenChange={(v) => { if (!v) setPendingDeleteId(null) }}
+        title="Delete file"
+        description={(() => {
+          const f = pendingDeleteId ? project.files.find((x) => x.id === pendingDeleteId) : null
+          return f ? `Remove "${f.name}" from this project? The underlying data is not deleted from disk.` : ""
+        })()}
+        confirmLabel="Delete"
+        checkboxLabel="I understand this removes the file from the project."
+        onConfirm={() => { if (pendingDeleteId) handleDeleteFile(pendingDeleteId); setPendingDeleteId(null) }}
+      />
+      <Dialog open={moveTargetId !== null} onOpenChange={(v) => { if (!v) setMoveTargetId(null) }}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader><DialogTitle>Move to corpus</DialogTitle></DialogHeader>
+          <input
+            value={moveCorpus}
+            onChange={(e) => setMoveCorpus(e.target.value)}
+            placeholder="Corpus name (or blank to ungroup)"
+            className="w-full rounded border px-2 py-1"
+          />
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setMoveTargetId(null)}>Cancel</Button>
+            <Button onClick={async () => {
+              if (!project || !moveTargetId) return
+              const next = moveFileToCorpus(project, moveTargetId, moveCorpus)
+              await updateProject(next)
+              refresh()
+              setMoveTargetId(null)
+            }}>Save</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      {undo && (
+        <div className="fixed bottom-4 right-4 z-[70] flex items-center gap-2 rounded border bg-background px-3 py-2 text-sm shadow-md">
+          <span>Applied renames.</span>
+          <Button size="sm" variant="outline" onClick={async () => {
+            if (!undo) return
+            await updateProject(undo.project)
+            refresh()
+            setUndo(null)
+          }}>Undo</Button>
+        </div>
+      )}
+    </EditorScrollProvider>
   )
 }

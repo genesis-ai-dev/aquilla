@@ -2,7 +2,7 @@ import { useRef, useCallback, useMemo, useState, useEffect, forwardRef, useImper
 import { useVirtualizer } from "@tanstack/react-virtual"
 import * as Y from "yjs"
 import DOMPurify from "dompurify"
-import { Check, CheckCheck, Circle, CircleDot, AlertTriangle, AlertCircle, Languages, RefreshCw, MessageCircle, History, Play } from "lucide-react"
+import { Check, CheckCheck, Circle, CircleDot, Trash2, AlertTriangle, AlertCircle, Languages, RefreshCw, MessageCircle, History, Play } from "lucide-react"
 import type { CellData } from "@/hooks/useCells"
 import type { ScoredPair } from "@/lib/search/search-index"
 import type { TranslationRule, RuleInfraction, ProjectRecord } from "@/lib/parsers/types"
@@ -292,11 +292,6 @@ function EditorRow({
     })
   }
 
-  function handleToggleValidation() {
-    const isCurrentlyValidated = cell.activeValidators.includes(username)
-    toggleCellValidation(doc, cell.id, username, !isCurrentlyValidated)
-  }
-
   // Detect formatting loss: source has inline style marks that the target doesn't.
   const sourceHasFormatting = Boolean(cell.originalHtml && /<(b|strong|i|em|u|s|strike|del|code)\b/i.test(cell.originalHtml))
   const targetHtml = cell.translatedXml ? getFragmentHtml(cell.translatedXml) : ""
@@ -335,8 +330,10 @@ function EditorRow({
   const vs = cell.validationStatus
   const [validationPopoverOpen, setValidationPopoverOpen] = useState(false)
   const popoverRef = useRef<HTMLDivElement>(null)
+  const hoverTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const isSelfValidated = cell.activeValidators.includes(username)
 
+  // Close popover on click-outside
   useEffect(() => {
     if (!validationPopoverOpen) return
     function onClickOutside(e: MouseEvent) {
@@ -348,8 +345,34 @@ function EditorRow({
     return () => document.removeEventListener("mousedown", onClickOutside)
   }, [validationPopoverOpen])
 
+  function handleIconClick() {
+    if (!editable) return
+    if (!isSelfValidated) {
+      // Not yet validated by you → validate immediately
+      toggleCellValidation(doc, cell.id, username, true)
+    } else {
+      // Already validated → open popover so you can see details / remove
+      setValidationPopoverOpen(!validationPopoverOpen)
+    }
+  }
+
+  function handleHoverEnter() {
+    // Only show popover on hover if there are validators to show
+    if (cell.activeValidators.length === 0) return
+    hoverTimeoutRef.current = setTimeout(() => setValidationPopoverOpen(true), 400)
+  }
+  function handleHoverLeave() {
+    if (hoverTimeoutRef.current) clearTimeout(hoverTimeoutRef.current)
+    // Don't close if user is interacting with the popover
+  }
+
   const validationIcon = cell.translated && cell.translated.trim() ? (
-    <div className="relative flex flex-col items-center" title={healthTooltip}>
+    <div
+      className="relative flex flex-col items-center"
+      title={healthTooltip}
+      onMouseEnter={handleHoverEnter}
+      onMouseLeave={handleHoverLeave}
+    >
       <HealthRing health={healthValue} size={22} strokeWidth={2.5}>
         {vs === "empty" ? null : (
           <button
@@ -360,7 +383,8 @@ function EditorRow({
               vs === "others" ? "text-muted-foreground/60 hover:text-green-500" :
               "text-muted-foreground/30 hover:text-green-500",
             )}
-            onClick={() => setValidationPopoverOpen(!validationPopoverOpen)}
+            disabled={!editable}
+            onClick={handleIconClick}
           >
             {vs === "full" ? (
               <CheckCheck className="h-3 w-3" />
@@ -377,44 +401,32 @@ function EditorRow({
       {validationPopoverOpen && vs !== "empty" && (
         <div
           ref={popoverRef}
-          className="absolute right-6 top-0 z-50 w-52 rounded-md border bg-popover p-2 shadow-md"
+          className="absolute right-6 top-0 z-50 w-48 rounded-md border bg-popover p-2 shadow-md"
+          onMouseLeave={() => setValidationPopoverOpen(false)}
         >
           {cell.activeValidators.length > 0 ? (
-            <div className="mb-2 space-y-1">
+            <div className="space-y-1">
               <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">Validated by</p>
               {cell.activeValidators.map((v) => (
                 <div key={v} className="flex items-center justify-between text-xs">
-                  <span>{v}{v === username ? " (you)" : ""}</span>
+                  <span className="truncate">{v}{v === username ? " (you)" : ""}</span>
                   {v === username && editable && (
                     <button
-                      className="text-muted-foreground hover:text-destructive"
+                      className="ml-2 flex-shrink-0 text-muted-foreground hover:text-destructive"
                       title="Remove your validation"
-                      onClick={() => { handleToggleValidation(); setValidationPopoverOpen(false) }}
+                      onClick={() => {
+                        toggleCellValidation(doc, cell.id, username, false)
+                        setValidationPopoverOpen(false)
+                      }}
                     >
-                      <AlertCircle className="h-3 w-3" />
+                      <Trash2 className="h-3 w-3" />
                     </button>
                   )}
                 </div>
               ))}
             </div>
           ) : (
-            <p className="mb-2 text-xs text-muted-foreground">No validations yet</p>
-          )}
-          {editable && !isSelfValidated && (
-            <button
-              className="w-full rounded bg-green-500/10 px-2 py-1 text-xs text-green-700 hover:bg-green-500/20"
-              onClick={() => { handleToggleValidation(); setValidationPopoverOpen(false) }}
-            >
-              <Check className="mr-1 inline h-3 w-3" /> Validate
-            </button>
-          )}
-          {editable && isSelfValidated && cell.activeValidators.length > 0 && (
-            <button
-              className="w-full rounded bg-amber-500/10 px-2 py-1 text-xs text-amber-700 hover:bg-amber-500/20"
-              onClick={() => { handleToggleValidation(); setValidationPopoverOpen(false) }}
-            >
-              Remove your validation
-            </button>
+            <p className="text-xs text-muted-foreground">No validations yet</p>
           )}
         </div>
       )}

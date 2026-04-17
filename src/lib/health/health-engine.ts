@@ -25,16 +25,26 @@ export function computeHealthMap(
   const fileHealth = new Map<string, number>()
   const fileProgress = new Map<string, { translated: number; validated: number; total: number }>()
 
-  // First pass: compute health for all cells across all files
-  // Process in natural order — examples always come before dependents
+  // First pass: compute health for all cells across all files.
+  // Uses validationStatus (multi-user, derived from __source.validatedBy) as
+  // the primary signal so health updates reactively when validations are
+  // added or removed — no manual recalculation needed.
   for (const [, cells] of fileCells) {
     for (const cell of cells) {
-      if (cell.status === "empty") continue
-      if (cell.status === "validated") {
+      const vs = cell.validationStatus ?? (cell.status === "empty" ? "empty" : cell.status === "validated" ? "full" : "none")
+      if (vs === "empty") continue
+      // "full" or "self" = the current user (or enough users) validated → 100%
+      if (vs === "full" || vs === "self") {
         healthMap.set(cell.id, 100)
         continue
       }
-      // status === "unvalidated" (LLM-generated)
+      // "others" = someone else validated but not current user → 100% for health
+      // (the cell IS human-validated, just not by you)
+      if (vs === "others") {
+        healthMap.set(cell.id, 100)
+        continue
+      }
+      // "none" = no validations — check LLM example chain
       const lastEntry = cell.history[cell.history.length - 1]
       const exampleIds = lastEntry?.examples || []
       if (exampleIds.length === 0) {

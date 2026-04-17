@@ -30,6 +30,9 @@ dist-ssr
 # Glance memory shards
 .glance/
 
+# Serena cache
+.serena/
+
 # Tauri
 src-tauri/target/
 src-tauri/gen/schemas/

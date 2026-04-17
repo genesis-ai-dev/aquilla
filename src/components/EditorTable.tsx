@@ -2,12 +2,12 @@ import { useRef, useCallback, useMemo, forwardRef, useImperativeHandle } from "r
 import { useVirtualizer } from "@tanstack/react-virtual"
 import * as Y from "yjs"
 import DOMPurify from "dompurify"
-import { Check, AlertTriangle, AlertCircle, Languages, RefreshCw, MessageCircle, History, Play } from "lucide-react"
+import { Check, CheckCheck, Circle, CircleDot, AlertTriangle, AlertCircle, Languages, RefreshCw, MessageCircle, History, Play } from "lucide-react"
 import type { CellData } from "@/hooks/useCells"
 import type { ScoredPair } from "@/lib/search/search-index"
 import type { TranslationRule, RuleInfraction, ProjectRecord } from "@/lib/parsers/types"
 import { useProjectPermissions } from "@/hooks/useProjectPermissions"
-import { appendCellHistory, recordHistoryEntry, validateCell } from "@/hooks/useCellHistory"
+import { appendCellHistory, recordHistoryEntry, toggleCellValidation } from "@/hooks/useCellHistory"
 import { getPlainText, getFragmentHtml } from "@/lib/richtext/translated-xml"
 import { SparkleButton } from "./SparkleButton"
 import { ExamplePanel } from "./ExamplePanel"
@@ -292,8 +292,9 @@ function EditorRow({
     })
   }
 
-  function handleValidate() {
-    validateCell(doc, cell.id, username)
+  function handleToggleValidation() {
+    const isCurrentlyValidated = cell.activeValidators.includes(username)
+    toggleCellValidation(doc, cell.id, username, !isCurrentlyValidated)
   }
 
   // Detect formatting loss: source has inline style marks that the target doesn't.
@@ -331,21 +332,45 @@ function EditorRow({
         ? `Health: ${healthValue}% — no examples`
         : `Health: ${healthValue}% — ${exampleIds.length} example${exampleIds.length !== 1 ? "s" : ""}`
 
+  const vs = cell.validationStatus
+  const validatorTooltip =
+    vs === "full"
+      ? `Validated by ${cell.activeValidators.join(", ")}`
+      : vs === "self"
+        ? `You validated — click to remove`
+        : vs === "others"
+          ? `Validated by ${cell.activeValidators.join(", ")} — click to add yours`
+          : vs === "none"
+            ? (editable ? "Click to validate" : "Not validated")
+            : undefined
+
   const validationIcon = cell.translated && cell.translated.trim() ? (
     <div className="flex flex-col items-center" title={healthTooltip}>
       <HealthRing health={healthValue} size={22} strokeWidth={2.5}>
-        {cell.status === "validated" ? (
-          <Check className="h-3 w-3 text-green-500" />
-        ) : cell.status === "unvalidated" ? (
+        {vs === "empty" ? null : (
           <button
-            className="flex h-full w-full items-center justify-center rounded-full text-amber-500 hover:text-green-500 disabled:cursor-not-allowed disabled:opacity-50"
-            title={editable ? "Click to validate" : "Read-only (imported from git)"}
+            className={cn(
+              "flex h-full w-full items-center justify-center rounded-full disabled:cursor-not-allowed disabled:opacity-50",
+              vs === "full" ? "text-green-500 hover:text-green-600" :
+              vs === "self" ? "text-green-500 hover:text-amber-500" :
+              vs === "others" ? "text-muted-foreground/60 hover:text-green-500" :
+              "text-muted-foreground/30 hover:text-green-500",
+            )}
+            title={validatorTooltip}
             disabled={!editable}
-            onClick={handleValidate}
+            onClick={handleToggleValidation}
           >
-            <Check className="h-3 w-3" />
+            {vs === "full" ? (
+              <CheckCheck className="h-3 w-3" />
+            ) : vs === "self" ? (
+              <Check className="h-3 w-3" />
+            ) : vs === "others" ? (
+              <CircleDot className="h-3 w-3" />
+            ) : (
+              <Circle className="h-3 w-3" />
+            )}
           </button>
-        ) : null}
+        )}
       </HealthRing>
       <span className="mt-0.5 text-[9px] tabular-nums text-muted-foreground">{healthValue}%</span>
       {cellInfractions.length > 0 && (

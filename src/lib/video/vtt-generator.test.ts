@@ -10,6 +10,8 @@ function makeCell(overrides: Partial<CellData> & { id: string }): CellData {
     group: "",
     type: "cue",
     status: "empty",
+    validationStatus: "none",
+    activeValidators: [],
     history: [],
     threads: [],
     ...overrides,

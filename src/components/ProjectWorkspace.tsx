@@ -70,7 +70,7 @@ export function ProjectWorkspace() {
   const [shareRefreshKey, setShareRefreshKey] = useState(0)
   const editorRef = useRef<EditorTableHandle>(null)
   const { doc } = useFileDoc(activeFileId)
-  const cells = useCells(doc)
+  const cells = useCells(doc, project?.username || "local")
   const fileMeta = useFileMeta(doc, project?.targetLanguage)
   const [cellLabelsEnabled, setCellLabelsEnabled] = useCellLabelsPreference(projectId!)
 

@@ -1,21 +1,25 @@
 import { useEffect, useState } from "react"
 import * as Y from "yjs"
 import type { CellHistoryEntry, SourceLocation, CommentThread } from "@/lib/parsers/types"
-import type { CodexCellAttachment } from "@/lib/codex-editor/types"
+import type { CodexCellAttachment, ValidationEntry } from "@/lib/codex-editor/types"
 import { extractThreadsFromCell } from "./useComments"
 import { getPlainText } from "@/lib/richtext/translated-xml"
 
+export type ValidationStatus = "empty" | "none" | "others" | "self" | "full"
+
 export interface CellData {
   id: string
-  cellLabel?: string  // From cell.__source.metadata.cellLabel (codex source); user-editable label like "Narrator", "5:12"
+  cellLabel?: string
   original: string
   originalHtml?: string
   translated: string
-  translatedXml?: Y.XmlFragment  // NEW — raw fragment for editor binding
+  translatedXml?: Y.XmlFragment
   context: string
   group: string
   type: string
   status: "empty" | "unvalidated" | "validated"
+  validationStatus: ValidationStatus
+  activeValidators: string[]
   history: CellHistoryEntry[]
   threads: CommentThread[]
   sourceLocation?: SourceLocation
@@ -26,13 +30,47 @@ export interface CellData {
   selectedAudioId?: string
 }
 
+const DEFAULT_REQUIRED_VALIDATIONS = 1
+
 function deriveStatus(translated: string, history: CellHistoryEntry[]): "empty" | "unvalidated" | "validated" {
   if (!translated || !translated.trim()) return "empty"
   if (history.length === 0) return "validated"
   return history[history.length - 1].validated ? "validated" : "unvalidated"
 }
 
-export function useCells(doc: Y.Doc | null): CellData[] {
+function deriveValidationStatus(
+  translated: string,
+  edits: Array<{ editMap?: string[]; validatedBy?: ValidationEntry[] }> | undefined,
+  currentUsername: string,
+  requiredValidations: number,
+): { validationStatus: ValidationStatus; activeValidators: string[] } {
+  if (!translated || !translated.trim()) {
+    return { validationStatus: "empty", activeValidators: [] }
+  }
+
+  let validatedBy: ValidationEntry[] = []
+  if (edits) {
+    for (let i = edits.length - 1; i >= 0; i--) {
+      if (edits[i].editMap?.[0] === "value") {
+        validatedBy = edits[i].validatedBy ?? []
+        break
+      }
+    }
+  }
+
+  const active = validatedBy.filter(v =>
+    v && typeof v === "object" && typeof v.username === "string" && !v.isDeleted
+  )
+  const activeUsernames = active.map(v => v.username)
+  const count = activeUsernames.length
+
+  if (count === 0) return { validationStatus: "none", activeValidators: [] }
+  if (count >= requiredValidations) return { validationStatus: "full", activeValidators: activeUsernames }
+  if (activeUsernames.includes(currentUsername)) return { validationStatus: "self", activeValidators: activeUsernames }
+  return { validationStatus: "others", activeValidators: activeUsernames }
+}
+
+export function useCells(doc: Y.Doc | null, username = "local"): CellData[] {
   const [cells, setCells] = useState<CellData[]>([])
 
   useEffect(() => {
@@ -51,13 +89,13 @@ export function useCells(doc: Y.Doc | null): CellData[] {
         const historyArr = cell.get("history") as Y.Array<CellHistoryEntry> | undefined
         const history: CellHistoryEntry[] = historyArr ? historyArr.toArray() : []
         const threads = extractThreadsFromCell(cell)
-        // Audio attachment data lives in __source — the round-trippable JSON
-        // stash that serializeCell reads from. Pull it out for the UI here so
-        // CellAudioButton can render without knowing about the stash layout.
         const source = cell.get("__source") as
-          | { metadata?: { attachments?: Record<string, CodexCellAttachment>; selectedAudioId?: string; cellLabel?: string } }
+          | { metadata?: { attachments?: Record<string, CodexCellAttachment>; selectedAudioId?: string; cellLabel?: string; edits?: Array<{ editMap?: string[]; validatedBy?: ValidationEntry[] }> } }
           | undefined
         const cellLabel = source?.metadata?.cellLabel
+        const { validationStatus, activeValidators } = deriveValidationStatus(
+          translated, source?.metadata?.edits, username, DEFAULT_REQUIRED_VALIDATIONS,
+        )
         ordered.push({
           id: cell.get("id") as string,
           original: cell.get("original") as string,
@@ -68,6 +106,8 @@ export function useCells(doc: Y.Doc | null): CellData[] {
           group: cell.get("group") as string,
           type: cell.get("type") as string,
           status: deriveStatus(translated, history),
+          validationStatus,
+          activeValidators,
           history,
           threads,
           sourceLocation: cell.get("sourceLocation") as SourceLocation | undefined,

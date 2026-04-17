@@ -1,4 +1,4 @@
-export type FileType = "md" | "docx" | "pptx" | "txt" | "vtt" | "srt" | "usfm"
+export type FileType = "md" | "docx" | "pptx" | "txt" | "vtt" | "srt" | "usfm" | "ebible"
 
 export type CellType =
   | "text"

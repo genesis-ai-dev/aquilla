@@ -50,6 +50,7 @@ interface EditorTableProps {
   lineNumbersEnabled: boolean
   cellLabelsEnabled: boolean
   textDirection: "ltr" | "rtl"
+  isAnonymous?: boolean
 }
 
 export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(function EditorTable({
@@ -62,6 +63,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   syncProvider, collabUser,
   activeCueIndex, onSeekToCue,
   lineNumbersEnabled, cellLabelsEnabled, textDirection,
+  isAnonymous,
 }, ref) {
   const permissions = useProjectPermissions(project)
   const canEdit = permissions.canEditContent
@@ -166,6 +168,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
                 cellLabelsEnabled={cellLabelsEnabled}
                 textDirection={textDirection}
                 gridCols={gridCols}
+                isAnonymous={isAnonymous}
                 onDragStart={() => {
                   isDragging.current = true
                   dragCells.current = new Set([cell.id])
@@ -216,6 +219,7 @@ interface EditorRowProps {
   cellLabelsEnabled: boolean
   textDirection: "ltr" | "rtl"
   gridCols: "grid-cols-[24px_1fr_1fr]" | "grid-cols-[48px_1fr_1fr]"
+  isAnonymous?: boolean
 }
 
 function EditorRow({
@@ -229,6 +233,7 @@ function EditorRow({
   isActiveCue: _isActiveCue, onSeekToCue,
   onDragStart, onDragEnter,
   rowIndex, lineNumbersEnabled, cellLabelsEnabled, textDirection, gridCols,
+  isAnonymous,
 }: EditorRowProps) {
   function handleChange(e: React.ChangeEvent<HTMLTextAreaElement>) {
     appendCellHistory(doc, cell.id, {
@@ -496,12 +501,20 @@ function EditorRow({
           </span>
         )}
         <SparkleButton
-          disabled={!isCompletionConfigured || !editable}
+          disabled={!isCompletionConfigured || !editable || isAnonymous}
           loading={isLoading}
           onComplete={() => onCompleteSingle(cell)}
           onDragStart={onDragStart}
           onDragEnter={onDragEnter}
-          tooltip={!editable ? "Read-only (imported from git)" : isCompletionConfigured ? "Generate translation" : "Configure LLM in settings"}
+          tooltip={
+            isAnonymous
+              ? "Sign in for AI translations"
+              : !editable
+                ? "Read-only (imported from git)"
+                : isCompletionConfigured
+                  ? "Generate translation"
+                  : "Configure LLM in settings"
+          }
         />
         {onSeekToCue && (
           <button

@@ -446,6 +446,7 @@ export function ProjectWorkspace() {
                 lineNumbersEnabled={fileMeta.lineNumbersEnabled}
                 cellLabelsEnabled={cellLabelsEnabled}
                 textDirection={fileMeta.textDirection}
+                isAnonymous={!frontierSession}
               />
             ) : <p className="p-4 text-muted-foreground">Loading file...</p>) : (
               <p className="p-4 text-muted-foreground">Select a file from the sidebar, or import files.</p>

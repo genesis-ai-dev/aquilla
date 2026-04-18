@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest"
-import { FLAGS, flagDefault, listFlags, type FlagKey } from "./flags"
+import { FLAGS, flagDefault, listFlags } from "./flags"
 
 describe("FLAGS registry", () => {
   it("registers living-memory-view flag", () => {
@@ -38,6 +38,3 @@ describe("listFlags", () => {
   })
 })
 
-// Type-level sanity: FlagKey should exclude unknown strings.
-// Uncommenting the next line should fail compilation.
-// const _bad: FlagKey = "nonexistent-flag"

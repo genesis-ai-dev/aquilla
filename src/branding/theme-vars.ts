@@ -45,5 +45,3 @@ export function buildBrandThemeStyle(theme: { light: ThemeTokens; dark: ThemeTok
   const dark = themeTokensToCssDeclarations(theme.dark)
   return `:root { ${light} } html.dark { ${dark} }`
 }
-
-export { TOKEN_TO_VAR }

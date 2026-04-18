@@ -14,6 +14,7 @@ export function Dashboard() {
   const [loading, setLoading] = useState(true)
   const { session } = useFrontierSession()
   const navigate = useNavigate()
+  const brand = useBrand()
 
   useEffect(() => {
     listProjects()
@@ -38,8 +39,6 @@ export function Dashboard() {
   if (!loading && !onboardingComplete && projects.length === 0) {
     return <Navigate to="/onboarding" replace />
   }
-
-  const brand = useBrand()
 
   return (
     <div className="min-h-screen bg-background">

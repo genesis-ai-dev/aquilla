@@ -8,6 +8,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { getProject, updateProject } from "@/lib/store/project-index"
 import { fetchModels, DEFAULT_SYSTEM_PROMPT, resolveProvider } from "@/lib/completion/completion-service"
 import type { ProjectRecord, CompletionProvider } from "@/lib/parsers/types"
+import { ValidationSettingsSection } from "./ProjectSettings/ValidationSettingsSection"
+import { readValidationCount, readValidationCountAudio } from "@/lib/progress/read-validation-count"
 
 // Well-known OpenAI-compatible providers. Keys are stable IDs for the preset dropdown.
 // "local" is the default for self-hosted/localhost setups with no API key.
@@ -58,6 +60,9 @@ export function ProjectSettings() {
   const [autoSyncEnabled, setAutoSyncEnabled] = useState(false)
   const [autoSyncInterval, setAutoSyncInterval] = useState(5)
 
+  const [validationCount, setValidationCount] = useState(1)
+  const [validationCountAudio, setValidationCountAudio] = useState(1)
+
   const [models, setModels] = useState<string[]>([])
   const [connecting, setConnecting] = useState(false)
   const [connectionError, setConnectionError] = useState<string | null>(null)
@@ -85,6 +90,8 @@ export function ProjectSettings() {
       }
       setAutoSyncEnabled(p.syncSettings?.autoSync.enabled ?? false)
       setAutoSyncInterval(p.syncSettings?.autoSync.intervalMinutes ?? 5)
+      setValidationCount(readValidationCount(p))
+      setValidationCountAudio(readValidationCountAudio(p))
       setLoading(false)
     })
   }, [id])
@@ -397,6 +404,22 @@ export function ProjectSettings() {
             </div>
           </div>
         </details>
+
+        <ValidationSettingsSection
+          validationCount={validationCount}
+          validationCountAudio={validationCountAudio}
+          hasAnyAudioData={Boolean(project?.hasAnyAudioData)}
+          onChange={(u) => {
+            if (u.validationCount !== undefined) {
+              setValidationCount(u.validationCount)
+              save({ validationCount: u.validationCount })
+            }
+            if (u.validationCountAudio !== undefined) {
+              setValidationCountAudio(u.validationCountAudio)
+              save({ validationCountAudio: u.validationCountAudio })
+            }
+          }}
+        />
 
         {project?.origin?.kind === "git" && (
           <Card>

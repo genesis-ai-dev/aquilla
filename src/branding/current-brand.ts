@@ -1,11 +1,11 @@
 import { BRANDS, BRAND_IDS } from "./brands"
 import type { BrandId } from "./types"
 
-function isBrandId(value: string): value is BrandId {
+export function isBrandId(value: string): value is BrandId {
   return (BRAND_IDS as string[]).includes(value)
 }
 
-function resolveBrandId(): BrandId {
+export function resolveBrandId(): BrandId {
   const fromEnv = (import.meta.env.VITE_BRAND as string | undefined) ?? ""
   if (import.meta.env.DEV && typeof window !== "undefined") {
     const override = new URLSearchParams(window.location.search).get("brand")

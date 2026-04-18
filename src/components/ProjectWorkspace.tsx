@@ -67,6 +67,8 @@ import type { ProjectRecord } from "@/lib/parsers/types"
 import { readValidationCount } from "@/lib/progress/read-validation-count"
 import { useSetupChecklist } from "@/hooks/useSetupChecklist"
 import { SetupChecklistDrawer } from "./onboarding/SetupChecklistDrawer"
+import { NextUnfinishedButton } from "./NextUnfinishedButton"
+import { useNextUnfinished } from "@/hooks/useNextUnfinished"
 
 export function ProjectWorkspace() {
   const { id: projectId, fileId: routeFileId } = useParams<{ id: string; fileId?: string }>()
@@ -100,6 +102,12 @@ export function ProjectWorkspace() {
   const currentUsername = frontierSession?.username || project?.username || "local"
   const validationCount = project ? readValidationCount(project) : 1
   const cells = useCells(doc, currentUsername, validationCount)
+  const { hasAny: hasUnfinished, findNext: findNextUnfinished } = useNextUnfinished(cells, validationCount)
+  const handleJumpNextUnfinished = useCallback(() => {
+    const currentIndex = editorRef.current?.getCurrentIndex?.() ?? 0
+    const next = findNextUnfinished(currentIndex)
+    if (next >= 0) editorRef.current?.scrollToCellIndex(next)
+  }, [findNextUnfinished])
   const fileMeta = useFileMeta(doc, project?.sourceLanguage, project?.targetLanguage)
   const [cellLabelsEnabled, setCellLabelsEnabled] = useCellLabelsPreference(projectId!)
 
@@ -528,6 +536,10 @@ export function ProjectWorkspace() {
                 Setup: {checklistState.completedCount}/{checklistState.totalCount}
               </button>
             )}
+            <NextUnfinishedButton
+              onClick={handleJumpNextUnfinished}
+              disabled={!activeFileId || !hasUnfinished}
+            />
             <PrimaryActionButton ctx={actionCtx} run={actionArgs} />
           </WorkspaceHeader>
         }

@@ -50,7 +50,7 @@ export function ExpandableFileList({
 
   return (
     <>
-      <ScrollArea className="flex-1">
+      <ScrollArea className="min-h-0 flex-1">
         <div className="p-2 space-y-2">
           {groups.length === 0 && (
             <p className="px-2 text-sm text-muted-foreground">No files imported yet.</p>

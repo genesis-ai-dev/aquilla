@@ -345,33 +345,15 @@ export function ProjectWorkspace() {
     return () => document.removeEventListener("keydown", handler)
   }, [project, perms.canPush, frontierSession, syncInFlight, runSync, handleProjectUpdated])
 
-  if (loading || !project) return <div className="p-8 text-muted-foreground">Loading...</div>
-
-  async function handleImported(refs: FileReference[]) {
-    if (!project) return
-    await updateProject({ ...project, files: [...project.files, ...refs] })
-    refresh()
-    if (refs.length > 0) setActiveFileId(refs[0].id)
-  }
-
-  async function handleExport() {
-    if (!activeFileId) return
-    try {
-      const { blob, filename } = await exportFile(activeFileId)
-      downloadBlob(blob, filename)
-    } catch (err) {
-      alert(`Export failed: ${err instanceof Error ? err.message : "Unknown error"}`)
-    }
-  }
-
-  // ── New state and handlers ────────────────────────────────────────────────
+  // All hooks below must live above the early return so hook count is stable
+  // across renders (React throws "Rendered more hooks" otherwise).
 
   const suggestions = useMemo(
-    () => detectSuggestions(project),
+    () => (project ? detectSuggestions(project) : []),
     [project]
   )
   const bannerSuggestions = useMemo(() => {
-    if (project.suggestionsDismissedAt) return []
+    if (!project || project.suggestionsDismissedAt) return []
     return suggestions
   }, [project, suggestions])
   const suggestionFileIds = useMemo(
@@ -440,6 +422,16 @@ export function ProjectWorkspace() {
     fileProgress,
   }), [project, activeFileId, fileProgress])
 
+  async function handleExport() {
+    if (!activeFileId) return
+    try {
+      const { blob, filename } = await exportFile(activeFileId)
+      downloadBlob(blob, filename)
+    } catch (err) {
+      alert(`Export failed: ${err instanceof Error ? err.message : "Unknown error"}`)
+    }
+  }
+
   const actionArgs = useMemo(() => ({
     openImport: () => setImportOpen(true),
     runCompletions: () => { if (activeFileId) completeBatch(cells) },
@@ -452,7 +444,16 @@ export function ProjectWorkspace() {
     },
     runImportWip: () => setImportOpen(true),
     navigate,
-  }), [activeFileId, completeBatch, navigate])
+  }), [activeFileId, completeBatch, cells, navigate])
+
+  if (loading || !project) return <div className="p-8 text-muted-foreground">Loading...</div>
+
+  async function handleImported(refs: FileReference[]) {
+    if (!project) return
+    await updateProject({ ...project, files: [...project.files, ...refs] })
+    refresh()
+    if (refs.length > 0) setActiveFileId(refs[0].id)
+  }
 
   // ── Render ────────────────────────────────────────────────────────────────
 
@@ -633,12 +634,13 @@ export function ProjectWorkspace() {
           </>
         }
       />
-      {checklistOpen && !checklistDismissed && project && (
+      {project && (
         <SetupChecklistDrawer
+          open={checklistOpen && !checklistDismissed}
+          onOpenChange={setChecklistOpen}
           project={project}
           state={checklistState}
           onDismiss={() => { dismissChecklist(); setChecklistOpen(false) }}
-          onClose={() => setChecklistOpen(false)}
           onProjectUpdated={handleProjectUpdated}
           onSharesChanged={refreshChecklistShares}
         />

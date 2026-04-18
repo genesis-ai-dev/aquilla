@@ -31,7 +31,12 @@ export default defineConfig({
     port: 1420,
     strictPort: true,
     hmr: { protocol: "ws", host: "127.0.0.1", port: 1421 },
-    watch: { ignored: ["**/src-tauri/**"] },
+    watch: {
+      // Worktrees contain their own copies of tsconfig.json; any touch there
+      // triggers Vite's "changed tsconfig" path which clears the cache and
+      // forces a full reload — that's the white-screen on project click.
+      ignored: ["**/src-tauri/**", "**/.worktrees/**", "**/.claude/worktrees/**"],
+    },
   },
   plugins: [
     react(),
@@ -47,6 +52,25 @@ export default defineConfig({
     alias: {
       "@": path.resolve(__dirname, "./src"),
     },
+  },
+  optimizeDeps: {
+    // Shims are injected by vite-plugin-node-polyfills at transform time, so
+    // Vite's static scanner misses them. Pre-including them avoids a second
+    // optimization pass that re-hashes every shared chunk mid-page-load.
+    include: [
+      "vite-plugin-node-polyfills/shims/buffer",
+      "vite-plugin-node-polyfills/shims/global",
+      "vite-plugin-node-polyfills/shims/process",
+      // Base UI sub-paths reachable only from ProjectWorkspace. Without
+      // pre-inclusion, navigating from Dashboard → /project/:id triggers a
+      // mid-flight re-optimize that re-hashes every shared chunk and forces
+      // a reload (white screen).
+      "@base-ui/react/button",
+      "@base-ui/react/dialog",
+      "@base-ui/react/input",
+      "@base-ui/react/menu",
+      "@base-ui/react/scroll-area",
+    ],
   },
   build: {
     // Split large third-party deps out of the main bundle. Without this the

@@ -5,9 +5,12 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { Switch } from "@/components/ui/switch"
 import { getProject, updateProject } from "@/lib/store/project-index"
 import { fetchModels, DEFAULT_SYSTEM_PROMPT, resolveProvider } from "@/lib/completion/completion-service"
 import type { ProjectRecord, CompletionProvider } from "@/lib/parsers/types"
+import { listFlags } from "@/lib/features/flags"
+import { useFeatureFlag, setFeatureFlag } from "@/hooks/useFeatureFlag"
 
 // Well-known OpenAI-compatible providers. Keys are stable IDs for the preset dropdown.
 // "local" is the default for self-hosted/localhost setups with no API key.
@@ -434,7 +437,77 @@ export function ProjectSettings() {
             </CardContent>
           </Card>
         )}
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Experimental</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <p className="text-sm text-muted-foreground">
+              These features are in active development. They may change, move, or be
+              removed. Expect rough edges.
+            </p>
+            {listFlags().length === 0 ? (
+              <p className="text-sm text-muted-foreground">
+                No experimental features available.
+              </p>
+            ) : (
+              <div className="space-y-3">
+                {listFlags().map(({ key, def }) => (
+                  <ExperimentalFlagRow
+                    key={key}
+                    flagKey={key}
+                    label={def.label}
+                    description={def.description}
+                    project={project}
+                  />
+                ))}
+              </div>
+            )}
+          </CardContent>
+        </Card>
       </main>
+    </div>
+  )
+}
+
+function ExperimentalFlagRow({
+  flagKey,
+  label,
+  description,
+  project,
+}: {
+  flagKey: Parameters<typeof useFeatureFlag>[0]
+  label: string
+  description: string
+  project: ProjectRecord | null
+}) {
+  const value = useFeatureFlag(flagKey, project)
+  const [optimistic, setOptimistic] = useState<boolean | null>(null)
+  const checked = optimistic ?? value
+
+  const handleChange = async (next: boolean) => {
+    if (!project) return
+    setOptimistic(next)
+    try {
+      await setFeatureFlag(project.id, flagKey, next)
+      setOptimistic(null)
+    } catch {
+      setOptimistic(null) // revert to store value on failure
+    }
+  }
+
+  return (
+    <div className="flex items-start justify-between gap-4 rounded-md border p-3">
+      <div className="flex-1">
+        <div className="text-sm font-medium">{label}</div>
+        <p className="text-sm text-muted-foreground">{description}</p>
+      </div>
+      <Switch
+        checked={checked}
+        onCheckedChange={handleChange}
+        aria-label={`Toggle ${label}`}
+      />
     </div>
   )
 }

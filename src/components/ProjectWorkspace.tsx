@@ -481,6 +481,7 @@ export function ProjectWorkspace() {
               activeFileCells={cells}
               fileProgress={fileProgress}
               suggestionFileIds={suggestionFileIds}
+              validationCount={validationCount}
               onSelectFile={setActiveFileId}
               onRename={handleRename}
               onMove={(fileId) => {

@@ -222,10 +222,15 @@ export function ProjectWorkspace() {
         e.preventDefault()
         setSearchOpen(true)
       }
+      if ((e.metaKey || e.ctrlKey) && e.key === ".") {
+        if (!activeFileId || !hasUnfinished) return
+        e.preventDefault()
+        handleJumpNextUnfinished()
+      }
     }
     document.addEventListener("keydown", handler)
     return () => document.removeEventListener("keydown", handler)
-  }, [])
+  }, [activeFileId, hasUnfinished, handleJumpNextUnfinished])
 
   useEffect(() => {
     if (!project || !routeFileId) return

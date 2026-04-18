@@ -11,15 +11,15 @@ interface Props {
 
 export function AppShell({ sidebar, header, statusBar, beforeMain, main, aside }: Props) {
   return (
-    <div className="flex h-screen">
-      <aside className="flex w-56 flex-col border-r bg-background">
+    <div className="flex h-screen min-w-0">
+      <aside className="flex w-64 shrink-0 flex-col overflow-hidden border-r bg-background">
         {sidebar}
       </aside>
-      <div className="flex flex-1 flex-col overflow-hidden">
+      <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
         {header}
         {beforeMain}
-        <main className="flex flex-1 overflow-hidden">
-          <div className="flex-1 overflow-hidden">{main}</div>
+        <main className="flex min-h-0 flex-1 overflow-hidden">
+          <div className="min-w-0 flex-1 overflow-hidden">{main}</div>
           {aside}
         </main>
         {statusBar}

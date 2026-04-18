@@ -1,7 +1,6 @@
 import { useEffect, useRef } from "react"
 import type { ProjectRecord } from "@/lib/parsers/types"
 import { updateProject } from "@/lib/store/project-index"
-import { loadFileDoc, destroyFileDoc } from "@/lib/store/file-doc"
 import { getTestament } from "@/lib/codex-editor/bible-books"
 
 export function useCorpusBackfill(project: ProjectRecord | null, onUpdated: () => void) {
@@ -15,25 +14,20 @@ export function useCorpusBackfill(project: ProjectRecord | null, onUpdated: () =
     const missing = project.files.filter((f) => !f.corpusMarker)
     if (missing.length === 0) return
 
+    // Filename-based detection only. The importer computes corpusMarker from
+    // the same getTestament(stem) at import time (git-importer.ts), so any
+    // unresolved files here would not have been resolvable via doc meta either
+    // in the common case. Legacy imports with meta.__source.corpusMarker but
+    // missing FileReference.corpusMarker can be fixed manually via the sidebar.
+    const updates: Record<string, string> = {}
+    for (const file of missing) {
+      const marker = getTestament(file.name)
+      if (marker) updates[file.id] = marker
+    }
+    if (Object.keys(updates).length === 0) return
+
     let cancelled = false
     ;(async () => {
-      const updates: Record<string, string> = {}
-      for (const file of missing) {
-        const handle = loadFileDoc(file.id)
-        try {
-          await new Promise<void>((resolve) => {
-            if (handle.persistence.synced) resolve()
-            else handle.persistence.once("synced", () => resolve())
-          })
-          if (cancelled) return
-          const meta = handle.doc.getMap("meta").get("__source") as { corpusMarker?: string } | undefined
-          const marker = meta?.corpusMarker || getTestament(file.name)
-          if (marker) updates[file.id] = marker
-        } finally {
-          destroyFileDoc(handle)
-        }
-      }
-      if (cancelled || Object.keys(updates).length === 0) return
       const updatedFiles = project.files.map((f) =>
         updates[f.id] ? { ...f, corpusMarker: updates[f.id] } : f
       )

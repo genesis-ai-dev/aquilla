@@ -1,11 +1,17 @@
-import type { CellData } from "@/hooks/useCells"
-
 export interface RecentExample {
   cellId: string
   source: string
   target: string
   validatedAt: string // ISO; empty string if no history available
   author: string       // last human edit author if available
+}
+
+interface ExampleSource {
+  id: string
+  original: string
+  translated: string
+  validationStatus: string
+  history: { timestamp: string; author: string }[]
 }
 
 /**
@@ -16,7 +22,7 @@ export interface RecentExample {
  * (current user has validated). Empty and un-validated cells are excluded.
  * Cells with no history are included but sorted to the bottom.
  */
-export function selectRecentValidatedExamples(cells: CellData[], limit: number): RecentExample[] {
+export function selectRecentValidatedExamples(cells: ExampleSource[], limit: number): RecentExample[] {
   const validated = cells.filter(
     (c) => c.validationStatus === "full" || c.validationStatus === "self",
   )

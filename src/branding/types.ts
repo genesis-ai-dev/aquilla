@@ -1,4 +1,6 @@
-import type { ComponentType, SVGProps } from "react"
+import type { ComponentType, HTMLAttributes } from "react"
+
+export type BrandLogoProps = HTMLAttributes<HTMLElement> & { className?: string }
 
 export type BrandId = "codex" | "honeycomb" | "context"
 
@@ -46,8 +48,8 @@ export interface Brand {
     htmlTitle: string
   }
   logo: {
-    Mark: ComponentType<SVGProps<SVGSVGElement>>
-    Wordmark: ComponentType<SVGProps<SVGSVGElement>>
+    Mark: ComponentType<BrandLogoProps>
+    Wordmark: ComponentType<BrandLogoProps>
     faviconHref: string
   }
   theme: {

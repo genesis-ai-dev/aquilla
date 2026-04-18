@@ -30,7 +30,6 @@ export interface CellData {
   selectedAudioId?: string
 }
 
-const DEFAULT_REQUIRED_VALIDATIONS = 1
 
 function deriveStatus(translated: string, history: CellHistoryEntry[]): "empty" | "unvalidated" | "validated" {
   if (!translated || !translated.trim()) return "empty"
@@ -70,7 +69,7 @@ function deriveValidationStatus(
   return { validationStatus: "others", activeValidators: activeUsernames }
 }
 
-export function useCells(doc: Y.Doc | null, username = "local"): CellData[] {
+export function useCells(doc: Y.Doc | null, username = "local", requiredValidations = 1): CellData[] {
   const [cells, setCells] = useState<CellData[]>([])
 
   useEffect(() => {
@@ -94,7 +93,7 @@ export function useCells(doc: Y.Doc | null, username = "local"): CellData[] {
           | undefined
         const cellLabel = source?.metadata?.cellLabel
         const { validationStatus, activeValidators } = deriveValidationStatus(
-          translated, source?.metadata?.edits, username, DEFAULT_REQUIRED_VALIDATIONS,
+          translated, source?.metadata?.edits, username, requiredValidations,
         )
         ordered.push({
           id: cell.get("id") as string,
@@ -139,7 +138,7 @@ export function useCells(doc: Y.Doc | null, username = "local"): CellData[] {
       cellsMap.unobserveDeep(scheduleUpdate)
       orderArray.unobserve(scheduleUpdate)
     }
-  }, [doc])
+  }, [doc, username, requiredValidations])
 
   return cells
 }

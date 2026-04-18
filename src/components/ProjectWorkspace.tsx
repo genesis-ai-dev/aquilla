@@ -64,6 +64,7 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog"
 import type { ProjectRecord } from "@/lib/parsers/types"
+import { readValidationCount } from "@/lib/progress/read-validation-count"
 import { useSetupChecklist } from "@/hooks/useSetupChecklist"
 import { SetupChecklistDrawer } from "./onboarding/SetupChecklistDrawer"
 
@@ -97,7 +98,8 @@ export function ProjectWorkspace() {
   // should attribute to the actual signed-in user.
   const { session: frontierSession } = useFrontierSession()
   const currentUsername = frontierSession?.username || project?.username || "local"
-  const cells = useCells(doc, currentUsername)
+  const validationCount = project ? readValidationCount(project) : 1
+  const cells = useCells(doc, currentUsername, validationCount)
   const fileMeta = useFileMeta(doc, project?.sourceLanguage, project?.targetLanguage)
   const [cellLabelsEnabled, setCellLabelsEnabled] = useCellLabelsPreference(projectId!)
 

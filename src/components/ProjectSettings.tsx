@@ -11,6 +11,7 @@ import { fetchModels, DEFAULT_SYSTEM_PROMPT, resolveProvider } from "@/lib/compl
 import type { ProjectRecord, CompletionProvider } from "@/lib/parsers/types"
 import { listFlags } from "@/lib/features/flags"
 import { useFeatureFlag, setFeatureFlag } from "@/hooks/useFeatureFlag"
+import { isSettingsDirty, type SettingsFormSnapshot } from "./project-settings/dirty"
 
 // Well-known OpenAI-compatible providers. Keys are stable IDs for the preset dropdown.
 // "local" is the default for self-hosted/localhost setups with no API key.
@@ -61,6 +62,8 @@ export function ProjectSettings() {
   const [autoSyncEnabled, setAutoSyncEnabled] = useState(false)
   const [autoSyncInterval, setAutoSyncInterval] = useState(5)
 
+  const [loadedSnapshot, setLoadedSnapshot] = useState<SettingsFormSnapshot | null>(null)
+
   const [models, setModels] = useState<string[]>([])
   const [connecting, setConnecting] = useState(false)
   const [connectionError, setConnectionError] = useState<string | null>(null)
@@ -88,6 +91,22 @@ export function ProjectSettings() {
       }
       setAutoSyncEnabled(p.syncSettings?.autoSync.enabled ?? false)
       setAutoSyncInterval(p.syncSettings?.autoSync.intervalMinutes ?? 5)
+      setLoadedSnapshot({
+        name: p.name,
+        sourceLanguage: p.sourceLanguage,
+        targetLanguage: p.targetLanguage,
+        username: p.username || "local",
+        provider: p.completionSettings ? resolveProvider(p.completionSettings) : "frontier",
+        endpoint: p.completionSettings?.endpoint ?? "",
+        apiKey: p.completionSettings?.apiKey ?? "",
+        model: p.completionSettings?.model ?? "",
+        maxTokens: p.completionSettings?.maxTokens ?? 512,
+        temperature: p.completionSettings?.temperature ?? 0.3,
+        systemPrompt: p.completionSettings?.systemPrompt ?? DEFAULT_SYSTEM_PROMPT,
+        llmHealthPenalty: p.completionSettings?.llmHealthPenalty ?? 0.1,
+        autoSyncEnabled: p.syncSettings?.autoSync.enabled ?? false,
+        autoSyncInterval: p.syncSettings?.autoSync.intervalMinutes ?? 5,
+      })
       setLoading(false)
     })
   }, [id])
@@ -119,6 +138,51 @@ export function ProjectSettings() {
         llmHealthPenalty,
       },
     })
+  }
+
+  const currentSnapshot: SettingsFormSnapshot = {
+    name, sourceLanguage, targetLanguage, username,
+    provider, endpoint, apiKey, model, maxTokens, temperature,
+    systemPrompt, llmHealthPenalty,
+    autoSyncEnabled, autoSyncInterval,
+  }
+  const dirty = isSettingsDirty(loadedSnapshot, currentSnapshot)
+
+  useEffect(() => {
+    if (!dirty) return
+    const handler = (e: BeforeUnloadEvent) => {
+      e.preventDefault()
+      e.returnValue = ""
+    }
+    window.addEventListener("beforeunload", handler)
+    return () => window.removeEventListener("beforeunload", handler)
+  }, [dirty])
+
+  async function handleSave() {
+    if (!project) return
+    const updated: ProjectRecord = {
+      ...project,
+      name,
+      sourceLanguage,
+      targetLanguage,
+      username,
+      completionSettings: {
+        provider,
+        endpoint: endpoint.trim(),
+        apiKey: apiKey.trim() || undefined,
+        model,
+        maxTokens,
+        temperature,
+        systemPrompt,
+        llmHealthPenalty,
+      },
+      syncSettings: project.syncSettings
+        ? { ...project.syncSettings, autoSync: { enabled: autoSyncEnabled, intervalMinutes: autoSyncInterval } }
+        : undefined,
+    }
+    await updateProject(updated)
+    setProject(updated)
+    setLoadedSnapshot(currentSnapshot)
   }
 
   function handlePresetChange(nextPresetId: string) {
@@ -466,6 +530,14 @@ export function ProjectSettings() {
             )}
           </CardContent>
         </Card>
+        <div className="flex items-center gap-4">
+          <p className="text-xs text-muted-foreground">
+            Experimental toggles save automatically. Other changes need Save.
+          </p>
+          <Button onClick={handleSave} variant={dirty ? "default" : "outline"}>
+            {dirty ? "Save (unsaved changes)" : "Save"}
+          </Button>
+        </div>
       </main>
     </div>
   )

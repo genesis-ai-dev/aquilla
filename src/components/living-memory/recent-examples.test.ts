@@ -5,7 +5,6 @@ import { selectRecentValidatedExamples } from "./recent-examples"
 
 function makeCell(overrides: Partial<CellData> & { id: string; history?: CellHistoryEntry[] }): CellData {
   return {
-    id: "default",
     original: "source",
     translated: "target",
     context: "",

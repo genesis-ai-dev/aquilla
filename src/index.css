@@ -16,6 +16,9 @@
     --color-sidebar-primary: var(--sidebar-primary);
     --color-sidebar-foreground: var(--sidebar-foreground);
     --color-sidebar: var(--sidebar);
+    --color-charts-blue: oklch(0.62 0.17 245);
+    --color-charts-blue-dark: oklch(0.45 0.18 245);
+    --color-editor-warning-foreground: oklch(0.75 0.17 85);
     --color-chart-5: var(--chart-5);
     --color-chart-4: var(--chart-4);
     --color-chart-3: var(--chart-3);

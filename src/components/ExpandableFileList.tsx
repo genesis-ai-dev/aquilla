@@ -1,6 +1,5 @@
 import { useMemo, useState } from "react"
 import type { FileReference } from "@/lib/parsers/types"
-import type { CellData } from "@/hooks/useCells"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { useSidebarExpansion } from "@/hooks/useSidebarExpansion"
 import { FileRow } from "./FileRow"
@@ -15,7 +14,6 @@ interface Props {
   projectId: string
   files: FileReference[]
   activeFileId: string | null
-  activeFileCells: CellData[]
   fileProgress: Map<string, FileStats>
   suggestionFileIds: Set<string>
   validationCount: number

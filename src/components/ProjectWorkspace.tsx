@@ -491,7 +491,6 @@ export function ProjectWorkspace() {
               projectId={projectId!}
               files={project.files}
               activeFileId={activeFileId}
-              activeFileCells={cells}
               fileProgress={fileProgress}
               suggestionFileIds={suggestionFileIds}
               validationCount={validationCount}

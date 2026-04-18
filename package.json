@@ -5,7 +5,11 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "dev:honeycomb": "BRAND=honeycomb vite",
+    "dev:context": "BRAND=context vite",
     "build": "tsc -b && vite build",
+    "build:honeycomb": "BRAND=honeycomb tsc -b && BRAND=honeycomb vite build",
+    "build:context": "BRAND=context tsc -b && BRAND=context vite build",
     "lint": "eslint .",
     "preview": "vite preview",
     "test": "vitest run",
@@ -13,7 +17,9 @@
     "tauri": "tauri",
     "tauri:dev": "tauri dev",
     "tauri:build": "tauri build",
-    "deploy": "npm run build && wrangler pages deploy dist --project-name=codex-web-app --commit-dirty=true"
+    "deploy": "npm run build && wrangler pages deploy dist --project-name=codex-web-app --commit-dirty=true",
+    "deploy:honeycomb": "npm run build:honeycomb && wrangler pages deploy dist --project-name=honeycomb-studio --commit-dirty=true",
+    "deploy:context": "npm run build:context && wrangler pages deploy dist --project-name=context-studio --commit-dirty=true"
   },
   "dependencies": {
     "@base-ui/react": "^1.4.0",

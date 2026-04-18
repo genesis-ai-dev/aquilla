@@ -7,6 +7,7 @@ import { ProjectCreateDialog } from "./ProjectCreateDialog"
 import { HeaderAuth } from "@/components/git-import/HeaderAuth"
 import { RemoteProjectsSection } from "@/components/git-import/RemoteProjectsSection"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
+import { useBrand } from "@/branding/use-brand"
 
 export function Dashboard() {
   const [projects, setProjects] = useState<ProjectRecord[]>([])
@@ -38,11 +39,13 @@ export function Dashboard() {
     return <Navigate to="/onboarding" replace />
   }
 
+  const brand = useBrand()
+
   return (
     <div className="min-h-screen bg-background">
       <header className="border-b">
         <div className="flex items-center justify-between px-6 py-4">
-          <h1 className="text-xl font-semibold">Codex Translator</h1>
+          <h1 className="text-xl font-semibold">{brand.app.name}</h1>
           <div className="flex items-center gap-2">
             <HeaderAuth />
             <ProjectCreateDialog onCreated={upsert} />

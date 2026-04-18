@@ -26,6 +26,25 @@ const CUSTOM_PRESETS: { id: string; label: string; endpoint: string; requiresKey
   { id: "custom", label: "Other (enter URL manually)", endpoint: "", requiresKey: false },
 ]
 
+function snapshotFromProject(p: ProjectRecord): SettingsFormSnapshot {
+  return {
+    name: p.name,
+    sourceLanguage: p.sourceLanguage,
+    targetLanguage: p.targetLanguage,
+    username: p.username || "local",
+    provider: p.completionSettings ? resolveProvider(p.completionSettings) : "frontier",
+    endpoint: p.completionSettings?.endpoint ?? "",
+    apiKey: p.completionSettings?.apiKey ?? "",
+    model: p.completionSettings?.model ?? "",
+    maxTokens: p.completionSettings?.maxTokens ?? 512,
+    temperature: p.completionSettings?.temperature ?? 0.3,
+    systemPrompt: p.completionSettings?.systemPrompt ?? DEFAULT_SYSTEM_PROMPT,
+    llmHealthPenalty: p.completionSettings?.llmHealthPenalty ?? 0.1,
+    autoSyncEnabled: p.syncSettings?.autoSync.enabled ?? false,
+    autoSyncInterval: p.syncSettings?.autoSync.intervalMinutes ?? 5,
+  }
+}
+
 function presetIdForEndpoint(endpoint: string): string {
   const trimmed = endpoint.trim().replace(/\/+$/, "").toLowerCase()
   if (!trimmed) return "local"
@@ -91,22 +110,7 @@ export function ProjectSettings() {
       }
       setAutoSyncEnabled(p.syncSettings?.autoSync.enabled ?? false)
       setAutoSyncInterval(p.syncSettings?.autoSync.intervalMinutes ?? 5)
-      setLoadedSnapshot({
-        name: p.name,
-        sourceLanguage: p.sourceLanguage,
-        targetLanguage: p.targetLanguage,
-        username: p.username || "local",
-        provider: p.completionSettings ? resolveProvider(p.completionSettings) : "frontier",
-        endpoint: p.completionSettings?.endpoint ?? "",
-        apiKey: p.completionSettings?.apiKey ?? "",
-        model: p.completionSettings?.model ?? "",
-        maxTokens: p.completionSettings?.maxTokens ?? 512,
-        temperature: p.completionSettings?.temperature ?? 0.3,
-        systemPrompt: p.completionSettings?.systemPrompt ?? DEFAULT_SYSTEM_PROMPT,
-        llmHealthPenalty: p.completionSettings?.llmHealthPenalty ?? 0.1,
-        autoSyncEnabled: p.syncSettings?.autoSync.enabled ?? false,
-        autoSyncInterval: p.syncSettings?.autoSync.intervalMinutes ?? 5,
-      })
+      setLoadedSnapshot(snapshotFromProject(p))
       setLoading(false)
     })
   }, [id])
@@ -116,6 +120,7 @@ export function ProjectSettings() {
     const updated = { ...project, ...updates }
     await updateProject(updated)
     setProject(updated)
+    setLoadedSnapshot(snapshotFromProject(updated))
   }
 
   function saveCompletionSettings(overrides: {
@@ -182,7 +187,7 @@ export function ProjectSettings() {
     }
     await updateProject(updated)
     setProject(updated)
-    setLoadedSnapshot(currentSnapshot)
+    setLoadedSnapshot(snapshotFromProject(updated))
   }
 
   function handlePresetChange(nextPresetId: string) {

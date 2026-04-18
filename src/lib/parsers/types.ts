@@ -77,6 +77,12 @@ export interface ProjectRecord {
   syncSettings?: ProjectSyncSettings
   suggestionsDismissedAt?: string  // ISO timestamp; suggestion banner is hidden after this is set.
   setupChecklistDismissed?: boolean
+  /** Required distinct validators for a text cell to count as "fully validated". Clamped [1, 15]. Default 1. Mirrors desktop manifest. */
+  validationCount?: number
+  /** Required distinct validators for audio. Clamped [1, 15]. Default 1. */
+  validationCountAudio?: number
+  /** Cached flag — set true when any cell first writes audio. Avoids scanning every file's Y.Doc on load. */
+  hasAnyAudioData?: boolean
 }
 
 export interface ProjectSyncSettings {

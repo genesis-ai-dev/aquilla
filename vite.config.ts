@@ -4,10 +4,26 @@ import { defineConfig } from "vite"
 import react from "@vitejs/plugin-react"
 import tailwindcss from "@tailwindcss/vite"
 import { nodePolyfills } from "vite-plugin-node-polyfills"
+import { brandingHtmlPlugin } from "./scripts/vite-html-branding"
+import { BRAND_DATA, BRAND_DATA_IDS } from "./src/branding/brands/data"
+import type { BrandId } from "./src/branding/types"
+
+function resolveBuildBrand(): BrandId {
+  const raw = process.env.BRAND ?? "codex"
+  if ((BRAND_DATA_IDS as string[]).includes(raw)) return raw as BrandId
+  console.warn(`[branding] unknown BRAND="${raw}"; falling back to codex`)
+  return "codex"
+}
+
+const brandId = resolveBuildBrand()
+const brand = BRAND_DATA[brandId]
 
 export default defineConfig({
   clearScreen: false,
   envPrefix: ["VITE_", "TAURI_ENV_"],
+  define: {
+    "import.meta.env.VITE_BRAND": JSON.stringify(brandId),
+  },
   server: {
     // Bind to 127.0.0.1 explicitly; "localhost" can resolve to ::1 on macOS,
     // which Vite then can't bind, leaving Tauri's HTTP probe hanging.
@@ -25,6 +41,7 @@ export default defineConfig({
       include: ["crypto", "buffer", "stream", "util", "events", "path"],
       globals: { Buffer: true, global: true, process: true },
     }),
+    brandingHtmlPlugin(brand),
   ],
   resolve: {
     alias: {

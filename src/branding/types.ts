@@ -38,7 +38,7 @@ export interface ThemeTokens {
   sidebarRing: string
 }
 
-export interface Brand {
+export interface BrandData {
   id: BrandId
   app: {
     name: string
@@ -48,8 +48,6 @@ export interface Brand {
     htmlTitle: string
   }
   logo: {
-    Mark: ComponentType<BrandLogoProps>
-    Wordmark: ComponentType<BrandLogoProps>
     faviconHref: string
   }
   theme: {
@@ -67,5 +65,12 @@ export interface Brand {
   deploy?: {
     domain?: string
     ogImage?: string
+  }
+}
+
+export interface Brand extends Omit<BrandData, "logo"> {
+  logo: BrandData["logo"] & {
+    Mark: ComponentType<BrandLogoProps>
+    Wordmark: ComponentType<BrandLogoProps>
   }
 }

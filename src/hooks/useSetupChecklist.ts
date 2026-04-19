@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from "react"
+import { useEffect, useRef, useState, useCallback } from "react"
 import type { ProjectRecord, CompletionSettings } from "@/lib/parsers/types"
 import { getProject, updateProject } from "@/lib/store/project-index"
 import { listShares } from "@/lib/sync/share-tokens"
@@ -32,10 +32,18 @@ export function useSetupChecklist(project: ProjectRecord | null) {
   const [shareCount, setShareCount] = useState(0)
   const [dismissed, setDismissed] = useState(false)
 
+  // Session-sticky lock keyed by project id. Once the user clicks Dismiss in
+  // this React session for this project, dismissed stays true even if IDB
+  // gets clobbered by stale-state spreads in concurrent updateProject calls.
+  // The ref resets when the user navigates to a different project.
+  const sessionDismissedForProjectRef = useRef<string | null>(null)
+
   useEffect(() => {
     if (!project) return
     let cancelled = false
-    setDismissed(project.setupChecklistDismissed ?? false)
+    const persisted = project.setupChecklistDismissed ?? false
+    const sessionLocked = sessionDismissedForProjectRef.current === project.id
+    setDismissed(persisted || sessionLocked)
     listShares(project.id).then((shares) => {
       if (!cancelled) setShareCount(shares.length)
     })
@@ -46,12 +54,15 @@ export function useSetupChecklist(project: ProjectRecord | null) {
 
   const dismiss = useCallback(async () => {
     if (!project) return
+    // Lock first so the UI is sticky even if the IDB write loses a race
+    // with another updateProject call that spreads stale local state.
+    sessionDismissedForProjectRef.current = project.id
+    setDismissed(true)
     // Re-read the latest project from the store so we don't clobber
     // intervening writes (e.g. AI settings saved through the checklist).
     const latest = await getProject(project.id)
     const base = latest ?? project
     await updateProject({ ...base, setupChecklistDismissed: true })
-    setDismissed(true)
   }, [project])
 
   const refreshShares = useCallback(async () => {

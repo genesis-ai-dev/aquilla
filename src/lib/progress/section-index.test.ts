@@ -39,4 +39,26 @@ describe("buildSectionIndex", () => {
       { label: "X", cellIds: ["b"] },
     ])
   })
+
+  it("prefers cell.section over cell.group when both are present", () => {
+    const cells = [
+      { id: "a", group: "uuid-1", section: "GEN 1" },
+      { id: "b", group: "uuid-2", section: "GEN 1" },
+      { id: "c", group: "uuid-3", section: "GEN 2" },
+    ] as any[]
+    expect(buildSectionIndex(cells)).toEqual([
+      { label: "GEN 1", cellIds: ["a", "b"] },
+      { label: "GEN 2", cellIds: ["c"] },
+    ])
+  })
+
+  it("falls back to group when section is missing or empty", () => {
+    const cells = [
+      { id: "a", group: "G1", section: "" },
+      { id: "b", group: "G1" },
+    ] as any[]
+    expect(buildSectionIndex(cells)).toEqual([
+      { label: "G1", cellIds: ["a", "b"] },
+    ])
+  })
 })

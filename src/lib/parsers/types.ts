@@ -21,6 +21,8 @@ export interface TranslatableString {
   translated: string
   context: string
   group: string
+  /** Optional section label for navigation/progress. USFM/ebible set this to "BOOK CHAPTER" (e.g. "GEN 1"). When present, takes precedence over `group` for sectioning UI. */
+  section?: string
   type: CellType
   sourceLocation?: SourceLocation
 }

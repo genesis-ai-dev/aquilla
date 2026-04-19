@@ -5,10 +5,12 @@ export interface SectionInfo {
   cellIds: string[]
 }
 
-export function buildSectionIndex(cells: Pick<CellData, "id" | "group">[]): SectionInfo[] {
+export function buildSectionIndex(cells: Pick<CellData, "id" | "group" | "section">[]): SectionInfo[] {
   const byLabel = new Map<string, SectionInfo>()
   for (const cell of cells) {
-    const label = cell.group && cell.group.trim() ? cell.group : "Ungrouped"
+    const label = (cell.section && cell.section.trim())
+      ? cell.section
+      : (cell.group && cell.group.trim() ? cell.group : "Ungrouped")
     let section = byLabel.get(label)
     if (!section) {
       section = { label, cellIds: [] }

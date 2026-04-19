@@ -16,6 +16,8 @@ export interface CellData {
   translatedXml?: Y.XmlFragment
   context: string
   group: string
+  /** Optional section label for navigation/progress. USFM/ebible set this to "BOOK CHAPTER" (e.g. "GEN 1"). When present, takes precedence over `group` for sectioning UI. */
+  section?: string
   type: string
   status: "empty" | "unvalidated" | "validated"
   validationStatus: ValidationStatus
@@ -103,6 +105,7 @@ export function useCells(doc: Y.Doc | null, username = "local", requiredValidati
           ...(frag ? { translatedXml: frag } : {}),
           context: cell.get("context") as string,
           group: cell.get("group") as string,
+          section: cell.get("section") as string | undefined,
           type: cell.get("type") as string,
           status: deriveStatus(translated, history),
           validationStatus,

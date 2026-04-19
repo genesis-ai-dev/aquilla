@@ -11,7 +11,7 @@ export interface SectionProgress extends SectionInfo {
   hasAudio: boolean
 }
 
-type ProgressCell = Pick<CellData, "id" | "group" | "translated" | "activeValidators"> & {
+type ProgressCell = Pick<CellData, "id" | "group" | "section" | "translated" | "activeValidators"> & {
   audioUrl?: string // present once audio support lands
 }
 

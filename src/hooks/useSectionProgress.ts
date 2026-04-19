@@ -29,6 +29,7 @@ export function useSectionProgress(
       const ordered: Array<{
         id: string
         group: string
+        section?: string
         translated: string
         activeValidators: string[]
         audioUrl?: string
@@ -57,6 +58,7 @@ export function useSectionProgress(
         ordered.push({
           id: cell.get("id") as string,
           group: (cell.get("group") as string) || "",
+          section: cell.get("section") as string | undefined,
           translated,
           activeValidators,
           audioUrl: source?.metadata?.selectedAudioId,

@@ -5,7 +5,8 @@ import type { EditSessionSnapshot } from "./types"
 /**
  * Canonical getter for a cell's edits array. Creates on first access so
  * callers never have to null-check. The returned Y.Array holds Y.Map entries
- * shaped per appendEntry() below.
+ * whose shape matches CreateEntryInput (authors, timestamp, type, editMap,
+ * value, and optionally validatedBy).
  */
 export function getEditsArray(cell: Y.Map<unknown>): Y.Array<Y.Map<unknown>> {
   let arr = cell.get("edits") as Y.Array<Y.Map<unknown>> | undefined
@@ -97,6 +98,10 @@ export function snapshotEntry(entry: Y.Map<unknown>): EditSessionSnapshot {
  * Add or reactivate a validator. Idempotent: calling twice for the same
  * username at the same timestamp produces the same state (last-write-wins on
  * updatedTimestamp is exactly what we want for concurrent same-user writes).
+ *
+ * Precondition: `entry` must already be attached to a Y.Doc (guaranteed when
+ * obtained via appendEntry). Operating on a fully detached entry will throw
+ * when the internal validators Y.Map is read back.
  */
 export function upsertValidator(
   entry: Y.Map<unknown>, username: string, timestamp: number,

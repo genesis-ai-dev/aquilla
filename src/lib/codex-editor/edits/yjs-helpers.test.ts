@@ -7,6 +7,10 @@ import {
   upsertValidator,
   softDeleteValidator,
   getValidatorsActive,
+  entryHasAuthor,
+  appendAuthor,
+  editMapEquals,
+  getEntryEditMap,
 } from "./yjs-helpers"
 
 function newCell(): Y.Map<unknown> {
@@ -112,5 +116,51 @@ describe("yjs-helpers", () => {
     softDeleteValidator(entry, "zoe", 2000)
     expect(getValidatorsActive(entry)).toEqual([])
     expect(snapshotEntry(entry).validatedBy).toEqual([])
+  })
+
+  it("entryHasAuthor returns false when author is absent", () => {
+    const { arr } = newCellWithArr()
+    const entry = appendEntry(arr, {
+      authors: ["alice"],
+      timestamp: 1000,
+      type: "user-edit",
+      editMap: ["value"],
+      value: "",
+    })
+    expect(entryHasAuthor(entry, "alice")).toBe(true)
+    expect(entryHasAuthor(entry, "bob")).toBe(false)
+  })
+
+  it("appendAuthor adds a new author to an existing entry", () => {
+    const { arr } = newCellWithArr()
+    const entry = appendEntry(arr, {
+      authors: ["alice"],
+      timestamp: 1000,
+      type: "user-edit",
+      editMap: ["value"],
+      value: "",
+    })
+    appendAuthor(entry, "bob")
+    expect(snapshotEntry(entry).authors).toEqual(["alice", "bob"])
+  })
+
+  it("editMapEquals handles length and element mismatches", () => {
+    expect(editMapEquals(["value"], ["value"])).toBe(true)
+    expect(editMapEquals(["a", "b"], ["a", "b"])).toBe(true)
+    expect(editMapEquals(["a"], ["a", "b"])).toBe(false)
+    expect(editMapEquals(["a"], ["b"])).toBe(false)
+    expect(editMapEquals([], [])).toBe(true)
+  })
+
+  it("getEntryEditMap returns the editMap as a plain array", () => {
+    const { arr } = newCellWithArr()
+    const entry = appendEntry(arr, {
+      authors: ["alice"],
+      timestamp: 1000,
+      type: "user-edit",
+      editMap: ["metadata", "cellLabel"],
+      value: "Gen 1:1",
+    })
+    expect(getEntryEditMap(entry)).toEqual(["metadata", "cellLabel"])
   })
 })

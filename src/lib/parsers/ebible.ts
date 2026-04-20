@@ -210,6 +210,7 @@ export function parseEBibleCorpus(corpusText: string): TranslatableString[] {
 
     const vref = vrefs[i]
     const bookId = vref.split(" ")[0] || "UNK"
+    const section = vref.split(":")[0]  // e.g. "GEN 1" from "GEN 1:1"
 
     out.push({
       id: uuid(),
@@ -217,6 +218,7 @@ export function parseEBibleCorpus(corpusText: string): TranslatableString[] {
       translated: "",
       context: vref,
       group: bookId,
+      section,
       type: "verse",
     })
   }

@@ -19,6 +19,7 @@ import { cn } from "@/lib/utils"
 
 export interface EditorTableHandle {
   scrollToCellIndex: (index: number) => void
+  getCurrentIndex?: () => number
 }
 
 interface EditorTableProps {
@@ -86,6 +87,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
         virtualizer.scrollToIndex(index, { align: "center" })
       }
     },
+    getCurrentIndex: () => 0,
   }), [virtualizer, cells.length])
 
   const showGutterContent = lineNumbersEnabled || cellLabelsEnabled

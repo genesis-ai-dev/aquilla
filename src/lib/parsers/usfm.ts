@@ -28,7 +28,7 @@ function parseBookSection(section: string, bookId: string): UsfmBookResult {
   let chapter = 0
   let verse = 0
 
-  function addString(text: string, context: string, type: CellType) {
+  function addString(text: string, context: string, type: CellType, section: string | undefined) {
     const segments = splitIntoSegments(text)
     for (const seg of segments) {
       strings.push({
@@ -37,6 +37,7 @@ function parseBookSection(section: string, bookId: string): UsfmBookResult {
         translated: "",
         context,
         group: seg.group,
+        section,
         type,
       })
     }
@@ -58,13 +59,13 @@ function parseBookSection(section: string, bookId: string): UsfmBookResult {
     const verseMatch = trimmed.match(/^\\v\s+(\d+)\s+(.*)/)
     if (verseMatch) {
       verse = parseInt(verseMatch[1])
-      addString(verseMatch[2], `${bookId} ${chapter}:${verse}`, "verse")
+      addString(verseMatch[2], `${bookId} ${chapter}:${verse}`, "verse", `${bookId} ${chapter}`)
       continue
     }
 
     const sectionMatch = trimmed.match(/^\\s\d?\s+(.*)/)
     if (sectionMatch) {
-      addString(sectionMatch[1], `${bookId} ${chapter}`, "heading")
+      addString(sectionMatch[1], `${bookId} ${chapter}`, "heading", `${bookId} ${chapter}`)
       continue
     }
 
@@ -72,7 +73,7 @@ function parseBookSection(section: string, bookId: string): UsfmBookResult {
 
     const paratextMatch = trimmed.match(/^\\(mt|ms|r)\d?\s+(.*)/)
     if (paratextMatch) {
-      addString(paratextMatch[2], bookId, "paratext")
+      addString(paratextMatch[2], bookId, "paratext", bookId)
       continue
     }
 

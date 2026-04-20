@@ -16,6 +16,8 @@ export interface CellData {
   translatedXml?: Y.XmlFragment
   context: string
   group: string
+  /** Optional section label for navigation/progress. USFM/ebible set this to "BOOK CHAPTER" (e.g. "GEN 1"). When present, takes precedence over `group` for sectioning UI. */
+  section?: string
   type: string
   status: "empty" | "unvalidated" | "validated"
   validationStatus: ValidationStatus
@@ -30,7 +32,6 @@ export interface CellData {
   selectedAudioId?: string
 }
 
-const DEFAULT_REQUIRED_VALIDATIONS = 1
 
 function deriveStatus(translated: string, history: CellHistoryEntry[]): "empty" | "unvalidated" | "validated" {
   if (!translated || !translated.trim()) return "empty"
@@ -70,7 +71,7 @@ function deriveValidationStatus(
   return { validationStatus: "others", activeValidators: activeUsernames }
 }
 
-export function useCells(doc: Y.Doc | null, username = "local"): CellData[] {
+export function useCells(doc: Y.Doc | null, username = "local", requiredValidations = 1): CellData[] {
   const [cells, setCells] = useState<CellData[]>([])
 
   useEffect(() => {
@@ -94,7 +95,7 @@ export function useCells(doc: Y.Doc | null, username = "local"): CellData[] {
           | undefined
         const cellLabel = source?.metadata?.cellLabel
         const { validationStatus, activeValidators } = deriveValidationStatus(
-          translated, source?.metadata?.edits, username, DEFAULT_REQUIRED_VALIDATIONS,
+          translated, source?.metadata?.edits, username, requiredValidations,
         )
         ordered.push({
           id: cell.get("id") as string,
@@ -104,6 +105,7 @@ export function useCells(doc: Y.Doc | null, username = "local"): CellData[] {
           ...(frag ? { translatedXml: frag } : {}),
           context: cell.get("context") as string,
           group: cell.get("group") as string,
+          section: cell.get("section") as string | undefined,
           type: cell.get("type") as string,
           status: deriveStatus(translated, history),
           validationStatus,
@@ -139,7 +141,7 @@ export function useCells(doc: Y.Doc | null, username = "local"): CellData[] {
       cellsMap.unobserveDeep(scheduleUpdate)
       orderArray.unobserve(scheduleUpdate)
     }
-  }, [doc])
+  }, [doc, username, requiredValidations])
 
   return cells
 }

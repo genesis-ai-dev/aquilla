@@ -64,9 +64,12 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog"
 import type { ProjectRecord } from "@/lib/parsers/types"
+import { readValidationCount } from "@/lib/progress/read-validation-count"
 import { useSetupChecklist } from "@/hooks/useSetupChecklist"
 import { SetupChecklistDrawer } from "./onboarding/SetupChecklistDrawer"
 import { useFeatureFlag } from "@/hooks/useFeatureFlag"
+import { NextUnfinishedButton } from "./NextUnfinishedButton"
+import { useNextUnfinished } from "@/hooks/useNextUnfinished"
 
 export function ProjectWorkspace() {
   const { id: projectId, fileId: routeFileId } = useParams<{ id: string; fileId?: string }>()
@@ -98,7 +101,14 @@ export function ProjectWorkspace() {
   // should attribute to the actual signed-in user.
   const { session: frontierSession } = useFrontierSession()
   const currentUsername = frontierSession?.username || project?.username || "local"
-  const cells = useCells(doc, currentUsername)
+  const validationCount = project ? readValidationCount(project) : 1
+  const cells = useCells(doc, currentUsername, validationCount)
+  const { hasAny: hasUnfinished, findNext: findNextUnfinished } = useNextUnfinished(cells, validationCount)
+  const handleJumpNextUnfinished = useCallback(() => {
+    const currentIndex = editorRef.current?.getCurrentIndex?.() ?? 0
+    const next = findNextUnfinished(currentIndex)
+    if (next >= 0) editorRef.current?.scrollToCellIndex(next)
+  }, [findNextUnfinished])
   const fileMeta = useFileMeta(doc, project?.sourceLanguage, project?.targetLanguage)
   const [cellLabelsEnabled, setCellLabelsEnabled] = useCellLabelsPreference(projectId!)
 
@@ -213,10 +223,15 @@ export function ProjectWorkspace() {
         e.preventDefault()
         setSearchOpen(true)
       }
+      if ((e.metaKey || e.ctrlKey) && e.key === ".") {
+        if (!activeFileId || !hasUnfinished) return
+        e.preventDefault()
+        handleJumpNextUnfinished()
+      }
     }
     document.addEventListener("keydown", handler)
     return () => document.removeEventListener("keydown", handler)
-  }, [])
+  }, [activeFileId, hasUnfinished, handleJumpNextUnfinished])
 
   useEffect(() => {
     if (!project || !routeFileId) return
@@ -491,9 +506,9 @@ export function ProjectWorkspace() {
               projectId={projectId!}
               files={project.files}
               activeFileId={activeFileId}
-              activeFileCells={cells}
               fileProgress={fileProgress}
               suggestionFileIds={suggestionFileIds}
+              validationCount={validationCount}
               onSelectFile={setActiveFileId}
               onRename={handleRename}
               onMove={(fileId) => {
@@ -540,6 +555,10 @@ export function ProjectWorkspace() {
                 Setup: {checklistState.completedCount}/{checklistState.totalCount}
               </button>
             )}
+            <NextUnfinishedButton
+              onClick={handleJumpNextUnfinished}
+              disabled={!activeFileId || !hasUnfinished}
+            />
             <PrimaryActionButton ctx={actionCtx} run={actionArgs} />
           </WorkspaceHeader>
         }

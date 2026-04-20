@@ -1,13 +1,12 @@
 import { useMemo, useState } from "react"
 import type { FileReference } from "@/lib/parsers/types"
-import type { CellData } from "@/hooks/useCells"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { useSidebarExpansion } from "@/hooks/useSidebarExpansion"
 import { FileRow } from "./FileRow"
-import { SectionRow } from "./SectionRow"
 import { FileActionMenu } from "./FileActionMenu"
 import { groupByCorpus } from "@/lib/sidebar/group-by-corpus"
 import { useEditorScroll } from "@/context/EditorScrollContext"
+import { FileSectionGrid } from "./sidebar/FileSectionGrid"
 
 interface FileStats { translated: number; validated: number; total: number }
 
@@ -15,9 +14,9 @@ interface Props {
   projectId: string
   files: FileReference[]
   activeFileId: string | null
-  activeFileCells: CellData[]
   fileProgress: Map<string, FileStats>
   suggestionFileIds: Set<string>
+  validationCount: number
   onSelectFile: (fileId: string) => void
   onRename: (fileId: string, newName: string) => void
   onMove: (fileId: string) => void
@@ -25,28 +24,14 @@ interface Props {
 }
 
 export function ExpandableFileList({
-  projectId, files, activeFileId, activeFileCells, fileProgress,
-  suggestionFileIds, onSelectFile, onRename, onMove, onDelete,
+  projectId, files, activeFileId, fileProgress,
+  suggestionFileIds, validationCount, onSelectFile, onRename, onMove, onDelete,
 }: Props) {
   const { expanded, toggle } = useSidebarExpansion(projectId)
   const [menu, setMenu] = useState<{ fileId: string; x: number; y: number } | null>(null)
   const [editingFileId, setEditingFileId] = useState<string | null>(null)
   const { requestScrollToGroup } = useEditorScroll()
   const groups = useMemo(() => groupByCorpus(files), [files])
-
-  function sectionsFor(fileId: string) {
-    if (fileId !== activeFileId || activeFileCells.length === 0) return []
-    const byGroup = new Map<string, FileStats>()
-    for (const c of activeFileCells) {
-      const key = c.group || "Ungrouped"
-      const s = byGroup.get(key) ?? { translated: 0, validated: 0, total: 0 }
-      s.total += 1
-      if (c.translated) s.translated += 1
-      if (c.status === "validated") s.validated += 1
-      byGroup.set(key, s)
-    }
-    return Array.from(byGroup.entries()).map(([label, stats]) => ({ label, ...stats }))
-  }
 
   return (
     <>
@@ -85,19 +70,20 @@ export function ExpandableFileList({
                         onOpenMenu={(x, y) => setMenu({ fileId: file.id, x, y })}
                         onStartRename={() => setEditingFileId(file.id)}
                       />
-                      {isExpanded && sectionsFor(file.id).map((s) => (
-                        <SectionRow
-                          key={s.label}
-                          label={s.label}
-                          translated={s.translated}
-                          validated={s.validated}
-                          total={s.total}
-                          onClick={() => {
-                            onSelectFile(file.id)
-                            requestScrollToGroup(s.label)
+                      {isExpanded && (
+                        <FileSectionGrid
+                          fileId={file.id}
+                          validationCount={validationCount}
+                          onSectionClick={(label) => {
+                            if (file.id !== activeFileId) {
+                              onSelectFile(file.id)
+                              setTimeout(() => requestScrollToGroup(label), 100)
+                            } else {
+                              requestScrollToGroup(label)
+                            }
                           }}
                         />
-                      ))}
+                      )}
                     </div>
                   )
                 })}

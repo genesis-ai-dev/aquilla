@@ -92,3 +92,27 @@ describe("extractUsfmStrings", () => {
     expect(result[0].strings[0].translated).toBe("")
   })
 })
+
+describe("extractUsfmStrings — section labels", () => {
+  it("sets section to 'BOOK CHAPTER' for verses", () => {
+    const usfm = "\\id GEN\n\\c 1\n\\v 1 In the beginning.\n\\c 2\n\\v 1 The heavens.\n"
+    const [book] = extractUsfmStrings(usfm)
+    expect(book.bookId).toBe("GEN")
+    expect(book.strings[0].section).toBe("GEN 1")
+    expect(book.strings[1].section).toBe("GEN 2")
+  })
+
+  it("sets section to 'BOOK CHAPTER' for headings", () => {
+    const usfm = "\\id GEN\n\\c 3\n\\s1 The Fall\n\\v 1 Now the serpent.\n"
+    const [book] = extractUsfmStrings(usfm)
+    const heading = book.strings.find(s => s.type === "heading")
+    expect(heading?.section).toBe("GEN 3")
+  })
+
+  it("sets section to bookId for paratext (book-level)", () => {
+    const usfm = "\\id GEN\n\\mt1 Genesis\n\\c 1\n\\v 1 hi\n"
+    const [book] = extractUsfmStrings(usfm)
+    const paratext = book.strings.find(s => s.type === "paratext")
+    expect(paratext?.section).toBe("GEN")
+  })
+})

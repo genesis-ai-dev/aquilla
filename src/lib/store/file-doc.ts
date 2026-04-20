@@ -48,6 +48,7 @@ export function createFileDoc(
       if (str.translated) setPlainText(translatedXml, str.translated)
       cell.set("context", str.context)
       cell.set("group", str.group)
+      if (str.section) cell.set("section", str.section)
       cell.set("type", str.type)
       cell.set("history", new Y.Array())
       if (str.sourceLocation) cell.set("sourceLocation", str.sourceLocation)

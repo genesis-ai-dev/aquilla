@@ -21,6 +21,8 @@ export interface TranslatableString {
   translated: string
   context: string
   group: string
+  /** Optional section label for navigation/progress. USFM/ebible set this to "BOOK CHAPTER" (e.g. "GEN 1"). When present, takes precedence over `group` for sectioning UI. */
+  section?: string
   type: CellType
   sourceLocation?: SourceLocation
 }
@@ -83,6 +85,12 @@ export interface ProjectRecord {
    * projects without this field fall back to registry defaults.
    */
   experimentalFlags?: Record<string, boolean>
+  /** Required distinct validators for a text cell to count as "fully validated". Clamped [1, 15]. Default 1. Mirrors desktop manifest. */
+  validationCount?: number
+  /** Required distinct validators for audio. Clamped [1, 15]. Default 1. */
+  validationCountAudio?: number
+  /** Cached flag — set true when any cell first writes audio. Avoids scanning every file's Y.Doc on load. */
+  hasAnyAudioData?: boolean
 }
 
 export interface ProjectSyncSettings {

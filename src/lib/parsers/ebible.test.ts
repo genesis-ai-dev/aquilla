@@ -86,4 +86,12 @@ describe("parseEBibleCorpus", () => {
     expect(out).toHaveLength(2)
     expect(out[1].context).toBe("GEN 1:2")
   })
+
+  it("derives section from vref (BOOK CHAPTER)", () => {
+    __setVrefsForTest(["GEN 1:1", "GEN 1:2", "GEN 2:1"])
+    const out = parseEBibleCorpus("In the beginning.\nThe earth.\nThus the heavens.\n")
+    expect(out[0].section).toBe("GEN 1")
+    expect(out[1].section).toBe("GEN 1")
+    expect(out[2].section).toBe("GEN 2")
+  })
 })

@@ -77,6 +77,12 @@ export interface ProjectRecord {
   syncSettings?: ProjectSyncSettings
   suggestionsDismissedAt?: string  // ISO timestamp; suggestion banner is hidden after this is set.
   setupChecklistDismissed?: boolean
+  /**
+   * Project-scoped toggles for in-development features. Keys are defined in
+   * `src/lib/features/flags.ts`; unknown keys are ignored on read. Optional —
+   * projects without this field fall back to registry defaults.
+   */
+  experimentalFlags?: Record<string, boolean>
 }
 
 export interface ProjectSyncSettings {

@@ -147,6 +147,80 @@ export async function collectValidatedPairs(fileIds: string[]): Promise<Validate
   return pairs
 }
 
+export interface RecentExampleCandidate {
+  id: string
+  original: string
+  translated: string
+  validationStatus: "full" | "self" | "none" | "empty" | "others"
+  history: { timestamp: string; author: string; validated: boolean }[]
+}
+
+/**
+ * Load candidate examples for Living Memory's Recent Examples section —
+ * cells that have a non-empty translation and at least one validated
+ * history entry. Filtering/sorting/limiting is performed by the pure
+ * selector `selectRecentValidatedExamples`; this helper's only job is
+ * to stream per-cell records across multiple file docs.
+ *
+ * Mirrors `collectValidatedPairs`' doc-load-and-destroy pattern.
+ */
+export async function collectRecentExampleCandidates(
+  fileIds: string[],
+): Promise<RecentExampleCandidate[]> {
+  const out: RecentExampleCandidate[] = []
+
+  for (const fileId of fileIds) {
+    const handle = loadFileDoc(fileId)
+    try {
+      await new Promise<void>((resolve) => {
+        if (handle.persistence.synced) resolve()
+        else handle.persistence.once("synced", () => resolve())
+      })
+
+      const cellsMap = handle.doc.getMap("cells")
+      const orderArray = handle.doc.getArray<string>("order")
+
+      for (const cellId of orderArray.toArray()) {
+        const cell = cellsMap.get(cellId) as Y.Map<unknown> | undefined
+        if (!cell) continue
+
+        const translated = extractCellTranslated(cell)
+        if (!translated.trim()) continue
+
+        const historyArr = cell.get("history") as
+          | Y.Array<{ timestamp?: string; author?: string; validated?: boolean }>
+          | undefined
+        const history = historyArr
+          ? historyArr.toArray().map((h) => ({
+              timestamp: h.timestamp ?? "",
+              author: h.author ?? "",
+              validated: !!h.validated,
+            }))
+          : []
+        if (history.length === 0) continue
+        const last = history[history.length - 1]
+        if (!last.validated) continue
+
+        // We don't have access to the per-user `__source.validatedBy` entries
+        // here without extra plumbing; treat any cell whose last history
+        // entry is `validated: true` as "full" for selector purposes.
+        // Refine later if we need per-user granularity in Living Memory.
+        out.push({
+          id: cellId,
+          original: (cell.get("original") as string) || "",
+          translated,
+          validationStatus: "full",
+          history,
+        })
+      }
+    } finally {
+      destroyFileDoc(handle)
+    }
+  }
+
+  return out
+}
+
 export interface ExportCell {
   id: string
   original: string

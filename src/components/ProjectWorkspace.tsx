@@ -41,7 +41,7 @@ import { useSyncProject } from "@/hooks/useSyncProject"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { useAutoSync } from "@/hooks/useAutoSync"
 import { useCorpusBackfill } from "@/hooks/useCorpusBackfill"
-import { Film, Scale, MessagesSquare, Camera, Share2, Settings as SettingsIcon, Lock, ClipboardList } from "lucide-react"
+import { Film, Scale, MessagesSquare, Camera, Share2, Settings as SettingsIcon, Lock, ClipboardList, Brain } from "lucide-react"
 import { AppShell } from "./AppShell"
 import { WorkspaceHeader } from "./WorkspaceHeader"
 import { WorkspaceStatusBar } from "./WorkspaceStatusBar"
@@ -66,6 +66,7 @@ import {
 import type { ProjectRecord } from "@/lib/parsers/types"
 import { useSetupChecklist } from "@/hooks/useSetupChecklist"
 import { SetupChecklistDrawer } from "./onboarding/SetupChecklistDrawer"
+import { useFeatureFlag } from "@/hooks/useFeatureFlag"
 
 export function ProjectWorkspace() {
   const { id: projectId, fileId: routeFileId } = useParams<{ id: string; fileId?: string }>()
@@ -317,6 +318,7 @@ export function ProjectWorkspace() {
 
   const { state: checklistState, dismissed: checklistDismissed, dismiss: dismissChecklist, refreshShares: refreshChecklistShares } = useSetupChecklist(project ?? null)
   const [checklistOpen, setChecklistOpen] = useState(!checklistDismissed)
+  const livingMemoryEnabled = useFeatureFlag("living-memory-view", project)
 
   useEffect(() => {
     if (!checklistDismissed) setChecklistOpen(true)
@@ -402,19 +404,32 @@ export function ProjectWorkspace() {
     refresh()
   }, [project, refresh])
 
-  const projectNavItems = useMemo(() => ([
-    { id: "rules", label: "Rules", icon: Scale,
-      onClick: () => navigate(`/project/${projectId}/rules`) },
-    { id: "comments", label: "Comments", icon: MessagesSquare,
-      badge: Array.from(openCommentCount.values()).reduce((a, b) => a + b, 0),
-      onClick: () => navigate(`/project/${projectId}/comments`) },
-    { id: "snapshots", label: "Snapshots", icon: Camera,
-      onClick: () => navigate(`/project/${projectId}/snapshots`) },
-    { id: "share", label: "Share", icon: Share2,
-      onClick: () => setShareOpen(true) },
-    { id: "settings", label: "Settings", icon: SettingsIcon,
-      onClick: () => navigate(`/project/${projectId}/settings`) },
-  ]), [projectId, navigate, openCommentCount])
+  const projectNavItems = useMemo(() => {
+    const items = [
+      { id: "rules", label: "Rules", icon: Scale,
+        onClick: () => navigate(`/project/${projectId}/rules`) },
+      { id: "comments", label: "Comments", icon: MessagesSquare,
+        badge: Array.from(openCommentCount.values()).reduce((a, b) => a + b, 0),
+        onClick: () => navigate(`/project/${projectId}/comments`) },
+      { id: "snapshots", label: "Snapshots", icon: Camera,
+        onClick: () => navigate(`/project/${projectId}/snapshots`) },
+      { id: "share", label: "Share", icon: Share2,
+        onClick: () => setShareOpen(true) },
+      { id: "settings", label: "Settings", icon: SettingsIcon,
+        onClick: () => navigate(`/project/${projectId}/settings`) },
+    ]
+    if (livingMemoryEnabled) {
+      // Insert before Share so it sits with Rules/Comments/Snapshots.
+      const insertIdx = items.findIndex((i) => i.id === "share")
+      items.splice(insertIdx, 0, {
+        id: "living-memory",
+        label: "Living Memory",
+        icon: Brain,
+        onClick: () => navigate(`/project/${projectId}/memory`),
+      })
+    }
+    return items
+  }, [projectId, navigate, openCommentCount, livingMemoryEnabled])
 
   const actionCtx = useMemo(() => ({
     project: project!,

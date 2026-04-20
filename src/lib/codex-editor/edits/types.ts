@@ -1,10 +1,12 @@
 import type { EditTypeValue, ValidationEntry } from "@/lib/codex-editor/types"
 
 /**
- * Contiguous-commit window. A commit from the same author+type+editMap
- * within this many ms of the last entry extends that entry in place.
- * Must match the desktop serializer's SESSION_GAP_MS in
- * src/lib/codex-editor/serialize/edit-sessions.ts so round-trips are stable.
+ * Contiguous-commit window. A commit with the same type+editMap within this
+ * many ms of the last entry extends that entry in place — author is NOT part
+ * of the grouping key, so two users committing in the same window end up in
+ * one entry with both usernames in `authors`. Matches the desktop serializer's
+ * SESSION_GAP_MS in src/lib/codex-editor/serialize/edit-sessions.ts so
+ * round-trips are stable.
  */
 export const SESSION_GAP_MS = 5 * 60_000
 

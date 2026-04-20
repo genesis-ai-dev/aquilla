@@ -17,8 +17,11 @@ function resolveType(source: "human" | "llm"): EditTypeValue {
 
 /**
  * Record a deliberate commit on a cell's value or metadata. Applies the
- * session-grouping rule: same author/type/editMap within SESSION_GAP_MS
- * extends the last entry in place; otherwise a new entry is appended.
+ * session-grouping rule: same type/editMap within SESSION_GAP_MS extends
+ * the last entry in place (adding the committing user to `authors` if new);
+ * otherwise a new entry is appended. Author is intentionally NOT part of
+ * the grouping key — multi-author collaboration within one session is a
+ * first-class case.
  *
  * For source="human" on a value-editMap, the author is auto-validated.
  * LLM commits never auto-validate, and metadata-editMap entries omit

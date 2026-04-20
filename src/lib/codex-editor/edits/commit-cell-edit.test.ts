@@ -47,13 +47,17 @@ describe("commitCellEdit", () => {
     expect(arr.length).toBe(2)
   })
 
-  it("appends a new entry when the editMap differs", () => {
+  it("appends a new entry when the editMap differs, with no validator seeded on metadata entries", () => {
     const { doc, cell } = setupDoc()
     commitCellEdit(doc, "c1", "alice", ["value"], "hello", "human")
     vi.advanceTimersByTime(60_000)
     commitCellEdit(doc, "c1", "alice", ["metadata", "cellLabel"], "Gen 1:1", "human")
     const arr = getEditsArray(cell)
     expect(arr.length).toBe(2)
+    const metaSnap = snapshotEntry(arr.get(1))
+    expect(metaSnap.editMap).toEqual(["metadata", "cellLabel"])
+    // FileEditHistory shape: metadata edits carry no validators
+    expect(metaSnap.validatedBy).toEqual([])
   })
 
   it("appends a new entry when the type differs (human vs llm)", () => {

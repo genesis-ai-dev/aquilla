@@ -2,7 +2,7 @@ import { useRef, useCallback, useMemo, useState, useEffect, forwardRef, useImper
 import { useVirtualizer } from "@tanstack/react-virtual"
 import * as Y from "yjs"
 import DOMPurify from "dompurify"
-import { Check, CheckCheck, Circle, CircleDot, Trash2, AlertTriangle, AlertCircle, Languages, RefreshCw, MessageCircle, History, Play } from "lucide-react"
+import { Check, CheckCheck, Circle, Trash2, AlertTriangle, AlertCircle, Languages, RefreshCw, MessageCircle, History, Play } from "lucide-react"
 import type { CellData } from "@/hooks/useCells"
 import type { ScoredPair } from "@/lib/search/search-index"
 import type { TranslationRule, RuleInfraction, ProjectRecord } from "@/lib/parsers/types"
@@ -382,7 +382,10 @@ function EditorRow({
     // Don't close if user is interacting with the popover
   }
 
-  const ValidationIcon = vs === "full" ? CheckCheck : vs === "self" ? Check : vs === "others" ? CircleDot : Circle
+  // "others" now uses a filled Circle (lucide has no dedicated filled-circle
+  // icon; we render Circle with fill="currentColor"). Matches codex-editor
+  // desktop AudioValidationStatusIcon's circle-filled codicon.
+  const ValidationIcon = vs === "full" ? CheckCheck : vs === "self" ? Check : Circle
   const validationColorClass =
     vs === "full" ? "text-emerald-500" :
     vs === "self" ? "text-emerald-500" :
@@ -412,7 +415,11 @@ function EditorRow({
         onClick={handleIconClick}
       >
         <HealthRing health={healthValue} size={22} strokeWidth={2}>
-          <ValidationIcon className="h-3 w-3" strokeWidth={2.5} />
+          <ValidationIcon
+            className="h-3 w-3"
+            strokeWidth={2.5}
+            {...(vs === "others" ? { fill: "currentColor" } : {})}
+          />
         </HealthRing>
       </button>
       {validationPopoverOpen && vs !== "empty" && (

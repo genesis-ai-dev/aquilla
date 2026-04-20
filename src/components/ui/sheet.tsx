@@ -27,20 +27,24 @@ function SheetContent({
   side?: "right" | "left"
   showCloseButton?: boolean
 }) {
-  const sideClasses =
-    side === "right"
-      ? "right-0 border-l data-open:animate-in data-open:slide-in-from-right data-closed:animate-out data-closed:slide-out-to-right"
-      : "left-0 border-r data-open:animate-in data-open:slide-in-from-left data-closed:animate-out data-closed:slide-out-to-left"
+  // No animation classes — tw-animate-css's `animate-out` keyframe doesn't
+  // use `animation-fill-mode: forwards`, so after the exit animation runs
+  // the element reverts to its natural (visible) state and Base UI never
+  // removes it from the DOM. Dropping animations makes close instant but
+  // correct; visual polish can be added later if the underlying CSS gets
+  // fixed.
+  const sideClasses = side === "right" ? "right-0 border-l" : "left-0 border-r"
   return (
     <DialogPrimitive.Portal>
       <DialogPrimitive.Backdrop
         data-slot="sheet-overlay"
-        className="fixed inset-0 z-50 bg-black/20 duration-150 data-open:animate-in data-open:fade-in-0 data-closed:animate-out data-closed:fade-out-0"
+        className="fixed inset-0 z-50 bg-black/20"
       />
       <DialogPrimitive.Popup
         data-slot="sheet-content"
         className={cn(
-          "fixed top-0 z-50 flex h-full w-80 flex-col bg-background shadow-xl ring-1 ring-foreground/10 duration-200 outline-none",
+          "fixed top-0 z-50 flex h-full w-80 flex-col bg-background shadow-xl ring-1 ring-foreground/10 outline-none",
+          "data-closed:pointer-events-none data-closed:opacity-0",
           sideClasses,
           className
         )}

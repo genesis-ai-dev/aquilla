@@ -579,7 +579,7 @@ import type { EditTypeValue } from "@/lib/codex-editor/types"
 import { SESSION_GAP_MS } from "./types"
 import {
   getEditsArray,
-  createEntry,
+  appendEntry,
   editMapEquals,
   getEntryEditMap,
   entryHasAuthor,
@@ -640,7 +640,7 @@ export function commitCellEdit(
       }
     }
 
-    const entry = createEntry({
+    appendEntry(arr, {
       authors: [username],
       timestamp: now,
       type,
@@ -648,7 +648,6 @@ export function commitCellEdit(
       value,
       seedValidator: source === "human" && isValueEdit ? username : undefined,
     })
-    arr.push([entry])
   })
 }
 ```
@@ -884,7 +883,7 @@ import * as Y from "yjs"
 import type { EditTypeValue } from "@/lib/codex-editor/types"
 import { SESSION_GAP_MS } from "./types"
 import {
-  createEntry, editMapEquals, getEntryEditMap,
+  appendEntry, editMapEquals, getEntryEditMap,
   entryHasAuthor, appendAuthor,
 } from "./yjs-helpers"
 
@@ -933,7 +932,7 @@ export function commitMetaEdit(
       }
     }
 
-    arr.push([createEntry({ authors: [username], timestamp: now, type, editMap, value })])
+    appendEntry(arr, { authors: [username], timestamp: now, type, editMap, value })
   })
 }
 ```
@@ -1063,7 +1062,7 @@ Create `src/lib/codex-editor/edits/seed-from-source.ts`:
 import * as Y from "yjs"
 import type { CodexCell, EditHistory, ValidationEntry } from "@/lib/codex-editor/types"
 import { isValidValidationEntry } from "@/lib/codex-editor/merge/validators"
-import { getEditsArray, createEntry, upsertValidator, softDeleteValidator } from "./yjs-helpers"
+import { getEditsArray, appendEntry, upsertValidator, softDeleteValidator } from "./yjs-helpers"
 import { getMetaEditsArray } from "./commit-meta-edit"
 
 /**
@@ -1092,7 +1091,10 @@ export function seedCellEditsFromSource(cell: Y.Map<unknown>): void {
   for (const e of edits) {
     const authors = parseAuthors(e.author)
     if (authors.length === 0) continue
-    const entry = createEntry({
+    // appendEntry attaches the entry to the doc immediately so the
+    // upsertValidator/softDeleteValidator calls below can write to the
+    // nested validatedBy Y.Map.
+    const entry = appendEntry(arr, {
       authors,
       timestamp: e.timestamp,
       type: e.type,
@@ -1110,7 +1112,6 @@ export function seedCellEditsFromSource(cell: Y.Map<unknown>): void {
         }
       }
     }
-    arr.push([entry])
   }
 }
 
@@ -1130,14 +1131,13 @@ export function seedMetaEditsFromSource(meta: Y.Map<unknown>): void {
   for (const e of edits) {
     const authors = parseAuthors(e.author)
     if (authors.length === 0) continue
-    const entry = createEntry({
+    appendEntry(arr, {
       authors,
       timestamp: e.timestamp,
       type: e.type,
       editMap: e.editMap ?? [],
       value: e.value,
     })
-    arr.push([entry])
   }
 }
 ```

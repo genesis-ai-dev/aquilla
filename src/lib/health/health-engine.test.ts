@@ -13,6 +13,7 @@ function makeCell(overrides: Partial<CellData> & { id: string }): CellData {
     validationStatus: overrides.validationStatus
       ?? (status === "validated" ? "full" : status === "empty" ? "empty" : "none"),
     activeValidators: [],
+    validationHistory: [],
     history: [], threads: [],
     ...overrides,
   }

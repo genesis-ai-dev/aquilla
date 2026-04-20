@@ -2,12 +2,13 @@ import { useRef, useCallback, useMemo, useState, useEffect, forwardRef, useImper
 import { useVirtualizer } from "@tanstack/react-virtual"
 import * as Y from "yjs"
 import DOMPurify from "dompurify"
-import { Check, CheckCheck, Circle, CircleDot, Trash2, AlertTriangle, AlertCircle, Languages, RefreshCw, MessageCircle, History, Play } from "lucide-react"
+import { Check, CheckCheck, Circle, Trash2, AlertTriangle, AlertCircle, Languages, RefreshCw, MessageCircle, History, Play } from "lucide-react"
 import type { CellData } from "@/hooks/useCells"
 import type { ScoredPair } from "@/lib/search/search-index"
 import type { TranslationRule, RuleInfraction, ProjectRecord } from "@/lib/parsers/types"
 import { useProjectPermissions } from "@/hooks/useProjectPermissions"
 import { appendCellHistory, recordHistoryEntry, toggleCellValidation } from "@/hooks/useCellHistory"
+import { commitCellEdit } from "@/lib/codex-editor/edits/commit-cell-edit"
 import { getPlainText, getFragmentHtml } from "@/lib/richtext/translated-xml"
 import { SparkleButton } from "./SparkleButton"
 import { ExamplePanel } from "./ExamplePanel"
@@ -16,6 +17,73 @@ import { HealthRing } from "./HealthRing"
 import { TranslatedEditor } from "./TranslatedEditor"
 import { CellAudioButton } from "./CellAudioButton"
 import { cn } from "@/lib/utils"
+
+function ValidationHistoryTimeline({
+  entries, currentUsername,
+}: {
+  entries: import("@/lib/codex-editor/edits/types").EditValidationSummary[]
+  currentUsername: string
+}) {
+  const [expandedIdx, setExpandedIdx] = useState<number | null>(null)
+  // entries are value-editMap only, oldest-first. The last entry IS the current
+  // state (already shown above the divider), so skip it. Show remaining newest-first.
+  const historical = entries.slice(0, -1).reverse()
+  if (historical.length === 0) return null
+
+  return (
+    <>
+      <div className="my-1 h-px bg-border" />
+      <div className="mb-1 px-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">History</div>
+      <ul className="space-y-0.5">
+        {historical.map((entry, i) => {
+          const snippet = typeof entry.value === "string"
+            ? (entry.value.length > 40 ? entry.value.slice(0, 40) + "…" : entry.value)
+            : ""
+          const date = new Date(entry.timestamp).toLocaleDateString(undefined, { month: "short", day: "numeric" })
+          const authors = entry.authors.join(", ")
+          const expanded = expandedIdx === i
+          return (
+            <li key={`${entry.timestamp}-${i}`} className="rounded text-xs">
+              <button
+                type="button"
+                className="flex w-full items-center justify-between gap-2 px-1 py-1 text-left hover:bg-muted/50"
+                onClick={() => setExpandedIdx(expanded ? null : i)}
+              >
+                <span className="truncate">
+                  <span className="text-muted-foreground">{date} · </span>
+                  <span>{authors}</span>
+                </span>
+              </button>
+              {snippet && (
+                <div className="px-1 pb-1 text-[11px] italic text-muted-foreground/80 truncate">"{snippet}"</div>
+              )}
+              {expanded && (
+                <ul className="border-l border-border/50 pl-2 ml-1 mb-1 space-y-0.5">
+                  {entry.validatorsAll.length === 0 ? (
+                    <li className="px-1 py-0.5 text-[11px] text-muted-foreground/60">No validators on this state</li>
+                  ) : entry.validatorsAll.map(v => (
+                    <li
+                      key={v.username}
+                      className={cn(
+                        "px-1 py-0.5 text-[11px] flex items-center gap-1",
+                        v.isDeleted && "text-muted-foreground/50 line-through",
+                      )}
+                    >
+                      <span>{v.username}{v.username === currentUsername ? " (you)" : ""}</span>
+                      <span className="text-muted-foreground/60 ml-auto">
+                        {new Date(v.updatedTimestamp).toLocaleDateString(undefined, { month: "short", day: "numeric" })}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </li>
+          )
+        })}
+      </ul>
+    </>
+  )
+}
 
 export interface EditorTableHandle {
   scrollToCellIndex: (index: number) => void
@@ -291,6 +359,7 @@ function EditorRow({
             timestamp: new Date().toISOString(),
           }])
         })
+        commitCellEdit(doc, cell.id, username, ["value"], currentText, "human")
         return
       }
     }
@@ -301,6 +370,9 @@ function EditorRow({
       author: username,
       validated: true,
     })
+    // Dual write: cell.edits is the Yjs-native source of truth for validation;
+    // cell.history keeps feeding the TipTap binding.
+    commitCellEdit(doc, cell.id, username, ["value"], currentText, "human")
   }
 
   // Detect formatting loss: source has inline style marks that the target doesn't.
@@ -377,7 +449,10 @@ function EditorRow({
     // Don't close if user is interacting with the popover
   }
 
-  const ValidationIcon = vs === "full" ? CheckCheck : vs === "self" ? Check : vs === "others" ? CircleDot : Circle
+  // "others" now uses a filled Circle (lucide has no dedicated filled-circle
+  // icon; we render Circle with fill="currentColor"). Matches codex-editor
+  // desktop AudioValidationStatusIcon's circle-filled codicon.
+  const ValidationIcon = vs === "full" ? CheckCheck : vs === "self" ? Check : Circle
   const validationColorClass =
     vs === "full" ? "text-emerald-500" :
     vs === "self" ? "text-emerald-500" :
@@ -407,23 +482,29 @@ function EditorRow({
         onClick={handleIconClick}
       >
         <HealthRing health={healthValue} size={22} strokeWidth={2}>
-          <ValidationIcon className="h-3 w-3" strokeWidth={2.5} />
+          <ValidationIcon
+            className="h-3 w-3"
+            strokeWidth={2.5}
+            {...(vs === "others" ? { fill: "currentColor" } : {})}
+          />
         </HealthRing>
       </button>
       {validationPopoverOpen && vs !== "empty" && (
         <div
           ref={popoverRef}
           className={cn(
-            "absolute right-7 top-0 z-50 w-48 origin-top-right rounded-lg border bg-popover p-2 shadow-lg",
+            "absolute right-7 top-0 z-50 w-72 origin-top-right rounded-lg border bg-popover p-2 shadow-lg",
             "animate-in fade-in-0 zoom-in-95 duration-150",
           )}
         >
-          {cell.activeValidators.length > 0 ? (
-            <ul className="space-y-0.5">
-              <li className="mb-1 px-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
-                Validated by
-              </li>
-              {cell.activeValidators.map((v) => (
+          <ul className="space-y-0.5">
+            <li className="mb-1 px-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+              Validated by
+            </li>
+            {cell.activeValidators.length === 0 ? (
+              <li className="px-1 py-1 text-xs text-muted-foreground">No active validators</li>
+            ) : (
+              cell.activeValidators.map((v) => (
                 <li key={v} className="flex items-center justify-between gap-2 rounded px-1 py-1 text-xs hover:bg-muted/50">
                   <span className="truncate">{v}{v === username ? " (you)" : ""}</span>
                   {v === username && editable && (
@@ -440,10 +521,11 @@ function EditorRow({
                     </button>
                   )}
                 </li>
-              ))}
-            </ul>
-          ) : (
-            <p className="px-1 py-2 text-xs text-muted-foreground">No validations yet</p>
+              ))
+            )}
+          </ul>
+          {cell.validationHistory.length > 0 && (
+            <ValidationHistoryTimeline entries={cell.validationHistory} currentUsername={username} />
           )}
         </div>
       )}

@@ -7,6 +7,7 @@ function makeCell(overrides: Partial<CellData> & { id: string }): CellData {
   return {
     original: "test", translated: "", context: "", group: "", type: "text",
     originalHtml: undefined, status: "empty", validationStatus: "none", activeValidators: [],
+    validationHistory: [],
     history: [], threads: [],
     ...overrides,
   }

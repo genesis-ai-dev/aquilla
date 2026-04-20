@@ -1,109 +1,79 @@
-import { describe, it, expect } from "vitest";
-import * as Y from "yjs";
-import { serializeCell } from "./cell";
-import type { CodexCell } from "@/lib/codex-editor/types";
-import { setFragmentFromHtml } from "@/lib/richtext/translated-xml";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest"
+import * as Y from "yjs"
+import { serializeCell } from "./cell"
+import { commitCellEdit } from "@/lib/codex-editor/edits/commit-cell-edit"
+import { toggleCellValidation } from "@/lib/codex-editor/edits/toggle-cell-validation"
+import { setPlainText } from "@/lib/richtext/translated-xml"
 
-function buildYCell(source: CodexCell, lastSyncedHistoryAt = 0): Y.Map<unknown> {
-  const doc = new Y.Doc();
-  const m = doc.getMap("c");
-  const cell = new Y.Map<unknown>();
-  cell.set("id", source.metadata.id);
-  cell.set("__source", JSON.parse(JSON.stringify(source)));
-  cell.set("__lastSyncedHistoryAt", lastSyncedHistoryAt);
-  const frag = new Y.XmlFragment();
-  cell.set("translatedXml", frag);
-  setFragmentFromHtml(frag, source.value);
-  cell.set("history", new Y.Array());
-  cell.set("threads", new Y.Array());
-  m.set("c", cell);
-  return cell;
+function setupCell(): Y.Map<unknown> {
+  const doc = new Y.Doc()
+  const cell = new Y.Map<unknown>()
+  const frag = new Y.XmlFragment()
+  cell.set("translatedXml", frag)
+  cell.set("__source", {
+    kind: 2, languageId: "html", value: "",
+    metadata: { id: "c1", type: "text", edits: [] },
+  })
+  doc.getMap("cells").set("c1", cell)
+  return cell
 }
 
-describe("serializeCell", () => {
-  it("byte-identical output when nothing changed", () => {
-    const source: CodexCell = {
-      kind: 2,
-      languageId: "scripture",
-      value: "<p>Im Anfang</p>",
-      metadata: {
-        id: "GEN 1:1",
-        type: "text",
-        edits: [
-          {
-            author: "a",
-            timestamp: 1,
-            type: "user-edit",
-            editMap: ["value"],
-            value: "<p>Im Anfang</p>",
-          },
-        ],
-        data: { book: "GEN", chapter: "1", verse: "1" },
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        attachments: { aud1: { type: "audio", url: "x" } as any },
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      } as any,
-    };
-    const cell = buildYCell(source, 999);
-    const out = serializeCell(cell);
-    expect(out).toEqual(source);
-  });
+describe("serializeCell — cell.edits → metadata.edits", () => {
+  beforeEach(() => { vi.useFakeTimers(); vi.setSystemTime(new Date(2026, 3, 20, 10, 0, 0)) })
+  afterEach(() => { vi.useRealTimers() })
 
-  it("appends a new edit when text changed", () => {
-    const source: CodexCell = {
-      kind: 2,
-      languageId: "scripture",
-      value: "<p>old</p>",
-      metadata: { id: "GEN 1:1", type: "text", edits: [] },
-    };
-    const cell = buildYCell(source, 0);
-    const frag = cell.get("translatedXml") as Y.XmlFragment;
-    setFragmentFromHtml(frag, "<p>new</p>");
-    // Simulate a recorded local edit session via the history Y.Array
-    const hist = cell.get("history") as Y.Array<unknown>;
-    hist.push([
-      {
-        timestamp: new Date(50_000).toISOString(),
-        value: "<p>new</p>",
-        source: "human",
-        author: "alice",
-        validated: false,
-      },
-    ]);
+  it("emits metadata.edits empty when cell.edits is empty", () => {
+    const cell = setupCell()
+    const out = serializeCell(cell)
+    expect(out.metadata.edits).toEqual([])
+  })
 
-    const out = serializeCell(cell);
-    expect(out.value).toBe("<p>new</p>");
-    expect(out.metadata.edits).toHaveLength(1);
-    expect(out.metadata.edits![0]).toMatchObject({
-      author: "alice",
-      value: "<p>new</p>",
-      editMap: ["value"],
-      type: "user-edit",
-    });
-  });
+  it("emits single-author entry with author string unchanged", () => {
+    const cell = setupCell()
+    const frag = cell.get("translatedXml") as Y.XmlFragment
+    setPlainText(frag, "hello")
+    const yDoc = cell.doc!
+    commitCellEdit(yDoc, "c1", "alice", ["value"], "hello", "human")
+    const out = serializeCell(cell)
+    expect(out.metadata.edits).toHaveLength(1)
+    expect(out.metadata.edits![0].author).toBe("alice")
+    expect(out.metadata.edits![0].validatedBy).toEqual([
+      expect.objectContaining({ username: "alice", isDeleted: false }),
+    ])
+  })
 
-  it("preserves unknown fields (attachments, cellLabel, isLocked)", () => {
-    const source: CodexCell = {
-      kind: 2,
-      languageId: "scripture",
-      value: "<p>x</p>",
-      metadata: {
-        id: "X",
-        type: "text",
-        cellLabel: "1:1",
-        isLocked: true,
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        attachments: { a1: { foo: "bar" } as any },
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      } as any,
-    };
-    const cell = buildYCell(source, 999);
-    const out = serializeCell(cell);
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    expect((out.metadata as any).cellLabel).toBe("1:1");
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    expect((out.metadata as any).isLocked).toBe(true);
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    expect((out.metadata as any).attachments.a1.foo).toBe("bar");
-  });
-});
+  it("emits 'alice/bob' when a session has multiple authors", () => {
+    const cell = setupCell()
+    const frag = cell.get("translatedXml") as Y.XmlFragment
+    setPlainText(frag, "hi")
+    const yDoc = cell.doc!
+    commitCellEdit(yDoc, "c1", "alice", ["value"], "hi", "human")
+    vi.advanceTimersByTime(60_000)
+    commitCellEdit(yDoc, "c1", "bob", ["value"], "hi edited", "human")
+    const out = serializeCell(cell)
+    expect(out.metadata.edits).toHaveLength(1)
+    expect(out.metadata.edits![0].author).toBe("alice/bob")
+  })
+
+  it("emits soft-deleted validators with isDeleted: true", () => {
+    const cell = setupCell()
+    const frag = cell.get("translatedXml") as Y.XmlFragment
+    setPlainText(frag, "hi")
+    const yDoc = cell.doc!
+    commitCellEdit(yDoc, "c1", "alice", ["value"], "hi", "human")
+    vi.advanceTimersByTime(60_000)
+    toggleCellValidation(yDoc, "c1", "alice", false)
+    const out = serializeCell(cell)
+    const vb = out.metadata.edits![0].validatedBy!
+    expect(vb).toHaveLength(1)
+    expect(vb[0].isDeleted).toBe(true)
+  })
+
+  it("omits validatedBy when the map is empty (LLM edit)", () => {
+    const cell = setupCell()
+    const yDoc = cell.doc!
+    commitCellEdit(yDoc, "c1", "llm", ["value"], "draft", "llm")
+    const out = serializeCell(cell)
+    expect(out.metadata.edits![0].validatedBy).toBeUndefined()
+  })
+})

@@ -1,7 +1,9 @@
 import { useEffect, useState } from "react"
 import * as Y from "yjs"
 import type { CellHistoryEntry, SourceLocation, CommentThread } from "@/lib/parsers/types"
-import type { CodexCellAttachment, ValidationEntry } from "@/lib/codex-editor/types"
+import type { CodexCellAttachment } from "@/lib/codex-editor/types"
+import type { EditValidationSummary } from "@/lib/codex-editor/edits/types"
+import { snapshotEntry } from "@/lib/codex-editor/edits/yjs-helpers"
 import { extractThreadsFromCell } from "./useComments"
 import { getPlainText } from "@/lib/richtext/translated-xml"
 
@@ -22,6 +24,9 @@ export interface CellData {
   status: "empty" | "unvalidated" | "validated"
   validationStatus: ValidationStatus
   activeValidators: string[]
+  /** Read-only projection of cell.edits (value-editMap entries only, newest-last)
+   *  used by the validation popover's history timeline. */
+  validationHistory: EditValidationSummary[]
   history: CellHistoryEntry[]
   threads: CommentThread[]
   sourceLocation?: SourceLocation
@@ -41,34 +46,34 @@ function deriveStatus(translated: string, history: CellHistoryEntry[]): "empty" 
 
 function deriveValidationStatus(
   translated: string,
-  edits: Array<{ editMap?: string[]; validatedBy?: ValidationEntry[] }> | undefined,
+  cell: Y.Map<unknown>,
   currentUsername: string,
   requiredValidations: number,
 ): { validationStatus: ValidationStatus; activeValidators: string[] } {
   if (!translated || !translated.trim()) {
     return { validationStatus: "empty", activeValidators: [] }
   }
-
-  let validatedBy: ValidationEntry[] = []
-  if (edits) {
-    for (let i = edits.length - 1; i >= 0; i--) {
-      if (edits[i].editMap?.[0] === "value") {
-        validatedBy = edits[i].validatedBy ?? []
-        break
-      }
+  const arr = cell.get("edits") as Y.Array<Y.Map<unknown>> | undefined
+  if (!arr) return { validationStatus: "none", activeValidators: [] }
+  // Walk backwards for the latest value-edit.
+  for (let i = arr.length - 1; i >= 0; i--) {
+    const entry = arr.get(i)
+    const editMapArr = entry.get("editMap") as Y.Array<string> | undefined
+    if (editMapArr?.get(0) !== "value") continue
+    const validators = entry.get("validatedBy") as Y.Map<Y.Map<unknown>> | undefined
+    const active: string[] = []
+    if (validators) {
+      validators.forEach((v, username) => { if (!v.get("isDeleted")) active.push(username) })
     }
+    const count = active.length
+    if (count === 0) return { validationStatus: "none", activeValidators: [] }
+    // Threshold met → "full" takes precedence over "self" (matches the desktop
+    // AudioValidationStatusIcon logic: isFullyValidated wins).
+    if (count >= requiredValidations) return { validationStatus: "full", activeValidators: active }
+    if (active.includes(currentUsername)) return { validationStatus: "self", activeValidators: active }
+    return { validationStatus: "others", activeValidators: active }
   }
-
-  const active = validatedBy.filter(v =>
-    v && typeof v === "object" && typeof v.username === "string" && !v.isDeleted
-  )
-  const activeUsernames = active.map(v => v.username)
-  const count = activeUsernames.length
-
-  if (count === 0) return { validationStatus: "none", activeValidators: [] }
-  if (count >= requiredValidations) return { validationStatus: "full", activeValidators: activeUsernames }
-  if (activeUsernames.includes(currentUsername)) return { validationStatus: "self", activeValidators: activeUsernames }
-  return { validationStatus: "others", activeValidators: activeUsernames }
+  return { validationStatus: "none", activeValidators: [] }
 }
 
 export function useCells(doc: Y.Doc | null, username = "local", requiredValidations = 1): CellData[] {
@@ -91,12 +96,30 @@ export function useCells(doc: Y.Doc | null, username = "local", requiredValidati
         const history: CellHistoryEntry[] = historyArr ? historyArr.toArray() : []
         const threads = extractThreadsFromCell(cell)
         const source = cell.get("__source") as
-          | { metadata?: { attachments?: Record<string, CodexCellAttachment>; selectedAudioId?: string; cellLabel?: string; edits?: Array<{ editMap?: string[]; validatedBy?: ValidationEntry[] }> } }
+          | { metadata?: { attachments?: Record<string, CodexCellAttachment>; selectedAudioId?: string; cellLabel?: string } }
           | undefined
         const cellLabel = source?.metadata?.cellLabel
         const { validationStatus, activeValidators } = deriveValidationStatus(
-          translated, source?.metadata?.edits, username, requiredValidations,
+          translated, cell, username, requiredValidations,
         )
+        const editsArr = cell.get("edits") as Y.Array<Y.Map<unknown>> | undefined
+        const validationHistory: EditValidationSummary[] = []
+        if (editsArr) {
+          for (let i = 0; i < editsArr.length; i++) {
+            const snap = snapshotEntry(editsArr.get(i))
+            if (snap.editMap[0] !== "value") continue
+            const active = snap.validatedBy.filter(v => !v.isDeleted).map(v => v.username)
+            validationHistory.push({
+              authors: snap.authors,
+              timestamp: snap.timestamp,
+              type: snap.type,
+              editMap: snap.editMap,
+              value: snap.value,
+              validatorsActive: active,
+              validatorsAll: snap.validatedBy,
+            })
+          }
+        }
         ordered.push({
           id: cell.get("id") as string,
           original: cell.get("original") as string,
@@ -110,6 +133,7 @@ export function useCells(doc: Y.Doc | null, username = "local", requiredValidati
           status: deriveStatus(translated, history),
           validationStatus,
           activeValidators,
+          validationHistory,
           history,
           threads,
           sourceLocation: cell.get("sourceLocation") as SourceLocation | undefined,

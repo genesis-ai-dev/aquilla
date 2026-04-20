@@ -4,6 +4,8 @@ import { rehydrateFileDoc } from "./file-doc"
 import { getFragmentHtml, getPlainText } from "@/lib/richtext/translated-xml"
 import type { CodexCell, CodexNotebookFile } from "@/lib/codex-editor/types"
 import type { CellHistoryEntry } from "@/lib/parsers/types"
+import { getEditsArray, snapshotEntry } from "@/lib/codex-editor/edits/yjs-helpers"
+import { getMetaEditsArray } from "@/lib/codex-editor/edits/commit-meta-edit"
 
 function seedDoc(cells: CodexCell[]): Y.Doc {
   const doc = new Y.Doc()
@@ -129,5 +131,65 @@ describe("rehydrateFileDoc", () => {
     rehydrateFileDoc(doc, merged, Date.now())
     const src = doc.getMap("meta").get("__source") as { videoUrl?: string }
     expect(src.videoUrl).toBe("https://example.com/v.mp4")
+  })
+})
+
+describe("rehydrateFileDoc — seeds cell.edits and meta.edits", () => {
+  it("populates cell.edits from merged __source.metadata.edits", () => {
+    const doc = new Y.Doc()
+    const merged = {
+      cells: [{
+        kind: 2 as const, languageId: "html", value: "hello",
+        metadata: { id: "c1", type: "text" as const, edits: [
+          { author: "alice", timestamp: 1000, type: "user-edit" as const, editMap: ["value"], value: "hello",
+            validatedBy: [{ username: "alice", creationTimestamp: 1000, updatedTimestamp: 1000, isDeleted: false }] },
+        ] },
+      }],
+      metadata: { id: "n1", originalName: "n.codex" },
+    }
+    rehydrateFileDoc(doc, merged as never, 2000)
+    const cell = doc.getMap("cells").get("c1") as Y.Map<unknown>
+    const arr = getEditsArray(cell)
+    expect(arr.length).toBe(1)
+    expect(snapshotEntry(arr.get(0)).authors).toEqual(["alice"])
+  })
+
+  it("wipes and rebuilds cell.edits on subsequent rehydrate (GitLab pull path)", () => {
+    const doc = new Y.Doc()
+    const first = {
+      cells: [{ kind: 2 as const, languageId: "html", value: "v1",
+        metadata: { id: "c1", type: "text" as const, edits: [
+          { author: "alice", timestamp: 1000, type: "user-edit" as const, editMap: ["value"], value: "v1" },
+        ] } }],
+      metadata: { id: "n1", originalName: "n.codex" },
+    }
+    rehydrateFileDoc(doc, first as never, 2000)
+
+    const second = {
+      cells: [{ kind: 2 as const, languageId: "html", value: "v2",
+        metadata: { id: "c1", type: "text" as const, edits: [
+          { author: "alice", timestamp: 1000, type: "user-edit" as const, editMap: ["value"], value: "v1" },
+          { author: "bob", timestamp: 4000, type: "user-edit" as const, editMap: ["value"], value: "v2" },
+        ] } }],
+      metadata: { id: "n1", originalName: "n.codex" },
+    }
+    rehydrateFileDoc(doc, second as never, 5000)
+
+    const cell = doc.getMap("cells").get("c1") as Y.Map<unknown>
+    const arr = getEditsArray(cell)
+    expect(arr.length).toBe(2)
+    expect(snapshotEntry(arr.get(1)).authors).toEqual(["bob"])
+  })
+
+  it("populates meta.edits from merged __source.edits", () => {
+    const doc = new Y.Doc()
+    const merged = {
+      cells: [],
+      metadata: { id: "n1", originalName: "n.codex",
+        edits: [{ author: "alice", timestamp: 1000, type: "user-edit" as const, editMap: ["videoUrl"], value: "url" }] },
+    }
+    rehydrateFileDoc(doc, merged as never, 2000)
+    const arr = getMetaEditsArray(doc.getMap("meta"))
+    expect(arr.length).toBe(1)
   })
 })

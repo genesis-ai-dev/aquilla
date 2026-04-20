@@ -3,6 +3,7 @@ import { IndexeddbPersistence } from "y-indexeddb"
 import type { TranslatableString, FileType, CellHistoryEntry } from "../parsers/types"
 import { getPlainText, getFragmentHtml, setPlainText, setFragmentFromHtml } from "@/lib/richtext/translated-xml"
 import { mapEditHistory } from "@/lib/codex-editor/map-history"
+import { seedCellEditsFromSource, seedMetaEditsFromSource } from "@/lib/codex-editor/edits/seed-from-source"
 
 function extractCellTranslated(cell: Y.Map<unknown>): string {
   const frag = cell.get("translatedXml") as Y.XmlFragment | undefined
@@ -282,6 +283,12 @@ export function rehydrateFileDoc(
       // on-disk shape, so merged edits become the new baseline.
       yCell.set("__source", JSON.parse(JSON.stringify(cell)))
 
+      // Rebuild cell.edits from the merged __source so the Yjs-native edit
+      // log stays in sync with disk state. Wipes existing entries; see
+      // docs/superpowers/plans/2026-04-20-validation-history.md for why
+      // a marker-based approach would lose GitLab-pulled edits.
+      seedCellEditsFromSource(yCell)
+
       // Refresh the translatedXml fragment so the editor UI sees the merged
       // value. Without this the fragment retains our pre-merge HTML and
       // isCellDirty reports a false-positive on the next sync (fragment vs
@@ -313,6 +320,7 @@ export function rehydrateFileDoc(
     for (const cell of merged.cells) order.push([cell.metadata.id])
 
     meta.set("__source", merged.metadata)
+    seedMetaEditsFromSource(meta)
   })
 }
 

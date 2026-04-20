@@ -67,14 +67,10 @@ function deriveValidationStatus(
     }
     const count = active.length
     if (count === 0) return { validationStatus: "none", activeValidators: [] }
-    const selfIncluded = active.includes(currentUsername)
-    // "full" when threshold is met and others have also validated alongside currentUser
-    // (or threshold met without currentUser). "self" when currentUser is the sole or
-    // only validator below threshold.
-    if (count >= requiredValidations && (!selfIncluded || count > 1)) {
-      return { validationStatus: "full", activeValidators: active }
-    }
-    if (selfIncluded) return { validationStatus: "self", activeValidators: active }
+    // Threshold met → "full" takes precedence over "self" (matches the desktop
+    // AudioValidationStatusIcon logic: isFullyValidated wins).
+    if (count >= requiredValidations) return { validationStatus: "full", activeValidators: active }
+    if (active.includes(currentUsername)) return { validationStatus: "self", activeValidators: active }
     return { validationStatus: "others", activeValidators: active }
   }
   return { validationStatus: "none", activeValidators: [] }

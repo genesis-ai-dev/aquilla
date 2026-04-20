@@ -5,8 +5,8 @@ import { useCells } from "./useCells"
 import { commitCellEdit } from "@/lib/codex-editor/edits/commit-cell-edit"
 import { toggleCellValidation } from "@/lib/codex-editor/edits/toggle-cell-validation"
 
-function Probe({ doc, username, out }: { doc: Y.Doc; username: string; out: { current?: ReturnType<typeof useCells> } }) {
-  const cells = useCells(doc, username, 1)
+function Probe({ doc, username, out, required = 2 }: { doc: Y.Doc; username: string; out: { current?: ReturnType<typeof useCells> }; required?: number }) {
+  const cells = useCells(doc, username, required)
   out.current = cells
   return null
 }
@@ -30,11 +30,12 @@ function setupCell(doc: Y.Doc, id: string) {
 }
 
 describe("useCells — validation derivation from cell.edits", () => {
-  it("shows 'self' after current user edits (auto-validate)", async () => {
+  it("shows 'self' after current user auto-validates below the threshold", async () => {
     const doc = new Y.Doc()
     setupCell(doc, "c1")
     const out: { current?: ReturnType<typeof useCells> } = {}
-    render(<Probe doc={doc} username="alice" out={out} />)
+    // required=2 so count=1 < threshold → "self" (not "full")
+    render(<Probe doc={doc} username="alice" out={out} required={2} />)
     act(() => { commitCellEdit(doc, "c1", "alice", ["value"], "hello", "human") })
     await waitFor(() => {
       expect(out.current![0].validationStatus).toBe("self")
@@ -42,11 +43,23 @@ describe("useCells — validation derivation from cell.edits", () => {
     expect(out.current![0].activeValidators).toEqual(["alice"])
   })
 
-  it("becomes 'self' for bob after bob edits after alice (prior validator on prior entry)", async () => {
+  it("shows 'full' when a single validator meets requiredValidations=1", async () => {
     const doc = new Y.Doc()
     setupCell(doc, "c1")
     const out: { current?: ReturnType<typeof useCells> } = {}
-    render(<Probe doc={doc} username="bob" out={out} />)
+    render(<Probe doc={doc} username="alice" out={out} required={1} />)
+    act(() => { commitCellEdit(doc, "c1", "alice", ["value"], "hello", "human") })
+    await waitFor(() => {
+      expect(out.current![0].validationStatus).toBe("full")
+    })
+    expect(out.current![0].activeValidators).toEqual(["alice"])
+  })
+
+  it("bob sees 'self' after his own edit (new session, prior validator on prior entry)", async () => {
+    const doc = new Y.Doc()
+    setupCell(doc, "c1")
+    const out: { current?: ReturnType<typeof useCells> } = {}
+    render(<Probe doc={doc} username="bob" out={out} required={2} />)
     const now = Date.now()
     act(() => { commitCellEdit(doc, "c1", "alice", ["value"], "hello", "human") })
     // Force a new session: advance system clock past SESSION_GAP_MS.
@@ -62,16 +75,11 @@ describe("useCells — validation derivation from cell.edits", () => {
     expect(out.current![0].validationHistory.length).toBe(2)
   })
 
-  it("shows 'full' when toggle adds a second validator and requiredValidations=2", async () => {
+  it("shows 'full' when toggle adds a second validator meeting requiredValidations=2", async () => {
     const doc = new Y.Doc()
     setupCell(doc, "c1")
     const out: { current?: ReturnType<typeof useCells> } = {}
-    function ProbeTwo({ doc }: { doc: Y.Doc }) {
-      const cells = useCells(doc, "alice", 2)
-      out.current = cells
-      return null
-    }
-    render(<ProbeTwo doc={doc} />)
+    render(<Probe doc={doc} username="alice" out={out} required={2} />)
     act(() => { commitCellEdit(doc, "c1", "alice", ["value"], "hi", "human") })
     await waitFor(() => {
       expect(out.current![0].validationStatus).toBe("self")

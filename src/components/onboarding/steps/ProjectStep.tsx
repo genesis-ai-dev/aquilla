@@ -10,10 +10,12 @@ export function ProjectStep({
   displayName,
   onCreated,
   onBack,
+  onSkip,
 }: {
   displayName: string
   onCreated: (p: ProjectRecord) => void
   onBack: () => void
+  onSkip: () => void
 }) {
   const [name, setName] = useState("")
   const [sourceLanguage, setSourceLanguage] = useState("")
@@ -91,6 +93,14 @@ export function ProjectStep({
       <Button variant="ghost" size="sm" onClick={onBack} className="w-full">
         ← Back
       </Button>
+      <button
+        type="button"
+        onClick={onSkip}
+        disabled={busy}
+        className="w-full text-xs text-muted-foreground hover:text-foreground underline-offset-4 hover:underline disabled:opacity-50"
+      >
+        Do this later — you can create a project anytime
+      </button>
     </div>
   )
 }

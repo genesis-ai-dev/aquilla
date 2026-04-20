@@ -95,8 +95,7 @@
             "timestamp": 1700000300000,
             "type": "user-edit",
             "editMap": ["value"],
-            "value": "<p>Und Gott sprach: Es werde Licht!</p>",
-            "validatedBy": []
+            "value": "<p>Und Gott sprach: Es werde Licht!</p>"
           }
         ]
       }

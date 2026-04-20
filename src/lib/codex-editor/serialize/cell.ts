@@ -1,48 +1,54 @@
 import * as Y from "yjs";
-import type { CodexCell, EditHistory } from "@/lib/codex-editor/types";
-import type { CellHistoryEntry } from "@/lib/parsers/types";
+import type { CodexCell, EditHistory, EditTypeValue, ValidationEntry } from "@/lib/codex-editor/types";
 import { getFragmentHtml } from "@/lib/richtext/translated-xml";
-import { collapseToEditSessions, sessionToEditEntry } from "./edit-sessions";
+import { snapshotEntry } from "@/lib/codex-editor/edits/yjs-helpers";
 
 /**
- * Serialize a single cell Y.Map back into the CodexCell JSON shape that gets
- * written to a `.codex` notebook on disk.
+ * Serialize a single cell Y.Map back into the CodexCell JSON shape for a
+ * .codex notebook. Starts from __source to carry unknown fields (attachments,
+ * isLocked, data, etc.) verbatim, then replaces metadata.edits with a fresh
+ * emit from the live cell.edits Y.Array.
  *
- * Starts from `__source` (the original imported cell JSON stashed at import
- * time) so unknown fields — attachments, cellLabel, isLocked, data, etc. —
- * round-trip verbatim. Then it layers two kinds of edits on top:
- *
- *   1. `metadata.edits` gains a new EditHistory entry for every unsynced edit
- *      session found in the cell's `history` Y.Array (filtered by
- *      `__lastSyncedHistoryAt`).
- *
- *   2. `value` is re-emitted from the `translatedXml` Y.XmlFragment *only*
- *      when there are unsynced edits. If nothing changed since import, we keep
- *      the exact `value` bytes from `__source` — the HTML round-trip through
- *      our parser isn't a fixed point for every input, and preserving source
- *      bytes matters for the no-op commit case.
+ * Multi-author sessions are concatenated as "alice/bob" for compat with the
+ * desktop app's EditHistory.author: string shape. When upstream supports
+ * author: string[], drop the concat at this one call site.
  */
 export function serializeCell(cell: Y.Map<unknown>): CodexCell {
   const source = cell.get("__source") as CodexCell | undefined;
   if (!source) throw new Error("serializeCell: cell has no __source stash");
   const merged: CodexCell = JSON.parse(JSON.stringify(source));
 
-  // Fold unsynced edit sessions in.
-  const lastSynced = (cell.get("__lastSyncedHistoryAt") as number) ?? 0;
-  const histArr = cell.get("history") as Y.Array<CellHistoryEntry> | undefined;
-  const localEntries = (histArr?.toArray() ?? []).filter(
-    (e) => Date.parse(e.timestamp) > lastSynced,
-  );
-  const newEdits: EditHistory[] = collapseToEditSessions(localEntries).map(sessionToEditEntry);
-
-  if (newEdits.length > 0) {
-    merged.metadata.edits = [...(merged.metadata.edits ?? []), ...newEdits];
-    // There were local edits: re-emit value from the current fragment so the
-    // written bytes reflect the user's latest state.
-    const frag = cell.get("translatedXml") as Y.XmlFragment | undefined;
-    if (frag) merged.value = getFragmentHtml(frag);
+  const editsArr = cell.get("edits") as Y.Array<Y.Map<unknown>> | undefined;
+  const newEdits: EditHistory[] = [];
+  if (editsArr) {
+    for (let i = 0; i < editsArr.length; i++) {
+      const snap = snapshotEntry(editsArr.get(i));
+      const entry: EditHistory = {
+        // TODO: drop concat once EditHistory.author upstream supports string[]
+        author: snap.authors.length > 1 ? snap.authors.join("/") : (snap.authors[0] ?? ""),
+        timestamp: snap.timestamp,
+        type: snap.type as EditTypeValue,
+        editMap: snap.editMap,
+        value: snap.value,
+      };
+      if (snap.validatedBy.length > 0) entry.validatedBy = snap.validatedBy as ValidationEntry[];
+      newEdits.push(entry);
+    }
   }
-  // Otherwise keep merged.value = source.value (byte-identical).
+  // Only set metadata.edits when the source had the field or we have new edits.
+  // This preserves the round-trip contract for non-text cells (e.g. milestones)
+  // that omit edits entirely — force-writing [] would change their on-disk shape.
+  if (source.metadata.edits !== undefined || newEdits.length > 0) {
+    merged.metadata.edits = newEdits;
+  }
+
+  // Re-emit value from the current fragment if we have any edits locally.
+  // If cell.edits is empty AND fragment is empty, keep the source value bytes
+  // (matches current no-op semantics — serialize must be a fixed point).
+  const frag = cell.get("translatedXml") as Y.XmlFragment | undefined;
+  if (frag && (newEdits.length > 0 || frag.length > 0)) {
+    merged.value = getFragmentHtml(frag);
+  }
 
   return merged;
 }

@@ -16,6 +16,7 @@ import { IndexeddbPersistence } from "y-indexeddb";
 import { createProject } from "@/lib/store/project-index";
 import { createFileDoc } from "@/lib/store/file-doc";
 import { setFragmentFromHtml } from "@/lib/richtext/translated-xml";
+import { seedCellEditsFromSource } from "@/lib/codex-editor/edits/seed-from-source";
 import type { FrontierSession, GitlabProject } from "@/lib/frontier/types";
 import { cloneRepo } from "@/lib/git/clone";
 import { getFsProvider } from "@/lib/fs";
@@ -163,10 +164,13 @@ export async function importFromOpfs(args: ImportArgs): Promise<ImportedProject>
 
       // Stash the raw CodexCell source on each cell under __source so the
       // serializer can round-trip unknown fields (attachments, data, etc.).
+      // Also seed cell.edits from the stashed metadata.edits so the new
+      // cell.edits-based serializer can emit them on round-trip.
       for (const sourceCell of nb.cells) {
         const cell = cellsMap.get(sourceCell.metadata.id) as Y.Map<unknown> | undefined;
         if (!cell) continue;
         cell.set("__source", JSON.parse(JSON.stringify(sourceCell)));
+        seedCellEditsFromSource(cell);
       }
 
       // Layer in history per cell (createFileDoc gave each cell an empty history Y.Array).

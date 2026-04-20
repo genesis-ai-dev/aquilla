@@ -8,6 +8,7 @@ import type { ScoredPair } from "@/lib/search/search-index"
 import type { TranslationRule, RuleInfraction, ProjectRecord } from "@/lib/parsers/types"
 import { useProjectPermissions } from "@/hooks/useProjectPermissions"
 import { appendCellHistory, recordHistoryEntry, toggleCellValidation } from "@/hooks/useCellHistory"
+import { commitCellEdit } from "@/lib/codex-editor/edits/commit-cell-edit"
 import { getPlainText, getFragmentHtml } from "@/lib/richtext/translated-xml"
 import { SparkleButton } from "./SparkleButton"
 import { ExamplePanel } from "./ExamplePanel"
@@ -291,6 +292,7 @@ function EditorRow({
             timestamp: new Date().toISOString(),
           }])
         })
+        commitCellEdit(doc, cell.id, username, ["value"], currentText, "human")
         return
       }
     }
@@ -301,6 +303,9 @@ function EditorRow({
       author: username,
       validated: true,
     })
+    // Dual write: cell.edits is the Yjs-native source of truth for validation;
+    // cell.history keeps feeding the TipTap binding.
+    commitCellEdit(doc, cell.id, username, ["value"], currentText, "human")
   }
 
   // Detect formatting loss: source has inline style marks that the target doesn't.

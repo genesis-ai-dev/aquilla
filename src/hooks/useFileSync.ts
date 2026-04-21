@@ -43,6 +43,7 @@ export function useFileSync(options: UseFileSyncOptions): {
   const [peers, setPeers] = useState<PeerState[]>([])
   const [connected, setConnected] = useState(false)
   const [provider, setProviderState] = useState<YProvider | null>(null)
+  const [isIdle, setIsIdle] = useState(false)
 
   const handleRef = useMemo(() => ({ current: null as FileSyncProviderHandle | null }), [])
 
@@ -128,17 +129,69 @@ export function useFileSync(options: UseFileSyncOptions): {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [username, fileId])
 
+  // Idle-disconnect: if the tab stays hidden for 5 minutes, tear down the WS
+  // to let the DO hibernate (keeping it alive costs nothing while truly idle,
+  // but once the browser throttles the tab we get unhelpful reconnect noise).
+  // Reconnects automatically when the tab becomes visible again.
+  useEffect(() => {
+    if (!provider) return
+    // Guard against non-browser contexts (tests running outside happy-dom/node).
+    if (typeof document === "undefined") return
+
+    const HIDDEN_IDLE_MS = 5 * 60 * 1000
+    let idleTimer: ReturnType<typeof setTimeout> | null = null
+    let idleDisconnected = false
+
+    const disconnectIfStillHidden = () => {
+      if (document.visibilityState === "hidden" && !idleDisconnected) {
+        provider.disconnect()
+        idleDisconnected = true
+        setIsIdle(true)
+      }
+    }
+
+    const onVisChange = () => {
+      if (document.visibilityState === "hidden") {
+        if (idleTimer) clearTimeout(idleTimer)
+        idleTimer = setTimeout(disconnectIfStillHidden, HIDDEN_IDLE_MS)
+      } else {
+        if (idleTimer) {
+          clearTimeout(idleTimer)
+          idleTimer = null
+        }
+        if (idleDisconnected) {
+          provider.connect()
+          idleDisconnected = false
+          setIsIdle(false)
+        }
+      }
+    }
+
+    document.addEventListener("visibilitychange", onVisChange)
+    if (document.visibilityState === "hidden") {
+      idleTimer = setTimeout(disconnectIfStillHidden, HIDDEN_IDLE_MS)
+    }
+
+    return () => {
+      if (idleTimer) clearTimeout(idleTimer)
+      document.removeEventListener("visibilitychange", onVisChange)
+    }
+  }, [provider])
+
   // Status derivation:
   //   disabled   — hook not running (no session, no project/file, or disabled)
+  //   idle       — intentionally disconnected while the tab is hidden
   //   connecting — provider exists but WS hasn't completed the handshake yet;
   //                doubles as the "reconnecting" state since YProvider
   //                automatically backs off on failure
   //   live       — WS connected AND server acked sync
   const status: SyncStatus = !provider
     ? "disabled"
-    : connected
-      ? "live"
-      : "connecting"
+    : isIdle
+      ? "idle"
+      : connected
+        ? "live"
+        : "connecting"
 
   return { peers, connected, provider, status }
 }

@@ -1,0 +1,89 @@
+// Fetch short-lived JWTs from frontier-server's POST /api/v2/sync-token.
+// One token per (projectId, fileId) scope; 15-min TTL. Cache the token in memory
+// and refresh when within 30 s of expiry so reconnects don't race with expiration.
+
+// Dev default works both against prod (no local frontier-server) and against
+// a locally-running frontier-server if VITE_FRONTIER_API_URL is set.
+export const FRONTIER_API_URL =
+  (import.meta.env.VITE_FRONTIER_API_URL as string | undefined)?.replace(/\/$/, "") ??
+  "https://api.frontierrnd.com"
+
+export interface SyncTokenResponse {
+  token: string
+  expiresIn: number
+  role: { level: number; name: string; source: "override" | "creator" | "gitlab" }
+}
+
+export class SyncTokenError extends Error {
+  status: number
+  body: string
+  constructor(status: number, body: string) {
+    super(`sync-token fetch failed: HTTP ${status} — ${body.slice(0, 200)}`)
+    this.status = status
+    this.body = body
+    this.name = "SyncTokenError"
+  }
+}
+
+export async function fetchSyncToken(
+  jwt: string,
+  projectId: string,
+  fileId: string,
+  apiUrl: string = FRONTIER_API_URL
+): Promise<SyncTokenResponse> {
+  const res = await fetch(`${apiUrl}/api/v2/sync-token`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${jwt}`,
+    },
+    body: JSON.stringify({ projectId, fileId }),
+  })
+  if (!res.ok) {
+    const body = await res.text().catch(() => "")
+    throw new SyncTokenError(res.status, body)
+  }
+  return (await res.json()) as SyncTokenResponse
+}
+
+interface CachedToken {
+  value: string
+  expiresAtMs: number
+}
+
+const REFRESH_SAFETY_MS = 30_000
+
+/**
+ * Build a getToken callback suitable for YProvider's `params` option. Caches
+ * the minted token in memory and refreshes it when within 30 s of expiry.
+ * Returns null when the fetch fails — caller decides how to surface that.
+ */
+export function makeSyncTokenFetcher(
+  getJwt: () => string | null,
+  projectId: string,
+  fileId: string,
+  apiUrl?: string
+): () => Promise<string | null> {
+  let cached: CachedToken | null = null
+  return async () => {
+    const now = Date.now()
+    if (cached && cached.expiresAtMs > now + REFRESH_SAFETY_MS) {
+      return cached.value
+    }
+    const jwt = getJwt()
+    if (!jwt) return null
+    try {
+      const resp = await fetchSyncToken(jwt, projectId, fileId, apiUrl)
+      cached = {
+        value: resp.token,
+        expiresAtMs: now + resp.expiresIn * 1000,
+      }
+      return resp.token
+    } catch (err) {
+      // Most common paths: 401 (stale jwt), 403 (no project access), 5xx (transient).
+      // Log and surface null — useFileSync treats null as "no sync for now".
+      console.warn("[sync-token] fetch failed:", err)
+      return null
+    }
+  }
+}

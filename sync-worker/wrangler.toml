@@ -20,9 +20,10 @@ bucket_name = "codex-snapshots"
 # For local `wrangler dev`, wrangler will use a local simulator if the bucket doesn't exist.
 
 # Auth:
-#   SECRET_KEY and ALLOW_UNAUTHENTICATED live in .dev.vars for local dev
-#   (see .dev.vars.example) and are provisioned via `wrangler secret put`
-#   in production. Deploying with neither set means strict auth (reject all
-#   WS connections without a valid sync-token JWT) — that's the intended
-#   prod default. If you need to disable auth in prod for some reason, set
-#   ALLOW_UNAUTHENTICATED="true" via `wrangler secret put`.
+#   SYNC_SECRET_KEY (shared with frontier-server for JWT signing — distinct
+#   from Frontier's main SECRET_KEY) and ALLOW_UNAUTHENTICATED live in
+#   .dev.vars for local dev (see .dev.vars.example) and are provisioned via
+#   `wrangler secret put` in production. Deploying with neither set means
+#   strict auth (reject all WS connections without a valid sync-token JWT)
+#   — the intended prod default. If you need to disable auth in prod for
+#   some reason, set ALLOW_UNAUTHENTICATED="true" via `wrangler secret put`.

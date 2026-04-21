@@ -24,7 +24,7 @@ export async function verifyTokenForDoc(
   secret: string | undefined
 ): Promise<AuthResult> {
   if (!secret) {
-    return { ok: false, status: 500, reason: "SECRET_KEY not configured" }
+    return { ok: false, status: 500, reason: "SYNC_SECRET_KEY not configured" }
   }
   if (!token) {
     return { ok: false, status: 401, reason: "missing token" }

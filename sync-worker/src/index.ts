@@ -21,8 +21,10 @@ declare global {
     interface Env {
       FileSync: DurableObjectNamespace
       SNAPSHOTS: R2Bucket
-      /** Shared HMAC secret with frontier-server that mints /sync-token JWTs. */
-      SECRET_KEY?: string
+      /** Shared HMAC key with frontier-server that mints /sync-token JWTs.
+       *  Distinct from Frontier's main SECRET_KEY so a sync-worker compromise
+       *  cannot forge Frontier access tokens. */
+      SYNC_SECRET_KEY?: string
       /**
        * Dev escape hatch. "true" disables JWT verification for WS connections,
        * used until the client is wired to fetch /sync-token. Set to "false"
@@ -106,7 +108,7 @@ export default {
           const result = await verifyTokenForDoc(
             token,
             { projectId, fileId },
-            env.SECRET_KEY
+            env.SYNC_SECRET_KEY
           )
           if (!result.ok) {
             return new Response(result.reason, { status: result.status })

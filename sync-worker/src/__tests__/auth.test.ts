@@ -32,13 +32,13 @@ describe("verifyTokenForDoc", () => {
     }
   })
 
-  it("rejects when SECRET_KEY is not configured", async () => {
+  it("rejects when SYNC_SECRET_KEY is not configured", async () => {
     const token = await makeToken()
     const res = await verifyTokenForDoc(token, expected, undefined)
     expect(res.ok).toBe(false)
     if (!res.ok) {
       expect(res.status).toBe(500)
-      expect(res.reason).toContain("SECRET_KEY")
+      expect(res.reason).toContain("SYNC_SECRET_KEY")
     }
   })
 

@@ -150,7 +150,8 @@ export class DualIndex {
     const cleanQuery = query.trim()
     if (!cleanQuery) return []
     const queryAllTokens = tokenizeText(cleanQuery)
-    const queryTotalTokens = queryAllTokens.length
+    const queryUniqueTokens = new Set(queryAllTokens)
+    const queryTotalTokens = queryUniqueTokens.size
     if (queryTotalTokens === 0) return []
 
     const MAX_RESTARTS = 2
@@ -179,6 +180,8 @@ export class DualIndex {
         if (bTokens.size === 0) continue
 
         const inv = side === "source" ? this.sourceInverted : this.targetInverted
+        const df = side === "source" ? this.sourceDocFreq : this.targetDocFreq
+        const docCount = this.pairs.size
         const candidates = new Set<string>()
         for (const t of bTokens) {
           const bucket = inv.get(t)
@@ -190,10 +193,16 @@ export class DualIndex {
           if (!pair) continue
           const tokens = side === "source" ? pair.sourceTokens : pair.targetTokens
           const matched: string[] = []
-          for (const t of bTokens) if (tokens.has(t)) matched.push(t)
+          let idfSum = 0
+          for (const t of bTokens) {
+            if (tokens.has(t)) {
+              matched.push(t)
+              idfSum += Math.log((docCount + 1) / ((df.get(t) ?? 1) + 1))
+            }
+          }
           if (matched.length === 0) continue
           const coverage = matched.length / bTokens.size
-          const score = (0.3 * coverage + 0.7 * coverage) * (1 + 0.5 * coverage)
+          const score = (0.3 * coverage + 0.7 * (idfSum / Math.max(1, bTokens.size))) * (1 + 0.5 * coverage)
           if (score > bestScore) {
             bestScore = score
             best = { pair, matched, branchIdx: bi, branchQuery: b }

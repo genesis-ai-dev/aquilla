@@ -1,0 +1,8 @@
+# Local miniflare state (DO + R2 simulators)
+.wrangler
+
+# Real dev secrets; commit .dev.vars.example instead
+.dev.vars
+
+# Build outputs
+dist

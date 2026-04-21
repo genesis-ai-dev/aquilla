@@ -31,6 +31,7 @@ import { VideoAttachmentDialog } from "./VideoAttachmentDialog"
 import { useVideoAttachment } from "@/hooks/useVideoAttachment"
 import { parseTimestampRange, extractCuesFromCells } from "@/lib/video/vtt-generator"
 import { useSync } from "@/hooks/useSync"
+import { useFileSync } from "@/hooks/useFileSync"
 import { useFileMeta } from "@/hooks/useFileMeta"
 import { useCellLabelsPreference } from "@/hooks/useCellLabelsPreference"
 import { peerColor as peerColorLocal } from "@/lib/sync/webrtc-provider"
@@ -269,13 +270,15 @@ export function ProjectWorkspace() {
     }
   }, [project, activeShareToken])
 
-  const syncRoom = activeShareToken && activeFileId ? `codex:share:${activeShareToken}:file:${activeFileId}` : null
-  const { peers: fileLevelPeers, provider: syncProvider } = useSync({
+  // Always-on file sync via the codex sync-worker (y-partyserver DO + R2).
+  // Unlike the previous share-token-gated path, this keeps every open file
+  // in lockstep across devices for the same user too, not just collaborators.
+  const { peers: fileLevelPeers, provider: syncProvider } = useFileSync({
     doc,
-    roomName: syncRoom,
+    projectId: project?.id ?? null,
+    fileId: activeFileId || null,
     username: currentUsername,
-    currentFileId: activeFileId || undefined,
-    enabled: Boolean(syncRoom),
+    enabled: Boolean(project && activeFileId && doc),
   })
 
   // Project-wide presence room: everyone in the project joins regardless of

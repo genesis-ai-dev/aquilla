@@ -65,3 +65,39 @@ describe("DualIndex build / add / remove", () => {
     expect(internals.docCount).toBe(1)
   })
 })
+
+describe("DualIndex plain search", () => {
+  it("returns [] for empty query", () => {
+    const ix = new DualIndex()
+    ix.buildFromProject([cell("a", "hello world", "bonjour monde")])
+    expect(ix.searchPlainSource("", 5)).toEqual([])
+    expect(ix.searchPlainSource("   ", 5)).toEqual([])
+  })
+
+  it("ranks candidates by IDF-weighted match and normalizes coverageWeight", () => {
+    const ix = new DualIndex()
+    ix.buildFromProject([
+      cell("a", "in the beginning god created the heavens", "au commencement"),
+      cell("b", "god created the earth", "dieu créa la terre"),
+      cell("c", "the end of days", "la fin des jours"),
+    ])
+    const r = ix.searchPlainSource("god created", 5)
+    expect(r.length).toBeGreaterThan(0)
+    expect(r[0].coverageWeight).toBe(1)  // top result normalizes to 1
+    expect(r.every(p => p.coverageWeight >= 0 && p.coverageWeight <= 1)).toBe(true)
+    // 'a' and 'b' both match; 'c' should not be in the top result or carry very low score
+    const ids = r.map(p => p.cellId)
+    expect(ids).toContain("a")
+    expect(ids).toContain("b")
+  })
+
+  it("searchPlainTarget matches against target tokens", () => {
+    const ix = new DualIndex()
+    ix.buildFromProject([
+      cell("a", "hello", "bonjour"),
+      cell("b", "world", "monde"),
+    ])
+    const r = ix.searchPlainTarget("monde", 5)
+    expect(r.map(p => p.cellId)).toEqual(["b"])
+  })
+})

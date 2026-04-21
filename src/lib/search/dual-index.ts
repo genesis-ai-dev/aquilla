@@ -76,6 +76,68 @@ export class DualIndex {
     return set ? set.size > 0 : false
   }
 
+  searchPlainSource(query: string, limit: number): ScoredPair[] {
+    return this.plainSearch(query, limit, "source")
+  }
+
+  searchPlainTarget(query: string, limit: number): ScoredPair[] {
+    return this.plainSearch(query, limit, "target")
+  }
+
+  private plainSearch(query: string, limit: number, side: IndexSide): ScoredPair[] {
+    const q = query.trim()
+    if (!q) return []
+    const queryTokens = new Set(tokenizeText(q))
+    if (queryTokens.size === 0) return []
+
+    const inv = side === "source" ? this.sourceInverted : this.targetInverted
+    const df = side === "source" ? this.sourceDocFreq : this.targetDocFreq
+    const docCount = this.pairs.size
+
+    // Collect candidate cellIds via inverted index
+    const candidates = new Set<string>()
+    for (const t of queryTokens) {
+      const bucket = inv.get(t)
+      if (bucket) for (const id of bucket) candidates.add(id)
+    }
+    if (candidates.size === 0) return []
+
+    type Scored = { pair: IndexedPair; score: number; matched: string[] }
+    const scored: Scored[] = []
+    for (const id of candidates) {
+      const pair = this.pairs.get(id)
+      if (!pair) continue
+      const tokens = side === "source" ? pair.sourceTokens : pair.targetTokens
+      const matched: string[] = []
+      let idfSum = 0
+      for (const t of queryTokens) {
+        if (tokens.has(t)) {
+          matched.push(t)
+          const freq = df.get(t) ?? 1
+          idfSum += Math.log((docCount + 1) / (freq + 1))
+        }
+      }
+      if (matched.length === 0) continue
+      const coverage = matched.length / queryTokens.size
+      const score = 0.3 * coverage + 0.7 * (idfSum / Math.max(1, queryTokens.size))
+      scored.push({ pair, score, matched })
+    }
+
+    scored.sort((a, b) => b.score - a.score)
+    const top = scored.slice(0, limit)
+    const maxScore = top[0]?.score ?? 1
+
+    return top.map((s) => ({
+      cellId: s.pair.cellId,
+      fileId: s.pair.fileId,
+      source: s.pair.source,
+      target: s.pair.target,
+      score: s.score,
+      matchedTokens: s.matched,
+      coverageWeight: maxScore > 0 ? s.score / maxScore : 0,
+    }))
+  }
+
   /** Internal accessor for search methods added in later tasks. Returns live refs. */
   getInternals() {
     const self = this

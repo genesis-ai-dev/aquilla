@@ -14,12 +14,21 @@
 import { YServer } from "y-partyserver"
 import * as Y from "yjs"
 import { routePartykitRequest } from "partyserver"
+import { verifyTokenForDoc } from "./auth"
 
 declare global {
   namespace Cloudflare {
     interface Env {
       FileSync: DurableObjectNamespace
       SNAPSHOTS: R2Bucket
+      /** Shared HMAC secret with frontier-server that mints /sync-token JWTs. */
+      SECRET_KEY?: string
+      /**
+       * Dev escape hatch. "true" disables JWT verification for WS connections,
+       * used until the client is wired to fetch /sync-token. Set to "false"
+       * (or omit) in production.
+       */
+      ALLOW_UNAUTHENTICATED?: string
     }
   }
 }
@@ -88,8 +97,22 @@ export class FileSync extends YServer {
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     return (
-      (await routePartykitRequest(request, env)) ??
-      new Response("not found", { status: 404 })
+      (await routePartykitRequest(request, env, {
+        onBeforeConnect: async (req, lobby) => {
+          if (env.ALLOW_UNAUTHENTICATED === "true") return
+          const url = new URL(req.url)
+          const token = url.searchParams.get("token")
+          const { projectId, fileId } = parseDocId(lobby.name)
+          const result = await verifyTokenForDoc(
+            token,
+            { projectId, fileId },
+            env.SECRET_KEY
+          )
+          if (!result.ok) {
+            return new Response(result.reason, { status: result.status })
+          }
+        },
+      })) ?? new Response("not found", { status: 404 })
     )
   },
 }

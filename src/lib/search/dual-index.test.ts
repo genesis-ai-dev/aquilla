@@ -91,3 +91,36 @@ describe("DualIndex plain search", () => {
     expect(r.map(p => p.cellId)).toEqual(["b"])
   })
 })
+
+describe("DualIndex branching search", () => {
+  it("returns [] for empty query", () => {
+    const ix = new DualIndex()
+    ix.buildFromProject([cell("a", "hello world", "bonjour monde")])
+    expect(ix.searchBranchingSource("", 5)).toEqual([])
+  })
+
+  it("emits coverageWeight as coveredTokens/queryTokens; sum over results ≤ 1", () => {
+    const ix = new DualIndex()
+    ix.buildFromProject([
+      cell("a", "in the beginning god created heaven", "au commencement"),
+      cell("b", "the earth was without form", "la terre était informe"),
+      cell("c", "god created the earth", "dieu créa la terre"),
+    ])
+    const results = ix.searchBranchingSource("god created heaven earth", 5)
+    expect(results.length).toBeGreaterThan(0)
+    const sum = results.reduce((a, p) => a + p.coverageWeight, 0)
+    expect(sum).toBeLessThanOrEqual(1 + 1e-9)
+    expect(results.every(p => p.coverageWeight >= 0 && p.coverageWeight <= 1)).toBe(true)
+  })
+
+  it("searchBranchingTarget queries target tokens", () => {
+    const ix = new DualIndex()
+    ix.buildFromProject([
+      cell("a", "hello", "bonjour"),
+      cell("b", "world", "monde"),
+      cell("c", "hello world", "bonjour monde"),
+    ])
+    const r = ix.searchBranchingTarget("bonjour monde", 5)
+    expect(r.map(p => p.cellId)).toContain("c")
+  })
+})

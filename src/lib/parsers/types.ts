@@ -85,6 +85,8 @@ export interface ProjectRecord {
    * projects without this field fall back to registry defaults.
    */
   experimentalFlags?: Record<string, boolean>
+  /** Caps and knobs for the composite-health scorer. Absent → use HEALTH_DEFAULTS. */
+  healthSettings?: HealthSettings
   /** Required distinct validators for a text cell to count as "fully validated". Clamped [1, 15]. Default 1. Mirrors desktop manifest. */
   validationCount?: number
   /** Required distinct validators for audio. Clamped [1, 15]. Default 1. */
@@ -122,7 +124,8 @@ export interface CompletionSettings {
   maxTokens: number
   temperature: number
   systemPrompt: string
-  llmHealthPenalty: number // 0-1, default 0.1 (10% penalty). Multiplier = 1 - penalty.
+  /** 0-1, default 0.1. Only consumed by the legacy health engine (flag-off path). Will be removed once the composite-health flag is default-on. */
+  llmHealthPenalty?: number
 }
 
 export interface WeightedExample {
@@ -218,6 +221,43 @@ export interface ProjectPermissions {
   canResolveComments: boolean
   canPush: boolean
   accessLevel?: number
+}
+
+// ─── Health settings (composite-health flag) ────────────────────────────
+
+export interface HealthCaps {
+  validationGap: number
+  ancestryPenalty: number
+  neighborhoodPenalty: number
+  rulePenalty: number
+}
+
+export interface HealthRulePenaltiesConfig {
+  major: number
+  minor: number
+}
+
+export interface NeighborhoodWeights {
+  idJaccard: number
+  tfidfTokenOverlap: number
+}
+
+export interface HealthConfig {
+  caps: HealthCaps
+  rulePenalties: HealthRulePenaltiesConfig
+  neighborhoodWeights: NeighborhoodWeights
+  neighborhoodSearchLimit: number
+}
+
+export type DeepPartial<T> = {
+  [K in keyof T]?: T[K] extends object ? DeepPartial<T[K]> : T[K]
+}
+
+export interface HealthSettings {
+  /** When true, ignore `overrides` and always use HEALTH_DEFAULTS. */
+  followDefaults: boolean
+  /** Partial override of HEALTH_DEFAULTS, merged at resolution time. */
+  overrides?: DeepPartial<HealthConfig>
 }
 
 export function detectFileType(fileName: string): FileType | null {

@@ -1,6 +1,6 @@
 import { cn } from "@/lib/utils"
 
-export type SyncStatus = "live" | "connecting" | "offline" | "disabled"
+export type SyncStatus = "live" | "connecting" | "offline" | "idle" | "disabled"
 
 interface SyncStatusIndicatorProps {
   status: SyncStatus
@@ -13,6 +13,8 @@ interface SyncStatusIndicatorProps {
  *   live       — green  → WS connected AND initial sync complete
  *   connecting — amber  → WS not yet established, or handshake in progress
  *   offline    — red    → was connected and now isn't (reconnect backoff)
+ *   idle       — grey   → intentionally disconnected while the tab is hidden,
+ *                         will resume when the user returns
  *   disabled   — grey   → no session, no project/file selected, or sync turned off
  */
 export function SyncStatusIndicator({ status, className }: SyncStatusIndicatorProps) {
@@ -54,6 +56,12 @@ function describeStatus(status: SyncStatus): { dot: string; label: string; toolt
         dot: "bg-red-500",
         label: "Offline",
         tooltip: "Offline — changes are saved locally and will sync when reconnected",
+      }
+    case "idle":
+      return {
+        dot: "bg-muted-foreground/40",
+        label: "Paused",
+        tooltip: "Sync paused while the tab is hidden — will resume when you return",
       }
     case "disabled":
       return {

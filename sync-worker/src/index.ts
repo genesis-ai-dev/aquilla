@@ -12,10 +12,12 @@
 // connect to any docId. Tolerable while the worker isn't deployed publicly.
 
 import { YServer } from "y-partyserver"
-import type { Connection } from "partyserver"
+import type { Connection, ConnectionContext } from "partyserver"
 import * as Y from "yjs"
 import { routePartykitRequest } from "partyserver"
-import { verifyTokenForDoc } from "./auth"
+import { verifyTokenForDoc, shouldBeReadOnly } from "./auth"
+
+const ROLE_HEADER = "X-Codex-Role"
 
 declare global {
   namespace Cloudflare {
@@ -146,6 +148,26 @@ export class FileSync extends YServer {
     await this.env.SNAPSHOTS.put(key, state)
   }
 
+  // Stash the verified role on the connection so isReadOnly can gate writes.
+  // onBeforeConnect (in the default fetch handler below) is where the token is
+  // verified and the X-Codex-Role header is attached — trusted because we set
+  // it ourselves from verified JWT claims after stripping any client-supplied
+  // header of the same name.
+  onConnect(conn: Connection, ctx: ConnectionContext): void {
+    const roleHeader = ctx.request.headers.get(ROLE_HEADER)
+    if (roleHeader) {
+      const role = Number.parseInt(roleHeader, 10)
+      if (Number.isFinite(role)) {
+        conn.setState({ role })
+      }
+    }
+    super.onConnect(conn, ctx)
+  }
+
+  isReadOnly(connection: Connection): boolean {
+    const state = connection.state as { role?: number } | null
+    return shouldBeReadOnly(state?.role)
+  }
   // When the room empties, arm a compaction alarm. A reconnect within the
   // grace window reschedules (overwrites) the alarm so we don't compact
   // during a reload.
@@ -181,7 +203,17 @@ export default {
     return (
       (await routePartykitRequest(request, env, {
         onBeforeConnect: async (req, lobby) => {
-          if (env.ALLOW_UNAUTHENTICATED === "true") return
+          // Always strip any client-supplied role header first; the only role
+          // we trust is the one we attach ourselves from verified JWT claims.
+          const safeHeaders = new Headers(req.headers)
+          safeHeaders.delete(ROLE_HEADER)
+
+          if (env.ALLOW_UNAUTHENTICATED === "true") {
+            // Dev bypass: connection accepted with no role header, so the DO's
+            // isReadOnly returns permissive (undefined role).
+            return new Request(req, { headers: safeHeaders })
+          }
+
           const url = new URL(req.url)
           const token = url.searchParams.get("token")
           const { projectId, fileId } = parseDocId(lobby.name)
@@ -193,6 +225,8 @@ export default {
           if (!result.ok) {
             return new Response(result.reason, { status: result.status })
           }
+          safeHeaders.set(ROLE_HEADER, String(result.claims.role))
+          return new Request(req, { headers: safeHeaders })
         },
       })) ?? new Response("not found", { status: 404 })
     )

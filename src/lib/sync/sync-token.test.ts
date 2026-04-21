@@ -40,7 +40,7 @@ describe("fetchSyncToken", () => {
     })
     global.fetch = fetchMock as unknown as typeof fetch
 
-    const result = await fetchSyncToken("jwt-user", "proj-1", "file-a", API)
+    const result = await fetchSyncToken("jwt-user", "proj-1", "file-a", {}, API)
 
     expect(result.token).toBe("jwt-abc")
     expect(result.expiresIn).toBe(900)
@@ -55,9 +55,45 @@ describe("fetchSyncToken", () => {
     expect(JSON.parse(init.body as string)).toEqual({ projectId: "proj-1", fileId: "file-a" })
   })
 
+  it("forwards projectName and gitlabProjectId when the bootstrap payload is set", async () => {
+    const fetchMock = mockFetch({
+      status: 200,
+      body: { token: "t", expiresIn: 900, role: { level: 700, name: "owner", source: "creator" } },
+    })
+    global.fetch = fetchMock as unknown as typeof fetch
+
+    await fetchSyncToken("jwt-user", "proj-1", "file-a", {
+      projectName: "Genesis MVP",
+      gitlabProjectId: 4242,
+    }, API)
+
+    const body = JSON.parse(fetchMock.mock.calls[0][1]!.body as string)
+    expect(body).toEqual({
+      projectId: "proj-1",
+      fileId: "file-a",
+      projectName: "Genesis MVP",
+      gitlabProjectId: 4242,
+    })
+  })
+
+  it("omits bootstrap fields from the body when unset", async () => {
+    const fetchMock = mockFetch({
+      status: 200,
+      body: { token: "t", expiresIn: 900, role: { level: 700, name: "owner", source: "creator" } },
+    })
+    global.fetch = fetchMock as unknown as typeof fetch
+
+    await fetchSyncToken("jwt-user", "proj-1", "file-a", undefined, API)
+
+    const body = JSON.parse(fetchMock.mock.calls[0][1]!.body as string)
+    expect(body).toEqual({ projectId: "proj-1", fileId: "file-a" })
+    expect(body).not.toHaveProperty("projectName")
+    expect(body).not.toHaveProperty("gitlabProjectId")
+  })
+
   it("throws SyncTokenError with status on non-2xx", async () => {
     global.fetch = mockFetch({ status: 403, body: { error: "no access" } }) as unknown as typeof fetch
-    await expect(fetchSyncToken("jwt-user", "proj-x", "file-x", API)).rejects.toMatchObject({
+    await expect(fetchSyncToken("jwt-user", "proj-x", "file-x", {}, API)).rejects.toMatchObject({
       name: "SyncTokenError",
       status: 403,
     })
@@ -65,7 +101,7 @@ describe("fetchSyncToken", () => {
 
   it("handles 401 as SyncTokenError", async () => {
     global.fetch = mockFetch({ status: 401, body: "Authorization header required" }) as unknown as typeof fetch
-    const err = await fetchSyncToken("bad", "p", "f", API).catch((e) => e as SyncTokenError)
+    const err = await fetchSyncToken("bad", "p", "f", {}, API).catch((e) => e as SyncTokenError)
     expect(err).toBeInstanceOf(SyncTokenError)
     expect((err as SyncTokenError).status).toBe(401)
   })
@@ -84,7 +120,7 @@ describe("makeSyncTokenFetcher", () => {
 
   it("returns null when no jwt is available", async () => {
     global.fetch = vi.fn() as unknown as typeof fetch
-    const getToken = makeSyncTokenFetcher(() => null, "proj-1", "file-a", API)
+    const getToken = makeSyncTokenFetcher(() => null, "proj-1", "file-a", {}, API)
     const result = await getToken()
     expect(result).toBeNull()
     expect(global.fetch).not.toHaveBeenCalled()
@@ -97,7 +133,7 @@ describe("makeSyncTokenFetcher", () => {
     })
     global.fetch = fetchMock as unknown as typeof fetch
 
-    const getToken = makeSyncTokenFetcher(() => "jwt-user", "proj-1", "file-a", API)
+    const getToken = makeSyncTokenFetcher(() => "jwt-user", "proj-1", "file-a", {}, API)
     expect(await getToken()).toBe("jwt-cached")
     expect(await getToken()).toBe("jwt-cached")
     expect(fetchMock).toHaveBeenCalledTimes(1)
@@ -115,7 +151,7 @@ describe("makeSyncTokenFetcher", () => {
     })
     global.fetch = firstFetch as unknown as typeof fetch
 
-    const getToken = makeSyncTokenFetcher(() => "jwt-user", "proj-1", "file-a", API)
+    const getToken = makeSyncTokenFetcher(() => "jwt-user", "proj-1", "file-a", {}, API)
     expect(await getToken()).toBe("jwt-first")
 
     // Jump to 14:45 — only 15 s of TTL left, inside the 30 s safety margin.
@@ -134,7 +170,7 @@ describe("makeSyncTokenFetcher", () => {
   it("returns null and logs when the server rejects the jwt", async () => {
     global.fetch = mockFetch({ status: 401, body: "stale" }) as unknown as typeof fetch
     const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined)
-    const getToken = makeSyncTokenFetcher(() => "stale-jwt", "proj-1", "file-a", API)
+    const getToken = makeSyncTokenFetcher(() => "stale-jwt", "proj-1", "file-a", {}, API)
     expect(await getToken()).toBeNull()
     expect(warn).toHaveBeenCalled()
     warn.mockRestore()

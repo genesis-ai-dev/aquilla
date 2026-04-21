@@ -25,6 +25,12 @@ interface UseFileSyncOptions {
    *  token — fine in dev mode, rejected in prod (editor keeps working via
    *  IndexedDB). */
   session: FrontierSession | null
+  /** Human-readable project name — forwarded to /sync-token so the server can
+   *  auto-register the project row on first use with something meaningful. */
+  projectName?: string | null
+  /** GitLab project ID when the project is GitLab-backed; enables the
+   *  GitLab-permission fallback for other users later. */
+  gitlabProjectId?: number | null
 }
 
 export function useFileSync(options: UseFileSyncOptions): {
@@ -33,7 +39,7 @@ export function useFileSync(options: UseFileSyncOptions): {
   provider: YProvider | null
   status: SyncStatus
 } {
-  const { doc, projectId, fileId, username, enabled, session } = options
+  const { doc, projectId, fileId, username, enabled, session, projectName, gitlabProjectId } = options
   const [peers, setPeers] = useState<PeerState[]>([])
   const [connected, setConnected] = useState(false)
   const [provider, setProviderState] = useState<YProvider | null>(null)
@@ -55,7 +61,10 @@ export function useFileSync(options: UseFileSyncOptions): {
       return
     }
 
-    const getToken = makeSyncTokenFetcher(() => jwtRef.current, projectId, fileId)
+    const getToken = makeSyncTokenFetcher(() => jwtRef.current, projectId, fileId, {
+      projectName: projectName ?? undefined,
+      gitlabProjectId: gitlabProjectId ?? undefined,
+    })
     const handle = createFileSyncProvider(doc, projectId, fileId, getToken)
     handleRef.current = handle
     const { provider } = handle

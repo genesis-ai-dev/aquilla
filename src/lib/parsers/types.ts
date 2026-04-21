@@ -125,13 +125,24 @@ export interface CompletionSettings {
   llmHealthPenalty: number // 0-1, default 0.1 (10% penalty). Multiplier = 1 - penalty.
 }
 
+export interface WeightedExample {
+  cellId: string
+  /** Coverage weight at generation time, in [0, 1]. Larger = example covered more of the source query. */
+  weight: number
+}
+
 export interface CellHistoryEntry {
   timestamp: string
   value: string
   source: "human" | "llm"
   author: string
   validated: boolean
-  examples?: string[]
+  /**
+   * Example cells used at generation time. Legacy entries store `string[]`
+   * (cell IDs, unweighted); new entries store `WeightedExample[]`. The
+   * composite-health scorer treats legacy entries as unknown lineage.
+   */
+  examples?: string[] | WeightedExample[]
 }
 
 export interface CommentMessage {

@@ -46,7 +46,9 @@ export function computeHealthMap(
       }
       // "none" = no validations — check LLM example chain
       const lastEntry = cell.history[cell.history.length - 1]
-      const exampleIds = lastEntry?.examples || []
+      const exampleIds = (lastEntry?.examples ?? []).map((e) =>
+        typeof e === "string" ? e : e.cellId
+      )
       if (exampleIds.length === 0) {
         healthMap.set(cell.id, 0)
         continue

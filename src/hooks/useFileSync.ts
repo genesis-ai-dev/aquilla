@@ -13,6 +13,7 @@ import { peerColor } from "@/lib/sync/webrtc-provider"
 import { makeSyncTokenFetcher } from "@/lib/sync/sync-token"
 import type { PeerState } from "@/hooks/useSync"
 import type { FrontierSession } from "@/lib/frontier/types"
+import type { SyncStatus } from "@/components/SyncStatusIndicator"
 
 interface UseFileSyncOptions {
   doc: Y.Doc | null
@@ -30,6 +31,7 @@ export function useFileSync(options: UseFileSyncOptions): {
   peers: PeerState[]
   connected: boolean
   provider: YProvider | null
+  status: SyncStatus
 } {
   const { doc, projectId, fileId, username, enabled, session } = options
   const [peers, setPeers] = useState<PeerState[]>([])
@@ -117,5 +119,17 @@ export function useFileSync(options: UseFileSyncOptions): {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [username, fileId])
 
-  return { peers, connected, provider }
+  // Status derivation:
+  //   disabled   — hook not running (no session, no project/file, or disabled)
+  //   connecting — provider exists but WS hasn't completed the handshake yet;
+  //                doubles as the "reconnecting" state since YProvider
+  //                automatically backs off on failure
+  //   live       — WS connected AND server acked sync
+  const status: SyncStatus = !provider
+    ? "disabled"
+    : connected
+      ? "live"
+      : "connecting"
+
+  return { peers, connected, provider, status }
 }

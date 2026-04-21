@@ -279,6 +279,7 @@ export function ProjectWorkspace() {
     fileId: activeFileId || null,
     username: currentUsername,
     enabled: Boolean(project && activeFileId && doc),
+    session: frontierSession,
   })
 
   // Project-wide presence room: everyone in the project joins regardless of

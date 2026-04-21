@@ -1,7 +1,7 @@
 // File-level sync hook backed by the codex sync-worker (y-partyserver DO + R2).
 // Mirrors useSync's shape so callers only change the import and input keys.
 
-import { useEffect, useState, useMemo } from "react"
+import { useEffect, useState, useMemo, useRef } from "react"
 import * as Y from "yjs"
 import type YProvider from "y-partyserver/provider"
 import {
@@ -10,7 +10,9 @@ import {
   type FileSyncProviderHandle,
 } from "@/lib/sync/partyserver-provider"
 import { peerColor } from "@/lib/sync/webrtc-provider"
+import { makeSyncTokenFetcher } from "@/lib/sync/sync-token"
 import type { PeerState } from "@/hooks/useSync"
+import type { FrontierSession } from "@/lib/frontier/types"
 
 interface UseFileSyncOptions {
   doc: Y.Doc | null
@@ -18,6 +20,10 @@ interface UseFileSyncOptions {
   fileId: string | null
   username: string
   enabled: boolean
+  /** Active Frontier session. When null, the provider connects with no auth
+   *  token — fine in dev mode, rejected in prod (editor keeps working via
+   *  IndexedDB). */
+  session: FrontierSession | null
 }
 
 export function useFileSync(options: UseFileSyncOptions): {
@@ -25,12 +31,19 @@ export function useFileSync(options: UseFileSyncOptions): {
   connected: boolean
   provider: YProvider | null
 } {
-  const { doc, projectId, fileId, username, enabled } = options
+  const { doc, projectId, fileId, username, enabled, session } = options
   const [peers, setPeers] = useState<PeerState[]>([])
   const [connected, setConnected] = useState(false)
   const [provider, setProviderState] = useState<YProvider | null>(null)
 
   const handleRef = useMemo(() => ({ current: null as FileSyncProviderHandle | null }), [])
+
+  // Stash the current jwt in a ref so the token-fetcher closure always reads
+  // the latest session without tearing down the provider on session swap.
+  const jwtRef = useRef<string | null>(session?.jwt ?? null)
+  useEffect(() => {
+    jwtRef.current = session?.jwt ?? null
+  }, [session])
 
   useEffect(() => {
     if (!enabled || !doc || !projectId || !fileId) {
@@ -40,7 +53,8 @@ export function useFileSync(options: UseFileSyncOptions): {
       return
     }
 
-    const handle = createFileSyncProvider(doc, projectId, fileId)
+    const getToken = makeSyncTokenFetcher(() => jwtRef.current, projectId, fileId)
+    const handle = createFileSyncProvider(doc, projectId, fileId, getToken)
     handleRef.current = handle
     const { provider } = handle
     setProviderState(provider)

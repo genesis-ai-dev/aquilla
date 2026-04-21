@@ -138,19 +138,6 @@ export class DualIndex {
     }))
   }
 
-  /** Internal accessor for search methods added in later tasks. Returns live refs. */
-  getInternals() {
-    const self = this
-    return {
-      pairs: this.pairs,
-      sourceInverted: this.sourceInverted,
-      targetInverted: this.targetInverted,
-      sourceDocFreq: this.sourceDocFreq,
-      targetDocFreq: this.targetDocFreq,
-      get docCount() { return self.pairs.size },
-    }
-  }
-
   private addInverted(
     inv: Map<string, Set<string>>, df: Map<string, number>, token: string, cellId: string,
   ): void {

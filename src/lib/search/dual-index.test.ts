@@ -54,16 +54,6 @@ describe("DualIndex build / add / remove", () => {
     expect(ix.hasToken("source", "bonjour")).toBe(false)
   })
 
-  it("getInternals().docCount reflects live size after mutations", () => {
-    const ix = new DualIndex()
-    ix.buildFromProject([cell("a", "hello", "bonjour")])
-    const internals = ix.getInternals()
-    expect(internals.docCount).toBe(1)
-    ix.addPair(cell("b", "world", "monde"))
-    expect(internals.docCount).toBe(2)
-    ix.removePair("a")
-    expect(internals.docCount).toBe(1)
-  })
 })
 
 describe("DualIndex plain search", () => {

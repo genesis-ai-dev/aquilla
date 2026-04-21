@@ -7,6 +7,11 @@ describe("FLAGS registry", () => {
     expect(FLAGS["living-memory-view"].default).toBe(false)
   })
 
+  it("registers composite-health flag with default off", () => {
+    expect(FLAGS).toHaveProperty("composite-health")
+    expect(FLAGS["composite-health"].default).toBe(false)
+  })
+
   it("every flag has a non-empty label and description", () => {
     for (const [key, def] of Object.entries(FLAGS)) {
       expect(def.label, `flag "${key}" label`).toBeTruthy()

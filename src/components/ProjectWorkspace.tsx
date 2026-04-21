@@ -281,6 +281,9 @@ export function ProjectWorkspace() {
     username: currentUsername,
     enabled: Boolean(project && activeFileId && doc),
     session: frontierSession,
+    projectName: project?.name ?? null,
+    gitlabProjectId:
+      project?.origin?.kind === "git" ? project.origin.gitlabProjectId : null,
   })
 
   // Project-wide presence room: everyone in the project joins regardless of

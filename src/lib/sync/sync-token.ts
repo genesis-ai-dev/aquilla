@@ -25,23 +25,36 @@ export class SyncTokenError extends Error {
   }
 }
 
+/** Optional bootstrap payload so the server can auto-register an unknown
+ *  projectId on the caller's first /sync-token request. */
+export interface ProjectBootstrap {
+  projectName?: string
+  gitlabProjectId?: number
+}
+
 export async function fetchSyncToken(
   jwt: string,
   projectId: string,
   fileId: string,
+  bootstrap: ProjectBootstrap = {},
   apiUrl: string = FRONTIER_API_URL
 ): Promise<SyncTokenResponse> {
+  const body: Record<string, unknown> = { projectId, fileId }
+  if (bootstrap.projectName) body.projectName = bootstrap.projectName
+  if (typeof bootstrap.gitlabProjectId === "number") {
+    body.gitlabProjectId = bootstrap.gitlabProjectId
+  }
   const res = await fetch(`${apiUrl}/api/v2/sync-token`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
       Authorization: `Bearer ${jwt}`,
     },
-    body: JSON.stringify({ projectId, fileId }),
+    body: JSON.stringify(body),
   })
   if (!res.ok) {
-    const body = await res.text().catch(() => "")
-    throw new SyncTokenError(res.status, body)
+    const errBody = await res.text().catch(() => "")
+    throw new SyncTokenError(res.status, errBody)
   }
   return (await res.json()) as SyncTokenResponse
 }
@@ -62,6 +75,7 @@ export function makeSyncTokenFetcher(
   getJwt: () => string | null,
   projectId: string,
   fileId: string,
+  bootstrap: ProjectBootstrap = {},
   apiUrl?: string
 ): () => Promise<string | null> {
   let cached: CachedToken | null = null
@@ -73,7 +87,7 @@ export function makeSyncTokenFetcher(
     const jwt = getJwt()
     if (!jwt) return null
     try {
-      const resp = await fetchSyncToken(jwt, projectId, fileId, apiUrl)
+      const resp = await fetchSyncToken(jwt, projectId, fileId, bootstrap, apiUrl)
       cached = {
         value: resp.token,
         expiresAtMs: now + resp.expiresIn * 1000,

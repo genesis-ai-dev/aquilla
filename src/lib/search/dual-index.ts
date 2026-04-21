@@ -76,15 +76,16 @@ export class DualIndex {
     return set ? set.size > 0 : false
   }
 
-  /** Internal accessor for search methods added in later tasks. */
+  /** Internal accessor for search methods added in later tasks. Returns live refs. */
   getInternals() {
+    const self = this
     return {
       pairs: this.pairs,
       sourceInverted: this.sourceInverted,
       targetInverted: this.targetInverted,
       sourceDocFreq: this.sourceDocFreq,
       targetDocFreq: this.targetDocFreq,
-      docCount: this.pairs.size,
+      get docCount() { return self.pairs.size },
     }
   }
 

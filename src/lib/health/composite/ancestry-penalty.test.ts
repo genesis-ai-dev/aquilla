@@ -38,7 +38,9 @@ describe("ancestryPenalty", () => {
       ...Array.from({ length: 9 }, (_, i) => [`b${i}`, 15] as [string, number]),
     ])
     const result = ancestryPenalty(examples, healthMap, CAP)
-    expect(result).toBeLessThan(2)  // weighted avg ≈ 95 → penalty ≈ 1
+    // weighted avg = (0.8*100 + 9*0.02*15) / (0.8 + 0.18) ≈ 84.4
+    // penalty ≈ 20 * (1 - 0.844) ≈ 3.12
+    expect(result).toBeLessThan(5)
   })
 
   it("treats missing examples in healthMap as 0 health", () => {

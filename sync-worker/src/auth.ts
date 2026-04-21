@@ -14,6 +14,25 @@ export interface SyncTokenClaims {
   exp: number
 }
 
+/**
+ * Contributor role level — minimum required to push Y.Doc updates. Viewer
+ * (100), commenter (200), and reviewer (300) all connect successfully but
+ * their writes are silently dropped by isReadOnly. Kept here (alongside the
+ * token claims) so the DO and any future role-gating logic share one source.
+ */
+export const WRITE_ROLE_LEVEL = 400
+
+/**
+ * Pure read-only check. null/undefined role means "role unknown" — happens in
+ * ALLOW_UNAUTHENTICATED dev mode when onBeforeConnect doesn't stash a role
+ * header on the request — and defaults to permissive (return false) so local
+ * dev without tokens still lets edits through.
+ */
+export function shouldBeReadOnly(role: number | null | undefined): boolean {
+  if (role == null) return false
+  return role < WRITE_ROLE_LEVEL
+}
+
 export type AuthResult =
   | { ok: true; claims: SyncTokenClaims }
   | { ok: false; status: 401 | 403 | 500; reason: string }

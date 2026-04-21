@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest"
 import { sign } from "hono/jwt"
-import { verifyTokenForDoc, type SyncTokenClaims } from "../auth"
+import { verifyTokenForDoc, shouldBeReadOnly, type SyncTokenClaims } from "../auth"
 
 const SECRET = "test-secret-key-for-unit-tests"
 
@@ -108,5 +108,32 @@ describe("verifyTokenForDoc", () => {
       expect(res.status).toBe(403)
       expect(res.reason).toContain("different file")
     }
+  })
+})
+
+describe("shouldBeReadOnly", () => {
+  // Ladder is 100 viewer / 200 commenter / 300 reviewer / 400 contributor /
+  // 500 project_lead / 600 maintainer / 700 owner. Writes gate at 400.
+  it("viewer, commenter, reviewer cannot write", () => {
+    expect(shouldBeReadOnly(100)).toBe(true)
+    expect(shouldBeReadOnly(200)).toBe(true)
+    expect(shouldBeReadOnly(300)).toBe(true)
+  })
+
+  it("contributor and above can write", () => {
+    expect(shouldBeReadOnly(400)).toBe(false)
+    expect(shouldBeReadOnly(500)).toBe(false)
+    expect(shouldBeReadOnly(600)).toBe(false)
+    expect(shouldBeReadOnly(700)).toBe(false)
+  })
+
+  it("unknown role defaults to permissive (dev-mode fallback)", () => {
+    expect(shouldBeReadOnly(null)).toBe(false)
+    expect(shouldBeReadOnly(undefined)).toBe(false)
+  })
+
+  it("non-numeric / out-of-band role values stay gated when below threshold", () => {
+    expect(shouldBeReadOnly(0)).toBe(true)
+    expect(shouldBeReadOnly(399)).toBe(true)
   })
 })

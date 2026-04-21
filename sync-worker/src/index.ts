@@ -12,6 +12,7 @@
 // connect to any docId. Tolerable while the worker isn't deployed publicly.
 
 import { YServer } from "y-partyserver"
+import type { Connection } from "partyserver"
 import * as Y from "yjs"
 import { routePartykitRequest } from "partyserver"
 import { verifyTokenForDoc } from "./auth"
@@ -58,6 +59,56 @@ function parseDocId(name: string): { projectId: string; fileId: string } {
   }
 }
 
+// Grace period after the last client disconnects before we compact tails into
+// a snapshot. Keeps churn low when a user is just reloading — the DO stays
+// warm and the alarm is rescheduled on reconnect instead of firing.
+const COMPACTION_GRACE_MS = 60 * 1000
+
+/**
+ * Merge existing snapshot + all tail blobs into a new snapshot, then delete
+ * the tails. Idempotent: running it twice in a row is a no-op (second call
+ * sees no tails). Reads directly from R2 so it works both when the DO's
+ * Y.Doc is warm in memory and when the alarm wakes a cold DO.
+ */
+async function compactToSnapshot(
+  bucket: R2Bucket,
+  projectId: string,
+  fileId: string
+): Promise<number> {
+  const prefix = tailPrefix(projectId, fileId)
+  const snapKey = snapshotKey(projectId, fileId)
+
+  const [existingSnap, tails] = await Promise.all([
+    bucket.get(snapKey),
+    bucket.list({ prefix }),
+  ])
+
+  if (tails.objects.length === 0) return 0
+
+  const updates: Uint8Array[] = []
+  if (existingSnap) {
+    updates.push(new Uint8Array(await existingSnap.arrayBuffer()))
+  }
+  const tailKeys = tails.objects.map((o) => o.key).sort()
+  for (const key of tailKeys) {
+    const obj = await bucket.get(key)
+    if (!obj) continue
+    updates.push(new Uint8Array(await obj.arrayBuffer()))
+  }
+
+  // Y.mergeUpdates returns the combined update bytes that, when applied to a
+  // fresh Y.Doc, reproduce the state of applying every input update in order.
+  const merged = Y.mergeUpdates(updates)
+  await bucket.put(snapKey, merged)
+
+  // Delete the consumed tails AFTER the snapshot is written. If the deletes
+  // fail we're still consistent: onLoad replays snapshot + surviving tails
+  // (applying an update already in the snapshot is a no-op in Yjs).
+  await bucket.delete(tailKeys)
+
+  return tailKeys.length
+}
+
 export class FileSync extends YServer {
   static options = { hibernate: true }
   static callbackOptions = {
@@ -93,6 +144,35 @@ export class FileSync extends YServer {
     const seq = Date.now().toString().padStart(16, "0")
     const key = `${tailPrefix(projectId, fileId)}${seq}.bin`
     await this.env.SNAPSHOTS.put(key, state)
+  }
+
+  // When the room empties, arm a compaction alarm. A reconnect within the
+  // grace window reschedules (overwrites) the alarm so we don't compact
+  // during a reload.
+  async onClose(
+    connection: Connection,
+    code: number,
+    reason: string,
+    wasClean: boolean
+  ): Promise<void> {
+    await super.onClose(connection, code, reason, wasClean)
+    const stillOpen = Array.from(this.getConnections()).length
+    if (stillOpen === 0) {
+      await this.ctx.storage.setAlarm(Date.now() + COMPACTION_GRACE_MS)
+    }
+  }
+
+  // Alarm fires after the grace window with no reconnect. Compact, then let
+  // the DO evict naturally (CF reclaims idle DOs).
+  async onAlarm(): Promise<void> {
+    const live = Array.from(this.getConnections()).length
+    if (live > 0) return // someone rejoined — the next onClose will re-arm
+    const { projectId, fileId } = parseDocId(this.name)
+    try {
+      await compactToSnapshot(this.env.SNAPSHOTS, projectId, fileId)
+    } catch (err) {
+      console.warn(`compaction failed for ${this.name}:`, err)
+    }
   }
 }
 

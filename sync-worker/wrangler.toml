@@ -1,0 +1,20 @@
+name = "codex-sync-worker"
+main = "src/index.ts"
+compatibility_date = "2024-12-01"
+compatibility_flags = ["nodejs_compat"]
+
+# y-partyserver wires one Durable Object per file (room name = fileId).
+[[durable_objects.bindings]]
+name = "FileSync"
+class_name = "FileSync"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["FileSync"]
+
+# R2 holds canonical Y.Doc snapshots and tail updates.
+# Key layout: projects/{projectId}/files/{fileId}/{snapshot.bin,tail/{seq}.bin,checkpoints/{id}.bin}
+[[r2_buckets]]
+binding = "SNAPSHOTS"
+bucket_name = "codex-snapshots"
+# For local `wrangler dev`, wrangler will use a local simulator if the bucket doesn't exist.

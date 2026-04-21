@@ -136,5 +136,440 @@
     "updated_at": "2026-04-13T17:18:04.548658+00:00",
     "last_viewed": null,
     "stale_views": 0
+  },
+  {
+    "id": "2e2c4a062b76",
+    "file": "src/lib/store/file-doc.ts",
+    "anchor": {
+      "from_text": "export function createFileDoc(",
+      "to_text": "return { doc, persistence, fileId }\n}",
+      "function_anchor": "createFileDoc",
+      "start_line": 20,
+      "end_line": 26
+    },
+    "original_content": "export function createFileDoc(\n  fileId: string,\n  fileName: string,\n  fileType: FileType,\n  sourceLanguage: string,\n  targetLanguage: string,\n  strings: TranslatableString[]",
+    "original_hash": "cb91da105f38d22d",
+    "summary": "Yjs-based per-file Y.Doc. Three root collections: meta (Y.Map: fileId, fileName, fileType, sourceLanguage, targetLanguage, __source, videoUrl), cells (Y.Map<cellId, Y.Map>), order (Y.Array<string>). Each cell Y.Map holds: id, original, translatedXml (Y.XmlFragment for rich text), context, group, type, history (Y.Array<CellHistoryEntry> \u2014 edit ledger), __source (stashed original CodexCell JSON for round-trip), __lastSyncedHistoryAt (number watermark). Persisted client-side via y-indexeddb under key `codex:file:${fileId}`. createFileDoc only called by importer and does NOT register with shared registry \u2014 importer owns single ref and destroys after whenSynced.",
+    "tags": [
+      "crdt",
+      "yjs",
+      "file-doc",
+      "data-structure"
+    ],
+    "created_at": "2026-04-17T21:28:10.847519+00:00",
+    "updated_at": "2026-04-17T21:28:10.847851+00:00",
+    "last_viewed": null,
+    "stale_views": 0
+  },
+  {
+    "id": "251262c24c9d",
+    "file": "src/lib/store/file-doc.ts",
+    "anchor": {
+      "from_text": "// Shared registry of live handles.",
+      "to_text": "handle.persistence.destroy()\n  handle.doc.destroy()\n}",
+      "function_anchor": null,
+      "start_line": 67,
+      "end_line": 87
+    },
+    "original_content": "// Shared registry of live handles. Without this, sync's loadFileDoc returned\n// a fresh Y.Doc + persistence disjoint from the editor's doc, so syncProject's\n// rehydrate wrote through to IDB but the editor's Y.Doc in the same tab kept\n// showing pre-merge state. Ref-count so destroyFileDoc from one caller doesn't\n// tear down the handle another caller is still using.\ninterface RegistryEntry {\n  handle: FileDocHandle\n  refcount: number\n}\nconst registry = new Map<string, RegistryEntry>()\n\nexport function loadFileDoc(fileId: string): FileDocHandle {\n  const existing = registry.get(fileId)\n  if (existing) {\n    existing.refcount++\n    return existing.handle\n  }\n  const doc = new Y.Doc()\n  const persistence = new IndexeddbPersistence(`codex:file:${fileId}`, doc)\n  const handle: FileDocHandle = { doc, persistence, fileId }\n  registry.set(fileId, { handle, refcount: 1 })",
+    "original_hash": "932605c3167cd393",
+    "summary": "Ref-counted registry of FileDocHandle instances keyed by fileId. Exists because without it, sync's loadFileDoc returned a fresh Y.Doc + persistence disjoint from the editor's doc, so syncProject's rehydrate wrote through IDB but editor kept showing pre-merge state. loadFileDoc increments refcount if entry exists else creates new Y.Doc+IndexeddbPersistence. destroyFileDoc decrements; only tears down when refcount hits 0.",
+    "tags": [
+      "crdt",
+      "yjs",
+      "registry",
+      "ref-counting"
+    ],
+    "created_at": "2026-04-17T21:28:15.375589+00:00",
+    "updated_at": "2026-04-17T21:28:15.375600+00:00",
+    "last_viewed": null,
+    "stale_views": 0
+  },
+  {
+    "id": "8894426f7932",
+    "file": "src/lib/sync/git-sync.ts",
+    "anchor": {
+      "from_text": "export type SyncPhase =",
+      "to_text": "opts: SyncOptions = {},",
+      "function_anchor": null,
+      "start_line": 18,
+      "end_line": 60
+    },
+    "original_content": "export type SyncPhase =\n  | \"idle\"\n  | \"checking-dirty\"\n  | \"serializing\"\n  | \"writing\"\n  | \"committing\"\n  | \"merging\"\n  | \"rehydrating\"\n  | \"pushing\"\n  | \"done\"\n  | \"error\"\n  | \"remote-moved\"\n\nexport interface SyncResult {\n  status: \"synced\" | \"no-changes\" | \"remote-moved\" | \"merged\" | \"error\"\n  commitSha?: string\n  mergeSha?: string\n  touchedPaths?: string[]\n  filesWritten?: number\n  backupRef?: string\n  message?: string\n}\n\nexport interface SyncOptions {\n  signal?: AbortSignal\n  onPhase?: (phase: SyncPhase, label?: string) => void\n  /**\n   * Test seam: when set, use this fs instead of opening OPFS. Lets tests\n   * plumb a MemoryDirectoryHandle-backed fs into syncProject without any\n   * OPFS access.\n   */\n  fs?: FsProvider\n}\n\nfunction repoKey(p: ProjectRecord): string {\n  if (p.origin?.kind !== \"git\") throw new Error(\"syncProject: project has no git origin\")\n  return opfsRepoKey(p.origin.gitlabProjectId, pathWithNamespaceFromCloneUrl(p.origin.cloneUrl))\n}\n\nexport async function syncProject(\n  project: ProjectRecord,\n  session: FrontierSession,\n  opts: SyncOptions = {},",
+    "original_hash": "65710e81970a4d65",
+    "summary": "syncProject orchestrator in src/lib/sync/git-sync.ts. Phases: idle \u2192 checking-dirty \u2192 serializing \u2192 writing \u2192 committing \u2192 merging (if remote moved) \u2192 rehydrating \u2192 pushing \u2192 done. SyncResult.status: synced | no-changes | remote-moved | merged | error. Flow: check isFileDirty \u2192 serializeFile/serializeComments \u2192 write .codex + comments.json to OPFS \u2192 git add+commit \u2192 if remote moved, mergeRemoteIntoOurs \u2192 rehydrateFileDoc (re-sources Y.Doc from merged tree) \u2192 push to GitLab \u2192 update ProjectRecord.origin.headSha. Test seam: fs option lets tests plumb MemoryDirectoryHandle instead of OPFS.",
+    "tags": [
+      "gitlab-sync",
+      "sync-orchestration",
+      "crdt"
+    ],
+    "created_at": "2026-04-17T21:28:21.681106+00:00",
+    "updated_at": "2026-04-17T21:28:21.681119+00:00",
+    "last_viewed": null,
+    "stale_views": 0
+  },
+  {
+    "id": "2e67c9415557",
+    "file": "src/lib/sync/dirty.ts",
+    "anchor": {
+      "from_text": "export function isCellDirty(",
+      "to_text": "return false\n}",
+      "function_anchor": "isCellDirty",
+      "start_line": 7,
+      "end_line": 22
+    },
+    "original_content": "export function isCellDirty(cell: Y.Map<unknown>): boolean {\n  const source = cell.get(\"__source\") as CodexCell | undefined\n  if (!source) return true // new cell \u2014 treat as dirty (Phase 2 doesn't add cells but defensive)\n\n  const frag = cell.get(\"translatedXml\") as Y.XmlFragment | undefined\n  const currentValue = frag ? getFragmentHtml(frag) : \"\"\n  if (currentValue !== source.value) return true\n\n  const lastSynced = (cell.get(\"__lastSyncedHistoryAt\") as number) ?? 0\n  const histArr = cell.get(\"history\") as Y.Array<CellHistoryEntry> | undefined\n  if (histArr) {\n    for (const e of histArr.toArray()) {\n      if (Date.parse(e.timestamp) > lastSynced) return true\n    }\n  }\n  return false",
+    "original_hash": "f338b9d5dcc03ce5",
+    "summary": "Two-signal dirty check. Cell is dirty if: (1) fragment HTML != __source.value, OR (2) any history entry timestamp > __lastSyncedHistoryAt. File dirty if any cell dirty. isProjectDirty awaits IndexeddbPersistence.synced before checking. __lastSyncedHistoryAt is single source of truth for \"has this been synced\" \u2014 prevents stale-check bugs.",
+    "tags": [
+      "gitlab-sync",
+      "dirty-detection",
+      "crdt"
+    ],
+    "created_at": "2026-04-17T21:28:25.121126+00:00",
+    "updated_at": "2026-04-17T21:28:25.121143+00:00",
+    "last_viewed": null,
+    "stale_views": 0
+  },
+  {
+    "id": "bf0cf7c1b57d",
+    "file": "src/lib/sync/git-merge/index.ts",
+    "anchor": {
+      "from_text": "// src/lib/sync/git-merge/index.ts",
+      "to_text": "this.backupRef = opts.backupRef\n  }\n}",
+      "function_anchor": null,
+      "start_line": 1,
+      "end_line": 21
+    },
+    "original_content": "// src/lib/sync/git-merge/index.ts\n// Orchestrator for the Phase 3 merge. Produces a two-parent merge commit whose\n// tree merges ours + theirs via per-path two-way resolvers. On resolver\n// failure, stashes a backup branch at oursSha and throws \u2014 nothing is lost.\nimport * as git from \"isomorphic-git\"\nimport type { OpfsFs } from \"@/lib/git/opfs-fs\"\nimport { buildTreeDiff } from \"./tree-diff\"\nimport { buildTreeFromOursPlusOverrides, type Override } from \"./tree-write\"\nimport { resolveTwoWay } from \"@/lib/codex-editor/merge/resolvers\"\n\nexport interface MergeArgs {\n  fs: OpfsFs\n  dir: string\n  oursSha: string\n  theirsSha: string\n  author: { name: string; email: string }\n  message?: string\n}\n\nexport interface MergeResult {\n  mergeSha: string",
+    "original_hash": "ade71e19ad843b15",
+    "summary": "Two-parent merge orchestrator. Takes oursSha + theirsSha, builds tree diff, resolves each path via resolveTwoWay (dispatches to resolveCodexTwoWay / resolveCommentsTwoWay / resolveMetadataTwoWay \u2014 all ported from codex-editor VS Code extension for backward compat). Writes merged blobs, creates merge commit. On resolver failure throws MergeFailure after stashing backup branch at oursSha \u2014 nothing is lost.",
+    "tags": [
+      "gitlab-sync",
+      "merge",
+      "conflict-resolution"
+    ],
+    "created_at": "2026-04-17T21:28:28.941986+00:00",
+    "updated_at": "2026-04-17T21:28:28.942001+00:00",
+    "last_viewed": null,
+    "stale_views": 0
+  },
+  {
+    "id": "b6c1616a7c11",
+    "file": "src/lib/sync/y-sweet-spike.test.ts",
+    "anchor": {
+      "from_text": "// @vitest-environment node",
+      "to_text": "async function openTwoClients",
+      "function_anchor": null,
+      "start_line": 1,
+      "end_line": 65
+    },
+    "original_content": "// @vitest-environment node\n// Spike: does our Y.Doc shape round-trip cleanly through y-sweet?\n// Requires a local y-sweet server: `npx y-sweet@latest serve /tmp/y-sweet-data`\n// If the server isn't reachable, the whole suite is skipped so `npm test` stays green.\n// Runs in Node env (not happy-dom) because happy-dom enforces CORS on fetch and\n// blocks y-sweet's check_store endpoint.\n\nimport { describe, it, expect, beforeAll, afterEach, type TestContext } from \"vitest\"\nimport * as Y from \"yjs\"\nimport { DocumentManager, type ClientToken } from \"@y-sweet/sdk\"\nimport { createYjsProvider, YSweetProvider } from \"@y-sweet/client\"\nimport { getFragmentHtml } from \"@/lib/richtext/translated-xml\"\nimport type { CellHistoryEntry } from \"@/lib/parsers/types\"\n\nconst CONNECTION_STRING = \"ys://127.0.0.1:8080\"\n\nfunction uniqueDocId(): string {\n  return `codex-spike-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`\n}\n\nasync function serverReachable(): Promise<boolean> {\n  // Direct fetch so we own the error handling \u2014 the SDK's checkStore prints a noisy\n  // error via undici when the server is down, even inside a try/catch.\n  const httpUrl = CONNECTION_STRING.replace(/^ys:\\/\\//, \"http://\").replace(/^yss:\\/\\//, \"https://\")\n  const controller = new AbortController()\n  const t = setTimeout(() => controller.abort(), 500)\n  try {\n    const res = await fetch(`${httpUrl}/check_store`, { method: \"POST\", signal: controller.signal })\n    return res.ok\n  } catch {\n    return false\n  } finally {\n    clearTimeout(t)\n  }\n}\n\nasync function waitForSync(provider: YSweetProvider, timeoutMs = 3000): Promise<void> {\n  if (provider.synced) return\n  await new Promise<void>((resolve, reject) => {\n    const t = setTimeout(() => reject(new Error(\"timeout waiting for provider sync\")), timeoutMs)\n    provider.once(\"sync\", () => { clearTimeout(t); resolve() })\n  })\n}\n\nfunction waitForCondition(predicate: () => boolean, timeoutMs = 3000, label = \"condition\"): Promise<void> {\n  return new Promise((resolve, reject) => {\n    const start = Date.now()\n    const tick = () => {\n      if (predicate()) return resolve()\n      if (Date.now() - start > timeoutMs) return reject(new Error(`timeout waiting for ${label}`))\n      setTimeout(tick, 20)\n    }\n    tick()\n  })\n}\n\ninterface TwoClientHarness {\n  docA: Y.Doc\n  docB: Y.Doc\n  providerA: YSweetProvider\n  providerB: YSweetProvider\n  cleanup: () => void\n}\n\nasync function openTwoClients(manager: DocumentManager, docId: string): Promise<TwoClientHarness> {",
+    "original_hash": "c53dfce2b312c420",
+    "summary": "Spike test that validates our Y.Doc shape round-trips through y-sweet. Runs in Node env (happy-dom enforces CORS on the y-sweet /check_store fetch and blocks it). Four tests: Y.XmlFragment with rich-text, history Y.Array of plain-object CellHistoryEntry, __source stash as plain JS object in Y.Map, awareness between two providers. Skips cleanly if ys://127.0.0.1:8080 isn't reachable. To run: `npx y-sweet@latest serve /tmp/y-sweet-data` then `npx vitest run src/lib/sync/y-sweet-spike.test.ts`.",
+    "tags": [
+      "crdt-migration"
+    ],
+    "created_at": "2026-04-17T22:28:54.462681+00:00",
+    "updated_at": "2026-04-17T22:28:54.462699+00:00",
+    "last_viewed": null,
+    "stale_views": 0
+  },
+  {
+    "id": "8db9e217350c",
+    "file": "/Users/ryderwishart/prototypes/codex-web-app/.worktrees/branding-abstraction/src/branding/types.ts",
+    "anchor": {
+      "from_text": "export interface ThemeTokens {",
+      "to_text": "  sidebarRing: string\n}",
+      "function_anchor": null,
+      "start_line": 5,
+      "end_line": 25
+    },
+    "original_content": "export interface ThemeTokens {\n  background: string\n  foreground: string\n  card: string\n  cardForeground: string\n  popover: string\n  popoverForeground: string\n  primary: string\n  primaryForeground: string\n  secondary: string\n  secondaryForeground: string\n  muted: string\n  mutedForeground: string\n  accent: string\n  accentForeground: string\n  destructive: string\n  border: string\n  input: string\n  ring: string\n  chart1: string\n  chart2: string",
+    "original_hash": "9ef7f14a58a5ec28",
+    "summary": "ThemeTokens defines 34 color tokens used for theming. Maps to CSS custom properties via TOKEN_TO_VAR in theme-vars.ts. Includes backgrounds, text colors, semantic colors (primary/secondary/accent/destructive), component colors (card/popover/sidebar), and chart colors 1-5.",
+    "tags": [
+      "branding",
+      "theme-tokens"
+    ],
+    "created_at": "2026-04-18T15:18:49.100086+00:00",
+    "updated_at": "2026-04-18T15:18:49.100530+00:00",
+    "last_viewed": null,
+    "stale_views": 0
+  },
+  {
+    "id": "4ea8ab02b1eb",
+    "file": "src/lib/completion/completion-service.ts",
+    "anchor": {
+      "from_text": "export function buildPrompt(options: {",
+      "to_text": "return [{ role: \"system\", content: sys }, { role: \"user\", content: user.trim() }]",
+      "function_anchor": "buildPrompt",
+      "start_line": 22,
+      "end_line": 34
+    },
+    "original_content": "export function buildPrompt(options: {\n  sourceLanguage: string; targetLanguage: string; systemPrompt: string\n  sourceText: string; examples: { source: string; target: string }[]\n}): ChatMessage[] {\n  const sys = options.systemPrompt\n    .replace(/\\{sourceLanguage\\}/g, options.sourceLanguage)\n    .replace(/\\{targetLanguage\\}/g, options.targetLanguage)\n\n  let user = \"\"\n  for (const ex of options.examples) user += `Source: ${ex.source}\\nTranslation: ${ex.target}\\n\\n`\n  user += `Source: ${options.sourceText}\\nTranslation:`\n\n  return [{ role: \"system\", content: sys }, { role: \"user\", content: user.trim() }]",
+    "original_hash": "ffdbe17d361fc3f5",
+    "summary": "buildPrompt constructs the LLM chat messages from sourceLanguage, targetLanguage, systemPrompt, sourceText, and an array of examples. Examples are formatted as \"Source: {source}\\nTranslation: {target}\" pairs in the user message.",
+    "tags": [
+      "prediction",
+      "examples",
+      "prompt-building"
+    ],
+    "created_at": "2026-04-20T12:06:53.794878+00:00",
+    "updated_at": "2026-04-20T12:06:53.795654+00:00",
+    "last_viewed": "2026-04-20T21:08:33.327815+00:00",
+    "stale_views": 0
+  },
+  {
+    "id": "7ff7a16ab5f0",
+    "file": "src/hooks/useCompletion.ts",
+    "anchor": {
+      "from_text": "const completeSingle = useCallback(async (cell: CellData) => {",
+      "to_text": "}, [doc, effectiveSettings, isConfigured, sourceLanguage, targetLanguage, search, session])",
+      "function_anchor": null,
+      "start_line": 48,
+      "end_line": 89
+    },
+    "original_content": "  const completeSingle = useCallback(async (cell: CellData) => {\n    if (!doc || !isConfigured) return\n\n    setCompleting((p) => new Map(p).set(cell.id, \"searching\"))\n    const found = search(cell.original, 5)\n    setExamples((p) => new Map(p).set(cell.id, found))\n    setCompleting((p) => new Map(p).set(cell.id, \"generating\"))\n\n    try {\n      const messages = buildPrompt({\n        sourceLanguage, targetLanguage,\n        systemPrompt: effectiveSettings.systemPrompt || DEFAULT_SYSTEM_PROMPT,\n        sourceText: cell.original,\n        examples: found.map((e) => ({ source: e.source, target: e.target })),\n      })\n      const result = await complete({\n        settings: effectiveSettings, session,\n        messages,\n        stream: true,\n        onChunk: (text) => {\n          const cells = doc.getMap(\"cells\")\n          const yCell = cells.get(cell.id) as Y.Map<unknown> | undefined\n          if (yCell) {\n            const frag = yCell.get(\"translatedXml\") as Y.XmlFragment | undefined\n            if (frag) {\n              setPlainText(frag, text)\n            } else {\n              doc.transact(() => { yCell.set(\"translated\", text) })\n            }\n          }\n        },\n      })\n      appendCellHistory(doc, cell.id, {\n        value: result, source: \"llm\", author: effectiveSettings.model || \"frontier-default\",\n        validated: false, examples: found.map((e) => e.cellId),\n      })\n      setCompleting((p) => new Map(p).set(cell.id, \"done\"))\n    } catch (err) {\n      setCompleting((p) => new Map(p).set(cell.id, \"error\"))\n      setErrors((p) => new Map(p).set(cell.id, err instanceof Error ? err.message : \"Failed\"))\n    }\n  }, [doc, effectiveSettings, isConfigured, sourceLanguage, targetLanguage, search, session])",
+    "original_hash": "bfe007e62127f9bb",
+    "summary": "completeSingle generates predictions for a cell by: (1) searching for similar examples with search(cell.original, 5), (2) storing them in state via setExamples, (3) building a prompt with buildPrompt(), (4) calling complete() to get the LLM result, and (5) appending to cell history with examples: found.map(e => e.cellId).",
+    "tags": [
+      "prediction",
+      "examples",
+      "completion"
+    ],
+    "created_at": "2026-04-20T12:06:55.653427+00:00",
+    "updated_at": "2026-04-20T12:06:55.653483+00:00",
+    "last_viewed": "2026-04-20T21:08:33.327815+00:00",
+    "stale_views": 0
+  },
+  {
+    "id": "31ea8812d3e7",
+    "file": "src/lib/search/search-index.ts",
+    "anchor": {
+      "from_text": "export class SearchIndex {",
+      "to_text": "const MIN_SCORE_THRESHOLD = 0.15",
+      "function_anchor": null,
+      "start_line": 31,
+      "end_line": 51
+    },
+    "original_content": "export class SearchIndex {\n  private pairs: Map<string, IndexedPair> = new Map()\n  // IDF: how many documents contain each token\n  private docFreq: Map<string, number> = new Map()\n  private docCount = 0\n\n  buildFromProject(files: { fileId: string; cells: CellInput[] }[]): void {\n    this.pairs.clear()\n    this.docFreq.clear()\n    this.docCount = 0\n    for (const file of files) {\n      for (const cell of file.cells) {\n        if (cell.translated && cell.translated.trim()) {\n          this.addPair(cell.id, cell.original, cell.translated, file.fileId)\n        }\n      }\n    }\n  }\n\n  addPair(cellId: string, source: string, target: string, fileId: string): void {\n    const tokens = new Set(tokenizeText(source))",
+    "original_hash": "7998fe3fcbde2d3c",
+    "summary": "SearchIndex implements kNN-style retrieval: stores tokenized source text for each translated cell, computes TF-IDF scores, and returns ScoredPair[] with matched tokens. No embeddings\u2014purely token-based (keyword) matching.",
+    "tags": [
+      "examples",
+      "retrieval",
+      "similarity"
+    ],
+    "created_at": "2026-04-20T12:06:56.911588+00:00",
+    "updated_at": "2026-04-20T12:06:56.911598+00:00",
+    "last_viewed": null,
+    "stale_views": 0
+  },
+  {
+    "id": "59a41ad84777",
+    "file": "src/components/ExamplePanel.tsx",
+    "anchor": {
+      "from_text": "export function ExamplePanel({",
+      "to_text": "  )\n}",
+      "function_anchor": "ExamplePanel",
+      "start_line": 7,
+      "end_line": 36
+    },
+    "original_content": "export function ExamplePanel({ examples, globalColorOffset = 0 }: { examples: ScoredPair[]; globalColorOffset?: number }) {\n  const [expanded, setExpanded] = useState(false)\n  if (examples.length === 0) return null\n\n  return (\n    <div className=\"mt-1\">\n      <button onClick={() => setExpanded(!expanded)} className=\"flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground\">\n        {expanded ? <ChevronDown className=\"h-3 w-3\" /> : <ChevronRight className=\"h-3 w-3\" />}\n        <BookOpen className=\"h-3 w-3\" />\n        {examples.length} example{examples.length !== 1 ? \"s\" : \"\"}\n      </button>\n      {expanded && (\n        <div className=\"mt-1 space-y-1.5 rounded border bg-muted/30 p-2\">\n          {examples.map((ex, i) => {\n            const colorIndex = (i + globalColorOffset) % EXAMPLE_COLORS.length\n            const sourceTokens = new Set(tokenizeText(ex.source))\n            const matched = ex.matchedTokens.filter((t) => sourceTokens.has(t.toLowerCase()))\n            return (\n              <div key={ex.cellId} className=\"rounded border-l-2 bg-background p-2 text-xs\" style={{ borderLeftColor: EXAMPLE_COLORS[colorIndex] }}>\n                <div className=\"text-muted-foreground\">\n                  <HighlightedText text={ex.source} highlights={matched.map((t) => ({ token: t, colorIndex }))} />\n                </div>\n                <div className=\"mt-0.5 font-medium\">{ex.target}</div>\n              </div>\n            )\n          })}\n        </div>\n      )}\n    </div>\n  )",
+    "original_hash": "2d3ccebe68eaed2a",
+    "summary": "ExamplePanel renders an expandable list of ScoredPair examples in the editor. Shows source text with matched-token highlights and target translation. Used in EditorTable to display examples that influenced an LLM suggestion.",
+    "tags": [
+      "examples",
+      "ui-rendering"
+    ],
+    "created_at": "2026-04-20T12:07:00.481064+00:00",
+    "updated_at": "2026-04-20T12:07:00.481074+00:00",
+    "last_viewed": null,
+    "stale_views": 0
+  },
+  {
+    "id": "1dc40ef78230",
+    "file": "src/components/LivingMemoryPage.tsx",
+    "anchor": {
+      "from_text": "export function LivingMemoryPage() {",
+      "to_text": "}",
+      "function_anchor": "LivingMemoryPage",
+      "start_line": 22,
+      "end_line": 23
+    },
+    "original_content": "export function LivingMemoryPage() {\n  const { id } = useParams<{ id: string }>()",
+    "original_hash": "734a645a3d911228",
+    "summary": "LivingMemoryPage (route: /project/:id/memory) surfaces three sections: (1) InstructionsSection\u2014system prompt for the LLM, (2) StandardsSection\u2014rules, and (3) RecentExamplesSection\u201410 most recently validated cells. Feature-flagged behind \"living-memory-view\".",
+    "tags": [
+      "memory",
+      "navigation",
+      "ui"
+    ],
+    "created_at": "2026-04-20T12:07:02.130815+00:00",
+    "updated_at": "2026-04-20T12:07:02.130834+00:00",
+    "last_viewed": "2026-04-20T21:08:33.327815+00:00",
+    "stale_views": 0
+  },
+  {
+    "id": "bdcb5a05a3f8",
+    "file": "src/components/EditorTable.tsx",
+    "anchor": {
+      "from_text": "import { ExamplePanel } from \"./ExamplePanel\"",
+      "to_text": "      {cellExamples.length > 0 && <ExamplePanel examples={cellExamples} />}",
+      "function_anchor": null,
+      "start_line": 13,
+      "end_line": 537
+    },
+    "original_content": "import { ExamplePanel } from \"./ExamplePanel\"\nimport { HighlightedText, buildHighlightsFromExamples } from \"./HighlightedText\"\nimport { HealthRing } from \"./HealthRing\"\nimport { TranslatedEditor } from \"./TranslatedEditor\"\nimport { CellAudioButton } from \"./CellAudioButton\"\nimport { cn } from \"@/lib/utils\"\n\nexport interface EditorTableHandle {\n  scrollToCellIndex: (index: number) => void\n}\n\ninterface EditorTableProps {\n  project: ProjectRecord\n  cells: CellData[]\n  doc: Y.Doc\n  username: string\n  isCompletionConfigured: boolean\n  completing: Map<string, string>\n  examples: Map<string, ScoredPair[]>\n  errors: Map<string, string>\n  onCompleteSingle: (cell: CellData) => void\n  onCompleteBatch: (cells: CellData[]) => void\n  healthMap: Map<string, number>\n  infractions?: Map<string, RuleInfraction[]>\n  rules?: TranslationRule[]\n  onInfractionClick?: (ruleId: string) => void\n  isBacktranslationConfigured?: boolean\n  onBacktranslate?: (cell: CellData) => void\n  backtranslating?: Set<string>\n  backtranslationErrors?: Map<string, string>\n  cellOpenCommentCount?: Map<string, number>\n  onOpenComments?: (cellId: string) => void\n  onOpenHistory?: (cellId: string) => void\n  syncProvider?: import(\"y-websocket\").WebsocketProvider | null\n  collabUser?: { name: string; color: string }\n  activeCueIndex?: number\n  onSeekToCue?: (cellId: string) => void\n  lineNumbersEnabled: boolean\n  cellLabelsEnabled: boolean\n  sourceTextDirection: \"ltr\" | \"rtl\"\n  targetTextDirection: \"ltr\" | \"rtl\"\n  isAnonymous?: boolean\n}\n\nexport const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(function EditorTable({\n  project, cells, doc, username, isCompletionConfigured,\n  completing, examples, errors,\n  onCompleteSingle, onCompleteBatch, healthMap,\n  infractions = new Map(), rules = [], onInfractionClick,\n  isBacktranslationConfigured, onBacktranslate, backtranslating, backtranslationErrors,\n  cellOpenCommentCount, onOpenComments, onOpenHistory,\n  syncProvider, collabUser,\n  activeCueIndex, onSeekToCue,\n  lineNumbersEnabled, cellLabelsEnabled, sourceTextDirection, targetTextDirection,\n  isAnonymous,\n}, ref) {\n  const permissions = useProjectPermissions(project)\n  const canEdit = permissions.canEditContent\n  const parentRef = useRef<HTMLDivElement>(null)\n  const isDragging = useRef(false)\n  const dragCells = useRef<Set<string>>(new Set())\n\n  const ruleMap = useMemo(() => new Map(rules.map((r) => [r.id, r])), [rules])\n\n  const virtualizer = useVirtualizer({\n    count: cells.length,\n    getScrollElement: () => parentRef.current,\n    estimateSize: () => 90,\n  })\n\n  useImperativeHandle(ref, () => ({\n    scrollToCellIndex(index: number) {\n      if (index >= 0 && index < cells.length) {\n        virtualizer.scrollToIndex(index, { align: \"center\" })\n      }\n    },\n  }), [virtualizer, cells.length])\n\n  const showGutterContent = lineNumbersEnabled || cellLabelsEnabled\n  const gridCols = showGutterContent ? \"grid-cols-[48px_1fr_1fr]\" : \"grid-cols-[24px_1fr_1fr]\"\n\n  const handleMouseUp = useCallback(() => {\n    if (isDragging.current && dragCells.current.size > 1) {\n      const selected = cells.filter((c) => dragCells.current.has(c.id))\n      onCompleteBatch(selected)\n    }\n    isDragging.current = false\n    dragCells.current = new Set()\n  }, [cells, onCompleteBatch])\n\n  return (\n    <div ref={parentRef} className=\"h-full overflow-auto\" onMouseUp={handleMouseUp}>\n      <div className={cn(\"sticky top-0 z-10 grid gap-2 border-b bg-background px-4 py-2 text-sm font-medium text-muted-foreground\", gridCols)}>\n        <div />\n        <div>Source</div>\n        <div>Target</div>\n      </div>\n\n      <div style={{ height: `${virtualizer.getTotalSize()}px`, width: \"100%\", position: \"relative\" }}>\n        {virtualizer.getVirtualItems().map((virtualRow) => {\n          const cell = cells[virtualRow.index]\n          const cellExamples = examples.get(cell.id) || []\n          const completingState = completing.get(cell.id)\n          const isLoading = completingState === \"searching\" || completingState === \"generating\"\n          const highlights = buildHighlightsFromExamples(cellExamples)\n          const cellInfractions = infractions.get(cell.id) || []\n          const openCommentCount = cellOpenCommentCount?.get(cell.id) || 0\n          const hasOpenComments = openCommentCount > 0\n          const isActiveCue = activeCueIndex !== undefined && activeCueIndex === virtualRow.index\n\n          return (\n            <div\n              key={cell.id}\n              data-index={virtualRow.index}\n              ref={virtualizer.measureElement}\n              style={{\n                position: \"absolute\",\n                top: 0,\n                left: 0,\n                width: \"100%\",\n                transform: `translateY(${virtualRow.start}px)`,\n              }}\n              className={cn(\n                \"transition-colors duration-150 ease-out hover:bg-muted/20\",\n                hasOpenComments && \"border-l-2 border-l-blue-400\",\n                isActiveCue && \"bg-primary/5 ring-1 ring-primary/30\"\n              )}\n            >\n              <EditorRow\n                project={project}\n                cell={cell}\n                doc={doc}\n                username={username}\n                editable={canEdit}\n                isCompletionConfigured={isCompletionConfigured}\n                isLoading={isLoading}\n                cellExamples={cellExamples}\n                highlights={highlights}\n                error={errors.get(cell.id)}\n                health={healthMap.get(cell.id)}\n                cellInfractions={cellInfractions}\n                ruleMap={ruleMap}\n                onCompleteSingle={onCompleteSingle}\n                onInfractionClick={onInfractionClick}\n                isBacktranslationConfigured={isBacktranslationConfigured}\n                isBacktranslating={backtranslating?.has(cell.id)}\n                backtranslationError={backtranslationErrors?.get(cell.id)}\n                onBacktranslate={onBacktranslate}\n                openCommentCount={openCommentCount}\n                onOpenComments={onOpenComments}\n                onOpenHistory={onOpenHistory}\n                syncProvider={syncProvider}\n                collabUser={collabUser}\n                isActiveCue={isActiveCue}\n                onSeekToCue={onSeekToCue}\n                rowIndex={virtualRow.index}\n                lineNumbersEnabled={lineNumbersEnabled}\n                cellLabelsEnabled={cellLabelsEnabled}\n                sourceTextDirection={sourceTextDirection}\n                targetTextDirection={targetTextDirection}\n                gridCols={gridCols}\n                isAnonymous={isAnonymous}\n                onDragStart={() => {\n                  isDragging.current = true\n                  dragCells.current = new Set([cell.id])\n                }}\n                onDragEnter={() => {\n                  if (isDragging.current) dragCells.current.add(cell.id)\n                }}\n              />\n            </div>\n          )\n        })}\n      </div>\n    </div>\n  )\n})\n\ninterface EditorRowProps {\n  project: ProjectRecord\n  cell: CellData\n  doc: Y.Doc\n  username: string\n  editable: boolean\n  isCompletionConfigured: boolean\n  isLoading: boolean\n  cellExamples: ScoredPair[]\n  highlights: ReturnType<typeof buildHighlightsFromExamples>\n  error?: string\n  health: number | undefined\n  cellInfractions: RuleInfraction[]\n  ruleMap: Map<string, TranslationRule>\n  onCompleteSingle: (cell: CellData) => void\n  onInfractionClick?: (ruleId: string) => void\n  isBacktranslationConfigured?: boolean\n  isBacktranslating?: boolean\n  backtranslationError?: string\n  onBacktranslate?: (cell: CellData) => void\n  openCommentCount: number\n  onOpenComments?: (cellId: string) => void\n  onOpenHistory?: (cellId: string) => void\n  syncProvider?: import(\"y-websocket\").WebsocketProvider | null\n  collabUser?: { name: string; color: string }\n  isActiveCue?: boolean\n  onSeekToCue?: (cellId: string) => void\n  onDragStart: () => void\n  onDragEnter: () => void\n  rowIndex: number\n  lineNumbersEnabled: boolean\n  cellLabelsEnabled: boolean\n  sourceTextDirection: \"ltr\" | \"rtl\"\n  targetTextDirection: \"ltr\" | \"rtl\"\n  gridCols: \"grid-cols-[24px_1fr_1fr]\" | \"grid-cols-[48px_1fr_1fr]\"\n  isAnonymous?: boolean\n}\n\nfunction EditorRow({\n  project, cell, doc, username, editable, isCompletionConfigured, isLoading,\n  cellExamples, highlights, error, health,\n  cellInfractions, ruleMap,\n  onCompleteSingle, onInfractionClick,\n  isBacktranslationConfigured, isBacktranslating, backtranslationError, onBacktranslate,\n  openCommentCount, onOpenComments, onOpenHistory,\n  syncProvider, collabUser,\n  isActiveCue: _isActiveCue, onSeekToCue,\n  onDragStart, onDragEnter,\n  rowIndex, lineNumbersEnabled, cellLabelsEnabled, sourceTextDirection, targetTextDirection, gridCols,\n  isAnonymous,\n}: EditorRowProps) {\n  function handleChange(e: React.ChangeEvent<HTMLTextAreaElement>) {\n    appendCellHistory(doc, cell.id, {\n      value: e.target.value,\n      source: \"human\",\n      author: username,\n      validated: true,\n    })\n  }\n\n  // Called when the TipTap editor loses focus. Capture the current fragment\n  // text and append a history entry if it differs meaningfully from the most\n  // recent entry. Focus-triggered (not keystroke-triggered) so each editing\n  // session produces at most one entry regardless of typing length.\n  function handleEditorBlur() {\n    const cellsMap = doc.getMap(\"cells\")\n    const yCell = cellsMap.get(cell.id) as Y.Map<unknown> | undefined\n    if (!yCell) return\n    const frag = yCell.get(\"translatedXml\") as Y.XmlFragment | undefined\n    if (!frag) return\n    const currentText = getPlainText(frag)\n    const lastEntry = cell.history[cell.history.length - 1]\n\n    // Don't record a no-op empty\n    if (!currentText.trim() && cell.history.length === 0) return\n    if (lastEntry && lastEntry.value === currentText) return\n\n    // Collapse rapid same-author edits: if the last entry is from the same\n    // author within the past 5 seconds and the text changed only slightly,\n    // OVERWRITE the last entry's value/timestamp in place instead of appending\n    // a new one. This guards against accidental rapid blur/focus cycles that\n    // would otherwise spam history.\n    if (\n      lastEntry &&\n      lastEntry.author === username &&\n      lastEntry.source === \"human\" &&\n      Date.now() - new Date(lastEntry.timestamp).getTime() < 5_000\n    ) {\n      // Update the last entry by removing + re-adding (Y.Array doesn't have set)\n      const historyArr = yCell.get(\"history\") as Y.Array<import(\"@/lib/parsers/types\").CellHistoryEntry> | undefined\n      if (historyArr && historyArr.length > 0) {\n        doc.transact(() => {\n          historyArr.delete(historyArr.length - 1, 1)\n          historyArr.push([{\n            value: currentText,\n            source: \"human\",\n            author: username,\n            validated: true,\n            timestamp: new Date().toISOString(),\n          }])\n        })\n        return\n      }\n    }\n\n    recordHistoryEntry(doc, cell.id, {\n      value: currentText,\n      source: \"human\",\n      author: username,\n      validated: true,\n    })\n  }\n\n  // Detect formatting loss: source has inline style marks that the target doesn't.\n  const sourceHasFormatting = Boolean(cell.originalHtml && /<(b|strong|i|em|u|s|strike|del|code)\\b/i.test(cell.originalHtml))\n  const targetHtml = cell.translatedXml ? getFragmentHtml(cell.translatedXml) : \"\"\n  const targetHasFormatting = /<(b|strong|i|em|u|s|strike|del|code)\\b/i.test(targetHtml)\n  const showFormattingLossWarning =\n    sourceHasFormatting && !targetHasFormatting && cell.translated.trim().length > 0\n\n  const healthValue = health ?? (cell.status === \"validated\" ? 100 : 0)\n\n  // Minimal CodexCell shape for CellAudioButton \u2014 only the metadata fields\n  // the hook actually reads (selectedAudioId, attachments). Avoids plumbing\n  // the entire CodexCell through CellData.\n  const cellForButton = {\n    kind: 2 as const,\n    languageId: \"html\",\n    value: cell.translated ?? \"\",\n    metadata: {\n      id: cell.id,\n      type: (cell.type ?? \"text\") as \"text\",\n      attachments: cell.attachments,\n      selectedAudioId: cell.selectedAudioId,\n    },\n  } as unknown as import(\"@/lib/codex-editor/types\").CodexCell\n\n  // Build tooltip detail\n  const lastEntry = cell.history[cell.history.length - 1]\n  const exampleIds = lastEntry?.examples || []\n  const healthTooltip = cell.status === \"empty\"\n    ? undefined\n    : cell.status === \"validated\"\n      ? `Health: ${healthValue}% \u2014 validated`\n      : exampleIds.length === 0\n        ? `Health: ${healthValue}% \u2014 no examples`\n        : `Health: ${healthValue}% \u2014 ${exampleIds.length} example${exampleIds.length !== 1 ? \"s\" : \"\"}`\n\n  const vs = cell.validationStatus\n  const [validationPopoverOpen, setValidationPopoverOpen] = useState(false)\n  const popoverRef = useRef<HTMLDivElement>(null)\n  const hoverTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)\n  const isSelfValidated = cell.activeValidators.includes(username)\n\n  // Close popover on click-outside\n  useEffect(() => {\n    if (!validationPopoverOpen) return\n    function onClickOutside(e: MouseEvent) {\n      if (popoverRef.current && !popoverRef.current.contains(e.target as Node)) {\n        setValidationPopoverOpen(false)\n      }\n    }\n    document.addEventListener(\"mousedown\", onClickOutside)\n    return () => document.removeEventListener(\"mousedown\", onClickOutside)\n  }, [validationPopoverOpen])\n\n  function handleIconClick() {\n    if (!editable) return\n    if (!isSelfValidated) {\n      // Not yet validated by you \u2192 validate immediately\n      toggleCellValidation(doc, cell.id, username, true)\n    } else {\n      // Already validated \u2192 open popover so you can see details / remove\n      setValidationPopoverOpen(!validationPopoverOpen)\n    }\n  }\n\n  function handleHoverEnter() {\n    // Only show popover on hover if there are validators to show\n    if (cell.activeValidators.length === 0) return\n    hoverTimeoutRef.current = setTimeout(() => setValidationPopoverOpen(true), 400)\n  }\n  function handleHoverLeave() {\n    if (hoverTimeoutRef.current) clearTimeout(hoverTimeoutRef.current)\n    // Don't close if user is interacting with the popover\n  }\n\n  const ValidationIcon = vs === \"full\" ? CheckCheck : vs === \"self\" ? Check : vs === \"others\" ? CircleDot : Circle\n  const validationColorClass =\n    vs === \"full\" ? \"text-emerald-500\" :\n    vs === \"self\" ? \"text-emerald-500\" :\n    vs === \"others\" ? \"text-muted-foreground/60\" :\n    \"text-muted-foreground/30\"\n\n  const hasContent = Boolean(cell.translated && cell.translated.trim())\n\n  const validationButton = hasContent ? (\n    <div\n      className=\"relative\"\n      onMouseEnter={handleHoverEnter}\n      onMouseLeave={handleHoverLeave}\n    >\n      <button\n        type=\"button\"\n        className={cn(\n          \"flex h-6 w-6 items-center justify-center rounded-full transition-[transform,color] duration-150 ease-out\",\n          \"active:scale-[0.92] disabled:cursor-not-allowed disabled:opacity-40\",\n          \"hover:bg-muted/60\",\n          validationColorClass,\n          vs === \"none\" && \"hover:text-emerald-500\",\n          vs === \"others\" && \"hover:text-emerald-500\",\n        )}\n        title={healthTooltip}\n        disabled={!editable}\n        onClick={handleIconClick}\n      >\n        <HealthRing health={healthValue} size={22} strokeWidth={2}>\n          <ValidationIcon className=\"h-3 w-3\" strokeWidth={2.5} />\n        </HealthRing>\n      </button>\n      {validationPopoverOpen && vs !== \"empty\" && (\n        <div\n          ref={popoverRef}\n          className={cn(\n            \"absolute right-7 top-0 z-50 w-48 origin-top-right rounded-lg border bg-popover p-2 shadow-lg\",\n            \"animate-in fade-in-0 zoom-in-95 duration-150\",\n          )}\n        >\n          {cell.activeValidators.length > 0 ? (\n            <ul className=\"space-y-0.5\">\n              <li className=\"mb-1 px-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground\">\n                Validated by\n              </li>\n              {cell.activeValidators.map((v) => (\n                <li key={v} className=\"flex items-center justify-between gap-2 rounded px-1 py-1 text-xs hover:bg-muted/50\">\n                  <span className=\"truncate\">{v}{v === username ? \" (you)\" : \"\"}</span>\n                  {v === username && editable && (\n                    <button\n                      type=\"button\"\n                      className=\"flex-shrink-0 rounded p-0.5 text-muted-foreground/70 transition-colors hover:bg-destructive/10 hover:text-destructive\"\n                      title=\"Remove your validation\"\n                      onClick={() => {\n                        toggleCellValidation(doc, cell.id, username, false)\n                        setValidationPopoverOpen(false)\n                      }}\n                    >\n                      <Trash2 className=\"h-3 w-3\" />\n                    </button>\n                  )}\n                </li>\n              ))}\n            </ul>\n          ) : (\n            <p className=\"px-1 py-2 text-xs text-muted-foreground\">No validations yet</p>\n          )}\n        </div>\n      )}\n    </div>\n  ) : null\n\n  // SECURITY: originalHtml is sanitized through DOMPurify.sanitize() at the\n  // render boundary. Parsers only produce safe inline tags (<b>, <i>, <u>,\n  // <s>, <code>). DOMPurify provides defense-in-depth against XSS.\n  const showLineNumber = lineNumbersEnabled && cell.type !== \"paratext\"\n  const showCellLabel = cellLabelsEnabled && cell.cellLabel\n  const hasGutterMetadata = showLineNumber || showCellLabel\n  return (\n    <div className={cn(\"group grid gap-2 border-b px-4 py-2 transition-colors\", gridCols)}>\n      {/* Gutter \u2014 metadata at top, generator action centered */}\n      <div className=\"flex flex-col items-center gap-1\">\n        {hasGutterMetadata && (\n          <div className=\"flex h-4 items-center gap-1 text-[10px] leading-none text-muted-foreground/60\">\n            {showLineNumber && (\n              <span className=\"tabular-nums\" title={`Line ${rowIndex + 1}`}>\n                {rowIndex + 1}\n              </span>\n            )}\n            {showCellLabel && (\n              <span\n                className=\"rounded bg-muted/50 px-1 py-0.5 font-medium text-muted-foreground/80\"\n                title=\"Cell label\"\n              >\n                {cell.cellLabel}\n              </span>\n            )}\n          </div>\n        )}\n        <div className={cn(\"flex flex-col items-center gap-1\", hasGutterMetadata ? \"pt-1\" : \"pt-5\")}>\n          <SparkleButton\n            disabled={!isCompletionConfigured || !editable || isAnonymous}\n            loading={isLoading}\n            onComplete={() => onCompleteSingle(cell)}\n            onDragStart={onDragStart}\n            onDragEnter={onDragEnter}\n            tooltip={\n              isAnonymous\n                ? \"Sign in for AI translations\"\n                : !editable\n                  ? \"Read-only (imported from git)\"\n                  : isCompletionConfigured\n                    ? \"Generate translation\"\n                    : \"Configure LLM in settings\"\n            }\n          />\n          {onSeekToCue && (\n            <button\n              type=\"button\"\n              onClick={() => onSeekToCue(cell.id)}\n              className=\"flex h-5 w-5 items-center justify-center rounded text-muted-foreground/50 transition-[transform,color] duration-150 ease-out hover:bg-muted/60 hover:text-foreground active:scale-[0.92]\"\n              title=\"Play from this cue\"\n            >\n              <Play className=\"h-3 w-3\" />\n            </button>\n          )}\n        </div>\n      </div>\n\n      {/* Source column */}\n      <div dir={sourceTextDirection}>\n        <div className=\"mb-1 flex items-center gap-1 text-xs text-muted-foreground\" dir=\"ltr\">\n          <span>{cell.context}</span>\n          {showFormattingLossWarning && (\n            <span\n              title=\"Source has inline formatting (bold, italic, etc.) that the target doesn't preserve. Formatting will be lost on export.\"\n              className=\"inline-flex items-center gap-0.5 rounded bg-amber-100 px-1 py-0.5 text-[9px] font-medium text-amber-700 dark:bg-amber-950 dark:text-amber-400\"\n            >\n              <AlertTriangle className=\"h-2.5 w-2.5\" />\n              formatting\n            </span>\n          )}\n        </div>\n        {cell.originalHtml ? (\n          <div\n            className=\"text-sm\"\n            // eslint-disable-next-line react/no-danger\n            dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(cell.originalHtml) }}\n          />\n        ) : (\n          <div className=\"text-sm\">\n            {highlights.length > 0 ? (\n              <HighlightedText text={cell.original} highlights={highlights} />\n            ) : (\n              cell.original\n            )}\n          </div>\n        )}\n        {cellExamples.length > 0 && <ExamplePanel examples={cellExamples} />}",
+    "original_hash": "e1acf714a6358fd2",
+    "summary": "EditorTable renders cells in a table with each row optionally showing ExamplePanel if examples exist for that cell. Examples come from the \"examples\" Map prop (keyed by cell.id) populated by useCompletion hook.",
+    "tags": [
+      "examples",
+      "ui-rendering",
+      "editor"
+    ],
+    "created_at": "2026-04-20T12:07:06.653434+00:00",
+    "updated_at": "2026-04-20T12:07:06.653444+00:00",
+    "last_viewed": null,
+    "stale_views": 0
+  },
+  {
+    "id": "8b1730ed328e",
+    "file": "../../frontierrnd/frontier-server/cloudflare/src/middleware/auth.ts",
+    "anchor": {
+      "from_text": "export const authMiddleware",
+      "to_text": "__auth_source: \"hetzner\"",
+      "function_anchor": null,
+      "start_line": 13,
+      "end_line": 145
+    },
+    "original_content": "export const authMiddleware = async (\n  c: Context<{ Bindings: Env; Variables: Variables }>,\n  next: Next\n): Promise<Response | void> => {\n  // Mock mode for local development - bypass auth entirely\n  if (c.env.MOCK_LLM === \"true\") {\n    const mockUser: User = {\n      id: 1,\n      username: \"mock-user\",\n      email: \"mock@localhost\",\n      password_hash: \"\",\n      gitlab_user_id: undefined,\n      gitlab_username: undefined,\n      gitlab_token: undefined,\n      stripe_customer_id: undefined,\n      subscription_tier: \"pro\" as any,\n      preferences: { __auth_source: \"mock\" },\n      created_at: new Date().toISOString(),\n      updated_at: new Date().toISOString(),\n    };\n    c.set(\"user\", mockUser);\n    await next();\n    return;\n  }\n\n  const authHeader = c.req.header(\"Authorization\");\n\n  if (!authHeader) {\n    return c.json({ error: \"Authorization header required\" }, 401);\n  }\n\n  const jwtService = new JWTService(c.env);\n  const token = jwtService.extractTokenFromHeader(authHeader);\n\n  if (!token) {\n    // Help debug client auth header formats without logging credentials.\n    const parts = authHeader.trim().split(/\\s+/);\n    const scheme = parts[0] || \"(empty)\";\n    const segments = parts.length;\n    console.warn(\n      `[authMiddleware] Unable to extract token from Authorization header (scheme=\"${scheme}\", segments=${segments})`\n    );\n    return c.json({ error: \"Invalid authorization header format\" }, 401);\n  }\n\n  // Primary path: verify as a Worker-issued JWT and load user from D1.\n  const payload = await jwtService.verifyToken(token);\n  if (payload) {\n    // Check if token is expired\n    const now = Math.floor(Date.now() / 1000);\n    if (payload.exp < now) {\n      return c.json({ error: \"Token expired\" }, 401);\n    }\n\n    // Load user from database\n    let user = await jwtService.getUserByUsername(payload.sub);\n    if (!user) {\n      // Env-based admins (super-admin, ADMIN_USERNAMES) are not in D1.\n      // Create a synthetic user so admin tokens work with auth-protected routes.\n      const adminCredentials = getAdminCredentials(c.env);\n      if (adminCredentials[payload.sub]) {\n        user = {\n          id: 0,\n          username: payload.sub,\n          email: `${payload.sub}@admin.local`,\n          password_hash: \"\",\n          gitlab_user_id: undefined,\n          gitlab_username: undefined,\n          gitlab_token: undefined,\n          stripe_customer_id: undefined,\n          subscription_tier: \"pro\" as any,\n          preferences: { __auth_source: \"admin\" },\n          created_at: new Date().toISOString(),\n          updated_at: new Date().toISOString(),\n        };\n      } else {\n        return c.json({ error: \"User not found\" }, 401);\n      }\n    }\n\n    // Store user in context for use in route handlers\n    c.set(\"user\", user);\n    await next();\n    return;\n  }\n\n  // Fallback path (important during migration):\n  // Tokens minted by Hetzner (FastAPI) may not be verifiable with the Worker SECRET_KEY.\n  // In that case, treat the token as opaque and validate it by calling Hetzner /auth/me.\n  if (c.env.HETZNER_API_URL) {\n    try {\n      console.log(\n        `[authMiddleware] Falling back to Hetzner /api/v1/auth/me (token starts ${token.slice(\n          0,\n          12\n        )}...)`\n      );\n      const controller = new AbortController();\n      const timeoutId = setTimeout(() => controller.abort(), 5_000);\n      const meResp = await fetch(`${c.env.HETZNER_API_URL}/api/v1/auth/me`, {\n        headers: {\n          Authorization: `Bearer ${token}`,\n          Accept: \"application/json\",\n        },\n        signal: controller.signal,\n      });\n      clearTimeout(timeoutId);\n\n      if (meResp.ok) {\n        const me = (await meResp.json()) as {\n          id: number;\n          username: string;\n          email: string;\n          gitlab_username?: string;\n          preferences?: Record<string, any>;\n        };\n\n        // Create a User-shaped object sufficient for LLM routes.\n        // NOTE: This user is NOT backed by D1; callers that depend on D1 usage tracking\n        // should treat this as \"best-effort\" until user data is migrated.\n        const externalUser: User = {\n          id: me.id,\n          username: me.username,\n          email: me.email,\n          password_hash: \"\",\n          gitlab_user_id: undefined,\n          gitlab_username: me.gitlab_username,\n          gitlab_token: undefined,\n          stripe_customer_id: undefined,\n          subscription_tier: \"free\" as any,\n          preferences: {\n            ...(me.preferences || {}),\n            __auth_source: \"hetzner\",",
+    "original_hash": "9022e0d872b14a18",
+    "summary": "authMiddleware at src/middleware/auth.ts:13-164 is the single JWT validation pipeline every authenticated route flows through. Pipeline: extractTokenFromHeader \u2192 JWTService.verifyToken (HS256 + SECRET_KEY via hono/jwt) \u2192 check exp \u2192 load user from D1 users table by sub claim \u2192 admin fallback (SUPER_ADMIN_USERNAME / ADMIN_USERNAMES env) \u2192 Hetzner fallback (opaque token validated via HETZNER_API_URL, migration-phase). optionalAuthMiddleware + adminAuthMiddleware are sibling entry points. Any new sync-token code reuses this same middleware to validate the incoming Frontier JWT.",
+    "tags": [
+      "frontier-server",
+      "jwt",
+      "auth-middleware"
+    ],
+    "created_at": "2026-04-20T12:07:54.095136+00:00",
+    "updated_at": "2026-04-20T12:07:54.095162+00:00",
+    "last_viewed": null,
+    "stale_views": 0
+  },
+  {
+    "id": "c47a132b2f24",
+    "file": "sync-worker/src/index.ts",
+    "anchor": {
+      "from_text": "export class FileSync extends YServer {",
+      "to_text": "await this.env.SNAPSHOTS.put(key, state)\n  }\n}",
+      "function_anchor": null,
+      "start_line": 38,
+      "end_line": 58
+    },
+    "original_content": "export class FileSync extends YServer {\n  static options = { hibernate: true }\n  static callbackOptions = {\n    debounceWait: 2000,\n    debounceMaxWait: 10000,\n    timeout: 5000,\n  }\n\n  private get projectId(): string {\n    // TODO: derive from the sync-token JWT once /sync-token is live.\n    return SPIKE_PROJECT_PREFIX\n  }\n\n  async onLoad(): Promise<Y.Doc | void> {\n    const fileId = this.name\n    const snap = await this.env.SNAPSHOTS.get(snapshotKey(this.projectId, fileId))\n    if (snap) {\n      const buf = new Uint8Array(await snap.arrayBuffer())\n      Y.applyUpdate(this.document, buf)\n    }\n",
+    "original_hash": "e4f82016e408f4d0",
+    "summary": "FileSync DO in sync-worker/src/index.ts \u2014 extends YServer from y-partyserver v2.1.4. static options = { hibernate: true }, callbackOptions debounceWait 2000ms debounceMaxWait 10000ms. onLoad reads projects/{projectId}/files/{fileId}/snapshot.bin + all tail/*.bin sorted by key then applies via Y.applyUpdate. onSave writes full Y.encodeStateAsUpdate to tail/{16-digit-ms-timestamp}.bin (padded for lexicographic sort). projectId is the spike stub \"spike\" until /sync-token wires in the real claim. Client connects via y-partyserver/provider with party: \"file-sync\" (class name kebab-cased). R2 binding name SNAPSHOTS \u2192 bucket codex-snapshots.",
+    "tags": [
+      "y-partyserver",
+      "sync-worker",
+      "r2-persistence"
+    ],
+    "created_at": "2026-04-20T16:30:28.114029+00:00",
+    "updated_at": "2026-04-20T16:30:28.114045+00:00",
+    "last_viewed": null,
+    "stale_views": 0
+  },
+  {
+    "id": "c93f81878fad",
+    "file": "src/lib/health/health-engine.ts",
+    "anchor": {
+      "from_text": "export function computeHealthMap(",
+      "to_text": "const projectHealth = projectCount > 0 ? Math.round(projectSum / projectCount) : 0",
+      "function_anchor": "computeHealthMap",
+      "start_line": 18,
+      "end_line": 107
+    },
+    "original_content": "export function computeHealthMap(\n  fileCells: Map<string, CellData[]>,\n  llmHealthMultiplier = DEFAULT_LLM_HEALTH_MULTIPLIER,\n  rules: TranslationRule[] = [],\n  rulePenalties: { major: number; minor: number } = { major: 15, minor: 5 }\n): HealthStats {\n  const healthMap = new Map<string, number>()\n  const fileHealth = new Map<string, number>()\n  const fileProgress = new Map<string, { translated: number; validated: number; total: number }>()\n\n  // First pass: compute health for all cells across all files.\n  // Uses validationStatus (multi-user, derived from __source.validatedBy) as\n  // the primary signal so health updates reactively when validations are\n  // added or removed \u2014 no manual recalculation needed.\n  for (const [, cells] of fileCells) {\n    for (const cell of cells) {\n      const vs = cell.validationStatus ?? (cell.status === \"empty\" ? \"empty\" : cell.status === \"validated\" ? \"full\" : \"none\")\n      if (vs === \"empty\") continue\n      // \"full\" or \"self\" = the current user (or enough users) validated \u2192 100%\n      if (vs === \"full\" || vs === \"self\") {\n        healthMap.set(cell.id, 100)\n        continue\n      }\n      // \"others\" = someone else validated but not current user \u2192 100% for health\n      // (the cell IS human-validated, just not by you)\n      if (vs === \"others\") {\n        healthMap.set(cell.id, 100)\n        continue\n      }\n      // \"none\" = no validations \u2014 check LLM example chain\n      const lastEntry = cell.history[cell.history.length - 1]\n      const exampleIds = lastEntry?.examples || []\n      if (exampleIds.length === 0) {\n        healthMap.set(cell.id, 0)\n        continue\n      }\n      let sum = 0\n      for (const exId of exampleIds) {\n        sum += healthMap.get(exId) ?? 0\n      }\n      healthMap.set(cell.id, Math.round((sum / exampleIds.length) * llmHealthMultiplier))\n    }\n  }\n\n  // Rule infractions pass\n  const infractions = checkRules(fileCells, rules)\n\n  // Build rule severity lookup\n  const ruleSeverity = new Map<string, \"major\" | \"minor\">()\n  for (const rule of rules) ruleSeverity.set(rule.id, rule.severity)\n\n  // Apply penalties\n  for (const [cellId, cellInfractions] of infractions) {\n    const baseHealth = healthMap.get(cellId)\n    if (baseHealth === undefined) continue\n    let penalty = 0\n    for (const inf of cellInfractions) {\n      const severity = ruleSeverity.get(inf.ruleId) || \"minor\"\n      penalty += severity === \"major\" ? rulePenalties.major : rulePenalties.minor\n    }\n    healthMap.set(cellId, Math.max(0, baseHealth - penalty))\n  }\n\n  // Second pass: file-level stats\n  let projectSum = 0\n  let projectCount = 0\n\n  for (const [fileId, cells] of fileCells) {\n    const total = cells.length\n    const translated = cells.filter((c) => c.status !== \"empty\").length\n    const validated = cells.filter((c) => c.status === \"validated\").length\n    fileProgress.set(fileId, { translated, validated, total })\n\n    // File health = average of all non-empty cell healths\n    let fileSum = 0\n    let fileCount = 0\n    for (const cell of cells) {\n      const h = healthMap.get(cell.id)\n      if (h !== undefined) {\n        fileSum += h\n        fileCount += 1\n      }\n    }\n    const avgHealth = fileCount > 0 ? Math.round(fileSum / fileCount) : 0\n    fileHealth.set(fileId, avgHealth)\n    projectSum += fileSum\n    projectCount += fileCount\n  }\n\n  const projectHealth = projectCount > 0 ? Math.round(projectSum / projectCount) : 0",
+    "original_hash": "453fe35db7c8e7cd",
+    "summary": "computeHealthMap(fileCells, llmHealthMultiplier=0.9, rules, rulePenalties={major:15,minor:5}) produces per-cell/file/project health. Per-cell rule: empty\u2192skip; validationStatus full|self|others\u2192100; none\u2192average of healthMap[exId] for exIds in last history entry's examples, times llmHealthMultiplier (0 if no examples). Then subtracts rule-infraction penalties (clamped \u22650). File health = mean of non-empty cell healths; project health = mean across files. Key dependency: LLM cells get non-zero health only if their last history entry's `examples` array references OTHER cells that already have health in the map.",
+    "tags": [
+      "health",
+      "cell",
+      "validation"
+    ],
+    "created_at": "2026-04-20T21:10:25.470467+00:00",
+    "updated_at": "2026-04-20T21:10:25.470517+00:00",
+    "last_viewed": null,
+    "stale_views": 0
+  },
+  {
+    "id": "dc4810e00136",
+    "file": "src/hooks/useSearchIndex.ts",
+    "anchor": {
+      "from_text": "export function useSearchIndex",
+      "to_text": "return { search, index: indexRef.current }",
+      "function_anchor": "useSearchIndex",
+      "start_line": 6,
+      "end_line": 19
+    },
+    "original_content": "export function useSearchIndex(_files: FileReference[], currentCells: CellData[]) {\n  const indexRef = useRef(new SearchIndex())\n\n  useEffect(() => {\n    if (currentCells.length > 0) {\n      indexRef.current.buildFromProject([{ fileId: \"current\", cells: currentCells }])\n    }\n  }, [currentCells])\n\n  const search = useCallback((query: string, limit?: number): ScoredPair[] => {\n    return indexRef.current.search(query, limit)\n  }, [])\n\n  return { search, index: indexRef.current }",
+    "original_hash": "41fdf6817b5645e0",
+    "summary": "useSearchIndex IGNORES its first arg (_files: FileReference[]) and only indexes `currentCells` (the currently open file's cells) via buildFromProject([{fileId:'current', cells: currentCells}]). Effect re-runs on every currentCells identity change (cheap but frequent). Consequence: few-shot search for predictions only finds examples inside the active file, and only among cells whose `translated` is non-empty (see search-index.ts addPair guard). A fresh file with no translations yet produces zero search results \u2192 new LLM predictions get empty `examples` array \u2192 health-engine scores them 0.",
+    "tags": [
+      "search",
+      "prediction",
+      "examples"
+    ],
+    "created_at": "2026-04-20T21:10:30.251562+00:00",
+    "updated_at": "2026-04-20T21:10:30.251572+00:00",
+    "last_viewed": null,
+    "stale_views": 0
+  },
+  {
+    "id": "702c5f63fb0f",
+    "file": "src/lib/sync/partyserver-provider.ts",
+    "anchor": {
+      "from_text": "export function buildFileSyncDocId",
+      "to_text": "console.warn(\"Error destroying file-sync provider:\", err)\n  }\n}",
+      "function_anchor": "buildFileSyncDocId",
+      "start_line": 21,
+      "end_line": 22
+    },
+    "original_content": "export function buildFileSyncDocId(projectId: string, fileId: string): string {\n  return `${projectId}--${fileId}`",
+    "original_hash": "4a9584b2e7a140bb",
+    "summary": "createFileSyncProvider(doc, projectId, fileId) builds docId \"{projectId}--{fileId}\" (double-dash separator, both halves may contain UUIDs with single dashes) and opens a YProvider from y-partyserver/provider pointing at VITE_SYNC_WORKER_HOST (default 127.0.0.1:8787). Uses ws:// for localhost, wss:// otherwise. Party is hardcoded \"file-sync\" matching the sync-worker's class name. Destroy via destroyFileSyncProvider. Kept separate from createSyncProvider in webrtc-provider.ts which still serves the ephemeral share-link rooms on the older signaling relay.",
+    "tags": [
+      "y-partyserver",
+      "file-sync",
+      "provider"
+    ],
+    "created_at": "2026-04-21T03:37:29.578467+00:00",
+    "updated_at": "2026-04-21T03:37:29.578476+00:00",
+    "last_viewed": null,
+    "stale_views": 0
+  },
+  {
+    "id": "c826660814ed",
+    "file": "src/hooks/useFileSync.ts",
+    "anchor": {
+      "from_text": "export function useFileSync",
+      "to_text": "return { peers, connected, provider }\n}",
+      "function_anchor": "useFileSync",
+      "start_line": 23,
+      "end_line": 26
+    },
+    "original_content": "export function useFileSync(options: UseFileSyncOptions): {\n  peers: PeerState[]\n  connected: boolean\n  provider: YProvider | null",
+    "original_hash": "875daaf126d78be9",
+    "summary": "Hook that wires a Y.Doc to the codex sync-worker (y-partyserver DO + R2) for always-on multi-device file sync. Takes {doc, projectId, fileId, username, enabled}. Returns {peers, connected, provider} matching useSync's shape. Callers pass project.id and activeFileId from ProjectWorkspace. Enable-gate lets callers skip sync until both ids are resolved. Peer state uses the same PeerState shape as useSync so components shared with the ephemeral share path still typecheck.",
+    "tags": [
+      "y-partyserver",
+      "hook",
+      "file-sync"
+    ],
+    "created_at": "2026-04-21T03:37:35.131750+00:00",
+    "updated_at": "2026-04-21T03:37:35.131759+00:00",
+    "last_viewed": null,
+    "stale_views": 0
   }
 ]

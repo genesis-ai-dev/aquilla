@@ -1,0 +1,5 @@
+# Local miniflare state (DO + R2 simulators)
+.wrangler
+
+# Build outputs
+dist

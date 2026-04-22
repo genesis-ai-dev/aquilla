@@ -170,6 +170,49 @@ function hashDjb2(text: string): string {
 }
 
 /**
+ * Composite fingerprint of every field we write for a cell. Used by
+ * diffProjection to skip D1 UPSERTs for cells the DO has projected before
+ * with identical field values. contentHash alone isn't enough — a validated
+ * flip or a new history entry can change lastEditAt without touching the
+ * translated text, and those still need to reach D1.
+ */
+export function cellFingerprint(c: CellProjection): string {
+  return `${c.contentHash}|${c.validated}|${c.wordCount}|${c.lastEditAt}|${c.lastEditor ?? ""}`
+}
+
+/**
+ * Narrow a ProjectionResult to only the cells whose fingerprint differs
+ * from the prior snapshot stored on the DO. Mutates `prior` to reflect
+ * the new fingerprints (including deletions) so subsequent calls stay
+ * accurate. File rollup is untouched — always written.
+ *
+ * Deletions: cells present in `prior` but missing from `result` have their
+ * fingerprints removed. Actually issuing DELETEs against codex-db is out
+ * of scope here (callers would need to track the dropped cell ids); for
+ * now those cell rows become orphans in D1 until the file is rebuilt.
+ */
+export function diffProjection(
+  result: ProjectionResult,
+  prior: Map<string, string>
+): ProjectionResult {
+  const changed: CellProjection[] = []
+  const seen = new Set<string>()
+  for (const c of result.cells) {
+    const fp = cellFingerprint(c)
+    seen.add(c.cellId)
+    if (prior.get(c.cellId) !== fp) {
+      changed.push(c)
+      prior.set(c.cellId, fp)
+    }
+  }
+  // Prune removed cells so the map doesn't grow unbounded across edits.
+  for (const id of Array.from(prior.keys())) {
+    if (!seen.has(id)) prior.delete(id)
+  }
+  return { file: result.file, cells: changed }
+}
+
+/**
  * Apply a ProjectionResult to codex-db. File row is always upserted (cheap).
  * Cell rows use the last_edit_at guard clause so stale / out-of-order
  * projections don't overwrite newer data. Idempotent.

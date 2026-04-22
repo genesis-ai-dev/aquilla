@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest"
 import * as Y from "yjs"
-import { projectDoc } from "../projection"
+import { projectDoc, diffProjection, cellFingerprint } from "../projection"
 
 // Builds a Y.Doc matching the shape the codex-web-app writes (see
 // codex-web-app/src/lib/store/file-doc.ts). Only the fields exercised by
@@ -169,5 +169,90 @@ describe("projectDoc", () => {
     expect(result.cells[0].lastEditAt).toBe(0)
     expect(result.cells[0].lastEditor).toBeNull()
     doc.destroy()
+  })
+})
+
+describe("diffProjection", () => {
+  function twoCellDoc(text1: string, text2: string): Y.Doc {
+    return makeDoc(({ cells }) => {
+      addCell(cells, "cell-1", { text: text1 })
+      addCell(cells, "cell-2", { text: text2 })
+    })
+  }
+
+  it("first call with empty prior returns every cell and populates fingerprints", () => {
+    const doc = twoCellDoc("a", "b")
+    const full = projectDoc("p", "f", doc)
+    const prior = new Map<string, string>()
+    const diffed = diffProjection(full, prior)
+    expect(diffed.cells).toHaveLength(2)
+    expect(prior.size).toBe(2)
+    expect(prior.get("cell-1")).toBe(cellFingerprint(full.cells[0]))
+    doc.destroy()
+  })
+
+  it("second call with same state returns zero cells (the common idle case)", () => {
+    const doc = twoCellDoc("a", "b")
+    const prior = new Map<string, string>()
+    diffProjection(projectDoc("p", "f", doc), prior) // seed
+    const diffed = diffProjection(projectDoc("p", "f", doc), prior)
+    expect(diffed.cells).toHaveLength(0)
+    // file rollup is still present so callers always upsert files
+    expect(diffed.file.cellCount).toBe(2)
+    doc.destroy()
+  })
+
+  it("returns only the cells whose content changed", () => {
+    const doc1 = twoCellDoc("hello", "world")
+    const prior = new Map<string, string>()
+    diffProjection(projectDoc("p", "f", doc1), prior)
+    doc1.destroy()
+
+    const doc2 = twoCellDoc("hello", "different")
+    const diffed = diffProjection(projectDoc("p", "f", doc2), prior)
+    expect(diffed.cells).toHaveLength(1)
+    expect(diffed.cells[0].cellId).toBe("cell-2")
+    doc2.destroy()
+  })
+
+  it("flipping validated without text change still projects the cell", () => {
+    const doc1 = makeDoc(({ cells }) =>
+      addCell(cells, "c", {
+        text: "stable",
+        history: [{ timestamp: "2026-04-01T00:00:00Z", author: "a", validated: false }],
+      })
+    )
+    const prior = new Map<string, string>()
+    diffProjection(projectDoc("p", "f", doc1), prior)
+    doc1.destroy()
+
+    const doc2 = makeDoc(({ cells }) =>
+      addCell(cells, "c", {
+        text: "stable",
+        history: [
+          { timestamp: "2026-04-01T00:00:00Z", author: "a", validated: false },
+          { timestamp: "2026-04-02T00:00:00Z", author: "b", validated: true },
+        ],
+      })
+    )
+    const diffed = diffProjection(projectDoc("p", "f", doc2), prior)
+    expect(diffed.cells).toHaveLength(1)
+    expect(diffed.cells[0].validated).toBe(1)
+    doc2.destroy()
+  })
+
+  it("prunes fingerprints for cells that were deleted between ticks", () => {
+    const doc1 = twoCellDoc("a", "b")
+    const prior = new Map<string, string>()
+    diffProjection(projectDoc("p", "f", doc1), prior)
+    expect(prior.size).toBe(2)
+    doc1.destroy()
+
+    // Next doc only has cell-1 — cell-2 was removed.
+    const doc2 = makeDoc(({ cells }) => addCell(cells, "cell-1", { text: "a" }))
+    diffProjection(projectDoc("p", "f", doc2), prior)
+    expect(prior.size).toBe(1)
+    expect(prior.has("cell-2")).toBe(false)
+    doc2.destroy()
   })
 })

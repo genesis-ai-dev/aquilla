@@ -74,9 +74,16 @@ export function useCompositeHealth(input: UseCompositeHealthInput): UseComposite
     // (Avoids infinite loops when the caller creates new Map/array objects on
     // every render but the actual data is unchanged.)
     const key = JSON.stringify([
-      cells.map(c => [c.id, c.translated, c.validatorCount]),
+      cells.map(c => [
+        c.id,
+        c.translated,
+        c.validatorCount,
+        c.history.length,
+        c.history.at(-1)?.examples,
+      ]),
       input.requiredValidations,
       input.rules,
+      input.config,
     ])
     if (key === prevKeyRef.current) return
     prevKeyRef.current = key

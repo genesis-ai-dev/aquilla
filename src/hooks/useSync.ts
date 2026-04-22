@@ -1,7 +1,7 @@
 import { useEffect, useState, useMemo } from "react"
 import * as Y from "yjs"
 import type { WebsocketProvider } from "y-websocket"
-import { createSyncProvider, destroySyncProvider, peerColor, type SyncProviderHandle } from "@/lib/sync/webrtc-provider"
+import { createSyncProvider, destroySyncProvider, peerColor, type SyncProviderHandle } from "@/lib/sync/signaling-provider"
 
 export interface PeerState {
   peerId: string  // ephemeral client ID from y-webrtc awareness

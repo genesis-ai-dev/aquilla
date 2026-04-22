@@ -1,6 +1,6 @@
 import * as Y from "yjs"
 import type { WebsocketProvider } from "y-websocket"
-import { createSyncProvider, destroySyncProvider } from "./webrtc-provider"
+import { createSyncProvider, destroySyncProvider } from "./signaling-provider"
 import { createProject, getProject } from "@/lib/store/project-index"
 import { loadFileDoc, destroyFileDoc } from "@/lib/store/file-doc"
 import { saveShare } from "./share-tokens"

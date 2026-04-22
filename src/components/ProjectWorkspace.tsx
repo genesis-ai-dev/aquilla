@@ -66,6 +66,7 @@ import {
 } from "@/components/ui/dialog"
 import type { ProjectRecord } from "@/lib/parsers/types"
 import { readValidationCount } from "@/lib/progress/read-validation-count"
+import { resolveHealthConfig } from "@/lib/health/config-resolver"
 import { useSetupChecklist } from "@/hooks/useSetupChecklist"
 import { SetupChecklistDrawer } from "./onboarding/SetupChecklistDrawer"
 import { useFeatureFlag } from "@/hooks/useFeatureFlag"
@@ -206,11 +207,16 @@ export function ProjectWorkspace() {
     return map
   }, [activeFileId, cells])
 
+  const compositeFlag = useFeatureFlag("composite-health", project ?? null)
+  const healthConfig = useMemo(() => resolveHealthConfig(project ?? null), [project])
+  const requiredValidations = project ? readValidationCount(project) : 1
+
   const { healthMap, fileHealth: _fileHealth, projectHealth, fileProgress, infractions, openCommentCount, cellOpenCommentCount } = useHealth(
     fileCells,
     project?.completionSettings?.llmHealthPenalty ?? 0.1,
     rules,
-    penalties
+    penalties,
+    { composite: compositeFlag, compositeConfig: healthConfig, requiredValidations },
   )
 
   const drawerRule = rules.find((r) => r.id === drawerRuleId) || null

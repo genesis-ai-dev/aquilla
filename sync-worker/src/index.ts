@@ -8,14 +8,18 @@
 //   projects/{projectId}/files/{fileId}/snapshot.bin    — last compacted state
 //   projects/{projectId}/files/{fileId}/tail/{seq}.bin  — updates since snapshot
 //
-// Token validation is not yet wired in. Anyone who can reach the worker can
-// connect to any docId. Tolerable while the worker isn't deployed publicly.
+// Tokens are required in prod (set SYNC_SECRET_KEY, leave ALLOW_UNAUTHENTICATED
+// unset). onBeforeConnect verifies JWTs and stashes the role claim; the DO's
+// isReadOnly reads it to gate writes. See auth.ts for the verifier.
+// onSave projects the Y.Doc into codex-db (files + cells) so dashboards can
+// read counts + text without touching the Y.Doc. See projection.ts.
 
 import { YServer } from "y-partyserver"
 import type { Connection, ConnectionContext } from "partyserver"
 import * as Y from "yjs"
 import { routePartykitRequest } from "partyserver"
 import { verifyTokenForDoc, shouldBeReadOnly } from "./auth"
+import { projectDoc, writeProjection } from "./projection"
 
 const ROLE_HEADER = "X-Codex-Role"
 
@@ -24,6 +28,11 @@ declare global {
     interface Env {
       FileSync: DurableObjectNamespace
       SNAPSHOTS: R2Bucket
+      /** codex-db (frontier-server-owned schema). Optional so the spike + dev
+       *  setups without a D1 binding keep working — onSave skips projection
+       *  when absent. In prod, the binding is wired in wrangler.toml and
+       *  CODEX_DB is always present. */
+      CODEX_DB?: D1Database
       /** Shared HMAC key with frontier-server that mints /sync-token JWTs.
        *  Distinct from Frontier's main SECRET_KEY so a sync-worker compromise
        *  cannot forge Frontier access tokens. */
@@ -146,6 +155,18 @@ export class FileSync extends YServer {
     const seq = Date.now().toString().padStart(16, "0")
     const key = `${tailPrefix(projectId, fileId)}${seq}.bin`
     await this.env.SNAPSHOTS.put(key, state)
+
+    // Keep the CQRS read model in sync. Projection failure is non-fatal — the
+    // tail write is durable and the next onSave (or compaction-time reconcile)
+    // will retry. Skip when CODEX_DB isn't bound (spike / dev without D1).
+    if (this.env.CODEX_DB) {
+      try {
+        const result = projectDoc(projectId, fileId, this.document)
+        await writeProjection(this.env.CODEX_DB, result, key)
+      } catch (err) {
+        console.warn(`projection failed for ${this.name}:`, err)
+      }
+    }
   }
 
   // Stash the verified role on the connection so isReadOnly can gate writes.

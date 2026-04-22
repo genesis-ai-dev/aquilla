@@ -23,6 +23,13 @@ binding = "SNAPSHOTS"
 bucket_name = "codex-snapshots"
 # For local `wrangler dev`, wrangler will use a local simulator if the bucket doesn't exist.
 
+# Shared D1 with frontier-server. Schema owned there (cloudflare/codex_migrations);
+# sync-worker is a writer only (projects files + cells on every onSave).
+[[d1_databases]]
+binding = "CODEX_DB"
+database_name = "codex-db"
+database_id = "cf7133b2-227f-4f0a-9d8f-ad81ee05f27d"
+
 # Auth:
 #   SYNC_SECRET_KEY (shared with frontier-server for JWT signing — distinct
 #   from Frontier's main SECRET_KEY) and ALLOW_UNAUTHENTICATED live in

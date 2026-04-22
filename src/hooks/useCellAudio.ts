@@ -90,11 +90,20 @@ export function useCellAudio(
     try {
       const data = await repoFs.promises.readFile(attachmentUrl, { encoding: "utf8" })
       pointerText = typeof data === "string" ? data : new TextDecoder().decode(data)
-    } catch (e) {
-      throw {
-        kind: "pointer-missing",
-        message: `Could not read ${attachmentUrl}: ${e instanceof Error ? e.message : String(e)}`,
-      } as AudioError
+    } catch {
+      // The codex-editor metadata stores paths as `.project/attachments/files/...`
+      // but the git repo may store them under `.project/attachments/pointers/...`.
+      // Try the alternate path before giving up.
+      const altUrl = attachmentUrl.replace("/attachments/files/", "/attachments/pointers/")
+      try {
+        const data = await repoFs.promises.readFile(altUrl, { encoding: "utf8" })
+        pointerText = typeof data === "string" ? data : new TextDecoder().decode(data)
+      } catch (e2) {
+        throw {
+          kind: "pointer-missing",
+          message: `Could not read ${attachmentUrl} (also tried ${altUrl}): ${e2 instanceof Error ? e2.message : String(e2)}`,
+        } as AudioError
+      }
     }
 
     const pointer = parsePointerContent(pointerText)

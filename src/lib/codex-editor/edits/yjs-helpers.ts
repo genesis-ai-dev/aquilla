@@ -39,12 +39,12 @@ export function appendEntry(
   input: CreateEntryInput,
 ): Y.Map<unknown> {
   const entry = new Y.Map<unknown>()
-  // Set primitives before push (safe) and nested Y types after push (required).
+  // Push first so entry is attached to the doc — Yjs emits warnings for writes
+  // (even primitives) on detached Y types.
+  arr.push([entry])
   entry.set("timestamp", input.timestamp)
   entry.set("type", input.type)
   entry.set("value", input.value)
-  arr.push([entry])
-  // Now attached — safe to nest Y types.
   const authorsArr = new Y.Array<string>()
   entry.set("authors", authorsArr)
   authorsArr.push(input.authors.slice())

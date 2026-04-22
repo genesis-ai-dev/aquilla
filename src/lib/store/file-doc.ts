@@ -41,6 +41,9 @@ export function createFileDoc(
 
     for (const str of strings) {
       const cell = new Y.Map()
+      // Attach to doc first — Yjs warns on writes to detached Y types.
+      cells.set(str.id, cell)
+      order.push([str.id])
       cell.set("id", str.id)
       cell.set("original", str.original)
       if (str.originalHtml) cell.set("originalHtml", str.originalHtml)
@@ -53,8 +56,6 @@ export function createFileDoc(
       cell.set("type", str.type)
       cell.set("history", new Y.Array())
       if (str.sourceLocation) cell.set("sourceLocation", str.sourceLocation)
-      cells.set(str.id, cell)
-      order.push([str.id])
     }
   })
 

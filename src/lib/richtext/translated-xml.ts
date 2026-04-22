@@ -43,21 +43,27 @@ function extractXmlTextPlain(node: Y.XmlText): string {
 // Newlines in the text become hard breaks within that paragraph.
 export function setPlainText(frag: Y.XmlFragment, text: string): void {
   const doc = frag.doc
+  const doIt = () => {
+    // Clear existing children
+    while (frag.length > 0) frag.delete(0, 1)
+    pushParagraphFromText(frag, text)
+  }
   if (!doc) {
-    replaceFragmentContent(frag, buildParagraphFromText(text))
+    doIt()
     return
   }
-  doc.transact(() => {
-    replaceFragmentContent(frag, buildParagraphFromText(text))
-  })
+  doc.transact(doIt)
 }
 
-function buildParagraphFromText(text: string): Y.XmlElement[] {
-  // Split on \n into lines; within a single paragraph, separate lines with <br/>
+/**
+ * Build paragraph elements and push them directly into an attached fragment.
+ * Writing to Y types that are already in a doc avoids Yjs "Invalid access"
+ * warnings. The fragment MUST be attached before calling this.
+ */
+function pushParagraphFromText(frag: Y.XmlFragment, text: string): void {
   const para = new Y.XmlElement("paragraph")
-  if (text === "") {
-    return [para]
-  }
+  frag.push([para])
+  if (text === "") return
   const lines = text.split("\n")
   lines.forEach((line, i) => {
     if (i > 0) {
@@ -65,11 +71,10 @@ function buildParagraphFromText(text: string): Y.XmlElement[] {
     }
     if (line.length > 0) {
       const textNode = new Y.XmlText()
-      textNode.insert(0, line)
       para.push([textNode])
+      textNode.insert(0, line)
     }
   })
-  return [para]
 }
 
 function replaceFragmentContent(frag: Y.XmlFragment, newChildren: Y.XmlElement[]): void {
@@ -77,7 +82,7 @@ function replaceFragmentContent(frag: Y.XmlFragment, newChildren: Y.XmlElement[]
   while (frag.length > 0) {
     frag.delete(0, 1)
   }
-  frag.push(newChildren)
+  if (newChildren.length > 0) frag.push(newChildren)
 }
 
 // Serialize the fragment to HTML using ProseMirror's schema mapping.
@@ -150,60 +155,57 @@ function escapeHtml(text: string): string {
 // Populate the fragment from HTML. Supports a small subset of tags.
 // Only paragraphs and inline marks (b/strong, i/em, u, s/strike, code) and <br>.
 export function setFragmentFromHtml(frag: Y.XmlFragment, html: string): void {
-  const paragraphs = parseHtmlToParagraphs(html)
   const doc = frag.doc
+  const doIt = () => {
+    // Clear existing children
+    while (frag.length > 0) frag.delete(0, 1)
+    pushHtmlParagraphs(frag, html)
+  }
   if (!doc) {
-    replaceFragmentContent(frag, paragraphs)
+    doIt()
     return
   }
-  doc.transact(() => {
-    replaceFragmentContent(frag, paragraphs)
-  })
+  doc.transact(doIt)
 }
 
-function parseHtmlToParagraphs(html: string): Y.XmlElement[] {
+/**
+ * Parse HTML and push paragraph elements directly into an attached fragment.
+ * All Y types are attached before being written to, avoiding Yjs warnings.
+ */
+function pushHtmlParagraphs(frag: Y.XmlFragment, html: string): void {
   const parser = new DOMParser()
   const domDoc = parser.parseFromString(`<body>${html}</body>`, "text/html")
   const body = domDoc.body
-  const paragraphs: Y.XmlElement[] = []
+  let pushed = false
 
-  // Iterate direct children of body
   for (const child of Array.from(body.childNodes)) {
     if (child.nodeType === 1) {
-      // Element
       const el = child as Element
       const tag = el.tagName.toLowerCase()
+      const para = new Y.XmlElement("paragraph")
+      frag.push([para])
+      pushed = true
       if (tag === "p") {
-        paragraphs.push(buildParagraphFromDom(el, {}))
-      } else {
-        // Unknown block → treat as paragraph content
-        const para = new Y.XmlElement("paragraph")
         appendDomContent(el, para, {})
-        paragraphs.push(para)
+      } else {
+        appendDomContent(el, para, {})
       }
     } else if (child.nodeType === 3) {
-      // Text node at top level → wrap in paragraph
       const text = child.nodeValue || ""
       if (text.trim()) {
         const para = new Y.XmlElement("paragraph")
+        frag.push([para])
+        pushed = true
         const t = new Y.XmlText()
-        t.insert(0, text)
         para.push([t])
-        paragraphs.push(para)
+        t.insert(0, text)
       }
     }
   }
 
-  if (paragraphs.length === 0) {
-    paragraphs.push(new Y.XmlElement("paragraph"))
+  if (!pushed) {
+    frag.push([new Y.XmlElement("paragraph")])
   }
-  return paragraphs
-}
-
-function buildParagraphFromDom(el: Element, marks: Record<string, boolean>): Y.XmlElement {
-  const para = new Y.XmlElement("paragraph")
-  appendDomContent(el, para, marks)
-  return para
 }
 
 function appendDomContent(el: Element, target: Y.XmlElement, marks: Record<string, boolean>): void {
@@ -212,8 +214,8 @@ function appendDomContent(el: Element, target: Y.XmlElement, marks: Record<strin
       const text = child.nodeValue || ""
       if (text.length > 0) {
         const tn = new Y.XmlText()
-        tn.insert(0, text, { ...marks })
         target.push([tn])
+        tn.insert(0, text, { ...marks })
       }
     } else if (child.nodeType === 1) {
       const childEl = child as Element

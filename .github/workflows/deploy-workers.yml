@@ -1,0 +1,82 @@
+name: Deploy Workers
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'sync-worker/**'
+      - 'cors-proxy/**'
+      - 'signaling/**'
+  workflow_dispatch:
+    inputs:
+      worker:
+        description: 'Which worker to deploy (all, sync-worker, cors-proxy, signaling)'
+        required: false
+        default: 'all'
+
+jobs:
+  sync-worker:
+    if: >
+      github.event_name == 'workflow_dispatch' && (github.event.inputs.worker == 'all' || github.event.inputs.worker == 'sync-worker')
+      || github.event_name == 'push' && contains(toJSON(github.event.commits.*.modified), 'sync-worker/')
+      || github.event_name == 'push' && contains(toJSON(github.event.commits.*.added), 'sync-worker/')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: sync-worker/package-lock.json
+      - run: npm ci
+        working-directory: sync-worker
+      - name: Deploy sync-worker
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: 6a80496d1e59948a9cbaa3c643ba81d7
+          workingDirectory: sync-worker
+
+  cors-proxy:
+    if: >
+      github.event_name == 'workflow_dispatch' && (github.event.inputs.worker == 'all' || github.event.inputs.worker == 'cors-proxy')
+      || github.event_name == 'push' && contains(toJSON(github.event.commits.*.modified), 'cors-proxy/')
+      || github.event_name == 'push' && contains(toJSON(github.event.commits.*.added), 'cors-proxy/')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: cors-proxy/package-lock.json
+      - run: npm ci
+        working-directory: cors-proxy
+      - name: Deploy cors-proxy
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: 6a80496d1e59948a9cbaa3c643ba81d7
+          workingDirectory: cors-proxy
+
+  signaling:
+    if: >
+      github.event_name == 'workflow_dispatch' && (github.event.inputs.worker == 'all' || github.event.inputs.worker == 'signaling')
+      || github.event_name == 'push' && contains(toJSON(github.event.commits.*.modified), 'signaling/')
+      || github.event_name == 'push' && contains(toJSON(github.event.commits.*.added), 'signaling/')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: signaling/package-lock.json
+      - run: npm ci
+        working-directory: signaling
+      - name: Deploy signaling
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: 6a80496d1e59948a9cbaa3c643ba81d7
+          workingDirectory: signaling

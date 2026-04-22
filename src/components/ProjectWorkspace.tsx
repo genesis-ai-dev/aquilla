@@ -10,7 +10,7 @@ import { useHealth } from "@/hooks/useHealth"
 import { useRules } from "@/hooks/useRules"
 import { updateProject } from "@/lib/store/project-index"
 import { exportFile, downloadBlob } from "@/lib/export/export-service"
-import type { FileReference } from "@/lib/parsers/types"
+import type { FileReference, CellHealthBreakdown } from "@/lib/parsers/types"
 import type { CellData } from "@/hooks/useCells"
 import { useWorkspaceSearch } from "@/hooks/useWorkspaceSearch"
 import { useBacktranslation } from "@/hooks/useBacktranslation"
@@ -67,6 +67,7 @@ import {
 } from "@/components/ui/dialog"
 import type { ProjectRecord } from "@/lib/parsers/types"
 import { readValidationCount } from "@/lib/progress/read-validation-count"
+import { resolveHealthConfig } from "@/lib/health/config-resolver"
 import { useSetupChecklist } from "@/hooks/useSetupChecklist"
 import { SetupChecklistDrawer } from "./onboarding/SetupChecklistDrawer"
 import { useFeatureFlag } from "@/hooks/useFeatureFlag"
@@ -104,7 +105,7 @@ export function ProjectWorkspace() {
   const { session: frontierSession } = useFrontierSession()
   const currentUsername = frontierSession?.username || project?.username || "local"
   const validationCount = project ? readValidationCount(project) : 1
-  const cells = useCells(doc, currentUsername, validationCount)
+  const cells = useCells(doc, activeFileId ?? "", currentUsername, validationCount)
   const { hasAny: hasUnfinished, findNext: findNextUnfinished } = useNextUnfinished(cells, validationCount)
   const handleJumpNextUnfinished = useCallback(() => {
     const currentIndex = editorRef.current?.getCurrentIndex?.() ?? 0
@@ -166,7 +167,29 @@ export function ProjectWorkspace() {
   }, [cells])
 
   const { buildIndex, search: runSearch, results: searchResults, loading: searchLoading, ready: searchReady } = useWorkspaceSearch(project?.files || [])
-  const { search } = useSearchIndex(project?.files || [], cells)
+
+  const { rules, penalties } = useRules(project ?? null, refresh)
+  const { addThread, addMessage, resolveThread, reopenThread } = useComments(doc, currentUsername)
+  const commentsCell = commentsCellId ? cells.find((c) => c.id === commentsCellId) : null
+  const historyCell = historyCellId ? cells.find((c) => c.id === historyCellId) : null
+
+  // Build fileCells map for health computation
+  // For now, only the active file's cells are loaded
+  const fileCells = useMemo(() => {
+    const map = new Map<string, CellData[]>()
+    if (activeFileId && cells.length > 0) {
+      map.set(activeFileId, cells)
+    }
+    return map
+  }, [activeFileId, cells])
+
+  const allProjectCells = useMemo(() => {
+    const all: CellData[] = []
+    for (const [, fc] of fileCells) all.push(...fc)
+    return all
+  }, [fileCells])
+
+  const { search } = useSearchIndex(project?.files || [], allProjectCells)
   const { completeSingle, completeBatch, isConfigured, completing, examples, errors } = useCompletion(
     doc, project?.completionSettings, project?.sourceLanguage || "", project?.targetLanguage || "", search, frontierSession
   )
@@ -192,27 +215,62 @@ export function ProjectWorkspace() {
     frontierSession,
   )
 
-  const { rules, penalties } = useRules(project ?? null, refresh)
-  const { addThread, addMessage, resolveThread, reopenThread } = useComments(doc, currentUsername)
-  const commentsCell = commentsCellId ? cells.find((c) => c.id === commentsCellId) : null
-  const historyCell = historyCellId ? cells.find((c) => c.id === historyCellId) : null
+  const compositeFlag = useFeatureFlag("composite-health", project ?? null)
+  const healthConfig = useMemo(() => resolveHealthConfig(project ?? null), [project])
+  const requiredValidations = project ? readValidationCount(project) : 1
 
-  // Build fileCells map for health computation
-  // For now, only the active file's cells are loaded
-  const fileCells = useMemo(() => {
-    const map = new Map<string, CellData[]>()
-    if (activeFileId && cells.length > 0) {
-      map.set(activeFileId, cells)
-    }
-    return map
-  }, [activeFileId, cells])
-
-  const { healthMap, fileHealth: _fileHealth, projectHealth, fileProgress, infractions, openCommentCount, cellOpenCommentCount } = useHealth(
+  const health = useHealth(
     fileCells,
     project?.completionSettings?.llmHealthPenalty ?? 0.1,
     rules,
-    penalties
+    penalties,
+    { composite: compositeFlag, compositeConfig: healthConfig, requiredValidations },
   )
+  const { healthMap, fileHealth: _fileHealth, projectHealth, fileProgress, infractions, openCommentCount, cellOpenCommentCount } = health
+
+  const projectBreakdown: CellHealthBreakdown | undefined = useMemo(() => {
+    if (!compositeFlag) return undefined
+    const bs = Array.from(health.breakdownMap.values())
+    if (bs.length === 0) return undefined
+    const avg = (f: (b: CellHealthBreakdown) => number) =>
+      Math.round(bs.reduce((a, b) => a + f(b), 0) / bs.length)
+    return {
+      cellId: "__project__",
+      score: health.projectHealth,
+      validationGap: avg((b) => b.validationGap),
+      ancestryPenalty: avg((b) => b.ancestryPenalty),
+      neighborhoodPenalty: avg((b) => b.neighborhoodPenalty),
+      rulePenalty: avg((b) => b.rulePenalty),
+      signals: {
+        validatorCount: 0,
+        requiredValidations: requiredValidations,
+        ancestryExamples: bs
+          .flatMap((b) => b.signals.ancestryExamples)
+          .sort((a, b) => b.health - a.health)
+          .slice(0, 5),
+        neighborhoodSourceCellIds: [],
+        neighborhoodTargetCellIds: [],
+        idJaccard: 0,
+        tfidfTokenOverlap: 0,
+        infractions: [],
+      },
+    }
+  }, [compositeFlag, health, requiredValidations])
+
+  const biggestDrags = useMemo(() => {
+    if (!compositeFlag) return undefined
+    const entries: Array<{ cellId: string; score: number }> = []
+    for (const b of health.breakdownMap.values()) {
+      entries.push({ cellId: b.cellId, score: b.score })
+    }
+    entries.sort((a, b) => a.score - b.score)
+    return entries.slice(0, 3)
+  }, [compositeFlag, health.breakdownMap])
+
+  const jumpToCellId = useCallback((cellId: string) => {
+    const idx = cells.findIndex((c) => c.id === cellId)
+    if (idx >= 0) editorRef.current?.scrollToCellIndex(idx)
+  }, [cells])
 
   const drawerRule = rules.find((r) => r.id === drawerRuleId) || null
   const drawerInfractions = drawerRuleId
@@ -629,6 +687,8 @@ export function ProjectWorkspace() {
             sourceTextDirection={fileMeta.sourceTextDirection}
             targetTextDirection={fileMeta.targetTextDirection}
             isAnonymous={!frontierSession}
+            breakdownMap={health.breakdownMap}
+            onJumpToCell={jumpToCellId}
           />
         ) : <p className="p-4 text-muted-foreground">Loading file...</p>) : (
           <p className="p-4 text-muted-foreground">Select a file from the sidebar, or use + Import.</p>
@@ -677,7 +737,13 @@ export function ProjectWorkspace() {
                 />
               }
             />
-            <StatusBar cells={cells} projectHealth={projectHealth} />
+            <StatusBar
+              cells={cells}
+              projectHealth={projectHealth}
+              projectBreakdown={projectBreakdown}
+              biggestDrags={biggestDrags}
+              onJumpToCell={jumpToCellId}
+            />
           </>
         }
       />

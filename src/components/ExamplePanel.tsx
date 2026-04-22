@@ -1,6 +1,6 @@
 import { useState } from "react"
 import { BookOpen, ChevronDown, ChevronRight } from "lucide-react"
-import type { ScoredPair } from "@/lib/search/search-index"
+import type { ScoredPair } from "@/lib/search/dual-index"
 import { HighlightedText, EXAMPLE_COLORS } from "./HighlightedText"
 import { tokenizeText } from "@/lib/search/tokenizer"
 

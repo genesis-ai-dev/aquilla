@@ -11,6 +11,7 @@ export type ValidationStatus = "empty" | "none" | "others" | "self" | "full"
 
 export interface CellData {
   id: string
+  fileId: string
   cellLabel?: string
   original: string
   originalHtml?: string
@@ -76,7 +77,7 @@ function deriveValidationStatus(
   return { validationStatus: "none", activeValidators: [] }
 }
 
-export function useCells(doc: Y.Doc | null, username = "local", requiredValidations = 1): CellData[] {
+export function useCells(doc: Y.Doc | null, fileId: string, username = "local", requiredValidations = 1): CellData[] {
   const [cells, setCells] = useState<CellData[]>([])
 
   useEffect(() => {
@@ -122,6 +123,7 @@ export function useCells(doc: Y.Doc | null, username = "local", requiredValidati
         }
         ordered.push({
           id: cell.get("id") as string,
+          fileId,
           original: cell.get("original") as string,
           originalHtml: cell.get("originalHtml") as string | undefined,
           translated,
@@ -165,7 +167,7 @@ export function useCells(doc: Y.Doc | null, username = "local", requiredValidati
       cellsMap.unobserveDeep(scheduleUpdate)
       orderArray.unobserve(scheduleUpdate)
     }
-  }, [doc, username, requiredValidations])
+  }, [doc, fileId, username, requiredValidations])
 
   return cells
 }

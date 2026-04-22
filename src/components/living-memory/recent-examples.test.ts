@@ -7,6 +7,7 @@ function makeCell(overrides: Partial<CellData> & { id: string; history?: CellHis
   return {
     original: "source",
     translated: "target",
+    fileId: "test-file",
     context: "",
     group: "",
     type: "text",

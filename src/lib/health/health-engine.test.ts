@@ -6,7 +6,7 @@ import type { TranslationRule } from "@/lib/parsers/types"
 function makeCell(overrides: Partial<CellData> & { id: string }): CellData {
   const status = overrides.status ?? "empty"
   return {
-    original: "test", translated: "", context: "", group: "", type: "text",
+    original: "test", translated: "", fileId: "test-file", context: "", group: "", type: "text",
     originalHtml: undefined, status,
     // Derive validationStatus from status if not explicitly provided, so tests
     // that set status: "validated" get the expected health behavior.

@@ -3,7 +3,7 @@ import * as Y from "yjs"
 import type { CompletionSettings } from "@/lib/parsers/types"
 import type { FrontierSession } from "@/lib/frontier/types"
 import { setPlainText } from "@/lib/richtext/translated-xml"
-import type { ScoredPair } from "@/lib/search/search-index"
+import type { ScoredPair } from "@/lib/search/dual-index"
 import type { CellData } from "./useCells"
 import { buildPrompt, complete, resolveProvider, DEFAULT_SYSTEM_PROMPT } from "@/lib/completion/completion-service"
 import { useFrontierHealth } from "@/lib/completion/frontier-health"
@@ -79,7 +79,7 @@ export function useCompletion(
       })
       appendCellHistory(doc, cell.id, {
         value: result, source: "llm", author: effectiveSettings.model || "frontier-default",
-        validated: false, examples: found.map((e) => e.cellId),
+        validated: false, examples: found.map((e) => ({ cellId: e.cellId, weight: e.coverageWeight })),
       })
       setCompleting((p) => new Map(p).set(cell.id, "done"))
     } catch (err) {
@@ -119,7 +119,7 @@ export function useCompletion(
           })
           appendCellHistory(doc!, cell.id, {
             value: result, source: "llm", author: effectiveSettings.model || "frontier-default",
-            validated: false, examples: found.map((e) => e.cellId),
+            validated: false, examples: found.map((e) => ({ cellId: e.cellId, weight: e.coverageWeight })),
           })
           setCompleting((p) => new Map(p).set(cell.id, "done"))
         } catch (err) {

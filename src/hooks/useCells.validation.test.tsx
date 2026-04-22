@@ -6,7 +6,7 @@ import { commitCellEdit } from "@/lib/codex-editor/edits/commit-cell-edit"
 import { toggleCellValidation } from "@/lib/codex-editor/edits/toggle-cell-validation"
 
 function Probe({ doc, username, out, required = 2 }: { doc: Y.Doc; username: string; out: { current?: ReturnType<typeof useCells> }; required?: number }) {
-  const cells = useCells(doc, username, required)
+  const cells = useCells(doc, "test-file", username, required)
   out.current = cells
   return null
 }

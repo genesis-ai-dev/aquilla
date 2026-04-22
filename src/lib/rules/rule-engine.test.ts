@@ -5,7 +5,7 @@ import type { CellData } from "@/hooks/useCells"
 
 function makeCell(overrides: Partial<CellData> & { id: string }): CellData {
   return {
-    original: "test", translated: "", context: "", group: "", type: "text",
+    original: "test", translated: "", fileId: "test-file", context: "", group: "", type: "text",
     originalHtml: undefined, status: "empty", validationStatus: "none", activeValidators: [],
     validationHistory: [],
     history: [], threads: [],

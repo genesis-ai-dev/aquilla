@@ -1,5 +1,5 @@
 import type { CellData } from "@/hooks/useCells"
-import type { TranslationRule, RuleInfraction } from "@/lib/parsers/types"
+import type { TranslationRule, RuleInfraction, CellHealthBreakdown } from "@/lib/parsers/types"
 import { checkRules } from "@/lib/rules/rule-engine"
 
 export interface HealthStats {
@@ -11,6 +11,7 @@ export interface HealthStats {
   openCommentCount: Map<string, number>
   projectOpenCommentCount: number
   cellOpenCommentCount: Map<string, number>
+  breakdownMap: Map<string, CellHealthBreakdown>
 }
 
 export const DEFAULT_LLM_HEALTH_MULTIPLIER = 0.9
@@ -46,7 +47,9 @@ export function computeHealthMap(
       }
       // "none" = no validations — check LLM example chain
       const lastEntry = cell.history[cell.history.length - 1]
-      const exampleIds = lastEntry?.examples || []
+      const exampleIds = (lastEntry?.examples ?? []).map((e) =>
+        typeof e === "string" ? e : e.cellId
+      )
       if (exampleIds.length === 0) {
         healthMap.set(cell.id, 0)
         continue
@@ -124,5 +127,5 @@ export function computeHealthMap(
     projectOpenCommentCount += fileCount
   }
 
-  return { healthMap, fileHealth, projectHealth, fileProgress, infractions, openCommentCount, projectOpenCommentCount, cellOpenCommentCount }
+  return { healthMap, fileHealth, projectHealth, fileProgress, infractions, openCommentCount, projectOpenCommentCount, cellOpenCommentCount, breakdownMap: new Map<string, CellHealthBreakdown>() }
 }

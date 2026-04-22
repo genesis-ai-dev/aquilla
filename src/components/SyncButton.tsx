@@ -4,13 +4,14 @@ import { Button } from "@/components/ui/button"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { useProjectPermissions } from "@/hooks/useProjectPermissions"
 import { isProjectDirty } from "@/lib/sync/dirty"
+import { patchProject } from "@/lib/store/project-index"
 import type { ProjectRecord } from "@/lib/parsers/types"
 import type { SyncPhase, SyncResult } from "@/lib/sync/git-sync"
 import type { FrontierSession } from "@/lib/frontier/types"
 
 interface SyncButtonProps {
   project: ProjectRecord
-  onUpdated: (p: ProjectRecord) => void
+  onUpdated: (p: ProjectRecord | undefined) => void
   sync: (project: ProjectRecord, session: FrontierSession) => Promise<SyncResult | null>
   phase: SyncPhase
   inFlight: boolean
@@ -52,7 +53,11 @@ export function SyncButton({ project, onUpdated, sync, phase, inFlight, lastResu
     if (!session) return
     const r = await sync(project, session)
     if ((r?.status === "synced" || r?.status === "merged") && r.commitSha && project.origin?.kind === "git") {
-      onUpdated({ ...project, origin: { ...project.origin, headSha: r.commitSha } })
+      const updated = await patchProject(project.id, (p) => ({
+        ...p,
+        origin: { ...p.origin!, headSha: r.commitSha },
+      }))
+      onUpdated(updated)
     }
   }
 

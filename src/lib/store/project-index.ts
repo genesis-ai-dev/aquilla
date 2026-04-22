@@ -88,6 +88,24 @@ export async function updateProject(project: ProjectRecord): Promise<void> {
   await db.put("projects", project)
 }
 
+/**
+ * Read-then-apply: reads the latest record from IDB, passes it to a
+ * transform function, and writes the result back. This avoids stale-state
+ * overwrites when multiple async operations touch the same project.
+ *
+ * Returns the updated record (or undefined if the project was not found).
+ */
+export async function patchProject(
+  id: string,
+  transform: (latest: ProjectRecord) => ProjectRecord,
+): Promise<ProjectRecord | undefined> {
+  const latest = await getProject(id)
+  if (!latest) return undefined
+  const next = transform(latest)
+  await updateProject(next)
+  return next
+}
+
 export async function deleteProject(id: string): Promise<void> {
   const db = await getDb()
   await db.delete("projects", id)

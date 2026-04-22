@@ -1,6 +1,6 @@
 import { useMemo } from "react"
 import type { ProjectRecord } from "@/lib/parsers/types"
-import { getProject, updateProject } from "@/lib/store/project-index"
+import { patchProject } from "@/lib/store/project-index"
 import { getFlagValue } from "@/lib/features/flag-selector"
 import type { FlagKey } from "@/lib/features/flags"
 
@@ -24,10 +24,8 @@ export async function setFeatureFlag(
   key: FlagKey,
   value: boolean,
 ): Promise<void> {
-  const p = await getProject(projectId)
-  if (!p) return
-  await updateProject({
+  await patchProject(projectId, (p) => ({
     ...p,
     experimentalFlags: { ...(p.experimentalFlags ?? {}), [key]: value },
-  })
+  }))
 }

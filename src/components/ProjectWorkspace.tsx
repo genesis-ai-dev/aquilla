@@ -8,7 +8,7 @@ import { useSearchIndex } from "@/hooks/useSearchIndex"
 import { useCompletion } from "@/hooks/useCompletion"
 import { useHealth } from "@/hooks/useHealth"
 import { useRules } from "@/hooks/useRules"
-import { updateProject } from "@/lib/store/project-index"
+import { updateProject, patchProject, getProject } from "@/lib/store/project-index"
 import { exportFile, downloadBlob } from "@/lib/export/export-service"
 import type { FileReference, CellHealthBreakdown } from "@/lib/parsers/types"
 import type { CellData } from "@/hooks/useCells"
@@ -405,9 +405,9 @@ export function ProjectWorkspace() {
     if (!checklistDismissed) setChecklistOpen(true)
   }, [checklistDismissed])
 
-  const handleProjectUpdated = useCallback(async (updated: ProjectRecord | undefined) => {
-    if (!updated) return
-    await updateProject(updated)
+  const handleProjectUpdated = useCallback(async (_updated: ProjectRecord | undefined) => {
+    // The caller (useSaveCompletionSettings, SyncButton, etc.) already
+    // persisted to IDB. We just need to refresh the in-memory project state.
     refresh()
   }, [refresh])
 
@@ -419,7 +419,10 @@ export function ProjectWorkspace() {
         if (syncInFlight) return
         runSync(project, frontierSession).then((r) => {
           if (r?.status === "synced" && r.commitSha && project.origin?.kind === "git") {
-            handleProjectUpdated({ ...project, origin: { ...project.origin, headSha: r.commitSha } })
+            patchProject(project.id, (p) => ({
+              ...p,
+              origin: { ...p.origin!, headSha: r.commitSha },
+            })).then(() => refresh())
           }
         })
       }
@@ -452,8 +455,7 @@ export function ProjectWorkspace() {
   const handleRename = useCallback(async (fileId: string, newName: string) => {
     if (!project) return
     try {
-      const next = renameFile(project, fileId, newName)
-      await updateProject(next)
+      await patchProject(project.id, (p) => renameFile(p, fileId, newName))
       refresh()
     } catch (e) {
       alert(e instanceof Error ? e.message : "Rename failed")
@@ -462,26 +464,23 @@ export function ProjectWorkspace() {
 
   const handleDeleteFile = useCallback(async (fileId: string) => {
     if (!project) return
-    const next = deleteFile(project, fileId)
-    await updateProject(next)
+    await patchProject(project.id, (p) => deleteFile(p, fileId))
     refresh()
     if (activeFileId === fileId) setActiveFileId(null)
   }, [project, refresh, activeFileId, setActiveFileId])
 
   const handleApplySuggestions = useCallback(async (chosen: RenameSuggestion[]) => {
     if (!project) return
-    const before = project
-    const next = applySuggestions(project, chosen)
-    await updateProject(next)
+    const before = await getProject(project.id)
+    await patchProject(project.id, (p) => applySuggestions(p, chosen))
     refresh()
-    setUndo({ project: before })
+    if (before) setUndo({ project: before })
     setTimeout(() => setUndo((u) => (u?.project === before ? null : u)), 10000)
   }, [project, refresh])
 
   const handleDismissBanner = useCallback(async () => {
     if (!project) return
-    const next = { ...project, suggestionsDismissedAt: new Date().toISOString() }
-    await updateProject(next)
+    await patchProject(project.id, (p) => ({ ...p, suggestionsDismissedAt: new Date().toISOString() }))
     refresh()
   }, [project, refresh])
 
@@ -546,7 +545,7 @@ export function ProjectWorkspace() {
 
   async function handleImported(refs: FileReference[]) {
     if (!project) return
-    await updateProject({ ...project, files: [...project.files, ...refs] })
+    await patchProject(project.id, (p) => ({ ...p, files: [...p.files, ...refs] }))
     refresh()
     if (refs.length > 0) setActiveFileId(refs[0].id)
   }
@@ -691,7 +690,7 @@ export function ProjectWorkspace() {
             onJumpToCell={jumpToCellId}
           />
         ) : <p className="p-4 text-muted-foreground">Loading file...</p>) : (
-          <p className="p-4 text-muted-foreground">Select a file from the sidebar, or use + Import.</p>
+          <p className="p-4 text-muted-foreground">Select a file from the sidebar, or import a file.</p>
         )}
         aside={
           <>
@@ -801,8 +800,7 @@ export function ProjectWorkspace() {
             <Button variant="outline" onClick={() => setMoveTargetId(null)}>Cancel</Button>
             <Button onClick={async () => {
               if (!project || !moveTargetId) return
-              const next = moveFileToCorpus(project, moveTargetId, moveCorpus)
-              await updateProject(next)
+              await patchProject(project.id, (p) => moveFileToCorpus(p, moveTargetId, moveCorpus))
               refresh()
               setMoveTargetId(null)
             }}>Save</Button>
@@ -838,10 +836,19 @@ function ScrollToGroupHandler({ cells, editorRef }: ScrollToGroupHandlerProps) {
   const editorScroll = useEditorScroll()
 
   useEffect(() => {
-    const groupId = editorScroll.pendingGroup
-    if (!groupId) return
-    const idx = cells.findIndex((c) => (c.group ?? "Ungrouped") === groupId)
-    editorScroll.consume()
+    const { group: groupId, section: sectionLabel } = editorScroll.consume()
+    if (!groupId && !sectionLabel) return
+
+    let idx = -1
+    if (sectionLabel) {
+      // Match by section label first (e.g. "GEN 1")
+      idx = cells.findIndex((c) => c.section === sectionLabel)
+      // Fallback: match by group
+      if (idx < 0) idx = cells.findIndex((c) => (c.group ?? "Ungrouped") === sectionLabel)
+    } else if (groupId) {
+      idx = cells.findIndex((c) => (c.group ?? "Ungrouped") === groupId)
+    }
+
     if (idx >= 0) {
       // Defer a tick so the virtualizer has the latest cell list after any
       // file-switch that preceded this request.

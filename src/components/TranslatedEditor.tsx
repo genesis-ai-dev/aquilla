@@ -6,7 +6,7 @@ import Collaboration from "@tiptap/extension-collaboration"
 import { Extension } from "@tiptap/core"
 import { yCursorPlugin } from "@tiptap/y-tiptap"
 import * as Y from "yjs"
-import type { WebsocketProvider } from "y-websocket"
+import type YProvider from "y-partyserver/provider"
 import { Bold, Italic, Underline as UnderlineIcon, Strikethrough, Code } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { useRef, useEffect } from "react"
@@ -18,7 +18,7 @@ interface TranslatedEditorProps {
   className?: string
   // When provided, remote cursors from other peers in this provider's awareness
   // are rendered inline with the given user's name and color for their local cursor.
-  syncProvider?: WebsocketProvider | null
+  syncProvider?: YProvider | null
   user?: { name: string; color: string }
   editable?: boolean
 }
@@ -158,7 +158,7 @@ export function TranslatedEditor({ fragment, onBlur, placeholder, className, syn
 // Publishes the local user's cursor position to the provider's awareness under
 // `user: { name, color }`, and renders other peers' cursors as colored carets.
 function createCollabCursorExtension(
-  provider: WebsocketProvider,
+  provider: YProvider,
   user: { name: string; color: string }
 ) {
   return Extension.create({

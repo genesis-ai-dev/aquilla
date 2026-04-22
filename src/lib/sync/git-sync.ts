@@ -10,7 +10,7 @@ import { parseCodexNotebook } from "@/lib/codex-editor/parse-codex"
 import { mergeRemoteIntoOurs, MergeFailure } from "./git-merge"
 import { isFileDirty } from "./dirty"
 import { buildCommitMessage } from "./commit-message"
-import { updateProject } from "@/lib/store/project-index"
+import { patchProject } from "@/lib/store/project-index"
 import type { FrontierSession } from "@/lib/frontier/types"
 import type { ProjectRecord } from "@/lib/parsers/types"
 import * as Y from "yjs"
@@ -280,11 +280,10 @@ export async function syncProject(
     }
 
     // 9) Update ProjectRecord.origin.headSha.
-    const updated: ProjectRecord = {
-      ...project,
-      origin: { ...project.origin, headSha: finalSha },
-    }
-    await updateProject(updated)
+    await patchProject(project.id, (p) => ({
+      ...p,
+      origin: { ...p.origin!, headSha: finalSha },
+    }))
 
     onPhase?.("done")
     return mergeSha

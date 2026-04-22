@@ -1,6 +1,6 @@
 import { useEffect, useRef } from "react"
 import type { ProjectRecord } from "@/lib/parsers/types"
-import { updateProject } from "@/lib/store/project-index"
+import { patchProject } from "@/lib/store/project-index"
 import { getTestament } from "@/lib/codex-editor/bible-books"
 
 export function useCorpusBackfill(project: ProjectRecord | null, onUpdated: () => void) {
@@ -28,10 +28,14 @@ export function useCorpusBackfill(project: ProjectRecord | null, onUpdated: () =
 
     let cancelled = false
     ;(async () => {
-      const updatedFiles = project.files.map((f) =>
-        updates[f.id] ? { ...f, corpusMarker: updates[f.id] } : f
-      )
-      await updateProject({ ...project, files: updatedFiles })
+      // patchProject reads the latest record from IDB before applying,
+      // so we never clobber concurrent writes (e.g. completionSettings).
+      await patchProject(project.id, (p) => ({
+        ...p,
+        files: p.files.map((f) =>
+          updates[f.id] ? { ...f, corpusMarker: updates[f.id] } : f
+        ),
+      }))
       if (!cancelled) onUpdated()
     })()
 

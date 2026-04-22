@@ -9,6 +9,8 @@ import {
 import {
   listShares, createShare, deleteShare, generatePin, updateSharePin,
 } from "@/lib/sync/share-tokens"
+import { createServerInvite } from "@/lib/sync/invites"
+import { useFrontierSession } from "@/hooks/useFrontierSession"
 import type { ShareInvite } from "@/lib/parsers/types"
 
 interface SharePanelProps {
@@ -19,6 +21,17 @@ interface SharePanelProps {
   onSharesChanged?: () => void
 }
 
+// Roles visible in the share UI. Project_lead (500) and above can only be
+// granted by maintainer-and-up and aren't useful in a "share with a
+// collaborator" flow, so they're intentionally omitted.
+const INVITE_ROLE_OPTIONS: Array<{ level: number; name: string; description: string }> = [
+  { level: 100, name: "viewer", description: "Read-only access to cells + comments" },
+  { level: 200, name: "commenter", description: "Read + add comments on cells" },
+  { level: 300, name: "reviewer", description: "Read + comment + validate cells (no content edits)" },
+  { level: 400, name: "contributor", description: "Read + comment + edit cell content" },
+]
+const DEFAULT_INVITE_ROLE = 400
+
 export function SharePanel({ open, onOpenChange, projectId, username, onSharesChanged }: SharePanelProps) {
   const [shares, setShares] = useState<ShareInvite[]>([])
   const [newShareForm, setNewShareForm] = useState(false)
@@ -27,6 +40,7 @@ export function SharePanel({ open, onOpenChange, projectId, username, onSharesCh
   const [revealedPins, setRevealedPins] = useState<Set<string>>(new Set())
   const [pinCache, setPinCache] = useState<Map<string, string>>(new Map())
   const [copied, setCopied] = useState<string | null>(null)
+  const [inviteRole, setInviteRole] = useState<number>(DEFAULT_INVITE_ROLE)
 
   const refresh = useCallback(async () => {
     const list = await listShares(projectId)
@@ -44,15 +58,26 @@ export function SharePanel({ open, onOpenChange, projectId, username, onSharesCh
     }
   }, [requirePin, generatedPin])
 
+  const { session } = useFrontierSession()
+
   async function handleCreate() {
     const pin = requirePin ? generatedPin : undefined
-    const invite = await createShare(projectId, pin, username)
+    // Register server-side first so the local ShareInvite and the server's
+    // project_invites row share one token. Falls back to a local-only token
+    // when there's no active Frontier session — the joiner can still receive
+    // the project record, but without server-side membership /sync-token
+    // will 403 and multi-device sync won't light up for them.
+    const serverInvite = session?.jwt
+      ? await createServerInvite(session.jwt, projectId, inviteRole)
+      : null
+    const invite = await createShare(projectId, pin, username, serverInvite?.token)
     if (pin) {
       setPinCache((p) => new Map(p).set(invite.token, pin))
     }
     setNewShareForm(false)
     setRequirePin(false)
     setGeneratedPin("")
+    setInviteRole(DEFAULT_INVITE_ROLE)
     await refresh()
   }
 
@@ -170,6 +195,26 @@ export function SharePanel({ open, onOpenChange, projectId, username, onSharesCh
 
           {newShareForm ? (
             <div className="rounded border border-primary/50 p-3 space-y-2">
+              <div className="space-y-1">
+                <Label className="text-xs">Role</Label>
+                <select
+                  className="w-full rounded border bg-background px-2 py-1 text-sm"
+                  value={inviteRole}
+                  onChange={(e) => setInviteRole(Number(e.target.value))}
+                  disabled={!session?.jwt}
+                >
+                  {INVITE_ROLE_OPTIONS.map((opt) => (
+                    <option key={opt.level} value={opt.level}>
+                      {opt.name}
+                    </option>
+                  ))}
+                </select>
+                <p className="text-[10px] text-muted-foreground">
+                  {session?.jwt
+                    ? INVITE_ROLE_OPTIONS.find((o) => o.level === inviteRole)?.description
+                    : "Sign in to pick a role — local-only share creates a read-write link"}
+                </p>
+              </div>
               <Label className="flex items-center gap-2 text-xs">
                 <input
                   type="checkbox"

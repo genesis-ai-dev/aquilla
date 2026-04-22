@@ -13,6 +13,8 @@ import { listFlags } from "@/lib/features/flags"
 import { useFeatureFlag, setFeatureFlag } from "@/hooks/useFeatureFlag"
 import { isSettingsDirty, type SettingsFormSnapshot } from "./project-settings/dirty"
 import { ValidationSettingsSection } from "./ProjectSettings/ValidationSettingsSection"
+import { HealthSettingsSection } from "./ProjectSettings/HealthSettingsSection"
+import type { HealthSettings } from "@/lib/parsers/types"
 import { readValidationCount, readValidationCountAudio } from "@/lib/progress/read-validation-count"
 
 // Well-known OpenAI-compatible providers. Keys are stable IDs for the preset dropdown.
@@ -121,6 +123,23 @@ export function ProjectSettings() {
       setLoading(false)
     })
   }, [id])
+
+  const compositeFlag = useFeatureFlag("composite-health", project ?? null)
+  const [healthSettings, setHealthSettings] = useState<HealthSettings>({ followDefaults: true })
+
+  useEffect(() => {
+    if (project?.healthSettings) setHealthSettings(project.healthSettings)
+  }, [project?.healthSettings])
+
+  async function saveHealthSettings(next: HealthSettings) {
+    setHealthSettings(next)
+    if (!project) return
+    await updateProject({ ...project, healthSettings: next })
+  }
+
+  async function resetHealthOverrides() {
+    await saveHealthSettings({ ...healthSettings, overrides: undefined })
+  }
 
   async function save(updates: Partial<ProjectRecord>) {
     if (!project) return
@@ -467,15 +486,25 @@ export function ProjectSettings() {
               </div>
             </div>
 
-            <div>
-              <Label>LLM Health Penalty ({Math.round(llmHealthPenalty * 100)}%)</Label>
-              <input type="range" min="0" max="0.5" step="0.05" value={llmHealthPenalty} onChange={(e) => setLlmHealthPenalty(Number(e.target.value))} onMouseUp={() => saveCompletionSettings()} className="mt-2 w-full" />
-              <p className="mt-1 text-xs text-muted-foreground">
-                LLM translations are penalized by this amount in health calculations. 0% = full trust, 50% = heavy penalty. Default: 10%.
-              </p>
-            </div>
+            {!compositeFlag && (
+              <div>
+                <Label>LLM Health Penalty ({Math.round(llmHealthPenalty * 100)}%)</Label>
+                <input type="range" min="0" max="0.5" step="0.05" value={llmHealthPenalty} onChange={(e) => setLlmHealthPenalty(Number(e.target.value))} onMouseUp={() => saveCompletionSettings()} className="mt-2 w-full" />
+                <p className="mt-1 text-xs text-muted-foreground">
+                  LLM translations are penalized by this amount in health calculations. 0% = full trust, 50% = heavy penalty. Default: 10%.
+                </p>
+              </div>
+            )}
           </div>
         </details>
+
+        {compositeFlag && (
+          <HealthSettingsSection
+            settings={healthSettings}
+            onChange={saveHealthSettings}
+            onReset={resetHealthOverrides}
+          />
+        )}
 
         <ValidationSettingsSection
           validationCount={validationCount}

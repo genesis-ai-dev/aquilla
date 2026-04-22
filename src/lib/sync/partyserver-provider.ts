@@ -6,13 +6,15 @@
 import YProvider from "y-partyserver/provider"
 import * as Y from "yjs"
 
-const DEFAULT_HOST = "127.0.0.1:8787"
+// Dev default assumes `cd sync-worker && wrangler dev`. Prod deploys must set
+// VITE_SYNC_WORKER_HOST at build time to the deployed worker hostname.
+const DEV_HOST = "127.0.0.1:8787"
+const PROD_HOST = "codex-sync-worker.blue-darkness-7674.workers.dev"
 
-export const SYNC_WORKER_HOST =
-  ((import.meta.env.VITE_SYNC_WORKER_HOST as string | undefined) ?? DEFAULT_HOST).replace(
-    /^wss?:\/\//,
-    ""
-  )
+export const SYNC_WORKER_HOST = (
+  (import.meta.env.VITE_SYNC_WORKER_HOST as string | undefined) ??
+  (import.meta.env.PROD ? PROD_HOST : DEV_HOST)
+).replace(/^wss?:\/\//, "")
 
 function isLocalHost(host: string): boolean {
   return /^(127\.|localhost|0\.0\.0\.0)/.test(host)
@@ -30,12 +32,23 @@ export interface FileSyncProviderHandle {
 export function createFileSyncProvider(
   doc: Y.Doc,
   projectId: string,
-  fileId: string
+  fileId: string,
+  getToken?: () => Promise<string | null>
 ): FileSyncProviderHandle {
   const docId = buildFileSyncDocId(projectId, fileId)
   const provider = new YProvider(SYNC_WORKER_HOST, docId, doc, {
     party: "file-sync",
     protocol: isLocalHost(SYNC_WORKER_HOST) ? "ws" : "wss",
+    // y-partyserver calls params on every (re)connect. Returning no token is
+    // fine when the sync-worker is running in ALLOW_UNAUTHENTICATED=true dev
+    // mode; in prod the WS upgrade will be rejected with 401 and the provider
+    // will enter a reconnect backoff — editor still works via IndexedDB.
+    params: getToken
+      ? async () => {
+          const token = await getToken()
+          return token ? { token } : {}
+        }
+      : undefined,
   })
   return { provider, docId }
 }

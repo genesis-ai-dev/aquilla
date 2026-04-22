@@ -44,7 +44,10 @@ export function Dashboard() {
     <div className="min-h-screen bg-background">
       <header className="border-b">
         <div className="flex items-center justify-between px-6 py-4">
-          <h1 className="text-xl font-semibold">{brand.app.name}</h1>
+          <div className="flex items-center gap-2">
+            <brand.logo.Mark className="h-7 w-7 shrink-0" aria-hidden />
+            <h1 className="text-xl font-semibold">{brand.app.name}</h1>
+          </div>
           <div className="flex items-center gap-2">
             <HeaderAuth />
             <ProjectCreateDialog onCreated={upsert} />

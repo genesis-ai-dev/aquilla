@@ -113,7 +113,7 @@ interface EditorTableProps {
   cellOpenCommentCount?: Map<string, number>
   onOpenComments?: (cellId: string) => void
   onOpenHistory?: (cellId: string) => void
-  syncProvider?: import("y-websocket").WebsocketProvider | null
+  syncProvider?: import("y-partyserver/provider").default | null
   collabUser?: { name: string; color: string }
   activeCueIndex?: number
   onSeekToCue?: (cellId: string) => void
@@ -286,7 +286,7 @@ interface EditorRowProps {
   openCommentCount: number
   onOpenComments?: (cellId: string) => void
   onOpenHistory?: (cellId: string) => void
-  syncProvider?: import("y-websocket").WebsocketProvider | null
+  syncProvider?: import("y-partyserver/provider").default | null
   collabUser?: { name: string; color: string }
   isActiveCue?: boolean
   onSeekToCue?: (cellId: string) => void

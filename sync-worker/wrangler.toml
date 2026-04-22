@@ -3,6 +3,10 @@ main = "src/index.ts"
 compatibility_date = "2024-12-01"
 compatibility_flags = ["nodejs_compat"]
 
+# Same CF account as frontier-server and codex-db. Pinned so `wrangler deploy`
+# doesn't prompt interactively and lands on the wrong account by accident.
+account_id = "6a80496d1e59948a9cbaa3c643ba81d7"
+
 # y-partyserver wires one Durable Object per file (room name = fileId).
 [[durable_objects.bindings]]
 name = "FileSync"

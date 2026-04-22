@@ -1,7 +1,7 @@
 // File-level sync hook backed by the codex sync-worker (y-partyserver DO + R2).
 // Mirrors useSync's shape so callers only change the import and input keys.
 
-import { useEffect, useState, useMemo } from "react"
+import { useEffect, useState, useMemo, useRef } from "react"
 import * as Y from "yjs"
 import type YProvider from "y-partyserver/provider"
 import {
@@ -10,7 +10,10 @@ import {
   type FileSyncProviderHandle,
 } from "@/lib/sync/partyserver-provider"
 import { peerColor } from "@/lib/sync/webrtc-provider"
+import { makeSyncTokenFetcher } from "@/lib/sync/sync-token"
 import type { PeerState } from "@/hooks/useSync"
+import type { FrontierSession } from "@/lib/frontier/types"
+import type { SyncStatus } from "@/components/SyncStatusIndicator"
 
 interface UseFileSyncOptions {
   doc: Y.Doc | null
@@ -18,19 +21,38 @@ interface UseFileSyncOptions {
   fileId: string | null
   username: string
   enabled: boolean
+  /** Active Frontier session. When null, the provider connects with no auth
+   *  token — fine in dev mode, rejected in prod (editor keeps working via
+   *  IndexedDB). */
+  session: FrontierSession | null
+  /** Human-readable project name — forwarded to /sync-token so the server can
+   *  auto-register the project row on first use with something meaningful. */
+  projectName?: string | null
+  /** GitLab project ID when the project is GitLab-backed; enables the
+   *  GitLab-permission fallback for other users later. */
+  gitlabProjectId?: number | null
 }
 
 export function useFileSync(options: UseFileSyncOptions): {
   peers: PeerState[]
   connected: boolean
   provider: YProvider | null
+  status: SyncStatus
 } {
-  const { doc, projectId, fileId, username, enabled } = options
+  const { doc, projectId, fileId, username, enabled, session, projectName, gitlabProjectId } = options
   const [peers, setPeers] = useState<PeerState[]>([])
   const [connected, setConnected] = useState(false)
   const [provider, setProviderState] = useState<YProvider | null>(null)
+  const [isIdle, setIsIdle] = useState(false)
 
   const handleRef = useMemo(() => ({ current: null as FileSyncProviderHandle | null }), [])
+
+  // Stash the current jwt in a ref so the token-fetcher closure always reads
+  // the latest session without tearing down the provider on session swap.
+  const jwtRef = useRef<string | null>(session?.jwt ?? null)
+  useEffect(() => {
+    jwtRef.current = session?.jwt ?? null
+  }, [session])
 
   useEffect(() => {
     if (!enabled || !doc || !projectId || !fileId) {
@@ -40,7 +62,11 @@ export function useFileSync(options: UseFileSyncOptions): {
       return
     }
 
-    const handle = createFileSyncProvider(doc, projectId, fileId)
+    const getToken = makeSyncTokenFetcher(() => jwtRef.current, projectId, fileId, {
+      projectName: projectName ?? undefined,
+      gitlabProjectId: gitlabProjectId ?? undefined,
+    })
+    const handle = createFileSyncProvider(doc, projectId, fileId, getToken)
     handleRef.current = handle
     const { provider } = handle
     setProviderState(provider)
@@ -103,5 +129,69 @@ export function useFileSync(options: UseFileSyncOptions): {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [username, fileId])
 
-  return { peers, connected, provider }
+  // Idle-disconnect: if the tab stays hidden for 5 minutes, tear down the WS
+  // to let the DO hibernate (keeping it alive costs nothing while truly idle,
+  // but once the browser throttles the tab we get unhelpful reconnect noise).
+  // Reconnects automatically when the tab becomes visible again.
+  useEffect(() => {
+    if (!provider) return
+    // Guard against non-browser contexts (tests running outside happy-dom/node).
+    if (typeof document === "undefined") return
+
+    const HIDDEN_IDLE_MS = 5 * 60 * 1000
+    let idleTimer: ReturnType<typeof setTimeout> | null = null
+    let idleDisconnected = false
+
+    const disconnectIfStillHidden = () => {
+      if (document.visibilityState === "hidden" && !idleDisconnected) {
+        provider.disconnect()
+        idleDisconnected = true
+        setIsIdle(true)
+      }
+    }
+
+    const onVisChange = () => {
+      if (document.visibilityState === "hidden") {
+        if (idleTimer) clearTimeout(idleTimer)
+        idleTimer = setTimeout(disconnectIfStillHidden, HIDDEN_IDLE_MS)
+      } else {
+        if (idleTimer) {
+          clearTimeout(idleTimer)
+          idleTimer = null
+        }
+        if (idleDisconnected) {
+          provider.connect()
+          idleDisconnected = false
+          setIsIdle(false)
+        }
+      }
+    }
+
+    document.addEventListener("visibilitychange", onVisChange)
+    if (document.visibilityState === "hidden") {
+      idleTimer = setTimeout(disconnectIfStillHidden, HIDDEN_IDLE_MS)
+    }
+
+    return () => {
+      if (idleTimer) clearTimeout(idleTimer)
+      document.removeEventListener("visibilitychange", onVisChange)
+    }
+  }, [provider])
+
+  // Status derivation:
+  //   disabled   — hook not running (no session, no project/file, or disabled)
+  //   idle       — intentionally disconnected while the tab is hidden
+  //   connecting — provider exists but WS hasn't completed the handshake yet;
+  //                doubles as the "reconnecting" state since YProvider
+  //                automatically backs off on failure
+  //   live       — WS connected AND server acked sync
+  const status: SyncStatus = !provider
+    ? "disabled"
+    : isIdle
+      ? "idle"
+      : connected
+        ? "live"
+        : "connecting"
+
+  return { peers, connected, provider, status }
 }

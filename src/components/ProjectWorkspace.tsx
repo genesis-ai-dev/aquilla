@@ -19,6 +19,7 @@ import { SearchDialog } from "./SearchDialog"
 import type { EditorTableHandle } from "./EditorTable"
 import type { WorkspaceSearchResult } from "@/lib/search/workspace-index"
 import { StatusBar } from "./StatusBar"
+import { SyncStatusIndicator } from "./SyncStatusIndicator"
 import { ImportDialog } from "./ImportDialog"
 import { EditorTable } from "./EditorTable"
 import { RuleDrawer } from "./RuleDrawer"
@@ -331,12 +332,16 @@ export function ProjectWorkspace() {
   // Always-on file sync via the codex sync-worker (y-partyserver DO + R2).
   // Unlike the previous share-token-gated path, this keeps every open file
   // in lockstep across devices for the same user too, not just collaborators.
-  const { peers: fileLevelPeers, provider: syncProvider } = useFileSync({
+  const { peers: fileLevelPeers, provider: syncProvider, status: fileSyncStatus } = useFileSync({
     doc,
     projectId: project?.id ?? null,
     fileId: activeFileId || null,
     username: currentUsername,
     enabled: Boolean(project && activeFileId && doc),
+    session: frontierSession,
+    projectName: project?.name ?? null,
+    gitlabProjectId:
+      project?.origin?.kind === "git" ? project.origin.gitlabProjectId : null,
   })
 
   // Project-wide presence room: everyone in the project joins regardless of
@@ -715,7 +720,12 @@ export function ProjectWorkspace() {
         statusBar={
           <>
             <WorkspaceStatusBar
-              left={<PeerPresence peers={peers} />}
+              left={
+                <div className="flex items-center gap-3">
+                  <PeerPresence peers={peers} />
+                  <SyncStatusIndicator status={fileSyncStatus} />
+                </div>
+              }
               right={
                 <SyncButton
                   project={project}

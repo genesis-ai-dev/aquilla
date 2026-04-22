@@ -38,7 +38,7 @@ function SheetContent({
     <DialogPrimitive.Portal>
       <DialogPrimitive.Backdrop
         data-slot="sheet-overlay"
-        className="fixed inset-0 z-50 bg-black/20"
+        className="fixed inset-0 z-50 bg-black/20 data-closed:pointer-events-none data-closed:opacity-0"
       />
       <DialogPrimitive.Popup
         data-slot="sheet-content"

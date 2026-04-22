@@ -37,12 +37,17 @@ export interface TranslationRule {
   check: RuleCheck
   enabled: boolean
   createdAt: string
+  autofix?: RuleAutofix
+  autofixAttemptedAt?: string  // ISO; absent means never tried
 }
 
 export type RuleCheck =
   | { type: "source-requires-target"; sourcePattern: string; targetPattern: string }
   | { type: "target-forbids"; targetPattern: string }
   | { type: "source-target-match"; pattern: string }
+
+export type RuleAutofix =
+  | { kind: "regex-replace"; pattern: string; replacement: string; flags: string }
 
 export interface RuleInfraction {
   ruleId: string
@@ -54,6 +59,15 @@ export interface RuleInfraction {
 export interface RulePenalties {
   major: number  // default 15
   minor: number  // default 5
+}
+
+export interface ProjectUsage {
+  llmCalls: Record<string, {
+    total: number
+    byModel: Record<string, number>
+    byProvider: Record<string, number>
+  }>
+  fixesApplied: number
 }
 
 export interface ProjectRecord {
@@ -93,6 +107,7 @@ export interface ProjectRecord {
   validationCountAudio?: number
   /** Cached flag — set true when any cell first writes audio. Avoids scanning every file's Y.Doc on load. */
   hasAnyAudioData?: boolean
+  usage?: ProjectUsage
 }
 
 export interface ProjectSyncSettings {

@@ -79,7 +79,7 @@ export function useCompletion(
       })
       appendCellHistory(doc, cell.id, {
         value: result, source: "llm", author: effectiveSettings.model || "frontier-default",
-        validated: false, examples: found.map((e) => e.cellId),
+        validated: false, examples: found.map((e) => ({ cellId: e.cellId, weight: e.coverageWeight })),
       })
       setCompleting((p) => new Map(p).set(cell.id, "done"))
     } catch (err) {
@@ -119,7 +119,7 @@ export function useCompletion(
           })
           appendCellHistory(doc!, cell.id, {
             value: result, source: "llm", author: effectiveSettings.model || "frontier-default",
-            validated: false, examples: found.map((e) => e.cellId),
+            validated: false, examples: found.map((e) => ({ cellId: e.cellId, weight: e.coverageWeight })),
           })
           setCompleting((p) => new Map(p).set(cell.id, "done"))
         } catch (err) {

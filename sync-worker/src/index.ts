@@ -66,6 +66,11 @@ function parseDocId(name: string): { projectId: string; fileId: string } {
 // warm and the alarm is rescheduled on reconnect instead of firing.
 const COMPACTION_GRACE_MS = 60 * 1000
 
+// Tail count that triggers background compaction during an active session.
+// At the default 2 s onSave debounce that's ~100 s of continuous editing —
+// bounded onLoad replay cost even for hours-long sessions without evictions.
+const MID_SESSION_COMPACT_AT_TAILS = 50
+
 /**
  * Merge existing snapshot + all tail blobs into a new snapshot, then delete
  * the tails. Idempotent: running it twice in a row is a no-op (second call
@@ -119,6 +124,13 @@ export class FileSync extends YServer {
     timeout: 5000,
   }
 
+  // Tail count since the last compaction. Tracked in-memory to avoid a list()
+  // round-trip on every onSave. Seeded from R2 on cold-start (onLoad) and
+  // reset after background compaction. Counter is never authoritative — it's
+  // a heuristic for "should we kick off compaction now?"; R2 is truth.
+  private tailCount = 0
+  private compactionInFlight = false
+
   async onLoad(): Promise<Y.Doc | void> {
     const { projectId, fileId } = parseDocId(this.name)
     const snap = await this.env.SNAPSHOTS.get(snapshotKey(projectId, fileId))
@@ -136,6 +148,7 @@ export class FileSync extends YServer {
       const buf = new Uint8Array(await obj.arrayBuffer())
       Y.applyUpdate(this.document, buf)
     }
+    this.tailCount = keys.length
   }
 
   async onSave(): Promise<void> {
@@ -146,6 +159,29 @@ export class FileSync extends YServer {
     const seq = Date.now().toString().padStart(16, "0")
     const key = `${tailPrefix(projectId, fileId)}${seq}.bin`
     await this.env.SNAPSHOTS.put(key, state)
+    this.tailCount += 1
+
+    // Long editing sessions without eviction let tails pile up — onLoad's
+    // replay cost grows linearly. Compact in the background when we cross
+    // the threshold so the save itself stays on the debounce budget.
+    if (this.tailCount >= MID_SESSION_COMPACT_AT_TAILS && !this.compactionInFlight) {
+      this.compactionInFlight = true
+      this.ctx.waitUntil(this.compactInBackground(projectId, fileId))
+    }
+  }
+
+  private async compactInBackground(projectId: string, fileId: string): Promise<void> {
+    try {
+      const removed = await compactToSnapshot(this.env.SNAPSHOTS, projectId, fileId)
+      // Tails written during compaction bumped tailCount already; subtracting
+      // the removed count gives the post-compact total (never goes negative
+      // because onSave is the only thing that adds to tailCount).
+      this.tailCount = Math.max(0, this.tailCount - removed)
+    } catch (err) {
+      console.warn(`mid-session compaction failed for ${this.name}:`, err)
+    } finally {
+      this.compactionInFlight = false
+    }
   }
 
   // Stash the verified role on the connection so isReadOnly can gate writes.
@@ -191,7 +227,8 @@ export class FileSync extends YServer {
     if (live > 0) return // someone rejoined — the next onClose will re-arm
     const { projectId, fileId } = parseDocId(this.name)
     try {
-      await compactToSnapshot(this.env.SNAPSHOTS, projectId, fileId)
+      const removed = await compactToSnapshot(this.env.SNAPSHOTS, projectId, fileId)
+      this.tailCount = Math.max(0, this.tailCount - removed)
     } catch (err) {
       console.warn(`compaction failed for ${this.name}:`, err)
     }

@@ -104,7 +104,7 @@ export function ProjectWorkspace() {
   const { session: frontierSession } = useFrontierSession()
   const currentUsername = frontierSession?.username || project?.username || "local"
   const validationCount = project ? readValidationCount(project) : 1
-  const cells = useCells(doc, currentUsername, validationCount)
+  const cells = useCells(doc, activeFileId ?? "", currentUsername, validationCount)
   const { hasAny: hasUnfinished, findNext: findNextUnfinished } = useNextUnfinished(cells, validationCount)
   const handleJumpNextUnfinished = useCallback(() => {
     const currentIndex = editorRef.current?.getCurrentIndex?.() ?? 0
@@ -166,7 +166,29 @@ export function ProjectWorkspace() {
   }, [cells])
 
   const { buildIndex, search: runSearch, results: searchResults, loading: searchLoading, ready: searchReady } = useWorkspaceSearch(project?.files || [])
-  const { search } = useSearchIndex(project?.files || [], cells)
+
+  const { rules, penalties } = useRules(project ?? null, refresh)
+  const { addThread, addMessage, resolveThread, reopenThread } = useComments(doc, currentUsername)
+  const commentsCell = commentsCellId ? cells.find((c) => c.id === commentsCellId) : null
+  const historyCell = historyCellId ? cells.find((c) => c.id === historyCellId) : null
+
+  // Build fileCells map for health computation
+  // For now, only the active file's cells are loaded
+  const fileCells = useMemo(() => {
+    const map = new Map<string, CellData[]>()
+    if (activeFileId && cells.length > 0) {
+      map.set(activeFileId, cells)
+    }
+    return map
+  }, [activeFileId, cells])
+
+  const allProjectCells = useMemo(() => {
+    const all: CellData[] = []
+    for (const [, fc] of fileCells) all.push(...fc)
+    return all
+  }, [fileCells])
+
+  const { search } = useSearchIndex(project?.files || [], allProjectCells)
   const { completeSingle, completeBatch, isConfigured, completing, examples, errors } = useCompletion(
     doc, project?.completionSettings, project?.sourceLanguage || "", project?.targetLanguage || "", search, frontierSession
   )
@@ -191,21 +213,6 @@ export function ProjectWorkspace() {
     findBacktranslationExamples,
     frontierSession,
   )
-
-  const { rules, penalties } = useRules(project ?? null, refresh)
-  const { addThread, addMessage, resolveThread, reopenThread } = useComments(doc, currentUsername)
-  const commentsCell = commentsCellId ? cells.find((c) => c.id === commentsCellId) : null
-  const historyCell = historyCellId ? cells.find((c) => c.id === historyCellId) : null
-
-  // Build fileCells map for health computation
-  // For now, only the active file's cells are loaded
-  const fileCells = useMemo(() => {
-    const map = new Map<string, CellData[]>()
-    if (activeFileId && cells.length > 0) {
-      map.set(activeFileId, cells)
-    }
-    return map
-  }, [activeFileId, cells])
 
   const compositeFlag = useFeatureFlag("composite-health", project ?? null)
   const healthConfig = useMemo(() => resolveHealthConfig(project ?? null), [project])

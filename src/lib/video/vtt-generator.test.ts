@@ -6,6 +6,7 @@ function makeCell(overrides: Partial<CellData> & { id: string }): CellData {
   return {
     original: "",
     translated: "",
+    fileId: "test-file",
     context: "",
     group: "",
     type: "cue",

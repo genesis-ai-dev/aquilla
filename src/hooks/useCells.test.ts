@@ -27,14 +27,14 @@ function buildDoc(label: string | undefined): Y.Doc {
 describe("useCells cellLabel surfacing", () => {
   it("returns cellLabel from __source.metadata.cellLabel when present", async () => {
     const doc = buildDoc("Narrator")
-    const { result } = renderHook(() => useCells(doc))
+    const { result } = renderHook(() => useCells(doc, "test-file"))
     await waitFor(() => expect(result.current).toHaveLength(1))
     expect(result.current[0].cellLabel).toBe("Narrator")
   })
 
   it("returns undefined cellLabel when __source is absent", async () => {
     const doc = buildDoc(undefined)
-    const { result } = renderHook(() => useCells(doc))
+    const { result } = renderHook(() => useCells(doc, "test-file"))
     await waitFor(() => expect(result.current).toHaveLength(1))
     expect(result.current[0].cellLabel).toBeUndefined()
   })

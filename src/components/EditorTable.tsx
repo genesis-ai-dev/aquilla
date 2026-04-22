@@ -5,7 +5,7 @@ import DOMPurify from "dompurify"
 import { Check, CheckCheck, Circle, Trash2, AlertTriangle, AlertCircle, Languages, RefreshCw, MessageCircle, History, Play } from "lucide-react"
 import type { CellData } from "@/hooks/useCells"
 import type { ScoredPair } from "@/lib/search/dual-index"
-import type { TranslationRule, RuleInfraction, ProjectRecord } from "@/lib/parsers/types"
+import type { TranslationRule, RuleInfraction, ProjectRecord, CellHealthBreakdown } from "@/lib/parsers/types"
 import { useProjectPermissions } from "@/hooks/useProjectPermissions"
 import { appendCellHistory, recordHistoryEntry, toggleCellValidation } from "@/hooks/useCellHistory"
 import { commitCellEdit } from "@/lib/codex-editor/edits/commit-cell-edit"
@@ -14,6 +14,7 @@ import { SparkleButton } from "./SparkleButton"
 import { ExamplePanel } from "./ExamplePanel"
 import { HighlightedText, buildHighlightsFromExamples } from "./HighlightedText"
 import { HealthRing } from "./HealthRing"
+import { HealthBreakdown } from "./HealthBreakdown/HealthBreakdown"
 import { TranslatedEditor } from "./TranslatedEditor"
 import { CellAudioButton } from "./CellAudioButton"
 import { cn } from "@/lib/utils"
@@ -121,6 +122,8 @@ interface EditorTableProps {
   sourceTextDirection: "ltr" | "rtl"
   targetTextDirection: "ltr" | "rtl"
   isAnonymous?: boolean
+  breakdownMap?: Map<string, CellHealthBreakdown>
+  onJumpToCell?: (cellId: string) => void
 }
 
 export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(function EditorTable({
@@ -133,7 +136,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   syncProvider, collabUser,
   activeCueIndex, onSeekToCue,
   lineNumbersEnabled, cellLabelsEnabled, sourceTextDirection, targetTextDirection,
-  isAnonymous,
+  isAnonymous, breakdownMap, onJumpToCell,
 }, ref) {
   const permissions = useProjectPermissions(project)
   const canEdit = permissions.canEditContent
@@ -242,6 +245,8 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
                 targetTextDirection={targetTextDirection}
                 gridCols={gridCols}
                 isAnonymous={isAnonymous}
+                breakdown={breakdownMap?.get(cell.id)}
+                onJumpToCell={onJumpToCell}
                 onDragStart={() => {
                   isDragging.current = true
                   dragCells.current = new Set([cell.id])
@@ -294,6 +299,8 @@ interface EditorRowProps {
   targetTextDirection: "ltr" | "rtl"
   gridCols: "grid-cols-[24px_1fr_1fr]" | "grid-cols-[48px_1fr_1fr]"
   isAnonymous?: boolean
+  breakdown?: CellHealthBreakdown
+  onJumpToCell?: (cellId: string) => void
 }
 
 function EditorRow({
@@ -307,7 +314,7 @@ function EditorRow({
   isActiveCue: _isActiveCue, onSeekToCue,
   onDragStart, onDragEnter,
   rowIndex, lineNumbersEnabled, cellLabelsEnabled, sourceTextDirection, targetTextDirection, gridCols,
-  isAnonymous,
+  isAnonymous, breakdown, onJumpToCell,
 }: EditorRowProps) {
   function handleChange(e: React.ChangeEvent<HTMLTextAreaElement>) {
     appendCellHistory(doc, cell.id, {
@@ -462,6 +469,7 @@ function EditorRow({
   const hasContent = Boolean(cell.translated && cell.translated.trim())
 
   const validationButton = hasContent ? (
+    <div className="inline-flex items-center gap-0.5">
     <div
       className="relative"
       onMouseEnter={handleHoverEnter}
@@ -529,6 +537,17 @@ function EditorRow({
           )}
         </div>
       )}
+    </div>
+    {breakdown && (
+      <HealthBreakdown
+        breakdown={breakdown}
+        scopeLabel="cell health"
+        onCellClick={onJumpToCell}
+        majorInfractionCount={breakdown.signals.infractions.length}
+      >
+        <span className="sr-only">Breakdown</span>
+      </HealthBreakdown>
+    )}
     </div>
   ) : null
 

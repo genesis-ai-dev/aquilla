@@ -260,6 +260,25 @@ export interface HealthSettings {
   overrides?: DeepPartial<HealthConfig>
 }
 
+export interface CellHealthBreakdown {
+  cellId: string
+  score: number
+  validationGap: number
+  ancestryPenalty: number
+  neighborhoodPenalty: number
+  rulePenalty: number
+  signals: {
+    validatorCount: number
+    requiredValidations: number
+    ancestryExamples: Array<{ cellId: string; health: number; weight: number }>
+    neighborhoodSourceCellIds: string[]
+    neighborhoodTargetCellIds: string[]
+    idJaccard: number
+    tfidfTokenOverlap: number
+    infractions: RuleInfraction[]
+  }
+}
+
 export function detectFileType(fileName: string): FileType | null {
   const ext = fileName.split(".").pop()?.toLowerCase()
   const map: Record<string, FileType> = {

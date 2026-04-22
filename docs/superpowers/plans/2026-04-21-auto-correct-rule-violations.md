@@ -1046,7 +1046,7 @@ import type { CellData } from "@/hooks/useCells"
 function baseProject(rule?: TranslationRule): ProjectRecord {
   return {
     id: "p1", name: "Demo", sourceLanguage: "en", targetLanguage: "fr",
-    files: [], createdAt: "", updatedAt: "", rules: rule ? [rule] : [],
+    files: [], members: [], createdAt: "", updatedAt: "", rules: rule ? [rule] : [],
     completionSettings: {
       endpoint: "", model: "m", maxTokens: 1024, temperature: 0.2,
       systemPrompt: "", llmHealthPenalty: 0.1, provider: "frontier",

@@ -6,6 +6,8 @@ import { Input } from "@/components/ui/input"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { joinViaBootstrap, completeJoin } from "@/lib/sync/bootstrap"
 import { getShare, hashPin } from "@/lib/sync/share-tokens"
+import { acceptServerInvite } from "@/lib/sync/invites"
+import { useFrontierSession } from "@/hooks/useFrontierSession"
 import type { ShareInvite } from "@/lib/parsers/types"
 
 type Phase = "initial" | "discovering" | "pin-required" | "syncing" | "error"
@@ -13,6 +15,7 @@ type Phase = "initial" | "discovering" | "pin-required" | "syncing" | "error"
 export function JoinPage() {
   const { token } = useParams<{ token: string }>()
   const navigate = useNavigate()
+  const { session } = useFrontierSession()
   const [phase, setPhase] = useState<Phase>("initial")
   const [status, setStatus] = useState("")
   const [error, setError] = useState<string | null>(null)
@@ -71,6 +74,14 @@ export function JoinPage() {
       const projectId = await completeJoin(invite, payload, (synced, total) => {
         setProgress({ synced, total })
       })
+
+      // Redeem the server-side invite so /sync-token returns a real token
+      // for this project. No-op when the joiner isn't logged in with
+      // Frontier — they'll still see the project locally but multi-device
+      // sync won't light up until they sign in and re-accept.
+      if (session?.jwt) {
+        await acceptServerInvite(session.jwt, token)
+      }
 
       navigate(`/project/${projectId}`)
     } catch (err) {

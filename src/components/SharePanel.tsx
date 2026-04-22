@@ -9,6 +9,8 @@ import {
 import {
   listShares, createShare, deleteShare, generatePin, updateSharePin,
 } from "@/lib/sync/share-tokens"
+import { createServerInvite } from "@/lib/sync/invites"
+import { useFrontierSession } from "@/hooks/useFrontierSession"
 import type { ShareInvite } from "@/lib/parsers/types"
 
 interface SharePanelProps {
@@ -44,9 +46,19 @@ export function SharePanel({ open, onOpenChange, projectId, username, onSharesCh
     }
   }, [requirePin, generatedPin])
 
+  const { session } = useFrontierSession()
+
   async function handleCreate() {
     const pin = requirePin ? generatedPin : undefined
-    const invite = await createShare(projectId, pin, username)
+    // Register server-side first so the local ShareInvite and the server's
+    // project_invites row share one token. Falls back to a local-only token
+    // when there's no active Frontier session — the joiner can still receive
+    // the project record, but without server-side membership /sync-token
+    // will 403 and multi-device sync won't light up for them.
+    const serverInvite = session?.jwt
+      ? await createServerInvite(session.jwt, projectId)
+      : null
+    const invite = await createShare(projectId, pin, username, serverInvite?.token)
     if (pin) {
       setPinCache((p) => new Map(p).set(invite.token, pin))
     }

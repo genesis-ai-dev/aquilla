@@ -41,9 +41,14 @@ export async function verifyPin(pin: string, token: string, expectedHash: string
 export async function createShare(
   projectId: string,
   pin: string | undefined,
-  createdBy: string
+  createdBy: string,
+  // Optional pre-issued token — callers that create a server-side invite
+  // first (see createServerInvite in ./invites.ts) pass that token here so
+  // the local ShareInvite and the server's project_invites row agree on
+  // the same identifier.
+  existingToken?: string
 ): Promise<ShareInvite> {
-  const token = generateToken()
+  const token = existingToken ?? generateToken()
   const invite: ShareInvite = {
     token,
     projectId,

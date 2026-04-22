@@ -61,6 +61,7 @@ import { EditorScrollProvider, useEditorScroll } from "@/context/EditorScrollCon
 import { detectSuggestions, type RenameSuggestion } from "@/lib/file-labeling/detect"
 import { applySuggestions } from "@/lib/file-labeling/apply"
 import { renameFile, moveFileToCorpus, deleteFile } from "@/lib/store/file-operations"
+import { deleteFileProjection } from "@/lib/sync/file-projection"
 import { Button } from "@/components/ui/button"
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
@@ -408,7 +409,15 @@ export function ProjectWorkspace() {
     await updateProject(next)
     refresh()
     if (activeFileId === fileId) setActiveFileId(null)
-  }, [project, refresh, activeFileId, setActiveFileId])
+    // Tell frontier-server to drop the projection rows for this file too.
+    // Best-effort: a failure here doesn't roll back the local delete — the
+    // D1 row just becomes an orphan until a future sweep.
+    void deleteFileProjection({
+      jwt: frontierSession?.jwt ?? null,
+      projectId: project.id,
+      fileId,
+    })
+  }, [project, refresh, activeFileId, setActiveFileId, frontierSession])
 
   const handleApplySuggestions = useCallback(async (chosen: RenameSuggestion[]) => {
     if (!project) return

@@ -3,6 +3,8 @@ import * as Y from "yjs"
 import { useParams, useNavigate } from "react-router-dom"
 import { useProject } from "@/hooks/useProject"
 import { useFileDoc } from "@/hooks/useFileDoc"
+import { deriveCellAreaState } from "@/lib/editor/cell-area-state"
+import { CellAreaPlaceholder } from "./CellAreaPlaceholder"
 import { useCells } from "@/hooks/useCells"
 import { useSearchIndex } from "@/hooks/useSearchIndex"
 import { useCompletion } from "@/hooks/useCompletion"
@@ -22,6 +24,7 @@ import { StatusBar } from "./StatusBar"
 import { SyncStatusIndicator } from "./SyncStatusIndicator"
 import { ImportDialog } from "./ImportDialog"
 import { EditorTable } from "./EditorTable"
+import { AudioRecordingModal } from "./AudioRecorder/AudioRecordingModal"
 import { RuleDrawer } from "./RuleDrawer"
 import { CommentsDrawer } from "./CommentsDrawer"
 import { HistoryDrawer } from "./HistoryDrawer"
@@ -102,8 +105,9 @@ export function ProjectWorkspace() {
   const [activeShareToken, setActiveShareToken] = useState<string | null>(null)
   const [shareRefreshKey, setShareRefreshKey] = useState(0)
   const [aiSetupOpen, setAiSetupOpen] = useState(false)
+  const [recordingCellId, setRecordingCellId] = useState<string | null>(null)
   const editorRef = useRef<EditorTableHandle>(null)
-  const { doc } = useFileDoc(activeFileId)
+  const { doc, loading: docLoading } = useFileDoc(activeFileId)
   // Prefer the Frontier session username (authenticated identity) over the
   // project-level username setting. Validation entries and edit history
   // should attribute to the actual signed-in user.
@@ -353,6 +357,20 @@ export function ProjectWorkspace() {
   // meta.projectDeletedAt; this observer reconciles IDB so the
   // TrashedProjectScreen renders on the next refresh.
   useProjectTombstoneObserver(doc, project?.id ?? null, refresh)
+
+  // Drives the editor-area rendering: loading skeleton vs. empty state vs.
+  // EditorTable. Centralizes the decision so we don't flash between states
+  // while a file hydrates.
+  const cellAreaState = useMemo(
+    () => deriveCellAreaState({
+      activeFileId,
+      docLoading,
+      hasDoc: Boolean(doc),
+      cellCount: cells.length,
+      syncStatus: fileSyncStatus,
+    }),
+    [activeFileId, docLoading, doc, cells.length, fileSyncStatus]
+  )
 
   // Project-wide presence room: everyone in the project joins regardless of
   // which file they're viewing, so the toolbar can show peers who are online
@@ -705,7 +723,7 @@ export function ProjectWorkspace() {
             )}
           </>
         }
-        main={activeFileId ? (doc ? (
+        main={cellAreaState.kind === "ready" && doc ? (
           <EditorTable
             ref={editorRef} project={project} cells={cells} doc={doc}
             username={currentUsername}
@@ -738,9 +756,14 @@ export function ProjectWorkspace() {
             breakdownMap={health.breakdownMap}
             onJumpToCell={jumpToCellId}
             onAiSetupNeeded={() => setAiSetupOpen(true)}
+            onOpenRecording={(cellId) => setRecordingCellId(cellId)}
           />
-        ) : <p className="p-4 text-muted-foreground">Loading file...</p>) : (
-          <p className="p-4 text-muted-foreground">Select a file from the sidebar, or import a file.</p>
+        ) : (
+          <CellAreaPlaceholder
+            state={cellAreaState}
+            fileName={activeFile?.name}
+            onImportClick={() => setImportOpen(true)}
+          />
         )}
         aside={
           <>
@@ -813,6 +836,24 @@ export function ProjectWorkspace() {
           onOpenChange={setAiSetupOpen}
           project={project}
           onUpdated={handleProjectUpdated}
+        />
+      )}
+      {project && doc && (
+        <AudioRecordingModal
+          open={recordingCellId !== null}
+          project={project}
+          doc={doc}
+          cells={cells}
+          activeCellId={recordingCellId}
+          username={currentUsername}
+          onActiveCellChange={(cellId) => {
+            setRecordingCellId(cellId)
+            // Scroll the underlying editor to the new cell so the row is visible
+            // when the modal closes.
+            const idx = cells.findIndex((c) => c.id === cellId)
+            if (idx >= 0) editorRef.current?.scrollToCellIndex(idx)
+          }}
+          onClose={() => setRecordingCellId(null)}
         />
       )}
       <ImportDialog open={importOpen} onOpenChange={setImportOpen}

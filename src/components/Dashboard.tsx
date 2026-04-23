@@ -11,6 +11,8 @@ import {
 import { ProjectCard } from "./ProjectCard"
 import { ProjectCreateDialog } from "./ProjectCreateDialog"
 import { ConfirmActionDialog } from "./ConfirmActionDialog"
+import { Skeleton } from "@/components/ui/skeleton"
+import { Card, CardContent, CardHeader } from "@/components/ui/card"
 import { HeaderAuth } from "@/components/git-import/HeaderAuth"
 import { RemoteProjectsSection } from "@/components/git-import/RemoteProjectsSection"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
@@ -156,7 +158,9 @@ export function Dashboard() {
       <main className="px-6 py-6">
         <section>
           <h2 className="mb-3 text-sm font-semibold text-muted-foreground">Your projects</h2>
-          {projects.length === 0 ? (
+          {loading && projects.length === 0 ? (
+            <ProjectCardGridSkeleton count={3} />
+          ) : projects.length === 0 ? (
             <p className="text-sm text-muted-foreground">
               {session
                 ? "No local projects yet. Import one from Frontier below or create a new one."
@@ -256,6 +260,26 @@ export function Dashboard() {
           {errorToast}
         </div>
       )}
+    </div>
+  )
+}
+
+/** Placeholder cards rendered while IDB is loading — prevents the split-
+ *  second "No local projects yet…" flash before listProjects resolves. */
+function ProjectCardGridSkeleton({ count }: { count: number }) {
+  return (
+    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+      {Array.from({ length: count }).map((_, i) => (
+        <Card key={i} aria-hidden>
+          <CardHeader className="pb-2">
+            <Skeleton className="h-6 w-2/3" />
+          </CardHeader>
+          <CardContent className="space-y-2">
+            <Skeleton className="h-4 w-1/3" />
+            <Skeleton className="h-4 w-1/2" />
+          </CardContent>
+        </Card>
+      ))}
     </div>
   )
 }

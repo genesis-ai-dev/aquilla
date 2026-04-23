@@ -27,6 +27,7 @@ import {
   type ArchiveMarker,
 } from "./project-archive"
 import { notifyFileDo } from "./archive-broadcast"
+import { encodeNextTail } from "./incremental"
 
 const ROLE_HEADER = "X-Codex-Role"
 
@@ -150,6 +151,11 @@ export class FileSync extends YServer {
   // skip D1 UPSERTs for cells that haven't changed since the previous tail
   // write. Empty on cold start → first onSave projects everything, then diffs.
   private projectedFingerprints = new Map<string, string>()
+  // State vector at the last successful tail write. Seeded from the doc in
+  // onLoad so the first post-cold-start save doesn't redundantly emit the
+  // full state. Each onSave writes only updates since this vector, keeping
+  // tail sizes (and peak DO memory during compaction) bounded.
+  private lastFlushedSV: Uint8Array | null = null
 
   async onLoad(): Promise<Y.Doc | void> {
     const { projectId, fileId } = parseDocId(this.name)
@@ -176,6 +182,11 @@ export class FileSync extends YServer {
     // operation idempotent across reloads.
     const marker = await readArchiveMarker(this.env.SNAPSHOTS, projectId)
     this.applyArchiveMarker(marker)
+
+    // After the archive marker is (possibly) merged in, snapshot the state
+    // vector so the next onSave only emits updates made DURING this session,
+    // not a redundant re-encoding of everything we just loaded.
+    this.lastFlushedSV = Y.encodeStateVector(this.document)
   }
 
   /** Internal: writes the archive marker's state into the doc's `meta` map.
@@ -229,12 +240,16 @@ export class FileSync extends YServer {
 
   async onSave(): Promise<void> {
     const { projectId, fileId } = parseDocId(this.name)
-    // Spike strategy: write full state as a new tail object. Compaction merges later.
-    // Production may want incremental updates via update-tracking in onMessage; fine as a v2.
-    const state = Y.encodeStateAsUpdate(this.document)
+    // Incremental diff against the last flushed state vector. Returns null
+    // when nothing's changed since the previous save (e.g. onSave fired for
+    // awareness-only traffic) — skip the R2 write in that case so we don't
+    // litter R2 with empty tails.
+    const encoded = encodeNextTail(this.document, this.lastFlushedSV)
+    if (!encoded) return
     const seq = Date.now().toString().padStart(16, "0")
     const key = `${tailPrefix(projectId, fileId)}${seq}.bin`
-    await this.env.SNAPSHOTS.put(key, state)
+    await this.env.SNAPSHOTS.put(key, encoded.update)
+    this.lastFlushedSV = encoded.newSV
     this.tailCount += 1
 
     // Keep the CQRS read model in sync. Projection failure is non-fatal — the

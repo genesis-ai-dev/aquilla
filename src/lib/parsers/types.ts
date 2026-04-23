@@ -106,6 +106,24 @@ export interface ProjectRecord {
   validationCountAudio?: number
   /** Cached flag — set true when any cell first writes audio. Avoids scanning every file's Y.Doc on load. */
   hasAnyAudioData?: boolean
+  /** Soft-delete marker. When present the project is in Trash; the Dashboard
+   * hides it from "Your projects" and shows it under the Trash section. Set by
+   * owner-triggered archive (local projects) or by a sync signal from
+   * frontier-server (cloud-synced projects). */
+  deletedAt?: string
+  /** Display name of whoever archived the project. Populated from frontier-
+   * server's response, or from the local session for purely local projects. */
+  deletedBy?: string
+  /** Cached sync role from the most recent /sync-token response. Lets the
+   * Dashboard show the owner-only "Move to Trash" action without a round-trip
+   * per card. Stale values are tolerable — server re-validates on every
+   * archive call. */
+  syncRole?: {
+    level: number
+    name: string
+    source: string
+    fetchedAt: string
+  }
 }
 
 export interface ProjectSyncSettings {

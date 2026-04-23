@@ -11,6 +11,7 @@ import {
 } from "@/lib/sync/partyserver-provider"
 import { peerColor } from "@/lib/sync/signaling-provider"
 import { makeSyncTokenFetcher } from "@/lib/sync/sync-token"
+import { patchProject } from "@/lib/store/project-index"
 import type { PeerState } from "@/hooks/useSync"
 import type { FrontierSession } from "@/lib/frontier/types"
 import type { SyncStatus } from "@/components/SyncStatusIndicator"
@@ -62,10 +63,31 @@ export function useFileSync(options: UseFileSyncOptions): {
       return
     }
 
-    const getToken = makeSyncTokenFetcher(() => jwtRef.current, projectId, fileId, {
-      projectName: projectName ?? undefined,
-      gitlabProjectId: gitlabProjectId ?? undefined,
-    })
+    const getToken = makeSyncTokenFetcher(
+      () => jwtRef.current,
+      projectId,
+      fileId,
+      {
+        projectName: projectName ?? undefined,
+        gitlabProjectId: gitlabProjectId ?? undefined,
+      },
+      undefined,
+      {
+        onRole: (role) => {
+          // Persist the authoritative role back to IDB so the Dashboard can
+          // show owner-only actions without re-calling the server.
+          void patchProject(projectId, (p) => ({
+            ...p,
+            syncRole: {
+              level: role.level,
+              name: role.name,
+              source: role.source,
+              fetchedAt: new Date().toISOString(),
+            },
+          }))
+        },
+      }
+    )
     const handle = createFileSyncProvider(doc, projectId, fileId, getToken)
     handleRef.current = handle
     const { provider } = handle

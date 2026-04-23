@@ -1,5 +1,11 @@
 import { openDB, type DBSchema } from "idb"
 import type { ProjectRecord, ProjectSnapshot, ShareInvite } from "../parsers/types"
+import {
+  archiveProjectRemote,
+  unarchiveProjectRemote,
+  type ArchiveResult,
+  type UnarchiveResult,
+} from "../sync/archive"
 
 interface CodexDB extends DBSchema {
   projects: {
@@ -68,9 +74,24 @@ export async function _resetDbForTesting(): Promise<void> {
   }
 }
 
-export async function listProjects(): Promise<ProjectRecord[]> {
+export interface ListProjectsOptions {
+  /** Include soft-deleted (trashed) projects. Default: false. */
+  includeTrashed?: boolean
+}
+
+export async function listProjects(
+  opts: ListProjectsOptions = {}
+): Promise<ProjectRecord[]> {
   const db = await getDb()
-  return db.getAll("projects")
+  const all = await db.getAll("projects")
+  if (opts.includeTrashed) return all
+  return all.filter((p) => !p.deletedAt)
+}
+
+export async function listTrashedProjects(): Promise<ProjectRecord[]> {
+  const db = await getDb()
+  const all = await db.getAll("projects")
+  return all.filter((p) => Boolean(p.deletedAt))
 }
 
 export async function getProject(id: string): Promise<ProjectRecord | undefined> {
@@ -109,6 +130,82 @@ export async function patchProject(
 export async function deleteProject(id: string): Promise<void> {
   const db = await getDb()
   await db.delete("projects", id)
+}
+
+export interface TombstoneOutcome {
+  /** The updated project record, or null if the project disappeared. */
+  project: ProjectRecord | null
+  /** What happened on the server side. Useful for surfacing toasts. */
+  remote: ArchiveResult | { kind: "skipped-no-session" }
+}
+
+/**
+ * Move a project to Trash (soft-delete). For cloud-synced projects this hits
+ * frontier-server so all collaborators see the tombstone on their next sync
+ * event or dashboard load. For purely local projects (no server row yet)
+ * we still set the local tombstone — the user experience is the same either
+ * way. If the server returns 403, the local tombstone is NOT applied and
+ * callers should surface an error.
+ */
+export async function tombstoneProject(
+  project: ProjectRecord,
+  opts: { jwt: string | null; fallbackUsername?: string }
+): Promise<TombstoneOutcome> {
+  let remote: TombstoneOutcome["remote"] = { kind: "skipped-no-session" }
+  let deletedBy = opts.fallbackUsername ?? project.username ?? "you"
+  let deletedAt = new Date().toISOString()
+
+  if (opts.jwt) {
+    remote = await archiveProjectRemote(project.id, opts.jwt)
+    if (remote.kind === "forbidden" || remote.kind === "error") {
+      return { project: project, remote }
+    }
+    if (remote.kind === "archived") {
+      deletedAt = remote.archivedAt
+      deletedBy = remote.archivedBy.username
+    }
+    // kind === "local-only" — server had no row; continue with local tombstone.
+  }
+
+  const updated = await patchProject(project.id, (p) => ({
+    ...p,
+    deletedAt,
+    deletedBy,
+  }))
+
+  return { project: updated ?? null, remote }
+}
+
+export interface RestoreOutcome {
+  project: ProjectRecord | null
+  remote: UnarchiveResult | { kind: "skipped-no-session" }
+}
+
+/**
+ * Restore a trashed project. Symmetric to tombstoneProject.
+ */
+export async function restoreProject(
+  project: ProjectRecord,
+  opts: { jwt: string | null }
+): Promise<RestoreOutcome> {
+  let remote: RestoreOutcome["remote"] = { kind: "skipped-no-session" }
+
+  if (opts.jwt) {
+    remote = await unarchiveProjectRemote(project.id, opts.jwt)
+    if (remote.kind === "forbidden" || remote.kind === "error") {
+      return { project, remote }
+    }
+    // local-only or restored — both continue to clear the local tombstone.
+  }
+
+  const updated = await patchProject(project.id, (p) => {
+    const next: ProjectRecord = { ...p }
+    delete next.deletedAt
+    delete next.deletedBy
+    return next
+  })
+
+  return { project: updated ?? null, remote }
 }
 
 export async function storeOriginalFile(fileId: string, buffer: ArrayBuffer): Promise<void> {

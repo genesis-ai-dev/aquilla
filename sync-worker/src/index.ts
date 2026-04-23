@@ -21,6 +21,12 @@ import { routePartykitRequest } from "partyserver"
 import { verifyTokenForDoc, shouldBeReadOnly } from "./auth"
 import { projectDoc, writeProjection, diffProjection } from "./projection"
 import { handleAdminRequest } from "./admin"
+import {
+  handleProjectArchiveRequest,
+  readArchiveMarker,
+  type ArchiveMarker,
+} from "./project-archive"
+import { notifyFileDo } from "./archive-broadcast"
 
 const ROLE_HEADER = "X-Codex-Role"
 
@@ -163,6 +169,62 @@ export class FileSync extends YServer {
       Y.applyUpdate(this.document, buf)
     }
     this.tailCount = keys.length
+
+    // Seed the project-archive tombstone into `meta` so a client connecting to
+    // a cold DO sees the banner without waiting for a broadcast. Writes only
+    // when the marker's state differs from the doc's current meta to keep the
+    // operation idempotent across reloads.
+    const marker = await readArchiveMarker(this.env.SNAPSHOTS, projectId)
+    this.applyArchiveMarker(marker)
+  }
+
+  /** Internal: writes the archive marker's state into the doc's `meta` map.
+   *  Used both on cold load (onLoad) and live broadcasts (handleTombstoneRequest). */
+  private applyArchiveMarker(marker: ArchiveMarker | null): void {
+    const meta = this.document.getMap("meta")
+    const currentAt = meta.get("projectDeletedAt")
+    const currentBy = meta.get("projectDeletedBy")
+    const nextAt = marker?.archivedAt ?? null
+    const nextBy = marker?.deletedBy ?? null
+    if (currentAt === nextAt && currentBy === nextBy) return
+    this.document.transact(() => {
+      if (nextAt) {
+        meta.set("projectDeletedAt", nextAt)
+        if (nextBy) meta.set("projectDeletedBy", nextBy)
+        else meta.delete("projectDeletedBy")
+      } else {
+        meta.delete("projectDeletedAt")
+        meta.delete("projectDeletedBy")
+      }
+    })
+  }
+
+  /**
+   * Handles POST http://do.internal/__admin/tombstone from the sync-worker's
+   * admin router. Authorized by SYNC_SECRET_KEY (the same secret gate used
+   * for /admin/files/*). Writes `projectDeletedAt` / `projectDeletedBy`
+   * into the Y.Doc's `meta` map; connected clients see the update instantly.
+   */
+  async onRequest(request: Request): Promise<Response> {
+    const url = new URL(request.url)
+    if (request.method === "POST" && url.pathname === "/__admin/tombstone") {
+      const auth = request.headers.get("Authorization") ?? ""
+      const expected = this.env.SYNC_SECRET_KEY
+        ? `Bearer ${this.env.SYNC_SECRET_KEY}`
+        : null
+      if (!expected || auth !== expected) {
+        return new Response("unauthorized", { status: 401 })
+      }
+      let marker: ArchiveMarker
+      try {
+        marker = (await request.json()) as ArchiveMarker
+      } catch {
+        return new Response("bad request", { status: 400 })
+      }
+      this.applyArchiveMarker(marker)
+      return Response.json({ ok: true })
+    }
+    return new Response("not found", { status: 404 })
   }
 
   async onSave(): Promise<void> {
@@ -272,6 +334,8 @@ export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     // Admin paths are intercepted before partyserver so its routing
     // doesn't try to treat /admin/... as a party name.
+    const projectArchiveResponse = await handleProjectArchiveRequest(request, env, notifyFileDo)
+    if (projectArchiveResponse) return projectArchiveResponse
     const adminResponse = await handleAdminRequest(request, env)
     if (adminResponse) return adminResponse
 

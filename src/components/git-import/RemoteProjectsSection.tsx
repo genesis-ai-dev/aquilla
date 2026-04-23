@@ -161,7 +161,7 @@ export function RemoteProjectsSection({ session, localProjects, onImported }: Pr
           {search ? `No matches for "${search}"` : "No projects accessible."}
         </p>
       ) : (
-        <div className="rounded border">
+        <div className="max-h-[60vh] overflow-y-auto rounded border">
           {[...hierarchy.subgroups.values()].map(g => (
             <GroupNode
               key={g.path}

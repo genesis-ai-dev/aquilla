@@ -33,6 +33,7 @@ import { useVideoAttachment } from "@/hooks/useVideoAttachment"
 import { parseTimestampRange, extractCuesFromCells } from "@/lib/video/vtt-generator"
 import { useSync } from "@/hooks/useSync"
 import { useFileSync } from "@/hooks/useFileSync"
+import { useProjectTombstoneObserver } from "@/hooks/useProjectTombstoneObserver"
 import { useFileMeta } from "@/hooks/useFileMeta"
 import { useCellLabelsPreference } from "@/hooks/useCellLabelsPreference"
 import { peerColor as peerColorLocal } from "@/lib/sync/signaling-provider"
@@ -43,7 +44,8 @@ import { useSyncProject } from "@/hooks/useSyncProject"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { useAutoSync } from "@/hooks/useAutoSync"
 import { useCorpusBackfill } from "@/hooks/useCorpusBackfill"
-import { Film, Scale, MessagesSquare, Camera, Share2, Settings as SettingsIcon, Lock, ClipboardList, Brain } from "lucide-react"
+import { Film, Scale, MessagesSquare, Camera, Share2, Settings as SettingsIcon, Lock, ClipboardList, Brain, Trash2, Undo2 } from "lucide-react"
+import { restoreProject } from "@/lib/store/project-index"
 import { AppShell } from "./AppShell"
 import { WorkspaceHeader } from "./WorkspaceHeader"
 import { WorkspaceStatusBar } from "./WorkspaceStatusBar"
@@ -347,6 +349,11 @@ export function ProjectWorkspace() {
       project?.origin?.kind === "git" ? project.origin.gitlabProjectId : null,
   })
 
+  // When the owner archives the project, the sync-worker DO flips
+  // meta.projectDeletedAt; this observer reconciles IDB so the
+  // TrashedProjectScreen renders on the next refresh.
+  useProjectTombstoneObserver(doc, project?.id ?? null, refresh)
+
   // Project-wide presence room: everyone in the project joins regardless of
   // which file they're viewing, so the toolbar can show peers who are online
   // even when they're on different files.
@@ -553,6 +560,22 @@ export function ProjectWorkspace() {
   }), [activeFileId, completeBatch, cells, navigate])
 
   if (loading || !project) return <div className="p-8 text-muted-foreground">Loading...</div>
+
+  if (project.deletedAt) {
+    return (
+      <TrashedProjectScreen
+        project={project}
+        onClose={() => navigate("/")}
+        onRestore={async () => {
+          const result = await restoreProject(project, { jwt: frontierSession?.jwt ?? null })
+          if (result.remote.kind === "forbidden" || result.remote.kind === "error") {
+            return
+          }
+          refresh()
+        }}
+      />
+    )
+  }
 
   async function handleImported(refs: FileReference[]) {
     if (!project) return
@@ -879,4 +902,45 @@ function ScrollToGroupHandler({ cells, editorRef }: ScrollToGroupHandlerProps) {
   }, [cells, editorScroll, editorRef])
 
   return null
+}
+
+interface TrashedProjectScreenProps {
+  project: ProjectRecord
+  onClose: () => void
+  onRestore: () => void | Promise<void>
+}
+
+function TrashedProjectScreen({ project, onClose, onRestore }: TrashedProjectScreenProps) {
+  const { session } = useFrontierSession()
+  const canRestore =
+    (project.syncRole?.level ?? 0) >= 700 ||
+    (!project.origin && !project.syncRole) ||
+    session == null
+
+  return (
+    <div className="flex min-h-screen items-center justify-center bg-background px-6">
+      <div className="max-w-md rounded-lg border bg-card p-8 text-center shadow-sm">
+        <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-muted">
+          <Trash2 className="h-6 w-6 text-muted-foreground" />
+        </div>
+        <h1 className="mb-2 text-lg font-semibold">This project is in Trash</h1>
+        <p className="mb-6 text-sm text-muted-foreground">
+          "{project.name}" was moved to Trash
+          {project.deletedBy ? ` by ${project.deletedBy}` : ""}.
+          Restore it to continue editing.
+        </p>
+        <div className="flex items-center justify-center gap-2">
+          <Button variant="outline" onClick={onClose}>
+            Back to Dashboard
+          </Button>
+          {canRestore && (
+            <Button onClick={() => onRestore()}>
+              <Undo2 className="mr-1 h-4 w-4" />
+              Restore
+            </Button>
+          )}
+        </div>
+      </div>
+    </div>
+  )
 }

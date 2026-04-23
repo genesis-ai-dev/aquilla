@@ -71,12 +71,23 @@ const REFRESH_SAFETY_MS = 30_000
  * the minted token in memory and refreshes it when within 30 s of expiry.
  * Returns null when the fetch fails — caller decides how to surface that.
  */
+export interface SyncTokenCallbacks {
+  /** Fires whenever a fresh token is successfully minted. Callers persist the
+   * role to IDB so Dashboard rendering can decide owner-only actions without
+   * a round-trip. */
+  onRole?: (role: SyncTokenResponse["role"]) => void
+  /** Fires when the server rejects with 403, typically because the project was
+   * archived. Callers use this to drive local tombstone reconciliation. */
+  onForbidden?: () => void
+}
+
 export function makeSyncTokenFetcher(
   getJwt: () => string | null,
   projectId: string,
   fileId: string,
   bootstrap: ProjectBootstrap = {},
-  apiUrl?: string
+  apiUrl?: string,
+  callbacks: SyncTokenCallbacks = {}
 ): () => Promise<string | null> {
   let cached: CachedToken | null = null
   return async () => {
@@ -92,8 +103,12 @@ export function makeSyncTokenFetcher(
         value: resp.token,
         expiresAtMs: now + resp.expiresIn * 1000,
       }
+      callbacks.onRole?.(resp.role)
       return resp.token
     } catch (err) {
+      if (err instanceof SyncTokenError && err.status === 403) {
+        callbacks.onForbidden?.()
+      }
       // Most common paths: 401 (stale jwt), 403 (no project access), 5xx (transient).
       // Log and surface null — useFileSync treats null as "no sync for now".
       console.warn("[sync-token] fetch failed:", err)

@@ -1,10 +1,13 @@
-import { describe, it, expect, beforeEach } from "vitest"
+import { describe, it, expect, beforeEach, vi, afterEach } from "vitest"
 import {
   listProjects,
+  listTrashedProjects,
   getProject,
   createProject,
   updateProject,
   deleteProject,
+  tombstoneProject,
+  restoreProject,
   storeOriginalFile,
   getOriginalFile,
   _resetDbForTesting,
@@ -76,5 +79,126 @@ describe("project-index", () => {
     const retrieved = await getOriginalFile("file1")
     expect(retrieved).toBeDefined()
     expect(new Uint8Array(retrieved!)).toEqual(new Uint8Array([1, 2, 3, 4, 5, 6, 7, 8]))
+  })
+})
+
+describe("project-index trash", () => {
+  const originalFetch = globalThis.fetch
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch
+    vi.useRealTimers()
+  })
+
+  it("listProjects filters trashed by default", async () => {
+    await createProject(makeProject({ id: "a", name: "Active" }))
+    await createProject(
+      makeProject({ id: "t", name: "Trashed", deletedAt: "2026-04-23T12:00:00Z" })
+    )
+    const active = await listProjects()
+    expect(active.map((p) => p.id).sort()).toEqual(["a"])
+    const all = await listProjects({ includeTrashed: true })
+    expect(all.map((p) => p.id).sort()).toEqual(["a", "t"])
+  })
+
+  it("listTrashedProjects returns only trashed", async () => {
+    await createProject(makeProject({ id: "a" }))
+    await createProject(
+      makeProject({ id: "t", deletedAt: "2026-04-23T12:00:00Z", deletedBy: "alice" })
+    )
+    const trashed = await listTrashedProjects()
+    expect(trashed).toHaveLength(1)
+    expect(trashed[0].id).toBe("t")
+    expect(trashed[0].deletedBy).toBe("alice")
+  })
+
+  it("tombstoneProject without session sets deletedAt locally", async () => {
+    const project = makeProject({ id: "p1", name: "Local" })
+    await createProject(project)
+    const result = await tombstoneProject(project, { jwt: null, fallbackUsername: "ryder" })
+    expect(result.remote.kind).toBe("skipped-no-session")
+    const fetched = await getProject("p1")
+    expect(fetched?.deletedAt).toBeDefined()
+    expect(fetched?.deletedBy).toBe("ryder")
+  })
+
+  it("tombstoneProject with session calls server and applies returned metadata", async () => {
+    const project = makeProject({ id: "p2", name: "Synced" })
+    await createProject(project)
+    globalThis.fetch = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({
+            ok: true,
+            archivedAt: "2026-04-23T15:30:00Z",
+            archivedBy: { id: 1, username: "alice" },
+          }),
+          { status: 200 }
+        )
+    ) as typeof fetch
+    const result = await tombstoneProject(project, { jwt: "fake-jwt" })
+    expect(result.remote.kind).toBe("archived")
+    const fetched = await getProject("p2")
+    expect(fetched?.deletedAt).toBe("2026-04-23T15:30:00Z")
+    expect(fetched?.deletedBy).toBe("alice")
+  })
+
+  it("tombstoneProject falls through to local when server returns 404", async () => {
+    const project = makeProject({ id: "p3" })
+    await createProject(project)
+    globalThis.fetch = vi.fn(
+      async () => new Response("not found", { status: 404 })
+    ) as typeof fetch
+    const result = await tombstoneProject(project, {
+      jwt: "fake-jwt",
+      fallbackUsername: "ryder",
+    })
+    expect(result.remote.kind).toBe("local-only")
+    const fetched = await getProject("p3")
+    expect(fetched?.deletedAt).toBeDefined()
+  })
+
+  it("tombstoneProject leaves local state unchanged on 403", async () => {
+    const project = makeProject({ id: "p4" })
+    await createProject(project)
+    globalThis.fetch = vi.fn(
+      async () =>
+        new Response(JSON.stringify({ error: "only owners" }), { status: 403 })
+    ) as typeof fetch
+    const result = await tombstoneProject(project, { jwt: "fake-jwt" })
+    expect(result.remote.kind).toBe("forbidden")
+    const fetched = await getProject("p4")
+    expect(fetched?.deletedAt).toBeUndefined()
+  })
+
+  it("restoreProject clears local deletedAt and deletedBy", async () => {
+    const project = makeProject({
+      id: "p5",
+      deletedAt: "2026-04-23T12:00:00Z",
+      deletedBy: "alice",
+    })
+    await createProject(project)
+    const result = await restoreProject(project, { jwt: null })
+    expect(result.remote.kind).toBe("skipped-no-session")
+    const fetched = await getProject("p5")
+    expect(fetched?.deletedAt).toBeUndefined()
+    expect(fetched?.deletedBy).toBeUndefined()
+  })
+
+  it("restoreProject keeps tombstone if server returns 403", async () => {
+    const project = makeProject({
+      id: "p6",
+      deletedAt: "2026-04-23T12:00:00Z",
+      deletedBy: "alice",
+    })
+    await createProject(project)
+    globalThis.fetch = vi.fn(
+      async () =>
+        new Response(JSON.stringify({ error: "only owners" }), { status: 403 })
+    ) as typeof fetch
+    const result = await restoreProject(project, { jwt: "fake-jwt" })
+    expect(result.remote.kind).toBe("forbidden")
+    const fetched = await getProject("p6")
+    expect(fetched?.deletedAt).toBe("2026-04-23T12:00:00Z")
   })
 })

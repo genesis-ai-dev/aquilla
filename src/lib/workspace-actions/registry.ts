@@ -19,7 +19,7 @@ export function getDefaultAction(
 
 export const workspaceActions: WorkspaceAction[] = [
   {
-    id: "import-new", label: "+ Import", icon: Plus, group: "primary",
+    id: "import-new", label: "Import", icon: Plus, group: "primary",
     isAvailable: () => true,
     isDefault: (c) => c.activeFileId == null,
     run: (_c, args) => args.openImport(),

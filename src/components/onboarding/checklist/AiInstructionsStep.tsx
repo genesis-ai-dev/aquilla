@@ -1,8 +1,7 @@
 import { useState } from "react"
 import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
-import { updateProject } from "@/lib/store/project-index"
-import { DEFAULT_SYSTEM_PROMPT } from "@/lib/completion/completion-service"
+import { DEFAULT_SYSTEM_PROMPT, useSaveCompletionSettings } from "@/hooks/useCompletionSettings"
 import type { ProjectRecord } from "@/lib/parsers/types"
 
 export function AiInstructionsStep({
@@ -16,21 +15,10 @@ export function AiInstructionsStep({
     project.completionSettings?.systemPrompt ?? DEFAULT_SYSTEM_PROMPT
   )
 
+  const saveSettings = useSaveCompletionSettings(project.id, onUpdated)
+
   async function handleSave() {
-    const updated: ProjectRecord = {
-      ...project,
-      completionSettings: {
-        provider: project.completionSettings?.provider ?? "frontier",
-        endpoint: project.completionSettings?.endpoint ?? "",
-        model: project.completionSettings?.model ?? "",
-        maxTokens: project.completionSettings?.maxTokens ?? 512,
-        temperature: project.completionSettings?.temperature ?? 0.3,
-        systemPrompt: prompt,
-        llmHealthPenalty: project.completionSettings?.llmHealthPenalty ?? 0.1,
-      },
-    }
-    await updateProject(updated)
-    onUpdated(updated)
+    await saveSettings({ systemPrompt: prompt })
   }
 
   return (

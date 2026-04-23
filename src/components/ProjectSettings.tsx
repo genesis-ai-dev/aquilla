@@ -1,24 +1,24 @@
-import { useEffect, useState } from "react"
+import { useCallback, useEffect, useState } from "react"
 import { useParams, useNavigate } from "react-router-dom"
-import { ArrowLeft, CheckCircle, XCircle, Loader2, Sparkles, Eye, EyeOff } from "lucide-react"
+import { ArrowLeft, CheckCircle, XCircle, Loader2, Sparkles, Eye, EyeOff, Check } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Switch } from "@/components/ui/switch"
+import { useProject } from "@/hooks/useProject"
 import { getProject, updateProject } from "@/lib/store/project-index"
-import { fetchModels, DEFAULT_SYSTEM_PROMPT, resolveProvider } from "@/lib/completion/completion-service"
+import { fetchModels, resolveProvider } from "@/lib/completion/completion-service"
+import { useSaveCompletionSettings, DEFAULT_SYSTEM_PROMPT, buildCompletionSettings } from "@/hooks/useCompletionSettings"
 import type { ProjectRecord, CompletionProvider } from "@/lib/parsers/types"
 import { listFlags } from "@/lib/features/flags"
 import { useFeatureFlag, setFeatureFlag } from "@/hooks/useFeatureFlag"
-import { isSettingsDirty, type SettingsFormSnapshot } from "./project-settings/dirty"
 import { ValidationSettingsSection } from "./ProjectSettings/ValidationSettingsSection"
 import { HealthSettingsSection } from "./ProjectSettings/HealthSettingsSection"
 import type { HealthSettings } from "@/lib/parsers/types"
 import { readValidationCount, readValidationCountAudio } from "@/lib/progress/read-validation-count"
 
-// Well-known OpenAI-compatible providers. Keys are stable IDs for the preset dropdown.
-// "local" is the default for self-hosted/localhost setups with no API key.
+// Well-known OpenAI-compatible providers.
 const CUSTOM_PRESETS: { id: string; label: string; endpoint: string; requiresKey: boolean; keyHint?: string }[] = [
   { id: "local", label: "Local / self-hosted (no key)", endpoint: "http://localhost:8000", requiresKey: false },
   { id: "openrouter", label: "OpenRouter", endpoint: "https://openrouter.ai/api/v1", requiresKey: true, keyHint: "sk-or-..." },
@@ -29,25 +29,6 @@ const CUSTOM_PRESETS: { id: string; label: string; endpoint: string; requiresKey
   { id: "deepseek", label: "DeepSeek", endpoint: "https://api.deepseek.com/v1", requiresKey: true },
   { id: "custom", label: "Other (enter URL manually)", endpoint: "", requiresKey: false },
 ]
-
-function snapshotFromProject(p: ProjectRecord): SettingsFormSnapshot {
-  return {
-    name: p.name,
-    sourceLanguage: p.sourceLanguage,
-    targetLanguage: p.targetLanguage,
-    username: p.username || "local",
-    provider: p.completionSettings ? resolveProvider(p.completionSettings) : "frontier",
-    endpoint: p.completionSettings?.endpoint ?? "",
-    apiKey: p.completionSettings?.apiKey ?? "",
-    model: p.completionSettings?.model ?? "",
-    maxTokens: p.completionSettings?.maxTokens ?? 512,
-    temperature: p.completionSettings?.temperature ?? 0.3,
-    systemPrompt: p.completionSettings?.systemPrompt ?? DEFAULT_SYSTEM_PROMPT,
-    llmHealthPenalty: p.completionSettings?.llmHealthPenalty ?? 0.1,
-    autoSyncEnabled: p.syncSettings?.autoSync.enabled ?? false,
-    autoSyncInterval: p.syncSettings?.autoSync.intervalMinutes ?? 5,
-  }
-}
 
 function presetIdForEndpoint(endpoint: string): string {
   const trimmed = endpoint.trim().replace(/\/+$/, "").toLowerCase()
@@ -60,12 +41,24 @@ function presetIdForEndpoint(endpoint: string): string {
   return "custom"
 }
 
+/** Briefly show "Saved" indicator. */
+function useSavedFlash() {
+  const [visible, setVisible] = useState(false)
+  const flash = useCallback(() => {
+    setVisible(true)
+    const t = setTimeout(() => setVisible(false), 1500)
+    return () => clearTimeout(t)
+  }, [])
+  return { visible, flash }
+}
+
 export function ProjectSettings() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
-  const [project, setProject] = useState<ProjectRecord | null>(null)
-  const [loading, setLoading] = useState(true)
+  const { project, loading, refresh } = useProject(id!)
+  const { visible: savedFlash, flash } = useSavedFlash()
 
+  // ── Local form state (mirrors project, auto-saves on blur) ──────────
   const [name, setName] = useState("")
   const [sourceLanguage, setSourceLanguage] = useState("")
   const [targetLanguage, setTargetLanguage] = useState("")
@@ -85,8 +78,6 @@ export function ProjectSettings() {
   const [autoSyncEnabled, setAutoSyncEnabled] = useState(false)
   const [autoSyncInterval, setAutoSyncInterval] = useState(5)
 
-  const [loadedSnapshot, setLoadedSnapshot] = useState<SettingsFormSnapshot | null>(null)
-
   const [validationCount, setValidationCount] = useState(1)
   const [validationCountAudio, setValidationCountAudio] = useState(1)
 
@@ -95,34 +86,48 @@ export function ProjectSettings() {
   const [connectionError, setConnectionError] = useState<string | null>(null)
   const [connected, setConnected] = useState(false)
 
+  // Sync local state from project record
   useEffect(() => {
+    if (!project) return
+    setName(project.name)
+    setSourceLanguage(project.sourceLanguage)
+    setTargetLanguage(project.targetLanguage)
+    setUsername(project.username || "local")
+    if (project.completionSettings) {
+      setProvider(resolveProvider(project.completionSettings))
+      setEndpoint(project.completionSettings.endpoint)
+      setApiKey(project.completionSettings.apiKey ?? "")
+      setPresetId(presetIdForEndpoint(project.completionSettings.endpoint))
+      setModel(project.completionSettings.model)
+      setMaxTokens(project.completionSettings.maxTokens)
+      setTemperature(project.completionSettings.temperature)
+      setSystemPrompt(project.completionSettings.systemPrompt)
+      setLlmHealthPenalty(project.completionSettings.llmHealthPenalty ?? 0.1)
+    }
+    setAutoSyncEnabled(project.syncSettings?.autoSync.enabled ?? false)
+    setAutoSyncInterval(project.syncSettings?.autoSync.intervalMinutes ?? 5)
+    setValidationCount(readValidationCount(project))
+    setValidationCountAudio(readValidationCountAudio(project))
+  }, [project])
+
+  // ── Race-safe save helpers ──────────────────────────────────────────
+
+  /** Save project-level fields by reading latest from IDB first. */
+  const saveField = useCallback(async (updates: Partial<ProjectRecord>) => {
     if (!id) return
-    getProject(id).then((p) => {
-      if (!p) return
-      setProject(p)
-      setName(p.name)
-      setSourceLanguage(p.sourceLanguage)
-      setTargetLanguage(p.targetLanguage)
-      setUsername(p.username || "local")
-      if (p.completionSettings) {
-        setProvider(resolveProvider(p.completionSettings))
-        setEndpoint(p.completionSettings.endpoint)
-        setApiKey(p.completionSettings.apiKey ?? "")
-        setPresetId(presetIdForEndpoint(p.completionSettings.endpoint))
-        setModel(p.completionSettings.model)
-        setMaxTokens(p.completionSettings.maxTokens)
-        setTemperature(p.completionSettings.temperature)
-        setSystemPrompt(p.completionSettings.systemPrompt)
-        setLlmHealthPenalty(p.completionSettings.llmHealthPenalty ?? 0.1)
-      }
-      setAutoSyncEnabled(p.syncSettings?.autoSync.enabled ?? false)
-      setAutoSyncInterval(p.syncSettings?.autoSync.intervalMinutes ?? 5)
-      setLoadedSnapshot(snapshotFromProject(p))
-      setValidationCount(readValidationCount(p))
-      setValidationCountAudio(readValidationCountAudio(p))
-      setLoading(false)
-    })
-  }, [id])
+    const latest = await getProject(id)
+    if (!latest) return
+    const updated = { ...latest, ...updates }
+    await updateProject(updated)
+    refresh()
+    flash()
+  }, [id, refresh, flash])
+
+  /** Save completion settings via shared abstraction. */
+  const saveCompletionSettings = useSaveCompletionSettings(id, (updated) => {
+    refresh()
+    flash()
+  })
 
   const compositeFlag = useFeatureFlag("composite-health", project ?? null)
   const [healthSettings, setHealthSettings] = useState<HealthSettings>({ followDefaults: true })
@@ -133,94 +138,17 @@ export function ProjectSettings() {
 
   async function saveHealthSettings(next: HealthSettings) {
     setHealthSettings(next)
-    if (!project) return
-    await updateProject({ ...project, healthSettings: next })
+    await saveField({ healthSettings: next })
   }
 
   async function resetHealthOverrides() {
     await saveHealthSettings({ ...healthSettings, overrides: undefined })
   }
 
-  async function save(updates: Partial<ProjectRecord>) {
-    if (!project) return
-    const updated = { ...project, ...updates }
-    await updateProject(updated)
-    setProject(updated)
-    setLoadedSnapshot(snapshotFromProject(updated))
-  }
-
-  function saveCompletionSettings(overrides: {
-    provider?: CompletionProvider
-    endpoint?: string
-    apiKey?: string
-  } = {}) {
-    const nextProvider = overrides.provider ?? provider
-    const nextEndpoint = (overrides.endpoint ?? endpoint).trim()
-    const nextApiKey = (overrides.apiKey ?? apiKey).trim()
-    save({
-      completionSettings: {
-        provider: nextProvider,
-        endpoint: nextEndpoint,
-        apiKey: nextApiKey || undefined,
-        model,
-        maxTokens,
-        temperature,
-        systemPrompt,
-        llmHealthPenalty,
-      },
-    })
-  }
-
-  const currentSnapshot: SettingsFormSnapshot = {
-    name, sourceLanguage, targetLanguage, username,
-    provider, endpoint, apiKey, model, maxTokens, temperature,
-    systemPrompt, llmHealthPenalty,
-    autoSyncEnabled, autoSyncInterval,
-  }
-  const dirty = isSettingsDirty(loadedSnapshot, currentSnapshot)
-
-  useEffect(() => {
-    if (!dirty) return
-    const handler = (e: BeforeUnloadEvent) => {
-      e.preventDefault()
-      e.returnValue = ""
-    }
-    window.addEventListener("beforeunload", handler)
-    return () => window.removeEventListener("beforeunload", handler)
-  }, [dirty])
-
-  async function handleSave() {
-    if (!project) return
-    const updated: ProjectRecord = {
-      ...project,
-      name,
-      sourceLanguage,
-      targetLanguage,
-      username,
-      completionSettings: {
-        provider,
-        endpoint: endpoint.trim(),
-        apiKey: apiKey.trim() || undefined,
-        model,
-        maxTokens,
-        temperature,
-        systemPrompt,
-        llmHealthPenalty,
-      },
-      syncSettings: project.syncSettings
-        ? { ...project.syncSettings, autoSync: { enabled: autoSyncEnabled, intervalMinutes: autoSyncInterval } }
-        : undefined,
-    }
-    await updateProject(updated)
-    setProject(updated)
-    setLoadedSnapshot(snapshotFromProject(updated))
-  }
-
   function handlePresetChange(nextPresetId: string) {
     setPresetId(nextPresetId)
     const preset = CUSTOM_PRESETS.find((p) => p.id === nextPresetId)
     if (!preset) return
-    // "custom" leaves the existing endpoint alone so the user can type their own.
     const nextEndpoint = preset.id === "custom" ? endpoint : preset.endpoint
     setEndpoint(nextEndpoint)
     setConnected(false)
@@ -255,14 +183,12 @@ export function ProjectSettings() {
           <ArrowLeft className="mr-1 h-4 w-4" /> Back to Editor
         </Button>
         <h2 className="font-semibold">Project Settings</h2>
-        <div className="ml-auto">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => navigate(`/project/${id}`)}
-          >
-            View Setup Checklist
-          </Button>
+        <div className="ml-auto flex items-center gap-2">
+          {savedFlash && (
+            <span className="flex items-center gap-1 text-xs text-green-600 animate-in fade-in duration-200">
+              <Check className="h-3 w-3" /> Saved
+            </span>
+          )}
         </div>
       </header>
       <main className="mx-auto max-w-2xl space-y-6 p-6">
@@ -271,16 +197,16 @@ export function ProjectSettings() {
           <CardContent className="space-y-4">
             <div>
               <Label htmlFor="pname">Project Name</Label>
-              <Input id="pname" value={name} onChange={(e) => setName(e.target.value)} onBlur={() => save({ name })} />
+              <Input id="pname" value={name} onChange={(e) => setName(e.target.value)} onBlur={() => saveField({ name })} />
             </div>
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <Label htmlFor="sl">Source Language</Label>
-                <Input id="sl" value={sourceLanguage} onChange={(e) => setSourceLanguage(e.target.value)} onBlur={() => save({ sourceLanguage })} />
+                <Input id="sl" value={sourceLanguage} onChange={(e) => setSourceLanguage(e.target.value)} onBlur={() => saveField({ sourceLanguage })} />
               </div>
               <div>
                 <Label htmlFor="tl">Target Language</Label>
-                <Input id="tl" value={targetLanguage} onChange={(e) => setTargetLanguage(e.target.value)} onBlur={() => save({ targetLanguage })} />
+                <Input id="tl" value={targetLanguage} onChange={(e) => setTargetLanguage(e.target.value)} onBlur={() => saveField({ targetLanguage })} />
               </div>
             </div>
           </CardContent>
@@ -290,7 +216,7 @@ export function ProjectSettings() {
           <CardHeader><CardTitle>User</CardTitle></CardHeader>
           <CardContent>
             <Label htmlFor="un">Username</Label>
-            <Input id="un" value={username} onChange={(e) => setUsername(e.target.value)} onBlur={() => save({ username })} placeholder="local" />
+            <Input id="un" value={username} onChange={(e) => setUsername(e.target.value)} onBlur={() => saveField({ username })} placeholder="local" />
             <p className="mt-1 text-xs text-muted-foreground">Used as author name in translation history.</p>
           </CardContent>
         </Card>
@@ -307,7 +233,7 @@ export function ProjectSettings() {
               id="sp"
               value={systemPrompt}
               onChange={(e) => setSystemPrompt(e.target.value)}
-              onBlur={() => saveCompletionSettings()}
+              onBlur={() => saveCompletionSettings({ systemPrompt })}
               rows={6}
               className="w-full rounded border bg-background px-3 py-2 font-mono text-sm"
               placeholder={DEFAULT_SYSTEM_PROMPT}
@@ -386,7 +312,7 @@ export function ProjectSettings() {
                         id="ep"
                         value={endpoint}
                         onChange={(e) => { setEndpoint(e.target.value); setPresetId(presetIdForEndpoint(e.target.value)) }}
-                        onBlur={() => saveCompletionSettings()}
+                        onBlur={() => saveCompletionSettings({ endpoint: endpoint.trim() })}
                         placeholder="http://localhost:8000"
                         className="flex-1"
                       />
@@ -411,7 +337,7 @@ export function ProjectSettings() {
                         type={showApiKey ? "text" : "password"}
                         value={apiKey}
                         onChange={(e) => setApiKey(e.target.value)}
-                        onBlur={() => saveCompletionSettings()}
+                        onBlur={() => saveCompletionSettings({ apiKey: apiKey.trim() || undefined })}
                         placeholder={preset.keyHint ?? (preset.requiresKey ? "Paste your API key" : "Leave blank for no auth")}
                         autoComplete="off"
                         spellCheck={false}
@@ -435,7 +361,7 @@ export function ProjectSettings() {
                   {models.length > 0 && (
                     <div>
                       <Label htmlFor="mdl">Model</Label>
-                      <select id="mdl" value={model} onChange={(e) => { setModel(e.target.value); saveCompletionSettings() }} className="w-full rounded border bg-background px-3 py-2 text-sm">
+                      <select id="mdl" value={model} onChange={(e) => { setModel(e.target.value); saveCompletionSettings({ model: e.target.value }) }} className="w-full rounded border bg-background px-3 py-2 text-sm">
                         {models.map((m) => <option key={m} value={m}>{m}</option>)}
                       </select>
                     </div>
@@ -447,7 +373,7 @@ export function ProjectSettings() {
                         id="mdl-manual"
                         value={model}
                         onChange={(e) => setModel(e.target.value)}
-                        onBlur={() => saveCompletionSettings()}
+                        onBlur={() => saveCompletionSettings({ model })}
                         placeholder={presetId === "openrouter" ? "anthropic/claude-3.5-sonnet" : "Type a model id"}
                       />
                       <p className="mt-1 text-xs text-muted-foreground">
@@ -466,7 +392,7 @@ export function ProjectSettings() {
                   id="mdl-frontier"
                   value={model}
                   onChange={(e) => setModel(e.target.value)}
-                  onBlur={() => saveCompletionSettings()}
+                  onBlur={() => saveCompletionSettings({ model })}
                   placeholder="Leave blank for Frontier's default"
                 />
                 <p className="mt-1 text-xs text-muted-foreground">
@@ -478,18 +404,18 @@ export function ProjectSettings() {
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <Label htmlFor="mt">Max Tokens</Label>
-                <Input id="mt" type="number" value={maxTokens} onChange={(e) => setMaxTokens(Number(e.target.value))} onBlur={() => saveCompletionSettings()} />
+                <Input id="mt" type="number" value={maxTokens} onChange={(e) => setMaxTokens(Number(e.target.value))} onBlur={() => saveCompletionSettings({ maxTokens })} />
               </div>
               <div>
                 <Label>Temperature ({temperature})</Label>
-                <input type="range" min="0" max="1" step="0.05" value={temperature} onChange={(e) => setTemperature(Number(e.target.value))} onMouseUp={() => saveCompletionSettings()} className="mt-2 w-full" />
+                <input type="range" min="0" max="1" step="0.05" value={temperature} onChange={(e) => setTemperature(Number(e.target.value))} onMouseUp={() => saveCompletionSettings({ temperature })} className="mt-2 w-full" />
               </div>
             </div>
 
             {!compositeFlag && (
               <div>
                 <Label>LLM Health Penalty ({Math.round(llmHealthPenalty * 100)}%)</Label>
-                <input type="range" min="0" max="0.5" step="0.05" value={llmHealthPenalty} onChange={(e) => setLlmHealthPenalty(Number(e.target.value))} onMouseUp={() => saveCompletionSettings()} className="mt-2 w-full" />
+                <input type="range" min="0" max="0.5" step="0.05" value={llmHealthPenalty} onChange={(e) => setLlmHealthPenalty(Number(e.target.value))} onMouseUp={() => saveCompletionSettings({ llmHealthPenalty })} className="mt-2 w-full" />
                 <p className="mt-1 text-xs text-muted-foreground">
                   LLM translations are penalized by this amount in health calculations. 0% = full trust, 50% = heavy penalty. Default: 10%.
                 </p>
@@ -513,11 +439,11 @@ export function ProjectSettings() {
           onChange={(u) => {
             if (u.validationCount !== undefined) {
               setValidationCount(u.validationCount)
-              save({ validationCount: u.validationCount })
+              saveField({ validationCount: u.validationCount })
             }
             if (u.validationCountAudio !== undefined) {
               setValidationCountAudio(u.validationCountAudio)
-              save({ validationCountAudio: u.validationCountAudio })
+              saveField({ validationCountAudio: u.validationCountAudio })
             }
           }}
         />
@@ -537,7 +463,7 @@ export function ProjectSettings() {
                   onChange={(e) => {
                     const enabled = e.target.checked
                     setAutoSyncEnabled(enabled)
-                    save({ syncSettings: { autoSync: { enabled, intervalMinutes: autoSyncInterval } } })
+                    saveField({ syncSettings: { autoSync: { enabled, intervalMinutes: autoSyncInterval } } })
                   }}
                 />
                 <Label htmlFor="auto-sync" className="text-sm">Auto-sync every</Label>
@@ -548,7 +474,7 @@ export function ProjectSettings() {
                   className="h-8 w-20"
                   value={autoSyncInterval}
                   onChange={(e) => setAutoSyncInterval(Math.max(1, Number(e.target.value) || 1))}
-                  onBlur={() => save({ syncSettings: { autoSync: { enabled: autoSyncEnabled, intervalMinutes: Math.max(1, autoSyncInterval) } } })}
+                  onBlur={() => saveField({ syncSettings: { autoSync: { enabled: autoSyncEnabled, intervalMinutes: Math.max(1, autoSyncInterval) } } })}
                 />
                 <span className="text-sm">minutes (only when there are changes)</span>
               </div>
@@ -581,20 +507,17 @@ export function ProjectSettings() {
                     label={def.label}
                     description={def.description}
                     project={project}
+                    onToggled={refresh}
                   />
                 ))}
               </div>
             )}
           </CardContent>
         </Card>
-        <div className="flex items-center gap-4">
-          <p className="text-xs text-muted-foreground">
-            Experimental toggles save automatically. Other changes need Save.
-          </p>
-          <Button onClick={handleSave} variant={dirty ? "default" : "outline"}>
-            {dirty ? "Save (unsaved changes)" : "Save"}
-          </Button>
-        </div>
+
+        <p className="text-xs text-muted-foreground text-center pb-8">
+          All changes save automatically.
+        </p>
       </main>
     </div>
   )
@@ -605,24 +528,25 @@ function ExperimentalFlagRow({
   label,
   description,
   project,
+  onToggled,
 }: {
   flagKey: Parameters<typeof useFeatureFlag>[0]
   label: string
   description: string
   project: ProjectRecord | null
+  onToggled: () => void
 }) {
   const value = useFeatureFlag(flagKey, project)
-  const [optimistic, setOptimistic] = useState<boolean | null>(null)
-  const checked = optimistic ?? value
+  const [saving, setSaving] = useState(false)
 
   const handleChange = async (next: boolean) => {
     if (!project) return
-    setOptimistic(next)
+    setSaving(true)
     try {
       await setFeatureFlag(project.id, flagKey, next)
-      setOptimistic(null)
-    } catch {
-      setOptimistic(null) // revert to store value on failure
+      onToggled()
+    } finally {
+      setSaving(false)
     }
   }
 
@@ -633,8 +557,9 @@ function ExperimentalFlagRow({
         <p className="text-sm text-muted-foreground">{description}</p>
       </div>
       <Switch
-        checked={checked}
+        checked={value}
         onCheckedChange={handleChange}
+        disabled={saving}
         aria-label={`Toggle ${label}`}
       />
     </div>

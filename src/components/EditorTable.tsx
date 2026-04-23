@@ -124,6 +124,8 @@ interface EditorTableProps {
   isAnonymous?: boolean
   breakdownMap?: Map<string, CellHealthBreakdown>
   onJumpToCell?: (cellId: string) => void
+  /** Called when user clicks a disabled sparkle while AI is not yet configured. */
+  onAiSetupNeeded?: () => void
 }
 
 export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(function EditorTable({
@@ -196,6 +198,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           return (
             <div
               key={cell.id}
+              data-cell-id={cell.id}
               data-index={virtualRow.index}
               ref={virtualizer.measureElement}
               style={{

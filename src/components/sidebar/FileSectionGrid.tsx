@@ -1,5 +1,5 @@
 import { useSectionProgress } from "@/hooks/useSectionProgress"
-import { ProgressDot } from "./ProgressDot"
+import { cn } from "@/lib/utils"
 
 interface Props {
   fileId: string
@@ -8,10 +8,9 @@ interface Props {
 }
 
 /**
- * Compact dot grid showing per-section progress for a file. Rendered inside
- * the expanded file row in the sidebar. Loads the file's Y.Doc lazily (via
- * the ref-counted registry) so expanding N files hydrates N docs but
- * collapsing frees them.
+ * List of sections shown under an expanded file in the sidebar. Each section
+ * is a clickable row (like a sub-file) with a small progress bar, replacing
+ * the old dot-grid which was hard to interpret.
  */
 export function FileSectionGrid({ fileId, validationCount, onSectionClick }: Props) {
   const sections = useSectionProgress(fileId, validationCount)
@@ -24,18 +23,39 @@ export function FileSectionGrid({ fileId, validationCount, onSectionClick }: Pro
   }
 
   return (
-    <div className="flex flex-wrap gap-1.5 px-6 py-1.5 max-h-24 overflow-y-auto">
-      {sections.map((section) => (
-        <ProgressDot
-          key={section.label}
-          label={section.label}
-          completedPercent={section.textCompleted}
-          validatedPercent={section.textValidated}
-          validationLevels={section.textValidationLevels}
-          requiredValidations={validationCount}
-          onClick={() => onSectionClick(section.label)}
-        />
-      ))}
+    <div className="space-y-px pl-6 pr-2 py-1">
+      {sections.map((section) => {
+        const completed = section.textCompleted
+        const validated = section.textValidated
+        return (
+          <button
+            key={section.label}
+            type="button"
+            className={cn(
+              "flex w-full items-center gap-2 rounded px-2 py-0.5 text-left text-[11px] transition-colors",
+              "hover:bg-accent/50 text-muted-foreground hover:text-foreground",
+            )}
+            onClick={() => onSectionClick(section.label)}
+            title={`${section.label} — ${completed}% translated, ${validated}% validated`}
+          >
+            <span className="flex-1 min-w-0 truncate">{section.label}</span>
+            <span className="flex items-center gap-0.5 shrink-0">
+              <span className="h-1.5 w-5 rounded-full bg-muted overflow-hidden">
+                <span
+                  className="block h-full bg-amber-500 transition-all"
+                  style={{ width: `${completed}%` }}
+                />
+              </span>
+              <span className="h-1.5 w-5 rounded-full bg-muted overflow-hidden">
+                <span
+                  className="block h-full bg-emerald-500 transition-all"
+                  style={{ width: `${validated}%` }}
+                />
+              </span>
+            </span>
+          </button>
+        )
+      })}
     </div>
   )
 }

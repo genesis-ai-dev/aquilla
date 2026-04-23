@@ -2,10 +2,10 @@ import { useState } from "react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { updateProject } from "@/lib/store/project-index"
-import { FRONTIER_CHAT_URL, DEFAULT_SYSTEM_PROMPT } from "@/lib/completion/completion-service"
+import { FRONTIER_CHAT_URL, DEFAULT_SYSTEM_PROMPT } from "@/hooks/useCompletionSettings"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import type { ProjectRecord, CompletionProvider } from "@/lib/parsers/types"
+import { useSaveCompletionSettings } from "@/hooks/useCompletionSettings"
 import { Check } from "lucide-react"
 
 export function AiProviderStep({
@@ -25,22 +25,15 @@ export function AiProviderStep({
     currentProvider === "custom" ? (project.completionSettings?.model ?? "") : ""
   )
 
+  const saveSettings = useSaveCompletionSettings(project.id, onUpdated)
+
   async function handleSave() {
     const isFrontier = selected === "frontier"
-    const updated: ProjectRecord = {
-      ...project,
-      completionSettings: {
-        provider: isFrontier ? "frontier" : "custom",
-        endpoint: isFrontier ? FRONTIER_CHAT_URL : customEndpoint.trim(),
-        model: isFrontier ? "" : customModel.trim(),
-        maxTokens: project.completionSettings?.maxTokens ?? 512,
-        temperature: project.completionSettings?.temperature ?? 0.3,
-        systemPrompt: project.completionSettings?.systemPrompt ?? DEFAULT_SYSTEM_PROMPT,
-        llmHealthPenalty: project.completionSettings?.llmHealthPenalty ?? 0.1,
-      },
-    }
-    await updateProject(updated)
-    onUpdated(updated)
+    await saveSettings({
+      provider: isFrontier ? "frontier" : "custom",
+      endpoint: isFrontier ? FRONTIER_CHAT_URL : customEndpoint.trim(),
+      model: isFrontier ? "" : customModel.trim(),
+    })
   }
 
   const canSave = selected === "frontier"

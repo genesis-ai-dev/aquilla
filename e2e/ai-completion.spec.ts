@@ -8,6 +8,7 @@ import {
   openProject,
   importFile,
   waitForEditor,
+  clickFileInSidebar,
 } from "./helpers"
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -64,7 +65,7 @@ test("sparkle button fills cell with AI completion", async ({ page }) => {
   await importFile(page, sampleFile)
 
   // Click first file in sidebar
-  await page.locator("aside").locator("button, a").filter({ hasText: "sample" }).first().click()
+  await clickFileInSidebar(page, "sample")
 
   // Wait for editor to load
   await waitForEditor(page)

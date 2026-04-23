@@ -73,11 +73,19 @@ export async function createProject(
 
 /**
  * Navigate into a project by clicking its card on the dashboard.
+ * Dismisses the per-project Setup Checklist drawer that auto-opens
+ * on first visit — it overlays the workspace header and blocks clicks.
  */
 export async function openProject(page: Page, name: string) {
   await page.getByText(name).click()
-  // Wait for workspace to load (sidebar visible)
   await expect(page.locator("aside")).toBeVisible({ timeout: 10_000 })
+  // Close the Setup Checklist sheet if it auto-opened. Escape is the
+  // standard Radix Sheet dismiss. No-op if not open.
+  const setupSheet = page.getByRole("dialog", { name: /project setup/i })
+  if (await setupSheet.isVisible().catch(() => false)) {
+    await page.keyboard.press("Escape")
+    await expect(setupSheet).not.toBeVisible({ timeout: 3_000 })
+  }
 }
 
 /**
@@ -105,4 +113,18 @@ export async function importFile(page: Page, filePath: string) {
  */
 export async function waitForEditor(page: Page) {
   await expect(page.locator("[data-cell-id]").first()).toBeVisible({ timeout: 10_000 })
+}
+
+/**
+ * Click a file row in the sidebar. The row is a clickable <div>, not a button —
+ * it has the filename inside it. Filters by substring of the filename (e.g. "sample").
+ */
+export async function clickFileInSidebar(page: Page, nameSubstring: string) {
+  await page
+    .locator("aside")
+    .locator("div")
+    .filter({ hasText: new RegExp(nameSubstring, "i") })
+    .filter({ has: page.locator('button[aria-label="File actions"]') })
+    .first()
+    .click()
 }

@@ -7,6 +7,7 @@ import {
   openProject,
   importFile,
   waitForEditor,
+  clickFileInSidebar,
 } from "./helpers"
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -21,7 +22,7 @@ test.beforeEach(async ({ page }) => {
   await importFile(page, sampleFile)
 
   // Click first file in sidebar to open it
-  await page.locator("aside").locator("button, a").filter({ hasText: "sample" }).first().click()
+  await clickFileInSidebar(page, "sample")
 })
 
 test("validate a translated cell changes its icon", async ({ page }) => {
@@ -88,7 +89,7 @@ test("validation persists across navigation", async ({ page }) => {
 
   // Re-open the project and file
   await openProject(page, projectName)
-  await page.locator("aside").locator("button, a").filter({ hasText: "sample" }).first().click()
+  await clickFileInSidebar(page, "sample")
   await waitForEditor(page)
 
   // Verify emerald-500 still shows (validation persisted)

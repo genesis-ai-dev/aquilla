@@ -6,7 +6,7 @@ const API = "https://api.example.test"
 const originalFetch = global.fetch
 
 function mockFetch(status: number, body: unknown) {
-  return vi.fn(async () => {
+  return vi.fn<typeof fetch>(async () => {
     const text = typeof body === "string" ? body : JSON.stringify(body)
     return new Response(text, {
       status,
@@ -36,9 +36,9 @@ describe("createServerInvite", () => {
     })
     const [url, init] = fetchMock.mock.calls[0]
     expect(url).toBe(`${API}/api/v2/projects/proj-1/invites`)
-    expect((init as RequestInit).method).toBe("POST")
-    expect(((init as RequestInit).headers as Record<string, string>).Authorization).toBe("Bearer jwt-user")
-    expect(JSON.parse((init as RequestInit).body as string)).toEqual({ role: 400 })
+    expect(init!.method).toBe("POST")
+    expect((init!.headers as Record<string, string>).Authorization).toBe("Bearer jwt-user")
+    expect(JSON.parse(init!.body as string)).toEqual({ role: 400 })
   })
 
   it("URL-encodes projectId", async () => {
@@ -52,7 +52,7 @@ describe("createServerInvite", () => {
     const fetchMock = mockFetch(200, { token: "t", projectId: "p", role: 400, expiresAt: "x" })
     global.fetch = fetchMock as unknown as typeof fetch
     await createServerInvite("j", "p", undefined, API)
-    const body = JSON.parse(fetchMock.mock.calls[0][1]!.body as string)
+    const body = JSON.parse(fetchMock.mock.calls[0][1]!.body as string) as { role: number }
     expect(body.role).toBe(400)
   })
 
@@ -81,8 +81,8 @@ describe("acceptServerInvite", () => {
 
     const [url, init] = fetchMock.mock.calls[0]
     expect(url).toBe(`${API}/api/v2/projects/accept-invite`)
-    expect((init as RequestInit).method).toBe("POST")
-    expect(JSON.parse((init as RequestInit).body as string)).toEqual({ token: "token-123" })
+    expect(init!.method).toBe("POST")
+    expect(JSON.parse(init!.body as string)).toEqual({ token: "token-123" })
   })
 
   it("returns null on 410 (used or expired)", async () => {

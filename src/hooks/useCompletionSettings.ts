@@ -1,7 +1,7 @@
 import { useCallback } from "react"
 import { getProject, updateProject } from "@/lib/store/project-index"
 import { DEFAULT_SYSTEM_PROMPT, FRONTIER_CHAT_URL, resolveProvider } from "@/lib/completion/completion-service"
-import type { ProjectRecord, CompletionSettings, CompletionProvider } from "@/lib/parsers/types"
+import type { ProjectRecord, CompletionSettings } from "@/lib/parsers/types"
 
 /**
  * Build a full CompletionSettings from partial overrides, filling defaults.

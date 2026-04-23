@@ -61,7 +61,7 @@ describe("archiveProjectRemote", () => {
   })
 
   it("sends Bearer auth + POST to the archive endpoint", async () => {
-    const fetchMock = vi.fn(
+    const fetchMock = vi.fn<typeof fetch>(
       async () =>
         new Response(
           JSON.stringify({
@@ -72,13 +72,13 @@ describe("archiveProjectRemote", () => {
           { status: 200 }
         )
     )
-    globalThis.fetch = fetchMock as typeof fetch
+    globalThis.fetch = fetchMock
     await archiveProjectRemote("proj 1", "my-jwt", API)
     const [url, init] = fetchMock.mock.calls[0]
     expect(url).toBe(`${API}/api/v2/projects/proj%201/archive`)
-    const headers = (init as RequestInit).headers as Record<string, string>
+    const headers = init!.headers as Record<string, string>
     expect(headers.Authorization).toBe("Bearer my-jwt")
-    expect((init as RequestInit).method).toBe("POST")
+    expect(init!.method).toBe("POST")
   })
 })
 
@@ -94,12 +94,12 @@ describe("unarchiveProjectRemote", () => {
   })
 
   it("issues DELETE method", async () => {
-    const fetchMock = vi.fn(
+    const fetchMock = vi.fn<typeof fetch>(
       async () => new Response(JSON.stringify({ ok: true }), { status: 200 })
     )
-    globalThis.fetch = fetchMock as typeof fetch
+    globalThis.fetch = fetchMock
     await unarchiveProjectRemote("p1", "jwt", API)
-    expect((fetchMock.mock.calls[0][1] as RequestInit).method).toBe("DELETE")
+    expect(fetchMock.mock.calls[0][1]!.method).toBe("DELETE")
   })
 })
 

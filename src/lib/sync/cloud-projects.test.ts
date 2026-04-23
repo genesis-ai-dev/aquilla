@@ -10,7 +10,7 @@ const API = "https://api.example.test"
 const originalFetch = global.fetch
 
 function mockFetch(status: number, body: unknown) {
-  return vi.fn(async () => {
+  return vi.fn<typeof fetch>(async () => {
     const text = typeof body === "string" ? body : JSON.stringify(body)
     return new Response(text, {
       status,
@@ -49,8 +49,8 @@ describe("fetchAccessibleProjects", () => {
 
     const [url, init] = fetchMock.mock.calls[0]
     expect(url).toBe(`${API}/api/v2/projects`)
-    expect((init as RequestInit).method).toBe("GET")
-    expect(((init as RequestInit).headers as Record<string, string>).Authorization).toBe("Bearer jwt-user")
+    expect(init!.method).toBe("GET")
+    expect((init!.headers as Record<string, string>).Authorization).toBe("Bearer jwt-user")
   })
 
   it("returns empty array on 401/500/network error instead of throwing", async () => {

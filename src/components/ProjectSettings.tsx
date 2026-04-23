@@ -9,7 +9,7 @@ import { Switch } from "@/components/ui/switch"
 import { useProject } from "@/hooks/useProject"
 import { getProject, updateProject } from "@/lib/store/project-index"
 import { fetchModels, resolveProvider } from "@/lib/completion/completion-service"
-import { useSaveCompletionSettings, DEFAULT_SYSTEM_PROMPT, buildCompletionSettings } from "@/hooks/useCompletionSettings"
+import { useSaveCompletionSettings, DEFAULT_SYSTEM_PROMPT } from "@/hooks/useCompletionSettings"
 import type { ProjectRecord, CompletionProvider } from "@/lib/parsers/types"
 import { listFlags } from "@/lib/features/flags"
 import { useFeatureFlag, setFeatureFlag } from "@/hooks/useFeatureFlag"
@@ -124,7 +124,7 @@ export function ProjectSettings() {
   }, [id, refresh, flash])
 
   /** Save completion settings via shared abstraction. */
-  const saveCompletionSettings = useSaveCompletionSettings(id, (updated) => {
+  const saveCompletionSettings = useSaveCompletionSettings(id, () => {
     refresh()
     flash()
   })

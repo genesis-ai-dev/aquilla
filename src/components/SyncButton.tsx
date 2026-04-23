@@ -53,9 +53,10 @@ export function SyncButton({ project, onUpdated, sync, phase, inFlight, lastResu
     if (!session) return
     const r = await sync(project, session)
     if ((r?.status === "synced" || r?.status === "merged") && r.commitSha && project.origin?.kind === "git") {
+      const commitSha = r.commitSha
       const updated = await patchProject(project.id, (p) => ({
         ...p,
-        origin: { ...p.origin!, headSha: r.commitSha },
+        origin: { ...p.origin!, headSha: commitSha },
       }))
       onUpdated(updated)
     }

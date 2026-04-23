@@ -429,9 +429,10 @@ export function ProjectWorkspace() {
         if (syncInFlight) return
         runSync(project, frontierSession).then((r) => {
           if (r?.status === "synced" && r.commitSha && project.origin?.kind === "git") {
+            const commitSha = r.commitSha
             patchProject(project.id, (p) => ({
               ...p,
-              origin: { ...p.origin!, headSha: r.commitSha },
+              origin: { ...p.origin!, headSha: commitSha },
             })).then(() => refresh())
           }
         })

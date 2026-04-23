@@ -77,14 +77,6 @@ function pushParagraphFromText(frag: Y.XmlFragment, text: string): void {
   })
 }
 
-function replaceFragmentContent(frag: Y.XmlFragment, newChildren: Y.XmlElement[]): void {
-  // Clear existing children
-  while (frag.length > 0) {
-    frag.delete(0, 1)
-  }
-  if (newChildren.length > 0) frag.push(newChildren)
-}
-
 // Serialize the fragment to HTML using ProseMirror's schema mapping.
 // Uses a minimal recursive walker since we control the schema.
 export function getFragmentHtml(frag: Y.XmlFragment): string {

@@ -11,8 +11,8 @@ describe("deleteFileProjection", () => {
   })
 
   it("returns false without firing when jwt is null", async () => {
-    const fetchMock = vi.fn()
-    global.fetch = fetchMock as unknown as typeof fetch
+    const fetchMock = vi.fn<typeof fetch>()
+    global.fetch = fetchMock
     const ok = await deleteFileProjection({
       jwt: null,
       projectId: "p",
@@ -24,8 +24,8 @@ describe("deleteFileProjection", () => {
   })
 
   it("DELETEs the file projection with bearer auth on success", async () => {
-    const fetchMock = vi.fn(async () => new Response(null, { status: 200 }))
-    global.fetch = fetchMock as unknown as typeof fetch
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response(null, { status: 200 }))
+    global.fetch = fetchMock
     const ok = await deleteFileProjection({
       jwt: "jwt-user",
       projectId: "proj-1",
@@ -36,15 +36,15 @@ describe("deleteFileProjection", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1)
     const [url, init] = fetchMock.mock.calls[0]
     expect(url).toBe(`${API}/api/v2/projects/proj-1/files/file-a`)
-    expect((init as RequestInit).method).toBe("DELETE")
-    expect(((init as RequestInit).headers as Record<string, string>).Authorization).toBe(
+    expect(init!.method).toBe("DELETE")
+    expect((init!.headers as Record<string, string>).Authorization).toBe(
       "Bearer jwt-user"
     )
   })
 
   it("URL-encodes projectId and fileId", async () => {
-    const fetchMock = vi.fn(async () => new Response(null, { status: 200 }))
-    global.fetch = fetchMock as unknown as typeof fetch
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response(null, { status: 200 }))
+    global.fetch = fetchMock
     await deleteFileProjection({
       jwt: "j",
       projectId: "proj with space",

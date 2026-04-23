@@ -1,6 +1,6 @@
-import { useEffect, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { useNavigate, Navigate } from "react-router-dom"
-import { ChevronRight, Trash2 } from "lucide-react"
+import { ChevronRight, Cloud, Trash2 } from "lucide-react"
 import type { ProjectRecord } from "@/lib/parsers/types"
 import {
   listProjects,
@@ -15,10 +15,16 @@ import { HeaderAuth } from "@/components/git-import/HeaderAuth"
 import { RemoteProjectsSection } from "@/components/git-import/RemoteProjectsSection"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { useBrand } from "@/branding/use-brand"
+import {
+  fetchAccessibleProjects,
+  minimalProjectRecord,
+  type CloudProjectSummary,
+} from "@/lib/sync/cloud-projects"
 
 export function Dashboard() {
   const [projects, setProjects] = useState<ProjectRecord[]>([])
   const [trashed, setTrashed] = useState<ProjectRecord[]>([])
+  const [cloudProjects, setCloudProjects] = useState<CloudProjectSummary[]>([])
   const [loading, setLoading] = useState(true)
   const [pendingTrashId, setPendingTrashId] = useState<string | null>(null)
   const [trashExpanded, setTrashExpanded] = useState(false)
@@ -42,6 +48,29 @@ export function Dashboard() {
     const t = setTimeout(() => setErrorToast(null), 4000)
     return () => clearTimeout(t)
   }, [errorToast])
+
+  // Cloud-side discovery: list every project the user has access to on the
+  // server. Dedup against IDB happens at render time (see cloudOnly).
+  useEffect(() => {
+    if (!session?.jwt) {
+      setCloudProjects([])
+      return
+    }
+    let cancelled = false
+    fetchAccessibleProjects(session.jwt).then((list) => {
+      if (!cancelled) setCloudProjects(list)
+    })
+    return () => { cancelled = true }
+  }, [session?.jwt])
+
+  // Projects the user can access on the server but haven't opened on this
+  // device yet. Clicking one navigates into ProjectWorkspace, which calls
+  // useProject → fetchProjectState → updateProject to hydrate IDB.
+  const cloudOnly = useMemo(() => {
+    const localIds = new Set(projects.map((p) => p.id))
+    const trashedIds = new Set(trashed.map((p) => p.id))
+    return cloudProjects.filter((cp) => !localIds.has(cp.id) && !trashedIds.has(cp.id))
+  }, [cloudProjects, projects, trashed])
 
   function upsert(project: ProjectRecord) {
     setProjects(prev => {
@@ -147,6 +176,27 @@ export function Dashboard() {
             </div>
           )}
         </section>
+
+        {cloudOnly.length > 0 && (
+          <section className="mt-10">
+            <h2 className="mb-3 flex items-center gap-1.5 text-sm font-semibold text-muted-foreground">
+              <Cloud className="h-4 w-4" />
+              Your cloud projects
+            </h2>
+            <p className="mb-3 text-xs text-muted-foreground">
+              Projects you can access that aren't on this device yet. Clicking one downloads its state.
+            </p>
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+              {cloudOnly.map((cp) => (
+                <ProjectCard
+                  key={cp.id}
+                  project={minimalProjectRecord(cp)}
+                  onClick={() => navigate(`/project/${cp.id}`)}
+                />
+              ))}
+            </div>
+          </section>
+        )}
 
         {session && (
           <RemoteProjectsSection

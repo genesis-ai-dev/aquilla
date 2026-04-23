@@ -81,7 +81,7 @@ import { AiSetupDialog } from "./AiSetupDialog"
 export function ProjectWorkspace() {
   const { id: projectId, fileId: routeFileId } = useParams<{ id: string; fileId?: string }>()
   const navigate = useNavigate()
-  const { project, loading, refresh } = useProject(projectId!)
+  const { project, status, refresh } = useProject(projectId!)
 
   const activeFileId = routeFileId ?? null
 
@@ -559,7 +559,21 @@ export function ProjectWorkspace() {
     navigate,
   }), [activeFileId, completeBatch, cells, navigate])
 
-  if (loading || !project) return <div className="p-8 text-muted-foreground">Loading...</div>
+  if (status === "loading") return <div className="p-8 text-muted-foreground">Loading...</div>
+  if (status === "no-session") {
+    return (
+      <div className="p-8 text-muted-foreground">
+        This project isn't on this device. <button className="underline" onClick={() => navigate("/")}>Sign in</button> to open it from the cloud.
+      </div>
+    )
+  }
+  if (status === "not-found" || !project) {
+    return (
+      <div className="p-8 text-muted-foreground">
+        Project not found, or you don't have access. <button className="underline" onClick={() => navigate("/")}>Back to dashboard</button>.
+      </div>
+    )
+  }
 
   if (project.deletedAt) {
     return (

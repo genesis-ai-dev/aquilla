@@ -82,11 +82,25 @@ This is where today's "no blur event → no write" bug class dies: every field h
 ```
 
 One component used by all three current surfaces:
-- `ProjectSettings` page — default (`compact={false}`): shows provider radio, preset, URL+Connect, API key, model dropdown, max tokens, temperature, health penalty, system prompt.
-- `AiSetupDialog` — `compact={true}`: shows provider radio, preset, URL+Connect, API key, model. Hides sliders and system prompt. "Full settings →" link remains.
+- `ProjectSettings` page — default (`compact={false}`): shows provider radio, preset, URL, API key, model dropdown, max tokens, temperature, health penalty, system prompt.
+- `AiSetupDialog` — `compact={true}`: shows provider radio, preset, URL, API key, model. Hides sliders and system prompt. "Full settings →" link remains.
 - Onboarding checklist — replaces `AiProviderStep` with `<LlmSettingsForm compact />`.
 
 No "Save" button anywhere in the form. Every field commits on its natural event.
+
+#### Auto-connect and model autoselect
+
+No explicit "Connect" button. The `/models` fetch is a side-effect of the URL (or API key, or preset) commit:
+
+- When the URL field commits (blur or preset selection), and provider is custom, fire `fetchModels(endpoint, apiKey)`.
+- When the API key field commits, if URL is set and we have not yet connected successfully, re-fire the fetch (many providers need the key before `/models` returns).
+- When the preset selector changes, the URL is updated in one compound action — set new URL, commit it, trigger the fetch. Preset change also clears any stale model list and any "connected" indicator so the UI doesn't carry models across providers.
+- While a fetch is in flight, show a small spinner inline under the URL (replaces what the Connect button communicated). On success, show "Connected — N model(s)". On failure, show the error message inline.
+- On successful fetch, if the current `model` field is empty, `commit(list[0])` automatically. If the user already has a model set (either from a prior session or a manual entry), leave their choice alone — don't clobber it.
+- The model dropdown lets the user switch at any time. Changing the dropdown commits immediately.
+- If the user types a URL that never returns models (404, CORS, unreachable), the model field falls back to a free-text input (same behavior as today's "Model (if not listed)" branch). Free-text commits on blur.
+
+The UX goal: for the common path (paste a URL, optionally paste a key), the user does nothing else and the sparkle is live. For the uncommon path (exotic provider without `/models`), they get a text fallback without extra clicks.
 
 ### Validation parity
 
@@ -109,7 +123,7 @@ By construction, the form and the gating cannot disagree about whether a configu
 
 ## Bug fixes — how they land under this design
 
-**Bug 1 (model not persisted after Connect):** `handleConnect` inside `LlmSettingsForm` calls the model field's `commit(list[0])` after setting the model list, instead of `setValue`. This is one atomic intent ("connected, auto-picked first model"), persisted immediately. `useCompletion` then reads the fresh record.
+**Bug 1 (model not persisted after Connect):** there is no Connect button to skip a persist on. The URL commit triggers the fetch; on success, the first model is `commit()`-ed through the same `useSaveProjectPatch` path every other field uses. `useCompletion` then reads the fresh record. The divergent "local setModel without save" path is gone.
 
 **Bug 2 (dialog shows different UI):** `AiSetupDialog` body becomes `<LlmSettingsForm project compact />`. The "Model (optional)" label is gone — the model field shares labeling with the full form, and `isAiConfigured`'s inline indicator tells the user exactly what's missing.
 
@@ -138,9 +152,11 @@ By construction, the form and the gating cannot disagree about whether a configu
 - `useSettingField`: (a) `setValue` alone does not call `save`; (b) `commit` calls `save` with current local value and clears dirty; (c) external `source` change while clean updates local value; (d) external `source` change while dirty does not overwrite local value until after next `commit`.
 
 **E2E (Playwright, extend `e2e/` specs):**
-- Custom endpoint golden path: open settings → switch to Custom → enter URL → Connect → assert model persisted (reload page, dropdown still set, IDB record has model) → return to editor → click sparkle → assert completion actually fires.
+- Custom endpoint golden path: open settings → switch to Custom → enter URL → blur → assert auto-connect spinner → assert model auto-selected and persisted (reload page, dropdown still set, IDB record has model) → return to editor → click sparkle → assert completion actually fires.
+- User override: after auto-select, change dropdown to a different model → assert persisted → assert sparkle uses new model.
 - Dialog parity: from editor, open sparkle dialog → assert fields match settings page LLM section (compact set) by role/label.
 - Cross-surface consistency: change provider in dialog → close dialog → open settings → assert provider reflects change.
+- `/models` failure path: enter an unreachable URL → assert inline error shown → assert free-text model fallback appears → type model id → blur → assert persisted.
 
 ## Migration / rollout
 

@@ -2,8 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react"
 import type { ProjectRecord } from "@/lib/parsers/types"
 import { getProject, updateProject } from "@/lib/store/project-index"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
-import { fetchProjectState } from "@/lib/sync/archive"
-import { minimalProjectRecord } from "@/lib/sync/cloud-projects"
+import { minimalProjectRecord, resolveCloudProject } from "@/lib/sync/cloud-projects"
 
 export type ProjectLoadStatus =
   | "loading"
@@ -40,7 +39,7 @@ export function useProject(projectId: string) {
         hasLoaded.current = true
         return
       }
-      const state = await fetchProjectState(projectId, session.jwt)
+      const state = await resolveCloudProject(projectId, session.jwt)
       if (cancelled) return
       if (!state) {
         setProject(null)

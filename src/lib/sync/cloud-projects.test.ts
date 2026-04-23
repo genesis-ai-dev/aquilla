@@ -3,6 +3,7 @@ import { describe, it, expect, vi, afterEach } from "vitest"
 import {
   fetchAccessibleProjects,
   minimalProjectRecord,
+  resolveCloudProject,
   type CloudProjectSummary,
 } from "./cloud-projects"
 
@@ -115,5 +116,75 @@ describe("minimalProjectRecord", () => {
     const record = minimalProjectRecord({ ...summary, archivedAt: null })
     expect(record.deletedAt).toBeUndefined()
     expect(record.deletedBy).toBeUndefined()
+  })
+})
+
+describe("resolveCloudProject", () => {
+  afterEach(() => { global.fetch = originalFetch })
+
+  it("returns the single-project response when that endpoint is available", async () => {
+    const calls: string[] = []
+    global.fetch = vi.fn<typeof fetch>(async (input) => {
+      const url = typeof input === "string" ? input : (input as Request).url
+      calls.push(url)
+      return new Response(JSON.stringify({
+        id: "p-1",
+        name: "Alpha",
+        gitlabProjectId: null,
+        archivedAt: null,
+        archivedBy: null,
+        role: { level: 700, name: "owner", source: "creator" },
+      }), { status: 200, headers: { "Content-Type": "application/json" } })
+    }) as unknown as typeof fetch
+
+    const result = await resolveCloudProject("p-1", "jwt", API)
+    expect(result).not.toBeNull()
+    expect(result!.id).toBe("p-1")
+    // Should hit the single-project endpoint first, no fallback needed.
+    expect(calls).toHaveLength(1)
+    expect(calls[0]).toBe(`${API}/api/v2/projects/p-1`)
+  })
+
+  it("falls back to the list endpoint when the single endpoint 404s", async () => {
+    // Mirrors the current deployment state where `GET /api/v2/projects/:id`
+    // hasn't landed yet but `GET /api/v2/projects` has. Without this fallback
+    // URL-paste into a fresh browser dead-ends on "not found".
+    const calls: string[] = []
+    global.fetch = vi.fn<typeof fetch>(async (input) => {
+      const url = typeof input === "string" ? input : (input as Request).url
+      calls.push(url)
+      if (url.endsWith("/api/v2/projects/p-1")) {
+        return new Response("not found", { status: 404 })
+      }
+      if (url.endsWith("/api/v2/projects")) {
+        return new Response(JSON.stringify({
+          projects: [
+            { id: "p-1", name: "Alpha", gitlabProjectId: null,
+              role: { level: 700, name: "owner", source: "creator" } },
+            { id: "p-2", name: "Beta", gitlabProjectId: null,
+              role: { level: 400, name: "contributor", source: "override" } },
+          ],
+        }), { status: 200, headers: { "Content-Type": "application/json" } })
+      }
+      throw new Error(`unexpected URL: ${url}`)
+    }) as unknown as typeof fetch
+
+    const result = await resolveCloudProject("p-1", "jwt", API)
+    expect(result).not.toBeNull()
+    expect(result!.id).toBe("p-1")
+    expect(calls).toHaveLength(2)
+  })
+
+  it("returns null when neither endpoint has the project", async () => {
+    global.fetch = vi.fn<typeof fetch>(async (input) => {
+      const url = typeof input === "string" ? input : (input as Request).url
+      if (url.endsWith("/api/v2/projects/p-missing")) {
+        return new Response("not found", { status: 404 })
+      }
+      return new Response(JSON.stringify({ projects: [] }), { status: 200 })
+    }) as unknown as typeof fetch
+
+    const result = await resolveCloudProject("p-missing", "jwt", API)
+    expect(result).toBeNull()
   })
 })

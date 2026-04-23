@@ -6,6 +6,7 @@
 
 import type { ProjectRecord } from "@/lib/parsers/types"
 import { FRONTIER_API_URL } from "./sync-token"
+import { fetchProjectState, type ProjectStateResponse } from "./archive"
 
 export interface CloudProjectSummary {
   id: string
@@ -74,4 +75,22 @@ export function minimalProjectRecord(summary: CloudProjectSummary): ProjectRecor
     if (summary.archivedBy?.username) record.deletedBy = summary.archivedBy.username
   }
   return record
+}
+
+/**
+ * Resolve a single project from the server by id. Tries the single-project
+ * endpoint first; falls back to the list endpoint + filter when the single
+ * endpoint 404s (happens on deployments that haven't landed the Trash-era
+ * `GET /:projectId` yet). Returns null when the user has no access or the
+ * project doesn't exist.
+ */
+export async function resolveCloudProject(
+  projectId: string,
+  jwt: string,
+  apiUrl: string = FRONTIER_API_URL
+): Promise<ProjectStateResponse | CloudProjectSummary | null> {
+  const direct = await fetchProjectState(projectId, jwt, apiUrl)
+  if (direct) return direct
+  const list = await fetchAccessibleProjects(jwt, apiUrl)
+  return list.find((p) => p.id === projectId) ?? null
 }

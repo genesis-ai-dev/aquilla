@@ -34,6 +34,10 @@ export interface FileProjection {
 export interface ProjectionResult {
   file: FileProjection
   cells: CellProjection[]
+  /** Cell IDs to delete from D1. Populated by diffProjection when a cell was
+   *  projected before but is no longer in the Y.Doc. projectDoc returns
+   *  an empty array (it doesn't have prior-state context on its own). */
+  deletedCellIds: string[]
 }
 
 export function projectDoc(
@@ -73,6 +77,7 @@ export function projectDoc(
       lastEditAt: maxEditAt > 0 ? maxEditAt : null,
     },
     cells,
+    deletedCellIds: [],
   }
 }
 
@@ -183,13 +188,12 @@ export function cellFingerprint(c: CellProjection): string {
 /**
  * Narrow a ProjectionResult to only the cells whose fingerprint differs
  * from the prior snapshot stored on the DO. Mutates `prior` to reflect
- * the new fingerprints (including deletions) so subsequent calls stay
- * accurate. File rollup is untouched — always written.
+ * the new fingerprints so subsequent calls stay accurate. File rollup is
+ * untouched — always written.
  *
- * Deletions: cells present in `prior` but missing from `result` have their
- * fingerprints removed. Actually issuing DELETEs against codex-db is out
- * of scope here (callers would need to track the dropped cell ids); for
- * now those cell rows become orphans in D1 until the file is rebuilt.
+ * Cells present in `prior` but missing from `result` are collected into
+ * `deletedCellIds` so writeProjection can DELETE them from D1, keeping the
+ * read model tidy when cells are removed from the Y.Doc.
  */
 export function diffProjection(
   result: ProjectionResult,
@@ -205,11 +209,14 @@ export function diffProjection(
       prior.set(c.cellId, fp)
     }
   }
-  // Prune removed cells so the map doesn't grow unbounded across edits.
+  const deleted: string[] = []
   for (const id of Array.from(prior.keys())) {
-    if (!seen.has(id)) prior.delete(id)
+    if (!seen.has(id)) {
+      deleted.push(id)
+      prior.delete(id)
+    }
   }
-  return { file: result.file, cells: changed }
+  return { file: result.file, cells: changed, deletedCellIds: deleted }
 }
 
 /**
@@ -295,6 +302,18 @@ export async function writeProjection(
         projectedFrom
       )
     )
+  }
+
+  // DELETE rows for cells dropped from the Y.Doc. FTS triggers on `cells`
+  // clean up cells_fts too (see migration 0001). The cell_count in the
+  // file row is already adjusted because the projection walked the live doc.
+  if (result.deletedCellIds.length > 0) {
+    const deleteStmt = db.prepare(
+      `DELETE FROM cells WHERE file_id = ? AND cell_id = ?`
+    )
+    for (const cellId of result.deletedCellIds) {
+      stmts.push(deleteStmt.bind(result.file.fileId, cellId))
+    }
   }
 
   if (stmts.length > 0) await db.batch(stmts)

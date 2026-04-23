@@ -241,7 +241,7 @@ describe("diffProjection", () => {
     doc2.destroy()
   })
 
-  it("prunes fingerprints for cells that were deleted between ticks", () => {
+  it("prunes fingerprints and reports deletedCellIds for removed cells", () => {
     const doc1 = twoCellDoc("a", "b")
     const prior = new Map<string, string>()
     diffProjection(projectDoc("p", "f", doc1), prior)
@@ -250,9 +250,35 @@ describe("diffProjection", () => {
 
     // Next doc only has cell-1 — cell-2 was removed.
     const doc2 = makeDoc(({ cells }) => addCell(cells, "cell-1", { text: "a" }))
-    diffProjection(projectDoc("p", "f", doc2), prior)
+    const diffed = diffProjection(projectDoc("p", "f", doc2), prior)
     expect(prior.size).toBe(1)
     expect(prior.has("cell-2")).toBe(false)
+    expect(diffed.deletedCellIds).toEqual(["cell-2"])
+    expect(diffed.cells).toEqual([]) // cell-1 unchanged
+    doc2.destroy()
+  })
+
+  it("emits empty deletedCellIds on first call with no prior state", () => {
+    const doc = twoCellDoc("a", "b")
+    const diffed = diffProjection(projectDoc("p", "f", doc), new Map())
+    expect(diffed.deletedCellIds).toEqual([])
+    doc.destroy()
+  })
+
+  it("handles simultaneous add + delete in one tick", () => {
+    const prior = new Map<string, string>()
+    const doc1 = twoCellDoc("a", "b")
+    diffProjection(projectDoc("p", "f", doc1), prior)
+    doc1.destroy()
+
+    // cell-2 gone, cell-3 added
+    const doc2 = makeDoc(({ cells }) => {
+      addCell(cells, "cell-1", { text: "a" })
+      addCell(cells, "cell-3", { text: "brand new" })
+    })
+    const diffed = diffProjection(projectDoc("p", "f", doc2), prior)
+    expect(diffed.deletedCellIds).toEqual(["cell-2"])
+    expect(diffed.cells.map((c) => c.cellId)).toEqual(["cell-3"])
     doc2.destroy()
   })
 })

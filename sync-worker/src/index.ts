@@ -19,7 +19,7 @@ import type { Connection, ConnectionContext } from "partyserver"
 import * as Y from "yjs"
 import { routePartykitRequest } from "partyserver"
 import { verifyTokenForDoc, shouldBeReadOnly } from "./auth"
-import { projectDoc, writeProjection } from "./projection"
+import { projectDoc, writeProjection, diffProjection } from "./projection"
 
 const ROLE_HEADER = "X-Codex-Role"
 
@@ -139,6 +139,10 @@ export class FileSync extends YServer {
   // a heuristic for "should we kick off compaction now?"; R2 is truth.
   private tailCount = 0
   private compactionInFlight = false
+  // Per-cell fingerprints from the last successful projection. Lets onSave
+  // skip D1 UPSERTs for cells that haven't changed since the previous tail
+  // write. Empty on cold start → first onSave projects everything, then diffs.
+  private projectedFingerprints = new Map<string, string>()
 
   async onLoad(): Promise<Y.Doc | void> {
     const { projectId, fileId } = parseDocId(this.name)
@@ -175,9 +179,16 @@ export class FileSync extends YServer {
     // will retry. Skip when CODEX_DB isn't bound (spike / dev without D1).
     if (this.env.CODEX_DB) {
       try {
-        const result = projectDoc(projectId, fileId, this.document)
-        await writeProjection(this.env.CODEX_DB, result, key)
+        const full = projectDoc(projectId, fileId, this.document)
+        // Only UPSERT cells whose projected fields differ from last tick.
+        // File rollup is always written (single cheap row).
+        const diffed = diffProjection(full, this.projectedFingerprints)
+        await writeProjection(this.env.CODEX_DB, diffed, key)
       } catch (err) {
+        // On failure, clear the fingerprint cache so the next onSave does a
+        // full projection — otherwise a D1 error + cache retention would
+        // leave D1 permanently behind until the DO evicts.
+        this.projectedFingerprints.clear()
         console.warn(`projection failed for ${this.name}:`, err)
       }
     }

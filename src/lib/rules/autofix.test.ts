@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest"
 import { applyRegexFix, applyLiteralFix } from "./autofix"
+import { parseBatchResponse, parsePerCellResponse } from "./autofix"
 
 describe("applyRegexFix", () => {
   it("replaces all matches with global flag", () => {
@@ -43,5 +44,68 @@ describe("applyLiteralFix", () => {
 
   it("is safe with regex metacharacters in find", () => {
     expect(applyLiteralFix("a.b", "ab", "a.b and a.b and axb")).toBe("ab and ab and axb")
+  })
+})
+
+describe("parseBatchResponse", () => {
+  it("parses a regex-replace response", () => {
+    const raw = `{"kind":"regex-replace","pattern":"foo","replacement":"bar","flags":"gi","rationale":"r"}`
+    expect(parseBatchResponse(raw)).toEqual({
+      kind: "regex-replace", pattern: "foo", replacement: "bar", flags: "gi", rationale: "r",
+    })
+  })
+
+  it("parses a none response", () => {
+    const raw = `{"kind":"none","reason":"too semantic"}`
+    expect(parseBatchResponse(raw)).toEqual({ kind: "none", reason: "too semantic" })
+  })
+
+  it("strips markdown code fences", () => {
+    const raw = "```json\n{\"kind\":\"none\",\"reason\":\"r\"}\n```"
+    expect(parseBatchResponse(raw)).toEqual({ kind: "none", reason: "r" })
+  })
+
+  it("returns null for invalid JSON", () => {
+    expect(parseBatchResponse("not json")).toBeNull()
+  })
+
+  it("returns null for unknown kind", () => {
+    expect(parseBatchResponse(`{"kind":"ignore"}`)).toBeNull()
+  })
+
+  it("returns null when regex-replace is missing required fields", () => {
+    expect(parseBatchResponse(`{"kind":"regex-replace","pattern":"p"}`)).toBeNull()
+  })
+})
+
+describe("parsePerCellResponse", () => {
+  it("parses valid fixes", () => {
+    const raw = `{"kind":"per-cell","fixes":[{"cellId":"c1","find":"a","replace":"b","rationale":"r"}]}`
+    const parsed = parsePerCellResponse(raw)
+    expect(parsed?.kind).toBe("per-cell")
+    expect(parsed?.kind === "per-cell" && parsed.fixes).toHaveLength(1)
+  })
+
+  it("parses none", () => {
+    const raw = `{"kind":"none","reason":"r"}`
+    expect(parsePerCellResponse(raw)).toEqual({ kind: "none", reason: "r" })
+  })
+
+  it("filters malformed fix entries", () => {
+    const raw = JSON.stringify({
+      kind: "per-cell",
+      fixes: [
+        { cellId: "c1", find: "a", replace: "b" },
+        { cellId: "c2", find: "x" }, // missing replace
+        { find: "a", replace: "b" },  // missing cellId
+        "bad",
+      ],
+    })
+    const parsed = parsePerCellResponse(raw)
+    expect(parsed?.kind === "per-cell" && parsed.fixes.map((f) => f.cellId)).toEqual(["c1"])
+  })
+
+  it("returns null for invalid JSON", () => {
+    expect(parsePerCellResponse("garbage")).toBeNull()
   })
 })

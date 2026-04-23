@@ -1,9 +1,18 @@
 import { describe, it, expect } from "vitest"
 import { computeSectionProgress } from "./section-progress"
 
-function mkCell(id: string, group: string, translated: string, validators: string[], audioUrl?: string) {
+function mkCell(
+  id: string,
+  section: string,
+  translated: string,
+  validators: string[],
+  audioUrl?: string,
+) {
   return {
-    id, group, translated,
+    id,
+    group: "irrelevant",
+    section,
+    translated,
     activeValidators: validators,
     audioUrl,
   } as any

@@ -30,6 +30,7 @@ export function useSectionProgress(
         id: string
         group: string
         section?: string
+        globalReferences?: string[]
         translated: string
         activeValidators: string[]
         audioUrl?: string
@@ -59,6 +60,7 @@ export function useSectionProgress(
           id: cell.get("id") as string,
           group: (cell.get("group") as string) || "",
           section: cell.get("section") as string | undefined,
+          globalReferences: cell.get("globalReferences") as string[] | undefined,
           translated,
           activeValidators,
           audioUrl: source?.metadata?.selectedAudioId,

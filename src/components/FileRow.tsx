@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react"
 import { ChevronRight, MoreHorizontal, Sparkles } from "lucide-react"
 import type { FileReference } from "@/lib/parsers/types"
+import { fileTypeHasSections } from "@/lib/parsers/types"
 import { cn } from "@/lib/utils"
 
 interface FileStats { translated: number; validated: number; total: number }
@@ -40,6 +41,7 @@ export function FileRow(props: FileRowProps) {
     ? Math.round((progress.translated / progress.total) * 100) : 0
   const validatedPct = progress && progress.total > 0
     ? Math.round((progress.validated / progress.total) * 100) : 0
+  const canExpand = fileTypeHasSections(file.type)
 
   return (
     <div
@@ -57,13 +59,17 @@ export function FileRow(props: FileRowProps) {
       }}
       tabIndex={0}
     >
-      <button
-        className="p-0.5 hover:bg-muted rounded"
-        onClick={(e) => { e.stopPropagation(); onToggleExpand() }}
-        aria-label={expanded ? "Collapse" : "Expand"}
-      >
-        <ChevronRight className={cn("h-3 w-3 transition-transform", expanded && "rotate-90")} />
-      </button>
+      {canExpand ? (
+        <button
+          className="p-0.5 hover:bg-muted rounded"
+          onClick={(e) => { e.stopPropagation(); onToggleExpand() }}
+          aria-label={expanded ? "Collapse" : "Expand"}
+        >
+          <ChevronRight className={cn("h-3 w-3 transition-transform", expanded && "rotate-90")} />
+        </button>
+      ) : (
+        <span className="w-[18px] shrink-0" aria-hidden="true" />
+      )}
       <div className="flex-1 min-w-0">
         {editing ? (
           <input

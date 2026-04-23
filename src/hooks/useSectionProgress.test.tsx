@@ -14,9 +14,9 @@ describe("useSectionProgress", () => {
 
   it("returns null while loading and sections once synced", async () => {
     const handle = createFileDoc("test-file-1", "file.usfm", "usfm", "en", "fr", [
-      { id: "c1", original: "Hello", translated: "Bonjour", context: "", group: "Chapter 1", type: "text" },
-      { id: "c2", original: "World", translated: "",        context: "", group: "Chapter 1", type: "text" },
-      { id: "c3", original: "!",     translated: "!",       context: "", group: "Chapter 2", type: "text" },
+      { id: "c1", original: "Hello", translated: "Bonjour", context: "", group: "g", section: "Chapter 1", type: "text" },
+      { id: "c2", original: "World", translated: "",        context: "", group: "g", section: "Chapter 1", type: "text" },
+      { id: "c3", original: "!",     translated: "!",       context: "", group: "g", section: "Chapter 2", type: "text" },
     ])
     await new Promise<void>((r) => handle.persistence.once("synced", () => r()))
     destroyFileDoc(handle)

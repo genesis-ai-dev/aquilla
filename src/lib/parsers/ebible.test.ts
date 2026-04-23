@@ -94,4 +94,11 @@ describe("parseEBibleCorpus", () => {
     expect(out[1].section).toBe("GEN 1")
     expect(out[2].section).toBe("GEN 2")
   })
+
+  it("tags each cell with globalReferences = [vref]", () => {
+    __setVrefsForTest(["GEN 1:1", "GEN 1:2"])
+    const out = parseEBibleCorpus("line 1\nline 2\n")
+    expect(out[0].globalReferences).toEqual(["GEN 1:1"])
+    expect(out[1].globalReferences).toEqual(["GEN 1:2"])
+  })
 })

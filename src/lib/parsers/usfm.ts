@@ -28,7 +28,13 @@ function parseBookSection(section: string, bookId: string): UsfmBookResult {
   let chapter = 0
   let verse = 0
 
-  function addString(text: string, context: string, type: CellType, section: string | undefined) {
+  function addString(
+    text: string,
+    context: string,
+    type: CellType,
+    section: string | undefined,
+    globalReferences?: string[],
+  ) {
     const segments = splitIntoSegments(text)
     for (const seg of segments) {
       strings.push({
@@ -38,6 +44,7 @@ function parseBookSection(section: string, bookId: string): UsfmBookResult {
         context,
         group: seg.group,
         section,
+        ...(globalReferences && globalReferences.length > 0 ? { globalReferences } : {}),
         type,
       })
     }
@@ -59,7 +66,8 @@ function parseBookSection(section: string, bookId: string): UsfmBookResult {
     const verseMatch = trimmed.match(/^\\v\s+(\d+)\s+(.*)/)
     if (verseMatch) {
       verse = parseInt(verseMatch[1])
-      addString(verseMatch[2], `${bookId} ${chapter}:${verse}`, "verse", `${bookId} ${chapter}`)
+      const vref = `${bookId} ${chapter}:${verse}`
+      addString(verseMatch[2], vref, "verse", `${bookId} ${chapter}`, [vref])
       continue
     }
 
@@ -73,7 +81,7 @@ function parseBookSection(section: string, bookId: string): UsfmBookResult {
 
     const paratextMatch = trimmed.match(/^\\(mt|ms|r)\d?\s+(.*)/)
     if (paratextMatch) {
-      addString(paratextMatch[2], bookId, "paratext", bookId)
+      addString(paratextMatch[2], bookId, "paratext", `${bookId} intro`)
       continue
     }
 

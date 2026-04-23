@@ -219,6 +219,7 @@ export function parseEBibleCorpus(corpusText: string): TranslatableString[] {
       context: vref,
       group: bookId,
       section,
+      globalReferences: [vref],
       type: "verse",
     })
   }

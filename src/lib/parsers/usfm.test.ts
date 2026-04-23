@@ -109,10 +109,29 @@ describe("extractUsfmStrings — section labels", () => {
     expect(heading?.section).toBe("GEN 3")
   })
 
-  it("sets section to bookId for paratext (book-level)", () => {
+  it("sets section to '<BOOK> intro' for paratext (book-level front matter)", () => {
     const usfm = "\\id GEN\n\\mt1 Genesis\n\\c 1\n\\v 1 hi\n"
     const [book] = extractUsfmStrings(usfm)
     const paratext = book.strings.find(s => s.type === "paratext")
-    expect(paratext?.section).toBe("GEN")
+    expect(paratext?.section).toBe("GEN intro")
+  })
+})
+
+describe("extractUsfmStrings — globalReferences", () => {
+  it("tags verse cells with [vref]", () => {
+    const usfm = "\\id LUK\n\\c 1\n\\v 1 First verse.\n\\v 2 Second verse.\n"
+    const [book] = extractUsfmStrings(usfm)
+    const verses = book.strings.filter(s => s.type === "verse")
+    expect(verses[0].globalReferences).toEqual(["LUK 1:1"])
+    expect(verses[1].globalReferences).toEqual(["LUK 1:2"])
+  })
+
+  it("does not tag headings or paratext with globalReferences", () => {
+    const usfm = "\\id LUK\n\\mt1 Luke\n\\c 1\n\\s1 The Coming.\n\\v 1 First verse.\n"
+    const [book] = extractUsfmStrings(usfm)
+    const heading = book.strings.find(s => s.type === "heading")
+    const paratext = book.strings.find(s => s.type === "paratext")
+    expect(heading?.globalReferences).toBeUndefined()
+    expect(paratext?.globalReferences).toBeUndefined()
   })
 })

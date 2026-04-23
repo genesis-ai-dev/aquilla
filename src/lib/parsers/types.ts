@@ -21,10 +21,23 @@ export interface TranslatableString {
   translated: string
   context: string
   group: string
-  /** Optional section label for navigation/progress. USFM/ebible set this to "BOOK CHAPTER" (e.g. "GEN 1"). When present, takes precedence over `group` for sectioning UI. */
+  /** Optional section label for navigation/progress. USFM/ebible set this to "BOOK CHAPTER" (e.g. "GEN 1"). */
   section?: string
+  /**
+   * Semantic tags external to cell identity. For scripture, the verse ref(s) this cell represents,
+   * e.g. ["LUK 1:1"] or ["LUK 1:1", "LUK 1:2"] for a verse range. Mirrors the codex-editor
+   * extension's `metadata.data.globalReferences`. Empty/omitted for non-scripture content.
+   * Section labels in the sidebar are derived from these when present.
+   */
+  globalReferences?: string[]
   type: CellType
   sourceLocation?: SourceLocation
+}
+
+/** File types whose parsers produce scripture-style sections (globalReferences populated, section labels meaningful). */
+export const SCRIPTURE_FILE_TYPES: ReadonlySet<FileType> = new Set(["usfm", "ebible"])
+export function fileTypeHasSections(type: FileType): boolean {
+  return SCRIPTURE_FILE_TYPES.has(type)
 }
 
 export interface TranslationRule {

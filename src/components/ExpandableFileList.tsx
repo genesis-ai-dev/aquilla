@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react"
 import type { FileReference } from "@/lib/parsers/types"
+import { fileTypeHasSections } from "@/lib/parsers/types"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { useSidebarExpansion } from "@/hooks/useSidebarExpansion"
 import { FileRow } from "./FileRow"
@@ -30,7 +31,7 @@ export function ExpandableFileList({
   const { expanded, toggle } = useSidebarExpansion(projectId)
   const [menu, setMenu] = useState<{ fileId: string; x: number; y: number } | null>(null)
   const [editingFileId, setEditingFileId] = useState<string | null>(null)
-  const { requestScrollToGroup } = useEditorScroll()
+  const { requestScrollToSection } = useEditorScroll()
   const groups = useMemo(() => groupByCorpus(files), [files])
 
   return (
@@ -49,7 +50,8 @@ export function ExpandableFileList({
               ) : null}
               <div className="space-y-0.5">
                 {group.files.map((file) => {
-                  const isExpanded = expanded.has(file.id)
+                  const canExpand = fileTypeHasSections(file.type)
+                  const isExpanded = canExpand && expanded.has(file.id)
                   const isEditing = editingFileId === file.id
                   return (
                     <div key={file.id}>
@@ -77,9 +79,9 @@ export function ExpandableFileList({
                           onSectionClick={(label) => {
                             if (file.id !== activeFileId) {
                               onSelectFile(file.id)
-                              setTimeout(() => requestScrollToGroup(label), 100)
+                              setTimeout(() => requestScrollToSection(label), 100)
                             } else {
-                              requestScrollToGroup(label)
+                              requestScrollToSection(label)
                             }
                           }}
                         />

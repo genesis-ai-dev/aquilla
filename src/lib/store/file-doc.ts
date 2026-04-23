@@ -53,6 +53,9 @@ export function createFileDoc(
       cell.set("context", str.context)
       cell.set("group", str.group)
       if (str.section) cell.set("section", str.section)
+      if (str.globalReferences && str.globalReferences.length > 0) {
+        cell.set("globalReferences", str.globalReferences)
+      }
       cell.set("type", str.type)
       cell.set("history", new Y.Array())
       if (str.sourceLocation) cell.set("sourceLocation", str.sourceLocation)

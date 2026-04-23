@@ -20,6 +20,7 @@ import * as Y from "yjs"
 import { routePartykitRequest } from "partyserver"
 import { verifyTokenForDoc, shouldBeReadOnly } from "./auth"
 import { projectDoc, writeProjection, diffProjection } from "./projection"
+import { handleAdminRequest } from "./admin"
 
 const ROLE_HEADER = "X-Codex-Role"
 
@@ -269,6 +270,11 @@ export class FileSync extends YServer {
 
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
+    // Admin paths are intercepted before partyserver so its routing
+    // doesn't try to treat /admin/... as a party name.
+    const adminResponse = await handleAdminRequest(request, env)
+    if (adminResponse) return adminResponse
+
     return (
       (await routePartykitRequest(request, env, {
         onBeforeConnect: async (req, lobby) => {

@@ -4,7 +4,7 @@
 // to the server when IDB misses — so pasting a project URL into a second
 // browser resolves instead of spinning "Loading..." forever.
 
-import type { FileReference, FileType, ProjectRecord } from "@/lib/parsers/types"
+import type { FileType, ProjectRecord } from "@/lib/parsers/types"
 import { FRONTIER_API_URL } from "./sync-token"
 import { fetchProjectState, type ProjectStateResponse } from "./archive"
 

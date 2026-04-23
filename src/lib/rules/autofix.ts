@@ -1,4 +1,5 @@
 import type { RuleAutofix } from "@/lib/parsers/types"
+import type { CellData } from "@/hooks/useCells"
 
 export function applyRegexFix(fix: RuleAutofix, translated: string): string {
   const re = new RegExp(fix.pattern, fix.flags)
@@ -84,4 +85,58 @@ export function parsePerCellResponse(raw: string): PerCellResponse | null {
     })
   }
   return { kind: "per-cell", fixes }
+}
+
+export interface FixPreview {
+  cellId: string
+  fileId: string
+  before: string
+  after: string
+  find?: string
+  replace?: string
+  source: "llm" | "cached-regex"
+  rationale?: string
+}
+
+export type FixProposal =
+  | { kind: "regex-replace"; pattern: string; replacement: string; flags: string; rationale?: string; previews: FixPreview[] }
+  | { kind: "per-cell"; previews: FixPreview[] }
+  | { kind: "none"; reason: string }
+
+export function buildRegexProposal(
+  fix: RuleAutofix,
+  cells: CellData[],
+  source: "llm" | "cached-regex",
+  rationale?: string,
+): FixProposal {
+  const previews: FixPreview[] = []
+  for (const c of cells) {
+    let after: string
+    try { after = applyRegexFix(fix, c.translated) } catch { continue }
+    if (after === c.translated) continue
+    previews.push({
+      cellId: c.id, fileId: c.fileId, before: c.translated, after, source, rationale,
+    })
+  }
+  return { kind: "regex-replace", pattern: fix.pattern, replacement: fix.replacement, flags: fix.flags, rationale, previews }
+}
+
+export function buildPerCellProposal(
+  response: { kind: "per-cell"; fixes: PerCellFix[] },
+  cells: CellData[],
+): FixProposal {
+  const byId = new Map(cells.map((c) => [c.id, c]))
+  const previews: FixPreview[] = []
+  for (const fx of response.fixes) {
+    const c = byId.get(fx.cellId)
+    if (!c) continue
+    if (!c.translated.includes(fx.find)) continue   // hallucination guard
+    const after = applyLiteralFix(fx.find, fx.replace, c.translated)
+    if (after === c.translated) continue
+    previews.push({
+      cellId: c.id, fileId: c.fileId, before: c.translated, after,
+      find: fx.find, replace: fx.replace, source: "llm", rationale: fx.rationale,
+    })
+  }
+  return { kind: "per-cell", previews }
 }

@@ -1,6 +1,14 @@
 import { describe, it, expect } from "vitest"
 import { applyRegexFix, applyLiteralFix } from "./autofix"
 import { parseBatchResponse, parsePerCellResponse } from "./autofix"
+import { buildRegexProposal, buildPerCellProposal } from "./autofix"
+import type { CellData } from "@/hooks/useCells"
+
+function cell(id: string, translated: string, original = ""): CellData {
+  return {
+    id, original, translated, fileId: "f1", status: "translated",
+  } as unknown as CellData
+}
 
 describe("applyRegexFix", () => {
   it("replaces all matches with global flag", () => {
@@ -107,5 +115,48 @@ describe("parsePerCellResponse", () => {
 
   it("returns null for invalid JSON", () => {
     expect(parsePerCellResponse("garbage")).toBeNull()
+  })
+})
+
+describe("buildRegexProposal", () => {
+  it("produces previews only for cells the regex changes", () => {
+    const prop = buildRegexProposal(
+      { kind: "regex-replace", pattern: "foo", replacement: "bar", flags: "g" },
+      [cell("c1", "foo here"), cell("c2", "no match"), cell("c3", "another foo")],
+      "llm",
+    )
+    expect(prop.kind).toBe("regex-replace")
+    if (prop.kind !== "regex-replace") throw new Error("wrong kind")
+    expect(prop.previews.map((p) => p.cellId)).toEqual(["c1", "c3"])
+    expect(prop.previews[0]).toMatchObject({ before: "foo here", after: "bar here", source: "llm" })
+  })
+
+  it("marks source as cached-regex when flagged", () => {
+    const prop = buildRegexProposal(
+      { kind: "regex-replace", pattern: "foo", replacement: "bar", flags: "g" },
+      [cell("c1", "foo")],
+      "cached-regex",
+    )
+    if (prop.kind !== "regex-replace") throw new Error("wrong kind")
+    expect(prop.previews[0].source).toBe("cached-regex")
+  })
+})
+
+describe("buildPerCellProposal", () => {
+  it("produces a preview per valid fix and filters hallucinated find strings", () => {
+    const cells = [cell("c1", "I don't go"), cell("c2", "do nothing"), cell("c3", "hello world")]
+    const response = {
+      kind: "per-cell" as const,
+      fixes: [
+        { cellId: "c1", find: "don't", replace: "do not" },
+        { cellId: "c2", find: "banana", replace: "x" },   // hallucinated — filter
+        { cellId: "c3", find: "world", replace: "earth" },
+        { cellId: "c999", find: "a", replace: "b" },       // unknown cell — filter
+      ],
+    }
+    const prop = buildPerCellProposal(response, cells)
+    if (prop.kind !== "per-cell") throw new Error("wrong kind")
+    expect(prop.previews.map((p) => p.cellId)).toEqual(["c1", "c3"])
+    expect(prop.previews[0]).toMatchObject({ before: "I don't go", after: "I do not go", find: "don't", replace: "do not" })
   })
 })

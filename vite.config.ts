@@ -80,7 +80,7 @@ export default defineConfig({
       output: {
         manualChunks: (id: string) => {
           if (!id.includes("node_modules")) return
-          if (id.includes("/yjs/") || id.includes("/y-indexeddb/") || id.includes("/y-webrtc/")) return "yjs"
+          if (id.includes("/yjs/") || id.includes("/y-indexeddb/") || id.includes("/y-partyserver/") || id.includes("/partyserver/")) return "yjs"
           if (id.includes("/isomorphic-git/")) return "git"
           if (id.includes("/@tiptap/")) return "tiptap"
           if (id.includes("/react/") || id.includes("/react-dom/") || id.includes("/react-router")) return "react"

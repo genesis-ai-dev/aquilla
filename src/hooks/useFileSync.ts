@@ -9,7 +9,7 @@ import {
   destroyFileSyncProvider,
   type FileSyncProviderHandle,
 } from "@/lib/sync/partyserver-provider"
-import { peerColor } from "@/lib/sync/webrtc-provider"
+import { peerColor } from "@/lib/sync/signaling-provider"
 import { makeSyncTokenFetcher } from "@/lib/sync/sync-token"
 import type { PeerState } from "@/hooks/useSync"
 import type { FrontierSession } from "@/lib/frontier/types"

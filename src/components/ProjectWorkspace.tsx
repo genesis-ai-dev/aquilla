@@ -16,6 +16,7 @@ import { useWorkspaceSearch } from "@/hooks/useWorkspaceSearch"
 import { useBacktranslation } from "@/hooks/useBacktranslation"
 import { useComments } from "@/hooks/useComments"
 import { SearchDialog } from "./SearchDialog"
+import { ParallelPassagesPanel, type ParallelPanelMode, type ParallelPanelScope } from "./ParallelPassagesPanel"
 import type { EditorTableHandle } from "./EditorTable"
 import type { WorkspaceSearchResult } from "@/lib/search/workspace-index"
 import { StatusBar } from "./StatusBar"
@@ -98,6 +99,9 @@ export function ProjectWorkspace() {
   const [commentsCellId, setCommentsCellId] = useState<string | null>(null)
   const [historyCellId, setHistoryCellId] = useState<string | null>(null)
   const [searchOpen, setSearchOpen] = useState(false)
+  const [parallelOpen, setParallelOpen] = useState(false)
+  const [parallelMode, setParallelMode] = useState<ParallelPanelMode>("search")
+  const [parallelScope, setParallelScope] = useState<ParallelPanelScope>("project")
   const [shareOpen, setShareOpen] = useState(false)
   const [activeShareToken, setActiveShareToken] = useState<string | null>(null)
   const [shareRefreshKey, setShareRefreshKey] = useState(0)
@@ -171,7 +175,7 @@ export function ProjectWorkspace() {
     videoPlayerRef.current?.play().catch(() => { /* autoplay blocked */ })
   }, [cells])
 
-  const { buildIndex, search: runSearch, results: searchResults, loading: searchLoading, ready: searchReady } = useWorkspaceSearch(project?.files || [])
+  const { buildIndex, rebuild: rebuildSearchIndex, search: runSearch, results: searchResults, loading: searchLoading, ready: searchReady } = useWorkspaceSearch(project?.files || [])
 
   const { rules, penalties } = useRules(project ?? null, refresh)
   const { addThread, addMessage, resolveThread, reopenThread } = useComments(doc, currentUsername)
@@ -292,6 +296,23 @@ export function ProjectWorkspace() {
         if (!activeFileId || !hasUnfinished) return
         e.preventDefault()
         handleJumpNextUnfinished()
+      }
+      // Parallel passages shortcuts mirror codex-editor:
+      //   Cmd/Ctrl+F        → search in current file
+      //   Cmd/Ctrl+Shift+F  → search across all files
+      //   Cmd/Ctrl+Shift+R  → search + replace across all files
+      const key = e.key.toLowerCase()
+      if ((e.metaKey || e.ctrlKey) && !e.altKey && key === "f") {
+        e.preventDefault()
+        setParallelMode("search")
+        setParallelScope(e.shiftKey ? "project" : activeFileId ? "file" : "project")
+        setParallelOpen(true)
+      }
+      if ((e.metaKey || e.ctrlKey) && e.shiftKey && key === "r") {
+        e.preventDefault()
+        setParallelMode("replace")
+        setParallelScope("project")
+        setParallelOpen(true)
       }
     }
     document.addEventListener("keydown", handler)
@@ -821,6 +842,26 @@ export function ProjectWorkspace() {
         open={searchOpen} onOpenChange={setSearchOpen}
         onReady={buildIndex} loading={searchLoading} ready={searchReady}
         results={searchResults} onSearch={runSearch} onSelect={handleSearchSelect}
+      />
+      <ParallelPassagesPanel
+        open={parallelOpen}
+        onOpenChange={setParallelOpen}
+        mode={parallelMode}
+        onModeChange={setParallelMode}
+        scope={parallelScope}
+        onScopeChange={setParallelScope}
+        activeFileId={activeFileId}
+        activeFileName={activeFileId ? project.files.find((f) => f.id === activeFileId)?.name ?? null : null}
+        activeDoc={doc}
+        loading={searchLoading}
+        ready={searchReady}
+        results={searchResults}
+        onReady={buildIndex}
+        onSearch={runSearch}
+        onSelect={handleSearchSelect}
+        username={currentUsername}
+        isReadOnly={isReadOnly}
+        onAfterReplace={rebuildSearchIndex}
       />
       <SharePanel
         open={shareOpen} onOpenChange={setShareOpen}

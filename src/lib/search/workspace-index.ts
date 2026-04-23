@@ -55,7 +55,11 @@ export class WorkspaceIndex {
     }
   }
 
-  search(query: string, limit = 20): WorkspaceSearchResult[] {
+  search(
+    query: string,
+    limit = 20,
+    options: { fileId?: string } = {},
+  ): WorkspaceSearchResult[] {
     const cleaned = query.trim()
     if (!cleaned) return []
 
@@ -65,6 +69,7 @@ export class WorkspaceIndex {
     const results: WorkspaceSearchResult[] = []
 
     for (const cell of this.cells) {
+      if (options.fileId && cell.fileId !== options.fileId) continue
       const matched: string[] = []
       let idfSum = 0
       for (const t of queryTokens) {

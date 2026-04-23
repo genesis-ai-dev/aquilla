@@ -74,6 +74,7 @@ import { SetupChecklistDrawer } from "./onboarding/SetupChecklistDrawer"
 import { useFeatureFlag } from "@/hooks/useFeatureFlag"
 import { NextUnfinishedButton } from "./NextUnfinishedButton"
 import { useNextUnfinished } from "@/hooks/useNextUnfinished"
+import { AiSetupDialog } from "./AiSetupDialog"
 
 export function ProjectWorkspace() {
   const { id: projectId, fileId: routeFileId } = useParams<{ id: string; fileId?: string }>()
@@ -98,6 +99,7 @@ export function ProjectWorkspace() {
   const [shareOpen, setShareOpen] = useState(false)
   const [activeShareToken, setActiveShareToken] = useState<string | null>(null)
   const [shareRefreshKey, setShareRefreshKey] = useState(0)
+  const [aiSetupOpen, setAiSetupOpen] = useState(false)
   const editorRef = useRef<EditorTableHandle>(null)
   const { doc } = useFileDoc(activeFileId)
   // Prefer the Frontier session username (authenticated identity) over the
@@ -697,6 +699,7 @@ export function ProjectWorkspace() {
             isAnonymous={!frontierSession}
             breakdownMap={health.breakdownMap}
             onJumpToCell={jumpToCellId}
+            onAiSetupNeeded={() => setAiSetupOpen(true)}
           />
         ) : <p className="p-4 text-muted-foreground">Loading file...</p>) : (
           <p className="p-4 text-muted-foreground">Select a file from the sidebar, or import a file.</p>
@@ -764,6 +767,14 @@ export function ProjectWorkspace() {
           onDismiss={() => { dismissChecklist(); setChecklistOpen(false) }}
           onProjectUpdated={handleProjectUpdated}
           onSharesChanged={refreshChecklistShares}
+        />
+      )}
+      {project && (
+        <AiSetupDialog
+          open={aiSetupOpen}
+          onOpenChange={setAiSetupOpen}
+          project={project}
+          onUpdated={handleProjectUpdated}
         />
       )}
       <ImportDialog open={importOpen} onOpenChange={setImportOpen}

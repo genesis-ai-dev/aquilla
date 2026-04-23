@@ -138,7 +138,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   syncProvider, collabUser,
   activeCueIndex, onSeekToCue,
   lineNumbersEnabled, cellLabelsEnabled, sourceTextDirection, targetTextDirection,
-  isAnonymous, breakdownMap, onJumpToCell,
+  isAnonymous, breakdownMap, onJumpToCell, onAiSetupNeeded,
 }, ref) {
   const permissions = useProjectPermissions(project)
   const canEdit = permissions.canEditContent
@@ -250,6 +250,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
                 isAnonymous={isAnonymous}
                 breakdown={breakdownMap?.get(cell.id)}
                 onJumpToCell={onJumpToCell}
+                onAiSetupNeeded={onAiSetupNeeded}
                 onDragStart={() => {
                   isDragging.current = true
                   dragCells.current = new Set([cell.id])
@@ -304,6 +305,7 @@ interface EditorRowProps {
   isAnonymous?: boolean
   breakdown?: CellHealthBreakdown
   onJumpToCell?: (cellId: string) => void
+  onAiSetupNeeded?: () => void
 }
 
 function EditorRow({
@@ -317,7 +319,7 @@ function EditorRow({
   isActiveCue: _isActiveCue, onSeekToCue,
   onDragStart, onDragEnter,
   rowIndex, lineNumbersEnabled, cellLabelsEnabled, sourceTextDirection, targetTextDirection, gridCols,
-  isAnonymous, breakdown, onJumpToCell,
+  isAnonymous, breakdown, onJumpToCell, onAiSetupNeeded,
 }: EditorRowProps) {
   function handleChange(e: React.ChangeEvent<HTMLTextAreaElement>) {
     appendCellHistory(doc, cell.id, {
@@ -588,6 +590,11 @@ function EditorRow({
             onComplete={() => onCompleteSingle(cell)}
             onDragStart={onDragStart}
             onDragEnter={onDragEnter}
+            onSetupNeeded={
+              !isCompletionConfigured && editable && !isAnonymous
+                ? onAiSetupNeeded
+                : undefined
+            }
             tooltip={
               isAnonymous
                 ? "Sign in for AI translations"
@@ -595,7 +602,7 @@ function EditorRow({
                   ? "Read-only (imported from git)"
                   : isCompletionConfigured
                     ? "Generate translation"
-                    : "Configure LLM in settings"
+                    : "Set up AI to enable"
             }
           />
           {onSeekToCue && (

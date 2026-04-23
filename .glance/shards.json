@@ -408,7 +408,7 @@
     ],
     "created_at": "2026-04-20T12:07:02.130815+00:00",
     "updated_at": "2026-04-20T12:07:02.130834+00:00",
-    "last_viewed": "2026-04-20T21:08:33.327815+00:00",
+    "last_viewed": "2026-04-22T21:40:41.346547+00:00",
     "stale_views": 0
   },
   {
@@ -569,6 +569,53 @@
     ],
     "created_at": "2026-04-21T03:37:35.131750+00:00",
     "updated_at": "2026-04-21T03:37:35.131759+00:00",
+    "last_viewed": null,
+    "stale_views": 0
+  },
+  {
+    "id": "a7cbfc265a8a",
+    "file": "src/components/SparkleButton.tsx",
+    "anchor": {
+      "from_text": "export function SparkleButton({ disabled, loading, onComplete, onDragStart, onDragEnter, tooltip }",
+      "to_text": "}",
+      "function_anchor": "SparkleButton",
+      "start_line": 4,
+      "end_line": 4
+    },
+    "original_content": "export function SparkleButton({ disabled, loading, onComplete, onDragStart, onDragEnter, tooltip }: {",
+    "original_hash": "edd76f5117339fc1",
+    "summary": "SparkleButton \u2014 disabled when !isCompletionConfigured || !editable || isAnonymous. Tooltip switches based on reason. Currently no click-through for disabled state.",
+    "tags": [
+      "sparkle",
+      "ai",
+      "ui"
+    ],
+    "created_at": "2026-04-22T21:42:48.436894+00:00",
+    "updated_at": "2026-04-22T21:42:48.437219+00:00",
+    "last_viewed": null,
+    "stale_views": 0
+  },
+  {
+    "id": "e587a6d6ffcb",
+    "file": "src/components/EditorTable.tsx",
+    "anchor": {
+      "from_text": "interface EditorTableProps {",
+      "to_text": "isAnonymous?: boolean",
+      "function_anchor": null,
+      "start_line": 94,
+      "end_line": 124
+    },
+    "original_content": "interface EditorTableProps {\n  project: ProjectRecord\n  cells: CellData[]\n  doc: Y.Doc\n  username: string\n  isCompletionConfigured: boolean\n  completing: Map<string, string>\n  examples: Map<string, ScoredPair[]>\n  errors: Map<string, string>\n  onCompleteSingle: (cell: CellData) => void\n  onCompleteBatch: (cells: CellData[]) => void\n  healthMap: Map<string, number>\n  infractions?: Map<string, RuleInfraction[]>\n  rules?: TranslationRule[]\n  onInfractionClick?: (ruleId: string) => void\n  isBacktranslationConfigured?: boolean\n  onBacktranslate?: (cell: CellData) => void\n  backtranslating?: Set<string>\n  backtranslationErrors?: Map<string, string>\n  cellOpenCommentCount?: Map<string, number>\n  onOpenComments?: (cellId: string) => void\n  onOpenHistory?: (cellId: string) => void\n  syncProvider?: import(\"y-partyserver/provider\").default | null\n  collabUser?: { name: string; color: string }\n  activeCueIndex?: number\n  onSeekToCue?: (cellId: string) => void\n  lineNumbersEnabled: boolean\n  cellLabelsEnabled: boolean\n  sourceTextDirection: \"ltr\" | \"rtl\"\n  targetTextDirection: \"ltr\" | \"rtl\"\n  isAnonymous?: boolean",
+    "original_hash": "9fb56699844480e9",
+    "summary": "EditorTableProps \u2014 isCompletionConfigured: boolean controls SparkleButton disabled state. SparkleButton at line ~583 with tooltip switching on isAnonymous/editable/isCompletionConfigured.",
+    "tags": [
+      "sparkle",
+      "ai",
+      "editor",
+      "ui"
+    ],
+    "created_at": "2026-04-22T21:42:50.477079+00:00",
+    "updated_at": "2026-04-22T21:42:50.477085+00:00",
     "last_viewed": null,
     "stale_views": 0
   }

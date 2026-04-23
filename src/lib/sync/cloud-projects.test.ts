@@ -117,6 +117,32 @@ describe("minimalProjectRecord", () => {
     expect(record.deletedAt).toBeUndefined()
     expect(record.deletedBy).toBeUndefined()
   })
+
+  it("maps the summary's files[] into FileReference[] on the record", () => {
+    // Server-side list endpoint joins codex-db.files; the client should
+    // carry those through so the sidebar populates on first hydration
+    // without an extra round trip.
+    const withFiles: CloudProjectSummary = {
+      ...summary,
+      files: [
+        { id: "f-1", name: "GEN", type: "usfm", cellCount: 1533 },
+        { id: "f-2", name: "EXO", type: "usfm", cellCount: 1213 },
+      ],
+    }
+    const record = minimalProjectRecord(withFiles)
+    expect(record.files).toHaveLength(2)
+    expect(record.files[0].id).toBe("f-1")
+    expect(record.files[0].name).toBe("GEN")
+    expect(record.files[0].type).toBe("usfm")
+    expect(record.files[0].cellCount).toBe(1533)
+    expect(typeof record.files[0].createdAt).toBe("string")
+  })
+
+  it("defaults files to [] when the summary omits them", () => {
+    // Single-project endpoint may not return files; don't crash.
+    const record = minimalProjectRecord(summary)
+    expect(record.files).toEqual([])
+  })
 })
 
 describe("resolveCloudProject", () => {

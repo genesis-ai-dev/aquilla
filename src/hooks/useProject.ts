@@ -26,24 +26,35 @@ export function useProject(projectId: string) {
     ;(async () => {
       const cached = await getProject(projectId)
       if (cancelled) return
-      if (cached) {
+
+      // If we have a cloud-hydrated record (syncRole set) with an empty
+      // files list, treat it as a stale stub and refresh from the server.
+      // Earlier hydrations produced these before the list endpoint returned
+      // files inline. Also catches the legitimate "brand new empty project"
+      // case — extra fetch per mount is acceptable.
+      const isStaleStub = Boolean(
+        cached && cached.syncRole && (cached.files?.length ?? 0) === 0
+      )
+
+      if (cached && !isStaleStub) {
         setProject(cached)
         setStatus("ready")
         hasLoaded.current = true
         return
       }
-      // IDB miss — try the server so a pasted URL resolves on a fresh device.
+      // IDB miss (or stale stub) — try the server so a pasted URL resolves
+      // on a fresh device and stubs get backfilled with their file list.
       if (!session?.jwt) {
-        setProject(null)
-        setStatus("no-session")
+        setProject(cached ?? null)
+        setStatus(cached ? "ready" : "no-session")
         hasLoaded.current = true
         return
       }
       const state = await resolveCloudProject(projectId, session.jwt)
       if (cancelled) return
       if (!state) {
-        setProject(null)
-        setStatus("not-found")
+        setProject(cached ?? null)
+        setStatus(cached ? "ready" : "not-found")
         hasLoaded.current = true
         return
       }

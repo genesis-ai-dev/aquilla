@@ -4,9 +4,16 @@
 // to the server when IDB misses — so pasting a project URL into a second
 // browser resolves instead of spinning "Loading..." forever.
 
-import type { ProjectRecord } from "@/lib/parsers/types"
+import type { FileReference, FileType, ProjectRecord } from "@/lib/parsers/types"
 import { FRONTIER_API_URL } from "./sync-token"
 import { fetchProjectState, type ProjectStateResponse } from "./archive"
+
+export interface CloudFileSummary {
+  id: string
+  name: string
+  type: string
+  cellCount: number
+}
 
 export interface CloudProjectSummary {
   id: string
@@ -21,6 +28,10 @@ export interface CloudProjectSummary {
     name: string
     source: string
   }
+  /** Populated by the list endpoint via a join against codex-db.files. The
+   *  single-project endpoint may omit. Hydration treats absence as "unknown"
+   *  rather than "empty" so we don't clobber a cached local file list. */
+  files?: CloudFileSummary[]
 }
 
 /**
@@ -55,19 +66,28 @@ export async function fetchAccessibleProjects(
  * ProjectOrigin requires clone metadata we don't have.
  */
 export function minimalProjectRecord(summary: CloudProjectSummary): ProjectRecord {
+  const now = new Date().toISOString()
   const record: ProjectRecord = {
     id: summary.id,
     name: summary.name,
     sourceLanguage: "",
     targetLanguage: "",
-    createdAt: new Date().toISOString(),
-    files: [],
+    createdAt: now,
+    files: (summary.files ?? []).map((f) => ({
+      id: f.id,
+      name: f.name,
+      // Server sends the raw string; FileType is a union we widen back here
+      // and accept "unknown" as an unexpected value rather than crashing.
+      type: f.type as FileType,
+      createdAt: now,
+      cellCount: f.cellCount,
+    })),
     members: [],
     syncRole: {
       level: summary.role.level,
       name: summary.role.name,
       source: summary.role.source,
-      fetchedAt: new Date().toISOString(),
+      fetchedAt: now,
     },
   }
   if (summary.archivedAt) {

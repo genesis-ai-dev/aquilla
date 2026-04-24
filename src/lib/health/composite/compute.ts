@@ -37,6 +37,44 @@ export interface CompositeOutput {
 
 const MAX_ANCESTRY_ITERATIONS = 3
 
+/**
+ * Compute one cell's composite health using the provided `peerHealth` map
+ * for ancestry lookups. Pure: takes the snapshot it needs, returns the score
+ * plus breakdown, doesn't mutate. Callers that want the fixed-point
+ * relaxation (project-wide compute) iterate this; incremental callers
+ * (HealthStore) run it once per changed cell and accept that ancestry drift
+ * will catch up on the next direct touch — the spreadsheet model, where
+ * each cell is what it was last computed to be.
+ */
+export function computeOneCellHealth(
+  cell: CompositeCell,
+  rules: TranslationRule[],
+  config: HealthConfig,
+  requiredValidations: number,
+  peerHealth: Map<string, number>,
+): { score: number; breakdown: CellHealthBreakdown } {
+  const vg = validationGap(cell.validatorCount, requiredValidations, config.caps.validationGap)
+  const ap = ancestryPenalty(cell.examples, peerHealth, config.caps.ancestryPenalty)
+  const tfidfOverlap = weightedTokenOverlap(cell.branchingSource, cell.branchingTarget)
+  const idJaccard = weightedJaccard(cell.plainSource, cell.plainTarget)
+  const np = neighborhoodPenalty({
+    branchingSource: cell.branchingSource,
+    branchingTarget: cell.branchingTarget,
+    plainSource: cell.plainSource,
+    plainTarget: cell.plainTarget,
+    weights: config.neighborhoodWeights,
+    cap: config.caps.neighborhoodPenalty,
+  })
+  const rp = rulePenalty(cell.infractions, rules, config.rulePenalties, config.caps.rulePenalty)
+  const rawScore = 100 - vg - ap - np - rp
+  const score = Math.max(0, Math.min(100, Math.round(rawScore)))
+  const breakdown = buildBreakdown(
+    cell, vg, ap, np, rp, score, peerHealth,
+    requiredValidations, idJaccard, tfidfOverlap,
+  )
+  return { score, breakdown }
+}
+
 export function computeCompositeHealth(input: CompositeInput): CompositeOutput {
   const healthMap = new Map<string, number>()
   const breakdownMap = new Map<string, CellHealthBreakdown>()
@@ -48,33 +86,15 @@ export function computeCompositeHealth(input: CompositeInput): CompositeOutput {
     let changed = false
 
     for (const cell of active) {
-      const vg = validationGap(cell.validatorCount, input.requiredValidations, input.config.caps.validationGap)
-      const ap = ancestryPenalty(cell.examples, healthMap, input.config.caps.ancestryPenalty)
-      const tfidfOverlap = weightedTokenOverlap(cell.branchingSource, cell.branchingTarget)
-      const idJaccard = weightedJaccard(cell.plainSource, cell.plainTarget)
-      const np = neighborhoodPenalty({
-        branchingSource: cell.branchingSource,
-        branchingTarget: cell.branchingTarget,
-        plainSource: cell.plainSource,
-        plainTarget: cell.plainTarget,
-        weights: input.config.neighborhoodWeights,
-        cap: input.config.caps.neighborhoodPenalty,
-      })
-      const rp = rulePenalty(cell.infractions, input.rules, input.config.rulePenalties, input.config.caps.rulePenalty)
-
-      const rawScore = 100 - vg - ap - np - rp
-      const score = Math.max(0, Math.min(100, Math.round(rawScore)))
-
+      const { score, breakdown } = computeOneCellHealth(
+        cell, input.rules, input.config, input.requiredValidations, healthMap,
+      )
       const prev = healthMap.get(cell.id)
       if (prev !== score) {
         healthMap.set(cell.id, score)
         changed = true
       }
-
-      breakdownMap.set(cell.id, buildBreakdown(
-        cell, vg, ap, np, rp, score, healthMap,
-        input.requiredValidations, idJaccard, tfidfOverlap,
-      ))
+      breakdownMap.set(cell.id, breakdown)
     }
 
     if (!changed) break

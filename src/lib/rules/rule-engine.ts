@@ -24,20 +24,35 @@ export function checkRules(
 
   for (const [fileId, cells] of fileCells) {
     for (const cell of cells) {
-      if (cell.status === "empty" || !cell.translated.trim()) continue
-
-      for (const rule of enabledRules) {
-        const infraction = checkRule(rule, cell, fileId)
-        if (infraction) {
-          const existing = infractions.get(cell.id) || []
-          existing.push(infraction)
-          infractions.set(cell.id, existing)
-        }
-      }
+      const cellInf = checkRulesForCell(cell, fileId, enabledRules)
+      if (cellInf.length > 0) infractions.set(cell.id, cellInf)
     }
   }
 
   return infractions
+}
+
+/**
+ * Run every enabled rule against one cell. Returns its infractions in an
+ * array (possibly empty). Exported so incremental callers can re-check only
+ * the cells whose content changed — the rule set is pure per-cell, so a
+ * keystroke in X never requires re-evaluating rules on any Y.
+ *
+ * Pass pre-filtered `enabledRules` to avoid re-filtering on every call.
+ */
+export function checkRulesForCell(
+  cell: CellData,
+  fileId: string,
+  enabledRules: TranslationRule[],
+): RuleInfraction[] {
+  if (cell.status === "empty" || !cell.translated.trim()) return []
+  if (enabledRules.length === 0) return []
+  const out: RuleInfraction[] = []
+  for (const rule of enabledRules) {
+    const infraction = checkRule(rule, cell, fileId)
+    if (infraction) out.push(infraction)
+  }
+  return out
 }
 
 function checkRule(rule: TranslationRule, cell: CellData, fileId: string): RuleInfraction | null {

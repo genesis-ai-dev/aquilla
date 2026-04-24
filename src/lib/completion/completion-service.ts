@@ -76,6 +76,13 @@ export async function complete(options: CompleteOptions): Promise<string> {
   const provider = resolveProvider(options.settings)
   const { url, headers } = await buildRequestTarget(provider, options.settings, options.session)
 
+  // The Frontier worker's SSE proxy drops OpenRouter content chunks that
+  // straddle `reader.read()` boundaries (fixed in the worker but not yet
+  // deployed), which surfaces as an empty completion. Force non-streaming
+  // for `frontier` until the worker fix ships; custom providers (BYO-key)
+  // still stream normally.
+  const useStream = options.stream === true && provider !== "frontier"
+
   const res = await fetch(url, {
     method: "POST",
     headers: { "Content-Type": "application/json", ...headers },
@@ -84,7 +91,7 @@ export async function complete(options: CompleteOptions): Promise<string> {
       messages: options.messages,
       max_tokens: options.settings.maxTokens,
       temperature: options.settings.temperature,
-      stream: options.stream || false,
+      stream: useStream,
     }),
   })
   if (!res.ok) {
@@ -96,24 +103,80 @@ export async function complete(options: CompleteOptions): Promise<string> {
     throw new Error(`Completion failed: ${res.status} ${text}`)
   }
 
-  if (options.stream && options.onChunk && res.body) {
-    const reader = res.body.getReader()
-    const decoder = new TextDecoder()
-    let full = ""
-    while (true) {
-      const { done, value } = await reader.read()
-      if (done) break
-      for (const line of decoder.decode(value, { stream: true }).split("\n").filter((l) => l.startsWith("data: "))) {
-        const json = line.slice(6)
-        if (json === "[DONE]") break
-        try { const d = JSON.parse(json).choices?.[0]?.delta?.content || ""; if (d) { full += d; options.onChunk(full) } } catch {}
-      }
-    }
-    return full.trim()
+  if (useStream && options.onChunk && res.body) {
+    return consumeStream(res.body, options.onChunk)
   }
 
   const data = await res.json()
   return data.choices[0]?.message?.content?.trim() || ""
+}
+
+/**
+ * Consume an OpenAI-compatible SSE stream from `/chat/completions`.
+ *
+ * Two correctness concerns the naive per-chunk split got wrong:
+ *   1. SSE events span arbitrary `reader.read()` boundaries — we must buffer
+ *      incomplete lines across reads instead of silently losing them.
+ *   2. Streaming endpoints return HTTP 200 and embed errors inline
+ *      (subscription limits, upstream provider failures). If we only look for
+ *      `choices[0].delta.content`, those errors surface as an empty string and
+ *      the user sees a blank translation. Detect `data: {"error": ...}` frames
+ *      and throw so the caller can surface the message.
+ */
+async function consumeStream(
+  body: ReadableStream<Uint8Array>,
+  onChunk: (text: string) => void,
+): Promise<string> {
+  const reader = body.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ""
+  let full = ""
+
+  const processLine = (line: string): "continue" | "done" => {
+    if (!line.startsWith("data: ")) return "continue"
+    const payload = line.slice(6).trim()
+    if (!payload) return "continue"
+    if (payload === "[DONE]") return "done"
+    let parsed: {
+      choices?: { delta?: { content?: string } }[]
+      error?: string | { message?: string }
+      message?: string
+    }
+    try { parsed = JSON.parse(payload) } catch {
+      // Shouldn't happen with proper line buffering; log so we notice if upstream changes shape.
+      console.warn("[completion] skipped unparseable SSE frame:", payload.slice(0, 200))
+      return "continue"
+    }
+    if (parsed.error) {
+      const msg = typeof parsed.error === "string"
+        ? (parsed.message || parsed.error)
+        : (parsed.error.message || parsed.message || "Completion stream error")
+      throw new Error(msg)
+    }
+    const delta = parsed.choices?.[0]?.delta?.content || ""
+    if (delta) {
+      full += delta
+      onChunk(full)
+    }
+    return "continue"
+  }
+
+  while (true) {
+    const { done, value } = await reader.read()
+    if (done) {
+      // Flush any trailing line left in the buffer.
+      if (buffer.trim()) processLine(buffer.trim())
+      break
+    }
+    buffer += decoder.decode(value, { stream: true })
+    let newlineIdx: number
+    while ((newlineIdx = buffer.indexOf("\n")) !== -1) {
+      const line = buffer.slice(0, newlineIdx).replace(/\r$/, "")
+      buffer = buffer.slice(newlineIdx + 1)
+      if (processLine(line) === "done") return full.trim()
+    }
+  }
+  return full.trim()
 }
 
 async function buildRequestTarget(

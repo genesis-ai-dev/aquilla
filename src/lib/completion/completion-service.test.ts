@@ -244,4 +244,79 @@ describe("complete", () => {
       complete({ settings: { ...BASE, provider: "custom", endpoint: "" }, session: null, messages: msg }),
     ).rejects.toThrow(/No custom endpoint/)
   })
+
+  // Helper to build a streaming Response from a sequence of byte chunks.
+  function streamResponse(chunks: string[]): Response {
+    const encoder = new TextEncoder()
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        for (const c of chunks) controller.enqueue(encoder.encode(c))
+        controller.close()
+      },
+    })
+    return new Response(stream, { status: 200, headers: { "Content-Type": "text/event-stream" } })
+  }
+
+  it("stream: accumulates content even when SSE frames split across chunk boundaries", async () => {
+    // Simulate Cloudflare-style fragmentation: a single SSE event arrives split
+    // across two reads. The naive split-by-\n-per-read parser loses this data.
+    fetchMock.mockResolvedValueOnce(streamResponse([
+      `data: {"choices":[{"delta":{"content":"Hel`,
+      `lo"}}]}\n\ndata: {"choices":[{"delta":{"content":" world"}}]}\n\ndata: [DONE]\n\n`,
+    ]))
+    const pieces: string[] = []
+    const out = await complete({
+      settings: { ...BASE, provider: "custom", endpoint: "http://localhost:8000", model: "x" }, session: null, messages: msg,
+      stream: true, onChunk: (t) => pieces.push(t),
+    })
+    expect(out).toBe("Hello world")
+    expect(pieces.at(-1)).toBe("Hello world")
+  })
+
+  it("stream: surfaces server-sent error chunks as thrown errors", async () => {
+    // Streaming endpoints return HTTP 200 then embed errors inline. The client
+    // must throw so callers see the failure instead of an empty string.
+    fetchMock.mockResolvedValueOnce(streamResponse([
+      `data: {"error":"subscription_limit","message":"Monthly credits exhausted"}\n\n`,
+    ]))
+    await expect(complete({
+      settings: { ...BASE, provider: "custom", endpoint: "http://localhost:8000", model: "x" }, session: null, messages: msg,
+      stream: true, onChunk: () => {},
+    })).rejects.toThrow(/Monthly credits exhausted/)
+  })
+
+  it("stream: handles multi-byte UTF-8 split across chunks", async () => {
+    // "é" is 0xC3 0xA9 — split it between reads to verify decoder stream mode.
+    const bytes = new TextEncoder().encode(`data: {"choices":[{"delta":{"content":"café"}}]}\n\ndata: [DONE]\n\n`)
+    // Find byte index of 'é' first byte and split there.
+    const idx = [...bytes].findIndex((b) => b === 0xc3)
+    const chunks = [bytes.slice(0, idx + 1), bytes.slice(idx + 1)]
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        for (const c of chunks) controller.enqueue(c)
+        controller.close()
+      },
+    })
+    fetchMock.mockResolvedValueOnce(new Response(stream, { status: 200 }))
+    const out = await complete({
+      settings: { ...BASE, provider: "custom", endpoint: "http://localhost:8000", model: "x" }, session: null, messages: msg,
+      stream: true, onChunk: () => {},
+    })
+    expect(out).toBe("café")
+  })
+
+  it("frontier: forces non-streaming even when caller requests stream", async () => {
+    // The Frontier worker's SSE proxy currently drops content; until the fix
+    // is deployed the client must fall back to a single-shot JSON request.
+    fetchMock.mockResolvedValueOnce(okJson({ choices: [{ message: { content: "translated" } }] }))
+    const pieces: string[] = []
+    const out = await complete({
+      settings: { ...BASE, provider: "frontier" }, session: SESSION, messages: msg,
+      stream: true, onChunk: (t) => pieces.push(t),
+    })
+    expect(out).toBe("translated")
+    expect(pieces).toEqual([])
+    const body = JSON.parse((fetchMock.mock.calls[0][1] as RequestInit).body as string)
+    expect(body.stream).toBe(false)
+  })
 })

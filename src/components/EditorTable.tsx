@@ -236,50 +236,66 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
       <div style={{ height: `${virtualizer.getTotalSize()}px`, width: "100%", position: "relative" }}>
         {virtualizer.getVirtualItems().map((virtualRow) => {
           const cell = cells[virtualRow.index]
+          // The positioning wrapper lives OUTSIDE MemoizedRow. When the typed
+          // cell grows in height, every row below it gets a new virtualRow.start
+          // — if that value crossed the memo boundary, every shifted row would
+          // re-render. Here the position-carrying div is a fresh element each
+          // parent render (cheap), but MemoizedRow below it sees stable props.
           return (
-            <MemoizedRow
+            <div
               key={cell.id}
-              virtualRowStart={virtualRow.start}
-              measureRef={virtualizer.measureElement}
-              project={project}
-              cell={cell}
-              doc={doc}
-              username={username}
-              editable={canEdit}
-              isCompletionConfigured={isCompletionConfigured}
-              examples={examples}
-              completing={completing}
-              errors={errors}
-              healthMap={healthMap}
-              infractions={infractions}
-              ruleMap={ruleMap}
-              onCompleteSingle={onCompleteSingle}
-              onInfractionClick={onInfractionClick}
-              isBacktranslationConfigured={isBacktranslationConfigured}
-              backtranslating={backtranslating}
-              backtranslationErrors={backtranslationErrors}
-              onBacktranslate={onBacktranslate}
-              cellOpenCommentCount={cellOpenCommentCount}
-              onOpenComments={onOpenComments}
-              onOpenHistory={onOpenHistory}
-              syncProvider={syncProvider}
-              collabUser={collabUser}
-              activeCueIndex={activeCueIndex}
-              onSeekToCue={onSeekToCue}
-              rowIndex={virtualRow.index}
-              lineNumbersEnabled={lineNumbersEnabled}
-              cellLabelsEnabled={cellLabelsEnabled}
-              sourceTextDirection={sourceTextDirection}
-              targetTextDirection={targetTextDirection}
-              gridCols={gridCols}
-              isAnonymous={isAnonymous}
-              breakdownMap={breakdownMap}
-              onJumpToCell={onJumpToCell}
-              onAiSetupNeeded={onAiSetupNeeded}
-              onOpenRecording={onOpenRecording}
-              onDragStart={handleDragStart}
-              onDragEnter={handleDragEnter}
-            />
+              data-cell-id={cell.id}
+              data-index={virtualRow.index}
+              ref={virtualizer.measureElement}
+              style={{
+                position: "absolute",
+                top: 0,
+                left: 0,
+                width: "100%",
+                transform: `translateY(${virtualRow.start}px)`,
+              }}
+            >
+              <MemoizedRow
+                project={project}
+                cell={cell}
+                doc={doc}
+                username={username}
+                editable={canEdit}
+                isCompletionConfigured={isCompletionConfigured}
+                examples={examples}
+                completing={completing}
+                errors={errors}
+                healthMap={healthMap}
+                infractions={infractions}
+                ruleMap={ruleMap}
+                onCompleteSingle={onCompleteSingle}
+                onInfractionClick={onInfractionClick}
+                isBacktranslationConfigured={isBacktranslationConfigured}
+                backtranslating={backtranslating}
+                backtranslationErrors={backtranslationErrors}
+                onBacktranslate={onBacktranslate}
+                cellOpenCommentCount={cellOpenCommentCount}
+                onOpenComments={onOpenComments}
+                onOpenHistory={onOpenHistory}
+                syncProvider={syncProvider}
+                collabUser={collabUser}
+                activeCueIndex={activeCueIndex}
+                onSeekToCue={onSeekToCue}
+                rowIndex={virtualRow.index}
+                lineNumbersEnabled={lineNumbersEnabled}
+                cellLabelsEnabled={cellLabelsEnabled}
+                sourceTextDirection={sourceTextDirection}
+                targetTextDirection={targetTextDirection}
+                gridCols={gridCols}
+                isAnonymous={isAnonymous}
+                breakdownMap={breakdownMap}
+                onJumpToCell={onJumpToCell}
+                onAiSetupNeeded={onAiSetupNeeded}
+                onOpenRecording={onOpenRecording}
+                onDragStart={handleDragStart}
+                onDragEnter={handleDragEnter}
+              />
+            </div>
           )
         })}
       </div>
@@ -300,8 +316,6 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
  * the cutoff point where the re-render tree gets pruned.
  */
 interface MemoizedRowProps {
-  virtualRowStart: number
-  measureRef: (el: HTMLElement | null) => void
   project: ProjectRecord
   cell: CellData
   doc: Y.Doc
@@ -344,7 +358,6 @@ interface MemoizedRowProps {
 
 const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
   const {
-    virtualRowStart, measureRef,
     cell, examples, completing, errors, healthMap, infractions,
     backtranslating, backtranslationErrors, cellOpenCommentCount, breakdownMap,
     activeCueIndex, rowIndex, gridCols,
@@ -385,16 +398,6 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
 
   return (
     <div
-      data-cell-id={cellId}
-      data-index={rowIndex}
-      ref={measureRef}
-      style={{
-        position: "absolute",
-        top: 0,
-        left: 0,
-        width: "100%",
-        transform: `translateY(${virtualRowStart}px)`,
-      }}
       className={cn(
         "transition-colors duration-150 ease-out hover:bg-muted/20",
         hasOpenComments && "border-l-2 border-l-blue-400",

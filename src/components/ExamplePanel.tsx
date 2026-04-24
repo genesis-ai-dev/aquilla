@@ -4,8 +4,22 @@ import type { ScoredPair } from "@/lib/search/dual-index"
 import { HighlightedText, EXAMPLE_COLORS } from "./HighlightedText"
 import { tokenizeText } from "@/lib/search/tokenizer"
 
-export function ExamplePanel({ examples, globalColorOffset = 0 }: { examples: ScoredPair[]; globalColorOffset?: number }) {
-  const [expanded, setExpanded] = useState(false)
+export function ExamplePanel({
+  examples, globalColorOffset = 0,
+  expanded: expandedProp,
+  onExpandedChange,
+}: {
+  examples: ScoredPair[]
+  globalColorOffset?: number
+  expanded?: boolean
+  onExpandedChange?: (expanded: boolean) => void
+}) {
+  const [internal, setInternal] = useState(false)
+  const expanded = expandedProp ?? internal
+  const setExpanded = (next: boolean) => {
+    if (onExpandedChange) onExpandedChange(next)
+    else setInternal(next)
+  }
   if (examples.length === 0) return null
 
   return (

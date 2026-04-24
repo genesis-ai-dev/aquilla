@@ -22,6 +22,7 @@ import {
   minimalProjectRecord,
   type CloudProjectSummary,
 } from "@/lib/sync/cloud-projects"
+import { filterCloudOnly } from "@/lib/projects/dedupe-cloud"
 
 export function Dashboard() {
   const [projects, setProjects] = useState<ProjectRecord[]>([])
@@ -66,13 +67,14 @@ export function Dashboard() {
   }, [session?.jwt])
 
   // Projects the user can access on the server but haven't opened on this
-  // device yet. Clicking one navigates into ProjectWorkspace, which calls
-  // useProject → fetchProjectState → updateProject to hydrate IDB.
-  const cloudOnly = useMemo(() => {
-    const localIds = new Set(projects.map((p) => p.id))
-    const trashedIds = new Set(trashed.map((p) => p.id))
-    return cloudProjects.filter((cp) => !localIds.has(cp.id) && !trashedIds.has(cp.id))
-  }, [cloudProjects, projects, trashed])
+  // device yet. Dedup against local + trashed by id AND by gitlabProjectId
+  // — GitLab-imported projects have a different local IDB id than the
+  // canonical server id but share a GitLab id, so id-only dedup would show
+  // both cards.
+  const cloudOnly = useMemo(
+    () => filterCloudOnly(cloudProjects, projects, trashed),
+    [cloudProjects, projects, trashed]
+  )
 
   function upsert(project: ProjectRecord) {
     setProjects(prev => {

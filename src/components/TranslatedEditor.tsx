@@ -9,6 +9,8 @@ import type YProvider from "y-partyserver/provider"
 import { Bold, Italic, Underline as UnderlineIcon, Strikethrough, Code } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { useRef, useEffect } from "react"
+import type { RuleInfraction } from "@/lib/parsers/types"
+import { createViolationDecorationExtension, violationPluginKey } from "@/lib/richtext/violation-decoration-plugin"
 
 interface TranslatedEditorProps {
   fragment: Y.XmlFragment
@@ -20,9 +22,19 @@ interface TranslatedEditorProps {
   syncProvider?: YProvider | null
   user?: { name: string; color: string }
   editable?: boolean
+  infractions?: RuleInfraction[]
+  ruleSeverity?: Map<string, "major" | "minor">
+  waivedRuleIds?: Set<string>
+  onRuleClick?: (ruleId: string, anchor: HTMLElement) => void
 }
 
-export function TranslatedEditor({ fragment, onBlur, placeholder, className, syncProvider, user, editable = true }: TranslatedEditorProps) {
+export function TranslatedEditor({ fragment, onBlur, placeholder, className, syncProvider, user, editable = true, infractions, ruleSeverity, waivedRuleIds, onRuleClick }: TranslatedEditorProps) {
+  const latestViolationStateRef = useRef({
+    infractions: infractions ?? [],
+    ruleSeverity: ruleSeverity ?? new Map<string, "major" | "minor">(),
+    waivedRuleIds: waivedRuleIds ?? new Set<string>(),
+  })
+
   const editor = useEditor({
     editable,
     extensions: [
@@ -44,6 +56,7 @@ export function TranslatedEditor({ fragment, onBlur, placeholder, className, syn
       ...(syncProvider && user
         ? [createCollabCursorExtension(syncProvider, user)]
         : []),
+      createViolationDecorationExtension(() => latestViolationStateRef.current),
     ],
     editorProps: {
       attributes: {
@@ -71,6 +84,18 @@ export function TranslatedEditor({ fragment, onBlur, placeholder, className, syn
   useEffect(() => {
     editor?.setEditable(editable)
   }, [editor, editable])
+
+  useEffect(() => {
+    latestViolationStateRef.current = {
+      infractions: infractions ?? [],
+      ruleSeverity: ruleSeverity ?? new Map<string, "major" | "minor">(),
+      waivedRuleIds: waivedRuleIds ?? new Set<string>(),
+    }
+    if (editor) {
+      const tr = editor.state.tr.setMeta(violationPluginKey, "rebuild")
+      editor.view.dispatch(tr)
+    }
+  }, [editor, infractions, ruleSeverity, waivedRuleIds])
 
   if (!editor) {
     return <div className={cn("min-h-[40px] px-2 py-1 text-sm border rounded bg-background", className)}>{placeholder}</div>
@@ -146,7 +171,18 @@ export function TranslatedEditor({ fragment, onBlur, placeholder, className, syn
           </button>
         </div>
       </BubbleMenu>
-      <EditorContent editor={editor} />
+      <div
+        onClick={(e) => {
+          if (!onRuleClick) return
+          const target = e.target as HTMLElement
+          const blot = target.closest("[data-rule-id]")
+          if (blot) {
+            onRuleClick(blot.getAttribute("data-rule-id")!, blot as HTMLElement)
+          }
+        }}
+      >
+        <EditorContent editor={editor} />
+      </div>
     </div>
   )
 }

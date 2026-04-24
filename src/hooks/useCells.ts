@@ -41,6 +41,10 @@ export interface CellData {
   backtranslationForText?: string
   attachments?: Record<string, CodexCellAttachment>
   selectedAudioId?: string
+  /** Cue start/end timestamps (seconds) from the cell's CodexData. Populated
+   *  for subtitle-imported cells; used by the recording modal's duration bar. */
+  startTime?: number
+  endTime?: number
 }
 
 
@@ -102,9 +106,16 @@ export function useCells(doc: Y.Doc | null, fileId: string, username = "local", 
         const history: CellHistoryEntry[] = historyArr ? historyArr.toArray() : []
         const threads = extractThreadsFromCell(cell)
         const source = cell.get("__source") as
-          | { metadata?: { attachments?: Record<string, CodexCellAttachment>; selectedAudioId?: string; cellLabel?: string } }
+          | { metadata?: {
+              attachments?: Record<string, CodexCellAttachment>
+              selectedAudioId?: string
+              cellLabel?: string
+              data?: { startTime?: number; endTime?: number }
+            } }
           | undefined
         const cellLabel = source?.metadata?.cellLabel
+        const startTime = source?.metadata?.data?.startTime
+        const endTime = source?.metadata?.data?.endTime
         const { validationStatus, activeValidators } = deriveValidationStatus(
           translated, cell, username, requiredValidations,
         )
@@ -151,6 +162,8 @@ export function useCells(doc: Y.Doc | null, fileId: string, username = "local", 
           attachments: source?.metadata?.attachments,
           selectedAudioId: source?.metadata?.selectedAudioId,
           ...(cellLabel ? { cellLabel } : {}),
+          ...(typeof startTime === "number" ? { startTime } : {}),
+          ...(typeof endTime === "number" ? { endTime } : {}),
         })
       }
       return ordered

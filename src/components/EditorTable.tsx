@@ -2,7 +2,7 @@ import { useRef, useCallback, useMemo, useState, useEffect, forwardRef, useImper
 import { useVirtualizer } from "@tanstack/react-virtual"
 import * as Y from "yjs"
 import DOMPurify from "dompurify"
-import { Check, CheckCheck, Circle, Trash2, AlertTriangle, AlertCircle, Languages, RefreshCw, MessageCircle, History, Play } from "lucide-react"
+import { Check, CheckCheck, Circle, Trash2, AlertTriangle, AlertCircle, RefreshCw, MessageCircle, Play } from "lucide-react"
 import type { CellData } from "@/hooks/useCells"
 import type { ScoredPair } from "@/lib/search/dual-index"
 import type { TranslationRule, RuleInfraction, ProjectRecord, CellHealthBreakdown } from "@/lib/parsers/types"
@@ -17,6 +17,8 @@ import { HealthRing } from "./HealthRing"
 import { HealthBreakdown } from "./HealthBreakdown/HealthBreakdown"
 import { TranslatedEditor } from "./TranslatedEditor"
 import { CellAudioButton } from "./CellAudioButton"
+import { CellAudioRecordButton } from "./CellAudioRecordButton"
+import { CellActionsMenu } from "./CellActionsMenu"
 import { cn } from "@/lib/utils"
 
 function ValidationHistoryTimeline({
@@ -126,6 +128,9 @@ interface EditorTableProps {
   onJumpToCell?: (cellId: string) => void
   /** Called when user clicks a disabled sparkle while AI is not yet configured. */
   onAiSetupNeeded?: () => void
+  /** Called when the user clicks the mic button on a cell. The parent owns
+   *  the recording modal so it can persist across cell navigation. */
+  onOpenRecording?: (cellId: string) => void
 }
 
 export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(function EditorTable({
@@ -138,7 +143,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   syncProvider, collabUser,
   activeCueIndex, onSeekToCue,
   lineNumbersEnabled, cellLabelsEnabled, sourceTextDirection, targetTextDirection,
-  isAnonymous, breakdownMap, onJumpToCell, onAiSetupNeeded,
+  isAnonymous, breakdownMap, onJumpToCell, onAiSetupNeeded, onOpenRecording,
 }, ref) {
   const permissions = useProjectPermissions(project)
   const canEdit = permissions.canEditContent
@@ -163,8 +168,12 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     getCurrentIndex: () => 0,
   }), [virtualizer, cells.length])
 
-  const showGutterContent = lineNumbersEnabled || cellLabelsEnabled
-  const gridCols = showGutterContent ? "grid-cols-[48px_1fr_1fr]" : "grid-cols-[24px_1fr_1fr]"
+  // Grid layout: [left-gutter] [source] [target] [right-gutter]. Each gutter
+  // is 56px so a flex-wrap icon container fits two 24px buttons per row — short
+  // cells collapse the icon stack into a 2-column grid instead of a tall tower.
+  // Left gutter: audio + creation actions (AI, validation, play, mic, cue).
+  // Right gutter: meta (infractions, backtranslation, comments, history).
+  const gridCols = "grid-cols-[56px_1fr_1fr_56px]"
 
   const handleMouseUp = useCallback(() => {
     if (isDragging.current && dragCells.current.size > 1) {
@@ -181,6 +190,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
         <div />
         <div>Source</div>
         <div>Target</div>
+        <div />
       </div>
 
       <div style={{ height: `${virtualizer.getTotalSize()}px`, width: "100%", position: "relative" }}>
@@ -251,6 +261,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
                 breakdown={breakdownMap?.get(cell.id)}
                 onJumpToCell={onJumpToCell}
                 onAiSetupNeeded={onAiSetupNeeded}
+                onOpenRecording={onOpenRecording}
                 onDragStart={() => {
                   isDragging.current = true
                   dragCells.current = new Set([cell.id])
@@ -301,11 +312,12 @@ interface EditorRowProps {
   cellLabelsEnabled: boolean
   sourceTextDirection: "ltr" | "rtl"
   targetTextDirection: "ltr" | "rtl"
-  gridCols: "grid-cols-[24px_1fr_1fr]" | "grid-cols-[48px_1fr_1fr]"
+  gridCols: "grid-cols-[56px_1fr_1fr_56px]"
   isAnonymous?: boolean
   breakdown?: CellHealthBreakdown
   onJumpToCell?: (cellId: string) => void
   onAiSetupNeeded?: () => void
+  onOpenRecording?: (cellId: string) => void
 }
 
 function EditorRow({
@@ -319,7 +331,7 @@ function EditorRow({
   isActiveCue: _isActiveCue, onSeekToCue,
   onDragStart, onDragEnter,
   rowIndex, lineNumbersEnabled, cellLabelsEnabled, sourceTextDirection, targetTextDirection, gridCols,
-  isAnonymous, breakdown, onJumpToCell, onAiSetupNeeded,
+  isAnonymous, breakdown, onJumpToCell, onAiSetupNeeded, onOpenRecording,
 }: EditorRowProps) {
   function handleChange(e: React.ChangeEvent<HTMLTextAreaElement>) {
     appendCellHistory(doc, cell.id, {
@@ -395,6 +407,9 @@ function EditorRow({
     sourceHasFormatting && !targetHasFormatting && cell.translated.trim().length > 0
 
   const healthValue = health ?? (cell.status === "validated" ? 100 : 0)
+
+  const selectedAudio = cell.selectedAudioId ? cell.attachments?.[cell.selectedAudioId] : undefined
+  const hasAudio = Boolean(selectedAudio && !selectedAudio.isDeleted)
 
   // Minimal CodexCell shape for CellAudioButton — only the metadata fields
   // the hook actually reads (selectedAudioId, attachments). Avoids plumbing
@@ -564,7 +579,9 @@ function EditorRow({
   const hasGutterMetadata = showLineNumber || showCellLabel
   return (
     <div className={cn("group grid gap-2 border-b px-4 py-2 transition-colors", gridCols)}>
-      {/* Gutter — metadata at top, generator action centered */}
+      {/* Left gutter — metadata on top, audio + creation actions below.
+          flex-wrap with a max-height so if we add more icons later they flow
+          into a 2nd column for short cells. */}
       <div className="flex flex-col items-center gap-1">
         {hasGutterMetadata && (
           <div className="flex h-4 items-center gap-1 text-[10px] leading-none text-muted-foreground/60">
@@ -583,7 +600,17 @@ function EditorRow({
             )}
           </div>
         )}
-        <div className={cn("flex flex-col items-center gap-1", hasGutterMetadata ? "pt-1" : "pt-5")}>
+        {/*
+          Flex-wrap icon container. Column direction with gap-1 means 4 icons
+          take ~92px vertically; max-h-24 (96px) keeps them single-column for
+          the common case, and anything beyond 4 wraps into a second column.
+        */}
+        <div
+          className={cn(
+            "flex flex-col flex-wrap content-start gap-1 max-h-24",
+            hasGutterMetadata ? "pt-1" : "pt-5",
+          )}
+        >
           <SparkleButton
             disabled={!isCompletionConfigured || !editable || isAnonymous}
             loading={isLoading}
@@ -605,6 +632,22 @@ function EditorRow({
                     : "Set up AI to enable"
             }
           />
+
+          {validationButton}
+
+          {/* Play-vs-mic are mutually exclusive. Play shows when a non-deleted
+              audio attachment exists on the cell; otherwise the mic invites
+              recording. Re-recording lives in the right-gutter ellipsis menu. */}
+          {hasAudio ? (
+            <CellAudioButton project={project} cell={cellForButton} />
+          ) : (
+            <CellAudioRecordButton
+              project={project}
+              onOpenRecording={() => onOpenRecording?.(cell.id)}
+              disabled={!editable || !onOpenRecording}
+            />
+          )}
+
           {onSeekToCue && (
             <button
               type="button"
@@ -650,9 +693,9 @@ function EditorRow({
         {cellExamples.length > 0 && <ExamplePanel examples={cellExamples} />}
       </div>
 
-      {/* Target column */}
-      <div className="flex gap-1" dir={targetTextDirection}>
-        <div className="flex-1">
+      {/* Target column — actions live in the left gutter, so no right-side rail. */}
+      <div dir={targetTextDirection}>
+        <div>
           {cell.translatedXml ? (
             <TranslatedEditor
               fragment={cell.translatedXml}
@@ -699,98 +742,63 @@ function EditorRow({
             <p className="mt-0.5 text-xs text-destructive">BT: {backtranslationError}</p>
           )}
         </div>
-        {/* Right actions — compact vertical stack with consistent rhythm */}
-        <div className="flex flex-col items-center gap-1">
-          {validationButton}
+      </div>
 
-          {cellInfractions.length > 0 && (
-            <div className="flex flex-col items-center gap-0.5">
-              {cellInfractions.map((inf) => {
-                const rule = ruleMap.get(inf.ruleId)
-                const isMajor = rule?.severity === "major"
-                const Icon = isMajor ? AlertTriangle : AlertCircle
-                return (
-                  <button
-                    key={inf.ruleId}
-                    type="button"
-                    onClick={() => onInfractionClick?.(inf.ruleId)}
-                    title={inf.message}
-                    className={cn(
-                      "flex h-5 w-5 items-center justify-center rounded transition-[transform,color] duration-150 ease-out active:scale-[0.92] hover:bg-muted/60",
-                      isMajor ? "text-red-500 hover:text-red-600" : "text-amber-500 hover:text-amber-600"
-                    )}
-                  >
-                    <Icon className="h-3 w-3" />
-                  </button>
-                )
-              })}
-            </div>
-          )}
+      {/* Right gutter — visible meta actions (comments + warnings) and an
+          ellipsis menu for less-frequent ones (re-record, history, regenerate
+          backtranslation). Keeping comments visible because they're the main
+          collab surface; keeping infractions visible because they're warnings. */}
+      <div className="flex flex-col flex-wrap content-start gap-1 max-h-24 pt-5">
+        {onOpenComments && (
+          <button
+            type="button"
+            className={cn(
+              "relative flex h-5 w-5 items-center justify-center rounded transition-[transform,color] duration-150 ease-out active:scale-[0.92] hover:bg-muted/60",
+              openCommentCount > 0 ? "text-primary" : "text-muted-foreground/50 hover:text-foreground",
+            )}
+            onClick={() => onOpenComments(cell.id)}
+            title={openCommentCount > 0 ? `${openCommentCount} open comment${openCommentCount !== 1 ? "s" : ""}` : "Add comment"}
+          >
+            <MessageCircle className="h-3 w-3" />
+            {openCommentCount > 0 && (
+              <span className="absolute -right-0.5 -top-0.5 flex h-3 min-w-3 items-center justify-center rounded-full bg-primary px-0.5 text-[8px] font-semibold leading-none text-primary-foreground tabular-nums">
+                {openCommentCount}
+              </span>
+            )}
+          </button>
+        )}
 
-          <CellAudioButton project={project} cell={cellForButton} />
-
-          {isBacktranslationConfigured !== undefined && (
+        {cellInfractions.length > 0 && cellInfractions.map((inf) => {
+          const rule = ruleMap.get(inf.ruleId)
+          const isMajor = rule?.severity === "major"
+          const Icon = isMajor ? AlertTriangle : AlertCircle
+          return (
             <button
+              key={inf.ruleId}
               type="button"
+              onClick={() => onInfractionClick?.(inf.ruleId)}
+              title={inf.message}
               className={cn(
                 "flex h-5 w-5 items-center justify-center rounded transition-[transform,color] duration-150 ease-out active:scale-[0.92] hover:bg-muted/60",
-                isBacktranslating && "animate-pulse text-primary",
-                !isBacktranslating && isBacktranslationConfigured && "text-muted-foreground/50 hover:text-foreground",
-                !isBacktranslationConfigured && "cursor-not-allowed text-muted-foreground/20",
+                isMajor ? "text-red-500 hover:text-red-600" : "text-amber-500 hover:text-amber-600"
               )}
-              disabled={!isBacktranslationConfigured || isBacktranslating || !editable}
-              onClick={() => onBacktranslate?.(cell)}
-              title={
-                !editable
-                  ? "Read-only (imported from git)"
-                  : !isBacktranslationConfigured
-                    ? "Configure LLM in settings"
-                    : isBacktranslating
-                      ? "Generating…"
-                      : cell.backtranslation ? "Regenerate backtranslation" : "Generate backtranslation"
-              }
             >
-              <Languages className="h-3 w-3" />
+              <Icon className="h-3 w-3" />
             </button>
-          )}
+          )
+        })}
 
-          {onOpenComments && (
-            <button
-              type="button"
-              className={cn(
-                "relative flex h-5 w-5 items-center justify-center rounded transition-[transform,color] duration-150 ease-out active:scale-[0.92] hover:bg-muted/60",
-                openCommentCount > 0 ? "text-primary" : "text-muted-foreground/50 hover:text-foreground",
-              )}
-              onClick={() => onOpenComments(cell.id)}
-              title={openCommentCount > 0 ? `${openCommentCount} open comment${openCommentCount !== 1 ? "s" : ""}` : "Add comment"}
-            >
-              <MessageCircle className="h-3 w-3" />
-              {openCommentCount > 0 && (
-                <span className="absolute -right-0.5 -top-0.5 flex h-3 min-w-3 items-center justify-center rounded-full bg-primary px-0.5 text-[8px] font-semibold leading-none text-primary-foreground tabular-nums">
-                  {openCommentCount}
-                </span>
-              )}
-            </button>
-          )}
-
-          {onOpenHistory && (cell.history.length > 0 || hasContent) && (
-            <button
-              type="button"
-              className={cn(
-                "flex h-5 w-5 items-center justify-center rounded transition-[transform,color] duration-150 ease-out active:scale-[0.92] hover:bg-muted/60 hover:text-foreground",
-                cell.history.length > 0 ? "text-muted-foreground/70" : "text-muted-foreground/30",
-              )}
-              onClick={() => onOpenHistory(cell.id)}
-              title={
-                cell.history.length > 0
-                  ? `Edit history (${cell.history.length} revision${cell.history.length !== 1 ? "s" : ""})`
-                  : "Edit history (empty)"
-              }
-            >
-              <History className="h-3 w-3" />
-            </button>
-          )}
-        </div>
+        <CellActionsMenu
+          cell={cell}
+          editable={editable}
+          hasAudio={hasAudio}
+          isGitProject={project.origin?.kind === "git"}
+          isBacktranslationConfigured={isBacktranslationConfigured}
+          isBacktranslating={isBacktranslating}
+          onOpenRecording={onOpenRecording}
+          onOpenHistory={onOpenHistory}
+          onBacktranslate={onBacktranslate}
+        />
       </div>
     </div>
   )

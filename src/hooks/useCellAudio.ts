@@ -10,6 +10,7 @@ import { parsePointerContent } from "@/lib/lfs/pointer"
 import { lfsCacheGet, lfsCachePut } from "@/lib/lfs/cache"
 import { downloadLfsBlob } from "@/lib/lfs/download"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
+import { fetchCellAudio, parseFrontierAudioUrl } from "@/lib/audio/upload"
 import type { CodexCell } from "@/lib/codex-editor/types"
 import type { ProjectRecord } from "@/lib/parsers/types"
 
@@ -72,6 +73,29 @@ export function useCellAudio(
     if (!attachmentUrl) {
       throw { kind: "pointer-missing", message: "No audio attachment on this cell" } as AudioError
     }
+
+    // Web-only (non-git) projects: attachment URL is a frontier-audio:// marker
+    // resolved by the R2-backed audio worker.
+    const frontier = parseFrontierAudioUrl(attachmentUrl)
+    if (frontier) {
+      if (!session?.jwt) {
+        throw { kind: "no-session", message: "Not signed in" } as AudioError
+      }
+      try {
+        return await fetchCellAudio({
+          session,
+          projectId: project.id,
+          audioId: frontier.audioId,
+          ext: frontier.ext,
+        })
+      } catch (e) {
+        throw {
+          kind: "download-failed",
+          message: e instanceof Error ? e.message : String(e),
+        } as AudioError
+      }
+    }
+
     if (project.origin?.kind !== "git") {
       throw { kind: "no-git-origin", message: "Project has no git origin" } as AudioError
     }

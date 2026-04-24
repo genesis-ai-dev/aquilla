@@ -164,4 +164,15 @@ describe("infraction spans", () => {
     expect(inf.spans[0].matchedText).toBe("5")
     expect(inf.spans[1].matchedText).toBe("7")
   })
+
+  it("source-requires-target records source trigger spans when target lacks required match", () => {
+    const cells = new Map([["f1", [
+      makeCell({ id: "c1", original: "Chapter 5 is here", translated: "Chapitre est ici", status: "validated" }),
+    ]]])
+    const rules = [makeRule({ id: "r1", check: { type: "source-requires-target", sourcePattern: "\\d+", targetPattern: "\\d+" } })]
+    const result = checkRules(cells, rules)
+    const inf = result.get("c1")![0]
+    expect(inf.spans).toHaveLength(1)
+    expect(inf.spans[0]).toEqual({ side: "source", start: 8, end: 9, matchedText: "5" })
+  })
 })

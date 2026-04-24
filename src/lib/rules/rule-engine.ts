@@ -74,19 +74,23 @@ function checkRule(rule: TranslationRule, cell: CellData, fileId: string): RuleI
       }
     }
     case "source-requires-target": {
-      const sourceRe = compile(check.sourcePattern, "i")
+      const sourceRe = compile(check.sourcePattern, "gi")
       if (!sourceRe) return null
-      if (!sourceRe.test(cell.original)) return null
+      sourceRe.lastIndex = 0
+      const sourceSpans: import("@/lib/parsers/types").InfractionSpan[] = []
+      for (const m of cell.original.matchAll(sourceRe)) {
+        if (m.index === undefined) continue
+        sourceSpans.push({ side: "source", start: m.index, end: m.index + m[0].length, matchedText: m[0] })
+      }
+      if (sourceSpans.length === 0) return null // source pattern not present → rule doesn't apply
       const targetRe = compile(check.targetPattern, "i")
       if (!targetRe) return null
-      if (!targetRe.test(cell.translated)) {
-        return {
-          ruleId: rule.id, cellId: cell.id, fileId,
-          message: `"${rule.name}": source matches pattern but target does not`,
-          spans: [],
-        }
+      if (targetRe.test(cell.translated)) return null // target satisfies the requirement
+      return {
+        ruleId: rule.id, cellId: cell.id, fileId,
+        message: `"${rule.name}": source matches pattern but target does not`,
+        spans: sourceSpans,
       }
-      return null
     }
     case "source-target-match": {
       const re = compile(check.pattern, "gi")

@@ -1,7 +1,7 @@
 import type {
   HealthConfig, TranslationRule, RuleInfraction, CellHealthBreakdown, CellHistoryEntry,
 } from "@/lib/parsers/types"
-import { DualIndex, type CellInput } from "@/lib/search/dual-index"
+import { DualIndex } from "@/lib/search/dual-index"
 import { computeCompositeHealth, type CompositeCell } from "@/lib/health/composite/compute"
 import { checkRules } from "@/lib/rules/rule-engine"
 
@@ -29,12 +29,46 @@ export interface HealthSyncResponse {
   infractions: Map<string, RuleInfraction[]>
 }
 
+// Persistent DualIndex + per-cell content signature. Each call diffs against
+// the previous snapshot so only changed cells are reindexed — a full project
+// rebuild on every keystroke was the dominant cost in the typing hot path.
+let cachedIndex: DualIndex | null = null
+const prevCellSig = new Map<string, string>()
+
+function cellSig(c: HealthSyncCell): string {
+  return `${c.fileId}\u0001${c.original}\u0001${c.translated}`
+}
+
+/** Test-only: drop the cached index and signature map. */
+export function resetHealthSyncCache(): void {
+  cachedIndex = null
+  prevCellSig.clear()
+}
+
 export function computeHealthSync(req: HealthSyncRequest): HealthSyncResponse {
-  const index = new DualIndex()
-  const indexInputs: CellInput[] = req.cells.map((c) => ({
-    id: c.id, original: c.original, translated: c.translated, fileId: c.fileId,
-  }))
-  index.buildFromProject(indexInputs)
+  if (!cachedIndex) cachedIndex = new DualIndex()
+  const index = cachedIndex
+
+  const currentIds = new Set<string>()
+  for (const c of req.cells) {
+    currentIds.add(c.id)
+    const sig = cellSig(c)
+    if (prevCellSig.get(c.id) === sig) continue
+    // removePair is a noop if the cell isn't indexed, so this handles both
+    // "new cell" and "content changed" uniformly. addPair skips empty cells,
+    // so a cell going empty is correctly removed and not re-added.
+    index.removePair(c.id)
+    if (c.original.trim() && c.translated.trim()) {
+      index.addPair({ id: c.id, original: c.original, translated: c.translated, fileId: c.fileId })
+    }
+    prevCellSig.set(c.id, sig)
+  }
+  for (const id of [...prevCellSig.keys()]) {
+    if (!currentIds.has(id)) {
+      index.removePair(id)
+      prevCellSig.delete(id)
+    }
+  }
 
   // Rule check. The existing engine expects Map<fileId, CellData[]>; we adapt
   // with a minimal shim since checkRules only reads a handful of fields.

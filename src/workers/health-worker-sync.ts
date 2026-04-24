@@ -4,6 +4,37 @@ import type {
 import { DualIndex } from "@/lib/search/dual-index"
 import { computeOneCellHealth, type CompositeCell } from "@/lib/health/composite/compute"
 import { checkRulesForCell } from "@/lib/rules/rule-engine"
+// NOTE: this module runs in BOTH the main thread (sync fallback / tests) and
+// the dedicated Worker. Workers have their own localStorage, so the
+// localStorage-gated perf-log helper is unreliable here. We use a local flag
+// that the caller flips via `setHealthSyncPerf(true)` whenever the main-thread
+// `PERF_LOG` is on; that way worker logs (visible in DevTools) actually fire.
+let perfOn = false
+let perfBuffer: string[] = []
+export function setHealthSyncPerf(on: boolean): void { perfOn = on }
+/** Drain and return any perf messages logged since the last call. The worker
+ *  ships these back to the main thread so they appear in DevTools (worker
+ *  console.log isn't visible to MCP-style log consumers). */
+export function consumeHealthSyncPerfBuffer(): string[] {
+  if (perfBuffer.length === 0) return []
+  const out = perfBuffer
+  perfBuffer = []
+  return out
+}
+function plog(label: string, ...args: unknown[]): void {
+  if (!perfOn) return
+  const suffix = args.length > 0 ? " " + args.map(a => typeof a === "string" ? a : JSON.stringify(a)).join(" ") : ""
+  perfBuffer.push(`[perf] ${label}${suffix}`)
+}
+function pmark(label: string): () => number {
+  if (!perfOn) return () => 0
+  const t = performance.now()
+  return () => {
+    const dt = performance.now() - t
+    perfBuffer.push(`[perf] ${label} ${dt.toFixed(2)}ms`)
+    return dt
+  }
+}
 
 export interface HealthSyncCell {
   id: string
@@ -139,12 +170,15 @@ function rulesContentKey(rules: TranslationRule[]): string {
 }
 
 export function computeHealthSync(req: HealthSyncRequest): HealthSyncResponse {
+  const endTotal = pmark("health.compute total")
+
   // Full invalidation when the rule/config landscape shifts. Every cell's
   // score depends on these, so incremental per-cell work wouldn't be sound.
   const rulesChanged = req.rules !== prevRulesRef || rulesContentKey(req.rules) !== prevRulesContent
   const configChanged = req.config !== prevConfigRef
   const requiredChanged = req.requiredValidations !== prevRequiredValidations
   if (rulesChanged || configChanged || requiredChanged) {
+    plog(`health.compute full-invalidate rules=${rulesChanged} config=${configChanged} required=${requiredChanged}`)
     resetHealthSyncCache()
     prevRulesRef = req.rules
     prevRulesContent = rulesContentKey(req.rules)
@@ -157,6 +191,7 @@ export function computeHealthSync(req: HealthSyncRequest): HealthSyncResponse {
   const enabledRules = req.rules.filter((r) => r.enabled)
 
   // --- Phase 1: diff input against prev signatures; update index incrementally.
+  const endIndex = pmark("health.compute indexUpdate")
   const currentIds = new Set<string>()
   const changedIds: string[] = []
   for (const c of req.cells) {
@@ -172,15 +207,21 @@ export function computeHealthSync(req: HealthSyncRequest): HealthSyncResponse {
   }
 
   // --- Phase 2: drop cells no longer in the corpus.
+  let removedCount = 0
   for (const id of [...prevCellSig.keys()]) {
     if (currentIds.has(id)) continue
     index.removePair(id)
     prevCellSig.delete(id)
     purgeCell(id)
+    removedCount++
   }
+  endIndex()
 
   // --- Phase 3: recompute only the changed cells. Everyone else keeps their
   // cached score — no ripples. Aggregates adjust via delta.
+  let ruleCheckMs = 0
+  let neighborhoodMs = 0
+  let healthCalcMs = 0
   if (changedIds.length > 0) {
     const cellById = new Map<string, HealthSyncCell>()
     for (const c of req.cells) cellById.set(c.id, c)
@@ -197,12 +238,15 @@ export function computeHealthSync(req: HealthSyncRequest): HealthSyncResponse {
 
       // Rule check — pure per-cell, no dependency on peers.
       const ruleAdapted = adaptToRuleEngineCell(cell)
+      const t0 = perfOn ? performance.now() : 0
       const inf = checkRulesForCell(ruleAdapted, cell.fileId, enabledRules)
+      if (perfOn) ruleCheckMs += performance.now() - t0
       if (inf.length > 0) cachedInfractions.set(id, inf)
       else cachedInfractions.delete(id)
 
       // Build composite (neighborhood queries use the current incremental index).
       const last = cell.history[cell.history.length - 1]
+      const t1 = perfOn ? performance.now() : 0
       const composite: CompositeCell = {
         id: cell.id,
         fileId: cell.fileId,
@@ -215,17 +259,26 @@ export function computeHealthSync(req: HealthSyncRequest): HealthSyncResponse {
         plainSource: index.searchPlainSource(cell.original, req.config.neighborhoodSearchLimit),
         plainTarget: index.searchPlainTarget(cell.translated, req.config.neighborhoodSearchLimit),
       }
+      if (perfOn) neighborhoodMs += performance.now() - t1
 
       // Compute using cached peer healths. Ancestry misses fall back to 0
       // (ancestryPenalty treats unknowns as lowest health), which matches
       // the pre-incremental behavior on a fresh healthMap.
+      const t2 = perfOn ? performance.now() : 0
       const { score, breakdown } = computeOneCellHealth(
         composite, req.rules, req.config, req.requiredValidations, cachedHealth,
       )
+      if (perfOn) healthCalcMs += performance.now() - t2
       recordHealth(id, cell.fileId, score)
       cachedBreakdown.set(id, breakdown)
     }
   }
+
+  plog(
+    `health.compute incoming=${req.cells.length} changed=${changedIds.length} removed=${removedCount} ` +
+    `cached=${cachedHealth.size} indexSize=${index.size()} ` +
+    `rule=${ruleCheckMs.toFixed(2)}ms neighborhood=${neighborhoodMs.toFixed(2)}ms health=${healthCalcMs.toFixed(2)}ms`
+  )
 
   // --- Phase 4: assemble aggregates from running totals.
   const fileHealth = new Map<string, number>()
@@ -237,13 +290,15 @@ export function computeHealthSync(req: HealthSyncRequest): HealthSyncResponse {
   // Return fresh Map copies so callers that treat the response as immutable
   // don't see subsequent mutations. Cheap: O(cached cells), but this is a
   // once-per-debounce cost, not per-keystroke.
-  return {
+  const out = {
     healthMap: new Map(cachedHealth),
     breakdownMap: new Map(cachedBreakdown),
     fileHealth,
     projectHealth,
     infractions: new Map(cachedInfractions),
   }
+  endTotal()
+  return out
 }
 
 function adaptToRuleEngineCell(c: HealthSyncCell) {

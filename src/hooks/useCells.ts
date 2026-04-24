@@ -6,6 +6,7 @@ import type { EditValidationSummary } from "@/lib/codex-editor/edits/types"
 import { snapshotEntry } from "@/lib/codex-editor/edits/yjs-helpers"
 import { extractThreadsFromCell } from "./useComments"
 import { getPlainText } from "@/lib/richtext/translated-xml"
+import { perfLog, perfMark } from "@/lib/perf-log"
 
 export type ValidationStatus = "empty" | "none" | "others" | "self" | "full"
 
@@ -204,21 +205,28 @@ export function useCells(doc: Y.Doc | null, fileId: string, username = "local", 
 
     function flush() {
       scheduled = false
+      const end = perfMark("useCells.flush")
       if (fullRebuild) {
         cache.clear()
         fullRebuild = false
+        const dirtySnapshot = dirtyIds.size
         dirtyIds.clear()
         setCells(computeOrdered())
+        perfLog(`useCells.flush full-rebuild dirty=${dirtySnapshot} cacheSize=${cache.size}`)
+        end()
         return
       }
       if (dirtyIds.size === 0) {
-        // No-op (shouldn't happen, but be safe).
+        end()
         return
       }
       // Invalidate only the cells whose Yjs content reported a change.
+      const dirtyCount = dirtyIds.size
       for (const id of dirtyIds) cache.delete(id)
       dirtyIds.clear()
       setCells(computeOrdered())
+      perfLog(`useCells.flush incremental dirty=${dirtyCount} cacheSize=${cache.size}`)
+      end()
     }
 
     function schedule() {

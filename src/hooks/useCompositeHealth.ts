@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from "react"
 import { computeHealthSync, type HealthSyncCell, type HealthSyncRequest, type HealthSyncResponse } from "@/workers/health-worker-sync"
 import type { CellData } from "./useCells"
 import type { HealthConfig, TranslationRule } from "@/lib/parsers/types"
+import { perfLog, perfMark, isPerfLogEnabled } from "@/lib/perf-log"
+import { setHealthSyncPerf } from "@/workers/health-worker-sync"
 
 export interface UseCompositeHealthInput {
   fileCells: Map<string, CellData[]>
@@ -75,13 +77,22 @@ export function useCompositeHealth(input: UseCompositeHealthInput): UseComposite
     if (!isTestEnv && typeof Worker !== "undefined") {
       try {
         const w = createHealthWorker()
-        w.onmessage = (event: MessageEvent<{ id: number; payload: HealthSyncResponse | { error: string } }>) => {
+        w.onmessage = (event: MessageEvent<{ id: number; payload: HealthSyncResponse | { error: string }; perfMessages?: string[] }>) => {
+          // Worker-side perf messages are shipped here for main-thread re-emit
+          // (worker console.log isn't visible to many DevTools consumers).
+          if (event.data.perfMessages && event.data.perfMessages.length > 0) {
+            for (const m of event.data.perfMessages) {
+              // eslint-disable-next-line no-console
+              console.log(m)
+            }
+          }
           if (event.data.id !== requestIdRef.current) return
           const p = event.data.payload
           if ("error" in p) {
             console.error("[useCompositeHealth] worker error:", p.error)
             return
           }
+          perfLog(`health.worker.recv id=${event.data.id} cells=${p.healthMap.size} infractions=${p.infractions.size}`)
           setStats(p)
           setReady(true)
         }
@@ -112,8 +123,12 @@ export function useCompositeHealth(input: UseCompositeHealthInput): UseComposite
     if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current)
     debounceTimerRef.current = setTimeout(() => {
       debounceTimerRef.current = null
+      const endTotal = perfMark("health.debounce.fire total")
       const current = latestInputRef.current
+      const endBuild = perfMark("health.buildCells")
       const cells = buildCells(current.fileCells)
+      endBuild()
+      perfLog(`health.debounce.fire cells=${cells.length} rules=${current.rules.length}`)
 
       // Cheap content key so we bail out when a new Map/array is passed with
       // identical content (avoids re-firing the worker for no-op updates).
@@ -140,14 +155,21 @@ export function useCompositeHealth(input: UseCompositeHealthInput): UseComposite
       }
 
       const rid = ++requestIdRef.current
+      const perf = isPerfLogEnabled()
       if (workerRef.current) {
-        workerRef.current.postMessage({ id: rid, payload: req })
+        perfLog(`health.worker.post id=${rid} cells=${req.cells.length}`)
+        workerRef.current.postMessage({ id: rid, payload: req, perf })
+        endTotal()
         return
       }
       // Sync fallback: tests, SSR, or Worker init failure.
+      setHealthSyncPerf(perf)
+      const endSync = perfMark("health.sync.compute")
       const result = computeHealthSync(req)
+      endSync()
       setStats(result)
       setReady(true)
+      endTotal()
     }, HEALTH_DEBOUNCE_MS)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   })

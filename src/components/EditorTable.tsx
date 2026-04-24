@@ -21,6 +21,29 @@ import { CellAudioRecordButton } from "./CellAudioRecordButton"
 import { CellActionsMenu } from "./CellActionsMenu"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { cn } from "@/lib/utils"
+import { isPerfLogEnabled } from "@/lib/perf-log"
+
+// Per-row render counter. Always accumulated when perf logging is on (cheap)
+// but NOT auto-logged — render logs would flood the console and push the
+// useful health/cells/worker logs out of the 500-entry buffer. Inspect on
+// demand from the console:
+//
+//   window.__perfRowRenders         → Map of "cellIdPrefix" → count
+//   window.__perfDumpRowRenders()   → console.table of the same
+const rowRenders = new Map<string, number>()
+if (typeof window !== "undefined") {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  ;(window as any).__perfRowRenders = rowRenders
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  ;(window as any).__perfDumpRowRenders = () => {
+    const obj: Record<string, number> = {}
+    for (const [k, v] of rowRenders) obj[k] = v
+    // eslint-disable-next-line no-console
+    console.table(obj)
+  }
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  ;(window as any).__perfResetRowRenders = () => rowRenders.clear()
+}
 
 function ValidationHistoryTimeline({
   entries, currentUsername,
@@ -336,6 +359,10 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
   } = props
 
   const cellId = cell.id
+  if (isPerfLogEnabled()) {
+    const key = cellId.slice(0, 8)
+    rowRenders.set(key, (rowRenders.get(key) ?? 0) + 1)
+  }
   const cellExamples = useMemo(() => examples.get(cellId) ?? EMPTY_EXAMPLES, [examples, cellId])
   const highlights = useMemo(() => buildHighlightsFromExamples(cellExamples), [cellExamples])
   const cellInfractions = useMemo(() => infractions.get(cellId) ?? EMPTY_INFRACTIONS, [infractions, cellId])

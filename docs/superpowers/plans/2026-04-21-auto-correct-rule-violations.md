@@ -1060,7 +1060,7 @@ const rule: TranslationRule = {
 }
 
 function makeCell(id: string, translated: string): CellData {
-  return { id, original: "src", translated, fileId: "f1", status: "translated" } as CellData
+  return { id, original: "src", translated, fileId: "f1", status: "unvalidated" } as unknown as CellData
 }
 
 function setupDoc(cells: { id: string; value: string }[]): Y.Doc {

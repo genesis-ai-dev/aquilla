@@ -46,6 +46,7 @@ export interface CellData {
    *  for subtitle-imported cells; used by the recording modal's duration bar. */
   startTime?: number
   endTime?: number
+  waivers?: import("@/lib/parsers/types").RuleWaiver[]
 }
 
 
@@ -157,6 +158,7 @@ function buildCellData(
     ...(cellLabel ? { cellLabel } : {}),
     ...(typeof startTime === "number" ? { startTime } : {}),
     ...(typeof endTime === "number" ? { endTime } : {}),
+    waivers: (cell.get("waivers") as import("@/lib/parsers/types").RuleWaiver[] | undefined),
   }
 }
 

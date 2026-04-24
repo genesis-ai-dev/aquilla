@@ -138,3 +138,17 @@ describe("checkRules", () => {
     expect(result.size).toBe(0)
   })
 })
+
+describe("infraction spans", () => {
+  it("target-forbids records a span on target for each match", () => {
+    const cells = new Map([["f1", [
+      makeCell({ id: "c1", translated: "this is bad and also bad twice", status: "validated" }),
+    ]]])
+    const rules = [makeRule({ id: "r1", check: { type: "target-forbids", targetPattern: "bad" } })]
+    const result = checkRules(cells, rules)
+    const inf = result.get("c1")![0]
+    expect(inf.spans).toHaveLength(2)
+    expect(inf.spans[0]).toEqual({ side: "target", start: 8, end: 11, matchedText: "bad" })
+    expect(inf.spans[1]).toEqual({ side: "target", start: 21, end: 24, matchedText: "bad" })
+  })
+})

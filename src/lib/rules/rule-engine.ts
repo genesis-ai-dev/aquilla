@@ -59,16 +59,19 @@ function checkRule(rule: TranslationRule, cell: CellData, fileId: string): RuleI
   const check = rule.check
   switch (check.type) {
     case "target-forbids": {
-      const re = compile(check.targetPattern, "i")
+      const re = compile(check.targetPattern, "gi")
       if (!re) return null
-      if (re.test(cell.translated)) {
-        return {
-          ruleId: rule.id, cellId: cell.id, fileId,
-          message: `"${rule.name}": target contains forbidden pattern`,
-          spans: [],
-        }
+      const spans: import("@/lib/parsers/types").InfractionSpan[] = []
+      for (const m of cell.translated.matchAll(re)) {
+        if (m.index === undefined) continue
+        spans.push({ side: "target", start: m.index, end: m.index + m[0].length, matchedText: m[0] })
       }
-      return null
+      if (spans.length === 0) return null
+      return {
+        ruleId: rule.id, cellId: cell.id, fileId,
+        message: `"${rule.name}": target contains forbidden pattern`,
+        spans,
+      }
     }
     case "source-requires-target": {
       const sourceRe = compile(check.sourcePattern, "i")

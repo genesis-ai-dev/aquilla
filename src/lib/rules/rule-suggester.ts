@@ -42,10 +42,13 @@ GUIDELINES:
 
 Output ONLY valid JSON. No markdown, no code fences, no explanation.`
 
+export type UsageCallback = (meta: { kind: string; model?: string; provider: string }) => void
+
 export async function suggestRulesFromPairs(
   pairs: { source: string; target: string }[],
   settings: CompletionSettings,
   session: FrontierSession | null = null,
+  onLlmCall?: UsageCallback,
 ): Promise<RuleSuggestion[]> {
   if (pairs.length === 0) return []
 
@@ -66,6 +69,8 @@ export async function suggestRulesFromPairs(
       { role: "user", content: userMessage },
     ],
   })
+
+  onLlmCall?.({ kind: "rule-suggestion", model: settings.model, provider: settings.provider || "frontier" })
 
   return parseRuleSuggestions(response)
 }

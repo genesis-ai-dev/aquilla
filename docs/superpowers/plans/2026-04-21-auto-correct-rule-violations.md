@@ -1046,7 +1046,7 @@ import type { CellData } from "@/hooks/useCells"
 function baseProject(rule?: TranslationRule): ProjectRecord {
   return {
     id: "p1", name: "Demo", sourceLanguage: "en", targetLanguage: "fr",
-    files: [], createdAt: "", updatedAt: "", rules: rule ? [rule] : [],
+    files: [], members: [], createdAt: "", updatedAt: "", rules: rule ? [rule] : [],
     completionSettings: {
       endpoint: "", model: "m", maxTokens: 1024, temperature: 0.2,
       systemPrompt: "", llmHealthPenalty: 0.1, provider: "frontier",
@@ -1060,7 +1060,7 @@ const rule: TranslationRule = {
 }
 
 function makeCell(id: string, translated: string): CellData {
-  return { id, original: "src", translated, fileId: "f1", status: "translated" } as CellData
+  return { id, original: "src", translated, fileId: "f1", status: "unvalidated" } as unknown as CellData
 }
 
 function setupDoc(cells: { id: string; value: string }[]): Y.Doc {

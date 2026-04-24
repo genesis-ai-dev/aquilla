@@ -1,6 +1,6 @@
 import { useState, useMemo, useRef, useEffect, useCallback } from "react"
 import * as Y from "yjs"
-import { useParams, useNavigate } from "react-router-dom"
+import { useParams, useNavigate, useSearchParams } from "react-router-dom"
 import { useProject } from "@/hooks/useProject"
 import { useFileDoc } from "@/hooks/useFileDoc"
 import { deriveCellAreaState } from "@/lib/editor/cell-area-state"
@@ -98,6 +98,11 @@ export function ProjectWorkspace() {
   }, [projectId, navigate])
   const [importOpen, setImportOpen] = useState(false)
   const [drawerRuleId, setDrawerRuleId] = useState<string | null>(null)
+  const [searchParams] = useSearchParams()
+  useEffect(() => {
+    const open = searchParams.get("openRule")
+    if (open) setDrawerRuleId(open)
+  }, [searchParams])
   const [commentsCellId, setCommentsCellId] = useState<string | null>(null)
   const [historyCellId, setHistoryCellId] = useState<string | null>(null)
   const [searchOpen, setSearchOpen] = useState(false)
@@ -769,9 +774,16 @@ export function ProjectWorkspace() {
           <>
             {drawerRuleId && (
               <RuleDrawer
-                rule={drawerRule} infractions={drawerInfractions} cells={cells}
+                rule={drawerRule}
+                infractions={drawerInfractions}
+                cells={cells}
                 onClose={() => setDrawerRuleId(null)}
                 onNavigateToCell={() => {}}
+                project={project}
+                doc={doc}
+                username={currentUsername}
+                refresh={refresh}
+                cellsByFile={fileCells}
               />
             )}
             {commentsCell && (

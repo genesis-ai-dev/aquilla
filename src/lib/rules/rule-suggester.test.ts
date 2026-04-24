@@ -1,5 +1,8 @@
-import { describe, it, expect } from "vitest"
-import { parseRuleSuggestions } from "./rule-suggester"
+import { describe, it, expect, vi, beforeEach } from "vitest"
+import { parseRuleSuggestions, suggestRulesFromPairs } from "./rule-suggester"
+
+vi.mock("@/lib/completion/completion-service", () => ({ complete: vi.fn() }))
+import { complete } from "@/lib/completion/completion-service"
 
 describe("parseRuleSuggestions", () => {
   it("parses a valid JSON array", () => {
@@ -54,5 +57,22 @@ describe("parseRuleSuggestions", () => {
     const result = parseRuleSuggestions(raw)
     expect(result).toHaveLength(1)
     expect(result[0].name).toBe("Complete")
+  })
+})
+
+describe("suggestRulesFromPairs usage callback", () => {
+  beforeEach(() => vi.mocked(complete).mockReset())
+
+  it("invokes onLlmCall with kind=rule-suggestion after a successful call", async () => {
+    vi.mocked(complete).mockResolvedValueOnce("[]")
+    const onLlmCall = vi.fn()
+    await suggestRulesFromPairs(
+      [{ source: "a", target: "b" }],
+      { endpoint: "", model: "m", maxTokens: 512, temperature: 0.2, systemPrompt: "", llmHealthPenalty: 0.1, provider: "custom" },
+      null,
+      onLlmCall,
+    )
+    expect(onLlmCall).toHaveBeenCalledTimes(1)
+    expect(onLlmCall.mock.calls[0][0]).toMatchObject({ kind: "rule-suggestion", provider: "custom", model: "m" })
   })
 })

@@ -22,6 +22,7 @@ import { CellActionsMenu } from "./CellActionsMenu"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { cn } from "@/lib/utils"
 import { isPerfLogEnabled } from "@/lib/perf-log"
+import { partitionInfractions } from "@/lib/rules/waivers"
 
 // Per-row render counter. Always accumulated when perf logging is on (cheap)
 // but NOT auto-logged — render logs would flood the console and push the
@@ -380,6 +381,11 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
   const highlights = useMemo(() => buildHighlightsFromExamples(cellExamples), [cellExamples])
   const cellInfractions = useMemo(() => infractions.get(cellId) ?? EMPTY_INFRACTIONS, [infractions, cellId])
 
+  const { active: activeInfractions, waived: waivedInfractions } = useMemo(
+    () => partitionInfractions(cellInfractions, cell.waivers),
+    [cellInfractions, cell.waivers],
+  )
+
   const completingState = completing.get(cellId)
   const isLoading = completingState === "searching" || completingState === "generating"
   const error = errors.get(cellId)
@@ -416,7 +422,8 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
         highlights={highlights}
         error={error}
         health={health}
-        cellInfractions={cellInfractions}
+        cellInfractions={activeInfractions}
+        waivedInfractions={waivedInfractions}
         ruleMap={ruleMap}
         onCompleteSingle={onCompleteSingle}
         onInfractionClick={onInfractionClick}
@@ -462,6 +469,7 @@ interface EditorRowProps {
   error?: string
   health: number | undefined
   cellInfractions: RuleInfraction[]
+  waivedInfractions: RuleInfraction[]
   ruleMap: Map<string, TranslationRule>
   onCompleteSingle: (cell: CellData) => void
   onInfractionClick?: (ruleId: string) => void
@@ -494,7 +502,7 @@ interface EditorRowProps {
 function EditorRow({
   project, cell, doc, username, editable, isCompletionConfigured, isLoading,
   cellExamples, highlights, error, health,
-  cellInfractions, ruleMap,
+  cellInfractions, waivedInfractions, ruleMap,
   onCompleteSingle, onInfractionClick,
   isBacktranslationConfigured, isBacktranslating, backtranslationError, onBacktranslate,
   openCommentCount, onOpenComments, onOpenHistory,
@@ -504,6 +512,8 @@ function EditorRow({
   rowIndex, lineNumbersEnabled, cellLabelsEnabled, sourceTextDirection, targetTextDirection, gridCols,
   isAnonymous, breakdown, onJumpToCell, onAiSetupNeeded, onOpenRecording,
 }: EditorRowProps) {
+  void waivedInfractions // will be consumed by Task 13
+
   function handleChange(e: React.ChangeEvent<HTMLTextAreaElement>) {
     appendCellHistory(doc, cell.id, {
       value: e.target.value,

@@ -1,4 +1,4 @@
-import { useRef, useCallback, useMemo, useState, forwardRef, useImperativeHandle } from "react"
+import React, { useRef, useCallback, useMemo, useState, forwardRef, useImperativeHandle } from "react"
 import { useVirtualizer } from "@tanstack/react-virtual"
 import * as Y from "yjs"
 import DOMPurify from "dompurify"
@@ -88,6 +88,12 @@ function ValidationHistoryTimeline({
     </>
   )
 }
+
+// Stable empty sentinels so per-cell "map.get(id) ?? []" derivations keep a
+// steady reference when the cell has no entry — otherwise every render would
+// mint a fresh [] and break React.memo for every row.
+const EMPTY_EXAMPLES: ScoredPair[] = []
+const EMPTY_INFRACTIONS: RuleInfraction[] = []
 
 export interface EditorTableHandle {
   scrollToCellIndex: (index: number) => void
@@ -185,6 +191,16 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     dragCells.current = new Set()
   }, [cells, onCompleteBatch])
 
+  // Stable drag handlers keyed by cellId. Inline closures per row would mint
+  // a fresh function every render and defeat React.memo on MemoizedRow.
+  const handleDragStart = useCallback((cellId: string) => {
+    isDragging.current = true
+    dragCells.current = new Set([cellId])
+  }, [])
+  const handleDragEnter = useCallback((cellId: string) => {
+    if (isDragging.current) dragCells.current.add(cellId)
+  }, [])
+
   return (
     <div ref={parentRef} className="h-full overflow-auto" onMouseUp={handleMouseUp}>
       <div className={cn("sticky top-0 z-10 grid gap-2 border-b bg-background px-4 py-2 text-sm font-medium text-muted-foreground", gridCols)}>
@@ -197,84 +213,208 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
       <div style={{ height: `${virtualizer.getTotalSize()}px`, width: "100%", position: "relative" }}>
         {virtualizer.getVirtualItems().map((virtualRow) => {
           const cell = cells[virtualRow.index]
-          const cellExamples = examples.get(cell.id) || []
-          const completingState = completing.get(cell.id)
-          const isLoading = completingState === "searching" || completingState === "generating"
-          const highlights = buildHighlightsFromExamples(cellExamples)
-          const cellInfractions = infractions.get(cell.id) || []
-          const openCommentCount = cellOpenCommentCount?.get(cell.id) || 0
-          const hasOpenComments = openCommentCount > 0
-          const isActiveCue = activeCueIndex !== undefined && activeCueIndex === virtualRow.index
-
           return (
-            <div
+            <MemoizedRow
               key={cell.id}
-              data-cell-id={cell.id}
-              data-index={virtualRow.index}
-              ref={virtualizer.measureElement}
-              style={{
-                position: "absolute",
-                top: 0,
-                left: 0,
-                width: "100%",
-                transform: `translateY(${virtualRow.start}px)`,
-              }}
-              className={cn(
-                "transition-colors duration-150 ease-out hover:bg-muted/20",
-                hasOpenComments && "border-l-2 border-l-blue-400",
-                isActiveCue && "bg-primary/5 ring-1 ring-primary/30"
-              )}
-            >
-              <EditorRow
-                project={project}
-                cell={cell}
-                doc={doc}
-                username={username}
-                editable={canEdit}
-                isCompletionConfigured={isCompletionConfigured}
-                isLoading={isLoading}
-                cellExamples={cellExamples}
-                highlights={highlights}
-                error={errors.get(cell.id)}
-                health={healthMap.get(cell.id)}
-                cellInfractions={cellInfractions}
-                ruleMap={ruleMap}
-                onCompleteSingle={onCompleteSingle}
-                onInfractionClick={onInfractionClick}
-                isBacktranslationConfigured={isBacktranslationConfigured}
-                isBacktranslating={backtranslating?.has(cell.id)}
-                backtranslationError={backtranslationErrors?.get(cell.id)}
-                onBacktranslate={onBacktranslate}
-                openCommentCount={openCommentCount}
-                onOpenComments={onOpenComments}
-                onOpenHistory={onOpenHistory}
-                syncProvider={syncProvider}
-                collabUser={collabUser}
-                isActiveCue={isActiveCue}
-                onSeekToCue={onSeekToCue}
-                rowIndex={virtualRow.index}
-                lineNumbersEnabled={lineNumbersEnabled}
-                cellLabelsEnabled={cellLabelsEnabled}
-                sourceTextDirection={sourceTextDirection}
-                targetTextDirection={targetTextDirection}
-                gridCols={gridCols}
-                isAnonymous={isAnonymous}
-                breakdown={breakdownMap?.get(cell.id)}
-                onJumpToCell={onJumpToCell}
-                onAiSetupNeeded={onAiSetupNeeded}
-                onOpenRecording={onOpenRecording}
-                onDragStart={() => {
-                  isDragging.current = true
-                  dragCells.current = new Set([cell.id])
-                }}
-                onDragEnter={() => {
-                  if (isDragging.current) dragCells.current.add(cell.id)
-                }}
-              />
-            </div>
+              virtualRowStart={virtualRow.start}
+              measureRef={virtualizer.measureElement}
+              project={project}
+              cell={cell}
+              doc={doc}
+              username={username}
+              editable={canEdit}
+              isCompletionConfigured={isCompletionConfigured}
+              examples={examples}
+              completing={completing}
+              errors={errors}
+              healthMap={healthMap}
+              infractions={infractions}
+              ruleMap={ruleMap}
+              onCompleteSingle={onCompleteSingle}
+              onInfractionClick={onInfractionClick}
+              isBacktranslationConfigured={isBacktranslationConfigured}
+              backtranslating={backtranslating}
+              backtranslationErrors={backtranslationErrors}
+              onBacktranslate={onBacktranslate}
+              cellOpenCommentCount={cellOpenCommentCount}
+              onOpenComments={onOpenComments}
+              onOpenHistory={onOpenHistory}
+              syncProvider={syncProvider}
+              collabUser={collabUser}
+              activeCueIndex={activeCueIndex}
+              onSeekToCue={onSeekToCue}
+              rowIndex={virtualRow.index}
+              lineNumbersEnabled={lineNumbersEnabled}
+              cellLabelsEnabled={cellLabelsEnabled}
+              sourceTextDirection={sourceTextDirection}
+              targetTextDirection={targetTextDirection}
+              gridCols={gridCols}
+              isAnonymous={isAnonymous}
+              breakdownMap={breakdownMap}
+              onJumpToCell={onJumpToCell}
+              onAiSetupNeeded={onAiSetupNeeded}
+              onOpenRecording={onOpenRecording}
+              onDragStart={handleDragStart}
+              onDragEnter={handleDragEnter}
+            />
           )
         })}
       </div>
+    </div>
+  )
+})
+
+/**
+ * Memoized row wrapper. Owns every per-cell derivation that used to live in
+ * the parent render loop — `examples.get(id) ?? []` style lookups, the
+ * `isActiveCue`/`hasOpenComments` booleans, the drag handler binding to
+ * cell.id. Moving them here lets React.memo actually hold: when typing in
+ * cell X rebuilds only X's CellData (per the useCells cache), rows for every
+ * OTHER cell receive the same `cell` ref, same stable maps, same stable
+ * callbacks — memo hits and they skip render entirely.
+ *
+ * The parent (EditorTable) still re-renders per keystroke; this wrapper is
+ * the cutoff point where the re-render tree gets pruned.
+ */
+interface MemoizedRowProps {
+  virtualRowStart: number
+  measureRef: (el: HTMLElement | null) => void
+  project: ProjectRecord
+  cell: CellData
+  doc: Y.Doc
+  username: string
+  editable: boolean
+  isCompletionConfigured: boolean
+  examples: Map<string, ScoredPair[]>
+  completing: Map<string, string>
+  errors: Map<string, string>
+  healthMap: Map<string, number>
+  infractions: Map<string, RuleInfraction[]>
+  ruleMap: Map<string, TranslationRule>
+  onCompleteSingle: (cell: CellData) => void
+  onInfractionClick?: (ruleId: string) => void
+  isBacktranslationConfigured?: boolean
+  backtranslating?: Set<string>
+  backtranslationErrors?: Map<string, string>
+  onBacktranslate?: (cell: CellData) => void
+  cellOpenCommentCount?: Map<string, number>
+  onOpenComments?: (cellId: string) => void
+  onOpenHistory?: (cellId: string) => void
+  syncProvider?: import("y-partyserver/provider").default | null
+  collabUser?: { name: string; color: string }
+  activeCueIndex?: number
+  onSeekToCue?: (cellId: string) => void
+  rowIndex: number
+  lineNumbersEnabled: boolean
+  cellLabelsEnabled: boolean
+  sourceTextDirection: "ltr" | "rtl"
+  targetTextDirection: "ltr" | "rtl"
+  gridCols: "grid-cols-[56px_1fr_1fr_56px]"
+  isAnonymous?: boolean
+  breakdownMap?: Map<string, CellHealthBreakdown>
+  onJumpToCell?: (cellId: string) => void
+  onAiSetupNeeded?: () => void
+  onOpenRecording?: (cellId: string) => void
+  onDragStart: (cellId: string) => void
+  onDragEnter: (cellId: string) => void
+}
+
+const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
+  const {
+    virtualRowStart, measureRef,
+    cell, examples, completing, errors, healthMap, infractions,
+    backtranslating, backtranslationErrors, cellOpenCommentCount, breakdownMap,
+    activeCueIndex, rowIndex, gridCols,
+    onDragStart: onDragStartParent, onDragEnter: onDragEnterParent,
+    project, doc, username, editable, isCompletionConfigured,
+    ruleMap, onCompleteSingle, onInfractionClick,
+    isBacktranslationConfigured, onBacktranslate,
+    onOpenComments, onOpenHistory, syncProvider, collabUser,
+    onSeekToCue, lineNumbersEnabled, cellLabelsEnabled,
+    sourceTextDirection, targetTextDirection, isAnonymous,
+    onJumpToCell, onAiSetupNeeded, onOpenRecording,
+  } = props
+
+  const cellId = cell.id
+  const cellExamples = useMemo(() => examples.get(cellId) ?? EMPTY_EXAMPLES, [examples, cellId])
+  const highlights = useMemo(() => buildHighlightsFromExamples(cellExamples), [cellExamples])
+  const cellInfractions = useMemo(() => infractions.get(cellId) ?? EMPTY_INFRACTIONS, [infractions, cellId])
+
+  const completingState = completing.get(cellId)
+  const isLoading = completingState === "searching" || completingState === "generating"
+  const error = errors.get(cellId)
+  const health = healthMap.get(cellId)
+  const isBacktranslating = backtranslating?.has(cellId)
+  const backtranslationError = backtranslationErrors?.get(cellId)
+  const openCommentCount = cellOpenCommentCount?.get(cellId) ?? 0
+  const hasOpenComments = openCommentCount > 0
+  const breakdown = breakdownMap?.get(cellId)
+  const isActiveCue = activeCueIndex !== undefined && activeCueIndex === rowIndex
+
+  // Bind the stable parent (cellId) => void handlers to this row's cellId.
+  // Stable per-row because both parent callbacks and cellId are stable.
+  const handleDragStart = useCallback(() => onDragStartParent(cellId), [onDragStartParent, cellId])
+  const handleDragEnter = useCallback(() => onDragEnterParent(cellId), [onDragEnterParent, cellId])
+
+  return (
+    <div
+      data-cell-id={cellId}
+      data-index={rowIndex}
+      ref={measureRef}
+      style={{
+        position: "absolute",
+        top: 0,
+        left: 0,
+        width: "100%",
+        transform: `translateY(${virtualRowStart}px)`,
+      }}
+      className={cn(
+        "transition-colors duration-150 ease-out hover:bg-muted/20",
+        hasOpenComments && "border-l-2 border-l-blue-400",
+        isActiveCue && "bg-primary/5 ring-1 ring-primary/30",
+      )}
+    >
+      <EditorRow
+        project={project}
+        cell={cell}
+        doc={doc}
+        username={username}
+        editable={editable}
+        isCompletionConfigured={isCompletionConfigured}
+        isLoading={isLoading}
+        cellExamples={cellExamples}
+        highlights={highlights}
+        error={error}
+        health={health}
+        cellInfractions={cellInfractions}
+        ruleMap={ruleMap}
+        onCompleteSingle={onCompleteSingle}
+        onInfractionClick={onInfractionClick}
+        isBacktranslationConfigured={isBacktranslationConfigured}
+        isBacktranslating={isBacktranslating}
+        backtranslationError={backtranslationError}
+        onBacktranslate={onBacktranslate}
+        openCommentCount={openCommentCount}
+        onOpenComments={onOpenComments}
+        onOpenHistory={onOpenHistory}
+        syncProvider={syncProvider}
+        collabUser={collabUser}
+        isActiveCue={isActiveCue}
+        onSeekToCue={onSeekToCue}
+        rowIndex={rowIndex}
+        lineNumbersEnabled={lineNumbersEnabled}
+        cellLabelsEnabled={cellLabelsEnabled}
+        sourceTextDirection={sourceTextDirection}
+        targetTextDirection={targetTextDirection}
+        gridCols={gridCols}
+        isAnonymous={isAnonymous}
+        breakdown={breakdown}
+        onJumpToCell={onJumpToCell}
+        onAiSetupNeeded={onAiSetupNeeded}
+        onOpenRecording={onOpenRecording}
+        onDragStart={handleDragStart}
+        onDragEnter={handleDragEnter}
+      />
     </div>
   )
 })

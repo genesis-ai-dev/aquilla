@@ -12,23 +12,29 @@ interface Props {
   disabled?: boolean
 }
 
-function isSupported(): boolean {
-  if (typeof navigator === "undefined" || typeof window === "undefined") return false
-  if (typeof MediaRecorder === "undefined") return false
-  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) return false
-  return true
+function getUnsupportedReason(): string | null {
+  if (typeof navigator === "undefined" || typeof window === "undefined") return "Browser API unavailable"
+  if (typeof MediaRecorder === "undefined") return "MediaRecorder not supported in this browser"
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    // On Tauri/WKWebView this usually means NSMicrophoneUsageDescription is
+    // missing from Info.plist, or the webview is running in an insecure
+    // context. We render the button anyway so the state is discoverable.
+    return "Microphone API not exposed — this can happen in Tauri without mic entitlement, or in non-HTTPS contexts"
+  }
+  return null
 }
 
 export function CellAudioRecordButton({ project, onOpenRecording, disabled }: Props) {
-  if (!isSupported()) return null
-
+  const unsupportedReason = getUnsupportedReason()
   const isGitProject = project.origin?.kind === "git"
-  const blocked = disabled || isGitProject
-  const tooltip = disabled
-    ? "Recording disabled"
-    : isGitProject
-      ? "Recording on GitLab projects isn't available yet"
-      : "Record audio"
+  const blocked = disabled || isGitProject || unsupportedReason !== null
+  const tooltip = unsupportedReason
+    ? `Recording unavailable — ${unsupportedReason}`
+    : disabled
+      ? "Recording disabled"
+      : isGitProject
+        ? "Recording on GitLab projects isn't available yet"
+        : "Record audio"
 
   return (
     <button

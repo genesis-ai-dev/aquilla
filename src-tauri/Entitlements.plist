@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!-- Required for hardened runtime + getUserMedia on macOS. Without this,
+         WKWebView's mic capture is blocked by TCC even with NSMicrophoneUsageDescription. -->
+    <key>com.apple.security.device.audio-input</key>
+    <true/>
+    <!-- Network client needed for fetch/websocket to Frontier server. -->
+    <key>com.apple.security.network.client</key>
+    <true/>
+    <!-- JIT permission — required by WKWebView's JavaScriptCore on some macOS configurations. -->
+    <key>com.apple.security.cs.allow-jit</key>
+    <true/>
+    <!-- Allow unsigned executable memory (required for some wry/wkwebview dev builds). -->
+    <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+    <true/>
+</dict>
+</plist>

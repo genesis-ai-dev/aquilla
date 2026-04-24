@@ -91,19 +91,22 @@ function checkRule(rule: TranslationRule, cell: CellData, fileId: string): RuleI
     case "source-target-match": {
       const re = compile(check.pattern, "gi")
       if (!re) return null
-      // String.prototype.match with a /g/ regex resets lastIndex, so reusing
-      // the cached instance is safe here.
-      const sourceMatches = cell.original.match(re)
-      if (!sourceMatches || sourceMatches.length === 0) return null
-      const targetMatches = cell.translated.match(re)
-      if (!targetMatches || targetMatches.length === 0) {
-        return {
-          ruleId: rule.id, cellId: cell.id, fileId,
-          message: `"${rule.name}": pattern found in source but missing in target`,
-          spans: [],
-        }
+      re.lastIndex = 0 // cached regex — clear any leftover state before matchAll
+      const sourceSpans: import("@/lib/parsers/types").InfractionSpan[] = []
+      for (const m of cell.original.matchAll(re)) {
+        if (m.index === undefined) continue
+        sourceSpans.push({ side: "source", start: m.index, end: m.index + m[0].length, matchedText: m[0] })
       }
-      return null
+      if (sourceSpans.length === 0) return null
+      re.lastIndex = 0
+      const targetHasMatch = re.test(cell.translated)
+      re.lastIndex = 0 // reset after test() advances it on a /g regex
+      if (targetHasMatch) return null
+      return {
+        ruleId: rule.id, cellId: cell.id, fileId,
+        message: `"${rule.name}": pattern found in source but missing in target`,
+        spans: sourceSpans,
+      }
     }
   }
 }

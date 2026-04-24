@@ -175,57 +175,89 @@ export function useCells(doc: Y.Doc | null, fileId: string, username = "local", 
     const cache = cacheRef.current
     cache.clear()
 
-    function computeOrdered(): CellData[] {
-      const ordered: CellData[] = []
+    // Ordered array of CellData references + id→index lookup. Kept across
+    // flushes so a single-cell edit to a 30k-row Bible doesn't re-walk the
+    // whole order list — we patch the one slot in place and hand React a
+    // shallow copy (V8's Array#slice is ~1–2ms for 30k refs; the old
+    // computeOrdered + array push loop was 14–20ms).
+    let ordered: CellData[] = []
+    const idToIndex = new Map<string, number>()
+
+    function buildOrEnsure(id: string): CellData | null {
+      let entry = cache.get(id)
+      if (entry) return entry
+      const cell = cellsMap.get(id) as Y.Map<unknown> | undefined
+      if (!cell) return null
+      entry = buildCellData(cell, fileId, username, requiredValidations)
+      cache.set(id, entry)
+      return entry
+    }
+
+    function rebuildFromScratch(): void {
+      const ids = orderArray.toArray()
+      const next: CellData[] = []
+      idToIndex.clear()
       const seen = new Set<string>()
-      for (const id of orderArray.toArray()) {
+      for (const id of ids) {
         seen.add(id)
-        let entry = cache.get(id)
-        if (!entry) {
-          const cell = cellsMap.get(id) as Y.Map<unknown> | undefined
-          if (!cell) continue
-          entry = buildCellData(cell, fileId, username, requiredValidations)
-          cache.set(id, entry)
-        }
-        ordered.push(entry)
+        const entry = buildOrEnsure(id)
+        if (!entry) continue
+        idToIndex.set(id, next.length)
+        next.push(entry)
       }
-      // Drop cache entries for cells no longer in the order.
       for (const id of [...cache.keys()]) {
         if (!seen.has(id)) cache.delete(id)
       }
-      return ordered
+      ordered = next
     }
 
-    // Initial read is safe inside useEffect — runs after the current render.
-    setCells(computeOrdered())
+    rebuildFromScratch()
+    setCells(ordered)
 
     const dirtyIds = new Set<string>()
     let fullRebuild = false
+    let orderTopologyDirty = false
     let scheduled = false
 
     function flush() {
       scheduled = false
       const end = perfMark("useCells.flush")
-      if (fullRebuild) {
+
+      // Full rebuild path: topology or key churn on cellsMap.
+      if (fullRebuild || orderTopologyDirty) {
         cache.clear()
+        idToIndex.clear()
         fullRebuild = false
+        orderTopologyDirty = false
         const dirtySnapshot = dirtyIds.size
         dirtyIds.clear()
-        setCells(computeOrdered())
-        perfLog(`useCells.flush full-rebuild dirty=${dirtySnapshot} cacheSize=${cache.size}`)
+        rebuildFromScratch()
+        setCells(ordered.slice())
+        perfLog(`useCells.flush full-rebuild dirty=${dirtySnapshot} ordered=${ordered.length}`)
         end()
         return
       }
-      if (dirtyIds.size === 0) {
-        end()
-        return
-      }
-      // Invalidate only the cells whose Yjs content reported a change.
+
+      if (dirtyIds.size === 0) { end(); return }
+
+      // Incremental patch: only rebuild the dirty cells' entries, splice them
+      // into a shallow copy of `ordered`. React sees a new array ref so the
+      // consuming tree re-renders, but unchanged CellData refs are preserved
+      // so React.memo on rows skips everyone but the typed cell.
       const dirtyCount = dirtyIds.size
-      for (const id of dirtyIds) cache.delete(id)
+      const next = ordered.slice()
+      for (const id of dirtyIds) {
+        const idx = idToIndex.get(id)
+        if (idx === undefined) continue  // cell not in current order (was removed between events); ignore
+        cache.delete(id)
+        const entry = buildOrEnsure(id)
+        if (!entry) continue
+        next[idx] = entry
+      }
       dirtyIds.clear()
-      setCells(computeOrdered())
-      perfLog(`useCells.flush incremental dirty=${dirtyCount} cacheSize=${cache.size}`)
+      ordered = next
+      setCells(next)
+      perfLog(`useCells.flush incremental dirty=${dirtyCount} ordered=${ordered.length}`)
       end()
     }
 
@@ -244,8 +276,6 @@ export function useCells(doc: Y.Doc | null, fileId: string, username = "local", 
         // direct change to cellsMap (key add/remove) has path.length === 0;
         // changes nested inside a cell have path[0] === cellId.
         if (ev.path.length === 0) {
-          // Cell add/remove on the top-level map. Could change cell identities;
-          // rebuild from scratch to keep cache consistent.
           fullRebuild = true
           break
         }
@@ -253,8 +283,6 @@ export function useCells(doc: Y.Doc | null, fileId: string, username = "local", 
         if (typeof head === "string") {
           dirtyIds.add(head)
         } else {
-          // Unexpected path shape — fall back to full rebuild rather than
-          // silently miss an update.
           fullRebuild = true
           break
         }
@@ -263,9 +291,9 @@ export function useCells(doc: Y.Doc | null, fileId: string, username = "local", 
     }
 
     function onOrderChange() {
-      // Order changes (insert/move/delete) don't affect any cell's content,
-      // but the resulting array must reflect the new ordering. We still reuse
-      // cached entries — only the array is rebuilt.
+      // Any insert/move/delete in the order array can shift indices — our
+      // idToIndex map is invalid. Mark for full rebuild.
+      orderTopologyDirty = true
       schedule()
     }
 

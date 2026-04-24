@@ -70,7 +70,7 @@ export function RulesPage() {
         </Button>
         <h2 className="font-semibold">Translation Rules</h2>
         <div className="flex-1" />
-        <RuleSuggestDialog files={project?.files || []} completionSettings={project?.completionSettings} onAdd={addRule} />
+        <RuleSuggestDialog files={project?.files || []} completionSettings={project?.completionSettings} onAdd={addRule} projectId={id} />
         <RuleCreateDialog onAdd={addRule} />
       </header>
 

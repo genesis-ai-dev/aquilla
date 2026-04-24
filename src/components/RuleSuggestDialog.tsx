@@ -9,6 +9,8 @@ import { suggestRulesFromPairs, type RuleSuggestion } from "@/lib/rules/rule-sug
 import { resolveProvider, DEFAULT_SYSTEM_PROMPT } from "@/lib/completion/completion-service"
 import { useFrontierHealth } from "@/lib/completion/frontier-health"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
+import { addLlmCall } from "@/lib/usage/record-usage"
+import { getProject, updateProject } from "@/lib/store/project-index"
 import type { CompletionSettings, FileReference, TranslationRule } from "@/lib/parsers/types"
 
 const FALLBACK_SETTINGS: CompletionSettings = {
@@ -25,9 +27,10 @@ interface RuleSuggestDialogProps {
   files: FileReference[]
   completionSettings: CompletionSettings | undefined
   onAdd: (rule: Omit<TranslationRule, "id" | "createdAt">) => void
+  projectId?: string
 }
 
-export function RuleSuggestDialog({ files, completionSettings, onAdd }: RuleSuggestDialogProps) {
+export function RuleSuggestDialog({ files, completionSettings, onAdd, projectId }: RuleSuggestDialogProps) {
   const { session } = useFrontierSession()
   const { available: frontierAvailable } = useFrontierHealth()
   const [open, setOpen] = useState(false)
@@ -57,7 +60,17 @@ export function RuleSuggestDialog({ files, completionSettings, onAdd }: RuleSugg
         return
       }
 
-      const result = await suggestRulesFromPairs(pairs, effectiveSettings, session)
+      const result = await suggestRulesFromPairs(
+        pairs,
+        effectiveSettings,
+        session,
+        async (meta) => {
+          if (!projectId) return
+          const current = await getProject(projectId)
+          if (!current) return
+          await updateProject(addLlmCall(current, meta))
+        },
+      )
       if (result.length === 0) {
         setError("The LLM didn't find any testable patterns. Try validating more diverse translations.")
         setStage("idle")

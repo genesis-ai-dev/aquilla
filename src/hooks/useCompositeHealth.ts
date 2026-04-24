@@ -67,7 +67,6 @@ export function useCompositeHealth(input: UseCompositeHealthInput): UseComposite
   const workerRef = useRef<Worker | null>(null)
   const prevKeyRef = useRef<string | null>(null)
   const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const pendingRequestRef = useRef<HealthSyncRequest | null>(null)
 
   // Worker setup + teardown runs once. A single persistent message listener
   // dispatches responses by request id so we don't leak listeners across the
@@ -102,39 +101,43 @@ export function useCompositeHealth(input: UseCompositeHealthInput): UseComposite
     }
   }, [])
 
+  // Latest inputs captured in a ref so the debounced callback always reads
+  // the freshest values without re-binding the timer or re-allocating cells
+  // on every render. The effect body only schedules — all heavy work
+  // (buildCells + JSON key + postMessage) happens inside the timer.
+  const latestInputRef = useRef(input)
+  latestInputRef.current = input
+
   useEffect(() => {
-    const cells = buildCells(input.fileCells)
-
-    // Cheap content key so we bail out when a new Map/array is passed with
-    // identical content (avoids infinite re-renders).
-    const key = JSON.stringify([
-      cells.map(c => [
-        c.id,
-        c.translated,
-        c.validatorCount,
-        c.history.length,
-        c.history.at(-1)?.examples,
-      ]),
-      input.requiredValidations,
-      input.rules,
-      input.config,
-    ])
-    if (key === prevKeyRef.current) return
-    prevKeyRef.current = key
-
-    pendingRequestRef.current = {
-      cells,
-      rules: input.rules,
-      config: input.config,
-      requiredValidations: input.requiredValidations,
-    }
-
     if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current)
     debounceTimerRef.current = setTimeout(() => {
       debounceTimerRef.current = null
-      const req = pendingRequestRef.current
-      if (!req) return
-      pendingRequestRef.current = null
+      const current = latestInputRef.current
+      const cells = buildCells(current.fileCells)
+
+      // Cheap content key so we bail out when a new Map/array is passed with
+      // identical content (avoids re-firing the worker for no-op updates).
+      const key = JSON.stringify([
+        cells.map(c => [
+          c.id,
+          c.translated,
+          c.validatorCount,
+          c.history.length,
+          c.history.at(-1)?.examples,
+        ]),
+        current.requiredValidations,
+        current.rules,
+        current.config,
+      ])
+      if (key === prevKeyRef.current) return
+      prevKeyRef.current = key
+
+      const req: HealthSyncRequest = {
+        cells,
+        rules: current.rules,
+        config: current.config,
+        requiredValidations: current.requiredValidations,
+      }
 
       const rid = ++requestIdRef.current
       if (workerRef.current) {

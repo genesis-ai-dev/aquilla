@@ -1,7 +1,6 @@
 import { useEditor, EditorContent } from "@tiptap/react"
 import { BubbleMenu } from "@tiptap/react/menus"
 import StarterKit from "@tiptap/starter-kit"
-import Underline from "@tiptap/extension-underline"
 import Collaboration from "@tiptap/extension-collaboration"
 import { Extension } from "@tiptap/core"
 import { yCursorPlugin } from "@tiptap/y-tiptap"
@@ -39,7 +38,6 @@ export function TranslatedEditor({ fragment, onBlur, placeholder, className, syn
         codeBlock: false,
         horizontalRule: false,
       }),
-      Underline,
       Collaboration.configure({
         fragment,
       }),

@@ -56,6 +56,9 @@ export function TranslatedEditor({ fragment, onBlur, placeholder, className, syn
       ...(syncProvider && user
         ? [createCollabCursorExtension(syncProvider, user)]
         : []),
+      // The callback is invoked by the PM plugin, not during React render —
+      // the lint rule is overly conservative here.
+      // eslint-disable-next-line react-hooks/refs
       createViolationDecorationExtension(() => latestViolationStateRef.current),
     ],
     editorProps: {

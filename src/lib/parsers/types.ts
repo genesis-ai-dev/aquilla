@@ -62,11 +62,36 @@ export type RuleCheck =
 export type RuleAutofix =
   | { kind: "regex-replace"; pattern: string; replacement: string; flags: string }
 
+export interface InfractionSpan {
+  /** Which side of the cell the match lives on. */
+  side: "source" | "target"
+  /** Character offset (inclusive) into the plain-text of that side. */
+  start: number
+  /** Character offset (exclusive). */
+  end: number
+  /** The matched substring — retained for popover context and debugging. */
+  matchedText: string
+}
+
+export interface RuleWaiver {
+  ruleId: string
+  /** Optional human-entered reason. */
+  reason?: string
+  /** ISO timestamp. */
+  waivedAt: string
+  /** User id / username, when available. */
+  waivedBy?: string
+}
+
 export interface RuleInfraction {
   ruleId: string
   cellId: string
   fileId: string
   message: string
+  /** Triggering text spans. Empty when the violation has no identifiable
+   *  concrete match (e.g. absence rules with no source trigger) — those
+   *  fall back to the gutter icon only. */
+  spans: InfractionSpan[]
 }
 
 export interface RulePenalties {

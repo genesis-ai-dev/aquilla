@@ -10,7 +10,7 @@ function rule(id: string, severity: "major" | "minor"): TranslationRule {
   }
 }
 function inf(ruleId: string): RuleInfraction {
-  return { ruleId, cellId: "c", fileId: "f", message: "" }
+  return { ruleId, cellId: "c", fileId: "f", message: "", spans: [] }
 }
 
 describe("rulePenalty", () => {

@@ -65,6 +65,7 @@ function checkRule(rule: TranslationRule, cell: CellData, fileId: string): RuleI
         return {
           ruleId: rule.id, cellId: cell.id, fileId,
           message: `"${rule.name}": target contains forbidden pattern`,
+          spans: [],
         }
       }
       return null
@@ -79,6 +80,7 @@ function checkRule(rule: TranslationRule, cell: CellData, fileId: string): RuleI
         return {
           ruleId: rule.id, cellId: cell.id, fileId,
           message: `"${rule.name}": source matches pattern but target does not`,
+          spans: [],
         }
       }
       return null
@@ -95,6 +97,7 @@ function checkRule(rule: TranslationRule, cell: CellData, fileId: string): RuleI
         return {
           ruleId: rule.id, cellId: cell.id, fileId,
           message: `"${rule.name}": pattern found in source but missing in target`,
+          spans: [],
         }
       }
       return null

@@ -19,7 +19,7 @@
     ],
     "created_at": "2026-04-13T17:17:30.703633+00:00",
     "updated_at": "2026-04-13T17:17:30.704866+00:00",
-    "last_viewed": null,
+    "last_viewed": "2026-04-23T15:22:00.882576+00:00",
     "stale_views": 0
   },
   {
@@ -616,6 +616,77 @@
     ],
     "created_at": "2026-04-22T21:42:50.477079+00:00",
     "updated_at": "2026-04-22T21:42:50.477085+00:00",
+    "last_viewed": null,
+    "stale_views": 0
+  },
+  {
+    "id": "19d8a508b48e",
+    "file": "/Users/ryderwishart/frontierrnd/codex-editor/webviews/codex-webviews/src/CodexCellEditor/TextCellEditor.tsx",
+    "anchor": {
+      "from_text": "const startRecording",
+      "to_text": "saveAudioToCell(blob)",
+      "function_anchor": null,
+      "start_line": 1107,
+      "end_line": 1181
+    },
+    "original_content": "    const startRecording = async () => {\n        // Prevent recording if cell is locked\n        if (isCellLocked) {\n            setRecordingStatus(\"Cannot record: cell is locked\");\n            return;\n        }\n\n        if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {\n            setRecordingStatus(\"Microphone not supported in this browser\");\n            return;\n        }\n\n        try {\n            const stream = await navigator.mediaDevices.getUserMedia({\n                audio: {\n                    // Request high-quality capture suitable for later WAV conversion during export\n                    sampleRate: 48000,\n                    sampleSize: 24, // May be ignored by some browsers; best-effort\n                    channelCount: 1,\n                    echoCancellation: false,\n                    noiseSuppression: false,\n                    autoGainControl: false,\n                },\n            });\n\n            const mediaRecorderOptions: MediaRecorderOptions = {};\n            try {\n                if (typeof MediaRecorder !== \"undefined\") {\n                    if (MediaRecorder.isTypeSupported?.(\"audio/webm;codecs=opus\")) {\n                        mediaRecorderOptions.mimeType = \"audio/webm;codecs=opus\";\n                    } else if (MediaRecorder.isTypeSupported?.(\"audio/webm\")) {\n                        mediaRecorderOptions.mimeType = \"audio/webm\";\n                    }\n                }\n            } catch {\n                // no-op, fall back to default mimeType\n            }\n            // Increase bitrate for higher quality Opus encoding\n            mediaRecorderOptions.audioBitsPerSecond = 256000; // 256 kbps\n\n            const recorder = new MediaRecorder(stream, mediaRecorderOptions);\n\n            audioChunksRef.current = [];\n\n            recorder.ondataavailable = (e) => {\n                if (e.data.size > 0) {\n                    audioChunksRef.current.push(e.data);\n                }\n            };\n\n            recorder.onstart = () => {\n                setIsRecording(true);\n                setRecordingStatus(\"Recording...\");\n            };\n\n            recorder.onstop = () => {\n                setIsRecording(false);\n                // Keep Blob type simple to avoid downstream extension parsing issues\n                const blob = new Blob(audioChunksRef.current, { type: \"audio/webm\" });\n                setAudioBlob(blob);\n\n                // Clean up old URL if exists\n                if (audioUrl) {\n                    URL.revokeObjectURL(audioUrl);\n                }\n\n                const url = URL.createObjectURL(blob);\n                setAudioUrl(url);\n                setRecordingStatus(\"Recording complete\");\n\n                // Stop all tracks to release microphone\n                stream.getTracks().forEach((track) => track.stop());\n\n                // Save audio to cell data\n                saveAudioToCell(blob);",
+    "original_hash": "000515f010403b8c",
+    "summary": "Desktop codex-editor webview recording flow. Uses MediaRecorder with webm/opus @ 256kbps, 48kHz mono, no echoCancellation/noiseSuppression. Accumulates chunks in audioChunksRef, on stop calls saveAudioToCell(blob) which base64-encodes and posts saveAudioAttachment message to extension host. Audio ID format: audio-{cellId}-{Date.now()}-{9-char-random}. File naming: audio-{cellId}-{ts}-{rand}.{ext} where ext is webm/wav/mp3/m4a/ogg (webm default).",
+    "tags": [
+      "codex-editor",
+      "audio-recording",
+      "mediarecorder"
+    ],
+    "created_at": "2026-04-23T15:33:12.661803+00:00",
+    "updated_at": "2026-04-23T15:33:12.661820+00:00",
+    "last_viewed": null,
+    "stale_views": 0
+  },
+  {
+    "id": "8eaab7e76e0b",
+    "file": "/Users/ryderwishart/frontierrnd/codex-editor/src/providers/codexCellEditorProvider/codexCellEditorMessagehandling.ts",
+    "anchor": {
+      "from_text": "saveAudioAttachment",
+      "to_text": "audioAttachmentSaved",
+      "function_anchor": null,
+      "start_line": 2071,
+      "end_line": 2086
+    },
+    "original_content": "    saveAudioAttachment: async ({ event, document, webviewPanel, provider }) => {\n        const typedEvent = event as Extract<EditorPostMessages, { command: \"saveAudioAttachment\"; }>;\n        const requestId = typedEvent.requestId;\n        debug(\"saveAudioAttachment message received\", {\n            cellId: typedEvent.content.cellId,\n            audioId: typedEvent.content.audioId,\n            fileExtension: typedEvent.content.fileExtension\n        });\n\n        // Prevent saving audio if cell is locked\n        const cellId = typedEvent.content.cellId;\n        const cell = document.getCell(cellId);\n        if (cell?.metadata?.isLocked) {\n            console.warn(`Attempted to save audio to locked cell ${cellId}. Operation blocked.`);\n            provider.postMessageToWebview(webviewPanel, {\n                type: \"audioAttachmentSaved\",",
+    "original_hash": "ac9d72692fe682d4",
+    "summary": "Desktop extension host handler for saveAudioAttachment message from webview. Validates audioId (alphanumeric+dash), whitelists extensions (webm/wav/mp3/m4a/ogg), enforces 50MB max. Atomic dual-write: .project/attachments/files/{segment}/{audioId}.{ext} AND .project/attachments/pointers/{segment}/{audioId}.{ext} (temp file \u2192 rename). Then calls document.updateCellAttachment to write CodexCellAttachment{url,type:'audio',createdAt,updatedAt,isDeleted:false,createdBy:username} into cell.metadata.attachments[audioId] and sets cell.metadata.selectedAudioId. Auto-selects new recording. Responds with audioAttachmentSaved{cellId,audioId,requestId,success,savedToCodexFile}. Audio recordings are written as direct binary, NOT LFS-pointerified (LFS infra exists only for imported audio).",
+    "tags": [
+      "codex-editor",
+      "audio-recording",
+      "persistence",
+      "attachments"
+    ],
+    "created_at": "2026-04-23T15:33:12.668819+00:00",
+    "updated_at": "2026-04-23T15:33:12.668831+00:00",
+    "last_viewed": null,
+    "stale_views": 0
+  },
+  {
+    "id": "d8cfd7101935",
+    "file": "/Users/ryderwishart/prototypes/codex-web-app/src/lib/codex-editor/types.ts",
+    "anchor": {
+      "from_text": "export interface CodexCellAttachment",
+      "to_text": "selectedAudioId",
+      "function_anchor": null,
+      "start_line": 51,
+      "end_line": 69
+    },
+    "original_content": "export interface CodexCellAttachment {\n  url: string;\n  type: string;\n  createdAt?: number;\n  updatedAt?: number;\n  isDeleted?: boolean;\n  isMissing?: boolean;\n}\n\nexport interface CodexCellMetadata {\n  id: string;\n  type: CodexCellType;\n  edits?: EditHistory[];\n  data?: CodexData;\n  cellLabel?: string;\n  parentId?: string;\n  isLocked?: boolean;\n  attachments?: Record<string, CodexCellAttachment>;\n  selectedAudioId?: string;",
+    "original_hash": "a3ff9a98d1f97eac",
+    "summary": "Web app cell attachment shape matches desktop: CodexCellAttachment{url,type,createdAt?,updatedAt?,isDeleted?,isMissing?}. Cell metadata carries attachments?: Record<string, CodexCellAttachment> + selectedAudioId?: string. Same data model as desktop codex-editor \u2014 recording implementation should write the same shape to Y.Doc so existing playback (useCellAudio + CellAudioButton) picks it up automatically.",
+    "tags": [
+      "codex-web-app",
+      "audio-recording",
+      "attachments",
+      "data-model"
+    ],
+    "created_at": "2026-04-23T15:33:12.675861+00:00",
+    "updated_at": "2026-04-23T15:33:12.675866+00:00",
     "last_viewed": null,
     "stale_views": 0
   }

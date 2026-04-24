@@ -22,7 +22,10 @@ import { CellActionsMenu } from "./CellActionsMenu"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { cn } from "@/lib/utils"
 import { isPerfLogEnabled } from "@/lib/perf-log"
-import { partitionInfractions } from "@/lib/rules/waivers"
+import { partitionInfractions, addWaiver, removeWaiver } from "@/lib/rules/waivers"
+import { setCellWaivers } from "@/hooks/useCellWaivers"
+import { ViolationPopover } from "./ViolationPopover"
+import type { RangeHighlight } from "./HighlightedText"
 
 // Per-row render counter. Always accumulated when perf logging is on (cheap)
 // but NOT auto-logged — render logs would flood the console and push the
@@ -512,7 +515,69 @@ function EditorRow({
   rowIndex, lineNumbersEnabled, cellLabelsEnabled, sourceTextDirection, targetTextDirection, gridCols,
   isAnonymous, breakdown, onJumpToCell, onAiSetupNeeded, onOpenRecording,
 }: EditorRowProps) {
-  void waivedInfractions // will be consumed by Task 13
+  const [openRuleId, setOpenRuleId] = useState<string | null>(null)
+  const [examplesExpanded, setExamplesExpanded] = useState(false)
+
+  const ruleSeverity = useMemo(() => {
+    const m = new Map<string, "major" | "minor">()
+    for (const [id, rule] of ruleMap) m.set(id, rule.severity)
+    return m
+  }, [ruleMap])
+
+  const waivedRuleIds = useMemo(
+    () => new Set((cell.waivers ?? []).map((w) => w.ruleId)),
+    [cell.waivers],
+  )
+
+  const handleWaive = useCallback((input: { ruleId: string; reason?: string }) => {
+    const next = addWaiver(cell.waivers ?? [], input, username)
+    setCellWaivers(doc, cell.id, next)
+    setOpenRuleId(null)
+  }, [cell.waivers, cell.id, doc, username])
+
+  const handleUnwaive = useCallback((ruleId: string) => {
+    const next = removeWaiver(cell.waivers ?? [], ruleId)
+    setCellWaivers(doc, cell.id, next)
+    setOpenRuleId(null)
+  }, [cell.waivers, cell.id, doc])
+
+  const sourceRanges = useMemo<RangeHighlight[]>(() => {
+    const out: RangeHighlight[] = []
+    const all = [...cellInfractions, ...waivedInfractions]
+    for (const inf of all) {
+      const waived = waivedRuleIds.has(inf.ruleId)
+      const severity = ruleSeverity.get(inf.ruleId) ?? "major"
+      for (const span of inf.spans) {
+        if (span.side !== "source") continue
+        out.push({
+          start: span.start, end: span.end, ruleId: inf.ruleId,
+          kind: waived ? "violation-waived" : (severity === "major" ? "violation-major" : "violation-minor"),
+        })
+      }
+    }
+    return out
+  }, [cellInfractions, waivedInfractions, waivedRuleIds, ruleSeverity])
+
+  const targetRanges = useMemo<RangeHighlight[]>(() => {
+    // Target side is handled by the ProseMirror plugin inside TranslatedEditor
+    // when the cell has a translatedXml fragment. Only produce ranges for the
+    // plain-textarea fallback case.
+    if (cell.translatedXml) return []
+    const out: RangeHighlight[] = []
+    const all = [...cellInfractions, ...waivedInfractions]
+    for (const inf of all) {
+      const waived = waivedRuleIds.has(inf.ruleId)
+      const severity = ruleSeverity.get(inf.ruleId) ?? "major"
+      for (const span of inf.spans) {
+        if (span.side !== "target") continue
+        out.push({
+          start: span.start, end: span.end, ruleId: inf.ruleId,
+          kind: waived ? "violation-waived" : (severity === "major" ? "violation-major" : "violation-minor"),
+        })
+      }
+    }
+    return out
+  }, [cellInfractions, waivedInfractions, waivedRuleIds, ruleSeverity, cell.translatedXml])
 
   function handleChange(e: React.ChangeEvent<HTMLTextAreaElement>) {
     appendCellHistory(doc, cell.id, {
@@ -858,14 +923,22 @@ function EditorRow({
           />
         ) : (
           <div className="text-sm">
-            {highlights.length > 0 ? (
-              <HighlightedText text={cell.original} highlights={highlights} />
-            ) : (
-              cell.original
-            )}
+            <HighlightedText
+              text={cell.original}
+              highlights={highlights}
+              ranges={sourceRanges}
+              showEvidence={examplesExpanded}
+              onRangeClick={(ruleId) => setOpenRuleId(ruleId)}
+            />
           </div>
         )}
-        {cellExamples.length > 0 && <ExamplePanel examples={cellExamples} />}
+        {cellExamples.length > 0 && (
+          <ExamplePanel
+            examples={cellExamples}
+            expanded={examplesExpanded}
+            onExpandedChange={setExamplesExpanded}
+          />
+        )}
       </div>
 
       {/* Target column — actions live in the left gutter, so no right-side rail. */}
@@ -879,15 +952,29 @@ function EditorRow({
               user={collabUser}
               onBlur={handleEditorBlur}
               editable={editable}
+              infractions={[...cellInfractions, ...waivedInfractions]}
+              ruleSeverity={ruleSeverity}
+              waivedRuleIds={waivedRuleIds}
+              onRuleClick={(ruleId) => setOpenRuleId(ruleId)}
             />
           ) : (
-            <textarea
-              className="w-full resize-none rounded border bg-background px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-ring disabled:cursor-not-allowed disabled:opacity-70"
-              value={cell.translated}
-              onChange={handleChange}
-              readOnly={!editable}
-              rows={Math.max(2, Math.ceil(cell.original.length / 50))}
-            />
+            <div className="relative">
+              <textarea
+                className="w-full resize-none rounded border bg-background px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-ring disabled:cursor-not-allowed disabled:opacity-70"
+                value={cell.translated}
+                onChange={handleChange}
+                readOnly={!editable}
+                rows={Math.max(2, Math.ceil(cell.original.length / 50))}
+              />
+              {targetRanges.length > 0 && (
+                <div
+                  className="pointer-events-none absolute inset-0 whitespace-pre-wrap break-words px-2 py-1 text-sm"
+                  aria-hidden
+                >
+                  <HighlightedText text={cell.translated} ranges={targetRanges} />
+                </div>
+              )}
+            </div>
           )}
           {error && <p className="mt-0.5 text-xs text-destructive">{error}</p>}
           {cell.backtranslation && (
@@ -918,6 +1005,26 @@ function EditorRow({
           )}
         </div>
       </div>
+
+      {openRuleId && (() => {
+        const inf = [...cellInfractions, ...waivedInfractions].find((i) => i.ruleId === openRuleId)
+        const rule = ruleMap.get(openRuleId)
+        if (!inf || !rule) return null
+        return (
+          <ViolationPopover
+            open
+            onOpenChange={(next) => { if (!next) setOpenRuleId(null) }}
+            infraction={inf}
+            ruleName={rule.name}
+            waivers={cell.waivers ?? []}
+            onOpenRule={(ruleId) => { setOpenRuleId(null); onInfractionClick?.(ruleId) }}
+            onWaive={handleWaive}
+            onUnwaive={handleUnwaive}
+          >
+            <span />
+          </ViolationPopover>
+        )
+      })()}
 
       {/* Right gutter — visible meta actions (comments + warnings) and an
           ellipsis menu for less-frequent ones (re-record, history, regenerate

@@ -13,7 +13,7 @@ export function SparkleButton({ disabled, loading, onComplete, onDragStart, onDr
   return (
     <button
       className={cn(
-        "flex h-6 w-6 items-center justify-center rounded transition-colors",
+        "flex h-5 w-5 items-center justify-center rounded transition-colors",
         disabled
           ? onSetupNeeded
             ? "cursor-pointer text-muted-foreground/30 hover:text-muted-foreground/50"
@@ -32,7 +32,7 @@ export function SparkleButton({ disabled, loading, onComplete, onDragStart, onDr
       onMouseDown={(e) => { e.stopPropagation(); if (!disabled && !loading && onDragStart) onDragStart() }}
       onMouseEnter={() => { if (!disabled && !loading && onDragEnter) onDragEnter() }}
     >
-      <Sparkles className="h-3.5 w-3.5" />
+      <Sparkles className="h-3 w-3" />
     </button>
   )
 }

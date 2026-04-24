@@ -498,7 +498,7 @@ function EditorRow({
       <button
         type="button"
         className={cn(
-          "flex h-6 w-6 items-center justify-center rounded-full transition-[transform,color] duration-150 ease-out",
+          "flex h-5 w-5 items-center justify-center rounded-full transition-[transform,color] duration-150 ease-out",
           "active:scale-[0.92] disabled:cursor-not-allowed disabled:opacity-40",
           "hover:bg-muted/60",
           validationColorClass,
@@ -509,7 +509,7 @@ function EditorRow({
         disabled={!editable}
         onClick={handleIconClick}
       >
-        <HealthRing health={healthValue} size={22} strokeWidth={2}>
+        <HealthRing health={healthValue} size={18} strokeWidth={2}>
           <ValidationIcon
             className="h-3 w-3"
             strokeWidth={2.5}

@@ -27,7 +27,7 @@ export function ViolationPopover({
 
   return (
     <Popover open={open} onOpenChange={(next) => { if (!next) reset(); onOpenChange(next) }}>
-      <PopoverTrigger asChild>{children}</PopoverTrigger>
+      <PopoverTrigger>{children}</PopoverTrigger>
       <PopoverContent className="w-72 space-y-2 p-3 text-sm">
         <button
           type="button"

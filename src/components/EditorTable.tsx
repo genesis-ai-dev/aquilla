@@ -1,4 +1,4 @@
-import { useRef, useCallback, useMemo, useState, useEffect, forwardRef, useImperativeHandle } from "react"
+import { useRef, useCallback, useMemo, useState, forwardRef, useImperativeHandle } from "react"
 import { useVirtualizer } from "@tanstack/react-virtual"
 import * as Y from "yjs"
 import DOMPurify from "dompurify"
@@ -19,6 +19,7 @@ import { TranslatedEditor } from "./TranslatedEditor"
 import { CellAudioButton } from "./CellAudioButton"
 import { CellAudioRecordButton } from "./CellAudioRecordButton"
 import { CellActionsMenu } from "./CellActionsMenu"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { cn } from "@/lib/utils"
 
 function ValidationHistoryTimeline({
@@ -439,41 +440,35 @@ function EditorRow({
 
   const vs = cell.validationStatus
   const [validationPopoverOpen, setValidationPopoverOpen] = useState(false)
-  const popoverRef = useRef<HTMLDivElement>(null)
-  const hoverTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const isSelfValidated = cell.activeValidators.includes(username)
+  const hasValidatorInfo = cell.activeValidators.length > 0 || cell.validationHistory.length > 1
 
-  // Close popover on click-outside
-  useEffect(() => {
-    if (!validationPopoverOpen) return
-    function onClickOutside(e: MouseEvent) {
-      if (popoverRef.current && !popoverRef.current.contains(e.target as Node)) {
-        setValidationPopoverOpen(false)
+  // Gate Base UI's auto-toggle: clicks on an unvalidated cell should validate
+  // (not open the popover), and hovers should only open when there's actually
+  // something to show. Everything else passes through to the default behavior,
+  // including outside-press / escape-key closes.
+  function handleOpenChange(
+    nextOpen: boolean,
+    details: { reason: string; cancel(): void },
+  ) {
+    if (!nextOpen) {
+      setValidationPopoverOpen(false)
+      return
+    }
+    if (details.reason === "trigger-press") {
+      if (editable && !isSelfValidated) {
+        toggleCellValidation(doc, cell.id, username, true)
+        details.cancel()
+        return
       }
+      setValidationPopoverOpen(true)
+      return
     }
-    document.addEventListener("mousedown", onClickOutside)
-    return () => document.removeEventListener("mousedown", onClickOutside)
-  }, [validationPopoverOpen])
-
-  function handleIconClick() {
-    if (!editable) return
-    if (!isSelfValidated) {
-      // Not yet validated by you → validate immediately
-      toggleCellValidation(doc, cell.id, username, true)
-    } else {
-      // Already validated → open popover so you can see details / remove
-      setValidationPopoverOpen(!validationPopoverOpen)
+    if (details.reason === "trigger-hover" && !hasValidatorInfo) {
+      details.cancel()
+      return
     }
-  }
-
-  function handleHoverEnter() {
-    // Only show popover on hover if there are validators to show
-    if (cell.activeValidators.length === 0) return
-    hoverTimeoutRef.current = setTimeout(() => setValidationPopoverOpen(true), 400)
-  }
-  function handleHoverLeave() {
-    if (hoverTimeoutRef.current) clearTimeout(hoverTimeoutRef.current)
-    // Don't close if user is interacting with the popover
+    setValidationPopoverOpen(true)
   }
 
   // "others" now uses a filled Circle (lucide has no dedicated filled-circle
@@ -490,40 +485,40 @@ function EditorRow({
 
   const validationButton = hasContent ? (
     <div className="inline-flex items-center gap-0.5">
-    <div
-      className="relative"
-      onMouseEnter={handleHoverEnter}
-      onMouseLeave={handleHoverLeave}
-    >
-      <button
-        type="button"
-        className={cn(
-          "flex h-5 w-5 items-center justify-center rounded-full transition-[transform,color] duration-150 ease-out",
-          "active:scale-[0.92] disabled:cursor-not-allowed disabled:opacity-40",
-          "hover:bg-muted/60",
-          validationColorClass,
-          vs === "none" && "hover:text-emerald-500",
-          vs === "others" && "hover:text-emerald-500",
-        )}
-        title={healthTooltip}
-        disabled={!editable}
-        onClick={handleIconClick}
-      >
-        <HealthRing health={healthValue} size={18} strokeWidth={2}>
-          <ValidationIcon
-            className="h-3 w-3"
-            strokeWidth={2.5}
-            {...(vs === "others" ? { fill: "currentColor" } : {})}
-          />
-        </HealthRing>
-      </button>
-      {validationPopoverOpen && vs !== "empty" && (
-        <div
-          ref={popoverRef}
-          className={cn(
-            "absolute right-7 top-0 z-50 w-72 origin-top-right rounded-lg border bg-popover p-2 shadow-lg",
-            "animate-in fade-in-0 zoom-in-95 duration-150",
-          )}
+    <Popover open={validationPopoverOpen} onOpenChange={handleOpenChange}>
+      <PopoverTrigger
+        openOnHover
+        delay={400}
+        closeDelay={100}
+        render={
+          <button
+            type="button"
+            className={cn(
+              "flex h-5 w-5 items-center justify-center rounded-full transition-[transform,color] duration-150 ease-out",
+              "active:scale-[0.92] disabled:cursor-not-allowed disabled:opacity-40",
+              "hover:bg-muted/60",
+              validationColorClass,
+              vs === "none" && "hover:text-emerald-500",
+              vs === "others" && "hover:text-emerald-500",
+            )}
+            title={healthTooltip}
+            disabled={!editable}
+          >
+            <HealthRing health={healthValue} size={18} strokeWidth={2}>
+              <ValidationIcon
+                className="h-3 w-3"
+                strokeWidth={2.5}
+                {...(vs === "others" ? { fill: "currentColor" } : {})}
+              />
+            </HealthRing>
+          </button>
+        }
+      />
+      {vs !== "empty" && (
+        <PopoverContent
+          side="right"
+          align="start"
+          className="w-72 rounded-lg border p-2 shadow-lg"
         >
           <ul className="space-y-0.5">
             <li className="mb-1 px-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
@@ -555,9 +550,9 @@ function EditorRow({
           {cell.validationHistory.length > 0 && (
             <ValidationHistoryTimeline entries={cell.validationHistory} currentUsername={username} />
           )}
-        </div>
+        </PopoverContent>
       )}
-    </div>
+    </Popover>
     {breakdown && (
       <HealthBreakdown
         breakdown={breakdown}

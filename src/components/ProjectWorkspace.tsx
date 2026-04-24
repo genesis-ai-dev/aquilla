@@ -697,9 +697,16 @@ export function ProjectWorkspace() {
           <>
             {drawerRuleId && (
               <RuleDrawer
-                rule={drawerRule} infractions={drawerInfractions} cells={cells}
+                rule={drawerRule}
+                infractions={drawerInfractions}
+                cells={cells}
                 onClose={() => setDrawerRuleId(null)}
                 onNavigateToCell={() => {}}
+                project={project}
+                doc={doc}
+                username={currentUsername}
+                refresh={refresh}
+                cellsByFile={fileCells}
               />
             )}
             {commentsCell && (

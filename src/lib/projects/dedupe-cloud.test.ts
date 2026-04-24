@@ -6,13 +6,13 @@ import { filterCloudOnly } from "./dedupe-cloud"
 function localGitProject(overrides: Partial<ProjectRecord> & { id: string; gitlabProjectId: number }): ProjectRecord {
   const { gitlabProjectId, ...rest } = overrides
   return {
-    id: rest.id,
-    name: rest.name ?? "name",
+    name: "name",
     sourceLanguage: "en",
     targetLanguage: "en",
     createdAt: new Date().toISOString(),
     files: [],
     members: [],
+    ...rest,
     origin: {
       kind: "git",
       cloneUrl: "https://example",
@@ -21,14 +21,12 @@ function localGitProject(overrides: Partial<ProjectRecord> & { id: string; gitla
       headSha: "abc",
       importedAt: new Date().toISOString(),
     },
-    ...rest,
   } as ProjectRecord
 }
 
 function cfNativeLocal(overrides: Partial<ProjectRecord> & { id: string }): ProjectRecord {
   return {
-    id: overrides.id,
-    name: overrides.name ?? "name",
+    name: "name",
     sourceLanguage: "",
     targetLanguage: "",
     createdAt: new Date().toISOString(),
@@ -40,9 +38,8 @@ function cfNativeLocal(overrides: Partial<ProjectRecord> & { id: string }): Proj
 
 function cloud(overrides: Partial<CloudProjectSummary> & { id: string }): CloudProjectSummary {
   return {
-    id: overrides.id,
-    name: overrides.name ?? "cloud name",
-    gitlabProjectId: overrides.gitlabProjectId ?? null,
+    name: "cloud name",
+    gitlabProjectId: null,
     role: { level: 700, name: "owner", source: "creator" },
     ...overrides,
   }

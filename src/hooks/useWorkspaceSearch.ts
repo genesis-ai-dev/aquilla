@@ -35,9 +35,15 @@ export function useWorkspaceSearch(files: FileReference[]) {
     }
   }, [files, filesKey, ready])
 
-  const search = useCallback((query: string) => {
-    setResults(indexRef.current.search(query, 20))
+  const search = useCallback((query: string, options: { fileId?: string; limit?: number } = {}) => {
+    setResults(indexRef.current.search(query, options.limit ?? 20, { fileId: options.fileId }))
   }, [])
 
-  return { buildIndex, search, results, loading, ready }
+  const rebuild = useCallback(() => {
+    lastBuiltKey.current = ""
+    setReady(false)
+    return buildIndex()
+  }, [buildIndex])
+
+  return { buildIndex, rebuild, search, results, loading, ready }
 }

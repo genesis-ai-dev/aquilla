@@ -3,6 +3,8 @@ import type { ProjectRecord } from "@/lib/parsers/types"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { MembershipAvatars } from "./MembershipAvatars"
+import { useProjectMembers } from "@/hooks/useProjectMembers"
 
 interface ProjectCardProps {
   project: ProjectRecord
@@ -27,6 +29,8 @@ export function ProjectCard({
 }: ProjectCardProps) {
   const isGit = project.origin?.kind === "git"
   const isTrashed = variant === "trashed"
+  // Trashed cards skip the fetch — avatars are only relevant for active cards.
+  const { members } = useProjectMembers(isTrashed ? null : project.id)
 
   return (
     <Card
@@ -85,6 +89,11 @@ export function ProjectCard({
         <p className="text-sm text-muted-foreground">
           {project.files.length} file{project.files.length !== 1 ? "s" : ""}
         </p>
+        {!isTrashed && members.length > 0 && (
+          <div className="mt-2">
+            <MembershipAvatars members={members} maxVisible={4} />
+          </div>
+        )}
         {isTrashed && (
           <div className="mt-3 flex items-center justify-between gap-2">
             <span className="text-xs text-muted-foreground">

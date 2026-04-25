@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react"
-import { useNavigate, Navigate } from "react-router-dom"
+import { useNavigate, Navigate, Link } from "react-router-dom"
 import { ChevronRight, Cloud, Trash2 } from "lucide-react"
 import type { ProjectRecord } from "@/lib/parsers/types"
 import {
@@ -152,6 +152,12 @@ export function Dashboard() {
             <h1 className="hidden truncate text-xl font-semibold sm:inline">{brand.app.name}</h1>
           </div>
           <div className="flex shrink-0 items-center gap-2">
+            <Link
+              to="/settings/org"
+              className="text-sm underline-offset-2 hover:underline"
+            >
+              Organization
+            </Link>
             <HeaderAuth />
             <ProjectCreateDialog onCreated={upsert} />
           </div>

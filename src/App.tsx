@@ -9,6 +9,7 @@ import { CommentsPage } from "@/components/CommentsPage"
 import { SnapshotsPage } from "@/components/SnapshotsPage"
 import { JoinPage } from "@/components/JoinPage"
 import { OnboardingWizard } from "@/components/onboarding/OnboardingWizard"
+import { OrgSettings } from "@/pages/OrgSettings"
 import { SyncingProvider, useSyncing } from "@/context/SyncingContext"
 
 function SyncFreezeOverlay() {
@@ -48,6 +49,7 @@ function AppRoutes() {
       <Route path="/project/:id/snapshots/debug" element={<DebugView />} />
       <Route path="/join/:token" element={<JoinPage />} />
       <Route path="/onboarding" element={<OnboardingWizard />} />
+      <Route path="/settings/org" element={<OrgSettings />} />
     </Routes>
   )
 }

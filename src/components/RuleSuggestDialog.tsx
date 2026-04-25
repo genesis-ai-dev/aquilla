@@ -26,7 +26,7 @@ const FALLBACK_SETTINGS: CompletionSettings = {
 interface RuleSuggestDialogProps {
   files: FileReference[]
   completionSettings: CompletionSettings | undefined
-  onAdd: (rule: Omit<TranslationRule, "id" | "createdAt">) => void
+  onAdd: (rule: Omit<TranslationRule, "id" | "createdAt">) => void | Promise<void>
   projectId?: string
 }
 
@@ -95,11 +95,11 @@ export function RuleSuggestDialog({ files, completionSettings, onAdd, projectId 
     })
   }
 
-  function handleCommit() {
+  async function handleCommit() {
     for (let i = 0; i < suggestions.length; i++) {
       if (!accepted.has(i)) continue
       const s = suggestions[i]
-      onAdd({
+      await onAdd({
         name: s.name,
         description: s.description,
         severity: s.severity,

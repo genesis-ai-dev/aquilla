@@ -108,6 +108,39 @@ export interface ProjectUsage {
   fixesApplied: number
 }
 
+export type AudioMediaStrategy =
+  /** Stream play directly from the storage URL; only download bytes when the
+   *  user opts in to features that need them locally (waveform, transcribe). */
+  | "stream"
+  /** Default. Download bytes for a cell on first interaction (play OR
+   *  waveform mount). Cached locally after that. */
+  | "lazy"
+  /** On file open, prefetch peaks for every cell with audio so waveforms
+   *  appear instantly. Audio bytes for playback come down on first play. */
+  | "eager"
+  /** Don't auto-download anything. Each cell's waveform shows a download
+   *  button the user has to click. */
+  | "manual"
+
+export const AUDIO_MEDIA_STRATEGY_LABELS: Record<AudioMediaStrategy, { name: string; description: string }> = {
+  stream: {
+    name: "Stream",
+    description: "Play directly from the network. No local cache, no waveforms unless you opt in.",
+  },
+  lazy: {
+    name: "Lazy (default)",
+    description: "Download a cell's audio when you scroll to it or press play. Caches locally.",
+  },
+  eager: {
+    name: "Eager",
+    description: "Prefetch every cell's waveform when the file opens. Best for offline review.",
+  },
+  manual: {
+    name: "Manual",
+    description: "Don't auto-download anything. You click a button per cell to load it.",
+  },
+}
+
 export interface ProjectRecord {
   id: string
   name: string
@@ -145,6 +178,8 @@ export interface ProjectRecord {
   validationCountAudio?: number
   /** Cached flag — set true when any cell first writes audio. Avoids scanning every file's Y.Doc on load. */
   hasAnyAudioData?: boolean
+  /** When and how to fetch audio bytes from the storage backend. Default: "lazy". */
+  audioMediaStrategy?: AudioMediaStrategy
   /** Soft-delete marker. When present the project is in Trash; the Dashboard
    * hides it from "Your projects" and shows it under the Trash section. Set by
    * owner-triggered archive (local projects) or by a sync signal from

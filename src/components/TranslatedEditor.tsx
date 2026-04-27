@@ -11,6 +11,9 @@ import { cn } from "@/lib/utils"
 import { useRef, useEffect } from "react"
 import type { RuleInfraction } from "@/lib/parsers/types"
 import { createViolationDecorationExtension, violationPluginKey } from "@/lib/richtext/violation-decoration-plugin"
+import { createKaraokeExtension, karaokePluginKey, type KaraokePluginState } from "@/lib/richtext/karaoke-plugin"
+import { findActiveTimingIndex } from "@/lib/audio/timings"
+import type { WordTiming } from "@/lib/codex-editor/types"
 
 interface TranslatedEditorProps {
   fragment: Y.XmlFragment
@@ -26,13 +29,24 @@ interface TranslatedEditorProps {
   ruleSeverity?: Map<string, "major" | "minor">
   waivedRuleIds?: Set<string>
   onRuleClick?: (ruleId: string, anchor: HTMLElement) => void
+  audioTimings?: WordTiming[]
+  /** Audio playback time in seconds. Drives the karaoke decoration. */
+  audioCurrentTime?: number
+  /** Called on alt+click of a word when timings are present. */
+  onSeekToTime?: (t: number) => void
 }
 
-export function TranslatedEditor({ fragment, onBlur, placeholder, className, syncProvider, user, editable = true, infractions, ruleSeverity, waivedRuleIds, onRuleClick }: TranslatedEditorProps) {
+export function TranslatedEditor({ fragment, onBlur, placeholder, className, syncProvider, user, editable = true, infractions, ruleSeverity, waivedRuleIds, onRuleClick, audioTimings, audioCurrentTime, onSeekToTime }: TranslatedEditorProps) {
   const latestViolationStateRef = useRef({
     infractions: infractions ?? [],
     ruleSeverity: ruleSeverity ?? new Map<string, "major" | "minor">(),
     waivedRuleIds: waivedRuleIds ?? new Set<string>(),
+  })
+
+  const latestKaraokeStateRef = useRef<KaraokePluginState>({
+    timings: audioTimings,
+    activeIdx: -1,
+    onSeekToWord: undefined,
   })
 
   const editor = useEditor({
@@ -60,6 +74,8 @@ export function TranslatedEditor({ fragment, onBlur, placeholder, className, syn
       // the lint rule is overly conservative here.
       // eslint-disable-next-line react-hooks/refs
       createViolationDecorationExtension(() => latestViolationStateRef.current),
+      // eslint-disable-next-line react-hooks/refs
+      createKaraokeExtension(() => latestKaraokeStateRef.current),
     ],
     editorProps: {
       attributes: {
@@ -99,6 +115,31 @@ export function TranslatedEditor({ fragment, onBlur, placeholder, className, syn
       editor.view.dispatch(tr)
     }
   }, [editor, infractions, ruleSeverity, waivedRuleIds])
+
+  // Keep the karaoke ref's timings + onSeek in sync, and rebuild when the
+  // timings array changes (regardless of activeIdx).
+  useEffect(() => {
+    latestKaraokeStateRef.current = {
+      ...latestKaraokeStateRef.current,
+      timings: audioTimings,
+      onSeekToWord: onSeekToTime ? (_, timing) => onSeekToTime(timing.t0) : undefined,
+    }
+    if (editor) {
+      editor.view.dispatch(editor.state.tr.setMeta(karaokePluginKey, "rebuild"))
+    }
+  }, [editor, audioTimings, onSeekToTime])
+
+  // Drive the active-word decoration from currentTime, but only dispatch a
+  // rebuild when the active index actually changes — currentTime ticks 60Hz.
+  const lastActiveIdxRef = useRef(-1)
+  useEffect(() => {
+    if (!editor) return
+    const idx = findActiveTimingIndex(audioTimings, audioCurrentTime ?? 0)
+    if (idx === lastActiveIdxRef.current) return
+    lastActiveIdxRef.current = idx
+    latestKaraokeStateRef.current = { ...latestKaraokeStateRef.current, activeIdx: idx }
+    editor.view.dispatch(editor.state.tr.setMeta(karaokePluginKey, "rebuild"))
+  }, [editor, audioTimings, audioCurrentTime])
 
   if (!editor) {
     return <div className={cn("min-h-[40px] px-2 py-1 text-sm border rounded bg-background", className)}>{placeholder}</div>

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react"
 import * as Y from "yjs"
 import type { CellHistoryEntry, SourceLocation, CommentThread } from "@/lib/parsers/types"
-import type { CodexCellAttachment } from "@/lib/codex-editor/types"
+import type { CodexCellAttachment, WordTiming } from "@/lib/codex-editor/types"
 import type { EditValidationSummary } from "@/lib/codex-editor/edits/types"
 import { snapshotEntry } from "@/lib/codex-editor/edits/yjs-helpers"
 import { extractThreadsFromCell } from "./useComments"
@@ -42,6 +42,7 @@ export interface CellData {
   backtranslationForText?: string
   attachments?: Record<string, CodexCellAttachment>
   selectedAudioId?: string
+  audioTimings?: Record<string, WordTiming[]>
   /** Cue start/end timestamps (seconds) from the cell's CodexData. Populated
    *  for subtitle-imported cells; used by the recording modal's duration bar. */
   startTime?: number
@@ -103,6 +104,7 @@ function buildCellData(
     | { metadata?: {
         attachments?: Record<string, CodexCellAttachment>
         selectedAudioId?: string
+        audioTimings?: Record<string, WordTiming[]>
         cellLabel?: string
         data?: { startTime?: number; endTime?: number }
       } }
@@ -155,6 +157,7 @@ function buildCellData(
     backtranslationForText: cell.get("backtranslationForText") as string | undefined,
     attachments: source?.metadata?.attachments,
     selectedAudioId: source?.metadata?.selectedAudioId,
+    audioTimings: source?.metadata?.audioTimings,
     ...(cellLabel ? { cellLabel } : {}),
     ...(typeof startTime === "number" ? { startTime } : {}),
     ...(typeof endTime === "number" ? { endTime } : {}),

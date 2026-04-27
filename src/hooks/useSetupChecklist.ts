@@ -2,27 +2,31 @@ import { useEffect, useRef, useState, useCallback } from "react"
 import type { ProjectRecord, CompletionSettings } from "@/lib/parsers/types"
 import { patchProject } from "@/lib/store/project-index"
 import { listShares } from "@/lib/sync/share-tokens"
+import { useModelStatus } from "@/lib/audio/prefetch"
 
 export interface ChecklistState {
   aiProvider: boolean
   aiInstructions: boolean
   collaborators: boolean
+  aiModels: boolean
   completedCount: number
   totalCount: number
 }
 
 export function deriveChecklistState(
   settings: Partial<CompletionSettings> | undefined,
-  shareCount: number
+  shareCount: number,
+  aiModelsReady: boolean
 ): ChecklistState {
   const aiProvider = Boolean(settings?.endpoint?.trim())
   const aiInstructions = Boolean(settings?.systemPrompt?.trim())
   const collaborators = shareCount > 0
-  const items = [aiProvider, aiInstructions, collaborators]
+  const items = [aiProvider, aiInstructions, collaborators, aiModelsReady]
   return {
     aiProvider,
     aiInstructions,
     collaborators,
+    aiModels: aiModelsReady,
     completedCount: items.filter(Boolean).length,
     totalCount: items.length,
   }
@@ -50,7 +54,11 @@ export function useSetupChecklist(project: ProjectRecord | null) {
     return () => { cancelled = true }
   }, [project])
 
-  const state = deriveChecklistState(project?.completionSettings, shareCount)
+  const whisper = useModelStatus("whisper")
+  const kokoro = useModelStatus("kokoro")
+  const aiModelsReady = whisper.kind === "ready" && kokoro.kind === "ready"
+
+  const state = deriveChecklistState(project?.completionSettings, shareCount, aiModelsReady)
 
   const dismiss = useCallback(async () => {
     if (!project) return

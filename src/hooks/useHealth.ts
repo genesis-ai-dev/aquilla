@@ -4,6 +4,7 @@ import { useCompositeHealth } from "./useCompositeHealth"
 import type { CellData } from "./useCells"
 import type { TranslationRule, RulePenalties, HealthConfig, CellHealthBreakdown, RuleInfraction } from "@/lib/parsers/types"
 import { HEALTH_DEFAULTS } from "@/lib/health/defaults"
+import { perfMark } from "@/lib/perf-log"
 
 interface HealthDispatchOptions {
   composite: boolean
@@ -100,6 +101,55 @@ function healthStatsEqual(a: HealthStats, b: HealthStats): boolean {
   return true
 }
 
+// Single shared empty result used as the legacy stand-in when composite is on.
+// Stable reference so the composite-mode useMemo below doesn't re-trigger.
+const EMPTY_HEALTH_STATS: HealthStats = {
+  healthMap: new Map(),
+  fileHealth: new Map(),
+  projectHealth: 0,
+  fileProgress: new Map(),
+  infractions: new Map(),
+  openCommentCount: new Map(),
+  projectOpenCommentCount: 0,
+  cellOpenCommentCount: new Map(),
+  breakdownMap: new Map(),
+}
+
+// Composite-on path still needs file progress + comment counts (the composite
+// engine doesn't compute those). Cheap auxiliary derivation, O(N) but only the
+// counting bits — no rule checks, no LLM-chain scoring.
+function deriveAuxStats(fileCells: Map<string, CellData[]>): {
+  fileProgress: HealthStats["fileProgress"]
+  openCommentCount: HealthStats["openCommentCount"]
+  projectOpenCommentCount: HealthStats["projectOpenCommentCount"]
+  cellOpenCommentCount: HealthStats["cellOpenCommentCount"]
+} {
+  const fileProgress: HealthStats["fileProgress"] = new Map()
+  const openCommentCount: HealthStats["openCommentCount"] = new Map()
+  const cellOpenCommentCount: HealthStats["cellOpenCommentCount"] = new Map()
+  let projectOpenCommentCount = 0
+  for (const [fileId, cells] of fileCells) {
+    let translated = 0
+    let validated = 0
+    let fileOpen = 0
+    for (const cell of cells) {
+      if (cell.status !== "empty") translated++
+      if (cell.status === "validated") validated++
+      const threads = cell.threads ?? []
+      let openForCell = 0
+      for (const t of threads) if (t.status === "open") openForCell++
+      if (openForCell > 0) {
+        cellOpenCommentCount.set(cell.id, openForCell)
+        fileOpen += openForCell
+      }
+    }
+    fileProgress.set(fileId, { translated, validated, total: cells.length })
+    openCommentCount.set(fileId, fileOpen)
+    projectOpenCommentCount += fileOpen
+  }
+  return { fileProgress, openCommentCount, projectOpenCommentCount, cellOpenCommentCount }
+}
+
 export function useHealth(
   fileCells: Map<string, CellData[]>,
   llmHealthPenalty = 0.1,
@@ -109,11 +159,16 @@ export function useHealth(
 ): HealthStats {
   const multiplier = 1 - llmHealthPenalty
 
-  // Legacy result — always computed (cheap), used when flag is off
-  const legacyRaw = useMemo(
-    () => computeHealthMap(fileCells, multiplier, rules, penalties),
-    [fileCells, multiplier, rules, penalties],
-  )
+  // Legacy result — only computed when the legacy path will actually be used
+  // (composite flag off). Skipping this when composite is on saves a full
+  // O(N) sweep + checkRules over every cell on every keystroke.
+  const legacyRaw = useMemo(() => {
+    if (options.composite) return EMPTY_HEALTH_STATS
+    const end = perfMark("useHealth.legacy.computeHealthMap")
+    const r = computeHealthMap(fileCells, multiplier, rules, penalties)
+    end()
+    return r
+  }, [options.composite, fileCells, multiplier, rules, penalties])
 
   // Composite — only meaningful when flag on, but the hook must run unconditionally (Rules of Hooks)
   const composite = useCompositeHealth({
@@ -123,6 +178,14 @@ export function useHealth(
     requiredValidations: options.requiredValidations ?? 1,
   })
 
+  // Auxiliary stats that the composite worker doesn't produce (file progress,
+  // comment counts). Only needed in composite mode; legacy result already
+  // contains these.
+  const aux = useMemo(() => {
+    if (!options.composite) return null
+    return deriveAuxStats(fileCells)
+  }, [options.composite, fileCells])
+
   // Assemble the raw result that will be returned to callers.
   const raw: HealthStats = useMemo(() => {
     if (!options.composite) return legacyRaw
@@ -131,14 +194,14 @@ export function useHealth(
       healthMap: composite.stats.healthMap,
       fileHealth: composite.stats.fileHealth,
       projectHealth: composite.stats.projectHealth,
-      fileProgress: legacyRaw.fileProgress,
+      fileProgress: aux?.fileProgress ?? new Map(),
       infractions: composite.stats.infractions,
-      openCommentCount: legacyRaw.openCommentCount,
-      projectOpenCommentCount: legacyRaw.projectOpenCommentCount,
-      cellOpenCommentCount: legacyRaw.cellOpenCommentCount,
+      openCommentCount: aux?.openCommentCount ?? new Map(),
+      projectOpenCommentCount: aux?.projectOpenCommentCount ?? 0,
+      cellOpenCommentCount: aux?.cellOpenCommentCount ?? new Map(),
       breakdownMap,
     }
-  }, [options.composite, legacyRaw, composite.stats])
+  }, [options.composite, legacyRaw, composite.stats, aux])
 
   // Structural stability: if the raw result is semantically unchanged from
   // last render, return the previous reference so React.memo on downstream

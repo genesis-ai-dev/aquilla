@@ -12,6 +12,13 @@ export interface WorkspaceActionContext {
   project: ProjectRecord
   activeFileId: string | null
   fileProgress: Map<string, FileProgressEntry>
+  /** Counts driving the bulk audio actions in the secondary action group. */
+  audioCounts?: {
+    /** Cells with a recording but no Whisper timings yet. */
+    untranscribed: number
+    /** Cells with translated text but no recording yet. */
+    unsynthesized: number
+  }
 }
 
 export interface WorkspaceActionRunArgs {
@@ -21,6 +28,8 @@ export interface WorkspaceActionRunArgs {
   runBatchValidate: () => void
   runAgentInput: () => void
   runImportWip: () => void
+  runTranscribeAll: () => void
+  runSynthAll: () => void
   navigate: NavigateFunction
 }
 

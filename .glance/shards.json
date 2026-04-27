@@ -19,7 +19,7 @@
     ],
     "created_at": "2026-04-13T17:17:30.703633+00:00",
     "updated_at": "2026-04-13T17:17:30.704866+00:00",
-    "last_viewed": "2026-04-23T15:22:00.882576+00:00",
+    "last_viewed": "2026-04-25T17:09:01.467171+00:00",
     "stale_views": 0
   },
   {
@@ -42,7 +42,7 @@
     ],
     "created_at": "2026-04-13T17:17:34.778250+00:00",
     "updated_at": "2026-04-13T17:17:34.778260+00:00",
-    "last_viewed": null,
+    "last_viewed": "2026-04-25T17:09:01.467171+00:00",
     "stale_views": 0
   },
   {
@@ -65,7 +65,7 @@
     ],
     "created_at": "2026-04-13T17:17:38.670019+00:00",
     "updated_at": "2026-04-13T17:17:38.670070+00:00",
-    "last_viewed": null,
+    "last_viewed": "2026-04-25T17:09:01.467171+00:00",
     "stale_views": 0
   },
   {
@@ -111,7 +111,7 @@
     ],
     "created_at": "2026-04-13T17:18:01.659398+00:00",
     "updated_at": "2026-04-13T17:18:01.659426+00:00",
-    "last_viewed": null,
+    "last_viewed": "2026-04-25T17:09:01.467171+00:00",
     "stale_views": 0
   },
   {
@@ -431,8 +431,8 @@
     ],
     "created_at": "2026-04-20T12:07:06.653434+00:00",
     "updated_at": "2026-04-20T12:07:06.653444+00:00",
-    "last_viewed": null,
-    "stale_views": 0
+    "last_viewed": "2026-04-27T04:33:04.844694+00:00",
+    "stale_views": 2
   },
   {
     "id": "8b1730ed328e",
@@ -500,7 +500,7 @@
     ],
     "created_at": "2026-04-20T21:10:25.470467+00:00",
     "updated_at": "2026-04-20T21:10:25.470517+00:00",
-    "last_viewed": null,
+    "last_viewed": "2026-04-27T04:33:04.844694+00:00",
     "stale_views": 0
   },
   {
@@ -616,7 +616,7 @@
     ],
     "created_at": "2026-04-22T21:42:50.477079+00:00",
     "updated_at": "2026-04-22T21:42:50.477085+00:00",
-    "last_viewed": null,
+    "last_viewed": "2026-04-27T04:33:04.844694+00:00",
     "stale_views": 0
   },
   {
@@ -639,7 +639,7 @@
     ],
     "created_at": "2026-04-23T15:33:12.661803+00:00",
     "updated_at": "2026-04-23T15:33:12.661820+00:00",
-    "last_viewed": null,
+    "last_viewed": "2026-04-25T17:09:01.467171+00:00",
     "stale_views": 0
   },
   {
@@ -663,7 +663,7 @@
     ],
     "created_at": "2026-04-23T15:33:12.668819+00:00",
     "updated_at": "2026-04-23T15:33:12.668831+00:00",
-    "last_viewed": null,
+    "last_viewed": "2026-04-25T17:09:01.467171+00:00",
     "stale_views": 0
   },
   {
@@ -687,6 +687,579 @@
     ],
     "created_at": "2026-04-23T15:33:12.675861+00:00",
     "updated_at": "2026-04-23T15:33:12.675866+00:00",
+    "last_viewed": "2026-04-25T17:09:01.467171+00:00",
+    "stale_views": 0
+  },
+  {
+    "id": "9a26e42261c5",
+    "file": "src/lib/rules/rule-engine.ts",
+    "anchor": {
+      "from_text": "const regexCache = new Map",
+      "to_text": "return re\n}",
+      "function_anchor": null,
+      "start_line": 7,
+      "end_line": 27
+    },
+    "original_content": "const regexCache = new Map<string, RegExp | null>()\nfunction compile(pattern: string, flags: string): RegExp | null {\n  const key = `${flags}\\u0001${pattern}`\n  if (regexCache.has(key)) return regexCache.get(key) ?? null\n  let re: RegExp | null\n  try { re = new RegExp(pattern, flags) } catch { re = null }\n  regexCache.set(key, re)\n  return re\n}\n\nexport function checkRules(\n  fileCells: Map<string, CellData[]>,\n  rules: TranslationRule[]\n): Map<string, RuleInfraction[]> {\n  const infractions = new Map<string, RuleInfraction[]>()\n  const enabledRules = rules.filter((r) => r.enabled)\n  if (enabledRules.length === 0) return infractions\n\n  for (const [fileId, cells] of fileCells) {\n    for (const cell of cells) {\n      if (cell.status === \"empty\" || !cell.translated.trim()) continue",
+    "original_hash": "ce2769e2224cd594",
+    "summary": "Memoized regex cache for rule-engine. Compiles each (flags, pattern) once and reuses the RegExp across cells and calls. Failed compiles cached as null so invalid patterns don't retry. Safe for cached reuse because only `i` flag patterns use `.test()` and `gi` patterns use `.match()` (which resets lastIndex). Unbounded growth risk is bounded by number of unique rule patterns (low). Added 2026-04-24 to fix per-keystroke lag where `new RegExp` was called per cell per rule.",
+    "tags": [
+      "perf",
+      "rules",
+      "rule-engine",
+      "hot-path"
+    ],
+    "created_at": "2026-04-24T18:44:09.021284+00:00",
+    "updated_at": "2026-04-24T18:44:09.021684+00:00",
+    "last_viewed": "2026-04-27T04:33:04.844694+00:00",
+    "stale_views": 0
+  },
+  {
+    "id": "56dda4ef1feb",
+    "file": "src/workers/health-worker-sync.ts",
+    "anchor": {
+      "from_text": "let cachedIndex: DualIndex | null = null",
+      "to_text": "prevCellSig.clear()\n}",
+      "function_anchor": null,
+      "start_line": 35,
+      "end_line": 55
+    },
+    "original_content": "let cachedIndex: DualIndex | null = null\nconst prevCellSig = new Map<string, string>()\n\nfunction cellSig(c: HealthSyncCell): string {\n  return `${c.fileId}\\u0001${c.original}\\u0001${c.translated}`\n}\n\n/** Test-only: drop the cached index and signature map. */\nexport function resetHealthSyncCache(): void {\n  cachedIndex = null\n  prevCellSig.clear()\n}\n\nexport function computeHealthSync(req: HealthSyncRequest): HealthSyncResponse {\n  if (!cachedIndex) cachedIndex = new DualIndex()\n  const index = cachedIndex\n\n  const currentIds = new Set<string>()\n  for (const c of req.cells) {\n    currentIds.add(c.id)\n    const sig = cellSig(c)",
+    "original_hash": "d9080ed9eb2b33cf",
+    "summary": "Persistent DualIndex cached at module scope, keyed by per-cell content signature `${fileId}|${original}|${translated}`. Replaces full `buildFromProject` rebuild per call with incremental `addPair`/`removePair` diff. Works correctly across project switches (all prev IDs get removed, all new IDs get added \u2014 same cost as rebuild, no special handling). Module-level state is safe: in prod each Worker instance has its own module; in tests `resetHealthSyncCache()` is exported but not currently called (tests pass without it because signature diff handles test-to-test cell set changes correctly).",
+    "tags": [
+      "perf",
+      "health",
+      "dual-index",
+      "hot-path"
+    ],
+    "created_at": "2026-04-24T18:44:15.512059+00:00",
+    "updated_at": "2026-04-24T18:44:15.512095+00:00",
+    "last_viewed": "2026-04-27T04:33:04.844694+00:00",
+    "stale_views": 1
+  },
+  {
+    "id": "6bea7e9ec0dc",
+    "file": "src/hooks/useCompositeHealth.ts",
+    "anchor": {
+      "from_text": "const HEALTH_DEBOUNCE_MS = 200",
+      "to_text": "export function useCompositeHealth(input: UseCompositeHealthInput): UseCompositeHealthResult {",
+      "function_anchor": null,
+      "start_line": 29,
+      "end_line": 63
+    },
+    "original_content": "const HEALTH_DEBOUNCE_MS = 200\n\n/**\n * Lazily create the health Worker.\n * The worker path is built at call-time so Vite's static\n * `new URL(\"...\", import.meta.url)` analyser doesn't bundle the worker's\n * full dependency tree during test transforms (would OOM in happy-dom).\n */\nfunction createHealthWorker(): Worker {\n  const workerUrl = new URL(\"../workers/health-worker.ts\", import.meta.url)\n  return new Worker(workerUrl, { type: \"module\" })\n}\n\n/** True when running inside Vitest (import.meta.env.VITEST is injected by the framework). */\nconst isTestEnv: boolean = !!import.meta.env.VITEST\n\n/** Derive a stable cells array from the fileCells Map. */\nfunction buildCells(fileCells: Map<string, CellData[]>): HealthSyncCell[] {\n  const cells: HealthSyncCell[] = []\n  for (const [fileId, fileCellList] of fileCells) {\n    for (const c of fileCellList) {\n      cells.push({\n        id: c.id,\n        fileId,\n        original: c.original,\n        translated: c.translated,\n        validatorCount: c.activeValidators.length,\n        history: c.history,\n      })\n    }\n  }\n  return cells\n}\n\nexport function useCompositeHealth(input: UseCompositeHealthInput): UseCompositeHealthResult {",
+    "original_hash": "07921445aea984f6",
+    "summary": "useCompositeHealth: 200ms debounce on health recompute. Each keystroke triggers buildCells() which creates ~1000 new HealthSyncCell objects. Eventually queued to worker. But still creates garbage per keystroke.",
+    "tags": [
+      "typing-lag",
+      "health-computation",
+      "worker-debounce"
+    ],
+    "created_at": "2026-04-24T18:44:20.537298+00:00",
+    "updated_at": "2026-04-24T18:59:54.432794+00:00",
+    "last_viewed": null,
+    "stale_views": 0
+  },
+  {
+    "id": "8c2f99e53db8",
+    "file": "src/components/EditorTable.tsx",
+    "anchor": {
+      "from_text": "const ruleMap = useMemo(() => new Map(rules.map((r) => [r.id, r])), [rules])",
+      "to_text": "const handleMouseUp = useCallback(() => {\n    if (isDragging.current && dragCells.current.size > 1) {\n      const selected = cells.filter((c) => dragCells.current.has(c.id))\n      onCompleteBatch(selected)\n    }\n    isDragging.current = false\n    dragCells.current = new Set()\n  }, [cells, onCompleteBatch])",
+      "function_anchor": null,
+      "start_line": 155,
+      "end_line": 175
+    },
+    "original_content": "  const ruleMap = useMemo(() => new Map(rules.map((r) => [r.id, r])), [rules])\n\n  const virtualizer = useVirtualizer({\n    count: cells.length,\n    getScrollElement: () => parentRef.current,\n    estimateSize: () => 90,\n  })\n\n  useImperativeHandle(ref, () => ({\n    scrollToCellIndex(index: number) {\n      if (index >= 0 && index < cells.length) {\n        virtualizer.scrollToIndex(index, { align: \"center\" })\n      }\n    },\n    getCurrentIndex: () => 0,\n  }), [virtualizer, cells.length])\n\n  // Grid layout: [left-gutter] [source] [target] [right-gutter]. Each gutter\n  // is 56px so a flex-wrap icon container fits two 24px buttons per row \u2014 short\n  // cells collapse the icon stack into a 2-column grid instead of a tall tower.\n  // Left gutter: audio + creation actions (AI, validation, play, mic, cue).",
+    "original_hash": "47177277c9a7b3e0",
+    "summary": "EditorTable creates ruleMap and virtualizer. EditorRow is NOT memoized (function declaration) so it re-renders per keystroke. Map.get() calls in virtualizer.getVirtualItems().map() create new arrays/objects each render.",
+    "tags": [
+      "typing-lag",
+      "expensive-operations",
+      "editable-table"
+    ],
+    "created_at": "2026-04-24T18:59:39.195983+00:00",
+    "updated_at": "2026-04-24T18:59:39.196002+00:00",
+    "last_viewed": null,
+    "stale_views": 0
+  },
+  {
+    "id": "0aa79a59e0ae",
+    "file": "src/components/TranslatedEditor.tsx",
+    "anchor": {
+      "from_text": "import Underline from \"@tiptap/extension-underline\"",
+      "to_text": "      Underline,",
+      "function_anchor": null,
+      "start_line": 4,
+      "end_line": 42
+    },
+    "original_content": "import Underline from \"@tiptap/extension-underline\"\nimport Collaboration from \"@tiptap/extension-collaboration\"\nimport { Extension } from \"@tiptap/core\"\nimport { yCursorPlugin } from \"@tiptap/y-tiptap\"\nimport * as Y from \"yjs\"\nimport type YProvider from \"y-partyserver/provider\"\nimport { Bold, Italic, Underline as UnderlineIcon, Strikethrough, Code } from \"lucide-react\"\nimport { cn } from \"@/lib/utils\"\nimport { useRef, useEffect } from \"react\"\n\ninterface TranslatedEditorProps {\n  fragment: Y.XmlFragment\n  onBlur?: () => void\n  placeholder?: string\n  className?: string\n  // When provided, remote cursors from other peers in this provider's awareness\n  // are rendered inline with the given user's name and color for their local cursor.\n  syncProvider?: YProvider | null\n  user?: { name: string; color: string }\n  editable?: boolean\n}\n\nexport function TranslatedEditor({ fragment, onBlur, placeholder, className, syncProvider, user, editable = true }: TranslatedEditorProps) {\n  const editor = useEditor({\n    editable,\n    extensions: [\n      StarterKit.configure({\n        // Turn off TipTap's own history \u2014 Yjs manages undo/redo via the collab plugin\n        undoRedo: false,\n        // Disable node types we don't support in cells\n        heading: false,\n        bulletList: false,\n        orderedList: false,\n        listItem: false,\n        blockquote: false,\n        codeBlock: false,\n        horizontalRule: false,\n      }),\n      Underline,",
+    "original_hash": "de55b7f3ff26696f",
+    "summary": "DUPLICATE UNDERLINE: StarterKit already includes @tiptap/extension-underline. Line 42 explicitly adds Underline again. Creates duplicate extension registrations per editor instance.",
+    "tags": [
+      "typing-lag",
+      "tiptap-extensions",
+      "duplicate-underline"
+    ],
+    "created_at": "2026-04-24T18:59:51.304765+00:00",
+    "updated_at": "2026-04-24T18:59:51.304771+00:00",
+    "last_viewed": null,
+    "stale_views": 0
+  },
+  {
+    "id": "79bf69f3d672",
+    "file": "/Users/ryderwishart/frontierrnd/frontier-server/cloudflare/migrations/0001_initial_schema.sql",
+    "anchor": {
+      "from_text": "CREATE TABLE users (",
+      "to_text": "CREATE INDEX idx_password_reset_tokens_expires ON password_reset_tokens(expires_at);",
+      "function_anchor": null,
+      "start_line": 5,
+      "end_line": 81
+    },
+    "original_content": "CREATE TABLE users (\n    id INTEGER PRIMARY KEY AUTOINCREMENT,\n    username TEXT UNIQUE NOT NULL,\n    email TEXT UNIQUE NOT NULL,\n    password_hash TEXT NOT NULL,\n    gitlab_user_id INTEGER UNIQUE,\n    gitlab_username TEXT,\n    gitlab_token TEXT,\n    stripe_customer_id TEXT UNIQUE,\n    subscription_tier TEXT DEFAULT 'free',\n    preferences TEXT DEFAULT '{}', -- JSON string\n    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,\n    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP\n);\n\n-- Activity logs table\nCREATE TABLE activity_logs (\n    id INTEGER PRIMARY KEY AUTOINCREMENT,\n    user_id INTEGER NOT NULL,\n    activity_type TEXT,\n    description TEXT,\n    activity_metadata TEXT, -- JSON string\n    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,\n    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE\n);\n\n-- API usage table\nCREATE TABLE api_usage (\n    id INTEGER PRIMARY KEY AUTOINCREMENT,\n    user_id INTEGER NOT NULL,\n    endpoint TEXT,\n    tokens_used INTEGER,\n    cost REAL,\n    api_usage_metadata TEXT DEFAULT '{}', -- JSON string\n    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,\n    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE\n);\n\n-- Password reset tokens table\nCREATE TABLE password_reset_tokens (\n    id INTEGER PRIMARY KEY AUTOINCREMENT,\n    user_id INTEGER NOT NULL,\n    token TEXT UNIQUE NOT NULL,\n    expires_at DATETIME NOT NULL,\n    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,\n    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE\n);\n\n-- Subscription status table\nCREATE TABLE subscription_status (\n    id INTEGER PRIMARY KEY AUTOINCREMENT,\n    user_id INTEGER NOT NULL,\n    stripe_subscription_id TEXT UNIQUE,\n    status TEXT NOT NULL,\n    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,\n    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,\n    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE\n);\n\n-- Database version tracking\nCREATE TABLE db_version (\n    id INTEGER PRIMARY KEY AUTOINCREMENT,\n    version TEXT NOT NULL,\n    applied_at DATETIME DEFAULT CURRENT_TIMESTAMP\n);\n\n-- Indexes for performance\nCREATE INDEX idx_users_email ON users(email);\nCREATE INDEX idx_users_username ON users(username);\nCREATE INDEX idx_users_gitlab_id ON users(gitlab_user_id);\nCREATE INDEX idx_activity_logs_user_id ON activity_logs(user_id);\nCREATE INDEX idx_activity_logs_timestamp ON activity_logs(timestamp);\nCREATE INDEX idx_api_usage_user_id ON api_usage(user_id);\nCREATE INDEX idx_api_usage_timestamp ON api_usage(timestamp);\nCREATE INDEX idx_api_usage_endpoint ON api_usage(endpoint);\nCREATE INDEX idx_password_reset_tokens_token ON password_reset_tokens(token);\nCREATE INDEX idx_password_reset_tokens_expires ON password_reset_tokens(expires_at);",
+    "original_hash": "2f9140c725c57243",
+    "summary": "Initial D1 schema: users table (id, username, email, password_hash, gitlab_user_id, gitlab_username, gitlab_token, stripe_customer_id, subscription_tier). Also includes activity_logs, api_usage, password_reset_tokens, subscription_status tables.",
+    "tags": [
+      "frontier-server",
+      "schema",
+      "users"
+    ],
+    "created_at": "2026-04-24T23:02:40.732870+00:00",
+    "updated_at": "2026-04-24T23:02:40.733227+00:00",
+    "last_viewed": null,
+    "stale_views": 0
+  },
+  {
+    "id": "686335ed8238",
+    "file": "/Users/ryderwishart/frontierrnd/frontier-server/cloudflare/migrations/0008_organizations.sql",
+    "anchor": {
+      "from_text": "-- Organizations: billing entity.",
+      "to_text": "CREATE INDEX idx_subscription_status_org ON subscription_status(org_id);",
+      "function_anchor": null,
+      "start_line": 4,
+      "end_line": 22
+    },
+    "original_content": "-- Organizations: billing entity. Payer = owner. Subscription belongs to org.\nCREATE TABLE organizations (\n    id INTEGER PRIMARY KEY AUTOINCREMENT,\n    name TEXT,\n    stripe_customer_id TEXT UNIQUE NOT NULL,\n    subscription_tier TEXT NOT NULL,\n    owner_user_id INTEGER NOT NULL,\n    gitlab_group_id INTEGER,\n    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,\n    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,\n    FOREIGN KEY (owner_user_id) REFERENCES users(id)\n);\n\nCREATE INDEX idx_organizations_owner ON organizations(owner_user_id);\nCREATE INDEX idx_organizations_stripe ON organizations(stripe_customer_id);\n\n-- Extend subscription_status to support org-centric subscriptions\nALTER TABLE subscription_status ADD COLUMN org_id INTEGER REFERENCES organizations(id);\nCREATE INDEX idx_subscription_status_org ON subscription_status(org_id);",
+    "original_hash": "ab6bc323244f1efe",
+    "summary": "Organizations table (id, name, stripe_customer_id, subscription_tier, owner_user_id). Org-centric billing: payer=owner, subscription belongs to org. Extends subscription_status to link to org_id.",
+    "tags": [
+      "frontier-server",
+      "schema",
+      "organizations"
+    ],
+    "created_at": "2026-04-24T23:02:42.305310+00:00",
+    "updated_at": "2026-04-24T23:02:42.305339+00:00",
+    "last_viewed": null,
+    "stale_views": 0
+  },
+  {
+    "id": "1e243084712d",
+    "file": "/Users/ryderwishart/frontierrnd/frontier-server/cloudflare/migrations/0013_roles_projects_members.sql",
+    "anchor": {
+      "from_text": "-- Role lookup. Numeric levels with 100-gaps",
+      "to_text": "CREATE INDEX idx_project_members_role ON project_members(role_level);",
+      "function_anchor": null,
+      "start_line": 5,
+      "end_line": 58
+    },
+    "original_content": "-- Role lookup. Numeric levels with 100-gaps for future insertion.\n-- Higher levels inherit all capabilities of lower levels.\nCREATE TABLE roles (\n    level INTEGER PRIMARY KEY,\n    name TEXT UNIQUE NOT NULL,\n    description TEXT\n);\n\nINSERT INTO roles (level, name, description) VALUES\n    (100, 'viewer',       'Read cells and comments'),\n    (200, 'commenter',    'Viewer + write comments'),\n    (300, 'reviewer',     'Commenter + validate cells (set validated=true) without editing cell values'),\n    (400, 'contributor',  'Reviewer + edit cell values (replaces GitLab developer)'),\n    (500, 'project_lead', 'Contributor + assign reviewers/validators to scoped ranges'),\n    (600, 'maintainer',   'Project lead + manage members and project settings'),\n    (700, 'owner',        'Maintainer + delete or transfer project');\n\n-- Projects known to the CF-native stack.\n-- gitlab_project_id is nullable: new projects may be CF-native-only.\nCREATE TABLE projects (\n    id TEXT PRIMARY KEY,\n    name TEXT NOT NULL,\n    gitlab_project_id INTEGER UNIQUE,\n    org_id INTEGER,\n    created_by INTEGER NOT NULL,\n    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,\n    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,\n    archived_at DATETIME,\n    FOREIGN KEY (created_by) REFERENCES users(id),\n    FOREIGN KEY (org_id) REFERENCES organizations(id)\n);\n\nCREATE INDEX idx_projects_gitlab ON projects(gitlab_project_id);\nCREATE INDEX idx_projects_org ON projects(org_id);\nCREATE INDEX idx_projects_created_by ON projects(created_by);\n\n-- Per-project role override. When a row exists here for (project_id, user_id),\n-- the stored role_level wins over whatever GitLab reports for that user.\n-- Absence means \"defer to GitLab permission check via frontier-server\".\nCREATE TABLE project_members (\n    project_id TEXT NOT NULL,\n    user_id INTEGER NOT NULL,\n    role_level INTEGER NOT NULL,\n    granted_by INTEGER,\n    granted_at DATETIME DEFAULT CURRENT_TIMESTAMP,\n    PRIMARY KEY (project_id, user_id),\n    FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,\n    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,\n    FOREIGN KEY (role_level) REFERENCES roles(level),\n    FOREIGN KEY (granted_by) REFERENCES users(id)\n);\n\nCREATE INDEX idx_project_members_user ON project_members(user_id);\nCREATE INDEX idx_project_members_role ON project_members(role_level);",
+    "original_hash": "4f0508ac144caebb",
+    "summary": "Roles table (100-700): viewer(100), commenter(200), reviewer(300), contributor(400), project_lead(500), maintainer(600), owner(700). Projects table (id TEXT, name, gitlab_project_id, org_id, created_by, created_at, updated_at, archived_at). project_members overrides GitLab: (project_id, user_id, role_level, granted_by, granted_at).",
+    "tags": [
+      "frontier-server",
+      "schema",
+      "roles",
+      "projects",
+      "permissions"
+    ],
+    "created_at": "2026-04-24T23:02:44.124569+00:00",
+    "updated_at": "2026-04-24T23:02:44.124575+00:00",
+    "last_viewed": null,
+    "stale_views": 0
+  },
+  {
+    "id": "aef35a410a42",
+    "file": "/Users/ryderwishart/frontierrnd/frontier-server/cloudflare/migrations/0014_project_invites.sql",
+    "anchor": {
+      "from_text": "CREATE TABLE project_invites",
+      "to_text": "CREATE INDEX idx_project_invites_unused ON project_invites(project_id, used_by)\n  WHERE used_by IS NULL;",
+      "function_anchor": null,
+      "start_line": 7,
+      "end_line": 26
+    },
+    "original_content": "CREATE TABLE project_invites (\n    token TEXT PRIMARY KEY,\n    project_id TEXT NOT NULL,\n    role_level INTEGER NOT NULL,\n    created_by INTEGER NOT NULL,\n    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,\n    expires_at DATETIME,\n    used_by INTEGER,\n    used_at DATETIME,\n    FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,\n    FOREIGN KEY (role_level) REFERENCES roles(level),\n    FOREIGN KEY (created_by) REFERENCES users(id),\n    FOREIGN KEY (used_by) REFERENCES users(id)\n);\n\n-- Listing invites per project (for a \"manage members\" UI later) and looking\n-- up unused live invites cheaply during accept.\nCREATE INDEX idx_project_invites_project ON project_invites(project_id);\nCREATE INDEX idx_project_invites_unused ON project_invites(project_id, used_by)\n  WHERE used_by IS NULL;",
+    "original_hash": "7b52bd959686cce6",
+    "summary": "project_invites: shareable tokens with role_level baked in. Used-only indexes for managing invites. Redeemed tokens create project_members rows.",
+    "tags": [
+      "frontier-server",
+      "schema",
+      "invites"
+    ],
+    "created_at": "2026-04-24T23:02:45.590714+00:00",
+    "updated_at": "2026-04-24T23:02:45.590726+00:00",
+    "last_viewed": null,
+    "stale_views": 0
+  },
+  {
+    "id": "95feef666c4b",
+    "file": "/Users/ryderwishart/frontierrnd/frontier-server/cloudflare/src/services/project-permissions.ts",
+    "anchor": {
+      "from_text": "export async function resolveProjectRole(",
+      "to_text": "  return resolveProjectRoleInternal(env, user, projectId, { includeArchived: false });\n}",
+      "function_anchor": "resolveProjectRole",
+      "start_line": 83,
+      "end_line": 86
+    },
+    "original_content": "export async function resolveProjectRole(\n  env: Env,\n  user: User,\n  projectId: string",
+    "original_hash": "7f3f07e16f3749bb",
+    "summary": "3-tier role resolution: (1) project_members override wins if present (source:\"override\"). (2) projects.created_by==user.id implies owner 700 (source:\"creator\"). (3) Fall back to GitLab if gitlab_project_id and user.gitlab_token both set (source:\"gitlab\"). Returns null for archived unless includeArchived flag.",
+    "tags": [
+      "frontier-server",
+      "permissions",
+      "role-resolution"
+    ],
+    "created_at": "2026-04-24T23:02:47.740364+00:00",
+    "updated_at": "2026-04-24T23:02:47.740376+00:00",
+    "last_viewed": null,
+    "stale_views": 0
+  },
+  {
+    "id": "88f79a305c9d",
+    "file": "/Users/ryderwishart/frontierrnd/frontier-server/cloudflare/src/routes/auth.ts",
+    "anchor": {
+      "from_text": "auth.get(\"/me\", authMiddleware, async (c) => {",
+      "to_text": "  return c.json(response);\n});",
+      "function_anchor": null,
+      "start_line": 343,
+      "end_line": 363
+    },
+    "original_content": "auth.get(\"/me\", authMiddleware, async (c) => {\n  const user = c.get(\"user\") as User;\n\n  const response: UserResponse = {\n    id: user.id,\n    username: user.username,\n    email: user.email,\n    gitlab_username: user.gitlab_username,\n    preferences: user.preferences,\n  };\n\n  return c.json(response);\n});\n\n// Admin status (portal uses this for nav visibility)\nauth.get(\"/admin-status\", authMiddleware, async (c) => {\n  const user = c.get(\"user\") as User;\n  const credentials = getAdminCredentials(c.env);\n  const is_admin = credentials[user.username] !== undefined;\n  const is_super_admin = isSuperAdmin(user.username, c.env);\n  return c.json({",
+    "original_hash": "b191c83cdefa26c6",
+    "summary": "GET /me: requires authMiddleware (JWT). Returns user profile: id, username, email, gitlab_username, preferences. User lookup is auth-gated; no public user search endpoint exists.",
+    "tags": [
+      "frontier-server",
+      "routes",
+      "auth"
+    ],
+    "created_at": "2026-04-24T23:02:50.748550+00:00",
+    "updated_at": "2026-04-24T23:02:50.748562+00:00",
+    "last_viewed": null,
+    "stale_views": 0
+  },
+  {
+    "id": "994f417d77db",
+    "file": "src/components/EditorTable.tsx",
+    "anchor": {
+      "from_text": "import { CellAudioButton } from \"./CellAudioButton\"",
+      "to_text": "import type { RangeHighlight } from \"./HighlightedText\"",
+      "function_anchor": null,
+      "start_line": 19,
+      "end_line": 28
+    },
+    "original_content": "import { CellAudioButton } from \"./CellAudioButton\"\nimport { CellAudioRecordButton } from \"./CellAudioRecordButton\"\nimport { CellActionsMenu } from \"./CellActionsMenu\"\nimport { Popover, PopoverContent, PopoverTrigger } from \"@/components/ui/popover\"\nimport { cn } from \"@/lib/utils\"\nimport { isPerfLogEnabled } from \"@/lib/perf-log\"\nimport { partitionInfractions, addWaiver, removeWaiver } from \"@/lib/rules/waivers\"\nimport { setCellWaivers } from \"@/hooks/useCellWaivers\"\nimport { ViolationPopover } from \"./ViolationPopover\"\nimport type { RangeHighlight } from \"./HighlightedText\"",
+    "original_hash": "c716512e89c2fa4f",
+    "summary": "EditorTable.tsx is the virtualized cell editor surface. Composes per-row: CellAudioButton (play/pause), CellAudioRecordButton (opens AudioRecordingModal at workspace level), TranslatedEditor (Tiptap+Yjs), HealthRing, ViolationPopover, SparkleButton (AI completion). Uses @tanstack/react-virtual. Each row renders a CellData with rule infractions, validation history, examples panel. This is where waveform/timestamp overlays would attach.",
+    "tags": [
+      "editor",
+      "cell",
+      "audio-recording",
+      "tiptap"
+    ],
+    "created_at": "2026-04-25T17:09:57.621550+00:00",
+    "updated_at": "2026-04-25T17:09:57.621595+00:00",
+    "last_viewed": "2026-04-27T04:33:04.844694+00:00",
+    "stale_views": 0
+  },
+  {
+    "id": "bb103fc995a9",
+    "file": "src/hooks/useCellAudio.ts",
+    "anchor": {
+      "from_text": "export function useCellAudio(",
+      "to_text": "return { state, error, isPlaying, play, pause }",
+      "function_anchor": "useCellAudio",
+      "start_line": 38,
+      "end_line": 195
+    },
+    "original_content": "export function useCellAudio(\n  project: ProjectRecord,\n  cell: CodexCell,\n): UseCellAudioResult {\n  const { session } = useFrontierSession()\n  const [state, setState] = useState<UseCellAudioResult[\"state\"]>(\"idle\")\n  const [error, setError] = useState<AudioError | null>(null)\n  const [isPlaying, setIsPlaying] = useState(false)\n\n  const audioRef = useRef<HTMLAudioElement | null>(null)\n  const urlRef = useRef<string | null>(null)\n\n  const selectedAudioId = cell.metadata?.selectedAudioId\n  const attachment = selectedAudioId\n    ? cell.metadata?.attachments?.[selectedAudioId]\n    : undefined\n  const attachmentUrl = attachment?.url\n\n  useEffect(() => {\n    return () => {\n      if (audioRef.current) {\n        audioRef.current.pause()\n        audioRef.current = null\n      }\n      if (urlRef.current) {\n        URL.revokeObjectURL(urlRef.current)\n        urlRef.current = null\n      }\n      setState(\"idle\")\n      setIsPlaying(false)\n      setError(null)\n    }\n  }, [selectedAudioId])\n\n  const load = useCallback(async (): Promise<Uint8Array> => {\n    if (!attachmentUrl) {\n      throw { kind: \"pointer-missing\", message: \"No audio attachment on this cell\" } as AudioError\n    }\n\n    // Web-only (non-git) projects: attachment URL is a frontier-audio:// marker\n    // resolved by the R2-backed audio worker.\n    const frontier = parseFrontierAudioUrl(attachmentUrl)\n    if (frontier) {\n      if (!session?.jwt) {\n        throw { kind: \"no-session\", message: \"Not signed in\" } as AudioError\n      }\n      try {\n        return await fetchCellAudio({\n          session,\n          projectId: project.id,\n          audioId: frontier.audioId,\n          ext: frontier.ext,\n        })\n      } catch (e) {\n        throw {\n          kind: \"download-failed\",\n          message: e instanceof Error ? e.message : String(e),\n        } as AudioError\n      }\n    }\n\n    if (project.origin?.kind !== \"git\") {\n      throw { kind: \"no-git-origin\", message: \"Project has no git origin\" } as AudioError\n    }\n    if (!session?.gitlabToken) {\n      throw { kind: \"no-session\", message: \"Not signed in\" } as AudioError\n    }\n\n    const repoHandle = await openOpfsRepoDir(\n      opfsRepoKey(\n        project.origin.gitlabProjectId,\n        pathWithNamespaceFromCloneUrl(project.origin.cloneUrl),\n      ),\n    )\n    const repoFs = createOpfsFs(repoHandle)\n    let pointerText: string\n    try {\n      const data = await repoFs.promises.readFile(attachmentUrl, { encoding: \"utf8\" })\n      pointerText = typeof data === \"string\" ? data : new TextDecoder().decode(data)\n    } catch {\n      // The codex-editor metadata stores paths as `.project/attachments/files/...`\n      // but the git repo may store them under `.project/attachments/pointers/...`.\n      // Try the alternate path before giving up.\n      const altUrl = attachmentUrl.replace(\"/attachments/files/\", \"/attachments/pointers/\")\n      try {\n        const data = await repoFs.promises.readFile(altUrl, { encoding: \"utf8\" })\n        pointerText = typeof data === \"string\" ? data : new TextDecoder().decode(data)\n      } catch (e2) {\n        throw {\n          kind: \"pointer-missing\",\n          message: `Could not read ${attachmentUrl} (also tried ${altUrl}): ${e2 instanceof Error ? e2.message : String(e2)}`,\n        } as AudioError\n      }\n    }\n\n    const pointer = parsePointerContent(pointerText)\n    if (!pointer) {\n      throw { kind: \"pointer-invalid\", message: `${attachmentUrl} is not a valid LFS pointer` } as AudioError\n    }\n\n    const cached = await lfsCacheGet(pointer.oid)\n    if (cached) return cached\n\n    try {\n      const bytes = await downloadLfsBlob({\n        cloneUrl: project.origin.cloneUrl,\n        gitlabToken: session.gitlabToken,\n        oid: pointer.oid,\n        size: pointer.size,\n      })\n      try { await lfsCachePut(pointer.oid, bytes) } catch { /* non-fatal */ }\n      return bytes\n    } catch (e) {\n      if (e && typeof e === \"object\" && \"kind\" in e) throw e as AudioError\n      throw { kind: \"download-failed\", message: e instanceof Error ? e.message : String(e) } as AudioError\n    }\n  }, [attachmentUrl, project, session])\n\n  const play = useCallback(async () => {\n    if (audioRef.current) {\n      try { await audioRef.current.play() } catch (e) {\n        console.error(\"[useCellAudio] play() rejected\", e)\n      }\n      return\n    }\n    setState(\"loading\")\n    setError(null)\n    try {\n      const bytes = await load()\n      const blob = new Blob([bytes as BlobPart])\n      const url = URL.createObjectURL(blob)\n      urlRef.current = url\n      const audio = new Audio(url)\n      audio.onplay = () => setIsPlaying(true)\n      audio.onpause = () => setIsPlaying(false)\n      audio.onended = () => setIsPlaying(false)\n      audioRef.current = audio\n      setState(\"ready\")\n      try {\n        await audio.play()\n      } catch (e) {\n        console.error(\"[useCellAudio] play() rejected on fresh audio\", e)\n      }\n    } catch (e) {\n      const err = (e && typeof e === \"object\" && \"kind\" in e)\n        ? (e as AudioError)\n        : { kind: \"download-failed\" as const, message: String(e) }\n      console.error(\"[useCellAudio]\", err)\n      setError(err)\n      setState(\"error\")\n    }\n  }, [load])\n\n  const pause = useCallback(() => {\n    audioRef.current?.pause()\n  }, [])\n\n  return { state, error, isPlaying, play, pause }",
+    "original_hash": "bcbdb143271dcf43",
+    "summary": "useCellAudio(project, cell): owns HTMLAudioElement lifecycle for cell.metadata.selectedAudioId. Loads bytes from one of two paths: (1) frontier-audio:// marker \u2192 R2-backed audio worker via fetchCellAudio; (2) LFS pointer for git projects \u2192 reads .project/attachments/files|pointers/, parses pointer, hits lfsCacheGet, falls back to downloadLfsBlob. Returns {state, error, isPlaying, play, pause}. Exposes only play/pause \u2014 no seek, no currentTime, no waveform peaks. This is the surface to extend for time-sync features.",
+    "tags": [
+      "audio-recording",
+      "cell",
+      "playback",
+      "lfs"
+    ],
+    "created_at": "2026-04-25T17:10:04.851517+00:00",
+    "updated_at": "2026-04-25T17:10:04.851531+00:00",
+    "last_viewed": null,
+    "stale_views": 0
+  },
+  {
+    "id": "e25b0b917ecc",
+    "file": "src/components/AudioRecorder/AudioWaveform.tsx",
+    "anchor": {
+      "from_text": "export function AudioWaveform(",
+      "to_text": "return (",
+      "function_anchor": "AudioWaveform",
+      "start_line": 17,
+      "end_line": 108
+    },
+    "original_content": "export function AudioWaveform({ stream, height = 48, windowSec = 8, className }: Props) {\n  const canvasRef = useRef<HTMLCanvasElement | null>(null)\n  const ctxRef = useRef<AudioContext | null>(null)\n  const rafRef = useRef<number | null>(null)\n\n  useEffect(() => {\n    if (!stream) {\n      const canvas = canvasRef.current\n      if (canvas) {\n        const ctx = canvas.getContext(\"2d\")\n        ctx?.clearRect(0, 0, canvas.width, canvas.height)\n      }\n      return\n    }\n\n    const canvas = canvasRef.current\n    if (!canvas) return\n    const ctx = canvas.getContext(\"2d\")\n    if (!ctx) return\n\n    const AudioCtx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext\n    const audioCtx = new AudioCtx()\n    ctxRef.current = audioCtx\n    const source = audioCtx.createMediaStreamSource(stream)\n    const analyser = audioCtx.createAnalyser()\n    analyser.fftSize = 1024\n    analyser.smoothingTimeConstant = 0.3\n    source.connect(analyser)\n\n    const timeData = new Uint8Array(analyser.fftSize)\n    // One RMS sample per frame; a rolling buffer sized to cover windowSec at\n    // ~60fps. Using a Float32Array keeps the update O(1) via modular index.\n    const bufferLen = Math.max(120, Math.floor(60 * windowSec))\n    const amps = new Float32Array(bufferLen)\n    let writeIdx = 0\n    let frameCount = 0\n\n    function resizeCanvas() {\n      if (!canvas) return\n      const dpr = window.devicePixelRatio || 1\n      const cssWidth = canvas.clientWidth || 200\n      canvas.width = Math.max(1, Math.floor(cssWidth * dpr))\n      canvas.height = Math.max(1, Math.floor(height * dpr))\n      ctx!.setTransform(dpr, 0, 0, dpr, 0, 0)\n    }\n\n    resizeCanvas()\n    const ro = new ResizeObserver(resizeCanvas)\n    ro.observe(canvas)\n\n    function draw() {\n      analyser.getByteTimeDomainData(timeData)\n      // RMS amplitude for this frame, normalized to [0, 1].\n      let sumSq = 0\n      for (let i = 0; i < timeData.length; i++) {\n        const v = (timeData[i] - 128) / 128\n        sumSq += v * v\n      }\n      const rms = Math.sqrt(sumSq / timeData.length)\n      amps[writeIdx] = rms\n      writeIdx = (writeIdx + 1) % bufferLen\n      frameCount++\n\n      if (!canvas || !ctx) return\n      const w = canvas.clientWidth || 200\n      const h = height\n      ctx.clearRect(0, 0, w, h)\n      ctx.fillStyle = \"rgba(239,68,68,0.08)\" // red-500/8 subtle background\n      ctx.fillRect(0, 0, w, h)\n      const mid = h / 2\n      ctx.strokeStyle = \"rgb(239,68,68)\"\n      ctx.lineWidth = 1\n      ctx.beginPath()\n      for (let x = 0; x < w; x++) {\n        // Map x \u2192 index in circular buffer. Older samples on the left, latest\n        // on the right.\n        const bufIdx = (writeIdx + bufferLen - Math.floor((w - x) / w * bufferLen)) % bufferLen\n        const amp = amps[bufIdx] ?? 0\n        const y = mid - amp * mid * 2.4 // scale up so quiet speech is visible\n        const y2 = mid + amp * mid * 2.4\n        if (x === 0) ctx.moveTo(x, y)\n        else ctx.lineTo(x, y)\n        ctx.lineTo(x, y2)\n      }\n      ctx.stroke()\n\n      rafRef.current = requestAnimationFrame(draw)\n    }\n\n    rafRef.current = requestAnimationFrame(draw)\n\n    return () => {",
+    "original_hash": "b853db508fe8b4d5",
+    "summary": "AudioWaveform: live MediaStream waveform for the recording modal. AnalyserNode (fftSize 1024, smoothing 0.3) \u2192 Float32 RMS samples \u2192 rolling 8s circular buffer \u2192 rAF canvas render. Tap-only (no audio routed to output). NOT used for playback waveforms \u2014 for those we'd need a different component fed by decoded peaks of the loaded blob.",
+    "tags": [
+      "audio-recording",
+      "waveform",
+      "canvas"
+    ],
+    "created_at": "2026-04-25T17:10:10.688598+00:00",
+    "updated_at": "2026-04-25T17:10:10.688625+00:00",
+    "last_viewed": null,
+    "stale_views": 0
+  },
+  {
+    "id": "c56ba63807ba",
+    "file": "src/components/CellWaveform.tsx",
+    "anchor": {
+      "from_text": "export function CellWaveform(",
+      "to_text": "export function CellWaveform({ controller, bins = 320, height = 28, className }: Props) {",
+      "function_anchor": "CellWaveform",
+      "start_line": 17,
+      "end_line": 17
+    },
+    "original_content": "export function CellWaveform({ controller, bins = 320, height = 28, className }: Props) {",
+    "original_hash": "94e979a076167e18",
+    "summary": "CellWaveform: per-cell scrubbable waveform strip rendered under the translated text. Receives a UseCellAudioResult controller (shared with CellAudioButton in the same row). On mount calls controller.requestPeaks(bins) to lazily decode + cache peaks via OPFS. Renders bars on canvas (DPR-aware), overlays a 1px primary-color playhead positioned by currentTime/duration, click-to-seek via pointerdown. Default bins=320, height=28. Loading state shows a flat baseline with pulse animation.",
+    "tags": [
+      "audio-recording",
+      "waveform",
+      "cell",
+      "scrubber"
+    ],
+    "created_at": "2026-04-26T03:03:07.509058+00:00",
+    "updated_at": "2026-04-26T03:03:07.509076+00:00",
+    "last_viewed": null,
+    "stale_views": 0
+  },
+  {
+    "id": "1ff7ddfd2a36",
+    "file": "src/lib/audio/timings.ts",
+    "anchor": {
+      "from_text": "export function readCellTimings(",
+      "to_text": "return -1\n}",
+      "function_anchor": "readCellTimings",
+      "start_line": 10,
+      "end_line": 13
+    },
+    "original_content": "export function readCellTimings(\n  doc: Y.Doc,\n  cellId: string,\n  audioId: string,",
+    "original_hash": "e9d347ef9b7c140a",
+    "summary": "Audio timings helpers. Y.Doc-backed read/write keyed by cellId+audioId, stored at cell.audioTimings (Y.Map of audioId \u2192 Y.Array of WordTiming). tokenizeWords splits text into non-whitespace runs with start/end offsets. uniformTimings spreads a duration evenly across tokens (placeholder for pre-Whisper demos). findActiveTimingIndex does O(log n) binary search over [t0, t1) to find the word at currentTime. WordTiming = {word, t0, t1, start, end} where t* is seconds and start/end are inclusive/exclusive char offsets in the cell's plain text at recording time.",
+    "tags": [
+      "audio-recording",
+      "karaoke",
+      "timings",
+      "yjs"
+    ],
+    "created_at": "2026-04-26T04:56:10.254169+00:00",
+    "updated_at": "2026-04-26T04:56:10.254197+00:00",
+    "last_viewed": null,
+    "stale_views": 0
+  },
+  {
+    "id": "1b8d9e1debd9",
+    "file": "src/lib/richtext/karaoke-plugin.ts",
+    "anchor": {
+      "from_text": "export function createKaraokeExtension(",
+      "to_text": "return Extension.create({",
+      "function_anchor": "createKaraokeExtension",
+      "start_line": 70,
+      "end_line": 71
+    },
+    "original_content": "export function createKaraokeExtension(getState: () => KaraokePluginState) {\n  return Extension.create({",
+    "original_hash": "4f0163d70cff7cb7",
+    "summary": "Tiptap extension that renders the karaoke decoration. Pattern mirrors createViolationDecorationExtension: getState callback returns {timings, activeIdx, onSeekToWord}; meta-transaction \"rebuild\" triggers redraw; doc changes auto-map decorations. handleClick fires onSeekToWord only for alt+click so plain clicks still position the cursor. Used by TranslatedEditor \u2014 activeIdx is computed by findActiveTimingIndex(currentTime) and only dispatched when it changes (never 60Hz).",
+    "tags": [
+      "audio-recording",
+      "karaoke",
+      "tiptap",
+      "prosemirror"
+    ],
+    "created_at": "2026-04-26T04:56:17.733035+00:00",
+    "updated_at": "2026-04-26T04:56:17.733042+00:00",
+    "last_viewed": null,
+    "stale_views": 0
+  },
+  {
+    "id": "b30096804b44",
+    "file": "src/lib/audio/whisper-worker.ts",
+    "anchor": {
+      "from_text": "self.addEventListener(\"message\"",
+      "to_text": "export type { OutgoingMessage",
+      "function_anchor": null,
+      "start_line": 80,
+      "end_line": 119
+    },
+    "original_content": "self.addEventListener(\"message\", async (event: MessageEvent<IncomingMessage>) => {\n  const msg = event.data\n  if (msg.type !== \"transcribe\") return\n\n  try {\n    const pipe = await getPipe(msg.model ?? DEFAULT_MODEL, msg.requestId)\n    // transformers.js wants Float32 mono PCM (it auto-resamples internally if\n    // needed, but pre-resampling on the main thread saves CPU).\n    const result = await pipe(msg.pcm as unknown as Float32Array, {\n      return_timestamps: \"word\",\n      language: msg.language,\n      chunk_length_s: 30,\n      stride_length_s: 5,\n    })\n    const r = (Array.isArray(result) ? result[0] : result) as {\n      text: string\n      chunks?: Array<{ text: string; timestamp: [number | null, number | null] }>\n    }\n    const chunks = (r.chunks ?? [])\n      .filter((c) => c.timestamp[0] != null && c.timestamp[1] != null)\n      .map((c) => ({ text: c.text.trim(), start: c.timestamp[0]!, end: c.timestamp[1]! }))\n      .filter((c) => c.text.length > 0)\n    const out: ResultMessage = {\n      type: \"result\",\n      requestId: msg.requestId,\n      text: r.text,\n      chunks,\n    }\n    ;(self as unknown as Worker).postMessage(out)\n  } catch (e) {\n    const out: ErrorMessage = {\n      type: \"error\",\n      requestId: msg.requestId,\n      message: e instanceof Error ? e.message : String(e),\n    }\n    ;(self as unknown as Worker).postMessage(out)\n  }\n})\n\nexport type { OutgoingMessage, IncomingMessage, TranscribeRequest, ProgressMessage, ResultMessage, ErrorMessage }",
+    "original_hash": "a67b41ed91144cfb",
+    "summary": "Whisper Web Worker. Lazy-loads `Xenova/whisper-base` via @huggingface/transformers v3 with `device: \"webgpu\"` (auto-falls-back to wasm). Receives {pcm: Float32, sampleRate, language?, model?} and returns {text, chunks: [{text, start, end}, ...]} via `return_timestamps: \"word\"`. Reports model-download progress via \"progress\" messages. Pipeline cached after first load. Imported with `?worker` from transcribe.ts so Vite emits a separate chunk and the main bundle stays light.",
+    "tags": [
+      "audio-recording",
+      "whisper",
+      "asr",
+      "worker"
+    ],
+    "created_at": "2026-04-26T05:18:46.993774+00:00",
+    "updated_at": "2026-04-26T05:18:46.993789+00:00",
+    "last_viewed": null,
+    "stale_views": 0
+  },
+  {
+    "id": "f2123781ed04",
+    "file": "src/lib/audio/transcribe.ts",
+    "anchor": {
+      "from_text": "export async function transcribeAudio(",
+      "to_text": "return { text: result.text, chunks: result.chunks, timings }",
+      "function_anchor": "transcribeAudio",
+      "start_line": 93,
+      "end_line": 128
+    },
+    "original_content": "export async function transcribeAudio(\n  bytes: Uint8Array,\n  opts: TranscriptionOptions = {},\n): Promise<TranscriptionResult> {\n  const pcm = await audioBytesToWhisperPcm(bytes)\n  const worker = await getWorker()\n  const requestId = `t-${++workerSeq}`\n\n  const result = await new Promise<ResultMessage>((resolve, reject) => {\n    const onMessage = (event: MessageEvent<ResultMessage | ErrorMessage | ProgressMessage>) => {\n      const msg = event.data\n      if (msg.requestId !== requestId) return\n      if (msg.type === \"progress\") {\n        opts.onProgress?.({\n          status: msg.status, file: msg.file, loaded: msg.loaded, total: msg.total,\n        })\n        return\n      }\n      worker.removeEventListener(\"message\", onMessage)\n      if (msg.type === \"result\") resolve(msg)\n      else reject(new Error(msg.message))\n    }\n    worker.addEventListener(\"message\", onMessage)\n    const req: TranscribeRequest = {\n      type: \"transcribe\",\n      requestId,\n      pcm,\n      sampleRate: WHISPER_SAMPLE_RATE,\n      language: opts.language,\n      model: opts.model,\n    }\n    worker.postMessage(req)\n  })\n\n  const timings = alignChunks(result.chunks, opts.cellText)\n  return { text: result.text, chunks: result.chunks, timings }",
+    "original_hash": "f79e095688a4ea02",
+    "summary": "Main-thread transcription orchestrator. (1) audioBytesToWhisperPcm decodes via AudioContext + resamples to 16kHz mono via OfflineAudioContext. (2) transcribeAudio sends PCM to lazy-loaded whisper worker, receives chunks with [start, end] timestamps. (3) alignChunks tries to map Whisper word-count \u2192 cell-text word offsets; falls back to transcript offsets on length mismatch. (4) transcribeAndStoreTimings combines all that and writes to cell.audioTimings via writeCellTimings. Worker is a singleton \u2014 first call downloads ~140MB model, subsequent transcriptions are fast (~1-3s).",
+    "tags": [
+      "audio-recording",
+      "whisper",
+      "asr",
+      "transcribe",
+      "yjs"
+    ],
+    "created_at": "2026-04-26T05:19:00.788825+00:00",
+    "updated_at": "2026-04-26T05:19:00.788832+00:00",
+    "last_viewed": null,
+    "stale_views": 0
+  },
+  {
+    "id": "e479322fb33d",
+    "file": "src/lib/audio/synth-and-attach.ts",
+    "anchor": {
+      "from_text": "export async function synthAndAttachAudio",
+      "to_text": "return { audioId: result.audioId }",
+      "function_anchor": "synthAndAttachAudio",
+      "start_line": 26,
+      "end_line": 78
+    },
+    "original_content": "export async function synthAndAttachAudio(args: SynthAndAttachArgs): Promise<{ audioId: string }> {\n  const text = args.cellText.trim()\n  if (!text) throw new Error(\"Cell has no text to synthesize\")\n\n  const blob = await synthesizeToWavBlob(text, {\n    voice: args.voice,\n    speed: args.speed,\n    onProgress: args.onTtsProgress,\n  })\n\n  const audioId = buildAudioId(args.cellId)\n  const result = await uploadCellAudio({\n    session: args.session,\n    projectId: args.projectId,\n    audioId,\n    ext: \"wav\",\n    blob,\n  })\n\n  attachAudioToCell(args.doc, args.cellId, {\n    audioId: result.audioId,\n    url: result.url,\n    username: args.username,\n    mimeType: \"audio/wav\",\n  })\n\n  // Auto-transcribe so karaoke lights up immediately. Errors here are\n  // non-fatal \u2014 the audio is already attached and playable.\n  void (async () => {\n    setTranscribeStatus(result.audioId, { kind: \"loading\", loaded: 0, total: 0, file: \"\" })\n    const startedAt = Date.now()\n    try {\n      const audioBytes = new Uint8Array(await blob.arrayBuffer())\n      const out = await transcribeAndStoreTimings(args.doc, args.cellId, result.audioId, audioBytes, {\n        cellText: text,\n        onProgress: (p) => {\n          setTranscribeStatus(result.audioId, { kind: \"loading\", loaded: p.loaded, total: p.total, file: p.file })\n          if (p.status === \"ready\" || (p.total > 0 && p.loaded >= p.total)) {\n            setTranscribeStatus(result.audioId, { kind: \"transcribing\" })\n          }\n        },\n      })\n      setTranscribeStatus(result.audioId, {\n        kind: \"done\", wordCount: out.timings.length, durationMs: Date.now() - startedAt,\n      })\n    } catch (e) {\n      setTranscribeStatus(result.audioId, {\n        kind: \"error\", message: e instanceof Error ? e.message : String(e),\n      })\n    }\n  })()\n\n  return { audioId: result.audioId }",
+    "original_hash": "f234341278c77b61",
+    "summary": "End-to-end \"Generate AI voice for a cell\": Kokoro TTS \u2192 16-bit WAV blob \u2192 R2 audio worker upload \u2192 cell.attachments + selectedAudioId \u2192 background Whisper transcription for karaoke timings. Wired into CellActionsMenu's \"Generate AI voice\" action (web-only projects with non-empty translated text). Per-cell status surfaced via setTtsStatus(\"synth:\" + cellId). First call downloads ~80MB Kokoro model + ~140MB Whisper model; subsequent cells skip both downloads.",
+    "tags": [
+      "audio-recording",
+      "tts",
+      "kokoro",
+      "synth",
+      "yjs"
+    ],
+    "created_at": "2026-04-26T05:19:08.497076+00:00",
+    "updated_at": "2026-04-26T05:19:08.497083+00:00",
+    "last_viewed": null,
+    "stale_views": 0
+  },
+  {
+    "id": "0b6d540d79b5",
+    "file": "src/lib/audio/ai-consent.ts",
+    "anchor": {
+      "from_text": "export function requestAiModelConsent(",
+      "to_text": "notify()\n  })\n}",
+      "function_anchor": "requestAiModelConsent",
+      "start_line": 64,
+      "end_line": 88
+    },
+    "original_content": "export function requestAiModelConsent(model: AiModelInfo): Promise<boolean> {\n  if (hasStoredConsent(model.id)) return Promise.resolve(true)\n  if (pending) {\n    // Coalesce concurrent requests for the same model \u2014 a single dialog\n    // serves them all. Different models queue.\n    if (pending.model.id === model.id) {\n      const existing = pending\n      return new Promise<boolean>((resolve) => {\n        const prev = existing.resolve\n        existing.resolve = (granted) => { prev(granted); resolve(granted) }\n      })\n    }\n  }\n  return new Promise<boolean>((resolve) => {\n    pending = {\n      model,\n      resolve: (granted) => {\n        if (granted) storeConsent(model.id)\n        pending = null\n        notify()\n        resolve(granted)\n      },\n    }\n    notify()\n  })",
+    "original_hash": "802f59e760aef856",
+    "summary": "requestAiModelConsent: page-local consent gate for the heavy in-browser AI models (Whisper ~140MB, Kokoro ~80MB). Resolves true immediately if user previously consented (localStorage `codex.aiConsent.{whisper|kokoro}` = \"1\"). Otherwise opens a single AiModelConsentDialog at the app root via subscribe/notify. Coalesces concurrent requests for the same model into one dialog. Throws AiModelConsentDeniedError on cancel \u2014 orchestrators (transcribeAudio, synthesizeToWavBlob) propagate, and component callers swallow it back to idle (no error UI).",
+    "tags": [
+      "audio-recording",
+      "ai-consent",
+      "tts",
+      "asr",
+      "ux"
+    ],
+    "created_at": "2026-04-26T14:22:06.805406+00:00",
+    "updated_at": "2026-04-26T14:22:06.805419+00:00",
+    "last_viewed": null,
+    "stale_views": 0
+  },
+  {
+    "id": "79feff808826",
+    "file": "vite.config.ts",
+    "anchor": {
+      "from_text": "\"@huggingface/transformers\"",
+      "to_text": "\"kokoro-js\"",
+      "function_anchor": null,
+      "start_line": 80,
+      "end_line": 81
+    },
+    "original_content": "      \"@huggingface/transformers\",\n      \"kokoro-js\",",
+    "original_hash": "34d734c97a091c8d",
+    "summary": "@huggingface/transformers and kokoro-js are pre-included in optimizeDeps so Vite bundles them at server start instead of triggering a mid-flight re-optimize on first AI button click. Without these entries, the first transcription or TTS dynamic import causes Vite to re-optimize, which forces a full page reload and kills the in-progress model download (the white-screen issue from Tauri/dev). Production builds aren't affected.",
+    "tags": [
+      "vite",
+      "audio-recording",
+      "asr",
+      "tts",
+      "perf"
+    ],
+    "created_at": "2026-04-26T14:22:14.011723+00:00",
+    "updated_at": "2026-04-26T14:22:14.011731+00:00",
+    "last_viewed": "2026-04-27T04:33:04.844694+00:00",
+    "stale_views": 0
+  },
+  {
+    "id": "1c3cbe03639d",
+    "file": "src/lib/audio/prefetch.ts",
+    "anchor": {
+      "from_text": "export async function prefetchAiModels(",
+      "to_text": "await Promise.all(promises)\n}",
+      "function_anchor": "prefetchAiModels",
+      "start_line": 171,
+      "end_line": 176
+    },
+    "original_content": "export async function prefetchAiModels(opts: PrefetchOptions = {}): Promise<void> {\n  const models = opts.models ?? [\"whisper\", \"kokoro\"]\n  const promises: Promise<void>[] = []\n  if (models.includes(\"whisper\")) promises.push(warmWhisper())\n  if (models.includes(\"kokoro\")) promises.push(warmKokoro())\n  await Promise.all(promises)",
+    "original_hash": "6618535f24c75e06",
+    "summary": "prefetchAiModels: background download orchestrator. Sends \"warmup\" messages to whisper-worker and kokoro-worker (each calls its pipeline init, which fetches model weights into the browser Cache API and reports progress). Status is exposed via useModelStatus(modelId) which returns idle/downloading/ready/error. Hydrated from localStorage `codex.modelReady.{whisper|kokoro}` on app start. Driven from the onboarding checklist's \"Enable AI voice & transcription\" step (AiModelsStep); progress is also rendered in the floating AiModelDownloadChip mounted at the App root. Independent from the per-feature consent dialog \u2014 the onboarding step pre-grants consent and pre-warms models so feature buttons are instant.",
+    "tags": [
+      "audio-recording",
+      "asr",
+      "tts",
+      "prefetch",
+      "warmup",
+      "onboarding"
+    ],
+    "created_at": "2026-04-26T14:50:58.003147+00:00",
+    "updated_at": "2026-04-26T14:50:58.003158+00:00",
+    "last_viewed": null,
+    "stale_views": 0
+  },
+  {
+    "id": "3fdc4f324fdf",
+    "file": "src/lib/audio/audio-coordinator.ts",
+    "anchor": {
+      "from_text": "export interface ActiveAudioController",
+      "to_text": "return false\n}",
+      "function_anchor": null,
+      "start_line": 10,
+      "end_line": 30
+    },
+    "original_content": "export interface ActiveAudioController {\n  /** Returns true if audio is currently playing. Reads live, not a snapshot. */\n  isPlaying: () => boolean\n  play: () => Promise<void>\n  pause: () => void\n}\n\nlet current: ActiveAudioController | null = null\nconst listeners = new Set<() => void>()\n\nfunction notify() { for (const l of listeners) l() }\n\nexport function setActiveAudio(controller: ActiveAudioController): void {\n  if (current === controller) return\n  current = controller\n  notify()\n}\n\nexport function clearActiveAudioIf(controller: ActiveAudioController): void {\n  if (current === controller) {\n    current = null",
+    "original_hash": "37ddd068169ef823",
+    "summary": "Singleton \"currently active audio\" coordinator. ActiveAudioController is a small delegating shape \u2014 { isPlaying: () => bool, play, pause } \u2014 registered by useCellAudio's first play() call. Global Space shortcut (App > GlobalAudioShortcuts > useGlobalAudioShortcuts) calls togglePlayActive() to pause/resume the most-recently-played cell. isInEditableContext gates Space behavior so typing in TipTap still inserts a space. setActiveAudio dedups by reference so same-controller re-registration doesn't notify subscribers.",
+    "tags": [
+      "audio-recording",
+      "shortcuts",
+      "coordinator"
+    ],
+    "created_at": "2026-04-27T05:15:34.643190+00:00",
+    "updated_at": "2026-04-27T05:15:34.643575+00:00",
     "last_viewed": null,
     "stale_views": 0
   }

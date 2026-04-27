@@ -2,7 +2,7 @@
 // the workspace level — the modal owns the full capture flow (countdown,
 // waveform, duration bar, preview/retake/save, rapid next/prev navigation).
 
-import { Mic } from "lucide-react"
+import { Mic, MicOff } from "lucide-react"
 import { cn } from "@/lib/utils"
 import type { ProjectRecord } from "@/lib/parsers/types"
 
@@ -50,7 +50,7 @@ export function CellAudioRecordButton({ project, onOpenRecording, disabled }: Pr
           : "text-muted-foreground/50 hover:text-foreground",
       )}
     >
-      <Mic className="h-3 w-3" />
+      {blocked ? <MicOff className="h-3 w-3" /> : <Mic className="h-3 w-3" />}
     </button>
   )
 }

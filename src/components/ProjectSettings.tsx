@@ -15,6 +15,7 @@ import { listFlags } from "@/lib/features/flags"
 import { useFeatureFlag, setFeatureFlag } from "@/hooks/useFeatureFlag"
 import { ValidationSettingsSection } from "./ProjectSettings/ValidationSettingsSection"
 import { HealthSettingsSection } from "./ProjectSettings/HealthSettingsSection"
+import { AudioMediaStrategySection } from "./ProjectSettings/AudioMediaStrategySection"
 import type { HealthSettings } from "@/lib/parsers/types"
 import { readValidationCount, readValidationCountAudio } from "@/lib/progress/read-validation-count"
 
@@ -446,6 +447,11 @@ export function ProjectSettings() {
               saveField({ validationCountAudio: u.validationCountAudio })
             }
           }}
+        />
+
+        <AudioMediaStrategySection
+          value={project?.audioMediaStrategy ?? "lazy"}
+          onChange={(v) => saveField({ audioMediaStrategy: v })}
         />
 
         {project?.origin?.kind === "git" && (

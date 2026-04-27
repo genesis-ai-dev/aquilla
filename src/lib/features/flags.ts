@@ -18,7 +18,7 @@ export const FLAGS = {
     label: "Composite health scoring",
     description:
       "Replaces validation-as-override with a four-dimension composite score: Reviewed, Examples, Consistency, Rules — each a capped subtraction from 100.",
-    default: false,
+    default: true,
   },
 } as const satisfies Record<string, FlagDefinition>
 

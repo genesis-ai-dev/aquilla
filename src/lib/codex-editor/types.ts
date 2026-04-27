@@ -57,6 +57,17 @@ export interface CodexCellAttachment {
   isMissing?: boolean;
 }
 
+// Per-word timing for karaoke / forced-alignment / ASR output. Character
+// offsets refer to the cell's plain text at the time the timing was produced;
+// they may go stale if the cell is edited afterward.
+export interface WordTiming {
+  word: string;
+  t0: number;   // seconds from the start of the audio clip
+  t1: number;
+  start: number; // inclusive char offset in cell plain text
+  end: number;   // exclusive char offset
+}
+
 export interface CodexCellMetadata {
   id: string;
   type: CodexCellType;
@@ -67,6 +78,7 @@ export interface CodexCellMetadata {
   isLocked?: boolean;
   attachments?: Record<string, CodexCellAttachment>;
   selectedAudioId?: string;
+  audioTimings?: Record<string, WordTiming[]>;
 }
 
 export interface CodexCell {

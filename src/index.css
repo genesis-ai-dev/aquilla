@@ -103,3 +103,10 @@
   text-decoration-color: color-mix(in oklch, var(--muted-foreground) 60%, transparent);
   opacity: 0.6;
 }
+
+.karaoke-active {
+  background-color: color-mix(in oklch, var(--color-primary, oklch(0.65 0.2 250)) 22%, transparent);
+  border-radius: 2px;
+  box-shadow: 0 0 0 1px color-mix(in oklch, var(--color-primary, oklch(0.65 0.2 250)) 35%, transparent);
+  transition: background-color 80ms linear;
+}

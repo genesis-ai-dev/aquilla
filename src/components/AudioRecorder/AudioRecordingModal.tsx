@@ -21,6 +21,10 @@ import { AudioWaveform } from "./AudioWaveform"
 import { DurationBar } from "./DurationBar"
 import { buildAudioId, uploadCellAudio } from "@/lib/audio/upload"
 import { attachAudioToCell } from "@/lib/audio/attach"
+import { transcribeAndStoreTimings } from "@/lib/audio/transcribe"
+import { whisperLanguageFromTag } from "@/lib/audio/language"
+import { setTranscribeStatus } from "@/lib/audio/transcribe-status"
+import { AiModelConsentDeniedError } from "@/lib/audio/ai-consent"
 
 interface Props {
   open: boolean
@@ -163,6 +167,42 @@ export function AudioRecordingModal({
         username,
         mimeType: recorder.state.mimeType,
       })
+      // Fire-and-forget transcription. The modal returns to idle/saved
+      // immediately; the per-cell badge in EditorTable surfaces progress.
+      const cellId = activeCell.id
+      const savedAudioId = result.audioId
+      const cellTextSnapshot = activeCell.translated
+      const audioBytes = new Uint8Array(await blob.arrayBuffer())
+      void (async () => {
+        setTranscribeStatus(savedAudioId, { kind: "loading", loaded: 0, total: 0, file: "" })
+        const startedAt = Date.now()
+        try {
+          const out = await transcribeAndStoreTimings(doc, cellId, savedAudioId, audioBytes, {
+            cellText: cellTextSnapshot,
+            language: whisperLanguageFromTag(project.targetLanguage),
+            onProgress: (p) => {
+              setTranscribeStatus(savedAudioId, { kind: "loading", loaded: p.loaded, total: p.total, file: p.file })
+              if (p.status === "ready" || (p.total > 0 && p.loaded >= p.total)) {
+                setTranscribeStatus(savedAudioId, { kind: "transcribing" })
+              }
+            },
+          })
+          setTranscribeStatus(savedAudioId, {
+            kind: "done",
+            wordCount: out.timings.length,
+            durationMs: Date.now() - startedAt,
+          })
+        } catch (e) {
+          if (e instanceof AiModelConsentDeniedError) {
+            setTranscribeStatus(savedAudioId, { kind: "idle" })
+          } else {
+            setTranscribeStatus(savedAudioId, {
+              kind: "error",
+              message: e instanceof Error ? e.message : String(e),
+            })
+          }
+        }
+      })()
       setPhase("saved")
       // Auto-advance: settle on the new cell after a brief success indication.
       setTimeout(() => {

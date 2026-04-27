@@ -72,6 +72,13 @@ export default defineConfig({
       "@base-ui/react/input",
       "@base-ui/react/menu",
       "@base-ui/react/scroll-area",
+      // Audio AI deps imported only inside Web Workers. Without pre-inclusion
+      // the first transcription/TTS click triggers a mid-flight Vite re-
+      // optimize, which forces a full page reload (white-screen) and kills
+      // the in-progress model download. These are big — pre-bundling them
+      // up front keeps the dev server boot a few seconds slower instead.
+      "@huggingface/transformers",
+      "kokoro-js",
     ],
   },
   build: {

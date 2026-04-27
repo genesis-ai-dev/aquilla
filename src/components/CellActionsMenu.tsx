@@ -4,7 +4,7 @@
 // contextual/infrequent ones (re-record, history, regenerate backtranslation).
 
 import { useState } from "react"
-import { MoreHorizontal, Mic, History as HistoryIcon, Languages } from "lucide-react"
+import { MoreHorizontal, Mic, History as HistoryIcon, Languages, Sparkles, Wand2 } from "lucide-react"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { cn } from "@/lib/utils"
 import type { CellData } from "@/hooks/useCells"
@@ -16,15 +16,19 @@ interface Props {
   isGitProject: boolean
   isBacktranslationConfigured?: boolean
   isBacktranslating?: boolean
+  isTranscribing?: boolean
+  isSynthesizing?: boolean
   onOpenRecording?: (cellId: string) => void
   onOpenHistory?: (cellId: string) => void
   onBacktranslate?: (cell: CellData) => void
+  onTranscribe?: (cell: CellData) => void
+  onSynthesizeAudio?: (cell: CellData) => void
 }
 
 export function CellActionsMenu({
   cell, editable, hasAudio, isGitProject,
-  isBacktranslationConfigured, isBacktranslating,
-  onOpenRecording, onOpenHistory, onBacktranslate,
+  isBacktranslationConfigured, isBacktranslating, isTranscribing, isSynthesizing,
+  onOpenRecording, onOpenHistory, onBacktranslate, onTranscribe, onSynthesizeAudio,
 }: Props) {
   const [open, setOpen] = useState(false)
 
@@ -39,6 +43,26 @@ export function CellActionsMenu({
           label: "Re-record audio",
           disabled: !editable || isGitProject,
           onSelect: () => { onOpenRecording(cell.id); setOpen(false) },
+        }
+      : null,
+    hasAudio && onTranscribe
+      ? {
+          key: "transcribe",
+          icon: <Sparkles className={cn("h-3.5 w-3.5", isTranscribing && "animate-pulse")} />,
+          label: isTranscribing ? "Transcribing…" : "Transcribe with Whisper",
+          disabled: !editable || Boolean(isTranscribing),
+          onSelect: () => { onTranscribe(cell); setOpen(false) },
+        }
+      : null,
+    onSynthesizeAudio && cell.translated.trim().length > 0 && !isGitProject
+      ? {
+          key: "synth",
+          icon: <Wand2 className={cn("h-3.5 w-3.5", isSynthesizing && "animate-pulse")} />,
+          label: isSynthesizing
+            ? "Synthesizing…"
+            : hasAudio ? "Generate AI voice (replaces audio)" : "Generate AI voice",
+          disabled: !editable || Boolean(isSynthesizing),
+          onSelect: () => { onSynthesizeAudio(cell); setOpen(false) },
         }
       : null,
     onOpenHistory && cell.history.length > 0

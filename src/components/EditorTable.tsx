@@ -1,4 +1,4 @@
-import React, { useRef, useCallback, useMemo, useState, forwardRef, useImperativeHandle } from "react"
+import React, { useEffect, useRef, useCallback, useMemo, useState, forwardRef, useImperativeHandle } from "react"
 import { useVirtualizer } from "@tanstack/react-virtual"
 import * as Y from "yjs"
 import DOMPurify from "dompurify"
@@ -18,6 +18,19 @@ import { HealthBreakdown } from "./HealthBreakdown/HealthBreakdown"
 import { TranslatedEditor } from "./TranslatedEditor"
 import { CellAudioButton } from "./CellAudioButton"
 import { CellAudioRecordButton } from "./CellAudioRecordButton"
+import { CellWaveform } from "./CellWaveform"
+import { CellTranscribeBadge } from "./CellTranscribeBadge"
+import { CellTranscriptPreview } from "./CellTranscriptPreview"
+import { CellTtsButton } from "./CellTtsButton"
+import { tokenizeWords } from "@/lib/audio/timings"
+import { useCellAudio } from "@/hooks/useCellAudio"
+import { transcribeAndStoreTimings } from "@/lib/audio/transcribe"
+import { setTranscribeStatus, useTranscribeStatus } from "@/lib/audio/transcribe-status"
+import { whisperLanguageFromTag } from "@/lib/audio/language"
+import { synthAndAttachAudio } from "@/lib/audio/synth-and-attach"
+import { setTtsStatus, useTtsStatus } from "@/lib/audio/tts"
+import { AiModelConsentDeniedError } from "@/lib/audio/ai-consent"
+import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { CellActionsMenu } from "./CellActionsMenu"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { cn } from "@/lib/utils"
@@ -656,11 +669,12 @@ function EditorRow({
 
   const selectedAudio = cell.selectedAudioId ? cell.attachments?.[cell.selectedAudioId] : undefined
   const hasAudio = Boolean(selectedAudio && !selectedAudio.isDeleted)
+  const cellAudioTimings = cell.selectedAudioId ? cell.audioTimings?.[cell.selectedAudioId] : undefined
 
-  // Minimal CodexCell shape for CellAudioButton — only the metadata fields
-  // the hook actually reads (selectedAudioId, attachments). Avoids plumbing
-  // the entire CodexCell through CellData.
-  const cellForButton = {
+  // Minimal CodexCell shape for the audio hook — only the metadata fields it
+  // actually reads (selectedAudioId, attachments). Avoids plumbing the entire
+  // CodexCell through CellData.
+  const cellForAudio = useMemo(() => ({
     kind: 2 as const,
     languageId: "html",
     value: cell.translated ?? "",
@@ -670,7 +684,115 @@ function EditorRow({
       attachments: cell.attachments,
       selectedAudioId: cell.selectedAudioId,
     },
-  } as unknown as import("@/lib/codex-editor/types").CodexCell
+  } as unknown as import("@/lib/codex-editor/types").CodexCell), [
+    cell.id, cell.type, cell.translated, cell.attachments, cell.selectedAudioId,
+  ])
+  const audioController = useCellAudio(project, cellForAudio)
+
+  // When this cell starts playing, gently bring it into view if it's
+  // off-screen. Skips when the user is actively interacting with another cell
+  // (focus inside an editable element).
+  const rowRef = useRef<HTMLDivElement | null>(null)
+  const wasPlayingRef = useRef(false)
+  useEffect(() => {
+    const wasPlaying = wasPlayingRef.current
+    wasPlayingRef.current = audioController.isPlaying
+    if (!wasPlaying && audioController.isPlaying && rowRef.current) {
+      const rect = rowRef.current.getBoundingClientRect()
+      const fullyVisible = rect.top >= 0 && rect.bottom <= window.innerHeight
+      const ae = document.activeElement
+      const userIsTyping = ae instanceof HTMLElement && (
+        ae.isContentEditable || ae.tagName === "INPUT" || ae.tagName === "TEXTAREA"
+      )
+      if (!fullyVisible && !userIsTyping) {
+        rowRef.current.scrollIntoView({ behavior: "smooth", block: "center" })
+      }
+    }
+  }, [audioController.isPlaying])
+  const transcribeStatus = useTranscribeStatus(cell.selectedAudioId)
+  const isTranscribing = transcribeStatus.kind === "loading" || transcribeStatus.kind === "transcribing"
+  const transcriptPreviewRef = useRef<HTMLDivElement | null>(null)
+  const handleJumpToTranscript = useCallback(() => {
+    const el = transcriptPreviewRef.current
+    if (!el) return
+    el.scrollIntoView({ behavior: "smooth", block: "center" })
+    el.focus({ preventScroll: true })
+  }, [])
+
+  const synthStatusKey = `synth:${cell.id}`
+  const synthStatus = useTtsStatus(synthStatusKey)
+  const isSynthesizing = synthStatus.kind === "loading" || synthStatus.kind === "synthesizing"
+  const { session: frontierSession } = useFrontierSession()
+
+  const handleSynthesizeAudio = useCallback(async () => {
+    if (!frontierSession?.jwt) {
+      setTtsStatus(synthStatusKey, { kind: "error", message: "Sign in to upload audio" })
+      return
+    }
+    if (project.origin?.kind === "git") {
+      setTtsStatus(synthStatusKey, { kind: "error", message: "AI voice not supported on git projects yet" })
+      return
+    }
+    if (hasAudio) {
+      const ok = window.confirm(
+        "This cell already has a recording. Generating AI voice will replace it. Continue?",
+      )
+      if (!ok) return
+    }
+    setTtsStatus(synthStatusKey, { kind: "loading", loaded: 0, total: 0, file: "" })
+    try {
+      await synthAndAttachAudio({
+        doc, cellId: cell.id, cellText: cell.translated,
+        projectId: project.id,
+        languageTag: project.targetLanguage,
+        session: frontierSession, username,
+        onTtsProgress: (p) => {
+          setTtsStatus(synthStatusKey, { kind: "loading", loaded: p.loaded, total: p.total, file: p.file })
+          if (p.status === "ready" || (p.total > 0 && p.loaded >= p.total)) {
+            setTtsStatus(synthStatusKey, { kind: "synthesizing" })
+          }
+        },
+      })
+      setTtsStatus(synthStatusKey, { kind: "idle" })
+    } catch (e) {
+      if (e instanceof AiModelConsentDeniedError) {
+        setTtsStatus(synthStatusKey, { kind: "idle" })
+        return
+      }
+      setTtsStatus(synthStatusKey, { kind: "error", message: e instanceof Error ? e.message : String(e) })
+    }
+  }, [cell.id, cell.translated, doc, project.id, project.origin, frontierSession, username, synthStatusKey, hasAudio])
+
+  const handleTranscribe = useCallback(async () => {
+    const audioId = cell.selectedAudioId
+    if (!audioId) return
+    setTranscribeStatus(audioId, { kind: "loading", loaded: 0, total: 0, file: "" })
+    const startedAt = Date.now()
+    try {
+      const bytes = await audioController.ensureBytes()
+      const out = await transcribeAndStoreTimings(doc, cell.id, audioId, bytes, {
+        cellText: cell.translated,
+        language: whisperLanguageFromTag(project.targetLanguage),
+        onProgress: (p) => {
+          setTranscribeStatus(audioId, { kind: "loading", loaded: p.loaded, total: p.total, file: p.file })
+          if (p.status === "ready" || (p.total > 0 && p.loaded >= p.total)) {
+            setTranscribeStatus(audioId, { kind: "transcribing" })
+          }
+        },
+      })
+      setTranscribeStatus(audioId, {
+        kind: "done", wordCount: out.timings.length, durationMs: Date.now() - startedAt,
+      })
+    } catch (e) {
+      if (e instanceof AiModelConsentDeniedError) {
+        setTranscribeStatus(audioId, { kind: "idle" })
+        return
+      }
+      setTranscribeStatus(audioId, {
+        kind: "error", message: e instanceof Error ? e.message : String(e),
+      })
+    }
+  }, [cell.id, cell.selectedAudioId, cell.translated, audioController, doc, project.targetLanguage])
 
   // Build tooltip detail
   const lastEntry = cell.history[cell.history.length - 1]
@@ -818,7 +940,14 @@ function EditorRow({
   const showCellLabel = cellLabelsEnabled && cell.cellLabel
   const hasGutterMetadata = showLineNumber || showCellLabel
   return (
-    <div className={cn("group grid gap-2 border-b px-4 py-2 transition-colors", gridCols)}>
+    <div
+      ref={rowRef}
+      className={cn(
+        "group grid gap-2 border-b px-4 py-2 transition-colors",
+        audioController.isPlaying && "bg-primary/[0.04]",
+        gridCols,
+      )}
+    >
       {/* Left gutter — metadata on top, audio + creation actions below.
           flex-wrap with a max-height so if we add more icons later they flow
           into a 2nd column for short cells. */}
@@ -879,7 +1008,7 @@ function EditorRow({
               audio attachment exists on the cell; otherwise the mic invites
               recording. Re-recording lives in the right-gutter ellipsis menu. */}
           {hasAudio ? (
-            <CellAudioButton project={project} cell={cellForButton} />
+            <CellAudioButton controller={audioController} />
           ) : (
             <CellAudioRecordButton
               project={project}
@@ -887,6 +1016,16 @@ function EditorRow({
               disabled={!editable || !onOpenRecording}
             />
           )}
+          {hasAudio && (
+            <CellTranscribeBadge
+              audioId={cell.selectedAudioId}
+              hasTimings={Boolean(cellAudioTimings && cellAudioTimings.length > 0)}
+              onJumpToTranscript={handleJumpToTranscript}
+            />
+          )}
+
+          <CellTtsButton cellId={cell.id} text={cell.translated} disabled={!editable} />
+
 
           {onSeekToCue && (
             <button
@@ -956,6 +1095,9 @@ function EditorRow({
               ruleSeverity={ruleSeverity}
               waivedRuleIds={waivedRuleIds}
               onRuleClick={(ruleId) => setOpenRuleId(ruleId)}
+              audioTimings={cellAudioTimings}
+              audioCurrentTime={hasAudio ? audioController.currentTime : undefined}
+              onSeekToTime={hasAudio ? audioController.seek : undefined}
             />
           ) : (
             <div className="relative">
@@ -977,6 +1119,25 @@ function EditorRow({
             </div>
           )}
           {error && <p className="mt-0.5 text-xs text-destructive">{error}</p>}
+          {hasAudio && (
+            <CellWaveform
+              controller={audioController}
+              className="mt-1.5"
+              strategy={project.audioMediaStrategy ?? "lazy"}
+            />
+          )}
+          {hasAudio && cellAudioTimings && cellAudioTimings.length > 0 && (
+            <CellTranscriptPreview
+              ref={transcriptPreviewRef}
+              timings={cellAudioTimings}
+              cellText={cell.translated}
+              cellId={cell.id}
+              doc={doc}
+              alignedToCellText={tokenizeWords(cell.translated).length === cellAudioTimings.length}
+              editable={editable}
+              onRetranscribe={handleTranscribe}
+            />
+          )}
           {cell.backtranslation && (
             <div className="mt-1.5 rounded-md border-l-2 border-blue-400/70 bg-muted/30 px-2.5 py-1.5 text-xs italic text-muted-foreground">
               <div className="flex items-center gap-1.5 not-italic">
@@ -1077,9 +1238,13 @@ function EditorRow({
           isGitProject={project.origin?.kind === "git"}
           isBacktranslationConfigured={isBacktranslationConfigured}
           isBacktranslating={isBacktranslating}
+          isTranscribing={isTranscribing}
+          isSynthesizing={isSynthesizing}
           onOpenRecording={onOpenRecording}
           onOpenHistory={onOpenHistory}
           onBacktranslate={onBacktranslate}
+          onTranscribe={hasAudio ? handleTranscribe : undefined}
+          onSynthesizeAudio={handleSynthesizeAudio}
         />
       </div>
     </div>

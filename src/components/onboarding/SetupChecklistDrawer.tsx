@@ -6,7 +6,6 @@ import {
   SheetHeader,
   SheetTitle,
   SheetDescription,
-  SheetFooter,
 } from "@/components/ui/sheet"
 import type { ChecklistState } from "@/hooks/useSetupChecklist"
 import type { ProjectRecord } from "@/lib/parsers/types"
@@ -14,13 +13,13 @@ import { AiProviderStep } from "./checklist/AiProviderStep"
 import { AiInstructionsStep } from "./checklist/AiInstructionsStep"
 import { InviteStep } from "./checklist/InviteStep"
 import { ComingSoonStep } from "./checklist/ComingSoonStep"
+import { AiModelsStep } from "./checklist/AiModelsStep"
 
 interface SetupChecklistDrawerProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   project: ProjectRecord
   state: ChecklistState
-  onDismiss: () => void
   onProjectUpdated: (p: ProjectRecord) => void
   onSharesChanged: () => void
 }
@@ -68,7 +67,6 @@ export function SetupChecklistDrawer({
   onOpenChange,
   project,
   state,
-  onDismiss,
   onProjectUpdated,
   onSharesChanged,
 }: SetupChecklistDrawerProps) {
@@ -95,6 +93,10 @@ export function SetupChecklistDrawer({
             <InviteStep projectId={project.id} username={project.username || "anonymous"} onSharesChanged={onSharesChanged} />
           </ChecklistItem>
 
+          <ChecklistItem title="Enable AI voice & transcription" complete={state.aiModels}>
+            <AiModelsStep />
+          </ChecklistItem>
+
           <ComingSoonStep
             title="Upload project standards"
             description="Upload style guides and translation standards that AI will follow."
@@ -104,15 +106,6 @@ export function SetupChecklistDrawer({
             description="Import existing translation memories or glossaries to improve consistency."
           />
         </div>
-
-        <SheetFooter>
-          <button
-            onClick={onDismiss}
-            className="w-full text-center text-xs text-muted-foreground underline-offset-4 hover:underline"
-          >
-            Dismiss checklist
-          </button>
-        </SheetFooter>
       </SheetContent>
     </Sheet>
   )

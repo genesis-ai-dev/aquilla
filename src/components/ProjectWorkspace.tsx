@@ -46,6 +46,11 @@ import { listShares } from "@/lib/sync/share-tokens"
 import { useProjectPermissions } from "@/hooks/useProjectPermissions"
 import { useSyncProject } from "@/hooks/useSyncProject"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
+import {
+  countSynthTargets, countTranscribeTargets,
+  synthAllInFile, transcribeAllInFile,
+} from "@/lib/audio/bulk-audio"
+import { eagerlyPrefetchPeaks } from "@/lib/audio/eager-peaks"
 import { useAutoSync } from "@/hooks/useAutoSync"
 import { useCorpusBackfill } from "@/hooks/useCorpusBackfill"
 import { Film, Scale, MessagesSquare, Camera, Share2, Settings as SettingsIcon, Lock, ClipboardList, Brain, Trash2, Undo2 } from "lucide-react"
@@ -77,6 +82,7 @@ import { readValidationCount } from "@/lib/progress/read-validation-count"
 import { resolveHealthConfig } from "@/lib/health/config-resolver"
 import { useSetupChecklist } from "@/hooks/useSetupChecklist"
 import { SetupChecklistDrawer } from "./onboarding/SetupChecklistDrawer"
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { useFeatureFlag } from "@/hooks/useFeatureFlag"
 import { NextUnfinishedButton } from "./NextUnfinishedButton"
 import { useNextUnfinished } from "@/hooks/useNextUnfinished"
@@ -452,12 +458,35 @@ export function ProjectWorkspace() {
   useCorpusBackfill(project ?? null, refresh)
 
   const { state: checklistState, dismissed: checklistDismissed, dismiss: dismissChecklist, refreshShares: refreshChecklistShares } = useSetupChecklist(project ?? null)
-  const [checklistOpen, setChecklistOpen] = useState(!checklistDismissed)
+  const [checklistOpen, setChecklistOpen] = useState(false)
+  const [showChipTooltip, setShowChipTooltip] = useState(false)
+  const autoOpenHandledRef = useRef<string | null>(null)
   const livingMemoryEnabled = useFeatureFlag("living-memory-view", project)
 
+  // Auto-open the drawer at most once per (mount, project) — and only when the
+  // user has never dismissed it. Subsequent navigations to a dismissed project
+  // leave it closed; the chip in the header is the re-entry point.
   useEffect(() => {
-    if (!checklistDismissed) setChecklistOpen(true)
-  }, [checklistDismissed])
+    if (!project) return
+    if (autoOpenHandledRef.current === project.id) return
+    autoOpenHandledRef.current = project.id
+    if (!project.setupChecklistDismissed) setChecklistOpen(true)
+  }, [project])
+
+  const handleChecklistOpenChange = useCallback((next: boolean) => {
+    setChecklistOpen(next)
+    if (next || checklistDismissed) return
+    // First close — persist the dismissal so we don't reopen on next nav,
+    // and surface a one-time hint pointing at the chip.
+    void dismissChecklist()
+    let alreadyShown = false
+    try { alreadyShown = localStorage.getItem("codex.checklistTooltipShown") === "1" } catch { /* ignore */ }
+    if (!alreadyShown) {
+      try { localStorage.setItem("codex.checklistTooltipShown", "1") } catch { /* ignore */ }
+      setShowChipTooltip(true)
+      window.setTimeout(() => setShowChipTooltip(false), 6000)
+    }
+  }, [checklistDismissed, dismissChecklist])
 
   const handleProjectUpdated = useCallback(async (_updated: ProjectRecord | undefined) => {
     // The caller (useSaveCompletionSettings, SyncButton, etc.) already
@@ -574,11 +603,32 @@ export function ProjectWorkspace() {
     return items
   }, [projectId, navigate, openCommentCount, livingMemoryEnabled])
 
+  const audioCounts = useMemo(() => ({
+    untranscribed: countTranscribeTargets(cells),
+    unsynthesized: countSynthTargets(cells, false),
+  }), [cells])
+
+  // Eager media strategy: prefetch every recording's waveform peaks into the
+  // OPFS cache once the file is open, so even cells the user hasn't scrolled
+  // to yet will have an instant waveform.
+  useEffect(() => {
+    if (project?.audioMediaStrategy !== "eager") return
+    if (!frontierSession?.jwt) return
+    if (cells.length === 0) return
+    let cancelled = false
+    void eagerlyPrefetchPeaks({
+      cells, project, session: frontierSession, bins: 320,
+      isCancelled: () => cancelled,
+    })
+    return () => { cancelled = true }
+  }, [project, cells, frontierSession])
+
   const actionCtx = useMemo(() => ({
     project: project!,
     activeFileId,
     fileProgress,
-  }), [project, activeFileId, fileProgress])
+    audioCounts,
+  }), [project, activeFileId, fileProgress, audioCounts])
 
   async function handleExport() {
     if (!activeFileId) return
@@ -601,8 +651,19 @@ export function ProjectWorkspace() {
       console.info("agent-input triggered (placeholder runner)")
     },
     runImportWip: () => setImportOpen(true),
+    runTranscribeAll: () => {
+      if (!doc || !project || !frontierSession) return
+      void transcribeAllInFile({ doc, cells, project, session: frontierSession })
+    },
+    runSynthAll: () => {
+      if (!doc || !project || !frontierSession) return
+      void synthAllInFile({
+        doc, cells, project, session: frontierSession,
+        username: project.username || "anonymous",
+      })
+    },
     navigate,
-  }), [activeFileId, completeBatch, cells, navigate])
+  }), [activeFileId, completeBatch, cells, doc, project, frontierSession, navigate])
 
   if (status === "loading") return <div className="p-8 text-muted-foreground">Loading...</div>
   if (status === "no-session") {
@@ -703,15 +764,26 @@ export function ProjectWorkspace() {
                 <Film className="h-4 w-4" />
               </button>
             )}
-            {!checklistDismissed && checklistState.totalCount > 0 && checklistState.completedCount < checklistState.totalCount && (
-              <button
-                onClick={() => setChecklistOpen(true)}
-                className="flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-medium text-muted-foreground hover:bg-accent"
-                title="Open setup checklist"
-              >
-                <ClipboardList className="h-3 w-3" />
-                Setup: {checklistState.completedCount}/{checklistState.totalCount}
-              </button>
+            {checklistState.totalCount > 0 && checklistState.completedCount < checklistState.totalCount && (
+              <TooltipProvider delay={0}>
+                <Tooltip open={showChipTooltip} onOpenChange={setShowChipTooltip}>
+                  <TooltipTrigger
+                    render={
+                      <button
+                        onClick={() => { setShowChipTooltip(false); setChecklistOpen(true) }}
+                        className="flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-medium text-muted-foreground hover:bg-accent"
+                        title="Open setup checklist"
+                      />
+                    }
+                  >
+                    <ClipboardList className="h-3 w-3" />
+                    Setup: {checklistState.completedCount}/{checklistState.totalCount}
+                  </TooltipTrigger>
+                  <TooltipContent side="bottom">
+                    Reopen the setup checklist anytime from here.
+                  </TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
             )}
             <NextUnfinishedButton
               onClick={handleJumpNextUnfinished}
@@ -854,11 +926,10 @@ export function ProjectWorkspace() {
       />
       {project && (
         <SetupChecklistDrawer
-          open={checklistOpen && !checklistDismissed}
-          onOpenChange={setChecklistOpen}
+          open={checklistOpen}
+          onOpenChange={handleChecklistOpenChange}
           project={project}
           state={checklistState}
-          onDismiss={() => { dismissChecklist(); setChecklistOpen(false) }}
           onProjectUpdated={handleProjectUpdated}
           onSharesChanged={refreshChecklistShares}
         />

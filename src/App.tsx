@@ -11,6 +11,18 @@ import { JoinPage } from "@/components/JoinPage"
 import { OnboardingWizard } from "@/components/onboarding/OnboardingWizard"
 import { OrgSettings } from "@/pages/OrgSettings"
 import { SyncingProvider, useSyncing } from "@/context/SyncingContext"
+import { AiModelConsentDialog } from "@/components/AiModelConsentDialog"
+import { AiModelDownloadChip } from "@/components/AiModelDownloadChip"
+import { AudioBulkProgressBanner } from "@/components/AudioBulkProgressBanner"
+import { hydratePrefetchStatus } from "@/lib/audio/prefetch"
+import { useGlobalAudioShortcuts } from "@/hooks/useGlobalAudioShortcuts"
+
+void hydratePrefetchStatus()
+
+function GlobalAudioShortcuts() {
+  useGlobalAudioShortcuts()
+  return null
+}
 
 function SyncFreezeOverlay() {
   const { syncing } = useSyncing()
@@ -27,6 +39,10 @@ export default function App() {
     <SyncingProvider>
       <SyncFreezeOverlay />
       <AppRoutes />
+      <AiModelConsentDialog />
+      <AiModelDownloadChip />
+      <AudioBulkProgressBanner />
+      <GlobalAudioShortcuts />
     </SyncingProvider>
   )
 }

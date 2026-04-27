@@ -1,27 +1,19 @@
 // src/components/CellAudioButton.tsx
-// Compact ▶/⏸ button rendered in the cell row when selectedAudioId is set
-// and the attachment isn't marked deleted.
+// Compact ▶/⏸ button. The audio controller is owned by the parent EditorRow
+// so the button and the waveform stay in lock-step on play / pause / seek.
 
-import { AlertCircle, Loader2, Pause, Play } from "lucide-react"
+import { AlertCircle, CloudOff, FileQuestion, Loader2, Pause, Play } from "lucide-react"
 import { cn } from "@/lib/utils"
-import { useCellAudio } from "@/hooks/useCellAudio"
-import type { CodexCell } from "@/lib/codex-editor/types"
-import type { ProjectRecord } from "@/lib/parsers/types"
+import type { UseCellAudioResult } from "@/hooks/useCellAudio"
 
 interface Props {
-  project: ProjectRecord
-  cell: CodexCell
+  controller: UseCellAudioResult
+  hidden?: boolean
 }
 
-export function CellAudioButton({ project, cell }: Props) {
-  const selectedAudioId = cell.metadata?.selectedAudioId
-  const attachment = selectedAudioId
-    ? cell.metadata?.attachments?.[selectedAudioId]
-    : undefined
-
-  if (!attachment || attachment.isDeleted === true) return null
-
-  const { state, error, isPlaying, play, pause } = useCellAudio(project, cell)
+export function CellAudioButton({ controller, hidden }: Props) {
+  if (hidden) return null
+  const { state, error, isPlaying, play, pause } = controller
 
   const onClick = () => {
     if (state === "loading") return
@@ -52,13 +44,27 @@ export function CellAudioButton({ project, cell }: Props) {
       )}
     >
       {state === "loading" && <Loader2 className="h-3 w-3 animate-spin" />}
-      {state === "error" && <AlertCircle className="h-3 w-3" />}
+      {state === "error" && errorIcon(error?.kind)}
       {state !== "loading" && state !== "error" && (isPlaying
         ? <Pause className="h-3 w-3" />
         : <Play className="h-3 w-3" />
       )}
     </button>
   )
+}
+
+function errorIcon(kind: string | undefined) {
+  switch (kind) {
+    case "pointer-missing":
+    case "pointer-invalid":
+      return <FileQuestion className="h-3 w-3" />
+    case "no-session":
+    case "no-git-origin":
+    case "batch-failed":
+      return <CloudOff className="h-3 w-3" />
+    default:
+      return <AlertCircle className="h-3 w-3" />
+  }
 }
 
 function errorTooltip(kind: string): string {

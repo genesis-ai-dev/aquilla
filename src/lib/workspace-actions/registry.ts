@@ -1,4 +1,4 @@
-import { Plus, Sparkles, Download, CheckSquare, Bot, Upload } from "lucide-react"
+import { Plus, Sparkles, Download, CheckSquare, Bot, Upload, Mic, Wand2 } from "lucide-react"
 import type {
   WorkspaceAction, WorkspaceActionContext,
 } from "./types"
@@ -73,5 +73,31 @@ export const workspaceActions: WorkspaceAction[] = [
     id: "import-wip", label: "Import work in progress", icon: Upload, group: "secondary",
     isAvailable: () => true,
     run: (_c, args) => args.runImportWip(),
+  },
+  {
+    id: "transcribe-all", label: "Transcribe all audio", icon: Mic, group: "secondary",
+    isAvailable: (c) => c.activeFileId != null && (c.audioCounts?.untranscribed ?? 0) > 0,
+    requiresConfirmation: {
+      title: "Transcribe all audio in this file",
+      description: (c) => {
+        const n = c.audioCounts?.untranscribed ?? 0
+        return `Run Whisper on ${n} cell${n === 1 ? "" : "s"} that already have a recording but no karaoke timings yet.`
+      },
+      confirmLabel: "Transcribe all",
+    },
+    run: (_c, args) => args.runTranscribeAll(),
+  },
+  {
+    id: "synth-all", label: "Generate AI voice for empty cells", icon: Wand2, group: "secondary",
+    isAvailable: (c) => c.activeFileId != null && (c.audioCounts?.unsynthesized ?? 0) > 0,
+    requiresConfirmation: {
+      title: "Generate AI voice",
+      description: (c) => {
+        const n = c.audioCounts?.unsynthesized ?? 0
+        return `Synthesize Kokoro audio for ${n} cell${n === 1 ? "" : "s"} that have translated text but no recording yet. Existing recordings are not touched.`
+      },
+      confirmLabel: "Generate audio",
+    },
+    run: (_c, args) => args.runSynthAll(),
   },
 ]

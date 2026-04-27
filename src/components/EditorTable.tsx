@@ -146,6 +146,7 @@ interface EditorTableProps {
   doc: Y.Doc
   username: string
   isCompletionConfigured: boolean
+  isCompletionAvailable: boolean
   completing: Map<string, string>
   examples: Map<string, ScoredPair[]>
   errors: Map<string, string>
@@ -181,7 +182,7 @@ interface EditorTableProps {
 }
 
 export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(function EditorTable({
-  project, cells, doc, username, isCompletionConfigured,
+  project, cells, doc, username, isCompletionConfigured, isCompletionAvailable,
   completing, examples, errors,
   onCompleteSingle, onCompleteBatch, healthMap,
   infractions = new Map(), rules = [], onInfractionClick,
@@ -243,10 +244,10 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
 
   return (
     <div ref={parentRef} className="h-full overflow-auto" onMouseUp={handleMouseUp}>
-      <div className={cn("sticky top-0 z-10 grid gap-2 border-b bg-background px-4 py-2 text-sm font-medium text-muted-foreground", gridCols)}>
+      <div className={cn("sticky top-0 z-10 grid gap-2 border-b bg-background px-4 py-2 text-xs font-medium uppercase tracking-wide text-muted-foreground", gridCols)}>
         <div />
         <div>Source</div>
-        <div>Target</div>
+        <div className="border-l border-border/60 pl-3">Target</div>
         <div />
       </div>
 
@@ -279,6 +280,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
                 username={username}
                 editable={canEdit}
                 isCompletionConfigured={isCompletionConfigured}
+                isCompletionAvailable={isCompletionAvailable}
                 examples={examples}
                 completing={completing}
                 errors={errors}
@@ -339,6 +341,7 @@ interface MemoizedRowProps {
   username: string
   editable: boolean
   isCompletionConfigured: boolean
+  isCompletionAvailable: boolean
   examples: Map<string, ScoredPair[]>
   completing: Map<string, string>
   errors: Map<string, string>
@@ -379,7 +382,7 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
     backtranslating, backtranslationErrors, cellOpenCommentCount, breakdownMap,
     activeCueIndex, rowIndex, gridCols,
     onDragStart: onDragStartParent, onDragEnter: onDragEnterParent,
-    project, doc, username, editable, isCompletionConfigured,
+    project, doc, username, editable, isCompletionConfigured, isCompletionAvailable,
     ruleMap, onCompleteSingle, onInfractionClick,
     isBacktranslationConfigured, onBacktranslate,
     onOpenComments, onOpenHistory, syncProvider, collabUser,
@@ -433,6 +436,7 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
         username={username}
         editable={editable}
         isCompletionConfigured={isCompletionConfigured}
+        isCompletionAvailable={isCompletionAvailable}
         isLoading={isLoading}
         cellExamples={cellExamples}
         highlights={highlights}
@@ -479,6 +483,7 @@ interface EditorRowProps {
   username: string
   editable: boolean
   isCompletionConfigured: boolean
+  isCompletionAvailable: boolean
   isLoading: boolean
   cellExamples: ScoredPair[]
   highlights: ReturnType<typeof buildHighlightsFromExamples>
@@ -516,7 +521,7 @@ interface EditorRowProps {
 }
 
 function EditorRow({
-  project, cell, doc, username, editable, isCompletionConfigured, isLoading,
+  project, cell, doc, username, editable, isCompletionConfigured, isCompletionAvailable, isLoading,
   cellExamples, highlights, error, health,
   cellInfractions, waivedInfractions, ruleMap,
   onCompleteSingle, onInfractionClick,
@@ -981,7 +986,7 @@ function EditorRow({
           )}
         >
           <SparkleButton
-            disabled={!isCompletionConfigured || !editable || isAnonymous}
+            disabled={!isCompletionConfigured || !isCompletionAvailable || !editable || isAnonymous}
             loading={isLoading}
             onComplete={() => onCompleteSingle(cell)}
             onDragStart={onDragStart}
@@ -996,9 +1001,11 @@ function EditorRow({
                 ? "Sign in for AI translations"
                 : !editable
                   ? "Read-only (imported from git)"
-                  : isCompletionConfigured
-                    ? "Generate translation"
-                    : "Set up AI to enable"
+                  : !isCompletionConfigured
+                    ? "Set up AI to enable"
+                    : !isCompletionAvailable
+                      ? "AI service unavailable — try again shortly"
+                      : "Generate translation"
             }
           />
 
@@ -1041,7 +1048,7 @@ function EditorRow({
       </div>
 
       {/* Source column */}
-      <div dir={sourceTextDirection}>
+      <div className="flex flex-col" dir={sourceTextDirection}>
         <div className="mb-1 flex items-center gap-1 text-xs text-muted-foreground" dir="ltr">
           <span>{cell.context}</span>
           {showFormattingLossWarning && (
@@ -1081,28 +1088,30 @@ function EditorRow({
       </div>
 
       {/* Target column — actions live in the left gutter, so no right-side rail. */}
-      <div dir={targetTextDirection}>
-        <div>
+      <div className="flex flex-col border-l border-border/50 pl-3" dir={targetTextDirection}>
+        <div className="flex flex-1 flex-col">
           {cell.translatedXml ? (
-            <TranslatedEditor
-              fragment={cell.translatedXml}
-              className="w-full"
-              syncProvider={syncProvider}
-              user={collabUser}
-              onBlur={handleEditorBlur}
-              editable={editable}
-              infractions={[...cellInfractions, ...waivedInfractions]}
-              ruleSeverity={ruleSeverity}
-              waivedRuleIds={waivedRuleIds}
-              onRuleClick={(ruleId) => setOpenRuleId(ruleId)}
-              audioTimings={cellAudioTimings}
-              audioCurrentTime={hasAudio ? audioController.currentTime : undefined}
-              onSeekToTime={hasAudio ? audioController.seek : undefined}
-            />
+            <div className="flex min-h-[40px] flex-1 flex-col">
+              <TranslatedEditor
+                fragment={cell.translatedXml}
+                className="w-full"
+                syncProvider={syncProvider}
+                user={collabUser}
+                onBlur={handleEditorBlur}
+                editable={editable}
+                infractions={[...cellInfractions, ...waivedInfractions]}
+                ruleSeverity={ruleSeverity}
+                waivedRuleIds={waivedRuleIds}
+                onRuleClick={(ruleId) => setOpenRuleId(ruleId)}
+                audioTimings={cellAudioTimings}
+                audioCurrentTime={hasAudio ? audioController.currentTime : undefined}
+                onSeekToTime={hasAudio ? audioController.seek : undefined}
+              />
+            </div>
           ) : (
-            <div className="relative">
+            <div className="relative flex min-h-[40px] flex-1 flex-col">
               <textarea
-                className="w-full resize-none rounded border bg-background px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-ring disabled:cursor-not-allowed disabled:opacity-70"
+                className="w-full flex-1 resize-none rounded-sm bg-transparent px-2 py-1 text-sm leading-relaxed transition-colors hover:bg-muted/40 focus:bg-muted/30 focus:outline-none disabled:cursor-not-allowed disabled:opacity-70"
                 value={cell.translated}
                 onChange={handleChange}
                 readOnly={!editable}

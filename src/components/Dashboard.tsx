@@ -17,6 +17,7 @@ import { HeaderAuth } from "@/components/git-import/HeaderAuth"
 import { RemoteProjectsSection } from "@/components/git-import/RemoteProjectsSection"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { useBrand } from "@/branding/use-brand"
+import { ThemeToggle } from "@/branding/ThemeMode"
 import {
   fetchAccessibleProjects,
   minimalProjectRecord,
@@ -158,6 +159,7 @@ export function Dashboard() {
             >
               Organization
             </Link>
+            <ThemeToggle />
             <HeaderAuth />
             <ProjectCreateDialog onCreated={upsert} />
           </div>

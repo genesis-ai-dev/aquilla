@@ -1,5 +1,6 @@
 import type { ReactNode } from "react"
 import type { ProjectRecord } from "@/lib/parsers/types"
+import { ThemeToggle } from "@/branding/ThemeMode"
 
 interface Props {
   project: ProjectRecord
@@ -27,6 +28,7 @@ export function WorkspaceHeader({ project, onBack, children }: Props) {
       <div className="flex-1" />
       <div className="flex items-center gap-1 shrink-0">
         {children}
+        <ThemeToggle />
       </div>
     </header>
   )

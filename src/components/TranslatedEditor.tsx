@@ -80,9 +80,9 @@ export function TranslatedEditor({ fragment, onBlur, placeholder, className, syn
     editorProps: {
       attributes: {
         class: cn(
-          "prose prose-sm max-w-none min-h-[40px] px-2 py-1 text-sm focus:outline-none",
-          "border rounded bg-background",
-          "focus:ring-1 focus:ring-ring",
+          "prose prose-sm max-w-none h-full min-h-[40px] px-2 py-1 text-sm leading-relaxed focus:outline-none",
+          "rounded-sm transition-colors",
+          "hover:bg-muted/40 focus:bg-muted/30",
           className
         ),
       },
@@ -142,11 +142,11 @@ export function TranslatedEditor({ fragment, onBlur, placeholder, className, syn
   }, [editor, audioTimings, audioCurrentTime])
 
   if (!editor) {
-    return <div className={cn("min-h-[40px] px-2 py-1 text-sm border rounded bg-background", className)}>{placeholder}</div>
+    return <div className={cn("min-h-[40px] px-2 py-1 text-sm text-muted-foreground", className)}>{placeholder}</div>
   }
 
   return (
-    <div className="relative">
+    <div className="relative h-full">
       <BubbleMenu
         editor={editor}
         shouldShow={({ editor, from, to }) => {
@@ -216,6 +216,7 @@ export function TranslatedEditor({ fragment, onBlur, placeholder, className, syn
         </div>
       </BubbleMenu>
       <div
+        className="h-full"
         onClick={(e) => {
           if (!onRuleClick) return
           const target = e.target as HTMLElement
@@ -225,7 +226,7 @@ export function TranslatedEditor({ fragment, onBlur, placeholder, className, syn
           }
         }}
       >
-        <EditorContent editor={editor} />
+        <EditorContent editor={editor} className="h-full [&>.ProseMirror]:h-full" />
       </div>
     </div>
   )

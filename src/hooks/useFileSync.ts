@@ -10,6 +10,7 @@ import {
   type FileSyncProviderHandle,
 } from "@/lib/sync/partyserver-provider"
 import { peerColor } from "@/lib/sync/signaling-provider"
+import { displayNameFor } from "@/lib/sync/anonymous-name"
 import { makeSyncTokenFetcher } from "@/lib/sync/sync-token"
 import { patchProject } from "@/lib/store/project-index"
 import type { PeerState } from "@/hooks/useSync"
@@ -93,10 +94,11 @@ export function useFileSync(options: UseFileSyncOptions): {
     const { provider } = handle
     setProviderState(provider)
 
+    const selfClientId = String(provider.awareness.clientID)
     const selfState: PeerState = {
-      peerId: String(provider.awareness.clientID),
-      username,
-      color: peerColor(String(provider.awareness.clientID)),
+      peerId: selfClientId,
+      username: displayNameFor(username, selfClientId),
+      color: peerColor(selfClientId),
       currentFileId: fileId,
     }
     provider.awareness.setLocalState(selfState)
@@ -106,10 +108,11 @@ export function useFileSync(options: UseFileSyncOptions): {
       provider.awareness.getStates().forEach((state, clientId) => {
         if (clientId === provider.awareness.clientID) return
         if (!state) return
+        const peerClientId = String(clientId)
         states.push({
-          peerId: String(clientId),
-          username: String(state.username || "anonymous"),
-          color: (state.color as string) || peerColor(String(clientId)),
+          peerId: peerClientId,
+          username: displayNameFor(state.username as string | undefined, peerClientId),
+          color: (state.color as string) || peerColor(peerClientId),
           currentFileId: state.currentFileId as string | undefined,
         })
       })
@@ -143,9 +146,10 @@ export function useFileSync(options: UseFileSyncOptions): {
     if (!handle) return
     const { provider } = handle
     const current = provider.awareness.getLocalState() || {}
+    const selfClientId = String(provider.awareness.clientID)
     provider.awareness.setLocalState({
       ...current,
-      username,
+      username: displayNameFor(username, selfClientId),
       currentFileId: fileId,
     })
     // eslint-disable-next-line react-hooks/exhaustive-deps

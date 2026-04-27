@@ -2,6 +2,7 @@ import { useEffect, useState, useMemo } from "react"
 import * as Y from "yjs"
 import type { WebsocketProvider } from "y-websocket"
 import { createSyncProvider, destroySyncProvider, peerColor, type SyncProviderHandle } from "@/lib/sync/signaling-provider"
+import { displayNameFor } from "@/lib/sync/anonymous-name"
 
 export interface PeerState {
   peerId: string  // ephemeral client ID from y-webrtc awareness
@@ -43,11 +44,13 @@ export function useSync(options: UseSyncOptions): {
     const { provider } = handle
     setProviderState(provider)
 
-    // Publish our own awareness state
+    // Publish our own awareness state. Unauthenticated peers get a stable
+    // friendly name derived from their clientID instead of a placeholder.
+    const selfClientId = String(provider.awareness.clientID)
     const selfState: PeerState = {
-      peerId: String(provider.awareness.clientID),
-      username,
-      color: peerColor(String(provider.awareness.clientID)),
+      peerId: selfClientId,
+      username: displayNameFor(username, selfClientId),
+      color: peerColor(selfClientId),
       currentFileId,
     }
     provider.awareness.setLocalState(selfState)
@@ -57,10 +60,11 @@ export function useSync(options: UseSyncOptions): {
       provider.awareness.getStates().forEach((state, clientId) => {
         if (clientId === provider.awareness.clientID) return  // skip self
         if (!state) return
+        const peerClientId = String(clientId)
         states.push({
-          peerId: String(clientId),
-          username: String(state.username || "anonymous"),
-          color: state.color as string || peerColor(String(clientId)),
+          peerId: peerClientId,
+          username: displayNameFor(state.username as string | undefined, peerClientId),
+          color: state.color as string || peerColor(peerClientId),
           currentFileId: state.currentFileId as string | undefined,
         })
       })
@@ -96,9 +100,10 @@ export function useSync(options: UseSyncOptions): {
     if (!handle) return
     const { provider } = handle
     const current = provider.awareness.getLocalState() || {}
+    const selfClientId = String(provider.awareness.clientID)
     provider.awareness.setLocalState({
       ...current,
-      username,
+      username: displayNameFor(username, selfClientId),
       currentFileId,
     })
     // eslint-disable-next-line react-hooks/exhaustive-deps

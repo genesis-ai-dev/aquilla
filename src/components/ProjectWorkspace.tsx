@@ -14,6 +14,7 @@ import { useHealth } from "@/hooks/useHealth"
 import { useRules } from "@/hooks/useRules"
 import { updateProject, patchProject, getProject } from "@/lib/store/project-index"
 import { exportFile, downloadBlob } from "@/lib/export/export-service"
+import { MAX_BATCH_COMPLETIONS } from "@/lib/workspace-actions/registry"
 import type { FileReference, CellHealthBreakdown } from "@/lib/parsers/types"
 import type { CellData } from "@/hooks/useCells"
 import { useWorkspaceSearch } from "@/hooks/useWorkspaceSearch"
@@ -653,7 +654,12 @@ export function ProjectWorkspace() {
 
   const actionArgs = useMemo(() => ({
     openImport: () => setImportOpen(true),
-    runCompletions: () => { if (activeFileId) completeBatch(cells) },
+    runCompletions: () => {
+      if (!activeFileId) return
+      const untranslated = cells.filter((c) => !c.translated.trim())
+      if (untranslated.length === 0) return
+      completeBatch(untranslated.slice(0, MAX_BATCH_COMPLETIONS))
+    },
     runExport: () => handleExport(),
     runBatchValidate: () => {
       console.info("batch-validate triggered (placeholder runner)")

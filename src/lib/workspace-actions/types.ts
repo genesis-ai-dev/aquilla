@@ -45,5 +45,6 @@ export interface WorkspaceAction {
     description: (ctx: WorkspaceActionContext) => string
     confirmLabel: string
   }
+  comingSoon?: boolean
   run: (ctx: WorkspaceActionContext, args: WorkspaceActionRunArgs) => void
 }

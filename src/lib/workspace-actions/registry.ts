@@ -3,6 +3,11 @@ import type {
   WorkspaceAction, WorkspaceActionContext,
 } from "./types"
 
+// Hard cap on cells generated per "Run completions" click. Bump (or remove,
+// once we have spend controls) when we're confident a stray click can't burn
+// through the LLM budget for a 100k-row file.
+export const MAX_BATCH_COMPLETIONS = 10
+
 export function getVisibleActions(
   actions: WorkspaceAction[], ctx: WorkspaceActionContext,
 ): WorkspaceAction[] {
@@ -13,8 +18,9 @@ export function getDefaultAction(
   actions: WorkspaceAction[], ctx: WorkspaceActionContext,
 ): WorkspaceAction {
   const visible = getVisibleActions(actions, ctx)
-  const match = visible.find((a) => a.isDefault?.(ctx))
-  return match ?? visible[0] ?? actions[0]
+  const selectable = visible.filter((a) => !a.comingSoon)
+  const match = selectable.find((a) => a.isDefault?.(ctx))
+  return match ?? selectable[0] ?? visible[0] ?? actions[0]
 }
 
 export const workspaceActions: WorkspaceAction[] = [
@@ -32,7 +38,24 @@ export const workspaceActions: WorkspaceAction[] = [
       const p = c.fileProgress.get(c.activeFileId)
       return !!p && p.total > 0 && p.translated < p.total
     },
+    requiresConfirmation: {
+      title: "Run completions",
+      description: (c) => {
+        if (!c.activeFileId) return ""
+        const p = c.fileProgress.get(c.activeFileId)
+        const untranslated = p ? p.total - p.translated : 0
+        const next = Math.min(MAX_BATCH_COMPLETIONS, untranslated)
+        return `Generate translations for the next ${next} of ${untranslated} untranslated cell${untranslated === 1 ? "" : "s"}. Capped at ${MAX_BATCH_COMPLETIONS} per click while we work on spend controls — re-run to continue.`
+      },
+      confirmLabel: "Run completions",
+    },
     run: (_c, args) => args.runCompletions(),
+  },
+  {
+    id: "complete-all", label: "Complete all (coming soon)", icon: Sparkles, group: "primary",
+    isAvailable: (c) => c.activeFileId != null,
+    comingSoon: true,
+    run: () => {},
   },
   {
     id: "batch-validate", label: "Batch validate…", icon: CheckSquare, group: "primary",

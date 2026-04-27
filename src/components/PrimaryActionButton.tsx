@@ -35,6 +35,7 @@ export function PrimaryActionButton({ ctx, run }: Props) {
   }, [open])
 
   function handleRun(action: WorkspaceAction) {
+    if (action.comingSoon) return
     setOpen(false)
     if (action.requiresConfirmation) {
       setPendingConfirm(action)
@@ -102,13 +103,17 @@ function MenuItem({
   isDefault?: boolean
   onClick: () => void
 }) {
+  const disabled = action.comingSoon
   return (
     <button
       className={cn(
         "flex w-full items-center gap-2 rounded px-2 py-1.5 text-sm text-left hover:bg-accent",
         isDefault && "font-medium",
+        disabled && "cursor-not-allowed opacity-50 hover:bg-transparent",
       )}
       onClick={onClick}
+      disabled={disabled}
+      aria-disabled={disabled}
     >
       {action.icon && <action.icon className="h-4 w-4" />}
       <span>{action.label}</span>

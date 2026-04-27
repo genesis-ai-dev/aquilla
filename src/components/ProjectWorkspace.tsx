@@ -43,6 +43,7 @@ import { useProjectTombstoneObserver } from "@/hooks/useProjectTombstoneObserver
 import { useFileMeta } from "@/hooks/useFileMeta"
 import { useCellLabelsPreference } from "@/hooks/useCellLabelsPreference"
 import { peerColor as peerColorLocal } from "@/lib/sync/signaling-provider"
+import { displayNameFor } from "@/lib/sync/anonymous-name"
 import { startBootstrapHost } from "@/lib/sync/bootstrap"
 import { listShares } from "@/lib/sync/share-tokens"
 import { useProjectPermissions } from "@/hooks/useProjectPermissions"
@@ -441,10 +442,10 @@ export function ProjectWorkspace() {
     if (!syncProvider) return undefined
     const clientId = String(syncProvider.awareness.clientID)
     return {
-      name: currentUsername,
+      name: displayNameFor(currentUsername, clientId),
       color: peerColorLocal(clientId),
     }
-  }, [syncProvider, project?.username])
+  }, [syncProvider, currentUsername])
 
   async function handleSearchSelect(result: WorkspaceSearchResult) {
     if (result.fileId !== activeFileId) {

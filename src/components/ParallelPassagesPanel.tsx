@@ -79,6 +79,7 @@ export function ParallelPassagesPanel({
   const [activeIndex, setActiveIndex] = useState(0)
   const [pending, setPending] = useState<PendingReplace | null>(null)
   const [lastReport, setLastReport] = useState<string | null>(null)
+  const [lastSearchedQuery, setLastSearchedQuery] = useState<string | null>(null)
   const findRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
@@ -86,20 +87,28 @@ export function ParallelPassagesPanel({
     setActiveIndex(0)
     setPending(null)
     setLastReport(null)
+    setLastSearchedQuery(null)
     onReady()
     setTimeout(() => findRef.current?.focus(), 50)
   }, [open, onReady])
 
   const effectiveFileId = scope === "file" ? activeFileId : undefined
 
+  const triggerSearch = useCallback(() => {
+    const cleaned = query.trim()
+    if (!cleaned || !ready) return
+    onSearch(query, { fileId: effectiveFileId ?? undefined })
+    setLastSearchedQuery(query)
+  }, [query, ready, onSearch, effectiveFileId])
+
+  // Re-run when scope changes only if the user has already searched at least
+  // once — avoids surprising the user with auto-runs the first time around.
   useEffect(() => {
-    if (!open) return
-    const timer = setTimeout(
-      () => onSearch(query, { fileId: effectiveFileId ?? undefined }),
-      100,
-    )
-    return () => clearTimeout(timer)
-  }, [query, onSearch, ready, effectiveFileId, open])
+    if (lastSearchedQuery === null) return
+    onSearch(lastSearchedQuery, { fileId: effectiveFileId ?? undefined })
+  }, [effectiveFileId, lastSearchedQuery, onSearch])
+
+  const isStale = query.trim().length > 0 && query !== lastSearchedQuery
 
   useEffect(() => {
     setActiveIndex(0)
@@ -176,6 +185,10 @@ export function ParallelPassagesPanel({
       setActiveIndex((i) => Math.max(0, i - 1))
     } else if (e.key === "Enter") {
       e.preventDefault()
+      if (isStale) {
+        triggerSearch()
+        return
+      }
       const r = results[activeIndex]
       if (r) {
         onSelect(r)
@@ -236,6 +249,16 @@ export function ParallelPassagesPanel({
               disabled={loading}
               className="border-0 bg-transparent shadow-none focus-visible:ring-0"
             />
+            <Button
+              size="sm"
+              variant={isStale ? "default" : "secondary"}
+              onClick={triggerSearch}
+              disabled={loading || !ready || !query.trim()}
+              className="h-7"
+            >
+              <SearchIcon className="h-3.5 w-3.5" />
+              Search
+            </Button>
           </div>
           {mode === "replace" && (
             <div className="flex items-center gap-2">
@@ -297,8 +320,10 @@ export function ParallelPassagesPanel({
         <div className="max-h-[55vh] min-h-[200px] overflow-auto">
           {!query.trim() ? (
             <p className="p-4 text-sm text-muted-foreground">
-              {loading ? "Loading project cells..." : "Type to search across source and target cells."}
+              {loading ? "Loading project cells..." : "Type a query, then press Enter or click Search."}
             </p>
+          ) : lastSearchedQuery === null ? (
+            <p className="p-4 text-sm text-muted-foreground">Press Enter or click Search to run.</p>
           ) : results.length === 0 ? (
             <p className="p-4 text-sm text-muted-foreground">No matches.</p>
           ) : (

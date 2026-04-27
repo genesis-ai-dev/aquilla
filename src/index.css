@@ -52,6 +52,9 @@
 }
 
 @layer base {
+  :root {
+    --radius: 0.65rem;
+  }
   * {
     @apply border-border outline-ring/50;
     }
@@ -61,6 +64,9 @@
   html {
     @apply font-sans;
     }
+  html.dark {
+    color-scheme: dark;
+  }
 }
 /* y-prosemirror remote cursor decorations (rendered by yCursorPlugin).
  * The plugin sets border-color and background-color via inline styles using

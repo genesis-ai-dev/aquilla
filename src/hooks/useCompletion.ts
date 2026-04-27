@@ -39,14 +39,21 @@ export function useCompletion(
   const provider = resolveProvider(effectiveSettings)
   const { available: frontierAvailable } = useFrontierHealth()
 
-  // Frontier: needs a session AND the /api/v2/health probe must have returned
-  // ok at least once. Custom: needs endpoint + model.
+  // "Configured" = the user has done the setup. Frontier: signed in.
+  // Custom: endpoint + model. Service reachability (`isAvailable` below) is
+  // a separate, runtime concern — folding it in here causes the AI setup
+  // dialog to re-prompt every time the health probe fails, even though the
+  // user already configured a provider.
   const isConfigured = provider === "frontier"
-    ? Boolean(session?.jwt) && frontierAvailable
+    ? Boolean(session?.jwt)
     : Boolean(effectiveSettings.endpoint && effectiveSettings.model)
 
+  // "Available" = service is reachable right now. Used to disable Generate
+  // with a clear "service unavailable" message — never to gate setup.
+  const isAvailable = provider === "frontier" ? frontierAvailable : true
+
   const completeSingle = useCallback(async (cell: CellData) => {
-    if (!doc || !isConfigured) return
+    if (!doc || !isConfigured || !isAvailable) return
 
     setCompleting((p) => new Map(p).set(cell.id, "searching"))
     const found = search(cell.original, 5)
@@ -86,10 +93,10 @@ export function useCompletion(
       setCompleting((p) => new Map(p).set(cell.id, "error"))
       setErrors((p) => new Map(p).set(cell.id, err instanceof Error ? err.message : "Failed"))
     }
-  }, [doc, effectiveSettings, isConfigured, sourceLanguage, targetLanguage, search, session])
+  }, [doc, effectiveSettings, isConfigured, isAvailable, sourceLanguage, targetLanguage, search, session])
 
   const completeBatch = useCallback(async (cells: CellData[]) => {
-    if (!doc || !isConfigured) return
+    if (!doc || !isConfigured || !isAvailable) return
 
     const allExamples = new Map<string, ScoredPair[]>()
     for (const cell of cells) {
@@ -129,7 +136,7 @@ export function useCompletion(
       }
     }
     await Promise.all(Array.from({ length: 3 }, () => worker()))
-  }, [doc, effectiveSettings, isConfigured, sourceLanguage, targetLanguage, search, session])
+  }, [doc, effectiveSettings, isConfigured, isAvailable, sourceLanguage, targetLanguage, search, session])
 
-  return { completeSingle, completeBatch, isConfigured, completing, examples, errors }
+  return { completeSingle, completeBatch, isConfigured, isAvailable, completing, examples, errors }
 }

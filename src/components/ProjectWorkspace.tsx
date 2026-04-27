@@ -5,6 +5,8 @@ import { useProject } from "@/hooks/useProject"
 import { useFileDoc } from "@/hooks/useFileDoc"
 import { deriveCellAreaState } from "@/lib/editor/cell-area-state"
 import { CellAreaPlaceholder } from "./CellAreaPlaceholder"
+import { TabStrip } from "./TabStrip"
+import { useWorkspaceTabs } from "@/hooks/useWorkspaceTabs"
 import { useCells } from "@/hooks/useCells"
 import { useSearchIndex } from "@/hooks/useSearchIndex"
 import { useCompletion } from "@/hooks/useCompletion"
@@ -97,6 +99,14 @@ export function ProjectWorkspace() {
       navigate(`/project/${projectId}`)
     }
   }, [projectId, navigate])
+  const projectFiles = project?.files ?? []
+  const fileIds = useMemo(() => projectFiles.map((f) => f.id), [projectFiles])
+  const workspaceTabs = useWorkspaceTabs({
+    projectId: projectId ?? "",
+    fileIds,
+    activeFileId,
+    setActiveFileId,
+  })
   const [importOpen, setImportOpen] = useState(false)
   const [drawerRuleId, setDrawerRuleId] = useState<string | null>(null)
   const [searchParams] = useSearchParams()
@@ -208,7 +218,7 @@ export function ProjectWorkspace() {
   }, [fileCells])
 
   const { search } = useSearchIndex(project?.files || [], allProjectCells)
-  const { completeSingle, completeBatch, isConfigured, completing, examples, errors } = useCompletion(
+  const { completeSingle, completeBatch, isConfigured, isAvailable: isCompletionAvailable, completing, examples, errors } = useCompletion(
     doc, project?.completionSettings, project?.sourceLanguage || "", project?.targetLanguage || "", search, frontierSession
   )
 
@@ -432,7 +442,7 @@ export function ProjectWorkspace() {
 
   async function handleSearchSelect(result: WorkspaceSearchResult) {
     if (result.fileId !== activeFileId) {
-      setActiveFileId(result.fileId)
+      workspaceTabs.openFile(result.fileId)
       setTimeout(() => {
         const idx = cells.findIndex((c) => c.id === result.cellId)
         if (idx >= 0) editorRef.current?.scrollToCellIndex(idx)
@@ -640,7 +650,7 @@ export function ProjectWorkspace() {
     if (!project) return
     await patchProject(project.id, (p) => ({ ...p, files: [...p.files, ...refs] }))
     refresh()
-    if (refs.length > 0) setActiveFileId(refs[0].id)
+    if (refs.length > 0) workspaceTabs.openFile(refs[0].id)
   }
 
   // ── Render ────────────────────────────────────────────────────────────────
@@ -667,7 +677,7 @@ export function ProjectWorkspace() {
               fileProgress={fileProgress}
               suggestionFileIds={suggestionFileIds}
               validationCount={validationCount}
-              onSelectFile={setActiveFileId}
+              onSelectFile={workspaceTabs.openFile}
               onRename={handleRename}
               onMove={(fileId) => {
                 setMoveTargetId(fileId)
@@ -722,6 +732,13 @@ export function ProjectWorkspace() {
         }
         beforeMain={
           <>
+            <TabStrip
+              tabs={workspaceTabs.tabs}
+              activeTabId={workspaceTabs.activeTabId}
+              files={projectFiles}
+              onActivate={workspaceTabs.activateTab}
+              onClose={workspaceTabs.closeTab}
+            />
             {isReadOnly && (
               <div className="flex items-center gap-2 border-b bg-amber-50 px-4 py-2 text-xs text-amber-900">
                 <Lock className="h-3.5 w-3.5" />
@@ -753,7 +770,7 @@ export function ProjectWorkspace() {
           <EditorTable
             ref={editorRef} project={project} cells={cells} doc={doc}
             username={currentUsername}
-            isCompletionConfigured={isConfigured} completing={completing}
+            isCompletionConfigured={isConfigured} isCompletionAvailable={isCompletionAvailable} completing={completing}
             examples={examples} errors={errors}
             onCompleteSingle={completeSingle} onCompleteBatch={completeBatch}
             healthMap={healthMap} infractions={infractions} rules={rules}

@@ -7,6 +7,16 @@
     <meta name="description" content="%BRAND_DESCRIPTION%" />
     <title>%BRAND_TITLE%</title>
     %BRAND_THEME_STYLE%
+    <script>
+      (function () {
+        try {
+          var stored = localStorage.getItem("codex-theme");
+          var prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+          var dark = stored === "dark" || ((stored === "system" || !stored) && prefersDark);
+          if (dark) document.documentElement.classList.add("dark");
+        } catch (e) {}
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

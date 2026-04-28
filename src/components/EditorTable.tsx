@@ -2,7 +2,11 @@ import React, { useEffect, useRef, useCallback, useMemo, useState, forwardRef, u
 import { useVirtualizer } from "@tanstack/react-virtual"
 import * as Y from "yjs"
 import DOMPurify from "dompurify"
-import { Check, CheckCheck, Circle, Trash2, AlertTriangle, AlertCircle, RefreshCw, MessageCircle, Play } from "lucide-react"
+import {
+  Check, CheckCheck, Circle, Trash2, AlertTriangle, AlertCircle, RefreshCw,
+  MessageCircle, Play, Pause, Mic, MicOff, Sparkles, FileText, History as HistoryIcon,
+  ArrowRight, Wand2,
+} from "lucide-react"
 import type { CellData } from "@/hooks/useCells"
 import type { ScoredPair } from "@/lib/search/dual-index"
 import type { TranslationRule, RuleInfraction, ProjectRecord, CellHealthBreakdown } from "@/lib/parsers/types"
@@ -10,18 +14,16 @@ import { useProjectPermissions } from "@/hooks/useProjectPermissions"
 import { appendCellHistory, recordHistoryEntry, toggleCellValidation } from "@/hooks/useCellHistory"
 import { commitCellEdit } from "@/lib/codex-editor/edits/commit-cell-edit"
 import { getPlainText, getFragmentHtml } from "@/lib/richtext/translated-xml"
-import { SparkleButton } from "./SparkleButton"
 import { ExamplePanel } from "./ExamplePanel"
 import { HighlightedText, buildHighlightsFromExamples } from "./HighlightedText"
 import { HealthRing } from "./HealthRing"
 import { HealthBreakdown } from "./HealthBreakdown/HealthBreakdown"
 import { TranslatedEditor } from "./TranslatedEditor"
-import { CellAudioButton } from "./CellAudioButton"
-import { CellAudioRecordButton } from "./CellAudioRecordButton"
 import { CellWaveform } from "./CellWaveform"
-import { CellTranscribeBadge } from "./CellTranscribeBadge"
-import { CellTranscriptPreview } from "./CellTranscriptPreview"
 import { CellTtsButton } from "./CellTtsButton"
+import { CellTranscriptPreview } from "./CellTranscriptPreview"
+import { CellActionRail, RailButton, isInteractiveTarget } from "./CellActionRail"
+import { CellExpansion } from "./CellExpansion"
 import { tokenizeWords } from "@/lib/audio/timings"
 import { useCellAudio } from "@/hooks/useCellAudio"
 import { transcribeAndStoreTimings } from "@/lib/audio/transcribe"
@@ -31,7 +33,6 @@ import { synthAndAttachAudio } from "@/lib/audio/synth-and-attach"
 import { setTtsStatus, useTtsStatus } from "@/lib/audio/tts"
 import { AiModelConsentDeniedError } from "@/lib/audio/ai-consent"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
-import { CellActionsMenu } from "./CellActionsMenu"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { cn } from "@/lib/utils"
 import { isPerfLogEnabled } from "@/lib/perf-log"
@@ -216,12 +217,13 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     getCurrentIndex: () => 0,
   }), [virtualizer, cells.length])
 
-  // Grid layout: [left-gutter] [source] [target] [right-gutter]. Each gutter
-  // is 56px so a flex-wrap icon container fits two 24px buttons per row — short
-  // cells collapse the icon stack into a 2-column grid instead of a tall tower.
-  // Left gutter: audio + creation actions (AI, validation, play, mic, cue).
-  // Right gutter: meta (infractions, backtranslation, comments, history).
-  const gridCols = "grid-cols-[56px_1fr_1fr_56px]"
+  // Grid layout: [left-gutter] [source] [target]. The left 44px gutter holds
+  // only the line number / cell label and the validation pill. There is no
+  // right gutter — the floating action rail (sparkle / mic / tts / comment /
+  // expand) is absolutely positioned at the row's right edge so it doesn't
+  // claim layout space when collapsed. The target column reserves pr-9 so the
+  // ever-present expand chevron never overlaps text.
+  const gridCols = "grid-cols-[44px_1fr_1fr]"
 
   const handleMouseUp = useCallback(() => {
     if (isDragging.current && dragCells.current.size > 1) {
@@ -248,7 +250,6 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
         <div />
         <div>Source</div>
         <div className="border-l border-border/60 pl-3">Target</div>
-        <div />
       </div>
 
       <div style={{ height: `${virtualizer.getTotalSize()}px`, width: "100%", position: "relative" }}>
@@ -366,7 +367,7 @@ interface MemoizedRowProps {
   cellLabelsEnabled: boolean
   sourceTextDirection: "ltr" | "rtl"
   targetTextDirection: "ltr" | "rtl"
-  gridCols: "grid-cols-[56px_1fr_1fr_56px]"
+  gridCols: "grid-cols-[44px_1fr_1fr]"
   isAnonymous?: boolean
   breakdownMap?: Map<string, CellHealthBreakdown>
   onJumpToCell?: (cellId: string) => void
@@ -512,7 +513,7 @@ interface EditorRowProps {
   cellLabelsEnabled: boolean
   sourceTextDirection: "ltr" | "rtl"
   targetTextDirection: "ltr" | "rtl"
-  gridCols: "grid-cols-[56px_1fr_1fr_56px]"
+  gridCols: "grid-cols-[44px_1fr_1fr]"
   isAnonymous?: boolean
   breakdown?: CellHealthBreakdown
   onJumpToCell?: (cellId: string) => void
@@ -717,12 +718,6 @@ function EditorRow({
   const transcribeStatus = useTranscribeStatus(cell.selectedAudioId)
   const isTranscribing = transcribeStatus.kind === "loading" || transcribeStatus.kind === "transcribing"
   const transcriptPreviewRef = useRef<HTMLDivElement | null>(null)
-  const handleJumpToTranscript = useCallback(() => {
-    const el = transcriptPreviewRef.current
-    if (!el) return
-    el.scrollIntoView({ behavior: "smooth", block: "center" })
-    el.focus({ preventScroll: true })
-  }, [])
 
   const synthStatusKey = `synth:${cell.id}`
   const synthStatus = useTtsStatus(synthStatusKey)
@@ -938,256 +933,713 @@ function EditorRow({
     </div>
   ) : null
 
-  // SECURITY: originalHtml is sanitized through DOMPurify.sanitize() at the
-  // render boundary. Parsers only produce safe inline tags (<b>, <i>, <u>,
+  // SECURITY: originalHtml below is sanitized through DOMPurify.sanitize() at
+  // the render boundary. Parsers only produce safe inline tags (<b>, <i>, <u>,
   // <s>, <code>). DOMPurify provides defense-in-depth against XSS.
   const showLineNumber = lineNumbersEnabled && cell.type !== "paratext"
   const showCellLabel = cellLabelsEnabled && cell.cellLabel
   const hasGutterMetadata = showLineNumber || showCellLabel
+  const isGitProject = project.origin?.kind === "git"
+
+  // ── Hover / focus / tap state for the floating action rail ───────────────
+  // Three input sources OR'd together: row hover, focus-within, tap-selected
+  // (touch). Hover-leave has a 120ms grace period to prevent flicker as the
+  // cursor grazes adjacent rows.
+  const [isHovering, setIsHovering] = useState(false)
+  const [hasFocusWithin, setHasFocusWithin] = useState(false)
+  const [isTapSelected, setIsTapSelected] = useState(false)
+  const hoverLeaveTimerRef = useRef<number | null>(null)
+
+  // ── Expansion state ───────────────────────────────────────────────────────
+  const [expanded, setExpanded] = useState(false)
+  const [expansionTab, setExpansionTab] = useState<string>("backtranslation")
+
+  // ── Compute attention signals for chevron + tab dots ──────────────────────
+  const isBtStale = Boolean(
+    cell.backtranslation && cell.backtranslationForText !== cell.translated,
+  )
+  const transcriptText = useMemo(() => {
+    if (!cellAudioTimings || cellAudioTimings.length === 0) return ""
+    return cellAudioTimings.map((t) => t.word).join(" ")
+  }, [cellAudioTimings])
+  const transcriptMatchesCellText = useMemo(() => {
+    if (!hasAudio || !transcriptText) return true
+    const norm = (s: string) =>
+      s.toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, "").trim().replace(/\s+/g, " ")
+    return norm(transcriptText) === norm(cell.translated)
+  }, [hasAudio, transcriptText, cell.translated])
+  const transcriptNeedsAttention =
+    hasAudio &&
+    Boolean(cellAudioTimings && cellAudioTimings.length > 0) &&
+    !transcriptMatchesCellText
+  const hasMajorInfraction = cellInfractions.some(
+    (i) => ruleMap.get(i.ruleId)?.severity === "major",
+  )
+  const chevronAttentionDot: "red" | "amber" | "emerald" | "primary" | null =
+    cellInfractions.length > 0
+      ? hasMajorInfraction
+        ? "red"
+        : "amber"
+      : isBtStale
+        ? "amber"
+        : transcriptNeedsAttention
+          ? "amber"
+          : null
+
+  // First-open auto-tab: prefer the most-attention-worthy tab. Only applied
+  // when the panel was closed and is being opened — once open, the user's
+  // choice (or programmatic switches via inline rule clicks) wins.
+  const previousExpandedRef = useRef(false)
+  useEffect(() => {
+    if (expanded && !previousExpandedRef.current) {
+      const initial =
+        cellInfractions.length > 0
+          ? "issues"
+          : transcriptNeedsAttention
+            ? "audio"
+            : "backtranslation"
+      setExpansionTab(initial)
+    }
+    previousExpandedRef.current = expanded
+  }, [expanded, cellInfractions.length, transcriptNeedsAttention])
+
+  const railRevealed = isHovering || hasFocusWithin || isTapSelected || expanded
+
+  // Stable rail handlers
+  const handleRowMouseEnter = () => {
+    if (hoverLeaveTimerRef.current !== null) {
+      window.clearTimeout(hoverLeaveTimerRef.current)
+      hoverLeaveTimerRef.current = null
+    }
+    setIsHovering(true)
+  }
+  const handleRowMouseLeave = () => {
+    if (hoverLeaveTimerRef.current !== null) window.clearTimeout(hoverLeaveTimerRef.current)
+    hoverLeaveTimerRef.current = window.setTimeout(() => {
+      setIsHovering(false)
+      hoverLeaveTimerRef.current = null
+    }, 120)
+  }
+  const handleRowFocusCapture = () => setHasFocusWithin(true)
+  const handleRowBlurCapture = (e: React.FocusEvent) => {
+    const next = e.relatedTarget as Node | null
+    if (next && rowRef.current?.contains(next)) return
+    setHasFocusWithin(false)
+  }
+  const handleRowClick = (e: React.MouseEvent) => {
+    // Tap on a non-interactive area toggles tap-selected (touch users get
+    // persistent rail visibility). Clicks on buttons / inputs / contentEditable
+    // pass through.
+    if (!isInteractiveTarget(e.target)) {
+      setIsTapSelected((p) => !p)
+    }
+  }
+
+  // Inline rule click → open expansion to issues tab and remember which rule
+  // is active so the existing ViolationPopover can render alongside.
+  const openInlineRule = useCallback((ruleId: string) => {
+    setExpanded(true)
+    setExpansionTab("issues")
+    setOpenRuleId(ruleId)
+  }, [])
+
   return (
-    <div
-      ref={rowRef}
-      className={cn(
-        "group grid gap-2 border-b px-4 py-2 transition-colors",
-        audioController.isPlaying && "bg-primary/[0.04]",
-        gridCols,
-      )}
-    >
-      {/* Left gutter — metadata on top, audio + creation actions below.
-          flex-wrap with a max-height so if we add more icons later they flow
-          into a 2nd column for short cells. */}
-      <div className="flex flex-col items-center gap-1">
-        {hasGutterMetadata && (
-          <div className="flex h-4 items-center gap-1 text-[10px] leading-none text-muted-foreground/60">
-            {showLineNumber && (
-              <span className="tabular-nums" title={`Line ${rowIndex + 1}`}>
-                {rowIndex + 1}
-              </span>
-            )}
-            {showCellLabel && (
-              <span
-                className="rounded bg-muted/50 px-1 py-0.5 font-medium text-muted-foreground/80"
-                title="Cell label"
-              >
-                {cell.cellLabel}
-              </span>
-            )}
-          </div>
+    <div className="border-b">
+      <div
+        ref={rowRef}
+        className={cn(
+          "group relative grid gap-2 px-4 py-2 transition-colors",
+          audioController.isPlaying && "bg-primary/[0.04]",
+          expanded && "bg-muted/10",
+          gridCols,
         )}
-        {/*
-          Flex-wrap icon container. Column direction with gap-1 means 4 icons
-          take ~92px vertically; max-h-24 (96px) keeps them single-column for
-          the common case, and anything beyond 4 wraps into a second column.
-        */}
-        <div
-          className={cn(
-            "flex flex-col flex-wrap content-start gap-1 max-h-24",
-            hasGutterMetadata ? "pt-1" : "pt-5",
-          )}
-        >
-          <SparkleButton
-            disabled={!isCompletionConfigured || !isCompletionAvailable || !editable || isAnonymous}
-            loading={isLoading}
-            onComplete={() => onCompleteSingle(cell)}
-            onDragStart={onDragStart}
-            onDragEnter={onDragEnter}
-            onSetupNeeded={
-              !isCompletionConfigured && editable && !isAnonymous
-                ? onAiSetupNeeded
-                : undefined
-            }
-            tooltip={
-              isAnonymous
-                ? "Sign in for AI translations"
-                : !editable
-                  ? "Read-only (imported from git)"
-                  : !isCompletionConfigured
-                    ? "Set up AI to enable"
-                    : !isCompletionAvailable
-                      ? "AI service unavailable — try again shortly"
-                      : "Generate translation"
-            }
-          />
-
-          {validationButton}
-
-          {/* Play-vs-mic are mutually exclusive. Play shows when a non-deleted
-              audio attachment exists on the cell; otherwise the mic invites
-              recording. Re-recording lives in the right-gutter ellipsis menu. */}
-          {hasAudio ? (
-            <CellAudioButton controller={audioController} />
-          ) : (
-            <CellAudioRecordButton
-              project={project}
-              onOpenRecording={() => onOpenRecording?.(cell.id)}
-              disabled={!editable || !onOpenRecording}
-            />
-          )}
-          {hasAudio && (
-            <CellTranscribeBadge
-              audioId={cell.selectedAudioId}
-              hasTimings={Boolean(cellAudioTimings && cellAudioTimings.length > 0)}
-              onJumpToTranscript={handleJumpToTranscript}
-            />
-          )}
-
-          <CellTtsButton cellId={cell.id} text={cell.translated} disabled={!editable} />
-
-
-          {onSeekToCue && (
-            <button
-              type="button"
-              onClick={() => onSeekToCue(cell.id)}
-              className="flex h-5 w-5 items-center justify-center rounded text-muted-foreground/50 transition-[transform,color] duration-150 ease-out hover:bg-muted/60 hover:text-foreground active:scale-[0.92]"
-              title="Play from this cue"
-            >
-              <Play className="h-3 w-3" />
-            </button>
-          )}
-        </div>
-      </div>
-
-      {/* Source column */}
-      <div className="flex flex-col" dir={sourceTextDirection}>
-        <div className="mb-1 flex items-center gap-1 text-xs text-muted-foreground" dir="ltr">
-          <span>{cell.context}</span>
-          {showFormattingLossWarning && (
-            <span
-              title="Source has inline formatting (bold, italic, etc.) that the target doesn't preserve. Formatting will be lost on export."
-              className="inline-flex items-center gap-0.5 rounded bg-amber-100 px-1 py-0.5 text-[9px] font-medium text-amber-700 dark:bg-amber-950 dark:text-amber-400"
-            >
-              <AlertTriangle className="h-2.5 w-2.5" />
-              formatting
-            </span>
-          )}
-        </div>
-        {cell.originalHtml ? (
-          <div
-            className="text-sm"
-            // eslint-disable-next-line react/no-danger
-            dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(cell.originalHtml) }}
-          />
-        ) : (
-          <div className="text-sm">
-            <HighlightedText
-              text={cell.original}
-              highlights={highlights}
-              ranges={sourceRanges}
-              showEvidence={examplesExpanded}
-              onRangeClick={(ruleId) => setOpenRuleId(ruleId)}
-            />
-          </div>
-        )}
-        {cellExamples.length > 0 && (
-          <ExamplePanel
-            examples={cellExamples}
-            expanded={examplesExpanded}
-            onExpandedChange={setExamplesExpanded}
-          />
-        )}
-      </div>
-
-      {/* Target column — actions live in the left gutter, so no right-side rail. */}
-      <div className="flex flex-col border-l border-border/50 pl-3" dir={targetTextDirection}>
-        <div className="flex flex-1 flex-col">
-          {cell.translatedXml ? (
-            <div className="flex min-h-[40px] flex-1 flex-col">
-              <TranslatedEditor
-                fragment={cell.translatedXml}
-                className="w-full"
-                syncProvider={syncProvider}
-                user={collabUser}
-                onBlur={handleEditorBlur}
-                editable={editable}
-                infractions={[...cellInfractions, ...waivedInfractions]}
-                ruleSeverity={ruleSeverity}
-                waivedRuleIds={waivedRuleIds}
-                onRuleClick={(ruleId) => setOpenRuleId(ruleId)}
-                audioTimings={cellAudioTimings}
-                audioCurrentTime={hasAudio ? audioController.currentTime : undefined}
-                onSeekToTime={hasAudio ? audioController.seek : undefined}
-              />
-            </div>
-          ) : (
-            <div className="relative flex min-h-[40px] flex-1 flex-col">
-              <textarea
-                className="w-full flex-1 resize-none rounded-sm bg-transparent px-2 py-1 text-sm leading-relaxed transition-colors hover:bg-muted/40 focus:bg-muted/30 focus:outline-none disabled:cursor-not-allowed disabled:opacity-70"
-                value={cell.translated}
-                onChange={handleChange}
-                readOnly={!editable}
-                rows={Math.max(2, Math.ceil(cell.original.length / 50))}
-              />
-              {targetRanges.length > 0 && (
-                <div
-                  className="pointer-events-none absolute inset-0 whitespace-pre-wrap break-words px-2 py-1 text-sm"
-                  aria-hidden
+        onMouseEnter={handleRowMouseEnter}
+        onMouseLeave={handleRowMouseLeave}
+        onFocusCapture={handleRowFocusCapture}
+        onBlurCapture={handleRowBlurCapture}
+        onClick={handleRowClick}
+      >
+        {/* Left gutter — line number + cell label + validation pill. */}
+        <div className="flex flex-col items-center gap-1.5 pt-1">
+          {hasGutterMetadata && (
+            <div className="flex h-4 items-center gap-1 text-[10px] leading-none text-muted-foreground/60">
+              {showLineNumber && (
+                <span className="tabular-nums" title={`Line ${rowIndex + 1}`}>
+                  {rowIndex + 1}
+                </span>
+              )}
+              {showCellLabel && (
+                <span
+                  className="rounded bg-muted/50 px-1 py-0.5 font-medium text-muted-foreground/80"
+                  title="Cell label"
                 >
-                  <HighlightedText text={cell.translated} ranges={targetRanges} />
-                </div>
+                  {cell.cellLabel}
+                </span>
               )}
             </div>
           )}
-          {error && <p className="mt-0.5 text-xs text-destructive">{error}</p>}
-          {hasAudio && (
-            <CellWaveform
-              controller={audioController}
-              className="mt-1.5"
-              strategy={project.audioMediaStrategy ?? "lazy"}
+          <div className={hasGutterMetadata ? "" : "pt-3"}>{validationButton}</div>
+        </div>
+
+        {/* Source column */}
+        <div className="flex flex-col" dir={sourceTextDirection}>
+          <div className="mb-1 flex items-center gap-1 text-xs text-muted-foreground" dir="ltr">
+            <span>{cell.context}</span>
+            {showFormattingLossWarning && (
+              <span
+                title="Source has inline formatting (bold, italic, etc.) that the target doesn't preserve. Formatting will be lost on export."
+                className="inline-flex items-center gap-0.5 rounded bg-amber-100 px-1 py-0.5 text-[9px] font-medium text-amber-700 dark:bg-amber-950 dark:text-amber-400"
+              >
+                <AlertTriangle className="h-2.5 w-2.5" />
+                formatting
+              </span>
+            )}
+          </div>
+          {cell.originalHtml ? (
+            <div
+              className="text-sm"
+              // eslint-disable-next-line react/no-danger
+              dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(cell.originalHtml) }}
             />
-          )}
-          {hasAudio && cellAudioTimings && cellAudioTimings.length > 0 && (
-            <CellTranscriptPreview
-              ref={transcriptPreviewRef}
-              timings={cellAudioTimings}
-              cellText={cell.translated}
-              cellId={cell.id}
-              doc={doc}
-              alignedToCellText={tokenizeWords(cell.translated).length === cellAudioTimings.length}
-              editable={editable}
-              onRetranscribe={handleTranscribe}
-            />
-          )}
-          {cell.backtranslation && (
-            <div className="mt-1.5 rounded-md border-l-2 border-blue-400/70 bg-muted/30 px-2.5 py-1.5 text-xs italic text-muted-foreground">
-              <div className="flex items-center gap-1.5 not-italic">
-                <span className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground/80">Backtranslation</span>
-                {cell.backtranslationForText !== cell.translated && (
-                  <span title="Translation has changed since backtranslation" className="flex items-center gap-0.5 rounded bg-amber-500/10 px-1 py-0.5 text-[9px] font-medium text-amber-600 dark:text-amber-400">
-                    <AlertTriangle className="h-2.5 w-2.5" />
-                    stale
-                  </span>
-                )}
-                <button
-                  type="button"
-                  onClick={() => onBacktranslate?.(cell)}
-                  disabled={!isBacktranslationConfigured || isBacktranslating || !editable}
-                  className="ml-auto flex h-4 w-4 items-center justify-center rounded text-muted-foreground/60 transition-[transform,color] duration-150 ease-out hover:bg-muted/60 hover:text-foreground active:scale-[0.92] disabled:cursor-not-allowed disabled:opacity-30"
-                  title={!editable ? "Read-only (imported from git)" : "Regenerate"}
-                >
-                  <RefreshCw className={cn("h-3 w-3", isBacktranslating && "animate-spin")} />
-                </button>
-              </div>
-              <div className="mt-1 leading-relaxed">{cell.backtranslation}</div>
+          ) : (
+            <div className="text-sm">
+              <HighlightedText
+                text={cell.original}
+                highlights={highlights}
+                ranges={sourceRanges}
+                showEvidence={examplesExpanded}
+                onRangeClick={openInlineRule}
+              />
             </div>
           )}
-          {backtranslationError && (
-            <p className="mt-0.5 text-xs text-destructive">BT: {backtranslationError}</p>
+          {cellExamples.length > 0 && (
+            <ExamplePanel
+              examples={cellExamples}
+              expanded={examplesExpanded}
+              onExpandedChange={setExamplesExpanded}
+            />
           )}
+        </div>
+
+        {/* Target column — TipTap is inline so typing is unchanged. Everything
+            else (waveform, transcript preview, backtranslation, infractions
+            detail) lives in the expansion panel. pr-9 reserves space for the
+            ever-present chevron at the right edge. */}
+        <div className="flex flex-col border-l border-border/50 pl-3 pr-9" dir={targetTextDirection}>
+          <div className="flex flex-1 flex-col">
+            {cell.translatedXml ? (
+              <div className="flex min-h-[40px] flex-1 flex-col">
+                <TranslatedEditor
+                  fragment={cell.translatedXml}
+                  className="w-full"
+                  syncProvider={syncProvider}
+                  user={collabUser}
+                  onBlur={handleEditorBlur}
+                  editable={editable}
+                  infractions={[...cellInfractions, ...waivedInfractions]}
+                  ruleSeverity={ruleSeverity}
+                  waivedRuleIds={waivedRuleIds}
+                  onRuleClick={openInlineRule}
+                  audioTimings={cellAudioTimings}
+                  audioCurrentTime={hasAudio ? audioController.currentTime : undefined}
+                  onSeekToTime={hasAudio ? audioController.seek : undefined}
+                />
+              </div>
+            ) : (
+              <div className="relative flex min-h-[40px] flex-1 flex-col">
+                <textarea
+                  className="w-full flex-1 resize-none rounded-sm bg-transparent px-2 py-1 text-sm leading-relaxed transition-colors hover:bg-muted/40 focus:bg-muted/30 focus:outline-none disabled:cursor-not-allowed disabled:opacity-70"
+                  value={cell.translated}
+                  onChange={handleChange}
+                  readOnly={!editable}
+                  rows={Math.max(2, Math.ceil(cell.original.length / 50))}
+                />
+                {targetRanges.length > 0 && (
+                  <div
+                    className="pointer-events-none absolute inset-0 whitespace-pre-wrap break-words px-2 py-1 text-sm"
+                    aria-hidden
+                  >
+                    <HighlightedText text={cell.translated} ranges={targetRanges} />
+                  </div>
+                )}
+              </div>
+            )}
+            {error && <p className="mt-0.5 text-xs text-destructive">{error}</p>}
+          </div>
+        </div>
+
+        {/* Floating action rail — anchored to the row's right edge. */}
+        <div className="pointer-events-none absolute right-2 top-1.5 z-10 flex">
+          <div className="pointer-events-auto">
+            <CellActionRail
+              revealed={railRevealed}
+              expanded={expanded}
+              onToggleExpanded={() => setExpanded((p) => !p)}
+              alwaysShowChevron
+              expansionAttentionDot={chevronAttentionDot}
+            >
+              <RailButton
+                icon={<Sparkles className="h-3.5 w-3.5" />}
+                tooltip={
+                  isAnonymous
+                    ? "Sign in for AI translations"
+                    : !editable
+                      ? "Read-only (imported from git)"
+                      : !isCompletionConfigured
+                        ? "Set up AI to enable"
+                        : !isCompletionAvailable
+                          ? "AI service unavailable — try again shortly"
+                          : isLoading
+                            ? "Generating…"
+                            : "Generate translation"
+                }
+                onClick={() => {
+                  if (isLoading) return
+                  if (!isCompletionConfigured && editable && !isAnonymous) {
+                    onAiSetupNeeded?.()
+                    return
+                  }
+                  if (
+                    isCompletionConfigured &&
+                    isCompletionAvailable &&
+                    editable &&
+                    !isAnonymous
+                  ) {
+                    onCompleteSingle(cell)
+                  }
+                }}
+                disabled={
+                  (!isCompletionConfigured && !onAiSetupNeeded) ||
+                  !isCompletionAvailable ||
+                  !editable ||
+                  isAnonymous ||
+                  isLoading
+                }
+                pulsing={isLoading}
+                onMouseDown={onDragStart}
+                onMouseEnter={onDragEnter}
+              />
+
+              {hasAudio ? (
+                <RailButton
+                  icon={
+                    audioController.isPlaying ? (
+                      <Pause className="h-3.5 w-3.5" />
+                    ) : (
+                      <Play className="h-3.5 w-3.5" />
+                    )
+                  }
+                  tooltip={audioController.isPlaying ? "Pause" : "Play audio"}
+                  onClick={() => {
+                    if (audioController.state === "loading") return
+                    if (audioController.isPlaying) audioController.pause()
+                    else void audioController.play()
+                  }}
+                  disabled={audioController.state === "loading"}
+                  toneClass={
+                    audioController.isPlaying
+                      ? "text-primary hover:text-primary"
+                      : undefined
+                  }
+                />
+              ) : (
+                <RailButton
+                  icon={
+                    !editable || isGitProject ? (
+                      <MicOff className="h-3.5 w-3.5" />
+                    ) : (
+                      <Mic className="h-3.5 w-3.5" />
+                    )
+                  }
+                  tooltip={
+                    isGitProject
+                      ? "Recording on GitLab projects isn't available yet"
+                      : !editable
+                        ? "Read-only (imported from git)"
+                        : !onOpenRecording
+                          ? "Recording disabled"
+                          : "Record audio"
+                  }
+                  onClick={() => onOpenRecording?.(cell.id)}
+                  disabled={!editable || !onOpenRecording || isGitProject}
+                />
+              )}
+
+              {cell.translated.trim().length > 0 && (
+                <CellTtsButton
+                  cellId={cell.id}
+                  text={cell.translated}
+                  disabled={!editable}
+                />
+              )}
+
+              {onOpenComments && (
+                <RailButton
+                  icon={<MessageCircle className="h-3.5 w-3.5" />}
+                  tooltip={
+                    openCommentCount > 0
+                      ? `${openCommentCount} open comment${openCommentCount !== 1 ? "s" : ""}`
+                      : "Add comment"
+                  }
+                  onClick={() => onOpenComments(cell.id)}
+                  toneClass={
+                    openCommentCount > 0
+                      ? "text-primary hover:text-primary"
+                      : undefined
+                  }
+                  dot={openCommentCount > 0 ? "primary" : undefined}
+                />
+              )}
+
+              {onSeekToCue && (
+                <RailButton
+                  icon={<Play className="h-3.5 w-3.5" />}
+                  tooltip="Play from this cue"
+                  onClick={() => onSeekToCue(cell.id)}
+                />
+              )}
+            </CellActionRail>
+          </div>
         </div>
       </div>
 
+      {/* Expansion panel — hosts the rich, lower-frequency context that used
+          to clutter the inline row: backtranslation, audio waveform +
+          transcript, infractions detail, edit history. */}
+      <div className="px-4 pb-2">
+        <CellExpansion
+          open={expanded}
+          tab={expansionTab}
+          onTabChange={setExpansionTab}
+          onClose={() => setExpanded(false)}
+          tabs={[
+            {
+              value: "backtranslation",
+              icon: <FileText className="h-3 w-3" />,
+              label: "Backtranslation",
+              attentionDot: isBtStale ? "amber" : undefined,
+              content: (
+                <div className="flex flex-col gap-2">
+                  <div className="flex items-center justify-between">
+                    <h4 className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+                      Backtranslation
+                    </h4>
+                    <button
+                      type="button"
+                      onClick={() => onBacktranslate?.(cell)}
+                      disabled={
+                        !isBacktranslationConfigured ||
+                        isBacktranslating ||
+                        !editable ||
+                        cell.translated.trim().length === 0
+                      }
+                      className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
+                      title={
+                        !editable
+                          ? "Read-only (imported from git)"
+                          : !isBacktranslationConfigured
+                            ? "Set up AI for backtranslation"
+                            : cell.backtranslation
+                              ? "Regenerate backtranslation"
+                              : "Generate backtranslation"
+                      }
+                    >
+                      <RefreshCw
+                        className={cn("h-3 w-3", isBacktranslating && "animate-spin")}
+                      />
+                      {cell.backtranslation ? "Regenerate" : "Generate"}
+                    </button>
+                  </div>
+
+                  {cell.backtranslation ? (
+                    <div className="rounded border border-border/40 bg-background/40 px-3 py-2 text-sm italic text-muted-foreground">
+                      {isBtStale && (
+                        <div className="mb-1 inline-flex items-center gap-1 rounded-full bg-amber-500/10 px-2 py-0.5 text-[10px] font-medium not-italic text-amber-700 dark:text-amber-400">
+                          <AlertTriangle className="h-2.5 w-2.5" />
+                          Stale — translation has changed
+                        </div>
+                      )}
+                      <div className="leading-relaxed">{cell.backtranslation}</div>
+                    </div>
+                  ) : (
+                    <p className="rounded border border-dashed border-border/60 px-3 py-3 text-center text-xs text-muted-foreground">
+                      {cell.translated.trim().length === 0
+                        ? "Add a translation first, then generate a backtranslation."
+                        : "No backtranslation yet. Click Generate to create one."}
+                    </p>
+                  )}
+                  {backtranslationError && (
+                    <p className="text-xs text-destructive">{backtranslationError}</p>
+                  )}
+                </div>
+              ),
+            },
+            {
+              value: "audio",
+              icon: <Mic className="h-3 w-3" />,
+              label: "Audio",
+              attentionDot: transcriptNeedsAttention
+                ? "amber"
+                : hasAudio
+                  ? "emerald"
+                  : undefined,
+              content: (
+                <div className="flex flex-col gap-3">
+                  {!hasAudio ? (
+                    <div className="flex flex-col items-center gap-3 py-4 text-center">
+                      <div className="flex h-12 w-12 items-center justify-center rounded-full bg-muted/40 text-muted-foreground/50">
+                        <Mic className="h-5 w-5" />
+                      </div>
+                      <p className="text-xs text-muted-foreground">No audio recorded yet.</p>
+                      <div className="flex flex-wrap items-center justify-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => onOpenRecording?.(cell.id)}
+                          disabled={!editable || !onOpenRecording || isGitProject}
+                          className="inline-flex items-center gap-1.5 rounded-full bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-40"
+                          title={
+                            isGitProject
+                              ? "Recording on GitLab projects isn't available yet"
+                              : "Record audio"
+                          }
+                        >
+                          <Mic className="h-3 w-3" />
+                          Record
+                        </button>
+                        {!isGitProject && cell.translated.trim().length > 0 && (
+                          <button
+                            type="button"
+                            onClick={handleSynthesizeAudio}
+                            disabled={!editable || isSynthesizing}
+                            className="inline-flex items-center gap-1.5 rounded-full border border-border bg-background px-3 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-40"
+                            title="Generate a synthetic voice for this translation"
+                          >
+                            <Wand2
+                              className={cn(
+                                "h-3 w-3",
+                                isSynthesizing && "animate-pulse",
+                              )}
+                            />
+                            {isSynthesizing ? "Synthesizing…" : "Generate AI voice"}
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  ) : (
+                    <>
+                      <CellWaveform
+                        controller={audioController}
+                        height={36}
+                        strategy={project.audioMediaStrategy ?? "lazy"}
+                      />
+                      {cellAudioTimings && cellAudioTimings.length > 0 && (
+                        <CellTranscriptPreview
+                          ref={transcriptPreviewRef}
+                          timings={cellAudioTimings}
+                          cellText={cell.translated}
+                          cellId={cell.id}
+                          doc={doc}
+                          alignedToCellText={
+                            tokenizeWords(cell.translated).length === cellAudioTimings.length
+                          }
+                          editable={editable}
+                          onRetranscribe={handleTranscribe}
+                        />
+                      )}
+                      <div className="flex flex-wrap gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => onOpenRecording?.(cell.id)}
+                          disabled={!editable || !onOpenRecording || isGitProject}
+                          className="inline-flex items-center gap-1.5 rounded-full border border-border bg-background px-2.5 py-1 text-[11px] font-medium text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-40"
+                        >
+                          <Mic className="h-3 w-3" />
+                          Re-record
+                        </button>
+                        <button
+                          type="button"
+                          onClick={handleTranscribe}
+                          disabled={!editable || isTranscribing}
+                          className="inline-flex items-center gap-1.5 rounded-full border border-border bg-background px-2.5 py-1 text-[11px] font-medium text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-40"
+                        >
+                          <Sparkles
+                            className={cn(
+                              "h-3 w-3",
+                              isTranscribing && "animate-pulse",
+                            )}
+                          />
+                          {isTranscribing ? "Transcribing…" : "Transcribe"}
+                        </button>
+                        {!isGitProject && cell.translated.trim().length > 0 && (
+                          <button
+                            type="button"
+                            onClick={handleSynthesizeAudio}
+                            disabled={!editable || isSynthesizing}
+                            className="inline-flex items-center gap-1.5 rounded-full border border-border bg-background px-2.5 py-1 text-[11px] font-medium text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-40"
+                            title="Replace this recording with a synthesized voice"
+                          >
+                            <Wand2
+                              className={cn(
+                                "h-3 w-3",
+                                isSynthesizing && "animate-pulse",
+                              )}
+                            />
+                            {isSynthesizing ? "Synthesizing…" : "Replace with AI voice"}
+                          </button>
+                        )}
+                      </div>
+                    </>
+                  )}
+                </div>
+              ),
+            },
+            {
+              value: "issues",
+              icon: <AlertTriangle className="h-3 w-3" />,
+              label: "Issues",
+              attentionDot:
+                cellInfractions.length > 0
+                  ? hasMajorInfraction
+                    ? "red"
+                    : "amber"
+                  : undefined,
+              disabled: cellInfractions.length === 0 && waivedInfractions.length === 0,
+              content: (
+                <div className="flex flex-col gap-1.5">
+                  {cellInfractions.length === 0 && waivedInfractions.length === 0 ? (
+                    <p className="py-3 text-center text-xs text-muted-foreground">
+                      No translation rule issues on this cell.
+                    </p>
+                  ) : (
+                    <>
+                      {cellInfractions.map((inf) => {
+                        const rule = ruleMap.get(inf.ruleId)
+                        const isMajor = rule?.severity === "major"
+                        const Icon = isMajor ? AlertTriangle : AlertCircle
+                        return (
+                          <button
+                            key={inf.ruleId}
+                            type="button"
+                            onClick={() => setOpenRuleId(inf.ruleId)}
+                            className="flex w-full items-start gap-2 rounded border border-border/40 bg-background/40 px-2.5 py-2 text-left text-xs transition-colors hover:bg-muted/40"
+                          >
+                            <Icon
+                              className={cn(
+                                "mt-0.5 h-3 w-3 shrink-0",
+                                isMajor ? "text-red-500" : "text-amber-500",
+                              )}
+                            />
+                            <span className="flex-1">
+                              <span className="font-medium text-foreground">
+                                {rule?.name ?? inf.ruleId}
+                              </span>
+                              <span className="ml-1 text-muted-foreground">
+                                — {inf.message}
+                              </span>
+                            </span>
+                            <ArrowRight className="mt-0.5 h-3 w-3 shrink-0 text-muted-foreground/50" />
+                          </button>
+                        )
+                      })}
+                      {waivedInfractions.length > 0 && (
+                        <>
+                          <div className="mt-2 px-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+                            Waived
+                          </div>
+                          {waivedInfractions.map((inf) => {
+                            const rule = ruleMap.get(inf.ruleId)
+                            return (
+                              <button
+                                key={`waived-${inf.ruleId}`}
+                                type="button"
+                                onClick={() => setOpenRuleId(inf.ruleId)}
+                                className="flex w-full items-start gap-2 rounded border border-border/30 bg-background/20 px-2.5 py-1.5 text-left text-xs text-muted-foreground/70 transition-colors hover:bg-muted/30"
+                              >
+                                <Check className="mt-0.5 h-3 w-3 shrink-0" />
+                                <span className="flex-1">
+                                  {rule?.name ?? inf.ruleId}
+                                </span>
+                              </button>
+                            )
+                          })}
+                        </>
+                      )}
+                    </>
+                  )}
+                </div>
+              ),
+            },
+            {
+              value: "history",
+              icon: <HistoryIcon className="h-3 w-3" />,
+              label: "History",
+              disabled: cell.history.length === 0,
+              content: (
+                <div className="flex flex-col gap-2">
+                  {cell.history.length === 0 ? (
+                    <p className="py-3 text-center text-xs text-muted-foreground">
+                      No edit history yet.
+                    </p>
+                  ) : (
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => onOpenHistory?.(cell.id)}
+                        disabled={!onOpenHistory}
+                        className="self-start inline-flex items-center gap-1.5 rounded-full border border-border bg-background px-2.5 py-1 text-[11px] font-medium text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-40"
+                      >
+                        <HistoryIcon className="h-3 w-3" />
+                        Open full history
+                      </button>
+                      <ul className="divide-y divide-border/40 rounded border border-border/40 bg-background/40">
+                        {[...cell.history].slice(-5).reverse().map((entry, i) => {
+                          const date = new Date(entry.timestamp).toLocaleString(undefined, {
+                            month: "short",
+                            day: "numeric",
+                            hour: "numeric",
+                            minute: "2-digit",
+                          })
+                          return (
+                            <li key={`${entry.timestamp}-${i}`} className="px-2.5 py-1.5 text-xs">
+                              <div className="flex items-center justify-between gap-2 text-[10px] uppercase tracking-wide text-muted-foreground/80">
+                                <span>{entry.author}</span>
+                                <span>{date}</span>
+                              </div>
+                              <div className="mt-0.5 truncate italic text-muted-foreground">
+                                "{entry.value}"
+                              </div>
+                            </li>
+                          )
+                        })}
+                      </ul>
+                    </>
+                  )}
+                </div>
+              ),
+            },
+          ]}
+        />
+      </div>
+
       {openRuleId && (() => {
-        const inf = [...cellInfractions, ...waivedInfractions].find((i) => i.ruleId === openRuleId)
+        const inf = [...cellInfractions, ...waivedInfractions].find(
+          (i) => i.ruleId === openRuleId,
+        )
         const rule = ruleMap.get(openRuleId)
         if (!inf || !rule) return null
         return (
           <ViolationPopover
             open
-            onOpenChange={(next) => { if (!next) setOpenRuleId(null) }}
+            onOpenChange={(next) => {
+              if (!next) setOpenRuleId(null)
+            }}
             infraction={inf}
             ruleName={rule.name}
             waivers={cell.waivers ?? []}
-            onOpenRule={(ruleId) => { setOpenRuleId(null); onInfractionClick?.(ruleId) }}
+            onOpenRule={(ruleId) => {
+              setOpenRuleId(null)
+              onInfractionClick?.(ruleId)
+            }}
             onWaive={handleWaive}
             onUnwaive={handleUnwaive}
           >
@@ -1195,67 +1647,6 @@ function EditorRow({
           </ViolationPopover>
         )
       })()}
-
-      {/* Right gutter — visible meta actions (comments + warnings) and an
-          ellipsis menu for less-frequent ones (re-record, history, regenerate
-          backtranslation). Keeping comments visible because they're the main
-          collab surface; keeping infractions visible because they're warnings. */}
-      <div className="flex flex-col flex-wrap content-start gap-1 max-h-24 pt-5">
-        {onOpenComments && (
-          <button
-            type="button"
-            className={cn(
-              "relative flex h-5 w-5 items-center justify-center rounded transition-[transform,color] duration-150 ease-out active:scale-[0.92] hover:bg-muted/60",
-              openCommentCount > 0 ? "text-primary" : "text-muted-foreground/50 hover:text-foreground",
-            )}
-            onClick={() => onOpenComments(cell.id)}
-            title={openCommentCount > 0 ? `${openCommentCount} open comment${openCommentCount !== 1 ? "s" : ""}` : "Add comment"}
-          >
-            <MessageCircle className="h-3 w-3" />
-            {openCommentCount > 0 && (
-              <span className="absolute -right-0.5 -top-0.5 flex h-3 min-w-3 items-center justify-center rounded-full bg-primary px-0.5 text-[8px] font-semibold leading-none text-primary-foreground tabular-nums">
-                {openCommentCount}
-              </span>
-            )}
-          </button>
-        )}
-
-        {cellInfractions.length > 0 && cellInfractions.map((inf) => {
-          const rule = ruleMap.get(inf.ruleId)
-          const isMajor = rule?.severity === "major"
-          const Icon = isMajor ? AlertTriangle : AlertCircle
-          return (
-            <button
-              key={inf.ruleId}
-              type="button"
-              onClick={() => onInfractionClick?.(inf.ruleId)}
-              title={inf.message}
-              className={cn(
-                "flex h-5 w-5 items-center justify-center rounded transition-[transform,color] duration-150 ease-out active:scale-[0.92] hover:bg-muted/60",
-                isMajor ? "text-red-500 hover:text-red-600" : "text-amber-500 hover:text-amber-600"
-              )}
-            >
-              <Icon className="h-3 w-3" />
-            </button>
-          )
-        })}
-
-        <CellActionsMenu
-          cell={cell}
-          editable={editable}
-          hasAudio={hasAudio}
-          isGitProject={project.origin?.kind === "git"}
-          isBacktranslationConfigured={isBacktranslationConfigured}
-          isBacktranslating={isBacktranslating}
-          isTranscribing={isTranscribing}
-          isSynthesizing={isSynthesizing}
-          onOpenRecording={onOpenRecording}
-          onOpenHistory={onOpenHistory}
-          onBacktranslate={onBacktranslate}
-          onTranscribe={hasAudio ? handleTranscribe : undefined}
-          onSynthesizeAudio={handleSynthesizeAudio}
-        />
-      </div>
     </div>
   )
 }

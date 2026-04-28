@@ -2,6 +2,7 @@ import * as Y from "yjs";
 import type { OpfsFs } from "@/lib/git/opfs-fs";
 import {
   parseCodexNotebook, parseCodexComments, parseCodexProjectMetadata,
+  extractProjectLanguages,
   pairCells, mapEditHistory, mapCodexCommentsToThreads,
   getTestament,
 } from "@/lib/codex-editor";
@@ -78,6 +79,12 @@ export async function importFromOpfs(args: ImportArgs): Promise<ImportedProject>
   const { fs, repoDir, onProgress } = args;
 
   // 1. Parse root metadata.json (best-effort).
+  //
+  // Two metadata shapes have been written by codex-editor over its history:
+  //   • Flat:  { sourceLanguage: { tag }, targetLanguage: { tag } }   (current)
+  //   • Array: { languages: [{ tag, projectStatus: "source" }, …] }   (legacy)
+  // extractProjectLanguages collapses both into a single { sourceTag, targetTag }
+  // so legacy GitLab projects don't silently fall back to "en"/"en".
   let projectName = "Imported project";
   let sourceLanguage = "en";
   let targetLanguage = "en";
@@ -85,9 +92,18 @@ export async function importFromOpfs(args: ImportArgs): Promise<ImportedProject>
     const metaRaw = (await fs.promises.readFile(`${repoDir}/metadata.json`, { encoding: "utf8" })) as string;
     const meta = parseCodexProjectMetadata(metaRaw);
     if (typeof meta.projectName === "string") projectName = meta.projectName;
-    if (meta.sourceLanguage?.tag) sourceLanguage = meta.sourceLanguage.tag;
-    if (meta.targetLanguage?.tag) targetLanguage = meta.targetLanguage.tag;
-  } catch { /* keep defaults */ }
+    const langs = extractProjectLanguages(meta);
+    if (langs.sourceTag) sourceLanguage = langs.sourceTag;
+    if (langs.targetTag) targetLanguage = langs.targetTag;
+    if (!langs.sourceTag || !langs.targetTag) {
+      console.warn(
+        "[import] metadata.json missing language tags — defaulting to en/en",
+        { hasSource: !!langs.sourceTag, hasTarget: !!langs.targetTag },
+      );
+    }
+  } catch (e) {
+    console.warn("[import] failed to parse metadata.json — defaulting to en/en", e);
+  }
 
   // 2. Enumerate .codex target files.
   const codexPaths = await listFilesMatching(fs, `${repoDir}/files/target`, /\.codex$/);

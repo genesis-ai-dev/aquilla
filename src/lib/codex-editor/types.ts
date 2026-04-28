@@ -139,10 +139,29 @@ export interface CodexCommentThread {
 export type CodexCommentsFile = Record<string, CodexCommentThread>;
 
 // Root metadata.json — same shape as CodexNotebookMetadata plus project-level fields.
+//
+// The desktop codex-editor wrote two different shapes over its history. Newer
+// projects flatten the language pair onto the root as `sourceLanguage` /
+// `targetLanguage`. Older / Scripture-Burrito-aligned projects use a
+// `languages` array where each entry carries a `projectStatus` discriminator
+// of "source" or "target". We model both so importers can fall back when the
+// flat shape is missing.
+export interface CodexLanguageEntry {
+  tag: string;
+  refName?: string;
+  /** "source" | "target" — desktop sometimes uses these strings, sometimes
+   *  the LanguageProjectStatus enum value with the same wire format. */
+  projectStatus?: string;
+  name?: Record<string, string> | string;
+  [key: string]: unknown;
+}
+
 export interface CodexProjectMetadata {
   projectName?: string;
   sourceLanguage?: { tag: string; refName?: string };
   targetLanguage?: { tag: string; refName?: string };
+  /** Legacy/burrito shape — entries discriminated by `projectStatus`. */
+  languages?: CodexLanguageEntry[];
   meta?: Record<string, unknown>;
   [key: string]: unknown;
 }

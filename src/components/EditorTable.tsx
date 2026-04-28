@@ -5,7 +5,7 @@ import DOMPurify from "dompurify"
 import {
   Check, CheckCheck, Circle, Trash2, AlertTriangle, AlertCircle, RefreshCw,
   MessageCircle, Play, Pause, Mic, MicOff, Sparkles, FileText, History as HistoryIcon,
-  ArrowRight, Wand2,
+  ArrowRight, Wand2, Activity,
 } from "lucide-react"
 import type { CellData } from "@/hooks/useCells"
 import type { ScoredPair } from "@/lib/search/dual-index"
@@ -18,6 +18,7 @@ import { ExamplePanel } from "./ExamplePanel"
 import { HighlightedText, buildHighlightsFromExamples } from "./HighlightedText"
 import { HealthRing } from "./HealthRing"
 import { HealthBreakdown } from "./HealthBreakdown/HealthBreakdown"
+import { BreakdownContent } from "./HealthBreakdown/BreakdownContent"
 import { TranslatedEditor } from "./TranslatedEditor"
 import { CellWaveform } from "./CellWaveform"
 import { CellTtsButton } from "./CellTtsButton"
@@ -1304,8 +1305,8 @@ function EditorRow({
       </div>
 
       {/* Expansion panel — hosts the rich, lower-frequency context that used
-          to clutter the inline row: backtranslation, audio waveform +
-          transcript, infractions detail, edit history. */}
+          to clutter the inline row: health breakdown, backtranslation, audio
+          waveform + transcript, infractions detail, edit history. */}
       <div className="px-4 pb-2">
         <CellExpansion
           open={expanded}
@@ -1313,6 +1314,28 @@ function EditorRow({
           onTabChange={setExpansionTab}
           onClose={() => setExpanded(false)}
           tabs={[
+            {
+              value: "health",
+              icon: <Activity className="h-3 w-3" />,
+              label: "Health",
+              disabled: !breakdown,
+              content: breakdown ? (
+                <BreakdownContent
+                  breakdown={breakdown}
+                  scopeLabel="cell health"
+                  onCellClick={onJumpToCell}
+                  majorInfractionCount={cellInfractions.filter(
+                    (i) => ruleMap.get(i.ruleId)?.severity === "major",
+                  ).length}
+                  variant="inline"
+                />
+              ) : (
+                <p className="py-3 text-center text-xs text-muted-foreground">
+                  Composite health is off — turn it on in project settings to
+                  see this cell's breakdown.
+                </p>
+              ),
+            },
             {
               value: "backtranslation",
               icon: <FileText className="h-3 w-3" />,

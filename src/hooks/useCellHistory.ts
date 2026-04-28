@@ -68,11 +68,41 @@ export function validateCell(doc: Y.Doc, cellId: string, username: string): void
 /**
  * Explicit validation toggle (not tied to a content commit). Delegates to
  * the Yjs-native cell.edits implementation; no more __source mutation.
+ *
+ * Imported cells (legacy git projects, fresh .codex notebooks) often arrive
+ * with translated content but no `metadata.edits` history — there's nothing
+ * for the underlying toggler to attach a validator to, so it would silently
+ * no-op and leave the user wondering why "Validate" did nothing. When that
+ * happens we seed a value-edit from the current text, which makes the cell
+ * a first-class validatable record going forward.
  */
 export function toggleCellValidation(
   doc: Y.Doc, cellId: string, username: string, validate: boolean,
 ): void {
+  if (validate) {
+    const cellsMap = doc.getMap("cells")
+    const cell = cellsMap.get(cellId) as Y.Map<unknown> | undefined
+    if (cell) {
+      const arr = cell.get("edits") as Y.Array<Y.Map<unknown>> | undefined
+      const hasValueEdit = arr ? arrayHasValueEdit(arr) : false
+      if (!hasValueEdit) {
+        // Seed a value-edit from the current translated text and validate
+        // in one shot. validateCell handles the empty-text guard.
+        validateCell(doc, cellId, username)
+        return
+      }
+    }
+  }
   toggleCellEditsValidation(doc, cellId, username, validate)
+}
+
+function arrayHasValueEdit(arr: Y.Array<Y.Map<unknown>>): boolean {
+  for (let i = 0; i < arr.length; i++) {
+    const entry = arr.get(i)
+    const editMapArr = entry.get("editMap") as Y.Array<string> | undefined
+    if (editMapArr?.get(0) === "value") return true
+  }
+  return false
 }
 
 export function setCellBacktranslation(

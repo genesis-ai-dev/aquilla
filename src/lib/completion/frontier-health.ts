@@ -4,7 +4,8 @@
 // (cached for 60s) so the UI can enable AI controls without every callsite
 // making its own network check.
 
-import { useEffect, useState } from "react"
+import { useCallback, useEffect, useState } from "react"
+import { subscribeSession } from "@/lib/frontier/session-store"
 
 const HEALTH_URL = "https://api.frontierrnd.com/api/v2/health"
 const TTL_MS = 60_000
@@ -18,10 +19,14 @@ interface Snapshot {
 let snapshot: Snapshot | null = null
 let inflight: Promise<boolean> | null = null
 
-export async function checkFrontierHealth(): Promise<boolean> {
+export async function checkFrontierHealth(force = false): Promise<boolean> {
   const now = Date.now()
-  if (snapshot && now - snapshot.checkedAt < TTL_MS) return snapshot.available
-  if (inflight) return inflight
+  if (!force && snapshot && now - snapshot.checkedAt < TTL_MS) return snapshot.available
+  if (!force && inflight) return inflight
+  if (force) {
+    snapshot = null
+    inflight = null
+  }
   inflight = (async () => {
     try {
       const controller = new AbortController()
@@ -56,18 +61,27 @@ export function useFrontierHealth(): FrontierHealthState {
   const [available, setAvailable] = useState<boolean>(() => snapshot?.available ?? false)
   const [checking, setChecking] = useState<boolean>(() => !snapshot)
 
-  useEffect(() => {
+  const probe = useCallback((force = false) => {
     let cancelled = false
-    // Re-probe if the snapshot is stale or missing. checkFrontierHealth
-    // handles its own dedupe + caching.
     setChecking(true)
-    checkFrontierHealth().then((ok) => {
+    checkFrontierHealth(force).then((ok) => {
       if (cancelled) return
       setAvailable(ok)
       setChecking(false)
     })
     return () => { cancelled = true }
   }, [])
+
+  useEffect(() => probe(), [probe])
+
+  // The probe result is cached for 60s. If the user signs in (or switches
+  // accounts) while the cache holds a stale "unavailable" result — say the
+  // initial probe ran during a transient hiccup — the AI controls would stay
+  // off until the TTL elapses or the page is refreshed. Re-probe with a
+  // forced refresh on every session change so login flips the controls live.
+  useEffect(() => {
+    return subscribeSession(() => probe(true))
+  }, [probe])
 
   return { available, checking }
 }

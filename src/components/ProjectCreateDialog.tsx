@@ -68,8 +68,11 @@ export function ProjectCreateDialog({ onCreated }: ProjectCreateDialogProps) {
               id="source"
               value={sourceLanguage}
               onChange={(e) => setSourceLanguage(e.target.value)}
-              placeholder="en"
+              placeholder="e.g. en, es-419, ar"
             />
+            <p className="mt-1 text-[11px] text-muted-foreground">
+              BCP-47 tag of the language you're translating <em>from</em>.
+            </p>
           </div>
           <div>
             <Label htmlFor="target">Target Language</Label>
@@ -77,8 +80,11 @@ export function ProjectCreateDialog({ onCreated }: ProjectCreateDialogProps) {
               id="target"
               value={targetLanguage}
               onChange={(e) => setTargetLanguage(e.target.value)}
-              placeholder="fr"
+              placeholder="e.g. fr, sw, zh-Hant"
             />
+            <p className="mt-1 text-[11px] text-muted-foreground">
+              BCP-47 tag of the language you're translating <em>into</em>.
+            </p>
           </div>
           <Button type="submit" className="w-full">
             Create Project

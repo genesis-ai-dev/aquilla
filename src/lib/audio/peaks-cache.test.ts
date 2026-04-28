@@ -1,10 +1,15 @@
 import "fake-indexeddb/auto"
-import { beforeEach, describe, expect, it } from "vitest"
+import { beforeEach, describe, expect, it, vi } from "vitest"
 import { createOpfsFs } from "@/lib/git/opfs-fs"
 import { MemoryDirectoryHandle } from "@/lib/git/__test__/mem-fs-handles"
 import { __setRootForTests, peaksCacheGet, peaksCachePut } from "./peaks-cache"
+import {
+  __resetOpfsAvailabilityForTests,
+  isOpfsAvailable,
+} from "@/lib/storage/opfs-availability"
 
 beforeEach(() => {
+  __resetOpfsAvailabilityForTests()
   __setRootForTests(createOpfsFs(new MemoryDirectoryHandle("root") as unknown as FileSystemDirectoryHandle))
 })
 
@@ -35,5 +40,31 @@ describe("peaks cache", () => {
     const back = await peaksCacheGet(messy, 3)
     expect(back).not.toBeNull()
     expect(back!.length).toBe(3)
+  })
+
+  // Repro: in Safari Private Browsing the OPFS root throws UnknownError. We
+  // must treat that as a cache miss / no-op so the audio stack can still
+  // stream without the user seeing a Retry-waveform error state forever.
+  it("treats OPFS unavailability as a cache miss instead of throwing", async () => {
+    __setRootForTests(null)
+    const original = navigator.storage?.getDirectory
+    const stub = vi
+      .fn()
+      .mockRejectedValue(new DOMException("denied", "UnknownError"))
+    Object.defineProperty(navigator, "storage", {
+      value: { ...navigator.storage, getDirectory: stub },
+      configurable: true,
+    })
+    try {
+      const back = await peaksCacheGet("audio-x", 200)
+      expect(back).toBeNull()
+      await expect(peaksCachePut("audio-x", new Float32Array(200))).resolves.toBeUndefined()
+      expect(isOpfsAvailable()).toBe(false)
+    } finally {
+      Object.defineProperty(navigator, "storage", {
+        value: { ...navigator.storage, getDirectory: original },
+        configurable: true,
+      })
+    }
   })
 })

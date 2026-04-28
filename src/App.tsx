@@ -14,10 +14,13 @@ import { SyncingProvider, useSyncing } from "@/context/SyncingContext"
 import { AiModelConsentDialog } from "@/components/AiModelConsentDialog"
 import { AiModelDownloadChip } from "@/components/AiModelDownloadChip"
 import { AudioBulkProgressBanner } from "@/components/AudioBulkProgressBanner"
+import { PrivateModeBanner } from "@/components/PrivateModeBanner"
 import { hydratePrefetchStatus } from "@/lib/audio/prefetch"
+import { probeOpfsAvailability } from "@/lib/storage/opfs-availability"
 import { useGlobalAudioShortcuts } from "@/hooks/useGlobalAudioShortcuts"
 
 void hydratePrefetchStatus()
+void probeOpfsAvailability()
 
 function GlobalAudioShortcuts() {
   useGlobalAudioShortcuts()
@@ -37,6 +40,7 @@ function SyncFreezeOverlay() {
 export default function App() {
   return (
     <SyncingProvider>
+      <PrivateModeBanner />
       <SyncFreezeOverlay />
       <AppRoutes />
       <AiModelConsentDialog />

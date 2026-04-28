@@ -4,17 +4,30 @@
 // small as the cache grows.
 
 import { createOpfsFs, type OpfsFs } from "@/lib/git/opfs-fs"
+import { markOpfsUnavailable } from "@/lib/storage/opfs-availability"
 
 let rootFsCache: OpfsFs | null = null
 
-async function rootFs(): Promise<OpfsFs> {
+// Returns null when OPFS is unavailable (Safari Private Browsing, locked-down
+// contexts). Callers must treat null as "no cache" rather than an error so the
+// audio stack can still stream and decode without persistence.
+async function rootFs(): Promise<OpfsFs | null> {
   if (rootFsCache) return rootFsCache
-  const handle = await navigator.storage.getDirectory()
-  rootFsCache = createOpfsFs(handle)
-  return rootFsCache
+  try {
+    const handle = await navigator.storage?.getDirectory?.()
+    if (!handle) {
+      markOpfsUnavailable()
+      return null
+    }
+    rootFsCache = createOpfsFs(handle)
+    return rootFsCache
+  } catch {
+    markOpfsUnavailable()
+    return null
+  }
 }
 
-export function __setRootForTests(fs: OpfsFs): void {
+export function __setRootForTests(fs: OpfsFs | null): void {
   rootFsCache = fs
 }
 
@@ -33,6 +46,7 @@ export async function peaksCacheGet(
   bins: number,
 ): Promise<Float32Array | null> {
   const fs = await rootFs()
+  if (!fs) return null
   try {
     const data = await fs.promises.readFile(cachePath(audioId, bins))
     const bytes = typeof data === "string" ? new TextEncoder().encode(data) : data
@@ -48,6 +62,7 @@ export async function peaksCachePut(
   peaks: Float32Array,
 ): Promise<void> {
   const fs = await rootFs()
+  if (!fs) return
   const view = new Uint8Array(peaks.buffer, peaks.byteOffset, peaks.byteLength)
   await fs.promises.writeFile(cachePath(audioId, peaks.length), view)
 }

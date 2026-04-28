@@ -3,9 +3,9 @@
 // every previously-downloading model finishes, briefly displays a "Ready"
 // confirmation so the user knows the work completed before the chip hides.
 
-import { CheckCircle2, Loader2, X } from "lucide-react"
+import { AlertCircle, CheckCircle2, Loader2, RotateCw, X } from "lucide-react"
 import { useEffect, useRef, useState } from "react"
-import { useModelStatus, type ModelId } from "@/lib/audio/prefetch"
+import { prefetchAiModels, useModelStatus, type ModelId } from "@/lib/audio/prefetch"
 import { cn } from "@/lib/utils"
 
 const READY_FLASH_MS = 4000
@@ -21,6 +21,14 @@ interface ModelView {
   loaded: number
   total: number
 }
+
+interface ErrorView {
+  id: ModelId
+  label: string
+  message: string
+}
+
+const LABELS: Record<ModelId, string> = { whisper: "Whisper", kokoro: "Kokoro" }
 
 export function AiModelDownloadChip() {
   const whisper = useModelStatus("whisper")
@@ -56,13 +64,29 @@ export function AiModelDownloadChip() {
   }, [readyFlash])
 
   const downloads: ModelView[] = []
-  if (whisper.kind === "downloading") downloads.push({ id: "whisper", label: "Whisper", loaded: whisper.loaded, total: whisper.total })
-  if (kokoro.kind === "downloading") downloads.push({ id: "kokoro", label: "Kokoro", loaded: kokoro.loaded, total: kokoro.total })
+  if (whisper.kind === "downloading") downloads.push({ id: "whisper", label: LABELS.whisper, loaded: whisper.loaded, total: whisper.total })
+  if (kokoro.kind === "downloading") downloads.push({ id: "kokoro", label: LABELS.kokoro, loaded: kokoro.loaded, total: kokoro.total })
+
+  const errors: ErrorView[] = []
+  if (whisper.kind === "error") errors.push({ id: "whisper", label: LABELS.whisper, message: whisper.message })
+  if (kokoro.kind === "error") errors.push({ id: "kokoro", label: LABELS.kokoro, message: kokoro.message })
+
+  // Re-show the chip if a new failure happens after the user dismissed an
+  // earlier success — the error needs attention.
+  useEffect(() => {
+    if (errors.length > 0) setDismissed(false)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [whisper.kind, kokoro.kind])
 
   if (dismissed) return null
-  if (downloads.length === 0 && readyFlash.length === 0) return null
+  if (downloads.length === 0 && readyFlash.length === 0 && errors.length === 0) return null
 
-  const allReady = downloads.length === 0 && readyFlash.length > 0
+  const allReady = downloads.length === 0 && errors.length === 0 && readyFlash.length > 0
+  const hasErrors = errors.length > 0
+
+  const handleRetry = (id: ModelId): void => {
+    void prefetchAiModels({ models: [id] })
+  }
 
   return (
     <div
@@ -73,13 +97,17 @@ export function AiModelDownloadChip() {
       )}
     >
       <div className="mb-2 flex items-center gap-2">
-        {allReady ? (
+        {hasErrors ? (
+          <AlertCircle className="h-3.5 w-3.5 text-destructive" />
+        ) : allReady ? (
           <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500" />
         ) : (
           <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" />
         )}
         <span className="font-medium">
-          {allReady ? "AI models ready" : "Downloading AI models"}
+          {hasErrors
+            ? errors.length === 1 ? `${errors[0].label} download failed` : "AI model downloads failed"
+            : allReady ? "AI models ready" : "Downloading AI models"}
         </span>
         <button
           type="button"
@@ -120,6 +148,27 @@ export function AiModelDownloadChip() {
               <CheckCircle2 className="h-3 w-3" />
               <span className="capitalize">{id}</span>
               <span className="text-muted-foreground">ready to use</span>
+            </li>
+          ))}
+        </ul>
+      )}
+
+      {errors.length > 0 && (
+        <ul className="space-y-2">
+          {errors.map((err) => (
+            <li key={err.id} className="space-y-1">
+              <p className="text-[11px] leading-snug text-destructive" title={err.message}>
+                <span className="font-medium">{err.label}:</span>{" "}
+                {err.message}
+              </p>
+              <button
+                type="button"
+                onClick={() => handleRetry(err.id)}
+                className="inline-flex items-center gap-1 rounded border border-amber-300 bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-800 transition-colors hover:bg-amber-100 dark:border-amber-900/40 dark:bg-amber-950/40 dark:text-amber-200 dark:hover:bg-amber-900/40"
+              >
+                <RotateCw className="h-3 w-3" />
+                Retry
+              </button>
             </li>
           ))}
         </ul>

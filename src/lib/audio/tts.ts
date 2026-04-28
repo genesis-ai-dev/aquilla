@@ -46,12 +46,15 @@ let workerSeq = 0
 
 async function getWorker(): Promise<Worker> {
   if (workerPromise) return workerPromise
-  workerPromise = (async () => {
+  // Clear on rejection so retries can re-attempt — see notes in transcribe.ts.
+  const p = (async () => {
     const mod = await import("./kokoro-worker?worker")
     const Ctor = mod.default as new () => Worker
     return new Ctor()
   })()
-  return workerPromise
+  workerPromise = p
+  p.catch(() => { if (workerPromise === p) workerPromise = null })
+  return p
 }
 
 export interface SynthOptions {

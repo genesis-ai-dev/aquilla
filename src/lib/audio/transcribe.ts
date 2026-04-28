@@ -49,14 +49,18 @@ let workerSeq = 0
 
 async function getWorker(): Promise<Worker> {
   if (workerPromise) return workerPromise
-  workerPromise = (async () => {
-    // Dynamic import lets Vite emit the worker as a separate chunk; the main
-    // bundle never pulls in transformers.js until transcription is requested.
+  // Dynamic import lets Vite emit the worker as a separate chunk; the main
+  // bundle never pulls in transformers.js until transcription is requested.
+  // Clear the cached promise on rejection so retries can re-attempt the import
+  // (Brave Shields / Tor / offline can fail this transiently).
+  const p = (async () => {
     const mod = await import("./whisper-worker?worker")
     const Ctor = mod.default as new () => Worker
     return new Ctor()
   })()
-  return workerPromise
+  workerPromise = p
+  p.catch(() => { if (workerPromise === p) workerPromise = null })
+  return p
 }
 
 export async function audioBytesToWhisperPcm(bytes: Uint8Array): Promise<Float32Array> {

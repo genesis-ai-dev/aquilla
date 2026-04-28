@@ -134,67 +134,121 @@ let whisperWorkerPromise: Promise<Worker> | null = null
 let kokoroWorkerPromise: Promise<Worker> | null = null
 let prefetchSeq = 0
 
+// On dynamic-import failure (Brave Shields blocks the asset, network down,
+// SOCKS proxy refusing) the cached promise would otherwise stay rejected
+// forever — clearing it lets the user retry.
 async function getWhisperWorker(): Promise<Worker> {
   if (whisperWorkerPromise) return whisperWorkerPromise
-  whisperWorkerPromise = (async () => {
+  const p = (async () => {
     const mod = await import("./whisper-worker?worker")
     return new (mod.default as new () => Worker)()
   })()
-  return whisperWorkerPromise
+  whisperWorkerPromise = p
+  p.catch(() => { if (whisperWorkerPromise === p) whisperWorkerPromise = null })
+  return p
 }
 async function getKokoroWorker(): Promise<Worker> {
   if (kokoroWorkerPromise) return kokoroWorkerPromise
-  kokoroWorkerPromise = (async () => {
+  const p = (async () => {
     const mod = await import("./kokoro-worker?worker")
     return new (mod.default as new () => Worker)()
   })()
-  return kokoroWorkerPromise
+  kokoroWorkerPromise = p
+  p.catch(() => { if (kokoroWorkerPromise === p) kokoroWorkerPromise = null })
+  return p
 }
 
 async function warmWhisper(): Promise<void> {
   if (getModelStatus("whisper").kind === "ready") return
   setStatus("whisper", { kind: "downloading", loaded: 0, total: 0, file: "" })
-  const worker = await getWhisperWorker()
+  let worker: Worker
+  try {
+    worker = await getWhisperWorker()
+  } catch (e) {
+    const message = e instanceof Error ? e.message : String(e)
+    setStatus("whisper", { kind: "error", message: friendlyDownloadError(message) })
+    throw e
+  }
   const requestId = `warm-w-${++prefetchSeq}`
-  await new Promise<void>((resolve, reject) => {
-    const onMessage = (event: MessageEvent<WhisperProgress | WhisperWarmed | WhisperError>) => {
-      const m = event.data
-      if (m.requestId !== requestId) return
-      if (m.type === "progress") {
-        setStatus("whisper", { kind: "downloading", loaded: m.loaded, total: m.total, file: m.file })
-        return
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const onMessage = (event: MessageEvent<WhisperProgress | WhisperWarmed | WhisperError>) => {
+        const m = event.data
+        if (m.requestId !== requestId) return
+        if (m.type === "progress") {
+          setStatus("whisper", { kind: "downloading", loaded: m.loaded, total: m.total, file: m.file })
+          return
+        }
+        worker.removeEventListener("message", onMessage)
+        if (m.type === "warmed") { markReady("whisper"); resolve() }
+        else { setStatus("whisper", { kind: "error", message: friendlyDownloadError(m.message) }); reject(new Error(m.message)) }
       }
-      worker.removeEventListener("message", onMessage)
-      if (m.type === "warmed") { markReady("whisper"); resolve() }
-      else { setStatus("whisper", { kind: "error", message: m.message }); reject(new Error(m.message)) }
-    }
-    worker.addEventListener("message", onMessage)
-    const req: WhisperWarmupRequest = { type: "warmup", requestId }
-    worker.postMessage(req)
-  })
+      worker.addEventListener("message", onMessage)
+      const req: WhisperWarmupRequest = { type: "warmup", requestId }
+      worker.postMessage(req)
+    })
+  } catch (e) {
+    // Worker may be in a half-initialised state — terminate so the next retry
+    // creates a fresh one rather than reusing a broken pipeline.
+    try { worker.terminate() } catch { /* nothing to clean up */ }
+    if (whisperWorkerPromise) whisperWorkerPromise = null
+    throw e
+  }
 }
 
 async function warmKokoro(): Promise<void> {
   if (getModelStatus("kokoro").kind === "ready") return
   setStatus("kokoro", { kind: "downloading", loaded: 0, total: 0, file: "" })
-  const worker = await getKokoroWorker()
+  let worker: Worker
+  try {
+    worker = await getKokoroWorker()
+  } catch (e) {
+    const message = e instanceof Error ? e.message : String(e)
+    setStatus("kokoro", { kind: "error", message: friendlyDownloadError(message) })
+    throw e
+  }
   const requestId = `warm-k-${++prefetchSeq}`
-  await new Promise<void>((resolve, reject) => {
-    const onMessage = (event: MessageEvent<KokoroProgress | KokoroWarmed | KokoroError>) => {
-      const m = event.data
-      if (m.requestId !== requestId) return
-      if (m.type === "progress") {
-        setStatus("kokoro", { kind: "downloading", loaded: m.loaded, total: m.total, file: m.file })
-        return
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const onMessage = (event: MessageEvent<KokoroProgress | KokoroWarmed | KokoroError>) => {
+        const m = event.data
+        if (m.requestId !== requestId) return
+        if (m.type === "progress") {
+          setStatus("kokoro", { kind: "downloading", loaded: m.loaded, total: m.total, file: m.file })
+          return
+        }
+        worker.removeEventListener("message", onMessage)
+        if (m.type === "warmed") { markReady("kokoro"); resolve() }
+        else { setStatus("kokoro", { kind: "error", message: friendlyDownloadError(m.message) }); reject(new Error(m.message)) }
       }
-      worker.removeEventListener("message", onMessage)
-      if (m.type === "warmed") { markReady("kokoro"); resolve() }
-      else { setStatus("kokoro", { kind: "error", message: m.message }); reject(new Error(m.message)) }
-    }
-    worker.addEventListener("message", onMessage)
-    const req: KokoroWarmupRequest = { type: "warmup", requestId }
-    worker.postMessage(req)
-  })
+      worker.addEventListener("message", onMessage)
+      const req: KokoroWarmupRequest = { type: "warmup", requestId }
+      worker.postMessage(req)
+    })
+  } catch (e) {
+    try { worker.terminate() } catch { /* nothing to clean up */ }
+    if (kokoroWorkerPromise) kokoroWorkerPromise = null
+    throw e
+  }
+}
+
+// Map the raw browser/network errors we see most often (Brave Shields, Tor
+// SOCKS, offline) to a single line the user can act on.
+function friendlyDownloadError(raw: string): string {
+  const r = raw.toLowerCase()
+  if (
+    r.includes("err_blocked_by_client") ||
+    r.includes("blocked by client") ||
+    r.includes("err_socks_connection_failed") ||
+    r.includes("failed to fetch") ||
+    r.includes("network") ||
+    r.includes("err_internet_disconnected") ||
+    r.includes("err_timed_out") ||
+    r.includes("dynamically imported module")
+  ) {
+    return "Network blocked the download. Check Brave Shields / Tor / VPN, then retry."
+  }
+  return raw
 }
 
 export interface PrefetchOptions {

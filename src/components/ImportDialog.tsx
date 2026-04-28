@@ -82,8 +82,8 @@ export function ImportDialog({
           <EBiblePanel
             sourceLanguage={sourceLanguage}
             targetLanguage={targetLanguage}
-            onImported={(ref) => {
-              onImported([ref])
+            onImported={(refs) => {
+              onImported(refs)
               onOpenChange(false)
             }}
           />
@@ -182,7 +182,7 @@ function UploadPanel({ sourceLanguage, targetLanguage, onImported }: UploadPanel
 interface EBiblePanelProps {
   sourceLanguage: string
   targetLanguage: string
-  onImported: (ref: FileReference) => void
+  onImported: (refs: FileReference[]) => void
 }
 
 function EBiblePanel({ sourceLanguage, targetLanguage, onImported }: EBiblePanelProps) {
@@ -233,14 +233,14 @@ function EBiblePanel({ sourceLanguage, targetLanguage, onImported }: EBiblePanel
     abortRef.current = new AbortController()
 
     try {
-      const ref = await importEBible(
+      const refs = await importEBible(
         selected,
         sourceLanguage,
         targetLanguage,
         setProgress,
         abortRef.current.signal
       )
-      onImported(ref)
+      onImported(refs)
     } catch (err) {
       setImportErr(err instanceof Error ? err.message : "Import failed")
     } finally {

@@ -94,13 +94,18 @@ function buildCellData(
   fileId: string,
   username: string,
   requiredValidations: number,
+  sourceCell?: Y.Map<unknown>,
 ): CellData {
+  // For paired (source + target) files we read source-side fields out of
+  // `sourceCell` and target-side fields out of `cell`. For legacy unified
+  // files (no sourceCell passed) everything comes from the single cell.
+  const sideForSource = sourceCell ?? cell
   const frag = cell.get("translatedXml") as Y.XmlFragment | undefined
   const translated = frag ? getPlainText(frag) : ((cell.get("translated") as string) || "")
   const historyArr = cell.get("history") as Y.Array<CellHistoryEntry> | undefined
   const history: CellHistoryEntry[] = historyArr ? historyArr.toArray() : []
   const threads = extractThreadsFromCell(cell)
-  const source = cell.get("__source") as
+  const source = (sideForSource.get("__source") ?? cell.get("__source")) as
     | { metadata?: {
         attachments?: Record<string, CodexCellAttachment>
         selectedAudioId?: string
@@ -136,22 +141,22 @@ function buildCellData(
   return {
     id: cell.get("id") as string,
     fileId,
-    original: cell.get("original") as string,
-    originalHtml: cell.get("originalHtml") as string | undefined,
+    original: (sideForSource.get("original") as string) || "",
+    originalHtml: sideForSource.get("originalHtml") as string | undefined,
     translated,
     ...(frag ? { translatedXml: frag } : {}),
-    context: cell.get("context") as string,
-    group: cell.get("group") as string,
-    section: cell.get("section") as string | undefined,
-    globalReferences: cell.get("globalReferences") as string[] | undefined,
-    type: cell.get("type") as string,
+    context: (sideForSource.get("context") as string) || "",
+    group: (sideForSource.get("group") as string) || "",
+    section: sideForSource.get("section") as string | undefined,
+    globalReferences: sideForSource.get("globalReferences") as string[] | undefined,
+    type: (sideForSource.get("type") as string) || "text",
     status: deriveStatus(translated, history),
     validationStatus,
     activeValidators,
     validationHistory,
     history,
     threads,
-    sourceLocation: cell.get("sourceLocation") as SourceLocation | undefined,
+    sourceLocation: sideForSource.get("sourceLocation") as SourceLocation | undefined,
     backtranslation: cell.get("backtranslation") as string | undefined,
     backtranslationUpdatedAt: cell.get("backtranslationUpdatedAt") as string | undefined,
     backtranslationForText: cell.get("backtranslationForText") as string | undefined,
@@ -165,7 +170,13 @@ function buildCellData(
   }
 }
 
-export function useCells(doc: Y.Doc | null, fileId: string, username = "local", requiredValidations = 1): CellData[] {
+export function useCells(
+  doc: Y.Doc | null,
+  fileId: string,
+  username = "local",
+  requiredValidations = 1,
+  sourceDoc: Y.Doc | null = null,
+): CellData[] {
   const [cells, setCells] = useState<CellData[]>([])
   // Per-cell cache keyed by cell id. Entries are reused across observer fires
   // when the cell's Yjs content didn't change, so consumers see referentially
@@ -177,6 +188,7 @@ export function useCells(doc: Y.Doc | null, fileId: string, username = "local", 
 
     const cellsMap = doc.getMap("cells")
     const orderArray = doc.getArray<string>("order")
+    const sourceCellsMap = sourceDoc?.getMap("cells") ?? null
     const cache = cacheRef.current
     cache.clear()
 
@@ -193,7 +205,10 @@ export function useCells(doc: Y.Doc | null, fileId: string, username = "local", 
       if (entry) return entry
       const cell = cellsMap.get(id) as Y.Map<unknown> | undefined
       if (!cell) return null
-      entry = buildCellData(cell, fileId, username, requiredValidations)
+      const sourceCell = sourceCellsMap
+        ? (sourceCellsMap.get(id) as Y.Map<unknown> | undefined)
+        : undefined
+      entry = buildCellData(cell, fileId, username, requiredValidations, sourceCell)
       cache.set(id, entry)
       return entry
     }
@@ -304,11 +319,19 @@ export function useCells(doc: Y.Doc | null, fileId: string, username = "local", 
 
     cellsMap.observeDeep(onCellsChange)
     orderArray.observe(onOrderChange)
+    // When the paired source's cells or order change (rare — sources are
+    // generally immutable after import — but possible after a snapshot
+    // restore or rename), invalidate just like the target's own changes.
+    const sourceOrderArray = sourceDoc?.getArray<string>("order") ?? null
+    if (sourceCellsMap) sourceCellsMap.observeDeep(onCellsChange)
+    if (sourceOrderArray) sourceOrderArray.observe(onOrderChange)
     return () => {
       cellsMap.unobserveDeep(onCellsChange)
       orderArray.unobserve(onOrderChange)
+      if (sourceCellsMap) sourceCellsMap.unobserveDeep(onCellsChange)
+      if (sourceOrderArray) sourceOrderArray.unobserve(onOrderChange)
     }
-  }, [doc, fileId, username, requiredValidations])
+  }, [doc, sourceDoc, fileId, username, requiredValidations])
 
   return cells
 }

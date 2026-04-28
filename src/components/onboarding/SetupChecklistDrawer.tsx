@@ -1,5 +1,5 @@
-import { useState } from "react"
-import { Check, ChevronDown, ChevronRight } from "lucide-react"
+import { CheckCircle2, Sparkles } from "lucide-react"
+import { Button } from "@/components/ui/button"
 import {
   Sheet,
   SheetContent,
@@ -9,6 +9,7 @@ import {
 } from "@/components/ui/sheet"
 import type { ChecklistState } from "@/hooks/useSetupChecklist"
 import type { ProjectRecord } from "@/lib/parsers/types"
+import { ChecklistItem } from "./checklist/ChecklistItem"
 import { AiProviderStep } from "./checklist/AiProviderStep"
 import { AiInstructionsStep } from "./checklist/AiInstructionsStep"
 import { InviteStep } from "./checklist/InviteStep"
@@ -22,44 +23,8 @@ interface SetupChecklistDrawerProps {
   state: ChecklistState
   onProjectUpdated: (p: ProjectRecord) => void
   onSharesChanged: () => void
-}
-
-function ChecklistItem({
-  title,
-  complete,
-  children,
-}: {
-  title: string
-  complete: boolean
-  children: React.ReactNode
-}) {
-  const [open, setOpen] = useState(!complete)
-
-  return (
-    <div className="rounded-lg border">
-      <button
-        className="flex w-full items-center gap-3 p-3 text-left text-sm font-medium hover:bg-accent/50"
-        onClick={() => setOpen(!open)}
-        aria-expanded={open}
-      >
-        <div
-          className={
-            "flex h-5 w-5 shrink-0 items-center justify-center rounded-full " +
-            (complete ? "bg-green-100 text-green-600" : "border border-muted-foreground/40")
-          }
-        >
-          {complete && <Check className="h-3 w-3" />}
-        </div>
-        <span className="flex-1">{title}</span>
-        {open ? (
-          <ChevronDown className="h-4 w-4 text-muted-foreground" />
-        ) : (
-          <ChevronRight className="h-4 w-4 text-muted-foreground" />
-        )}
-      </button>
-      {open && <div className="border-t px-3 pb-3 pt-2">{children}</div>}
-    </div>
-  )
+  /** Persist dismissal and close the drawer. Surfaced as "All set" when 100%. */
+  onDismiss: () => void
 }
 
 export function SetupChecklistDrawer({
@@ -69,44 +34,115 @@ export function SetupChecklistDrawer({
   state,
   onProjectUpdated,
   onSharesChanged,
+  onDismiss,
 }: SetupChecklistDrawerProps) {
+  const allDone = state.completedCount === state.totalCount && state.totalCount > 0
+  const progress = state.totalCount === 0 ? 0 : state.completedCount / state.totalCount
+
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent side="right" className="w-96">
-        <SheetHeader>
-          <SheetTitle>Project Setup</SheetTitle>
+      <SheetContent side="right" className="flex w-[28rem] flex-col">
+        <SheetHeader className="border-b">
+          <SheetTitle className="flex items-center gap-2">
+            <Sparkles className="h-4 w-4 text-primary" aria-hidden />
+            Project setup
+          </SheetTitle>
           <SheetDescription>
-            {state.completedCount}/{state.totalCount} complete
+            A few quick steps so AI suggestions, voice, and collaboration are
+            ready before you dive in.
           </SheetDescription>
+          <ProgressBar value={progress} />
+          <p className="text-xs text-muted-foreground">
+            {state.completedCount} of {state.totalCount} complete
+          </p>
         </SheetHeader>
 
         <div className="flex-1 min-h-0 overflow-y-auto p-4 space-y-3">
-          <ChecklistItem title="Choose AI provider" complete={state.aiProvider}>
+          <ChecklistItem
+            title="Choose an AI provider"
+            description="Picks the engine that powers translation suggestions and rule autofixes."
+            complete={state.aiProvider}
+          >
             <AiProviderStep project={project} onUpdated={onProjectUpdated} />
           </ChecklistItem>
 
-          <ChecklistItem title="Set AI instructions" complete={state.aiInstructions}>
+          <ChecklistItem
+            title="Set translation instructions"
+            description="A short system prompt that shapes tone, formality, and style."
+            complete={state.aiInstructions}
+          >
             <AiInstructionsStep project={project} onUpdated={onProjectUpdated} />
           </ChecklistItem>
 
-          <ChecklistItem title="Invite collaborators" complete={state.collaborators}>
-            <InviteStep projectId={project.id} username={project.username || "anonymous"} onSharesChanged={onSharesChanged} />
+          <ChecklistItem
+            title="Invite collaborators"
+            description="Translators and reviewers join with the same permissions you choose."
+            complete={state.collaborators}
+          >
+            <InviteStep
+              projectId={project.id}
+              username={project.username || "anonymous"}
+              onSharesChanged={onSharesChanged}
+            />
           </ChecklistItem>
 
-          <ChecklistItem title="Enable AI voice & transcription" complete={state.aiModels}>
+          <ChecklistItem
+            title="Enable in-browser voice & transcription"
+            description="One-time download (~220 MB). Models run locally — audio never leaves your device."
+            complete={state.aiModels}
+          >
             <AiModelsStep />
           </ChecklistItem>
 
           <ComingSoonStep
             title="Upload project standards"
-            description="Upload style guides and translation standards that AI will follow."
+            description="Style guides and translation standards the AI will follow."
           />
           <ComingSoonStep
             title="Import glossary / translation memory"
-            description="Import existing translation memories or glossaries to improve consistency."
+            description="Existing TM or glossaries to keep terminology consistent."
           />
+        </div>
+
+        <div className="border-t bg-card/40 p-4">
+          {allDone ? (
+            <div className="space-y-2">
+              <div className="flex items-center gap-2 text-sm font-medium text-emerald-700 dark:text-emerald-400">
+                <CheckCircle2 className="h-4 w-4" />
+                You're all set
+              </div>
+              <p className="text-xs text-muted-foreground">
+                You can reopen this checklist any time from the project header.
+              </p>
+              <Button onClick={onDismiss} className="w-full">
+                Hide checklist and start translating
+              </Button>
+            </div>
+          ) : (
+            <Button variant="ghost" onClick={onDismiss} className="w-full">
+              Skip for now
+            </Button>
+          )}
         </div>
       </SheetContent>
     </Sheet>
+  )
+}
+
+function ProgressBar({ value }: { value: number }) {
+  const pct = Math.max(0, Math.min(1, value))
+  return (
+    <div
+      className="h-1 w-full overflow-hidden rounded-full bg-muted"
+      role="progressbar"
+      aria-valuenow={Math.round(pct * 100)}
+      aria-valuemin={0}
+      aria-valuemax={100}
+    >
+      <div
+        className="h-full bg-primary transition-[width] duration-200"
+        style={{ width: `${pct * 100}%` }}
+      />
+    </div>
   )
 }

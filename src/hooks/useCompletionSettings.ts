@@ -5,6 +5,13 @@ import type { ProjectRecord, CompletionSettings } from "@/lib/parsers/types"
 
 /**
  * Build a full CompletionSettings from partial overrides, filling defaults.
+ *
+ * `systemPrompt` intentionally defaults to "" (not DEFAULT_SYSTEM_PROMPT).
+ * Otherwise saving any other field — say, the AI provider — would silently
+ * mark the project as having custom instructions, completing the "Set AI
+ * instructions" checklist step the user never touched. Consumers (see
+ * useCompletion, InstructionsSection) already fall back to
+ * DEFAULT_SYSTEM_PROMPT at read time, so leaving it blank here is safe.
  */
 export function buildCompletionSettings(
   base: Partial<CompletionSettings> | undefined,
@@ -17,7 +24,7 @@ export function buildCompletionSettings(
     model: overrides.model ?? base?.model ?? "",
     maxTokens: overrides.maxTokens ?? base?.maxTokens ?? 512,
     temperature: overrides.temperature ?? base?.temperature ?? 0.3,
-    systemPrompt: overrides.systemPrompt ?? base?.systemPrompt ?? DEFAULT_SYSTEM_PROMPT,
+    systemPrompt: overrides.systemPrompt ?? base?.systemPrompt ?? "",
     llmHealthPenalty: overrides.llmHealthPenalty ?? base?.llmHealthPenalty ?? 0.1,
   }
 }

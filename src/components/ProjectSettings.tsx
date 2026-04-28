@@ -102,7 +102,7 @@ export function ProjectSettings() {
       setModel(project.completionSettings.model)
       setMaxTokens(project.completionSettings.maxTokens)
       setTemperature(project.completionSettings.temperature)
-      setSystemPrompt(project.completionSettings.systemPrompt)
+      setSystemPrompt(project.completionSettings.systemPrompt || DEFAULT_SYSTEM_PROMPT)
       setLlmHealthPenalty(project.completionSettings.llmHealthPenalty ?? 0.1)
     }
     setAutoSyncEnabled(project.syncSettings?.autoSync.enabled ?? false)

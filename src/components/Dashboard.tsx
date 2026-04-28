@@ -29,6 +29,7 @@ export function Dashboard() {
   const [projects, setProjects] = useState<ProjectRecord[]>([])
   const [trashed, setTrashed] = useState<ProjectRecord[]>([])
   const [cloudProjects, setCloudProjects] = useState<CloudProjectSummary[]>([])
+  const [cloudProjectsLoaded, setCloudProjectsLoaded] = useState(false)
   const [loading, setLoading] = useState(true)
   const [pendingTrashId, setPendingTrashId] = useState<string | null>(null)
   const [trashExpanded, setTrashExpanded] = useState(false)
@@ -55,15 +56,24 @@ export function Dashboard() {
 
   // Cloud-side discovery: list every project the user has access to on the
   // server. Dedup against IDB happens at render time (see cloudOnly).
+  // The cloudProjectsLoaded flag gates the onboarding redirect — without it
+  // we'd briefly redirect signed-in users with cloud-only projects to the
+  // wizard before the cloud list arrives.
   useEffect(() => {
     if (!session?.jwt) {
       setCloudProjects([])
+      setCloudProjectsLoaded(true)
       return
     }
     let cancelled = false
-    fetchAccessibleProjects(session.jwt).then((list) => {
-      if (!cancelled) setCloudProjects(list)
-    })
+    setCloudProjectsLoaded(false)
+    fetchAccessibleProjects(session.jwt)
+      .then((list) => {
+        if (!cancelled) setCloudProjects(list)
+      })
+      .finally(() => {
+        if (!cancelled) setCloudProjectsLoaded(true)
+      })
     return () => { cancelled = true }
   }, [session?.jwt])
 
@@ -135,8 +145,15 @@ export function Dashboard() {
     return false
   }
 
+  // Onboarding gate: only steer first-time users into the wizard. A signed-in
+  // user with cloud projects on another device should land on the dashboard
+  // and see those projects, not the "create your first project" flow. Wait
+  // for cloudProjectsLoaded so we don't flash-redirect before the list arrives.
   const onboardingComplete = localStorage.getItem("codex:onboardingComplete") === "true"
-  if (!loading && !onboardingComplete && projects.length === 0 && trashed.length === 0) {
+  const hasAnyProject =
+    projects.length > 0 || trashed.length > 0 || cloudProjects.length > 0
+  const cloudReady = !session?.jwt || cloudProjectsLoaded
+  if (!loading && cloudReady && !onboardingComplete && !hasAnyProject) {
     return <Navigate to="/onboarding" replace />
   }
 

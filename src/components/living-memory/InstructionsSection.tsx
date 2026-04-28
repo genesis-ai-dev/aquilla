@@ -18,7 +18,7 @@ function resolvePrompt(template: string, src: string, tgt: string): string {
 export function InstructionsSection({
   projectId, systemPrompt, sourceLanguage, targetLanguage,
 }: Props) {
-  const resolved = resolvePrompt(systemPrompt ?? DEFAULT_SYSTEM_PROMPT, sourceLanguage, targetLanguage)
+  const resolved = resolvePrompt(systemPrompt || DEFAULT_SYSTEM_PROMPT, sourceLanguage, targetLanguage)
   return (
     <Card>
       <CardHeader>

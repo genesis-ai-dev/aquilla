@@ -85,6 +85,7 @@ import type { ProjectRecord } from "@/lib/parsers/types"
 import { readValidationCount } from "@/lib/progress/read-validation-count"
 import { resolveHealthConfig } from "@/lib/health/config-resolver"
 import { useSetupChecklist } from "@/hooks/useSetupChecklist"
+import { useProjectSettingsSync } from "@/hooks/useProjectSettingsSync"
 import { SetupChecklistDrawer } from "./onboarding/SetupChecklistDrawer"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { useFeatureFlag } from "@/hooks/useFeatureFlag"
@@ -401,6 +402,11 @@ export function ProjectWorkspace() {
   // meta.projectDeletedAt; this observer reconciles IDB so the
   // TrashedProjectScreen renders on the next refresh.
   useProjectTombstoneObserver(doc, project?.id ?? null, refresh)
+
+  // Cross-collaborator sync for AI provider/instructions: piggybacks on the
+  // active file's Y.Doc meta so settings flow between clients without a
+  // dedicated project-meta room.
+  useProjectSettingsSync(doc, project ?? null, refresh)
 
   // Drives the editor-area rendering: loading skeleton vs. empty state vs.
   // EditorTable. Centralizes the decision so we don't flash between states
@@ -956,6 +962,10 @@ export function ProjectWorkspace() {
           state={checklistState}
           onProjectUpdated={handleProjectUpdated}
           onSharesChanged={refreshChecklistShares}
+          onDismiss={() => {
+            void dismissChecklist()
+            setChecklistOpen(false)
+          }}
         />
       )}
       {project && (

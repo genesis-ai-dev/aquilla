@@ -199,17 +199,17 @@ export function RuleSuggestDialog({ files, completionSettings, onAdd, projectId 
                     <div className="flex items-start gap-2">
                       <Icon className={`h-4 w-4 flex-shrink-0 mt-0.5 ${sevColor}`} />
                       <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2">
-                          <span className="text-sm font-medium">{s.name}</span>
-                          <span className={`rounded px-1.5 py-0.5 text-[10px] font-medium ${badgeColor}`}>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="text-sm font-medium min-w-0 flex-1 break-words">{s.name}</span>
+                          <span className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium ${badgeColor}`}>
                             {s.severity}
                           </span>
                         </div>
                         {s.description && (
-                          <p className="mt-0.5 text-xs text-muted-foreground">{s.description}</p>
+                          <p className="mt-0.5 text-xs text-muted-foreground break-words">{s.description}</p>
                         )}
                         <div className="mt-1 rounded bg-muted/50 p-1.5">
-                          <p className="font-mono text-[11px] leading-relaxed">
+                          <p className="font-mono text-[11px] leading-relaxed break-all">
                             {s.check.type === "source-target-match" && (
                               <>match both: <span className="font-semibold">{s.check.pattern}</span></>
                             )}

@@ -53,6 +53,30 @@ export function subscribeActiveAudio(listener: () => void): () => void {
   return () => { listeners.delete(listener) }
 }
 
+// Stack of components that have temporarily claimed the audio keyboard
+// shortcuts (Space, arrows). The global handler bails when this is > 0 so the
+// claiming UI (e.g. the recording modal) gets exclusive Space handling.
+let shortcutOverrideCount = 0
+
+export function pushAudioShortcutOverride(): () => void {
+  shortcutOverrideCount += 1
+  let released = false
+  return () => {
+    if (released) return
+    released = true
+    shortcutOverrideCount = Math.max(0, shortcutOverrideCount - 1)
+  }
+}
+
+export function isAudioShortcutOverridden(): boolean {
+  return shortcutOverrideCount > 0
+}
+
+/** Test seam — drop any leftover overrides between tests. */
+export function __resetAudioShortcutOverridesForTests(): void {
+  shortcutOverrideCount = 0
+}
+
 /**
  * True when the keyboard event happened inside an editable surface where
  * Space (or other keys) should keep their default insert-text behavior.

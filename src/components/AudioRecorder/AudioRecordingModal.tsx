@@ -16,6 +16,7 @@ import type { CellData } from "@/hooks/useCells"
 import type { ProjectRecord } from "@/lib/parsers/types"
 import { useAudioRecorder } from "@/hooks/useAudioRecorder"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
+import { pushAudioShortcutOverride } from "@/lib/audio/audio-coordinator"
 import { useCountdown } from "./useCountdown"
 import { AudioWaveform } from "./AudioWaveform"
 import { DurationBar } from "./DurationBar"
@@ -225,6 +226,14 @@ export function AudioRecordingModal({
     if (idx < 0 || idx >= cells.length) return
     onActiveCellChange(cells[idx].id)
   }, [canNav, cells, onActiveCellChange])
+
+  // While the modal is open, claim the audio keyboard shortcuts so the global
+  // Space handler doesn't toggle whatever clip the user was just playing.
+  useEffect(() => {
+    if (!open) return
+    const release = pushAudioShortcutOverride()
+    return release
+  }, [open])
 
   // Keyboard shortcuts.
   useEffect(() => {

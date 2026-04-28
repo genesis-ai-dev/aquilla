@@ -22,12 +22,11 @@ interface Props {
   onRename: (fileId: string, newName: string) => void
   onMove: (fileId: string) => void
   onDelete: (fileId: string) => void
-  onAddTarget?: (sourceFileId: string) => void
 }
 
 export function ExpandableFileList({
   projectId, files, activeFileId, fileProgress,
-  suggestionFileIds, validationCount, onSelectFile, onRename, onMove, onDelete, onAddTarget,
+  suggestionFileIds, validationCount, onSelectFile, onRename, onMove, onDelete,
 }: Props) {
   const { expanded, toggle } = useSidebarExpansion(projectId)
   const [menu, setMenu] = useState<{ fileId: string; x: number; y: number } | null>(null)
@@ -95,20 +94,15 @@ export function ExpandableFileList({
           ))}
         </div>
       </ScrollArea>
-      {menu && (() => {
-        const menuFile = files.find((f) => f.id === menu.fileId)
-        const canAddTarget = menuFile?.kind === "source" && Boolean(onAddTarget)
-        return (
-          <FileActionMenu
-            x={menu.x} y={menu.y}
-            onClose={() => setMenu(null)}
-            onRename={() => setEditingFileId(menu.fileId)}
-            onMove={() => onMove(menu.fileId)}
-            onDelete={() => onDelete(menu.fileId)}
-            onAddTarget={canAddTarget ? () => onAddTarget!(menu.fileId) : undefined}
-          />
-        )
-      })()}
+      {menu && (
+        <FileActionMenu
+          x={menu.x} y={menu.y}
+          onClose={() => setMenu(null)}
+          onRename={() => setEditingFileId(menu.fileId)}
+          onMove={() => onMove(menu.fileId)}
+          onDelete={() => onDelete(menu.fileId)}
+        />
+      )}
     </>
   )
 }

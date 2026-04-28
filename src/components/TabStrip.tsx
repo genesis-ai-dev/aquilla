@@ -5,7 +5,6 @@ import type { WorkspaceTab } from "@/hooks/useWorkspaceTabs"
 interface FileMeta {
   id: string
   name: string
-  kind?: "source" | "target"
 }
 
 interface Props {
@@ -16,8 +15,8 @@ interface Props {
   onClose: (tabId: string) => void
 }
 
-function fileFor(files: readonly FileMeta[], fileId: string): FileMeta | null {
-  return files.find((f) => f.id === fileId) ?? null
+function fileNameFor(files: readonly FileMeta[], fileId: string): string {
+  return files.find((f) => f.id === fileId)?.name ?? fileId
 }
 
 export function TabStrip({ tabs, activeTabId, files, onActivate, onClose }: Props) {
@@ -30,12 +29,7 @@ export function TabStrip({ tabs, activeTabId, files, onActivate, onClose }: Prop
     >
       {tabs.map((tab) => {
         const active = tab.id === activeTabId
-        const file = fileFor(files, tab.fileId)
-        const name = file?.name ?? tab.fileId
-        const kind = file?.kind
-        const titleParts = [name]
-        if (kind) titleParts.push(kind === "source" ? "Source" : "Target")
-        if (tab.sectionLabel) titleParts.push(tab.sectionLabel)
+        const name = fileNameFor(files, tab.fileId)
         return (
           <div
             key={tab.id}
@@ -51,22 +45,10 @@ export function TabStrip({ tabs, activeTabId, files, onActivate, onClose }: Prop
             <button
               type="button"
               onClick={() => onActivate(tab.id)}
-              className="flex max-w-[220px] items-center gap-1.5 truncate text-left"
-              title={titleParts.join(" · ")}
+              className="flex max-w-[200px] items-center gap-1.5 truncate text-left"
+              title={tab.sectionLabel ? `${name} · ${tab.sectionLabel}` : name}
             >
               <span className="truncate font-medium">{name}</span>
-              {kind && (
-                <span
-                  className={cn(
-                    "shrink-0 rounded px-1 py-px text-[9px] font-medium uppercase tracking-wide",
-                    kind === "source"
-                      ? "bg-muted text-muted-foreground"
-                      : "bg-primary/10 text-primary",
-                  )}
-                >
-                  {kind === "source" ? "src" : "tgt"}
-                </span>
-              )}
               {tab.sectionLabel && (
                 <span className="truncate text-muted-foreground/80">· {tab.sectionLabel}</span>
               )}

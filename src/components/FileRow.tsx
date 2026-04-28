@@ -86,22 +86,7 @@ export function FileRow(props: FileRowProps) {
           />
         ) : (
           <>
-            <div className="flex items-center gap-1.5 truncate">
-              <span className="truncate">{file.name}</span>
-              {file.kind && (
-                <span
-                  className={cn(
-                    "shrink-0 rounded px-1 py-px text-[9px] font-medium uppercase tracking-wide",
-                    file.kind === "source"
-                      ? "bg-muted text-muted-foreground"
-                      : "bg-primary/10 text-primary",
-                  )}
-                  title={file.kind === "source" ? "Source document" : "Target translation"}
-                >
-                  {file.kind === "source" ? "src" : "tgt"}
-                </span>
-              )}
-            </div>
+            <div className="truncate">{file.name}</div>
             {file.originalName && (
               <div className="truncate text-[10px] text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity">
                 {file.originalName}

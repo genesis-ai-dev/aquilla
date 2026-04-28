@@ -7,12 +7,7 @@ import { extractVttStrings, extractSrtStrings } from "./parsers/subtitle"
 import { extractUsfmStrings } from "./parsers/usfm"
 import { extractDocxStrings } from "./parsers/docx"
 import { extractPptxStrings } from "./parsers/pptx"
-import {
-  createSourceFileDoc,
-  createTargetFileDoc,
-  destroyFileDoc,
-  type FileDocHandle,
-} from "./store/file-doc"
+import { createFileDoc, destroyFileDoc } from "./store/file-doc"
 import { storeOriginalFile } from "./store/project-index"
 import {
   fetchTranslationText,
@@ -32,66 +27,6 @@ interface ImportResult {
   strings: TranslatableString[]
 }
 
-async function whenSynced(handle: FileDocHandle): Promise<void> {
-  return new Promise<void>((resolve) => {
-    if (handle.persistence.synced) resolve()
-    else handle.persistence.once("synced", () => resolve())
-  })
-}
-
-/** Build a paired source + target FileReference for one parsed result.
- *  Cell ids match across the pair so `useCells` can join them later. */
-async function buildPairedRefs(
-  fileType: FileType,
-  baseName: string,
-  strings: TranslatableString[],
-  sourceLanguage: string,
-  targetLanguage: string,
-): Promise<{ source: FileReference; target: FileReference }> {
-  const sourceFileId = uuid()
-  const targetFileId = uuid()
-  const createdAt = new Date().toISOString()
-
-  const sourceHandle = createSourceFileDoc(
-    sourceFileId,
-    baseName,
-    fileType,
-    sourceLanguage,
-    strings,
-  )
-  const targetHandle = createTargetFileDoc(
-    targetFileId,
-    baseName,
-    fileType,
-    sourceLanguage,
-    targetLanguage,
-    strings.map((s) => ({ id: s.id, translated: s.translated || undefined })),
-  )
-
-  await Promise.all([whenSynced(sourceHandle), whenSynced(targetHandle)])
-  destroyFileDoc(sourceHandle)
-  destroyFileDoc(targetHandle)
-
-  const source: FileReference = {
-    id: sourceFileId,
-    name: baseName,
-    type: fileType,
-    createdAt,
-    cellCount: strings.length,
-    kind: "source",
-  }
-  const target: FileReference = {
-    id: targetFileId,
-    name: baseName,
-    type: fileType,
-    createdAt,
-    cellCount: strings.length,
-    kind: "target",
-    pairing: { sourceFileIds: [sourceFileId] },
-  }
-  return { source, target }
-}
-
 export async function importFile(
   file: File,
   sourceLanguage: string,
@@ -106,21 +41,37 @@ export async function importFile(
   const refs: FileReference[] = []
 
   for (const result of results) {
-    const { source, target } = await buildPairedRefs(
-      fileType,
+    const fileId = uuid()
+    const handle = createFileDoc(
+      fileId,
       result.name,
-      result.strings,
+      fileType,
       sourceLanguage,
       targetLanguage,
+      result.strings
     )
 
+    await new Promise<void>((resolve) => {
+      if (handle.persistence.synced) {
+        resolve()
+      } else {
+        handle.persistence.once("synced", () => resolve())
+      }
+    })
+
     if (fileType === "docx" || fileType === "pptx") {
-      // Original-file blob is needed by surgical export, which lives on the
-      // source side (export reads source structure + target translation).
-      await storeOriginalFile(source.id, await file.arrayBuffer())
+      await storeOriginalFile(fileId, await file.arrayBuffer())
     }
 
-    refs.push(source, target)
+    refs.push({
+      id: fileId,
+      name: result.name,
+      type: fileType,
+      createdAt: new Date().toISOString(),
+      cellCount: result.strings.length,
+    })
+
+    destroyFileDoc(handle)
   }
 
   return refs
@@ -132,7 +83,7 @@ export async function importEBible(
   targetLanguage: string,
   onProgress?: (p: EBibleProgress) => void,
   signal?: AbortSignal
-): Promise<FileReference[]> {
+): Promise<FileReference> {
   onProgress?.({ phase: "download", received: 0, total: 0 })
 
   const corpusText = await fetchTranslationText(
@@ -149,16 +100,34 @@ export async function importEBible(
 
   onProgress?.({ phase: "save" })
 
+  const fileId = uuid()
   const fileName = `${translation.title} (${translation.id})`
-  const { source, target } = await buildPairedRefs(
-    "ebible",
+  const handle = createFileDoc(
+    fileId,
     fileName,
-    strings,
+    "ebible",
     sourceLanguage,
     targetLanguage,
+    strings
   )
 
-  return [source, target]
+  await new Promise<void>((resolve) => {
+    if (handle.persistence.synced) {
+      resolve()
+    } else {
+      handle.persistence.once("synced", () => resolve())
+    }
+  })
+
+  destroyFileDoc(handle)
+
+  return {
+    id: fileId,
+    name: fileName,
+    type: "ebible",
+    createdAt: new Date().toISOString(),
+    cellCount: strings.length,
+  }
 }
 
 async function parseFile(file: File, fileType: FileType): Promise<ImportResult[]> {

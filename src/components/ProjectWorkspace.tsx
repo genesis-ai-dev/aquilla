@@ -7,8 +7,6 @@ import { deriveCellAreaState } from "@/lib/editor/cell-area-state"
 import { CellAreaPlaceholder } from "./CellAreaPlaceholder"
 import { TabStrip } from "./TabStrip"
 import { useWorkspaceTabs } from "@/hooks/useWorkspaceTabs"
-import { useExamplePool } from "@/hooks/useExamplePool"
-import { loadFileDoc, destroyFileDoc, createTargetFileDoc } from "@/lib/store/file-doc"
 import { useCells } from "@/hooks/useCells"
 import { useSearchIndex } from "@/hooks/useSearchIndex"
 import { useCompletion } from "@/hooks/useCompletion"
@@ -144,18 +142,7 @@ export function ProjectWorkspace() {
   const { session: frontierSession } = useFrontierSession()
   const currentUsername = frontierSession?.username || project?.username || "local"
   const validationCount = project ? readValidationCount(project) : 1
-  // For new-model target files, pair with the linked source's doc so source
-  // columns render alongside the editable target. Legacy unified files
-  // (kind undefined) still hold both sides in one doc and don't need this.
-  const activeFileForPairing = activeFileId
-    ? project?.files.find((f) => f.id === activeFileId) ?? null
-    : null
-  const pairedSourceFileId =
-    activeFileForPairing?.kind === "target"
-      ? activeFileForPairing.pairing?.sourceFileIds[0] ?? null
-      : null
-  const { doc: sourceDoc } = useFileDoc(pairedSourceFileId)
-  const cells = useCells(doc, activeFileId ?? "", currentUsername, validationCount, sourceDoc)
+  const cells = useCells(doc, activeFileId ?? "", currentUsername, validationCount)
   const { hasAny: hasUnfinished, findNext: findNextUnfinished } = useNextUnfinished(cells, validationCount)
   const handleJumpNextUnfinished = useCallback(() => {
     const currentIndex = editorRef.current?.getCurrentIndex?.() ?? 0
@@ -239,20 +226,7 @@ export function ProjectWorkspace() {
     return all
   }, [fileCells])
 
-  // For target files with configured AI example pairings, load that cross-file
-  // pool. Empty/undefined pairings → fall back to the active target's own
-  // joined cells (self-pair, current behavior).
-  const examplePairings = activeFileForPairing?.kind === "target"
-    ? activeFileForPairing.pairing?.examplePairings ?? null
-    : null
-  const examplePool = useExamplePool(examplePairings)
-  const aiCells = useMemo(() => {
-    if (!examplePool) return allProjectCells
-    // Cast: ExampleCell is a strict subset of CellData fields the dual-index uses.
-    return examplePool as unknown as CellData[]
-  }, [examplePool, allProjectCells])
-
-  const { search } = useSearchIndex(project?.files || [], aiCells)
+  const { search } = useSearchIndex(project?.files || [], allProjectCells)
   const { completeSingle, completeBatch, isConfigured, isAvailable: isCompletionAvailable, completing, examples, errors } = useCompletion(
     doc, project?.completionSettings, project?.sourceLanguage || "", project?.targetLanguage || "", search, frontierSession
   )
@@ -494,9 +468,7 @@ export function ProjectWorkspace() {
   }
 
   const perms = useProjectPermissions(project)
-  // Source files are not user-editable: writes belong on the paired target.
-  // Permissions read-only also wins.
-  const isReadOnly = !perms.canEditContent || activeFileForPairing?.kind === "source"
+  const isReadOnly = !perms.canEditContent
 
   const { sync: runSync, phase: syncPhase, inFlight: syncInFlight, lastResult: syncLastResult } = useSyncProject()
 
@@ -752,60 +724,8 @@ export function ProjectWorkspace() {
     if (!project) return
     await patchProject(project.id, (p) => ({ ...p, files: [...p.files, ...refs] }))
     refresh()
-    // Land on the first target (the editable side) rather than the source.
-    const firstTarget = refs.find((r) => r.kind === "target") ?? refs[0]
-    if (firstTarget) workspaceTabs.openFile(firstTarget.id)
+    if (refs.length > 0) workspaceTabs.openFile(refs[0].id)
   }
-
-  /** Spawn a new empty target file paired to an existing source. The new
-   *  target carries cells with matching ids (one per source cell) and
-   *  empty translations, so the user can translate the same source into
-   *  another target without re-importing. */
-  const handleAddTargetForSource = useCallback(async (sourceFileId: string) => {
-    if (!project) return
-    const sourceRef = project.files.find((f) => f.id === sourceFileId)
-    if (!sourceRef || sourceRef.kind !== "source") return
-
-    const sourceHandle = loadFileDoc(sourceFileId)
-    try {
-      await new Promise<void>((resolve) => {
-        if (sourceHandle.persistence.synced) resolve()
-        else sourceHandle.persistence.once("synced", () => resolve())
-      })
-      const order = sourceHandle.doc.getArray<string>("order").toArray()
-      const seeds = order.map((id) => ({ id }))
-
-      const newTargetId = crypto.randomUUID()
-      const targetHandle = createTargetFileDoc(
-        newTargetId,
-        sourceRef.name,
-        sourceRef.type,
-        project.sourceLanguage,
-        project.targetLanguage,
-        seeds,
-      )
-      await new Promise<void>((resolve) => {
-        if (targetHandle.persistence.synced) resolve()
-        else targetHandle.persistence.once("synced", () => resolve())
-      })
-      destroyFileDoc(targetHandle)
-
-      const targetRef: FileReference = {
-        id: newTargetId,
-        name: sourceRef.name,
-        type: sourceRef.type,
-        createdAt: new Date().toISOString(),
-        cellCount: seeds.length,
-        kind: "target",
-        pairing: { sourceFileIds: [sourceFileId] },
-      }
-      await patchProject(project.id, (p) => ({ ...p, files: [...p.files, targetRef] }))
-      refresh()
-      workspaceTabs.openFile(newTargetId)
-    } finally {
-      destroyFileDoc(sourceHandle)
-    }
-  }, [project, refresh, workspaceTabs])
 
   // ── Render ────────────────────────────────────────────────────────────────
 
@@ -838,7 +758,6 @@ export function ProjectWorkspace() {
                 setMoveCorpus(project.files.find((f) => f.id === fileId)?.corpusMarker ?? "")
               }}
               onDelete={(fileId) => setPendingDeleteId(fileId)}
-              onAddTarget={handleAddTargetForSource}
             />
             <SidebarProjectSection items={projectNavItems} />
             <SidebarCommandPaletteHint onClick={() => setSearchOpen(true)} />

@@ -1,5 +1,5 @@
 import { useEffect, useRef } from "react"
-import { Pencil, FolderInput, Trash2, Plus } from "lucide-react"
+import { Pencil, FolderInput, Trash2 } from "lucide-react"
 
 interface FileActionMenuProps {
   x: number
@@ -8,11 +8,10 @@ interface FileActionMenuProps {
   onRename: () => void
   onMove: () => void
   onDelete: () => void
-  onAddTarget?: () => void
 }
 
 export function FileActionMenu({
-  x, y, onClose, onRename, onMove, onDelete, onAddTarget,
+  x, y, onClose, onRename, onMove, onDelete,
 }: FileActionMenuProps) {
   const ref = useRef<HTMLDivElement>(null)
 
@@ -47,14 +46,6 @@ export function FileActionMenu({
       >
         <FolderInput className="h-3.5 w-3.5" /> Move to corpus…
       </button>
-      {onAddTarget && (
-        <button
-          className="flex w-full items-center gap-2 rounded px-2 py-1.5 hover:bg-accent"
-          onClick={() => { onAddTarget(); onClose() }}
-        >
-          <Plus className="h-3.5 w-3.5" /> New target from this source
-        </button>
-      )}
       <div className="my-1 h-px bg-border" />
       <button
         className="flex w-full items-center gap-2 rounded px-2 py-1.5 hover:bg-destructive/10 text-destructive"

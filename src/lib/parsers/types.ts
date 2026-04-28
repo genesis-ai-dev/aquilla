@@ -205,6 +205,32 @@ export interface ProjectSyncSettings {
   autoSync: { enabled: boolean; intervalMinutes: number }
 }
 
+/**
+ * Files come in two flavors that map onto the original Codex extension's
+ * `.source` and `.codex` notebook split:
+ *  - "source": holds source-side cell content. Read-only target-wise.
+ *  - "target": holds the user's translation, paired by cell id to one or
+ *    more source files. AI example retrieval is configured per target.
+ * Legacy files imported before this split have `kind` undefined and continue
+ * to render as a single unified doc (source + target paired in one cell).
+ */
+export type FileKind = "source" | "target"
+
+export interface ExamplePairing {
+  sourceFileId: string
+  targetFileId: string
+}
+
+export interface FilePairing {
+  /** For target files: the source file(s) this target translates. Cell ids
+   *  align across paired files. */
+  sourceFileIds: string[]
+  /** For target files: which (source, target) pairs to draw AI completion
+   *  examples from. Defaults to the self-pair (this target + its first
+   *  paired source) if absent. */
+  examplePairings?: ExamplePairing[]
+}
+
 export interface FileReference {
   id: string
   name: string
@@ -213,6 +239,8 @@ export interface FileReference {
   cellCount: number
   corpusMarker?: string  // From notebook metadata.corpusMarker, OT/NT fallback for biblical book stems
   originalName?: string  // Set the first time `name` is auto-rewritten by a suggestion or user rename. Enables hover-to-see-original. Never overwritten after set.
+  kind?: FileKind        // undefined = legacy unified single-doc file.
+  pairing?: FilePairing  // populated on target files only.
 }
 
 export interface ProjectMember {

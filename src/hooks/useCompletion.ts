@@ -8,6 +8,7 @@ import type { CellData } from "./useCells"
 import { buildPrompt, complete, resolveProvider, DEFAULT_SYSTEM_PROMPT } from "@/lib/completion/completion-service"
 import { useFrontierHealth } from "@/lib/completion/frontier-health"
 import { appendCellHistory } from "./useCellHistory"
+import posthog, { getAnonymousId } from "@/lib/posthog"
 
 // Default settings for projects that haven't customized anything yet.
 // Frontier provider + default system prompt, no custom endpoint.
@@ -88,15 +89,39 @@ export function useCompletion(
         value: result, source: "llm", author: effectiveSettings.model || "frontier-default",
         validated: false, examples: found.map((e) => ({ cellId: e.cellId, weight: e.coverageWeight })),
       })
+      posthog.capture({
+        distinctId: session?.username ?? getAnonymousId(),
+        event: "ai translation completed",
+        properties: {
+          provider,
+          model: effectiveSettings.model || "frontier-default",
+          source_language: sourceLanguage,
+          target_language: targetLanguage,
+          example_count: found.length,
+        },
+      })
       setCompleting((p) => new Map(p).set(cell.id, "done"))
     } catch (err) {
+      posthog.captureException(err instanceof Error ? err : new Error(String(err)), session?.username ?? getAnonymousId())
       setCompleting((p) => new Map(p).set(cell.id, "error"))
       setErrors((p) => new Map(p).set(cell.id, err instanceof Error ? err.message : "Failed"))
     }
-  }, [doc, effectiveSettings, isConfigured, isAvailable, sourceLanguage, targetLanguage, search, session])
+  }, [doc, effectiveSettings, isConfigured, isAvailable, sourceLanguage, targetLanguage, search, session, provider])
 
   const completeBatch = useCallback(async (cells: CellData[]) => {
     if (!doc || !isConfigured || !isAvailable) return
+
+    posthog.capture({
+      distinctId: session?.username ?? getAnonymousId(),
+      event: "ai batch translation started",
+      properties: {
+        provider,
+        model: effectiveSettings.model || "frontier-default",
+        source_language: sourceLanguage,
+        target_language: targetLanguage,
+        cell_count: cells.length,
+      },
+    })
 
     const allExamples = new Map<string, ScoredPair[]>()
     for (const cell of cells) {

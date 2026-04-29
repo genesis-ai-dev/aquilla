@@ -8,6 +8,7 @@ import {
 } from "@/components/ui/dialog"
 import { createSnapshot } from "@/lib/store/snapshots"
 import type { ProjectSnapshot } from "@/lib/parsers/types"
+import posthog, { getAnonymousId } from "@/lib/posthog"
 
 interface SnapshotCreateDialogProps {
   projectId: string
@@ -28,6 +29,11 @@ export function SnapshotCreateDialog({ projectId, onCreated }: SnapshotCreateDia
     setError(null)
     try {
       const snap = await createSnapshot(projectId, name.trim(), description.trim() || undefined, false)
+      posthog.capture({
+        distinctId: getAnonymousId(),
+        event: "snapshot created",
+        properties: { project_id: projectId, snapshot_id: snap.id, snapshot_name: snap.name },
+      })
       onCreated(snap)
       setName("")
       setDescription("")

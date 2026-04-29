@@ -24,6 +24,7 @@ import {
   type CloudProjectSummary,
 } from "@/lib/sync/cloud-projects"
 import { filterCloudOnly } from "@/lib/projects/dedupe-cloud"
+import posthog, { getAnonymousId } from "@/lib/posthog"
 
 export function Dashboard() {
   const [projects, setProjects] = useState<ProjectRecord[]>([])
@@ -115,6 +116,11 @@ export function Dashboard() {
       return
     }
     if (!result.project) return
+    posthog.capture({
+      distinctId: session?.username ?? getAnonymousId(),
+      event: "project trashed",
+      properties: { project_id: projectId, project_name: project.name },
+    })
     setProjects((prev) => prev.filter((p) => p.id !== projectId))
     setTrashed((prev) => [result.project as ProjectRecord, ...prev])
     setTrashExpanded(true)
@@ -133,6 +139,11 @@ export function Dashboard() {
       return
     }
     if (!result.project) return
+    posthog.capture({
+      distinctId: session?.username ?? getAnonymousId(),
+      event: "project restored",
+      properties: { project_id: projectId, project_name: project.name },
+    })
     setTrashed((prev) => prev.filter((p) => p.id !== projectId))
     setProjects((prev) => [...prev, result.project as ProjectRecord])
   }

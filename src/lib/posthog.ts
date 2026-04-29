@@ -10,6 +10,7 @@ if (typeof window !== "undefined" && KEY) {
     persistence: "localStorage+cookie",
     capture_pageview: true,
     autocapture: false,
+    disable_session_recording: true,
     opt_out_capturing_by_default: !isAnalyticsEnabled(),
   })
 

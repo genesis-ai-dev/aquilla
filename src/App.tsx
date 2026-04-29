@@ -10,6 +10,7 @@ import { SnapshotsPage } from "@/components/SnapshotsPage"
 import { JoinPage } from "@/components/JoinPage"
 import { OnboardingWizard } from "@/components/onboarding/OnboardingWizard"
 import { OrgSettings } from "@/pages/OrgSettings"
+import { Settings } from "@/pages/Settings"
 import { SyncingProvider, useSyncing } from "@/context/SyncingContext"
 import { AiModelConsentDialog } from "@/components/AiModelConsentDialog"
 import { AiModelDownloadChip } from "@/components/AiModelDownloadChip"
@@ -69,6 +70,7 @@ function AppRoutes() {
       <Route path="/project/:id/snapshots/debug" element={<DebugView />} />
       <Route path="/join/:token" element={<JoinPage />} />
       <Route path="/onboarding" element={<OnboardingWizard />} />
+      <Route path="/settings" element={<Settings />} />
       <Route path="/settings/org" element={<OrgSettings />} />
     </Routes>
   )

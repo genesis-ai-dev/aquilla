@@ -12,7 +12,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { createProject } from "@/lib/store/project-index"
 import type { ProjectRecord } from "@/lib/parsers/types"
-import posthog, { getAnonymousId } from "@/lib/posthog"
+import posthog from "@/lib/posthog"
 
 interface ProjectCreateDialogProps {
   onCreated: (project: ProjectRecord) => void
@@ -39,14 +39,10 @@ export function ProjectCreateDialog({ onCreated }: ProjectCreateDialogProps) {
     }
 
     await createProject(project)
-    posthog.capture({
-      distinctId: getAnonymousId(),
-      event: "project created",
-      properties: {
-        project_id: project.id,
-        source_language: project.sourceLanguage,
-        target_language: project.targetLanguage,
-      },
+    posthog.capture("project created", {
+      project_id: project.id,
+      source_language: project.sourceLanguage,
+      target_language: project.targetLanguage,
     })
     onCreated(project)
     setName("")

@@ -6,7 +6,7 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger,
 } from "@/components/ui/dialog"
 import type { TranslationRule, RuleCheck } from "@/lib/parsers/types"
-import posthog, { getAnonymousId } from "@/lib/posthog"
+import posthog from "@/lib/posthog"
 
 interface RuleCreateDialogProps {
   onAdd: (rule: Omit<TranslationRule, "id" | "createdAt">) => void
@@ -80,10 +80,10 @@ export function RuleCreateDialog({ onAdd }: RuleCreateDialogProps) {
     e.preventDefault()
     if (!name.trim()) return
     const check = buildCheck()
-    posthog.capture({
-      distinctId: getAnonymousId(),
-      event: "translation rule created",
-      properties: { rule_name: name.trim(), severity, check_type: check.type },
+    posthog.capture("translation rule created", {
+      rule_name: name.trim(),
+      severity,
+      check_type: check.type,
     })
     onAdd({
       name: name.trim(),

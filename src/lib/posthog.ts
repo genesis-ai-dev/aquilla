@@ -1,18 +1,22 @@
-import { PostHog } from "posthog-node"
+import posthog from "posthog-js"
+import { isAnalyticsEnabled, onAnalyticsConsentChange } from "@/lib/analytics-consent"
 
-const posthog = new PostHog(import.meta.env.VITE_POSTHOG_KEY as string, {
-  host: import.meta.env.VITE_POSTHOG_HOST as string,
-  enableExceptionAutocapture: true,
-})
+const KEY = import.meta.env.VITE_POSTHOG_KEY as string | undefined
+const HOST = (import.meta.env.VITE_POSTHOG_HOST as string | undefined) ?? "https://us.i.posthog.com"
 
-export function getAnonymousId(): string {
-  const key = "posthog_anonymous_id"
-  let id = localStorage.getItem(key)
-  if (!id) {
-    id = crypto.randomUUID()
-    localStorage.setItem(key, id)
-  }
-  return id
+if (typeof window !== "undefined" && KEY) {
+  posthog.init(KEY, {
+    api_host: HOST,
+    persistence: "localStorage+cookie",
+    capture_pageview: true,
+    autocapture: false,
+    opt_out_capturing_by_default: !isAnalyticsEnabled(),
+  })
+
+  onAnalyticsConsentChange((enabled) => {
+    if (enabled) posthog.opt_in_capturing()
+    else posthog.opt_out_capturing()
+  })
 }
 
 export default posthog

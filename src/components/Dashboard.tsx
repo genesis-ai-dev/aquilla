@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react"
 import { useNavigate, Navigate, Link } from "react-router-dom"
-import { ChevronRight, Cloud, Trash2 } from "lucide-react"
+import { ChevronRight, Cloud, Settings as SettingsIcon, Trash2 } from "lucide-react"
 import type { ProjectRecord } from "@/lib/parsers/types"
 import {
   listProjects,
@@ -24,7 +24,7 @@ import {
   type CloudProjectSummary,
 } from "@/lib/sync/cloud-projects"
 import { filterCloudOnly } from "@/lib/projects/dedupe-cloud"
-import posthog, { getAnonymousId } from "@/lib/posthog"
+import posthog from "@/lib/posthog"
 
 export function Dashboard() {
   const [projects, setProjects] = useState<ProjectRecord[]>([])
@@ -116,11 +116,7 @@ export function Dashboard() {
       return
     }
     if (!result.project) return
-    posthog.capture({
-      distinctId: session?.username ?? getAnonymousId(),
-      event: "project trashed",
-      properties: { project_id: projectId, project_name: project.name },
-    })
+    posthog.capture("project trashed", { project_id: projectId, project_name: project.name })
     setProjects((prev) => prev.filter((p) => p.id !== projectId))
     setTrashed((prev) => [result.project as ProjectRecord, ...prev])
     setTrashExpanded(true)
@@ -139,11 +135,7 @@ export function Dashboard() {
       return
     }
     if (!result.project) return
-    posthog.capture({
-      distinctId: session?.username ?? getAnonymousId(),
-      event: "project restored",
-      properties: { project_id: projectId, project_name: project.name },
-    })
+    posthog.capture("project restored", { project_id: projectId, project_name: project.name })
     setTrashed((prev) => prev.filter((p) => p.id !== projectId))
     setProjects((prev) => [...prev, result.project as ProjectRecord])
   }
@@ -186,6 +178,14 @@ export function Dashboard() {
               className="text-sm underline-offset-2 hover:underline"
             >
               Organization
+            </Link>
+            <Link
+              to="/settings"
+              aria-label="Settings"
+              title="Settings"
+              className="inline-flex h-9 w-9 items-center justify-center rounded-md text-sm hover:bg-accent"
+            >
+              <SettingsIcon className="h-4 w-4" />
             </Link>
             <ThemeToggle />
             <HeaderAuth />

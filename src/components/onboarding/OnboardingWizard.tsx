@@ -2,12 +2,13 @@ import { useState, useCallback } from "react"
 import { useNavigate } from "react-router-dom"
 import type { ProjectRecord } from "@/lib/parsers/types"
 import { WelcomeStep } from "./steps/WelcomeStep"
+import { PrivacyStep } from "./steps/PrivacyStep"
 import { SignInStep } from "./steps/SignInStep"
 import { NameStep } from "./steps/NameStep"
 import { ProjectStep } from "./steps/ProjectStep"
 import { ReadyStep } from "./steps/ReadyStep"
 
-const TOTAL_STEPS = 5
+const TOTAL_STEPS = 6
 
 export function OnboardingWizard() {
   const navigate = useNavigate()
@@ -55,8 +56,9 @@ export function OnboardingWizard() {
 
         {/* Steps */}
         {step === 1 && <WelcomeStep onNext={next} />}
-        {step === 2 && <SignInStep onNext={next} onBack={back} />}
-        {step === 3 && (
+        {step === 2 && <PrivacyStep onNext={next} onBack={back} />}
+        {step === 3 && <SignInStep onNext={next} onBack={back} />}
+        {step === 4 && (
           <NameStep
             value={displayName}
             onChange={setDisplayName}
@@ -64,7 +66,7 @@ export function OnboardingWizard() {
             onBack={back}
           />
         )}
-        {step === 4 && (
+        {step === 5 && (
           <ProjectStep
             displayName={displayName}
             onCreated={handleProjectCreated}
@@ -72,7 +74,7 @@ export function OnboardingWizard() {
             onSkip={handleSkipProject}
           />
         )}
-        {step === 5 && createdProject && (
+        {step === 6 && createdProject && (
           <ReadyStep project={createdProject} onFinish={handleFinish} />
         )}
       </div>

@@ -2,13 +2,22 @@ import { useState } from "react";
 import { useOrg, useOrgMembers } from "@/hooks/useOrg";
 import { MembersPanel, type MembersPanelMember } from "@/components/MembersPanel";
 import { RemoveOrgMemberDialog } from "@/components/RemoveOrgMemberDialog";
+import { ROLE, ORG_ROLE_PICKER, roleName } from "@/lib/frontier/roles";
 
-const ORG_ROLE_OPTIONS = [
-  { level: 100, name: "viewer", description: "Read-only across all projects" },
-  { level: 400, name: "contributor", description: "Edit content across all projects" },
-  { level: 500, name: "project_lead", description: "Manage members on every project" },
-  { level: 600, name: "maintainer", description: "Lead + manage roles" },
-];
+// Org-scope descriptions differ from project-scope ("across all projects"),
+// so we keep a small local mapping rather than reusing roleDescription().
+const ORG_ROLE_DESCRIPTIONS: Record<number, string> = {
+  [ROLE.VIEWER]: "Read-only across all projects",
+  [ROLE.CONTRIBUTOR]: "Edit content across all projects",
+  [ROLE.PROJECT_LEAD]: "Manage members on every project",
+  [ROLE.MAINTAINER]: "Lead + manage roles",
+};
+
+const ORG_ROLE_OPTIONS = ORG_ROLE_PICKER.map((level) => ({
+  level,
+  name: roleName(level),
+  description: ORG_ROLE_DESCRIPTIONS[level] ?? "",
+}));
 
 export function OrgSettings() {
   // FrontierSession doesn't carry a userId; the server enforces self-grant
@@ -28,9 +37,9 @@ export function OrgSettings() {
     username: m.username,
     roleLevel: m.role.level,
     roleName: m.role.name,
-    source: m.role.level === 700 ? "owner-of-org" : "override",
-    isLocked: m.role.level === 700, // owner can't be removed
-    lockedHint: m.role.level === 700 ? "Org owner" : undefined,
+    source: m.role.level === ROLE.OWNER ? "owner-of-org" : "override",
+    isLocked: m.role.level === ROLE.OWNER, // owner can't be removed
+    lockedHint: m.role.level === ROLE.OWNER ? "Org owner" : undefined,
   }));
 
   return (
@@ -43,9 +52,9 @@ export function OrgSettings() {
       <MembersPanel
         members={panelMembers}
         roleOptions={ORG_ROLE_OPTIONS}
-        defaultRole={600}
+        defaultRole={ROLE.MAINTAINER}
         callerUserId={callerUserId}
-        callerMaxRole={600}
+        callerMaxRole={ROLE.MAINTAINER}
         onAdd={async (username, role) => {
           const result = await add(username, role);
           return result

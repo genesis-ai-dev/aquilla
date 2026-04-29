@@ -7,9 +7,8 @@ import { listShares, createShare, deleteShare } from "@/lib/sync/share-tokens"
 import { createServerInvite } from "@/lib/sync/invites"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { useProjectMembers } from "@/hooks/useProjectMembers"
+import { ROLE } from "@/lib/frontier/roles"
 import type { ShareInvite } from "@/lib/parsers/types"
-
-const CONTRIBUTOR_ROLE = 400
 
 interface InviteStepProps {
   projectId: string
@@ -68,7 +67,7 @@ export function InviteStep({ projectId, username, onSharesChanged }: InviteStepP
     setInviteBusy(true)
     setInviteResult(null)
     try {
-      const member = await add(trimmed, CONTRIBUTOR_ROLE)
+      const member = await add(trimmed, ROLE.CONTRIBUTOR)
       if (!member) {
         setInviteResult({
           kind: "error",
@@ -98,7 +97,7 @@ export function InviteStep({ projectId, username, onSharesChanged }: InviteStepP
       // local-only when offline; the joiner won't gain server-side access in
       // that case, but the share doc is still useful for live sessions.
       const serverInvite = session?.jwt
-        ? await createServerInvite(session.jwt, projectId, CONTRIBUTOR_ROLE)
+        ? await createServerInvite(session.jwt, projectId, ROLE.CONTRIBUTOR)
         : null
       await createShare(projectId, undefined, username, serverInvite?.token)
       await refresh()

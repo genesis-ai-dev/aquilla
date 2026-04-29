@@ -7,6 +7,7 @@
 // with the server — fall back to local-only" and log.
 
 import { FRONTIER_API_URL } from "./sync-token"
+import { ROLE } from "@/lib/frontier/roles"
 
 export interface ServerInviteCreated {
   token: string
@@ -23,14 +24,16 @@ export interface ServerInviteAccepted {
 /**
  * POST /api/v2/projects/:projectId/invites — sharer side.
  *
- * role defaults to 400 (contributor), which matches the implicit level the
- * old client-only share flow granted. Sharer must have role_level >= 500
- * (project_lead) server-side; a 403 shows up as null.
+ * role defaults to ROLE.CONTRIBUTOR (400), which matches the implicit level
+ * the old client-only share flow granted. Server enforces a hard cap at
+ * contributor for link-share invites (LINK_ROLE_ALLOWED in roles.ts);
+ * sharer must also have role_level >= 500 (project_lead) on the project.
+ * A 403 shows up as null.
  */
 export async function createServerInvite(
   jwt: string,
   projectId: string,
-  role = 400,
+  role: number = ROLE.CONTRIBUTOR,
   apiUrl: string = FRONTIER_API_URL
 ): Promise<ServerInviteCreated | null> {
   try {

@@ -13,6 +13,11 @@ import { createServerInvite } from "@/lib/sync/invites"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { useProjectMembers } from "@/hooks/useProjectMembers"
 import { MembersPanel, type MembersPanelMember } from "./MembersPanel"
+import {
+  ROLE,
+  LINK_ROLE_OPTIONS,
+  PROJECT_ROLE_OPTIONS,
+} from "@/lib/frontier/roles"
 import type { ShareInvite } from "@/lib/parsers/types"
 
 interface SharePanelProps {
@@ -23,25 +28,11 @@ interface SharePanelProps {
   onSharesChanged?: () => void
 }
 
-// Roles visible in the share UI. Project_lead (500) and above can only be
-// granted by maintainer-and-up and aren't useful in a "share with a
-// collaborator" flow, so they're intentionally omitted.
-const INVITE_ROLE_OPTIONS: Array<{ level: number; name: string; description: string }> = [
-  { level: 100, name: "viewer", description: "Read-only access to cells + comments" },
-  { level: 200, name: "commenter", description: "Read + add comments on cells" },
-  { level: 300, name: "reviewer", description: "Read + comment + validate cells (no content edits)" },
-  { level: 400, name: "contributor", description: "Read + comment + edit cell content" },
-]
-const DEFAULT_INVITE_ROLE = 400
-
-const PROJECT_ROLE_OPTIONS = [
-  { level: 100, name: "viewer", description: "Read-only" },
-  { level: 200, name: "commenter", description: "Read + comments" },
-  { level: 300, name: "reviewer", description: "Read + validate" },
-  { level: 400, name: "contributor", description: "Read + edit" },
-  { level: 500, name: "project_lead", description: "Contributor + manage members" },
-  { level: 600, name: "maintainer", description: "Lead + manage roles" },
-]
+// Roles visible in the share-link UI come from LINK_ROLE_OPTIONS (capped at
+// contributor by ../lib/frontier/roles). Roles in the per-project Members tab
+// come from PROJECT_ROLE_OPTIONS. Both are mirrored server-side; the
+// server is the security boundary, this picker is the UX hint.
+const DEFAULT_INVITE_ROLE = ROLE.CONTRIBUTOR
 
 type Tab = "members" | "link"
 
@@ -99,7 +90,7 @@ function MembersTab({ projectId }: { projectId: string }) {
   // FrontierSession has no userId — server enforces self-grant rejection so we
   // pass null and skip the local self-block.
   const callerUserId = null
-  const callerMaxRole = 600 // Server caps grants; we permit the full grantable range.
+  const callerMaxRole = ROLE.MAINTAINER // Server caps grants; we permit the full grantable range.
 
   const { members, isLoading, error, add, remove } = useProjectMembers(projectId)
 
@@ -126,8 +117,8 @@ function MembersTab({ projectId }: { projectId: string }) {
       ) : (
         <MembersPanel
           members={panelMembers}
-          roleOptions={PROJECT_ROLE_OPTIONS}
-          defaultRole={400}
+          roleOptions={[...PROJECT_ROLE_OPTIONS]}
+          defaultRole={ROLE.CONTRIBUTOR}
           callerUserId={callerUserId}
           callerMaxRole={callerMaxRole}
           onAdd={async (username, role) => {
@@ -314,7 +305,7 @@ function InviteLinkTab({ open, projectId, username, onSharesChanged }: InviteLin
               onChange={(e) => setInviteRole(Number(e.target.value))}
               disabled={!session?.jwt}
             >
-              {INVITE_ROLE_OPTIONS.map((opt) => (
+              {LINK_ROLE_OPTIONS.map((opt) => (
                 <option key={opt.level} value={opt.level}>
                   {opt.name}
                 </option>
@@ -322,7 +313,7 @@ function InviteLinkTab({ open, projectId, username, onSharesChanged }: InviteLin
             </select>
             <p className="text-[10px] text-muted-foreground">
               {session?.jwt
-                ? INVITE_ROLE_OPTIONS.find((o) => o.level === inviteRole)?.description
+                ? LINK_ROLE_OPTIONS.find((o) => o.level === inviteRole)?.description
                 : "Sign in to pick a role — local-only share creates a read-write link"}
             </p>
           </div>

@@ -6,11 +6,14 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Switch } from "@/components/ui/switch"
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { useProject } from "@/hooks/useProject"
+import { useProjectSettings } from "@/hooks/useProjectSettings"
 import { getProject, updateProject } from "@/lib/store/project-index"
 import { fetchModels, resolveProvider } from "@/lib/completion/completion-service"
 import { useSaveCompletionSettings, DEFAULT_SYSTEM_PROMPT } from "@/hooks/useCompletionSettings"
 import type { ProjectRecord, CompletionProvider, ProjectTtsSettings } from "@/lib/parsers/types"
+import type { ProjectWideSettings } from "@/lib/sync/project-settings"
 import { listFlags } from "@/lib/features/flags"
 import { useFeatureFlag, setFeatureFlag } from "@/hooks/useFeatureFlag"
 import { ValidationSettingsSection } from "./ProjectSettings/ValidationSettingsSection"
@@ -61,6 +64,14 @@ export function ProjectSettings() {
   const navigate = useNavigate()
   const { project, loading, refresh } = useProject(id!)
   const { visible: savedFlash, flash } = useSavedFlash()
+
+  const { canEdit: canEditShared, reasonCannotEdit, patch: patchShared } =
+    useProjectSettings(id ?? null, project?.syncRole?.level ?? null)
+
+  const sharedDisabledTooltip =
+    reasonCannotEdit === "offline" ? "Reconnect to edit shared settings."
+    : reasonCannotEdit === "role" ? "Project Lead or higher can edit shared settings."
+    : null
 
   // ── Local form state (mirrors project, auto-saves on blur) ──────────
   const [name, setName] = useState("")
@@ -126,6 +137,17 @@ export function ProjectSettings() {
     refresh()
     flash()
   }, [id, refresh, flash])
+
+  /** Save project-wide synced fields through the server-authoritative patch. */
+  const savePartialShared = useCallback(async (partial: ProjectWideSettings) => {
+    const out = await patchShared(partial)
+    if (out.kind === "ok") {
+      flash()
+    }
+    // For "blocked" or "conflict" or "error" outcomes, no UI side-effect here.
+    // Conflict toast + revert UX lands in Task 10. Disabled fields prevent
+    // "blocked" from ever firing in normal flow.
+  }, [patchShared, flash])
 
   /** Save completion settings via shared abstraction. */
   const saveCompletionSettings = useSaveCompletionSettings(id, () => {
@@ -223,11 +245,29 @@ export function ProjectSettings() {
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <Label htmlFor="sl">Source Language</Label>
-                <Input id="sl" value={sourceLanguage} onChange={(e) => setSourceLanguage(e.target.value)} onBlur={() => saveField({ sourceLanguage })} />
+                <TooltipProvider delay={200}>
+                  <Tooltip>
+                    <TooltipTrigger render={<span className="block" />}>
+                      <Input id="sl" value={sourceLanguage} onChange={(e) => setSourceLanguage(e.target.value)} onBlur={() => savePartialShared({ sourceLanguage })} disabled={!canEditShared} />
+                    </TooltipTrigger>
+                    {sharedDisabledTooltip && (
+                      <TooltipContent>{sharedDisabledTooltip}</TooltipContent>
+                    )}
+                  </Tooltip>
+                </TooltipProvider>
               </div>
               <div>
                 <Label htmlFor="tl">Target Language</Label>
-                <Input id="tl" value={targetLanguage} onChange={(e) => setTargetLanguage(e.target.value)} onBlur={() => saveField({ targetLanguage })} />
+                <TooltipProvider delay={200}>
+                  <Tooltip>
+                    <TooltipTrigger render={<span className="block" />}>
+                      <Input id="tl" value={targetLanguage} onChange={(e) => setTargetLanguage(e.target.value)} onBlur={() => savePartialShared({ targetLanguage })} disabled={!canEditShared} />
+                    </TooltipTrigger>
+                    {sharedDisabledTooltip && (
+                      <TooltipContent>{sharedDisabledTooltip}</TooltipContent>
+                    )}
+                  </Tooltip>
+                </TooltipProvider>
               </div>
             </div>
           </CardContent>
@@ -250,15 +290,25 @@ export function ProjectSettings() {
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-3">
-            <textarea
-              id="sp"
-              value={systemPrompt}
-              onChange={(e) => setSystemPrompt(e.target.value)}
-              onBlur={() => saveCompletionSettings({ systemPrompt })}
-              rows={6}
-              className="w-full rounded border bg-background px-3 py-2 font-mono text-sm"
-              placeholder={DEFAULT_SYSTEM_PROMPT}
-            />
+            <TooltipProvider delay={200}>
+              <Tooltip>
+                <TooltipTrigger render={<span className="block" />}>
+                  <textarea
+                    id="sp"
+                    value={systemPrompt}
+                    onChange={(e) => setSystemPrompt(e.target.value)}
+                    onBlur={() => savePartialShared({ systemPrompt })}
+                    rows={6}
+                    disabled={!canEditShared}
+                    className="w-full rounded border bg-background px-3 py-2 font-mono text-sm disabled:cursor-not-allowed disabled:opacity-50"
+                    placeholder={DEFAULT_SYSTEM_PROMPT}
+                  />
+                </TooltipTrigger>
+                {sharedDisabledTooltip && (
+                  <TooltipContent>{sharedDisabledTooltip}</TooltipContent>
+                )}
+              </Tooltip>
+            </TooltipProvider>
             <p className="text-xs text-muted-foreground">
               Describe what this project is producing and how translations should read — the AI uses this on every
               completion. Use <code className="rounded bg-muted px-1">{"{sourceLanguage}"}</code> and{" "}
@@ -360,6 +410,9 @@ export function ProjectSettings() {
                     onUserKeyChange={(v) => setUserApiKey("completion", v)}
                     help="Sent as Authorization: Bearer <key>. Stored locally in your browser; never uploaded to Frontier."
                   />
+                  <p className="text-xs text-muted-foreground">
+                    Stays on this device — not shared with collaborators.
+                  </p>
                   {models.length > 0 && (
                     <div>
                       <Label htmlFor="mdl">Model</Label>
@@ -443,14 +496,16 @@ export function ProjectSettings() {
           validationCount={validationCount}
           validationCountAudio={validationCountAudio}
           hasAnyAudioData={Boolean(project?.hasAnyAudioData)}
+          disabled={!canEditShared}
+          disabledTooltip={sharedDisabledTooltip ?? undefined}
           onChange={(u) => {
             if (u.validationCount !== undefined) {
               setValidationCount(u.validationCount)
-              saveField({ validationCount: u.validationCount })
+              void savePartialShared({ validationCount: u.validationCount })
             }
             if (u.validationCountAudio !== undefined) {
               setValidationCountAudio(u.validationCountAudio)
-              saveField({ validationCountAudio: u.validationCountAudio })
+              void savePartialShared({ validationCountAudio: u.validationCountAudio })
             }
           }}
         />

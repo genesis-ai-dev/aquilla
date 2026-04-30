@@ -15,8 +15,9 @@ export const DEFAULT_PROMPT_TEMPLATE = [
 ].join("\n")
 
 /**
- * Built-in voices the user starts with. They cover a useful spread of
- * narrator / character / mood archetypes. Editable by forking.
+ * Built-in voices the user starts with. Three distinct moods — steady,
+ * gentle, energetic — to cover most needs without overwhelming the
+ * inventory. Editable in place.
  */
 export const PRESET_VOICES: readonly Voice[] = [
   {
@@ -29,33 +30,6 @@ export const PRESET_VOICES: readonly Voice[] = [
     builtIn: true,
   },
   {
-    id: "preset-elder",
-    name: "Elder",
-    color: "#a16207",
-    provider: "gemini",
-    voiceName: "Gacrux",
-    prompt: "Read in a warm, mature elder's voice with steady pacing.\n\n{text}",
-    builtIn: true,
-  },
-  {
-    id: "preset-child",
-    name: "Child",
-    color: "#ec4899",
-    provider: "gemini",
-    voiceName: "Leda",
-    prompt: "Read in a youthful, light voice.\n\n{text}",
-    builtIn: true,
-  },
-  {
-    id: "preset-excited",
-    name: "Excited",
-    color: "#f97316",
-    provider: "gemini",
-    voiceName: "Puck",
-    prompt: "Read with energetic, upbeat delivery — like an enthusiastic announcement.\n\n{text}",
-    builtIn: true,
-  },
-  {
     id: "preset-calm",
     name: "Calm",
     color: "#14b8a6",
@@ -65,12 +39,12 @@ export const PRESET_VOICES: readonly Voice[] = [
     builtIn: true,
   },
   {
-    id: "preset-whisper",
-    name: "Whisper",
-    color: "#475569",
+    id: "preset-excited",
+    name: "Excited",
+    color: "#f97316",
     provider: "gemini",
-    voiceName: "Enceladus",
-    prompt: "Read in a hushed, breathy near-whisper.\n\n{text}",
+    voiceName: "Puck",
+    prompt: "Read with energetic, upbeat delivery — like an enthusiastic announcement.\n\n{text}",
     builtIn: true,
   },
 ] as const

@@ -3,6 +3,32 @@ import type { ProjectRecord } from "@/lib/parsers/types"
 import { getProject, patchProject, updateProject } from "@/lib/store/project-index"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { minimalProjectRecord, resolveCloudProject } from "@/lib/sync/cloud-projects"
+import { useProjectSettings } from "@/hooks/useProjectSettings"
+import type { ProjectWideSettings } from "@/lib/sync/project-settings"
+
+/**
+ * Overlay synced project-wide settings onto the IDB-cached ProjectRecord.
+ * Server fields win for keys it has set; local fields outside the synced
+ * subset (endpoint, apiKey, model/maxTokens/temperature, audio strategy,
+ * etc.) are untouched. Mutates a shallow copy — never the input.
+ */
+function overlaySettings(record: ProjectRecord, settings: ProjectWideSettings): ProjectRecord {
+  const next: ProjectRecord = { ...record }
+  if (settings.sourceLanguage != null) next.sourceLanguage = settings.sourceLanguage
+  if (settings.targetLanguage != null) next.targetLanguage = settings.targetLanguage
+  if (settings.systemPrompt != null) {
+    next.completionSettings = {
+      ...(record.completionSettings ?? ({} as any)),
+      systemPrompt: settings.systemPrompt,
+    }
+  }
+  if (settings.rules != null) next.rules = settings.rules
+  if (settings.rulePenalties != null) next.rulePenalties = settings.rulePenalties
+  if (settings.healthSettings != null) next.healthSettings = settings.healthSettings
+  if (settings.validationCount != null) next.validationCount = settings.validationCount
+  if (settings.validationCountAudio != null) next.validationCountAudio = settings.validationCountAudio
+  return next
+}
 
 export type ProjectLoadStatus =
   | "loading"
@@ -107,5 +133,14 @@ export function useProject(projectId: string) {
     return cleanup
   }, [refresh])
 
-  return { project, status, loading: status === "loading", refresh }
+  // Overlay synced settings (server-authoritative project-wide fields) onto
+  // the IDB record so existing consumers see merged values without any
+  // per-callsite changes. The synced subset is languages, system prompt,
+  // rules, health settings, validation counts. Device-local fields like
+  // completionSettings.endpoint and apiKey are never affected by this.
+  const roleLevel = project?.syncRole?.level ?? null
+  const { settings: syncedSettings } = useProjectSettings(projectId, roleLevel)
+  const overlaid = project ? overlaySettings(project, syncedSettings) : null
+
+  return { project: overlaid, status, loading: status === "loading", refresh }
 }

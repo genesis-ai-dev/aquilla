@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { getProject, patchProject } from "@/lib/store/project-index"
+import { ROLE } from "@/lib/frontier/roles"
 import {
   fetchProjectSettings,
   patchProjectSettings,
@@ -9,7 +10,7 @@ import {
   type ProjectSettingsResponse,
 } from "@/lib/sync/project-settings"
 
-const EDIT_ROLE_FLOOR = 500 // PROJECT_LEAD+
+const EDIT_ROLE_FLOOR = ROLE.PROJECT_LEAD
 
 export type CannotEditReason = "offline" | "role" | null
 

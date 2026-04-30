@@ -477,12 +477,27 @@ function PendingInviteRow({
   return (
     <li className="flex items-center gap-2 py-1.5 text-xs">
       <div className="min-w-0 flex-1">
-        <div className="flex items-center gap-1.5">
+        <div className="flex flex-wrap items-center gap-1.5">
           <span className="font-medium truncate">{invite.projectName}</span>
           <span className="text-muted-foreground">·</span>
           <span className="capitalize text-muted-foreground">
             {invite.role.name.replace(/_/g, " ")}
           </span>
+          {invite.email ? (
+            <span
+              className="rounded bg-blue-500/15 text-blue-700 dark:text-blue-300 px-1.5 py-0.5 text-[9px] font-mono"
+              title="Targeted invite — sign-up form will be prefilled with this email"
+            >
+              {invite.email}
+            </span>
+          ) : (
+            <span
+              className="rounded bg-muted px-1.5 py-0.5 text-[9px] text-muted-foreground"
+              title="Open link — anyone holding the URL can redeem"
+            >
+              open link
+            </span>
+          )}
         </div>
         <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
           <span>by {invite.createdBy.username}</span>

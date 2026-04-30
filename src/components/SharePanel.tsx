@@ -149,6 +149,12 @@ function InviteLinkTab({ open, projectId, username, onSharesChanged }: InviteLin
   const [pinCache, setPinCache] = useState<Map<string, string>>(new Map())
   const [copied, setCopied] = useState<string | null>(null)
   const [inviteRole, setInviteRole] = useState<number>(DEFAULT_INVITE_ROLE)
+  // Optional email binding. When set, the server stores the email on the
+  // invite row and the JoinPage prefills the sign-up form for unsigned-up
+  // recipients. The token is still the credential (Zoom-URL semantics);
+  // the email is purely UX prefill + audit trail.
+  const [inviteEmail, setInviteEmail] = useState<string>("")
+  const [emailError, setEmailError] = useState<string | null>(null)
 
   const refresh = useCallback(async () => {
     const list = await listShares(projectId)
@@ -169,6 +175,15 @@ function InviteLinkTab({ open, projectId, username, onSharesChanged }: InviteLin
   const { session } = useFrontierSession()
 
   async function handleCreate() {
+    setEmailError(null)
+    const trimmedEmail = inviteEmail.trim()
+    // Light client-side validation — server does the canonical check via
+    // zod's email refinement, but we want to fail fast in the UI before
+    // the round-trip.
+    if (trimmedEmail.length > 0 && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmedEmail)) {
+      setEmailError("Enter a valid email address, or leave blank for an open link.")
+      return
+    }
     const pin = requirePin ? generatedPin : undefined
     // Register server-side first so the local ShareInvite and the server's
     // project_invites row share one token. Falls back to a local-only token
@@ -176,7 +191,13 @@ function InviteLinkTab({ open, projectId, username, onSharesChanged }: InviteLin
     // the project record, but without server-side membership /sync-token
     // will 403 and multi-device sync won't light up for them.
     const serverInvite = session?.jwt
-      ? await createServerInvite(session.jwt, projectId, inviteRole)
+      ? await createServerInvite(
+          session.jwt,
+          projectId,
+          inviteRole,
+          undefined,
+          trimmedEmail || undefined
+        )
       : null
     const invite = await createShare(projectId, pin, username, serverInvite?.token)
     if (pin) {
@@ -186,6 +207,7 @@ function InviteLinkTab({ open, projectId, username, onSharesChanged }: InviteLin
     setRequirePin(false)
     setGeneratedPin("")
     setInviteRole(DEFAULT_INVITE_ROLE)
+    setInviteEmail("")
     await refresh()
   }
 
@@ -316,6 +338,35 @@ function InviteLinkTab({ open, projectId, username, onSharesChanged }: InviteLin
                 ? LINK_ROLE_OPTIONS.find((o) => o.level === inviteRole)?.description
                 : "Sign in to pick a role — local-only share creates a read-write link"}
             </p>
+          </div>
+          {/* Optional email recipient — turns this from an "anyone with the
+              link" share into a targeted invite with sign-up prefill. */}
+          <div className="space-y-1">
+            <Label htmlFor="invite-email" className="text-xs">
+              Recipient email <span className="text-muted-foreground font-normal">(optional)</span>
+            </Label>
+            <Input
+              id="invite-email"
+              type="email"
+              inputMode="email"
+              autoComplete="off"
+              value={inviteEmail}
+              onChange={(e) => {
+                setInviteEmail(e.target.value)
+                setEmailError(null)
+              }}
+              placeholder="name@example.com"
+              disabled={!session?.jwt}
+            />
+            {emailError ? (
+              <p className="text-[10px] text-destructive">{emailError}</p>
+            ) : (
+              <p className="text-[10px] text-muted-foreground">
+                {inviteEmail.trim()
+                  ? "If they don't have a Frontier account, the join page prefills sign-up with this email."
+                  : "Leave blank for an open link anyone can redeem."}
+              </p>
+            )}
           </div>
           <Label className="flex items-center gap-2 text-xs">
             <input

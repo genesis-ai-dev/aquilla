@@ -1,8 +1,8 @@
 import { useState } from "react";
 import { Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { formatRelativeTime, isStale } from "@/lib/time/relative";
+import { UsernameTypeahead, type RecipientValue } from "@/components/UsernameTypeahead";
 
 export interface MembersPanelMember {
   userId: number;
@@ -49,22 +49,30 @@ export function MembersPanel({
   callerUserId,
   callerMaxRole,
 }: MembersPanelProps) {
-  const [username, setUsername] = useState("");
+  // Typeahead-mode-only here. Email-mode is for project-link invites
+  // (handled in MultiProjectInviteDialog / SharePanel), not direct
+  // org-membership grants — `addOrgMember` requires a real Frontier
+  // user id, which we don't have for an unsigned-up email yet.
+  const [recipient, setRecipient] = useState<RecipientValue>({
+    mode: "username",
+    raw: "",
+  });
   const [role, setRole] = useState(defaultRole);
   const [adding, setAdding] = useState(false);
   const [addError, setAddError] = useState<string | null>(null);
 
   async function handleAdd() {
-    if (!username.trim()) return;
+    const trimmed = recipient.raw.trim();
+    if (!trimmed) return;
     setAdding(true);
     setAddError(null);
-    const result = await onAdd(username.trim(), role);
+    const result = await onAdd(trimmed, role);
     setAdding(false);
     if (!result.ok) {
       setAddError(result.error ?? "Could not add user");
       return;
     }
-    setUsername("");
+    setRecipient({ mode: "username", raw: "" });
     setRole(defaultRole);
   }
 
@@ -123,13 +131,15 @@ export function MembersPanel({
 
       <div className="space-y-2">
         <div className="flex gap-2">
-          <Input
-            placeholder="Username"
-            value={username}
-            onChange={(e) => setUsername(e.target.value)}
-            disabled={adding}
-            autoComplete="off"
-          />
+          <div className="flex-1">
+            <UsernameTypeahead
+              value={recipient}
+              onChange={setRecipient}
+              disabled={adding}
+              showModeToggle={false}
+              placeholder={{ username: "Frontier username" }}
+            />
+          </div>
           <select
             className="rounded border bg-background px-2 text-sm"
             value={role}
@@ -140,7 +150,7 @@ export function MembersPanel({
               <option key={r.level} value={r.level}>{r.name}</option>
             ))}
           </select>
-          <Button onClick={handleAdd} disabled={adding || !username.trim()}>
+          <Button onClick={handleAdd} disabled={adding || !recipient.raw.trim()}>
             Add
           </Button>
         </div>

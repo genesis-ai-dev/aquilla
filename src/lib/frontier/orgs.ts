@@ -79,6 +79,11 @@ export interface PendingOrgInvite {
   createdBy: { userId: number; username: string };
   createdAt: string;
   expiresAt: string | null;
+  /** Non-null when the invite was minted for a specific email recipient.
+   * Null means "anyone with the link can redeem" (open link). The Roster
+   * surfaces this so the operator can distinguish targeted invites from
+   * open shares. */
+  email?: string | null;
 }
 
 export interface OrgMemberProject {

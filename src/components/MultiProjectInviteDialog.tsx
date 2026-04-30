@@ -1,7 +1,6 @@
 import { useMemo, useState } from "react"
 import { Check, Loader2, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription,
@@ -14,6 +13,7 @@ import {
 } from "@/lib/frontier/roles"
 import { addProjectMember, lookupUser } from "@/lib/frontier/members"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
+import { UsernameTypeahead, type RecipientValue } from "@/components/UsernameTypeahead"
 import type { CloudProjectSummary } from "@/lib/sync/cloud-projects"
 
 interface MultiProjectInviteDialogProps {
@@ -47,7 +47,15 @@ export function MultiProjectInviteDialog({
   onSuccess,
 }: MultiProjectInviteDialogProps) {
   const { session } = useFrontierSession()
-  const [username, setUsername] = useState("")
+  // Username-only here. Multi-project email invites would need N tokens
+  // (one per project), each bearing the same email — awkward UX. The
+  // single-project email-invite path lives in SharePanel; once the
+  // recipient signs up there, they become a known user the operator
+  // can bulk-add by username from this dialog.
+  const [recipient, setRecipient] = useState<RecipientValue>({
+    mode: "username",
+    raw: "",
+  })
   const [selections, setSelections] = useState<Record<string, RoleLevel>>({})
   const [busy, setBusy] = useState(false)
   const [perProjectError, setPerProjectError] = useState<Record<string, string>>({})
@@ -56,7 +64,7 @@ export function MultiProjectInviteDialog({
 
   const selectedIds = useMemo(() => Object.keys(selections), [selections])
   const canSubmit =
-    !busy && username.trim().length > 0 && selectedIds.length > 0 && Boolean(session?.jwt)
+    !busy && recipient.raw.trim().length > 0 && selectedIds.length > 0 && Boolean(session?.jwt)
 
   function toggleProject(projectId: string) {
     setSelections((prev) => {
@@ -81,9 +89,14 @@ export function MultiProjectInviteDialog({
     setPerProjectError({})
     setDone(null)
     try {
-      const target = await lookupUser(session.jwt, username.trim())
+      // If the typeahead already verified the user, skip the redundant
+      // round-trip. Otherwise (operator typed and hit Add without picking
+      // a suggestion) fall back to a definitive lookup.
+      const target =
+        recipient.resolved ??
+        (await lookupUser(session.jwt, recipient.raw.trim()))
       if (!target) {
-        setTopError(`No Frontier user named "${username.trim()}".`)
+        setTopError(`No Frontier user named "${recipient.raw.trim()}".`)
         return
       }
       // Issue grants in parallel — they're independent and we want the
@@ -115,7 +128,7 @@ export function MultiProjectInviteDialog({
 
   function handleClose() {
     if (busy) return
-    setUsername("")
+    setRecipient({ mode: "username", raw: "" })
     setSelections({})
     setPerProjectError({})
     setTopError(null)
@@ -146,14 +159,17 @@ export function MultiProjectInviteDialog({
             <Label htmlFor="invite-username" className="text-xs">
               Frontier username
             </Label>
-            <Input
-              id="invite-username"
-              value={username}
-              onChange={(e) => setUsername(e.target.value)}
-              placeholder="e.g. mariad"
+            <UsernameTypeahead
+              value={recipient}
+              onChange={setRecipient}
               disabled={busy}
-              autoComplete="off"
+              inputId="invite-username"
+              showModeToggle={false}
             />
+            <p className="text-[10px] text-muted-foreground">
+              Invite by email is in the per-project Share panel — once they
+              sign up, you can bulk-add them here.
+            </p>
           </div>
 
           <div>

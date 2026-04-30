@@ -14,11 +14,25 @@ export interface ServerInviteCreated {
   projectId: string
   role: number
   expiresAt: string
+  /** Echoed back when the invite was bound to a specific email. Null/absent
+   * for "anyone with the link" invites. */
+  email?: string
 }
 
 export interface ServerInviteAccepted {
   projectId: string
   role: number
+}
+
+export interface ServerInvitePreview {
+  projectId: string
+  projectName: string
+  role: { level: number; name: string }
+  expiresAt: string | null
+  /** Non-null when the invite was minted for a specific email — used by
+   * the JoinPage to prefill the sign-up form. Null for "anyone with the
+   * link" invites. */
+  email: string | null
 }
 
 /**
@@ -29,14 +43,22 @@ export interface ServerInviteAccepted {
  * contributor for link-share invites (LINK_ROLE_ALLOWED in roles.ts);
  * sharer must also have role_level >= 500 (project_lead) on the project.
  * A 403 shows up as null.
+ *
+ * Optional `email` binds the invite to a specific recipient. The token is
+ * still the auth credential — anyone holding it can redeem after signup —
+ * but the email lets the JoinPage prefill the sign-up form when the
+ * recipient lacks a Frontier account.
  */
 export async function createServerInvite(
   jwt: string,
   projectId: string,
   role: number = ROLE.CONTRIBUTOR,
-  apiUrl: string = FRONTIER_API_URL
+  apiUrl: string = FRONTIER_API_URL,
+  email?: string
 ): Promise<ServerInviteCreated | null> {
   try {
+    const body: Record<string, unknown> = { role }
+    if (email && email.trim().length > 0) body.email = email.trim()
     const res = await fetch(
       `${apiUrl}/api/v2/projects/${encodeURIComponent(projectId)}/invites`,
       {
@@ -45,7 +67,7 @@ export async function createServerInvite(
           "Content-Type": "application/json",
           Authorization: `Bearer ${jwt}`,
         },
-        body: JSON.stringify({ role }),
+        body: JSON.stringify(body),
       }
     )
     if (!res.ok) {
@@ -57,6 +79,33 @@ export async function createServerInvite(
     return (await res.json()) as ServerInviteCreated
   } catch (err) {
     console.warn("[invites] createServerInvite failed:", err)
+    return null
+  }
+}
+
+/**
+ * GET /api/v2/projects/invite-preview/:token — public, no JWT required.
+ *
+ * Returns project + role metadata so the JoinPage can render context
+ * before the recipient signs in. 404 (unknown token) and 410 (used /
+ * expired) both surface as null with a console warning; the page renders
+ * an "invite no longer valid" empty state.
+ */
+export async function previewServerInvite(
+  token: string,
+  apiUrl: string = FRONTIER_API_URL
+): Promise<ServerInvitePreview | null> {
+  try {
+    const res = await fetch(
+      `${apiUrl}/api/v2/projects/invite-preview/${encodeURIComponent(token)}`
+    )
+    if (!res.ok) {
+      console.warn(`[invites] previewServerInvite → HTTP ${res.status}`)
+      return null
+    }
+    return (await res.json()) as ServerInvitePreview
+  } catch (err) {
+    console.warn("[invites] previewServerInvite failed:", err)
     return null
   }
 }

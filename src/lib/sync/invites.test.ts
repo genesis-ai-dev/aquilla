@@ -67,6 +67,38 @@ describe("createServerInvite", () => {
     const result = await createServerInvite("jwt", "proj-1", 400, API)
     expect(result).toBeNull()
   })
+
+  it("includes email in request body when provided", async () => {
+    const fetchMock = mockFetch(200, {
+      token: "tok",
+      projectId: "proj-1",
+      role: 400,
+      expiresAt: "x",
+      email: "daniel@example.com",
+    })
+    global.fetch = fetchMock as unknown as typeof fetch
+    const result = await createServerInvite(
+      "jwt",
+      "proj-1",
+      400,
+      API,
+      "daniel@example.com"
+    )
+    const body = JSON.parse(fetchMock.mock.calls[0][1]!.body as string) as {
+      role: number
+      email?: string
+    }
+    expect(body.email).toBe("daniel@example.com")
+    expect(result?.email).toBe("daniel@example.com")
+  })
+
+  it("trims whitespace and omits email when empty/whitespace", async () => {
+    const fetchMock = mockFetch(200, { token: "t", projectId: "p", role: 400, expiresAt: "x" })
+    global.fetch = fetchMock as unknown as typeof fetch
+    await createServerInvite("j", "p", 400, API, "   ")
+    const body = JSON.parse(fetchMock.mock.calls[0][1]!.body as string) as Record<string, unknown>
+    expect(body).not.toHaveProperty("email")
+  })
 })
 
 describe("acceptServerInvite", () => {

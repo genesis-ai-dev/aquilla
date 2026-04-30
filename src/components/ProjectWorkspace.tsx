@@ -88,6 +88,7 @@ import { resolveHealthConfig } from "@/lib/health/config-resolver"
 import { useSetupChecklist } from "@/hooks/useSetupChecklist"
 import { useProjectSettingsSync } from "@/hooks/useProjectSettingsSync"
 import { SetupChecklistDrawer } from "./onboarding/SetupChecklistDrawer"
+import { SystemPromptNudge } from "./onboarding/SystemPromptNudge"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { useFeatureFlag } from "@/hooks/useFeatureFlag"
 import { NextUnfinishedButton } from "./NextUnfinishedButton"
@@ -479,18 +480,7 @@ export function ProjectWorkspace() {
   const { state: checklistState, dismissed: checklistDismissed, dismiss: dismissChecklist, refreshShares: refreshChecklistShares } = useSetupChecklist(project ?? null)
   const [checklistOpen, setChecklistOpen] = useState(false)
   const [showChipTooltip, setShowChipTooltip] = useState(false)
-  const autoOpenHandledRef = useRef<string | null>(null)
   const livingMemoryEnabled = useFeatureFlag("living-memory-view", project)
-
-  // Auto-open the drawer at most once per (mount, project) — and only when the
-  // user has never dismissed it. Subsequent navigations to a dismissed project
-  // leave it closed; the chip in the header is the re-entry point.
-  useEffect(() => {
-    if (!project) return
-    if (autoOpenHandledRef.current === project.id) return
-    autoOpenHandledRef.current = project.id
-    if (!project.setupChecklistDismissed) setChecklistOpen(true)
-  }, [project])
 
   const handleChecklistOpenChange = useCallback((next: boolean) => {
     setChecklistOpen(next)
@@ -841,6 +831,13 @@ export function ProjectWorkspace() {
                 <Lock className="h-3.5 w-3.5" />
                 Read-only — imported from git. Push is coming in Phase 2.
               </div>
+            )}
+            {project && (
+              <SystemPromptNudge
+                project={project}
+                onProjectUpdated={handleProjectUpdated}
+                onCustomize={() => setChecklistOpen(true)}
+              />
             )}
             {isSubtitleFile && videoSrc && (
               <ResizableVideoPanel>

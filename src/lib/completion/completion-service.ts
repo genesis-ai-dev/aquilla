@@ -1,6 +1,7 @@
 import type { CompletionSettings, CompletionProvider } from "@/lib/parsers/types"
 import type { FrontierSession } from "@/lib/frontier/types"
 import { resolveApiKey } from "@/lib/store/user-api-keys"
+import { getUserProviderOverride } from "@/lib/store/user-provider-override"
 
 export const DEFAULT_SYSTEM_PROMPT =
   "You are translating a project from {sourceLanguage} into {targetLanguage}.\n" +
@@ -74,8 +75,21 @@ export interface CompleteOptions {
 }
 
 export async function complete(options: CompleteOptions): Promise<string> {
-  const provider = resolveProvider(options.settings)
-  const { url, headers } = await buildRequestTarget(provider, options.settings, options.session)
+  // Personal per-device override (set in user Settings) takes precedence over
+  // the project's completionSettings. This is the "advanced" path: the user
+  // wants their own endpoint/key for everything they translate on this device.
+  const override = getUserProviderOverride()
+  const effectiveSettings: CompletionSettings = override
+    ? {
+        ...options.settings,
+        provider: "custom",
+        endpoint: override.endpoint,
+        model: override.model || options.settings.model,
+        apiKey: override.apiKey,
+      }
+    : options.settings
+  const provider = resolveProvider(effectiveSettings)
+  const { url, headers } = await buildRequestTarget(provider, effectiveSettings, options.session)
 
   // The Frontier worker's SSE proxy drops OpenRouter content chunks that
   // straddle `reader.read()` boundaries (fixed in the worker but not yet
@@ -88,10 +102,10 @@ export async function complete(options: CompleteOptions): Promise<string> {
     method: "POST",
     headers: { "Content-Type": "application/json", ...headers },
     body: JSON.stringify({
-      model: options.settings.model || "default",
+      model: effectiveSettings.model || "default",
       messages: options.messages,
-      max_tokens: options.settings.maxTokens,
-      temperature: options.settings.temperature,
+      max_tokens: effectiveSettings.maxTokens,
+      temperature: effectiveSettings.temperature,
       stream: useStream,
     }),
   })

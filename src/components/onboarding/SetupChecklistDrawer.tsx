@@ -10,7 +10,6 @@ import {
 import type { ChecklistState } from "@/hooks/useSetupChecklist"
 import type { ProjectRecord } from "@/lib/parsers/types"
 import { ChecklistItem } from "./checklist/ChecklistItem"
-import { AiProviderStep } from "./checklist/AiProviderStep"
 import { AiInstructionsStep } from "./checklist/AiInstructionsStep"
 import { InviteStep } from "./checklist/InviteStep"
 import { ComingSoonStep } from "./checklist/ComingSoonStep"
@@ -59,16 +58,8 @@ export function SetupChecklistDrawer({
 
         <div className="flex-1 min-h-0 overflow-y-auto p-4 space-y-3">
           <ChecklistItem
-            title="Choose an AI provider"
-            description="Picks the engine that powers translation suggestions and rule autofixes."
-            complete={state.aiProvider}
-          >
-            <AiProviderStep project={project} onUpdated={onProjectUpdated} />
-          </ChecklistItem>
-
-          <ChecklistItem
             title="Set translation instructions"
-            description="A short system prompt that shapes tone, formality, and style."
+            description="A short system prompt that shapes tone, formality, and style. Shared with everyone in this project."
             complete={state.aiInstructions}
           >
             <AiInstructionsStep project={project} onUpdated={onProjectUpdated} />

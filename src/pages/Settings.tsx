@@ -3,6 +3,7 @@ import { ArrowLeft } from "lucide-react"
 import { Switch } from "@/components/ui/switch"
 import { Label } from "@/components/ui/label"
 import { useAnalyticsConsent } from "@/hooks/useAnalyticsConsent"
+import { PersonalProviderSection } from "@/components/settings/PersonalProviderSection"
 
 export function Settings() {
   const { enabled, setEnabled } = useAnalyticsConsent()
@@ -52,6 +53,10 @@ export function Settings() {
           )}
         </div>
       </section>
+
+      <div className="mt-8">
+        <PersonalProviderSection />
+      </div>
     </div>
   )
 }

@@ -1,5 +1,5 @@
 import { useCallback } from "react"
-import { login as doLogin } from "@/lib/frontier/auth"
+import { login as doLogin, register as doRegister } from "@/lib/frontier/auth"
 import { clearSession } from "@/lib/frontier/session-store"
 import { useAccounts } from "@/hooks/useAccounts"
 import { purgeAudioCachesOnSignOut } from "@/lib/audio/cache-cleanup"
@@ -15,6 +15,13 @@ export function useFrontierSession() {
     return session
   }, [])
 
+  const register = useCallback(async (username: string, email: string, password: string) => {
+    const session = await doRegister({ username, email, password })
+    posthog.identify(session.username, { username: session.username, email })
+    posthog.capture("user signed up", { username: session.username })
+    return session
+  }, [])
+
   const logout = useCallback(async () => {
     posthog.capture("user logged out")
     posthog.reset()
@@ -22,5 +29,5 @@ export function useFrontierSession() {
     await purgeAudioCachesOnSignOut()
   }, [])
 
-  return { session: active, loading, login, logout }
+  return { session: active, loading, login, register, logout }
 }

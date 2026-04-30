@@ -213,6 +213,10 @@ export interface ProjectRecord {
   syncSettings?: ProjectSyncSettings
   suggestionsDismissedAt?: string  // ISO timestamp; suggestion banner is hidden after this is set.
   setupChecklistDismissed?: boolean
+  /** ISO timestamp set when the user dismisses the "your project is still using
+   * default AI instructions" nudge, OR when they actually customize the system
+   * prompt. Either way, we stop nagging. */
+  defaultPromptNudgeDismissedAt?: string
   /**
    * Project-scoped toggles for in-development features. Keys are defined in
    * `src/lib/features/flags.ts`; unknown keys are ignored on read. Optional —

@@ -8,7 +8,6 @@ import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { DEFAULT_TTS_PROVIDER } from "@/lib/audio/gemini-tts"
 
 export interface ChecklistState {
-  aiProvider: boolean
   aiInstructions: boolean
   collaborators: boolean
   aiModels: boolean
@@ -20,18 +19,20 @@ export interface ChecklistState {
  * `collaboratorReach` counts any signal that the project is no longer
  * "just me": local share links the user created OR project members beyond
  * the caller. Either confirms they reached out to a teammate.
+ *
+ * AI provider is no longer in the checklist — for the happy path, signing
+ * in to Frontier covers it. The advanced "personal endpoint override" lives
+ * in user Settings, not project setup.
  */
 export function deriveChecklistState(
   settings: Partial<CompletionSettings> | undefined,
   collaboratorReach: number,
   aiModelsReady: boolean
 ): ChecklistState {
-  const aiProvider = Boolean(settings?.endpoint?.trim())
   const aiInstructions = Boolean(settings?.systemPrompt?.trim())
   const collaborators = collaboratorReach > 0
-  const items = [aiProvider, aiInstructions, collaborators, aiModelsReady]
+  const items = [aiInstructions, collaborators, aiModelsReady]
   return {
-    aiProvider,
     aiInstructions,
     collaborators,
     aiModels: aiModelsReady,

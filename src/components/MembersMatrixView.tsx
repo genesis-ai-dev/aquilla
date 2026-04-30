@@ -1,16 +1,25 @@
 import { Loader2, AlertTriangle } from "lucide-react"
 import { useProjectsMembersMatrix } from "@/hooks/useProjectsMembersMatrix"
 import { ROLE } from "@/lib/frontier/roles"
-import type { MatrixCell, MatrixMember } from "@/hooks/useProjectsMembersMatrix"
+import { MembersMatrixCellEditor } from "./MembersMatrixCellEditor"
+import type { MatrixMember } from "@/hooks/useProjectsMembersMatrix"
 import type { CloudProjectSummary } from "@/lib/sync/cloud-projects"
 
 /**
- * Members × projects scan view. Read-only v1: shows the role at every
- * intersection so an operational PM can spot coverage gaps and concentration
- * risk in one glance. Editing happens via drill-in to existing surfaces
- * (project name → project SharePanel; member name → roster row's project
- * chips). That keeps the matrix tight and avoids re-implementing role-pick
- * logic inline.
+ * Members × projects scan view, with inline cell editing.
+ *
+ * Click any cell to open a popover:
+ *   - Empty cell → role picker; selecting a role POSTs /members for that
+ *     project. Adds the user as a project_external if they aren't an org
+ *     member, or as an override on top of their org role if they are.
+ *   - Override cell → role picker (changes the override) + Remove button.
+ *   - Org-inherited cell → "Make exception" picker that creates an
+ *     override that supersedes the org grant for this project only.
+ *   - Creator / GitLab cell → read-only with explanation of where to
+ *     actually edit it (those grants live elsewhere).
+ *
+ * Refresh after every successful mutation re-fetches the matrix so the
+ * cell color and source label update to match the new state.
  *
  * The cell color encodes role tier so the eye can scan without reading text:
  *   - viewer (100)         → muted gray
@@ -27,7 +36,7 @@ import type { CloudProjectSummary } from "@/lib/sync/cloud-projects"
  * losing this person locks the project").
  */
 export function MembersMatrixView() {
-  const { matrix, isLoading, error } = useProjectsMembersMatrix()
+  const { matrix, isLoading, error, refresh } = useProjectsMembersMatrix()
 
   if (isLoading && !matrix) {
     return (
@@ -78,7 +87,12 @@ export function MembersMatrixView() {
         </thead>
         <tbody>
           {matrix.members.map((m) => (
-            <MatrixRow key={m.userId} member={m} matrix={matrix} />
+            <MatrixRow
+              key={m.userId}
+              member={m}
+              matrix={matrix}
+              onMutated={refresh}
+            />
           ))}
         </tbody>
       </table>
@@ -123,7 +137,15 @@ function ProjectHeaderCell({
   )
 }
 
-function MatrixRow({ member, matrix }: { member: MatrixMember; matrix: ReturnType<typeof useProjectsMembersMatrix>["matrix"] }) {
+function MatrixRow({
+  member,
+  matrix,
+  onMutated,
+}: {
+  member: MatrixMember
+  matrix: ReturnType<typeof useProjectsMembersMatrix>["matrix"]
+  onMutated: () => Promise<void>
+}) {
   if (!matrix) return null
   const memberCells = matrix.cells.get(member.userId)
   return (
@@ -144,40 +166,22 @@ function MatrixRow({ member, matrix }: { member: MatrixMember; matrix: ReturnTyp
       </th>
       {matrix.projects.map((p) => {
         const cell = memberCells?.get(p.id)
-        return <Cell key={p.id} cell={cell} />
+        const palette = cell ? colorForRole(cell.role.level) : ""
+        const sourceHint = cell ? sourceLabel(cell.role.source) : ""
+        return (
+          <MembersMatrixCellEditor
+            key={p.id}
+            cell={cell}
+            userId={member.userId}
+            username={member.username}
+            projectId={p.id}
+            onMutated={onMutated}
+            cellClassName={palette}
+            sourceHint={sourceHint}
+          />
+        )
       })}
     </tr>
-  )
-}
-
-function Cell({ cell }: { cell: MatrixCell | undefined }) {
-  if (!cell) {
-    return (
-      <td
-        className="px-2 py-1.5 border-l text-center text-muted-foreground"
-        title="No access"
-      >
-        <span aria-hidden>—</span>
-        <span className="sr-only">No access</span>
-      </td>
-    )
-  }
-  const palette = colorForRole(cell.role.level)
-  const sourceHint = sourceLabel(cell.role.source)
-  return (
-    <td
-      className={`px-2 py-1.5 border-l text-[11px] ${palette}`}
-      title={`${cell.role.name}${sourceHint ? ` · ${sourceHint}` : ""}`}
-    >
-      <div className="flex items-center justify-between gap-1">
-        <span className="capitalize truncate">{cell.role.name.replace(/_/g, " ")}</span>
-        {sourceHint && (
-          <span className="text-[9px] opacity-75 shrink-0" aria-hidden>
-            {sourceHint[0]}
-          </span>
-        )}
-      </div>
-    </td>
   )
 }
 

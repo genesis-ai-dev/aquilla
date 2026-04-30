@@ -8,7 +8,15 @@ export interface LookedUpUser {
 export interface ProjectMemberRole {
   level: number;
   name: string;
-  source: "override" | "creator" | "org";
+  /**
+   * Where this role came from in frontier-server's resolveProjectRole tier:
+   *   - "override": explicit row in project_members for this user+project
+   *   - "creator":  user is the project's `created_by`
+   *   - "org":      user has an org_members row for this project's org
+   *   - "gitlab":   resolved via GitLab pass-through for legacy projects
+   *                 (only ever set when the project has a gitlab_project_id)
+   */
+  source: "override" | "creator" | "org" | "gitlab";
 }
 
 export interface ProjectMember {

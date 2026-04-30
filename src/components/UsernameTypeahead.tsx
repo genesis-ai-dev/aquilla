@@ -60,7 +60,7 @@ export function UsernameTypeahead({
 }: Props) {
   const [open, setOpen] = useState(false)
   const containerRef = useRef<HTMLDivElement>(null)
-  const { results, isLoading, needsMorePrefix } = useUserSearch(
+  const { results, isLoading, needsMorePrefix, lastFetchOk } = useUserSearch(
     value.mode === "username" ? value.raw : ""
   )
 
@@ -176,7 +176,12 @@ export function UsernameTypeahead({
             </p>
           )}
 
-          {!needsMorePrefix && !isLoading && results.length === 0 && value.raw.trim().length >= 2 && (
+          {/* Only claim "no user named X" when the search actually
+              succeeded (lastFetchOk). When the search endpoint isn't
+              deployed yet (404) or the network errored, we'd otherwise
+              be lying about the user's existence — suppress the
+              false-negative and render a softer fallback hint. */}
+          {!needsMorePrefix && !isLoading && results.length === 0 && value.raw.trim().length >= 2 && lastFetchOk && (
             <div className="px-3 py-2">
               <p className="text-[11px] text-muted-foreground">
                 No Frontier user named "{value.raw.trim()}".
@@ -192,6 +197,12 @@ export function UsernameTypeahead({
                 </button>
               )}
             </div>
+          )}
+
+          {!needsMorePrefix && !isLoading && results.length === 0 && value.raw.trim().length >= 2 && !lastFetchOk && (
+            <p className="px-3 py-2 text-[11px] text-muted-foreground">
+              Couldn't search right now — we'll verify the username when you submit.
+            </p>
           )}
 
           {results.length > 0 && (

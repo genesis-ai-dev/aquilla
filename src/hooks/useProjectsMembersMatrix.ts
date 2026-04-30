@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useFrontierSession } from "./useFrontierSession";
 import { useAccessibleProjects } from "./useAccessibleProjects";
+import { useOrg, useOrgMembers } from "./useOrg";
 import { listProjectMembers, type ProjectMember } from "@/lib/frontier/members";
 import type { CloudProjectSummary } from "@/lib/sync/cloud-projects";
 
@@ -44,12 +45,18 @@ export interface UseProjectsMembersMatrix {
  * Pulls members for every accessible project in parallel, then aggregates
  * into a sparse {userId → projectId → role} map for the Matrix view.
  *
- * Why fan-out per project instead of one batched endpoint: frontier-server
- * doesn't currently expose a "members across the org" endpoint, and
- * adding one for v1 isn't worth the round-trip. With Promise.all over
- * accessibleProjects we get O(1) wall-clock latency for typical org sizes
- * (< 30 projects). When the matrix gets too large to render anyway, the
- * UI will need filters before the round-trip count becomes the bottleneck.
+ * Two row sources, unioned:
+ *   1. Members returned by listProjectMembers per accessible project —
+ *      includes anyone with a project_members row, the project creator,
+ *      AND org-tier members (when the project has org_id set).
+ *   2. The caller's full org membership list (useOrgMembers) — covers
+ *      org members who DON'T appear in source (1) because the project's
+ *      org_id is NULL (legacy / un-migrated rows). Without this, an
+ *      operator who just added someone as org maintainer wouldn't see
+ *      them in the matrix when their projects predate org-binding.
+ *      Cells for those members stay empty across projects without org_id —
+ *      the truthful state, since the org grant doesn't propagate without
+ *      the binding.
  *
  * Skipped when there's no JWT or no projects to summarize.
  */
@@ -57,6 +64,9 @@ export function useProjectsMembersMatrix(): UseProjectsMembersMatrix {
   const { session } = useFrontierSession();
   const jwt = session?.jwt ?? null;
   const { projects } = useAccessibleProjects();
+  const { state: orgState } = useOrg();
+  const orgId = orgState.kind === "success" ? orgState.org.id : null;
+  const { members: orgMembers } = useOrgMembers(orgId);
   const [matrix, setMatrix] = useState<MembersMatrix | null>(null);
   const [isLoading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -125,6 +135,23 @@ export function useProjectsMembersMatrix(): UseProjectsMembersMatrix {
         ownerCountByProject.set(project.id, ownerCount);
       }
 
+      // Union org members in as rows. Anyone in the org but not yet
+      // observed via a project's effective-members list is still on the
+      // operator's payroll — they should appear in the matrix with empty
+      // cells, distinct from "this person isn't in your org at all."
+      // isOrgInherited stays true because their access on any project
+      // would come from the org tier (or be absent if the project's
+      // org_id is null).
+      for (const om of orgMembers) {
+        if (!memberByUserId.has(om.userId)) {
+          memberByUserId.set(om.userId, {
+            userId: om.userId,
+            username: om.username,
+            isOrgInherited: true,
+          });
+        }
+      }
+
       const sortedMembers = [...memberByUserId.values()].sort((a, b) =>
         a.username.localeCompare(b.username)
       );
@@ -142,7 +169,7 @@ export function useProjectsMembersMatrix(): UseProjectsMembersMatrix {
     } finally {
       if (aliveRef.current) setLoading(false);
     }
-  }, [jwt, projects]);
+  }, [jwt, projects, orgMembers]);
 
   useEffect(() => {
     void refresh();

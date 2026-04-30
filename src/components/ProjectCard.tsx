@@ -52,6 +52,17 @@ export function ProjectCard({
   const { members } = useProjectMembers(fetchKey)
   const { session } = useFrontierSession()
 
+  // First member with role >= MAINTAINER level is the canonical maintainer for
+  // empty-state copy. We sort descending so OWNER (highest) sorts first; the
+  // top entry is the best person to name. Returns null while still fetching.
+  const maintainerLabel = (() => {
+    if (members.length === 0) return null
+    const sorted = [...members].sort((a, b) => b.role.level - a.role.level)
+    const top = sorted[0]
+    if (!top) return null
+    return top.username
+  })()
+
   // Derive my role on this project. Prefer the live members fetch (freshest),
   // fall back to the syncRole cache (still useful when offline). Local-only
   // projects with no server-side existence get no badge — ownership is
@@ -125,6 +136,10 @@ export function ProjectCard({
         {project.sourceLanguage || project.targetLanguage ? (
           <p className="text-sm text-muted-foreground">
             {project.sourceLanguage || "?"} → {project.targetLanguage || "?"}
+          </p>
+        ) : hasServerSideExistence(project) ? (
+          <p className="text-sm text-muted-foreground italic">
+            Awaiting setup{maintainerLabel ? ` by ${maintainerLabel}` : ""}
           </p>
         ) : (
           <p className="text-sm text-muted-foreground italic">

@@ -851,8 +851,17 @@ function EditorRow({
 
   const hasContent = Boolean(cell.translated && cell.translated.trim())
 
+  const hasMajorInfraction = cellInfractions.some(
+    (i) => ruleMap.get(i.ruleId)?.severity === "major",
+  )
+  const infractionCount = cellInfractions.length
+  const infractionTooltip =
+    infractionCount > 0
+      ? `${infractionCount} issue${infractionCount !== 1 ? "s" : ""}${hasMajorInfraction ? " (major)" : " (minor)"}`
+      : undefined
+
   const validationButton = hasContent ? (
-    <div className="inline-flex items-center gap-0.5">
+    <div className="relative inline-flex items-center gap-0.5">
     <Popover open={validationPopoverOpen} onOpenChange={handleOpenChange}>
       <PopoverTrigger
         openOnHover
@@ -931,6 +940,16 @@ function EditorRow({
         <span className="sr-only">Breakdown</span>
       </HealthBreakdown>
     )}
+    {infractionCount > 0 && (
+      <span
+        aria-label={infractionTooltip}
+        title={infractionTooltip}
+        className={cn(
+          "pointer-events-none absolute -bottom-0.5 -right-0.5 h-1.5 w-1.5 rounded-full ring-1 ring-background",
+          hasMajorInfraction ? "bg-red-500" : "bg-amber-500",
+        )}
+      />
+    )}
     </div>
   ) : null
 
@@ -973,9 +992,6 @@ function EditorRow({
     hasAudio &&
     Boolean(cellAudioTimings && cellAudioTimings.length > 0) &&
     !transcriptMatchesCellText
-  const hasMajorInfraction = cellInfractions.some(
-    (i) => ruleMap.get(i.ruleId)?.severity === "major",
-  )
   const chevronAttentionDot: "red" | "amber" | "emerald" | "primary" | null =
     cellInfractions.length > 0
       ? hasMajorInfraction
@@ -1060,6 +1076,18 @@ function EditorRow({
         onBlurCapture={handleRowBlurCapture}
         onClick={handleRowClick}
       >
+        {/* Severity stripe — absolutely positioned so layout (and vertical
+            alignment with rows that have no issue) stays identical. */}
+        {infractionCount > 0 && (
+          <div
+            aria-hidden
+            className={cn(
+              "pointer-events-none absolute inset-y-0 left-0 w-[3px]",
+              hasMajorInfraction ? "bg-red-500/80" : "bg-amber-500/80",
+            )}
+          />
+        )}
+
         {/* Left gutter — line number + cell label + validation pill. */}
         <div className="flex flex-col items-center gap-1.5 pt-1">
           {hasGutterMetadata && (

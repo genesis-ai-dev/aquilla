@@ -1,5 +1,47 @@
 import { FRONTIER_BASE } from "./auth";
 
+/**
+ * Default timeout for org/members fetches. Errors out as
+ * "request timed out after Ns" instead of leaving the UI hung on a
+ * "Loading…" spinner indefinitely. Long enough to tolerate a CF Worker
+ * cold start (typically <1s but occasionally several seconds), short
+ * enough that a true network/worker failure surfaces quickly.
+ */
+const DEFAULT_TIMEOUT_MS = 15_000;
+
+function withTimeout(ms: number = DEFAULT_TIMEOUT_MS): { signal: AbortSignal; cancel: () => void } {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), ms);
+  return {
+    signal: controller.signal,
+    cancel: () => clearTimeout(timer),
+  };
+}
+
+/**
+ * fetch wrapper that aborts after `ms` and converts the AbortError into a
+ * clear "request timed out" error. The plain DOMException("AbortError")
+ * is unhelpful in catch blocks; this maps it to something the UI can
+ * surface verbatim.
+ */
+async function fetchWithTimeout(
+  url: string,
+  init: RequestInit,
+  ms: number = DEFAULT_TIMEOUT_MS
+): Promise<Response> {
+  const { signal, cancel } = withTimeout(ms);
+  try {
+    return await fetch(url, { ...init, signal });
+  } catch (err) {
+    if (err instanceof DOMException && err.name === "AbortError") {
+      throw new Error(`Request timed out after ${ms / 1000}s — server may be unreachable`);
+    }
+    throw err;
+  } finally {
+    cancel();
+  }
+}
+
 export interface OrgRole {
   level: number;
   name: string;
@@ -50,13 +92,15 @@ function authHeaders(jwt: string): HeadersInit {
 }
 
 export async function getOrCreateMyOrg(jwt: string): Promise<MyOrg> {
-  const res = await fetch(`${FRONTIER_BASE}/api/v2/orgs/me`, { headers: authHeaders(jwt) });
+  const res = await fetchWithTimeout(`${FRONTIER_BASE}/api/v2/orgs/me`, {
+    headers: authHeaders(jwt),
+  });
   if (!res.ok) throw new Error(`getOrCreateMyOrg failed: HTTP ${res.status}`);
   return (await res.json()) as MyOrg;
 }
 
 export async function listOrgMembers(jwt: string, orgId: number): Promise<OrgMember[]> {
-  const res = await fetch(`${FRONTIER_BASE}/api/v2/orgs/${orgId}/members`, {
+  const res = await fetchWithTimeout(`${FRONTIER_BASE}/api/v2/orgs/${orgId}/members`, {
     headers: authHeaders(jwt),
   });
   if (!res.ok) throw new Error(`listOrgMembers failed: HTTP ${res.status}`);

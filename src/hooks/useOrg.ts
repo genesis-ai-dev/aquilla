@@ -6,20 +6,22 @@ import {
 import { useFrontierSession } from "./useFrontierSession";
 
 /**
- * Async resource state. Distinguishes the four cases callers actually care
+ * Async resource state. Distinguishes the five cases callers actually care
  * about:
- *   - idle:    no JWT yet (session still hydrating, or signed-out)
- *   - loading: JWT present, fetch in flight
- *   - error:   fetch finished with an error
- *   - success: fetch finished with data
+ *   - idle:           signed out / no session
+ *   - session-loading: account hydration in flight (no JWT yet)
+ *   - loading:        JWT present, /orgs/me fetch in flight
+ *   - error:          fetch finished with an error
+ *   - success:        fetch finished with data
  *
- * The previous `{ org, error }` shape collapsed idle and loading into the
- * same "no value" branch, which made consumers render an indefinite
- * "Loading…" when really they should be showing "Sign in" or surfacing
- * an error. Each consumer now picks the right UI for the right state.
+ * Distinguishing session-loading from org-loading matters for the UX —
+ * "Waiting for session…" is a different message than "Loading members…",
+ * and conflating them is exactly how the page gets stuck on a misleading
+ * "Loading members…" message when the real issue is unrelated.
  */
 export type OrgState =
   | { kind: "idle" }
+  | { kind: "session-loading" }
   | { kind: "loading" }
   | { kind: "error"; error: string }
   | { kind: "success"; org: MyOrg };
@@ -40,13 +42,23 @@ export function useOrg(): UseOrg {
   const [state, setState] = useState<OrgState>({ kind: "idle" });
   const aliveRef = useRef(true);
 
-  useEffect(() => () => { aliveRef.current = false; }, []);
+  // CRITICAL: reset aliveRef to true on every effect run, not just at mount.
+  // React StrictMode in dev runs setup → cleanup → setup as a dry-run on
+  // first mount. Without the explicit `aliveRef.current = true` here, the
+  // first cleanup permanently flips the ref to false, every subsequent
+  // setState gets silently skipped, and the page hangs on whatever state
+  // the cleanup interrupted (typically "loading"). This was the root cause
+  // of the "Loading members… spins forever" symptom.
+  useEffect(() => {
+    aliveRef.current = true;
+    return () => { aliveRef.current = false; };
+  }, []);
 
   const refresh = useCallback(async () => {
-    // Keep "idle" while session is still hydrating so the UI doesn't briefly
-    // flash an error in the gap between mount and JWT availability.
     if (!jwt) {
-      if (aliveRef.current) setState({ kind: sessionLoading ? "loading" : "idle" });
+      if (aliveRef.current) {
+        setState({ kind: sessionLoading ? "session-loading" : "idle" });
+      }
       return;
     }
     if (aliveRef.current) setState({ kind: "loading" });
@@ -89,7 +101,11 @@ export function useOrgMembers(orgId: number | null): UseOrgMembers {
   const [error, setError] = useState<string | null>(null);
   const aliveRef = useRef(true);
 
-  useEffect(() => () => { aliveRef.current = false; }, []);
+  // See useOrg above for the StrictMode rationale — same pattern.
+  useEffect(() => {
+    aliveRef.current = true;
+    return () => { aliveRef.current = false; };
+  }, []);
 
   const refresh = useCallback(async () => {
     if (!jwt || orgId == null) return;

@@ -26,7 +26,14 @@ export function useProjectMembers(projectId: string | null): UseProjectMembers {
   const [error, setError] = useState<string | null>(null);
   const aliveRef = useRef(true);
 
-  useEffect(() => () => { aliveRef.current = false; }, []);
+  // Reset aliveRef on each effect run so React StrictMode's dry-run
+  // cleanup doesn't permanently flip it false (which would cause every
+  // subsequent setState in this hook to be silently skipped — the
+  // "Loading… spins forever" failure mode).
+  useEffect(() => {
+    aliveRef.current = true;
+    return () => { aliveRef.current = false; };
+  }, []);
 
   const refresh = useCallback(async () => {
     if (!jwt || !projectId) return;

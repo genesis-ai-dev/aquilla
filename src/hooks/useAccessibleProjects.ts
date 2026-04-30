@@ -24,7 +24,12 @@ export function useAccessibleProjects(): UseAccessibleProjects {
   const [isLoading, setLoading] = useState(false);
   const aliveRef = useRef(true);
 
-  useEffect(() => () => { aliveRef.current = false; }, []);
+  // Reset aliveRef on each effect run — see useOrg for the StrictMode
+  // rationale (cleanup-only would permanently flip it false in dev).
+  useEffect(() => {
+    aliveRef.current = true;
+    return () => { aliveRef.current = false; };
+  }, []);
 
   const refresh = async () => {
     if (!jwt) {

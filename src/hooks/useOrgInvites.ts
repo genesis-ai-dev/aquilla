@@ -34,7 +34,12 @@ export function useOrgInvites(orgId: number | null): UseOrgInvites {
   const [error, setError] = useState<string | null>(null)
   const aliveRef = useRef(true)
 
-  useEffect(() => () => { aliveRef.current = false }, [])
+  // Reset aliveRef on each effect run — see useOrg for the StrictMode
+  // rationale (cleanup-only would permanently flip it false in dev).
+  useEffect(() => {
+    aliveRef.current = true
+    return () => { aliveRef.current = false }
+  }, [])
 
   const refresh = useCallback(async () => {
     if (!jwt || orgId == null) {

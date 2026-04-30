@@ -48,14 +48,40 @@ const ORG_ROLE_OPTIONS = ORG_ROLE_PICKER.map((level) => ({
 export function MembersPage() {
   const { state, refresh: refreshOrg } = useOrg()
 
-  if (state.kind === "idle" || state.kind === "loading") {
+  if (state.kind === "idle") {
+    // Signed out — distinct from "loading" so the user gets a real action,
+    // not a misleading spinner. Common when navigating to /members directly
+    // from a logged-out tab.
+    return (
+      <PageShell>
+        <div className="rounded-md border bg-muted/30 p-6 text-center">
+          <p className="text-sm font-medium">Sign in to manage members</p>
+          <p className="mt-1 text-xs text-muted-foreground">
+            Member access requires a Frontier session. Sign in from the dashboard
+            and come back to this page.
+          </p>
+        </div>
+      </PageShell>
+    )
+  }
+
+  if (state.kind === "session-loading") {
     return (
       <PageShell>
         <div className="flex items-center justify-center py-16 text-muted-foreground">
           <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-          <span className="text-sm">
-            {state.kind === "idle" ? "Waiting for session…" : "Loading members…"}
-          </span>
+          <span className="text-sm">Waiting for session…</span>
+        </div>
+      </PageShell>
+    )
+  }
+
+  if (state.kind === "loading") {
+    return (
+      <PageShell>
+        <div className="flex items-center justify-center py-16 text-muted-foreground">
+          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+          <span className="text-sm">Loading members…</span>
         </div>
       </PageShell>
     )
@@ -67,6 +93,10 @@ export function MembersPage() {
         <div className="rounded-md border border-destructive/30 bg-destructive/5 p-4">
           <p className="text-sm font-medium text-destructive">Couldn't load your organization</p>
           <p className="mt-1 text-xs text-muted-foreground">{state.error}</p>
+          <p className="mt-2 text-[10px] text-muted-foreground">
+            Common causes: the Frontier worker is unreachable, your session expired,
+            or the request timed out. Check your network and try again.
+          </p>
           <Button
             variant="outline"
             size="sm"

@@ -65,8 +65,21 @@ export function ProjectSettings() {
   const { project, loading, refresh } = useProject(id!)
   const { visible: savedFlash, flash } = useSavedFlash()
 
-  const { canEdit: canEditShared, reasonCannotEdit, patch: patchShared } =
-    useProjectSettings(id ?? null, project?.syncRole?.level ?? null)
+  const [conflictBy, setConflictBy] = useState<string | null>(null)
+  useEffect(() => {
+    if (!conflictBy) return
+    const t = setTimeout(() => setConflictBy(null), 4000)
+    return () => clearTimeout(t)
+  }, [conflictBy])
+
+  const {
+    canEdit: canEditShared,
+    reasonCannotEdit,
+    patch: patchShared,
+    version: sharedVersion,
+    updatedAt: sharedUpdatedAt,
+    updatedBy: sharedUpdatedBy,
+  } = useProjectSettings(id ?? null, project?.syncRole?.level ?? null)
 
   const sharedDisabledTooltip =
     reasonCannotEdit === "offline" ? "Reconnect to edit shared settings."
@@ -139,14 +152,16 @@ export function ProjectSettings() {
   }, [id, refresh, flash])
 
   /** Save project-wide synced fields through the server-authoritative patch. */
-  const savePartialShared = useCallback(async (partial: ProjectWideSettings) => {
+  const savePartialShared = useCallback(async (partial: Parameters<typeof patchShared>[0]) => {
     const out = await patchShared(partial)
     if (out.kind === "ok") {
       flash()
+    } else if (out.kind === "conflict") {
+      setConflictBy(out.latest.updatedBy?.username ?? "another collaborator")
     }
-    // For "blocked" or "conflict" or "error" outcomes, no UI side-effect here.
-    // Conflict toast + revert UX lands in Task 10. Disabled fields prevent
-    // "blocked" from ever firing in normal flow.
+    // "blocked" never fires in normal flow because disabled fields prevent
+    // the call. "error" is a network/server problem; we leave it silent for
+    // now (the field will look unsaved; user can re-blur to retry).
   }, [patchShared, flash])
 
   /** Save completion settings via shared abstraction. */
@@ -242,6 +257,12 @@ export function ProjectSettings() {
               <Label htmlFor="pname">Project Name</Label>
               <Input id="pname" value={name} onChange={(e) => setName(e.target.value)} onBlur={() => saveField({ name })} />
             </div>
+            {sharedUpdatedBy && sharedUpdatedAt && sharedVersion != null && sharedVersion > 0 && (
+              <p className="text-xs text-muted-foreground">
+                Last edited by {sharedUpdatedBy.username} ·{" "}
+                {new Date(sharedUpdatedAt).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })}
+              </p>
+            )}
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <Label htmlFor="sl">Source Language</Label>
@@ -586,6 +607,15 @@ export function ProjectSettings() {
           All changes save automatically.
         </p>
       </main>
+
+      {conflictBy && (
+        <div
+          role="status"
+          className="fixed bottom-4 right-4 z-[70] rounded border bg-amber-50 px-3 py-2 text-sm text-amber-900 shadow-md dark:bg-amber-950 dark:text-amber-100"
+        >
+          Synced settings update from <span className="font-medium">{conflictBy}</span>.
+        </div>
+      )}
     </div>
   )
 }

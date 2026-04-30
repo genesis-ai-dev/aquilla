@@ -20,15 +20,15 @@
 
 > All server tasks happen in the **`~/frontierrnd/frontier-server/cloudflare`** repo. Switch directories before starting these tasks. Commits go in that repo's history.
 
-### Task 1: D1 migration 0017 — `project_settings` table
+### Task 1: D1 migration 0020 — `project_settings` table
 
 **Files:**
-- Create: `migrations/0017_project_settings.sql`
+- Create: `migrations/0020_project_settings.sql`
 
 - [ ] **Step 1: Write the migration**
 
 ```sql
--- 0017_project_settings.sql
+-- 0020_project_settings.sql
 -- Project-wide settings synced across collaborators. JSON blob keeps schema
 -- migrations cheap as new keys land; old clients ignore unknown keys.
 
@@ -51,7 +51,7 @@ CREATE INDEX idx_project_settings_updated_at ON project_settings(updated_at);
 - [ ] **Step 2: Apply locally and verify**
 
 ```bash
-wrangler d1 execute frontier-db-v2 --local --file=migrations/0017_project_settings.sql
+wrangler d1 execute frontier-db-v2 --local --file=migrations/0020_project_settings.sql
 wrangler d1 execute frontier-db-v2 --local --command="SELECT name FROM sqlite_master WHERE type='table' AND name='project_settings'"
 ```
 
@@ -60,8 +60,8 @@ Expected: one row with `name = project_settings`.
 - [ ] **Step 3: Commit**
 
 ```bash
-git add migrations/0017_project_settings.sql
-git commit -m "feat(d1): add project_settings table (0017)"
+git add migrations/0020_project_settings.sql
+git commit -m "feat(d1): add project_settings table (0020)"
 ```
 
 ---

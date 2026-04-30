@@ -172,3 +172,53 @@ describe("useProjectSettings — write path", () => {
     expect(result.current.version).toBe(2)
   })
 })
+
+describe("useProjectSettings — migration", () => {
+  it("PATCHes local IDB values when server returns version 0 + canEdit=true", async () => {
+    vi.spyOn(restClient, "fetchProjectSettings").mockResolvedValue({
+      version: 0, updatedAt: "x", updatedBy: null, settings: {},
+    })
+    const patchSpy = vi.spyOn(restClient, "patchProjectSettings").mockResolvedValue({
+      kind: "ok",
+      value: {
+        version: 1, updatedAt: "y", updatedBy: { id: 1, username: "ryder" },
+        settings: { sourceLanguage: "en", targetLanguage: "swh" },
+      },
+    })
+    renderHook(() => useProjectSettings("p1", 700))
+    await waitFor(() => {
+      expect(patchSpy).toHaveBeenCalledWith(
+        "test-jwt", "p1",
+        expect.objectContaining({ sourceLanguage: "en", targetLanguage: "swh" }),
+        0
+      )
+    })
+  })
+
+  it("does NOT migrate when sub-PROJECT_LEAD", async () => {
+    vi.spyOn(restClient, "fetchProjectSettings").mockResolvedValue({
+      version: 0, updatedAt: "x", updatedBy: null, settings: {},
+    })
+    const patchSpy = vi.spyOn(restClient, "patchProjectSettings")
+    renderHook(() => useProjectSettings("p1", 400))
+    // Wait long enough that an erroneous migration would have fired.
+    await new Promise((r) => setTimeout(r, 50))
+    expect(patchSpy).not.toHaveBeenCalled()
+  })
+
+  it("does NOT migrate when local IDB is empty", async () => {
+    const idbMod = await import("@/lib/store/project-index")
+    vi.mocked(idbMod.getProject).mockResolvedValueOnce({
+      id: "p1", name: "P", sourceLanguage: "", targetLanguage: "",
+      files: [], members: [], createdAt: "",
+      syncRole: { level: 700, name: "owner", source: "creator", fetchedAt: "" },
+    } as any)
+    vi.spyOn(restClient, "fetchProjectSettings").mockResolvedValue({
+      version: 0, updatedAt: "x", updatedBy: null, settings: {},
+    })
+    const patchSpy = vi.spyOn(restClient, "patchProjectSettings")
+    renderHook(() => useProjectSettings("p1", 700))
+    await new Promise((r) => setTimeout(r, 50))
+    expect(patchSpy).not.toHaveBeenCalled()
+  })
+})

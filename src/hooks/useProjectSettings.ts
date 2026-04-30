@@ -187,6 +187,32 @@ export function useProjectSettings(
       ? "offline"
       : "role"
 
+  // One-shot migration: push local IDB values to the server when the server
+  // row is empty (version 0) and the caller has PROJECT_LEAD+ authority.
+  // This handles projects created locally before cloud settings existed.
+  const migrationFiredRef = useRef(false)
+  useEffect(() => {
+    if (migrationFiredRef.current) return
+    if (!hasFetched) return
+    if (!server || server.version !== 0) return
+    if (!canEdit) return
+    if (!projectId || !jwt) return
+    // Treat local as empty if every value is an empty string / falsy primitive.
+    if (!Object.values(local).some((v) => v !== "" && v != null)) return
+
+    // Claim the flag before the await so a re-render during the network call
+    // cannot double-fire within this hook instance.
+    migrationFiredRef.current = true
+    void (async () => {
+      const out = await patchProjectSettings(jwt, projectId, local, 0)
+      if (!aliveRef.current) return
+      if (out.kind === "ok") setServer(out.value)
+      else if (out.kind === "conflict") setServer(out.latest)
+      // forbidden / error: leave server at version 0; display is still backed
+      // by local cache. A fresh hook instance will retry on next mount.
+    })()
+  }, [hasFetched, server, canEdit, local, jwt, projectId])
+
   const patch = useCallback(async (partial: ProjectWideSettings): Promise<PatchOutcome> => {
     if (!projectId || !jwt) return { kind: "error", message: "no session or project" }
     if (!isOnlineRef.current) return { kind: "blocked", reason: "offline" }

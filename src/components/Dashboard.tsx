@@ -13,7 +13,7 @@ import { ProjectCreateDialog } from "./ProjectCreateDialog"
 import { ConfirmActionDialog } from "./ConfirmActionDialog"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Card, CardContent, CardHeader } from "@/components/ui/card"
-import { HeaderAuth } from "@/components/git-import/HeaderAuth"
+import { AccountSwitcher } from "@/components/AccountSwitcher"
 import { RemoteProjectsSection } from "@/components/git-import/RemoteProjectsSection"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { useBrand } from "@/branding/use-brand"
@@ -188,7 +188,7 @@ export function Dashboard() {
               <SettingsIcon className="h-4 w-4" />
             </Link>
             <ThemeToggle />
-            <HeaderAuth />
+            <AccountSwitcher variant="header" />
             <ProjectCreateDialog onCreated={upsert} />
           </div>
         </div>

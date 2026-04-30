@@ -21,6 +21,7 @@ import { HealthBreakdown } from "./HealthBreakdown/HealthBreakdown"
 import { BreakdownContent } from "./HealthBreakdown/BreakdownContent"
 import { TranslatedEditor } from "./TranslatedEditor"
 import { CellWaveform } from "./CellWaveform"
+import { CellAudioButton } from "./CellAudioButton"
 import { CellTtsButton } from "./CellTtsButton"
 import { CellTranscriptPreview } from "./CellTranscriptPreview"
 import { CellActionRail, RailButton, isInteractiveTarget } from "./CellActionRail"
@@ -554,6 +555,7 @@ function EditorRow({
   isAnonymous, breakdown, onJumpToCell, onAiSetupNeeded, onOpenRecording,
 }: EditorRowProps) {
   const [openRuleId, setOpenRuleId] = useState<string | null>(null)
+  const [openRuleAnchor, setOpenRuleAnchor] = useState<HTMLElement | null>(null)
   const [examplesExpanded, setExamplesExpanded] = useState(false)
 
   const ruleSeverity = useMemo(() => {
@@ -1049,11 +1051,13 @@ function EditorRow({
   }
 
   // Inline rule click → open expansion to issues tab and remember which rule
-  // is active so the existing ViolationPopover can render alongside.
-  const openInlineRule = useCallback((ruleId: string) => {
+  // (and which blot DOM node) is active so the ViolationPopover can anchor to
+  // the blot directly rather than to a stray span at the bottom of the row.
+  const openInlineRule = useCallback((ruleId: string, anchor: HTMLElement) => {
     setExpanded(true)
     setExpansionTab("issues")
     setOpenRuleId(ruleId)
+    setOpenRuleAnchor(anchor)
   }, [])
 
   const [isVoiceDropTarget, setIsVoiceDropTarget] = useState(false)
@@ -1467,11 +1471,16 @@ function EditorRow({
                 <div className="flex flex-col gap-3">
                   {hasAudio ? (
                     <>
-                      <CellWaveform
-                        controller={audioController}
-                        height={36}
-                        strategy={project.audioMediaStrategy ?? "lazy"}
-                      />
+                      <div className="flex items-center gap-2">
+                        <CellAudioButton controller={audioController} />
+                        <div className="flex-1">
+                          <CellWaveform
+                            controller={audioController}
+                            height={36}
+                            strategy={project.audioMediaStrategy ?? "lazy"}
+                          />
+                        </div>
+                      </div>
                       {cellAudioTimings && cellAudioTimings.length > 0 && (
                         <CellTranscriptPreview
                           ref={transcriptPreviewRef}
@@ -1514,11 +1523,16 @@ function EditorRow({
                     </>
                   ) : hasGeneratedVoice ? (
                     <>
-                      <CellWaveform
-                        controller={generatedVoiceController}
-                        height={36}
-                        strategy={project.audioMediaStrategy ?? "lazy"}
-                      />
+                      <div className="flex items-center gap-2">
+                        <CellAudioButton controller={generatedVoiceController} />
+                        <div className="flex-1">
+                          <CellWaveform
+                            controller={generatedVoiceController}
+                            height={36}
+                            strategy={project.audioMediaStrategy ?? "lazy"}
+                          />
+                        </div>
+                      </div>
                       {generatedVoiceTimings && generatedVoiceTimings.length > 0 && (
                         <CellTranscriptPreview
                           timings={generatedVoiceTimings}
@@ -1711,20 +1725,23 @@ function EditorRow({
           <ViolationPopover
             open
             onOpenChange={(next) => {
-              if (!next) setOpenRuleId(null)
+              if (!next) {
+                setOpenRuleId(null)
+                setOpenRuleAnchor(null)
+              }
             }}
             infraction={inf}
             ruleName={rule.name}
             waivers={cell.waivers ?? []}
+            anchor={openRuleAnchor}
             onOpenRule={(ruleId) => {
               setOpenRuleId(null)
+              setOpenRuleAnchor(null)
               onInfractionClick?.(ruleId)
             }}
             onWaive={handleWaive}
             onUnwaive={handleUnwaive}
-          >
-            <span />
-          </ViolationPopover>
+          />
         )
       })()}
     </div>

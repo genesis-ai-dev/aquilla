@@ -2,10 +2,11 @@ import { useState } from "react"
 import { Button } from "@/components/ui/button"
 import { FrontierLoginForm } from "@/components/git-import/FrontierLoginForm"
 import { FrontierSignupForm } from "@/components/git-import/FrontierSignupForm"
+import { FrontierForgotPasswordForm } from "@/components/git-import/FrontierForgotPasswordForm"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { Check } from "lucide-react"
 
-type Mode = "signup" | "login"
+type Mode = "signup" | "login" | "forgot"
 
 export function SignInStep({ onNext, onBack }: { onNext: () => void; onBack: () => void }) {
   const { session } = useFrontierSession()
@@ -33,34 +34,46 @@ export function SignInStep({ onNext, onBack }: { onNext: () => void; onBack: () 
   }
 
   const isSignup = mode === "signup"
+  const isForgot = mode === "forgot"
+
+  const headings: Record<Mode, string> = {
+    signup: "Create your Frontier account",
+    login: "Sign in to Frontier",
+    forgot: "Reset your password",
+  }
 
   return (
     <div className="space-y-6">
       <div className="text-center space-y-2">
-        <h2 className="text-2xl font-semibold">
-          {isSignup ? "Create your Frontier account" : "Sign in to Frontier"}
-        </h2>
+        <h2 className="text-2xl font-semibold">{headings[mode]}</h2>
         <p className="text-sm text-muted-foreground">
           Unlock AI-powered translations, sync across devices, and import projects from the cloud.
         </p>
       </div>
 
-      {isSignup ? (
-        <FrontierSignupForm onSuccess={onNext} />
-      ) : (
-        <FrontierLoginForm onSuccess={onNext} />
+      {mode === "signup" && <FrontierSignupForm onSuccess={onNext} />}
+      {mode === "login" && (
+        <FrontierLoginForm
+          onSuccess={onNext}
+          onForgotPassword={() => setMode("forgot")}
+        />
+      )}
+      {mode === "forgot" && (
+        <FrontierForgotPasswordForm onBack={() => setMode("login")} />
       )}
 
-      <p className="text-center text-sm text-muted-foreground">
-        {isSignup ? "Already have an account?" : "New to Frontier?"}{" "}
-        <button
-          type="button"
-          onClick={() => setMode(isSignup ? "login" : "signup")}
-          className="font-medium text-foreground underline-offset-4 hover:underline"
-        >
-          {isSignup ? "Log in" : "Create one"}
-        </button>
-      </p>
+      {!isForgot && (
+        <p className="text-center text-sm text-muted-foreground">
+          {isSignup ? "Already have an account?" : "New to Frontier?"}{" "}
+          <button
+            type="button"
+            onClick={() => setMode(isSignup ? "login" : "signup")}
+            className="font-medium text-foreground underline-offset-4 hover:underline"
+          >
+            {isSignup ? "Log in" : "Create one"}
+          </button>
+        </p>
+      )}
 
       <div className="text-center">
         <button

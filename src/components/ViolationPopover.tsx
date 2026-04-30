@@ -1,5 +1,5 @@
 import { useState } from "react"
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { Popover, PopoverContent } from "@/components/ui/popover"
 import type { RuleInfraction, RuleWaiver } from "@/lib/parsers/types"
 import { cn } from "@/lib/utils"
 
@@ -9,15 +9,15 @@ interface ViolationPopoverProps {
   infraction: RuleInfraction
   ruleName: string
   waivers: RuleWaiver[]
+  anchor: HTMLElement | null
   onOpenRule: (ruleId: string) => void
   onWaive: (input: { ruleId: string; reason?: string }) => void
   onUnwaive: (ruleId: string) => void
-  children: React.ReactNode
 }
 
 export function ViolationPopover({
-  open, onOpenChange, infraction, ruleName, waivers,
-  onOpenRule, onWaive, onUnwaive, children,
+  open, onOpenChange, infraction, ruleName, waivers, anchor,
+  onOpenRule, onWaive, onUnwaive,
 }: ViolationPopoverProps) {
   const waiver = waivers.find((w) => w.ruleId === infraction.ruleId)
   const [mode, setMode] = useState<"view" | "waive-reason">("view")
@@ -27,8 +27,13 @@ export function ViolationPopover({
 
   return (
     <Popover open={open} onOpenChange={(next) => { if (!next) reset(); onOpenChange(next) }}>
-      <PopoverTrigger>{children}</PopoverTrigger>
-      <PopoverContent className="w-72 space-y-2 p-3 text-sm">
+      <PopoverContent
+        anchor={anchor}
+        sideOffset={6}
+        initialFocus={false}
+        finalFocus={false}
+        className="w-72 space-y-2 p-3 text-sm"
+      >
         <button
           type="button"
           className="text-left font-medium hover:underline"

@@ -6,7 +6,67 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog"
 import { FrontierLoginForm } from "./git-import/FrontierLoginForm"
+import { FrontierSignupForm } from "./git-import/FrontierSignupForm"
+import { FrontierForgotPasswordForm } from "./git-import/FrontierForgotPasswordForm"
 import { cn } from "@/lib/utils"
+
+type AuthMode = "login" | "signup" | "forgot"
+
+function AuthDialogBody({
+  isAdditional,
+  onDone,
+}: {
+  isAdditional: boolean
+  onDone: () => void
+}) {
+  const [mode, setMode] = useState<AuthMode>("login")
+  const titles: Record<AuthMode, string> = {
+    login: isAdditional ? "Add Frontier account" : "Log in to Frontier",
+    signup: "Create a Frontier account",
+    forgot: "Reset your password",
+  }
+  return (
+    <>
+      <DialogHeader><DialogTitle>{titles[mode]}</DialogTitle></DialogHeader>
+      {mode === "login" && (
+        <div className="space-y-4">
+          <FrontierLoginForm
+            onSuccess={onDone}
+            onForgotPassword={() => setMode("forgot")}
+          />
+          <p className="text-center text-sm text-muted-foreground">
+            New to Frontier?{" "}
+            <button
+              type="button"
+              onClick={() => setMode("signup")}
+              className="font-medium text-foreground underline-offset-4 hover:underline"
+            >
+              Create an account
+            </button>
+          </p>
+        </div>
+      )}
+      {mode === "signup" && (
+        <div className="space-y-4">
+          <FrontierSignupForm onSuccess={onDone} />
+          <p className="text-center text-sm text-muted-foreground">
+            Already have an account?{" "}
+            <button
+              type="button"
+              onClick={() => setMode("login")}
+              className="font-medium text-foreground underline-offset-4 hover:underline"
+            >
+              Log in
+            </button>
+          </p>
+        </div>
+      )}
+      {mode === "forgot" && (
+        <FrontierForgotPasswordForm onBack={() => setMode("login")} />
+      )}
+    </>
+  )
+}
 
 function initials(name: string): string {
   const t = name.trim()
@@ -23,7 +83,7 @@ function colorFor(name: string): string {
   return `hsl(${hue}, 55%, 45%)`
 }
 
-export function AccountSwitcher() {
+export function AccountSwitcher({ variant = "sidebar" }: { variant?: "sidebar" | "header" } = {}) {
   const { active, sessions, activate, remove } = useAccounts()
   const [open, setOpen] = useState(false)
   const [loginOpen, setLoginOpen] = useState(false)
@@ -38,11 +98,17 @@ export function AccountSwitcher() {
     return () => document.removeEventListener("mousedown", onClick)
   }, [open])
 
+  const isHeader = variant === "header"
+
   if (!active) {
     return (
       <>
         <button
-          className="flex w-full items-center gap-2 px-2 py-1.5 text-sm hover:bg-accent rounded"
+          className={cn(
+            "flex items-center gap-2 rounded px-2 py-1.5 text-sm hover:bg-accent",
+            !isHeader && "w-full",
+            isHeader && "border h-9",
+          )}
           onClick={() => setLoginOpen(true)}
         >
           <LogIn className="h-4 w-4" />
@@ -50,8 +116,7 @@ export function AccountSwitcher() {
         </button>
         <Dialog open={loginOpen} onOpenChange={setLoginOpen}>
           <DialogContent className="max-w-sm">
-            <DialogHeader><DialogTitle>Log in to Frontier</DialogTitle></DialogHeader>
-            <FrontierLoginForm onSuccess={() => setLoginOpen(false)} />
+            <AuthDialogBody isAdditional={false} onDone={() => setLoginOpen(false)} />
           </DialogContent>
         </Dialog>
       </>
@@ -64,7 +129,11 @@ export function AccountSwitcher() {
   return (
     <div ref={rootRef} className="relative">
       <button
-        className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-sm hover:bg-accent"
+        className={cn(
+          "flex items-center gap-2 rounded px-2 py-1.5 text-sm hover:bg-accent",
+          !isHeader && "w-full",
+          isHeader && "h-9",
+        )}
         onClick={() => setOpen((v) => !v)}
       >
         <div
@@ -73,11 +142,16 @@ export function AccountSwitcher() {
         >
           {initials(active.username)}
         </div>
-        <span className="truncate flex-1 text-left">{active.username}</span>
+        <span className={cn("truncate text-left", !isHeader && "flex-1")}>{active.username}</span>
         <ChevronsUpDown className="h-3.5 w-3.5 text-muted-foreground" />
       </button>
       {open && (
-        <div className="absolute left-0 top-full mt-1 z-50 w-60 rounded-md border bg-popover p-1 shadow-md">
+        <div
+          className={cn(
+            "absolute top-full mt-1 z-50 w-60 rounded-md border bg-popover p-1 shadow-md",
+            isHeader ? "right-0" : "left-0",
+          )}
+        >
           <div className="px-2 py-1.5 text-[10px] uppercase tracking-wide text-muted-foreground">
             Signed in
           </div>
@@ -116,8 +190,7 @@ export function AccountSwitcher() {
       )}
       <Dialog open={loginOpen} onOpenChange={setLoginOpen}>
         <DialogContent className="max-w-sm">
-          <DialogHeader><DialogTitle>Add Frontier account</DialogTitle></DialogHeader>
-          <FrontierLoginForm onSuccess={() => setLoginOpen(false)} />
+          <AuthDialogBody isAdditional onDone={() => setLoginOpen(false)} />
         </DialogContent>
       </Dialog>
     </div>

@@ -277,6 +277,10 @@ export function useCellAudio(
       const clamped = Math.max(0, Math.min(t, Number.isFinite(a.duration) ? a.duration : t))
       a.currentTime = clamped
       setCurrentTime(clamped)
+      // Clicking the waveform implies "play from here" — resume if paused
+      // (covers the post-end and post-pause cases where audioRef is set but
+      // playback has stopped).
+      if (a.paused) void play()
       return
     }
     // No audio loaded yet — kick off play and let the user-initiated promise

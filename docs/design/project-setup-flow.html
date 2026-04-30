@@ -1,0 +1,1908 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Codex — Project Setup Flow</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght,SOFT@0,9..144,300..900,0..100;1,9..144,300..900,0..100&family=Instrument+Sans:ital,wght@0,400..700;1,400..700&family=JetBrains+Mono:wght@400..600&display=swap" rel="stylesheet" />
+<style>
+  :root {
+    --cream:        #F1EBDD;
+    --cream-soft:   #F8F4EA;
+    --paper:        #FBF8F1;
+    --ink:          #1B1815;
+    --ink-soft:     #3A322B;
+    --ink-mute:     #8B7E6C;
+    --ink-faint:    #BCB1A0;
+    --rule:         rgba(27, 24, 21, 0.10);
+    --rule-soft:    rgba(27, 24, 21, 0.05);
+    --sienna:       #8B3A0E;
+    --sienna-deep:  #5C2607;
+    --sienna-soft:  rgba(139, 58, 14, 0.08);
+    --moss:         #4F5B3F;
+    --moss-soft:    rgba(79, 91, 63, 0.10);
+    --warn:         #A8540F;
+    --shadow-page:  0 24px 60px -28px rgba(27, 24, 21, 0.30),
+                    0 6px 18px -6px rgba(27, 24, 21, 0.12),
+                    0 0 0 1px var(--rule);
+    --shadow-sheet: 0 -20px 60px -20px rgba(27, 24, 21, 0.35),
+                    0 0 0 1px var(--rule);
+  }
+
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+
+  body {
+    margin: 0;
+    background:
+      radial-gradient(circle at 20% 0%, rgba(139, 58, 14, 0.04), transparent 40%),
+      radial-gradient(circle at 80% 100%, rgba(79, 91, 63, 0.04), transparent 40%),
+      var(--cream);
+    color: var(--ink);
+    font-family: 'Instrument Sans', system-ui, sans-serif;
+    font-size: 15px;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+    min-height: 100vh;
+  }
+
+  /* Subtle paper grain across whole page */
+  body::before {
+    content: "";
+    position: fixed; inset: 0;
+    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 0.106  0 0 0 0 0.094  0 0 0 0 0.082  0 0 0 0.045 0'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>");
+    pointer-events: none;
+    z-index: 999;
+    mix-blend-mode: multiply;
+    opacity: 0.6;
+  }
+
+  /* ───── Spec header ───── */
+  .spec-header {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 96px 64px 72px;
+    border-bottom: 1px solid var(--rule);
+  }
+  .spec-eyebrow {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--ink-mute);
+    margin: 0 0 28px;
+    display: flex;
+    gap: 24px;
+    align-items: baseline;
+  }
+  .spec-eyebrow .dot {
+    width: 6px; height: 6px; border-radius: 50%;
+    background: var(--sienna);
+    display: inline-block;
+  }
+  h1.spec-title {
+    font-family: 'Fraunces', serif;
+    font-variation-settings: "opsz" 144, "SOFT" 60, "wght" 320;
+    font-size: clamp(56px, 8vw, 112px);
+    line-height: 0.95;
+    letter-spacing: -0.025em;
+    margin: 0 0 32px;
+    color: var(--ink);
+    max-width: 18ch;
+  }
+  h1.spec-title em {
+    font-style: italic;
+    font-variation-settings: "opsz" 144, "SOFT" 100, "wght" 320;
+    color: var(--sienna);
+  }
+  .spec-lede {
+    font-family: 'Fraunces', serif;
+    font-variation-settings: "opsz" 24, "SOFT" 50, "wght" 360;
+    font-size: 22px;
+    line-height: 1.4;
+    color: var(--ink-soft);
+    max-width: 60ch;
+    margin: 0 0 56px;
+  }
+
+  .spec-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 40px;
+    border-top: 1px solid var(--rule);
+    padding-top: 32px;
+  }
+  .spec-cell h4 {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--ink-mute);
+    margin: 0 0 12px;
+    font-weight: 500;
+  }
+  .spec-cell p {
+    margin: 0;
+    color: var(--ink-soft);
+    font-size: 14px;
+  }
+  .swatches { display: flex; gap: 6px; }
+  .sw {
+    width: 28px; height: 28px;
+    border-radius: 50%;
+    border: 1px solid var(--rule);
+  }
+  .principles {
+    grid-column: span 2;
+    display: grid;
+    gap: 8px;
+  }
+  .principles li {
+    list-style: none;
+    padding-left: 18px;
+    position: relative;
+    font-size: 14px;
+    color: var(--ink-soft);
+  }
+  .principles li::before {
+    content: "—";
+    position: absolute; left: 0;
+    color: var(--sienna);
+  }
+  .principles ul { padding: 0; margin: 0; }
+
+  /* ───── Artboards ───── */
+  .artboards {
+    max-width: 1280px;
+    margin: 0 auto;
+    padding: 80px 64px 160px;
+  }
+
+  .artboard {
+    margin-bottom: 144px;
+    opacity: 0;
+    transform: translateY(24px);
+    animation: rise 800ms cubic-bezier(0.2, 0.8, 0.2, 1) forwards;
+  }
+  .artboard:nth-child(1) { animation-delay: 60ms; }
+  .artboard:nth-child(2) { animation-delay: 140ms; }
+  .artboard:nth-child(3) { animation-delay: 220ms; }
+  .artboard:nth-child(4) { animation-delay: 300ms; }
+  .artboard:nth-child(5) { animation-delay: 380ms; }
+  .artboard:nth-child(6) { animation-delay: 460ms; }
+  .artboard:nth-child(7) { animation-delay: 540ms; }
+  .artboard:nth-child(8) { animation-delay: 620ms; }
+
+  @keyframes rise {
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  .artboard-meta {
+    display: grid;
+    grid-template-columns: 80px 1fr 240px;
+    gap: 32px;
+    align-items: baseline;
+    margin-bottom: 32px;
+    padding-bottom: 20px;
+    border-bottom: 1px solid var(--rule);
+  }
+  .artboard-num {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    letter-spacing: 0.16em;
+    color: var(--sienna);
+  }
+  .artboard-title {
+    font-family: 'Fraunces', serif;
+    font-variation-settings: "opsz" 36, "wght" 400;
+    font-size: 28px;
+    margin: 0;
+    line-height: 1.1;
+    letter-spacing: -0.01em;
+  }
+  .artboard-note {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    color: var(--ink-mute);
+    line-height: 1.55;
+  }
+
+  /* ───── Frames ───── */
+  .frame {
+    background: var(--paper);
+    border-radius: 14px;
+    box-shadow: var(--shadow-page);
+    overflow: hidden;
+    position: relative;
+  }
+  .frame-chrome {
+    height: 32px;
+    background: var(--cream-soft);
+    border-bottom: 1px solid var(--rule);
+    display: flex;
+    align-items: center;
+    padding: 0 14px;
+    gap: 6px;
+  }
+  .frame-chrome .dot {
+    width: 9px; height: 9px; border-radius: 50%;
+    background: rgba(27, 24, 21, 0.12);
+  }
+  .frame-url {
+    flex: 1;
+    text-align: center;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    color: var(--ink-mute);
+    letter-spacing: 0.04em;
+  }
+
+  /* ───── Reusable atoms ───── */
+  .btn {
+    font-family: 'Instrument Sans', sans-serif;
+    font-size: 14px;
+    font-weight: 500;
+    padding: 12px 22px;
+    border-radius: 999px;
+    border: 1px solid transparent;
+    cursor: pointer;
+    transition: all 200ms ease;
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    letter-spacing: -0.005em;
+  }
+  .btn-primary {
+    background: var(--ink);
+    color: var(--cream);
+  }
+  .btn-primary:hover { background: var(--sienna-deep); }
+  .btn-ghost {
+    background: transparent;
+    color: var(--ink);
+    border-color: var(--rule);
+  }
+  .btn-ghost:hover { border-color: var(--ink); }
+  .btn-text {
+    background: none;
+    color: var(--ink-soft);
+    padding: 6px 0;
+    border: none;
+    border-bottom: 1px solid var(--rule);
+    border-radius: 0;
+  }
+  .btn .arr {
+    transition: transform 200ms ease;
+  }
+  .btn:hover .arr { transform: translateX(3px); }
+
+  .pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    padding: 4px 10px;
+    border-radius: 999px;
+  }
+  .pill-shared {
+    background: var(--moss-soft);
+    color: var(--moss);
+    border: 1px solid rgba(79, 91, 63, 0.25);
+  }
+  .pill-personal {
+    background: var(--sienna-soft);
+    color: var(--sienna-deep);
+    border: 1px solid rgba(139, 58, 14, 0.18);
+  }
+  .pill-local {
+    background: var(--cream);
+    color: var(--ink-mute);
+    border: 1px solid var(--rule);
+  }
+  .pill .dot { width: 5px; height: 5px; border-radius: 50%; background: currentColor; }
+
+  /* ───── Screen 1 — Founder landing ───── */
+  .screen-landing {
+    min-height: 720px;
+    padding: 96px 80px;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 64px;
+    align-items: center;
+    position: relative;
+  }
+  .screen-landing .nav {
+    position: absolute;
+    top: 24px; left: 80px; right: 80px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    color: var(--ink-mute);
+    letter-spacing: 0.06em;
+  }
+  .codex-mark {
+    font-family: 'Fraunces', serif;
+    font-variation-settings: "opsz" 36, "SOFT" 100, "wght" 480;
+    font-style: italic;
+    font-size: 22px;
+    color: var(--ink);
+    letter-spacing: -0.01em;
+  }
+  .landing-headline {
+    font-family: 'Fraunces', serif;
+    font-variation-settings: "opsz" 144, "SOFT" 80, "wght" 280;
+    font-size: clamp(56px, 6.5vw, 96px);
+    line-height: 0.94;
+    letter-spacing: -0.028em;
+    margin: 0 0 28px;
+    color: var(--ink);
+  }
+  .landing-headline em {
+    font-style: italic;
+    color: var(--sienna);
+    font-variation-settings: "opsz" 144, "SOFT" 100, "wght" 280;
+  }
+  .landing-sub {
+    font-family: 'Fraunces', serif;
+    font-variation-settings: "opsz" 24, "wght" 380;
+    font-size: 18px;
+    color: var(--ink-soft);
+    margin: 0 0 40px;
+    max-width: 38ch;
+    line-height: 1.45;
+  }
+  .landing-actions {
+    display: flex;
+    gap: 16px;
+    align-items: center;
+  }
+  .landing-actions .secondary {
+    font-size: 13px;
+    color: var(--ink-mute);
+    text-decoration: none;
+    border-bottom: 1px dotted var(--ink-faint);
+    padding-bottom: 2px;
+    transition: all 200ms ease;
+  }
+  .landing-actions .secondary:hover {
+    color: var(--ink);
+    border-bottom-color: var(--ink);
+  }
+  .landing-art {
+    border-left: 1px solid var(--rule);
+    padding: 32px 0 32px 56px;
+  }
+  .landing-art-head {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--ink-mute);
+    margin: 0 0 24px;
+  }
+  .verse-row {
+    display: grid;
+    grid-template-columns: 48px 1fr;
+    gap: 20px;
+    padding: 14px 0;
+    border-bottom: 1px solid var(--rule-soft);
+  }
+  .verse-ref {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    color: var(--ink-mute);
+    padding-top: 4px;
+  }
+  .verse-pair {
+    display: grid;
+    gap: 6px;
+  }
+  .verse-source {
+    font-family: 'Fraunces', serif;
+    font-variation-settings: "opsz" 18, "wght" 400;
+    font-size: 16px;
+    color: var(--ink);
+    line-height: 1.45;
+  }
+  .verse-target {
+    font-family: 'Fraunces', serif;
+    font-style: italic;
+    font-variation-settings: "opsz" 18, "SOFT" 70, "wght" 380;
+    font-size: 14px;
+    color: var(--sienna);
+    line-height: 1.45;
+  }
+  .verse-target.typing::after {
+    content: "▍";
+    color: var(--sienna);
+    animation: blink 1.1s steps(2, end) infinite;
+    margin-left: 2px;
+    font-style: normal;
+  }
+  @keyframes blink { 0%, 50% { opacity: 1; } 51%, 100% { opacity: 0; } }
+
+  /* ───── Screen 2 — Founder one-form ───── */
+  .screen-form {
+    min-height: 640px;
+    padding: 80px 96px;
+    display: grid;
+    grid-template-columns: 5fr 7fr;
+    gap: 80px;
+    align-items: center;
+  }
+  .form-headline {
+    font-family: 'Fraunces', serif;
+    font-variation-settings: "opsz" 96, "SOFT" 70, "wght" 320;
+    font-size: 64px;
+    line-height: 0.96;
+    letter-spacing: -0.025em;
+    margin: 0 0 20px;
+    color: var(--ink);
+  }
+  .form-headline em {
+    font-style: italic;
+    color: var(--sienna);
+  }
+  .form-side {
+    color: var(--ink-soft);
+    font-size: 15px;
+    line-height: 1.55;
+  }
+  .form-side .step {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    letter-spacing: 0.18em;
+    color: var(--ink-mute);
+    margin-bottom: 24px;
+  }
+  .field-group {
+    display: grid;
+    gap: 28px;
+  }
+  .field {
+    display: grid;
+    gap: 8px;
+  }
+  .field label {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--ink-mute);
+  }
+  .field input,
+  .field .input-mock {
+    font-family: 'Fraunces', serif;
+    font-variation-settings: "opsz" 24, "wght" 360;
+    font-size: 22px;
+    color: var(--ink);
+    background: transparent;
+    border: none;
+    border-bottom: 1px solid var(--ink-faint);
+    padding: 8px 0 12px;
+    outline: none;
+    transition: border-color 200ms ease;
+  }
+  .field input:focus,
+  .field .input-mock.focused {
+    border-bottom-color: var(--sienna);
+  }
+  .field .input-mock { display: block; }
+  .field .input-mock.placeholder { color: var(--ink-faint); font-style: italic; }
+  .field-row {
+    display: grid;
+    grid-template-columns: 1fr 24px 1fr;
+    gap: 20px;
+    align-items: end;
+  }
+  .field-row .arrow {
+    font-family: 'Fraunces', serif;
+    font-style: italic;
+    color: var(--ink-faint);
+    text-align: center;
+    padding-bottom: 14px;
+    font-size: 22px;
+  }
+  .form-actions {
+    margin-top: 48px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .form-back {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    color: var(--ink-mute);
+    text-decoration: none;
+    letter-spacing: 0.06em;
+  }
+
+  /* ───── Screen 3 — Joiner landing ───── */
+  .screen-joiner {
+    min-height: 700px;
+    padding: 96px;
+    display: grid;
+    grid-template-columns: 1fr;
+    place-items: center;
+    text-align: center;
+    position: relative;
+  }
+  .joiner-card {
+    max-width: 540px;
+  }
+  .joiner-from {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--ink-mute);
+    margin: 0 0 28px;
+  }
+  .avatar {
+    width: 28px; height: 28px;
+    border-radius: 50%;
+    background: var(--sienna);
+    color: var(--cream);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-family: 'Fraunces', serif;
+    font-style: italic;
+    font-size: 13px;
+    font-weight: 500;
+  }
+  .joiner-headline {
+    font-family: 'Fraunces', serif;
+    font-variation-settings: "opsz" 96, "SOFT" 60, "wght" 320;
+    font-size: 52px;
+    line-height: 1.05;
+    letter-spacing: -0.022em;
+    margin: 0 0 12px;
+    color: var(--ink);
+  }
+  .joiner-project {
+    font-family: 'Fraunces', serif;
+    font-style: italic;
+    font-variation-settings: "opsz" 36, "wght" 380;
+    color: var(--sienna);
+    font-size: 22px;
+    margin: 0 0 36px;
+  }
+  .joiner-langs {
+    display: inline-flex;
+    align-items: center;
+    gap: 14px;
+    margin-bottom: 48px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+    color: var(--ink-mute);
+  }
+  .lang-chip {
+    padding: 6px 14px;
+    border: 1px solid var(--rule);
+    border-radius: 999px;
+    background: var(--cream-soft);
+    color: var(--ink);
+    letter-spacing: 0.04em;
+  }
+  .signin-stack {
+    display: grid;
+    gap: 10px;
+    max-width: 320px;
+    margin: 0 auto 32px;
+  }
+  .signin-btn {
+    width: 100%;
+    justify-content: center;
+    font-family: 'Instrument Sans', sans-serif;
+    font-size: 14px;
+    padding: 14px 20px;
+    border-radius: 8px;
+    border: 1px solid var(--rule);
+    background: var(--paper);
+    color: var(--ink);
+    cursor: pointer;
+    transition: all 180ms ease;
+    display: inline-flex;
+    align-items: center;
+    gap: 12px;
+  }
+  .signin-btn:hover { border-color: var(--ink); background: var(--cream-soft); }
+  .signin-btn .icon {
+    width: 16px; height: 16px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-family: 'Fraunces', serif;
+    font-style: italic;
+  }
+  .joiner-note {
+    font-family: 'Fraunces', serif;
+    font-style: italic;
+    font-variation-settings: "opsz" 18, "wght" 400;
+    color: var(--ink-mute);
+    font-size: 14px;
+    line-height: 1.5;
+    max-width: 42ch;
+    margin: 0 auto;
+  }
+  .joiner-note .pill { vertical-align: middle; margin-right: 8px; }
+
+  /* ───── Screen 4 — Empty editor with hint ───── */
+  .screen-editor {
+    height: 600px;
+    display: grid;
+    grid-template-columns: 220px 1fr 280px;
+    grid-template-rows: 56px 1fr;
+    grid-template-areas:
+      "header header header"
+      "side main right";
+    background: var(--paper);
+  }
+  .editor-header {
+    grid-area: header;
+    border-bottom: 1px solid var(--rule);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 28px;
+    background: var(--cream-soft);
+  }
+  .editor-project {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+  }
+  .editor-project .name {
+    font-family: 'Fraunces', serif;
+    font-style: italic;
+    font-variation-settings: "opsz" 24, "wght" 460;
+    font-size: 18px;
+    color: var(--ink);
+  }
+  .editor-project .crumb {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    color: var(--ink-mute);
+    letter-spacing: 0.08em;
+  }
+  .editor-tools {
+    display: flex;
+    gap: 6px;
+    align-items: center;
+  }
+  .tool-btn {
+    width: 32px; height: 32px;
+    border-radius: 8px;
+    background: transparent;
+    border: 1px solid transparent;
+    color: var(--ink-soft);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 13px;
+    cursor: pointer;
+    transition: all 160ms ease;
+  }
+  .tool-btn:hover { background: var(--cream-soft); border-color: var(--rule); }
+  .tool-btn.active { background: var(--ink); color: var(--cream); }
+  .tool-btn.accent { color: var(--sienna); }
+
+  .editor-side {
+    grid-area: side;
+    border-right: 1px solid var(--rule);
+    padding: 24px 16px;
+    overflow: hidden;
+  }
+  .editor-side h5 {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--ink-mute);
+    margin: 0 0 16px;
+    padding: 0 8px;
+  }
+  .doc-list { display: grid; gap: 2px; }
+  .doc-item {
+    padding: 9px 10px;
+    border-radius: 6px;
+    font-family: 'Fraunces', serif;
+    font-size: 14px;
+    color: var(--ink-soft);
+    cursor: pointer;
+  }
+  .doc-item:hover { background: var(--cream-soft); }
+  .doc-item.active {
+    background: var(--ink);
+    color: var(--cream);
+  }
+  .doc-item .ref {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    opacity: 0.6;
+    margin-left: 6px;
+  }
+
+  .editor-main {
+    grid-area: main;
+    padding: 80px 88px;
+    overflow: hidden;
+    position: relative;
+  }
+  .empty-state {
+    max-width: 480px;
+  }
+  .empty-state h2 {
+    font-family: 'Fraunces', serif;
+    font-variation-settings: "opsz" 48, "SOFT" 50, "wght" 360;
+    font-size: 36px;
+    line-height: 1.1;
+    letter-spacing: -0.015em;
+    margin: 0 0 12px;
+    color: var(--ink);
+  }
+  .empty-state p {
+    font-family: 'Fraunces', serif;
+    font-style: italic;
+    font-variation-settings: "opsz" 24, "wght" 400;
+    color: var(--ink-mute);
+    margin: 0 0 32px;
+    line-height: 1.5;
+    font-size: 17px;
+  }
+  .empty-textarea {
+    border: 1px dashed var(--ink-faint);
+    border-radius: 8px;
+    padding: 24px;
+    min-height: 160px;
+    font-family: 'Fraunces', serif;
+    color: var(--ink-faint);
+    font-style: italic;
+    font-size: 16px;
+    background: var(--cream-soft);
+  }
+
+  .editor-right {
+    grid-area: right;
+    border-left: 1px solid var(--rule);
+    padding: 24px;
+    background: var(--cream-soft);
+  }
+  .editor-right h5 {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--ink-mute);
+    margin: 0 0 12px;
+  }
+  .ai-status {
+    border: 1px solid var(--rule);
+    border-radius: 10px;
+    padding: 16px;
+    background: var(--paper);
+    font-size: 13px;
+    color: var(--ink-soft);
+    line-height: 1.5;
+  }
+  .ai-status strong {
+    display: block;
+    font-family: 'Fraunces', serif;
+    font-style: italic;
+    color: var(--ink);
+    font-size: 15px;
+    margin-bottom: 6px;
+  }
+
+  /* Floating hint chip overlaying editor */
+  .hint-chip {
+    position: absolute;
+    bottom: 28px;
+    left: 88px;
+    background: var(--ink);
+    color: var(--cream);
+    padding: 12px 18px;
+    border-radius: 10px;
+    font-size: 13px;
+    box-shadow: 0 12px 28px -8px rgba(27, 24, 21, 0.4);
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    max-width: 360px;
+  }
+  .hint-chip .marker {
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: var(--sienna-soft);
+    background: rgba(196, 100, 31, 0.9);
+    flex-shrink: 0;
+  }
+  .hint-chip span { flex: 1; line-height: 1.4; }
+
+  /* ───── Screen 5 — Provider sheet ───── */
+  .screen-provider {
+    height: 700px;
+    position: relative;
+    background: var(--paper);
+    overflow: hidden;
+  }
+  /* Faded editor behind sheet */
+  .provider-bg {
+    position: absolute;
+    inset: 0;
+    padding: 80px 88px;
+    opacity: 0.35;
+    pointer-events: none;
+  }
+  .provider-bg .verse-row { padding: 18px 0; }
+  .provider-overlay {
+    position: absolute;
+    inset: 0;
+    background: rgba(27, 24, 21, 0.30);
+  }
+  .sheet {
+    position: absolute;
+    bottom: 0; left: 0; right: 0;
+    background: var(--paper);
+    border-radius: 18px 18px 0 0;
+    box-shadow: var(--shadow-sheet);
+    padding: 40px 56px 48px;
+    max-height: 78%;
+    overflow: hidden;
+  }
+  .sheet-handle {
+    width: 36px; height: 4px;
+    background: var(--ink-faint);
+    border-radius: 999px;
+    margin: 0 auto 28px;
+  }
+  .sheet-grid {
+    display: grid;
+    grid-template-columns: 5fr 7fr;
+    gap: 56px;
+    align-items: start;
+  }
+  .sheet-headline {
+    font-family: 'Fraunces', serif;
+    font-variation-settings: "opsz" 60, "SOFT" 60, "wght" 340;
+    font-size: 38px;
+    line-height: 1.05;
+    letter-spacing: -0.018em;
+    margin: 0 0 14px;
+    color: var(--ink);
+  }
+  .sheet-headline em {
+    font-style: italic;
+    color: var(--sienna);
+  }
+  .sheet-sub {
+    font-family: 'Fraunces', serif;
+    font-style: italic;
+    font-variation-settings: "opsz" 18, "wght" 400;
+    font-size: 16px;
+    color: var(--ink-soft);
+    line-height: 1.5;
+    margin: 0 0 24px;
+  }
+  .sheet-trust {
+    display: flex;
+    gap: 8px;
+    flex-direction: column;
+  }
+  .trust-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 12px;
+    color: var(--ink-mute);
+    font-family: 'JetBrains Mono', monospace;
+    letter-spacing: 0.02em;
+  }
+  .trust-row .check {
+    width: 14px; height: 14px;
+    border: 1px solid var(--moss);
+    border-radius: 3px;
+    color: var(--moss);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 10px;
+  }
+
+  .provider-options {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 10px;
+    margin-bottom: 24px;
+  }
+  .provider-card {
+    padding: 16px;
+    border: 1px solid var(--rule);
+    border-radius: 10px;
+    background: var(--cream-soft);
+    cursor: pointer;
+    transition: all 180ms ease;
+    text-align: left;
+  }
+  .provider-card.selected {
+    border-color: var(--ink);
+    background: var(--paper);
+    box-shadow: 0 0 0 3px var(--sienna-soft);
+  }
+  .provider-card .name {
+    font-family: 'Fraunces', serif;
+    font-variation-settings: "opsz" 24, "wght" 460;
+    font-size: 15px;
+    color: var(--ink);
+    margin-bottom: 4px;
+  }
+  .provider-card .meta {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    color: var(--ink-mute);
+  }
+
+  .key-input-wrap {
+    display: grid;
+    gap: 10px;
+    margin-bottom: 24px;
+  }
+  .key-input-wrap label {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--ink-mute);
+  }
+  .key-input {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 13px;
+    padding: 12px 16px;
+    border: 1px solid var(--rule);
+    border-radius: 8px;
+    background: var(--cream-soft);
+    color: var(--ink);
+    letter-spacing: 0.04em;
+    outline: none;
+  }
+  .key-input.filled {
+    color: var(--ink);
+    background: var(--paper);
+    border-color: var(--ink);
+  }
+  .key-help {
+    font-family: 'Fraunces', serif;
+    font-style: italic;
+    font-size: 13px;
+    color: var(--ink-mute);
+  }
+  .key-help a {
+    color: var(--sienna);
+    text-decoration: underline;
+    text-underline-offset: 3px;
+    text-decoration-thickness: 1px;
+  }
+
+  .sheet-actions {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    border-top: 1px solid var(--rule);
+    padding-top: 20px;
+  }
+  .sheet-actions .left {
+    font-size: 12px;
+    color: var(--ink-mute);
+    font-family: 'JetBrains Mono', monospace;
+  }
+
+  /* ───── Screen 6 — Shared prompt drawer ───── */
+  .screen-drawer {
+    height: 720px;
+    position: relative;
+    background: var(--paper);
+    overflow: hidden;
+    display: grid;
+    grid-template-columns: 1fr 460px;
+  }
+  .drawer-bg {
+    padding: 60px 80px;
+    overflow: hidden;
+  }
+  .drawer-bg h2 {
+    font-family: 'Fraunces', serif;
+    font-variation-settings: "opsz" 48, "wght" 380;
+    font-size: 28px;
+    margin: 0 0 24px;
+    color: var(--ink-soft);
+  }
+  .drawer {
+    border-left: 1px solid var(--rule);
+    padding: 32px 36px 36px;
+    background: var(--cream-soft);
+    display: grid;
+    grid-template-rows: auto auto auto 1fr auto;
+    gap: 16px;
+    overflow: hidden;
+  }
+  .drawer-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  .drawer-title {
+    font-family: 'Fraunces', serif;
+    font-variation-settings: "opsz" 36, "SOFT" 50, "wght" 380;
+    font-size: 24px;
+    margin: 0;
+    line-height: 1.1;
+    letter-spacing: -0.012em;
+  }
+  .close-x {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 18px;
+    color: var(--ink-mute);
+    cursor: pointer;
+    background: none;
+    border: none;
+  }
+  .drawer-pills {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+  .drawer-help {
+    font-family: 'Fraunces', serif;
+    font-style: italic;
+    font-size: 13px;
+    color: var(--ink-mute);
+    line-height: 1.5;
+    margin: 0;
+  }
+  .prompt-textarea {
+    background: var(--paper);
+    border: 1px solid var(--rule);
+    border-radius: 8px;
+    padding: 18px;
+    font-family: 'Fraunces', serif;
+    font-variation-settings: "opsz" 18, "wght" 400;
+    font-size: 14px;
+    color: var(--ink);
+    line-height: 1.55;
+    overflow: auto;
+    height: 100%;
+  }
+  .prompt-textarea .var {
+    color: var(--sienna);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+    background: var(--sienna-soft);
+    padding: 1px 6px;
+    border-radius: 4px;
+  }
+  .drawer-actions {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  .drawer-actions .saved {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    color: var(--ink-mute);
+  }
+
+  /* ───── Screen 7 — First-edit confirmation ───── */
+  .screen-confirm {
+    height: 540px;
+    position: relative;
+    background: var(--paper);
+    overflow: hidden;
+  }
+  .confirm-bg {
+    padding: 60px 80px;
+    opacity: 0.4;
+    pointer-events: none;
+  }
+  .confirm-overlay {
+    position: absolute;
+    inset: 0;
+    background: rgba(27, 24, 21, 0.40);
+    display: grid;
+    place-items: center;
+  }
+  .confirm-modal {
+    background: var(--paper);
+    border-radius: 14px;
+    box-shadow: 0 30px 80px -20px rgba(27, 24, 21, 0.5);
+    padding: 40px;
+    max-width: 480px;
+    text-align: left;
+  }
+  .confirm-icon {
+    width: 40px; height: 40px;
+    border-radius: 50%;
+    background: var(--moss-soft);
+    color: var(--moss);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-family: 'Fraunces', serif;
+    font-style: italic;
+    font-size: 22px;
+    margin-bottom: 20px;
+  }
+  .confirm-headline {
+    font-family: 'Fraunces', serif;
+    font-variation-settings: "opsz" 36, "SOFT" 60, "wght" 380;
+    font-size: 26px;
+    line-height: 1.15;
+    margin: 0 0 12px;
+    letter-spacing: -0.01em;
+  }
+  .confirm-body {
+    font-family: 'Fraunces', serif;
+    font-style: italic;
+    font-size: 15px;
+    color: var(--ink-soft);
+    line-height: 1.5;
+    margin: 0 0 28px;
+  }
+  .confirm-collabs {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 24px;
+    padding: 12px 14px;
+    background: var(--cream-soft);
+    border-radius: 8px;
+    border: 1px solid var(--rule);
+  }
+  .avatar-stack {
+    display: flex;
+  }
+  .avatar-stack .avatar {
+    width: 24px; height: 24px;
+    font-size: 11px;
+    margin-left: -8px;
+    border: 2px solid var(--paper);
+  }
+  .avatar-stack .avatar:first-child { margin-left: 0; }
+  .avatar.b { background: var(--moss); }
+  .avatar.c { background: var(--ink); }
+  .avatar.d { background: var(--sienna-deep); }
+  .confirm-collabs .who {
+    font-size: 12px;
+    color: var(--ink-soft);
+    font-family: 'Instrument Sans', sans-serif;
+  }
+  .confirm-collabs .who strong { color: var(--ink); font-weight: 500; }
+  .confirm-actions {
+    display: flex;
+    gap: 12px;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .checkbox-row {
+    font-size: 12px;
+    color: var(--ink-mute);
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .checkbox {
+    width: 14px; height: 14px;
+    border: 1px solid var(--ink-faint);
+    border-radius: 3px;
+  }
+  .confirm-actions .right { display: flex; gap: 10px; }
+
+  /* ───── Screen 8 — Eventual nudge ───── */
+  .screen-nudge {
+    height: 460px;
+    background: var(--paper);
+    padding: 56px 72px;
+    position: relative;
+    display: grid;
+    grid-template-rows: auto 1fr auto;
+    gap: 20px;
+    overflow: hidden;
+  }
+  .nudge-context {
+    color: var(--ink-mute);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    letter-spacing: 0.08em;
+  }
+  .nudge-verses {
+    display: grid;
+    gap: 14px;
+    opacity: 0.55;
+  }
+  .nudge-banner {
+    background: var(--paper);
+    border: 1px solid var(--ink);
+    border-radius: 12px;
+    padding: 20px 24px;
+    display: grid;
+    grid-template-columns: 36px 1fr auto;
+    gap: 18px;
+    align-items: center;
+    box-shadow: 0 12px 32px -16px rgba(27, 24, 21, 0.25);
+  }
+  .nudge-counter {
+    font-family: 'Fraunces', serif;
+    font-variation-settings: "opsz" 36, "wght" 460;
+    font-size: 22px;
+    color: var(--sienna);
+    text-align: center;
+    line-height: 1;
+  }
+  .nudge-counter small {
+    display: block;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 8px;
+    color: var(--ink-mute);
+    letter-spacing: 0.1em;
+    margin-top: 2px;
+  }
+  .nudge-text {
+    font-size: 14px;
+    color: var(--ink);
+    line-height: 1.5;
+  }
+  .nudge-text strong {
+    font-family: 'Fraunces', serif;
+    font-style: italic;
+    font-weight: 500;
+  }
+  .nudge-actions {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+  }
+
+  /* ───── Footer/coda ───── */
+  .coda {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 80px 64px 160px;
+    border-top: 1px solid var(--rule);
+  }
+  .coda h3 {
+    font-family: 'Fraunces', serif;
+    font-variation-settings: "opsz" 60, "SOFT" 70, "wght" 360;
+    font-size: 36px;
+    margin: 0 0 32px;
+    letter-spacing: -0.015em;
+  }
+  .coda h3 em { color: var(--sienna); font-style: italic; }
+  .coda-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 40px;
+  }
+  .coda-cell {
+    border-left: 2px solid var(--sienna);
+    padding-left: 20px;
+  }
+  .coda-cell h5 {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--ink-mute);
+    margin: 0 0 10px;
+    font-weight: 500;
+  }
+  .coda-cell p {
+    font-family: 'Fraunces', serif;
+    font-style: italic;
+    color: var(--ink);
+    margin: 0;
+    line-height: 1.5;
+    font-size: 16px;
+  }
+  .coda-cell .num {
+    font-family: 'Fraunces', serif;
+    font-variation-settings: "opsz" 144, "wght" 320;
+    font-size: 56px;
+    color: var(--sienna);
+    line-height: 1;
+    margin-bottom: 12px;
+  }
+
+  /* ───── TOC ───── */
+  .toc {
+    position: fixed;
+    top: 50%;
+    left: 24px;
+    transform: translateY(-50%);
+    z-index: 1000;
+    display: grid;
+    gap: 6px;
+  }
+  .toc a {
+    display: block;
+    width: 28px;
+    text-align: center;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 9px;
+    color: var(--ink-faint);
+    text-decoration: none;
+    padding: 4px 0;
+    transition: color 200ms ease;
+    border-right: 1px solid transparent;
+  }
+  .toc a:hover { color: var(--ink); }
+  .toc a:hover::before {
+    content: attr(data-label);
+    position: absolute;
+    left: 32px;
+    background: var(--ink);
+    color: var(--cream);
+    padding: 4px 10px;
+    border-radius: 4px;
+    font-size: 10px;
+    white-space: nowrap;
+  }
+
+  @media (max-width: 900px) {
+    .spec-header, .artboards, .coda { padding-left: 24px; padding-right: 24px; }
+    .spec-grid, .coda-grid { grid-template-columns: 1fr 1fr; }
+    .principles { grid-column: span 2; }
+    .toc { display: none; }
+    .screen-landing, .screen-form, .screen-joiner { padding: 40px; grid-template-columns: 1fr; gap: 32px; }
+    .screen-editor { grid-template-columns: 1fr; grid-template-areas: "header" "main"; height: auto; }
+    .editor-side, .editor-right { display: none; }
+    .sheet-grid { grid-template-columns: 1fr; gap: 32px; }
+    .screen-drawer { grid-template-columns: 1fr; }
+    .drawer-bg { display: none; }
+  }
+</style>
+</head>
+<body>
+
+<nav class="toc">
+  <a href="#a01" data-label="Founder landing">01</a>
+  <a href="#a02" data-label="Project setup">02</a>
+  <a href="#a03" data-label="Joiner landing">03</a>
+  <a href="#a04" data-label="Empty editor">04</a>
+  <a href="#a05" data-label="Provider sheet">05</a>
+  <a href="#a06" data-label="Prompt drawer">06</a>
+  <a href="#a07" data-label="First-edit confirm">07</a>
+  <a href="#a08" data-label="Eventual nudge">08</a>
+</nav>
+
+<header class="spec-header">
+  <p class="spec-eyebrow">
+    <span class="dot"></span>
+    Codex / design spec
+    <span>2026.04.29</span>
+    <span>v1 — project setup</span>
+  </p>
+  <h1 class="spec-title">Setup happens <em>to you,</em> not in front of you.</h1>
+  <p class="spec-lede">
+    Founders create a project in 30 seconds and translate inside the next 30. Joiners translate within
+    60 seconds of clicking their invite link. AI provider is a personal credential, prompted just-in-time.
+    The system message is a project artifact, surfaced in the editor with a visible "shared with collaborators" mark.
+    No checklist drawer.
+  </p>
+
+  <div class="spec-grid">
+    <div class="spec-cell">
+      <h4>Type</h4>
+      <p>Fraunces (display, variable SOFT)<br/>Instrument Sans (body)<br/>JetBrains Mono (meta + keys)</p>
+    </div>
+    <div class="spec-cell">
+      <h4>Palette</h4>
+      <div class="swatches">
+        <div class="sw" style="background: var(--cream)"></div>
+        <div class="sw" style="background: var(--paper)"></div>
+        <div class="sw" style="background: var(--ink)"></div>
+        <div class="sw" style="background: var(--sienna)"></div>
+        <div class="sw" style="background: var(--moss)"></div>
+      </div>
+      <p style="margin-top: 12px; font-family: 'JetBrains Mono', monospace; font-size: 11px; line-height: 1.7;">
+        cream · paper · ink<br/>sienna (personal) · moss (shared)
+      </p>
+    </div>
+    <div class="spec-cell principles">
+      <h4>Principles</h4>
+      <ul>
+        <li>URL implies intent. <code style="font-family:'JetBrains Mono',monospace;font-size:12px;">/?invite=…</code> → joiner; bare root → founder.</li>
+        <li>Setup is just-in-time. The provider sheet shows when you press Translate, not before.</li>
+        <li>Altitude is communicated in the chrome, never via tutorial. Sienna = personal. Moss = shared.</li>
+        <li>Nudges are earned. The "customize your instructions" prompt only appears after meaningful use.</li>
+      </ul>
+    </div>
+  </div>
+</header>
+
+<main class="artboards">
+
+  <!-- ══════════════ 01 — Founder landing ══════════════ -->
+  <section class="artboard" id="a01">
+    <div class="artboard-meta">
+      <div class="artboard-num">01 / 08</div>
+      <h2 class="artboard-title">Founder lands at codex.app</h2>
+      <p class="artboard-note">A new visitor with no invite. One headline, one button, one escape hatch for invitees who arrived without the link.</p>
+    </div>
+    <div class="frame">
+      <div class="frame-chrome">
+        <span class="dot"></span><span class="dot"></span><span class="dot"></span>
+        <span class="frame-url">codex.app</span>
+      </div>
+      <div class="screen-landing">
+        <div class="nav">
+          <span class="codex-mark">Codex</span>
+          <span>Sign in →</span>
+        </div>
+        <div>
+          <h1 class="landing-headline">Translate <em>scripture</em><br/>with your team.</h1>
+          <p class="landing-sub">A workspace for Bible translators — verse-by-verse, side-by-side, in your browser. Everything you draft is yours.</p>
+          <div class="landing-actions">
+            <button class="btn btn-primary">Create a project <span class="arr">→</span></button>
+            <a class="secondary" href="#">Already invited? Open your link</a>
+          </div>
+        </div>
+        <div class="landing-art">
+          <p class="landing-art-head">In progress · Antioquia New Testament</p>
+          <div class="verse-row">
+            <span class="verse-ref">Gen 1:1</span>
+            <div class="verse-pair">
+              <span class="verse-source">In the beginning God created the heavens and the earth.</span>
+              <span class="verse-target">En el principio creó Dios los cielos y la tierra.</span>
+            </div>
+          </div>
+          <div class="verse-row">
+            <span class="verse-ref">Gen 1:2</span>
+            <div class="verse-pair">
+              <span class="verse-source">Now the earth was formless and empty, darkness was over the surface of the deep…</span>
+              <span class="verse-target">La tierra estaba desordenada y vacía, y las tinieblas cubrían…</span>
+            </div>
+          </div>
+          <div class="verse-row">
+            <span class="verse-ref">Gen 1:3</span>
+            <div class="verse-pair">
+              <span class="verse-source">And God said, "Let there be light," and there was light.</span>
+              <span class="verse-target typing">Y dijo Dios: "Sea la luz"</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ══════════════ 02 — Founder one-form ══════════════ -->
+  <section class="artboard" id="a02">
+    <div class="artboard-meta">
+      <div class="artboard-num">02 / 08</div>
+      <h2 class="artboard-title">One form. Three fields. Editor next.</h2>
+      <p class="artboard-note">After sign-in. Replaces the current 6-step wizard. No "skip for now" option — these three are the minimum a project literally cannot exist without.</p>
+    </div>
+    <div class="frame">
+      <div class="frame-chrome">
+        <span class="dot"></span><span class="dot"></span><span class="dot"></span>
+        <span class="frame-url">codex.app/new</span>
+      </div>
+      <div class="screen-form">
+        <div class="form-side">
+          <div class="step">Step 1 of 1</div>
+          <h2 class="form-headline">Name your <em>project.</em></h2>
+          <p style="margin: 0 0 12px;">A project is a translation effort — a book, a testament, a corpus. You can change everything later.</p>
+          <p style="margin: 0; font-family: 'Fraunces', serif; font-style: italic; color: var(--ink-mute); font-size: 14px;">
+            Working alone for now? That's fine. Invite collaborators when you're ready.
+          </p>
+        </div>
+        <div>
+          <div class="field-group">
+            <div class="field">
+              <label>Project name</label>
+              <span class="input-mock focused">Antioquia New Testament</span>
+            </div>
+            <div class="field-row">
+              <div class="field">
+                <label>Source language</label>
+                <span class="input-mock">English (ESV)</span>
+              </div>
+              <div class="arrow">→</div>
+              <div class="field">
+                <label>Target language</label>
+                <span class="input-mock">Embera Chamí</span>
+              </div>
+            </div>
+          </div>
+          <div class="form-actions">
+            <a class="form-back" href="#">← Back</a>
+            <button class="btn btn-primary">Open the editor <span class="arr">→</span></button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ══════════════ 03 — Joiner landing ══════════════ -->
+  <section class="artboard" id="a03">
+    <div class="artboard-meta">
+      <div class="artboard-num">03 / 08</div>
+      <h2 class="artboard-title">Joiner clicks an invite link</h2>
+      <p class="artboard-note">Critical: the screen names the inviter, the project, and the language pair. It also pre-tells the joiner that they'll connect their own AI key — heading off the "I assumed Maria's key was shared" failure mode.</p>
+    </div>
+    <div class="frame">
+      <div class="frame-chrome">
+        <span class="dot"></span><span class="dot"></span><span class="dot"></span>
+        <span class="frame-url">codex.app/join/g7k4qw…</span>
+      </div>
+      <div class="screen-joiner">
+        <div class="joiner-card">
+          <p class="joiner-from">
+            <span class="avatar">M</span>
+            Invitation from Maria Restrepo
+          </p>
+          <h1 class="joiner-headline">You've been invited to join</h1>
+          <p class="joiner-project">Antioquia New Testament</p>
+          <div class="joiner-langs">
+            <span class="lang-chip">English (ESV)</span>
+            <span>→</span>
+            <span class="lang-chip">Embera Chamí</span>
+            <span style="margin-left: 8px;">· 4 translators · 1,247 verses drafted</span>
+          </div>
+          <div class="signin-stack">
+            <button class="signin-btn"><span class="icon">G</span>Continue with Google</button>
+            <button class="signin-btn"><span class="icon">@</span>Continue with email</button>
+          </div>
+          <p class="joiner-note">
+            <span class="pill pill-personal"><span class="dot"></span>Heads up</span>
+            After you sign in, you'll connect your own AI provider. Each translator uses their own key — yours is private to you.
+          </p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ══════════════ 04 — Empty editor with hint ══════════════ -->
+  <section class="artboard" id="a04">
+    <div class="artboard-meta">
+      <div class="artboard-num">04 / 08</div>
+      <h2 class="artboard-title">Founder lands in the editor</h2>
+      <p class="artboard-note">Empty doc, one hint at the bottom. The hint tells the user that AI setup will happen on first translation — no surprise, no upfront ask.</p>
+    </div>
+    <div class="frame">
+      <div class="frame-chrome">
+        <span class="dot"></span><span class="dot"></span><span class="dot"></span>
+        <span class="frame-url">codex.app/p/antioquia-nt</span>
+      </div>
+      <div class="screen-editor">
+        <div class="editor-header">
+          <div class="editor-project">
+            <span class="codex-mark" style="font-size:16px;">Codex</span>
+            <span class="crumb">/ ANTIOQUIA NT</span>
+            <span class="editor-project name">Antioquia New Testament</span>
+          </div>
+          <div class="editor-tools">
+            <button class="tool-btn">⊕</button>
+            <button class="tool-btn">⌂</button>
+            <button class="tool-btn">✦</button>
+            <button class="btn btn-ghost" style="font-size:12px;padding:6px 14px;margin-left:10px;">Invite</button>
+            <span class="avatar" style="margin-left: 8px;">M</span>
+          </div>
+        </div>
+        <div class="editor-side">
+          <h5>Documents</h5>
+          <div class="doc-list">
+            <div class="doc-item active">Genesis <span class="ref">GEN</span></div>
+            <div class="doc-item">Exodus <span class="ref">EXO</span></div>
+            <div class="doc-item">Matthew <span class="ref">MAT</span></div>
+            <div class="doc-item">Mark <span class="ref">MRK</span></div>
+            <div class="doc-item" style="color: var(--ink-faint);">+ Add a book</div>
+          </div>
+        </div>
+        <div class="editor-main">
+          <div class="empty-state">
+            <h2>Genesis 1.</h2>
+            <p>Paste source text below, or open the document picker to import. You can start translating right away.</p>
+            <div class="empty-textarea">In the beginning God created the heavens and the earth…</div>
+          </div>
+          <div class="hint-chip">
+            <span class="marker"></span>
+            <span>You'll connect an AI provider the first time you press <strong style="font-family:'Fraunces',serif;font-style:italic;">Translate.</strong> It's stored only in this browser.</span>
+          </div>
+        </div>
+        <div class="editor-right">
+          <h5>AI assistant</h5>
+          <div class="ai-status">
+            <strong>Not connected yet</strong>
+            Translate, transcribe, and rephrase tools will activate once you add a provider.
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ══════════════ 05 — Provider sheet ══════════════ -->
+  <section class="artboard" id="a05">
+    <div class="artboard-meta">
+      <div class="artboard-num">05 / 08</div>
+      <h2 class="artboard-title">Provider sheet — just-in-time</h2>
+      <p class="artboard-note">Triggered the first time the user presses Translate. Slides up over the editor. Three trust statements at the top resolve the "is my key safe?" anxiety before the user has to ask. Key is validated against the provider before the sheet closes.</p>
+    </div>
+    <div class="frame">
+      <div class="frame-chrome">
+        <span class="dot"></span><span class="dot"></span><span class="dot"></span>
+        <span class="frame-url">codex.app/p/antioquia-nt</span>
+      </div>
+      <div class="screen-provider">
+        <div class="provider-bg">
+          <div class="verse-row">
+            <span class="verse-ref">Gen 1:1</span>
+            <div class="verse-pair">
+              <span class="verse-source">In the beginning God created the heavens and the earth.</span>
+              <span class="verse-target">…</span>
+            </div>
+          </div>
+          <div class="verse-row">
+            <span class="verse-ref">Gen 1:2</span>
+            <div class="verse-pair">
+              <span class="verse-source">Now the earth was formless and empty…</span>
+              <span class="verse-target">…</span>
+            </div>
+          </div>
+        </div>
+        <div class="provider-overlay"></div>
+        <div class="sheet">
+          <div class="sheet-handle"></div>
+          <div class="sheet-grid">
+            <div>
+              <h2 class="sheet-headline">Connect an <em>AI provider</em> to translate.</h2>
+              <p class="sheet-sub">Codex doesn't pick a model for you. Bring your own key from a provider you trust.</p>
+              <div class="sheet-trust">
+                <div class="trust-row"><span class="check">✓</span> Stored in this browser, encrypted at rest</div>
+                <div class="trust-row"><span class="check">✓</span> Never sent to Codex servers</div>
+                <div class="trust-row"><span class="check">✓</span> Each collaborator uses their own key</div>
+              </div>
+            </div>
+            <div>
+              <div class="provider-options">
+                <button class="provider-card">
+                  <div class="name">Anthropic</div>
+                  <div class="meta">Claude Opus 4.7</div>
+                </button>
+                <button class="provider-card selected">
+                  <div class="name">OpenAI</div>
+                  <div class="meta">GPT-4o · GPT-4 Turbo</div>
+                </button>
+                <button class="provider-card">
+                  <div class="name">Custom</div>
+                  <div class="meta">OpenAI-compatible URL</div>
+                </button>
+              </div>
+              <div class="key-input-wrap">
+                <label>API key</label>
+                <input class="key-input filled" value="sk-proj-aB3kT9…•••••••••••••••mE2x" />
+                <span class="key-help">
+                  Don't have one yet? <a href="#">Get an OpenAI key →</a> · takes about 2 minutes
+                </span>
+              </div>
+              <div class="sheet-actions">
+                <span class="left">Press Esc to do this later</span>
+                <div style="display:flex;gap:10px;">
+                  <button class="btn btn-ghost" style="font-size:13px;">Test key</button>
+                  <button class="btn btn-primary" style="font-size:13px;">Save & translate <span class="arr">→</span></button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ══════════════ 06 — Shared prompt drawer ══════════════ -->
+  <section class="artboard" id="a06">
+    <div class="artboard-meta">
+      <div class="artboard-num">06 / 08</div>
+      <h2 class="artboard-title">Shared instructions, surfaced in the editor</h2>
+      <p class="artboard-note">Side drawer. The moss-coloured "shared with all collaborators" pill is always visible — altitude is communicated in the chrome. The label "Project translation instructions" makes the scope obvious without a tutorial.</p>
+    </div>
+    <div class="frame">
+      <div class="frame-chrome">
+        <span class="dot"></span><span class="dot"></span><span class="dot"></span>
+        <span class="frame-url">codex.app/p/antioquia-nt</span>
+      </div>
+      <div class="screen-drawer">
+        <div class="drawer-bg">
+          <h2>Genesis 1:1</h2>
+          <div class="verse-row">
+            <span class="verse-ref">Gen 1:1</span>
+            <div class="verse-pair">
+              <span class="verse-source">In the beginning God created the heavens and the earth.</span>
+              <span class="verse-target">Naide ka, Daichi izhi b'ai bidau bua eu daunita.</span>
+            </div>
+          </div>
+          <div class="verse-row">
+            <span class="verse-ref">Gen 1:2</span>
+            <div class="verse-pair">
+              <span class="verse-source">Now the earth was formless and empty, darkness was over the surface of the deep, and the Spirit of God was hovering over the waters.</span>
+              <span class="verse-target">Eu daunita ki k'aubeida pe'edaurea, p'esi ema kawerea k'aubeida ki…</span>
+            </div>
+          </div>
+        </div>
+        <div class="drawer">
+          <div class="drawer-header">
+            <h3 class="drawer-title">Project translation instructions</h3>
+            <button class="close-x">×</button>
+          </div>
+          <div class="drawer-pills">
+            <span class="pill pill-shared"><span class="dot"></span>Shared with all collaborators</span>
+            <span class="pill pill-local">4 translators</span>
+          </div>
+          <p class="drawer-help">
+            These instructions are sent to every translator's AI provider as the system message. Use <span style="color:var(--sienna);font-family:'JetBrains Mono',monospace;font-size:12px;">{sourceLanguage}</span> and <span style="color:var(--sienna);font-family:'JetBrains Mono',monospace;font-size:12px;">{targetLanguage}</span> as placeholders.
+          </p>
+          <div class="prompt-textarea">You are a careful Bible translation assistant working from <span class="var">{sourceLanguage}</span> into <span class="var">{targetLanguage}</span>.<br/><br/>Preserve the literary register of the source. Favor natural Embera Chamí word order over English calque. Where a Hebrew or Greek term has cultural baggage, prefer the dynamic equivalent that resonates in the Antioquia region. Honor the existing translations of <em>Daichi</em> (God) and <em>Naide</em> (beginning) — these were chosen by the project lead.<br/><br/>When unsure, leave a translator's note in <span class="var">[brackets]</span> rather than guessing.</div>
+          <div class="drawer-actions">
+            <span class="saved">Last saved 2m ago by Maria</span>
+            <div style="display:flex;gap:10px;">
+              <button class="btn btn-ghost" style="font-size:12px;padding:8px 16px;">Reset to default</button>
+              <button class="btn btn-primary" style="font-size:12px;padding:8px 16px;">Save</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ══════════════ 07 — First-edit confirmation ══════════════ -->
+  <section class="artboard" id="a07">
+    <div class="artboard-meta">
+      <div class="artboard-num">07 / 08</div>
+      <h2 class="artboard-title">First-edit confirmation — protect the shared artifact</h2>
+      <p class="artboard-note">Shown only the first time a user saves a change to the project system prompt. Names the collaborators by avatar, not by abstraction. "Don't ask me again" because frequent editors shouldn't be re-prompted.</p>
+    </div>
+    <div class="frame">
+      <div class="frame-chrome">
+        <span class="dot"></span><span class="dot"></span><span class="dot"></span>
+        <span class="frame-url">codex.app/p/antioquia-nt</span>
+      </div>
+      <div class="screen-confirm">
+        <div class="confirm-bg">
+          <h2 style="font-family:'Fraunces',serif;color:var(--ink-soft);font-size:24px;margin:0 0 24px;">Project translation instructions</h2>
+          <div class="prompt-textarea" style="height: auto;">You are a careful Bible translation assistant working from <span class="var">{sourceLanguage}</span> into <span class="var">{targetLanguage}</span>…</div>
+        </div>
+        <div class="confirm-overlay">
+          <div class="confirm-modal">
+            <div class="confirm-icon">⇆</div>
+            <h2 class="confirm-headline">Save and share with your collaborators?</h2>
+            <p class="confirm-body">Anyone working on Antioquia NT will use these instructions the next time they translate. You can always revert.</p>
+            <div class="confirm-collabs">
+              <div class="avatar-stack">
+                <span class="avatar">M</span>
+                <span class="avatar b">P</span>
+                <span class="avatar c">R</span>
+                <span class="avatar d">+1</span>
+              </div>
+              <span class="who"><strong>Maria, Pablo, Rosa</strong> and one more will see your changes</span>
+            </div>
+            <div class="confirm-actions">
+              <label class="checkbox-row"><span class="checkbox"></span> Don't ask me again</label>
+              <div class="right">
+                <button class="btn btn-ghost" style="font-size:13px;padding:10px 18px;">Cancel</button>
+                <button class="btn btn-primary" style="font-size:13px;padding:10px 18px;">Save & share</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ══════════════ 08 — Eventual nudge ══════════════ -->
+  <section class="artboard" id="a08">
+    <div class="artboard-meta">
+      <div class="artboard-num">08 / 08</div>
+      <h2 class="artboard-title">The earned nudge</h2>
+      <p class="artboard-note">For founders who skipped customizing AI instructions. Appears after they've accumulated meaningful work (10 verses translated, or 3 days of use — whichever comes first). Dismissable; resurfaces after another 25 verses if dismissed. Never appears for joiners.</p>
+    </div>
+    <div class="frame">
+      <div class="frame-chrome">
+        <span class="dot"></span><span class="dot"></span><span class="dot"></span>
+        <span class="frame-url">codex.app/p/antioquia-nt</span>
+      </div>
+      <div class="screen-nudge">
+        <p class="nudge-context">Antioquia NT · Genesis 1 · 14 verses translated this session</p>
+        <div class="nudge-verses">
+          <div class="verse-row">
+            <span class="verse-ref">Gen 1:9</span>
+            <div class="verse-pair">
+              <span class="verse-source">And God said, "Let the water under the sky be gathered to one place…"</span>
+              <span class="verse-target">Y dijo Dios: "Júntense las aguas que están debajo de los cielos en un lugar…"</span>
+            </div>
+          </div>
+          <div class="verse-row">
+            <span class="verse-ref">Gen 1:10</span>
+            <div class="verse-pair">
+              <span class="verse-source">God called the dry ground "land," and the gathered waters he called "seas."</span>
+              <span class="verse-target">Y llamó Dios a lo seco "tierra"…</span>
+            </div>
+          </div>
+        </div>
+        <div class="nudge-banner">
+          <div class="nudge-counter">10<small>VERSES</small></div>
+          <div class="nudge-text">
+            You've translated <strong>ten verses</strong> with the default instructions. A two-minute customization — naming the dialect, the desired register, the terms you've already chosen — usually meaningfully improves the AI's drafts.
+          </div>
+          <div class="nudge-actions">
+            <button class="btn btn-ghost" style="font-size:12px;padding:8px 14px;">Not now</button>
+            <button class="btn btn-primary" style="font-size:12px;padding:8px 14px;">Customize <span class="arr">→</span></button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<footer class="coda">
+  <h3>What this design <em>removes.</em></h3>
+  <div class="coda-grid">
+    <div class="coda-cell">
+      <div class="num">−6</div>
+      <h5>Wizard steps</h5>
+      <p>The 6-step OnboardingWizard collapses into one form for founders, zero-step for joiners.</p>
+    </div>
+    <div class="coda-cell">
+      <div class="num">−4</div>
+      <h5>Checklist tiles</h5>
+      <p>SetupChecklistDrawer is gone. Provider, instructions, invites, voice — all surface contextually.</p>
+    </div>
+    <div class="coda-cell">
+      <div class="num">+2</div>
+      <h5>Tracks, separated</h5>
+      <p>Founder and joiner are distinct paths, implied by URL — not branched by checklist state.</p>
+    </div>
+  </div>
+
+  <h3 style="margin-top: 80px;">Open questions for <em>v1.5.</em></h3>
+  <div class="coda-grid">
+    <div class="coda-cell">
+      <h5>Org-managed keys</h5>
+      <p>For non-technical translators, an org-paid pooled provider may be necessary. Not v1, but the provider sheet should leave room for an "Use my organization's plan" option.</p>
+    </div>
+    <div class="coda-cell">
+      <h5>Project sync</h5>
+      <p>The shared system prompt is per-project, but sync is happening via y-partyserver. The "Last saved 2m ago by Maria" line implies Yjs presence — confirm that's wired.</p>
+    </div>
+    <div class="coda-cell">
+      <h5>Nudge cadence</h5>
+      <p>10 verses is a guess. Instrument the nudge: % accept, % dismiss, time-to-customize. Tune the threshold against actual data after 30 days.</p>
+    </div>
+  </div>
+</footer>
+
+<script>
+  // Pause the typing-cursor animation if the user prefers reduced motion
+  if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+    document.querySelectorAll('.verse-target.typing').forEach(el => el.classList.remove('typing'));
+    document.querySelectorAll('.artboard').forEach(el => {
+      el.style.animation = 'none';
+      el.style.opacity = '1';
+      el.style.transform = 'none';
+    });
+  }
+</script>
+
+</body>
+</html>

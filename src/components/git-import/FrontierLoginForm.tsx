@@ -5,7 +5,13 @@ import { Label } from "@/components/ui/label"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { FrontierAuthError } from "@/lib/frontier/auth"
 
-export function FrontierLoginForm({ onSuccess }: { onSuccess: () => void }) {
+export function FrontierLoginForm({
+  onSuccess,
+  onForgotPassword,
+}: {
+  onSuccess: () => void
+  onForgotPassword?: () => void
+}) {
   const { login } = useFrontierSession()
   const [username, setUsername] = useState("")
   const [password, setPassword] = useState("")
@@ -33,7 +39,18 @@ export function FrontierLoginForm({ onSuccess }: { onSuccess: () => void }) {
         <Input id="f-user" value={username} onChange={(e) => setUsername(e.target.value)} autoComplete="username" />
       </div>
       <div>
-        <Label htmlFor="f-pass">Password</Label>
+        <div className="flex items-center justify-between">
+          <Label htmlFor="f-pass">Password</Label>
+          {onForgotPassword && (
+            <button
+              type="button"
+              onClick={onForgotPassword}
+              className="text-xs text-muted-foreground underline-offset-4 hover:underline"
+            >
+              Forgot password?
+            </button>
+          )}
+        </div>
         <Input id="f-pass" type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="current-password" />
       </div>
       {error && <p className="text-sm text-destructive">{error}</p>}

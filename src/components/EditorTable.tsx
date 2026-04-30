@@ -5,7 +5,7 @@ import DOMPurify from "dompurify"
 import {
   Check, CheckCheck, Circle, Trash2, AlertTriangle, AlertCircle, RefreshCw,
   MessageCircle, Play, Pause, Mic, MicOff, Sparkles, FileText, History as HistoryIcon,
-  ArrowRight, Wand2, Activity,
+  ArrowRight, Activity,
 } from "lucide-react"
 import type { CellData } from "@/hooks/useCells"
 import type { ScoredPair } from "@/lib/search/dual-index"
@@ -30,10 +30,8 @@ import { useCellAudio } from "@/hooks/useCellAudio"
 import { transcribeAndStoreTimings } from "@/lib/audio/transcribe"
 import { setTranscribeStatus, useTranscribeStatus } from "@/lib/audio/transcribe-status"
 import { whisperLanguageFromTag } from "@/lib/audio/language"
-import { synthAndAttachAudio } from "@/lib/audio/synth-and-attach"
-import { setTtsStatus, useTtsStatus } from "@/lib/audio/tts"
+import { handleVoiceDropOnCell, VOICE_DRAG_MIME } from "./VoiceBar"
 import { AiModelConsentDeniedError } from "@/lib/audio/ai-consent"
-import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { cn } from "@/lib/utils"
 import { isPerfLogEnabled } from "@/lib/perf-log"
@@ -181,6 +179,8 @@ interface EditorTableProps {
   /** Called when the user clicks the mic button on a cell. The parent owns
    *  the recording modal so it can persist across cell navigation. */
   onOpenRecording?: (cellId: string) => void
+  /** Re-read the project record from IDB after a settings change (e.g. voice library edits). */
+  onProjectChanged?: () => void
 }
 
 export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(function EditorTable({
@@ -194,12 +194,18 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   activeCueIndex, onSeekToCue,
   lineNumbersEnabled, cellLabelsEnabled, sourceTextDirection, targetTextDirection,
   isAnonymous, breakdownMap, onJumpToCell, onAiSetupNeeded, onOpenRecording,
+  onProjectChanged,
 }, ref) {
   const permissions = useProjectPermissions(project)
   const canEdit = permissions.canEditContent
   const parentRef = useRef<HTMLDivElement>(null)
   const isDragging = useRef(false)
   const dragCells = useRef<Set<string>>(new Set())
+  const cellsRef = useRef(cells)
+
+  useEffect(() => {
+    cellsRef.current = cells
+  }, [cells])
 
   const ruleMap = useMemo(() => new Map(rules.map((r) => [r.id, r])), [rules])
 
@@ -243,6 +249,9 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   }, [])
   const handleDragEnter = useCallback((cellId: string) => {
     if (isDragging.current) dragCells.current.add(cellId)
+  }, [])
+  const getVoiceTakeCells = useCallback((startIndex: number, count: number) => {
+    return cellsRef.current.slice(startIndex, startIndex + count)
   }, [])
 
   return (
@@ -313,8 +322,10 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
                 onJumpToCell={onJumpToCell}
                 onAiSetupNeeded={onAiSetupNeeded}
                 onOpenRecording={onOpenRecording}
+                onProjectChanged={onProjectChanged}
                 onDragStart={handleDragStart}
                 onDragEnter={handleDragEnter}
+                getVoiceTakeCells={getVoiceTakeCells}
               />
             </div>
           )
@@ -374,8 +385,10 @@ interface MemoizedRowProps {
   onJumpToCell?: (cellId: string) => void
   onAiSetupNeeded?: () => void
   onOpenRecording?: (cellId: string) => void
+  onProjectChanged?: () => void
   onDragStart: (cellId: string) => void
   onDragEnter: (cellId: string) => void
+  getVoiceTakeCells: (startIndex: number, count: number) => CellData[]
 }
 
 const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
@@ -384,13 +397,14 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
     backtranslating, backtranslationErrors, cellOpenCommentCount, breakdownMap,
     activeCueIndex, rowIndex, gridCols,
     onDragStart: onDragStartParent, onDragEnter: onDragEnterParent,
+    getVoiceTakeCells,
     project, doc, username, editable, isCompletionConfigured, isCompletionAvailable,
     ruleMap, onCompleteSingle, onInfractionClick,
     isBacktranslationConfigured, onBacktranslate,
     onOpenComments, onOpenHistory, syncProvider, collabUser,
     onSeekToCue, lineNumbersEnabled, cellLabelsEnabled,
     sourceTextDirection, targetTextDirection, isAnonymous,
-    onJumpToCell, onAiSetupNeeded, onOpenRecording,
+    onJumpToCell, onAiSetupNeeded, onOpenRecording, onProjectChanged,
   } = props
 
   const cellId = cell.id
@@ -471,8 +485,10 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
         onJumpToCell={onJumpToCell}
         onAiSetupNeeded={onAiSetupNeeded}
         onOpenRecording={onOpenRecording}
+        onProjectChanged={onProjectChanged}
         onDragStart={handleDragStart}
         onDragEnter={handleDragEnter}
+        getVoiceTakeCells={getVoiceTakeCells}
       />
     </div>
   )
@@ -509,6 +525,7 @@ interface EditorRowProps {
   onSeekToCue?: (cellId: string) => void
   onDragStart: () => void
   onDragEnter: () => void
+  getVoiceTakeCells: (startIndex: number, count: number) => CellData[]
   rowIndex: number
   lineNumbersEnabled: boolean
   cellLabelsEnabled: boolean
@@ -520,6 +537,7 @@ interface EditorRowProps {
   onJumpToCell?: (cellId: string) => void
   onAiSetupNeeded?: () => void
   onOpenRecording?: (cellId: string) => void
+  onProjectChanged?: () => void
 }
 
 function EditorRow({
@@ -677,6 +695,13 @@ function EditorRow({
   const selectedAudio = cell.selectedAudioId ? cell.attachments?.[cell.selectedAudioId] : undefined
   const hasAudio = Boolean(selectedAudio && !selectedAudio.isDeleted)
   const cellAudioTimings = cell.selectedAudioId ? cell.audioTimings?.[cell.selectedAudioId] : undefined
+  const selectedGeneratedVoice = cell.selectedGeneratedVoiceAudioId
+    ? cell.attachments?.[cell.selectedGeneratedVoiceAudioId]
+    : undefined
+  const hasGeneratedVoice = Boolean(selectedGeneratedVoice && !selectedGeneratedVoice.isDeleted)
+  const generatedVoiceTimings = cell.selectedGeneratedVoiceAudioId
+    ? cell.audioTimings?.[cell.selectedGeneratedVoiceAudioId]
+    : undefined
 
   // Minimal CodexCell shape for the audio hook — only the metadata fields it
   // actually reads (selectedAudioId, attachments). Avoids plumbing the entire
@@ -695,6 +720,20 @@ function EditorRow({
     cell.id, cell.type, cell.translated, cell.attachments, cell.selectedAudioId,
   ])
   const audioController = useCellAudio(project, cellForAudio)
+  const cellForGeneratedVoice = useMemo(() => ({
+    kind: 2 as const,
+    languageId: "html",
+    value: cell.translated ?? "",
+    metadata: {
+      id: cell.id,
+      type: (cell.type ?? "text") as "text",
+      attachments: cell.attachments,
+      selectedAudioId: cell.selectedGeneratedVoiceAudioId,
+    },
+  } as unknown as import("@/lib/codex-editor/types").CodexCell), [
+    cell.id, cell.type, cell.translated, cell.attachments, cell.selectedGeneratedVoiceAudioId,
+  ])
+  const generatedVoiceController = useCellAudio(project, cellForGeneratedVoice)
 
   // When this cell starts playing, gently bring it into view if it's
   // off-screen. Skips when the user is actively interacting with another cell
@@ -703,8 +742,9 @@ function EditorRow({
   const wasPlayingRef = useRef(false)
   useEffect(() => {
     const wasPlaying = wasPlayingRef.current
-    wasPlayingRef.current = audioController.isPlaying
-    if (!wasPlaying && audioController.isPlaying && rowRef.current) {
+    const anyPlaying = audioController.isPlaying || generatedVoiceController.isPlaying
+    wasPlayingRef.current = anyPlaying
+    if (!wasPlaying && anyPlaying && rowRef.current) {
       const rect = rowRef.current.getBoundingClientRect()
       const fullyVisible = rect.top >= 0 && rect.bottom <= window.innerHeight
       const ae = document.activeElement
@@ -715,54 +755,10 @@ function EditorRow({
         rowRef.current.scrollIntoView({ behavior: "smooth", block: "center" })
       }
     }
-  }, [audioController.isPlaying])
+  }, [audioController.isPlaying, generatedVoiceController.isPlaying])
   const transcribeStatus = useTranscribeStatus(cell.selectedAudioId)
   const isTranscribing = transcribeStatus.kind === "loading" || transcribeStatus.kind === "transcribing"
   const transcriptPreviewRef = useRef<HTMLDivElement | null>(null)
-
-  const synthStatusKey = `synth:${cell.id}`
-  const synthStatus = useTtsStatus(synthStatusKey)
-  const isSynthesizing = synthStatus.kind === "loading" || synthStatus.kind === "synthesizing"
-  const { session: frontierSession } = useFrontierSession()
-
-  const handleSynthesizeAudio = useCallback(async () => {
-    if (!frontierSession?.jwt) {
-      setTtsStatus(synthStatusKey, { kind: "error", message: "Sign in to upload audio" })
-      return
-    }
-    if (project.origin?.kind === "git") {
-      setTtsStatus(synthStatusKey, { kind: "error", message: "AI voice not supported on git projects yet" })
-      return
-    }
-    if (hasAudio) {
-      const ok = window.confirm(
-        "This cell already has a recording. Generating AI voice will replace it. Continue?",
-      )
-      if (!ok) return
-    }
-    setTtsStatus(synthStatusKey, { kind: "loading", loaded: 0, total: 0, file: "" })
-    try {
-      await synthAndAttachAudio({
-        doc, cellId: cell.id, cellText: cell.translated,
-        projectId: project.id,
-        languageTag: project.targetLanguage,
-        session: frontierSession, username,
-        onTtsProgress: (p) => {
-          setTtsStatus(synthStatusKey, { kind: "loading", loaded: p.loaded, total: p.total, file: p.file })
-          if (p.status === "ready" || (p.total > 0 && p.loaded >= p.total)) {
-            setTtsStatus(synthStatusKey, { kind: "synthesizing" })
-          }
-        },
-      })
-      setTtsStatus(synthStatusKey, { kind: "idle" })
-    } catch (e) {
-      if (e instanceof AiModelConsentDeniedError) {
-        setTtsStatus(synthStatusKey, { kind: "idle" })
-        return
-      }
-      setTtsStatus(synthStatusKey, { kind: "error", message: e instanceof Error ? e.message : String(e) })
-    }
-  }, [cell.id, cell.translated, doc, project.id, project.origin, frontierSession, username, synthStatusKey, hasAudio])
 
   const handleTranscribe = useCallback(async () => {
     const audioId = cell.selectedAudioId
@@ -1060,6 +1056,25 @@ function EditorRow({
     setOpenRuleId(ruleId)
   }, [])
 
+  const [isVoiceDropTarget, setIsVoiceDropTarget] = useState(false)
+  const handleRowDragOver = useCallback((e: React.DragEvent<HTMLDivElement>) => {
+    if (e.dataTransfer.types.includes(VOICE_DRAG_MIME)) {
+      e.preventDefault()
+      e.dataTransfer.dropEffect = "copy"
+      if (!isVoiceDropTarget) setIsVoiceDropTarget(true)
+    }
+  }, [isVoiceDropTarget])
+  const handleRowDragLeave = useCallback(() => {
+    if (isVoiceDropTarget) setIsVoiceDropTarget(false)
+  }, [isVoiceDropTarget])
+  const handleRowDrop = useCallback((e: React.DragEvent<HTMLDivElement>) => {
+    const voiceId = e.dataTransfer.getData(VOICE_DRAG_MIME)
+    if (!voiceId) return
+    e.preventDefault()
+    setIsVoiceDropTarget(false)
+    void handleVoiceDropOnCell(cell.id, voiceId)
+  }, [cell.id])
+
   return (
     <div className="border-b">
       <div
@@ -1068,6 +1083,7 @@ function EditorRow({
           "group relative grid gap-2 px-4 py-2 transition-colors",
           audioController.isPlaying && "bg-primary/[0.04]",
           expanded && "bg-muted/10",
+          isVoiceDropTarget && "ring-2 ring-primary/60 ring-inset bg-primary/5",
           gridCols,
         )}
         onMouseEnter={handleRowMouseEnter}
@@ -1075,6 +1091,9 @@ function EditorRow({
         onFocusCapture={handleRowFocusCapture}
         onBlurCapture={handleRowBlurCapture}
         onClick={handleRowClick}
+        onDragOver={handleRowDragOver}
+        onDragLeave={handleRowDragLeave}
+        onDrop={handleRowDrop}
       >
         {/* Severity stripe — absolutely positioned so layout (and vertical
             alignment with rows that have no issue) stays identical. */}
@@ -1298,6 +1317,16 @@ function EditorRow({
                 <CellTtsButton
                   cellId={cell.id}
                   text={cell.translated}
+                  original={cell.original}
+                  context={cell.context}
+                  cellLabel={cell.cellLabel}
+                  sourceLanguage={project.sourceLanguage}
+                  targetLanguage={project.targetLanguage}
+                  projectTtsSettings={project.ttsSettings}
+                  cellTtsSettings={cell.ttsSettings}
+                  generatedVoiceAudioId={cell.selectedGeneratedVoiceAudioId}
+                  attachments={cell.attachments}
+                  projectId={project.id}
                   disabled={!editable}
                 />
               )}
@@ -1428,55 +1457,15 @@ function EditorRow({
             {
               value: "audio",
               icon: <Mic className="h-3 w-3" />,
-              label: "Audio",
+              label: "Recording",
               attentionDot: transcriptNeedsAttention
                 ? "amber"
-                : hasAudio
+                : (hasAudio || hasGeneratedVoice)
                   ? "emerald"
                   : undefined,
               content: (
                 <div className="flex flex-col gap-3">
-                  {!hasAudio ? (
-                    <div className="flex flex-col items-center gap-3 py-4 text-center">
-                      <div className="flex h-12 w-12 items-center justify-center rounded-full bg-muted/40 text-muted-foreground/50">
-                        <Mic className="h-5 w-5" />
-                      </div>
-                      <p className="text-xs text-muted-foreground">No audio recorded yet.</p>
-                      <div className="flex flex-wrap items-center justify-center gap-2">
-                        <button
-                          type="button"
-                          onClick={() => onOpenRecording?.(cell.id)}
-                          disabled={!editable || !onOpenRecording || isGitProject}
-                          className="inline-flex items-center gap-1.5 rounded-full bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-40"
-                          title={
-                            isGitProject
-                              ? "Recording on GitLab projects isn't available yet"
-                              : "Record audio"
-                          }
-                        >
-                          <Mic className="h-3 w-3" />
-                          Record
-                        </button>
-                        {!isGitProject && cell.translated.trim().length > 0 && (
-                          <button
-                            type="button"
-                            onClick={handleSynthesizeAudio}
-                            disabled={!editable || isSynthesizing}
-                            className="inline-flex items-center gap-1.5 rounded-full border border-border bg-background px-3 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-40"
-                            title="Generate a synthetic voice for this translation"
-                          >
-                            <Wand2
-                              className={cn(
-                                "h-3 w-3",
-                                isSynthesizing && "animate-pulse",
-                              )}
-                            />
-                            {isSynthesizing ? "Synthesizing…" : "Generate AI voice"}
-                          </button>
-                        )}
-                      </div>
-                    </div>
-                  ) : (
+                  {hasAudio ? (
                     <>
                       <CellWaveform
                         controller={audioController}
@@ -1521,25 +1510,65 @@ function EditorRow({
                           />
                           {isTranscribing ? "Transcribing…" : "Transcribe"}
                         </button>
-                        {!isGitProject && cell.translated.trim().length > 0 && (
-                          <button
-                            type="button"
-                            onClick={handleSynthesizeAudio}
-                            disabled={!editable || isSynthesizing}
-                            className="inline-flex items-center gap-1.5 rounded-full border border-border bg-background px-2.5 py-1 text-[11px] font-medium text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-40"
-                            title="Replace this recording with a synthesized voice"
-                          >
-                            <Wand2
-                              className={cn(
-                                "h-3 w-3",
-                                isSynthesizing && "animate-pulse",
-                              )}
-                            />
-                            {isSynthesizing ? "Synthesizing…" : "Replace with AI voice"}
-                          </button>
-                        )}
                       </div>
                     </>
+                  ) : hasGeneratedVoice ? (
+                    <>
+                      <CellWaveform
+                        controller={generatedVoiceController}
+                        height={36}
+                        strategy={project.audioMediaStrategy ?? "lazy"}
+                      />
+                      {generatedVoiceTimings && generatedVoiceTimings.length > 0 && (
+                        <CellTranscriptPreview
+                          timings={generatedVoiceTimings}
+                          cellText={cell.translated}
+                          cellId={cell.id}
+                          doc={doc}
+                          alignedToCellText={
+                            tokenizeWords(cell.translated).length === generatedVoiceTimings.length
+                          }
+                          editable={editable}
+                        />
+                      )}
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <span className="text-[11px] text-muted-foreground">AI generated voice. Drag a voice from the toolbar to regenerate, or:</span>
+                        <button
+                          type="button"
+                          onClick={() => onOpenRecording?.(cell.id)}
+                          disabled={!editable || !onOpenRecording || isGitProject}
+                          className="inline-flex items-center gap-1.5 rounded-full border border-border bg-background px-2.5 py-1 text-[11px] font-medium text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-40"
+                        >
+                          <Mic className="h-3 w-3" />
+                          Record over
+                        </button>
+                      </div>
+                    </>
+                  ) : (
+                    <div className="flex flex-col items-center gap-3 py-4 text-center">
+                      <div className="flex h-12 w-12 items-center justify-center rounded-full bg-muted/40 text-muted-foreground/50">
+                        <Mic className="h-5 w-5" />
+                      </div>
+                      <p className="text-xs text-muted-foreground">
+                        No audio yet. Record below, or drag a voice onto this cell from the toolbar above.
+                      </p>
+                      <div className="flex flex-wrap items-center justify-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => onOpenRecording?.(cell.id)}
+                          disabled={!editable || !onOpenRecording || isGitProject}
+                          className="inline-flex items-center gap-1.5 rounded-full bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-40"
+                          title={
+                            isGitProject
+                              ? "Recording on GitLab projects isn't available yet"
+                              : "Record audio"
+                          }
+                        >
+                          <Mic className="h-3 w-3" />
+                          Record
+                        </button>
+                      </div>
+                    </div>
                   )}
                 </div>
               ),

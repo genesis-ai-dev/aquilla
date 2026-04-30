@@ -141,6 +141,54 @@ export const AUDIO_MEDIA_STRATEGY_LABELS: Record<AudioMediaStrategy, { name: str
   },
 }
 
+export type TtsProvider = "kokoro" | "gemini"
+
+/**
+ * A reusable voice in the project's voice library. Voice owns *all* the knobs
+ * a user might want to tune (voice id, accent, pronunciation reference,
+ * prompt). Project settings hold the API key and the library; per-cell
+ * settings just point at one voice by id.
+ */
+export interface Voice {
+  id: string
+  name: string
+  /** Hex color for the voice's chip/dot in the UI. */
+  color?: string
+  /** Defaults to "gemini" when absent. Kokoro voices ignore everything below voiceName. */
+  provider?: TtsProvider
+  /** Optional Gemini model override. */
+  model?: string
+  /** Gemini prebuilt voice id (e.g. "Kore"). For Kokoro, the engine voice name. */
+  voiceName?: string
+  /** Spoken accent or oral reading tradition. */
+  accent?: string
+  /** Closest high-resource language whose pronunciation should be used as a fallback. */
+  pronunciationReference?: string
+  /**
+   * Prompt template. Supports {text}, {source}, {target}, {original},
+   * {cellLabel}, {context}, {accent}, {pronunciationReference}.
+   */
+  prompt?: string
+  /** Preset voices shipped with the app. Cannot be deleted, only forked. */
+  builtIn?: boolean
+}
+
+export interface ProjectTtsSettings {
+  /** "gemini" is the recommended BYOK default. "kokoro" keeps the local browser model path. */
+  provider?: TtsProvider
+  /** Gemini API key for BYOK TTS. Stored in the local project record. */
+  apiKey?: string
+  /** Project's voice library. Empty/absent means: use the built-in presets. */
+  voices?: Voice[]
+  /** Voice id used when a cell doesn't specify one. */
+  defaultVoiceId?: string
+}
+
+export interface CellTtsSettings {
+  /** Voice from the project's voice library. Falls back to project's defaultVoiceId. */
+  voiceId?: string
+}
+
 export interface ProjectRecord {
   id: string
   name: string
@@ -150,6 +198,7 @@ export interface ProjectRecord {
   files: FileReference[]
   members: ProjectMember[]
   completionSettings?: CompletionSettings
+  ttsSettings?: ProjectTtsSettings
   username?: string
   rules?: TranslationRule[]
   rulePenalties?: RulePenalties

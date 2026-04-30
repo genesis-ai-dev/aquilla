@@ -117,7 +117,7 @@ export const workspaceActions: WorkspaceAction[] = [
       title: "Generate AI voice",
       description: (c) => {
         const n = c.audioCounts?.unsynthesized ?? 0
-        return `Synthesize Kokoro audio for ${n} cell${n === 1 ? "" : "s"} that have translated text but no recording yet. Existing recordings are not touched.`
+        return `Generate AI voice audio for ${n} cell${n === 1 ? "" : "s"} that have translated text but no recording yet. Existing recordings are not touched.`
       },
       confirmLabel: "Generate audio",
     },

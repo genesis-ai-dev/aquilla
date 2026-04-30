@@ -13,6 +13,7 @@ export function attachAudioToCell(
     url: string
     username: string
     mimeType?: string
+    slot?: "recording" | "generatedVoice"
   },
 ): void {
   const cellsMap = doc.getMap("cells")
@@ -22,13 +23,14 @@ export function attachAudioToCell(
   doc.transact(() => {
     const prev = yCell.get("__source") as CodexCell | undefined
     const now = Date.now()
-    const attachment: CodexCellAttachment & { createdBy?: string; mimeType?: string } = {
+    const attachment: CodexCellAttachment & { createdBy?: string; mimeType?: string; audioKind?: string } = {
       url: args.url,
       type: "audio",
       createdAt: now,
       updatedAt: now,
       isDeleted: false,
       ...(args.mimeType ? { mimeType: args.mimeType } : {}),
+      audioKind: args.slot === "generatedVoice" ? "generatedVoice" : "recording",
       createdBy: args.username,
     }
 
@@ -49,7 +51,11 @@ export function attachAudioToCell(
       ...(next.metadata.attachments || {}),
       [args.audioId]: attachment,
     }
-    next.metadata.selectedAudioId = args.audioId
+    if (args.slot === "generatedVoice") {
+      next.metadata.selectedGeneratedVoiceAudioId = args.audioId
+    } else {
+      next.metadata.selectedAudioId = args.audioId
+    }
 
     yCell.set("__source", next)
   })
@@ -71,12 +77,21 @@ export function softDeleteAudioAttachment(
     const target = next.metadata.attachments![audioId]
     target.isDeleted = true
     target.updatedAt = Date.now()
-    if (next.metadata.selectedAudioId === audioId) {
+    if (next.metadata.selectedAudioId === audioId || next.metadata.selectedGeneratedVoiceAudioId === audioId) {
       // Find the most recent non-deleted attachment as fallback, else clear.
       const remaining = Object.entries(next.metadata.attachments!)
         .filter(([id, a]) => id !== audioId && !a.isDeleted)
         .sort((a, b) => (b[1].updatedAt ?? 0) - (a[1].updatedAt ?? 0))
-      next.metadata.selectedAudioId = remaining[0]?.[0]
+      if (next.metadata.selectedAudioId === audioId) {
+        next.metadata.selectedAudioId = remaining.find(([, a]) => {
+          return (a as CodexCellAttachment & { audioKind?: string }).audioKind !== "generatedVoice"
+        })?.[0]
+      }
+      if (next.metadata.selectedGeneratedVoiceAudioId === audioId) {
+        next.metadata.selectedGeneratedVoiceAudioId = remaining.find(([, a]) => {
+          return (a as CodexCellAttachment & { audioKind?: string }).audioKind === "generatedVoice"
+        })?.[0]
+      }
     }
     yCell.set("__source", next)
   })

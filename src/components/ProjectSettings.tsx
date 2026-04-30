@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react"
 import { useParams, useNavigate } from "react-router-dom"
-import { ArrowLeft, CheckCircle, XCircle, Loader2, Sparkles, Eye, EyeOff, Check } from "lucide-react"
+import { ArrowLeft, CheckCircle, XCircle, Loader2, Sparkles, Check } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -10,14 +10,17 @@ import { useProject } from "@/hooks/useProject"
 import { getProject, updateProject } from "@/lib/store/project-index"
 import { fetchModels, resolveProvider } from "@/lib/completion/completion-service"
 import { useSaveCompletionSettings, DEFAULT_SYSTEM_PROMPT } from "@/hooks/useCompletionSettings"
-import type { ProjectRecord, CompletionProvider } from "@/lib/parsers/types"
+import type { ProjectRecord, CompletionProvider, ProjectTtsSettings } from "@/lib/parsers/types"
 import { listFlags } from "@/lib/features/flags"
 import { useFeatureFlag, setFeatureFlag } from "@/hooks/useFeatureFlag"
 import { ValidationSettingsSection } from "./ProjectSettings/ValidationSettingsSection"
 import { HealthSettingsSection } from "./ProjectSettings/HealthSettingsSection"
 import { AudioMediaStrategySection } from "./ProjectSettings/AudioMediaStrategySection"
+import { VoiceLibrarySection } from "./ProjectSettings/VoiceLibrarySection"
+import { ApiKeyField } from "./ApiKeyField"
 import type { HealthSettings } from "@/lib/parsers/types"
 import { readValidationCount, readValidationCountAudio } from "@/lib/progress/read-validation-count"
+import { setUserApiKey, useUserApiKey } from "@/lib/store/user-api-keys"
 
 // Well-known OpenAI-compatible providers.
 const CUSTOM_PRESETS: { id: string; label: string; endpoint: string; requiresKey: boolean; keyHint?: string }[] = [
@@ -68,7 +71,7 @@ export function ProjectSettings() {
   const [provider, setProvider] = useState<CompletionProvider>("frontier")
   const [endpoint, setEndpoint] = useState("")
   const [apiKey, setApiKey] = useState("")
-  const [showApiKey, setShowApiKey] = useState(false)
+  const completionUserKey = useUserApiKey("completion") ?? ""
   const [presetId, setPresetId] = useState<string>("local")
   const [model, setModel] = useState("")
   const [maxTokens, setMaxTokens] = useState(512)
@@ -129,6 +132,23 @@ export function ProjectSettings() {
     refresh()
     flash()
   })
+
+  const saveTtsSettings = useCallback(async (overrides: Partial<ProjectTtsSettings>) => {
+    if (!id) return
+    const latest = await getProject(id)
+    if (!latest) return
+    const base = latest.ttsSettings
+    const merged: ProjectTtsSettings = {
+      provider: overrides.provider ?? base?.provider,
+      apiKey: Object.prototype.hasOwnProperty.call(overrides, "apiKey") ? overrides.apiKey : base?.apiKey,
+      voices: overrides.voices ?? base?.voices,
+      defaultVoiceId: Object.prototype.hasOwnProperty.call(overrides, "defaultVoiceId") ? overrides.defaultVoiceId : base?.defaultVoiceId,
+    }
+    const updated: ProjectRecord = { ...latest, ttsSettings: merged }
+    await updateProject(updated)
+    refresh()
+    flash()
+  }, [id, refresh, flash])
 
   const compositeFlag = useFeatureFlag("composite-health", project ?? null)
   const [healthSettings, setHealthSettings] = useState<HealthSettings>({ followDefaults: true })
@@ -328,37 +348,18 @@ export function ProjectSettings() {
                     {connected && <p className="mt-1 flex items-center gap-1 text-xs text-green-600"><CheckCircle className="h-3 w-3" /> Connected — {models.length} model(s)</p>}
                     {connectionError && <p className="mt-1 flex items-center gap-1 text-xs text-destructive"><XCircle className="h-3 w-3" /> {connectionError}</p>}
                   </div>
-                  <div>
-                    <Label htmlFor="apikey">
-                      API key {preset.requiresKey ? <span className="text-destructive">*</span> : <span className="text-muted-foreground">(optional)</span>}
-                    </Label>
-                    <div className="flex gap-2">
-                      <Input
-                        id="apikey"
-                        type={showApiKey ? "text" : "password"}
-                        value={apiKey}
-                        onChange={(e) => setApiKey(e.target.value)}
-                        onBlur={() => saveCompletionSettings({ apiKey: apiKey.trim() || undefined })}
-                        placeholder={preset.keyHint ?? (preset.requiresKey ? "Paste your API key" : "Leave blank for no auth")}
-                        autoComplete="off"
-                        spellCheck={false}
-                        className="flex-1 font-mono"
-                      />
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => setShowApiKey((v) => !v)}
-                        aria-label={showApiKey ? "Hide API key" : "Show API key"}
-                      >
-                        {showApiKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                      </Button>
-                    </div>
-                    <p className="mt-1 text-xs text-muted-foreground">
-                      Sent as <code className="rounded bg-muted px-1">Authorization: Bearer &lt;key&gt;</code>. Stored
-                      locally in your browser (IndexedDB) — never uploaded to Frontier.
-                    </p>
-                  </div>
+                  <ApiKeyField
+                    label={`API key${preset.requiresKey ? " *" : " (optional)"}`}
+                    placeholder={preset.keyHint ?? (preset.requiresKey ? "Paste your API key" : "Leave blank for no auth")}
+                    projectKey={apiKey}
+                    userKey={completionUserKey}
+                    onProjectKeyChange={(v) => {
+                      setApiKey(v)
+                      saveCompletionSettings({ apiKey: v || undefined })
+                    }}
+                    onUserKeyChange={(v) => setUserApiKey("completion", v)}
+                    help="Sent as Authorization: Bearer <key>. Stored locally in your browser; never uploaded to Frontier."
+                  />
                   {models.length > 0 && (
                     <div>
                       <Label htmlFor="mdl">Model</Label>
@@ -424,6 +425,11 @@ export function ProjectSettings() {
             )}
           </div>
         </details>
+
+        <VoiceLibrarySection
+          settings={project?.ttsSettings}
+          onChange={saveTtsSettings}
+        />
 
         {compositeFlag && (
           <HealthSettingsSection

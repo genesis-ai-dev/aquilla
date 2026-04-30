@@ -61,6 +61,7 @@ import { Film, Scale, MessagesSquare, Camera, Share2, Settings as SettingsIcon, 
 import { restoreProject } from "@/lib/store/project-index"
 import { AppShell } from "./AppShell"
 import { WorkspaceHeader } from "./WorkspaceHeader"
+import { VoiceBar } from "./VoiceBar"
 import { WorkspaceStatusBar } from "./WorkspaceStatusBar"
 import { PrimaryActionButton } from "./PrimaryActionButton"
 import { AccountSwitcher } from "./AccountSwitcher"
@@ -824,6 +825,17 @@ export function ProjectWorkspace() {
               onActivate={workspaceTabs.activateTab}
               onClose={workspaceTabs.closeTab}
             />
+            {project && doc && activeFileId && (
+              <VoiceBar
+                project={project}
+                cells={cells}
+                doc={doc}
+                username={currentUsername}
+                session={frontierSession}
+                editorRef={editorRef}
+                onProjectChanged={refresh}
+              />
+            )}
             {isReadOnly && (
               <div className="flex items-center gap-2 border-b bg-amber-50 px-4 py-2 text-xs text-amber-900">
                 <Lock className="h-3.5 w-3.5" />
@@ -885,6 +897,7 @@ export function ProjectWorkspace() {
             onJumpToCell={jumpToCellId}
             onAiSetupNeeded={() => setAiSetupOpen(true)}
             onOpenRecording={(cellId) => setRecordingCellId(cellId)}
+            onProjectChanged={refresh}
           />
         ) : (
           <CellAreaPlaceholder

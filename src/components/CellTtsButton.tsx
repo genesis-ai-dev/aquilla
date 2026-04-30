@@ -1,36 +1,87 @@
-// "Hear it" button — synthesizes the cell's translated text via in-browser
-// Kokoro and plays it back. Lives in the gutter alongside Play/Mic.
+// "Hear it" button — plays the cell's generated voice attachment if one
+// exists, else synthesizes on-demand via the cell's resolved voice.
 //
-// First click on the page downloads ~80MB of model weights (cached
-// permanently after that); subsequent clicks for the same cell are instant
-// because we keep the synthesized blob URL in module-local state until the
-// cell or its text changes.
+// On-demand synth is cached per cell + voice + text. The cache key also
+// includes the current generatedVoiceAudioId so that regenerating voice
+// invalidates the speaker's cached blob (so the speaker stays in sync with
+// the attached audio).
 
 import { useCallback, useEffect, useRef, useState } from "react"
 import { AlertCircle, Loader2, Pause, Volume2 } from "lucide-react"
 import { cn } from "@/lib/utils"
-import { synthesizeToWavBlob, setTtsStatus, useTtsStatus } from "@/lib/audio/tts"
+import { synthesizeForCell, setTtsStatus, useTtsStatus } from "@/lib/audio/tts"
 import { AiModelConsentDeniedError } from "@/lib/audio/ai-consent"
 import { useModelStatus } from "@/lib/audio/prefetch"
+import { fetchCellAudio, parseFrontierAudioUrl } from "@/lib/audio/upload"
+import { useFrontierSession } from "@/hooks/useFrontierSession"
+import type {
+  CellTtsSettings, ProjectTtsSettings,
+} from "@/lib/parsers/types"
+import type { CodexCellAttachment } from "@/lib/codex-editor/types"
+import { DEFAULT_TTS_PROVIDER } from "@/lib/audio/gemini-tts"
+import { resolveVoice } from "@/lib/audio/voices"
 
 interface Props {
   cellId: string
   text: string
+  original?: string
+  context?: string
+  cellLabel?: string
+  sourceLanguage?: string
+  targetLanguage?: string
+  projectTtsSettings?: ProjectTtsSettings
+  cellTtsSettings?: CellTtsSettings
+  /** If set, the speaker plays this attached audio instead of synthesizing fresh. */
+  generatedVoiceAudioId?: string
+  attachments?: Record<string, CodexCellAttachment>
+  /** Used when fetching attachments for non-git projects. */
+  projectId?: string
   disabled?: boolean
 }
 
-const cache = new Map<string, string>() // key = cellId+text → blob URL
+const cache = new Map<string, string>() // key = cellId+text+voice+attachId → blob URL
 
-function cacheKey(cellId: string, text: string): string {
-  return `${cellId}::${text}`
+function cacheKey(
+  cellId: string,
+  text: string,
+  voiceId: string,
+  provider: string,
+  generatedAttachId: string | undefined,
+): string {
+  return `${cellId}::${provider}::${voiceId}::${generatedAttachId ?? ""}::${text}`
 }
 
-export function CellTtsButton({ cellId, text, disabled }: Props) {
+export function CellTtsButton({
+  cellId,
+  text,
+  original,
+  context,
+  cellLabel,
+  sourceLanguage,
+  targetLanguage,
+  projectTtsSettings,
+  cellTtsSettings,
+  generatedVoiceAudioId,
+  attachments,
+  projectId,
+  disabled,
+}: Props) {
   const trimmed = text.trim()
   const status = useTtsStatus(cellId)
   const modelStatus = useModelStatus("kokoro")
+  const voice = resolveVoice(projectTtsSettings, cellTtsSettings?.voiceId)
+  const provider = projectTtsSettings?.provider ?? voice.provider ?? DEFAULT_TTS_PROVIDER
   const audioRef = useRef<HTMLAudioElement | null>(null)
+  const { session } = useFrontierSession()
   const [isPlaying, setIsPlaying] = useState(false)
+
+  // The attached generated voice (if any) is the source of truth for playback.
+  // We resolve it once per render so the cache key matches what we play.
+  const generatedAttachment = generatedVoiceAudioId ? attachments?.[generatedVoiceAudioId] : undefined
+  const generatedAttachmentUrl = generatedAttachment && !generatedAttachment.isDeleted
+    ? generatedAttachment.url
+    : undefined
+  const playableAttachId = generatedAttachmentUrl ? generatedVoiceAudioId : undefined
 
   useEffect(() => {
     return () => {
@@ -41,14 +92,15 @@ export function CellTtsButton({ cellId, text, disabled }: Props) {
     }
   }, [cellId])
 
-  // If text changes, drop the cached audio so we don't replay stale synthesis.
+  // If text or the attached audio changes, drop the per-row audio element so
+  // the next click reloads from the right source.
   useEffect(() => {
     setIsPlaying(false)
     if (audioRef.current) {
       audioRef.current.pause()
       audioRef.current = null
     }
-  }, [text])
+  }, [text, playableAttachId])
 
   const onClick = useCallback(async () => {
     if (!trimmed) return
@@ -60,21 +112,44 @@ export function CellTtsButton({ cellId, text, disabled }: Props) {
       try { await audioRef.current.play() } catch (e) { console.error("[tts] play() rejected", e) }
       return
     }
-    const key = cacheKey(cellId, trimmed)
+    const key = cacheKey(cellId, trimmed, voice.id, provider, playableAttachId)
     let url = cache.get(key)
     if (!url) {
       try {
-        setTtsStatus(cellId, { kind: "loading", loaded: 0, total: 0, file: "" })
-        const blob = await synthesizeToWavBlob(trimmed, {
-          onProgress: (p) => {
-            setTtsStatus(cellId, { kind: "loading", loaded: p.loaded, total: p.total, file: p.file })
-            if (p.status === "ready" || (p.total > 0 && p.loaded >= p.total)) {
-              setTtsStatus(cellId, { kind: "synthesizing" })
-            }
-          },
-        })
-        url = URL.createObjectURL(blob)
-        cache.set(key, url)
+        if (playableAttachId && generatedAttachmentUrl) {
+          // Play the attached generated voice, fetching bytes from the audio
+          // backend (or directly from the URL for non-frontier-audio:// URLs).
+          setTtsStatus(cellId, { kind: "loading", loaded: 0, total: 0, file: "" })
+          const blob = await fetchAttachmentBlob({
+            attachmentUrl: generatedAttachmentUrl,
+            projectId,
+            session,
+          })
+          url = URL.createObjectURL(blob)
+          cache.set(key, url)
+        } else {
+          // No attached generated voice — synth on demand using the resolved voice.
+          setTtsStatus(cellId, { kind: "loading", loaded: 0, total: 0, file: "" })
+          const blob = await synthesizeForCell(trimmed, {
+            projectTtsSettings,
+            cellVoiceId: cellTtsSettings?.voiceId,
+            geminiContext: {
+              sourceLanguage,
+              targetLanguage,
+              original,
+              context,
+              cellLabel,
+            },
+            onProgress: (p) => {
+              setTtsStatus(cellId, { kind: "loading", loaded: p.loaded, total: p.total, file: p.file })
+              if (p.status === "ready" || (p.total > 0 && p.loaded >= p.total)) {
+                setTtsStatus(cellId, { kind: "synthesizing" })
+              }
+            },
+          })
+          url = URL.createObjectURL(blob)
+          cache.set(key, url)
+        }
       } catch (e) {
         if (e instanceof AiModelConsentDeniedError) {
           setTtsStatus(cellId, { kind: "idle" })
@@ -90,14 +165,28 @@ export function CellTtsButton({ cellId, text, disabled }: Props) {
     audio.onended = () => { setIsPlaying(false); setTtsStatus(cellId, { kind: "idle" }) }
     audioRef.current = audio
     try { await audio.play() } catch (e) { console.error("[tts] initial play() rejected", e) }
-  }, [trimmed, isPlaying, cellId])
+  }, [
+    trimmed,
+    isPlaying,
+    cellId,
+    voice.id,
+    provider,
+    playableAttachId,
+    generatedAttachmentUrl,
+    projectId,
+    session,
+    projectTtsSettings,
+    cellTtsSettings?.voiceId,
+    sourceLanguage,
+    targetLanguage,
+    original,
+    context,
+    cellLabel,
+  ])
 
   if (!trimmed) return null
 
-  // Treat both per-cell synth status AND the global Kokoro download status as
-  // "loading" so the button can show a download % even when the user clicked
-  // TTS while a background prefetch is mid-flight.
-  const downloadingModel = modelStatus.kind === "downloading" && status.kind !== "idle"
+  const downloadingModel = !playableAttachId && provider !== "gemini" && modelStatus.kind === "downloading" && status.kind !== "idle"
   const isLoadingModel = status.kind === "loading" || downloadingModel
   const isSynthesizing = status.kind === "synthesizing"
   const isError = status.kind === "error"
@@ -114,8 +203,10 @@ export function CellTtsButton({ cellId, text, disabled }: Props) {
       : isSynthesizing
         ? "Synthesizing speech…"
         : isPlaying
-          ? "Pause TTS"
-          : "Hear translation (in-browser TTS)"
+          ? "Pause"
+          : playableAttachId
+            ? `Play generated voice (${voice.name})`
+            : `Hear translation (${voice.name})`
 
   return (
     <button
@@ -146,4 +237,26 @@ export function CellTtsButton({ cellId, text, disabled }: Props) {
       )}
     </button>
   )
+}
+
+async function fetchAttachmentBlob(args: {
+  attachmentUrl: string
+  projectId: string | undefined
+  session: ReturnType<typeof useFrontierSession>["session"]
+}): Promise<Blob> {
+  const frontier = parseFrontierAudioUrl(args.attachmentUrl)
+  if (frontier && args.projectId && args.session?.jwt) {
+    const bytes = await fetchCellAudio({
+      session: args.session,
+      projectId: args.projectId,
+      audioId: frontier.audioId,
+      ext: frontier.ext,
+    })
+    return new Blob([bytes as BlobPart], { type: "audio/wav" })
+  }
+  // Fallback for direct URLs (e.g. blob:, http:). Git/LFS attachments aren't
+  // supported here yet — those projects already disable AI voice generation.
+  const res = await fetch(args.attachmentUrl)
+  if (!res.ok) throw new Error(`Failed to fetch attached audio (${res.status})`)
+  return res.blob()
 }

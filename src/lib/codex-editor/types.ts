@@ -78,7 +78,9 @@ export interface CodexCellMetadata {
   isLocked?: boolean;
   attachments?: Record<string, CodexCellAttachment>;
   selectedAudioId?: string;
+  selectedGeneratedVoiceAudioId?: string;
   audioTimings?: Record<string, WordTiming[]>;
+  ttsSettings?: import("@/lib/parsers/types").CellTtsSettings;
 }
 
 export interface CodexCell {

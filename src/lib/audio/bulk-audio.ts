@@ -131,18 +131,18 @@ export function countSynthTargets(cells: CellData[], replaceExisting: boolean): 
   return cells.filter((c) => {
     if (!c.translated.trim()) return false
     if (replaceExisting) return true
-    const audioId = c.selectedAudioId
+    const audioId = c.selectedGeneratedVoiceAudioId
     const att = audioId ? c.attachments?.[audioId] : undefined
     return !att || att.isDeleted === true
   }).length
 }
 
-/** Run Kokoro + Whisper on every cell with text but no recording. */
+/** Run configured TTS + Whisper on every cell with text but no recording. */
 export async function synthAllInFile(args: SynthAllArgs): Promise<void> {
   const targets = args.cells.filter((c) => {
     if (!c.translated.trim()) return false
     if (args.replaceExisting) return true
-    const audioId = c.selectedAudioId
+    const audioId = c.selectedGeneratedVoiceAudioId
     const att = audioId ? c.attachments?.[audioId] : undefined
     return !att || att.isDeleted === true
   })
@@ -152,9 +152,15 @@ export async function synthAllInFile(args: SynthAllArgs): Promise<void> {
     try {
       await synthAndAttachAudio({
         doc, cellId: cell.id, cellText: cell.translated,
+        cellOriginal: cell.original,
+        cellContext: cell.context,
+        cellLabel: cell.cellLabel,
         projectId: args.project.id,
+        sourceLanguage: args.project.sourceLanguage,
         languageTag: args.project.targetLanguage,
         session: args.session, username: args.username,
+        projectTtsSettings: args.project.ttsSettings,
+        cellVoiceId: cell.ttsSettings?.voiceId,
         onTtsProgress: (p) => {
           setTtsStatus(key, { kind: "loading", loaded: p.loaded, total: p.total, file: p.file })
           if (p.status === "ready" || (p.total > 0 && p.loaded >= p.total)) {

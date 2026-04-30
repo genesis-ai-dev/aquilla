@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react"
 import * as Y from "yjs"
-import type { CellHistoryEntry, SourceLocation, CommentThread } from "@/lib/parsers/types"
+import type { CellHistoryEntry, SourceLocation, CommentThread, CellTtsSettings } from "@/lib/parsers/types"
 import type { CodexCellAttachment, WordTiming } from "@/lib/codex-editor/types"
 import type { EditValidationSummary } from "@/lib/codex-editor/edits/types"
 import { snapshotEntry } from "@/lib/codex-editor/edits/yjs-helpers"
@@ -42,7 +42,9 @@ export interface CellData {
   backtranslationForText?: string
   attachments?: Record<string, CodexCellAttachment>
   selectedAudioId?: string
+  selectedGeneratedVoiceAudioId?: string
   audioTimings?: Record<string, WordTiming[]>
+  ttsSettings?: CellTtsSettings
   /** Cue start/end timestamps (seconds) from the cell's CodexData. Populated
    *  for subtitle-imported cells; used by the recording modal's duration bar. */
   startTime?: number
@@ -104,7 +106,9 @@ function buildCellData(
     | { metadata?: {
         attachments?: Record<string, CodexCellAttachment>
         selectedAudioId?: string
+        selectedGeneratedVoiceAudioId?: string
         audioTimings?: Record<string, WordTiming[]>
+        ttsSettings?: CellTtsSettings
         cellLabel?: string
         data?: { startTime?: number; endTime?: number }
       } }
@@ -157,7 +161,9 @@ function buildCellData(
     backtranslationForText: cell.get("backtranslationForText") as string | undefined,
     attachments: source?.metadata?.attachments,
     selectedAudioId: source?.metadata?.selectedAudioId,
+    selectedGeneratedVoiceAudioId: source?.metadata?.selectedGeneratedVoiceAudioId,
     audioTimings: source?.metadata?.audioTimings,
+    ttsSettings: source?.metadata?.ttsSettings,
     ...(cellLabel ? { cellLabel } : {}),
     ...(typeof startTime === "number" ? { startTime } : {}),
     ...(typeof endTime === "number" ? { endTime } : {}),

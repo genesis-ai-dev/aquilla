@@ -1,10 +1,14 @@
-// Main-thread orchestrator for in-browser Kokoro TTS. Encodes the
-// worker-returned Float32 PCM into a 16-bit WAV blob so it can be played by
-// any HTMLAudioElement without further decoding.
+// Main-thread orchestrator for TTS. Kokoro stays browser-local through the
+// worker path; Gemini uses BYOK REST and returns raw PCM that we wrap in WAV.
 
 import { useSyncExternalStore } from "react"
+import type { ProjectTtsSettings, Voice } from "@/lib/parsers/types"
 import { requestAiModelConsent, KOKORO_MODEL, AiModelConsentDeniedError } from "./ai-consent"
 import type { ResultMessage, ErrorMessage, ProgressMessage, SynthRequest } from "./kokoro-worker"
+import { synthesizeGeminiTtsToWavBlob, type GeminiTtsContext } from "./gemini-tts"
+import { floatPcmToWavBlob } from "./wav"
+import { resolveVoice } from "./voices"
+import { resolveApiKey } from "@/lib/store/user-api-keys"
 
 export type TtsStatus =
   | { kind: "idle" }
@@ -58,15 +62,32 @@ async function getWorker(): Promise<Worker> {
 }
 
 export interface SynthOptions {
-  voice?: string
+  /** Resolved voice (from the project library + per-cell voiceId). */
+  voice: Voice
+  /** Project-level provider override; defaults to voice.provider. */
+  projectProvider?: ProjectTtsSettings["provider"]
+  apiKey?: string
   speed?: number
+  geminiContext?: GeminiTtsContext
   onProgress?: (p: { loaded: number; total: number; file: string; status: string }) => void
 }
 
 export async function synthesizeToWavBlob(
   text: string,
-  opts: SynthOptions = {},
+  opts: SynthOptions,
 ): Promise<Blob> {
+  const provider = opts.projectProvider ?? opts.voice.provider ?? "gemini"
+
+  if (provider === "gemini") {
+    opts.onProgress?.({ loaded: 0, total: 0, file: "Gemini TTS", status: "ready" })
+    return synthesizeGeminiTtsToWavBlob({
+      text,
+      apiKey: opts.apiKey ?? "",
+      voice: opts.voice,
+      context: opts.geminiContext,
+    })
+  }
+
   const consented = await requestAiModelConsent(KOKORO_MODEL)
   if (!consented) throw new AiModelConsentDeniedError(KOKORO_MODEL.id)
   const worker = await getWorker()
@@ -85,55 +106,35 @@ export async function synthesizeToWavBlob(
     }
     worker.addEventListener("message", onMessage)
     const req: SynthRequest = {
-      type: "synth", requestId, text, voice: opts.voice, speed: opts.speed,
+      type: "synth", requestId, text, voice: opts.voice.voiceName, speed: opts.speed,
     }
     worker.postMessage(req)
   })
   return pcmToWavBlob(result.pcm, result.sampleRate)
 }
 
-/**
- * Encode mono Float32 PCM (range -1..1) as a 16-bit WAV blob. Tiny helper —
- * keeps the synthesis pipeline browser-only by avoiding a dedicated audio
- * encoder dependency.
- */
-export function pcmToWavBlob(pcm: Float32Array, sampleRate: number): Blob {
-  const numChannels = 1
-  const bytesPerSample = 2
-  const blockAlign = numChannels * bytesPerSample
-  const byteRate = sampleRate * blockAlign
-  const dataSize = pcm.length * bytesPerSample
-
-  const buffer = new ArrayBuffer(44 + dataSize)
-  const view = new DataView(buffer)
-
-  // RIFF header
-  writeString(view, 0, "RIFF")
-  view.setUint32(4, 36 + dataSize, true)
-  writeString(view, 8, "WAVE")
-  // fmt sub-chunk
-  writeString(view, 12, "fmt ")
-  view.setUint32(16, 16, true)         // sub-chunk size
-  view.setUint16(20, 1, true)          // PCM format
-  view.setUint16(22, numChannels, true)
-  view.setUint32(24, sampleRate, true)
-  view.setUint32(28, byteRate, true)
-  view.setUint16(32, blockAlign, true)
-  view.setUint16(34, bytesPerSample * 8, true)
-  // data sub-chunk
-  writeString(view, 36, "data")
-  view.setUint32(40, dataSize, true)
-
-  let offset = 44
-  for (let i = 0; i < pcm.length; i++) {
-    const s = Math.max(-1, Math.min(1, pcm[i]))
-    view.setInt16(offset, Math.round(s < 0 ? s * 0x8000 : s * 0x7fff), true)
-    offset += 2
-  }
-
-  return new Blob([buffer], { type: "audio/wav" })
+/** Convenience: resolve voice from project + cell, then synth. */
+export async function synthesizeForCell(
+  text: string,
+  args: {
+    projectTtsSettings?: ProjectTtsSettings
+    cellVoiceId?: string
+    speed?: number
+    geminiContext?: GeminiTtsContext
+    onProgress?: SynthOptions["onProgress"]
+  },
+): Promise<Blob> {
+  const voice = resolveVoice(args.projectTtsSettings, args.cellVoiceId)
+  return synthesizeToWavBlob(text, {
+    voice,
+    projectProvider: args.projectTtsSettings?.provider,
+    apiKey: resolveApiKey("gemini-tts", args.projectTtsSettings?.apiKey),
+    speed: args.speed,
+    geminiContext: args.geminiContext,
+    onProgress: args.onProgress,
+  })
 }
 
-function writeString(view: DataView, offset: number, str: string): void {
-  for (let i = 0; i < str.length; i++) view.setUint8(offset + i, str.charCodeAt(i))
+export function pcmToWavBlob(pcm: Float32Array, sampleRate: number): Blob {
+  return floatPcmToWavBlob(pcm, sampleRate)
 }

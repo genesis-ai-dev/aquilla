@@ -1,5 +1,6 @@
 import type { CompletionSettings, CompletionProvider } from "@/lib/parsers/types"
 import type { FrontierSession } from "@/lib/frontier/types"
+import { resolveApiKey } from "@/lib/store/user-api-keys"
 
 export const DEFAULT_SYSTEM_PROMPT =
   "You are translating a project from {sourceLanguage} into {targetLanguage}.\n" +
@@ -199,6 +200,7 @@ async function buildRequestTarget(
   }
   const { chatUrl } = normalizeOpenAIBaseUrl(settings.endpoint)
   const headers: Record<string, string> = {}
-  if (settings.apiKey?.trim()) headers.Authorization = `Bearer ${settings.apiKey.trim()}`
+  const key = resolveApiKey("completion", settings.apiKey)
+  if (key) headers.Authorization = `Bearer ${key}`
   return { url: chatUrl, headers }
 }

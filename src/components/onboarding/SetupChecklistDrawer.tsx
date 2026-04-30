@@ -87,11 +87,11 @@ export function SetupChecklistDrawer({
           </ChecklistItem>
 
           <ChecklistItem
-            title="Enable in-browser voice & transcription"
-            description="One-time download (~220 MB). Models run locally — audio never leaves your device."
+            title="Configure voice & transcription"
+            description="Gemini TTS is recommended for voice; Whisper transcription runs locally."
             complete={state.aiModels}
           >
-            <AiModelsStep />
+            <AiModelsStep project={project} onUpdated={onProjectUpdated} />
           </ChecklistItem>
 
           <ComingSoonStep

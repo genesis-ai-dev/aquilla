@@ -5,6 +5,7 @@ import { listShares } from "@/lib/sync/share-tokens"
 import { listProjectMembers } from "@/lib/frontier/members"
 import { useModelStatus } from "@/lib/audio/prefetch"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
+import { DEFAULT_TTS_PROVIDER } from "@/lib/audio/gemini-tts"
 
 export interface ChecklistState {
   aiProvider: boolean
@@ -87,7 +88,12 @@ export function useSetupChecklist(project: ProjectRecord | null) {
 
   const whisper = useModelStatus("whisper")
   const kokoro = useModelStatus("kokoro")
-  const aiModelsReady = whisper.kind === "ready" && kokoro.kind === "ready"
+  const ttsProvider = project?.ttsSettings?.provider ?? DEFAULT_TTS_PROVIDER
+  const aiModelsReady =
+    whisper.kind === "ready" &&
+    (ttsProvider === "gemini"
+      ? Boolean(project?.ttsSettings?.apiKey?.trim())
+      : kokoro.kind === "ready")
 
   const state = deriveChecklistState(
     project?.completionSettings,

@@ -3,11 +3,16 @@
 // triggers them. Setting the consent flag here also suppresses the per-
 // feature consent dialog later in the session.
 
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { CheckCircle2, Download, AlertCircle, Loader2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
 import { prefetchAiModels, useModelStatus } from "@/lib/audio/prefetch"
 import { storeAllFeaturesConsent } from "@/lib/audio/ai-consent"
+import { patchProject } from "@/lib/store/project-index"
+import type { ProjectRecord, ProjectTtsSettings, TtsProvider } from "@/lib/parsers/types"
+import { DEFAULT_TTS_PROVIDER } from "@/lib/audio/gemini-tts"
 
 interface ModelRowProps {
   label: string
@@ -61,18 +66,51 @@ function ModelRow({ label, sizeMb, status }: ModelRowProps) {
   )
 }
 
-export function AiModelsStep() {
+interface AiModelsStepProps {
+  project: ProjectRecord
+  onUpdated: (p: ProjectRecord) => void
+}
+
+export function AiModelsStep({ project, onUpdated }: AiModelsStepProps) {
   const whisper = useModelStatus("whisper")
   const kokoro = useModelStatus("kokoro")
+  const [ttsProvider, setTtsProvider] = useState<TtsProvider>(
+    project.ttsSettings?.provider ?? DEFAULT_TTS_PROVIDER,
+  )
+  const [geminiKey, setGeminiKey] = useState(project.ttsSettings?.apiKey ?? "")
   const [error, setError] = useState<string | null>(null)
-  const allReady = whisper.kind === "ready" && kokoro.kind === "ready"
-  const anyDownloading = whisper.kind === "downloading" || kokoro.kind === "downloading"
+  const allReady =
+    whisper.kind === "ready" &&
+    (ttsProvider === "gemini" ? Boolean(geminiKey.trim()) : kokoro.kind === "ready")
+  const anyDownloading =
+    whisper.kind === "downloading" || (ttsProvider === "kokoro" && kokoro.kind === "downloading")
+
+  useEffect(() => {
+    setTtsProvider(project.ttsSettings?.provider ?? DEFAULT_TTS_PROVIDER)
+    setGeminiKey(project.ttsSettings?.apiKey ?? "")
+  }, [project.ttsSettings?.provider, project.ttsSettings?.apiKey])
+
+  async function saveTtsSettings(overrides: Partial<ProjectTtsSettings>) {
+    const updated = await patchProject(project.id, (latest) => {
+      const base = latest.ttsSettings
+      return {
+        ...latest,
+        ttsSettings: {
+          provider: overrides.provider ?? base?.provider ?? DEFAULT_TTS_PROVIDER,
+          apiKey: Object.prototype.hasOwnProperty.call(overrides, "apiKey") ? overrides.apiKey : base?.apiKey,
+          voices: overrides.voices ?? base?.voices,
+          defaultVoiceId: Object.prototype.hasOwnProperty.call(overrides, "defaultVoiceId") ? overrides.defaultVoiceId : base?.defaultVoiceId,
+        },
+      }
+    })
+    if (updated) onUpdated(updated)
+  }
 
   const handleStart = async () => {
     setError(null)
     storeAllFeaturesConsent()
     try {
-      await prefetchAiModels()
+      await prefetchAiModels({ models: ttsProvider === "gemini" ? ["whisper"] : ["whisper", "kokoro"] })
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
     }
@@ -81,15 +119,81 @@ export function AiModelsStep() {
   return (
     <div className="space-y-3">
       <p className="text-xs text-muted-foreground">
-        Audio transcription and text-to-speech run entirely in your browser —
-        nothing leaves your device. Downloading the models now (~220 MB total)
-        means transcription and AI voice will feel instant the first time you
-        use them.
+        Gemini TTS is the default voice path because it produces much better,
+        fully promptable speech. Whisper transcription still runs locally;
+        choose Kokoro if you need offline voice generation too.
       </p>
 
       <div className="space-y-2">
+        <button
+          type="button"
+          onClick={() => {
+            setTtsProvider("gemini")
+            void saveTtsSettings({ provider: "gemini" })
+          }}
+          aria-pressed={ttsProvider === "gemini"}
+          className={
+            "w-full rounded-lg border p-3 text-left transition-colors " +
+            (ttsProvider === "gemini" ? "border-primary bg-primary/5" : "hover:bg-accent/40")
+          }
+        >
+          <div className="flex items-center gap-2 text-sm font-medium">
+            <span>Gemini TTS</span>
+            <span className="rounded-full bg-primary/10 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-primary">
+              Recommended
+            </span>
+          </div>
+          <p className="mt-0.5 text-xs text-muted-foreground">
+            BYOK voice generation with per-cell prompts, voices, and model overrides.
+          </p>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => {
+            setTtsProvider("kokoro")
+            void saveTtsSettings({ provider: "kokoro" })
+          }}
+          aria-pressed={ttsProvider === "kokoro"}
+          className={
+            "w-full rounded-lg border p-3 text-left transition-colors " +
+            (ttsProvider === "kokoro" ? "border-primary bg-primary/5" : "hover:bg-accent/40")
+          }
+        >
+          <div className="text-sm font-medium">Kokoro local voice</div>
+          <p className="mt-0.5 text-xs text-muted-foreground">
+            Keeps voice generation fully in-browser after an ~80 MB download.
+          </p>
+        </button>
+      </div>
+
+      {ttsProvider === "gemini" && (
+        <div className="space-y-1 rounded-md bg-muted/30 p-2">
+          <Label htmlFor="setup-gemini-tts-key" className="text-xs">
+            Gemini API key
+          </Label>
+          <Input
+            id="setup-gemini-tts-key"
+            type="password"
+            value={geminiKey}
+            onChange={(e) => setGeminiKey(e.target.value)}
+            onBlur={() => void saveTtsSettings({ provider: "gemini", apiKey: geminiKey.trim() || undefined })}
+            placeholder="AIza..."
+            autoComplete="off"
+            spellCheck={false}
+            className="font-mono text-sm"
+          />
+          <p className="text-xs text-muted-foreground">
+            Stored locally in this browser and sent directly to Google for voice generation.
+          </p>
+        </div>
+      )}
+
+      <div className="space-y-2">
         <ModelRow label="Whisper (transcription)" sizeMb={140} status={whisper} />
-        <ModelRow label="Kokoro (text-to-speech)" sizeMb={80} status={kokoro} />
+        {ttsProvider === "kokoro" && (
+          <ModelRow label="Kokoro (local text-to-speech)" sizeMb={80} status={kokoro} />
+        )}
       </div>
 
       <div className="flex items-center gap-2">
@@ -99,10 +203,12 @@ export function AiModelsStep() {
           disabled={allReady || anyDownloading}
         >
           {allReady
-            ? "Downloaded"
+            ? "Ready"
             : anyDownloading
               ? "Downloading in background…"
-              : "Download in background"}
+              : ttsProvider === "gemini"
+                ? "Download transcription model"
+                : "Download local models"}
         </Button>
         {anyDownloading && (
           <span className="text-xs text-muted-foreground">
@@ -111,7 +217,9 @@ export function AiModelsStep() {
         )}
         {allReady && (
           <span className="text-xs text-emerald-600 dark:text-emerald-400">
-            Ready to transcribe and synthesize offline.
+            {ttsProvider === "gemini"
+              ? "Ready to transcribe locally and generate voice with Gemini."
+              : "Ready to transcribe and synthesize offline."}
           </span>
         )}
       </div>

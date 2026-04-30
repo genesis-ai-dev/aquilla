@@ -133,7 +133,11 @@ export function MultiProjectInviteDialog({
         <DialogHeader>
           <DialogTitle>Invite to projects</DialogTitle>
           <DialogDescription>
-            Add someone to multiple projects in one step. Set their role per project.
+            Add someone to multiple projects in one step. They get
+            <strong className="font-medium"> project-only access</strong>{" "}
+            — org-wide membership is unchanged. If the person is already in
+            your org, this adds project-level overrides on top of their
+            existing org role.
           </DialogDescription>
         </DialogHeader>
 

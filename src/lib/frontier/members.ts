@@ -34,11 +34,24 @@ export async function lookupUser(jwt: string, username: string): Promise<LookedU
   return (await res.json()) as LookedUpUser;
 }
 
-export async function listProjectMembers(jwt: string, projectId: string): Promise<ProjectMember[]> {
+/**
+ * GET /api/v2/projects/:id/members.
+ *
+ * Returns null when the caller has no server-side access to the project
+ * (403) or the project doesn't exist server-side (404). Both are expected
+ * conditions for local-only IndexedDB projects on the dashboard, where
+ * the avatar stack should silently render empty rather than treat the
+ * miss as an error. Real failures (5xx, network) still throw.
+ */
+export async function listProjectMembers(
+  jwt: string,
+  projectId: string
+): Promise<ProjectMember[] | null> {
   const res = await fetch(
     `${FRONTIER_BASE}/api/v2/projects/${encodeURIComponent(projectId)}/members`,
     { headers: authHeaders(jwt) }
   );
+  if (res.status === 403 || res.status === 404) return null;
   if (!res.ok) throw new Error(`listProjectMembers failed: HTTP ${res.status}`);
   const body = (await res.json()) as { members: ProjectMember[] };
   return body.members;

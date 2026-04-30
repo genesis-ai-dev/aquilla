@@ -5,28 +5,69 @@ import {
 } from "@/lib/frontier/orgs";
 import { useFrontierSession } from "./useFrontierSession";
 
-export function useOrg() {
-  const { session } = useFrontierSession();
+/**
+ * Async resource state. Distinguishes the four cases callers actually care
+ * about:
+ *   - idle:    no JWT yet (session still hydrating, or signed-out)
+ *   - loading: JWT present, fetch in flight
+ *   - error:   fetch finished with an error
+ *   - success: fetch finished with data
+ *
+ * The previous `{ org, error }` shape collapsed idle and loading into the
+ * same "no value" branch, which made consumers render an indefinite
+ * "Loading…" when really they should be showing "Sign in" or surfacing
+ * an error. Each consumer now picks the right UI for the right state.
+ */
+export type OrgState =
+  | { kind: "idle" }
+  | { kind: "loading" }
+  | { kind: "error"; error: string }
+  | { kind: "success"; org: MyOrg };
+
+export interface UseOrg {
+  state: OrgState;
+  /** Convenience accessor — null unless state is "success". */
+  org: MyOrg | null;
+  /** Convenience accessor — null unless state is "error". */
+  error: string | null;
+  /** Re-fire the /orgs/me fetch (e.g. after a 401 retry). */
+  refresh: () => Promise<void>;
+}
+
+export function useOrg(): UseOrg {
+  const { session, loading: sessionLoading } = useFrontierSession();
   const jwt = session?.jwt ?? null;
-  const [org, setOrg] = useState<MyOrg | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [state, setState] = useState<OrgState>({ kind: "idle" });
   const aliveRef = useRef(true);
 
   useEffect(() => () => { aliveRef.current = false; }, []);
 
-  useEffect(() => {
+  const refresh = useCallback(async () => {
+    // Keep "idle" while session is still hydrating so the UI doesn't briefly
+    // flash an error in the gap between mount and JWT availability.
     if (!jwt) {
-      setOrg(null);
+      if (aliveRef.current) setState({ kind: sessionLoading ? "loading" : "idle" });
       return;
     }
-    let cancelled = false;
-    getOrCreateMyOrg(jwt)
-      .then((o) => { if (!cancelled && aliveRef.current) setOrg(o); })
-      .catch((e) => { if (!cancelled && aliveRef.current) setError(e instanceof Error ? e.message : String(e)); });
-    return () => { cancelled = true; };
-  }, [jwt]);
+    if (aliveRef.current) setState({ kind: "loading" });
+    try {
+      const org = await getOrCreateMyOrg(jwt);
+      if (aliveRef.current) setState({ kind: "success", org });
+    } catch (e) {
+      if (aliveRef.current) {
+        setState({ kind: "error", error: e instanceof Error ? e.message : String(e) });
+      }
+    }
+  }, [jwt, sessionLoading]);
 
-  return { org, error };
+  useEffect(() => { void refresh(); }, [refresh]);
+
+  return {
+    state,
+    org: state.kind === "success" ? state.org : null,
+    error: state.kind === "error" ? state.error : null,
+    refresh,
+  };
 }
 
 export interface UseOrgMembers {

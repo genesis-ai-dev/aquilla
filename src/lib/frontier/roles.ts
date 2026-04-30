@@ -1,6 +1,6 @@
 /**
  * Codex's CF-native numeric role ladder. Single source of truth for the
- * 7-level scheme used across InviteStep, SharePanel, OrgSettings, and the
+ * 7-level scheme used across InviteStep, SharePanel, MembersPage, and the
  * frontier-server (mirrored in
  * `frontier-server/cloudflare/src/services/project-permissions.ts` —
  * see migration 0013).
@@ -110,7 +110,7 @@ export function roleDescription(level: number): string {
 /**
  * Human-readable role option for picker UIs. Combines the canonical name
  * with its long description; `name` and `description` keep the existing
- * shape used by SharePanel/OrgSettings/MembersPanel.
+ * shape used by SharePanel/MembersPage/MembersPanel.
  */
 export interface RoleOption {
   level: RoleLevel

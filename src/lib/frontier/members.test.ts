@@ -33,7 +33,7 @@ describe("lookupUser", () => {
 });
 
 describe("listProjectMembers", () => {
-  it("returns members array", async () => {
+  it("returns members array on 200", async () => {
     const members: ProjectMember[] = [
       { userId: 1, username: "wendy", role: { level: 700, name: "owner", source: "creator" } },
     ];
@@ -42,6 +42,27 @@ describe("listProjectMembers", () => {
     );
     const result = await listProjectMembers("jwt", "p1");
     expect(result).toEqual(members);
+  });
+
+  // Treat 403 / 404 as "no server-side membership" — local-only projects on
+  // the dashboard hit this all the time and should not be surfaced as errors.
+  it("returns null on 403 (caller has no access)", async () => {
+    (global.fetch as any).mockResolvedValueOnce(
+      new Response(JSON.stringify({ error: "no access" }), { status: 403 })
+    );
+    expect(await listProjectMembers("jwt", "p1")).toBeNull();
+  });
+
+  it("returns null on 404 (project does not exist server-side)", async () => {
+    (global.fetch as any).mockResolvedValueOnce(new Response("", { status: 404 }));
+    expect(await listProjectMembers("jwt", "p1")).toBeNull();
+  });
+
+  it("throws on 5xx (real failure)", async () => {
+    (global.fetch as any).mockResolvedValueOnce(
+      new Response("server down", { status: 503 })
+    );
+    await expect(listProjectMembers("jwt", "p1")).rejects.toThrow(/HTTP 503/);
   });
 });
 

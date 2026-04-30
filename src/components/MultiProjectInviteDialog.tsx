@@ -1,0 +1,261 @@
+import { useMemo, useState } from "react"
+import { Check, Loader2, X } from "lucide-react"
+import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
+import {
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription,
+} from "@/components/ui/dialog"
+import {
+  ROLE,
+  PROJECT_ROLE_OPTIONS,
+  roleName,
+  type RoleLevel,
+} from "@/lib/frontier/roles"
+import { addProjectMember, lookupUser } from "@/lib/frontier/members"
+import { useFrontierSession } from "@/hooks/useFrontierSession"
+import type { CloudProjectSummary } from "@/lib/sync/cloud-projects"
+
+interface MultiProjectInviteDialogProps {
+  open: boolean
+  onOpenChange: (open: boolean) => void
+  /** Projects the operator can invite to (already filtered to those they
+   * have permission on). Comes from useAccessibleProjects. */
+  projects: CloudProjectSummary[]
+  /** Fired after a successful invite so the parent can refresh dependent
+   * state (e.g. roster project chips). */
+  onSuccess?: () => void
+}
+
+/**
+ * Operational PM's bulk-add flow. Type a username, multi-select projects,
+ * pick a role per project, hit Invite. Each project gets its own
+ * POST /projects/:id/members; failures are surfaced per-row so the
+ * operator knows which ones landed.
+ *
+ * Why per-project role (not "set all to role X"): translation projects
+ * have meaningful per-project role variation — someone might be Translator
+ * on Genesis but Reviewer on Exodus. Per-row picker keeps the right
+ * granularity at the moment of invite, when the operator's intent is
+ * clearest. A "set all" shortcut is a future polish; the granular form
+ * is the load-bearing primitive.
+ */
+export function MultiProjectInviteDialog({
+  open,
+  onOpenChange,
+  projects,
+  onSuccess,
+}: MultiProjectInviteDialogProps) {
+  const { session } = useFrontierSession()
+  const [username, setUsername] = useState("")
+  const [selections, setSelections] = useState<Record<string, RoleLevel>>({})
+  const [busy, setBusy] = useState(false)
+  const [perProjectError, setPerProjectError] = useState<Record<string, string>>({})
+  const [topError, setTopError] = useState<string | null>(null)
+  const [done, setDone] = useState<Record<string, "ok"> | null>(null)
+
+  const selectedIds = useMemo(() => Object.keys(selections), [selections])
+  const canSubmit =
+    !busy && username.trim().length > 0 && selectedIds.length > 0 && Boolean(session?.jwt)
+
+  function toggleProject(projectId: string) {
+    setSelections((prev) => {
+      const next = { ...prev }
+      if (projectId in next) {
+        delete next[projectId]
+      } else {
+        next[projectId] = ROLE.CONTRIBUTOR
+      }
+      return next
+    })
+  }
+
+  function setProjectRole(projectId: string, level: RoleLevel) {
+    setSelections((prev) => ({ ...prev, [projectId]: level }))
+  }
+
+  async function handleInvite() {
+    if (!session?.jwt) return
+    setBusy(true)
+    setTopError(null)
+    setPerProjectError({})
+    setDone(null)
+    try {
+      const target = await lookupUser(session.jwt, username.trim())
+      if (!target) {
+        setTopError(`No Frontier user named "${username.trim()}".`)
+        return
+      }
+      // Issue grants in parallel — they're independent and we want the
+      // round-trip cost to be O(1) round-trips, not O(N).
+      const results = await Promise.allSettled(
+        selectedIds.map((projectId) =>
+          addProjectMember(session.jwt, projectId, target.username, selections[projectId]!)
+        )
+      )
+      const errors: Record<string, string> = {}
+      const successes: Record<string, "ok"> = {}
+      results.forEach((r, i) => {
+        const id = selectedIds[i]!
+        if (r.status === "fulfilled") {
+          successes[id] = "ok"
+        } else {
+          errors[id] = r.reason instanceof Error ? r.reason.message : String(r.reason)
+        }
+      })
+      setPerProjectError(errors)
+      setDone(successes)
+      if (Object.keys(successes).length > 0) onSuccess?.()
+    } catch (err) {
+      setTopError(err instanceof Error ? err.message : "Invite failed.")
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  function handleClose() {
+    if (busy) return
+    setUsername("")
+    setSelections({})
+    setPerProjectError({})
+    setTopError(null)
+    setDone(null)
+    onOpenChange(false)
+  }
+
+  // Cap role picker at maintainer; owner is conferred on creation, never via
+  // bulk add. Mirrors PROJECT_ROLE_OPTIONS but only the levels we want here.
+  const roleChoices = PROJECT_ROLE_OPTIONS
+
+  return (
+    <Dialog open={open} onOpenChange={(v) => (v ? onOpenChange(v) : handleClose())}>
+      <DialogContent className="max-w-xl">
+        <DialogHeader>
+          <DialogTitle>Invite to projects</DialogTitle>
+          <DialogDescription>
+            Add someone to multiple projects in one step. Set their role per project.
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="space-y-4">
+          <div className="space-y-1.5">
+            <Label htmlFor="invite-username" className="text-xs">
+              Frontier username
+            </Label>
+            <Input
+              id="invite-username"
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
+              placeholder="e.g. mariad"
+              disabled={busy}
+              autoComplete="off"
+            />
+          </div>
+
+          <div>
+            <Label className="text-xs">Projects</Label>
+            {projects.length === 0 ? (
+              <p className="text-xs text-muted-foreground py-2">
+                No projects available — create one first or check back when sync completes.
+              </p>
+            ) : (
+              <ul className="mt-1.5 max-h-64 overflow-y-auto rounded border divide-y">
+                {projects.map((p) => {
+                  const isSelected = p.id in selections
+                  const errorMsg = perProjectError[p.id]
+                  const isDone = done?.[p.id] === "ok"
+                  return (
+                    <li
+                      key={p.id}
+                      className={`flex items-center gap-2 px-3 py-2 text-sm ${
+                        isSelected ? "bg-muted/40" : ""
+                      }`}
+                    >
+                      <button
+                        type="button"
+                        role="checkbox"
+                        aria-checked={isSelected}
+                        onClick={() => toggleProject(p.id)}
+                        disabled={busy}
+                        className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border ${
+                          isSelected
+                            ? "bg-primary border-primary text-primary-foreground"
+                            : "border-input"
+                        }`}
+                      >
+                        {isSelected && <Check className="h-3 w-3" />}
+                      </button>
+                      <span className="flex-1 truncate">{p.name}</span>
+                      {isDone ? (
+                        <span className="text-[10px] text-emerald-600 dark:text-emerald-400 inline-flex items-center gap-1">
+                          <Check className="h-3 w-3" /> added
+                        </span>
+                      ) : isSelected ? (
+                        <select
+                          className="rounded border bg-background px-2 py-1 text-xs"
+                          value={selections[p.id]}
+                          onChange={(e) =>
+                            setProjectRole(p.id, Number(e.target.value) as RoleLevel)
+                          }
+                          disabled={busy}
+                        >
+                          {roleChoices.map((r) => (
+                            <option key={r.level} value={r.level}>
+                              {r.name}
+                            </option>
+                          ))}
+                        </select>
+                      ) : null}
+                      {errorMsg && (
+                        <span
+                          className="text-[10px] text-destructive max-w-[10rem] truncate"
+                          title={errorMsg}
+                        >
+                          {errorMsg}
+                        </span>
+                      )}
+                    </li>
+                  )
+                })}
+              </ul>
+            )}
+            {selectedIds.length > 0 && (
+              <p className="mt-1 text-[10px] text-muted-foreground">
+                {selectedIds.length} project{selectedIds.length === 1 ? "" : "s"} selected
+                {selectedIds.length > 1 && (
+                  <>
+                    {" "}— roles:{" "}
+                    {[...new Set(selectedIds.map((id) => selections[id]!))]
+                      .map((lvl) => roleName(lvl))
+                      .join(", ")}
+                  </>
+                )}
+              </p>
+            )}
+          </div>
+
+          {topError && (
+            <p className="text-xs text-destructive">{topError}</p>
+          )}
+
+          <div className="flex justify-end gap-2 pt-2 border-t">
+            <Button variant="outline" onClick={handleClose} disabled={busy}>
+              <X className="mr-1 h-4 w-4" />
+              {done ? "Close" : "Cancel"}
+            </Button>
+            <Button onClick={handleInvite} disabled={!canSubmit}>
+              {busy ? (
+                <>
+                  <Loader2 className="mr-1 h-4 w-4 animate-spin" />
+                  Inviting…
+                </>
+              ) : (
+                <>Invite</>
+              )}
+            </Button>
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
+  )
+}

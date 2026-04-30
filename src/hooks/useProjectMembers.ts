@@ -33,8 +33,11 @@ export function useProjectMembers(projectId: string | null): UseProjectMembers {
     setLoading(true);
     setError(null);
     try {
+      // null = caller has no server-side access OR project doesn't exist
+      // server-side. Both are expected for local-only IndexedDB projects;
+      // we render an empty members list and don't surface as an error.
       const next = await listProjectMembers(jwt, projectId);
-      if (aliveRef.current) setMembers(next);
+      if (aliveRef.current) setMembers(next ?? []);
     } catch (e) {
       if (aliveRef.current) setError(e instanceof Error ? e.message : String(e));
     } finally {

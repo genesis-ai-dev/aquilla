@@ -174,10 +174,10 @@ export function Dashboard() {
           </div>
           <div className="flex shrink-0 items-center gap-2">
             <Link
-              to="/settings/org"
+              to="/members"
               className="text-sm underline-offset-2 hover:underline"
             >
-              Organization
+              Members
             </Link>
             <Link
               to="/settings"

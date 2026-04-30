@@ -1,4 +1,4 @@
-import { Routes, Route } from "react-router-dom"
+import { Routes, Route, Navigate } from "react-router-dom"
 import { Dashboard } from "@/components/Dashboard"
 import { ProjectWorkspace } from "@/components/ProjectWorkspace"
 import { ProjectSettings } from "@/components/ProjectSettings"
@@ -9,7 +9,7 @@ import { CommentsPage } from "@/components/CommentsPage"
 import { SnapshotsPage } from "@/components/SnapshotsPage"
 import { JoinPage } from "@/components/JoinPage"
 import { OnboardingWizard } from "@/components/onboarding/OnboardingWizard"
-import { OrgSettings } from "@/pages/OrgSettings"
+import { MembersPage } from "@/pages/MembersPage"
 import { Settings } from "@/pages/Settings"
 import { SyncingProvider, useSyncing } from "@/context/SyncingContext"
 import { AiModelConsentDialog } from "@/components/AiModelConsentDialog"
@@ -71,7 +71,10 @@ function AppRoutes() {
       <Route path="/join/:token" element={<JoinPage />} />
       <Route path="/onboarding" element={<OnboardingWizard />} />
       <Route path="/settings" element={<Settings />} />
-      <Route path="/settings/org" element={<OrgSettings />} />
+      <Route path="/members" element={<MembersPage />} />
+      {/* Backward-compat: the old admin-flavored URL still resolves but
+          permanently redirects to the operational /members surface. */}
+      <Route path="/settings/org" element={<Navigate to="/members" replace />} />
     </Routes>
   )
 }

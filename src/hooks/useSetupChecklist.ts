@@ -75,7 +75,8 @@ export function useSetupChecklist(project: ProjectRecord | null) {
     listProjectMembers(session.jwt, project.id)
       .then((members) => {
         if (cancelled) return
-        const others = members.filter((m) => m.username !== session.username)
+        // null = no server-side access / project not server-side; treat as 0.
+        const others = (members ?? []).filter((m) => m.username !== session.username)
         setMemberCount(others.length)
       })
       .catch(() => {
@@ -112,7 +113,7 @@ export function useSetupChecklist(project: ProjectRecord | null) {
     if (session?.jwt) {
       try {
         const members = await listProjectMembers(session.jwt, project.id)
-        const others = members.filter((m) => m.username !== session.username)
+        const others = (members ?? []).filter((m) => m.username !== session.username)
         setMemberCount(others.length)
       } catch {
         /* network blip — keep last known count */

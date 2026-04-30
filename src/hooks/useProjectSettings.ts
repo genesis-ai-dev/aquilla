@@ -9,6 +9,7 @@ import {
   type ProjectWideSettings,
   type ProjectSettingsResponse,
 } from "@/lib/sync/project-settings"
+import posthog from "@/lib/posthog"
 
 const EDIT_ROLE_FLOOR = ROLE.PROJECT_LEAD
 
@@ -95,6 +96,8 @@ export function useProjectSettings(
     [],
   )
 
+  const mountAtRef = useRef(performance.now())
+
   // Keep a ref so refresh's identity is stable across connectivity changes.
   const isOnlineRef = useRef(isOnline)
   useEffect(() => {
@@ -108,6 +111,13 @@ export function useProjectSettings(
     if (!aliveRef.current) return null
     setServer(got)
     setHasFetched(true)
+    if (got) {
+      posthog.capture("project settings hydrated", {
+        project_id: projectId,
+        within_ms: Math.round(performance.now() - mountAtRef.current),
+        has_server_row: got.version > 0,
+      })
+    }
     if (got && got.version > 0) {
       try {
         await patchProject(projectId, (existing) => ({
@@ -206,8 +216,23 @@ export function useProjectSettings(
     void (async () => {
       const out = await patchProjectSettings(jwt, projectId, local, 0)
       if (!aliveRef.current) return
-      if (out.kind === "ok") setServer(out.value)
-      else if (out.kind === "conflict") setServer(out.latest)
+      const nonEmptyCount = Object.keys(local).filter((k) => {
+        const v = (local as any)[k]
+        return v !== "" && v != null
+      }).length
+      if (out.kind === "ok") {
+        setServer(out.value)
+        posthog.capture("project settings migrated", {
+          project_id: projectId,
+          fields_count: nonEmptyCount,
+        })
+      } else if (out.kind === "conflict") {
+        setServer(out.latest)
+        posthog.capture("project settings migration conflict", {
+          project_id: projectId,
+          fields_count: nonEmptyCount,
+        })
+      }
       // forbidden / error: leave server at version 0; display is still backed
       // by local cache. A fresh hook instance will retry on next mount.
     })()
@@ -237,6 +262,10 @@ export function useProjectSettings(
     }
     if (result.kind === "conflict") {
       setServer(result.latest)
+      posthog.capture("project settings sync conflict", {
+        project_id: projectId,
+        conflicting_user: result.latest.updatedBy?.username ?? null,
+      })
       return { kind: "conflict", latest: result.latest }
     }
     if (result.kind === "forbidden") {

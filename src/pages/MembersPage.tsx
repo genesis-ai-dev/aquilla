@@ -1,14 +1,27 @@
 import { useCallback, useEffect, useState } from "react"
-import { ChevronDown, ChevronRight, Grid3x3, List, Loader2, Users, UsersRound } from "lucide-react"
+import {
+  ChevronDown,
+  ChevronRight,
+  Clock,
+  Grid3x3,
+  List,
+  Loader2,
+  Mail,
+  Users,
+  UsersRound,
+  X,
+} from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { useOrg, useOrgMembers } from "@/hooks/useOrg"
 import { useAccessibleProjects } from "@/hooks/useAccessibleProjects"
+import { useOrgInvites } from "@/hooks/useOrgInvites"
 import { MembersPanel, type MembersPanelMember } from "@/components/MembersPanel"
 import { MultiProjectInviteDialog } from "@/components/MultiProjectInviteDialog"
 import { MembersMatrixView } from "@/components/MembersMatrixView"
 import { RemoveOrgMemberDialog } from "@/components/RemoveOrgMemberDialog"
 import { ROLE, ORG_ROLE_PICKER, roleName } from "@/lib/frontier/roles"
-import type { OrgMemberProject } from "@/lib/frontier/orgs"
+import { formatRelativeTime } from "@/lib/time/relative"
+import type { OrgMemberProject, PendingOrgInvite } from "@/lib/frontier/orgs"
 
 type View = "roster" | "matrix"
 
@@ -104,6 +117,7 @@ function MembersPageContent({ orgId, orgName }: MembersPageContentProps) {
     source: m.role.level === ROLE.OWNER ? "owner-of-org" : "override",
     isLocked: m.role.level === ROLE.OWNER,
     lockedHint: m.role.level === ROLE.OWNER ? "Org owner" : undefined,
+    lastActiveAt: m.lastActiveAt ?? null,
   }))
 
   return (
@@ -174,17 +188,20 @@ function MembersPageContent({ orgId, orgName }: MembersPageContentProps) {
             <span className="text-sm">Loading members…</span>
           </div>
         ) : (
-          <RosterWithProjectChips
-            orgId={orgId}
-            panelMembers={panelMembers}
-            listMemberProjects={listMemberProjects}
-            add={add}
-            remove={remove}
-            callerUserId={callerUserId}
-            onRequestRemove={(userId, username) =>
-              setRemoveTarget({ userId, username })
-            }
-          />
+          <div className="space-y-4">
+            <RosterWithProjectChips
+              orgId={orgId}
+              panelMembers={panelMembers}
+              listMemberProjects={listMemberProjects}
+              add={add}
+              remove={remove}
+              callerUserId={callerUserId}
+              onRequestRemove={(userId, username) =>
+                setRemoveTarget({ userId, username })
+              }
+            />
+            <PendingInvitesSection orgId={orgId} />
+          </div>
         )
       ) : (
         <MembersMatrixView />
@@ -370,5 +387,114 @@ function ProjectChipsRow({ username, loadProjects }: ProjectChipsRowProps) {
       )}
     </li>
   )
+}
+
+/**
+ * Pending share-link invitations across this org. Owner-only (the server
+ * gates the listing, returning null on 403, and the hook hides the section
+ * for non-owners). Each row shows what was invited where, by whom, and an
+ * expiry hint; the trash icon revokes (DELETE /projects/:id/invites/:token).
+ *
+ * Optimistic revoke: the row disappears immediately on click. If the
+ * server later errors, the hook re-fetches and the row reappears.
+ */
+function PendingInvitesSection({ orgId }: { orgId: number }) {
+  const { invites, isLoading, error, revoke } = useOrgInvites(orgId)
+
+  // Non-owner callers (server returned null/403) → hide the section entirely.
+  // No-pending case → also hide; nothing for the operator to act on.
+  if (invites === null) return null
+  if (!isLoading && invites.length === 0) return null
+
+  return (
+    <div className="rounded border bg-muted/20 p-3">
+      <div className="mb-2 flex items-center gap-1.5">
+        <Mail className="h-3.5 w-3.5 text-muted-foreground" />
+        <p className="text-xs font-medium text-muted-foreground">
+          Pending invitations
+        </p>
+        {isLoading && <Loader2 className="h-3 w-3 animate-spin text-muted-foreground" />}
+      </div>
+
+      {error && <p className="mb-2 text-xs text-destructive">{error}</p>}
+
+      {invites.length > 0 && (
+        <ul className="divide-y">
+          {invites.map((inv) => (
+            <PendingInviteRow key={inv.token} invite={inv} onRevoke={revoke} />
+          ))}
+        </ul>
+      )}
+    </div>
+  )
+}
+
+function PendingInviteRow({
+  invite,
+  onRevoke,
+}: {
+  invite: PendingOrgInvite
+  onRevoke: (projectId: string, token: string) => Promise<boolean>
+}) {
+  const [busy, setBusy] = useState(false)
+  const expiresLabel = invite.expiresAt
+    ? `expires ${formatRelativeTime(invite.expiresAt)?.replace(" ago", " from now") ?? ""}`
+    : "no expiry"
+  // Hack-y: formatRelativeTime is past-tense; for an expiry we want
+  // "expires in 2 days". Recompute properly when expiresAt is in the future.
+  const futureLabel = computeFutureLabel(invite.expiresAt)
+
+  return (
+    <li className="flex items-center gap-2 py-1.5 text-xs">
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center gap-1.5">
+          <span className="font-medium truncate">{invite.projectName}</span>
+          <span className="text-muted-foreground">·</span>
+          <span className="capitalize text-muted-foreground">
+            {invite.role.name.replace(/_/g, " ")}
+          </span>
+        </div>
+        <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
+          <span>by {invite.createdBy.username}</span>
+          <span>·</span>
+          <Clock className="h-2.5 w-2.5" />
+          <span>{futureLabel ?? expiresLabel}</span>
+        </div>
+      </div>
+      <Button
+        size="icon"
+        variant="ghost"
+        className="h-7 w-7 text-muted-foreground hover:text-destructive"
+        disabled={busy}
+        title="Revoke invitation"
+        aria-label={`Revoke invitation to ${invite.projectName}`}
+        onClick={async () => {
+          setBusy(true)
+          try {
+            await onRevoke(invite.projectId, invite.token)
+          } finally {
+            setBusy(false)
+          }
+        }}
+      >
+        {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <X className="h-3.5 w-3.5" />}
+      </Button>
+    </li>
+  )
+}
+
+/** "expires in 2 days" / "expired" / null when no expiry set. */
+function computeFutureLabel(iso: string | null): string | null {
+  if (!iso) return null
+  const t = Date.parse(iso)
+  if (Number.isNaN(t)) return null
+  const ms = t - Date.now()
+  if (ms <= 0) return "expired"
+  const days = Math.floor(ms / (24 * 60 * 60 * 1000))
+  if (days >= 1) return `expires in ${days} day${days === 1 ? "" : "s"}`
+  const hours = Math.floor(ms / (60 * 60 * 1000))
+  if (hours >= 1) return `expires in ${hours} hour${hours === 1 ? "" : "s"}`
+  const minutes = Math.max(1, Math.floor(ms / (60 * 1000)))
+  return `expires in ${minutes} minute${minutes === 1 ? "" : "s"}`
 }
 

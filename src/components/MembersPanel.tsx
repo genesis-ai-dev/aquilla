@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { formatRelativeTime, isStale } from "@/lib/time/relative";
 
 export interface MembersPanelMember {
   userId: number;
@@ -12,6 +13,10 @@ export interface MembersPanelMember {
   /** True when removing this row is not possible from this UI surface. */
   isLocked: boolean;
   lockedHint?: string;
+  /** Optional ISO timestamp of last project-context activity in this org.
+   * When provided, the panel renders a "Last active X ago" hint and
+   * highlights stale (>30d) members. Absence renders no hint. */
+  lastActiveAt?: string | null;
 }
 
 export interface MembersPanelRoleOption {
@@ -83,6 +88,7 @@ export function MembersPanel({
               {m.source === "gitlab" && (
                 <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">via gitlab</span>
               )}
+              <LastActiveChip lastActiveAt={m.lastActiveAt} />
               <div className="ml-auto flex items-center gap-2">
                 {onChangeRole && !m.isLocked && !isSelf && (
                   <select
@@ -141,5 +147,35 @@ export function MembersPanel({
         {addError && <p className="text-xs text-destructive">{addError}</p>}
       </div>
     </div>
+  );
+}
+
+/**
+ * "Last active X ago" chip with a stale highlight past 30 days. Absent
+ * timestamps render nothing — that's the "we haven't seen activity yet
+ * since tracking landed" state, distinct from "we haven't seen them in
+ * a long time."
+ */
+function LastActiveChip({ lastActiveAt }: { lastActiveAt: string | null | undefined }) {
+  if (lastActiveAt == null) return null;
+  const label = formatRelativeTime(lastActiveAt);
+  if (!label) return null;
+  const stale = isStale(lastActiveAt);
+  return (
+    <span
+      className={`rounded px-1.5 py-0.5 text-[10px] ${
+        stale
+          ? "bg-amber-500/15 text-amber-700 dark:text-amber-300"
+          : "bg-muted text-muted-foreground"
+      }`}
+      title={
+        stale
+          ? "No recent activity — consider whether this membership is still needed"
+          : "Last project-context activity in this org"
+      }
+    >
+      {stale ? "stale · " : ""}
+      {label}
+    </span>
   );
 }

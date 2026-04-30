@@ -15,6 +15,28 @@ export interface OrgMember {
   userId: number;
   username: string;
   role: OrgRole;
+  /** ISO timestamp of last project-context activity by this user in this
+   * org. NULL when no activity has been recorded since migration 0018
+   * landed. The Members page surfaces this as "Last active X ago" /
+   * "No recent activity." */
+  lastActiveAt?: string | null;
+}
+
+/**
+ * One unredeemed, unexpired invite for a project in this org. Returned by
+ * `listPendingOrgInvites`. `token` is included so the operator can revoke
+ * via DELETE /projects/:id/invites/:token; the listing is owner-gated
+ * server-side so token leakage is contained to org admins (who could
+ * already revoke anyway).
+ */
+export interface PendingOrgInvite {
+  token: string;
+  projectId: string;
+  projectName: string;
+  role: OrgRole;
+  createdBy: { userId: number; username: string };
+  createdAt: string;
+  expiresAt: string | null;
 }
 
 export interface OrgMemberProject {
@@ -78,4 +100,45 @@ export async function listOrgMemberProjects(
   );
   if (!res.ok) throw new Error(`listOrgMemberProjects failed: HTTP ${res.status}`);
   return ((await res.json()) as { projects: OrgMemberProject[] }).projects;
+}
+
+/**
+ * GET /api/v2/orgs/:orgId/invites — pending invites for projects in this org.
+ * Owner-only server-side; returns null on 403 (caller isn't owner) so the
+ * Roster can hide the "Pending" section gracefully without surfacing the
+ * gate as an error. Throws on other failures.
+ */
+export async function listPendingOrgInvites(
+  jwt: string,
+  orgId: number
+): Promise<PendingOrgInvite[] | null> {
+  const res = await fetch(`${FRONTIER_BASE}/api/v2/orgs/${orgId}/invites`, {
+    headers: authHeaders(jwt),
+  });
+  if (res.status === 403) return null;
+  if (!res.ok) throw new Error(`listPendingOrgInvites failed: HTTP ${res.status}`);
+  return ((await res.json()) as { invites: PendingOrgInvite[] }).invites;
+}
+
+/**
+ * DELETE /api/v2/projects/:projectId/invites/:token — revoke a pending invite.
+ * Server returns `{ removed: boolean }` (idempotent: removed=false when the
+ * token doesn't match anything pending, e.g. it was already redeemed or
+ * revoked elsewhere). 403 throws.
+ */
+export async function revokeProjectInvite(
+  jwt: string,
+  projectId: string,
+  token: string
+): Promise<boolean> {
+  const res = await fetch(
+    `${FRONTIER_BASE}/api/v2/projects/${encodeURIComponent(
+      projectId
+    )}/invites/${encodeURIComponent(token)}`,
+    { method: "DELETE", headers: authHeaders(jwt) }
+  );
+  if (!res.ok) {
+    throw new Error(`revokeProjectInvite failed: HTTP ${res.status}`);
+  }
+  return ((await res.json()) as { removed: boolean }).removed;
 }

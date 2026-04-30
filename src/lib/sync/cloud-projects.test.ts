@@ -160,6 +160,7 @@ describe("resolveCloudProject", () => {
         archivedAt: null,
         archivedBy: null,
         role: { level: 700, name: "owner", source: "creator" },
+        files: [],
       }), { status: 200, headers: { "Content-Type": "application/json" } })
     }) as unknown as typeof fetch
 
@@ -169,6 +170,64 @@ describe("resolveCloudProject", () => {
     // Should hit the single-project endpoint first, no fallback needed.
     expect(calls).toHaveLength(1)
     expect(calls[0]).toBe(`${API}/api/v2/projects/p-1`)
+  })
+
+  // Regression: dashboard's cloud card showed N files (from list endpoint join),
+  // but clicking the card opened the workspace with 0 files because the
+  // single-project endpoint never carried the same join. After hydration, the
+  // empty record was written to IDB and the count was lost. The single-project
+  // endpoint's files[] shape MUST match the list endpoint's files[] shape so
+  // first-open hydration of a cloud-only project produces a record with the
+  // correct file list.
+  it("carries files[] through from the single-project endpoint into a usable ProjectRecord", async () => {
+    global.fetch = vi.fn<typeof fetch>(async () => {
+      return new Response(JSON.stringify({
+        id: "p-1",
+        name: "Alpha",
+        gitlabProjectId: null,
+        archivedAt: null,
+        archivedBy: null,
+        role: { level: 700, name: "owner", source: "creator" },
+        files: [
+          { id: "f-1", name: "GEN", type: "usfm", cellCount: 1533 },
+          { id: "f-2", name: "EXO", type: "usfm", cellCount: 1213 },
+        ],
+      }), { status: 200, headers: { "Content-Type": "application/json" } })
+    }) as unknown as typeof fetch
+
+    const state = await resolveCloudProject("p-1", "jwt", API)
+    expect(state).not.toBeNull()
+    // Pipe through the same conversion useProject does on first open.
+    const record = minimalProjectRecord(state as CloudProjectSummary)
+    expect(record.files).toHaveLength(2)
+    expect(record.files[0].id).toBe("f-1")
+    expect(record.files[0].name).toBe("GEN")
+    expect(record.files[1].cellCount).toBe(1213)
+  })
+
+  it("preserves files[] from the list-endpoint fallback when the single endpoint 404s", async () => {
+    global.fetch = vi.fn<typeof fetch>(async (input) => {
+      const url = typeof input === "string" ? input : (input as Request).url
+      if (url.endsWith("/api/v2/projects/p-1")) {
+        return new Response("not found", { status: 404 })
+      }
+      return new Response(JSON.stringify({
+        projects: [
+          {
+            id: "p-1",
+            name: "Alpha",
+            gitlabProjectId: null,
+            role: { level: 700, name: "owner", source: "creator" },
+            files: [{ id: "f-9", name: "PSA", type: "usfm", cellCount: 2461 }],
+          },
+        ],
+      }), { status: 200, headers: { "Content-Type": "application/json" } })
+    }) as unknown as typeof fetch
+
+    const state = await resolveCloudProject("p-1", "jwt", API)
+    const record = minimalProjectRecord(state as CloudProjectSummary)
+    expect(record.files).toHaveLength(1)
+    expect(record.files[0].id).toBe("f-9")
   })
 
   it("falls back to the list endpoint when the single endpoint 404s", async () => {

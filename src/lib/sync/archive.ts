@@ -3,6 +3,7 @@
 // so all collaborators see the tombstone. Purely local projects (no server
 // row) get a 404 — callers should fall through to an IDB-only tombstone.
 
+import type { CloudFileSummary } from "./cloud-projects"
 import { FRONTIER_API_URL } from "./sync-token"
 
 export interface ArchiveSuccess {
@@ -41,6 +42,10 @@ export interface ProjectStateResponse {
   archivedAt: string | null
   archivedBy: { id: number; username: string } | null
   role: { level: number; name: string; source: string }
+  /** Populated by the codex-db.files join. Optional only because old
+   *  deployments may not have shipped the join yet — current servers
+   *  always return at least []. */
+  files?: CloudFileSummary[]
 }
 
 async function parseError(res: Response): Promise<string> {

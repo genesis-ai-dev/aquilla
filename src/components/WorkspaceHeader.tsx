@@ -20,10 +20,14 @@ export function WorkspaceHeader({ project, onBack, children }: Props) {
         </button>
         <span className="text-muted-foreground">/</span>
         <span className="font-medium truncate">{project.name}</span>
-        <span className="text-muted-foreground">·</span>
-        <span className="text-muted-foreground truncate">
-          {project.sourceLanguage} → {project.targetLanguage}
-        </span>
+        {(project.sourceLanguage || project.targetLanguage) && (
+          <>
+            <span className="text-muted-foreground">·</span>
+            <span className="text-muted-foreground truncate">
+              {project.sourceLanguage || "?"} → {project.targetLanguage || "?"}
+            </span>
+          </>
+        )}
       </nav>
       <div className="flex-1" />
       <div className="flex items-center gap-1 shrink-0">

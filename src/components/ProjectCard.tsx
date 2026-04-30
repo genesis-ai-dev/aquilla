@@ -122,9 +122,15 @@ export function ProjectCard({
         </div>
       </CardHeader>
       <CardContent>
-        <p className="text-sm text-muted-foreground">
-          {project.sourceLanguage} → {project.targetLanguage}
-        </p>
+        {project.sourceLanguage || project.targetLanguage ? (
+          <p className="text-sm text-muted-foreground">
+            {project.sourceLanguage || "?"} → {project.targetLanguage || "?"}
+          </p>
+        ) : (
+          <p className="text-sm text-muted-foreground italic">
+            Languages not set
+          </p>
+        )}
         <p className="text-sm text-muted-foreground">
           {project.files.length} file{project.files.length !== 1 ? "s" : ""}
         </p>

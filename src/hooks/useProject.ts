@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import type { ProjectRecord } from "@/lib/parsers/types"
-import { getProject, updateProject } from "@/lib/store/project-index"
+import { getProject, patchProject, updateProject } from "@/lib/store/project-index"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { minimalProjectRecord, resolveCloudProject } from "@/lib/sync/cloud-projects"
 
@@ -36,32 +36,65 @@ export function useProject(projectId: string) {
         cached && cached.syncRole && (cached.files?.length ?? 0) === 0
       )
 
-      if (cached && !isStaleStub) {
+      // Surface the cached row immediately even when we're going to refresh
+      // it from the server. Previously a stale-stub silently waited on the
+      // network round-trip, which on a slow connection or worker cold-start
+      // left the workspace blank for ~30s; far better to render whatever
+      // local state we have and patch it in once the server replies.
+      if (cached) {
         setProject(cached)
         setStatus("ready")
         hasLoaded.current = true
-        return
       }
+
+      if (cached && !isStaleStub) return
+
       // IDB miss (or stale stub) — try the server so a pasted URL resolves
       // on a fresh device and stubs get backfilled with their file list.
       if (!session?.jwt) {
-        setProject(cached ?? null)
-        setStatus(cached ? "ready" : "no-session")
-        hasLoaded.current = true
+        if (!cached) {
+          setProject(null)
+          setStatus("no-session")
+          hasLoaded.current = true
+        }
         return
       }
       const state = await resolveCloudProject(projectId, session.jwt)
       if (cancelled) return
       if (!state) {
-        setProject(cached ?? null)
-        setStatus(cached ? "ready" : "not-found")
-        hasLoaded.current = true
+        if (!cached) {
+          setProject(null)
+          setStatus("not-found")
+          hasLoaded.current = true
+        }
         return
       }
       const hydrated = minimalProjectRecord(state)
-      await updateProject(hydrated)
+      // Merge instead of overwrite: a previous run on this device may have
+      // captured sourceLanguage / targetLanguage / completionSettings / etc.
+      // that the server doesn't store. Server fields (name, syncRole, archive
+      // metadata, the file list when it's non-empty) win; everything else is
+      // preserved from local IDB. This is the resilience guarantee — if IDB
+      // gets cleared we fall back to server-known fields, but we never wipe
+      // local state we still have.
+      const merged = await patchProject(projectId, (existing) => ({
+        ...existing,
+        name: hydrated.name,
+        syncRole: hydrated.syncRole ?? existing.syncRole,
+        // Prefer server file list when local is empty (fresh device or stub);
+        // otherwise keep local — server's file list is metadata-only and
+        // local IDB has the actual cell counts.
+        files: existing.files.length > 0 ? existing.files : hydrated.files,
+        ...(hydrated.deletedAt
+          ? { deletedAt: hydrated.deletedAt, deletedBy: hydrated.deletedBy }
+          : {}),
+      })) ?? null
+      if (!merged) {
+        // No prior IDB row → write the fresh stub.
+        await updateProject(hydrated)
+      }
       if (cancelled) return
-      setProject(hydrated)
+      setProject(merged ?? hydrated)
       setStatus("ready")
       hasLoaded.current = true
     })()

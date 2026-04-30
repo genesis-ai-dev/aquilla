@@ -105,10 +105,11 @@ export function RemoteProjectsSection({ session, localProjects, onImported }: Pr
     },
   })
 
-  // Auto-fetch every page in the background.
-  useEffect(() => {
-    if (q.hasNextPage && !q.isFetchingNextPage) q.fetchNextPage()
-  }, [q.hasNextPage, q.isFetchingNextPage, q.data, q])
+  // Pagination is explicit — see the "Load more" button below the list. The
+  // previous incarnation auto-walked every page in the background, which on
+  // large GitLab namespaces could fire 8+ sequential requests per Dashboard
+  // mount and contend with the frontier-API calls. Users almost never browse
+  // past the first page; if they do, one click is fine.
 
   const allProjects = useMemo(
     () => (q.data?.pages ?? []).flatMap(p => p.items),
@@ -137,7 +138,7 @@ export function RemoteProjectsSection({ session, localProjects, onImported }: Pr
         <h2 className="text-sm font-semibold text-muted-foreground">
           From Frontier{total != null ? ` (${loaded}${q.hasNextPage ? "+" : ""} / ${total})` : ` (${loaded})`}
         </h2>
-        {(q.isFetching || q.hasNextPage) && (
+        {q.isFetching && (
           <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />
         )}
         <Input
@@ -186,6 +187,33 @@ export function RemoteProjectsSection({ session, localProjects, onImported }: Pr
                 />
               ))}
             </ul>
+          )}
+          {q.hasNextPage && (
+            <div className="border-t bg-muted/30 px-3 py-2 flex items-center justify-center">
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => q.fetchNextPage()}
+                disabled={q.isFetchingNextPage}
+                className="h-7"
+              >
+                {q.isFetchingNextPage ? (
+                  <>
+                    <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
+                    Loading more…
+                  </>
+                ) : (
+                  <>
+                    Load more
+                    {total != null && (
+                      <span className="ml-1.5 text-xs text-muted-foreground">
+                        ({loaded} / {total})
+                      </span>
+                    )}
+                  </>
+                )}
+              </Button>
+            </div>
           )}
         </div>
       )}

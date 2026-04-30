@@ -38,14 +38,12 @@ CREATE TABLE project_settings (
   -- systemPrompt, rules, rulePenalties, healthSettings, validationCount,
   -- validationCountAudio. Empty object is valid.
   settings TEXT NOT NULL DEFAULT '{}',
-  updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
   updated_by INTEGER REFERENCES users(id),
   -- Monotonic counter — incremented atomically on PATCH. Clients send
   -- ifMatchVersion = previous value; mismatch returns 409.
   version INTEGER NOT NULL DEFAULT 0
 );
-
-CREATE INDEX idx_project_settings_updated_at ON project_settings(updated_at);
 ```
 
 - [ ] **Step 2: Apply locally and verify**
@@ -408,7 +406,7 @@ projectSettingsRoutes.patch("/:id/settings", async (c) => {
     // SELECT above and this UPDATE.
     const updated = await c.env.DB.prepare(
       `UPDATE project_settings
-       SET settings = ?, version = version + 1, updated_by = ?, updated_at = datetime('now')
+       SET settings = ?, version = version + 1, updated_by = ?, updated_at = CURRENT_TIMESTAMP
        WHERE project_id = ? AND version = ?
        RETURNING version`
     ).bind(merged, user.id, projectId, body.ifMatchVersion).first<{ version: number }>()
@@ -429,7 +427,7 @@ projectSettingsRoutes.patch("/:id/settings", async (c) => {
     try {
       await c.env.DB.prepare(
         `INSERT INTO project_settings (project_id, settings, version, updated_by, updated_at)
-         VALUES (?, ?, 1, ?, datetime('now'))`
+         VALUES (?, ?, 1, ?, CURRENT_TIMESTAMP)`
       ).bind(projectId, merged, user.id).run()
     } catch {
       const latest = await loadSettings(c.env, projectId)

@@ -3,6 +3,8 @@ import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { getProject, patchProject } from "@/lib/store/project-index"
 import {
   fetchProjectSettings,
+  patchProjectSettings,
+  type PatchResult,
   type ProjectWideSettings,
   type ProjectSettingsResponse,
 } from "@/lib/sync/project-settings"
@@ -10,6 +12,12 @@ import {
 const EDIT_ROLE_FLOOR = 500 // PROJECT_LEAD+
 
 export type CannotEditReason = "offline" | "role" | null
+
+export type PatchOutcome =
+  | { kind: "ok" }
+  | { kind: "conflict"; latest: ProjectSettingsResponse }
+  | { kind: "blocked"; reason: "offline" | "role" }
+  | { kind: "error"; message: string }
 
 export interface UseProjectSettings {
   /** Merged view: server values overlay local IDB values for keys the
@@ -27,6 +35,10 @@ export interface UseProjectSettings {
   reasonCannotEdit: CannotEditReason
   /** Force a re-GET. */
   refresh: () => Promise<ProjectSettingsResponse | null>
+  /** Apply a partial settings update. Optimistic local update, server PATCH,
+   *  conflict-snap on 409, returns outcome. Blocked when offline or below
+   *  PROJECT_LEAD. */
+  patch: (partial: ProjectWideSettings) => Promise<PatchOutcome>
 }
 
 function useOnline(): boolean {
@@ -174,6 +186,40 @@ export function useProjectSettings(
       ? "offline"
       : "role"
 
+  const patch = useCallback(async (partial: ProjectWideSettings): Promise<PatchOutcome> => {
+    if (!projectId || !jwt) return { kind: "error", message: "no session or project" }
+    if (!isOnlineRef.current) return { kind: "blocked", reason: "offline" }
+    if (roleLevel == null || roleLevel < EDIT_ROLE_FLOOR) return { kind: "blocked", reason: "role" }
+
+    // Optimistic local update so the UI feels instant.
+    const baseVersion = server?.version ?? 0
+    const optimistic: ProjectSettingsResponse = {
+      version: baseVersion,
+      updatedAt: server?.updatedAt ?? new Date().toISOString(),
+      updatedBy: server?.updatedBy ?? null,
+      settings: { ...(server?.settings ?? {}), ...partial },
+    }
+    setServer(optimistic)
+
+    const result: PatchResult = await patchProjectSettings(jwt, projectId, partial, baseVersion)
+    if (!aliveRef.current) return { kind: "ok" }
+
+    if (result.kind === "ok") {
+      setServer(result.value)
+      return { kind: "ok" }
+    }
+    if (result.kind === "conflict") {
+      setServer(result.latest)
+      return { kind: "conflict", latest: result.latest }
+    }
+    if (result.kind === "forbidden") {
+      void refresh() // revert optimistic by re-fetching truth
+      return { kind: "blocked", reason: "role" }
+    }
+    void refresh()
+    return { kind: "error", message: result.message }
+  }, [projectId, jwt, roleLevel, server, refresh])
+
   return {
     settings,
     version: server ? server.version : null,
@@ -184,5 +230,6 @@ export function useProjectSettings(
     canEdit,
     reasonCannotEdit,
     refresh,
+    patch,
   }
 }

@@ -107,3 +107,68 @@ describe("useProjectSettings — read path", () => {
     await waitFor(() => expect(result.current.settings.sourceLanguage).toBe("en"))
   })
 })
+
+describe("useProjectSettings — write path", () => {
+  it("returns blocked-offline when offline", async () => {
+    Object.defineProperty(navigator, "onLine", { configurable: true, value: false })
+    const { result } = renderHook(() => useProjectSettings("p1", 700))
+    const got = await result.current.patch({ sourceLanguage: "fr" })
+    expect(got.kind).toBe("blocked")
+    if (got.kind === "blocked") expect(got.reason).toBe("offline")
+  })
+
+  it("returns blocked-role for sub-PROJECT_LEAD callers", async () => {
+    const { result } = renderHook(() => useProjectSettings("p1", 400))
+    const got = await result.current.patch({ sourceLanguage: "fr" })
+    expect(got.kind).toBe("blocked")
+    if (got.kind === "blocked") expect(got.reason).toBe("role")
+  })
+
+  it("optimistic write + server confirm", async () => {
+    vi.spyOn(restClient, "fetchProjectSettings").mockResolvedValue({
+      version: 1, updatedAt: "x", updatedBy: { id: 1, username: "ryder" },
+      settings: { sourceLanguage: "en" },
+    })
+    const patchSpy = vi.spyOn(restClient, "patchProjectSettings").mockResolvedValue({
+      kind: "ok",
+      value: {
+        version: 2, updatedAt: "y", updatedBy: { id: 1, username: "ryder" },
+        settings: { sourceLanguage: "fr" },
+      },
+    })
+    const { result } = renderHook(() => useProjectSettings("p1", 700))
+    await waitFor(() => expect(result.current.version).toBe(1))
+    let res!: any
+    await act(async () => {
+      res = await result.current.patch({ sourceLanguage: "fr" })
+    })
+    expect(res.kind).toBe("ok")
+    expect(patchSpy).toHaveBeenCalledWith("test-jwt", "p1", { sourceLanguage: "fr" }, 1)
+    expect(result.current.settings.sourceLanguage).toBe("fr")
+    expect(result.current.version).toBe(2)
+  })
+
+  it("snaps to server on conflict", async () => {
+    vi.spyOn(restClient, "fetchProjectSettings").mockResolvedValue({
+      version: 1, updatedAt: "x", updatedBy: { id: 1, username: "ryder" },
+      settings: { sourceLanguage: "en" },
+    })
+    vi.spyOn(restClient, "patchProjectSettings").mockResolvedValue({
+      kind: "conflict",
+      latest: {
+        version: 2, updatedAt: "y", updatedBy: { id: 9, username: "alex" },
+        settings: { sourceLanguage: "de" },
+      },
+    })
+    const { result } = renderHook(() => useProjectSettings("p1", 700))
+    await waitFor(() => expect(result.current.version).toBe(1))
+    let res!: any
+    await act(async () => {
+      res = await result.current.patch({ sourceLanguage: "fr" })
+    })
+    expect(res.kind).toBe("conflict")
+    if (res.kind === "conflict") expect(res.latest.updatedBy?.username).toBe("alex")
+    expect(result.current.settings.sourceLanguage).toBe("de")
+    expect(result.current.version).toBe(2)
+  })
+})

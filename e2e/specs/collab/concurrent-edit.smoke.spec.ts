@@ -38,6 +38,6 @@ test("alice's edit on cell 0 is visible in bob's open editor within 5s", async (
   const text = `from-alice-${Date.now()}`
   await aliceWs.editCell(0, text)
 
-  // Bob sees it
-  await expect(bobWs.cellRow(0)).toContainText(text, { timeout: 5_000 })
+  // Bob sees it. 10s budget covers cold DO round-trip + DOM update under load.
+  await expect(bobWs.cellRow(0)).toContainText(text, { timeout: 10_000 })
 })

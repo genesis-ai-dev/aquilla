@@ -21,6 +21,7 @@
     "test:e2e": "tsx scripts/e2e-up.ts",
     "test:e2e:ui": "tsx scripts/e2e-up.ts -- --ui",
     "test:e2e:debug": "tsx scripts/e2e-up.ts -- --debug",
+    "//test:e2e:tauri": "Plan 3 — config file does not yet exist; this script will fail until Tauri smoke is implemented.",
     "test:e2e:tauri": "playwright test --config e2e/config/playwright.config.tauri.ts",
     "tauri": "tauri",
     "pretauri:dev": "node scripts/ensure-port-free.mjs 1420",

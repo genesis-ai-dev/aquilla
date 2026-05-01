@@ -145,7 +145,20 @@ async function main(): Promise<void> {
   const dashDashIdx = extra.indexOf("--")
   if (dashDashIdx >= 0) playwrightArgs.push(...extra.slice(dashDashIdx + 1))
   console.log(`[e2e-up] running: npx ${playwrightArgs.join(" ")}`)
-  const pw = spawn("npx", playwrightArgs, { cwd: REPO_ROOT, stdio: "inherit" })
+  // Pass the local backend URLs through to the Playwright child so test
+  // helpers (seed.ts, auth.ts, AI completion spec) can read them via
+  // process.env. .env.test.local handles the Vite/browser side; this
+  // handles the test-runner/node side.
+  const pw = spawn("npx", playwrightArgs, {
+    cwd: REPO_ROOT,
+    stdio: "inherit",
+    env: {
+      ...process.env,
+      VITE_FRONTIER_BASE: `http://127.0.0.1:${FRONTIER_PORT}`,
+      VITE_SYNC_WORKER_HOST: `127.0.0.1:${SYNC_WORKER_PORT}`,
+      VITE_LLM_BASE_URL: mockLLM.baseUrl,
+    },
+  })
   pw.on("exit", (code) => { void shutdown(code ?? 1) })
 }
 

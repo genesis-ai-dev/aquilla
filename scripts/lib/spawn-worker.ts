@@ -28,16 +28,21 @@ export async function spawnWranglerDev(opts: {
   child.stdout?.on("data", (b) => process.stdout.write(`[${opts.label}] ${b}`))
   child.stderr?.on("data", (b) => process.stderr.write(`[${opts.label}] ${b}`))
 
-  // Wait for the worker to be reachable.
+  // Wait for the worker to be reachable. Throw if it never comes up.
   const start = Date.now()
+  let ready = false
   while (Date.now() - start < 30_000) {
     try {
       const r = await fetch(`http://127.0.0.1:${opts.port}/`)
-      if (r.status < 500) break
+      if (r.status < 500) { ready = true; break }
     } catch {
       // not yet reachable
     }
     await new Promise((r) => setTimeout(r, 500))
+  }
+  if (!ready) {
+    child.kill("SIGKILL")
+    throw new Error(`[${opts.label}] timed out waiting for :${opts.port}`)
   }
 
   return {

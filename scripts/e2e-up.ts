@@ -17,9 +17,16 @@ const VITE_PORT = 5173
 
 const cleanup: Array<() => Promise<void>> = []
 
+let shuttingDown = false
 async function shutdown(code = 0): Promise<never> {
+  if (shuttingDown) {
+    // A second SIGINT during teardown — give up on graceful and exit hard.
+    process.exit(code)
+  }
+  shuttingDown = true
   console.log("\n[e2e-up] shutting down…")
-  for (const fn of cleanup.reverse()) {
+  // Iterate a copy so the array isn't mutated.
+  for (const fn of [...cleanup].reverse()) {
     try { await fn() } catch (e) { console.error(e) }
   }
   process.exit(code)
@@ -111,10 +118,12 @@ async function main(): Promise<void> {
 
   // 7. Boot Vite
   console.log(`[e2e-up] starting Vite on :${VITE_PORT}…`)
-  const vite = spawn("npx", ["vite", "--port", String(VITE_PORT), "--strictPort"], {
+  // `--mode test` makes Vite load .env.test.local (Vite reads its mode from
+  // the CLI flag, not the MODE shell env var).
+  const vite = spawn("npx", ["vite", "--port", String(VITE_PORT), "--strictPort", "--mode", "test"], {
     cwd: REPO_ROOT,
     stdio: ["ignore", "pipe", "pipe"],
-    env: { ...process.env, MODE: "test" },
+    env: { ...process.env },
   })
   vite.stdout?.on("data", (b) => process.stdout.write(`[vite] ${b}`))
   vite.stderr?.on("data", (b) => process.stderr.write(`[vite] ${b}`))

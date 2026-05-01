@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import "fake-indexeddb/auto";
 import { login, FrontierAuthError } from "./auth";
 import { clearSession, loadSession } from "./session-store";
@@ -29,5 +29,26 @@ describe("login", () => {
       new Response(JSON.stringify({ detail: "bad creds" }), { status: 401 })
     );
     await expect(login({ username: "x", password: "y" })).rejects.toBeInstanceOf(FrontierAuthError);
+  });
+});
+
+describe("FRONTIER_BASE env override", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.resetModules();
+  });
+
+  it("uses VITE_FRONTIER_BASE when set", async () => {
+    vi.stubEnv("VITE_FRONTIER_BASE", "http://127.0.0.1:8787");
+    vi.resetModules();
+    const mod = await import("./auth");
+    expect(mod.FRONTIER_BASE).toBe("http://127.0.0.1:8787");
+  });
+
+  it("falls back to api.frontierrnd.com when env is unset", async () => {
+    vi.stubEnv("VITE_FRONTIER_BASE", "");
+    vi.resetModules();
+    const mod = await import("./auth");
+    expect(mod.FRONTIER_BASE).toBe("https://api.frontierrnd.com");
   });
 });

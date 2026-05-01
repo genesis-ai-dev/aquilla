@@ -1,7 +1,9 @@
 import type { FrontierSession } from "./types";
 import { saveSession } from "./session-store";
 
-export const FRONTIER_BASE = "https://api.frontierrnd.com";
+export const FRONTIER_BASE =
+  ((import.meta.env.VITE_FRONTIER_BASE as string | undefined)?.replace(/\/+$/, "")) ||
+  "https://api.frontierrnd.com";
 
 export class FrontierAuthError extends Error {
   public status: number;

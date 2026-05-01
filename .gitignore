@@ -43,3 +43,6 @@ test-results/
 playwright-report/
 blob-report/
 playwright/.cache/
+
+# E2E suite — local-only state
+e2e/.auth/

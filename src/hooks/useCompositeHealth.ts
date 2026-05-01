@@ -113,12 +113,18 @@ export function useCompositeHealth(input: UseCompositeHealthInput): UseComposite
   }, [])
 
   // Latest inputs captured in a ref so the debounced callback always reads
-  // the freshest values without re-binding the timer or re-allocating cells
-  // on every render. The effect body only schedules — all heavy work
-  // (buildCells + JSON key + postMessage) happens inside the timer.
+  // the freshest values without re-allocating cells on every render. The
+  // effect body only schedules — all heavy work (buildCells + JSON key +
+  // postMessage) happens inside the timer.
   const latestInputRef = useRef(input)
   latestInputRef.current = input
 
+  // Schedule a recompute when an input identity actually changes. The deps
+  // are the four input fields (each stable across renders by upstream useMemo
+  // / primitive). Without these deps the effect would fire on every parent
+  // render — any unrelated state churn (video time, presence, sync ticks)
+  // would reset the timer and a validate/invalidate could go unrecomputed
+  // until renders happen to quiesce for a full debounce window.
   useEffect(() => {
     if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current)
     debounceTimerRef.current = setTimeout(() => {
@@ -171,8 +177,7 @@ export function useCompositeHealth(input: UseCompositeHealthInput): UseComposite
       setReady(true)
       endTotal()
     }, HEALTH_DEBOUNCE_MS)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  })
+  }, [input.fileCells, input.rules, input.config, input.requiredValidations])
 
   return { stats, ready }
 }

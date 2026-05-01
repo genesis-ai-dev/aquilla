@@ -1,5 +1,5 @@
 import { spawn, spawnSync } from "node:child_process"
-import { existsSync, writeFileSync, rmSync } from "node:fs"
+import { existsSync, writeFileSync, rmSync, readdirSync } from "node:fs"
 import { homedir } from "node:os"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
@@ -91,17 +91,46 @@ async function main(): Promise<void> {
   await freePort(SYNC_WORKER_PORT)
   await freePort(VITE_PORT)
 
-  // 1. Reset frontier-server local D1 by deleting wrangler state
-  const wranglerStateDir = path.join(FRONTIER_SERVER_DIR, ".wrangler")
-  console.log(`[e2e-up] resetting wrangler local state at ${wranglerStateDir}`)
-  rmSync(wranglerStateDir, { recursive: true, force: true })
+  // 1. Reset both wrangler local states for clean slate
+  console.log("[boot 1/8] resetting wrangler local state…")
+  rmSync(path.join(FRONTIER_SERVER_DIR, ".wrangler"), { recursive: true, force: true })
+  rmSync(path.join(SYNC_WORKER_DIR, ".wrangler"), { recursive: true, force: true })
 
-  // 2. Apply migrations
-  console.log("[e2e-up] applying frontier-server migrations…")
-  await runOnce("npx", ["wrangler", "d1", "migrations", "apply", "frontier-db-v2", "--local"], FRONTIER_SERVER_DIR)
+  // 2. Apply frontier-db-v2 migrations (auth, orgs, members, sync-token).
+  console.log("[boot 2/8] applying frontier-db-v2 migrations…")
+  await runOnce(
+    "npx",
+    ["wrangler", "d1", "migrations", "apply", "frontier-db-v2", "--local"],
+    FRONTIER_SERVER_DIR,
+  )
+
+  // 2b. Apply codex-db schema to BOTH workers' local D1.
+  //
+  // codex-db is shared (frontier-server reads, sync-worker writes the
+  // `files`/`cells` projections on Y.Doc onSave). frontier-server owns the
+  // migrations (cloudflare/codex_migrations). sync-worker doesn't list a
+  // migrations_dir for it, so we apply by piping each .sql file to
+  // `wrangler d1 execute` against the sync-worker's local D1.
+  console.log("[boot 3/8] applying codex-db schema (both workers)…")
+  await runOnce(
+    "npx",
+    ["wrangler", "d1", "migrations", "apply", "codex-db", "--local"],
+    FRONTIER_SERVER_DIR,
+  )
+  const codexMigrationsDir = path.join(FRONTIER_SERVER_DIR, "cloudflare/codex_migrations")
+  const codexMigrations = readdirSync(codexMigrationsDir)
+    .filter((f) => f.endsWith(".sql"))
+    .sort()
+  for (const m of codexMigrations) {
+    await runOnce(
+      "npx",
+      ["wrangler", "d1", "execute", "codex-db", "--local", `--file=${path.join(codexMigrationsDir, m)}`],
+      SYNC_WORKER_DIR,
+    )
+  }
 
   // 3. Boot frontier-server
-  console.log(`[e2e-up] starting frontier-server on :${FRONTIER_PORT}…`)
+  console.log(`[boot 4/8] starting frontier-server on :${FRONTIER_PORT}…`)
   const frontier: SpawnedWorker = await spawnWranglerDev({
     cwd: FRONTIER_SERVER_DIR,
     port: FRONTIER_PORT,
@@ -111,7 +140,7 @@ async function main(): Promise<void> {
   cleanup.push(() => frontier.kill())
 
   // 4. Boot sync-worker
-  console.log(`[e2e-up] starting sync-worker on :${SYNC_WORKER_PORT}…`)
+  console.log(`[boot 5/8] starting sync-worker on :${SYNC_WORKER_PORT}…`)
   const sync: SpawnedWorker = await spawnWranglerDev({
     cwd: SYNC_WORKER_DIR,
     port: SYNC_WORKER_PORT,
@@ -120,10 +149,10 @@ async function main(): Promise<void> {
   cleanup.push(() => sync.kill())
 
   // 5. Boot mock LLM
-  console.log("[e2e-up] starting mock LLM…")
+  console.log("[boot 6/8] starting mock LLM…")
   const mockLLM = new MockLLMServer()
   await mockLLM.start()
-  console.log(`[e2e-up] mock LLM ready at ${mockLLM.baseUrl}`)
+  console.log(`         mock LLM ready at ${mockLLM.baseUrl}`)
   cleanup.push(async () => mockLLM.stop())
 
   // 6. Write .env.test.local
@@ -138,7 +167,6 @@ async function main(): Promise<void> {
     ].join("\n"),
   )
   cleanup.push(async () => rmSync(envFile, { force: true }))
-  console.log(`[e2e-up] wrote ${envFile}`)
 
   // 7. Build once, then serve via `vite preview` (static).
   //
@@ -148,10 +176,10 @@ async function main(): Promise<void> {
   // static server with ~0 ongoing CPU and ~50 MB RAM vs. several hundred MB.
   //
   // The build cost (~15-30s) pays for itself after the second spec.
-  console.log("[e2e-up] building app for test mode (one-time)…")
+  console.log("[boot 7/8] building app for test mode (one-time, ~30s)…")
   await runOnce("npx", ["vite", "build", "--mode", "test"], REPO_ROOT)
 
-  console.log(`[e2e-up] starting Vite preview on :${VITE_PORT}…`)
+  console.log(`[boot 8/8] starting Vite preview on :${VITE_PORT}…`)
   const vite = spawn(
     "npx",
     ["vite", "preview", "--port", String(VITE_PORT), "--strictPort", "--mode", "test"],
@@ -167,12 +195,27 @@ async function main(): Promise<void> {
 
   await waitForUrl(`http://127.0.0.1:${VITE_PORT}/`, 30_000)
 
+  console.log("[boot ✓] all services up, handing off to Playwright")
+  console.log("")
+
   // 8. Hand off to Playwright. Forward extra CLI args after `--`.
-  const playwrightArgs = ["playwright", "test", "--config", "e2e/config/playwright.config.web.ts"]
+  // Default to the `line` reporter for live one-line progress; user can
+  // override via `npm run test:e2e -- --reporter=list` etc.
+  const playwrightArgs = [
+    "playwright",
+    "test",
+    "--config",
+    "e2e/config/playwright.config.web.ts",
+  ]
   const extra = process.argv.slice(2)
   const dashDashIdx = extra.indexOf("--")
-  if (dashDashIdx >= 0) playwrightArgs.push(...extra.slice(dashDashIdx + 1))
-  console.log(`[e2e-up] running: npx ${playwrightArgs.join(" ")}`)
+  const userArgs = dashDashIdx >= 0 ? extra.slice(dashDashIdx + 1) : []
+  const userSpecifiedReporter = userArgs.some((a) => a === "--reporter" || a.startsWith("--reporter="))
+  if (!userSpecifiedReporter && !process.env.CI) {
+    playwrightArgs.push("--reporter=line")
+  }
+  playwrightArgs.push(...userArgs)
+  console.log(`[run] npx ${playwrightArgs.join(" ")}`)
   // Pass the local backend URLs through to the Playwright child so test
   // helpers (seed.ts, auth.ts, AI completion spec) can read them via
   // process.env. .env.test.local handles the Vite/browser side; this

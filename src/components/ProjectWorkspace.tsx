@@ -62,6 +62,7 @@ import { restoreProject } from "@/lib/store/project-index"
 import { AppShell } from "./AppShell"
 import { WorkspaceHeader } from "./WorkspaceHeader"
 import { VoiceBar } from "./VoiceBar"
+import { SelectionBar } from "./SelectionBar"
 import { WorkspaceStatusBar } from "./WorkspaceStatusBar"
 import { PrimaryActionButton } from "./PrimaryActionButton"
 import { AccountSwitcher } from "./AccountSwitcher"
@@ -816,15 +817,26 @@ export function ProjectWorkspace() {
               onClose={workspaceTabs.closeTab}
             />
             {project && doc && activeFileId && (
-              <VoiceBar
-                project={project}
-                cells={cells}
-                doc={doc}
-                username={currentUsername}
-                session={frontierSession}
-                editorRef={editorRef}
-                onProjectChanged={refresh}
-              />
+              <>
+                <VoiceBar
+                  project={project}
+                  cells={cells}
+                  doc={doc}
+                  username={currentUsername}
+                  session={frontierSession}
+                  editorRef={editorRef}
+                  onProjectChanged={refresh}
+                  onCompleteSingle={completeSingle}
+                />
+                <SelectionBar
+                  project={project}
+                  cells={cells}
+                  doc={doc}
+                  session={frontierSession}
+                  username={currentUsername}
+                  completeSingle={completeSingle}
+                />
+              </>
             )}
             {isReadOnly && (
               <div className="flex items-center gap-2 border-b bg-amber-50 px-4 py-2 text-xs text-amber-900">

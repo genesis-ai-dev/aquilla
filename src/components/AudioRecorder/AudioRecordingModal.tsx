@@ -22,6 +22,7 @@ import { AudioWaveform } from "./AudioWaveform"
 import { DurationBar } from "./DurationBar"
 import { buildAudioId, uploadCellAudio } from "@/lib/audio/upload"
 import { attachAudioToCell } from "@/lib/audio/attach"
+import { markProjectHasAudioDataSoon } from "@/lib/audio/project-audio-state"
 import { transcribeAndStoreTimings } from "@/lib/audio/transcribe"
 import { whisperLanguageFromTag } from "@/lib/audio/language"
 import { setTranscribeStatus } from "@/lib/audio/transcribe-status"
@@ -168,6 +169,7 @@ export function AudioRecordingModal({
         username,
         mimeType: recorder.state.mimeType,
       })
+      markProjectHasAudioDataSoon(project.id)
       // Fire-and-forget transcription. The modal returns to idle/saved
       // immediately; the per-cell badge in EditorTable surfaces progress.
       const cellId = activeCell.id

@@ -1,5 +1,5 @@
 // Page-local consent gate for the heavy in-browser AI models. The first
-// time a user kicks off Whisper or Kokoro we surface a dialog explaining
+// time a user kicks off Whisper, Kokoro, or MMS we surface a dialog explaining
 // the download size; subsequent uses (in this browser) skip it.
 //
 // Lives outside React so workers and orchestrators can call
@@ -19,7 +19,7 @@ export class AiModelConsentDeniedError extends Error {
 
 export interface AiModelInfo {
   /** Stable id used for the localStorage key. */
-  id: "whisper" | "kokoro"
+  id: "whisper" | "kokoro" | "mms"
   /** Display name in the dialog. */
   label: string
   /** Approximate download size in MB (one-time). */
@@ -55,7 +55,7 @@ function storeConsent(id: AiModelInfo["id"]): void {
 
 /**
  * Stores the "all AI features" consent flag. Setting this skips the per-
- * model consent dialog for both Whisper and Kokoro. Used by the onboarding
+ * model consent dialog for Whisper, Kokoro, and MMS. Used by the onboarding
  * "Enable AI voice & transcription" step which asks once for both.
  */
 export function storeAllFeaturesConsent(): void {
@@ -65,6 +65,7 @@ export function storeAllFeaturesConsent(): void {
     // Also set per-model so legacy checks elsewhere stay consistent.
     localStorage.setItem(KEY_PREFIX + "whisper", "1")
     localStorage.setItem(KEY_PREFIX + "kokoro", "1")
+    localStorage.setItem(KEY_PREFIX + "mms", "1")
   } catch { /* private mode */ }
 }
 
@@ -140,4 +141,12 @@ export const KOKORO_MODEL: AiModelInfo = {
   sizeMb: 80,
   rationale:
     "Generates a clean voice rendering of cell text. Runs entirely in your browser — your text isn't sent to any server.",
+}
+
+export const MMS_MODEL: AiModelInfo = {
+  id: "mms",
+  label: "MMS (multilingual TTS)",
+  sizeMb: 130,
+  rationale:
+    "Meta's MMS-TTS runs in your browser for supported Xenova language repos. Each language is downloaded the first time you use it.",
 }

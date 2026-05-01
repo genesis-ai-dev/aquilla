@@ -1,8 +1,8 @@
 // Background prefetch for the heavy in-browser AI models. Drives both the
 // onboarding "Download AI features" step and the floating progress chip.
 //
-// Internals: sends a "warmup" message to the lazy-loaded Whisper and Kokoro
-// workers; they call their pipeline init (downloading model weights to the
+// Internals: sends a "warmup" message to the lazy-loaded Whisper, Kokoro,
+// and MMS workers; they call their pipeline init (downloading model weights to the
 // browser's Cache API) and post progress back. Subsequent transcribe / synth
 // calls find the pipeline already warm and run instantly.
 
@@ -19,8 +19,15 @@ import type {
   WarmedMessage as KokoroWarmed,
   WarmupRequest as KokoroWarmupRequest,
 } from "./kokoro-worker"
+import type {
+  ProgressMessage as MmsProgress,
+  ErrorMessage as MmsError,
+  WarmedMessage as MmsWarmed,
+  WarmupRequest as MmsWarmupRequest,
+} from "./mms-worker"
+import { DEFAULT_MMS_LANGUAGE, inferMmsLanguageCode } from "./tts-providers"
 
-export type ModelId = "whisper" | "kokoro"
+export type ModelId = "whisper" | "kokoro" | "mms"
 
 export type ModelPrefetchStatus =
   | { kind: "idle" }
@@ -82,6 +89,7 @@ const TRANSFORMERS_CACHE_KEY = "transformers-cache"
 const MODEL_REPOS: Record<ModelId, string> = {
   whisper: "Xenova/whisper-base",
   kokoro: "onnx-community/Kokoro-82M-v1.0-ONNX",
+  mms: "mms-tts-",
 }
 
 /**
@@ -111,6 +119,7 @@ export async function hydratePrefetchStatus(): Promise<void> {
 export async function clearPrefetchStatus(model?: ModelId): Promise<void> {
   if (model) status.delete(model)
   else status.clear()
+  if (!model || model === "mms") readyMmsLanguage = null
   notify()
   if (typeof caches === "undefined") return
   try {
@@ -132,7 +141,9 @@ export async function clearPrefetchStatus(model?: ModelId): Promise<void> {
 
 let whisperWorkerPromise: Promise<Worker> | null = null
 let kokoroWorkerPromise: Promise<Worker> | null = null
+let mmsWorkerPromise: Promise<Worker> | null = null
 let prefetchSeq = 0
+let readyMmsLanguage: string | null = null
 
 // On dynamic-import failure (Brave Shields blocks the asset, network down,
 // SOCKS proxy refusing) the cached promise would otherwise stay rejected
@@ -155,6 +166,16 @@ async function getKokoroWorker(): Promise<Worker> {
   })()
   kokoroWorkerPromise = p
   p.catch(() => { if (kokoroWorkerPromise === p) kokoroWorkerPromise = null })
+  return p
+}
+async function getMmsWorker(): Promise<Worker> {
+  if (mmsWorkerPromise) return mmsWorkerPromise
+  const p = (async () => {
+    const mod = await import("./mms-worker?worker")
+    return new (mod.default as new () => Worker)()
+  })()
+  mmsWorkerPromise = p
+  p.catch(() => { if (mmsWorkerPromise === p) mmsWorkerPromise = null })
   return p
 }
 
@@ -232,10 +253,54 @@ async function warmKokoro(): Promise<void> {
   }
 }
 
+async function warmMms(language: string | undefined): Promise<void> {
+  const lang = inferMmsLanguageCode(language) ?? DEFAULT_MMS_LANGUAGE
+  if (getModelStatus("mms").kind === "ready" && readyMmsLanguage === lang) return
+  setStatus("mms", { kind: "downloading", loaded: 0, total: 0, file: "" })
+  let worker: Worker
+  try {
+    worker = await getMmsWorker()
+  } catch (e) {
+    const message = e instanceof Error ? e.message : String(e)
+    setStatus("mms", { kind: "error", message: friendlyDownloadError(message) })
+    throw e
+  }
+  const requestId = `warm-m-${++prefetchSeq}`
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const onMessage = (event: MessageEvent<MmsProgress | MmsWarmed | MmsError>) => {
+        const m = event.data
+        if (m.requestId !== requestId) return
+        if (m.type === "progress") {
+          setStatus("mms", { kind: "downloading", loaded: m.loaded, total: m.total, file: m.file })
+          return
+        }
+        worker.removeEventListener("message", onMessage)
+        if (m.type === "warmed") { readyMmsLanguage = lang; markReady("mms"); resolve() }
+        else { setStatus("mms", { kind: "error", message: friendlyDownloadError(m.message) }); reject(new Error(m.message)) }
+      }
+      worker.addEventListener("message", onMessage)
+      const req: MmsWarmupRequest = { type: "warmup", requestId, lang }
+      worker.postMessage(req)
+    })
+  } catch (e) {
+    try { worker.terminate() } catch { /* nothing to clean up */ }
+    if (mmsWorkerPromise) mmsWorkerPromise = null
+    throw e
+  }
+}
+
 // Map the raw browser/network errors we see most often (Brave Shields, Tor
 // SOCKS, offline) to a single line the user can act on.
 function friendlyDownloadError(raw: string): string {
   const r = raw.toLowerCase()
+  if (
+    r.includes("unauthorized access") ||
+    r.includes("401") ||
+    r.includes("403")
+  ) {
+    return "Model host rejected the download. Check that the MMS model bucket is public and CORS allows this app."
+  }
   if (
     r.includes("err_blocked_by_client") ||
     r.includes("blocked by client") ||
@@ -253,6 +318,8 @@ function friendlyDownloadError(raw: string): string {
 
 export interface PrefetchOptions {
   models?: ModelId[]
+  /** MMS downloads one language model at a time. Defaults to English. */
+  mmsLanguage?: string
 }
 
 /**
@@ -270,5 +337,6 @@ export async function prefetchAiModels(opts: PrefetchOptions = {}): Promise<void
   const promises: Promise<void>[] = []
   if (models.includes("whisper")) promises.push(warmWhisper())
   if (models.includes("kokoro")) promises.push(warmKokoro())
+  if (models.includes("mms")) promises.push(warmMms(opts.mmsLanguage))
   await Promise.all(promises)
 }

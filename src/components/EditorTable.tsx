@@ -33,6 +33,16 @@ import { setTranscribeStatus, useTranscribeStatus } from "@/lib/audio/transcribe
 import { whisperLanguageFromTag } from "@/lib/audio/language"
 import { handleVoiceDropOnCell, VOICE_DRAG_MIME } from "./VoiceBar"
 import { AiModelConsentDeniedError } from "@/lib/audio/ai-consent"
+import {
+  MAX_SELECTED,
+  clearSelection,
+  getSelectedIds,
+  getSelectionAnchorId,
+  setSelection,
+  toggleSelected,
+  useIsSelected,
+} from "@/lib/audio/selection"
+import { ttsStatusKey, useTtsStatus } from "@/lib/audio/tts"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { cn } from "@/lib/utils"
 import { isPerfLogEnabled } from "@/lib/perf-log"
@@ -61,6 +71,44 @@ if (typeof window !== "undefined") {
   }
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   ;(window as any).__perfResetRowRenders = () => rowRenders.clear()
+}
+
+/** Tiny gutter badge that surfaces synth lifecycle: translating, generating,
+ *  or failed. Lives in the left gutter so the loading state is anchored next
+ *  to the cell that's actually working, even if the row scrolls. */
+function SynthStatusBadge({
+  status,
+}: {
+  status: ReturnType<typeof useTtsStatus>
+}) {
+  if (status.kind === "loading") {
+    const isTranslating = status.file === "Translating…"
+    return (
+      <span className="inline-flex items-center gap-1 rounded-full bg-primary/15 px-1.5 py-0.5 text-[9px] font-medium text-primary">
+        <span className="h-1 w-1 animate-pulse rounded-full bg-primary" />
+        {isTranslating ? "Translating" : "Loading"}
+      </span>
+    )
+  }
+  if (status.kind === "synthesizing") {
+    return (
+      <span className="inline-flex items-center gap-1 rounded-full bg-primary/15 px-1.5 py-0.5 text-[9px] font-medium text-primary">
+        <span className="h-1 w-1 animate-pulse rounded-full bg-primary" />
+        Voicing
+      </span>
+    )
+  }
+  if (status.kind === "error") {
+    return (
+      <span
+        className="inline-flex max-w-[80px] items-center gap-1 truncate rounded-full bg-destructive/15 px-1.5 py-0.5 text-[9px] font-medium text-destructive"
+        title={status.message}
+      >
+        Failed
+      </span>
+    )
+  }
+  return null
 }
 
 function ValidationHistoryTimeline({
@@ -135,6 +183,9 @@ function ValidationHistoryTimeline({
 // mint a fresh [] and break React.memo for every row.
 const EMPTY_EXAMPLES: ScoredPair[] = []
 const EMPTY_INFRACTIONS: RuleInfraction[] = []
+const SELECTION_DRAG_THRESHOLD_PX = 3
+const SELECTION_EDGE_SCROLL_ZONE_PX = 56
+const SELECTION_EDGE_SCROLL_STEP_PX = 22
 
 export interface EditorTableHandle {
   scrollToCellIndex: (index: number) => void
@@ -203,6 +254,18 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   const isDragging = useRef(false)
   const dragCells = useRef<Set<string>>(new Set())
   const cellsRef = useRef(cells)
+  const selectionDragRef = useRef<{
+    pointerId: number
+    anchorIndex: number
+    lastIndex: number
+    startX: number
+    startY: number
+    didDrag: boolean
+  } | null>(null)
+  const selectionDragAbortRef = useRef<AbortController | null>(null)
+  const selectionAutoScrollFrameRef = useRef<number | null>(null)
+  const selectionPointerYRef = useRef<number | null>(null)
+  const previousBodyUserSelectRef = useRef<string | null>(null)
 
   useEffect(() => {
     cellsRef.current = cells
@@ -224,6 +287,209 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     },
     getCurrentIndex: () => 0,
   }), [virtualizer, cells.length])
+
+  const clampCellIndex = useCallback((index: number) => {
+    const last = cellsRef.current.length - 1
+    if (last < 0) return -1
+    return Math.max(0, Math.min(last, index))
+  }, [])
+
+  const findCellIndex = useCallback((cellId: string | null | undefined) => {
+    if (!cellId) return -1
+    return cellsRef.current.findIndex((c) => c.id === cellId)
+  }, [])
+
+  const selectRangeByIndexes = useCallback((anchorIndex: number, focusIndex: number) => {
+    const list = cellsRef.current
+    if (list.length === 0) return
+    const anchor = clampCellIndex(anchorIndex)
+    const focus = clampCellIndex(focusIndex)
+    if (anchor < 0 || focus < 0) return
+
+    const start = focus >= anchor
+      ? anchor
+      : Math.max(focus, anchor - MAX_SELECTED + 1)
+    const end = focus >= anchor
+      ? Math.min(focus, anchor + MAX_SELECTED - 1)
+      : anchor
+    const ids = list.slice(start, end + 1).map((c) => c.id)
+    setSelection(ids, list[anchor]?.id ?? ids[0] ?? null)
+  }, [clampCellIndex])
+
+  const getIndexAtClientY = useCallback((clientY: number) => {
+    const scrollEl = parentRef.current
+    const list = cellsRef.current
+    if (!scrollEl || list.length === 0) return -1
+    const rect = scrollEl.getBoundingClientRect()
+    const yWithin = Math.max(0, Math.min(rect.height, clientY - rect.top))
+    const y = scrollEl.scrollTop + yWithin
+    const virtualItems = virtualizer.getVirtualItems()
+    if (virtualItems.length === 0) return clampCellIndex(Math.round(y / 90))
+
+    let nearest = virtualItems[0]
+    let nearestDistance = Number.POSITIVE_INFINITY
+    for (const item of virtualItems) {
+      const end = item.start + item.size
+      if (y >= item.start && y <= end) return clampCellIndex(item.index)
+      const distance = y < item.start ? item.start - y : y - end
+      if (distance < nearestDistance) {
+        nearest = item
+        nearestDistance = distance
+      }
+    }
+    return clampCellIndex(nearest.index)
+  }, [clampCellIndex, virtualizer])
+
+  const updateSelectionFromPointer = useCallback((clientY: number) => {
+    const drag = selectionDragRef.current
+    if (!drag) return
+    const nextIndex = getIndexAtClientY(clientY)
+    if (nextIndex < 0 || nextIndex === drag.lastIndex) return
+    drag.lastIndex = nextIndex
+    selectRangeByIndexes(drag.anchorIndex, nextIndex)
+  }, [getIndexAtClientY, selectRangeByIndexes])
+
+  const scrollSelectionNearEdge = useCallback((clientY: number) => {
+    const scrollEl = parentRef.current
+    if (!scrollEl) return
+    const rect = scrollEl.getBoundingClientRect()
+    let delta = 0
+    if (clientY < rect.top + SELECTION_EDGE_SCROLL_ZONE_PX) {
+      delta = -SELECTION_EDGE_SCROLL_STEP_PX
+    } else if (clientY > rect.bottom - SELECTION_EDGE_SCROLL_ZONE_PX) {
+      delta = SELECTION_EDGE_SCROLL_STEP_PX
+    }
+    if (delta !== 0) scrollEl.scrollTop += delta
+  }, [])
+
+  const stopSelectionDrag = useCallback(() => {
+    selectionDragAbortRef.current?.abort()
+    selectionDragAbortRef.current = null
+    selectionDragRef.current = null
+    selectionPointerYRef.current = null
+    if (selectionAutoScrollFrameRef.current !== null) {
+      window.cancelAnimationFrame(selectionAutoScrollFrameRef.current)
+      selectionAutoScrollFrameRef.current = null
+    }
+    if (previousBodyUserSelectRef.current !== null) {
+      document.body.style.userSelect = previousBodyUserSelectRef.current
+      previousBodyUserSelectRef.current = null
+    }
+  }, [])
+
+  const handleSelectionPointerMove = useCallback((e: PointerEvent) => {
+    const drag = selectionDragRef.current
+    if (!drag || e.pointerId !== drag.pointerId) return
+    e.preventDefault()
+    selectionPointerYRef.current = e.clientY
+    if (
+      !drag.didDrag &&
+      (Math.abs(e.clientX - drag.startX) > SELECTION_DRAG_THRESHOLD_PX ||
+        Math.abs(e.clientY - drag.startY) > SELECTION_DRAG_THRESHOLD_PX)
+    ) {
+      drag.didDrag = true
+    }
+    updateSelectionFromPointer(e.clientY)
+  }, [updateSelectionFromPointer])
+
+  const handleSelectionPointerEnd = useCallback((e: PointerEvent) => {
+    const drag = selectionDragRef.current
+    if (!drag || e.pointerId !== drag.pointerId) return
+    e.preventDefault()
+    stopSelectionDrag()
+  }, [stopSelectionDrag])
+
+  const startSelectionAutoScroll = useCallback(() => {
+    if (selectionAutoScrollFrameRef.current !== null) return
+    const tick = () => {
+      if (!selectionDragRef.current) {
+        selectionAutoScrollFrameRef.current = null
+        return
+      }
+      const y = selectionPointerYRef.current
+      if (typeof y === "number") {
+        scrollSelectionNearEdge(y)
+        updateSelectionFromPointer(y)
+      }
+      selectionAutoScrollFrameRef.current = window.requestAnimationFrame(tick)
+    }
+    selectionAutoScrollFrameRef.current = window.requestAnimationFrame(tick)
+  }, [scrollSelectionNearEdge, updateSelectionFromPointer])
+
+  const handleSelectionPointerDown = useCallback((
+    cellId: string,
+    rowIndex: number,
+    e: React.PointerEvent<HTMLButtonElement>,
+  ) => {
+    if (e.button !== 0) return
+    e.preventDefault()
+    e.stopPropagation()
+
+    stopSelectionDrag()
+
+    const selectedIds = getSelectedIds()
+    const isAdditive = e.metaKey || e.ctrlKey
+    const isAlreadySelected = selectedIds.has(cellId)
+    const anchorIndex = findCellIndex(getSelectionAnchorId())
+    const shouldRange =
+      !isAdditive &&
+      anchorIndex >= 0 &&
+      (e.shiftKey || (selectedIds.size > 0 && !isAlreadySelected))
+    const startIndex = shouldRange ? anchorIndex : rowIndex
+
+    selectionDragRef.current = {
+      pointerId: e.pointerId,
+      anchorIndex: clampCellIndex(startIndex),
+      lastIndex: clampCellIndex(rowIndex),
+      startX: e.clientX,
+      startY: e.clientY,
+      didDrag: false,
+    }
+    selectionPointerYRef.current = e.clientY
+
+    previousBodyUserSelectRef.current = document.body.style.userSelect
+    document.body.style.userSelect = "none"
+
+    const controller = new AbortController()
+    selectionDragAbortRef.current = controller
+    window.addEventListener("pointermove", handleSelectionPointerMove, {
+      signal: controller.signal,
+    })
+    window.addEventListener("pointerup", handleSelectionPointerEnd, {
+      signal: controller.signal,
+    })
+    window.addEventListener("pointercancel", handleSelectionPointerEnd, {
+      signal: controller.signal,
+    })
+
+    try {
+      e.currentTarget.setPointerCapture(e.pointerId)
+    } catch {
+      // Pointer capture is a best-effort guard; window listeners still carry
+      // the drag if the browser refuses capture for any reason.
+    }
+
+    if (isAdditive) {
+      toggleSelected(cellId)
+    } else if (shouldRange) {
+      selectRangeByIndexes(anchorIndex, rowIndex)
+    } else if (isAlreadySelected && selectedIds.size === 1) {
+      clearSelection()
+    } else {
+      setSelection([cellId], cellId)
+    }
+    startSelectionAutoScroll()
+  }, [
+    clampCellIndex,
+    findCellIndex,
+    handleSelectionPointerEnd,
+    handleSelectionPointerMove,
+    selectRangeByIndexes,
+    startSelectionAutoScroll,
+    stopSelectionDrag,
+  ])
+
+  useEffect(() => stopSelectionDrag, [stopSelectionDrag])
 
   // Grid layout: [left-gutter] [source] [target]. The left 44px gutter holds
   // only the line number / cell label and the validation pill. There is no
@@ -326,6 +592,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
                 onProjectChanged={onProjectChanged}
                 onDragStart={handleDragStart}
                 onDragEnter={handleDragEnter}
+                onSelectionPointerDown={handleSelectionPointerDown}
                 getVoiceTakeCells={getVoiceTakeCells}
               />
             </div>
@@ -389,6 +656,11 @@ interface MemoizedRowProps {
   onProjectChanged?: () => void
   onDragStart: (cellId: string) => void
   onDragEnter: (cellId: string) => void
+  onSelectionPointerDown: (
+    cellId: string,
+    rowIndex: number,
+    e: React.PointerEvent<HTMLButtonElement>,
+  ) => void
   getVoiceTakeCells: (startIndex: number, count: number) => CellData[]
 }
 
@@ -398,6 +670,7 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
     backtranslating, backtranslationErrors, cellOpenCommentCount, breakdownMap,
     activeCueIndex, rowIndex, gridCols,
     onDragStart: onDragStartParent, onDragEnter: onDragEnterParent,
+    onSelectionPointerDown: onSelectionPointerDownParent,
     getVoiceTakeCells,
     project, doc, username, editable, isCompletionConfigured, isCompletionAvailable,
     ruleMap, onCompleteSingle, onInfractionClick,
@@ -437,6 +710,10 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
   // Stable per-row because both parent callbacks and cellId are stable.
   const handleDragStart = useCallback(() => onDragStartParent(cellId), [onDragStartParent, cellId])
   const handleDragEnter = useCallback(() => onDragEnterParent(cellId), [onDragEnterParent, cellId])
+  const handleSelectionPointerDown = useCallback(
+    (e: React.PointerEvent<HTMLButtonElement>) => onSelectionPointerDownParent(cellId, rowIndex, e),
+    [onSelectionPointerDownParent, cellId, rowIndex],
+  )
 
   return (
     <div
@@ -489,6 +766,7 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
         onProjectChanged={onProjectChanged}
         onDragStart={handleDragStart}
         onDragEnter={handleDragEnter}
+        onSelectionPointerDown={handleSelectionPointerDown}
         getVoiceTakeCells={getVoiceTakeCells}
       />
     </div>
@@ -526,6 +804,7 @@ interface EditorRowProps {
   onSeekToCue?: (cellId: string) => void
   onDragStart: () => void
   onDragEnter: () => void
+  onSelectionPointerDown: (e: React.PointerEvent<HTMLButtonElement>) => void
   getVoiceTakeCells: (startIndex: number, count: number) => CellData[]
   rowIndex: number
   lineNumbersEnabled: boolean
@@ -550,7 +829,7 @@ function EditorRow({
   openCommentCount, onOpenComments, onOpenHistory,
   syncProvider, collabUser,
   isActiveCue: _isActiveCue, onSeekToCue,
-  onDragStart, onDragEnter,
+  onDragStart, onDragEnter, onSelectionPointerDown,
   rowIndex, lineNumbersEnabled, cellLabelsEnabled, sourceTextDirection, targetTextDirection, gridCols,
   isAnonymous, breakdown, onJumpToCell, onAiSetupNeeded, onOpenRecording,
 }: EditorRowProps) {
@@ -956,7 +1235,6 @@ function EditorRow({
   // <s>, <code>). DOMPurify provides defense-in-depth against XSS.
   const showLineNumber = lineNumbersEnabled && cell.type !== "paratext"
   const showCellLabel = cellLabelsEnabled && cell.cellLabel
-  const hasGutterMetadata = showLineNumber || showCellLabel
   const isGitProject = project.origin?.kind === "git"
 
   // ── Hover / focus / tap state for the floating action rail ───────────────
@@ -1042,11 +1320,32 @@ function EditorRow({
     setHasFocusWithin(false)
   }
   const handleRowClick = (e: React.MouseEvent) => {
-    // Tap on a non-interactive area toggles tap-selected (touch users get
-    // persistent rail visibility). Clicks on buttons / inputs / contentEditable
-    // pass through.
-    if (!isInteractiveTarget(e.target)) {
-      setIsTapSelected((p) => !p)
+    // Cmd/Ctrl-click → toggle multi-select. Wins even over text editors and
+    // buttons so the user can grab cells without aiming at a tiny gutter.
+    if (e.metaKey || e.ctrlKey) {
+      e.preventDefault()
+      e.stopPropagation()
+      toggleSelected(cell.id)
+      return
+    }
+    if (isInteractiveTarget(e.target)) return
+    // Plain click clears any active multi-selection so the next interaction
+    // doesn't surprise the user with a stale bulk action target.
+    clearSelection()
+    setIsTapSelected((p) => !p)
+  }
+
+  /**
+   * Cmd/Ctrl-mousedown also has to be intercepted *before* the click — content-
+   * editable surfaces (TipTap/ProseMirror) handle mousedown to place the
+   * caret, and `preventDefault` on the later click event can't undo that. We
+   * stop the gesture at mousedown when a modifier is held; the click handler
+   * still fires and toggles the selection.
+   */
+  const handleRowMouseDownCapture = (e: React.MouseEvent) => {
+    if (e.metaKey || e.ctrlKey) {
+      e.preventDefault()
+      e.stopPropagation()
     }
   }
 
@@ -1079,6 +1378,11 @@ function EditorRow({
     void handleVoiceDropOnCell(cell.id, voiceId)
   }, [cell.id])
 
+  const isMultiSelected = useIsSelected(cell.id)
+  const synthStatus = useTtsStatus(ttsStatusKey(cell.id))
+  const isSynthBusy = synthStatus.kind === "loading" || synthStatus.kind === "synthesizing"
+  const isSynthError = synthStatus.kind === "error"
+
   return (
     <div className="border-b">
       <div
@@ -1087,13 +1391,20 @@ function EditorRow({
           "group relative grid gap-2 px-4 py-2 transition-colors",
           audioController.isPlaying && "bg-primary/[0.04]",
           expanded && "bg-muted/10",
-          isVoiceDropTarget && "ring-2 ring-primary/60 ring-inset bg-primary/5",
+          isMultiSelected && "ring-2 ring-primary/40 ring-inset bg-primary/[0.03]",
+          isVoiceDropTarget && "ring-2 ring-primary/70 ring-inset bg-primary/5",
+          // Pulsing ring while a voice is being generated for this cell. Gives
+          // the user a clear "something is happening" signal — drop, translate,
+          // and bulk synth all flow through this status key.
+          isSynthBusy && "ring-2 ring-primary/60 ring-inset bg-primary/[0.04] animate-pulse",
+          isSynthError && "ring-2 ring-destructive/60 ring-inset bg-destructive/5",
           gridCols,
         )}
         onMouseEnter={handleRowMouseEnter}
         onMouseLeave={handleRowMouseLeave}
         onFocusCapture={handleRowFocusCapture}
         onBlurCapture={handleRowBlurCapture}
+        onMouseDownCapture={handleRowMouseDownCapture}
         onClick={handleRowClick}
         onDragOver={handleRowDragOver}
         onDragLeave={handleRowDragLeave}
@@ -1111,26 +1422,28 @@ function EditorRow({
           />
         )}
 
-        {/* Left gutter — line number + cell label + validation pill. */}
-        <div className="flex flex-col items-center gap-1.5 pt-1">
-          {hasGutterMetadata && (
-            <div className="flex h-4 items-center gap-1 text-[10px] leading-none text-muted-foreground/60">
-              {showLineNumber && (
-                <span className="tabular-nums" title={`Line ${rowIndex + 1}`}>
-                  {rowIndex + 1}
-                </span>
-              )}
-              {showCellLabel && (
-                <span
-                  className="rounded bg-muted/50 px-1 py-0.5 font-medium text-muted-foreground/80"
-                  title="Cell label"
-                >
-                  {cell.cellLabel}
-                </span>
-              )}
-            </div>
+        {/* Left gutter — line number/label + validation pill. Selection lives
+            on the source/target divider so range selection follows the text. */}
+        <div className="flex flex-col items-center gap-1 pt-1">
+          <div className="flex h-4 items-center gap-1 text-[10px] leading-none text-muted-foreground/60">
+            {showLineNumber && (
+              <span className="tabular-nums" title={`Line ${rowIndex + 1}`}>
+                {rowIndex + 1}
+              </span>
+            )}
+            {showCellLabel && (
+              <span
+                className="rounded bg-muted/50 px-1 py-0.5 font-medium text-muted-foreground/80"
+                title="Cell label"
+              >
+                {cell.cellLabel}
+              </span>
+            )}
+          </div>
+          {(isSynthBusy || isSynthError) && (
+            <SynthStatusBadge status={synthStatus} />
           )}
-          <div className={hasGutterMetadata ? "" : "pt-3"}>{validationButton}</div>
+          {validationButton}
         </div>
 
         {/* Source column */}
@@ -1177,7 +1490,30 @@ function EditorRow({
             else (waveform, transcript preview, backtranslation, infractions
             detail) lives in the expansion panel. pr-9 reserves space for the
             ever-present chevron at the right edge. */}
-        <div className="flex flex-col border-l border-border/50 pl-3 pr-9" dir={targetTextDirection}>
+        <div className="relative flex flex-col border-l border-border/50 pl-3 pr-9" dir={targetTextDirection}>
+          <button
+            type="button"
+            role="checkbox"
+            aria-checked={isMultiSelected}
+            aria-label={isMultiSelected ? "Selected cell. Drag to extend selection." : "Select cell. Drag to select a range."}
+            onPointerDown={onSelectionPointerDown}
+            onClick={(e) => e.stopPropagation()}
+            className={cn(
+              "absolute left-0 top-1/2 z-20 grid h-5 w-5 -translate-x-1/2 -translate-y-1/2 place-items-center rounded-full border shadow-sm",
+              "touch-none cursor-ns-resize transition-[opacity,transform,color,background-color,border-color] duration-150 ease-out",
+              "focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 focus-visible:ring-offset-2",
+              isMultiSelected
+                ? "border-primary bg-primary text-primary-foreground opacity-100"
+                : "border-border bg-background text-muted-foreground/70 opacity-60 hover:border-primary hover:text-primary group-hover:opacity-100",
+            )}
+            title={isMultiSelected ? "Selected. Drag up or down to extend the range." : "Select cell. Drag up or down to select a range."}
+          >
+            {isMultiSelected ? (
+              <Check className="h-3 w-3" strokeWidth={3} />
+            ) : (
+              <span className="h-1.5 w-1.5 rounded-full bg-current opacity-70" />
+            )}
+          </button>
           <div className="flex flex-1 flex-col">
             {cell.translatedXml ? (
               <div className="flex min-h-[40px] flex-1 flex-col">

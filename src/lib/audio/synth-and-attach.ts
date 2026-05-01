@@ -13,6 +13,7 @@ import { tokenizeWords, writeCellTimings } from "./timings"
 import { floatPcmToWavBlob } from "./wav"
 import { resolveVoice } from "./voices"
 import { resolveApiKey } from "@/lib/store/user-api-keys"
+import { markProjectHasAudioDataSoon } from "./project-audio-state"
 import type { FrontierSession } from "@/lib/frontier/types"
 import type { ProjectTtsSettings } from "@/lib/parsers/types"
 import type { WordTiming } from "@/lib/codex-editor/types"
@@ -97,6 +98,7 @@ export async function synthAndAttachAudio(args: SynthAndAttachArgs): Promise<{ a
     mimeType: "audio/wav",
     slot: "generatedVoice",
   })
+  markProjectHasAudioDataSoon(args.projectId)
 
   // Auto-transcribe so karaoke lights up immediately. Errors here are
   // non-fatal — the audio is already attached and playable.
@@ -215,6 +217,7 @@ export async function synthAndAttachAudioGroup(
       mimeType: "audio/wav",
       slot: "generatedVoice",
     })
+    markProjectHasAudioDataSoon(args.projectId)
     writeCellTimings(args.doc, segment.cell.id, result.audioId, segment.timings)
     audioIds.set(segment.cell.id, result.audioId)
     clips.push({ cellId: segment.cell.id, audioId: result.audioId, blob: clipBlob })

@@ -6,7 +6,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { cn } from "@/lib/utils"
 import { ApiKeyField } from "@/components/ApiKeyField"
 import type { ProjectTtsSettings, TtsProvider } from "@/lib/parsers/types"
-import { DEFAULT_TTS_PROVIDER } from "@/lib/audio/gemini-tts"
+import { DEFAULT_TTS_PROVIDER, TTS_PROVIDER_INFOS } from "@/lib/audio/tts-providers"
+import { HAS_HOSTED_MMS_MODELS } from "@/lib/audio/mms-languages"
 import { setUserApiKey, useUserApiKey } from "@/lib/store/user-api-keys"
 
 interface Props {
@@ -25,20 +26,17 @@ export function VoiceLibrarySection({ settings, onChange }: Props) {
         <CardTitle>Voice engine</CardTitle>
       </CardHeader>
       <CardContent className="space-y-4">
-        <div className="grid gap-2 sm:grid-cols-2">
-          <ProviderTile
-            active={provider === "gemini"}
-            title="Gemini TTS"
-            badge="Recommended"
-            hint="BYOK Google AI key. Promptable, high-quality voices."
-            onClick={() => onChange({ provider: "gemini" })}
-          />
-          <ProviderTile
-            active={provider === "kokoro"}
-            title="Kokoro (local)"
-            hint="Runs in-browser after a one-time ~80 MB download."
-            onClick={() => onChange({ provider: "kokoro" })}
-          />
+        <div className="grid gap-2 sm:grid-cols-3">
+          {TTS_PROVIDER_INFOS.map((info) => (
+            <ProviderTile
+              key={info.id}
+              active={provider === info.id}
+              title={info.title}
+              badge={info.badge}
+              hint={info.hint}
+              onClick={() => onChange({ provider: info.id })}
+            />
+          ))}
         </div>
 
         {provider === "gemini" && (
@@ -51,6 +49,15 @@ export function VoiceLibrarySection({ settings, onChange }: Props) {
             onUserKeyChange={(v) => setUserApiKey("gemini-tts", v)}
             help="Sent directly to Google. Never uploaded to Frontier."
           />
+        )}
+
+        {provider === "mms" && (
+          <p className="text-xs text-muted-foreground">
+            No API key. Each MMS voice is tied to one language code.
+            {HAS_HOSTED_MMS_MODELS
+              ? " Hosted MMS codes are loaded from the configured model bucket."
+              : " The public browser set is limited; pick one of the listed languages in the voice editor."}
+          </p>
         )}
 
         {provider === "kokoro" && (

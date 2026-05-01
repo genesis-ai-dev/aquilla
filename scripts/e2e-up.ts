@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process"
+import { spawn, spawnSync } from "node:child_process"
 import { existsSync, writeFileSync, rmSync } from "node:fs"
 import { homedir } from "node:os"
 import path from "node:path"
@@ -56,6 +56,25 @@ function runOnce(cmd: string, args: string[], cwd: string): Promise<void> {
   })
 }
 
+/** Free a port held by a stale process from a prior run. Non-interactive
+ * SIGTERM-then-SIGKILL — anything bound to one of our managed ports is by
+ * definition leftover orchestrator state. */
+async function freePort(port: number): Promise<void> {
+  const pidsRaw = spawnSync("lsof", ["-ti", `:${port}`], { encoding: "utf8" }).stdout || ""
+  const pids = pidsRaw.split("\n").filter(Boolean)
+  if (pids.length === 0) return
+  console.log(`[e2e-up] freeing port ${port} (held by ${pids.join(", ")})…`)
+  for (const pid of pids) {
+    try { process.kill(Number(pid), "SIGTERM") } catch {}
+  }
+  await new Promise((r) => setTimeout(r, 500))
+  const remaining = (spawnSync("lsof", ["-ti", `:${port}`], { encoding: "utf8" }).stdout || "")
+    .split("\n").filter(Boolean)
+  for (const pid of remaining) {
+    try { process.kill(Number(pid), "SIGKILL") } catch {}
+  }
+}
+
 async function main(): Promise<void> {
   if (!existsSync(FRONTIER_SERVER_DIR)) {
     console.error(`[e2e-up] frontier-server not found at ${FRONTIER_SERVER_DIR}`)
@@ -66,6 +85,11 @@ async function main(): Promise<void> {
     console.error(`[e2e-up] sync-worker not found at ${SYNC_WORKER_DIR}`)
     process.exit(1)
   }
+
+  // 0. Free our managed ports — survives stale processes from a prior aborted run.
+  await freePort(FRONTIER_PORT)
+  await freePort(SYNC_WORKER_PORT)
+  await freePort(VITE_PORT)
 
   // 1. Reset frontier-server local D1 by deleting wrangler state
   const wranglerStateDir = path.join(FRONTIER_SERVER_DIR, ".wrangler")

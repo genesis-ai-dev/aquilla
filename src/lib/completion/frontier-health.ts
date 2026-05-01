@@ -7,7 +7,10 @@
 import { useCallback, useEffect, useState } from "react"
 import { subscribeSession } from "@/lib/frontier/session-store"
 
-const HEALTH_URL = "https://api.frontierrnd.com/api/v2/health"
+// Honor VITE_FRONTIER_BASE override (see src/lib/frontier/auth.ts).
+const FRONTIER_BASE_OVERRIDE =
+  ((import.meta.env.VITE_FRONTIER_BASE as string | undefined)?.replace(/\/+$/, "")) || ""
+const HEALTH_URL = `${FRONTIER_BASE_OVERRIDE || "https://api.frontierrnd.com"}/api/v2/health`
 const TTL_MS = 60_000
 const TIMEOUT_MS = 3_000
 

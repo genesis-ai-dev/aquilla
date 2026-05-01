@@ -7,7 +7,12 @@ export const DEFAULT_SYSTEM_PROMPT =
   "You are translating a project from {sourceLanguage} into {targetLanguage}.\n" +
   "Match the tone and formality of the provided examples. Return only the translated text — no explanations, no source text, no commentary."
 
-export const FRONTIER_CHAT_URL = "https://api.frontierrnd.com/api/v1/chat/completions"
+// Honor VITE_FRONTIER_BASE override so the E2E suite can redirect chat
+// completion calls to a local wrangler dev instance. See src/lib/frontier/auth.ts
+// for the same pattern.
+const FRONTIER_BASE_OVERRIDE =
+  ((import.meta.env.VITE_FRONTIER_BASE as string | undefined)?.replace(/\/+$/, "")) || ""
+export const FRONTIER_CHAT_URL = `${FRONTIER_BASE_OVERRIDE || "https://api.frontierrnd.com"}/api/v1/chat/completions`
 
 interface ChatMessage { role: "system" | "user" | "assistant"; content: string }
 

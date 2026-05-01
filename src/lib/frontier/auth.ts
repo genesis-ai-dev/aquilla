@@ -1,7 +1,12 @@
 import type { FrontierSession } from "./types";
 import { saveSession } from "./session-store";
 
-export const FRONTIER_BASE = "https://api.frontierrnd.com";
+// `||` (not `??`) so empty-string env values fall back too — `vi.stubEnv` sets
+// "" to simulate "unset" in tests, and an accidental empty value in a prod
+// .env should also use the default rather than break network calls.
+export const FRONTIER_BASE =
+  ((import.meta.env.VITE_FRONTIER_BASE as string | undefined)?.replace(/\/+$/, "")) ||
+  "https://api.frontierrnd.com";
 
 export class FrontierAuthError extends Error {
   public status: number;

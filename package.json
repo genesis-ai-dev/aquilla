@@ -17,8 +17,12 @@
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:e2e": "npx playwright test",
-    "test:e2e:ui": "npx playwright test --ui",
+    "test:e2e:smoke": "tsx scripts/e2e-up.ts -- smoke.spec",
+    "test:e2e": "tsx scripts/e2e-up.ts",
+    "test:e2e:ui": "tsx scripts/e2e-up.ts -- --ui",
+    "test:e2e:debug": "tsx scripts/e2e-up.ts -- --debug",
+    "//test:e2e:tauri": "Plan 3 — config file does not yet exist; this script will fail until Tauri smoke is implemented.",
+    "test:e2e:tauri": "playwright test --config e2e/config/playwright.config.tauri.ts",
     "tauri": "tauri",
     "pretauri:dev": "node scripts/ensure-port-free.mjs 1420",
     "tauri:dev": "tauri dev",
@@ -26,7 +30,8 @@
     "tauri:build:mac": "bash -c 'set -a; [ -f .env.signing ] && . ./.env.signing; set +a; tauri build'",
     "deploy": "npm run build && wrangler pages deploy dist --project-name=codex-web --commit-dirty=true",
     "deploy:honeycomb": "npm run build:honeycomb && wrangler pages deploy dist --project-name=honeycomb-studio --commit-dirty=true",
-    "deploy:context": "npm run build:context && wrangler pages deploy dist --project-name=context-studio --commit-dirty=true"
+    "deploy:context": "npm run build:context && wrangler pages deploy dist --project-name=context-studio --commit-dirty=true",
+    "prepare": "husky"
   },
   "dependencies": {
     "@base-ui/react": "^1.4.0",
@@ -88,6 +93,7 @@
     "fake-indexeddb": "^6.2.5",
     "globals": "^17.4.0",
     "happy-dom": "^20.8.9",
+    "husky": "^9.1.7",
     "tailwindcss": "^4.2.2",
     "tsx": "^4.21.0",
     "typescript": "~6.0.2",

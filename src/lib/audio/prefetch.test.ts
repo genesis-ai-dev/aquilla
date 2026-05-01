@@ -12,7 +12,7 @@ import * as prefetch from "./prefetch"
 // package so we can poke at the module's private setter through the same
 // instance that the chip uses.
 type WithSetter = typeof prefetch & {
-  __testOnlySetStatus?: (m: "whisper" | "kokoro", s: import("./prefetch").ModelPrefetchStatus) => void
+  __testOnlySetStatus?: (m: import("./prefetch").ModelId, s: import("./prefetch").ModelPrefetchStatus) => void
 }
 
 describe("prefetch monotonic progress", () => {

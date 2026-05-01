@@ -12,7 +12,7 @@ import { transcribeAndStoreTimings } from "./transcribe"
 import { whisperLanguageFromTag } from "./language"
 import { setTranscribeStatus } from "./transcribe-status"
 import { synthAndAttachAudio } from "./synth-and-attach"
-import { setTtsStatus } from "./tts"
+import { setTtsStatus, ttsStatusKey } from "./tts"
 import { fetchCellAudio, parseFrontierAudioUrl } from "./upload"
 
 // ── Shared progress store ───────────────────────────────────────────────────
@@ -147,7 +147,7 @@ export async function synthAllInFile(args: SynthAllArgs): Promise<void> {
     return !att || att.isDeleted === true
   })
   await runBulk(args.doc, targets, "synth-all", async (doc, cell) => {
-    const key = `synth:${cell.id}`
+    const key = ttsStatusKey(cell.id)
     setTtsStatus(key, { kind: "loading", loaded: 0, total: 0, file: "" })
     try {
       await synthAndAttachAudio({

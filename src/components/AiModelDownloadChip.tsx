@@ -28,11 +28,12 @@ interface ErrorView {
   message: string
 }
 
-const LABELS: Record<ModelId, string> = { whisper: "Whisper", kokoro: "Kokoro" }
+const LABELS: Record<ModelId, string> = { whisper: "Whisper", kokoro: "Kokoro", mms: "MMS" }
 
 export function AiModelDownloadChip() {
   const whisper = useModelStatus("whisper")
   const kokoro = useModelStatus("kokoro")
+  const mms = useModelStatus("mms")
   const [dismissed, setDismissed] = useState(false)
   const [readyFlash, setReadyFlash] = useState<ModelId[]>([])
   const seenDownloadingRef = useRef<Set<ModelId>>(new Set())
@@ -51,7 +52,8 @@ export function AiModelDownloadChip() {
     }
     checkOne("whisper", whisper.kind)
     checkOne("kokoro", kokoro.kind)
-  }, [whisper.kind, kokoro.kind])
+    checkOne("mms", mms.kind)
+  }, [whisper.kind, kokoro.kind, mms.kind])
 
   // Auto-clear the flash after a few seconds.
   useEffect(() => {
@@ -66,17 +68,19 @@ export function AiModelDownloadChip() {
   const downloads: ModelView[] = []
   if (whisper.kind === "downloading") downloads.push({ id: "whisper", label: LABELS.whisper, loaded: whisper.loaded, total: whisper.total })
   if (kokoro.kind === "downloading") downloads.push({ id: "kokoro", label: LABELS.kokoro, loaded: kokoro.loaded, total: kokoro.total })
+  if (mms.kind === "downloading") downloads.push({ id: "mms", label: LABELS.mms, loaded: mms.loaded, total: mms.total })
 
   const errors: ErrorView[] = []
   if (whisper.kind === "error") errors.push({ id: "whisper", label: LABELS.whisper, message: whisper.message })
   if (kokoro.kind === "error") errors.push({ id: "kokoro", label: LABELS.kokoro, message: kokoro.message })
+  if (mms.kind === "error") errors.push({ id: "mms", label: LABELS.mms, message: mms.message })
 
   // Re-show the chip if a new failure happens after the user dismissed an
   // earlier success — the error needs attention.
   useEffect(() => {
     if (errors.length > 0) setDismissed(false)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [whisper.kind, kokoro.kind])
+  }, [whisper.kind, kokoro.kind, mms.kind])
 
   if (dismissed) return null
   if (downloads.length === 0 && readyFlash.length === 0 && errors.length === 0) return null

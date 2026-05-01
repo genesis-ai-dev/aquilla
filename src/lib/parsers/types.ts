@@ -141,7 +141,7 @@ export const AUDIO_MEDIA_STRATEGY_LABELS: Record<AudioMediaStrategy, { name: str
   },
 }
 
-export type TtsProvider = "kokoro" | "gemini"
+export type TtsProvider = "kokoro" | "gemini" | "mms"
 
 /**
  * A reusable voice in the project's voice library. Voice owns *all* the knobs

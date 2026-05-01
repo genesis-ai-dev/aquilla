@@ -9,6 +9,13 @@ import {
 } from "@/components/ui/dialog"
 import { storeAllFeaturesConsent, usePendingAiConsent } from "@/lib/audio/ai-consent"
 import { prefetchAiModels } from "@/lib/audio/prefetch"
+import { DEFAULT_MMS_LANGUAGE } from "@/lib/audio/tts-providers"
+
+const SHORT_LABELS = {
+  whisper: "Whisper",
+  kokoro: "Kokoro",
+  mms: "MMS",
+} as const
 
 export function AiModelConsentDialog() {
   const pending = usePendingAiConsent()
@@ -18,14 +25,15 @@ export function AiModelConsentDialog() {
   const handleAccept = () => pending?.resolve(true)
   const handleAcceptAll = () => {
     storeAllFeaturesConsent()
-    // Kick off the other model's download in the background while the
-    // current one runs. Errors here are non-fatal — they surface on next use.
-    void prefetchAiModels().catch(() => undefined)
+    // Kick off the local model downloads in the background while the current
+    // request runs. Errors here are non-fatal; they surface on next use.
+    void prefetchAiModels({
+      models: ["whisper", "kokoro", "mms"],
+      mmsLanguage: DEFAULT_MMS_LANGUAGE,
+    }).catch(() => undefined)
     pending?.resolve(true)
   }
-  // The complementary model the user could enable in one click.
-  const otherLabel = pending?.model.id === "whisper" ? "Kokoro (TTS)" : "Whisper (transcription)"
-  const justThisLabel = pending?.model.id === "whisper" ? "Just Whisper" : "Just Kokoro"
+  const justThisLabel = pending ? `Just ${SHORT_LABELS[pending.model.id]}` : "Just this model"
 
   return (
     <Dialog open={open} onOpenChange={(next) => { if (!next) pending?.resolve(false) }}>
@@ -59,10 +67,10 @@ export function AiModelConsentDialog() {
           </Button>
           <Button
             onClick={handleAcceptAll}
-            title={`Also pre-download ${otherLabel} so it's ready next time`}
+            title="Also pre-download the local AI models so they're ready next time"
             className="w-full sm:w-auto"
           >
-            Enable both
+            Enable all local models
           </Button>
         </DialogFooter>
       </DialogContent>

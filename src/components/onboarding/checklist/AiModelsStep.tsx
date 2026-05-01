@@ -12,7 +12,7 @@ import { prefetchAiModels, useModelStatus } from "@/lib/audio/prefetch"
 import { storeAllFeaturesConsent } from "@/lib/audio/ai-consent"
 import { patchProject } from "@/lib/store/project-index"
 import type { ProjectRecord, ProjectTtsSettings, TtsProvider } from "@/lib/parsers/types"
-import { DEFAULT_TTS_PROVIDER } from "@/lib/audio/gemini-tts"
+import { DEFAULT_MMS_LANGUAGE, DEFAULT_TTS_PROVIDER, TTS_PROVIDER_INFOS } from "@/lib/audio/tts-providers"
 
 interface ModelRowProps {
   label: string
@@ -74,16 +74,18 @@ interface AiModelsStepProps {
 export function AiModelsStep({ project, onUpdated }: AiModelsStepProps) {
   const whisper = useModelStatus("whisper")
   const kokoro = useModelStatus("kokoro")
+  const mms = useModelStatus("mms")
   const [ttsProvider, setTtsProvider] = useState<TtsProvider>(
     project.ttsSettings?.provider ?? DEFAULT_TTS_PROVIDER,
   )
   const [geminiKey, setGeminiKey] = useState(project.ttsSettings?.apiKey ?? "")
   const [error, setError] = useState<string | null>(null)
+  const ttsModelStatus = ttsProvider === "mms" ? mms : kokoro
   const allReady =
     whisper.kind === "ready" &&
-    (ttsProvider === "gemini" ? Boolean(geminiKey.trim()) : kokoro.kind === "ready")
+    (ttsProvider === "gemini" ? Boolean(geminiKey.trim()) : ttsModelStatus.kind === "ready")
   const anyDownloading =
-    whisper.kind === "downloading" || (ttsProvider === "kokoro" && kokoro.kind === "downloading")
+    whisper.kind === "downloading" || (ttsProvider !== "gemini" && ttsModelStatus.kind === "downloading")
 
   useEffect(() => {
     setTtsProvider(project.ttsSettings?.provider ?? DEFAULT_TTS_PROVIDER)
@@ -110,7 +112,10 @@ export function AiModelsStep({ project, onUpdated }: AiModelsStepProps) {
     setError(null)
     storeAllFeaturesConsent()
     try {
-      await prefetchAiModels({ models: ttsProvider === "gemini" ? ["whisper"] : ["whisper", "kokoro"] })
+      await prefetchAiModels({
+        models: ttsProvider === "gemini" ? ["whisper"] : ["whisper", ttsProvider],
+        mmsLanguage: DEFAULT_MMS_LANGUAGE,
+      })
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
     }
@@ -119,52 +124,37 @@ export function AiModelsStep({ project, onUpdated }: AiModelsStepProps) {
   return (
     <div className="space-y-3">
       <p className="text-xs text-muted-foreground">
-        Gemini TTS is the default voice path because it produces much better,
-        fully promptable speech. Whisper transcription still runs locally;
-        choose Kokoro if you need offline voice generation too.
+        Gemini is the promptable cloud voice path. Kokoro and MMS keep
+        synthesis local after their first browser download; Whisper
+        transcription runs locally for all providers.
       </p>
 
       <div className="space-y-2">
-        <button
-          type="button"
-          onClick={() => {
-            setTtsProvider("gemini")
-            void saveTtsSettings({ provider: "gemini" })
-          }}
-          aria-pressed={ttsProvider === "gemini"}
-          className={
-            "w-full rounded-lg border p-3 text-left transition-colors " +
-            (ttsProvider === "gemini" ? "border-primary bg-primary/5" : "hover:bg-accent/40")
-          }
-        >
-          <div className="flex items-center gap-2 text-sm font-medium">
-            <span>Gemini TTS</span>
-            <span className="rounded-full bg-primary/10 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-primary">
-              Recommended
-            </span>
-          </div>
-          <p className="mt-0.5 text-xs text-muted-foreground">
-            BYOK voice generation with per-cell prompts, voices, and model overrides.
-          </p>
-        </button>
-
-        <button
-          type="button"
-          onClick={() => {
-            setTtsProvider("kokoro")
-            void saveTtsSettings({ provider: "kokoro" })
-          }}
-          aria-pressed={ttsProvider === "kokoro"}
-          className={
-            "w-full rounded-lg border p-3 text-left transition-colors " +
-            (ttsProvider === "kokoro" ? "border-primary bg-primary/5" : "hover:bg-accent/40")
-          }
-        >
-          <div className="text-sm font-medium">Kokoro local voice</div>
-          <p className="mt-0.5 text-xs text-muted-foreground">
-            Keeps voice generation fully in-browser after an ~80 MB download.
-          </p>
-        </button>
+        {TTS_PROVIDER_INFOS.map((info) => (
+          <button
+            key={info.id}
+            type="button"
+            onClick={() => {
+              setTtsProvider(info.id)
+              void saveTtsSettings({ provider: info.id })
+            }}
+            aria-pressed={ttsProvider === info.id}
+            className={
+              "w-full rounded-lg border p-3 text-left transition-colors " +
+              (ttsProvider === info.id ? "border-primary bg-primary/5" : "hover:bg-accent/40")
+            }
+          >
+            <div className="flex items-center gap-2 text-sm font-medium">
+              <span>{info.title}</span>
+              {info.badge && (
+                <span className="rounded-full bg-primary/10 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-primary">
+                  {info.badge}
+                </span>
+              )}
+            </div>
+            <p className="mt-0.5 text-xs text-muted-foreground">{info.hint}</p>
+          </button>
+        ))}
       </div>
 
       {ttsProvider === "gemini" && (
@@ -194,6 +184,9 @@ export function AiModelsStep({ project, onUpdated }: AiModelsStepProps) {
         {ttsProvider === "kokoro" && (
           <ModelRow label="Kokoro (local text-to-speech)" sizeMb={80} status={kokoro} />
         )}
+        {ttsProvider === "mms" && (
+          <ModelRow label="MMS (multilingual text-to-speech)" sizeMb={130} status={mms} />
+        )}
       </div>
 
       <div className="flex items-center gap-2">
@@ -219,7 +212,7 @@ export function AiModelsStep({ project, onUpdated }: AiModelsStepProps) {
           <span className="text-xs text-emerald-600 dark:text-emerald-400">
             {ttsProvider === "gemini"
               ? "Ready to transcribe locally and generate voice with Gemini."
-              : "Ready to transcribe and synthesize offline."}
+              : "Ready to transcribe and synthesize locally."}
           </span>
         )}
       </div>

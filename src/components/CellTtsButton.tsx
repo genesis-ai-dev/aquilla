@@ -9,7 +9,7 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import { AlertCircle, Loader2, Pause, Volume2 } from "lucide-react"
 import { cn } from "@/lib/utils"
-import { synthesizeForCell, setTtsStatus, useTtsStatus } from "@/lib/audio/tts"
+import { synthesizeForCell, setTtsStatus, ttsStatusKey, useTtsStatus } from "@/lib/audio/tts"
 import { AiModelConsentDeniedError } from "@/lib/audio/ai-consent"
 import { useModelStatus } from "@/lib/audio/prefetch"
 import { fetchCellAudio, parseFrontierAudioUrl } from "@/lib/audio/upload"
@@ -18,8 +18,8 @@ import type {
   CellTtsSettings, ProjectTtsSettings,
 } from "@/lib/parsers/types"
 import type { CodexCellAttachment } from "@/lib/codex-editor/types"
-import { DEFAULT_TTS_PROVIDER } from "@/lib/audio/gemini-tts"
 import { resolveVoice } from "@/lib/audio/voices"
+import { normalizeVoiceForProvider, resolveTtsProvider } from "@/lib/audio/tts-providers"
 
 interface Props {
   cellId: string
@@ -39,16 +39,42 @@ interface Props {
   disabled?: boolean
 }
 
-const cache = new Map<string, string>() // key = cellId+text+voice+attachId → blob URL
+const MAX_CACHE_ENTRIES = 64
+const cache = new Map<string, string>() // key = cellId+text+voice+attachId -> blob URL
 
 function cacheKey(
   cellId: string,
   text: string,
-  voiceId: string,
+  voiceSignature: string,
   provider: string,
   generatedAttachId: string | undefined,
 ): string {
-  return `${cellId}::${provider}::${voiceId}::${generatedAttachId ?? ""}::${text}`
+  return `${cellId}::${provider}::${voiceSignature}::${generatedAttachId ?? ""}::${text}`
+}
+
+function voiceSignature(voice: ReturnType<typeof resolveVoice>): string {
+  return [
+    voice.id,
+    voice.voiceName ?? "",
+    voice.model ?? "",
+    voice.prompt ?? "",
+    voice.accent ?? "",
+    voice.pronunciationReference ?? "",
+  ].join("::")
+}
+
+function rememberUrl(key: string, url: string): void {
+  const existing = cache.get(key)
+  if (existing) URL.revokeObjectURL(existing)
+  cache.delete(key)
+  cache.set(key, url)
+  while (cache.size > MAX_CACHE_ENTRIES) {
+    const oldest = cache.keys().next().value as string | undefined
+    if (!oldest) break
+    const oldUrl = cache.get(oldest)
+    cache.delete(oldest)
+    if (oldUrl) URL.revokeObjectURL(oldUrl)
+  }
 }
 
 export function CellTtsButton({
@@ -67,10 +93,12 @@ export function CellTtsButton({
   disabled,
 }: Props) {
   const trimmed = text.trim()
-  const status = useTtsStatus(cellId)
-  const modelStatus = useModelStatus("kokoro")
-  const voice = resolveVoice(projectTtsSettings, cellTtsSettings?.voiceId)
-  const provider = projectTtsSettings?.provider ?? voice.provider ?? DEFAULT_TTS_PROVIDER
+  const statusKey = ttsStatusKey(cellId)
+  const status = useTtsStatus(statusKey)
+  const baseVoice = resolveVoice(projectTtsSettings, cellTtsSettings?.voiceId)
+  const provider = resolveTtsProvider(projectTtsSettings)
+  const voice = normalizeVoiceForProvider(baseVoice, provider, { targetLanguage })
+  const modelStatus = useModelStatus(provider === "mms" ? "mms" : "kokoro")
   const audioRef = useRef<HTMLAudioElement | null>(null)
   const { session } = useFrontierSession()
   const [isPlaying, setIsPlaying] = useState(false)
@@ -109,27 +137,30 @@ export function CellTtsButton({
       return
     }
     if (audioRef.current) {
-      try { await audioRef.current.play() } catch (e) { console.error("[tts] play() rejected", e) }
+      try { await audioRef.current.play() } catch (e) {
+        setTtsStatus(statusKey, { kind: "idle" })
+        console.error("[tts] play() rejected", e)
+      }
       return
     }
-    const key = cacheKey(cellId, trimmed, voice.id, provider, playableAttachId)
+    const key = cacheKey(cellId, trimmed, voiceSignature(voice), provider, playableAttachId)
     let url = cache.get(key)
     if (!url) {
       try {
         if (playableAttachId && generatedAttachmentUrl) {
           // Play the attached generated voice, fetching bytes from the audio
           // backend (or directly from the URL for non-frontier-audio:// URLs).
-          setTtsStatus(cellId, { kind: "loading", loaded: 0, total: 0, file: "" })
+          setTtsStatus(statusKey, { kind: "loading", loaded: 0, total: 0, file: "" })
           const blob = await fetchAttachmentBlob({
             attachmentUrl: generatedAttachmentUrl,
             projectId,
             session,
           })
           url = URL.createObjectURL(blob)
-          cache.set(key, url)
+          rememberUrl(key, url)
         } else {
           // No attached generated voice — synth on demand using the resolved voice.
-          setTtsStatus(cellId, { kind: "loading", loaded: 0, total: 0, file: "" })
+          setTtsStatus(statusKey, { kind: "loading", loaded: 0, total: 0, file: "" })
           const blob = await synthesizeForCell(trimmed, {
             projectTtsSettings,
             cellVoiceId: cellTtsSettings?.voiceId,
@@ -141,35 +172,45 @@ export function CellTtsButton({
               cellLabel,
             },
             onProgress: (p) => {
-              setTtsStatus(cellId, { kind: "loading", loaded: p.loaded, total: p.total, file: p.file })
+              setTtsStatus(statusKey, { kind: "loading", loaded: p.loaded, total: p.total, file: p.file })
               if (p.status === "ready" || (p.total > 0 && p.loaded >= p.total)) {
-                setTtsStatus(cellId, { kind: "synthesizing" })
+                setTtsStatus(statusKey, { kind: "synthesizing" })
               }
             },
           })
           url = URL.createObjectURL(blob)
-          cache.set(key, url)
+          rememberUrl(key, url)
         }
       } catch (e) {
         if (e instanceof AiModelConsentDeniedError) {
-          setTtsStatus(cellId, { kind: "idle" })
+          setTtsStatus(statusKey, { kind: "idle" })
           return
         }
-        setTtsStatus(cellId, { kind: "error", message: e instanceof Error ? e.message : String(e) })
+        setTtsStatus(statusKey, { kind: "error", message: e instanceof Error ? e.message : String(e) })
         return
       }
     }
     const audio = new Audio(url)
-    audio.onplay = () => { setIsPlaying(true); setTtsStatus(cellId, { kind: "playing" }) }
-    audio.onpause = () => { setIsPlaying(false); setTtsStatus(cellId, { kind: "idle" }) }
-    audio.onended = () => { setIsPlaying(false); setTtsStatus(cellId, { kind: "idle" }) }
+    audio.onplay = () => { setIsPlaying(true); setTtsStatus(statusKey, { kind: "playing" }) }
+    audio.onpause = () => { setIsPlaying(false); setTtsStatus(statusKey, { kind: "idle" }) }
+    audio.onended = () => { setIsPlaying(false); setTtsStatus(statusKey, { kind: "idle" }) }
+    audio.onerror = () => {
+      setIsPlaying(false)
+      setTtsStatus(statusKey, { kind: "error", message: "Audio failed to load" })
+    }
     audioRef.current = audio
-    try { await audio.play() } catch (e) { console.error("[tts] initial play() rejected", e) }
+    try { await audio.play() } catch (e) {
+      if (audioRef.current === audio) audioRef.current = null
+      setIsPlaying(false)
+      setTtsStatus(statusKey, { kind: "idle" })
+      console.error("[tts] initial play() rejected", e)
+    }
   }, [
     trimmed,
     isPlaying,
     cellId,
-    voice.id,
+    statusKey,
+    voice,
     provider,
     playableAttachId,
     generatedAttachmentUrl,

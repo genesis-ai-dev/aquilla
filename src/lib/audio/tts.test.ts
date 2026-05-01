@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { pcmToWavBlob } from "./tts"
+import { pcmToWavBlob, synthesizeToWavBlob } from "./tts"
 
 describe("pcmToWavBlob", () => {
   it("emits a valid RIFF/WAVE header for 16-bit mono PCM", async () => {
@@ -38,5 +38,13 @@ describe("pcmToWavBlob", () => {
     const view = new DataView(blob)
     expect(view.getInt16(44, true)).toBe(0x7fff)
     expect(view.getInt16(46, true)).toBe(-0x8000)
+  })
+})
+
+describe("synthesizeToWavBlob", () => {
+  it("rejects empty text before loading a provider", async () => {
+    await expect(synthesizeToWavBlob("   ", {
+      voice: { id: "mms-eng", name: "English", provider: "mms", voiceName: "eng" },
+    })).rejects.toThrow("No text to synthesize")
   })
 })

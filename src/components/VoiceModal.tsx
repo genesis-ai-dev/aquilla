@@ -22,7 +22,13 @@ import {
   forkVoice, newVoiceId, PRESET_VOICES, VOICE_PALETTE,
 } from "@/lib/audio/voices"
 import { synthesizeToWavBlob } from "@/lib/audio/tts"
+import {
+  HAS_HOSTED_MMS_MODELS,
+  POPULAR_MMS_LANGUAGES,
+  mmsModelIdForLanguage,
+} from "@/lib/audio/mms-languages"
 import { useUserApiKey } from "@/lib/store/user-api-keys"
+import { defaultVoiceNameForProvider, normalizeVoiceForProvider } from "@/lib/audio/tts-providers"
 
 const SAMPLE_TEXT = "The quick brown fox jumps over the lazy dog."
 
@@ -103,14 +109,14 @@ export function VoiceModal({
       id: newVoiceId(),
       name: "New voice",
       color: VOICE_PALETTE[voices.length % VOICE_PALETTE.length],
-      provider: "gemini",
-      voiceName: "Kore",
+      provider,
+      voiceName: defaultVoiceNameForProvider(provider, { targetLanguage }),
       builtIn: false,
     }
     const next = [...voices, copy]
     setSelectedId(copy.id)
     writeBack(next, defaultVoiceId)
-  }, [voices, writeBack, defaultVoiceId])
+  }, [voices, provider, targetLanguage, writeBack, defaultVoiceId])
 
   const deleteSelected = useCallback(() => {
     if (!selected) return
@@ -243,6 +249,7 @@ function VoiceEditor({
   const [preview, setPreview] = useState<PreviewState>({ kind: "idle" })
   const audioRef = useRef<HTMLAudioElement | null>(null)
   const previewUrlRef = useRef<string | null>(null)
+  const effectiveVoice = normalizeVoiceForProvider(voice, provider, { targetLanguage })
 
   const stopPreview = useCallback(() => {
     audioRef.current?.pause()
@@ -269,7 +276,7 @@ function VoiceEditor({
     setPreview({ kind: "loading" })
     try {
       const blob = await synthesizeToWavBlob(SAMPLE_TEXT, {
-        voice,
+        voice: effectiveVoice,
         projectProvider: provider,
         apiKey,
         geminiContext: { targetLanguage },
@@ -287,9 +294,10 @@ function VoiceEditor({
     } catch (e) {
       setPreview({ kind: "error", message: e instanceof Error ? e.message : String(e) })
     }
-  }, [voice, provider, apiKey, targetLanguage, preview.kind, stopPreview])
+  }, [effectiveVoice, provider, apiKey, targetLanguage, preview.kind, stopPreview])
 
   const isGemini = provider === "gemini"
+  const isMms = provider === "mms"
 
   return (
     <div className="min-w-0 space-y-3">
@@ -332,14 +340,19 @@ function VoiceEditor({
         </p>
       )}
 
-      {isGemini ? (
+      {isMms ? (
+        <MmsLanguagePicker
+          value={effectiveVoice.voiceName ?? ""}
+          onChange={(v) => onChange({ voiceName: v || undefined })}
+        />
+      ) : isGemini ? (
         <>
           <div className="grid gap-3 md:grid-cols-2">
             <div className="min-w-0">
               <Label htmlFor="voice-engine">Gemini voice</Label>
               <select
                 id="voice-engine"
-                value={voice.voiceName ?? ""}
+                value={effectiveVoice.voiceName ?? ""}
                 onChange={(e) => onChange({ voiceName: e.target.value || undefined })}
                 className="mt-1 w-full rounded border bg-background px-3 py-2 text-sm"
               >
@@ -403,7 +416,7 @@ function VoiceEditor({
           <Label htmlFor="voice-engine">Kokoro voice id</Label>
           <Input
             id="voice-engine"
-            value={voice.voiceName ?? ""}
+            value={effectiveVoice.voiceName ?? ""}
             onChange={(e) => onChange({ voiceName: e.target.value || undefined })}
             placeholder="e.g. af_bella"
             className="font-mono"
@@ -465,4 +478,70 @@ function ColorDot({ color, onPick }: { color?: string; onPick: (c: string) => vo
 
 function Code({ children }: { children: React.ReactNode }) {
   return <code className="rounded bg-muted px-1">{children}</code>
+}
+
+interface MmsLanguagePickerProps {
+  value: string
+  onChange: (next: string) => void
+}
+
+function MmsLanguagePicker({ value, onChange }: MmsLanguagePickerProps) {
+  const knownCode = POPULAR_MMS_LANGUAGES.some((l) => l.code === value)
+  const selectValue = knownCode ? value : HAS_HOSTED_MMS_MODELS ? "__other__" : ""
+  const modelId = mmsModelIdForLanguage(value) ?? mmsModelIdForLanguage("eng") ?? "Xenova/mms-tts-eng"
+  return (
+    <div className="space-y-3">
+      <div className="grid gap-3 md:grid-cols-[1fr_11rem]">
+        <div className="min-w-0">
+          <Label htmlFor="mms-lang">Language</Label>
+          <select
+            id="mms-lang"
+            value={selectValue}
+            onChange={(e) => {
+              const next = e.target.value
+              onChange(next === "__other__" ? "" : next)
+            }}
+            className="mt-1 w-full rounded border bg-background px-3 py-2 text-sm"
+          >
+            {!knownCode && !HAS_HOSTED_MMS_MODELS && (
+              <option value="" disabled>
+                {value ? `Unsupported code: ${value}` : "Choose a language"}
+              </option>
+            )}
+            {POPULAR_MMS_LANGUAGES.map((l) => (
+              <option key={l.code} value={l.code}>{l.name} ({l.code})</option>
+            ))}
+            {HAS_HOSTED_MMS_MODELS && (
+              <option value="__other__">Other hosted code</option>
+            )}
+          </select>
+        </div>
+        {HAS_HOSTED_MMS_MODELS && (
+          <div className="min-w-0">
+            <Label htmlFor="mms-code">MMS code</Label>
+            <Input
+              id="mms-code"
+              value={value}
+              onChange={(e) => onChange(e.target.value.trim().toLowerCase())}
+              placeholder="ita"
+              className="mt-1 font-mono"
+            />
+          </div>
+        )}
+      </div>
+      {!HAS_HOSTED_MMS_MODELS && !knownCode && value && (
+        <p className="text-xs text-destructive">
+          This MMS code is not available in the public browser model set.
+        </p>
+      )}
+      <p className="text-xs text-muted-foreground">
+        Loads <Code>{modelId}</Code> on first use (~130 MB per language, cached after).
+        {HAS_HOSTED_MMS_MODELS ? (
+          " Hosted R2 MMS codes are allowed."
+        ) : (
+          " Only browser-ready Xenova MMS-TTS repos are listed here."
+        )}
+      </p>
+    </div>
+  )
 }

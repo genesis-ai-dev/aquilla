@@ -22,9 +22,12 @@ import {
 import { getVoiceLibrary } from "@/lib/audio/voices"
 import { setCellTtsSettings } from "@/lib/audio/cell-tts-settings"
 import { synthAndAttachAudio } from "@/lib/audio/synth-and-attach"
-import { setTtsStatus } from "@/lib/audio/tts"
+import { setTtsStatus, ttsStatusKey } from "@/lib/audio/tts"
 import { AiModelConsentDeniedError } from "@/lib/audio/ai-consent"
 import { patchProject } from "@/lib/store/project-index"
+import { getPlainText } from "@/lib/richtext/translated-xml"
+import { getSelectedIds, clearSelection } from "@/lib/audio/selection"
+import { translateThenSynthAsOneTake } from "@/lib/audio/bulk-selected"
 
 /** DataTransfer key used by voice chips → cell drop targets. */
 export const VOICE_DRAG_MIME = "application/x-frontier-voice-id"
@@ -37,10 +40,14 @@ interface Props {
   session: FrontierSession | null
   editorRef: React.RefObject<EditorTableHandle | null>
   onProjectChanged: () => void
+  /** Translation entry point. Called when a voice is dropped on a cell that
+   *  has source text but no translation yet. */
+  onCompleteSingle?: (cell: CellData) => Promise<void> | void
 }
 
 export function VoiceBar({
   project, cells, doc, username, session, editorRef, onProjectChanged,
+  onCompleteSingle,
 }: Props) {
   const [modalOpen, setModalOpen] = useState(false)
   const queue = useQueueState()
@@ -205,6 +212,7 @@ export function VoiceBar({
         doc={doc}
         username={username}
         session={session}
+        onCompleteSingle={onCompleteSingle}
       />
     </div>
   )
@@ -247,22 +255,38 @@ interface DropContext {
   doc: Y.Doc
   username: string
   session: FrontierSession | null
+  completeSingle?: (cell: CellData) => Promise<void> | void
 }
 
 let dropCtx: DropContext | null = null
 let cellsByIdRef: Map<string, CellData> | null = null
 
-function DropGenerator({ project, cells, doc, username, session }: {
+function DropGenerator({ project, cells, doc, username, session, onCompleteSingle }: {
   project: ProjectRecord
   cells: CellData[]
   doc: Y.Doc
   username: string
   session: FrontierSession | null
+  onCompleteSingle?: (cell: CellData) => Promise<void> | void
 }) {
   // Refresh the static refs each render so the drop handler sees current data.
-  dropCtx = { project, doc, username, session }
+  dropCtx = { project, doc, username, session, completeSingle: onCompleteSingle }
   cellsByIdRef = new Map(cells.map((c) => [c.id, c]))
   return null
+}
+
+/**
+ * Read the cell's current translated text directly from the Y.Doc. We use
+ * this after triggering completion-on-drop because the in-memory CellData
+ * snapshot was captured before the streaming write, so it'd still be empty.
+ */
+function readTranslatedFromDoc(doc: Y.Doc, cellId: string): string {
+  const cells = doc.getMap("cells")
+  const yCell = cells.get(cellId) as Y.Map<unknown> | undefined
+  if (!yCell) return ""
+  const frag = yCell.get("translatedXml") as Y.XmlFragment | undefined
+  if (frag) return getPlainText(frag).trim()
+  return ((yCell.get("translated") as string) ?? "").trim()
 }
 
 /**
@@ -272,29 +296,94 @@ function DropGenerator({ project, cells, doc, username, session }: {
  */
 export async function handleVoiceDropOnCell(cellId: string, voiceId: string): Promise<void> {
   const ctx = dropCtx
-  const cell = cellsByIdRef?.get(cellId)
-  if (!ctx || !cell) return
+  if (!ctx || !cellsByIdRef) return
+
+  // If the dropped cell is part of an active multi-selection, fan the action
+  // out across the whole selection (translating any missing first). The
+  // dropped cell itself stays in the bulk run so the user gets the same
+  // translate-then-synth ordering whether they selected first or not.
+  const selectedIds = getSelectedIds()
+  if (selectedIds.size > 1 && selectedIds.has(cellId)) {
+    // Preserve document order so the take sounds natural; the Set iteration
+    // order matches insertion order, but the user may have selected the cells
+    // in any order. Sort by the cell list's index instead.
+    const idIndex = new Map(cellsByIdRef!.size > 0
+      ? [...cellsByIdRef!.keys()].map((id, i) => [id, i] as const)
+      : [])
+    const cells = [...selectedIds]
+      .map((id) => cellsByIdRef!.get(id))
+      .filter((c): c is CellData => Boolean(c))
+      .sort((a, b) => (idIndex.get(a.id) ?? 0) - (idIndex.get(b.id) ?? 0))
+    try {
+      const result = await translateThenSynthAsOneTake({
+        cells,
+        doc: ctx.doc,
+        project: ctx.project,
+        session: ctx.session,
+        username: ctx.username,
+        completeSingle: ctx.completeSingle,
+        voiceId,
+      })
+      if (result?.blob) void playBlob(result.blob)
+    } catch (e) {
+      console.warn("[voice-drop] take failed", e)
+    } finally {
+      clearSelection()
+    }
+    return
+  }
+
+  const cell = cellsByIdRef.get(cellId)
+  if (!cell) return
+  const statusKey = ttsStatusKey(cellId)
   if (!ctx.session?.jwt) {
-    setTtsStatus(`synth:${cellId}`, { kind: "error", message: "Sign in to upload audio" })
+    setTtsStatus(statusKey, { kind: "error", message: "Sign in to upload audio" })
     return
   }
   if (ctx.project.origin?.kind === "git") {
-    setTtsStatus(`synth:${cellId}`, { kind: "error", message: "AI voice not supported on git projects yet" })
+    setTtsStatus(statusKey, { kind: "error", message: "AI voice not supported on git projects yet" })
     return
   }
-  if (!cell.translated.trim()) return
 
   // Persist the chosen voice on the cell so subsequent bulk-generate /
   // re-synth actions reuse it.
   setCellTtsSettings(ctx.doc, cellId, { voiceId })
 
-  const statusKey = `synth:${cellId}`
+  // Drop on an untranslated cell → translate first, then synth. If there's
+  // no source text either, give up; without source we can't translate.
+  let cellText = cell.translated.trim()
+  if (!cellText) {
+    if (!cell.original?.trim()) {
+      setTtsStatus(statusKey, { kind: "error", message: "Cell has no source text to translate." })
+      return
+    }
+    if (!ctx.completeSingle) {
+      setTtsStatus(statusKey, { kind: "error", message: "Translation isn't configured for this project." })
+      return
+    }
+    setTtsStatus(statusKey, { kind: "loading", loaded: 0, total: 0, file: "Translating…" })
+    try {
+      await ctx.completeSingle(cell)
+    } catch (e) {
+      setTtsStatus(statusKey, {
+        kind: "error",
+        message: `Translation failed: ${e instanceof Error ? e.message : String(e)}`,
+      })
+      return
+    }
+    cellText = readTranslatedFromDoc(ctx.doc, cellId)
+    if (!cellText) {
+      setTtsStatus(statusKey, { kind: "error", message: "Translation produced no text." })
+      return
+    }
+  }
+
   setTtsStatus(statusKey, { kind: "loading", loaded: 0, total: 0, file: "" })
   try {
-    await synthAndAttachAudio({
+    const result = await synthAndAttachAudio({
       doc: ctx.doc,
       cellId,
-      cellText: cell.translated,
+      cellText,
       cellOriginal: cell.original,
       cellContext: cell.context,
       cellLabel: cell.cellLabel,
@@ -313,6 +402,10 @@ export async function handleVoiceDropOnCell(cellId: string, voiceId: string): Pr
       },
     })
     setTtsStatus(statusKey, { kind: "idle" })
+    // Instant gratification: play the freshly generated take so the user
+    // hears the result without hunting for the speaker icon. The blob is
+    // already in memory from synth; no extra fetch.
+    void playBlob(result.blob)
   } catch (e) {
     if (e instanceof AiModelConsentDeniedError) {
       setTtsStatus(statusKey, { kind: "idle" })
@@ -322,5 +415,37 @@ export async function handleVoiceDropOnCell(cellId: string, voiceId: string): Pr
       kind: "error",
       message: e instanceof Error ? e.message : String(e),
     })
+  }
+}
+
+/** Module-local "preview audio" — held in a single ref so a fresh drop
+ *  cancels any prior preview cleanly. */
+let previewAudio: HTMLAudioElement | null = null
+let previewUrl: string | null = null
+
+async function playBlob(blob: Blob): Promise<void> {
+  if (previewAudio) {
+    previewAudio.pause()
+    previewAudio = null
+  }
+  if (previewUrl) {
+    URL.revokeObjectURL(previewUrl)
+    previewUrl = null
+  }
+  const url = URL.createObjectURL(blob)
+  const audio = new Audio(url)
+  previewAudio = audio
+  previewUrl = url
+  audio.onended = () => {
+    if (previewAudio === audio) previewAudio = null
+    if (previewUrl === url) {
+      URL.revokeObjectURL(url)
+      previewUrl = null
+    }
+  }
+  try {
+    await audio.play()
+  } catch (e) {
+    console.error("[voice-drop] auto-play failed", e)
   }
 }

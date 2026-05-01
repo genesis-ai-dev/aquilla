@@ -40,6 +40,23 @@ export function fileTypeHasSections(type: FileType): boolean {
   return SCRIPTURE_FILE_TYPES.has(type)
 }
 
+export type BuiltinCheckId =
+  | "empty-target"
+  | "target-equals-source"
+  | "placeholder-integrity"
+  | "number-integrity"
+  | "end-punctuation-mismatch"
+  | "double-space"
+  | "repeated-word"
+  | "unpaired-symbols"
+  | "abbreviation-mismatch"
+
+export interface AlgorithmicCheckOverride {
+  enabled: boolean
+  /** Omit to use the registry default. */
+  severity?: "major" | "minor"
+}
+
 export interface TranslationRule {
   id: string
   name: string
@@ -58,6 +75,7 @@ export type RuleCheck =
   | { type: "source-requires-target"; sourcePattern: string; targetPattern: string }
   | { type: "target-forbids"; targetPattern: string }
   | { type: "source-target-match"; pattern: string }
+  | { type: "builtin"; checkId: BuiltinCheckId }
 
 export type RuleAutofix =
   | { kind: "regex-replace"; pattern: string; replacement: string; flags: string }
@@ -201,6 +219,9 @@ export interface ProjectRecord {
   ttsSettings?: ProjectTtsSettings
   username?: string
   rules?: TranslationRule[]
+  /** Per-project enable/severity overrides for built-in algorithmic checks.
+   *  Absent → registry defaults apply. */
+  algorithmicChecks?: Partial<Record<BuiltinCheckId, AlgorithmicCheckOverride>>
   rulePenalties?: RulePenalties
   origin?: ProjectOrigin
   permissions?: ProjectPermissions

@@ -149,11 +149,69 @@ Defaults live in `src/lib/lqa/defaults.ts` (analogous to `src/lib/health/default
 ## Performance budget
 
 - **Hot tier per-cell budget:** ≤ 0.5ms per cell at the 95th percentile, single-threaded. Tier-1 checks are O(len) and avoid per-call regex compilation via the existing cache.
-- **Idle tier:** runs in `lqaAnalyticsWorker.ts`. Debounced 1.5s after the last keystroke in a project. Re-runs incrementally when feasible; full pass otherwise. Worker output is a structured-clonable plain-object map merged onto the main thread.
+- **Idle tier:** runs in `lqaAnalyticsWorker.ts` (extends the existing `health-worker-sync.ts` model, not a parallel worker). Debounced 1.5s after the last keystroke. Re-runs incrementally; only changed cells and cells in touched index buckets recompute.
 - **Worker payload:** sends only `{ cellId, source, target, fileId }` arrays — no Y.Doc, no history, no audio.
 - **Memory:** AnalyticsContext capped at one entry per cell; per-cell payload < 200 bytes.
 
-The existing per-keystroke `checkRulesForCell` path already runs synchronously on the main thread without animation jank — adding ~10 string-only checks per cell is well within budget. Profiling is part of the implementation acceptance criteria.
+## Incremental recalculation contract
+
+**Critical:** this design extends the existing incremental "spreadsheet model" in `src/workers/health-worker-sync.ts` (per-cell signature diff → only changed cells recompute; running aggregates with deltas; full invalidation only on rule/config refs change). The LQA layer must not regress this.
+
+### Indices maintained in the worker
+
+In addition to the existing `DualIndex`, the worker maintains:
+
+| Index | Shape | Used by | Scope |
+|---|---|---|---|
+| `targetIndex` | `Map<fileId, Map<normalizedTarget, Set<cellId>>>` | `duplicate-target` | per-file |
+| `sourceTargetIndex` | `Map<fileId, Map<normalizedSource, Map<normalizedTarget, Set<cellId>>>>` | `inconsistent-translation` | per-file |
+| `lengthStats` | `Map<fileId, { n, mean, m2 }>` (Welford) | `length-ratio` | per-file |
+| `scriptStats` | `Map<fileId, Map<UnicodeScript, count>>` + cached `expectedScript` | `script-leakage` | per-file |
+| `langDetectCache` | `Map<cellId, { contentHash, detectedLang }>` | `wrong-language-detected` | per-cell |
+| `glossaryCompiledRules` | `TranslationRule[]` materialized from `ProjectRecord.glossary` | glossary, DNT | project |
+
+All indices update **incrementally** in the same cellSig-diff loop already in `health-worker-sync.ts`. When a cell's signature changes:
+1. **Remove** old `(source, target)` from `targetIndex` / `sourceTargetIndex`; subtract from `lengthStats` / `scriptStats` (Welford supports removal).
+2. **Add** new `(source, target)`.
+3. **Track touched buckets**: the set of map keys whose value-set changed. Cells in those buckets are added to a `dirtyForCrossCell` set.
+
+### Event → recompute matrix
+
+| Event | Hot tier (per-cell) | Idle tier (cross-cell) | Aggregates |
+|---|---|---|---|
+| Keystroke in cell X | Re-run all enabled per-cell checks on X (existing path, no change) | Debounce 1.5s; on fire: update indices for X, recompute cross-cell checks for `dirtyForCrossCell` only | Welford delta-update file mean/stddev; project/file health updated by score delta |
+| Cell X added | Per-cell checks on X | Update indices; recompute cross-cell for `dirtyForCrossCell ∪ {X}`. `segment-count` runs on file. | Increment Welford count; add to file/project totals |
+| Cell X removed | — | Remove X from indices; cells in vacated buckets re-checked | Decrement Welford; subtract from totals |
+| Cell X validation changes | None (no rule depends on validation) | If `expectedScript` was bootstrapped from validated cells and majority shifts, rebaseline + mark file dirty | Health recomputed for X (validation feeds composite health, not LQA) |
+| User adds 1 glossary entry | Compile entry → 1 new `source-requires-target` rule. Re-run **only that rule** across all cells (target-side scan only). | None | Health recomputes for cells the new rule fires on |
+| User edits 1 glossary entry | Same as above — diff old vs new compiled rule, drop old infractions, run new | None | As above |
+| User toggles algorithmic check off | Drop all infractions with that ruleId from cache. **No recompute.** | None | Aggregates updated by penalty delta only |
+| User toggles algorithmic check on | Run that single check across all cells in worker | None | Aggregates updated |
+| User changes severity | Update penalty math; **no infraction recompute** | None | Health recomputes (penalty changed) |
+| File opened | Build indices for that file; run all checks once | (Idle tier already covers this) | Initial aggregates |
+| File closed/unloaded | Drop file's indices to free memory | — | — |
+
+### Key invariants
+
+1. **A cell's per-cell check infractions never recompute unless that cell's content changes** (existing invariant, preserved).
+2. **Cross-cell checks recompute only for cells in touched index buckets.** Cell Y in file F is unaffected by cell X's edit unless X's old-target == Y's target, X's new-target == Y's target, X's old-source == Y's source, or X's new-source == Y's source.
+3. **Glossary is per-rule, not full-invalidate.** Adding a glossary entry must only run the new rule, not re-run the entire rule set. *Caveat: the existing worker does full-invalidate on `rulesContentKey` change. v1 ships an extension that detects "added rules ⊆ old rules" and runs only the delta; falls back to full invalidate for removals/edits.*
+4. **Language detection is content-hashed.** If `hash(newTarget) === cached.hash`, skip — no library call.
+5. **`length-ratio` and `script-leakage` thresholds are bootstrapped lazily.** Below `n=30` cells in a file, the check no-ops. Avoids early-project false positives.
+6. **No check ever walks all cells on a keystroke.** Hot tier is per-cell-only. Idle tier is debounced.
+
+### What gets thrown away
+
+- `langDetectCache` survives across debounces; persists per session.
+- `targetIndex` / `sourceTargetIndex` / `lengthStats` / `scriptStats` rebuild from scratch on full-invalidate (rule/config change). Cost: O(N) over all cells; acceptable as a once-per-config-change event.
+- `glossaryCompiledRules` rebuild on glossary mutation (cheap; one regex compile per entry, all cached).
+
+### Profiling acceptance criteria
+
+- **30k-cell Bible project, single keystroke:** hot path ≤ 1ms; idle pass after 1.5s debounce ≤ 50ms when only buckets of size ≤ 5 are touched.
+- **30k-cell project, full invalidate (e.g., severity bulk-change):** ≤ 500ms in worker; UI does not block.
+- **Glossary add (single entry):** ≤ 100ms to scan all cells against the new rule on a 30k project.
+- **Bench harness:** add a `bench/lqa-incremental.bench.ts` script that runs the above scenarios and prints timings; CI fails on >2× regression.
 
 ## Composite-health integration
 

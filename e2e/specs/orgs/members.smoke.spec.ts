@@ -1,9 +1,11 @@
 import { test, expect } from "../../helpers/multi-user"
 
-// NOTE: Selectors here are based on the planned UI shape. They may need
-// tightening during Task 26 end-to-end verification — orgs surfaces are
-// less stable than projects/editor.
-test("alice (Acme owner) adds bob to her org and bob sees Acme on his dashboard", async ({ alice, bob }) => {
+// FIXME: Selectors here are speculative. The flow assumes a button labelled
+// /Acme/i opens an org switcher, then a /members/i link inside it. The actual
+// app routes /members at the top level (MembersPage) and uses useOrg() context
+// to scope, not a per-org button. Spec needs to be rewritten against the real
+// org-management UI once we identify the right entrypoint.
+test.fixme("alice (Acme owner) adds bob to her org and bob sees Acme on his dashboard", async ({ alice, bob }) => {
   // alice navigates to her org members page.
   // Acme is pre-seeded by /__test__/reset with alice as owner.
   await alice.goto("/")

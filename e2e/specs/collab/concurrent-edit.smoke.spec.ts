@@ -7,7 +7,10 @@ import { fileURLToPath } from "node:url"
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const SAMPLE_MD = path.resolve(__dirname, "../../fixtures/sample.md")
 
-test("alice's edit on cell 0 is visible in bob's open editor within 5s", async ({ alice, bob }) => {
+// FIXME: Same blocker as file-propagation.smoke — alice's project is
+// local-only at creation, /members 403s, can't add bob via the UI as
+// written. Needs the real local→synced project upgrade flow.
+test.fixme("alice's edit on cell 0 is visible in bob's open editor within 5s", async ({ alice, bob }) => {
   const aliceDash = new Dashboard(alice)
   await aliceDash.goto()
   const name = `Concurrent ${Date.now()}`

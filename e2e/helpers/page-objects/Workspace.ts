@@ -34,10 +34,24 @@ export class Workspace {
     return this.page.locator("[data-cell-id]").nth(index)
   }
 
-  /** Click into a cell, type text, blur. Persists on blur per editor design. */
+  /** Click into a cell, type text, blur. Persists on blur per editor design.
+   *
+   * Cell editable surface is either:
+   * - a `<textarea>` (plain markdown / fallback path), or
+   * - a TipTap `<EditorContent>` which renders as `.ProseMirror[contenteditable]`
+   *   (NOT `.tiptap` — `.tiptap` is a className the user sets, not a default).
+   *
+   * `[contenteditable="true"]` covers any contenteditable target. Order matters
+   * for `.first()`: list textarea first since plain cells are common and the
+   * TipTap editor inside the row also has a few non-editable contenteditable
+   * children we don't want to match. */
   async editCell(index: number, text: string): Promise<void> {
     const row = this.cellRow(index)
-    const target = row.locator(".tiptap [contenteditable], textarea").first()
+    await row.scrollIntoViewIfNeeded()
+    const target = row
+      .locator('textarea, .ProseMirror[contenteditable="true"], [contenteditable="true"]')
+      .first()
+    await target.waitFor({ state: "visible", timeout: 10_000 })
     await target.click()
     await this.page.keyboard.type(text)
     await this.page.locator("aside").click() // blur outside editor

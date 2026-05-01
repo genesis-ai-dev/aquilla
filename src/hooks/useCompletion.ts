@@ -4,6 +4,8 @@ import type { CompletionSettings } from "@/lib/parsers/types"
 import type { FrontierSession } from "@/lib/frontier/types"
 import { setPlainText } from "@/lib/richtext/translated-xml"
 import type { ScoredPair } from "@/lib/search/dual-index"
+
+type SearchFn = (query: string, limit?: number, excludeId?: string) => ScoredPair[]
 import type { CellData } from "./useCells"
 import { buildPrompt, complete, resolveProvider, DEFAULT_SYSTEM_PROMPT } from "@/lib/completion/completion-service"
 import { useFrontierHealth } from "@/lib/completion/frontier-health"
@@ -27,7 +29,7 @@ export function useCompletion(
   settings: CompletionSettings | undefined,
   sourceLanguage: string,
   targetLanguage: string,
-  search: (query: string, limit?: number) => ScoredPair[],
+  search: SearchFn,
   session: FrontierSession | null = null,
 ) {
   const [completing, setCompleting] = useState<Map<string, string>>(new Map())
@@ -57,7 +59,9 @@ export function useCompletion(
     if (!doc || !isConfigured || !isAvailable) return
 
     setCompleting((p) => new Map(p).set(cell.id, "searching"))
-    const found = search(cell.original, 5)
+    // Exclude the cell itself — re-completing an already-translated cell would
+    // otherwise show the model its own (source, target) pair and get an echo.
+    const found = search(cell.original, 5, cell.id)
     setExamples((p) => new Map(p).set(cell.id, found))
     setCompleting((p) => new Map(p).set(cell.id, "generating"))
 
@@ -118,7 +122,7 @@ export function useCompletion(
     const allExamples = new Map<string, ScoredPair[]>()
     for (const cell of cells) {
       setCompleting((p) => new Map(p).set(cell.id, "searching"))
-      allExamples.set(cell.id, search(cell.original, 5))
+      allExamples.set(cell.id, search(cell.original, 5, cell.id))
     }
     for (const cell of cells) {
       setExamples((p) => new Map(p).set(cell.id, allExamples.get(cell.id) || []))

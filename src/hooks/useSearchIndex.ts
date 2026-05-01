@@ -23,8 +23,15 @@ export function useSearchIndex(_files: FileReference[], allProjectCells: CellDat
     )
   }, [allProjectCells])
 
-  const search = useCallback((query: string, limit?: number): ScoredPair[] => {
-    return indexRef.current.searchBranchingSource(query, limit ?? 5)
+  // `excludeId` skips a specific cell from the result — used by completion to
+  // keep the cell-being-translated out of its own few-shot examples (otherwise
+  // a re-completion of an already-translated cell sees its own (source, target)
+  // pair and the model just echoes the existing translation back).
+  const search = useCallback((query: string, limit = 5, excludeId?: string): ScoredPair[] => {
+    if (!excludeId) return indexRef.current.searchBranchingSource(query, limit)
+    const raw = indexRef.current.searchBranchingSource(query, limit + 1)
+    const filtered = raw.filter((p) => p.cellId !== excludeId)
+    return filtered.length > limit ? filtered.slice(0, limit) : filtered
   }, [])
 
   return { search, index: indexRef.current }

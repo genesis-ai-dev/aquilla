@@ -11,7 +11,11 @@ export interface CreateProjectOpts {
  * Methods are user-intent verbs (createProject, openProject, deleteProject)
  * and selectors live only here so spec authors don't duplicate them. */
 export class Dashboard {
-  constructor(private readonly page: Page) {}
+  private readonly page: Page
+
+  constructor(page: Page) {
+    this.page = page
+  }
 
   async goto(): Promise<void> {
     await this.page.goto("/")

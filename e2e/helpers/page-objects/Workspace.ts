@@ -2,7 +2,11 @@ import { type Page, type Locator, expect } from "@playwright/test"
 
 /** Page object for the project workspace route ("/project/:id"). */
 export class Workspace {
-  constructor(private readonly page: Page) {}
+  private readonly page: Page
+
+  constructor(page: Page) {
+    this.page = page
+  }
 
   async importFile(filePath: string): Promise<void> {
     await this.page.getByRole("button", { name: /^Import$/i }).click()

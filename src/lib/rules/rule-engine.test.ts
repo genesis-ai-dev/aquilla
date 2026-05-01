@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest"
-import { checkRules } from "./rule-engine"
+import { checkRules, checkRulesForCell } from "./rule-engine"
 import type { TranslationRule } from "@/lib/parsers/types"
 import type { CellData } from "@/hooks/useCells"
 
@@ -174,5 +174,43 @@ describe("infraction spans", () => {
     const inf = result.get("c1")![0]
     expect(inf.spans).toHaveLength(1)
     expect(inf.spans[0]).toEqual({ side: "source", start: 8, end: 9, matchedText: "5" })
+  })
+})
+
+describe("rule engine — builtin variant", () => {
+  it("dispatches to BUILTIN_CHECKS for type='builtin' (empty-target fires on empty cell)", () => {
+    const rule = makeRule({
+      id: "builtin-empty-target",
+      name: "Empty target",
+      source: "algorithmic",
+      check: { type: "builtin", checkId: "empty-target" },
+    })
+    const cell = makeCell({ id: "c1", original: "Hello", translated: "", status: "empty" })
+    const out = checkRulesForCell(cell, "f1", [rule])
+    expect(out).toHaveLength(1)
+    expect(out[0].ruleId).toBe("builtin-empty-target")
+  })
+
+  it("non-empty-aware builtins skip empty cells", () => {
+    const rule = makeRule({
+      id: "builtin-tes",
+      name: "Target eq source",
+      source: "algorithmic",
+      check: { type: "builtin", checkId: "target-equals-source" },
+    })
+    const cell = makeCell({ id: "c1", original: "Hello", translated: "", status: "empty" })
+    expect(checkRulesForCell(cell, "f1", [rule])).toEqual([])
+  })
+
+  it("target-equals-source fires when target verbatim matches source", () => {
+    const rule = makeRule({
+      id: "builtin-tes",
+      name: "Target eq source",
+      source: "algorithmic",
+      check: { type: "builtin", checkId: "target-equals-source" },
+    })
+    const cell = makeCell({ id: "c1", original: "Hello world", translated: "Hello world", status: "validated" })
+    const out = checkRulesForCell(cell, "f1", [rule])
+    expect(out).toHaveLength(1)
   })
 })

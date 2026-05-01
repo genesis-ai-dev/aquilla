@@ -1,5 +1,6 @@
 import type { TranslationRule, RuleInfraction } from "@/lib/parsers/types"
 import type { CellData } from "@/hooks/useCells"
+import { BUILTIN_CHECKS } from "@/lib/lqa/builtin-registry"
 
 // Compiled-regex cache. Rule patterns are stable across cells and across
 // calls; without this the hot keystroke path recompiles every pattern for
@@ -45,10 +46,27 @@ export function checkRulesForCell(
   fileId: string,
   enabledRules: TranslationRule[],
 ): RuleInfraction[] {
-  if (cell.status === "empty" || !cell.translated.trim()) return []
   if (enabledRules.length === 0) return []
   const out: RuleInfraction[] = []
+
+  // Step 1: empty-aware builtin checks fire even when target is empty.
   for (const rule of enabledRules) {
+    if (rule.check.type !== "builtin") continue
+    const def = BUILTIN_CHECKS[rule.check.checkId]
+    if (!def?.runsOnEmptyTarget) continue
+    const infraction = checkRule(rule, cell, fileId)
+    if (infraction) out.push(infraction)
+  }
+
+  // Step 2: short-circuit on empty target for the rest.
+  if (cell.status === "empty" || !cell.translated.trim()) return out
+
+  // Step 3: regular checks (skip the empty-aware builtins already handled).
+  for (const rule of enabledRules) {
+    if (rule.check.type === "builtin") {
+      const def = BUILTIN_CHECKS[rule.check.checkId]
+      if (def?.runsOnEmptyTarget) continue
+    }
     const infraction = checkRule(rule, cell, fileId)
     if (infraction) out.push(infraction)
   }
@@ -110,6 +128,19 @@ function checkRule(rule: TranslationRule, cell: CellData, fileId: string): RuleI
         ruleId: rule.id, cellId: cell.id, fileId,
         message: `"${rule.name}": pattern found in source but missing in target`,
         spans: sourceSpans,
+      }
+    }
+    case "builtin": {
+      const def = BUILTIN_CHECKS[check.checkId]
+      if (!def) return null
+      const spans = def.run(cell.original, cell.translated)
+      if (!spans || spans.length === 0) return null
+      return {
+        ruleId: rule.id,
+        cellId: cell.id,
+        fileId,
+        message: `"${rule.name}": ${def.message}`,
+        spans,
       }
     }
   }

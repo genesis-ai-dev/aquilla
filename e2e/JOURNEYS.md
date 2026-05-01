@@ -4,8 +4,8 @@
 
 | Area        | Journey                                              | Spec                                                          | Smoke? |
 | ----------- | ---------------------------------------------------- | ------------------------------------------------------------- | :----: |
-| Auth        | Seed user logs in via UI                             | `e2e/specs/auth/login.smoke.spec.ts`                          |   ✅   |
-| Auth        | Sign up new account                                  | _gap — Plan 2_                                                |        |
+| Auth        | API-level login (covered implicitly by every multi-user spec via `ensureAuthState`) | `e2e/helpers/auth.ts` |  n/a   |
+| Auth        | UI sign-up / login flow                              | _gap — Plan 2 (no `/login` route; login lives in onboarding)_ |        |
 | Auth        | Password reset request                               | _gap — Plan 2_                                                |        |
 | Auth        | Switch between two signed-in accounts                | _gap — Plan 2_                                                |        |
 | Onboarding  | First-run flow to dashboard                          | _gap — Plan 2_                                                |        |

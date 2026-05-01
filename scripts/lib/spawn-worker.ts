@@ -1,4 +1,5 @@
 import { spawn, spawnSync, type ChildProcess } from "node:child_process"
+import { createWriteStream, type WriteStream } from "node:fs"
 
 export interface SpawnedWorker {
   child: ChildProcess
@@ -22,13 +23,16 @@ function killTree(pid: number, signal: NodeJS.Signals = "SIGTERM"): void {
 }
 
 /** Spawns `wrangler dev --local` in a child process and waits until the
- * worker is reachable on its port. Streams stdout/stderr with a label
- * prefix so the orchestrator's combined output is greppable. */
+ * worker is reachable on its port. Streams stdout/stderr to a log file
+ * (silent by default); pass `streamToParent: true` to also tee to this
+ * process's stdout/stderr (used by --verbose). */
 export async function spawnWranglerDev(opts: {
   cwd: string
   port: number
   label: string
   env?: Record<string, string>
+  logFile?: WriteStream
+  streamToParent?: boolean
 }): Promise<SpawnedWorker> {
   const child = spawn(
     "npx",
@@ -40,8 +44,7 @@ export async function spawnWranglerDev(opts: {
     },
   )
 
-  child.stdout?.on("data", (b) => process.stdout.write(`[${opts.label}] ${b}`))
-  child.stderr?.on("data", (b) => process.stderr.write(`[${opts.label}] ${b}`))
+  attachOutput(child, opts.label, opts.logFile, opts.streamToParent ?? false)
 
   // Wait for the worker to be reachable. Throw if it never comes up.
   const start = Date.now()
@@ -78,6 +81,30 @@ export async function spawnWranglerDev(opts: {
   }
 }
 
+/** Wire a child's stdout/stderr into a log file (and optionally also tee
+ * to the parent process's stdout/stderr). The label is prefixed onto each
+ * line written to the parent, but written verbatim to the log file. */
+export function attachOutput(
+  child: ChildProcess,
+  label: string,
+  logFile?: WriteStream,
+  streamToParent = false,
+): void {
+  if (logFile) {
+    child.stdout?.pipe(logFile, { end: false })
+    child.stderr?.pipe(logFile, { end: false })
+  } else {
+    // Drain the streams even if we're not logging — otherwise the child's
+    // stdio buffer fills and it blocks.
+    child.stdout?.on("data", () => {})
+    child.stderr?.on("data", () => {})
+  }
+  if (streamToParent) {
+    child.stdout?.on("data", (b) => process.stdout.write(`[${label}] ${b}`))
+    child.stderr?.on("data", (b) => process.stderr.write(`[${label}] ${b}`))
+  }
+}
+
 /** Same kill-tree pattern but for a generic spawned child (Vite, etc.). */
 export function killChildTree(child: ChildProcess): Promise<void> {
   return new Promise<void>((resolve) => {
@@ -91,4 +118,9 @@ export function killChildTree(child: ChildProcess): Promise<void> {
       resolve()
     }, 5_000)
   })
+}
+
+/** Open a log file write stream, replacing any prior contents. */
+export function openLogFile(filePath: string): WriteStream {
+  return createWriteStream(filePath, { flags: "w" })
 }

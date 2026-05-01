@@ -1,9 +1,15 @@
 import { spawn, spawnSync } from "node:child_process"
-import { existsSync, writeFileSync, rmSync, readdirSync } from "node:fs"
+import { existsSync, writeFileSync, rmSync, readdirSync, mkdirSync, readFileSync } from "node:fs"
 import { homedir } from "node:os"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
-import { spawnWranglerDev, killChildTree, type SpawnedWorker } from "./lib/spawn-worker"
+import {
+  spawnWranglerDev,
+  killChildTree,
+  attachOutput,
+  openLogFile,
+  type SpawnedWorker,
+} from "./lib/spawn-worker"
 import { MockLLMServer } from "../e2e/helpers/mock-llm-server"
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -15,7 +21,11 @@ const FRONTIER_PORT = 8787
 const SYNC_WORKER_PORT = 8788
 const VITE_PORT = 5173
 
+const VERBOSE = process.env.E2E_VERBOSE === "1" || process.argv.includes("--verbose")
+const LOG_DIR = path.join(REPO_ROOT, ".e2e-logs")
+
 const cleanup: Array<() => Promise<void>> = []
+const logFiles: Record<string, string> = {}
 
 let shuttingDown = false
 async function shutdown(code = 0): Promise<never> {
@@ -49,11 +59,42 @@ async function waitForUrl(url: string, timeoutMs: number): Promise<void> {
   throw new Error(`timed out waiting for ${url}`)
 }
 
-function runOnce(cmd: string, args: string[], cwd: string): Promise<void> {
+/** Run a command and either inherit stdio (verbose) or pipe to /dev/null
+ * (quiet). Output goes to the log file in quiet mode if `logLabel` is set. */
+function runOnce(
+  cmd: string,
+  args: string[],
+  cwd: string,
+  logLabel?: string,
+): Promise<void> {
   return new Promise((resolve, reject) => {
-    const c = spawn(cmd, args, { cwd, stdio: "inherit" })
+    const stdio: ("inherit" | "ignore" | "pipe")[] =
+      VERBOSE ? ["inherit", "inherit", "inherit"] : ["ignore", "pipe", "pipe"]
+    const c = spawn(cmd, args, { cwd, stdio })
+    if (!VERBOSE && logLabel && logFiles[logLabel]) {
+      const stream = openLogFile(logFiles[logLabel])
+      c.stdout?.pipe(stream, { end: false })
+      c.stderr?.pipe(stream, { end: false })
+    } else if (!VERBOSE) {
+      // Drain so the child doesn't block on full pipes.
+      c.stdout?.on("data", () => {})
+      c.stderr?.on("data", () => {})
+    }
     c.on("exit", (code) => (code === 0 ? resolve() : reject(new Error(`${cmd} ${args.join(" ")} exit ${code}`))))
   })
+}
+
+/** Print the last N lines of each known log file to stderr. Used when a
+ * subcommand fails so the developer can see what went wrong without
+ * needing to know the log paths. */
+function dumpLogs(tailLines = 80): void {
+  for (const [label, file] of Object.entries(logFiles)) {
+    if (!existsSync(file)) continue
+    const lines = readFileSync(file, "utf-8").trimEnd().split("\n")
+    const tail = lines.slice(-tailLines)
+    process.stderr.write(`\n──── ${label} (last ${tail.length} lines of ${file}) ────\n`)
+    process.stderr.write(tail.join("\n") + "\n")
+  }
 }
 
 /** Free a port held by a stale process from a prior run. Non-interactive
@@ -91,8 +132,16 @@ async function main(): Promise<void> {
   await freePort(SYNC_WORKER_PORT)
   await freePort(VITE_PORT)
 
-  // 1. Reset both wrangler local states for clean slate
-  console.log("[boot 1/8] resetting wrangler local state…")
+  // Set up the log dir. Worker stdout/stderr is piped here in non-verbose
+  // mode so the developer's terminal stays clean. On test failure we tail
+  // these files so problems are still discoverable.
+  mkdirSync(LOG_DIR, { recursive: true })
+  logFiles.frontier = path.join(LOG_DIR, "frontier.log")
+  logFiles.sync = path.join(LOG_DIR, "sync.log")
+  logFiles.vite = path.join(LOG_DIR, "vite.log")
+  logFiles.migrations = path.join(LOG_DIR, "migrations.log")
+  logFiles.build = path.join(LOG_DIR, "build.log")
+  console.log(`[boot 1/8] resetting wrangler local state… (logs: ${LOG_DIR}/)`)
   rmSync(path.join(FRONTIER_SERVER_DIR, ".wrangler"), { recursive: true, force: true })
   rmSync(path.join(SYNC_WORKER_DIR, ".wrangler"), { recursive: true, force: true })
 
@@ -102,6 +151,7 @@ async function main(): Promise<void> {
     "npx",
     ["wrangler", "d1", "migrations", "apply", "frontier-db-v2", "--local"],
     FRONTIER_SERVER_DIR,
+    "migrations",
   )
 
   // 2b. Apply codex-db schema to BOTH workers' local D1.
@@ -116,6 +166,7 @@ async function main(): Promise<void> {
     "npx",
     ["wrangler", "d1", "migrations", "apply", "codex-db", "--local"],
     FRONTIER_SERVER_DIR,
+    "migrations",
   )
   const codexMigrationsDir = path.join(FRONTIER_SERVER_DIR, "cloudflare/codex_migrations")
   const codexMigrations = readdirSync(codexMigrationsDir)
@@ -126,6 +177,7 @@ async function main(): Promise<void> {
       "npx",
       ["wrangler", "d1", "execute", "codex-db", "--local", `--file=${path.join(codexMigrationsDir, m)}`],
       SYNC_WORKER_DIR,
+      "migrations",
     )
   }
 
@@ -136,6 +188,8 @@ async function main(): Promise<void> {
     port: FRONTIER_PORT,
     label: "frontier",
     env: { WRANGLER_LOCAL: "1" },
+    logFile: openLogFile(logFiles.frontier),
+    streamToParent: VERBOSE,
   })
   cleanup.push(() => frontier.kill())
 
@@ -145,6 +199,8 @@ async function main(): Promise<void> {
     cwd: SYNC_WORKER_DIR,
     port: SYNC_WORKER_PORT,
     label: "sync",
+    logFile: openLogFile(logFiles.sync),
+    streamToParent: VERBOSE,
   })
   cleanup.push(() => sync.kill())
 
@@ -152,7 +208,6 @@ async function main(): Promise<void> {
   console.log("[boot 6/8] starting mock LLM…")
   const mockLLM = new MockLLMServer()
   await mockLLM.start()
-  console.log(`         mock LLM ready at ${mockLLM.baseUrl}`)
   cleanup.push(async () => mockLLM.stop())
 
   // 6. Write .env.test.local
@@ -177,7 +232,7 @@ async function main(): Promise<void> {
   //
   // The build cost (~15-30s) pays for itself after the second spec.
   console.log("[boot 7/8] building app for test mode (one-time, ~30s)…")
-  await runOnce("npx", ["vite", "build", "--mode", "test"], REPO_ROOT)
+  await runOnce("npx", ["vite", "build", "--mode", "test"], REPO_ROOT, "build")
 
   console.log(`[boot 8/8] starting Vite preview on :${VITE_PORT}…`)
   const vite = spawn(
@@ -189,8 +244,7 @@ async function main(): Promise<void> {
       env: { ...process.env },
     },
   )
-  vite.stdout?.on("data", (b) => process.stdout.write(`[vite] ${b}`))
-  vite.stderr?.on("data", (b) => process.stderr.write(`[vite] ${b}`))
+  attachOutput(vite, "vite", openLogFile(logFiles.vite), VERBOSE)
   cleanup.push(() => killChildTree(vite))
 
   await waitForUrl(`http://127.0.0.1:${VITE_PORT}/`, 30_000)
@@ -230,7 +284,17 @@ async function main(): Promise<void> {
       VITE_LLM_BASE_URL: mockLLM.baseUrl,
     },
   })
-  pw.on("exit", (code) => { void shutdown(code ?? 1) })
+  pw.on("exit", (code) => {
+    if (code !== 0 && !VERBOSE) {
+      // Test failed and worker logs are in files. Tail them so the dev
+      // sees what went wrong without having to know the file paths.
+      console.log(`\n[fail] Playwright exited ${code}. Tailing worker logs:`)
+      dumpLogs()
+      console.log(`\n[hint] Full logs: ${LOG_DIR}/`)
+      console.log(`[hint] Re-run with --verbose to stream live: npm run test:e2e -- --verbose`)
+    }
+    void shutdown(code ?? 1)
+  })
 }
 
 main().catch((e) => {

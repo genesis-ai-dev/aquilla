@@ -46,3 +46,4 @@ playwright/.cache/
 
 # E2E suite — local-only state
 e2e/.auth/
+.e2e-logs/

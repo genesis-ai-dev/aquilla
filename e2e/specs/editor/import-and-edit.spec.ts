@@ -7,10 +7,10 @@ import {
   openProject,
   importFile,
   waitForEditor,
-} from "./helpers"
+} from "../../helpers/legacy"
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
-const SAMPLE_MD = resolve(__dirname, "fixtures/sample.md")
+const SAMPLE_MD = resolve(__dirname, "../../fixtures/sample.md")
 const PROJECT_NAME = "Lifecycle Test"
 
 test.describe("Project lifecycle", () => {

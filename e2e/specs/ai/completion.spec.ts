@@ -1,7 +1,7 @@
 import { test, expect } from "@playwright/test"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
-import { MockLLMServer } from "./mock-llm-server"
+import { MockLLMServer } from "../../helpers/mock-llm-server"
 import {
   resetAndGotoDashboard,
   createProject,
@@ -9,10 +9,10 @@ import {
   importFile,
   waitForEditor,
   clickFileInSidebar,
-} from "./helpers"
+} from "../../helpers/legacy"
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
-const sampleFile = path.resolve(__dirname, "fixtures/sample.md")
+const sampleFile = path.resolve(__dirname, "../../fixtures/sample.md")
 
 let mockServer: MockLLMServer
 

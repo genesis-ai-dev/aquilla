@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test"
-import { resetAndGotoDashboard, createProject, openProject } from "./helpers"
+import { resetAndGotoDashboard, createProject, openProject } from "../../helpers/legacy"
 
 test.describe("Dashboard", () => {
   test.beforeEach(async ({ page }) => {

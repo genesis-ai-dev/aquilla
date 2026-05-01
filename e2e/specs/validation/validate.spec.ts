@@ -8,10 +8,10 @@ import {
   importFile,
   waitForEditor,
   clickFileInSidebar,
-} from "./helpers"
+} from "../../helpers/legacy"
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
-const sampleFile = path.resolve(__dirname, "fixtures/sample.md")
+const sampleFile = path.resolve(__dirname, "../../fixtures/sample.md")
 
 let projectName: string
 

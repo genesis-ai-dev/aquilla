@@ -19,7 +19,7 @@ function resolveBuildBrand(): BrandId {
 const brandId = resolveBuildBrand()
 const brand = BRAND_DATA[brandId]
 
-export default defineConfig({
+export default defineConfig(({ mode }) => ({
   clearScreen: false,
   envPrefix: ["VITE_", "TAURI_ENV_"],
   define: {
@@ -41,7 +41,10 @@ export default defineConfig({
   },
   plugins: [
     react(),
-    babel({ presets: [reactCompilerPreset()] }),
+    // React Compiler is RC and expensive at compile time. Skip it for the
+    // test build — the compiler isn't what we're testing, and including it
+    // turned the E2E orchestrator into a memory hog on dev machines.
+    ...(mode === "test" ? [] : [babel({ presets: [reactCompilerPreset()] })]),
     tailwindcss(),
     // isomorphic-git pulls in node:crypto, node:buffer, etc.
     nodePolyfills({
@@ -103,4 +106,4 @@ export default defineConfig({
     passWithNoTests: true,
     exclude: ["**/node_modules/**", "dist/**", ".worktrees/**", ".claude/worktrees/**", "cors-proxy/**", "e2e/**"],
   },
-})
+}))

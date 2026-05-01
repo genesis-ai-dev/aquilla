@@ -3,7 +3,7 @@ import { existsSync, writeFileSync, rmSync } from "node:fs"
 import { homedir } from "node:os"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
-import { spawnWranglerDev, type SpawnedWorker } from "./lib/spawn-worker"
+import { spawnWranglerDev, killChildTree, type SpawnedWorker } from "./lib/spawn-worker"
 import { MockLLMServer } from "../e2e/helpers/mock-llm-server"
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -140,26 +140,30 @@ async function main(): Promise<void> {
   cleanup.push(async () => rmSync(envFile, { force: true }))
   console.log(`[e2e-up] wrote ${envFile}`)
 
-  // 7. Boot Vite
-  console.log(`[e2e-up] starting Vite on :${VITE_PORT}…`)
-  // `--mode test` makes Vite load .env.test.local (Vite reads its mode from
-  // the CLI flag, not the MODE shell env var).
-  const vite = spawn("npx", ["vite", "--port", String(VITE_PORT), "--strictPort", "--mode", "test"], {
-    cwd: REPO_ROOT,
-    stdio: ["ignore", "pipe", "pipe"],
-    env: { ...process.env },
-  })
+  // 7. Build once, then serve via `vite preview` (static).
+  //
+  // Why not `vite dev`? Dev mode runs babel/react-compiler on every request,
+  // keeps an HMR watcher alive, and forces re-optimize roundtrips that
+  // crater CPU/RAM under E2E load. A pre-built dist is served by a plain
+  // static server with ~0 ongoing CPU and ~50 MB RAM vs. several hundred MB.
+  //
+  // The build cost (~15-30s) pays for itself after the second spec.
+  console.log("[e2e-up] building app for test mode (one-time)…")
+  await runOnce("npx", ["vite", "build", "--mode", "test"], REPO_ROOT)
+
+  console.log(`[e2e-up] starting Vite preview on :${VITE_PORT}…`)
+  const vite = spawn(
+    "npx",
+    ["vite", "preview", "--port", String(VITE_PORT), "--strictPort", "--mode", "test"],
+    {
+      cwd: REPO_ROOT,
+      stdio: ["ignore", "pipe", "pipe"],
+      env: { ...process.env },
+    },
+  )
   vite.stdout?.on("data", (b) => process.stdout.write(`[vite] ${b}`))
   vite.stderr?.on("data", (b) => process.stderr.write(`[vite] ${b}`))
-  cleanup.push(
-    () =>
-      new Promise<void>((resolve) => {
-        if (vite.killed) return resolve()
-        vite.once("exit", () => resolve())
-        vite.kill("SIGTERM")
-        setTimeout(() => { if (!vite.killed) vite.kill("SIGKILL"); resolve() }, 5_000)
-      }),
-  )
+  cleanup.push(() => killChildTree(vite))
 
   await waitForUrl(`http://127.0.0.1:${VITE_PORT}/`, 30_000)
 

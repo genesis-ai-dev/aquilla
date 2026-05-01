@@ -1,9 +1,24 @@
-import { spawn, type ChildProcess } from "node:child_process"
+import { spawn, spawnSync, type ChildProcess } from "node:child_process"
 
 export interface SpawnedWorker {
   child: ChildProcess
   port: number
   kill: () => Promise<void>
+}
+
+/** Kill a process and any descendants. wrangler dev wraps a workerd child
+ * that doesn't always die when the npx parent gets SIGTERM, leaving
+ * orphans that hold ports across runs. We use `pkill -P` to walk the
+ * tree, then SIGKILL the parent if it still hasn't exited. */
+function killTree(pid: number, signal: NodeJS.Signals = "SIGTERM"): void {
+  // Kill children first (reaping bottom-up keeps a workerd-style daemon from
+  // getting reparented to PID 1 and surviving its parent).
+  spawnSync("pkill", [signal === "SIGKILL" ? "-9" : "-15", "-P", String(pid)])
+  try {
+    process.kill(pid, signal)
+  } catch {
+    // already gone
+  }
 }
 
 /** Spawns `wrangler dev --local` in a child process and waits until the
@@ -41,7 +56,7 @@ export async function spawnWranglerDev(opts: {
     await new Promise((r) => setTimeout(r, 500))
   }
   if (!ready) {
-    child.kill("SIGKILL")
+    if (child.pid) killTree(child.pid, "SIGKILL")
     throw new Error(`[${opts.label}] timed out waiting for :${opts.port}`)
   }
 
@@ -50,13 +65,30 @@ export async function spawnWranglerDev(opts: {
     port: opts.port,
     kill: () =>
       new Promise<void>((resolve) => {
-        if (child.killed) return resolve()
+        if (child.killed || child.exitCode !== null) return resolve()
         child.once("exit", () => resolve())
-        child.kill("SIGTERM")
+        if (child.pid) killTree(child.pid, "SIGTERM")
         setTimeout(() => {
-          if (!child.killed) child.kill("SIGKILL")
+          if (!child.killed && child.exitCode === null && child.pid) {
+            killTree(child.pid, "SIGKILL")
+          }
           resolve()
         }, 5_000)
       }),
   }
+}
+
+/** Same kill-tree pattern but for a generic spawned child (Vite, etc.). */
+export function killChildTree(child: ChildProcess): Promise<void> {
+  return new Promise<void>((resolve) => {
+    if (child.killed || child.exitCode !== null) return resolve()
+    child.once("exit", () => resolve())
+    if (child.pid) killTree(child.pid, "SIGTERM")
+    setTimeout(() => {
+      if (!child.killed && child.exitCode === null && child.pid) {
+        killTree(child.pid, "SIGKILL")
+      }
+      resolve()
+    }, 5_000)
+  })
 }

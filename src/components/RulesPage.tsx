@@ -9,6 +9,7 @@ import { getProject } from "@/lib/store/project-index"
 import { useRules } from "@/hooks/useRules"
 import { RuleCreateDialog } from "./RuleCreateDialog"
 import { RuleSuggestDialog } from "./RuleSuggestDialog"
+import { BuiltinChecksList } from "./BuiltinChecksList"
 import type { ProjectRecord, RuleAutofix, TranslationRule } from "@/lib/parsers/types"
 
 export function RulesPage() {
@@ -43,7 +44,7 @@ export function RulesPage() {
     }
   }, [searchParams, project])
 
-  const { rules, penalties, addRule, updateRule, deleteRule, updatePenalties } = useRules(project, refresh)
+  const { userRules, builtinRules, penalties, addRule, updateRule, deleteRule, updatePenalties, setBuiltinOverride } = useRules(project, refresh)
 
   const usageSummary = useMemo(() => {
     const u = project?.usage
@@ -97,16 +98,23 @@ export function RulesPage() {
           </CardContent>
         </Card>
 
+        {/* TODO(lqa-plan-b): wire real infractions when worker dispatch lands. */}
+        <BuiltinChecksList
+          builtinRules={builtinRules}
+          infractions={new Map()}
+          onSetOverride={setBuiltinOverride}
+        />
+
         <Card>
-          <CardHeader><CardTitle>Rules ({rules.length})</CardTitle></CardHeader>
+          <CardHeader><CardTitle>Rules ({userRules.length})</CardTitle></CardHeader>
           <CardContent>
-            {rules.length === 0 ? (
+            {userRules.length === 0 ? (
               <div className="space-y-2 text-sm text-muted-foreground">
                 <p>No rules defined yet.</p>
               </div>
             ) : (
               <ul className="space-y-2">
-                {rules.map((rule) => {
+                {userRules.map((rule) => {
                   const Icon = rule.severity === "major" ? AlertTriangle : AlertCircle
                   const badgeColor = rule.severity === "major"
                     ? "bg-red-100 text-red-700 dark:bg-red-950 dark:text-red-400"

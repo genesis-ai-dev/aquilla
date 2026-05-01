@@ -2,10 +2,9 @@
 // One token per (projectId, fileId) scope; 15-min TTL. Cache the token in memory
 // and refresh when within 30 s of expiry so reconnects don't race with expiration.
 
-// Dev default works both against prod (no local frontier-server) and against
-// a locally-running frontier-server if VITE_FRONTIER_API_URL is set.
+// Honor VITE_FRONTIER_BASE override (see src/lib/frontier/auth.ts).
 export const FRONTIER_API_URL =
-  (import.meta.env.VITE_FRONTIER_API_URL as string | undefined)?.replace(/\/$/, "") ??
+  ((import.meta.env.VITE_FRONTIER_BASE as string | undefined)?.replace(/\/+$/, "")) ||
   "https://api.frontierrnd.com"
 
 export interface SyncTokenResponse {

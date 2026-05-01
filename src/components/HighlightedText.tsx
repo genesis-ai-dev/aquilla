@@ -26,7 +26,9 @@ interface HighlightedTextProps {
   /** Byte-range violation highlights. Always rendered. */
   ranges?: RangeHighlight[]
   showEvidence?: boolean
-  onRangeClick?: (ruleId: string, event: React.MouseEvent<HTMLSpanElement>) => void
+  /** Called with the rule id and the span element itself, so callers can
+   *  anchor popovers to the violation glyph. Matches `TranslatedEditor.onRuleClick`. */
+  onRangeClick?: (ruleId: string, anchor: HTMLElement) => void
 }
 
 export function HighlightedText({
@@ -66,7 +68,7 @@ export function HighlightedText({
               key={i}
               role={onRangeClick ? "button" : undefined}
               tabIndex={onRangeClick ? 0 : undefined}
-              onClick={onRangeClick ? (e) => onRangeClick(chunk.range!.ruleId, e) : undefined}
+              onClick={onRangeClick ? (e) => onRangeClick(chunk.range!.ruleId, e.currentTarget) : undefined}
               className={cn(
                 "cursor-pointer",
                 chunk.range.kind === "violation-major" && "decoration-wavy decoration-red-500 underline underline-offset-[3px]",

@@ -17,7 +17,9 @@ export function RuleCreateDialog({ onAdd }: RuleCreateDialogProps) {
   const [name, setName] = useState("")
   const [description, setDescription] = useState("")
   const [severity, setSeverity] = useState<"major" | "minor">("minor")
-  const [checkType, setCheckType] = useState<RuleCheck["type"]>("source-target-match")
+  // The dialog creates user-defined regex rules; builtin checks are code-defined
+  // and surfaced elsewhere, so they're excluded from the picker here.
+  const [checkType, setCheckType] = useState<Exclude<RuleCheck["type"], "builtin">>("source-target-match")
   const [pattern, setPattern] = useState("")
   const [sourcePattern, setSourcePattern] = useState("")
   const [targetPattern, setTargetPattern] = useState("")
@@ -125,7 +127,7 @@ export function RuleCreateDialog({ onAdd }: RuleCreateDialogProps) {
             </div>
             <div>
               <Label>Rule Type</Label>
-              <select value={checkType} onChange={(e) => setCheckType(e.target.value as RuleCheck["type"])} className="w-full rounded border bg-background px-3 py-2 text-sm">
+              <select value={checkType} onChange={(e) => setCheckType(e.target.value as Exclude<RuleCheck["type"], "builtin">)} className="w-full rounded border bg-background px-3 py-2 text-sm">
                 <option value="source-target-match">Source-target match</option>
                 <option value="source-requires-target">Source requires target</option>
                 <option value="target-forbids">Target forbids</option>

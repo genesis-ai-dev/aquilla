@@ -175,7 +175,9 @@ function describeCheck(rule: TranslationRule): string {
   const c = rule.check
   if (c.type === "target-forbids") return `Target must not contain /${c.targetPattern}/i`
   if (c.type === "source-target-match") return `Pattern /${c.pattern}/gi must appear in both source and target when present in source`
-  return `When source matches /${c.sourcePattern}/i, target must match /${c.targetPattern}/i`
+  if (c.type === "source-requires-target") return `When source matches /${c.sourcePattern}/i, target must match /${c.targetPattern}/i`
+  // builtin: code-defined check, identified only by id from the caller's perspective.
+  return `Built-in check: ${c.checkId}`
 }
 
 function buildBatchUserMessage(rule: TranslationRule, breaking: CellData[], passing: CellData[]): string {

@@ -13,11 +13,9 @@ describe("ViolationPopover", () => {
   it("renders rule name, message, and a Waive button by default", () => {
     render(
       <ViolationPopover
-        open infraction={infraction} ruleName="No bad" waivers={[]}
+        open infraction={infraction} ruleName="No bad" waivers={[]} anchor={null}
         onOpenChange={() => {}} onOpenRule={() => {}} onWaive={() => {}} onUnwaive={() => {}}
-      >
-        <span>anchor</span>
-      </ViolationPopover>
+      />
     )
     expect(screen.getByText("No bad")).toBeInTheDocument()
     expect(screen.getByText(/forbidden pattern/)).toBeInTheDocument()
@@ -28,11 +26,9 @@ describe("ViolationPopover", () => {
     const waivers: RuleWaiver[] = [{ ruleId: "r1", reason: "agreed", waivedAt: "2026-04-24T00:00:00Z" }]
     render(
       <ViolationPopover
-        open infraction={infraction} ruleName="No bad" waivers={waivers}
+        open infraction={infraction} ruleName="No bad" waivers={waivers} anchor={null}
         onOpenChange={() => {}} onOpenRule={() => {}} onWaive={() => {}} onUnwaive={() => {}}
-      >
-        <span>anchor</span>
-      </ViolationPopover>
+      />
     )
     expect(screen.getByText(/Waived/)).toBeInTheDocument()
     expect(screen.getByText(/agreed/)).toBeInTheDocument()
@@ -43,11 +39,9 @@ describe("ViolationPopover", () => {
     const onWaive = vi.fn()
     render(
       <ViolationPopover
-        open infraction={infraction} ruleName="No bad" waivers={[]}
+        open infraction={infraction} ruleName="No bad" waivers={[]} anchor={null}
         onOpenChange={() => {}} onOpenRule={() => {}} onWaive={onWaive} onUnwaive={() => {}}
-      >
-        <span>anchor</span>
-      </ViolationPopover>
+      />
     )
     fireEvent.click(screen.getByRole("button", { name: /waive/i }))
     fireEvent.change(screen.getByPlaceholderText(/reason/i), { target: { value: "intentional" } })

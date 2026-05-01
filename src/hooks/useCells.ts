@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react"
+import { useLayoutEffect, useRef, useState } from "react"
 import * as Y from "yjs"
 import type { CellHistoryEntry, SourceLocation, CommentThread, CellTtsSettings } from "@/lib/parsers/types"
 import type { CodexCellAttachment, WordTiming } from "@/lib/codex-editor/types"
@@ -178,7 +178,11 @@ export function useCells(doc: Y.Doc | null, fileId: string, username = "local", 
   // stable cell objects (lets React.memo skip unaffected rows).
   const cacheRef = useRef<Map<string, CellData>>(new Map())
 
-  useEffect(() => {
+  // useLayoutEffect (not useEffect) so the initial rebuildFromScratch + setCells
+  // happens synchronously before the browser paints. Otherwise the render where
+  // doc transitions from null → loaded paints with cells === [], briefly showing
+  // the "no cells" empty state before useEffect fires and populates them.
+  useLayoutEffect(() => {
     if (!doc) { setCells([]); cacheRef.current.clear(); return }
 
     const cellsMap = doc.getMap("cells")

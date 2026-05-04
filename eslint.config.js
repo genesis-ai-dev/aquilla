@@ -23,4 +23,36 @@ export default defineConfig([
       "react-hooks/react-compiler": "error",
     },
   },
+  // AuthorizedEvent perimeter guard: only authorize.ts may construct instances.
+  // Any other file in sync-worker/src that calls `new AuthorizedEvent(...)` is
+  // a policy violation — it bypasses the auth perimeter.
+  {
+    files: ['sync-worker/src/**/*.ts'],
+    ignores: ['sync-worker/src/events/authorize.ts'],
+    rules: {
+      'no-restricted-syntax': [
+        'error',
+        {
+          selector: 'NewExpression[callee.name="AuthorizedEvent"]',
+          message:
+            'AuthorizedEvent must only be constructed via authorize() in events/authorize.ts. Direct instantiation defeats the auth perimeter.',
+        },
+        {
+          selector: 'ClassDeclaration[superClass.name="AuthorizedEvent"]',
+          message:
+            'Subclassing AuthorizedEvent is not permitted; subclasses inherit the [AUTHORIZED] symbol via super(). Use authorize() directly.',
+        },
+        {
+          selector: 'ClassExpression[superClass.name="AuthorizedEvent"]',
+          message:
+            'Subclassing AuthorizedEvent is not permitted; subclasses inherit the [AUTHORIZED] symbol via super(). Use authorize() directly.',
+        },
+        {
+          selector: 'ImportSpecifier[imported.name="AuthorizedEvent"]:not([local.name="AuthorizedEvent"])',
+          message:
+            'AuthorizedEvent must not be aliased on import; this defeats the ESLint perimeter guard.',
+        },
+      ],
+    },
+  },
 ])

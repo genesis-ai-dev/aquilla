@@ -19,9 +19,6 @@ export default defineConfig([
       ecmaVersion: 2020,
       globals: globals.browser,
     },
-    rules: {
-      "react-hooks/react-compiler": "error",
-    },
   },
   // AuthorizedEvent perimeter guard: only authorize.ts may construct instances.
   // Any other file in sync-worker/src that calls `new AuthorizedEvent(...)` is

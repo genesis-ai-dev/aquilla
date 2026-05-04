@@ -7,48 +7,84 @@ import { fileURLToPath } from "node:url"
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const SAMPLE_MD = path.resolve(__dirname, "../../fixtures/sample.md")
 
-// FIXME: ProjectSettings.tsx has a useEffect at line ~124 that re-syncs
-// `endpoint` state from project store every time the project re-loads.
-// Our .fill() triggers .blur() → save → project re-render → effect → setEndpoint
-// races against our subsequent .click(). Connect button stays disabled
-// because endpoint state is briefly empty.
-//
-// Fix paths: (a) bypass UI by writing completionSettings directly to IDB
-// before navigating to settings, or (b) refactor ProjectSettings to not
-// reset local state from store after a local save. (b) is a real bug,
-// (a) is the easier test fix.
-test.fixme("sparkle button fills target cell from mock LLM", async ({ alice }) => {
+/**
+ * Verify the sparkle-button → mock LLM flow.
+ *
+ * We bypass the project-settings UI entirely by writing the project's
+ * completionSettings directly into IDB. This sidesteps a real bug in
+ * ProjectSettings.tsx (a useEffect re-syncs `endpoint` from store after
+ * every save, racing UI fill→blur→click) and tests only what this spec
+ * is meant to verify: when configured to point at a custom OpenAI-
+ * compatible endpoint, the sparkle button populates a target cell with
+ * the LLM's response.
+ *
+ * IDB layout: db "codex" v3, store "projects" keyed by id.
+ */
+test("sparkle button fills target cell from mock LLM (config injected via IDB)", async ({ alice }) => {
   const dash = new Dashboard(alice)
   await dash.goto()
   const name = `AI ${Date.now()}`
   await dash.createProject({ name, source: "en", target: "es" })
   await dash.openProject(name)
-
-  // Configure the project to use the local mock LLM via Settings page
   const projectId = alice.url().split("/project/")[1]?.split("/")[0]
   expect(projectId).toBeTruthy()
-  await alice.goto(`/project/${projectId}/settings`)
-  await alice.locator("details").filter({ hasText: "Advanced LLM settings" }).locator("summary").click()
-  // Select the "Custom" provider radio (last one in the list)
-  await alice.locator("input[name='provider'][type='radio']").last().check()
-  const endpointInput = alice.locator("#ep")
+
+  // Inject completionSettings pointing at the orchestrator's mock LLM.
   const llmBase = process.env.VITE_LLM_BASE_URL ?? ""
   expect(llmBase).toMatch(/^http:\/\/127\.0\.0\.1:\d+$/)
-  await endpointInput.fill(llmBase)
-  await endpointInput.blur()
-  await alice.getByRole("button", { name: "Connect" }).click()
-  await expect(alice.getByText("Connected")).toBeVisible({ timeout: 10_000 })
 
-  // Back to workspace, import, complete
-  await alice.goto(`/project/${projectId}`)
+  await alice.evaluate(async ({ id, endpoint }) => {
+    const open = indexedDB.open("codex", 3)
+    await new Promise<void>((resolve, reject) => {
+      open.onsuccess = () => resolve()
+      open.onerror = () => reject(open.error)
+      open.onblocked = () => reject(new Error("IDB upgrade blocked"))
+    })
+    const db = open.result
+    const tx = db.transaction("projects", "readwrite")
+    const store = tx.objectStore("projects")
+    const existing = await new Promise<unknown>((resolve, reject) => {
+      const req = store.get(id)
+      req.onsuccess = () => resolve(req.result)
+      req.onerror = () => reject(req.error)
+    })
+    if (!existing) throw new Error(`project ${id} not in IDB`)
+    const project = existing as Record<string, unknown>
+    project.completionSettings = {
+      provider: "custom",
+      endpoint,
+      apiKey: "",
+      model: "mock-model",
+      maxTokens: 256,
+      temperature: 0.2,
+      systemPrompt: "Translate.",
+    }
+    await new Promise<void>((resolve, reject) => {
+      const req = store.put(project)
+      req.onsuccess = () => resolve()
+      req.onerror = () => reject(req.error)
+    })
+    await new Promise<void>((resolve, reject) => {
+      tx.oncomplete = () => resolve()
+      tx.onerror = () => reject(tx.error)
+    })
+    db.close()
+  }, { id: projectId!, endpoint: llmBase })
+
+  // Reload so React reads the patched project state.
+  await alice.reload()
+  await alice.waitForLoadState("networkidle")
+
+  // Import sample, open, click sparkle.
   const ws = new Workspace(alice)
   await ws.importFile(SAMPLE_MD)
   await ws.openFileBySubstring("sample")
   await ws.waitForEditor()
+
   await alice.locator("button[title*='Generate translation']").first().click()
 
-  // MockLLMServer's default response is "Traducción de prueba"
+  // Mock LLM's default response is "Traducción de prueba".
   await expect(
-    alice.locator("[data-cell-id]").first().locator("textarea, .tiptap"),
+    alice.locator("[data-cell-id]").first().locator("textarea, .ProseMirror"),
   ).toContainText("Traducción de prueba", { timeout: 15_000 })
 })

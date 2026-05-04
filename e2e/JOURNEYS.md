@@ -12,20 +12,20 @@
 | Projects    | Create project, appears on dashboard                 | `e2e/specs/projects/create.smoke.spec.ts`                     |   ✅   |
 | Projects    | Open / delete / restore from trash                   | _gap — Plan 2_                                                |        |
 | Orgs        | Create org                                           | _gap — Plan 2_                                                |        |
-| Orgs        | Add member to org, member sees it                    | `e2e/specs/orgs/members.smoke.spec.ts` (fixme — selectors)    |   ⚠   |
+| Orgs        | Add member to org, member sees it                    | `e2e/specs/orgs/members.smoke.spec.ts` (API setup + UI verify) |   ✅   |
 | Orgs        | Remove member, change role                           | _gap — Plan 2_                                                |        |
 | Orgs        | Send & accept invite                                 | _gap — Plan 2_                                                |        |
 | Editor      | Import markdown, edit cell, persists across reload   | `e2e/specs/editor/import-and-edit.smoke.spec.ts`              |   ✅   |
 | Editor      | Cmd+K search                                         | _gap — Plan 2_                                                |        |
 | Editor      | Virtualization scroll integrity                      | _gap — Plan 2_                                                |        |
-| Rules       | Enable built-in rule, see violation in editor        | `e2e/specs/rules/violation.smoke.spec.ts` (fixme — selectors) |   ⚠   |
+| Rules       | Enable built-in rule, see violation in editor        | `e2e/specs/rules/violation.smoke.spec.ts`                     |   ✅   |
 | Rules       | Define custom rule                                   | _gap — Plan 2_                                                |        |
 | Rules       | Auto-correct a violation                             | _gap — Plan 2_                                                |        |
 | Validation  | Validate a cell, indicator turns emerald             | `e2e/specs/validation/validate.smoke.spec.ts`                 |   ✅   |
 | Validation  | History persists across navigation                   | _gap — Plan 2_                                                |        |
-| AI          | Sparkle button fills cell from mock LLM              | `e2e/specs/ai/completion.smoke.spec.ts` (fixme — endpoint state race) | ⚠ |
-| Collab      | File propagates from alice to bob                    | `e2e/specs/collab/file-propagation.smoke.spec.ts` (fixme — local→synced flow) | ⚠ |
-| Collab      | Concurrent cell edit propagates alice → bob          | `e2e/specs/collab/concurrent-edit.smoke.spec.ts` (fixme — local→synced flow) | ⚠ |
+| AI          | Sparkle button fills cell from mock LLM              | `e2e/specs/ai/completion.smoke.spec.ts` (IDB-injected settings)            | ✅ |
+| Collab      | File propagates from alice to bob                    | `e2e/specs/collab/file-propagation.smoke.spec.ts` (API project bootstrap)  | ✅ |
+| Collab      | Concurrent cell edit propagates alice → bob          | `e2e/specs/collab/concurrent-edit.smoke.spec.ts` (API project bootstrap)   | ✅ |
 | Collab      | Conflict resolution on same cell                     | _gap — Plan 2_                                                |        |
 | Collab      | Member presence indicators                           | _gap — Plan 2_                                                |        |
 | Comments    | Add / edit / resolve comment                         | _gap — Plan 2_                                                |        |

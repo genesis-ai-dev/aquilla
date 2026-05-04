@@ -1556,8 +1556,13 @@ function EditorRow({
           </div>
         </div>
 
-        {/* Floating action rail — anchored to the row's right edge. */}
-        <div className="pointer-events-none absolute right-2 top-1.5 z-10 flex">
+        {/* Floating action rail — anchored to the row's right edge. z-20 so
+            it sits above the sticky column header (z-10). Without this, when
+            a row is positioned at the very top of the scroll container, the
+            sticky header's stacking context wins (rows are position:relative
+            with auto z-index, so the row's local z-10 doesn't escape the
+            sticky header's z-10 context). */}
+        <div className="pointer-events-none absolute right-2 top-1.5 z-20 flex">
           <div className="pointer-events-auto">
             <CellActionRail
               revealed={railRevealed}

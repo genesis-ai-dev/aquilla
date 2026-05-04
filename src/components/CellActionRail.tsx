@@ -116,7 +116,12 @@ export function CellActionRail({
         className="flex items-center gap-0.5"
         style={{
           opacity: revealed ? 1 : 0,
-          transform: revealed ? "translateX(0) scale(1)" : "translateX(10px) scale(0.85)",
+          // Scale only — no translate. A translate moves the button's hit-box
+          // during the reveal transition, which races mouse/Playwright clicks
+          // (the click coord is computed pre-reveal and the button slides out
+          // from underneath the cursor mid-transition).
+          transform: revealed ? "scale(1)" : "scale(0.85)",
+          transformOrigin: "right center",
           transition: `opacity 180ms ease-out, transform 220ms ${SPRING}`,
           pointerEvents: revealed ? "auto" : "none",
         }}

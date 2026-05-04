@@ -12,6 +12,7 @@ import {
 import { peerColor } from "@/lib/sync/signaling-provider"
 import { displayNameFor } from "@/lib/sync/anonymous-name"
 import { makeSyncTokenFetcher } from "@/lib/sync/sync-token"
+import { attachSyncDebug, logEffectShortCircuit, type SyncDebugAttach } from "@/lib/sync/sync-debug"
 import { patchProject } from "@/lib/store/project-index"
 import type { PeerState } from "@/hooks/useSync"
 import type { FrontierSession } from "@/lib/frontier/types"
@@ -58,6 +59,7 @@ export function useFileSync(options: UseFileSyncOptions): {
 
   useEffect(() => {
     if (!enabled || !doc || !projectId || !fileId) {
+      logEffectShortCircuit("useFileSync", { enabled, hasDoc: !!doc, projectId, fileId })
       setPeers([])
       setConnected(false)
       setProviderState(null)
@@ -93,6 +95,9 @@ export function useFileSync(options: UseFileSyncOptions): {
     handleRef.current = handle
     const { provider } = handle
     setProviderState(provider)
+
+    const debug: SyncDebugAttach = attachSyncDebug(provider, "useFileSync")
+    debug.logEffectRun({ projectId, fileId, clientID: provider.awareness.clientID })
 
     const selfClientId = String(provider.awareness.clientID)
     const selfState: PeerState = {
@@ -131,6 +136,8 @@ export function useFileSync(options: UseFileSyncOptions): {
     updateConnected()
 
     return () => {
+      debug.logEffectCleanup("teardown")
+      debug.detach()
       provider.awareness.off("change", updatePeers)
       provider.off("status", updateConnected)
       provider.off("sync", updateConnected)
@@ -168,8 +175,22 @@ export function useFileSync(options: UseFileSyncOptions): {
     let idleTimer: ReturnType<typeof setTimeout> | null = null
     let idleDisconnected = false
 
+    const debugLogIdle = (state: "hidden" | "visible" | "disconnect-fired" | "reconnect") => {
+      // Lightweight inline call; attachSyncDebug instance lives in the
+      // provider effect above, so we just write straight to console with the
+      // same format if debug is on.
+      if (import.meta.env.DEV ||
+          (typeof sessionStorage !== "undefined" && sessionStorage.getItem("codex.debug.sync") === "1")) {
+        // eslint-disable-next-line no-console
+        console.log(`[sync ${new Date().toISOString().slice(11, 23)}] useFileSync pk=${provider.id} idle:${state}`, {
+          visibility: typeof document !== "undefined" ? document.visibilityState : "unknown",
+        })
+      }
+    }
+
     const disconnectIfStillHidden = () => {
       if (document.visibilityState === "hidden" && !idleDisconnected) {
+        debugLogIdle("disconnect-fired")
         provider.disconnect()
         idleDisconnected = true
         setIsIdle(true)
@@ -178,14 +199,17 @@ export function useFileSync(options: UseFileSyncOptions): {
 
     const onVisChange = () => {
       if (document.visibilityState === "hidden") {
+        debugLogIdle("hidden")
         if (idleTimer) clearTimeout(idleTimer)
         idleTimer = setTimeout(disconnectIfStillHidden, HIDDEN_IDLE_MS)
       } else {
+        debugLogIdle("visible")
         if (idleTimer) {
           clearTimeout(idleTimer)
           idleTimer = null
         }
         if (idleDisconnected) {
+          debugLogIdle("reconnect")
           provider.connect()
           idleDisconnected = false
           setIsIdle(false)

@@ -88,6 +88,79 @@ const COMPACTION_GRACE_MS = 60 * 1000
 // bounded onLoad replay cost even for hours-long sessions without evictions.
 const MID_SESSION_COMPACT_AT_TAILS = 50
 
+// Cap on per-cell `edits` Y.Array length. Each entry is a nested Y.Map with
+// authors/editMap/validatedBy sub-types — Yjs allocates significant CRDT
+// metadata per entry, so an unbounded array is a major cause of doc bloat
+// and DO OOM on long-lived projects. 100 entries comfortably covers active
+// review while keeping memory bounded. Mirror of EDITS_CAP_PER_CELL in
+// src/lib/codex-editor/edits/yjs-helpers.ts — keep in sync.
+const EDITS_CAP_PER_CELL = 100
+
+// Cap on per-cell `history` Y.Array length. Each entry is a plain object with
+// the full `value` text duplicated, so for long cells the array bytes grow
+// quickly. 100 entries gives the UI's history drawer plenty of context while
+// bounding the doc. Mirror of HISTORY_CAP_PER_CELL on the client.
+const HISTORY_CAP_PER_CELL = 100
+
+/**
+ * Walk every cell in the doc and trim both append-only Y.Arrays that grow
+ * unboundedly during normal use:
+ *  - `edits`   — Y.Array<Y.Map>, validation log; trim oldest entries.
+ *  - `history` — Y.Array<plain CellHistoryEntry>, audit log; trim oldest.
+ *
+ * History entries duplicate the full cell value, so trimming is the cheap
+ * way to win back doc size without losing recent context.
+ *
+ * Returns counts so the admin endpoint can report what was changed. The
+ * caller is responsible for wrapping in doc.transact() — we don't transact
+ * here so the caller can compose with other mutations.
+ */
+function pruneCellHistory(doc: Y.Doc): {
+  cellsTouched: number
+  editsTrimmedFromTotal: number
+  editsTrimmedToTotal: number
+  historyTrimmedFromTotal: number
+  historyTrimmedToTotal: number
+} {
+  const cellsMap = doc.getMap("cells")
+  let cellsTouched = 0
+  let editsTrimmedFromTotal = 0
+  let editsTrimmedToTotal = 0
+  let historyTrimmedFromTotal = 0
+  let historyTrimmedToTotal = 0
+
+  cellsMap.forEach((value) => {
+    const cell = value as Y.Map<unknown>
+    let touched = false
+
+    const edits = cell.get("edits") as Y.Array<unknown> | undefined
+    if (edits && edits.length > EDITS_CAP_PER_CELL) {
+      editsTrimmedFromTotal += edits.length
+      edits.delete(0, edits.length - EDITS_CAP_PER_CELL)
+      editsTrimmedToTotal += edits.length
+      touched = true
+    }
+
+    const history = cell.get("history") as Y.Array<unknown> | undefined
+    if (history && history.length > HISTORY_CAP_PER_CELL) {
+      historyTrimmedFromTotal += history.length
+      history.delete(0, history.length - HISTORY_CAP_PER_CELL)
+      historyTrimmedToTotal += history.length
+      touched = true
+    }
+
+    if (touched) cellsTouched++
+  })
+
+  return {
+    cellsTouched,
+    editsTrimmedFromTotal,
+    editsTrimmedToTotal,
+    historyTrimmedFromTotal,
+    historyTrimmedToTotal,
+  }
+}
+
 /**
  * Merge existing snapshot + all tail blobs into a new snapshot, then delete
  * the tails. Idempotent: running it twice in a row is a no-op (second call
@@ -345,12 +418,103 @@ export class FileSync extends YServer {
   }
 }
 
+/**
+ * POST /admin/files/:projectId/:fileId/compact-doc
+ *
+ * One-shot remediation for files whose Y.Doc has accumulated unbounded
+ * per-cell history and exceeds DO memory limits at runtime. Loads the doc
+ * from R2, drops the legacy `history` Y.Array, trims `edits` to the last N
+ * entries per cell, and writes a fresh snapshot. Idempotent across retries.
+ *
+ * Auth: SYNC_SECRET_KEY. Returns the byte sizes before/after so the caller
+ * can verify the prune actually shrank the doc.
+ */
+async function handleCompactDocRequest(
+  request: Request,
+  env: Env
+): Promise<Response | null> {
+  const url = new URL(request.url)
+  const match = url.pathname.match(/^\/admin\/files\/([^/]+)\/([^/]+)\/compact-doc$/)
+  if (!match) return null
+  if (request.method !== "POST") return new Response("method not allowed", { status: 405 })
+
+  const auth = request.headers.get("Authorization") ?? ""
+  const expected = env.SYNC_SECRET_KEY ? `Bearer ${env.SYNC_SECRET_KEY}` : null
+  if (!expected || auth !== expected) {
+    return new Response("unauthorized", { status: 401 })
+  }
+
+  const projectId = decodeURIComponent(match[1])
+  const fileId = decodeURIComponent(match[2])
+  const snapKey = snapshotKey(projectId, fileId)
+  const tailPref = tailPrefix(projectId, fileId)
+
+  // Load existing snapshot + every tail into a fresh Y.Doc, then prune.
+  // We don't go through the DO instance — running this against an active DO
+  // could conflict with live edits. Operating on R2 directly + writing the
+  // result back is safe because the DO will pick up the new snapshot on its
+  // next cold start (and live clients that still have a session are operating
+  // on a y-partyserver hibernated WS, which will close when the DO restarts).
+  const snap = await env.SNAPSHOTS.get(snapKey)
+  let snapBytesBefore = 0
+  const doc = new Y.Doc()
+  if (snap) {
+    const buf = new Uint8Array(await snap.arrayBuffer())
+    snapBytesBefore = buf.byteLength
+    Y.applyUpdate(doc, buf)
+  }
+
+  const tailList = await env.SNAPSHOTS.list({ prefix: tailPref })
+  const tailKeys = tailList.objects.map((o) => o.key).sort()
+  let tailBytesBefore = 0
+  for (const key of tailKeys) {
+    const obj = await env.SNAPSHOTS.get(key)
+    if (!obj) continue
+    const buf = new Uint8Array(await obj.arrayBuffer())
+    tailBytesBefore += buf.byteLength
+    Y.applyUpdate(doc, buf)
+  }
+
+  let pruneStats: ReturnType<typeof pruneCellHistory> = {
+    cellsTouched: 0,
+    editsTrimmedFromTotal: 0,
+    editsTrimmedToTotal: 0,
+    historyTrimmedFromTotal: 0,
+    historyTrimmedToTotal: 0,
+  }
+  doc.transact(() => {
+    pruneStats = pruneCellHistory(doc)
+  })
+
+  const newSnap = Y.encodeStateAsUpdate(doc)
+  await env.SNAPSHOTS.put(snapKey, newSnap)
+
+  if (tailKeys.length > 0) {
+    // R2 delete cap is 1000 keys per call.
+    const CHUNK = 1000
+    for (let i = 0; i < tailKeys.length; i += CHUNK) {
+      await env.SNAPSHOTS.delete(tailKeys.slice(i, i + CHUNK))
+    }
+  }
+
+  return Response.json({
+    ok: true,
+    projectId,
+    fileId,
+    before: { snapBytes: snapBytesBefore, tailCount: tailKeys.length, tailBytes: tailBytesBefore },
+    after: { snapBytes: newSnap.byteLength, tailCount: 0, tailBytes: 0 },
+    prune: pruneStats,
+  })
+}
+
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     // Admin paths are intercepted before partyserver so its routing
     // doesn't try to treat /admin/... as a party name.
     const projectArchiveResponse = await handleProjectArchiveRequest(request, env, notifyFileDo)
     if (projectArchiveResponse) return projectArchiveResponse
+    const compactDocResponse = await handleCompactDocRequest(request, env)
+    if (compactDocResponse) return compactDocResponse
     const adminResponse = await handleAdminRequest(request, env)
     if (adminResponse) return adminResponse
 

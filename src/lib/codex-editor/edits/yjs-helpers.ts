@@ -17,6 +17,28 @@ export function getEditsArray(cell: Y.Map<unknown>): Y.Array<Y.Map<unknown>> {
   return arr
 }
 
+// Cap on per-cell `edits` Y.Array length. Each entry is a nested Y.Map with
+// authors/editMap/validatedBy sub-types — Yjs allocates significant CRDT
+// metadata per entry, so an unbounded array is the leading cause of doc
+// bloat (and DO OOM) on long-lived projects. 100 entries comfortably covers
+// active review while keeping per-cell memory bounded.
+//
+// Mirrors EDITS_CAP_PER_CELL in sync-worker/src/index.ts. If you change one,
+// change both. Server-side enforcement is the safety net; this client cap is
+// the primary mechanism so the doc never grows past the limit in the first
+// place.
+export const EDITS_CAP_PER_CELL = 100
+
+/**
+ * Trim the head of the edits array so its length is at most cap. Caller is
+ * responsible for wrapping in doc.transact() (typically already in one when
+ * called from appendEntry's caller).
+ */
+function trimEditsToCap(arr: Y.Array<Y.Map<unknown>>, cap: number): void {
+  if (arr.length <= cap) return
+  arr.delete(0, arr.length - cap)
+}
+
 export interface CreateEntryInput {
   authors: string[]
   timestamp: number
@@ -38,6 +60,10 @@ export function appendEntry(
   arr: Y.Array<Y.Map<unknown>>,
   input: CreateEntryInput,
 ): Y.Map<unknown> {
+  // Trim BEFORE the push so the post-push length is at most the cap.
+  // Trimming after would briefly hold cap+1 entries, which matters for
+  // Yjs garbage collection of the deleted-from-front entries.
+  trimEditsToCap(arr, EDITS_CAP_PER_CELL - 1)
   const entry = new Y.Map<unknown>()
   // Push first so entry is attached to the doc — Yjs emits warnings for writes
   // (even primitives) on detached Y types.

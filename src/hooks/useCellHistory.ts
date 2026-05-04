@@ -4,6 +4,23 @@ import { getPlainText, setPlainText } from "@/lib/richtext/translated-xml"
 import { toggleCellValidation as toggleCellEditsValidation } from "@/lib/codex-editor/edits/toggle-cell-validation"
 import { commitCellEdit } from "@/lib/codex-editor/edits/commit-cell-edit"
 
+// Cap on per-cell `history` Y.Array length. Each entry duplicates the full
+// `value` text plus author/timestamp metadata, so unbounded growth is the
+// main reason a 15+ MB Y.Doc can hit the Cloudflare DO 128 MiB memory cap
+// at runtime. The HistoryDrawer UI shows the most recent entries; older
+// entries are mostly invisible. Mirror of HISTORY_CAP_PER_CELL in
+// sync-worker/src/index.ts (server safety net).
+const HISTORY_CAP_PER_CELL = 100
+
+/**
+ * Trim the head of a history Y.Array so its length is at most cap. Caller
+ * is responsible for wrapping in doc.transact().
+ */
+function trimHistoryToCap(arr: Y.Array<CellHistoryEntry>, cap: number): void {
+  if (arr.length <= cap) return
+  arr.delete(0, arr.length - cap)
+}
+
 export function appendCellHistory(
   doc: Y.Doc,
   cellId: string,
@@ -26,6 +43,7 @@ export function appendCellHistory(
       historyArr = new Y.Array<CellHistoryEntry>()
       cell.set("history", historyArr)
     }
+    trimHistoryToCap(historyArr, HISTORY_CAP_PER_CELL - 1)
     historyArr.push([{ ...entry, timestamp: new Date().toISOString() }])
   })
 }
@@ -48,6 +66,7 @@ export function recordHistoryEntry(
       historyArr = new Y.Array<CellHistoryEntry>()
       cell.set("history", historyArr)
     }
+    trimHistoryToCap(historyArr, HISTORY_CAP_PER_CELL - 1)
     historyArr.push([{ ...entry, timestamp: new Date().toISOString() }])
   })
 }

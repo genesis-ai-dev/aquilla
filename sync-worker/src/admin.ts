@@ -22,18 +22,67 @@ export async function handleAdminRequest(
 ): Promise<Response | null> {
   const url = new URL(request.url)
   if (!url.pathname.startsWith("/admin/")) return null
-  if (request.method !== "DELETE") {
-    return new Response("method not allowed", { status: 405 })
-  }
 
+  // Match path BEFORE checking method so we return 405 (not 404) for a
+  // recognized resource hit with the wrong method.
+  const inspectMatch = url.pathname.match(/^\/admin\/files\/([^/]+)\/([^/]+)\/inspect$/)
+  const fileMatch = url.pathname.match(/^\/admin\/files\/([^/]+)\/([^/]+)$/)
+  if (!inspectMatch && !fileMatch) return new Response("not found", { status: 404 })
+
+  // Auth gate applies to every recognized admin route.
   const auth = request.headers.get("Authorization") ?? ""
   const expected = env.SYNC_SECRET_KEY ? `Bearer ${env.SYNC_SECRET_KEY}` : null
   if (!expected || auth !== expected) {
     return new Response("unauthorized", { status: 401 })
   }
 
-  const match = url.pathname.match(/^\/admin\/files\/([^/]+)\/([^/]+)$/)
-  if (!match) return new Response("not found", { status: 404 })
+  // GET /admin/files/:projectId/:fileId/inspect — returns counts and sizes
+  // for the file's R2 keys. Read-only; useful for diagnosing OOMs from the
+  // command line without needing the R2 list CLI.
+  if (inspectMatch) {
+    if (request.method !== "GET") return new Response("method not allowed", { status: 405 })
+    const projectId = decodeURIComponent(inspectMatch[1])
+    const fileId = decodeURIComponent(inspectMatch[2])
+    const prefix = `projects/${projectId}/files/${fileId}/`
+    const objects: Array<{ key: string; size: number }> = []
+    let cursor: string | undefined = undefined
+    do {
+      const page = await env.SNAPSHOTS.list({ prefix, cursor })
+      for (const obj of page.objects) objects.push({ key: obj.key, size: obj.size })
+      cursor = page.truncated ? page.cursor : undefined
+    } while (cursor)
+    let snapshotSize = 0
+    let tailCount = 0
+    let tailBytes = 0
+    let tailMaxBytes = 0
+    let otherCount = 0
+    let otherBytes = 0
+    for (const o of objects) {
+      const tail = `${prefix}tail/`
+      const snap = `${prefix}snapshot.bin`
+      if (o.key === snap) snapshotSize = o.size
+      else if (o.key.startsWith(tail)) {
+        tailCount++
+        tailBytes += o.size
+        if (o.size > tailMaxBytes) tailMaxBytes = o.size
+      } else {
+        otherCount++
+        otherBytes += o.size
+      }
+    }
+    return Response.json({
+      ok: true,
+      prefix,
+      snapshotBytes: snapshotSize,
+      tail: { count: tailCount, totalBytes: tailBytes, maxBytes: tailMaxBytes },
+      other: { count: otherCount, totalBytes: otherBytes },
+      total: objects.length,
+    })
+  }
+
+  // DELETE /admin/files/:projectId/:fileId — wipe all R2 objects for the file.
+  if (request.method !== "DELETE") return new Response("method not allowed", { status: 405 })
+  const match = fileMatch!
   const projectId = decodeURIComponent(match[1])
   const fileId = decodeURIComponent(match[2])
 

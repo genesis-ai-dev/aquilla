@@ -81,7 +81,17 @@ test("sparkle button fills target cell from mock LLM (config injected via IDB)",
   await ws.openFileBySubstring("sample")
   await ws.waitForEditor()
 
-  await alice.locator("button[title*='Generate translation']").first().click()
+  // The sparkle lives in CellActionRail, hidden until the row is hovered
+  // and faded in over 180ms. Playwright's auto-hover-on-click occasionally
+  // doesn't trigger the row's onMouseEnter (the rail wrapper is
+  // pointer-events:none and Playwright teleports the cursor), leaving the
+  // children container at opacity:0 + pointer-events:none and the chip
+  // parent intercepting. Hover the cell row explicitly first.
+  const sparkle = alice.locator("button[title*='Generate translation']").first()
+  await sparkle.scrollIntoViewIfNeeded()
+  await alice.locator("[data-cell-id]").first().hover()
+  await alice.waitForTimeout(250) // let the 180ms opacity fade settle
+  await sparkle.click()
 
   // Mock LLM's default response is "Traducción de prueba".
   await expect(

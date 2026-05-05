@@ -5,7 +5,6 @@ import { toggleCellValidation as toggleCellEditsValidation } from "@/lib/codex-e
 import { commitCellEdit } from "@/lib/codex-editor/edits/commit-cell-edit"
 import {
   enqueueCellCommitAfterValueEdit,
-  enqueueCellValidateToggle,
 } from "@/lib/sync/cqrs-bridge"
 
 // Cap on per-cell `history` Y.Array length. Each entry duplicates the full
@@ -56,6 +55,33 @@ export function appendCellHistory(
   }
 }
 
+/**
+ * Remove the last history entry if it's a placeholder LLM seed by the given
+ * author (empty value, validated:false). Used by completion paths to clean up
+ * the seed entry before recording the final translation. Without this collapse
+ * the cell ends up with a phantom empty-LLM entry in its history view.
+ */
+export function dropLlmSeedHistory(
+  doc: Y.Doc,
+  cellId: string,
+  llmAuthor: string
+): void {
+  const cellsMap = doc.getMap("cells")
+  const cell = cellsMap.get(cellId) as Y.Map<unknown> | undefined
+  if (!cell) return
+  const historyArr = cell.get("history") as Y.Array<CellHistoryEntry> | undefined
+  if (!historyArr || historyArr.length === 0) return
+  const last = historyArr.get(historyArr.length - 1)
+  if (
+    last.source === "llm" &&
+    last.author === llmAuthor &&
+    !last.validated &&
+    (last.value === "" || last.value === undefined)
+  ) {
+    doc.transact(() => historyArr.delete(historyArr.length - 1, 1))
+  }
+}
+
 // Append a history entry WITHOUT modifying the fragment. Use this when the
 // fragment was already updated by the TipTap editor — we just want to record
 // the revision for audit without clobbering inline formatting via setPlainText.
@@ -90,13 +116,14 @@ export function validateCell(
   const frag = cell.get("translatedXml") as Y.XmlFragment | undefined
   const translated = frag ? getPlainText(frag) : ((cell.get("translated") as string) || "")
   if (!translated.trim()) return
-  // Commits to the session log AND auto-validates the current user.
-  const editEventId = commitCellEdit(doc, cellId, username, ["value"], translated, "human", fileIdOverride)
-  // Dual-write: CQRS enqueue happens inside commitCellEdit; skip duplicate here.
-  appendCellHistory(doc, cellId, {
-    value: translated, source: "human", author: username, validated: true,
-  }, { skipCqrs: true })
-  enqueueCellValidateToggle(cellId, true, undefined, fileIdOverride, editEventId ?? undefined)
+  // Two-step: ensure a value-edit exists in the ledger, then explicitly
+  // validate it. commitCellEdit no longer auto-validates — validation is
+  // strictly an explicit, button-triggered action.
+  commitCellEdit(doc, cellId, username, ["value"], translated, "human", fileIdOverride)
+  toggleCellEditsValidation(doc, cellId, username, true, fileIdOverride)
+  // Keep the history log entry for TipTap/audit; this is a deliberate
+  // validation, so validated:true here mirrors the cell.edits state.
+  appendCellHistory(doc, cellId, { value: translated, source: "human", author: username, validated: true }, { skipCqrs: true })
 }
 
 /**

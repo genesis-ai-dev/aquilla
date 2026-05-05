@@ -899,11 +899,13 @@ function EditorRow({
   }, [cellInfractions, waivedInfractions, waivedRuleIds, ruleSeverity, cell.translatedXml])
 
   function handleChange(e: React.ChangeEvent<HTMLTextAreaElement>) {
+    // Typing records an edit; validation is a separate, deliberate action
+    // expressed through the Validate button.
     appendCellHistory(doc, cell.id, {
       value: e.target.value,
       source: "human",
       author: username,
-      validated: true,
+      validated: false,
     })
   }
 
@@ -944,7 +946,7 @@ function EditorRow({
             value: currentText,
             source: "human",
             author: username,
-            validated: true,
+            validated: false,
             timestamp: new Date().toISOString(),
           }])
         })
@@ -953,14 +955,15 @@ function EditorRow({
       }
     }
 
+    // Record the edit in both surfaces. cell.edits is the Yjs-native edit
+    // ledger; cell.history feeds the TipTap binding. Neither carries a
+    // validator — validation is strictly opt-in via the Validate button.
     recordHistoryEntry(doc, cell.id, {
       value: currentText,
       source: "human",
       author: username,
-      validated: true,
+      validated: false,
     })
-    // Dual write: cell.edits is the Yjs-native source of truth for validation;
-    // cell.history keeps feeding the TipTap binding.
     commitCellEdit(doc, cell.id, username, ["value"], currentText, "human")
   }
 

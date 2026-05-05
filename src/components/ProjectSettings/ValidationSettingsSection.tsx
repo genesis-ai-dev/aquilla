@@ -1,7 +1,7 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
+import { DisabledFieldTooltip } from "./DisabledFieldTooltip"
 import type { ProjectRecord } from "@/lib/parsers/types"
 
 interface Props {
@@ -46,50 +46,39 @@ export function ValidationSettingsSection({
       <CardContent className="space-y-4">
         <div className="space-y-2">
           <Label htmlFor="validation-count">Required validators (text)</Label>
-          <TooltipProvider delay={200}>
-            <Tooltip>
-              <TooltipTrigger render={<span className="inline-block" />}>
-                <Input
-                  id="validation-count"
-                  type="number"
-                  min={1}
-                  max={15}
-                  disabled={disabled}
-                  value={validationCount}
-                  onChange={(e) => onChange({ validationCount: clamp(e.target.value) })}
-                  className="w-24"
-                />
-              </TooltipTrigger>
-              {disabled && disabledTooltip && (
-                <TooltipContent>{disabledTooltip}</TooltipContent>
-              )}
-            </Tooltip>
-          </TooltipProvider>
+          <DisabledFieldTooltip disabled={disabled} tooltip={disabledTooltip ?? null}>
+            <Input
+              id="validation-count"
+              type="number"
+              min={1}
+              max={15}
+              disabled={disabled}
+              value={validationCount}
+              onChange={(e) => onChange({ validationCount: clamp(e.target.value) })}
+              className="w-24"
+            />
+          </DisabledFieldTooltip>
           <p className="text-xs text-muted-foreground">
             Cells need this many distinct validators to count as fully validated.
           </p>
         </div>
         <div className="space-y-2">
           <Label htmlFor="validation-count-audio">Required validators (audio)</Label>
-          <TooltipProvider delay={200}>
-            <Tooltip>
-              <TooltipTrigger render={<span className="inline-block" />}>
-                <Input
-                  id="validation-count-audio"
-                  type="number"
-                  min={1}
-                  max={15}
-                  disabled={disabled || !hasAnyAudioData}
-                  value={validationCountAudio}
-                  onChange={(e) => onChange({ validationCountAudio: clamp(e.target.value) })}
-                  className="w-24"
-                />
-              </TooltipTrigger>
-              {disabled && disabledTooltip && (
-                <TooltipContent>{disabledTooltip}</TooltipContent>
-              )}
-            </Tooltip>
-          </TooltipProvider>
+          <DisabledFieldTooltip
+            disabled={disabled || !hasAnyAudioData}
+            tooltip={disabled ? (disabledTooltip ?? null) : null}
+          >
+            <Input
+              id="validation-count-audio"
+              type="number"
+              min={1}
+              max={15}
+              disabled={disabled || !hasAnyAudioData}
+              value={validationCountAudio}
+              onChange={(e) => onChange({ validationCountAudio: clamp(e.target.value) })}
+              className="w-24"
+            />
+          </DisabledFieldTooltip>
           <p className="text-xs text-muted-foreground">
             {hasAnyAudioData
               ? "Applies to audio translations."

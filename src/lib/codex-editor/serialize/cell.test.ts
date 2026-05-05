@@ -28,12 +28,14 @@ describe("serializeCell — cell.edits → metadata.edits", () => {
     expect(out.metadata.edits).toEqual([])
   })
 
-  it("emits single-author entry with author string unchanged", () => {
+  it("emits single-author entry with author string unchanged + explicit validation", () => {
     const cell = setupCell()
     const frag = cell.get("translatedXml") as Y.XmlFragment
     setPlainText(frag, "hello")
     const yDoc = cell.doc!
     commitCellEdit(yDoc, "c1", "alice", ["value"], "hello", "human")
+    // Validation is now strictly explicit — the user must opt in.
+    toggleCellValidation(yDoc, "c1", "alice", true)
     const out = serializeCell(cell)
     expect(out.metadata.edits).toHaveLength(1)
     expect(out.metadata.edits![0].author).toBe("alice")
@@ -61,6 +63,7 @@ describe("serializeCell — cell.edits → metadata.edits", () => {
     setPlainText(frag, "hi")
     const yDoc = cell.doc!
     commitCellEdit(yDoc, "c1", "alice", ["value"], "hi", "human")
+    toggleCellValidation(yDoc, "c1", "alice", true)
     vi.advanceTimersByTime(60_000)
     toggleCellValidation(yDoc, "c1", "alice", false)
     const out = serializeCell(cell)

@@ -41,6 +41,53 @@ export function buildPrompt(options: {
   return [{ role: "system", content: sys }, { role: "user", content: user.trim() }]
 }
 
+// LLMs translate a passage substantially better than the same verses in
+// isolation (pronoun antecedents, tense agreement, discourse cohesion). The
+// segmented prompt asks the model to translate a whole user-selected span as
+// one unit, framed with numbered <vN>...</vN> tags so the response can be
+// demuxed back to individual cells. Numbered tags (not bare <v>) so a
+// missing/extra tag in the response is per-cell recoverable.
+const BATCH_FRAMING_INSTRUCTIONS =
+  "The source is segmented with <v1>, <v2>, ... tags. " +
+  "Produce a translation segmented with the same tags, in the same order, with the same count. " +
+  "Do not merge, split, omit, or reorder segments."
+
+export interface PassageExample {
+  // Aligned source/target rows; rendered as mirrored <vN> in the prompt so the
+  // model sees the segmented format demonstrated, not just described.
+  cells: { source: string; target: string }[]
+}
+
+export function buildBatchPrompt(options: {
+  sourceLanguage: string; targetLanguage: string; systemPrompt: string
+  cells: { source: string }[]
+  examples: PassageExample[]
+  // Just-translated cells from the previous sub-batch in the same selection.
+  // Rendered as a final example to give the model continuity across a chunk
+  // boundary at zero token cost vs. one full extra example.
+  priorBatch?: { source: string; target: string }[]
+}): ChatMessage[] {
+  const sys = (BATCH_FRAMING_INSTRUCTIONS + "\n\n" + options.systemPrompt)
+    .replace(/\{sourceLanguage\}/g, options.sourceLanguage)
+    .replace(/\{targetLanguage\}/g, options.targetLanguage)
+
+  const renderSide = (rows: { source: string; target: string }[], side: "source" | "target") =>
+    rows.map((r, i) => `<v${i + 1}>${side === "source" ? r.source : r.target}</v${i + 1}>`).join("\n")
+
+  let user = ""
+  for (const ex of options.examples) {
+    if (!ex.cells.length) continue
+    user += `Source:\n${renderSide(ex.cells, "source")}\n\nTranslation:\n${renderSide(ex.cells, "target")}\n\n`
+  }
+  if (options.priorBatch?.length) {
+    user += `Source:\n${renderSide(options.priorBatch, "source")}\n\nTranslation:\n${renderSide(options.priorBatch, "target")}\n\n`
+  }
+  const liveSource = options.cells.map((c, i) => `<v${i + 1}>${c.source}</v${i + 1}>`).join("\n")
+  user += `Source:\n${liveSource}\n\nTranslation:\n`
+
+  return [{ role: "system", content: sys }, { role: "user", content: user.trim() }]
+}
+
 /**
  * Normalize a user-supplied OpenAI-compatible base URL into endpoints for
  * `/chat/completions` and `/models`. Accepts:

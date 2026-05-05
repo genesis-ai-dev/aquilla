@@ -30,17 +30,32 @@ function setupCell(doc: Y.Doc, id: string) {
 }
 
 describe("useCells — validation derivation from cell.edits", () => {
-  it("shows 'self' after current user auto-validates below the threshold", async () => {
+  it("shows 'self' after current user explicitly validates below the threshold", async () => {
     const doc = new Y.Doc()
     setupCell(doc, "c1")
     const out: { current?: ReturnType<typeof useCells> } = {}
     // required=2 so count=1 < threshold → "self" (not "full")
     render(<Probe doc={doc} username="alice" out={out} required={2} />)
-    act(() => { commitCellEdit(doc, "c1", "alice", ["value"], "hello", "human") })
+    act(() => {
+      commitCellEdit(doc, "c1", "alice", ["value"], "hello", "human")
+      toggleCellValidation(doc, "c1", "alice", true)
+    })
     await waitFor(() => {
       expect(out.current![0].validationStatus).toBe("self")
     })
     expect(out.current![0].activeValidators).toEqual(["alice"])
+  })
+
+  it("editing without explicit validation leaves the cell as 'none'", async () => {
+    const doc = new Y.Doc()
+    setupCell(doc, "c1")
+    const out: { current?: ReturnType<typeof useCells> } = {}
+    render(<Probe doc={doc} username="alice" out={out} required={2} />)
+    act(() => { commitCellEdit(doc, "c1", "alice", ["value"], "hello", "human") })
+    await waitFor(() => {
+      expect(out.current![0].validationStatus).toBe("none")
+    })
+    expect(out.current![0].activeValidators).toEqual([])
   })
 
   it("shows 'full' when a single validator meets requiredValidations=1", async () => {
@@ -48,25 +63,34 @@ describe("useCells — validation derivation from cell.edits", () => {
     setupCell(doc, "c1")
     const out: { current?: ReturnType<typeof useCells> } = {}
     render(<Probe doc={doc} username="alice" out={out} required={1} />)
-    act(() => { commitCellEdit(doc, "c1", "alice", ["value"], "hello", "human") })
+    act(() => {
+      commitCellEdit(doc, "c1", "alice", ["value"], "hello", "human")
+      toggleCellValidation(doc, "c1", "alice", true)
+    })
     await waitFor(() => {
       expect(out.current![0].validationStatus).toBe("full")
     })
     expect(out.current![0].activeValidators).toEqual(["alice"])
   })
 
-  it("bob sees 'self' after his own edit (new session, prior validator on prior entry)", async () => {
+  it("bob sees 'self' after his own edit + explicit validation (new session, prior validator on prior entry)", async () => {
     const doc = new Y.Doc()
     setupCell(doc, "c1")
     const out: { current?: ReturnType<typeof useCells> } = {}
     render(<Probe doc={doc} username="bob" out={out} required={2} />)
     const now = Date.now()
-    act(() => { commitCellEdit(doc, "c1", "alice", ["value"], "hello", "human") })
+    act(() => {
+      commitCellEdit(doc, "c1", "alice", ["value"], "hello", "human")
+      toggleCellValidation(doc, "c1", "alice", true)
+    })
     // Force a new session: advance system clock past SESSION_GAP_MS.
     const originalNow = Date.now
     Date.now = () => now + 10 * 60_000
     try {
-      act(() => { commitCellEdit(doc, "c1", "bob", ["value"], "hello edited", "human") })
+      act(() => {
+        commitCellEdit(doc, "c1", "bob", ["value"], "hello edited", "human")
+        toggleCellValidation(doc, "c1", "bob", true)
+      })
     } finally { Date.now = originalNow }
     await waitFor(() => {
       expect(out.current![0].validationStatus).toBe("self")
@@ -80,7 +104,10 @@ describe("useCells — validation derivation from cell.edits", () => {
     setupCell(doc, "c1")
     const out: { current?: ReturnType<typeof useCells> } = {}
     render(<Probe doc={doc} username="alice" out={out} required={2} />)
-    act(() => { commitCellEdit(doc, "c1", "alice", ["value"], "hi", "human") })
+    act(() => {
+      commitCellEdit(doc, "c1", "alice", ["value"], "hi", "human")
+      toggleCellValidation(doc, "c1", "alice", true)
+    })
     await waitFor(() => {
       expect(out.current![0].validationStatus).toBe("self")
     })

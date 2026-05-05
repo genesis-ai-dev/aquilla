@@ -305,9 +305,9 @@ export function ProjectWorkspace() {
     return all
   }, [fileCells])
 
-  const { search } = useSearchIndex(project?.files || [], allProjectCells)
+  const { search, searchPassages } = useSearchIndex(project?.files || [], allProjectCells)
   const { completeSingle, completeBatch, isConfigured, isAvailable: isCompletionAvailable, completing, examples, errors } = useCompletion(
-    doc, project?.completionSettings, project?.sourceLanguage || "", project?.targetLanguage || "", search, frontierSession
+    doc, project?.completionSettings, project?.sourceLanguage || "", project?.targetLanguage || "", search, searchPassages, frontierSession
   )
 
   const findBacktranslationExamples = useCallback((target: CellData) => {
@@ -911,6 +911,7 @@ export function ProjectWorkspace() {
                   session={frontierSession}
                   username={currentUsername}
                   completeSingle={completeSingle}
+                  completeBatch={completeBatch}
                 />
               </>
             )}

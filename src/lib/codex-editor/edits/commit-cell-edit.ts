@@ -8,7 +8,6 @@ import {
   getEntryEditMap,
   entryHasAuthor,
   appendAuthor,
-  upsertValidator,
 } from "./yjs-helpers"
 import { enqueueCellCommitAfterValueEdit } from "@/lib/sync/cqrs-bridge"
 
@@ -24,11 +23,9 @@ function resolveType(source: "human" | "llm"): EditTypeValue {
  * the grouping key — multi-author collaboration within one session is a
  * first-class case.
  *
- * For source="human" on a value-editMap, the author is auto-validated.
- * LLM commits never auto-validate, and metadata-editMap entries omit
- * validatedBy entirely (file/project-level edits are audit-only per the
- * desktop app's FileEditHistory shape).
- *
+ * Validation is intentionally NEVER seeded here, regardless of source:
+ * "validated" is a deliberate user action expressed through the Validate
+ * button (toggleCellValidation), not a side effect of typing or auto-saving.
  * Wrapped in doc.transact so observers fire once per commit.
  */
 export function commitCellEdit(
@@ -70,7 +67,6 @@ export function commitCellEdit(
         last.set("value", value)
         last.set("timestamp", now)
         if (!entryHasAuthor(last, username)) appendAuthor(last, username)
-        if (source === "human" && isValueEdit) upsertValidator(last, username, now)
         if (isValueEdit) touchedValueEntry = last
         return
       }
@@ -82,7 +78,6 @@ export function commitCellEdit(
       type,
       editMap,
       value,
-      seedValidator: source === "human" && isValueEdit ? username : undefined,
     })
     if (isValueEdit) touchedValueEntry = entry
   })

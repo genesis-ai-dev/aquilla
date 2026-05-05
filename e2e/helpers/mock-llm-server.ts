@@ -60,17 +60,44 @@ export class MockLLMServer {
       let body = ""
       req.on("data", (c) => { body += c })
       req.on("end", () => {
-        let parsed: unknown = null
-        try { parsed = JSON.parse(body) } catch {}
+        let parsed: { stream?: boolean } | null = null
+        try { parsed = JSON.parse(body) as { stream?: boolean } } catch {}
         this._requests.push({
           url: req.url!,
           method: req.method!,
           body: parsed,
           timestamp: Date.now(),
         })
+
+        const id = "mock-" + Date.now()
+
+        // Custom-provider clients (the AI completion path under test) always
+        // request stream:true. Honor it with proper OpenAI-compatible SSE so
+        // the consumeStream() reader extracts delta.content; without this,
+        // the client treats the JSON body as SSE and finds no `data:` lines.
+        if (parsed?.stream === true) {
+          res.writeHead(200, {
+            "Content-Type": "text/event-stream",
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+          })
+          const frame = (obj: unknown) => `data: ${JSON.stringify(obj)}\n\n`
+          res.write(frame({
+            id, object: "chat.completion.chunk",
+            choices: [{ index: 0, delta: { role: "assistant", content: this._nextResponse }, finish_reason: null }],
+          }))
+          res.write(frame({
+            id, object: "chat.completion.chunk",
+            choices: [{ index: 0, delta: {}, finish_reason: "stop" }],
+          }))
+          res.write("data: [DONE]\n\n")
+          res.end()
+          return
+        }
+
         res.writeHead(200, { "Content-Type": "application/json" })
         res.end(JSON.stringify({
-          id: "mock-" + Date.now(),
+          id,
           object: "chat.completion",
           choices: [{
             index: 0,

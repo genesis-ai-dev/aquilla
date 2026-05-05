@@ -178,7 +178,7 @@ export function applyReplaceToCell(
       source: "human",
       author: username,
       validated: false,
-    })
+    }, { skipCqrs: true })
     if (opts.retainValidations === false) {
       toggleCellValidation(doc, cellId, username, false)
     }

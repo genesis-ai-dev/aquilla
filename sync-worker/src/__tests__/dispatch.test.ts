@@ -1,7 +1,7 @@
 // Tests for dispatchEvent.
 //
-// Verifies that the dispatcher routes cell.commit to handleCellCommit and
-// returns 501 for all other currently-known EventKinds. The exhaustiveness
+// Verifies that the dispatcher routes implemented kinds to handlers and
+// returns 501 for kinds not yet implemented. The exhaustiveness
 // check in dispatch.ts (the `default: never` branch) ensures that any new
 // EventKind added to types.ts will trigger a TypeScript compile error until
 // a case is added to dispatchEvent.
@@ -102,24 +102,25 @@ describe('dispatchEvent', () => {
     expect(outcome.result.dirtyTables).toContain('cells')
   })
 
-  it('cell.validate returns { ok: false, status: 501 }', async () => {
+  it('cell.validate returns { ok: true, result }', async () => {
     const db = makeNoOpD1()
     const authed = await makeAuthorized('cell.validate')
     const outcome = dispatchEvent(db, authed, Date.now())
-    expect(outcome.ok).toBe(false)
-    if (outcome.ok) throw new Error('expected not ok')
-    expect(outcome.status).toBe(501)
-    expect(outcome.reason).toContain('cell.validate')
+    expect(outcome.ok).toBe(true)
+    if (!outcome.ok) throw new Error('expected ok')
+    expect(outcome.result.stmts.length).toBeGreaterThan(0)
+    expect(outcome.result.eventFrame.kind).toBe('cell.validate')
+    expect(outcome.result.dirtyTables).toContain('cell_validators')
   })
 
-  it('cell.unvalidate returns { ok: false, status: 501 }', async () => {
+  it('cell.unvalidate returns { ok: true, result }', async () => {
     const db = makeNoOpD1()
     const authed = await makeAuthorized('cell.unvalidate')
     const outcome = dispatchEvent(db, authed, Date.now())
-    expect(outcome.ok).toBe(false)
-    if (outcome.ok) throw new Error('expected not ok')
-    expect(outcome.status).toBe(501)
-    expect(outcome.reason).toContain('cell.unvalidate')
+    expect(outcome.ok).toBe(true)
+    if (!outcome.ok) throw new Error('expected ok')
+    expect(outcome.result.stmts.length).toBeGreaterThan(0)
+    expect(outcome.result.eventFrame.kind).toBe('cell.unvalidate')
   })
 
   it('thread.add returns { ok: false, status: 501 }', async () => {

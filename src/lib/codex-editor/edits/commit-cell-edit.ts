@@ -10,6 +10,7 @@ import {
   appendAuthor,
   upsertValidator,
 } from "./yjs-helpers"
+import { enqueueCellCommitAfterValueEdit } from "@/lib/sync/cqrs-bridge"
 
 function resolveType(source: "human" | "llm"): EditTypeValue {
   return source === "llm" ? "llm-edit" : "user-edit"
@@ -76,4 +77,8 @@ export function commitCellEdit(
       seedValidator: source === "human" && isValueEdit ? username : undefined,
     })
   })
+
+  if (isValueEdit) {
+    enqueueCellCommitAfterValueEdit(doc, cellId, now)
+  }
 }

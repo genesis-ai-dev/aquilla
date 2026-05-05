@@ -26,6 +26,7 @@ import type { EditorTableHandle } from "./EditorTable"
 import type { WorkspaceSearchResult } from "@/lib/search/workspace-index"
 import { StatusBar } from "./StatusBar"
 import { SyncStatusIndicator } from "./SyncStatusIndicator"
+import { OutboxSyncIndicator } from "./OutboxSyncIndicator"
 import { ImportDialog } from "./ImportDialog"
 import { EditorTable } from "./EditorTable"
 import { AudioRecordingModal } from "./AudioRecorder/AudioRecordingModal"
@@ -55,7 +56,11 @@ import {
   synthAllInFile, transcribeAllInFile,
 } from "@/lib/audio/bulk-audio"
 import { eagerlyPrefetchPeaks } from "@/lib/audio/eager-peaks"
-import { useAutoSync } from "@/hooks/useAutoSync"
+import { useOutboxFlusher } from "@/hooks/useOutboxFlusher"
+import {
+  setCqrsOutboxBridge,
+  buildFileScopedTokenFetcher,
+} from "@/lib/sync/cqrs-bridge"
 import { useCorpusBackfill } from "@/hooks/useCorpusBackfill"
 import { Film, Scale, MessagesSquare, Camera, Share2, Settings as SettingsIcon, Lock, ClipboardList, Brain, Trash2, Undo2 } from "lucide-react"
 import { restoreProject } from "@/lib/store/project-index"
@@ -144,6 +149,66 @@ export function ProjectWorkspace() {
   // should attribute to the actual signed-in user.
   const { session: frontierSession } = useFrontierSession()
   const currentUsername = frontierSession?.username || project?.username || "local"
+  const jwtRef = useRef<string | null>(null)
+  useEffect(() => {
+    jwtRef.current = frontierSession?.jwt ?? null
+  }, [frontierSession?.jwt])
+
+  const getTokenForFile = useMemo(() => {
+    if (!project?.id) {
+      return async (_fileId: string) => null as string | null
+    }
+    const pid = project.id
+    const bootstrap = {
+      projectName: project.name ?? undefined,
+      gitlabProjectId:
+        project.origin?.kind === "git" ? project.origin.gitlabProjectId : undefined,
+    }
+    return buildFileScopedTokenFetcher(
+      () => jwtRef.current,
+      pid,
+      bootstrap,
+      undefined,
+      {
+        onRole: (role) => {
+          void patchProject(pid, (p) => ({
+            ...p,
+            syncRole: {
+              level: role.level,
+              name: role.name,
+              source: role.source,
+              fetchedAt: new Date().toISOString(),
+            },
+          }))
+        },
+      },
+    )
+  }, [
+    project?.id,
+    project?.name,
+    project?.origin?.kind,
+    project?.origin?.kind === "git" ? project?.origin.gitlabProjectId : undefined,
+  ])
+
+  useEffect(() => {
+    if (!project?.id || !activeFileId) {
+      setCqrsOutboxBridge(null)
+      return
+    }
+    setCqrsOutboxBridge({
+      projectId: project.id,
+      activeFileId,
+      username: currentUsername,
+    })
+    return () => setCqrsOutboxBridge(null)
+  }, [project?.id, activeFileId, currentUsername])
+
+  const outboxFlushEnabled = Boolean(project?.id && activeFileId && frontierSession?.jwt)
+  const { pendingCount: outboxPending, failureStreak: outboxFailures } = useOutboxFlusher({
+    enabled: outboxFlushEnabled,
+    getTokenForFile,
+  })
+
   const validationCount = project ? readValidationCount(project) : 1
   const cells = useCells(doc, activeFileId ?? "", currentUsername, validationCount)
   const { hasAny: hasUnfinished, findNext: findNextUnfinished } = useNextUnfinished(cells, validationCount)
@@ -953,6 +1018,10 @@ export function ProjectWorkspace() {
                 <div className="flex items-center gap-3">
                   <PeerPresence peers={peers} />
                   <SyncStatusIndicator status={fileSyncStatus} />
+                  <OutboxSyncIndicator
+                    pendingCount={outboxPending}
+                    failureStreak={outboxFailures}
+                  />
                 </div>
               }
               right={

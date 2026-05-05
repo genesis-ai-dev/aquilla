@@ -188,14 +188,12 @@ describe('handleEventsWriteRequest — empty batch', () => {
 // ── Mixed batch ───────────────────────────────────────────────────────────────
 
 describe('handleEventsWriteRequest — mixed batch', () => {
-  it('accepts valid cell.commit, rejects malformed JWT, rejects cell.validate (501)', async () => {
+  it('accepts valid cell.commit + cell.validate, rejects project mismatch (403)', async () => {
     const validToken = await makeToken()
-    const badToken = 'not.a.valid.jwt'
 
     const validEvent = makeCommitEvent({ id: 'evt-valid-001' })
-    const badAuthEvent = makeCommitEvent({ id: 'evt-bad-auth-002' })
-    const unimplementedEvent: RawEvent<'cell.validate'> = {
-      id: 'evt-unimpl-003',
+    const validateEvent: RawEvent<'cell.validate'> = {
+      id: 'evt-validate-003',
       schemaVersion: 1,
       kind: 'cell.validate',
       projectId: 'proj-a',
@@ -206,16 +204,12 @@ describe('handleEventsWriteRequest — mixed batch', () => {
       clientTs: 2000,
     }
 
-    // Send all three events. Only the first uses a valid token; the whole
-    // request uses one Authorization header (same token for all events).
-    // To simulate per-event auth failure, we send the bad-auth event with
-    // a project the token doesn't cover.
     const badAuthEventMismatch = makeCommitEvent({
       id: 'evt-bad-auth-002',
       projectId: 'proj-other', // token is for proj-a only → 403 from authorize
     })
 
-    const events = [validEvent, badAuthEventMismatch, unimplementedEvent]
+    const events = [validEvent, badAuthEventMismatch, validateEvent]
     const req = await makeRequest(events, validToken)
     const db = makeInMemoryD1()
     const res = await handleEventsWriteRequest(req, makeEnv(db)) as Response
@@ -223,22 +217,13 @@ describe('handleEventsWriteRequest — mixed batch', () => {
     expect(res.status).toBe(200)
     const body = await res.json() as any
 
-    // 1 accepted (the valid cell.commit)
-    expect(body.accepted).toHaveLength(1)
-    expect(body.accepted[0].id).toBe('evt-valid-001')
+    expect(body.accepted).toHaveLength(2)
+    const acceptedIds = body.accepted.map((a: any) => a.id).sort()
+    expect(acceptedIds).toEqual(['evt-validate-003', 'evt-valid-001'].sort())
 
-    // 2 rejected: project mismatch (403) + unimplemented kind (501)
-    expect(body.rejected).toHaveLength(2)
-
-    const rejectedIds = body.rejected.map((r: any) => r.id)
-    expect(rejectedIds).toContain('evt-bad-auth-002')
-    expect(rejectedIds).toContain('evt-unimpl-003')
-
-    const cellValidateRejection = body.rejected.find((r: any) => r.id === 'evt-unimpl-003')
-    expect(cellValidateRejection?.status).toBe(501)
-
-    const authRejection = body.rejected.find((r: any) => r.id === 'evt-bad-auth-002')
-    expect(authRejection?.status).toBe(403)
+    expect(body.rejected).toHaveLength(1)
+    expect(body.rejected[0].id).toBe('evt-bad-auth-002')
+    expect(body.rejected[0].status).toBe(403)
   })
 })
 

@@ -5,6 +5,7 @@ import {
   upsertValidator,
   softDeleteValidator,
 } from "./yjs-helpers"
+import { enqueueCellValidateToggle } from "@/lib/sync/cqrs-bridge"
 
 /**
  * Add or remove the current user's validation on the cell's latest
@@ -15,11 +16,15 @@ import {
  */
 export function toggleCellValidation(
   doc: Y.Doc, cellId: string, username: string, validate: boolean,
+  /** See commit-cell-edit.ts for fileIdOverride rationale. */
+  fileIdOverride?: string,
 ): void {
   const cellsMap = doc.getMap("cells")
   const cell = cellsMap.get(cellId) as Y.Map<unknown> | undefined
   if (!cell) return
 
+  const now = Date.now()
+  let applied = false
   doc.transact(() => {
     const arr = getEditsArray(cell)
     let target: Y.Map<unknown> | undefined
@@ -28,8 +33,11 @@ export function toggleCellValidation(
       if (getEntryEditMap(entry)[0] === "value") { target = entry; break }
     }
     if (!target) return
-    const now = Date.now()
+    applied = true
     if (validate) upsertValidator(target, username, now)
     else softDeleteValidator(target, username, now)
   })
+  if (applied) {
+    enqueueCellValidateToggle(cellId, validate, now, fileIdOverride)
+  }
 }

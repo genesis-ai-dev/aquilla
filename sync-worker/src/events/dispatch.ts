@@ -8,6 +8,8 @@
 import type { AuthorizedEvent } from './authorize'
 import type { EventKind } from './types'
 import { handleCellCommit, type DispatchResult } from './handlers/cell-commit'
+import { handleCellValidate } from './handlers/cell-validate'
+import { handleCellUnvalidate } from './handlers/cell-unvalidate'
 
 export type DispatchOutcome =
   | { ok: true; result: DispatchResult }
@@ -38,11 +40,21 @@ export function dispatchEvent(
         result: handleCellCommit(db, authed as AuthorizedEvent<'cell.commit'>, serverTs),
       }
 
-    // Phase 1: these kinds are valid EventKind values but their handlers are
-    // not yet implemented. They will be added in later phases following the
-    // same pattern as cell.commit above.
     case 'cell.validate':
+      return {
+        ok: true,
+        result: handleCellValidate(db, authed as AuthorizedEvent<'cell.validate'>, serverTs),
+      }
+
     case 'cell.unvalidate':
+      return {
+        ok: true,
+        result: handleCellUnvalidate(db, authed as AuthorizedEvent<'cell.unvalidate'>, serverTs),
+      }
+
+    // Later phases: these kinds are valid EventKind values but their handlers
+    // are not yet implemented. They will be added in later phases following the
+    // same pattern as cell.commit above.
     case 'thread.add':
     case 'thread.resolve':
     case 'cell.metadata.set':

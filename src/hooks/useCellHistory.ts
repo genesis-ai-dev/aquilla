@@ -3,6 +3,10 @@ import type { CellHistoryEntry } from "@/lib/parsers/types"
 import { getPlainText, setPlainText } from "@/lib/richtext/translated-xml"
 import { toggleCellValidation as toggleCellEditsValidation } from "@/lib/codex-editor/edits/toggle-cell-validation"
 import { commitCellEdit } from "@/lib/codex-editor/edits/commit-cell-edit"
+import {
+  enqueueCellCommitAfterValueEdit,
+  enqueueCellValidateToggle,
+} from "@/lib/sync/cqrs-bridge"
 
 // Cap on per-cell `history` Y.Array length. Each entry duplicates the full
 // `value` text plus author/timestamp metadata, so unbounded growth is the
@@ -24,7 +28,8 @@ function trimHistoryToCap(arr: Y.Array<CellHistoryEntry>, cap: number): void {
 export function appendCellHistory(
   doc: Y.Doc,
   cellId: string,
-  entry: Omit<CellHistoryEntry, "timestamp">
+  entry: Omit<CellHistoryEntry, "timestamp">,
+  opts?: { skipCqrs?: boolean },
 ): void {
   const cellsMap = doc.getMap("cells")
   const cell = cellsMap.get(cellId) as Y.Map<unknown> | undefined
@@ -46,6 +51,9 @@ export function appendCellHistory(
     trimHistoryToCap(historyArr, HISTORY_CAP_PER_CELL - 1)
     historyArr.push([{ ...entry, timestamp: new Date().toISOString() }])
   })
+  if (!opts?.skipCqrs) {
+    enqueueCellCommitAfterValueEdit(doc, cellId)
+  }
 }
 
 // Append a history entry WITHOUT modifying the fragment. Use this when the
@@ -71,7 +79,11 @@ export function recordHistoryEntry(
   })
 }
 
-export function validateCell(doc: Y.Doc, cellId: string, username: string): void {
+export function validateCell(
+  doc: Y.Doc, cellId: string, username: string,
+  /** See commit-cell-edit.ts for fileIdOverride rationale. */
+  fileIdOverride?: string,
+): void {
   const cellsMap = doc.getMap("cells")
   const cell = cellsMap.get(cellId) as Y.Map<unknown> | undefined
   if (!cell) return
@@ -79,9 +91,12 @@ export function validateCell(doc: Y.Doc, cellId: string, username: string): void
   const translated = frag ? getPlainText(frag) : ((cell.get("translated") as string) || "")
   if (!translated.trim()) return
   // Commits to the session log AND auto-validates the current user.
-  commitCellEdit(doc, cellId, username, ["value"], translated, "human")
-  // Keep the keystroke log entry for TipTap/audit.
-  appendCellHistory(doc, cellId, { value: translated, source: "human", author: username, validated: true })
+  commitCellEdit(doc, cellId, username, ["value"], translated, "human", fileIdOverride)
+  // Dual-write: CQRS enqueue happens inside commitCellEdit; skip duplicate here.
+  appendCellHistory(doc, cellId, {
+    value: translated, source: "human", author: username, validated: true,
+  }, { skipCqrs: true })
+  enqueueCellValidateToggle(cellId, true, undefined, fileIdOverride)
 }
 
 /**
@@ -97,6 +112,8 @@ export function validateCell(doc: Y.Doc, cellId: string, username: string): void
  */
 export function toggleCellValidation(
   doc: Y.Doc, cellId: string, username: string, validate: boolean,
+  /** See commit-cell-edit.ts for fileIdOverride rationale. */
+  fileIdOverride?: string,
 ): void {
   if (validate) {
     const cellsMap = doc.getMap("cells")
@@ -107,12 +124,12 @@ export function toggleCellValidation(
       if (!hasValueEdit) {
         // Seed a value-edit from the current translated text and validate
         // in one shot. validateCell handles the empty-text guard.
-        validateCell(doc, cellId, username)
+        validateCell(doc, cellId, username, fileIdOverride)
         return
       }
     }
   }
-  toggleCellEditsValidation(doc, cellId, username, validate)
+  toggleCellEditsValidation(doc, cellId, username, validate, fileIdOverride)
 }
 
 function arrayHasValueEdit(arr: Y.Array<Y.Map<unknown>>): boolean {

@@ -136,7 +136,7 @@ export function useAutofix(params: Params) {
         } catch { skipped++; continue }
         if (next === current) { skipped++; continue }
         const author = `autofix:rule-${rule.id}`
-        appendCellHistory(doc, preview.cellId, { value: next, source: "llm", author, validated: false })
+        appendCellHistory(doc, preview.cellId, { value: next, source: "llm", author, validated: false }, { skipCqrs: true })
         commitCellEdit(doc, preview.cellId, author, ["value"], next, "llm")
         applied++
       }

@@ -4,12 +4,20 @@ import type { CellData } from "./useCells"
 import type { HealthConfig, TranslationRule } from "@/lib/parsers/types"
 import { perfLog, perfMark, isPerfLogEnabled } from "@/lib/perf-log"
 import { setHealthSyncPerf } from "@/workers/health-worker-sync"
+import type { CellAuditStats } from "./useCellsAuditStats"
 
 export interface UseCompositeHealthInput {
   fileCells: Map<string, CellData[]>
   rules: TranslationRule[]
   config: HealthConfig
   requiredValidations: number
+  /**
+   * D1-backed per-cell audit stats. When provided, `editCount` is used as a
+   * richer change-detection signal (replaces `history.length` in the content
+   * key so the worker re-fires when D1 has more events than Y.Doc cap allows).
+   * Falls back to `history.length` per cell when stats are unavailable.
+   */
+  auditStats?: Map<string, CellAuditStats>
 }
 
 export interface UseCompositeHealthResult {
@@ -139,13 +147,17 @@ export function useCompositeHealth(input: UseCompositeHealthInput): UseComposite
       // Cheap content key so we bail out when a new Map/array is passed with
       // identical content (avoids re-firing the worker for no-op updates).
       const key = JSON.stringify([
-        cells.map(c => [
-          c.id,
-          c.translated,
-          c.validatorCount,
-          c.history.length,
-          c.history.at(-1)?.examples,
-        ]),
+        cells.map(c => {
+          // Prefer D1 editCount when available; fall back to Y.Doc history.length.
+          const d1Count = current.auditStats?.get(c.id)?.editCount
+          return [
+            c.id,
+            c.translated,
+            c.validatorCount,
+            d1Count ?? c.history.length,
+            c.history.at(-1)?.examples,
+          ]
+        }),
         current.requiredValidations,
         current.rules,
         current.config,
@@ -177,7 +189,7 @@ export function useCompositeHealth(input: UseCompositeHealthInput): UseComposite
       setReady(true)
       endTotal()
     }, HEALTH_DEBOUNCE_MS)
-  }, [input.fileCells, input.rules, input.config, input.requiredValidations])
+  }, [input.fileCells, input.rules, input.config, input.requiredValidations, input.auditStats])
 
   return { stats, ready }
 }

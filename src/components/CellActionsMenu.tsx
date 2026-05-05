@@ -8,6 +8,7 @@ import { MoreHorizontal, Mic, History as HistoryIcon, Languages, Sparkles, Wand2
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { cn } from "@/lib/utils"
 import type { CellData } from "@/hooks/useCells"
+import type { CellAuditStats } from "@/hooks/useCellsAuditStats"
 
 interface Props {
   cell: CellData
@@ -23,14 +24,22 @@ interface Props {
   onBacktranslate?: (cell: CellData) => void
   onTranscribe?: (cell: CellData) => void
   onSynthesizeAudio?: (cell: CellData) => void
+  /** D1-backed per-cell audit stats for this file. When provided, editCount is
+   *  preferred over cell.history.length for the history count badge. */
+  auditStatsByCellId?: Map<string, CellAuditStats>
 }
 
 export function CellActionsMenu({
   cell, editable, hasAudio, isGitProject,
   isBacktranslationConfigured, isBacktranslating, isTranscribing, isSynthesizing,
   onOpenRecording, onOpenHistory, onBacktranslate, onTranscribe, onSynthesizeAudio,
+  auditStatsByCellId,
 }: Props) {
   const [open, setOpen] = useState(false)
+
+  // Prefer D1 editCount when available; fall back to Y.Doc history length.
+  const d1Stats = auditStatsByCellId?.get(cell.id)
+  const historyCount = d1Stats?.editCount ?? cell.history.length
 
   const items: Array<
     | { key: string; icon: React.ReactNode; label: string; disabled?: boolean; onSelect: () => void }
@@ -65,11 +74,11 @@ export function CellActionsMenu({
           onSelect: () => { onSynthesizeAudio(cell); setOpen(false) },
         }
       : null,
-    onOpenHistory && cell.history.length > 0
+    onOpenHistory && historyCount > 0
       ? {
           key: "history",
           icon: <HistoryIcon className="h-3.5 w-3.5" />,
-          label: `History (${cell.history.length})`,
+          label: `History (${historyCount})`,
           onSelect: () => { onOpenHistory(cell.id); setOpen(false) },
         }
       : null,

@@ -109,6 +109,7 @@ describe('buildEventProjectionStmts', () => {
 
       const { sql, args } = recorded[0]
       expect(sql).toContain('INSERT INTO cells')
+      expect(sql).toContain('edit_count')
       expect(sql).toContain('ON CONFLICT(file_id, cell_id)')
       expect(sql).toContain('WHERE excluded.last_edit_at > cells.last_edit_at')
 

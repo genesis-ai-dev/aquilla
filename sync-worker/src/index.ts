@@ -29,6 +29,8 @@ import {
 import { handleRebuildProjectionRequest } from "./events/rebuild"
 import { handleEventsWriteRequest } from "./events/route"
 import { handleEventsReadRequest } from "./events/read-route"
+import { handleValidatorsReadRequest } from "./events/validators-read-route"
+import { handleCellsAuditReadRequest } from "./events/cells-audit-read-route"
 import { notifyFileDo } from "./archive-broadcast"
 import { parseRealtimeMessage } from "./events/realtime"
 import { encodeNextTail } from "./incremental"
@@ -544,6 +546,10 @@ export default {
     if (adminResponse) return adminResponse
     const eventsReadResponse = await handleEventsReadRequest(request, env)
     if (eventsReadResponse) return eventsReadResponse
+    const validatorsReadResponse = await handleValidatorsReadRequest(request, env)
+    if (validatorsReadResponse) return validatorsReadResponse
+    const cellsAuditReadResponse = await handleCellsAuditReadRequest(request, env)
+    if (cellsAuditReadResponse) return cellsAuditReadResponse
     const eventsWriteResponse = await handleEventsWriteRequest(request, env)
     if (eventsWriteResponse) return eventsWriteResponse
 

@@ -62,6 +62,7 @@ import {
   setCqrsOutboxBridge,
   buildFileScopedTokenFetcher,
 } from "@/lib/sync/cqrs-bridge"
+import { useCellsAuditStats } from "@/hooks/useCellsAuditStats"
 import { useCorpusBackfill } from "@/hooks/useCorpusBackfill"
 import { Film, Scale, MessagesSquare, Camera, Share2, Settings as SettingsIcon, Lock, ClipboardList, Brain, Trash2, Undo2 } from "lucide-react"
 import { restoreProject } from "@/lib/store/project-index"
@@ -210,6 +211,15 @@ export function ProjectWorkspace() {
     getTokenForFile,
   })
 
+  // D1-backed audit stats for the active file; O(1) lookup by cellId.
+  // Enabled only when we have an authenticated session and an active file.
+  const auditStatsEnabled = Boolean(project?.id && activeFileId && frontierSession?.jwt)
+  const { byCellId: auditStatsByCellId } = useCellsAuditStats({
+    enabled: auditStatsEnabled,
+    fileId: activeFileId,
+    getTokenForFile,
+  })
+
   const validationCount = project ? readValidationCount(project) : 1
   const cells = useCells(doc, activeFileId ?? "", currentUsername, validationCount)
   const { hasAny: hasUnfinished, findNext: findNextUnfinished } = useNextUnfinished(cells, validationCount)
@@ -330,7 +340,7 @@ export function ProjectWorkspace() {
     project?.completionSettings?.llmHealthPenalty ?? 0.1,
     rules,
     penalties,
-    { composite: compositeFlag, compositeConfig: healthConfig, requiredValidations },
+    { composite: compositeFlag, compositeConfig: healthConfig, requiredValidations, auditStats: auditStatsByCellId },
   )
   const { healthMap, fileHealth: _fileHealth, projectHealth, fileProgress, infractions, openCommentCount, cellOpenCommentCount } = health
 
@@ -1008,7 +1018,12 @@ export function ProjectWorkspace() {
               />
             )}
             {historyCell && (
-              <HistoryDrawer cell={historyCell} onClose={() => setHistoryCellId(null)} />
+              <HistoryDrawer
+                cell={historyCell}
+                onClose={() => setHistoryCellId(null)}
+                fileId={activeFileId}
+                getTokenForFile={getTokenForFile}
+              />
             )}
           </>
         }

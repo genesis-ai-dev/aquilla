@@ -10,7 +10,10 @@
 //   DELETE FROM cell_validators WHERE project_id = ?
 //   DELETE FROM cells WHERE file_id IN (SELECT id FROM files WHERE project_id = ?)
 //   INSERT INTO events (...) -- canonical event audit row
-//   INSERT INTO cells (...) ON CONFLICT ... -- from event-projection
+//   SELECT … FROM events WHERE project_id = ? AND file_id = ? … — GET /events
+//   SELECT … FROM cell_validators WHERE … — GET /cell-validators
+//   SELECT cell_id, COALESCE(edit_count,0) … FROM cells WHERE file_id = ? — audit-stats
+//   INSERT INTO cells (...) ON CONFLICT ... — event-projection (edit_count literal 1) or projection.ts (literal 0)
 //   INSERT INTO cell_validators (...) ON CONFLICT ... -- from event-projection
 //   UPDATE cells SET validated = (...) WHERE ... -- from validate/unvalidate
 
@@ -44,6 +47,8 @@ export interface CellRow {
   last_editor: string | null
   last_edit_at: number
   projected_from: string
+  /** CQRS edit counter; optional in fixtures, defaults to 0 when missing. */
+  edit_count?: number
 }
 
 export interface ValidatorRow {
@@ -137,6 +142,80 @@ export function makeInMemoryD1(tables: Partial<Tables> = {}): InMemoryD1 {
       return [{ cnt }]
     }
 
+    // ── SELECT events (GET /events) ─────────────────────────────────────────
+    if (
+      /^SELECT id, schema_version, project_id, file_id, cell_id, kind, author, payload, client_ts, server_ts FROM events WHERE project_id = \? AND file_id = \?/.test(
+        normalized,
+      )
+    ) {
+      const projectId = args[0] as string
+      const fileId = args[1] as string
+      const hasCell = normalized.includes('AND cell_id = ?')
+      const hasBefore = normalized.includes('AND server_ts < ?')
+      let i = 2
+      let cellId: string | null = null
+      let before: number | null = null
+      if (hasCell) {
+        cellId = args[i++] as string
+      }
+      if (hasBefore) {
+        before = args[i++] as number
+      }
+      const limit = args[i] as number
+      let rows = db.events.filter(
+        (e) => e.project_id === projectId && e.file_id === fileId,
+      )
+      if (cellId !== null) {
+        rows = rows.filter((e) => e.cell_id === cellId)
+      }
+      if (before !== null) {
+        rows = rows.filter((e) => e.server_ts < before)
+      }
+      rows.sort((a, b) => b.server_ts - a.server_ts)
+      return rows.slice(0, limit)
+    }
+
+    // ── SELECT cell_validators (GET /cell-validators) ───────────────────────
+    if (
+      /^SELECT edit_event_id, username, is_active, decided_ts FROM cell_validators WHERE project_id = \? AND file_id = \? AND cell_id = \? ORDER BY decided_ts DESC/.test(
+        normalized,
+      )
+    ) {
+      const projectId = args[0] as string
+      const fileId = args[1] as string
+      const cellId = args[2] as string
+      return db.cell_validators
+        .filter(
+          (v) =>
+            v.project_id === projectId &&
+            v.file_id === fileId &&
+            v.cell_id === cellId,
+        )
+        .sort((a, b) => b.decided_ts - a.decided_ts)
+        .map((v) => ({
+          edit_event_id: v.edit_event_id,
+          username: v.username,
+          is_active: v.is_active,
+          decided_ts: v.decided_ts,
+        }))
+    }
+
+    // ── SELECT cells audit stats (GET /cells/audit-stats) ────────────────────
+    if (
+      /SELECT cell_id, COALESCE\(edit_count, 0\) as edit_count, content_hash FROM cells WHERE file_id = \?/.test(
+        normalized,
+      )
+    ) {
+      const fileId = args[0] as string
+      return db.cells
+        .filter((c) => c.file_id === fileId)
+        .map((c) => ({
+          cell_id: c.cell_id,
+          edit_count: c.edit_count ?? 0,
+          content_hash: c.content_hash,
+        }))
+    }
+
     // ── DELETE cell_validators ─────────────────────────────────────────────
     if (/^DELETE FROM cell_validators WHERE project_id = \?$/.test(normalized)) {
       const pid = args[0] as string
@@ -182,11 +261,8 @@ export function makeInMemoryD1(tables: Partial<Tables> = {}): InMemoryD1 {
       return []
     }
 
-    // ── INSERT INTO cells (UPSERT) ─────────────────────────────────────────
-    if (/^INSERT INTO cells/.test(normalized)) {
-      // Bind order (from event-projection.ts):
-      // 0=file_id, 1=cell_id, 2=content_text, 3=content_hash,
-      // 4=word_count, 5=last_editor, 6=last_edit_at, 7=projected_from
+    // ── INSERT INTO cells (UPSERT) — event-projection cell.commit ──────────
+    if (/VALUES \(\?, \?, \?, \?, 0, \?, \?, \?, \?, 1\)/.test(normalized)) {
       const row: CellRow = {
         file_id: args[0] as string,
         cell_id: args[1] as string,
@@ -197,19 +273,51 @@ export function makeInMemoryD1(tables: Partial<Tables> = {}): InMemoryD1 {
         last_editor: args[5] as string | null,
         last_edit_at: args[6] as number,
         projected_from: args[7] as string,
+        edit_count: 1,
       }
       const idx = db.cells.findIndex(
         (c) => c.file_id === row.file_id && c.cell_id === row.cell_id,
       )
       if (idx === -1) {
         db.cells.push(row)
-      } else {
-        // LWW: only update if the incoming last_edit_at is newer.
-        if (row.last_edit_at > db.cells[idx].last_edit_at) {
-          db.cells[idx] = row
+      } else if (row.last_edit_at > db.cells[idx].last_edit_at) {
+        const prev = db.cells[idx]
+        db.cells[idx] = {
+          ...row,
+          edit_count: (prev.edit_count ?? 0) + 1,
         }
       }
       return []
+    }
+
+    // ── INSERT INTO cells (UPSERT) — projection.writeProjection (Y.Doc) ───
+    if (/VALUES \(\?, \?, \?, \?, \?, \?, \?, \?, \?, 0\)/.test(normalized)) {
+      const row: CellRow = {
+        file_id: args[0] as string,
+        cell_id: args[1] as string,
+        content_text: args[2] as string,
+        content_hash: args[3] as string,
+        validated: args[4] as number,
+        word_count: args[5] as number,
+        last_editor: args[6] as string | null,
+        last_edit_at: args[7] as number,
+        projected_from: args[8] as string,
+        edit_count: 0,
+      }
+      const idx = db.cells.findIndex(
+        (c) => c.file_id === row.file_id && c.cell_id === row.cell_id,
+      )
+      if (idx === -1) {
+        db.cells.push(row)
+      } else if (row.last_edit_at > db.cells[idx].last_edit_at) {
+        const prev = db.cells[idx]
+        db.cells[idx] = { ...row, edit_count: prev.edit_count ?? 0 }
+      }
+      return []
+    }
+
+    if (/^INSERT INTO cells/.test(normalized)) {
+      throw new Error(`d1-fake: unhandled INSERT INTO cells SQL: ${normalized.slice(0, 160)}`)
     }
 
     // ── INSERT INTO cell_validators (UPSERT) ───────────────────────────────

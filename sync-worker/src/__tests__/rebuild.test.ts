@@ -213,6 +213,7 @@ describe('handleRebuildProjectionRequest', () => {
       expect(cells[0].content_text).toBe('In the beginning')
       expect(cells[0].last_editor).toBe('alice')
       expect(cells[0].projected_from).toBe('event:evt-commit-1')
+      expect(cells[0].edit_count).toBe(1)
     })
 
     it('writes the cell_validator from the validate + unvalidate events (LWW: is_active=0 wins)', async () => {

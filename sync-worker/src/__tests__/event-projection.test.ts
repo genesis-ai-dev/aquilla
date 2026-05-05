@@ -213,11 +213,13 @@ describe('buildEventProjectionStmts', () => {
       expect(sql2).toContain('UPDATE cells')
       expect(sql2).toContain('SET validated')
       expect(sql2).toContain('cell_validators')
+      expect(sql2).toContain('projected_from')
       expect(args2[0]).toBe('proj-1')  // project_id for subquery
       expect(args2[1]).toBe('file-a')  // file_id for subquery
       expect(args2[2]).toBe('cell-1')  // cell_id for subquery
-      expect(args2[3]).toBe('file-a')  // file_id for WHERE
-      expect(args2[4]).toBe('cell-1')  // cell_id for WHERE
+      expect(args2[3]).toBe('evt-commit-id') // legacy fallback edit id
+      expect(args2[4]).toBe('file-a')  // file_id for WHERE
+      expect(args2[5]).toBe('cell-1')  // cell_id for WHERE
     })
 
     it('throws when fileId is missing', () => {
@@ -269,8 +271,10 @@ describe('buildEventProjectionStmts', () => {
       const { sql: sql2, args: args2 } = recorded[1]
       expect(sql2).toContain('UPDATE cells')
       expect(sql2).toContain('SET validated')
-      expect(args2[3]).toBe('file-a')  // file_id for WHERE
-      expect(args2[4]).toBe('cell-1')  // cell_id for WHERE
+      expect(sql2).toContain('projected_from')
+      expect(args2[3]).toBe('evt-commit-id') // legacy fallback edit id
+      expect(args2[4]).toBe('file-a')  // file_id for WHERE
+      expect(args2[5]).toBe('cell-1')  // cell_id for WHERE
     })
 
     it('throws when fileId is missing', () => {

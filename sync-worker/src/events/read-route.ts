@@ -113,7 +113,7 @@ export async function handleEventsReadRequest(
     binds.push(before)
   }
 
-  parts.push("ORDER BY server_ts DESC")
+  parts.push("ORDER BY server_ts DESC, id DESC")
   parts.push("LIMIT ?")
   binds.push(limit)
 

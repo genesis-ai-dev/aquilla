@@ -119,6 +119,19 @@ export function makeInMemoryD1(tables: Partial<Tables> = {}): InMemoryD1 {
       return rows
     }
 
+    if (/^SELECT server_ts FROM events WHERE id = \?$/.test(normalized)) {
+      const id = args[0] as string
+      const row = db.events.find((e) => e.id === id)
+      return row ? [{ server_ts: row.server_ts }] : []
+    }
+
+    if (/^SELECT last_edit_at FROM cells WHERE file_id = \? AND cell_id = \?$/.test(normalized)) {
+      const fileId = args[0] as string
+      const cellId = args[1] as string
+      const row = db.cells.find((c) => c.file_id === fileId && c.cell_id === cellId)
+      return row ? [{ last_edit_at: row.last_edit_at }] : []
+    }
+
     // ── SELECT events (legacy — project-level SELECT * pattern) ───────────
     if (/^SELECT \* FROM events WHERE project_id = \?/.test(normalized)) {
       const pid = args[0] as string
@@ -359,17 +372,23 @@ export function makeInMemoryD1(tables: Partial<Tables> = {}): InMemoryD1 {
     // ── UPDATE cells SET validated = (...) ────────────────────────────────
     // Emitted by validate/unvalidate handlers to recompute the denormalized flag.
     // Bind order: 0=project_id, 1=file_id, 2=cell_id (for subquery),
-    //             3=file_id, 4=cell_id (for WHERE clause)
+    //             3=legacy fallback edit_event_id,
+    //             4=file_id, 5=cell_id (for WHERE clause)
     if (/^UPDATE cells SET validated/.test(normalized)) {
       const projectId = args[0] as string
-      const fileId = args[3] as string
-      const cellId = args[4] as string
+      const fileId = args[4] as string
+      const cellId = args[5] as string
+      const cell = db.cells.find((c) => c.file_id === fileId && c.cell_id === cellId)
+      const currentEditId = cell?.projected_from?.startsWith('event:')
+        ? cell.projected_from.slice('event:'.length)
+        : args[3] as string
       const activeCount = db.cell_validators.filter(
         (v) =>
           v.project_id === projectId &&
           v.file_id === fileId &&
           v.cell_id === cellId &&
-          v.is_active === 1,
+          v.is_active === 1 &&
+          v.edit_event_id === currentEditId,
       ).length
       const validated = activeCount > 0 ? 1 : 0
       for (const cell of db.cells) {

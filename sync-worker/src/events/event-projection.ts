@@ -140,6 +140,9 @@ export function buildEventProjectionStmts(
           ),
       )
       // Recompute the denormalized cells.validated flag from active validator state.
+      // Only validations for the cell's current edit count. If a user validates
+      // edit A and edit B lands later, replaying or retrying validation for A
+      // must not mark edit B as approved.
       stmts.push(
         db
           .prepare(
@@ -148,6 +151,13 @@ export function buildEventProjectionStmts(
               SELECT CASE WHEN COUNT(*) > 0 THEN 1 ELSE 0 END
               FROM cell_validators
               WHERE project_id = ? AND file_id = ? AND cell_id = ? AND is_active = 1
+                AND edit_event_id = COALESCE(
+                  CASE
+                    WHEN cells.projected_from LIKE 'event:%'
+                    THEN substr(cells.projected_from, 7)
+                  END,
+                  ?
+                )
             )
             WHERE file_id = ? AND cell_id = ?`,
           )
@@ -155,6 +165,7 @@ export function buildEventProjectionStmts(
             event.projectId,
             event.fileId,
             event.cellId,
+            p.editEventId,
             event.fileId,
             event.cellId,
           ),
@@ -201,6 +212,8 @@ export function buildEventProjectionStmts(
           ),
       )
       // Recompute the denormalized cells.validated flag from active validator state.
+      // See the validate branch above: validation state is scoped to the
+      // current edit, not the cell id alone.
       stmts.push(
         db
           .prepare(
@@ -209,6 +222,13 @@ export function buildEventProjectionStmts(
               SELECT CASE WHEN COUNT(*) > 0 THEN 1 ELSE 0 END
               FROM cell_validators
               WHERE project_id = ? AND file_id = ? AND cell_id = ? AND is_active = 1
+                AND edit_event_id = COALESCE(
+                  CASE
+                    WHEN cells.projected_from LIKE 'event:%'
+                    THEN substr(cells.projected_from, 7)
+                  END,
+                  ?
+                )
             )
             WHERE file_id = ? AND cell_id = ?`,
           )
@@ -216,6 +236,7 @@ export function buildEventProjectionStmts(
             event.projectId,
             event.fileId,
             event.cellId,
+            p.editEventId,
             event.fileId,
             event.cellId,
           ),

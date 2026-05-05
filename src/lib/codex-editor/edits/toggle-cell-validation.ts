@@ -25,6 +25,7 @@ export function toggleCellValidation(
 
   const now = Date.now()
   let applied = false
+  let editEventId: string | undefined
   doc.transact(() => {
     const arr = getEditsArray(cell)
     let target: Y.Map<unknown> | undefined
@@ -34,10 +35,11 @@ export function toggleCellValidation(
     }
     if (!target) return
     applied = true
+    editEventId = target.get("cqrsEventId") as string | undefined
     if (validate) upsertValidator(target, username, now)
     else softDeleteValidator(target, username, now)
   })
   if (applied) {
-    enqueueCellValidateToggle(cellId, validate, now, fileIdOverride)
+    enqueueCellValidateToggle(cellId, validate, now, fileIdOverride, editEventId)
   }
 }

@@ -85,13 +85,13 @@ export function enqueueCellCommitAfterValueEdit(
   cellId: string,
   clientTs: number = Date.now(),
   fileIdOverride?: string,
-): void {
+): string | null {
   const b = bridge
-  if (!b) return
+  if (!b) return null
   const fileId = fileIdOverride ?? b.activeFileId
-  if (!fileId) return
+  if (!fileId) return null
   const snap = readCellSnapshot(doc, cellId)
-  if (!snap) return
+  if (!snap) return null
   const id = uuidv7()
   const prev = lastCommitEventIdByCell.get(cellId)
   const event: CqrsRawEvent<"cell.commit"> = {
@@ -111,6 +111,7 @@ export function enqueueCellCommitAfterValueEdit(
   }
   lastCommitEventIdByCell.set(cellId, id)
   void enqueueOutboxEvent(event)
+  return id
 }
 
 /**
@@ -122,13 +123,14 @@ export function enqueueCellValidateToggle(
   validate: boolean,
   clientTs: number = Date.now(),
   fileIdOverride?: string,
+  editEventIdOverride?: string,
 ): void {
   const b = bridge
   if (!b) return
   const fileId = fileIdOverride ?? b.activeFileId
   if (!fileId) return
-  const editEventId = lastCommitEventIdByCell.get(cellId)
-  if (!editEventId) return
+  const editEventId =
+    editEventIdOverride ?? lastCommitEventIdByCell.get(cellId) ?? `legacy:${fileId}:${cellId}`
 
   const id = uuidv7()
   const event: CqrsRawEvent =

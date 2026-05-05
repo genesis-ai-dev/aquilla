@@ -39,6 +39,30 @@ interface RejectedEntry {
   reason: string
 }
 
+async function readExistingEventServerTs(
+  db: D1Database,
+  eventId: string,
+): Promise<number | null> {
+  const row = await db
+    .prepare('SELECT server_ts FROM events WHERE id = ?')
+    .bind(eventId)
+    .first<{ server_ts: number }>()
+  return typeof row?.server_ts === 'number' ? row.server_ts : null
+}
+
+async function readCellLastEditAt(
+  db: D1Database,
+  fileId: string | undefined,
+  cellId: string | undefined,
+): Promise<number | null> {
+  if (!fileId || !cellId) return null
+  const row = await db
+    .prepare('SELECT last_edit_at FROM cells WHERE file_id = ? AND cell_id = ?')
+    .bind(fileId, cellId)
+    .first<{ last_edit_at: number }>()
+  return typeof row?.last_edit_at === 'number' ? row.last_edit_at : null
+}
+
 /**
  * POST /events
  *
@@ -115,10 +139,10 @@ export async function handleEventsWriteRequest(
   const authHeader = request.headers.get('Authorization') ?? ''
   const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : null
 
-  // 7. One server timestamp for the entire batch.
-  //    All events in a single request share the same server_ts; tie-breaking
-  //    uses the input order within the batch.
-  const serverTs = Date.now()
+  // 7. Monotonic server timestamps for this request.
+  //    D1 projections use server_ts as their LWW key, so multiple commits to
+  //    the same cell in one outbox flush must not share the same timestamp.
+  let nextServerTs = Date.now()
 
   const accepted: AcceptedEntry[] = []
   const rejected: RejectedEntry[] = []
@@ -128,25 +152,26 @@ export async function handleEventsWriteRequest(
   // in the batch doesn't leave a partial write.
   const pendingStmts: D1PreparedStatement[] = []
 
-  // One entry per successfully-dispatched event (in input order). Each entry
-  // records how many statements belong to it so we can attribute D1 batch
-  // failures to specific events for partial-success reporting.
-  interface PendingEntry {
-    id: string
-    stmtCount: number
-  }
-  const pendingEntries: PendingEntry[] = []
-
-  // Accumulate eventFrames and dirty table sets for Realtime broadcast after
-  // D1 commit. Broadcast is non-fatal — clients poll as a safety net.
-  const pendingEventFrames: Array<Extract<RealtimeMessage, { t: 'event' }>> = []
   // Track dirty tables per (project, file) scope for projection.dirty fan-out.
   interface DirtyEntry {
     project: string
     file: string
     tables: Set<ProjectionTable>
   }
-  const pendingDirtyEntries: DirtyEntry[] = []
+
+  // One entry per successfully-dispatched event (in input order). The route
+  // chunks D1 work on these event boundaries so an event INSERT is never
+  // committed in one D1 batch while its projection statements wait in another.
+  interface PendingEntry {
+    id: string
+    stmtStart: number
+    stmtCount: number
+    eventFrame: Extract<RealtimeMessage, { t: 'event' }>
+    dirtyEntry?: DirtyEntry
+  }
+  const pendingEntries: PendingEntry[] = []
+
+  const seenEventIds = new Set<string>()
 
   for (const rawEvent of rawEvents) {
     // Authorize each event independently.
@@ -159,6 +184,22 @@ export async function handleEventsWriteRequest(
       })
       continue
     }
+
+    if (seenEventIds.has(rawEvent.id)) {
+      accepted.push({ id: rawEvent.id })
+      continue
+    }
+    seenEventIds.add(rawEvent.id)
+
+    const existingServerTs = await readExistingEventServerTs(db, rawEvent.id)
+    if (existingServerTs !== null) {
+      accepted.push({ id: rawEvent.id })
+      continue
+    }
+
+    const cellLastEditAt = await readCellLastEditAt(db, rawEvent.fileId, rawEvent.cellId)
+    const serverTs = Math.max(nextServerTs++, (cellLastEditAt ?? 0) + 1)
+    nextServerTs = Math.max(nextServerTs, serverTs + 1)
 
     // Dispatch to the kind-specific handler.
     const outcome = dispatchEvent(db, authResult.event, serverTs)
@@ -176,49 +217,88 @@ export async function handleEventsWriteRequest(
     for (const stmt of outcome.result.stmts) {
       pendingStmts.push(stmt)
     }
-    pendingEntries.push({ id: rawEvent.id, stmtCount: pendingStmts.length - stmtsBefore })
-    pendingEventFrames.push(outcome.result.eventFrame)
+
     // Accumulate dirty tables keyed by (project, file) scope.
     const frame = outcome.result.eventFrame
+    let dirtyEntry: DirtyEntry | undefined
     if (frame.file) {
-      pendingDirtyEntries.push({
+      dirtyEntry = {
         project: frame.project,
         file: frame.file,
         tables: new Set(outcome.result.dirtyTables),
-      })
+      }
     }
+    pendingEntries.push({
+      id: rawEvent.id,
+      stmtStart: stmtsBefore,
+      stmtCount: pendingStmts.length - stmtsBefore,
+      eventFrame: outcome.result.eventFrame,
+      dirtyEntry,
+    })
   }
 
   // 8. Commit accumulated statements in D1_BATCH_LIMIT-sized chunks.
   //    Only add to accepted AFTER successful commit (step 9).
   //    On partial failure, report uncommitted events as rejected.
   if (pendingStmts.length > 0) {
-    // Track how many statements have committed so we can attribute failures.
-    let stmtsCommitted = 0
+    interface PendingChunk {
+      entries: PendingEntry[]
+      stmts: D1PreparedStatement[]
+    }
+
+    const chunks: PendingChunk[] = []
+    let currentChunk: PendingChunk = { entries: [], stmts: [] }
+
+    for (const entry of pendingEntries) {
+      const eventStmts = pendingStmts.slice(
+        entry.stmtStart,
+        entry.stmtStart + entry.stmtCount,
+      )
+
+      if (eventStmts.length > D1_BATCH_LIMIT) {
+        rejected.push({
+          id: entry.id,
+          status: 500,
+          reason: `event produced ${eventStmts.length} D1 statements, exceeding batch limit ${D1_BATCH_LIMIT}`,
+        })
+        continue
+      }
+
+      if (
+        currentChunk.stmts.length > 0 &&
+        currentChunk.stmts.length + eventStmts.length > D1_BATCH_LIMIT
+      ) {
+        chunks.push(currentChunk)
+        currentChunk = { entries: [], stmts: [] }
+      }
+
+      currentChunk.entries.push(entry)
+      currentChunk.stmts.push(...eventStmts)
+    }
+
+    if (currentChunk.stmts.length > 0) {
+      chunks.push(currentChunk)
+    }
+
+    const committedEntries: PendingEntry[] = []
 
     try {
-      for (let i = 0; i < pendingStmts.length; i += D1_BATCH_LIMIT) {
-        await db.batch(pendingStmts.slice(i, i + D1_BATCH_LIMIT))
-        stmtsCommitted += Math.min(D1_BATCH_LIMIT, pendingStmts.length - i)
+      for (const chunk of chunks) {
+        await db.batch(chunk.stmts)
+        committedEntries.push(...chunk.entries)
       }
     } catch (err) {
-      // D1 batch failed mid-flight. Attribute partial success by comparing
-      // each entry's statement range against stmtsCommitted.
-      let stmtOffset = 0
+      const committed = new Set(committedEntries.map((entry) => entry.id))
       for (const entry of pendingEntries) {
-        const entryEnd = stmtOffset + entry.stmtCount
-        if (entryEnd <= stmtsCommitted) {
-          // All statements for this event committed before the failure.
+        if (committed.has(entry.id)) {
           accepted.push({ id: entry.id })
-        } else {
-          // Some or all statements for this event did not commit.
+        } else if (!rejected.some((r) => r.id === entry.id)) {
           rejected.push({
             id: entry.id,
             status: 500,
             reason: `D1 batch failed: ${String(err)}`,
           })
         }
-        stmtOffset = entryEnd
       }
 
       return Response.json({ accepted, rejected }, { status: 200 })
@@ -226,7 +306,7 @@ export async function handleEventsWriteRequest(
 
     // All batches succeeded — accept every dispatched event (preserving order,
     // including duplicates — e.g. same event submitted twice in one request).
-    for (const entry of pendingEntries) {
+    for (const entry of committedEntries) {
       accepted.push({ id: entry.id })
     }
 
@@ -241,21 +321,23 @@ export async function handleEventsWriteRequest(
 
       // Coalesce dirty tables per (project, file) before broadcast.
       const dirtyByScope = new Map<string, { project: string; file: string; tables: Set<ProjectionTable> }>()
-      for (const entry of pendingDirtyEntries) {
-        const key = `${entry.project}|${entry.file}`
+      for (const entry of committedEntries) {
+        if (!entry.dirtyEntry) continue
+        const dirty = entry.dirtyEntry
+        const key = `${dirty.project}|${dirty.file}`
         const existing = dirtyByScope.get(key)
         if (existing) {
-          for (const t of entry.tables) existing.tables.add(t)
+          for (const t of dirty.tables) existing.tables.add(t)
         } else {
-          dirtyByScope.set(key, { project: entry.project, file: entry.file, tables: new Set(entry.tables) })
+          dirtyByScope.set(key, { project: dirty.project, file: dirty.file, tables: new Set(dirty.tables) })
         }
       }
 
       // Fan out all event frames and coalesced projection.dirty messages in
       // parallel. broadcastRealtime is non-throwing so Promise.all is safe.
       const broadcasts: Promise<void>[] = []
-      for (const frame of pendingEventFrames) {
-        broadcasts.push(broadcastRealtime(broadcastEnv, frame))
+      for (const entry of committedEntries) {
+        broadcasts.push(broadcastRealtime(broadcastEnv, entry.eventFrame))
       }
       for (const { project, file, tables } of dirtyByScope.values()) {
         broadcasts.push(broadcastRealtime(broadcastEnv, {

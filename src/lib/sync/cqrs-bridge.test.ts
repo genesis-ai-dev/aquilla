@@ -111,7 +111,7 @@ describe("cqrs-bridge", () => {
 
   // -- Bridge teardown -------------------------------------------------------
 
-  it("setting bridge to null clears lastCommitEventIdByCell (validate is no-op after re-set)", async () => {
+  it("setting bridge to null clears the session map but validation falls back to a legacy edit id", async () => {
     // Enqueue one commit to populate the internal map
     setCqrsOutboxBridge(BRIDGE)
     const doc = makeDoc("cell-teardown")
@@ -125,12 +125,14 @@ describe("cqrs-bridge", () => {
     // Re-set with same project / file
     setCqrsOutboxBridge(BRIDGE)
 
-    // Validate should be a no-op because the map was cleared
+    // Validate should still enqueue using a stable legacy edit id because the
+    // session-only map was cleared.
     enqueueCellValidateToggle("cell-teardown", true, 2)
     await new Promise((r) => setTimeout(r, 0))
-    // Only the commit is present, no validate
     const batch = await peekOutboxBatch(10)
-    expect(batch.filter((r) => r.event.kind === "cell.validate")).toHaveLength(0)
+    const validate = batch.find((r) => r.event.kind === "cell.validate")
+    expect(validate).toBeDefined()
+    expect(validate!.event.payload).toEqual({ editEventId: "legacy:file-1:cell-teardown" })
   })
 
   // -- fileId stamping -------------------------------------------------------
@@ -227,12 +229,13 @@ describe("cqrs-bridge", () => {
     expect(validateEvent!.event.fileId).toBe("file-1")
   })
 
-  it("enqueueCellValidateToggle is a silent no-op when no prior commit exists for the cell", async () => {
+  it("enqueueCellValidateToggle uses a legacy edit id when no prior commit exists for the cell", async () => {
     setCqrsOutboxBridge(BRIDGE)
-    // No commit for "cell-unregistered" — lastCommitEventIdByCell has no entry
     enqueueCellValidateToggle("cell-unregistered", true, 1)
     await new Promise((r) => setTimeout(r, 0))
-    expect(await outboxPendingCount()).toBe(0)
+    const batch = await peekOutboxBatch(10)
+    expect(batch).toHaveLength(1)
+    expect(batch[0].event.payload).toEqual({ editEventId: "legacy:file-1:cell-unregistered" })
   })
 
   it("enqueueCellValidateToggle produces kind 'cell.validate' when validate=true", async () => {

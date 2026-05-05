@@ -44,14 +44,15 @@ export function commitCellEdit(
    * active editor file. Default uses the bridge.
    */
   fileIdOverride?: string,
-): void {
+): string | null {
   const cellsMap = doc.getMap("cells")
   const cell = cellsMap.get(cellId) as Y.Map<unknown> | undefined
-  if (!cell) return
+  if (!cell) return null
 
   const type = resolveType(source)
   const isValueEdit = editMap[0] === "value"
   const now = Date.now()
+  let touchedValueEntry: Y.Map<unknown> | null = null
 
   doc.transact(() => {
     const arr = getEditsArray(cell)
@@ -70,11 +71,12 @@ export function commitCellEdit(
         last.set("timestamp", now)
         if (!entryHasAuthor(last, username)) appendAuthor(last, username)
         if (source === "human" && isValueEdit) upsertValidator(last, username, now)
+        if (isValueEdit) touchedValueEntry = last
         return
       }
     }
 
-    appendEntry(arr, {
+    const entry = appendEntry(arr, {
       authors: [username],
       timestamp: now,
       type,
@@ -82,9 +84,17 @@ export function commitCellEdit(
       value,
       seedValidator: source === "human" && isValueEdit ? username : undefined,
     })
+    if (isValueEdit) touchedValueEntry = entry
   })
 
   if (isValueEdit) {
-    enqueueCellCommitAfterValueEdit(doc, cellId, now, fileIdOverride)
+    const eventId = enqueueCellCommitAfterValueEdit(doc, cellId, now, fileIdOverride)
+    if (eventId && touchedValueEntry) {
+      doc.transact(() => {
+        touchedValueEntry?.set("cqrsEventId", eventId)
+      })
+    }
+    return eventId
   }
+  return null
 }

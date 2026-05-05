@@ -43,6 +43,21 @@ function makeCommitEvent(overrides: Partial<RawEvent<'cell.commit'>> = {}): RawE
   }
 }
 
+function makeValidateEvent(overrides: Partial<RawEvent<'cell.validate'>> = {}): RawEvent<'cell.validate'> {
+  return {
+    id: 'evt-validate-000',
+    schemaVersion: 1,
+    kind: 'cell.validate',
+    projectId: 'proj-a',
+    fileId: 'file-x',
+    cellId: 'cell-1',
+    author: 'alice',
+    payload: { editEventId: 'evt-commit-000' },
+    clientTs: 2000,
+    ...overrides,
+  }
+}
+
 function makeEnv(db?: D1Database, secret: string | undefined = SECRET) {
   return { CODEX_DB: db, SYNC_SECRET_KEY: secret }
 }
@@ -287,6 +302,21 @@ describe('handleEventsWriteRequest — successful single cell.commit', () => {
     expect(tables.cells[0].cell_id).toBe('cell-1')
     expect(tables.cells[0].content_text).toBe('written text')
   })
+
+  it('writes the verified token username rather than the client-supplied author', async () => {
+    const token = await makeToken({ username: 'token-alice' })
+    const event = makeCommitEvent({
+      id: 'evt-author-spoof-001',
+      author: 'mallory',
+    })
+    const req = await makeRequest([event], token)
+    const db = makeInMemoryD1()
+    await handleEventsWriteRequest(req, makeEnv(db)) as Response
+
+    const tables = (db as any)._tables()
+    expect(tables.events[0].author).toBe('token-alice')
+    expect(tables.cells[0].last_editor).toBe('token-alice')
+  })
 })
 
 // ── Idempotency ───────────────────────────────────────────────────────────────
@@ -338,6 +368,95 @@ describe('handleEventsWriteRequest — idempotency', () => {
     // DB still has only one row
     const tables = (db as any)._tables()
     expect(tables.events).toHaveLength(1)
+  })
+
+  it('retrying an old event does not re-project over a newer commit', async () => {
+    const token = await makeToken()
+    const oldEvent = makeCommitEvent({
+      id: 'evt-retry-old',
+      payload: { value: 'old text', valueHtml: '<p>old text</p>' },
+    })
+    const newEvent = makeCommitEvent({
+      id: 'evt-retry-new',
+      payload: { value: 'new text', valueHtml: '<p>new text</p>' },
+    })
+    const db = makeInMemoryD1()
+    const env = makeEnv(db)
+
+    await handleEventsWriteRequest(await makeRequest([oldEvent], token), env)
+    await handleEventsWriteRequest(await makeRequest([newEvent], token), env)
+    await handleEventsWriteRequest(await makeRequest([oldEvent], token), env)
+
+    const cell = (db as any)._tables().cells[0]
+    expect(cell.content_text).toBe('new text')
+    expect(cell.edit_count).toBe(2)
+  })
+
+  it('multiple commits to the same cell in one batch project the last event', async () => {
+    const token = await makeToken()
+    const events = [
+      makeCommitEvent({
+        id: 'evt-same-cell-1',
+        payload: { value: 'first', valueHtml: '<p>first</p>' },
+      }),
+      makeCommitEvent({
+        id: 'evt-same-cell-2',
+        payload: { value: 'second', valueHtml: '<p>second</p>' },
+      }),
+      makeCommitEvent({
+        id: 'evt-same-cell-3',
+        payload: { value: 'third', valueHtml: '<p>third</p>' },
+      }),
+    ]
+    const db = makeInMemoryD1()
+    const res = await handleEventsWriteRequest(await makeRequest(events, token), makeEnv(db)) as Response
+
+    expect(res.status).toBe(200)
+    const cell = (db as any)._tables().cells[0]
+    expect(cell.content_text).toBe('third')
+    expect(cell.edit_count).toBe(3)
+  })
+
+  it('validation for an older edit does not mark the current edit validated', async () => {
+    const token = await makeToken()
+    const db = makeInMemoryD1()
+    const env = makeEnv(db)
+    const first = makeCommitEvent({
+      id: 'evt-current-edit-1',
+      payload: { value: 'first', valueHtml: '<p>first</p>' },
+    })
+    const second = makeCommitEvent({
+      id: 'evt-current-edit-2',
+      payload: { value: 'second', valueHtml: '<p>second</p>' },
+    })
+
+    await handleEventsWriteRequest(await makeRequest([first], token), env)
+    await handleEventsWriteRequest(await makeRequest([
+      makeValidateEvent({
+        id: 'evt-current-edit-1-validate',
+        payload: { editEventId: 'evt-current-edit-1' },
+      }),
+    ], token), env)
+    expect((db as any)._tables().cells[0].validated).toBe(1)
+
+    await handleEventsWriteRequest(await makeRequest([second], token), env)
+    expect((db as any)._tables().cells[0].validated).toBe(0)
+
+    await handleEventsWriteRequest(await makeRequest([
+      makeValidateEvent({
+        id: 'evt-current-edit-1-validate-late',
+        payload: { editEventId: 'evt-current-edit-1' },
+      }),
+    ], token), env)
+    expect((db as any)._tables().cells[0].validated).toBe(0)
+
+    await handleEventsWriteRequest(await makeRequest([
+      makeValidateEvent({
+        id: 'evt-current-edit-2-validate',
+        payload: { editEventId: 'evt-current-edit-2' },
+      }),
+    ], token), env)
+    expect((db as any)._tables().cells[0].validated).toBe(1)
   })
 })
 
@@ -422,5 +541,33 @@ describe('handleEventsWriteRequest — chunked-batch partial-success', () => {
     expect(body.rejected[0].id).toBe('evt-chunk-050')
     expect(body.rejected[0].status).toBe(500)
     expect(body.rejected[0].reason).toMatch(/not committed|D1 batch/i)
+  })
+
+  it('never splits a multi-statement event across D1 chunks', async () => {
+    const token = await makeToken()
+    const commits = Array.from({ length: 49 }, (_, i) =>
+      makeCommitEvent({
+        id: `evt-boundary-${String(i).padStart(3, '0')}`,
+        cellId: `cell-${i}`,
+      }),
+    )
+    const validate = makeValidateEvent({
+      id: 'evt-boundary-validate',
+      cellId: 'cell-0',
+      payload: { editEventId: 'evt-boundary-000' },
+    })
+    const req = await makeRequest([...commits, validate], token)
+    const db = makeFailingD1(2)
+    const res = await handleEventsWriteRequest(req, makeEnv(db)) as Response
+
+    expect(res.status).toBe(200)
+    const body = await res.json() as any
+    expect(body.accepted).toHaveLength(49)
+    expect(body.rejected).toHaveLength(1)
+    expect(body.rejected[0].id).toBe('evt-boundary-validate')
+
+    const tables = (db as any)._tables()
+    expect(tables.events.some((e: any) => e.id === 'evt-boundary-validate')).toBe(false)
+    expect(tables.cell_validators).toHaveLength(0)
   })
 })

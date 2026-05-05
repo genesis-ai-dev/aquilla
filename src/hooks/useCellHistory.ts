@@ -91,12 +91,12 @@ export function validateCell(
   const translated = frag ? getPlainText(frag) : ((cell.get("translated") as string) || "")
   if (!translated.trim()) return
   // Commits to the session log AND auto-validates the current user.
-  commitCellEdit(doc, cellId, username, ["value"], translated, "human", fileIdOverride)
+  const editEventId = commitCellEdit(doc, cellId, username, ["value"], translated, "human", fileIdOverride)
   // Dual-write: CQRS enqueue happens inside commitCellEdit; skip duplicate here.
   appendCellHistory(doc, cellId, {
     value: translated, source: "human", author: username, validated: true,
   }, { skipCqrs: true })
-  enqueueCellValidateToggle(cellId, true, undefined, fileIdOverride)
+  enqueueCellValidateToggle(cellId, true, undefined, fileIdOverride, editEventId ?? undefined)
 }
 
 /**

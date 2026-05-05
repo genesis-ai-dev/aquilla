@@ -1,11 +1,11 @@
 // Floating action bar that appears whenever the user has multi-selected
-// cells. Surfaces bulk Translate / Generate Audio / Both.
+// cells. Surfaces bulk Translate / Validate / Generate Audio / Both.
 //
 // Synth uses the project's default voice; users can also drag a voice
 // chip from the VoiceBar onto any selected cell to synth with that voice.
 
 import { useCallback, useEffect, useMemo, useState } from "react"
-import { Languages, Loader2, Sparkles, Wand2, X } from "lucide-react"
+import { CheckCheck, Languages, Loader2, Sparkles, Wand2, X } from "lucide-react"
 import * as Y from "yjs"
 import type { CellData } from "@/hooks/useCells"
 import type { ProjectRecord } from "@/lib/parsers/types"
@@ -18,6 +18,7 @@ import {
   translateThenSynthAsOneTake,
 } from "@/lib/audio/bulk-selected"
 import { resolveVoice } from "@/lib/audio/voices"
+import { toggleCellValidation } from "@/hooks/useCellHistory"
 
 interface Props {
   project: ProjectRecord
@@ -26,15 +27,20 @@ interface Props {
   session: FrontierSession | null
   username: string
   completeSingle?: (cell: CellData) => Promise<void> | void
+  // Segmented batch translation. When provided, "Translate" sends the whole
+  // selection as one <vN>-framed call instead of falling back to N
+  // per-cell calls — much higher quality for sequential passages.
+  completeBatch?: (cells: CellData[]) => Promise<void> | void
 }
 
 type Running =
   | { kind: "idle" }
   | { kind: "translate" }
+  | { kind: "validate" }
   | { kind: "synth" }
   | { kind: "translate-synth" }
 
-export function SelectionBar({ project, cells, doc, session, username, completeSingle }: Props) {
+export function SelectionBar({ project, cells, doc, session, username, completeSingle, completeBatch }: Props) {
   const selected = useSelectedIds()
   const [running, setRunning] = useState<Running>({ kind: "idle" })
 
@@ -64,6 +70,12 @@ export function SelectionBar({ project, cells, doc, session, username, completeS
     () => selectedCells.filter((c) => !c.translated.trim() && c.original?.trim()).length,
     [selectedCells],
   )
+  const validatableCount = useMemo(
+    () => selectedCells.filter(
+      (c) => c.translated.trim() && !c.activeValidators.includes(username),
+    ).length,
+    [selectedCells, username],
+  )
   const allHaveTranslation = selectedCells.length > 0 && selectedCells.every((c) => c.translated.trim())
   const isGitProject = project.origin?.kind === "git"
   const isBusy = running.kind !== "idle"
@@ -72,13 +84,39 @@ export function SelectionBar({ project, cells, doc, session, username, completeS
     if (isBusy) return
     setRunning({ kind: "translate" })
     try {
-      await translateMissing({
-        cells: selectedCells, doc, project, session, username, completeSingle,
-      })
+      // Prefer the segmented batch path when available — it sends the whole
+      // selection as one <vN>-framed prompt, which translates significantly
+      // better than the same verses in isolation. Fall back to per-cell only
+      // when the segmented path isn't wired (e.g. legacy callers).
+      const missing = selectedCells.filter(
+        (c) => !c.translated.trim() && c.original?.trim(),
+      )
+      if (missing.length > 0 && completeBatch) {
+        await completeBatch(missing)
+      } else {
+        await translateMissing({
+          cells: selectedCells, doc, project, session, username, completeSingle,
+        })
+      }
     } finally {
       setRunning({ kind: "idle" })
     }
-  }, [selectedCells, doc, project, session, username, completeSingle, isBusy])
+  }, [selectedCells, doc, project, session, username, completeSingle, completeBatch, isBusy])
+
+  const onValidate = useCallback(() => {
+    if (isBusy) return
+    if (validatableCount === 0) return
+    setRunning({ kind: "validate" })
+    try {
+      for (const cell of selectedCells) {
+        if (!cell.translated.trim()) continue
+        if (cell.activeValidators.includes(username)) continue
+        toggleCellValidation(doc, cell.id, username, true)
+      }
+    } finally {
+      setRunning({ kind: "idle" })
+    }
+  }, [selectedCells, doc, username, validatableCount, isBusy])
 
   const onSynth = useCallback(async () => {
     if (isBusy) return
@@ -170,6 +208,30 @@ export function SelectionBar({ project, cells, doc, session, username, completeS
         {missingCount > 0 && allHaveTranslation === false && (
           <span className="ml-1 rounded-full bg-primary-foreground/20 px-1.5 py-0.5 tabular-nums text-primary-foreground">
             {missingCount}
+          </span>
+        )}
+      </Button>
+      <Button
+        type="button"
+        size="sm"
+        variant="outline"
+        onClick={onValidate}
+        disabled={isBusy || validatableCount === 0}
+        title={
+          validatableCount === 0
+            ? "Nothing to validate — selected cells are empty or already validated by you"
+            : `Validate ${validatableCount} cell${validatableCount === 1 ? "" : "s"}`
+        }
+      >
+        {running.kind === "validate" ? (
+          <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />
+        ) : (
+          <CheckCheck className="mr-1 h-3.5 w-3.5" />
+        )}
+        Validate
+        {validatableCount > 0 && (
+          <span className="ml-1 rounded-full bg-muted px-1.5 py-0.5 tabular-nums text-muted-foreground">
+            {validatableCount}
           </span>
         )}
       </Button>

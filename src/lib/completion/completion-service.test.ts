@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
-import { buildPrompt, complete, fetchModels, normalizeOpenAIBaseUrl, resolveProvider, DEFAULT_SYSTEM_PROMPT, FRONTIER_CHAT_URL } from "./completion-service"
+import { buildPrompt, buildBatchPrompt, complete, fetchModels, normalizeOpenAIBaseUrl, resolveProvider, DEFAULT_SYSTEM_PROMPT, FRONTIER_CHAT_URL } from "./completion-service"
 import type { CompletionSettings } from "@/lib/parsers/types"
 import type { FrontierSession } from "@/lib/frontier/types"
 
@@ -50,6 +50,77 @@ describe("buildPrompt", () => {
       systemPrompt: "Translate {sourceLanguage} to {targetLanguage}.", sourceText: "test", examples: [],
     })
     expect(messages[0].content).toBe("Translate English to Spanish.")
+  })
+})
+
+describe("buildBatchPrompt", () => {
+  it("frames live cells as numbered <vN> tags and asks for the same structure back", () => {
+    const messages = buildBatchPrompt({
+      sourceLanguage: "English", targetLanguage: "French",
+      systemPrompt: DEFAULT_SYSTEM_PROMPT,
+      cells: [{ source: "In the beginning" }, { source: "God created" }, { source: "the heavens" }],
+      examples: [],
+    })
+    expect(messages).toHaveLength(2)
+    // Framing instructions live in the system prompt, not the user prompt — keeps
+    // the per-call user message focused on content.
+    expect(messages[0].content).toMatch(/<v1>, <v2>/)
+    expect(messages[0].content).toContain("English")
+    expect(messages[0].content).toContain("French")
+    expect(messages[1].role).toBe("user")
+    expect(messages[1].content).toContain("<v1>In the beginning</v1>")
+    expect(messages[1].content).toContain("<v2>God created</v2>")
+    expect(messages[1].content).toContain("<v3>the heavens</v3>")
+    // Trails with "Translation:" so the model continues the segmented structure.
+    expect(messages[1].content.endsWith("Translation:")).toBe(true)
+  })
+
+  it("renders examples with mirrored <vN> tags on both source and translation sides", () => {
+    const messages = buildBatchPrompt({
+      sourceLanguage: "English", targetLanguage: "French",
+      systemPrompt: DEFAULT_SYSTEM_PROMPT,
+      cells: [{ source: "live cell" }],
+      examples: [
+        { cells: [{ source: "Hello", target: "Bonjour" }, { source: "world", target: "monde" }] },
+      ],
+    })
+    expect(messages[1].content).toContain("<v1>Hello</v1>\n<v2>world</v2>")
+    expect(messages[1].content).toContain("<v1>Bonjour</v1>\n<v2>monde</v2>")
+  })
+
+  it("appends priorBatch as a final example to carry continuity across sub-batch splits", () => {
+    const messages = buildBatchPrompt({
+      sourceLanguage: "English", targetLanguage: "French",
+      systemPrompt: DEFAULT_SYSTEM_PROMPT,
+      cells: [{ source: "fresh source" }],
+      examples: [],
+      priorBatch: [{ source: "earlier verse", target: "verset précédent" }],
+    })
+    const idxPrior = messages[1].content.indexOf("<v1>earlier verse</v1>")
+    const idxLive = messages[1].content.indexOf("<v1>fresh source</v1>")
+    expect(idxPrior).toBeGreaterThan(-1)
+    expect(idxLive).toBeGreaterThan(idxPrior)
+    expect(messages[1].content).toContain("<v1>verset précédent</v1>")
+  })
+
+  it("substitutes language placeholders in the user-supplied system prompt", () => {
+    const messages = buildBatchPrompt({
+      sourceLanguage: "Greek", targetLanguage: "Spanish",
+      systemPrompt: "Translate from {sourceLanguage} to {targetLanguage}.",
+      cells: [{ source: "x" }], examples: [],
+    })
+    expect(messages[0].content).toContain("Translate from Greek to Spanish.")
+  })
+
+  it("skips examples whose cells array is empty", () => {
+    const messages = buildBatchPrompt({
+      sourceLanguage: "English", targetLanguage: "French",
+      systemPrompt: DEFAULT_SYSTEM_PROMPT,
+      cells: [{ source: "x" }],
+      examples: [{ cells: [] }, { cells: [{ source: "good", target: "bon" }] }],
+    })
+    // Only the non-empty example is rendered.
+    expect((messages[1].content.match(/Source:/g) || []).length).toBe(2) // 1 example + 1 live
   })
 })
 

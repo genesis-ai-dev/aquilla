@@ -10,7 +10,7 @@ import type { CellData } from "./useCells"
 import { buildPrompt, buildBatchPrompt, complete, resolveProvider, DEFAULT_SYSTEM_PROMPT, type PassageExample } from "@/lib/completion/completion-service"
 import type { PassageHit } from "./useSearchIndex"
 import { useFrontierHealth } from "@/lib/completion/frontier-health"
-import { appendCellHistory } from "./useCellHistory"
+import { appendCellHistory, dropLlmSeedHistory, recordHistoryEntry } from "./useCellHistory"
 import posthog from "@/lib/posthog"
 
 // Cap per LLM call. Above this we split sequentially and chain via priorBatch.
@@ -72,6 +72,18 @@ export function useCompletion(
     setExamples((p) => new Map(p).set(cell.id, found))
     setCompleting((p) => new Map(p).set(cell.id, "generating"))
 
+    const llmAuthor = effectiveSettings.model || "frontier-default"
+    // Seed an LLM history entry with validated:false BEFORE the stream starts.
+    // Without this, deriveStatus's "translated text + empty history → validated"
+    // fallback flips the cell to a green/validated state for the entire
+    // streaming window, which the user sees as "auto-validated by the LLM."
+    // The seed is collapsed into the final history entry below.
+    dropLlmSeedHistory(doc, cell.id, llmAuthor)
+    recordHistoryEntry(doc, cell.id, {
+      value: "", source: "llm", author: llmAuthor, validated: false,
+      examples: found.map((e) => ({ cellId: e.cellId, weight: e.coverageWeight })),
+    })
+
     try {
       const messages = buildPrompt({
         sourceLanguage, targetLanguage,
@@ -96,8 +108,10 @@ export function useCompletion(
           }
         },
       })
+      // Collapse the start-of-stream seed into the final entry.
+      dropLlmSeedHistory(doc, cell.id, llmAuthor)
       appendCellHistory(doc, cell.id, {
-        value: result, source: "llm", author: effectiveSettings.model || "frontier-default",
+        value: result, source: "llm", author: llmAuthor,
         validated: false, examples: found.map((e) => ({ cellId: e.cellId, weight: e.coverageWeight })),
       })
       posthog.capture("ai translation completed", {
@@ -109,6 +123,9 @@ export function useCompletion(
       })
       setCompleting((p) => new Map(p).set(cell.id, "done"))
     } catch (err) {
+      // Stream failed — drop the seed so the cell isn't left with a phantom
+      // empty LLM entry in its history.
+      dropLlmSeedHistory(doc, cell.id, llmAuthor)
       posthog.captureException(err instanceof Error ? err : new Error(String(err)))
       setCompleting((p) => new Map(p).set(cell.id, "error"))
       setErrors((p) => new Map(p).set(cell.id, err instanceof Error ? err.message : "Failed"))
@@ -163,9 +180,19 @@ export function useCompletion(
           score: 1, matchedTokens: [], coverageWeight: 1,
         }))
       )
+      const llmAuthor = effectiveSettings.model || "frontier-default"
       for (const c of chunk) {
         setExamples((p) => new Map(p).set(c.id, flatExamples))
         setCompleting((p) => new Map(p).set(c.id, "generating"))
+        // Seed an LLM history entry with validated:false BEFORE streaming
+        // starts. Otherwise deriveStatus's "translated text + empty history →
+        // validated" fallback makes every cell light up validated for the
+        // (multi-second) duration of the LLM call.
+        dropLlmSeedHistory(doc, c.id, llmAuthor)
+        recordHistoryEntry(doc, c.id, {
+          value: "", source: "llm", author: llmAuthor, validated: false,
+          examples: flatExamples.map((e) => ({ cellId: e.cellId, weight: e.coverageWeight })),
+        })
       }
 
       // 2. Stream the segmented response and route closed <vN>...</vN> blocks
@@ -215,6 +242,8 @@ export function useCompletion(
         for (let i = 0; i < chunk.length; i++) {
           if (filledText.has(i + 1)) continue
           const c = chunk[i]
+          // Drop the seed so the cell isn't stuck with an empty LLM entry.
+          dropLlmSeedHistory(doc, c.id, llmAuthor)
           setCompleting((p) => new Map(p).set(c.id, "error"))
           setErrors((p) => new Map(p).set(c.id, msg))
         }
@@ -228,15 +257,18 @@ export function useCompletion(
 
       // Record history + status for cells that round-tripped; queue the rest
       // for single-cell fallback so a couple of dropped tags don't lose the
-      // user's whole batch.
+      // user's whole batch. In both cases drop the seed entry first so we
+      // don't accumulate phantom empty-LLM entries — completeSingle seeds
+      // its own when it picks up a fallback.
       for (let i = 0; i < chunk.length; i++) {
         const cell = chunk[i]
         const text = filledText.get(i + 1)
+        dropLlmSeedHistory(doc, cell.id, llmAuthor)
         if (text !== undefined) {
           appendCellHistory(doc, cell.id, {
             value: text,
             source: "llm",
-            author: effectiveSettings.model || "frontier-default",
+            author: llmAuthor,
             validated: false,
             examples: flatExamples.map((e) => ({ cellId: e.cellId, weight: e.coverageWeight })),
           })

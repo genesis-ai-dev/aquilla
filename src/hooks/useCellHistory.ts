@@ -48,6 +48,33 @@ export function appendCellHistory(
   })
 }
 
+/**
+ * Remove the last history entry if it's a placeholder LLM seed by the given
+ * author (empty value, validated:false). Used by completion paths to clean up
+ * the seed entry before recording the final translation. Without this collapse
+ * the cell ends up with a phantom empty-LLM entry in its history view.
+ */
+export function dropLlmSeedHistory(
+  doc: Y.Doc,
+  cellId: string,
+  llmAuthor: string
+): void {
+  const cellsMap = doc.getMap("cells")
+  const cell = cellsMap.get(cellId) as Y.Map<unknown> | undefined
+  if (!cell) return
+  const historyArr = cell.get("history") as Y.Array<CellHistoryEntry> | undefined
+  if (!historyArr || historyArr.length === 0) return
+  const last = historyArr.get(historyArr.length - 1)
+  if (
+    last.source === "llm" &&
+    last.author === llmAuthor &&
+    !last.validated &&
+    (last.value === "" || last.value === undefined)
+  ) {
+    doc.transact(() => historyArr.delete(historyArr.length - 1, 1))
+  }
+}
+
 // Append a history entry WITHOUT modifying the fragment. Use this when the
 // fragment was already updated by the TipTap editor — we just want to record
 // the revision for audit without clobbering inline formatting via setPlainText.

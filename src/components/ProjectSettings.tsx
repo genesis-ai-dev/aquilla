@@ -6,7 +6,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Switch } from "@/components/ui/switch"
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
+import { DisabledFieldTooltip } from "./ProjectSettings/DisabledFieldTooltip"
 import { useProject } from "@/hooks/useProject"
 import { useProjectSettings } from "@/hooks/useProjectSettings"
 import { getProject, updateProject } from "@/lib/store/project-index"
@@ -265,29 +265,15 @@ export function ProjectSettings() {
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <Label htmlFor="sl">Source Language</Label>
-                <TooltipProvider delay={200}>
-                  <Tooltip>
-                    <TooltipTrigger render={<span className="block" />}>
-                      <Input id="sl" value={sourceLanguage} onChange={(e) => setSourceLanguage(e.target.value)} onBlur={() => savePartialShared({ sourceLanguage })} disabled={!canEditShared} />
-                    </TooltipTrigger>
-                    {sharedDisabledTooltip && (
-                      <TooltipContent>{sharedDisabledTooltip}</TooltipContent>
-                    )}
-                  </Tooltip>
-                </TooltipProvider>
+                <DisabledFieldTooltip disabled={!canEditShared} tooltip={sharedDisabledTooltip}>
+                  <Input id="sl" value={sourceLanguage} onChange={(e) => setSourceLanguage(e.target.value)} onBlur={() => savePartialShared({ sourceLanguage })} disabled={!canEditShared} />
+                </DisabledFieldTooltip>
               </div>
               <div>
                 <Label htmlFor="tl">Target Language</Label>
-                <TooltipProvider delay={200}>
-                  <Tooltip>
-                    <TooltipTrigger render={<span className="block" />}>
-                      <Input id="tl" value={targetLanguage} onChange={(e) => setTargetLanguage(e.target.value)} onBlur={() => savePartialShared({ targetLanguage })} disabled={!canEditShared} />
-                    </TooltipTrigger>
-                    {sharedDisabledTooltip && (
-                      <TooltipContent>{sharedDisabledTooltip}</TooltipContent>
-                    )}
-                  </Tooltip>
-                </TooltipProvider>
+                <DisabledFieldTooltip disabled={!canEditShared} tooltip={sharedDisabledTooltip}>
+                  <Input id="tl" value={targetLanguage} onChange={(e) => setTargetLanguage(e.target.value)} onBlur={() => savePartialShared({ targetLanguage })} disabled={!canEditShared} />
+                </DisabledFieldTooltip>
               </div>
             </div>
           </CardContent>
@@ -310,25 +296,18 @@ export function ProjectSettings() {
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-3">
-            <TooltipProvider delay={200}>
-              <Tooltip>
-                <TooltipTrigger render={<span className="block" />}>
-                  <textarea
-                    id="sp"
-                    value={systemPrompt}
-                    onChange={(e) => setSystemPrompt(e.target.value)}
-                    onBlur={() => savePartialShared({ systemPrompt })}
-                    rows={6}
-                    disabled={!canEditShared}
-                    className="w-full rounded border bg-background px-3 py-2 font-mono text-sm disabled:cursor-not-allowed disabled:opacity-50"
-                    placeholder={DEFAULT_SYSTEM_PROMPT}
-                  />
-                </TooltipTrigger>
-                {sharedDisabledTooltip && (
-                  <TooltipContent>{sharedDisabledTooltip}</TooltipContent>
-                )}
-              </Tooltip>
-            </TooltipProvider>
+            <DisabledFieldTooltip disabled={!canEditShared} tooltip={sharedDisabledTooltip}>
+              <textarea
+                id="sp"
+                value={systemPrompt}
+                onChange={(e) => setSystemPrompt(e.target.value)}
+                onBlur={() => savePartialShared({ systemPrompt })}
+                rows={6}
+                disabled={!canEditShared}
+                className="w-full rounded border bg-background px-3 py-2 font-mono text-sm disabled:cursor-not-allowed disabled:opacity-50"
+                placeholder={DEFAULT_SYSTEM_PROMPT}
+              />
+            </DisabledFieldTooltip>
             <p className="text-xs text-muted-foreground">
               Describe what this project is producing and how translations should read — the AI uses this on every
               completion. Use <code className="rounded bg-muted px-1">{"{sourceLanguage}"}</code> and{" "}

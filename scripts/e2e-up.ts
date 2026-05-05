@@ -181,6 +181,21 @@ async function main(): Promise<void> {
     )
   }
 
+  const codexPatchesDir = path.join(SYNC_WORKER_DIR, "codex-db-patches")
+  if (existsSync(codexPatchesDir)) {
+    const codexPatches = readdirSync(codexPatchesDir)
+      .filter((f) => f.endsWith(".sql"))
+      .sort()
+    for (const p of codexPatches) {
+      await runOnce(
+        "npx",
+        ["wrangler", "d1", "execute", "codex-db", "--local", `--file=${path.join(codexPatchesDir, p)}`],
+        SYNC_WORKER_DIR,
+        "migrations",
+      )
+    }
+  }
+
   // 3. Boot frontier-server
   console.log(`[boot 4/8] starting frontier-server on :${FRONTIER_PORT}…`)
   const frontier: SpawnedWorker = await spawnWranglerDev({

@@ -1,10 +1,8 @@
 // Tests for dispatchEvent.
 //
 // Verifies that the dispatcher routes implemented kinds to handlers and
-// returns 501 for kinds not yet implemented. The exhaustiveness
-// check in dispatch.ts (the `default: never` branch) ensures that any new
-// EventKind added to types.ts will trigger a TypeScript compile error until
-// a case is added to dispatchEvent.
+// returns 400 only for unknown runtime kinds. Audit-only kinds (thread.*,
+// cell.metadata.set) return ok with an events-table insert.
 
 import { describe, it, expect } from 'vitest'
 import { dispatchEvent } from '../events/dispatch'
@@ -123,34 +121,35 @@ describe('dispatchEvent', () => {
     expect(outcome.result.eventFrame.kind).toBe('cell.unvalidate')
   })
 
-  it('thread.add returns { ok: false, status: 501 }', async () => {
+  it('thread.add returns { ok: true } with events-only projection', async () => {
     const db = makeNoOpD1()
     const authed = await makeAuthorized('thread.add')
     const outcome = dispatchEvent(db, authed, Date.now())
-    expect(outcome.ok).toBe(false)
-    if (outcome.ok) throw new Error('expected not ok')
-    expect(outcome.status).toBe(501)
-    expect(outcome.reason).toContain('thread.add')
+    expect(outcome.ok).toBe(true)
+    if (!outcome.ok) throw new Error('expected ok')
+    expect(outcome.result.stmts.length).toBe(1)
+    expect(outcome.result.dirtyTables).toEqual(['events'])
+    expect(outcome.result.eventFrame.kind).toBe('thread.add')
   })
 
-  it('thread.resolve returns { ok: false, status: 501 }', async () => {
+  it('thread.resolve returns { ok: true } with events-only projection', async () => {
     const db = makeNoOpD1()
     const authed = await makeAuthorized('thread.resolve')
     const outcome = dispatchEvent(db, authed, Date.now())
-    expect(outcome.ok).toBe(false)
-    if (outcome.ok) throw new Error('expected not ok')
-    expect(outcome.status).toBe(501)
-    expect(outcome.reason).toContain('thread.resolve')
+    expect(outcome.ok).toBe(true)
+    if (!outcome.ok) throw new Error('expected ok')
+    expect(outcome.result.stmts.length).toBe(1)
+    expect(outcome.result.eventFrame.kind).toBe('thread.resolve')
   })
 
-  it('cell.metadata.set returns { ok: false, status: 501 }', async () => {
+  it('cell.metadata.set returns { ok: true } with events-only projection', async () => {
     const db = makeNoOpD1()
     const authed = await makeAuthorized('cell.metadata.set')
     const outcome = dispatchEvent(db, authed, Date.now())
-    expect(outcome.ok).toBe(false)
-    if (outcome.ok) throw new Error('expected not ok')
-    expect(outcome.status).toBe(501)
-    expect(outcome.reason).toContain('cell.metadata.set')
+    expect(outcome.ok).toBe(true)
+    if (!outcome.ok) throw new Error('expected ok')
+    expect(outcome.result.stmts.length).toBe(1)
+    expect(outcome.result.eventFrame.kind).toBe('cell.metadata.set')
   })
 
   it('the caller does not need to know about specific kinds — dispatcher is the single mapping point', async () => {

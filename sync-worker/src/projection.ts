@@ -276,8 +276,8 @@ export async function writeProjection(
   const cellStmt = db.prepare(
     `INSERT INTO cells (
       file_id, cell_id, content_text, content_hash, validated, word_count,
-      last_editor, last_edit_at, projected_from
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      last_editor, last_edit_at, projected_from, edit_count
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
     ON CONFLICT(file_id, cell_id) DO UPDATE SET
       content_text = excluded.content_text,
       content_hash = excluded.content_hash,
@@ -285,7 +285,8 @@ export async function writeProjection(
       word_count = excluded.word_count,
       last_editor = excluded.last_editor,
       last_edit_at = excluded.last_edit_at,
-      projected_from = excluded.projected_from
+      projected_from = excluded.projected_from,
+      edit_count = cells.edit_count
     WHERE excluded.last_edit_at > cells.last_edit_at`
   )
   for (const c of result.cells) {

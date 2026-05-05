@@ -28,7 +28,9 @@ import {
 } from "./project-archive"
 import { handleRebuildProjectionRequest } from "./events/rebuild"
 import { handleEventsWriteRequest } from "./events/route"
+import { handleEventsReadRequest } from "./events/read-route"
 import { notifyFileDo } from "./archive-broadcast"
+import { parseRealtimeMessage } from "./events/realtime"
 import { encodeNextTail } from "./incremental"
 
 const ROLE_HEADER = "X-Codex-Role"
@@ -310,6 +312,25 @@ export class FileSync extends YServer {
       this.applyArchiveMarker(marker)
       return Response.json({ ok: true })
     }
+    if (request.method === "POST" && url.pathname === "/__broadcast") {
+      const auth = request.headers.get("Authorization") ?? ""
+      const expected = this.env.SYNC_SECRET_KEY
+        ? `Bearer ${this.env.SYNC_SECRET_KEY}`
+        : null
+      if (!expected || auth !== expected) {
+        return new Response("unauthorized", { status: 401 })
+      }
+      const body = await request.text()
+      // Validate as a RealtimeMessage before broadcasting (defense in depth).
+      const parsed = parseRealtimeMessage(body)
+      if (!parsed) {
+        return new Response("invalid realtime message", { status: 400 })
+      }
+      // Broadcast to all WS connections in this room. partyserver's Server
+      // has a `broadcast(message, exclude?)` method that sends to all peers.
+      this.broadcast(body)
+      return Response.json({ ok: true })
+    }
     return new Response("not found", { status: 404 })
   }
 
@@ -521,6 +542,8 @@ export default {
     if (compactDocResponse) return compactDocResponse
     const adminResponse = await handleAdminRequest(request, env)
     if (adminResponse) return adminResponse
+    const eventsReadResponse = await handleEventsReadRequest(request, env)
+    if (eventsReadResponse) return eventsReadResponse
     const eventsWriteResponse = await handleEventsWriteRequest(request, env)
     if (eventsWriteResponse) return eventsWriteResponse
 

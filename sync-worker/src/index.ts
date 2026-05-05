@@ -26,6 +26,7 @@ import {
   readArchiveMarker,
   type ArchiveMarker,
 } from "./project-archive"
+import { handleRebuildProjectionRequest } from "./events/rebuild"
 import { notifyFileDo } from "./archive-broadcast"
 import { encodeNextTail } from "./incremental"
 
@@ -513,6 +514,8 @@ export default {
     // doesn't try to treat /admin/... as a party name.
     const projectArchiveResponse = await handleProjectArchiveRequest(request, env, notifyFileDo)
     if (projectArchiveResponse) return projectArchiveResponse
+    const rebuildResponse = await handleRebuildProjectionRequest(request, env)
+    if (rebuildResponse) return rebuildResponse
     const compactDocResponse = await handleCompactDocRequest(request, env)
     if (compactDocResponse) return compactDocResponse
     const adminResponse = await handleAdminRequest(request, env)

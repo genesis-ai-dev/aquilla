@@ -105,9 +105,13 @@ export function validateCell(doc: Y.Doc, cellId: string, username: string): void
   const frag = cell.get("translatedXml") as Y.XmlFragment | undefined
   const translated = frag ? getPlainText(frag) : ((cell.get("translated") as string) || "")
   if (!translated.trim()) return
-  // Commits to the session log AND auto-validates the current user.
+  // Two-step: ensure a value-edit exists in the ledger, then explicitly
+  // validate it. commitCellEdit no longer auto-validates — validation is
+  // strictly an explicit, button-triggered action.
   commitCellEdit(doc, cellId, username, ["value"], translated, "human")
-  // Keep the keystroke log entry for TipTap/audit.
+  toggleCellEditsValidation(doc, cellId, username, true)
+  // Keep the history log entry for TipTap/audit; this is a deliberate
+  // validation, so validated:true here mirrors the cell.edits state.
   appendCellHistory(doc, cellId, { value: translated, source: "human", author: username, validated: true })
 }
 

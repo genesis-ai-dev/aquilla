@@ -14,7 +14,7 @@ describe("commitCellEdit", () => {
   beforeEach(() => { vi.useFakeTimers(); vi.setSystemTime(new Date(2026, 3, 20, 10, 0, 0)) })
   afterEach(() => { vi.useRealTimers() })
 
-  it("appends a new entry on the first commit", () => {
+  it("appends a new entry on the first commit (validation is NOT auto-seeded)", () => {
     const { doc, cell } = setupDoc()
     commitCellEdit(doc, "c1", "alice", ["value"], "hello", "human")
     const arr = getEditsArray(cell)
@@ -23,7 +23,9 @@ describe("commitCellEdit", () => {
     expect(snap.authors).toEqual(["alice"])
     expect(snap.value).toBe("hello")
     expect(snap.type).toBe("user-edit")
-    expect(snap.validatedBy.map(v => v.username)).toEqual(["alice"])
+    // Validation is a deliberate user action via toggleCellValidation, not a
+    // side effect of editing. commitCellEdit only records the edit ledger.
+    expect(snap.validatedBy).toEqual([])
   })
 
   it("updates the last entry in place for same author within 5 min", () => {
@@ -72,7 +74,7 @@ describe("commitCellEdit", () => {
     expect(snap2.validatedBy).toEqual([])
   })
 
-  it("extends a same-window session with a second author and auto-validates them", () => {
+  it("extends a same-window session with a second author (validators stay empty)", () => {
     const { doc, cell } = setupDoc()
     commitCellEdit(doc, "c1", "alice", ["value"], "hi", "human")
     vi.advanceTimersByTime(60_000)
@@ -81,7 +83,7 @@ describe("commitCellEdit", () => {
     expect(arr.length).toBe(1)
     const snap = snapshotEntry(arr.get(0))
     expect(snap.authors).toEqual(["alice", "bob"])
-    expect(snap.validatedBy.map(v => v.username).sort()).toEqual(["alice", "bob"])
+    expect(snap.validatedBy).toEqual([])
   })
 
   it("LLM commit does not seed validatedBy", () => {
@@ -93,7 +95,7 @@ describe("commitCellEdit", () => {
     expect(snap.validatedBy).toEqual([])
   })
 
-  it("user commit after LLM entry appends a new entry and auto-validates the user", () => {
+  it("user commit after LLM entry appends a new entry without auto-validating", () => {
     const { doc, cell } = setupDoc()
     commitCellEdit(doc, "c1", "llm-bot", ["value"], "draft", "llm")
     vi.advanceTimersByTime(60_000)
@@ -102,7 +104,7 @@ describe("commitCellEdit", () => {
     expect(arr.length).toBe(2)
     const snap2 = snapshotEntry(arr.get(1))
     expect(snap2.authors).toEqual(["alice"])
-    expect(snap2.validatedBy.map(v => v.username)).toEqual(["alice"])
+    expect(snap2.validatedBy).toEqual([])
   })
 
   it("no-op when cellId is missing", () => {

@@ -18,6 +18,7 @@ describe("toggleCellValidation", () => {
   it("adds a second validator (bob) on alice's edit", () => {
     const { doc, cell } = setupDoc()
     commitCellEdit(doc, "c1", "alice", ["value"], "hi", "human")
+    toggleCellValidation(doc, "c1", "alice", true)
     vi.advanceTimersByTime(60_000)
     toggleCellValidation(doc, "c1", "bob", true)
     const snap = snapshotEntry(getEditsArray(cell).get(0))
@@ -27,6 +28,7 @@ describe("toggleCellValidation", () => {
   it("soft-deletes a validator (isDeleted true, entry preserved)", () => {
     const { doc, cell } = setupDoc()
     commitCellEdit(doc, "c1", "alice", ["value"], "hi", "human")
+    toggleCellValidation(doc, "c1", "alice", true)
     vi.advanceTimersByTime(60_000)
     toggleCellValidation(doc, "c1", "alice", false)
     const snap = snapshotEntry(getEditsArray(cell).get(0))
@@ -38,6 +40,7 @@ describe("toggleCellValidation", () => {
   it("re-validates a soft-deleted validator (isDeleted false)", () => {
     const { doc, cell } = setupDoc()
     commitCellEdit(doc, "c1", "alice", ["value"], "hi", "human")
+    toggleCellValidation(doc, "c1", "alice", true)
     vi.advanceTimersByTime(60_000)
     toggleCellValidation(doc, "c1", "alice", false)
     vi.advanceTimersByTime(60_000)
@@ -49,6 +52,7 @@ describe("toggleCellValidation", () => {
   it("targets the latest value-edit, ignoring a later metadata-edit", () => {
     const { doc, cell } = setupDoc()
     commitCellEdit(doc, "c1", "alice", ["value"], "hi", "human")
+    toggleCellValidation(doc, "c1", "alice", true)
     vi.advanceTimersByTime(6 * 60_000)
     commitCellEdit(doc, "c1", "alice", ["metadata", "cellLabel"], "Gen 1:1", "human")
     vi.advanceTimersByTime(60_000)

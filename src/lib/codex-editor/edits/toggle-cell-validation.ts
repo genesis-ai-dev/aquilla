@@ -16,6 +16,8 @@ import { enqueueCellValidateToggle } from "@/lib/sync/cqrs-bridge"
  */
 export function toggleCellValidation(
   doc: Y.Doc, cellId: string, username: string, validate: boolean,
+  /** See commit-cell-edit.ts for fileIdOverride rationale. */
+  fileIdOverride?: string,
 ): void {
   const cellsMap = doc.getMap("cells")
   const cell = cellsMap.get(cellId) as Y.Map<unknown> | undefined
@@ -36,6 +38,6 @@ export function toggleCellValidation(
     else softDeleteValidator(target, username, now)
   })
   if (applied) {
-    enqueueCellValidateToggle(cellId, validate, now)
+    enqueueCellValidateToggle(cellId, validate, now, fileIdOverride)
   }
 }

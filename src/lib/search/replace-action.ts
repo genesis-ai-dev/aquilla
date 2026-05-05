@@ -121,6 +121,12 @@ export function applyReplaceToCell(
   cellId: string,
   opts: ReplaceOptions,
   username: string,
+  /**
+   * The fileId this cell belongs to. Used by the CQRS dual-write so events
+   * for cells in non-active files (cross-file batch replace) get stamped
+   * with the correct fileId rather than the editor's open file.
+   */
+  fileId?: string,
 ): ReplaceResult {
   const cells = doc.getMap("cells")
   const cell = cells.get(cellId) as Y.Map<unknown> | undefined
@@ -172,7 +178,7 @@ export function applyReplaceToCell(
     // Ledger entry (user-edit, value editMap). commitCellEdit auto-validates
     // the author. We strip that validation immediately if retainValidations
     // is false to preserve the "cleared validations" UX.
-    commitCellEdit(doc, cellId, username, ["value"], after, "human")
+    commitCellEdit(doc, cellId, username, ["value"], after, "human", fileId)
     appendCellHistory(doc, cellId, {
       value: after,
       source: "human",
@@ -180,9 +186,9 @@ export function applyReplaceToCell(
       validated: false,
     }, { skipCqrs: true })
     if (opts.retainValidations === false) {
-      toggleCellValidation(doc, cellId, username, false)
+      toggleCellValidation(doc, cellId, username, false, fileId)
     }
-    return { fileId: "", cellId, success: true, before, after }
+    return { fileId: fileId ?? "", cellId, success: true, before, after }
   } catch (err) {
     return {
       fileId: "",
@@ -230,7 +236,7 @@ export async function applyReplaceBatch(
         })
       }
       for (const cellId of cellIds) {
-        const res = applyReplaceToCell(doc, cellId, opts, username)
+        const res = applyReplaceToCell(doc, cellId, opts, username, fileId)
         out.push({ ...res, fileId })
         done++
         onProgress?.(done, total)

@@ -5,11 +5,15 @@ import type { CellData } from "./useCells"
 import type { TranslationRule, RulePenalties, HealthConfig, CellHealthBreakdown, RuleInfraction } from "@/lib/parsers/types"
 import { HEALTH_DEFAULTS } from "@/lib/health/defaults"
 import { perfMark } from "@/lib/perf-log"
+import type { CellAuditStats } from "./useCellsAuditStats"
 
 interface HealthDispatchOptions {
   composite: boolean
   compositeConfig?: HealthConfig
   requiredValidations?: number
+  /** D1-backed per-cell audit stats, passed through to useCompositeHealth for
+   *  richer change-detection. Optional — falls back to Y.Doc history.length. */
+  auditStats?: Map<string, CellAuditStats>
 }
 
 // ---------------------------------------------------------------------------
@@ -176,6 +180,7 @@ export function useHealth(
     rules,
     config: options.compositeConfig ?? HEALTH_DEFAULTS,
     requiredValidations: options.requiredValidations ?? 1,
+    auditStats: options.auditStats,
   })
 
   // Auxiliary stats that the composite worker doesn't produce (file progress,

@@ -4,10 +4,15 @@ import { Button } from "@/components/ui/button"
 import type { CellData } from "@/hooks/useCells"
 import type { CellHistoryEntry } from "@/lib/parsers/types"
 import { cn } from "@/lib/utils"
+import { useCellEditHistory } from "@/hooks/useCellEditHistory"
 
 interface HistoryDrawerProps {
   cell: CellData
   onClose: () => void
+  /** File the cell belongs to — required to fetch D1 audit history. */
+  fileId?: string | null
+  /** Fetches a file-scoped sync token (same as Phase 2 outbox flusher). */
+  getTokenForFile?: (fileId: string) => Promise<string | null>
 }
 
 interface EntryGroup {
@@ -92,8 +97,25 @@ function commonSuffixLength(a: string, b: string, prefixLen: number): number {
   return i
 }
 
-export function HistoryDrawer({ cell, onClose }: HistoryDrawerProps) {
-  const history = cell.history || []
+export function HistoryDrawer({ cell, onClose, fileId, getTokenForFile }: HistoryDrawerProps) {
+  const enabled = !!fileId && !!getTokenForFile
+  const {
+    history: d1History,
+    isLoading: d1Loading,
+    isError: d1Error,
+  } = useCellEditHistory({
+    enabled,
+    fileId: fileId ?? null,
+    cellId: cell.id,
+    getTokenForFile: getTokenForFile ?? (() => Promise.resolve(null)),
+  })
+
+  // Prefer D1 history when available; fall back to Y.Doc history when D1 is
+  // loading, errored, or returned no entries (cell may not have D1 records yet).
+  const history = enabled && !d1Loading && !d1Error && d1History.length > 0
+    ? d1History
+    : cell.history || []
+
   const groups = groupHistory(history).slice().reverse() // most recent group first
   const hiddenCount = history.length - groups.length
 

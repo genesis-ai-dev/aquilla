@@ -7,12 +7,11 @@
  * Key scenarios:
  *   - Empty outbox / no token: does not call fetch
  *   - Happy path: all events accepted, removed from outbox
- *   - Partial accept: rejected events remain in outbox
+ *   - Partial accept: permanent validation rejects are dropped from outbox
  *   - Network throw / non-2xx: networkError=true, outbox unchanged
- *   - Auth failure (DOCUMENTED QA GAP): 401 is indistinguishable from transient
- *     network errors — events stay in outbox and networkError=true
+ *   - Auth failures stay in outbox so a fresh token / restored role can retry
  *   - Per-file batching: only oldest-file events are sent per call
- *   - Records without fileId: silent no-op
+ *   - Records without fileId: dropped from outbox
  *   - Body parse failure: treated as network error
  */
 
@@ -136,7 +135,7 @@ describe("flushOutboxBatch", () => {
 
   // -- Partial accept --------------------------------------------------------
 
-  it("removes only accepted events; rejected events remain in outbox", async () => {
+  it("removes accepted events and permanent 400 rejected events", async () => {
     await enqueueOutboxEvent(makeEvent("e1", "f1"))
     await enqueueOutboxEvent(makeEvent("e2", "f1"))
     await enqueueOutboxEvent(makeEvent("e3", "f1"))
@@ -156,7 +155,29 @@ describe("flushOutboxBatch", () => {
     })
 
     expect(result).toEqual({ posted: 3, accepted: 1, networkError: false })
-    // e2 and e3 must still be in the outbox for retry
+    expect(await outboxPendingCount()).toBe(0)
+  })
+
+  it("keeps per-event 401 and 403 rejects in the outbox for auth retry", async () => {
+    await enqueueOutboxEvent(makeEvent("e1", "f1"))
+    await enqueueOutboxEvent(makeEvent("e2", "f1"))
+    await enqueueOutboxEvent(makeEvent("e3", "f1"))
+
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse({
+        accepted: [{ id: "e1" }],
+        rejected: [
+          { id: "e2", status: 401, reason: "token expired" },
+          { id: "e3", status: 403, reason: "role too low for cell.commit" },
+        ],
+      }),
+    )
+    const result = await flushOutboxBatch({
+      getTokenForFile: TOKEN_FN,
+      fetchImpl: fetchMock as unknown as typeof fetch,
+    })
+
+    expect(result).toEqual({ posted: 3, accepted: 1, networkError: false })
     expect(await outboxPendingCount()).toBe(2)
   })
 
@@ -194,17 +215,11 @@ describe("flushOutboxBatch", () => {
     expect(await outboxPendingCount()).toBe(3)
   })
 
-  // -- Auth failure: QA gap documented ---------------------------------------
+  // -- Auth failure ----------------------------------------------------------
 
   it(
-    "AUTH FAILURE (QA GAP — currently INDISTINGUISHABLE from transient network error): " +
-      "fetch returns 401 → networkError:true, events stay in outbox for retry; " +
-      "follow-up needed to distinguish permanent auth failures from transient ones",
+    "fetch returns 401 → networkError:true and events stay in outbox for retry",
     async () => {
-      // QA review flagged: both 401/403 and transient network errors go through
-      // the same code path (!res.ok → networkError:true). This means a bad token
-      // will keep events stuck in the outbox indefinitely (with backoff) instead
-      // of surfacing as a distinct auth error. This test documents that behavior.
       await enqueueOutboxEvent(makeEvent("e1", "f1"))
 
       const fetchMock = vi.fn().mockResolvedValue(new Response("Unauthorized", { status: 401 }))
@@ -296,7 +311,7 @@ describe("flushOutboxBatch", () => {
 
   // -- Records without fileId ------------------------------------------------
 
-  it("returns { posted:0, accepted:0, networkError:false } and does not call fetch for records without fileId", async () => {
+  it("drops records without fileId so they cannot poison the outbox", async () => {
     // An event with no fileId ends up as the only / first record
     const noFileEvent = makeEvent("no-file", undefined)
     await enqueueOutboxEvent(noFileEvent)
@@ -309,6 +324,7 @@ describe("flushOutboxBatch", () => {
 
     expect(result).toEqual({ posted: 0, accepted: 0, networkError: false })
     expect(fetchMock).not.toHaveBeenCalled()
+    expect(await outboxPendingCount()).toBe(0)
   })
 
   // -- Body parse failure ----------------------------------------------------

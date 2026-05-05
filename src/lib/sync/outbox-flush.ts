@@ -52,6 +52,7 @@ export async function flushOutboxBatch(deps: FlushDeps): Promise<{
   const batch = groupOldestFileFirst(records)
   const fileId = batch[0].event.fileId
   if (!fileId) {
+    await removeOutboxEvents([batch[0].id])
     return { posted: 0, accepted: 0, networkError: false }
   }
   const token = await deps.getTokenForFile(fileId)
@@ -86,8 +87,12 @@ export async function flushOutboxBatch(deps: FlushDeps): Promise<{
   }
 
   const acceptedIds = (body.accepted ?? []).map((a) => a.id)
-  if (acceptedIds.length > 0) {
-    await removeOutboxEvents(acceptedIds)
+  const permanentlyRejectedIds = (body.rejected ?? [])
+    .filter((r) => r.status >= 400 && r.status < 500 && r.status !== 401 && r.status !== 403)
+    .map((r) => r.id)
+  const removableIds = [...new Set([...acceptedIds, ...permanentlyRejectedIds])]
+  if (removableIds.length > 0) {
+    await removeOutboxEvents(removableIds)
   }
 
   return {

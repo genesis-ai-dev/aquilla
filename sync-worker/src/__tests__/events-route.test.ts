@@ -3,7 +3,16 @@
 // Uses the shared in-memory D1 fake from __tests__/helpers/d1-fake.ts and
 // the JWT signing pattern from authorize.test.ts.
 
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
+
+// route.ts now imports broadcast.ts → partyserver (cloudflare: URL).
+// Mock partyserver so Node's ESM loader doesn't choke on cloudflare: imports.
+vi.mock('partyserver', () => ({
+  getServerByName: vi.fn().mockResolvedValue({
+    fetch: vi.fn().mockResolvedValue(new Response(JSON.stringify({ ok: true }), { status: 200 })),
+  }),
+}))
+
 import { handleEventsWriteRequest } from '../events/route'
 import { makeInMemoryD1 } from './helpers/d1-fake'
 import { makeTestToken } from './helpers/auth'

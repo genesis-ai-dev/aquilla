@@ -56,6 +56,7 @@ import {
   synthAllInFile, transcribeAllInFile,
 } from "@/lib/audio/bulk-audio"
 import { eagerlyPrefetchPeaks } from "@/lib/audio/eager-peaks"
+import { useAutoSync } from "@/hooks/useAutoSync"
 import { useOutboxFlusher } from "@/hooks/useOutboxFlusher"
 import {
   setCqrsOutboxBridge,

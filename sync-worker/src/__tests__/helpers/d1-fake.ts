@@ -85,7 +85,41 @@ export function makeInMemoryD1(tables: Partial<Tables> = {}): InMemoryD1 {
   function execSql(sql: string, args: unknown[]): unknown[] {
     const normalized = sql.replace(/\s+/g, ' ').trim()
 
-    // ── SELECT events ──────────────────────────────────────────────────────
+    // ── SELECT events (audit log read — GET /events) ───────────────────────
+    // Handles the parameterized query from read-route.ts:
+    //   SELECT id, schema_version, ... FROM events
+    //   WHERE project_id = ? AND file_id = ?
+    //   [AND cell_id = ?] [AND server_ts < ?]
+    //   ORDER BY server_ts DESC LIMIT ?
+    if (/^SELECT id, schema_version/.test(normalized)) {
+      // args: projectId, fileId, [cellId], [before], limit
+      // Parse them out by walking the WHERE clause binds.
+      let argIdx = 0
+      const pid = args[argIdx++] as string
+      const fid = args[argIdx++] as string
+
+      // Check for optional AND clauses.
+      const hasCellId = normalized.includes('AND cell_id = ?')
+      const hasBefore = normalized.includes('AND server_ts < ?')
+      const cellId = hasCellId ? (args[argIdx++] as string) : null
+      const before = hasBefore ? (args[argIdx++] as number) : null
+      const limit = args[argIdx] as number
+
+      let rows = db.events.filter((e) => {
+        if (e.project_id !== pid) return false
+        if (e.file_id !== fid) return false
+        if (cellId !== null && e.cell_id !== cellId) return false
+        if (before !== null && e.server_ts >= before) return false
+        return true
+      })
+      // ORDER BY server_ts DESC
+      rows = rows.sort((a, b) => b.server_ts - a.server_ts)
+      // LIMIT
+      rows = rows.slice(0, limit)
+      return rows
+    }
+
+    // ── SELECT events (legacy — project-level SELECT * pattern) ───────────
     if (/^SELECT \* FROM events WHERE project_id = \?/.test(normalized)) {
       const pid = args[0] as string
       return db.events

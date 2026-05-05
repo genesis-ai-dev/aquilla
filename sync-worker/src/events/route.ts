@@ -15,6 +15,8 @@ import type { RawEvent } from './types'
 import type { RealtimeMessage, ProjectionTable } from './realtime'
 import { authorize } from './authorize'
 import { dispatchEvent } from './dispatch'
+import { broadcastRealtime } from './broadcast'
+import type { BroadcastEnv } from './broadcast'
 
 // Cloudflare D1 max statements per db.batch() call.
 // Exceeding this limit causes D1 to throw at runtime with an unhelpful error.
@@ -23,6 +25,8 @@ const D1_BATCH_LIMIT = 100
 export interface EventsRouteEnv {
   CODEX_DB?: D1Database
   SYNC_SECRET_KEY?: string
+  /** Optional — when present, successful D1 commits broadcast Realtime frames. */
+  FileSync?: DurableObjectNamespace
 }
 
 interface AcceptedEntry {
@@ -133,11 +137,16 @@ export async function handleEventsWriteRequest(
   }
   const pendingEntries: PendingEntry[] = []
 
-  // TODO(Task B): accumulate eventFrames for Realtime broadcast after D1 commit.
-  // When Task B is implemented, hook into this array to fan out
-  // projection.dirty messages to all room participants for each dirty file.
+  // Accumulate eventFrames and dirty table sets for Realtime broadcast after
+  // D1 commit. Broadcast is non-fatal — clients poll as a safety net.
   const pendingEventFrames: Array<Extract<RealtimeMessage, { t: 'event' }>> = []
-  const pendingDirtyTables: Set<ProjectionTable> = new Set()
+  // Track dirty tables per (project, file) scope for projection.dirty fan-out.
+  interface DirtyEntry {
+    project: string
+    file: string
+    tables: Set<ProjectionTable>
+  }
+  const pendingDirtyEntries: DirtyEntry[] = []
 
   for (const rawEvent of rawEvents) {
     // Authorize each event independently.
@@ -169,8 +178,14 @@ export async function handleEventsWriteRequest(
     }
     pendingEntries.push({ id: rawEvent.id, stmtCount: pendingStmts.length - stmtsBefore })
     pendingEventFrames.push(outcome.result.eventFrame)
-    for (const table of outcome.result.dirtyTables) {
-      pendingDirtyTables.add(table)
+    // Accumulate dirty tables keyed by (project, file) scope.
+    const frame = outcome.result.eventFrame
+    if (frame.file) {
+      pendingDirtyEntries.push({
+        project: frame.project,
+        file: frame.file,
+        tables: new Set(outcome.result.dirtyTables),
+      })
     }
   }
 
@@ -213,6 +228,46 @@ export async function handleEventsWriteRequest(
     // including duplicates — e.g. same event submitted twice in one request).
     for (const entry of pendingEntries) {
       accepted.push({ id: entry.id })
+    }
+
+    // Broadcast event frames then projection.dirty messages — non-fatal.
+    // Only attempt broadcast if FileSync is available (it won't be in
+    // envs that have CODEX_DB but no FileSync binding).
+    if (env.FileSync && env.SYNC_SECRET_KEY) {
+      const broadcastEnv: BroadcastEnv = {
+        FileSync: env.FileSync,
+        SYNC_SECRET_KEY: env.SYNC_SECRET_KEY,
+      }
+
+      // Coalesce dirty tables per (project, file) before broadcast.
+      const dirtyByScope = new Map<string, { project: string; file: string; tables: Set<ProjectionTable> }>()
+      for (const entry of pendingDirtyEntries) {
+        const key = `${entry.project}|${entry.file}`
+        const existing = dirtyByScope.get(key)
+        if (existing) {
+          for (const t of entry.tables) existing.tables.add(t)
+        } else {
+          dirtyByScope.set(key, { project: entry.project, file: entry.file, tables: new Set(entry.tables) })
+        }
+      }
+
+      // Fan out all event frames and coalesced projection.dirty messages in
+      // parallel. broadcastRealtime is non-throwing so Promise.all is safe.
+      const broadcasts: Promise<void>[] = []
+      for (const frame of pendingEventFrames) {
+        broadcasts.push(broadcastRealtime(broadcastEnv, frame))
+      }
+      for (const { project, file, tables } of dirtyByScope.values()) {
+        broadcasts.push(broadcastRealtime(broadcastEnv, {
+          v: 1,
+          t: 'projection.dirty',
+          project,
+          file,
+          tables: [...tables],
+        }))
+      }
+      // broadcastRealtime is non-throwing; Promise.all is safe here.
+      await Promise.all(broadcasts)
     }
   }
 

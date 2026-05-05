@@ -38,6 +38,12 @@ export function commitCellEdit(
   editMap: string[],
   value: unknown,
   source: "human" | "llm",
+  /**
+   * Cross-file callers (batch replace, parallel passages) pass the target
+   * fileId explicitly so the CQRS event isn't stamped with the bridge's
+   * active editor file. Default uses the bridge.
+   */
+  fileIdOverride?: string,
 ): void {
   const cellsMap = doc.getMap("cells")
   const cell = cellsMap.get(cellId) as Y.Map<unknown> | undefined
@@ -79,6 +85,6 @@ export function commitCellEdit(
   })
 
   if (isValueEdit) {
-    enqueueCellCommitAfterValueEdit(doc, cellId, now)
+    enqueueCellCommitAfterValueEdit(doc, cellId, now, fileIdOverride)
   }
 }

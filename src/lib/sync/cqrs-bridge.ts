@@ -72,14 +72,24 @@ function readCellSnapshot(
   return { plain: t, html: "" }
 }
 
-/** After a value edit lands in the Y.Doc, mirror it to the CQRS outbox. */
+/**
+ * After a value edit lands in the Y.Doc, mirror it to the CQRS outbox.
+ *
+ * `fileIdOverride` lets cross-file callers (batch replace, parallel passages)
+ * stamp the event with the correct fileId instead of the bridge's active
+ * editor file. Without it, events on non-active files would be misfiled
+ * in D1 — the audit trail would point at the wrong file.
+ */
 export function enqueueCellCommitAfterValueEdit(
   doc: Y.Doc,
   cellId: string,
   clientTs: number = Date.now(),
+  fileIdOverride?: string,
 ): void {
   const b = bridge
-  if (!b?.activeFileId) return
+  if (!b) return
+  const fileId = fileIdOverride ?? b.activeFileId
+  if (!fileId) return
   const snap = readCellSnapshot(doc, cellId)
   if (!snap) return
   const id = uuidv7()
@@ -89,7 +99,7 @@ export function enqueueCellCommitAfterValueEdit(
     schemaVersion: CQRS_SCHEMA_VERSION,
     kind: "cell.commit",
     projectId: b.projectId,
-    fileId: b.activeFileId,
+    fileId,
     cellId,
     author: b.username,
     payload: {
@@ -103,13 +113,20 @@ export function enqueueCellCommitAfterValueEdit(
   void enqueueOutboxEvent(event)
 }
 
+/**
+ * `fileIdOverride` — see enqueueCellCommitAfterValueEdit. Same rationale:
+ * cross-file batch operations need to stamp the correct fileId.
+ */
 export function enqueueCellValidateToggle(
   cellId: string,
   validate: boolean,
   clientTs: number = Date.now(),
+  fileIdOverride?: string,
 ): void {
   const b = bridge
-  if (!b?.activeFileId) return
+  if (!b) return
+  const fileId = fileIdOverride ?? b.activeFileId
+  if (!fileId) return
   const editEventId = lastCommitEventIdByCell.get(cellId)
   if (!editEventId) return
 
@@ -121,7 +138,7 @@ export function enqueueCellValidateToggle(
           schemaVersion: CQRS_SCHEMA_VERSION,
           kind: "cell.validate",
           projectId: b.projectId,
-          fileId: b.activeFileId,
+          fileId,
           cellId,
           author: b.username,
           payload: { editEventId },
@@ -132,7 +149,7 @@ export function enqueueCellValidateToggle(
           schemaVersion: CQRS_SCHEMA_VERSION,
           kind: "cell.unvalidate",
           projectId: b.projectId,
-          fileId: b.activeFileId,
+          fileId,
           cellId,
           author: b.username,
           payload: { editEventId },

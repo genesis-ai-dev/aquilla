@@ -79,7 +79,11 @@ export function recordHistoryEntry(
   })
 }
 
-export function validateCell(doc: Y.Doc, cellId: string, username: string): void {
+export function validateCell(
+  doc: Y.Doc, cellId: string, username: string,
+  /** See commit-cell-edit.ts for fileIdOverride rationale. */
+  fileIdOverride?: string,
+): void {
   const cellsMap = doc.getMap("cells")
   const cell = cellsMap.get(cellId) as Y.Map<unknown> | undefined
   if (!cell) return
@@ -87,12 +91,12 @@ export function validateCell(doc: Y.Doc, cellId: string, username: string): void
   const translated = frag ? getPlainText(frag) : ((cell.get("translated") as string) || "")
   if (!translated.trim()) return
   // Commits to the session log AND auto-validates the current user.
-  commitCellEdit(doc, cellId, username, ["value"], translated, "human")
+  commitCellEdit(doc, cellId, username, ["value"], translated, "human", fileIdOverride)
   // Dual-write: CQRS enqueue happens inside commitCellEdit; skip duplicate here.
   appendCellHistory(doc, cellId, {
     value: translated, source: "human", author: username, validated: true,
   }, { skipCqrs: true })
-  enqueueCellValidateToggle(cellId, true)
+  enqueueCellValidateToggle(cellId, true, undefined, fileIdOverride)
 }
 
 /**
@@ -108,6 +112,8 @@ export function validateCell(doc: Y.Doc, cellId: string, username: string): void
  */
 export function toggleCellValidation(
   doc: Y.Doc, cellId: string, username: string, validate: boolean,
+  /** See commit-cell-edit.ts for fileIdOverride rationale. */
+  fileIdOverride?: string,
 ): void {
   if (validate) {
     const cellsMap = doc.getMap("cells")
@@ -118,12 +124,12 @@ export function toggleCellValidation(
       if (!hasValueEdit) {
         // Seed a value-edit from the current translated text and validate
         // in one shot. validateCell handles the empty-text guard.
-        validateCell(doc, cellId, username)
+        validateCell(doc, cellId, username, fileIdOverride)
         return
       }
     }
   }
-  toggleCellEditsValidation(doc, cellId, username, validate)
+  toggleCellEditsValidation(doc, cellId, username, validate, fileIdOverride)
 }
 
 function arrayHasValueEdit(arr: Y.Array<Y.Map<unknown>>): boolean {

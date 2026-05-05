@@ -1,25 +1,14 @@
 import { describe, it, expect } from "vitest"
 import { sign } from "hono/jwt"
 import { authorize, AuthorizedEvent, isAuthorizedEvent } from "../events/authorize"
+import { makeTestToken } from "./helpers/auth"
 import type { RawEvent } from "../events/types"
 import type { SyncTokenClaims } from "../auth"
 
 const SECRET = "test-secret"
 
-const now = Math.floor(Date.now() / 1000)
-
 async function makeToken(partial: Partial<SyncTokenClaims> = {}): Promise<string> {
-  const claims: SyncTokenClaims = {
-    userId: 1,
-    projectId: "proj-a",
-    fileId: "file-x",
-    role: 400,
-    aud: "sync",
-    iat: now,
-    exp: now + 900,
-    ...partial,
-  }
-  return sign(claims as unknown as Record<string, unknown>, SECRET, "HS256")
+  return makeTestToken(SECRET, { projectId: "proj-a", fileId: "file-x", ...partial })
 }
 
 function makeRawEvent<K extends "cell.commit" | "thread.add">(
@@ -60,8 +49,9 @@ describe("authorize()", () => {
 
   it("returns 401 for invalid signature", async () => {
     // Tamper with the signature by signing with a different secret
+    const ts = Math.floor(Date.now() / 1000)
     const wrongToken = await sign(
-      { userId: 1, projectId: "proj-a", fileId: "file-x", role: 400, aud: "sync", iat: now, exp: now + 900 } as Record<string, unknown>,
+      { userId: 1, projectId: "proj-a", fileId: "file-x", role: 400, aud: "sync", iat: ts, exp: ts + 900 } as Record<string, unknown>,
       "wrong-secret",
       "HS256",
     )
@@ -72,8 +62,9 @@ describe("authorize()", () => {
   })
 
   it("returns 401 for wrong audience", async () => {
+    const ts = Math.floor(Date.now() / 1000)
     const token = await sign(
-      { userId: 1, projectId: "proj-a", fileId: "file-x", role: 400, aud: "frontier", iat: now, exp: now + 900 } as Record<string, unknown>,
+      { userId: 1, projectId: "proj-a", fileId: "file-x", role: 400, aud: "frontier", iat: ts, exp: ts + 900 } as Record<string, unknown>,
       SECRET,
       "HS256",
     )

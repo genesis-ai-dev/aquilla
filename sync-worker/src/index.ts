@@ -27,6 +27,7 @@ import {
   type ArchiveMarker,
 } from "./project-archive"
 import { handleRebuildProjectionRequest } from "./events/rebuild"
+import { handleEventsWriteRequest } from "./events/route"
 import { notifyFileDo } from "./archive-broadcast"
 import { encodeNextTail } from "./incremental"
 
@@ -520,6 +521,8 @@ export default {
     if (compactDocResponse) return compactDocResponse
     const adminResponse = await handleAdminRequest(request, env)
     if (adminResponse) return adminResponse
+    const eventsWriteResponse = await handleEventsWriteRequest(request, env)
+    if (eventsWriteResponse) return eventsWriteResponse
 
     return (
       (await routePartykitRequest(request, env, {

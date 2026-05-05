@@ -52,15 +52,9 @@ export function isAuthorizedEvent<K extends EventKind = EventKind>(
  *   6. Check role level meets requiredRoleFor(event.kind) (returns 403 if too low).
  *   7. Return AuthorizedEvent on success; structured rejection on failure.
  *
- * Note on username: for Phase 0, `username` in EventClaims is taken directly
- * from `raw.author` (the client-supplied frontier username). This is a
- * temporary trust assumption — the author field is not cryptographically bound
- * to the JWT in Phase 0.
- * TODO(Phase 1): tighten this — either frontier-server adds a `username` claim
- * to the JWT payload, or sync-worker resolves it from D1 project_members using
- * `tokenClaims.userId`. Until then, any caller that supplies an `author` field
- * that doesn't match the real user is only hurting themselves (the JWT still
- * scopes access correctly via userId / role / projectId / fileId).
+ * Authorship is bound to the verified token, not `raw.author`. New Frontier
+ * sync tokens carry `username`; older tokens fall back to a stable user-id
+ * label so a client cannot spoof another user's audit identity.
  */
 export async function authorize<K extends EventKind>(
   token: string | null | undefined,
@@ -93,6 +87,10 @@ export async function authorize<K extends EventKind>(
   }
 
   const tokenClaims: SyncTokenClaims = authResult.claims
+  const tokenUsername =
+    typeof tokenClaims.username === 'string' && tokenClaims.username.trim() !== ''
+      ? tokenClaims.username
+      : `user:${tokenClaims.userId}`
 
   // Role gate: check that the token's role is sufficient for this event kind.
   if (tokenClaims.role < requiredRoleFor(raw.kind)) {
@@ -101,8 +99,7 @@ export async function authorize<K extends EventKind>(
 
   const claims: EventClaims = {
     userId: tokenClaims.userId,
-    // See TODO above — username is currently trusted from the event payload.
-    username: raw.author,
+    username: tokenUsername,
     projectId: tokenClaims.projectId,
     fileId: tokenClaims.fileId,
     roleLevel: tokenClaims.role,

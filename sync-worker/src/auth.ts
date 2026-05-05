@@ -6,6 +6,8 @@ import { verify } from "hono/jwt"
 
 export interface SyncTokenClaims {
   userId: number
+  /** Frontier username stamped by /sync-token. Older tokens may omit it. */
+  username?: string
   projectId: string
   fileId: string
   role: number

@@ -160,6 +160,28 @@ describe("authorize()", () => {
     }
   })
 
+  it("uses the token username instead of the client-supplied author", async () => {
+    const token = await makeToken({ role: 400, username: "token-alice" })
+    const raw = makeRawEvent("cell.commit", { author: "mallory" })
+    const result = await authorize(token, raw, SECRET)
+
+    expect(result.ok).toBe(true)
+    if (result.ok) {
+      expect(result.event.claims.username).toBe("token-alice")
+    }
+  })
+
+  it("falls back to user:id when an older sync token has no username claim", async () => {
+    const token = await makeToken({ role: 400, username: undefined })
+    const raw = makeRawEvent("cell.commit", { author: "mallory" })
+    const result = await authorize(token, raw, SECRET)
+
+    expect(result.ok).toBe(true)
+    if (result.ok) {
+      expect(result.event.claims.username).toBe("user:1")
+    }
+  })
+
   it("Object.assign produces a non-instanceof plain-object copy", async () => {
     // One of several forgery vectors: Object.assign copies only enumerable
     // string-keyed properties; the Symbol-keyed AUTHORIZED brand is not copied

@@ -9,6 +9,7 @@ export async function makeTestToken(
 ): Promise<string> {
   const claims: SyncTokenClaims = {
     userId: 1,
+    username: 'alice',
     projectId: 'p1',
     fileId: 'f1',
     role: 400,

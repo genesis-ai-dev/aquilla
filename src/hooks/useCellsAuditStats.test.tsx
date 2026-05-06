@@ -163,6 +163,29 @@ describe("useCellsAuditStats", () => {
     expect(global.fetch).not.toHaveBeenCalled()
   })
 
+  it("returns a stable empty-Map reference across renders before data loads", async () => {
+    // Regression: useCompositeHealth depends on this Map as a useEffect
+    // dep. A fresh `new Map()` per render reset the debounce timer every
+    // time, so projectHealth never moved off zero in the StatusBar.
+    global.fetch = vi.fn() as unknown as typeof fetch
+
+    const { result, rerender } = renderHook(
+      () =>
+        useCellsAuditStats({
+          enabled: false,
+          fileId: "file-abc",
+          getTokenForFile: TOKEN_FN,
+        }),
+      { wrapper: makeWrapper() }
+    )
+
+    const first = result.current.byCellId
+    rerender()
+    rerender()
+    const second = result.current.byCellId
+    expect(second).toBe(first)
+  })
+
   it("sends Authorization header with Bearer token", async () => {
     global.fetch = vi.fn().mockResolvedValueOnce(
       new Response(JSON.stringify({ cells: [] }), { status: 200 })

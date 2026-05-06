@@ -14,6 +14,14 @@ interface UseCellsAuditStatsOptions {
   getTokenForFile: (fileId: string) => Promise<string | null>
 }
 
+// Stable empty fallback so the `data ?? …` return doesn't allocate a new
+// Map on every render before the query resolves. Consumers (notably
+// useCompositeHealth) treat the returned Map as a useEffect dep — a fresh
+// reference each render would reset the debounce timer and prevent the
+// worker from ever firing, which manifests as projectHealth never moving
+// off zero in the StatusBar.
+const EMPTY_AUDIT_STATS = new Map<string, CellAuditStats>()
+
 /**
  * Fetches /cells/audit-stats for a file. Returns a map keyed by cellId
  * for O(1) lookup from per-cell call sites (CellActionsMenu, useCompositeHealth).
@@ -57,7 +65,7 @@ export function useCellsAuditStats(opts: UseCellsAuditStatsOptions): {
   })
 
   return {
-    byCellId: data ?? new Map(),
+    byCellId: data ?? EMPTY_AUDIT_STATS,
     isLoading,
     isError,
   }

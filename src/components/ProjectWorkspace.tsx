@@ -70,6 +70,8 @@ import { restoreProject } from "@/lib/store/project-index"
 import { AppShell } from "./AppShell"
 import { WorkspaceHeader } from "./WorkspaceHeader"
 import { VoiceBar } from "./VoiceBar"
+import { SpeakBarToggle } from "./SpeakBarToggle"
+import { setSpeakBarEnabled, useSpeakBarEnabled } from "@/lib/audio/speak-bar-pref"
 import { SelectionBar } from "./SelectionBar"
 import { WorkspaceStatusBar } from "./WorkspaceStatusBar"
 import { PrimaryActionButton } from "./PrimaryActionButton"
@@ -146,6 +148,7 @@ export function ProjectWorkspace() {
   const [aiSetupOpen, setAiSetupOpen] = useState(false)
   const [recordingCellId, setRecordingCellId] = useState<string | null>(null)
   const editorRef = useRef<EditorTableHandle>(null)
+  const speakBarEnabled = useSpeakBarEnabled(project?.id)
   const { doc, loading: docLoading } = useFileDoc(activeFileId)
   // Prefer the Frontier session username (authenticated identity) over the
   // project-level username setting. Validation entries and edit history
@@ -892,6 +895,12 @@ export function ProjectWorkspace() {
               onClick={handleJumpNextUnfinished}
               disabled={!activeFileId || !hasUnfinished}
             />
+            {project && (
+              <SpeakBarToggle
+                enabled={speakBarEnabled}
+                onToggle={() => setSpeakBarEnabled(project.id, !speakBarEnabled)}
+              />
+            )}
             <PrimaryActionButton ctx={actionCtx} run={actionArgs} />
           </WorkspaceHeader>
         }
@@ -906,16 +915,19 @@ export function ProjectWorkspace() {
             />
             {project && doc && activeFileId && (
               <>
-                <VoiceBar
-                  project={project}
-                  cells={cells}
-                  doc={doc}
-                  username={currentUsername}
-                  session={frontierSession}
-                  editorRef={editorRef}
-                  onProjectChanged={refresh}
-                  onCompleteSingle={completeSingle}
-                />
+                {speakBarEnabled && (
+                  <VoiceBar
+                    project={project}
+                    cells={cells}
+                    doc={doc}
+                    username={currentUsername}
+                    session={frontierSession}
+                    editorRef={editorRef}
+                    onProjectChanged={refresh}
+                    onCompleteSingle={completeSingle}
+                    onHide={() => setSpeakBarEnabled(project.id, false)}
+                  />
+                )}
                 <SelectionBar
                   project={project}
                   cells={cells}

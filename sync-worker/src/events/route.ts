@@ -17,6 +17,8 @@ import { authorize } from './authorize'
 import { dispatchEvent } from './dispatch'
 import { broadcastRealtime } from './broadcast'
 import type { BroadcastEnv } from './broadcast'
+import { applyEventToLiveDoc } from './apply-event'
+import type { CellCommitPayload } from './hydrate'
 
 // Cloudflare D1 max statements per db.batch() call.
 // Exceeding this limit causes D1 to throw at runtime with an unhelpful error.
@@ -168,6 +170,15 @@ export async function handleEventsWriteRequest(
     stmtCount: number
     eventFrame: Extract<RealtimeMessage, { t: 'event' }>
     dirtyEntry?: DirtyEntry
+    /** When the event is a cell.commit with a fileId, captured here so the
+     *  post-commit hot-apply step can reach the live DO. Other kinds leave
+     *  this undefined and are skipped. */
+    commitForLiveDoc?: {
+      projectId: string
+      fileId: string
+      cellId: string
+      payload: CellCommitPayload
+    }
   }
   const pendingEntries: PendingEntry[] = []
 
@@ -228,12 +239,27 @@ export async function handleEventsWriteRequest(
         tables: new Set(outcome.result.dirtyTables),
       }
     }
+    let commitForLiveDoc: PendingEntry['commitForLiveDoc']
+    if (
+      rawEvent.kind === 'cell.commit' &&
+      rawEvent.fileId &&
+      rawEvent.cellId
+    ) {
+      commitForLiveDoc = {
+        projectId: rawEvent.projectId,
+        fileId: rawEvent.fileId,
+        cellId: rawEvent.cellId,
+        payload: rawEvent.payload as CellCommitPayload,
+      }
+    }
+
     pendingEntries.push({
       id: rawEvent.id,
       stmtStart: stmtsBefore,
       stmtCount: pendingStmts.length - stmtsBefore,
       eventFrame: outcome.result.eventFrame,
       dirtyEntry,
+      commitForLiveDoc,
     })
   }
 
@@ -348,7 +374,25 @@ export async function handleEventsWriteRequest(
           tables: [...tables],
         }))
       }
-      // broadcastRealtime is non-throwing; Promise.all is safe here.
+
+      // Hot-update: send each cell.commit's payload to its file's live DO so
+      // imported cells appear in any open editor without a reload. The DO
+      // applies in `new-only` mode, leaving cells already in the doc alone
+      // (their CRDT state is governed by the live editing path). De-duped
+      // by (project, file, cell): multiple commits to the same cell in one
+      // batch only need the latest one applied to the live doc.
+      const liveApplyByCell = new Map<string, NonNullable<PendingEntry['commitForLiveDoc']>>()
+      for (const entry of committedEntries) {
+        if (!entry.commitForLiveDoc) continue
+        const key = `${entry.commitForLiveDoc.projectId}|${entry.commitForLiveDoc.fileId}|${entry.commitForLiveDoc.cellId}`
+        liveApplyByCell.set(key, entry.commitForLiveDoc) // last write wins
+      }
+      for (const input of liveApplyByCell.values()) {
+        broadcasts.push(applyEventToLiveDoc(broadcastEnv, input))
+      }
+
+      // broadcastRealtime / applyEventToLiveDoc are non-throwing; Promise.all
+      // is safe here.
       await Promise.all(broadcasts)
     }
   }

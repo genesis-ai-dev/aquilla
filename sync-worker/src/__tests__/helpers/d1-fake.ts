@@ -65,6 +65,17 @@ export interface ValidatorRow {
 export interface FileRow {
   id: string
   project_id: string
+  /** Display name. Optional in fixtures so older tests (which only need
+   *  id+project_id for join-by-project queries) don't have to set it. */
+  name?: string
+  file_type?: string
+  source_language?: string | null
+  target_language?: string | null
+  cell_count?: number
+  approved_count?: number
+  word_count?: number
+  last_edit_at?: number | null
+  projected_from?: string | null
 }
 
 export type InMemoryD1 = D1Database & {
@@ -371,6 +382,43 @@ export function makeInMemoryD1(tables: Partial<Tables> = {}): InMemoryD1 {
 
     if (/^INSERT INTO cells/.test(normalized)) {
       throw new Error(`d1-fake: unhandled INSERT INTO cells SQL: ${normalized.slice(0, 160)}`)
+    }
+
+    // ── INSERT INTO files (UPSERT) — file.create handler ───────────────────
+    // VALUES bind order: id, project_id, name, file_type, source_language,
+    // target_language, projected_from. Counters/last_edit_at are SQL literals.
+    if (
+      /^INSERT INTO files \([^)]*\) VALUES \(\?, \?, \?, \?, \?, \?, 0, 0, 0, NULL, \?, unixepoch\('now'\) \* 1000\)/.test(
+        normalized,
+      )
+    ) {
+      const row: FileRow = {
+        id: args[0] as string,
+        project_id: args[1] as string,
+        name: args[2] as string,
+        file_type: args[3] as string,
+        source_language: args[4] as string | null,
+        target_language: args[5] as string | null,
+        cell_count: 0,
+        approved_count: 0,
+        word_count: 0,
+        last_edit_at: null,
+        projected_from: args[6] as string,
+      }
+      const idx = db.files.findIndex((f) => f.id === row.id)
+      if (idx === -1) {
+        db.files.push(row)
+      } else {
+        // ON CONFLICT updates only the administrative fields, leaves counters.
+        db.files[idx] = {
+          ...db.files[idx],
+          name: row.name,
+          file_type: row.file_type,
+          source_language: row.source_language,
+          target_language: row.target_language,
+        }
+      }
+      return []
     }
 
     // ── INSERT INTO cell_validators (UPSERT) ───────────────────────────────

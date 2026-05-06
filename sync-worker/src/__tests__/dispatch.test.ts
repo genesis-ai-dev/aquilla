@@ -35,6 +35,7 @@ async function makeAuthorized<K extends EventKind>(kind: K) {
     'thread.add': { threadId: 't1', content: 'a comment' },
     'thread.resolve': { threadId: 't1' },
     'cell.metadata.set': { field: 'cellLabel', value: 'v' },
+    'file.create': { name: 'Genesis', fileType: 'codex' },
   }
 
   // All kinds except project-level ones need a fileId. All our test events

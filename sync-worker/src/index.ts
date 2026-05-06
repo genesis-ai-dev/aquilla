@@ -27,7 +27,7 @@ import {
   type ArchiveMarker,
 } from "./project-archive"
 import { handleRebuildProjectionRequest } from "./events/rebuild"
-import { hydrateYDocFromEvents } from "./events/hydrate"
+import { hydrateYDocFromEvents, applyCellCommitToDoc } from "./events/hydrate"
 import { handleEventsWriteRequest } from "./events/route"
 import { handleEventsReadRequest } from "./events/read-route"
 import { handleValidatorsReadRequest } from "./events/validators-read-route"
@@ -368,6 +368,39 @@ export class FileSync extends YServer {
       // has a `broadcast(message, exclude?)` method that sends to all peers.
       this.broadcast(body)
       return Response.json({ ok: true })
+    }
+
+    // Phase 4d hot-update: events route POSTs cell.commit payloads here
+    // after the D1 batch lands so cells imported into D1 appear in any
+    // currently-open editor without a reload. Mode is `new-only` —
+    // existing cells are left alone (active-editor edits win), so this
+    // safely co-exists with the live Yjs CRDT path.
+    if (request.method === "POST" && url.pathname === "/__apply-event") {
+      const auth = request.headers.get("Authorization") ?? ""
+      const expected = this.env.SYNC_SECRET_KEY
+        ? `Bearer ${this.env.SYNC_SECRET_KEY}`
+        : null
+      if (!expected || auth !== expected) {
+        return new Response("unauthorized", { status: 401 })
+      }
+      let body: { kind?: string; cellId?: string; payload?: unknown }
+      try {
+        body = (await request.json()) as typeof body
+      } catch {
+        return new Response("bad request", { status: 400 })
+      }
+      if (body.kind !== "cell.commit") {
+        return Response.json({ ok: true, applied: false, reason: "non-commit kind" })
+      }
+      if (typeof body.cellId !== "string" || !body.payload || typeof body.payload !== "object") {
+        return new Response("bad request", { status: 400 })
+      }
+      const result = applyCellCommitToDoc(this.document, {
+        cellId: body.cellId,
+        payload: body.payload as Parameters<typeof applyCellCommitToDoc>[1]['payload'],
+        mode: "new-only",
+      })
+      return Response.json({ ok: true, ...result })
     }
     return new Response("not found", { status: 404 })
   }

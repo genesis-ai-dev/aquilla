@@ -261,6 +261,45 @@ export function buildEventProjectionStmts(
       break
     }
 
+    case 'file.create': {
+      const p = event.payload as EventPayloads['file.create']
+      if (!event.fileId) {
+        throw new Error(
+          `file.create event ${event.id} is missing fileId`,
+        )
+      }
+      // Mirror the UPSERT in handlers/file-create.ts so projection rebuild
+      // (which replays events through this function) correctly recreates
+      // file rows. Counters left at zero on first insert and untouched on
+      // conflict — cell.commit projections maintain those.
+      stmts.push(
+        db
+          .prepare(
+            `INSERT INTO files (
+              id, project_id, name, file_type, source_language, target_language,
+              cell_count, approved_count, word_count, last_edit_at, projected_from,
+              updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, 0, 0, 0, NULL, ?, unixepoch('now') * 1000)
+            ON CONFLICT(id) DO UPDATE SET
+              name = excluded.name,
+              file_type = excluded.file_type,
+              source_language = excluded.source_language,
+              target_language = excluded.target_language,
+              updated_at = unixepoch('now') * 1000`,
+          )
+          .bind(
+            event.fileId,
+            event.projectId,
+            p.name,
+            p.fileType,
+            p.sourceLanguage ?? null,
+            p.targetLanguage ?? null,
+            `event:${event.id}`,
+          ),
+      )
+      break
+    }
+
     default: {
       // Defensive exhaustiveness check. TypeScript narrows `event.kind` to
       // `never` here if all EventKind variants are handled above — a compile-

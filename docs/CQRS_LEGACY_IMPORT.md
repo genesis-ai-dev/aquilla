@@ -75,16 +75,17 @@ during hydration; subsequent commits don't re-stamp these fields. This means:
 2. After the (empty) snapshot replay, `doc.getMap("cells")` is empty, AND
 3. `CODEX_DB` is bound (production; spike/dev without D1 skip silently)
 
-Hydration is **cold-start only**. After the first user opens the project,
-the hydrated Y.Doc is persisted to R2; subsequent loads use R2 and skip
-hydration entirely. Adding new events to D1 *after* the project has been
-opened won't surface them — they need to flow through the live event path
-(client → outbox → POST /events → server broadcast → DO realtime).
+Hydration is **cold-start only** for cells that don't yet exist in the
+Y.Doc. After the first user opens the project, the hydrated Y.Doc is
+persisted to R2; subsequent loads use R2 and skip the full event replay.
 
-For "add cells to an already-opened project" use cases, prefer:
-
-- The client-side outbox (normal user edits)
-- A future admin endpoint to force-rehydrate (not yet implemented)
+For new cells imported into D1 while the project is already open,
+**hot-apply** picks up the slack: after each `POST /events` commit, the
+server pushes any cell.commit payloads to the live DO via `__apply-event`,
+which adds the cell to the open Y.Doc. The DO uses `new-only` mode so
+existing cells (which may have active edits) are left alone — additive
+imports work seamlessly, but updates to already-edited cells still need
+to flow through the live editing path or via a project close-and-reopen.
 
 ## What hydration does NOT do
 
@@ -93,12 +94,25 @@ For "add cells to an already-opened project" use cases, prefer:
   `useCellsAuditStatsWithOverlay`, not from the Y.Doc.
 - **Thread events** are skipped (Phase 4 hasn't moved threads out of Y.Doc
   yet; once it does, hydration will handle them).
-- **Rich text reconstruction**: the current implementation seeds
-  `translatedXml` as a single Y.XmlText with the plain `value`. The
-  `valueHtml` field is stored on the event but not parsed back into a
-  Y.XmlFragment with formatting. Users will see the text on first open
-  but lose inline formatting until they re-edit the cell. (Follow-up:
-  parse `valueHtml` → fragment in hydration.)
+
+### Rich text fidelity
+
+Hydration prefers `valueHtml` and parses it into a `Y.XmlFragment` with
+inline marks. Supported tags:
+
+- `<p>` paragraphs (top-level inline content auto-wraps in one)
+- `<b>` / `<strong>` → bold
+- `<i>` / `<em>` → italic
+- `<u>` → underline
+- `<s>` / `<strike>` / `<del>` → strikethrough
+- `<code>` → code
+- `<br>` → hard break inside a paragraph
+- HTML entities: `&amp;` `&lt;` `&gt;` `&quot;` `&apos;` `&#39;` `&nbsp;`
+
+Tags outside this set (e.g. `<span>`, `<a>`, `<ul>`) are dropped at the
+wrapper level — their children are kept as plain text, formatting is
+lost. If `valueHtml` is absent or fails to parse, hydration falls back
+to plain `value`.
 
 ## Required role
 
@@ -109,13 +123,35 @@ the bulk import.
 
 ## File rows
 
-Hydration only restores `cells` → Y.Doc. The `files` table row is created
-the first time the DO calls `writeProjection` (on `onSave`). For the
-project listing UI to show the imported files immediately, also INSERT
-`files` rows during import — either via a separate admin endpoint or
-directly against D1.
+Use the **`file.create`** event kind to seed `files` rows during import,
+parallel to `cell.commit`:
 
-(Future work: add a `file.create` event kind so files are also event-sourced.)
+```
+POST /events {
+  id: <UUIDv7>,
+  schemaVersion: 1,
+  kind: "file.create",
+  projectId, fileId,
+  author: "<frontier username>",
+  payload: {
+    name: "Genesis",
+    fileType: "codex",
+    sourceLanguage: "eng",
+    targetLanguage: "spa"
+  },
+  clientTs: Date.now()
+}
+```
+
+Idempotent on `events.id`. UPSERT semantics on the `files` row:
+administrative fields (name / file_type / source_language / target_language)
+are overwritten; counters (cell_count, approved_count, word_count,
+last_edit_at) are preserved so re-emitting doesn't reset rollups built
+by `cell.commit` projections.
+
+Required role: **PROJECT_LEAD (500)**. The bulk-import sync-token must
+be minted with this role. Contributors can't emit `file.create` during
+normal editing.
 
 ## Verifying an import
 

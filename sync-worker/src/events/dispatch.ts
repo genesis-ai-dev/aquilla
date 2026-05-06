@@ -11,6 +11,7 @@ import { handleCellCommit, type DispatchResult } from './handlers/cell-commit'
 import { handleCellValidate } from './handlers/cell-validate'
 import { handleCellUnvalidate } from './handlers/cell-unvalidate'
 import { handleEventsAuditOnly } from './handlers/events-audit-only'
+import { handleFileCreate } from './handlers/file-create'
 
 export type DispatchOutcome =
   | { ok: true; result: DispatchResult }
@@ -59,6 +60,12 @@ export function dispatchEvent(
       return {
         ok: true,
         result: handleEventsAuditOnly(db, authed, serverTs),
+      }
+
+    case 'file.create':
+      return {
+        ok: true,
+        result: handleFileCreate(db, authed as AuthorizedEvent<'file.create'>, serverTs),
       }
 
     default: {

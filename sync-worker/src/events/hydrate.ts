@@ -15,8 +15,9 @@
 
 import * as Y from 'yjs'
 import type { CellSeedMeta, EventKind } from './types'
+import { htmlToFragment, plainTextToFragment } from './html-to-fragment'
 
-interface CellCommitPayload {
+export interface CellCommitPayload {
   value: string
   valueHtml?: string
   prevEventId?: string
@@ -106,58 +107,11 @@ export async function hydrateYDocFromEvents(
       }
 
       const cellId = row.cell_id
-      let cell = cellsMap.get(cellId) as Y.Map<unknown> | undefined
-      const isFirstSeed = !cell && !existingCellIds.has(cellId)
-
-      if (!cell) {
-        cell = new Y.Map<unknown>()
-        cellsMap.set(cellId, cell)
-      }
-      cell.set('id', cellId)
-
-      // Apply seed metadata once per cell — first time we see it during
-      // replay. Subsequent commits don't re-stamp the same fields (they
-      // shouldn't carry `meta` anyway, but defending against client bugs
-      // here is cheap and avoids surprising overwrites).
-      if (isFirstSeed && payload.meta) {
-        const m = payload.meta
-        if (typeof m.original === 'string') cell.set('original', m.original)
-        if (typeof m.originalHtml === 'string') cell.set('originalHtml', m.originalHtml)
-        if (typeof m.context === 'string') cell.set('context', m.context)
-        if (typeof m.group === 'string') cell.set('group', m.group)
-        if (typeof m.type === 'string') cell.set('type', m.type)
-        if (m.sourceLocation && typeof m.sourceLocation === 'object') {
-          cell.set('sourceLocation', m.sourceLocation)
-        }
-        if (Array.isArray(m.globalReferences)) {
-          cell.set('globalReferences', m.globalReferences)
-        }
-        // cellLabel lives under __source.metadata for compatibility with the
-        // existing cell renderer (see useCells.buildCellData). Stamp the
-        // shape the editor already expects.
-        if (typeof m.cellLabel === 'string') {
-          cell.set('__source', { metadata: { id: cellId, cellLabel: m.cellLabel } })
-        }
-      }
-
-      // Always update translatedXml to the latest commit's value. We replace
-      // the fragment outright rather than diffing into the existing one —
-      // the imported events represent committed snapshots, not Yjs deltas.
-      const frag = new Y.XmlFragment()
-      const p = new Y.XmlElement('p')
-      // Empty string is valid (a cell can be cleared). Y.XmlText('') would
-      // throw; only insert text nodes for non-empty values.
-      if (payload.value && payload.value.length > 0) {
-        p.insert(0, [new Y.XmlText(payload.value)])
-      }
-      frag.insert(0, [p])
-      cell.set('translatedXml', frag)
-
-      if (!orderedSeen.has(cellId)) {
-        orderArr.push([cellId])
-        orderedSeen.add(cellId)
-      }
-
+      const isFirstSeed = !cellsMap.has(cellId) && !existingCellIds.has(cellId)
+      // Internal apply: caller already wraps the whole replay in a transaction,
+      // so we use `applyCellCommit` (not `applyCellCommitToDoc`) which expects
+      // to run inside an existing one.
+      applyCellCommitInTransaction(cellsMap, orderArr, orderedSeen, cellId, payload, isFirstSeed)
       cellCommitsApplied += 1
     }
   })
@@ -166,5 +120,106 @@ export async function hydrateYDocFromEvents(
     cellCount: cellsMap.size,
     eventsRead: rows.length,
     cellCommitsApplied,
+  }
+}
+
+/**
+ * Apply a single `cell.commit` payload to a Y.Doc in its own transaction.
+ *
+ * Used by the hot-update path (events route → DO) so a freshly-imported
+ * cell appears in any open editor without requiring a reload. Returns
+ * `true` when the cell was new (added to `order` + cells map), `false`
+ * when the cell already existed and the commit was treated as an
+ * update — see the `mode` parameter for control over the latter.
+ */
+export interface ApplyCellCommitInput {
+  cellId: string
+  payload: CellCommitPayload
+  /**
+   * - `'new-only'` (default): no-op when the cell already exists. Safe for
+   *   hot-applying imports without clobbering active edits.
+   * - `'overwrite'`: always update translatedXml + (re-)apply seed meta on
+   *   first occurrence. Used by hydration internally.
+   */
+  mode?: 'new-only' | 'overwrite'
+}
+
+export function applyCellCommitToDoc(
+  doc: Y.Doc,
+  input: ApplyCellCommitInput,
+): { applied: boolean; created: boolean } {
+  const cellsMap = doc.getMap('cells')
+  const orderArr = doc.getArray<string>('order')
+  const orderedSeen = new Set<string>(orderArr.toArray())
+  const mode = input.mode ?? 'new-only'
+
+  const exists = cellsMap.has(input.cellId)
+  if (mode === 'new-only' && exists) {
+    return { applied: false, created: false }
+  }
+
+  let result = { applied: false, created: false }
+  doc.transact(() => {
+    const isFirstSeed = !exists
+    applyCellCommitInTransaction(
+      cellsMap,
+      orderArr,
+      orderedSeen,
+      input.cellId,
+      input.payload,
+      isFirstSeed,
+    )
+    result = { applied: true, created: !exists }
+  })
+  return result
+}
+
+function applyCellCommitInTransaction(
+  cellsMap: Y.Map<unknown>,
+  orderArr: Y.Array<string>,
+  orderedSeen: Set<string>,
+  cellId: string,
+  payload: CellCommitPayload,
+  isFirstSeed: boolean,
+): void {
+  let cell = cellsMap.get(cellId) as Y.Map<unknown> | undefined
+  if (!cell) {
+    cell = new Y.Map<unknown>()
+    cellsMap.set(cellId, cell)
+  }
+  cell.set('id', cellId)
+
+  // Seed metadata only on first occurrence — protects against a misbehaving
+  // client that sends `meta` on a later commit, and against an accidental
+  // re-import overwriting fields the user has already adjusted.
+  if (isFirstSeed && payload.meta) {
+    const m = payload.meta
+    if (typeof m.original === 'string') cell.set('original', m.original)
+    if (typeof m.originalHtml === 'string') cell.set('originalHtml', m.originalHtml)
+    if (typeof m.context === 'string') cell.set('context', m.context)
+    if (typeof m.group === 'string') cell.set('group', m.group)
+    if (typeof m.type === 'string') cell.set('type', m.type)
+    if (m.sourceLocation && typeof m.sourceLocation === 'object') {
+      cell.set('sourceLocation', m.sourceLocation)
+    }
+    if (Array.isArray(m.globalReferences)) {
+      cell.set('globalReferences', m.globalReferences)
+    }
+    if (typeof m.cellLabel === 'string') {
+      cell.set('__source', { metadata: { id: cellId, cellLabel: m.cellLabel } })
+    }
+  }
+
+  // Prefer valueHtml so inline marks survive; fall back to plain text.
+  // Fragment is rebuilt outright — committed snapshots, not CRDT deltas.
+  const frag =
+    typeof payload.valueHtml === 'string' && payload.valueHtml.length > 0
+      ? htmlToFragment(payload.valueHtml)
+      : plainTextToFragment(payload.value ?? '')
+  cell.set('translatedXml', frag)
+
+  if (!orderedSeen.has(cellId)) {
+    orderArr.push([cellId])
+    orderedSeen.add(cellId)
   }
 }

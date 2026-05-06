@@ -23,6 +23,10 @@ export const REQUIRED_ROLE: Record<EventKind, number> = {
   'thread.add': ROLE.COMMENTER,
   'thread.resolve': ROLE.REVIEWER,
   'cell.metadata.set': ROLE.CONTRIBUTOR,
+  // file.create is a structural project change — gated to PROJECT_LEAD so
+  // contributors can't sprinkle stray file rows during normal editing. The
+  // legacy import path uses an admin sync-token with this role.
+  'file.create': ROLE.PROJECT_LEAD,
 }
 
 export function requiredRoleFor(kind: EventKind): number {

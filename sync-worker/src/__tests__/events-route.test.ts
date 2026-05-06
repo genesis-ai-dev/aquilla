@@ -571,3 +571,161 @@ describe('handleEventsWriteRequest — chunked-batch partial-success', () => {
     expect(tables.cell_validators).toHaveLength(0)
   })
 })
+
+// ── Hot-update path (Phase 4e) ────────────────────────────────────────────────
+
+describe('handleEventsWriteRequest — hot-apply to live DOs', () => {
+  it('POSTs each cell.commit payload to the DO via /__apply-event after D1 commit', async () => {
+    const partyserver = await import('partyserver')
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ ok: true, applied: true, created: true }), { status: 200 }),
+    )
+    ;(partyserver.getServerByName as any).mockResolvedValue({ fetch: fetchMock })
+
+    const token = await makeToken()
+    const event = makeCommitEvent({
+      id: 'evt-hotapply-001',
+      cellId: 'cell-import-1',
+      payload: {
+        value: 'hello',
+        valueHtml: '<p>hello</p>',
+        meta: { original: 'hola', context: 'greeting' },
+      },
+    })
+    const req = await makeRequest([event], token)
+    const db = makeInMemoryD1()
+    const res = await handleEventsWriteRequest(req, {
+      ...makeEnv(db),
+      // Any truthy value works — partyserver.getServerByName is mocked.
+      FileSync: {} as any,
+    })
+
+    expect(res?.status).toBe(200)
+
+    // The DO fetch should have been called for /__apply-event with the cell.commit payload.
+    const applyCalls = fetchMock.mock.calls.filter((c: any[]) =>
+      String(c[0]).includes('/__apply-event'),
+    )
+    expect(applyCalls).toHaveLength(1)
+    const init = applyCalls[0][1] as RequestInit
+    expect(init.method).toBe('POST')
+    const body = JSON.parse(init.body as string)
+    expect(body).toEqual({
+      kind: 'cell.commit',
+      cellId: 'cell-import-1',
+      payload: {
+        value: 'hello',
+        valueHtml: '<p>hello</p>',
+        meta: { original: 'hola', context: 'greeting' },
+      },
+    })
+  })
+
+  it('coalesces multiple commits to the same cell into one DO apply (last wins)', async () => {
+    const partyserver = await import('partyserver')
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ ok: true }), { status: 200 }),
+    )
+    ;(partyserver.getServerByName as any).mockResolvedValue({ fetch: fetchMock })
+
+    const token = await makeToken()
+    const events = [
+      makeCommitEvent({
+        id: 'evt-hotapply-coalesce-1',
+        cellId: 'cell-x',
+        payload: { value: 'first', valueHtml: '<p>first</p>' },
+      }),
+      makeCommitEvent({
+        id: 'evt-hotapply-coalesce-2',
+        cellId: 'cell-x',
+        payload: { value: 'second', valueHtml: '<p>second</p>' },
+      }),
+    ]
+    const req = await makeRequest(events, token)
+    const db = makeInMemoryD1()
+    await handleEventsWriteRequest(req, { ...makeEnv(db), FileSync: {} as any })
+
+    const applyCalls = fetchMock.mock.calls.filter((c: any[]) =>
+      String(c[0]).includes('/__apply-event'),
+    )
+    expect(applyCalls).toHaveLength(1)
+    const body = JSON.parse((applyCalls[0][1] as RequestInit).body as string)
+    expect(body.payload.value).toBe('second')
+  })
+
+  it('does not POST /__apply-event for non-cell.commit events', async () => {
+    const partyserver = await import('partyserver')
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ ok: true }), { status: 200 }),
+    )
+    ;(partyserver.getServerByName as any).mockResolvedValue({ fetch: fetchMock })
+
+    // Seed the cell + a commit event so cell.validate has a target edit.
+    const token = await makeToken()
+    const commit = makeCommitEvent({ id: 'evt-pre-commit', cellId: 'cell-y' })
+    const validate = makeValidateEvent({
+      id: 'evt-pre-validate',
+      cellId: 'cell-y',
+      payload: { editEventId: 'evt-pre-commit' },
+    })
+    const req = await makeRequest([validate], token)
+    const db = makeInMemoryD1({
+      events: [
+        {
+          id: 'evt-pre-commit',
+          schema_version: 1,
+          project_id: 'proj-a',
+          file_id: 'file-x',
+          cell_id: 'cell-y',
+          kind: 'cell.commit',
+          author: 'alice',
+          payload: JSON.stringify({ value: 'v', valueHtml: '<p>v</p>' }),
+          client_ts: 1000,
+          server_ts: 1000,
+        },
+      ],
+      cells: [
+        {
+          file_id: 'file-x',
+          cell_id: 'cell-y',
+          content_text: 'v',
+          content_hash: 'h',
+          validated: 0,
+          word_count: 1,
+          last_editor: 'alice',
+          last_edit_at: 1000,
+          projected_from: 'event:evt-pre-commit',
+          edit_count: 1,
+        },
+      ],
+    })
+    await handleEventsWriteRequest(req, { ...makeEnv(db), FileSync: {} as any })
+
+    // The validate event should NOT have triggered an apply; only broadcasts fire.
+    const applyCalls = fetchMock.mock.calls.filter((c: any[]) =>
+      String(c[0]).includes('/__apply-event'),
+    )
+    expect(applyCalls).toHaveLength(0)
+
+    // But broadcastRealtime should have run (event frame + projection.dirty).
+    const broadcastCalls = fetchMock.mock.calls.filter((c: any[]) =>
+      String(c[0]).includes('/__broadcast'),
+    )
+    expect(broadcastCalls.length).toBeGreaterThan(0)
+  })
+
+  it('skips hot-apply when FileSync binding is absent', async () => {
+    const partyserver = await import('partyserver')
+    const fetchMock = vi.fn()
+    ;(partyserver.getServerByName as any).mockResolvedValue({ fetch: fetchMock })
+
+    const token = await makeToken()
+    const event = makeCommitEvent({ id: 'evt-no-binding', cellId: 'cell-z' })
+    const req = await makeRequest([event], token)
+    const db = makeInMemoryD1()
+    // No FileSync in env — broadcast/apply block is skipped wholesale.
+    await handleEventsWriteRequest(req, makeEnv(db))
+
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+})

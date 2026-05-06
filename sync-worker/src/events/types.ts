@@ -33,6 +33,7 @@ export type EventKind =
   | 'thread.add'
   | 'thread.resolve'
   | 'cell.metadata.set'
+  | 'file.create'
 
 // Payload shape per event kind. Using an interface (not Record) so that
 // EventPayloads[K] gives type-safe lookups without `as` casts.
@@ -74,6 +75,22 @@ export interface EventPayloads {
     /** Field name on the cell projection (e.g. 'cellLabel', 'sourceLocation'). */
     field: string
     value: unknown
+  }
+  /**
+   * Project-level event that creates a `files` row in D1. Emitted by the
+   * legacy import path so the project listing surfaces imported files
+   * before any client opens them. Idempotent — repeat emits with the same
+   * event id are no-ops, and the projection UPSERT keeps the latest known
+   * name/languages without resetting counters.
+   */
+  'file.create': {
+    /** Display name for the file in the project sidebar. */
+    name: string
+    /** "codex" | "vtt" | "srt" | etc. — matches `files.file_type`. */
+    fileType: string
+    /** ISO codes; null/undefined when unknown at import time. */
+    sourceLanguage?: string
+    targetLanguage?: string
   }
 }
 

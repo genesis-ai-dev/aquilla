@@ -50,7 +50,7 @@ export function ApiKeyField({
 
   return (
     <div className="space-y-2">
-      <Label>{label}</Label>
+      {label && <Label>{label}</Label>}
       <div className="flex gap-2">
         <Input
           type={show ? "text" : "password"}

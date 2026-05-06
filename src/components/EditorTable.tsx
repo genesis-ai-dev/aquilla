@@ -42,8 +42,11 @@ import {
   toggleSelected,
   useIsSelected,
 } from "@/lib/audio/selection"
-import { ttsStatusKey, useTtsStatus } from "@/lib/audio/tts"
+import { setTtsStatus, ttsStatusKey, useTtsStatus } from "@/lib/audio/tts"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { categorizeAiError } from "@/lib/audio/ai-error"
+import { CellAiStatusPopover } from "./CellAiStatusPopover"
+import { openVoiceModalFromAnywhere } from "./VoiceBar"
 import { cn } from "@/lib/utils"
 import { isPerfLogEnabled } from "@/lib/perf-log"
 import { partitionInfractions, addWaiver, removeWaiver } from "@/lib/rules/waivers"
@@ -75,37 +78,79 @@ if (typeof window !== "undefined") {
 
 /** Tiny gutter badge that surfaces synth lifecycle: translating, generating,
  *  or failed. Lives in the left gutter so the loading state is anchored next
- *  to the cell that's actually working, even if the row scrolls. */
+ *  to the cell that's actually working, even if the row scrolls. Errors are
+ *  click-to-expand: full message + actions (set Gemini key, dismiss). */
 function SynthStatusBadge({
-  status,
+  status, cellId,
 }: {
   status: ReturnType<typeof useTtsStatus>
+  cellId: string
 }) {
   if (status.kind === "loading") {
     const isTranslating = status.file === "Translating…"
+    const pct = !isTranslating && status.total > 0
+      ? Math.round((status.loaded / status.total) * 100)
+      : null
     return (
-      <span className="inline-flex items-center gap-1 rounded-full bg-primary/15 px-1.5 py-0.5 text-[9px] font-medium text-primary">
+      <span
+        className="inline-flex items-center gap-1 rounded-full bg-primary/15 px-1.5 py-0.5 text-[9px] font-medium text-primary"
+        title={isTranslating ? "Translating before voicing" : pct != null ? `Loading voice model (${pct}%)` : "Loading voice model"}
+      >
         <span className="h-1 w-1 animate-pulse rounded-full bg-primary" />
-        {isTranslating ? "Translating" : "Loading"}
+        {isTranslating
+          ? "Translating"
+          : pct != null
+            ? <>Loading <span className="tabular-nums">{pct}%</span></>
+            : "Loading"}
       </span>
     )
   }
   if (status.kind === "synthesizing") {
     return (
-      <span className="inline-flex items-center gap-1 rounded-full bg-primary/15 px-1.5 py-0.5 text-[9px] font-medium text-primary">
+      <span
+        className="inline-flex items-center gap-1 rounded-full bg-primary/15 px-1.5 py-0.5 text-[9px] font-medium text-primary"
+        title="Generating audio…"
+      >
         <span className="h-1 w-1 animate-pulse rounded-full bg-primary" />
         Voicing
       </span>
     )
   }
   if (status.kind === "error") {
+    const error = categorizeAiError(status.message)
+    const dismiss = () => setTtsStatus(ttsStatusKey(cellId), { kind: "idle" })
+    const actions = []
+    if (error.category === "missing-gemini-key") {
+      actions.push({
+        label: "Add Gemini API key",
+        primary: true,
+        onClick: () => openVoiceModalFromAnywhere("apiKey"),
+      })
+    } else if (error.category === "translation-not-configured" || error.category === "no-source-text") {
+      // Soft fixes — no inline action available; the popover body still
+      // explains what to do.
+    } else if (error.category === "git-project-unsupported" || error.category === "sign-in-required") {
+      // Same — body covers it.
+    } else {
+      actions.push({
+        label: "Open voice settings",
+        onClick: () => openVoiceModalFromAnywhere(),
+      })
+    }
     return (
-      <span
-        className="inline-flex max-w-[80px] items-center gap-1 truncate rounded-full bg-destructive/15 px-1.5 py-0.5 text-[9px] font-medium text-destructive"
-        title={status.message}
-      >
-        Failed
-      </span>
+      <CellAiStatusPopover
+        error={error}
+        actions={actions}
+        onDismiss={dismiss}
+        trigger={
+          <button
+            type="button"
+            className="inline-flex max-w-[80px] cursor-pointer items-center gap-1 truncate rounded-full bg-destructive/15 px-1.5 py-0.5 text-[9px] font-medium text-destructive hover:bg-destructive/25"
+          >
+            Failed
+          </button>
+        }
+      />
     )
   }
   return null
@@ -1444,13 +1489,19 @@ function EditorRow({
             )}
           </div>
           {(isSynthBusy || isSynthError) && (
-            <SynthStatusBadge status={synthStatus} />
+            <SynthStatusBadge status={synthStatus} cellId={cell.id} />
           )}
           {validationButton}
         </div>
 
         {/* Source column */}
-        <div className="flex flex-col" dir={sourceTextDirection}>
+        <div
+          className={cn(
+            "flex flex-col transition-opacity",
+            isSynthBusy && "opacity-70",
+          )}
+          dir={sourceTextDirection}
+        >
           <div className="mb-1 flex items-center gap-1 text-xs text-muted-foreground" dir="ltr">
             <span>{cell.context}</span>
             {showFormattingLossWarning && (
@@ -1493,7 +1544,13 @@ function EditorRow({
             else (waveform, transcript preview, backtranslation, infractions
             detail) lives in the expansion panel. pr-9 reserves space for the
             ever-present chevron at the right edge. */}
-        <div className="relative flex flex-col border-l border-border/50 pl-3 pr-9" dir={targetTextDirection}>
+        <div
+          className={cn(
+            "relative flex flex-col border-l border-border/50 pl-3 pr-9 transition-opacity",
+            isSynthBusy && "opacity-70",
+          )}
+          dir={targetTextDirection}
+        >
           <button
             type="button"
             role="checkbox"

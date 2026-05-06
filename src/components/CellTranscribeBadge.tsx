@@ -2,22 +2,31 @@
 // model-download progress on first use, then a brief "transcribing" spinner,
 // then a 5-second "✓ N words" confirmation so the user knows transcription
 // completed (the karaoke decoration only shows when audio plays). Errors are
-// surfaced via tooltip.
+// click-to-expand: full message + actions (retry, dismiss).
 
 import { useEffect, useRef, useState } from "react"
-import { AlertCircle, CheckCircle2, Loader2, Sparkles } from "lucide-react"
+import { CheckCircle2, Loader2, Sparkles } from "lucide-react"
 import { cn } from "@/lib/utils"
-import { useTranscribeStatus, type TranscribeStatus } from "@/lib/audio/transcribe-status"
+import {
+  clearTranscribeStatus,
+  useTranscribeStatus,
+  type TranscribeStatus,
+} from "@/lib/audio/transcribe-status"
+import { categorizeAiError } from "@/lib/audio/ai-error"
+import { CellAiStatusPopover, type AiStatusAction } from "./CellAiStatusPopover"
 
 interface Props {
   audioId: string | undefined
   hasTimings: boolean
   onJumpToTranscript?: () => void
+  /** Optional: invoked when the user clicks "Retry" in the error popover.
+   *  Without this, only "Dismiss" is offered. */
+  onRetry?: () => void
 }
 
 const SUCCESS_FLASH_MS = 5000
 
-export function CellTranscribeBadge({ audioId, hasTimings, onJumpToTranscript }: Props) {
+export function CellTranscribeBadge({ audioId, hasTimings, onJumpToTranscript, onRetry }: Props) {
   const status = useTranscribeStatus(audioId)
   const [flashedDone, setFlashedDone] = useState<TranscribeStatus & { kind: "done" } | null>(null)
   const lastSeenKindRef = useRef<TranscribeStatus["kind"]>("idle")
@@ -102,14 +111,26 @@ export function CellTranscribeBadge({ audioId, hasTimings, onJumpToTranscript }:
   }
 
   if (status.kind === "error") {
+    const error = categorizeAiError(status.message)
+    const dismiss = () => { if (audioId) clearTranscribeStatus(audioId) }
+    const actions: AiStatusAction[] = []
+    if (onRetry) {
+      actions.push({ label: "Retry", primary: true, onClick: () => { dismiss(); onRetry() } })
+    }
     return (
-      <span
-        title={`Transcription failed — ${status.message}`}
-        className="flex h-5 items-center gap-1 rounded bg-destructive/10 px-1 text-[10px] font-medium text-destructive"
-      >
-        <AlertCircle className="h-2.5 w-2.5" />
-        <span>asr</span>
-      </span>
+      <CellAiStatusPopover
+        error={error}
+        actions={actions}
+        onDismiss={dismiss}
+        trigger={
+          <button
+            type="button"
+            className="flex h-5 cursor-pointer items-center gap-1 rounded bg-destructive/10 px-1 text-[10px] font-medium text-destructive hover:bg-destructive/20"
+          >
+            <span>asr · failed</span>
+          </button>
+        }
+      />
     )
   }
 

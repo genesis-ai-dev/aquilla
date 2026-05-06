@@ -31,6 +31,7 @@ import { handleEventsWriteRequest } from "./events/route"
 import { handleEventsReadRequest } from "./events/read-route"
 import { handleValidatorsReadRequest } from "./events/validators-read-route"
 import { handleCellsAuditReadRequest } from "./events/cells-audit-read-route"
+import { handleCorsPreflight, withCors } from "./cors"
 import { notifyFileDo } from "./archive-broadcast"
 import { parseRealtimeMessage } from "./events/realtime"
 import { encodeNextTail } from "./incremental"
@@ -534,6 +535,12 @@ async function handleCompactDocRequest(
 
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
+    // CORS preflight for browser-facing CQRS routes — must run before any
+    // handler that returns null on non-matching method, otherwise OPTIONS
+    // falls through to partyserver and 404s.
+    const preflight = handleCorsPreflight(request)
+    if (preflight) return preflight
+
     // Admin paths are intercepted before partyserver so its routing
     // doesn't try to treat /admin/... as a party name.
     const projectArchiveResponse = await handleProjectArchiveRequest(request, env, notifyFileDo)
@@ -545,13 +552,13 @@ export default {
     const adminResponse = await handleAdminRequest(request, env)
     if (adminResponse) return adminResponse
     const eventsReadResponse = await handleEventsReadRequest(request, env)
-    if (eventsReadResponse) return eventsReadResponse
+    if (eventsReadResponse) return withCors(eventsReadResponse, request)
     const validatorsReadResponse = await handleValidatorsReadRequest(request, env)
-    if (validatorsReadResponse) return validatorsReadResponse
+    if (validatorsReadResponse) return withCors(validatorsReadResponse, request)
     const cellsAuditReadResponse = await handleCellsAuditReadRequest(request, env)
-    if (cellsAuditReadResponse) return cellsAuditReadResponse
+    if (cellsAuditReadResponse) return withCors(cellsAuditReadResponse, request)
     const eventsWriteResponse = await handleEventsWriteRequest(request, env)
-    if (eventsWriteResponse) return eventsWriteResponse
+    if (eventsWriteResponse) return withCors(eventsWriteResponse, request)
 
     return (
       (await routePartykitRequest(request, env, {

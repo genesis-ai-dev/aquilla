@@ -3,9 +3,9 @@
 // and the entry point to edit voices. Draws audio out of the cell rows so
 // the cell UI can focus on text + recording.
 
-import { useCallback, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useState } from "react"
 import {
-  ChevronsLeft, ChevronsRight, Loader2, Pause, Play, Settings2, Square,
+  ChevronsLeft, ChevronsRight, KeyRound, Loader2, Pause, Play, Settings2, Square, X,
 } from "lucide-react"
 import * as Y from "yjs"
 import type { CellData } from "@/hooks/useCells"
@@ -20,6 +20,9 @@ import {
   startQueue, stopQueue, useQueueState,
 } from "@/lib/audio/play-queue"
 import { getVoiceLibrary } from "@/lib/audio/voices"
+import { resolveTtsProvider, TTS_PROVIDER_INFOS, providerInfo } from "@/lib/audio/tts-providers"
+import type { TtsProvider } from "@/lib/parsers/types"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { setCellTtsSettings } from "@/lib/audio/cell-tts-settings"
 import { synthAndAttachAudio } from "@/lib/audio/synth-and-attach"
 import { setTtsStatus, ttsStatusKey } from "@/lib/audio/tts"
@@ -28,9 +31,21 @@ import { patchProject } from "@/lib/store/project-index"
 import { getPlainText } from "@/lib/richtext/translated-xml"
 import { getSelectedIds, clearSelection } from "@/lib/audio/selection"
 import { translateThenSynthAsOneTake } from "@/lib/audio/bulk-selected"
+import { useUserApiKey } from "@/lib/store/user-api-keys"
 
 /** DataTransfer key used by voice chips → cell drop targets. */
 export const VOICE_DRAG_MIME = "application/x-frontier-voice-id"
+
+// Module-local registry so out-of-tree callers can pop the voice modal —
+// e.g. an error popover on a cell row offering "Add Gemini API key" routes
+// here when the VoiceBar is mounted.
+let voiceModalOpener: ((focus?: "apiKey") => void) | null = null
+
+/** Open the voice modal, optionally focusing the API-key entry. No-ops if
+ *  the VoiceBar isn't currently mounted. */
+export function openVoiceModalFromAnywhere(focus?: "apiKey"): void {
+  voiceModalOpener?.(focus)
+}
 
 interface Props {
   project: ProjectRecord
@@ -43,16 +58,49 @@ interface Props {
   /** Translation entry point. Called when a voice is dropped on a cell that
    *  has source text but no translation yet. */
   onCompleteSingle?: (cell: CellData) => Promise<void> | void
+  /** Called when the user clicks the Hide control on the bar. The parent
+   *  controls visibility via `useSpeakBarEnabled`. */
+  onHide?: () => void
 }
 
 export function VoiceBar({
   project, cells, doc, username, session, editorRef, onProjectChanged,
-  onCompleteSingle,
+  onCompleteSingle, onHide,
 }: Props) {
   const [modalOpen, setModalOpen] = useState(false)
+  const [modalFocus, setModalFocus] = useState<"apiKey" | undefined>(undefined)
   const queue = useQueueState()
   const voices = getVoiceLibrary(project.ttsSettings)
   const isGitProject = project.origin?.kind === "git"
+
+  const userGeminiKey = useUserApiKey("gemini-tts")
+  const projectProvider = resolveTtsProvider(project.ttsSettings)
+  const hasGeminiKey = Boolean(
+    (project.ttsSettings?.apiKey ?? "").trim() || (userGeminiKey ?? "").trim(),
+  )
+  // A voice is unavailable when its effective provider needs credentials
+  // we don't have. Today only Gemini needs a key; local providers (Kokoro,
+  // MMS) just need a one-time model download and we surface that elsewhere.
+  const reasonFor = useCallback((voice: Voice): string | null => {
+    const provider = projectProvider ?? voice.provider ?? "gemini"
+    if (provider === "gemini" && !hasGeminiKey) return "Needs a Gemini API key"
+    return null
+  }, [projectProvider, hasGeminiKey])
+
+  const openModal = useCallback((focus?: "apiKey") => {
+    setModalFocus(focus)
+    setModalOpen(true)
+  }, [])
+
+  // Register a module-local opener so consumers outside the voice-bar tree
+  // (e.g. cell-row error popovers) can route the user to the right fix
+  // without prop-drilling. Mirrors the dropCtx pattern below.
+  useEffect(() => {
+    voiceModalOpener = openModal
+    return () => {
+      if (voiceModalOpener === openModal) voiceModalOpener = null
+    }
+  }, [openModal])
 
   const playable = useMemo(() => hasAnyPlayableAudio(cells), [cells])
 
@@ -161,19 +209,32 @@ export function VoiceBar({
 
       <div className="h-5 w-px bg-border" />
 
+      <ProviderQuickSwitch
+        currentProvider={projectProvider}
+        onChangeProvider={(p) => void saveProjectTtsSettings({ provider: p })}
+        onOpenSettings={() => openModal()}
+      />
+
+      <div className="h-5 w-px bg-border" />
+
       <div className="flex items-center gap-1.5 overflow-x-auto">
         <span className="shrink-0 text-[11px] font-medium text-muted-foreground">
           Voices
         </span>
         {voices.map((voice) => (
-          <VoiceChip key={voice.id} voice={voice} />
+          <VoiceChip
+            key={voice.id}
+            voice={voice}
+            unavailableReason={reasonFor(voice)}
+            onUnavailableClick={() => openModal("apiKey")}
+          />
         ))}
         <Button
           type="button"
           size="sm"
           variant="ghost"
           className="shrink-0 gap-1 text-xs"
-          onClick={() => setModalOpen(true)}
+          onClick={() => openModal()}
           title="Edit voice library"
         >
           <Settings2 className="h-3.5 w-3.5" />
@@ -195,11 +256,27 @@ export function VoiceBar({
             Drag a voice onto a cell to generate
           </span>
         )}
+        {onHide && (
+          <Button
+            type="button"
+            size="icon-sm"
+            variant="ghost"
+            onClick={onHide}
+            aria-label="Hide Speak bar"
+            title="Hide Speak bar (toggle from header)"
+          >
+            <X className="h-3.5 w-3.5" />
+          </Button>
+        )}
       </div>
 
       <VoiceModal
         open={modalOpen}
-        onOpenChange={setModalOpen}
+        onOpenChange={(next) => {
+          setModalOpen(next)
+          if (!next) setModalFocus(undefined)
+        }}
+        initialFocus={modalFocus}
         targetLanguage={project.targetLanguage}
         settings={project.ttsSettings}
         onSettingsChange={saveProjectTtsSettings}
@@ -218,30 +295,132 @@ export function VoiceBar({
   )
 }
 
+// ── Provider quick-switch ──────────────────────────────────────────────────
+// Compact chip in the bar that shows the active TTS provider and pops up a
+// short list to switch. The full provider editor lives in the voice modal;
+// this is the fast path for "I want to flip to Kokoro for this take" without
+// leaving the editing surface.
+
+interface ProviderQuickSwitchProps {
+  currentProvider: TtsProvider
+  onChangeProvider: (next: TtsProvider) => void
+  onOpenSettings: () => void
+}
+
+function ProviderQuickSwitch({
+  currentProvider, onChangeProvider, onOpenSettings,
+}: ProviderQuickSwitchProps) {
+  const current = providerInfo(currentProvider)
+  return (
+    <Popover>
+      <PopoverTrigger
+        render={
+          <button
+            type="button"
+            title="Switch TTS provider"
+            className={cn(
+              "shrink-0 inline-flex items-center gap-1 rounded-full border bg-background px-2 py-1 text-[11px] font-medium",
+              "hover:bg-accent",
+            )}
+          >
+            <span className="text-muted-foreground">Model</span>
+            <span>{current.shortTitle}</span>
+            <span className="text-muted-foreground" aria-hidden>▾</span>
+          </button>
+        }
+      />
+      <PopoverContent align="start" sideOffset={6} className="w-60 p-1">
+        <ul className="space-y-0.5">
+          {TTS_PROVIDER_INFOS.map((info) => {
+            const active = info.id === currentProvider
+            return (
+              <li key={info.id}>
+                <button
+                  type="button"
+                  onClick={() => onChangeProvider(info.id)}
+                  className={cn(
+                    "flex w-full flex-col items-start gap-0.5 rounded-md px-2 py-1.5 text-left text-xs hover:bg-accent",
+                    active && "bg-accent/60",
+                  )}
+                >
+                  <span className="flex items-center gap-1.5 font-medium">
+                    {info.title}
+                    {active && <span className="text-[9px] uppercase text-muted-foreground">current</span>}
+                    {info.badge && (
+                      <span className="rounded-full bg-primary/10 px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-wide text-primary">
+                        {info.badge}
+                      </span>
+                    )}
+                  </span>
+                  <span className="text-muted-foreground">{info.hint}</span>
+                </button>
+              </li>
+            )
+          })}
+        </ul>
+        <div className="my-1 h-px bg-border" />
+        <button
+          type="button"
+          onClick={onOpenSettings}
+          className="flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-left text-[11px] text-muted-foreground hover:bg-accent"
+        >
+          <Settings2 className="h-3 w-3" />
+          Voice & prompt settings…
+        </button>
+      </PopoverContent>
+    </Popover>
+  )
+}
+
 // ── Voice chip ─────────────────────────────────────────────────────────────
 
-function VoiceChip({ voice }: { voice: Voice }) {
+interface VoiceChipProps {
+  voice: Voice
+  /** Non-null when the voice can't run yet (e.g. missing API key). When set,
+   *  the chip is non-draggable and clicking opens the recovery surface. */
+  unavailableReason: string | null
+  onUnavailableClick: () => void
+}
+
+function VoiceChip({ voice, unavailableReason, onUnavailableClick }: VoiceChipProps) {
+  const unavailable = unavailableReason != null
   const onDragStart = (e: React.DragEvent<HTMLButtonElement>) => {
+    if (unavailable) {
+      e.preventDefault()
+      return
+    }
     e.dataTransfer.setData(VOICE_DRAG_MIME, voice.id)
     e.dataTransfer.effectAllowed = "copy"
   }
   return (
     <button
       type="button"
-      draggable
+      draggable={!unavailable}
       onDragStart={onDragStart}
-      title={`Drag onto a cell to generate with ${voice.name}`}
+      onClick={() => { if (unavailable) onUnavailableClick() }}
+      aria-disabled={unavailable}
+      title={unavailable
+        ? `${unavailableReason} — click to add`
+        : `Drag onto a cell to generate with ${voice.name}`}
       className={cn(
-        "shrink-0 inline-flex cursor-grab items-center gap-1.5 rounded-full border bg-background px-2.5 py-1 text-[11px] font-medium",
-        "hover:bg-accent active:cursor-grabbing active:scale-[0.97]",
+        "shrink-0 inline-flex items-center gap-1.5 rounded-full border bg-background px-2.5 py-1 text-[11px] font-medium",
+        unavailable
+          ? "cursor-pointer border-dashed opacity-60 hover:opacity-90 hover:bg-accent/40 text-muted-foreground"
+          : "cursor-grab hover:bg-accent active:cursor-grabbing active:scale-[0.97]",
       )}
     >
       <span
-        className="h-2 w-2 rounded-full border"
-        style={{ backgroundColor: voice.color || "#94a3b8" }}
+        className={cn("h-2 w-2 rounded-full border", unavailable && "border-muted-foreground/40")}
+        style={{ backgroundColor: unavailable ? "transparent" : (voice.color || "#94a3b8") }}
         aria-hidden
       />
       <span>{voice.name}</span>
+      {unavailable && (
+        <span className="-mr-0.5 inline-flex items-center gap-0.5 text-[10px] uppercase tracking-wide text-muted-foreground">
+          <KeyRound className="h-2.5 w-2.5" />
+          setup
+        </span>
+      )}
     </button>
   )
 }

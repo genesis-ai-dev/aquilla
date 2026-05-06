@@ -5,7 +5,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react"
 import {
-  Check, Copy, Loader2, Pause, Play, Plus, Star, Trash2,
+  Check, Copy, KeyRound, Loader2, Pause, Play, Plus, Star, Trash2,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -27,8 +27,9 @@ import {
   POPULAR_MMS_LANGUAGES,
   mmsModelIdForLanguage,
 } from "@/lib/audio/mms-languages"
-import { useUserApiKey } from "@/lib/store/user-api-keys"
+import { setUserApiKey, useUserApiKey } from "@/lib/store/user-api-keys"
 import { defaultVoiceNameForProvider, normalizeVoiceForProvider } from "@/lib/audio/tts-providers"
+import { ApiKeyField } from "@/components/ApiKeyField"
 
 const SAMPLE_TEXT = "The quick brown fox jumps over the lazy dog."
 
@@ -40,16 +41,21 @@ interface Props {
   settings: ProjectTtsSettings | undefined
   /** Persist a partial change to project tts settings. */
   onSettingsChange: (next: Partial<ProjectTtsSettings>) => void | Promise<void>
+  /** When set, surface the matching recovery affordance prominently — e.g.
+   *  "apiKey" pins an inline ApiKeyField at the top of the dialog. Used by
+   *  the disabled voice chip flow so the user lands directly on the fix. */
+  initialFocus?: "apiKey"
 }
 
 export function VoiceModal({
-  open, onOpenChange, targetLanguage, settings, onSettingsChange,
+  open, onOpenChange, targetLanguage, settings, onSettingsChange, initialFocus,
 }: Props) {
   const provider = settings?.provider ?? DEFAULT_TTS_PROVIDER
   // Resolve the API key with project → user-saved fallback so the Test
   // button works even when the user only set their key in another project.
   const userKey = useUserApiKey("gemini-tts")
   const apiKey = (settings?.apiKey?.trim() || userKey) ?? ""
+  const showKeyBanner = provider === "gemini" && (initialFocus === "apiKey" || !apiKey)
 
   // Local mirror of the library + selection. Seeded from props on each
   // open transition; subsequent edits stay local and write through async.
@@ -140,6 +146,35 @@ export function VoiceModal({
             Each voice bundles voice id, accent, pronunciation, and prompt. Drag voices onto cells to generate.
           </DialogDescription>
         </DialogHeader>
+
+        {showKeyBanner && (
+          <div
+            className={cn(
+              "rounded-md border p-3",
+              !apiKey
+                ? "border-amber-300/60 bg-amber-50 dark:border-amber-500/30 dark:bg-amber-950/30"
+                : "bg-muted/30",
+            )}
+          >
+            <div className="mb-2 flex items-center gap-2 text-sm font-medium">
+              <KeyRound className="h-3.5 w-3.5" />
+              {!apiKey
+                ? "Add your Gemini API key to use Gemini voices"
+                : "Gemini API key"}
+            </div>
+            <ApiKeyField
+              label=""
+              placeholder="AIza..."
+              projectKey={settings?.apiKey ?? ""}
+              userKey={userKey ?? ""}
+              onProjectKeyChange={(v) => void onSettingsChange({ apiKey: v || undefined })}
+              onUserKeyChange={(v) => setUserApiKey("gemini-tts", v)}
+              help={!apiKey
+                ? "Get a key at aistudio.google.com/apikey. Sent directly to Google; never uploaded to Frontier."
+                : "Sent directly to Google. Never uploaded to Frontier."}
+            />
+          </div>
+        )}
 
         <div className="grid grid-cols-1 gap-5 md:grid-cols-[220px_minmax(0,1fr)]">
           <VoiceList

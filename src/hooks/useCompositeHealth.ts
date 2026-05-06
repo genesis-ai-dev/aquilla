@@ -38,19 +38,30 @@ const EMPTY_RESPONSE: HealthSyncResponse = {
 // imperceptible but eliminates per-keystroke worker traffic.
 const HEALTH_DEBOUNCE_MS = 200
 
-/**
- * Lazily create the health Worker.
- * The worker path is built at call-time so Vite's static
- * `new URL("...", import.meta.url)` analyser doesn't bundle the worker's
- * full dependency tree during test transforms (would OOM in happy-dom).
- */
-function createHealthWorker(): Worker {
-  const workerUrl = new URL("../workers/health-worker.ts", import.meta.url)
-  return new Worker(workerUrl, { type: "module" })
-}
-
 /** True when running inside Vitest (import.meta.env.VITEST is injected by the framework). */
 const isTestEnv: boolean = !!import.meta.env.VITEST
+
+/**
+ * Lazily create the health Worker.
+ *
+ * Uses Vite's `?worker` query suffix (same pattern as the audio workers in
+ * src/lib/audio) — that's the import shape Vite's bundler statically detects
+ * and emits as its own chunk. The earlier
+ * `new Worker(new URL("…", import.meta.url))` form was wrapped in a function
+ * to keep the URL out of Vite's static analyser, which sounded clever but
+ * silently meant the worker chunk was never produced for production builds:
+ * dev worked because Vite's dev server resolves URLs on the fly, prod fell
+ * through to the in-process sync compute and "composite-health" looked like
+ * legacy "simple health" because the worker post never fired.
+ *
+ * The dynamic import is gated behind `isTestEnv` in the call site so vitest
+ * transforms don't pull the worker's full dependency tree (the original
+ * happy-dom OOM concern).
+ */
+async function createHealthWorker(): Promise<Worker> {
+  const mod = await import("../workers/health-worker?worker")
+  return new mod.default()
+}
 
 /** Derive a stable cells array from the fileCells Map. */
 function buildCells(fileCells: Map<string, CellData[]>): HealthSyncCell[] {
@@ -82,9 +93,13 @@ export function useCompositeHealth(input: UseCompositeHealthInput): UseComposite
   // dispatches responses by request id so we don't leak listeners across the
   // many recomputes a long-lived editor session triggers.
   useEffect(() => {
+    let cancelled = false
     if (!isTestEnv && typeof Worker !== "undefined") {
-      try {
-        const w = createHealthWorker()
+      createHealthWorker().then((w) => {
+        if (cancelled) {
+          w.terminate()
+          return
+        }
         w.onmessage = (event: MessageEvent<{ id: number; payload: HealthSyncResponse | { error: string }; perfMessages?: string[] }>) => {
           // Worker-side perf messages are shipped here for main-thread re-emit
           // (worker console.log isn't visible to many DevTools consumers).
@@ -105,12 +120,13 @@ export function useCompositeHealth(input: UseCompositeHealthInput): UseComposite
           setReady(true)
         }
         workerRef.current = w
-      } catch (err) {
+      }).catch((err) => {
         console.error("[useCompositeHealth] Worker init failed, falling back to sync:", err)
         workerRef.current = null
-      }
+      })
     }
     return () => {
+      cancelled = true
       if (debounceTimerRef.current) {
         clearTimeout(debounceTimerRef.current)
         debounceTimerRef.current = null

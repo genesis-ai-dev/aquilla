@@ -86,6 +86,22 @@ export function makeInMemoryD1(tables: Partial<Tables> = {}): InMemoryD1 {
   function execSql(sql: string, args: unknown[]): unknown[] {
     const normalized = sql.replace(/\s+/g, ' ').trim()
 
+    // ── SELECT events for hydration (Phase 4d, ASC chronological) ──────────
+    // Matched BEFORE the broader DESC pattern below because the SELECT prefix
+    // overlaps; the distinguishing feature is ORDER BY server_ts ASC with no
+    // cell_id / before / limit clauses.
+    if (
+      /^SELECT id, schema_version, project_id, file_id, cell_id, kind, author, payload, client_ts, server_ts FROM events WHERE project_id = \? AND file_id = \? ORDER BY server_ts ASC$/.test(
+        normalized,
+      )
+    ) {
+      const projectId = args[0] as string
+      const fileId = args[1] as string
+      return db.events
+        .filter((e) => e.project_id === projectId && e.file_id === fileId)
+        .sort((a, b) => a.server_ts - b.server_ts)
+    }
+
     // ── SELECT events (audit log read — GET /events) ───────────────────────
     // Handles the parameterized query from read-route.ts:
     //   SELECT id, schema_version, ... FROM events

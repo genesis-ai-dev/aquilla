@@ -1,3 +1,28 @@
+/**
+ * One-time cell metadata captured when a cell first enters the system
+ * (typically during gitlab import). Stored on the cell.commit event payload
+ * so Phase 4d hydration can reconstruct a Y.Doc from events alone. Every
+ * field is optional — clients that don't care can omit `meta` entirely.
+ */
+export interface CellSeedMeta {
+  /** Source-language text. */
+  original?: string
+  /** Source HTML (preserves inline formatting like <b>, <i>). */
+  originalHtml?: string
+  /** Free-form context shown alongside the source. */
+  context?: string
+  /** Group label (chapter, scene, …); not the same as `section`. */
+  group?: string
+  /** "text" | "audio" | "subtitle" | etc. */
+  type?: string
+  /** Subtitle / audio cue boundaries. */
+  sourceLocation?: { startTime?: number; endTime?: number; [k: string]: unknown }
+  /** Scripture verse refs, e.g. ["LUK 1:1"]. */
+  globalReferences?: string[]
+  /** Display label, e.g. "Narrator" or "GEN 1:1". */
+  cellLabel?: string
+}
+
 // Discriminated union of all known event kinds. Adding a new kind requires
 // adding a payload type to EventPayloads AND a role to REQUIRED_ROLE in
 // role-policy.ts (TypeScript's exhaustiveness check enforces both).
@@ -19,6 +44,14 @@ export interface EventPayloads {
     valueHtml: string
     /** ID of the previous cell.commit event for this cell, if any. */
     prevEventId?: string
+    /**
+     * Cell creation metadata. Populated on the first commit for a cell
+     * (notably during legacy gitlab imports); omitted on subsequent edits.
+     * Phase 4d hydration reads these to reconstruct a Y.Doc when no R2
+     * snapshot exists. Additive fields — older events without `meta` still
+     * hydrate to cells with default values, no schema bump required.
+     */
+    meta?: CellSeedMeta
   }
   'cell.validate': {
     /** The cell.commit event being validated. */

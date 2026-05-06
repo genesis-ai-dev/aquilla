@@ -27,6 +27,7 @@ import {
   type ArchiveMarker,
 } from "./project-archive"
 import { handleRebuildProjectionRequest } from "./events/rebuild"
+import { hydrateYDocFromEvents } from "./events/hydrate"
 import { handleEventsWriteRequest } from "./events/route"
 import { handleEventsReadRequest } from "./events/read-route"
 import { handleValidatorsReadRequest } from "./events/validators-read-route"
@@ -255,6 +256,40 @@ export class FileSync extends YServer {
       Y.applyUpdate(this.document, buf)
     }
     this.tailCount = keys.length
+
+    // Phase 4d cold-start hydration: when neither the snapshot nor any tail
+    // produced cells (legacy gitlab projects imported as `cell.commit` events
+    // straight to D1, never opened before), replay events to seed the doc.
+    // Gated on `cells` being empty so a partially-loaded doc from R2 is left
+    // alone — Yjs would not merge replayed commits cleanly with existing CRDT
+    // state, and the live event stream is the path for additive updates after
+    // first open. Skipped silently when CODEX_DB isn't bound (spike/dev).
+    const cellsMap = this.document.getMap("cells")
+    if (cellsMap.size === 0 && this.env.CODEX_DB) {
+      try {
+        const result = await hydrateYDocFromEvents(
+          this.env.CODEX_DB,
+          projectId,
+          fileId,
+          this.document,
+        )
+        if (result.cellCount > 0) {
+          // Persist the hydrated state to R2 immediately so subsequent loads
+          // skip the event replay. Writes the full state under the snapshot
+          // key (not a tail) — matches what compactToSnapshot would produce.
+          const update = Y.encodeStateAsUpdate(this.document)
+          await this.env.SNAPSHOTS.put(snapshotKey(projectId, fileId), update)
+          console.log(
+            `[FileSync.onLoad] hydrated ${this.name}: ${result.cellCount} cells from ${result.cellCommitsApplied} commits`,
+          )
+        }
+      } catch (err) {
+        // Hydration failure is non-fatal — the doc just loads empty and the
+        // user can either retry the import or wait for live events. Log so
+        // the operator can spot the failure in worker logs.
+        console.warn(`[FileSync.onLoad] hydration failed for ${this.name}:`, err)
+      }
+    }
 
     // Seed the project-archive tombstone into `meta` so a client connecting to
     // a cold DO sees the banner without waiting for a broadcast. Writes only

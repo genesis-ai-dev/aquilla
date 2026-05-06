@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef, useState } from "react"
+import { useEffect, useLayoutEffect, useRef, useState } from "react"
 import * as Y from "yjs"
 import type { CellHistoryEntry, SourceLocation, CommentThread, CellTtsSettings } from "@/lib/parsers/types"
 import type { CodexCellAttachment, WordTiming } from "@/lib/codex-editor/types"
@@ -7,6 +7,7 @@ import { snapshotEntry } from "@/lib/codex-editor/edits/yjs-helpers"
 import { extractThreadsFromCell } from "./useComments"
 import { getPlainText } from "@/lib/richtext/translated-xml"
 import { perfLog, perfMark } from "@/lib/perf-log"
+import type { CellAuditStats } from "./useCellsAuditStats"
 
 export type ValidationStatus = "empty" | "none" | "others" | "self" | "full"
 
@@ -59,15 +60,46 @@ function deriveStatus(translated: string, history: CellHistoryEntry[]): "empty" 
   return history[history.length - 1].validated ? "validated" : "unvalidated"
 }
 
+/** Classify a set of active validators into the UI's 5-state validation status.
+ *  Shared by the D1-backed and Y.Doc-backed paths so both produce identical
+ *  output for the same validator list. */
+/** Stable empty map so the default-arg path doesn't trigger useLayoutEffect
+ *  re-runs every render. */
+const EMPTY_STATS: ReadonlyMap<string, CellAuditStats> = new Map()
+
+function classifyValidators(
+  active: string[],
+  currentUsername: string,
+  requiredValidations: number,
+): ValidationStatus {
+  if (active.length === 0) return "none"
+  if (active.length >= requiredValidations) return "full"
+  if (active.includes(currentUsername)) return "self"
+  return "others"
+}
+
 function deriveValidationStatus(
   translated: string,
   cell: Y.Map<unknown>,
   currentUsername: string,
   requiredValidations: number,
+  stats: CellAuditStats | undefined,
 ): { validationStatus: ValidationStatus; activeValidators: string[] } {
   if (!translated || !translated.trim()) {
     return { validationStatus: "empty", activeValidators: [] }
   }
+
+  // Prefer D1 stats when present — same source of truth as the project-wide
+  // health view. Fall back to walking cell.edits only when stats aren't
+  // available yet (initial loading, isolated tests).
+  if (stats) {
+    const active = stats.activeValidators
+    return {
+      validationStatus: classifyValidators(active, currentUsername, requiredValidations),
+      activeValidators: active,
+    }
+  }
+
   const arr = cell.get("edits") as Y.Array<Y.Map<unknown>> | undefined
   if (!arr) return { validationStatus: "none", activeValidators: [] }
   // Walk backwards for the latest value-edit.
@@ -80,13 +112,10 @@ function deriveValidationStatus(
     if (validators) {
       validators.forEach((v, username) => { if (!v.get("isDeleted")) active.push(username) })
     }
-    const count = active.length
-    if (count === 0) return { validationStatus: "none", activeValidators: [] }
-    // Threshold met → "full" takes precedence over "self" (matches the desktop
-    // AudioValidationStatusIcon logic: isFullyValidated wins).
-    if (count >= requiredValidations) return { validationStatus: "full", activeValidators: active }
-    if (active.includes(currentUsername)) return { validationStatus: "self", activeValidators: active }
-    return { validationStatus: "others", activeValidators: active }
+    return {
+      validationStatus: classifyValidators(active, currentUsername, requiredValidations),
+      activeValidators: active,
+    }
   }
   return { validationStatus: "none", activeValidators: [] }
 }
@@ -96,6 +125,7 @@ function buildCellData(
   fileId: string,
   username: string,
   requiredValidations: number,
+  stats: CellAuditStats | undefined,
 ): CellData {
   const frag = cell.get("translatedXml") as Y.XmlFragment | undefined
   const translated = frag ? getPlainText(frag) : ((cell.get("translated") as string) || "")
@@ -117,7 +147,7 @@ function buildCellData(
   const startTime = source?.metadata?.data?.startTime
   const endTime = source?.metadata?.data?.endTime
   const { validationStatus, activeValidators } = deriveValidationStatus(
-    translated, cell, username, requiredValidations,
+    translated, cell, username, requiredValidations, stats,
   )
   const editsArr = cell.get("edits") as Y.Array<Y.Map<unknown>> | undefined
   const validationHistory: EditValidationSummary[] = []
@@ -171,12 +201,34 @@ function buildCellData(
   }
 }
 
-export function useCells(doc: Y.Doc | null, fileId: string, username = "local", requiredValidations = 1): CellData[] {
+export function useCells(
+  doc: Y.Doc | null,
+  fileId: string,
+  username = "local",
+  requiredValidations = 1,
+  /** D1-backed audit stats keyed by cellId. When provided, validation status
+   *  and active validators come from here — Y.Doc cell.edits walk is the
+   *  fallback for cells without stats yet (initial load, isolated tests).
+   *  Project-wide validation views live elsewhere; this hook stays per-file. */
+  auditStats: ReadonlyMap<string, CellAuditStats> = EMPTY_STATS,
+): CellData[] {
   const [cells, setCells] = useState<CellData[]>([])
   // Per-cell cache keyed by cell id. Entries are reused across observer fires
   // when the cell's Yjs content didn't change, so consumers see referentially
   // stable cell objects (lets React.memo skip unaffected rows).
   const cacheRef = useRef<Map<string, CellData>>(new Map())
+  // Stats accessed via a ref so the main useLayoutEffect doesn't need to
+  // re-run when stats change — buildOrEnsure deref's it on each rebuild.
+  // A separate effect below diffs old vs new stats and marks just the
+  // cells whose stats actually changed as dirty (preserving cache stability
+  // for unaffected cells, which matters on 30k-cell files).
+  const statsRef = useRef<ReadonlyMap<string, CellAuditStats>>(auditStats)
+  statsRef.current = auditStats
+  const prevStatsRef = useRef<ReadonlyMap<string, CellAuditStats>>(EMPTY_STATS)
+  // Wired by the main useLayoutEffect; null before the effect runs and after
+  // its cleanup. Outer effects call it to enqueue dirty-cell IDs into the
+  // main effect's flush pipeline.
+  const markDirtyRef = useRef<((ids: Iterable<string>) => void) | null>(null)
 
   // useLayoutEffect (not useEffect) so the initial rebuildFromScratch + setCells
   // happens synchronously before the browser paints. Otherwise the render where
@@ -203,7 +255,7 @@ export function useCells(doc: Y.Doc | null, fileId: string, username = "local", 
       if (entry) return entry
       const cell = cellsMap.get(id) as Y.Map<unknown> | undefined
       if (!cell) return null
-      entry = buildCellData(cell, fileId, username, requiredValidations)
+      entry = buildCellData(cell, fileId, username, requiredValidations, statsRef.current.get(id))
       cache.set(id, entry)
       return entry
     }
@@ -314,11 +366,59 @@ export function useCells(doc: Y.Doc | null, fileId: string, username = "local", 
 
     cellsMap.observeDeep(onCellsChange)
     orderArray.observe(onOrderChange)
+    markDirtyRef.current = (ids: Iterable<string>) => {
+      let any = false
+      for (const id of ids) {
+        if (idToIndex.has(id)) {
+          dirtyIds.add(id)
+          any = true
+        }
+      }
+      if (any) schedule()
+    }
     return () => {
       cellsMap.unobserveDeep(onCellsChange)
       orderArray.unobserve(onOrderChange)
+      markDirtyRef.current = null
     }
   }, [doc, fileId, username, requiredValidations])
 
+  // Re-derive validation fields for cells whose D1 stats changed since last
+  // render. Without this, stats refreshes (30s polling, outbox-driven overlay
+  // bumps) wouldn't propagate into the CellData entries already cached.
+  // Diffing keeps the per-cell cache stable for cells whose stats didn't move.
+  useEffect(() => {
+    const prev = prevStatsRef.current
+    if (prev === auditStats) return
+    const changed = new Set<string>()
+    for (const [id, next] of auditStats) {
+      if (!statsEquivalent(prev.get(id), next)) changed.add(id)
+    }
+    for (const id of prev.keys()) {
+      if (!auditStats.has(id)) changed.add(id)
+    }
+    prevStatsRef.current = auditStats
+    if (changed.size === 0) return
+    markDirtyRef.current?.(changed)
+  }, [auditStats])
+
   return cells
+}
+
+function statsEquivalent(
+  a: CellAuditStats | undefined,
+  b: CellAuditStats | undefined,
+): boolean {
+  if (a === b) return true
+  if (!a || !b) return false
+  if (a.editCount !== b.editCount) return false
+  if (a.lastEditEventId !== b.lastEditEventId) return false
+  if (a.lastEditAt !== b.lastEditAt) return false
+  if (a.contentHash !== b.contentHash) return false
+  if (a.activeValidators.length !== b.activeValidators.length) return false
+  // Validator order is server-determined; compare as sets via length+includes.
+  for (const u of a.activeValidators) {
+    if (!b.activeValidators.includes(u)) return false
+  }
+  return true
 }

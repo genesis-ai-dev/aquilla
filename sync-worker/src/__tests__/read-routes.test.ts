@@ -109,7 +109,7 @@ describe('CQRS read routes', () => {
     expect(body.validators[0].isActive).toBe(false)
   })
 
-  it('GET /cells/audit-stats returns edit_count and content_hash', async () => {
+  it('GET /cells/audit-stats returns edit_count, content_hash, last-edit metadata, and active validators', async () => {
     const db = makeInMemoryD1({
       cells: [
         {
@@ -117,26 +117,94 @@ describe('CQRS read routes', () => {
           cell_id: 'c1',
           content_text: 'x',
           content_hash: 'abcd1234',
-          validated: 0,
+          validated: 1,
           word_count: 1,
           last_editor: 'a',
-          last_edit_at: 1,
-          projected_from: 'y',
+          last_edit_at: 1700,
+          projected_from: 'event:ev-current',
           edit_count: 3,
+        },
+        {
+          file_id: 'file-x',
+          cell_id: 'c2',
+          content_text: 'y',
+          content_hash: 'beef9999',
+          validated: 0,
+          word_count: 1,
+          last_editor: 'b',
+          last_edit_at: 1800,
+          // projected_from without "event:" prefix → no last_edit_event_id, no validators usable.
+          projected_from: 'legacy-y-doc',
+          edit_count: 1,
+        },
+      ],
+      cell_validators: [
+        // Active validators tied to the current edit on c1.
+        {
+          project_id: 'proj-x',
+          file_id: 'file-x',
+          cell_id: 'c1',
+          edit_event_id: 'ev-current',
+          username: 'alice',
+          is_active: 1,
+          decided_ts: 1750,
+        },
+        {
+          project_id: 'proj-x',
+          file_id: 'file-x',
+          cell_id: 'c1',
+          edit_event_id: 'ev-current',
+          username: 'bob',
+          is_active: 1,
+          decided_ts: 1751,
+        },
+        // Stale validator on a previous edit — must not surface for the current edit.
+        {
+          project_id: 'proj-x',
+          file_id: 'file-x',
+          cell_id: 'c1',
+          edit_event_id: 'ev-old',
+          username: 'carol',
+          is_active: 1,
+          decided_ts: 1600,
+        },
+        // Soft-deleted validator on the current edit — must not appear.
+        {
+          project_id: 'proj-x',
+          file_id: 'file-x',
+          cell_id: 'c1',
+          edit_event_id: 'ev-current',
+          username: 'dave',
+          is_active: 0,
+          decided_ts: 1752,
         },
       ],
     })
-    const token = await makeTestToken(SECRET, { fileId: 'file-x' })
+    const token = await makeTestToken(SECRET, { fileId: 'file-x', projectId: 'proj-x' })
     const req = new Request('https://w/cells/audit-stats?fileId=file-x', {
       headers: { Authorization: `Bearer ${token}` },
     })
     const res = (await handleCellsAuditReadRequest(req, envWith(db)))!
     expect(res.status).toBe(200)
     const body = (await res.json()) as {
-      cells: { cellId: string; editCount: number; contentHash: string }[]
+      cells: {
+        cellId: string
+        editCount: number
+        contentHash: string
+        lastEditAt: number | null
+        lastEditEventId: string | null
+        activeValidators: string[]
+      }[]
     }
-    expect(body.cells).toEqual([
-      { cellId: 'c1', editCount: 3, contentHash: 'abcd1234' },
-    ])
+    const c1 = body.cells.find((c) => c.cellId === 'c1')!
+    expect(c1.editCount).toBe(3)
+    expect(c1.contentHash).toBe('abcd1234')
+    expect(c1.lastEditAt).toBe(1700)
+    expect(c1.lastEditEventId).toBe('ev-current')
+    expect(new Set(c1.activeValidators)).toEqual(new Set(['alice', 'bob']))
+
+    const c2 = body.cells.find((c) => c.cellId === 'c2')!
+    expect(c2.lastEditEventId).toBe(null)
+    expect(c2.activeValidators).toEqual([])
   })
 })

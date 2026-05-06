@@ -40,8 +40,22 @@ function makeWrapper() {
 const TOKEN_FN = vi.fn().mockResolvedValue("test-token")
 
 const STATS_RESPONSE = [
-  { cellId: "cell-1", editCount: 3, contentHash: "abc123" },
-  { cellId: "cell-2", editCount: 7, contentHash: "def456" },
+  {
+    cellId: "cell-1",
+    editCount: 3,
+    contentHash: "abc123",
+    lastEditAt: 1700,
+    lastEditEventId: "ev-1",
+    activeValidators: ["alice", "bob"],
+  },
+  {
+    cellId: "cell-2",
+    editCount: 7,
+    contentHash: "def456",
+    lastEditAt: 1800,
+    lastEditEventId: null,
+    activeValidators: [],
+  },
 ]
 
 // ---------------------------------------------------------------------------
@@ -72,11 +86,17 @@ describe("useCellsAuditStats", () => {
       cellId: "cell-1",
       editCount: 3,
       contentHash: "abc123",
+      lastEditAt: 1700,
+      lastEditEventId: "ev-1",
+      activeValidators: ["alice", "bob"],
     })
     expect(result.current.byCellId.get("cell-2")).toEqual({
       cellId: "cell-2",
       editCount: 7,
       contentHash: "def456",
+      lastEditAt: 1800,
+      lastEditEventId: null,
+      activeValidators: [],
     })
   })
 

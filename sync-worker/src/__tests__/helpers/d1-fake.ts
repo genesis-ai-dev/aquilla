@@ -12,7 +12,8 @@
 //   INSERT INTO events (...) -- canonical event audit row
 //   SELECT … FROM events WHERE project_id = ? AND file_id = ? … — GET /events
 //   SELECT … FROM cell_validators WHERE … — GET /cell-validators
-//   SELECT cell_id, COALESCE(edit_count,0) … FROM cells WHERE file_id = ? — audit-stats
+//   SELECT cell_id, COALESCE(edit_count,0), …, last_edit_at, last_edit_event_id FROM cells WHERE file_id = ? — audit-stats
+//   SELECT cell_id, edit_event_id, username FROM cell_validators WHERE project_id = ? AND file_id = ? AND is_active = 1 — audit-stats validators
 //   INSERT INTO cells (...) ON CONFLICT ... — event-projection (edit_count literal 1) or projection.ts (literal 0)
 //   INSERT INTO cell_validators (...) ON CONFLICT ... -- from event-projection
 //   UPDATE cells SET validated = (...) WHERE ... -- from validate/unvalidate
@@ -215,7 +216,7 @@ export function makeInMemoryD1(tables: Partial<Tables> = {}): InMemoryD1 {
 
     // ── SELECT cells audit stats (GET /cells/audit-stats) ────────────────────
     if (
-      /SELECT cell_id, COALESCE\(edit_count, 0\) as edit_count, content_hash FROM cells WHERE file_id = \?/.test(
+      /SELECT cell_id, COALESCE\(edit_count, 0\) AS edit_count, content_hash, last_edit_at, CASE WHEN projected_from LIKE 'event:%' THEN substr\(projected_from, 7\) ELSE NULL END AS last_edit_event_id FROM cells WHERE file_id = \?/.test(
         normalized,
       )
     ) {
@@ -226,6 +227,29 @@ export function makeInMemoryD1(tables: Partial<Tables> = {}): InMemoryD1 {
           cell_id: c.cell_id,
           edit_count: c.edit_count ?? 0,
           content_hash: c.content_hash,
+          last_edit_at: c.last_edit_at,
+          last_edit_event_id: c.projected_from?.startsWith('event:')
+            ? c.projected_from.slice('event:'.length)
+            : null,
+        }))
+    }
+
+    // ── SELECT cell_validators (active, by file — audit-stats join) ──────────
+    if (
+      /^SELECT cell_id, edit_event_id, username FROM cell_validators WHERE project_id = \? AND file_id = \? AND is_active = 1$/.test(
+        normalized,
+      )
+    ) {
+      const projectId = args[0] as string
+      const fileId = args[1] as string
+      return db.cell_validators
+        .filter(
+          (v) => v.project_id === projectId && v.file_id === fileId && v.is_active === 1,
+        )
+        .map((v) => ({
+          cell_id: v.cell_id,
+          edit_event_id: v.edit_event_id,
+          username: v.username,
         }))
     }
 

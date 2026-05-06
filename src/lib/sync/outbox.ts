@@ -17,6 +17,31 @@ export interface OutboxRecord {
 
 let dbPromise: Promise<IDBDatabase> | null = null
 
+/**
+ * Subscribers fired whenever the outbox contents change (enqueue or remove).
+ * Used by overlay hooks to refresh pending-event views without polling. The
+ * IDB write itself is the durable record; this is just an in-process notify.
+ */
+type OutboxListener = () => void
+const listeners = new Set<OutboxListener>()
+
+export function subscribeToOutbox(cb: OutboxListener): () => void {
+  listeners.add(cb)
+  return () => {
+    listeners.delete(cb)
+  }
+}
+
+function notifyOutboxChanged(): void {
+  for (const cb of listeners) {
+    try {
+      cb()
+    } catch {
+      /* listener errors don't impair the writer */
+    }
+  }
+}
+
 /** Closes the singleton connection (tests only). */
 export async function resetOutboxConnectionForTests(): Promise<void> {
   if (!dbPromise) return
@@ -27,6 +52,7 @@ export async function resetOutboxConnectionForTests(): Promise<void> {
     /* ignore */
   }
   dbPromise = null
+  listeners.clear()
 }
 
 async function openDb(): Promise<IDBDatabase> {
@@ -63,6 +89,7 @@ export async function enqueueOutboxEvent(event: CqrsRawEvent): Promise<void> {
     tx.oncomplete = () => resolve()
     tx.objectStore(STORE).put(rec)
   })
+  notifyOutboxChanged()
 }
 
 /** Oldest-first pending rows, at most `limit`. */
@@ -103,6 +130,7 @@ export async function removeOutboxEvents(ids: string[]): Promise<void> {
       store.delete(id)
     }
   })
+  notifyOutboxChanged()
 }
 
 export async function outboxPendingCount(): Promise<number> {

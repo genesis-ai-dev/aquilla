@@ -62,7 +62,7 @@ import {
   setCqrsOutboxBridge,
   buildFileScopedTokenFetcher,
 } from "@/lib/sync/cqrs-bridge"
-import { useCellsAuditStats } from "@/hooks/useCellsAuditStats"
+import { useCellsAuditStatsWithOverlay } from "@/hooks/useCellsAuditStatsWithOverlay"
 import { useCorpusBackfill } from "@/hooks/useCorpusBackfill"
 import { Film, Scale, MessagesSquare, Camera, Share2, Settings as SettingsIcon, Lock, ClipboardList, Brain, Trash2, Undo2 } from "lucide-react"
 import { restoreProject } from "@/lib/store/project-index"
@@ -211,17 +211,24 @@ export function ProjectWorkspace() {
     getTokenForFile,
   })
 
-  // D1-backed audit stats for the active file; O(1) lookup by cellId.
-  // Enabled only when we have an authenticated session and an active file.
+  // D1-backed audit stats for the active file with the client outbox applied
+  // on top — pending commits/validates show up immediately, before the next
+  // 30s refetch. Source of truth for project-wide validation views.
   const auditStatsEnabled = Boolean(project?.id && activeFileId && frontierSession?.jwt)
-  const { byCellId: auditStatsByCellId } = useCellsAuditStats({
+  const { byCellId: auditStatsByCellId } = useCellsAuditStatsWithOverlay({
     enabled: auditStatsEnabled,
     fileId: activeFileId,
     getTokenForFile,
   })
 
   const validationCount = project ? readValidationCount(project) : 1
-  const cells = useCells(doc, activeFileId ?? "", currentUsername, validationCount)
+  const cells = useCells(
+    doc,
+    activeFileId ?? "",
+    currentUsername,
+    validationCount,
+    auditStatsByCellId,
+  )
   const { hasAny: hasUnfinished, findNext: findNextUnfinished } = useNextUnfinished(cells, validationCount)
   const handleJumpNextUnfinished = useCallback(() => {
     const currentIndex = editorRef.current?.getCurrentIndex?.() ?? 0

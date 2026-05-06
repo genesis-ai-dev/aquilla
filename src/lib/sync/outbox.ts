@@ -1,18 +1,37 @@
 /**
  * IndexedDB-backed outbox for CQRS events (Phase 2). Survives tab close;
  * drained by the flusher hook with idempotent POST /events retries.
+ *
+ * Records carry per-attempt status so the inspector UI can distinguish
+ * "just enqueued" from "retried, kept by the server" (401/403 quarantine
+ * waiting on a fresh token). Updates are best-effort via `markOutboxAttempt`;
+ * a failed write doesn't block the flusher.
  */
 
 import type { CqrsRawEvent } from "./cqrs-types"
 
 const DB_NAME = "codex-cqrs-outbox"
-const DB_VERSION = 1
+/** v2: adds `attempts`, `lastAttemptAt`, `lastError` to existing rows. */
+const DB_VERSION = 2
 const STORE = "outbox"
+
+export interface OutboxAttemptError {
+  status: number
+  reason: string
+}
 
 export interface OutboxRecord {
   id: string
   enqueuedAt: number
   event: CqrsRawEvent
+  /** How many flush attempts have hit the server for this record. 0 = never tried. */
+  attempts: number
+  /** Wallclock of the most recent attempt; null when attempts === 0. */
+  lastAttemptAt: number | null
+  /** Last server-side rejection that didn't cause removal (auth quarantine,
+   *  or 5xx/network on a non-final outcome). null when last attempt landed
+   *  the record (which by then would've been deleted) or when never tried. */
+  lastError: OutboxAttemptError | null
 }
 
 let dbPromise: Promise<IDBDatabase> | null = null
@@ -64,11 +83,35 @@ async function openDb(): Promise<IDBDatabase> {
       const req = indexedDB.open(DB_NAME, DB_VERSION)
       req.onerror = () => reject(req.error ?? new Error("IDB open failed"))
       req.onsuccess = () => resolve(req.result)
-      req.onupgradeneeded = () => {
+      req.onupgradeneeded = (ev) => {
         const db = req.result
+        const tx = req.transaction
         if (!db.objectStoreNames.contains(STORE)) {
           const store = db.createObjectStore(STORE, { keyPath: "id" })
           store.createIndex("enqueuedAt", "enqueuedAt", { unique: false })
+          return
+        }
+        // v1 → v2: backfill the new fields on existing rows so reads/writes
+        // that assume their presence don't have to handle undefined.
+        const upgradeEv = ev as IDBVersionChangeEvent
+        if (upgradeEv.oldVersion < 2 && tx) {
+          const store = tx.objectStore(STORE)
+          const cursorReq = store.openCursor()
+          cursorReq.onsuccess = () => {
+            const cursor = cursorReq.result
+            if (!cursor) return
+            const rec = cursor.value as Partial<OutboxRecord>
+            const next: OutboxRecord = {
+              id: rec.id!,
+              enqueuedAt: rec.enqueuedAt ?? Date.now(),
+              event: rec.event!,
+              attempts: rec.attempts ?? 0,
+              lastAttemptAt: rec.lastAttemptAt ?? null,
+              lastError: rec.lastError ?? null,
+            }
+            cursor.update(next)
+            cursor.continue()
+          }
         }
       }
     })
@@ -82,12 +125,63 @@ export async function enqueueOutboxEvent(event: CqrsRawEvent): Promise<void> {
     id: event.id,
     enqueuedAt: Date.now(),
     event,
+    attempts: 0,
+    lastAttemptAt: null,
+    lastError: null,
   }
   await new Promise<void>((resolve, reject) => {
     const tx = db.transaction(STORE, "readwrite")
     tx.onerror = () => reject(tx.error ?? new Error("enqueue tx failed"))
     tx.oncomplete = () => resolve()
     tx.objectStore(STORE).put(rec)
+  })
+  notifyOutboxChanged()
+}
+
+/**
+ * Record an attempt outcome on the kept-back records. Called by the flusher
+ * after a POST resolves: each record that wasn't accepted (or permanently
+ * rejected) gets its `attempts` bumped and, if applicable, a `lastError`
+ * stamped. Best-effort — IDB write failures are swallowed so the flusher
+ * keeps draining.
+ */
+export async function markOutboxAttempt(
+  ids: string[],
+  outcome: { error: OutboxAttemptError | null; at?: number },
+): Promise<void> {
+  if (ids.length === 0) return
+  let db: IDBDatabase
+  try {
+    db = await openDb()
+  } catch {
+    return
+  }
+  const at = outcome.at ?? Date.now()
+  await new Promise<void>((resolve) => {
+    const tx = db.transaction(STORE, "readwrite")
+    // Don't reject the caller on individual write errors — flusher progress
+    // matters more than per-attempt bookkeeping.
+    tx.onerror = () => resolve()
+    tx.oncomplete = () => resolve()
+    const store = tx.objectStore(STORE)
+    for (const id of ids) {
+      const getReq = store.get(id)
+      getReq.onsuccess = () => {
+        const rec = getReq.result as Partial<OutboxRecord> | undefined
+        if (!rec || !rec.id || !rec.event) return
+        const next: OutboxRecord = {
+          id: rec.id,
+          enqueuedAt: rec.enqueuedAt ?? Date.now(),
+          event: rec.event,
+          // Coalesce in case the v1 → v2 upgrade hasn't reached this row yet
+          // (defense-in-depth; the upgrade-on-open should have backfilled).
+          attempts: (rec.attempts ?? 0) + 1,
+          lastAttemptAt: at,
+          lastError: outcome.error,
+        }
+        store.put(next)
+      }
+    }
   })
   notifyOutboxChanged()
 }

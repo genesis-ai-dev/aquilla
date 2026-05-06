@@ -4,8 +4,10 @@
 
 import type { CqrsRawEvent } from "./cqrs-types"
 import {
+  markOutboxAttempt,
   peekOutboxBatch,
   removeOutboxEvents,
+  type OutboxAttemptError,
   type OutboxRecord,
 } from "./outbox"
 import { syncWorkerHttpOrigin } from "./sync-worker-url"
@@ -71,11 +73,20 @@ export async function flushOutboxBatch(deps: FlushDeps): Promise<{
       },
       body: JSON.stringify({ events }),
     })
-  } catch {
+  } catch (err) {
+    const reason = err instanceof Error ? err.message : "network error"
+    await markOutboxAttempt(
+      batch.map((r) => r.id),
+      { error: { status: 0, reason } },
+    )
     return { posted: events.length, accepted: 0, networkError: true }
   }
 
   if (!res.ok) {
+    await markOutboxAttempt(
+      batch.map((r) => r.id),
+      { error: { status: res.status, reason: `HTTP ${res.status}` } },
+    )
     return { posted: events.length, accepted: 0, networkError: true }
   }
 
@@ -83,21 +94,59 @@ export async function flushOutboxBatch(deps: FlushDeps): Promise<{
   try {
     body = (await res.json()) as PostBody
   } catch {
+    await markOutboxAttempt(
+      batch.map((r) => r.id),
+      { error: { status: 0, reason: "malformed server response" } },
+    )
     return { posted: events.length, accepted: 0, networkError: true }
   }
 
-  const acceptedIds = (body.accepted ?? []).map((a) => a.id)
-  const permanentlyRejectedIds = (body.rejected ?? [])
-    .filter((r) => r.status >= 400 && r.status < 500 && r.status !== 401 && r.status !== 403)
-    .map((r) => r.id)
-  const removableIds = [...new Set([...acceptedIds, ...permanentlyRejectedIds])]
+  const acceptedIds = new Set((body.accepted ?? []).map((a) => a.id))
+  const permanentlyRejectedIds = new Set(
+    (body.rejected ?? [])
+      .filter((r) => r.status >= 400 && r.status < 500 && r.status !== 401 && r.status !== 403)
+      .map((r) => r.id),
+  )
+  const removableIds = [...acceptedIds, ...permanentlyRejectedIds]
   if (removableIds.length > 0) {
     await removeOutboxEvents(removableIds)
   }
 
+  // Records the server kept-back (401/403 auth quarantine, or any record we
+  // can't tell from `body` because the server didn't ack it explicitly) get
+  // their attempt recorded so the inspector shows why they're sitting around.
+  const rejectionByid = new Map<string, OutboxAttemptError>()
+  for (const r of body.rejected ?? []) {
+    rejectionByid.set(r.id, { status: r.status, reason: r.reason })
+  }
+  const keptBackIds: string[] = []
+  const keptBackUpdates: Array<[string, OutboxAttemptError | null]> = []
+  for (const r of batch) {
+    if (acceptedIds.has(r.id)) continue
+    if (permanentlyRejectedIds.has(r.id)) continue
+    keptBackIds.push(r.id)
+    keptBackUpdates.push([r.id, rejectionByid.get(r.id) ?? null])
+  }
+  if (keptBackIds.length > 0) {
+    // Group by error so we can mark in shared transactions where possible.
+    const byErr = new Map<string, { err: OutboxAttemptError | null; ids: string[] }>()
+    for (const [id, err] of keptBackUpdates) {
+      const key = err ? `${err.status}|${err.reason}` : "_none_"
+      let bucket = byErr.get(key)
+      if (!bucket) {
+        bucket = { err, ids: [] }
+        byErr.set(key, bucket)
+      }
+      bucket.ids.push(id)
+    }
+    for (const { err, ids } of byErr.values()) {
+      await markOutboxAttempt(ids, { error: err })
+    }
+  }
+
   return {
     posted: events.length,
-    accepted: acceptedIds.length,
+    accepted: acceptedIds.size,
     networkError: false,
   }
 }

@@ -66,7 +66,14 @@ function unvalidate(
 }
 
 function rec(event: CqrsRawEvent, enqueuedAt: number): OutboxRecord {
-  return { id: event.id, enqueuedAt, event }
+  return {
+    id: event.id,
+    enqueuedAt,
+    event,
+    attempts: 0,
+    lastAttemptAt: null,
+    lastError: null,
+  }
 }
 
 const baseStats = (overrides: Partial<CellAuditStats> = {}): CellAuditStats => ({

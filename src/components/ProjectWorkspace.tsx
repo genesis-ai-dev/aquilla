@@ -58,6 +58,7 @@ import {
 import { eagerlyPrefetchPeaks } from "@/lib/audio/eager-peaks"
 import { useAutoSync } from "@/hooks/useAutoSync"
 import { useOutboxFlusher } from "@/hooks/useOutboxFlusher"
+import { usePendingOutboxRecords } from "@/hooks/usePendingOutboxRecords"
 import {
   setCqrsOutboxBridge,
   buildFileScopedTokenFetcher,
@@ -209,6 +210,10 @@ export function ProjectWorkspace() {
   const { pendingCount: outboxPending, failureStreak: outboxFailures } = useOutboxFlusher({
     enabled: outboxFlushEnabled,
     getTokenForFile,
+  })
+  const outboxRecords = usePendingOutboxRecords({
+    enabled: Boolean(project?.id),
+    fileId: null,
   })
 
   // D1-backed audit stats for the active file with the client outbox applied
@@ -1045,6 +1050,7 @@ export function ProjectWorkspace() {
                   <OutboxSyncIndicator
                     pendingCount={outboxPending}
                     failureStreak={outboxFailures}
+                    records={outboxRecords}
                   />
                 </div>
               }

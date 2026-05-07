@@ -11,9 +11,12 @@ interface OutboxSyncIndicatorProps {
   className?: string
 }
 
+type ChipTone = "idle" | "queued" | "stuck"
+
 /**
- * Shows when CQRS audit events are waiting in IndexedDB or flusher retries are failing.
- * Clicking opens the OutboxInspectorPopover so users can see what's queued and why.
+ * Renders the outbox status chip in the workspace status bar. Always visible
+ * so users can open the inspector even when the queue is empty (peace of mind:
+ * "is anything stuck?"). Tone shifts as the queue fills up or retries fail.
  */
 export function OutboxSyncIndicator({
   pendingCount,
@@ -21,21 +24,23 @@ export function OutboxSyncIndicator({
   records,
   className,
 }: OutboxSyncIndicatorProps) {
-  if (pendingCount === 0 && failureStreak < 3) return null
   const stuck = failureStreak >= 3
-  const label = stuck ? "Sync backlog" : `Queued ${pendingCount}`
-  const title = stuck
-    ? "Could not sync audit events to the server. Edits are still saved locally."
-    : `${pendingCount} change(s) queued for server sync`
+  const tone: ChipTone = stuck ? "stuck" : pendingCount > 0 ? "queued" : "idle"
 
-  const trigger = (
-    <ChipButton
-      label={label}
-      title={title}
-      stuck={stuck}
-      className={className}
-    />
-  )
+  const label =
+    tone === "stuck"
+      ? "Sync backlog"
+      : tone === "queued"
+        ? `Queued ${pendingCount}`
+        : "Synced"
+  const title =
+    tone === "stuck"
+      ? "Could not sync audit events to the server. Edits are still saved locally. Click to inspect."
+      : tone === "queued"
+        ? `${pendingCount} change(s) queued for server sync. Click to inspect.`
+        : "All audit events synced. Click to inspect the queue."
+
+  const trigger = <ChipButton label={label} title={title} tone={tone} className={className} />
 
   if (!records) return trigger
 
@@ -45,12 +50,12 @@ export function OutboxSyncIndicator({
 interface ChipProps {
   label: string
   title: string
-  stuck: boolean
+  tone: ChipTone
   className?: string
 }
 
 const ChipButton = forwardRef<HTMLButtonElement, ChipProps>(function ChipButton(
-  { label, title, stuck, className, ...rest },
+  { label, title, tone, className, ...rest },
   ref,
 ) {
   return (
@@ -61,7 +66,9 @@ const ChipButton = forwardRef<HTMLButtonElement, ChipProps>(function ChipButton(
       className={cn(
         "rounded-sm px-1.5 py-0.5 text-xs tabular-nums transition-colors",
         "hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-        stuck ? "text-amber-600 dark:text-amber-500" : "text-muted-foreground",
+        tone === "stuck" && "text-amber-600 dark:text-amber-500",
+        tone === "queued" && "text-foreground",
+        tone === "idle" && "text-muted-foreground/70",
         className,
       )}
       {...rest}

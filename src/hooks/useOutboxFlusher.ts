@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef, useCallback } from "react"
 import { flushOutboxBatch } from "@/lib/sync/outbox-flush"
-import { outboxPendingCount } from "@/lib/sync/outbox"
+import { outboxPendingCount, subscribeToOutbox } from "@/lib/sync/outbox"
 
 const BASE_INTERVAL_MS = 5000
 const MAX_BACKOFF_MS = 60_000
@@ -32,6 +32,12 @@ export function useOutboxFlusher(options: UseOutboxFlusherOptions): {
 
   useEffect(() => {
     void refreshPending()
+    if (!options.enabled) return
+    // Without this, the count only updates inside the flush cycle — and the
+    // flush cycle short-circuits while offline, so a backlog of edits would
+    // pile up in IDB invisibly.
+    const unsub = subscribeToOutbox(() => void refreshPending())
+    return unsub
   }, [refreshPending, options.enabled])
 
   useEffect(() => {

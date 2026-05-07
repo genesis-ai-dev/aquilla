@@ -148,5 +148,5 @@ export const MMS_MODEL: AiModelInfo = {
   label: "MMS (multilingual TTS)",
   sizeMb: 130,
   rationale:
-    "Meta's MMS-TTS runs in your browser for supported Xenova language repos. Each language is downloaded the first time you use it.",
+    "Meta's MMS-TTS runs in your browser from browser-ready ONNX language models. Each language is downloaded the first time you use it.",
 }

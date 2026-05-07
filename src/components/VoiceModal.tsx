@@ -23,8 +23,10 @@ import {
 } from "@/lib/audio/voices"
 import { synthesizeToWavBlob } from "@/lib/audio/tts"
 import {
+  HAS_EXTENDED_MMS_MODELS,
   HAS_HOSTED_MMS_MODELS,
   POPULAR_MMS_LANGUAGES,
+  USE_SHERPA_MMS_MODELS,
   mmsModelIdForLanguage,
 } from "@/lib/audio/mms-languages"
 import { setUserApiKey, useUserApiKey } from "@/lib/store/user-api-keys"
@@ -522,7 +524,7 @@ interface MmsLanguagePickerProps {
 
 function MmsLanguagePicker({ value, onChange }: MmsLanguagePickerProps) {
   const knownCode = POPULAR_MMS_LANGUAGES.some((l) => l.code === value)
-  const selectValue = knownCode ? value : HAS_HOSTED_MMS_MODELS ? "__other__" : ""
+  const selectValue = knownCode ? value : HAS_EXTENDED_MMS_MODELS ? "__other__" : ""
   const modelId = mmsModelIdForLanguage(value) ?? mmsModelIdForLanguage("eng") ?? "Xenova/mms-tts-eng"
   return (
     <div className="space-y-3">
@@ -538,7 +540,7 @@ function MmsLanguagePicker({ value, onChange }: MmsLanguagePickerProps) {
             }}
             className="mt-1 w-full rounded border bg-background px-3 py-2 text-sm"
           >
-            {!knownCode && !HAS_HOSTED_MMS_MODELS && (
+            {!knownCode && !HAS_EXTENDED_MMS_MODELS && (
               <option value="" disabled>
                 {value ? `Unsupported code: ${value}` : "Choose a language"}
               </option>
@@ -546,12 +548,12 @@ function MmsLanguagePicker({ value, onChange }: MmsLanguagePickerProps) {
             {POPULAR_MMS_LANGUAGES.map((l) => (
               <option key={l.code} value={l.code}>{l.name} ({l.code})</option>
             ))}
-            {HAS_HOSTED_MMS_MODELS && (
-              <option value="__other__">Other hosted code</option>
+            {HAS_EXTENDED_MMS_MODELS && (
+              <option value="__other__">Other MMS code</option>
             )}
           </select>
         </div>
-        {HAS_HOSTED_MMS_MODELS && (
+        {HAS_EXTENDED_MMS_MODELS && (
           <div className="min-w-0">
             <Label htmlFor="mms-code">MMS code</Label>
             <Input
@@ -564,14 +566,16 @@ function MmsLanguagePicker({ value, onChange }: MmsLanguagePickerProps) {
           </div>
         )}
       </div>
-      {!HAS_HOSTED_MMS_MODELS && !knownCode && value && (
+      {!HAS_EXTENDED_MMS_MODELS && !knownCode && value && (
         <p className="text-xs text-destructive">
           This MMS code is not available in the public browser model set.
         </p>
       )}
       <p className="text-xs text-muted-foreground">
         Loads <Code>{modelId}</Code> on first use (~130 MB per language, cached after).
-        {HAS_HOSTED_MMS_MODELS ? (
+        {USE_SHERPA_MMS_MODELS ? (
+          " Sherpa-ONNX MMS codes are allowed."
+        ) : HAS_HOSTED_MMS_MODELS ? (
           " Hosted R2 MMS codes are allowed."
         ) : (
           " Only browser-ready Xenova MMS-TTS repos are listed here."

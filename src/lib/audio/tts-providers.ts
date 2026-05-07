@@ -1,5 +1,5 @@
 import type { ProjectTtsSettings, TtsProvider, Voice } from "@/lib/parsers/types"
-import { HAS_HOSTED_MMS_MODELS, isSupportedMmsLanguageCode } from "./mms-languages"
+import { HAS_HOSTED_MMS_MODELS, USE_SHERPA_MMS_MODELS, isSupportedMmsLanguageCode } from "./mms-languages"
 
 export const DEFAULT_TTS_PROVIDER: TtsProvider = "gemini"
 
@@ -63,9 +63,11 @@ export const TTS_PROVIDER_INFOS: readonly TtsProviderInfo[] = [
     id: "mms",
     title: "MMS (multilingual)",
     shortTitle: "MMS",
-    hint: HAS_HOSTED_MMS_MODELS
-      ? "Local browser voices loaded from the hosted MMS model bucket."
-      : "Local browser voices for supported MMS language repos.",
+    hint: USE_SHERPA_MMS_MODELS
+      ? "Local browser voices loaded from the Sherpa-ONNX MMS mirror."
+      : HAS_HOSTED_MMS_MODELS
+        ? "Local browser voices loaded from the hosted MMS model bucket."
+        : "Local browser voices for supported MMS language repos.",
     localModel: "mms",
   },
   {

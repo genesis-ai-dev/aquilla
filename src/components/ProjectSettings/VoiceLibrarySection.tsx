@@ -7,7 +7,7 @@ import { cn } from "@/lib/utils"
 import { ApiKeyField } from "@/components/ApiKeyField"
 import type { ProjectTtsSettings, TtsProvider } from "@/lib/parsers/types"
 import { DEFAULT_TTS_PROVIDER, TTS_PROVIDER_INFOS } from "@/lib/audio/tts-providers"
-import { HAS_HOSTED_MMS_MODELS } from "@/lib/audio/mms-languages"
+import { HAS_HOSTED_MMS_MODELS, USE_SHERPA_MMS_MODELS } from "@/lib/audio/mms-languages"
 import { setUserApiKey, useUserApiKey } from "@/lib/store/user-api-keys"
 
 interface Props {
@@ -54,7 +54,9 @@ export function VoiceLibrarySection({ settings, onChange }: Props) {
         {provider === "mms" && (
           <p className="text-xs text-muted-foreground">
             No API key. Each MMS voice is tied to one language code.
-            {HAS_HOSTED_MMS_MODELS
+            {USE_SHERPA_MMS_MODELS
+              ? " MMS codes are loaded from the public Sherpa-ONNX mirror."
+              : HAS_HOSTED_MMS_MODELS
               ? " Hosted MMS codes are loaded from the configured model bucket."
               : " The public browser set is limited; pick one of the listed languages in the voice editor."}
           </p>

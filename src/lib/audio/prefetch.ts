@@ -25,6 +25,7 @@ import type {
   WarmedMessage as MmsWarmed,
   WarmupRequest as MmsWarmupRequest,
 } from "./mms-worker"
+import { MMS_SHERPA_CACHE_KEY, USE_SHERPA_MMS_MODELS } from "./mms-languages"
 import { DEFAULT_MMS_LANGUAGE, inferMmsLanguageCode } from "./tts-providers"
 
 export type ModelId = "whisper" | "kokoro" | "mms"
@@ -102,13 +103,18 @@ export async function hydratePrefetchStatus(): Promise<void> {
   if (typeof caches === "undefined") return
   try {
     const has = await caches.has(TRANSFORMERS_CACHE_KEY)
-    if (!has) return
-    const cache = await caches.open(TRANSFORMERS_CACHE_KEY)
-    const keys = await cache.keys()
-    const urls = keys.map((k) => k.url)
-    for (const m of Object.keys(MODEL_REPOS) as ModelId[]) {
-      if (status.get(m)?.kind === "downloading") continue
-      if (urls.some((u) => u.includes(MODEL_REPOS[m]))) status.set(m, READY)
+    if (has) {
+      const cache = await caches.open(TRANSFORMERS_CACHE_KEY)
+      const keys = await cache.keys()
+      const urls = keys.map((k) => k.url)
+      for (const m of Object.keys(MODEL_REPOS) as ModelId[]) {
+        if (status.get(m)?.kind === "downloading") continue
+        if (urls.some((u) => u.includes(MODEL_REPOS[m]))) status.set(m, READY)
+      }
+    }
+    if (USE_SHERPA_MMS_MODELS && status.get("mms")?.kind !== "downloading") {
+      const sherpaHasCache = await caches.has(MMS_SHERPA_CACHE_KEY)
+      if (sherpaHasCache) status.set("mms", READY)
     }
     notify()
   } catch {
@@ -124,16 +130,18 @@ export async function clearPrefetchStatus(model?: ModelId): Promise<void> {
   if (typeof caches === "undefined") return
   try {
     const has = await caches.has(TRANSFORMERS_CACHE_KEY)
-    if (!has) return
-    const cache = await caches.open(TRANSFORMERS_CACHE_KEY)
-    const keys = await cache.keys()
-    await Promise.all(
-      keys.map((req) => {
-        if (!model) return cache.delete(req)
-        if (req.url.includes(MODEL_REPOS[model])) return cache.delete(req)
-        return Promise.resolve(false)
-      })
-    )
+    if (has) {
+      const cache = await caches.open(TRANSFORMERS_CACHE_KEY)
+      const keys = await cache.keys()
+      await Promise.all(
+        keys.map((req) => {
+          if (!model) return cache.delete(req)
+          if (req.url.includes(MODEL_REPOS[model])) return cache.delete(req)
+          return Promise.resolve(false)
+        })
+      )
+    }
+    if (!model || model === "mms") await caches.delete(MMS_SHERPA_CACHE_KEY)
   } catch {
     /* ignore */
   }

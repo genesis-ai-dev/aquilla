@@ -1,9 +1,24 @@
 # MMS TTS R2 Hosting
 
-The app can use two MMS sources:
+The app can use three MMS sources:
 
-- Default: public `Xenova/mms-tts-*` browser-ready repos. This set is small.
+- Default: public Sherpa-ONNX MMS files from `willwade/mms-tts-multilingual-models-onnx`. This set is broad and uses `model.onnx` + `tokens.txt` per language.
+- Legacy: public `Xenova/mms-tts-*` browser-ready repos. This set is small; set `VITE_MMS_RUNTIME=transformers` to use it.
 - Hosted: converted MMS ONNX repos from our own object storage.
+
+The default Sherpa-ONNX runtime downloads:
+
+```text
+https://huggingface.co/willwade/mms-tts-multilingual-models-onnx/resolve/main/ita/model.onnx
+https://huggingface.co/willwade/mms-tts-multilingual-models-onnx/resolve/main/ita/tokens.txt
+```
+
+Override the mirror with:
+
+```bash
+VITE_MMS_SHERPA_ONNX_REMOTE_HOST=https://models.example.com
+VITE_MMS_SHERPA_ONNX_REPO=mms-tts-multilingual-models-onnx
+```
 
 Configure hosted MMS at build time:
 

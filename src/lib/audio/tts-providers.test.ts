@@ -34,9 +34,12 @@ describe("TTS provider normalization", () => {
     expect(inferMmsLanguageCode("eng")).toBe("eng")
   })
 
-  it("does not infer unsupported MMS repos", () => {
+  it("accepts extended MMS repository codes", () => {
+    expect(inferMmsLanguageCode("ita")).toBe("ita")
+  })
+
+  it("does not infer short language tags without an MMS mapping", () => {
     expect(inferMmsLanguageCode("it")).toBeUndefined()
-    expect(inferMmsLanguageCode("ita")).toBeUndefined()
     expect(inferMmsLanguageCode("sw-KE")).toBeUndefined()
   })
 

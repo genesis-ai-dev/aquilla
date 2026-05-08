@@ -23,7 +23,10 @@ interface ChatMessage { role: "system" | "user" | "assistant"; content: string }
  */
 export function resolveProvider(settings: CompletionSettings): CompletionProvider {
   if (settings.provider) return settings.provider
-  return settings.endpoint.trim() ? "custom" : "frontier"
+  // Tolerate partial records: server-synced overlays can produce a
+  // completionSettings object containing only `systemPrompt` (see
+  // useProject.ts overlaySettings), and legacy IDB rows predate `endpoint`.
+  return (settings.endpoint ?? "").trim() ? "custom" : "frontier"
 }
 
 export function buildPrompt(options: {
@@ -261,10 +264,11 @@ async function buildRequestTarget(
     }
   }
   // custom: local, self-hosted, or third-party OpenAI-compatible (OpenRouter, OpenAI, Groq, ...)
-  if (!settings.endpoint.trim()) {
+  const customEndpoint = (settings.endpoint ?? "").trim()
+  if (!customEndpoint) {
     throw new Error("No custom endpoint configured.")
   }
-  const { chatUrl } = normalizeOpenAIBaseUrl(settings.endpoint)
+  const { chatUrl } = normalizeOpenAIBaseUrl(customEndpoint)
   const headers: Record<string, string> = {}
   const key = resolveApiKey("completion", settings.apiKey)
   if (key) headers.Authorization = `Bearer ${key}`

@@ -207,6 +207,15 @@ describe("resolveProvider", () => {
   it("infers 'custom' when provider missing but legacy endpoint is populated", () => {
     expect(resolveProvider({ ...BASE, endpoint: "http://localhost:8000" })).toBe("custom")
   })
+
+  it("tolerates undefined endpoint (partial record from server overlay)", () => {
+    // Simulates the overlaySettings path that previously produced
+    // completionSettings = { systemPrompt } with endpoint missing,
+    // crashing the workspace render with TypeError on `endpoint.trim()`.
+    const partial = { systemPrompt: "x" } as unknown as CompletionSettings
+    expect(() => resolveProvider(partial)).not.toThrow()
+    expect(resolveProvider(partial)).toBe("frontier")
+  })
 })
 
 describe("complete", () => {

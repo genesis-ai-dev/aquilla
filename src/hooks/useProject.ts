@@ -4,6 +4,7 @@ import { getProject, patchProject, updateProject } from "@/lib/store/project-ind
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { minimalProjectRecord, resolveCloudProject } from "@/lib/sync/cloud-projects"
 import { useProjectSettings } from "@/hooks/useProjectSettings"
+import { buildCompletionSettings } from "@/hooks/useCompletionSettings"
 import type { ProjectWideSettings } from "@/lib/sync/project-settings"
 
 /**
@@ -17,10 +18,15 @@ function overlaySettings(record: ProjectRecord, settings: ProjectWideSettings): 
   if (settings.sourceLanguage != null) next.sourceLanguage = settings.sourceLanguage
   if (settings.targetLanguage != null) next.targetLanguage = settings.targetLanguage
   if (settings.systemPrompt != null) {
-    next.completionSettings = {
-      ...(record.completionSettings ?? ({} as any)),
-      systemPrompt: settings.systemPrompt,
-    }
+    // buildCompletionSettings fills required fields (endpoint, model, etc.)
+    // when the local record has no completionSettings yet — without it, an
+    // overlay containing only systemPrompt left endpoint undefined and
+    // crashed resolveProvider on the next render (white-screen on project
+    // load for fresh devices / projects synced from another user).
+    next.completionSettings = buildCompletionSettings(
+      record.completionSettings,
+      { systemPrompt: settings.systemPrompt },
+    )
   }
   if (settings.rules != null) next.rules = settings.rules
   if (settings.rulePenalties != null) next.rulePenalties = settings.rulePenalties

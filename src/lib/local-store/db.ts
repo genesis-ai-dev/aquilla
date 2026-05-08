@@ -16,6 +16,26 @@ import type {
 
 import type { Migration } from "./migrations"
 
+/**
+ * Thrown when a migration's content hash differs from what was recorded the
+ * first time it was applied. See DATA_PERSISTENCE_PLAN.md §13 — migration
+ * files are append-only; editing one after deploy is a critical bug.
+ *
+ * Recovery is "wipe local store and re-bootstrap from server snapshot."
+ */
+export class MigrationDriftError extends Error {
+  constructor(
+    public readonly version: number,
+    public readonly stored: string,
+    public readonly current: string,
+  ) {
+    super(
+      `migration ${version} content hash drift — recorded ${stored.slice(0, 8)}…, now ${current.slice(0, 8)}…. Migration files are append-only after deploy.`,
+    )
+    this.name = "MigrationDriftError"
+  }
+}
+
 let sqlite3Promise: Promise<Sqlite3Static> | null = null
 
 function getSqlite3(): Promise<Sqlite3Static> {
@@ -85,28 +105,57 @@ export class LocalStore {
 
   /**
    * Apply migrations that haven't been applied yet, in ascending version order.
-   * Idempotent: re-applying a migration that has already run is a no-op.
+   *
+   * Each migration is applied inside a transaction together with its
+   * `_migrations` row, so a partial failure (network drop, page close,
+   * malformed SQL) leaves the database in its pre-migration state.
+   *
+   * Each `_migrations` row records a SHA-256 hash of the canonicalized SQL.
+   * On every subsequent open we recompute the hash for already-applied
+   * migrations and throw `MigrationDriftError` on mismatch — this is the
+   * tripwire for the most common migration disaster (editing a migration
+   * file in place after it has shipped to users). See
+   * DATA_PERSISTENCE_PLAN.md §13 for the full policy.
    */
   async migrate(migrations: ReadonlyArray<Migration>): Promise<void> {
     this.db["exec"]({
       sql: `CREATE TABLE IF NOT EXISTS _migrations (
               version INTEGER PRIMARY KEY,
-              applied_at INTEGER NOT NULL
+              applied_at INTEGER NOT NULL,
+              content_hash TEXT NOT NULL
             )`,
     })
-    const applied = await this.query<{ version: number }>(
-      "SELECT version FROM _migrations",
+    const applied = await this.query<{ version: number; content_hash: string }>(
+      "SELECT version, content_hash FROM _migrations",
     )
-    const appliedSet = new Set(applied.map((r) => r.version))
-    const pending = [...migrations]
-      .filter((m) => !appliedSet.has(m.version))
-      .sort((a, b) => a.version - b.version)
-    for (const m of pending) {
-      this.db["exec"]({ sql: m.sql })
-      this.db["exec"]({
-        sql: "INSERT INTO _migrations (version, applied_at) VALUES (?, ?)",
-        bind: [m.version, Date.now()],
+    const appliedHash = new Map(applied.map((r) => [r.version, r.content_hash]))
+
+    const sorted = [...migrations].sort((a, b) => a.version - b.version)
+    for (const m of sorted) {
+      const hash = await hashMigrationSql(m.sql)
+      const stored = appliedHash.get(m.version)
+      if (stored !== undefined) {
+        if (stored !== hash) {
+          throw new MigrationDriftError(m.version, stored, hash)
+        }
+        continue
+      }
+      await this.transaction(async () => {
+        this.db["exec"]({ sql: m.sql })
+        await this.run(
+          "INSERT INTO _migrations (version, applied_at, content_hash) VALUES (?, ?, ?)",
+          [m.version, Date.now(), hash],
+        )
       })
     }
   }
+}
+
+async function hashMigrationSql(sql: string): Promise<string> {
+  const canonical = sql.replace(/\r\n/g, "\n").trim()
+  const data = new TextEncoder().encode(canonical)
+  const buffer = await globalThis.crypto.subtle.digest("SHA-256", data)
+  return Array.from(new Uint8Array(buffer))
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("")
 }

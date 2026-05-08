@@ -12,7 +12,7 @@
  *   // …subscribe to DO websocket, call applyChangeBatch on each broadcast
  */
 
-export { LocalStore, type LocalStoreOptions } from "./db"
+export { LocalStore, MigrationDriftError, type LocalStoreOptions } from "./db"
 export { MIGRATIONS, type Migration } from "./migrations"
 
 export {

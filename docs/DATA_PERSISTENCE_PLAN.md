@@ -613,7 +613,92 @@ CI requirement: every adapter ships with golden-file fixtures. PR cannot merge i
 
 ---
 
-## 13. Build order
+## 13. Schema evolution and migration safety
+
+This is the section that does not look load-bearing until the day it is. Read it before writing any migration, on either side.
+
+### 13.1 Premortem
+
+The failure modes we are designing against, ranked by likelihood × blast radius:
+
+1. **Edit-in-place after deploy.** A developer fixes a bug in an already-shipped migration file. Existing users' `_migrations` says version N ran, but their schema diverges from what the file now says it did. Silent corruption, no telemetry signal until something queries the affected column.
+2. **Mid-migration crash.** Migration runs `CREATE TABLE foo`; the page closes before the `INSERT INTO _migrations` row lands. Next open the runner sees N as not applied, retries, and fails because the table already exists. Database wedged for the user.
+3. **Server `NOT NULL` without default.** New migration adds `cells.scope_lang TEXT NOT NULL` without a default. Old clients writing rows that omit that column get rejected by the server. Cascading failures.
+4. **Server drops or renames a column.** New migration drops `cells.original_text`. Old clients reading that column get nulls. UI silently empties or misrenders.
+5. **Concurrent tab migration race.** Two tabs open against the same OPFS database; both check `_migrations`, both see "not applied", both run.
+6. **Snapshot has unknown column or record type.** Server emits a new field or kind the client doesn't know about. Client either crashes parsing or silently drops it.
+7. **FTS5 index out-of-date after schema change.** Adding tokenizer or column changes makes search results stale until rebuild.
+8. **Long migration freezes the tab.** A backfill over 30k cells runs synchronously on the main thread.
+
+### 13.2 Client-side migration rules (enforced)
+
+1. **Append-only.** Never edit a migration file once it has been merged to `main`. Never delete one. The shape of `_migrations` and the on-disk SQL are part of the public contract with every database that has ever been opened.
+2. **Content-hashed.** The migration runner stores a SHA-256 hash alongside `(version, applied_at)`. On every open it recomputes the hash for already-applied migrations and throws `MigrationDriftError` on mismatch. *See `LocalStore.migrate` in `src/lib/local-store/db.ts` and the runtime test in `migration-drift.test.ts`.*
+3. **CI-locked.** A `MIGRATIONS_LOCK.json` manifest at `src/lib/local-store/migrations/MIGRATIONS_LOCK.json` records each migration's expected hash. The vitest spec `migrations/lockfile.test.ts` fails if any committed migration's canonical hash diverges from the manifest. Editing a migration file fails CI; adding one requires updating the manifest in the same PR.
+4. **Atomic.** Each migration runs inside a SQLite transaction together with its `_migrations` insert. Partial failure leaves nothing applied — recovery is to rerun.
+5. **Limited operations.** Stick to: `CREATE TABLE/INDEX/TRIGGER/VIEW`, `DROP TABLE/INDEX/TRIGGER/VIEW`, `ALTER TABLE ADD COLUMN`, `ALTER TABLE RENAME COLUMN`. For type changes, `DROP COLUMN` on older SQLite versions, or constraint changes, use the rebuild pattern: create new table, `INSERT INTO new SELECT * FROM old`, drop old, rename new — all inside one migration file.
+6. **No data backfills in migrations.** Backfills can take seconds-to-minutes on Bible-sized DBs and freeze the tab. Backfills must (a) happen server-side and arrive via `applyChangeBatch`, or (b) run in a Worker post-migration with progress UI.
+7. **FTS5 rebuilds are explicit.** A migration that changes anything affecting `cells_fts` content must end with `INSERT INTO cells_fts(cells_fts) VALUES('rebuild');`.
+8. **Recovery from drift is a wipe.** When a client hits `MigrationDriftError`, the recovery path is "delete the local OPFS file → re-bootstrap from server snapshot → replay outbox after surfacing any conflicts." No data is lost server-side. Outbox records that haven't been ack'd are at risk and must be surfaced before the wipe — see §13.5.
+
+### 13.3 Server-side migration rules (D1)
+
+The asymmetry is critical: client migrations are run by code we deploy together; server migrations face *every* client version that is currently in the wild. Until you have telemetry showing zero traffic from old clients, every server change must be backward-compatible.
+
+1. **Always backward-compatible during the rollout window.** Old clients in the wild keep working unchanged. The "rollout window" defaults to 30 days, or until <0.1% of mutations come from clients that lack the new code. Track via the `User-Agent` + a `client_version` claim on the JWT.
+2. **Add columns NULL-default.** Never `NOT NULL` without an explicit default; never `NOT NULL` on a column that incoming mutations from old clients might omit.
+3. **Never drop or rename in a single step.** Use the deprecation cadence:
+   - **Step 1 — Add.** New column with default. Server dual-writes (projects from `old → new` and `new → old`). Old clients keep working unchanged.
+   - **Step 2 — Read.** Update server projections to prefer the new column on output. Update client code to read the new column. Roll out.
+   - **Step 3 — Wait.** Stay in this state for the rollout window. Monitor `user_agent` distribution.
+   - **Step 4 — Single-write.** Stop the `new → old` half of the dual-write. Old clients still work because they read both names from snapshot/changes responses (the snapshot includes both column names until step 5).
+   - **Step 5 — Drop.** Remove the old column in a follow-up migration once telemetry shows the previous step has been live for a full window with no errors.
+4. **Schema compatibility headers.** Server includes `X-Schema-Version: N` in `/snapshot` and `/changes` responses. Clients log a warning when their expected version differs. Future: hard-gate on `X-Min-Schema-Version` when the gap exceeds the rollout window.
+5. **Tolerant readers on both sides.** Both client and server tolerate unknown JSON fields silently. Adding a field on either side requires no immediate change on the other. *Verified by `forward-compat.test.ts` for the client.*
+6. **Mutations are versioned.** Every mutation endpoint accepts `expected_version` (as today) but also tolerates extra payload fields it doesn't know about — required for forward-compatibility from newer clients hitting the same endpoint.
+7. **Format adapters are forever.** Once a parser version (e.g. `usfm@2.4.1`) has produced cells in a project, that exact parser version stays callable in the codebase. Re-parsing always emits a new version (`usfm@2.5.0`); never silently change the output of an existing version.
+
+### 13.4 Compatibility-window contract
+
+| Action | Compatibility window |
+|---|---|
+| Add column (NULL-default) | 0 days — safe immediately |
+| Add table | 0 days |
+| Add index | 0 days |
+| Rename column | minimum 30 days, dual-write throughout |
+| Drop column | minimum 30 days after step 4 above |
+| Drop table | minimum 30 days; dual-read first |
+| Change column type | rebuild via the table-replacement pattern; same window as rename |
+| Change `NOT NULL` constraint (relax) | 0 days |
+| Change `NOT NULL` constraint (tighten) | minimum 30 days; backfill server-side first |
+
+Override only with explicit user-impact analysis in the PR description.
+
+### 13.5 Recovery from client drift
+
+When `LocalStore.migrate` throws `MigrationDriftError` on app open:
+
+1. The error reaches the React error boundary at the project route.
+2. UI shows: "Your local cache is incompatible with this version of the app. Reload to clear it and re-fetch from the server. *N pending edit(s) have not yet synced — these will be lost.*" with a "Reload" button.
+3. If `N > 0`, surface the affected cells in a list with their pending text so the user can copy anything they care about.
+4. On confirm: drop the OPFS file, reload the page. The next open does a fresh snapshot fetch and replay.
+
+The same path triggers if the OPFS file is corrupted or quota-exceeded — these are also "wipe and re-bootstrap" failure modes.
+
+### 13.6 Tooling guards in the repo
+
+| Guard | What it catches | Where |
+|---|---|---|
+| `MigrationDriftError` at runtime | edited migration that diverges from a previously-applied DB | `src/lib/local-store/db.ts` |
+| `migrations/lockfile.test.ts` | edited migration source between PRs | vitest CI |
+| `forward-compat.test.ts` | reader that crashes on unknown JSON fields | vitest CI |
+| Round-trip adapter fixtures | format adapter that changes its parse output silently | per-adapter golden tests |
+| `X-Schema-Version` header (future) | client-server skew detection | server middleware |
+| `User-Agent` + `client_version` telemetry (future) | knowing when the rollout window has actually elapsed | analytics dashboard |
+
+---
+
+## 14. Build order
 
 Each step is independently shippable and reversible.
 
@@ -630,7 +715,7 @@ Each step is independently shippable and reversible.
 
 ---
 
-## 14. Glossary
+## 15. Glossary
 
 | Term | Meaning |
 |---|---|
@@ -648,7 +733,7 @@ Each step is independently shippable and reversible.
 
 ---
 
-## 15. Cross-references
+## 16. Cross-references
 
 - [SPEC.md](./SPEC.md) — product-level specification (read this for what the app does, not how it stores data).
 - [SYNC.md](./SYNC.md) — *current* sync architecture. Will be retired and replaced by this document. See cleanup doc for migration steps.

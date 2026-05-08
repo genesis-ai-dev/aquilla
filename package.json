@@ -6,11 +6,14 @@
   "scripts": {
     "predev": "node scripts/ensure-port-free.mjs 5173",
     "dev": "vite",
+    "predev:codex": "node scripts/ensure-port-free.mjs 5173",
+    "dev:codex": "BRAND=codex vite",
     "predev:honeycomb": "node scripts/ensure-port-free.mjs 5173",
     "dev:honeycomb": "BRAND=honeycomb vite",
     "predev:context": "node scripts/ensure-port-free.mjs 5173",
     "dev:context": "BRAND=context vite",
-    "build": "tsc -b && vite build && tsx scripts/check-brand-build.ts codex",
+    "build": "tsc -b && vite build && tsx scripts/check-brand-build.ts aquilla",
+    "build:codex": "BRAND=codex tsc -b && BRAND=codex vite build && tsx scripts/check-brand-build.ts codex",
     "build:honeycomb": "BRAND=honeycomb tsc -b && BRAND=honeycomb vite build && tsx scripts/check-brand-build.ts honeycomb",
     "build:context": "BRAND=context tsc -b && BRAND=context vite build && tsx scripts/check-brand-build.ts context",
     "lint": "eslint .",
@@ -30,6 +33,7 @@
     "tauri:build": "tauri build",
     "tauri:build:mac": "bash -c 'set -a; [ -f .env.signing ] && . ./.env.signing; set +a; tauri build'",
     "deploy": "npm run build && wrangler pages deploy dist --project-name=codex-web --commit-dirty=true",
+    "deploy:codex": "npm run build:codex && wrangler pages deploy dist --project-name=codex-web --commit-dirty=true",
     "deploy:honeycomb": "npm run build:honeycomb && wrangler pages deploy dist --project-name=honeycomb-studio --commit-dirty=true",
     "deploy:context": "npm run build:context && wrangler pages deploy dist --project-name=context-studio --commit-dirty=true",
     "prepare": "husky"

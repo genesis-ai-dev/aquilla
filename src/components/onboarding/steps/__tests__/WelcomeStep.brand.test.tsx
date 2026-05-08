@@ -10,7 +10,7 @@ describe("WelcomeStep per brand", () => {
     cleanup()
   })
 
-  for (const id of ["codex", "honeycomb", "context"] as BrandId[]) {
+  for (const id of ["aquilla", "codex", "honeycomb", "context"] as BrandId[]) {
     it(`renders brand ${id}'s headline and subhead`, () => {
       const brand = BRANDS[id]
       render(

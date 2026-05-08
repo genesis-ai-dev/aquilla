@@ -9,11 +9,11 @@ describe("current-brand resolver", () => {
     window.history.replaceState({}, "", "/")
   })
 
-  it("returns codex when VITE_BRAND is not set", async () => {
+  it("returns aquilla when VITE_BRAND is not set", async () => {
     vi.stubEnv("VITE_BRAND", "")
     vi.stubEnv("DEV", false)
     const { brandId } = await import("../current-brand")
-    expect(brandId).toBe("codex")
+    expect(brandId).toBe("aquilla")
   })
 
   it("returns the brand from VITE_BRAND when valid", async () => {
@@ -23,18 +23,18 @@ describe("current-brand resolver", () => {
     expect(brandId).toBe("honeycomb")
   })
 
-  it("falls back to codex on unknown VITE_BRAND", async () => {
+  it("falls back to aquilla on unknown VITE_BRAND", async () => {
     vi.stubEnv("VITE_BRAND", "nonsense")
     vi.stubEnv("DEV", false)
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
     const { brandId } = await import("../current-brand")
-    expect(brandId).toBe("codex")
+    expect(brandId).toBe("aquilla")
     expect(warn).toHaveBeenCalled()
     warn.mockRestore()
   })
 
   it("honors ?brand= override in dev mode", async () => {
-    vi.stubEnv("VITE_BRAND", "codex")
+    vi.stubEnv("VITE_BRAND", "aquilla")
     vi.stubEnv("DEV", true)
     window.history.replaceState({}, "", "/?brand=context")
     const { brandId } = await import("../current-brand")
@@ -42,18 +42,18 @@ describe("current-brand resolver", () => {
   })
 
   it("ignores ?brand= override when not in dev mode", async () => {
-    vi.stubEnv("VITE_BRAND", "codex")
+    vi.stubEnv("VITE_BRAND", "aquilla")
     vi.stubEnv("DEV", false)
     window.history.replaceState({}, "", "/?brand=context")
     const { brandId } = await import("../current-brand")
-    expect(brandId).toBe("codex")
+    expect(brandId).toBe("aquilla")
   })
 
   it("ignores unknown ?brand= override", async () => {
-    vi.stubEnv("VITE_BRAND", "codex")
+    vi.stubEnv("VITE_BRAND", "aquilla")
     vi.stubEnv("DEV", true)
     window.history.replaceState({}, "", "/?brand=nonsense")
     const { brandId } = await import("../current-brand")
-    expect(brandId).toBe("codex")
+    expect(brandId).toBe("aquilla")
   })
 })

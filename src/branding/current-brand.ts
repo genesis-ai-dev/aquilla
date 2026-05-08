@@ -12,8 +12,8 @@ export function resolveBrandId(): BrandId {
     if (override && isBrandId(override)) return override
   }
   if (fromEnv && isBrandId(fromEnv)) return fromEnv
-  if (fromEnv) console.warn(`[branding] unknown VITE_BRAND="${fromEnv}"; falling back to codex`)
-  return "codex"
+  if (fromEnv) console.warn(`[branding] unknown VITE_BRAND="${fromEnv}"; falling back to aquilla`)
+  return "aquilla"
 }
 
 export const brandId = resolveBrandId()

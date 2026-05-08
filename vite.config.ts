@@ -10,10 +10,10 @@ import { BRAND_DATA, BRAND_DATA_IDS } from "./src/branding/brands/data"
 import type { BrandId } from "./src/branding/types"
 
 function resolveBuildBrand(): BrandId {
-  const raw = process.env.BRAND ?? "codex"
+  const raw = process.env.BRAND ?? "aquilla"
   if ((BRAND_DATA_IDS as string[]).includes(raw)) return raw as BrandId
-  console.warn(`[branding] unknown BRAND="${raw}"; falling back to codex`)
-  return "codex"
+  console.warn(`[branding] unknown BRAND="${raw}"; falling back to aquilla`)
+  return "aquilla"
 }
 
 const brandId = resolveBuildBrand()

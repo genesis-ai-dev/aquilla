@@ -30,6 +30,40 @@ describe("login", () => {
     );
     await expect(login({ username: "x", password: "y" })).rejects.toBeInstanceOf(FrontierAuthError);
   });
+
+  it("prefers server-canonical username over the typed input (email login)", async () => {
+    // The user typed an email but the server resolves it to the canonical
+    // handle and echoes it. Without this preference, the avatar / "signed
+    // in as" copy / permission compares all use the email string.
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({
+        access_token: "jwt-1",
+        token_type: "bearer",
+        gitlab_token: "glpat-1",
+        gitlab_url: "https://gitlab.example",
+        username: "alice",
+      }), { status: 200 })
+    );
+    const s = await login({ username: "alice@example.com", password: "pw" });
+    expect(s.username).toBe("alice");
+    expect((await loadSession())?.username).toBe("alice");
+  });
+
+  it("falls back to the typed input when the server omits username", async () => {
+    // Older server deployments don't include `username` in the response.
+    // We must keep the existing behavior so the client doesn't break
+    // during the rollout window.
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({
+        access_token: "jwt-1",
+        token_type: "bearer",
+        gitlab_token: "glpat-1",
+        gitlab_url: "https://gitlab.example",
+      }), { status: 200 })
+    );
+    const s = await login({ username: "alice", password: "pw" });
+    expect(s.username).toBe("alice");
+  });
 });
 
 describe("FRONTIER_BASE env override", () => {

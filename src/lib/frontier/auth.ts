@@ -24,6 +24,11 @@ interface AuthResponse {
   token_type: string;
   gitlab_token: string;
   gitlab_url: string;
+  // Server-side canonical username. Login accepts username OR email, so the
+  // string the user typed isn't necessarily their handle. Optional for
+  // graceful degradation against older servers that don't return this yet —
+  // falls back to the typed input below.
+  username?: string;
 }
 
 export async function login(args: LoginArgs): Promise<FrontierSession> {
@@ -81,12 +86,20 @@ export async function requestPasswordReset(email: string): Promise<void> {
   }
 }
 
-async function finalizeSession(username: string, data: AuthResponse): Promise<FrontierSession> {
+async function finalizeSession(typedUsername: string, data: AuthResponse): Promise<FrontierSession> {
+  // Prefer the server-supplied canonical username. Falls back to whatever
+  // the user typed at login when the server doesn't include it (older
+  // deployments). Without this preference, an email-login user has their
+  // email stored as `session.username` and never sees their actual handle —
+  // the AccountSwitcher avatar, the "Signed in as ..." copy, the
+  // owner/lead permission compares, PostHog identity, and git commit
+  // author email all silently use the email string.
+  const canonicalUsername = data.username?.trim() || typedUsername;
   const session: FrontierSession = {
     jwt: data.access_token,
     gitlabToken: data.gitlab_token,
     gitlabUrl: data.gitlab_url.replace(/\/+$/, ""),
-    username,
+    username: canonicalUsername,
     createdAt: new Date().toISOString(),
   };
   await saveSession(session);

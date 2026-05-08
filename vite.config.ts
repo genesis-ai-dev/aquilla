@@ -38,6 +38,19 @@ export default defineConfig(({ mode }) => ({
       // forces a full reload — that's the white-screen on project click.
       ignored: ["**/src-tauri/**", "**/.worktrees/**", "**/.claude/worktrees/**"],
     },
+    // OPFS SyncAccessHandle (used by SQLite-WASM's worker) requires the page
+    // to be cross-origin isolated. Without these headers the local-store
+    // promiser hangs forever in dev.
+    headers: {
+      "Cross-Origin-Opener-Policy": "same-origin",
+      "Cross-Origin-Embedder-Policy": "require-corp",
+    },
+  },
+  preview: {
+    headers: {
+      "Cross-Origin-Opener-Policy": "same-origin",
+      "Cross-Origin-Embedder-Policy": "require-corp",
+    },
   },
   plugins: [
     react(),

@@ -57,4 +57,39 @@ test.describe("local-store demo", () => {
       timeout: 15_000,
     })
   })
+
+  test("OPFS persistence: edit, reload, edit is still there", async ({
+    page,
+  }) => {
+    await page.goto("/dev/local-store")
+    await expect(page.getByTestId("local-store-demo")).toBeVisible({
+      timeout: 15_000,
+    })
+
+    const input = page.getByTestId("translation-demo:cell-1")
+    await input.fill("Persistence test translation")
+    await expect(input).toHaveValue("Persistence test translation")
+
+    // Pending mutations should be > 0 right now.
+    await expect(page.getByTestId("pending-count-value")).not.toHaveText("0")
+
+    // Hard reload — should re-open the same OPFS db.
+    await page.reload()
+    await expect(page.getByTestId("local-store-demo")).toBeVisible({
+      timeout: 15_000,
+    })
+
+    // The translation we typed should still be visible after reload.
+    const reloadedInput = page.getByTestId("translation-demo:cell-1")
+    await expect(reloadedInput).toHaveValue("Persistence test translation")
+
+    // The unedited cells should still show empty translations.
+    await expect(page.getByTestId("translation-demo:cell-2")).toHaveValue("")
+
+    // Outbox state also persisted — the pending mutation we enqueued
+    // before reload is still queued (no flusher running yet).
+    await expect(
+      page.getByTestId("pending-count-value"),
+    ).not.toHaveText("0")
+  })
 })

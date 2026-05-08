@@ -11,6 +11,7 @@ import { useEffect, useRef, useState } from "react"
 import {
   enqueueOutboxRecord,
   getCellsByScope,
+  getProjectMeta,
   ingestSnapshot,
   listPending,
   LocalStore,
@@ -21,6 +22,7 @@ import {
 
 const PROJECT_ID = "demo"
 const SCOPE_ID = "scope-1"
+const DB_NAME = "codex-demo"
 
 const FIXTURE_LINES: string[] = [
   JSON.stringify({
@@ -89,17 +91,24 @@ export default function LocalStoreDemo() {
     let cancelled = false
     ;(async () => {
       try {
-        const s = await LocalStore.open({ name: ":memory:" })
+        const s = await LocalStore.open({ name: DB_NAME })
         await s.migrate(MIGRATIONS)
-        await ingestSnapshot(s, asLines(FIXTURE_LINES))
+        // Skip ingest if this OPFS DB already holds the project (warm cache).
+        // First open seeds; reload sees existing project_meta and reuses it.
+        const existing = await getProjectMeta(s, PROJECT_ID)
+        if (!existing) {
+          await ingestSnapshot(s, asLines(FIXTURE_LINES))
+        }
         if (cancelled) {
           await s.close()
           return
         }
         storeRef.current = s
         const rows = await getCellsByScope(s, PROJECT_ID, SCOPE_ID)
+        const outbox = await listPending(s)
         setStore(s)
         setCells(rows)
+        setPending(outbox.length)
       } catch (e) {
         if (!cancelled) setError((e as Error).message)
       }

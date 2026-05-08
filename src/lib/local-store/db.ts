@@ -1,19 +1,20 @@
 /**
  * Client-side local store backed by SQLite-WASM.
  *
- * In tests: pass `name: ":memory:"` for an isolated in-memory database.
- * In the browser: pass a stable name; OPFS persistence is added in a
- * follow-up step.
+ * Two storage backends, picked by the `name` option:
+ *   - `":memory:"`     in-process db, no persistence. Used in unit tests
+ *                      and as a fallback when OPFS is unavailable.
+ *   - any other string OPFS-backed db at `<name>.sqlite3` under the page's
+ *                      origin. Survives reload, scoped to the project.
  *
- * See docs/DATA_PERSISTENCE_PLAN.md §2 (Storage tiers) and §8.6 (outbox).
+ * See docs/DATA_PERSISTENCE_PLAN.md §2 (storage tiers) and §13 (migrations).
  */
 
-import sqlite3InitModule from "@sqlite.org/sqlite-wasm"
-import type {
-  Database as Sqlite3DB,
-  Sqlite3Static,
-} from "@sqlite.org/sqlite-wasm"
-
+import {
+  openMemoryBackend,
+  openOpfsBackend,
+  type SqliteBackend,
+} from "./db-backends"
 import type { Migration } from "./migrations"
 
 /**
@@ -36,54 +37,36 @@ export class MigrationDriftError extends Error {
   }
 }
 
-let sqlite3Promise: Promise<Sqlite3Static> | null = null
-
-function getSqlite3(): Promise<Sqlite3Static> {
-  if (!sqlite3Promise) {
-    sqlite3Promise = sqlite3InitModule({
-      print: () => {},
-      printErr: () => {},
-    })
-  }
-  return sqlite3Promise
-}
-
 export interface LocalStoreOptions {
   /**
-   * Database identifier. Currently always opens an in-memory database
-   * regardless of the name; the name parameter exists for the OPFS path
-   * (per-project persistent storage) which lands in a follow-up commit.
-   * Tests should pass `":memory:"` for clarity.
+   * Database identifier. Use `":memory:"` for tests and ephemeral stores;
+   * any other string for an OPFS-backed persistent database scoped under
+   * `<name>.sqlite3` in the page's origin storage.
    */
   name: string
 }
 
 export class LocalStore {
-  private constructor(private readonly db: Sqlite3DB) {}
+  private constructor(private readonly backend: SqliteBackend) {}
 
   static async open(opts: LocalStoreOptions): Promise<LocalStore> {
-    const sqlite3 = await getSqlite3()
-    const db = new sqlite3.oo1.DB(opts.name, "ct")
-    return new LocalStore(db)
+    const backend =
+      opts.name === ":memory:"
+        ? await openMemoryBackend()
+        : await openOpfsBackend(opts.name)
+    return new LocalStore(backend)
   }
 
   async run(sql: string, params?: ReadonlyArray<unknown>): Promise<void> {
-    this.db["exec"]({ sql, bind: params as never })
+    await this.backend.run(sql, params)
   }
 
   async query<T>(sql: string, params?: ReadonlyArray<unknown>): Promise<T[]> {
-    const rows: T[] = []
-    this.db["exec"]({
-      sql,
-      bind: params as never,
-      rowMode: "object",
-      resultRows: rows as never,
-    })
-    return rows
+    return this.backend.query<T>(sql, params)
   }
 
   async close(): Promise<void> {
-    this.db.close()
+    await this.backend.close()
   }
 
   /**
@@ -107,24 +90,23 @@ export class LocalStore {
    * Apply migrations that haven't been applied yet, in ascending version order.
    *
    * Each migration is applied inside a transaction together with its
-   * `_migrations` row, so a partial failure (network drop, page close,
-   * malformed SQL) leaves the database in its pre-migration state.
+   * `_migrations` row insert, so a partial failure (page close, malformed
+   * SQL) leaves the database in its pre-migration state.
    *
    * Each `_migrations` row records a SHA-256 hash of the canonicalized SQL.
    * On every subsequent open we recompute the hash for already-applied
-   * migrations and throw `MigrationDriftError` on mismatch — this is the
+   * migrations and compare. Mismatch throws `MigrationDriftError` — the
    * tripwire for the most common migration disaster (editing a migration
-   * file in place after it has shipped to users). See
-   * DATA_PERSISTENCE_PLAN.md §13 for the full policy.
+   * file in place after it has shipped). See DATA_PERSISTENCE_PLAN.md §13.
    */
   async migrate(migrations: ReadonlyArray<Migration>): Promise<void> {
-    this.db["exec"]({
-      sql: `CREATE TABLE IF NOT EXISTS _migrations (
-              version INTEGER PRIMARY KEY,
-              applied_at INTEGER NOT NULL,
-              content_hash TEXT NOT NULL
-            )`,
-    })
+    await this.run(
+      `CREATE TABLE IF NOT EXISTS _migrations (
+         version INTEGER PRIMARY KEY,
+         applied_at INTEGER NOT NULL,
+         content_hash TEXT NOT NULL
+       )`,
+    )
     const applied = await this.query<{ version: number; content_hash: string }>(
       "SELECT version, content_hash FROM _migrations",
     )
@@ -141,7 +123,7 @@ export class LocalStore {
         continue
       }
       await this.transaction(async () => {
-        this.db["exec"]({ sql: m.sql })
+        await this.run(m.sql)
         await this.run(
           "INSERT INTO _migrations (version, applied_at, content_hash) VALUES (?, ?, ?)",
           [m.version, Date.now(), hash],

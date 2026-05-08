@@ -16,6 +16,7 @@
 | Orgs        | Remove member, change role                           | _gap — Plan 2_                                                |        |
 | Orgs        | Send & accept invite                                 | _gap — Plan 2_                                                |        |
 | Editor      | Import markdown, edit cell, persists across reload   | `e2e/specs/editor/import-and-edit.smoke.spec.ts`              |   ✅   |
+| Local store | Dev demo: snapshot ingest + outbox enqueue (new persistence stack) | `e2e/specs/local-store/demo.smoke.spec.ts` |   ✅   |
 | Editor      | Cmd+K search                                         | _gap — Plan 2_                                                |        |
 | Editor      | Virtualization scroll integrity                      | _gap — Plan 2_                                                |        |
 | Rules       | Enable built-in rule, see violation in editor        | `e2e/specs/rules/violation.smoke.spec.ts`                     |   ✅   |

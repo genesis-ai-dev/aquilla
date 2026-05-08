@@ -113,6 +113,24 @@ export async function markConflict(
   )
 }
 
+/**
+ * Return an in_flight record to pending after a retryable failure. Does not
+ * change `attempts` (markInFlight already incremented it on send).
+ */
+export async function markPending(
+  store: LocalStore,
+  localId: string,
+  now: number,
+  lastError: string | null,
+): Promise<void> {
+  await store.run(
+    `UPDATE outbox
+     SET status = 'pending', last_error = ?, updated_at = ?
+     WHERE local_id = ?`,
+    [lastError, now, localId],
+  )
+}
+
 export async function markFailed(
   store: LocalStore,
   localId: string,

@@ -29,6 +29,7 @@ export {
   getOutboxRecord,
   listPending,
   markInFlight,
+  markPending,
   markConflict,
   markFailed,
   deleteOutboxRecord,

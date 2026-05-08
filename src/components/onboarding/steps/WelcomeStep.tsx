@@ -6,7 +6,7 @@ export function WelcomeStep({ onNext }: { onNext: () => void }) {
   const Logo = brand.logo.Mark
   return (
     <div className="text-center space-y-6">
-      <Logo className="mx-auto h-24 w-24 shadow-lg" aria-hidden />
+      <Logo className="mx-auto h-20 w-20 shadow-lg" aria-hidden />
       <div className="space-y-2">
         <h1 className="text-3xl font-bold tracking-tight">{brand.marketing.onboardingHeadline}</h1>
         <p className="text-muted-foreground">

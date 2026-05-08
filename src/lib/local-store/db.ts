@@ -30,8 +30,10 @@ function getSqlite3(): Promise<Sqlite3Static> {
 
 export interface LocalStoreOptions {
   /**
-   * Database identifier. Use `":memory:"` for tests or transient stores;
-   * a stable per-project string for OPFS-backed production storage.
+   * Database identifier. Currently always opens an in-memory database
+   * regardless of the name; the name parameter exists for the OPFS path
+   * (per-project persistent storage) which lands in a follow-up commit.
+   * Tests should pass `":memory:"` for clarity.
    */
   name: string
 }
@@ -62,6 +64,23 @@ export class LocalStore {
 
   async close(): Promise<void> {
     this.db.close()
+  }
+
+  /**
+   * Run `fn` inside a SQLite transaction. Commits if `fn` resolves; rolls
+   * back if it throws. Only one transaction at a time — SQLite-WASM has a
+   * single-writer model and we don't open savepoints.
+   */
+  async transaction<T>(fn: () => Promise<T> | T): Promise<T> {
+    await this.run("BEGIN")
+    try {
+      const result = await fn()
+      await this.run("COMMIT")
+      return result
+    } catch (e) {
+      await this.run("ROLLBACK")
+      throw e
+    }
   }
 
   /**

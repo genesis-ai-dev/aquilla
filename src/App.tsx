@@ -1,5 +1,6 @@
 import { Routes, Route, Navigate } from "react-router-dom"
 import LocalStoreDemo from "@/pages/LocalStoreDemo"
+import EditorV2Demo from "@/pages/EditorV2Demo"
 import { Dashboard } from "@/components/Dashboard"
 import { ProjectWorkspace } from "@/components/ProjectWorkspace"
 import { ProjectSettings } from "@/components/ProjectSettings"
@@ -75,6 +76,7 @@ function AppRoutes() {
           docs/DATA_PERSISTENCE_PLAN.md and the e2e spec at
           e2e/specs/local-store/demo.smoke.spec.ts. */}
       <Route path="/dev/local-store" element={<LocalStoreDemo />} />
+      <Route path="/dev/editor-v2" element={<EditorV2Demo />} />
       <Route path="/settings" element={<Settings />} />
       <Route path="/members" element={<MembersPage />} />
       {/* Backward-compat: the old admin-flavored URL still resolves but

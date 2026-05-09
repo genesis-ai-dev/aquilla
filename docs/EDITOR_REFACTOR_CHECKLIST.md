@@ -92,14 +92,14 @@ Replace TipTap-on-Y.XmlFragment with an editor that operates on `cells.translati
 
 ## Phase F — Mirrors for the rest of `CellData`
 
-Each subsystem gets its own mirror module + downstream wiring. Threads, comments, attachments, audio, validations, waivers, backtranslations.
+Each subsystem gets its own mirror module + downstream wiring.
 
-- [ ] Threads + thread_messages mirror
-- [ ] Cell_attachments mirror
-- [ ] Validations mirror (writes `validation.signoff` mutations through the outbox)
-- [ ] Waivers mirror
-- [ ] Backtranslations mirror
-- [ ] Audio timing mirror (uses existing `cell_media`)
+- [x] Threads + thread_messages mirror (cell-keyed; thread.create + thread.append + thread.resolve outbox kinds, all `accept` per §9.2)
+- [ ] Cell_attachments mirror — mostly one-shot bootstrap (legacy live updates write to repoFs, not Y.Doc); fold into the existing Y.Doc → local-store importer in Phase D.1 rather than a standalone mirror
+- [ ] Audio timings mirror — same shape as attachments (read-only from Y.Doc.cell.metadata.audioTimings); fold into the Phase D.1 importer
+- [ ] Waivers mirror — edit-keyed; the first edit-keyed mirror, exercises the text_snapshot + cell_version_at columns and the `accept-as-historical` conflict policy
+- [ ] Backtranslations mirror — edit-keyed; AI-generated content mostly, but user-edits flow through too with version-checked LWW
+- [ ] Validations mirror — server-sourced today (cell_validators table, audit overlay), not Y.Doc-bound. The work here is *migrating the audit overlay path* to read from local-store's `validations` table, not building a Y.Doc → local-store mirror
 - [ ] Each mirror has unit tests; each mutation kind has end-to-end coverage
 - [ ] Existing UIs that depend on threads/comments/etc. updated to read from local-store
 

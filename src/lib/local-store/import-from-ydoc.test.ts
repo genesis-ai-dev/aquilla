@@ -201,6 +201,53 @@ describe("importYDocIfEmpty", () => {
     await cleanup()
   })
 
+  test("imports attachments from __source.metadata into cell_attachments", async () => {
+    seedCell(yDoc, "uuid-with-attachments", {
+      original: "src",
+      type: "verse",
+      __source: {
+        kind: "code",
+        languageId: "scripture",
+        value: "src",
+        metadata: {
+          id: "uuid-with-attachments",
+          type: "verse",
+          attachments: {
+            "att-audio-1": {
+              url: "/.project/attachments/files/JUD/a.webm",
+              type: "audio",
+              createdAt: 1700000000,
+            },
+            "att-image-1": {
+              url: "/.project/attachments/images/photo.png",
+              type: "image",
+            },
+          },
+        },
+      },
+    })
+
+    const { ctx, cleanup } = await makeCtx(yDoc)
+    await importYDocIfEmpty(ctx)
+
+    const rows = await ctx.store.query<{
+      id: string
+      cell_id: string
+      kind: string
+      ref: string
+    }>(
+      "SELECT id, cell_id, kind, ref FROM cell_attachments WHERE cell_id = ? ORDER BY id",
+      ["uuid-with-attachments"],
+    )
+    expect(rows).toHaveLength(2)
+    expect(rows.map((r) => r.kind).sort()).toEqual(["audio", "image"])
+    expect(
+      rows.find((r) => r.id === "uuid-with-attachments::att-audio-1")?.ref,
+    ).toBe("/.project/attachments/files/JUD/a.webm")
+
+    await cleanup()
+  })
+
   test("import + mirror together: Y.Doc edit after import propagates correctly", async () => {
     seedCellWithTranslation(yDoc, "uuid-1", "")
     const { ctx, cleanup } = await makeCtx(yDoc)

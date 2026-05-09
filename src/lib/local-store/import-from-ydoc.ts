@@ -71,11 +71,52 @@ export async function importYDocIfEmpty(
       const yCell = cellsMap.get(cellId)
       if (!(yCell instanceof Y.Map)) continue
       await upsertCell(ctx.store, mapYCellToRow(yCell, cellId, ord, ctx))
+      await importCellAttachments(ctx, cellId, yCell)
       ord++
       imported++
     }
   })
   return { imported, skipped: false }
+}
+
+interface LegacyAttachment {
+  url?: string
+  type?: string
+  createdAt?: number
+  isDeleted?: boolean
+}
+
+async function importCellAttachments(
+  ctx: YDocImportContext,
+  cellId: string,
+  yCell: Y.Map<unknown>,
+): Promise<void> {
+  const source = yCell.get("__source") as
+    | { metadata?: { attachments?: Record<string, LegacyAttachment> } }
+    | undefined
+  const attachments = source?.metadata?.attachments
+  if (!attachments) return
+  for (const [attId, att] of Object.entries(attachments)) {
+    if (!att || att.isDeleted) continue
+    await ctx.store.run(
+      `INSERT OR REPLACE INTO cell_attachments (
+        id, cell_id, kind, ref, blob_key, display_name, metadata,
+        added_by, added_at, seq
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        `${cellId}::${attId}`,
+        cellId,
+        att.type ?? "file",
+        att.url ?? null,
+        null,
+        attId,
+        "{}",
+        "ydoc-imported",
+        att.createdAt ?? ctx.now(),
+        0,
+      ],
+    )
+  }
 }
 
 function mapYCellToRow(

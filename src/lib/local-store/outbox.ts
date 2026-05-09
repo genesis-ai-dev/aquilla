@@ -8,6 +8,7 @@
  */
 
 import type { LocalStore } from "./db"
+import { storeEvents } from "./store-events"
 
 export type OutboxStatus = "pending" | "in_flight" | "conflict" | "failed"
 
@@ -52,6 +53,7 @@ export async function enqueueOutboxRecord(
       record.created_at,
     ],
   )
+  storeEvents.emit({ type: "outbox.changed", projectId: record.project_id })
 }
 
 export async function getOutboxRecord(

@@ -12,6 +12,7 @@
  */
 
 import type { LocalStore } from "./db"
+import { storeEvents } from "./store-events"
 
 export type WaiverState = "proposed" | "approved" | "revoked"
 
@@ -58,6 +59,7 @@ export async function upsertWaiver(
     w.seq,
     w.org_id,
   ])
+  storeEvents.emit({ type: "waivers.changed", cellId: w.cell_id })
 }
 
 export async function getWaiver(

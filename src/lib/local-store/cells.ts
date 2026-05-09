@@ -4,6 +4,7 @@
  */
 
 import type { LocalStore } from "./db"
+import { storeEvents } from "./store-events"
 
 /** One row of the local `cells` table. Field shapes match the schema 1:1. */
 export interface CellRow {
@@ -91,6 +92,11 @@ export async function upsertCell(
     cell.label ?? null,
     cell.backtranslation_pinned_id ?? null,
   ])
+  storeEvents.emit({
+    type: "cells.changed",
+    cellIds: [cell.id],
+    projectId: cell.project_id,
+  })
 }
 
 export async function getCell(

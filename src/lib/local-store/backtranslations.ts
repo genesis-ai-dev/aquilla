@@ -10,6 +10,7 @@
  */
 
 import type { LocalStore } from "./db"
+import { storeEvents } from "./store-events"
 
 export interface BacktranslationRow {
   id: string
@@ -44,6 +45,7 @@ export async function upsertBacktranslation(
     b.is_user_edited,
     b.seq,
   ])
+  storeEvents.emit({ type: "backtranslations.changed", cellId: b.cell_id })
 }
 
 export async function getBacktranslation(

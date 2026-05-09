@@ -58,6 +58,12 @@ export {
 export { wipeOpfsDb } from "./wipe"
 
 export {
+  storeEvents,
+  type StoreEvent,
+  type StoreEventListener,
+} from "./store-events"
+
+export {
   upsertThread,
   getThread,
   getThreadsByCell,
@@ -82,6 +88,14 @@ export {
   getActiveBacktranslation,
   type BacktranslationRow,
 } from "./backtranslations"
+
+export {
+  rowToLocalCellData,
+  type LocalCellData,
+  type LocalThread,
+  type LocalWaiver,
+  type LocalBacktranslation,
+} from "./local-cell-data"
 
 export {
   LocalStoreProvider,

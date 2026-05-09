@@ -7,6 +7,7 @@
  */
 
 import type { LocalStore } from "./db"
+import { storeEvents } from "./store-events"
 
 export interface ThreadRow {
   id: string
@@ -46,6 +47,7 @@ export async function upsertThread(
     thread.resolved_at,
     thread.seq,
   ])
+  storeEvents.emit({ type: "threads.changed", cellId: thread.cell_id })
 }
 
 export async function getThread(
@@ -85,6 +87,10 @@ export async function appendThreadMessage(
     msg.created_at,
     msg.seq,
   ])
+  storeEvents.emit({
+    type: "thread_messages.changed",
+    threadId: msg.thread_id,
+  })
 }
 
 export async function getMessagesByThread(

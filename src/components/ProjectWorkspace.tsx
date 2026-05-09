@@ -105,23 +105,79 @@ import { useFeatureFlag } from "@/hooks/useFeatureFlag"
 import { NextUnfinishedButton } from "./NextUnfinishedButton"
 import { useNextUnfinished } from "@/hooks/useNextUnfinished"
 import { AiSetupDialog } from "./AiSetupDialog"
-import { LocalStoreProvider } from "@/lib/local-store"
+import { LocalStoreProvider, useProjectStore } from "@/lib/local-store"
+import { importYDocIfEmpty } from "@/lib/local-store/import-from-ydoc"
 import { useMirrorRegistry } from "@/lib/mirror-registry"
 import type * as Y from "yjs"
 
 /**
- * Renders nothing; its only job is to register the translation_text mirror
- * for the workspace's Y.Doc so live edits flow into the local SQLite store
- * + outbox. Must live inside <LocalStoreProvider>.
+ * Renders nothing; orchestrates two things for the workspace's Y.Doc:
+ *
+ *   1. One-shot import: when this file's local-store rows are absent,
+ *      copy them from the Y.Doc. Runs once per (projectId, fileId).
+ *   2. Continuous mirror: register the translation_text mirror so
+ *      subsequent Y.Doc edits flow into local-store + outbox.
+ *
+ * The mirror only attaches *after* the import resolves so a fast typist
+ * cannot have edits silently dropped on the empty-table path.
+ *
+ * Must live inside <LocalStoreProvider>.
  */
 function MirrorBridge({
   doc,
   username,
+  projectId,
+  fileId,
+  sourceLang,
+  targetLang,
+  orgId,
 }: {
   doc: Y.Doc | null
   username: string
+  projectId: string
+  fileId: string | null
+  sourceLang: string
+  targetLang: string
+  orgId: string
 }): null {
-  useMirrorRegistry(doc, username)
+  const store = useProjectStore()
+  const [importedFileId, setImportedFileId] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (!store || !doc || !fileId) return
+    if (importedFileId === fileId) return
+    let cancelled = false
+    void importYDocIfEmpty({
+      store,
+      yDoc: doc,
+      projectId,
+      fileId,
+      sourceLang,
+      targetLang,
+      orgId,
+      now: () => Date.now(),
+    })
+      .then((result) => {
+        if (cancelled) return
+        if (result.imported > 0 || result.skipped) {
+          // eslint-disable-next-line no-console
+          console.info(
+            `[MirrorBridge] import ${result.skipped ? "skipped" : `imported=${result.imported}`} for ${projectId}/${fileId}`,
+          )
+        }
+        setImportedFileId(fileId)
+      })
+      .catch((err) => {
+        // eslint-disable-next-line no-console
+        console.error("[MirrorBridge] import failed", err)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [store, doc, fileId, projectId, sourceLang, targetLang, orgId, importedFileId])
+
+  const docForMirror = importedFileId === fileId ? doc : null
+  useMirrorRegistry(docForMirror, username)
   return null
 }
 
@@ -833,7 +889,15 @@ export function ProjectWorkspace() {
 
   return (
     <LocalStoreProvider projectId={projectId!}>
-      <MirrorBridge doc={doc} username={currentUsername} />
+      <MirrorBridge
+        doc={doc}
+        username={currentUsername}
+        projectId={projectId!}
+        fileId={activeFileId}
+        sourceLang={project?.sourceLanguage ?? "und"}
+        targetLang={project?.targetLanguage ?? "und"}
+        orgId={String(project?.orgId ?? "default")}
+      />
       <EditorScrollProvider>
       {/* ScrollToGroupHandler must live inside EditorScrollProvider so it can call useEditorScroll */}
       <ScrollToGroupHandler cells={cells} editorRef={editorRef} />

@@ -145,6 +145,41 @@ Per [CLEANUP_POST_REFACTOR.md](./CLEANUP_POST_REFACTOR.md). Delete dead code pat
 - **Y.Doc is going away as truth, but stays as sugar.** Phase E removes Y.XmlFragment; Phase G removes persistent Y.Doc; co-edit Y.Text remains as ephemeral sugar.
 - **Test gates.** Each phase adds unit tests for new modules and extends Playwright for any new user-visible flow. The smoke suite must stay green at every phase boundary.
 
+## Preview deploys
+
+Branch builds deploy to Cloudflare Pages preview aliases. From the worktree:
+
+```sh
+pnpm build
+CLOUDFLARE_ACCOUNT_ID=6a80496d1e59948a9cbaa3c643ba81d7 \
+  npx wrangler pages deploy dist \
+    --project-name=codex-web \
+    --branch=refactor/data-persistence \
+    --commit-dirty=true
+```
+
+Deploy alias: `https://refactor-data-persistence.codex-web-4ih.pages.dev`
+
+Validate the deployed preview end-to-end (real OPFS, real Pages headers):
+
+```sh
+PREVIEW_URL=https://refactor-data-persistence.codex-web-4ih.pages.dev \
+  npx playwright test --config=e2e/config/playwright.config.preview.ts \
+    -g "local-store demo|editor v2 demo"
+```
+
+If the deployed preview hangs at "Opening local SQLite database…" the
+[`preview-probe.spec.ts`](../e2e/specs/local-store/preview-probe.spec.ts)
+spec captures `crossOriginIsolated`, OPFS availability, and any failed
+network requests — the fast path for diagnosing OPFS / COOP-COEP / CORP
+header regressions.
+
+The header rules that make OPFS work on Pages are in
+[`public/_headers`](../public/_headers) — page response gets
+`COOP same-origin` + `COEP credentialless`; the worker file ALSO needs
+its own COEP header (the worker is *launched* under the page's
+isolation, so CORP alone isn't sufficient).
+
 ---
 
 ## Open questions to resolve as we go

@@ -58,6 +58,56 @@ test.describe("local-store demo", () => {
     })
   })
 
+  test("Reset local cache wipes OPFS and re-ingests fixture on reload", async ({
+    page,
+  }) => {
+    await page.goto("/dev/local-store")
+    await expect(page.getByTestId("local-store-demo")).toBeVisible({
+      timeout: 15_000,
+    })
+
+    // Make a change so we can prove it's gone after reset.
+    await page.getByTestId("translation-demo:cell-1").fill("Doomed text")
+    await expect(page.getByTestId("translation-demo:cell-1")).toHaveValue(
+      "Doomed text",
+    )
+
+    await page.getByTestId("reset-cache-button").click()
+
+    // Demo re-mounts after the in-page reload; cell-1 is empty again.
+    await expect(page.getByTestId("local-store-demo")).toBeVisible({
+      timeout: 15_000,
+    })
+    await expect(page.getByTestId("translation-demo:cell-1")).toHaveValue("")
+    await expect(page.getByTestId("pending-count-value")).toHaveText("0")
+  })
+
+  test("Drift recovery: corrupted _migrations triggers wipe-and-reload UI", async ({
+    page,
+  }) => {
+    // First load seeds the fixture into OPFS.
+    await page.goto("/dev/local-store")
+    await expect(page.getByTestId("local-store-demo")).toBeVisible({
+      timeout: 15_000,
+    })
+
+    // ?simulate-drift=1 corrupts _migrations.content_hash and redirects.
+    await page.goto("/dev/local-store?simulate-drift=1")
+
+    // After redirect, the next mount detects drift and renders the recovery UI.
+    await expect(page.getByTestId("local-store-demo-drift")).toBeVisible({
+      timeout: 15_000,
+    })
+    await expect(page.getByTestId("drift-wipe-button")).toBeVisible()
+
+    // Click "Wipe and reload" → drift cleared, demo loads cleanly.
+    await page.getByTestId("drift-wipe-button").click()
+    await expect(page.getByTestId("local-store-demo")).toBeVisible({
+      timeout: 15_000,
+    })
+    await expect(page.getByTestId("local-store-demo-drift")).toHaveCount(0)
+  })
+
   test("OPFS persistence: edit, reload, edit is still there", async ({
     page,
   }) => {

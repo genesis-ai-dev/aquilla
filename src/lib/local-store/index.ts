@@ -54,3 +54,5 @@ export {
   type ChangeBatch,
   type CommitRecord,
 } from "./sync"
+
+export { wipeOpfsDb } from "./wipe"

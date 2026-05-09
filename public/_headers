@@ -17,9 +17,12 @@
 
 /sqlite3-worker1.mjs
   Cross-Origin-Resource-Policy: same-origin
+  Cross-Origin-Embedder-Policy: credentialless
+  Cross-Origin-Opener-Policy: same-origin
 
 /sqlite3-opfs-async-proxy.js
   Cross-Origin-Resource-Policy: same-origin
+  Cross-Origin-Embedder-Policy: credentialless
 
 /sqlite3.wasm
   Cross-Origin-Resource-Policy: same-origin

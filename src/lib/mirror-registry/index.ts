@@ -27,6 +27,11 @@ export {
 } from "./threads-mirror"
 
 export {
+  createWaiversMirror,
+  type WaiversMirrorOptions,
+} from "./waivers-mirror"
+
+export {
   useMirrorRegistry,
   type MirrorRegistryStatus,
 } from "./use-mirror-registry"

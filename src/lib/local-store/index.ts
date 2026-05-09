@@ -56,3 +56,11 @@ export {
 } from "./sync"
 
 export { wipeOpfsDb } from "./wipe"
+
+export {
+  LocalStoreProvider,
+  useProjectStore,
+  useLocalStoreState,
+  type LocalStoreState,
+  type LocalStoreProviderProps,
+} from "./provider"

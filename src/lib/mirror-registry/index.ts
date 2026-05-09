@@ -20,3 +20,8 @@ export {
   createTranslationTextMirror,
   type TranslationTextMirrorOptions,
 } from "./translation-text-mirror"
+
+export {
+  useMirrorRegistry,
+  type MirrorRegistryStatus,
+} from "./use-mirror-registry"

@@ -105,6 +105,25 @@ import { useFeatureFlag } from "@/hooks/useFeatureFlag"
 import { NextUnfinishedButton } from "./NextUnfinishedButton"
 import { useNextUnfinished } from "@/hooks/useNextUnfinished"
 import { AiSetupDialog } from "./AiSetupDialog"
+import { LocalStoreProvider } from "@/lib/local-store"
+import { useMirrorRegistry } from "@/lib/mirror-registry"
+import type * as Y from "yjs"
+
+/**
+ * Renders nothing; its only job is to register the translation_text mirror
+ * for the workspace's Y.Doc so live edits flow into the local SQLite store
+ * + outbox. Must live inside <LocalStoreProvider>.
+ */
+function MirrorBridge({
+  doc,
+  username,
+}: {
+  doc: Y.Doc | null
+  username: string
+}): null {
+  useMirrorRegistry(doc, username)
+  return null
+}
 
 export function ProjectWorkspace() {
   const { id: projectId, fileId: routeFileId } = useParams<{ id: string; fileId?: string }>()
@@ -813,7 +832,9 @@ export function ProjectWorkspace() {
   // ── Render ────────────────────────────────────────────────────────────────
 
   return (
-    <EditorScrollProvider>
+    <LocalStoreProvider projectId={projectId!}>
+      <MirrorBridge doc={doc} username={currentUsername} />
+      <EditorScrollProvider>
       {/* ScrollToGroupHandler must live inside EditorScrollProvider so it can call useEditorScroll */}
       <ScrollToGroupHandler cells={cells} editorRef={editorRef} />
       <AppShell
@@ -1209,6 +1230,7 @@ export function ProjectWorkspace() {
         </div>
       )}
     </EditorScrollProvider>
+    </LocalStoreProvider>
   )
 }
 

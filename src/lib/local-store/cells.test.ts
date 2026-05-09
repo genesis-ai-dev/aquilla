@@ -31,6 +31,8 @@ function makeCell(overrides: Partial<CellRow> = {}): CellRow {
     source_lang: "hbo",
     target_lang: "spa",
     format_meta: "{}",
+    label: null,
+    backtranslation_pinned_id: null,
     ...overrides,
   }
 }

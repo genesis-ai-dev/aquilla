@@ -57,7 +57,14 @@ client ⇄│ Project DO │ ⇄  │ frontier-srv │ ⇄  │     D1          
 | **Project DO** | Per-project ephemeral coordinator. Presence, change broadcast, focused-cell Y.Text relay. | RAM only; persists nothing. |
 | **Client SQLite-WASM (OPFS)** | Full project replica + FTS5 + outbox. | Local; reconciled via sync engine. |
 
-**The pivotal change from today's architecture:** Yjs is no longer the system of record and never persists to R2. It exists only as transient coordination during a focused multi-user co-edit session. See [CLEANUP_POST_REFACTOR.md](./CLEANUP_POST_REFACTOR.md) for what this means for the existing `sync-worker` code.
+**The pivotal change from today's architecture:** Yjs is no longer the system of record and never persists to R2. It exists only as ephemeral *sugar* on top of the SQLite + outbox stack, in two narrow forms:
+
+- **`Y.XmlFragment` per focused cell** — TipTap's editing CRDT, scoped to a single cell, lives only while that cell has focus. On blur or quiesce, the canonical text is flushed to `cells.translation_text` via the outbox. The Y.XmlFragment is then disposed.
+- **`Y.Text` per co-edited cell** — when ≥2 clients focus the same cell, the project DO spins up a transient Y.Text seeded from `cells.translation_text` so live cursors and concurrent character ops merge cleanly. Same disposal rule: on quiesce, flush + tear down.
+
+Y.Doc is *never* persisted. The DO holds it in RAM only while at least one client is focused on a co-edited cell. Single-user editing on a single cell uses Y.XmlFragment locally without involving the DO.
+
+See [CLEANUP_POST_REFACTOR.md](./CLEANUP_POST_REFACTOR.md) for what this means for the existing `sync-worker` code.
 
 ---
 
@@ -325,9 +332,9 @@ CREATE TABLE cell_media (
 CREATE INDEX idx_cell_media_speaker ON cell_media(speaker_id);
 ```
 
-### 4.9 Stub tables (land empty, build later)
+### 4.9 Termbase (stub)
 
-These ship in the first migration with empty tables so future code does not require structural change.
+Lands empty in migration 001. Built out by Phase F of the editor refactor.
 
 ```sql
 CREATE TABLE term_entries (
@@ -346,29 +353,117 @@ CREATE TABLE term_entries (
   updated_at       INTEGER NOT NULL
 );
 CREATE INDEX idx_terms_lookup ON term_entries(org_id, source_lang, target_lang);
+```
 
-CREATE TABLE cell_comments (
-  id              TEXT PRIMARY KEY,
-  cell_id         TEXT NOT NULL,
-  cell_version_at INTEGER NOT NULL,              -- version when comment was made
-  parent_id       TEXT,                          -- thread parent
-  author_id       TEXT NOT NULL,
-  body            TEXT NOT NULL,
-  resolved        INTEGER NOT NULL DEFAULT 0,
-  created_at      INTEGER NOT NULL
-);
-CREATE INDEX idx_comments_cell ON cell_comments(cell_id, created_at);
+### 4.10 Cell data model: cell-keyed vs edit-keyed
 
-CREATE TABLE cell_qa (
-  cell_id         TEXT NOT NULL,
-  check_id        TEXT NOT NULL,                 -- 'tag_mismatch' | 'length_cps' | 'term_compliance' | …
-  cell_version_at INTEGER NOT NULL,
-  severity        TEXT NOT NULL,                 -- 'error' | 'warning' | 'info'
-  message         TEXT NOT NULL,
-  suggested_fix   TEXT,
-  ran_at          INTEGER NOT NULL,
-  PRIMARY KEY(cell_id, check_id)
+`CellData` (the legacy observed shape) is sourced from many subsystems addressed by `cell_id`. They split cleanly into two categories with different persistence shapes and different conflict semantics:
+
+| Category | Examples | Identity | Lifecycle |
+|---|---|---|---|
+| **Cell-keyed** | `translation_text`, `label`, `threads`, `attachments`, `media_segments` | Tied to the cell as an entity. Survive translation edits. | Mutated over time; LWW with version checks where conflict matters. |
+| **Edit-keyed** | `validations`, `waivers`, `backtranslations` | Assertions about a *specific text version*. Naturally invalidated when the version moves. | Append-only; new rows on each version. UI renders staleness honestly ("validated at v3, current is v4"). |
+
+Edit-keyed rows carry a `text_snapshot TEXT NOT NULL` of the translation they apply to. Self-contained: no FK to `cell_revisions`, so the row stays interpretable even if older revisions are pruned. The PM input that surfaced this rule:
+
+> Validation isn't a property of the cell, it's a signoff against a specific edit (cell_id + version). Multiple users validate the same edit independently; advancing the cell version naturally invalidates prior signoffs because they were assertions about a specific text, not about the cell as an entity.
+
+### 4.11 Edit-keyed signoffs (added in migration 002)
+
+```sql
+CREATE TABLE validations (
+  id                TEXT PRIMARY KEY,
+  cell_id           TEXT NOT NULL,
+  cell_version_at   INTEGER NOT NULL,           -- the cells.version this signoff applies to
+  text_snapshot     TEXT NOT NULL,              -- the translation_text the validator actually saw
+  rule_id           TEXT,                       -- NULL for general signoff; set for rule-scoped
+  validator_id      TEXT NOT NULL,
+  validated_at      INTEGER NOT NULL,
+  status            TEXT NOT NULL DEFAULT 'validated',  -- 'validated' | 'rejected' | 'withdrawn'
+  notes             TEXT,
+  seq               INTEGER NOT NULL,
+  org_id            TEXT NOT NULL,
+  UNIQUE(cell_id, cell_version_at, rule_id, validator_id)
 );
+CREATE INDEX idx_validations_cell    ON validations(cell_id, cell_version_at);
+CREATE INDEX idx_validations_active  ON validations(cell_id, status)
+                                       WHERE status = 'validated';
+
+CREATE TABLE waivers (
+  id                TEXT PRIMARY KEY,
+  cell_id           TEXT NOT NULL,
+  cell_version_at   INTEGER NOT NULL,
+  text_snapshot     TEXT NOT NULL,
+  rule_id           TEXT NOT NULL,
+  state             TEXT NOT NULL DEFAULT 'proposed',  -- 'proposed' | 'approved' | 'revoked'
+  justification     TEXT NOT NULL,
+  proposed_by       TEXT NOT NULL,
+  proposed_at       INTEGER NOT NULL,
+  resolved_by       TEXT,
+  resolved_at       INTEGER,
+  seq               INTEGER NOT NULL,
+  org_id            TEXT NOT NULL
+);
+CREATE INDEX idx_waivers_cell        ON waivers(cell_id, cell_version_at);
+CREATE INDEX idx_waivers_active      ON waivers(cell_id, rule_id, state)
+                                       WHERE state IN ('proposed','approved');
+
+CREATE TABLE backtranslations (
+  id                TEXT PRIMARY KEY,
+  cell_id           TEXT NOT NULL,
+  cell_version_at   INTEGER NOT NULL,
+  text_snapshot     TEXT NOT NULL,              -- the translation_text we back-translated FROM
+  back_text         TEXT NOT NULL,              -- the back-translation result
+  generated_by      TEXT NOT NULL,              -- user_id or 'ai:<model>'
+  generated_at      INTEGER NOT NULL,
+  is_user_edited    INTEGER NOT NULL DEFAULT 0,
+  seq               INTEGER NOT NULL,
+  UNIQUE(cell_id, cell_version_at)
+);
+CREATE INDEX idx_backtrans_cell      ON backtranslations(cell_id, cell_version_at);
+```
+
+### 4.12 Cell-keyed entities (added in migration 002)
+
+```sql
+CREATE TABLE threads (
+  id                TEXT PRIMARY KEY,
+  cell_id           TEXT NOT NULL,
+  status            TEXT NOT NULL DEFAULT 'open',  -- 'open' | 'resolved'
+  created_by        TEXT NOT NULL,
+  created_at        INTEGER NOT NULL,
+  resolved_by       TEXT,
+  resolved_at       INTEGER,
+  seq               INTEGER NOT NULL
+);
+CREATE INDEX idx_threads_cell        ON threads(cell_id, status);
+
+CREATE TABLE thread_messages (
+  id                TEXT PRIMARY KEY,
+  thread_id         TEXT NOT NULL,
+  author_id         TEXT NOT NULL,
+  body              TEXT NOT NULL,
+  created_at        INTEGER NOT NULL,
+  seq               INTEGER NOT NULL
+);
+CREATE INDEX idx_msgs_thread         ON thread_messages(thread_id, created_at);
+
+CREATE TABLE cell_attachments (
+  id                TEXT PRIMARY KEY,
+  cell_id           TEXT NOT NULL,
+  kind              TEXT NOT NULL,                 -- 'audio' | 'image' | 'link' | 'file' | 'reference'
+  ref               TEXT,                          -- URL or external id
+  blob_key          TEXT,                          -- R2 key when stored locally
+  display_name      TEXT,
+  metadata          TEXT NOT NULL DEFAULT '{}',    -- JSON, kind-specific
+  added_by          TEXT NOT NULL,
+  added_at          INTEGER NOT NULL,
+  seq               INTEGER NOT NULL
+);
+CREATE INDEX idx_attach_cell         ON cell_attachments(cell_id);
+```
+
+Migration 002 also adds `cells.label TEXT` (cell-keyed user label) and `cells.backtranslation_pinned_id TEXT` (an FK pointer to the currently-displayed `backtranslations.id`, so the UI can fix on a specific version when the user explicitly chose one).
 CREATE INDEX idx_qa_severity ON cell_qa(severity);
 ```
 
@@ -518,17 +613,71 @@ Optimistic local apply: on enqueue, write the new state to the local `cells` row
 - Soft locks: 30s TTL, refreshed on heartbeat. Pure UX hint; server still uses optimistic version checks.
 - Rate limiting per DO: cap presence updates at ~10 Hz, cap Y.Text relay at ~50 ops/sec/cell. Above thresholds, drop oldest.
 
+### 8.8 Mirror registry (Y.Doc → local store)
+
+During the editor refactor (and any time a non-local source produces state the local store needs to mirror), the bridge is a small *registry* of mirror modules — not a single hardcoded observer. Each subsystem (`translation_text`, `threads`, `cell_attachments`, `validations`, etc.) ships its own mirror.
+
+```ts
+interface Mirror {
+  name: string                                  // unique key, e.g. "translation-text"
+  bootstrap(ctx: MirrorContext): Promise<void>  // one-shot import on first project open
+  attach(ctx: MirrorContext): () => void        // observers; returns dispose fn
+}
+
+mirrorRegistry.register(translationTextMirror)
+// Future phases:
+// mirrorRegistry.register(threadsMirror)
+// mirrorRegistry.register(attachmentsMirror)
+```
+
+The pattern keeps the migration path additive: each phase adds a mirror without reshaping the bridge. A retrofit to swap the bridge after Phase 0 hardcoded a single observer would be expensive — this is the cheap-now / expensive-later design.
+
+**Bootstrap precedence.** When mounting on an existing project, the mirror's bootstrap path checks whether the destination table already has data. If empty, it imports from the source (Y.Doc, etc.). If non-empty, the local store wins and the source is ignored — the local store is canonical, the source is a lossy fallback.
+
 ---
 
 ## 9. Conflict resolution
 
-Three-pane diff in UI:
+### 9.1 The three-pane diff (UI flow)
+
+When a `cell.set_translation` mutation returns 409:
 
 - **Mine** = client's pending outbox payload.
 - **Theirs** = server's current `cells` row.
 - **Base** = `cell_revisions` at `expected_version` (lazy-fetched).
 
 User picks: keep mine / take theirs / merge (open in editor with a 3-way merge view). Whatever they pick becomes a new mutation with `expected_version = theirs.version`.
+
+### 9.2 Mutation kinds and per-kind conflict policies
+
+Every outbox record carries a typed `kind` describing what it asserts. The flusher dispatches to the right server endpoint by kind, and the conflict policy below tells it what to do when the server says "the cell version moved while you were offline."
+
+| `kind` | Shape (payload) | Endpoint | Conflict policy on `expected_version` mismatch |
+|---|---|---|---|
+| `cell.set_translation` | `{translation_text, expected_version}` | `POST /projects/:p/cells/:c` | **reject (409 → 3-way diff)** |
+| `cell.set_label` | `{label, expected_version}` | `POST /projects/:p/cells/:c/label` | **reject (409)** — labels are cell-keyed and concurrent label edits should surface |
+| `cell.transition_status` | `{from, to, expected_version}` | `POST /projects/:p/cells/:c/status` | **reject (409)** |
+| `validation.signoff` | `{cell_id, cell_version_at, text_snapshot, status, notes?}` | `POST /projects/:p/validations` | **reject (409)** — version moved → reviewer must re-look |
+| `validation.withdraw` | `{validation_id}` | `POST /projects/:p/validations/:id/withdraw` | LWW; accept |
+| `waiver.propose` | `{cell_id, cell_version_at, text_snapshot, rule_id, justification}` | `POST /projects/:p/waivers` | **accept as historical** — old version's waiver row is preserved; UI marks it stale |
+| `waiver.transition` | `{waiver_id, expected_state, to_state}` | `POST /projects/:p/waivers/:id/transition` | **reject (409)** — state transitions require fresh look |
+| `backtranslation.set` (AI) | `{cell_id, cell_version_at, text_snapshot, back_text}` | `POST /projects/:p/backtranslations` | **accept as historical** — AI-generated, just persist for the version we ran on |
+| `backtranslation.edit` (user) | `{backtranslation_id, expected_version, back_text}` | `PUT /projects/:p/backtranslations/:id` | **reject (409)** — user edit must re-confirm against current text |
+| `thread.create` | `{cell_id, body}` | `POST /projects/:p/threads` | **accept** — server-assigned `id`, additive; comments are version-irrelevant |
+| `thread.append` | `{thread_id, body}` | `POST /projects/:p/threads/:id/messages` | **accept** — additive |
+| `thread.resolve` | `{thread_id, expected_state}` | `POST /projects/:p/threads/:id/resolve` | LWW on `state`; accept |
+| `attachment.add` | `{cell_id, kind, ref?, blob_key?, display_name?, metadata?}` | `POST /projects/:p/cells/:c/attachments` | **accept** — additive; concurrent attaches don't conflict |
+| `attachment.remove` | `{attachment_id}` | `DELETE /projects/:p/attachments/:id` | LWW; accept |
+| `media.set_timing` | `{cell_id, expected_version, t_start_actual, t_end_actual, generated_clip_ref?}` | `POST /projects/:p/cells/:c/media` | **reject (409)** — timing belongs to a specific text version |
+
+The two distinct "reject" semantics are the high-leverage piece:
+
+- **`reject (409)`** = surface to user. The user sees a UI prompt or a stale banner. They re-make the decision against fresh text.
+- **`accept as historical`** = the row goes through. It stays attached to its `cell_version_at`. The UI later renders staleness honestly: "validated at v3, current is v4."
+
+Mutations that are version-irrelevant (threads, attachments) are always `accept` — concurrent additions are not conflicts.
+
+The kinds list is *the* artifact that proves a subsystem's conflict model has been thought through. **A subsystem cannot ship in code without an entry here.**
 
 ---
 

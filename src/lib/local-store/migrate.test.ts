@@ -43,7 +43,13 @@ describe("LocalStore.migrate", () => {
       const versions = await store.query<{ version: number }>(
         "SELECT version FROM _migrations ORDER BY version",
       )
-      expect(versions).toEqual([{ version: 1 }])
+      // Whatever migrations are committed in MIGRATIONS, calling migrate
+      // twice leaves exactly one row per version. The set itself grows
+      // over time; the assertion is "no duplication," not a hardcoded count.
+      const expected = MIGRATIONS.map((m) => ({ version: m.version })).sort(
+        (a, b) => a.version - b.version,
+      )
+      expect(versions).toEqual(expected)
     } finally {
       await store.close()
     }

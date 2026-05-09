@@ -39,6 +39,12 @@ export interface CellRow {
   target_lang: string
 
   format_meta: string
+
+  // Added in migration 002. Optional on the input side so existing fixtures
+  // and pre-migration code keep working; the DB columns themselves are
+  // nullable so the absence is faithful.
+  label?: string | null
+  backtranslation_pinned_id?: string | null
 }
 
 const UPSERT_SQL = `INSERT OR REPLACE INTO cells (
@@ -49,8 +55,8 @@ const UPSERT_SQL = `INSERT OR REPLACE INTO cells (
   version, last_edited_by, last_edited_at,
   seq, created_at, updated_at,
   org_id, source_lang, target_lang,
-  format_meta
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  format_meta, label, backtranslation_pinned_id
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
 
 export async function upsertCell(
   store: LocalStore,
@@ -82,6 +88,8 @@ export async function upsertCell(
     cell.source_lang,
     cell.target_lang,
     cell.format_meta,
+    cell.label ?? null,
+    cell.backtranslation_pinned_id ?? null,
   ])
 }
 

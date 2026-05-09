@@ -49,7 +49,7 @@ export function TranslatedEditorV2({
   editable = true,
   debounceMs = 400,
   className,
-}: TranslatedEditorV2Props): JSX.Element {
+}: TranslatedEditorV2Props) {
   // Keep the latest commit callback in a ref so the editor's onUpdate
   // closure doesn't go stale across renders.
   const commitRef = useRef(onCommit)
@@ -74,7 +74,6 @@ export function TranslatedEditorV2({
           blockquote: false,
           codeBlock: false,
           horizontalRule: false,
-          undoRedo: true,
         }),
         ...placeholderExtensions,
       ],

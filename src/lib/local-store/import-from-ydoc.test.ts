@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, test } from "vitest"
 import * as Y from "yjs"
 import { LocalStore } from "./db"
 import { MIGRATIONS } from "./migrations"
-import { getCell, getCellsByScope, upsertCell, type CellRow } from "./cells"
+import { getCell, getCellsByScope, upsertCell } from "./cells"
 import { importYDocIfEmpty, type YDocImportContext } from "./import-from-ydoc"
 
 const NOW = 1_700_000_000_000

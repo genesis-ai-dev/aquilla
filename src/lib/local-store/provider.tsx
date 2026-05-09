@@ -53,7 +53,7 @@ export interface LocalStoreProviderProps {
 export function LocalStoreProvider({
   projectId,
   children,
-}: LocalStoreProviderProps): JSX.Element {
+}: LocalStoreProviderProps) {
   const [state, setState] = useState<LocalStoreState>({ status: "loading" })
   const storeRef = useRef<LocalStore | null>(null)
 

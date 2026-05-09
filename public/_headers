@@ -1,0 +1,25 @@
+# Cloudflare Pages response headers
+# https://developers.cloudflare.com/pages/configuration/headers/
+#
+# OPFS SyncAccessHandle (used by SQLite-WASM's worker) requires the page
+# to be `crossOriginIsolated`. We scope these headers to /dev/* routes
+# only — applying them globally would break legacy surfaces that load
+# cross-origin scripts without explicit CORP responses (PostHog, etc.).
+#
+# `credentialless` is preferred over `require-corp` because it allows
+# anonymous cross-origin requests without requiring the resource server
+# to set Cross-Origin-Resource-Policy headers. Modern Chromium supports
+# it, which is the only browser the smoke suite targets.
+
+/dev/*
+  Cross-Origin-Opener-Policy: same-origin
+  Cross-Origin-Embedder-Policy: credentialless
+
+/sqlite3-worker1.mjs
+  Cross-Origin-Resource-Policy: same-origin
+
+/sqlite3-opfs-async-proxy.js
+  Cross-Origin-Resource-Policy: same-origin
+
+/sqlite3.wasm
+  Cross-Origin-Resource-Policy: same-origin

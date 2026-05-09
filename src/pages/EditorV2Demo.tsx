@@ -105,7 +105,7 @@ function dictForCell(cell: CellRow): TagDictionary {
   }
 }
 
-export default function EditorV2Demo(): JSX.Element {
+export default function EditorV2Demo() {
   const [store, setStore] = useState<LocalStore | null>(null)
   const [cells, setCells] = useState<CellRow[]>([])
   const [pending, setPending] = useState(0)

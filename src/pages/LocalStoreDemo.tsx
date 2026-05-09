@@ -321,7 +321,7 @@ export default function LocalStoreDemo() {
  * via upsertCell, and this panel reflects the new translated text on the
  * next event-bus tick.
  */
-function UseCellsLocalPanel({ store }: { store: LocalStore }): JSX.Element {
+function UseCellsLocalPanel({ store }: { store: LocalStore }) {
   const cells = useCellsLocal(store, PROJECT_ID, SCOPE_ID)
   return (
     <div

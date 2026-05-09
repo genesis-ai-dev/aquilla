@@ -11,10 +11,7 @@ import { LocalStore } from "@/lib/local-store/db"
 import { MIGRATIONS } from "@/lib/local-store/migrations"
 import { listPending } from "@/lib/local-store/outbox"
 import { upsertCell } from "@/lib/local-store/cells"
-import {
-  getActiveBacktranslation,
-  getBacktranslation,
-} from "@/lib/local-store/backtranslations"
+import { getActiveBacktranslation } from "@/lib/local-store/backtranslations"
 import type { CellRow } from "@/lib/local-store/cells"
 import type { MirrorContext } from "./registry"
 import { createBacktranslationsMirror } from "./backtranslations-mirror"

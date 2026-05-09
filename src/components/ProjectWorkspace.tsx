@@ -108,7 +108,6 @@ import { AiSetupDialog } from "./AiSetupDialog"
 import { LocalStoreProvider, useProjectStore } from "@/lib/local-store"
 import { importYDocIfEmpty } from "@/lib/local-store/import-from-ydoc"
 import { useMirrorRegistry } from "@/lib/mirror-registry"
-import type * as Y from "yjs"
 
 /**
  * Renders nothing; orchestrates two things for the workspace's Y.Doc:
@@ -896,7 +895,7 @@ export function ProjectWorkspace() {
         fileId={activeFileId}
         sourceLang={project?.sourceLanguage ?? "und"}
         targetLang={project?.targetLanguage ?? "und"}
-        orgId={String(project?.orgId ?? "default")}
+        orgId="default"
       />
       <EditorScrollProvider>
       {/* ScrollToGroupHandler must live inside EditorScrollProvider so it can call useEditorScroll */}

@@ -28,10 +28,13 @@ export interface SqliteBackend {
 let sqlite3Promise: Promise<Sqlite3Static> | null = null
 function getSqlite3(): Promise<Sqlite3Static> {
   if (!sqlite3Promise) {
-    sqlite3Promise = sqlite3InitModule({
-      print: () => {},
-      printErr: () => {},
-    })
+    // Newer @sqlite.org/sqlite-wasm types declared init as zero-arg; the
+    // runtime accepts a config (print/printErr) for log routing. Bypass
+    // the typed signature.
+    const init = sqlite3InitModule as unknown as (
+      cfg?: { print?: (...a: unknown[]) => void; printErr?: (...a: unknown[]) => void },
+    ) => Promise<Sqlite3Static>
+    sqlite3Promise = init({ print: () => {}, printErr: () => {} })
   }
   return sqlite3Promise
 }
@@ -44,10 +47,13 @@ export async function openMemoryBackend(): Promise<SqliteBackend> {
 
 function makeMemoryBackend(db: Sqlite3DB): SqliteBackend {
   return {
-    async run(sql, params) {
+    async run(sql: string, params?: ReadonlyArray<unknown>) {
       db["exec"]({ sql, bind: params as never })
     },
-    async query<T>(sql, params): Promise<T[]> {
+    async query<T>(
+      sql: string,
+      params?: ReadonlyArray<unknown>,
+    ): Promise<T[]> {
       const rows: T[] = []
       db["exec"]({
         sql,
@@ -106,28 +112,34 @@ export async function openOpfsBackend(name: string): Promise<SqliteBackend> {
   })
   const dbId = opened.result.dbId
 
+  // The Worker1 promiser types declare narrow shapes that don't reflect the
+  // actual runtime API (which accepts dbId on every call). Cast through
+  // `unknown` so the types-vs-runtime gap doesn't bleed into call sites.
+  const rawPromiser = promiser as unknown as (
+    op: string,
+    args: Record<string, unknown>,
+  ) => Promise<{ result?: { resultRows?: unknown[] } }>
   return {
-    async run(sql, params) {
-      await promiser("exec", {
-        dbId,
-        sql,
-        bind: params as never,
-      })
+    async run(sql: string, params?: ReadonlyArray<unknown>) {
+      await rawPromiser("exec", { dbId, sql, bind: params })
     },
-    async query<T>(sql, params): Promise<T[]> {
+    async query<T>(
+      sql: string,
+      params?: ReadonlyArray<unknown>,
+    ): Promise<T[]> {
       const rows: unknown[] = []
-      const result = await promiser("exec", {
+      const result = await rawPromiser("exec", {
         dbId,
         sql,
-        bind: params as never,
+        bind: params,
         rowMode: "object",
-        resultRows: rows as never,
+        resultRows: rows,
       })
-      const echoed = (result.result as { resultRows?: unknown[] })?.resultRows
+      const echoed = result.result?.resultRows
       return ((echoed ?? rows) as T[]).slice()
     },
     async close() {
-      await promiser("close", { dbId })
+      await rawPromiser("close", { dbId })
     },
   }
 }

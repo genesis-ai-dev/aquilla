@@ -25,15 +25,17 @@ import type { Migration } from "./migrations"
  * Recovery is "wipe local store and re-bootstrap from server snapshot."
  */
 export class MigrationDriftError extends Error {
-  constructor(
-    public readonly version: number,
-    public readonly stored: string,
-    public readonly current: string,
-  ) {
+  readonly version: number
+  readonly stored: string
+  readonly current: string
+  constructor(version: number, stored: string, current: string) {
     super(
       `migration ${version} content hash drift — recorded ${stored.slice(0, 8)}…, now ${current.slice(0, 8)}…. Migration files are append-only after deploy.`,
     )
     this.name = "MigrationDriftError"
+    this.version = version
+    this.stored = stored
+    this.current = current
   }
 }
 
@@ -47,7 +49,10 @@ export interface LocalStoreOptions {
 }
 
 export class LocalStore {
-  private constructor(private readonly backend: SqliteBackend) {}
+  private readonly backend: SqliteBackend
+  private constructor(backend: SqliteBackend) {
+    this.backend = backend
+  }
 
   static async open(opts: LocalStoreOptions): Promise<LocalStore> {
     const backend =

@@ -86,36 +86,88 @@ interface LegacyAttachment {
   isDeleted?: boolean
 }
 
+interface LegacyWordTiming {
+  word: string
+  t0: number
+  t1: number
+  start: number
+  end: number
+}
+
 async function importCellAttachments(
   ctx: YDocImportContext,
   cellId: string,
   yCell: Y.Map<unknown>,
 ): Promise<void> {
   const source = yCell.get("__source") as
-    | { metadata?: { attachments?: Record<string, LegacyAttachment> } }
+    | {
+        metadata?: {
+          attachments?: Record<string, LegacyAttachment>
+          audioTimings?: Record<string, LegacyWordTiming[]>
+        }
+      }
     | undefined
+
   const attachments = source?.metadata?.attachments
-  if (!attachments) return
-  for (const [attId, att] of Object.entries(attachments)) {
-    if (!att || att.isDeleted) continue
-    await ctx.store.run(
-      `INSERT OR REPLACE INTO cell_attachments (
-        id, cell_id, kind, ref, blob_key, display_name, metadata,
-        added_by, added_at, seq
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [
-        `${cellId}::${attId}`,
-        cellId,
-        att.type ?? "file",
-        att.url ?? null,
-        null,
-        attId,
-        "{}",
-        "ydoc-imported",
-        att.createdAt ?? ctx.now(),
-        0,
-      ],
+  if (attachments) {
+    for (const [attId, att] of Object.entries(attachments)) {
+      if (!att || att.isDeleted) continue
+      await ctx.store.run(
+        `INSERT OR REPLACE INTO cell_attachments (
+          id, cell_id, kind, ref, blob_key, display_name, metadata,
+          added_by, added_at, seq
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          `${cellId}::${attId}`,
+          cellId,
+          att.type ?? "file",
+          att.url ?? null,
+          null,
+          attId,
+          "{}",
+          "ydoc-imported",
+          att.createdAt ?? ctx.now(),
+          0,
+        ],
+      )
+    }
+  }
+
+  // Audio timings — paired with attachments by attachmentId. The legacy
+  // shape doesn't carry text_snapshot or cell_version_at; on import we
+  // capture both from the cell's *current* row so the edit-keyed
+  // contract holds going forward. Re-running the importer will refresh
+  // these to the latest cell version.
+  const audioTimings = source?.metadata?.audioTimings
+  if (audioTimings) {
+    const cellRow = await ctx.store.query<{
+      version: number
+      translation_text: string
+    }>(
+      "SELECT version, translation_text FROM cells WHERE id = ?",
+      [cellId],
     )
+    const version = cellRow[0]?.version ?? 0
+    const text = cellRow[0]?.translation_text ?? ""
+    for (const [attId, timings] of Object.entries(audioTimings)) {
+      if (!Array.isArray(timings) || timings.length === 0) continue
+      await ctx.store.run(
+        `INSERT OR REPLACE INTO audio_timings (
+          attachment_id, cell_id, cell_version_at, text_snapshot,
+          timings_json, generated_by, generated_at, seq
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          `${cellId}::${attId}`,
+          cellId,
+          version,
+          text,
+          JSON.stringify(timings),
+          "ydoc-imported",
+          ctx.now(),
+          0,
+        ],
+      )
+    }
   }
 }
 

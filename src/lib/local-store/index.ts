@@ -90,6 +90,14 @@ export {
 } from "./backtranslations"
 
 export {
+  upsertAudioTimings,
+  getAudioTimingsByAttachment,
+  getAudioTimingsForCell,
+  type AudioTimingsRow,
+  type WordTiming,
+} from "./audio-timings"
+
+export {
   rowToLocalCellData,
   type LocalCellData,
   type LocalThread,

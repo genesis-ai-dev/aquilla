@@ -248,6 +248,83 @@ describe("importYDocIfEmpty", () => {
     await cleanup()
   })
 
+  test("imports audioTimings from __source.metadata into audio_timings", async () => {
+    seedCell(yDoc, "uuid-with-audio", {
+      original: "src",
+      type: "verse",
+      __source: {
+        kind: "code",
+        languageId: "scripture",
+        value: "src",
+        metadata: {
+          id: "uuid-with-audio",
+          type: "verse",
+          attachments: {
+            "att-audio-1": {
+              url: "/.project/attachments/files/JUD/a.webm",
+              type: "audio",
+            },
+          },
+          audioTimings: {
+            "att-audio-1": [
+              { word: "In", t0: 0, t1: 0.18, start: 0, end: 2 },
+              { word: "the", t0: 0.18, t1: 0.32, start: 3, end: 6 },
+              {
+                word: "beginning",
+                t0: 0.32,
+                t1: 0.92,
+                start: 7,
+                end: 16,
+              },
+            ],
+          },
+        },
+      },
+    })
+
+    const { ctx, cleanup } = await makeCtx(yDoc)
+    await importYDocIfEmpty(ctx)
+
+    const rows = await ctx.store.query<{
+      attachment_id: string
+      cell_id: string
+      timings_json: string
+    }>(
+      "SELECT attachment_id, cell_id, timings_json FROM audio_timings WHERE cell_id = ?",
+      ["uuid-with-audio"],
+    )
+    expect(rows).toHaveLength(1)
+    expect(rows[0].attachment_id).toBe("uuid-with-audio::att-audio-1")
+    const parsed = JSON.parse(rows[0].timings_json) as Array<{ word: string }>
+    expect(parsed.map((t) => t.word)).toEqual([
+      "In",
+      "the",
+      "beginning",
+    ])
+
+    await cleanup()
+  })
+
+  test("audio timings are skipped when the audioTimings field is missing", async () => {
+    seedCell(yDoc, "uuid-no-audio", {
+      original: "src",
+      type: "verse",
+      __source: {
+        kind: "code",
+        languageId: "scripture",
+        value: "src",
+        metadata: { id: "uuid-no-audio", type: "verse" },
+      },
+    })
+    const { ctx, cleanup } = await makeCtx(yDoc)
+    await importYDocIfEmpty(ctx)
+    const rows = await ctx.store.query<{ count: number }>(
+      "SELECT COUNT(*) as count FROM audio_timings",
+    )
+    expect(rows[0].count).toBe(0)
+    await cleanup()
+  })
+
   test("import + mirror together: Y.Doc edit after import propagates correctly", async () => {
     seedCellWithTranslation(yDoc, "uuid-1", "")
     const { ctx, cleanup } = await makeCtx(yDoc)

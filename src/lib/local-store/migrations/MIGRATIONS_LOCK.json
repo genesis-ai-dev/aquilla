@@ -2,6 +2,7 @@
   "_doc": "SHA-256 of the canonicalized SQL (CRLF→LF, trimmed) of every committed migration. See DATA_PERSISTENCE_PLAN.md §13. Updating an existing entry is a critical bug; only add new versions in PRs that introduce new migration files. The lockfile.test.ts vitest spec fails CI if any current hash diverges from this manifest.",
   "hashes": {
     "1": "3d6bb1d0d76342d0de568393761385a5fa6e57cccb240308cfd0d882670f6205",
-    "2": "c49a08a3b238c1654eb67781519e9b893b6f12c8e5ea636678ec0da64c07808d"
+    "2": "c49a08a3b238c1654eb67781519e9b893b6f12c8e5ea636678ec0da64c07808d",
+    "3": "28c1f2e69ce8fec8a12d28051bdcdf483969b9170a316484c3f7246b6ed5ca0a"
   }
 }

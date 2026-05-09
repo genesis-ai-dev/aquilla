@@ -26,6 +26,7 @@ import {
   wipeOpfsDb,
   type CellRow,
 } from "@/lib/local-store"
+import { useCellsLocal } from "@/hooks/useCellsLocal"
 
 const PROJECT_ID = "demo"
 const SCOPE_ID = "scope-1"
@@ -266,6 +267,8 @@ export default function LocalStoreDemo() {
       <p className="text-sm text-gray-600 mb-4">
         OPFS-backed SQLite-WASM, snapshot ingested, cells editable via outbox.
       </p>
+      <UseCellsLocalPanel store={store} />
+
       <div
         data-testid="pending-count"
         className="mb-4 inline-block rounded bg-amber-50 border border-amber-200 px-2 py-1 text-xs text-amber-800"
@@ -308,6 +311,37 @@ export default function LocalStoreDemo() {
           Wipes OPFS for this project and reloads.
         </span>
       </div>
+    </div>
+  )
+}
+
+/**
+ * Read-only view powered by `useCellsLocal`. Proves the hook re-renders
+ * when the underlying cells table changes — the input fields above write
+ * via upsertCell, and this panel reflects the new translated text on the
+ * next event-bus tick.
+ */
+function UseCellsLocalPanel({ store }: { store: LocalStore }): JSX.Element {
+  const cells = useCellsLocal(store, PROJECT_ID, SCOPE_ID)
+  return (
+    <div
+      data-testid="use-cells-local-panel"
+      className="mb-4 rounded border border-emerald-200 bg-emerald-50/50 p-3 text-xs"
+    >
+      <div className="font-semibold text-emerald-900 mb-1">
+        via useCellsLocal ({cells.length})
+      </div>
+      <ul className="space-y-1">
+        {cells.map((c) => (
+          <li
+            key={c.id}
+            data-testid={`local-cell-${c.id}`}
+            className="font-mono text-emerald-800"
+          >
+            {c.id}: <span data-testid={`local-translated-${c.id}`}>{c.translated || "—"}</span>
+          </li>
+        ))}
+      </ul>
     </div>
   )
 }

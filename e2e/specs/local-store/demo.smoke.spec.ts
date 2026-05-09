@@ -44,6 +44,13 @@ test.describe("local-store demo", () => {
     // Outbox now has at least one pending mutation (one per keystroke
     // batched by React's event loop, but at minimum 1).
     await expect(page.getByTestId("pending-count-value")).not.toHaveText("0")
+
+    // The useCellsLocal panel — a separate view powered entirely by
+    // `useCellsLocal` + the store-events bus — also reflects the typed
+    // text. Proves the read path subscription is wired correctly.
+    await expect(
+      page.getByTestId("local-translated-demo:cell-1"),
+    ).toContainText("En el principio")
   })
 
   test("loading state is shown briefly before the store is ready", async ({

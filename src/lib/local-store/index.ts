@@ -77,6 +77,13 @@ export {
 } from "./waivers"
 
 export {
+  upsertBacktranslation,
+  getBacktranslation,
+  getActiveBacktranslation,
+  type BacktranslationRow,
+} from "./backtranslations"
+
+export {
   LocalStoreProvider,
   useProjectStore,
   useLocalStoreState,

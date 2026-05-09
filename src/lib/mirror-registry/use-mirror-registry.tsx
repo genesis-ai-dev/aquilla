@@ -23,6 +23,7 @@ import { MirrorRegistry, type MirrorContext } from "./registry"
 import { createTranslationTextMirror } from "./translation-text-mirror"
 import { createThreadsMirror } from "./threads-mirror"
 import { createWaiversMirror } from "./waivers-mirror"
+import { createBacktranslationsMirror } from "./backtranslations-mirror"
 
 export type MirrorRegistryStatus = "no-store" | "loading" | "ready"
 
@@ -47,6 +48,7 @@ export function useMirrorRegistry(
     registry.register(createTranslationTextMirror({ yDoc }))
     registry.register(createThreadsMirror({ yDoc }))
     registry.register(createWaiversMirror({ yDoc }))
+    registry.register(createBacktranslationsMirror({ yDoc }))
 
     const ctx: MirrorContext = {
       store,

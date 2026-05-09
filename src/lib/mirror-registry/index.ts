@@ -32,6 +32,11 @@ export {
 } from "./waivers-mirror"
 
 export {
+  createBacktranslationsMirror,
+  type BacktranslationsMirrorOptions,
+} from "./backtranslations-mirror"
+
+export {
   useMirrorRegistry,
   type MirrorRegistryStatus,
 } from "./use-mirror-registry"

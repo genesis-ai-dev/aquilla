@@ -663,8 +663,8 @@ Every outbox record carries a typed `kind` describing what it asserts. The flush
 | `waiver.transition` | `{waiver_id, expected_state, to_state}` | `POST /projects/:p/waivers/:id/transition` | **reject (409)** — state transitions require fresh look |
 | `backtranslation.set` (AI) | `{cell_id, cell_version_at, text_snapshot, back_text}` | `POST /projects/:p/backtranslations` | **accept as historical** — AI-generated, just persist for the version we ran on |
 | `backtranslation.edit` (user) | `{backtranslation_id, expected_version, back_text}` | `PUT /projects/:p/backtranslations/:id` | **reject (409)** — user edit must re-confirm against current text |
-| `thread.create` | `{cell_id, body}` | `POST /projects/:p/threads` | **accept** — server-assigned `id`, additive; comments are version-irrelevant |
-| `thread.append` | `{thread_id, body}` | `POST /projects/:p/threads/:id/messages` | **accept** — additive |
+| `thread.create` | `{cell_id, id, created_by, created_at}` | `POST /projects/:p/threads` | **accept** — additive; the empty thread shell. The first (and every) message arrives as a separate `thread.append`. |
+| `thread.append` | `{thread_id, id, author_id, body, created_at}` | `POST /projects/:p/threads/:id/messages` | **accept** — additive; carries the message id so the server can dedupe on retry. |
 | `thread.resolve` | `{thread_id, expected_state}` | `POST /projects/:p/threads/:id/resolve` | LWW on `state`; accept |
 | `attachment.add` | `{cell_id, kind, ref?, blob_key?, display_name?, metadata?}` | `POST /projects/:p/cells/:c/attachments` | **accept** — additive; concurrent attaches don't conflict |
 | `attachment.remove` | `{attachment_id}` | `DELETE /projects/:p/attachments/:id` | LWW; accept |

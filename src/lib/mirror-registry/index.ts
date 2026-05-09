@@ -22,6 +22,11 @@ export {
 } from "./translation-text-mirror"
 
 export {
+  createThreadsMirror,
+  type ThreadsMirrorOptions,
+} from "./threads-mirror"
+
+export {
   useMirrorRegistry,
   type MirrorRegistryStatus,
 } from "./use-mirror-registry"

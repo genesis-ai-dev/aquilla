@@ -58,6 +58,17 @@ export {
 export { wipeOpfsDb } from "./wipe"
 
 export {
+  upsertThread,
+  getThread,
+  getThreadsByCell,
+  appendThreadMessage,
+  getMessagesByThread,
+  resolveThreadStatus,
+  type ThreadRow,
+  type ThreadMessageRow,
+} from "./threads"
+
+export {
   LocalStoreProvider,
   useProjectStore,
   useLocalStoreState,

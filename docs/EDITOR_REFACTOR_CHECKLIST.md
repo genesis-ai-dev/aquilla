@@ -58,35 +58,35 @@ A React context owns the per-project `LocalStore` instance. `ProjectWorkspace` o
 
 ---
 
-## Phase D — Replace `useCells` read path
+## Phase D — Y.Doc → local store one-shot import (substrate populated)
 
-Switch the synchronous read from Y.Doc to a polling/subscription cache fed by `LocalStore.query`. All downstream `CellData` consumers stay unchanged.
+- [x] `src/lib/local-store/import-from-ydoc.ts` — maps legacy Y.Doc cells to the new `CellRow` shape with deterministic ord, fallback addresses, and a one-shot guard that skips when the local store already holds rows for the scope.
+- [x] Wired into `MirrorBridge`: import runs on every (projectId, fileId) mount; the mirror only attaches *after* import resolves so a fast typist can't have edits silently dropped on the empty-table path.
+- [x] Editor smoke (`alice imports markdown, edits cell, persists across reload`) still passes — proves the bridge is non-regressive.
+- [x] Threads, attachments, validations, etc. *not* imported here — those land per-subsystem in Phase F.
 
-- [ ] `src/hooks/useCellsLocal.ts` — synchronous-shaped hook backed by an in-memory cache. The cache is rebuilt on each mirror update.
-- [ ] Translation layer `src/lib/local-store/cell-row-to-cell-data.ts` — produces the legacy `CellData` shape from a `CellRow` plus joined data (label, status, etc.). Edit-keyed fields (validationStatus, etc.) join from the new tables.
-- [ ] Replace `useCells` import in `ProjectWorkspace.tsx` with `useCellsLocal`
-- [ ] Verify all `CellData`-consuming components (`EditorTable`, `VoiceBar`, `RuleDrawer`, `CellActionsMenu`, `HistoryDrawer`, `SelectionBar`, `StatusBar`, `CommentsDrawer`, `AudioRecordingModal`) keep working
-- [ ] E2E: editor still renders cells, edit + save, audit overlay reflects state
+**Phase D exit criteria** (met): every project opened in this branch populates a complete `cells` shadow copy in local-store, and live edits keep it in sync. Y.Doc remains the read source for the existing editor; the actual `useCells` swap is deferred to Phase E because it's load-bearing-entangled with the editor rewrite (translatedXml, threads, history, etc. all come together when TipTap is replaced).
 
-**Phase D exit criteria:** Y.Doc is no longer the read source for cell data. Editing still flows through Y.Doc → mirror → local-store, but the UI reads from local-store.
+## Phase E — New cell editor on plain text + placeholders, with `useCells` swap
+
+Replace TipTap-on-Y.XmlFragment with an editor that operates on `cells.translation_text` (plain text) + `cells.tag_dictionary` (placeholder metadata). The new editor reads cells directly from local-store via `useCellsLocal`; `useCells` (Y.Doc-backed) is retired alongside the editor change because the two are entangled — both produce `CellData`, and the legacy `CellData.translatedXml` field disappears with the new editor.
 
 ---
 
-## Phase E — New cell editor: plain text + placeholders
+### Phase E sub-plan
 
-Replace TipTap-on-Y.XmlFragment with an editor that operates on `cells.translation_text` (plain text) + `cells.tag_dictionary` (placeholder metadata). This is the bulk of the editor rewrite.
-
+- [ ] `src/hooks/useCellsLocal.ts` — synchronous-shaped hook over a local-store query + an in-process change emitter; produces the *new* `CellData` (no `translatedXml`).
+- [ ] `src/lib/local-store/cell-row-to-cell-data.ts` — typed translator. Edit-keyed fields (validationStatus, waivers, backtranslation) join from the migration-002 tables.
 - [ ] `src/components/codex-editor-v2/CellEditor.tsx` — the new editor primitive
-  - [ ] Plain-text editing surface
-  - [ ] Placeholder rendering as protected chips (drag/drop within cell, delete with backspace as a unit)
-  - [ ] Tag dictionary mutations via outbox
-  - [ ] Source/target placeholder validation: target's placeholder set must be a subset of source's
+  - [ ] Plain-text editing surface bound to `cells.translation_text`
+  - [ ] Placeholder rendering as protected chips (drag/drop within cell, delete-as-unit)
+  - [ ] Tag dictionary mutations through the outbox
+  - [ ] Source/target placeholder validation: target's set ⊆ source's
 - [ ] Replace TipTap binding in `EditorTable.tsx` with the new editor
-- [ ] Drop the `Y.XmlFragment` field from `CellData`
-- [ ] Co-edit hook: when a cell has ≥2 focused users, spin up a transient `Y.Text` for live cursor relay (Phase G plumbing)
-- [ ] Tests: unit + E2E for the new editor's golden flows (type, paste, delete placeholder, etc.)
+- [ ] Co-edit hook: when ≥2 users focus the same cell, spin up a transient `Y.Text` for live cursor relay (Phase G plumbing)
+- [ ] Tests: unit + E2E for golden flows (type, paste, delete placeholder, conflict)
 
-**Phase E exit criteria:** Y.Doc no longer carries cell text; the editor operates directly on local-store with outbox-driven persistence.
+**Phase E exit criteria:** Y.Doc no longer carries cell text; the editor reads + writes local-store; outbox drains to the server (when phases 1–3 land).
 
 ---
 

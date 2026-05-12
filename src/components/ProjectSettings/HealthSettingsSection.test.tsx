@@ -130,4 +130,48 @@ describe("HealthSettingsSection", () => {
     const call = onChange.mock.calls.at(-1)?.[0]
     expect(call.overrides.caps.validationGap).toBe(100)
   })
+
+  it("disabled={true} disables every cap/weight/penalty input and the reset button", () => {
+    const onChange = vi.fn()
+    const onRulePenaltiesChange = vi.fn()
+    render(
+      <HealthSettingsSection
+        settings={{ followDefaults: false, overrides: { caps: { rulePenalty: 30 } as never } }}
+        rulePenalties={DEFAULT_PENALTIES}
+        onChange={onChange}
+        onRulePenaltiesChange={onRulePenaltiesChange}
+        onReset={vi.fn()}
+        disabled={true}
+        disabledTooltip="Project Lead or higher can edit shared settings."
+      />
+    )
+    for (const label of [
+      /Validation gap cap/i, /Ancestry cap/i, /Neighborhood cap/i, /Rules cap/i,
+      /ID Jaccard weight/i, /TF-IDF weight/i,
+      /Major rule penalty/i, /Minor rule penalty/i,
+    ]) {
+      expect(screen.getByLabelText(label)).toBeDisabled()
+    }
+    expect(screen.getByRole("button", { name: /Reset overrides/i })).toBeDisabled()
+    // (Synthetic fireEvent.change bypasses the browser's disabled guard, so a
+    // "no onChange fired" assertion isn't reliable in jsdom. The DOM-level
+    // disabled attribute is what real users would be blocked by; that's what
+    // this test pins.)
+  })
+
+  it("disabled={false} (default) keeps the inputs editable", () => {
+    const onChange = vi.fn()
+    render(
+      <HealthSettingsSection
+        settings={{ followDefaults: false, overrides: {} }}
+        rulePenalties={DEFAULT_PENALTIES}
+        onChange={onChange}
+        onRulePenaltiesChange={vi.fn()}
+        onReset={vi.fn()}
+      />
+    )
+    expect(screen.getByLabelText(/Validation gap cap/i)).not.toBeDisabled()
+    fireEvent.change(screen.getByLabelText(/Validation gap cap/i), { target: { value: "42" } })
+    expect(onChange).toHaveBeenCalled()
+  })
 })

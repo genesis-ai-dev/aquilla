@@ -3,6 +3,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
 import { Button } from "@/components/ui/button"
+import { DisabledFieldTooltip } from "./DisabledFieldTooltip"
 import type { HealthSettings, HealthConfig, RulePenalties } from "@/lib/parsers/types"
 import { resolveHealthConfig } from "@/lib/health/config-resolver"
 
@@ -17,9 +18,18 @@ interface Props {
    *  the RulesPage "Penalty Configuration" card). */
   onRulePenaltiesChange: (next: RulePenalties) => void
   onReset: () => void
+  /** When true, every input + the reset button is read-only and shows
+   *  `disabledTooltip` on hover. Wire from the caller as
+   *  `!canEditShared && projectIsSynced` so unsynced (local-only) projects
+   *  stay editable. */
+  disabled?: boolean
+  disabledTooltip?: string
 }
 
-export function HealthSettingsSection({ settings, rulePenalties, onChange, onRulePenaltiesChange, onReset }: Props) {
+export function HealthSettingsSection({
+  settings, rulePenalties, onChange, onRulePenaltiesChange, onReset,
+  disabled = false, disabledTooltip,
+}: Props) {
   // Effective config — used for caps + weights. rulePenalties comes from the
   // dedicated prop above so this surface stays in sync with the RulesPage card
   // even when one side hasn't been re-read yet.
@@ -73,11 +83,14 @@ export function HealthSettingsSection({ settings, rulePenalties, onChange, onRul
       </CardHeader>
       <CardContent className="space-y-4">
         <div className="flex items-center gap-2">
-          <Switch
-            aria-label="Follow defaults"
-            checked={settings.followDefaults}
-            onCheckedChange={(v) => onChange({ ...settings, followDefaults: Boolean(v) })}
-          />
+          <DisabledFieldTooltip disabled={disabled} tooltip={disabledTooltip ?? null}>
+            <Switch
+              aria-label="Follow defaults"
+              checked={settings.followDefaults}
+              disabled={disabled}
+              onCheckedChange={(v) => onChange({ ...settings, followDefaults: Boolean(v) })}
+            />
+          </DisabledFieldTooltip>
           <span className="text-sm font-medium">Follow defaults</span>
           <p className="ml-2 text-xs text-muted-foreground">
             {settings.followDefaults
@@ -88,34 +101,34 @@ export function HealthSettingsSection({ settings, rulePenalties, onChange, onRul
 
         <div className="grid grid-cols-2 gap-3">
           <CapInput id="cap-validation" label="Validation gap cap" value={effective.caps.validationGap}
-            min={0} max={100}
+            min={0} max={100} disabled={disabled} disabledTooltip={disabledTooltip}
             onChange={(v) => updateCap("validationGap", v)} />
           <CapInput id="cap-ancestry" label="Ancestry cap" value={effective.caps.ancestryPenalty}
-            min={0} max={100}
+            min={0} max={100} disabled={disabled} disabledTooltip={disabledTooltip}
             onChange={(v) => updateCap("ancestryPenalty", v)} />
           <CapInput id="cap-neighborhood" label="Neighborhood cap" value={effective.caps.neighborhoodPenalty}
-            min={0} max={100}
+            min={0} max={100} disabled={disabled} disabledTooltip={disabledTooltip}
             onChange={(v) => updateCap("neighborhoodPenalty", v)} />
           <CapInput id="cap-rules" label="Rules cap" value={effective.caps.rulePenalty}
-            min={0} max={100}
+            min={0} max={100} disabled={disabled} disabledTooltip={disabledTooltip}
             onChange={(v) => updateCap("rulePenalty", v)} />
         </div>
 
         <div className="grid grid-cols-2 gap-3">
           <CapInput id="weight-jaccard" label="ID Jaccard weight" value={effective.neighborhoodWeights.idJaccard}
-            step={0.05} min={0} max={1}
+            step={0.05} min={0} max={1} disabled={disabled} disabledTooltip={disabledTooltip}
             onChange={(v) => updateWeight("idJaccard", v)} />
           <CapInput id="weight-tfidf" label="TF-IDF weight" value={effective.neighborhoodWeights.tfidfTokenOverlap}
-            step={0.05} min={0} max={1}
+            step={0.05} min={0} max={1} disabled={disabled} disabledTooltip={disabledTooltip}
             onChange={(v) => updateWeight("tfidfTokenOverlap", v)} />
         </div>
 
         <div className="grid grid-cols-2 gap-3">
           <CapInput id="rp-major" label="Major rule penalty" value={rulePenalties.major}
-            min={0} max={100}
+            min={0} max={100} disabled={disabled} disabledTooltip={disabledTooltip}
             onChange={(v) => updateRulePenalty("major", v)} />
           <CapInput id="rp-minor" label="Minor rule penalty" value={rulePenalties.minor}
-            min={0} max={100}
+            min={0} max={100} disabled={disabled} disabledTooltip={disabledTooltip}
             onChange={(v) => updateRulePenalty("minor", v)} />
         </div>
 
@@ -123,7 +136,7 @@ export function HealthSettingsSection({ settings, rulePenalties, onChange, onRul
           <Button
             type="button"
             variant="outline"
-            disabled={!settings.overrides || Object.keys(settings.overrides).length === 0}
+            disabled={disabled || !settings.overrides || Object.keys(settings.overrides).length === 0}
             onClick={() => {
               if (confirm("Reset all health overrides to defaults? This can't be undone.")) onReset()
             }}
@@ -148,12 +161,23 @@ export function HealthSettingsSection({ settings, rulePenalties, onChange, onRul
 }
 
 function CapInput({
-  id, label, value, step = 1, min, max, onChange,
-}: { id: string; label: string; value: number; step?: number; min?: number; max?: number; onChange: (v: string) => void }) {
+  id, label, value, step = 1, min, max, disabled = false, disabledTooltip, onChange,
+}: {
+  id: string; label: string; value: number; step?: number; min?: number; max?: number;
+  disabled?: boolean; disabledTooltip?: string;
+  onChange: (v: string) => void;
+}) {
   return (
     <div className="space-y-1">
       <Label htmlFor={id}>{label}</Label>
-      <Input id={id} type="number" step={step} min={min} max={max} value={value} onChange={(e) => onChange(e.target.value)} />
+      <DisabledFieldTooltip disabled={disabled} tooltip={disabledTooltip ?? null}>
+        <Input
+          id={id} type="number" step={step} min={min} max={max}
+          disabled={disabled}
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+        />
+      </DisabledFieldTooltip>
     </div>
   )
 }

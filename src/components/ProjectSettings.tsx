@@ -495,6 +495,11 @@ export function ProjectSettings() {
             onChange={saveHealthSettings}
             onRulePenaltiesChange={(rp: RulePenalties) => savePartialShared({ rulePenalties: rp })}
             onReset={resetHealthOverrides}
+            // Only block editing when the project IS synced — for unsynced
+            // (local-only) projects, roleLevel is null so canEditShared is
+            // false too, but local edits are still meaningful.
+            disabled={!canEditShared && project?.syncRole != null}
+            disabledTooltip={sharedDisabledTooltip ?? undefined}
           />
         )}
 

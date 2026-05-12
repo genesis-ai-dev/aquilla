@@ -1,12 +1,11 @@
 import { useCallback, useEffect, useState } from "react"
 
-function storageKey(projectId: string) {
-  return `sidebar:expanded:${projectId}`
-}
-
-function read(projectId: string): Set<string> {
+/** Persisted toggle set keyed by (storageKey, scope). Used by the sidebar for
+ *  per-file expansion AND per-corpus collapse — both share the same shape
+ *  (a Set<string> backed by localStorage). */
+function read(key: string): Set<string> {
   try {
-    const raw = localStorage.getItem(storageKey(projectId))
+    const raw = localStorage.getItem(key)
     if (!raw) return new Set()
     const arr = JSON.parse(raw) as unknown
     if (!Array.isArray(arr)) return new Set()
@@ -16,22 +15,25 @@ function read(projectId: string): Set<string> {
   }
 }
 
-export function useSidebarExpansion(projectId: string) {
-  const [expanded, setExpanded] = useState<Set<string>>(() => read(projectId))
+export function usePersistedToggleSet(storageKey: string) {
+  const [members, setMembers] = useState<Set<string>>(() => read(storageKey))
+  useEffect(() => { setMembers(read(storageKey)) }, [storageKey])
 
-  useEffect(() => { setExpanded(read(projectId)) }, [projectId])
-
-  const toggle = useCallback((fileId: string) => {
-    setExpanded((prev) => {
+  const toggle = useCallback((id: string) => {
+    setMembers((prev) => {
       const next = new Set(prev)
-      if (next.has(fileId)) next.delete(fileId)
-      else next.add(fileId)
-      try {
-        localStorage.setItem(storageKey(projectId), JSON.stringify(Array.from(next)))
-      } catch { /* ignore quota errors */ }
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      try { localStorage.setItem(storageKey, JSON.stringify([...next])) }
+      catch { /* quota — non-fatal */ }
       return next
     })
-  }, [projectId])
+  }, [storageKey])
 
-  return { expanded, toggle }
+  return { members, toggle }
+}
+
+export function useSidebarExpansion(projectId: string) {
+  const { members, toggle } = usePersistedToggleSet(`sidebar:expanded:${projectId}`)
+  return { expanded: members, toggle }
 }

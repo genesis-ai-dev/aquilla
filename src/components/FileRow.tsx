@@ -20,12 +20,13 @@ interface FileRowProps {
   onSelect: () => void
   onOpenMenu: (x: number, y: number) => void
   onStartRename: () => void
+  onApplySuggestion?: () => void
 }
 
 export function FileRow(props: FileRowProps) {
   const {
     file, active, expanded, progress, hasSuggestion, editing,
-    onEditCommit, onEditCancel, onToggleExpand, onSelect, onOpenMenu, onStartRename,
+    onEditCommit, onEditCancel, onToggleExpand, onSelect, onOpenMenu, onStartRename, onApplySuggestion,
   } = props
   const inputRef = useRef<HTMLInputElement>(null)
   const [draft, setDraft] = useState(file.name)
@@ -115,7 +116,14 @@ export function FileRow(props: FileRowProps) {
         </button>
       )}
       {hasSuggestion && !editing && (
-        <Sparkles className="h-3 w-3 text-amber-500 shrink-0" aria-label="Rename suggestion available" />
+        <button
+          className="p-1 rounded hover:bg-muted shrink-0"
+          onClick={(e) => { e.stopPropagation(); onApplySuggestion?.() }}
+          aria-label="Apply rename suggestion"
+          title="A cleaner name was detected for this file. Click to apply, or use the Apply button at the top of the sidebar."
+        >
+          <Sparkles className="h-3 w-3 text-amber-500" />
+        </button>
       )}
     </div>
   )

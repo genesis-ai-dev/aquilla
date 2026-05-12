@@ -10,6 +10,10 @@ export interface WorkspaceTab {
 
 interface PersistedState {
   tabs: WorkspaceTab[]
+  /** Last file the user actually had open. Survives navigation to Project
+   *  subpages (Rules/Comments/Snapshots/...) so returning to the workspace
+   *  re-opens the same file instead of dropping to an empty view (#38). */
+  lastActiveFileId?: string
 }
 
 interface UseWorkspaceTabsArgs {
@@ -44,7 +48,9 @@ function readState(projectId: string): PersistedState {
         fileId: t.fileId,
         sectionLabel: typeof t.sectionLabel === "string" ? t.sectionLabel : undefined,
       }))
-    return { tabs: cleaned }
+    const lastActiveFileId =
+      typeof parsed.lastActiveFileId === "string" ? parsed.lastActiveFileId : undefined
+    return { tabs: cleaned, lastActiveFileId }
   } catch {
     return { tabs: [] }
   }
@@ -57,6 +63,14 @@ function writeState(projectId: string, state: PersistedState): void {
   } catch {
     // localStorage full / disabled — non-fatal, tabs just won't persist.
   }
+}
+
+/** Read the most-recently-active file id for a project. Free function so
+ *  callers (ProjectWorkspace) can consult it during render to decide whether
+ *  to restore a file on mount, without taking a dependency on this hook's
+ *  state. Writes are co-located inside useWorkspaceTabs's persist effect. */
+export function readLastActiveFileId(projectId: string): string | null {
+  return readState(projectId).lastActiveFileId ?? null
 }
 
 function newTabId(): string {
@@ -97,10 +111,15 @@ export function useWorkspaceTabs({
     })
   }, [activeFileId])
 
-  // Persist.
+  // Persist tabs + the most recent activeFileId. Co-locating the write keeps
+  // a single storage key per project and ensures readLastActiveFileId (#38
+  // restore-on-subpage-return) sees fresh data.
   useEffect(() => {
-    writeState(projectId, { tabs })
-  }, [projectId, tabs])
+    writeState(projectId, {
+      tabs,
+      lastActiveFileId: activeFileId ?? undefined,
+    })
+  }, [projectId, tabs, activeFileId])
 
   const openFile = useCallback(
     (fileId: string, opts?: { sectionLabel?: string }) => {
@@ -142,11 +161,17 @@ export function useWorkspaceTabs({
         if (closing.fileId === activeFileId) {
           const neighbor = next[idx - 1] ?? next[idx] ?? null
           setActiveFileId(neighbor?.fileId ?? null)
+          // Closing the last tab is an explicit "I'm done with files" gesture;
+          // clear the sticky lastActiveFileId in storage so the restore-on-
+          // subpage-return logic (#38) doesn't fight the close.
+          if (!neighbor) {
+            writeState(projectId, { tabs: next, lastActiveFileId: undefined })
+          }
         }
         return next
       })
     },
-    [activeFileId, setActiveFileId],
+    [activeFileId, projectId, setActiveFileId],
   )
 
   const activeTabId = useMemo(

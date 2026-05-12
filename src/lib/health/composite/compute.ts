@@ -53,10 +53,29 @@ export function computeOneCellHealth(
   requiredValidations: number,
   peerHealth: Map<string, number>,
 ): { score: number; breakdown: CellHealthBreakdown } {
-  const vg = validationGap(cell.validatorCount, requiredValidations, config.caps.validationGap)
-  const ap = ancestryPenalty(cell.examples, peerHealth, config.caps.ancestryPenalty)
+  // Diagnostic signals — surfaced in the breakdown popover regardless of which
+  // path computes the score, so users can still see ancestry/neighbor context
+  // on validated cells even though those dimensions don't penalize.
   const tfidfOverlap = weightedTokenOverlap(cell.branchingSource, cell.branchingTarget)
   const idJaccard = weightedJaccard(cell.plainSource, cell.plainTarget)
+  const rp = rulePenalty(cell.infractions, rules, config.rulePenalties, config.caps.rulePenalty)
+
+  // A human signing off on a cell is a stronger signal than any of the
+  // AI-context dimensions; mirror the legacy engine
+  // (`health-engine.ts:38-47`) and zero them out. Rule violations still
+  // subtract — the user explicitly asked that automated checks remain visible
+  // after validation.
+  if (cell.validatorCount >= 1) {
+    const score = Math.max(0, Math.min(100, Math.round(100 - rp)))
+    const breakdown = buildBreakdown(
+      cell, 0, 0, 0, rp, score, peerHealth,
+      requiredValidations, idJaccard, tfidfOverlap,
+    )
+    return { score, breakdown }
+  }
+
+  const vg = validationGap(cell.validatorCount, requiredValidations, config.caps.validationGap)
+  const ap = ancestryPenalty(cell.examples, peerHealth, config.caps.ancestryPenalty)
   const np = neighborhoodPenalty({
     branchingSource: cell.branchingSource,
     branchingTarget: cell.branchingTarget,
@@ -65,7 +84,6 @@ export function computeOneCellHealth(
     weights: config.neighborhoodWeights,
     cap: config.caps.neighborhoodPenalty,
   })
-  const rp = rulePenalty(cell.infractions, rules, config.rulePenalties, config.caps.rulePenalty)
   const rawScore = 100 - vg - ap - np - rp
   const score = Math.max(0, Math.min(100, Math.round(rawScore)))
   const breakdown = buildBreakdown(

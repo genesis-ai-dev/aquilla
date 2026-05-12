@@ -3,7 +3,7 @@ import * as Y from "yjs"
 import type { CellHistoryEntry, SourceLocation, CommentThread, CellTtsSettings } from "@/lib/parsers/types"
 import type { CodexCellAttachment, WordTiming } from "@/lib/codex-editor/types"
 import type { EditValidationSummary } from "@/lib/codex-editor/edits/types"
-import { snapshotEntry } from "@/lib/codex-editor/edits/yjs-helpers"
+import { snapshotEntry, readLatestActiveValidators } from "@/lib/codex-editor/edits/yjs-helpers"
 import { extractThreadsFromCell } from "./useComments"
 import { getPlainText } from "@/lib/richtext/translated-xml"
 import { perfLog, perfMark } from "@/lib/perf-log"
@@ -100,24 +100,11 @@ function deriveValidationStatus(
     }
   }
 
-  const arr = cell.get("edits") as Y.Array<Y.Map<unknown>> | undefined
-  if (!arr) return { validationStatus: "none", activeValidators: [] }
-  // Walk backwards for the latest value-edit.
-  for (let i = arr.length - 1; i >= 0; i--) {
-    const entry = arr.get(i)
-    const editMapArr = entry.get("editMap") as Y.Array<string> | undefined
-    if (editMapArr?.get(0) !== "value") continue
-    const validators = entry.get("validatedBy") as Y.Map<Y.Map<unknown>> | undefined
-    const active: string[] = []
-    if (validators) {
-      validators.forEach((v, username) => { if (!v.get("isDeleted")) active.push(username) })
-    }
-    return {
-      validationStatus: classifyValidators(active, currentUsername, requiredValidations),
-      activeValidators: active,
-    }
+  const active = readLatestActiveValidators(cell)
+  return {
+    validationStatus: classifyValidators(active, currentUsername, requiredValidations),
+    activeValidators: active,
   }
-  return { validationStatus: "none", activeValidators: [] }
 }
 
 function buildCellData(

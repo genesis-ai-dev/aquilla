@@ -1,6 +1,10 @@
 import { useEffect, useMemo, useState } from "react"
-import { useNavigate, Navigate, Link } from "react-router-dom"
-import { ChevronRight, Cloud, Settings as SettingsIcon, Trash2 } from "lucide-react"
+import { useNavigate, Navigate } from "react-router-dom"
+import {
+  ChevronRight, Cloud, Settings as SettingsIcon, Trash2,
+  MoreHorizontal, Users,
+} from "lucide-react"
+import { Menu } from "@base-ui/react/menu"
 import type { ProjectRecord } from "@/lib/parsers/types"
 import {
   listProjects,
@@ -13,6 +17,7 @@ import { ProjectCreateDialog } from "./ProjectCreateDialog"
 import { ConfirmActionDialog } from "./ConfirmActionDialog"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Card, CardContent, CardHeader } from "@/components/ui/card"
+import { Button } from "@/components/ui/button"
 import { AccountSwitcher } from "@/components/AccountSwitcher"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { useBrand } from "@/branding/use-brand"
@@ -172,23 +177,42 @@ export function Dashboard() {
             <h1 className="hidden truncate text-xl font-semibold sm:inline">{brand.app.name}</h1>
           </div>
           <div className="flex shrink-0 items-center gap-2">
-            <Link
-              to="/members"
-              className="text-sm underline-offset-2 hover:underline"
-            >
-              Members
-            </Link>
-            <Link
-              to="/settings"
-              aria-label="Settings"
-              title="Settings"
-              className="inline-flex h-9 w-9 items-center justify-center rounded-md text-sm hover:bg-accent"
-            >
-              <SettingsIcon className="h-4 w-4" />
-            </Link>
-            <ThemeToggle />
-            <AccountSwitcher variant="header" />
+            <Menu.Root>
+              <Menu.Trigger
+                render={
+                  <Button variant="ghost" size="icon" aria-label="More" title="More">
+                    <MoreHorizontal className="h-4 w-4" />
+                  </Button>
+                }
+              />
+              <Menu.Portal>
+                <Menu.Positioner sideOffset={4} align="end">
+                  <Menu.Popup className="z-40 min-w-48 rounded-md border bg-popover p-1 text-popover-foreground shadow-md">
+                    <Menu.Item
+                      onClick={() => navigate("/members")}
+                      className="flex cursor-pointer select-none items-center gap-2 rounded-sm px-2 py-1.5 text-sm outline-none data-[highlighted]:bg-accent"
+                    >
+                      <Users className="h-4 w-4" />
+                      <span>Members</span>
+                    </Menu.Item>
+                    <Menu.Item
+                      onClick={() => navigate("/settings")}
+                      className="flex cursor-pointer select-none items-center gap-2 rounded-sm px-2 py-1.5 text-sm outline-none data-[highlighted]:bg-accent"
+                    >
+                      <SettingsIcon className="h-4 w-4" />
+                      <span>Settings</span>
+                    </Menu.Item>
+                    <div className="my-1 h-px bg-border" role="separator" />
+                    <div className="flex items-center justify-between gap-2 px-2 py-1 text-sm">
+                      <span className="text-muted-foreground">Theme</span>
+                      <ThemeToggle />
+                    </div>
+                  </Menu.Popup>
+                </Menu.Positioner>
+              </Menu.Portal>
+            </Menu.Root>
             <ProjectCreateDialog onCreated={upsert} />
+            <AccountSwitcher variant="header" />
           </div>
         </div>
       </header>

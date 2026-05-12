@@ -3,6 +3,8 @@ name: Deploy to Cloudflare Pages
 on:
   push:
     branches: [main, dev]
+  pull_request:
+    branches: [dev, main]
   workflow_dispatch:
 
 jobs:
@@ -11,6 +13,7 @@ jobs:
     permissions:
       contents: read
       deployments: write
+      pull-requests: write
     steps:
       - uses: actions/checkout@v4
 
@@ -25,9 +28,33 @@ jobs:
 
       - run: npm run build
 
+      - name: Compute deploy branch alias
+        id: branch
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            echo "name=pr-${{ github.event.number }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "name=${{ github.ref_name }}" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Deploy to Cloudflare Pages
+        id: deploy
         uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: 6a80496d1e59948a9cbaa3c643ba81d7
-          command: pages deploy dist --project-name=codex-web --branch=${{ github.ref_name }}
+          command: pages deploy dist --project-name=codex-web --branch=${{ steps.branch.outputs.name }}
+
+      - name: Comment preview URL on PR
+        if: github.event_name == 'pull_request'
+        uses: marocchino/sticky-pull-request-comment@v2
+        with:
+          header: pages-preview
+          message: |
+            **Cloudflare Pages preview**
+
+            - Branch alias: https://${{ steps.branch.outputs.name }}.codex-web-4ih.pages.dev
+            - This deployment: ${{ steps.deploy.outputs.deployment-url }}
+            - Commit: `${{ github.event.pull_request.head.sha }}`
+
+            Re-deployed on every push to this PR.

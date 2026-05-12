@@ -14,7 +14,7 @@ on:
     branches: [dev, main]
     types: [opened, synchronize, reopened]
     paths:
-      - 'sync-worker/migrations/**'
+      - 'sync-worker/migrations/**.sql'
 
 # Cancel an in-flight fork run when a new push lands; the latest commit
 # wins.

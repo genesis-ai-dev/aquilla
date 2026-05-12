@@ -45,8 +45,8 @@ export function anonymousNameFor(clientId: string | number): string {
   return `${adj} ${noun}`
 }
 
-// Treat these placeholder values as "no real identity yet" — useSync will
-// substitute the friendly anonymous name for awareness publishing.
+// Treat these placeholder values as "no real identity yet" — useFileSync
+// substitutes the friendly anonymous name for awareness publishing.
 const PLACEHOLDER_USERNAMES = new Set(["", "local", "anonymous"])
 
 export function isPlaceholderUsername(name: string | null | undefined): boolean {

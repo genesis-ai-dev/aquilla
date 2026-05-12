@@ -367,14 +367,6 @@ export interface ProjectSnapshot {
   projectRecord: ProjectRecord
 }
 
-export interface ShareInvite {
-  token: string
-  projectId: string
-  pinHash?: string
-  createdAt: string
-  createdBy: string
-}
-
 export interface VideoAttachment {
   videoUrl?: string
   videoLocalFileId?: string

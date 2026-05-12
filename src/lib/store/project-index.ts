@@ -1,5 +1,5 @@
 import { openDB, type DBSchema } from "idb"
-import type { ProjectRecord, ProjectSnapshot, ShareInvite } from "../parsers/types"
+import type { ProjectRecord, ProjectSnapshot } from "../parsers/types"
 import {
   archiveProjectRemote,
   unarchiveProjectRemote,
@@ -21,15 +21,14 @@ interface CodexDB extends DBSchema {
     value: ProjectSnapshot
     indexes: { "by-project": string }
   }
-  shares: {
-    key: string
-    value: ShareInvite
-    indexes: { "by-project": string }
-  }
 }
 
 const DB_NAME = "codex"
-const DB_VERSION = 3
+// v4: drop the legacy `shares` store. Share-link invites now live server-side
+// (project_invites in frontier-db-v2) and the joiner flow doesn't need a
+// local mirror — accept-invite returns the projectId and the workspace loads
+// it via the normal sync-token + sync-worker path.
+const DB_VERSION = 4
 
 let dbPromise: ReturnType<typeof openDB<CodexDB>> | null = null
 
@@ -47,9 +46,13 @@ export function getDb() {
           const store = db.createObjectStore("snapshots", { keyPath: "id" })
           store.createIndex("by-project", "projectId")
         }
-        if (oldVersion < 3 && !db.objectStoreNames.contains("shares")) {
-          const store = db.createObjectStore("shares", { keyPath: "token" })
-          store.createIndex("by-project", "projectId")
+        // v3 once created a `shares` store for the legacy share-link flow.
+        // v4 removes it — pre-v4 databases get the store deleted on upgrade;
+        // fresh databases never see it. Cast away the schema's discriminated
+        // store-name union since `shares` is intentionally no longer typed.
+        const storeNames = db.objectStoreNames as unknown as DOMStringList
+        if (oldVersion < 4 && storeNames.contains("shares")) {
+          (db as unknown as IDBDatabase).deleteObjectStore("shares")
         }
       },
       blocked() {

@@ -1,0 +1,10 @@
+# Reserve directory for SQL migrations.
+#
+# Add migrations as `<NNNN>_<short_desc>.sql`. A PR adding files here triggers
+# .github/workflows/pr-db-fork.yml which provisions a per-PR D1 fork with the
+# staging schema + your new migrations, plus a sync-worker variant
+# (codex-sync-worker-pr-<N>) pointing at it. PR preview builds will target
+# that worker automatically.
+#
+# See scripts/pr-db-fork.sh for the provisioning logic and
+# sync-worker/wrangler.pr.toml.tpl for the per-PR worker config template.

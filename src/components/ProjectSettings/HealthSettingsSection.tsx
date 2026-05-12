@@ -21,11 +21,14 @@ export function HealthSettingsSection({ settings, onChange, onReset }: Props) {
   function updateCap(key: keyof HealthConfig["caps"], raw: string) {
     const n = Number(raw)
     if (!Number.isFinite(n)) return
+    // No single penalty dimension can subtract more than 100 — beyond that the
+    // final score is clamped to 0 anyway. Keep the stored value sane.
+    const clamped = Math.max(0, Math.min(100, Math.round(n)))
     const next: HealthSettings = {
       followDefaults: false,
       overrides: {
         ...(settings.overrides ?? {}),
-        caps: { ...(settings.overrides?.caps ?? {}), [key]: n },
+        caps: { ...(settings.overrides?.caps ?? {}), [key]: clamped },
       },
     }
     onChange(next)
@@ -50,11 +53,12 @@ export function HealthSettingsSection({ settings, onChange, onReset }: Props) {
   function updateRulePenalty(key: "major" | "minor", raw: string) {
     const n = Number(raw)
     if (!Number.isFinite(n)) return
+    const clamped = Math.max(0, Math.min(100, Math.round(n)))
     const next: HealthSettings = {
       followDefaults: false,
       overrides: {
         ...(settings.overrides ?? {}),
-        rulePenalties: { ...(settings.overrides?.rulePenalties ?? {}), [key]: n },
+        rulePenalties: { ...(settings.overrides?.rulePenalties ?? {}), [key]: clamped },
       },
     }
     onChange(next)
@@ -82,28 +86,34 @@ export function HealthSettingsSection({ settings, onChange, onReset }: Props) {
 
         <div className="grid grid-cols-2 gap-3">
           <CapInput id="cap-validation" label="Validation gap cap" value={effective.caps.validationGap}
+            min={0} max={100}
             onChange={(v) => updateCap("validationGap", v)} />
           <CapInput id="cap-ancestry" label="Ancestry cap" value={effective.caps.ancestryPenalty}
+            min={0} max={100}
             onChange={(v) => updateCap("ancestryPenalty", v)} />
           <CapInput id="cap-neighborhood" label="Neighborhood cap" value={effective.caps.neighborhoodPenalty}
+            min={0} max={100}
             onChange={(v) => updateCap("neighborhoodPenalty", v)} />
           <CapInput id="cap-rules" label="Rules cap" value={effective.caps.rulePenalty}
+            min={0} max={100}
             onChange={(v) => updateCap("rulePenalty", v)} />
         </div>
 
         <div className="grid grid-cols-2 gap-3">
           <CapInput id="weight-jaccard" label="ID Jaccard weight" value={effective.neighborhoodWeights.idJaccard}
-            step={0.05}
+            step={0.05} min={0} max={1}
             onChange={(v) => updateWeight("idJaccard", v)} />
           <CapInput id="weight-tfidf" label="TF-IDF weight" value={effective.neighborhoodWeights.tfidfTokenOverlap}
-            step={0.05}
+            step={0.05} min={0} max={1}
             onChange={(v) => updateWeight("tfidfTokenOverlap", v)} />
         </div>
 
         <div className="grid grid-cols-2 gap-3">
           <CapInput id="rp-major" label="Major rule penalty" value={effective.rulePenalties.major}
+            min={0} max={100}
             onChange={(v) => updateRulePenalty("major", v)} />
           <CapInput id="rp-minor" label="Minor rule penalty" value={effective.rulePenalties.minor}
+            min={0} max={100}
             onChange={(v) => updateRulePenalty("minor", v)} />
         </div>
 
@@ -136,12 +146,12 @@ export function HealthSettingsSection({ settings, onChange, onReset }: Props) {
 }
 
 function CapInput({
-  id, label, value, step = 1, onChange,
-}: { id: string; label: string; value: number; step?: number; onChange: (v: string) => void }) {
+  id, label, value, step = 1, min, max, onChange,
+}: { id: string; label: string; value: number; step?: number; min?: number; max?: number; onChange: (v: string) => void }) {
   return (
     <div className="space-y-1">
       <Label htmlFor={id}>{label}</Label>
-      <Input id={id} type="number" step={step} value={value} onChange={(e) => onChange(e.target.value)} />
+      <Input id={id} type="number" step={step} min={min} max={max} value={value} onChange={(e) => onChange(e.target.value)} />
     </div>
   )
 }

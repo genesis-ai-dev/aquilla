@@ -55,4 +55,37 @@ describe("resolveHealthConfig", () => {
       HEALTH_DEFAULTS.neighborhoodWeights.tfidfTokenOverlap,
     )
   })
+
+  it("project.rulePenalties wins over defaults (the RulesPage 'Penalty Configuration' card)", () => {
+    const p = proj({ rulePenalties: { major: 25, minor: 8 } })
+    const r = resolveHealthConfig(p)
+    expect(r.rulePenalties).toEqual({ major: 25, minor: 8 })
+    // Other dimensions untouched.
+    expect(r.caps.rulePenalty).toBe(HEALTH_DEFAULTS.caps.rulePenalty)
+  })
+
+  it("project.rulePenalties wins over healthSettings.overrides.rulePenalties", () => {
+    // If both UIs are used, the top-level field (the RulesPage UI) is the
+    // authoritative one — it's the surface users actually interact with for
+    // rule configuration. The HealthSettingsSection's rulePenalties override
+    // becomes effectively dead in that case, which is fine.
+    const p = proj({
+      rulePenalties: { major: 30, minor: 10 },
+      healthSettings: {
+        followDefaults: false,
+        overrides: { rulePenalties: { major: 99, minor: 99 } },
+      },
+    })
+    expect(resolveHealthConfig(p).rulePenalties).toEqual({ major: 30, minor: 10 })
+  })
+
+  it("project.rulePenalties absent → falls back to healthSettings override", () => {
+    const p = proj({
+      healthSettings: {
+        followDefaults: false,
+        overrides: { rulePenalties: { major: 22, minor: 7 } },
+      },
+    })
+    expect(resolveHealthConfig(p).rulePenalties).toEqual({ major: 22, minor: 7 })
+  })
 })

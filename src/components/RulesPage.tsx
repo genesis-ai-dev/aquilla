@@ -12,6 +12,15 @@ import { RuleSuggestDialog } from "./RuleSuggestDialog"
 import { BuiltinChecksList } from "./BuiltinChecksList"
 import type { ProjectRecord, RuleAutofix, TranslationRule } from "@/lib/parsers/types"
 
+/** Clamp a raw input string to [0, 100], integer. Rejects non-numeric input by
+ *  falling back to 0 (the field is type=number so this is mostly belt-and-braces
+ *  for paste paths that bypass the spinner). */
+function clampPenalty(raw: string): number {
+  const n = Number(raw)
+  if (!Number.isFinite(n)) return 0
+  return Math.max(0, Math.min(100, Math.round(n)))
+}
+
 export function RulesPage() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
@@ -84,17 +93,20 @@ export function RulesPage() {
           <CardHeader><CardTitle>Penalty Configuration</CardTitle></CardHeader>
           <CardContent>
             <div className="grid grid-cols-2 gap-4">
-              <div>
+              <div className="space-y-1.5">
                 <Label htmlFor="majpen">Major penalty (health points)</Label>
-                <Input id="majpen" type="number" value={penalties.major}
-                  onChange={(e) => updatePenalties({ ...penalties, major: Number(e.target.value) })} />
+                <Input id="majpen" type="number" min={0} max={100} value={penalties.major}
+                  onChange={(e) => updatePenalties({ ...penalties, major: clampPenalty(e.target.value) })} />
               </div>
-              <div>
+              <div className="space-y-1.5">
                 <Label htmlFor="minpen">Minor penalty (health points)</Label>
-                <Input id="minpen" type="number" value={penalties.minor}
-                  onChange={(e) => updatePenalties({ ...penalties, minor: Number(e.target.value) })} />
+                <Input id="minpen" type="number" min={0} max={100} value={penalties.minor}
+                  onChange={(e) => updatePenalties({ ...penalties, minor: clampPenalty(e.target.value) })} />
               </div>
             </div>
+            <p className="mt-3 text-xs text-muted-foreground">
+              Subtracted from a cell's score per matching infraction. Capped at 100; the total rule-penalty cap is configured under Project Settings → Health.
+            </p>
           </CardContent>
         </Card>
 

@@ -3,8 +3,18 @@ import { HEALTH_DEFAULTS } from "./defaults"
 
 export function resolveHealthConfig(project: ProjectRecord | null | undefined): HealthConfig {
   const s = project?.healthSettings
-  if (!s || s.followDefaults) return HEALTH_DEFAULTS
-  return deepMerge(HEALTH_DEFAULTS, s.overrides ?? {})
+  const base: HealthConfig = !s || s.followDefaults
+    ? HEALTH_DEFAULTS
+    : deepMerge(HEALTH_DEFAULTS, s.overrides ?? {})
+
+  // `project.rulePenalties` is the field the RulesPage's "Penalty
+  // Configuration" card writes to. Treat it as the authoritative override
+  // for major/minor penalties — without this, edits in that card would
+  // only affect the legacy engine and silently bounce off composite.
+  if (project?.rulePenalties) {
+    return { ...base, rulePenalties: project.rulePenalties }
+  }
+  return base
 }
 
 function deepMerge<T extends object>(base: T, override: DeepPartial<T>): T {

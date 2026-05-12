@@ -221,17 +221,16 @@ export function makeFakeD1(initial: Partial<FakeTables> = {}): FakeD1 {
       return { first: null, results: [] }
     }
     if (n.startsWith("INSERT INTO users")) {
-      const [username, email, password_hash, gitlab_user_id, gitlab_username, gitlab_token] =
-        args as [string, string, string, number, string, string]
+      const [username, email, password_hash] = args as [string, string, string]
       const id = tables.users.length + 1
       tables.users.push({
         id,
         username,
         email,
         password_hash,
-        gitlab_user_id,
-        gitlab_username,
-        gitlab_token,
+        gitlab_user_id: null,
+        gitlab_username: null,
+        gitlab_token: null,
         stripe_customer_id: null,
         subscription_tier: "free",
         preferences: "{}",

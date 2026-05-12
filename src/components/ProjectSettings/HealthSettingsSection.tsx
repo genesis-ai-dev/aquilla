@@ -3,17 +3,26 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
 import { Button } from "@/components/ui/button"
-import type { HealthSettings, HealthConfig } from "@/lib/parsers/types"
+import type { HealthSettings, HealthConfig, RulePenalties } from "@/lib/parsers/types"
 import { resolveHealthConfig } from "@/lib/health/config-resolver"
 
 interface Props {
   settings: HealthSettings
+  /** The effective rulePenalties (after `project.rulePenalties` precedence) —
+   *  displayed in the major/minor inputs so both this surface and the
+   *  RulesPage card show the same value at all times. */
+  rulePenalties: RulePenalties
   onChange: (next: HealthSettings) => void
+  /** Writes to `project.rulePenalties` (the authoritative field shared with
+   *  the RulesPage "Penalty Configuration" card). */
+  onRulePenaltiesChange: (next: RulePenalties) => void
   onReset: () => void
 }
 
-export function HealthSettingsSection({ settings, onChange, onReset }: Props) {
-  // Effective config — shown in the inputs; writes go into overrides.
+export function HealthSettingsSection({ settings, rulePenalties, onChange, onRulePenaltiesChange, onReset }: Props) {
+  // Effective config — used for caps + weights. rulePenalties comes from the
+  // dedicated prop above so this surface stays in sync with the RulesPage card
+  // even when one side hasn't been re-read yet.
   const effective: HealthConfig = resolveHealthConfig({
     healthSettings: settings,
   } as Parameters<typeof resolveHealthConfig>[0])
@@ -54,14 +63,7 @@ export function HealthSettingsSection({ settings, onChange, onReset }: Props) {
     const n = Number(raw)
     if (!Number.isFinite(n)) return
     const clamped = Math.max(0, Math.min(100, Math.round(n)))
-    const next: HealthSettings = {
-      followDefaults: false,
-      overrides: {
-        ...(settings.overrides ?? {}),
-        rulePenalties: { ...(settings.overrides?.rulePenalties ?? {}), [key]: clamped },
-      },
-    }
-    onChange(next)
+    onRulePenaltiesChange({ ...rulePenalties, [key]: clamped })
   }
 
   return (
@@ -109,13 +111,16 @@ export function HealthSettingsSection({ settings, onChange, onReset }: Props) {
         </div>
 
         <div className="grid grid-cols-2 gap-3">
-          <CapInput id="rp-major" label="Major rule penalty" value={effective.rulePenalties.major}
+          <CapInput id="rp-major" label="Major rule penalty" value={rulePenalties.major}
             min={0} max={100}
             onChange={(v) => updateRulePenalty("major", v)} />
-          <CapInput id="rp-minor" label="Minor rule penalty" value={effective.rulePenalties.minor}
+          <CapInput id="rp-minor" label="Minor rule penalty" value={rulePenalties.minor}
             min={0} max={100}
             onChange={(v) => updateRulePenalty("minor", v)} />
         </div>
+        <p className="-mt-1 text-xs text-muted-foreground">
+          Major/Minor are also editable in Rules → Penalty Configuration; the two surfaces share one value.
+        </p>
 
         <div>
           <Button

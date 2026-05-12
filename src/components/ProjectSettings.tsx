@@ -12,7 +12,8 @@ import { useProjectSettings } from "@/hooks/useProjectSettings"
 import { getProject, updateProject } from "@/lib/store/project-index"
 import { fetchModels, resolveProvider } from "@/lib/completion/completion-service"
 import { useSaveCompletionSettings, DEFAULT_SYSTEM_PROMPT } from "@/hooks/useCompletionSettings"
-import type { ProjectRecord, CompletionProvider, ProjectTtsSettings } from "@/lib/parsers/types"
+import type { ProjectRecord, CompletionProvider, ProjectTtsSettings, RulePenalties } from "@/lib/parsers/types"
+import { HEALTH_DEFAULTS } from "@/lib/health/defaults"
 import { listFlags } from "@/lib/features/flags"
 import { useFeatureFlag, setFeatureFlag } from "@/hooks/useFeatureFlag"
 import { ValidationSettingsSection } from "./ProjectSettings/ValidationSettingsSection"
@@ -486,7 +487,9 @@ export function ProjectSettings() {
         {compositeFlag && (
           <HealthSettingsSection
             settings={healthSettings}
+            rulePenalties={project?.rulePenalties ?? HEALTH_DEFAULTS.rulePenalties}
             onChange={saveHealthSettings}
+            onRulePenaltiesChange={(rp: RulePenalties) => saveField({ rulePenalties: rp })}
             onReset={resetHealthOverrides}
           />
         )}

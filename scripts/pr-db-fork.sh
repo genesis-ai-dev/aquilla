@@ -2,8 +2,10 @@
 # Per-PR D1 fork + sync-worker variant deploy.
 #
 # Provisions (idempotent):
-#   1. D1 `codex-db-pr-<N>` — mirrors prod codex-db schema, plus any new
-#      migrations from the PR applied on top.
+#   1. D1 `codex-db-pr-<N>` — mirrors codex-db-staging's schema, plus any
+#      new migrations from the PR applied on top. The fork NEVER reads
+#      from prod codex-db; staging is kept in lockstep with prod schema
+#      separately (apply prod migrations to staging when they ship).
 #   2. Worker `codex-sync-worker-pr-<N>` — points at the new D1, shares
 #      codex-snapshots-staging via R2_KEY_PREFIX=pr-<N>.
 #
@@ -21,7 +23,11 @@ set -euo pipefail
 
 DB_NAME="codex-db-pr-${PR_NUMBER}"
 WORKER_NAME="codex-sync-worker-pr-${PR_NUMBER}"
-PROD_DB="codex-db"
+# Source schema from staging, NEVER from prod. The CI workflow that runs
+# this script must not read prod data under any circumstance — staging
+# is kept in lockstep with prod's schema (apply prod migrations to
+# staging too), and PR forks branch off staging.
+SOURCE_DB="codex-db-staging"
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 TEMPLATE="${REPO_ROOT}/sync-worker/wrangler.pr.toml.tpl"
@@ -62,10 +68,10 @@ echo "[pr-db-fork] DB_ID=${DB_ID}"
 # 2. Mirror prod schema (read-only on prod). Idempotent: re-applying
 #    `CREATE TABLE IF NOT EXISTS` and friends is safe. We filter out CF
 #    internals + FTS shadow tables + sqlite_sequence so apply doesn't error.
-echo "[pr-db-fork] mirroring schema from prod ${PROD_DB}"
+echo "[pr-db-fork] mirroring schema from ${SOURCE_DB}"
 SCHEMA_FILE="$(mktemp -t "codex-schema-XXXXXX.sql")"
 trap 'rm -f "${OUT_TOML}" "${SCHEMA_FILE}"' EXIT
-npx wrangler d1 execute "${PROD_DB}" --remote --json --command "
+npx wrangler d1 execute "${SOURCE_DB}" --remote --json --command "
 SELECT name, sql FROM sqlite_master
 WHERE type IN ('table','index','trigger','view') AND sql IS NOT NULL
 ORDER BY type, name

@@ -12,7 +12,8 @@ import { useProjectSettings } from "@/hooks/useProjectSettings"
 import { getProject, updateProject } from "@/lib/store/project-index"
 import { fetchModels, resolveProvider } from "@/lib/completion/completion-service"
 import { useSaveCompletionSettings, DEFAULT_SYSTEM_PROMPT } from "@/hooks/useCompletionSettings"
-import type { ProjectRecord, CompletionProvider, ProjectTtsSettings } from "@/lib/parsers/types"
+import type { ProjectRecord, CompletionProvider, ProjectTtsSettings, RulePenalties } from "@/lib/parsers/types"
+import { HEALTH_DEFAULTS } from "@/lib/health/defaults"
 import { listFlags } from "@/lib/features/flags"
 import { useFeatureFlag, setFeatureFlag } from "@/hooks/useFeatureFlag"
 import { ValidationSettingsSection } from "./ProjectSettings/ValidationSettingsSection"
@@ -195,7 +196,11 @@ export function ProjectSettings() {
 
   async function saveHealthSettings(next: HealthSettings) {
     setHealthSettings(next)
-    await saveField({ healthSettings: next })
+    // Route through the synced patch pipe. `saveField` would only write to
+    // local IDB, and `useProject`'s overlay with `useProjectSettings.settings`
+    // then re-applies the stale server value on the next render, reverting
+    // the edit silently.
+    await savePartialShared({ healthSettings: next })
   }
 
   async function resetHealthOverrides() {
@@ -486,8 +491,15 @@ export function ProjectSettings() {
         {compositeFlag && (
           <HealthSettingsSection
             settings={healthSettings}
+            rulePenalties={project?.rulePenalties ?? HEALTH_DEFAULTS.rulePenalties}
             onChange={saveHealthSettings}
+            onRulePenaltiesChange={(rp: RulePenalties) => savePartialShared({ rulePenalties: rp })}
             onReset={resetHealthOverrides}
+            // Only block editing when the project IS synced — for unsynced
+            // (local-only) projects, roleLevel is null so canEditShared is
+            // false too, but local edits are still meaningful.
+            disabled={!canEditShared && project?.syncRole != null}
+            disabledTooltip={sharedDisabledTooltip ?? undefined}
           />
         )}
 

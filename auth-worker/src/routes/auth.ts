@@ -16,7 +16,6 @@ import type {
 } from "../middleware/auth"
 import { authMiddleware } from "../middleware/auth"
 import { JWTService } from "../auth/jwt"
-import { GitLabService } from "../services/gitlab"
 import { sendPasswordResetEmail } from "../services/email"
 import {
   hashPasswordWerkzeugScrypt,
@@ -64,37 +63,6 @@ auth.post("/register", zValidator("json", registerSchema), async (c) => {
   const { username, email, password } = c.req.valid("json")
 
   try {
-    if (!c.env.GITLAB_URL) {
-      return c.json(
-        {
-          detail: "GitLab is not configured (missing GITLAB_URL)",
-          error: "Registration failed",
-        },
-        503,
-      )
-    }
-    if (!c.env.GITLAB_ADMIN_TOKEN) {
-      return c.json(
-        {
-          detail: "GitLab is not configured (missing GITLAB_ADMIN_TOKEN)",
-          error: "Registration failed",
-        },
-        503,
-      )
-    }
-    try {
-      new URL(String(c.env.GITLAB_URL))
-    } catch {
-      return c.json(
-        {
-          detail: `GitLab is misconfigured (invalid GITLAB_URL: ${String(
-            c.env.GITLAB_URL,
-          )})`,
-          error: "Registration failed",
-        },
-        503,
-      )
-    }
     if (!c.env.SECRET_KEY || !c.env.ALGORITHM) {
       return c.json(
         {
@@ -118,32 +86,19 @@ auth.post("/register", zValidator("json", registerSchema), async (c) => {
       )
     }
 
-    const gitlabService = new GitLabService(c.env)
-    const gitlabUser = await gitlabService.createOrGetUser(
-      username,
-      email,
-      password,
-    )
-
     const passwordHash = await hashPasswordWerkzeugScrypt(password)
 
+    // gitlab_* columns stay nullable in the schema (legacy users created by
+    // the old frontier-server keep their values). Users registered here
+    // never get a paired GitLab account — codex-web doesn't surface GitLab
+    // features.
     const result = await c.env.AUTH_DB.prepare(
-      `INSERT INTO users (username, email, password_hash, gitlab_user_id, gitlab_username, gitlab_token)
-       VALUES (?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO users (username, email, password_hash)
+       VALUES (?, ?, ?)`,
     )
-      .bind(
-        username,
-        email,
-        passwordHash,
-        gitlabUser.id,
-        gitlabUser.username,
-        gitlabUser.access_token,
-      )
+      .bind(username, email, passwordHash)
       .run()
     if (!result.success) {
-      if (gitlabUser.just_created) {
-        await gitlabService.deleteUser(gitlabUser.id)
-      }
       throw new Error("Failed to create user in database")
     }
 
@@ -152,8 +107,6 @@ auth.post("/register", zValidator("json", registerSchema), async (c) => {
     return c.json({
       access_token: accessToken,
       token_type: "bearer",
-      gitlab_token: gitlabUser.access_token,
-      gitlab_url: gitlabUser.gitlab_url,
     })
   } catch (error) {
     console.error("Registration error:", error)
@@ -258,34 +211,10 @@ auth.post("/token", async (c) => {
       return c.json({ error: "Incorrect username/email or password" }, 401)
     }
 
-    // Best-effort GitLab token refresh. We don't fail login if GitLab is down.
-    let gitlabToken = user.gitlab_token || undefined
-    let gitlabUrl = c.env.GITLAB_URL
-    if (c.env.GITLAB_URL && c.env.GITLAB_ADMIN_TOKEN) {
-      try {
-        const gitlabService = new GitLabService(c.env)
-        const tokenData = await gitlabService.createPersonalAccessToken(
-          user.username,
-          password,
-        )
-        gitlabToken = tokenData.access_token
-        gitlabUrl = tokenData.gitlab_url
-        await c.env.AUTH_DB.prepare(
-          "UPDATE users SET gitlab_token = ? WHERE id = ?",
-        )
-          .bind(gitlabToken, user.id)
-          .run()
-      } catch (gitlabError) {
-        console.error("Failed to refresh GitLab token:", gitlabError)
-      }
-    }
-
     const accessToken = await jwtService.createAccessToken(user.username)
     return c.json({
       access_token: accessToken,
       token_type: "bearer",
-      gitlab_token: gitlabToken,
-      gitlab_url: gitlabUrl,
     })
   } catch (error) {
     console.error("Login error:", error)
@@ -302,44 +231,6 @@ auth.get("/me", authMiddleware, async (c) => {
     gitlab_username: user.gitlab_username,
     preferences: user.preferences,
   })
-})
-
-auth.get("/gitlab/info", authMiddleware, async (c) => {
-  const user = c.get("user")
-  try {
-    if (!c.env.GITLAB_URL || !c.env.GITLAB_ADMIN_TOKEN) {
-      return c.json({ error: "GitLab is not configured" }, 503)
-    }
-    const gitlabService = new GitLabService(c.env)
-    const info = await gitlabService.getUserInfo(
-      user.username,
-      user.gitlab_user_id,
-      user.gitlab_username,
-      user.gitlab_token,
-    )
-    return c.json(info)
-  } catch (error) {
-    console.error("GitLab info error:", error)
-    return c.json({ error: "Failed to get GitLab info" }, 500)
-  }
-})
-
-auth.get("/gitlab/projects/count", authMiddleware, async (c) => {
-  const user = c.get("user")
-  if (!user.gitlab_user_id) {
-    return c.json({ error: "GitLab info not found" }, 404)
-  }
-  try {
-    if (!c.env.GITLAB_URL || !c.env.GITLAB_ADMIN_TOKEN) {
-      return c.json({ error: "GitLab is not configured" }, 503)
-    }
-    const gitlabService = new GitLabService(c.env)
-    const count = await gitlabService.getUserProjectsCount(user.gitlab_user_id)
-    return c.json({ project_count: count })
-  } catch (error) {
-    console.error("GitLab projects count error:", error)
-    return c.json({ error: "Failed to get projects count" }, 500)
-  }
 })
 
 interface ActivityLogRow {
@@ -516,17 +407,6 @@ auth.post(
         .bind(user.id)
         .run()
 
-      if (user.gitlab_user_id && c.env.GITLAB_URL && c.env.GITLAB_ADMIN_TOKEN) {
-        try {
-          const gitlabService = new GitLabService(c.env)
-          await gitlabService.updateUserPassword(
-            user.gitlab_user_id,
-            new_password,
-          )
-        } catch (gitlabError) {
-          console.error("Failed to update GitLab password:", gitlabError)
-        }
-      }
       return c.json({ message: "Password reset successful" })
     } catch (error) {
       console.error("Password reset error:", error)

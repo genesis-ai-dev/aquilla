@@ -16,20 +16,15 @@ database_name = "frontier-db-v2"
 database_id = "9c6abd81-01c3-44ce-9d93-9dfa1c7e1086"
 
 # Secrets (provisioned via `wrangler secret put`, never committed):
-#   SECRET_KEY        — frontier JWT signing key. MUST match prod
-#                       frontier-server so access tokens are interchangeable.
-#   SYNC_SECRET_KEY   — signs /sync-token JWTs. MUST match codex-sync-worker.
-#   GITLAB_ADMIN_TOKEN — used by /register + /token to provision GitLab users
-#                       and refresh PATs. Without it, /register returns 503.
-#   RESEND_API_KEY    — used by /password-reset/request to send email.
-# Plain vars (override via [vars] if you need to point at a non-prod GitLab):
-#   GITLAB_URL, ALGORITHM, ACCESS_TOKEN_EXPIRE_MINUTES, BASE_URL, EMAIL_FROM,
-#   ENVIRONMENT — see types.ts for the full list.
+#   SECRET_KEY      — frontier JWT signing key. MUST match prod
+#                     frontier-server so access tokens are interchangeable.
+#   SYNC_SECRET_KEY — signs /sync-token JWTs. MUST match codex-sync-worker.
+#   RESEND_API_KEY  — used by /password-reset/request to send email.
+# Plain vars: see types.ts for the full list.
 
 [vars]
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = "43200"
-GITLAB_URL = "https://gitlab.frontierrnd.com"
 EMAIL_FROM = "noreply@frontierrnd.com"
 BASE_URL = "https://codex-web.pages.dev"
 ENVIRONMENT = "production"
@@ -52,7 +47,6 @@ database_id = "636fdec6-ba75-447f-b890-6743e00b95fe"
 [env.staging.vars]
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = "43200"
-GITLAB_URL = "https://gitlab.frontierrnd.com"
 EMAIL_FROM = "noreply@frontierrnd.com"
 BASE_URL = "https://dev.codex-web.pages.dev"
 ENVIRONMENT = "staging"

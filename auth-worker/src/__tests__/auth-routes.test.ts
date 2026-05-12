@@ -187,7 +187,7 @@ describe("GET /api/v2/auth/me", () => {
 })
 
 describe("POST /api/v2/auth/register", () => {
-  it("returns 503 when GITLAB_URL isn't configured (fast-fail)", async () => {
+  it("registers a new user and returns a bearer token (no GitLab provisioning)", async () => {
     const db = makeFakeD1()
     const env = makeEnv(db)
     const res = await app.request(
@@ -203,6 +203,43 @@ describe("POST /api/v2/auth/register", () => {
       },
       env,
     )
-    expect(res.status).toBe(503)
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as { access_token: string; token_type: string; gitlab_token?: unknown }
+    expect(body.token_type).toBe("bearer")
+    expect(body.access_token).toMatch(/^eyJ/)
+    expect(body.gitlab_token).toBeUndefined()
+  })
+
+  it("returns 409 when the username already exists", async () => {
+    const db = makeFakeD1()
+    const env = makeEnv(db)
+    const first = await app.request(
+      "/api/v2/auth/register",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          username: "alice",
+          email: "alice@example.com",
+          password: "pw1abcdef",
+        }),
+      },
+      env,
+    )
+    expect(first.status).toBe(200)
+    const dup = await app.request(
+      "/api/v2/auth/register",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          username: "alice",
+          email: "alice2@example.com",
+          password: "pw2abcdef",
+        }),
+      },
+      env,
+    )
+    expect(dup.status).toBe(409)
   })
 })

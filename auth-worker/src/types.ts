@@ -17,10 +17,6 @@ export interface Env {
   // Sync-token signing (shared with codex-sync-worker; distinct from SECRET_KEY).
   SYNC_SECRET_KEY?: string
 
-  // GitLab user provisioning for /register and PAT refresh on /token.
-  GITLAB_URL?: string
-  GITLAB_ADMIN_TOKEN?: string
-
   // Email (Resend) for password reset.
   RESEND_API_KEY?: string
   EMAIL_FROM?: string

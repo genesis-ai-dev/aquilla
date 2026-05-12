@@ -8,8 +8,6 @@
 //   POST /api/v2/auth/register
 //   POST /api/v2/auth/token
 //   GET  /api/v2/auth/me
-//   GET  /api/v2/auth/gitlab/info
-//   GET  /api/v2/auth/gitlab/projects/count
 //   GET  /api/v2/auth/activity-log
 //   POST /api/v2/auth/password-reset/request
 //   POST /api/v2/auth/password-reset/verify

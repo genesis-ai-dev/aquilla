@@ -36,6 +36,11 @@ export function BreakdownContent({
 }: Props) {
   const caps = HEALTH_DEFAULTS.caps
   const b = breakdown
+  // Validated cells short-circuit ancestry/neighborhood/validationGap to zero
+  // (see `compute.ts`). Reflect that in the copy so a 100-score with weak
+  // ancestry doesn't look like a bug — the dimensions were *skipped*, not
+  // measured-as-perfect.
+  const validated = b.signals.validatorCount >= 1
 
   const ancestryRows = b.signals.ancestryExamples.slice(0, 5)
   const ancestryOverflow = b.signals.ancestryExamples.length - ancestryRows.length
@@ -71,7 +76,11 @@ export function BreakdownContent({
       <Section
         label="Examples"
         signedValue={signed(-b.ancestryPenalty)}
-        description={examplesBand(b.ancestryPenalty, caps.ancestryPenalty)}
+        description={
+          validated
+            ? "Skipped — validated"
+            : examplesBand(b.ancestryPenalty, caps.ancestryPenalty)
+        }
       >
         {ancestryRows.length > 0 && (
           <ul className="mt-1 space-y-0.5 font-mono text-xs">
@@ -97,7 +106,11 @@ export function BreakdownContent({
       <Section
         label="Consistency"
         signedValue={signed(-b.neighborhoodPenalty)}
-        description={consistencyBand(b.neighborhoodPenalty, caps.neighborhoodPenalty)}
+        description={
+          validated
+            ? "Skipped — validated"
+            : consistencyBand(b.neighborhoodPenalty, caps.neighborhoodPenalty)
+        }
       >
         <div className="mt-1 space-y-0.5 font-mono text-xs text-muted-foreground">
           <div>Source neighbors: {sourceIds.length}</div>

@@ -2,7 +2,7 @@ import { useEffect, useState } from "react"
 import * as Y from "yjs"
 import { loadFileDoc, destroyFileDoc } from "@/lib/store/file-doc"
 import { computeSectionProgress, type SectionProgress } from "@/lib/progress/section-progress"
-import type { ValidationEntry } from "@/lib/codex-editor/types"
+import { readLatestActiveValidators } from "@/lib/codex-editor/edits/yjs-helpers"
 import { getPlainText } from "@/lib/richtext/translated-xml"
 
 /**
@@ -42,20 +42,13 @@ export function useSectionProgress(
         const frag = cell.get("translatedXml") as Y.XmlFragment | undefined
         const translated = frag ? getPlainText(frag) : ((cell.get("translated") as string) || "")
         const source = cell.get("__source") as
-          | { metadata?: { edits?: Array<{ editMap?: string[]; validatedBy?: ValidationEntry[] }>; selectedAudioId?: string } }
+          | { metadata?: { selectedAudioId?: string } }
           | undefined
-        let activeValidators: string[] = []
-        if (source?.metadata?.edits) {
-          for (let i = source.metadata.edits.length - 1; i >= 0; i--) {
-            const edit = source.metadata.edits[i]
-            if (edit.editMap?.[0] === "value") {
-              activeValidators = (edit.validatedBy ?? [])
-                .filter(v => v && typeof v.username === "string" && !v.isDeleted)
-                .map(v => v.username)
-              break
-            }
-          }
-        }
+        // Read validators from the live cell.edits Y.Array, not the import-time
+        // __source.metadata.edits snapshot — the latter never updates after
+        // import, so the sidebar's "% validated" bar would otherwise stay at 0
+        // no matter how many cells the user validates in the editor.
+        const activeValidators = readLatestActiveValidators(cell)
         ordered.push({
           id: cell.get("id") as string,
           group: (cell.get("group") as string) || "",

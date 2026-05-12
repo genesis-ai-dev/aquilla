@@ -173,6 +173,31 @@ export function getValidatorsActive(entry: Y.Map<unknown>): string[] {
   return out
 }
 
+/**
+ * Read the active validator usernames for a cell's latest *value*-edit. This
+ * is the canonical "who has signed off on the current translation" question:
+ * non-value edits (metadata-only, etc.) never carry validator state, and any
+ * value-edit older than the latest is stale because the text it ratified has
+ * since changed.
+ *
+ * Shared by `useCells` (when D1 audit stats aren't available yet) and
+ * `useSectionProgress` (which doesn't consult D1 at all). Keeping a single
+ * implementation prevents the two from drifting — the earlier divergence is
+ * what made the sidebar's "% validated" bar stay at 0 even though the editor
+ * UI showed validators present.
+ */
+export function readLatestActiveValidators(cell: Y.Map<unknown>): string[] {
+  const arr = cell.get("edits") as Y.Array<Y.Map<unknown>> | undefined
+  if (!arr) return []
+  for (let i = arr.length - 1; i >= 0; i--) {
+    const entry = arr.get(i)
+    const editMapArr = entry.get("editMap") as Y.Array<string> | undefined
+    if (editMapArr?.get(0) !== "value") continue
+    return getValidatorsActive(entry)
+  }
+  return []
+}
+
 /** Does this entry's authors array contain the username? */
 export function entryHasAuthor(entry: Y.Map<unknown>, username: string): boolean {
   const arr = entry.get("authors") as Y.Array<string> | undefined

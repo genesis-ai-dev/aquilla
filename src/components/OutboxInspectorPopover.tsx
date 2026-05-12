@@ -109,7 +109,9 @@ export function OutboxInspectorPopover({ trigger, records }: Props) {
       <PopoverTrigger render={trigger as React.ReactElement} />
       <PopoverContent
         className="w-[380px] max-w-[calc(100vw-2rem)] p-0"
+        side="top"
         align="end"
+        sideOffset={6}
       >
         <div className="flex flex-col">
           <div className="border-b border-border px-3 py-2">

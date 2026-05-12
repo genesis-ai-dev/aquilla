@@ -1,5 +1,14 @@
 import { describe, it, expect } from "vitest"
-import { tokenizeText } from "./tokenizer"
+import { tokenizeText, stripTags } from "./tokenizer"
+
+describe("stripTags", () => {
+  it("removes HTML tags but keeps text", () => {
+    expect(stripTags("Hello <b>brave</b> world")).toBe("Hello  brave  world")
+  })
+  it("handles empty input", () => {
+    expect(stripTags("")).toBe("")
+  })
+})
 
 describe("tokenizeText", () => {
   it("lowercases and splits on whitespace", () => {

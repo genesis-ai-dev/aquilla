@@ -1,8 +1,16 @@
-import { useCallback, useMemo, useRef, useState } from "react"
-import { WorkspaceIndex, type WorkspaceSearchResult } from "@/lib/search/workspace-index"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import {
+  WorkspaceIndex,
+  type SearchOptions,
+  type WorkspaceSearchResult,
+} from "@/lib/search/workspace-index"
 import { collectExportCells } from "@/lib/store/file-doc"
 import type { FileReference } from "@/lib/parsers/types"
 
+/**
+ * Loads project cells into a substring index. The index rebuilds when the
+ * file list changes; callers can also `rebuild()` after edits (e.g. replace).
+ */
 export function useWorkspaceSearch(files: FileReference[]) {
   const indexRef = useRef(new WorkspaceIndex())
   const [ready, setReady] = useState(false)
@@ -10,40 +18,43 @@ export function useWorkspaceSearch(files: FileReference[]) {
   const [results, setResults] = useState<WorkspaceSearchResult[]>([])
 
   const filesKey = useMemo(() => files.map((f) => f.id).join(","), [files])
-  const lastBuiltKey = useRef<string>("")
+  const builtKey = useRef<string>("")
 
-  // Invalidate if files list changes
-  if (lastBuiltKey.current !== "" && lastBuiltKey.current !== filesKey && ready) {
-    setReady(false)
-  }
+  // Drop ready when the file list changes — next buildIndex() will reload.
+  useEffect(() => {
+    if (builtKey.current && builtKey.current !== filesKey) {
+      setReady(false)
+      builtKey.current = ""
+    }
+  }, [filesKey])
 
   const buildIndex = useCallback(async () => {
-    if (lastBuiltKey.current === filesKey && ready) return
+    if (builtKey.current === filesKey) return
     setLoading(true)
     try {
-      const fileDatas = await Promise.all(
-        files.map(async (f) => {
-          const data = await collectExportCells(f.id)
-          return { fileId: f.id, fileName: data.fileName, cells: data.cells }
-        })
-      )
+      const fileDatas = await Promise.all(files.map(async (f) => {
+        const data = await collectExportCells(f.id)
+        return { fileId: f.id, fileName: data.fileName, cells: data.cells }
+      }))
       indexRef.current.buildFromProject(fileDatas)
-      lastBuiltKey.current = filesKey
+      builtKey.current = filesKey
       setReady(true)
     } finally {
       setLoading(false)
     }
-  }, [files, filesKey, ready])
+  }, [files, filesKey])
 
-  const search = useCallback((query: string, options: { fileId?: string; limit?: number } = {}) => {
-    setResults(indexRef.current.search(query, options.limit ?? 20, { fileId: options.fileId }))
+  const search = useCallback((query: string, options: SearchOptions = {}) => {
+    setResults(indexRef.current.search(query, options))
   }, [])
 
+  const clear = useCallback(() => setResults([]), [])
+
   const rebuild = useCallback(() => {
-    lastBuiltKey.current = ""
+    builtKey.current = ""
     setReady(false)
     return buildIndex()
   }, [buildIndex])
 
-  return { buildIndex, rebuild, search, results, loading, ready }
+  return { buildIndex, rebuild, search, clear, results, loading, ready }
 }

@@ -196,7 +196,11 @@ export function ProjectSettings() {
 
   async function saveHealthSettings(next: HealthSettings) {
     setHealthSettings(next)
-    await saveField({ healthSettings: next })
+    // Route through the synced patch pipe. `saveField` would only write to
+    // local IDB, and `useProject`'s overlay with `useProjectSettings.settings`
+    // then re-applies the stale server value on the next render, reverting
+    // the edit silently.
+    await savePartialShared({ healthSettings: next })
   }
 
   async function resetHealthOverrides() {
@@ -489,7 +493,7 @@ export function ProjectSettings() {
             settings={healthSettings}
             rulePenalties={project?.rulePenalties ?? HEALTH_DEFAULTS.rulePenalties}
             onChange={saveHealthSettings}
-            onRulePenaltiesChange={(rp: RulePenalties) => saveField({ rulePenalties: rp })}
+            onRulePenaltiesChange={(rp: RulePenalties) => savePartialShared({ rulePenalties: rp })}
             onReset={resetHealthOverrides}
           />
         )}

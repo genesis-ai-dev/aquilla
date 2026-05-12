@@ -8,6 +8,13 @@ export const FRONTIER_BASE =
   ((import.meta.env.VITE_FRONTIER_BASE as string | undefined)?.replace(/\/+$/, "")) ||
   "https://api.frontierrnd.com";
 
+// Auth + sync-token + invite routes have been ported into the codex-auth-worker
+// in this repo. Default to FRONTIER_BASE so unconfigured environments still hit
+// the legacy frontier-server. CI wires VITE_AUTH_BASE per-branch.
+export const AUTH_BASE =
+  ((import.meta.env.VITE_AUTH_BASE as string | undefined)?.replace(/\/+$/, "")) ||
+  FRONTIER_BASE;
+
 export class FrontierAuthError extends Error {
   public status: number;
   constructor(message: string, status: number) {
@@ -27,7 +34,7 @@ interface AuthResponse {
 }
 
 export async function login(args: LoginArgs): Promise<FrontierSession> {
-  const res = await fetch(`${FRONTIER_BASE}/api/v1/auth/token`, {
+  const res = await fetch(`${AUTH_BASE}/api/v1/auth/token`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(args),
@@ -43,7 +50,7 @@ export async function login(args: LoginArgs): Promise<FrontierSession> {
 }
 
 export async function register(args: RegisterArgs): Promise<FrontierSession> {
-  const res = await fetch(`${FRONTIER_BASE}/api/v1/auth/register`, {
+  const res = await fetch(`${AUTH_BASE}/api/v1/auth/register`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(args),
@@ -64,7 +71,7 @@ export async function register(args: RegisterArgs): Promise<FrontierSession> {
 }
 
 export async function requestPasswordReset(email: string): Promise<void> {
-  const res = await fetch(`${FRONTIER_BASE}/api/v1/auth/password-reset/request`, {
+  const res = await fetch(`${AUTH_BASE}/api/v1/auth/password-reset/request`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ email }),

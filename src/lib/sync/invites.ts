@@ -4,7 +4,7 @@
 // network error). Callers surface null as "couldn't create / preview / accept"
 // and log — the UI shows a retry path.
 
-import { FRONTIER_API_URL } from "./sync-token"
+import { AUTH_API_URL } from "./sync-token"
 import { ROLE } from "@/lib/frontier/roles"
 
 export interface ServerInviteCreated {
@@ -51,7 +51,7 @@ export async function createServerInvite(
   jwt: string,
   projectId: string,
   role: number = ROLE.CONTRIBUTOR,
-  apiUrl: string = FRONTIER_API_URL,
+  apiUrl: string = AUTH_API_URL,
   email?: string
 ): Promise<ServerInviteCreated | null> {
   try {
@@ -91,7 +91,7 @@ export async function createServerInvite(
  */
 export async function previewServerInvite(
   token: string,
-  apiUrl: string = FRONTIER_API_URL
+  apiUrl: string = AUTH_API_URL
 ): Promise<ServerInvitePreview | null> {
   try {
     const res = await fetch(
@@ -118,7 +118,7 @@ export async function previewServerInvite(
 export async function acceptServerInvite(
   jwt: string,
   token: string,
-  apiUrl: string = FRONTIER_API_URL
+  apiUrl: string = AUTH_API_URL
 ): Promise<ServerInviteAccepted | null> {
   try {
     const res = await fetch(`${apiUrl}/api/v2/projects/accept-invite`, {

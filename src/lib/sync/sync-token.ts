@@ -1,11 +1,24 @@
-// Fetch short-lived JWTs from frontier-server's POST /api/v2/sync-token.
+// Fetch short-lived JWTs from the codex-auth-worker's POST /api/v2/sync-token.
 // One token per (projectId, fileId) scope; 15-min TTL. Cache the token in memory
 // and refresh when within 30 s of expiry so reconnects don't race with expiration.
+//
+// AUTH_API_URL points at codex-auth-worker (auth, sync-token, invites). It
+// falls back to VITE_FRONTIER_BASE so legacy environments that only have the
+// old frontier-server still work. The plain `FRONTIER_API_URL` re-export is
+// kept around for chat/LLM/payments routes that haven't been ported.
 
-// Honor VITE_FRONTIER_BASE override (see src/lib/frontier/auth.ts).
-export const FRONTIER_API_URL =
+const FRONTIER_DEFAULT = "https://api.frontierrnd.com"
+
+const FRONTIER_BASE =
   ((import.meta.env.VITE_FRONTIER_BASE as string | undefined)?.replace(/\/+$/, "")) ||
-  "https://api.frontierrnd.com"
+  FRONTIER_DEFAULT
+
+export const AUTH_API_URL =
+  ((import.meta.env.VITE_AUTH_BASE as string | undefined)?.replace(/\/+$/, "")) ||
+  FRONTIER_BASE
+
+/** @deprecated for routes ported to auth-worker; prefer AUTH_API_URL. */
+export const FRONTIER_API_URL = FRONTIER_BASE
 
 export interface SyncTokenResponse {
   token: string
@@ -36,7 +49,7 @@ export async function fetchSyncToken(
   projectId: string,
   fileId: string,
   bootstrap: ProjectBootstrap = {},
-  apiUrl: string = FRONTIER_API_URL
+  apiUrl: string = AUTH_API_URL
 ): Promise<SyncTokenResponse> {
   const body: Record<string, unknown> = { projectId, fileId }
   if (bootstrap.projectName) body.projectName = bootstrap.projectName

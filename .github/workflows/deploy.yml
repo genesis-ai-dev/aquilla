@@ -89,11 +89,14 @@ jobs:
           fi
 
       # Frontend points at prod workers when building from main; staging
-      # workers everywhere else.
+      # workers everywhere else. VITE_AUTH_BASE targets the new codex-auth-
+      # worker for auth/sync-token/invite routes; the rest of the frontier
+      # API (chat, payments, members, orgs) stays on VITE_FRONTIER_BASE.
       - run: npm run build
         if: steps.decide.outputs.deploy == 'true'
         env:
           VITE_SYNC_WORKER_HOST: ${{ github.ref == 'refs/heads/main' && 'codex-sync-worker.blue-darkness-7674.workers.dev' || 'codex-sync-worker-staging.blue-darkness-7674.workers.dev' }}
+          VITE_AUTH_BASE: ${{ github.ref == 'refs/heads/main' && 'https://codex-auth-worker.blue-darkness-7674.workers.dev' || 'https://codex-auth-worker-staging.blue-darkness-7674.workers.dev' }}
           VITE_GIT_CORS_PROXY: ${{ github.ref == 'refs/heads/main' && 'https://codex-git-proxy.ryderwishart.workers.dev' || 'https://codex-git-proxy-staging.blue-darkness-7674.workers.dev' }}
 
       - name: Deploy to Cloudflare Pages

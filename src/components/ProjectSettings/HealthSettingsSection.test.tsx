@@ -3,12 +3,16 @@ import { render, screen, fireEvent } from "@testing-library/react"
 import { HealthSettingsSection } from "./HealthSettingsSection"
 import { HEALTH_DEFAULTS } from "@/lib/health/defaults"
 
+const DEFAULT_PENALTIES = HEALTH_DEFAULTS.rulePenalties
+
 describe("HealthSettingsSection", () => {
   it("shows defaults when followDefaults is true", () => {
     render(
       <HealthSettingsSection
         settings={{ followDefaults: true }}
+        rulePenalties={DEFAULT_PENALTIES}
         onChange={vi.fn()}
+        onRulePenaltiesChange={vi.fn()}
         onReset={vi.fn()}
       />
     )
@@ -21,7 +25,9 @@ describe("HealthSettingsSection", () => {
     render(
       <HealthSettingsSection
         settings={{ followDefaults: false, overrides: {} }}
+        rulePenalties={DEFAULT_PENALTIES}
         onChange={onChange}
+        onRulePenaltiesChange={vi.fn()}
         onReset={vi.fn()}
       />
     )
@@ -38,7 +44,9 @@ describe("HealthSettingsSection", () => {
     render(
       <HealthSettingsSection
         settings={{ followDefaults: true }}
+        rulePenalties={DEFAULT_PENALTIES}
         onChange={onChange}
+        onRulePenaltiesChange={vi.fn()}
         onReset={vi.fn()}
       />
     )
@@ -51,13 +59,16 @@ describe("HealthSettingsSection", () => {
 
   it("invokes onReset when the reset button is clicked (after confirm)", () => {
     const onReset = vi.fn()
+    // Stub window.confirm to auto-accept
     const origConfirm = window.confirm
     window.confirm = () => true
     try {
       render(
         <HealthSettingsSection
           settings={{ followDefaults: false, overrides: { caps: { rulePenalty: 30 } as never } }}
+          rulePenalties={DEFAULT_PENALTIES}
           onChange={vi.fn()}
+          onRulePenaltiesChange={vi.fn()}
           onReset={onReset}
         />
       )
@@ -68,67 +79,73 @@ describe("HealthSettingsSection", () => {
     }
   })
 
-  it("clamps penalty inputs at the current rule-penalty cap", () => {
-    // Default rulePenalty cap is HEALTH_DEFAULTS.caps.rulePenalty. The penalty
-    // input should never store a value above the cap — rule-penalty.ts clamps
-    // the sum anyway, so allowing per-severity values above the cap would be
-    // misleading.
+  it("major/minor penalty inputs write to project.rulePenalties (not to healthSettings.overrides)", () => {
+    const onRulePenaltiesChange = vi.fn()
     const onChange = vi.fn()
     render(
       <HealthSettingsSection
         settings={{ followDefaults: false, overrides: {} }}
+        rulePenalties={{ major: 15, minor: 5 }}
         onChange={onChange}
+        onRulePenaltiesChange={onRulePenaltiesChange}
+        onReset={vi.fn()}
+      />
+    )
+    const major = screen.getByLabelText(/Major rule penalty/i) as HTMLInputElement
+    fireEvent.change(major, { target: { value: "25" } })
+    expect(onRulePenaltiesChange).toHaveBeenCalledWith({ major: 25, minor: 5 })
+    // Crucially, the healthSettings.overrides path must NOT have been written.
+    expect(onChange).not.toHaveBeenCalled()
+  })
+
+  it("clamps penalty inputs at the current rule-penalty cap (default 40)", () => {
+    // Per-severity penalty caps at HEALTH_DEFAULTS.caps.rulePenalty so the
+    // stored value never exceeds what rule-penalty.ts could actually subtract.
+    const onRulePenaltiesChange = vi.fn()
+    render(
+      <HealthSettingsSection
+        settings={{ followDefaults: false, overrides: {} }}
+        rulePenalties={{ major: 15, minor: 5 }}
+        onChange={vi.fn()}
+        onRulePenaltiesChange={onRulePenaltiesChange}
         onReset={vi.fn()}
       />
     )
     const minor = screen.getByLabelText(/Minor rule penalty/i) as HTMLInputElement
     fireEvent.change(minor, { target: { value: "250" } })
-    const call = onChange.mock.calls.at(-1)?.[0]
-    expect(call.overrides.rulePenalties.minor).toBe(HEALTH_DEFAULTS.caps.rulePenalty)
+    expect(onRulePenaltiesChange).toHaveBeenCalledWith({
+      major: 15, minor: HEALTH_DEFAULTS.caps.rulePenalty,
+    })
   })
 
-  it("penalty input cap tracks the current Rules cap override (not the default)", () => {
-    const onChange = vi.fn()
+  it("penalty cap tracks the current Rules cap override (not the default)", () => {
+    const onRulePenaltiesChange = vi.fn()
     render(
       <HealthSettingsSection
         settings={{ followDefaults: false, overrides: { caps: { rulePenalty: 25 } as never } }}
-        onChange={onChange}
+        rulePenalties={{ major: 15, minor: 5 }}
+        onChange={vi.fn()}
+        onRulePenaltiesChange={onRulePenaltiesChange}
         onReset={vi.fn()}
       />
     )
     const major = screen.getByLabelText(/Major rule penalty/i) as HTMLInputElement
     fireEvent.change(major, { target: { value: "999" } })
-    const call = onChange.mock.calls.at(-1)?.[0]
-    expect(call.overrides.rulePenalties.major).toBe(25)
-  })
-
-  it("clamps negative penalty input at zero", () => {
-    const onChange = vi.fn()
-    render(
-      <HealthSettingsSection
-        settings={{ followDefaults: false, overrides: {} }}
-        onChange={onChange}
-        onReset={vi.fn()}
-      />
-    )
-    const minor = screen.getByLabelText(/Minor rule penalty/i) as HTMLInputElement
-    fireEvent.change(minor, { target: { value: "-5" } })
-    const call = onChange.mock.calls.at(-1)?.[0]
-    expect(call.overrides.rulePenalties.minor).toBe(0)
+    expect(onRulePenaltiesChange).toHaveBeenCalledWith({ major: 25, minor: 5 })
   })
 
   it("renders the /N fraction suffix next to major and minor penalty inputs", () => {
     render(
       <HealthSettingsSection
         settings={{ followDefaults: true }}
+        rulePenalties={DEFAULT_PENALTIES}
         onChange={vi.fn()}
+        onRulePenaltiesChange={vi.fn()}
         onReset={vi.fn()}
       />
     )
-    // Two rows (major, minor) both reference the same cap.
     const suffix = `/ ${HEALTH_DEFAULTS.caps.rulePenalty}`
     expect(screen.getAllByText(suffix).length).toBeGreaterThanOrEqual(2)
-    // And the HTML `max` attribute reflects the cap so spinner buttons stop there.
     expect(screen.getByLabelText(/Major rule penalty/i)).toHaveAttribute(
       "max",
       String(HEALTH_DEFAULTS.caps.rulePenalty),
@@ -139,11 +156,74 @@ describe("HealthSettingsSection", () => {
     render(
       <HealthSettingsSection
         settings={{ followDefaults: false, overrides: { caps: { rulePenalty: 25 } as never } }}
+        rulePenalties={DEFAULT_PENALTIES}
         onChange={vi.fn()}
+        onRulePenaltiesChange={vi.fn()}
         onReset={vi.fn()}
       />
     )
     expect(screen.getAllByText("/ 25").length).toBeGreaterThanOrEqual(2)
     expect(screen.getByLabelText(/Major rule penalty/i)).toHaveAttribute("max", "25")
+  })
+
+  it("clamps cap inputs at 100", () => {
+    const onChange = vi.fn()
+    render(
+      <HealthSettingsSection
+        settings={{ followDefaults: false, overrides: {} }}
+        rulePenalties={DEFAULT_PENALTIES}
+        onChange={onChange}
+        onRulePenaltiesChange={vi.fn()}
+        onReset={vi.fn()}
+      />
+    )
+    const input = screen.getByLabelText(/Validation gap cap/i) as HTMLInputElement
+    fireEvent.change(input, { target: { value: "500" } })
+    const call = onChange.mock.calls.at(-1)?.[0]
+    expect(call.overrides.caps.validationGap).toBe(100)
+  })
+
+  it("disabled={true} disables every cap/weight/penalty input and the reset button", () => {
+    const onChange = vi.fn()
+    const onRulePenaltiesChange = vi.fn()
+    render(
+      <HealthSettingsSection
+        settings={{ followDefaults: false, overrides: { caps: { rulePenalty: 30 } as never } }}
+        rulePenalties={DEFAULT_PENALTIES}
+        onChange={onChange}
+        onRulePenaltiesChange={onRulePenaltiesChange}
+        onReset={vi.fn()}
+        disabled={true}
+        disabledTooltip="Project Lead or higher can edit shared settings."
+      />
+    )
+    for (const label of [
+      /Validation gap cap/i, /Ancestry cap/i, /Neighborhood cap/i, /Rules cap/i,
+      /ID Jaccard weight/i, /TF-IDF weight/i,
+      /Major rule penalty/i, /Minor rule penalty/i,
+    ]) {
+      expect(screen.getByLabelText(label)).toBeDisabled()
+    }
+    expect(screen.getByRole("button", { name: /Reset overrides/i })).toBeDisabled()
+    // (Synthetic fireEvent.change bypasses the browser's disabled guard, so a
+    // "no onChange fired" assertion isn't reliable in jsdom. The DOM-level
+    // disabled attribute is what real users would be blocked by; that's what
+    // this test pins.)
+  })
+
+  it("disabled={false} (default) keeps the inputs editable", () => {
+    const onChange = vi.fn()
+    render(
+      <HealthSettingsSection
+        settings={{ followDefaults: false, overrides: {} }}
+        rulePenalties={DEFAULT_PENALTIES}
+        onChange={onChange}
+        onRulePenaltiesChange={vi.fn()}
+        onReset={vi.fn()}
+      />
+    )
+    expect(screen.getByLabelText(/Validation gap cap/i)).not.toBeDisabled()
+    fireEvent.change(screen.getByLabelText(/Validation gap cap/i), { target: { value: "42" } })
+    expect(onChange).toHaveBeenCalled()
   })
 })

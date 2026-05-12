@@ -15,6 +15,7 @@ export interface ProjectArchiveEnv {
   FileSync: DurableObjectNamespace
   SNAPSHOTS: R2Bucket
   SYNC_SECRET_KEY?: string
+  R2_KEY_PREFIX?: string
 }
 
 export interface ArchiveMarker {
@@ -22,8 +23,13 @@ export interface ArchiveMarker {
   deletedBy: string | null
 }
 
-function archiveMarkerKey(projectId: string): string {
-  return `projects/${projectId}/archive.json`
+function r2KeyPrefix(env: Pick<ProjectArchiveEnv, "R2_KEY_PREFIX">): string {
+  const p = env.R2_KEY_PREFIX?.trim().replace(/^\/+|\/+$/g, "") ?? ""
+  return p ? `${p}/` : ""
+}
+
+function archiveMarkerKey(env: Pick<ProjectArchiveEnv, "R2_KEY_PREFIX">, projectId: string): string {
+  return `${r2KeyPrefix(env)}projects/${projectId}/archive.json`
 }
 
 /** Broadcast hook — overridable in tests so we don't need a DO runtime. */
@@ -71,15 +77,15 @@ export async function handleProjectArchiveRequest(
   // Persist a marker so cold-started DOs (after hibernation / eviction)
   // reconstruct the tombstone in onLoad. Omit entirely when unarchiving.
   if (body.archivedAt) {
-    await env.SNAPSHOTS.put(archiveMarkerKey(projectId), JSON.stringify(body))
+    await env.SNAPSHOTS.put(archiveMarkerKey(env, projectId), JSON.stringify(body))
   } else {
-    await env.SNAPSHOTS.delete(archiveMarkerKey(projectId))
+    await env.SNAPSHOTS.delete(archiveMarkerKey(env, projectId))
   }
 
   // Enumerate every file we've ever persisted under this project — each
   // file has a DO that may be holding a live client. We wake each stub
   // and let it decide whether anyone is connected.
-  const filePrefix = `projects/${projectId}/files/`
+  const filePrefix = `${r2KeyPrefix(env)}projects/${projectId}/files/`
   const fileIds = new Set<string>()
   let cursor: string | undefined = undefined
   do {
@@ -116,10 +122,10 @@ export async function handleProjectArchiveRequest(
  * serving any client.
  */
 export async function readArchiveMarker(
-  bucket: R2Bucket,
+  env: Pick<ProjectArchiveEnv, "R2_KEY_PREFIX"> & { SNAPSHOTS: R2Bucket },
   projectId: string
 ): Promise<ArchiveMarker | null> {
-  const obj = await bucket.get(archiveMarkerKey(projectId))
+  const obj = await env.SNAPSHOTS.get(archiveMarkerKey(env, projectId))
   if (!obj) return null
   try {
     return (await obj.json()) as ArchiveMarker

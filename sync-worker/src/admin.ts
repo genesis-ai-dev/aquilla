@@ -6,6 +6,12 @@
 export interface AdminEnv {
   SNAPSHOTS: R2Bucket
   SYNC_SECRET_KEY?: string
+  R2_KEY_PREFIX?: string
+}
+
+function r2KeyPrefix(env: Pick<AdminEnv, "R2_KEY_PREFIX">): string {
+  const p = env.R2_KEY_PREFIX?.trim().replace(/^\/+|\/+$/g, "") ?? ""
+  return p ? `${p}/` : ""
 }
 
 /**
@@ -43,7 +49,7 @@ export async function handleAdminRequest(
     if (request.method !== "GET") return new Response("method not allowed", { status: 405 })
     const projectId = decodeURIComponent(inspectMatch[1])
     const fileId = decodeURIComponent(inspectMatch[2])
-    const prefix = `projects/${projectId}/files/${fileId}/`
+    const prefix = `${r2KeyPrefix(env)}projects/${projectId}/files/${fileId}/`
     const objects: Array<{ key: string; size: number }> = []
     let cursor: string | undefined = undefined
     do {

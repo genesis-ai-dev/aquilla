@@ -10,7 +10,7 @@ import {
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
-import type { WorkspaceSearchResult } from "@/lib/search/workspace-index"
+import type { WorkspaceSearchResult, SearchOptions } from "@/lib/search/workspace-index"
 import { HighlightedText } from "./HighlightedText"
 import {
   applyReplaceBatch,
@@ -38,8 +38,9 @@ interface ParallelPassagesPanelProps {
   ready: boolean
   results: WorkspaceSearchResult[]
   onReady: () => void | Promise<void>
-  onSearch: (query: string, options: { fileId?: string }) => void
-  onSelect: (result: WorkspaceSearchResult) => void
+  onSearch: (query: string, options: SearchOptions) => void
+  onClearResults: () => void
+  onSelect: (result: WorkspaceSearchResult, query: string) => void
 
   username: string
   isReadOnly: boolean
@@ -51,6 +52,8 @@ interface PendingReplace {
   done: number
   results: ReplaceResult[]
 }
+
+const SEARCH_DEBOUNCE_MS = 180
 
 export function ParallelPassagesPanel({
   open,
@@ -67,6 +70,7 @@ export function ParallelPassagesPanel({
   results,
   onReady,
   onSearch,
+  onClearResults,
   onSelect,
   username,
   isReadOnly,
@@ -79,56 +83,62 @@ export function ParallelPassagesPanel({
   const [activeIndex, setActiveIndex] = useState(0)
   const [pending, setPending] = useState<PendingReplace | null>(null)
   const [lastReport, setLastReport] = useState<string | null>(null)
-  const [lastSearchedQuery, setLastSearchedQuery] = useState<string | null>(null)
   const findRef = useRef<HTMLInputElement>(null)
+
+  // If activeFileId disappears (e.g. closing the file) while scope=file, fall
+  // back to project — otherwise search silently returns nothing.
+  useEffect(() => {
+    if (scope === "file" && !activeFileId) onScopeChange("project")
+  }, [scope, activeFileId, onScopeChange])
 
   useEffect(() => {
     if (!open) return
     setActiveIndex(0)
     setPending(null)
     setLastReport(null)
-    setLastSearchedQuery(null)
     onReady()
     setTimeout(() => findRef.current?.focus(), 50)
   }, [open, onReady])
 
-  const effectiveFileId = scope === "file" ? activeFileId : undefined
+  const effectiveFileId = scope === "file" ? activeFileId ?? undefined : undefined
 
-  const triggerSearch = useCallback(() => {
-    const cleaned = query.trim()
-    if (!cleaned || !ready) return
-    onSearch(query, { fileId: effectiveFileId ?? undefined })
-    setLastSearchedQuery(query)
-  }, [query, ready, onSearch, effectiveFileId])
-
-  // Re-run when scope changes only if the user has already searched at least
-  // once — avoids surprising the user with auto-runs the first time around.
+  // Live debounced re-search on every query/scope/case-sensitivity change.
   useEffect(() => {
-    if (lastSearchedQuery === null) return
-    onSearch(lastSearchedQuery, { fileId: effectiveFileId ?? undefined })
-  }, [effectiveFileId, lastSearchedQuery, onSearch])
-
-  const isStale = query.trim().length > 0 && query !== lastSearchedQuery
+    if (!open || !ready) return
+    const cleaned = query.trim()
+    if (!cleaned) {
+      onClearResults()
+      return
+    }
+    const handle = setTimeout(() => {
+      onSearch(query, { fileId: effectiveFileId, caseSensitive })
+    }, SEARCH_DEBOUNCE_MS)
+    return () => clearTimeout(handle)
+  }, [open, ready, query, effectiveFileId, caseSensitive, onSearch, onClearResults])
 
   useEffect(() => {
     setActiveIndex(0)
   }, [results])
 
-  const replaceableResults = useMemo(() => {
-    if (mode !== "replace" || !query.trim()) return new Map<string, { after: string; count: number }>()
+  // Per-result replace preview + tallies that explain why the replace count
+  // can be 0 even with visible results (source-only matches, empty target).
+  const { previews, srcOnly, emptyTarget } = useMemo(() => {
     const map = new Map<string, { after: string; count: number }>()
+    let srcOnly = 0
+    let emptyTarget = 0
+    if (mode !== "replace" || !query.trim()) return { previews: map, srcOnly, emptyTarget }
     for (const r of results) {
-      const preview = previewCellReplace(r.translated, {
-        find: query,
-        replace: replaceText,
-        caseSensitive,
-      })
-      if (preview.count > 0) map.set(`${r.fileId}:${r.cellId}`, preview)
+      const preview = previewCellReplace(r.translated, { find: query, replace: replaceText, caseSensitive })
+      if (preview.count > 0) {
+        map.set(`${r.fileId}:${r.cellId}`, preview)
+      } else if (r.matchedFields.has("original") || r.matchedFields.has("context")) {
+        if (r.translated.trim()) srcOnly++; else emptyTarget++
+      }
     }
-    return map
+    return { previews: map, srcOnly, emptyTarget }
   }, [mode, results, query, replaceText, caseSensitive])
 
-  const replaceableCount = replaceableResults.size
+  const replaceableCount = previews.size
 
   const runReplace = useCallback(
     async (targets: { fileId: string; cellId: string }[]) => {
@@ -156,25 +166,18 @@ export function ParallelPassagesPanel({
       }
     },
     [
-      query,
-      replaceText,
-      caseSensitive,
-      retainValidations,
-      username,
-      activeFileId,
-      activeDoc,
-      isReadOnly,
-      onAfterReplace,
+      query, replaceText, caseSensitive, retainValidations, username,
+      activeFileId, activeDoc, isReadOnly, onAfterReplace,
     ],
   )
 
   const handleReplaceAll = useCallback(() => {
-    const targets = Array.from(replaceableResults.keys()).map((k) => {
+    const targets = Array.from(previews.keys()).map((k) => {
       const [fileId, cellId] = k.split(":")
       return { fileId, cellId }
     })
     return runReplace(targets)
-  }, [replaceableResults, runReplace])
+  }, [previews, runReplace])
 
   function handleKeyDown(e: React.KeyboardEvent) {
     if (e.key === "ArrowDown") {
@@ -185,23 +188,24 @@ export function ParallelPassagesPanel({
       setActiveIndex((i) => Math.max(0, i - 1))
     } else if (e.key === "Enter") {
       e.preventDefault()
-      if (isStale) {
-        triggerSearch()
-        return
-      }
       const r = results[activeIndex]
       if (r) {
-        onSelect(r)
+        onSelect(r, query)
         onOpenChange(false)
       }
     }
   }
 
   const scopeLabel = scope === "file"
-    ? activeFileName
-      ? `This file (${activeFileName})`
-      : "This file"
+    ? activeFileName ? `This file (${activeFileName})` : "This file"
     : "All files"
+
+  const replaceHint = mode === "replace" && replaceableCount === 0 && (srcOnly + emptyTarget > 0)
+    ? [
+        srcOnly && `${srcOnly} matched only in source (read-only)`,
+        emptyTarget && `${emptyTarget} have empty target`,
+      ].filter(Boolean).join(" · ")
+    : null
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -233,7 +237,7 @@ export function ParallelPassagesPanel({
           </DialogTitle>
           <DialogDescription className="sr-only">
             Search translated and source cells across the project, with optional
-            find & replace on target cells.
+            find &amp; replace on target cells.
           </DialogDescription>
         </DialogHeader>
 
@@ -249,16 +253,6 @@ export function ParallelPassagesPanel({
               disabled={loading}
               className="border-0 bg-transparent shadow-none focus-visible:ring-0"
             />
-            <Button
-              size="sm"
-              variant={isStale ? "default" : "secondary"}
-              onClick={triggerSearch}
-              disabled={loading || !ready || !query.trim()}
-              className="h-7"
-            >
-              <SearchIcon className="h-3.5 w-3.5" />
-              Search
-            </Button>
           </div>
           {mode === "replace" && (
             <div className="flex items-center gap-2">
@@ -320,10 +314,8 @@ export function ParallelPassagesPanel({
         <div className="max-h-[55vh] min-h-[200px] overflow-auto">
           {!query.trim() ? (
             <p className="p-4 text-sm text-muted-foreground">
-              {loading ? "Loading project cells..." : "Type a query, then press Enter or click Search."}
+              {loading ? "Loading project cells..." : "Type to search across cells."}
             </p>
-          ) : lastSearchedQuery === null ? (
-            <p className="p-4 text-sm text-muted-foreground">Press Enter or click Search to run.</p>
           ) : results.length === 0 ? (
             <p className="p-4 text-sm text-muted-foreground">No matches.</p>
           ) : (
@@ -331,8 +323,9 @@ export function ParallelPassagesPanel({
               {results.map((r, i) => {
                 const key = `${r.fileId}-${r.cellId}`
                 const replaceKey = `${r.fileId}:${r.cellId}`
-                const preview = replaceableResults.get(replaceKey)
+                const preview = previews.get(replaceKey)
                 const highlights = r.matchedTokens.map((t) => ({ token: t, colorIndex: 0 }))
+                const srcOnlyRow = mode === "replace" && !r.matchedFields.has("translated")
                 return (
                   <li key={key}>
                     <div
@@ -351,12 +344,12 @@ export function ParallelPassagesPanel({
                       </div>
                       <div className="text-sm">
                         <div className="text-[10px] uppercase tracking-wide text-muted-foreground">Source</div>
-                        <HighlightedText text={r.original} highlights={highlights} />
+                        <HighlightedText text={r.original} highlights={highlights} showEvidence />
                       </div>
                       <div className="text-sm">
                         <div className="text-[10px] uppercase tracking-wide text-muted-foreground">Target</div>
                         {r.translated ? (
-                          <HighlightedText text={r.translated} highlights={highlights} />
+                          <HighlightedText text={r.translated} highlights={highlights} showEvidence />
                         ) : (
                           <span className="text-muted-foreground italic">empty</span>
                         )}
@@ -368,18 +361,23 @@ export function ParallelPassagesPanel({
                             <div className="whitespace-pre-wrap">{preview.after}</div>
                           </div>
                         )}
+                        {srcOnlyRow && (
+                          <div className="mt-1 text-[11px] italic text-muted-foreground">
+                            Source match — target {r.translated.trim() ? "is missing the term" : "is empty"}, can&apos;t replace.
+                          </div>
+                        )}
                       </div>
                       <div className="flex flex-col items-end gap-1">
                         <Button
                           size="sm"
                           variant="ghost"
                           onClick={() => {
-                            onSelect(r)
+                            onSelect(r, query)
                             onOpenChange(false)
                           }}
                           className="h-7 px-2 text-xs"
                         >
-                          Jump
+                          Go to cell
                         </Button>
                         {mode === "replace" && preview && !isReadOnly && (
                           <Button
@@ -405,6 +403,7 @@ export function ParallelPassagesPanel({
           <span>
             {ready ? `${results.length} result${results.length === 1 ? "" : "s"}` : "Indexing..."}
             {mode === "replace" && query.trim() && ` · ${replaceableCount} replaceable`}
+            {replaceHint && <span className="ml-2 text-amber-600 dark:text-amber-500">({replaceHint})</span>}
           </span>
           <div className="flex items-center gap-3">
             {pending && (
@@ -414,12 +413,17 @@ export function ParallelPassagesPanel({
               </span>
             )}
             {lastReport && !pending && <span>{lastReport}</span>}
-            <span>↑↓ navigate · Enter jump · Esc close</span>
+            <span>↑↓ navigate · Enter open · Esc close</span>
             {mode === "replace" && !isReadOnly && (
               <Button
                 size="sm"
                 disabled={replaceableCount === 0 || pending !== null}
                 onClick={handleReplaceAll}
+                title={
+                  replaceableCount === 0 && replaceHint
+                    ? `Nothing to replace: ${replaceHint}`
+                    : undefined
+                }
               >
                 Replace all ({replaceableCount})
               </Button>

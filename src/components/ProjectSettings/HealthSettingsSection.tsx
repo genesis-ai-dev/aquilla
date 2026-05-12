@@ -118,9 +118,6 @@ export function HealthSettingsSection({ settings, rulePenalties, onChange, onRul
             min={0} max={100}
             onChange={(v) => updateRulePenalty("minor", v)} />
         </div>
-        <p className="-mt-1 text-xs text-muted-foreground">
-          Major/Minor are also editable in Rules → Penalty Configuration; the two surfaces share one value.
-        </p>
 
         <div>
           <Button

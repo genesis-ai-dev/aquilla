@@ -26,7 +26,15 @@ jobs:
 
       - run: npm test
 
+      # Frontend points at prod workers when building from main; staging
+      # workers everywhere else (dev branch, PR previews — see PR #44 for
+      # the trigger expansion). Production cors-proxy URL is still
+      # ryderwishart's account — to be migrated in a follow-up alongside
+      # the signaling consolidation.
       - run: npm run build
+        env:
+          VITE_SYNC_WORKER_HOST: ${{ github.ref == 'refs/heads/main' && 'codex-sync-worker.blue-darkness-7674.workers.dev' || 'codex-sync-worker-staging.blue-darkness-7674.workers.dev' }}
+          VITE_GIT_CORS_PROXY: ${{ github.ref == 'refs/heads/main' && 'https://codex-git-proxy.ryderwishart.workers.dev' || 'https://codex-git-proxy-staging.blue-darkness-7674.workers.dev' }}
 
       - name: Compute deploy branch alias
         id: branch

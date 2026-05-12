@@ -1,8 +1,15 @@
 name: Deploy Workers
 
+# Branch → environment mapping:
+#   push to main → wrangler deploy           → prod workers (codex-sync-worker, codex-git-proxy)
+#   push to dev  → wrangler deploy --env=staging → staging workers (-staging suffix)
+#
+# Each worker only runs if its directory changed in the push (path filter) or
+# if invoked explicitly via workflow_dispatch.
+
 on:
   push:
-    branches: [main]
+    branches: [main, dev]
     paths:
       - 'sync-worker/**'
       - 'cors-proxy/**'
@@ -35,6 +42,7 @@ jobs:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: 6a80496d1e59948a9cbaa3c643ba81d7
           workingDirectory: sync-worker
+          command: deploy ${{ github.ref == 'refs/heads/main' && ' ' || '--env=staging' }}
 
   cors-proxy:
     if: >
@@ -57,3 +65,4 @@ jobs:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: 6a80496d1e59948a9cbaa3c643ba81d7
           workingDirectory: cors-proxy
+          command: deploy ${{ github.ref == 'refs/heads/main' && ' ' || '--env=staging' }}

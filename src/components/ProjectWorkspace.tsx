@@ -1,5 +1,4 @@
 import { useState, useMemo, useRef, useEffect, useCallback } from "react"
-import * as Y from "yjs"
 import { useParams, useNavigate, useSearchParams } from "react-router-dom"
 import { useProject } from "@/hooks/useProject"
 import { useFileDoc } from "@/hooks/useFileDoc"
@@ -39,15 +38,11 @@ import { ResizableVideoPanel } from "./ResizableVideoPanel"
 import { VideoAttachmentDialog } from "./VideoAttachmentDialog"
 import { useVideoAttachment } from "@/hooks/useVideoAttachment"
 import { parseTimestampRange, extractCuesFromCells } from "@/lib/video/vtt-generator"
-import { useSync } from "@/hooks/useSync"
-import { useFileSync } from "@/hooks/useFileSync"
+import { useFileSync, peerColor as peerColorLocal } from "@/hooks/useFileSync"
 import { useProjectTombstoneObserver } from "@/hooks/useProjectTombstoneObserver"
 import { useFileMeta } from "@/hooks/useFileMeta"
 import { useCellLabelsPreference } from "@/hooks/useCellLabelsPreference"
-import { peerColor as peerColorLocal } from "@/lib/sync/signaling-provider"
 import { displayNameFor } from "@/lib/sync/anonymous-name"
-import { startBootstrapHost } from "@/lib/sync/bootstrap"
-import { listShares } from "@/lib/sync/share-tokens"
 import { useProjectPermissions } from "@/hooks/useProjectPermissions"
 import { useSyncProject } from "@/hooks/useSyncProject"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
@@ -143,8 +138,6 @@ export function ProjectWorkspace() {
   const [parallelMode, setParallelMode] = useState<ParallelPanelMode>("search")
   const [parallelScope, setParallelScope] = useState<ParallelPanelScope>("project")
   const [shareOpen, setShareOpen] = useState(false)
-  const [activeShareToken, setActiveShareToken] = useState<string | null>(null)
-  const [shareRefreshKey, setShareRefreshKey] = useState(0)
   const [aiSetupOpen, setAiSetupOpen] = useState(false)
   const [recordingCellId, setRecordingCellId] = useState<string | null>(null)
   const editorRef = useRef<EditorTableHandle>(null)
@@ -449,37 +442,10 @@ export function ProjectWorkspace() {
     }
   }, [project, routeFileId, projectId, navigate])
 
-  useEffect(() => {
-    if (!project) {
-      setActiveShareToken(null)
-      return
-    }
-    listShares(project.id).then((shares) => {
-      setActiveShareToken(shares[0]?.token || null)
-    })
-  }, [project?.id, shareRefreshKey])
-
-  useEffect(() => {
-    if (!project || !activeShareToken) return
-    let stopFn: (() => void) | null = null
-    let cancelled = false
-    ;(async () => {
-      const shares = await listShares(project.id)
-      const activeShare = shares.find((s) => s.token === activeShareToken)
-      if (!activeShare || cancelled) return
-      const host = startBootstrapHost(activeShare, project)
-      stopFn = host.stop
-      if (cancelled) host.stop()
-    })()
-    return () => {
-      cancelled = true
-      if (stopFn) stopFn()
-    }
-  }, [project, activeShareToken])
-
   // Always-on file sync via the codex sync-worker (y-partyserver DO + R2).
-  // Unlike the previous share-token-gated path, this keeps every open file
-  // in lockstep across devices for the same user too, not just collaborators.
+  // This keeps every open file in lockstep across devices for the same user,
+  // not just collaborators — and is also the share-link path now that
+  // joiners are added to project_members on /join/:token redemption.
   const { peers: fileLevelPeers, provider: syncProvider, status: fileSyncStatus } = useFileSync({
     doc,
     projectId: project?.id ?? null,
@@ -516,28 +482,13 @@ export function ProjectWorkspace() {
     [activeFileId, docLoading, doc, cells.length, fileSyncStatus]
   )
 
-  // Project-wide presence room: everyone in the project joins regardless of
-  // which file they're viewing, so the toolbar can show peers who are online
-  // even when they're on different files.
-  const presenceDoc = useMemo(() => (activeShareToken ? new Y.Doc() : null), [activeShareToken])
-  const presenceRoom = activeShareToken ? `codex:share:${activeShareToken}:presence` : null
-  const { peers: presencePeers } = useSync({
-    doc: presenceDoc,
-    roomName: presenceRoom,
-    username: currentUsername,
-    currentFileId: activeFileId || undefined,
-    enabled: Boolean(presenceRoom),
-  })
-
-  // Merge file-level peers (who are in the same file as us) with project-wide
-  // presence peers, deduping by peerId. File-level entries take precedence for
-  // richer awareness like cursor state.
-  const peers = useMemo(() => {
-    const byId = new Map<string, (typeof presencePeers)[number]>()
-    for (const p of presencePeers) byId.set(p.peerId, p)
-    for (const p of fileLevelPeers) byId.set(p.peerId, p)
-    return Array.from(byId.values())
-  }, [fileLevelPeers, presencePeers])
+  // Presence visible in the status bar is the file-level set the sync-worker
+  // already broadcasts via awareness. We previously union'd this with a
+  // separate project-wide presence room (over the legacy signaling relay) so
+  // peers on other files showed up too, but the relay is gone and the
+  // sync-worker doesn't fan out cross-file awareness yet — file-level only
+  // for now.
+  const peers = fileLevelPeers
 
   const collabUser = useMemo(() => {
     if (!syncProvider) return undefined
@@ -1158,8 +1109,7 @@ export function ProjectWorkspace() {
       <SharePanel
         open={shareOpen} onOpenChange={setShareOpen}
         projectId={projectId!}
-        username={project.username || "anonymous"}
-        onSharesChanged={() => setShareRefreshKey((k) => k + 1)}
+        onSharesChanged={refreshChecklistShares}
       />
       <VideoAttachmentDialog
         open={videoDialogOpen} onOpenChange={setVideoDialogOpen}

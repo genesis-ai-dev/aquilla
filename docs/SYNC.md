@@ -28,14 +28,18 @@ How codex-web-app's Yjs-based sync works, what lives where, and how to run it.
 Three services, two D1 databases, one R2 bucket. Everything lives in the
 same Cloudflare account so cross-service calls stay on-network.
 
-## The four services
+## The three services
 
 | service                | where                                  | role                                                      |
 |------------------------|----------------------------------------|-----------------------------------------------------------|
 | **codex-web-app**      | this repo (`src/`)                     | React app. Holds Y.Docs + IndexedDB. Fetches sync tokens. |
 | **codex-sync-worker**  | this repo (`sync-worker/`)             | Cloudflare Worker hosting one Durable Object per file.    |
 | **frontier-server**    | `~/frontierrnd/frontier-server/cloudflare/` | Identity + project + sync-token minting.             |
-| **signaling** (legacy) | this repo (`signaling/`)               | Old y-websocket relay. Still used by `bootstrap.ts` share-link flow pending redesign. |
+
+Share links go through frontier-server's `POST /api/v2/projects/:id/invites`
+(create) and `POST /api/v2/projects/accept-invite` (redeem). Redemption adds
+the caller to `project_members`, after which the normal sync-token + sync-
+worker path unlocks for them. There is no separate signaling relay.
 
 ## The flow (single-user, single-file)
 
@@ -172,8 +176,6 @@ Env knobs for the client:
 
 ## Open follow-ups
 
-- Share-link `bootstrap.ts` still uses the legacy signaling relay. Works
-  but doesn't benefit from the new stack.
 - Orphan R2 blobs from failed admin-cleanup calls. A periodic sweeper is
   the right home; currently relies on the inline call succeeding.
 - Playwright end-to-end test that spins the full stack and drives the UI.

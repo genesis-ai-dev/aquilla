@@ -19,7 +19,6 @@ import type { CellData } from "@/hooks/useCells"
 import { useWorkspaceSearch } from "@/hooks/useWorkspaceSearch"
 import { useBacktranslation } from "@/hooks/useBacktranslation"
 import { useComments } from "@/hooks/useComments"
-import { SearchDialog } from "./SearchDialog"
 import { ParallelPassagesPanel, type ParallelPanelMode, type ParallelPanelScope } from "./ParallelPassagesPanel"
 import type { EditorTableHandle } from "./EditorTable"
 import type { WorkspaceSearchResult } from "@/lib/search/workspace-index"
@@ -60,7 +59,7 @@ import {
 } from "@/lib/sync/cqrs-bridge"
 import { useCellsAuditStatsWithOverlay } from "@/hooks/useCellsAuditStatsWithOverlay"
 import { useCorpusBackfill } from "@/hooks/useCorpusBackfill"
-import { Film, Scale, MessagesSquare, Camera, Share2, Settings as SettingsIcon, Lock, ClipboardList, Brain, Trash2, Undo2 } from "lucide-react"
+import { Film, Scale, MessagesSquare, Camera, Share2, Settings as SettingsIcon, Lock, ClipboardList, Brain, Trash2, Undo2, Search as SearchIcon } from "lucide-react"
 import { restoreProject } from "@/lib/store/project-index"
 import { AppShell } from "./AppShell"
 import { WorkspaceHeader } from "./WorkspaceHeader"
@@ -73,7 +72,6 @@ import { PrimaryActionButton } from "./PrimaryActionButton"
 import { AccountSwitcher } from "./AccountSwitcher"
 import { ExpandableFileList } from "./ExpandableFileList"
 import { SidebarProjectSection } from "./SidebarProjectSection"
-import { SidebarCommandPaletteHint } from "./SidebarCommandPaletteHint"
 import { SuggestionBanner } from "./SuggestionBanner"
 import { ConfirmActionDialog } from "./ConfirmActionDialog"
 import { PeerPresence } from "./PeerPresence"
@@ -133,7 +131,6 @@ export function ProjectWorkspace() {
   }, [searchParams])
   const [commentsCellId, setCommentsCellId] = useState<string | null>(null)
   const [historyCellId, setHistoryCellId] = useState<string | null>(null)
-  const [searchOpen, setSearchOpen] = useState(false)
   const [parallelOpen, setParallelOpen] = useState(false)
   const [parallelMode, setParallelMode] = useState<ParallelPanelMode>("search")
   const [parallelScope, setParallelScope] = useState<ParallelPanelScope>("project")
@@ -290,7 +287,20 @@ export function ProjectWorkspace() {
     videoPlayerRef.current?.play().catch(() => { /* autoplay blocked */ })
   }, [cells])
 
-  const { buildIndex, rebuild: rebuildSearchIndex, search: runSearch, results: searchResults, loading: searchLoading, ready: searchReady } = useWorkspaceSearch(project?.files || [])
+  const {
+    buildIndex,
+    rebuild: rebuildSearchIndex,
+    search: runSearch,
+    clear: clearSearchResults,
+    results: searchResults,
+    loading: searchLoading,
+    ready: searchReady,
+  } = useWorkspaceSearch(project?.files || [])
+
+  // Captures the latest cells in a ref so post-navigation flash can read them
+  // without racing React re-renders.
+  const cellsRef = useRef(cells)
+  useEffect(() => { cellsRef.current = cells }, [cells])
 
   const { rules, penalties } = useRules(project ?? null, refresh)
   const { addThread, addMessage, resolveThread, reopenThread } = useComments(doc, currentUsername)
@@ -401,27 +411,28 @@ export function ProjectWorkspace() {
     ? Array.from(infractions.values()).flat().filter((i) => i.ruleId === drawerRuleId)
     : []
 
+  // Parallel-passages shortcuts (mirrors codex-editor):
+  //   Cmd/Ctrl+F        → search in current file
+  //   Cmd/Ctrl+K        → search across all files (alias)
+  //   Cmd/Ctrl+Shift+F  → search across all files
+  //   Cmd/Ctrl+Shift+R  → search + replace across all files
   useEffect(() => {
     function handler(e: KeyboardEvent) {
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
-        e.preventDefault()
-        setSearchOpen(true)
-      }
+      const key = e.key.toLowerCase()
       if ((e.metaKey || e.ctrlKey) && e.key === ".") {
         if (!activeFileId || !hasUnfinished) return
         e.preventDefault()
         handleJumpNextUnfinished()
+        return
       }
-      // Parallel passages shortcuts mirror codex-editor:
-      //   Cmd/Ctrl+F        → search in current file
-      //   Cmd/Ctrl+Shift+F  → search across all files
-      //   Cmd/Ctrl+Shift+R  → search + replace across all files
-      const key = e.key.toLowerCase()
-      if ((e.metaKey || e.ctrlKey) && !e.altKey && key === "f") {
+      if ((e.metaKey || e.ctrlKey) && !e.altKey && (key === "f" || key === "k")) {
         e.preventDefault()
         setParallelMode("search")
-        setParallelScope(e.shiftKey ? "project" : activeFileId ? "file" : "project")
+        setParallelScope(
+          key === "k" ? "project" : e.shiftKey ? "project" : activeFileId ? "file" : "project",
+        )
         setParallelOpen(true)
+        return
       }
       if ((e.metaKey || e.ctrlKey) && e.shiftKey && key === "r") {
         e.preventDefault()
@@ -499,16 +510,17 @@ export function ProjectWorkspace() {
     }
   }, [syncProvider, currentUsername])
 
-  async function handleSearchSelect(result: WorkspaceSearchResult) {
+  async function handleSearchSelect(result: WorkspaceSearchResult, query: string) {
+    const flash = () => {
+      const idx = cellsRef.current.findIndex((c) => c.id === result.cellId)
+      if (idx >= 0) editorRef.current?.scrollToCellIndex(idx)
+      editorRef.current?.flashCell(result.cellId, query)
+    }
     if (result.fileId !== activeFileId) {
       workspaceTabs.openFile(result.fileId)
-      setTimeout(() => {
-        const idx = cells.findIndex((c) => c.id === result.cellId)
-        if (idx >= 0) editorRef.current?.scrollToCellIndex(idx)
-      }, 400)
+      setTimeout(flash, 400)
     } else {
-      const idx = cells.findIndex((c) => c.id === result.cellId)
-      if (idx >= 0) editorRef.current?.scrollToCellIndex(idx)
+      flash()
     }
   }
 
@@ -794,7 +806,6 @@ export function ProjectWorkspace() {
               onDelete={(fileId) => setPendingDeleteId(fileId)}
             />
             <SidebarProjectSection items={projectNavItems} />
-            <SidebarCommandPaletteHint onClick={() => setSearchOpen(true)} />
           </>
         }
         header={
@@ -842,6 +853,18 @@ export function ProjectWorkspace() {
                 </Tooltip>
               </TooltipProvider>
             )}
+            <button
+              className="flex items-center gap-1.5 rounded p-1.5 text-sm hover:bg-accent"
+              onClick={() => {
+                setParallelMode("search")
+                setParallelScope(activeFileId ? "file" : "project")
+                setParallelOpen(true)
+              }}
+              title="Search & replace (⌘F)"
+            >
+              <SearchIcon className="h-4 w-4" />
+              <span className="hidden text-xs sm:inline">Search</span>
+            </button>
             <NextUnfinishedButton
               onClick={handleJumpNextUnfinished}
               disabled={!activeFileId || !hasUnfinished}
@@ -1081,11 +1104,6 @@ export function ProjectWorkspace() {
       <ImportDialog open={importOpen} onOpenChange={setImportOpen}
         sourceLanguage={project.sourceLanguage} targetLanguage={project.targetLanguage}
         onImported={handleImported} />
-      <SearchDialog
-        open={searchOpen} onOpenChange={setSearchOpen}
-        onReady={buildIndex} loading={searchLoading} ready={searchReady}
-        results={searchResults} onSearch={runSearch} onSelect={handleSearchSelect}
-      />
       <ParallelPassagesPanel
         open={parallelOpen}
         onOpenChange={setParallelOpen}
@@ -1101,6 +1119,7 @@ export function ProjectWorkspace() {
         results={searchResults}
         onReady={buildIndex}
         onSearch={runSearch}
+        onClearResults={clearSearchResults}
         onSelect={handleSearchSelect}
         username={currentUsername}
         isReadOnly={isReadOnly}

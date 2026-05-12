@@ -235,6 +235,8 @@ const SELECTION_EDGE_SCROLL_STEP_PX = 22
 export interface EditorTableHandle {
   scrollToCellIndex: (index: number) => void
   getCurrentIndex?: () => number
+  /** Briefly outline a cell after a "Go to cell" so the user sees where the search landed. */
+  flashCell: (cellId: string, searchTerm: string) => void
 }
 
 interface EditorTableProps {
@@ -331,6 +333,18 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
       }
     },
     getCurrentIndex: () => 0,
+    flashCell(cellId, _searchTerm) {
+      // Defer to next frame: the virtualizer may still be scrolling, so the
+      // DOM node we want might not exist yet.
+      requestAnimationFrame(() => {
+        const root = parentRef.current
+        if (!root) return
+        const el = root.querySelector<HTMLElement>(`[data-cell-id="${CSS.escape(cellId)}"]`)
+        if (!el) return
+        el.classList.add("codex-search-flash")
+        window.setTimeout(() => el.classList.remove("codex-search-flash"), 1800)
+      })
+    },
   }), [virtualizer, cells.length])
 
   const clampCellIndex = useCallback((index: number) => {

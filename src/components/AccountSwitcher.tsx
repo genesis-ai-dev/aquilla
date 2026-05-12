@@ -148,7 +148,7 @@ export function AccountSwitcher({ variant = "sidebar" }: { variant?: "sidebar" |
       {open && (
         <div
           className={cn(
-            "absolute top-full mt-1 z-50 w-60 rounded-md border bg-popover p-1 shadow-md",
+            "absolute top-full mt-1 z-40 w-60 rounded-md border bg-popover p-1 shadow-md",
             isHeader ? "right-0" : "left-0",
           )}
         >

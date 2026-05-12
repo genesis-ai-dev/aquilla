@@ -63,7 +63,7 @@ export function PrimaryActionButton({ ctx, run }: Props) {
         <ChevronDown className="h-4 w-4" />
       </Button>
       {open && (
-        <div className="absolute right-0 top-full mt-1 z-50 w-56 rounded-md border bg-popover p-1 shadow-md">
+        <div className="absolute right-0 top-full mt-1 z-40 w-56 rounded-md border bg-popover p-1 shadow-md">
           {primary.map((a) => (
             <MenuItem
               key={a.id} action={a}

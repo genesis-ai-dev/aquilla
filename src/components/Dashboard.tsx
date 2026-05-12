@@ -285,7 +285,7 @@ export function Dashboard() {
       />
 
       {errorToast && (
-        <div className="fixed bottom-4 right-4 z-[70] rounded border bg-destructive px-3 py-2 text-sm text-destructive-foreground shadow-md">
+        <div className="fixed bottom-4 right-4 z-60 rounded border bg-destructive px-3 py-2 text-sm text-destructive-foreground shadow-md">
           {errorToast}
         </div>
       )}

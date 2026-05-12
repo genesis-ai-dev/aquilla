@@ -1127,7 +1127,7 @@ export function ProjectWorkspace() {
         </DialogContent>
       </Dialog>
       {undo && (
-        <div className="fixed bottom-4 right-4 z-[70] flex items-center gap-2 rounded border bg-background px-3 py-2 text-sm shadow-md">
+        <div className="fixed bottom-4 right-4 z-60 flex items-center gap-2 rounded border bg-background px-3 py-2 text-sm shadow-md">
           <span>Applied renames.</span>
           <Button size="sm" variant="outline" onClick={async () => {
             if (!undo) return

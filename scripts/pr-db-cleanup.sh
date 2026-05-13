@@ -22,7 +22,9 @@ echo "[pr-db-cleanup] deleting worker ${WORKER_NAME}"
 npx wrangler delete --name "${WORKER_NAME}" 2>&1 | tail -5 || true
 
 # 2. Delete R2 objects under pr-<N>/. R2 doesn't have a recursive delete;
-#    list + chunked delete.
+#    list + chunked delete. Defensive: wrangler r2 object list with --json
+#    can emit non-JSON output on error (auth failures, ratelimit, etc.) —
+#    we treat anything unparseable as "nothing to delete here" and break.
 echo "[pr-db-cleanup] purging R2 keys under ${R2_BUCKET}/${R2_PREFIX}"
 cursor=""
 deleted=0
@@ -30,16 +32,24 @@ while :; do
   args=(--prefix "${R2_PREFIX}")
   [ -n "${cursor}" ] && args+=(--cursor "${cursor}")
   page="$(npx wrangler r2 object list "${R2_BUCKET}" --json "${args[@]}" 2>/dev/null || echo '{"objects":[]}')"
-  keys="$(echo "${page}" | python3 -c "
+  parsed="$(echo "${page}" | python3 -c "
 import json, sys
-d = json.load(sys.stdin)
-for o in d.get('objects', []): print(o['key'])
+try:
+    d = json.load(sys.stdin)
+except Exception:
+    print('__INVALID__')
+    sys.exit(0)
+keys = [o.get('key', '') for o in d.get('objects', [])]
+cursor = d.get('cursor', '') if d.get('truncated') else ''
+print('__CURSOR__:' + cursor)
+for k in keys: print(k)
 ")"
-  cursor="$(echo "${page}" | python3 -c "
-import json, sys
-d = json.load(sys.stdin)
-print(d.get('cursor', '') if d.get('truncated') else '')
-")"
+  if echo "${parsed}" | head -1 | grep -q '__INVALID__'; then
+    echo "[pr-db-cleanup]   skip R2 (list returned non-JSON — likely no bucket access or already empty)"
+    break
+  fi
+  cursor="$(echo "${parsed}" | head -1 | sed 's|^__CURSOR__:||')"
+  keys="$(echo "${parsed}" | tail -n +2)"
   if [ -z "${keys}" ]; then break; fi
   while IFS= read -r key; do
     [ -z "${key}" ] && continue

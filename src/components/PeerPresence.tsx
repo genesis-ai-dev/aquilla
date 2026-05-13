@@ -49,7 +49,7 @@ export function PeerPresence({ peers }: PeerPresenceProps) {
       </button>
 
       {showPopover && (
-        <div className="absolute right-0 top-8 z-50 w-56 rounded border bg-background p-2 shadow-md">
+        <div className="absolute right-0 bottom-full mb-2 z-40 w-56 rounded border bg-background p-2 shadow-md">
           <div className="mb-1.5 flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
             <Users className="h-3 w-3" />
             Online ({peers.length})

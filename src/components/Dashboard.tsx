@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from "react"
-import { useNavigate, Navigate, Link } from "react-router-dom"
-import { ChevronRight, Cloud, Settings as SettingsIcon, Trash2 } from "lucide-react"
+import { useNavigate, Navigate } from "react-router-dom"
+import {
+  ChevronRight, Cloud, Settings as SettingsIcon, Trash2, Users,
+} from "lucide-react"
 import type { ProjectRecord } from "@/lib/parsers/types"
 import {
   listProjects,
@@ -14,9 +16,9 @@ import { ConfirmActionDialog } from "./ConfirmActionDialog"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Card, CardContent, CardHeader } from "@/components/ui/card"
 import { AccountSwitcher } from "@/components/AccountSwitcher"
+import { OverflowMenu } from "@/components/OverflowMenu"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { useBrand } from "@/branding/use-brand"
-import { ThemeToggle } from "@/branding/ThemeMode"
 import {
   fetchAccessibleProjects,
   minimalProjectRecord,
@@ -172,23 +174,14 @@ export function Dashboard() {
             <h1 className="hidden truncate text-xl font-semibold sm:inline">{brand.app.name}</h1>
           </div>
           <div className="flex shrink-0 items-center gap-2">
-            <Link
-              to="/members"
-              className="text-sm underline-offset-2 hover:underline"
-            >
-              Members
-            </Link>
-            <Link
-              to="/settings"
-              aria-label="Settings"
-              title="Settings"
-              className="inline-flex h-9 w-9 items-center justify-center rounded-md text-sm hover:bg-accent"
-            >
-              <SettingsIcon className="h-4 w-4" />
-            </Link>
-            <ThemeToggle />
-            <AccountSwitcher variant="header" />
+            <OverflowMenu
+              items={[
+                { id: "members", label: "Members", icon: Users, onClick: () => navigate("/members") },
+                { id: "settings", label: "Settings", icon: SettingsIcon, onClick: () => navigate("/settings") },
+              ]}
+            />
             <ProjectCreateDialog onCreated={upsert} />
+            <AccountSwitcher variant="header" />
           </div>
         </div>
       </header>
@@ -285,7 +278,7 @@ export function Dashboard() {
       />
 
       {errorToast && (
-        <div className="fixed bottom-4 right-4 z-[70] rounded border bg-destructive px-3 py-2 text-sm text-destructive-foreground shadow-md">
+        <div className="fixed bottom-4 right-4 z-60 rounded border bg-destructive px-3 py-2 text-sm text-destructive-foreground shadow-md">
           {errorToast}
         </div>
       )}

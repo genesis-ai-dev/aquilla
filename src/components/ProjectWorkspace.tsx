@@ -56,7 +56,7 @@ import {
   buildFileScopedTokenFetcher,
 } from "@/lib/sync/cqrs-bridge"
 import { useCellsAuditStatsWithOverlay } from "@/hooks/useCellsAuditStatsWithOverlay"
-import { Film, Scale, MessagesSquare, Camera, Share2, Settings as SettingsIcon, Lock, ClipboardList, Brain, Trash2, Undo2, Search as SearchIcon } from "lucide-react"
+import { Film, Scale, MessagesSquare, Camera, Share2, Settings as SettingsIcon, Lock, ClipboardList, Brain, Trash2, Undo2, Search as SearchIcon, Sparkles } from "lucide-react"
 import { restoreProject } from "@/lib/store/project-index"
 import { AppShell } from "./AppShell"
 import { WorkspaceHeader } from "./WorkspaceHeader"
@@ -620,7 +620,15 @@ export function ProjectWorkspace() {
   const handleApplySuggestions = useCallback(async (chosen: RenameSuggestion[]) => {
     if (!project) return
     const before = await getProject(project.id)
-    await patchProject(project.id, (p) => applySuggestions(p, chosen))
+    const dismissedAt = new Date().toISOString()
+    // Apply the user's choices and dismiss the banner in the same write:
+    // once they've engaged, the banner is no longer useful and shouldn't
+    // re-appear for any remaining (unchosen) suggestions until they
+    // explicitly re-run detection from the overflow menu.
+    await patchProject(project.id, (p) => ({
+      ...applySuggestions(p, chosen),
+      suggestionsDismissedAt: dismissedAt,
+    }))
     refresh()
     if (before) setUndo({ project: before })
     setTimeout(() => setUndo((u) => (u?.project === before ? null : u)), 10000)
@@ -642,6 +650,16 @@ export function ProjectWorkspace() {
   const handleDismissBanner = useCallback(async () => {
     if (!project) return
     await patchProject(project.id, (p) => ({ ...p, suggestionsDismissedAt: new Date().toISOString() }))
+    refresh()
+  }, [project, refresh])
+
+  const handleReinviteSuggestions = useCallback(async () => {
+    if (!project) return
+    await patchProject(project.id, (p) => {
+      const next = { ...p }
+      delete next.suggestionsDismissedAt
+      return next
+    })
     refresh()
   }, [project, refresh])
 
@@ -816,7 +834,20 @@ export function ProjectWorkspace() {
           </>
         }
         header={
-          <WorkspaceHeader project={project} onBack={() => navigate("/")}>
+          <WorkspaceHeader
+            project={project}
+            onBack={() => navigate("/")}
+            extraMenuItems={
+              suggestions.length > 0 && project.suggestionsDismissedAt
+                ? [{
+                    id: "redetect-suggestions",
+                    label: `Show ${suggestions.length} file name suggestion${suggestions.length === 1 ? "" : "s"}`,
+                    icon: Sparkles,
+                    onClick: handleReinviteSuggestions,
+                  }]
+                : []
+            }
+          >
             <ViewSettingsMenu
               fileOpen={Boolean(activeFileId)}
               lineNumbersEnabled={fileMeta.lineNumbersEnabled}
@@ -1159,7 +1190,7 @@ export function ProjectWorkspace() {
         />
       )}
       {undo && (
-        <div className="fixed bottom-4 right-4 z-[70] flex items-center gap-2 rounded border bg-background px-3 py-2 text-sm shadow-md">
+        <div className="fixed bottom-4 right-4 z-60 flex items-center gap-2 rounded border bg-background px-3 py-2 text-sm shadow-md">
           <span>Applied renames.</span>
           <Button size="sm" variant="outline" onClick={async () => {
             if (!undo) return

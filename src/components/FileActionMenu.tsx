@@ -31,7 +31,7 @@ export function FileActionMenu({
   return (
     <div
       ref={ref}
-      className="fixed z-[60] w-44 rounded-md border bg-popover p-1 shadow-md text-sm"
+      className="fixed z-40 w-44 rounded-md border bg-popover p-1 shadow-md text-sm"
       style={{ left: x, top: y }}
     >
       <button

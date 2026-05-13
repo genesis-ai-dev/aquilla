@@ -163,7 +163,7 @@ export function UsernameTypeahead({
 
       {/* Username suggestions dropdown */}
       {showSuggestions && (
-        <div className="absolute left-0 right-0 top-full mt-0.5 z-30 max-h-56 overflow-y-auto rounded-md border bg-popover shadow-md">
+        <div className="absolute left-0 right-0 top-full mt-0.5 z-40 max-h-56 overflow-y-auto rounded-md border bg-popover shadow-md">
           {needsMorePrefix && (
             <p className="px-3 py-2 text-[11px] text-muted-foreground">
               Type at least 2 characters to search.

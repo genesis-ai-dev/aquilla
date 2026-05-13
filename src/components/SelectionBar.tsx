@@ -170,7 +170,7 @@ export function SelectionBar({ project, cells, doc, session, username, completeS
   return (
     <div
       className={cn(
-        "pointer-events-auto fixed left-1/2 z-40 flex -translate-x-1/2 items-center gap-2",
+        "pointer-events-auto fixed left-1/2 z-30 flex -translate-x-1/2 items-center gap-2",
         "bottom-4 rounded-full border bg-background/95 px-3 py-2 text-xs shadow-lg backdrop-blur",
         "supports-[backdrop-filter]:bg-background/80",
       )}

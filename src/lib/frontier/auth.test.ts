@@ -11,8 +11,6 @@ describe("login", () => {
       new Response(JSON.stringify({
         access_token: "jwt-1",
         token_type: "bearer",
-        gitlab_token: "glpat-1",
-        gitlab_url: "https://gitlab.example",
       }), { status: 200 })
     );
     const s = await login({ username: "alice", password: "pw" });

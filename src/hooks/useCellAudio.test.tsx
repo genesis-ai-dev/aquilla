@@ -1,34 +1,37 @@
+// Tests for the R2-backed audio hook. Verifies the happy-path fetch flow
+// against the sync-worker /audio endpoint, plus the error states the UI
+// renders (legacy LFS attachment, no session, server failure).
+
 import "fake-indexeddb/auto"
 import { describe, it, expect, beforeEach, vi, afterEach } from "vitest"
 import { renderHook, act } from "@testing-library/react"
-import { createOpfsFs } from "@/lib/git/opfs-fs"
-import { MemoryDirectoryHandle } from "@/lib/git/__test__/mem-fs-handles"
-import * as cache from "@/lib/lfs/cache"
 import type { CodexCell } from "@/lib/codex-editor/types"
 import type { ProjectRecord } from "@/lib/parsers/types"
 
-async function sha256Hex(bytes: Uint8Array): Promise<string> {
-  const buf = await crypto.subtle.digest("SHA-256", bytes as BufferSource)
-  return [...new Uint8Array(buf)].map(b => b.toString(16).padStart(2, "0")).join("")
-}
-
-const session = { gitlabToken: "tok", username: "u" }
+const session = { jwt: "user-jwt", username: "u" }
 
 vi.mock("@/hooks/useFrontierSession", () => ({
   useFrontierSession: () => ({ session }),
 }))
 
-const fakeRepoRoot = new MemoryDirectoryHandle("repo")
-vi.mock("@/lib/git/opfs-fs", async (importActual) => {
-  const actual = await importActual<typeof import("@/lib/git/opfs-fs")>()
+// Stub the sync-token fetch so the hook never tries to hit the auth-worker.
+// Returns a fixed token that we don't actually verify in tests; the audio
+// endpoint mock checks for its presence in the Authorization header.
+vi.mock("@/lib/sync/sync-token", async () => {
+  const actual = await vi.importActual<typeof import("@/lib/sync/sync-token")>("@/lib/sync/sync-token")
   return {
     ...actual,
-    openOpfsRepoDir: vi.fn(async () => fakeRepoRoot as unknown as FileSystemDirectoryHandle),
+    fetchSyncToken: vi.fn(async () => ({
+      token: "sync-token-stub",
+      expiresIn: 900,
+      role: { level: 400, name: "contributor", source: "creator" as const },
+    })),
   }
 })
 
 // Pull useCellAudio after mocks are declared.
 import { useCellAudio } from "./useCellAudio"
+import { buildFrontierAudioUrl } from "@/lib/audio/upload"
 
 let nextUrlId = 0
 const createdUrls: string[] = []
@@ -62,23 +65,13 @@ beforeEach(() => {
       pause() { this.onpause?.() }
     },
   })
-  cache.__setRootForTests(createOpfsFs(new MemoryDirectoryHandle("cacheroot") as unknown as FileSystemDirectoryHandle))
 })
 afterEach(() => { vi.restoreAllMocks() })
-
-async function seedPointerInRepo(urlRelative: string, oid: string, size: number): Promise<void> {
-  const repoFs = createOpfsFs(fakeRepoRoot as unknown as FileSystemDirectoryHandle)
-  const text = `version https://git-lfs.github.com/spec/v1\noid sha256:${oid}\nsize ${size}\n`
-  await repoFs.promises.writeFile(urlRelative, text)
-}
 
 function makeProject(): ProjectRecord {
   return {
     id: "p1", name: "P", sourceLanguage: "en", targetLanguage: "es",
     createdAt: "", files: [], members: [],
-    origin: { kind: "git", cloneUrl: "https://git.genesisrnd.com/g/r.git",
-              gitlabProjectId: 1, branch: "main", headSha: "abc",
-              importedAt: "" },
   } as unknown as ProjectRecord
 }
 
@@ -97,21 +90,13 @@ describe("useCellAudio", () => {
   const fetchMock = vi.fn()
   beforeEach(() => { vi.stubGlobal("fetch", fetchMock); fetchMock.mockReset() })
 
-  it("happy path: loads pointer, downloads, plays", async () => {
+  it("happy path: GETs from sync-worker /audio and plays", async () => {
     const bytes = new TextEncoder().encode("audio-bytes")
-    const oid = await sha256Hex(bytes)
-    const size = bytes.byteLength
-    await seedPointerInRepo("/.project/attachments/files/JUD/a.webm", oid, size)
-
-    fetchMock
-      .mockResolvedValueOnce(new Response(JSON.stringify({
-        objects: [{ oid, size, actions: { download: { href: "https://r2/o" } } }],
-      }), { status: 200 }))
-      .mockResolvedValueOnce(new Response(bytes.buffer as ArrayBuffer, { status: 200 }))
+    fetchMock.mockResolvedValueOnce(new Response(bytes.buffer as ArrayBuffer, { status: 200 }))
 
     const project = makeProject()
-    const cell = makeCell("a1", "/.project/attachments/files/JUD/a.webm")
-    const { result } = renderHook(() => useCellAudio(project, cell))
+    const cell = makeCell("a1", buildFrontierAudioUrl("a1", "webm"))
+    const { result } = renderHook(() => useCellAudio(project, cell, "file-1"))
 
     expect(result.current.state).toBe("idle")
 
@@ -119,71 +104,74 @@ describe("useCellAudio", () => {
 
     expect(result.current.state).toBe("ready")
     expect(result.current.error).toBeNull()
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    const [url, opts] = fetchMock.mock.calls[0]
+    expect(String(url)).toContain("/audio/p1/file-1/a1.webm")
+    expect((opts as RequestInit)?.headers).toMatchObject({
+      Authorization: "Bearer sync-token-stub",
+    })
     expect(createdUrls.length).toBe(1)
   })
 
-  it("surfaces pointer-missing when the file isn't in the repo", async () => {
+  it("surfaces pointer-invalid for legacy LFS attachment URLs", async () => {
     const project = makeProject()
-    const cell = makeCell("a2", "/.project/attachments/files/JUD/nope.webm")
-    const { result } = renderHook(() => useCellAudio(project, cell))
+    const cell = makeCell("a2", "/.project/attachments/files/JUD/legacy.webm")
+    const { result } = renderHook(() => useCellAudio(project, cell, "file-1"))
+
+    await act(async () => { await result.current.play() })
+    expect(result.current.state).toBe("error")
+    expect(result.current.error).toMatchObject({ kind: "pointer-invalid" })
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it("surfaces pointer-missing when the cell has no audio attachment", async () => {
+    const project = makeProject()
+    const cell = {
+      kind: 2, languageId: "html", value: "",
+      metadata: { id: "c", type: "text" },
+    } as unknown as CodexCell
+    const { result } = renderHook(() => useCellAudio(project, cell, "file-1"))
 
     await act(async () => { await result.current.play() })
     expect(result.current.state).toBe("error")
     expect(result.current.error).toMatchObject({ kind: "pointer-missing" })
   })
 
-  it("surfaces pointer-invalid when the file isn't a pointer", async () => {
-    const repoFs = createOpfsFs(fakeRepoRoot as unknown as FileSystemDirectoryHandle)
-    await repoFs.promises.writeFile("/.project/attachments/files/JUD/weird.webm", "not a pointer")
+  it("surfaces download-failed when sync-worker returns 5xx", async () => {
+    fetchMock.mockResolvedValueOnce(new Response("boom", { status: 500 }))
 
     const project = makeProject()
-    const cell = makeCell("a3", "/.project/attachments/files/JUD/weird.webm")
-    const { result } = renderHook(() => useCellAudio(project, cell))
+    const cell = makeCell("a3", buildFrontierAudioUrl("a3", "webm"))
+    const { result } = renderHook(() => useCellAudio(project, cell, "file-1"))
 
     await act(async () => { await result.current.play() })
     expect(result.current.state).toBe("error")
-    expect(result.current.error).toMatchObject({ kind: "pointer-invalid" })
+    expect(result.current.error?.kind).toBe("download-failed")
   })
 
-  it("uses the cache on replay (no fetch second time)", async () => {
+  it("does not re-fetch bytes on a second play after the audio element exists", async () => {
     const bytes = new TextEncoder().encode("cached-audio")
-    const oid = await sha256Hex(bytes)
-    const size = bytes.byteLength
-    await seedPointerInRepo("/.project/attachments/files/JUD/c.webm", oid, size)
-
-    fetchMock
-      .mockResolvedValueOnce(new Response(JSON.stringify({
-        objects: [{ oid, size, actions: { download: { href: "https://r2/o" } } }],
-      }), { status: 200 }))
-      .mockResolvedValueOnce(new Response(bytes.buffer as ArrayBuffer, { status: 200 }))
+    fetchMock.mockResolvedValueOnce(new Response(bytes.buffer as ArrayBuffer, { status: 200 }))
 
     const project = makeProject()
-    const cell = makeCell("a4", "/.project/attachments/files/JUD/c.webm")
-    const { result } = renderHook(() => useCellAudio(project, cell))
+    const cell = makeCell("a4", buildFrontierAudioUrl("a4", "webm"))
+    const { result } = renderHook(() => useCellAudio(project, cell, "file-1"))
 
     await act(async () => { await result.current.play() })
-    expect(fetchMock.mock.calls.length).toBe(2)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
 
-    const { result: result2 } = renderHook(() => useCellAudio(project, cell))
-    await act(async () => { await result2.current.play() })
-    expect(fetchMock.mock.calls.length).toBe(2)
+    await act(async () => { await result.current.play() })
+    // Second play reuses the existing HTMLAudioElement; no further fetch.
+    expect(fetchMock).toHaveBeenCalledTimes(1)
   })
 
   it("revokes the object URL on unmount", async () => {
     const bytes = new TextEncoder().encode("revoke-test")
-    const oid = await sha256Hex(bytes)
-    const size = bytes.byteLength
-    await seedPointerInRepo("/.project/attachments/files/JUD/r.webm", oid, size)
-
-    fetchMock
-      .mockResolvedValueOnce(new Response(JSON.stringify({
-        objects: [{ oid, size, actions: { download: { href: "https://r2/o" } } }],
-      }), { status: 200 }))
-      .mockResolvedValueOnce(new Response(bytes.buffer as ArrayBuffer, { status: 200 }))
+    fetchMock.mockResolvedValueOnce(new Response(bytes.buffer as ArrayBuffer, { status: 200 }))
 
     const project = makeProject()
-    const cell = makeCell("a5", "/.project/attachments/files/JUD/r.webm")
-    const { result, unmount } = renderHook(() => useCellAudio(project, cell))
+    const cell = makeCell("a5", buildFrontierAudioUrl("a5", "webm"))
+    const { result, unmount } = renderHook(() => useCellAudio(project, cell, "file-1"))
     await act(async () => { await result.current.play() })
     expect(createdUrls.length).toBe(1)
 

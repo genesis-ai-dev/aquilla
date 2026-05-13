@@ -14,7 +14,6 @@ import { ConfirmActionDialog } from "./ConfirmActionDialog"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Card, CardContent, CardHeader } from "@/components/ui/card"
 import { AccountSwitcher } from "@/components/AccountSwitcher"
-import { RemoteProjectsSection } from "@/components/git-import/RemoteProjectsSection"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { useBrand } from "@/branding/use-brand"
 import { ThemeToggle } from "@/branding/ThemeMode"
@@ -238,14 +237,6 @@ export function Dashboard() {
               ))}
             </div>
           </section>
-        )}
-
-        {session && (
-          <RemoteProjectsSection
-            session={session}
-            localProjects={projects}
-            onImported={upsert}
-          />
         )}
 
         {trashed.length > 0 && (

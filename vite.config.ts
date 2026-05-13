@@ -116,7 +116,6 @@ export default defineConfig(({ mode }) => ({
       // own directory.
       "auth-worker/**",
       "chat-worker/**",
-      "cors-proxy/**",
       "signaling/**",
       "sync-worker/**",
     ],

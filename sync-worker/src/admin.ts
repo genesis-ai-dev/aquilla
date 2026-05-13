@@ -93,9 +93,9 @@ export async function handleAdminRequest(
   const fileId = decodeURIComponent(match[2])
 
   // Enumerate every object under projects/{pid}/files/{fid}/ so snapshot,
-  // tails, and checkpoints all disappear in one call. list() paginates at
-  // 1000 keys by default — loop with cursor until drained.
-  const prefix = `projects/${projectId}/files/${fileId}/`
+  // tails, checkpoints, and per-cell audio all disappear in one call.
+  // list() paginates at 1000 keys by default — loop with cursor until drained.
+  const prefix = `${r2KeyPrefix(env)}projects/${projectId}/files/${fileId}/`
   const allKeys: string[] = []
   let cursor: string | undefined = undefined
   do {

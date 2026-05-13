@@ -58,7 +58,6 @@ export async function translateMissing(args: RunArgs): Promise<void> {
 export async function synthEach(args: RunArgs): Promise<void> {
   const { cells, doc, project, session, username, voiceId } = args
   if (!session?.jwt) throw new Error("Sign in to upload audio")
-  if (project.origin?.kind === "git") throw new Error("AI voice not supported on git projects yet")
 
   for (const cell of cells) {
     const text = readTranslated(doc, cell.id) || cell.translated.trim()
@@ -76,6 +75,7 @@ export async function synthEach(args: RunArgs): Promise<void> {
         cellContext: cell.context,
         cellLabel: cell.cellLabel,
         projectId: project.id,
+        fileId: cell.fileId,
         sourceLanguage: project.sourceLanguage,
         languageTag: project.targetLanguage,
         session,
@@ -140,7 +140,6 @@ export async function translateThenSynth(args: RunArgs): Promise<void> {
 export async function synthAsOneTake(args: RunArgs): Promise<{ blob: Blob } | null> {
   const { cells, doc, project, session, username, voiceId } = args
   if (!session?.jwt) throw new Error("Sign in to upload audio")
-  if (project.origin?.kind === "git") throw new Error("AI voice not supported on git projects yet")
 
   const eligible = cells.filter((c) => {
     const t = readTranslated(doc, c.id) || c.translated.trim()
@@ -168,6 +167,7 @@ export async function synthAsOneTake(args: RunArgs): Promise<{ blob: Blob } | nu
         cellLabel: c.cellLabel,
       })),
       projectId: project.id,
+      fileId: eligible[0].fileId,
       sourceLanguage: project.sourceLanguage,
       languageTag: project.targetLanguage,
       session,

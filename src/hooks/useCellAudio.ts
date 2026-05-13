@@ -1,17 +1,13 @@
 // src/hooks/useCellAudio.ts
-// React hook that loads per-cell LFS audio on demand. Owns the
-// HTMLAudioElement lifecycle and revokes the object URL on unmount /
+// React hook that loads per-cell audio on demand from sync-worker R2.
+// Owns the HTMLAudioElement lifecycle and revokes the object URL on unmount /
 // selectedAudioId change. Also exposes currentTime/seek and lazy peak
 // decoding so that waveform UI and the play button can share one controller.
 
-import { useCallback, useEffect, useRef, useState } from "react"
-import { createOpfsFs, openOpfsRepoDir } from "@/lib/git/opfs-fs"
-import { opfsRepoKey, pathWithNamespaceFromCloneUrl } from "@/lib/git/repo-key"
-import { parsePointerContent } from "@/lib/lfs/pointer"
-import { lfsCacheGet, lfsCachePut } from "@/lib/lfs/cache"
-import { downloadLfsBlob } from "@/lib/lfs/download"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { fetchCellAudio, parseFrontierAudioUrl } from "@/lib/audio/upload"
+import { makeAudioSyncTokenFetcher } from "@/lib/audio/sync-token-fetcher"
 import { decodePeaks } from "@/lib/audio/peaks"
 import { peaksCacheGet, peaksCachePut } from "@/lib/audio/peaks-cache"
 import {
@@ -25,10 +21,8 @@ import type { ProjectRecord } from "@/lib/parsers/types"
 export type AudioErrorKind =
   | "pointer-missing"
   | "pointer-invalid"
-  | "batch-failed"
   | "download-failed"
   | "no-session"
-  | "no-git-origin"
 
 export interface AudioError {
   kind: AudioErrorKind
@@ -58,6 +52,7 @@ export interface UseCellAudioResult {
 export function useCellAudio(
   project: ProjectRecord,
   cell: CodexCell,
+  fileId: string,
 ): UseCellAudioResult {
   const { session } = useFrontierSession()
   const [state, setState] = useState<UseCellAudioResult["state"]>("idle")
@@ -73,6 +68,16 @@ export function useCellAudio(
   const bytesRef = useRef<Uint8Array | null>(null)
   const rafRef = useRef<number | null>(null)
   const peaksRequestedRef = useRef<number | null>(null)
+
+  // Keep the latest session reachable from the cached token fetcher without
+  // recreating it (and trashing the per-(project,file) token cache) on every
+  // session field update.
+  const sessionRef = useRef(session)
+  useEffect(() => { sessionRef.current = session }, [session])
+  const getSyncToken = useMemo(
+    () => makeAudioSyncTokenFetcher(() => sessionRef.current),
+    [],
+  )
 
   // The play/pause callbacks are recreated every render; the coordinator
   // needs stable references it can call later. Stash the latest callbacks in
@@ -129,84 +134,36 @@ export function useCellAudio(
     }
 
     const frontier = parseFrontierAudioUrl(attachmentUrl)
-    if (frontier) {
-      if (!session?.jwt) {
-        throw { kind: "no-session", message: "Not signed in" } as AudioError
-      }
-      try {
-        const bytes = await fetchCellAudio({
-          session,
-          projectId: project.id,
-          audioId: frontier.audioId,
-          ext: frontier.ext,
-        })
-        bytesRef.current = bytes
-        return bytes
-      } catch (e) {
-        throw {
-          kind: "download-failed",
-          message: e instanceof Error ? e.message : String(e),
-        } as AudioError
-      }
+    if (!frontier) {
+      // Legacy GitLab LFS attachments are no longer fetchable from codex-web;
+      // surface this clearly so the UI can render a "needs re-record" state.
+      throw {
+        kind: "pointer-invalid",
+        message: `Unsupported audio URL (legacy LFS): ${attachmentUrl}`,
+      } as AudioError
     }
 
-    if (project.origin?.kind !== "git") {
-      throw { kind: "no-git-origin", message: "Project has no git origin" } as AudioError
-    }
-    if (!session?.gitlabToken) {
+    if (!sessionRef.current?.jwt) {
       throw { kind: "no-session", message: "Not signed in" } as AudioError
     }
 
-    const repoHandle = await openOpfsRepoDir(
-      opfsRepoKey(
-        project.origin.gitlabProjectId,
-        pathWithNamespaceFromCloneUrl(project.origin.cloneUrl),
-      ),
-    )
-    const repoFs = createOpfsFs(repoHandle)
-    let pointerText: string
     try {
-      const data = await repoFs.promises.readFile(attachmentUrl, { encoding: "utf8" })
-      pointerText = typeof data === "string" ? data : new TextDecoder().decode(data)
-    } catch {
-      const altUrl = attachmentUrl.replace("/attachments/files/", "/attachments/pointers/")
-      try {
-        const data = await repoFs.promises.readFile(altUrl, { encoding: "utf8" })
-        pointerText = typeof data === "string" ? data : new TextDecoder().decode(data)
-      } catch (e2) {
-        throw {
-          kind: "pointer-missing",
-          message: `Could not read ${attachmentUrl} (also tried ${altUrl}): ${e2 instanceof Error ? e2.message : String(e2)}`,
-        } as AudioError
-      }
-    }
-
-    const pointer = parsePointerContent(pointerText)
-    if (!pointer) {
-      throw { kind: "pointer-invalid", message: `${attachmentUrl} is not a valid LFS pointer` } as AudioError
-    }
-
-    const cached = await lfsCacheGet(pointer.oid)
-    if (cached) {
-      bytesRef.current = cached
-      return cached
-    }
-
-    try {
-      const bytes = await downloadLfsBlob({
-        cloneUrl: project.origin.cloneUrl,
-        gitlabToken: session.gitlabToken,
-        oid: pointer.oid,
-        size: pointer.size,
+      const bytes = await fetchCellAudio({
+        projectId: project.id,
+        fileId,
+        audioId: frontier.audioId,
+        ext: frontier.ext,
+        getSyncToken,
       })
-      try { await lfsCachePut(pointer.oid, bytes) } catch { /* non-fatal */ }
       bytesRef.current = bytes
       return bytes
     } catch (e) {
-      if (e && typeof e === "object" && "kind" in e) throw e as AudioError
-      throw { kind: "download-failed", message: e instanceof Error ? e.message : String(e) } as AudioError
+      throw {
+        kind: "download-failed",
+        message: e instanceof Error ? e.message : String(e),
+      } as AudioError
     }
-  }, [attachmentUrl, project, session])
+  }, [attachmentUrl, project.id, fileId, getSyncToken])
 
   const tickPlayhead = useCallback(() => {
     const a = audioRef.current
@@ -317,8 +274,8 @@ export function useCellAudio(
     } catch (e) {
       const kind = (e && typeof e === "object" && "kind" in e) ? (e as AudioError).kind : null
       // pointer-missing / no-session are expected in many real-world states
-      // (LFS file not downloaded, anonymous session). Don't spam the console.
-      if (kind !== "pointer-missing" && kind !== "no-session" && kind !== "no-git-origin") {
+      // (no recording for this cell yet, anonymous session). Don't spam the console.
+      if (kind !== "pointer-missing" && kind !== "no-session") {
         console.error("[useCellAudio] requestPeaks failed", e)
       }
       // Leave peaksRequestedRef pinned to bins so we don't retry in a loop.

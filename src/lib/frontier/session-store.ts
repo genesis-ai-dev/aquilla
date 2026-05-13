@@ -29,7 +29,7 @@ export function subscribeSession(listener: Listener): () => void {
 }
 
 export function sessionKey(s: FrontierSession): string {
-  return `${s.gitlabUrl}::${s.username}`
+  return s.username
 }
 
 async function readEnvelope(): Promise<Envelope> {
@@ -56,7 +56,6 @@ async function writeEnvelope(env: Envelope): Promise<void> {
 export interface SessionSummary {
   key: string
   username: string
-  gitlabUrl: string
   createdAt: string
   active: boolean
 }
@@ -64,7 +63,7 @@ export interface SessionSummary {
 export async function listSessions(): Promise<SessionSummary[]> {
   const env = await readEnvelope()
   return Object.entries(env.sessions).map(([key, s]) => ({
-    key, username: s.username, gitlabUrl: s.gitlabUrl,
+    key, username: s.username,
     createdAt: s.createdAt, active: env.active === key,
   }))
 }

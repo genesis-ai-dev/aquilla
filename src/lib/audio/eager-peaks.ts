@@ -4,6 +4,7 @@
 // into view. Cancellation is cooperative — caller flips a flag.
 
 import { fetchCellAudio, parseFrontierAudioUrl } from "./upload"
+import { audioSyncTokenFetcherForSession } from "./sync-token-fetcher"
 import { decodePeaks } from "./peaks"
 import { peaksCacheGet, peaksCachePut } from "./peaks-cache"
 import type { CellData } from "@/hooks/useCells"
@@ -27,6 +28,7 @@ export interface EagerPrefetchArgs {
  * user is actively interacting with.
  */
 export async function eagerlyPrefetchPeaks(args: EagerPrefetchArgs): Promise<void> {
+  const getSyncToken = audioSyncTokenFetcherForSession(args.session)
   for (const cell of args.cells) {
     if (args.isCancelled()) return
     const audioId = cell.selectedAudioId
@@ -40,14 +42,15 @@ export async function eagerlyPrefetchPeaks(args: EagerPrefetchArgs): Promise<voi
     } catch { /* fall through to fetch */ }
 
     const frontier = parseFrontierAudioUrl(att.url)
-    if (!frontier) continue // git/LFS prefetch is handled by the hook on first mount
+    if (!frontier) continue // legacy LFS attachments — no longer fetchable
 
     try {
       const bytes = await fetchCellAudio({
-        session: args.session,
         projectId: args.project.id,
+        fileId: cell.fileId,
         audioId: frontier.audioId,
         ext: frontier.ext,
+        getSyncToken,
       })
       if (args.isCancelled()) return
       const decoded = await decodePeaks(bytes, args.bins)

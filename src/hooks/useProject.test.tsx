@@ -13,8 +13,6 @@ vi.mock("@/hooks/useFrontierSession", () => ({
   useFrontierSession: () => ({
     session: {
       jwt: "test-jwt",
-      gitlabToken: "g",
-      gitlabUrl: "https://git.example.com",
       username: "ryder",
       createdAt: "2026-04-30T00:00:00Z",
     },

@@ -71,7 +71,6 @@ export function VoiceBar({
   const [modalFocus, setModalFocus] = useState<"apiKey" | undefined>(undefined)
   const queue = useQueueState()
   const voices = getVoiceLibrary(project.ttsSettings)
-  const isGitProject = project.origin?.kind === "git"
 
   const userGeminiKey = useUserApiKey("gemini-tts")
   const projectProvider = resolveTtsProvider(project.ttsSettings)
@@ -251,11 +250,9 @@ export function VoiceBar({
             Cell {queue.cellIndex + 1}
           </span>
         )}
-        {!isGitProject && (
-          <span className="hidden sm:inline text-[11px] text-muted-foreground">
-            Drag a voice onto a cell to generate
-          </span>
-        )}
+        <span className="hidden sm:inline text-[11px] text-muted-foreground">
+          Drag a voice onto a cell to generate
+        </span>
         {onHide && (
           <Button
             type="button"
@@ -519,11 +516,6 @@ export async function handleVoiceDropOnCell(cellId: string, voiceId: string): Pr
     setTtsStatus(statusKey, { kind: "error", message: "Sign in to upload audio" })
     return
   }
-  if (ctx.project.origin?.kind === "git") {
-    setTtsStatus(statusKey, { kind: "error", message: "AI voice not supported on git projects yet" })
-    return
-  }
-
   // Persist the chosen voice on the cell so subsequent bulk-generate /
   // re-synth actions reuse it.
   setCellTtsSettings(ctx.doc, cellId, { voiceId })
@@ -567,6 +559,7 @@ export async function handleVoiceDropOnCell(cellId: string, voiceId: string): Pr
       cellContext: cell.context,
       cellLabel: cell.cellLabel,
       projectId: ctx.project.id,
+      fileId: cell.fileId,
       sourceLanguage: ctx.project.sourceLanguage,
       languageTag: ctx.project.targetLanguage,
       session: ctx.session,

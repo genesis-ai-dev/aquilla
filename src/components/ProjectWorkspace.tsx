@@ -43,14 +43,12 @@ import { useFileMeta } from "@/hooks/useFileMeta"
 import { useCellLabelsPreference } from "@/hooks/useCellLabelsPreference"
 import { displayNameFor } from "@/lib/sync/anonymous-name"
 import { useProjectPermissions } from "@/hooks/useProjectPermissions"
-import { useSyncProject } from "@/hooks/useSyncProject"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import {
   countSynthTargets, countTranscribeTargets,
   synthAllInFile, transcribeAllInFile,
 } from "@/lib/audio/bulk-audio"
 import { eagerlyPrefetchPeaks } from "@/lib/audio/eager-peaks"
-import { useAutoSync } from "@/hooks/useAutoSync"
 import { useOutboxFlusher } from "@/hooks/useOutboxFlusher"
 import { usePendingOutboxRecords } from "@/hooks/usePendingOutboxRecords"
 import {
@@ -58,7 +56,6 @@ import {
   buildFileScopedTokenFetcher,
 } from "@/lib/sync/cqrs-bridge"
 import { useCellsAuditStatsWithOverlay } from "@/hooks/useCellsAuditStatsWithOverlay"
-import { useCorpusBackfill } from "@/hooks/useCorpusBackfill"
 import { Film, Scale, MessagesSquare, Camera, Share2, Settings as SettingsIcon, Lock, ClipboardList, Brain, Trash2, Undo2, Search as SearchIcon } from "lucide-react"
 import { restoreProject } from "@/lib/store/project-index"
 import { AppShell } from "./AppShell"
@@ -75,7 +72,6 @@ import { SidebarProjectSection } from "./SidebarProjectSection"
 import { SuggestionBanner } from "./SuggestionBanner"
 import { ConfirmActionDialog } from "./ConfirmActionDialog"
 import { PeerPresence } from "./PeerPresence"
-import { SyncButton } from "./SyncButton"
 import { ViewSettingsMenu } from "./ViewSettingsMenu"
 import { EditorScrollProvider, useEditorScroll } from "@/context/EditorScrollContext"
 import { detectSuggestions, type RenameSuggestion } from "@/lib/file-labeling/detect"
@@ -527,11 +523,6 @@ export function ProjectWorkspace() {
   const perms = useProjectPermissions(project)
   const isReadOnly = !perms.canEditContent
 
-  const { sync: runSync, phase: syncPhase, inFlight: syncInFlight, lastResult: syncLastResult } = useSyncProject()
-
-  useAutoSync(project ?? null, frontierSession)
-  useCorpusBackfill(project ?? null, refresh)
-
   const { state: checklistState, dismissed: checklistDismissed, dismiss: dismissChecklist, refreshShares: refreshChecklistShares } = useSetupChecklist(project ?? null)
   const [checklistOpen, setChecklistOpen] = useState(false)
   const [showChipTooltip, setShowChipTooltip] = useState(false)
@@ -553,31 +544,10 @@ export function ProjectWorkspace() {
   }, [checklistDismissed, dismissChecklist])
 
   const handleProjectUpdated = useCallback(async (_updated: ProjectRecord | undefined) => {
-    // The caller (useSaveCompletionSettings, SyncButton, etc.) already
-    // persisted to IDB. We just need to refresh the in-memory project state.
+    // The caller (useSaveCompletionSettings, etc.) already persisted to IDB.
+    // We just need to refresh the in-memory project state.
     refresh()
   }, [refresh])
-
-  useEffect(() => {
-    function handler(e: KeyboardEvent) {
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "s") {
-        if (!project || !perms.canPush || !frontierSession) return
-        e.preventDefault()
-        if (syncInFlight) return
-        runSync(project, frontierSession).then((r) => {
-          if (r?.status === "synced" && r.commitSha && project.origin?.kind === "git") {
-            const commitSha = r.commitSha
-            patchProject(project.id, (p) => ({
-              ...p,
-              origin: { ...p.origin!, headSha: commitSha },
-            })).then(() => refresh())
-          }
-        })
-      }
-    }
-    document.addEventListener("keydown", handler)
-    return () => document.removeEventListener("keydown", handler)
-  }, [project, perms.canPush, frontierSession, syncInFlight, runSync, handleProjectUpdated])
 
   // All hooks below must live above the early return so hook count is stable
   // across renders (React throws "Rendered more hooks" otherwise).
@@ -1039,16 +1009,6 @@ export function ProjectWorkspace() {
                     records={outboxRecords}
                   />
                 </div>
-              }
-              right={
-                <SyncButton
-                  project={project}
-                  onUpdated={handleProjectUpdated}
-                  sync={runSync}
-                  phase={syncPhase}
-                  inFlight={syncInFlight}
-                  lastResult={syncLastResult}
-                />
               }
             />
             <StatusBar

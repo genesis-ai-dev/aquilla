@@ -201,4 +201,50 @@ describe("DELETE /admin/files/:projectId/:fileId", () => {
     const body = (await res.json()) as any
     expect(body.deleted).toBe(3)
   })
+
+  it("honors R2_KEY_PREFIX when listing and deleting", async () => {
+    // Per-PR sandbox workers (R2_KEY_PREFIX=pr-<N>) must scope their wipes
+    // to their own prefix; without that, a PR delete would clobber prod /
+    // staging objects sharing the same bucket.
+    const env = makeEnv("k")
+    env.R2_KEY_PREFIX = "pr-7"
+    env.SNAPSHOTS._seed("pr-7/projects/p/files/f/snapshot.bin", new Uint8Array([1]))
+    env.SNAPSHOTS._seed("pr-7/projects/p/files/f/tail/0.bin", new Uint8Array([2]))
+    env.SNAPSHOTS._seed("pr-7/projects/p/files/f/audio/clip.webm", new Uint8Array([3]))
+    // Same-shaped key in a different prefix must NOT be touched.
+    env.SNAPSHOTS._seed("projects/p/files/f/snapshot.bin", new Uint8Array([9]))
+
+    const res = await handleAdminRequest(
+      new Request("https://worker/admin/files/p/f", {
+        method: "DELETE",
+        headers: { Authorization: "Bearer k" },
+      }),
+      env
+    ) as Response
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as any
+    expect(body.deleted).toBe(3)
+    expect(env.SNAPSHOTS._allKeys()).toEqual(["projects/p/files/f/snapshot.bin"])
+  })
+
+  it("admin DELETE wipes the audio subdirectory along with snapshot/tails", async () => {
+    // The audio endpoints write under projects/{pid}/files/{fid}/audio/...
+    // so the existing prefix listing should pick them up automatically.
+    const env = makeEnv("k")
+    env.SNAPSHOTS._seed("projects/p1/files/f1/snapshot.bin", new Uint8Array([1]))
+    env.SNAPSHOTS._seed("projects/p1/files/f1/tail/0000000000000001.bin", new Uint8Array([2]))
+    env.SNAPSHOTS._seed("projects/p1/files/f1/audio/clip.webm", new Uint8Array([3, 3, 3]))
+
+    const res = await handleAdminRequest(
+      new Request("https://worker/admin/files/p1/f1", {
+        method: "DELETE",
+        headers: { Authorization: "Bearer k" },
+      }),
+      env
+    ) as Response
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as any
+    expect(body.deleted).toBe(3)
+    expect(env.SNAPSHOTS._size()).toBe(0)
+  })
 })

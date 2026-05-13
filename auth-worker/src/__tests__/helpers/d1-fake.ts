@@ -65,12 +65,30 @@ export interface ResetTokenRow {
   expires_at: string
 }
 
+export interface OrganizationRow {
+  id: number
+  name: string | null
+  owner_user_id: number
+  subscription_tier: string
+}
+
+export interface OrgMemberRow {
+  org_id: number
+  user_id: number
+  role_level: number
+  granted_by: number | null
+  granted_at: string
+  last_active_at: string | null
+}
+
 export interface FakeTables {
   users: UserRow[]
   projects: ProjectRow[]
   project_members: ProjectMemberRow[]
   project_invites: ProjectInviteRow[]
   password_reset_tokens: ResetTokenRow[]
+  organizations: OrganizationRow[]
+  org_members: OrgMemberRow[]
 }
 
 export type FakeD1 = D1Database & {
@@ -85,6 +103,8 @@ export function makeFakeD1(initial: Partial<FakeTables> = {}): FakeD1 {
     project_members: initial.project_members ?? [],
     project_invites: initial.project_invites ?? [],
     password_reset_tokens: initial.password_reset_tokens ?? [],
+    organizations: initial.organizations ?? [],
+    org_members: initial.org_members ?? [],
   }
   const issued: Array<{ sql: string; args: unknown[] }> = []
 
@@ -136,6 +156,17 @@ export function makeFakeD1(initial: Partial<FakeTables> = {}): FakeD1 {
     if (n.startsWith("SELECT id, name, gitlab_project_id, org_id, created_by, archived_at FROM projects WHERE id = ?")) {
       const p = tables.projects.find((x) => x.id === args[0])
       return { first: p ?? null, results: p ? [p] : [] }
+    }
+
+    // ─── SELECT org_members ──────────────────────────────────────────
+    if (n.startsWith("SELECT role_level FROM org_members WHERE org_id = ? AND user_id = ?")) {
+      const m = tables.org_members.find(
+        (x) => x.org_id === args[0] && x.user_id === args[1],
+      )
+      return {
+        first: m ? { role_level: m.role_level } : null,
+        results: m ? [{ role_level: m.role_level }] : [],
+      }
     }
 
     // ─── SELECT project_members ──────────────────────────────────────

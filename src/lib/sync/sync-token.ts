@@ -2,23 +2,19 @@
 // One token per (projectId, fileId) scope; 15-min TTL. Cache the token in memory
 // and refresh when within 30 s of expiry so reconnects don't race with expiration.
 //
-// AUTH_API_URL points at codex-auth-worker (auth, sync-token, invites). It
-// falls back to VITE_FRONTIER_BASE so legacy environments that only have the
-// old frontier-server still work. The plain `FRONTIER_API_URL` re-export is
-// kept around for chat/LLM/payments routes that haven't been ported.
+// AUTH_API_URL is the canonical base for every codex-web → backend call now
+// (auth, sync-token, invites, orgs, members, projects, users, health). The
+// legacy frontier-server fallback was removed on 2026-05-13 when these routes
+// were ported into codex-auth-worker.
 
-const FRONTIER_DEFAULT = "https://api.frontierrnd.com"
-
-const FRONTIER_BASE =
-  ((import.meta.env.VITE_FRONTIER_BASE as string | undefined)?.replace(/\/+$/, "")) ||
-  FRONTIER_DEFAULT
+const AUTH_DEFAULT = "https://codex-auth-worker.blue-darkness-7674.workers.dev"
 
 export const AUTH_API_URL =
   ((import.meta.env.VITE_AUTH_BASE as string | undefined)?.replace(/\/+$/, "")) ||
-  FRONTIER_BASE
+  AUTH_DEFAULT
 
-/** @deprecated for routes ported to auth-worker; prefer AUTH_API_URL. */
-export const FRONTIER_API_URL = FRONTIER_BASE
+/** @deprecated alias for AUTH_API_URL. Kept while callers are migrated. */
+export const FRONTIER_API_URL = AUTH_API_URL
 
 export interface SyncTokenResponse {
   token: string

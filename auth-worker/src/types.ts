@@ -9,13 +9,26 @@ export interface Env {
   /** Bound to frontier-db-v2 (prod) or frontier-db-v2-staging (staging). */
   AUTH_DB: D1Database
 
+  /**
+   * Bound to codex-db (prod) or codex-db-staging (staging). Optional so
+   * test environments and the legacy auth-only routes still work without it.
+   * Used by project list/get to hydrate the file list and by file-projection
+   * delete to drop projected `files` rows.
+   */
+  CODEX_DB?: D1Database
+
   // Frontier JWT signing (interchangeable with the old frontier-server).
   SECRET_KEY: string
   ALGORITHM: string
   ACCESS_TOKEN_EXPIRE_MINUTES: string
 
-  // Sync-token signing (shared with codex-sync-worker; distinct from SECRET_KEY).
+  // Sync-token signing AND admin auth to codex-sync-worker. Distinct from
+  // SECRET_KEY. Shared between auth-worker, sync-worker, and (still) the
+  // legacy frontier-server.
   SYNC_SECRET_KEY?: string
+
+  /** codex-sync-worker base URL for archive / file-delete notifications. */
+  SYNC_WORKER_URL?: string
 
   // Email (Resend) for password reset.
   RESEND_API_KEY?: string
@@ -23,6 +36,15 @@ export interface Env {
   BASE_URL?: string
 
   ENVIRONMENT?: string
+
+  /**
+   * When set to "1", exposes `/__test__/reset` and skips authentication on
+   * sensitive routes that the E2E harness needs to seed. NEVER set in
+   * production — gated explicitly so an accidental config flip doesn't
+   * expose admin routes. Mirrors the legacy frontier-server's WRANGLER_LOCAL
+   * + ALLOW_UNAUTHENTICATED gates.
+   */
+  WRANGLER_LOCAL?: string
 }
 
 export type Variables = {

@@ -12,7 +12,7 @@
 import { verifyTokenForFile } from '../auth'
 
 export interface CellsAuditReadEnv {
-  CODEX_DB?: D1Database
+  AQUILLA_DB?: D1Database
   SYNC_SECRET_KEY?: string
 }
 
@@ -27,8 +27,8 @@ export async function handleCellsAuditReadRequest(
   if (!env.SYNC_SECRET_KEY) {
     return new Response('SYNC_SECRET_KEY not configured', { status: 500 })
   }
-  if (!env.CODEX_DB) {
-    return new Response('CODEX_DB binding not configured', { status: 500 })
+  if (!env.AQUILLA_DB) {
+    return new Response('AQUILLA_DB binding not configured', { status: 500 })
   }
 
   const token = (request.headers.get('Authorization') ?? '').startsWith('Bearer ')
@@ -80,8 +80,8 @@ export async function handleCellsAuditReadRequest(
   }
 
   const [cellsRes, validatorsRes] = await Promise.all([
-    env.CODEX_DB.prepare(cellsSql).bind(fileId).all<CellRow>(),
-    env.CODEX_DB.prepare(validatorsSql).bind(projectId, fileId).all<ValidatorRow>(),
+    env.AQUILLA_DB.prepare(cellsSql).bind(fileId).all<CellRow>(),
+    env.AQUILLA_DB.prepare(validatorsSql).bind(projectId, fileId).all<ValidatorRow>(),
   ])
 
   // Bucket validators by cell_id → edit_event_id → usernames[].

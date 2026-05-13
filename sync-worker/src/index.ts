@@ -48,8 +48,8 @@ declare global {
       /** codex-db (frontier-server-owned schema). Optional so the spike + dev
        *  setups without a D1 binding keep working — onSave skips projection
        *  when absent. In prod, the binding is wired in wrangler.toml and
-       *  CODEX_DB is always present. */
-      CODEX_DB?: D1Database
+       *  AQUILLA_DB is always present. */
+      AQUILLA_DB?: D1Database
       /** Shared HMAC key with frontier-server that mints /sync-token JWTs.
        *  Distinct from Frontier's main SECRET_KEY so a sync-worker compromise
        *  cannot forge Frontier access tokens. */
@@ -285,12 +285,12 @@ export class FileSync extends YServer {
     // Gated on `cells` being empty so a partially-loaded doc from R2 is left
     // alone — Yjs would not merge replayed commits cleanly with existing CRDT
     // state, and the live event stream is the path for additive updates after
-    // first open. Skipped silently when CODEX_DB isn't bound (spike/dev).
+    // first open. Skipped silently when AQUILLA_DB isn't bound (spike/dev).
     const cellsMap = this.document.getMap("cells")
-    if (cellsMap.size === 0 && this.env.CODEX_DB) {
+    if (cellsMap.size === 0 && this.env.AQUILLA_DB) {
       try {
         const result = await hydrateYDocFromEvents(
-          this.env.CODEX_DB,
+          this.env.AQUILLA_DB,
           projectId,
           fileId,
           this.document,
@@ -443,14 +443,14 @@ export class FileSync extends YServer {
 
     // Keep the CQRS read model in sync. Projection failure is non-fatal — the
     // tail write is durable and the next onSave (or compaction-time reconcile)
-    // will retry. Skip when CODEX_DB isn't bound (spike / dev without D1).
-    if (this.env.CODEX_DB) {
+    // will retry. Skip when AQUILLA_DB isn't bound (spike / dev without D1).
+    if (this.env.AQUILLA_DB) {
       try {
         const full = projectDoc(projectId, fileId, this.document)
         // Only UPSERT cells whose projected fields differ from last tick.
         // File rollup is always written (single cheap row).
         const diffed = diffProjection(full, this.projectedFingerprints)
-        await writeProjection(this.env.CODEX_DB, diffed, key)
+        await writeProjection(this.env.AQUILLA_DB, diffed, key)
       } catch (err) {
         // On failure, clear the fingerprint cache so the next onSave does a
         // full projection — otherwise a D1 error + cache retention would

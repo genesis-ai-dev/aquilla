@@ -2,7 +2,7 @@
 // frontier-server (HS256, claim `sub` = username, configurable expiry) so
 // tokens minted here verify against the old server and vice versa.
 //
-// Ported from frontier-server/cloudflare/src/auth/jwt.ts, narrowed to AUTH_DB
+// Ported from frontier-server/cloudflare/src/auth/jwt.ts, narrowed to AQUILLA_DB
 // and the strict UserRow shape (no `any`).
 
 import { sign, verify } from "hono/jwt"
@@ -82,7 +82,7 @@ export class JWTService {
 
   async getUserByUsername(username: string): Promise<AuthUser | null> {
     try {
-      const result = await this.env.AUTH_DB.prepare(
+      const result = await this.env.AQUILLA_DB.prepare(
         "SELECT * FROM users WHERE username = ?",
       )
         .bind(username)
@@ -97,7 +97,7 @@ export class JWTService {
 
   async getUserByEmail(email: string): Promise<AuthUser | null> {
     try {
-      const result = await this.env.AUTH_DB.prepare(
+      const result = await this.env.AQUILLA_DB.prepare(
         "SELECT * FROM users WHERE email = ?",
       )
         .bind(email)
@@ -129,11 +129,6 @@ export function rowToUser(row: UserRow): AuthUser {
     username: row.username,
     email: row.email,
     password_hash: row.password_hash,
-    gitlab_user_id: row.gitlab_user_id,
-    gitlab_username: row.gitlab_username,
-    gitlab_token: row.gitlab_token,
-    stripe_customer_id: row.stripe_customer_id,
-    subscription_tier: row.subscription_tier,
     preferences: prefs,
     created_at: row.created_at,
     updated_at: row.updated_at,

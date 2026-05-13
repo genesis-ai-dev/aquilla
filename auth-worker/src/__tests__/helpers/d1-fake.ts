@@ -1,31 +1,15 @@
 // Minimal in-memory D1 fake for auth-worker route tests.
 //
-// Supports only the statement shapes the auth-worker actually issues:
-//   - SELECT * FROM users WHERE username = ? (first)
-//   - SELECT * FROM users WHERE email = ? (first)
-//   - SELECT id FROM users WHERE username = ? OR email = ? (first)
-//   - SELECT id, username FROM users WHERE email = ? (first)
-//   - SELECT id, gitlab_user_id FROM users WHERE username = ? (first)
-//   - SELECT * FROM projects WHERE id = ? (first)
-//   - SELECT role_level FROM project_members WHERE project_id = ? AND user_id = ? (first)
-//   - SELECT * FROM project_invites WHERE token = ? (first)
-//   - INSERT INTO projects / project_invites / project_members / users / password_reset_tokens
-//   - UPDATE project_members / project_invites / users / password_reset_tokens
-//   - DELETE FROM password_reset_tokens WHERE user_id = ?
-//
-// We pattern-match on the normalized SQL string + bind args; not pretty but
-// sufficient for the happy-path coverage.
+// Supports the statement shapes the auth-worker actually issues against the
+// single codex D1: users, organizations, org_members, projects,
+// project_members, project_invites, password_reset_tokens. Pattern-matches
+// on the normalized SQL string + bind args.
 
 export interface UserRow {
   id: number
   username: string
   email: string
   password_hash: string
-  gitlab_user_id: number | null
-  gitlab_username: string | null
-  gitlab_token: string | null
-  stripe_customer_id: string | null
-  subscription_tier: string | null
   preferences: string | null
   created_at: string
   updated_at: string
@@ -34,7 +18,6 @@ export interface UserRow {
 export interface ProjectRow {
   id: string
   name: string
-  gitlab_project_id: number | null
   org_id: number | null
   created_by: number
   archived_at: string | null
@@ -65,12 +48,29 @@ export interface ResetTokenRow {
   expires_at: string
 }
 
+export interface OrganizationRow {
+  id: number
+  name: string | null
+  owner_user_id: number
+}
+
+export interface OrgMemberRow {
+  org_id: number
+  user_id: number
+  role_level: number
+  granted_by: number | null
+  granted_at: string
+  last_active_at: string | null
+}
+
 export interface FakeTables {
   users: UserRow[]
   projects: ProjectRow[]
   project_members: ProjectMemberRow[]
   project_invites: ProjectInviteRow[]
   password_reset_tokens: ResetTokenRow[]
+  organizations: OrganizationRow[]
+  org_members: OrgMemberRow[]
 }
 
 export type FakeD1 = D1Database & {
@@ -85,6 +85,8 @@ export function makeFakeD1(initial: Partial<FakeTables> = {}): FakeD1 {
     project_members: initial.project_members ?? [],
     project_invites: initial.project_invites ?? [],
     password_reset_tokens: initial.password_reset_tokens ?? [],
+    organizations: initial.organizations ?? [],
+    org_members: initial.org_members ?? [],
   }
   const issued: Array<{ sql: string; args: unknown[] }> = []
 
@@ -118,24 +120,32 @@ export function makeFakeD1(initial: Partial<FakeTables> = {}): FakeD1 {
         results: u ? [{ id: u.id, username: u.username }] : [],
       }
     }
-    if (n.startsWith("SELECT id, gitlab_user_id FROM users WHERE username = ?")) {
-      const u = tables.users.find((x) => x.username === args[0])
-      return {
-        first: u
-          ? { id: u.id, gitlab_user_id: u.gitlab_user_id }
-          : null,
-        results: u ? [{ id: u.id, gitlab_user_id: u.gitlab_user_id }] : [],
-      }
-    }
     if (n.startsWith("SELECT id FROM users WHERE username = ?")) {
       const u = tables.users.find((x) => x.username === args[0])
       return { first: u ? { id: u.id } : null, results: u ? [{ id: u.id }] : [] }
     }
 
     // ─── SELECT projects ──────────────────────────────────────────────
-    if (n.startsWith("SELECT id, name, gitlab_project_id, org_id, created_by, archived_at FROM projects WHERE id = ?")) {
+    // Several handlers SELECT different column subsets; we match on the
+    // `FROM projects WHERE id = ?` tail and return the full row so the
+    // caller's typed cast picks whatever columns it needs.
+    if (
+      n.includes("FROM projects WHERE id = ?") &&
+      n.startsWith("SELECT")
+    ) {
       const p = tables.projects.find((x) => x.id === args[0])
       return { first: p ?? null, results: p ? [p] : [] }
+    }
+
+    // ─── SELECT org_members ──────────────────────────────────────────
+    if (n.startsWith("SELECT role_level FROM org_members WHERE org_id = ? AND user_id = ?")) {
+      const m = tables.org_members.find(
+        (x) => x.org_id === args[0] && x.user_id === args[1],
+      )
+      return {
+        first: m ? { role_level: m.role_level } : null,
+        results: m ? [{ role_level: m.role_level }] : [],
+      }
     }
 
     // ─── SELECT project_members ──────────────────────────────────────
@@ -168,17 +178,22 @@ export function makeFakeD1(initial: Partial<FakeTables> = {}): FakeD1 {
 
     // ─── INSERTs ──────────────────────────────────────────────────────
     if (n.startsWith("INSERT INTO projects")) {
-      const [id, name, gitlab_project_id, created_by] = args as [
-        string,
-        string,
-        number | null,
-        number,
-      ]
+      // sync-token.ts:    INSERT INTO projects (id, name, created_by) VALUES (?, ?, ?)
+      // projects.ts POST: INSERT INTO projects (id, name, org_id, created_by) VALUES (?, ?, ?, ?)
+      const id = args[0] as string
+      const name = args[1] as string
+      let org_id: number | null = null
+      let created_by: number
+      if (args.length === 4) {
+        org_id = (args[2] as number | null) ?? null
+        created_by = args[3] as number
+      } else {
+        created_by = args[2] as number
+      }
       tables.projects.push({
         id,
         name,
-        gitlab_project_id: gitlab_project_id ?? null,
-        org_id: null,
+        org_id,
         created_by,
         archived_at: null,
       })
@@ -228,11 +243,6 @@ export function makeFakeD1(initial: Partial<FakeTables> = {}): FakeD1 {
         username,
         email,
         password_hash,
-        gitlab_user_id: null,
-        gitlab_username: null,
-        gitlab_token: null,
-        stripe_customer_id: null,
-        subscription_tier: "free",
         preferences: "{}",
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
@@ -286,19 +296,6 @@ export function makeFakeD1(initial: Partial<FakeTables> = {}): FakeD1 {
       }
       return { first: null, results: [] }
     }
-    if (n.startsWith("UPDATE users SET gitlab_token = ? WHERE id = ?")) {
-      const [token, id] = args as [string, number]
-      const u = tables.users.find((x) => x.id === id)
-      if (u) u.gitlab_token = token
-      return { first: null, results: [] }
-    }
-    if (n.startsWith("UPDATE users SET gitlab_token = ? WHERE username = ?")) {
-      const [token, uname] = args as [string, string]
-      const u = tables.users.find((x) => x.username === uname)
-      if (u) u.gitlab_token = token
-      return { first: null, results: [] }
-    }
-
     // ─── DELETEs ─────────────────────────────────────────────────────
     if (n.startsWith("DELETE FROM password_reset_tokens WHERE user_id = ?")) {
       tables.password_reset_tokens = tables.password_reset_tokens.filter(

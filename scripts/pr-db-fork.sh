@@ -31,7 +31,10 @@ SOURCE_DB="codex-db-staging"
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 TEMPLATE="${REPO_ROOT}/sync-worker/wrangler.pr.toml.tpl"
-OUT_TOML="$(mktemp -t "wrangler-pr-${PR_NUMBER}-XXXXXX.toml")"
+# Render the per-PR wrangler config INSIDE sync-worker/ so wrangler resolves
+# `main = "src/index.ts"` relative to the worker dir (not /tmp). Suffix the
+# PR number so concurrent fork runs don't stomp each other.
+OUT_TOML="${REPO_ROOT}/sync-worker/wrangler.pr-${PR_NUMBER}.toml"
 trap 'rm -f "${OUT_TOML}"' EXIT
 
 echo "[pr-db-fork] PR=${PR_NUMBER} db=${DB_NAME} worker=${WORKER_NAME}"

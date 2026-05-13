@@ -6,3 +6,4 @@
 
 # Build outputs
 dist
+wrangler.pr-*.toml

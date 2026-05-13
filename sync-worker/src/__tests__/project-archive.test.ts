@@ -159,7 +159,7 @@ describe("POST /admin/projects/:projectId/archive", () => {
     expect(body.fileCount).toBe(2)
 
     // Marker is persisted for cold DOs
-    const marker = await readArchiveMarker(env.SNAPSHOTS as any, "proj-1")
+    const marker = await readArchiveMarker(env as any, "proj-1")
     expect(marker?.archivedAt).toBe("2026-04-23T12:00:00Z")
     expect(marker?.deletedBy).toBe("alice")
 
@@ -181,7 +181,7 @@ describe("POST /admin/projects/:projectId/archive", () => {
       env,
       async () => {}
     )
-    expect(await readArchiveMarker(env.SNAPSHOTS as any, "proj-1")).not.toBeNull()
+    expect(await readArchiveMarker(env as any, "proj-1")).not.toBeNull()
 
     await handleProjectArchiveRequest(
       new Request("https://worker/admin/projects/proj-1/archive", {
@@ -192,7 +192,7 @@ describe("POST /admin/projects/:projectId/archive", () => {
       env,
       async () => {}
     )
-    expect(await readArchiveMarker(env.SNAPSHOTS as any, "proj-1")).toBeNull()
+    expect(await readArchiveMarker(env as any, "proj-1")).toBeNull()
   })
 
   it("decodes URL-encoded projectId", async () => {

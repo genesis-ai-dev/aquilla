@@ -1,3 +1,13 @@
 name = "codex-git-proxy"
 main = "src/index.ts"
 compatibility_date = "2025-01-01"
+
+# Pin to the Frontier CF account so deploys land on the team account and not
+# whichever account the deploying machine happens to be logged into.
+account_id = "6a80496d1e59948a9cbaa3c643ba81d7"
+
+# Staging variant — separate worker, same account. Stateless, so this is
+# effectively just a separate URL for dev / PR previews.
+[env.staging]
+name = "codex-git-proxy-staging"
+account_id = "6a80496d1e59948a9cbaa3c643ba81d7"

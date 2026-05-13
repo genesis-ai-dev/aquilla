@@ -1,16 +1,24 @@
 name: Deploy Workers
 
+# Branch → environment mapping:
+#   push to main → wrangler deploy           → prod workers (codex-sync-worker, codex-git-proxy)
+#   push to dev  → wrangler deploy --env=staging → staging workers (-staging suffix)
+#
+# Each worker only runs if its directory changed in the push (path filter) or
+# if invoked explicitly via workflow_dispatch.
+
 on:
   push:
-    branches: [main]
+    branches: [main, dev]
     paths:
       - 'sync-worker/**'
       - 'cors-proxy/**'
-      - 'signaling/**'
+      - 'auth-worker/**'
+      - 'chat-worker/**'
   workflow_dispatch:
     inputs:
       worker:
-        description: 'Which worker to deploy (all, sync-worker, cors-proxy, signaling)'
+        description: 'Which worker to deploy (all, sync-worker, cors-proxy, auth-worker, chat-worker)'
         required: false
         default: 'all'
 
@@ -36,6 +44,65 @@ jobs:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: 6a80496d1e59948a9cbaa3c643ba81d7
           workingDirectory: sync-worker
+          command: deploy ${{ github.ref == 'refs/heads/main' && ' ' || '--env=staging' }}
+
+  auth-worker:
+    if: >
+      github.event_name == 'workflow_dispatch' && (github.event.inputs.worker == 'all' || github.event.inputs.worker == 'auth-worker')
+      || github.event_name == 'push' && contains(toJSON(github.event.commits.*.modified), 'auth-worker/')
+      || github.event_name == 'push' && contains(toJSON(github.event.commits.*.added), 'auth-worker/')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: auth-worker/package-lock.json
+      - run: npm ci
+        working-directory: auth-worker
+      - name: Type-check auth-worker
+        run: npm run type-check
+        working-directory: auth-worker
+      - name: Test auth-worker
+        run: npm test
+        working-directory: auth-worker
+      - name: Deploy auth-worker
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: 6a80496d1e59948a9cbaa3c643ba81d7
+          workingDirectory: auth-worker
+          command: deploy ${{ github.ref == 'refs/heads/main' && ' ' || '--env=staging' }}
+
+  chat-worker:
+    if: >
+      github.event_name == 'workflow_dispatch' && (github.event.inputs.worker == 'all' || github.event.inputs.worker == 'chat-worker')
+      || github.event_name == 'push' && contains(toJSON(github.event.commits.*.modified), 'chat-worker/')
+      || github.event_name == 'push' && contains(toJSON(github.event.commits.*.added), 'chat-worker/')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: chat-worker/package-lock.json
+      - run: npm ci
+        working-directory: chat-worker
+      - name: Type-check chat-worker
+        run: npm run type-check
+        working-directory: chat-worker
+      - name: Test chat-worker
+        run: npm test
+        working-directory: chat-worker
+      - name: Deploy chat-worker
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: 6a80496d1e59948a9cbaa3c643ba81d7
+          workingDirectory: chat-worker
+          command: deploy ${{ github.ref == 'refs/heads/main' && ' ' || '--env=staging' }}
 
   cors-proxy:
     if: >
@@ -58,25 +125,4 @@ jobs:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: 6a80496d1e59948a9cbaa3c643ba81d7
           workingDirectory: cors-proxy
-
-  signaling:
-    if: >
-      github.event_name == 'workflow_dispatch' && (github.event.inputs.worker == 'all' || github.event.inputs.worker == 'signaling')
-      || github.event_name == 'push' && contains(toJSON(github.event.commits.*.modified), 'signaling/')
-      || github.event_name == 'push' && contains(toJSON(github.event.commits.*.added), 'signaling/')
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: npm
-          cache-dependency-path: signaling/package-lock.json
-      - run: npm ci
-        working-directory: signaling
-      - name: Deploy signaling
-        uses: cloudflare/wrangler-action@v3
-        with:
-          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          accountId: 6a80496d1e59948a9cbaa3c643ba81d7
-          workingDirectory: signaling
+          command: deploy ${{ github.ref == 'refs/heads/main' && ' ' || '--env=staging' }}

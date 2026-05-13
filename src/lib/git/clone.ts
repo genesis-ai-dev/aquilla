@@ -2,8 +2,12 @@ import * as git from "isomorphic-git";
 import http from "isomorphic-git/http/web";
 import type { OpfsFs } from "./opfs-fs";
 
-// Deployed CORS proxy (Task 19). Update if the Worker name changes.
-export const GIT_CORS_PROXY = "https://codex-git-proxy.ryderwishart.workers.dev";
+// Deployed CORS proxy. Set VITE_GIT_CORS_PROXY at build time to override
+// (dev/PR-preview builds point at codex-git-proxy-staging).
+const DEFAULT_GIT_CORS_PROXY = "https://codex-git-proxy.ryderwishart.workers.dev";
+export const GIT_CORS_PROXY =
+  (import.meta.env.VITE_GIT_CORS_PROXY as string | undefined)?.replace(/\/+$/, "") ||
+  DEFAULT_GIT_CORS_PROXY;
 
 export interface CloneArgs {
   fs: OpfsFs;

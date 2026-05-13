@@ -1,5 +1,4 @@
 import { useState, useMemo, useRef, useEffect, useCallback } from "react"
-import * as Y from "yjs"
 import { useParams, useNavigate, useSearchParams } from "react-router-dom"
 import { useProject } from "@/hooks/useProject"
 import { useFileDoc } from "@/hooks/useFileDoc"
@@ -20,7 +19,6 @@ import type { CellData } from "@/hooks/useCells"
 import { useWorkspaceSearch } from "@/hooks/useWorkspaceSearch"
 import { useBacktranslation } from "@/hooks/useBacktranslation"
 import { useComments } from "@/hooks/useComments"
-import { SearchDialog } from "./SearchDialog"
 import { ParallelPassagesPanel, type ParallelPanelMode, type ParallelPanelScope } from "./ParallelPassagesPanel"
 import type { EditorTableHandle } from "./EditorTable"
 import type { WorkspaceSearchResult } from "@/lib/search/workspace-index"
@@ -39,15 +37,11 @@ import { ResizableVideoPanel } from "./ResizableVideoPanel"
 import { VideoAttachmentDialog } from "./VideoAttachmentDialog"
 import { useVideoAttachment } from "@/hooks/useVideoAttachment"
 import { parseTimestampRange, extractCuesFromCells } from "@/lib/video/vtt-generator"
-import { useSync } from "@/hooks/useSync"
-import { useFileSync } from "@/hooks/useFileSync"
+import { useFileSync, peerColor as peerColorLocal } from "@/hooks/useFileSync"
 import { useProjectTombstoneObserver } from "@/hooks/useProjectTombstoneObserver"
 import { useFileMeta } from "@/hooks/useFileMeta"
 import { useCellLabelsPreference } from "@/hooks/useCellLabelsPreference"
-import { peerColor as peerColorLocal } from "@/lib/sync/signaling-provider"
 import { displayNameFor } from "@/lib/sync/anonymous-name"
-import { startBootstrapHost } from "@/lib/sync/bootstrap"
-import { listShares } from "@/lib/sync/share-tokens"
 import { useProjectPermissions } from "@/hooks/useProjectPermissions"
 import { useSyncProject } from "@/hooks/useSyncProject"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
@@ -65,7 +59,7 @@ import {
 } from "@/lib/sync/cqrs-bridge"
 import { useCellsAuditStatsWithOverlay } from "@/hooks/useCellsAuditStatsWithOverlay"
 import { useCorpusBackfill } from "@/hooks/useCorpusBackfill"
-import { Film, Scale, MessagesSquare, Camera, Share2, Settings as SettingsIcon, Lock, ClipboardList, Brain, Trash2, Undo2 } from "lucide-react"
+import { Film, Scale, MessagesSquare, Camera, Share2, Settings as SettingsIcon, Lock, ClipboardList, Brain, Trash2, Undo2, Search as SearchIcon } from "lucide-react"
 import { restoreProject } from "@/lib/store/project-index"
 import { AppShell } from "./AppShell"
 import { WorkspaceHeader } from "./WorkspaceHeader"
@@ -78,7 +72,6 @@ import { PrimaryActionButton } from "./PrimaryActionButton"
 import { AccountSwitcher } from "./AccountSwitcher"
 import { ExpandableFileList } from "./ExpandableFileList"
 import { SidebarProjectSection } from "./SidebarProjectSection"
-import { SidebarCommandPaletteHint } from "./SidebarCommandPaletteHint"
 import { SuggestionBanner } from "./SuggestionBanner"
 import { ConfirmActionDialog } from "./ConfirmActionDialog"
 import { PeerPresence } from "./PeerPresence"
@@ -138,13 +131,10 @@ export function ProjectWorkspace() {
   }, [searchParams])
   const [commentsCellId, setCommentsCellId] = useState<string | null>(null)
   const [historyCellId, setHistoryCellId] = useState<string | null>(null)
-  const [searchOpen, setSearchOpen] = useState(false)
   const [parallelOpen, setParallelOpen] = useState(false)
   const [parallelMode, setParallelMode] = useState<ParallelPanelMode>("search")
   const [parallelScope, setParallelScope] = useState<ParallelPanelScope>("project")
   const [shareOpen, setShareOpen] = useState(false)
-  const [activeShareToken, setActiveShareToken] = useState<string | null>(null)
-  const [shareRefreshKey, setShareRefreshKey] = useState(0)
   const [aiSetupOpen, setAiSetupOpen] = useState(false)
   const [recordingCellId, setRecordingCellId] = useState<string | null>(null)
   const editorRef = useRef<EditorTableHandle>(null)
@@ -297,7 +287,20 @@ export function ProjectWorkspace() {
     videoPlayerRef.current?.play().catch(() => { /* autoplay blocked */ })
   }, [cells])
 
-  const { buildIndex, rebuild: rebuildSearchIndex, search: runSearch, results: searchResults, loading: searchLoading, ready: searchReady } = useWorkspaceSearch(project?.files || [])
+  const {
+    buildIndex,
+    rebuild: rebuildSearchIndex,
+    search: runSearch,
+    clear: clearSearchResults,
+    results: searchResults,
+    loading: searchLoading,
+    ready: searchReady,
+  } = useWorkspaceSearch(project?.files || [])
+
+  // Captures the latest cells in a ref so post-navigation flash can read them
+  // without racing React re-renders.
+  const cellsRef = useRef(cells)
+  useEffect(() => { cellsRef.current = cells }, [cells])
 
   const { rules, penalties } = useRules(project ?? null, refresh)
   const { addThread, addMessage, resolveThread, reopenThread } = useComments(doc, currentUsername)
@@ -408,27 +411,28 @@ export function ProjectWorkspace() {
     ? Array.from(infractions.values()).flat().filter((i) => i.ruleId === drawerRuleId)
     : []
 
+  // Parallel-passages shortcuts (mirrors codex-editor):
+  //   Cmd/Ctrl+F        → search in current file
+  //   Cmd/Ctrl+K        → search across all files (alias)
+  //   Cmd/Ctrl+Shift+F  → search across all files
+  //   Cmd/Ctrl+Shift+R  → search + replace across all files
   useEffect(() => {
     function handler(e: KeyboardEvent) {
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
-        e.preventDefault()
-        setSearchOpen(true)
-      }
+      const key = e.key.toLowerCase()
       if ((e.metaKey || e.ctrlKey) && e.key === ".") {
         if (!activeFileId || !hasUnfinished) return
         e.preventDefault()
         handleJumpNextUnfinished()
+        return
       }
-      // Parallel passages shortcuts mirror codex-editor:
-      //   Cmd/Ctrl+F        → search in current file
-      //   Cmd/Ctrl+Shift+F  → search across all files
-      //   Cmd/Ctrl+Shift+R  → search + replace across all files
-      const key = e.key.toLowerCase()
-      if ((e.metaKey || e.ctrlKey) && !e.altKey && key === "f") {
+      if ((e.metaKey || e.ctrlKey) && !e.altKey && (key === "f" || key === "k")) {
         e.preventDefault()
         setParallelMode("search")
-        setParallelScope(e.shiftKey ? "project" : activeFileId ? "file" : "project")
+        setParallelScope(
+          key === "k" ? "project" : e.shiftKey ? "project" : activeFileId ? "file" : "project",
+        )
         setParallelOpen(true)
+        return
       }
       if ((e.metaKey || e.ctrlKey) && e.shiftKey && key === "r") {
         e.preventDefault()
@@ -449,37 +453,10 @@ export function ProjectWorkspace() {
     }
   }, [project, routeFileId, projectId, navigate])
 
-  useEffect(() => {
-    if (!project) {
-      setActiveShareToken(null)
-      return
-    }
-    listShares(project.id).then((shares) => {
-      setActiveShareToken(shares[0]?.token || null)
-    })
-  }, [project?.id, shareRefreshKey])
-
-  useEffect(() => {
-    if (!project || !activeShareToken) return
-    let stopFn: (() => void) | null = null
-    let cancelled = false
-    ;(async () => {
-      const shares = await listShares(project.id)
-      const activeShare = shares.find((s) => s.token === activeShareToken)
-      if (!activeShare || cancelled) return
-      const host = startBootstrapHost(activeShare, project)
-      stopFn = host.stop
-      if (cancelled) host.stop()
-    })()
-    return () => {
-      cancelled = true
-      if (stopFn) stopFn()
-    }
-  }, [project, activeShareToken])
-
   // Always-on file sync via the codex sync-worker (y-partyserver DO + R2).
-  // Unlike the previous share-token-gated path, this keeps every open file
-  // in lockstep across devices for the same user too, not just collaborators.
+  // This keeps every open file in lockstep across devices for the same user,
+  // not just collaborators — and is also the share-link path now that
+  // joiners are added to project_members on /join/:token redemption.
   const { peers: fileLevelPeers, provider: syncProvider, status: fileSyncStatus } = useFileSync({
     doc,
     projectId: project?.id ?? null,
@@ -516,28 +493,13 @@ export function ProjectWorkspace() {
     [activeFileId, docLoading, doc, cells.length, fileSyncStatus]
   )
 
-  // Project-wide presence room: everyone in the project joins regardless of
-  // which file they're viewing, so the toolbar can show peers who are online
-  // even when they're on different files.
-  const presenceDoc = useMemo(() => (activeShareToken ? new Y.Doc() : null), [activeShareToken])
-  const presenceRoom = activeShareToken ? `codex:share:${activeShareToken}:presence` : null
-  const { peers: presencePeers } = useSync({
-    doc: presenceDoc,
-    roomName: presenceRoom,
-    username: currentUsername,
-    currentFileId: activeFileId || undefined,
-    enabled: Boolean(presenceRoom),
-  })
-
-  // Merge file-level peers (who are in the same file as us) with project-wide
-  // presence peers, deduping by peerId. File-level entries take precedence for
-  // richer awareness like cursor state.
-  const peers = useMemo(() => {
-    const byId = new Map<string, (typeof presencePeers)[number]>()
-    for (const p of presencePeers) byId.set(p.peerId, p)
-    for (const p of fileLevelPeers) byId.set(p.peerId, p)
-    return Array.from(byId.values())
-  }, [fileLevelPeers, presencePeers])
+  // Presence visible in the status bar is the file-level set the sync-worker
+  // already broadcasts via awareness. We previously union'd this with a
+  // separate project-wide presence room (over the legacy signaling relay) so
+  // peers on other files showed up too, but the relay is gone and the
+  // sync-worker doesn't fan out cross-file awareness yet — file-level only
+  // for now.
+  const peers = fileLevelPeers
 
   const collabUser = useMemo(() => {
     if (!syncProvider) return undefined
@@ -548,16 +510,17 @@ export function ProjectWorkspace() {
     }
   }, [syncProvider, currentUsername])
 
-  async function handleSearchSelect(result: WorkspaceSearchResult) {
+  async function handleSearchSelect(result: WorkspaceSearchResult, query: string) {
+    const flash = () => {
+      const idx = cellsRef.current.findIndex((c) => c.id === result.cellId)
+      if (idx >= 0) editorRef.current?.scrollToCellIndex(idx)
+      editorRef.current?.flashCell(result.cellId, query)
+    }
     if (result.fileId !== activeFileId) {
       workspaceTabs.openFile(result.fileId)
-      setTimeout(() => {
-        const idx = cells.findIndex((c) => c.id === result.cellId)
-        if (idx >= 0) editorRef.current?.scrollToCellIndex(idx)
-      }, 400)
+      setTimeout(flash, 400)
     } else {
-      const idx = cells.findIndex((c) => c.id === result.cellId)
-      if (idx >= 0) editorRef.current?.scrollToCellIndex(idx)
+      flash()
     }
   }
 
@@ -843,7 +806,6 @@ export function ProjectWorkspace() {
               onDelete={(fileId) => setPendingDeleteId(fileId)}
             />
             <SidebarProjectSection items={projectNavItems} />
-            <SidebarCommandPaletteHint onClick={() => setSearchOpen(true)} />
           </>
         }
         header={
@@ -891,6 +853,18 @@ export function ProjectWorkspace() {
                 </Tooltip>
               </TooltipProvider>
             )}
+            <button
+              className="flex items-center gap-1.5 rounded p-1.5 text-sm hover:bg-accent"
+              onClick={() => {
+                setParallelMode("search")
+                setParallelScope(activeFileId ? "file" : "project")
+                setParallelOpen(true)
+              }}
+              title="Search & replace (⌘F)"
+            >
+              <SearchIcon className="h-4 w-4" />
+              <span className="hidden text-xs sm:inline">Search</span>
+            </button>
             <NextUnfinishedButton
               onClick={handleJumpNextUnfinished}
               disabled={!activeFileId || !hasUnfinished}
@@ -1130,11 +1104,6 @@ export function ProjectWorkspace() {
       <ImportDialog open={importOpen} onOpenChange={setImportOpen}
         sourceLanguage={project.sourceLanguage} targetLanguage={project.targetLanguage}
         onImported={handleImported} />
-      <SearchDialog
-        open={searchOpen} onOpenChange={setSearchOpen}
-        onReady={buildIndex} loading={searchLoading} ready={searchReady}
-        results={searchResults} onSearch={runSearch} onSelect={handleSearchSelect}
-      />
       <ParallelPassagesPanel
         open={parallelOpen}
         onOpenChange={setParallelOpen}
@@ -1150,6 +1119,7 @@ export function ProjectWorkspace() {
         results={searchResults}
         onReady={buildIndex}
         onSearch={runSearch}
+        onClearResults={clearSearchResults}
         onSelect={handleSearchSelect}
         username={currentUsername}
         isReadOnly={isReadOnly}
@@ -1158,8 +1128,7 @@ export function ProjectWorkspace() {
       <SharePanel
         open={shareOpen} onOpenChange={setShareOpen}
         projectId={projectId!}
-        username={project.username || "anonymous"}
-        onSharesChanged={() => setShareRefreshKey((k) => k + 1)}
+        onSharesChanged={refreshChecklistShares}
       />
       <VideoAttachmentDialog
         open={videoDialogOpen} onOpenChange={setVideoDialogOpen}

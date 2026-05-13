@@ -1,7 +1,7 @@
 // File-sync provider backed by the codex sync-worker (y-partyserver DO + R2).
-// Separate from createSyncProvider in ./signaling-provider.ts which still
-// serves the ephemeral share-link rooms on the older signaling relay. Keep
-// them split until the share flow is redesigned for DOs.
+// This is the only sync provider — share-link joiners are added to
+// project_members via /api/v2/projects/accept-invite, then sync over the same
+// path as any other authenticated member.
 
 import YProvider from "y-partyserver/provider"
 import * as Y from "yjs"

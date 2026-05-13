@@ -59,6 +59,13 @@ declare global {
        * (or omit) in production.
        */
       ALLOW_UNAUTHENTICATED?: string
+      /**
+       * Optional R2 key prefix. Empty / unset on prod and the shared staging
+       * worker. Per-PR worker variants set this to `pr-<N>` so they can
+       * share `codex-snapshots-staging` with the dev/preview sandbox without
+       * stepping on each other's snapshots.
+       */
+      R2_KEY_PREFIX?: string
     }
   }
 }
@@ -69,12 +76,25 @@ type Env = Cloudflare.Env
 const SPIKE_PROJECT_PREFIX = "spike"
 const DOC_ID_SEPARATOR = "--"
 
-function snapshotKey(projectId: string, fileId: string): string {
-  return `projects/${projectId}/files/${fileId}/snapshot.bin`
+/** Resolves the optional R2_KEY_PREFIX env var into a normalized prefix
+ *  (empty string or trailing-slash form). Centralized so every key
+ *  constructor agrees on the rules. */
+export function r2KeyPrefix(env: Pick<Env, "R2_KEY_PREFIX">): string {
+  const p = env.R2_KEY_PREFIX?.trim().replace(/^\/+|\/+$/g, "") ?? ""
+  return p ? `${p}/` : ""
 }
 
-function tailPrefix(projectId: string, fileId: string): string {
-  return `projects/${projectId}/files/${fileId}/tail/`
+function snapshotKey(env: Pick<Env, "R2_KEY_PREFIX">, projectId: string, fileId: string): string {
+  return `${r2KeyPrefix(env)}projects/${projectId}/files/${fileId}/snapshot.bin`
+}
+
+function tailPrefix(env: Pick<Env, "R2_KEY_PREFIX">, projectId: string, fileId: string): string {
+  return `${r2KeyPrefix(env)}projects/${projectId}/files/${fileId}/tail/`
+}
+
+/** R2 prefix that lists *every* object for a file (snapshot + all tails + checkpoints). */
+function fileObjectPrefix(env: Pick<Env, "R2_KEY_PREFIX">, projectId: string, fileId: string): string {
+  return `${r2KeyPrefix(env)}projects/${projectId}/files/${fileId}/`
 }
 
 function parseDocId(name: string): { projectId: string; fileId: string } {
@@ -176,12 +196,13 @@ function pruneCellHistory(doc: Y.Doc): {
  * Y.Doc is warm in memory and when the alarm wakes a cold DO.
  */
 async function compactToSnapshot(
-  bucket: R2Bucket,
+  env: Pick<Env, "R2_KEY_PREFIX"> & { SNAPSHOTS: R2Bucket },
   projectId: string,
   fileId: string
 ): Promise<number> {
-  const prefix = tailPrefix(projectId, fileId)
-  const snapKey = snapshotKey(projectId, fileId)
+  const bucket = env.SNAPSHOTS
+  const prefix = tailPrefix(env, projectId, fileId)
+  const snapKey = snapshotKey(env, projectId, fileId)
 
   const [existingSnap, tails] = await Promise.all([
     bucket.get(snapKey),
@@ -240,14 +261,14 @@ export class FileSync extends YServer {
 
   async onLoad(): Promise<Y.Doc | void> {
     const { projectId, fileId } = parseDocId(this.name)
-    const snap = await this.env.SNAPSHOTS.get(snapshotKey(projectId, fileId))
+    const snap = await this.env.SNAPSHOTS.get(snapshotKey(this.env, projectId, fileId))
     if (snap) {
       const buf = new Uint8Array(await snap.arrayBuffer())
       Y.applyUpdate(this.document, buf)
     }
 
     // Replay tail updates since the last compaction.
-    const list = await this.env.SNAPSHOTS.list({ prefix: tailPrefix(projectId, fileId) })
+    const list = await this.env.SNAPSHOTS.list({ prefix: tailPrefix(this.env, projectId, fileId) })
     const keys = list.objects.map((o) => o.key).sort()
     for (const key of keys) {
       const obj = await this.env.SNAPSHOTS.get(key)
@@ -278,7 +299,7 @@ export class FileSync extends YServer {
           // skip the event replay. Writes the full state under the snapshot
           // key (not a tail) — matches what compactToSnapshot would produce.
           const update = Y.encodeStateAsUpdate(this.document)
-          await this.env.SNAPSHOTS.put(snapshotKey(projectId, fileId), update)
+          await this.env.SNAPSHOTS.put(snapshotKey(this.env, projectId, fileId), update)
           console.log(
             `[FileSync.onLoad] hydrated ${this.name}: ${result.cellCount} cells from ${result.cellCommitsApplied} commits`,
           )
@@ -295,7 +316,7 @@ export class FileSync extends YServer {
     // a cold DO sees the banner without waiting for a broadcast. Writes only
     // when the marker's state differs from the doc's current meta to keep the
     // operation idempotent across reloads.
-    const marker = await readArchiveMarker(this.env.SNAPSHOTS, projectId)
+    const marker = await readArchiveMarker(this.env, projectId)
     this.applyArchiveMarker(marker)
 
     // After the archive marker is (possibly) merged in, snapshot the state
@@ -414,7 +435,7 @@ export class FileSync extends YServer {
     const encoded = encodeNextTail(this.document, this.lastFlushedSV)
     if (!encoded) return
     const seq = Date.now().toString().padStart(16, "0")
-    const key = `${tailPrefix(projectId, fileId)}${seq}.bin`
+    const key = `${tailPrefix(this.env, projectId, fileId)}${seq}.bin`
     await this.env.SNAPSHOTS.put(key, encoded.update)
     this.lastFlushedSV = encoded.newSV
     this.tailCount += 1
@@ -449,7 +470,7 @@ export class FileSync extends YServer {
 
   private async compactInBackground(projectId: string, fileId: string): Promise<void> {
     try {
-      const removed = await compactToSnapshot(this.env.SNAPSHOTS, projectId, fileId)
+      const removed = await compactToSnapshot(this.env, projectId, fileId)
       // Tails written during compaction bumped tailCount already; subtracting
       // the removed count gives the post-compact total (never goes negative
       // because onSave is the only thing that adds to tailCount).
@@ -504,7 +525,7 @@ export class FileSync extends YServer {
     if (live > 0) return // someone rejoined — the next onClose will re-arm
     const { projectId, fileId } = parseDocId(this.name)
     try {
-      const removed = await compactToSnapshot(this.env.SNAPSHOTS, projectId, fileId)
+      const removed = await compactToSnapshot(this.env, projectId, fileId)
       this.tailCount = Math.max(0, this.tailCount - removed)
     } catch (err) {
       console.warn(`compaction failed for ${this.name}:`, err)
@@ -540,8 +561,8 @@ async function handleCompactDocRequest(
 
   const projectId = decodeURIComponent(match[1])
   const fileId = decodeURIComponent(match[2])
-  const snapKey = snapshotKey(projectId, fileId)
-  const tailPref = tailPrefix(projectId, fileId)
+  const snapKey = snapshotKey(env, projectId, fileId)
+  const tailPref = tailPrefix(env, projectId, fileId)
 
   // Load existing snapshot + every tail into a fresh Y.Doc, then prune.
   // We don't go through the DO instance — running this against an active DO

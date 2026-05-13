@@ -72,7 +72,6 @@ export function SetupChecklistDrawer({
           >
             <InviteStep
               projectId={project.id}
-              username={project.username || "anonymous"}
               onSharesChanged={onSharesChanged}
             />
           </ChecklistItem>

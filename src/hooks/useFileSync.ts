@@ -1,5 +1,4 @@
 // File-level sync hook backed by the codex sync-worker (y-partyserver DO + R2).
-// Mirrors useSync's shape so callers only change the import and input keys.
 
 import { useEffect, useState, useMemo, useRef } from "react"
 import * as Y from "yjs"
@@ -9,14 +8,38 @@ import {
   destroyFileSyncProvider,
   type FileSyncProviderHandle,
 } from "@/lib/sync/partyserver-provider"
-import { peerColor } from "@/lib/sync/signaling-provider"
 import { displayNameFor } from "@/lib/sync/anonymous-name"
 import { makeSyncTokenFetcher } from "@/lib/sync/sync-token"
 import { attachSyncDebug, logEffectShortCircuit, type SyncDebugAttach } from "@/lib/sync/sync-debug"
 import { patchProject } from "@/lib/store/project-index"
-import type { PeerState } from "@/hooks/useSync"
 import type { FrontierSession } from "@/lib/frontier/types"
 import type { SyncStatus } from "@/components/SyncStatusIndicator"
+
+/** Awareness payload for a single connected peer in a file-sync room. */
+export interface PeerState {
+  /** Ephemeral client ID from y-partyserver awareness. */
+  peerId: string
+  username: string
+  color: string
+  currentFileId?: string
+}
+
+/**
+ * Deterministic color from a peerId for avatar tinting. Same id maps to the
+ * same color across reloads so peers stay visually stable.
+ */
+export function peerColor(peerId: string): string {
+  let hash = 0
+  for (let i = 0; i < peerId.length; i++) {
+    hash = (hash << 5) - hash + peerId.charCodeAt(i)
+    hash |= 0
+  }
+  const colors = [
+    "#3b82f6", "#ef4444", "#22c55e", "#a855f7", "#f97316",
+    "#14b8a6", "#eab308", "#ec4899", "#6366f1", "#84cc16",
+  ]
+  return colors[Math.abs(hash) % colors.length]
+}
 
 interface UseFileSyncOptions {
   doc: Y.Doc | null

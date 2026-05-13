@@ -1,6 +1,6 @@
 import { useState } from "react"
 import { Users } from "lucide-react"
-import type { PeerState } from "@/hooks/useSync"
+import type { PeerState } from "@/hooks/useFileSync"
 
 interface PeerPresenceProps {
   peers: PeerState[]

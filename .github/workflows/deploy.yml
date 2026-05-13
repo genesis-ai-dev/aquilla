@@ -1,33 +1,145 @@
 name: Deploy to Cloudflare Pages
 
+# When previews are built:
+#   push to main / dev       → always (these are "real" deploys)
+#   PR opened / reopened     → always (give reviewers something to click)
+#   PR ready_for_review      → always (author signaled "look at this")
+#   PR synchronize (push)    → only if [preview] or [deploy] in commit message
+#   draft PR                 → never (author is iterating; not blocking quota on it)
+#   docs-only changes        → never (paths-ignore)
+#
+# Branch alias stays pointing at the last *deployed* commit. Iterate freely
+# without burning a build; push one [preview] commit when you want reviewers
+# to see the latest.
+
 on:
   push:
-    branches: [main]
+    branches: [main, dev]
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+  pull_request:
+    branches: [dev, main]
+    types: [opened, reopened, ready_for_review, synchronize]
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
   workflow_dispatch:
+
+# Kill in-flight deploys for the same PR / branch when a new push lands.
+concurrency:
+  group: deploy-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 jobs:
   deploy:
+    if: github.event.pull_request.draft != true
     runs-on: ubuntu-latest
     permissions:
       contents: read
       deployments: write
+      pull-requests: write
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Decide whether to deploy
+        id: decide
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ] && [ "${{ github.event.action }}" = "synchronize" ]; then
+            msg=$(git log -1 --format='%s%n%b')
+            if echo "$msg" | grep -qiE '\[preview\]|\[deploy\]'; then
+              echo "deploy=true" >> "$GITHUB_OUTPUT"
+              echo "reason=preview-tag" >> "$GITHUB_OUTPUT"
+            else
+              echo "deploy=false" >> "$GITHUB_OUTPUT"
+              echo "reason=synchronize-without-tag" >> "$GITHUB_OUTPUT"
+            fi
+          else
+            echo "deploy=true" >> "$GITHUB_OUTPUT"
+            echo "reason=${{ github.event_name }}/${{ github.event.action }}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Skip notice
+        if: steps.decide.outputs.deploy != 'true'
+        run: |
+          echo "::notice::Skipping preview deploy (${{ steps.decide.outputs.reason }}). Add [preview] to a commit message to force one."
 
       - uses: actions/setup-node@v4
+        if: steps.decide.outputs.deploy == 'true'
         with:
           node-version: 22
           cache: npm
 
       - run: npm ci
+        if: steps.decide.outputs.deploy == 'true'
 
       - run: npm test
+        if: steps.decide.outputs.deploy == 'true'
 
+      - name: Compute deploy branch alias
+        id: branch
+        if: steps.decide.outputs.deploy == 'true'
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            echo "name=pr-${{ github.event.number }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "name=${{ github.ref_name }}" >> "$GITHUB_OUTPUT"
+          fi
+
+      # When a PR adds SQL migrations, pr-db-fork.yml spins up
+      # codex-sync-worker-pr-<N> against a forked D1 + namespaced R2
+      # prefix so the migration doesn't pollute shared staging. The build
+      # then needs to target that worker. Detect here so the build env
+      # block below can switch.
+      - name: Detect PR migrations
+        id: migrations
+        if: steps.decide.outputs.deploy == 'true' && github.event_name == 'pull_request'
+        run: |
+          if git diff --name-only --diff-filter=AM origin/${{ github.event.pull_request.base.ref }}...HEAD \
+               | grep -qE '^sync-worker/migrations/.*\.sql$'; then
+            echo "has=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      # Branch → worker host mapping:
+      #   main                        → prod          (codex-sync-worker.*)
+      #   PR with migrations          → per-PR fork   (codex-sync-worker-pr-<N>.*)
+      #   anything else (dev, PR)     → staging       (codex-sync-worker-staging.*)
+      # VITE_AUTH_BASE targets codex-auth-worker for auth / sync-token /
+      # invite routes. VITE_CHAT_BASE targets codex-chat-worker for the
+      # LLM completion proxy. The rest of the frontier API (payments,
+      # members, orgs — none of which codex-web calls today) would still
+      # use VITE_FRONTIER_BASE if we ever needed it.
       - run: npm run build
+        if: steps.decide.outputs.deploy == 'true'
+        env:
+          VITE_SYNC_WORKER_HOST: ${{ github.ref == 'refs/heads/main' && 'codex-sync-worker.blue-darkness-7674.workers.dev' || (steps.migrations.outputs.has == 'true' && format('codex-sync-worker-pr-{0}.blue-darkness-7674.workers.dev', github.event.pull_request.number) || 'codex-sync-worker-staging.blue-darkness-7674.workers.dev') }}
+          VITE_AUTH_BASE: ${{ github.ref == 'refs/heads/main' && 'https://codex-auth-worker.blue-darkness-7674.workers.dev' || 'https://codex-auth-worker-staging.blue-darkness-7674.workers.dev' }}
+          VITE_CHAT_BASE: ${{ github.ref == 'refs/heads/main' && 'https://codex-chat-worker.blue-darkness-7674.workers.dev' || 'https://codex-chat-worker-staging.blue-darkness-7674.workers.dev' }}
+          VITE_GIT_CORS_PROXY: ${{ github.ref == 'refs/heads/main' && 'https://codex-git-proxy.ryderwishart.workers.dev' || 'https://codex-git-proxy-staging.blue-darkness-7674.workers.dev' }}
 
       - name: Deploy to Cloudflare Pages
+        id: deploy
+        if: steps.decide.outputs.deploy == 'true'
         uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: 6a80496d1e59948a9cbaa3c643ba81d7
-          command: pages deploy dist --project-name=codex-web --branch=main
+          command: pages deploy dist --project-name=codex-web --branch=${{ steps.branch.outputs.name }}
+
+      - name: Comment preview URL on PR
+        if: github.event_name == 'pull_request' && steps.decide.outputs.deploy == 'true'
+        uses: marocchino/sticky-pull-request-comment@v2
+        with:
+          header: pages-preview
+          message: |
+            **Cloudflare Pages preview**
+
+            - Branch alias: https://${{ steps.branch.outputs.name }}.codex-web-4ih.pages.dev
+            - This deployment: ${{ steps.deploy.outputs.deployment-url }}
+            - Commit: `${{ github.event.pull_request.head.sha }}`
+
+            Re-deploys on commits tagged `[preview]` (skip the tag to iterate without rebuilding).

@@ -8,7 +8,7 @@ import { makeTestToken } from './helpers/auth'
 const SECRET = 'read-route-secret'
 
 function envWith(db: ReturnType<typeof makeInMemoryD1>) {
-  return { CODEX_DB: db, SYNC_SECRET_KEY: SECRET }
+  return { AQUILLA_DB: db, SYNC_SECRET_KEY: SECRET }
 }
 
 describe('CQRS read routes', () => {

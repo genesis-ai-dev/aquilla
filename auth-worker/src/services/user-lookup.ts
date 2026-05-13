@@ -18,7 +18,7 @@ export async function lookupUserByUsername(
   env: Env,
   username: string,
 ): Promise<LookedUpUser | null> {
-  const row = await env.CODEX_DB.prepare(
+  const row = await env.AQUILLA_DB.prepare(
     "SELECT id, username FROM users WHERE username = ?",
   )
     .bind(username)
@@ -42,7 +42,7 @@ export async function searchUsersByPrefix(
   prefix: string,
   limit: number,
 ): Promise<LookedUpUser[]> {
-  const result = await env.CODEX_DB.prepare(
+  const result = await env.AQUILLA_DB.prepare(
     `SELECT id, username FROM users
       WHERE username LIKE ? || '%' COLLATE NOCASE
       ORDER BY username COLLATE NOCASE ASC

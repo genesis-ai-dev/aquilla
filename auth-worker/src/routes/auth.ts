@@ -74,7 +74,7 @@ auth.post("/register", zValidator("json", registerSchema), async (c) => {
       )
     }
 
-    const existingUser = await c.env.CODEX_DB.prepare(
+    const existingUser = await c.env.AQUILLA_DB.prepare(
       "SELECT id FROM users WHERE username = ? OR email = ?",
     )
       .bind(username, email)
@@ -88,7 +88,7 @@ auth.post("/register", zValidator("json", registerSchema), async (c) => {
 
     const passwordHash = await hashPasswordWerkzeugScrypt(password)
 
-    const result = await c.env.CODEX_DB.prepare(
+    const result = await c.env.AQUILLA_DB.prepare(
       `INSERT INTO users (username, email, password_hash)
        VALUES (?, ?, ?)`,
     )
@@ -189,7 +189,7 @@ auth.post("/token", async (c) => {
       if (result.isValid && result.shouldRehashToWerkzeugScrypt) {
         try {
           const newHash = await hashPasswordWerkzeugScrypt(password)
-          await c.env.CODEX_DB.prepare(
+          await c.env.AQUILLA_DB.prepare(
             "UPDATE users SET password_hash = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
           )
             .bind(newHash, user.id)
@@ -238,7 +238,7 @@ interface ActivityLogRow {
 auth.get("/activity-log", authMiddleware, async (c) => {
   const user = c.get("user")
   try {
-    const logs = await c.env.CODEX_DB.prepare(
+    const logs = await c.env.AQUILLA_DB.prepare(
       `SELECT timestamp, activity_type, description, activity_metadata
        FROM activity_logs
        WHERE user_id = ?
@@ -277,7 +277,7 @@ auth.post(
   async (c) => {
     const { email } = c.req.valid("json")
     try {
-      const user = await c.env.CODEX_DB.prepare(
+      const user = await c.env.AQUILLA_DB.prepare(
         "SELECT id, username FROM users WHERE email = ?",
       )
         .bind(email)
@@ -289,7 +289,7 @@ auth.post(
 
       const token = crypto.randomUUID()
       const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000)
-      await c.env.CODEX_DB.prepare(
+      await c.env.AQUILLA_DB.prepare(
         `INSERT OR REPLACE INTO password_reset_tokens (user_id, token, expires_at)
          VALUES (?, ?, ?)`,
       )
@@ -320,7 +320,7 @@ auth.post(
   async (c) => {
     const { token, username } = c.req.valid("json")
     try {
-      const user = await c.env.CODEX_DB.prepare(
+      const user = await c.env.AQUILLA_DB.prepare(
         "SELECT id FROM users WHERE username = ?",
       )
         .bind(username)
@@ -329,7 +329,7 @@ auth.post(
         return c.json({ error: "Invalid token" }, 400)
       }
 
-      const resetToken = await c.env.CODEX_DB.prepare(
+      const resetToken = await c.env.AQUILLA_DB.prepare(
         `SELECT expires_at FROM password_reset_tokens
          WHERE user_id = ? AND token = ?`,
       )
@@ -341,7 +341,7 @@ auth.post(
 
       const expiresAt = new Date(resetToken.expires_at)
       if (expiresAt < new Date()) {
-        await c.env.CODEX_DB.prepare(
+        await c.env.AQUILLA_DB.prepare(
           "DELETE FROM password_reset_tokens WHERE user_id = ?",
         )
           .bind(user.id)
@@ -362,7 +362,7 @@ auth.post(
   async (c) => {
     const { token, username, new_password } = c.req.valid("json")
     try {
-      const user = await c.env.CODEX_DB.prepare(
+      const user = await c.env.AQUILLA_DB.prepare(
         "SELECT id FROM users WHERE username = ?",
       )
         .bind(username)
@@ -371,7 +371,7 @@ auth.post(
         return c.json({ error: "Invalid token" }, 400)
       }
 
-      const resetToken = await c.env.CODEX_DB.prepare(
+      const resetToken = await c.env.AQUILLA_DB.prepare(
         `SELECT expires_at FROM password_reset_tokens
          WHERE user_id = ? AND token = ?`,
       )
@@ -382,7 +382,7 @@ auth.post(
       }
       const expiresAt = new Date(resetToken.expires_at)
       if (expiresAt < new Date()) {
-        await c.env.CODEX_DB.prepare(
+        await c.env.AQUILLA_DB.prepare(
           "DELETE FROM password_reset_tokens WHERE user_id = ?",
         )
           .bind(user.id)
@@ -391,12 +391,12 @@ auth.post(
       }
 
       const passwordHash = await hashPasswordWerkzeugScrypt(new_password)
-      await c.env.CODEX_DB.prepare(
+      await c.env.AQUILLA_DB.prepare(
         "UPDATE users SET password_hash = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
       )
         .bind(passwordHash, user.id)
         .run()
-      await c.env.CODEX_DB.prepare(
+      await c.env.AQUILLA_DB.prepare(
         "DELETE FROM password_reset_tokens WHERE user_id = ?",
       )
         .bind(user.id)

@@ -21,7 +21,7 @@ export async function getOrCreateUserOrg(
   env: Env,
   user: AuthUser,
 ): Promise<UserOrg> {
-  const existing = await env.CODEX_DB.prepare(
+  const existing = await env.AQUILLA_DB.prepare(
     "SELECT id, name FROM organizations WHERE owner_user_id = ? ORDER BY id ASC LIMIT 1",
   )
     .bind(user.id)
@@ -32,7 +32,7 @@ export async function getOrCreateUserOrg(
   }
 
   const name = `${user.username}'s workspace`
-  const inserted = await env.CODEX_DB.prepare(
+  const inserted = await env.AQUILLA_DB.prepare(
     `INSERT INTO organizations (name, owner_user_id, subscription_tier)
      VALUES (?, ?, 'free') RETURNING id`,
   )
@@ -40,7 +40,7 @@ export async function getOrCreateUserOrg(
     .first<{ id: number }>()
   if (!inserted) throw new Error("failed to insert organization row")
 
-  await env.CODEX_DB.prepare(
+  await env.AQUILLA_DB.prepare(
     `INSERT INTO org_members (org_id, user_id, role_level, granted_by)
      VALUES (?, ?, 700, ?)
      ON CONFLICT(org_id, user_id) DO NOTHING`,
@@ -57,7 +57,7 @@ export async function getOrgMemberRole(
   orgId: number,
   userId: number,
 ): Promise<number | null> {
-  const row = await env.CODEX_DB.prepare(
+  const row = await env.AQUILLA_DB.prepare(
     "SELECT role_level FROM org_members WHERE org_id = ? AND user_id = ?",
   )
     .bind(orgId, userId)
@@ -78,7 +78,7 @@ export async function listOrgMembersWithUsers(
   env: Env,
   orgId: number,
 ): Promise<OrgMemberWithUser[]> {
-  const result = await env.CODEX_DB.prepare(
+  const result = await env.AQUILLA_DB.prepare(
     `SELECT om.user_id AS user_id, u.username AS username,
             om.role_level AS role_level, om.last_active_at AS last_active_at
      FROM org_members om
@@ -114,7 +114,7 @@ export async function bumpOrgActivity(
 ): Promise<void> {
   if (orgId == null) return
   try {
-    await env.CODEX_DB.prepare(
+    await env.AQUILLA_DB.prepare(
       `UPDATE org_members
           SET last_active_at = CURRENT_TIMESTAMP
         WHERE org_id = ? AND user_id = ?
@@ -144,7 +144,7 @@ export async function listPendingInvitesInOrg(
   env: Env,
   orgId: number,
 ): Promise<PendingOrgInvite[]> {
-  const result = await env.CODEX_DB.prepare(
+  const result = await env.AQUILLA_DB.prepare(
     `SELECT pi.token AS token,
             pi.project_id AS project_id,
             p.name AS project_name,
@@ -203,7 +203,7 @@ export async function listEffectiveProjectMembers(
   orgId: number | null,
   createdBy: number,
 ): Promise<EffectiveMember[]> {
-  const direct = await env.CODEX_DB.prepare(
+  const direct = await env.AQUILLA_DB.prepare(
     `SELECT pm.user_id AS user_id, u.username AS username, pm.role_level AS role_level
      FROM project_members pm
      INNER JOIN users u ON u.id = pm.user_id
@@ -223,7 +223,7 @@ export async function listEffectiveProjectMembers(
   }
 
   if (orgId != null) {
-    const orgMembers = await env.CODEX_DB.prepare(
+    const orgMembers = await env.AQUILLA_DB.prepare(
       `SELECT om.user_id AS user_id, u.username AS username, om.role_level AS role_level
        FROM org_members om
        INNER JOIN users u ON u.id = om.user_id
@@ -245,7 +245,7 @@ export async function listEffectiveProjectMembers(
   }
 
   if (!directMap.has(createdBy)) {
-    const creator = await env.CODEX_DB.prepare(
+    const creator = await env.AQUILLA_DB.prepare(
       "SELECT id, username FROM users WHERE id = ?",
     )
       .bind(createdBy)
@@ -280,7 +280,7 @@ export async function listUserDirectMembershipsInOrg(
   orgId: number,
   userId: number,
 ): Promise<ProjectMembershipInOrg[]> {
-  const result = await env.CODEX_DB.prepare(
+  const result = await env.AQUILLA_DB.prepare(
     `SELECT pm.project_id AS project_id, p.name AS project_name, pm.role_level AS role_level
      FROM project_members pm
      INNER JOIN projects p ON p.id = pm.project_id

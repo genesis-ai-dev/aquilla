@@ -90,7 +90,7 @@ orgs.post(
       return c.json({ error: "cannot grant role to self" }, 400)
     }
 
-    await c.env.CODEX_DB.prepare(
+    await c.env.AQUILLA_DB.prepare(
       `INSERT INTO org_members (org_id, user_id, role_level, granted_by)
        VALUES (?, ?, ?, ?)
        ON CONFLICT(org_id, user_id) DO UPDATE SET
@@ -126,7 +126,7 @@ orgs.delete("/:orgId/members/:userId", async (c) => {
     return c.json({ error: "owner cannot remove self" }, 400)
   }
 
-  await c.env.CODEX_DB.prepare(
+  await c.env.AQUILLA_DB.prepare(
     "DELETE FROM org_members WHERE org_id = ? AND user_id = ?",
   )
     .bind(orgId, targetUserId)

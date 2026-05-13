@@ -80,7 +80,7 @@ async function resolveProjectRoleInternal(
   projectId: string,
   opts: { includeArchived: boolean },
 ): Promise<ResolvedRole | null> {
-  const project = await env.CODEX_DB.prepare(
+  const project = await env.AQUILLA_DB.prepare(
     `SELECT id, org_id, created_by, archived_at FROM projects WHERE id = ?`,
   )
     .bind(projectId)
@@ -95,7 +95,7 @@ async function resolveProjectRoleInternal(
   if (!opts.includeArchived && project.archived_at) return null
 
   // Tier 1: explicit override.
-  const override = await env.CODEX_DB.prepare(
+  const override = await env.AQUILLA_DB.prepare(
     "SELECT role_level FROM project_members WHERE project_id = ? AND user_id = ?",
   )
     .bind(projectId, user.id)
@@ -116,7 +116,7 @@ async function resolveProjectRoleInternal(
 
   // Tier 3: org membership grants role on every project in that org.
   if (project.org_id != null) {
-    const orgRow = await env.CODEX_DB.prepare(
+    const orgRow = await env.AQUILLA_DB.prepare(
       "SELECT role_level FROM org_members WHERE org_id = ? AND user_id = ?",
     )
       .bind(project.org_id, user.id)

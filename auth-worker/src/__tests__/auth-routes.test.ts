@@ -21,7 +21,7 @@ async function makeUserRow(): Promise<UserRow> {
 
 function makeEnv(db: ReturnType<typeof makeFakeD1>): Env {
   return {
-    CODEX_DB: db,
+    AQUILLA_DB: db,
     SECRET_KEY: SECRET,
     ALGORITHM: "HS256",
     ACCESS_TOKEN_EXPIRE_MINUTES: "60",

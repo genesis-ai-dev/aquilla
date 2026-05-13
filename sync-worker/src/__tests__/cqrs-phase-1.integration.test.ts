@@ -115,7 +115,7 @@ describe('CQRS Phase 1 integration: POST → DB → broadcast → GET', () => {
   it('writes event and cell projection to D1, then broadcasts, then GET returns the event', async () => {
     const db = makeInMemoryD1()
     const FileSync = {} as DurableObjectNamespace
-    const env = { CODEX_DB: db, SYNC_SECRET_KEY: SECRET, FileSync }
+    const env = { AQUILLA_DB: db, SYNC_SECRET_KEY: SECRET, FileSync }
 
     const token = await makeToken()
     const event = makeCommitEvent()
@@ -190,7 +190,7 @@ describe('CQRS Phase 1 integration: POST → DB → broadcast → GET', () => {
   it('broadcast is skipped when FileSync is absent (no env binding)', async () => {
     const db = makeInMemoryD1()
     // No FileSync in env — should not call getServerByName.
-    const env = { CODEX_DB: db, SYNC_SECRET_KEY: SECRET }
+    const env = { AQUILLA_DB: db, SYNC_SECRET_KEY: SECRET }
 
     const token = await makeToken()
     const postRes = await postEvents([makeCommitEvent()], env, token)
@@ -203,7 +203,7 @@ describe('CQRS Phase 1 integration: POST → DB → broadcast → GET', () => {
     mockGetServerByName.mockResolvedValue({ fetch: broadcastFetchSpy })
 
     const db = makeInMemoryD1()
-    const env = { CODEX_DB: db, SYNC_SECRET_KEY: SECRET, FileSync: {} as DurableObjectNamespace }
+    const env = { AQUILLA_DB: db, SYNC_SECRET_KEY: SECRET, FileSync: {} as DurableObjectNamespace }
     const token = await makeToken()
 
     const postRes = await postEvents([makeCommitEvent()], env, token)
@@ -215,7 +215,7 @@ describe('CQRS Phase 1 integration: POST → DB → broadcast → GET', () => {
 
   it('GET /events returns only events for the requested fileId', async () => {
     const db = makeInMemoryD1()
-    const env = { CODEX_DB: db, SYNC_SECRET_KEY: SECRET }
+    const env = { AQUILLA_DB: db, SYNC_SECRET_KEY: SECRET }
     const tokenX = await makeToken({ fileId: 'file-x' })
     const tokenY = await makeToken({ fileId: 'file-y' })
 
@@ -243,7 +243,7 @@ describe('CQRS Phase 1 integration: POST → DB → broadcast → GET', () => {
     // and shared (project, file, cell) so the projection.dirty coalesces.
     const d1 = makeInMemoryD1()
     const FileSync = {} as DurableObjectNamespace
-    const env = { CODEX_DB: d1, SYNC_SECRET_KEY: SECRET, FileSync }
+    const env = { AQUILLA_DB: d1, SYNC_SECRET_KEY: SECRET, FileSync }
     const token = await makeToken({ projectId: 'p1', fileId: 'f1' })
 
     const events: RawEvent<'cell.commit'>[] = []

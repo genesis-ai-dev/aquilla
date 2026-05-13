@@ -67,7 +67,7 @@ syncToken.post(
     const user = c.get("user")
     const { projectId, fileId, projectName } = c.req.valid("json")
 
-    const project = await c.env.CODEX_DB.prepare(
+    const project = await c.env.AQUILLA_DB.prepare(
       `SELECT id, name, org_id, created_by, archived_at
        FROM projects WHERE id = ?`,
     )
@@ -82,7 +82,7 @@ syncToken.post(
       }
 
       // 1. project_members override.
-      const member = await c.env.CODEX_DB.prepare(
+      const member = await c.env.AQUILLA_DB.prepare(
         `SELECT role_level FROM project_members
          WHERE project_id = ? AND user_id = ?`,
       )
@@ -109,7 +109,7 @@ syncToken.post(
       //    name) is supplied by the client; the caller becomes the owner.
       //    Matches the auto-registration behaviour described in docs/SYNC.md.
       try {
-        await c.env.CODEX_DB.prepare(
+        await c.env.AQUILLA_DB.prepare(
           `INSERT INTO projects (id, name, created_by)
            VALUES (?, ?, ?)`,
         )

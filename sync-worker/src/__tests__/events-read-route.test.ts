@@ -35,7 +35,7 @@ function makeEventRow(overrides: Partial<EventRow> = {}): EventRow {
 }
 
 function makeEnv(db?: D1Database, secret: string | undefined = SECRET) {
-  return { CODEX_DB: db, SYNC_SECRET_KEY: secret }
+  return { AQUILLA_DB: db, SYNC_SECRET_KEY: secret }
 }
 
 async function makeRequest(
@@ -83,11 +83,11 @@ describe('handleEventsReadRequest', () => {
     const req = await makeRequest({ fileId: 'file-x' }, 'tok', '/events', 'GET')
     // Pass env without SYNC_SECRET_KEY (explicit undefined triggers the default,
     // so we build the object directly).
-    const res = await handleEventsReadRequest(req, { CODEX_DB: makeInMemoryD1(), SYNC_SECRET_KEY: undefined })
+    const res = await handleEventsReadRequest(req, { AQUILLA_DB: makeInMemoryD1(), SYNC_SECRET_KEY: undefined })
     expect(res?.status).toBe(500)
   })
 
-  it('returns 500 when CODEX_DB missing', async () => {
+  it('returns 500 when AQUILLA_DB missing', async () => {
     const token = await makeToken()
     const req = await makeRequest({ fileId: 'file-x' }, token)
     const res = await handleEventsReadRequest(req, makeEnv(undefined, SECRET))

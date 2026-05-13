@@ -35,8 +35,8 @@ testReset.post("/reset", async (c) => {
     return c.json({ error: "Not found" }, 404)
   }
 
-  const db = c.env.CODEX_DB
-  const codexDb = c.env.CODEX_DB
+  const db = c.env.AQUILLA_DB
+  const codexDb = c.env.AQUILLA_DB
 
   // Order matters: drop dependent rows before parents. The hand-rolled
   // delete-everything is safer than a real TRUNCATE because some tables

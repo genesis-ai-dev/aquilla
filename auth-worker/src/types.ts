@@ -8,7 +8,7 @@
 export interface Env {
   /** Bound to `codex` (prod) or `codex-staging` (staging). Shared with
    *  codex-sync-worker (same database_id). */
-  CODEX_DB: D1Database
+  AQUILLA_DB: D1Database
 
   // Frontier JWT signing. Rotated for the clean break — tokens minted by
   // the legacy frontier-server no longer verify here.

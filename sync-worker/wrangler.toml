@@ -28,7 +28,7 @@ bucket_name = "codex-snapshots"
 # against the `files`, `cells`, `events`, `cell_validators`, `checkpoints`
 # tables. Migration application happens via auth-worker's deploy step.
 [[d1_databases]]
-binding = "CODEX_DB"
+binding = "AQUILLA_DB"
 database_name = "aquilla-db"
 # database_id is populated by `wrangler d1 create aquilla-db` — must match
 # auth-worker/wrangler.toml.
@@ -72,6 +72,6 @@ binding = "SNAPSHOTS"
 bucket_name = "codex-snapshots-staging"
 
 [[env.staging.d1_databases]]
-binding = "CODEX_DB"
+binding = "AQUILLA_DB"
 database_name = "aquilla-db-staging"
 database_id = "c995bf9a-97c0-4966-a112-053a2d04d8f9"

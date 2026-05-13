@@ -10,13 +10,16 @@ const AUTH_DIR = path.resolve(__dirname, "../.auth")
 
 if (!existsSync(AUTH_DIR)) mkdirSync(AUTH_DIR, { recursive: true })
 
-const FRONTIER_BASE = process.env.VITE_FRONTIER_BASE ?? "http://127.0.0.1:8787"
+const AUTH_BASE = process.env.VITE_AUTH_BASE ?? "http://127.0.0.1:8787"
 
 interface AuthResponse {
   access_token: string
   token_type: string
-  gitlab_token: string
-  gitlab_url: string
+  // GitLab fields are returned as null/empty strings by codex-auth-worker —
+  // codex-web dropped its GitLab integration (#66), but the legacy field
+  // names are preserved in the response so existing helpers keep parsing.
+  gitlab_token?: string
+  gitlab_url?: string
 }
 
 export interface PersistedSession {
@@ -37,7 +40,7 @@ export async function ensureAuthState(username: SeedUser["username"]): Promise<P
 
   const ctx = await pwRequest.newContext()
   try {
-    const r = await ctx.post(`${FRONTIER_BASE}/api/v1/auth/token`, {
+    const r = await ctx.post(`${AUTH_BASE}/api/v1/auth/token`, {
       data: { username: u.username, password: u.password },
     })
     if (!r.ok()) {
@@ -46,8 +49,8 @@ export async function ensureAuthState(username: SeedUser["username"]): Promise<P
     const auth = (await r.json()) as AuthResponse
     const session: PersistedSession = {
       jwt: auth.access_token,
-      gitlabToken: auth.gitlab_token,
-      gitlabUrl: auth.gitlab_url.replace(/\/+$/, ""),
+      gitlabToken: auth.gitlab_token ?? "",
+      gitlabUrl: (auth.gitlab_url ?? "").replace(/\/+$/, ""),
       username: u.username,
       createdAt: new Date().toISOString(),
     }

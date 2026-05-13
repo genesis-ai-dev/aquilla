@@ -108,11 +108,12 @@ jobs:
       #   main                        → prod          (codex-sync-worker.*)
       #   PR with migrations          → per-PR fork   (codex-sync-worker-pr-<N>.*)
       #   anything else (dev, PR)     → staging       (codex-sync-worker-staging.*)
-      # VITE_AUTH_BASE targets codex-auth-worker for auth / sync-token /
-      # invite routes. VITE_CHAT_BASE targets codex-chat-worker for the
-      # LLM completion proxy. The rest of the frontier API (payments,
-      # members, orgs — none of which codex-web calls today) would still
-      # use VITE_FRONTIER_BASE if we ever needed it.
+      # VITE_AUTH_BASE targets codex-auth-worker — the canonical backend for
+      # auth, sync-token, invites, orgs, members, projects, user search, and
+      # the AI health probe. VITE_CHAT_BASE targets codex-chat-worker for
+      # the LLM completion proxy. The legacy frontier-server is no longer in
+      # codex-web's runtime path (it still serves the codex-editor VS Code
+      # extension on its own deployment).
       - run: npm run build
         if: steps.decide.outputs.deploy == 'true'
         env:

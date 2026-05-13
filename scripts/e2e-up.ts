@@ -1,6 +1,5 @@
 import { spawn, spawnSync } from "node:child_process"
-import { existsSync, writeFileSync, rmSync, readdirSync, mkdirSync, readFileSync } from "node:fs"
-import { homedir } from "node:os"
+import { existsSync, writeFileSync, rmSync, mkdirSync, readFileSync } from "node:fs"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
 import {
@@ -14,10 +13,10 @@ import { MockLLMServer } from "../e2e/helpers/mock-llm-server"
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const REPO_ROOT = path.resolve(__dirname, "..")
-const FRONTIER_SERVER_DIR =
-  process.env.FRONTIER_SERVER_DIR ?? path.join(homedir(), "frontierrnd/frontier-server")
+const AUTH_WORKER_DIR = path.join(REPO_ROOT, "auth-worker")
 const SYNC_WORKER_DIR = path.join(REPO_ROOT, "sync-worker")
-const FRONTIER_PORT = 8787
+const SQL_DIR = path.join(REPO_ROOT, "e2e/sql")
+const AUTH_PORT = 8787
 const SYNC_WORKER_PORT = 8788
 const VITE_PORT = 5173
 
@@ -29,13 +28,9 @@ const logFiles: Record<string, string> = {}
 
 let shuttingDown = false
 async function shutdown(code = 0): Promise<never> {
-  if (shuttingDown) {
-    // A second SIGINT during teardown — give up on graceful and exit hard.
-    process.exit(code)
-  }
+  if (shuttingDown) process.exit(code)
   shuttingDown = true
   console.log("\n[e2e-up] shutting down…")
-  // Iterate a copy so the array isn't mutated.
   for (const fn of [...cleanup].reverse()) {
     try { await fn() } catch (e) { console.error(e) }
   }
@@ -59,8 +54,6 @@ async function waitForUrl(url: string, timeoutMs: number): Promise<void> {
   throw new Error(`timed out waiting for ${url}`)
 }
 
-/** Run a command and either inherit stdio (verbose) or pipe to /dev/null
- * (quiet). Output goes to the log file in quiet mode if `logLabel` is set. */
 function runOnce(
   cmd: string,
   args: string[],
@@ -76,7 +69,6 @@ function runOnce(
       c.stdout?.pipe(stream, { end: false })
       c.stderr?.pipe(stream, { end: false })
     } else if (!VERBOSE) {
-      // Drain so the child doesn't block on full pipes.
       c.stdout?.on("data", () => {})
       c.stderr?.on("data", () => {})
     }
@@ -84,9 +76,6 @@ function runOnce(
   })
 }
 
-/** Print the last N lines of each known log file to stderr. Used when a
- * subcommand fails so the developer can see what went wrong without
- * needing to know the log paths. */
 function dumpLogs(tailLines = 80): void {
   for (const [label, file] of Object.entries(logFiles)) {
     if (!existsSync(file)) continue
@@ -97,9 +86,6 @@ function dumpLogs(tailLines = 80): void {
   }
 }
 
-/** Free a port held by a stale process from a prior run. Non-interactive
- * SIGTERM-then-SIGKILL — anything bound to one of our managed ports is by
- * definition leftover orchestrator state. */
 async function freePort(port: number): Promise<void> {
   const pidsRaw = spawnSync("lsof", ["-ti", `:${port}`], { encoding: "utf8" }).stdout || ""
   const pids = pidsRaw.split("\n").filter(Boolean)
@@ -117,72 +103,68 @@ async function freePort(port: number): Promise<void> {
 }
 
 async function main(): Promise<void> {
-  if (!existsSync(FRONTIER_SERVER_DIR)) {
-    console.error(`[e2e-up] frontier-server not found at ${FRONTIER_SERVER_DIR}`)
-    console.error(`[e2e-up] set FRONTIER_SERVER_DIR or clone the repo`)
+  if (!existsSync(AUTH_WORKER_DIR)) {
+    console.error(`[e2e-up] auth-worker not found at ${AUTH_WORKER_DIR}`)
     process.exit(1)
   }
   if (!existsSync(SYNC_WORKER_DIR)) {
     console.error(`[e2e-up] sync-worker not found at ${SYNC_WORKER_DIR}`)
     process.exit(1)
   }
+  if (!existsSync(SQL_DIR)) {
+    console.error(`[e2e-up] e2e/sql not found at ${SQL_DIR}`)
+    process.exit(1)
+  }
 
   // 0. Free our managed ports — survives stale processes from a prior aborted run.
-  await freePort(FRONTIER_PORT)
+  await freePort(AUTH_PORT)
   await freePort(SYNC_WORKER_PORT)
   await freePort(VITE_PORT)
 
-  // Set up the log dir. Worker stdout/stderr is piped here in non-verbose
-  // mode so the developer's terminal stays clean. On test failure we tail
-  // these files so problems are still discoverable.
+  // 1. Reset wrangler local state so each E2E run starts from a known schema.
   mkdirSync(LOG_DIR, { recursive: true })
-  logFiles.frontier = path.join(LOG_DIR, "frontier.log")
+  logFiles.auth = path.join(LOG_DIR, "auth.log")
   logFiles.sync = path.join(LOG_DIR, "sync.log")
   logFiles.vite = path.join(LOG_DIR, "vite.log")
   logFiles.migrations = path.join(LOG_DIR, "migrations.log")
   logFiles.build = path.join(LOG_DIR, "build.log")
-  console.log(`[boot 1/8] resetting wrangler local state… (logs: ${LOG_DIR}/)`)
-  rmSync(path.join(FRONTIER_SERVER_DIR, ".wrangler"), { recursive: true, force: true })
+  console.log(`[boot 1/7] resetting wrangler local state… (logs: ${LOG_DIR}/)`)
+  rmSync(path.join(AUTH_WORKER_DIR, ".wrangler"), { recursive: true, force: true })
   rmSync(path.join(SYNC_WORKER_DIR, ".wrangler"), { recursive: true, force: true })
 
-  // 2. Apply frontier-db-v2 migrations (auth, orgs, members, sync-token).
-  console.log("[boot 2/8] applying frontier-db-v2 migrations…")
+  // 2. Apply the vendored frontier-db-v2 schema to auth-worker's local D1.
+  //    Schema is sourced from `e2e/sql/frontier-db-v2.sql` (frontier-server
+  //    origin/main, collapsed to what auth-worker reads/writes).
+  console.log("[boot 2/7] applying frontier-db-v2 schema (auth-worker local)…")
   await runOnce(
     "npx",
-    ["wrangler", "d1", "migrations", "apply", "frontier-db-v2", "--local"],
-    FRONTIER_SERVER_DIR,
+    [
+      "wrangler", "d1", "execute", "frontier-db-v2", "--local",
+      `--file=${path.join(SQL_DIR, "frontier-db-v2.sql")}`,
+    ],
+    AUTH_WORKER_DIR,
     "migrations",
   )
 
-  // 2b. Apply codex-db schema to BOTH workers' local D1.
-  //
-  // codex-db is shared (frontier-server reads, sync-worker writes the
-  // `files`/`cells` projections on Y.Doc onSave). frontier-server owns the
-  // migrations (cloudflare/codex_migrations). sync-worker doesn't list a
-  // migrations_dir for it, so we apply by piping each .sql file to
-  // `wrangler d1 execute` against the sync-worker's local D1.
-  console.log("[boot 3/8] applying codex-db schema (both workers)…")
-  await runOnce(
-    "npx",
-    ["wrangler", "d1", "migrations", "apply", "codex-db", "--local"],
-    FRONTIER_SERVER_DIR,
-    "migrations",
-  )
-  const codexMigrationsDir = path.join(FRONTIER_SERVER_DIR, "cloudflare/codex_migrations")
-  const codexMigrations = readdirSync(codexMigrationsDir)
-    .filter((f) => f.endsWith(".sql"))
-    .sort()
-  for (const m of codexMigrations) {
+  // 3. Apply the codex-db schema to BOTH auth-worker and sync-worker's local
+  //    D1 (each worker keeps its own .wrangler/state). codex-db is shared in
+  //    prod — sync-worker writes file/cell projections, auth-worker reads.
+  console.log("[boot 3/7] applying codex-db schema (both workers)…")
+  for (const dir of [AUTH_WORKER_DIR, SYNC_WORKER_DIR]) {
     await runOnce(
       "npx",
-      ["wrangler", "d1", "execute", "codex-db", "--local", `--file=${path.join(codexMigrationsDir, m)}`],
-      SYNC_WORKER_DIR,
+      [
+        "wrangler", "d1", "execute", "codex-db", "--local",
+        `--file=${path.join(SQL_DIR, "codex-db.sql")}`,
+      ],
+      dir,
       "migrations",
     )
   }
 
   const codexPatchesDir = path.join(SYNC_WORKER_DIR, "codex-db-patches")
   if (existsSync(codexPatchesDir)) {
+    const { readdirSync } = await import("node:fs")
     const codexPatches = readdirSync(codexPatchesDir)
       .filter((f) => f.endsWith(".sql"))
       .sort()
@@ -196,20 +178,28 @@ async function main(): Promise<void> {
     }
   }
 
-  // 3. Boot frontier-server
-  console.log(`[boot 4/8] starting frontier-server on :${FRONTIER_PORT}…`)
-  const frontier: SpawnedWorker = await spawnWranglerDev({
-    cwd: FRONTIER_SERVER_DIR,
-    port: FRONTIER_PORT,
-    label: "frontier",
-    env: { WRANGLER_LOCAL: "1" },
-    logFile: openLogFile(logFiles.frontier),
+  // 4. Boot codex-auth-worker. WRANGLER_LOCAL=1 enables /__test__/reset.
+  console.log(`[boot 4/7] starting codex-auth-worker on :${AUTH_PORT}…`)
+  const auth: SpawnedWorker = await spawnWranglerDev({
+    cwd: AUTH_WORKER_DIR,
+    port: AUTH_PORT,
+    label: "auth",
+    env: {
+      WRANGLER_LOCAL: "1",
+      // Minimum viable secrets for the routes E2E exercises. These match
+      // what auth-worker reads from `env`; SYNC_SECRET_KEY is the shared
+      // key for sync-token + sync-worker admin authorization.
+      SECRET_KEY: "test-secret-key-do-not-use-in-prod",
+      SYNC_SECRET_KEY: "test-sync-secret-key",
+      SYNC_WORKER_URL: `http://127.0.0.1:${SYNC_WORKER_PORT}`,
+    },
+    logFile: openLogFile(logFiles.auth),
     streamToParent: VERBOSE,
   })
-  cleanup.push(() => frontier.kill())
+  cleanup.push(() => auth.kill())
 
-  // 4. Boot sync-worker
-  console.log(`[boot 5/8] starting sync-worker on :${SYNC_WORKER_PORT}…`)
+  // 5. Boot sync-worker.
+  console.log(`[boot 5/7] starting sync-worker on :${SYNC_WORKER_PORT}…`)
   const sync: SpawnedWorker = await spawnWranglerDev({
     cwd: SYNC_WORKER_DIR,
     port: SYNC_WORKER_PORT,
@@ -219,18 +209,19 @@ async function main(): Promise<void> {
   })
   cleanup.push(() => sync.kill())
 
-  // 5. Boot mock LLM
-  console.log("[boot 6/8] starting mock LLM…")
+  // 6. Mock LLM (chat-worker stand-in for /api/v1/chat/completions).
+  console.log("[boot 6/7] starting mock LLM…")
   const mockLLM = new MockLLMServer()
   await mockLLM.start()
   cleanup.push(async () => mockLLM.stop())
 
-  // 6. Write .env.test.local
+  // 7. Build the test bundle. VITE_AUTH_BASE is the canonical base for every
+  //    codex-web → backend call now; VITE_FRONTIER_BASE is gone.
   const envFile = path.join(REPO_ROOT, ".env.test.local")
   writeFileSync(
     envFile,
     [
-      `VITE_FRONTIER_BASE=http://127.0.0.1:${FRONTIER_PORT}`,
+      `VITE_AUTH_BASE=http://127.0.0.1:${AUTH_PORT}`,
       `VITE_SYNC_WORKER_HOST=127.0.0.1:${SYNC_WORKER_PORT}`,
       `VITE_LLM_BASE_URL=${mockLLM.baseUrl}`,
       "",
@@ -238,18 +229,10 @@ async function main(): Promise<void> {
   )
   cleanup.push(async () => rmSync(envFile, { force: true }))
 
-  // 7. Build once, then serve via `vite preview` (static).
-  //
-  // Why not `vite dev`? Dev mode runs babel/react-compiler on every request,
-  // keeps an HMR watcher alive, and forces re-optimize roundtrips that
-  // crater CPU/RAM under E2E load. A pre-built dist is served by a plain
-  // static server with ~0 ongoing CPU and ~50 MB RAM vs. several hundred MB.
-  //
-  // The build cost (~15-30s) pays for itself after the second spec.
-  console.log("[boot 7/8] building app for test mode (one-time, ~30s)…")
+  console.log("[boot 7/7] building app for test mode (one-time, ~30s)…")
   await runOnce("npx", ["vite", "build", "--mode", "test"], REPO_ROOT, "build")
 
-  console.log(`[boot 8/8] starting Vite preview on :${VITE_PORT}…`)
+  console.log(`[boot ✓] starting Vite preview on :${VITE_PORT}…`)
   const vite = spawn(
     "npx",
     ["vite", "preview", "--port", String(VITE_PORT), "--strictPort", "--mode", "test"],
@@ -267,9 +250,6 @@ async function main(): Promise<void> {
   console.log("[boot ✓] all services up, handing off to Playwright")
   console.log("")
 
-  // 8. Hand off to Playwright. Forward extra CLI args after `--`.
-  // Default to the `line` reporter for live one-line progress; user can
-  // override via `npm run test:e2e -- --reporter=list` etc.
   const playwrightArgs = [
     "playwright",
     "test",
@@ -285,24 +265,21 @@ async function main(): Promise<void> {
   }
   playwrightArgs.push(...userArgs)
   console.log(`[run] npx ${playwrightArgs.join(" ")}`)
-  // Pass the local backend URLs through to the Playwright child so test
-  // helpers (seed.ts, auth.ts, AI completion spec) can read them via
-  // process.env. .env.test.local handles the Vite/browser side; this
-  // handles the test-runner/node side.
+  // VITE_AUTH_BASE handles the Vite/browser side via .env.test.local; this
+  // env handles the Playwright/node side so test helpers (seed.ts,
+  // frontier-api.ts) talk to auth-worker directly.
   const pw = spawn("npx", playwrightArgs, {
     cwd: REPO_ROOT,
     stdio: "inherit",
     env: {
       ...process.env,
-      VITE_FRONTIER_BASE: `http://127.0.0.1:${FRONTIER_PORT}`,
+      VITE_AUTH_BASE: `http://127.0.0.1:${AUTH_PORT}`,
       VITE_SYNC_WORKER_HOST: `127.0.0.1:${SYNC_WORKER_PORT}`,
       VITE_LLM_BASE_URL: mockLLM.baseUrl,
     },
   })
   pw.on("exit", (code) => {
     if (code !== 0 && !VERBOSE) {
-      // Test failed and worker logs are in files. Tail them so the dev
-      // sees what went wrong without having to know the file paths.
       console.log(`\n[fail] Playwright exited ${code}. Tailing worker logs:`)
       dumpLogs()
       console.log(`\n[hint] Full logs: ${LOG_DIR}/`)

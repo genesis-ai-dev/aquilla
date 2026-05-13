@@ -1,5 +1,5 @@
 /**
- * Thin HTTP client for frontier-server, used by E2E specs to set up
+ * Thin HTTP client for codex-auth-worker, used by E2E specs to set up
  * server-side state (projects, org members, project members) without
  * driving brittle UI flows.
  *
@@ -13,7 +13,7 @@
  *   500 project_lead, 600 maintainer, 700 owner.
  */
 
-const FRONTIER_BASE = process.env.VITE_FRONTIER_BASE ?? "http://127.0.0.1:8787"
+const AUTH_BASE = process.env.VITE_AUTH_BASE ?? "http://127.0.0.1:8787"
 
 export const ROLE = {
   VIEWER: 100,
@@ -42,7 +42,7 @@ export interface MyOrg {
  * if she's never explicitly created one (frontier-server lazy-creates a
  * personal org on first call). */
 export async function getMyOrg(jwt: string): Promise<MyOrg> {
-  const r = await fetch(`${FRONTIER_BASE}/api/v2/orgs/me`, { headers: authHeaders(jwt) })
+  const r = await fetch(`${AUTH_BASE}/api/v2/orgs/me`, { headers: authHeaders(jwt) })
   if (!r.ok) throw new Error(`getMyOrg failed: HTTP ${r.status} — ${await r.text()}`)
   return (await r.json()) as MyOrg
 }
@@ -56,7 +56,7 @@ export async function addOrgMember(
   username: string,
   role: number = ROLE.CONTRIBUTOR,
 ): Promise<void> {
-  const r = await fetch(`${FRONTIER_BASE}/api/v2/orgs/${orgId}/members`, {
+  const r = await fetch(`${AUTH_BASE}/api/v2/orgs/${orgId}/members`, {
     method: "POST",
     headers: authHeaders(jwt),
     body: JSON.stringify({ username, role }),
@@ -78,7 +78,7 @@ export async function createProjectServerSide(
   jwt: string,
   args: { id: string; name: string },
 ): Promise<CreatedProject> {
-  const r = await fetch(`${FRONTIER_BASE}/api/v2/projects`, {
+  const r = await fetch(`${AUTH_BASE}/api/v2/projects`, {
     method: "POST",
     headers: authHeaders(jwt),
     body: JSON.stringify(args),
@@ -95,7 +95,7 @@ export async function addProjectMember(
   role: number = ROLE.CONTRIBUTOR,
 ): Promise<void> {
   const r = await fetch(
-    `${FRONTIER_BASE}/api/v2/projects/${encodeURIComponent(projectId)}/members`,
+    `${AUTH_BASE}/api/v2/projects/${encodeURIComponent(projectId)}/members`,
     {
       method: "POST",
       headers: authHeaders(jwt),

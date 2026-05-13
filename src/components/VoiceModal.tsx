@@ -496,7 +496,7 @@ function ColorDot({ color, onPick }: { color?: string; onPick: (c: string) => vo
         style={{ backgroundColor: color || "#94a3b8" }}
       />
       {open && (
-        <div className="absolute left-0 top-full z-50 mt-1 grid grid-cols-6 gap-1 rounded-md border bg-popover p-1.5 shadow-md">
+        <div className="absolute left-0 top-full z-40 mt-1 grid grid-cols-6 gap-1 rounded-md border bg-popover p-1.5 shadow-md">
           {VOICE_PALETTE.map((c) => (
             <button
               key={c}

@@ -7,6 +7,7 @@
 import { useSyncExternalStore } from "react"
 import type { CellData } from "@/hooks/useCells"
 import { fetchCellAudio, parseFrontierAudioUrl } from "./upload"
+import { audioSyncTokenFetcherForSession } from "./sync-token-fetcher"
 import type { FrontierSession } from "@/lib/frontier/types"
 import { setActiveAudio, clearActiveAudioIf, type ActiveAudioController } from "./audio-coordinator"
 
@@ -84,13 +85,18 @@ function pickPlayableAudio(cell: CellData): { audioId: string; url: string } | u
 async function fetchAudioBlob(
   attachmentUrl: string,
   projectId: string,
+  fileId: string,
   session: FrontierSession,
 ): Promise<Blob> {
   const frontier = parseFrontierAudioUrl(attachmentUrl)
   if (frontier) {
     if (!session.jwt) throw new Error("Sign in to play audio")
     const bytes = await fetchCellAudio({
-      session, projectId, audioId: frontier.audioId, ext: frontier.ext,
+      projectId,
+      fileId,
+      audioId: frontier.audioId,
+      ext: frontier.ext,
+      getSyncToken: audioSyncTokenFetcherForSession(session),
     })
     return new Blob([bytes as BlobPart], { type: "audio/wav" })
   }
@@ -155,7 +161,7 @@ async function playAt(index: number): Promise<void> {
 
   let blob: Blob
   try {
-    blob = await fetchAudioBlob(playable.url, ctx.projectId, ctx.session)
+    blob = await fetchAudioBlob(playable.url, ctx.projectId, cell.fileId, ctx.session)
   } catch (e) {
     if (seq !== currentSeq) return // superseded
     setState({ kind: "error", message: e instanceof Error ? e.message : String(e), cellId: cell.id })

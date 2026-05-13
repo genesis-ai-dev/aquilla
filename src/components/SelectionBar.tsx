@@ -77,7 +77,6 @@ export function SelectionBar({ project, cells, doc, session, username, completeS
     [selectedCells, username],
   )
   const allHaveTranslation = selectedCells.length > 0 && selectedCells.every((c) => c.translated.trim())
-  const isGitProject = project.origin?.kind === "git"
   const isBusy = running.kind !== "idle"
 
   const onTranslate = useCallback(async () => {
@@ -171,7 +170,7 @@ export function SelectionBar({ project, cells, doc, session, username, completeS
   return (
     <div
       className={cn(
-        "pointer-events-auto fixed left-1/2 z-40 flex -translate-x-1/2 items-center gap-2",
+        "pointer-events-auto fixed left-1/2 z-30 flex -translate-x-1/2 items-center gap-2",
         "bottom-4 rounded-full border bg-background/95 px-3 py-2 text-xs shadow-lg backdrop-blur",
         "supports-[backdrop-filter]:bg-background/80",
       )}
@@ -240,9 +239,8 @@ export function SelectionBar({ project, cells, doc, session, username, completeS
         size="sm"
         variant="outline"
         onClick={onSynth}
-        disabled={isBusy || isGitProject || !session?.jwt}
+        disabled={isBusy || !session?.jwt}
         title={
-          isGitProject ? "AI voice isn't available on git projects yet" :
           !session?.jwt ? "Sign in to upload audio" :
           missingCount > 0 ? `Translate ${missingCount} cell${missingCount === 1 ? "" : "s"}, then speak ${selectedCells.length} selected` :
           isMulti ? `Speak ${selectedCells.length} selected as one take` :

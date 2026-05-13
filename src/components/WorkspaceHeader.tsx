@@ -1,14 +1,20 @@
 import type { ReactNode } from "react"
+import { X } from "lucide-react"
 import type { ProjectRecord } from "@/lib/parsers/types"
-import { ThemeToggle } from "@/branding/ThemeMode"
+import { OverflowMenu, type OverflowMenuItem } from "./OverflowMenu"
 
 interface Props {
   project: ProjectRecord
   onBack: () => void
   children?: ReactNode
+  extraMenuItems?: OverflowMenuItem[]
 }
 
-export function WorkspaceHeader({ project, onBack, children }: Props) {
+export function WorkspaceHeader({ project, onBack, children, extraMenuItems }: Props) {
+  const items: OverflowMenuItem[] = [
+    { id: "close", label: "Close project", icon: X, onClick: onBack },
+    ...(extraMenuItems ?? []),
+  ]
   return (
     <header className="relative z-30 flex items-center gap-3 border-b bg-background px-4 py-2">
       <nav className="flex items-center gap-1 text-sm min-w-0">
@@ -32,7 +38,7 @@ export function WorkspaceHeader({ project, onBack, children }: Props) {
       <div className="flex-1" />
       <div className="flex items-center gap-1 shrink-0">
         {children}
-        <ThemeToggle />
+        <OverflowMenu items={items} />
       </div>
     </header>
   )

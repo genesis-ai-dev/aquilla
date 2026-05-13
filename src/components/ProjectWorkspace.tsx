@@ -5,7 +5,7 @@ import { useFileDoc } from "@/hooks/useFileDoc"
 import { deriveCellAreaState } from "@/lib/editor/cell-area-state"
 import { CellAreaPlaceholder } from "./CellAreaPlaceholder"
 import { TabStrip } from "./TabStrip"
-import { useWorkspaceTabs } from "@/hooks/useWorkspaceTabs"
+import { useWorkspaceTabs, readLastActiveFileId } from "@/hooks/useWorkspaceTabs"
 import { useCells } from "@/hooks/useCells"
 import { useSearchIndex } from "@/hooks/useSearchIndex"
 import { useCompletion } from "@/hooks/useCompletion"
@@ -43,14 +43,12 @@ import { useFileMeta } from "@/hooks/useFileMeta"
 import { useCellLabelsPreference } from "@/hooks/useCellLabelsPreference"
 import { displayNameFor } from "@/lib/sync/anonymous-name"
 import { useProjectPermissions } from "@/hooks/useProjectPermissions"
-import { useSyncProject } from "@/hooks/useSyncProject"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import {
   countSynthTargets, countTranscribeTargets,
   synthAllInFile, transcribeAllInFile,
 } from "@/lib/audio/bulk-audio"
 import { eagerlyPrefetchPeaks } from "@/lib/audio/eager-peaks"
-import { useAutoSync } from "@/hooks/useAutoSync"
 import { useOutboxFlusher } from "@/hooks/useOutboxFlusher"
 import { usePendingOutboxRecords } from "@/hooks/usePendingOutboxRecords"
 import {
@@ -58,8 +56,7 @@ import {
   buildFileScopedTokenFetcher,
 } from "@/lib/sync/cqrs-bridge"
 import { useCellsAuditStatsWithOverlay } from "@/hooks/useCellsAuditStatsWithOverlay"
-import { useCorpusBackfill } from "@/hooks/useCorpusBackfill"
-import { Film, Scale, MessagesSquare, Camera, Share2, Settings as SettingsIcon, Lock, ClipboardList, Brain, Trash2, Undo2, Search as SearchIcon } from "lucide-react"
+import { Film, Scale, MessagesSquare, Camera, Share2, Settings as SettingsIcon, Lock, ClipboardList, Brain, Trash2, Undo2, Search as SearchIcon, Sparkles } from "lucide-react"
 import { restoreProject } from "@/lib/store/project-index"
 import { AppShell } from "./AppShell"
 import { WorkspaceHeader } from "./WorkspaceHeader"
@@ -75,12 +72,11 @@ import { SidebarProjectSection } from "./SidebarProjectSection"
 import { SuggestionBanner } from "./SuggestionBanner"
 import { ConfirmActionDialog } from "./ConfirmActionDialog"
 import { PeerPresence } from "./PeerPresence"
-import { SyncButton } from "./SyncButton"
 import { ViewSettingsMenu } from "./ViewSettingsMenu"
 import { EditorScrollProvider, useEditorScroll } from "@/context/EditorScrollContext"
 import { detectSuggestions, type RenameSuggestion } from "@/lib/file-labeling/detect"
 import { applySuggestions } from "@/lib/file-labeling/apply"
-import { renameFile, moveFileToCorpus, deleteFile } from "@/lib/store/file-operations"
+import { renameFile, moveFileToCorpus, renameCorpus, deleteFile } from "@/lib/store/file-operations"
 import { deleteFileProjection } from "@/lib/sync/file-projection"
 import { Button } from "@/components/ui/button"
 import {
@@ -122,6 +118,20 @@ export function ProjectWorkspace() {
     activeFileId,
     setActiveFileId,
   })
+
+  // After a detour through a Project subpage (Rules/Comments/Snapshots/...),
+  // the URL drops back to `/project/:id` with no fileId. Restore the
+  // previously open file so #38's "closes currently selected file" symptom
+  // doesn't happen. Reads localStorage directly because it only needs to fire
+  // on the no-fileId render; making it stateful would require deriving state
+  // from props inside an effect.
+  useEffect(() => {
+    if (routeFileId || !projectId) return
+    const last = readLastActiveFileId(projectId)
+    if (last && fileIds.includes(last)) {
+      navigate(`/project/${projectId}/file/${last}`, { replace: true })
+    }
+  }, [routeFileId, fileIds, navigate, projectId])
   const [importOpen, setImportOpen] = useState(false)
   const [drawerRuleId, setDrawerRuleId] = useState<string | null>(null)
   const [searchParams] = useSearchParams()
@@ -527,11 +537,6 @@ export function ProjectWorkspace() {
   const perms = useProjectPermissions(project)
   const isReadOnly = !perms.canEditContent
 
-  const { sync: runSync, phase: syncPhase, inFlight: syncInFlight, lastResult: syncLastResult } = useSyncProject()
-
-  useAutoSync(project ?? null, frontierSession)
-  useCorpusBackfill(project ?? null, refresh)
-
   const { state: checklistState, dismissed: checklistDismissed, dismiss: dismissChecklist, refreshShares: refreshChecklistShares } = useSetupChecklist(project ?? null)
   const [checklistOpen, setChecklistOpen] = useState(false)
   const [showChipTooltip, setShowChipTooltip] = useState(false)
@@ -553,31 +558,10 @@ export function ProjectWorkspace() {
   }, [checklistDismissed, dismissChecklist])
 
   const handleProjectUpdated = useCallback(async (_updated: ProjectRecord | undefined) => {
-    // The caller (useSaveCompletionSettings, SyncButton, etc.) already
-    // persisted to IDB. We just need to refresh the in-memory project state.
+    // The caller (useSaveCompletionSettings, etc.) already persisted to IDB.
+    // We just need to refresh the in-memory project state.
     refresh()
   }, [refresh])
-
-  useEffect(() => {
-    function handler(e: KeyboardEvent) {
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "s") {
-        if (!project || !perms.canPush || !frontierSession) return
-        e.preventDefault()
-        if (syncInFlight) return
-        runSync(project, frontierSession).then((r) => {
-          if (r?.status === "synced" && r.commitSha && project.origin?.kind === "git") {
-            const commitSha = r.commitSha
-            patchProject(project.id, (p) => ({
-              ...p,
-              origin: { ...p.origin!, headSha: commitSha },
-            })).then(() => refresh())
-          }
-        })
-      }
-    }
-    document.addEventListener("keydown", handler)
-    return () => document.removeEventListener("keydown", handler)
-  }, [project, perms.canPush, frontierSession, syncInFlight, runSync, handleProjectUpdated])
 
   // All hooks below must live above the early return so hook count is stable
   // across renders (React throws "Rendered more hooks" otherwise).
@@ -597,6 +581,14 @@ export function ProjectWorkspace() {
 
   const [moveTargetId, setMoveTargetId] = useState<string | null>(null)
   const [moveCorpus, setMoveCorpus] = useState("")
+  const existingCorpusMarkers = useMemo(() => {
+    const set = new Set<string>()
+    for (const f of project?.files ?? []) {
+      const m = f.corpusMarker?.trim()
+      if (m) set.add(m)
+    }
+    return Array.from(set).sort((a, b) => a.localeCompare(b))
+  }, [project?.files])
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null)
   const [undo, setUndo] = useState<{ project: ProjectRecord } | null>(null)
 
@@ -628,15 +620,46 @@ export function ProjectWorkspace() {
   const handleApplySuggestions = useCallback(async (chosen: RenameSuggestion[]) => {
     if (!project) return
     const before = await getProject(project.id)
-    await patchProject(project.id, (p) => applySuggestions(p, chosen))
+    const dismissedAt = new Date().toISOString()
+    // Apply the user's choices and dismiss the banner in the same write:
+    // once they've engaged, the banner is no longer useful and shouldn't
+    // re-appear for any remaining (unchosen) suggestions until they
+    // explicitly re-run detection from the overflow menu.
+    await patchProject(project.id, (p) => ({
+      ...applySuggestions(p, chosen),
+      suggestionsDismissedAt: dismissedAt,
+    }))
     refresh()
     if (before) setUndo({ project: before })
     setTimeout(() => setUndo((u) => (u?.project === before ? null : u)), 10000)
   }, [project, refresh])
 
+  const handleApplyOneSuggestion = useCallback(async (fileId: string) => {
+    if (!project) return
+    const target = suggestions.find((s) => s.fileId === fileId)
+    if (!target) return
+    await handleApplySuggestions([target])
+  }, [project, suggestions, handleApplySuggestions])
+
+  const handleRenameCorpus = useCallback(async (oldMarker: string, newMarker: string) => {
+    if (!project) return
+    await patchProject(project.id, (p) => renameCorpus(p, oldMarker, newMarker))
+    refresh()
+  }, [project, refresh])
+
   const handleDismissBanner = useCallback(async () => {
     if (!project) return
     await patchProject(project.id, (p) => ({ ...p, suggestionsDismissedAt: new Date().toISOString() }))
+    refresh()
+  }, [project, refresh])
+
+  const handleReinviteSuggestions = useCallback(async () => {
+    if (!project) return
+    await patchProject(project.id, (p) => {
+      const next = { ...p }
+      delete next.suggestionsDismissedAt
+      return next
+    })
     refresh()
   }, [project, refresh])
 
@@ -804,12 +827,27 @@ export function ProjectWorkspace() {
                 setMoveCorpus(project.files.find((f) => f.id === fileId)?.corpusMarker ?? "")
               }}
               onDelete={(fileId) => setPendingDeleteId(fileId)}
+              onApplySuggestion={handleApplyOneSuggestion}
+              onRenameCorpus={handleRenameCorpus}
             />
             <SidebarProjectSection items={projectNavItems} />
           </>
         }
         header={
-          <WorkspaceHeader project={project} onBack={() => navigate("/")}>
+          <WorkspaceHeader
+            project={project}
+            onBack={() => navigate("/")}
+            extraMenuItems={
+              suggestions.length > 0 && project.suggestionsDismissedAt
+                ? [{
+                    id: "redetect-suggestions",
+                    label: `Show ${suggestions.length} file name suggestion${suggestions.length === 1 ? "" : "s"}`,
+                    icon: Sparkles,
+                    onClick: handleReinviteSuggestions,
+                  }]
+                : []
+            }
+          >
             <ViewSettingsMenu
               fileOpen={Boolean(activeFileId)}
               lineNumbersEnabled={fileMeta.lineNumbersEnabled}
@@ -1040,16 +1078,6 @@ export function ProjectWorkspace() {
                   />
                 </div>
               }
-              right={
-                <SyncButton
-                  project={project}
-                  onUpdated={handleProjectUpdated}
-                  sync={runSync}
-                  phase={syncPhase}
-                  inFlight={syncInFlight}
-                  lastResult={syncLastResult}
-                />
-              }
             />
             <StatusBar
               cells={cells}
@@ -1146,28 +1174,23 @@ export function ProjectWorkspace() {
         checkboxLabel="I understand this removes the file from the project."
         onConfirm={() => { if (pendingDeleteId) handleDeleteFile(pendingDeleteId); setPendingDeleteId(null) }}
       />
-      <Dialog open={moveTargetId !== null} onOpenChange={(v) => { if (!v) setMoveTargetId(null) }}>
-        <DialogContent className="max-w-sm">
-          <DialogHeader><DialogTitle>Move to corpus</DialogTitle></DialogHeader>
-          <input
-            value={moveCorpus}
-            onChange={(e) => setMoveCorpus(e.target.value)}
-            placeholder="Corpus name (or blank to ungroup)"
-            className="w-full rounded border px-2 py-1"
-          />
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setMoveTargetId(null)}>Cancel</Button>
-            <Button onClick={async () => {
-              if (!project || !moveTargetId) return
-              await patchProject(project.id, (p) => moveFileToCorpus(p, moveTargetId, moveCorpus))
-              refresh()
-              setMoveTargetId(null)
-            }}>Save</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      {moveTargetId !== null && (
+        <MoveToCorpusDialog
+          // Remount per-open so internal state resets cleanly without an effect.
+          key={moveTargetId}
+          initialValue={moveCorpus}
+          existingMarkers={existingCorpusMarkers}
+          onClose={() => setMoveTargetId(null)}
+          onSave={async (next) => {
+            if (!project) return
+            await patchProject(project.id, (p) => moveFileToCorpus(p, moveTargetId, next))
+            refresh()
+            setMoveTargetId(null)
+          }}
+        />
+      )}
       {undo && (
-        <div className="fixed bottom-4 right-4 z-[70] flex items-center gap-2 rounded border bg-background px-3 py-2 text-sm shadow-md">
+        <div className="fixed bottom-4 right-4 z-60 flex items-center gap-2 rounded border bg-background px-3 py-2 text-sm shadow-md">
           <span>Applied renames.</span>
           <Button size="sm" variant="outline" onClick={async () => {
             if (!undo) return
@@ -1178,6 +1201,60 @@ export function ProjectWorkspace() {
         </div>
       )}
     </EditorScrollProvider>
+  )
+}
+
+// Pick from existing corpus markers via a native <select>, with an inline
+// "Other…" option to create a brand-new marker. Replaces the prior free-text
+// input that hid the existing options behind the dialog's backdrop blur (#39).
+// Caller wraps with `key` so internal state resets on each open.
+function MoveToCorpusDialog({
+  initialValue, existingMarkers, onClose, onSave,
+}: {
+  initialValue: string
+  existingMarkers: ReadonlyArray<string>
+  onClose: () => void
+  onSave: (value: string) => void | Promise<void>
+}) {
+  const NEW = "__new__"
+  const trimmed = initialValue.trim()
+  const initIsNew = trimmed.length > 0 && !existingMarkers.includes(trimmed)
+  const [selection, setSelection] = useState(initIsNew ? NEW : trimmed)
+  const [customValue, setCustomValue] = useState(initIsNew ? trimmed : "")
+  const isNew = selection === NEW
+  return (
+    <Dialog open onOpenChange={(v) => { if (!v) onClose() }}>
+      <DialogContent className="max-w-sm">
+        <DialogHeader><DialogTitle>Move to corpus</DialogTitle></DialogHeader>
+        <select
+          value={selection}
+          onChange={(e) => setSelection(e.target.value)}
+          className="w-full rounded border bg-background px-2 py-1.5 text-sm"
+        >
+          <option value="">Ungrouped</option>
+          {existingMarkers.map((m) => <option key={m} value={m}>{m}</option>)}
+          <option value={NEW}>Other…</option>
+        </select>
+        {isNew && (
+          <input
+            autoFocus
+            value={customValue}
+            onChange={(e) => setCustomValue(e.target.value)}
+            placeholder="New corpus name"
+            className="mt-2 w-full rounded border bg-background px-2 py-1 text-sm"
+          />
+        )}
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose}>Cancel</Button>
+          <Button
+            disabled={isNew && !customValue.trim()}
+            onClick={() => { void onSave(isNew ? customValue : selection) }}
+          >
+            Save
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   )
 }
 

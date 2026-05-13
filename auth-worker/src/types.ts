@@ -76,8 +76,6 @@ export interface UserResponse {
 export interface AuthResponse {
   access_token: string
   token_type: "bearer"
-  gitlab_token?: string
-  gitlab_url?: string
 }
 
 export interface JWTPayload {

@@ -21,6 +21,7 @@ import { routePartykitRequest } from "partyserver"
 import { verifyTokenForDoc, shouldBeReadOnly } from "./auth"
 import { projectDoc, writeProjection, diffProjection } from "./projection"
 import { handleAdminRequest } from "./admin"
+import { handleAudioRequest } from "./audio"
 import {
   handleProjectArchiveRequest,
   readArchiveMarker,
@@ -640,6 +641,8 @@ export default {
     if (compactDocResponse) return compactDocResponse
     const adminResponse = await handleAdminRequest(request, env)
     if (adminResponse) return adminResponse
+    const audioResponse = await handleAudioRequest(request, env)
+    if (audioResponse) return audioResponse
     const eventsReadResponse = await handleEventsReadRequest(request, env)
     if (eventsReadResponse) return withCors(eventsReadResponse, request)
     const validatorsReadResponse = await handleValidatorsReadRequest(request, env)

@@ -21,6 +21,7 @@ import { useCountdown } from "./useCountdown"
 import { AudioWaveform } from "./AudioWaveform"
 import { DurationBar } from "./DurationBar"
 import { buildAudioId, uploadCellAudio } from "@/lib/audio/upload"
+import { audioSyncTokenFetcherForSession } from "@/lib/audio/sync-token-fetcher"
 import { attachAudioToCell } from "@/lib/audio/attach"
 import { markProjectHasAudioDataSoon } from "@/lib/audio/project-audio-state"
 import { transcribeAndStoreTimings } from "@/lib/audio/transcribe"
@@ -63,8 +64,6 @@ export function AudioRecordingModal({
   const targetSec = activeCell && activeCell.startTime != null && activeCell.endTime != null
     ? Math.max(0, activeCell.endTime - activeCell.startTime)
     : null
-
-  const isGitProject = project.origin?.kind === "git"
 
   // Whenever the user switches cells, reset the capture state so the new cell
   // opens fresh.
@@ -110,14 +109,6 @@ export function AudioRecordingModal({
   }, [recorder.state, phase])
 
   const startFlow = useCallback(() => {
-    if (!isGitProject ? false : true) {
-      /* placeholder — block only runs to satisfy the type-narrowing below */
-    }
-    if (isGitProject) {
-      setErrorMessage("Recording on GitLab projects isn't available yet")
-      setPhase("error")
-      return
-    }
     if (!session?.jwt) {
       setErrorMessage("Sign in to save recordings")
       setPhase("error")
@@ -132,7 +123,7 @@ export function AudioRecordingModal({
         void recorder.start()
       },
     })
-  }, [beepEnabled, countdown, isGitProject, recorder, session?.jwt])
+  }, [beepEnabled, countdown, recorder, session?.jwt])
 
   const stopRecording = useCallback(() => {
     recorder.stop()
@@ -157,11 +148,12 @@ export function AudioRecordingModal({
       const ext = recorder.state.ext
       const audioId = buildAudioId(activeCell.id)
       const result = await uploadCellAudio({
-        session,
         projectId: project.id,
+        fileId: activeCell.fileId,
         audioId,
         ext,
         blob,
+        getSyncToken: audioSyncTokenFetcherForSession(session),
       })
       attachAudioToCell(doc, activeCell.id, {
         audioId: result.audioId,
@@ -452,7 +444,7 @@ export function AudioRecordingModal({
           )}
 
           {(displayPhase === "idle" || displayPhase === "error") && (
-            <Button size="sm" onClick={startFlow} disabled={isGitProject}>
+            <Button size="sm" onClick={startFlow}>
               <Play className="mr-1 h-4 w-4" /> Start
             </Button>
           )}

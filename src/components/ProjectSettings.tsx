@@ -601,7 +601,7 @@ export function ProjectSettings() {
       {conflictBy && (
         <div
           role="status"
-          className="fixed bottom-4 right-4 z-[70] rounded border bg-amber-50 px-3 py-2 text-sm text-amber-900 shadow-md dark:bg-amber-950 dark:text-amber-100"
+          className="fixed bottom-4 right-4 z-60 rounded border bg-amber-50 px-3 py-2 text-sm text-amber-900 shadow-md dark:bg-amber-950 dark:text-amber-100"
         >
           Synced settings update from <span className="font-medium">{conflictBy}</span>.
         </div>

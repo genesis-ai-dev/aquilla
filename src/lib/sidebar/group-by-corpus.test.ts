@@ -34,8 +34,28 @@ describe("groupByCorpus", () => {
     expect(groups[0].label).toBe("Subtitle")
   })
 
-  it("sorts files within a group by name", () => {
-    const groups = groupByCorpus([f("zeta", "OT"), f("alpha", "OT")])
+  it("sorts files within a non-Bible group alphabetically", () => {
+    const groups = groupByCorpus([f("zeta", "Other"), f("alpha", "Other")])
     expect(groups[0].files.map((x) => x.name)).toEqual(["alpha", "zeta"])
+  })
+
+  it("sorts Bible books in canonical OT/NT order within OT and NT corpora", () => {
+    const groups = groupByCorpus([
+      f("Numbers", "OT"),
+      f("Genesis", "OT"),
+      f("Leviticus", "OT"),
+      f("Revelation", "NT"),
+      f("Matthew", "NT"),
+      f("John", "NT"),
+    ])
+    expect(groups.find((g) => g.label === "OT")?.files.map((x) => x.name))
+      .toEqual(["Genesis", "Leviticus", "Numbers"])
+    expect(groups.find((g) => g.label === "NT")?.files.map((x) => x.name))
+      .toEqual(["Matthew", "John", "Revelation"])
+  })
+
+  it("falls back to alphabetic when names aren't canonical book names", () => {
+    const groups = groupByCorpus([f("ZZZ Misc", "OT"), f("AAA Misc", "OT")])
+    expect(groups[0].files.map((x) => x.name)).toEqual(["AAA Misc", "ZZZ Misc"])
   })
 })

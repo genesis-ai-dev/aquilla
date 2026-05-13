@@ -1,7 +1,7 @@
 import "fake-indexeddb/auto"
 import { beforeEach, describe, expect, it, vi } from "vitest"
-import { createOpfsFs } from "@/lib/git/opfs-fs"
-import { MemoryDirectoryHandle } from "@/lib/git/__test__/mem-fs-handles"
+import { createOpfsFs } from "@/lib/fs/opfs-fs"
+import { MemoryDirectoryHandle } from "@/lib/fs/__test__/mem-fs-handles"
 import { __setRootForTests, peaksCacheGet, peaksCachePut } from "./peaks-cache"
 import {
   __resetOpfsAvailabilityForTests,

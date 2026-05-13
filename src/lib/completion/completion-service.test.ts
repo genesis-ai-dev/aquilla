@@ -14,8 +14,6 @@ const BASE: CompletionSettings = {
 
 const SESSION: FrontierSession = {
   jwt: "jwt-abc",
-  gitlabToken: "glpat",
-  gitlabUrl: "https://git.genesisrnd.com",
   username: "tester",
   createdAt: new Date().toISOString(),
 }

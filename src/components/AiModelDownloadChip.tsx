@@ -97,7 +97,7 @@ export function AiModelDownloadChip() {
       className={cn(
         // Anchored bottom-left so we don't collide with the workspace's
         // bottom-right "Synced" pill.
-        "fixed bottom-4 left-4 z-40 w-72 rounded-lg border bg-popover p-3 text-xs shadow-lg",
+        "fixed bottom-4 left-4 z-30 w-72 rounded-lg border bg-popover p-3 text-xs shadow-lg",
       )}
     >
       <div className="mb-2 flex items-center gap-2">

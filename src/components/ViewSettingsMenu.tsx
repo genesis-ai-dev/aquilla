@@ -56,7 +56,7 @@ export function ViewSettingsMenu({
       {hintVisible && (
         <div
           className={cn(
-            "absolute right-full top-1/2 z-40 mr-2 flex -translate-y-1/2 items-center gap-2 whitespace-nowrap",
+            "absolute right-full top-1/2 z-30 mr-2 flex -translate-y-1/2 items-center gap-2 whitespace-nowrap",
             "rounded-lg border bg-popover px-3 py-2 text-xs shadow-lg",
             "animate-in fade-in-0 slide-in-from-right-2 duration-200",
           )}
@@ -113,7 +113,7 @@ export function ViewSettingsMenu({
         />
         <Menu.Portal>
           <Menu.Positioner sideOffset={4}>
-            <Menu.Popup className="z-50 min-w-60 rounded-md border bg-popover p-1 text-popover-foreground shadow-md">
+            <Menu.Popup className="z-40 min-w-60 rounded-md border bg-popover p-1 text-popover-foreground shadow-md">
               <Menu.Item
                 disabled={!fileOpen}
                 onClick={() => onLineNumbersChange(!lineNumbersEnabled)}

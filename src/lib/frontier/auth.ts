@@ -29,8 +29,6 @@ interface RegisterArgs { username: string; email: string; password: string; }
 interface AuthResponse {
   access_token: string;
   token_type: string;
-  gitlab_token: string;
-  gitlab_url: string;
 }
 
 export async function login(args: LoginArgs): Promise<FrontierSession> {
@@ -91,8 +89,6 @@ export async function requestPasswordReset(email: string): Promise<void> {
 async function finalizeSession(username: string, data: AuthResponse): Promise<FrontierSession> {
   const session: FrontierSession = {
     jwt: data.access_token,
-    gitlabToken: data.gitlab_token,
-    gitlabUrl: data.gitlab_url.replace(/\/+$/, ""),
     username,
     createdAt: new Date().toISOString(),
   };

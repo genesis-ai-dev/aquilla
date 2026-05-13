@@ -1,7 +1,7 @@
 name: Deploy Workers
 
 # Branch → environment mapping:
-#   push to main → wrangler deploy           → prod workers (codex-sync-worker, codex-git-proxy)
+#   push to main → wrangler deploy           → prod workers
 #   push to dev  → wrangler deploy --env=staging → staging workers (-staging suffix)
 #
 # Each worker only runs if its directory changed in the push (path filter) or
@@ -12,13 +12,12 @@ on:
     branches: [main, dev]
     paths:
       - 'sync-worker/**'
-      - 'cors-proxy/**'
       - 'auth-worker/**'
       - 'chat-worker/**'
   workflow_dispatch:
     inputs:
       worker:
-        description: 'Which worker to deploy (all, sync-worker, cors-proxy, auth-worker, chat-worker)'
+        description: 'Which worker to deploy (all, sync-worker, auth-worker, chat-worker)'
         required: false
         default: 'all'
 
@@ -104,25 +103,3 @@ jobs:
           workingDirectory: chat-worker
           command: deploy ${{ github.ref == 'refs/heads/main' && ' ' || '--env=staging' }}
 
-  cors-proxy:
-    if: >
-      github.event_name == 'workflow_dispatch' && (github.event.inputs.worker == 'all' || github.event.inputs.worker == 'cors-proxy')
-      || github.event_name == 'push' && contains(toJSON(github.event.commits.*.modified), 'cors-proxy/')
-      || github.event_name == 'push' && contains(toJSON(github.event.commits.*.added), 'cors-proxy/')
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: npm
-          cache-dependency-path: cors-proxy/package-lock.json
-      - run: npm ci
-        working-directory: cors-proxy
-      - name: Deploy cors-proxy
-        uses: cloudflare/wrangler-action@v3
-        with:
-          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          accountId: 6a80496d1e59948a9cbaa3c643ba81d7
-          workingDirectory: cors-proxy
-          command: deploy ${{ github.ref == 'refs/heads/main' && ' ' || '--env=staging' }}

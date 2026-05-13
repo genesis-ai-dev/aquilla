@@ -1,5 +1,14 @@
 import type { ReactNode } from "react"
 
+// Project-wide z-index scale (Tailwind v4 dynamic):
+//   z-10 — content stickies (table headers, sticky cells)
+//   z-20 — in-content floats (action rails, expansion glyphs)
+//   z-30 — app chrome (workspace header, fixed top/bottom banners, status chips)
+//   z-40 — popovers, menus, dropdowns, autocomplete
+//   z-50 — modals, sheets, dialogs (+ their backdrops)
+//   z-60 — toasts / transient notices that must beat everything
+// Anything else is a bug. Don't reach for z-[999].
+
 interface Props {
   sidebar: ReactNode
   header: ReactNode

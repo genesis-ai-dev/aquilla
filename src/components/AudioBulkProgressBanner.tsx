@@ -29,7 +29,7 @@ export function AudioBulkProgressBanner() {
     <div
       className={cn(
         // Anchored bottom-right but above the workspace footer.
-        "fixed bottom-16 right-4 z-40 w-80 rounded-lg border bg-popover p-3 text-xs shadow-lg",
+        "fixed bottom-16 right-4 z-30 w-80 rounded-lg border bg-popover p-3 text-xs shadow-lg",
       )}
     >
       <div className="mb-2 flex items-center gap-2">

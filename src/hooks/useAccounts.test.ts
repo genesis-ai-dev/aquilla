@@ -17,7 +17,7 @@ describe("useAccounts", () => {
 
   it("reflects sessions after add", async () => {
     await addSession({
-      jwt: "x", gitlabToken: "g", gitlabUrl: "https://git.example.com",
+      jwt: "x",
       username: "ada", createdAt: "2026-01-01T00:00:00Z",
     })
     const { result } = renderHook(() => useAccounts())
@@ -27,17 +27,17 @@ describe("useAccounts", () => {
 
   it("activate swaps active session", async () => {
     await addSession({
-      jwt: "x", gitlabToken: "g", gitlabUrl: "https://git.example.com",
+      jwt: "x",
       username: "ryder", createdAt: "2026-01-01T00:00:00Z",
     })
     await addSession({
-      jwt: "y", gitlabToken: "g", gitlabUrl: "https://git.example.com",
+      jwt: "y",
       username: "ada", createdAt: "2026-01-02T00:00:00Z",
     })
     const { result } = renderHook(() => useAccounts())
     await waitFor(() => expect(result.current.sessions).toHaveLength(2))
     const adaKey = sessionKey({
-      jwt: "y", gitlabToken: "g", gitlabUrl: "https://git.example.com",
+      jwt: "y",
       username: "ada", createdAt: "2026-01-02T00:00:00Z",
     })
     await act(async () => { await result.current.activate(adaKey) })

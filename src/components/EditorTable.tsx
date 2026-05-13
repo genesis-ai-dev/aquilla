@@ -1062,7 +1062,7 @@ function EditorRow({
   } as unknown as import("@/lib/codex-editor/types").CodexCell), [
     cell.id, cell.type, cell.translated, cell.attachments, cell.selectedAudioId,
   ])
-  const audioController = useCellAudio(project, cellForAudio)
+  const audioController = useCellAudio(project, cellForAudio, cell.fileId)
   const cellForGeneratedVoice = useMemo(() => ({
     kind: 2 as const,
     languageId: "html",
@@ -1076,7 +1076,7 @@ function EditorRow({
   } as unknown as import("@/lib/codex-editor/types").CodexCell), [
     cell.id, cell.type, cell.translated, cell.attachments, cell.selectedGeneratedVoiceAudioId,
   ])
-  const generatedVoiceController = useCellAudio(project, cellForGeneratedVoice)
+  const generatedVoiceController = useCellAudio(project, cellForGeneratedVoice, cell.fileId)
 
   // When this cell starts playing, gently bring it into view if it's
   // off-screen. Skips when the user is actively interacting with another cell
@@ -1297,7 +1297,6 @@ function EditorRow({
   // <s>, <code>). DOMPurify provides defense-in-depth against XSS.
   const showLineNumber = lineNumbersEnabled && cell.type !== "paratext"
   const showCellLabel = cellLabelsEnabled && cell.cellLabel
-  const isGitProject = project.origin?.kind === "git"
 
   // ── Hover / focus / tap state for the floating action rail ───────────────
   // Three input sources OR'd together: row hover, focus-within, tap-selected
@@ -1712,23 +1711,21 @@ function EditorRow({
               ) : (
                 <RailButton
                   icon={
-                    !editable || isGitProject ? (
+                    !editable ? (
                       <MicOff className="h-3.5 w-3.5" />
                     ) : (
                       <Mic className="h-3.5 w-3.5" />
                     )
                   }
                   tooltip={
-                    isGitProject
-                      ? "Recording on GitLab projects isn't available yet"
-                      : !editable
-                        ? "Read-only (imported from git)"
-                        : !onOpenRecording
-                          ? "Recording disabled"
-                          : "Record audio"
+                    !editable
+                      ? "Read-only"
+                      : !onOpenRecording
+                        ? "Recording disabled"
+                        : "Record audio"
                   }
                   onClick={() => onOpenRecording?.(cell.id)}
-                  disabled={!editable || !onOpenRecording || isGitProject}
+                  disabled={!editable || !onOpenRecording}
                 />
               )}
 
@@ -1746,6 +1743,7 @@ function EditorRow({
                   generatedVoiceAudioId={cell.selectedGeneratedVoiceAudioId}
                   attachments={cell.attachments}
                   projectId={project.id}
+                  fileId={cell.fileId}
                   disabled={!editable}
                 />
               )}
@@ -1914,7 +1912,7 @@ function EditorRow({
                         <button
                           type="button"
                           onClick={() => onOpenRecording?.(cell.id)}
-                          disabled={!editable || !onOpenRecording || isGitProject}
+                          disabled={!editable || !onOpenRecording}
                           className="inline-flex items-center gap-1.5 rounded-full border border-border bg-background px-2.5 py-1 text-[11px] font-medium text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-40"
                         >
                           <Mic className="h-3 w-3" />
@@ -1965,7 +1963,7 @@ function EditorRow({
                         <button
                           type="button"
                           onClick={() => onOpenRecording?.(cell.id)}
-                          disabled={!editable || !onOpenRecording || isGitProject}
+                          disabled={!editable || !onOpenRecording}
                           className="inline-flex items-center gap-1.5 rounded-full border border-border bg-background px-2.5 py-1 text-[11px] font-medium text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-40"
                         >
                           <Mic className="h-3 w-3" />
@@ -1985,13 +1983,9 @@ function EditorRow({
                         <button
                           type="button"
                           onClick={() => onOpenRecording?.(cell.id)}
-                          disabled={!editable || !onOpenRecording || isGitProject}
+                          disabled={!editable || !onOpenRecording}
                           className="inline-flex items-center gap-1.5 rounded-full bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-40"
-                          title={
-                            isGitProject
-                              ? "Recording on GitLab projects isn't available yet"
-                              : "Record audio"
-                          }
+                          title="Record audio"
                         >
                           <Mic className="h-3 w-3" />
                           Record

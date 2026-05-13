@@ -1,0 +1,10 @@
+{
+  "name": "@aquilla/telemetry",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Aquilla telemetry SDK — error reporting, perf, usage events.",
+  "type": "module",
+  "scripts": {
+    "build": "echo 'stub — populated in Phase 3'"
+  }
+}

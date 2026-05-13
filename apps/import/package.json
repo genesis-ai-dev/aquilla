@@ -1,0 +1,10 @@
+{
+  "name": "@aquilla/import",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Aquilla import app — stub (Phase 1B). Populated in Phase 3.",
+  "scripts": {
+    "build": "echo 'stub — populated in Phase 3'",
+    "deploy": "echo 'stub — populated in Phase 3'"
+  }
+}

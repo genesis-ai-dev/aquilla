@@ -1,0 +1,13 @@
+{
+  "login":           "/login",
+  "signup":          "/signup",
+  "reset":           "/reset",
+  "projects":        "/projects",
+  "import":          "/import",
+  "export":          "/export",
+  "migrate":         "/migrate",
+  "billing":         "/billing",
+  "org":             "/org",
+  "workspace":       "/w",
+  "frontier-server": "/api/identity"
+}

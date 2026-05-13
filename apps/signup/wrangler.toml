@@ -1,0 +1,60 @@
+# Stub wrangler config for apps/signup/.
+# Populated with real bindings in Phase 3 — for now this only declares the
+# per-env name and route patterns so the boot-time assertEnvBindings()
+# helper (packages/errors) has the right shape to validate against.
+#
+# Mounted under `/signup` (routes.json).
+
+name = "aquilla-signup"
+main = "src/index.ts"
+compatibility_date = "2024-12-01"
+compatibility_flags = ["nodejs_compat"]
+
+# Same CF account as the rest of the monorepo workers. Pinned to avoid
+# wrangler interactive account-pick prompts.
+account_id = "6a80496d1e59948a9cbaa3c643ba81d7"
+
+# Top-level (no env flag) defaults to prod for symmetry with the legacy
+# workers. Prefer `--env=production` / `--env=staging` / `--env=preview`
+# explicitly; do not rely on these defaults.
+routes = ["aquilla.app/signup/*"]
+
+[vars]
+ENV = "prod"
+
+# ---------------------------------------------------------------------------
+# Production — `wrangler deploy --env production`
+# ---------------------------------------------------------------------------
+[env.production]
+name = "aquilla-prod-signup"
+account_id = "6a80496d1e59948a9cbaa3c643ba81d7"
+routes = ["aquilla.app/signup/*"]
+
+[env.production.vars]
+ENV = "prod"
+
+# ---------------------------------------------------------------------------
+# Staging — `wrangler deploy --env staging`
+# ---------------------------------------------------------------------------
+[env.staging]
+name = "aquilla-dev-signup"
+account_id = "6a80496d1e59948a9cbaa3c643ba81d7"
+routes = ["dev.aquilla.app/signup/*"]
+
+[env.staging.vars]
+ENV = "preview"
+
+# ---------------------------------------------------------------------------
+# Preview (per-PR) — CI substitutes `__PR__` with the PR number at deploy
+# time. Resource names land on the `aquilla-pr-<N>-` prefix that the
+# boot-time env assertion helper (packages/errors) expects under
+# ENV=preview.
+# ---------------------------------------------------------------------------
+[env.preview]
+name = "aquilla-pr-__PR__-signup"
+account_id = "6a80496d1e59948a9cbaa3c643ba81d7"
+routes = ["pr-__PR__.aquilla.app/signup/*"]
+
+[env.preview.vars]
+ENV = "preview"
+PR = "__PR__"

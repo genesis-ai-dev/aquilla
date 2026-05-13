@@ -1,0 +1,228 @@
+name: Deploy all Aquilla apps (per-PR preview)
+
+# AD-11 / spec §21-monorepo.md — every PR redeploys every app.
+# Clicking around in the preview stays in the preview (no fall-through to
+# main for unchanged apps); the consistency benefit is worth the small
+# extra spend on parallel deploys.
+#
+# Phase 1B gate: each app under apps/ ships ONLY a stub (README + package.json
+# + wrangler.toml) — there is no src/ to deploy yet. The "Discover apps to
+# deploy" step filters the matrix down to apps that have a src/ directory.
+# Until Phase 3 populates them, this workflow runs but the matrix is empty
+# and the deploy job is skipped. The teardown job still fires on PR close
+# so any per-PR Workers created later are reliably cleaned up.
+#
+# Selective preview rule (matches deploy.yml / user memory
+# feedback_selective_deploy_tag):
+#   PR open / reopen / ready_for_review  → always run
+#   PR synchronize (push)                → only if commit msg has [preview]
+#                                          or [deploy] (case-insensitive)
+#   draft PR                             → never
+
+on:
+  pull_request:
+    types: [opened, reopened, ready_for_review, synchronize, closed]
+    branches: [dev, main]
+
+concurrency:
+  group: deploy-all-apps-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  # ─────────────────────────────────────────────────────────────────────
+  # Gate + matrix generation
+  # ─────────────────────────────────────────────────────────────────────
+  plan:
+    if: github.event.action != 'closed' && github.event.pull_request.draft != true
+    runs-on: ubuntu-latest
+    outputs:
+      deploy: ${{ steps.decide.outputs.deploy }}
+      apps: ${{ steps.discover.outputs.apps }}
+      has_apps: ${{ steps.discover.outputs.has_apps }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Decide whether to deploy (selective-deploy tag rule)
+        id: decide
+        run: |
+          if [ "${{ github.event.action }}" = "synchronize" ]; then
+            msg=$(git log -1 --format='%s%n%b')
+            if echo "$msg" | grep -qiE '\[preview\]|\[deploy\]'; then
+              echo "deploy=true" >> "$GITHUB_OUTPUT"
+              echo "reason=preview-tag" >> "$GITHUB_OUTPUT"
+            else
+              echo "deploy=false" >> "$GITHUB_OUTPUT"
+              echo "reason=synchronize-without-tag" >> "$GITHUB_OUTPUT"
+            fi
+          else
+            echo "deploy=true" >> "$GITHUB_OUTPUT"
+            echo "reason=${{ github.event.action }}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Discover apps with deployable src/
+        id: discover
+        run: |
+          set -euo pipefail
+          # Find every apps/<slug>/ that has BOTH a wrangler.toml AND a src/
+          # directory. Stubs have wrangler.toml but no src/, so the matrix
+          # stays empty during Phase 1B.
+          if [ ! -d apps ]; then
+            echo "apps=[]" >> "$GITHUB_OUTPUT"
+            echo "has_apps=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          mapfile -t found < <(
+            find apps -mindepth 1 -maxdepth 1 -type d \
+              | while read -r d; do
+                  if [ -f "$d/wrangler.toml" ] && [ -d "$d/src" ]; then
+                    basename "$d"
+                  fi
+                done \
+              | sort
+          )
+          if [ "${#found[@]}" -eq 0 ]; then
+            echo "apps=[]" >> "$GITHUB_OUTPUT"
+            echo "has_apps=false" >> "$GITHUB_OUTPUT"
+          else
+            json=$(printf '%s\n' "${found[@]}" | jq -R . | jq -s -c .)
+            echo "apps=$json" >> "$GITHUB_OUTPUT"
+            echo "has_apps=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Skip notice
+        if: steps.decide.outputs.deploy != 'true' || steps.discover.outputs.has_apps != 'true'
+        run: |
+          if [ "${{ steps.decide.outputs.deploy }}" != "true" ]; then
+            echo "::notice::Skipping per-PR app deploy (${{ steps.decide.outputs.reason }})."
+          else
+            echo "::notice::No deployable apps under apps/* yet (Phase 1B scaffolding only). Workflow exits clean."
+          fi
+
+  # ─────────────────────────────────────────────────────────────────────
+  # Per-app deploy + smoke test (matrix over discovered apps)
+  # ─────────────────────────────────────────────────────────────────────
+  deploy-app:
+    needs: plan
+    if: |
+      needs.plan.outputs.deploy == 'true' &&
+      needs.plan.outputs.has_apps == 'true'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        app: ${{ fromJson(needs.plan.outputs.apps) }}
+    env:
+      PR: ${{ github.event.pull_request.number }}
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: 6a80496d1e59948a9cbaa3c643ba81d7
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+      - run: pnpm install --frozen-lockfile
+
+      - name: Substitute __PR__ in wrangler.toml
+        working-directory: apps/${{ matrix.app }}
+        run: |
+          # CI substitutes __PR__ at deploy time (spec §"Preview deployments").
+          # In-place rewrite is safe: the apps/<slug>/wrangler.toml lives in
+          # the PR's checkout, not in the persistent workspace.
+          sed -i "s|__PR__|${PR}|g" wrangler.toml
+
+      - name: Deploy
+        working-directory: apps/${{ matrix.app }}
+        run: pnpm exec wrangler deploy --env preview
+
+      - name: Smoke-test preview URL
+        run: |
+          # The mounted path for this app comes from routes.json.
+          path=$(jq -r --arg slug "${{ matrix.app }}" '.[$slug] // empty' routes.json)
+          if [ -z "$path" ] && [ "${{ matrix.app }}" = "front-door" ]; then
+            path="/"
+          fi
+          if [ -z "$path" ]; then
+            echo "::warning::No routes.json entry for ${{ matrix.app }} — skipping smoke test."
+            exit 0
+          fi
+          url="https://pr-${PR}.aquilla.app${path}/"
+          echo "Smoke-testing $url"
+          # Allow 200, 301, 302, 401 (preview may be auth-walled); fail on 5xx
+          # or connection error.
+          code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 20 "$url" || echo "000")
+          echo "→ HTTP $code"
+          case "$code" in
+            2*|3*|401|403) ;;
+            *) echo "::error::Smoke test failed for ${{ matrix.app }} (HTTP $code)"; exit 1 ;;
+          esac
+
+  # ─────────────────────────────────────────────────────────────────────
+  # Sticky-comment the preview URL on the PR
+  # ─────────────────────────────────────────────────────────────────────
+  comment:
+    needs: [plan, deploy-app]
+    if: needs.plan.outputs.has_apps == 'true' && needs.plan.outputs.deploy == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+    steps:
+      - uses: marocchino/sticky-pull-request-comment@v2
+        with:
+          header: aquilla-apps-preview
+          message: |
+            ### Aquilla apps preview
+
+            Preview hostname: **pr-${{ github.event.pull_request.number }}.aquilla.app**
+
+            Deployed apps: `${{ needs.plan.outputs.apps }}`
+
+            Each app is mounted under its `routes.json` slug:
+            - `/login`, `/signup`, `/reset`, `/projects`, `/import`, `/export`, `/migrate`, `/billing`, `/org`
+            - `/w/*` (workspace), `/api/identity/*` (frontier-server)
+            - `/` (front-door — redirects to `/projects`)
+
+  # ─────────────────────────────────────────────────────────────────────
+  # Per-PR cleanup on close
+  # ─────────────────────────────────────────────────────────────────────
+  teardown:
+    if: github.event.action == 'closed'
+    runs-on: ubuntu-latest
+    env:
+      PR: ${{ github.event.pull_request.number }}
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: 6a80496d1e59948a9cbaa3c643ba81d7
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+      - run: pnpm install --frozen-lockfile
+
+      - name: Discover per-PR Workers and delete them
+        run: |
+          set -euo pipefail
+          if [ ! -d apps ]; then
+            echo "No apps/ directory — nothing to tear down."
+            exit 0
+          fi
+          # The naming convention is fixed: aquilla-pr-<N>-<slug>.
+          # We discover slugs from the apps/ directory rather than from the
+          # CF account so we don't accidentally pick up unrelated Workers.
+          for d in apps/*/; do
+            slug=$(basename "$d")
+            name="aquilla-pr-${PR}-${slug}"
+            echo "Deleting Worker: $name"
+            # `wrangler delete` exits non-zero if the Worker doesn't exist;
+            # absorb that so a previously-failed deploy doesn't block the
+            # rest of the cleanup.
+            pnpm exec wrangler delete --name "$name" --force || \
+              echo "::warning::Worker $name not found (skipped)"
+          done

@@ -1,0 +1,22 @@
+{
+  "name": "@aquilla/front-door",
+  "private": true,
+  "version": "0.0.1",
+  "description": "Aquilla front-door Worker — handles / (redirect to default app), /__routes (debug), CSP injection, and 404 fallback. Workers Routes does the per-app dispatch upstream of this Worker.",
+  "type": "module",
+  "main": "src/index.ts",
+  "scripts": {
+    "deploy": "wrangler deploy",
+    "deploy:staging": "wrangler deploy --env staging",
+    "deploy:preview": "wrangler deploy --env preview",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@aquilla/errors": "workspace:*"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20240117.0",
+    "typescript": "~6.0.2",
+    "wrangler": "^4.83.0"
+  }
+}

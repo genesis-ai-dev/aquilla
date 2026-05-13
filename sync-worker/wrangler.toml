@@ -3,8 +3,8 @@ main = "src/index.ts"
 compatibility_date = "2024-12-01"
 compatibility_flags = ["nodejs_compat"]
 
-# Same CF account as frontier-server and codex-db. Pinned so `wrangler deploy`
-# doesn't prompt interactively and lands on the wrong account by accident.
+# Same CF account as codex-auth-worker. Pinned so `wrangler deploy` doesn't
+# prompt interactively and lands on the wrong account by accident.
 account_id = "6a80496d1e59948a9cbaa3c643ba81d7"
 
 # y-partyserver wires one Durable Object per file (room name = fileId).
@@ -23,27 +23,32 @@ binding = "SNAPSHOTS"
 bucket_name = "codex-snapshots"
 # For local `wrangler dev`, wrangler will use a local simulator if the bucket doesn't exist.
 
-# Shared D1 with frontier-server. Schema owned there (cloudflare/codex_migrations);
-# sync-worker is a writer only (projects files + cells on every onSave).
+# Shared D1 with codex-auth-worker. Schema is owned by auth-worker
+# (auth-worker/migrations/0001_initial.sql); sync-worker is a writer-only
+# against the `files`, `cells`, `events`, `cell_validators`, `checkpoints`
+# tables. Migration application happens via auth-worker's deploy step.
 [[d1_databases]]
 binding = "CODEX_DB"
-database_name = "codex-db"
-database_id = "cf7133b2-227f-4f0a-9d8f-ad81ee05f27d"
+database_name = "codex"
+# database_id is filled in after `wrangler d1 create codex` — must match
+# auth-worker/wrangler.toml.
+database_id = "REPLACE_WITH_PROD_CODEX_D1_ID"
 
 # Auth:
-#   SYNC_SECRET_KEY (shared with frontier-server for JWT signing — distinct
-#   from Frontier's main SECRET_KEY) and ALLOW_UNAUTHENTICATED live in
-#   .dev.vars for local dev (see .dev.vars.example) and are provisioned via
-#   `wrangler secret put` in production. Deploying with neither set means
-#   strict auth (reject all WS connections without a valid sync-token JWT)
-#   — the intended prod default. If you need to disable auth in prod for
-#   some reason, set ALLOW_UNAUTHENTICATED="true" via `wrangler secret put`.
+#   SYNC_SECRET_KEY (shared with codex-auth-worker for sync-token JWT
+#   signing — distinct from auth-worker's main SECRET_KEY) and
+#   ALLOW_UNAUTHENTICATED live in .dev.vars for local dev (see
+#   .dev.vars.example) and are provisioned via `wrangler secret put` in
+#   production. Deploying with neither set means strict auth (reject all
+#   WS connections without a valid sync-token JWT) — the intended prod
+#   default. If you need to disable auth in prod for some reason, set
+#   ALLOW_UNAUTHENTICATED="true" via `wrangler secret put`.
 
 # ---------------------------------------------------------------------------
 # Staging environment — physically separate D1, R2, DO namespace.
-# Auth model unchanged: same SYNC_SECRET_KEY as prod, same frontier-server
+# Auth model unchanged: same SYNC_SECRET_KEY as prod, same auth-worker
 # issues sync-tokens. A logged-in user can use the staging frontend and
-# their writes land in codex-db-staging / codex-snapshots-staging, leaving
+# their writes land in codex-staging / codex-snapshots-staging, leaving
 # prod data untouched.
 #
 # Deploy: `wrangler deploy --env staging` (CI does this on push to dev).
@@ -68,5 +73,5 @@ bucket_name = "codex-snapshots-staging"
 
 [[env.staging.d1_databases]]
 binding = "CODEX_DB"
-database_name = "codex-db-staging"
-database_id = "2afa2bb5-667a-4f0d-bc1e-fffa3c9f256f"
+database_name = "codex-staging"
+database_id = "REPLACE_WITH_STAGING_CODEX_D1_ID"

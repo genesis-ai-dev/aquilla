@@ -4,29 +4,26 @@ compatibility_date = "2024-12-01"
 compatibility_flags = ["nodejs_compat"]
 account_id = "6a80496d1e59948a9cbaa3c643ba81d7"
 
-# Side-by-side writer with the legacy frontier-server. Both workers point at
-# the same prod frontier-db-v2 so a user created by either side can log in
-# via either side, and JWTs are interchangeable (shared SECRET_KEY).
-# Schema is owned by frontier-server's migrations; this worker is a writer
-# against `users`, `password_reset_tokens`, `activity_logs`, `project_invites`,
-# `project_members`, `projects`, `organizations`, and `org_members`.
-[[d1_databases]]
-binding = "AUTH_DB"
-database_name = "frontier-db-v2"
-database_id = "9c6abd81-01c3-44ce-9d93-9dfa1c7e1086"
-
-# codex-db (file/cell projections written by sync-worker on Y.Doc onSave).
-# Auth-worker reads it for project list/get + writes `files` deletes when a
-# user removes a file from a project (DELETE /projects/:id/files/:fileId).
-# Schema owned by sync-worker's migrations.
+# Single D1 owns everything codex-web touches — identity, orgs, projects,
+# members, invites, file/cell projections. Brand-new schema (no shared
+# tables with the legacy frontier-server's frontier-db-v2). Migrations
+# under `migrations/` are wrangler-applied on deploy.
+#
+# Schema ownership lives here; sync-worker binds the same D1 but does NOT
+# declare migrations_dir (wrangler tracks applied migrations per file in a
+# `d1_migrations` row, so a second worker would no-op anyway — keeping a
+# single owner avoids confusion).
 [[d1_databases]]
 binding = "CODEX_DB"
-database_name = "codex-db"
-database_id = "cf7133b2-227f-4f0a-9d8f-ad81ee05f27d"
+database_name = "codex"
+# database_id is filled in after `wrangler d1 create codex`.
+database_id = "REPLACE_WITH_PROD_CODEX_D1_ID"
+migrations_dir = "migrations"
 
 # Secrets (provisioned via `wrangler secret put`, never committed):
-#   SECRET_KEY      — frontier JWT signing key. MUST match prod
-#                     frontier-server so access tokens are interchangeable.
+#   SECRET_KEY      — frontier JWT signing key. Rotate to a fresh value for
+#                     the clean break; legacy frontier-server tokens will no
+#                     longer verify here (acceptable — no shared users yet).
 #   SYNC_SECRET_KEY — signs /sync-token JWTs AND authenticates admin calls
 #                     to codex-sync-worker. MUST match codex-sync-worker.
 #   RESEND_API_KEY  — used by /password-reset/request to send email.
@@ -43,24 +40,20 @@ ENVIRONMENT = "production"
 SYNC_WORKER_URL = "https://codex-sync-worker.blue-darkness-7674.workers.dev"
 
 # ---------------------------------------------------------------------------
-# Staging environment — physically separate D1 (frontier-db-v2-staging) so
-# experiments don't pollute prod identities. Same SECRET_KEY + SYNC_SECRET_KEY
-# as prod so tokens minted against staging still verify against prod workers
-# during cross-env testing (set via `wrangler secret put --env staging`).
+# Staging — physically separate D1 (codex-staging) so experiments don't
+# pollute prod identities. SECRET_KEY + SYNC_SECRET_KEY may be either shared
+# with prod (cross-env testing convenience) or rotated; that's a deploy
+# decision, not a code one.
 # ---------------------------------------------------------------------------
 [env.staging]
 name = "codex-auth-worker-staging"
 account_id = "6a80496d1e59948a9cbaa3c643ba81d7"
 
 [[env.staging.d1_databases]]
-binding = "AUTH_DB"
-database_name = "frontier-db-v2-staging"
-database_id = "636fdec6-ba75-447f-b890-6743e00b95fe"
-
-[[env.staging.d1_databases]]
 binding = "CODEX_DB"
-database_name = "codex-db-staging"
-database_id = "2afa2bb5-667a-4f0d-bc1e-fffa3c9f256f"
+database_name = "codex-staging"
+database_id = "REPLACE_WITH_STAGING_CODEX_D1_ID"
+migrations_dir = "migrations"
 
 [env.staging.vars]
 ALGORITHM = "HS256"

@@ -5,7 +5,7 @@ import type { Env } from "../types"
 
 function makeEnv(overrides: Partial<Env> = {}): Env {
   return {
-    AUTH_DB: {} as unknown as D1Database,
+    CODEX_DB: {} as unknown as D1Database,
     SECRET_KEY: "test-secret",
     ALGORITHM: "HS256",
     ACCESS_TOKEN_EXPIRE_MINUTES: "60",

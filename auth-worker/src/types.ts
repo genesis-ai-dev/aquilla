@@ -1,30 +1,23 @@
 // Shared types for the codex-auth-worker.
 //
-// This worker is a side-by-side writer alongside the legacy frontier-server,
-// both pointing at the same prod frontier-db-v2. Column names mirror the
-// production schema (verified via wrangler d1 execute on 2026-05-12) so DB
-// row casts are strongly typed without `any`.
+// Single D1 (`codex` prod, `codex-staging` staging) owns everything codex-web
+// touches — identity, orgs, projects, members, invites, plus the file/cell
+// projections sync-worker writes. Schema is defined in
+// `auth-worker/migrations/0001_initial.sql`.
 
 export interface Env {
-  /** Bound to frontier-db-v2 (prod) or frontier-db-v2-staging (staging). */
-  AUTH_DB: D1Database
+  /** Bound to `codex` (prod) or `codex-staging` (staging). Shared with
+   *  codex-sync-worker (same database_id). */
+  CODEX_DB: D1Database
 
-  /**
-   * Bound to codex-db (prod) or codex-db-staging (staging). Optional so
-   * test environments and the legacy auth-only routes still work without it.
-   * Used by project list/get to hydrate the file list and by file-projection
-   * delete to drop projected `files` rows.
-   */
-  CODEX_DB?: D1Database
-
-  // Frontier JWT signing (interchangeable with the old frontier-server).
+  // Frontier JWT signing. Rotated for the clean break — tokens minted by
+  // the legacy frontier-server no longer verify here.
   SECRET_KEY: string
   ALGORITHM: string
   ACCESS_TOKEN_EXPIRE_MINUTES: string
 
-  // Sync-token signing AND admin auth to codex-sync-worker. Distinct from
-  // SECRET_KEY. Shared between auth-worker, sync-worker, and (still) the
-  // legacy frontier-server.
+  // Sync-token signing AND admin auth to codex-sync-worker. Shared between
+  // auth-worker and sync-worker.
   SYNC_SECRET_KEY?: string
 
   /** codex-sync-worker base URL for archive / file-delete notifications. */
@@ -41,8 +34,7 @@ export interface Env {
    * When set to "1", exposes `/__test__/reset` and skips authentication on
    * sensitive routes that the E2E harness needs to seed. NEVER set in
    * production — gated explicitly so an accidental config flip doesn't
-   * expose admin routes. Mirrors the legacy frontier-server's WRANGLER_LOCAL
-   * + ALLOW_UNAUTHENTICATED gates.
+   * expose admin routes.
    */
   WRANGLER_LOCAL?: string
 }
@@ -52,21 +44,16 @@ export type Variables = {
 }
 
 /**
- * Row shape of the `users` table in frontier-db-v2. Mirrors the production
- * schema verified on 2026-05-12 — kept narrow so this worker only relies on
- * columns the legacy frontier-server also writes.
+ * Row shape of the `users` table. Mirrors the schema in
+ * `auth-worker/migrations/0001_initial.sql`. Legacy gitlab_* / stripe_*
+ * columns were removed in the clean-break migration (2026-05-13).
  */
 export interface UserRow {
   id: number
   username: string
   email: string
   password_hash: string
-  gitlab_user_id: number | null
-  gitlab_username: string | null
-  gitlab_token: string | null
-  stripe_customer_id: string | null
-  subscription_tier: string | null
-  preferences: string | null
+  preferences: string
   created_at: string
   updated_at: string
 }
@@ -77,11 +64,6 @@ export interface AuthUser {
   username: string
   email: string
   password_hash: string
-  gitlab_user_id: number | null
-  gitlab_username: string | null
-  gitlab_token: string | null
-  stripe_customer_id: string | null
-  subscription_tier: string | null
   preferences: Record<string, unknown>
   created_at: string
   updated_at: string
@@ -91,7 +73,6 @@ export interface UserResponse {
   id: number
   username: string
   email: string
-  gitlab_username: string | null
   preferences: Record<string, unknown>
 }
 
@@ -101,7 +82,7 @@ export interface AuthResponse {
 }
 
 export interface JWTPayload {
-  /** Username — matches the legacy frontier-server's claim layout. */
+  /** Username — sub claim. */
   sub: string
   exp: number
   iat: number
@@ -126,7 +107,7 @@ export interface SyncTokenClaims {
 export interface RoleResolution {
   level: number
   name: string
-  source: "override" | "creator" | "gitlab"
+  source: "override" | "creator" | "org"
 }
 
 export interface SyncTokenResponse {
@@ -135,7 +116,7 @@ export interface SyncTokenResponse {
   role: RoleResolution
 }
 
-/** Row shape of `project_invites` in frontier-db-v2. */
+/** Row shape of `project_invites`. */
 export interface ProjectInviteRow {
   token: string
   project_id: string
@@ -147,7 +128,7 @@ export interface ProjectInviteRow {
   used_at: string | null
 }
 
-/** Row shape of `project_members` in frontier-db-v2. */
+/** Row shape of `project_members`. */
 export interface ProjectMemberRow {
   project_id: string
   user_id: number
@@ -156,11 +137,10 @@ export interface ProjectMemberRow {
   granted_at: string
 }
 
-/** Row shape of `projects` in frontier-db-v2 — only the columns we read. */
+/** Row shape of `projects` — only the columns we read. */
 export interface ProjectRow {
   id: string
   name: string
-  gitlab_project_id: number | null
   org_id: number | null
   created_by: number
   archived_at: string | null

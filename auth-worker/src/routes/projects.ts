@@ -150,7 +150,7 @@ projects.post(
     const userOrg = await getOrCreateUserOrg(c.env, user)
 
     try {
-      await c.env.AUTH_DB.prepare(
+      await c.env.CODEX_DB.prepare(
         `INSERT INTO projects (id, name, org_id, created_by)
          VALUES (?, ?, ?, ?)
          ON CONFLICT(id) DO NOTHING`,
@@ -179,7 +179,7 @@ projects.post(
 projects.get("/", authMiddleware, async (c) => {
   const user = c.get("user")
 
-  const rows = await c.env.AUTH_DB.prepare(
+  const rows = await c.env.CODEX_DB.prepare(
     `SELECT p.id, p.name,
             COALESCE(pm.role_level, om.role_level, 700) AS role_level,
             CASE
@@ -237,7 +237,7 @@ projects.get("/:projectId", authMiddleware, async (c) => {
   const role = await resolveProjectRoleIncludingArchived(c.env, user, projectId)
   if (!role) return c.json({ error: "not found or no access" }, 403)
 
-  const row = await c.env.AUTH_DB.prepare(
+  const row = await c.env.CODEX_DB.prepare(
     `SELECT p.id, p.name, p.archived_at, p.archived_by,
             u.username AS archived_by_username
        FROM projects p
@@ -285,7 +285,7 @@ projects.post("/:projectId/archive", authMiddleware, async (c) => {
   }
 
   try {
-    await c.env.AUTH_DB.prepare(
+    await c.env.CODEX_DB.prepare(
       `UPDATE projects
           SET archived_at = CURRENT_TIMESTAMP,
               archived_by = ?
@@ -299,7 +299,7 @@ projects.post("/:projectId/archive", authMiddleware, async (c) => {
     return c.json({ error: `archive failed: ${message}` }, 500)
   }
 
-  const row = await c.env.AUTH_DB.prepare(
+  const row = await c.env.CODEX_DB.prepare(
     "SELECT archived_at, archived_by FROM projects WHERE id = ?",
   )
     .bind(projectId)
@@ -331,7 +331,7 @@ projects.delete("/:projectId/archive", authMiddleware, async (c) => {
   }
 
   try {
-    await c.env.AUTH_DB.prepare(
+    await c.env.CODEX_DB.prepare(
       `UPDATE projects
           SET archived_at = NULL,
               archived_by = NULL
@@ -360,7 +360,7 @@ projects.get("/:projectId/members", authMiddleware, async (c) => {
   const role = await resolveProjectRole(c.env, user, projectId)
   if (!role) return c.json({ error: "no access to project" }, 403)
 
-  const project = await c.env.AUTH_DB.prepare(
+  const project = await c.env.CODEX_DB.prepare(
     "SELECT created_by, org_id FROM projects WHERE id = ?",
   )
     .bind(projectId)
@@ -430,7 +430,7 @@ projects.post(
       return c.json({ error: "cannot grant role to self" }, 400)
     }
 
-    await c.env.AUTH_DB.prepare(
+    await c.env.CODEX_DB.prepare(
       `INSERT INTO project_members (project_id, user_id, role_level, granted_by)
        VALUES (?, ?, ?, ?)
        ON CONFLICT(project_id, user_id) DO UPDATE SET
@@ -467,7 +467,7 @@ projects.delete("/:projectId/members/:userId", authMiddleware, async (c) => {
     return c.json({ error: "role >= maintainer required" }, 403)
   }
 
-  const existing = await c.env.AUTH_DB.prepare(
+  const existing = await c.env.CODEX_DB.prepare(
     "SELECT role_level FROM project_members WHERE project_id = ? AND user_id = ?",
   )
     .bind(projectId, targetUserId)
@@ -479,7 +479,7 @@ projects.delete("/:projectId/members/:userId", authMiddleware, async (c) => {
     )
   }
 
-  await c.env.AUTH_DB.prepare(
+  await c.env.CODEX_DB.prepare(
     "DELETE FROM project_members WHERE project_id = ? AND user_id = ?",
   )
     .bind(projectId, targetUserId)
@@ -587,7 +587,7 @@ projects.post(
     const expiresAt = new Date(Date.now() + DEFAULT_INVITE_TTL_MS).toISOString()
 
     try {
-      await c.env.AUTH_DB.prepare(
+      await c.env.CODEX_DB.prepare(
         `INSERT INTO project_invites
            (token, project_id, role_level, created_by, expires_at)
          VALUES (?, ?, ?, ?, ?)`,
@@ -616,7 +616,7 @@ projects.get("/invite-preview/:token", async (c) => {
     return c.json({ error: "Invalid token" }, 404)
   }
 
-  const invite = await c.env.AUTH_DB.prepare(
+  const invite = await c.env.CODEX_DB.prepare(
     `SELECT token, project_id, role_level, created_by, created_at,
             expires_at, used_by, used_at
      FROM project_invites WHERE token = ?`,
@@ -637,8 +637,8 @@ projects.get("/invite-preview/:token", async (c) => {
     return c.json({ error: "Invite already used" }, 410)
   }
 
-  const project = await c.env.AUTH_DB.prepare(
-    `SELECT id, name, gitlab_project_id, org_id, created_by, archived_at
+  const project = await c.env.CODEX_DB.prepare(
+    `SELECT id, name, org_id, created_by, archived_at
      FROM projects WHERE id = ?`,
   )
     .bind(invite.project_id)
@@ -671,7 +671,7 @@ projects.post(
     const user = c.get("user")
     const { token } = c.req.valid("json")
 
-    const invite = await c.env.AUTH_DB.prepare(
+    const invite = await c.env.CODEX_DB.prepare(
       `SELECT token, project_id, role_level, created_by, created_at,
               expires_at, used_by, used_at
        FROM project_invites WHERE token = ?`,
@@ -691,7 +691,7 @@ projects.post(
       return c.json({ error: "Invite already used" }, 410)
     }
 
-    const existing = await c.env.AUTH_DB.prepare(
+    const existing = await c.env.CODEX_DB.prepare(
       `SELECT role_level FROM project_members
        WHERE project_id = ? AND user_id = ?`,
     )
@@ -704,7 +704,7 @@ projects.post(
 
     try {
       if (existing) {
-        await c.env.AUTH_DB.prepare(
+        await c.env.CODEX_DB.prepare(
           `UPDATE project_members
            SET role_level = ?, granted_by = ?, granted_at = CURRENT_TIMESTAMP
            WHERE project_id = ? AND user_id = ?`,
@@ -712,7 +712,7 @@ projects.post(
           .bind(finalRole, invite.created_by, invite.project_id, user.id)
           .run()
       } else {
-        await c.env.AUTH_DB.prepare(
+        await c.env.CODEX_DB.prepare(
           `INSERT INTO project_members
              (project_id, user_id, role_level, granted_by)
            VALUES (?, ?, ?, ?)`,
@@ -721,7 +721,7 @@ projects.post(
           .run()
       }
       if (!invite.used_at) {
-        await c.env.AUTH_DB.prepare(
+        await c.env.CODEX_DB.prepare(
           `UPDATE project_invites
            SET used_by = ?, used_at = CURRENT_TIMESTAMP
            WHERE token = ?`,
@@ -749,7 +749,7 @@ projects.delete("/:projectId/invites/:token", authMiddleware, async (c) => {
     return c.json({ error: "role >= project_lead required" }, 403)
   }
 
-  const result = await c.env.AUTH_DB.prepare(
+  const result = await c.env.CODEX_DB.prepare(
     `DELETE FROM project_invites
       WHERE token = ? AND project_id = ? AND used_by IS NULL`,
   )

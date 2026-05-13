@@ -42,14 +42,13 @@ VITE_LLM_BASE_URL=http://127.0.0.1:<random>
 
 Playwright runs against `http://127.0.0.1:5173`.
 
-## Schema sources
+## Schema
 
-`e2e/sql/frontier-db-v2.sql` and `e2e/sql/codex-db.sql` are consolidated
-schema snapshots. Production schemas are owned by the legacy frontier-server
-(for frontier-db-v2) and by sync-worker / pending Phase 1 migrations (for
-codex-db); these vendored copies are local-only and never applied to a
-hosted D1. Refresh them manually if a column codex-web depends on is later
-added on the upstream side.
+Single D1 (`codex`) holds everything — identity, orgs, projects, members,
+invites, files, cells, events. Schema is owned by
+`auth-worker/migrations/`; `wrangler d1 migrations apply codex --local` is
+the canonical setup step. In prod, auth-worker's deploy applies migrations
+on every deploy. Sync-worker binds the same D1 but doesn't own migrations.
 
 ## Per-test isolation
 

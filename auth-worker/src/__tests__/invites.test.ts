@@ -12,11 +12,6 @@ function makeUser(id: number, username: string): UserRow {
     username,
     email: `${username}@example.com`,
     password_hash: "scrypt:32768:8:1$salt$" + "ab".repeat(64),
-    gitlab_user_id: id + 1000,
-    gitlab_username: username,
-    gitlab_token: "glpat-fake",
-    stripe_customer_id: null,
-    subscription_tier: "free",
     preferences: "{}",
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
@@ -34,7 +29,7 @@ async function frontierJwt(username: string): Promise<string> {
 
 function makeEnv(db: ReturnType<typeof makeFakeD1>): Env {
   return {
-    AUTH_DB: db,
+    CODEX_DB: db,
     SECRET_KEY: SECRET,
     ALGORITHM: "HS256",
     ACCESS_TOKEN_EXPIRE_MINUTES: "60",
@@ -50,7 +45,6 @@ describe("POST /api/v2/projects/:id/invites", () => {
         {
           id: "proj-1",
           name: "Test",
-          gitlab_project_id: null,
           org_id: null,
           created_by: 1,
           archived_at: null,
@@ -90,7 +84,6 @@ describe("POST /api/v2/projects/:id/invites", () => {
         {
           id: "proj-1",
           name: "Test",
-          gitlab_project_id: null,
           org_id: null,
           created_by: 99,
           archived_at: null,
@@ -149,7 +142,6 @@ describe("POST /api/v2/projects/accept-invite", () => {
         {
           id: "proj-1",
           name: "Test",
-          gitlab_project_id: null,
           org_id: null,
           created_by: 1,
           archived_at: null,
@@ -204,7 +196,6 @@ describe("POST /api/v2/projects/accept-invite", () => {
         {
           id: "proj-1",
           name: "Test",
-          gitlab_project_id: null,
           org_id: null,
           created_by: 1,
           archived_at: null,
@@ -264,7 +255,6 @@ describe("POST /api/v2/projects/accept-invite", () => {
         {
           id: "proj-1",
           name: "Test",
-          gitlab_project_id: null,
           org_id: null,
           created_by: 1,
           archived_at: null,
@@ -318,7 +308,6 @@ describe("GET /api/v2/projects/invite-preview/:token", () => {
         {
           id: "proj-1",
           name: "Genesis MVP",
-          gitlab_project_id: null,
           org_id: null,
           created_by: 1,
           archived_at: null,

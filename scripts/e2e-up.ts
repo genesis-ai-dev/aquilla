@@ -15,7 +15,6 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const REPO_ROOT = path.resolve(__dirname, "..")
 const AUTH_WORKER_DIR = path.join(REPO_ROOT, "auth-worker")
 const SYNC_WORKER_DIR = path.join(REPO_ROOT, "sync-worker")
-const SQL_DIR = path.join(REPO_ROOT, "e2e/sql")
 const AUTH_PORT = 8787
 const SYNC_WORKER_PORT = 8788
 const VITE_PORT = 5173
@@ -111,10 +110,6 @@ async function main(): Promise<void> {
     console.error(`[e2e-up] sync-worker not found at ${SYNC_WORKER_DIR}`)
     process.exit(1)
   }
-  if (!existsSync(SQL_DIR)) {
-    console.error(`[e2e-up] e2e/sql not found at ${SQL_DIR}`)
-    process.exit(1)
-  }
 
   // 0. Free our managed ports — survives stale processes from a prior aborted run.
   await freePort(AUTH_PORT)
@@ -128,58 +123,43 @@ async function main(): Promise<void> {
   logFiles.vite = path.join(LOG_DIR, "vite.log")
   logFiles.migrations = path.join(LOG_DIR, "migrations.log")
   logFiles.build = path.join(LOG_DIR, "build.log")
-  console.log(`[boot 1/7] resetting wrangler local state… (logs: ${LOG_DIR}/)`)
+  console.log(`[boot 1/6] resetting wrangler local state… (logs: ${LOG_DIR}/)`)
   rmSync(path.join(AUTH_WORKER_DIR, ".wrangler"), { recursive: true, force: true })
   rmSync(path.join(SYNC_WORKER_DIR, ".wrangler"), { recursive: true, force: true })
 
-  // 2. Apply the vendored frontier-db-v2 schema to auth-worker's local D1.
-  //    Schema is sourced from `e2e/sql/frontier-db-v2.sql` (frontier-server
-  //    origin/main, collapsed to what auth-worker reads/writes).
-  console.log("[boot 2/7] applying frontier-db-v2 schema (auth-worker local)…")
+  // 2. Apply the codex schema. Single D1 (`codex`) holds everything —
+  //    identity, orgs, projects, members, invites, plus the file/cell
+  //    projections sync-worker writes. Auth-worker owns the migrations dir;
+  //    in prod its deploy applies them. For local E2E each worker keeps its
+  //    own .wrangler state, so we apply twice:
+  //    (a) via `migrations apply` from auth-worker (tracked in d1_migrations)
+  //    (b) via `d1 execute --file` from sync-worker (raw apply to its sqlite)
+  console.log("[boot 2/6] applying codex schema (both workers' local D1)…")
   await runOnce(
     "npx",
-    [
-      "wrangler", "d1", "execute", "frontier-db-v2", "--local",
-      `--file=${path.join(SQL_DIR, "frontier-db-v2.sql")}`,
-    ],
+    ["wrangler", "d1", "migrations", "apply", "codex", "--local"],
     AUTH_WORKER_DIR,
     "migrations",
   )
-
-  // 3. Apply the codex-db schema to BOTH auth-worker and sync-worker's local
-  //    D1 (each worker keeps its own .wrangler/state). codex-db is shared in
-  //    prod — sync-worker writes file/cell projections, auth-worker reads.
-  console.log("[boot 3/7] applying codex-db schema (both workers)…")
-  for (const dir of [AUTH_WORKER_DIR, SYNC_WORKER_DIR]) {
+  const migrationsDir = path.join(AUTH_WORKER_DIR, "migrations")
+  const { readdirSync } = await import("node:fs")
+  const migrationFiles = readdirSync(migrationsDir)
+    .filter((f) => f.endsWith(".sql"))
+    .sort()
+  for (const m of migrationFiles) {
     await runOnce(
       "npx",
       [
-        "wrangler", "d1", "execute", "codex-db", "--local",
-        `--file=${path.join(SQL_DIR, "codex-db.sql")}`,
+        "wrangler", "d1", "execute", "codex", "--local",
+        `--file=${path.join(migrationsDir, m)}`,
       ],
-      dir,
+      SYNC_WORKER_DIR,
       "migrations",
     )
   }
 
-  const codexPatchesDir = path.join(SYNC_WORKER_DIR, "codex-db-patches")
-  if (existsSync(codexPatchesDir)) {
-    const { readdirSync } = await import("node:fs")
-    const codexPatches = readdirSync(codexPatchesDir)
-      .filter((f) => f.endsWith(".sql"))
-      .sort()
-    for (const p of codexPatches) {
-      await runOnce(
-        "npx",
-        ["wrangler", "d1", "execute", "codex-db", "--local", `--file=${path.join(codexPatchesDir, p)}`],
-        SYNC_WORKER_DIR,
-        "migrations",
-      )
-    }
-  }
-
   // 4. Boot codex-auth-worker. WRANGLER_LOCAL=1 enables /__test__/reset.
-  console.log(`[boot 4/7] starting codex-auth-worker on :${AUTH_PORT}…`)
+  console.log(`[boot 3/6] starting codex-auth-worker on :${AUTH_PORT}…`)
   const auth: SpawnedWorker = await spawnWranglerDev({
     cwd: AUTH_WORKER_DIR,
     port: AUTH_PORT,
@@ -199,7 +179,7 @@ async function main(): Promise<void> {
   cleanup.push(() => auth.kill())
 
   // 5. Boot sync-worker.
-  console.log(`[boot 5/7] starting sync-worker on :${SYNC_WORKER_PORT}…`)
+  console.log(`[boot 4/6] starting sync-worker on :${SYNC_WORKER_PORT}…`)
   const sync: SpawnedWorker = await spawnWranglerDev({
     cwd: SYNC_WORKER_DIR,
     port: SYNC_WORKER_PORT,
@@ -210,7 +190,7 @@ async function main(): Promise<void> {
   cleanup.push(() => sync.kill())
 
   // 6. Mock LLM (chat-worker stand-in for /api/v1/chat/completions).
-  console.log("[boot 6/7] starting mock LLM…")
+  console.log("[boot 5/6] starting mock LLM…")
   const mockLLM = new MockLLMServer()
   await mockLLM.start()
   cleanup.push(async () => mockLLM.stop())
@@ -229,7 +209,7 @@ async function main(): Promise<void> {
   )
   cleanup.push(async () => rmSync(envFile, { force: true }))
 
-  console.log("[boot 7/7] building app for test mode (one-time, ~30s)…")
+  console.log("[boot 6/6] building app for test mode (one-time, ~30s)…")
   await runOnce("npx", ["vite", "build", "--mode", "test"], REPO_ROOT, "build")
 
   console.log(`[boot ✓] starting Vite preview on :${VITE_PORT}…`)

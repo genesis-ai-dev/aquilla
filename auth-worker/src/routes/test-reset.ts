@@ -35,7 +35,7 @@ testReset.post("/reset", async (c) => {
     return c.json({ error: "Not found" }, 404)
   }
 
-  const db = c.env.AUTH_DB
+  const db = c.env.CODEX_DB
   const codexDb = c.env.CODEX_DB
 
   // Order matters: drop dependent rows before parents. The hand-rolled

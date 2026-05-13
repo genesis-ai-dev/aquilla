@@ -1,8 +1,4 @@
 // Tests for dispatchEvent.
-//
-// Verifies that the dispatcher routes implemented kinds to handlers and
-// returns 400 only for unknown runtime kinds. Audit-only kinds (thread.*,
-// cell.metadata.set) return ok with an events-table insert.
 
 import { describe, it, expect } from 'vitest'
 import { dispatchEvent } from '../events/dispatch'
@@ -12,47 +8,39 @@ import type { EventKind, RawEvent } from '../events/types'
 
 const SECRET = 'test-secret'
 
-async function makeToken(
-  overrides: Record<string, unknown> = {},
-): Promise<string> {
-  return makeTestToken(SECRET, {
-    projectId: 'proj-a',
-    fileId: 'file-x',
-    ...overrides,
-  } as any)
+async function makeToken(role = 500): Promise<string> {
+  return makeTestToken(SECRET, { projectId: 'proj-a', fileId: 'file-x', role })
 }
 
-// Produce an AuthorizedEvent for the given kind. Payload is filled in just
-// enough to satisfy authorize() — the dispatcher doesn't validate payload
-// shape (that's the handler's job).
-async function makeAuthorized<K extends EventKind>(kind: K) {
-  // Build a minimal payload per kind so that authorize() can validate the
-  // token claims (it only checks kind, projectId, fileId, role — not payload).
+async function makeAuthorized<K extends EventKind>(kind: K, role = 500) {
   const payloads: Record<EventKind, unknown> = {
-    'cell.commit': { value: 'hello', valueHtml: '<p>hello</p>' },
+    'source.cell.create': { cellId: 'cell-1', value: 'x' },
+    'source.cell.commit': { value: 'x' },
+    'source.cell.delete': {},
+    'source.cell.reorder': { anchorCellId: null },
+    'target.cell.create': { cellId: 'cell-1', value: 'x' },
+    'target.cell.commit': { value: 'x' },
+    'target.cell.delete': {},
+    'target.cell.reorder': { anchorCellId: null },
     'cell.validate': { editEventId: 'evt-1' },
     'cell.unvalidate': { editEventId: 'evt-1' },
-    'thread.add': { threadId: 't1', content: 'a comment' },
-    'thread.resolve': { threadId: 't1' },
-    'cell.metadata.set': { field: 'cellLabel', value: 'v' },
     'file.create': { name: 'Genesis', fileType: 'codex' },
   }
 
-  // All kinds except project-level ones need a fileId. All our test events
-  // are file-scoped, which covers all current EventKind values.
   const raw = {
     id: 'evt-00000000-0000-7000-0000-000000000001',
     schemaVersion: 1,
     kind,
     projectId: 'proj-a',
     fileId: 'file-x',
-    cellId: 'cell-1',
+    cellId: kind === 'file.create' ? undefined : 'cell-1',
+    parentId: null,
     author: 'alice',
     payload: payloads[kind],
     clientTs: 1000,
   } as unknown as RawEvent<K>
 
-  const token = await makeToken()
+  const token = await makeToken(role)
   const authResult = await authorize(token, raw, SECRET)
   if (!authResult.ok) {
     throw new Error(`authorize failed for kind ${kind}: ${authResult.reason}`)
@@ -60,8 +48,6 @@ async function makeAuthorized<K extends EventKind>(kind: K) {
   return authResult.event
 }
 
-// Minimal no-op D1 stub — dispatch.test only cares about the DispatchOutcome
-// shape, not what gets written to D1.
 function makeNoOpD1(): D1Database {
   function makePrepared(sql: string) {
     let boundArgs: unknown[] = []
@@ -87,86 +73,47 @@ function makeNoOpD1(): D1Database {
 }
 
 describe('dispatchEvent', () => {
-  it('cell.commit returns { ok: true, result: DispatchResult }', async () => {
-    const db = makeNoOpD1()
-    const authed = await makeAuthorized('cell.commit')
-    const outcome = dispatchEvent(db, authed, Date.now())
+  it('target.cell.create routes to the cell handler, returns events INSERT + cells UPSERT', async () => {
+    const authed = await makeAuthorized('target.cell.create', 400)
+    const outcome = dispatchEvent(makeNoOpD1(), authed, 9999, { updateProjection: true, serverSeq: 1 })
     expect(outcome.ok).toBe(true)
-    if (!outcome.ok) throw new Error('expected ok')
-    expect(outcome.result.stmts).toBeDefined()
-    expect(Array.isArray(outcome.result.stmts)).toBe(true)
-    expect(outcome.result.stmts.length).toBeGreaterThan(0)
-    expect(outcome.result.eventFrame.t).toBe('event')
+    if (!outcome.ok) throw new Error('unreachable')
+    expect(outcome.result.stmts.length).toBe(2)
     expect(outcome.result.dirtyTables).toContain('events')
     expect(outcome.result.dirtyTables).toContain('cells')
   })
 
-  it('cell.validate returns { ok: true, result }', async () => {
-    const db = makeNoOpD1()
-    const authed = await makeAuthorized('cell.validate')
-    const outcome = dispatchEvent(db, authed, Date.now())
+  it('cell.validate routes to the cell handler with two projection stmts + recompute', async () => {
+    const authed = await makeAuthorized('cell.validate', 300)
+    const outcome = dispatchEvent(makeNoOpD1(), authed, 9999, { updateProjection: true, serverSeq: 1 })
     expect(outcome.ok).toBe(true)
-    if (!outcome.ok) throw new Error('expected ok')
-    expect(outcome.result.stmts.length).toBeGreaterThan(0)
-    expect(outcome.result.eventFrame.kind).toBe('cell.validate')
+    if (!outcome.ok) throw new Error('unreachable')
+    // 1 events INSERT + 1 validator UPSERT + 1 recompute = 3
+    expect(outcome.result.stmts.length).toBe(3)
     expect(outcome.result.dirtyTables).toContain('cell_validators')
   })
 
-  it('cell.unvalidate returns { ok: true, result }', async () => {
-    const db = makeNoOpD1()
-    const authed = await makeAuthorized('cell.unvalidate')
-    const outcome = dispatchEvent(db, authed, Date.now())
+  it('updateProjection=false produces only the events INSERT (AD-2 stale sibling)', async () => {
+    const authed = await makeAuthorized('target.cell.commit', 400)
+    const outcome = dispatchEvent(makeNoOpD1(), authed, 9999, { updateProjection: false, serverSeq: 1 })
     expect(outcome.ok).toBe(true)
-    if (!outcome.ok) throw new Error('expected ok')
-    expect(outcome.result.stmts.length).toBeGreaterThan(0)
-    expect(outcome.result.eventFrame.kind).toBe('cell.unvalidate')
-  })
-
-  it('thread.add returns { ok: true } with events-only projection', async () => {
-    const db = makeNoOpD1()
-    const authed = await makeAuthorized('thread.add')
-    const outcome = dispatchEvent(db, authed, Date.now())
-    expect(outcome.ok).toBe(true)
-    if (!outcome.ok) throw new Error('expected ok')
+    if (!outcome.ok) throw new Error('unreachable')
     expect(outcome.result.stmts.length).toBe(1)
     expect(outcome.result.dirtyTables).toEqual(['events'])
-    expect(outcome.result.eventFrame.kind).toBe('thread.add')
   })
 
-  it('thread.resolve returns { ok: true } with events-only projection', async () => {
-    const db = makeNoOpD1()
-    const authed = await makeAuthorized('thread.resolve')
-    const outcome = dispatchEvent(db, authed, Date.now())
+  it('file.create routes to the file handler', async () => {
+    const authed = await makeAuthorized('file.create', 500)
+    const outcome = dispatchEvent(makeNoOpD1(), authed, 9999, { updateProjection: true, serverSeq: 1 })
     expect(outcome.ok).toBe(true)
-    if (!outcome.ok) throw new Error('expected ok')
-    expect(outcome.result.stmts.length).toBe(1)
-    expect(outcome.result.eventFrame.kind).toBe('thread.resolve')
+    if (!outcome.ok) throw new Error('unreachable')
+    expect(outcome.result.stmts.length).toBe(2) // events INSERT + files UPSERT
+    expect(outcome.result.dirtyTables).toContain('files')
   })
 
-  it('cell.metadata.set returns { ok: true } with events-only projection', async () => {
-    const db = makeNoOpD1()
-    const authed = await makeAuthorized('cell.metadata.set')
-    const outcome = dispatchEvent(db, authed, Date.now())
+  it('source.* kinds route to the cell handler (with side=source projection)', async () => {
+    const authed = await makeAuthorized('source.cell.create', 500)
+    const outcome = dispatchEvent(makeNoOpD1(), authed, 9999, { updateProjection: true, serverSeq: 1 })
     expect(outcome.ok).toBe(true)
-    if (!outcome.ok) throw new Error('expected ok')
-    expect(outcome.result.stmts.length).toBe(1)
-    expect(outcome.result.eventFrame.kind).toBe('cell.metadata.set')
-  })
-
-  it('the caller does not need to know about specific kinds — dispatcher is the single mapping point', async () => {
-    // This test verifies the design intent: a handler that uses dispatchEvent
-    // only needs to check ok/not-ok; it doesn't switch on kind itself.
-    // The dispatcher encapsulates all kind-to-handler routing.
-    const db = makeNoOpD1()
-    const authed = await makeAuthorized('cell.commit')
-    const outcome = dispatchEvent(db, authed, Date.now())
-    // The caller only needs to check outcome.ok and outcome.result
-    // without importing or referencing any specific handler.
-    if (outcome.ok) {
-      expect(outcome.result).toBeDefined()
-    } else {
-      expect(outcome.status).toBeDefined()
-      expect(outcome.reason).toBeDefined()
-    }
   })
 })

@@ -23,5 +23,8 @@
     "typescript": "^5.6.0",
     "vitest": "^4.1.4",
     "wrangler": "^3.78.12"
+  },
+  "overrides": {
+    "rollup": "npm:@rollup/wasm-node@^4.0.0"
   }
 }

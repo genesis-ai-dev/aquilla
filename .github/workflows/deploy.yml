@@ -109,13 +109,16 @@ jobs:
       #   PR with migrations          → per-PR fork   (codex-sync-worker-pr-<N>.*)
       #   anything else (dev, PR)     → staging       (codex-sync-worker-staging.*)
       # VITE_AUTH_BASE targets codex-auth-worker for auth / sync-token /
-      # invite routes; the rest of the frontier API (chat, payments,
-      # members, orgs) keeps using VITE_FRONTIER_BASE.
+      # invite routes. VITE_CHAT_BASE targets codex-chat-worker for the
+      # LLM completion proxy. The rest of the frontier API (payments,
+      # members, orgs — none of which codex-web calls today) would still
+      # use VITE_FRONTIER_BASE if we ever needed it.
       - run: npm run build
         if: steps.decide.outputs.deploy == 'true'
         env:
           VITE_SYNC_WORKER_HOST: ${{ github.ref == 'refs/heads/main' && 'codex-sync-worker.blue-darkness-7674.workers.dev' || (steps.migrations.outputs.has == 'true' && format('codex-sync-worker-pr-{0}.blue-darkness-7674.workers.dev', github.event.pull_request.number) || 'codex-sync-worker-staging.blue-darkness-7674.workers.dev') }}
           VITE_AUTH_BASE: ${{ github.ref == 'refs/heads/main' && 'https://codex-auth-worker.blue-darkness-7674.workers.dev' || 'https://codex-auth-worker-staging.blue-darkness-7674.workers.dev' }}
+          VITE_CHAT_BASE: ${{ github.ref == 'refs/heads/main' && 'https://codex-chat-worker.blue-darkness-7674.workers.dev' || 'https://codex-chat-worker-staging.blue-darkness-7674.workers.dev' }}
           VITE_GIT_CORS_PROXY: ${{ github.ref == 'refs/heads/main' && 'https://codex-git-proxy.ryderwishart.workers.dev' || 'https://codex-git-proxy-staging.blue-darkness-7674.workers.dev' }}
 
       - name: Deploy to Cloudflare Pages

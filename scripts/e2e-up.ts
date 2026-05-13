@@ -137,7 +137,7 @@ async function main(): Promise<void> {
   console.log("[boot 2/6] applying codex schema (both workers' local D1)…")
   await runOnce(
     "npx",
-    ["wrangler", "d1", "migrations", "apply", "codex", "--local"],
+    ["wrangler", "d1", "migrations", "apply", "aquilla-db", "--local"],
     AUTH_WORKER_DIR,
     "migrations",
   )
@@ -150,7 +150,7 @@ async function main(): Promise<void> {
     await runOnce(
       "npx",
       [
-        "wrangler", "d1", "execute", "codex", "--local",
+        "wrangler", "d1", "execute", "aquilla-db", "--local",
         `--file=${path.join(migrationsDir, m)}`,
       ],
       SYNC_WORKER_DIR,

@@ -20,8 +20,8 @@ npm run test:e2e:ui
 ```
 
 No external repo checkout is required — codex-auth-worker and sync-worker
-both live in this repo, and the D1 schemas they expect are vendored under
-`e2e/sql/`.
+both live in this repo, and the D1 schema is applied via
+`auth-worker/migrations/` against a local sqlite each run.
 
 ## Architecture
 
@@ -44,11 +44,12 @@ Playwright runs against `http://127.0.0.1:5173`.
 
 ## Schema
 
-Single D1 (`codex`) holds everything — identity, orgs, projects, members,
-invites, files, cells, events. Schema is owned by
-`auth-worker/migrations/`; `wrangler d1 migrations apply codex --local` is
-the canonical setup step. In prod, auth-worker's deploy applies migrations
-on every deploy. Sync-worker binds the same D1 but doesn't own migrations.
+Single D1 (`aquilla-db`) holds everything — identity, orgs, projects,
+members, invites, files, cells, events. Schema is owned by
+`auth-worker/migrations/`; `wrangler d1 migrations apply aquilla-db --local`
+is the canonical setup step. In prod, auth-worker's deploy applies
+migrations on every deploy. Sync-worker binds the same D1 but doesn't own
+migrations.
 
 ## Per-test isolation
 

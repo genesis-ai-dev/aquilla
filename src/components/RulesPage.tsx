@@ -3,7 +3,6 @@ import { useParams, useNavigate, useSearchParams } from "react-router-dom"
 import { ArrowLeft, AlertTriangle, AlertCircle, Trash2, Wand2, ChevronDown, ChevronUp } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { getProject } from "@/lib/store/project-index"
 import { useRules } from "@/hooks/useRules"
@@ -44,7 +43,7 @@ export function RulesPage() {
     }
   }, [searchParams, project])
 
-  const { userRules, builtinRules, penalties, addRule, updateRule, deleteRule, updatePenalties, setBuiltinOverride } = useRules(project, refresh)
+  const { userRules, builtinRules, addRule, updateRule, deleteRule, setBuiltinOverride } = useRules(project, refresh)
 
   const usageSummary = useMemo(() => {
     const u = project?.usage
@@ -79,24 +78,6 @@ export function RulesPage() {
         {usageSummary && (
           <p className="text-xs text-muted-foreground" title="LLM usage on this project">{usageSummary}</p>
         )}
-
-        <Card>
-          <CardHeader><CardTitle>Penalty Configuration</CardTitle></CardHeader>
-          <CardContent>
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <Label htmlFor="majpen">Major penalty (health points)</Label>
-                <Input id="majpen" type="number" value={penalties.major}
-                  onChange={(e) => updatePenalties({ ...penalties, major: Number(e.target.value) })} />
-              </div>
-              <div>
-                <Label htmlFor="minpen">Minor penalty (health points)</Label>
-                <Input id="minpen" type="number" value={penalties.minor}
-                  onChange={(e) => updatePenalties({ ...penalties, minor: Number(e.target.value) })} />
-              </div>
-            </div>
-          </CardContent>
-        </Card>
 
         {/* TODO(lqa-plan-b): wire real infractions when worker dispatch lands. */}
         <BuiltinChecksList

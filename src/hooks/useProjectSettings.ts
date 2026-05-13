@@ -239,11 +239,27 @@ export function useProjectSettings(
   }, [hasFetched, server, canEdit, local, jwt, projectId])
 
   const patch = useCallback(async (partial: ProjectWideSettings): Promise<PatchOutcome> => {
+    // Apply locally *before* the gates. The original implementation gated the
+    // entire write — including the local IDB / local-state mirror — behind
+    // jwt+online+role, which silently dropped every edit on unsynced or
+    // offline projects. For the synced-no-perm case the local apply is
+    // reverted by the next server fetch anyway (callers gate the UI with
+    // `disabled={!canEditShared && synced}` so users don't see a phantom
+    // edit); for unsynced projects this is the only place the value ever
+    // lands. setLocal is synchronous so the next render reflects it; the
+    // patchProject write to IDB is fire-and-forget.
+    setLocal((prev) => ({ ...prev, ...partial }))
+    if (projectId) {
+      void patchProject(projectId, (existing) => ({ ...existing, ...partial })).catch((err) => {
+        console.warn("[useProjectSettings] local IDB patch failed", err)
+      })
+    }
+
     if (!projectId || !jwt) return { kind: "error", message: "no session or project" }
     if (!isOnlineRef.current) return { kind: "blocked", reason: "offline" }
     if (roleLevel == null || roleLevel < EDIT_ROLE_FLOOR) return { kind: "blocked", reason: "role" }
 
-    // Optimistic local update so the UI feels instant.
+    // Optimistic server-side state so the UI feels instant for synced projects.
     const baseVersion = server?.version ?? 0
     const optimistic: ProjectSettingsResponse = {
       version: baseVersion,
@@ -262,6 +278,13 @@ export function useProjectSettings(
     }
     if (result.kind === "conflict") {
       setServer(result.latest)
+      // Snap local + IDB to the conflict winner so the overlay stops lying
+      // about what state we're in. Without this, `local` keeps the user's
+      // doomed edit and the overlay merges it on top of the server truth.
+      setLocal((prev) => ({ ...prev, ...result.latest.settings }))
+      void patchProject(projectId, (existing) => ({ ...existing, ...result.latest.settings })).catch((err) => {
+        console.warn("[useProjectSettings] local IDB conflict-snap failed", err)
+      })
       posthog.capture("project settings sync conflict", {
         project_id: projectId,
         conflicting_user: result.latest.updatedBy?.username ?? null,

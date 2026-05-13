@@ -7,6 +7,11 @@ name: PR DB cleanup
 on:
   pull_request:
     types: [closed]
+    # Only run cleanup when the PR actually had migrations — mirror the
+    # path filter from pr-db-fork.yml. PRs that never spun up per-PR
+    # resources don't need a teardown pass.
+    paths:
+      - 'sync-worker/migrations/**.sql'
 
 jobs:
   cleanup:

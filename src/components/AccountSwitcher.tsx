@@ -200,7 +200,6 @@ export function AccountSwitcher({ variant = "sidebar" }: { variant?: "sidebar" |
 interface EntrySummary {
   key: string
   username: string
-  gitlabUrl: string
   active: boolean
 }
 
@@ -227,7 +226,6 @@ function Entry({
       </div>
       <div className="flex flex-col min-w-0 flex-1">
         <span className="truncate">{summary.username}</span>
-        <span className="truncate text-[10px] text-muted-foreground">{summary.gitlabUrl}</span>
       </div>
       {summary.active && <Check className="h-3.5 w-3.5 text-muted-foreground" />}
       {onRemove && !summary.active && (

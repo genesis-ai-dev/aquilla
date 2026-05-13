@@ -13,6 +13,7 @@ import { synthesizeForCell, setTtsStatus, ttsStatusKey, useTtsStatus } from "@/l
 import { AiModelConsentDeniedError } from "@/lib/audio/ai-consent"
 import { useModelStatus } from "@/lib/audio/prefetch"
 import { fetchCellAudio, parseFrontierAudioUrl } from "@/lib/audio/upload"
+import { audioSyncTokenFetcherForSession } from "@/lib/audio/sync-token-fetcher"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import type {
   CellTtsSettings, ProjectTtsSettings,
@@ -34,8 +35,10 @@ interface Props {
   /** If set, the speaker plays this attached audio instead of synthesizing fresh. */
   generatedVoiceAudioId?: string
   attachments?: Record<string, CodexCellAttachment>
-  /** Used when fetching attachments for non-git projects. */
+  /** Required for resolving attached audio via sync-worker R2. */
   projectId?: string
+  /** Required for the sync-worker R2 audio key. */
+  fileId?: string
   disabled?: boolean
 }
 
@@ -90,6 +93,7 @@ export function CellTtsButton({
   generatedVoiceAudioId,
   attachments,
   projectId,
+  fileId,
   disabled,
 }: Props) {
   const trimmed = text.trim()
@@ -154,6 +158,7 @@ export function CellTtsButton({
           const blob = await fetchAttachmentBlob({
             attachmentUrl: generatedAttachmentUrl,
             projectId,
+            fileId,
             session,
           })
           url = URL.createObjectURL(blob)
@@ -283,20 +288,22 @@ export function CellTtsButton({
 async function fetchAttachmentBlob(args: {
   attachmentUrl: string
   projectId: string | undefined
+  fileId: string | undefined
   session: ReturnType<typeof useFrontierSession>["session"]
 }): Promise<Blob> {
   const frontier = parseFrontierAudioUrl(args.attachmentUrl)
-  if (frontier && args.projectId && args.session?.jwt) {
+  if (frontier && args.projectId && args.fileId && args.session?.jwt) {
     const bytes = await fetchCellAudio({
-      session: args.session,
       projectId: args.projectId,
+      fileId: args.fileId,
       audioId: frontier.audioId,
       ext: frontier.ext,
+      getSyncToken: audioSyncTokenFetcherForSession(args.session),
     })
     return new Blob([bytes as BlobPart], { type: "audio/wav" })
   }
-  // Fallback for direct URLs (e.g. blob:, http:). Git/LFS attachments aren't
-  // supported here yet — those projects already disable AI voice generation.
+  // Fallback for direct URLs (e.g. blob:, http:). Legacy LFS attachments
+  // aren't supported anymore — their bytes are no longer reachable.
   const res = await fetch(args.attachmentUrl)
   if (!res.ok) throw new Error(`Failed to fetch attached audio (${res.status})`)
   return res.blob()

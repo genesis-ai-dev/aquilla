@@ -3,7 +3,7 @@
 // first two characters of the sanitized id so individual directories stay
 // small as the cache grows.
 
-import { createOpfsFs, type OpfsFs } from "@/lib/git/opfs-fs"
+import { createOpfsFs, type OpfsFs } from "@/lib/fs/opfs-fs"
 import { markOpfsUnavailable } from "@/lib/storage/opfs-availability"
 
 let rootFsCache: OpfsFs | null = null

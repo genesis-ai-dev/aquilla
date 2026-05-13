@@ -1,22 +1,30 @@
-// R2-backed audio upload for web-only (non-git) projects.
-// Uploads a recorded Blob to the frontier-server /api/v2/audio route and
-// returns the logical attachment URL to store on the cell.
+// Per-cell audio storage backed by sync-worker's R2 bucket.
 //
-// GitLab-imported projects push audio via LFS instead (not implemented here).
+// Audio rides on the same R2 lifecycle as snapshots/tails — admin DELETE
+// of a file wipes its audio subdirectory automatically, and per-PR sandbox
+// workers stay isolated via R2_KEY_PREFIX without any extra plumbing here.
+//
+// URL scheme stored on cell attachments stays `frontier-audio://<id>.<ext>`
+// for backwards compatibility with existing recordings.
 
-import { FRONTIER_BASE } from "@/lib/frontier/auth"
-import type { FrontierSession } from "@/lib/frontier/types"
+import { syncWorkerHttpOrigin } from "@/lib/sync/sync-worker-url"
 
 const AUDIO_URL_SCHEME = "frontier-audio"
 
 export interface AudioUploadResult {
   audioId: string
   ext: string
-  /** Logical URL stored on the cell attachment. Scheme-prefixed so readers
-   *  know to resolve via the frontier audio worker instead of the repo FS. */
+  /** Logical URL stored on the cell attachment. The scheme prefix tells
+   *  readers to resolve via the sync-worker rather than treating it as
+   *  a path inside a repo working copy. */
   url: string
   sizeBytes: number
 }
+
+export type SyncTokenForFile = (
+  projectId: string,
+  fileId: string,
+) => Promise<string | null>
 
 /**
  * Build a stable audio id in the desktop format:
@@ -30,7 +38,7 @@ export function buildAudioId(cellId: string): string {
   return `audio-${normalised}-${ts}-${rnd}`
 }
 
-/** Extract the attachment URL scheme marker. Returns null for legacy (LFS path) urls. */
+/** Extract the (audioId, ext) marker. Returns null for legacy LFS-pointer paths. */
 export function parseFrontierAudioUrl(url: string): { audioId: string; ext: string } | null {
   const prefix = `${AUDIO_URL_SCHEME}://`
   if (!url.startsWith(prefix)) return null
@@ -44,21 +52,34 @@ export function buildFrontierAudioUrl(audioId: string, ext: string): string {
   return `${AUDIO_URL_SCHEME}://${audioId}.${ext}`
 }
 
-export async function uploadCellAudio(args: {
-  session: FrontierSession
+function audioEndpoint(projectId: string, fileId: string, audioId: string, ext: string): string {
+  const objectName = `${audioId}.${ext}`
+  return (
+    `${syncWorkerHttpOrigin()}/audio/` +
+    `${encodeURIComponent(projectId)}/` +
+    `${encodeURIComponent(fileId)}/` +
+    `${encodeURIComponent(objectName)}`
+  )
+}
+
+export interface UploadCellAudioArgs {
   projectId: string
+  fileId: string
   audioId: string
   ext: string
   blob: Blob
-}): Promise<AudioUploadResult> {
-  const { session, projectId, audioId, ext, blob } = args
-  if (!session.jwt) throw new Error("not signed in")
+  getSyncToken: SyncTokenForFile
+}
 
-  const url = `${FRONTIER_BASE}/api/v2/audio/${encodeURIComponent(projectId)}/${encodeURIComponent(audioId)}.${ext}`
-  const res = await fetch(url, {
+export async function uploadCellAudio(args: UploadCellAudioArgs): Promise<AudioUploadResult> {
+  const { projectId, fileId, audioId, ext, blob, getSyncToken } = args
+  const token = await getSyncToken(projectId, fileId)
+  if (!token) throw new Error("audio upload: no sync token (not signed in or no project access)")
+
+  const res = await fetch(audioEndpoint(projectId, fileId, audioId, ext), {
     method: "PUT",
     headers: {
-      Authorization: `Bearer ${session.jwt}`,
+      Authorization: `Bearer ${token}`,
       "Content-Type": blob.type || "application/octet-stream",
     },
     body: blob,
@@ -75,23 +96,23 @@ export async function uploadCellAudio(args: {
   }
 }
 
-/**
- * Fetch an uploaded audio blob back from the worker. Used by playback for
- * non-git projects. Returns the raw bytes; the caller wraps them in a Blob
- * for the <audio> element.
- */
-export async function fetchCellAudio(args: {
-  session: FrontierSession
+export interface FetchCellAudioArgs {
   projectId: string
+  fileId: string
   audioId: string
   ext: string
-}): Promise<Uint8Array> {
-  const { session, projectId, audioId, ext } = args
-  if (!session.jwt) throw new Error("not signed in")
+  getSyncToken: SyncTokenForFile
+}
 
-  const url = `${FRONTIER_BASE}/api/v2/audio/${encodeURIComponent(projectId)}/${encodeURIComponent(audioId)}.${ext}`
-  const res = await fetch(url, {
-    headers: { Authorization: `Bearer ${session.jwt}` },
+/** Fetch an uploaded audio blob back from sync-worker. Returns the raw
+ *  bytes; the caller wraps them in a Blob for the <audio> element. */
+export async function fetchCellAudio(args: FetchCellAudioArgs): Promise<Uint8Array> {
+  const { projectId, fileId, audioId, ext, getSyncToken } = args
+  const token = await getSyncToken(projectId, fileId)
+  if (!token) throw new Error("audio fetch: no sync token (not signed in or no project access)")
+
+  const res = await fetch(audioEndpoint(projectId, fileId, audioId, ext), {
+    headers: { Authorization: `Bearer ${token}` },
   })
   if (!res.ok) {
     const text = await res.text().catch(() => "")

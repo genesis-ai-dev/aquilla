@@ -5,8 +5,6 @@ import type { FrontierSession } from "./types";
 
 const sample: FrontierSession = {
   jwt: "jwt-x",
-  gitlabToken: "glpat-x",
-  gitlabUrl: "https://gitlab.example",
   username: "alice",
   createdAt: new Date().toISOString(),
 };
@@ -37,7 +35,7 @@ import {
 
 function mkSession(overrides: Partial<FrontierSession> = {}): FrontierSession {
   return {
-    jwt: "jwt", gitlabToken: "g", gitlabUrl: "https://git.example.com",
+    jwt: "jwt",
     username: "ryder", createdAt: "2026-01-01T00:00:00Z",
     ...overrides,
   }
@@ -93,7 +91,7 @@ describe("multi-account envelope", () => {
     expect(active).toBeNull()
   })
 
-  it("sessionKey dedupes by url + username", async () => {
+  it("sessionKey dedupes by username", async () => {
     const first = mkSession({ jwt: "old" })
     const second = mkSession({ jwt: "new" })
     await addSession(first)

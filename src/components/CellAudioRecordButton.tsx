@@ -4,10 +4,8 @@
 
 import { Mic, MicOff } from "lucide-react"
 import { cn } from "@/lib/utils"
-import type { ProjectRecord } from "@/lib/parsers/types"
 
 interface Props {
-  project: ProjectRecord
   onOpenRecording: () => void
   disabled?: boolean
 }
@@ -24,17 +22,14 @@ function getUnsupportedReason(): string | null {
   return null
 }
 
-export function CellAudioRecordButton({ project, onOpenRecording, disabled }: Props) {
+export function CellAudioRecordButton({ onOpenRecording, disabled }: Props) {
   const unsupportedReason = getUnsupportedReason()
-  const isGitProject = project.origin?.kind === "git"
-  const blocked = disabled || isGitProject || unsupportedReason !== null
+  const blocked = disabled || unsupportedReason !== null
   const tooltip = unsupportedReason
     ? `Recording unavailable — ${unsupportedReason}`
     : disabled
       ? "Recording disabled"
-      : isGitProject
-        ? "Recording on GitLab projects isn't available yet"
-        : "Record audio"
+      : "Record audio"
 
   return (
     <button

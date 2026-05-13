@@ -5,6 +5,7 @@
 import * as Y from "yjs"
 import { synthesizeForCell, synthesizeToWavBlob } from "./tts"
 import { buildAudioId, uploadCellAudio } from "./upload"
+import { audioSyncTokenFetcherForSession } from "./sync-token-fetcher"
 import { attachAudioToCell } from "./attach"
 import { transcribeAndStoreTimings, transcribeAudio } from "./transcribe"
 import { whisperLanguageFromTag } from "./language"
@@ -26,6 +27,9 @@ export interface SynthAndAttachArgs {
   cellContext?: string
   cellLabel?: string
   projectId: string
+  /** Required for the sync-worker R2 audio key. The caller's component
+   *  always knows which file the cell came from (CellData.fileId). */
+  fileId: string
   sourceLanguage?: string
   /** Project language tag — passed to Whisper so the auto-transcription
    *  step uses the right decoder rather than auto-detecting from a few
@@ -52,6 +56,8 @@ export interface SynthAndAttachGroupArgs {
   doc: Y.Doc
   cells: SynthGroupCellInput[]
   projectId: string
+  /** Required for the sync-worker R2 audio key. */
+  fileId: string
   sourceLanguage?: string
   languageTag?: string
   session: FrontierSession
@@ -84,11 +90,12 @@ export async function synthAndAttachAudio(args: SynthAndAttachArgs): Promise<{ a
 
   const audioId = buildAudioId(args.cellId)
   const result = await uploadCellAudio({
-    session: args.session,
     projectId: args.projectId,
+    fileId: args.fileId,
     audioId,
     ext: "wav",
     blob,
+    getSyncToken: audioSyncTokenFetcherForSession(args.session),
   })
 
   attachAudioToCell(args.doc, args.cellId, {
@@ -147,6 +154,7 @@ export async function synthAndAttachAudioGroup(
       cellContext: cell.context,
       cellLabel: cell.cellLabel,
       projectId: args.projectId,
+      fileId: args.fileId,
       sourceLanguage: args.sourceLanguage,
       languageTag: args.languageTag,
       session: args.session,
@@ -204,11 +212,12 @@ export async function synthAndAttachAudioGroup(
     const clipBlob = audioBufferSegmentToWavBlob(decoded, segment.clipStart, segment.clipEnd)
     const audioId = buildAudioId(segment.cell.id)
     const result = await uploadCellAudio({
-      session: args.session,
       projectId: args.projectId,
+      fileId: args.fileId,
       audioId,
       ext: "wav",
       blob: clipBlob,
+      getSyncToken: audioSyncTokenFetcherForSession(args.session),
     })
     attachAudioToCell(args.doc, segment.cell.id, {
       audioId: result.audioId,

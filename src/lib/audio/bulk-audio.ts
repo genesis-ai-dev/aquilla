@@ -14,6 +14,7 @@ import { setTranscribeStatus } from "./transcribe-status"
 import { synthAndAttachAudio } from "./synth-and-attach"
 import { setTtsStatus, ttsStatusKey } from "./tts"
 import { fetchCellAudio, parseFrontierAudioUrl } from "./upload"
+import { audioSyncTokenFetcherForSession } from "./sync-token-fetcher"
 
 // ── Shared progress store ───────────────────────────────────────────────────
 //
@@ -95,7 +96,7 @@ export async function transcribeAllInFile(args: TranscribeAllArgs): Promise<void
     setTranscribeStatus(audioId, { kind: "loading", loaded: 0, total: 0, file: "" })
     const startedAt = Date.now()
     try {
-      const bytes = await fetchAudioBytesForCell(att.url, args.project, args.session)
+      const bytes = await fetchAudioBytesForCell(att.url, args.project, cell.fileId, args.session)
       const out = await transcribeAndStoreTimings(doc, cell.id, audioId, bytes, {
         cellText: cell.translated,
         language: whisperLanguageFromTag(args.project.targetLanguage),
@@ -156,6 +157,7 @@ export async function synthAllInFile(args: SynthAllArgs): Promise<void> {
         cellContext: cell.context,
         cellLabel: cell.cellLabel,
         projectId: args.project.id,
+        fileId: cell.fileId,
         sourceLanguage: args.project.sourceLanguage,
         languageTag: args.project.targetLanguage,
         session: args.session, username: args.username,
@@ -181,6 +183,7 @@ export async function synthAllInFile(args: SynthAllArgs): Promise<void> {
 async function fetchAudioBytesForCell(
   attachmentUrl: string,
   project: ProjectRecord,
+  fileId: string,
   session: FrontierSession,
 ): Promise<Uint8Array> {
   const frontier = parseFrontierAudioUrl(attachmentUrl)
@@ -188,10 +191,11 @@ async function fetchAudioBytesForCell(
     throw new Error("bulk transcribe currently supports only frontier-audio:// attachments")
   }
   return fetchCellAudio({
-    session,
     projectId: project.id,
+    fileId,
     audioId: frontier.audioId,
     ext: frontier.ext,
+    getSyncToken: audioSyncTokenFetcherForSession(session),
   })
 }
 

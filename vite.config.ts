@@ -104,6 +104,21 @@ export default defineConfig(({ mode }) => ({
     environment: "happy-dom",
     setupFiles: ["./src/test-setup.ts"],
     passWithNoTests: true,
-    exclude: ["**/node_modules/**", "dist/**", ".worktrees/**", ".claude/worktrees/**", "cors-proxy/**", "e2e/**"],
+    exclude: [
+      "**/node_modules/**",
+      "dist/**",
+      ".worktrees/**",
+      ".claude/worktrees/**",
+      "e2e/**",
+      // Each worker has its own vitest config + local node_modules. Running
+      // their tests from root pulls in worker-local deps the root install
+      // doesn't have. deploy-workers.yml runs each worker's tests in its
+      // own directory.
+      "auth-worker/**",
+      "chat-worker/**",
+      "cors-proxy/**",
+      "signaling/**",
+      "sync-worker/**",
+    ],
   },
 }))

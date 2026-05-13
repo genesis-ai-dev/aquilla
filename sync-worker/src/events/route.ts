@@ -25,7 +25,7 @@ import type { CellCommitPayload } from './hydrate'
 const D1_BATCH_LIMIT = 100
 
 export interface EventsRouteEnv {
-  CODEX_DB?: D1Database
+  AQUILLA_DB?: D1Database
   SYNC_SECRET_KEY?: string
   /** Optional — when present, successful D1 commits broadcast Realtime frames. */
   FileSync?: DurableObjectNamespace
@@ -102,11 +102,11 @@ export async function handleEventsWriteRequest(
   if (!env.SYNC_SECRET_KEY) {
     return new Response('SYNC_SECRET_KEY not configured', { status: 500 })
   }
-  if (!env.CODEX_DB) {
-    return new Response('CODEX_DB binding not configured', { status: 500 })
+  if (!env.AQUILLA_DB) {
+    return new Response('AQUILLA_DB binding not configured', { status: 500 })
   }
 
-  const db = env.CODEX_DB
+  const db = env.AQUILLA_DB
 
   // 4. Parse JSON body. Reject malformed input.
   let body: unknown
@@ -338,7 +338,7 @@ export async function handleEventsWriteRequest(
 
     // Broadcast event frames then projection.dirty messages — non-fatal.
     // Only attempt broadcast if FileSync is available (it won't be in
-    // envs that have CODEX_DB but no FileSync binding).
+    // envs that have AQUILLA_DB but no FileSync binding).
     if (env.FileSync && env.SYNC_SECRET_KEY) {
       const broadcastEnv: BroadcastEnv = {
         FileSync: env.FileSync,

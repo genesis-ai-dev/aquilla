@@ -25,7 +25,7 @@ function makeEnv(
   db?: D1Database,
   secret: string | undefined = 'shared-secret',
 ) {
-  return { CODEX_DB: db, SYNC_SECRET_KEY: secret }
+  return { AQUILLA_DB: db, SYNC_SECRET_KEY: secret }
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
@@ -68,7 +68,7 @@ describe('handleRebuildProjectionRequest', () => {
       makeRequest('/admin/projects/p1/rebuild-projection', 'POST', ''),
       // Explicitly omit SYNC_SECRET_KEY (undefined default doesn't work due to
       // JS default-parameter semantics -- passing undefined triggers the default)
-      { CODEX_DB: makeInMemoryD1(), SYNC_SECRET_KEY: undefined },
+      { AQUILLA_DB: makeInMemoryD1(), SYNC_SECRET_KEY: undefined },
     ) as Response
     expect(res.status).toBe(500)
     expect(await res.text()).toContain('SYNC_SECRET_KEY')
@@ -90,13 +90,13 @@ describe('handleRebuildProjectionRequest', () => {
     expect(res.status).toBe(401)
   })
 
-  it('returns 500 when CODEX_DB binding is not configured', async () => {
+  it('returns 500 when AQUILLA_DB binding is not configured', async () => {
     const res = await handleRebuildProjectionRequest(
       makeRequest('/admin/projects/p1/rebuild-projection'),
       makeEnv(undefined),
     ) as Response
     expect(res.status).toBe(500)
-    expect(await res.text()).toContain('CODEX_DB')
+    expect(await res.text()).toContain('AQUILLA_DB')
   })
 
   it('replays 0 events when no events exist and returns ok=true', async () => {

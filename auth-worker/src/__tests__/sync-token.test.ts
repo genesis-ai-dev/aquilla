@@ -13,11 +13,6 @@ function makeUser(): UserRow {
     username: "alice",
     email: "alice@example.com",
     password_hash: "scrypt:32768:8:1$saltsaltsalt$" + "ab".repeat(64),
-    gitlab_user_id: 1001,
-    gitlab_username: "alice",
-    gitlab_token: "glpat-fake",
-    stripe_customer_id: null,
-    subscription_tier: "free",
     preferences: "{}",
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
@@ -35,7 +30,7 @@ async function frontierJwt(username: string): Promise<string> {
 
 function makeEnv(db: ReturnType<typeof makeFakeD1>): Env {
   return {
-    AUTH_DB: db,
+    AQUILLA_DB: db,
     SECRET_KEY: SECRET,
     ALGORITHM: "HS256",
     ACCESS_TOKEN_EXPIRE_MINUTES: "60",
@@ -51,7 +46,6 @@ describe("POST /api/v2/sync-token", () => {
         {
           id: "proj-1",
           name: "Test",
-          gitlab_project_id: null,
           org_id: null,
           created_by: 42,
           archived_at: null,
@@ -105,7 +99,6 @@ describe("POST /api/v2/sync-token", () => {
         {
           id: "proj-1",
           name: "Test",
-          gitlab_project_id: null,
           org_id: null,
           created_by: 99, // not the caller
           archived_at: null,

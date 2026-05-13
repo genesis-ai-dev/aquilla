@@ -13,11 +13,6 @@ async function makeUserRow(): Promise<UserRow> {
     username: "alice",
     email: "alice@example.com",
     password_hash: await hashPasswordWerkzeugScrypt("correct-password"),
-    gitlab_user_id: 1001,
-    gitlab_username: "alice",
-    gitlab_token: "glpat-fake",
-    stripe_customer_id: null,
-    subscription_tier: "free",
     preferences: '{"theme":"dark"}',
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
@@ -26,7 +21,7 @@ async function makeUserRow(): Promise<UserRow> {
 
 function makeEnv(db: ReturnType<typeof makeFakeD1>): Env {
   return {
-    AUTH_DB: db,
+    AQUILLA_DB: db,
     SECRET_KEY: SECRET,
     ALGORITHM: "HS256",
     ACCESS_TOKEN_EXPIRE_MINUTES: "60",
@@ -204,12 +199,9 @@ describe("POST /api/v2/auth/register", () => {
       env,
     )
     expect(res.status).toBe(200)
-    const body = (await res.json()) as { access_token: string; token_type: string; gitlab_token?: unknown }
+    const body = (await res.json()) as { access_token: string; token_type: string }
     expect(body.token_type).toBe("bearer")
     expect(body.access_token).toMatch(/^eyJ/)
-    // GitLab fields were dropped from the response shape — the frontend
-    // session type no longer carries them.
-    expect(body.gitlab_token).toBeUndefined()
   })
 
   it("returns 409 when the username already exists", async () => {

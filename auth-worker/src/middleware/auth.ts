@@ -1,5 +1,5 @@
 // Authorization middleware. Verifies a frontier-style JWT (HS256, claim
-// `sub` = username) against AUTH_DB and stashes the hydrated user on the
+// `sub` = username) against AQUILLA_DB and stashes the hydrated user on the
 // Hono context.
 //
 // Adapted from frontier-server/cloudflare/src/middleware/auth.ts. The

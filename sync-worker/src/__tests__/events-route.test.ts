@@ -59,7 +59,7 @@ function makeValidateEvent(overrides: Partial<RawEvent<'cell.validate'>> = {}): 
 }
 
 function makeEnv(db?: D1Database, secret: string | undefined = SECRET) {
-  return { CODEX_DB: db, SYNC_SECRET_KEY: secret }
+  return { AQUILLA_DB: db, SYNC_SECRET_KEY: secret }
 }
 
 async function makeRequest(
@@ -134,12 +134,12 @@ describe('handleEventsWriteRequest — env validation', () => {
     })
     // Note: passing undefined explicitly triggers the default-param value, so
     // we must spread the env object directly (same pattern as rebuild.test.ts).
-    const res = await handleEventsWriteRequest(req, { CODEX_DB: makeInMemoryD1(), SYNC_SECRET_KEY: undefined }) as Response
+    const res = await handleEventsWriteRequest(req, { AQUILLA_DB: makeInMemoryD1(), SYNC_SECRET_KEY: undefined }) as Response
     expect(res.status).toBe(500)
     expect(await res.text()).toContain('SYNC_SECRET_KEY')
   })
 
-  it('returns 500 when CODEX_DB is missing', async () => {
+  it('returns 500 when AQUILLA_DB is missing', async () => {
     const req = new Request('https://worker/events', {
       method: 'POST',
       body: '{}',
@@ -147,7 +147,7 @@ describe('handleEventsWriteRequest — env validation', () => {
     })
     const res = await handleEventsWriteRequest(req, makeEnv(undefined, SECRET)) as Response
     expect(res.status).toBe(500)
-    expect(await res.text()).toContain('CODEX_DB')
+    expect(await res.text()).toContain('AQUILLA_DB')
   })
 })
 

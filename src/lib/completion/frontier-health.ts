@@ -1,16 +1,17 @@
 // src/lib/completion/frontier-health.ts
-// Lightweight availability probe for api.frontierrnd.com. The chat-completions
+// Lightweight availability probe for codex-auth-worker. The chat-completions
 // endpoint is the default LLM provider; we hit /api/v2/health once per tab
 // (cached for 60s) so the UI can enable AI controls without every callsite
 // making its own network check.
+//
+// Historically this probed api.frontierrnd.com — the legacy frontier-server.
+// Now it probes codex-auth-worker (same JWT, same liveness signal).
 
 import { useCallback, useEffect, useState } from "react"
 import { subscribeSession } from "@/lib/frontier/session-store"
+import { AUTH_BASE } from "@/lib/frontier/auth"
 
-// Honor VITE_FRONTIER_BASE override (see src/lib/frontier/auth.ts).
-const FRONTIER_BASE_OVERRIDE =
-  ((import.meta.env.VITE_FRONTIER_BASE as string | undefined)?.replace(/\/+$/, "")) || ""
-const HEALTH_URL = `${FRONTIER_BASE_OVERRIDE || "https://api.frontierrnd.com"}/api/v2/health`
+const HEALTH_URL = `${AUTH_BASE}/api/v2/health`
 const TTL_MS = 60_000
 const TIMEOUT_MS = 3_000
 

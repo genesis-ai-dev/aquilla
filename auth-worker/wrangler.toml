@@ -4,21 +4,28 @@ compatibility_date = "2024-12-01"
 compatibility_flags = ["nodejs_compat"]
 account_id = "6a80496d1e59948a9cbaa3c643ba81d7"
 
-# Side-by-side writer with the legacy frontier-server. Both workers point at
-# the same prod frontier-db-v2 so a user created by either side can log in
-# via either side, and JWTs are interchangeable (shared SECRET_KEY).
-# Schema is owned by frontier-server's migrations; this worker is a writer
-# only against `users`, `password_reset_tokens`, `activity_logs`,
-# `project_invites`, and `project_members`.
+# Single D1 owns everything codex-web touches — identity, orgs, projects,
+# members, invites, file/cell projections. Brand-new schema (no shared
+# tables with the legacy frontier-server's frontier-db-v2). Migrations
+# under `migrations/` are wrangler-applied on deploy.
+#
+# Schema ownership lives here; sync-worker binds the same D1 but does NOT
+# declare migrations_dir (wrangler tracks applied migrations per file in a
+# `d1_migrations` row, so a second worker would no-op anyway — keeping a
+# single owner avoids confusion).
 [[d1_databases]]
-binding = "AUTH_DB"
-database_name = "frontier-db-v2"
-database_id = "9c6abd81-01c3-44ce-9d93-9dfa1c7e1086"
+binding = "AQUILLA_DB"
+database_name = "aquilla-db"
+# database_id is populated by `wrangler d1 create aquilla-db`.
+database_id = "11828e9d-998b-4d3f-a405-91d9f624f94a"
+migrations_dir = "migrations"
 
 # Secrets (provisioned via `wrangler secret put`, never committed):
-#   SECRET_KEY      — frontier JWT signing key. MUST match prod
-#                     frontier-server so access tokens are interchangeable.
-#   SYNC_SECRET_KEY — signs /sync-token JWTs. MUST match codex-sync-worker.
+#   SECRET_KEY      — frontier JWT signing key. Rotate to a fresh value for
+#                     the clean break; legacy frontier-server tokens will no
+#                     longer verify here (acceptable — no shared users yet).
+#   SYNC_SECRET_KEY — signs /sync-token JWTs AND authenticates admin calls
+#                     to codex-sync-worker. MUST match codex-sync-worker.
 #   RESEND_API_KEY  — used by /password-reset/request to send email.
 # Plain vars: see types.ts for the full list.
 
@@ -28,21 +35,25 @@ ACCESS_TOKEN_EXPIRE_MINUTES = "43200"
 EMAIL_FROM = "noreply@frontierrnd.com"
 BASE_URL = "https://codex-web.pages.dev"
 ENVIRONMENT = "production"
+# Admin URL for fire-and-forget archive / R2 cleanup notifications. Used by
+# POST /projects/:id/archive and DELETE /projects/:id/files/:fileId.
+SYNC_WORKER_URL = "https://codex-sync-worker.blue-darkness-7674.workers.dev"
 
 # ---------------------------------------------------------------------------
-# Staging environment — physically separate D1 (frontier-db-v2-staging) so
-# experiments don't pollute prod identities. Same SECRET_KEY + SYNC_SECRET_KEY
-# as prod so tokens minted against staging still verify against prod workers
-# during cross-env testing (set via `wrangler secret put --env staging`).
+# Staging — physically separate D1 (codex-staging) so experiments don't
+# pollute prod identities. SECRET_KEY + SYNC_SECRET_KEY may be either shared
+# with prod (cross-env testing convenience) or rotated; that's a deploy
+# decision, not a code one.
 # ---------------------------------------------------------------------------
 [env.staging]
 name = "codex-auth-worker-staging"
 account_id = "6a80496d1e59948a9cbaa3c643ba81d7"
 
 [[env.staging.d1_databases]]
-binding = "AUTH_DB"
-database_name = "frontier-db-v2-staging"
-database_id = "636fdec6-ba75-447f-b890-6743e00b95fe"
+binding = "AQUILLA_DB"
+database_name = "aquilla-db-staging"
+database_id = "c995bf9a-97c0-4966-a112-053a2d04d8f9"
+migrations_dir = "migrations"
 
 [env.staging.vars]
 ALGORITHM = "HS256"
@@ -50,3 +61,4 @@ ACCESS_TOKEN_EXPIRE_MINUTES = "43200"
 EMAIL_FROM = "noreply@frontierrnd.com"
 BASE_URL = "https://dev.codex-web.pages.dev"
 ENVIRONMENT = "staging"
+SYNC_WORKER_URL = "https://codex-sync-worker-staging.blue-darkness-7674.workers.dev"

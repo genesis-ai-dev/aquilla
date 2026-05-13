@@ -37,6 +37,14 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+          cache: npm
+          cache-dependency-path: sync-worker/package-lock.json
+
+      # sync-worker's deps must be present before the fork script runs
+      # `wrangler deploy` against the rendered per-PR toml. Without this,
+      # esbuild fails to resolve partyserver / yjs / hono.
+      - run: npm ci
+        working-directory: sync-worker
 
       - name: Run fork script
         id: fork

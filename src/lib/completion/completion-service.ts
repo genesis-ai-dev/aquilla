@@ -7,12 +7,18 @@ export const DEFAULT_SYSTEM_PROMPT =
   "You are translating a project from {sourceLanguage} into {targetLanguage}.\n" +
   "Match the tone and formality of the provided examples. Return only the translated text — no explanations, no source text, no commentary."
 
-// Honor VITE_FRONTIER_BASE override so the E2E suite can redirect chat
-// completion calls to a local wrangler dev instance. See src/lib/frontier/auth.ts
-// for the same pattern.
+// VITE_CHAT_BASE points at codex-chat-worker (the in-repo replacement for the
+// legacy frontier-server `/api/v1/chat/completions` route). VITE_FRONTIER_BASE
+// is retained as the umbrella fallback so the E2E suite — which spins up a
+// mock LLM server and sets VITE_FRONTIER_BASE — still works without having to
+// know about the per-route split. CI wires VITE_CHAT_BASE per-branch (prod →
+// codex-chat-worker, anything else → codex-chat-worker-staging); see
+// .github/workflows/deploy.yml.
 const FRONTIER_BASE_OVERRIDE =
   ((import.meta.env.VITE_FRONTIER_BASE as string | undefined)?.replace(/\/+$/, "")) || ""
-export const FRONTIER_CHAT_URL = `${FRONTIER_BASE_OVERRIDE || "https://api.frontierrnd.com"}/api/v1/chat/completions`
+const CHAT_BASE_OVERRIDE =
+  ((import.meta.env.VITE_CHAT_BASE as string | undefined)?.replace(/\/+$/, "")) || ""
+export const FRONTIER_CHAT_URL = `${CHAT_BASE_OVERRIDE || FRONTIER_BASE_OVERRIDE || "https://api.frontierrnd.com"}/api/v1/chat/completions`
 
 interface ChatMessage { role: "system" | "user" | "assistant"; content: string }
 

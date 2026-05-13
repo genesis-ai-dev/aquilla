@@ -27,8 +27,7 @@ describe("WorkspaceIndex", () => {
     const results = index.search("beginning")
     expect(results).toHaveLength(1)
     expect(results[0].cellId).toBe("c1")
-    expect(results[0].fileId).toBe("f1")
-    expect(results[0].fileName).toBe("test.txt")
+    expect(results[0].matchedFields.has("original")).toBe(true)
   })
 
   it("finds matches on target text", () => {
@@ -37,7 +36,7 @@ describe("WorkspaceIndex", () => {
     ]}])
     const results = index.search("monde")
     expect(results).toHaveLength(1)
-    expect(results[0].cellId).toBe("c1")
+    expect(results[0].matchedFields.has("translated")).toBe(true)
   })
 
   it("finds matches on context", () => {
@@ -46,54 +45,70 @@ describe("WorkspaceIndex", () => {
     ]}])
     const results = index.search("Genesis")
     expect(results).toHaveLength(1)
-    expect(results[0].cellId).toBe("c1")
+    expect(results[0].matchedFields.has("context")).toBe(true)
   })
 
-  it("returns matched tokens", () => {
+  it("does partial / prefix matching (issue #25)", () => {
     index.buildFromProject([{ fileId: "f1", fileName: "test.txt", cells: [
-      makeCell({ id: "c1", original: "God created the heavens", translated: "", context: "" }),
+      makeCell({ id: "c1", original: "Abraham was a man", translated: "", context: "" }),
     ]}])
-    const results = index.search("God heavens")
-    expect(results[0].matchedTokens).toContain("god")
-    expect(results[0].matchedTokens).toContain("heavens")
+    expect(index.search("Abraha")).toHaveLength(1)
+    expect(index.search("brah")).toHaveLength(1)
   })
 
-  it("ranks more matches higher", () => {
+  it("matchCount counts all literal occurrences", () => {
     index.buildFromProject([{ fileId: "f1", fileName: "test.txt", cells: [
-      makeCell({ id: "c1", original: "cat only", translated: "", context: "" }),
-      makeCell({ id: "c2", original: "cat and dog together", translated: "", context: "" }),
+      makeCell({ id: "c1", original: "cat cat cat", translated: "dog cat", context: "" }),
     ]}])
-    const results = index.search("cat dog together")
-    expect(results[0].cellId).toBe("c2")
+    const [r] = index.search("cat")
+    expect(r.matchCount).toBe(4)
+  })
+
+  it("respects match-case (issue #24)", () => {
+    index.buildFromProject([{ fileId: "f1", fileName: "test.txt", cells: [
+      makeCell({ id: "c1", original: "abraham", translated: "", context: "" }),
+      makeCell({ id: "c2", original: "Abraham", translated: "", context: "" }),
+    ]}])
+    const insensitive = index.search("Abraham")
+    expect(insensitive).toHaveLength(2)
+    const sensitive = index.search("Abraham", { caseSensitive: true })
+    expect(sensitive).toHaveLength(1)
+    expect(sensitive[0].cellId).toBe("c2")
+  })
+
+  it("scopes by fileId (issue #23)", () => {
+    index.buildFromProject([
+      { fileId: "f1", fileName: "a.txt", cells: [makeCell({ id: "c1", original: "apple" })] },
+      { fileId: "f2", fileName: "b.txt", cells: [makeCell({ id: "c2", original: "apple" })] },
+    ])
+    expect(index.search("apple")).toHaveLength(2)
+    const scoped = index.search("apple", { fileId: "f1" })
+    expect(scoped).toHaveLength(1)
+    expect(scoped[0].fileId).toBe("f1")
   })
 
   it("respects limit", () => {
     index.buildFromProject([{ fileId: "f1", fileName: "test.txt", cells: [
-      makeCell({ id: "c1", original: "hello world", translated: "", context: "" }),
-      makeCell({ id: "c2", original: "hello there", translated: "", context: "" }),
-      makeCell({ id: "c3", original: "hello friend", translated: "", context: "" }),
+      makeCell({ id: "c1", original: "hello world" }),
+      makeCell({ id: "c2", original: "hello there" }),
+      makeCell({ id: "c3", original: "hello friend" }),
     ]}])
-    const results = index.search("hello", 2)
+    const results = index.search("hello", { limit: 2 })
     expect(results).toHaveLength(2)
   })
 
-  it("searches across multiple files", () => {
-    index.buildFromProject([
-      { fileId: "f1", fileName: "one.txt", cells: [makeCell({ id: "c1", original: "apple", translated: "", context: "" })] },
-      { fileId: "f2", fileName: "two.txt", cells: [makeCell({ id: "c2", original: "apple banana", translated: "", context: "" })] },
-    ])
-    const results = index.search("apple")
-    expect(results).toHaveLength(2)
-    const fileIds = results.map((r) => r.fileId)
-    expect(fileIds).toContain("f1")
-    expect(fileIds).toContain("f2")
-  })
-
-  it("indexes empty cells too (unlike SearchIndex)", () => {
+  it("strips HTML tags from indexed text", () => {
     index.buildFromProject([{ fileId: "f1", fileName: "test.txt", cells: [
-      makeCell({ id: "c1", original: "empty target cell", translated: "", context: "" }),
+      makeCell({ id: "c1", original: "Hello <b>brave</b> world" }),
     ]}])
-    const results = index.search("empty")
-    expect(results).toHaveLength(1)
+    expect(index.search("brave")).toHaveLength(1)
+    expect(index.search("<b>")).toHaveLength(0)
+  })
+
+  it("indexes empty cells too", () => {
+    index.buildFromProject([{ fileId: "f1", fileName: "test.txt", cells: [
+      makeCell({ id: "c1", original: "empty target cell" }),
+    ]}])
+    expect(index.search("empty")).toHaveLength(1)
   })
 })

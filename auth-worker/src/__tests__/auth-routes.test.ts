@@ -207,7 +207,10 @@ describe("POST /api/v2/auth/register", () => {
     const body = (await res.json()) as { access_token: string; token_type: string; gitlab_token?: unknown }
     expect(body.token_type).toBe("bearer")
     expect(body.access_token).toMatch(/^eyJ/)
-    expect(body.gitlab_token).toBeUndefined()
+    // gitlab_token kept in the response shape (empty string) so the
+    // frontend's session-shape doesn't crash. Actual GitLab integration is
+    // gone — see /register impl.
+    expect(body.gitlab_token).toBe("")
   })
 
   it("returns 409 when the username already exists", async () => {

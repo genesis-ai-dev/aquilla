@@ -107,6 +107,11 @@ auth.post("/register", zValidator("json", registerSchema), async (c) => {
     return c.json({
       access_token: accessToken,
       token_type: "bearer",
+      // Frontend's finalizeSession() reads gitlab_url/gitlab_token from this
+      // response. We dropped GitLab integration; returning empty strings keeps
+      // the session shape valid so the UI doesn't crash.
+      gitlab_token: "",
+      gitlab_url: "",
     })
   } catch (error) {
     console.error("Registration error:", error)
@@ -215,6 +220,11 @@ auth.post("/token", async (c) => {
     return c.json({
       access_token: accessToken,
       token_type: "bearer",
+      // See /register — keep the legacy gitlab_* fields in the response so
+      // the frontend's session-shape doesn't break. Tokens preserved for
+      // existing users created by the old frontier-server; new users get "".
+      gitlab_token: user.gitlab_token ?? "",
+      gitlab_url: "",
     })
   } catch (error) {
     console.error("Login error:", error)

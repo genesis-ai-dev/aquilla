@@ -263,6 +263,97 @@ export function makeInMemoryD1(tables: Partial<Tables> = {}): InMemoryD1 {
         }))
     }
 
+    // ── GET /api/v1/projects/:projectId/files (list) ──────────────────
+    if (
+      /^SELECT id, project_id, name, file_type, source_language, target_language, cell_count, approved_count, word_count, last_edit_at FROM files WHERE project_id = \? ORDER BY/.test(
+        normalized,
+      )
+    ) {
+      const pid = args[0] as string
+      return db.files
+        .filter((f) => f.project_id === pid)
+        .map((f) => ({
+          id: f.id,
+          project_id: f.project_id,
+          name: f.name ?? "",
+          file_type: f.file_type ?? "",
+          source_language: f.source_language ?? null,
+          target_language: f.target_language ?? null,
+          cell_count: f.cell_count ?? 0,
+          approved_count: f.approved_count ?? 0,
+          word_count: f.word_count ?? 0,
+          last_edit_at: f.last_edit_at ?? null,
+        }))
+        .sort((a, b) => {
+          const aEdit = a.last_edit_at
+          const bEdit = b.last_edit_at
+          if (aEdit !== null && bEdit !== null) return bEdit - aEdit
+          if (aEdit === null && bEdit !== null) return 1
+          if (aEdit !== null && bEdit === null) return -1
+          return a.name.localeCompare(b.name)
+        })
+    }
+
+    // ── GET /api/v1/projects/:projectId/files/:fileId (single) ────────
+    if (
+      /^SELECT id, project_id, name, file_type, source_language, target_language, cell_count, approved_count, word_count, last_edit_at FROM files WHERE project_id = \? AND id = \?$/.test(
+        normalized,
+      )
+    ) {
+      const pid = args[0] as string
+      const fid = args[1] as string
+      const f = db.files.find((row) => row.project_id === pid && row.id === fid)
+      if (!f) return []
+      return [
+        {
+          id: f.id,
+          project_id: f.project_id,
+          name: f.name ?? "",
+          file_type: f.file_type ?? "",
+          source_language: f.source_language ?? null,
+          target_language: f.target_language ?? null,
+          cell_count: f.cell_count ?? 0,
+          approved_count: f.approved_count ?? 0,
+          word_count: f.word_count ?? 0,
+          last_edit_at: f.last_edit_at ?? null,
+        },
+      ]
+    }
+
+    // ── GET /api/v1/projects/:projectId/files/:fileId/cells ────────────
+    if (
+      /^SELECT cell_id, side, value, value_html, type, canonical_ref, anchor_cell_id, event_id, source_event_id, last_editor, last_edit_at, validated, word_count FROM cells WHERE project_id = \? AND file_id = \?/.test(
+        normalized,
+      )
+    ) {
+      const pid = args[0] as string
+      const fid = args[1] as string
+      const hasSide = normalized.includes("AND side = ?")
+      const side = hasSide ? (args[2] as string) : null
+      return db.cells
+        .filter(
+          (c) =>
+            c.project_id === pid &&
+            c.file_id === fid &&
+            (side === null || c.side === side),
+        )
+        .map((c) => ({
+          cell_id: c.cell_id,
+          side: c.side,
+          value: c.value,
+          value_html: c.value_html ?? null,
+          type: c.type ?? null,
+          canonical_ref: c.canonical_ref ?? null,
+          anchor_cell_id: c.anchor_cell_id ?? null,
+          event_id: c.event_id,
+          source_event_id: c.source_event_id ?? null,
+          last_editor: c.last_editor,
+          last_edit_at: c.last_edit_at,
+          validated: c.validated,
+          word_count: c.word_count,
+        }))
+    }
+
     // ── Rebuild DELETE ─────────────────────────────────────────────────
     if (/^DELETE FROM cell_validators WHERE project_id = \?$/.test(normalized)) {
       const pid = args[0] as string

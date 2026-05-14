@@ -35,7 +35,12 @@ ENV = "prod"
 [env.production]
 name = "aquilla-prod-front-door"
 account_id = "6a80496d1e59948a9cbaa3c643ba81d7"
-# routes = ["aquilla.app/*"]  # TODO: uncomment after aquilla.app zone is provisioned in Cloudflare
+# Exact-match `aquilla.app/` (no `/*`) so front-door owns ONLY the apex.
+# Per-app Workers Routes (`aquilla.app/<slug>/*`) handle their slugs.
+# Everything else falls through to Pages (the legacy workspace bundle
+# at /project/:id, /debug, /favicon-*.svg, the apex SPA fallback). A
+# wildcard claim here would intercept all of that and break it.
+routes = ["aquilla.app/"]
 
 [env.production.vars]
 ENV = "prod"

@@ -21,8 +21,12 @@ type Routes = Record<string, string>
 const routes = routesJson as Routes
 
 // The default landing app. Lives in `routes.json` so it stays consistent
-// with the rest of the registry.
-const DEFAULT_APP_PATH = routes.projects ?? "/projects"
+// with the rest of the registry. Trailing slash is required: Workers
+// Routes patterns use `aquilla.app/<slug>/*` which does NOT match the
+// bare `/<slug>` path, so the redirect target has to include the slash
+// or it falls through to Pages and renders the wrong app.
+const DEFAULT_APP_PATH =
+  ((routes.projects ?? "/projects") + "/").replace(/\/+$/, "/")
 
 const PRODUCTION_HOSTS = new Set<string>(["aquilla.app", "www.aquilla.app"])
 

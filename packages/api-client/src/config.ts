@@ -4,10 +4,12 @@
 // pr-N.aquilla.app/projects/ calling pr-N.aquilla.app/api/identity/).
 //
 // Callers can also pass `apiUrl` explicitly per call; defaults below are
-// used when omitted. The legacy default points at the codex-auth-worker
-// hostname (pre-Phase-3e), which 3e relocates into apps/frontier-server/.
+// used when omitted. The default must match @aquilla/auth-client so tokens
+// minted by login/signup are validated by the same backend the apps call for
+// projects, orgs, members, invites, and user search.
 
-const AUTH_DEFAULT = "https://codex-auth-worker.blue-darkness-7674.workers.dev"
+export const DEFAULT_AUTH_API_URL =
+  "https://aquilla-frontier-server.blue-darkness-7674.workers.dev"
 
 // Loosely-typed accessor; the package compiles in both Vite (browser bundle)
 // and Node (vitest) contexts so we can't rely on Vite's ImportMeta augmentation.
@@ -28,4 +30,5 @@ function readEnv(): string | undefined {
   return undefined
 }
 
-export const AUTH_API_URL: string = (readEnv()?.replace(/\/+$/, "")) || AUTH_DEFAULT
+export const AUTH_API_URL: string =
+  (readEnv()?.replace(/\/+$/, "")) || DEFAULT_AUTH_API_URL

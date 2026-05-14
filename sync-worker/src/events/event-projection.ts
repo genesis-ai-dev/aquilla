@@ -108,7 +108,7 @@ export function buildEventProjectionStmts(
               canonical_ref, anchor_cell_id, event_id, source_event_id,
               last_editor, last_edit_at, validated, word_count, content_hash
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, 0, ?, ?)
-            ON CONFLICT(project_id, file_id, cell_id) DO UPDATE SET
+            ON CONFLICT(project_id, file_id, cell_id, side) DO UPDATE SET
               side           = excluded.side,
               value          = excluded.value,
               value_html     = excluded.value_html,
@@ -157,9 +157,10 @@ export function buildEventProjectionStmts(
         const tp = p as EventPayloads['target.cell.commit']
         const sourceEventId = tp.sourceEventId ?? null
 
-        // For target commits we update value-level fields and pin
-        // `source_event_id` from the payload. We don't touch side / type /
-        // anchor here — they were set by the preceding *.create event.
+        // For target commits we upsert the target-side row and pin
+        // `source_event_id` from the payload. The first human edit often
+        // arrives before a target row exists, so the insert path copies
+        // type/anchor metadata from the source row for stable ordering.
         // `event_id` advances to this event id (chain head). The
         // `validated` flag resets to 0 because the chain head moved —
         // validators targeting the prior edit are no longer "current".
@@ -168,30 +169,48 @@ export function buildEventProjectionStmts(
         stmts.push(
           db
             .prepare(
-              `UPDATE cells SET
-                value           = ?,
-                value_html      = ?,
-                event_id        = ?,
-                source_event_id = ?,
-                last_editor     = ?,
-                last_edit_at    = ?,
-                word_count      = ?,
-                content_hash    = ?,
-                validated       = 0
-              WHERE project_id = ? AND file_id = ? AND cell_id = ?`,
+            `INSERT INTO cells (
+              project_id, file_id, cell_id, side, value, value_html, type,
+              canonical_ref, anchor_cell_id, event_id, source_event_id,
+              last_editor, last_edit_at, validated, word_count, content_hash
+            ) VALUES (
+              ?, ?, ?, 'target', ?, ?,
+              (SELECT type FROM cells
+                WHERE project_id = ? AND file_id = ? AND cell_id = ? AND side = 'source'),
+              NULL,
+              (SELECT anchor_cell_id FROM cells
+                WHERE project_id = ? AND file_id = ? AND cell_id = ? AND side = 'source'),
+              ?, ?, ?, ?, 0, ?, ?
+            )
+            ON CONFLICT(project_id, file_id, cell_id, side) DO UPDATE SET
+              value           = excluded.value,
+              value_html      = excluded.value_html,
+              event_id        = excluded.event_id,
+              source_event_id = excluded.source_event_id,
+              last_editor     = excluded.last_editor,
+              last_edit_at    = excluded.last_edit_at,
+              word_count      = excluded.word_count,
+              content_hash    = excluded.content_hash,
+              validated       = 0`,
             )
             .bind(
+              event.projectId,
+              event.fileId,
+              event.cellId,
               value,
               valueHtml,
+              event.projectId,
+              event.fileId,
+              event.cellId,
+              event.projectId,
+              event.fileId,
+              event.cellId,
               event.id,
               sourceEventId,
               event.author,
               event.serverTs,
               wordCount,
               hash,
-              event.projectId,
-              event.fileId,
-              event.cellId,
             ),
         )
       } else {
@@ -210,7 +229,7 @@ export function buildEventProjectionStmts(
                 last_edit_at  = ?,
                 word_count    = ?,
                 content_hash  = ?
-              WHERE project_id = ? AND file_id = ? AND cell_id = ?`,
+              WHERE project_id = ? AND file_id = ? AND cell_id = ? AND side = 'source'`,
             )
             .bind(
               value,
@@ -235,13 +254,14 @@ export function buildEventProjectionStmts(
         throw new Error(`${event.kind} event ${event.id} is missing fileId or cellId`)
       }
       // Cell row leaves the projection; events stay queryable.
+      const side = event.kind === 'source.cell.delete' ? 'source' : 'target'
       stmts.push(
         db
           .prepare(
             `DELETE FROM cells
-             WHERE project_id = ? AND file_id = ? AND cell_id = ?`,
+             WHERE project_id = ? AND file_id = ? AND cell_id = ? AND side = ?`,
           )
-          .bind(event.projectId, event.fileId, event.cellId),
+          .bind(event.projectId, event.fileId, event.cellId, side),
       )
       return ['cells']
     }
@@ -252,6 +272,7 @@ export function buildEventProjectionStmts(
       if (!event.fileId || !event.cellId) {
         throw new Error(`${event.kind} event ${event.id} is missing fileId or cellId`)
       }
+      const side = event.kind === 'source.cell.reorder' ? 'source' : 'target'
       stmts.push(
         db
           .prepare(
@@ -260,7 +281,7 @@ export function buildEventProjectionStmts(
               event_id       = ?,
               last_editor    = ?,
               last_edit_at   = ?
-            WHERE project_id = ? AND file_id = ? AND cell_id = ?`,
+            WHERE project_id = ? AND file_id = ? AND cell_id = ? AND side = ?`,
           )
           .bind(
             p.anchorCellId ?? null,
@@ -270,6 +291,7 @@ export function buildEventProjectionStmts(
             event.projectId,
             event.fileId,
             event.cellId,
+            side,
           ),
       )
       return ['cells']
@@ -323,7 +345,7 @@ export function buildEventProjectionStmts(
                 AND is_active  = 1
                 AND edit_event_id = cells.event_id
             )
-            WHERE project_id = ? AND file_id = ? AND cell_id = ?`,
+            WHERE project_id = ? AND file_id = ? AND cell_id = ? AND side = 'target'`,
           )
           .bind(
             event.projectId,
@@ -428,25 +450,29 @@ export async function isWinningChild(
 
   // Build the SQL with a NULL-aware parent_id predicate. We also filter
   // to chain-mutating kinds so a sibling validation event doesn't block a
-  // legitimate commit from advancing the projection.
+  // legitimate commit from advancing the projection. Source-side and
+  // target-side rows have independent chains even when they share cell_id.
   const parentIsNull = candidate.parentId === null || candidate.parentId === undefined
   const kindList = [...CHAIN_MUTATING_KINDS].map((k) => `'${k}'`).join(', ')
+  const sideLike = candidate.kind.startsWith('target.') ? 'target.%' : 'source.%'
   const sql = parentIsNull
     ? `SELECT id, server_seq FROM events
        WHERE project_id = ? AND file_id = ? AND cell_id = ?
          AND parent_id IS NULL
          AND kind IN (${kindList})
+         AND kind LIKE ?
        ORDER BY server_seq ASC, id ASC
        LIMIT 1`
     : `SELECT id, server_seq FROM events
        WHERE project_id = ? AND file_id = ? AND cell_id = ? AND parent_id = ?
          AND kind IN (${kindList})
+         AND kind LIKE ?
        ORDER BY server_seq ASC, id ASC
        LIMIT 1`
 
   const stmt = parentIsNull
-    ? db.prepare(sql).bind(candidate.projectId, candidate.fileId, candidate.cellId)
-    : db.prepare(sql).bind(candidate.projectId, candidate.fileId, candidate.cellId, candidate.parentId)
+    ? db.prepare(sql).bind(candidate.projectId, candidate.fileId, candidate.cellId, sideLike)
+    : db.prepare(sql).bind(candidate.projectId, candidate.fileId, candidate.cellId, candidate.parentId, sideLike)
 
   const row = await stmt.first<{ id: string; server_seq: number }>()
 

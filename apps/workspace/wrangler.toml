@@ -25,7 +25,7 @@ account_id = "6a80496d1e59948a9cbaa3c643ba81d7"
 ENV = "prod"
 # Build-time Vite env vars; the bundler inlines these via import.meta.env.
 # Override in CI by exporting before `pnpm build`.
-VITE_AUTH_BASE = "https://codex-auth-worker.blue-darkness-7674.workers.dev"
+VITE_AUTH_BASE = "https://aquilla-frontier-server.blue-darkness-7674.workers.dev"
 
 [assets]
 directory = "./dist"
@@ -72,7 +72,7 @@ account_id = "6a80496d1e59948a9cbaa3c643ba81d7"
 
 [env.staging.vars]
 ENV = "preview"
-VITE_AUTH_BASE = "https://codex-auth-worker.blue-darkness-7674.workers.dev"
+VITE_AUTH_BASE = "https://aquilla-dev-frontier-server.blue-darkness-7674.workers.dev"
 
 [env.staging.assets]
 directory = "./dist"
@@ -93,7 +93,7 @@ account_id = "6a80496d1e59948a9cbaa3c643ba81d7"
 [env.preview.vars]
 ENV = "preview"
 PR = "__PR__"
-VITE_AUTH_BASE = "https://codex-auth-worker.blue-darkness-7674.workers.dev"
+VITE_AUTH_BASE = "https://aquilla-dev-frontier-server.blue-darkness-7674.workers.dev"
 
 [env.preview.assets]
 directory = "./dist"

@@ -184,6 +184,9 @@ async function main(): Promise<void> {
     cwd: SYNC_WORKER_DIR,
     port: SYNC_WORKER_PORT,
     label: "sync",
+    env: {
+      SYNC_SECRET_KEY: "test-sync-secret-key",
+    },
     logFile: openLogFile(logFiles.sync),
     streamToParent: VERBOSE,
   })

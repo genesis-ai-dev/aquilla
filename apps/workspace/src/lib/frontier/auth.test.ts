@@ -15,7 +15,7 @@ describe("login", () => {
     );
     const s = await login({ username: "alice", password: "pw" });
     expect(fetchSpy).toHaveBeenCalledWith(
-      "https://aquilla-prod-frontier-server.blue-darkness-7674.workers.dev/api/v1/auth/token",
+      "https://aquilla-frontier-server.blue-darkness-7674.workers.dev/api/v1/auth/token",
       expect.objectContaining({ method: "POST" })
     );
     expect(s.jwt).toBe("jwt-1");
@@ -50,7 +50,7 @@ describe("AUTH_BASE env override", () => {
     vi.resetModules();
     const mod = await import("./auth");
     expect(mod.AUTH_BASE).toBe(
-      "https://aquilla-prod-frontier-server.blue-darkness-7674.workers.dev",
+      "https://aquilla-frontier-server.blue-darkness-7674.workers.dev",
     );
   });
 });

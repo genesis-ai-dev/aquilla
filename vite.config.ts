@@ -40,6 +40,10 @@ const brand = BRAND_DATA[brandId]
 
 export default defineConfig(({ mode }) => ({
   root: path.resolve(__dirname, "apps/workspace"),
+  // Keep env files at the repo root even though the Vite root is the
+  // workspace app. E2E writes .env.test.local there before building, and
+  // Cloudflare Pages builds also export VITE_* from the repo-root context.
+  envDir: __dirname,
   // With root: apps/workspace, Vite's default publicDir would be
   // apps/workspace/public/ (which doesn't exist). Point it at the
   // repo-root public/ so favicons, OG images, and _redirects (which

@@ -7,11 +7,11 @@
 // (auth, sync-token, invites, orgs, members, projects, users, health). The
 // legacy frontier-server fallback was removed on 2026-05-13 when these routes
 // were ported into the codex-web identity worker. Phase 3e then relocated
-// that worker from auth-worker/ to apps/frontier-server/ and renamed the
-// Cloudflare worker from aquilla-frontier-server to aquilla-frontier-server
-// (prod: aquilla-prod-frontier-server; staging: aquilla-dev-frontier-server).
+// that worker from auth-worker/ to apps/frontier-server/. Production deploys
+// use the bare aquilla-frontier-server worker name; staging deploys use
+// aquilla-dev-frontier-server.
 
-const AUTH_DEFAULT = "https://aquilla-prod-frontier-server.blue-darkness-7674.workers.dev"
+const AUTH_DEFAULT = "https://aquilla-frontier-server.blue-darkness-7674.workers.dev"
 
 export const AUTH_API_URL =
   ((import.meta.env.VITE_AUTH_BASE as string | undefined)?.replace(/\/+$/, "")) ||

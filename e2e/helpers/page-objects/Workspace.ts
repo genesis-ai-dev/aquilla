@@ -17,13 +17,12 @@ export class Workspace {
 
   /** Click a file row in the sidebar, identified by a substring of its name. */
   async openFileBySubstring(nameSubstring: string): Promise<void> {
-    await this.page
+    const fileLabel = this.page
       .locator("aside")
-      .locator("div")
-      .filter({ hasText: new RegExp(nameSubstring, "i") })
-      .filter({ has: this.page.locator('button[aria-label="File actions"]') })
+      .getByText(new RegExp(nameSubstring, "i"))
       .first()
-      .click()
+    await expect(fileLabel).toBeVisible({ timeout: 10_000 })
+    await fileLabel.click()
   }
 
   async waitForEditor(): Promise<void> {
@@ -54,7 +53,15 @@ export class Workspace {
     await target.waitFor({ state: "visible", timeout: 10_000 })
     await target.click()
     await this.page.keyboard.type(text)
+    const commitPosted = this.page.waitForResponse(
+      (response) =>
+        response.request().method() === "POST" &&
+        response.url().endsWith("/events") &&
+        response.status() === 200,
+      { timeout: 10_000 },
+    )
     await this.page.locator("aside").click() // blur outside editor
+    await commitPosted
   }
 
   async readCell(index: number): Promise<string> {
@@ -67,11 +74,19 @@ export class Workspace {
     const row = this.cellRow(index)
     const validationButton = row.locator("button[title*='Health']").first()
     await expect(validationButton).toBeVisible({ timeout: 10_000 })
+    const validationPosted = this.page.waitForResponse(
+      (response) =>
+        response.request().method() === "POST" &&
+        response.url().endsWith("/events") &&
+        response.status() === 200,
+      { timeout: 10_000 },
+    )
     await validationButton.click()
     const validateAction = this.page.getByRole("button", { name: /validate/i })
     if (await validateAction.isVisible({ timeout: 2_000 }).catch(() => false)) {
       await validateAction.click()
     }
+    await validationPosted
     await expect(row.locator(".text-emerald-500").first()).toBeVisible({ timeout: 10_000 })
   }
 }

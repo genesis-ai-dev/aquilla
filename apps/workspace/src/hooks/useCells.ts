@@ -118,7 +118,11 @@ function buildCellData(
   const validationStatus: ValidationStatus =
     !translated.trim()
       ? "empty"
-      : classifyValidators(activeValidators, username, requiredValidations)
+      : activeValidators.length > 0
+        ? classifyValidators(activeValidators, username, requiredValidations)
+        : target?.validated
+          ? "full"
+          : "none"
 
   // Prefer the target row's `validated` flag as the source of truth for the
   // simple "is it green?" UI. When no stats are present, this is the only

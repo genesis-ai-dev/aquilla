@@ -241,7 +241,7 @@ export function currentJwt(): string | null {
 
 /**
  * Hard-navigate the browser to the login app, preserving the current URL
- * as the post-login `next` target. Apps call this when they detect a
+ * as the post-login `return` target. Apps call this when they detect a
  * missing JWT — login lives in a different Worker so we can't use
  * react-router's <Navigate />. Trailing slash on `/login/` is required:
  * Workers Routes claims `aquilla.app/login/*`, which doesn't match the
@@ -250,10 +250,10 @@ export function currentJwt(): string | null {
  */
 export function redirectToLogin(): void {
   if (typeof window === "undefined") return
-  const next = encodeURIComponent(
+  const returnTo = encodeURIComponent(
     window.location.pathname + window.location.search,
   )
-  window.location.replace(`/login/?next=${next}`)
+  window.location.replace(`/login/?return=${returnTo}`)
 }
 
 /**

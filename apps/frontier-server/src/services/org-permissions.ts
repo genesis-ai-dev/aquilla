@@ -1,7 +1,4 @@
-// Organization-permission helpers. Ported from frontier-server's
-// `cloudflare/src/services/org-permissions.ts`. Schema is shared with the
-// legacy worker (`organizations`, `org_members`) so reads and writes here
-// are interchangeable with the old fork.
+// Organization-permission helpers for the codex-web identity/project backend.
 
 import type { Env, AuthUser } from "../types"
 
@@ -33,8 +30,8 @@ export async function getOrCreateUserOrg(
 
   const name = `${user.username}'s workspace`
   const inserted = await env.AQUILLA_DB.prepare(
-    `INSERT INTO organizations (name, owner_user_id, subscription_tier)
-     VALUES (?, ?, 'free') RETURNING id`,
+    `INSERT INTO organizations (name, owner_user_id)
+     VALUES (?, ?) RETURNING id`,
   )
     .bind(name, user.id)
     .first<{ id: number }>()

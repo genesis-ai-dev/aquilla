@@ -26,7 +26,7 @@ ENV = "prod"
 # Per-app build-time env. The Vite build reads VITE_AUTH_BASE so the
 # bundled JS calls the right auth-worker host. These vars are exposed to
 # the Worker too in case the SPA-fallback handler ever needs them.
-VITE_AUTH_BASE = "https://codex-auth-worker.blue-darkness-7674.workers.dev"
+VITE_AUTH_BASE = "https://aquilla-frontier-server.blue-darkness-7674.workers.dev"
 VITE_SYNC_WORKER_HOST = "codex-sync-worker.blue-darkness-7674.workers.dev"
 
 # ---------------------------------------------------------------------------
@@ -48,7 +48,7 @@ run_worker_first = ["/projects/*", "!/projects/assets/*"]
 
 [env.production.vars]
 ENV = "prod"
-VITE_AUTH_BASE = "https://codex-auth-worker.blue-darkness-7674.workers.dev"
+VITE_AUTH_BASE = "https://aquilla-frontier-server.blue-darkness-7674.workers.dev"
 VITE_SYNC_WORKER_HOST = "codex-sync-worker.blue-darkness-7674.workers.dev"
 
 # ---------------------------------------------------------------------------
@@ -66,7 +66,7 @@ not_found_handling = "single-page-application"
 
 [env.staging.vars]
 ENV = "preview"
-VITE_AUTH_BASE = "https://codex-auth-worker-staging.blue-darkness-7674.workers.dev"
+VITE_AUTH_BASE = "https://aquilla-dev-frontier-server.blue-darkness-7674.workers.dev"
 VITE_SYNC_WORKER_HOST = "codex-sync-worker-staging.blue-darkness-7674.workers.dev"
 
 # ---------------------------------------------------------------------------
@@ -85,5 +85,5 @@ not_found_handling = "single-page-application"
 [env.preview.vars]
 ENV = "preview"
 PR = "__PR__"
-VITE_AUTH_BASE = "https://codex-auth-worker-staging.blue-darkness-7674.workers.dev"
+VITE_AUTH_BASE = "https://aquilla-dev-frontier-server.blue-darkness-7674.workers.dev"
 VITE_SYNC_WORKER_HOST = "codex-sync-worker-staging.blue-darkness-7674.workers.dev"

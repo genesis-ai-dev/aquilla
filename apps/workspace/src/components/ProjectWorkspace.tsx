@@ -56,6 +56,8 @@ import {
   setCqrsOutboxBridge,
   buildFileScopedTokenFetcher,
 } from "@/lib/sync/cqrs-bridge"
+import { emitTargetCellCommit } from "@/lib/sync/events-emit"
+import { flushOutboxBatch } from "@/lib/sync/outbox-flush"
 import { useCellsAuditStatsWithOverlay } from "@/hooks/useCellsAuditStatsWithOverlay"
 import { Film, Scale, MessagesSquare, Camera, Share2, Settings as SettingsIcon, Lock, ClipboardList, Brain, Trash2, Undo2, Search as SearchIcon, Sparkles } from "lucide-react"
 import { restoreProject } from "@/lib/store/project-index"
@@ -99,20 +101,60 @@ import { AiSetupDialog } from "./AiSetupDialog"
 export function ProjectWorkspace() {
   const { id: projectId, fileId: routeFileId } = useParams<{ id: string; fileId?: string }>()
   const navigate = useNavigate()
-  const { project, status, refresh } = useProject(projectId!)
+  const { project: loadedProject, status, refresh } = useProject(projectId!)
 
-  const activeFileId = routeFileId ?? null
+  const [selectedFileId, setSelectedFileId] = useState<string | null>(routeFileId ?? null)
+  const activeFileId = routeFileId ?? selectedFileId
 
   const setActiveFileId = useCallback((fileId: string | null) => {
     if (!projectId) return
+    setSelectedFileId(fileId)
     if (fileId) {
       navigate(`/project/${projectId}/file/${fileId}`)
     } else {
       navigate(`/project/${projectId}`)
     }
   }, [projectId, navigate])
-  const projectFiles = project?.files ?? []
+  useEffect(() => {
+    if (routeFileId) setSelectedFileId(routeFileId)
+  }, [routeFileId])
+  const [optimisticFiles, setOptimisticFiles] = useState<FileReference[]>([])
+  const optimisticFileIdsRef = useRef<Set<string>>(new Set())
+  useEffect(() => {
+    optimisticFileIdsRef.current = new Set()
+    setOptimisticFiles([])
+  }, [projectId])
+
+  const projectFiles = useMemo(() => {
+    const serverFiles = loadedProject?.files ?? []
+    if (optimisticFiles.length === 0) return serverFiles
+
+    const seen = new Set(serverFiles.map((file) => file.id))
+    const pending = optimisticFiles.filter((file) => !seen.has(file.id))
+    return pending.length > 0 ? [...serverFiles, ...pending] : serverFiles
+  }, [loadedProject?.files, optimisticFiles])
+
+  const project = useMemo<ProjectRecord | null>(() => {
+    if (!loadedProject) return null
+    if (projectFiles === loadedProject.files) return loadedProject
+    return { ...loadedProject, files: projectFiles }
+  }, [loadedProject, projectFiles])
+
+  useEffect(() => {
+    if (!loadedProject || optimisticFiles.length === 0) return
+    const serverIds = new Set(loadedProject.files.map((file) => file.id))
+    setOptimisticFiles((current) => {
+      const next = current.filter((file) => !serverIds.has(file.id))
+      optimisticFileIdsRef.current = new Set(next.map((file) => file.id))
+      return next
+    })
+  }, [loadedProject, optimisticFiles.length])
+
   const fileIds = useMemo(() => projectFiles.map((f) => f.id), [projectFiles])
+  useEffect(() => {
+    if (!selectedFileId || fileIds.length === 0 || fileIds.includes(selectedFileId)) return
+    setSelectedFileId(null)
+  }, [selectedFileId, fileIds])
   const workspaceTabs = useWorkspaceTabs({
     projectId: projectId ?? "",
     fileIds,
@@ -129,10 +171,19 @@ export function ProjectWorkspace() {
   useEffect(() => {
     if (routeFileId || !projectId) return
     const last = readLastActiveFileId(projectId)
-    if (last && fileIds.includes(last)) {
-      navigate(`/project/${projectId}/file/${last}`, { replace: true })
+    const firstOpenTab = workspaceTabs.tabs[0]?.fileId ?? null
+    const onlyFile = projectFiles.length === 1 ? projectFiles[0]?.id : null
+    const nextFileId =
+      last && fileIds.includes(last)
+        ? last
+        : firstOpenTab && fileIds.includes(firstOpenTab)
+          ? firstOpenTab
+          : onlyFile
+    if (nextFileId) {
+      setSelectedFileId(nextFileId)
+      navigate(`/project/${projectId}/file/${nextFileId}`, { replace: true })
     }
-  }, [routeFileId, fileIds, navigate, projectId])
+  }, [routeFileId, fileIds, navigate, projectId, projectFiles, workspaceTabs.tabs])
   const [importOpen, setImportOpen] = useState(false)
   const [drawerRuleId, setDrawerRuleId] = useState<string | null>(null)
   const [searchParams] = useSearchParams()
@@ -210,8 +261,12 @@ export function ProjectWorkspace() {
     return () => setCqrsOutboxBridge(null)
   }, [project?.id, activeFileId, currentUsername])
 
-  const outboxFlushEnabled = Boolean(project?.id && activeFileId && frontierSession?.jwt)
-  const { pendingCount: outboxPending, failureStreak: outboxFailures } = useOutboxFlusher({
+  const outboxFlushEnabled = Boolean(project?.id && frontierSession?.jwt)
+  const {
+    pendingCount: outboxPending,
+    failureStreak: outboxFailures,
+    refreshPending: refreshOutboxPending,
+  } = useOutboxFlusher({
     enabled: outboxFlushEnabled,
     getTokenForFile,
   })
@@ -224,7 +279,10 @@ export function ProjectWorkspace() {
   // on top — pending commits/validates show up immediately, before the next
   // 30s refetch. Source of truth for project-wide validation views.
   const auditStatsEnabled = Boolean(project?.id && activeFileId && frontierSession?.jwt)
-  const { byCellId: auditStatsByCellId } = useCellsAuditStatsWithOverlay({
+  const {
+    byCellId: auditStatsByCellId,
+    revalidate: revalidateAuditStats,
+  } = useCellsAuditStatsWithOverlay({
     enabled: auditStatsEnabled,
     fileId: activeFileId,
     getTokenForFile,
@@ -352,8 +410,24 @@ export function ProjectWorkspace() {
   }, [fileCells])
 
   const { search, searchPassages } = useSearchIndex(project?.files || [], allProjectCells)
+  const commitCompletedCell = useCallback(async (cell: CellData, text: string, author: string) => {
+    if (!project?.id) return
+    await emitTargetCellCommit({
+      projectId: project.id,
+      fileId: cell.fileId,
+      cellId: cell.id,
+      parentId: cell.targetEventId ?? cell.sourceEventId ?? null,
+      sourceEventId: cell.sourceEventId ?? null,
+      value: text,
+      author,
+    })
+    await flushOutboxBatch({ getTokenForFile })
+    await refreshOutboxPending()
+    revalidateAuditStats()
+    revalidateCells()
+  }, [project?.id, getTokenForFile, refreshOutboxPending, revalidateAuditStats, revalidateCells])
   const { completeSingle, completeBatch, isConfigured, isAvailable: isCompletionAvailable, completing, examples, errors } = useCompletion(
-    doc, project?.completionSettings, project?.sourceLanguage || "", project?.targetLanguage || "", search, searchPassages, frontierSession
+    doc, project?.completionSettings, project?.sourceLanguage || "", project?.targetLanguage || "", search, searchPassages, frontierSession, commitCompletedCell
   )
 
   const findBacktranslationExamples = useCallback((target: CellData) => {
@@ -475,7 +549,9 @@ export function ProjectWorkspace() {
 
   useEffect(() => {
     if (!project || !routeFileId) return
-    const exists = project.files.some((f) => f.id === routeFileId)
+    const exists =
+      project.files.some((f) => f.id === routeFileId) ||
+      optimisticFileIdsRef.current.has(routeFileId)
     if (!exists) {
       navigate(`/project/${projectId}`, { replace: true })
     }
@@ -868,6 +944,13 @@ export function ProjectWorkspace() {
     navigate,
   }), [activeFileId, completeBatch, cells, doc, project, frontierSession, navigate])
 
+  const handleCellCommitted = useCallback(async () => {
+    await flushOutboxBatch({ getTokenForFile })
+    await refreshOutboxPending()
+    revalidateAuditStats()
+    revalidateCells()
+  }, [getTokenForFile, refreshOutboxPending, revalidateAuditStats, revalidateCells])
+
   if (status === "loading") return <div className="p-8 text-muted-foreground">Loading...</div>
   if (status === "no-session") {
     return (
@@ -902,9 +985,41 @@ export function ProjectWorkspace() {
 
   async function handleImported(refs: FileReference[]) {
     if (!project) return
-    await patchProject(project.id, (p) => ({ ...p, files: [...p.files, ...refs] }))
-    refresh()
+    const localProject = await getProject(project.id).catch(() => undefined)
+    const baseProject = localProject ?? project
+    const nextFiles = [...baseProject.files]
+    const seenFileIds = new Set(nextFiles.map((file) => file.id))
+    for (const ref of refs) {
+      if (seenFileIds.has(ref.id)) continue
+      nextFiles.push(ref)
+      seenFileIds.add(ref.id)
+    }
+    await updateProject({
+      ...project,
+      ...baseProject,
+      sourceLanguage: project.sourceLanguage || baseProject.sourceLanguage,
+      targetLanguage: project.targetLanguage || baseProject.targetLanguage,
+      syncRole: project.syncRole ?? baseProject.syncRole,
+      files: nextFiles,
+    })
+    optimisticFileIdsRef.current = new Set([
+      ...optimisticFileIdsRef.current,
+      ...refs.map((ref) => ref.id),
+    ])
+    setOptimisticFiles((current) => {
+      const seen = new Set(current.map((file) => file.id))
+      const next = [...current]
+      for (const ref of refs) {
+        if (!seen.has(ref.id)) next.push(ref)
+      }
+      optimisticFileIdsRef.current = new Set(next.map((file) => file.id))
+      return next
+    })
     if (refs.length > 0) workspaceTabs.openFile(refs[0].id)
+    void flushOutboxBatch({ getTokenForFile }).then(() => {
+      refresh()
+      revalidateCells()
+    })
   }
 
   // ── Render ────────────────────────────────────────────────────────────────
@@ -1131,7 +1246,7 @@ export function ProjectWorkspace() {
             onAiSetupNeeded={() => setAiSetupOpen(true)}
             onOpenRecording={(cellId) => setRecordingCellId(cellId)}
             onProjectChanged={refresh}
-            onCellCommitted={revalidateCells}
+            onCellCommitted={handleCellCommitted}
             cellLockHolders={cellLockHolders}
             cellsWithRemoteChange={cellsWithRemoteChange}
             onClaimCell={handleClaimCell}

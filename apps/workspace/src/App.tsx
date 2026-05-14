@@ -28,6 +28,7 @@
 //   /settings/org  → /org/members  (was /members)
 
 import { Routes, Route } from "react-router-dom"
+import { Dashboard } from "@/components/Dashboard"
 import { ProjectWorkspace } from "@/components/ProjectWorkspace"
 import { DebugView } from "@/components/DebugView"
 import { RulesPage } from "@/components/RulesPage"
@@ -45,6 +46,8 @@ import { useGlobalAudioShortcuts } from "@/hooks/useGlobalAudioShortcuts"
 
 void hydratePrefetchStatus()
 void probeOpfsAvailability()
+
+const ENABLE_SMOKE_DASHBOARD_ROUTE = import.meta.env.MODE === "test"
 
 function GlobalAudioShortcuts() {
   useGlobalAudioShortcuts()
@@ -89,6 +92,13 @@ function HardRedirect({ to }: { to: string }) {
 function AppRoutes() {
   return (
     <Routes>
+      {/* Vite preview does not apply public/_redirects, while the smoke suite
+          drives the root dashboard. Keep this route test-only so production
+          continues to hand `/` to apps/projects/. */}
+      {ENABLE_SMOKE_DASHBOARD_ROUTE ? (
+        <Route path="/" element={<Dashboard />} />
+      ) : null}
+
       {/* Workspace surfaces — kept here until Phase 3a relocates them. */}
       <Route path="/debug" element={<DebugView />} />
       <Route path="/project/:id" element={<ProjectWorkspace />} />

@@ -1,11 +1,9 @@
-// Phase 2c-β: thin client (AD-3 v1) — fetch ProjectRecord from auth-worker
-// on demand, with no IDB cache fallback.
+// Phase 2c-β: server-first project hydration (AD-3 v1).
 //
-// Pre-Phase 2c the hook hydrated the local IDB record first and then merged
-// the server response on top. AD-3 v1's contract is "reads on demand";
-// local caching is a v2 progressive-caching concern. v1 thin client: a
-// cache miss surfaces as `isError`, and the dashboard / workspace render
-// their "not yet" states from there.
+// Project identity, role, and membership come from frontier-server on demand.
+// The file projection can lag behind the local import transaction in dev/E2E
+// topologies where workers do not share a D1 instance, so locally known file
+// refs are merged as a narrow overlay after the server record is resolved.
 //
 // `project_settings` (the synced subset — sourceLanguage, targetLanguage,
 // systemPrompt, rules, healthSettings, validation counts) continues to
@@ -19,6 +17,7 @@ import { minimalProjectRecord, resolveCloudProject } from "@/lib/sync/cloud-proj
 import { useProjectSettings } from "@/hooks/useProjectSettings"
 import { buildCompletionSettings } from "@/hooks/useCompletionSettings"
 import type { ProjectWideSettings } from "@/lib/sync/project-settings"
+import { getProject } from "@/lib/store/project-index"
 
 /**
  * Overlay synced project-wide settings onto the server-returned ProjectRecord.
@@ -40,6 +39,25 @@ function overlaySettings(record: ProjectRecord, settings: ProjectWideSettings): 
   if (settings.validationCount != null) next.validationCount = settings.validationCount
   if (settings.validationCountAudio != null) next.validationCountAudio = settings.validationCountAudio
   return next
+}
+
+async function overlayLocalProjectState(record: ProjectRecord): Promise<ProjectRecord> {
+  const local = await getProject(record.id).catch(() => undefined)
+  if (!local) return record
+
+  const serverFileIds = new Set(record.files.map((file) => file.id))
+  const localOnlyFiles = local.files.filter((file) => !serverFileIds.has(file.id))
+  const files = localOnlyFiles.length > 0
+    ? [...record.files, ...localOnlyFiles]
+    : record.files
+
+  return {
+    ...record,
+    sourceLanguage: record.sourceLanguage || local.sourceLanguage,
+    targetLanguage: record.targetLanguage || local.targetLanguage,
+    completionSettings: local.completionSettings ?? record.completionSettings,
+    files,
+  }
 }
 
 export type ProjectLoadStatus =
@@ -74,7 +92,7 @@ export function useProject(projectId: string) {
         hasLoaded.current = true
         return
       }
-      const hydrated = minimalProjectRecord(state)
+      const hydrated = await overlayLocalProjectState(minimalProjectRecord(state))
       setProject(hydrated)
       setStatus("ready")
       hasLoaded.current = true

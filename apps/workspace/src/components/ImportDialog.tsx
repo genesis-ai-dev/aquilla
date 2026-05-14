@@ -25,7 +25,7 @@ interface ImportDialogProps {
   username: string
   sourceLanguage: string
   targetLanguage: string
-  onImported: (refs: FileReference[]) => void
+  onImported: (refs: FileReference[]) => void | Promise<void>
 }
 
 export function ImportDialog({
@@ -79,8 +79,8 @@ export function ImportDialog({
             username={username}
             sourceLanguage={sourceLanguage}
             targetLanguage={targetLanguage}
-            onImported={(refs) => {
-              onImported(refs)
+            onImported={async (refs) => {
+              await onImported(refs)
               onOpenChange(false)
             }}
           />
@@ -90,8 +90,8 @@ export function ImportDialog({
             username={username}
             sourceLanguage={sourceLanguage}
             targetLanguage={targetLanguage}
-            onImported={(ref) => {
-              onImported([ref])
+            onImported={async (ref) => {
+              await onImported([ref])
               onOpenChange(false)
             }}
           />
@@ -106,7 +106,7 @@ interface UploadPanelProps {
   username: string
   sourceLanguage: string
   targetLanguage: string
-  onImported: (refs: FileReference[]) => void
+  onImported: (refs: FileReference[]) => void | Promise<void>
 }
 
 function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, onImported }: UploadPanelProps) {
@@ -133,7 +133,7 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, onIm
           })
           allRefs.push(...refs)
         }
-        onImported(allRefs)
+        await onImported(allRefs)
       } catch (err) {
         setError(err instanceof Error ? err.message : "Import failed")
       } finally {
@@ -205,7 +205,7 @@ interface EBiblePanelProps {
   username: string
   sourceLanguage: string
   targetLanguage: string
-  onImported: (ref: FileReference) => void
+  onImported: (ref: FileReference) => void | Promise<void>
 }
 
 function EBiblePanel({ projectId, username, sourceLanguage, targetLanguage, onImported }: EBiblePanelProps) {
@@ -267,7 +267,7 @@ function EBiblePanel({ projectId, username, sourceLanguage, targetLanguage, onIm
         setProgress,
         abortRef.current.signal
       )
-      onImported(ref)
+      await onImported(ref)
     } catch (err) {
       setImportErr(err instanceof Error ? err.message : "Import failed")
     } finally {

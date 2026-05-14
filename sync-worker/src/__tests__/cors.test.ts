@@ -23,6 +23,11 @@ describe("isBrowserCorsPath", () => {
     expect(isBrowserCorsPath("/cell-validators")).toBe(true)
   })
 
+  it("matches the project read API namespace", () => {
+    expect(isBrowserCorsPath("/api/v1/projects/p1/files/f1/cells")).toBe(true)
+    expect(isBrowserCorsPath("/api/v1/projects/p1/files/f1/stale-source")).toBe(true)
+  })
+
   it("does not match admin paths", () => {
     expect(isBrowserCorsPath("/admin/projects/p1/archive")).toBe(false)
   })
@@ -44,6 +49,11 @@ describe("handleCorsPreflight", () => {
 
   it("returns 204 for OPTIONS on /cells/audit-stats", () => {
     const res = handleCorsPreflight(req("OPTIONS", "/cells/audit-stats?fileId=abc"))
+    expect(res?.status).toBe(204)
+  })
+
+  it("returns 204 for OPTIONS on the project read API", () => {
+    const res = handleCorsPreflight(req("OPTIONS", "/api/v1/projects/p1/files/f1/cells"))
     expect(res?.status).toBe(204)
   })
 

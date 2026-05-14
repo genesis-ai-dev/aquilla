@@ -30,6 +30,8 @@ const FALLBACK_SETTINGS: CompletionSettings = {
   llmHealthPenalty: 0.1,
 }
 
+type CommitCompletedCell = (cell: CellData, text: string, author: string) => Promise<void>
+
 export function useCompletion(
   doc: Y.Doc | null,
   settings: CompletionSettings | undefined,
@@ -38,6 +40,7 @@ export function useCompletion(
   search: SearchFn,
   searchPassages: (query: string, hits?: number, radius?: number) => PassageHit[],
   session: FrontierSession | null = null,
+  commitCompletedCell?: CommitCompletedCell,
 ) {
   const [completing, setCompleting] = useState<Map<string, string>>(new Map())
   const [examples, setExamples] = useState<Map<string, ScoredPair[]>>(new Map())
@@ -108,6 +111,7 @@ export function useCompletion(
           }
         },
       })
+      await commitCompletedCell?.(cell, result, llmAuthor)
       // Collapse the start-of-stream seed into the final entry.
       dropLlmSeedHistory(doc, cell.id, llmAuthor)
       appendCellHistory(doc, cell.id, {
@@ -130,7 +134,7 @@ export function useCompletion(
       setCompleting((p) => new Map(p).set(cell.id, "error"))
       setErrors((p) => new Map(p).set(cell.id, err instanceof Error ? err.message : "Failed"))
     }
-  }, [doc, effectiveSettings, isConfigured, isAvailable, sourceLanguage, targetLanguage, search, session, provider])
+  }, [doc, effectiveSettings, isConfigured, isAvailable, sourceLanguage, targetLanguage, search, session, provider, commitCompletedCell])
 
   // Segmented batch translation: each sub-batch goes out as one <vN>-framed
   // prompt and the response is demuxed back to cells. LLMs translate a passage
@@ -265,6 +269,9 @@ export function useCompletion(
         const text = filledText.get(i + 1)
         dropLlmSeedHistory(doc, cell.id, llmAuthor)
         if (text !== undefined) {
+          if (commitCompletedCell) {
+            await commitCompletedCell(cell, text, llmAuthor)
+          }
           appendCellHistory(doc, cell.id, {
             value: text,
             source: "llm",
@@ -301,7 +308,7 @@ export function useCompletion(
     for (const cell of fallbackQueue) {
       await completeSingle(cell)
     }
-  }, [doc, effectiveSettings, isConfigured, isAvailable, sourceLanguage, targetLanguage, searchPassages, session, provider, completeSingle])
+  }, [doc, effectiveSettings, isConfigured, isAvailable, sourceLanguage, targetLanguage, searchPassages, session, provider, completeSingle, commitCompletedCell])
 
   return { completeSingle, completeBatch, isConfigured, isAvailable, completing, examples, errors }
 }

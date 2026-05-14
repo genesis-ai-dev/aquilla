@@ -13,7 +13,7 @@ import { saveSession } from "./session-store";
 // prod .env should also use the default rather than break network calls.
 export const AUTH_BASE =
   ((import.meta.env.VITE_AUTH_BASE as string | undefined)?.replace(/\/+$/, "")) ||
-  "https://aquilla-prod-frontier-server.blue-darkness-7674.workers.dev";
+  "https://aquilla-frontier-server.blue-darkness-7674.workers.dev";
 
 /** @deprecated FRONTIER_BASE used to point at api.frontierrnd.com; every
  *  runtime call now goes through AUTH_BASE (the frontier-server identity

@@ -28,9 +28,9 @@ export class Dashboard {
     const target = opts.target ?? "fr"
 
     await this.page.getByRole("button", { name: /new project/i }).click()
-    await this.page.getByLabel("Project Name").fill(name)
-    await this.page.getByLabel("Source Language").fill(source)
-    await this.page.getByLabel("Target Language").fill(target)
+    await this.page.getByRole("textbox", { name: "Project Name" }).fill(name)
+    await this.page.getByRole("textbox", { name: "Source Language" }).fill(source)
+    await this.page.getByRole("textbox", { name: "Target Language" }).fill(target)
     await this.page.getByRole("button", { name: "Create Project" }).click()
 
     await expect(this.page.getByText(name)).toBeVisible({ timeout: 5_000 })

@@ -3,7 +3,8 @@
 // The sync-worker is otherwise reached either as a partyserver WebSocket
 // (no preflight needed) or by frontier-server using SYNC_SECRET_KEY
 // (server-to-server, no preflight). The CQRS HTTP routes — /events,
-// /cells/audit-stats, /cell-validators — are the only paths the browser
+// /cells/audit-stats, /cell-validators, and the /api/v1/projects/*
+// read namespace — are the only paths the browser
 // hits cross-origin, so we add CORS headers narrowly here rather than
 // globally to keep partyserver upgrade responses untouched.
 //
@@ -11,7 +12,12 @@
 // `Access-Control-Allow-Origin: *` is safe (and avoids hard-coding a list
 // of frontend origins as the app moves between Vercel previews / local).
 
-const BROWSER_PATH_PREFIXES = ["/events", "/cells/", "/cell-validators"]
+const BROWSER_PATH_PREFIXES = [
+  "/events",
+  "/cells/",
+  "/cell-validators",
+  "/api/v1/projects/",
+]
 
 export function isBrowserCorsPath(pathname: string): boolean {
   return BROWSER_PATH_PREFIXES.some(

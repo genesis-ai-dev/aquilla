@@ -10,7 +10,8 @@ import {
 } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { createProject } from "@/lib/store/project-index"
+import { createProject as createLocalProject } from "@/lib/store/project-index"
+import { createProject as createRemoteProject } from "@aquilla/api-client"
 import type { ProjectRecord } from "@/lib/parsers/types"
 import posthog from "@/lib/posthog"
 import { useAccessibleProjects } from "@/hooks/useAccessibleProjects"
@@ -94,7 +95,7 @@ export function ProjectCreateDialog({ onCreated }: ProjectCreateDialogProps) {
     setLinkError(null)
 
     const id = uuid()
-    const project: ProjectRecord = {
+    let project: ProjectRecord = {
       id,
       name: name.trim(),
       sourceLanguage: sourceLanguage.trim(),
@@ -113,7 +114,22 @@ export function ProjectCreateDialog({ onCreated }: ProjectCreateDialogProps) {
         : {}),
     }
 
-    await createProject(project)
+    if (session?.jwt) {
+      const created = await createRemoteProject(
+        { id: project.id, name: project.name },
+        session.jwt,
+      )
+      project = {
+        ...project,
+        syncRole: {
+          ...created.role,
+          source: created.role.source,
+          fetchedAt: new Date().toISOString(),
+        },
+      }
+    }
+
+    await createLocalProject(project)
     posthog.capture("project created", {
       project_id: project.id,
       project_shape: shape,

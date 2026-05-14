@@ -133,6 +133,9 @@ jobs:
         # exist before wrangler can bind it via [assets] directory.
         if: matrix.app != 'front-door' && matrix.app != 'frontier-server'
         run: pnpm --filter @aquilla/${{ matrix.app }} build
+        env:
+          VITE_AUTH_BASE: https://aquilla-dev-frontier-server.blue-darkness-7674.workers.dev
+          VITE_SYNC_WORKER_HOST: aquilla-sync-worker-staging.blue-darkness-7674.workers.dev
 
       - name: Substitute __PR__ in wrangler.toml
         working-directory: apps/${{ matrix.app }}

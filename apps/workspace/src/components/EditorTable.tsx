@@ -247,7 +247,7 @@ interface EditorTableProps {
   username: string
   /** Called after a successful `target.cell.commit` enqueue so the parent
    *  refetches the cells projection. */
-  onCellCommitted?: () => void
+  onCellCommitted?: () => void | Promise<void>
   /** Map of cellId → presence holder label. When present, the cell editor
    *  goes read-only with an "Alice is editing" banner. */
   cellLockHolders?: ReadonlyMap<string, string>
@@ -716,7 +716,7 @@ interface MemoizedRowProps {
    *  Resolved once per file by the parent (membership look-up) so this prop
    *  is just a stable boolean — preserves the row's React.memo invariant. */
   isStaleSource: boolean
-  onCellCommitted?: () => void
+  onCellCommitted?: () => void | Promise<void>
   lockHolderLabel: string | null
   remoteChangedWhileFocused: boolean
   onClaimCell?: (cellId: string) => void
@@ -960,6 +960,11 @@ function EditorRow({
   const [openRuleId, setOpenRuleId] = useState<string | null>(null)
   const [openRuleAnchor, setOpenRuleAnchor] = useState<HTMLElement | null>(null)
   const [examplesExpanded, setExamplesExpanded] = useState(false)
+  const pendingTargetEventIdRef = useRef<string | null>(cell.targetEventId ?? null)
+
+  useEffect(() => {
+    if (cell.targetEventId) pendingTargetEventIdRef.current = cell.targetEventId
+  }, [cell.targetEventId])
 
   const ruleSeverity = useMemo(() => {
     const m = new Map<string, "major" | "minor">()
@@ -1019,17 +1024,35 @@ function EditorRow({
       projectId: project.id,
       fileId: cell.fileId,
       cellId: cell.id,
-      parentId: cell.targetEventId ?? null,
+      parentId: cell.targetEventId ?? cell.sourceEventId ?? null,
       sourceEventId: cell.sourceEventId ?? null,
       value,
       valueHtml,
       author: username,
-    }).then(() => {
-      onCellCommitted?.()
+    }).then((eventId) => {
+      pendingTargetEventIdRef.current = eventId
+      void onCellCommitted?.()
     }).catch((err) => {
       console.warn("[editor-commit] enqueue failed:", err)
     })
   }, [editable, project.id, cell.fileId, cell.id, cell.targetEventId, cell.sourceEventId, username, onCellCommitted])
+
+  const emitValidationChange = useCallback((validated: boolean) => {
+    const editEventId = cell.targetEventId ?? pendingTargetEventIdRef.current
+    if (!project.id || !editEventId) return
+    const emit = validated ? emitCellValidate : emitCellUnvalidate
+    void emit({
+      projectId: project.id,
+      fileId: cell.fileId,
+      cellId: cell.id,
+      editEventId,
+      author: username,
+    }).then(() => {
+      void onCellCommitted?.()
+    }).catch((err) => {
+      console.warn(`[${validated ? "validate" : "unvalidate"}] emit failed:`, err)
+    })
+  }, [cell.fileId, cell.id, cell.targetEventId, project.id, username, onCellCommitted])
 
   const handleEditorFocus = useCallback(() => {
     onClaimCell?.(cell.id)
@@ -1184,17 +1207,7 @@ function EditorRow({
     if (details.reason === "trigger-press") {
       if (editable && !isSelfValidated) {
         toggleCellValidation(doc, cell.id, username, true)
-        const editEventId = cell.targetEventId ?? null
-        if (project.id && editEventId) {
-          void emitCellValidate({
-            projectId: project.id,
-            fileId: cell.fileId,
-            cellId: cell.id,
-            editEventId,
-            author: username,
-          }).then(() => { onCellCommitted?.() })
-            .catch((err) => console.warn("[validate] emit failed:", err))
-        }
+        emitValidationChange(true)
         details.cancel()
         return
       }
@@ -1283,17 +1296,7 @@ function EditorRow({
                       title="Remove your validation"
                       onClick={() => {
                         toggleCellValidation(doc, cell.id, username, false)
-                        const editEventId = cell.targetEventId ?? null
-                        if (project.id && editEventId) {
-                          void emitCellUnvalidate({
-                            projectId: project.id,
-                            fileId: cell.fileId,
-                            cellId: cell.id,
-                            editEventId,
-                            author: username,
-                          }).then(() => { onCellCommitted?.() })
-                            .catch((err) => console.warn("[unvalidate] emit failed:", err))
-                        }
+                        emitValidationChange(false)
                         setValidationPopoverOpen(false)
                       }}
                     >

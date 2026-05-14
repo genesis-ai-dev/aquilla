@@ -98,6 +98,9 @@ jobs:
 
       - name: Build app
         run: pnpm --filter @aquilla/${{ matrix.app }} build
+        env:
+          VITE_AUTH_BASE: https://aquilla-frontier-server.blue-darkness-7674.workers.dev
+          VITE_SYNC_WORKER_HOST: aquilla-sync-worker.blue-darkness-7674.workers.dev
 
       - name: Deploy
         working-directory: apps/${{ matrix.app }}

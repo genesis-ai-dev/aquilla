@@ -30,7 +30,11 @@ new_sqlite_classes = ["ProjectSync"]
 # Key layout: projects/{projectId}/files/{fileId}/{snapshot.bin,tail/{seq}.bin,checkpoints/{id}.bin}
 [[r2_buckets]]
 binding = "SNAPSHOTS"
-bucket_name = "aquilla-snapshots"
+# TODO: rename to "aquilla-snapshots" once the bucket is provisioned in
+# Cloudflare (manual dashboard action — CF doesn't support in-place
+# bucket renames). Keeping the codex-snapshots name temporarily so prod
+# deploy doesn't fail trying to bind a nonexistent bucket.
+bucket_name = "codex-snapshots"
 # For local `wrangler dev`, wrangler will use a local simulator if the bucket doesn't exist.
 
 # Shared D1 with aquilla-frontier-server. Schema is owned by frontier-server
@@ -88,7 +92,8 @@ new_sqlite_classes = ["ProjectSync"]
 
 [[env.staging.r2_buckets]]
 binding = "SNAPSHOTS"
-bucket_name = "aquilla-snapshots-staging"
+# TODO: rename to "aquilla-snapshots-staging" once provisioned. See top-level r2_buckets above.
+bucket_name = "codex-snapshots-staging"
 
 [[env.staging.d1_databases]]
 binding = "AQUILLA_DB"

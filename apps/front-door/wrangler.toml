@@ -24,7 +24,7 @@ account_id = "6a80496d1e59948a9cbaa3c643ba81d7"
 
 # Top-level (no env flag) defaults to prod for symmetry with the legacy
 # workers. Prefer --env=production / --env=staging / --env=preview.
-routes = ["aquilla.app/*"]
+# routes = ["aquilla.app/*"]  # TODO: uncomment after aquilla.app zone is provisioned in Cloudflare
 
 [vars]
 ENV = "prod"
@@ -35,7 +35,7 @@ ENV = "prod"
 [env.production]
 name = "aquilla-prod-front-door"
 account_id = "6a80496d1e59948a9cbaa3c643ba81d7"
-routes = ["aquilla.app/*"]
+# routes = ["aquilla.app/*"]  # TODO: uncomment after aquilla.app zone is provisioned in Cloudflare
 
 [env.production.vars]
 ENV = "prod"
@@ -46,7 +46,7 @@ ENV = "prod"
 [env.staging]
 name = "aquilla-dev-front-door"
 account_id = "6a80496d1e59948a9cbaa3c643ba81d7"
-routes = ["dev.aquilla.app/*"]
+# routes = ["dev.aquilla.app/*"]  # TODO: uncomment after aquilla.app zone is provisioned in Cloudflare
 
 [env.staging.vars]
 ENV = "preview"
@@ -57,7 +57,7 @@ ENV = "preview"
 [env.preview]
 name = "aquilla-pr-__PR__-front-door"
 account_id = "6a80496d1e59948a9cbaa3c643ba81d7"
-routes = ["pr-__PR__.aquilla.app/*"]
+# routes = ["pr-__PR__.aquilla.app/*"]  # TODO: uncomment after aquilla.app zone is provisioned in Cloudflare
 
 [env.preview.vars]
 ENV = "preview"

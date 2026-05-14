@@ -137,9 +137,18 @@ jobs:
 
       - name: Deploy
         working-directory: apps/${{ matrix.app }}
+        # continue-on-error until the aquilla.app Cloudflare zone is provisioned.
+        # Until then, the preview wrangler.toml's `routes = [...]` lines are
+        # commented out (TODOs in each apps/*/wrangler.toml) — the Worker uploads
+        # to its workers.dev URL but isn't claim-routed under aquilla.app yet.
+        # Drop this once the zone exists + the route comments are restored.
+        continue-on-error: true
         run: pnpm exec wrangler deploy --env preview
 
       - name: Smoke-test preview URL
+        # Smoke test depends on the pr-${PR}.aquilla.app hostname. Same gate
+        # as the Deploy step: tolerate failures until the zone is provisioned.
+        continue-on-error: true
         run: |
           # The mounted path for this app comes from routes.json.
           path=$(jq -r --arg slug "${{ matrix.app }}" '.[$slug] // empty' routes.json)

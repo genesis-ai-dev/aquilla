@@ -1,13 +1,17 @@
-// Fetch short-lived JWTs from the codex-auth-worker's POST /api/v2/sync-token.
-// One token per (projectId, fileId) scope; 15-min TTL. Cache the token in memory
-// and refresh when within 30 s of expiry so reconnects don't race with expiration.
+// Fetch short-lived JWTs from the frontier-server identity worker's
+// POST /api/v2/sync-token. One token per (projectId, fileId) scope; 15-min
+// TTL. Cache the token in memory and refresh when within 30 s of expiry so
+// reconnects don't race with expiration.
 //
 // AUTH_API_URL is the canonical base for every codex-web → backend call now
 // (auth, sync-token, invites, orgs, members, projects, users, health). The
 // legacy frontier-server fallback was removed on 2026-05-13 when these routes
-// were ported into codex-auth-worker.
+// were ported into the codex-web identity worker. Phase 3e then relocated
+// that worker from auth-worker/ to apps/frontier-server/ and renamed the
+// Cloudflare worker from codex-auth-worker to aquilla-frontier-server
+// (prod: aquilla-prod-frontier-server; staging: aquilla-dev-frontier-server).
 
-const AUTH_DEFAULT = "https://codex-auth-worker.blue-darkness-7674.workers.dev"
+const AUTH_DEFAULT = "https://aquilla-prod-frontier-server.blue-darkness-7674.workers.dev"
 
 export const AUTH_API_URL =
   ((import.meta.env.VITE_AUTH_BASE as string | undefined)?.replace(/\/+$/, "")) ||

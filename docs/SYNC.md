@@ -8,7 +8,7 @@ How codex-web-app's Yjs-based sync works, what lives where, and how to run it.
                 ┌──── Frontier JWT ────┐
                 │                      ▼
   ┌──────────┐  │  ┌──────────────┐   ┌────────────────────────┐
-  │ browser  │──┴─▶│ frontier-     │   │ codex-sync-worker      │
+  │ browser  │──┴─▶│ frontier-     │   │ aquilla-sync-worker      │
   │ (codex-  │     │ server        │   │  (CF Worker + DO + R2) │
   │ web-app) │     │  (CF Worker)  │   │                        │
   └────┬─────┘     │  /sync-token  │   │  one DO per file       │
@@ -22,7 +22,7 @@ How codex-web-app's Yjs-based sync works, what lives where, and how to run it.
        │           │ db (D1)      │
        │           └──────────────┘
        │
-       └── WSS ──▶ codex-sync-worker /parties/file-sync/{docId}
+       └── WSS ──▶ aquilla-sync-worker /parties/file-sync/{docId}
 ```
 
 Three services, two D1 databases, one R2 bucket. Everything lives in the
@@ -33,7 +33,7 @@ same Cloudflare account so cross-service calls stay on-network.
 | service                | where                                  | role                                                      |
 |------------------------|----------------------------------------|-----------------------------------------------------------|
 | **codex-web-app**      | this repo (`src/`)                     | React app. Holds Y.Docs + IndexedDB. Fetches sync tokens. |
-| **codex-sync-worker**  | this repo (`sync-worker/`)             | Cloudflare Worker hosting one Durable Object per file.    |
+| **aquilla-sync-worker**  | this repo (`sync-worker/`)             | Cloudflare Worker hosting one Durable Object per file.    |
 | **frontier-server**    | `~/frontierrnd/frontier-server/cloudflare/` | Identity + project + sync-token minting.             |
 
 Share links go through frontier-server's `POST /api/v2/projects/:id/invites`
@@ -55,7 +55,7 @@ worker path unlocks for them. There is no separate signaling relay.
    GitLab fallback), auto-registers the project if it's unknown, then
    mints a 15-min HS256 JWT signed with `SYNC_SECRET_KEY` carrying
    `{userId, projectId, fileId, role, aud: "sync"}`.
-5. Client's YProvider opens a WS to `wss://codex-sync-worker.*.workers.dev/parties/file-sync/{docId}?token=<jwt>`.
+5. Client's YProvider opens a WS to `wss://aquilla-sync-worker.*.workers.dev/parties/file-sync/{docId}?token=<jwt>`.
 6. Sync-worker's `onBeforeConnect` strips any client-supplied role header,
    verifies the JWT, and attaches `X-Codex-Role: <level>` on the request
    passed into the DO.
@@ -80,7 +80,7 @@ worker path unlocks for them. There is no separate signaling relay.
 
 - **`SECRET_KEY`** (frontier-server) signs Frontier access tokens. Never
   leaves frontier-server.
-- **`SYNC_SECRET_KEY`** (shared between frontier-server + codex-sync-worker)
+- **`SYNC_SECRET_KEY`** (shared between frontier-server + aquilla-sync-worker)
   signs sync tokens + authenticates the admin R2-cleanup endpoint on
   sync-worker. A sync-worker compromise cannot forge Frontier access
   tokens. Never committed; set via `wrangler secret put` on both workers.
@@ -158,7 +158,7 @@ npm run dev
 
 Env knobs for the client:
 - `VITE_SYNC_WORKER_HOST` — defaults to `127.0.0.1:8787` in dev,
-  `codex-sync-worker.blue-darkness-7674.workers.dev` in prod builds.
+  `aquilla-sync-worker.blue-darkness-7674.workers.dev` in prod builds.
 - `VITE_FRONTIER_API_URL` — defaults to `https://api.frontierrnd.com`.
 
 ## Tests

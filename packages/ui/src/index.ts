@@ -1,9 +1,17 @@
-// @aquilla/ui — minimal shared primitives. Phase 3c subset; 3b's UI PR
-// expands to the full shadcn surface (Dialog, Popover, ScrollArea, Tooltip…).
-// Consumers should prefer this package over deep imports into src/components/ui/
-// in the workspace SPA — sharing through packages is the AD-11 contract.
+// Aggregate export for `@aquilla/ui`. Per-component sub-paths are also
+// exported in package.json so consumers can tree-shake or pin imports as
+// they prefer.
 
-export { cn } from "./utils"
+export { Button } from "./button"
+export type { ButtonProps } from "./button"
+export { buttonVariants } from "./button-variants"
+
+export { Input } from "./input"
+export type { InputProps } from "./input"
+
+export { Label } from "./label"
+export type { LabelProps } from "./label"
+
 export {
   Card,
   CardHeader,
@@ -12,5 +20,11 @@ export {
   CardContent,
   CardFooter,
 } from "./card"
-export { Skeleton } from "./skeleton"
-export { Button } from "./button"
+
+export { Alert } from "./alert"
+export type { AlertProps } from "./alert"
+
+export { FormRow } from "./form-row"
+export type { FormRowProps } from "./form-row"
+
+export { cn } from "./cn"

@@ -11,14 +11,17 @@ Phase 1B introduced the `apps/` + `packages/` chassis per spec §21-monorepo.md.
 - `packages/<name>/` — shared, versioned concerns. `@aquilla/errors` ships the boot-time `assertEnvBindings()` + `assertNotPreviewInProd()` helpers — every Worker calls them at startup so a preview deploy can't silently bind to prod resources (spec §"Environment binding hygiene").
 - `routes.json` (repo root) — authoritative slug → URL-path registry. Adding an app means editing this file plus dropping a folder under `apps/`.
 - `seed.sql` (repo root) — canonical preview test cast (alice/bob/carol/dave) applied to every per-PR D1 and the shared `aquilla-dev`.
+- **Apps populated (3d shells):** `import`, `export`, `migrate` — placeholder UIs; real logic ships after Phase 2c-β merges.
 
-**Apps populated:** `front-door` (1B), `login`/`signup`/`reset` (3b), `projects`/`billing`/`org` (3c), `frontier-server` (3e — relocated from `auth-worker/`). Remaining stubs: `import`, `export`, `migrate`, `workspace`. The workspace SPA in `src/` remains the running app until Phase 3a fully extracts it into `apps/workspace/`; relocated routes (`/`, `/project/:id/settings`, `/join/:token`, `/onboarding`, `/settings`, `/members`) have been removed from `src/App.tsx` and now live under their discrete-app paths.
+**Apps populated:** `front-door` (1B), `login`/`signup`/`reset` (3b), `projects`/`billing`/`org` (3c), `import`/`export`/`migrate` (3d-min shells), `frontier-server` (3e — relocated from `auth-worker/`), `workspace` (3a-shell — config only; `src/` extraction pending in 3a-final). The workspace SPA in `src/` remains the running app until 3a-final fully extracts it into `apps/workspace/src/`; relocated routes (`/`, `/project/:id/settings`, `/join/:token`, `/onboarding`, `/settings`, `/members`) have been removed from `src/App.tsx` and now live under their discrete-app paths.
 
-**Packages populated:** `@aquilla/errors` (1B), `@aquilla/api-client` (3c — `fetchProjectList`, `fetchProject`, `fetchProjectMembers`, `fetchUserOrgs`, `fetchOrgMembers`, invite primitives), `@aquilla/auth-client` (3c minimal stub — `getJwt`/`decodeUsername`/`redirectToLogin`; 3b's PR replaces with the full implementation), `@aquilla/ui` (3c minimal subset — `Card`, `Skeleton`, `Button`; 3b's PR adds the full shadcn surface).
+**Packages populated:** `@aquilla/errors` (1B), `@aquilla/data-model` + `@aquilla/telemetry` (#85), `@aquilla/auth-client` + `@aquilla/ui` (3b — full implementations), `@aquilla/api-client` (3c — `fetchProjectList`, `fetchProject`, `fetchProjectMembers`, `fetchUserOrgs`, `fetchOrgMembers`, invite primitives).
+
+Each populated app is a Vite SPA served by a Cloudflare Worker with a Workers Assets binding. The Worker script under `src/worker.ts` adds boot-time env-binding assertions (`@aquilla/errors`) + baseline security headers; the SPA lives in `dist/` and routes client-side under its mounted basename (`/login`, `/signup`, `/reset`, `/projects`, etc.). Build-time `VITE_AUTH_BASE` controls the identity-service host.
 
 Cross-app auth state assumption: the JWT lives in a parent-domain cookie (`aquilla_jwt` on `.aquilla.app`, `.dev.aquilla.app`, `.pr-<N>.aquilla.app`) so every discrete app under aquilla.app reads the same session. On localhost the login app writes `localStorage['aquilla:dev-jwt']` instead (no parent domain available for cookies).
 
-Existing top-level workers (`sync-worker/`, `chat-worker/`, `cors-proxy/`) stay put until Phase 4's rename pass.
+Existing top-level workers (`sync-worker/`, `chat-worker/`, `cors-proxy/`) stay put until Phase 4's rename pass; Phase 4 partial already renamed the worker NAMES (codex-sync-worker → aquilla-sync-worker etc.) but the directory paths are preserved.
 
 ## Project Overview
 
@@ -161,28 +164,28 @@ React 19 + Tailwind v4 (via `@tailwindcss/vite`) + shadcn/ui (`components.json`,
 Phase 2 migrates the client off Y.Doc reads onto the sync-worker's D1 projection (per Aquilla spec AD-2 / AD-3 v1 thin client). Status as of phase 2b:
 
 - **Reads** — every read-side hook is server-backed. The pattern is locked-in: a domain-specific `*-read.ts` + `*-read-types.ts` under `src/lib/sync/`, exposing a `fetchX(...)` wrapper that throws an `XReadError` on non-2xx; hooks wrap the fetcher with a vanilla useState + race-guarded effect (no React Query, no SWR). Phase 2a migrated `useCells`; Phase 2b migrated the remaining read hooks.
-- **Phase 2b additions** — fetch wrappers: `history-read.ts` (per-cell event chain), `search-read.ts` (project FTS5), `projects-read.ts` (auth-worker project list + detail), `members-read.ts`, `settings-read.ts`, `orgs-read.ts`. Hooks rewritten or aligned: `useCellHistory` (new read-side hook; old write helpers in the same file are untouched, Phase 2c rewrites them), `useCellEditHistory` (drops React Query; uses the new history wrapper; gains a required `projectId` prop wired through `HistoryDrawer`), `useCellValidators`, `useCellsAuditStats`, `useFileMeta` (Y.Doc → localStorage), `useWorkspaceSearch` (server FTS5). Hook stubs (`// Phase 2b: <concept> dropped from v1 event grammar`): `useComments`, `useCellWaivers`. New `useSync` reports a static online/connected state until Phase 2c wires the real WS reconciler. `useFileSync` is also stubbed (peers: [], provider: null, status: "live"); the TipTap editor's `syncProvider` prop is therefore always null on dev. `useFileDoc` is a shim that hands out a fresh in-memory Y.Doc per fileId — no IDB, no R2 — so the TipTap editor compiles unchanged until Phase 2c rips the Y.Doc dep out.
+- **Phase 2b additions** — fetch wrappers: `history-read.ts` (per-cell event chain), `search-read.ts` (project FTS5), `projects-read.ts` (frontier-server project list + detail), `members-read.ts`, `settings-read.ts`, `orgs-read.ts`. Hooks rewritten or aligned: `useCellHistory` (new read-side hook; old write helpers in the same file are untouched, Phase 2c rewrites them), `useCellEditHistory` (drops React Query; uses the new history wrapper; gains a required `projectId` prop wired through `HistoryDrawer`), `useCellValidators`, `useCellsAuditStats`, `useFileMeta` (Y.Doc → localStorage), `useWorkspaceSearch` (server FTS5). Hook stubs (`// Phase 2b: <concept> dropped from v1 event grammar`): `useComments`, `useCellWaivers`. New `useSync` reports a static online/connected state until Phase 2c wires the real WS reconciler. `useFileSync` is also stubbed (peers: [], provider: null, status: "live"); the TipTap editor's `syncProvider` prop is therefore always null on dev. `useFileDoc` is a shim that hands out a fresh in-memory Y.Doc per fileId — no IDB, no R2 — so the TipTap editor compiles unchanged until Phase 2c rips the Y.Doc dep out.
 - **New sync-worker routes (Phase 2b):**
   - `GET /api/v1/projects/:projectId/files/:fileId/cells/:cellId/history` → cell event chain, newest first.
   - `GET /api/v1/projects/:projectId/search?q=&side=&limit=` → FTS5 over `cells_fts`, project-scoped.
 - **Still Y.Doc-bound:** the TipTap editor (`@tiptap/extension-collaboration`), `src/lib/store/file-doc.ts`, parsers/import pipeline, all write paths (cell commits, edits, comments, snapshots). Phase 2c handles writes + finally deletes Y.Doc. Search-side concepts dropped from the v1 event grammar — comments and cell-waivers — return empty data from the stub hooks; future v1.x features.
-- **Project-index IDB** still lives in `src/lib/store/project-index.ts` for write callers that Phase 2c will migrate; reads happen through the auth-worker. The hook layer (`useProject`) overlays auth-worker project + settings onto whatever local stub remains.
+- **Project-index IDB** still lives in `src/lib/store/project-index.ts` for write callers that Phase 2c will migrate; reads happen through frontier-server. The hook layer (`useProject`) overlays frontier-server project + settings onto whatever local stub remains.
 - **Writes still go through Y.Doc** until Phase 2c. After a known write, callers should invoke `revalidate()` so the projection re-loads. `revalidate()` is best-effort: a write that lands in the local Y.Doc but hasn't propagated to the server's projection won't show up on refetch. Phase 2c replaces Y.Doc writes with the AD-3 outbox + cell-event POSTs and removes Y.Doc entirely.
 - **New sync-worker read routes** (added 2a; mounted in `sync-worker/src/index.ts`):
   - `GET /api/v1/projects/:projectId/files` → list with cell/word/last-edit rollups
   - `GET /api/v1/projects/:projectId/files/:fileId` → single file row
   - `GET /api/v1/projects/:projectId/files/:fileId/cells?side=&limit=&cursor=` → cells in anchor-chain order (AD-2). When `side` is omitted, the response carries both source and target rows; the client pairs by `cell_id` (AD-9).
-  - All three auth with a sync-token JWT (`Authorization: Bearer …`) scoped to `:projectId`. Membership is implicit in the JWT — auth-worker only mints tokens for project members.
+  - All three auth with a sync-token JWT (`Authorization: Bearer …`) scoped to `:projectId`. Membership is implicit in the JWT — frontier-server only mints tokens for project members.
 
 ## Backend stack
 
-Codex-web hosts its own Cloudflare Workers in this repo, independent of the older `frontier-server` (which keeps serving the codex-editor VS Code extension):
+Codex-web hosts its own Cloudflare Workers in this repo, independent of the older `frontier-server` repo (which keeps serving the codex-editor VS Code extension):
 
-- **`auth-worker/`** — `/api/v2/auth/*`, `/api/v2/sync-token`, `/api/v2/projects/*invites*`. Writes to D1 `frontier-db-v2` (shared user table with the old frontier-server, but JWTs sign with codex-web's own `SECRET_KEY`).
-- **`chat-worker/`** — `/api/v1/chat/completions`. Authenticated OpenRouter proxy. No billing.
-- **`sync-worker/`** — realtime collab DOs (one per file). Persists Y.Doc snapshots/tails to R2 (`codex-snapshots`); projects flat row state to D1 (`codex-db`). Also hosts `/audio/*` for cell-audio storage.
+- **`apps/frontier-server/`** — `/api/v2/auth/*`, `/api/v2/sync-token`, `/api/v2/users/*`, `/api/v2/orgs/*`, `/api/v2/projects/*` (incl. invites + settings + source-linking), `/api/v2/invites/*`. Identity service per AD-5; mounted under `/api/identity/*` once the aquilla.app zone is provisioned (routes.json). Worker name `aquilla-frontier-server` (prod: `aquilla-prod-frontier-server`; staging: `aquilla-dev-frontier-server`). Writes to D1 `aquilla-db` (its own schema; not shared with the legacy `frontier-db-v2`). Relocated from top-level `auth-worker/` in Phase 3e (AD-11).
+- **`chat-worker/`** — `/api/v1/chat/completions`. Authenticated OpenRouter proxy. No billing. Phase 4 renamed the worker to `aquilla-chat-worker`; the source dir keeps its `chat-worker/` name until a later phase.
+- **`sync-worker/`** — realtime collab DOs (one per file). Persists Y.Doc snapshots/tails to R2 (`aquilla-snapshots`); projects flat row state to D1 (`aquilla-db`, same database as frontier-server but writer-only against `files`/`cells`/`events`/etc.). Also hosts `/audio/*` for cell-audio storage. Phase 4 renamed the worker to `aquilla-sync-worker`; the source dir keeps its `sync-worker/` name until a later phase.
 
-Each worker has a `[env.staging]` block pointing at staging-suffixed resources (`frontier-db-v2-staging`, `codex-db-staging`, `codex-snapshots-staging`). Production and staging share zero data.
+Each worker has a `[env.staging]` block pointing at staging-suffixed resources (`aquilla-db-staging`, `aquilla-snapshots-staging`). `apps/frontier-server/` additionally has an `[env.preview]` block (per-PR; `aquilla-pr-<N>-frontier-server`) that CI substitutes `__PR__` into. Production and staging share zero data.
 
 The frontend wires worker URLs via build-time env vars: `VITE_AUTH_BASE`, `VITE_CHAT_BASE`, `VITE_SYNC_WORKER_HOST`. The deploy workflow injects prod vs staging hosts based on the branch.
 
@@ -193,7 +196,7 @@ Five workflows in `.github/workflows/`:
 | Workflow | Trigger paths |
 |---|---|
 | `deploy.yml` (Pages) | all paths except `**.md`, `docs/**` |
-| `deploy-workers.yml` | `sync-worker/**`, `auth-worker/**`, `chat-worker/**` |
+| `deploy-workers.yml` | `sync-worker/**`, `apps/frontier-server/**`, `chat-worker/**` |
 | `pr-db-fork.yml` | `sync-worker/migrations/**.sql` only |
 | `pr-db-cleanup.yml` | `sync-worker/migrations/**.sql` only (PR-close event) |
 | `web-ci.yml` | every PR push (no path filter) |

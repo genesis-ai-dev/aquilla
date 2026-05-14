@@ -2,15 +2,33 @@ import type { ReactNode } from "react"
 import { X } from "lucide-react"
 import type { ProjectRecord } from "@/lib/parsers/types"
 import { OverflowMenu, type OverflowMenuItem } from "./OverflowMenu"
+import { SourceProjectBadge } from "./SourceProjectBadge"
 
 interface Props {
   project: ProjectRecord
   onBack: () => void
   children?: ReactNode
   extraMenuItems?: OverflowMenuItem[]
+  /** AD-9 (Phase 5): when this project is a linked-target, the upstream
+   *  source project's id and (optional) name. The header renders a small
+   *  badge next to the language pair. Null → renders nothing.
+   *
+   *  Threaded as a prop rather than derived inside the header so the
+   *  workspace owner decides when the link state is "ready" (after the
+   *  /api/v2/projects fetch settles) and avoids a flash of unstyled
+   *  state during initial hydrate. */
+  sourceProjectId?: string | null
+  sourceProjectName?: string
 }
 
-export function WorkspaceHeader({ project, onBack, children, extraMenuItems }: Props) {
+export function WorkspaceHeader({
+  project,
+  onBack,
+  children,
+  extraMenuItems,
+  sourceProjectId,
+  sourceProjectName,
+}: Props) {
   const items: OverflowMenuItem[] = [
     { id: "close", label: "Close project", icon: X, onClick: onBack },
     ...(extraMenuItems ?? []),
@@ -32,6 +50,15 @@ export function WorkspaceHeader({ project, onBack, children, extraMenuItems }: P
             <span className="text-muted-foreground truncate">
               {project.sourceLanguage || "?"} → {project.targetLanguage || "?"}
             </span>
+          </>
+        )}
+        {(sourceProjectId ?? project.sourceProjectId) && (
+          <>
+            <span className="text-muted-foreground">·</span>
+            <SourceProjectBadge
+              sourceProjectId={sourceProjectId ?? project.sourceProjectId ?? null}
+              sourceProjectName={sourceProjectName ?? project.sourceProjectName}
+            />
           </>
         )}
       </nav>

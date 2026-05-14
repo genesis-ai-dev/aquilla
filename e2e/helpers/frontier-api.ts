@@ -1,5 +1,5 @@
 /**
- * Thin HTTP client for codex-auth-worker, used by E2E specs to set up
+ * Thin HTTP client for frontier-server, used by E2E specs to set up
  * server-side state (projects, org members, project members) without
  * driving brittle UI flows.
  *

@@ -2,9 +2,9 @@
   "name": "@aquilla/workspace",
   "private": true,
   "version": "0.0.0",
-  "description": "Aquilla workspace app — stub (Phase 1B). Populated in Phase 3.",
+  "description": "Aquilla workspace SPA (editor + copilot + comments + validation + search + sync + presence). AD-11's deliberate SPA exception. Shell only at this stage — src/ extraction + real deps come in 3a-final after Phase 2c-β merges.",
   "scripts": {
-    "build": "echo 'stub — populated in Phase 3'",
-    "deploy": "echo 'stub — populated in Phase 3'"
+    "build": "echo 'stub — src/ + deps populated in Phase 3a-final'",
+    "deploy": "echo 'stub — populated in Phase 3a-final'"
   }
 }

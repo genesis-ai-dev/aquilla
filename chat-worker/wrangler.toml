@@ -1,22 +1,22 @@
-name = "codex-chat-worker"
+name = "aquilla-chat-worker"
 main = "src/index.ts"
 compatibility_date = "2024-12-01"
 compatibility_flags = ["nodejs_compat"]
 account_id = "6a80496d1e59948a9cbaa3c643ba81d7"
 
 # Authenticated proxy to OpenRouter for codex-web's LLM completion route.
-# Verifies a frontier-style JWT (HS256, shared SECRET_KEY with codex-auth-worker
-# and the legacy frontier-server) against frontier-db-v2's `users` table, then
-# forwards the request to OpenRouter. No billing / usage tracking lives here —
-# codex-web doesn't need it, and keeping the worker small keeps the surface
-# area easy to reason about.
+# Verifies a frontier-style JWT (HS256, shared SECRET_KEY with
+# aquilla-frontier-server and the legacy frontier-server) against
+# frontier-db-v2's `users` table, then forwards the request to OpenRouter.
+# No billing / usage tracking lives here — codex-web doesn't need it, and
+# keeping the worker small keeps the surface area easy to reason about.
 [[d1_databases]]
 binding = "AUTH_DB"
 database_name = "frontier-db-v2"
 database_id = "9c6abd81-01c3-44ce-9d93-9dfa1c7e1086"
 
 # Secrets (provisioned via `wrangler secret put`, never committed):
-#   SECRET_KEY        — frontier JWT signing key. MUST match codex-auth-worker
+#   SECRET_KEY        — frontier JWT signing key. MUST match aquilla-frontier-server
 #                       (and the legacy frontier-server) so a single Bearer
 #                       token works against both.
 #   OPENROUTER_API_KEY — forwarded as Authorization: Bearer to OpenRouter.
@@ -38,7 +38,7 @@ ENVIRONMENT = "production"
 # testing (set via `wrangler secret put --env staging`).
 # ---------------------------------------------------------------------------
 [env.staging]
-name = "codex-chat-worker-staging"
+name = "aquilla-chat-worker-staging"
 account_id = "6a80496d1e59948a9cbaa3c643ba81d7"
 
 [[env.staging.d1_databases]]

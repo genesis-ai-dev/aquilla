@@ -1,4 +1,4 @@
-// codex-chat-worker — authenticated proxy to OpenRouter for codex-web.
+// aquilla-chat-worker — authenticated proxy to OpenRouter for codex-web.
 //
 // Hosts the single route the codex-web frontend needs:
 //   POST /api/v1/chat/completions
@@ -42,7 +42,7 @@ app.use("*", async (c, next) => {
 
 app.get("/", (c) =>
   c.json({
-    name: "codex-chat-worker",
+    name: "aquilla-chat-worker",
     routes: ["/api/v1/chat/completions"],
   }),
 )

@@ -1,4 +1,4 @@
-import { GitBranch, MoreVertical, Trash2, Undo2 } from "lucide-react"
+import { GitBranch, Link2, MoreVertical, Trash2, Undo2 } from "lucide-react"
 import type { ProjectRecord } from "@/lib/parsers/types"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
@@ -94,6 +94,18 @@ export function ProjectCard({
             {isGit && (
               <span className="inline-flex items-center gap-1 rounded-full border bg-muted px-2 py-0.5 text-[10px] font-medium text-muted-foreground">
                 <GitBranch className="h-3 w-3" /> git
+              </span>
+            )}
+            {!isTrashed && project.sourceProjectId && (
+              <span
+                className="inline-flex items-center gap-1 rounded-full border bg-muted px-2 py-0.5 text-[10px] font-medium text-muted-foreground"
+                title={
+                  project.sourceProjectName
+                    ? `Linked to source: ${project.sourceProjectName}`
+                    : "Linked to an upstream source project"
+                }
+              >
+                <Link2 className="h-3 w-3" /> linked
               </span>
             )}
             {!isTrashed && canTrash && onTrash && (

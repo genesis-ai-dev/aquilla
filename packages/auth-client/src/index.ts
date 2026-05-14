@@ -1,87 +1,240 @@
-// @aquilla/auth-client — parent-domain JWT cookie reader.
+// Auth client for apps/login, apps/signup, apps/reset (Phase 3b).
 //
-// CONTRACT (AD-11 navigation handoff): the auth JWT lives in a cookie
-// scoped to the parent domain so every discrete app under aquilla.app
-// reads the same value. The login app (apps/login/) is the only writer.
+// Wraps the identity-service REST endpoints currently served by
+// auth-worker (`/api/v2/auth/*`). The auth-worker is being renamed to
+// `aquilla-frontier-server` in Phase 3e, but every callsite goes through
+// `VITE_AUTH_BASE`, so flipping the env var at deploy time is the only
+// change required when the rename lands.
 //
-// COOKIE ASSUMPTIONS:
-//   - cookie name:    aquilla_jwt
-//   - prod domain:    .aquilla.app
-//   - staging domain: .dev.aquilla.app
-//   - preview domain: .pr-<N>.aquilla.app  (set by the per-PR auth-worker)
-//   - dev localhost:  no cookie writeable (no parent-domain on `localhost`);
-//                     login app writes localStorage['aquilla:dev-jwt'] instead.
-//
-// NOTE (Phase 3c): this is a pre-3b minimal stub so the projects/billing/org
-// apps can compile and run. 3b's auth-client PR replaces this with the full
-// implementation (login/logout side, refresh-token handling, useFrontierSession
-// hook, etc). Keep the signature surface stable so the swap doesn't break
-// every consumer; in particular: `getJwt(): string | null` and
-// `decodeUsername(jwt): string | null` are the load-bearing exports.
+// All HTTP plumbing here follows the same `readJson`/`AuthClientError`
+// pattern as `src/lib/sync/*-read.ts` so callers can `instanceof`-narrow on
+// the error and surface the server's response body verbatim.
 
-const COOKIE_NAME = "aquilla_jwt"
-const DEV_LOCALSTORAGE_KEY = "aquilla:dev-jwt"
+import { setJwt, getJwt, clearJwt } from "./cookie"
 
-function readCookie(name: string): string | null {
-  if (typeof document === "undefined") return null
-  const prefix = `${name}=`
-  for (const raw of document.cookie.split(";")) {
-    const trimmed = raw.trim()
-    if (trimmed.startsWith(prefix)) {
-      return decodeURIComponent(trimmed.slice(prefix.length))
+export { setJwt, getJwt, clearJwt, COOKIE_NAME } from "./cookie"
+export { deriveCookieDomain } from "./cookie"
+
+// ---------------------------------------------------------------------------
+// Base URL resolution
+// ---------------------------------------------------------------------------
+
+// Vite-style env access. `import.meta.env` is undefined under Node/vitest
+// happy-dom unless someone stubs it; treat the lookup as best-effort and
+// fall back to the prod auth-worker.
+//
+// `||` (not `??`) so empty-string values fall back too — matches the
+// existing src/lib/frontier/auth.ts convention so tests can pass `""` to
+// simulate "unset".
+function readBase(): string {
+  // import.meta.env is the Vite shape; tests may stub it on the module.
+  const meta = (import.meta as { env?: Record<string, string | undefined> })
+    .env
+  const base = meta?.VITE_AUTH_BASE
+  const trimmed = base ? base.replace(/\/+$/, "") : ""
+  return (
+    trimmed ||
+    "https://codex-auth-worker.blue-darkness-7674.workers.dev"
+  )
+}
+
+export const AUTH_BASE = readBase()
+
+// ---------------------------------------------------------------------------
+// Errors + helpers
+// ---------------------------------------------------------------------------
+
+export class AuthClientError extends Error {
+  status: number
+  body: string
+  /** Parsed JSON body if the response was JSON; null otherwise. */
+  detail: { detail?: string; error?: string; message?: string } | null
+
+  constructor(
+    status: number,
+    body: string,
+    detail: { detail?: string; error?: string; message?: string } | null,
+  ) {
+    const friendly =
+      detail?.detail ||
+      detail?.error ||
+      detail?.message ||
+      `auth-client failed: HTTP ${status}`
+    super(friendly)
+    this.name = "AuthClientError"
+    this.status = status
+    this.body = body
+    this.detail = detail
+  }
+}
+
+async function readJson<T>(res: Response): Promise<T> {
+  if (!res.ok) {
+    const body = await res.text().catch(() => "")
+    let detail: AuthClientError["detail"] = null
+    try {
+      detail = body ? (JSON.parse(body) as typeof detail) : null
+    } catch {
+      detail = null
     }
+    throw new AuthClientError(res.status, body, detail)
   }
-  return null
+  return (await res.json()) as T
 }
 
-function readDevJwt(): string | null {
-  if (typeof window === "undefined") return null
-  try {
-    return window.localStorage.getItem(DEV_LOCALSTORAGE_KEY)
-  } catch {
-    return null
-  }
+interface AuthResponse {
+  access_token: string
+  token_type: string
 }
 
-/** Return the current JWT or null. Reads cookie first, falls back to the
- *  dev-localStorage key for localhost. Apps must accept null and route to
- *  /login/?return=<current-url>. */
-export function getJwt(): string | null {
-  return readCookie(COOKIE_NAME) ?? readDevJwt()
+// ---------------------------------------------------------------------------
+// Public API
+// ---------------------------------------------------------------------------
+
+export interface LoginArgs {
+  /** Server accepts either username or email in this field. */
+  usernameOrEmail: string
+  password: string
 }
 
-/** Decode the username claim (no signature verification — UI only). */
-export function decodeUsername(jwt: string): string | null {
-  try {
-    const payload = jwt.split(".")[1]
-    if (!payload) return null
-    const padded = payload.padEnd(payload.length + ((4 - (payload.length % 4)) % 4), "=")
-    const json = JSON.parse(atob(padded.replace(/-/g, "+").replace(/_/g, "/")))
-    return typeof json.username === "string" ? json.username : null
-  } catch {
-    return null
-  }
-}
-
-/** Bounce to apps/login/ with a return URL so the user lands back here. */
-export function redirectToLogin(): void {
-  if (typeof window === "undefined") return
-  const here = window.location.href
-  window.location.assign(`/login/?return=${encodeURIComponent(here)}`)
-}
-
-/** A minimal "session" shape — mirrors `useFrontierSession()` from
- *  src/hooks/useFrontierSession.ts so consumer code can be ported with a
- *  one-line import swap. */
-export interface FrontierSession {
+export interface LoginResult {
   jwt: string
-  username: string | null
+  username: string
 }
 
-/** Read-once accessor. Apps that need reactivity should poll on mount or
- *  rely on the full hook in @aquilla/auth-client once 3b lands. */
-export function getSession(): FrontierSession | null {
-  const jwt = getJwt()
-  if (!jwt) return null
-  return { jwt, username: decodeUsername(jwt) }
+/**
+ * POST /api/v2/auth/token. On success, also writes the JWT to the parent-
+ * domain cookie so other apps on the same parent domain can read it.
+ */
+export async function login(
+  args: LoginArgs,
+  base: string = AUTH_BASE,
+): Promise<LoginResult> {
+  const res = await fetch(`${base}/api/v2/auth/token`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      username: args.usernameOrEmail,
+      password: args.password,
+    }),
+  })
+  const data = await readJson<AuthResponse>(res)
+  setJwt(data.access_token)
+  return { jwt: data.access_token, username: args.usernameOrEmail }
+}
+
+export interface SignupArgs {
+  username: string
+  email: string
+  password: string
+}
+
+export interface SignupResult {
+  jwt: string
+  username: string
+}
+
+/**
+ * POST /api/v2/auth/register. The legacy `displayName` notion isn't
+ * supported by the auth-worker today — we surface `username` + `email` and
+ * leave display-name fields for a future settings flow.
+ */
+export async function signup(
+  args: SignupArgs,
+  base: string = AUTH_BASE,
+): Promise<SignupResult> {
+  const res = await fetch(`${base}/api/v2/auth/register`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(args),
+  })
+  const data = await readJson<AuthResponse>(res)
+  setJwt(data.access_token)
+  return { jwt: data.access_token, username: args.username }
+}
+
+/**
+ * POST /api/v2/auth/password-reset/request. The server intentionally
+ * always returns 200 (never discloses whether the email is registered);
+ * we resolve to void on any 2xx.
+ */
+export async function requestPasswordReset(
+  email: string,
+  base: string = AUTH_BASE,
+): Promise<void> {
+  const res = await fetch(`${base}/api/v2/auth/password-reset/request`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email }),
+  })
+  await readJson<{ message: string }>(res)
+}
+
+export interface SubmitPasswordResetArgs {
+  token: string
+  /**
+   * The username the token is bound to. Reset links carry both `token` and
+   * `username` query params (see auth-worker `/password-reset/request`),
+   * and the server enforces the binding.
+   */
+  username: string
+  newPassword: string
+}
+
+/**
+ * POST /api/v2/auth/password-reset/reset. Note: the auth-worker route is
+ * literally `/reset`, not `/submit` — the spec's "submit" name is mapped
+ * here to keep callers reading nicely.
+ */
+export async function submitPasswordReset(
+  args: SubmitPasswordResetArgs,
+  base: string = AUTH_BASE,
+): Promise<void> {
+  const res = await fetch(`${base}/api/v2/auth/password-reset/reset`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      token: args.token,
+      username: args.username,
+      new_password: args.newPassword,
+    }),
+  })
+  await readJson<{ message: string }>(res)
+}
+
+/**
+ * POST /api/v2/auth/password-reset/verify. Returns true if the reset
+ * token is still valid; false on any 4xx. Lets the reset app surface
+ * "this link is expired" before showing the password form.
+ */
+export async function verifyPasswordResetToken(
+  args: { token: string; username: string },
+  base: string = AUTH_BASE,
+): Promise<boolean> {
+  const res = await fetch(`${base}/api/v2/auth/password-reset/verify`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(args),
+  })
+  if (res.ok) return true
+  if (res.status >= 400 && res.status < 500) return false
+  // 5xx → real error; surface it.
+  const body = await res.text().catch(() => "")
+  throw new AuthClientError(res.status, body, null)
+}
+
+/**
+ * Clears the JWT cookie. Apps that need to fully drop server-side state
+ * should additionally call any per-app cleanup; this function is the
+ * minimum "user is no longer authenticated in this browser" surface.
+ */
+export function logout(): void {
+  clearJwt()
+}
+
+/**
+ * Best-effort accessor for the current JWT (cookie read).
+ */
+export function currentJwt(): string | null {
+  return getJwt()
 }

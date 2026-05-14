@@ -1,10 +1,10 @@
-name = "codex-sync-worker"
+name = "aquilla-sync-worker"
 main = "src/index.ts"
 compatibility_date = "2024-12-01"
 compatibility_flags = ["nodejs_compat"]
 
-# Same CF account as codex-auth-worker. Pinned so `wrangler deploy` doesn't
-# prompt interactively and lands on the wrong account by accident.
+# Same CF account as aquilla-frontier-server. Pinned so `wrangler deploy`
+# doesn't prompt interactively and lands on the wrong account by accident.
 account_id = "6a80496d1e59948a9cbaa3c643ba81d7"
 
 # y-partyserver wires one Durable Object per file (room name = fileId).
@@ -30,23 +30,28 @@ new_sqlite_classes = ["ProjectSync"]
 # Key layout: projects/{projectId}/files/{fileId}/{snapshot.bin,tail/{seq}.bin,checkpoints/{id}.bin}
 [[r2_buckets]]
 binding = "SNAPSHOTS"
+# TODO: rename to "aquilla-snapshots" once the bucket is provisioned in
+# Cloudflare (manual dashboard action — CF doesn't support in-place
+# bucket renames). Keeping the codex-snapshots name temporarily so prod
+# deploy doesn't fail trying to bind a nonexistent bucket.
 bucket_name = "codex-snapshots"
 # For local `wrangler dev`, wrangler will use a local simulator if the bucket doesn't exist.
 
-# Shared D1 with codex-auth-worker. Schema is owned by auth-worker
-# (auth-worker/migrations/0001_initial.sql); sync-worker is a writer-only
-# against the `files`, `cells`, `events`, `cell_validators`, `checkpoints`
-# tables. Migration application happens via auth-worker's deploy step.
+# Shared D1 with aquilla-frontier-server. Schema is owned by frontier-server
+# (apps/frontier-server/migrations/0001_initial.sql); sync-worker is a writer-
+# only against the `files`, `cells`, `events`, `cell_validators`,
+# `checkpoints` tables. Migration application happens via frontier-server's
+# deploy step.
 [[d1_databases]]
 binding = "AQUILLA_DB"
 database_name = "aquilla-db"
 # database_id is populated by `wrangler d1 create aquilla-db` — must match
-# auth-worker/wrangler.toml.
+# apps/frontier-server/wrangler.toml.
 database_id = "11828e9d-998b-4d3f-a405-91d9f624f94a"
 
 # Auth:
-#   SYNC_SECRET_KEY (shared with codex-auth-worker for sync-token JWT
-#   signing — distinct from auth-worker's main SECRET_KEY) and
+#   SYNC_SECRET_KEY (shared with aquilla-frontier-server for sync-token JWT
+#   signing — distinct from frontier-server's main SECRET_KEY) and
 #   ALLOW_UNAUTHENTICATED live in .dev.vars for local dev (see
 #   .dev.vars.example) and are provisioned via `wrangler secret put` in
 #   production. Deploying with neither set means strict auth (reject all
@@ -56,9 +61,9 @@ database_id = "11828e9d-998b-4d3f-a405-91d9f624f94a"
 
 # ---------------------------------------------------------------------------
 # Staging environment — physically separate D1, R2, DO namespace.
-# Auth model unchanged: same SYNC_SECRET_KEY as prod, same auth-worker
+# Auth model unchanged: same SYNC_SECRET_KEY as prod, same frontier-server
 # issues sync-tokens. A logged-in user can use the staging frontend and
-# their writes land in codex-staging / codex-snapshots-staging, leaving
+# their writes land in aquilla-staging / aquilla-snapshots-staging, leaving
 # prod data untouched.
 #
 # Deploy: `wrangler deploy --env staging` (CI does this on push to dev).
@@ -66,7 +71,7 @@ database_id = "11828e9d-998b-4d3f-a405-91d9f624f94a"
 #   `wrangler secret put SYNC_SECRET_KEY --env staging`
 # ---------------------------------------------------------------------------
 [env.staging]
-name = "codex-sync-worker-staging"
+name = "aquilla-sync-worker-staging"
 account_id = "6a80496d1e59948a9cbaa3c643ba81d7"
 
 [[env.staging.durable_objects.bindings]]
@@ -87,6 +92,7 @@ new_sqlite_classes = ["ProjectSync"]
 
 [[env.staging.r2_buckets]]
 binding = "SNAPSHOTS"
+# TODO: rename to "aquilla-snapshots-staging" once provisioned. See top-level r2_buckets above.
 bucket_name = "codex-snapshots-staging"
 
 [[env.staging.d1_databases]]

@@ -1,10 +1,10 @@
-// Typed fetch wrappers for auth-worker project read endpoints (Phase 2b).
+// Typed fetch wrappers for frontier-server project read endpoints (Phase 2b).
 //
 // Pattern follows `cells-read.ts` (Phase 2a): an authoritative JWT is passed
 // in by the caller; failures throw `ProjectsReadError` with the HTTP status
 // and body.
 //
-// The auth-worker also hosts the older legacy wrappers in
+// frontier-server also hosts the older legacy wrappers in
 // `src/lib/sync/cloud-projects.ts` and `src/lib/frontier/*` — those return
 // null on 403/404 rather than throwing. We keep them as-is for callers that
 // rely on the silent-failure semantics; this file is for the strict variant
@@ -76,7 +76,7 @@ export async function fetchProjectList(
 /**
  * Alias of {@link fetchProjectList}. Kept under the spec-named export so
  * callers reading the spec map straight to the right wrapper. Server-side,
- * "accessible" === "listed by GET /projects" — auth-worker filters by
+ * "accessible" === "listed by GET /projects" — frontier-server filters by
  * project_members / org_members / creator on the calling user.
  */
 export async function fetchAccessibleProjects(

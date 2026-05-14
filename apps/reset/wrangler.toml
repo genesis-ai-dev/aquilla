@@ -35,6 +35,10 @@ VITE_AUTH_BASE = "https://api.aquilla.app/api/identity"
 directory = "./dist"
 binding = "ASSETS"
 not_found_handling = "single-page-application"
+# Run the Worker first for the index.html-shaped paths so we can
+# override Cache-Control on the SPA shell. Hashed asset requests still
+# go direct via Workers Assets (fast).
+run_worker_first = ["/reset/*", "!/reset/assets/*"]
 
 # ---------------------------------------------------------------------------
 # Staging — `wrangler deploy --env staging`

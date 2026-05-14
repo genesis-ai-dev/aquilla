@@ -1,0 +1,10 @@
+{
+  "name": "@aquilla/auth-client",
+  "private": true,
+  "version": "0.0.0",
+  "description": "JWT + parent-domain cookie reader. The only writer is apps/login/; every other app is a reader.",
+  "type": "module",
+  "scripts": {
+    "build": "echo 'stub — populated in Phase 3'"
+  }
+}

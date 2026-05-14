@@ -208,6 +208,56 @@ importers:
         specifier: ^4.83.0
         version: 4.85.0(@cloudflare/workers-types@4.20260425.1)
 
+  apps/billing: {}
+
+  apps/export: {}
+
+  apps/front-door:
+    dependencies:
+      '@aquilla/errors':
+        specifier: workspace:*
+        version: link:../../packages/errors
+    devDependencies:
+      '@cloudflare/workers-types':
+        specifier: ^4.20240117.0
+        version: 4.20260425.1
+      typescript:
+        specifier: ~6.0.2
+        version: 6.0.2
+      wrangler:
+        specifier: ^4.83.0
+        version: 4.85.0(@cloudflare/workers-types@4.20260425.1)
+
+  apps/frontier-server: {}
+
+  apps/import: {}
+
+  apps/login: {}
+
+  apps/migrate: {}
+
+  apps/org: {}
+
+  apps/projects: {}
+
+  apps/reset: {}
+
+  apps/signup: {}
+
+  apps/workspace: {}
+
+  packages/api-client: {}
+
+  packages/auth-client: {}
+
+  packages/data-model: {}
+
+  packages/errors: {}
+
+  packages/telemetry: {}
+
+  packages/ui: {}
+
 packages:
 
   '@adobe/css-tools@4.4.4':

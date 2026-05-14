@@ -1,0 +1,10 @@
+{
+  "name": "@aquilla/ui",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Aquilla shared design system + UI primitives (shadcn/ui + Tailwind).",
+  "type": "module",
+  "scripts": {
+    "build": "echo 'stub — populated in Phase 3'"
+  }
+}

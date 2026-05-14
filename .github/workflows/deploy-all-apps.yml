@@ -177,23 +177,55 @@ jobs:
     needs: [plan, deploy-app]
     if: needs.plan.outputs.has_apps == 'true' && needs.plan.outputs.deploy == 'true'
     runs-on: ubuntu-latest
+    # `contents: read` is required so actions/checkout@v4 can fetch the
+    # repo for `routes.json`. The default GITHUB_TOKEN gets it implicitly,
+    # but declaring an explicit `permissions:` block (we set
+    # `pull-requests: write` for the sticky comment) drops every permission
+    # not listed — checkout then fails with "Repository not found" (the
+    # 401 mask GitHub uses on private repos).
     permissions:
+      contents: read
       pull-requests: write
     steps:
+      - uses: actions/checkout@v4
+
+      - name: Build comment body
+        id: body
+        env:
+          PR: ${{ github.event.pull_request.number }}
+          APPS_JSON: ${{ needs.plan.outputs.apps }}
+        run: |
+          # The aquilla.app zone isn't provisioned on the CF account yet
+          # (route claims in apps/*/wrangler.toml are commented-out TODOs),
+          # so previews are reachable only via the per-Worker workers.dev
+          # URL. Drop this branch once the zone exists.
+          ACCOUNT_SUBDOMAIN="blue-darkness-7674.workers.dev"
+
+          {
+            echo "body<<EOF"
+            echo "### Aquilla apps preview"
+            echo
+            echo "_\`aquilla.app\` zone isn't provisioned yet — previews are served from per-Worker \`workers.dev\` URLs._"
+            echo
+            echo "| App | URL |"
+            echo "| --- | --- |"
+            for app in $(echo "$APPS_JSON" | jq -r '.[]'); do
+              path=$(jq -r --arg slug "$app" '.[$slug] // ""' routes.json)
+              if [ "$app" = "front-door" ]; then path="/"; fi
+              # Trailing slash so SPA fallback returns index.html.
+              [ "${path%/}" = "$path" ] && path="${path}/"
+              url="https://aquilla-pr-${PR}-${app}.${ACCOUNT_SUBDOMAIN}${path}"
+              echo "| \`$app\` | $url |"
+            done
+            echo
+            echo "Each app's SPA is built with its \`routes.json\` slug as basename — visit the slugged path (above) to land on the right route."
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
       - uses: marocchino/sticky-pull-request-comment@v2
         with:
           header: aquilla-apps-preview
-          message: |
-            ### Aquilla apps preview
-
-            Preview hostname: **pr-${{ github.event.pull_request.number }}.aquilla.app**
-
-            Deployed apps: `${{ needs.plan.outputs.apps }}`
-
-            Each app is mounted under its `routes.json` slug:
-            - `/login`, `/signup`, `/reset`, `/projects`, `/import`, `/export`, `/migrate`, `/billing`, `/org`
-            - `/w/*` (workspace), `/api/identity/*` (frontier-server)
-            - `/` (front-door — redirects to `/projects`)
+          message: ${{ steps.body.outputs.body }}
 
   # ─────────────────────────────────────────────────────────────────────
   # Per-PR cleanup on close

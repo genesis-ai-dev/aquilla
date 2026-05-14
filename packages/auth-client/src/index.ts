@@ -238,3 +238,17 @@ export function logout(): void {
 export function currentJwt(): string | null {
   return getJwt()
 }
+
+/**
+ * Hard-navigate the browser to the login app, preserving the current URL
+ * as the post-login `next` target. Apps call this when they detect a
+ * missing JWT — login lives in a different Worker so we can't use
+ * react-router's <Navigate />.
+ */
+export function redirectToLogin(): void {
+  if (typeof window === "undefined") return
+  const next = encodeURIComponent(
+    window.location.pathname + window.location.search,
+  )
+  window.location.replace(`/login?next=${next}`)
+}

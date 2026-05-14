@@ -14,7 +14,7 @@ export default defineConfig({
     },
   },
   build: {
-    outDir: "dist",
+    outDir: "dist/reset",
     emptyOutDir: true,
   },
   test: {

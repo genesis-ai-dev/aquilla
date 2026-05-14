@@ -127,6 +127,13 @@ jobs:
           version: 9
       - run: pnpm install --frozen-lockfile
 
+      - name: Build app
+        # Worker apps (front-door, frontier-server) don't ship a Vite SPA
+        # — skip the build step for those. Everything else needs `dist/` to
+        # exist before wrangler can bind it via [assets] directory.
+        if: matrix.app != 'front-door' && matrix.app != 'frontier-server'
+        run: pnpm --filter @aquilla/${{ matrix.app }} build
+
       - name: Substitute __PR__ in wrangler.toml
         working-directory: apps/${{ matrix.app }}
         run: |
@@ -137,17 +144,14 @@ jobs:
 
       - name: Deploy
         working-directory: apps/${{ matrix.app }}
-        # continue-on-error until the aquilla.app Cloudflare zone is provisioned.
-        # Until then, the preview wrangler.toml's `routes = [...]` lines are
-        # commented out (TODOs in each apps/*/wrangler.toml) — the Worker uploads
-        # to its workers.dev URL but isn't claim-routed under aquilla.app yet.
-        # Drop this once the zone exists + the route comments are restored.
-        continue-on-error: true
         run: pnpm exec wrangler deploy --env preview
 
       - name: Smoke-test preview URL
-        # Smoke test depends on the pr-${PR}.aquilla.app hostname. Same gate
-        # as the Deploy step: tolerate failures until the zone is provisioned.
+        # Per-PR previews need a wildcard pr-*.aquilla.app subdomain claim
+        # in CF. Until that's wired, smoke tests against pr-N.aquilla.app
+        # will connect-fail; tolerate it. The Deploy step above is now
+        # strictly enforced — if the worker doesn't actually upload, CI
+        # fails loudly.
         continue-on-error: true
         run: |
           # The mounted path for this app comes from routes.json.

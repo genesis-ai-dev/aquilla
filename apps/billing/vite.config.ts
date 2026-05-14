@@ -17,7 +17,7 @@ export default defineConfig({
     strictPort: false,
   },
   build: {
-    outDir: "dist",
+    outDir: "dist/billing",
     emptyOutDir: true,
   },
   test: {

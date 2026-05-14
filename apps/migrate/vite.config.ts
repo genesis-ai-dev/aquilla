@@ -8,7 +8,7 @@ import tailwindcss from "@tailwindcss/vite"
 export default defineConfig({
   base: "/migrate/",
   plugins: [react(), tailwindcss()],
-  build: { outDir: "dist" },
+  build: { outDir: "dist/migrate" },
   test: {
     environment: "happy-dom",
     passWithNoTests: true,

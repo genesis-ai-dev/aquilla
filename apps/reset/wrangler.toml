@@ -25,7 +25,7 @@ not_found_handling = "single-page-application"
 [env.production]
 name = "aquilla-prod-reset"
 account_id = "6a80496d1e59948a9cbaa3c643ba81d7"
-# routes = ["aquilla.app/reset/*"]  # TODO: uncomment after aquilla.app zone is provisioned in Cloudflare
+routes = ["aquilla.app/reset/*"]  # Claimed in production via Workers Routes (zone aquilla.app on CF account)
 
 [env.production.vars]
 ENV = "prod"

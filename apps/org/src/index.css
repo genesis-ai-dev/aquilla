@@ -1,5 +1,11 @@
 @import "tailwindcss";
 
+/* See apps/login/src/index.css for the why — Tailwind v4 needs
+ * to be told to scan @aquilla/ui (and any other shared packages
+ * that emit Tailwind classes) so they survive the build. */
+@source "../../../packages/ui/src/**/*.{ts,tsx}";
+@source "../../../packages/auth-client/src/**/*.{ts,tsx}";
+
 :root {
   color-scheme: light dark;
 }

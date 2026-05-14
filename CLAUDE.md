@@ -21,9 +21,9 @@ Each populated app is a Vite SPA served by a Cloudflare Worker with a Workers As
 
 ## Project Overview
 
-`codex-web` is a browser-based reimplementation of the Codex translation editor (originally a VS Code extension — see `docs/SPEC.md` for the origin design). It is a standalone single-page app: a cell-based translation notebook that imports source documents (USFM, DOCX, PPTX, Markdown, plaintext, VTT/SRT), lets translators fill in aligned target cells with rich text, and supports collaborative editing, snapshots, rules/health scoring, LLM completion/backtranslation, and P2P sharing.
+`codex-web` is a browser-based reimplementation of the Codex translation editor (originally a VS Code extension — see `docs/SPEC.md` for the origin design). It is a standalone single-page app: a cell-based translation notebook that imports source documents (USFM, DOCX, PPTX, Markdown, plaintext, VTT/SRT), lets translators fill in aligned target cells with rich text, and supports collaborative editing, snapshots, rules/health scoring, and LLM completion/backtranslation.
 
-There is no backend in this repo. Persistence is entirely client-side (IndexedDB + Yjs).
+Backed by Cloudflare Workers in this repo (`auth-worker`, `sync-worker`, `chat-worker`). The web client is a thin tier-1 client per AD-3 — reads on demand from D1, writes through a local outbox.
 
 ## Commands
 
@@ -45,97 +45,38 @@ Vitest runs in `happy-dom` with `fake-indexeddb/auto` loaded via `src/test-setup
 
 ## Architecture
 
-> **Phase 2c-α (in flight).** The Aquilla spec-alignment effort is migrating
-> codex-web from Y.Doc-as-source-of-truth to **events-log + projection as
-> the durable record** (AD-2) with WS-based focus locks for live
-> coordination (AD-1) and an outbox + reconciler for offline-tolerant
-> writes (AD-3). The migration is being shipped in three slices:
->
-> - **2a (merged):** D1 cells read-path. Reads now flow through
->   `src/lib/sync/cqrs-bridge.ts` → sync-worker D1.
-> - **2b (merged):** Stubs of project-level state, comment shells.
-> - **2c-α (this slice):** AD-2 event grammar + outbox enqueuer
->   (`src/lib/sync/events-emit.ts`, `outbox-types.ts`), per-project DO
->   (`sync-worker/src/project-do.ts`), WS reconciler client
->   (`src/lib/sync/ws-reconciler.ts`), focus-lock hook
->   (`src/hooks/useFocusLock.ts`). The editor still writes through the
->   legacy Y.Doc + `cqrs-bridge.ts` path; the new modules are wired but
->   unconsumed.
-> - **2c-β (next PR):** Editor migration (plain TipTap, remove
->   `@tiptap/extension-collaboration`); importer rewrite (parsers emit
->   `source.cell.create` events directly); full Yjs removal (drop deps,
->   delete `file-doc.ts`, `partyserver-provider.ts`, `translated-xml.ts`,
->   the IDB Y.Doc persistence, and the `useProject` IDB cache fallback).
->
-> The architecture sections below describe the **current** state during
-> 2c-α — Y.Doc remains the load path for cells until 2c-β.
+Post-Phase-2 the app is built on AD-2 / AD-3 v1 / AD-9:
 
-### Document model: parsers → Y.Doc → rebuilders
+### Source of truth
 
-The whole pipeline is built around a single intermediate shape: `TranslatableString[]` (see `src/lib/parsers/types.ts`). Each importer in `src/lib/parsers/` (`usfm`, `docx`, `pptx`, `markdown`, `plaintext`, `subtitle`) reads a binary/text blob and emits that array plus enough metadata (`SourceLocation` for docx/pptx) to reconstruct the original later. `src/lib/import.ts` dispatches on `detectFileType`.
+The append-only `events` table in D1 (`sync-worker`'s `codex-db`) is the durable record. Every write is an event with `parent_id` (the prior winning event on the same `(project_id, file_id, cell_id)`); the projection (`cells`, `files`, `cell_validators`) lands as events apply. Cell events are prefixed `source.*` (importer-only) or `target.*` (contributor+). `target.cell.commit` carries an AD-9 `sourceEventId` pin onto the source row's `event_id` observed at commit time — staleness becomes a pointer comparison at read.
 
-Each imported file becomes one Yjs document via `createFileDoc` in `src/lib/store/file-doc.ts`. Structure inside the doc is fixed and load-bearing:
+### Reads
 
-- `doc.getMap("meta")` — file-level metadata
-- `doc.getMap("cells")` — `Y.Map<cellId, Y.Map>`, each cell holding `original`, `originalHtml?`, `translatedXml` (a `Y.XmlFragment`, M9+), `context`, `group`, `type`, `history` (`Y.Array<CellHistoryEntry>`), optional `sourceLocation`, `threads`, backtranslation fields
-- `doc.getArray("order")` — cell id order
+Tier-1 thin client: reads fetch from sync-worker's HTTP endpoints on demand. Typed fetch wrappers live alongside the hooks under `src/lib/sync/*-read.ts`; each pairs with a `*-read-types.ts` mirror of the server response shape. Hooks use plain `useState` + race-guarded `useEffect`; no React Query, no SWR. Key read hooks: `useProject`, `useCells`, `useCellHistory`, `useCellValidators`, `useFileMeta`, `useWorkspaceSearch`, `useProjectMembers`, `useOrgInvites`, `useProjectSettings`.
 
-Per-file docs persist under `codex:file:<fileId>` via `y-indexeddb`. Project-level records (the `ProjectRecord` with file list, rules, completion settings, members) live in a separate `idb` database `codex` (see `src/lib/store/project-index.ts`), alongside snapshots and share invites. When editing a cell, **write to `translatedXml` via `src/lib/richtext/translated-xml.ts`** — the legacy plain `translated` string field is only kept as a read fallback for pre-M9 docs.
+`useCells` is the load path for the editor table: `GET /api/v1/projects/:projectId/files/:fileId/cells` returns paired source + target rows in anchor-chain order. Each row carries its current `event_id` (AD-2 chain head) and target rows additionally carry `source_event_id` (AD-9 staleness pin) — both surface on `CellData` as `targetEventId`, `sourceEventId`, `targetSourceEventId`. `useProject` is a server-only fetch — no IDB fallback in v1 (per AD-3); a miss surfaces as `status: 'not-found'`.
 
-Export is the inverse path: `src/lib/export/surgical-export.ts` + `src/lib/export/rebuilders/*` reconstruct the original file format from the current cell state using `SourceLocation`, so round-tripping a docx/pptx preserves non-translatable content.
+### Writes
 
-### Rich text editing
+Writes flow through a local IndexedDB outbox (`src/lib/sync/outbox.ts`) and surface to the server via two paths:
 
-Tiptap 3 bound directly to each cell's `Y.XmlFragment` via `@tiptap/extension-collaboration`. `TranslatedEditor` / `EditorTable` in `src/components/` are the cell surfaces; `src/lib/richtext/translated-xml.ts` has the helpers for reading plain text, reading fragment HTML, and replacing content. When you need a string representation of a cell's translation, always go through `getPlainText(frag)` rather than reading `cell.get("translated")`.
+1. **Per-project WebSocket reconciler** (`src/lib/sync/ws-reconciler.ts`) — `wss://sync-worker/parties/project-sync/:projectId`, backed by a per-project Durable Object (`sync-worker/src/project-do.ts`). Holds **only transient state**: focus-lock leases, presence, and `event.applied` / `event.stale` broadcasts. No DO storage writes; rooms evict when empty.
+2. **HTTP fallback** — `POST /events` for queued events when the WS is unhealthy. The outbox flusher (`src/hooks/useOutboxFlusher.ts`) drains in batches with idempotent UUIDv7 ids.
 
-### Hooks as the view-model layer
+Typed event helpers in `src/lib/sync/events-emit.ts`: `emitTargetCellCommit`, `emitCellValidate`, `emitCellUnvalidate`, `emitSourceCellCreate`, `emitFileCreate`. `outbox-types.ts` mirrors the server's `RawEvent<K>` grammar. All writes are optimistic — `useCells.revalidate()` (passed in as `onCellCommitted`) picks up the projection when the server acks. Remote `event.applied` broadcasts also trigger `revalidate()`.
 
-Every major subsystem has a hook in `src/hooks/` that subscribes to Yjs updates and returns a plain-React view:
+### Live coordination
 
-- `useProject`, `useFileDoc` — load project + open a file doc
-- `useCells` — observed, ordered `CellData[]` with derived `status` ("empty" | "unvalidated" | "validated")
-- `useComments`, `useCellHistory`, `useRules`, `useHealth`, `useCompletion`, `useBacktranslation`, `useSearchIndex`, `useWorkspaceSearch`, `useSync`
+`useFocusLock` (per-cell) talks to the per-project reconciler: `focus.claim` on editor focus, periodic `focus.renew`, `focus.release` on blur. Other clients see "Alice is editing this cell" via `lock.claimed` / `lock.released` broadcasts. AD-1: this is the only live coordination mechanism — no CRDT, no operational transform. When two collaborators edit offline against the same source state, the parent-chain rule resolves on reconcile (first child of a parent wins; siblings stay in history).
 
-Adding a new cell-level feature almost always means: extend the cell Y.Map shape in `file-doc.ts`, add a service under `src/lib/<feature>/`, surface it through a hook, and render in a component under `src/components/`.
+### Editor
 
-### Phase 2c-α write path (events log + outbox + WS coordination)
+`TranslatedEditor` is plain TipTap (no `@tiptap/extension-collaboration`, no Y.Doc binding). It hydrates from `cell.translatedHtml` (falling back to `cell.translated`), debounces keystrokes to `COMMIT_IDLE_MS` (~1.2s), then calls `onCommit({ value, valueHtml })` on idle / blur / lock-release. The wrapping `EditorTable` row emits `target.cell.commit` via the outbox, chained on `cell.targetEventId` and pinned to `cell.sourceEventId`. A remote `event.applied` for the focused cell triggers a non-blocking "this cell changed elsewhere — discard and reload" banner; the user chooses discard (revalidate) vs. keep (their commit becomes a stale-sibling per AD-2 when finalized).
 
-The post-Phase-2 write path is built around three concepts:
+### Imports
 
-1. **Typed event grammar (AD-2)** — `src/lib/sync/outbox-types.ts` mirrors
-   `sync-worker/src/events/types.ts`. Cell events carry `source.` or
-   `target.` prefixes; every chain-mutating event carries `parentId` (the
-   prior winning event on this cell's `(project, file, cell)` chain).
-   Genesis events (`*.create`, `file.create`) carry `parentId = null`.
-   `target.cell.commit` carries `sourceEventId` — the AD-9 staleness pin
-   onto the source row's `event_id` at commit time.
-
-2. **Outbox writers (AD-3)** — `src/lib/sync/events-emit.ts` exposes
-   `buildRawEvent`, `enqueueEvent`, and convenience helpers
-   (`emitTargetCellCommit`, `emitCellValidate`, `emitSourceCellCreate`,
-   `emitFileCreate`). All persist into the same IDB outbox as the legacy
-   path (`src/lib/sync/outbox.ts`), and the existing
-   `useOutboxFlusher`/`outbox-flush.ts` drains via HTTP `POST /events`.
-   Writes never block on the network — IDB is the durable buffer.
-
-3. **Per-project DO + WS reconciler (AD-1)** — `sync-worker/src/project-do.ts`
-   is a Durable Object instance per project (path
-   `/parties/project-sync/:projectId`). It holds **only transient state**
-   — focus-lock leases, presence, and an `event.applied` / `event.stale`
-   broadcast channel for `POST /events`. No DO storage writes; rooms
-   evict naturally when empty. The client side is
-   `src/lib/sync/ws-reconciler.ts` (per-project WS with backoff
-   reconnect) and `src/hooks/useFocusLock.ts` (claim/renew/release lease,
-   read `heldBy` for the "Alice is editing" affordance).
-
-These modules are **wired but not yet consumed**: the editor still writes
-through `cqrs-bridge.ts` (Y.Doc mirror) until 2c-β. 2c-β rewires
-`TranslatedEditor` / `EditorTable` to write through `emitTargetCellCommit`
-+ `useFocusLock` directly, deletes `cqrs-bridge.ts`, and removes Yjs.
-
-### Sync & sharing (P2P)
-
-`src/lib/sync/webrtc-provider.ts` wraps `y-webrtc` with public signaling + a free TURN fallback. Rooms are joined by share token; PIN protection is enforced at the app layer (`src/lib/sync/share-tokens.ts`), not via y-webrtc's built-in password. `useSync` drives awareness/presence, and `JoinPage` (`/join/:token`) is the entry point for invitees. There is no server component — share invites are stored locally and exchanged via the token string.
+Parsers (`src/lib/parsers/*`) still emit `TranslatableString[]` as the canonical intermediate shape. `src/lib/import.ts` no longer touches Y.Doc — instead it emits `file.create` + N `source.cell.create` events into the outbox, chained via `anchorCellId`. The dialog reports per-cell progress as events flush. Imported source blobs go to R2 (AD-4) for re-parse; the client keeps no local copy.
 
 ### Rules, health, completion
 
@@ -155,23 +96,9 @@ React 19 + Tailwind v4 (via `@tailwindcss/vite`) + shadcn/ui (`components.json`,
 
 `docs/SPEC.md` describes the VS Code extension this app was extracted from — useful for understanding the `.codex` notebook / paired-source / LLM-context concepts that this app inherits. Per-milestone specs and implementation plans live under `docs/superpowers/specs/` and `docs/superpowers/plans/` (M1–M10 covering import, editor, health, rules, export, search+backtranslation, comments, snapshots, richtext/Yjs migration, P2P sync). When working on a feature that has a spec there, read it first — the schema decisions (especially `translatedXml` vs `translated`, `SnapshotFile.ydocState`, `schemaVersion` on snapshots) were made deliberately and are load-bearing for migrations.
 
-## Phase 2 data flow (in progress)
+## Residual Y.Doc rip (Phase 2c-γ)
 
-Phase 2 migrates the client off Y.Doc reads onto the sync-worker's D1 projection (per Aquilla spec AD-2 / AD-3 v1 thin client). Status as of phase 2b:
-
-- **Reads** — every read-side hook is server-backed. The pattern is locked-in: a domain-specific `*-read.ts` + `*-read-types.ts` under `src/lib/sync/`, exposing a `fetchX(...)` wrapper that throws an `XReadError` on non-2xx; hooks wrap the fetcher with a vanilla useState + race-guarded effect (no React Query, no SWR). Phase 2a migrated `useCells`; Phase 2b migrated the remaining read hooks.
-- **Phase 2b additions** — fetch wrappers: `history-read.ts` (per-cell event chain), `search-read.ts` (project FTS5), `projects-read.ts` (frontier-server project list + detail), `members-read.ts`, `settings-read.ts`, `orgs-read.ts`. Hooks rewritten or aligned: `useCellHistory` (new read-side hook; old write helpers in the same file are untouched, Phase 2c rewrites them), `useCellEditHistory` (drops React Query; uses the new history wrapper; gains a required `projectId` prop wired through `HistoryDrawer`), `useCellValidators`, `useCellsAuditStats`, `useFileMeta` (Y.Doc → localStorage), `useWorkspaceSearch` (server FTS5). Hook stubs (`// Phase 2b: <concept> dropped from v1 event grammar`): `useComments`, `useCellWaivers`. New `useSync` reports a static online/connected state until Phase 2c wires the real WS reconciler. `useFileSync` is also stubbed (peers: [], provider: null, status: "live"); the TipTap editor's `syncProvider` prop is therefore always null on dev. `useFileDoc` is a shim that hands out a fresh in-memory Y.Doc per fileId — no IDB, no R2 — so the TipTap editor compiles unchanged until Phase 2c rips the Y.Doc dep out.
-- **New sync-worker routes (Phase 2b):**
-  - `GET /api/v1/projects/:projectId/files/:fileId/cells/:cellId/history` → cell event chain, newest first.
-  - `GET /api/v1/projects/:projectId/search?q=&side=&limit=` → FTS5 over `cells_fts`, project-scoped.
-- **Still Y.Doc-bound:** the TipTap editor (`@tiptap/extension-collaboration`), `src/lib/store/file-doc.ts`, parsers/import pipeline, all write paths (cell commits, edits, comments, snapshots). Phase 2c handles writes + finally deletes Y.Doc. Search-side concepts dropped from the v1 event grammar — comments and cell-waivers — return empty data from the stub hooks; future v1.x features.
-- **Project-index IDB** still lives in `src/lib/store/project-index.ts` for write callers that Phase 2c will migrate; reads happen through frontier-server. The hook layer (`useProject`) overlays frontier-server project + settings onto whatever local stub remains.
-- **Writes still go through Y.Doc** until Phase 2c. After a known write, callers should invoke `revalidate()` so the projection re-loads. `revalidate()` is best-effort: a write that lands in the local Y.Doc but hasn't propagated to the server's projection won't show up on refetch. Phase 2c replaces Y.Doc writes with the AD-3 outbox + cell-event POSTs and removes Y.Doc entirely.
-- **New sync-worker read routes** (added 2a; mounted in `sync-worker/src/index.ts`):
-  - `GET /api/v1/projects/:projectId/files` → list with cell/word/last-edit rollups
-  - `GET /api/v1/projects/:projectId/files/:fileId` → single file row
-  - `GET /api/v1/projects/:projectId/files/:fileId/cells?side=&limit=&cursor=` → cells in anchor-chain order (AD-2). When `side` is omitted, the response carries both source and target rows; the client pairs by `cell_id` (AD-9).
-  - All three auth with a sync-token JWT (`Authorization: Bearer …`) scoped to `:projectId`. Membership is implicit in the JWT — frontier-server only mints tokens for project members.
+Phase 2c-β switched the editor + importer + read paths off Y.Doc and onto the AD-2 event-log + outbox, but a tail of feature surfaces — comments, multi-validator edit history, waivers, cell audio / video attachments, snapshots, parallel-passages search/replace, completion + backtranslation writebacks — still write into per-file Y.Doc handles (held in memory via the `useFileDoc` shim). These features are functional today but their durable state never reaches D1 until each surface migrates to its own event grammar. Phase 2c-γ rips them: delete the residual `src/lib/store/file-doc.ts`, `partyserver-provider.ts`, `translated-xml.ts`, `cqrs-bridge.ts`, the `@tiptap/extension-collaboration` dep, and the `yjs` / `y-indexeddb` / `y-partyserver` / `y-webrtc` direct deps. Many of the features above are deferred per spec (comments, threads, waivers, validator edit history are v1.x); the rip is gated on their grammars landing.
 
 ## Backend stack
 

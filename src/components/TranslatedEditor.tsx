@@ -1,30 +1,58 @@
+// Phase 2c-β: plain TipTap editor — no Y.Doc, no collaboration extension.
+//
+// Architecture (AD-2 / AD-3 v1):
+//   - Read path:  `initialHtml` (or `initialPlain`) hydrates the editor when
+//                 the cell mounts or when remote content lands and we're not
+//                 focused. After a remote `event.applied` arrives while the
+//                 user IS focused, the parent surfaces a banner and lets the
+//                 user choose discard-and-reload vs. keep-my-edits.
+//   - Write path: editor onUpdate is debounced to COMMIT_IDLE_MS; on idle
+//                 (or blur, or programmatic flush) we serialize editor →
+//                 HTML + plain text and call `onCommit({ value, valueHtml })`.
+//                 The caller emits a `target.cell.commit` via the outbox,
+//                 chained off `cell.targetEventId` and pinned to
+//                 `cell.sourceEventId` (AD-9 staleness pin).
+//
+// Lock model (AD-1): the parent owns the WS focus lock via `useFocusLock`
+// and passes `heldByLabel` here. When that's set the editor is read-only
+// and shows the "Alice is editing" affordance.
+
 import { useEditor, EditorContent } from "@tiptap/react"
 import { BubbleMenu } from "@tiptap/react/menus"
 import StarterKit from "@tiptap/starter-kit"
-import Collaboration from "@tiptap/extension-collaboration"
-import { Extension } from "@tiptap/core"
-import { yCursorPlugin } from "@tiptap/y-tiptap"
-import * as Y from "yjs"
-import type YProvider from "y-partyserver/provider"
 import { Bold, Italic, Underline as UnderlineIcon, Strikethrough, Code } from "lucide-react"
 import { cn } from "@/lib/utils"
-import { useRef, useEffect } from "react"
+import { useEffect, useRef } from "react"
 import type { RuleInfraction } from "@/lib/parsers/types"
 import { createViolationDecorationExtension, violationPluginKey } from "@/lib/richtext/violation-decoration-plugin"
 import { createKaraokeExtension, karaokePluginKey, type KaraokePluginState } from "@/lib/richtext/karaoke-plugin"
 import { findActiveTimingIndex } from "@/lib/audio/timings"
 import type { WordTiming } from "@/lib/codex-editor/types"
 
+/** Window before a quiet keystroke pause counts as a commit-worthy idle. */
+export const COMMIT_IDLE_MS = 1_200
+
+export interface TranslatedEditorCommit {
+  /** Plain-text value derived from editor content. */
+  value: string
+  /** HTML form of editor content (only the allowed inline marks survive). */
+  valueHtml: string
+}
+
 interface TranslatedEditorProps {
-  fragment: Y.XmlFragment
+  /** Stable cell id — switching cells re-hydrates the editor from html. */
+  cellId: string
+  /** Initial content. Plain string fallback used when html is absent. */
+  initialHtml?: string
+  initialPlain: string
+  onCommit: (snapshot: TranslatedEditorCommit) => void
+  onFocus?: () => void
   onBlur?: () => void
   placeholder?: string
   className?: string
-  // When provided, remote cursors from other peers in this provider's awareness
-  // are rendered inline with the given user's name and color for their local cursor.
-  syncProvider?: YProvider | null
-  user?: { name: string; color: string }
   editable?: boolean
+  /** "Alice is editing" — when present, the editor is read-only and the banner shows. */
+  heldByLabel?: string | null
   infractions?: RuleInfraction[]
   ruleSeverity?: Map<string, "major" | "minor">
   waivedRuleIds?: Set<string>
@@ -34,9 +62,36 @@ interface TranslatedEditorProps {
   audioCurrentTime?: number
   /** Called on alt+click of a word when timings are present. */
   onSeekToTime?: (t: number) => void
+  /**
+   * Banner / change-while-editing reconciliation. When set, the parent has
+   * received a remote `event.applied` for this cell while we hold the lock.
+   * The editor stays editable; the banner offers a Discard-and-Reload action.
+   */
+  remoteChangedDuringEdit?: boolean
+  onDiscardLocal?: () => void
 }
 
-export function TranslatedEditor({ fragment, onBlur, placeholder, className, syncProvider, user, editable = true, infractions, ruleSeverity, waivedRuleIds, onRuleClick, audioTimings, audioCurrentTime, onSeekToTime }: TranslatedEditorProps) {
+export function TranslatedEditor({
+  cellId,
+  initialHtml,
+  initialPlain,
+  onCommit,
+  onFocus,
+  onBlur,
+  placeholder,
+  className,
+  editable = true,
+  heldByLabel,
+  infractions,
+  ruleSeverity,
+  waivedRuleIds,
+  onRuleClick,
+  audioTimings,
+  audioCurrentTime,
+  onSeekToTime,
+  remoteChangedDuringEdit,
+  onDiscardLocal,
+}: TranslatedEditorProps) {
   const latestViolationStateRef = useRef({
     infractions: infractions ?? [],
     ruleSeverity: ruleSeverity ?? new Map<string, "major" | "minor">(),
@@ -49,13 +104,23 @@ export function TranslatedEditor({ fragment, onBlur, placeholder, className, syn
     onSeekToWord: undefined,
   })
 
+  // Resolve initial content once per cellId — prefer rich HTML, fall back to plain text.
+  const initialContent = initialHtml && initialHtml.length > 0
+    ? stripToAllowedHtml(initialHtml)
+    : initialPlain
+
+  const isReadOnly = !editable || Boolean(heldByLabel)
+
+  const idleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const lastCommittedRef = useRef<string>(initialPlain)
+  const onCommitRef = useRef(onCommit)
+  useEffect(() => { onCommitRef.current = onCommit }, [onCommit])
+
   const editor = useEditor({
-    editable,
+    editable: !isReadOnly,
+    content: initialContent,
     extensions: [
       StarterKit.configure({
-        // Turn off TipTap's own history — Yjs manages undo/redo via the collab plugin
-        undoRedo: false,
-        // Disable node types we don't support in cells
         heading: false,
         bulletList: false,
         orderedList: false,
@@ -64,17 +129,9 @@ export function TranslatedEditor({ fragment, onBlur, placeholder, className, syn
         codeBlock: false,
         horizontalRule: false,
       }),
-      Collaboration.configure({
-        fragment,
-      }),
-      ...(syncProvider && user
-        ? [createCollabCursorExtension(syncProvider, user)]
-        : []),
       // The callback is invoked by the PM plugin, not during React render —
       // the lint rule is overly conservative here.
-      // eslint-disable-next-line react-hooks/refs
       createViolationDecorationExtension(() => latestViolationStateRef.current),
-      // eslint-disable-next-line react-hooks/refs
       createKaraokeExtension(() => latestKaraokeStateRef.current),
     ],
     editorProps: {
@@ -86,23 +143,55 @@ export function TranslatedEditor({ fragment, onBlur, placeholder, className, syn
           className
         ),
       },
-      // Transform pasted HTML to strip anything outside our allowed marks
       transformPastedHTML(html: string) {
         return stripToAllowedHtml(html)
       },
     },
-    onBlur: onBlur,
-  }, [fragment, syncProvider, user?.name, user?.color])
+    onUpdate({ editor }) {
+      // Reset idle timer on every keystroke; commit when the user pauses.
+      if (idleTimerRef.current !== null) clearTimeout(idleTimerRef.current)
+      const text = editor.getText()
+      const html = editor.getHTML()
+      idleTimerRef.current = setTimeout(() => {
+        if (text === lastCommittedRef.current) return
+        lastCommittedRef.current = text
+        onCommitRef.current({ value: text, valueHtml: html })
+      }, COMMIT_IDLE_MS)
+    },
+    onFocus() {
+      onFocus?.()
+    },
+    onBlur({ editor }) {
+      if (idleTimerRef.current !== null) {
+        clearTimeout(idleTimerRef.current)
+        idleTimerRef.current = null
+      }
+      const text = editor.getText()
+      const html = editor.getHTML()
+      if (text !== lastCommittedRef.current) {
+        lastCommittedRef.current = text
+        onCommitRef.current({ value: text, valueHtml: html })
+      }
+      onBlur?.()
+    },
+  }, [cellId])
 
-  // Reset editor when fragment identity changes (switching cells)
-  const prevFragmentRef = useRef(fragment)
+  // When initial content changes for the same cell (e.g. a remote
+  // event.applied landed while we weren't editing), reconcile. We never
+  // overwrite if the editor is focused — that's what the banner is for.
   useEffect(() => {
-    prevFragmentRef.current = fragment
-  }, [fragment])
+    if (!editor) return
+    if (editor.isFocused) return
+    const current = editor.getText()
+    if (current === initialPlain) return
+    editor.commands.setContent(initialContent)
+    lastCommittedRef.current = initialPlain
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editor, initialContent, initialPlain])
 
   useEffect(() => {
-    editor?.setEditable(editable)
-  }, [editor, editable])
+    editor?.setEditable(!isReadOnly)
+  }, [editor, isReadOnly])
 
   useEffect(() => {
     latestViolationStateRef.current = {
@@ -116,8 +205,6 @@ export function TranslatedEditor({ fragment, onBlur, placeholder, className, syn
     }
   }, [editor, infractions, ruleSeverity, waivedRuleIds])
 
-  // Keep the karaoke ref's timings + onSeek in sync, and rebuild when the
-  // timings array changes (regardless of activeIdx).
   useEffect(() => {
     latestKaraokeStateRef.current = {
       ...latestKaraokeStateRef.current,
@@ -129,8 +216,6 @@ export function TranslatedEditor({ fragment, onBlur, placeholder, className, syn
     }
   }, [editor, audioTimings, onSeekToTime])
 
-  // Drive the active-word decoration from currentTime, but only dispatch a
-  // rebuild when the active index actually changes — currentTime ticks 60Hz.
   const lastActiveIdxRef = useRef(-1)
   useEffect(() => {
     if (!editor) return
@@ -141,21 +226,52 @@ export function TranslatedEditor({ fragment, onBlur, placeholder, className, syn
     editor.view.dispatch(editor.state.tr.setMeta(karaokePluginKey, "rebuild"))
   }, [editor, audioTimings, audioCurrentTime])
 
+  // Flush pending idle commit on unmount so a programmatic navigate-away
+  // doesn't drop work.
+  useEffect(() => {
+    return () => {
+      if (idleTimerRef.current !== null) {
+        clearTimeout(idleTimerRef.current)
+        idleTimerRef.current = null
+      }
+    }
+  }, [])
+
   if (!editor) {
-    return <div className={cn("min-h-[40px] px-2 py-1 text-sm text-muted-foreground", className)}>{placeholder}</div>
+    return (
+      <div className={cn("min-h-[40px] px-2 py-1 text-sm text-muted-foreground", className)}>
+        {placeholder}
+      </div>
+    )
   }
 
   return (
     <div className="relative h-full">
+      {heldByLabel && (
+        <div
+          aria-live="polite"
+          className="pointer-events-none absolute right-1 top-1 z-10 rounded-full bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-medium text-amber-700 dark:text-amber-400"
+          title={`${heldByLabel} is editing this cell`}
+        >
+          {heldByLabel} is editing
+        </div>
+      )}
+      {remoteChangedDuringEdit && onDiscardLocal && (
+        <div className="mb-1 flex items-center justify-between gap-2 rounded-sm border border-amber-300 bg-amber-50 px-2 py-1 text-[11px] text-amber-800 dark:border-amber-700 dark:bg-amber-950 dark:text-amber-300">
+          <span>This cell changed elsewhere while you were editing.</span>
+          <button
+            type="button"
+            onClick={onDiscardLocal}
+            className="rounded bg-amber-500/20 px-2 py-0.5 text-amber-900 hover:bg-amber-500/30 dark:text-amber-100"
+          >
+            Discard and reload
+          </button>
+        </div>
+      )}
       <BubbleMenu
         editor={editor}
-        shouldShow={({ editor, from, to }) => {
-          // Only show when there's a non-empty text selection
-          return editor.isFocused && from !== to
-        }}
-        options={{
-          placement: "top",
-        }}
+        shouldShow={({ editor, from, to }) => editor.isFocused && from !== to}
+        options={{ placement: "top" }}
       >
         <div className="flex gap-0.5 rounded border bg-background p-0.5 shadow-sm">
           <button
@@ -232,33 +348,6 @@ export function TranslatedEditor({ fragment, onBlur, placeholder, className, syn
   )
 }
 
-// Remote-cursor extension. Wraps y-tiptap's yCursorPlugin (TipTap v3 renamed the
-// old CollaborationCursor extension; this restores equivalent behavior).
-// Publishes the local user's cursor position to the provider's awareness under
-// `user: { name, color }`, and renders other peers' cursors as colored carets.
-function createCollabCursorExtension(
-  provider: YProvider,
-  user: { name: string; color: string }
-) {
-  return Extension.create({
-    name: "collaborationCursor",
-    onCreate() {
-      provider.awareness.setLocalStateField("user", user)
-    },
-    onDestroy() {
-      const current = provider.awareness.getLocalState()
-      if (current && current.user) {
-        const { user: _removed, ...rest } = current
-        void _removed
-        provider.awareness.setLocalState(rest)
-      }
-    },
-    addProseMirrorPlugins() {
-      return [yCursorPlugin(provider.awareness as unknown as Parameters<typeof yCursorPlugin>[0])]
-    },
-  })
-}
-
 // Strip pasted HTML to only the marks we support.
 // Allowed tags: b, strong, i, em, u, s, strike, del, code, p, br
 // Everything else is removed (content preserved).
@@ -272,21 +361,18 @@ function stripToAllowedHtml(html: string): string {
 const ALLOWED_TAGS = new Set(["B", "STRONG", "I", "EM", "U", "S", "STRIKE", "DEL", "CODE", "P", "BR"])
 
 function walkAndStrip(el: Element): void {
-  // Walk children (snapshot array since we mutate during iteration)
   const children = Array.from(el.childNodes)
   for (const child of children) {
     if (child.nodeType === 1) {
       const elChild = child as Element
       walkAndStrip(elChild)
       if (!ALLOWED_TAGS.has(elChild.tagName)) {
-        // Replace element with its contents
         const parent = elChild.parentNode
         if (parent) {
           while (elChild.firstChild) parent.insertBefore(elChild.firstChild, elChild)
           parent.removeChild(elChild)
         }
       } else {
-        // Strip all attributes except none (we don't allow any attributes)
         const attrs = Array.from(elChild.attributes)
         for (const attr of attrs) elChild.removeAttribute(attr.name)
       }

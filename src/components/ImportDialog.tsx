@@ -21,6 +21,8 @@ type Tab = "upload" | "ebible"
 interface ImportDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
+  projectId: string
+  username: string
   sourceLanguage: string
   targetLanguage: string
   onImported: (refs: FileReference[]) => void
@@ -29,6 +31,8 @@ interface ImportDialogProps {
 export function ImportDialog({
   open,
   onOpenChange,
+  projectId,
+  username,
   sourceLanguage,
   targetLanguage,
   onImported,
@@ -71,6 +75,8 @@ export function ImportDialog({
 
         {tab === "upload" ? (
           <UploadPanel
+            projectId={projectId}
+            username={username}
             sourceLanguage={sourceLanguage}
             targetLanguage={targetLanguage}
             onImported={(refs) => {
@@ -80,6 +86,8 @@ export function ImportDialog({
           />
         ) : (
           <EBiblePanel
+            projectId={projectId}
+            username={username}
             sourceLanguage={sourceLanguage}
             targetLanguage={targetLanguage}
             onImported={(ref) => {
@@ -94,25 +102,35 @@ export function ImportDialog({
 }
 
 interface UploadPanelProps {
+  projectId: string
+  username: string
   sourceLanguage: string
   targetLanguage: string
   onImported: (refs: FileReference[]) => void
 }
 
-function UploadPanel({ sourceLanguage, targetLanguage, onImported }: UploadPanelProps) {
+function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, onImported }: UploadPanelProps) {
   const [importing, setImporting] = useState(false)
   const [dragOver, setDragOver] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [progress, setProgress] = useState<{ count: number; total: number } | null>(null)
 
   const handleFiles = useCallback(
     async (files: FileList | File[]) => {
       setImporting(true)
       setError(null)
+      setProgress(null)
       const allRefs: FileReference[] = []
 
       try {
         for (const file of Array.from(files)) {
-          const refs = await importFile(file, sourceLanguage, targetLanguage)
+          const refs = await importFile(file, {
+            projectId,
+            author: username,
+            sourceLanguage,
+            targetLanguage,
+            onCellEnqueued: (count, total) => setProgress({ count, total }),
+          })
           allRefs.push(...refs)
         }
         onImported(allRefs)
@@ -120,9 +138,10 @@ function UploadPanel({ sourceLanguage, targetLanguage, onImported }: UploadPanel
         setError(err instanceof Error ? err.message : "Import failed")
       } finally {
         setImporting(false)
+        setProgress(null)
       }
     },
-    [sourceLanguage, targetLanguage, onImported]
+    [projectId, username, sourceLanguage, targetLanguage, onImported]
   )
 
   function handleDrop(e: React.DragEvent) {
@@ -153,7 +172,9 @@ function UploadPanel({ sourceLanguage, targetLanguage, onImported }: UploadPanel
       onDrop={handleDrop}
     >
       {importing ? (
-        <p className="text-sm text-muted-foreground">Importing...</p>
+        <p className="text-sm text-muted-foreground">
+          Importing{progress ? ` (${progress.count} / ${progress.total} cells)…` : "…"}
+        </p>
       ) : (
         <>
           <p className="mb-2 text-sm text-muted-foreground">
@@ -180,12 +201,14 @@ function UploadPanel({ sourceLanguage, targetLanguage, onImported }: UploadPanel
 }
 
 interface EBiblePanelProps {
+  projectId: string
+  username: string
   sourceLanguage: string
   targetLanguage: string
   onImported: (ref: FileReference) => void
 }
 
-function EBiblePanel({ sourceLanguage, targetLanguage, onImported }: EBiblePanelProps) {
+function EBiblePanel({ projectId, username, sourceLanguage, targetLanguage, onImported }: EBiblePanelProps) {
   const [translations, setTranslations] = useState<EBibleTranslation[] | null>(null)
   const [loadErr, setLoadErr] = useState<string | null>(null)
   const [query, setQuery] = useState("")
@@ -235,8 +258,12 @@ function EBiblePanel({ sourceLanguage, targetLanguage, onImported }: EBiblePanel
     try {
       const ref = await importEBible(
         selected,
-        sourceLanguage,
-        targetLanguage,
+        {
+          projectId,
+          author: username,
+          sourceLanguage,
+          targetLanguage,
+        },
         setProgress,
         abortRef.current.signal
       )
@@ -332,7 +359,9 @@ function EBiblePanel({ sourceLanguage, targetLanguage, onImported }: EBiblePanel
             ? `Downloading ${selected?.id ?? ""}... ${formatProgress(progress.received, progress.total)}`
             : progress.phase === "parse"
               ? "Parsing verses..."
-              : "Saving to project..."}
+              : progress.cellsTotal
+                ? `Enqueuing cells: ${progress.cellsEnqueued ?? 0} / ${progress.cellsTotal}…`
+                : "Saving to project..."}
         </p>
       )}
       {importErr && <p className="text-sm text-destructive">{importErr}</p>}

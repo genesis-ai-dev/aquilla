@@ -1,48 +1,21 @@
-// Projection rebuild endpoint for codex CQRS Phase 0.
+// Projection rebuild endpoint.
 //
 // POST /admin/projects/:projectId/rebuild-projection
 //
-// Auth: Authorization: Bearer ${SYNC_SECRET_KEY}.
+// Drops every cell row + cell_validators row for this project, then replays
+// every event in `server_seq` order, applying the AD-2 first-child-of-
+// parent rule. The naive linear replay is enough here: each event has at
+// most one preceding sibling at its `(project_id, file_id, cell_id,
+// parent_id)` slot, and we visit in seq order, so a sibling that arrived
+// LATER (higher seq) and lost the race never gets to update the projection.
 //
-// Drops every cell row for files in this project AND every cell_validators
-// row for this project, then replays all events ORDER BY server_ts ASC,
-// applying each via buildEventProjectionStmts. Returns
-// {
-//   ok: true,
-//   eventsRead: N,           -- total rows pulled from events table
-//   statementsApplied: M,    -- total D1 statements issued (excludes no-op event kinds)
-//   cellsAfter: C,
-//   validatorsAfter: V,
-//   startedAt: <unix ms>,
-//   completedAt: <unix ms>,
-//   note: '...',
-// }
-//
-// ── Non-atomic failure mode ────────────────────────────────────────────────────
-//
-// This rebuild is NOT atomic. The sequence is:
-//   1. db.batch([DELETE cell_validators, DELETE cells])
-//   2. db.batch() x N  (INSERT statements in D1_BATCH_LIMIT-sized chunks)
-//
-// If the worker dies between step 1 and the end of step 2, the projection
-// tables are left partially empty. Symptoms: cells and/or cell_validators
-// rows missing for some files. Recovery: re-run this endpoint. The DELETE
-// step wipes whatever is there and a clean replay rebuilds from scratch.
-//
-// For Phase 1, consider adding a `projection_state` table row that marks
-// rebuild_started / rebuild_completed so operators can detect an incomplete run.
-//
-// ── Fail-fast guarantee ────────────────────────────────────────────────────────
-//
-// All D1PreparedStatements for every event are built up-front BEFORE any
-// db.batch() write call. If any event fails (bad payload, unknown kind, missing
-// required field), the function returns 500 without having mutated any rows.
+// ── Non-atomic failure mode ────────────────────────────────────────────
+// As before — DELETE + replay is not wrapped in a transaction. Re-running
+// the endpoint after a partial failure restarts from a clean slate.
 
 import { buildEventProjectionStmts, type PersistedEvent } from './event-projection'
 import type { EventKind } from './types'
 
-// Cloudflare D1 max statements per db.batch() call.
-// Exceeding this limit causes D1 to throw at runtime with an unhelpful error.
 const D1_BATCH_LIMIT = 100
 
 export interface RebuildEnv {
@@ -50,27 +23,23 @@ export interface RebuildEnv {
   SYNC_SECRET_KEY?: string
 }
 
-// D1 row shape for an event as returned by SELECT *.
 interface EventRow {
   id: string
   schema_version: number
   project_id: string
   file_id: string | null
   cell_id: string | null
+  parent_id: string | null
   kind: string
   author: string
-  payload: string   // JSON text -- we parse it below
+  payload: string
   client_ts: number
   server_ts: number
+  server_seq: number
 }
 
 const REBUILD_PATH = /^\/admin\/projects\/([^/]+)\/rebuild-projection$/
 
-/**
- * POST /admin/projects/:projectId/rebuild-projection
- *
- * Returns null if the URL doesn't match. Caller chains it with handleAdminRequest.
- */
 export async function handleRebuildProjectionRequest(
   request: Request,
   env: RebuildEnv,
@@ -79,14 +48,10 @@ export async function handleRebuildProjectionRequest(
   const match = REBUILD_PATH.exec(url.pathname)
   if (!match) return null
 
-  // Method check comes AFTER the URL match so an unmatched URL falls through
-  // to the next handler (null return above) while a matched-but-wrong-method
-  // URL correctly returns 405 (not 404 from the next handler).
   if (request.method !== 'POST') {
     return new Response('method not allowed', { status: 405 })
   }
 
-  // Auth: bearer key must match SYNC_SECRET_KEY.
   if (!env.SYNC_SECRET_KEY) {
     return new Response('SYNC_SECRET_KEY not configured', { status: 500 })
   }
@@ -103,22 +68,20 @@ export async function handleRebuildProjectionRequest(
   const projectId = decodeURIComponent(match[1])
   const startedAt = Date.now()
 
-  // 1. Wipe the existing projection for this project.
-  // cells doesn't have project_id directly -- join through files.
+  // 1. Wipe the projection for this project.
   const deleteStmts: D1PreparedStatement[] = [
-    db.prepare(
-      'DELETE FROM cell_validators WHERE project_id = ?',
-    ).bind(projectId),
-    db.prepare(
-      'DELETE FROM cells WHERE file_id IN (SELECT id FROM files WHERE project_id = ?)',
-    ).bind(projectId),
+    db.prepare('DELETE FROM cell_validators WHERE project_id = ?').bind(projectId),
+    db.prepare('DELETE FROM cells WHERE project_id = ?').bind(projectId),
   ]
   await db.batch(deleteStmts)
 
-  // 2. Load events in chronological order.
+  // 2. Load events in server_seq order.
   const { results: eventRows } = await db
     .prepare(
-      'SELECT * FROM events WHERE project_id = ? ORDER BY server_ts ASC',
+      `SELECT id, schema_version, project_id, file_id, cell_id, parent_id, kind,
+              author, payload, client_ts, server_ts, server_seq
+       FROM events WHERE project_id = ?
+       ORDER BY server_seq ASC, server_ts ASC, id ASC`,
     )
     .bind(projectId)
     .all<EventRow>()
@@ -127,13 +90,36 @@ export async function handleRebuildProjectionRequest(
     return new Response('failed to read events from DB', { status: 500 })
   }
 
-  // 3. Build ALL projection statements up-front before any mutation.
-  //    If any event throws (bad payload, unknown kind, missing field), we
-  //    return 500 here -- before step 4 writes anything.
+  // 3. AD-2 first-child-of-parent in-memory tracking.
+  //    For each `(project_id, file_id, cell_id, parent_id)` we record the
+  //    id of the first event we saw at that slot — that one wins. Subsequent
+  //    siblings stay in `events` (which we're not rewriting) but don't
+  //    contribute to the projection.
+  const winningChildAt = new Map<string, string>()
+  const childKey = (row: EventRow): string =>
+    `${row.project_id}\0${row.file_id ?? ''}\0${row.cell_id ?? ''}\0${row.parent_id ?? '<null>'}`
+
   const stmts: D1PreparedStatement[] = []
   let eventsRead = 0
+  let eventsProjected = 0
 
   for (const row of eventRows) {
+    eventsRead += 1
+
+    // Non-cell events skip the chain check.
+    let isWinner = true
+    if (row.cell_id) {
+      const key = childKey(row)
+      const winner = winningChildAt.get(key)
+      if (!winner) {
+        winningChildAt.set(key, row.id)
+      } else if (winner !== row.id) {
+        isWinner = false
+      }
+    }
+
+    if (!isWinner) continue
+
     let payload: unknown
     try {
       payload = JSON.parse(row.payload)
@@ -150,48 +136,41 @@ export async function handleRebuildProjectionRequest(
       projectId: row.project_id,
       fileId: row.file_id,
       cellId: row.cell_id,
+      parentId: row.parent_id,
       kind: row.kind as EventKind,
       author: row.author,
       payload,
       clientTs: row.client_ts,
       serverTs: row.server_ts,
+      serverSeq: row.server_seq,
     }
 
     try {
       buildEventProjectionStmts(db, event, stmts)
+      eventsProjected += 1
     } catch (err) {
       return new Response(
         `failed to build projection for event ${row.id} (kind: ${row.kind}): ${String(err)}`,
         { status: 500 },
       )
     }
-
-    eventsRead += 1
   }
 
   const statementsApplied = stmts.length
 
-  // 4. Apply all projection statements in D1_BATCH_LIMIT-sized chunks.
-  //    D1 caps db.batch() at 100 statements per call; exceeding the cap throws
-  //    at runtime with an unhelpful D1 error. Chunking keeps each call within
-  //    the limit while preserving the sequential ordering required for correctness
-  //    (e.g. cell_validators UPSERT must precede the cells.validated recompute).
+  // 4. Apply in batch chunks.
   for (let i = 0; i < stmts.length; i += D1_BATCH_LIMIT) {
     await db.batch(stmts.slice(i, i + D1_BATCH_LIMIT))
   }
 
-  // 5. Count the resulting rows for the response.
+  // 5. Counts.
   const [cellsResult, validatorsResult] = await Promise.all([
     db
-      .prepare(
-        'SELECT COUNT(*) as cnt FROM cells WHERE file_id IN (SELECT id FROM files WHERE project_id = ?)',
-      )
+      .prepare('SELECT COUNT(*) as cnt FROM cells WHERE project_id = ?')
       .bind(projectId)
       .first<{ cnt: number }>(),
     db
-      .prepare(
-        'SELECT COUNT(*) as cnt FROM cell_validators WHERE project_id = ?',
-      )
+      .prepare('SELECT COUNT(*) as cnt FROM cell_validators WHERE project_id = ?')
       .bind(projectId)
       .first<{ cnt: number }>(),
   ])
@@ -201,6 +180,7 @@ export async function handleRebuildProjectionRequest(
   return Response.json({
     ok: true,
     eventsRead,
+    eventsProjected,
     statementsApplied,
     cellsAfter: cellsResult?.cnt ?? 0,
     validatorsAfter: validatorsResult?.cnt ?? 0,

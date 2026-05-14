@@ -21,7 +21,7 @@ export interface EventsReadEnv {
  * Query parameters (all from URL searchParams):
  *   fileId    — required. Restricts to this file's events.
  *   cellId    — optional. Further restricts to this cell.
- *   before    — optional. server_ts cutoff (events with server_ts < before).
+ *   before    — optional. server_seq cutoff (events with server_seq < before).
  *   limit     — optional. Default 50. Max 200. Clamped, not 400'd.
  *
  * Response: { events: Array<{ id, kind, projectId, fileId, cellId, author, payload, clientTs, serverTs }> }
@@ -98,7 +98,7 @@ export async function handleEventsReadRequest(
 
   // Build the SQL query dynamically based on which optional filters are present.
   const parts: string[] = [
-    "SELECT id, schema_version, project_id, file_id, cell_id, kind, author, payload, client_ts, server_ts",
+    "SELECT id, schema_version, project_id, file_id, cell_id, parent_id, kind, author, payload, client_ts, server_ts, server_seq",
     "FROM events",
     "WHERE project_id = ? AND file_id = ?",
   ]
@@ -109,11 +109,13 @@ export async function handleEventsReadRequest(
     binds.push(qCellId)
   }
   if (before !== null) {
-    parts.push("AND server_ts < ?")
+    parts.push("AND server_seq < ?")
     binds.push(before)
   }
 
-  parts.push("ORDER BY server_ts DESC, id DESC")
+  // server_seq is the canonical ordering key under AD-2; server_ts is the
+  // human-readable timestamp. Order by seq DESC so newest events come first.
+  parts.push("ORDER BY server_seq DESC, id DESC")
   parts.push("LIMIT ?")
   binds.push(limit)
 
@@ -125,11 +127,13 @@ export async function handleEventsReadRequest(
     project_id: string
     file_id: string | null
     cell_id: string | null
+    parent_id: string | null
     kind: string
     author: string
     payload: string
     client_ts: number
     server_ts: number
+    server_seq: number
   }
 
   const result = await env.CODEX_DB.prepare(sql)
@@ -143,6 +147,7 @@ export async function handleEventsReadRequest(
     projectId: row.project_id,
     fileId: row.file_id,
     cellId: row.cell_id,
+    parentId: row.parent_id,
     author: row.author,
     payload: (() => {
       try {
@@ -153,6 +158,7 @@ export async function handleEventsReadRequest(
     })(),
     clientTs: row.client_ts,
     serverTs: row.server_ts,
+    serverSeq: row.server_seq,
   }))
 
   return Response.json({ events })

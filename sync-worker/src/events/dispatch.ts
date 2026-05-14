@@ -1,30 +1,42 @@
 // Per-kind event dispatcher.
 //
-// Keeps the route handler agnostic to kind-specific logic. This is the single
-// point of kind-to-handler mapping — adding a new EventKind in types.ts will
-// cause TypeScript to flag the exhaustiveness check in the default branch,
-// ensuring the dispatcher is always updated alongside the type.
+// Single point of kind-to-handler mapping. Adding a new EventKind in
+// types.ts will trip the exhaustiveness check in the default branch, so
+// the dispatcher stays in sync with the type at compile time.
+//
+// Every cell-level kind routes to the same `handleCellEvent` because the
+// shape of the work is identical (write events row + projection statements
+// + realtime frame). What changes per kind is the projection statements,
+// and those are built inside buildEventProjectionStmts (event-projection.ts).
+//
+// `file.create` is the only non-cell kind so it has its own handler.
 
 import type { AuthorizedEvent } from './authorize'
 import type { EventKind } from './types'
-import { handleCellCommit, type DispatchResult } from './handlers/cell-commit'
-import { handleCellValidate } from './handlers/cell-validate'
-import { handleCellUnvalidate } from './handlers/cell-unvalidate'
-import { handleEventsAuditOnly } from './handlers/events-audit-only'
+import { handleCellEvent, type CellEventKind } from './handlers/cell-events'
 import { handleFileCreate } from './handlers/file-create'
+import type { DispatchResult } from './handlers/types'
+
+export type { DispatchResult } from './handlers/types'
 
 export type DispatchOutcome =
   | { ok: true; result: DispatchResult }
   | { ok: false; status: number; reason: string }
 
+export interface DispatchOptions {
+  /**
+   * AD-2 first-child-of-parent decision. When `false`, the projection
+   * update is skipped — the event still lands in `events` (for history)
+   * but does not advance `cells.event_id`. The route layer evaluates the
+   * parent-chain guard before calling here.
+   */
+  updateProjection: boolean
+  /** Per-project monotonic sequence assigned at accept time. */
+  serverSeq: number
+}
+
 /**
  * Dispatch one authorized event to its kind-specific handler.
- *
- * Returns DispatchResult on success. Returns a structured rejection for:
- *   - Unimplemented kinds (501) — handlers will be added in Phase 2+.
- *   - Unknown kinds (400) — TypeScript exhaustiveness check guarantees this
- *     branch is only reached by a runtime kind value not present in EventKind
- *     (e.g. a newer client talking to an older worker).
  *
  * Does NOT write to D1 or broadcast — the caller (route.ts) batches and
  * commits statements after all events in the request are dispatched.
@@ -33,45 +45,43 @@ export function dispatchEvent(
   db: D1Database,
   authed: AuthorizedEvent,
   serverTs: number,
+  opts: DispatchOptions,
 ): DispatchOutcome {
   const kind = authed.event.kind as EventKind
   switch (kind) {
-    case 'cell.commit':
-      return {
-        ok: true,
-        result: handleCellCommit(db, authed as AuthorizedEvent<'cell.commit'>, serverTs),
-      }
-
+    case 'source.cell.create':
+    case 'source.cell.commit':
+    case 'source.cell.delete':
+    case 'source.cell.reorder':
+    case 'target.cell.create':
+    case 'target.cell.commit':
+    case 'target.cell.delete':
+    case 'target.cell.reorder':
     case 'cell.validate':
-      return {
-        ok: true,
-        result: handleCellValidate(db, authed as AuthorizedEvent<'cell.validate'>, serverTs),
-      }
-
     case 'cell.unvalidate':
       return {
         ok: true,
-        result: handleCellUnvalidate(db, authed as AuthorizedEvent<'cell.unvalidate'>, serverTs),
-      }
-
-    case 'thread.add':
-    case 'thread.resolve':
-    case 'cell.metadata.set':
-      return {
-        ok: true,
-        result: handleEventsAuditOnly(db, authed, serverTs),
+        result: handleCellEvent(
+          db,
+          authed as AuthorizedEvent<CellEventKind>,
+          serverTs,
+          opts,
+        ),
       }
 
     case 'file.create':
       return {
         ok: true,
-        result: handleFileCreate(db, authed as AuthorizedEvent<'file.create'>, serverTs),
+        result: handleFileCreate(
+          db,
+          authed as AuthorizedEvent<'file.create'>,
+          serverTs,
+          { serverSeq: opts.serverSeq },
+        ),
       }
 
     default: {
-      // Exhaustiveness check: TypeScript narrows `kind` to `never` if all
-      // EventKind variants are handled above. If a new kind is added to
-      // EventKind without a case here, this line triggers a TS compile error.
+      // Exhaustiveness check.
       const exhaustive: never = kind
       return { ok: false, status: 400, reason: `unknown event kind: ${exhaustive}` }
     }

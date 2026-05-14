@@ -1,10 +1,31 @@
 {
   "name": "@aquilla/frontier-server",
   "private": true,
-  "version": "0.0.0",
-  "description": "Aquilla frontier-server app — stub (Phase 1B). Populated in Phase 3.",
+  "version": "0.0.1",
+  "type": "module",
+  "description": "Aquilla frontier-server app — identity service per AD-5 / AD-11. Mounted at /api/identity (routes.json). Owns auth, orgs, projects, members, invites, and sync-token minting.",
   "scripts": {
-    "build": "echo 'stub — populated in Phase 3'",
-    "deploy": "echo 'stub — populated in Phase 3'"
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "type-check": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@hono/zod-validator": "^0.4.0",
+    "@noble/hashes": "^1.4.0",
+    "bcryptjs": "^2.4.3",
+    "hono": "^4.12.14",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20241218.0",
+    "@types/bcryptjs": "^2.4.6",
+    "@types/node": "^25.7.0",
+    "typescript": "^5.6.0",
+    "vitest": "^4.1.4",
+    "wrangler": "^3.78.12"
+  },
+  "overrides": {
+    "esbuild": "^0.28.0"
   }
 }

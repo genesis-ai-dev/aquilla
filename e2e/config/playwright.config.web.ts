@@ -7,7 +7,7 @@ const REPO_ROOT = path.resolve(__dirname, "../..")
 
 export default defineConfig({
   testDir: path.resolve(REPO_ROOT, "e2e/specs"),
-  // Tests share a single backend (codex-auth-worker + sync-worker), and the
+  // Tests share a single backend (frontier-server + sync-worker), and the
   // /__test__/reset hook is not transactional. Parallel execution races on
   // the shared D1 → UNIQUE-constraint failures on seed reinsertion. Keep
   // serial until/unless we move to per-worker backends.

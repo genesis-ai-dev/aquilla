@@ -3,7 +3,7 @@
 // Pre-Phase 2b this hook two-way-reconciled `completionSettings` between
 // the file's Y.Doc `meta` map and the local IDB ProjectRecord — the file
 // doc was the only project-scoped sync channel we had. Phase 2b moves
-// project settings onto the auth-worker (PUT /api/v2/projects/:id/settings
+// project settings onto frontier-server (PUT /api/v2/projects/:id/settings
 // with optimistic-concurrency `ifMatchVersion`), so the two-way Y.Doc
 // reconciliation is unnecessary and actively confusing (one source of
 // truth: the server). `useProjectSettings` is already wired against the
@@ -17,7 +17,7 @@ import type { ProjectRecord } from "@/lib/parsers/types"
 
 /**
  * Stub: no-op. Project settings flow through useProjectSettings →
- * writeProjectSettings → auth-worker in Phase 2b. There's nothing to
+ * writeProjectSettings → frontier-server in Phase 2b. There's nothing to
  * reconcile against the file Y.Doc anymore.
  */
 export function useProjectSettingsSync(

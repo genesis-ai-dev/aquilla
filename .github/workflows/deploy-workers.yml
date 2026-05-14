@@ -12,12 +12,12 @@ on:
     branches: [main, dev]
     paths:
       - 'sync-worker/**'
-      - 'auth-worker/**'
+      - 'apps/frontier-server/**'
       - 'chat-worker/**'
   workflow_dispatch:
     inputs:
       worker:
-        description: 'Which worker to deploy (all, sync-worker, auth-worker, chat-worker)'
+        description: 'Which worker to deploy (all, sync-worker, frontier-server, chat-worker)'
         required: false
         default: 'all'
 
@@ -45,11 +45,11 @@ jobs:
           workingDirectory: sync-worker
           command: deploy ${{ github.ref == 'refs/heads/main' && ' ' || '--env=staging' }}
 
-  auth-worker:
+  frontier-server:
     if: >
-      github.event_name == 'workflow_dispatch' && (github.event.inputs.worker == 'all' || github.event.inputs.worker == 'auth-worker')
-      || github.event_name == 'push' && contains(toJSON(github.event.commits.*.modified), 'auth-worker/')
-      || github.event_name == 'push' && contains(toJSON(github.event.commits.*.added), 'auth-worker/')
+      github.event_name == 'workflow_dispatch' && (github.event.inputs.worker == 'all' || github.event.inputs.worker == 'frontier-server')
+      || github.event_name == 'push' && contains(toJSON(github.event.commits.*.modified), 'apps/frontier-server/')
+      || github.event_name == 'push' && contains(toJSON(github.event.commits.*.added), 'apps/frontier-server/')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -57,21 +57,21 @@ jobs:
         with:
           node-version: 22
           cache: npm
-          cache-dependency-path: auth-worker/package-lock.json
+          cache-dependency-path: apps/frontier-server/package-lock.json
       - run: npm ci
-        working-directory: auth-worker
-      - name: Type-check auth-worker
+        working-directory: apps/frontier-server
+      - name: Type-check frontier-server
         run: npm run type-check
-        working-directory: auth-worker
-      - name: Test auth-worker
+        working-directory: apps/frontier-server
+      - name: Test frontier-server
         run: npm test
-        working-directory: auth-worker
-      - name: Deploy auth-worker
+        working-directory: apps/frontier-server
+      - name: Deploy frontier-server
         uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: 6a80496d1e59948a9cbaa3c643ba81d7
-          workingDirectory: auth-worker
+          workingDirectory: apps/frontier-server
           command: deploy ${{ github.ref == 'refs/heads/main' && ' ' || '--env=staging' }}
 
   chat-worker:
@@ -102,4 +102,3 @@ jobs:
           accountId: 6a80496d1e59948a9cbaa3c643ba81d7
           workingDirectory: chat-worker
           command: deploy ${{ github.ref == 'refs/heads/main' && ' ' || '--env=staging' }}
-

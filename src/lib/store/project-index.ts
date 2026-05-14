@@ -83,7 +83,7 @@ export interface ListProjectsOptions {
 }
 
 // Phase 2b: the IDB project-index is no longer the authoritative project
-// source — auth-worker's GET /api/v2/projects[/...] is. The hook layer
+// source — frontier-server's GET /api/v2/projects[/...] is. The hook layer
 // (useProject, useAccessibleProjects, dashboard) bypasses these helpers in
 // Phase 2b; we leave the implementations intact so existing tests + write
 // callers keep working. Phase 2c deletes this file entirely. See spec

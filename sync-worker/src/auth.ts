@@ -87,7 +87,7 @@ export async function verifyTokenForDoc(
  * for the per-project Durable Object WS connection (presence + focus locks
  * span every file in the project, so the file scope is irrelevant). The
  * token must still be a valid `aud=sync` token; the claims' role doubles as
- * the project-membership check (every sync-token issued by auth-worker is
+ * the project-membership check (every sync-token issued by frontier-server is
  * gated on project_members at mint time, so a valid token with
  * `projectId === expected` implies the user is a viewer (100) or higher on
  * that project).
@@ -124,7 +124,7 @@ export async function verifyTokenForProject(
   }
 
   // Viewer-level (100+) is required to read. All sync-tokens are issued at
-  // role 100+ by auth-worker, so this primarily guards against malformed
+  // role 100+ by frontier-server, so this primarily guards against malformed
   // claims; a legitimate token from a non-member will never reach here.
   if (typeof claims.role !== "number" || claims.role < 100) {
     return { ok: false, status: 403, reason: "insufficient role" }

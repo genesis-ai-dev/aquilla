@@ -114,7 +114,7 @@ export default defineConfig(({ mode }) => ({
       // their tests from root pulls in worker-local deps the root install
       // doesn't have. deploy-workers.yml runs each worker's tests in its
       // own directory.
-      "auth-worker/**",
+      "apps/frontier-server/**",
       "chat-worker/**",
       "signaling/**",
       "sync-worker/**",

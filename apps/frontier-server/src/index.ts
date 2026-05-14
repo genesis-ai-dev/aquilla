@@ -1,4 +1,8 @@
-// codex-auth-worker — codex-web's identity + project surface backend.
+// aquilla-frontier-server — codex-web's identity + project surface backend.
+// Relocated from `auth-worker/` to `apps/frontier-server/` in Phase 3e
+// per spec AD-5 + AD-11. Mounted under `/api/identity` once the aquilla.app
+// zone is provisioned (routes.json); until then it deploys to its
+// workers.dev URL.
 //
 // Side-by-side writer with the legacy frontier-server on the same
 // frontier-db-v2 (shared SECRET_KEY) so a user registered here can log in
@@ -89,7 +93,7 @@ app.use("*", async (c, next) => {
 
 app.get("/", (c) =>
   c.json({
-    name: "codex-auth-worker",
+    name: "aquilla-frontier-server",
     routes: [
       "/api/v2/auth/*",
       "/api/v2/sync-token",
@@ -106,7 +110,7 @@ app.get("/healthz", (c) => c.json({ ok: true }))
 // Liveness probe for the frontend (replaces the old api.frontierrnd.com
 // /api/v2/health that the AI controls used to gate on). Returns 200 + a
 // small JSON body — clients only inspect `ok`.
-app.get("/api/v2/health", (c) => c.json({ ok: true, name: "codex-auth-worker" }))
+app.get("/api/v2/health", (c) => c.json({ ok: true, name: "aquilla-frontier-server" }))
 
 app.route("/api/v2/auth", authRoutes)
 app.route("/api/v2/sync-token", syncTokenRoutes)
@@ -136,7 +140,7 @@ app.route("/api/v1/auth", authRoutes)
 app.notFound((c) => c.json({ error: "Not found" }, 404))
 
 app.onError((err, c) => {
-  console.error("Unhandled error in auth-worker:", err)
+  console.error("Unhandled error in frontier-server:", err)
   return c.json({ error: "Internal server error" }, 500)
 })
 

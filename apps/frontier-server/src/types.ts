@@ -1,13 +1,13 @@
-// Shared types for the codex-auth-worker.
+// Shared types for the aquilla-frontier-server identity worker.
 //
-// Single D1 (`codex` prod, `codex-staging` staging) owns everything codex-web
-// touches — identity, orgs, projects, members, invites, plus the file/cell
-// projections sync-worker writes. Schema is defined in
-// `auth-worker/migrations/0001_initial.sql`.
+// Single D1 (`aquilla-db` prod, `aquilla-db-staging` staging) owns
+// everything codex-web touches — identity, orgs, projects, members,
+// invites, plus the file/cell projections sync-worker writes. Schema is
+// defined in `apps/frontier-server/migrations/0001_initial.sql`.
 
 export interface Env {
-  /** Bound to `codex` (prod) or `codex-staging` (staging). Shared with
-   *  codex-sync-worker (same database_id). */
+  /** Bound to `aquilla-db` (prod) or `aquilla-db-staging` (staging).
+   *  Shared with aquilla-sync-worker (same database_id). */
   AQUILLA_DB: D1Database
 
   // Frontier JWT signing. Rotated for the clean break — tokens minted by
@@ -16,11 +16,11 @@ export interface Env {
   ALGORITHM: string
   ACCESS_TOKEN_EXPIRE_MINUTES: string
 
-  // Sync-token signing AND admin auth to codex-sync-worker. Shared between
-  // auth-worker and sync-worker.
+  // Sync-token signing AND admin auth to aquilla-sync-worker. Shared
+  // between frontier-server and sync-worker.
   SYNC_SECRET_KEY?: string
 
-  /** codex-sync-worker base URL for archive / file-delete notifications. */
+  /** aquilla-sync-worker base URL for archive / file-delete notifications. */
   SYNC_WORKER_URL?: string
 
   // Email (Resend) for password reset.
@@ -45,7 +45,7 @@ export type Variables = {
 
 /**
  * Row shape of the `users` table. Mirrors the schema in
- * `auth-worker/migrations/0001_initial.sql`. Legacy gitlab_* / stripe_*
+ * `apps/frontier-server/migrations/0001_initial.sql`. Legacy gitlab_* / stripe_*
  * columns were removed in the clean-break migration (2026-05-13).
  */
 export interface UserRow {

@@ -3,8 +3,8 @@ main = "src/index.ts"
 compatibility_date = "2024-12-01"
 compatibility_flags = ["nodejs_compat"]
 
-# Same CF account as codex-auth-worker. Pinned so `wrangler deploy` doesn't
-# prompt interactively and lands on the wrong account by accident.
+# Same CF account as aquilla-frontier-server. Pinned so `wrangler deploy`
+# doesn't prompt interactively and lands on the wrong account by accident.
 account_id = "6a80496d1e59948a9cbaa3c643ba81d7"
 
 # y-partyserver wires one Durable Object per file (room name = fileId).
@@ -33,20 +33,21 @@ binding = "SNAPSHOTS"
 bucket_name = "aquilla-snapshots"
 # For local `wrangler dev`, wrangler will use a local simulator if the bucket doesn't exist.
 
-# Shared D1 with codex-auth-worker. Schema is owned by auth-worker
-# (auth-worker/migrations/0001_initial.sql); sync-worker is a writer-only
-# against the `files`, `cells`, `events`, `cell_validators`, `checkpoints`
-# tables. Migration application happens via auth-worker's deploy step.
+# Shared D1 with aquilla-frontier-server. Schema is owned by frontier-server
+# (apps/frontier-server/migrations/0001_initial.sql); sync-worker is a writer-
+# only against the `files`, `cells`, `events`, `cell_validators`,
+# `checkpoints` tables. Migration application happens via frontier-server's
+# deploy step.
 [[d1_databases]]
 binding = "AQUILLA_DB"
 database_name = "aquilla-db"
 # database_id is populated by `wrangler d1 create aquilla-db` — must match
-# auth-worker/wrangler.toml.
+# apps/frontier-server/wrangler.toml.
 database_id = "11828e9d-998b-4d3f-a405-91d9f624f94a"
 
 # Auth:
-#   SYNC_SECRET_KEY (shared with codex-auth-worker for sync-token JWT
-#   signing — distinct from auth-worker's main SECRET_KEY) and
+#   SYNC_SECRET_KEY (shared with aquilla-frontier-server for sync-token JWT
+#   signing — distinct from frontier-server's main SECRET_KEY) and
 #   ALLOW_UNAUTHENTICATED live in .dev.vars for local dev (see
 #   .dev.vars.example) and are provisioned via `wrangler secret put` in
 #   production. Deploying with neither set means strict auth (reject all
@@ -56,7 +57,7 @@ database_id = "11828e9d-998b-4d3f-a405-91d9f624f94a"
 
 # ---------------------------------------------------------------------------
 # Staging environment — physically separate D1, R2, DO namespace.
-# Auth model unchanged: same SYNC_SECRET_KEY as prod, same auth-worker
+# Auth model unchanged: same SYNC_SECRET_KEY as prod, same frontier-server
 # issues sync-tokens. A logged-in user can use the staging frontend and
 # their writes land in aquilla-staging / aquilla-snapshots-staging, leaving
 # prod data untouched.

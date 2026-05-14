@@ -14,7 +14,7 @@ vi.mock("@/hooks/useFrontierSession", () => ({
   useFrontierSession: () => ({ session }),
 }))
 
-// Stub the sync-token fetch so the hook never tries to hit the auth-worker.
+// Stub the sync-token fetch so the hook never tries to hit frontier-server.
 // Returns a fixed token that we don't actually verify in tests; the audio
 // endpoint mock checks for its presence in the Authorization header.
 vi.mock("@/lib/sync/sync-token", async () => {

@@ -1,4 +1,4 @@
-// Typed fetch wrappers for auth-worker orgs endpoints (Phase 2b).
+// Typed fetch wrappers for frontier-server orgs endpoints (Phase 2b).
 //
 // Wraps the legacy `frontier/orgs.ts` primitives in the Phase 2a strict-
 // failure pattern: throws `OrgsReadError` on any non-2xx so the hook layer

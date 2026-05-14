@@ -108,17 +108,20 @@ jobs:
       #   main                        → prod          (aquilla-sync-worker.*)
       #   PR with migrations          → per-PR fork   (aquilla-sync-worker-pr-<N>.*)
       #   anything else (dev, PR)     → staging       (aquilla-sync-worker-staging.*)
-      # VITE_AUTH_BASE targets codex-auth-worker — the canonical backend for
-      # auth, sync-token, invites, orgs, members, projects, user search, and
-      # the AI health probe. VITE_CHAT_BASE targets aquilla-chat-worker for
-      # the LLM completion proxy. The legacy frontier-server is no longer in
-      # codex-web's runtime path (it still serves the codex-editor VS Code
-      # extension on its own deployment).
+      # VITE_AUTH_BASE targets the frontier-server identity worker — the
+      # canonical backend for auth, sync-token, invites, orgs, members,
+      # projects, user search, and the AI health probe. Phase 3e renamed
+      # the worker from codex-auth-worker to aquilla-frontier-server
+      # (prod: aquilla-prod-frontier-server; staging: aquilla-dev-frontier-server).
+      # VITE_CHAT_BASE targets aquilla-chat-worker for the LLM completion
+      # proxy. The legacy frontier-server (in genesis-ai-dev/frontier-server)
+      # is no longer in codex-web's runtime path; it still serves the
+      # codex-editor VS Code extension on its own deployment.
       - run: npm run build
         if: steps.decide.outputs.deploy == 'true'
         env:
           VITE_SYNC_WORKER_HOST: ${{ github.ref == 'refs/heads/main' && 'aquilla-sync-worker.blue-darkness-7674.workers.dev' || (steps.migrations.outputs.has == 'true' && format('aquilla-sync-worker-pr-{0}.blue-darkness-7674.workers.dev', github.event.pull_request.number) || 'aquilla-sync-worker-staging.blue-darkness-7674.workers.dev') }}
-          VITE_AUTH_BASE: ${{ github.ref == 'refs/heads/main' && 'https://codex-auth-worker.blue-darkness-7674.workers.dev' || 'https://codex-auth-worker-staging.blue-darkness-7674.workers.dev' }}
+          VITE_AUTH_BASE: ${{ github.ref == 'refs/heads/main' && 'https://aquilla-prod-frontier-server.blue-darkness-7674.workers.dev' || 'https://aquilla-dev-frontier-server.blue-darkness-7674.workers.dev' }}
           VITE_CHAT_BASE: ${{ github.ref == 'refs/heads/main' && 'https://aquilla-chat-worker.blue-darkness-7674.workers.dev' || 'https://aquilla-chat-worker-staging.blue-darkness-7674.workers.dev' }}
 
       - name: Deploy to Cloudflare Pages

@@ -90,7 +90,7 @@ export interface JWTPayload {
 }
 
 /**
- * Sync-token claim shape — must match codex-sync-worker/src/auth.ts.
+ * Sync-token claim shape — must match aquilla-sync-worker/src/auth.ts.
  * See `docs/SYNC.md` (this repo) for the security model.
  */
 export interface SyncTokenClaims {

@@ -34,11 +34,11 @@ describe("deriveCookieDomain", () => {
   })
 
   it("keeps the project label for pages.dev hosts", () => {
-    expect(deriveCookieDomain("foo.codex-web-4ih.pages.dev")).toBe(
-      ".codex-web-4ih.pages.dev",
+    expect(deriveCookieDomain("foo.aquilla-web-4ih.pages.dev")).toBe(
+      ".aquilla-web-4ih.pages.dev",
     )
-    expect(deriveCookieDomain("codex-web-4ih.pages.dev")).toBe(
-      ".codex-web-4ih.pages.dev",
+    expect(deriveCookieDomain("aquilla-web-4ih.pages.dev")).toBe(
+      ".aquilla-web-4ih.pages.dev",
     )
   })
 })
@@ -75,8 +75,8 @@ describe("setJwt / getJwt / clearJwt", () => {
   })
 
   it("sets pages.dev project-level Domain", () => {
-    setJwt("t", { doc, hostname: "preview.codex-web-4ih.pages.dev", secure: true })
-    expect(doc.cookie).toContain("Domain=.codex-web-4ih.pages.dev")
+    setJwt("t", { doc, hostname: "preview.aquilla-web-4ih.pages.dev", secure: true })
+    expect(doc.cookie).toContain("Domain=.aquilla-web-4ih.pages.dev")
   })
 
   it("URL-encodes JWT bytes that would break the header", () => {

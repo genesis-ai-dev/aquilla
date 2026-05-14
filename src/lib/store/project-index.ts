@@ -82,6 +82,13 @@ export interface ListProjectsOptions {
   includeTrashed?: boolean
 }
 
+// Phase 2b: the IDB project-index is no longer the authoritative project
+// source — auth-worker's GET /api/v2/projects[/...] is. The hook layer
+// (useProject, useAccessibleProjects, dashboard) bypasses these helpers in
+// Phase 2b; we leave the implementations intact so existing tests + write
+// callers keep working. Phase 2c deletes this file entirely. See spec
+// 03-data-model and the Phase 2b commit for the migration plan.
+
 export async function listProjects(
   opts: ListProjectsOptions = {}
 ): Promise<ProjectRecord[]> {

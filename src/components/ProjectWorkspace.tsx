@@ -249,7 +249,7 @@ export function ProjectWorkspace() {
     const next = findNextUnfinished(currentIndex)
     if (next >= 0) editorRef.current?.scrollToCellIndex(next)
   }, [findNextUnfinished])
-  const fileMeta = useFileMeta(doc, project?.sourceLanguage, project?.targetLanguage)
+  const fileMeta = useFileMeta(activeFileId, project?.sourceLanguage, project?.targetLanguage)
   const [cellLabelsEnabled, setCellLabelsEnabled] = useCellLabelsPreference(projectId!)
 
   const activeFile = activeFileId ? project?.files.find((f) => f.id === activeFileId) : null
@@ -1064,6 +1064,7 @@ export function ProjectWorkspace() {
               <HistoryDrawer
                 cell={historyCell}
                 onClose={() => setHistoryCellId(null)}
+                projectId={project?.id ?? null}
                 fileId={activeFileId}
                 getTokenForFile={getTokenForFile}
               />

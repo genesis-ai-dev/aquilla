@@ -9,6 +9,11 @@ import { useCellEditHistory } from "@/hooks/useCellEditHistory"
 interface HistoryDrawerProps {
   cell: CellData
   onClose: () => void
+  /** Project the cell belongs to — required (Phase 2b) for the
+   *  project-scoped history endpoint on the sync-worker. Phase 2a's
+   *  /events route was file-scoped; Phase 2b's per-cell history route is
+   *  project-scoped so we surface projectId explicitly here. */
+  projectId?: string | null
   /** File the cell belongs to — required to fetch D1 audit history. */
   fileId?: string | null
   /** Fetches a file-scoped sync token (same as Phase 2 outbox flusher). */
@@ -97,14 +102,15 @@ function commonSuffixLength(a: string, b: string, prefixLen: number): number {
   return i
 }
 
-export function HistoryDrawer({ cell, onClose, fileId, getTokenForFile }: HistoryDrawerProps) {
-  const enabled = !!fileId && !!getTokenForFile
+export function HistoryDrawer({ cell, onClose, projectId, fileId, getTokenForFile }: HistoryDrawerProps) {
+  const enabled = !!projectId && !!fileId && !!getTokenForFile
   const {
     history: d1History,
     isLoading: d1Loading,
     isError: d1Error,
   } = useCellEditHistory({
     enabled,
+    projectId: projectId ?? null,
     fileId: fileId ?? null,
     cellId: cell.id,
     getTokenForFile: getTokenForFile ?? (() => Promise.resolve(null)),

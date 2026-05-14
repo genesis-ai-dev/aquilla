@@ -75,7 +75,7 @@ declare global {
       /**
        * Optional R2 key prefix. Empty / unset on prod and the shared staging
        * worker. Per-PR worker variants set this to `pr-<N>` so they can
-       * share `codex-snapshots-staging` with the dev/preview sandbox without
+       * share `aquilla-snapshots-staging` with the dev/preview sandbox without
        * stepping on each other's snapshots.
        */
       R2_KEY_PREFIX?: string

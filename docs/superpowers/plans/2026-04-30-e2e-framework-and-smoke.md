@@ -151,7 +151,7 @@ git commit -m "feat(completion): honour VITE_FRONTIER_BASE for chat + health URL
 
 - [ ] **Step 1: Grep for any remaining hard-coded production URLs**
 
-Run: `grep -rn "api\.frontierrnd\.com\|codex-sync-worker\.blue-darkness" src/ --include="*.ts" --include="*.tsx"`
+Run: `grep -rn "api\.frontierrnd\.com\|aquilla-sync-worker\.blue-darkness" src/ --include="*.ts" --include="*.tsx"`
 Expected: only matches inside comments, JSX user-facing strings, and test mocks. If any executable code still uses the hard-coded URL, apply the same `VITE_FRONTIER_BASE` pattern.
 
 - [ ] **Step 2: Confirm `sync-token.ts` already honours `VITE_FRONTIER_API_URL`**

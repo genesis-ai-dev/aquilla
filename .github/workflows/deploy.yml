@@ -89,7 +89,7 @@ jobs:
           fi
 
       # When a PR adds SQL migrations, pr-db-fork.yml spins up
-      # codex-sync-worker-pr-<N> against a forked D1 + namespaced R2
+      # aquilla-sync-worker-pr-<N> against a forked D1 + namespaced R2
       # prefix so the migration doesn't pollute shared staging. The build
       # then needs to target that worker. Detect here so the build env
       # block below can switch.
@@ -105,21 +105,21 @@ jobs:
           fi
 
       # Branch → worker host mapping:
-      #   main                        → prod          (codex-sync-worker.*)
-      #   PR with migrations          → per-PR fork   (codex-sync-worker-pr-<N>.*)
-      #   anything else (dev, PR)     → staging       (codex-sync-worker-staging.*)
+      #   main                        → prod          (aquilla-sync-worker.*)
+      #   PR with migrations          → per-PR fork   (aquilla-sync-worker-pr-<N>.*)
+      #   anything else (dev, PR)     → staging       (aquilla-sync-worker-staging.*)
       # VITE_AUTH_BASE targets codex-auth-worker — the canonical backend for
       # auth, sync-token, invites, orgs, members, projects, user search, and
-      # the AI health probe. VITE_CHAT_BASE targets codex-chat-worker for
+      # the AI health probe. VITE_CHAT_BASE targets aquilla-chat-worker for
       # the LLM completion proxy. The legacy frontier-server is no longer in
       # codex-web's runtime path (it still serves the codex-editor VS Code
       # extension on its own deployment).
       - run: npm run build
         if: steps.decide.outputs.deploy == 'true'
         env:
-          VITE_SYNC_WORKER_HOST: ${{ github.ref == 'refs/heads/main' && 'codex-sync-worker.blue-darkness-7674.workers.dev' || (steps.migrations.outputs.has == 'true' && format('codex-sync-worker-pr-{0}.blue-darkness-7674.workers.dev', github.event.pull_request.number) || 'codex-sync-worker-staging.blue-darkness-7674.workers.dev') }}
+          VITE_SYNC_WORKER_HOST: ${{ github.ref == 'refs/heads/main' && 'aquilla-sync-worker.blue-darkness-7674.workers.dev' || (steps.migrations.outputs.has == 'true' && format('aquilla-sync-worker-pr-{0}.blue-darkness-7674.workers.dev', github.event.pull_request.number) || 'aquilla-sync-worker-staging.blue-darkness-7674.workers.dev') }}
           VITE_AUTH_BASE: ${{ github.ref == 'refs/heads/main' && 'https://codex-auth-worker.blue-darkness-7674.workers.dev' || 'https://codex-auth-worker-staging.blue-darkness-7674.workers.dev' }}
-          VITE_CHAT_BASE: ${{ github.ref == 'refs/heads/main' && 'https://codex-chat-worker.blue-darkness-7674.workers.dev' || 'https://codex-chat-worker-staging.blue-darkness-7674.workers.dev' }}
+          VITE_CHAT_BASE: ${{ github.ref == 'refs/heads/main' && 'https://aquilla-chat-worker.blue-darkness-7674.workers.dev' || 'https://aquilla-chat-worker-staging.blue-darkness-7674.workers.dev' }}
 
       - name: Deploy to Cloudflare Pages
         id: deploy
@@ -138,7 +138,7 @@ jobs:
           message: |
             **Cloudflare Pages preview**
 
-            - Branch alias: https://${{ steps.branch.outputs.name }}.codex-web-4ih.pages.dev
+            - Branch alias: https://${{ steps.branch.outputs.name }}.aquilla-web-4ih.pages.dev
             - This deployment: ${{ steps.deploy.outputs.deployment-url }}
             - Commit: `${{ github.event.pull_request.head.sha }}`
 

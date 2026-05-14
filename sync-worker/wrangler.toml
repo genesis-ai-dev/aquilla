@@ -1,4 +1,4 @@
-name = "codex-sync-worker"
+name = "aquilla-sync-worker"
 main = "src/index.ts"
 compatibility_date = "2024-12-01"
 compatibility_flags = ["nodejs_compat"]
@@ -30,7 +30,7 @@ new_sqlite_classes = ["ProjectSync"]
 # Key layout: projects/{projectId}/files/{fileId}/{snapshot.bin,tail/{seq}.bin,checkpoints/{id}.bin}
 [[r2_buckets]]
 binding = "SNAPSHOTS"
-bucket_name = "codex-snapshots"
+bucket_name = "aquilla-snapshots"
 # For local `wrangler dev`, wrangler will use a local simulator if the bucket doesn't exist.
 
 # Shared D1 with codex-auth-worker. Schema is owned by auth-worker
@@ -58,7 +58,7 @@ database_id = "11828e9d-998b-4d3f-a405-91d9f624f94a"
 # Staging environment — physically separate D1, R2, DO namespace.
 # Auth model unchanged: same SYNC_SECRET_KEY as prod, same auth-worker
 # issues sync-tokens. A logged-in user can use the staging frontend and
-# their writes land in codex-staging / codex-snapshots-staging, leaving
+# their writes land in aquilla-staging / aquilla-snapshots-staging, leaving
 # prod data untouched.
 #
 # Deploy: `wrangler deploy --env staging` (CI does this on push to dev).
@@ -66,7 +66,7 @@ database_id = "11828e9d-998b-4d3f-a405-91d9f624f94a"
 #   `wrangler secret put SYNC_SECRET_KEY --env staging`
 # ---------------------------------------------------------------------------
 [env.staging]
-name = "codex-sync-worker-staging"
+name = "aquilla-sync-worker-staging"
 account_id = "6a80496d1e59948a9cbaa3c643ba81d7"
 
 [[env.staging.durable_objects.bindings]]
@@ -87,7 +87,7 @@ new_sqlite_classes = ["ProjectSync"]
 
 [[env.staging.r2_buckets]]
 binding = "SNAPSHOTS"
-bucket_name = "codex-snapshots-staging"
+bucket_name = "aquilla-snapshots-staging"
 
 [[env.staging.d1_databases]]
 binding = "AQUILLA_DB"

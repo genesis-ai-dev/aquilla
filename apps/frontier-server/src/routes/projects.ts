@@ -105,7 +105,7 @@ async function loadFilesByProject(
   return byProject
 }
 
-/** Best-effort notify codex-sync-worker that a project was (un)archived. */
+/** Best-effort notify aquilla-sync-worker that a project was (un)archived. */
 async function notifySyncWorkerOfArchive(
   env: AuthHonoEnv["Bindings"],
   projectId: string,

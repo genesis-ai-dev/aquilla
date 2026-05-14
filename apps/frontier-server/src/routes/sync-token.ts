@@ -1,11 +1,11 @@
-// POST /api/v2/sync-token — mints a short-lived JWT for codex-sync-worker.
+// POST /api/v2/sync-token — mints a short-lived JWT for aquilla-sync-worker.
 //
 // Spec: docs/SYNC.md ("The flow (single-user, single-file)") in this repo.
 //
 // Request: { projectId, fileId, projectName? } + Bearer JWT.
 // Response: { token, expiresIn: 900, role: { level, name, source } }.
 //
-// Token claims must match codex-sync-worker/src/auth.ts SyncTokenClaims:
+// Token claims must match aquilla-sync-worker/src/auth.ts SyncTokenClaims:
 //   { userId, username, projectId, fileId, role, aud: "sync", iat, exp }
 // Signed HS256 with SYNC_SECRET_KEY (distinct from SECRET_KEY).
 //

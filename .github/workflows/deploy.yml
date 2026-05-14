@@ -111,7 +111,7 @@ jobs:
       # VITE_AUTH_BASE targets the frontier-server identity worker — the
       # canonical backend for auth, sync-token, invites, orgs, members,
       # projects, user search, and the AI health probe. Phase 3e renamed
-      # the worker from codex-auth-worker to aquilla-frontier-server
+      # the worker from aquilla-frontier-server to aquilla-frontier-server
       # (prod: aquilla-prod-frontier-server; staging: aquilla-dev-frontier-server).
       # VITE_CHAT_BASE targets aquilla-chat-worker for the LLM completion
       # proxy. The legacy frontier-server (in genesis-ai-dev/frontier-server)

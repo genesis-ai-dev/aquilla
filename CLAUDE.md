@@ -17,7 +17,7 @@ Phase 3e relocated `auth-worker/` to `apps/frontier-server/` (the AD-5 identity 
 
 **Apps populated:** `front-door` (Phase 1B), `login` / `signup` / `reset` (Phase 3b). Remaining stubs: `projects`, `import`, `export`, `migrate`, `billing`, `org`, `workspace`, `frontier-server`. **Packages populated:** `errors` (1B), `auth-client` / `ui` (3b). Remaining stubs: `api-client`, `data-model`, `telemetry`.
 
-Each populated app is a Vite SPA served by a Cloudflare Worker with a Workers Assets binding. The Worker script under `src/worker.ts` adds boot-time env-binding assertions (`@aquilla/errors`) + baseline security headers; the SPA lives in `dist/` and routes client-side under its mounted basename (`/login`, `/signup`, `/reset`). Build-time `VITE_AUTH_BASE` controls the identity-service host so the rename from `codex-auth-worker` to `aquilla-frontier-server` (Phase 3e) is a one-line wrangler-vars change.
+Each populated app is a Vite SPA served by a Cloudflare Worker with a Workers Assets binding. The Worker script under `src/worker.ts` adds boot-time env-binding assertions (`@aquilla/errors`) + baseline security headers; the SPA lives in `dist/` and routes client-side under its mounted basename (`/login`, `/signup`, `/reset`). Build-time `VITE_AUTH_BASE` controls the identity-service host so the rename from `aquilla-frontier-server` to `aquilla-frontier-server` (Phase 3e) is a one-line wrangler-vars change.
 
 ## Project Overview
 
@@ -126,13 +126,13 @@ Five workflows in `.github/workflows/`:
 
 ### Branch behavior
 
-- **Push to `main`** → production deploy. `codex-web-4ih.pages.dev` + custom domains rebuild with **prod** worker URLs. Workers re-deploy too if their dir changed.
-- **Push to `dev`** → staging deploy. `dev.codex-web-4ih.pages.dev` rebuilds with **staging** worker URLs. Workers re-deploy via `--env=staging`.
+- **Push to `main`** → production deploy. `aquilla-web-4ih.pages.dev` + custom domains rebuild with **prod** worker URLs. Workers re-deploy too if their dir changed.
+- **Push to `dev`** → staging deploy. `dev.aquilla-web-4ih.pages.dev` rebuilds with **staging** worker URLs. Workers re-deploy via `--env=staging`.
 - **Squash-merge caveat**: `deploy-workers.yml`'s job-level `if: contains(commits.*.modified, ...)` silently skips on squash-merges. After a worker-touching merge, verify it deployed; if not, dispatch manually: `gh workflow run "Deploy Workers" --ref <branch> -f worker=all`.
 
 ### PR behavior
 
-- **PR opened / reopened / `ready_for_review`** → always deploys preview to `pr-<N>.codex-web-4ih.pages.dev` with staging worker URLs. Sticky comment posts the URL.
+- **PR opened / reopened / `ready_for_review`** → always deploys preview to `pr-<N>.aquilla-web-4ih.pages.dev` with staging worker URLs. Sticky comment posts the URL.
 - **PR push (synchronize) on a non-draft PR** → deploys **only if commit message contains `[preview]` or `[deploy]`** (case-insensitive). Without the tag, the build is skipped (saves CF/GH minutes) and the branch alias stays pointing at the last *deployed* commit. The new selective-deploy logic is in `deploy.yml`'s `Decide whether to deploy` step.
 - **Draft PR** → never deploys, regardless of commit message.
 - **Concurrency cancellation** is enabled per-PR — a new push kills the in-flight deploy for the same PR.
@@ -143,11 +143,11 @@ If a PR adds `sync-worker/migrations/**.sql`, the `pr-db-fork.yml` workflow:
 
 1. Creates `codex-db-pr-<N>` D1 (mirrors `codex-db-staging` schema + applies the new migration files)
 2. Generates a per-PR `wrangler.toml` from `sync-worker/wrangler.pr.toml.tpl` (substitutes `__PR__`, `__DB_ID__`)
-3. Deploys `codex-sync-worker-pr-<N>` pointing at the forked D1; R2 namespaced via `R2_KEY_PREFIX=pr-<N>` (shares `codex-snapshots-staging`)
+3. Deploys `aquilla-sync-worker-pr-<N>` pointing at the forked D1; R2 namespaced via `R2_KEY_PREFIX=pr-<N>` (shares `codex-snapshots-staging`)
 4. Worker runs with `ALLOW_UNAUTHENTICATED=true` (per-PR shortcut — semi-hidden URL, staging data)
 5. Sticky-comments the per-PR worker URL on the PR
 
-`deploy.yml`'s `Detect PR migrations` step then targets `VITE_SYNC_WORKER_HOST` at `codex-sync-worker-pr-<N>` so the PR's preview bundle wires to the forked stack.
+`deploy.yml`'s `Detect PR migrations` step then targets `VITE_SYNC_WORKER_HOST` at `aquilla-sync-worker-pr-<N>` so the PR's preview bundle wires to the forked stack.
 
 **`pr-db-cleanup.yml`** runs on PR close (only when the PR had migrations) and tears down the per-PR worker, D1, and R2 keys under `pr-<N>/`.
 
@@ -156,7 +156,7 @@ If a PR adds `sync-worker/migrations/**.sql`, the `pr-db-fork.yml` workflow:
 ## Reference card: branch → effect
 
 ```
-Open a PR (non-draft) → preview at pr-<N>.codex-web-4ih.pages.dev (staging workers)
+Open a PR (non-draft) → preview at pr-<N>.aquilla-web-4ih.pages.dev (staging workers)
 Add a .sql migration → per-PR D1 + sync-worker variant spun up via pr-db-fork.yml
 
 Push fixups          → preview stays stale unless commit msg has [preview]
@@ -164,6 +164,6 @@ Push with [preview]  → preview rebuilds
 Mark ready for review → preview rebuilds
 
 Close PR             → per-PR DB + worker torn down (only if it had migrations)
-Merge to dev         → dev.codex-web-4ih.pages.dev rebuilds (staging workers)
+Merge to dev         → dev.aquilla-web-4ih.pages.dev rebuilds (staging workers)
 Merge dev → main     → production rebuilds (prod workers + custom domains)
 ```

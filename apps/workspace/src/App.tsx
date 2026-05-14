@@ -107,12 +107,6 @@ function AppRoutes() {
           apps/org/. A hard navigation is required since /org is a different
           Worker deploy (no in-router resolution possible). */}
       <Route path="/settings/org" element={<HardRedirect to="/org/members" />} />
-
-      {/* Root redirect: front-door is supposed to bounce `/` → `/projects`,
-          but the legacy Pages build still serves the workspace SPA at the
-          apex hostname (aquilla.app). Mirror front-door's behavior here so
-          a fresh visit doesn't render a blank page. */}
-      <Route path="/" element={<HardRedirect to="/projects" />} />
     </Routes>
   )
 }

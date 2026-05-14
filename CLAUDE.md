@@ -7,17 +7,17 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 Phase 1B introduced the `apps/` + `packages/` chassis per spec §21-monorepo.md. Each task-flow ships as its own deployable Worker under `apps/<slug>/`; the workspace SPA is the deliberate exception. Cross-app imports outside of `packages/` are forbidden — sharing happens through versioned packages (`@aquilla/ui`, `@aquilla/auth-client`, `@aquilla/api-client`, `@aquilla/data-model`, `@aquilla/telemetry`, `@aquilla/errors`).
 
 - `apps/<slug>/` — one Worker per discrete task (`login`, `signup`, `reset`, `projects`, `import`, `export`, `migrate`, `billing`, `org`, `workspace`, `frontier-server`).
+- `apps/workspace/` — AD-11's deliberate SPA exception (editor + copilot + comments + validation + search + sync + presence). Mounted at `/w/*`. The workspace's source lives at `apps/workspace/src/` (moved out of the repo root in Phase 3a-final).
 - `apps/front-door/` — root + 404 fallback Worker (`/` → `/projects`, CSP injection, `/__routes` debug). Cloudflare Workers Routes (not the front-door) dispatches each slug to its Worker.
 - `packages/<name>/` — shared, versioned concerns. `@aquilla/errors` ships the boot-time `assertEnvBindings()` + `assertNotPreviewInProd()` helpers — every Worker calls them at startup so a preview deploy can't silently bind to prod resources (spec §"Environment binding hygiene").
 - `routes.json` (repo root) — authoritative slug → URL-path registry. Adding an app means editing this file plus dropping a folder under `apps/`.
 - `seed.sql` (repo root) — canonical preview test cast (alice/bob/carol/dave) applied to every per-PR D1 and the shared `aquilla-dev`.
-- **Apps populated (3d shells):** `import`, `export`, `migrate` — placeholder UIs; real logic ships after Phase 2c-β merges.
 
-Phase 3e relocated `auth-worker/` to `apps/frontier-server/` (the AD-5 identity service). The remaining top-level workers (`sync-worker/`, `chat-worker/`, `cors-proxy/`) stay put until Phase 4's rename pass.
+Phase 3a-final moved the workspace SPA's source from the repo-root `src/` into `apps/workspace/src/`, completing the monorepo-extraction effort. The repo root retains only orchestration (root `package.json` scripts, `vite.config.ts` that drives the legacy Pages build with `root: apps/workspace`, e2e/, scripts/, the brand HTML plugin, Tauri shell, and CI workflows). All 11 task-flow apps now live under `apps/`; all 6 shared packages under `packages/`. Phase 3e relocated `auth-worker/` to `apps/frontier-server/` (the AD-5 identity service). The remaining top-level workers (`sync-worker/`, `chat-worker/`, `cors-proxy/`) stay put until Phase 4's rename pass.
 
-**Apps populated:** `front-door` (Phase 1B), `login` / `signup` / `reset` (Phase 3b). Remaining stubs: `projects`, `import`, `export`, `migrate`, `billing`, `org`, `workspace`, `frontier-server`. **Packages populated:** `errors` (1B), `auth-client` / `ui` (3b). Remaining stubs: `api-client`, `data-model`, `telemetry`.
+**Apps populated:** all eleven — `front-door` (Phase 1B), `login` / `signup` / `reset` (Phase 3b), `import` / `export` / `migrate` (Phase 3d shells), `projects` / `billing` / `org` (Phase 3c), `frontier-server` (Phase 3e), `workspace` (Phase 3a-final). **Packages populated:** all six — `errors` (1B), `auth-client` / `ui` (3b), `api-client` (3c), `data-model` / `telemetry` (#85).
 
-Each populated app is a Vite SPA served by a Cloudflare Worker with a Workers Assets binding. The Worker script under `src/worker.ts` adds boot-time env-binding assertions (`@aquilla/errors`) + baseline security headers; the SPA lives in `dist/` and routes client-side under its mounted basename (`/login`, `/signup`, `/reset`). Build-time `VITE_AUTH_BASE` controls the identity-service host so the rename from `codex-auth-worker` to `aquilla-frontier-server` (Phase 3e) is a one-line wrangler-vars change.
+Each populated app is a Vite SPA served by a Cloudflare Worker with a Workers Assets binding. The Worker script under `src/worker.ts` adds boot-time env-binding assertions (`@aquilla/errors`) + baseline security headers; the SPA lives in `dist/` and routes client-side under its mounted basename (`/login`, `/signup`, `/reset`, `/w`, …). Build-time `VITE_AUTH_BASE` controls the identity-service host so the rename from `codex-auth-worker` to `aquilla-frontier-server` (Phase 3e) is a one-line wrangler-vars change.
 
 ## Project Overview
 
@@ -37,11 +37,11 @@ pnpm test           # vitest run (single pass)
 pnpm test:watch     # vitest watch
 
 # Run a single test file or pattern
-pnpm test src/lib/parsers/usfm.test.ts
+pnpm test apps/workspace/src/lib/parsers/usfm.test.ts
 pnpm test -t "splits by verse"
 ```
 
-Vitest runs in `happy-dom` with `fake-indexeddb/auto` loaded via `src/test-setup.ts`, so tests that use IndexedDB / idb work without a browser. Path alias `@/` resolves to `src/`.
+Vitest runs in `happy-dom` with `fake-indexeddb/auto` loaded via `apps/workspace/src/test-setup.ts`, so tests that use IndexedDB / idb work without a browser. Path alias `@/` resolves to `apps/workspace/src/` (post-Phase-3a-final).
 
 ## Architecture
 
@@ -53,18 +53,18 @@ The append-only `events` table in D1 (`sync-worker`'s `codex-db`) is the durable
 
 ### Reads
 
-Tier-1 thin client: reads fetch from sync-worker's HTTP endpoints on demand. Typed fetch wrappers live alongside the hooks under `src/lib/sync/*-read.ts`; each pairs with a `*-read-types.ts` mirror of the server response shape. Hooks use plain `useState` + race-guarded `useEffect`; no React Query, no SWR. Key read hooks: `useProject`, `useCells`, `useCellHistory`, `useCellValidators`, `useFileMeta`, `useWorkspaceSearch`, `useProjectMembers`, `useOrgInvites`, `useProjectSettings`.
+Tier-1 thin client: reads fetch from sync-worker's HTTP endpoints on demand. Typed fetch wrappers live alongside the hooks under `apps/workspace/src/lib/sync/*-read.ts`; each pairs with a `*-read-types.ts` mirror of the server response shape. Hooks use plain `useState` + race-guarded `useEffect`; no React Query, no SWR. Key read hooks: `useProject`, `useCells`, `useCellHistory`, `useCellValidators`, `useFileMeta`, `useWorkspaceSearch`, `useProjectMembers`, `useOrgInvites`, `useProjectSettings`.
 
 `useCells` is the load path for the editor table: `GET /api/v1/projects/:projectId/files/:fileId/cells` returns paired source + target rows in anchor-chain order. Each row carries its current `event_id` (AD-2 chain head) and target rows additionally carry `source_event_id` (AD-9 staleness pin) — both surface on `CellData` as `targetEventId`, `sourceEventId`, `targetSourceEventId`. `useProject` is a server-only fetch — no IDB fallback in v1 (per AD-3); a miss surfaces as `status: 'not-found'`.
 
 ### Writes
 
-Writes flow through a local IndexedDB outbox (`src/lib/sync/outbox.ts`) and surface to the server via two paths:
+Writes flow through a local IndexedDB outbox (`apps/workspace/src/lib/sync/outbox.ts`) and surface to the server via two paths:
 
-1. **Per-project WebSocket reconciler** (`src/lib/sync/ws-reconciler.ts`) — `wss://sync-worker/parties/project-sync/:projectId`, backed by a per-project Durable Object (`sync-worker/src/project-do.ts`). Holds **only transient state**: focus-lock leases, presence, and `event.applied` / `event.stale` broadcasts. No DO storage writes; rooms evict when empty.
-2. **HTTP fallback** — `POST /events` for queued events when the WS is unhealthy. The outbox flusher (`src/hooks/useOutboxFlusher.ts`) drains in batches with idempotent UUIDv7 ids.
+1. **Per-project WebSocket reconciler** (`apps/workspace/src/lib/sync/ws-reconciler.ts`) — `wss://sync-worker/parties/project-sync/:projectId`, backed by a per-project Durable Object (`sync-worker/src/project-do.ts`). Holds **only transient state**: focus-lock leases, presence, and `event.applied` / `event.stale` broadcasts. No DO storage writes; rooms evict when empty.
+2. **HTTP fallback** — `POST /events` for queued events when the WS is unhealthy. The outbox flusher (`apps/workspace/src/hooks/useOutboxFlusher.ts`) drains in batches with idempotent UUIDv7 ids.
 
-Typed event helpers in `src/lib/sync/events-emit.ts`: `emitTargetCellCommit`, `emitCellValidate`, `emitCellUnvalidate`, `emitSourceCellCreate`, `emitFileCreate`. `outbox-types.ts` mirrors the server's `RawEvent<K>` grammar. All writes are optimistic — `useCells.revalidate()` (passed in as `onCellCommitted`) picks up the projection when the server acks. Remote `event.applied` broadcasts also trigger `revalidate()`.
+Typed event helpers in `apps/workspace/src/lib/sync/events-emit.ts`: `emitTargetCellCommit`, `emitCellValidate`, `emitCellUnvalidate`, `emitSourceCellCreate`, `emitFileCreate`. `outbox-types.ts` mirrors the server's `RawEvent<K>` grammar. All writes are optimistic — `useCells.revalidate()` (passed in as `onCellCommitted`) picks up the projection when the server acks. Remote `event.applied` broadcasts also trigger `revalidate()`.
 
 ### Live coordination
 
@@ -76,21 +76,21 @@ Typed event helpers in `src/lib/sync/events-emit.ts`: `emitTargetCellCommit`, `e
 
 ### Imports
 
-Parsers (`src/lib/parsers/*`) still emit `TranslatableString[]` as the canonical intermediate shape. `src/lib/import.ts` no longer touches Y.Doc — instead it emits `file.create` + N `source.cell.create` events into the outbox, chained via `anchorCellId`. The dialog reports per-cell progress as events flush. Imported source blobs go to R2 (AD-4) for re-parse; the client keeps no local copy.
+Parsers (`apps/workspace/src/lib/parsers/*`) still emit `TranslatableString[]` as the canonical intermediate shape. `apps/workspace/src/lib/import.ts` no longer touches Y.Doc — instead it emits `file.create` + N `source.cell.create` events into the outbox, chained via `anchorCellId`. The dialog reports per-cell progress as events flush. Imported source blobs go to R2 (AD-4) for re-parse; the client keeps no local copy.
 
 ### Rules, health, completion
 
-- `src/lib/rules/rule-engine.ts` evaluates `TranslationRule[]` against cell pairs; `rule-suggester.ts` asks an LLM to propose rules. Infractions feed into health.
-- `src/lib/health/health-engine.ts` computes the project health ring shown in `HealthRing`, combining rule infractions, validation state, and an LLM penalty multiplier from `CompletionSettings`.
-- `src/lib/completion/completion-service.ts` and `backtranslation-service.ts` call the configured `CompletionSettings.endpoint` (OpenAI-compatible). Endpoint/model/system-prompt are per-project.
+- `apps/workspace/src/lib/rules/rule-engine.ts` evaluates `TranslationRule[]` against cell pairs; `rule-suggester.ts` asks an LLM to propose rules. Infractions feed into health.
+- `apps/workspace/src/lib/health/health-engine.ts` computes the project health ring shown in `HealthRing`, combining rule infractions, validation state, and an LLM penalty multiplier from `CompletionSettings`.
+- `apps/workspace/src/lib/completion/completion-service.ts` and `backtranslation-service.ts` call the configured `CompletionSettings.endpoint` (OpenAI-compatible). Endpoint/model/system-prompt are per-project.
 
 ### Routing
 
-`src/App.tsx` is the full route table. All project-scoped views are under `/project/:id/...` (workspace, settings, rules, comments, snapshots, plus `/debug` variants). `/join/:token` handles share-link entry. There is no auth layer — the identity is a `username` stored on the `ProjectRecord`.
+`apps/workspace/src/App.tsx` is the full route table for the workspace SPA. All project-scoped views are under `/project/:id/...` (workspace, settings, rules, comments, snapshots, plus `/debug` variants). `/join/:token` handles share-link entry. There is no auth layer — the identity is a `username` stored on the `ProjectRecord`.
 
 ### UI stack
 
-React 19 + Tailwind v4 (via `@tailwindcss/vite`) + shadcn/ui (`components.json`, style `base-nova`, primitives in `src/components/ui/`) + `@base-ui/react`. Icons are lucide. When adding shadcn components, use the aliases declared in `components.json` (`@/components/ui`, `@/lib/utils`, etc.).
+React 19 + Tailwind v4 (via `@tailwindcss/vite`) + shadcn/ui (`components.json`, style `base-nova`, primitives in `apps/workspace/src/components/ui/`) + `@base-ui/react`. Icons are lucide. When adding shadcn components, use the aliases declared in `components.json` (`@/components/ui`, `@/lib/utils`, etc.) — `@/` resolves to `apps/workspace/src/`.
 
 ## Design docs & milestones
 
@@ -98,7 +98,7 @@ React 19 + Tailwind v4 (via `@tailwindcss/vite`) + shadcn/ui (`components.json`,
 
 ## Residual Y.Doc rip (Phase 2c-γ)
 
-Phase 2c-β switched the editor + importer + read paths off Y.Doc and onto the AD-2 event-log + outbox, but a tail of feature surfaces — comments, multi-validator edit history, waivers, cell audio / video attachments, snapshots, parallel-passages search/replace, completion + backtranslation writebacks — still write into per-file Y.Doc handles (held in memory via the `useFileDoc` shim). These features are functional today but their durable state never reaches D1 until each surface migrates to its own event grammar. Phase 2c-γ rips them: delete the residual `src/lib/store/file-doc.ts`, `partyserver-provider.ts`, `translated-xml.ts`, `cqrs-bridge.ts`, the `@tiptap/extension-collaboration` dep, and the `yjs` / `y-indexeddb` / `y-partyserver` / `y-webrtc` direct deps. Many of the features above are deferred per spec (comments, threads, waivers, validator edit history are v1.x); the rip is gated on their grammars landing.
+Phase 2c-β switched the editor + importer + read paths off Y.Doc and onto the AD-2 event-log + outbox, but a tail of feature surfaces — comments, multi-validator edit history, waivers, cell audio / video attachments, snapshots, parallel-passages search/replace, completion + backtranslation writebacks — still write into per-file Y.Doc handles (held in memory via the `useFileDoc` shim). These features are functional today but their durable state never reaches D1 until each surface migrates to its own event grammar. Phase 2c-γ rips them: delete the residual `apps/workspace/src/lib/store/file-doc.ts`, `partyserver-provider.ts`, `translated-xml.ts`, `cqrs-bridge.ts`, the `@tiptap/extension-collaboration` dep, and the `yjs` / `y-indexeddb` / `y-partyserver` / `y-webrtc` direct deps. Many of the features above are deferred per spec (comments, threads, waivers, validator edit history are v1.x); the rip is gated on their grammars landing.
 
 ## Backend stack
 

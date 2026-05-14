@@ -3,7 +3,9 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { parseCodexNotebook } from "./parse-codex";
 
-const FIXTURE_DIR = join(__dirname, "../../../tests/fixtures/codex-editor");
+// Phase 3a-final: src/ moved to apps/workspace/src/, so reach back up to
+// the repo-root tests/ directory (which still lives there).
+const FIXTURE_DIR = join(__dirname, "../../../../../tests/fixtures/codex-editor");
 
 describe("parseCodexNotebook", () => {
   it("parses a .codex file into cells and metadata", () => {

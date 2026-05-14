@@ -1,12 +1,14 @@
-# Stub wrangler config for apps/workspace/.
-# Populated with real bindings in Phase 3 — for now this only declares the
-# per-env name and route patterns so the boot-time assertEnvBindings()
-# helper (packages/errors) has the right shape to validate against.
+# wrangler.toml for apps/workspace/ (Phase 3a-final).
 #
-# Mounted under `/w` (routes.json).
+# Workers Assets binding serves the Vite SPA built into ./dist; the
+# Worker script under src/worker.ts wraps the asset response with the
+# boot-time env-binding assertion + baseline security headers (AD-11
+# §"Environment binding hygiene").
+#
+# Mounted under `/w/*` per routes.json — AD-11's deliberate SPA exception.
 
 name = "aquilla-workspace"
-main = "src/index.ts"
+main = "src/worker.ts"
 compatibility_date = "2024-12-01"
 compatibility_flags = ["nodejs_compat"]
 
@@ -21,6 +23,16 @@ account_id = "6a80496d1e59948a9cbaa3c643ba81d7"
 
 [vars]
 ENV = "prod"
+# Build-time Vite env vars; the bundler inlines these via import.meta.env.
+# Override in CI by exporting before `pnpm build`.
+VITE_AUTH_BASE = "https://codex-auth-worker.blue-darkness-7674.workers.dev"
+
+[assets]
+directory = "./dist"
+binding = "ASSETS"
+# SPA fallback: any unknown sub-path serves index.html so client routing
+# (React Router under /w/*) can take over.
+not_found_handling = "single-page-application"
 
 # ---------------------------------------------------------------------------
 # Production — `wrangler deploy --env production`
@@ -32,6 +44,12 @@ account_id = "6a80496d1e59948a9cbaa3c643ba81d7"
 
 [env.production.vars]
 ENV = "prod"
+VITE_AUTH_BASE = "https://api.aquilla.app/api/identity"
+
+[env.production.assets]
+directory = "./dist"
+binding = "ASSETS"
+not_found_handling = "single-page-application"
 
 # ---------------------------------------------------------------------------
 # Staging — `wrangler deploy --env staging`
@@ -43,6 +61,12 @@ account_id = "6a80496d1e59948a9cbaa3c643ba81d7"
 
 [env.staging.vars]
 ENV = "preview"
+VITE_AUTH_BASE = "https://codex-auth-worker.blue-darkness-7674.workers.dev"
+
+[env.staging.assets]
+directory = "./dist"
+binding = "ASSETS"
+not_found_handling = "single-page-application"
 
 # ---------------------------------------------------------------------------
 # Preview (per-PR) — CI substitutes `__PR__` with the PR number at deploy
@@ -58,3 +82,9 @@ account_id = "6a80496d1e59948a9cbaa3c643ba81d7"
 [env.preview.vars]
 ENV = "preview"
 PR = "__PR__"
+VITE_AUTH_BASE = "https://codex-auth-worker.blue-darkness-7674.workers.dev"
+
+[env.preview.assets]
+directory = "./dist"
+binding = "ASSETS"
+not_found_handling = "single-page-application"

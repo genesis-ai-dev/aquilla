@@ -7,6 +7,7 @@ import { CellAreaPlaceholder } from "./CellAreaPlaceholder"
 import { TabStrip } from "./TabStrip"
 import { useWorkspaceTabs, readLastActiveFileId } from "@/hooks/useWorkspaceTabs"
 import { useCells } from "@/hooks/useCells"
+import { useStaleSourceCells } from "@/hooks/useStaleSourceCells"
 import { useSearchIndex } from "@/hooks/useSearchIndex"
 import { useCompletion } from "@/hooks/useCompletion"
 import { useHealth } from "@/hooks/useHealth"
@@ -240,6 +241,17 @@ export function ProjectWorkspace() {
     username: currentUsername,
     requiredValidations: validationCount,
     auditStats: auditStatsByCellId,
+    getToken: getTokenForFile,
+    enabled: Boolean(project?.id && activeFileId && frontierSession?.jwt),
+  })
+  // Phase 5 / AD-9 — Phase 3a-final wiring. Fetch the set of cell ids
+  // whose source has advanced since the translator's last commit, so the
+  // editor table can decorate stale rows with the AlertTriangle badge.
+  // One fetch per (projectId, fileId) — flattened to a boolean per row
+  // inside EditorTable.
+  const { staleCellIds } = useStaleSourceCells({
+    projectId: project?.id ?? null,
+    fileId: activeFileId,
     getToken: getTokenForFile,
     enabled: Boolean(project?.id && activeFileId && frontierSession?.jwt),
   })
@@ -1125,6 +1137,7 @@ export function ProjectWorkspace() {
             onClaimCell={handleClaimCell}
             onReleaseCell={handleReleaseCell}
             onAckRemoteChange={handleAckRemoteChange}
+            staleCellIds={staleCellIds}
           />
         ) : (
           <CellAreaPlaceholder

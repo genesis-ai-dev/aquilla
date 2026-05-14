@@ -81,6 +81,59 @@ export async function verifyTokenForDoc(
 }
 
 /**
+ * Verify a sync-token JWT for a project-scoped operation. Unlike
+ * verifyTokenForDoc / verifyTokenForFile, this checks only the projectId —
+ * useful for project-level reads (list files, list cells across files) and
+ * for the per-project Durable Object WS connection (presence + focus locks
+ * span every file in the project, so the file scope is irrelevant). The
+ * token must still be a valid `aud=sync` token; the claims' role doubles as
+ * the project-membership check (every sync-token issued by frontier-server is
+ * gated on project_members at mint time, so a valid token with
+ * `projectId === expected` implies the user is a viewer (100) or higher on
+ * that project).
+ */
+export async function verifyTokenForProject(
+  token: string | null | undefined,
+  expectedProjectId: string,
+  secret: string | undefined,
+): Promise<AuthResult> {
+  if (!secret) {
+    return { ok: false, status: 500, reason: "SYNC_SECRET_KEY not configured" }
+  }
+  if (!token) {
+    return { ok: false, status: 401, reason: "missing token" }
+  }
+
+  let claims: SyncTokenClaims
+  try {
+    claims = (await verify(token, secret, "HS256")) as unknown as SyncTokenClaims
+  } catch (err) {
+    const name = (err as { name?: string }).name
+    if (name === "JwtTokenExpired") {
+      return { ok: false, status: 401, reason: "token expired" }
+    }
+    return { ok: false, status: 401, reason: "invalid token signature" }
+  }
+
+  if (claims.aud !== "sync") {
+    return { ok: false, status: 401, reason: "wrong audience" }
+  }
+
+  if (claims.projectId !== expectedProjectId) {
+    return { ok: false, status: 403, reason: "token scoped to different project" }
+  }
+
+  // Viewer-level (100+) is required to read. All sync-tokens are issued at
+  // role 100+ by frontier-server, so this primarily guards against malformed
+  // claims; a legitimate token from a non-member will never reach here.
+  if (typeof claims.role !== "number" || claims.role < 100) {
+    return { ok: false, status: 403, reason: "insufficient role" }
+  }
+
+  return { ok: true, claims }
+}
+
+/**
  * Like verifyTokenForDoc but only requires fileId match — projectId comes
  * from the verified token's claims. Used by reads where the caller doesn't
  * have the project context up front (e.g. GET /events?fileId=...).

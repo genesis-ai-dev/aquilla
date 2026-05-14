@@ -6,8 +6,8 @@
 #      new migrations from the PR applied on top. The fork NEVER reads
 #      from prod codex-db; staging is kept in lockstep with prod schema
 #      separately (apply prod migrations to staging when they ship).
-#   2. Worker `codex-sync-worker-pr-<N>` — points at the new D1, shares
-#      codex-snapshots-staging via R2_KEY_PREFIX=pr-<N>.
+#   2. Worker `aquilla-sync-worker-pr-<N>` — points at the new D1, shares
+#      aquilla-snapshots-staging via R2_KEY_PREFIX=pr-<N>.
 #
 # Usage:
 #   PR_NUMBER=43 CLOUDFLARE_ACCOUNT_ID=... ./scripts/pr-db-fork.sh
@@ -22,7 +22,7 @@ set -euo pipefail
 : "${CLOUDFLARE_ACCOUNT_ID:?need CLOUDFLARE_ACCOUNT_ID}"
 
 DB_NAME="codex-db-pr-${PR_NUMBER}"
-WORKER_NAME="codex-sync-worker-pr-${PR_NUMBER}"
+WORKER_NAME="aquilla-sync-worker-pr-${PR_NUMBER}"
 # Source schema from staging, NEVER from prod. The CI workflow that runs
 # this script must not read prod data under any circumstance — staging
 # is kept in lockstep with prod's schema (apply prod migrations to

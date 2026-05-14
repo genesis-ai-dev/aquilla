@@ -13,7 +13,7 @@ import { MockLLMServer } from "../e2e/helpers/mock-llm-server"
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const REPO_ROOT = path.resolve(__dirname, "..")
-const AUTH_WORKER_DIR = path.join(REPO_ROOT, "auth-worker")
+const AUTH_WORKER_DIR = path.join(REPO_ROOT, "apps/frontier-server")
 const SYNC_WORKER_DIR = path.join(REPO_ROOT, "sync-worker")
 const AUTH_PORT = 8787
 const SYNC_WORKER_PORT = 8788
@@ -103,7 +103,7 @@ async function freePort(port: number): Promise<void> {
 
 async function main(): Promise<void> {
   if (!existsSync(AUTH_WORKER_DIR)) {
-    console.error(`[e2e-up] auth-worker not found at ${AUTH_WORKER_DIR}`)
+    console.error(`[e2e-up] frontier-server not found at ${AUTH_WORKER_DIR}`)
     process.exit(1)
   }
   if (!existsSync(SYNC_WORKER_DIR)) {
@@ -129,10 +129,10 @@ async function main(): Promise<void> {
 
   // 2. Apply the codex schema. Single D1 (`codex`) holds everything —
   //    identity, orgs, projects, members, invites, plus the file/cell
-  //    projections sync-worker writes. Auth-worker owns the migrations dir;
-  //    in prod its deploy applies them. For local E2E each worker keeps its
-  //    own .wrangler state, so we apply twice:
-  //    (a) via `migrations apply` from auth-worker (tracked in d1_migrations)
+  //    projections sync-worker writes. frontier-server owns the migrations
+  //    dir; in prod its deploy applies them. For local E2E each worker
+  //    keeps its own .wrangler state, so we apply twice:
+  //    (a) via `migrations apply` from frontier-server (tracked in d1_migrations)
   //    (b) via `d1 execute --file` from sync-worker (raw apply to its sqlite)
   console.log("[boot 2/6] applying codex schema (both workers' local D1)…")
   await runOnce(
@@ -158,8 +158,8 @@ async function main(): Promise<void> {
     )
   }
 
-  // 4. Boot codex-auth-worker. WRANGLER_LOCAL=1 enables /__test__/reset.
-  console.log(`[boot 3/6] starting codex-auth-worker on :${AUTH_PORT}…`)
+  // 4. Boot frontier-server. WRANGLER_LOCAL=1 enables /__test__/reset.
+  console.log(`[boot 3/6] starting frontier-server on :${AUTH_PORT}…`)
   const auth: SpawnedWorker = await spawnWranglerDev({
     cwd: AUTH_WORKER_DIR,
     port: AUTH_PORT,
@@ -167,7 +167,7 @@ async function main(): Promise<void> {
     env: {
       WRANGLER_LOCAL: "1",
       // Minimum viable secrets for the routes E2E exercises. These match
-      // what auth-worker reads from `env`; SYNC_SECRET_KEY is the shared
+      // what frontier-server reads from `env`; SYNC_SECRET_KEY is the shared
       // key for sync-token + sync-worker admin authorization.
       SECRET_KEY: "test-secret-key-do-not-use-in-prod",
       SYNC_SECRET_KEY: "test-sync-secret-key",
@@ -247,7 +247,7 @@ async function main(): Promise<void> {
   console.log(`[run] npx ${playwrightArgs.join(" ")}`)
   // VITE_AUTH_BASE handles the Vite/browser side via .env.test.local; this
   // env handles the Playwright/node side so test helpers (seed.ts,
-  // frontier-api.ts) talk to auth-worker directly.
+  // frontier-api.ts) talk to frontier-server directly.
   const pw = spawn("npx", playwrightArgs, {
     cwd: REPO_ROOT,
     stdio: "inherit",

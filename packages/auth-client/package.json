@@ -1,0 +1,22 @@
+{
+  "name": "@aquilla/auth-client",
+  "private": true,
+  "version": "0.0.1",
+  "description": "Auth client + parent-domain cookie reader (AD-5 / AD-11). Login app writes the cookie; every other app reads it.",
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./cookie": "./src/cookie.ts"
+  },
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "happy-dom": "^20.8.9",
+    "typescript": "~6.0.2",
+    "vitest": "^4.1.4"
+  }
+}

@@ -1,0 +1,1460 @@
+import { useState, useMemo, useRef, useEffect, useCallback } from "react"
+import { useParams, useNavigate, useSearchParams } from "react-router-dom"
+import { useProject } from "@/hooks/useProject"
+import { useFileDoc } from "@/hooks/useFileDoc"
+import { deriveCellAreaState } from "@/lib/editor/cell-area-state"
+import { CellAreaPlaceholder } from "./CellAreaPlaceholder"
+import { TabStrip } from "./TabStrip"
+import { useWorkspaceTabs, readLastActiveFileId } from "@/hooks/useWorkspaceTabs"
+import { useCells } from "@/hooks/useCells"
+import { useStaleSourceCells } from "@/hooks/useStaleSourceCells"
+import { useSearchIndex } from "@/hooks/useSearchIndex"
+import { useCompletion } from "@/hooks/useCompletion"
+import { useHealth } from "@/hooks/useHealth"
+import { useRules } from "@/hooks/useRules"
+import { updateProject, patchProject, getProject } from "@/lib/store/project-index"
+import { exportFile, downloadBlob } from "@/lib/export/export-service"
+import { MAX_BATCH_COMPLETIONS } from "@/lib/workspace-actions/registry"
+import type { FileReference, CellHealthBreakdown } from "@/lib/parsers/types"
+import type { CellData } from "@/hooks/useCells"
+import { useWorkspaceSearch } from "@/hooks/useWorkspaceSearch"
+import { useBacktranslation } from "@/hooks/useBacktranslation"
+import { useComments } from "@/hooks/useComments"
+import { ParallelPassagesPanel, type ParallelPanelMode, type ParallelPanelScope } from "./ParallelPassagesPanel"
+import type { EditorTableHandle } from "./EditorTable"
+import type { WorkspaceSearchResult } from "@/lib/search/workspace-index"
+import { StatusBar } from "./StatusBar"
+import { SyncStatusIndicator } from "./SyncStatusIndicator"
+import { OutboxSyncIndicator } from "./OutboxSyncIndicator"
+import { ImportDialog } from "./ImportDialog"
+import { EditorTable } from "./EditorTable"
+import { AudioRecordingModal } from "./AudioRecorder/AudioRecordingModal"
+import { RuleDrawer } from "./RuleDrawer"
+import { CommentsDrawer } from "./CommentsDrawer"
+import { HistoryDrawer } from "./HistoryDrawer"
+import { SharePanel } from "./SharePanel"
+import { VideoPlayer, type VideoPlayerHandle } from "./VideoPlayer"
+import { ResizableVideoPanel } from "./ResizableVideoPanel"
+import { VideoAttachmentDialog } from "./VideoAttachmentDialog"
+import { useVideoAttachment } from "@/hooks/useVideoAttachment"
+import { parseTimestampRange, extractCuesFromCells } from "@/lib/video/vtt-generator"
+import { useFileSync, peerColor as peerColorLocal } from "@/hooks/useFileSync"
+import { useProjectTombstoneObserver } from "@/hooks/useProjectTombstoneObserver"
+import { useFileMeta } from "@/hooks/useFileMeta"
+import { useCellLabelsPreference } from "@/hooks/useCellLabelsPreference"
+import { displayNameFor } from "@/lib/sync/anonymous-name"
+import { useProjectPermissions } from "@/hooks/useProjectPermissions"
+import { useFrontierSession } from "@/hooks/useFrontierSession"
+import {
+  countSynthTargets, countTranscribeTargets,
+  synthAllInFile, transcribeAllInFile,
+} from "@/lib/audio/bulk-audio"
+import { eagerlyPrefetchPeaks } from "@/lib/audio/eager-peaks"
+import { useOutboxFlusher } from "@/hooks/useOutboxFlusher"
+import { usePendingOutboxRecords } from "@/hooks/usePendingOutboxRecords"
+import {
+  setCqrsOutboxBridge,
+  buildFileScopedTokenFetcher,
+} from "@/lib/sync/cqrs-bridge"
+import { useCellsAuditStatsWithOverlay } from "@/hooks/useCellsAuditStatsWithOverlay"
+import { Film, Scale, MessagesSquare, Camera, Share2, Settings as SettingsIcon, Lock, ClipboardList, Brain, Trash2, Undo2, Search as SearchIcon, Sparkles } from "lucide-react"
+import { restoreProject } from "@/lib/store/project-index"
+import { AppShell } from "./AppShell"
+import { WorkspaceHeader } from "./WorkspaceHeader"
+import { VoiceBar } from "./VoiceBar"
+import { SpeakBarToggle } from "./SpeakBarToggle"
+import { setSpeakBarEnabled, useSpeakBarEnabled } from "@/lib/audio/speak-bar-pref"
+import { SelectionBar } from "./SelectionBar"
+import { WorkspaceStatusBar } from "./WorkspaceStatusBar"
+import { PrimaryActionButton } from "./PrimaryActionButton"
+import { AccountSwitcher } from "./AccountSwitcher"
+import { ExpandableFileList } from "./ExpandableFileList"
+import { SidebarProjectSection } from "./SidebarProjectSection"
+import { SuggestionBanner } from "./SuggestionBanner"
+import { ConfirmActionDialog } from "./ConfirmActionDialog"
+import { PeerPresence } from "./PeerPresence"
+import { ViewSettingsMenu } from "./ViewSettingsMenu"
+import { EditorScrollProvider, useEditorScroll } from "@/context/EditorScrollContext"
+import { detectSuggestions, type RenameSuggestion } from "@/lib/file-labeling/detect"
+import { applySuggestions } from "@/lib/file-labeling/apply"
+import { renameFile, moveFileToCorpus, renameCorpus, deleteFile } from "@/lib/store/file-operations"
+import { deleteFileProjection } from "@/lib/sync/file-projection"
+import { Button } from "@/components/ui/button"
+import {
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
+} from "@/components/ui/dialog"
+import type { ProjectRecord } from "@/lib/parsers/types"
+import { readValidationCount } from "@/lib/progress/read-validation-count"
+import { resolveHealthConfig } from "@/lib/health/config-resolver"
+import { useSetupChecklist } from "@/hooks/useSetupChecklist"
+import { useProjectSettingsSync } from "@/hooks/useProjectSettingsSync"
+import { SetupChecklistDrawer } from "./onboarding/SetupChecklistDrawer"
+import { SystemPromptNudge } from "./onboarding/SystemPromptNudge"
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
+import { useFeatureFlag } from "@/hooks/useFeatureFlag"
+import { NextUnfinishedButton } from "./NextUnfinishedButton"
+import { useNextUnfinished } from "@/hooks/useNextUnfinished"
+import { AiSetupDialog } from "./AiSetupDialog"
+
+export function ProjectWorkspace() {
+  const { id: projectId, fileId: routeFileId } = useParams<{ id: string; fileId?: string }>()
+  const navigate = useNavigate()
+  const { project, status, refresh } = useProject(projectId!)
+
+  const activeFileId = routeFileId ?? null
+
+  const setActiveFileId = useCallback((fileId: string | null) => {
+    if (!projectId) return
+    if (fileId) {
+      navigate(`/project/${projectId}/file/${fileId}`)
+    } else {
+      navigate(`/project/${projectId}`)
+    }
+  }, [projectId, navigate])
+  const projectFiles = project?.files ?? []
+  const fileIds = useMemo(() => projectFiles.map((f) => f.id), [projectFiles])
+  const workspaceTabs = useWorkspaceTabs({
+    projectId: projectId ?? "",
+    fileIds,
+    activeFileId,
+    setActiveFileId,
+  })
+
+  // After a detour through a Project subpage (Rules/Comments/Snapshots/...),
+  // the URL drops back to `/project/:id` with no fileId. Restore the
+  // previously open file so #38's "closes currently selected file" symptom
+  // doesn't happen. Reads localStorage directly because it only needs to fire
+  // on the no-fileId render; making it stateful would require deriving state
+  // from props inside an effect.
+  useEffect(() => {
+    if (routeFileId || !projectId) return
+    const last = readLastActiveFileId(projectId)
+    if (last && fileIds.includes(last)) {
+      navigate(`/project/${projectId}/file/${last}`, { replace: true })
+    }
+  }, [routeFileId, fileIds, navigate, projectId])
+  const [importOpen, setImportOpen] = useState(false)
+  const [drawerRuleId, setDrawerRuleId] = useState<string | null>(null)
+  const [searchParams] = useSearchParams()
+  useEffect(() => {
+    const open = searchParams.get("openRule")
+    if (open) setDrawerRuleId(open)
+  }, [searchParams])
+  const [commentsCellId, setCommentsCellId] = useState<string | null>(null)
+  const [historyCellId, setHistoryCellId] = useState<string | null>(null)
+  const [parallelOpen, setParallelOpen] = useState(false)
+  const [parallelMode, setParallelMode] = useState<ParallelPanelMode>("search")
+  const [parallelScope, setParallelScope] = useState<ParallelPanelScope>("project")
+  const [shareOpen, setShareOpen] = useState(false)
+  const [aiSetupOpen, setAiSetupOpen] = useState(false)
+  const [recordingCellId, setRecordingCellId] = useState<string | null>(null)
+  const editorRef = useRef<EditorTableHandle>(null)
+  const speakBarEnabled = useSpeakBarEnabled(project?.id)
+  const { doc, loading: docLoading } = useFileDoc(activeFileId)
+  // Prefer the Frontier session username (authenticated identity) over the
+  // project-level username setting. Validation entries and edit history
+  // should attribute to the actual signed-in user.
+  const { session: frontierSession } = useFrontierSession()
+  const currentUsername = frontierSession?.username || project?.username || "local"
+  const jwtRef = useRef<string | null>(null)
+  useEffect(() => {
+    jwtRef.current = frontierSession?.jwt ?? null
+  }, [frontierSession?.jwt])
+
+  const getTokenForFile = useMemo(() => {
+    if (!project?.id) {
+      return async (_fileId: string) => null as string | null
+    }
+    const pid = project.id
+    const bootstrap = {
+      projectName: project.name ?? undefined,
+      gitlabProjectId:
+        project.origin?.kind === "git" ? project.origin.gitlabProjectId : undefined,
+    }
+    return buildFileScopedTokenFetcher(
+      () => jwtRef.current,
+      pid,
+      bootstrap,
+      undefined,
+      {
+        onRole: (role) => {
+          void patchProject(pid, (p) => ({
+            ...p,
+            syncRole: {
+              level: role.level,
+              name: role.name,
+              source: role.source,
+              fetchedAt: new Date().toISOString(),
+            },
+          }))
+        },
+      },
+    )
+  }, [
+    project?.id,
+    project?.name,
+    project?.origin?.kind,
+    project?.origin?.kind === "git" ? project?.origin.gitlabProjectId : undefined,
+  ])
+
+  useEffect(() => {
+    if (!project?.id || !activeFileId) {
+      setCqrsOutboxBridge(null)
+      return
+    }
+    setCqrsOutboxBridge({
+      projectId: project.id,
+      activeFileId,
+      username: currentUsername,
+    })
+    return () => setCqrsOutboxBridge(null)
+  }, [project?.id, activeFileId, currentUsername])
+
+  const outboxFlushEnabled = Boolean(project?.id && activeFileId && frontierSession?.jwt)
+  const { pendingCount: outboxPending, failureStreak: outboxFailures } = useOutboxFlusher({
+    enabled: outboxFlushEnabled,
+    getTokenForFile,
+  })
+  const outboxRecords = usePendingOutboxRecords({
+    enabled: Boolean(project?.id),
+    fileId: null,
+  })
+
+  // D1-backed audit stats for the active file with the client outbox applied
+  // on top — pending commits/validates show up immediately, before the next
+  // 30s refetch. Source of truth for project-wide validation views.
+  const auditStatsEnabled = Boolean(project?.id && activeFileId && frontierSession?.jwt)
+  const { byCellId: auditStatsByCellId } = useCellsAuditStatsWithOverlay({
+    enabled: auditStatsEnabled,
+    fileId: activeFileId,
+    getTokenForFile,
+  })
+
+  const validationCount = project ? readValidationCount(project) : 1
+  // Phase 2a: useCells reads from D1 via the sync-worker's HTTP read route.
+  // The Y.Doc is still wired for writes + the Tiptap editor; this just
+  // changes the load path for the cells list. See useCells.ts for the full
+  // story.
+  const { cells, revalidate: revalidateCells } = useCells({
+    projectId: project?.id ?? null,
+    fileId: activeFileId,
+    username: currentUsername,
+    requiredValidations: validationCount,
+    auditStats: auditStatsByCellId,
+    getToken: getTokenForFile,
+    enabled: Boolean(project?.id && activeFileId && frontierSession?.jwt),
+  })
+  // Phase 5 / AD-9 — Phase 3a-final wiring. Fetch the set of cell ids
+  // whose source has advanced since the translator's last commit, so the
+  // editor table can decorate stale rows with the AlertTriangle badge.
+  // One fetch per (projectId, fileId) — flattened to a boolean per row
+  // inside EditorTable.
+  const { staleCellIds } = useStaleSourceCells({
+    projectId: project?.id ?? null,
+    fileId: activeFileId,
+    getToken: getTokenForFile,
+    enabled: Boolean(project?.id && activeFileId && frontierSession?.jwt),
+  })
+  const { hasAny: hasUnfinished, findNext: findNextUnfinished } = useNextUnfinished(cells, validationCount)
+  const handleJumpNextUnfinished = useCallback(() => {
+    const currentIndex = editorRef.current?.getCurrentIndex?.() ?? 0
+    const next = findNextUnfinished(currentIndex)
+    if (next >= 0) editorRef.current?.scrollToCellIndex(next)
+  }, [findNextUnfinished])
+  const fileMeta = useFileMeta(activeFileId, project?.sourceLanguage, project?.targetLanguage)
+  const [cellLabelsEnabled, setCellLabelsEnabled] = useCellLabelsPreference(projectId!)
+
+  const activeFile = activeFileId ? project?.files.find((f) => f.id === activeFileId) : null
+  const isSubtitleFile = activeFile?.type === "vtt" || activeFile?.type === "srt"
+
+  const [videoDialogOpen, setVideoDialogOpen] = useState(false)
+  const [currentVideoTime, setCurrentVideoTime] = useState(0)
+  const videoPlayerRef = useRef<VideoPlayerHandle>(null)
+  const { attachment: videoAttachment, resolvedSrc: videoSrc, blobUnavailable, save: saveVideo } =
+    useVideoAttachment(isSubtitleFile ? doc : null)
+
+  // Live cues for the VideoPlayer's overlay (bypasses iframe CC). We drive
+  // rendering from cell data directly so edits appear immediately without a
+  // VTT blob round-trip.
+  const videoCues = useMemo(() => {
+    if (!isSubtitleFile || !videoSrc || cells.length === 0) return []
+    return extractCuesFromCells(cells)
+  }, [cells, isSubtitleFile, videoSrc])
+
+  const videoStartOffset = videoAttachment.videoStartOffset ?? 0
+
+  // Active cue is in cue-space (not raw video time). Adjust by offset.
+  const cueTime = currentVideoTime - videoStartOffset
+  const activeCueIndex = useMemo(() => {
+    if (!isSubtitleFile) return -1
+    for (let i = 0; i < cells.length; i++) {
+      const range = parseTimestampRange(cells[i].context)
+      if (!range) continue
+      if (cueTime >= range.start && cueTime <= range.end) {
+        return i
+      }
+    }
+    return -1
+  }, [cells, cueTime, isSubtitleFile])
+
+  useEffect(() => {
+    if (activeCueIndex < 0) return
+    const timer = setTimeout(() => {
+      editorRef.current?.scrollToCellIndex(activeCueIndex)
+    }, 500)
+    return () => clearTimeout(timer)
+  }, [activeCueIndex])
+
+  const handleCueSeek = useCallback((cellId: string) => {
+    const cell = cells.find((c) => c.id === cellId)
+    if (!cell) return
+    const range = parseTimestampRange(cell.context)
+    if (!range) return
+    // Seek in raw video time = cue-space start + offset
+    videoPlayerRef.current?.seekTo(range.start + videoStartOffset)
+    videoPlayerRef.current?.play().catch(() => { /* autoplay blocked */ })
+  }, [cells])
+
+  const {
+    buildIndex,
+    rebuild: rebuildSearchIndex,
+    search: runSearch,
+    clear: clearSearchResults,
+    results: searchResults,
+    loading: searchLoading,
+    ready: searchReady,
+  } = useWorkspaceSearch(project?.files || [])
+
+  // Captures the latest cells in a ref so post-navigation flash can read them
+  // without racing React re-renders.
+  const cellsRef = useRef(cells)
+  useEffect(() => { cellsRef.current = cells }, [cells])
+
+  const { rules, penalties } = useRules(project ?? null, refresh)
+  const { addThread, addMessage, resolveThread, reopenThread } = useComments(doc, currentUsername)
+  const commentsCell = commentsCellId ? cells.find((c) => c.id === commentsCellId) : null
+  const historyCell = historyCellId ? cells.find((c) => c.id === historyCellId) : null
+
+  // Build fileCells map for health computation
+  // For now, only the active file's cells are loaded
+  const fileCells = useMemo(() => {
+    const map = new Map<string, CellData[]>()
+    if (activeFileId && cells.length > 0) {
+      map.set(activeFileId, cells)
+    }
+    return map
+  }, [activeFileId, cells])
+
+  const allProjectCells = useMemo(() => {
+    const all: CellData[] = []
+    for (const [, fc] of fileCells) all.push(...fc)
+    return all
+  }, [fileCells])
+
+  const { search, searchPassages } = useSearchIndex(project?.files || [], allProjectCells)
+  const { completeSingle, completeBatch, isConfigured, isAvailable: isCompletionAvailable, completing, examples, errors } = useCompletion(
+    doc, project?.completionSettings, project?.sourceLanguage || "", project?.targetLanguage || "", search, searchPassages, frontierSession
+  )
+
+  const findBacktranslationExamples = useCallback((target: CellData) => {
+    return cells
+      .filter((c) => c.id !== target.id && c.backtranslation && c.backtranslationForText === c.translated)
+      .map((c) => ({ target: c.translated, backtranslation: c.backtranslation! }))
+      .slice(0, 3)
+  }, [cells])
+
+  const {
+    generate: runBacktranslation,
+    generating: backtranslating,
+    errors: backtranslationErrors,
+    isConfigured: isBacktranslationConfigured,
+  } = useBacktranslation(
+    doc,
+    project?.completionSettings,
+    project?.sourceLanguage || "",
+    project?.targetLanguage || "",
+    findBacktranslationExamples,
+    frontierSession,
+  )
+
+  const compositeFlag = useFeatureFlag("composite-health", project ?? null)
+  const healthConfig = useMemo(() => resolveHealthConfig(project ?? null), [project])
+  const requiredValidations = project ? readValidationCount(project) : 1
+
+  const health = useHealth(
+    fileCells,
+    project?.completionSettings?.llmHealthPenalty ?? 0.1,
+    rules,
+    penalties,
+    { composite: compositeFlag, compositeConfig: healthConfig, requiredValidations, auditStats: auditStatsByCellId },
+  )
+  const { healthMap, fileHealth: _fileHealth, projectHealth, fileProgress, infractions, openCommentCount, cellOpenCommentCount } = health
+
+  const projectBreakdown: CellHealthBreakdown | undefined = useMemo(() => {
+    if (!compositeFlag) return undefined
+    const bs = Array.from(health.breakdownMap.values())
+    if (bs.length === 0) return undefined
+    const avg = (f: (b: CellHealthBreakdown) => number) =>
+      Math.round(bs.reduce((a, b) => a + f(b), 0) / bs.length)
+    return {
+      cellId: "__project__",
+      score: health.projectHealth,
+      validationGap: avg((b) => b.validationGap),
+      ancestryPenalty: avg((b) => b.ancestryPenalty),
+      neighborhoodPenalty: avg((b) => b.neighborhoodPenalty),
+      rulePenalty: avg((b) => b.rulePenalty),
+      signals: {
+        validatorCount: 0,
+        requiredValidations: requiredValidations,
+        ancestryExamples: bs
+          .flatMap((b) => b.signals.ancestryExamples)
+          .sort((a, b) => b.health - a.health)
+          .slice(0, 5),
+        neighborhoodSourceCellIds: [],
+        neighborhoodTargetCellIds: [],
+        idJaccard: 0,
+        tfidfTokenOverlap: 0,
+        infractions: [],
+      },
+    }
+  }, [compositeFlag, health, requiredValidations])
+
+  const biggestDrags = useMemo(() => {
+    if (!compositeFlag) return undefined
+    const entries: Array<{ cellId: string; score: number }> = []
+    for (const b of health.breakdownMap.values()) {
+      entries.push({ cellId: b.cellId, score: b.score })
+    }
+    entries.sort((a, b) => a.score - b.score)
+    return entries.slice(0, 3)
+  }, [compositeFlag, health.breakdownMap])
+
+  const jumpToCellId = useCallback((cellId: string) => {
+    const idx = cells.findIndex((c) => c.id === cellId)
+    if (idx >= 0) editorRef.current?.scrollToCellIndex(idx)
+  }, [cells])
+
+  const drawerRule = rules.find((r) => r.id === drawerRuleId) || null
+  const drawerInfractions = drawerRuleId
+    ? Array.from(infractions.values()).flat().filter((i) => i.ruleId === drawerRuleId)
+    : []
+
+  // Parallel-passages shortcuts (mirrors codex-editor):
+  //   Cmd/Ctrl+F        → search in current file
+  //   Cmd/Ctrl+K        → search across all files (alias)
+  //   Cmd/Ctrl+Shift+F  → search across all files
+  //   Cmd/Ctrl+Shift+R  → search + replace across all files
+  useEffect(() => {
+    function handler(e: KeyboardEvent) {
+      const key = e.key.toLowerCase()
+      if ((e.metaKey || e.ctrlKey) && e.key === ".") {
+        if (!activeFileId || !hasUnfinished) return
+        e.preventDefault()
+        handleJumpNextUnfinished()
+        return
+      }
+      if ((e.metaKey || e.ctrlKey) && !e.altKey && (key === "f" || key === "k")) {
+        e.preventDefault()
+        setParallelMode("search")
+        setParallelScope(
+          key === "k" ? "project" : e.shiftKey ? "project" : activeFileId ? "file" : "project",
+        )
+        setParallelOpen(true)
+        return
+      }
+      if ((e.metaKey || e.ctrlKey) && e.shiftKey && key === "r") {
+        e.preventDefault()
+        setParallelMode("replace")
+        setParallelScope("project")
+        setParallelOpen(true)
+      }
+    }
+    document.addEventListener("keydown", handler)
+    return () => document.removeEventListener("keydown", handler)
+  }, [activeFileId, hasUnfinished, handleJumpNextUnfinished])
+
+  useEffect(() => {
+    if (!project || !routeFileId) return
+    const exists = project.files.some((f) => f.id === routeFileId)
+    if (!exists) {
+      navigate(`/project/${projectId}`, { replace: true })
+    }
+  }, [project, routeFileId, projectId, navigate])
+
+  // Always-on file sync via the codex sync-worker (y-partyserver DO + R2).
+  // This keeps every open file in lockstep across devices for the same user,
+  // not just collaborators — and is also the share-link path now that
+  // joiners are added to project_members on /join/:token redemption.
+  const { peers: fileLevelPeers, provider: syncProvider, status: fileSyncStatus } = useFileSync({
+    doc,
+    projectId: project?.id ?? null,
+    fileId: activeFileId || null,
+    username: currentUsername,
+    enabled: Boolean(project && activeFileId && doc),
+    session: frontierSession,
+    projectName: project?.name ?? null,
+    gitlabProjectId:
+      project?.origin?.kind === "git" ? project.origin.gitlabProjectId : null,
+  })
+
+  // When the owner archives the project, the sync-worker DO flips
+  // meta.projectDeletedAt; this observer reconciles IDB so the
+  // TrashedProjectScreen renders on the next refresh.
+  useProjectTombstoneObserver(doc, project?.id ?? null, refresh)
+
+  // Cross-collaborator sync for AI provider/instructions: piggybacks on the
+  // active file's Y.Doc meta so settings flow between clients without a
+  // dedicated project-meta room.
+  useProjectSettingsSync(doc, project ?? null, refresh)
+
+  // Phase 2c-β: per-project WS reconciler. Subscribes to the per-project
+  // Durable Object for presence + focus locks + `event.applied` broadcasts.
+  // The outbox flusher (above) ships writes; this connection drives reads.
+  const [cellLockHolders, setCellLockHolders] = useState<Map<string, string>>(() => new Map())
+  const [cellsWithRemoteChange, setCellsWithRemoteChange] = useState<Set<string>>(() => new Set())
+  const focusedCellIdRef = useRef<string | null>(null)
+  const reconcilerRef = useRef<import("@/lib/sync/ws-reconciler").WsReconciler | null>(null)
+
+  useEffect(() => {
+    if (!project?.id || !frontierSession?.jwt) return
+    let cancelled = false
+    let reconciler: import("@/lib/sync/ws-reconciler").WsReconciler | null = null
+    void (async () => {
+      const { createWsReconciler } = await import("@/lib/sync/ws-reconciler")
+      const { syncWorkerHttpOrigin } = await import("@/lib/sync/sync-worker-url")
+      if (cancelled || !project?.id) return
+      const pid = project.id
+      reconciler = createWsReconciler(
+        {
+          projectId: pid,
+          baseUrl: syncWorkerHttpOrigin(),
+          getToken: async () => {
+            const aFile = projectFiles[0]?.id ?? ""
+            if (!aFile) return null
+            return getTokenForFile(aFile)
+          },
+        },
+        {
+          onMessage(msg) {
+            if (msg.t === "event.applied") {
+              if (!msg.cell || msg.project !== pid) return
+              revalidateCells()
+              if (focusedCellIdRef.current === msg.cell) {
+                setCellsWithRemoteChange((cur) => {
+                  if (cur.has(msg.cell!)) return cur
+                  const next = new Set(cur)
+                  next.add(msg.cell!)
+                  return next
+                })
+              }
+            } else if (msg.t === "presence") {
+              const next = new Map<string, string>()
+              for (const u of msg.users) {
+                if (!u.focusedCell) continue
+                if (u.userId === currentUsername) continue
+                next.set(u.focusedCell, u.userId)
+              }
+              setCellLockHolders(next)
+            } else if (msg.t === "lock.claimed") {
+              if (msg.by.userId === currentUsername) return
+              setCellLockHolders((cur) => {
+                if (cur.get(msg.cellId) === msg.by.userId) return cur
+                const next = new Map(cur)
+                next.set(msg.cellId, msg.by.userId)
+                return next
+              })
+            } else if (msg.t === "lock.released") {
+              setCellLockHolders((cur) => {
+                if (!cur.has(msg.cellId)) return cur
+                const next = new Map(cur)
+                next.delete(msg.cellId)
+                return next
+              })
+            }
+          },
+        },
+      )
+      reconcilerRef.current = reconciler
+    })()
+    return () => {
+      cancelled = true
+      reconcilerRef.current = null
+      reconciler?.close()
+    }
+  }, [project?.id, frontierSession?.jwt, getTokenForFile, revalidateCells, projectFiles, currentUsername])
+
+  const handleClaimCell = useCallback((cellId: string) => {
+    focusedCellIdRef.current = cellId
+    reconcilerRef.current?.send({ t: "focus.claim", cellId })
+  }, [])
+  const handleReleaseCell = useCallback((cellId: string) => {
+    if (focusedCellIdRef.current === cellId) focusedCellIdRef.current = null
+    reconcilerRef.current?.send({ t: "focus.release", cellId })
+  }, [])
+  const handleAckRemoteChange = useCallback((cellId: string) => {
+    setCellsWithRemoteChange((cur) => {
+      if (!cur.has(cellId)) return cur
+      const next = new Set(cur)
+      next.delete(cellId)
+      return next
+    })
+  }, [])
+
+  // Drives the editor-area rendering: loading skeleton vs. empty state vs.
+  // EditorTable. Centralizes the decision so we don't flash between states
+  // while a file hydrates.
+  const cellAreaState = useMemo(
+    () => deriveCellAreaState({
+      activeFileId,
+      docLoading,
+      hasDoc: Boolean(doc),
+      cellCount: cells.length,
+      syncStatus: fileSyncStatus,
+    }),
+    [activeFileId, docLoading, doc, cells.length, fileSyncStatus]
+  )
+
+  // Presence visible in the status bar is the file-level set the sync-worker
+  // already broadcasts via awareness. We previously union'd this with a
+  // separate project-wide presence room (over the legacy signaling relay) so
+  // peers on other files showed up too, but the relay is gone and the
+  // sync-worker doesn't fan out cross-file awareness yet — file-level only
+  // for now.
+  const peers = fileLevelPeers
+
+  const collabUser = useMemo(() => {
+    if (!syncProvider) return undefined
+    const clientId = String(syncProvider.awareness.clientID)
+    return {
+      name: displayNameFor(currentUsername, clientId),
+      color: peerColorLocal(clientId),
+    }
+  }, [syncProvider, currentUsername])
+
+  async function handleSearchSelect(result: WorkspaceSearchResult, query: string) {
+    const flash = () => {
+      const idx = cellsRef.current.findIndex((c) => c.id === result.cellId)
+      if (idx >= 0) editorRef.current?.scrollToCellIndex(idx)
+      editorRef.current?.flashCell(result.cellId, query)
+    }
+    if (result.fileId !== activeFileId) {
+      workspaceTabs.openFile(result.fileId)
+      setTimeout(flash, 400)
+    } else {
+      flash()
+    }
+  }
+
+  const perms = useProjectPermissions(project)
+  const isReadOnly = !perms.canEditContent
+
+  const { state: checklistState, dismissed: checklistDismissed, dismiss: dismissChecklist, refreshShares: refreshChecklistShares } = useSetupChecklist(project ?? null)
+  const [checklistOpen, setChecklistOpen] = useState(false)
+  const [showChipTooltip, setShowChipTooltip] = useState(false)
+  const livingMemoryEnabled = useFeatureFlag("living-memory-view", project)
+
+  const handleChecklistOpenChange = useCallback((next: boolean) => {
+    setChecklistOpen(next)
+    if (next || checklistDismissed) return
+    // First close — persist the dismissal so we don't reopen on next nav,
+    // and surface a one-time hint pointing at the chip.
+    void dismissChecklist()
+    let alreadyShown = false
+    try { alreadyShown = localStorage.getItem("codex.checklistTooltipShown") === "1" } catch { /* ignore */ }
+    if (!alreadyShown) {
+      try { localStorage.setItem("codex.checklistTooltipShown", "1") } catch { /* ignore */ }
+      setShowChipTooltip(true)
+      window.setTimeout(() => setShowChipTooltip(false), 6000)
+    }
+  }, [checklistDismissed, dismissChecklist])
+
+  const handleProjectUpdated = useCallback(async (_updated: ProjectRecord | undefined) => {
+    // The caller (useSaveCompletionSettings, etc.) already persisted to IDB.
+    // We just need to refresh the in-memory project state.
+    refresh()
+  }, [refresh])
+
+  // All hooks below must live above the early return so hook count is stable
+  // across renders (React throws "Rendered more hooks" otherwise).
+
+  const suggestions = useMemo(
+    () => (project ? detectSuggestions(project) : []),
+    [project]
+  )
+  const bannerSuggestions = useMemo(() => {
+    if (!project || project.suggestionsDismissedAt) return []
+    return suggestions
+  }, [project, suggestions])
+  const suggestionFileIds = useMemo(
+    () => new Set(suggestions.map((s) => s.fileId)),
+    [suggestions]
+  )
+
+  const [moveTargetId, setMoveTargetId] = useState<string | null>(null)
+  const [moveCorpus, setMoveCorpus] = useState("")
+  const existingCorpusMarkers = useMemo(() => {
+    const set = new Set<string>()
+    for (const f of project?.files ?? []) {
+      const m = f.corpusMarker?.trim()
+      if (m) set.add(m)
+    }
+    return Array.from(set).sort((a, b) => a.localeCompare(b))
+  }, [project?.files])
+  const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null)
+  const [undo, setUndo] = useState<{ project: ProjectRecord } | null>(null)
+
+  const handleRename = useCallback(async (fileId: string, newName: string) => {
+    if (!project) return
+    try {
+      await patchProject(project.id, (p) => renameFile(p, fileId, newName))
+      refresh()
+    } catch (e) {
+      alert(e instanceof Error ? e.message : "Rename failed")
+    }
+  }, [project, refresh])
+
+  const handleDeleteFile = useCallback(async (fileId: string) => {
+    if (!project) return
+    await patchProject(project.id, (p) => deleteFile(p, fileId))
+    refresh()
+    if (activeFileId === fileId) setActiveFileId(null)
+    // Tell frontier-server to drop the projection rows for this file too.
+    // Best-effort: a failure here doesn't roll back the local delete — the
+    // D1 row just becomes an orphan until a future sweep.
+    void deleteFileProjection({
+      jwt: frontierSession?.jwt ?? null,
+      projectId: project.id,
+      fileId,
+    })
+  }, [project, refresh, activeFileId, setActiveFileId, frontierSession])
+
+  const handleApplySuggestions = useCallback(async (chosen: RenameSuggestion[]) => {
+    if (!project) return
+    const before = await getProject(project.id)
+    const dismissedAt = new Date().toISOString()
+    // Apply the user's choices and dismiss the banner in the same write:
+    // once they've engaged, the banner is no longer useful and shouldn't
+    // re-appear for any remaining (unchosen) suggestions until they
+    // explicitly re-run detection from the overflow menu.
+    await patchProject(project.id, (p) => ({
+      ...applySuggestions(p, chosen),
+      suggestionsDismissedAt: dismissedAt,
+    }))
+    refresh()
+    if (before) setUndo({ project: before })
+    setTimeout(() => setUndo((u) => (u?.project === before ? null : u)), 10000)
+  }, [project, refresh])
+
+  const handleApplyOneSuggestion = useCallback(async (fileId: string) => {
+    if (!project) return
+    const target = suggestions.find((s) => s.fileId === fileId)
+    if (!target) return
+    await handleApplySuggestions([target])
+  }, [project, suggestions, handleApplySuggestions])
+
+  const handleRenameCorpus = useCallback(async (oldMarker: string, newMarker: string) => {
+    if (!project) return
+    await patchProject(project.id, (p) => renameCorpus(p, oldMarker, newMarker))
+    refresh()
+  }, [project, refresh])
+
+  const handleDismissBanner = useCallback(async () => {
+    if (!project) return
+    await patchProject(project.id, (p) => ({ ...p, suggestionsDismissedAt: new Date().toISOString() }))
+    refresh()
+  }, [project, refresh])
+
+  const handleReinviteSuggestions = useCallback(async () => {
+    if (!project) return
+    await patchProject(project.id, (p) => {
+      const next = { ...p }
+      delete next.suggestionsDismissedAt
+      return next
+    })
+    refresh()
+  }, [project, refresh])
+
+  const projectNavItems = useMemo(() => {
+    const items = [
+      { id: "rules", label: "Rules", icon: Scale,
+        onClick: () => navigate(`/project/${projectId}/rules`) },
+      { id: "comments", label: "Comments", icon: MessagesSquare,
+        badge: Array.from(openCommentCount.values()).reduce((a, b) => a + b, 0),
+        onClick: () => navigate(`/project/${projectId}/comments`) },
+      { id: "snapshots", label: "Snapshots", icon: Camera,
+        onClick: () => navigate(`/project/${projectId}/snapshots`) },
+      { id: "share", label: "Share", icon: Share2,
+        onClick: () => setShareOpen(true) },
+      { id: "settings", label: "Settings", icon: SettingsIcon,
+        onClick: () => navigate(`/project/${projectId}/settings`) },
+    ]
+    if (livingMemoryEnabled) {
+      // Insert before Share so it sits with Rules/Comments/Snapshots.
+      const insertIdx = items.findIndex((i) => i.id === "share")
+      items.splice(insertIdx, 0, {
+        id: "living-memory",
+        label: "Living Memory",
+        icon: Brain,
+        onClick: () => navigate(`/project/${projectId}/memory`),
+      })
+    }
+    return items
+  }, [projectId, navigate, openCommentCount, livingMemoryEnabled])
+
+  const audioCounts = useMemo(() => ({
+    untranscribed: countTranscribeTargets(cells),
+    unsynthesized: countSynthTargets(cells, false),
+  }), [cells])
+
+  // Eager media strategy: prefetch every recording's waveform peaks into the
+  // OPFS cache once the file is open, so even cells the user hasn't scrolled
+  // to yet will have an instant waveform.
+  useEffect(() => {
+    if (project?.audioMediaStrategy !== "eager") return
+    if (!frontierSession?.jwt) return
+    if (cells.length === 0) return
+    let cancelled = false
+    void eagerlyPrefetchPeaks({
+      cells, project, session: frontierSession, bins: 320,
+      isCancelled: () => cancelled,
+    })
+    return () => { cancelled = true }
+  }, [project, cells, frontierSession])
+
+  const actionCtx = useMemo(() => ({
+    project: project!,
+    activeFileId,
+    fileProgress,
+    audioCounts,
+  }), [project, activeFileId, fileProgress, audioCounts])
+
+  async function handleExport() {
+    if (!activeFileId) return
+    try {
+      const { blob, filename } = await exportFile(activeFileId)
+      downloadBlob(blob, filename)
+    } catch (err) {
+      alert(`Export failed: ${err instanceof Error ? err.message : "Unknown error"}`)
+    }
+  }
+
+  const actionArgs = useMemo(() => ({
+    openImport: () => setImportOpen(true),
+    runCompletions: () => {
+      if (!activeFileId) return
+      const untranslated = cells.filter((c) => !c.translated.trim())
+      if (untranslated.length === 0) return
+      completeBatch(untranslated.slice(0, MAX_BATCH_COMPLETIONS))
+    },
+    runExport: () => handleExport(),
+    runBatchValidate: () => {
+      console.info("batch-validate triggered (placeholder runner)")
+    },
+    runAgentInput: () => {
+      console.info("agent-input triggered (placeholder runner)")
+    },
+    runImportWip: () => setImportOpen(true),
+    runTranscribeAll: () => {
+      if (!doc || !project || !frontierSession) return
+      void transcribeAllInFile({ doc, cells, project, session: frontierSession })
+    },
+    runSynthAll: () => {
+      if (!doc || !project || !frontierSession) return
+      void synthAllInFile({
+        doc, cells, project, session: frontierSession,
+        username: project.username || "anonymous",
+      })
+    },
+    navigate,
+  }), [activeFileId, completeBatch, cells, doc, project, frontierSession, navigate])
+
+  if (status === "loading") return <div className="p-8 text-muted-foreground">Loading...</div>
+  if (status === "no-session") {
+    return (
+      <div className="p-8 text-muted-foreground">
+        This project isn't on this device. <button className="underline" onClick={() => navigate("/")}>Sign in</button> to open it from the cloud.
+      </div>
+    )
+  }
+  if (status === "not-found" || !project) {
+    return (
+      <div className="p-8 text-muted-foreground">
+        Project not found, or you don't have access. <button className="underline" onClick={() => navigate("/")}>Back to dashboard</button>.
+      </div>
+    )
+  }
+
+  if (project.deletedAt) {
+    return (
+      <TrashedProjectScreen
+        project={project}
+        onClose={() => navigate("/")}
+        onRestore={async () => {
+          const result = await restoreProject(project, { jwt: frontierSession?.jwt ?? null })
+          if (result.remote.kind === "forbidden" || result.remote.kind === "error") {
+            return
+          }
+          refresh()
+        }}
+      />
+    )
+  }
+
+  async function handleImported(refs: FileReference[]) {
+    if (!project) return
+    await patchProject(project.id, (p) => ({ ...p, files: [...p.files, ...refs] }))
+    refresh()
+    if (refs.length > 0) workspaceTabs.openFile(refs[0].id)
+  }
+
+  // ── Render ────────────────────────────────────────────────────────────────
+
+  return (
+    <EditorScrollProvider>
+      {/* ScrollToGroupHandler must live inside EditorScrollProvider so it can call useEditorScroll */}
+      <ScrollToGroupHandler cells={cells} editorRef={editorRef} />
+      <AppShell
+        sidebar={
+          <>
+            <div className="border-b p-2">
+              <AccountSwitcher />
+            </div>
+            <SuggestionBanner
+              suggestions={bannerSuggestions}
+              onApply={handleApplySuggestions}
+              onDismiss={handleDismissBanner}
+            />
+            <ExpandableFileList
+              projectId={projectId!}
+              files={project.files}
+              activeFileId={activeFileId}
+              fileProgress={fileProgress}
+              suggestionFileIds={suggestionFileIds}
+              validationCount={validationCount}
+              onSelectFile={workspaceTabs.openFile}
+              onRename={handleRename}
+              onMove={(fileId) => {
+                setMoveTargetId(fileId)
+                setMoveCorpus(project.files.find((f) => f.id === fileId)?.corpusMarker ?? "")
+              }}
+              onDelete={(fileId) => setPendingDeleteId(fileId)}
+              onApplySuggestion={handleApplyOneSuggestion}
+              onRenameCorpus={handleRenameCorpus}
+            />
+            <SidebarProjectSection items={projectNavItems} />
+          </>
+        }
+        header={
+          <WorkspaceHeader
+            project={project}
+            onBack={() => navigate("/")}
+            extraMenuItems={
+              suggestions.length > 0 && project.suggestionsDismissedAt
+                ? [{
+                    id: "redetect-suggestions",
+                    label: `Show ${suggestions.length} file name suggestion${suggestions.length === 1 ? "" : "s"}`,
+                    icon: Sparkles,
+                    onClick: handleReinviteSuggestions,
+                  }]
+                : []
+            }
+          >
+            <ViewSettingsMenu
+              fileOpen={Boolean(activeFileId)}
+              lineNumbersEnabled={fileMeta.lineNumbersEnabled}
+              sourceTextDirection={fileMeta.sourceTextDirection}
+              targetTextDirection={fileMeta.targetTextDirection}
+              cellLabelsEnabled={cellLabelsEnabled}
+              rtlHintDismissed={fileMeta.rtlHintDismissed}
+              onLineNumbersChange={fileMeta.setLineNumbersEnabled}
+              onSourceTextDirectionChange={fileMeta.setSourceTextDirection}
+              onTargetTextDirectionChange={fileMeta.setTargetTextDirection}
+              onCellLabelsChange={setCellLabelsEnabled}
+              onDismissRtlHint={fileMeta.dismissRtlHint}
+            />
+            {isSubtitleFile && (
+              <button
+                className="rounded p-1.5 hover:bg-accent"
+                onClick={() => setVideoDialogOpen(true)}
+                title="Attach video"
+              >
+                <Film className="h-4 w-4" />
+              </button>
+            )}
+            {checklistState.totalCount > 0 && checklistState.completedCount < checklistState.totalCount && (
+              <TooltipProvider delay={0}>
+                <Tooltip open={showChipTooltip} onOpenChange={setShowChipTooltip}>
+                  <TooltipTrigger
+                    render={
+                      <button
+                        onClick={() => { setShowChipTooltip(false); setChecklistOpen(true) }}
+                        className="flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-medium text-muted-foreground hover:bg-accent"
+                        title="Open setup checklist"
+                      />
+                    }
+                  >
+                    <ClipboardList className="h-3 w-3" />
+                    Setup: {checklistState.completedCount}/{checklistState.totalCount}
+                  </TooltipTrigger>
+                  <TooltipContent side="bottom">
+                    Reopen the setup checklist anytime from here.
+                  </TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
+            )}
+            <button
+              className="flex items-center gap-1.5 rounded p-1.5 text-sm hover:bg-accent"
+              onClick={() => {
+                setParallelMode("search")
+                setParallelScope(activeFileId ? "file" : "project")
+                setParallelOpen(true)
+              }}
+              title="Search & replace (⌘F)"
+            >
+              <SearchIcon className="h-4 w-4" />
+              <span className="hidden text-xs sm:inline">Search</span>
+            </button>
+            <NextUnfinishedButton
+              onClick={handleJumpNextUnfinished}
+              disabled={!activeFileId || !hasUnfinished}
+            />
+            {project && (
+              <SpeakBarToggle
+                enabled={speakBarEnabled}
+                onToggle={() => setSpeakBarEnabled(project.id, !speakBarEnabled)}
+              />
+            )}
+            <PrimaryActionButton ctx={actionCtx} run={actionArgs} />
+          </WorkspaceHeader>
+        }
+        beforeMain={
+          <>
+            <TabStrip
+              tabs={workspaceTabs.tabs}
+              activeTabId={workspaceTabs.activeTabId}
+              files={projectFiles}
+              onActivate={workspaceTabs.activateTab}
+              onClose={workspaceTabs.closeTab}
+            />
+            {project && doc && activeFileId && (
+              <>
+                {speakBarEnabled && (
+                  <VoiceBar
+                    project={project}
+                    cells={cells}
+                    doc={doc}
+                    username={currentUsername}
+                    session={frontierSession}
+                    editorRef={editorRef}
+                    onProjectChanged={refresh}
+                    onCompleteSingle={completeSingle}
+                    onHide={() => setSpeakBarEnabled(project.id, false)}
+                  />
+                )}
+                <SelectionBar
+                  project={project}
+                  cells={cells}
+                  doc={doc}
+                  session={frontierSession}
+                  username={currentUsername}
+                  completeSingle={completeSingle}
+                  completeBatch={completeBatch}
+                />
+              </>
+            )}
+            {isReadOnly && (
+              <div className="flex items-center gap-2 border-b bg-amber-50 px-4 py-2 text-xs text-amber-900">
+                <Lock className="h-3.5 w-3.5" />
+                Read-only — imported from git. Push is coming in Phase 2.
+              </div>
+            )}
+            {project && (
+              <SystemPromptNudge
+                project={project}
+                onProjectUpdated={handleProjectUpdated}
+                onCustomize={() => setChecklistOpen(true)}
+              />
+            )}
+            {isSubtitleFile && videoSrc && (
+              <ResizableVideoPanel>
+                {(height) => (
+                  <VideoPlayer
+                    ref={videoPlayerRef}
+                    src={videoSrc}
+                    cues={videoCues}
+                    startOffset={videoStartOffset}
+                    height={height}
+                    onTimeUpdate={setCurrentVideoTime}
+                  />
+                )}
+              </ResizableVideoPanel>
+            )}
+            {isSubtitleFile && blobUnavailable && !videoAttachment.videoUrl && (
+              <div className="bg-amber-50 px-4 py-2 text-xs text-amber-700 dark:bg-amber-950 dark:text-amber-400">
+                Video file not available on this device. Attach it locally or paste a URL via the Film icon.
+              </div>
+            )}
+          </>
+        }
+        main={cellAreaState.kind === "ready" && doc ? (
+          <EditorTable
+            ref={editorRef} project={project} cells={cells} doc={doc}
+            username={currentUsername}
+            isCompletionConfigured={isConfigured} isCompletionAvailable={isCompletionAvailable} completing={completing}
+            examples={examples} errors={errors}
+            onCompleteSingle={completeSingle} onCompleteBatch={completeBatch}
+            healthMap={healthMap} infractions={infractions} rules={rules}
+            onInfractionClick={(ruleId) => {
+              setCommentsCellId(null); setHistoryCellId(null); setDrawerRuleId(ruleId)
+            }}
+            isBacktranslationConfigured={isBacktranslationConfigured}
+            onBacktranslate={runBacktranslation}
+            backtranslating={backtranslating}
+            backtranslationErrors={backtranslationErrors}
+            cellOpenCommentCount={cellOpenCommentCount}
+            onOpenComments={(cellId) => {
+              setDrawerRuleId(null); setHistoryCellId(null); setCommentsCellId(cellId)
+            }}
+            onOpenHistory={(cellId) => {
+              setDrawerRuleId(null); setCommentsCellId(null); setHistoryCellId(cellId)
+            }}
+            syncProvider={syncProvider} collabUser={collabUser}
+            activeCueIndex={activeCueIndex >= 0 ? activeCueIndex : undefined}
+            onSeekToCue={isSubtitleFile ? handleCueSeek : undefined}
+            lineNumbersEnabled={fileMeta.lineNumbersEnabled}
+            cellLabelsEnabled={cellLabelsEnabled}
+            sourceTextDirection={fileMeta.sourceTextDirection}
+            targetTextDirection={fileMeta.targetTextDirection}
+            isAnonymous={!frontierSession}
+            breakdownMap={health.breakdownMap}
+            onJumpToCell={jumpToCellId}
+            onAiSetupNeeded={() => setAiSetupOpen(true)}
+            onOpenRecording={(cellId) => setRecordingCellId(cellId)}
+            onProjectChanged={refresh}
+            onCellCommitted={revalidateCells}
+            cellLockHolders={cellLockHolders}
+            cellsWithRemoteChange={cellsWithRemoteChange}
+            onClaimCell={handleClaimCell}
+            onReleaseCell={handleReleaseCell}
+            onAckRemoteChange={handleAckRemoteChange}
+            staleCellIds={staleCellIds}
+          />
+        ) : (
+          <CellAreaPlaceholder
+            state={cellAreaState}
+            fileName={activeFile?.name}
+            onImportClick={() => setImportOpen(true)}
+          />
+        )}
+        aside={
+          <>
+            {drawerRuleId && (
+              <RuleDrawer
+                rule={drawerRule}
+                infractions={drawerInfractions}
+                cells={cells}
+                onClose={() => setDrawerRuleId(null)}
+                onNavigateToCell={() => {}}
+                project={project}
+                doc={doc}
+                username={currentUsername}
+                refresh={refresh}
+                cellsByFile={fileCells}
+              />
+            )}
+            {commentsCell && (
+              <CommentsDrawer
+                project={project} cell={commentsCell}
+                onClose={() => setCommentsCellId(null)}
+                onNewThread={(text) => addThread(commentsCell.id, text)}
+                onReply={(threadId, text) => addMessage(commentsCell.id, threadId, text)}
+                onResolve={(threadId, msg) => resolveThread(commentsCell.id, threadId, msg)}
+                onReopen={(threadId) => reopenThread(commentsCell.id, threadId)}
+              />
+            )}
+            {historyCell && (
+              <HistoryDrawer
+                cell={historyCell}
+                onClose={() => setHistoryCellId(null)}
+                projectId={project?.id ?? null}
+                fileId={activeFileId}
+                getTokenForFile={getTokenForFile}
+              />
+            )}
+          </>
+        }
+        statusBar={
+          <>
+            <WorkspaceStatusBar
+              left={
+                <div className="flex items-center gap-3">
+                  <PeerPresence peers={peers} />
+                  <SyncStatusIndicator status={fileSyncStatus} />
+                  <OutboxSyncIndicator
+                    pendingCount={outboxPending}
+                    failureStreak={outboxFailures}
+                    records={outboxRecords}
+                  />
+                </div>
+              }
+            />
+            <StatusBar
+              cells={cells}
+              projectHealth={projectHealth}
+              projectBreakdown={projectBreakdown}
+              biggestDrags={biggestDrags}
+              onJumpToCell={jumpToCellId}
+            />
+          </>
+        }
+      />
+      {project && (
+        <SetupChecklistDrawer
+          open={checklistOpen}
+          onOpenChange={handleChecklistOpenChange}
+          project={project}
+          state={checklistState}
+          onProjectUpdated={handleProjectUpdated}
+          onSharesChanged={refreshChecklistShares}
+          onDismiss={() => {
+            void dismissChecklist()
+            setChecklistOpen(false)
+          }}
+        />
+      )}
+      {project && (
+        <AiSetupDialog
+          open={aiSetupOpen}
+          onOpenChange={setAiSetupOpen}
+          project={project}
+          onUpdated={handleProjectUpdated}
+        />
+      )}
+      {project && doc && (
+        <AudioRecordingModal
+          open={recordingCellId !== null}
+          project={project}
+          doc={doc}
+          cells={cells}
+          activeCellId={recordingCellId}
+          username={currentUsername}
+          onActiveCellChange={(cellId) => {
+            setRecordingCellId(cellId)
+            // Scroll the underlying editor to the new cell so the row is visible
+            // when the modal closes.
+            const idx = cells.findIndex((c) => c.id === cellId)
+            if (idx >= 0) editorRef.current?.scrollToCellIndex(idx)
+          }}
+          onClose={() => setRecordingCellId(null)}
+        />
+      )}
+      <ImportDialog open={importOpen} onOpenChange={setImportOpen}
+        projectId={project.id}
+        username={currentUsername}
+        sourceLanguage={project.sourceLanguage} targetLanguage={project.targetLanguage}
+        onImported={handleImported} />
+      <ParallelPassagesPanel
+        open={parallelOpen}
+        onOpenChange={setParallelOpen}
+        mode={parallelMode}
+        onModeChange={setParallelMode}
+        scope={parallelScope}
+        onScopeChange={setParallelScope}
+        activeFileId={activeFileId}
+        activeFileName={activeFileId ? project.files.find((f) => f.id === activeFileId)?.name ?? null : null}
+        activeDoc={doc}
+        loading={searchLoading}
+        ready={searchReady}
+        results={searchResults}
+        onReady={buildIndex}
+        onSearch={runSearch}
+        onClearResults={clearSearchResults}
+        onSelect={handleSearchSelect}
+        username={currentUsername}
+        isReadOnly={isReadOnly}
+        onAfterReplace={rebuildSearchIndex}
+      />
+      <SharePanel
+        open={shareOpen} onOpenChange={setShareOpen}
+        projectId={projectId!}
+        onSharesChanged={refreshChecklistShares}
+      />
+      <VideoAttachmentDialog
+        open={videoDialogOpen} onOpenChange={setVideoDialogOpen}
+        current={videoAttachment} onSave={saveVideo}
+      />
+      <ConfirmActionDialog
+        open={pendingDeleteId !== null}
+        onOpenChange={(v) => { if (!v) setPendingDeleteId(null) }}
+        title="Delete file"
+        description={(() => {
+          const f = pendingDeleteId ? project.files.find((x) => x.id === pendingDeleteId) : null
+          return f ? `Remove "${f.name}" from this project? The underlying data is not deleted from disk.` : ""
+        })()}
+        confirmLabel="Delete"
+        checkboxLabel="I understand this removes the file from the project."
+        onConfirm={() => { if (pendingDeleteId) handleDeleteFile(pendingDeleteId); setPendingDeleteId(null) }}
+      />
+      {moveTargetId !== null && (
+        <MoveToCorpusDialog
+          // Remount per-open so internal state resets cleanly without an effect.
+          key={moveTargetId}
+          initialValue={moveCorpus}
+          existingMarkers={existingCorpusMarkers}
+          onClose={() => setMoveTargetId(null)}
+          onSave={async (next) => {
+            if (!project) return
+            await patchProject(project.id, (p) => moveFileToCorpus(p, moveTargetId, next))
+            refresh()
+            setMoveTargetId(null)
+          }}
+        />
+      )}
+      {undo && (
+        <div className="fixed bottom-4 right-4 z-60 flex items-center gap-2 rounded border bg-background px-3 py-2 text-sm shadow-md">
+          <span>Applied renames.</span>
+          <Button size="sm" variant="outline" onClick={async () => {
+            if (!undo) return
+            await updateProject(undo.project)
+            refresh()
+            setUndo(null)
+          }}>Undo</Button>
+        </div>
+      )}
+    </EditorScrollProvider>
+  )
+}
+
+// Pick from existing corpus markers via a native <select>, with an inline
+// "Other…" option to create a brand-new marker. Replaces the prior free-text
+// input that hid the existing options behind the dialog's backdrop blur (#39).
+// Caller wraps with `key` so internal state resets on each open.
+function MoveToCorpusDialog({
+  initialValue, existingMarkers, onClose, onSave,
+}: {
+  initialValue: string
+  existingMarkers: ReadonlyArray<string>
+  onClose: () => void
+  onSave: (value: string) => void | Promise<void>
+}) {
+  const NEW = "__new__"
+  const trimmed = initialValue.trim()
+  const initIsNew = trimmed.length > 0 && !existingMarkers.includes(trimmed)
+  const [selection, setSelection] = useState(initIsNew ? NEW : trimmed)
+  const [customValue, setCustomValue] = useState(initIsNew ? trimmed : "")
+  const isNew = selection === NEW
+  return (
+    <Dialog open onOpenChange={(v) => { if (!v) onClose() }}>
+      <DialogContent className="max-w-sm">
+        <DialogHeader><DialogTitle>Move to corpus</DialogTitle></DialogHeader>
+        <select
+          value={selection}
+          onChange={(e) => setSelection(e.target.value)}
+          className="w-full rounded border bg-background px-2 py-1.5 text-sm"
+        >
+          <option value="">Ungrouped</option>
+          {existingMarkers.map((m) => <option key={m} value={m}>{m}</option>)}
+          <option value={NEW}>Other…</option>
+        </select>
+        {isNew && (
+          <input
+            autoFocus
+            value={customValue}
+            onChange={(e) => setCustomValue(e.target.value)}
+            placeholder="New corpus name"
+            className="mt-2 w-full rounded border bg-background px-2 py-1 text-sm"
+          />
+        )}
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose}>Cancel</Button>
+          <Button
+            disabled={isNew && !customValue.trim()}
+            onClick={() => { void onSave(isNew ? customValue : selection) }}
+          >
+            Save
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+// ── ScrollToGroupHandler ───────────────────────────────────────────────────
+// Must render inside <EditorScrollProvider> so useEditorScroll() has context.
+// Watches pendingGroup and scrolls the first matching cell into view via the
+// forwarded editorRef.
+
+interface ScrollToGroupHandlerProps {
+  cells: CellData[]
+  editorRef: React.RefObject<EditorTableHandle | null>
+}
+
+function ScrollToGroupHandler({ cells, editorRef }: ScrollToGroupHandlerProps) {
+  const editorScroll = useEditorScroll()
+
+  useEffect(() => {
+    const { group: groupId, section: sectionLabel } = editorScroll.consume()
+    if (!groupId && !sectionLabel) return
+
+    let idx = -1
+    if (sectionLabel) {
+      // Match by section label first (e.g. "GEN 1")
+      idx = cells.findIndex((c) => c.section === sectionLabel)
+      // Fallback: match by group
+      if (idx < 0) idx = cells.findIndex((c) => (c.group ?? "Ungrouped") === sectionLabel)
+    } else if (groupId) {
+      idx = cells.findIndex((c) => (c.group ?? "Ungrouped") === groupId)
+    }
+
+    if (idx >= 0) {
+      // Defer a tick so the virtualizer has the latest cell list after any
+      // file-switch that preceded this request.
+      setTimeout(() => {
+        editorRef.current?.scrollToCellIndex(idx)
+      }, 0)
+    }
+  }, [cells, editorScroll, editorRef])
+
+  return null
+}
+
+interface TrashedProjectScreenProps {
+  project: ProjectRecord
+  onClose: () => void
+  onRestore: () => void | Promise<void>
+}
+
+function TrashedProjectScreen({ project, onClose, onRestore }: TrashedProjectScreenProps) {
+  const { session } = useFrontierSession()
+  const canRestore =
+    (project.syncRole?.level ?? 0) >= 700 ||
+    (!project.origin && !project.syncRole) ||
+    session == null
+
+  return (
+    <div className="flex min-h-screen items-center justify-center bg-background px-6">
+      <div className="max-w-md rounded-lg border bg-card p-8 text-center shadow-sm">
+        <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-muted">
+          <Trash2 className="h-6 w-6 text-muted-foreground" />
+        </div>
+        <h1 className="mb-2 text-lg font-semibold">This project is in Trash</h1>
+        <p className="mb-6 text-sm text-muted-foreground">
+          "{project.name}" was moved to Trash
+          {project.deletedBy ? ` by ${project.deletedBy}` : ""}.
+          Restore it to continue editing.
+        </p>
+        <div className="flex items-center justify-center gap-2">
+          <Button variant="outline" onClick={onClose}>
+            Back to Dashboard
+          </Button>
+          {canRestore && (
+            <Button onClick={() => onRestore()}>
+              <Undo2 className="mr-1 h-4 w-4" />
+              Restore
+            </Button>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}

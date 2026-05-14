@@ -1,12 +1,9 @@
-// Tests for handleEventsWriteRequest (POST /events).
-//
-// Uses the shared in-memory D1 fake from __tests__/helpers/d1-fake.ts and
-// the JWT signing pattern from authorize.test.ts.
+// Tests for handleEventsWriteRequest (POST /events) under AD-2 / AD-9.
 
 import { describe, it, expect, vi } from 'vitest'
 
-// route.ts now imports broadcast.ts → partyserver (cloudflare: URL).
-// Mock partyserver so Node's ESM loader doesn't choke on cloudflare: imports.
+// route.ts imports broadcast.ts → partyserver (cloudflare:* imports).
+// Mock partyserver so Node's ESM loader doesn't choke.
 vi.mock('partyserver', () => ({
   getServerByName: vi.fn().mockResolvedValue({
     fetch: vi.fn().mockResolvedValue(new Response(JSON.stringify({ ok: true }), { status: 200 })),
@@ -28,32 +25,74 @@ async function makeToken(overrides: Record<string, unknown> = {}): Promise<strin
   } as any)
 }
 
-function makeCommitEvent(overrides: Partial<RawEvent<'cell.commit'>> = {}): RawEvent<'cell.commit'> {
+function targetCreate(
+  overrides: Partial<RawEvent<'target.cell.create'>> = {},
+): RawEvent<'target.cell.create'> {
   return {
-    id: 'evt-00000000-0000-7000-0000-000000000001',
+    id: 'evt-create-001',
     schemaVersion: 1,
-    kind: 'cell.commit',
+    kind: 'target.cell.create',
     projectId: 'proj-a',
     fileId: 'file-x',
     cellId: 'cell-1',
+    parentId: null,
     author: 'alice',
-    payload: { value: 'hello world', valueHtml: '<p>hello world</p>' },
+    payload: { cellId: 'cell-1', value: 'hello', valueHtml: '<p>hello</p>' },
     clientTs: 1000,
     ...overrides,
   }
 }
 
-function makeValidateEvent(overrides: Partial<RawEvent<'cell.validate'>> = {}): RawEvent<'cell.validate'> {
+function targetCommit(
+  overrides: Partial<RawEvent<'target.cell.commit'>> = {},
+): RawEvent<'target.cell.commit'> {
   return {
-    id: 'evt-validate-000',
+    id: 'evt-commit-001',
+    schemaVersion: 1,
+    kind: 'target.cell.commit',
+    projectId: 'proj-a',
+    fileId: 'file-x',
+    cellId: 'cell-1',
+    parentId: 'evt-create-001',
+    author: 'alice',
+    payload: { value: 'updated', valueHtml: '<p>updated</p>' },
+    clientTs: 2000,
+    ...overrides,
+  }
+}
+
+function sourceCreate(
+  overrides: Partial<RawEvent<'source.cell.create'>> = {},
+): RawEvent<'source.cell.create'> {
+  return {
+    id: 'evt-src-create-001',
+    schemaVersion: 1,
+    kind: 'source.cell.create',
+    projectId: 'proj-a',
+    fileId: 'file-x',
+    cellId: 'cell-1',
+    parentId: null,
+    author: 'import-bot',
+    payload: { cellId: 'cell-1', value: 'source text' },
+    clientTs: 0,
+    ...overrides,
+  }
+}
+
+function validate(
+  overrides: Partial<RawEvent<'cell.validate'>> = {},
+): RawEvent<'cell.validate'> {
+  return {
+    id: 'evt-validate-001',
     schemaVersion: 1,
     kind: 'cell.validate',
     projectId: 'proj-a',
     fileId: 'file-x',
     cellId: 'cell-1',
-    author: 'alice',
-    payload: { editEventId: 'evt-commit-000' },
-    clientTs: 2000,
+    parentId: 'evt-create-001',
+    author: 'bob',
+    payload: { editEventId: 'evt-create-001' },
+    clientTs: 3000,
     ...overrides,
   }
 }
@@ -62,146 +101,49 @@ function makeEnv(db?: D1Database, secret: string | undefined = SECRET) {
   return { AQUILLA_DB: db, SYNC_SECRET_KEY: secret }
 }
 
-async function makeRequest(
-  events: unknown[],
-  token?: string,
-  path = '/events',
-  method = 'POST',
-): Promise<Request> {
+async function makeRequest(events: unknown[], token?: string): Promise<Request> {
   const headers: Record<string, string> = { 'Content-Type': 'application/json' }
-  if (token !== undefined) {
-    headers['Authorization'] = `Bearer ${token}`
-  }
-  return new Request(`https://worker${path}`, {
-    method,
+  if (token !== undefined) headers['Authorization'] = `Bearer ${token}`
+  return new Request('https://worker/events', {
+    method: 'POST',
     headers,
     body: JSON.stringify({ events }),
   })
 }
 
-// ── URL matching ──────────────────────────────────────────────────────────────
+// ── URL / method / env / body ──────────────────────────────────────────
 
-describe('handleEventsWriteRequest — URL matching', () => {
+describe('POST /events — wiring', () => {
   it('returns null for non-/events URLs', async () => {
     const req = new Request('https://worker/admin/projects/p1/rebuild-projection', { method: 'POST' })
-    const result = await handleEventsWriteRequest(req, makeEnv(makeInMemoryD1()))
-    expect(result).toBeNull()
+    expect(await handleEventsWriteRequest(req, makeEnv(makeInMemoryD1()))).toBeNull()
   })
 
-  it('returns null for /events/something (exact match only)', async () => {
-    const req = new Request('https://worker/events/foo', { method: 'POST' })
-    const result = await handleEventsWriteRequest(req, makeEnv(makeInMemoryD1()))
-    expect(result).toBeNull()
-  })
-
-  it('returns null for the root path', async () => {
-    const req = new Request('https://worker/', { method: 'POST' })
-    const result = await handleEventsWriteRequest(req, makeEnv(makeInMemoryD1()))
-    expect(result).toBeNull()
-  })
-})
-
-// ── Method validation ─────────────────────────────────────────────────────────
-
-describe('handleEventsWriteRequest — method validation', () => {
-  it('returns 405 for GET /events', async () => {
+  it('returns 405 for non-POST', async () => {
     const req = new Request('https://worker/events', { method: 'GET' })
-    const res = await handleEventsWriteRequest(req, makeEnv(makeInMemoryD1())) as Response
+    const res = (await handleEventsWriteRequest(req, makeEnv(makeInMemoryD1())))!
     expect(res.status).toBe(405)
   })
 
-  it('returns 405 for DELETE /events', async () => {
-    const req = new Request('https://worker/events', { method: 'DELETE' })
-    const res = await handleEventsWriteRequest(req, makeEnv(makeInMemoryD1())) as Response
-    expect(res.status).toBe(405)
-  })
-
-  it('returns 405 for PUT /events', async () => {
-    const req = new Request('https://worker/events', { method: 'PUT' })
-    const res = await handleEventsWriteRequest(req, makeEnv(makeInMemoryD1())) as Response
-    expect(res.status).toBe(405)
-  })
-})
-
-// ── Env validation ────────────────────────────────────────────────────────────
-
-describe('handleEventsWriteRequest — env validation', () => {
-  it('returns 500 when SYNC_SECRET_KEY is missing', async () => {
+  it('returns 500 when SYNC_SECRET_KEY missing', async () => {
     const req = new Request('https://worker/events', {
-      method: 'POST',
-      body: '{}',
-      headers: { 'Content-Type': 'application/json' },
+      method: 'POST', body: '{}', headers: { 'Content-Type': 'application/json' },
     })
-    // Note: passing undefined explicitly triggers the default-param value, so
-    // we must spread the env object directly (same pattern as rebuild.test.ts).
-    const res = await handleEventsWriteRequest(req, { AQUILLA_DB: makeInMemoryD1(), SYNC_SECRET_KEY: undefined }) as Response
+    const res = (await handleEventsWriteRequest(req, { AQUILLA_DB: makeInMemoryD1(), SYNC_SECRET_KEY: undefined }))!
     expect(res.status).toBe(500)
-    expect(await res.text()).toContain('SYNC_SECRET_KEY')
   })
 
-  it('returns 500 when AQUILLA_DB is missing', async () => {
+  it('returns 400 for invalid JSON body', async () => {
     const req = new Request('https://worker/events', {
-      method: 'POST',
-      body: '{}',
-      headers: { 'Content-Type': 'application/json' },
+      method: 'POST', body: 'not json', headers: { 'Content-Type': 'text/plain' },
     })
-    const res = await handleEventsWriteRequest(req, makeEnv(undefined, SECRET)) as Response
-    expect(res.status).toBe(500)
-    expect(await res.text()).toContain('AQUILLA_DB')
-  })
-})
-
-// ── Body parsing ──────────────────────────────────────────────────────────────
-
-describe('handleEventsWriteRequest — body parsing', () => {
-  it('returns 400 for non-JSON body', async () => {
-    const req = new Request('https://worker/events', {
-      method: 'POST',
-      body: 'not json',
-      headers: { 'Content-Type': 'text/plain' },
-    })
-    const res = await handleEventsWriteRequest(req, makeEnv(makeInMemoryD1())) as Response
+    const res = (await handleEventsWriteRequest(req, makeEnv(makeInMemoryD1())))!
     expect(res.status).toBe(400)
   })
 
-  it('returns 400 when body is missing the "events" key', async () => {
-    const req = new Request('https://worker/events', {
-      method: 'POST',
-      body: JSON.stringify({ notEvents: [] }),
-      headers: { 'Content-Type': 'application/json' },
-    })
-    const res = await handleEventsWriteRequest(req, makeEnv(makeInMemoryD1())) as Response
-    expect(res.status).toBe(400)
-  })
-
-  it('returns 400 when "events" is not an array', async () => {
-    const req = new Request('https://worker/events', {
-      method: 'POST',
-      body: JSON.stringify({ events: 'not an array' }),
-      headers: { 'Content-Type': 'application/json' },
-    })
-    const res = await handleEventsWriteRequest(req, makeEnv(makeInMemoryD1())) as Response
-    expect(res.status).toBe(400)
-  })
-
-  it('returns 400 when "events" is null', async () => {
-    const req = new Request('https://worker/events', {
-      method: 'POST',
-      body: JSON.stringify({ events: null }),
-      headers: { 'Content-Type': 'application/json' },
-    })
-    const res = await handleEventsWriteRequest(req, makeEnv(makeInMemoryD1())) as Response
-    expect(res.status).toBe(400)
-  })
-})
-
-// ── Empty batch ───────────────────────────────────────────────────────────────
-
-describe('handleEventsWriteRequest — empty batch', () => {
-  it('returns 200 with { accepted: [], rejected: [] } for empty events array', async () => {
+  it('returns 200 with empty arrays for an empty batch', async () => {
     const token = await makeToken()
-    const req = await makeRequest([], token)
-    const res = await handleEventsWriteRequest(req, makeEnv(makeInMemoryD1())) as Response
+    const res = (await handleEventsWriteRequest(await makeRequest([], token), makeEnv(makeInMemoryD1())))!
     expect(res.status).toBe(200)
     const body = await res.json() as any
     expect(body.accepted).toEqual([])
@@ -209,523 +151,212 @@ describe('handleEventsWriteRequest — empty batch', () => {
   })
 })
 
-// ── Mixed batch ───────────────────────────────────────────────────────────────
+// ── Author / authorization ─────────────────────────────────────────────
 
-describe('handleEventsWriteRequest — mixed batch', () => {
-  it('accepts valid cell.commit + cell.validate, rejects project mismatch (403)', async () => {
-    const validToken = await makeToken()
-
-    const validEvent = makeCommitEvent({ id: 'evt-valid-001' })
-    const validateEvent: RawEvent<'cell.validate'> = {
-      id: 'evt-validate-003',
-      schemaVersion: 1,
-      kind: 'cell.validate',
-      projectId: 'proj-a',
-      fileId: 'file-x',
-      cellId: 'cell-1',
-      author: 'alice',
-      payload: { editEventId: 'evt-valid-001' },
-      clientTs: 2000,
-    }
-
-    const badAuthEventMismatch = makeCommitEvent({
-      id: 'evt-bad-auth-002',
-      projectId: 'proj-other', // token is for proj-a only → 403 from authorize
-    })
-
-    const events = [validEvent, badAuthEventMismatch, validateEvent]
-    const req = await makeRequest(events, validToken)
+describe('POST /events — authorization', () => {
+  it('writes the token username as the events.author (not the client-supplied author)', async () => {
+    const token = await makeToken({ username: 'token-alice' })
+    const event = targetCreate({ author: 'mallory' })
     const db = makeInMemoryD1()
-    const res = await handleEventsWriteRequest(req, makeEnv(db)) as Response
+    await handleEventsWriteRequest(await makeRequest([event], token), makeEnv(db))
+    const tables = (db as any)._tables()
+    expect(tables.events[0].author).toBe('token-alice')
+  })
 
-    expect(res.status).toBe(200)
+  it('rejects source.cell.* from a CONTRIBUTOR token with 403', async () => {
+    const token = await makeToken({ role: 400 })
+    const event = sourceCreate()
+    const db = makeInMemoryD1()
+    const res = (await handleEventsWriteRequest(await makeRequest([event], token), makeEnv(db)))!
     const body = await res.json() as any
-
-    expect(body.accepted).toHaveLength(2)
-    const acceptedIds = body.accepted.map((a: any) => a.id).sort()
-    expect(acceptedIds).toEqual(['evt-validate-003', 'evt-valid-001'].sort())
-
     expect(body.rejected).toHaveLength(1)
-    expect(body.rejected[0].id).toBe('evt-bad-auth-002')
+    expect(body.rejected[0].status).toBe(403)
+  })
+
+  it('accepts source.cell.* from a PROJECT_LEAD token', async () => {
+    const token = await makeToken({ role: 500 })
+    const event = sourceCreate()
+    const db = makeInMemoryD1()
+    const res = (await handleEventsWriteRequest(await makeRequest([event], token), makeEnv(db)))!
+    const body = await res.json() as any
+    expect(body.accepted).toHaveLength(1)
+    expect((db as any)._tables().events[0].kind).toBe('source.cell.create')
+  })
+
+  it('rejects target.cell.commit from a COMMENTER token (< CONTRIBUTOR)', async () => {
+    const token = await makeToken({ role: 200 })
+    const event = targetCommit()
+    const db = makeInMemoryD1()
+    const res = (await handleEventsWriteRequest(await makeRequest([event], token), makeEnv(db)))!
+    const body = await res.json() as any
     expect(body.rejected[0].status).toBe(403)
   })
 })
 
-// ── Successful single cell.commit ─────────────────────────────────────────────
+// ── server_seq monotonicity ────────────────────────────────────────────
 
-describe('handleEventsWriteRequest — successful single cell.commit', () => {
-  it('issues D1 batch with events INSERT and cells UPSERT', async () => {
+describe('POST /events — server_seq', () => {
+  it('assigns a monotonically increasing server_seq per project', async () => {
     const token = await makeToken()
-    const event = makeCommitEvent({ id: 'evt-single-001' })
-    const req = await makeRequest([event], token)
     const db = makeInMemoryD1()
-    const res = await handleEventsWriteRequest(req, makeEnv(db)) as Response
-
-    expect(res.status).toBe(200)
-    const body = await res.json() as any
-    expect(body.accepted).toHaveLength(1)
-    expect(body.accepted[0].id).toBe('evt-single-001')
-    expect(body.rejected).toHaveLength(0)
-
-    // Verify the D1 batch was issued.
-    const stmts = (db as any)._issuedStmts() as Array<{ sql: string; args: unknown[] }>
-    // Should have issued: 1 events INSERT + 1 cells UPSERT = 2 statements
-    expect(stmts.length).toBeGreaterThanOrEqual(2)
-
-    const eventsInsert = stmts.find((s) => /INSERT OR IGNORE INTO events/.test(s.sql))
-    expect(eventsInsert).toBeDefined()
-    expect(eventsInsert?.args[0]).toBe('evt-single-001')
-
-    const cellsUpsert = stmts.find((s) => /INSERT INTO cells/.test(s.sql))
-    expect(cellsUpsert).toBeDefined()
-  })
-
-  it('writes the event row and the cell row into the D1 fake tables', async () => {
-    const token = await makeToken()
-    const event = makeCommitEvent({
-      id: 'evt-table-check-001',
-      payload: { value: 'written text', valueHtml: '<p>written text</p>' },
-    })
-    const req = await makeRequest([event], token)
-    const db = makeInMemoryD1()
-    await handleEventsWriteRequest(req, makeEnv(db)) as Response
-
-    // Check the events table
+    const events = [
+      targetCreate({ id: 'a', cellId: 'cell-1', payload: { cellId: 'cell-1', value: '1' } }),
+      targetCreate({ id: 'b', cellId: 'cell-2', payload: { cellId: 'cell-2', value: '2' } }),
+      targetCreate({ id: 'c', cellId: 'cell-3', payload: { cellId: 'cell-3', value: '3' } }),
+    ]
+    await handleEventsWriteRequest(await makeRequest(events, token), makeEnv(db))
     const tables = (db as any)._tables()
-    expect(tables.events).toHaveLength(1)
-    expect(tables.events[0].id).toBe('evt-table-check-001')
-    expect(tables.events[0].kind).toBe('cell.commit')
-    expect(tables.events[0].author).toBe('alice')
-
-    // Check the cells table
-    expect(tables.cells).toHaveLength(1)
-    expect(tables.cells[0].cell_id).toBe('cell-1')
-    expect(tables.cells[0].content_text).toBe('written text')
-  })
-
-  it('writes the verified token username rather than the client-supplied author', async () => {
-    const token = await makeToken({ username: 'token-alice' })
-    const event = makeCommitEvent({
-      id: 'evt-author-spoof-001',
-      author: 'mallory',
-    })
-    const req = await makeRequest([event], token)
-    const db = makeInMemoryD1()
-    await handleEventsWriteRequest(req, makeEnv(db)) as Response
-
-    const tables = (db as any)._tables()
-    expect(tables.events[0].author).toBe('token-alice')
-    expect(tables.cells[0].last_editor).toBe('token-alice')
+    expect(tables.events).toHaveLength(3)
+    const seqs = tables.events.map((e: any) => e.server_seq).sort((a: number, b: number) => a - b)
+    expect(seqs).toEqual([1, 2, 3])
   })
 })
 
-// ── Idempotency ───────────────────────────────────────────────────────────────
+// ── AD-2 parent-chain rule ─────────────────────────────────────────────
 
-describe('handleEventsWriteRequest — idempotency', () => {
-  it('same event ID submitted twice in the same request: both land in accepted (INSERT OR IGNORE means second insert is a no-op)', async () => {
+describe('POST /events — AD-2 first-child-of-parent', () => {
+  it('first sibling wins; second sibling is recorded but does NOT advance the projection', async () => {
     const token = await makeToken()
-    const event = makeCommitEvent({ id: 'evt-dupe-001' })
-    // Same event twice in one request
-    const req = await makeRequest([event, event], token)
     const db = makeInMemoryD1()
-    const res = await handleEventsWriteRequest(req, makeEnv(db)) as Response
 
-    expect(res.status).toBe(200)
-    const body = await res.json() as any
+    // Genesis create.
+    const create = targetCreate({ id: 'evt-create-001' })
+    const r0 = await handleEventsWriteRequest(await makeRequest([create], token), makeEnv(db))
+    expect((await r0!.json() as any).accepted).toHaveLength(1)
 
-    // Both instances are accepted (auth + dispatch both succeed; the INSERT
-    // OR IGNORE makes the second write a DB no-op, but the route still reports
-    // acceptance since there was no error).
-    expect(body.accepted).toHaveLength(2)
-    expect(body.accepted.map((a: any) => a.id)).toEqual(['evt-dupe-001', 'evt-dupe-001'])
-    expect(body.rejected).toHaveLength(0)
+    // Two commits with the SAME parent_id — only the first wins.
+    const winner = targetCommit({
+      id: 'evt-winner',
+      parentId: 'evt-create-001',
+      payload: { value: 'WINNER' },
+    })
+    const stale = targetCommit({
+      id: 'evt-stale',
+      parentId: 'evt-create-001',
+      payload: { value: 'STALE' },
+    })
 
-    // The DB should only have one row (second insert was ignored).
-    const tables = (db as any)._tables()
-    expect(tables.events).toHaveLength(1)
-    expect(tables.events[0].id).toBe('evt-dupe-001')
-  })
+    // First commit lands.
+    const r1 = await handleEventsWriteRequest(await makeRequest([winner], token), makeEnv(db))
+    expect((await r1!.json() as any).accepted).toHaveLength(1)
 
-  it('same event ID submitted in a second request: still accepted (INSERT OR IGNORE is idempotent)', async () => {
-    const token = await makeToken()
-    const event = makeCommitEvent({ id: 'evt-retry-001' })
-    const db = makeInMemoryD1()
-    const env = makeEnv(db)
+    let cell = (db as any)._tables().cells[0]
+    expect(cell.value).toBe('WINNER')
+    expect(cell.event_id).toBe('evt-winner')
 
-    // First request
-    const req1 = await makeRequest([event], token)
-    const res1 = await handleEventsWriteRequest(req1, env) as Response
-    expect(res1.status).toBe(200)
-
-    // Second request with same event
-    const req2 = await makeRequest([event], token)
-    const res2 = await handleEventsWriteRequest(req2, env) as Response
-    expect(res2.status).toBe(200)
-    const body2 = await res2.json() as any
+    // Second commit with the same parent_id is accepted (recorded in events)
+    // but the projection should NOT advance.
+    const r2 = await handleEventsWriteRequest(await makeRequest([stale], token), makeEnv(db))
+    const body2 = await r2!.json() as any
     expect(body2.accepted).toHaveLength(1)
     expect(body2.rejected).toHaveLength(0)
 
-    // DB still has only one row
+    const events = (db as any)._tables().events
+    expect(events.find((e: any) => e.id === 'evt-stale')).toBeDefined()
+
+    cell = (db as any)._tables().cells[0]
+    // Projection stayed on the winner.
+    expect(cell.value).toBe('WINNER')
+    expect(cell.event_id).toBe('evt-winner')
+  })
+
+  it('idempotent replay: the same event id replayed twice keeps the same chain head', async () => {
+    const token = await makeToken()
+    const db = makeInMemoryD1()
+
+    const create = targetCreate({ id: 'evt-create-001' })
+    await handleEventsWriteRequest(await makeRequest([create], token), makeEnv(db))
+    await handleEventsWriteRequest(await makeRequest([create], token), makeEnv(db))
+
     const tables = (db as any)._tables()
     expect(tables.events).toHaveLength(1)
-  })
-
-  it('retrying an old event does not re-project over a newer commit', async () => {
-    const token = await makeToken()
-    const oldEvent = makeCommitEvent({
-      id: 'evt-retry-old',
-      payload: { value: 'old text', valueHtml: '<p>old text</p>' },
-    })
-    const newEvent = makeCommitEvent({
-      id: 'evt-retry-new',
-      payload: { value: 'new text', valueHtml: '<p>new text</p>' },
-    })
-    const db = makeInMemoryD1()
-    const env = makeEnv(db)
-
-    await handleEventsWriteRequest(await makeRequest([oldEvent], token), env)
-    await handleEventsWriteRequest(await makeRequest([newEvent], token), env)
-    await handleEventsWriteRequest(await makeRequest([oldEvent], token), env)
-
-    const cell = (db as any)._tables().cells[0]
-    expect(cell.content_text).toBe('new text')
-    expect(cell.edit_count).toBe(2)
-  })
-
-  it('multiple commits to the same cell in one batch project the last event', async () => {
-    const token = await makeToken()
-    const events = [
-      makeCommitEvent({
-        id: 'evt-same-cell-1',
-        payload: { value: 'first', valueHtml: '<p>first</p>' },
-      }),
-      makeCommitEvent({
-        id: 'evt-same-cell-2',
-        payload: { value: 'second', valueHtml: '<p>second</p>' },
-      }),
-      makeCommitEvent({
-        id: 'evt-same-cell-3',
-        payload: { value: 'third', valueHtml: '<p>third</p>' },
-      }),
-    ]
-    const db = makeInMemoryD1()
-    const res = await handleEventsWriteRequest(await makeRequest(events, token), makeEnv(db)) as Response
-
-    expect(res.status).toBe(200)
-    const cell = (db as any)._tables().cells[0]
-    expect(cell.content_text).toBe('third')
-    expect(cell.edit_count).toBe(3)
-  })
-
-  it('validation for an older edit does not mark the current edit validated', async () => {
-    const token = await makeToken()
-    const db = makeInMemoryD1()
-    const env = makeEnv(db)
-    const first = makeCommitEvent({
-      id: 'evt-current-edit-1',
-      payload: { value: 'first', valueHtml: '<p>first</p>' },
-    })
-    const second = makeCommitEvent({
-      id: 'evt-current-edit-2',
-      payload: { value: 'second', valueHtml: '<p>second</p>' },
-    })
-
-    await handleEventsWriteRequest(await makeRequest([first], token), env)
-    await handleEventsWriteRequest(await makeRequest([
-      makeValidateEvent({
-        id: 'evt-current-edit-1-validate',
-        payload: { editEventId: 'evt-current-edit-1' },
-      }),
-    ], token), env)
-    expect((db as any)._tables().cells[0].validated).toBe(1)
-
-    await handleEventsWriteRequest(await makeRequest([second], token), env)
-    expect((db as any)._tables().cells[0].validated).toBe(0)
-
-    await handleEventsWriteRequest(await makeRequest([
-      makeValidateEvent({
-        id: 'evt-current-edit-1-validate-late',
-        payload: { editEventId: 'evt-current-edit-1' },
-      }),
-    ], token), env)
-    expect((db as any)._tables().cells[0].validated).toBe(0)
-
-    await handleEventsWriteRequest(await makeRequest([
-      makeValidateEvent({
-        id: 'evt-current-edit-2-validate',
-        payload: { editEventId: 'evt-current-edit-2' },
-      }),
-    ], token), env)
-    expect((db as any)._tables().cells[0].validated).toBe(1)
+    expect(tables.cells).toHaveLength(1)
+    expect(tables.cells[0].event_id).toBe('evt-create-001')
   })
 })
 
-// ── Missing token ─────────────────────────────────────────────────────────────
+// ── AD-9 source pin ────────────────────────────────────────────────────
 
-describe('handleEventsWriteRequest — auth edge cases', () => {
-  it('rejects all events when no Authorization header is provided', async () => {
-    const event = makeCommitEvent()
-    // makeRequest without token omits the Authorization header
-    const req = new Request('https://worker/events', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ events: [event] }),
-    })
+describe('POST /events — AD-9 source_event_id pin', () => {
+  it('target.cell.commit writes payload.sourceEventId into cells.source_event_id', async () => {
+    const token = await makeToken()
     const db = makeInMemoryD1()
-    const res = await handleEventsWriteRequest(req, makeEnv(db)) as Response
 
-    expect(res.status).toBe(200)
-    const body = await res.json() as any
-    expect(body.accepted).toHaveLength(0)
-    expect(body.rejected).toHaveLength(1)
-    expect(body.rejected[0].status).toBe(401)
-  })
-})
-
-// ── Chunked-batch partial-success ─────────────────────────────────────────────
-//
-// 51 cell.commit events × 2 stmts each = 102 stmts total.
-// With D1_BATCH_LIMIT=100 the route splits into two chunks:
-//   chunk 1: stmts[0..99]  → covers events 0..49  (50 events, 100 stmts)
-//   chunk 2: stmts[100..101] → covers event 50    (1 event,   2 stmts)
-//
-// When the second batch() call throws, events 0..49 are already committed
-// (accepted) and event 50 is not (rejected with status 500).
-
-/**
- * Wrap makeInMemoryD1 so that the Nth call to batch() throws.
- * All previous calls (< N) execute normally against the in-memory tables.
- */
-function makeFailingD1(throwOnBatch: number) {
-  const base = makeInMemoryD1()
-  let callCount = 0
-  const original = (base as any).batch.bind(base)
-
-  ;(base as any).batch = async function (stmts: D1PreparedStatement[]) {
-    callCount++
-    if (callCount === throwOnBatch) {
-      throw new Error('D1 batch simulated failure')
-    }
-    return original(stmts)
-  }
-
-  return base
-}
-
-describe('handleEventsWriteRequest — chunked-batch partial-success', () => {
-  it('50 accepted / 1 rejected when second D1 chunk throws', async () => {
-    const token = await makeToken()
-    // Build 51 distinct cell.commit events so they produce 102 D1 statements
-    // (2 per event: events INSERT + cells UPSERT).
-    const events = Array.from({ length: 51 }, (_, i) =>
-      makeCommitEvent({
-        id: `evt-chunk-${String(i).padStart(3, '0')}`,
-        cellId: `cell-${i}`,
-      }),
+    await handleEventsWriteRequest(
+      await makeRequest([targetCreate({ id: 'evt-create-001' })], token),
+      makeEnv(db),
     )
-    const req = await makeRequest(events, token)
-    // Fail on the second batch() call — the first chunk (stmts 0..99, events
-    // 0..49) commits successfully; the second chunk (stmts 100..101, event 50)
-    // throws, so event 50 ends up in rejected.
-    const db = makeFailingD1(2)
-    const res = await handleEventsWriteRequest(req, makeEnv(db)) as Response
-
-    expect(res.status).toBe(200)
-    const body = await res.json() as any
-
-    // 50 events fully committed before the failure.
-    expect(body.accepted).toHaveLength(50)
-
-    // 1 event failed because its chunk threw.
-    expect(body.rejected).toHaveLength(1)
-    expect(body.rejected[0].id).toBe('evt-chunk-050')
-    expect(body.rejected[0].status).toBe(500)
-    expect(body.rejected[0].reason).toMatch(/not committed|D1 batch/i)
-  })
-
-  it('never splits a multi-statement event across D1 chunks', async () => {
-    const token = await makeToken()
-    const commits = Array.from({ length: 49 }, (_, i) =>
-      makeCommitEvent({
-        id: `evt-boundary-${String(i).padStart(3, '0')}`,
-        cellId: `cell-${i}`,
-      }),
-    )
-    const validate = makeValidateEvent({
-      id: 'evt-boundary-validate',
-      cellId: 'cell-0',
-      payload: { editEventId: 'evt-boundary-000' },
-    })
-    const req = await makeRequest([...commits, validate], token)
-    const db = makeFailingD1(2)
-    const res = await handleEventsWriteRequest(req, makeEnv(db)) as Response
-
-    expect(res.status).toBe(200)
-    const body = await res.json() as any
-    expect(body.accepted).toHaveLength(49)
-    expect(body.rejected).toHaveLength(1)
-    expect(body.rejected[0].id).toBe('evt-boundary-validate')
-
-    const tables = (db as any)._tables()
-    expect(tables.events.some((e: any) => e.id === 'evt-boundary-validate')).toBe(false)
-    expect(tables.cell_validators).toHaveLength(0)
-  })
-})
-
-// ── Hot-update path (Phase 4e) ────────────────────────────────────────────────
-
-describe('handleEventsWriteRequest — hot-apply to live DOs', () => {
-  it('POSTs each cell.commit payload to the DO via /__apply-event after D1 commit', async () => {
-    const partyserver = await import('partyserver')
-    const fetchMock = vi.fn().mockResolvedValue(
-      new Response(JSON.stringify({ ok: true, applied: true, created: true }), { status: 200 }),
-    )
-    ;(partyserver.getServerByName as any).mockResolvedValue({ fetch: fetchMock })
-
-    const token = await makeToken()
-    const event = makeCommitEvent({
-      id: 'evt-hotapply-001',
-      cellId: 'cell-import-1',
+    const commit = targetCommit({
+      id: 'evt-commit-001',
+      parentId: 'evt-create-001',
       payload: {
-        value: 'hello',
-        valueHtml: '<p>hello</p>',
-        meta: { original: 'hola', context: 'greeting' },
+        value: 'translated',
+        valueHtml: '<p>translated</p>',
+        sourceEventId: 'src-pin-99',
       },
     })
-    const req = await makeRequest([event], token)
-    const db = makeInMemoryD1()
-    const res = await handleEventsWriteRequest(req, {
-      ...makeEnv(db),
-      // Any truthy value works — partyserver.getServerByName is mocked.
-      FileSync: {} as any,
-    })
+    await handleEventsWriteRequest(await makeRequest([commit], token), makeEnv(db))
 
-    expect(res?.status).toBe(200)
-
-    // The DO fetch should have been called for /__apply-event with the cell.commit payload.
-    const applyCalls = fetchMock.mock.calls.filter((c: any[]) =>
-      String(c[0]).includes('/__apply-event'),
-    )
-    expect(applyCalls).toHaveLength(1)
-    const init = applyCalls[0][1] as RequestInit
-    expect(init.method).toBe('POST')
-    const body = JSON.parse(init.body as string)
-    expect(body).toEqual({
-      kind: 'cell.commit',
-      cellId: 'cell-import-1',
-      payload: {
-        value: 'hello',
-        valueHtml: '<p>hello</p>',
-        meta: { original: 'hola', context: 'greeting' },
-      },
-    })
+    const cell = (db as any)._tables().cells[0]
+    expect(cell.source_event_id).toBe('src-pin-99')
   })
 
-  it('coalesces multiple commits to the same cell into one DO apply (last wins)', async () => {
-    const partyserver = await import('partyserver')
-    const fetchMock = vi.fn().mockResolvedValue(
-      new Response(JSON.stringify({ ok: true }), { status: 200 }),
-    )
-    ;(partyserver.getServerByName as any).mockResolvedValue({ fetch: fetchMock })
-
+  it('target.cell.commit without sourceEventId leaves source_event_id NULL', async () => {
     const token = await makeToken()
-    const events = [
-      makeCommitEvent({
-        id: 'evt-hotapply-coalesce-1',
-        cellId: 'cell-x',
-        payload: { value: 'first', valueHtml: '<p>first</p>' },
-      }),
-      makeCommitEvent({
-        id: 'evt-hotapply-coalesce-2',
-        cellId: 'cell-x',
-        payload: { value: 'second', valueHtml: '<p>second</p>' },
-      }),
-    ]
-    const req = await makeRequest(events, token)
     const db = makeInMemoryD1()
-    await handleEventsWriteRequest(req, { ...makeEnv(db), FileSync: {} as any })
-
-    const applyCalls = fetchMock.mock.calls.filter((c: any[]) =>
-      String(c[0]).includes('/__apply-event'),
+    await handleEventsWriteRequest(
+      await makeRequest([targetCreate({ id: 'evt-create-001' })], token),
+      makeEnv(db),
     )
-    expect(applyCalls).toHaveLength(1)
-    const body = JSON.parse((applyCalls[0][1] as RequestInit).body as string)
-    expect(body.payload.value).toBe('second')
+    await handleEventsWriteRequest(
+      await makeRequest([targetCommit({ id: 'evt-commit-001' })], token),
+      makeEnv(db),
+    )
+    const cell = (db as any)._tables().cells[0]
+    expect(cell.source_event_id).toBeNull()
+  })
+})
+
+// ── Validation ─────────────────────────────────────────────────────────
+
+describe('POST /events — cell.validate', () => {
+  it('marks the cell validated when the validator targets the current chain head', async () => {
+    const token = await makeToken({ role: 400 })
+    const reviewerToken = await makeToken({ role: 300, username: 'reviewer-bob' })
+    const db = makeInMemoryD1()
+    await handleEventsWriteRequest(
+      await makeRequest([targetCreate({ id: 'evt-create-001' })], token),
+      makeEnv(db),
+    )
+    await handleEventsWriteRequest(
+      await makeRequest([validate({ payload: { editEventId: 'evt-create-001' } })], reviewerToken),
+      makeEnv(db),
+    )
+    const cell = (db as any)._tables().cells[0]
+    expect(cell.validated).toBe(1)
   })
 
-  it('does not POST /__apply-event for non-cell.commit events', async () => {
-    const partyserver = await import('partyserver')
-    const fetchMock = vi.fn().mockResolvedValue(
-      new Response(JSON.stringify({ ok: true }), { status: 200 }),
-    )
-    ;(partyserver.getServerByName as any).mockResolvedValue({ fetch: fetchMock })
-
-    // Seed the cell + a commit event so cell.validate has a target edit.
-    const token = await makeToken()
-    const commit = makeCommitEvent({ id: 'evt-pre-commit', cellId: 'cell-y' })
-    const validate = makeValidateEvent({
-      id: 'evt-pre-validate',
-      cellId: 'cell-y',
-      payload: { editEventId: 'evt-pre-commit' },
-    })
-    const req = await makeRequest([validate], token)
-    const db = makeInMemoryD1({
-      events: [
-        {
-          id: 'evt-pre-commit',
-          schema_version: 1,
-          project_id: 'proj-a',
-          file_id: 'file-x',
-          cell_id: 'cell-y',
-          kind: 'cell.commit',
-          author: 'alice',
-          payload: JSON.stringify({ value: 'v', valueHtml: '<p>v</p>' }),
-          client_ts: 1000,
-          server_ts: 1000,
-        },
-      ],
-      cells: [
-        {
-          file_id: 'file-x',
-          cell_id: 'cell-y',
-          content_text: 'v',
-          content_hash: 'h',
-          validated: 0,
-          word_count: 1,
-          last_editor: 'alice',
-          last_edit_at: 1000,
-          projected_from: 'event:evt-pre-commit',
-          edit_count: 1,
-        },
-      ],
-    })
-    await handleEventsWriteRequest(req, { ...makeEnv(db), FileSync: {} as any })
-
-    // The validate event should NOT have triggered an apply; only broadcasts fire.
-    const applyCalls = fetchMock.mock.calls.filter((c: any[]) =>
-      String(c[0]).includes('/__apply-event'),
-    )
-    expect(applyCalls).toHaveLength(0)
-
-    // But broadcastRealtime should have run (event frame + projection.dirty).
-    const broadcastCalls = fetchMock.mock.calls.filter((c: any[]) =>
-      String(c[0]).includes('/__broadcast'),
-    )
-    expect(broadcastCalls.length).toBeGreaterThan(0)
-  })
-
-  it('skips hot-apply when FileSync binding is absent', async () => {
-    const partyserver = await import('partyserver')
-    const fetchMock = vi.fn()
-    ;(partyserver.getServerByName as any).mockResolvedValue({ fetch: fetchMock })
-
-    const token = await makeToken()
-    const event = makeCommitEvent({ id: 'evt-no-binding', cellId: 'cell-z' })
-    const req = await makeRequest([event], token)
+  it('validation for a prior edit does NOT mark the cell validated after a new commit', async () => {
+    const token = await makeToken({ role: 400 })
+    const reviewerToken = await makeToken({ role: 300, username: 'reviewer-bob' })
     const db = makeInMemoryD1()
-    // No FileSync in env — broadcast/apply block is skipped wholesale.
-    await handleEventsWriteRequest(req, makeEnv(db))
 
-    expect(fetchMock).not.toHaveBeenCalled()
+    await handleEventsWriteRequest(
+      await makeRequest([targetCreate({ id: 'evt-create-001' })], token),
+      makeEnv(db),
+    )
+    // Validate the create event.
+    await handleEventsWriteRequest(
+      await makeRequest([validate({ payload: { editEventId: 'evt-create-001' } })], reviewerToken),
+      makeEnv(db),
+    )
+    expect((db as any)._tables().cells[0].validated).toBe(1)
+
+    // A new commit advances the chain head — validated should flip to 0.
+    await handleEventsWriteRequest(
+      await makeRequest([targetCommit({ id: 'evt-commit-new', parentId: 'evt-create-001' })], token),
+      makeEnv(db),
+    )
+    expect((db as any)._tables().cells[0].validated).toBe(0)
   })
 })

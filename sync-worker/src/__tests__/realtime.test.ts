@@ -14,7 +14,7 @@ const eventMsg: RealtimeMessage = {
   v: 1,
   t: 'event',
   id: '01900000-0000-7000-0000-000000000001',
-  kind: 'cell.commit',
+  kind: 'target.cell.commit',
   project: 'proj-a',
   file: 'file-x',
   cell: 'cell-1',
@@ -25,7 +25,7 @@ const eventMsgNoOptionals: RealtimeMessage = {
   v: 1,
   t: 'event',
   id: '01900000-0000-7000-0000-000000000002',
-  kind: 'thread.add',
+  kind: 'file.create',
   project: 'proj-b',
   ts: 1700000001000,
 }

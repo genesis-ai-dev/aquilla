@@ -1,7 +1,7 @@
 # Copy to .dev.vars for local dev (.dev.vars is gitignored).
 # For production secrets use: wrangler secret put <NAME>
 
-# Frontier JWT signing key. MUST match codex-auth-worker (and the legacy
+# Frontier JWT signing key. MUST match aquilla-frontier-server (and the legacy
 # frontier-server) so the same Bearer token verifies against every worker
 # in the stack.
 SECRET_KEY="dev-frontier-secret"

@@ -1,0 +1,9 @@
+# Workspace declarations for the Aquilla monorepo.
+#
+# Phase 1B (AD-11) introduces the apps/ and packages/ scaffolding.
+# Phase 3e relocated auth-worker into apps/frontier-server (AD-5 identity
+# service). Remaining top-level workers (sync-worker, chat-worker,
+# cors-proxy) stay put until Phase 4 renames / relocates them.
+packages:
+  - "apps/*"
+  - "packages/*"

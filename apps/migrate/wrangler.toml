@@ -1,0 +1,82 @@
+# Wrangler config for apps/migrate/ (AD-11; spec §21-monorepo.md).
+#
+# Workers Assets pattern: the Vite build emits dist/, and the Worker
+# (src/worker.ts) serves those static assets through the [assets] binding.
+# The Worker also runs the boot-time assertEnvBindings() guard from
+# @aquilla/errors so a preview deploy can never silently bind to prod.
+#
+# Mounted under `/migrate` (routes.json).
+
+name = "aquilla-migrate"
+main = "src/worker.ts"
+compatibility_date = "2024-12-01"
+compatibility_flags = ["nodejs_compat"]
+
+# Same CF account as the rest of the monorepo workers. Pinned to avoid
+# wrangler interactive account-pick prompts.
+account_id = "6a80496d1e59948a9cbaa3c643ba81d7"
+
+# Top-level (no env flag) defaults to prod for symmetry with the legacy
+# workers. Prefer `--env=production` / `--env=staging` / `--env=preview`
+# explicitly; do not rely on these defaults.
+# routes = ["aquilla.app/migrate/*"]  # TODO: uncomment after aquilla.app zone is provisioned in Cloudflare
+
+[vars]
+ENV = "prod"
+
+[assets]
+directory = "./dist"
+binding = "ASSETS"
+not_found_handling = "single-page-application"
+
+# ---------------------------------------------------------------------------
+# Production — `wrangler deploy --env production`
+# ---------------------------------------------------------------------------
+[env.production]
+name = "aquilla-prod-migrate"
+account_id = "6a80496d1e59948a9cbaa3c643ba81d7"
+# routes = ["aquilla.app/migrate/*"]  # TODO: uncomment after aquilla.app zone is provisioned in Cloudflare
+
+[env.production.vars]
+ENV = "prod"
+
+[env.production.assets]
+directory = "./dist"
+binding = "ASSETS"
+not_found_handling = "single-page-application"
+
+# ---------------------------------------------------------------------------
+# Staging — `wrangler deploy --env staging`
+# ---------------------------------------------------------------------------
+[env.staging]
+name = "aquilla-dev-migrate"
+account_id = "6a80496d1e59948a9cbaa3c643ba81d7"
+# routes = ["dev.aquilla.app/migrate/*"]  # TODO: uncomment after aquilla.app zone is provisioned in Cloudflare
+
+[env.staging.vars]
+ENV = "preview"
+
+[env.staging.assets]
+directory = "./dist"
+binding = "ASSETS"
+not_found_handling = "single-page-application"
+
+# ---------------------------------------------------------------------------
+# Preview (per-PR) — CI substitutes `__PR__` with the PR number at deploy
+# time. Resource names land on the `aquilla-pr-<N>-` prefix that the
+# boot-time env assertion helper (packages/errors) expects under
+# ENV=preview.
+# ---------------------------------------------------------------------------
+[env.preview]
+name = "aquilla-pr-__PR__-migrate"
+account_id = "6a80496d1e59948a9cbaa3c643ba81d7"
+# routes = ["pr-__PR__.aquilla.app/migrate/*"]  # TODO: uncomment after aquilla.app zone is provisioned in Cloudflare
+
+[env.preview.vars]
+ENV = "preview"
+PR = "__PR__"
+
+[env.preview.assets]
+directory = "./dist"
+binding = "ASSETS"
+not_found_handling = "single-page-application"

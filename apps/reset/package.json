@@ -1,0 +1,41 @@
+{
+  "name": "@aquilla/reset",
+  "private": true,
+  "version": "0.0.1",
+  "description": "Aquilla password-reset app. Standalone Vite SPA served by a Cloudflare Worker with a Workers Assets binding. Mounted at /reset/* per routes.json. Two routes: /reset/ (request email) and /reset/:token (submit new password).",
+  "type": "module",
+  "main": "src/worker.ts",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "deploy": "pnpm build && wrangler deploy",
+    "deploy:staging": "pnpm build && wrangler deploy --env staging",
+    "deploy:preview": "pnpm build && wrangler deploy --env preview",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@aquilla/auth-client": "workspace:*",
+    "@aquilla/errors": "workspace:*",
+    "@aquilla/ui": "workspace:*",
+    "react": "^19.2.4",
+    "react-dom": "^19.2.4",
+    "react-router-dom": "^7.14.0"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20240117.0",
+    "@tailwindcss/vite": "^4.2.2",
+    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/react": "^16.3.2",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^6.0.1",
+    "happy-dom": "^20.8.9",
+    "tailwindcss": "^4.2.2",
+    "typescript": "~6.0.2",
+    "vite": "^8.0.4",
+    "vitest": "^4.1.4",
+    "wrangler": "^4.83.0"
+  }
+}

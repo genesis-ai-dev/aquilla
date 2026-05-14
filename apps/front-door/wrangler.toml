@@ -1,0 +1,64 @@
+# Front-door Worker for the Aquilla monorepo (AD-11; spec §21-monorepo.md).
+#
+# Workers Routes maps every known app slug to its own Worker
+# (aquilla.app/<slug>/* → aquilla-<slug>). The front-door is mapped to the
+# root + a 404 fallback only. It is NOT a dispatcher: there are no service
+# bindings to per-app Workers here, on purpose (avoids coupling every app
+# deploy to a front-door redeploy).
+#
+# Behavior:
+#   GET /            → 302 redirect to /projects
+#   GET /__routes    → JSON dump of routes.json (debug aid)
+#   anything else    → 404 (Workers Routes claims real app paths upstream)
+#
+# routes.json is imported at build time (rules + bundler resolve it through
+# the relative path in src/index.ts). Adding an app means: edit routes.json,
+# redeploy the front-door.
+
+name = "aquilla-front-door"
+main = "src/index.ts"
+compatibility_date = "2024-12-01"
+compatibility_flags = ["nodejs_compat"]
+
+account_id = "6a80496d1e59948a9cbaa3c643ba81d7"
+
+# Top-level (no env flag) defaults to prod for symmetry with the legacy
+# workers. Prefer --env=production / --env=staging / --env=preview.
+# routes = ["aquilla.app/*"]  # TODO: uncomment after aquilla.app zone is provisioned in Cloudflare
+
+[vars]
+ENV = "prod"
+
+# ---------------------------------------------------------------------------
+# Production — `wrangler deploy --env production`
+# ---------------------------------------------------------------------------
+[env.production]
+name = "aquilla-prod-front-door"
+account_id = "6a80496d1e59948a9cbaa3c643ba81d7"
+# routes = ["aquilla.app/*"]  # TODO: uncomment after aquilla.app zone is provisioned in Cloudflare
+
+[env.production.vars]
+ENV = "prod"
+
+# ---------------------------------------------------------------------------
+# Staging — `wrangler deploy --env staging`
+# ---------------------------------------------------------------------------
+[env.staging]
+name = "aquilla-dev-front-door"
+account_id = "6a80496d1e59948a9cbaa3c643ba81d7"
+# routes = ["dev.aquilla.app/*"]  # TODO: uncomment after aquilla.app zone is provisioned in Cloudflare
+
+[env.staging.vars]
+ENV = "preview"
+
+# ---------------------------------------------------------------------------
+# Preview (per-PR) — CI substitutes `__PR__` with the PR number.
+# ---------------------------------------------------------------------------
+[env.preview]
+name = "aquilla-pr-__PR__-front-door"
+account_id = "6a80496d1e59948a9cbaa3c643ba81d7"
+# routes = ["pr-__PR__.aquilla.app/*"]  # TODO: uncomment after aquilla.app zone is provisioned in Cloudflare
+
+[env.preview.vars]
+ENV = "preview"
+PR = "__PR__"

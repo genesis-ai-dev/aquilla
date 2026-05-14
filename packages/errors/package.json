@@ -1,0 +1,16 @@
+{
+  "name": "@aquilla/errors",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Shared error helpers, including the boot-time assertEnvBindings() guard (see env-assertion.ts).",
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./env-assertion": "./src/env-assertion.ts"
+  },
+  "scripts": {
+    "test": "vitest run"
+  }
+}

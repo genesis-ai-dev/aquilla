@@ -1,0 +1,70 @@
+# Cloudflare Worker config for apps/billing/ (AD-11; spec §21-monorepo.md).
+# Phase 3c scaffold — Worker serves the Vite SPA assets ("Coming Soon" page).
+
+name = "aquilla-billing"
+main = "src/worker.ts"
+compatibility_date = "2024-12-01"
+compatibility_flags = ["nodejs_compat"]
+
+account_id = "6a80496d1e59948a9cbaa3c643ba81d7"
+
+[assets]
+directory = "./dist"
+binding = "ASSETS"
+not_found_handling = "single-page-application"
+
+# Top-level (no env flag) defaults to prod for symmetry with the other
+# workers. Prefer --env=production / --env=staging / --env=preview explicitly.
+# routes = ["aquilla.app/billing/*"]  # TODO: uncomment after aquilla.app zone is provisioned in Cloudflare
+
+[vars]
+ENV = "prod"
+
+# ---------------------------------------------------------------------------
+# Production
+# ---------------------------------------------------------------------------
+[env.production]
+name = "aquilla-prod-billing"
+account_id = "6a80496d1e59948a9cbaa3c643ba81d7"
+# routes = ["aquilla.app/billing/*"]  # TODO: uncomment after aquilla.app zone is provisioned in Cloudflare
+
+[env.production.assets]
+directory = "./dist"
+binding = "ASSETS"
+not_found_handling = "single-page-application"
+
+[env.production.vars]
+ENV = "prod"
+
+# ---------------------------------------------------------------------------
+# Staging
+# ---------------------------------------------------------------------------
+[env.staging]
+name = "aquilla-dev-billing"
+account_id = "6a80496d1e59948a9cbaa3c643ba81d7"
+# routes = ["dev.aquilla.app/billing/*"]  # TODO: uncomment after aquilla.app zone is provisioned in Cloudflare
+
+[env.staging.assets]
+directory = "./dist"
+binding = "ASSETS"
+not_found_handling = "single-page-application"
+
+[env.staging.vars]
+ENV = "preview"
+
+# ---------------------------------------------------------------------------
+# Preview (per-PR) — CI substitutes __PR__ at deploy time.
+# ---------------------------------------------------------------------------
+[env.preview]
+name = "aquilla-pr-__PR__-billing"
+account_id = "6a80496d1e59948a9cbaa3c643ba81d7"
+# routes = ["pr-__PR__.aquilla.app/billing/*"]  # TODO: uncomment after aquilla.app zone is provisioned in Cloudflare
+
+[env.preview.assets]
+directory = "./dist"
+binding = "ASSETS"
+not_found_handling = "single-page-application"
+
+[env.preview.vars]
+ENV = "preview"
+PR = "__PR__"

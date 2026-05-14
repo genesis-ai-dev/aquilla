@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Tears down a per-PR sync-worker + its forked D1, plus the R2 keys under
-# the pr-<N>/ prefix in codex-snapshots-staging. Idempotent.
+# the pr-<N>/ prefix in aquilla-snapshots-staging. Idempotent.
 #
 # Usage:
 #   PR_NUMBER=43 CLOUDFLARE_ACCOUNT_ID=... ./scripts/pr-db-cleanup.sh
@@ -10,8 +10,8 @@ set -euo pipefail
 : "${CLOUDFLARE_ACCOUNT_ID:?need CLOUDFLARE_ACCOUNT_ID}"
 
 DB_NAME="codex-db-pr-${PR_NUMBER}"
-WORKER_NAME="codex-sync-worker-pr-${PR_NUMBER}"
-R2_BUCKET="codex-snapshots-staging"
+WORKER_NAME="aquilla-sync-worker-pr-${PR_NUMBER}"
+R2_BUCKET="codex-snapshots-staging"  # TODO: rename once provisioned in CF (see sync-worker/wrangler.toml)
 R2_PREFIX="pr-${PR_NUMBER}/"
 
 echo "[pr-db-cleanup] PR=${PR_NUMBER}"

@@ -1,6 +1,11 @@
 import { describe, it, expect } from "vitest"
 import { sign } from "hono/jwt"
-import { verifyTokenForDoc, shouldBeReadOnly, type SyncTokenClaims } from "../auth"
+import {
+  verifyTokenForDoc,
+  verifyTokenForProject,
+  shouldBeReadOnly,
+  type SyncTokenClaims,
+} from "../auth"
 
 const SECRET = "test-secret-key-for-unit-tests"
 
@@ -108,6 +113,56 @@ describe("verifyTokenForDoc", () => {
       expect(res.status).toBe(403)
       expect(res.reason).toContain("different file")
     }
+  })
+})
+
+describe("verifyTokenForProject", () => {
+  it("accepts a valid token scoped to the right project (any file)", async () => {
+    const token = await makeToken({ fileId: "anything" })
+    const res = await verifyTokenForProject(token, "proj-1", SECRET)
+    expect(res.ok).toBe(true)
+  })
+
+  it("rejects tokens scoped to a different project", async () => {
+    const token = await makeToken({ projectId: "other-project" })
+    const res = await verifyTokenForProject(token, "proj-1", SECRET)
+    expect(res.ok).toBe(false)
+    if (!res.ok) {
+      expect(res.status).toBe(403)
+      expect(res.reason).toContain("different project")
+    }
+  })
+
+  it("rejects when secret is unconfigured", async () => {
+    const token = await makeToken()
+    const res = await verifyTokenForProject(token, "proj-1", undefined)
+    expect(res.ok).toBe(false)
+    if (!res.ok) expect(res.status).toBe(500)
+  })
+
+  it("rejects expired tokens", async () => {
+    const token = await makeToken({
+      iat: Math.floor(Date.now() / 1000) - 7200,
+      exp: Math.floor(Date.now() / 1000) - 60,
+    })
+    const res = await verifyTokenForProject(token, "proj-1", SECRET)
+    expect(res.ok).toBe(false)
+    if (!res.ok) expect(res.reason).toBe("token expired")
+  })
+
+  it("rejects tokens without aud=sync", async () => {
+    const token = await sign(
+      {
+        sub: "alice",
+        iat: Math.floor(Date.now() / 1000),
+        exp: Math.floor(Date.now() / 1000) + 900,
+      } as Record<string, unknown>,
+      SECRET,
+      "HS256",
+    )
+    const res = await verifyTokenForProject(token, "proj-1", SECRET)
+    expect(res.ok).toBe(false)
+    if (!res.ok) expect(res.reason).toBe("wrong audience")
   })
 })
 

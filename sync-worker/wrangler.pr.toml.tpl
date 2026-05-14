@@ -6,7 +6,7 @@
 # - Each PR with migration changes gets its own forked D1 (codex-db-pr-N)
 #   so the migration can be applied without polluting the shared staging
 #   DB.
-# - R2 is shared with staging (codex-snapshots-staging) but namespaced
+# - R2 is shared with staging (aquilla-snapshots-staging) but namespaced
 #   via R2_KEY_PREFIX=pr-N so snapshots from different PRs don't collide.
 # - Durable Object namespace is implicitly per-worker (different worker
 #   name → different namespace).
@@ -17,7 +17,7 @@
 #
 # DO NOT edit the placeholders by hand. The workflow substitutes them.
 
-name = "codex-sync-worker-pr-__PR__"
+name = "aquilla-sync-worker-pr-__PR__"
 main = "src/index.ts"
 compatibility_date = "2024-12-01"
 compatibility_flags = ["nodejs_compat"]
@@ -27,12 +27,21 @@ account_id = "6a80496d1e59948a9cbaa3c643ba81d7"
 name = "FileSync"
 class_name = "FileSync"
 
+[[durable_objects.bindings]]
+name = "ProjectSync"
+class_name = "ProjectSync"
+
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["FileSync"]
 
+[[migrations]]
+tag = "v2"
+new_sqlite_classes = ["ProjectSync"]
+
 [[r2_buckets]]
 binding = "SNAPSHOTS"
+# TODO: rename to "aquilla-snapshots-staging" once provisioned. See sync-worker/wrangler.toml.
 bucket_name = "codex-snapshots-staging"
 
 [[d1_databases]]

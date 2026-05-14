@@ -19,16 +19,17 @@ npm run test:e2e
 npm run test:e2e:ui
 ```
 
-No external repo checkout is required — codex-auth-worker and sync-worker
+No external repo checkout is required — frontier-server and sync-worker
 both live in this repo, and the D1 schema is applied via
-`auth-worker/migrations/` against a local sqlite each run.
+`apps/frontier-server/migrations/` against a local sqlite each run.
 
 ## Architecture
 
 `scripts/e2e-up.ts` boots:
-1. `codex-auth-worker` via `wrangler dev --local` on port 8787 (auth, orgs,
-   members, projects, sync-token, users, `/__test__/reset`)
-2. `codex-sync-worker` via `wrangler dev --local` on port 8788 (y-partyserver
+1. `frontier-server` (aquilla-frontier-server) via `wrangler dev --local`
+   on port 8787 (auth, orgs, members, projects, sync-token, users,
+   `/__test__/reset`)
+2. `aquilla-sync-worker` via `wrangler dev --local` on port 8788 (y-partyserver
    collab DOs)
 3. `MockLLMServer` on a random port (OpenAI-compatible)
 4. `vite --mode test` on port 5173
@@ -46,15 +47,15 @@ Playwright runs against `http://127.0.0.1:5173`.
 
 Single D1 (`aquilla-db`) holds everything — identity, orgs, projects,
 members, invites, files, cells, events. Schema is owned by
-`auth-worker/migrations/`; `wrangler d1 migrations apply aquilla-db --local`
-is the canonical setup step. In prod, auth-worker's deploy applies
+`apps/frontier-server/migrations/`; `wrangler d1 migrations apply aquilla-db --local`
+is the canonical setup step. In prod, frontier-server's deploy applies
 migrations on every deploy. Sync-worker binds the same D1 but doesn't own
 migrations.
 
 ## Per-test isolation
 
 Every test calls `resetBackend()` (via the multi-user fixture or directly)
-which hits `POST /__test__/reset` on codex-auth-worker. That truncates the
+which hits `POST /__test__/reset` on frontier-server. That truncates the
 user/org/project tables and reseeds three known users (`alice`, `bob`,
 `carol`). The route is gated behind `WRANGLER_LOCAL=1`; production deploys
 return 404.
@@ -92,9 +93,9 @@ See `e2e/JOURNEYS.md` for the canonical journey map and conventions.
 ## Troubleshooting
 
 - **`wrangler dev` won't start** → confirm `wrangler login` is current. The
-  orchestrator targets `auth-worker/` and `sync-worker/` directly; no
-  external repo checkout is needed.
-- **`/__test__/reset` returns 404** → auth-worker was started without
+  orchestrator targets `apps/frontier-server/` and `sync-worker/` directly;
+  no external repo checkout is needed.
+- **`/__test__/reset` returns 404** → frontier-server was started without
   `WRANGLER_LOCAL=1`. e2e-up.ts sets that explicitly when it spawns the
   worker, so a 404 here means you're hitting a non-local URL.
 - **Tests pass alone, fail in suite** → reset isn't running or isn't

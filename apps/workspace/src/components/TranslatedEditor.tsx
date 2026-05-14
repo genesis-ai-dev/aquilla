@@ -1,0 +1,381 @@
+// Phase 2c-β: plain TipTap editor — no Y.Doc, no collaboration extension.
+//
+// Architecture (AD-2 / AD-3 v1):
+//   - Read path:  `initialHtml` (or `initialPlain`) hydrates the editor when
+//                 the cell mounts or when remote content lands and we're not
+//                 focused. After a remote `event.applied` arrives while the
+//                 user IS focused, the parent surfaces a banner and lets the
+//                 user choose discard-and-reload vs. keep-my-edits.
+//   - Write path: editor onUpdate is debounced to COMMIT_IDLE_MS; on idle
+//                 (or blur, or programmatic flush) we serialize editor →
+//                 HTML + plain text and call `onCommit({ value, valueHtml })`.
+//                 The caller emits a `target.cell.commit` via the outbox,
+//                 chained off `cell.targetEventId` and pinned to
+//                 `cell.sourceEventId` (AD-9 staleness pin).
+//
+// Lock model (AD-1): the parent owns the WS focus lock via `useFocusLock`
+// and passes `heldByLabel` here. When that's set the editor is read-only
+// and shows the "Alice is editing" affordance.
+
+import { useEditor, EditorContent } from "@tiptap/react"
+import { BubbleMenu } from "@tiptap/react/menus"
+import StarterKit from "@tiptap/starter-kit"
+import { Bold, Italic, Underline as UnderlineIcon, Strikethrough, Code } from "lucide-react"
+import { cn } from "@/lib/utils"
+import { useEffect, useRef } from "react"
+import type { RuleInfraction } from "@/lib/parsers/types"
+import { createViolationDecorationExtension, violationPluginKey } from "@/lib/richtext/violation-decoration-plugin"
+import { createKaraokeExtension, karaokePluginKey, type KaraokePluginState } from "@/lib/richtext/karaoke-plugin"
+import { findActiveTimingIndex } from "@/lib/audio/timings"
+import type { WordTiming } from "@/lib/codex-editor/types"
+
+/** Window before a quiet keystroke pause counts as a commit-worthy idle. */
+export const COMMIT_IDLE_MS = 1_200
+
+export interface TranslatedEditorCommit {
+  /** Plain-text value derived from editor content. */
+  value: string
+  /** HTML form of editor content (only the allowed inline marks survive). */
+  valueHtml: string
+}
+
+interface TranslatedEditorProps {
+  /** Stable cell id — switching cells re-hydrates the editor from html. */
+  cellId: string
+  /** Initial content. Plain string fallback used when html is absent. */
+  initialHtml?: string
+  initialPlain: string
+  onCommit: (snapshot: TranslatedEditorCommit) => void
+  onFocus?: () => void
+  onBlur?: () => void
+  placeholder?: string
+  className?: string
+  editable?: boolean
+  /** "Alice is editing" — when present, the editor is read-only and the banner shows. */
+  heldByLabel?: string | null
+  infractions?: RuleInfraction[]
+  ruleSeverity?: Map<string, "major" | "minor">
+  waivedRuleIds?: Set<string>
+  onRuleClick?: (ruleId: string, anchor: HTMLElement) => void
+  audioTimings?: WordTiming[]
+  /** Audio playback time in seconds. Drives the karaoke decoration. */
+  audioCurrentTime?: number
+  /** Called on alt+click of a word when timings are present. */
+  onSeekToTime?: (t: number) => void
+  /**
+   * Banner / change-while-editing reconciliation. When set, the parent has
+   * received a remote `event.applied` for this cell while we hold the lock.
+   * The editor stays editable; the banner offers a Discard-and-Reload action.
+   */
+  remoteChangedDuringEdit?: boolean
+  onDiscardLocal?: () => void
+}
+
+export function TranslatedEditor({
+  cellId,
+  initialHtml,
+  initialPlain,
+  onCommit,
+  onFocus,
+  onBlur,
+  placeholder,
+  className,
+  editable = true,
+  heldByLabel,
+  infractions,
+  ruleSeverity,
+  waivedRuleIds,
+  onRuleClick,
+  audioTimings,
+  audioCurrentTime,
+  onSeekToTime,
+  remoteChangedDuringEdit,
+  onDiscardLocal,
+}: TranslatedEditorProps) {
+  const latestViolationStateRef = useRef({
+    infractions: infractions ?? [],
+    ruleSeverity: ruleSeverity ?? new Map<string, "major" | "minor">(),
+    waivedRuleIds: waivedRuleIds ?? new Set<string>(),
+  })
+
+  const latestKaraokeStateRef = useRef<KaraokePluginState>({
+    timings: audioTimings,
+    activeIdx: -1,
+    onSeekToWord: undefined,
+  })
+
+  // Resolve initial content once per cellId — prefer rich HTML, fall back to plain text.
+  const initialContent = initialHtml && initialHtml.length > 0
+    ? stripToAllowedHtml(initialHtml)
+    : initialPlain
+
+  const isReadOnly = !editable || Boolean(heldByLabel)
+
+  const idleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const lastCommittedRef = useRef<string>(initialPlain)
+  const onCommitRef = useRef(onCommit)
+  useEffect(() => { onCommitRef.current = onCommit }, [onCommit])
+
+  const editor = useEditor({
+    editable: !isReadOnly,
+    content: initialContent,
+    extensions: [
+      StarterKit.configure({
+        heading: false,
+        bulletList: false,
+        orderedList: false,
+        listItem: false,
+        blockquote: false,
+        codeBlock: false,
+        horizontalRule: false,
+      }),
+      // The callback is invoked by the PM plugin, not during React render —
+      // the lint rule is overly conservative here.
+      createViolationDecorationExtension(() => latestViolationStateRef.current),
+      createKaraokeExtension(() => latestKaraokeStateRef.current),
+    ],
+    editorProps: {
+      attributes: {
+        class: cn(
+          "prose prose-sm max-w-none h-full min-h-[40px] px-2 py-1 text-sm leading-relaxed focus:outline-none",
+          "rounded-sm transition-colors",
+          "hover:bg-muted/40 focus:bg-muted/30",
+          className
+        ),
+      },
+      transformPastedHTML(html: string) {
+        return stripToAllowedHtml(html)
+      },
+    },
+    onUpdate({ editor }) {
+      // Reset idle timer on every keystroke; commit when the user pauses.
+      if (idleTimerRef.current !== null) clearTimeout(idleTimerRef.current)
+      const text = editor.getText()
+      const html = editor.getHTML()
+      idleTimerRef.current = setTimeout(() => {
+        if (text === lastCommittedRef.current) return
+        lastCommittedRef.current = text
+        onCommitRef.current({ value: text, valueHtml: html })
+      }, COMMIT_IDLE_MS)
+    },
+    onFocus() {
+      onFocus?.()
+    },
+    onBlur({ editor }) {
+      if (idleTimerRef.current !== null) {
+        clearTimeout(idleTimerRef.current)
+        idleTimerRef.current = null
+      }
+      const text = editor.getText()
+      const html = editor.getHTML()
+      if (text !== lastCommittedRef.current) {
+        lastCommittedRef.current = text
+        onCommitRef.current({ value: text, valueHtml: html })
+      }
+      onBlur?.()
+    },
+  }, [cellId])
+
+  // When initial content changes for the same cell (e.g. a remote
+  // event.applied landed while we weren't editing), reconcile. We never
+  // overwrite if the editor is focused — that's what the banner is for.
+  useEffect(() => {
+    if (!editor) return
+    if (editor.isFocused) return
+    const current = editor.getText()
+    if (current === initialPlain) return
+    editor.commands.setContent(initialContent)
+    lastCommittedRef.current = initialPlain
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editor, initialContent, initialPlain])
+
+  useEffect(() => {
+    editor?.setEditable(!isReadOnly)
+  }, [editor, isReadOnly])
+
+  useEffect(() => {
+    latestViolationStateRef.current = {
+      infractions: infractions ?? [],
+      ruleSeverity: ruleSeverity ?? new Map<string, "major" | "minor">(),
+      waivedRuleIds: waivedRuleIds ?? new Set<string>(),
+    }
+    if (editor) {
+      const tr = editor.state.tr.setMeta(violationPluginKey, "rebuild")
+      editor.view.dispatch(tr)
+    }
+  }, [editor, infractions, ruleSeverity, waivedRuleIds])
+
+  useEffect(() => {
+    latestKaraokeStateRef.current = {
+      ...latestKaraokeStateRef.current,
+      timings: audioTimings,
+      onSeekToWord: onSeekToTime ? (_, timing) => onSeekToTime(timing.t0) : undefined,
+    }
+    if (editor) {
+      editor.view.dispatch(editor.state.tr.setMeta(karaokePluginKey, "rebuild"))
+    }
+  }, [editor, audioTimings, onSeekToTime])
+
+  const lastActiveIdxRef = useRef(-1)
+  useEffect(() => {
+    if (!editor) return
+    const idx = findActiveTimingIndex(audioTimings, audioCurrentTime ?? 0)
+    if (idx === lastActiveIdxRef.current) return
+    lastActiveIdxRef.current = idx
+    latestKaraokeStateRef.current = { ...latestKaraokeStateRef.current, activeIdx: idx }
+    editor.view.dispatch(editor.state.tr.setMeta(karaokePluginKey, "rebuild"))
+  }, [editor, audioTimings, audioCurrentTime])
+
+  // Flush pending idle commit on unmount so a programmatic navigate-away
+  // doesn't drop work.
+  useEffect(() => {
+    return () => {
+      if (idleTimerRef.current !== null) {
+        clearTimeout(idleTimerRef.current)
+        idleTimerRef.current = null
+      }
+    }
+  }, [])
+
+  if (!editor) {
+    return (
+      <div className={cn("min-h-[40px] px-2 py-1 text-sm text-muted-foreground", className)}>
+        {placeholder}
+      </div>
+    )
+  }
+
+  return (
+    <div className="relative h-full">
+      {heldByLabel && (
+        <div
+          aria-live="polite"
+          className="pointer-events-none absolute right-1 top-1 z-10 rounded-full bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-medium text-amber-700 dark:text-amber-400"
+          title={`${heldByLabel} is editing this cell`}
+        >
+          {heldByLabel} is editing
+        </div>
+      )}
+      {remoteChangedDuringEdit && onDiscardLocal && (
+        <div className="mb-1 flex items-center justify-between gap-2 rounded-sm border border-amber-300 bg-amber-50 px-2 py-1 text-[11px] text-amber-800 dark:border-amber-700 dark:bg-amber-950 dark:text-amber-300">
+          <span>This cell changed elsewhere while you were editing.</span>
+          <button
+            type="button"
+            onClick={onDiscardLocal}
+            className="rounded bg-amber-500/20 px-2 py-0.5 text-amber-900 hover:bg-amber-500/30 dark:text-amber-100"
+          >
+            Discard and reload
+          </button>
+        </div>
+      )}
+      <BubbleMenu
+        editor={editor}
+        shouldShow={({ editor, from, to }) => editor.isFocused && from !== to}
+        options={{ placement: "top" }}
+      >
+        <div className="flex gap-0.5 rounded border bg-background p-0.5 shadow-sm">
+          <button
+            type="button"
+            onClick={() => editor.chain().focus().toggleBold().run()}
+            className={cn(
+              "flex h-6 w-6 items-center justify-center rounded text-xs hover:bg-accent",
+              editor.isActive("bold") && "bg-accent"
+            )}
+            title="Bold (Cmd+B)"
+          >
+            <Bold className="h-3 w-3" />
+          </button>
+          <button
+            type="button"
+            onClick={() => editor.chain().focus().toggleItalic().run()}
+            className={cn(
+              "flex h-6 w-6 items-center justify-center rounded text-xs hover:bg-accent",
+              editor.isActive("italic") && "bg-accent"
+            )}
+            title="Italic (Cmd+I)"
+          >
+            <Italic className="h-3 w-3" />
+          </button>
+          <button
+            type="button"
+            onClick={() => editor.chain().focus().toggleUnderline().run()}
+            className={cn(
+              "flex h-6 w-6 items-center justify-center rounded text-xs hover:bg-accent",
+              editor.isActive("underline") && "bg-accent"
+            )}
+            title="Underline (Cmd+U)"
+          >
+            <UnderlineIcon className="h-3 w-3" />
+          </button>
+          <button
+            type="button"
+            onClick={() => editor.chain().focus().toggleStrike().run()}
+            className={cn(
+              "flex h-6 w-6 items-center justify-center rounded text-xs hover:bg-accent",
+              editor.isActive("strike") && "bg-accent"
+            )}
+            title="Strikethrough"
+          >
+            <Strikethrough className="h-3 w-3" />
+          </button>
+          <button
+            type="button"
+            onClick={() => editor.chain().focus().toggleCode().run()}
+            className={cn(
+              "flex h-6 w-6 items-center justify-center rounded text-xs hover:bg-accent",
+              editor.isActive("code") && "bg-accent"
+            )}
+            title="Inline code"
+          >
+            <Code className="h-3 w-3" />
+          </button>
+        </div>
+      </BubbleMenu>
+      <div
+        className="h-full"
+        onClick={(e) => {
+          if (!onRuleClick) return
+          const target = e.target as HTMLElement
+          const blot = target.closest("[data-rule-id]")
+          if (blot) {
+            onRuleClick(blot.getAttribute("data-rule-id")!, blot as HTMLElement)
+          }
+        }}
+      >
+        <EditorContent editor={editor} className="h-full [&>.ProseMirror]:h-full" />
+      </div>
+    </div>
+  )
+}
+
+// Strip pasted HTML to only the marks we support.
+// Allowed tags: b, strong, i, em, u, s, strike, del, code, p, br
+// Everything else is removed (content preserved).
+function stripToAllowedHtml(html: string): string {
+  const parser = new DOMParser()
+  const doc = parser.parseFromString(`<body>${html}</body>`, "text/html")
+  walkAndStrip(doc.body)
+  return doc.body.innerHTML
+}
+
+const ALLOWED_TAGS = new Set(["B", "STRONG", "I", "EM", "U", "S", "STRIKE", "DEL", "CODE", "P", "BR"])
+
+function walkAndStrip(el: Element): void {
+  const children = Array.from(el.childNodes)
+  for (const child of children) {
+    if (child.nodeType === 1) {
+      const elChild = child as Element
+      walkAndStrip(elChild)
+      if (!ALLOWED_TAGS.has(elChild.tagName)) {
+        const parent = elChild.parentNode
+        if (parent) {
+          while (elChild.firstChild) parent.insertBefore(elChild.firstChild, elChild)
+          parent.removeChild(elChild)
+        }
+      } else {
+        const attrs = Array.from(elChild.attributes)
+        for (const attr of attrs) elChild.removeAttribute(attr.name)
+      }
+    }
+  }
+}

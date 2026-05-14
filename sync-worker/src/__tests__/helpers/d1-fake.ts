@@ -1,28 +1,25 @@
 // Shared in-memory D1 fake for sync-worker tests.
 //
-// Extracted from rebuild.test.ts so that rebuild tests, events-route tests,
-// and any future tests that need a D1 stub all use the same implementation.
-//
-// Supported SQL patterns (keyed on first verb + target table):
-//   SELECT * FROM events WHERE project_id = ?
-//   SELECT COUNT(*) as cnt FROM cells ...
-//   SELECT COUNT(*) as cnt FROM cell_validators ...
-//   DELETE FROM cell_validators WHERE project_id = ?
-//   DELETE FROM cells WHERE file_id IN (SELECT id FROM files WHERE project_id = ?)
-//   INSERT INTO events (...) -- canonical event audit row
-//   SELECT … FROM events WHERE project_id = ? AND file_id = ? … — GET /events
-//   SELECT … FROM cell_validators WHERE … — GET /cell-validators
-//   SELECT cell_id, COALESCE(edit_count,0), …, last_edit_at, last_edit_event_id FROM cells WHERE file_id = ? — audit-stats
-//   SELECT cell_id, edit_event_id, username FROM cell_validators WHERE project_id = ? AND file_id = ? AND is_active = 1 — audit-stats validators
-//   INSERT INTO cells (...) ON CONFLICT ... — event-projection (edit_count literal 1) or projection.ts (literal 0)
-//   INSERT INTO cell_validators (...) ON CONFLICT ... -- from event-projection
-//   UPDATE cells SET validated = (...) WHERE ... -- from validate/unvalidate
+// Recognizes the SQL patterns the events / cells code actually issues. SQL
+// strings are normalized (collapse whitespace) before matching so a code
+// change that only reformats SQL doesn't silently break the fake.
 
 export interface Tables {
   events: EventRow[]
   cells: CellRow[]
   cell_validators: ValidatorRow[]
   files: FileRow[]
+  /** AD-9: projects rows expose `source_project_id` for the stale-source
+   *  route. The auth-worker side of the codebase owns this table; we
+   *  model just the columns the sync-worker reads. */
+  projects: ProjectRow[]
+}
+
+export interface ProjectRow {
+  id: string
+  source_project_id: string | null
+  name?: string
+  archived_at?: string | null
 }
 
 export interface EventRow {
@@ -31,25 +28,36 @@ export interface EventRow {
   project_id: string
   file_id: string | null
   cell_id: string | null
+  parent_id: string | null
   kind: string
   author: string
   payload: string
   client_ts: number
   server_ts: number
+  server_seq: number
 }
 
+/**
+ * New `cells` shape per AD-2 / AD-9 (spec 03-data-model §"Indicative schemas").
+ * Composite PK is (project_id, file_id, cell_id).
+ */
 export interface CellRow {
+  project_id: string
   file_id: string
   cell_id: string
-  content_text: string
-  content_hash: string
-  validated: number
-  word_count: number
+  side: 'source' | 'target'
+  value: string
+  value_html?: string | null
+  type?: string | null
+  canonical_ref?: string | null
+  anchor_cell_id?: string | null
+  event_id: string
+  source_event_id?: string | null
   last_editor: string | null
   last_edit_at: number
-  projected_from: string
-  /** CQRS edit counter; optional in fixtures, defaults to 0 when missing. */
-  edit_count?: number
+  validated: number
+  word_count: number
+  content_hash?: string | null
 }
 
 export interface ValidatorRow {
@@ -65,8 +73,6 @@ export interface ValidatorRow {
 export interface FileRow {
   id: string
   project_id: string
-  /** Display name. Optional in fixtures so older tests (which only need
-   *  id+project_id for join-by-project queries) don't have to set it. */
   name?: string
   file_type?: string
   source_language?: string | null
@@ -89,134 +95,214 @@ export function makeInMemoryD1(tables: Partial<Tables> = {}): InMemoryD1 {
     cells: tables.cells ?? [],
     cell_validators: tables.cell_validators ?? [],
     files: tables.files ?? [],
+    projects: tables.projects ?? [],
   }
 
-  // Record every statement that gets batched, in order.
   const issuedStmts: Array<{ sql: string; args: unknown[] }> = []
+
+  function findCell(projectId: string, fileId: string, cellId: string): CellRow | undefined {
+    return db.cells.find(
+      (c) => c.project_id === projectId && c.file_id === fileId && c.cell_id === cellId,
+    )
+  }
+
+  /** Extract the quoted kinds from an `... AND kind IN ('a', 'b', ...) ...` clause. */
+  function parseKindList(sql: string): Set<string> {
+    const match = sql.match(/kind IN \(([^)]*)\)/)
+    if (!match) return new Set()
+    const set = new Set<string>()
+    for (const part of match[1].split(',')) {
+      const trimmed = part.trim()
+      if (trimmed.startsWith("'") && trimmed.endsWith("'")) {
+        set.add(trimmed.slice(1, -1))
+      }
+    }
+    return set
+  }
 
   function execSql(sql: string, args: unknown[]): unknown[] {
     const normalized = sql.replace(/\s+/g, ' ').trim()
 
-    // ── SELECT events for hydration (Phase 4d, ASC chronological) ──────────
-    // Matched BEFORE the broader DESC pattern below because the SELECT prefix
-    // overlaps; the distinguishing feature is ORDER BY server_ts ASC with no
-    // cell_id / before / limit clauses.
-    if (
-      /^SELECT id, schema_version, project_id, file_id, cell_id, kind, author, payload, client_ts, server_ts FROM events WHERE project_id = \? AND file_id = \? ORDER BY server_ts ASC$/.test(
-        normalized,
-      )
-    ) {
-      const projectId = args[0] as string
-      const fileId = args[1] as string
-      return db.events
-        .filter((e) => e.project_id === projectId && e.file_id === fileId)
-        .sort((a, b) => a.server_ts - b.server_ts)
-    }
-
-    // ── SELECT events (audit log read — GET /events) ───────────────────────
-    // Handles the parameterized query from read-route.ts:
-    //   SELECT id, schema_version, ... FROM events
-    //   WHERE project_id = ? AND file_id = ?
-    //   [AND cell_id = ?] [AND server_ts < ?]
-    //   ORDER BY server_ts DESC LIMIT ?
-    if (/^SELECT id, schema_version/.test(normalized)) {
-      // args: projectId, fileId, [cellId], [before], limit
-      // Parse them out by walking the WHERE clause binds.
-      let argIdx = 0
-      const pid = args[argIdx++] as string
-      const fid = args[argIdx++] as string
-
-      // Check for optional AND clauses.
-      const hasCellId = normalized.includes('AND cell_id = ?')
-      const hasBefore = normalized.includes('AND server_ts < ?')
-      const cellId = hasCellId ? (args[argIdx++] as string) : null
-      const before = hasBefore ? (args[argIdx++] as number) : null
-      const limit = args[argIdx] as number
-
-      let rows = db.events.filter((e) => {
-        if (e.project_id !== pid) return false
-        if (e.file_id !== fid) return false
-        if (cellId !== null && e.cell_id !== cellId) return false
-        if (before !== null && e.server_ts >= before) return false
-        return true
-      })
-      // ORDER BY server_ts DESC
-      rows = rows.sort((a, b) => b.server_ts - a.server_ts)
-      // LIMIT
-      rows = rows.slice(0, limit)
-      return rows
-    }
-
-    if (/^SELECT server_ts FROM events WHERE id = \?$/.test(normalized)) {
-      const id = args[0] as string
-      const row = db.events.find((e) => e.id === id)
-      return row ? [{ server_ts: row.server_ts }] : []
-    }
-
-    if (/^SELECT last_edit_at FROM cells WHERE file_id = \? AND cell_id = \?$/.test(normalized)) {
-      const fileId = args[0] as string
-      const cellId = args[1] as string
-      const row = db.cells.find((c) => c.file_id === fileId && c.cell_id === cellId)
-      return row ? [{ last_edit_at: row.last_edit_at }] : []
-    }
-
-    // ── SELECT events (legacy — project-level SELECT * pattern) ───────────
-    if (/^SELECT \* FROM events WHERE project_id = \?/.test(normalized)) {
+    // ── COUNT(*) cells (rebuild + diagnostics) ──────────────────────────
+    if (/^SELECT COUNT\(\*\) as cnt FROM cells WHERE project_id = \?/.test(normalized)) {
       const pid = args[0] as string
-      return db.events
-        .filter((e) => e.project_id === pid)
-        .sort((a, b) => a.server_ts - b.server_ts)
-    }
-
-    // ── SELECT COUNT cells ─────────────────────────────────────────────────
-    if (/^SELECT COUNT\(\*\) as cnt FROM cells/.test(normalized)) {
-      const pid = args[0] as string
-      const fileIds = db.files.filter((f) => f.project_id === pid).map((f) => f.id)
-      const cnt = db.cells.filter((c) => fileIds.includes(c.file_id)).length
+      const cnt = db.cells.filter((c) => c.project_id === pid).length
       return [{ cnt }]
     }
 
-    // ── SELECT COUNT cell_validators ───────────────────────────────────────
-    if (/^SELECT COUNT\(\*\) as cnt FROM cell_validators/.test(normalized)) {
+    if (/^SELECT COUNT\(\*\) as cnt FROM cell_validators WHERE project_id = \?/.test(normalized)) {
       const pid = args[0] as string
       const cnt = db.cell_validators.filter((v) => v.project_id === pid).length
       return [{ cnt }]
     }
 
-    // ── SELECT events (GET /events) ─────────────────────────────────────────
+    // ── COALESCE(MAX(server_seq), 0) + 1 — next-seq assignment ──────────
+    if (/^SELECT COALESCE\(MAX\(server_seq\), 0\) \+ 1 AS next_seq FROM events WHERE project_id = \?$/.test(normalized)) {
+      const pid = args[0] as string
+      let max = 0
+      for (const e of db.events) {
+        if (e.project_id === pid && e.server_seq > max) max = e.server_seq
+      }
+      return [{ next_seq: max + 1 }]
+    }
+
+    // ── AD-2 first-child-of-parent lookup ───────────────────────────────
+    // SQL filters by chain-mutating kinds (see event-projection.ts
+    // CHAIN_MUTATING_KINDS). The fake extracts the kinds from the IN(...)
+    // clause to keep itself in sync with the source.
     if (
-      /^SELECT id, schema_version, project_id, file_id, cell_id, kind, author, payload, client_ts, server_ts FROM events WHERE project_id = \? AND file_id = \?/.test(
+      /^SELECT id, server_seq FROM events WHERE project_id = \? AND file_id = \? AND cell_id = \? AND parent_id IS NULL AND kind IN \([^)]*\) ORDER BY server_seq ASC, id ASC LIMIT 1$/.test(
         normalized,
       )
     ) {
-      const projectId = args[0] as string
-      const fileId = args[1] as string
-      const hasCell = normalized.includes('AND cell_id = ?')
-      const hasBefore = normalized.includes('AND server_ts < ?')
-      let i = 2
-      let cellId: string | null = null
-      let before: number | null = null
-      if (hasCell) {
-        cellId = args[i++] as string
-      }
-      if (hasBefore) {
-        before = args[i++] as number
-      }
-      const limit = args[i] as number
-      let rows = db.events.filter(
-        (e) => e.project_id === projectId && e.file_id === fileId,
+      const pid = args[0] as string
+      const fid = args[1] as string
+      const cid = args[2] as string
+      const kinds = parseKindList(normalized)
+      const matches = db.events
+        .filter((e) => e.project_id === pid && e.file_id === fid && e.cell_id === cid && e.parent_id === null && kinds.has(e.kind))
+        .sort((a, b) => (a.server_seq - b.server_seq) || a.id.localeCompare(b.id))
+      return matches.length ? [{ id: matches[0].id, server_seq: matches[0].server_seq }] : []
+    }
+    if (
+      /^SELECT id, server_seq FROM events WHERE project_id = \? AND file_id = \? AND cell_id = \? AND parent_id = \? AND kind IN \([^)]*\) ORDER BY server_seq ASC, id ASC LIMIT 1$/.test(
+        normalized,
       )
-      if (cellId !== null) {
-        rows = rows.filter((e) => e.cell_id === cellId)
-      }
-      if (before !== null) {
-        rows = rows.filter((e) => e.server_ts < before)
-      }
-      rows.sort((a, b) => b.server_ts - a.server_ts)
-      return rows.slice(0, limit)
+    ) {
+      const pid = args[0] as string
+      const fid = args[1] as string
+      const cid = args[2] as string
+      const parent = args[3] as string
+      const kinds = parseKindList(normalized)
+      const matches = db.events
+        .filter((e) => e.project_id === pid && e.file_id === fid && e.cell_id === cid && e.parent_id === parent && kinds.has(e.kind))
+        .sort((a, b) => (a.server_seq - b.server_seq) || a.id.localeCompare(b.id))
+      return matches.length ? [{ id: matches[0].id, server_seq: matches[0].server_seq }] : []
     }
 
-    // ── SELECT cell_validators (GET /cell-validators) ───────────────────────
+    // ── Idempotency probe: existing event row ───────────────────────────
+    if (/^SELECT server_ts, server_seq FROM events WHERE id = \?$/.test(normalized)) {
+      const id = args[0] as string
+      const row = db.events.find((e) => e.id === id)
+      return row ? [{ server_ts: row.server_ts, server_seq: row.server_seq }] : []
+    }
+
+    // ── GET /events read route ──────────────────────────────────────────
+    if (/^SELECT id, schema_version, project_id, file_id, cell_id, parent_id, kind, author, payload, client_ts, server_ts, server_seq FROM events/.test(normalized)) {
+      // Two variants: rebuild (ASC) and read-route (DESC, with optional cell/before/limit).
+      const isAsc = /ORDER BY server_seq ASC/.test(normalized)
+      const projectIdIdx = 0
+      const fileIdIdx = isAsc ? 1 : 1
+      const pid = args[projectIdIdx] as string
+      const fid = args[fileIdIdx] as string | undefined
+
+      let rows = db.events.filter((e) => e.project_id === pid)
+      if (typeof fid === 'string') rows = rows.filter((e) => e.file_id === fid)
+
+      if (isAsc) {
+        return rows.sort((a, b) => (a.server_seq - b.server_seq) || (a.server_ts - b.server_ts) || a.id.localeCompare(b.id))
+      }
+
+      // DESC = read-route
+      let i = 2
+      if (normalized.includes('AND cell_id = ?')) {
+        const cellId = args[i++] as string
+        rows = rows.filter((e) => e.cell_id === cellId)
+      }
+      if (normalized.includes('AND server_seq < ?')) {
+        const before = args[i++] as number
+        rows = rows.filter((e) => e.server_seq < before)
+      }
+      const limit = args[i] as number
+      rows = rows.sort((a, b) => b.server_seq - a.server_seq).slice(0, limit)
+      return rows
+    }
+
+    // ── GET cell history read route ─────────────────────────────────────
+    // SELECT id, parent_id, kind, author, payload, client_ts, server_ts, server_seq
+    //   FROM events
+    //  WHERE project_id = ? AND file_id = ? AND cell_id = ?
+    //  ORDER BY server_seq DESC, id DESC
+    //  LIMIT ?
+    if (
+      /^SELECT id, parent_id, kind, author, payload, client_ts, server_ts, server_seq FROM events WHERE project_id = \? AND file_id = \? AND cell_id = \? ORDER BY server_seq DESC, id DESC LIMIT \?$/.test(
+        normalized,
+      )
+    ) {
+      const pid = args[0] as string
+      const fid = args[1] as string
+      const cid = args[2] as string
+      const limit = args[3] as number
+      return db.events
+        .filter((e) => e.project_id === pid && e.file_id === fid && e.cell_id === cid)
+        .sort((a, b) => (b.server_seq - a.server_seq) || b.id.localeCompare(a.id))
+        .slice(0, limit)
+        .map((e) => ({
+          id: e.id,
+          parent_id: e.parent_id,
+          kind: e.kind,
+          author: e.author,
+          payload: e.payload,
+          client_ts: e.client_ts,
+          server_ts: e.server_ts,
+          server_seq: e.server_seq,
+        }))
+    }
+
+    // ── GET /api/v1/projects/:projectId/search ─────────────────────────
+    // The route's SQL is multi-line; after whitespace-collapse:
+    //   SELECT cells.cell_id AS cell_id, cells.file_id AS file_id,
+    //          cells.side AS side, cells.value AS value,
+    //          snippet(cells_fts, ...) AS snippet, cells_fts.rank AS rank
+    //     FROM cells_fts
+    //     JOIN cells ON cells.rowid = cells_fts.rowid
+    //    WHERE cells_fts MATCH ? AND cells.project_id = ?
+    //      [AND cells.side = ?]
+    //    ORDER BY rank ASC LIMIT ?
+    //
+    // We model the FTS5 query as a naive substring match against the
+    // sanitized FTS query (which is a quoted-tokens string like '"foo" "bar"').
+    // Tests can assert on the result set ordering / filtering without us
+    // needing to reproduce FTS5 ranking.
+    if (
+      /^SELECT cells\.cell_id AS cell_id, cells\.file_id AS file_id, cells\.side AS side, cells\.value AS value, snippet\(cells_fts, 0, '<mark>', '<\/mark>', '\.\.\.', 16\) AS snippet, cells_fts\.rank AS rank FROM cells_fts JOIN cells ON cells\.rowid = cells_fts\.rowid WHERE cells_fts MATCH \? AND cells\.project_id = \?/.test(
+        normalized,
+      )
+    ) {
+      const ftsQuery = args[0] as string
+      const pid = args[1] as string
+      const hasSide = normalized.includes("AND cells.side = ?")
+      const side = hasSide ? (args[2] as string) : null
+      const limit = args[hasSide ? 3 : 2] as number
+
+      // Parse out the quoted tokens.
+      const tokens = (ftsQuery.match(/"[^"]+"/g) ?? []).map((t) =>
+        t.slice(1, -1).toLowerCase(),
+      )
+
+      const matched = db.cells
+        .filter((c) => c.project_id === pid)
+        .filter((c) => side === null || c.side === side)
+        .filter((c) => {
+          if (tokens.length === 0) return false
+          const v = c.value.toLowerCase()
+          return tokens.every((t) => v.includes(t))
+        })
+        .map((c, idx) => ({
+          cell_id: c.cell_id,
+          file_id: c.file_id,
+          side: c.side,
+          value: c.value,
+          snippet: c.value,
+          // Fake "rank" — lower is better. Use the iteration index so the
+          // first inserted matching cell sorts first in tests.
+          rank: idx,
+        }))
+        .slice(0, limit)
+      return matched
+    }
+
+    // ── GET /cell-validators read route ─────────────────────────────────
     if (
       /^SELECT edit_event_id, username, is_active, decided_ts FROM cell_validators WHERE project_id = \? AND file_id = \? AND cell_id = \? ORDER BY decided_ts DESC/.test(
         normalized,
@@ -226,12 +312,7 @@ export function makeInMemoryD1(tables: Partial<Tables> = {}): InMemoryD1 {
       const fileId = args[1] as string
       const cellId = args[2] as string
       return db.cell_validators
-        .filter(
-          (v) =>
-            v.project_id === projectId &&
-            v.file_id === fileId &&
-            v.cell_id === cellId,
-        )
+        .filter((v) => v.project_id === projectId && v.file_id === fileId && v.cell_id === cellId)
         .sort((a, b) => b.decided_ts - a.decided_ts)
         .map((v) => ({
           edit_event_id: v.edit_event_id,
@@ -241,27 +322,27 @@ export function makeInMemoryD1(tables: Partial<Tables> = {}): InMemoryD1 {
         }))
     }
 
-    // ── SELECT cells audit stats (GET /cells/audit-stats) ────────────────────
+    // ── GET /cells/audit-stats — cells select ──────────────────────────
     if (
-      /SELECT cell_id, COALESCE\(edit_count, 0\) AS edit_count, content_hash, last_edit_at, CASE WHEN projected_from LIKE 'event:%' THEN substr\(projected_from, 7\) ELSE NULL END AS last_edit_event_id FROM cells WHERE file_id = \?/.test(
+      /SELECT cell_id, side, content_hash, last_edit_at, event_id\s+AS last_edit_event_id, source_event_id FROM cells WHERE project_id = \? AND file_id = \?/.test(
         normalized,
       )
     ) {
-      const fileId = args[0] as string
+      const projectId = args[0] as string
+      const fileId = args[1] as string
       return db.cells
-        .filter((c) => c.file_id === fileId)
+        .filter((c) => c.project_id === projectId && c.file_id === fileId)
         .map((c) => ({
           cell_id: c.cell_id,
-          edit_count: c.edit_count ?? 0,
-          content_hash: c.content_hash,
+          side: c.side,
+          content_hash: c.content_hash ?? null,
           last_edit_at: c.last_edit_at,
-          last_edit_event_id: c.projected_from?.startsWith('event:')
-            ? c.projected_from.slice('event:'.length)
-            : null,
+          last_edit_event_id: c.event_id,
+          source_event_id: c.source_event_id ?? null,
         }))
     }
 
-    // ── SELECT cell_validators (active, by file — audit-stats join) ──────────
+    // ── GET /cells/audit-stats — validators select ─────────────────────
     if (
       /^SELECT cell_id, edit_event_id, username FROM cell_validators WHERE project_id = \? AND file_id = \? AND is_active = 1$/.test(
         normalized,
@@ -270,9 +351,7 @@ export function makeInMemoryD1(tables: Partial<Tables> = {}): InMemoryD1 {
       const projectId = args[0] as string
       const fileId = args[1] as string
       return db.cell_validators
-        .filter(
-          (v) => v.project_id === projectId && v.file_id === fileId && v.is_active === 1,
-        )
+        .filter((v) => v.project_id === projectId && v.file_id === fileId && v.is_active === 1)
         .map((v) => ({
           cell_id: v.cell_id,
           edit_event_id: v.edit_event_id,
@@ -280,30 +359,125 @@ export function makeInMemoryD1(tables: Partial<Tables> = {}): InMemoryD1 {
         }))
     }
 
-    // ── DELETE cell_validators ─────────────────────────────────────────────
+    // ── GET /api/v1/projects/:projectId/files (list) ──────────────────
+    if (
+      /^SELECT id, project_id, name, file_type, source_language, target_language, cell_count, approved_count, word_count, last_edit_at FROM files WHERE project_id = \? ORDER BY/.test(
+        normalized,
+      )
+    ) {
+      const pid = args[0] as string
+      return db.files
+        .filter((f) => f.project_id === pid)
+        .map((f) => ({
+          id: f.id,
+          project_id: f.project_id,
+          name: f.name ?? "",
+          file_type: f.file_type ?? "",
+          source_language: f.source_language ?? null,
+          target_language: f.target_language ?? null,
+          cell_count: f.cell_count ?? 0,
+          approved_count: f.approved_count ?? 0,
+          word_count: f.word_count ?? 0,
+          last_edit_at: f.last_edit_at ?? null,
+        }))
+        .sort((a, b) => {
+          const aEdit = a.last_edit_at
+          const bEdit = b.last_edit_at
+          if (aEdit !== null && bEdit !== null) return bEdit - aEdit
+          if (aEdit === null && bEdit !== null) return 1
+          if (aEdit !== null && bEdit === null) return -1
+          return a.name.localeCompare(b.name)
+        })
+    }
+
+    // ── GET /api/v1/projects/:projectId/files/:fileId (single) ────────
+    if (
+      /^SELECT id, project_id, name, file_type, source_language, target_language, cell_count, approved_count, word_count, last_edit_at FROM files WHERE project_id = \? AND id = \?$/.test(
+        normalized,
+      )
+    ) {
+      const pid = args[0] as string
+      const fid = args[1] as string
+      const f = db.files.find((row) => row.project_id === pid && row.id === fid)
+      if (!f) return []
+      return [
+        {
+          id: f.id,
+          project_id: f.project_id,
+          name: f.name ?? "",
+          file_type: f.file_type ?? "",
+          source_language: f.source_language ?? null,
+          target_language: f.target_language ?? null,
+          cell_count: f.cell_count ?? 0,
+          approved_count: f.approved_count ?? 0,
+          word_count: f.word_count ?? 0,
+          last_edit_at: f.last_edit_at ?? null,
+        },
+      ]
+    }
+
+    // ── GET /api/v1/projects/:projectId/files/:fileId/cells ────────────
+    if (
+      /^SELECT cell_id, side, value, value_html, type, canonical_ref, anchor_cell_id, event_id, source_event_id, last_editor, last_edit_at, validated, word_count FROM cells WHERE project_id = \? AND file_id = \?/.test(
+        normalized,
+      )
+    ) {
+      const pid = args[0] as string
+      const fid = args[1] as string
+      const hasSide = normalized.includes("AND side = ?")
+      const side = hasSide ? (args[2] as string) : null
+      return db.cells
+        .filter(
+          (c) =>
+            c.project_id === pid &&
+            c.file_id === fid &&
+            (side === null || c.side === side),
+        )
+        .map((c) => ({
+          cell_id: c.cell_id,
+          side: c.side,
+          value: c.value,
+          value_html: c.value_html ?? null,
+          type: c.type ?? null,
+          canonical_ref: c.canonical_ref ?? null,
+          anchor_cell_id: c.anchor_cell_id ?? null,
+          event_id: c.event_id,
+          source_event_id: c.source_event_id ?? null,
+          last_editor: c.last_editor,
+          last_edit_at: c.last_edit_at,
+          validated: c.validated,
+          word_count: c.word_count,
+        }))
+    }
+
+    // ── Rebuild DELETE ─────────────────────────────────────────────────
     if (/^DELETE FROM cell_validators WHERE project_id = \?$/.test(normalized)) {
       const pid = args[0] as string
       db.cell_validators = db.cell_validators.filter((v) => v.project_id !== pid)
       return []
     }
-
-    // ── DELETE cells (join through files) ──────────────────────────────────
-    if (
-      /^DELETE FROM cells WHERE file_id IN \(SELECT id FROM files WHERE project_id = \?\)$/.test(
-        normalized,
-      )
-    ) {
+    if (/^DELETE FROM cells WHERE project_id = \?$/.test(normalized)) {
       const pid = args[0] as string
-      const fileIds = db.files.filter((f) => f.project_id === pid).map((f) => f.id)
-      db.cells = db.cells.filter((c) => !fileIds.includes(c.file_id))
+      db.cells = db.cells.filter((c) => c.project_id !== pid)
       return []
     }
 
-    // ── INSERT INTO events (canonical audit row) ───────────────────────────
-    // Bind order (from cell-commit.ts):
-    // 0=id, 1=schema_version, 2=project_id, 3=file_id, 4=cell_id,
-    // 5=kind, 6=author, 7=payload (JSON), 8=client_ts, 9=server_ts
-    // TODO: when Phase 2+ adds INSERT OR IGNORE INTO cell_validators, add a parallel branch above this one.
+    // ── Single-cell DELETE (source.cell.delete / target.cell.delete) ────
+    if (/^DELETE FROM cells WHERE project_id = \? AND file_id = \? AND cell_id = \?$/.test(normalized)) {
+      const pid = args[0] as string
+      const fid = args[1] as string
+      const cid = args[2] as string
+      db.cells = db.cells.filter(
+        (c) => !(c.project_id === pid && c.file_id === fid && c.cell_id === cid),
+      )
+      return []
+    }
+
+    // ── INSERT events (canonical audit row) ────────────────────────────
+    // Bind order from handlers/cell-events.ts and file-create.ts:
+    //   0=id, 1=schema_version, 2=project_id, 3=file_id, 4=cell_id,
+    //   5=parent_id, 6=kind, 7=author, 8=payload, 9=client_ts,
+    //   10=server_ts, 11=server_seq
     if (/^INSERT OR IGNORE INTO events\s*\(/.test(normalized)) {
       const row: EventRow = {
         id: args[0] as string,
@@ -311,82 +485,142 @@ export function makeInMemoryD1(tables: Partial<Tables> = {}): InMemoryD1 {
         project_id: args[2] as string,
         file_id: args[3] as string | null,
         cell_id: args[4] as string | null,
-        kind: args[5] as string,
-        author: args[6] as string,
-        payload: args[7] as string,
-        client_ts: args[8] as number,
-        server_ts: args[9] as number,
+        parent_id: args[5] as string | null,
+        kind: args[6] as string,
+        author: args[7] as string,
+        payload: args[8] as string,
+        client_ts: args[9] as number,
+        server_ts: args[10] as number,
+        server_seq: args[11] as number,
       }
-      // INSERT OR IGNORE: only insert if id not already present
       const exists = db.events.some((e) => e.id === row.id)
-      if (!exists) {
-        db.events.push(row)
-      }
+      if (!exists) db.events.push(row)
       return []
     }
 
-    // ── INSERT INTO cells (UPSERT) — event-projection cell.commit ──────────
-    if (/VALUES \(\?, \?, \?, \?, 0, \?, \?, \?, \?, 1\)/.test(normalized)) {
+    // ── INSERT cells (cell create handlers) ─────────────────────────────
+    if (/^INSERT INTO cells \(\s*project_id, file_id, cell_id, side, value, value_html, type, canonical_ref, anchor_cell_id, event_id, source_event_id, last_editor, last_edit_at, validated, word_count, content_hash\s*\)/.test(
+      normalized,
+    )) {
       const row: CellRow = {
-        file_id: args[0] as string,
-        cell_id: args[1] as string,
-        content_text: args[2] as string,
-        content_hash: args[3] as string,
+        project_id: args[0] as string,
+        file_id: args[1] as string,
+        cell_id: args[2] as string,
+        side: args[3] as 'source' | 'target',
+        value: args[4] as string,
+        value_html: args[5] as string | null,
+        type: args[6] as string | null,
+        canonical_ref: args[7] as string | null,
+        anchor_cell_id: args[8] as string | null,
+        event_id: args[9] as string,
+        source_event_id: null,
+        last_editor: args[10] as string | null,
+        last_edit_at: args[11] as number,
         validated: 0,
-        word_count: args[4] as number,
-        last_editor: args[5] as string | null,
-        last_edit_at: args[6] as number,
-        projected_from: args[7] as string,
-        edit_count: 1,
+        word_count: args[12] as number,
+        content_hash: args[13] as string | null,
       }
-      const idx = db.cells.findIndex(
-        (c) => c.file_id === row.file_id && c.cell_id === row.cell_id,
-      )
-      if (idx === -1) {
+      const existing = findCell(row.project_id, row.file_id, row.cell_id)
+      if (!existing) {
         db.cells.push(row)
-      } else if (row.last_edit_at > db.cells[idx].last_edit_at) {
-        const prev = db.cells[idx]
-        db.cells[idx] = {
-          ...row,
-          edit_count: (prev.edit_count ?? 0) + 1,
-        }
+      } else {
+        // ON CONFLICT clause from the SQL — overwrite the value-level
+        // fields; reset source_event_id to NULL (create is genesis).
+        existing.side = row.side
+        existing.value = row.value
+        existing.value_html = row.value_html
+        existing.type = row.type
+        existing.canonical_ref = row.canonical_ref
+        existing.anchor_cell_id = row.anchor_cell_id
+        existing.event_id = row.event_id
+        existing.source_event_id = null
+        existing.last_editor = row.last_editor
+        existing.last_edit_at = row.last_edit_at
+        existing.word_count = row.word_count
+        existing.content_hash = row.content_hash
       }
       return []
     }
 
-    // ── INSERT INTO cells (UPSERT) — projection.writeProjection (Y.Doc) ───
-    if (/VALUES \(\?, \?, \?, \?, \?, \?, \?, \?, \?, 0\)/.test(normalized)) {
-      const row: CellRow = {
-        file_id: args[0] as string,
-        cell_id: args[1] as string,
-        content_text: args[2] as string,
-        content_hash: args[3] as string,
-        validated: args[4] as number,
-        word_count: args[5] as number,
-        last_editor: args[6] as string | null,
-        last_edit_at: args[7] as number,
-        projected_from: args[8] as string,
-        edit_count: 0,
-      }
-      const idx = db.cells.findIndex(
-        (c) => c.file_id === row.file_id && c.cell_id === row.cell_id,
-      )
-      if (idx === -1) {
-        db.cells.push(row)
-      } else if (row.last_edit_at > db.cells[idx].last_edit_at) {
-        const prev = db.cells[idx]
-        db.cells[idx] = { ...row, edit_count: prev.edit_count ?? 0 }
+    // ── UPDATE cells (target.cell.commit) ───────────────────────────────
+    if (/^UPDATE cells SET value = \?, value_html = \?, event_id = \?, source_event_id = \?, last_editor = \?, last_edit_at = \?, word_count = \?, content_hash = \?, validated = 0 WHERE project_id = \? AND file_id = \? AND cell_id = \?$/.test(
+      normalized,
+    )) {
+      const value = args[0] as string
+      const valueHtml = args[1] as string | null
+      const eventId = args[2] as string
+      const sourceEventId = args[3] as string | null
+      const lastEditor = args[4] as string | null
+      const lastEditAt = args[5] as number
+      const wordCount = args[6] as number
+      const contentHash = args[7] as string | null
+      const projectId = args[8] as string
+      const fileId = args[9] as string
+      const cellId = args[10] as string
+      const cell = findCell(projectId, fileId, cellId)
+      if (cell) {
+        cell.value = value
+        cell.value_html = valueHtml
+        cell.event_id = eventId
+        cell.source_event_id = sourceEventId
+        cell.last_editor = lastEditor
+        cell.last_edit_at = lastEditAt
+        cell.word_count = wordCount
+        cell.content_hash = contentHash
+        cell.validated = 0
       }
       return []
     }
 
-    if (/^INSERT INTO cells/.test(normalized)) {
-      throw new Error(`d1-fake: unhandled INSERT INTO cells SQL: ${normalized.slice(0, 160)}`)
+    // ── UPDATE cells (source.cell.commit) ───────────────────────────────
+    if (/^UPDATE cells SET value = \?, value_html = \?, event_id = \?, last_editor = \?, last_edit_at = \?, word_count = \?, content_hash = \? WHERE project_id = \? AND file_id = \? AND cell_id = \?$/.test(
+      normalized,
+    )) {
+      const value = args[0] as string
+      const valueHtml = args[1] as string | null
+      const eventId = args[2] as string
+      const lastEditor = args[3] as string | null
+      const lastEditAt = args[4] as number
+      const wordCount = args[5] as number
+      const contentHash = args[6] as string | null
+      const projectId = args[7] as string
+      const fileId = args[8] as string
+      const cellId = args[9] as string
+      const cell = findCell(projectId, fileId, cellId)
+      if (cell) {
+        cell.value = value
+        cell.value_html = valueHtml
+        cell.event_id = eventId
+        cell.last_editor = lastEditor
+        cell.last_edit_at = lastEditAt
+        cell.word_count = wordCount
+        cell.content_hash = contentHash
+      }
+      return []
     }
 
-    // ── INSERT INTO files (UPSERT) — file.create handler ───────────────────
-    // VALUES bind order: id, project_id, name, file_type, source_language,
-    // target_language, projected_from. Counters/last_edit_at are SQL literals.
+    // ── UPDATE cells (reorder) ──────────────────────────────────────────
+    if (/^UPDATE cells SET anchor_cell_id = \?, event_id = \?, last_editor = \?, last_edit_at = \? WHERE project_id = \? AND file_id = \? AND cell_id = \?$/.test(
+      normalized,
+    )) {
+      const anchor = args[0] as string | null
+      const eventId = args[1] as string
+      const lastEditor = args[2] as string | null
+      const lastEditAt = args[3] as number
+      const projectId = args[4] as string
+      const fileId = args[5] as string
+      const cellId = args[6] as string
+      const cell = findCell(projectId, fileId, cellId)
+      if (cell) {
+        cell.anchor_cell_id = anchor
+        cell.event_id = eventId
+        cell.last_editor = lastEditor
+        cell.last_edit_at = lastEditAt
+      }
+      return []
+    }
+
+    // ── INSERT files (UPSERT) ───────────────────────────────────────────
     if (
       /^INSERT INTO files \([^)]*\) VALUES \(\?, \?, \?, \?, \?, \?, 0, 0, 0, NULL, \?, unixepoch\('now'\) \* 1000\)/.test(
         normalized,
@@ -409,7 +643,6 @@ export function makeInMemoryD1(tables: Partial<Tables> = {}): InMemoryD1 {
       if (idx === -1) {
         db.files.push(row)
       } else {
-        // ON CONFLICT updates only the administrative fields, leaves counters.
         db.files[idx] = {
           ...db.files[idx],
           name: row.name,
@@ -421,12 +654,36 @@ export function makeInMemoryD1(tables: Partial<Tables> = {}): InMemoryD1 {
       return []
     }
 
-    // ── INSERT INTO cell_validators (UPSERT) ───────────────────────────────
+    // ── INSERT files (writeProjection rollup) ──────────────────────────
+    if (
+      /^INSERT INTO files \([^)]*\) VALUES \(\?, \?, \?, \?, \?, \?, \?, \?, \?, \?, \?, unixepoch\('now'\) \* 1000\)/.test(
+        normalized,
+      )
+    ) {
+      const row: FileRow = {
+        id: args[0] as string,
+        project_id: args[1] as string,
+        name: args[2] as string,
+        file_type: args[3] as string,
+        source_language: args[4] as string | null,
+        target_language: args[5] as string | null,
+        cell_count: args[6] as number,
+        approved_count: args[7] as number,
+        word_count: args[8] as number,
+        last_edit_at: args[9] as number | null,
+        projected_from: args[10] as string,
+      }
+      const idx = db.files.findIndex((f) => f.id === row.id)
+      if (idx === -1) {
+        db.files.push(row)
+      } else {
+        db.files[idx] = { ...db.files[idx], ...row }
+      }
+      return []
+    }
+
+    // ── INSERT cell_validators (UPSERT) ────────────────────────────────
     if (/^INSERT INTO cell_validators/.test(normalized)) {
-      // Bind order (from event-projection.ts):
-      // 0=project_id, 1=file_id, 2=cell_id, 3=edit_event_id,
-      // 4=username, 5=decided_ts
-      // is_active is a SQL literal (1 or 0) immediately before the decided_ts bind param
       const isActiveMatch = normalized.match(/VALUES \([^)]*?,\s*(0|1),\s*\?\)/)
       const isActive = isActiveMatch ? parseInt(isActiveMatch[1], 10) : 1
       const row: ValidatorRow = {
@@ -448,46 +705,81 @@ export function makeInMemoryD1(tables: Partial<Tables> = {}): InMemoryD1 {
       )
       if (idx === -1) {
         db.cell_validators.push(row)
-      } else {
-        // LWW on decided_ts
-        if (row.decided_ts > db.cell_validators[idx].decided_ts) {
-          db.cell_validators[idx] = row
-        }
+      } else if (row.decided_ts > db.cell_validators[idx].decided_ts) {
+        db.cell_validators[idx] = row
       }
       return []
     }
 
-    // ── UPDATE cells SET validated = (...) ────────────────────────────────
-    // Emitted by validate/unvalidate handlers to recompute the denormalized flag.
-    // Bind order: 0=project_id, 1=file_id, 2=cell_id (for subquery),
-    //             3=legacy fallback edit_event_id,
-    //             4=file_id, 5=cell_id (for WHERE clause)
+    // ── GET projects.source_project_id (stale-source route prelude) ────
+    if (/^SELECT source_project_id FROM projects WHERE id = \?$/.test(normalized)) {
+      const id = args[0] as string
+      const project = db.projects.find((p) => p.id === id)
+      return project ? [{ source_project_id: project.source_project_id }] : []
+    }
+
+    // ── AD-9 stale-source JOIN ─────────────────────────────────────────
+    // Bind order: 0=upstream_or_null, 1=project_id, 2=file_id.
+    // Whitespace-collapsed, the route's SQL becomes:
+    //   SELECT t.cell_id AS cell_id FROM cells t JOIN cells s
+    //     ON s.project_id = COALESCE(?, t.project_id) AND s.cell_id = t.cell_id
+    //    AND s.side = 'source'
+    //   WHERE t.project_id = ? AND t.file_id = ? AND t.side = 'target'
+    //     AND t.source_event_id IS NOT NULL AND s.event_id != t.source_event_id
+    if (
+      /^SELECT t\.cell_id AS cell_id FROM cells t JOIN cells s ON s\.project_id = COALESCE\(\?, t\.project_id\) AND s\.cell_id = t\.cell_id AND s\.side = 'source' WHERE t\.project_id = \? AND t\.file_id = \? AND t\.side = 'target' AND t\.source_event_id IS NOT NULL AND s\.event_id != t\.source_event_id$/.test(
+        normalized,
+      )
+    ) {
+      const upstreamArg = args[0] as string | null
+      const projectId = args[1] as string
+      const fileId = args[2] as string
+      const sourceProjectId = upstreamArg ?? projectId
+      const stale: Array<{ cell_id: string }> = []
+      for (const t of db.cells) {
+        if (
+          t.project_id === projectId &&
+          t.file_id === fileId &&
+          t.side === "target" &&
+          t.source_event_id != null
+        ) {
+          const sourceRow = db.cells.find(
+            (s) =>
+              s.project_id === sourceProjectId &&
+              s.cell_id === t.cell_id &&
+              s.side === "source",
+          )
+          if (sourceRow && sourceRow.event_id !== t.source_event_id) {
+            stale.push({ cell_id: t.cell_id })
+          }
+        }
+      }
+      return stale
+    }
+
+    // ── UPDATE cells SET validated = (...) ─────────────────────────────
+    // From validate/unvalidate: re-evaluate validated against the current
+    // chain head (cells.event_id).
+    // Bind order: 0=project_id, 1=file_id, 2=cell_id (subquery), 3=project_id, 4=file_id, 5=cell_id (WHERE).
     if (/^UPDATE cells SET validated/.test(normalized)) {
       const projectId = args[0] as string
       const fileId = args[4] as string
       const cellId = args[5] as string
-      const cell = db.cells.find((c) => c.file_id === fileId && c.cell_id === cellId)
-      const currentEditId = cell?.projected_from?.startsWith('event:')
-        ? cell.projected_from.slice('event:'.length)
-        : args[3] as string
-      const activeCount = db.cell_validators.filter(
-        (v) =>
-          v.project_id === projectId &&
-          v.file_id === fileId &&
-          v.cell_id === cellId &&
-          v.is_active === 1 &&
-          v.edit_event_id === currentEditId,
-      ).length
-      const validated = activeCount > 0 ? 1 : 0
-      for (const cell of db.cells) {
-        if (cell.file_id === fileId && cell.cell_id === cellId) {
-          cell.validated = validated
-        }
+      const cell = findCell(projectId, fileId, cellId)
+      if (cell) {
+        const activeForHead = db.cell_validators.some(
+          (v) =>
+            v.project_id === projectId &&
+            v.file_id === fileId &&
+            v.cell_id === cellId &&
+            v.is_active === 1 &&
+            v.edit_event_id === cell.event_id,
+        )
+        cell.validated = activeForHead ? 1 : 0
       }
       return []
     }
 
-    // Unrecognised SQL -- safe to ignore in the test context.
     return []
   }
 
@@ -514,7 +806,6 @@ export function makeInMemoryD1(tables: Partial<Tables> = {}): InMemoryD1 {
       raw: async () => [],
     } as unknown as D1PreparedStatement
 
-    // Track args when this statement is used in batch
     ;(stmt as any).__sql = sql
     ;(stmt as any).__getArgs = () => boundArgs
 
@@ -536,7 +827,6 @@ export function makeInMemoryD1(tables: Partial<Tables> = {}): InMemoryD1 {
     },
     dump: async () => new ArrayBuffer(0),
     exec: async () => ({ count: 0, duration: 0 }),
-    // Test helpers
     _tables() {
       return db
     },

@@ -1,28 +1,23 @@
-// Y.Doc hydration from D1 events for CQRS Phase 4d.
+// Y.Doc hydration from D1 events.
 //
 // When a `FileSync` Durable Object boots and finds no R2 snapshot, it can
-// reconstruct the Y.Doc by replaying every cell.commit event for this
-// (project, file) in server_ts order. This is what lets idempotent
-// gitlab-style imports flow as `POST /events` only — clients open the
-// project, the DO hits this code path, the imported cells appear without
-// any prior R2 round-trip.
+// reconstruct the doc by replaying every cell event for this
+// `(project, file)` in `server_seq` order. Phase 2 will likely remove the
+// Y.Doc entirely (AD-1's live-doc state can be modeled directly off the
+// event stream), but for now this path keeps the partyserver-based focus-
+// lock surface alive against the new event kinds.
 //
-// Validation events (cell.validate / cell.unvalidate) are intentionally
-// skipped: validators live in `cell_validators` (D1) and are read by
-// `useCellsAuditStatsWithOverlay`, not from the Y.Doc. Phase 4a moved the
-// reads off Y.Doc walks; replaying validations into the doc would be a
-// no-op for the UI and just bloat the snapshot.
+// Cell events that contribute to the doc:
+//   - source.cell.create / target.cell.create — seed the cell row + value.
+//   - source.cell.commit / target.cell.commit — update the value.
+//   - source.cell.delete / target.cell.delete — drop from the doc.
+//   - source.cell.reorder / target.cell.reorder — re-anchor in `order`.
+// cell.validate / cell.unvalidate are intentionally skipped (validators
+// live in cell_validators, not the doc).
 
 import * as Y from 'yjs'
-import type { CellSeedMeta, EventKind } from './types'
+import type { EventKind, EventPayloads } from './types'
 import { htmlToFragment, plainTextToFragment } from './html-to-fragment'
-
-export interface CellCommitPayload {
-  value: string
-  valueHtml?: string
-  prevEventId?: string
-  meta?: CellSeedMeta
-}
 
 /** Subset of the events row we read for hydration. */
 interface EventRow {
@@ -32,31 +27,28 @@ interface EventRow {
   file_id: string | null
   cell_id: string | null
   kind: string
+  parent_id: string | null
   author: string
   payload: string // JSON
   client_ts: number
   server_ts: number
+  server_seq: number
 }
 
 export interface HydrateResult {
-  /** Cell count after hydration; 0 means no events found. */
+  /** Cell count after hydration. */
   cellCount: number
-  /** Total events read (includes events skipped during hydration). */
+  /** Total events read. */
   eventsRead: number
-  /** cell.commit events actually projected into the doc. */
-  cellCommitsApplied: number
+  /** Cell-mutating events actually projected into the doc. */
+  cellEventsApplied: number
 }
 
 /**
  * Replay D1 events for a single (projectId, fileId) into an existing Y.Doc.
  * Mutates `doc` in a single transaction so observers fire once. Cells are
- * appended to the `order` Y.Array in event-arrival order (oldest server_ts
- * first); the same cell receiving multiple commits collapses to a single
- * entry in `order`, with `translatedXml` reflecting the most recent value.
- *
- * Returns counters for diagnostics. Caller decides whether to persist the
- * mutated doc back to R2 (FileSync.onLoad does this so subsequent loads
- * are fast).
+ * appended to the `order` Y.Array in event-arrival order (oldest server_seq
+ * first). Returns counters for diagnostics.
  */
 export async function hydrateYDocFromEvents(
   db: D1Database,
@@ -66,81 +58,171 @@ export async function hydrateYDocFromEvents(
 ): Promise<HydrateResult> {
   const { results } = await db
     .prepare(
-      `SELECT id, schema_version, project_id, file_id, cell_id, kind,
-              author, payload, client_ts, server_ts
+      `SELECT id, schema_version, project_id, file_id, cell_id, kind, parent_id,
+              author, payload, client_ts, server_ts, server_seq
        FROM events
        WHERE project_id = ? AND file_id = ?
-       ORDER BY server_ts ASC`,
+       ORDER BY server_seq ASC, server_ts ASC, id ASC`,
     )
     .bind(projectId, fileId)
     .all<EventRow>()
 
   const rows = results ?? []
   if (rows.length === 0) {
-    return { cellCount: 0, eventsRead: 0, cellCommitsApplied: 0 }
+    return { cellCount: 0, eventsRead: 0, cellEventsApplied: 0 }
   }
 
   const cellsMap = doc.getMap('cells')
   const orderArr = doc.getArray<string>('order')
-  // Track which cell IDs we've already pushed into `order` so we don't
-  // duplicate entries when a cell receives multiple commits during replay.
   const orderedSeen = new Set<string>(orderArr.toArray())
-  // Cells that already exist in the doc (from R2 snapshot) should not be
-  // re-seeded with metadata; the replay is purely for cells D1 has but the
-  // doc doesn't. The hydration callsite gates on `cellsMap.size === 0` so
-  // this set is empty in practice, but the bookkeeping costs nothing.
-  const existingCellIds = new Set<string>(cellsMap.keys())
 
-  let cellCommitsApplied = 0
+  let cellEventsApplied = 0
 
   doc.transact(() => {
     for (const row of rows) {
-      if (row.kind !== ('cell.commit' satisfies EventKind)) continue
       if (!row.cell_id) continue
+      const kind = row.kind as EventKind
+      const cellId = row.cell_id
 
-      let payload: CellCommitPayload
+      let payload: unknown
       try {
-        payload = JSON.parse(row.payload) as CellCommitPayload
+        payload = JSON.parse(row.payload)
       } catch {
-        // Skip malformed events rather than aborting the whole hydration.
         continue
       }
 
-      const cellId = row.cell_id
-      const isFirstSeed = !cellsMap.has(cellId) && !existingCellIds.has(cellId)
-      // Internal apply: caller already wraps the whole replay in a transaction,
-      // so we use `applyCellCommit` (not `applyCellCommitToDoc`) which expects
-      // to run inside an existing one.
-      applyCellCommitInTransaction(cellsMap, orderArr, orderedSeen, cellId, payload, isFirstSeed)
-      cellCommitsApplied += 1
+      switch (kind) {
+        case 'source.cell.create':
+        case 'target.cell.create': {
+          const p = payload as EventPayloads['source.cell.create']
+          applyCreate(cellsMap, orderArr, orderedSeen, cellId, p)
+          cellEventsApplied += 1
+          break
+        }
+        case 'source.cell.commit':
+        case 'target.cell.commit': {
+          const p = payload as EventPayloads['target.cell.commit']
+          applyCommit(cellsMap, orderArr, orderedSeen, cellId, p)
+          cellEventsApplied += 1
+          break
+        }
+        case 'source.cell.delete':
+        case 'target.cell.delete': {
+          applyDelete(cellsMap, orderArr, orderedSeen, cellId)
+          cellEventsApplied += 1
+          break
+        }
+        case 'source.cell.reorder':
+        case 'target.cell.reorder': {
+          // The Y.Array `order` here doesn't carry anchor semantics — we
+          // leave order alone and let downstream rebuilders interpret
+          // anchor_cell_id from the cell's own field if present.
+          const p = payload as EventPayloads['target.cell.reorder']
+          const cell = cellsMap.get(cellId) as Y.Map<unknown> | undefined
+          if (cell) cell.set('anchorCellId', p.anchorCellId ?? null)
+          cellEventsApplied += 1
+          break
+        }
+        case 'cell.validate':
+        case 'cell.unvalidate':
+        case 'file.create':
+          // Not part of the doc projection.
+          break
+      }
     }
   })
 
   return {
     cellCount: cellsMap.size,
     eventsRead: rows.length,
-    cellCommitsApplied,
+    cellEventsApplied,
   }
 }
 
-/**
- * Apply a single `cell.commit` payload to a Y.Doc in its own transaction.
- *
- * Used by the hot-update path (events route → DO) so a freshly-imported
- * cell appears in any open editor without requiring a reload. Returns
- * `true` when the cell was new (added to `order` + cells map), `false`
- * when the cell already existed and the commit was treated as an
- * update — see the `mode` parameter for control over the latter.
- */
+function applyCreate(
+  cellsMap: Y.Map<unknown>,
+  orderArr: Y.Array<string>,
+  orderedSeen: Set<string>,
+  cellId: string,
+  payload: EventPayloads['source.cell.create'] | EventPayloads['target.cell.create'],
+): void {
+  let cell = cellsMap.get(cellId) as Y.Map<unknown> | undefined
+  if (!cell) {
+    cell = new Y.Map<unknown>()
+    cellsMap.set(cellId, cell)
+  }
+  cell.set('id', cellId)
+  if (typeof payload.type === 'string') cell.set('type', payload.type)
+  if (typeof payload.anchorCellId === 'string' || payload.anchorCellId === null) {
+    cell.set('anchorCellId', payload.anchorCellId)
+  }
+
+  const frag =
+    typeof payload.valueHtml === 'string' && payload.valueHtml.length > 0
+      ? htmlToFragment(payload.valueHtml)
+      : plainTextToFragment(payload.value ?? '')
+  cell.set('translatedXml', frag)
+
+  if (!orderedSeen.has(cellId)) {
+    orderArr.push([cellId])
+    orderedSeen.add(cellId)
+  }
+}
+
+function applyCommit(
+  cellsMap: Y.Map<unknown>,
+  orderArr: Y.Array<string>,
+  orderedSeen: Set<string>,
+  cellId: string,
+  payload: EventPayloads['source.cell.commit'] | EventPayloads['target.cell.commit'],
+): void {
+  let cell = cellsMap.get(cellId) as Y.Map<unknown> | undefined
+  if (!cell) {
+    cell = new Y.Map<unknown>()
+    cellsMap.set(cellId, cell)
+    cell.set('id', cellId)
+  }
+  const frag =
+    typeof payload.valueHtml === 'string' && payload.valueHtml.length > 0
+      ? htmlToFragment(payload.valueHtml)
+      : plainTextToFragment(payload.value ?? '')
+  cell.set('translatedXml', frag)
+
+  if (!orderedSeen.has(cellId)) {
+    orderArr.push([cellId])
+    orderedSeen.add(cellId)
+  }
+}
+
+function applyDelete(
+  cellsMap: Y.Map<unknown>,
+  orderArr: Y.Array<string>,
+  orderedSeen: Set<string>,
+  cellId: string,
+): void {
+  cellsMap.delete(cellId)
+  if (orderedSeen.has(cellId)) {
+    for (let i = 0; i < orderArr.length; i++) {
+      if (orderArr.get(i) === cellId) {
+        orderArr.delete(i, 1)
+        break
+      }
+    }
+    orderedSeen.delete(cellId)
+  }
+}
+
+// ── Hot-apply path (legacy compatibility) ──────────────────────────────
+//
+// Originally used after a successful POST /events to push imported cell
+// values into any currently-open live editor. Now retained as a no-op
+// shim so the worker fetch handler can be updated incrementally; the
+// route layer no longer calls it because the live-doc state will be
+// rebuilt in Phase 2.
+
 export interface ApplyCellCommitInput {
   cellId: string
-  payload: CellCommitPayload
-  /**
-   * - `'new-only'` (default): no-op when the cell already exists. Safe for
-   *   hot-applying imports without clobbering active edits.
-   * - `'overwrite'`: always update translatedXml + (re-)apply seed meta on
-   *   first occurrence. Used by hydration internally.
-   */
+  payload: { value: string; valueHtml?: string }
   mode?: 'new-only' | 'overwrite'
 }
 
@@ -160,66 +242,8 @@ export function applyCellCommitToDoc(
 
   let result = { applied: false, created: false }
   doc.transact(() => {
-    const isFirstSeed = !exists
-    applyCellCommitInTransaction(
-      cellsMap,
-      orderArr,
-      orderedSeen,
-      input.cellId,
-      input.payload,
-      isFirstSeed,
-    )
+    applyCommit(cellsMap, orderArr, orderedSeen, input.cellId, input.payload)
     result = { applied: true, created: !exists }
   })
   return result
-}
-
-function applyCellCommitInTransaction(
-  cellsMap: Y.Map<unknown>,
-  orderArr: Y.Array<string>,
-  orderedSeen: Set<string>,
-  cellId: string,
-  payload: CellCommitPayload,
-  isFirstSeed: boolean,
-): void {
-  let cell = cellsMap.get(cellId) as Y.Map<unknown> | undefined
-  if (!cell) {
-    cell = new Y.Map<unknown>()
-    cellsMap.set(cellId, cell)
-  }
-  cell.set('id', cellId)
-
-  // Seed metadata only on first occurrence — protects against a misbehaving
-  // client that sends `meta` on a later commit, and against an accidental
-  // re-import overwriting fields the user has already adjusted.
-  if (isFirstSeed && payload.meta) {
-    const m = payload.meta
-    if (typeof m.original === 'string') cell.set('original', m.original)
-    if (typeof m.originalHtml === 'string') cell.set('originalHtml', m.originalHtml)
-    if (typeof m.context === 'string') cell.set('context', m.context)
-    if (typeof m.group === 'string') cell.set('group', m.group)
-    if (typeof m.type === 'string') cell.set('type', m.type)
-    if (m.sourceLocation && typeof m.sourceLocation === 'object') {
-      cell.set('sourceLocation', m.sourceLocation)
-    }
-    if (Array.isArray(m.globalReferences)) {
-      cell.set('globalReferences', m.globalReferences)
-    }
-    if (typeof m.cellLabel === 'string') {
-      cell.set('__source', { metadata: { id: cellId, cellLabel: m.cellLabel } })
-    }
-  }
-
-  // Prefer valueHtml so inline marks survive; fall back to plain text.
-  // Fragment is rebuilt outright — committed snapshots, not CRDT deltas.
-  const frag =
-    typeof payload.valueHtml === 'string' && payload.valueHtml.length > 0
-      ? htmlToFragment(payload.valueHtml)
-      : plainTextToFragment(payload.value ?? '')
-  cell.set('translatedXml', frag)
-
-  if (!orderedSeen.has(cellId)) {
-    orderArr.push([cellId])
-    orderedSeen.add(cellId)
-  }
 }

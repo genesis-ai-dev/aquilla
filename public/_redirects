@@ -1,1 +1,9 @@
+# Apex bounce: front-door is supposed to own `/` and redirect to /projects,
+# but until the aquilla.app Cloudflare zone is provisioned and Workers
+# Routes dispatches `/` to apps/front-door/, the legacy Pages build is
+# what serves the apex. Handle it at the Pages edge instead of in client
+# JS so there's no flicker. Drop once front-door owns the apex.
+/    /projects    302
+
+# SPA fallback for everything else (deep links into /project/:id, etc.).
 /*    /index.html   200

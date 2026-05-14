@@ -40,6 +40,12 @@ const brand = BRAND_DATA[brandId]
 
 export default defineConfig(({ mode }) => ({
   root: path.resolve(__dirname, "apps/workspace"),
+  // With root: apps/workspace, Vite's default publicDir would be
+  // apps/workspace/public/ (which doesn't exist). Point it at the
+  // repo-root public/ so favicons, OG images, and _redirects (which
+  // Cloudflare Pages reads at the edge for the apex `/` → `/projects`
+  // bounce) reach dist/.
+  publicDir: path.resolve(__dirname, "public"),
   clearScreen: false,
   envPrefix: ["VITE_", "TAURI_ENV_"],
   define: {

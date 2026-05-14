@@ -41,7 +41,8 @@ new_sqlite_classes = ["ProjectSync"]
 
 [[r2_buckets]]
 binding = "SNAPSHOTS"
-bucket_name = "aquilla-snapshots-staging"
+# TODO: rename to "aquilla-snapshots-staging" once provisioned. See sync-worker/wrangler.toml.
+bucket_name = "codex-snapshots-staging"
 
 [[d1_databases]]
 binding = "CODEX_DB"

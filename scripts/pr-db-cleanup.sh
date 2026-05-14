@@ -11,7 +11,7 @@ set -euo pipefail
 
 DB_NAME="codex-db-pr-${PR_NUMBER}"
 WORKER_NAME="aquilla-sync-worker-pr-${PR_NUMBER}"
-R2_BUCKET="aquilla-snapshots-staging"
+R2_BUCKET="codex-snapshots-staging"  # TODO: rename once provisioned in CF (see sync-worker/wrangler.toml)
 R2_PREFIX="pr-${PR_NUMBER}/"
 
 echo "[pr-db-cleanup] PR=${PR_NUMBER}"

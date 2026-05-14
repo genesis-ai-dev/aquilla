@@ -11,6 +11,7 @@ Phase 1B introduced the `apps/` + `packages/` chassis per spec §21-monorepo.md.
 - `packages/<name>/` — shared, versioned concerns. `@aquilla/errors` ships the boot-time `assertEnvBindings()` + `assertNotPreviewInProd()` helpers — every Worker calls them at startup so a preview deploy can't silently bind to prod resources (spec §"Environment binding hygiene").
 - `routes.json` (repo root) — authoritative slug → URL-path registry. Adding an app means editing this file plus dropping a folder under `apps/`.
 - `seed.sql` (repo root) — canonical preview test cast (alice/bob/carol/dave) applied to every per-PR D1 and the shared `aquilla-dev`.
+- **Apps populated (3d shells):** `import`, `export`, `migrate` — placeholder UIs; real logic ships after Phase 2c-β merges.
 
 Phase 3e relocated `auth-worker/` to `apps/frontier-server/` (the AD-5 identity service). The remaining top-level workers (`sync-worker/`, `chat-worker/`, `cors-proxy/`) stay put until Phase 4's rename pass.
 

@@ -1,12 +1,14 @@
-# Stub wrangler config for apps/import/.
-# Populated with real bindings in Phase 3 — for now this only declares the
-# per-env name and route patterns so the boot-time assertEnvBindings()
-# helper (packages/errors) has the right shape to validate against.
+# Wrangler config for apps/import/ (AD-11; spec §21-monorepo.md).
+#
+# Workers Assets pattern: the Vite build emits dist/, and the Worker
+# (src/worker.ts) serves those static assets through the [assets] binding.
+# The Worker also runs the boot-time assertEnvBindings() guard from
+# @aquilla/errors so a preview deploy can never silently bind to prod.
 #
 # Mounted under `/import` (routes.json).
 
 name = "aquilla-import"
-main = "src/index.ts"
+main = "src/worker.ts"
 compatibility_date = "2024-12-01"
 compatibility_flags = ["nodejs_compat"]
 
@@ -22,6 +24,12 @@ account_id = "6a80496d1e59948a9cbaa3c643ba81d7"
 [vars]
 ENV = "prod"
 
+[assets]
+directory = "./dist"
+binding = "ASSETS"
+# SPA fallback: any path that doesn't map to a built asset returns index.html.
+not_found_handling = "single-page-application"
+
 # ---------------------------------------------------------------------------
 # Production — `wrangler deploy --env production`
 # ---------------------------------------------------------------------------
@@ -33,6 +41,11 @@ account_id = "6a80496d1e59948a9cbaa3c643ba81d7"
 [env.production.vars]
 ENV = "prod"
 
+[env.production.assets]
+directory = "./dist"
+binding = "ASSETS"
+not_found_handling = "single-page-application"
+
 # ---------------------------------------------------------------------------
 # Staging — `wrangler deploy --env staging`
 # ---------------------------------------------------------------------------
@@ -43,6 +56,11 @@ account_id = "6a80496d1e59948a9cbaa3c643ba81d7"
 
 [env.staging.vars]
 ENV = "preview"
+
+[env.staging.assets]
+directory = "./dist"
+binding = "ASSETS"
+not_found_handling = "single-page-application"
 
 # ---------------------------------------------------------------------------
 # Preview (per-PR) — CI substitutes `__PR__` with the PR number at deploy
@@ -58,3 +76,8 @@ account_id = "6a80496d1e59948a9cbaa3c643ba81d7"
 [env.preview.vars]
 ENV = "preview"
 PR = "__PR__"
+
+[env.preview.assets]
+directory = "./dist"
+binding = "ASSETS"
+not_found_handling = "single-page-application"

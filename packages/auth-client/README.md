@@ -36,7 +36,7 @@ callers can surface the server's intended copy verbatim.
 ## Base URL
 
 `AUTH_BASE` reads `import.meta.env.VITE_AUTH_BASE`, falling back to the
-current production codex-auth-worker host. Each consuming app sets its
+current production aquilla-frontier-server host. Each consuming app sets its
 own `VITE_AUTH_BASE` at build time (see each app's `wrangler.toml`
 `[vars]`). The auth-worker is being renamed `aquilla-frontier-server` in
 Phase 3e; consumers don't need to care — they go through the env var.
@@ -48,7 +48,7 @@ Phase 3e; consumers don't need to care — they go through the env var.
 - Domain attribute derived from `window.location.hostname`:
   - `localhost` / single-label / IP → no Domain (host-only)
   - `pr-N.aquilla.app` / `dev.aquilla.app` → `.aquilla.app`
-  - `*.codex-web-4ih.pages.dev` → `.codex-web-4ih.pages.dev`
+  - `*.aquilla-web-4ih.pages.dev` → `.aquilla-web-4ih.pages.dev`
 - Max-Age: 30 days
 
 **HttpOnly:** we *cannot* set HttpOnly via `document.cookie`; the

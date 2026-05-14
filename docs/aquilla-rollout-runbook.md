@@ -22,7 +22,7 @@ Reflects state as of the Phase 2c-β / Phase 3 work stream.
 | 3d (minimal) | import/export/migrate app shells (Coming soon) | 🟡 in flight | subagent |
 | 3e | auth-worker → apps/frontier-server relocation | 🟡 in flight | subagent |
 | 4 partial | codex-sync/chat-worker + codex-snapshots → aquilla-* | ✅ merged | #83 |
-| 4 final-sweep partial | completion-service.ts codex-chat-worker rename | ✅ merged | #84 |
+| 4 final-sweep partial | completion-service.ts aquilla-chat-worker rename | ✅ merged | #84 |
 | 4 final-cleanup | residual codex-* refs in CLAUDE.md + src/ + auth-worker | ⏸ blocked | see playbook |
 | 5 | AD-9 source-project linking UI + stale-source indicator | 🟡 in flight | subagent |
 | packages/data-model | shared TS types | ✅ merged (in #85) |
@@ -118,8 +118,8 @@ Runs after Phase 2c-β + 3e merge. Sweeps every remaining `codex-*` reference.
 
 ### Prerequisites
 
-- ✅ 2c-β merged (so `src/lib/sync/partyserver-provider.ts`, `src/lib/sync/y-partyserver-spike.test.ts` are deleted — they had the last `codex-sync-worker` refs in src/).
-- ✅ 3e merged (so auth-worker is at apps/frontier-server/; any `codex-auth-worker` refs in its code/comments need updating to `aquilla-frontier-server`).
+- ✅ 2c-β merged (so `src/lib/sync/partyserver-provider.ts`, `src/lib/sync/y-partyserver-spike.test.ts` are deleted — they had the last `aquilla-sync-worker` refs in src/).
+- ✅ 3e merged (so auth-worker is at apps/frontier-server/; any `aquilla-frontier-server` refs in its code/comments need updating to `aquilla-frontier-server`).
 
 ### Steps
 
@@ -132,7 +132,7 @@ $EDITOR CLAUDE.md  # manual edit
 
 # 2. Sweep apps/frontier-server (was auth-worker). 3e should have caught
 #    most of these but verify with a grep:
-grep -rn "codex-auth-worker\|codex-web\|codex-db\b" apps/frontier-server
+grep -rn "aquilla-frontier-server\|codex-web\|codex-db\b" apps/frontier-server
 
 # 3. Sweep packages for codex- references. Should be zero by now.
 grep -rln "codex-" packages
@@ -182,6 +182,6 @@ The `aquilla.app` zone has not been provisioned. Several rollout steps depend on
 
 ## Open questions / TODO
 
-- `codex-web-4ih.pages.dev` is the current preview hostname pattern. After the Pages rename, what's the new pattern? The `[3]` referenced in commits (`aquilla-web-4ih.pages.dev`) is speculative — the actual subdomain CF assigns may differ.
+- `aquilla-web-4ih.pages.dev` is the current preview hostname pattern. After the Pages rename, what's the new pattern? The `[3]` referenced in commits (`aquilla-web-4ih.pages.dev`) is speculative — the actual subdomain CF assigns may differ.
 - The husky pre-push hook's `e2e:smoke` step times out on agent sandbox environments (port :8787 wrangler-dev cold-start > 30s). Documented workaround: `SKIP_E2E_SMOKE=1 git push`. Real fix: either bump the spawn-worker timeout to 60s+ or run E2E only in CI (drop the pre-push hook).
 - Email sending in preview environments: currently disabled per spec §"Preview identity". When the apps come online, verify that signup / password-reset flows surface tokens in the API response rather than email under `ENV=preview`.

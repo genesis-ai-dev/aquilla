@@ -34,7 +34,7 @@ function readBase(): string {
   const trimmed = base ? base.replace(/\/+$/, "") : ""
   return (
     trimmed ||
-    "https://codex-auth-worker.blue-darkness-7674.workers.dev"
+    "https://aquilla-frontier-server.blue-darkness-7674.workers.dev"
   )
 }
 

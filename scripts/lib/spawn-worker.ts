@@ -34,9 +34,30 @@ export async function spawnWranglerDev(opts: {
   logFile?: WriteStream
   streamToParent?: boolean
 }): Promise<SpawnedWorker> {
+  // wrangler doesn't propagate arbitrary parent process env vars into the
+  // worker's `c.env`. Anything we want the worker runtime to see has to be
+  // declared in wrangler.toml `[vars]` or passed on the CLI via
+  // `--var KEY:VALUE`. Forwarding `opts.env` through both keeps the
+  // wrangler subprocess working (it reads things like NODE_ENV from
+  // process.env) AND makes the values visible inside the worker — which
+  // is what the test harness needs for WRANGLER_LOCAL, SECRET_KEY, etc.
+  const varFlags: string[] = []
+  for (const [k, v] of Object.entries(opts.env ?? {})) {
+    varFlags.push("--var", `${k}:${v}`)
+  }
+
   const child = spawn(
     "npx",
-    ["wrangler", "dev", "--local", "--port", String(opts.port), "--ip", "127.0.0.1"],
+    [
+      "wrangler",
+      "dev",
+      "--local",
+      "--port",
+      String(opts.port),
+      "--ip",
+      "127.0.0.1",
+      ...varFlags,
+    ],
     {
       cwd: opts.cwd,
       env: { ...process.env, ...opts.env },

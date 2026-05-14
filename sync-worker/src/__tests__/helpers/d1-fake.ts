@@ -206,6 +206,90 @@ export function makeInMemoryD1(tables: Partial<Tables> = {}): InMemoryD1 {
       return rows
     }
 
+    // ── GET cell history read route ─────────────────────────────────────
+    // SELECT id, parent_id, kind, author, payload, client_ts, server_ts, server_seq
+    //   FROM events
+    //  WHERE project_id = ? AND file_id = ? AND cell_id = ?
+    //  ORDER BY server_seq DESC, id DESC
+    //  LIMIT ?
+    if (
+      /^SELECT id, parent_id, kind, author, payload, client_ts, server_ts, server_seq FROM events WHERE project_id = \? AND file_id = \? AND cell_id = \? ORDER BY server_seq DESC, id DESC LIMIT \?$/.test(
+        normalized,
+      )
+    ) {
+      const pid = args[0] as string
+      const fid = args[1] as string
+      const cid = args[2] as string
+      const limit = args[3] as number
+      return db.events
+        .filter((e) => e.project_id === pid && e.file_id === fid && e.cell_id === cid)
+        .sort((a, b) => (b.server_seq - a.server_seq) || b.id.localeCompare(a.id))
+        .slice(0, limit)
+        .map((e) => ({
+          id: e.id,
+          parent_id: e.parent_id,
+          kind: e.kind,
+          author: e.author,
+          payload: e.payload,
+          client_ts: e.client_ts,
+          server_ts: e.server_ts,
+          server_seq: e.server_seq,
+        }))
+    }
+
+    // ── GET /api/v1/projects/:projectId/search ─────────────────────────
+    // The route's SQL is multi-line; after whitespace-collapse:
+    //   SELECT cells.cell_id AS cell_id, cells.file_id AS file_id,
+    //          cells.side AS side, cells.value AS value,
+    //          snippet(cells_fts, ...) AS snippet, cells_fts.rank AS rank
+    //     FROM cells_fts
+    //     JOIN cells ON cells.rowid = cells_fts.rowid
+    //    WHERE cells_fts MATCH ? AND cells.project_id = ?
+    //      [AND cells.side = ?]
+    //    ORDER BY rank ASC LIMIT ?
+    //
+    // We model the FTS5 query as a naive substring match against the
+    // sanitized FTS query (which is a quoted-tokens string like '"foo" "bar"').
+    // Tests can assert on the result set ordering / filtering without us
+    // needing to reproduce FTS5 ranking.
+    if (
+      /^SELECT cells\.cell_id AS cell_id, cells\.file_id AS file_id, cells\.side AS side, cells\.value AS value, snippet\(cells_fts, 0, '<mark>', '<\/mark>', '\.\.\.', 16\) AS snippet, cells_fts\.rank AS rank FROM cells_fts JOIN cells ON cells\.rowid = cells_fts\.rowid WHERE cells_fts MATCH \? AND cells\.project_id = \?/.test(
+        normalized,
+      )
+    ) {
+      const ftsQuery = args[0] as string
+      const pid = args[1] as string
+      const hasSide = normalized.includes("AND cells.side = ?")
+      const side = hasSide ? (args[2] as string) : null
+      const limit = args[hasSide ? 3 : 2] as number
+
+      // Parse out the quoted tokens.
+      const tokens = (ftsQuery.match(/"[^"]+"/g) ?? []).map((t) =>
+        t.slice(1, -1).toLowerCase(),
+      )
+
+      const matched = db.cells
+        .filter((c) => c.project_id === pid)
+        .filter((c) => side === null || c.side === side)
+        .filter((c) => {
+          if (tokens.length === 0) return false
+          const v = c.value.toLowerCase()
+          return tokens.every((t) => v.includes(t))
+        })
+        .map((c, idx) => ({
+          cell_id: c.cell_id,
+          file_id: c.file_id,
+          side: c.side,
+          value: c.value,
+          snippet: c.value,
+          // Fake "rank" — lower is better. Use the iteration index so the
+          // first inserted matching cell sorts first in tests.
+          rank: idx,
+        }))
+        .slice(0, limit)
+      return matched
+    }
+
     // ── GET /cell-validators read route ─────────────────────────────────
     if (
       /^SELECT edit_event_id, username, is_active, decided_ts FROM cell_validators WHERE project_id = \? AND file_id = \? AND cell_id = \? ORDER BY decided_ts DESC/.test(

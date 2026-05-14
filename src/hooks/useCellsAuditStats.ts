@@ -1,4 +1,13 @@
-import { useQuery } from "@tanstack/react-query"
+// Phase 2b: aligned with the Phase 2a fetch pattern (vanilla useState +
+// race-guarded effect; no React Query). Same upstream endpoint
+// (`/cells/audit-stats?fileId=`) — the migration is purely about pattern
+// consistency.
+//
+// `useCompositeHealth` consumes this hook's Map as a useEffect dep, so we
+// preserve a stable empty-map reference between renders to avoid resetting
+// its debounce on every keystroke.
+
+import { useCallback, useEffect, useRef, useState } from "react"
 import { syncWorkerHttpOrigin } from "@/lib/sync/sync-worker-url"
 
 export interface CellAuditStats {
@@ -19,72 +28,121 @@ export interface CellAuditStats {
 interface UseCellsAuditStatsOptions {
   enabled: boolean
   fileId: string | null
-  /** Same shape as Phase 2 outbox flusher uses. */
   getTokenForFile: (fileId: string) => Promise<string | null>
 }
 
-// Stable empty fallback so the `data ?? …` return doesn't allocate a new
-// Map on every render before the query resolves. Consumers (notably
-// useCompositeHealth) treat the returned Map as a useEffect dep — a fresh
-// reference each render would reset the debounce timer and prevent the
-// worker from ever firing, which manifests as projectHealth never moving
-// off zero in the StatusBar.
-const EMPTY_AUDIT_STATS = new Map<string, CellAuditStats>()
-
-/**
- * Fetches /cells/audit-stats for a file. Returns a map keyed by cellId
- * for O(1) lookup from per-cell call sites (CellActionsMenu, useCompositeHealth,
- * useCells validation derivation).
- *
- * Stale-while-revalidate via React Query — UI updates on Realtime
- * `projection.dirty` invalidation by re-fetching; in this phase we just
- * use a 30s polling refetch as a safety net since the WS broadcast
- * wiring on the client isn't connected yet.
- */
-export function useCellsAuditStats(opts: UseCellsAuditStatsOptions): {
+export interface UseCellsAuditStatsResult {
   byCellId: Map<string, CellAuditStats>
   isLoading: boolean
   isError: boolean
-} {
+  revalidate: () => void
+}
+
+const EMPTY_AUDIT_STATS = new Map<string, CellAuditStats>()
+
+async function fetchCellsAuditStats(
+  fileId: string,
+  jwt: string,
+): Promise<Map<string, CellAuditStats>> {
+  const url = `${syncWorkerHttpOrigin()}/cells/audit-stats?fileId=${encodeURIComponent(fileId)}`
+  const res = await fetch(url, {
+    headers: { Authorization: `Bearer ${jwt}` },
+  })
+  if (!res.ok) {
+    const body = await res.text().catch(() => "")
+    throw new Error(`cells/audit-stats failed: HTTP ${res.status} — ${body.slice(0, 200)}`)
+  }
+  const body = (await res.json()) as { cells: Partial<CellAuditStats>[] }
+  const map = new Map<string, CellAuditStats>()
+  for (const row of body.cells) {
+    if (!row.cellId) continue
+    map.set(row.cellId, {
+      cellId: row.cellId,
+      editCount: row.editCount ?? 0,
+      contentHash: row.contentHash ?? "",
+      lastEditAt: row.lastEditAt ?? null,
+      lastEditEventId: row.lastEditEventId ?? null,
+      activeValidators: row.activeValidators ?? [],
+    })
+  }
+  return map
+}
+
+export function useCellsAuditStats(opts: UseCellsAuditStatsOptions): UseCellsAuditStatsResult {
   const { enabled, fileId, getTokenForFile } = opts
 
-  const { data, isLoading, isError } = useQuery<Map<string, CellAuditStats>>({
-    queryKey: ["cells-audit-stats", fileId],
-    enabled: enabled && !!fileId,
-    staleTime: 5_000,
-    refetchInterval: 30_000,
-    queryFn: async () => {
-      const token = await getTokenForFile(fileId!)
-      if (!token) {
-        throw new Error("no-token")
-      }
-      const url = `${syncWorkerHttpOrigin()}/cells/audit-stats?fileId=${encodeURIComponent(fileId!)}`
-      const res = await fetch(url, {
-        headers: { Authorization: `Bearer ${token}` },
-      })
-      if (!res.ok) {
-        throw new Error(`HTTP ${res.status}`)
-      }
-      const body: { cells: Partial<CellAuditStats>[] } = await res.json()
-      const map = new Map<string, CellAuditStats>()
-      for (const row of body.cells) {
-        if (!row.cellId) continue
-        map.set(row.cellId, {
-          cellId: row.cellId,
-          editCount: row.editCount ?? 0,
-          contentHash: row.contentHash ?? "",
-          lastEditAt: row.lastEditAt ?? null,
-          lastEditEventId: row.lastEditEventId ?? null,
-          activeValidators: row.activeValidators ?? [],
-        })
-      }
-      return map
-    },
-  })
+  const [data, setData] = useState<Map<string, CellAuditStats>>(EMPTY_AUDIT_STATS)
+  const [isLoading, setIsLoading] = useState(false)
+  const [isError, setIsError] = useState(false)
 
-  return {
-    byCellId: data ?? EMPTY_AUDIT_STATS,
-    isLoading,
-    isError,
-  }
+  const fileRef = useRef(fileId)
+  const tokenRef = useRef(getTokenForFile)
+  const enabledRef = useRef(enabled)
+  const generationRef = useRef(0)
+
+  fileRef.current = fileId
+  tokenRef.current = getTokenForFile
+  enabledRef.current = enabled
+
+  const doFetch = useCallback(async () => {
+    const fid = fileRef.current
+    if (!enabledRef.current || !fid) {
+      setData(EMPTY_AUDIT_STATS)
+      setIsLoading(false)
+      setIsError(false)
+      return
+    }
+    const gen = ++generationRef.current
+    setIsLoading(true)
+    setIsError(false)
+    try {
+      const token = await tokenRef.current(fid)
+      if (!token) {
+        if (generationRef.current !== gen) return
+        setIsError(true)
+        setIsLoading(false)
+        return
+      }
+      const map = await fetchCellsAuditStats(fid, token)
+      if (generationRef.current !== gen) return
+      setData(map)
+      setIsLoading(false)
+    } catch (err) {
+      if (generationRef.current !== gen) return
+      console.warn("[useCellsAuditStats] fetch failed:", err)
+      setIsError(true)
+      setIsLoading(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    void doFetch()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fileId, enabled])
+
+  useEffect(() => {
+    if (typeof window === "undefined") return
+    function onFocus() { void doFetch() }
+    function onVis() {
+      if (typeof document !== "undefined" && document.visibilityState === "visible") {
+        void doFetch()
+      }
+    }
+    window.addEventListener("focus", onFocus)
+    if (typeof document !== "undefined") {
+      document.addEventListener("visibilitychange", onVis)
+    }
+    return () => {
+      window.removeEventListener("focus", onFocus)
+      if (typeof document !== "undefined") {
+        document.removeEventListener("visibilitychange", onVis)
+      }
+    }
+  }, [doFetch])
+
+  const revalidate = useCallback(() => {
+    void doFetch()
+  }, [doFetch])
+
+  return { byCellId: data, isLoading, isError, revalidate }
 }

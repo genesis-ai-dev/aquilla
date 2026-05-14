@@ -1,130 +1,64 @@
-import { useCallback } from "react"
-import * as Y from "yjs"
-import { v4 as uuid } from "uuid"
-import type { CommentThread, CommentMessage } from "@/lib/parsers/types"
-import { extractMentions } from "@/lib/comments/comment-helpers"
+// Phase 2b: comments dropped from v1 event grammar (see 03-data-model.md);
+// stubbed. Future v1.x feature.
+//
+// Comments and threads were Yjs-resident in Phase 2a — extractThreadsFromCell
+// walked a Y.Map<unknown> on each cell. In Phase 2b we've pulled cells out of
+// Y.Doc and onto the sync-worker projection, but the v1 event grammar does
+// not include `comment.*` / `thread.*` kinds (deferred to v1.x). To avoid
+// shipping a half-server / half-client comments surface that users would
+// expect to sync, this hook returns empty data and no-op mutators. The UI
+// surface (CommentsPage, comments column in EditorTable) stays compiled and
+// renders the empty-state message its existing logic already handles.
 
-function makeMessage(text: string, author: string): CommentMessage {
-  return {
-    id: uuid(),
-    author: author || "anonymous",
-    authorType: author && author !== "anonymous" ? "user" : "anonymous",
-    text,
-    timestamp: new Date().toISOString(),
-    mentions: extractMentions(text),
-  }
+import { useMemo } from "react"
+import type { CommentThread } from "@/lib/parsers/types"
+
+export type UseCommentsApi = {
+  addThread: (cellId: string, firstMessage: string) => void
+  addMessage: (cellId: string, threadId: string, text: string) => void
+  resolveThread: (cellId: string, threadId: string, closingMessage?: string) => void
+  reopenThread: (cellId: string, threadId: string) => void
 }
 
-function getOrCreateThreadsArray(cell: Y.Map<unknown>): Y.Array<Y.Map<unknown>> {
-  let threads = cell.get("threads") as Y.Array<Y.Map<unknown>> | undefined
-  if (!threads) {
-    threads = new Y.Array<Y.Map<unknown>>()
-    cell.set("threads", threads)
-  }
-  return threads
+const NOOP_API: UseCommentsApi = {
+  addThread: () => {
+    /* phase 2b: comments stubbed; no-op until v1.x event grammar lands */
+  },
+  addMessage: () => {
+    /* phase 2b: comments stubbed */
+  },
+  resolveThread: () => {
+    /* phase 2b: comments stubbed */
+  },
+  reopenThread: () => {
+    /* phase 2b: comments stubbed */
+  },
 }
 
-export function useComments(doc: Y.Doc | null, username: string) {
-  const addThread = useCallback((cellId: string, firstMessage: string) => {
-    if (!doc) return
-    const cellsMap = doc.getMap("cells")
-    const cell = cellsMap.get(cellId) as Y.Map<unknown> | undefined
-    if (!cell) return
-    const translated = (cell.get("translated") as string) || ""
-
-    doc.transact(() => {
-      const threads = getOrCreateThreadsArray(cell)
-      const thread = new Y.Map<unknown>()
-      thread.set("id", uuid())
-      thread.set("status", "open")
-      thread.set("createdAt", new Date().toISOString())
-      thread.set("createdForTranslated", translated)
-      thread.set("messages", [makeMessage(firstMessage, username)] as CommentMessage[])
-      threads.push([thread])
-    })
-  }, [doc, username])
-
-  const addMessage = useCallback((cellId: string, threadId: string, text: string) => {
-    if (!doc) return
-    doc.transact(() => {
-      const cellsMap = doc.getMap("cells")
-      const cell = cellsMap.get(cellId) as Y.Map<unknown> | undefined
-      if (!cell) return
-      const threadsArr = cell.get("threads") as Y.Array<Y.Map<unknown>> | undefined
-      if (!threadsArr) return
-      for (let i = 0; i < threadsArr.length; i++) {
-        const t = threadsArr.get(i)
-        if (t.get("id") === threadId) {
-          const messages = (t.get("messages") as CommentMessage[] | undefined) || []
-          t.set("messages", [...messages, makeMessage(text, username)])
-          return
-        }
-      }
-    })
-  }, [doc, username])
-
-  const resolveThread = useCallback((cellId: string, threadId: string, closingMessage?: string) => {
-    if (!doc) return
-    doc.transact(() => {
-      const cellsMap = doc.getMap("cells")
-      const cell = cellsMap.get(cellId) as Y.Map<unknown> | undefined
-      if (!cell) return
-      const threadsArr = cell.get("threads") as Y.Array<Y.Map<unknown>> | undefined
-      if (!threadsArr) return
-      for (let i = 0; i < threadsArr.length; i++) {
-        const t = threadsArr.get(i)
-        if (t.get("id") === threadId) {
-          if (closingMessage && closingMessage.trim()) {
-            const messages = (t.get("messages") as CommentMessage[] | undefined) || []
-            t.set("messages", [...messages, makeMessage(closingMessage, username)])
-          }
-          t.set("status", "resolved")
-          t.set("resolvedAt", new Date().toISOString())
-          t.set("resolvedBy", username || "anonymous")
-          return
-        }
-      }
-    })
-  }, [doc, username])
-
-  const reopenThread = useCallback((cellId: string, threadId: string) => {
-    if (!doc) return
-    doc.transact(() => {
-      const cellsMap = doc.getMap("cells")
-      const cell = cellsMap.get(cellId) as Y.Map<unknown> | undefined
-      if (!cell) return
-      const threadsArr = cell.get("threads") as Y.Array<Y.Map<unknown>> | undefined
-      if (!threadsArr) return
-      for (let i = 0; i < threadsArr.length; i++) {
-        const t = threadsArr.get(i)
-        if (t.get("id") === threadId) {
-          t.set("status", "open")
-          t.set("resolvedAt", undefined)
-          t.set("resolvedBy", undefined)
-          return
-        }
-      }
-    })
-  }, [doc])
-
-  return { addThread, addMessage, resolveThread, reopenThread }
+/**
+ * Stub: returns no-op mutators. Mutations from this hook used to push into
+ * the file's Y.Doc; under Phase 2b they silently no-op. The signature is
+ * preserved so ProjectWorkspace / CommentsPage compile without changes
+ * until Phase 2c, when these callers move onto the outbox-based event API.
+ *
+ * Doc and username are accepted (and ignored) so consumers retain the
+ * "doc-bound" call shape; both will be removed when the v1.x comments
+ * feature lands.
+ */
+export function useComments(
+  _doc: unknown,
+  _username: string,
+): UseCommentsApi & { threads: CommentThread[] } {
+  // Memoize the empty array so React.memo'd consumers don't re-render on
+  // every parent render due to a fresh `threads` reference.
+  const threads = useMemo<CommentThread[]>(() => [], [])
+  return { ...NOOP_API, threads }
 }
 
-export function extractThreadsFromCell(cell: Y.Map<unknown>): CommentThread[] {
-  const threadsArr = cell.get("threads") as Y.Array<Y.Map<unknown>> | undefined
-  if (!threadsArr) return []
-  const result: CommentThread[] = []
-  for (let i = 0; i < threadsArr.length; i++) {
-    const t = threadsArr.get(i)
-    result.push({
-      id: t.get("id") as string,
-      status: (t.get("status") as "open" | "resolved") || "open",
-      createdAt: (t.get("createdAt") as string) || "",
-      resolvedAt: t.get("resolvedAt") as string | undefined,
-      resolvedBy: t.get("resolvedBy") as string | undefined,
-      createdForTranslated: (t.get("createdForTranslated") as string) || "",
-      messages: (t.get("messages") as CommentMessage[] | undefined) || [],
-    })
-  }
-  return result
+/**
+ * Stub: returns an empty thread list regardless of input. Pre-Phase 2b this
+ * walked a Y.Map<unknown> off the cell; now there is no cell-level Y.Map.
+ */
+export function extractThreadsFromCell(_cell: unknown): CommentThread[] {
+  return []
 }

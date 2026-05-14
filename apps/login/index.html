@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Sign in — Aquilla</title>
+    <meta name="description" content="Sign in to your Aquilla account." />
+  </head>
+  <body>
+    <div id="root"></div>
+    <!--
+      Vite rewrites this to /login/assets/main-<hash>.js at build time per
+      vite.config.ts `base: '/login/'`. Don't hardcode `/login/` here; the
+      bundler injects it. The HTML <base> element was removed because Vite
+      relies on absolute asset URLs from `base` rather than HTML base
+      relativization.
+    -->
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

@@ -14,6 +14,10 @@ Phase 1B introduced the `apps/` + `packages/` chassis per spec §21-monorepo.md.
 
 Phase 3e relocated `auth-worker/` to `apps/frontier-server/` (the AD-5 identity service). The remaining top-level workers (`sync-worker/`, `chat-worker/`, `cors-proxy/`) stay put until Phase 4's rename pass.
 
+**Apps populated:** `front-door` (Phase 1B), `login` / `signup` / `reset` (Phase 3b). Remaining stubs: `projects`, `import`, `export`, `migrate`, `billing`, `org`, `workspace`, `frontier-server`. **Packages populated:** `errors` (1B), `auth-client` / `ui` (3b). Remaining stubs: `api-client`, `data-model`, `telemetry`.
+
+Each populated app is a Vite SPA served by a Cloudflare Worker with a Workers Assets binding. The Worker script under `src/worker.ts` adds boot-time env-binding assertions (`@aquilla/errors`) + baseline security headers; the SPA lives in `dist/` and routes client-side under its mounted basename (`/login`, `/signup`, `/reset`). Build-time `VITE_AUTH_BASE` controls the identity-service host so the rename from `codex-auth-worker` to `aquilla-frontier-server` (Phase 3e) is a one-line wrangler-vars change.
+
 ## Project Overview
 
 `codex-web` is a browser-based reimplementation of the Codex translation editor (originally a VS Code extension — see `docs/SPEC.md` for the origin design). It is a standalone single-page app: a cell-based translation notebook that imports source documents (USFM, DOCX, PPTX, Markdown, plaintext, VTT/SRT), lets translators fill in aligned target cells with rich text, and supports collaborative editing, snapshots, rules/health scoring, LLM completion/backtranslation, and P2P sharing.

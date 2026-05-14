@@ -1,26 +1,23 @@
-# Stub wrangler config for apps/reset/.
-# Populated with real bindings in Phase 3 — for now this only declares the
-# per-env name and route patterns so the boot-time assertEnvBindings()
-# helper (packages/errors) has the right shape to validate against.
-#
-# Mounted under `/reset` (routes.json).
+# wrangler.toml for apps/reset/ (Phase 3b). See apps/login/wrangler.toml
+# for rationale comments.
 
 name = "aquilla-reset"
-main = "src/index.ts"
+main = "src/worker.ts"
 compatibility_date = "2024-12-01"
 compatibility_flags = ["nodejs_compat"]
 
-# Same CF account as the rest of the monorepo workers. Pinned to avoid
-# wrangler interactive account-pick prompts.
 account_id = "6a80496d1e59948a9cbaa3c643ba81d7"
 
-# Top-level (no env flag) defaults to prod for symmetry with the legacy
-# workers. Prefer `--env=production` / `--env=staging` / `--env=preview`
-# explicitly; do not rely on these defaults.
 # routes = ["aquilla.app/reset/*"]  # TODO: uncomment after aquilla.app zone is provisioned in Cloudflare
 
 [vars]
 ENV = "prod"
+VITE_AUTH_BASE = "https://codex-auth-worker.blue-darkness-7674.workers.dev"
+
+[assets]
+directory = "./dist"
+binding = "ASSETS"
+not_found_handling = "single-page-application"
 
 # ---------------------------------------------------------------------------
 # Production — `wrangler deploy --env production`
@@ -32,6 +29,12 @@ account_id = "6a80496d1e59948a9cbaa3c643ba81d7"
 
 [env.production.vars]
 ENV = "prod"
+VITE_AUTH_BASE = "https://api.aquilla.app/api/identity"
+
+[env.production.assets]
+directory = "./dist"
+binding = "ASSETS"
+not_found_handling = "single-page-application"
 
 # ---------------------------------------------------------------------------
 # Staging — `wrangler deploy --env staging`
@@ -43,6 +46,12 @@ account_id = "6a80496d1e59948a9cbaa3c643ba81d7"
 
 [env.staging.vars]
 ENV = "preview"
+VITE_AUTH_BASE = "https://codex-auth-worker.blue-darkness-7674.workers.dev"
+
+[env.staging.assets]
+directory = "./dist"
+binding = "ASSETS"
+not_found_handling = "single-page-application"
 
 # ---------------------------------------------------------------------------
 # Preview (per-PR) — CI substitutes `__PR__` with the PR number at deploy
@@ -58,3 +67,9 @@ account_id = "6a80496d1e59948a9cbaa3c643ba81d7"
 [env.preview.vars]
 ENV = "preview"
 PR = "__PR__"
+VITE_AUTH_BASE = "https://codex-auth-worker.blue-darkness-7674.workers.dev"
+
+[env.preview.assets]
+directory = "./dist"
+binding = "ASSETS"
+not_found_handling = "single-page-application"

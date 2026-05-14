@@ -5,17 +5,15 @@ name: Deploy apps to production
 # discovery + matrix structure but for prod, not per-PR previews.
 #
 # Skips:
-#   - apps/workspace  — its routes (/project/:id, /, /debug) are served
-#                       by the legacy Pages build at the apex; no /w/*
-#                       basename wired yet (vite base + BrowserRouter).
 #   - apps/front-door — the apex `/` is served by Pages (_redirects bounces
 #                       / → /projects). Re-enabling front-door would need
 #                       an `aquilla.app/*` route claim that fully replaces
 #                       Pages, which is a bigger change.
 #   - apps/frontier-server — already deployed by deploy-workers.yml.
 #
-# So this workflow handles the 9 SPA apps with discrete /<slug>/* mounts:
-# billing, export, import, login, migrate, org, projects, reset, signup.
+# So this workflow handles the SPA apps with discrete /<slug>/* mounts:
+# billing, export, import, login, migrate, org, projects, reset, signup,
+# and workspace (/w/*).
 #
 # `pnpm build` runs per-app before `wrangler deploy` (the Worker's
 # [assets] binding requires dist/ to exist). The route claim in each
@@ -36,6 +34,7 @@ on:
       - 'apps/projects/**'
       - 'apps/reset/**'
       - 'apps/signup/**'
+      - 'apps/workspace/**'
       - 'packages/**'
       - 'pnpm-lock.yaml'
       - '.github/workflows/deploy-apps-prod.yml'
@@ -62,10 +61,9 @@ jobs:
         id: matrix
         run: |
           set -euo pipefail
-          # The 9 user-facing SPA apps with discrete /<slug>/* mounts.
-          # Hand-curated: front-door + frontier-server + workspace are
-          # excluded per the workflow header.
-          all=(billing export import login migrate org projects reset signup)
+          # User-facing SPA apps with discrete mounts. Hand-curated:
+          # front-door + frontier-server are excluded per the workflow header.
+          all=(billing export import login migrate org projects reset signup workspace)
           requested='${{ github.event.inputs.app }}'
           if [ -n "$requested" ] && [ "$requested" != "all" ]; then
             # workflow_dispatch with a single slug → only that app.
@@ -101,6 +99,7 @@ jobs:
         env:
           VITE_AUTH_BASE: https://aquilla-frontier-server.blue-darkness-7674.workers.dev
           VITE_SYNC_WORKER_HOST: aquilla-sync-worker.blue-darkness-7674.workers.dev
+          VITE_CHAT_BASE: https://aquilla-chat-worker.blue-darkness-7674.workers.dev
 
       - name: Deploy
         working-directory: apps/${{ matrix.app }}
@@ -109,7 +108,12 @@ jobs:
       - name: Smoke-test prod URL
         run: |
           slug='${{ matrix.app }}'
-          url="https://aquilla.app/${slug}/"
+          path=$(jq -r --arg slug "$slug" '.[$slug] // empty' routes.json)
+          if [ -z "$path" ]; then
+            path="/${slug}"
+          fi
+          [ "${path%/}" = "$path" ] && path="${path}/"
+          url="https://aquilla.app${path}"
           echo "Smoke-testing $url"
           # Workers Routes propagation can take a few seconds after deploy.
           for attempt in 1 2 3 4 5; do

@@ -16,7 +16,7 @@ compatibility_flags = ["nodejs_compat"]
 # wrangler interactive account-pick prompts.
 account_id = "6a80496d1e59948a9cbaa3c643ba81d7"
 
-# Top-level (no env flag) defaults to prod for symmetry with the legacy
+# Top-level (no env flag) defaults to prod for symmetry with the other
 # workers. Prefer `--env=production` / `--env=staging` / `--env=preview`
 # explicitly; do not rely on these defaults.
 # routes = ["aquilla.app/w/*"]  # TODO: uncomment after aquilla.app zone is provisioned in Cloudflare
@@ -42,7 +42,7 @@ name = "aquilla-prod-workspace"
 account_id = "6a80496d1e59948a9cbaa3c643ba81d7"
 # Workspace at /w/* (per routes.json). Vite base = /w/, BrowserRouter
 # basename = /w (runtime-detected in main.tsx so the same bundle still
-# works at apex paths served by the legacy Pages build). The aquilla.app
+# works at apex paths served by the root Pages build). The aquilla.app
 # zone IS on the CF account — the original "TODO" comment was stale.
 routes = ["aquilla.app/w/*"]
 

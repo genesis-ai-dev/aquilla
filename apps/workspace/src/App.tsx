@@ -13,7 +13,8 @@
 // Cross-app navigation is a hard URL transition (apps may not import each
 // other at runtime; see AD-11 navigation handoff contract). When you need
 // the user back on a project's continuous-state workspace, link directly to
-// `/project/:id` here or `/w/:id` after Phase 4's workspace mount rename.
+// `/w/:id` from another app. Local dev and the smoke suite still use the
+// root-mounted `/project/:id` form.
 //
 // The workspace SPA owns continuous translation state — these routes stay
 // here until Phase 3a fully relocates the workspace into apps/workspace/:
@@ -23,9 +24,9 @@
 //   /project/:id/settings/debug
 //   /debug
 //
-// Legacy redirect retained for backwards compatibility:
+// Redirect retained for the settings handoff:
 //
-//   /settings/org  → /org/members  (was /members)
+//   /settings/org  → /org/members
 
 import { Routes, Route } from "react-router-dom"
 import { Dashboard } from "@/components/Dashboard"
@@ -48,6 +49,11 @@ void hydratePrefetchStatus()
 void probeOpfsAvailability()
 
 const ENABLE_SMOKE_DASHBOARD_ROUTE = import.meta.env.MODE === "test"
+
+const workspacePaths = (suffix = "") => [
+  `/project/:id${suffix}`,
+  `/:id${suffix}`,
+]
 
 function GlobalAudioShortcuts() {
   useGlobalAudioShortcuts()
@@ -89,7 +95,7 @@ function HardRedirect({ to }: { to: string }) {
   return null
 }
 
-function AppRoutes() {
+export function AppRoutes() {
   return (
     <Routes>
       {/* Vite preview does not apply public/_redirects, while the smoke suite
@@ -101,21 +107,39 @@ function AppRoutes() {
 
       {/* Workspace surfaces — kept here until Phase 3a relocates them. */}
       <Route path="/debug" element={<DebugView />} />
-      <Route path="/project/:id" element={<ProjectWorkspace />} />
-      <Route path="/project/:id/file/:fileId" element={<ProjectWorkspace />} />
-      <Route path="/project/:id/debug" element={<DebugView />} />
-      <Route path="/project/:id/settings/debug" element={<DebugView />} />
-      <Route path="/project/:id/rules" element={<RulesPage />} />
-      <Route path="/project/:id/memory" element={<LivingMemoryPage />} />
-      <Route path="/project/:id/comments" element={<CommentsPage />} />
-      <Route path="/project/:id/comments/debug" element={<DebugView />} />
-      <Route path="/project/:id/snapshots" element={<SnapshotsPage />} />
-      <Route path="/project/:id/snapshots/debug" element={<DebugView />} />
+      {workspacePaths().map((path) => (
+        <Route key={path} path={path} element={<ProjectWorkspace />} />
+      ))}
+      {workspacePaths("/file/:fileId").map((path) => (
+        <Route key={path} path={path} element={<ProjectWorkspace />} />
+      ))}
+      {workspacePaths("/debug").map((path) => (
+        <Route key={path} path={path} element={<DebugView />} />
+      ))}
+      {workspacePaths("/settings/debug").map((path) => (
+        <Route key={path} path={path} element={<DebugView />} />
+      ))}
+      {workspacePaths("/rules").map((path) => (
+        <Route key={path} path={path} element={<RulesPage />} />
+      ))}
+      {workspacePaths("/memory").map((path) => (
+        <Route key={path} path={path} element={<LivingMemoryPage />} />
+      ))}
+      {workspacePaths("/comments").map((path) => (
+        <Route key={path} path={path} element={<CommentsPage />} />
+      ))}
+      {workspacePaths("/comments/debug").map((path) => (
+        <Route key={path} path={path} element={<DebugView />} />
+      ))}
+      {workspacePaths("/snapshots").map((path) => (
+        <Route key={path} path={path} element={<SnapshotsPage />} />
+      ))}
+      {workspacePaths("/snapshots/debug").map((path) => (
+        <Route key={path} path={path} element={<DebugView />} />
+      ))}
 
-      {/* Backwards-compat redirects to relocated apps. /settings/org used to
-          point inside this SPA; the operational members surface now lives in
-          apps/org/. A hard navigation is required since /org is a different
-          Worker deploy (no in-router resolution possible). */}
+      {/* A hard navigation is required since /org is a different Worker deploy
+          and cannot be resolved inside this router. */}
       <Route path="/settings/org" element={<HardRedirect to="/org/members" />} />
     </Routes>
   )

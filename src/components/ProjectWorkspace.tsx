@@ -230,13 +230,19 @@ export function ProjectWorkspace() {
   })
 
   const validationCount = project ? readValidationCount(project) : 1
-  const cells = useCells(
-    doc,
-    activeFileId ?? "",
-    currentUsername,
-    validationCount,
-    auditStatsByCellId,
-  )
+  // Phase 2a: useCells reads from D1 via the sync-worker's HTTP read route.
+  // The Y.Doc is still wired for writes + the Tiptap editor; this just
+  // changes the load path for the cells list. See useCells.ts for the full
+  // story.
+  const { cells } = useCells({
+    projectId: project?.id ?? null,
+    fileId: activeFileId,
+    username: currentUsername,
+    requiredValidations: validationCount,
+    auditStats: auditStatsByCellId,
+    getToken: getTokenForFile,
+    enabled: Boolean(project?.id && activeFileId && frontierSession?.jwt),
+  })
   const { hasAny: hasUnfinished, findNext: findNextUnfinished } = useNextUnfinished(cells, validationCount)
   const handleJumpNextUnfinished = useCallback(() => {
     const currentIndex = editorRef.current?.getCurrentIndex?.() ?? 0

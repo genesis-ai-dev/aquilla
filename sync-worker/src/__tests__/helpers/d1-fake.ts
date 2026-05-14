@@ -9,6 +9,17 @@ export interface Tables {
   cells: CellRow[]
   cell_validators: ValidatorRow[]
   files: FileRow[]
+  /** AD-9: projects rows expose `source_project_id` for the stale-source
+   *  route. The auth-worker side of the codebase owns this table; we
+   *  model just the columns the sync-worker reads. */
+  projects: ProjectRow[]
+}
+
+export interface ProjectRow {
+  id: string
+  source_project_id: string | null
+  name?: string
+  archived_at?: string | null
 }
 
 export interface EventRow {
@@ -84,6 +95,7 @@ export function makeInMemoryD1(tables: Partial<Tables> = {}): InMemoryD1 {
     cells: tables.cells ?? [],
     cell_validators: tables.cell_validators ?? [],
     files: tables.files ?? [],
+    projects: tables.projects ?? [],
   }
 
   const issuedStmts: Array<{ sql: string; args: unknown[] }> = []
@@ -697,6 +709,52 @@ export function makeInMemoryD1(tables: Partial<Tables> = {}): InMemoryD1 {
         db.cell_validators[idx] = row
       }
       return []
+    }
+
+    // ── GET projects.source_project_id (stale-source route prelude) ────
+    if (/^SELECT source_project_id FROM projects WHERE id = \?$/.test(normalized)) {
+      const id = args[0] as string
+      const project = db.projects.find((p) => p.id === id)
+      return project ? [{ source_project_id: project.source_project_id }] : []
+    }
+
+    // ── AD-9 stale-source JOIN ─────────────────────────────────────────
+    // Bind order: 0=upstream_or_null, 1=project_id, 2=file_id.
+    // Whitespace-collapsed, the route's SQL becomes:
+    //   SELECT t.cell_id AS cell_id FROM cells t JOIN cells s
+    //     ON s.project_id = COALESCE(?, t.project_id) AND s.cell_id = t.cell_id
+    //    AND s.side = 'source'
+    //   WHERE t.project_id = ? AND t.file_id = ? AND t.side = 'target'
+    //     AND t.source_event_id IS NOT NULL AND s.event_id != t.source_event_id
+    if (
+      /^SELECT t\.cell_id AS cell_id FROM cells t JOIN cells s ON s\.project_id = COALESCE\(\?, t\.project_id\) AND s\.cell_id = t\.cell_id AND s\.side = 'source' WHERE t\.project_id = \? AND t\.file_id = \? AND t\.side = 'target' AND t\.source_event_id IS NOT NULL AND s\.event_id != t\.source_event_id$/.test(
+        normalized,
+      )
+    ) {
+      const upstreamArg = args[0] as string | null
+      const projectId = args[1] as string
+      const fileId = args[2] as string
+      const sourceProjectId = upstreamArg ?? projectId
+      const stale: Array<{ cell_id: string }> = []
+      for (const t of db.cells) {
+        if (
+          t.project_id === projectId &&
+          t.file_id === fileId &&
+          t.side === "target" &&
+          t.source_event_id != null
+        ) {
+          const sourceRow = db.cells.find(
+            (s) =>
+              s.project_id === sourceProjectId &&
+              s.cell_id === t.cell_id &&
+              s.side === "source",
+          )
+          if (sourceRow && sourceRow.event_id !== t.source_event_id) {
+            stale.push({ cell_id: t.cell_id })
+          }
+        }
+      }
+      return stale
     }
 
     // ── UPDATE cells SET validated = (...) ─────────────────────────────

@@ -38,6 +38,7 @@ import { handleFilesReadRequest } from "./events/files-read-route"
 import { handleCellsReadRequest } from "./events/cells-read-route"
 import { handleCellHistoryReadRequest } from "./events/cell-history-read-route"
 import { handleSearchReadRequest } from "./events/search-route"
+import { handleStaleSourceRequest } from "./events/stale-source-route"
 import { handleCorsPreflight, withCors } from "./cors"
 import { notifyFileDo } from "./archive-broadcast"
 import { parseRealtimeMessage } from "./events/realtime"
@@ -660,6 +661,8 @@ export default {
     if (cellsReadResponse) return withCors(cellsReadResponse, request)
     const cellHistoryResponse = await handleCellHistoryReadRequest(request, env)
     if (cellHistoryResponse) return withCors(cellHistoryResponse, request)
+    const staleSourceResponse = await handleStaleSourceRequest(request, env)
+    if (staleSourceResponse) return withCors(staleSourceResponse, request)
     const searchResponse = await handleSearchReadRequest(request, env)
     if (searchResponse) return withCors(searchResponse, request)
     const eventsWriteResponse = await handleEventsWriteRequest(request, env)

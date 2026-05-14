@@ -65,10 +65,38 @@ export default {
       assertNotPreviewInProd(env, url.hostname)
     }
 
-    // Hand to Workers Assets. The asset binding handles SPA fallback +
-    // immutable hashing for hashed file names; index.html is served at
-    // /w/ and on any unknown sub-path (per not_found_handling).
+    // The workspace SPA has no `/` route — entry is via /project/:id
+    // (after picking a project from /projects). A bare visit to /w or
+    // /w/ would mount the SPA and immediately render nothing. Bounce to
+    // /projects at the edge so users land on something useful.
+    if (url.pathname === "/w" || url.pathname === "/w/") {
+      // Trailing slash required: Workers Routes claims `aquilla.app/projects/*`
+      // which doesn't match bare `/projects` — that'd fall to Pages.
+      return withSecurityHeaders(
+        Response.redirect(new URL("/projects/", url).toString(), 302),
+      )
+    }
+
     const assetRes = await env.ASSETS.fetch(req)
+
+    // Workers Assets `not_found_handling = "single-page-application"`
+    // falls back to the directory-root index.html (./dist/index.html) —
+    // but our build emits to ./dist/w/, so the apex index.html doesn't
+    // exist and the asset binding 404s on every deep link
+    // (/w/debug, /w/project/abc, …). Re-fetch the slug's index.html as
+    // the SPA-fallback so client-side React Router can take over.
+    if (
+      assetRes.status === 404 &&
+      url.pathname.startsWith("/w/") &&
+      !/\.[a-z0-9]+$/i.test(url.pathname)
+    ) {
+      const fallback = new Request(new URL("/w/", url).toString(), req)
+      const fallbackRes = await env.ASSETS.fetch(fallback)
+      if (fallbackRes.ok) {
+        return withSecurityHeaders(fallbackRes)
+      }
+    }
+
     return withSecurityHeaders(assetRes)
   },
 }

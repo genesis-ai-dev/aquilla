@@ -24,12 +24,22 @@ const queryClient = new QueryClient({
   },
 })
 
+// The same workspace SPA bundle is served two ways in production:
+//   - aquilla.app/w/*  → apps/workspace Worker (vite base /w/)
+//   - aquilla.app/...  → legacy Cloudflare Pages bundle (vite base /)
+// React Router's basename has to match whichever path the browser
+// loaded under, so detect it at first paint by checking the URL prefix.
+const ROUTER_BASENAME =
+  typeof window !== "undefined" && window.location.pathname.startsWith("/w/")
+    ? "/w"
+    : "/"
+
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
     <QueryClientProvider client={queryClient}>
       <BrandProvider>
         <ThemeModeProvider>
-          <BrowserRouter>
+          <BrowserRouter basename={ROUTER_BASENAME}>
             <App />
           </BrowserRouter>
         </ThemeModeProvider>

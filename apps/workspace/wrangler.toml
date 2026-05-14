@@ -40,7 +40,11 @@ not_found_handling = "single-page-application"
 [env.production]
 name = "aquilla-prod-workspace"
 account_id = "6a80496d1e59948a9cbaa3c643ba81d7"
-# routes = ["aquilla.app/w/*"]  # TODO: uncomment after aquilla.app zone is provisioned in Cloudflare
+# Workspace at /w/* (per routes.json). Vite base = /w/, BrowserRouter
+# basename = /w (runtime-detected in main.tsx so the same bundle still
+# works at apex paths served by the legacy Pages build). The aquilla.app
+# zone IS on the CF account — the original "TODO" comment was stale.
+routes = ["aquilla.app/w/*"]
 
 [env.production.vars]
 ENV = "prod"
@@ -50,6 +54,13 @@ VITE_AUTH_BASE = "https://api.aquilla.app/api/identity"
 directory = "./dist"
 binding = "ASSETS"
 not_found_handling = "single-page-application"
+# By default Workers Assets intercepts asset requests before the Worker
+# script runs, which would skip our `/w/` → `/projects` landing redirect
+# in src/worker.ts. `run_worker_first` for the apex paths makes the
+# Worker handle them; everything else (assets, sub-routes) still gets
+# the auto-served path. Pattern syntax matches Workers Assets'
+# `run_worker_first` array form.
+run_worker_first = ["/w", "/w/"]
 
 # ---------------------------------------------------------------------------
 # Staging — `wrangler deploy --env staging`

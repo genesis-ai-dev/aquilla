@@ -98,7 +98,12 @@ export default defineConfig(({ mode }) => ({
     ],
   },
   build: {
-    outDir: "dist",
+    // Emit into dist/w/ so the on-disk layout matches Workers Routes'
+    // aquilla.app/w/* claim — requests for /w/assets/foo.js map to
+    // <directory>/w/assets/foo.js. Without the nested folder, every
+    // /w/assets/*.js falls through to the SPA-fallback index.html and
+    // the page loads with broken script tags.
+    outDir: "dist/w",
     emptyOutDir: true,
     sourcemap: true,
     // Split large third-party deps out of the main bundle. Without

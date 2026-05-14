@@ -1,28 +1,53 @@
-// Members matrix — the discrete-app port of src/pages/MembersPage.tsx
-// (+ MembersMatrixView + MembersMatrixCellEditor + RemoveOrgMemberDialog).
+// Org members list.
 //
-// Phase 3c stub. The matrix UI (~500 lines plus child components) depends on
-// useOrg, useProjectsMembersMatrix, and useProjectMembers hooks that live
-// in src/hooks/. Those hooks read from auth-worker via @aquilla/api-client
-// + role-resolution helpers; relocating them is Phase 3a's domain. Once
-// that lands, this page is a one-to-one port.
+// First-version surface: shows everyone in the caller's personal org with
+// their role, plus a "remove" action for owners. The cross-project members
+// matrix from src/pages/MembersPage.tsx (~500 lines) is deferred until the
+// matrix hooks are extracted into shared packages.
+//
+// Server endpoints used:
+//   GET    /api/v2/orgs/me                         (caller's org)
+//   GET    /api/v2/orgs/:orgId/members             (members list)
+//   DELETE /api/v2/orgs/:orgId/members/:userId     (remove member; owner-only)
 
-import { useEffect, useState } from "react"
+import { useEffect, useState, useCallback } from "react"
 import { Link } from "react-router-dom"
 import {
   fetchUserOrgs,
   fetchOrgMembers,
+  removeOrgMember,
   type MyOrg,
   type OrgMember,
 } from "@aquilla/api-client"
-import { getJwt, redirectToLogin } from "@aquilla/auth-client"
-import { Button, Card, CardContent, CardHeader, CardTitle } from "@aquilla/ui"
+import {
+  getJwt,
+  redirectToLogin,
+  handleAuthExpiredAndRedirect,
+} from "@aquilla/auth-client"
+import {
+  Alert,
+  Button,
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+} from "@aquilla/ui"
 
 export function MembersPage() {
   const [org, setOrg] = useState<MyOrg | null>(null)
   const [members, setMembers] = useState<OrgMember[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [pendingRemove, setPendingRemove] = useState<number | null>(null)
+  const [confirmRemove, setConfirmRemove] = useState<number | null>(null)
+
+  const handleAuthError = useCallback((err: unknown): boolean => {
+    if (err && typeof err === "object" && (err as { status?: number }).status === 401) {
+      handleAuthExpiredAndRedirect()
+      return true
+    }
+    return false
+  }, [])
 
   useEffect(() => {
     const jwt = getJwt()
@@ -39,7 +64,9 @@ export function MembersPage() {
         if (!cancelled) setMembers(ms)
       })
       .catch((err) => {
-        if (!cancelled) setError(err.message ?? "Failed to load members")
+        if (cancelled) return
+        if (handleAuthError(err)) return
+        setError(err.message ?? "Failed to load members")
       })
       .finally(() => {
         if (!cancelled) setLoading(false)
@@ -47,7 +74,30 @@ export function MembersPage() {
     return () => {
       cancelled = true
     }
-  }, [])
+  }, [handleAuthError])
+
+  async function handleRemove(userId: number): Promise<void> {
+    if (!org || pendingRemove != null) return
+    const jwt = getJwt()
+    if (!jwt) {
+      redirectToLogin()
+      return
+    }
+    setPendingRemove(userId)
+    setError(null)
+    try {
+      await removeOrgMember(org.id, userId, jwt)
+      setMembers((prev) => prev.filter((m) => m.userId !== userId))
+      setConfirmRemove(null)
+    } catch (err) {
+      if (handleAuthError(err)) return
+      setError(err instanceof Error ? err.message : "Couldn't remove member")
+    } finally {
+      setPendingRemove(null)
+    }
+  }
+
+  const isOwner = org?.role.level === 700
 
   return (
     <div className="mx-auto max-w-5xl px-6 py-8">
@@ -61,16 +111,16 @@ export function MembersPage() {
 
       <h1 className="text-2xl font-semibold">Members</h1>
       <p className="mt-1 text-sm text-muted-foreground">
-        Phase 3c scaffold. The full members matrix (assign roles per
-        project, bulk invite, remove) ports from src/pages/MembersPage.tsx
-        once Phase 3a relocates the matrix hooks.
+        Everyone with access to {org?.name ?? "your organization"}.
       </p>
 
-      {loading && <p className="mt-4 text-sm text-muted-foreground">Loading…</p>}
+      {loading && (
+        <p className="mt-4 text-sm text-muted-foreground">Loading…</p>
+      )}
       {error && (
-        <div className="mt-4 rounded border bg-destructive/10 px-3 py-2 text-sm text-destructive">
+        <Alert tone="error" className="mt-4" role="alert">
           {error}
-        </div>
+        </Alert>
       )}
 
       {org && members.length > 0 && (
@@ -83,18 +133,77 @@ export function MembersPage() {
               {members.map((m) => (
                 <li
                   key={m.userId}
-                  className="flex items-center justify-between gap-2 py-2 text-sm"
+                  className="flex items-center justify-between gap-2 py-3 text-sm"
                 >
-                  <span className="font-medium">{m.username}</span>
-                  <span className="text-xs text-muted-foreground">
-                    {m.role.name}
-                  </span>
+                  <div className="flex flex-col">
+                    <span className="font-medium">{m.username}</span>
+                    <span className="text-xs text-muted-foreground">
+                      {m.role.name}
+                      {m.lastActiveAt && (
+                        <> · last active {formatRelativeTime(m.lastActiveAt)}</>
+                      )}
+                    </span>
+                  </div>
+                  {isOwner && m.role.level !== 700 && (
+                    <div className="flex items-center gap-2">
+                      {confirmRemove === m.userId ? (
+                        <>
+                          <span className="text-xs text-muted-foreground">
+                            Remove?
+                          </span>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => handleRemove(m.userId)}
+                            disabled={pendingRemove === m.userId}
+                          >
+                            {pendingRemove === m.userId ? "Removing…" : "Yes"}
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            onClick={() => setConfirmRemove(null)}
+                            disabled={pendingRemove === m.userId}
+                          >
+                            Cancel
+                          </Button>
+                        </>
+                      ) : (
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          onClick={() => setConfirmRemove(m.userId)}
+                        >
+                          Remove
+                        </Button>
+                      )}
+                    </div>
+                  )}
                 </li>
               ))}
             </ul>
           </CardContent>
         </Card>
       )}
+
+      {!loading && org && members.length === 0 && (
+        <p className="mt-6 text-sm text-muted-foreground">
+          No members yet.
+        </p>
+      )}
     </div>
   )
+}
+
+/** Tiny relative-time formatter — avoids pulling in date-fns for one
+ *  string. "5m ago", "3d ago", "2026-04-12" past 30 days. */
+function formatRelativeTime(iso: string): string {
+  const then = Date.parse(iso)
+  if (Number.isNaN(then)) return iso
+  const diffSec = Math.max(0, (Date.now() - then) / 1000)
+  if (diffSec < 60) return "just now"
+  if (diffSec < 3600) return `${Math.floor(diffSec / 60)}m ago`
+  if (diffSec < 86_400) return `${Math.floor(diffSec / 3600)}h ago`
+  if (diffSec < 30 * 86_400) return `${Math.floor(diffSec / 86_400)}d ago`
+  return iso.slice(0, 10)
 }

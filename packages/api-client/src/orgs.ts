@@ -68,3 +68,19 @@ export async function fetchOrgMembers(
   const body = await readJson<OrgMembersResponse>(res)
   return body.members
 }
+
+/** DELETE /api/v2/orgs/:orgId/members/:userId — caller needs role >= owner. */
+export async function removeOrgMember(
+  orgId: number,
+  userId: number,
+  jwt: string,
+  apiUrl: string = AUTH_API_URL,
+): Promise<void> {
+  const res = await fetch(
+    `${apiUrl}/api/v2/orgs/${orgId}/members/${userId}`,
+    { method: "DELETE", headers: authHeaders(jwt) },
+  )
+  if (!res.ok) {
+    throw new OrgsReadError(res.status, await res.text().catch(() => ""))
+  }
+}

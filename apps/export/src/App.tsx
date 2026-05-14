@@ -26,8 +26,16 @@ export function App() {
           Export translations
         </h1>
         <p className="text-base text-slate-600">
-          Coming soon. This page is a placeholder for the deploy chassis.
+          Coming soon. Standalone exporting will live here. For now, open a
+          project from your dashboard and use the workspace's export
+          surface.
         </p>
+        <a
+          href="/projects/"
+          className="mt-2 inline-flex items-center text-sm text-primary hover:underline"
+        >
+          ← Back to projects
+        </a>
       </header>
 
       <section className="rounded-lg border border-slate-200 bg-white p-6 shadow-sm">
@@ -55,8 +63,7 @@ export function App() {
       </section>
 
       <p className="text-xs text-slate-400">
-        Disabled until the rebuilders are extracted out of src/ in the
-        post-Phase-2c-β follow-up.
+        Standalone exporting is not wired up yet.
       </p>
     </main>
   )

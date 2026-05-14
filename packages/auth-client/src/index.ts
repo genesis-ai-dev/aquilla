@@ -255,3 +255,36 @@ export function redirectToLogin(): void {
   )
   window.location.replace(`/login/?next=${next}`)
 }
+
+/**
+ * Self-healing 401 handler. Apps wrap their api-client calls so that any
+ * 401 — `Invalid or expired token`, `User not found`, etc. — clears the
+ * stale JWT cookie and bounces to the login app. Without this, a server
+ * SECRET_KEY rotation (or any signature mismatch) leaves users stuck on
+ * a blank page with no recovery path.
+ *
+ * Idempotent in practice: multiple parallel 401s call clearJwt() →
+ * redirectToLogin(); the second redirect is a no-op once `replace`
+ * lands.
+ */
+export function handleAuthExpiredAndRedirect(): void {
+  clearJwt()
+  redirectToLogin()
+}
+
+/**
+ * Convenience wrapper: invokes `fn`, and if it throws an error whose
+ * `status` is 401 (matches the `*ReadError` pattern used by
+ * @aquilla/api-client), self-heals and rethrows so the caller can break
+ * out of the current effect. Other errors pass through unchanged.
+ */
+export async function withAuthRetry<T>(fn: () => Promise<T>): Promise<T> {
+  try {
+    return await fn()
+  } catch (err) {
+    if (err && typeof err === "object" && (err as { status?: unknown }).status === 401) {
+      handleAuthExpiredAndRedirect()
+    }
+    throw err
+  }
+}

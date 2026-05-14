@@ -25,7 +25,11 @@ import {
   Skeleton,
   Button,
 } from "@aquilla/ui"
-import { getJwt, redirectToLogin } from "@aquilla/auth-client"
+import {
+  getJwt,
+  redirectToLogin,
+  handleAuthExpiredAndRedirect,
+} from "@aquilla/auth-client"
 
 export function ProjectListPage() {
   const [projects, setProjects] = useState<ProjectListItem[]>([])
@@ -45,7 +49,15 @@ export function ProjectListPage() {
         if (!cancelled) setProjects(list)
       })
       .catch((err) => {
-        if (!cancelled) setError(err.message ?? "Failed to load projects")
+        if (cancelled) return
+        // Self-heal: a 401 means the JWT is stale (signing key rotated,
+        // user deleted server-side, etc.) — clear it and bounce to login
+        // so the user isn't stuck on a "projects api failed" toast.
+        if (err && typeof err === "object" && err.status === 401) {
+          handleAuthExpiredAndRedirect()
+          return
+        }
+        setError(err.message ?? "Failed to load projects")
       })
       .finally(() => {
         if (!cancelled) setLoading(false)
@@ -69,9 +81,6 @@ export function ProjectListPage() {
         <div className="flex items-center justify-between gap-2 px-4 py-4 sm:px-6">
           <h1 className="text-xl font-semibold">Projects</h1>
           <div className="flex items-center gap-2">
-            <Button variant="outline" onClick={() => navigate("/onboarding")}>
-              First-time setup
-            </Button>
             <Button onClick={() => navigate("/new")}>New project</Button>
           </div>
         </div>

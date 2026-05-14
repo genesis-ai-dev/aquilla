@@ -12,9 +12,19 @@ account_id = "6a80496d1e59948a9cbaa3c643ba81d7"
 name = "FileSync"
 class_name = "FileSync"
 
+# Per-project DO (Phase 2c). Holds focus locks + presence + an event-fanout
+# relay. Transient state only; no D1/R2 writes from inside the DO itself.
+[[durable_objects.bindings]]
+name = "ProjectSync"
+class_name = "ProjectSync"
+
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["FileSync"]
+
+[[migrations]]
+tag = "v2"
+new_sqlite_classes = ["ProjectSync"]
 
 # R2 holds canonical Y.Doc snapshots and tail updates.
 # Key layout: projects/{projectId}/files/{fileId}/{snapshot.bin,tail/{seq}.bin,checkpoints/{id}.bin}
@@ -58,9 +68,17 @@ account_id = "6a80496d1e59948a9cbaa3c643ba81d7"
 name = "FileSync"
 class_name = "FileSync"
 
+[[env.staging.durable_objects.bindings]]
+name = "ProjectSync"
+class_name = "ProjectSync"
+
 [[env.staging.migrations]]
 tag = "v1"
 new_sqlite_classes = ["FileSync"]
+
+[[env.staging.migrations]]
+tag = "v2"
+new_sqlite_classes = ["ProjectSync"]
 
 [[env.staging.r2_buckets]]
 binding = "SNAPSHOTS"

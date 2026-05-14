@@ -81,14 +81,16 @@ export async function verifyTokenForDoc(
 }
 
 /**
- * Verify a sync-token JWT for a project-scoped read. Unlike
+ * Verify a sync-token JWT for a project-scoped operation. Unlike
  * verifyTokenForDoc / verifyTokenForFile, this checks only the projectId —
- * useful for project-level reads (list files, list cells across files) that
- * don't need to be scoped to a single file. The token must still be a valid
- * `aud=sync` token; the claims' role doubles as the project-membership check
- * (every sync-token issued by auth-worker is gated on project_members at
- * mint time, so a valid token with `projectId === expected` implies the user
- * is a viewer (100) or higher on that project).
+ * useful for project-level reads (list files, list cells across files) and
+ * for the per-project Durable Object WS connection (presence + focus locks
+ * span every file in the project, so the file scope is irrelevant). The
+ * token must still be a valid `aud=sync` token; the claims' role doubles as
+ * the project-membership check (every sync-token issued by auth-worker is
+ * gated on project_members at mint time, so a valid token with
+ * `projectId === expected` implies the user is a viewer (100) or higher on
+ * that project).
  */
 export async function verifyTokenForProject(
   token: string | null | undefined,

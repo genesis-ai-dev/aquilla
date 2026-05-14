@@ -28,6 +28,31 @@ Vitest runs in `happy-dom` with `fake-indexeddb/auto` loaded via `src/test-setup
 
 ## Architecture
 
+> **Phase 2c-α (in flight).** The Aquilla spec-alignment effort is migrating
+> codex-web from Y.Doc-as-source-of-truth to **events-log + projection as
+> the durable record** (AD-2) with WS-based focus locks for live
+> coordination (AD-1) and an outbox + reconciler for offline-tolerant
+> writes (AD-3). The migration is being shipped in three slices:
+>
+> - **2a (merged):** D1 cells read-path. Reads now flow through
+>   `src/lib/sync/cqrs-bridge.ts` → sync-worker D1.
+> - **2b (merged):** Stubs of project-level state, comment shells.
+> - **2c-α (this slice):** AD-2 event grammar + outbox enqueuer
+>   (`src/lib/sync/events-emit.ts`, `outbox-types.ts`), per-project DO
+>   (`sync-worker/src/project-do.ts`), WS reconciler client
+>   (`src/lib/sync/ws-reconciler.ts`), focus-lock hook
+>   (`src/hooks/useFocusLock.ts`). The editor still writes through the
+>   legacy Y.Doc + `cqrs-bridge.ts` path; the new modules are wired but
+>   unconsumed.
+> - **2c-β (next PR):** Editor migration (plain TipTap, remove
+>   `@tiptap/extension-collaboration`); importer rewrite (parsers emit
+>   `source.cell.create` events directly); full Yjs removal (drop deps,
+>   delete `file-doc.ts`, `partyserver-provider.ts`, `translated-xml.ts`,
+>   the IDB Y.Doc persistence, and the `useProject` IDB cache fallback).
+>
+> The architecture sections below describe the **current** state during
+> 2c-α — Y.Doc remains the load path for cells until 2c-β.
+
 ### Document model: parsers → Y.Doc → rebuilders
 
 The whole pipeline is built around a single intermediate shape: `TranslatableString[]` (see `src/lib/parsers/types.ts`). Each importer in `src/lib/parsers/` (`usfm`, `docx`, `pptx`, `markdown`, `plaintext`, `subtitle`) reads a binary/text blob and emits that array plus enough metadata (`SourceLocation` for docx/pptx) to reconstruct the original later. `src/lib/import.ts` dispatches on `detectFileType`.
@@ -55,6 +80,41 @@ Every major subsystem has a hook in `src/hooks/` that subscribes to Yjs updates 
 - `useComments`, `useCellHistory`, `useRules`, `useHealth`, `useCompletion`, `useBacktranslation`, `useSearchIndex`, `useWorkspaceSearch`, `useSync`
 
 Adding a new cell-level feature almost always means: extend the cell Y.Map shape in `file-doc.ts`, add a service under `src/lib/<feature>/`, surface it through a hook, and render in a component under `src/components/`.
+
+### Phase 2c-α write path (events log + outbox + WS coordination)
+
+The post-Phase-2 write path is built around three concepts:
+
+1. **Typed event grammar (AD-2)** — `src/lib/sync/outbox-types.ts` mirrors
+   `sync-worker/src/events/types.ts`. Cell events carry `source.` or
+   `target.` prefixes; every chain-mutating event carries `parentId` (the
+   prior winning event on this cell's `(project, file, cell)` chain).
+   Genesis events (`*.create`, `file.create`) carry `parentId = null`.
+   `target.cell.commit` carries `sourceEventId` — the AD-9 staleness pin
+   onto the source row's `event_id` at commit time.
+
+2. **Outbox writers (AD-3)** — `src/lib/sync/events-emit.ts` exposes
+   `buildRawEvent`, `enqueueEvent`, and convenience helpers
+   (`emitTargetCellCommit`, `emitCellValidate`, `emitSourceCellCreate`,
+   `emitFileCreate`). All persist into the same IDB outbox as the legacy
+   path (`src/lib/sync/outbox.ts`), and the existing
+   `useOutboxFlusher`/`outbox-flush.ts` drains via HTTP `POST /events`.
+   Writes never block on the network — IDB is the durable buffer.
+
+3. **Per-project DO + WS reconciler (AD-1)** — `sync-worker/src/project-do.ts`
+   is a Durable Object instance per project (path
+   `/parties/project-sync/:projectId`). It holds **only transient state**
+   — focus-lock leases, presence, and an `event.applied` / `event.stale`
+   broadcast channel for `POST /events`. No DO storage writes; rooms
+   evict naturally when empty. The client side is
+   `src/lib/sync/ws-reconciler.ts` (per-project WS with backoff
+   reconnect) and `src/hooks/useFocusLock.ts` (claim/renew/release lease,
+   read `heldBy` for the "Alice is editing" affordance).
+
+These modules are **wired but not yet consumed**: the editor still writes
+through `cqrs-bridge.ts` (Y.Doc mirror) until 2c-β. 2c-β rewires
+`TranslatedEditor` / `EditorTable` to write through `emitTargetCellCommit`
++ `useFocusLock` directly, deletes `cqrs-bridge.ts`, and removes Yjs.
 
 ### Sync & sharing (P2P)
 

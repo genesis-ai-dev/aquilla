@@ -81,6 +81,48 @@ export async function verifyTokenForDoc(
 }
 
 /**
+ * Like verifyTokenForDoc but only requires projectId match. The token may
+ * still carry a fileId scope (the legacy /sync-token mints them per file)
+ * but it's not enforced — the project DO accepts any file in the project.
+ *
+ * Used by the per-project Durable Object WS connection: presence + focus
+ * locks span every file in the project, so the file scope is irrelevant.
+ */
+export async function verifyTokenForProject(
+  token: string | null | undefined,
+  expectedProjectId: string,
+  secret: string | undefined,
+): Promise<AuthResult> {
+  if (!secret) {
+    return { ok: false, status: 500, reason: "SYNC_SECRET_KEY not configured" }
+  }
+  if (!token) {
+    return { ok: false, status: 401, reason: "missing token" }
+  }
+
+  let claims: SyncTokenClaims
+  try {
+    claims = (await verify(token, secret, "HS256")) as unknown as SyncTokenClaims
+  } catch (err) {
+    const name = (err as { name?: string }).name
+    if (name === "JwtTokenExpired") {
+      return { ok: false, status: 401, reason: "token expired" }
+    }
+    return { ok: false, status: 401, reason: "invalid token signature" }
+  }
+
+  if (claims.aud !== "sync") {
+    return { ok: false, status: 401, reason: "wrong audience" }
+  }
+
+  if (claims.projectId !== expectedProjectId) {
+    return { ok: false, status: 403, reason: "token scoped to different project" }
+  }
+
+  return { ok: true, claims }
+}
+
+/**
  * Like verifyTokenForDoc but only requires fileId match — projectId comes
  * from the verified token's claims. Used by reads where the caller doesn't
  * have the project context up front (e.g. GET /events?fileId=...).

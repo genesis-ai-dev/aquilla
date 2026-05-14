@@ -19,6 +19,7 @@ import type { Connection, ConnectionContext } from "partyserver"
 import * as Y from "yjs"
 import { routePartykitRequest } from "partyserver"
 import { verifyTokenForDoc, shouldBeReadOnly } from "./auth"
+export { ProjectSync } from "./project-do"
 import { projectDoc, writeProjection, diffProjection } from "./projection"
 import { handleAdminRequest } from "./admin"
 import { handleAudioRequest } from "./audio"
@@ -44,6 +45,13 @@ declare global {
   namespace Cloudflare {
     interface Env {
       FileSync: DurableObjectNamespace
+      /**
+       * Per-project Durable Object holding live coordination state — focus
+       * locks + presence + the relay for `event.applied` broadcasts.
+       * Phase 2c. Optional binding so existing deploys without the migration
+       * keep working; the new WS routes 503 when absent.
+       */
+      ProjectSync?: DurableObjectNamespace
       SNAPSHOTS: R2Bucket
       /** codex-db (frontier-server-owned schema). Optional so the spike + dev
        *  setups without a D1 binding keep working — onSave skips projection
@@ -651,6 +659,27 @@ export default {
     if (cellsAuditReadResponse) return withCors(cellsAuditReadResponse, request)
     const eventsWriteResponse = await handleEventsWriteRequest(request, env)
     if (eventsWriteResponse) return withCors(eventsWriteResponse, request)
+
+    // Per-project DO WS upgrade (Phase 2c). Path is
+    //   /parties/project-sync/<projectId>
+    // and accepts `?token=<jwt>&user=<userId>`. The DO itself parses and
+    // verifies the token (verifyTokenForProject) — we just route here.
+    const projectSyncMatch = new URL(request.url).pathname.match(
+      /^\/parties\/project-sync\/([^/]+)\/?$/,
+    )
+    if (projectSyncMatch) {
+      if (!env.ProjectSync) {
+        return new Response("ProjectSync DO not bound", { status: 503 })
+      }
+      const projectId = decodeURIComponent(projectSyncMatch[1])
+      const id = env.ProjectSync.idFromName(projectId)
+      const stub = env.ProjectSync.get(id)
+      const inner = new URL(request.url)
+      inner.pathname = "/connect"
+      inner.searchParams.set("project", projectId)
+      // `user` must be supplied by the client; the DO returns 400 if not.
+      return stub.fetch(new Request(inner.toString(), request))
+    }
 
     return (
       (await routePartykitRequest(request, env, {

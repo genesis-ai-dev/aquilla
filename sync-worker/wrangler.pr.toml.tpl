@@ -27,9 +27,17 @@ account_id = "6a80496d1e59948a9cbaa3c643ba81d7"
 name = "FileSync"
 class_name = "FileSync"
 
+[[durable_objects.bindings]]
+name = "ProjectSync"
+class_name = "ProjectSync"
+
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["FileSync"]
+
+[[migrations]]
+tag = "v2"
+new_sqlite_classes = ["ProjectSync"]
 
 [[r2_buckets]]
 binding = "SNAPSHOTS"

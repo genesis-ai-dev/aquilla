@@ -18,6 +18,7 @@ import { ExamplePanel } from "./ExamplePanel"
 import { HighlightedText, buildHighlightsFromExamples } from "./HighlightedText"
 import { HealthRing } from "./HealthRing"
 import { HealthBreakdown } from "./HealthBreakdown/HealthBreakdown"
+import { StaleSourceIndicator } from "./StaleSourceIndicator"
 import { BreakdownContent } from "./HealthBreakdown/BreakdownContent"
 import { TranslatedEditor } from "./TranslatedEditor"
 import { CellWaveform } from "./CellWaveform"
@@ -294,6 +295,11 @@ interface EditorTableProps {
   onOpenRecording?: (cellId: string) => void
   /** Re-read the project record from IDB after a settings change (e.g. voice library edits). */
   onProjectChanged?: () => void
+  /** Phase 5 / AD-9 — set of cell ids whose source has advanced since the
+   *  translator's last commit. When provided, each row renders the small
+   *  StaleSourceIndicator badge next to its validation status. Parent fetches
+   *  once per file via `useStaleSourceCells` so we don't issue N requests. */
+  staleCellIds?: ReadonlySet<string>
 }
 
 export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(function EditorTable({
@@ -312,6 +318,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   cellLockHolders,
   cellsWithRemoteChange,
   onClaimCell, onReleaseCell, onAckRemoteChange,
+  staleCellIds,
 }, ref) {
   const permissions = useProjectPermissions(project)
   const canEdit = permissions.canEditContent
@@ -631,6 +638,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
               <MemoizedRow
                 project={project}
                 cell={cell}
+                isStaleSource={staleCellIds?.has(cell.id) ?? false}
                 doc={doc}
                 username={username}
                 editable={canEdit}
@@ -704,6 +712,10 @@ interface MemoizedRowProps {
   doc: Y.Doc
   username: string
   editable: boolean
+  /** Phase 5 / AD-9: source has advanced since this target was last committed.
+   *  Resolved once per file by the parent (membership look-up) so this prop
+   *  is just a stable boolean — preserves the row's React.memo invariant. */
+  isStaleSource: boolean
   onCellCommitted?: () => void
   lockHolderLabel: string | null
   remoteChangedWhileFocused: boolean
@@ -770,6 +782,7 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
     onJumpToCell, onAiSetupNeeded, onOpenRecording, onProjectChanged,
     onCellCommitted, lockHolderLabel, remoteChangedWhileFocused,
     onClaimCell, onReleaseCell, onAckRemoteChange,
+    isStaleSource,
   } = props
 
   const cellId = cell.id
@@ -820,6 +833,7 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
         doc={doc}
         username={username}
         editable={editable}
+        isStaleSource={isStaleSource}
         isCompletionConfigured={isCompletionConfigured}
         isCompletionAvailable={isCompletionAvailable}
         isLoading={isLoading}
@@ -876,6 +890,10 @@ interface EditorRowProps {
   doc: Y.Doc
   username: string
   editable: boolean
+  /** Phase 5 / AD-9 — true when the source has advanced since the last
+   *  target commit. Renders a small warning badge next to the validation
+   *  status. Computed once-per-file by the parent. */
+  isStaleSource: boolean
   onCellCommitted?: () => void
   lockHolderLabel: string | null
   remoteChangedWhileFocused: boolean
@@ -937,6 +955,7 @@ function EditorRow({
   isAnonymous, breakdown, onJumpToCell, onAiSetupNeeded, onOpenRecording,
   onCellCommitted, lockHolderLabel, remoteChangedWhileFocused,
   onClaimCell, onReleaseCell, onAckRemoteChange,
+  isStaleSource,
 }: EditorRowProps) {
   const [openRuleId, setOpenRuleId] = useState<string | null>(null)
   const [openRuleAnchor, setOpenRuleAnchor] = useState<HTMLElement | null>(null)
@@ -1300,6 +1319,18 @@ function EditorRow({
       >
         <span className="sr-only">Breakdown</span>
       </HealthBreakdown>
+    )}
+    {/* Phase 5 / AD-9: source-changed indicator. Parent-managed mode —
+        membership lookup happens once per file at ProjectWorkspace and is
+        flattened to a per-row boolean here, so we pass a one-element set
+        the indicator resolves trivially. Skipping the component entirely
+        when !isStaleSource keeps the common (non-stale) case zero-cost
+        and avoids the per-row allocation. */}
+    {isStaleSource && (
+      <StaleSourceIndicator
+        cellId={cell.id}
+        staleCellIds={new Set([cell.id])}
+      />
     )}
     {infractionCount > 0 && (
       <span

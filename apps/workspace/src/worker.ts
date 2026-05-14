@@ -16,7 +16,7 @@
 import {
   assertEnvBindings,
   assertNotPreviewInProd,
-} from "@aquilla/errors/env-assertion"
+} from "@aquilla/errors"
 
 interface Env extends Record<string, unknown> {
   ENV: string

@@ -79,6 +79,12 @@ interface SetJwtOptions {
 /**
  * Writes the JWT cookie. Called by `login()` / `signup()` after a successful
  * response. Idempotent — calling twice just refreshes the cookie.
+ *
+ * Before writing, also wipes any host-only `aquilla_jwt` cookie that might
+ * be left over from an older login. Without this, the host-only cookie
+ * sticks around alongside the new parent-domain one and can be returned
+ * by getJwt() instead of the fresh JWT — causing the dreaded sign-in /
+ * sign-out loop.
  */
 export function setJwt(jwt: string, opts: SetJwtOptions = {}): void {
   if (typeof document === "undefined" && !opts.doc) {
@@ -93,6 +99,19 @@ export function setJwt(jwt: string, opts: SetJwtOptions = {}): void {
   const secure =
     opts.secure ??
     (typeof window !== "undefined" && window.location.protocol === "https:")
+
+  // Wipe stale host-only variant first. This is the cookie shape an
+  // earlier build wrote when there was no Domain attribute — browser
+  // keeps it independently of the parent-domain cookie we're about to
+  // set, and getJwt() can return the wrong one.
+  if (domain) {
+    doc.cookie = [
+      `${COOKIE_NAME}=`,
+      "Path=/",
+      "Max-Age=0",
+      "SameSite=Lax",
+    ].join("; ")
+  }
 
   const parts: string[] = [
     `${COOKIE_NAME}=${encodeURIComponent(jwt)}`,
@@ -112,26 +131,36 @@ interface GetJwtOptions {
 
 /**
  * Reads the current JWT cookie or null if missing/empty.
+ *
+ * If multiple cookies share the same name (browsers do this when one was
+ * set host-only and another with a Domain attribute, e.g. an older login
+ * left an `aquilla_jwt` host-only cookie that now coexists with the new
+ * `.aquilla.app` one), pick the **longest** value. JWT length grows with
+ * time-based claims, so the longest is also the most recently issued in
+ * practice — and it dodges the sign-in loop where getJwt repeatedly
+ * returns the stale host-only cookie that the API rejects with 401.
  */
 export function getJwt(opts: GetJwtOptions = {}): string | null {
   if (typeof document === "undefined" && !opts.doc) return null
   const doc = opts.doc ?? document
   const raw = doc.cookie || ""
-  // Naive cookie parser — we only need our own key.
+  let best: string | null = null
   for (const segment of raw.split(";")) {
     const eq = segment.indexOf("=")
     if (eq < 0) continue
     const key = segment.slice(0, eq).trim()
     if (key !== COOKIE_NAME) continue
-    const value = segment.slice(eq + 1).trim()
-    if (!value) return null
+    const valueRaw = segment.slice(eq + 1).trim()
+    if (!valueRaw) continue
+    let value: string
     try {
-      return decodeURIComponent(value)
+      value = decodeURIComponent(valueRaw)
     } catch {
-      return value
+      value = valueRaw
     }
+    if (best === null || value.length > best.length) best = value
   }
-  return null
+  return best
 }
 
 interface ClearJwtOptions {
@@ -140,8 +169,11 @@ interface ClearJwtOptions {
 }
 
 /**
- * Clears the JWT cookie. Same domain attribute as set, so the browser
- * actually overwrites the existing cookie rather than creating a sibling.
+ * Clears the JWT cookie — issues a Set-Cookie at BOTH the host-only and
+ * the parent-domain shapes, since both can exist at once. (A login from
+ * an older build may have written a host-only cookie that the new
+ * Domain=.aquilla.app cookie doesn't overwrite — the browser keeps both
+ * and either can win on the next read, leading to a sign-in loop.)
  */
 export function clearJwt(opts: ClearJwtOptions = {}): void {
   if (typeof document === "undefined" && !opts.doc) return
@@ -150,12 +182,23 @@ export function clearJwt(opts: ClearJwtOptions = {}): void {
     opts.hostname ??
     (typeof window !== "undefined" ? window.location.hostname : "")
   const domain = deriveCookieDomain(hostname)
-  const parts: string[] = [
+
+  // Host-only clear (no Domain attribute).
+  doc.cookie = [
     `${COOKIE_NAME}=`,
     "Path=/",
     "Max-Age=0",
     "SameSite=Lax",
-  ]
-  if (domain) parts.push(`Domain=${domain}`)
-  doc.cookie = parts.join("; ")
+  ].join("; ")
+
+  // Parent-domain clear (matches the canonical setJwt shape).
+  if (domain) {
+    doc.cookie = [
+      `${COOKIE_NAME}=`,
+      "Path=/",
+      "Max-Age=0",
+      "SameSite=Lax",
+      `Domain=${domain}`,
+    ].join("; ")
+  }
 }

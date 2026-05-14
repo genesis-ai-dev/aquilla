@@ -7,12 +7,12 @@ export const DEFAULT_SYSTEM_PROMPT =
   "You are translating a project from {sourceLanguage} into {targetLanguage}.\n" +
   "Match the tone and formality of the provided examples. Return only the translated text — no explanations, no source text, no commentary."
 
-// VITE_CHAT_BASE points at codex-chat-worker (the in-repo replacement for the
+// VITE_CHAT_BASE points at aquilla-chat-worker (the in-repo replacement for the
 // legacy frontier-server `/api/v1/chat/completions` route). VITE_FRONTIER_BASE
 // is retained as the umbrella fallback so the E2E suite — which spins up a
 // mock LLM server and sets VITE_FRONTIER_BASE — still works without having to
 // know about the per-route split. CI wires VITE_CHAT_BASE per-branch (prod →
-// codex-chat-worker, anything else → codex-chat-worker-staging); see
+// aquilla-chat-worker, anything else → aquilla-chat-worker-staging); see
 // .github/workflows/deploy.yml.
 const FRONTIER_BASE_OVERRIDE =
   ((import.meta.env.VITE_FRONTIER_BASE as string | undefined)?.replace(/\/+$/, "")) || ""

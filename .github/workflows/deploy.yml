@@ -66,15 +66,17 @@ jobs:
         run: |
           echo "::notice::Skipping preview deploy (${{ steps.decide.outputs.reason }}). Add [preview] to a commit message to force one."
 
+      - uses: pnpm/action-setup@v4
+        if: steps.decide.outputs.deploy == 'true'
+        with:
+          version: 9
+
       - uses: actions/setup-node@v4
         if: steps.decide.outputs.deploy == 'true'
         with:
           node-version: 22
           cache: pnpm
 
-      - uses: pnpm/action-setup@v4
-        with:
-          version: 9
       - run: pnpm install --frozen-lockfile
         if: steps.decide.outputs.deploy == 'true'
 

@@ -1,28 +1,17 @@
-// Onboarding wizard — first-time user setup.
+// First-time onboarding wizard.
 //
-// Phase 3c stub. The source surface is
-// src/components/onboarding/OnboardingWizard.tsx + its child steps
-// (NameStep, PrivacyStep, ProjectStep, SignInStep, …). Porting the full
-// wizard requires moving the brand context, useAccounts hook, and the
-// posthog opt-in flow — Phase 3a / Phase 3b's domain.
+// The full wizard (NameStep / PrivacyStep / ProjectStep / SignInStep /
+// posthog opt-in) is deferred until the workspace SPA's brand context +
+// useAccounts hook are extracted into shared packages — see
+// src/components/onboarding/OnboardingWizard.tsx for the source surface.
+//
+// Until then, the route just bounces to the project list. Surfacing a
+// half-finished placeholder confuses real users more than no route at
+// all; the hard navigation also clears any stale wizard URL the user
+// might have bookmarked.
 
-import { Link } from "react-router-dom"
-import { Button } from "@aquilla/ui"
+import { Navigate } from "react-router-dom"
 
 export function OnboardingPage() {
-  return (
-    <div className="mx-auto max-w-2xl px-6 py-12">
-      <h1 className="text-2xl font-semibold">Welcome to Aquilla</h1>
-      <p className="mt-2 text-sm text-muted-foreground">
-        Phase 3c scaffold. The full onboarding wizard ports from
-        src/components/onboarding/ once Phase 3a packages the brand context
-        + useAccounts hook.
-      </p>
-      <div className="mt-6">
-        <Link to="/">
-          <Button>Skip to projects</Button>
-        </Link>
-      </div>
-    </div>
-  )
+  return <Navigate to="/" replace />
 }

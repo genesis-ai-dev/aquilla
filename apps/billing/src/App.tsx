@@ -31,16 +31,18 @@ function ComingSoonPage() {
         <CardHeader>
           <CardTitle>Billing &mdash; coming soon</CardTitle>
         </CardHeader>
-        <CardContent className="space-y-3 text-sm text-muted-foreground">
+        <CardContent className="space-y-4 text-sm text-muted-foreground">
           <p>
-            Aquilla is in early access and there&rsquo;s nothing to pay for yet.
-            Plans, usage tracking, and invoice history will land here as the
-            billing surface comes online.
+            Aquilla is in early access and there&rsquo;s nothing to pay for
+            yet. Plans, usage tracking, and invoice history will land here as
+            the billing surface comes online.
           </p>
-          <p>
-            See the spec at <code>specs/04-features/billing-and-tiers.md</code>{" "}
-            for the planned flows.
-          </p>
+          <a
+            href="/projects/"
+            className="inline-flex items-center text-sm text-primary hover:underline"
+          >
+            ← Back to projects
+          </a>
         </CardContent>
       </Card>
     </div>

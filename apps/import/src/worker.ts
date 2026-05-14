@@ -11,6 +11,7 @@
 // Phase 2c-β.
 
 import { assertEnvBindings } from "@aquilla/errors/env-assertion"
+import { rejectStaleAssetFallback } from "@aquilla/errors/asset-fallback"
 
 interface Env extends Record<string, unknown> {
   ENV: string
@@ -25,6 +26,6 @@ export default {
     // mis-bound preview Worker — easy trade.
     assertEnvBindings(env, env.ENV)
 
-    return env.ASSETS.fetch(req)
+    return rejectStaleAssetFallback(req, await env.ASSETS.fetch(req))
   },
 }

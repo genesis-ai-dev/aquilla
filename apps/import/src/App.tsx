@@ -27,9 +27,15 @@ export function App() {
           Import source documents
         </h1>
         <p className="text-base text-slate-600">
-          Full flow coming after Phase 2c-β. This page is a placeholder for
-          the deploy chassis.
+          Coming soon. Importing source documents into a project will live
+          here. For now, create a project and add files from the workspace.
         </p>
+        <a
+          href="/projects/"
+          className="mt-2 inline-flex items-center text-sm text-primary hover:underline"
+        >
+          ← Back to projects
+        </a>
       </header>
 
       <section className="rounded-lg border border-slate-200 bg-white p-6 shadow-sm">
@@ -69,8 +75,7 @@ export function App() {
           />
         </div>
         <p className="mt-3 text-xs text-slate-400">
-          Disabled until Phase 2c-β extracts the parser + import pipeline
-          into this app.
+          Standalone import is not wired up yet.
         </p>
       </section>
     </main>

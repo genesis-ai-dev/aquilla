@@ -18,10 +18,15 @@ export function App() {
           Legacy migration
         </h1>
         <p className="text-base text-slate-600">
-          Coming soon. GitLab integration is being phased out; this app will
-          surface a one-time migration tool for translators with legacy
-          projects.
+          Coming soon. A one-time migration tool for translators with
+          legacy GitLab-backed projects will live here.
         </p>
+        <a
+          href="/projects/"
+          className="mt-2 inline-flex items-center text-sm text-primary hover:underline"
+        >
+          ← Back to projects
+        </a>
       </header>
 
       <section className="rounded-lg border border-slate-200 bg-white p-6 shadow-sm">
@@ -64,7 +69,7 @@ export function App() {
           </div>
         </form>
         <p className="mt-3 text-xs text-slate-400">
-          Disabled until the migration importer is wired up after Phase 2c-β.
+          The migration importer is not wired up yet.
         </p>
       </section>
     </main>

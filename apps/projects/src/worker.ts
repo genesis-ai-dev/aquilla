@@ -14,6 +14,7 @@ import {
   assertEnvBindings,
   assertNotPreviewInProd,
 } from "@aquilla/errors/env-assertion"
+import { rejectStaleAssetFallback } from "@aquilla/errors/asset-fallback"
 
 // EnvLike from @aquilla/errors expects Record<string, unknown>; declare Env
 // as an indexable type so it satisfies that signature while still being
@@ -40,6 +41,6 @@ export default {
     // here intact; we don't have to strip the prefix ourselves because
     // the ASSETS binding is configured with directory = "./dist" which
     // already contains the prefix-aware Vite build output.
-    return env.ASSETS.fetch(req)
+    return rejectStaleAssetFallback(req, await env.ASSETS.fetch(req))
   },
 }

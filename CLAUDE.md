@@ -90,6 +90,20 @@ React 19 + Tailwind v4 (via `@tailwindcss/vite`) + shadcn/ui (`components.json`,
 
 `docs/SPEC.md` describes the VS Code extension this app was extracted from — useful for understanding the `.codex` notebook / paired-source / LLM-context concepts that this app inherits. Per-milestone specs and implementation plans live under `docs/superpowers/specs/` and `docs/superpowers/plans/` (M1–M10 covering import, editor, health, rules, export, search+backtranslation, comments, snapshots, richtext/Yjs migration, P2P sync). When working on a feature that has a spec there, read it first — the schema decisions (especially `translatedXml` vs `translated`, `SnapshotFile.ydocState`, `schemaVersion` on snapshots) were made deliberately and are load-bearing for migrations.
 
+## Phase 2 data flow (in progress)
+
+Phase 2 migrates the client off Y.Doc reads onto the sync-worker's D1 projection (per Aquilla spec AD-2 / AD-3 v1 thin client). Status as of phase 2a:
+
+- **Reads** — hooks fetch from the sync-worker via `src/lib/sync/cells-read.ts` (`fetchProjectFiles`, `fetchFile`, `fetchFileCells`, `fetchAllFileCells`). Auth-worker still owns project-level data (`/api/v2/projects/*`); chat-worker still owns chat. Types for the sync-worker's read API live in `src/lib/sync/cells-read-types.ts` (`FileSummary`, `CellRow`, `CellsPage`) — they move to `packages/data-model` in Phase 3.
+- **Migrated this phase (2a):** `useCells` is now D1-backed. Signature changed to `useCells({ projectId, fileId, getToken, ... })` returning `{ cells, revalidate, isLoading, isError }`. Refetches on mount, on tab focus / visibility return, and on manual `revalidate()`. Single production caller is `ProjectWorkspace.tsx`.
+- **Still on Y.Doc (broken on `dev`, Phase 2b's problem):** `useFileDoc`, `useCellHistory`, `useComments`, `useSearchIndex`, `useCellEditHistory`, plus the Tiptap editor binding via `@tiptap/extension-collaboration`. The fields these hooks populate (`history`, `threads`, `validationHistory`, `attachments`, `audioTimings`, …) come back as defaults from `useCells` in Phase 2a — consumers compile and render but lose that data until 2b.
+- **Writes still go through Y.Doc** until Phase 2c. After a known write, callers should invoke `revalidate()` so the projection re-loads. `revalidate()` is best-effort: a write that lands in the local Y.Doc but hasn't propagated to the server's projection won't show up on refetch. Phase 2c replaces Y.Doc writes with the AD-3 outbox + cell-event POSTs and removes Y.Doc entirely.
+- **New sync-worker read routes** (added 2a; mounted in `sync-worker/src/index.ts`):
+  - `GET /api/v1/projects/:projectId/files` → list with cell/word/last-edit rollups
+  - `GET /api/v1/projects/:projectId/files/:fileId` → single file row
+  - `GET /api/v1/projects/:projectId/files/:fileId/cells?side=&limit=&cursor=` → cells in anchor-chain order (AD-2). When `side` is omitted, the response carries both source and target rows; the client pairs by `cell_id` (AD-9).
+  - All three auth with a sync-token JWT (`Authorization: Bearer …`) scoped to `:projectId`. Membership is implicit in the JWT — auth-worker only mints tokens for project members.
+
 ## Backend stack
 
 Codex-web hosts its own Cloudflare Workers in this repo, independent of the older `frontier-server` (which keeps serving the codex-editor VS Code extension):

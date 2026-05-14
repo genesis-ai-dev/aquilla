@@ -73,13 +73,32 @@ export function rejectStaleAssetFallback(
   return res
 }
 
+/** How long Cloudflare may edge-cache the SPA shell HTML.
+ *
+ *  Tradeoff:
+ *  - `no-store`: every request hits the Worker — wasteful but always fresh.
+ *  - long TTL: great perf, but stale HTML after a deploy points at
+ *    asset hashes that no longer exist → 404 chain (caught by
+ *    `rejectStaleAssetFallback`, which forces a hard-reload, but that's
+ *    a bad UX if it persists).
+ *  - 60s (chosen): users on a fresh load between deploys get the cache
+ *    hit; the post-deploy stale window is at most a minute. If a
+ *    visitor is caught in that window, asset-fallback returns 404 and
+ *    the browser hard-reloads.
+ *
+ *  If a deploy needs to invalidate immediately, purge the CF cache
+ *  manually (dashboard → aquilla.app → Caching → Purge Everything) or
+ *  add a `cache_purge`-scoped token to CI and call the purge API after
+ *  `wrangler deploy`. */
+const HTML_EDGE_TTL_SECONDS = 60
+
 function rewriteHtmlCacheHeaders(src: Headers): Headers {
   const h = new Headers(src)
-  h.set("cache-control", "no-store, no-cache, must-revalidate, max-age=0")
-  // Cloudflare-specific: short-circuit edge caching for this response.
-  h.set("cdn-cache-control", "no-store")
-  // Belt-and-suspenders: kill Pragma + remove any Expires that survived.
-  h.set("pragma", "no-cache")
-  h.delete("expires")
+  // Browser: revalidate every navigation. ETag still allows 304s.
+  h.set("cache-control", "public, max-age=0, must-revalidate")
+  // CDN: cache for HTML_EDGE_TTL_SECONDS. cdn-cache-control overrides
+  // cache-control specifically at the Cloudflare edge — without it,
+  // CF would also see max-age=0 and refuse to cache.
+  h.set("cdn-cache-control", `public, max-age=${HTML_EDGE_TTL_SECONDS}`)
   return h
 }

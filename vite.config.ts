@@ -118,6 +118,12 @@ export default defineConfig(({ mode }) => ({
       "chat-worker/**",
       "signaling/**",
       "sync-worker/**",
+      // Apps + packages have their own vitest configs + workspace-aware
+      // resolution. Running their tests from root would need workspace
+      // package resolution (e.g. @aquilla/auth-client) which the root
+      // node_modules doesn't carry — CI runs per-app tests separately.
+      "apps/**",
+      "packages/**",
     ],
   },
 }))

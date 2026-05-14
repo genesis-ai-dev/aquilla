@@ -8,7 +8,7 @@
 // legacy frontier-server fallback was removed on 2026-05-13 when these routes
 // were ported into the codex-web identity worker. Phase 3e then relocated
 // that worker from auth-worker/ to apps/frontier-server/ and renamed the
-// Cloudflare worker from codex-auth-worker to aquilla-frontier-server
+// Cloudflare worker from aquilla-frontier-server to aquilla-frontier-server
 // (prod: aquilla-prod-frontier-server; staging: aquilla-dev-frontier-server).
 
 const AUTH_DEFAULT = "https://aquilla-prod-frontier-server.blue-darkness-7674.workers.dev"

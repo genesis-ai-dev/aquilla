@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs"
 import { resolve } from "node:path"
-import { BRAND_DATA } from "../src/branding/brands/data"
-import type { BrandId } from "../src/branding/types"
+import { BRAND_DATA } from "../apps/workspace/src/branding/brands/data"
+import type { BrandId } from "../apps/workspace/src/branding/types"
 
 const brandId = (process.argv[2] ?? "codex") as BrandId
 const brand = BRAND_DATA[brandId]

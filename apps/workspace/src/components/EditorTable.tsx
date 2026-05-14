@@ -11,13 +11,14 @@ import type { CellData } from "@/hooks/useCells"
 import type { ScoredPair } from "@/lib/search/dual-index"
 import type { TranslationRule, RuleInfraction, ProjectRecord, CellHealthBreakdown } from "@/lib/parsers/types"
 import { useProjectPermissions } from "@/hooks/useProjectPermissions"
-import { appendCellHistory, recordHistoryEntry, toggleCellValidation } from "@/hooks/useCellHistory"
-import { commitCellEdit } from "@/lib/codex-editor/edits/commit-cell-edit"
-import { getPlainText, getFragmentHtml } from "@/lib/richtext/translated-xml"
+import { toggleCellValidation } from "@/hooks/useCellHistory"
+import { getFragmentHtml } from "@/lib/richtext/translated-xml"
+import { emitTargetCellCommit, emitCellValidate, emitCellUnvalidate } from "@/lib/sync/events-emit"
 import { ExamplePanel } from "./ExamplePanel"
 import { HighlightedText, buildHighlightsFromExamples } from "./HighlightedText"
 import { HealthRing } from "./HealthRing"
 import { HealthBreakdown } from "./HealthBreakdown/HealthBreakdown"
+import { StaleSourceIndicator } from "./StaleSourceIndicator"
 import { BreakdownContent } from "./HealthBreakdown/BreakdownContent"
 import { TranslatedEditor } from "./TranslatedEditor"
 import { CellWaveform } from "./CellWaveform"
@@ -244,6 +245,20 @@ interface EditorTableProps {
   cells: CellData[]
   doc: Y.Doc
   username: string
+  /** Called after a successful `target.cell.commit` enqueue so the parent
+   *  refetches the cells projection. */
+  onCellCommitted?: () => void
+  /** Map of cellId → presence holder label. When present, the cell editor
+   *  goes read-only with an "Alice is editing" banner. */
+  cellLockHolders?: ReadonlyMap<string, string>
+  /** Cell ids whose remote value changed while this client held the focus
+   *  lock — surfaces the discard-and-reload banner. */
+  cellsWithRemoteChange?: ReadonlySet<string>
+  /** Parent-managed focus claim/release (per-cell). */
+  onClaimCell?: (cellId: string) => void
+  onReleaseCell?: (cellId: string) => void
+  /** Drop the "remote-changed-while-editing" flag for a cell. */
+  onAckRemoteChange?: (cellId: string) => void
   isCompletionConfigured: boolean
   isCompletionAvailable: boolean
   completing: Map<string, string>
@@ -280,6 +295,11 @@ interface EditorTableProps {
   onOpenRecording?: (cellId: string) => void
   /** Re-read the project record from IDB after a settings change (e.g. voice library edits). */
   onProjectChanged?: () => void
+  /** Phase 5 / AD-9 — set of cell ids whose source has advanced since the
+   *  translator's last commit. When provided, each row renders the small
+   *  StaleSourceIndicator badge next to its validation status. Parent fetches
+   *  once per file via `useStaleSourceCells` so we don't issue N requests. */
+  staleCellIds?: ReadonlySet<string>
 }
 
 export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(function EditorTable({
@@ -294,6 +314,11 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   lineNumbersEnabled, cellLabelsEnabled, sourceTextDirection, targetTextDirection,
   isAnonymous, breakdownMap, onJumpToCell, onAiSetupNeeded, onOpenRecording,
   onProjectChanged,
+  onCellCommitted,
+  cellLockHolders,
+  cellsWithRemoteChange,
+  onClaimCell, onReleaseCell, onAckRemoteChange,
+  staleCellIds,
 }, ref) {
   const permissions = useProjectPermissions(project)
   const canEdit = permissions.canEditContent
@@ -613,9 +638,16 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
               <MemoizedRow
                 project={project}
                 cell={cell}
+                isStaleSource={staleCellIds?.has(cell.id) ?? false}
                 doc={doc}
                 username={username}
                 editable={canEdit}
+                onCellCommitted={onCellCommitted}
+                lockHolderLabel={cellLockHolders?.get(cell.id) ?? null}
+                remoteChangedWhileFocused={cellsWithRemoteChange?.has(cell.id) ?? false}
+                onClaimCell={onClaimCell}
+                onReleaseCell={onReleaseCell}
+                onAckRemoteChange={onAckRemoteChange}
                 isCompletionConfigured={isCompletionConfigured}
                 isCompletionAvailable={isCompletionAvailable}
                 examples={examples}
@@ -680,6 +712,16 @@ interface MemoizedRowProps {
   doc: Y.Doc
   username: string
   editable: boolean
+  /** Phase 5 / AD-9: source has advanced since this target was last committed.
+   *  Resolved once per file by the parent (membership look-up) so this prop
+   *  is just a stable boolean — preserves the row's React.memo invariant. */
+  isStaleSource: boolean
+  onCellCommitted?: () => void
+  lockHolderLabel: string | null
+  remoteChangedWhileFocused: boolean
+  onClaimCell?: (cellId: string) => void
+  onReleaseCell?: (cellId: string) => void
+  onAckRemoteChange?: (cellId: string) => void
   isCompletionConfigured: boolean
   isCompletionAvailable: boolean
   examples: Map<string, ScoredPair[]>
@@ -738,6 +780,9 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
     onSeekToCue, lineNumbersEnabled, cellLabelsEnabled,
     sourceTextDirection, targetTextDirection, isAnonymous,
     onJumpToCell, onAiSetupNeeded, onOpenRecording, onProjectChanged,
+    onCellCommitted, lockHolderLabel, remoteChangedWhileFocused,
+    onClaimCell, onReleaseCell, onAckRemoteChange,
+    isStaleSource,
   } = props
 
   const cellId = cell.id
@@ -788,6 +833,7 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
         doc={doc}
         username={username}
         editable={editable}
+        isStaleSource={isStaleSource}
         isCompletionConfigured={isCompletionConfigured}
         isCompletionAvailable={isCompletionAvailable}
         isLoading={isLoading}
@@ -827,6 +873,12 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
         onDragEnter={handleDragEnter}
         onSelectionPointerDown={handleSelectionPointerDown}
         getVoiceTakeCells={getVoiceTakeCells}
+        onCellCommitted={onCellCommitted}
+        lockHolderLabel={lockHolderLabel}
+        remoteChangedWhileFocused={remoteChangedWhileFocused}
+        onClaimCell={onClaimCell}
+        onReleaseCell={onReleaseCell}
+        onAckRemoteChange={onAckRemoteChange}
       />
     </div>
   )
@@ -838,6 +890,16 @@ interface EditorRowProps {
   doc: Y.Doc
   username: string
   editable: boolean
+  /** Phase 5 / AD-9 — true when the source has advanced since the last
+   *  target commit. Renders a small warning badge next to the validation
+   *  status. Computed once-per-file by the parent. */
+  isStaleSource: boolean
+  onCellCommitted?: () => void
+  lockHolderLabel: string | null
+  remoteChangedWhileFocused: boolean
+  onClaimCell?: (cellId: string) => void
+  onReleaseCell?: (cellId: string) => void
+  onAckRemoteChange?: (cellId: string) => void
   isCompletionConfigured: boolean
   isCompletionAvailable: boolean
   isLoading: boolean
@@ -886,11 +948,14 @@ function EditorRow({
   onCompleteSingle, onInfractionClick,
   isBacktranslationConfigured, isBacktranslating, backtranslationError, onBacktranslate,
   openCommentCount, onOpenComments, onOpenHistory,
-  syncProvider, collabUser,
+  syncProvider: _syncProvider, collabUser: _collabUser,
   isActiveCue: _isActiveCue, onSeekToCue,
   onDragStart, onDragEnter, onSelectionPointerDown,
   rowIndex, lineNumbersEnabled, cellLabelsEnabled, sourceTextDirection, targetTextDirection, gridCols,
   isAnonymous, breakdown, onJumpToCell, onAiSetupNeeded, onOpenRecording,
+  onCellCommitted, lockHolderLabel, remoteChangedWhileFocused,
+  onClaimCell, onReleaseCell, onAckRemoteChange,
+  isStaleSource,
 }: EditorRowProps) {
   const [openRuleId, setOpenRuleId] = useState<string | null>(null)
   const [openRuleAnchor, setOpenRuleAnchor] = useState<HTMLElement | null>(null)
@@ -936,95 +1001,49 @@ function EditorRow({
     return out
   }, [cellInfractions, waivedInfractions, waivedRuleIds, ruleSeverity])
 
-  const targetRanges = useMemo<RangeHighlight[]>(() => {
-    // Target side is handled by the ProseMirror plugin inside TranslatedEditor
-    // when the cell has a translatedXml fragment. Only produce ranges for the
-    // plain-textarea fallback case.
-    if (cell.translatedXml) return []
-    const out: RangeHighlight[] = []
-    const all = [...cellInfractions, ...waivedInfractions]
-    for (const inf of all) {
-      const waived = waivedRuleIds.has(inf.ruleId)
-      const severity = ruleSeverity.get(inf.ruleId) ?? "major"
-      for (const span of inf.spans) {
-        if (span.side !== "target") continue
-        out.push({
-          start: span.start, end: span.end, ruleId: inf.ruleId,
-          kind: waived ? "violation-waived" : (severity === "major" ? "violation-major" : "violation-minor"),
-        })
-      }
-    }
-    return out
-  }, [cellInfractions, waivedInfractions, waivedRuleIds, ruleSeverity, cell.translatedXml])
+  // Phase 2c-β: target-side rendering of violations happens via the
+  // ProseMirror plugin inside TranslatedEditor, so we no longer compute
+  // textarea-overlay ranges. Source-side ranges still flow through
+  // HighlightedText below.
+  void waivedRuleIds; void cellInfractions; void waivedInfractions; void ruleSeverity
 
-  function handleChange(e: React.ChangeEvent<HTMLTextAreaElement>) {
-    // Typing records an edit; validation is a separate, deliberate action
-    // expressed through the Validate button.
-    appendCellHistory(doc, cell.id, {
-      value: e.target.value,
-      source: "human",
+  // Editor commit path. The plain TipTap editor (TranslatedEditor) calls
+  // this on idle/blur/release with the current `{value, valueHtml}` snapshot.
+  // We emit a `target.cell.commit` event chained off cell.targetEventId
+  // (AD-2) and pinned to cell.sourceEventId (AD-9 staleness pin), then ping
+  // the parent to revalidate useCells so the projection lands.
+  const handleEditorCommit = useCallback(({ value, valueHtml }: { value: string; valueHtml: string }) => {
+    if (!editable) return
+    if (!project.id) return
+    void emitTargetCellCommit({
+      projectId: project.id,
+      fileId: cell.fileId,
+      cellId: cell.id,
+      parentId: cell.targetEventId ?? null,
+      sourceEventId: cell.sourceEventId ?? null,
+      value,
+      valueHtml,
       author: username,
-      validated: false,
+    }).then(() => {
+      onCellCommitted?.()
+    }).catch((err) => {
+      console.warn("[editor-commit] enqueue failed:", err)
     })
-  }
+  }, [editable, project.id, cell.fileId, cell.id, cell.targetEventId, cell.sourceEventId, username, onCellCommitted])
 
-  // Called when the TipTap editor loses focus. Capture the current fragment
-  // text and append a history entry if it differs meaningfully from the most
-  // recent entry. Focus-triggered (not keystroke-triggered) so each editing
-  // session produces at most one entry regardless of typing length.
-  function handleEditorBlur() {
-    const cellsMap = doc.getMap("cells")
-    const yCell = cellsMap.get(cell.id) as Y.Map<unknown> | undefined
-    if (!yCell) return
-    const frag = yCell.get("translatedXml") as Y.XmlFragment | undefined
-    if (!frag) return
-    const currentText = getPlainText(frag)
-    const lastEntry = cell.history[cell.history.length - 1]
+  const handleEditorFocus = useCallback(() => {
+    onClaimCell?.(cell.id)
+    onAckRemoteChange?.(cell.id)
+  }, [cell.id, onClaimCell, onAckRemoteChange])
 
-    // Don't record a no-op empty
-    if (!currentText.trim() && cell.history.length === 0) return
-    if (lastEntry && lastEntry.value === currentText) return
+  const handleEditorBlurOuter = useCallback(() => {
+    onReleaseCell?.(cell.id)
+  }, [cell.id, onReleaseCell])
 
-    // Collapse rapid same-author edits: if the last entry is from the same
-    // author within the past 5 seconds and the text changed only slightly,
-    // OVERWRITE the last entry's value/timestamp in place instead of appending
-    // a new one. This guards against accidental rapid blur/focus cycles that
-    // would otherwise spam history.
-    if (
-      lastEntry &&
-      lastEntry.author === username &&
-      lastEntry.source === "human" &&
-      Date.now() - new Date(lastEntry.timestamp).getTime() < 5_000
-    ) {
-      // Update the last entry by removing + re-adding (Y.Array doesn't have set)
-      const historyArr = yCell.get("history") as Y.Array<import("@/lib/parsers/types").CellHistoryEntry> | undefined
-      if (historyArr && historyArr.length > 0) {
-        doc.transact(() => {
-          historyArr.delete(historyArr.length - 1, 1)
-          historyArr.push([{
-            value: currentText,
-            source: "human",
-            author: username,
-            validated: false,
-            timestamp: new Date().toISOString(),
-          }])
-        })
-        commitCellEdit(doc, cell.id, username, ["value"], currentText, "human")
-        return
-      }
-    }
-
-    // Record the edit in both surfaces. cell.edits is the Yjs-native edit
-    // ledger; cell.history feeds the TipTap binding. Neither carries a
-    // validator — validation is strictly opt-in via the Validate button.
-    recordHistoryEntry(doc, cell.id, {
-      value: currentText,
-      source: "human",
-      author: username,
-      validated: false,
-    })
-    commitCellEdit(doc, cell.id, username, ["value"], currentText, "human")
-  }
+  const handleDiscardLocalAndReload = useCallback(() => {
+    onAckRemoteChange?.(cell.id)
+    onCellCommitted?.()
+  }, [cell.id, onAckRemoteChange, onCellCommitted])
 
   // Detect formatting loss: source has inline style marks that the target doesn't.
   const sourceHasFormatting = Boolean(cell.originalHtml && /<(b|strong|i|em|u|s|strike|del|code)\b/i.test(cell.originalHtml))
@@ -1165,6 +1184,17 @@ function EditorRow({
     if (details.reason === "trigger-press") {
       if (editable && !isSelfValidated) {
         toggleCellValidation(doc, cell.id, username, true)
+        const editEventId = cell.targetEventId ?? null
+        if (project.id && editEventId) {
+          void emitCellValidate({
+            projectId: project.id,
+            fileId: cell.fileId,
+            cellId: cell.id,
+            editEventId,
+            author: username,
+          }).then(() => { onCellCommitted?.() })
+            .catch((err) => console.warn("[validate] emit failed:", err))
+        }
         details.cancel()
         return
       }
@@ -1253,6 +1283,17 @@ function EditorRow({
                       title="Remove your validation"
                       onClick={() => {
                         toggleCellValidation(doc, cell.id, username, false)
+                        const editEventId = cell.targetEventId ?? null
+                        if (project.id && editEventId) {
+                          void emitCellUnvalidate({
+                            projectId: project.id,
+                            fileId: cell.fileId,
+                            cellId: cell.id,
+                            editEventId,
+                            author: username,
+                          }).then(() => { onCellCommitted?.() })
+                            .catch((err) => console.warn("[unvalidate] emit failed:", err))
+                        }
                         setValidationPopoverOpen(false)
                       }}
                     >
@@ -1278,6 +1319,18 @@ function EditorRow({
       >
         <span className="sr-only">Breakdown</span>
       </HealthBreakdown>
+    )}
+    {/* Phase 5 / AD-9: source-changed indicator. Parent-managed mode —
+        membership lookup happens once per file at ProjectWorkspace and is
+        flattened to a per-row boolean here, so we pass a one-element set
+        the indicator resolves trivially. Skipping the component entirely
+        when !isStaleSource keeps the common (non-stale) case zero-cost
+        and avoids the per-row allocation. */}
+    {isStaleSource && (
+      <StaleSourceIndicator
+        cellId={cell.id}
+        staleCellIds={new Set([cell.id])}
+      />
     )}
     {infractionCount > 0 && (
       <span
@@ -1588,43 +1641,28 @@ function EditorRow({
             )}
           </button>
           <div className="flex flex-1 flex-col">
-            {cell.translatedXml ? (
-              <div className="flex min-h-[40px] flex-1 flex-col">
-                <TranslatedEditor
-                  fragment={cell.translatedXml}
-                  className="w-full"
-                  syncProvider={syncProvider}
-                  user={collabUser}
-                  onBlur={handleEditorBlur}
-                  editable={editable}
-                  infractions={[...cellInfractions, ...waivedInfractions]}
-                  ruleSeverity={ruleSeverity}
-                  waivedRuleIds={waivedRuleIds}
-                  onRuleClick={openInlineRule}
-                  audioTimings={cellAudioTimings}
-                  audioCurrentTime={hasAudio ? audioController.currentTime : undefined}
-                  onSeekToTime={hasAudio ? audioController.seek : undefined}
-                />
-              </div>
-            ) : (
-              <div className="relative flex min-h-[40px] flex-1 flex-col">
-                <textarea
-                  className="w-full flex-1 resize-none rounded-sm bg-transparent px-2 py-1 text-sm leading-relaxed transition-colors hover:bg-muted/40 focus:bg-muted/30 focus:outline-none disabled:cursor-not-allowed disabled:opacity-70"
-                  value={cell.translated}
-                  onChange={handleChange}
-                  readOnly={!editable}
-                  rows={Math.max(2, Math.ceil(cell.original.length / 50))}
-                />
-                {targetRanges.length > 0 && (
-                  <div
-                    className="pointer-events-none absolute inset-0 whitespace-pre-wrap break-words px-2 py-1 text-sm"
-                    aria-hidden
-                  >
-                    <HighlightedText text={cell.translated} ranges={targetRanges} />
-                  </div>
-                )}
-              </div>
-            )}
+            <div className="flex min-h-[40px] flex-1 flex-col">
+              <TranslatedEditor
+                cellId={cell.id}
+                initialPlain={cell.translated}
+                initialHtml={cell.translatedHtml}
+                onCommit={handleEditorCommit}
+                onFocus={handleEditorFocus}
+                onBlur={handleEditorBlurOuter}
+                className="w-full"
+                editable={editable}
+                heldByLabel={lockHolderLabel}
+                infractions={[...cellInfractions, ...waivedInfractions]}
+                ruleSeverity={ruleSeverity}
+                waivedRuleIds={waivedRuleIds}
+                onRuleClick={openInlineRule}
+                audioTimings={cellAudioTimings}
+                audioCurrentTime={hasAudio ? audioController.currentTime : undefined}
+                onSeekToTime={hasAudio ? audioController.seek : undefined}
+                remoteChangedDuringEdit={remoteChangedWhileFocused}
+                onDiscardLocal={handleDiscardLocalAndReload}
+              />
+            </div>
             {error && <p className="mt-0.5 text-xs text-destructive">{error}</p>}
           </div>
         </div>

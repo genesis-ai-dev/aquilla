@@ -1,17 +1,15 @@
-// Phase 2a: useCells reads from the sync-worker `cells` projection (D1) via
-// HTTP. Earlier this hook subscribed to a Y.Doc and reflected its mutations
-// directly into React state; under AD-2 the event log is the source of truth
-// and the projection is the load path (AD-3 v1 thin client). Writes still
-// flow through Y.Doc in Phase 2a — `revalidate()` lets callers refetch after
-// a known write. Phase 2c removes the Y.Doc and switches writes to the
-// outbox.
+// Phase 2c-β: useCells reads from the sync-worker `cells` projection (D1)
+// via HTTP and surfaces AD-2 chain pointers (`event_id`, `source_event_id`)
+// on each cell so the editor's commit path can pin `parentId` + `sourceEventId`
+// at emit time. Writes flow through the outbox via `events-emit.ts`;
+// `revalidate()` is called after a known write or on a remote
+// `event.applied` WS broadcast.
 //
 // The public return type (`CellData`) is preserved so existing consumers
-// (EditorTable, CellRow, RuleDrawer, SelectionBar, HistoryDrawer, …) keep
-// compiling. Fields populated only by the Y.Doc (history, threads,
-// attachments, audio timings, validation edits) come back as defaults until
-// the respective hooks migrate in Phase 2b. That's deliberate — Phase 2a
-// unblocks "see the cells render at all," not full feature parity.
+// keep compiling. Fields whose event grammars are deferred to v1.x — threads,
+// validation edit history, attachments, audio timings, waivers — come back
+// as defaults; the residual Y.Doc-coupled feature surfaces that read them
+// are scheduled for rip in Phase 2c-γ.
 
 import { useCallback, useEffect, useRef, useState } from "react"
 import type * as Y from "yjs"
@@ -31,11 +29,21 @@ export interface CellData {
   original: string
   originalHtml?: string
   translated: string
-  /** Phase 2a: not populated by useCells — the Tiptap editor still reads
-   *  from the per-file Y.Doc via useFileDoc. Phase 2c removes the Y.Doc
-   *  entirely. Consumers that need the live fragment should look it up on
-   *  the doc directly until then. */
+  /** Phase 2c-β: residual legacy field. The plain-TipTap editor reads from
+   *  `translatedHtml` / `translated`. Y.Doc-dependent feature paths still
+   *  read this; it stays optional until the Phase 2c-γ rip lands. */
   translatedXml?: Y.XmlFragment
+  /** Rich-text variant of the target value, populated from `cells.value_html`.
+   *  Hydrates the plain TipTap editor on mount. */
+  translatedHtml?: string
+  /** AD-2 chain head for the target row (most recent winning event_id). Used
+   *  as `parentId` on the next `target.cell.commit` emit. Undefined when no
+   *  target row has been projected yet (genesis target write). */
+  targetEventId?: string
+  /** AD-9 staleness pin observed at the last target commit. */
+  targetSourceEventId?: string | null
+  /** Source row's `event_id` — pinned into `target.cell.commit.payload.sourceEventId`. */
+  sourceEventId?: string
   context: string
   group: string
   /** Optional section label for navigation/progress. */
@@ -123,7 +131,12 @@ function buildCellData(
     id: cellId,
     fileId,
     original,
+    originalHtml: source?.valueHtml ?? undefined,
     translated,
+    translatedHtml: target?.valueHtml ?? undefined,
+    sourceEventId: source?.eventId,
+    targetEventId: target?.eventId,
+    targetSourceEventId: target?.sourceEventId ?? null,
     context: "",
     group: target?.canonicalRef ?? source?.canonicalRef ?? "",
     type: target?.type ?? source?.type ?? "text",

@@ -19,7 +19,7 @@
 //   pr-123.aquilla.app               → .aquilla.app
 //   dev.aquilla.app                  → .aquilla.app
 //   aquilla.app                      → .aquilla.app
-//   foo.codex-web-4ih.pages.dev      → .codex-web-4ih.pages.dev
+//   foo.aquilla-web-4ih.pages.dev      → .aquilla-web-4ih.pages.dev
 //
 // The derivation is purely string-shape; it does not consult the public
 // suffix list (we don't ship one to the browser). The convention works for

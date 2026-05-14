@@ -10,7 +10,7 @@ Before claiming any feature is complete:
 2. **If your change touches a journey listed in `e2e/JOURNEYS.md`, extend the matching spec OR add a new spec under `e2e/specs/<area>/`.**
 3. **New user-facing journey = new row in `e2e/JOURNEYS.md` AND a new spec.**
 4. **Reuse helpers** in `e2e/helpers/page-objects/`. Do not duplicate selectors. If no page object fits, add one.
-5. Tests run against **in-repo `wrangler dev` instances** of `codex-auth-worker` + `codex-sync-worker` against a local D1 (schemas vendored under `e2e/sql/`). No external repo checkout required. See `e2e/README.md` for setup.
+5. Tests run against **in-repo `wrangler dev` instances** of `codex-auth-worker` + `aquilla-sync-worker` against a local D1 (schemas vendored under `e2e/sql/`). No external repo checkout required. See `e2e/README.md` for setup.
 
 ## Conventions
 

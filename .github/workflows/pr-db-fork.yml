@@ -67,7 +67,7 @@ jobs:
 
             - D1: `${{ steps.fork.outputs.db_name }}` (forked from staging schema; new migrations applied)
             - Worker: ${{ steps.fork.outputs.worker_url }}
-            - R2: shared `codex-snapshots-staging` bucket, namespaced under `pr-${{ github.event.pull_request.number }}/`
+            - R2: shared `aquilla-snapshots-staging` bucket, namespaced under `pr-${{ github.event.pull_request.number }}/`
 
             The PR's preview Pages bundle is built with `VITE_SYNC_WORKER_HOST`
             pointing at the worker above. Auth is disabled on the PR variant

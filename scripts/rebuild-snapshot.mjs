@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// One-shot snapshot rebuilder for codex-sync-worker R2 snapshots.
+// One-shot snapshot rebuilder for aquilla-sync-worker R2 snapshots.
 //
 // Why: a Yjs doc that accumulated tens of thousands of per-cell edits/history
 // entries can encode to >10 MiB. The Cloudflare DO that hosts it ends up
@@ -14,9 +14,9 @@
 // doesn't apply. Pull the bloated snapshot from R2, run this, push back.
 //
 // Usage:
-//   wrangler r2 object get codex-snapshots/projects/{P}/files/{F}/snapshot.bin --file old.bin
+//   wrangler r2 object get aquilla-snapshots/projects/{P}/files/{F}/snapshot.bin --file old.bin
 //   node scripts/rebuild-snapshot.mjs old.bin new.bin
-//   wrangler r2 object put codex-snapshots/projects/{P}/files/{F}/snapshot.bin --file new.bin
+//   wrangler r2 object put aquilla-snapshots/projects/{P}/files/{F}/snapshot.bin --file new.bin
 //
 // You should also delete the file's tail/ prefix in R2 after the upload —
 // tails reference the old doc's clientID/clock space and won't merge cleanly

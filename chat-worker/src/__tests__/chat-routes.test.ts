@@ -330,7 +330,7 @@ describe("GET / and /healthz", () => {
     const res = await app.request("/", { method: "GET" }, makeEnv(db))
     expect(res.status).toBe(200)
     const body = (await res.json()) as { name: string; routes: string[] }
-    expect(body.name).toBe("codex-chat-worker")
+    expect(body.name).toBe("aquilla-chat-worker")
     expect(body.routes).toContain("/api/v1/chat/completions")
   })
 

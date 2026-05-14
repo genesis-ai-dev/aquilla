@@ -108,7 +108,7 @@ jobs:
           # token can upload Workers/assets, but it intentionally does not
           # have zone route mutation permission, so strip route declarations
           # from the temporary checkout before deploying.
-          perl -0pi -e 's/^\s*routes\s*=\s*\[[^\n]*\]\n//mg' wrangler.toml
+          perl -0pi -e 's/^\s*routes\s*=.*\n//mg' wrangler.toml
           pnpm exec wrangler deploy --env=production
 
       - name: Smoke-test prod URL

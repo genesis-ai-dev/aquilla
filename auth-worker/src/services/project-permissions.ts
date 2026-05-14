@@ -132,3 +132,56 @@ async function resolveProjectRoleInternal(
 
   return null
 }
+
+/**
+ * Source-project access check for linked target projects (AD-9 /
+ * 03-data-model.md §"Source-project linking", §AD-9 "Permissions").
+ *
+ * When a project T is linked to upstream source project U via
+ * `projects.source_project_id`, members of T receive an implicit read on
+ * U's source-side cells — but no other rights on U.
+ *
+ * Returns true iff the user can read source cells belonging to
+ * `sourceProjectId` while operating in the context of `viewerProjectId`.
+ * The two valid paths:
+ *   1. User is a member of `sourceProjectId` directly (any role) — full
+ *      project read access trivially covers source.
+ *   2. `viewerProjectId.source_project_id == sourceProjectId` AND user is
+ *      a member of `viewerProjectId` — implicit read-only access via the
+ *      link.
+ *
+ * Note: reading source from upstream does NOT grant any other rights on
+ * upstream — callers must NOT use this resolver as a substitute for
+ * resolveProjectRole when operating on upstream's target side, comments,
+ * settings, etc.
+ */
+export async function canReadSourceCells(
+  env: Env,
+  user: AuthUser,
+  args: { sourceProjectId: string; viewerProjectId: string },
+): Promise<boolean> {
+  // Path 1: direct membership in the source project.
+  const direct = await resolveProjectRole(env, user, args.sourceProjectId)
+  if (direct) return true
+
+  // Path 2: viewer project is linked to this source AND the user is a
+  // member of the viewer project.
+  if (args.viewerProjectId === args.sourceProjectId) {
+    // Trivial loop — viewer == source. Path 1 above would have caught
+    // genuine access; if we got here, user isn't a member, so false.
+    return false
+  }
+
+  const viewer = await env.AQUILLA_DB.prepare(
+    "SELECT source_project_id FROM projects WHERE id = ?",
+  )
+    .bind(args.viewerProjectId)
+    .first<{ source_project_id: string | null }>()
+
+  if (!viewer || viewer.source_project_id !== args.sourceProjectId) {
+    return false
+  }
+
+  const viewerRole = await resolveProjectRole(env, user, args.viewerProjectId)
+  return viewerRole != null
+}

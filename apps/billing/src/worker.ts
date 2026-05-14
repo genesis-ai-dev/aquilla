@@ -2,6 +2,7 @@ import {
   assertEnvBindings,
   assertNotPreviewInProd,
 } from "@aquilla/errors/env-assertion"
+import { rejectStaleAssetFallback } from "@aquilla/errors/asset-fallback"
 
 interface Env extends Record<string, unknown> {
   ENV: string
@@ -18,6 +19,6 @@ export default {
     if (PRODUCTION_HOSTS.has(url.hostname)) {
       assertNotPreviewInProd(env, url.hostname)
     }
-    return env.ASSETS.fetch(req)
+    return rejectStaleAssetFallback(req, await env.ASSETS.fetch(req))
   },
 }

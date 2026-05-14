@@ -11,6 +11,7 @@
 // Phase 2c-β.
 
 import { assertEnvBindings } from "@aquilla/errors/env-assertion"
+import { rejectStaleAssetFallback } from "@aquilla/errors/asset-fallback"
 
 interface Env extends Record<string, unknown> {
   ENV: string
@@ -21,6 +22,6 @@ interface Env extends Record<string, unknown> {
 export default {
   async fetch(req: Request, env: Env): Promise<Response> {
     assertEnvBindings(env, env.ENV)
-    return env.ASSETS.fetch(req)
+    return rejectStaleAssetFallback(req, await env.ASSETS.fetch(req))
   },
 }

@@ -100,17 +100,36 @@ export function setJwt(jwt: string, opts: SetJwtOptions = {}): void {
     opts.secure ??
     (typeof window !== "undefined" && window.location.protocol === "https:")
 
-  // Wipe stale host-only variant first. This is the cookie shape an
-  // earlier build wrote when there was no Domain attribute — browser
-  // keeps it independently of the parent-domain cookie we're about to
-  // set, and getJwt() can return the wrong one.
-  if (domain) {
+  // Wipe stale duplicates first. Browsers keep one cookie per (name,
+  // Domain, Path) tuple, so a previous login could have left several
+  // `aquilla_jwt` cookies under different shapes that all coexist
+  // with whatever we write below — and getJwt() can return any of
+  // them on the next read.
+  //
+  // Cover the variants we've seen in the wild: host-only at /, the
+  // parent-domain at /, and path-scoped variants on the per-app
+  // mounts. HttpOnly cookies set by an old server are unreachable
+  // from JS — those have to be cleared by the server explicitly (no
+  // single API for that today).
+  const stalePaths = ["/", "/login/", "/projects/", "/signup/", "/reset/"]
+  for (const p of stalePaths) {
+    // Host-only.
     doc.cookie = [
       `${COOKIE_NAME}=`,
-      "Path=/",
+      `Path=${p}`,
       "Max-Age=0",
       "SameSite=Lax",
     ].join("; ")
+    // Parent-domain.
+    if (domain) {
+      doc.cookie = [
+        `${COOKIE_NAME}=`,
+        `Path=${p}`,
+        "Max-Age=0",
+        "SameSite=Lax",
+        `Domain=${domain}`,
+      ].join("; ")
+    }
   }
 
   const parts: string[] = [
@@ -169,11 +188,9 @@ interface ClearJwtOptions {
 }
 
 /**
- * Clears the JWT cookie — issues a Set-Cookie at BOTH the host-only and
- * the parent-domain shapes, since both can exist at once. (A login from
- * an older build may have written a host-only cookie that the new
- * Domain=.aquilla.app cookie doesn't overwrite — the browser keeps both
- * and either can win on the next read, leading to a sign-in loop.)
+ * Clears the JWT cookie — issues a Set-Cookie at every (Path, Domain)
+ * shape we've seen in the wild. Browsers keep one cookie per
+ * (name, Domain, Path) tuple, and the old code only cleared one of them.
  */
 export function clearJwt(opts: ClearJwtOptions = {}): void {
   if (typeof document === "undefined" && !opts.doc) return
@@ -183,22 +200,22 @@ export function clearJwt(opts: ClearJwtOptions = {}): void {
     (typeof window !== "undefined" ? window.location.hostname : "")
   const domain = deriveCookieDomain(hostname)
 
-  // Host-only clear (no Domain attribute).
-  doc.cookie = [
-    `${COOKIE_NAME}=`,
-    "Path=/",
-    "Max-Age=0",
-    "SameSite=Lax",
-  ].join("; ")
-
-  // Parent-domain clear (matches the canonical setJwt shape).
-  if (domain) {
+  const stalePaths = ["/", "/login/", "/projects/", "/signup/", "/reset/"]
+  for (const p of stalePaths) {
     doc.cookie = [
       `${COOKIE_NAME}=`,
-      "Path=/",
+      `Path=${p}`,
       "Max-Age=0",
       "SameSite=Lax",
-      `Domain=${domain}`,
     ].join("; ")
+    if (domain) {
+      doc.cookie = [
+        `${COOKIE_NAME}=`,
+        `Path=${p}`,
+        "Max-Age=0",
+        "SameSite=Lax",
+        `Domain=${domain}`,
+      ].join("; ")
+    }
   }
 }

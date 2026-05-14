@@ -26,6 +26,7 @@ import { ProjectCreatePage } from "./pages/ProjectCreatePage"
 import { ProjectSettingsPage } from "./pages/ProjectSettingsPage"
 import { OnboardingPage } from "./pages/OnboardingPage"
 import { JoinPage } from "./pages/JoinPage"
+import { DebugAuthPage } from "./pages/DebugAuthPage"
 
 export function App() {
   // basename MUST match index.html <base href> and vite.config.ts `base`.
@@ -38,6 +39,8 @@ export function App() {
         <Route path="/:id/settings" element={<ProjectSettingsPage />} />
         <Route path="/onboarding" element={<OnboardingPage />} />
         <Route path="/join/:token" element={<JoinPage />} />
+        {/* Diagnostic page (unlinked) — see pages/DebugAuthPage.tsx for context. */}
+        <Route path="/debug" element={<DebugAuthPage />} />
       </Routes>
     </BrowserRouter>
   )

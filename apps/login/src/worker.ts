@@ -16,6 +16,7 @@ import {
   assertEnvBindings,
   assertNotPreviewInProd,
 } from "@aquilla/errors/env-assertion"
+import { rejectStaleAssetFallback } from "@aquilla/errors/asset-fallback"
 
 // EnvLike is `Record<string, unknown>` — extending it keeps the
 // assertEnvBindings() helper type-compatible without an explicit cast.
@@ -65,8 +66,10 @@ export default {
 
     // Hand to Workers Assets. The asset binding handles SPA fallback +
     // immutable hashing for hashed file names; index.html is served at
-    // /login/ and on any unknown sub-path.
-    const assetRes = await env.ASSETS.fetch(req)
+    // /login/ and on any unknown sub-path. `rejectStaleAssetFallback`
+    // converts the SPA-fallback HTML to a clean 404 when an asset-shaped
+    // path (stale hashed bundle) hits the fallback.
+    const assetRes = rejectStaleAssetFallback(req, await env.ASSETS.fetch(req))
     return withSecurityHeaders(assetRes)
   },
 }

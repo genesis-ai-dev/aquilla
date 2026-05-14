@@ -147,7 +147,16 @@ projects.post(
     const user = c.get("user")
     const body = c.req.valid("json")
 
-    const userOrg = await getOrCreateUserOrg(c.env, user)
+    let orgId: number | null = null
+    try {
+      orgId = (await getOrCreateUserOrg(c.env, user)).id
+    } catch (err) {
+      // Project ownership is still authoritative through `projects.created_by`.
+      // If personal-org provisioning is unavailable because the deployed D1
+      // schema is temporarily ahead/behind the worker, do not block the core
+      // user journey of creating a project.
+      console.warn("personal org setup failed; creating project without org:", err)
+    }
 
     try {
       await c.env.AQUILLA_DB.prepare(
@@ -155,7 +164,7 @@ projects.post(
          VALUES (?, ?, ?, ?)
          ON CONFLICT(id) DO NOTHING`,
       )
-        .bind(body.id, body.name, userOrg.id, user.id)
+        .bind(body.id, body.name, orgId, user.id)
         .run()
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)
@@ -166,7 +175,7 @@ projects.post(
     return c.json({
       id: body.id,
       name: body.name,
-      orgId: userOrg.id,
+      orgId,
       role: { level: 700, name: "owner", source: "creator" },
     })
   },

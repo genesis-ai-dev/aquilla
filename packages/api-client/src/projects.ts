@@ -115,12 +115,12 @@ export interface CreateProjectArgs {
 export interface CreatedProject {
   id: string
   name: string
-  orgId: number
+  orgId: number | null
   role: ProjectMemberRoleSource
 }
 
 /** POST /api/v2/projects — owner-creator semantics; server creates the
- *  user's personal org if missing and stamps the caller as `owner`. */
+ *  user's personal org if available and stamps the caller as `owner`. */
 export async function createProject(
   args: CreateProjectArgs,
   jwt: string,

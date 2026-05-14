@@ -1,14 +1,26 @@
-// Pure function: read one persisted event, emit D1PreparedStatements that
-// update the projection tables (cells, cell_validators). Callers batch the
-// returned statements via db.batch() for a single D1 round-trip.
+// Builds D1 statements that advance the `cells` / `cell_validators`
+// projections in response to one persisted event.
 //
-// Hash function: djb2 (32-bit), matching the existing hashDjb2 in projection.ts.
-// Using the same scheme keeps content_hash values identical whether the row was
-// last written by the live Y.Doc path or the event-replay path.
+// AD-2 first-child-of-parent rule:
+//   Before applying any cell-mutating event, the caller (route.ts /
+//   rebuild.ts) checks that no other event already exists with the same
+//   `(project_id, file_id, cell_id, parent_id)` and an earlier server_seq.
+//   If a sibling has already won, the new event is a stale branch — its
+//   row stays in `events` (so history can surface it) but does NOT update
+//   the projection. The route/rebuild loop's `applyEventProjection`
+//   wrapper is the single place that runs the guard.
+//
+// AD-9 source pin:
+//   `target.cell.commit` carries an optional `sourceEventId`. When set,
+//   the projection writes it to `cells.source_event_id` so the stale-
+//   source query is a direct pointer comparison.
+//
+// Hash function: djb2 (32-bit), unchanged. Kept as a cheap FTS-skipping
+// fingerprint on `content_hash`.
 
 import type { EventKind, EventPayloads } from './types'
 
-// A single event row as read from D1's `events` table. JSON.parse is the
+// A single event row as it lives in D1. JSON.parse on `payload` is the
 // caller's responsibility — `payload` here is already an object.
 export interface PersistedEvent<K extends EventKind = EventKind> {
   id: string
@@ -16,17 +28,19 @@ export interface PersistedEvent<K extends EventKind = EventKind> {
   projectId: string
   fileId: string | null
   cellId: string | null
+  /** AD-2: prior winning event on the cell's chain. */
+  parentId: string | null
   kind: K
   author: string
-  payload: unknown      // narrowed via kind in handler
+  payload: unknown      // narrowed via kind in the switch below
   clientTs: number
   serverTs: number
+  /** AD-2: per-project monotonic. */
+  serverSeq: number
 }
 
 /**
  * djb2, 32-bit. Cheap change-detection marker — not a cryptographic hash.
- * Intentionally identical to hashDjb2 in projection.ts so that content_hash
- * values written by both paths are comparable without a migration.
  */
 export function contentHash(text: string): string {
   let h = 5381
@@ -36,166 +50,246 @@ export function contentHash(text: string): string {
   return (h >>> 0).toString(16).padStart(8, '0')
 }
 
+function countWords(text: string): number {
+  const trimmed = text.trim()
+  if (!trimmed) return 0
+  return trimmed.split(/\s+/).length
+}
+
+/** Caller hint: which projection tables this event will touch. */
+export type ProjectionTouches = 'cells' | 'cell_validators' | 'files'
+
 /**
- * Apply one event to the projection. Idempotent — replaying the same event
- * twice is safe because the writes are guarded:
- *   - cells: UPSERT guarded by last_edit_at (existing pattern from projection.ts)
- *   - cell_validators: UPSERT with LWW on decided_ts
+ * Apply one event to the projection (without the AD-2 sibling guard — the
+ * caller is responsible for that). Adds D1PreparedStatements to `stmts`
+ * so the caller can batch many events into one db.batch() call.
  *
- * Adds D1PreparedStatement instances to the `stmts` array so the caller can
- * batch many events into one db.batch() call.
+ * The returned `touches` list lets the route layer compute the
+ * `projection.dirty` broadcast payload.
  */
 export function buildEventProjectionStmts(
   db: D1Database,
   event: PersistedEvent,
   stmts: D1PreparedStatement[],
-): void {
+): ProjectionTouches[] {
   switch (event.kind) {
-    case 'cell.commit': {
-      const p = event.payload as EventPayloads['cell.commit']
-      const text = p.value
-      const hash = contentHash(text)
-      const wordCount = text.trim() === '' ? 0 : text.trim().split(/\s+/).length
-
-      if (!event.fileId || !event.cellId) {
-        throw new Error(
-          `cell.commit event ${event.id} is missing fileId or cellId`,
-        )
+    case 'source.cell.create':
+    case 'target.cell.create': {
+      const p = event.payload as EventPayloads['source.cell.create'] | EventPayloads['target.cell.create']
+      if (!event.fileId) {
+        throw new Error(`${event.kind} event ${event.id} is missing fileId`)
       }
+      // payload.cellId is canonical for create events; fall back to envelope cellId
+      const cellId = p.cellId ?? event.cellId
+      if (!cellId) {
+        throw new Error(`${event.kind} event ${event.id} is missing cellId`)
+      }
+      const side: 'source' | 'target' =
+        event.kind === 'source.cell.create' ? 'source' : 'target'
+      const value = p.value ?? ''
+      const valueHtml = p.valueHtml ?? null
+      const type = p.type ?? null
+      const canonicalRef =
+        event.kind === 'source.cell.create'
+          ? ((p as EventPayloads['source.cell.create']).canonicalRef ?? null)
+          : null
+      const anchorCellId = p.anchorCellId ?? null
+      const hash = contentHash(value)
+      const wordCount = countWords(value)
 
-      // Mirror the UPSERT pattern in projection.ts writeProjection, guarded by
-      // last_edit_at so out-of-order replay doesn't clobber newer data.
+      // Both create kinds are genesis events on the cell's chain — their
+      // event_id IS the new row's chain head. source_event_id is null on
+      // both sides at create time; target commits set it later.
       stmts.push(
         db
           .prepare(
             `INSERT INTO cells (
-              file_id, cell_id, content_text, content_hash, validated,
-              word_count, last_editor, last_edit_at, projected_from, edit_count
-            ) VALUES (?, ?, ?, ?, 0, ?, ?, ?, ?, 1)
-            ON CONFLICT(file_id, cell_id) DO UPDATE SET
-              content_text   = excluded.content_text,
-              content_hash   = excluded.content_hash,
-              validated      = excluded.validated,
-              word_count     = excluded.word_count,
+              project_id, file_id, cell_id, side, value, value_html, type,
+              canonical_ref, anchor_cell_id, event_id, source_event_id,
+              last_editor, last_edit_at, validated, word_count, content_hash
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, 0, ?, ?)
+            ON CONFLICT(project_id, file_id, cell_id) DO UPDATE SET
+              side           = excluded.side,
+              value          = excluded.value,
+              value_html     = excluded.value_html,
+              type           = excluded.type,
+              canonical_ref  = excluded.canonical_ref,
+              anchor_cell_id = excluded.anchor_cell_id,
+              event_id       = excluded.event_id,
+              source_event_id = NULL,
               last_editor    = excluded.last_editor,
               last_edit_at   = excluded.last_edit_at,
-              projected_from = excluded.projected_from,
-              edit_count     = CASE
-                WHEN excluded.last_edit_at > cells.last_edit_at
-                THEN COALESCE(cells.edit_count, 0) + 1
-                ELSE cells.edit_count
-              END
-            WHERE excluded.last_edit_at > cells.last_edit_at`,
+              word_count     = excluded.word_count,
+              content_hash   = excluded.content_hash`,
           )
           .bind(
+            event.projectId,
             event.fileId,
-            event.cellId,
-            text,
-            hash,
+            cellId,
+            side,
+            value,
+            valueHtml,
+            type,
+            canonicalRef,
+            anchorCellId,
+            event.id,
+            event.author,
+            event.serverTs,
             wordCount,
-            event.author,
-            event.serverTs,
-            `event:${event.id}`,
+            hash,
           ),
       )
-      break
+      return ['cells']
     }
 
-    case 'cell.validate': {
-      const p = event.payload as EventPayloads['cell.validate']
-
+    case 'source.cell.commit':
+    case 'target.cell.commit': {
+      const p = event.payload as EventPayloads['source.cell.commit'] | EventPayloads['target.cell.commit']
       if (!event.fileId || !event.cellId) {
-        throw new Error(
-          `cell.validate event ${event.id} is missing fileId or cellId`,
+        throw new Error(`${event.kind} event ${event.id} is missing fileId or cellId`)
+      }
+      const value = p.value ?? ''
+      const valueHtml = p.valueHtml ?? null
+      const hash = contentHash(value)
+      const wordCount = countWords(value)
+
+      if (event.kind === 'target.cell.commit') {
+        const tp = p as EventPayloads['target.cell.commit']
+        const sourceEventId = tp.sourceEventId ?? null
+
+        // For target commits we update value-level fields and pin
+        // `source_event_id` from the payload. We don't touch side / type /
+        // anchor here — they were set by the preceding *.create event.
+        // `event_id` advances to this event id (chain head). The
+        // `validated` flag resets to 0 because the chain head moved —
+        // validators targeting the prior edit are no longer "current".
+        // A subsequent cell.validate against this new event_id will flip
+        // it back on.
+        stmts.push(
+          db
+            .prepare(
+              `UPDATE cells SET
+                value           = ?,
+                value_html      = ?,
+                event_id        = ?,
+                source_event_id = ?,
+                last_editor     = ?,
+                last_edit_at    = ?,
+                word_count      = ?,
+                content_hash    = ?,
+                validated       = 0
+              WHERE project_id = ? AND file_id = ? AND cell_id = ?`,
+            )
+            .bind(
+              value,
+              valueHtml,
+              event.id,
+              sourceEventId,
+              event.author,
+              event.serverTs,
+              wordCount,
+              hash,
+              event.projectId,
+              event.fileId,
+              event.cellId,
+            ),
+        )
+      } else {
+        // source.cell.commit — same as target but no source_event_id pin
+        // (it's null on source-side rows by definition). Source-side
+        // validations aren't a v1 concept, so `validated` is left alone
+        // here — for source-side rows it stays at its initial 0 forever.
+        stmts.push(
+          db
+            .prepare(
+              `UPDATE cells SET
+                value         = ?,
+                value_html    = ?,
+                event_id      = ?,
+                last_editor   = ?,
+                last_edit_at  = ?,
+                word_count    = ?,
+                content_hash  = ?
+              WHERE project_id = ? AND file_id = ? AND cell_id = ?`,
+            )
+            .bind(
+              value,
+              valueHtml,
+              event.id,
+              event.author,
+              event.serverTs,
+              wordCount,
+              hash,
+              event.projectId,
+              event.fileId,
+              event.cellId,
+            ),
         )
       }
-
-      /**
-       * Emits TWO statements: the validator UPSERT and a recompute of
-       * cells.validated. The second reads from cell_validators after the first
-       * lands (D1 batch executes statements sequentially).
-       *
-       * UPSERT with LWW on decided_ts. is_active=1 means approval stands.
-       */
-      stmts.push(
-        db
-          .prepare(
-            `INSERT INTO cell_validators (
-              project_id, file_id, cell_id, edit_event_id, username,
-              is_active, decided_ts
-            ) VALUES (?, ?, ?, ?, ?, 1, ?)
-            ON CONFLICT(project_id, file_id, cell_id, edit_event_id, username)
-            DO UPDATE SET
-              is_active  = excluded.is_active,
-              decided_ts = excluded.decided_ts
-            WHERE excluded.decided_ts > cell_validators.decided_ts`,
-          )
-          .bind(
-            event.projectId,
-            event.fileId,
-            event.cellId,
-            p.editEventId,
-            event.author,
-            event.serverTs,
-          ),
-      )
-      // Recompute the denormalized cells.validated flag from active validator state.
-      // Only validations for the cell's current edit count. If a user validates
-      // edit A and edit B lands later, replaying or retrying validation for A
-      // must not mark edit B as approved.
-      stmts.push(
-        db
-          .prepare(
-            `UPDATE cells
-            SET validated = (
-              SELECT CASE WHEN COUNT(*) > 0 THEN 1 ELSE 0 END
-              FROM cell_validators
-              WHERE project_id = ? AND file_id = ? AND cell_id = ? AND is_active = 1
-                AND edit_event_id = COALESCE(
-                  CASE
-                    WHEN cells.projected_from LIKE 'event:%'
-                    THEN substr(cells.projected_from, 7)
-                  END,
-                  ?
-                )
-            )
-            WHERE file_id = ? AND cell_id = ?`,
-          )
-          .bind(
-            event.projectId,
-            event.fileId,
-            event.cellId,
-            p.editEventId,
-            event.fileId,
-            event.cellId,
-          ),
-      )
-      break
+      return ['cells']
     }
 
+    case 'source.cell.delete':
+    case 'target.cell.delete': {
+      if (!event.fileId || !event.cellId) {
+        throw new Error(`${event.kind} event ${event.id} is missing fileId or cellId`)
+      }
+      // Cell row leaves the projection; events stay queryable.
+      stmts.push(
+        db
+          .prepare(
+            `DELETE FROM cells
+             WHERE project_id = ? AND file_id = ? AND cell_id = ?`,
+          )
+          .bind(event.projectId, event.fileId, event.cellId),
+      )
+      return ['cells']
+    }
+
+    case 'source.cell.reorder':
+    case 'target.cell.reorder': {
+      const p = event.payload as EventPayloads['source.cell.reorder'] | EventPayloads['target.cell.reorder']
+      if (!event.fileId || !event.cellId) {
+        throw new Error(`${event.kind} event ${event.id} is missing fileId or cellId`)
+      }
+      stmts.push(
+        db
+          .prepare(
+            `UPDATE cells SET
+              anchor_cell_id = ?,
+              event_id       = ?,
+              last_editor    = ?,
+              last_edit_at   = ?
+            WHERE project_id = ? AND file_id = ? AND cell_id = ?`,
+          )
+          .bind(
+            p.anchorCellId ?? null,
+            event.id,
+            event.author,
+            event.serverTs,
+            event.projectId,
+            event.fileId,
+            event.cellId,
+          ),
+      )
+      return ['cells']
+    }
+
+    case 'cell.validate':
     case 'cell.unvalidate': {
-      const p = event.payload as EventPayloads['cell.unvalidate']
-
+      const p = event.payload as EventPayloads['cell.validate']
       if (!event.fileId || !event.cellId) {
-        throw new Error(
-          `cell.unvalidate event ${event.id} is missing fileId or cellId`,
-        )
+        throw new Error(`${event.kind} event ${event.id} is missing fileId or cellId`)
       }
+      const isActive = event.kind === 'cell.validate' ? 1 : 0
 
-      /**
-       * Emits TWO statements: the validator UPSERT and a recompute of
-       * cells.validated. The second reads from cell_validators after the first
-       * lands (D1 batch executes statements sequentially).
-       *
-       * Same as validate but is_active=0 (revocation).
-       */
       stmts.push(
         db
           .prepare(
             `INSERT INTO cell_validators (
               project_id, file_id, cell_id, edit_event_id, username,
               is_active, decided_ts
-            ) VALUES (?, ?, ?, ?, ?, 0, ?)
+            ) VALUES (?, ?, ?, ?, ?, ${isActive}, ?)
             ON CONFLICT(project_id, file_id, cell_id, edit_event_id, username)
             DO UPDATE SET
               is_active  = excluded.is_active,
@@ -211,9 +305,11 @@ export function buildEventProjectionStmts(
             event.serverTs,
           ),
       )
-      // Recompute the denormalized cells.validated flag from active validator state.
-      // See the validate branch above: validation state is scoped to the
-      // current edit, not the cell id alone.
+
+      // Recompute the denormalized `cells.validated` flag against the
+      // CURRENT chain head (`cells.event_id`). Validating an old edit no
+      // longer marks a freshly-committed cell as approved — matching the
+      // intent of AD-2 (the chain head is the only state that's "current").
       stmts.push(
         db
           .prepare(
@@ -221,57 +317,33 @@ export function buildEventProjectionStmts(
             SET validated = (
               SELECT CASE WHEN COUNT(*) > 0 THEN 1 ELSE 0 END
               FROM cell_validators
-              WHERE project_id = ? AND file_id = ? AND cell_id = ? AND is_active = 1
-                AND edit_event_id = COALESCE(
-                  CASE
-                    WHEN cells.projected_from LIKE 'event:%'
-                    THEN substr(cells.projected_from, 7)
-                  END,
-                  ?
-                )
+              WHERE project_id = ?
+                AND file_id    = ?
+                AND cell_id    = ?
+                AND is_active  = 1
+                AND edit_event_id = cells.event_id
             )
-            WHERE file_id = ? AND cell_id = ?`,
+            WHERE project_id = ? AND file_id = ? AND cell_id = ?`,
           )
           .bind(
             event.projectId,
             event.fileId,
             event.cellId,
-            p.editEventId,
+            event.projectId,
             event.fileId,
             event.cellId,
           ),
       )
-      break
-    }
-
-    case 'cell.metadata.set': {
-      // Phase 0 no-op. The `cells` projection schema doesn't yet have dedicated
-      // columns for the cell metadata fields managed by this event (e.g.
-      // cellLabel, sourceLocation). Those fields live in the Y.Doc for now and
-      // will be migrated to D1 columns in Phase 4. When Phase 4 lands, add an
-      // UPDATE cells SET <field> = ? WHERE file_id = ? AND cell_id = ? here.
-      break
-    }
-
-    case 'thread.add':
-    case 'thread.resolve': {
-      // Phase 0 no-op. There is no `threads` projection table yet. Thread
-      // data will be added in a future phase. When a threads table lands,
-      // add UPSERT logic here that writes the thread state.
-      break
+      return ['cell_validators', 'cells']
     }
 
     case 'file.create': {
       const p = event.payload as EventPayloads['file.create']
       if (!event.fileId) {
-        throw new Error(
-          `file.create event ${event.id} is missing fileId`,
-        )
+        throw new Error(`file.create event ${event.id} is missing fileId`)
       }
-      // Mirror the UPSERT in handlers/file-create.ts so projection rebuild
-      // (which replays events through this function) correctly recreates
-      // file rows. Counters left at zero on first insert and untouched on
-      // conflict — cell.commit projections maintain those.
+      // Counters left at zero on first insert and untouched on conflict —
+      // cell commit projections maintain those.
       stmts.push(
         db
           .prepare(
@@ -297,20 +369,93 @@ export function buildEventProjectionStmts(
             `event:${event.id}`,
           ),
       )
-      break
+      return ['files']
     }
 
     default: {
-      // Defensive exhaustiveness check. TypeScript narrows `event.kind` to
-      // `never` here if all EventKind variants are handled above — a compile-
-      // time signal that this runtime branch is unreachable in well-typed code.
-      // At runtime (e.g. a newer client sending a kind this worker doesn't know
-      // about) we fail loudly so the rebuild endpoint returns 500 rather than
-      // silently mis-projecting.
+      // Defensive exhaustiveness check. If a new EventKind is added without
+      // a case here this triggers a TS compile error.
       const exhaustiveCheck: never = event.kind
       throw new Error(
         `buildEventProjectionStmts: unknown event kind "${exhaustiveCheck}" (event id: ${event.id})`,
       )
     }
   }
+}
+
+/**
+ * Set of event kinds that compete for the cell's chain head (advance
+ * `cells.event_id`). Validation and file-level events don't move the
+ * chain pointer, so they're excluded from the AD-2 guard.
+ */
+const CHAIN_MUTATING_KINDS = new Set<string>([
+  'source.cell.create',
+  'source.cell.commit',
+  'source.cell.delete',
+  'source.cell.reorder',
+  'target.cell.create',
+  'target.cell.commit',
+  'target.cell.delete',
+  'target.cell.reorder',
+])
+
+/**
+ * AD-2 first-child-of-parent guard. Returns true if this event is the
+ * winning child for its `(project_id, file_id, cell_id, parent_id)` — that
+ * is, no other CHAIN-MUTATING event with the same key has been accepted
+ * yet.
+ *
+ * On `false`, the caller MUST skip the projection update; the event row
+ * itself still lands in `events` so per-cell history can surface it.
+ *
+ * The check is naturally idempotent: replaying the winning event sees
+ * its own row as the existing one and still returns true.
+ *
+ * Genesis events (`parent_id IS NULL`) follow the same rule — the first
+ * `*.cell.create` for a (project, file, cell) wins.
+ *
+ * Validation events (cell.validate / cell.unvalidate) and file-level
+ * events bypass the guard entirely (they're caller-skipped).
+ */
+export async function isWinningChild(
+  db: D1Database,
+  candidate: PersistedEvent,
+): Promise<boolean> {
+  if (!candidate.fileId || !candidate.cellId) {
+    // File-level events have no chain — always "winning".
+    return true
+  }
+
+  // Build the SQL with a NULL-aware parent_id predicate. We also filter
+  // to chain-mutating kinds so a sibling validation event doesn't block a
+  // legitimate commit from advancing the projection.
+  const parentIsNull = candidate.parentId === null || candidate.parentId === undefined
+  const kindList = [...CHAIN_MUTATING_KINDS].map((k) => `'${k}'`).join(', ')
+  const sql = parentIsNull
+    ? `SELECT id, server_seq FROM events
+       WHERE project_id = ? AND file_id = ? AND cell_id = ?
+         AND parent_id IS NULL
+         AND kind IN (${kindList})
+       ORDER BY server_seq ASC, id ASC
+       LIMIT 1`
+    : `SELECT id, server_seq FROM events
+       WHERE project_id = ? AND file_id = ? AND cell_id = ? AND parent_id = ?
+         AND kind IN (${kindList})
+       ORDER BY server_seq ASC, id ASC
+       LIMIT 1`
+
+  const stmt = parentIsNull
+    ? db.prepare(sql).bind(candidate.projectId, candidate.fileId, candidate.cellId)
+    : db.prepare(sql).bind(candidate.projectId, candidate.fileId, candidate.cellId, candidate.parentId)
+
+  const row = await stmt.first<{ id: string; server_seq: number }>()
+
+  // No existing event yet → this one is the first child, wins.
+  if (!row) return true
+
+  // The earliest-seq winner is this candidate → idempotent replay.
+  if (row.id === candidate.id) return true
+
+  // Some chain-mutating sibling beat us to the chain slot — stale branch.
+  return false
 }

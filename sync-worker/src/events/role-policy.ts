@@ -13,19 +13,44 @@ export const ROLE = {
   OWNER: 700,
 } as const
 
-// Source of truth for "who can do what." Adding a new EventKind triggers a
-// TypeScript exhaustiveness error here until a row is added — the type
-// system enforces that every event kind has an explicit role requirement.
+/**
+ * Source of truth for "who can do what" — per AD-2's prefixed-kind design.
+ *
+ *   source.*  — emitted only by the importer (acting under an admin's
+ *               authority) or by an owner who is reshaping source files.
+ *               PROJECT_LEAD is the minimum because re-importing a source
+ *               affects every downstream linked target (AD-9).
+ *
+ *   target.*  — translator-level writes. CONTRIBUTOR (400) and above.
+ *
+ *   cell.validate / cell.unvalidate — REVIEWER (300) and above.
+ *
+ *   file.create — structural change; PROJECT_LEAD so stray contributors
+ *                 can't sprinkle file rows during normal editing.
+ *
+ * Adding a new EventKind triggers a TypeScript exhaustiveness error here
+ * until a row is added — the type system enforces explicit role coverage.
+ */
 export const REQUIRED_ROLE: Record<EventKind, number> = {
-  'cell.commit': ROLE.CONTRIBUTOR,
+  // Source-side: importer (owner / admin path), or PROJECT_LEAD+ for
+  // direct re-imports. The import-bot service account is provisioned at
+  // OWNER level out of band.
+  'source.cell.create': ROLE.PROJECT_LEAD,
+  'source.cell.commit': ROLE.PROJECT_LEAD,
+  'source.cell.delete': ROLE.PROJECT_LEAD,
+  'source.cell.reorder': ROLE.PROJECT_LEAD,
+
+  // Target-side: translator commits.
+  'target.cell.create': ROLE.CONTRIBUTOR,
+  'target.cell.commit': ROLE.CONTRIBUTOR,
+  'target.cell.delete': ROLE.CONTRIBUTOR,
+  'target.cell.reorder': ROLE.CONTRIBUTOR,
+
+  // Validation gate.
   'cell.validate': ROLE.REVIEWER,
   'cell.unvalidate': ROLE.REVIEWER,
-  'thread.add': ROLE.COMMENTER,
-  'thread.resolve': ROLE.REVIEWER,
-  'cell.metadata.set': ROLE.CONTRIBUTOR,
-  // file.create is a structural project change — gated to PROJECT_LEAD so
-  // contributors can't sprinkle stray file rows during normal editing. The
-  // legacy import path uses an admin sync-token with this role.
+
+  // file.create is a structural change.
   'file.create': ROLE.PROJECT_LEAD,
 }
 

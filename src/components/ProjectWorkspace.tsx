@@ -234,7 +234,7 @@ export function ProjectWorkspace() {
   // The Y.Doc is still wired for writes + the Tiptap editor; this just
   // changes the load path for the cells list. See useCells.ts for the full
   // story.
-  const { cells } = useCells({
+  const { cells, revalidate: revalidateCells } = useCells({
     projectId: project?.id ?? null,
     fileId: activeFileId,
     username: currentUsername,
@@ -494,6 +494,99 @@ export function ProjectWorkspace() {
   // active file's Y.Doc meta so settings flow between clients without a
   // dedicated project-meta room.
   useProjectSettingsSync(doc, project ?? null, refresh)
+
+  // Phase 2c-β: per-project WS reconciler. Subscribes to the per-project
+  // Durable Object for presence + focus locks + `event.applied` broadcasts.
+  // The outbox flusher (above) ships writes; this connection drives reads.
+  const [cellLockHolders, setCellLockHolders] = useState<Map<string, string>>(() => new Map())
+  const [cellsWithRemoteChange, setCellsWithRemoteChange] = useState<Set<string>>(() => new Set())
+  const focusedCellIdRef = useRef<string | null>(null)
+  const reconcilerRef = useRef<import("@/lib/sync/ws-reconciler").WsReconciler | null>(null)
+
+  useEffect(() => {
+    if (!project?.id || !frontierSession?.jwt) return
+    let cancelled = false
+    let reconciler: import("@/lib/sync/ws-reconciler").WsReconciler | null = null
+    void (async () => {
+      const { createWsReconciler } = await import("@/lib/sync/ws-reconciler")
+      const { syncWorkerHttpOrigin } = await import("@/lib/sync/sync-worker-url")
+      if (cancelled || !project?.id) return
+      const pid = project.id
+      reconciler = createWsReconciler(
+        {
+          projectId: pid,
+          baseUrl: syncWorkerHttpOrigin(),
+          getToken: async () => {
+            const aFile = projectFiles[0]?.id ?? ""
+            if (!aFile) return null
+            return getTokenForFile(aFile)
+          },
+        },
+        {
+          onMessage(msg) {
+            if (msg.t === "event.applied") {
+              if (!msg.cell || msg.project !== pid) return
+              revalidateCells()
+              if (focusedCellIdRef.current === msg.cell) {
+                setCellsWithRemoteChange((cur) => {
+                  if (cur.has(msg.cell!)) return cur
+                  const next = new Set(cur)
+                  next.add(msg.cell!)
+                  return next
+                })
+              }
+            } else if (msg.t === "presence") {
+              const next = new Map<string, string>()
+              for (const u of msg.users) {
+                if (!u.focusedCell) continue
+                if (u.userId === currentUsername) continue
+                next.set(u.focusedCell, u.userId)
+              }
+              setCellLockHolders(next)
+            } else if (msg.t === "lock.claimed") {
+              if (msg.by.userId === currentUsername) return
+              setCellLockHolders((cur) => {
+                if (cur.get(msg.cellId) === msg.by.userId) return cur
+                const next = new Map(cur)
+                next.set(msg.cellId, msg.by.userId)
+                return next
+              })
+            } else if (msg.t === "lock.released") {
+              setCellLockHolders((cur) => {
+                if (!cur.has(msg.cellId)) return cur
+                const next = new Map(cur)
+                next.delete(msg.cellId)
+                return next
+              })
+            }
+          },
+        },
+      )
+      reconcilerRef.current = reconciler
+    })()
+    return () => {
+      cancelled = true
+      reconcilerRef.current = null
+      reconciler?.close()
+    }
+  }, [project?.id, frontierSession?.jwt, getTokenForFile, revalidateCells, projectFiles, currentUsername])
+
+  const handleClaimCell = useCallback((cellId: string) => {
+    focusedCellIdRef.current = cellId
+    reconcilerRef.current?.send({ t: "focus.claim", cellId })
+  }, [])
+  const handleReleaseCell = useCallback((cellId: string) => {
+    if (focusedCellIdRef.current === cellId) focusedCellIdRef.current = null
+    reconcilerRef.current?.send({ t: "focus.release", cellId })
+  }, [])
+  const handleAckRemoteChange = useCallback((cellId: string) => {
+    setCellsWithRemoteChange((cur) => {
+      if (!cur.has(cellId)) return cur
+      const next = new Set(cur)
+      next.delete(cellId)
+      return next
+    })
+  }, [])
 
   // Drives the editor-area rendering: loading skeleton vs. empty state vs.
   // EditorTable. Centralizes the decision so we don't flash between states
@@ -1026,6 +1119,12 @@ export function ProjectWorkspace() {
             onAiSetupNeeded={() => setAiSetupOpen(true)}
             onOpenRecording={(cellId) => setRecordingCellId(cellId)}
             onProjectChanged={refresh}
+            onCellCommitted={revalidateCells}
+            cellLockHolders={cellLockHolders}
+            cellsWithRemoteChange={cellsWithRemoteChange}
+            onClaimCell={handleClaimCell}
+            onReleaseCell={handleReleaseCell}
+            onAckRemoteChange={handleAckRemoteChange}
           />
         ) : (
           <CellAreaPlaceholder
@@ -1137,6 +1236,8 @@ export function ProjectWorkspace() {
         />
       )}
       <ImportDialog open={importOpen} onOpenChange={setImportOpen}
+        projectId={project.id}
+        username={currentUsername}
         sourceLanguage={project.sourceLanguage} targetLanguage={project.targetLanguage}
         onImported={handleImported} />
       <ParallelPassagesPanel

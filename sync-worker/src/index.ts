@@ -35,6 +35,8 @@ import { handleValidatorsReadRequest } from "./events/validators-read-route"
 import { handleCellsAuditReadRequest } from "./events/cells-audit-read-route"
 import { handleFilesReadRequest } from "./events/files-read-route"
 import { handleCellsReadRequest } from "./events/cells-read-route"
+import { handleCellHistoryReadRequest } from "./events/cell-history-read-route"
+import { handleSearchReadRequest } from "./events/search-route"
 import { handleCorsPreflight, withCors } from "./cors"
 import { notifyFileDo } from "./archive-broadcast"
 import { parseRealtimeMessage } from "./events/realtime"
@@ -648,6 +650,10 @@ export default {
     if (filesReadResponse) return withCors(filesReadResponse, request)
     const cellsReadResponse = await handleCellsReadRequest(request, env)
     if (cellsReadResponse) return withCors(cellsReadResponse, request)
+    const cellHistoryResponse = await handleCellHistoryReadRequest(request, env)
+    if (cellHistoryResponse) return withCors(cellHistoryResponse, request)
+    const searchResponse = await handleSearchReadRequest(request, env)
+    if (searchResponse) return withCors(searchResponse, request)
     const eventsWriteResponse = await handleEventsWriteRequest(request, env)
     if (eventsWriteResponse) return withCors(eventsWriteResponse, request)
 

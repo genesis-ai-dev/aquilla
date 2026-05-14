@@ -1,93 +1,68 @@
+// Phase 2b tests for useFileMeta — moved off Y.Doc onto localStorage.
+
 import "fake-indexeddb/auto"
-import { describe, it, expect } from "vitest"
+import { beforeEach, describe, expect, it } from "vitest"
 import { renderHook, act, waitFor } from "@testing-library/react"
-import * as Y from "yjs"
 import { useFileMeta } from "./useFileMeta"
 
-function buildDoc(initialMeta: Record<string, unknown> = {}): Y.Doc {
-  const doc = new Y.Doc()
-  doc.getMap("meta").set("__source", { id: "f", originalName: "f", ...initialMeta })
-  return doc
-}
+beforeEach(() => {
+  window.localStorage.clear()
+})
 
-describe("useFileMeta", () => {
-  it("returns defaults when meta has nothing set", async () => {
-    const doc = buildDoc()
-    const { result } = renderHook(() => useFileMeta(doc, "en", "en"))
+describe("useFileMeta (Phase 2b, localStorage-backed)", () => {
+  it("returns defaults when localStorage has nothing set", async () => {
+    const { result } = renderHook(() => useFileMeta("file-a", "en", "en"))
     await waitFor(() => expect(result.current.lineNumbersEnabled).toBe(true))
     expect(result.current.sourceTextDirection).toBe("ltr")
     expect(result.current.targetTextDirection).toBe("ltr")
+    expect(result.current.rtlHintDismissed).toBe(false)
   })
 
-  it("auto-seeds targetTextDirection to rtl when targetLanguage is Arabic", async () => {
-    const doc = buildDoc()
-    const { result } = renderHook(() => useFileMeta(doc, "en", "ar"))
+  it("auto-detects targetTextDirection from targetLanguage", async () => {
+    const { result } = renderHook(() => useFileMeta("file-a", "en", "ar"))
     await waitFor(() => expect(result.current.targetTextDirection).toBe("rtl"))
-    const src = doc.getMap("meta").get("__source") as Record<string, unknown>
-    expect(src.textDirection).toBe("rtl")
   })
 
-  it("auto-seeds sourceTextDirection to rtl when sourceLanguage is Hebrew", async () => {
-    const doc = buildDoc()
-    const { result } = renderHook(() => useFileMeta(doc, "he", "en"))
+  it("auto-detects sourceTextDirection from sourceLanguage", async () => {
+    const { result } = renderHook(() => useFileMeta("file-a", "he", "en"))
     await waitFor(() => expect(result.current.sourceTextDirection).toBe("rtl"))
-    // Target stays LTR since targetLanguage is English
     expect(result.current.targetTextDirection).toBe("ltr")
-    const src = doc.getMap("meta").get("__source") as Record<string, unknown>
-    expect(src.sourceTextDirection).toBe("rtl")
-    expect(src.textDirection).toBe("ltr")
   })
 
   it("handles mixed directions — source rtl + target ltr", async () => {
-    const doc = buildDoc()
-    const { result } = renderHook(() => useFileMeta(doc, "ar", "fr"))
+    const { result } = renderHook(() => useFileMeta("file-a", "ar", "fr"))
     await waitFor(() => {
       expect(result.current.sourceTextDirection).toBe("rtl")
       expect(result.current.targetTextDirection).toBe("ltr")
     })
   })
 
-  it("does not re-seed when textDirection is already set", async () => {
-    const doc = buildDoc({ textDirection: "ltr", sourceTextDirection: "ltr" })
-    const { result } = renderHook(() => useFileMeta(doc, "ar", "ar"))
-    await waitFor(() => expect(result.current.targetTextDirection).toBe("ltr"))
-    expect(result.current.sourceTextDirection).toBe("ltr")
-    const src = doc.getMap("meta").get("__source") as Record<string, unknown>
-    expect(src.textDirection).toBe("ltr")
-    expect(src.sourceTextDirection).toBe("ltr")
-  })
-
-  it("setLineNumbersEnabled writes to __source", async () => {
-    const doc = buildDoc()
-    const { result } = renderHook(() => useFileMeta(doc, "en", "en"))
-    await waitFor(() => expect(result.current.lineNumbersEnabled).toBe(true))
-    act(() => { result.current.setLineNumbersEnabled(false) })
-    await waitFor(() => expect(result.current.lineNumbersEnabled).toBe(false))
-    const src = doc.getMap("meta").get("__source") as Record<string, unknown>
-    expect(src.lineNumbersEnabled).toBe(false)
-  })
-
-  it("setTargetTextDirection writes to __source under textDirection (legacy key)", async () => {
-    const doc = buildDoc()
-    const { result } = renderHook(() => useFileMeta(doc, "en", "en"))
-    await waitFor(() => expect(result.current.targetTextDirection).toBe("ltr"))
+  it("setTargetTextDirection persists and reflects on rerender", async () => {
+    const { result } = renderHook(() => useFileMeta("file-a", "en", "en"))
     act(() => { result.current.setTargetTextDirection("rtl") })
     await waitFor(() => expect(result.current.targetTextDirection).toBe("rtl"))
-    const src = doc.getMap("meta").get("__source") as Record<string, unknown>
-    expect(src.textDirection).toBe("rtl")
+    // Re-mount: localStorage should preserve the value.
+    const { result: result2 } = renderHook(() => useFileMeta("file-a", "en", "en"))
+    await waitFor(() => expect(result2.current.targetTextDirection).toBe("rtl"))
   })
 
-  it("setSourceTextDirection writes to __source", async () => {
-    const doc = buildDoc()
-    const { result } = renderHook(() => useFileMeta(doc, "en", "en"))
-    await waitFor(() => expect(result.current.sourceTextDirection).toBe("ltr"))
-    act(() => { result.current.setSourceTextDirection("rtl") })
+  it("setLineNumbersEnabled persists and reflects on rerender", async () => {
+    const { result } = renderHook(() => useFileMeta("file-a", "en", "en"))
+    act(() => { result.current.setLineNumbersEnabled(false) })
+    await waitFor(() => expect(result.current.lineNumbersEnabled).toBe(false))
+    const { result: result2 } = renderHook(() => useFileMeta("file-a", "en", "en"))
+    await waitFor(() => expect(result2.current.lineNumbersEnabled).toBe(false))
+  })
+
+  it("dismissRtlHint sets rtlHintDismissed", async () => {
+    const { result } = renderHook(() => useFileMeta("file-a", "he", "en"))
     await waitFor(() => expect(result.current.sourceTextDirection).toBe("rtl"))
-    const src = doc.getMap("meta").get("__source") as Record<string, unknown>
-    expect(src.sourceTextDirection).toBe("rtl")
+    expect(result.current.rtlHintDismissed).toBe(false)
+    act(() => { result.current.dismissRtlHint() })
+    await waitFor(() => expect(result.current.rtlHintDismissed).toBe(true))
   })
 
-  it("returns sane defaults for null doc", () => {
+  it("returns sane defaults for null fileId", () => {
     const { result } = renderHook(() => useFileMeta(null, "en", "en"))
     expect(result.current.lineNumbersEnabled).toBe(true)
     expect(result.current.sourceTextDirection).toBe("ltr")
@@ -95,14 +70,11 @@ describe("useFileMeta", () => {
     expect(result.current.rtlHintDismissed).toBe(false)
   })
 
-  it("dismissRtlHint sets rtlHintDismissed on __source", async () => {
-    const doc = buildDoc()
-    const { result } = renderHook(() => useFileMeta(doc, "he", "en"))
-    await waitFor(() => expect(result.current.sourceTextDirection).toBe("rtl"))
-    expect(result.current.rtlHintDismissed).toBe(false)
-    act(() => { result.current.dismissRtlHint() })
-    await waitFor(() => expect(result.current.rtlHintDismissed).toBe(true))
-    const src = doc.getMap("meta").get("__source") as Record<string, unknown>
-    expect(src.rtlHintDismissed).toBe(true)
+  it("scopes preferences by fileId — different files keep separate state", async () => {
+    const { result: rA } = renderHook(() => useFileMeta("file-a", "en", "en"))
+    act(() => { rA.current.setLineNumbersEnabled(false) })
+    await waitFor(() => expect(rA.current.lineNumbersEnabled).toBe(false))
+    const { result: rB } = renderHook(() => useFileMeta("file-b", "en", "en"))
+    await waitFor(() => expect(rB.current.lineNumbersEnabled).toBe(true))
   })
 })

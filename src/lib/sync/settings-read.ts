@@ -1,4 +1,4 @@
-// Typed fetch wrappers for auth-worker project settings read/write API
+// Typed fetch wrappers for frontier-server project settings read/write API
 // (Phase 2b). Aliases over the existing `project-settings.ts` so the new
 // `useProjectSettings` hook can sit on top of one consistent naming scheme
 // without disturbing existing callers of the underlying primitives.

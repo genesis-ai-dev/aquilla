@@ -1,10 +1,38 @@
 {
   "name": "@aquilla/migrate",
   "private": true,
-  "version": "0.0.0",
-  "description": "Aquilla migrate app — stub (Phase 1B). Populated in Phase 3.",
+  "version": "0.0.1",
+  "description": "Aquilla legacy-migration app — Cloudflare Worker (Workers Assets) serving a one-time GitLab-to-Aquilla migration SPA. Phase 3d ships a placeholder UI; the real importer lands after Phase 2c-β.",
+  "type": "module",
   "scripts": {
-    "build": "echo 'stub — populated in Phase 3'",
-    "deploy": "echo 'stub — populated in Phase 3'"
+    "build": "vite build",
+    "dev": "vite",
+    "preview": "vite preview",
+    "deploy": "vite build && wrangler deploy",
+    "deploy:staging": "vite build && wrangler deploy --env staging",
+    "deploy:preview": "vite build && wrangler deploy --env preview",
+    "typecheck": "tsc -b",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@aquilla/auth-client": "workspace:*",
+    "@aquilla/errors": "workspace:*",
+    "@aquilla/ui": "workspace:*",
+    "react": "^19.2.4",
+    "react-dom": "^19.2.4"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20240117.0",
+    "@tailwindcss/vite": "^4.2.2",
+    "@testing-library/react": "^16.3.2",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^6.0.1",
+    "happy-dom": "^20.8.9",
+    "tailwindcss": "^4.2.2",
+    "typescript": "~6.0.2",
+    "vite": "^8.0.4",
+    "vitest": "^4.1.4",
+    "wrangler": "^4.83.0"
   }
 }

@@ -1,16 +1,39 @@
-import { Routes, Route, Navigate } from "react-router-dom"
-import { Dashboard } from "@/components/Dashboard"
+// Workspace SPA route table.
+//
+// Phase 3c (AD-11) extracted the following routes into their own discrete
+// apps; this file no longer registers them:
+//
+//   /                        → apps/projects/        (Dashboard, ProjectList)
+//   /project/:id/settings    → apps/projects/:id/settings
+//   /join/:token             → apps/projects/join/:token
+//   /onboarding              → apps/projects/onboarding
+//   /settings                → apps/billing/         (user-billing surface)
+//   /members                 → apps/org/members
+//
+// Cross-app navigation is a hard URL transition (apps may not import each
+// other at runtime; see AD-11 navigation handoff contract). When you need
+// the user back on a project's continuous-state workspace, link directly to
+// `/project/:id` here or `/w/:id` after Phase 4's workspace mount rename.
+//
+// The workspace SPA owns continuous translation state — these routes stay
+// here until Phase 3a fully relocates the workspace into apps/workspace/:
+//
+//   /project/:id, /project/:id/file/:fileId
+//   /project/:id/{rules, memory, comments, snapshots, debug}
+//   /project/:id/settings/debug
+//   /debug
+//
+// Legacy redirect retained for backwards compatibility:
+//
+//   /settings/org  → /org/members  (was /members)
+
+import { Routes, Route } from "react-router-dom"
 import { ProjectWorkspace } from "@/components/ProjectWorkspace"
-import { ProjectSettings } from "@/components/ProjectSettings"
 import { DebugView } from "@/components/DebugView"
 import { RulesPage } from "@/components/RulesPage"
 import { LivingMemoryPage } from "@/components/LivingMemoryPage"
 import { CommentsPage } from "@/components/CommentsPage"
 import { SnapshotsPage } from "@/components/SnapshotsPage"
-import { JoinPage } from "@/components/JoinPage"
-import { OnboardingWizard } from "@/components/onboarding/OnboardingWizard"
-import { MembersPage } from "@/pages/MembersPage"
-import { Settings } from "@/pages/Settings"
 import { SyncingProvider, useSyncing } from "@/context/SyncingContext"
 import { AiModelConsentDialog } from "@/components/AiModelConsentDialog"
 import { AiModelDownloadChip } from "@/components/AiModelDownloadChip"
@@ -52,15 +75,25 @@ export default function App() {
   )
 }
 
+/** Cross-app hard navigation helper. Returns a tiny component that bounces
+ *  to another app's URL. We don't use react-router's <Navigate /> because
+ *  the target is in a different deployable; the browser must do a real
+ *  GET so Workers Routes can dispatch. */
+function HardRedirect({ to }: { to: string }) {
+  if (typeof window !== "undefined") {
+    window.location.replace(to)
+  }
+  return null
+}
+
 function AppRoutes() {
   return (
     <Routes>
-      <Route path="/" element={<Dashboard />} />
+      {/* Workspace surfaces — kept here until Phase 3a relocates them. */}
       <Route path="/debug" element={<DebugView />} />
       <Route path="/project/:id" element={<ProjectWorkspace />} />
       <Route path="/project/:id/file/:fileId" element={<ProjectWorkspace />} />
       <Route path="/project/:id/debug" element={<DebugView />} />
-      <Route path="/project/:id/settings" element={<ProjectSettings />} />
       <Route path="/project/:id/settings/debug" element={<DebugView />} />
       <Route path="/project/:id/rules" element={<RulesPage />} />
       <Route path="/project/:id/memory" element={<LivingMemoryPage />} />
@@ -68,13 +101,12 @@ function AppRoutes() {
       <Route path="/project/:id/comments/debug" element={<DebugView />} />
       <Route path="/project/:id/snapshots" element={<SnapshotsPage />} />
       <Route path="/project/:id/snapshots/debug" element={<DebugView />} />
-      <Route path="/join/:token" element={<JoinPage />} />
-      <Route path="/onboarding" element={<OnboardingWizard />} />
-      <Route path="/settings" element={<Settings />} />
-      <Route path="/members" element={<MembersPage />} />
-      {/* Backward-compat: the old admin-flavored URL still resolves but
-          permanently redirects to the operational /members surface. */}
-      <Route path="/settings/org" element={<Navigate to="/members" replace />} />
+
+      {/* Backwards-compat redirects to relocated apps. /settings/org used to
+          point inside this SPA; the operational members surface now lives in
+          apps/org/. A hard navigation is required since /org is a different
+          Worker deploy (no in-router resolution possible). */}
+      <Route path="/settings/org" element={<HardRedirect to="/org/members" />} />
     </Routes>
   )
 }

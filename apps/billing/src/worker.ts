@@ -1,0 +1,23 @@
+import {
+  assertEnvBindings,
+  assertNotPreviewInProd,
+} from "@aquilla/errors/env-assertion"
+
+interface Env extends Record<string, unknown> {
+  ENV: string
+  PR?: string
+  ASSETS: Fetcher
+}
+
+const PRODUCTION_HOSTS = new Set<string>(["aquilla.app", "www.aquilla.app"])
+
+export default {
+  async fetch(req: Request, env: Env): Promise<Response> {
+    assertEnvBindings(env, env.ENV)
+    const url = new URL(req.url)
+    if (PRODUCTION_HOSTS.has(url.hostname)) {
+      assertNotPreviewInProd(env, url.hostname)
+    }
+    return env.ASSETS.fetch(req)
+  },
+}

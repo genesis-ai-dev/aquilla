@@ -12,7 +12,13 @@ Phase 1B introduced the `apps/` + `packages/` chassis per spec §21-monorepo.md.
 - `routes.json` (repo root) — authoritative slug → URL-path registry. Adding an app means editing this file plus dropping a folder under `apps/`.
 - `seed.sql` (repo root) — canonical preview test cast (alice/bob/carol/dave) applied to every per-PR D1 and the shared `aquilla-dev`.
 
-Existing top-level workers (`auth-worker/`, `sync-worker/`, `chat-worker/`, `cors-proxy/`) stay put until Phase 4's rename pass; Phase 1B is scaffold-only.
+**Apps populated:** `front-door` (1B), `login`/`signup`/`reset` (3b), `projects`/`billing`/`org` (3c), `frontier-server` (3e — relocated from `auth-worker/`). Remaining stubs: `import`, `export`, `migrate`, `workspace`. The workspace SPA in `src/` remains the running app until Phase 3a fully extracts it into `apps/workspace/`; relocated routes (`/`, `/project/:id/settings`, `/join/:token`, `/onboarding`, `/settings`, `/members`) have been removed from `src/App.tsx` and now live under their discrete-app paths.
+
+**Packages populated:** `@aquilla/errors` (1B), `@aquilla/api-client` (3c — `fetchProjectList`, `fetchProject`, `fetchProjectMembers`, `fetchUserOrgs`, `fetchOrgMembers`, invite primitives), `@aquilla/auth-client` (3c minimal stub — `getJwt`/`decodeUsername`/`redirectToLogin`; 3b's PR replaces with the full implementation), `@aquilla/ui` (3c minimal subset — `Card`, `Skeleton`, `Button`; 3b's PR adds the full shadcn surface).
+
+Cross-app auth state assumption: the JWT lives in a parent-domain cookie (`aquilla_jwt` on `.aquilla.app`, `.dev.aquilla.app`, `.pr-<N>.aquilla.app`) so every discrete app under aquilla.app reads the same session. On localhost the login app writes `localStorage['aquilla:dev-jwt']` instead (no parent domain available for cookies).
+
+Existing top-level workers (`sync-worker/`, `chat-worker/`, `cors-proxy/`) stay put until Phase 4's rename pass.
 
 ## Project Overview
 

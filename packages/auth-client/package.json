@@ -1,10 +1,20 @@
 {
   "name": "@aquilla/auth-client",
   "private": true,
-  "version": "0.0.0",
-  "description": "JWT + parent-domain cookie reader. The only writer is apps/login/; every other app is a reader.",
+  "version": "0.1.0-pre",
+  "description": "Parent-domain JWT cookie reader. The login app is the only writer; every other app is a reader. Stub populated by Phase 3c so consumer apps can compile; 3b ships the real implementation.",
   "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
   "scripts": {
-    "build": "echo 'stub — populated in Phase 3'"
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "typescript": "~6.0.2",
+    "vitest": "^4.1.4"
   }
 }

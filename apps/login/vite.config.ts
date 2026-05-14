@@ -20,7 +20,7 @@ export default defineConfig({
     },
   },
   build: {
-    outDir: "dist",
+    outDir: "dist/login",
     emptyOutDir: true,
   },
   test: {

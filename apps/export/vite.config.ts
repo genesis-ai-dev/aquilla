@@ -8,7 +8,7 @@ import tailwindcss from "@tailwindcss/vite"
 export default defineConfig({
   base: "/export/",
   plugins: [react(), tailwindcss()],
-  build: { outDir: "dist" },
+  build: { outDir: "dist/export" },
   test: {
     environment: "happy-dom",
     passWithNoTests: true,

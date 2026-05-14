@@ -1,0 +1,124 @@
+name: Deploy apps to production
+
+# Push to main → matrix-deploy each populated app under apps/* with
+# `wrangler deploy --env=production`. Mirrors deploy-all-apps.yml's
+# discovery + matrix structure but for prod, not per-PR previews.
+#
+# Skips:
+#   - apps/workspace  — its routes (/project/:id, /, /debug) are served
+#                       by the legacy Pages build at the apex; no /w/*
+#                       basename wired yet (vite base + BrowserRouter).
+#   - apps/front-door — the apex `/` is served by Pages (_redirects bounces
+#                       / → /projects). Re-enabling front-door would need
+#                       an `aquilla.app/*` route claim that fully replaces
+#                       Pages, which is a bigger change.
+#   - apps/frontier-server — already deployed by deploy-workers.yml.
+#
+# So this workflow handles the 9 SPA apps with discrete /<slug>/* mounts:
+# billing, export, import, login, migrate, org, projects, reset, signup.
+#
+# `pnpm build` runs per-app before `wrangler deploy` (the Worker's
+# [assets] binding requires dist/ to exist). The route claim in each
+# wrangler.toml `[env.production]` makes Workers Routes dispatch
+# `aquilla.app/<slug>/*` to the worker — Pages keeps serving everything
+# else.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'apps/billing/**'
+      - 'apps/export/**'
+      - 'apps/import/**'
+      - 'apps/login/**'
+      - 'apps/migrate/**'
+      - 'apps/org/**'
+      - 'apps/projects/**'
+      - 'apps/reset/**'
+      - 'apps/signup/**'
+      - 'packages/**'
+      - 'pnpm-lock.yaml'
+      - '.github/workflows/deploy-apps-prod.yml'
+  workflow_dispatch:
+    inputs:
+      app:
+        description: 'Which app to deploy (all, or a single slug like "projects")'
+        required: false
+        default: 'all'
+
+concurrency:
+  group: deploy-apps-prod
+  cancel-in-progress: false
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      apps: ${{ steps.matrix.outputs.apps }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build deploy matrix
+        id: matrix
+        run: |
+          set -euo pipefail
+          # The 9 user-facing SPA apps with discrete /<slug>/* mounts.
+          # Hand-curated: front-door + frontier-server + workspace are
+          # excluded per the workflow header.
+          all=(billing export import login migrate org projects reset signup)
+          requested='${{ github.event.inputs.app }}'
+          if [ -n "$requested" ] && [ "$requested" != "all" ]; then
+            # workflow_dispatch with a single slug → only that app.
+            json=$(printf '%s\n' "$requested" | jq -R . | jq -s -c .)
+          else
+            json=$(printf '%s\n' "${all[@]}" | jq -R . | jq -s -c .)
+          fi
+          echo "apps=$json" >> "$GITHUB_OUTPUT"
+
+  deploy-app:
+    needs: plan
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        app: ${{ fromJson(needs.plan.outputs.apps) }}
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: 6a80496d1e59948a9cbaa3c643ba81d7
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+
+      - name: Build app
+        run: pnpm --filter @aquilla/${{ matrix.app }} build
+
+      - name: Deploy
+        working-directory: apps/${{ matrix.app }}
+        run: pnpm exec wrangler deploy --env=production
+
+      - name: Smoke-test prod URL
+        run: |
+          slug='${{ matrix.app }}'
+          url="https://aquilla.app/${slug}/"
+          echo "Smoke-testing $url"
+          # Workers Routes propagation can take a few seconds after deploy.
+          for attempt in 1 2 3 4 5; do
+            code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 20 "$url" || echo "000")
+            echo "  attempt $attempt: HTTP $code"
+            case "$code" in
+              2*|3*|401|403)
+                echo "::notice::$slug is live ($code)"
+                exit 0
+                ;;
+            esac
+            sleep 10
+          done
+          echo "::error::Smoke test failed for $slug (HTTP $code) after retries"
+          exit 1

@@ -27,4 +27,6 @@ export type { AlertProps } from "./alert"
 export { FormRow } from "./form-row"
 export type { FormRowProps } from "./form-row"
 
+export { Skeleton } from "./skeleton"
+
 export { cn } from "./cn"

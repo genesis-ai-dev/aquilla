@@ -22,9 +22,13 @@ export default defineConfig({
     strictPort: false,
   },
   build: {
-    // Each app keeps its own dist/. The Worker's [assets] binding (wrangler
-    // .toml `directory = "./dist"`) consumes this.
-    outDir: "dist",
+    // Emit into dist/projects/ so the on-disk layout matches the URL
+    // prefix Workers Routes claims (aquilla.app/projects/*). The Workers
+    // Assets binding maps a request at /projects/foo.js to
+    // <directory>/projects/foo.js — without the nested folder, every
+    // /projects/assets/*.js request would fall through to the SPA-fallback
+    // index.html and the page would load with broken script tags.
+    outDir: "dist/projects",
     emptyOutDir: true,
   },
   test: {

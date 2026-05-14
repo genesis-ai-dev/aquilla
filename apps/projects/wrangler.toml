@@ -35,7 +35,7 @@ VITE_SYNC_WORKER_HOST = "codex-sync-worker.blue-darkness-7674.workers.dev"
 [env.production]
 name = "aquilla-prod-projects"
 account_id = "6a80496d1e59948a9cbaa3c643ba81d7"
-# routes = ["aquilla.app/projects/*"]  # TODO: uncomment after aquilla.app zone is provisioned in Cloudflare
+routes = ["aquilla.app/projects/*"]  # Claimed in production via Workers Routes (zone aquilla.app on CF account)
 
 [env.production.assets]
 directory = "./dist"

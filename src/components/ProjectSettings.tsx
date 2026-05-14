@@ -20,6 +20,7 @@ import { ValidationSettingsSection } from "./ProjectSettings/ValidationSettingsS
 import { HealthSettingsSection } from "./ProjectSettings/HealthSettingsSection"
 import { AudioMediaStrategySection } from "./ProjectSettings/AudioMediaStrategySection"
 import { VoiceLibrarySection } from "./ProjectSettings/VoiceLibrarySection"
+import { SourceLinkingPanel } from "./ProjectSettings/SourceLinkingPanel"
 import { ApiKeyField } from "./ApiKeyField"
 import type { HealthSettings } from "@/lib/parsers/types"
 import { readValidationCount, readValidationCountAudio } from "@/lib/progress/read-validation-count"
@@ -292,6 +293,13 @@ export function ProjectSettings() {
             <p className="mt-1 text-xs text-muted-foreground">Used as author name in translation history.</p>
           </CardContent>
         </Card>
+
+        {id && (
+          <SourceLinkingPanel
+            projectId={id}
+            roleLevel={project?.syncRole?.level ?? null}
+          />
+        )}
 
         <Card>
           <CardHeader>

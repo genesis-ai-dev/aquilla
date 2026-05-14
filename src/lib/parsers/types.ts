@@ -272,6 +272,15 @@ export interface ProjectRecord {
     source: string
     fetchedAt: string
   }
+  /** AD-9 source-project link (Phase 5). Self-FK to another project the
+   *  source-side cells are read from. Null / undefined = self-contained
+   *  or source-only (those two shapes are distinguished by `targetLanguage`).
+   *  Populated when the auth-worker's project endpoints start surfacing
+   *  the column; absent until then. */
+  sourceProjectId?: string | null
+  /** Optional display name of the upstream — purely cosmetic, populated
+   *  when known (e.g. from the user's accessible projects list). */
+  sourceProjectName?: string
   usage?: ProjectUsage
 }
 

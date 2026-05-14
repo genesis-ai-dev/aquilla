@@ -1,25 +1,25 @@
 // Pure handler for AuthorizedEvent<'file.create'>.
 //
-// Writes the canonical event row PLUS a `files` UPSERT so the file shows up
-// in the project listing immediately after import — before any user opens
-// the file's Durable Object. Without this, imports could land cell.commit
-// events but the file wouldn't appear in the sidebar until the FileSync
-// DO ran its first onSave (which only happens after a client connects).
-//
-// UPSERT semantics: name/file_type/languages from the event always overwrite
-// (these are administrative fields). Counters (cell_count, approved_count,
+// Writes the canonical event row PLUS a `files` UPSERT so the file shows
+// up in the project listing immediately after import — before any user
+// opens the file. UPSERT semantics: administrative fields (name, type,
+// languages) always overwrite; counters (cell_count, approved_count,
 // word_count, last_edit_at) are NOT touched here — they're maintained by
-// the cell.commit projection path and projection.writeProjection. So a
-// re-emitted file.create after edits have happened doesn't reset the rollups.
+// the cell-event projection path.
 
 import type { AuthorizedEvent } from '../authorize'
 import type { RealtimeMessage, ProjectionTable } from '../realtime'
-import type { DispatchResult } from './cell-commit'
+import type { DispatchResult } from './types'
+
+export interface HandleFileCreateOptions {
+  serverSeq: number
+}
 
 export function handleFileCreate(
   db: D1Database,
   authed: AuthorizedEvent<'file.create'>,
   serverTs: number,
+  opts: HandleFileCreateOptions,
 ): DispatchResult {
   const { event, claims } = authed
 
@@ -30,9 +30,9 @@ export function handleFileCreate(
   const eventInsert = db
     .prepare(
       `INSERT OR IGNORE INTO events (
-        id, schema_version, project_id, file_id, cell_id, kind, author,
-        payload, client_ts, server_ts
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        id, schema_version, project_id, file_id, cell_id, parent_id, kind,
+        author, payload, client_ts, server_ts, server_seq
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .bind(
       event.id,
@@ -40,16 +40,15 @@ export function handleFileCreate(
       event.projectId,
       event.fileId,
       null,
+      event.parentId ?? null,
       event.kind,
       claims.username,
       JSON.stringify(event.payload),
       event.clientTs,
       serverTs,
+      opts.serverSeq,
     )
 
-  // UPSERT the files row. Counters left at zero on first insert and untouched
-  // on conflict so cell.commit projections (which DO maintain counters via
-  // projection.writeProjection) don't get stomped by a later file.create.
   const fileUpsert = db
     .prepare(
       `INSERT INTO files (

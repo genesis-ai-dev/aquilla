@@ -20,7 +20,7 @@ import * as Y from "yjs"
 import { routePartykitRequest } from "partyserver"
 import { verifyTokenForDoc, shouldBeReadOnly } from "./auth"
 export { ProjectSync } from "./project-do"
-import { projectDoc, writeProjection, diffProjection } from "./projection"
+import { projectDoc, writeProjection } from "./projection"
 import { handleAdminRequest } from "./admin"
 import { handleAudioRequest } from "./audio"
 import {
@@ -34,6 +34,10 @@ import { handleEventsWriteRequest } from "./events/route"
 import { handleEventsReadRequest } from "./events/read-route"
 import { handleValidatorsReadRequest } from "./events/validators-read-route"
 import { handleCellsAuditReadRequest } from "./events/cells-audit-read-route"
+import { handleFilesReadRequest } from "./events/files-read-route"
+import { handleCellsReadRequest } from "./events/cells-read-route"
+import { handleCellHistoryReadRequest } from "./events/cell-history-read-route"
+import { handleSearchReadRequest } from "./events/search-route"
 import { handleCorsPreflight, withCors } from "./cors"
 import { notifyFileDo } from "./archive-broadcast"
 import { parseRealtimeMessage } from "./events/realtime"
@@ -258,10 +262,6 @@ export class FileSync extends YServer {
   // a heuristic for "should we kick off compaction now?"; R2 is truth.
   private tailCount = 0
   private compactionInFlight = false
-  // Per-cell fingerprints from the last successful projection. Lets onSave
-  // skip D1 UPSERTs for cells that haven't changed since the previous tail
-  // write. Empty on cold start → first onSave projects everything, then diffs.
-  private projectedFingerprints = new Map<string, string>()
   // State vector at the last successful tail write. Seeded from the doc in
   // onLoad so the first post-cold-start save doesn't redundantly emit the
   // full state. Each onSave writes only updates since this vector, keeping
@@ -287,9 +287,10 @@ export class FileSync extends YServer {
     }
     this.tailCount = keys.length
 
-    // Phase 4d cold-start hydration: when neither the snapshot nor any tail
-    // produced cells (legacy gitlab projects imported as `cell.commit` events
-    // straight to D1, never opened before), replay events to seed the doc.
+    // Cold-start hydration: when neither the snapshot nor any tail produced
+    // cells (e.g. projects imported as source.cell.create / target.cell.commit
+    // events straight to D1, never opened before), replay events to seed the
+    // doc.
     // Gated on `cells` being empty so a partially-loaded doc from R2 is left
     // alone — Yjs would not merge replayed commits cleanly with existing CRDT
     // state, and the live event stream is the path for additive updates after
@@ -310,7 +311,7 @@ export class FileSync extends YServer {
           const update = Y.encodeStateAsUpdate(this.document)
           await this.env.SNAPSHOTS.put(snapshotKey(this.env, projectId, fileId), update)
           console.log(
-            `[FileSync.onLoad] hydrated ${this.name}: ${result.cellCount} cells from ${result.cellCommitsApplied} commits`,
+            `[FileSync.onLoad] hydrated ${this.name}: ${result.cellCount} cells from ${result.cellEventsApplied} events`,
           )
         }
       } catch (err) {
@@ -400,11 +401,11 @@ export class FileSync extends YServer {
       return Response.json({ ok: true })
     }
 
-    // Phase 4d hot-update: events route POSTs cell.commit payloads here
-    // after the D1 batch lands so cells imported into D1 appear in any
-    // currently-open editor without a reload. Mode is `new-only` —
-    // existing cells are left alone (active-editor edits win), so this
-    // safely co-exists with the live Yjs CRDT path.
+    // Hot-update path: accepts a target.cell.commit / source.cell.commit
+    // payload and applies it to the live Y.Doc in `new-only` mode so an
+    // import seeding cells without a reload doesn't clobber an active
+    // editor's draft. The events route does not currently call this — the
+    // post-AD-2 reshape decoupled the live doc from the cells projection.
     if (request.method === "POST" && url.pathname === "/__apply-event") {
       const auth = request.headers.get("Authorization") ?? ""
       const expected = this.env.SYNC_SECRET_KEY
@@ -419,7 +420,9 @@ export class FileSync extends YServer {
       } catch {
         return new Response("bad request", { status: 400 })
       }
-      if (body.kind !== "cell.commit") {
+      // Accept either of the new commit kinds; older "cell.commit" callers
+      // are explicitly unsupported (no users, no backcompat per AD-2 reshape).
+      if (body.kind !== "target.cell.commit" && body.kind !== "source.cell.commit") {
         return Response.json({ ok: true, applied: false, reason: "non-commit kind" })
       }
       if (typeof body.cellId !== "string" || !body.payload || typeof body.payload !== "object") {
@@ -449,21 +452,15 @@ export class FileSync extends YServer {
     this.lastFlushedSV = encoded.newSV
     this.tailCount += 1
 
-    // Keep the CQRS read model in sync. Projection failure is non-fatal — the
-    // tail write is durable and the next onSave (or compaction-time reconcile)
-    // will retry. Skip when AQUILLA_DB isn't bound (spike / dev without D1).
+    // Under AD-2 the cells projection is driven by the event log, not by
+    // Y.Doc onSave. We still write a file-row rollup so the dashboard's
+    // file listing stays current without a full event scan; failures are
+    // non-fatal (the listing falls back to event-driven counts).
     if (this.env.AQUILLA_DB) {
       try {
-        const full = projectDoc(projectId, fileId, this.document)
-        // Only UPSERT cells whose projected fields differ from last tick.
-        // File rollup is always written (single cheap row).
-        const diffed = diffProjection(full, this.projectedFingerprints)
-        await writeProjection(this.env.AQUILLA_DB, diffed, key)
+        const result = projectDoc(projectId, fileId, this.document)
+        await writeProjection(this.env.AQUILLA_DB, result, key)
       } catch (err) {
-        // On failure, clear the fingerprint cache so the next onSave does a
-        // full projection — otherwise a D1 error + cache retention would
-        // leave D1 permanently behind until the DO evicts.
-        this.projectedFingerprints.clear()
         console.warn(`projection failed for ${this.name}:`, err)
       }
     }
@@ -657,6 +654,14 @@ export default {
     if (validatorsReadResponse) return withCors(validatorsReadResponse, request)
     const cellsAuditReadResponse = await handleCellsAuditReadRequest(request, env)
     if (cellsAuditReadResponse) return withCors(cellsAuditReadResponse, request)
+    const filesReadResponse = await handleFilesReadRequest(request, env)
+    if (filesReadResponse) return withCors(filesReadResponse, request)
+    const cellsReadResponse = await handleCellsReadRequest(request, env)
+    if (cellsReadResponse) return withCors(cellsReadResponse, request)
+    const cellHistoryResponse = await handleCellHistoryReadRequest(request, env)
+    if (cellHistoryResponse) return withCors(cellHistoryResponse, request)
+    const searchResponse = await handleSearchReadRequest(request, env)
+    if (searchResponse) return withCors(searchResponse, request)
     const eventsWriteResponse = await handleEventsWriteRequest(request, env)
     if (eventsWriteResponse) return withCors(eventsWriteResponse, request)
 

@@ -1,3 +1,11 @@
+// Phase 2b: this hook builds an *in-memory* DualIndex from `CellData[]`
+// — the array already comes from the sync-worker projection via useCells,
+// so no Y.Doc dependency here. Distinct from the user-facing project
+// search (`useWorkspaceSearch` — server FTS5) because this index serves
+// LLM example retrieval (branching-search semantics over source values for
+// few-shot completion), which is a per-call hot path that can't tolerate a
+// network round-trip. Kept client-side for that latency reason.
+
 import { useEffect, useRef, useCallback } from "react"
 import { DualIndex, type ScoredPair } from "@/lib/search/dual-index"
 import type { FileReference } from "@/lib/parsers/types"

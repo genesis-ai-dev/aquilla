@@ -21,6 +21,12 @@ export interface ProjectRow {
   org_id: number | null
   created_by: number
   archived_at: string | null
+  /**
+   * AD-9 source-project link. Column is created by Phase 1A's
+   * 0004_projects_source_link.sql; Phase 1C tests opt into it via this
+   * field. Defaults to null for older seeded rows.
+   */
+  source_project_id?: string | null
 }
 
 export interface ProjectMemberRow {
@@ -63,6 +69,42 @@ export interface OrgMemberRow {
   last_active_at: string | null
 }
 
+/** Project-settings row (Phase 1C migration 0005). */
+export interface ProjectSettingsRow {
+  project_id: string
+  settings: string
+  version: number
+  updated_at: string | null
+  updated_by: number | null
+}
+
+/** Generic event log row used by Phase 1C source-linking event emission. */
+export interface EventRow {
+  id: string
+  schema_version: number
+  project_id: string
+  file_id: string | null
+  cell_id: string | null
+  kind: string
+  author: string
+  payload: string
+  client_ts: number
+  server_ts: number
+}
+
+/**
+ * AD-9 cells projection (per spec §"Indicative schemas"). Phase 1C
+ * snapshot-source-cells reads this shape.
+ */
+export interface CellProjectionRow {
+  project_id: string
+  file_id: string
+  cell_id: string
+  side: "source" | "target"
+  value: string
+  value_html: string | null
+}
+
 export interface FakeTables {
   users: UserRow[]
   projects: ProjectRow[]
@@ -71,6 +113,12 @@ export interface FakeTables {
   password_reset_tokens: ResetTokenRow[]
   organizations: OrganizationRow[]
   org_members: OrgMemberRow[]
+  /** Phase 1C: project_settings (migration 0005). */
+  project_settings: ProjectSettingsRow[]
+  /** Phase 1C: event log writes (link-source / source.cell.commit bursts). */
+  events: EventRow[]
+  /** Phase 1A's AD-9 cells projection. Phase 1C reads it for source snapshots. */
+  cells: CellProjectionRow[]
 }
 
 export type FakeD1 = D1Database & {
@@ -81,12 +129,18 @@ export type FakeD1 = D1Database & {
 export function makeFakeD1(initial: Partial<FakeTables> = {}): FakeD1 {
   const tables: FakeTables = {
     users: initial.users ?? [],
-    projects: initial.projects ?? [],
+    projects: (initial.projects ?? []).map((p) => ({
+      ...p,
+      source_project_id: p.source_project_id ?? null,
+    })),
     project_members: initial.project_members ?? [],
     project_invites: initial.project_invites ?? [],
     password_reset_tokens: initial.password_reset_tokens ?? [],
     organizations: initial.organizations ?? [],
     org_members: initial.org_members ?? [],
+    project_settings: initial.project_settings ?? [],
+    events: initial.events ?? [],
+    cells: initial.cells ?? [],
   }
   const issued: Array<{ sql: string; args: unknown[] }> = []
 
@@ -94,7 +148,10 @@ export function makeFakeD1(initial: Partial<FakeTables> = {}): FakeD1 {
     return sql.replace(/\s+/g, " ").trim()
   }
 
-  function exec(sql: string, args: unknown[]): { first: unknown; results: unknown[] } {
+  function exec(
+    sql: string,
+    args: unknown[],
+  ): { first: unknown; results: unknown[]; changes?: number } {
     const n = norm(sql)
     issued.push({ sql: n, args })
 
@@ -160,9 +217,12 @@ export function makeFakeD1(initial: Partial<FakeTables> = {}): FakeD1 {
     }
 
     // ─── SELECT project_invites ──────────────────────────────────────
+    // Returns ALL rows sharing the token so the multi-project-invite
+    // surface (Phase 1C) works. `first` is rows[0] which is the correct
+    // value for the single-project legacy callers that .first()-ed.
     if (n.startsWith("SELECT token, project_id, role_level, created_by, created_at, expires_at, used_by, used_at FROM project_invites WHERE token = ?")) {
-      const inv = tables.project_invites.find((x) => x.token === args[0])
-      return { first: inv ?? null, results: inv ? [inv] : [] }
+      const rows = tables.project_invites.filter((x) => x.token === args[0])
+      return { first: rows[0] ?? null, results: rows }
     }
 
     // ─── SELECT password_reset_tokens ─────────────────────────────────
@@ -196,6 +256,7 @@ export function makeFakeD1(initial: Partial<FakeTables> = {}): FakeD1 {
         org_id,
         created_by,
         archived_at: null,
+        source_project_id: null,
       })
       return { first: null, results: [] }
     }
@@ -278,7 +339,12 @@ export function makeFakeD1(initial: Partial<FakeTables> = {}): FakeD1 {
       }
       return { first: null, results: [] }
     }
-    if (n.startsWith("UPDATE project_invites SET used_by = ?, used_at = CURRENT_TIMESTAMP WHERE token = ?")) {
+    if (
+      n.startsWith("UPDATE project_invites SET used_by = ?, used_at = CURRENT_TIMESTAMP WHERE token = ?") &&
+      // Reject the longer multi-invite form — that's handled by the
+      // Phase 1C branch below to stamp a specific (token, project_id) row.
+      !n.includes("AND project_id = ?")
+    ) {
       const [used_by, token] = args as [number, string]
       const inv = tables.project_invites.find((x) => x.token === token)
       if (inv) {
@@ -304,6 +370,233 @@ export function makeFakeD1(initial: Partial<FakeTables> = {}): FakeD1 {
       return { first: null, results: [] }
     }
 
+    // ───────────────────────────────────────────────────────────────────
+    // Phase 1C: project_settings (migration 0005)
+    // ───────────────────────────────────────────────────────────────────
+    if (
+      n.startsWith(
+        "SELECT project_id, settings, version, updated_at, updated_by FROM project_settings WHERE project_id = ?",
+      )
+    ) {
+      const row = tables.project_settings.find((x) => x.project_id === args[0])
+      return { first: row ?? null, results: row ? [row] : [] }
+    }
+    if (
+      n.startsWith(
+        "INSERT INTO project_settings (project_id, settings, version, updated_by)",
+      )
+    ) {
+      const [project_id, settings, version, updated_by] = args as [
+        string,
+        string,
+        number,
+        number,
+      ]
+      const existing = tables.project_settings.find(
+        (x) => x.project_id === project_id,
+      )
+      if (existing) {
+        throw new Error("UNIQUE constraint failed: project_settings.project_id")
+      }
+      tables.project_settings.push({
+        project_id,
+        settings,
+        version,
+        updated_at: new Date().toISOString(),
+        updated_by,
+      })
+      return { first: null, results: [] }
+    }
+    if (
+      n.startsWith(
+        "UPDATE project_settings SET settings = ?, version = version + 1, updated_at = CURRENT_TIMESTAMP, updated_by = ? WHERE project_id = ? AND version = ?",
+      )
+    ) {
+      const [settings, updated_by, project_id, ifVersion] = args as [
+        string,
+        number,
+        string,
+        number,
+      ]
+      const row = tables.project_settings.find(
+        (x) => x.project_id === project_id && x.version === ifVersion,
+      )
+      if (!row) {
+        return { first: null, results: [], changes: 0 }
+      }
+      row.settings = settings
+      row.version += 1
+      row.updated_at = new Date().toISOString()
+      row.updated_by = updated_by
+      return { first: null, results: [], changes: 1 }
+    }
+
+    // ───────────────────────────────────────────────────────────────────
+    // Phase 1C: source-linking (depends on Phase 1A's source_project_id
+    // column on projects + 1A's events / cells projection schema).
+    // ───────────────────────────────────────────────────────────────────
+    if (
+      n.startsWith(
+        "SELECT id, name, source_project_id, archived_at FROM projects WHERE id = ?",
+      )
+    ) {
+      const p = tables.projects.find((x) => x.id === args[0])
+      if (!p) return { first: null, results: [] }
+      const out = {
+        id: p.id,
+        name: p.name,
+        source_project_id: p.source_project_id ?? null,
+        archived_at: p.archived_at,
+      }
+      return { first: out, results: [out] }
+    }
+    if (
+      n.startsWith("SELECT source_project_id FROM projects WHERE id = ?")
+    ) {
+      const p = tables.projects.find((x) => x.id === args[0])
+      if (!p) return { first: null, results: [] }
+      const out = { source_project_id: p.source_project_id ?? null }
+      return { first: out, results: [out] }
+    }
+    if (
+      n.startsWith("SELECT id FROM projects WHERE source_project_id = ?")
+    ) {
+      const rows = tables.projects
+        .filter((x) => x.source_project_id === args[0])
+        .map((x) => ({ id: x.id }))
+      return { first: rows[0] ?? null, results: rows }
+    }
+    if (
+      n.startsWith(
+        "UPDATE projects SET source_project_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+      )
+    ) {
+      const [sourceProjectId, id] = args as [string | null, string]
+      const p = tables.projects.find((x) => x.id === id)
+      if (p) p.source_project_id = sourceProjectId
+      return { first: null, results: [] }
+    }
+    if (
+      n.startsWith(
+        "UPDATE projects SET source_project_id = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+      )
+    ) {
+      const [id] = args as [string]
+      const p = tables.projects.find((x) => x.id === id)
+      if (p) p.source_project_id = null
+      return { first: null, results: [] }
+    }
+    if (n.startsWith("DELETE FROM projects WHERE id = ?")) {
+      tables.projects = tables.projects.filter((x) => x.id !== args[0])
+      return { first: null, results: [] }
+    }
+
+    // ───────────────────────────────────────────────────────────────────
+    // Phase 1C: events writes (link-source + source.cell.commit burst).
+    // 1A owns the events table; the FakeD1 stores them here so tests can
+    // assert the durable record exists.
+    // ───────────────────────────────────────────────────────────────────
+    if (n.startsWith("INSERT INTO events")) {
+      const [id, project_id, ...rest] = args as unknown[]
+      // Match the two shapes used by source-linking.ts:
+      //   project-scope:  (id, project_id, author, payload, client_ts, server_ts)
+      //   cell-scope:     (id, project_id, file_id, cell_id, author, payload, client_ts, server_ts)
+      if (rest.length === 4) {
+        const [author, payload, client_ts, server_ts] = rest as [
+          string,
+          string,
+          number,
+          number,
+        ]
+        const kindMatch = n.match(/'([^']+)'/)
+        tables.events.push({
+          id: id as string,
+          schema_version: 1,
+          project_id: project_id as string,
+          file_id: null,
+          cell_id: null,
+          kind: kindMatch ? kindMatch[1] : "unknown",
+          author,
+          payload,
+          client_ts,
+          server_ts,
+        })
+      } else {
+        const [file_id, cell_id, author, payload, client_ts, server_ts] = rest as [
+          string,
+          string,
+          string,
+          string,
+          number,
+          number,
+        ]
+        const kindMatch = n.match(/'([^']+)'/)
+        tables.events.push({
+          id: id as string,
+          schema_version: 1,
+          project_id: project_id as string,
+          file_id,
+          cell_id,
+          kind: kindMatch ? kindMatch[1] : "unknown",
+          author,
+          payload,
+          client_ts,
+          server_ts,
+        })
+      }
+      return { first: null, results: [] }
+    }
+
+    // ───────────────────────────────────────────────────────────────────
+    // Phase 1C: cells read for source-snapshot burst.
+    // ───────────────────────────────────────────────────────────────────
+    if (
+      n.startsWith(
+        "SELECT file_id, cell_id, value, value_html FROM cells WHERE project_id = ? AND side = 'source'",
+      )
+    ) {
+      const rows = tables.cells
+        .filter((x) => x.project_id === args[0] && x.side === "source")
+        .map((x) => ({
+          file_id: x.file_id,
+          cell_id: x.cell_id,
+          value: x.value,
+          value_html: x.value_html,
+        }))
+      return { first: rows[0] ?? null, results: rows }
+    }
+
+    // ───────────────────────────────────────────────────────────────────
+    // Phase 1C: multi-invite token reads + updates. The
+    // SELECT-by-token-returning-all-rows behavior is implemented in the
+    // earlier project_invites branch (returns the full filtered list so
+    // both .first() and .all() callers work).
+    // ───────────────────────────────────────────────────────────────────
+    if (
+      n.startsWith(
+        "SELECT id, name, org_id, created_by, archived_at FROM projects WHERE id IN (",
+      )
+    ) {
+      const ids = args as string[]
+      const rows = tables.projects.filter((p) => ids.includes(p.id))
+      return { first: rows[0] ?? null, results: rows }
+    }
+    if (
+      n.startsWith(
+        "UPDATE project_invites SET used_by = ?, used_at = CURRENT_TIMESTAMP WHERE token = ? AND project_id = ?",
+      )
+    ) {
+      const [used_by, token, project_id] = args as [number, string, string]
+      const inv = tables.project_invites.find(
+        (x) => x.token === token && x.project_id === project_id,
+      )
+      if (inv) {
+        inv.used_by = used_by
+        inv.used_at = new Date().toISOString()
+      }
+      return { first: null, results: [] }
+    }
+
     throw new Error(`FakeD1: unsupported SQL: ${n}`)
   }
 
@@ -323,10 +616,12 @@ export function makeFakeD1(initial: Partial<FakeTables> = {}): FakeD1 {
         } as unknown as D1Result<T>
       },
       run: async () => {
-        exec(sql, args)
+        const r = exec(sql, args)
+        const meta: Record<string, unknown> = {}
+        if (typeof r.changes === "number") meta.changes = r.changes
         return {
           success: true,
-          meta: {} as Record<string, unknown>,
+          meta,
           results: [] as unknown[],
         } as unknown as D1Result
       },

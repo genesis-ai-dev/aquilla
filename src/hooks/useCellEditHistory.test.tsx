@@ -1,276 +1,197 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
-import { renderHook, waitFor } from "@testing-library/react"
-import React from "react"
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
-import { useCellEditHistory } from "./useCellEditHistory"
+// Phase 2b tests for useCellEditHistory. Uses the same mock-the-wrapper
+// pattern as useCells.test.tsx — no React Query, no global fetch mocking.
 
-// ---------------------------------------------------------------------------
-// Mocks
-// ---------------------------------------------------------------------------
+import { describe, it, expect, vi, beforeEach } from "vitest"
+import { renderHook, waitFor, act } from "@testing-library/react"
+import type { CellHistoryEvent } from "@/lib/sync/history-read-types"
 
-vi.mock("@/lib/sync/sync-worker-url", () => ({
-  syncWorkerHttpOrigin: () => "https://sync.example.com",
+const fetchCellHistoryMock = vi.fn<
+  (
+    projectId: string,
+    fileId: string,
+    cellId: string,
+    jwt: string,
+    opts?: { limit?: number },
+  ) => Promise<CellHistoryEvent[]>
+>()
+
+vi.mock("@/lib/sync/history-read", () => ({
+  fetchCellHistory: (...args: unknown[]) =>
+    fetchCellHistoryMock(...(args as Parameters<typeof fetchCellHistoryMock>)),
 }))
 
-const originalFetch = global.fetch
+import { useCellEditHistory } from "./useCellEditHistory"
 
-beforeEach(() => {
-  vi.restoreAllMocks()
-})
-
-afterEach(() => {
-  global.fetch = originalFetch
-})
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-function makeWrapper() {
-  const queryClient = new QueryClient({
-    defaultOptions: {
-      queries: { retry: false },
-    },
-  })
-  const Wrapper = ({ children }: { children: React.ReactNode }) =>
-    React.createElement(QueryClientProvider, { client: queryClient }, children)
-  return Wrapper
+function makeEvent(
+  over: Partial<CellHistoryEvent> & Pick<CellHistoryEvent, "id" | "serverSeq">,
+): CellHistoryEvent {
+  return {
+    parentId: null,
+    kind: "target.cell.commit",
+    author: "alice",
+    clientTs: 1700000000000,
+    serverTs: 1700000000000 + over.serverSeq * 1000,
+    payload: { value: "ed" },
+    ...over,
+  }
 }
 
-const TOKEN_FN = vi.fn().mockResolvedValue("test-token")
-
-/** Server returns newest-first (descending serverTs). */
-const SERVER_EVENTS = [
-  {
-    kind: "cell.commit",
-    serverTs: 1700000030000,
-    author: "alice",
-    payload: { value: "third edit" },
-  },
-  {
-    kind: "cell.commit",
-    serverTs: 1700000020000,
-    author: "bob",
-    payload: { value: "second edit" },
-  },
-  {
-    kind: "cell.commit",
-    serverTs: 1700000010000,
-    author: "alice",
-    payload: { value: "first edit" },
-  },
+const SERVER_EVENTS: CellHistoryEvent[] = [
+  // newest first — matches server output
+  makeEvent({ id: "e3", serverSeq: 3, payload: { value: "third edit" } }),
+  makeEvent({ id: "e2", serverSeq: 2, payload: { value: "second edit" }, author: "bob" }),
+  makeEvent({ id: "e1", serverSeq: 1, payload: { value: "first edit" } }),
 ]
 
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
+const getTokenForFile = vi.fn().mockResolvedValue("token-x")
 
-describe("useCellEditHistory", () => {
-  it("returns history entries in oldest-first order (reversed from server)", async () => {
-    global.fetch = vi.fn().mockResolvedValueOnce(
-      new Response(JSON.stringify({ events: SERVER_EVENTS }), { status: 200 })
-    ) as unknown as typeof fetch
+beforeEach(() => {
+  fetchCellHistoryMock.mockReset()
+  getTokenForFile.mockClear()
+  getTokenForFile.mockResolvedValue("token-x")
+})
 
-    const { result } = renderHook(
-      () =>
-        useCellEditHistory({
-          enabled: true,
-          fileId: "file-abc",
-          cellId: "cell-1",
-          getTokenForFile: TOKEN_FN,
-        }),
-      { wrapper: makeWrapper() }
+describe("useCellEditHistory (Phase 2b)", () => {
+  it("returns history entries oldest-first (reversed from server)", async () => {
+    fetchCellHistoryMock.mockResolvedValueOnce(SERVER_EVENTS)
+    const { result } = renderHook(() =>
+      useCellEditHistory({
+        enabled: true,
+        projectId: "proj-a",
+        fileId: "file-abc",
+        cellId: "cell-1",
+        getTokenForFile,
+      }),
     )
-
     await waitFor(() => expect(result.current.isLoading).toBe(false))
-
     expect(result.current.isError).toBe(false)
-    expect(result.current.history).toHaveLength(3)
-    // Oldest first (reversed from server's newest-first)
-    expect(result.current.history[0].value).toBe("first edit")
-    expect(result.current.history[1].value).toBe("second edit")
-    expect(result.current.history[2].value).toBe("third edit")
+    expect(result.current.history.map((e) => e.value)).toEqual([
+      "first edit",
+      "second edit",
+      "third edit",
+    ])
   })
 
-  it("maps server payload to CellHistoryEntry shape", async () => {
-    global.fetch = vi.fn().mockResolvedValueOnce(
-      new Response(JSON.stringify({ events: [SERVER_EVENTS[0]] }), { status: 200 })
-    ) as unknown as typeof fetch
-
-    const { result } = renderHook(
-      () =>
-        useCellEditHistory({
-          enabled: true,
-          fileId: "file-abc",
-          cellId: "cell-1",
-          getTokenForFile: TOKEN_FN,
-        }),
-      { wrapper: makeWrapper() }
+  it("maps the newest-first server payload to CellHistoryEntry shape", async () => {
+    fetchCellHistoryMock.mockResolvedValueOnce([SERVER_EVENTS[0]])
+    const { result } = renderHook(() =>
+      useCellEditHistory({
+        enabled: true,
+        projectId: "proj-a",
+        fileId: "file-abc",
+        cellId: "cell-1",
+        getTokenForFile,
+      }),
     )
-
-    await waitFor(() => expect(result.current.isLoading).toBe(false))
-
+    await waitFor(() => expect(result.current.history).toHaveLength(1))
     const entry = result.current.history[0]
-    expect(entry.timestamp).toBe(new Date(1700000030000).toISOString())
     expect(entry.value).toBe("third edit")
     expect(entry.source).toBe("human")
     expect(entry.author).toBe("alice")
     expect(entry.validated).toBe(false)
   })
 
-  it("filters out non-cell.commit events", async () => {
-    const events = [
-      { kind: "cell.validate", serverTs: 1700000050000, author: "alice", payload: {} },
+  it("filters out events that aren't *.cell.commit", async () => {
+    fetchCellHistoryMock.mockResolvedValueOnce([
+      makeEvent({ id: "v", serverSeq: 9, kind: "cell.validate", payload: {} }),
       ...SERVER_EVENTS,
-      { kind: "cell.unvalidate", serverTs: 1700000000000, author: "bob", payload: {} },
-    ]
-    global.fetch = vi.fn().mockResolvedValueOnce(
-      new Response(JSON.stringify({ events }), { status: 200 })
-    ) as unknown as typeof fetch
-
-    const { result } = renderHook(
-      () =>
-        useCellEditHistory({
-          enabled: true,
-          fileId: "file-abc",
-          cellId: "cell-1",
-          getTokenForFile: TOKEN_FN,
-        }),
-      { wrapper: makeWrapper() }
+      makeEvent({ id: "u", serverSeq: 0, kind: "cell.unvalidate", payload: {} }),
+    ])
+    const { result } = renderHook(() =>
+      useCellEditHistory({
+        enabled: true,
+        projectId: "proj-a",
+        fileId: "file-abc",
+        cellId: "cell-1",
+        getTokenForFile,
+      }),
     )
-
     await waitFor(() => expect(result.current.isLoading).toBe(false))
-
-    // Only cell.commit events
     expect(result.current.history).toHaveLength(3)
-    expect(result.current.history.every((e) => e.source === "human")).toBe(true)
   })
 
-  it("returns empty array when no events for cell", async () => {
-    global.fetch = vi.fn().mockResolvedValueOnce(
-      new Response(JSON.stringify({ events: [] }), { status: 200 })
-    ) as unknown as typeof fetch
-
-    const { result } = renderHook(
-      () =>
-        useCellEditHistory({
-          enabled: true,
-          fileId: "file-abc",
-          cellId: "cell-1",
-          getTokenForFile: TOKEN_FN,
-        }),
-      { wrapper: makeWrapper() }
+  it("surfaces isError + empty history when getTokenForFile returns null", async () => {
+    getTokenForFile.mockResolvedValueOnce(null)
+    const { result } = renderHook(() =>
+      useCellEditHistory({
+        enabled: true,
+        projectId: "proj-a",
+        fileId: "file-abc",
+        cellId: "cell-1",
+        getTokenForFile,
+      }),
     )
-
-    await waitFor(() => expect(result.current.isLoading).toBe(false))
-
-    expect(result.current.isError).toBe(false)
-    expect(result.current.history).toHaveLength(0)
+    await waitFor(() => expect(result.current.isError).toBe(true))
+    expect(result.current.history).toEqual([])
+    expect(fetchCellHistoryMock).not.toHaveBeenCalled()
   })
 
-  it("returns empty array and isError when token is null", async () => {
-    const noTokenFn = vi.fn().mockResolvedValue(null)
-
-    const { result } = renderHook(
-      () =>
-        useCellEditHistory({
-          enabled: true,
-          fileId: "file-abc",
-          cellId: "cell-1",
-          getTokenForFile: noTokenFn,
-        }),
-      { wrapper: makeWrapper() }
+  it("surfaces isError when the fetch wrapper throws", async () => {
+    fetchCellHistoryMock.mockRejectedValueOnce(new Error("boom"))
+    const { result } = renderHook(() =>
+      useCellEditHistory({
+        enabled: true,
+        projectId: "proj-a",
+        fileId: "file-abc",
+        cellId: "cell-1",
+        getTokenForFile,
+      }),
     )
-
-    await waitFor(() => expect(result.current.isLoading).toBe(false))
-
-    expect(result.current.isError).toBe(true)
-    expect(result.current.history).toHaveLength(0)
+    await waitFor(() => expect(result.current.isError).toBe(true))
+    expect(result.current.history).toEqual([])
   })
 
-  it("returns empty array and isError on non-2xx response", async () => {
-    global.fetch = vi.fn().mockResolvedValueOnce(
-      new Response("Not Found", { status: 404 })
-    ) as unknown as typeof fetch
-
-    const { result } = renderHook(
-      () =>
-        useCellEditHistory({
-          enabled: true,
-          fileId: "file-abc",
-          cellId: "cell-1",
-          getTokenForFile: TOKEN_FN,
-        }),
-      { wrapper: makeWrapper() }
+  it("does not fetch when disabled", async () => {
+    const { result } = renderHook(() =>
+      useCellEditHistory({
+        enabled: false,
+        projectId: "proj-a",
+        fileId: "file-abc",
+        cellId: "cell-1",
+        getTokenForFile,
+      }),
     )
-
-    await waitFor(() => expect(result.current.isLoading).toBe(false))
-
-    expect(result.current.isError).toBe(true)
-    expect(result.current.history).toHaveLength(0)
-  })
-
-  it("does not fetch when enabled is false", async () => {
-    global.fetch = vi.fn() as unknown as typeof fetch
-
-    const { result } = renderHook(
-      () =>
-        useCellEditHistory({
-          enabled: false,
-          fileId: "file-abc",
-          cellId: "cell-1",
-          getTokenForFile: TOKEN_FN,
-        }),
-      { wrapper: makeWrapper() }
-    )
-
-    expect(result.current.isLoading).toBe(false)
-    expect(result.current.history).toHaveLength(0)
-    expect(global.fetch).not.toHaveBeenCalled()
+    await new Promise((r) => setTimeout(r, 0))
+    expect(result.current.history).toEqual([])
+    expect(fetchCellHistoryMock).not.toHaveBeenCalled()
   })
 
   it("does not fetch when cellId is null", async () => {
-    global.fetch = vi.fn() as unknown as typeof fetch
-
-    const { result } = renderHook(
-      () =>
-        useCellEditHistory({
-          enabled: true,
-          fileId: "file-abc",
-          cellId: null,
-          getTokenForFile: TOKEN_FN,
-        }),
-      { wrapper: makeWrapper() }
+    const { result } = renderHook(() =>
+      useCellEditHistory({
+        enabled: true,
+        projectId: "proj-a",
+        fileId: "file-abc",
+        cellId: null,
+        getTokenForFile,
+      }),
     )
-
-    expect(result.current.isLoading).toBe(false)
-    expect(result.current.history).toHaveLength(0)
-    expect(global.fetch).not.toHaveBeenCalled()
+    await new Promise((r) => setTimeout(r, 0))
+    expect(result.current.history).toEqual([])
+    expect(fetchCellHistoryMock).not.toHaveBeenCalled()
   })
 
-  it("includes cellId and limit in query params", async () => {
-    global.fetch = vi.fn().mockResolvedValueOnce(
-      new Response(JSON.stringify({ events: [] }), { status: 200 })
-    ) as unknown as typeof fetch
-
-    const { result } = renderHook(
-      () =>
-        useCellEditHistory({
-          enabled: true,
-          fileId: "file-abc",
-          cellId: "cell-XYZ",
-          limit: 25,
-          getTokenForFile: TOKEN_FN,
-        }),
-      { wrapper: makeWrapper() }
+  it("revalidate() triggers a refetch and reflects new data", async () => {
+    fetchCellHistoryMock.mockResolvedValueOnce([
+      makeEvent({ id: "v1", serverSeq: 1, payload: { value: "old" } }),
+    ])
+    const { result } = renderHook(() =>
+      useCellEditHistory({
+        enabled: true,
+        projectId: "proj-a",
+        fileId: "file-abc",
+        cellId: "cell-1",
+        getTokenForFile,
+      }),
     )
+    await waitFor(() => expect(result.current.history).toHaveLength(1))
+    expect(result.current.history[0].value).toBe("old")
 
-    await waitFor(() => expect(result.current.isLoading).toBe(false))
-
-    const call = (global.fetch as ReturnType<typeof vi.fn>).mock.calls[0]
-    const url = call[0] as string
-    expect(url).toContain("cellId=cell-XYZ")
-    expect(url).toContain("limit=25")
-    expect(url).toContain("fileId=file-abc")
+    fetchCellHistoryMock.mockResolvedValueOnce([
+      makeEvent({ id: "v2", serverSeq: 2, payload: { value: "new" } }),
+    ])
+    act(() => { result.current.revalidate() })
+    await waitFor(() => expect(result.current.history[0].value).toBe("new"))
+    expect(fetchCellHistoryMock).toHaveBeenCalledTimes(2)
   })
 })

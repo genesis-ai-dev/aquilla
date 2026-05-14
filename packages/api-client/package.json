@@ -1,0 +1,10 @@
+{
+  "name": "@aquilla/api-client",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Typed client for the Aquilla event-log / projects API. Generated from Worker types.",
+  "type": "module",
+  "scripts": {
+    "build": "echo 'stub — populated in Phase 3'"
+  }
+}

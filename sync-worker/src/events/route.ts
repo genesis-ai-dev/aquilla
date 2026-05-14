@@ -1,27 +1,34 @@
-// HTTP fetch handler for POST /events — the CQRS event ingestion endpoint.
+// HTTP fetch handler for POST /events — the AD-2 event ingestion endpoint.
 //
-// Accepts a batch of raw events from authenticated clients, authorizes each
-// individually, dispatches to kind-specific handlers, batches the resulting
-// D1 statements, and returns a structured accepted/rejected result.
+// For each event in the request body:
+//   1. authorize() — JWT scope + role gate.
+//   2. Idempotency: if an event with this id already exists, accept and skip.
+//   3. Assign server_ts (Date.now()) and server_seq (per-project monotonic).
+//   4. Evaluate the AD-2 first-child-of-parent guard. The event always
+//      lands in `events` (so history can surface it); only the projection
+//      writes are skipped for stale siblings.
+//   5. Dispatch to the kind-specific handler to build D1 statements.
+//   6. Batch-commit in D1_BATCH_LIMIT chunks.
+//   7. Broadcast realtime frames + projection.dirty messages.
 //
 // Auth: Authorization: Bearer <sync-token JWT> (same token used for WS upgrades).
 //       Each event is authorized independently so a single bad event doesn't
 //       tank the whole batch.
 //
 // Idempotent: event.id is a client-generated UUIDv7. The events INSERT uses
-//   INSERT OR IGNORE, so replaying a batch with the same IDs is safe.
+//   INSERT OR IGNORE, so replaying a batch with the same IDs is safe. The
+//   parent-chain guard is naturally idempotent — replaying the winning
+//   event sees its own row as the existing one and continues to win.
 
 import type { RawEvent } from './types'
 import type { RealtimeMessage, ProjectionTable } from './realtime'
 import { authorize } from './authorize'
 import { dispatchEvent } from './dispatch'
+import { isWinningChild, type PersistedEvent } from './event-projection'
 import { broadcastRealtime } from './broadcast'
 import type { BroadcastEnv } from './broadcast'
-import { applyEventToLiveDoc } from './apply-event'
-import type { CellCommitPayload } from './hydrate'
 
 // Cloudflare D1 max statements per db.batch() call.
-// Exceeding this limit causes D1 to throw at runtime with an unhelpful error.
 const D1_BATCH_LIMIT = 100
 
 export interface EventsRouteEnv {
@@ -41,28 +48,43 @@ interface RejectedEntry {
   reason: string
 }
 
-async function readExistingEventServerTs(
-  db: D1Database,
-  eventId: string,
-): Promise<number | null> {
-  const row = await db
-    .prepare('SELECT server_ts FROM events WHERE id = ?')
-    .bind(eventId)
-    .first<{ server_ts: number }>()
-  return typeof row?.server_ts === 'number' ? row.server_ts : null
+interface ExistingEventRow {
+  server_ts: number
+  server_seq: number
 }
 
-async function readCellLastEditAt(
+async function readExistingEvent(
   db: D1Database,
-  fileId: string | undefined,
-  cellId: string | undefined,
-): Promise<number | null> {
-  if (!fileId || !cellId) return null
+  eventId: string,
+): Promise<ExistingEventRow | null> {
   const row = await db
-    .prepare('SELECT last_edit_at FROM cells WHERE file_id = ? AND cell_id = ?')
-    .bind(fileId, cellId)
-    .first<{ last_edit_at: number }>()
-  return typeof row?.last_edit_at === 'number' ? row.last_edit_at : null
+    .prepare('SELECT server_ts, server_seq FROM events WHERE id = ?')
+    .bind(eventId)
+    .first<ExistingEventRow>()
+  return row ?? null
+}
+
+/**
+ * Reserve the next per-project monotonic server_seq. D1 doesn't expose a
+ * cheap atomic counter primitive, so we read MAX+1 and INSERT inside the
+ * same logical request. Two concurrent requests against the same project
+ * can race — the UNIQUE INDEX idx_events_project_seq catches the duplicate
+ * at INSERT time. Callers should be prepared for an occasional INSERT
+ * failure and retry by rereading MAX.
+ *
+ * For the v1 traffic pattern (single editor per project at a time, modest
+ * burst from offline reconnect) this is fine. If contention becomes an
+ * issue we'll lift assignment into a project-scoped Durable Object.
+ */
+async function nextServerSeq(
+  db: D1Database,
+  projectId: string,
+): Promise<number> {
+  const row = await db
+    .prepare('SELECT COALESCE(MAX(server_seq), 0) + 1 AS next_seq FROM events WHERE project_id = ?')
+    .bind(projectId)
+    .first<{ next_seq: number }>()
+  return row?.next_seq ?? 1
 }
 
 /**
@@ -70,18 +92,11 @@ async function readCellLastEditAt(
  *
  * Body: { events: RawEvent[] }
  *
- * Auth: Authorization: Bearer <sync-token JWT> (the same token used to upgrade
- * the WS for live editing). The route validates each event independently
- * via authorize() so a single bad event doesn't tank a batch.
- *
  * Returns:
  *   {
  *     accepted: [{ id: string }],
  *     rejected: [{ id: string, status: number, reason: string }]
  *   }
- *
- * Idempotent on event.id (server-side INSERT OR IGNORE). Clients can safely
- * reflush their outbox.
  *
  * Returns null if the URL doesn't match (chainable in the fetch dispatcher).
  */
@@ -89,7 +104,7 @@ export async function handleEventsWriteRequest(
   request: Request,
   env: EventsRouteEnv,
 ): Promise<Response | null> {
-  // 1. URL match: only handle /events. Return null to fall through to next handler.
+  // 1. URL match.
   const url = new URL(request.url)
   if (url.pathname !== '/events') return null
 
@@ -98,7 +113,7 @@ export async function handleEventsWriteRequest(
     return new Response('method not allowed', { status: 405 })
   }
 
-  // 3. Validate required env bindings.
+  // 3. Env binding validation.
   if (!env.SYNC_SECRET_KEY) {
     return new Response('SYNC_SECRET_KEY not configured', { status: 500 })
   }
@@ -108,7 +123,7 @@ export async function handleEventsWriteRequest(
 
   const db = env.AQUILLA_DB
 
-  // 4. Parse JSON body. Reject malformed input.
+  // 4. Parse body.
   let body: unknown
   try {
     body = await request.json()
@@ -131,61 +146,53 @@ export async function handleEventsWriteRequest(
 
   const rawEvents = rawBody.events as RawEvent[]
 
-  // 5. Empty batch is valid — nothing to do.
   if (rawEvents.length === 0) {
     return Response.json({ accepted: [], rejected: [] })
   }
 
-  // 6. Extract bearer token from Authorization header.
-  //    Token may be absent (will result in 401 from authorize()).
+  // 5. Token extraction.
   const authHeader = request.headers.get('Authorization') ?? ''
   const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : null
 
-  // 7. Monotonic server timestamps for this request.
-  //    D1 projections use server_ts as their LWW key, so multiple commits to
-  //    the same cell in one outbox flush must not share the same timestamp.
+  // Server time base — Date.now() incremented monotonically so two commits
+  // in the same request can't share a server_ts. Server_seq is the
+  // canonical ordering key, but human-readable timestamps still benefit
+  // from monotonicity within a batch.
   let nextServerTs = Date.now()
+
+  // Cache per-project next-seq within this request. The route batches all
+  // INSERTs at the end, so reading MAX(server_seq) inside the per-event
+  // loop would always see the pre-batch value and assign duplicate seqs
+  // to every event in the request. We seed from D1 on first use per
+  // project then increment locally.
+  const seqByProject = new Map<string, number>()
+  async function reserveSeq(projectId: string): Promise<number> {
+    const cached = seqByProject.get(projectId)
+    const base = cached ?? (await nextServerSeq(db, projectId))
+    const assigned = cached === undefined ? base : base + 1
+    seqByProject.set(projectId, assigned)
+    return assigned
+  }
 
   const accepted: AcceptedEntry[] = []
   const rejected: RejectedEntry[] = []
 
-  // Accumulate D1 statements from successful dispatches.
-  // We don't commit until all dispatches are done so a bad event further
-  // in the batch doesn't leave a partial write.
-  const pendingStmts: D1PreparedStatement[] = []
+  // ── Per-event accumulation ─────────────────────────────────────────────
 
-  // Track dirty tables per (project, file) scope for projection.dirty fan-out.
-  interface DirtyEntry {
-    project: string
-    file: string
-    tables: Set<ProjectionTable>
-  }
-
-  // One entry per successfully-dispatched event (in input order). The route
-  // chunks D1 work on these event boundaries so an event INSERT is never
-  // committed in one D1 batch while its projection statements wait in another.
   interface PendingEntry {
     id: string
     stmtStart: number
     stmtCount: number
     eventFrame: Extract<RealtimeMessage, { t: 'event' }>
-    dirtyEntry?: DirtyEntry
-    /** When the event is a cell.commit with a fileId, captured here so the
-     *  post-commit hot-apply step can reach the live DO. Other kinds leave
-     *  this undefined and are skipped. */
-    commitForLiveDoc?: {
-      projectId: string
-      fileId: string
-      cellId: string
-      payload: CellCommitPayload
-    }
+    dirtyEntry?: { project: string; file: string; tables: Set<ProjectionTable> }
   }
-  const pendingEntries: PendingEntry[] = []
 
+  const pendingStmts: D1PreparedStatement[] = []
+  const pendingEntries: PendingEntry[] = []
   const seenEventIds = new Set<string>()
 
   for (const rawEvent of rawEvents) {
-    // Authorize each event independently.
+    // Authorize.
     const authResult = await authorize(token, rawEvent, env.SYNC_SECRET_KEY)
     if (!authResult.ok) {
       rejected.push({
@@ -196,24 +203,61 @@ export async function handleEventsWriteRequest(
       continue
     }
 
+    // Idempotency: same id within batch → accept silently.
     if (seenEventIds.has(rawEvent.id)) {
       accepted.push({ id: rawEvent.id })
       continue
     }
     seenEventIds.add(rawEvent.id)
 
-    const existingServerTs = await readExistingEventServerTs(db, rawEvent.id)
-    if (existingServerTs !== null) {
+    // Idempotency: same id across requests → accept silently.
+    const existing = await readExistingEvent(db, rawEvent.id)
+    if (existing !== null) {
       accepted.push({ id: rawEvent.id })
       continue
     }
 
-    const cellLastEditAt = await readCellLastEditAt(db, rawEvent.fileId, rawEvent.cellId)
-    const serverTs = Math.max(nextServerTs++, (cellLastEditAt ?? 0) + 1)
-    nextServerTs = Math.max(nextServerTs, serverTs + 1)
+    // Assign server_ts (monotone within request) and server_seq (per-project).
+    const serverTs = nextServerTs++
+    const serverSeq = await reserveSeq(rawEvent.projectId)
 
-    // Dispatch to the kind-specific handler.
-    const outcome = dispatchEvent(db, authResult.event, serverTs)
+    // AD-2 parent-chain decision. The candidate hasn't been INSERTed yet,
+    // so `isWinningChild` looks for a prior sibling with the same
+    // (project_id, file_id, cell_id, parent_id). If none exists, this
+    // candidate wins. The events INSERT below will land it as the chain
+    // head and any future sibling with the same parent will see this row
+    // as the existing winner.
+    //
+    // The guard applies only to events that advance `cells.event_id`
+    // (the chain-mutating cell.* kinds). Validation kinds and file.create
+    // do not compete for the chain head, so they always project.
+    const candidate: PersistedEvent = {
+      id: rawEvent.id,
+      schemaVersion: rawEvent.schemaVersion,
+      projectId: rawEvent.projectId,
+      fileId: rawEvent.fileId ?? null,
+      cellId: rawEvent.cellId ?? null,
+      parentId: rawEvent.parentId ?? null,
+      kind: rawEvent.kind,
+      author: authResult.event.claims.username,
+      payload: rawEvent.payload,
+      clientTs: rawEvent.clientTs,
+      serverTs,
+      serverSeq,
+    }
+    const isChainMutating =
+      rawEvent.kind !== 'cell.validate' &&
+      rawEvent.kind !== 'cell.unvalidate' &&
+      rawEvent.kind !== 'file.create'
+    const updateProjection = isChainMutating
+      ? await isWinningChild(db, candidate)
+      : true
+
+    // Dispatch.
+    const outcome = dispatchEvent(db, authResult.event, serverTs, {
+      updateProjection,
+      serverSeq,
+    })
     if (!outcome.ok) {
       rejected.push({
         id: rawEvent.id ?? '(unknown)',
@@ -223,33 +267,18 @@ export async function handleEventsWriteRequest(
       continue
     }
 
-    // Accumulate statements and metadata for later commit.
     const stmtsBefore = pendingStmts.length
     for (const stmt of outcome.result.stmts) {
       pendingStmts.push(stmt)
     }
 
-    // Accumulate dirty tables keyed by (project, file) scope.
     const frame = outcome.result.eventFrame
-    let dirtyEntry: DirtyEntry | undefined
+    let dirtyEntry: PendingEntry['dirtyEntry']
     if (frame.file) {
       dirtyEntry = {
         project: frame.project,
         file: frame.file,
         tables: new Set(outcome.result.dirtyTables),
-      }
-    }
-    let commitForLiveDoc: PendingEntry['commitForLiveDoc']
-    if (
-      rawEvent.kind === 'cell.commit' &&
-      rawEvent.fileId &&
-      rawEvent.cellId
-    ) {
-      commitForLiveDoc = {
-        projectId: rawEvent.projectId,
-        fileId: rawEvent.fileId,
-        cellId: rawEvent.cellId,
-        payload: rawEvent.payload as CellCommitPayload,
       }
     }
 
@@ -259,13 +288,10 @@ export async function handleEventsWriteRequest(
       stmtCount: pendingStmts.length - stmtsBefore,
       eventFrame: outcome.result.eventFrame,
       dirtyEntry,
-      commitForLiveDoc,
     })
   }
 
-  // 8. Commit accumulated statements in D1_BATCH_LIMIT-sized chunks.
-  //    Only add to accepted AFTER successful commit (step 9).
-  //    On partial failure, report uncommitted events as rejected.
+  // ── Commit accumulated statements in batch-limit-sized chunks ──────────
   if (pendingStmts.length > 0) {
     interface PendingChunk {
       entries: PendingEntry[]
@@ -330,15 +356,11 @@ export async function handleEventsWriteRequest(
       return Response.json({ accepted, rejected }, { status: 200 })
     }
 
-    // All batches succeeded — accept every dispatched event (preserving order,
-    // including duplicates — e.g. same event submitted twice in one request).
     for (const entry of committedEntries) {
       accepted.push({ id: entry.id })
     }
 
-    // Broadcast event frames then projection.dirty messages — non-fatal.
-    // Only attempt broadcast if FileSync is available (it won't be in
-    // envs that have AQUILLA_DB but no FileSync binding).
+    // Broadcast — non-fatal.
     if (env.FileSync && env.SYNC_SECRET_KEY) {
       const broadcastEnv: BroadcastEnv = {
         FileSync: env.FileSync,
@@ -359,8 +381,6 @@ export async function handleEventsWriteRequest(
         }
       }
 
-      // Fan out all event frames and coalesced projection.dirty messages in
-      // parallel. broadcastRealtime is non-throwing so Promise.all is safe.
       const broadcasts: Promise<void>[] = []
       for (const entry of committedEntries) {
         broadcasts.push(broadcastRealtime(broadcastEnv, entry.eventFrame))
@@ -375,28 +395,9 @@ export async function handleEventsWriteRequest(
         }))
       }
 
-      // Hot-update: send each cell.commit's payload to its file's live DO so
-      // imported cells appear in any open editor without a reload. The DO
-      // applies in `new-only` mode, leaving cells already in the doc alone
-      // (their CRDT state is governed by the live editing path). De-duped
-      // by (project, file, cell): multiple commits to the same cell in one
-      // batch only need the latest one applied to the live doc.
-      const liveApplyByCell = new Map<string, NonNullable<PendingEntry['commitForLiveDoc']>>()
-      for (const entry of committedEntries) {
-        if (!entry.commitForLiveDoc) continue
-        const key = `${entry.commitForLiveDoc.projectId}|${entry.commitForLiveDoc.fileId}|${entry.commitForLiveDoc.cellId}`
-        liveApplyByCell.set(key, entry.commitForLiveDoc) // last write wins
-      }
-      for (const input of liveApplyByCell.values()) {
-        broadcasts.push(applyEventToLiveDoc(broadcastEnv, input))
-      }
-
-      // broadcastRealtime / applyEventToLiveDoc are non-throwing; Promise.all
-      // is safe here.
       await Promise.all(broadcasts)
     }
   }
 
-  // 9. Return structured result.
   return Response.json({ accepted, rejected })
 }

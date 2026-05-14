@@ -2,6 +2,18 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Monorepo layout (AD-11 — Aquilla)
+
+Phase 1B introduced the `apps/` + `packages/` chassis per spec §21-monorepo.md. Each task-flow ships as its own deployable Worker under `apps/<slug>/`; the workspace SPA is the deliberate exception. Cross-app imports outside of `packages/` are forbidden — sharing happens through versioned packages (`@aquilla/ui`, `@aquilla/auth-client`, `@aquilla/api-client`, `@aquilla/data-model`, `@aquilla/telemetry`, `@aquilla/errors`).
+
+- `apps/<slug>/` — one Worker per discrete task (`login`, `signup`, `reset`, `projects`, `import`, `export`, `migrate`, `billing`, `org`, `workspace`, `frontier-server`).
+- `apps/front-door/` — root + 404 fallback Worker (`/` → `/projects`, CSP injection, `/__routes` debug). Cloudflare Workers Routes (not the front-door) dispatches each slug to its Worker.
+- `packages/<name>/` — shared, versioned concerns. `@aquilla/errors` ships the boot-time `assertEnvBindings()` + `assertNotPreviewInProd()` helpers — every Worker calls them at startup so a preview deploy can't silently bind to prod resources (spec §"Environment binding hygiene").
+- `routes.json` (repo root) — authoritative slug → URL-path registry. Adding an app means editing this file plus dropping a folder under `apps/`.
+- `seed.sql` (repo root) — canonical preview test cast (alice/bob/carol/dave) applied to every per-PR D1 and the shared `aquilla-dev`.
+
+Existing top-level workers (`auth-worker/`, `sync-worker/`, `chat-worker/`, `cors-proxy/`) stay put until Phase 4's rename pass; Phase 1B is scaffold-only.
+
 ## Project Overview
 
 `codex-web` is a browser-based reimplementation of the Codex translation editor (originally a VS Code extension — see `docs/SPEC.md` for the origin design). It is a standalone single-page app: a cell-based translation notebook that imports source documents (USFM, DOCX, PPTX, Markdown, plaintext, VTT/SRT), lets translators fill in aligned target cells with rich text, and supports collaborative editing, snapshots, rules/health scoring, LLM completion/backtranslation, and P2P sharing.
@@ -137,6 +149,24 @@ React 19 + Tailwind v4 (via `@tailwindcss/vite`) + shadcn/ui (`components.json`,
 ## Design docs & milestones
 
 `docs/SPEC.md` describes the VS Code extension this app was extracted from — useful for understanding the `.codex` notebook / paired-source / LLM-context concepts that this app inherits. Per-milestone specs and implementation plans live under `docs/superpowers/specs/` and `docs/superpowers/plans/` (M1–M10 covering import, editor, health, rules, export, search+backtranslation, comments, snapshots, richtext/Yjs migration, P2P sync). When working on a feature that has a spec there, read it first — the schema decisions (especially `translatedXml` vs `translated`, `SnapshotFile.ydocState`, `schemaVersion` on snapshots) were made deliberately and are load-bearing for migrations.
+
+## Phase 2 data flow (in progress)
+
+Phase 2 migrates the client off Y.Doc reads onto the sync-worker's D1 projection (per Aquilla spec AD-2 / AD-3 v1 thin client). Status as of phase 2b:
+
+- **Reads** — every read-side hook is server-backed. The pattern is locked-in: a domain-specific `*-read.ts` + `*-read-types.ts` under `src/lib/sync/`, exposing a `fetchX(...)` wrapper that throws an `XReadError` on non-2xx; hooks wrap the fetcher with a vanilla useState + race-guarded effect (no React Query, no SWR). Phase 2a migrated `useCells`; Phase 2b migrated the remaining read hooks.
+- **Phase 2b additions** — fetch wrappers: `history-read.ts` (per-cell event chain), `search-read.ts` (project FTS5), `projects-read.ts` (auth-worker project list + detail), `members-read.ts`, `settings-read.ts`, `orgs-read.ts`. Hooks rewritten or aligned: `useCellHistory` (new read-side hook; old write helpers in the same file are untouched, Phase 2c rewrites them), `useCellEditHistory` (drops React Query; uses the new history wrapper; gains a required `projectId` prop wired through `HistoryDrawer`), `useCellValidators`, `useCellsAuditStats`, `useFileMeta` (Y.Doc → localStorage), `useWorkspaceSearch` (server FTS5). Hook stubs (`// Phase 2b: <concept> dropped from v1 event grammar`): `useComments`, `useCellWaivers`. New `useSync` reports a static online/connected state until Phase 2c wires the real WS reconciler. `useFileSync` is also stubbed (peers: [], provider: null, status: "live"); the TipTap editor's `syncProvider` prop is therefore always null on dev. `useFileDoc` is a shim that hands out a fresh in-memory Y.Doc per fileId — no IDB, no R2 — so the TipTap editor compiles unchanged until Phase 2c rips the Y.Doc dep out.
+- **New sync-worker routes (Phase 2b):**
+  - `GET /api/v1/projects/:projectId/files/:fileId/cells/:cellId/history` → cell event chain, newest first.
+  - `GET /api/v1/projects/:projectId/search?q=&side=&limit=` → FTS5 over `cells_fts`, project-scoped.
+- **Still Y.Doc-bound:** the TipTap editor (`@tiptap/extension-collaboration`), `src/lib/store/file-doc.ts`, parsers/import pipeline, all write paths (cell commits, edits, comments, snapshots). Phase 2c handles writes + finally deletes Y.Doc. Search-side concepts dropped from the v1 event grammar — comments and cell-waivers — return empty data from the stub hooks; future v1.x features.
+- **Project-index IDB** still lives in `src/lib/store/project-index.ts` for write callers that Phase 2c will migrate; reads happen through the auth-worker. The hook layer (`useProject`) overlays auth-worker project + settings onto whatever local stub remains.
+- **Writes still go through Y.Doc** until Phase 2c. After a known write, callers should invoke `revalidate()` so the projection re-loads. `revalidate()` is best-effort: a write that lands in the local Y.Doc but hasn't propagated to the server's projection won't show up on refetch. Phase 2c replaces Y.Doc writes with the AD-3 outbox + cell-event POSTs and removes Y.Doc entirely.
+- **New sync-worker read routes** (added 2a; mounted in `sync-worker/src/index.ts`):
+  - `GET /api/v1/projects/:projectId/files` → list with cell/word/last-edit rollups
+  - `GET /api/v1/projects/:projectId/files/:fileId` → single file row
+  - `GET /api/v1/projects/:projectId/files/:fileId/cells?side=&limit=&cursor=` → cells in anchor-chain order (AD-2). When `side` is omitted, the response carries both source and target rows; the client pairs by `cell_id` (AD-9).
+  - All three auth with a sync-token JWT (`Authorization: Bearer …`) scoped to `:projectId`. Membership is implicit in the JWT — auth-worker only mints tokens for project members.
 
 ## Backend stack
 

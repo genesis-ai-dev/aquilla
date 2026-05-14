@@ -2,11 +2,43 @@ import { describe, it, expect } from "vitest"
 import { ROLE, REQUIRED_ROLE, requiredRoleFor } from "../events/role-policy"
 import type { EventKind } from "../events/types"
 
-describe("requiredRoleFor", () => {
-  it("returns CONTRIBUTOR for cell.commit", () => {
-    expect(requiredRoleFor('cell.commit')).toBe(ROLE.CONTRIBUTOR)
+describe("requiredRoleFor — target.* (translator)", () => {
+  it("returns CONTRIBUTOR for target.cell.create", () => {
+    expect(requiredRoleFor('target.cell.create')).toBe(ROLE.CONTRIBUTOR)
   })
 
+  it("returns CONTRIBUTOR for target.cell.commit", () => {
+    expect(requiredRoleFor('target.cell.commit')).toBe(ROLE.CONTRIBUTOR)
+  })
+
+  it("returns CONTRIBUTOR for target.cell.delete", () => {
+    expect(requiredRoleFor('target.cell.delete')).toBe(ROLE.CONTRIBUTOR)
+  })
+
+  it("returns CONTRIBUTOR for target.cell.reorder", () => {
+    expect(requiredRoleFor('target.cell.reorder')).toBe(ROLE.CONTRIBUTOR)
+  })
+})
+
+describe("requiredRoleFor — source.* (importer / admin)", () => {
+  it("returns PROJECT_LEAD for source.cell.create", () => {
+    expect(requiredRoleFor('source.cell.create')).toBe(ROLE.PROJECT_LEAD)
+  })
+
+  it("returns PROJECT_LEAD for source.cell.commit", () => {
+    expect(requiredRoleFor('source.cell.commit')).toBe(ROLE.PROJECT_LEAD)
+  })
+
+  it("returns PROJECT_LEAD for source.cell.delete", () => {
+    expect(requiredRoleFor('source.cell.delete')).toBe(ROLE.PROJECT_LEAD)
+  })
+
+  it("returns PROJECT_LEAD for source.cell.reorder", () => {
+    expect(requiredRoleFor('source.cell.reorder')).toBe(ROLE.PROJECT_LEAD)
+  })
+})
+
+describe("requiredRoleFor — validation", () => {
   it("returns REVIEWER for cell.validate", () => {
     expect(requiredRoleFor('cell.validate')).toBe(ROLE.REVIEWER)
   })
@@ -14,31 +46,41 @@ describe("requiredRoleFor", () => {
   it("returns REVIEWER for cell.unvalidate", () => {
     expect(requiredRoleFor('cell.unvalidate')).toBe(ROLE.REVIEWER)
   })
+})
 
-  it("returns COMMENTER for thread.add", () => {
-    expect(requiredRoleFor('thread.add')).toBe(ROLE.COMMENTER)
-  })
-
-  it("returns REVIEWER for thread.resolve", () => {
-    expect(requiredRoleFor('thread.resolve')).toBe(ROLE.REVIEWER)
-  })
-
-  it("returns CONTRIBUTOR for cell.metadata.set", () => {
-    expect(requiredRoleFor('cell.metadata.set')).toBe(ROLE.CONTRIBUTOR)
+describe("requiredRoleFor — file.create", () => {
+  it("returns PROJECT_LEAD for file.create", () => {
+    expect(requiredRoleFor('file.create')).toBe(ROLE.PROJECT_LEAD)
   })
 })
 
 describe("REQUIRED_ROLE table completeness", () => {
   it("has an entry for every EventKind", () => {
-    // The Record<EventKind, number> type already enforces this at compile time
-    // for object literals. This runtime check catches dynamic mutation and
-    // also exercises the string keys exactly as a runtime caller would.
     const keys = Object.keys(REQUIRED_ROLE) as EventKind[]
     expect(keys.length).toBeGreaterThan(0)
     for (const kind of keys) {
       expect(typeof REQUIRED_ROLE[kind]).toBe("number")
       expect(REQUIRED_ROLE[kind]).toBeGreaterThanOrEqual(100)
       expect(REQUIRED_ROLE[kind]).toBeLessThanOrEqual(700)
+    }
+  })
+
+  it("covers all current EventKind values explicitly (no implicit ROLE)", () => {
+    const expected: EventKind[] = [
+      'source.cell.create',
+      'source.cell.commit',
+      'source.cell.delete',
+      'source.cell.reorder',
+      'target.cell.create',
+      'target.cell.commit',
+      'target.cell.delete',
+      'target.cell.reorder',
+      'cell.validate',
+      'cell.unvalidate',
+      'file.create',
+    ]
+    for (const kind of expected) {
+      expect(REQUIRED_ROLE).toHaveProperty(kind)
     }
   })
 })

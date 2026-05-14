@@ -1,8 +1,7 @@
-// Tests for buildEventProjectionStmts. Validates the SQL + bindings emitted
-// for each event kind without hitting a real D1 database.
+// Tests for buildEventProjectionStmts.
 //
-// The D1Database stub records (sql, args) pairs per prepared statement so we
-// can assert on exactly what SQL and what bound values were generated.
+// Validates the SQL + bindings emitted for each event kind. Uses a tiny
+// recording D1 stub that captures (sql, args) pairs from prepare().bind().
 
 import { describe, it, expect } from 'vitest'
 import {
@@ -10,8 +9,7 @@ import {
   contentHash,
   type PersistedEvent,
 } from '../events/event-projection'
-
-// ── D1 stub ──────────────────────────────────────────────────────────────────
+import type { EventKind } from '../events/types'
 
 interface RecordedStmt {
   sql: string
@@ -21,18 +19,12 @@ interface RecordedStmt {
 function makeD1Stub() {
   const recorded: RecordedStmt[] = []
 
-  // A prepared statement stub whose bind() records (sql, args) and returns
-  // a fake D1PreparedStatement that satisfies the type. The caller only ever
-  // pushes the bound statement into the stmts array -- it doesn't call .run()
-  // or .all() directly -- so we only need bind().
   function makePrepared(sql: string): D1PreparedStatement {
     const stmt = {
       bind(...args: unknown[]): D1PreparedStatement {
         recorded.push({ sql: sql.replace(/\s+/g, ' ').trim(), args })
         return this as unknown as D1PreparedStatement
       },
-      // The following are never called in unit tests but are required by the
-      // D1PreparedStatement interface. They throw to catch accidental usage.
       first: () => Promise.reject(new Error('stub: first() not implemented')),
       run: () => Promise.reject(new Error('stub: run() not implemented')),
       all: () => Promise.reject(new Error('stub: all() not implemented')),
@@ -42,9 +34,7 @@ function makeD1Stub() {
   }
 
   const db = {
-    prepare(sql: string) {
-      return makePrepared(sql)
-    },
+    prepare(sql: string) { return makePrepared(sql) },
     batch: () => Promise.resolve([]),
     dump: () => Promise.resolve(new ArrayBuffer(0)),
     exec: () => Promise.resolve({ count: 0, duration: 0 }),
@@ -53,9 +43,7 @@ function makeD1Stub() {
   return { db, recorded }
 }
 
-// ── Helpers ──────────────────────────────────────────────────────────────────
-
-function makeEvent<K extends PersistedEvent['kind']>(
+function makeEvent<K extends EventKind>(
   kind: K,
   payload: unknown,
   overrides: Partial<PersistedEvent> = {},
@@ -66,297 +54,233 @@ function makeEvent<K extends PersistedEvent['kind']>(
     projectId: 'proj-1',
     fileId: 'file-a',
     cellId: 'cell-1',
+    parentId: null,
     kind,
     author: 'alice',
     payload,
     clientTs: 1000,
     serverTs: 2000,
+    serverSeq: 5,
     ...overrides,
   } as PersistedEvent<K>
 }
-
-// ── Tests ─────────────────────────────────────────────────────────────────────
 
 describe('contentHash', () => {
   it('returns an 8-char hex string', () => {
     expect(contentHash('hello')).toMatch(/^[0-9a-f]{8}$/)
   })
 
-  it('is stable -- same text always hashes to the same value', () => {
+  it('is stable', () => {
     expect(contentHash('Genesis 1:1')).toBe(contentHash('Genesis 1:1'))
   })
 
-  it('changes when text changes', () => {
+  it('differs for different text', () => {
     expect(contentHash('abc')).not.toBe(contentHash('abd'))
   })
 })
 
-describe('buildEventProjectionStmts', () => {
-  describe('cell.commit', () => {
-    it('produces a cells UPSERT with the correct column values', () => {
-      const { db, recorded } = makeD1Stub()
-      const stmts: D1PreparedStatement[] = []
-      const text = 'In the beginning God created the heavens and the earth'
+describe('buildEventProjectionStmts — source.cell.create', () => {
+  it('emits an INSERT INTO cells with side=source and event_id=this event', () => {
+    const { db, recorded } = makeD1Stub()
+    const stmts: D1PreparedStatement[] = []
 
-      buildEventProjectionStmts(
-        db,
-        makeEvent('cell.commit', { value: text, valueHtml: '<p>' + text + '</p>' }),
-        stmts,
-      )
+    buildEventProjectionStmts(
+      db,
+      makeEvent('source.cell.create', {
+        cellId: 'cell-1',
+        anchorCellId: null,
+        value: 'In the beginning',
+        valueHtml: '<p>In the beginning</p>',
+        type: 'verse',
+        canonicalRef: 'GEN 1:1',
+      }),
+      stmts,
+    )
 
-      expect(stmts).toHaveLength(1)
-      expect(recorded).toHaveLength(1)
+    expect(stmts).toHaveLength(1)
+    const { sql, args } = recorded[0]
+    expect(sql).toContain('INSERT INTO cells')
+    expect(sql).toContain('ON CONFLICT(project_id, file_id, cell_id)')
+    // 0=project_id, 1=file_id, 2=cell_id, 3=side, 4=value, 5=value_html,
+    // 6=type, 7=canonical_ref, 8=anchor_cell_id, 9=event_id,
+    // 10=last_editor, 11=last_edit_at, 12=word_count, 13=content_hash
+    expect(args[0]).toBe('proj-1')
+    expect(args[1]).toBe('file-a')
+    expect(args[2]).toBe('cell-1')
+    expect(args[3]).toBe('source')
+    expect(args[4]).toBe('In the beginning')
+    expect(args[6]).toBe('verse')
+    expect(args[7]).toBe('GEN 1:1')
+    expect(args[9]).toBe('evt-test-id')
+  })
+})
 
-      const { sql, args } = recorded[0]
-      expect(sql).toContain('INSERT INTO cells')
-      expect(sql).toContain('edit_count')
-      expect(sql).toContain('ON CONFLICT(file_id, cell_id)')
-      expect(sql).toContain('WHERE excluded.last_edit_at > cells.last_edit_at')
+describe('buildEventProjectionStmts — target.cell.create', () => {
+  it('emits an INSERT INTO cells with side=target', () => {
+    const { db, recorded } = makeD1Stub()
+    const stmts: D1PreparedStatement[] = []
+    buildEventProjectionStmts(
+      db,
+      makeEvent('target.cell.create', {
+        cellId: 'cell-1',
+        value: 'hello',
+        anchorCellId: 'cell-0',
+      }),
+      stmts,
+    )
+    const { args } = recorded[0]
+    expect(args[3]).toBe('target')
+    expect(args[8]).toBe('cell-0')   // anchor_cell_id
+    expect(args[9]).toBe('evt-test-id') // event_id
+  })
+})
 
-      // Positional bindings: file_id, cell_id, content_text, content_hash,
-      //   word_count, last_editor, last_edit_at, projected_from
-      expect(args[0]).toBe('file-a')           // file_id
-      expect(args[1]).toBe('cell-1')           // cell_id
-      expect(args[2]).toBe(text)               // content_text
-      expect(args[3]).toBe(contentHash(text))  // content_hash (djb2)
-      // validated is hardcoded 0 in the INSERT literal, not a bind param
-      expect(args[4]).toBe(10)                 // word_count
-      expect(args[5]).toBe('alice')            // last_editor
-      expect(args[6]).toBe(2000)               // last_edit_at = serverTs
-      expect(args[7]).toBe('event:evt-test-id') // projected_from
-    })
-
-    it('computes word_count correctly for multi-word and empty text', () => {
-      const { db: db1, recorded: r1 } = makeD1Stub()
-      const stmts1: D1PreparedStatement[] = []
-      buildEventProjectionStmts(
-        db1,
-        makeEvent('cell.commit', { value: 'one two three', valueHtml: '' }),
-        stmts1,
-      )
-      expect(r1[0].args[4]).toBe(3)
-
-      const { db: db2, recorded: r2 } = makeD1Stub()
-      const stmts2: D1PreparedStatement[] = []
-      buildEventProjectionStmts(
-        db2,
-        makeEvent('cell.commit', { value: '', valueHtml: '' }),
-        stmts2,
-      )
-      expect(r2[0].args[4]).toBe(0)
-    })
-
-    it('throws when fileId is missing', () => {
-      const { db } = makeD1Stub()
-      expect(() =>
-        buildEventProjectionStmts(
-          db,
-          makeEvent('cell.commit', { value: 'x', valueHtml: '' }, { fileId: null }),
-          [],
-        )
-      ).toThrow(/fileId/)
-    })
+describe('buildEventProjectionStmts — target.cell.commit', () => {
+  it('UPDATEs value, event_id, and source_event_id', () => {
+    const { db, recorded } = makeD1Stub()
+    const stmts: D1PreparedStatement[] = []
+    buildEventProjectionStmts(
+      db,
+      makeEvent('target.cell.commit', {
+        value: 'new text',
+        valueHtml: '<p>new text</p>',
+        sourceEventId: 'src-event-99',
+      }),
+      stmts,
+    )
+    expect(stmts).toHaveLength(1)
+    const { sql, args } = recorded[0]
+    expect(sql).toContain('UPDATE cells SET')
+    expect(sql).toContain('event_id = ?')
+    expect(sql).toContain('source_event_id = ?')
+    // 0=value, 1=value_html, 2=event_id, 3=source_event_id,
+    // 4=last_editor, 5=last_edit_at, 6=word_count, 7=content_hash,
+    // 8=project_id, 9=file_id, 10=cell_id
+    expect(args[0]).toBe('new text')
+    expect(args[2]).toBe('evt-test-id')
+    expect(args[3]).toBe('src-event-99')
+    expect(args[8]).toBe('proj-1')
+    expect(args[10]).toBe('cell-1')
   })
 
-  describe('idempotency', () => {
-    it('replaying the same cell.commit event twice leaves the cells row unchanged (LWW guard)', () => {
-      // The D1 stub in this file only records SQL/args; it doesn't maintain real
-      // state. We verify idempotency at the SQL level: the second apply produces
-      // the same statement with identical args, and the ON CONFLICT WHERE guard
-      // (excluded.last_edit_at > cells.last_edit_at) prevents any mutation when
-      // the timestamp is equal.
-      const { db, recorded } = makeD1Stub()
-      const stmts: D1PreparedStatement[] = []
-      const event = makeEvent('cell.commit', { value: 'hello', valueHtml: '<p>hello</p>' })
+  it('writes NULL source_event_id when omitted', () => {
+    const { db, recorded } = makeD1Stub()
+    const stmts: D1PreparedStatement[] = []
+    buildEventProjectionStmts(
+      db,
+      makeEvent('target.cell.commit', { value: 'x' }),
+      stmts,
+    )
+    expect(recorded[0].args[3]).toBe(null)
+  })
+})
 
-      buildEventProjectionStmts(db, event, stmts)
-      buildEventProjectionStmts(db, event, stmts)
+describe('buildEventProjectionStmts — source.cell.commit', () => {
+  it('UPDATEs value + event_id without touching source_event_id', () => {
+    const { db, recorded } = makeD1Stub()
+    const stmts: D1PreparedStatement[] = []
+    buildEventProjectionStmts(
+      db,
+      makeEvent('source.cell.commit', { value: 'updated source' }),
+      stmts,
+    )
+    const { sql } = recorded[0]
+    expect(sql).toContain('UPDATE cells SET')
+    expect(sql).not.toContain('source_event_id =')
+  })
+})
 
-      // Two statements emitted -- both are the same SQL shape and same args.
-      expect(stmts).toHaveLength(2)
-      expect(recorded[0].sql).toBe(recorded[1].sql)
-      expect(recorded[0].args).toEqual(recorded[1].args)
-      // Both include the LWW WHERE guard that prevents clobbering on equal ts.
-      expect(recorded[0].sql).toContain('WHERE excluded.last_edit_at > cells.last_edit_at')
-    })
+describe('buildEventProjectionStmts — *.cell.delete', () => {
+  it('emits a DELETE FROM cells statement', () => {
+    const { db, recorded } = makeD1Stub()
+    const stmts: D1PreparedStatement[] = []
+    buildEventProjectionStmts(db, makeEvent('target.cell.delete', {}), stmts)
+    expect(recorded[0].sql).toContain('DELETE FROM cells')
+    expect(recorded[0].args).toEqual(['proj-1', 'file-a', 'cell-1'])
+  })
+})
+
+describe('buildEventProjectionStmts — *.cell.reorder', () => {
+  it('UPDATEs anchor_cell_id and event_id', () => {
+    const { db, recorded } = makeD1Stub()
+    const stmts: D1PreparedStatement[] = []
+    buildEventProjectionStmts(
+      db,
+      makeEvent('target.cell.reorder', { anchorCellId: 'cell-7' }),
+      stmts,
+    )
+    expect(recorded[0].sql).toContain('UPDATE cells SET anchor_cell_id')
+    expect(recorded[0].args[0]).toBe('cell-7')
+    expect(recorded[0].args[1]).toBe('evt-test-id') // event_id
+  })
+})
+
+describe('buildEventProjectionStmts — cell.validate / cell.unvalidate', () => {
+  it('cell.validate emits validator UPSERT (is_active=1) + cells.validated recompute', () => {
+    const { db, recorded } = makeD1Stub()
+    const stmts: D1PreparedStatement[] = []
+    buildEventProjectionStmts(
+      db,
+      makeEvent('cell.validate', { editEventId: 'evt-commit-id' }),
+      stmts,
+    )
+    expect(stmts).toHaveLength(2)
+    expect(recorded[0].sql).toContain('INSERT INTO cell_validators')
+    expect(recorded[0].sql).toMatch(/VALUES \([^)]*?, 1, \?\)/)
+    expect(recorded[1].sql).toContain('UPDATE cells')
+    expect(recorded[1].sql).toContain('SET validated')
+    expect(recorded[1].sql).toContain('edit_event_id = cells.event_id')
   })
 
-  describe('cell.validate', () => {
-    it('produces TWO statements: cell_validators UPSERT with is_active=1 + cells.validated recompute', () => {
-      const { db, recorded } = makeD1Stub()
-      const stmts: D1PreparedStatement[] = []
+  it('cell.unvalidate emits validator UPSERT (is_active=0) + recompute', () => {
+    const { db, recorded } = makeD1Stub()
+    const stmts: D1PreparedStatement[] = []
+    buildEventProjectionStmts(
+      db,
+      makeEvent('cell.unvalidate', { editEventId: 'evt-commit-id' }),
+      stmts,
+    )
+    expect(stmts).toHaveLength(2)
+    expect(recorded[0].sql).toMatch(/VALUES \([^)]*?, 0, \?\)/)
+  })
+})
 
+describe('buildEventProjectionStmts — file.create', () => {
+  it('emits an INSERT INTO files row', () => {
+    const { db, recorded } = makeD1Stub()
+    const stmts: D1PreparedStatement[] = []
+    buildEventProjectionStmts(
+      db,
+      makeEvent('file.create', { name: 'Genesis', fileType: 'codex', sourceLanguage: 'en' }, { cellId: null }),
+      stmts,
+    )
+    expect(recorded[0].sql).toContain('INSERT INTO files')
+    expect(recorded[0].args[0]).toBe('file-a')
+    expect(recorded[0].args[2]).toBe('Genesis')
+  })
+})
+
+describe('buildEventProjectionStmts — error paths', () => {
+  it('throws when *.cell.commit has no fileId', () => {
+    const { db } = makeD1Stub()
+    expect(() =>
       buildEventProjectionStmts(
         db,
-        makeEvent('cell.validate', { editEventId: 'evt-commit-id' }),
-        stmts,
-      )
-
-      expect(stmts).toHaveLength(2)
-      expect(recorded).toHaveLength(2)
-
-      const { sql, args } = recorded[0]
-      expect(sql).toContain('INSERT INTO cell_validators')
-      expect(sql).toContain('ON CONFLICT(project_id, file_id, cell_id, edit_event_id, username)')
-      expect(sql).toContain('WHERE excluded.decided_ts > cell_validators.decided_ts')
-
-      expect(args[0]).toBe('proj-1')         // project_id
-      expect(args[1]).toBe('file-a')         // file_id
-      expect(args[2]).toBe('cell-1')         // cell_id
-      expect(args[3]).toBe('evt-commit-id')  // edit_event_id
-      expect(args[4]).toBe('alice')          // username
-      // is_active=1 is in the SQL literal, not a bind param
-      expect(args[5]).toBe(2000)             // decided_ts = serverTs
-
-      // Second statement: recompute cells.validated
-      const { sql: sql2, args: args2 } = recorded[1]
-      expect(sql2).toContain('UPDATE cells')
-      expect(sql2).toContain('SET validated')
-      expect(sql2).toContain('cell_validators')
-      expect(sql2).toContain('projected_from')
-      expect(args2[0]).toBe('proj-1')  // project_id for subquery
-      expect(args2[1]).toBe('file-a')  // file_id for subquery
-      expect(args2[2]).toBe('cell-1')  // cell_id for subquery
-      expect(args2[3]).toBe('evt-commit-id') // legacy fallback edit id
-      expect(args2[4]).toBe('file-a')  // file_id for WHERE
-      expect(args2[5]).toBe('cell-1')  // cell_id for WHERE
-    })
-
-    it('throws when fileId is missing', () => {
-      const { db } = makeD1Stub()
-      expect(() =>
-        buildEventProjectionStmts(
-          db,
-          makeEvent('cell.validate', { editEventId: 'e1' }, { fileId: null }),
-          [],
-        )
-      ).toThrow(/fileId/)
-    })
-
-    it('throws when cellId is missing', () => {
-      const { db } = makeD1Stub()
-      expect(() =>
-        buildEventProjectionStmts(
-          db,
-          makeEvent('cell.validate', { editEventId: 'e1' }, { cellId: null }),
-          [],
-        )
-      ).toThrow(/cellId/)
-    })
+        makeEvent('target.cell.commit', { value: 'x' }, { fileId: null }),
+        [],
+      ),
+    ).toThrow(/fileId/)
   })
 
-  describe('cell.unvalidate', () => {
-    it('produces TWO statements: cell_validators UPSERT with is_active=0 + cells.validated recompute', () => {
-      const { db, recorded } = makeD1Stub()
-      const stmts: D1PreparedStatement[] = []
-
+  it('throws on unknown event kind', () => {
+    const { db } = makeD1Stub()
+    expect(() =>
       buildEventProjectionStmts(
         db,
-        makeEvent('cell.unvalidate', { editEventId: 'evt-commit-id' }),
-        stmts,
-      )
-
-      expect(stmts).toHaveLength(2)
-      expect(recorded).toHaveLength(2)
-
-      const { sql, args } = recorded[0]
-      expect(sql).toContain('INSERT INTO cell_validators')
-      // is_active=0 appears literally in the SQL (not as a bind param)
-      expect(sql).toContain(', 0, ?)')
-      expect(args[0]).toBe('proj-1')
-      expect(args[3]).toBe('evt-commit-id')
-      expect(args[5]).toBe(2000)
-
-      // Second statement: recompute cells.validated
-      const { sql: sql2, args: args2 } = recorded[1]
-      expect(sql2).toContain('UPDATE cells')
-      expect(sql2).toContain('SET validated')
-      expect(sql2).toContain('projected_from')
-      expect(args2[3]).toBe('evt-commit-id') // legacy fallback edit id
-      expect(args2[4]).toBe('file-a')  // file_id for WHERE
-      expect(args2[5]).toBe('cell-1')  // cell_id for WHERE
-    })
-
-    it('throws when fileId is missing', () => {
-      const { db } = makeD1Stub()
-      expect(() =>
-        buildEventProjectionStmts(
-          db,
-          makeEvent('cell.unvalidate', { editEventId: 'e1' }, { fileId: null }),
-          [],
-        )
-      ).toThrow(/fileId/)
-    })
-
-    it('throws when cellId is missing', () => {
-      const { db } = makeD1Stub()
-      expect(() =>
-        buildEventProjectionStmts(
-          db,
-          makeEvent('cell.unvalidate', { editEventId: 'e1' }, { cellId: null }),
-          [],
-        )
-      ).toThrow(/cellId/)
-    })
-  })
-
-  describe('cell.metadata.set', () => {
-    it('produces NO statements (Phase 0 no-op)', () => {
-      // cell.metadata.set is deferred until Phase 4 when the cells table
-      // gains dedicated columns for these fields. For now it's a documented
-      // no-op so replay doesn't fail on metadata events in the log.
-      const { db } = makeD1Stub()
-      const stmts: D1PreparedStatement[] = []
-
-      buildEventProjectionStmts(
-        db,
-        makeEvent('cell.metadata.set', { field: 'cellLabel', value: 'v1' }),
-        stmts,
-      )
-
-      expect(stmts).toHaveLength(0)
-    })
-  })
-
-  describe('thread.add / thread.resolve', () => {
-    it('thread.add produces NO statements (Phase 0 no-op)', () => {
-      const { db } = makeD1Stub()
-      const stmts: D1PreparedStatement[] = []
-
-      buildEventProjectionStmts(
-        db,
-        makeEvent('thread.add', { threadId: 't1', content: 'hello' }),
-        stmts,
-      )
-
-      expect(stmts).toHaveLength(0)
-    })
-
-    it('thread.resolve produces NO statements (Phase 0 no-op)', () => {
-      const { db } = makeD1Stub()
-      const stmts: D1PreparedStatement[] = []
-
-      buildEventProjectionStmts(
-        db,
-        makeEvent('thread.resolve', { threadId: 't1' }),
-        stmts,
-      )
-
-      expect(stmts).toHaveLength(0)
-    })
-  })
-
-  describe('unknown kind', () => {
-    it('throws an error for an unrecognised event kind', () => {
-      const { db } = makeD1Stub()
-      expect(() =>
-        buildEventProjectionStmts(
-          db,
-          // @ts-expect-error intentionally passing unknown kind
-          makeEvent('cell.unknown.future', {}),
-          [],
-        )
-      ).toThrow(/unknown event kind/)
-    })
+        // @ts-expect-error intentionally bad kind
+        makeEvent('cell.future.unknown', {}),
+        [],
+      ),
+    ).toThrow(/unknown event kind/)
   })
 })

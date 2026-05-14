@@ -98,25 +98,7 @@ React 19 + Tailwind v4 (via `@tailwindcss/vite`) + shadcn/ui (`components.json`,
 
 ## Residual Y.Doc rip (Phase 2c-γ)
 
-<<<<<<< HEAD
 Phase 2c-β switched the editor + importer + read paths off Y.Doc and onto the AD-2 event-log + outbox, but a tail of feature surfaces — comments, multi-validator edit history, waivers, cell audio / video attachments, snapshots, parallel-passages search/replace, completion + backtranslation writebacks — still write into per-file Y.Doc handles (held in memory via the `useFileDoc` shim). These features are functional today but their durable state never reaches D1 until each surface migrates to its own event grammar. Phase 2c-γ rips them: delete the residual `src/lib/store/file-doc.ts`, `partyserver-provider.ts`, `translated-xml.ts`, `cqrs-bridge.ts`, the `@tiptap/extension-collaboration` dep, and the `yjs` / `y-indexeddb` / `y-partyserver` / `y-webrtc` direct deps. Many of the features above are deferred per spec (comments, threads, waivers, validator edit history are v1.x); the rip is gated on their grammars landing.
-=======
-Phase 2 migrates the client off Y.Doc reads onto the sync-worker's D1 projection (per Aquilla spec AD-2 / AD-3 v1 thin client). Status as of phase 2b:
-
-- **Reads** — every read-side hook is server-backed. The pattern is locked-in: a domain-specific `*-read.ts` + `*-read-types.ts` under `src/lib/sync/`, exposing a `fetchX(...)` wrapper that throws an `XReadError` on non-2xx; hooks wrap the fetcher with a vanilla useState + race-guarded effect (no React Query, no SWR). Phase 2a migrated `useCells`; Phase 2b migrated the remaining read hooks.
-- **Phase 2b additions** — fetch wrappers: `history-read.ts` (per-cell event chain), `search-read.ts` (project FTS5), `projects-read.ts` (frontier-server project list + detail), `members-read.ts`, `settings-read.ts`, `orgs-read.ts`. Hooks rewritten or aligned: `useCellHistory` (new read-side hook; old write helpers in the same file are untouched, Phase 2c rewrites them), `useCellEditHistory` (drops React Query; uses the new history wrapper; gains a required `projectId` prop wired through `HistoryDrawer`), `useCellValidators`, `useCellsAuditStats`, `useFileMeta` (Y.Doc → localStorage), `useWorkspaceSearch` (server FTS5). Hook stubs (`// Phase 2b: <concept> dropped from v1 event grammar`): `useComments`, `useCellWaivers`. New `useSync` reports a static online/connected state until Phase 2c wires the real WS reconciler. `useFileSync` is also stubbed (peers: [], provider: null, status: "live"); the TipTap editor's `syncProvider` prop is therefore always null on dev. `useFileDoc` is a shim that hands out a fresh in-memory Y.Doc per fileId — no IDB, no R2 — so the TipTap editor compiles unchanged until Phase 2c rips the Y.Doc dep out.
-- **New sync-worker routes (Phase 2b):**
-  - `GET /api/v1/projects/:projectId/files/:fileId/cells/:cellId/history` → cell event chain, newest first.
-  - `GET /api/v1/projects/:projectId/search?q=&side=&limit=` → FTS5 over `cells_fts`, project-scoped.
-- **Still Y.Doc-bound:** the TipTap editor (`@tiptap/extension-collaboration`), `src/lib/store/file-doc.ts`, parsers/import pipeline, all write paths (cell commits, edits, comments, snapshots). Phase 2c handles writes + finally deletes Y.Doc. Search-side concepts dropped from the v1 event grammar — comments and cell-waivers — return empty data from the stub hooks; future v1.x features.
-- **Project-index IDB** still lives in `src/lib/store/project-index.ts` for write callers that Phase 2c will migrate; reads happen through frontier-server. The hook layer (`useProject`) overlays frontier-server project + settings onto whatever local stub remains.
-- **Writes still go through Y.Doc** until Phase 2c. After a known write, callers should invoke `revalidate()` so the projection re-loads. `revalidate()` is best-effort: a write that lands in the local Y.Doc but hasn't propagated to the server's projection won't show up on refetch. Phase 2c replaces Y.Doc writes with the AD-3 outbox + cell-event POSTs and removes Y.Doc entirely.
-- **New sync-worker read routes** (added 2a; mounted in `sync-worker/src/index.ts`):
-  - `GET /api/v1/projects/:projectId/files` → list with cell/word/last-edit rollups
-  - `GET /api/v1/projects/:projectId/files/:fileId` → single file row
-  - `GET /api/v1/projects/:projectId/files/:fileId/cells?side=&limit=&cursor=` → cells in anchor-chain order (AD-2). When `side` is omitted, the response carries both source and target rows; the client pairs by `cell_id` (AD-9).
-  - All three auth with a sync-token JWT (`Authorization: Bearer …`) scoped to `:projectId`. Membership is implicit in the JWT — frontier-server only mints tokens for project members.
->>>>>>> origin/dev
 
 ## Backend stack
 

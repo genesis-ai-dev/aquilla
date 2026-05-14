@@ -1,5 +1,5 @@
-// Types for the auth-worker orgs read API (Phase 2b).
-// Mirror of `auth-worker/src/routes/orgs.ts`.
+// Types for the frontier-server orgs read API (Phase 2b).
+// Mirror of `apps/frontier-server/src/routes/orgs.ts`.
 
 export interface OrgRole {
   level: number

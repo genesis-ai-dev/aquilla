@@ -1,7 +1,7 @@
 // Auth routes ported from frontier-server/cloudflare/src/routes/auth.ts.
 //
 // All routes are mounted under `/api/v2/auth/*` by src/index.ts so the
-// frontend can target the new auth-worker by flipping VITE_AUTH_BASE without
+// frontend can target aquilla-frontier-server by flipping VITE_AUTH_BASE without
 // touching the rest of the request shape.
 //
 // Side-by-side writer model: rows land in the same frontier-db-v2 the legacy

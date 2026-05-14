@@ -1,6 +1,6 @@
-// Minimal in-memory D1 fake for auth-worker route tests.
+// Minimal in-memory D1 fake for frontier-server route tests.
 //
-// Supports the statement shapes the auth-worker actually issues against the
+// Supports the statement shapes frontier-server actually issues against the
 // single codex D1: users, organizations, org_members, projects,
 // project_members, project_invites, password_reset_tokens. Pattern-matches
 // on the normalized SQL string + bind args.

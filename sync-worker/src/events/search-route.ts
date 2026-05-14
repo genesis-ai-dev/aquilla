@@ -4,7 +4,7 @@
 //
 // Query params:
 //   q     — required, the user's search text. We MATCH against the
-//           `cells_fts` virtual table (created by auth-worker migration
+//           `cells_fts` virtual table (created by frontier-server migration
 //           0003_cells_reshape.sql against `cells.value`). The string is
 //           sanitized — special FTS5 syntax characters are stripped so a
 //           translator typing `"`, `*`, `(`, `:`, or a stray AND/OR doesn't

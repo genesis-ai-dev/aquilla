@@ -1,23 +1,25 @@
 import type { FrontierSession } from "./types";
 import { saveSession } from "./session-store";
 
-// codex-auth-worker is the canonical backend for auth, orgs, members,
-// projects, users/search, sync-token, invites, and the AI health probe.
-// The legacy frontier-server is no longer part of codex-web's runtime
-// surface; it still serves the codex-editor VS Code extension under its
-// own deployment.
+// The frontier-server identity worker (apps/frontier-server/) is the
+// canonical backend for auth, orgs, members, projects, users/search,
+// sync-token, invites, and the AI health probe. The legacy frontier-server
+// (genesis-ai-dev/frontier-server) is no longer part of codex-web's
+// runtime surface; it still serves the codex-editor VS Code extension
+// under its own deployment.
 //
 // `||` (not `??`) so empty-string env values fall back too — `vi.stubEnv`
 // uses "" to simulate "unset" in tests, and accidental empty values in a
 // prod .env should also use the default rather than break network calls.
 export const AUTH_BASE =
   ((import.meta.env.VITE_AUTH_BASE as string | undefined)?.replace(/\/+$/, "")) ||
-  "https://codex-auth-worker.blue-darkness-7674.workers.dev";
+  "https://aquilla-prod-frontier-server.blue-darkness-7674.workers.dev";
 
 /** @deprecated FRONTIER_BASE used to point at api.frontierrnd.com; every
- *  runtime call now goes through AUTH_BASE (codex-auth-worker). Kept as an
- *  alias for the duration of the cutover so existing imports compile while
- *  callers are migrated; new code should import AUTH_BASE directly. */
+ *  runtime call now goes through AUTH_BASE (the frontier-server identity
+ *  worker). Kept as an alias for the duration of the cutover so existing
+ *  imports compile while callers are migrated; new code should import
+ *  AUTH_BASE directly. */
 export const FRONTIER_BASE = AUTH_BASE;
 
 export class FrontierAuthError extends Error {

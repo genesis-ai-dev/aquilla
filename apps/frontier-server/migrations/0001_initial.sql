@@ -15,7 +15,7 @@
 --   - projects.gitlab_project_id                               (no GitLab)
 --   - `roles` lookup table                                     (constants
 --     live in src/lib/frontier/roles.ts on the client and
---     auth-worker/src/services/project-permissions.ts on the server)
+--     apps/frontier-server/src/services/project-permissions.ts on the server)
 --   - subscription_status, api_usage, ab_test_*, pricing_plans (none of
 --     these touched codex-web)
 

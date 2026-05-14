@@ -1,9 +1,11 @@
 // Frontier-style JWT verification + user lookup. Same wire format as the
 // legacy frontier-server (HS256, claim `sub` = username) so tokens minted by
-// codex-auth-worker (or the legacy frontier-server) verify here transparently.
+// aquilla-frontier-server (or the legacy frontier-server) verify here
+// transparently.
 //
-// Copied from codex-auth-worker (auth-worker/src/auth/jwt.ts) and trimmed:
-// the chat worker never *mints* tokens, so the signing helper is omitted.
+// Copied from aquilla-frontier-server (apps/frontier-server/src/auth/jwt.ts)
+// and trimmed: the chat worker never *mints* tokens, so the signing helper
+// is omitted.
 
 import { verify } from "hono/jwt"
 import type { Env, AuthUser, JWTPayload, UserRow } from "../types"

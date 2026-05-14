@@ -10,7 +10,7 @@
 //
 // Auth: Authorization: Bearer <sync-token JWT>. The token's `projectId`
 // claim must match the path's :projectId. Token role is implicitly the
-// project-membership check (auth-worker mints tokens only for members).
+// project-membership check (frontier-server mints tokens only for members).
 
 import { verifyTokenForProject } from "../auth"
 

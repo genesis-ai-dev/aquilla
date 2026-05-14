@@ -2,7 +2,7 @@
 // `sub` = username) against AUTH_DB and stashes the hydrated user on the
 // Hono context.
 //
-// Copied from codex-auth-worker (auth-worker/src/middleware/auth.ts). Kept
+// Copied from aquilla-frontier-server (apps/frontier-server/src/middleware/auth.ts). Kept
 // 1:1 so any tightening of the auth path can be applied uniformly across
 // both workers.
 

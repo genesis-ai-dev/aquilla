@@ -1,6 +1,6 @@
-// Types for the auth-worker project-members read API (Phase 2b).
+// Types for the frontier-server project-members read API (Phase 2b).
 //
-// Mirror of `auth-worker/src/routes/projects.ts` GET /api/v2/projects/:id/members.
+// Mirror of `apps/frontier-server/src/routes/projects.ts` GET /api/v2/projects/:id/members.
 
 export interface ProjectMemberRole {
   level: number

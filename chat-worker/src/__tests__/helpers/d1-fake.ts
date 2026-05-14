@@ -5,7 +5,7 @@
 // that one statement and throws on anything else — accidental new queries
 // are surfaced loudly during tests instead of silently no-oping.
 //
-// Adapted from auth-worker/src/__tests__/helpers/d1-fake.ts.
+// Adapted from apps/frontier-server/src/__tests__/helpers/d1-fake.ts.
 
 export interface UserRow {
   id: number

@@ -11,6 +11,14 @@
  * pulling in src/index.css from the workspace SPA.
  */
 
+/* Tailwind v4 only auto-scans this app's own source by default — without
+ * these @source declarations, classes used inside @aquilla/ui's primitives
+ * (button, input, card, alert, …) get tree-shaken out of the build,
+ * leaving the deployed CSS at ~5KB and the page rendering as bare-bones
+ * unstyled HTML. */
+@source "../../../packages/ui/src/**/*.{ts,tsx}";
+@source "../../../packages/auth-client/src/**/*.{ts,tsx}";
+
 @theme {
   --color-background: oklch(0.99 0 0);
   --color-foreground: oklch(0.21 0.01 285);

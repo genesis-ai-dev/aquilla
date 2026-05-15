@@ -13,7 +13,7 @@ Phase 1B introduced the `apps/` + `packages/` chassis per spec §21-monorepo.md.
 - `routes.json` (repo root) — authoritative slug → URL-path registry. Adding an app means editing this file plus dropping a folder under `apps/`.
 - `seed.sql` (repo root) — canonical preview test cast (alice/bob/carol/dave) applied to every per-PR D1 and the shared `aquilla-dev`.
 
-Phase 3a-final moved the workspace SPA's source from the repo-root `src/` into `apps/workspace/src/`, completing the monorepo-extraction effort. The repo root retains only orchestration (root `package.json` scripts, `vite.config.ts` that drives the legacy Pages build with `root: apps/workspace`, e2e/, scripts/, the brand HTML plugin, Tauri shell, and CI workflows). All 11 task-flow apps now live under `apps/`; all 6 shared packages under `packages/`. Phase 3e relocated `auth-worker/` to `apps/identity/` (the AD-5 identity service). The remaining top-level workers (`apps/sync/`, `apps/chat/`, `cors-proxy/`) stay put until Phase 4's rename pass.
+Phase 3a-final moved the workspace SPA's source from the repo-root `src/` into `apps/workspace/src/`, completing the monorepo-extraction effort. The repo root retains only orchestration (root `package.json` scripts, `vite.config.ts` that drives the Tauri build with `root: apps/workspace`, e2e/, scripts/, the brand HTML plugin, Tauri shell, and CI workflows). All 11 task-flow apps now live under `apps/`; all 6 shared packages under `packages/`. The AD-11 spec-unification pass relocated `auth-worker/` → `apps/identity/` (renamed from `frontier-server`), `sync-worker/` → `apps/sync/`, and `chat-worker/` → `apps/chat/`. No top-level workers remain.
 
 **Apps populated:** all eleven — `front-door` (Phase 1B), `login` / `signup` / `reset` (Phase 3b), `import` / `export` / `migrate` (Phase 3d shells), `projects` / `billing` / `org` (Phase 3c), `identity` (Phase 3e), `workspace` (Phase 3a-final). **Packages populated:** all six — `errors` (1B), `auth-client` / `ui` (3b), `api-client` (3c), `data-model` / `telemetry` (#85).
 
@@ -61,7 +61,7 @@ Tier-1 thin client: reads fetch from `apps/sync/`'s HTTP endpoints on demand. Ty
 
 Writes flow through a local IndexedDB outbox (`apps/workspace/src/lib/sync/outbox.ts`) and surface to the server via two paths:
 
-1. **Per-project WebSocket reconciler** (`apps/workspace/src/lib/sync/ws-reconciler.ts`) — `wss://apps/sync/parties/project-sync/:projectId`, backed by a per-project Durable Object (`apps/sync/src/project-do.ts`). Holds **only transient state**: focus-lock leases, presence, and `event.applied` / `event.stale` broadcasts. No DO storage writes; rooms evict when empty.
+1. **Per-project WebSocket reconciler** (`apps/workspace/src/lib/sync/ws-reconciler.ts`) — `wss://<sync-worker-host>/parties/project-sync/:projectId`, backed by a per-project Durable Object (`apps/sync/src/project-do.ts`). Holds **only transient state**: focus-lock leases, presence, and `event.applied` / `event.stale` broadcasts. No DO storage writes; rooms evict when empty.
 2. **HTTP fallback** — `POST /events` for queued events when the WS is unhealthy. The outbox flusher (`apps/workspace/src/hooks/useOutboxFlusher.ts`) drains in batches with idempotent UUIDv7 ids.
 
 Typed event helpers in `apps/workspace/src/lib/sync/events-emit.ts`: `emitTargetCellCommit`, `emitCellValidate`, `emitCellUnvalidate`, `emitSourceCellCreate`, `emitFileCreate`. `outbox-types.ts` mirrors the server's `RawEvent<K>` grammar. All writes are optimistic — `useCells.revalidate()` (passed in as `onCellCommitted`) picks up the projection when the server acks. Remote `event.applied` broadcasts also trigger `revalidate()`.
@@ -106,7 +106,7 @@ Codex-web hosts its own Cloudflare Workers in this repo, independent of the olde
 
 - **`apps/identity/`** — `/api/v2/auth/*`, `/api/v2/sync-token`, `/api/v2/users/*`, `/api/v2/orgs/*`, `/api/v2/projects/*` (incl. invites + settings + source-linking), `/api/v2/invites/*`. Identity service per AD-5; mounted under `/api/identity/*` via Workers Routes (routes.json). Worker name `aquilla-identity` (prod: `aquilla-prod-identity`; staging: `aquilla-dev-identity`). Writes to D1 `aquilla-db` (its own schema; not shared with the legacy `frontier-db-v2`). Relocated from top-level `auth-worker/` in Phase 3e, renamed from `frontier-server` during the AD-11 spec-unification pass.
 - **`apps/chat/`** — `/api/v1/chat/completions`. Authenticated OpenRouter proxy. No billing. Worker name `aquilla-chat-worker` (relocated from top-level `chat-worker/` during the AD-11 spec-unification pass).
-- **`apps/sync/`** — realtime collab DOs (one per file). Persists Y.Doc snapshots/tails to R2 (`aquilla-snapshots`); projects flat row state to D1 (`aquilla-db`, same database as identity but writer-only against `files`/`cells`/`events`/etc.). Also hosts `/audio/*` for cell-audio storage. Worker name `aquilla-sync-worker` (relocated from top-level `sync-worker/` during the AD-11 spec-unification pass).
+- **`apps/sync/`** — realtime collab DOs (one per file). Persists Y.Doc snapshots/tails to R2 (`codex-snapshots`; TODO rename to `aquilla-snapshots`); projects flat row state to D1 (`aquilla-db`, same database as identity but writer-only against `files`/`cells`/`events`/etc.). Also hosts `/audio/*` for cell-audio storage. Worker name `aquilla-sync-worker` (relocated from top-level `sync-worker/` during the AD-11 spec-unification pass).
 
 Each worker has a `[env.staging]` block pointing at staging-suffixed resources (`aquilla-db-staging`, `aquilla-snapshots-staging`). `apps/identity/` additionally has an `[env.preview]` block (per-PR; `aquilla-pr-<N>-identity`) that CI substitutes `__PR__` into. Production and staging share zero data.
 
@@ -125,7 +125,7 @@ Workflows in `.github/workflows/`:
 | `nightly-dev-reset.yml` | nightly cron — drops + reapplies `aquilla-db-staging` from migrations + seed |
 | `web-ci.yml` | every PR push (no path filter) — runs tests + build |
 
-Cloudflare Pages is retired: the front-door Worker wildcard-claims `aquilla.app/*` and per-app Workers Routes claim each slug. There is no more legacy SPA bundle.
+Cloudflare Pages retirement is **partial**. The repo no longer builds or deploys a Pages bundle (the `deploy.yml` workflow + root deploy scripts are gone), but the existing Pages deployment is still live in CF and Workers Routes still maps `aquilla.app/` (apex-exact) to front-door — not the wildcard `aquilla.app/*` claim that's documented in `apps/front-door/wrangler.toml`. Unclaimed paths still fall through to Pages, which serves the old SPA bundle's `index.html` + favicons. To complete the cutover: (a) migrate favicons + any other Pages-served assets into front-door or an app's `public/`, then (b) update the `aquilla.app/` Workers Route to `aquilla.app/*` in the Cloudflare dashboard (CI's token has `workers_routes:write` but the change is risky enough to want human review).
 
 ### Branch behavior
 

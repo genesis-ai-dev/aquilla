@@ -1,11 +1,17 @@
 import { describe, expect, it } from "vitest"
 import { createHash } from "node:crypto"
-import { readFileSync } from "node:fs"
+import { existsSync, readFileSync } from "node:fs"
 import { join } from "node:path"
 import worker from "./worker"
 
 function expectedInlineScriptHash(): string {
-  const html = readFileSync(join(process.cwd(), "index.html"), "utf8")
+  const indexPath = [
+    join(process.cwd(), "index.html"),
+    join(process.cwd(), "apps/workspace/index.html"),
+  ].find((path) => existsSync(path))
+  if (!indexPath) throw new Error("workspace index.html was not found")
+
+  const html = readFileSync(indexPath, "utf8")
   const script = html.match(/<script>([\s\S]*?)<\/script>/)?.[1]
   if (!script) throw new Error("workspace index.html has no inline bootstrap script")
   return `'sha256-${createHash("sha256").update(script).digest("base64")}'`

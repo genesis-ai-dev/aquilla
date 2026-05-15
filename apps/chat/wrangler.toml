@@ -50,3 +50,23 @@ database_id = "636fdec6-ba75-447f-b890-6743e00b95fe"
 ALGORITHM = "HS256"
 DEFAULT_LLM_MODEL = "anthropic/claude-sonnet-4.5"
 ENVIRONMENT = "staging"
+
+# ---------------------------------------------------------------------------
+# Production — explicit env block so the unified matrix workflow can call
+# `wrangler deploy --env=production`. Worker name matches the top-level
+# `aquilla-chat-worker` so we don't fork into a new worker name and orphan
+# anyone hitting the existing deployment.
+# ---------------------------------------------------------------------------
+[env.production]
+name = "aquilla-chat-worker"
+account_id = "6a80496d1e59948a9cbaa3c643ba81d7"
+
+[[env.production.d1_databases]]
+binding = "AUTH_DB"
+database_name = "frontier-db-v2"
+database_id = "9c6abd81-01c3-44ce-9d93-9dfa1c7e1086"
+
+[env.production.vars]
+ALGORITHM = "HS256"
+DEFAULT_LLM_MODEL = "anthropic/claude-sonnet-4.5"
+ENVIRONMENT = "production"

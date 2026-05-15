@@ -32,6 +32,14 @@ account_id = "6a80496d1e59948a9cbaa3c643ba81d7"
 [vars]
 ENV = "prod"
 
+# Static assets — favicons + OG image. Workers Assets serves any file
+# that matches the request path; unknown paths fall through to the
+# Worker script (src/index.ts) which handles redirects + 404. This
+# replaces the favicon-serving job Cloudflare Pages used to do.
+[assets]
+directory = "./public"
+binding = "ASSETS"
+
 # ---------------------------------------------------------------------------
 # Production — `wrangler deploy --env production`
 # ---------------------------------------------------------------------------
@@ -42,14 +50,19 @@ account_id = "6a80496d1e59948a9cbaa3c643ba81d7"
 # specific app route lands here. Per-app Workers Routes
 # (`aquilla.app/<slug>/*`) take precedence — Cloudflare picks the most
 # specific match, so /login/* still goes to aquilla-prod-login etc.
-# Front-door 301s legacy workspace URLs (/project/*, /debug, …) to
-# /w/<path> and 404s everything else. This replaces the Pages SPA
-# fallback (`/*` → `index.html`) that previously served the legacy
-# bundle at the apex.
+# Front-door serves favicons + OG image via Workers Assets, 301s
+# legacy workspace URLs (/project/*, /debug, …) to /w/<path>, and
+# 404s everything else. This replaces the Pages SPA fallback
+# (`/*` → `index.html`) that previously served the legacy bundle at
+# the apex.
 routes = ["aquilla.app/*"]
 
 [env.production.vars]
 ENV = "prod"
+
+[env.production.assets]
+directory = "./public"
+binding = "ASSETS"
 
 # ---------------------------------------------------------------------------
 # Staging — `wrangler deploy --env staging`
@@ -62,6 +75,10 @@ routes = ["dev.aquilla.app/*"]  # Claimed in staging via Workers Routes
 [env.staging.vars]
 ENV = "preview"
 
+[env.staging.assets]
+directory = "./public"
+binding = "ASSETS"
+
 # ---------------------------------------------------------------------------
 # Preview (per-PR) — CI substitutes `__PR__` with the PR number.
 # ---------------------------------------------------------------------------
@@ -73,3 +90,7 @@ routes = ["pr-__PR__.aquilla.app/*"]  # Claimed in preview via Workers Routes
 [env.preview.vars]
 ENV = "preview"
 PR = "__PR__"
+
+[env.preview.assets]
+directory = "./public"
+binding = "ASSETS"

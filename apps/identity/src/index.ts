@@ -80,6 +80,19 @@ const CORS_HEADERS: Record<string, string> = {
   Vary: "Origin",
 }
 
+// Workers Routes mount: `aquilla.app/api/identity/*` sends the full path
+// (prefix intact) to this worker. Strip the `/api/identity` prefix so the
+// rest of the routing table can keep its bare `/api/v2/...` paths — this
+// also keeps direct workers.dev calls working unchanged.
+app.use("*", async (c, next) => {
+  if (c.req.path.startsWith("/api/identity")) {
+    const url = new URL(c.req.url)
+    url.pathname = url.pathname.slice("/api/identity".length) || "/"
+    return app.fetch(new Request(url.toString(), c.req.raw), c.env, c.executionCtx)
+  }
+  return next()
+})
+
 app.options("*", () => {
   return new Response(null, { status: 204, headers: CORS_HEADERS })
 })

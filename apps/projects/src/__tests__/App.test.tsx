@@ -5,11 +5,11 @@
 //   - Unauthenticated users (no JWT cookie) hit the login redirect path on
 //     the list page (we stub the redirect helper to avoid an actual jsdom
 //     navigation).
-//   - Stub pages render their placeholder copy.
+//   - Stub pages render or redirect as expected.
 
 import { describe, it, expect, vi, beforeEach } from "vitest"
-import { render, screen, waitFor } from "@testing-library/react"
-import { MemoryRouter } from "react-router-dom"
+import { cleanup, render, screen, waitFor } from "@testing-library/react"
+import { MemoryRouter, Route, Routes } from "react-router-dom"
 import "@testing-library/jest-dom/vitest"
 
 // Mock the api-client to avoid network calls in tests.
@@ -31,6 +31,7 @@ vi.mock("@aquilla/auth-client", () => ({
 
 describe("apps/projects router", () => {
   beforeEach(() => {
+    cleanup()
     mockRedirect.mockClear()
   })
 
@@ -58,13 +59,16 @@ describe("apps/projects router", () => {
     expect(screen.getByText(/Create a project/i)).toBeInTheDocument()
   })
 
-  it("renders the onboarding-page stub copy", async () => {
+  it("redirects onboarding back to the project list", async () => {
     const { OnboardingPage } = await import("../pages/OnboardingPage")
     render(
-      <MemoryRouter>
-        <OnboardingPage />
+      <MemoryRouter initialEntries={["/onboarding"]}>
+        <Routes>
+          <Route path="/onboarding" element={<OnboardingPage />} />
+          <Route path="/" element={<div data-testid="project-list-target" />} />
+        </Routes>
       </MemoryRouter>,
     )
-    expect(screen.getByText(/Welcome to Aquilla/i)).toBeInTheDocument()
+    expect(screen.getByTestId("project-list-target")).toBeInTheDocument()
   })
 })

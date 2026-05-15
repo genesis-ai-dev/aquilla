@@ -101,6 +101,9 @@ import { AiSetupDialog } from "./AiSetupDialog"
 export function ProjectWorkspace() {
   const { id: projectId, fileId: routeFileId } = useParams<{ id: string; fileId?: string }>()
   const navigate = useNavigate()
+  const goToProjects = useCallback(() => {
+    window.location.assign("/projects/")
+  }, [])
   const { project: loadedProject, status, refresh } = useProject(projectId!)
 
   const [selectedFileId, setSelectedFileId] = useState<string | null>(routeFileId ?? null)
@@ -955,14 +958,14 @@ export function ProjectWorkspace() {
   if (status === "no-session") {
     return (
       <div className="p-8 text-muted-foreground">
-        This project isn't on this device. <button className="underline" onClick={() => navigate("/")}>Sign in</button> to open it from the cloud.
+        This project isn't on this device. <button className="underline" onClick={goToProjects}>Sign in</button> to open it from the cloud.
       </div>
     )
   }
   if (status === "not-found" || !project) {
     return (
       <div className="p-8 text-muted-foreground">
-        Project not found, or you don't have access. <button className="underline" onClick={() => navigate("/")}>Back to dashboard</button>.
+        Project not found, or you don't have access. <button className="underline" onClick={goToProjects}>Back to dashboard</button>.
       </div>
     )
   }
@@ -971,7 +974,7 @@ export function ProjectWorkspace() {
     return (
       <TrashedProjectScreen
         project={project}
-        onClose={() => navigate("/")}
+        onClose={goToProjects}
         onRestore={async () => {
           const result = await restoreProject(project, { jwt: frontierSession?.jwt ?? null })
           if (result.remote.kind === "forbidden" || result.remote.kind === "error") {
@@ -1062,7 +1065,7 @@ export function ProjectWorkspace() {
         header={
           <WorkspaceHeader
             project={project}
-            onBack={() => navigate("/")}
+            onBack={goToProjects}
             extraMenuItems={
               suggestions.length > 0 && project.suggestionsDismissedAt
                 ? [{

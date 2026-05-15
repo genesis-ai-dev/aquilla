@@ -3,8 +3,7 @@
 # Phase 1B (AD-11) introduced the apps/ and packages/ scaffolding.
 # The AD-11 spec-unification pass relocated every worker into apps/:
 # identity (formerly auth-worker / frontier-server), sync (formerly
-# sync-worker), chat (formerly chat-worker). cors-proxy still lives
-# at top level — relocate when it gets touched.
+# sync-worker), chat (formerly chat-worker).
 packages:
   - "apps/*"
   - "packages/*"

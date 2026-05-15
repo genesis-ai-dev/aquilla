@@ -73,6 +73,13 @@ export interface WsReconcilerHandlers {
 export interface WsReconcilerOptions {
   projectId: string
   /**
+   * Username (or any client-supplied identity string) sent as the
+   * `user` query param. Sync's `/connect` handler rejects with 400
+   * "missing project or user" if absent. Used only for presence
+   * display — authentication still comes from the JWT in `token`.
+   */
+  userId: string
+  /**
    * Returns a fresh JWT for the project DO. Called on each connect. Return
    * null when no session — the reconciler stays in the disconnected state
    * and retries when called again.
@@ -109,12 +116,18 @@ interface WsHostShape {
  * ws(s). Path is `/parties/project-sync/<projectId>` to match partyserver's
  * conventional layout, mirroring `parties/file-sync/...`.
  */
-export function buildProjectWsUrl(baseUrl: string, projectId: string, token: string | null): string {
+export function buildProjectWsUrl(
+  baseUrl: string,
+  projectId: string,
+  userId: string,
+  token: string | null,
+): string {
   const wsBase = baseUrl
     .replace(/^https?:\/\//, (m) => (m === "https://" ? "wss://" : "ws://"))
     .replace(/\/+$/, "")
-  const tokenSuffix = token ? `?token=${encodeURIComponent(token)}` : ""
-  return `${wsBase}/parties/project-sync/${encodeURIComponent(projectId)}${tokenSuffix}`
+  const params = new URLSearchParams({ user: userId })
+  if (token) params.set("token", token)
+  return `${wsBase}/parties/project-sync/${encodeURIComponent(projectId)}?${params.toString()}`
 }
 
 /**
@@ -180,7 +193,7 @@ export function createWsReconciler(
 
     let ws: WebSocket
     try {
-      const url = buildProjectWsUrl(options.baseUrl, options.projectId, token)
+      const url = buildProjectWsUrl(options.baseUrl, options.projectId, options.userId, token)
       ws = new host.Send(url)
     } catch (err) {
       const e = err instanceof Error ? err : new Error(String(err))

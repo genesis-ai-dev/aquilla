@@ -606,6 +606,7 @@ export function ProjectWorkspace() {
       reconciler = createWsReconciler(
         {
           projectId: pid,
+          userId: currentUsername,
           baseUrl: syncWorkerHttpOrigin(),
           getToken: async () => {
             const aFile = projectFiles[0]?.id ?? ""

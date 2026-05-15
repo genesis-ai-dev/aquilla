@@ -118,19 +118,19 @@ Workflows in `.github/workflows/`:
 
 | Workflow | Trigger paths |
 |---|---|
-| `deploy-apps-prod.yml` | every `apps/<slug>/**` (except front-door currently) on push to `main` — matrix-deploys all Workers via `wrangler deploy --env=production` |
+| `deploy-apps-prod.yml` | every `apps/<slug>/**` (except front-door currently) on push to `main` — matrix-deploys all Workers via `wrangler deploy --env=production`. For identity also runs `wrangler d1 migrations apply aquilla-db --remote` BEFORE the deploy so the schema lands first. |
 | `deploy-all-apps.yml` | every PR — matrix-deploys per-PR previews via `wrangler deploy --env=preview` at `pr-<N>.aquilla.app/<slug>/*` |
 | `pr-db-fork.yml` | `apps/*/migrations/**.sql` (any app's migrations) — provisions `aquilla-pr-<N>` D1 + per-PR sync worker |
 | `pr-db-cleanup.yml` | `apps/*/migrations/**.sql` (PR-close event) |
 | `nightly-dev-reset.yml` | nightly cron — drops + reapplies `aquilla-db-staging` from migrations + seed |
 | `web-ci.yml` | every PR push (no path filter) — runs tests + build |
 
-Cloudflare Pages retirement is **partial**. The repo no longer builds or deploys a Pages bundle (the `deploy.yml` workflow + root deploy scripts are gone), but the existing Pages deployment is still live in CF and Workers Routes still maps `aquilla.app/` (apex-exact) to front-door — not the wildcard `aquilla.app/*` claim that's documented in `apps/front-door/wrangler.toml`. Unclaimed paths still fall through to Pages, which serves the old SPA bundle's `index.html` + favicons. To complete the cutover: (a) migrate favicons + any other Pages-served assets into front-door or an app's `public/`, then (b) update the `aquilla.app/` Workers Route to `aquilla.app/*` in the Cloudflare dashboard (CI's token has `workers_routes:write` but the change is risky enough to want human review).
+Cloudflare Pages is retired. The repo no longer builds or deploys a Pages bundle, and front-door's Workers Route claim is `aquilla.app/*` (wildcard catch-all). Favicons + OG image were migrated into `apps/front-door/public/` and serve via Workers Assets. The legacy Pages project still exists in CF but receives no traffic.
 
 ### Branch behavior
 
-- **Push to `main`** → production deploy. Every app under `apps/*` re-deploys in parallel via `deploy-apps-prod.yml`.
-- **Push to `dev`** → staging deploy. Every app re-deploys with `--env=staging` to `aquilla-dev-<slug>` Workers; routes claim `dev.aquilla.app/<slug>/*`.
+- **Push to `main`** → production deploy. Every app under `apps/*` re-deploys in parallel via `deploy-apps-prod.yml`. Identity's D1 migrations apply automatically before its worker deploys.
+- **Push to `dev`** → no automatic staging deploy yet. Staging Workers (`aquilla-dev-<slug>`) exist for identity + sync but were deployed manually via local `wrangler deploy --env=staging`. Adding a `deploy-apps-staging.yml` mirror of the prod workflow is a pending follow-up.
 
 ### PR behavior
 

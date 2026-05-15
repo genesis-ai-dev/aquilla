@@ -31,7 +31,7 @@ const PRODUCTION_HOSTS = new Set<string>(["aquilla.app", "www.aquilla.app"])
 // WebSocket (wss:), worker-based AI models served from same-origin or
 // HuggingFace CDN (https:), and PostHog telemetry. Tighten later by
 // pinning the exact origins via build-time env vars.
-const THEME_BOOTSTRAP_SHA256 = "'sha256-74Xvtgz3gPUBIG0h/Kc709HVgoSH9YKOa6ntsFzZ1mg='"
+const THEME_BOOTSTRAP_SHA256 = "'sha256-qASoVislclNht+FyDihDFZAHUgKCDmNzun5cx3Ju+WY='"
 
 const BASELINE_CSP =
   "default-src 'self'; " +

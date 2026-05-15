@@ -1,5 +1,15 @@
 import { describe, expect, it } from "vitest"
+import { createHash } from "node:crypto"
+import { readFileSync } from "node:fs"
+import { join } from "node:path"
 import worker from "./worker"
+
+function expectedInlineScriptHash(): string {
+  const html = readFileSync(join(process.cwd(), "index.html"), "utf8")
+  const script = html.match(/<script>([\s\S]*?)<\/script>/)?.[1]
+  if (!script) throw new Error("workspace index.html has no inline bootstrap script")
+  return `'sha256-${createHash("sha256").update(script).digest("base64")}'`
+}
 
 describe("workspace worker", () => {
   it("sets CSP for the workspace shell scripts", async () => {
@@ -25,7 +35,7 @@ describe("workspace worker", () => {
     const csp = res.headers.get("content-security-policy")
 
     expect(res.status).toBe(200)
-    expect(csp).toContain("'sha256-74Xvtgz3gPUBIG0h/Kc709HVgoSH9YKOa6ntsFzZ1mg='")
+    expect(csp).toContain(expectedInlineScriptHash())
     expect(csp).toContain("https://static.cloudflareinsights.com")
   })
 })

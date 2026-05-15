@@ -30,6 +30,19 @@ export const COOKIE_NAME = "aquilla_jwt"
 // 30 days; matches the JWT TTL we issue for SPA sessions today. The cookie
 // outlives a single tab close but not an OS lifetime.
 const DEFAULT_MAX_AGE_SECONDS = 60 * 60 * 24 * 30
+const STALE_COOKIE_PATHS = [
+  "/",
+  "/login/",
+  "/projects/",
+  "/signup/",
+  "/reset/",
+  "/w/",
+  "/org/",
+  "/billing/",
+  "/import/",
+  "/export/",
+  "/migrate/",
+]
 
 /**
  * Pure function: given a hostname (e.g. "pr-7.aquilla.app"), return the
@@ -81,7 +94,7 @@ interface SetJwtOptions {
  * response. Idempotent — calling twice just refreshes the cookie.
  *
  * Before writing, also wipes any host-only `aquilla_jwt` cookie that might
- * be left over from an older login. Without this, the host-only cookie
+ * be left over from a previous login. Without this, the host-only cookie
  * sticks around alongside the new parent-domain one and can be returned
  * by getJwt() instead of the fresh JWT — causing the dreaded sign-in /
  * sign-out loop.
@@ -108,11 +121,10 @@ export function setJwt(jwt: string, opts: SetJwtOptions = {}): void {
   //
   // Cover the variants we've seen in the wild: host-only at /, the
   // parent-domain at /, and path-scoped variants on the per-app
-  // mounts. HttpOnly cookies set by an old server are unreachable
+  // mounts. HttpOnly cookies set by a previous server are unreachable
   // from JS — those have to be cleared by the server explicitly (no
   // single API for that today).
-  const stalePaths = ["/", "/login/", "/projects/", "/signup/", "/reset/"]
-  for (const p of stalePaths) {
+  for (const p of STALE_COOKIE_PATHS) {
     // Host-only.
     doc.cookie = [
       `${COOKIE_NAME}=`,
@@ -151,19 +163,18 @@ interface GetJwtOptions {
 /**
  * Reads the current JWT cookie or null if missing/empty.
  *
- * If multiple cookies share the same name (browsers do this when one was
- * set host-only and another with a Domain attribute, e.g. an older login
- * left an `aquilla_jwt` host-only cookie that now coexists with the new
- * `.aquilla.app` one), pick the **longest** value. JWT length grows with
- * time-based claims, so the longest is also the most recently issued in
- * practice — and it dodges the sign-in loop where getJwt repeatedly
- * returns the stale host-only cookie that the API rejects with 401.
+ * If multiple cookies share the same name, pick the JWT with the newest
+ * `iat` claim. Browsers can keep separate cookies for the same name across
+ * Domain/Path variants, and `document.cookie` does not expose which variant
+ * each value came from. Using `iat` keeps the latest successful login from
+ * losing to a previous path-scoped cookie.
  */
 export function getJwt(opts: GetJwtOptions = {}): string | null {
   if (typeof document === "undefined" && !opts.doc) return null
   const doc = opts.doc ?? document
   const raw = doc.cookie || ""
   let best: string | null = null
+  let bestIssuedAt = Number.NEGATIVE_INFINITY
   for (const segment of raw.split(";")) {
     const eq = segment.indexOf("=")
     if (eq < 0) continue
@@ -177,9 +188,41 @@ export function getJwt(opts: GetJwtOptions = {}): string | null {
     } catch {
       value = valueRaw
     }
-    if (best === null || value.length > best.length) best = value
+    const issuedAt = jwtIssuedAt(value)
+    if (
+      best === null ||
+      issuedAt > bestIssuedAt ||
+      (issuedAt === bestIssuedAt && value.length > best.length)
+    ) {
+      best = value
+      bestIssuedAt = issuedAt
+    }
   }
   return best
+}
+
+function jwtIssuedAt(jwt: string): number {
+  const payload = decodeJwtPayload(jwt)
+  const iat = payload?.iat
+  return typeof iat === "number" && Number.isFinite(iat)
+    ? iat
+    : Number.NEGATIVE_INFINITY
+}
+
+function decodeJwtPayload(jwt: string): Record<string, unknown> | null {
+  const payload = jwt.split(".")[1]
+  if (!payload) return null
+  try {
+    const base64 = payload.replace(/-/g, "+").replace(/_/g, "/")
+    const padded = base64.padEnd(base64.length + ((4 - (base64.length % 4)) % 4), "=")
+    const decoded = atob(padded)
+    const parsed = JSON.parse(decoded) as unknown
+    return parsed && typeof parsed === "object"
+      ? parsed as Record<string, unknown>
+      : null
+  } catch {
+    return null
+  }
 }
 
 interface ClearJwtOptions {
@@ -190,7 +233,7 @@ interface ClearJwtOptions {
 /**
  * Clears the JWT cookie — issues a Set-Cookie at every (Path, Domain)
  * shape we've seen in the wild. Browsers keep one cookie per
- * (name, Domain, Path) tuple, and the old code only cleared one of them.
+ * (name, Domain, Path) tuple, and the previous implementation only cleared one of them.
  */
 export function clearJwt(opts: ClearJwtOptions = {}): void {
   if (typeof document === "undefined" && !opts.doc) return
@@ -200,8 +243,7 @@ export function clearJwt(opts: ClearJwtOptions = {}): void {
     (typeof window !== "undefined" ? window.location.hostname : "")
   const domain = deriveCookieDomain(hostname)
 
-  const stalePaths = ["/", "/login/", "/projects/", "/signup/", "/reset/"]
-  for (const p of stalePaths) {
+  for (const p of STALE_COOKIE_PATHS) {
     doc.cookie = [
       `${COOKIE_NAME}=`,
       `Path=${p}`,

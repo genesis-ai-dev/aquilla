@@ -48,6 +48,14 @@ function makeDoc() {
   return { cookie: "" }
 }
 
+function jwtWithPayload(payload: Record<string, unknown>): string {
+  const encodedPayload = btoa(JSON.stringify(payload))
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
+    .replace(/=+$/, "")
+  return `header.${encodedPayload}.signature`
+}
+
 describe("setJwt / getJwt / clearJwt", () => {
   let doc: { cookie: string }
 
@@ -106,6 +114,20 @@ describe("setJwt / getJwt / clearJwt", () => {
   it("getJwt decodes URL-encoded values", () => {
     doc.cookie = `${COOKIE_NAME}=a%20b`
     expect(getJwt({ doc })).toBe("a b")
+  })
+
+  it("getJwt picks the newest JWT when duplicate cookie variants exist", () => {
+    const olderLonger = jwtWithPayload({ sub: "alice", iat: 100, extra: "x".repeat(80) })
+    const newerShorter = jwtWithPayload({ sub: "alice", iat: 200 })
+    doc.cookie = `${COOKIE_NAME}=${olderLonger}; ${COOKIE_NAME}=${newerShorter}`
+
+    expect(getJwt({ doc })).toBe(newerShorter)
+  })
+
+  it("getJwt falls back to longest value when iat is unavailable", () => {
+    doc.cookie = `${COOKIE_NAME}=short; ${COOKIE_NAME}=much-longer`
+
+    expect(getJwt({ doc })).toBe("much-longer")
   })
 
   it("clearJwt writes Max-Age=0", () => {

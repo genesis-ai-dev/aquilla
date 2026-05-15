@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import "fake-indexeddb/auto";
 import { saveSession, loadSession, clearSession } from "./session-store";
+import { clearJwt, setJwt } from "@aquilla/auth-client"
 import type { FrontierSession } from "./types";
 
 const sample: FrontierSession = {
@@ -41,9 +42,18 @@ function mkSession(overrides: Partial<FrontierSession> = {}): FrontierSession {
   }
 }
 
+function jwtWithPayload(payload: Record<string, unknown>): string {
+  const encodedPayload = btoa(JSON.stringify(payload))
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
+    .replace(/=+$/, "")
+  return `header.${encodedPayload}.signature`
+}
+
 describe("multi-account envelope", () => {
   beforeEach(async () => {
     const { _resetDbForTesting } = await import("./session-store")
+    clearJwt()
     await _resetDbForTesting()
   })
 
@@ -101,22 +111,38 @@ describe("multi-account envelope", () => {
     const active = await loadActiveSession()
     expect(active?.jwt).toBe("new")
   })
+
+  it("uses the shared auth cookie instead of a stale stored session", async () => {
+    const stale = mkSession({ username: "ryder", jwt: jwtWithPayload({ sub: "ryder", iat: 100 }) })
+    const freshJwt = jwtWithPayload({ sub: "ada", iat: 200 })
+
+    await addSession(stale)
+    setJwt(freshJwt, { hostname: "localhost", secure: false })
+
+    const active = await loadActiveSession()
+    expect(active?.username).toBe("ada")
+    expect(active?.jwt).toBe(freshJwt)
+  })
 })
 
 describe("migration from single-session to envelope", () => {
-  it("migrates on first load when only the old `current` key exists", async () => {
+  beforeEach(() => {
+    clearJwt()
+  })
+
+  it("migrates on first load when only the previous `current` key exists", async () => {
     const { _resetDbForTesting, loadActiveSession, listSessions: list2 } = await import("./session-store")
     await _resetDbForTesting()
-    const legacy = mkSession({ username: "legacy" })
+    const previous = mkSession({ username: "previous" })
     const { openDB } = await import("idb")
     const d = await openDB("frontier", 1, {
       upgrade(db) { if (!db.objectStoreNames.contains("session")) db.createObjectStore("session") },
     })
-    await d.put("session", legacy, "current")
+    await d.put("session", previous, "current")
     d.close()
 
     const active = await loadActiveSession()
-    expect(active?.username).toBe("legacy")
+    expect(active?.username).toBe("previous")
     const sessions = await list2()
     expect(sessions).toHaveLength(1)
   })

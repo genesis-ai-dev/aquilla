@@ -99,6 +99,20 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
 
+      - name: Apply D1 migrations (identity only)
+        # Identity owns the aquilla-db schema. Migrations don't run as a
+        # side effect of `wrangler deploy`; they require an explicit
+        # `wrangler d1 migrations apply`. We do it BEFORE the worker
+        # deploy so the new worker code never serves traffic against an
+        # older schema.
+        #
+        # Idempotent — wrangler checks d1_migrations and only applies
+        # the pending files. Non-interactive (no TTY in CI), so wrangler
+        # auto-confirms.
+        if: matrix.app == 'identity'
+        working-directory: apps/identity
+        run: pnpm exec wrangler d1 migrations apply aquilla-db --remote
+
       - name: Build app
         # Non-SPA workers (identity, sync, chat) skip the Vite build —
         # they don't ship a dist/ for Workers Assets to bind.

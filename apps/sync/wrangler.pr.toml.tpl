@@ -3,7 +3,7 @@
 # (__PR__, __DB_ID__) are sed-substituted before wrangler reads it.
 #
 # Behavior:
-# - Each PR with migration changes gets its own forked D1 (codex-db-pr-N)
+# - Each PR with migration changes gets its own forked D1 (aquilla-pr-N)
 #   so the migration can be applied without polluting the shared staging
 #   DB.
 # - R2 is shared with staging (aquilla-snapshots-staging) but namespaced
@@ -41,12 +41,11 @@ new_sqlite_classes = ["ProjectSync"]
 
 [[r2_buckets]]
 binding = "SNAPSHOTS"
-# TODO: rename to "aquilla-snapshots-staging" once provisioned. See sync-worker/wrangler.toml.
-bucket_name = "codex-snapshots-staging"
+bucket_name = "aquilla-snapshots-staging"
 
 [[d1_databases]]
-binding = "CODEX_DB"
-database_name = "codex-db-pr-__PR__"
+binding = "AQUILLA_DB"
+database_name = "aquilla-pr-__PR__"
 database_id = "__DB_ID__"
 
 [vars]

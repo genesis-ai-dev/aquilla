@@ -70,9 +70,19 @@ export function useProject(projectId: string) {
   const [project, setProject] = useState<ProjectRecord | null>(null)
   const [status, setStatus] = useState<ProjectLoadStatus>("loading")
   const hasLoaded = useRef(false)
-  const { session } = useFrontierSession()
+  const { session, loading: sessionLoading } = useFrontierSession()
 
   const refresh = useCallback(() => {
+    // Don't classify anything while the session is still being rehydrated
+    // from storage. Without this guard the `!session?.jwt` branch below
+    // briefly fires for every freshly-mounted project page, flashing the
+    // "no-session" UI ("This project isn't on this device…") even when
+    // the user has a valid session that just hasn't loaded yet.
+    if (sessionLoading) {
+      if (!hasLoaded.current) setStatus("loading")
+      return () => {}
+    }
+
     if (!hasLoaded.current) setStatus("loading")
 
     let cancelled = false
@@ -99,7 +109,7 @@ export function useProject(projectId: string) {
     })()
 
     return () => { cancelled = true }
-  }, [projectId, session?.jwt])
+  }, [projectId, session?.jwt, sessionLoading])
 
   useEffect(() => {
     const cleanup = refresh()

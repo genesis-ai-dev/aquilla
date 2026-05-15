@@ -98,9 +98,9 @@ function HardRedirect({ to }: { to: string }) {
 export function AppRoutes() {
   return (
     <Routes>
-      {/* Vite preview does not apply public/_redirects, while the smoke suite
-          drives the root dashboard. Keep this route test-only so production
-          continues to hand `/` to apps/projects/. */}
+      {/* Vite preview has no edge-redirect layer, but the smoke suite drives
+          the root dashboard. Keep this route test-only so production continues
+          to hand `/` to apps/projects/ via the front-door Worker. */}
       {ENABLE_SMOKE_DASHBOARD_ROUTE ? (
         <Route path="/" element={<Dashboard />} />
       ) : null}

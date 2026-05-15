@@ -1,6 +1,6 @@
-// Types for the frontier-server project read API (Phase 2b).
+// Types for the identity project read API (Phase 2b).
 //
-// Mirror of `apps/frontier-server/src/routes/projects.ts` GET /api/v2/projects
+// Mirror of `apps/identity/src/routes/projects.ts` GET /api/v2/projects
 // and GET /api/v2/projects/:projectId.
 
 export interface ProjectFileSummary {

@@ -28,7 +28,7 @@ ENV = "prod"
 # the other workers use, but it's effectively a build-time string the
 # bundler inlines via import.meta.env. Override in CI by exporting
 # VITE_AUTH_BASE before `pnpm build`.
-VITE_AUTH_BASE = "https://aquilla-frontier-server.blue-darkness-7674.workers.dev"
+VITE_AUTH_BASE = "https://aquilla-identity.blue-darkness-7674.workers.dev"
 
 [assets]
 directory = "./dist"
@@ -47,7 +47,7 @@ routes = ["aquilla.app/login/*"]  # Claimed in production via Workers Routes (zo
 
 [env.production.vars]
 ENV = "prod"
-VITE_AUTH_BASE = "https://api.aquilla.app/api/identity"
+VITE_AUTH_BASE = "https://aquilla.app/api/identity"
 
 [env.production.assets]
 directory = "./dist"
@@ -64,11 +64,11 @@ run_worker_first = ["/login/*", "!/login/assets/*"]
 [env.staging]
 name = "aquilla-dev-login"
 account_id = "6a80496d1e59948a9cbaa3c643ba81d7"
-# routes = ["dev.aquilla.app/login/*"]  # TODO: uncomment after aquilla.app zone is provisioned in Cloudflare
+routes = ["dev.aquilla.app/login/*"]  # Claimed in staging via Workers Routes
 
 [env.staging.vars]
 ENV = "preview"
-VITE_AUTH_BASE = "https://aquilla-frontier-server.blue-darkness-7674.workers.dev"
+VITE_AUTH_BASE = "https://aquilla-identity.blue-darkness-7674.workers.dev"
 
 [env.staging.assets]
 directory = "./dist"
@@ -84,12 +84,12 @@ not_found_handling = "single-page-application"
 [env.preview]
 name = "aquilla-pr-__PR__-login"
 account_id = "6a80496d1e59948a9cbaa3c643ba81d7"
-# routes = ["pr-__PR__.aquilla.app/login/*"]  # TODO: uncomment after aquilla.app zone is provisioned in Cloudflare
+routes = ["pr-__PR__.aquilla.app/login/*"]  # Claimed in preview via Workers Routes
 
 [env.preview.vars]
 ENV = "preview"
 PR = "__PR__"
-VITE_AUTH_BASE = "https://aquilla-frontier-server.blue-darkness-7674.workers.dev"
+VITE_AUTH_BASE = "https://aquilla-identity.blue-darkness-7674.workers.dev"
 
 [env.preview.assets]
 directory = "./dist"

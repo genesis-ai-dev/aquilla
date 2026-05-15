@@ -1,6 +1,6 @@
 // Event grammar types — AD-2 + AD-9 (spec 03-data-model.md).
 //
-// Mirror of `sync-worker/src/events/types.ts`; this package is the canonical
+// Mirror of `apps/sync/src/events/types.ts`; this package is the canonical
 // shared definition that every app and the web client consume. The Worker
 // vendors its own copy (Workers can't import workspace packages directly at
 // runtime in CF Workers' build model) — keep them in lockstep.

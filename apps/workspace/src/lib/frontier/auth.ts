@@ -1,7 +1,7 @@
 import type { FrontierSession } from "./types";
 import { saveSession } from "./session-store";
 
-// The frontier-server identity worker (apps/frontier-server/) is the
+// The identity worker (apps/identity/) is the
 // canonical backend for auth, orgs, members, projects, users/search,
 // sync-token, invites, and the AI health probe. The legacy frontier-server
 // (genesis-ai-dev/frontier-server) is no longer part of codex-web's
@@ -13,10 +13,10 @@ import { saveSession } from "./session-store";
 // prod .env should also use the default rather than break network calls.
 export const AUTH_BASE =
   ((import.meta.env.VITE_AUTH_BASE as string | undefined)?.replace(/\/+$/, "")) ||
-  "https://aquilla-frontier-server.blue-darkness-7674.workers.dev";
+  "https://aquilla-identity.blue-darkness-7674.workers.dev";
 
 /** @deprecated FRONTIER_BASE used to point at api.frontierrnd.com; every
- *  runtime call now goes through AUTH_BASE (the frontier-server identity
+ *  runtime call now goes through AUTH_BASE (the identity
  *  worker). Kept as an alias for the duration of the cutover so existing
  *  imports compile while callers are migrated; new code should import
  *  AUTH_BASE directly. */

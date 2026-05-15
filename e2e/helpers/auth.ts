@@ -15,7 +15,7 @@ const AUTH_BASE = process.env.VITE_AUTH_BASE ?? "http://127.0.0.1:8787"
 interface AuthResponse {
   access_token: string
   token_type: string
-  // GitLab fields are returned as null/empty strings by frontier-server —
+  // GitLab fields are returned as null/empty strings by identity —
   // codex-web dropped its GitLab integration (#66), but the legacy field
   // names are preserved in the response so existing helpers keep parsing.
   gitlab_token?: string

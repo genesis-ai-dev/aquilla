@@ -9,24 +9,18 @@ import { brandingHtmlPlugin } from "./scripts/vite-html-branding"
 import { BRAND_DATA, BRAND_DATA_IDS } from "./apps/workspace/src/branding/brands/data"
 import type { BrandId } from "./apps/workspace/src/branding/types"
 
-// Phase 3a-final: the workspace SPA's source has moved to
-// `apps/workspace/src/`. The repo root still drives the Vite build for two
-// callers:
+// The workspace SPA's source lives at `apps/workspace/src/`. The repo
+// root still drives this Vite build for Tauri only —
+// `src-tauri/tauri.conf.json` points `frontendDist` at `../dist` and
+// `beforeDevCommand` at `npm run dev`. Cloudflare Pages used to be the
+// other consumer; it was retired during the AD-11 spec-unification pass
+// (front-door + the per-app Workers now own every aquilla.app path).
 //
-//   1. Cloudflare Pages CI (`.github/workflows/deploy.yml`) — runs
-//      `npm run build` at root and deploys `dist/` to the existing Pages
-//      project. Eventually this migrates to the per-app Worker (Workers
-//      Assets via apps/workspace/src/worker.ts); until then the root
-//      build remains the entry point.
-//
-//   2. Tauri (`src-tauri/tauri.conf.json`) — points `frontendDist` at
-//      `../dist` and `beforeDevCommand` at `npm run dev`.
-//
-// This config sets `root: apps/workspace` so the new index.html /
-// main.tsx are picked up, but emits to the repo-root `dist/` for the
-// callers above. The companion `apps/workspace/vite.config.ts` is the
-// in-app build (Workers Assets path) and is what `pnpm --filter
-// @aquilla/workspace build` invokes.
+// This config sets `root: apps/workspace` so the index.html / main.tsx
+// are picked up, but emits to the repo-root `dist/` for Tauri. The
+// companion `apps/workspace/vite.config.ts` is the in-app build (Workers
+// Assets path) and is what `pnpm --filter @aquilla/workspace build`
+// invokes.
 
 function resolveBuildBrand(): BrandId {
   const raw = process.env.BRAND ?? "aquilla"
@@ -46,9 +40,9 @@ export default defineConfig(({ mode }) => ({
   envDir: __dirname,
   // With root: apps/workspace, Vite's default publicDir would be
   // apps/workspace/public/ (which doesn't exist). Point it at the
-  // repo-root public/ so favicons, OG images, and _redirects (which
-  // Cloudflare Pages reads at the edge for the apex `/` → `/projects`
-  // bounce) reach dist/.
+  // repo-root public/ so favicons and OG images reach dist/. (The
+  // legacy _redirects file used to live here too; the front-door
+  // Worker took over its job during the AD-11 spec-unification.)
   publicDir: path.resolve(__dirname, "public"),
   clearScreen: false,
   envPrefix: ["VITE_", "TAURI_ENV_"],
@@ -142,10 +136,10 @@ export default defineConfig(({ mode }) => ({
       // Running their tests from root pulls in worker-local deps the
       // root install doesn't have. deploy-workers.yml runs each worker's
       // tests in its own directory.
-      "apps/frontier-server/**",
-      "chat-worker/**",
+      "apps/identity/**",
+      "apps/chat/**",
       "signaling/**",
-      "sync-worker/**",
+      "apps/sync/**",
       // Other apps + packages have their own vitest configs + workspace-
       // aware resolution. CI runs per-app tests separately.
       "apps/billing/**",

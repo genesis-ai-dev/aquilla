@@ -1,0 +1,23 @@
+{
+  "name": "@aquilla/sync",
+  "private": true,
+  "version": "0.0.1",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "type-check": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "hono": "^4.12.14",
+    "partyserver": "^0.4.1",
+    "y-partyserver": "^2.1.4",
+    "yjs": "^13.6.30"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20241218.0",
+    "typescript": "^5.6.0",
+    "vitest": "^4.1.4",
+    "wrangler": "^3.78.12"
+  }
+}

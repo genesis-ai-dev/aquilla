@@ -11,7 +11,7 @@ on:
     # path filter from pr-db-fork.yml. PRs that never spun up per-PR
     # resources don't need a teardown pass.
     paths:
-      - 'sync-worker/migrations/**.sql'
+      - 'apps/*/migrations/**.sql'
 
 jobs:
   cleanup:

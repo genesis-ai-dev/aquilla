@@ -269,6 +269,34 @@ importers:
         specifier: ^4.83.0
         version: 4.85.0(@cloudflare/workers-types@4.20260425.1)
 
+  apps/chat:
+    dependencies:
+      '@hono/zod-validator':
+        specifier: ^0.4.0
+        version: 0.4.3(hono@4.12.14)(zod@3.25.76)
+      hono:
+        specifier: ^4.12.14
+        version: 4.12.14
+      zod:
+        specifier: ^3.23.8
+        version: 3.25.76
+    devDependencies:
+      '@cloudflare/workers-types':
+        specifier: ^4.20241218.0
+        version: 4.20260425.1
+      '@types/node':
+        specifier: ^25.7.0
+        version: 25.7.0
+      typescript:
+        specifier: ^5.6.0
+        version: 5.9.3
+      vitest:
+        specifier: ^4.1.4
+        version: 4.1.4(@opentelemetry/api@1.9.1)(@types/node@25.7.0)(happy-dom@20.9.0)(msw@2.13.3(@types/node@25.7.0)(typescript@5.9.3))(vite@8.0.8(@types/node@25.7.0)(esbuild@0.17.19)(jiti@2.6.1)(tsx@4.21.0))
+      wrangler:
+        specifier: ^3.78.12
+        version: 3.114.17(@cloudflare/workers-types@4.20260425.1)
+
   apps/export:
     dependencies:
       '@aquilla/auth-client':
@@ -340,7 +368,7 @@ importers:
         specifier: ^4.83.0
         version: 4.85.0(@cloudflare/workers-types@4.20260425.1)
 
-  apps/frontier-server:
+  apps/identity:
     dependencies:
       '@hono/zod-validator':
         specifier: ^0.4.0
@@ -372,7 +400,7 @@ importers:
         version: 5.9.3
       vitest:
         specifier: ^4.1.4
-        version: 4.1.4(@opentelemetry/api@1.9.1)(@types/node@25.7.0)(happy-dom@20.9.0)(msw@2.13.3(@types/node@25.7.0)(typescript@5.9.3))(vite@8.0.8(@types/node@25.7.0)(esbuild@0.17.19)(jiti@2.6.1)(tsx@4.21.0))
+        version: 4.1.4(@opentelemetry/api@1.9.1)(@types/node@25.7.0)(happy-dom@20.9.0)(msw@2.13.3(@types/node@25.7.0)(typescript@5.9.3))(vite@8.0.8(@types/node@25.7.0)(esbuild@0.27.7)(jiti@2.6.1)(tsx@4.21.0))
       wrangler:
         specifier: ^3.78.12
         version: 3.114.17(@cloudflare/workers-types@4.20260425.1)
@@ -803,6 +831,34 @@ importers:
       wrangler:
         specifier: ^4.83.0
         version: 4.85.0(@cloudflare/workers-types@4.20260425.1)
+
+  apps/sync:
+    dependencies:
+      hono:
+        specifier: ^4.12.14
+        version: 4.12.14
+      partyserver:
+        specifier: ^0.4.1
+        version: 0.4.1(@cloudflare/workers-types@4.20260425.1)
+      y-partyserver:
+        specifier: ^2.1.4
+        version: 2.2.0(@cloudflare/workers-types@4.20260425.1)(partyserver@0.4.1(@cloudflare/workers-types@4.20260425.1))(yjs@13.6.30)
+      yjs:
+        specifier: ^13.6.30
+        version: 13.6.30
+    devDependencies:
+      '@cloudflare/workers-types':
+        specifier: ^4.20241218.0
+        version: 4.20260425.1
+      typescript:
+        specifier: ^5.6.0
+        version: 5.9.3
+      vitest:
+        specifier: ^4.1.4
+        version: 4.1.4(@opentelemetry/api@1.9.1)(@types/node@25.7.0)(happy-dom@20.9.0)(msw@2.13.3(@types/node@25.7.0)(typescript@5.9.3))(vite@8.0.8(@types/node@25.7.0)(esbuild@0.27.7)(jiti@2.6.1)(tsx@4.21.0))
+      wrangler:
+        specifier: ^3.78.12
+        version: 3.114.17(@cloudflare/workers-types@4.20260425.1)
 
   apps/workspace:
     dependencies:
@@ -4880,6 +4936,11 @@ packages:
   parseurl@1.3.3:
     resolution: {integrity: sha512-CiyeOxFT/JZyN5m0z9PfXw4SCBJ6Sygz1Dpl0wqjlhDEGGBP1GnsUVEL0p63hoG1fcj3fHynXi9NYO4nWOL+qQ==}
     engines: {node: '>= 0.8'}
+
+  partyserver@0.4.1:
+    resolution: {integrity: sha512-StSs0oY8RmTxjGNil7VbCG4gnTN+4rYX20fiUIItAxTPpr/5rPDZT6PIvMROkk9M1Gn7GzE1wuQXwhxceaGhXA==}
+    peerDependencies:
+      '@cloudflare/workers-types': ^4.20240729.0
 
   partyserver@0.5.2:
     resolution: {integrity: sha512-OlPHIRiHI5QrBLptAKg8xtrEOOTQj7sjR0Wwe1egqct3Fpc0kfntxdpA8N2LiHGNdsioF20RqRrk5byZdKk4Mw==}
@@ -9747,6 +9808,11 @@ snapshots:
 
   parseurl@1.3.3: {}
 
+  partyserver@0.4.1(@cloudflare/workers-types@4.20260425.1):
+    dependencies:
+      '@cloudflare/workers-types': 4.20260425.1
+      nanoid: 5.1.9
+
   partyserver@0.5.2(@cloudflare/workers-types@4.20260425.1):
     dependencies:
       '@cloudflare/workers-types': 4.20260425.1
@@ -11024,6 +11090,16 @@ snapshots:
   y-indexeddb@9.0.12(yjs@13.6.30):
     dependencies:
       lib0: 0.2.117
+      yjs: 13.6.30
+
+  y-partyserver@2.2.0(@cloudflare/workers-types@4.20260425.1)(partyserver@0.4.1(@cloudflare/workers-types@4.20260425.1))(yjs@13.6.30):
+    dependencies:
+      '@cloudflare/workers-types': 4.20260425.1
+      lib0: 0.2.117
+      lodash.debounce: 4.0.8
+      nanoid: 5.1.9
+      partyserver: 0.4.1(@cloudflare/workers-types@4.20260425.1)
+      y-protocols: 1.0.7(yjs@13.6.30)
       yjs: 13.6.30
 
   y-partyserver@2.2.0(@cloudflare/workers-types@4.20260425.1)(partyserver@0.5.2(@cloudflare/workers-types@4.20260425.1))(yjs@13.6.30):

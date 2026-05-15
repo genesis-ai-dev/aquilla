@@ -20,7 +20,7 @@ Reflects state as of the Phase 2c-β / Phase 3 work stream.
 | 3b | login/signup/reset apps + packages/ui + packages/auth-client | 🟡 in flight | subagent |
 | 3c | projects/billing/org apps + packages/api-client | 🟡 in flight | subagent |
 | 3d (minimal) | import/export/migrate app shells (Coming soon) | 🟡 in flight | subagent |
-| 3e | auth-worker → apps/frontier-server relocation | 🟡 in flight | subagent |
+| 3e | auth-worker → apps/identity relocation | 🟡 in flight | subagent |
 | 4 partial | codex-sync/chat-worker + codex-snapshots → aquilla-* | ✅ merged | #83 |
 | 4 final-sweep partial | completion-service.ts aquilla-chat-worker rename | ✅ merged | #84 |
 | 4 final-cleanup | residual codex-* refs in CLAUDE.md + src/ + auth-worker | ⏸ blocked | see playbook |
@@ -33,7 +33,7 @@ Reflects state as of the Phase 2c-β / Phase 3 work stream.
 Conflict density is highest among Phase 3 streams + 2c-β because each touches `src/` and `CLAUDE.md`. Recommended order:
 
 1. **Phase 2c-β first.** Largest surface area; touches the most files. Resolves the Yjs deletion + editor rewrite that everything else builds on top of.
-2. **3e next.** Independent directory (auth-worker → apps/frontier-server). Conflicts: only `CLAUDE.md` backend stack section and CI workflows. Resolve those manually.
+2. **3e next.** Independent directory (auth-worker → apps/identity). Conflicts: only `CLAUDE.md` backend stack section and CI workflows. Resolve those manually.
 3. **Phase 5 next.** Adds new components in `src/components/`; depends on 2c-β's editor surface for the stale-source indicator wiring. The indicator is shipped as a standalone component; wiring it into the cell row is the small follow-up step (see "Phase 5 follow-up" below).
 4. **3b, 3c, 3d-minimal — parallel.** Each touches different `apps/<slug>/` directories. Conflicts: `packages/ui` if 3b and 3c both populate (likely they coordinated by scope — 3b for auth UI primitives, 3c for project/list primitives). `CLAUDE.md` "Apps populated" lines need a merge sweep.
 5. **PR #85 (data-model + telemetry) — any time.** No code-edit conflicts; only adds new packages.
@@ -119,7 +119,7 @@ Runs after Phase 2c-β + 3e merge. Sweeps every remaining `codex-*` reference.
 ### Prerequisites
 
 - ✅ 2c-β merged (so `src/lib/sync/partyserver-provider.ts`, `src/lib/sync/y-partyserver-spike.test.ts` are deleted — they had the last `aquilla-sync-worker` refs in src/).
-- ✅ 3e merged (so auth-worker is at apps/frontier-server/; any `aquilla-frontier-server` refs in its code/comments need updating to `aquilla-frontier-server`).
+- ✅ 3e merged (so auth-worker is at apps/identity/; any `aquilla-identity` refs in its code/comments need updating to `aquilla-identity`).
 
 ### Steps
 
@@ -130,9 +130,9 @@ git fetch origin && git checkout -B phase-4-final-cleanup/codex-aquilla-residual
 #    do a holistic re-read and update any remaining codex-* references.
 $EDITOR CLAUDE.md  # manual edit
 
-# 2. Sweep apps/frontier-server (was auth-worker). 3e should have caught
+# 2. Sweep apps/identity (was auth-worker). 3e should have caught
 #    most of these but verify with a grep:
-grep -rn "aquilla-frontier-server\|codex-web\|codex-db\b" apps/frontier-server
+grep -rn "aquilla-identity\|codex-web\|codex-db\b" apps/identity
 
 # 3. Sweep packages for codex- references. Should be zero by now.
 grep -rln "codex-" packages
@@ -175,7 +175,7 @@ import { StaleSourceIndicator } from "@/components/StaleSourceIndicator"
 The `aquilla.app` zone has not been provisioned. Several rollout steps depend on it. Sequence:
 
 1. **Register `aquilla.app` with Cloudflare** (via dashboard, manual). Set up the DNS records.
-2. **Create R2 buckets**: `aquilla-snapshots` and `aquilla-snapshots-staging`. Phase 4 partial (#83) updated wrangler.toml to reference these names; the buckets need to exist before sync-worker can deploy successfully (or revert the bucket-name lines in `sync-worker/wrangler.toml` if the rename is being delayed).
+2. **Create R2 buckets**: `aquilla-snapshots` and `aquilla-snapshots-staging`. Phase 4 partial (#83) updated wrangler.toml to reference these names; the buckets need to exist before sync-worker can deploy successfully (or revert the bucket-name lines in `apps/sync/wrangler.toml` if the rename is being delayed).
 3. **Uncomment the `routes = [...]` claims** in every `apps/*/wrangler.toml`. Currently commented with a `# TODO: uncomment after aquilla.app zone is provisioned in Cloudflare` marker (one per env).
 4. **Drop `continue-on-error: true`** from the deploy + smoke-test steps in `.github/workflows/deploy-all-apps.yml` once routes claim succeeds.
 5. **Rename the Cloudflare Pages project** from `codex-web` to `aquilla-web` (manual dashboard action; CF doesn't support in-place Pages renames so this means creating a new project, updating CI to deploy there, and dropping the old project).

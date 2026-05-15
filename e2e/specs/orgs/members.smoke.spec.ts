@@ -1,6 +1,6 @@
 import { test, expect } from "../../helpers/multi-user"
 import { ensureAuthState } from "../../helpers/auth"
-import { addOrgMember, getMyOrg, ROLE } from "../../helpers/frontier-api"
+import { addOrgMember, getMyOrg, ROLE } from "../../helpers/identity-api"
 
 /**
  * Setup: alice's seed org "Acme" exists (created by /__test__/reset).

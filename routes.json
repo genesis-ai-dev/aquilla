@@ -9,5 +9,5 @@
   "billing":         "/billing",
   "org":             "/org",
   "workspace":       "/w",
-  "frontier-server": "/api/identity"
+  "identity":        "/api/identity"
 }

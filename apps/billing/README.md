@@ -12,7 +12,7 @@ Future routes:
 - `/history`  — past invoices
 
 The Stripe webhook receiver lives server-side (likely in
-`apps/frontier-server/` or a dedicated `apps/billing-server/`) and is not
+`apps/identity/` or a dedicated `apps/billing-server/`) and is not
 served from this app.
 
 ## Dev

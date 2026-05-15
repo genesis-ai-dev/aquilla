@@ -4,7 +4,7 @@
 // throws on non-2xx, returns the parsed body on success. No React Query, no
 // caching layer. Apps wire it through vanilla useState + race-guarded effects.
 //
-// Endpoints served by apps/frontier-server/:
+// Endpoints served by apps/identity/:
 //   GET  /api/v2/projects
 //   GET  /api/v2/projects/:projectId
 //   POST /api/v2/projects                  (create)

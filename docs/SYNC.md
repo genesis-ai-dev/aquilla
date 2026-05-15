@@ -33,7 +33,7 @@ same Cloudflare account so cross-service calls stay on-network.
 | service                | where                                  | role                                                      |
 |------------------------|----------------------------------------|-----------------------------------------------------------|
 | **codex-web-app**      | this repo (`src/`)                     | React app. Holds Y.Docs + IndexedDB. Fetches sync tokens. |
-| **aquilla-sync-worker**  | this repo (`sync-worker/`)             | Cloudflare Worker hosting one Durable Object per file.    |
+| **aquilla-sync-worker**  | this repo (`apps/sync/`)             | Cloudflare Worker hosting one Durable Object per file.    |
 | **frontier-server**    | `~/frontierrnd/frontier-server/cloudflare/` | Identity + project + sync-token minting.             |
 
 Share links go through frontier-server's `POST /api/v2/projects/:id/invites`
@@ -165,7 +165,7 @@ Env knobs for the client:
 
 - **`src/lib/sync/y-partyserver-spike.test.ts`** — round-trip assertions
   against a running `wrangler dev`. Skips cleanly when unreachable.
-- **`sync-worker/src/__tests__/*.test.ts`** — pure unit tests for auth
+- **`apps/sync/src/__tests__/*.test.ts`** — pure unit tests for auth
   verification, role gating, compaction invariants, projection extraction,
   projection dedup, admin endpoint.
 - **`src/lib/sync/*.test.ts`** — client-side unit tests for token

@@ -3,7 +3,7 @@
 -- Applied to every per-PR D1 (`aquilla-pr-<N>`) and to the shared dev DB
 -- (`aquilla-dev`) after migrations run. Re-runs on the nightly dev reset.
 --
--- Schema target: the current shape in apps/frontier-server/migrations/0001_initial.sql.
+-- Schema target: the current shape in apps/identity/migrations/0001_initial.sql.
 -- Phase 1A (separate stream) is reshaping the schema toward AD-2's event-log
 -- model; once that lands, this seed file gets revised in lockstep with the
 -- migration that introduces the new tables.
@@ -19,7 +19,7 @@
 --
 -- All four accounts use the plaintext `test123`. The hash below is a
 -- PLACEHOLDER — preview-only — produced by the same Werkzeug-compatible
--- scrypt routine frontier-server uses (apps/frontier-server/src/utils/password.ts).
+-- scrypt routine identity uses (apps/identity/src/utils/password.ts).
 -- It is NOT a real working hash; computing one requires the runtime, so
 -- CI's "apply seed" step needs to either:
 --

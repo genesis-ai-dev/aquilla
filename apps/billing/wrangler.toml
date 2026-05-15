@@ -46,7 +46,7 @@ ENV = "prod"
 [env.staging]
 name = "aquilla-dev-billing"
 account_id = "6a80496d1e59948a9cbaa3c643ba81d7"
-# routes = ["dev.aquilla.app/billing/*"]  # TODO: uncomment after aquilla.app zone is provisioned in Cloudflare
+routes = ["dev.aquilla.app/billing/*"]  # Claimed in staging via Workers Routes
 
 [env.staging.assets]
 directory = "./dist"
@@ -62,7 +62,7 @@ ENV = "preview"
 [env.preview]
 name = "aquilla-pr-__PR__-billing"
 account_id = "6a80496d1e59948a9cbaa3c643ba81d7"
-# routes = ["pr-__PR__.aquilla.app/billing/*"]  # TODO: uncomment after aquilla.app zone is provisioned in Cloudflare
+routes = ["pr-__PR__.aquilla.app/billing/*"]  # Claimed in preview via Workers Routes
 
 [env.preview.assets]
 directory = "./dist"

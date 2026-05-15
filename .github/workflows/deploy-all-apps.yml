@@ -128,13 +128,16 @@ jobs:
       - run: pnpm install --frozen-lockfile
 
       - name: Build app
-        # Worker apps (front-door, frontier-server) don't ship a Vite SPA
-        # — skip the build step for those. Everything else needs `dist/` to
-        # exist before wrangler can bind it via [assets] directory.
-        if: matrix.app != 'front-door' && matrix.app != 'frontier-server'
+        # Worker apps (front-door, identity, sync, chat) don't ship a
+        # Vite SPA — skip the build step for those. Everything else
+        # needs `dist/` to exist before wrangler can bind it via the
+        # [assets] directory binding.
+        if: matrix.app != 'front-door' && matrix.app != 'identity' && matrix.app != 'sync' && matrix.app != 'chat'
         run: pnpm --filter @aquilla/${{ matrix.app }} build
         env:
-          VITE_AUTH_BASE: https://aquilla-dev-frontier-server.blue-darkness-7674.workers.dev
+          # Per-PR identity is mounted at pr-<N>.aquilla.app/api/identity/*.
+          # Sync still on workers.dev for staging (no public-path mount yet).
+          VITE_AUTH_BASE: https://pr-${{ env.PR }}.aquilla.app/api/identity
           VITE_SYNC_WORKER_HOST: aquilla-sync-worker-staging.blue-darkness-7674.workers.dev
 
       - name: Substitute __PR__ in wrangler.toml

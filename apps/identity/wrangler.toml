@@ -1,0 +1,130 @@
+# Aquilla identity service (AD-5 + AD-11). Mounted under `/api/identity`
+# (routes.json).
+#
+# Single D1 owns everything codex-web touches — identity, orgs, projects,
+# members, invites, file/cell projections. Brand-new schema (no shared
+# tables with the legacy `frontier-db-v2` that the codex-editor extension
+# uses). Migrations under `migrations/` are wrangler-applied on deploy.
+#
+# Schema ownership lives here; sync-worker binds the same D1 but does NOT
+# declare migrations_dir (wrangler tracks applied migrations per file in a
+# `d1_migrations` row, so a second worker would no-op anyway — keeping a
+# single owner avoids confusion).
+#
+# Renamed from `apps/frontier-server/` → `apps/identity/` in the AD-11
+# unification PR. The previous worker name `aquilla-frontier-server`
+# remains in CF as an orphan until manually deleted; route claims have
+# transferred to `aquilla-identity` here, so no traffic lands on the
+# old name once this deploys.
+
+name = "aquilla-identity"
+main = "src/index.ts"
+compatibility_date = "2024-12-01"
+compatibility_flags = ["nodejs_compat"]
+
+# Same CF account as the rest of the monorepo workers. Pinned to avoid
+# wrangler interactive account-pick prompts.
+account_id = "6a80496d1e59948a9cbaa3c643ba81d7"
+
+# Top-level (no env flag) defaults to prod for symmetry with the legacy
+# workers. Prefer `--env=production` / `--env=staging` / `--env=preview`
+# explicitly; do not rely on these defaults.
+routes = ["aquilla.app/api/identity/*"]  # Claimed in production via Workers Routes (zone aquilla.app on CF account)
+
+[[d1_databases]]
+binding = "AQUILLA_DB"
+database_name = "aquilla-db"
+# database_id is populated by `wrangler d1 create aquilla-db`.
+database_id = "11828e9d-998b-4d3f-a405-91d9f624f94a"
+migrations_dir = "migrations"
+
+# Secrets (provisioned via `wrangler secret put`, never committed):
+#   SECRET_KEY      — frontier JWT signing key. Rotate to a fresh value for
+#                     the clean break; legacy frontier-server tokens will no
+#                     longer verify here (acceptable — no shared users yet).
+#   SYNC_SECRET_KEY — signs /sync-token JWTs AND authenticates admin calls
+#                     to aquilla-sync-worker. MUST match aquilla-sync-worker.
+#   RESEND_API_KEY  — used by /password-reset/request to send email.
+# Plain vars: see src/types.ts for the full list.
+
+[vars]
+ENV = "prod"
+ALGORITHM = "HS256"
+ACCESS_TOKEN_EXPIRE_MINUTES = "43200"
+EMAIL_FROM = "noreply@frontierrnd.com"
+BASE_URL = "https://aquilla.app"
+ENVIRONMENT = "production"
+# Admin URL for fire-and-forget archive / R2 cleanup notifications. Used by
+# POST /projects/:id/archive and DELETE /projects/:id/files/:fileId.
+SYNC_WORKER_URL = "https://aquilla-sync-worker.blue-darkness-7674.workers.dev"
+
+# ---------------------------------------------------------------------------
+# Production — `wrangler deploy --env production`
+# ---------------------------------------------------------------------------
+[env.production]
+name = "aquilla-prod-identity"
+account_id = "6a80496d1e59948a9cbaa3c643ba81d7"
+routes = ["aquilla.app/api/identity/*"]  # Claimed in production via Workers Routes (zone aquilla.app on CF account)
+
+[[env.production.d1_databases]]
+binding = "AQUILLA_DB"
+database_name = "aquilla-db"
+database_id = "11828e9d-998b-4d3f-a405-91d9f624f94a"
+migrations_dir = "migrations"
+
+[env.production.vars]
+ENV = "prod"
+ALGORITHM = "HS256"
+ACCESS_TOKEN_EXPIRE_MINUTES = "43200"
+EMAIL_FROM = "noreply@frontierrnd.com"
+BASE_URL = "https://aquilla.app"
+ENVIRONMENT = "production"
+SYNC_WORKER_URL = "https://aquilla-sync-worker.blue-darkness-7674.workers.dev"
+
+# ---------------------------------------------------------------------------
+# Staging — `wrangler deploy --env staging`
+# Physically separate D1 (aquilla-db-staging) so experiments don't pollute
+# prod identities. SECRET_KEY + SYNC_SECRET_KEY may be either shared with
+# prod (cross-env testing convenience) or rotated; that's a deploy decision,
+# not a code one.
+# ---------------------------------------------------------------------------
+[env.staging]
+name = "aquilla-dev-identity"
+account_id = "6a80496d1e59948a9cbaa3c643ba81d7"
+routes = ["dev.aquilla.app/api/identity/*"]  # Claimed in staging via Workers Routes
+
+[[env.staging.d1_databases]]
+binding = "AQUILLA_DB"
+database_name = "aquilla-db-staging"
+database_id = "c995bf9a-97c0-4966-a112-053a2d04d8f9"
+migrations_dir = "migrations"
+
+[env.staging.vars]
+ENV = "preview"
+ALGORITHM = "HS256"
+ACCESS_TOKEN_EXPIRE_MINUTES = "43200"
+EMAIL_FROM = "noreply@frontierrnd.com"
+BASE_URL = "https://dev.aquilla.app"
+ENVIRONMENT = "staging"
+SYNC_WORKER_URL = "https://aquilla-sync-worker-staging.blue-darkness-7674.workers.dev"
+
+# ---------------------------------------------------------------------------
+# Preview (per-PR) — CI substitutes `__PR__` with the PR number at deploy
+# time. Resource names land on the `aquilla-pr-<N>-` prefix that the
+# boot-time env assertion helper (packages/errors) expects under
+# ENV=preview.
+# ---------------------------------------------------------------------------
+[env.preview]
+name = "aquilla-pr-__PR__-identity"
+account_id = "6a80496d1e59948a9cbaa3c643ba81d7"
+routes = ["pr-__PR__.aquilla.app/api/identity/*"]  # Claimed in preview via Workers Routes
+
+[env.preview.vars]
+ENV = "preview"
+PR = "__PR__"
+ALGORITHM = "HS256"
+ACCESS_TOKEN_EXPIRE_MINUTES = "43200"
+EMAIL_FROM = "noreply@frontierrnd.com"
+BASE_URL = "https://pr-__PR__.aquilla.app"
+ENVIRONMENT = "preview"
+SYNC_WORKER_URL = "https://aquilla-sync-worker-staging.blue-darkness-7674.workers.dev"

@@ -1,8 +1,8 @@
 // Types for the sync-worker read API (server-side reads, AD-3 v1 thin client).
 //
 // Mirror of the server's response shapes in:
-//   sync-worker/src/events/files-read-route.ts
-//   sync-worker/src/events/cells-read-route.ts
+//   apps/sync/src/events/files-read-route.ts
+//   apps/sync/src/events/cells-read-route.ts
 //
 // These will move into `packages/data-model` in Phase 3 (one canonical
 // definition shared by every Worker + the web client). Until then we keep

@@ -1,13 +1,16 @@
 # Front-door Worker for the Aquilla monorepo (AD-11; spec §21-monorepo.md).
 #
 # Workers Routes maps every known app slug to its own Worker
-# (aquilla.app/<slug>/* → aquilla-<slug>). The front-door is mapped to the
-# root + a 404 fallback only. It is NOT a dispatcher: there are no service
-# bindings to per-app Workers here, on purpose (avoids coupling every app
-# deploy to a front-door redeploy).
+# (aquilla.app/<slug>/* → aquilla-<slug>). The front-door catches every
+# unclaimed path on the apex. It is NOT a dispatcher: there are no
+# service bindings to per-app Workers here, on purpose (avoids coupling
+# every app deploy to a front-door redeploy).
 #
-# Behavior:
-#   GET /            → 302 redirect to /projects
+# Behavior (see src/index.ts):
+#   GET /            → 302 redirect to /projects/
+#   GET /<slug>      → 301 to /<slug>/ for every entry in routes.json
+#   GET /project/*   → 301 to /w/project/* (legacy workspace URL)
+#   GET /debug, …    → 301 to /w/<path> (other legacy workspace URLs)
 #   GET /__routes    → JSON dump of routes.json (debug aid)
 #   anything else    → 404 (Workers Routes claims real app paths upstream)
 #
@@ -24,7 +27,7 @@ account_id = "6a80496d1e59948a9cbaa3c643ba81d7"
 
 # Top-level (no env flag) defaults to prod for symmetry with the legacy
 # workers. Prefer --env=production / --env=staging / --env=preview.
-# routes = ["aquilla.app/*"]  # TODO: uncomment after aquilla.app zone is provisioned in Cloudflare
+# routes = ["aquilla.app/*"]  # See [env.production].routes below.
 
 [vars]
 ENV = "prod"
@@ -35,12 +38,15 @@ ENV = "prod"
 [env.production]
 name = "aquilla-prod-front-door"
 account_id = "6a80496d1e59948a9cbaa3c643ba81d7"
-# Exact-match `aquilla.app/` (no `/*`) so front-door owns ONLY the apex.
-# Per-app Workers Routes (`aquilla.app/<slug>/*`) handle their slugs.
-# Everything else falls through to Pages (the legacy workspace bundle
-# at /project/:id, /debug, /favicon-*.svg, the apex SPA fallback). A
-# wildcard claim here would intercept all of that and break it.
-routes = ["aquilla.app/"]
+# Wildcard catch-all: every aquilla.app path not claimed by a more
+# specific app route lands here. Per-app Workers Routes
+# (`aquilla.app/<slug>/*`) take precedence — Cloudflare picks the most
+# specific match, so /login/* still goes to aquilla-prod-login etc.
+# Front-door 301s legacy workspace URLs (/project/*, /debug, …) to
+# /w/<path> and 404s everything else. This replaces the Pages SPA
+# fallback (`/*` → `index.html`) that previously served the legacy
+# bundle at the apex.
+routes = ["aquilla.app/*"]
 
 [env.production.vars]
 ENV = "prod"
@@ -51,7 +57,7 @@ ENV = "prod"
 [env.staging]
 name = "aquilla-dev-front-door"
 account_id = "6a80496d1e59948a9cbaa3c643ba81d7"
-# routes = ["dev.aquilla.app/*"]  # TODO: uncomment after aquilla.app zone is provisioned in Cloudflare
+routes = ["dev.aquilla.app/*"]  # Claimed in staging via Workers Routes
 
 [env.staging.vars]
 ENV = "preview"
@@ -62,7 +68,7 @@ ENV = "preview"
 [env.preview]
 name = "aquilla-pr-__PR__-front-door"
 account_id = "6a80496d1e59948a9cbaa3c643ba81d7"
-# routes = ["pr-__PR__.aquilla.app/*"]  # TODO: uncomment after aquilla.app zone is provisioned in Cloudflare
+routes = ["pr-__PR__.aquilla.app/*"]  # Claimed in preview via Workers Routes
 
 [env.preview.vars]
 ENV = "preview"

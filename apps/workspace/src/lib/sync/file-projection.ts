@@ -1,4 +1,4 @@
-// Best-effort notification to frontier-server that a file has been removed
+// Best-effort notification to identity that a file has been removed
 // from a project, so its projection rows in codex-db (files + cells + FTS)
 // get cleaned up. Kept out of ProjectWorkspace so it can be unit-tested
 // cheaply and reused by any future file-management surface.

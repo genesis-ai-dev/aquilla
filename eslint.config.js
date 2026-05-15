@@ -21,11 +21,11 @@ export default defineConfig([
     },
   },
   // AuthorizedEvent perimeter guard: only authorize.ts may construct instances.
-  // Any other file in sync-worker/src that calls `new AuthorizedEvent(...)` is
+  // Any other file in apps/sync/src that calls `new AuthorizedEvent(...)` is
   // a policy violation — it bypasses the auth perimeter.
   {
-    files: ['sync-worker/src/**/*.ts'],
-    ignores: ['sync-worker/src/events/authorize.ts'],
+    files: ['apps/sync/src/**/*.ts'],
+    ignores: ['apps/sync/src/events/authorize.ts'],
     rules: {
       'no-restricted-syntax': [
         'error',

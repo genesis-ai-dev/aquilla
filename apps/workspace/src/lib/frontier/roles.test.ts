@@ -13,7 +13,7 @@ import {
 } from "./roles"
 
 // These assertions are the contract between the codex-web-app client and
-// frontier-server's `ROLE_NAMES` / migration 0013. If the server's enum
+// identity's `ROLE_NAMES` / migration 0013. If the server's enum
 // changes, the test failures here are the early-warning signal.
 
 describe("ROLE constants", () => {

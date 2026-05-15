@@ -797,7 +797,7 @@ export function ProjectWorkspace() {
     await patchProject(project.id, (p) => deleteFile(p, fileId))
     refresh()
     if (activeFileId === fileId) setActiveFileId(null)
-    // Tell frontier-server to drop the projection rows for this file too.
+    // Tell identity to drop the projection rows for this file too.
     // Best-effort: a failure here doesn't roll back the local delete — the
     // D1 row just becomes an orphan until a future sweep.
     void deleteFileProjection({

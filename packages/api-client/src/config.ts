@@ -9,7 +9,7 @@
 // projects, orgs, members, invites, and user search.
 
 export const DEFAULT_AUTH_API_URL =
-  "https://aquilla-frontier-server.blue-darkness-7674.workers.dev"
+  "https://aquilla-identity.blue-darkness-7674.workers.dev"
 
 // Loosely-typed accessor; the package compiles in both Vite (browser bundle)
 // and Node (vitest) contexts so we can't rely on Vite's ImportMeta augmentation.

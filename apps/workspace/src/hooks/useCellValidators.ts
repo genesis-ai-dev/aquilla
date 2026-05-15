@@ -1,7 +1,7 @@
 // Phase 2b: aligned with the Phase 2a fetch pattern (vanilla useState +
 // race-guarded effect; no React Query). Reads the existing
 // `/cell-validators` endpoint exposed by the sync-worker; that route is
-// file-scoped, but frontier-server mints sync-tokens per file so the file
+// file-scoped, but identity mints sync-tokens per file so the file
 // scope is satisfied implicitly.
 
 import { useCallback, useEffect, useRef, useState } from "react"

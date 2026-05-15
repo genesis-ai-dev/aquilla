@@ -1,4 +1,4 @@
-// Typed fetch wrapper for frontier-server project members read API (Phase 2b).
+// Typed fetch wrapper for identity project members read API (Phase 2b).
 //
 // Strict-failure counterpart to `frontier/members.ts.listProjectMembers`,
 // which returns null on 403/404 to support local-only projects on the

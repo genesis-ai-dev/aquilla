@@ -83,7 +83,7 @@ export interface ListProjectsOptions {
 }
 
 // Phase 2b: the IDB project-index is no longer the authoritative project
-// source — frontier-server's GET /api/v2/projects[/...] is. The hook layer
+// source — identity's GET /api/v2/projects[/...] is. The hook layer
 // (useProject, useAccessibleProjects, dashboard) bypasses these helpers in
 // Phase 2b; we leave the implementations intact so existing tests + write
 // callers keep working. Phase 2c deletes this file entirely. See spec
@@ -151,7 +151,7 @@ export interface TombstoneOutcome {
 
 /**
  * Move a project to Trash (soft-delete). For cloud-synced projects this hits
- * frontier-server so all collaborators see the tombstone on their next sync
+ * identity so all collaborators see the tombstone on their next sync
  * event or dashboard load. For purely local projects (no server row yet)
  * we still set the local tombstone — the user experience is the same either
  * way. If the server returns 403, the local tombstone is NOT applied and

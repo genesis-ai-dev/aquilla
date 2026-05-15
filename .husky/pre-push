@@ -1,6 +1,6 @@
 #!/usr/bin/env sh
 
-# Pre-push gate: run the E2E smoke against the in-repo aquilla-frontier-server +
+# Pre-push gate: run the E2E smoke against the in-repo aquilla-identity +
 # sync-worker. No external checkout required — schemas are vendored under
 # `e2e/sql/` so wrangler can stand the stack up locally.
 #

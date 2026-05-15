@@ -2,12 +2,16 @@
 # Per-PR D1 fork + sync-worker variant deploy.
 #
 # Provisions (idempotent):
-#   1. D1 `codex-db-pr-<N>` — mirrors codex-db-staging's schema, plus any
+#   1. D1 `aquilla-pr-<N>` — mirrors aquilla-db-staging's schema, plus any
 #      new migrations from the PR applied on top. The fork NEVER reads
-#      from prod codex-db; staging is kept in lockstep with prod schema
+#      from prod aquilla-db; staging is kept in lockstep with prod schema
 #      separately (apply prod migrations to staging when they ship).
 #   2. Worker `aquilla-sync-worker-pr-<N>` — points at the new D1, shares
 #      aquilla-snapshots-staging via R2_KEY_PREFIX=pr-<N>.
+#
+# Triggered when any `apps/*/migrations/**.sql` changes (spec
+# §"Preview databases (Tier 2)" — single D1 per PR, shared across all
+# apps that need persistence).
 #
 # Usage:
 #   PR_NUMBER=43 CLOUDFLARE_ACCOUNT_ID=... ./scripts/pr-db-fork.sh
@@ -15,26 +19,26 @@
 # Optional env:
 #   MIGRATION_GLOB — glob of new SQL files in this PR to apply after
 #     the staging schema mirror. Defaults to detecting added/modified
-#     files under sync-worker/migrations/ via git diff.
+#     files under apps/*/migrations/ via git diff.
 set -euo pipefail
 
 : "${PR_NUMBER:?need PR_NUMBER}"
 : "${CLOUDFLARE_ACCOUNT_ID:?need CLOUDFLARE_ACCOUNT_ID}"
 
-DB_NAME="codex-db-pr-${PR_NUMBER}"
+DB_NAME="aquilla-pr-${PR_NUMBER}"
 WORKER_NAME="aquilla-sync-worker-pr-${PR_NUMBER}"
 # Source schema from staging, NEVER from prod. The CI workflow that runs
 # this script must not read prod data under any circumstance — staging
 # is kept in lockstep with prod's schema (apply prod migrations to
 # staging too), and PR forks branch off staging.
-SOURCE_DB="codex-db-staging"
+SOURCE_DB="aquilla-db-staging"
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-TEMPLATE="${REPO_ROOT}/sync-worker/wrangler.pr.toml.tpl"
-# Render the per-PR wrangler config INSIDE sync-worker/ so wrangler resolves
+TEMPLATE="${REPO_ROOT}/apps/sync/wrangler.pr.toml.tpl"
+# Render the per-PR wrangler config INSIDE apps/sync/ so wrangler resolves
 # `main = "src/index.ts"` relative to the worker dir (not /tmp). Suffix the
 # PR number so concurrent fork runs don't stomp each other.
-OUT_TOML="${REPO_ROOT}/sync-worker/wrangler.pr-${PR_NUMBER}.toml"
+OUT_TOML="${REPO_ROOT}/apps/sync/wrangler.pr-${PR_NUMBER}.toml"
 trap 'rm -f "${OUT_TOML}"' EXIT
 
 echo "[pr-db-fork] PR=${PR_NUMBER} db=${DB_NAME} worker=${WORKER_NAME}"
@@ -112,11 +116,11 @@ else
 fi
 
 # 3. Apply any new migrations from the PR. Default: every .sql added or
-#    modified under sync-worker/migrations/ between origin/dev and HEAD.
+#    modified under apps/*/migrations/ between origin/dev and HEAD.
 if [ -n "${MIGRATION_GLOB:-}" ]; then
   MIGS=$(ls ${MIGRATION_GLOB} 2>/dev/null || true)
 else
-  MIGS="$(git diff --name-only --diff-filter=AM origin/dev...HEAD | grep -E '^sync-worker/migrations/.*\.sql$' || true)"
+  MIGS="$(git diff --name-only --diff-filter=AM origin/dev...HEAD | grep -E '^apps/[^/]+/migrations/.*\.sql$' || true)"
 fi
 if [ -n "${MIGS}" ]; then
   echo "[pr-db-fork] applying PR migrations:"
@@ -133,7 +137,7 @@ sed -e "s|__PR__|${PR_NUMBER}|g" \
     -e "s|__DB_ID__|${DB_ID}|g" \
     "${TEMPLATE}" > "${OUT_TOML}"
 echo "[pr-db-fork] deploying worker ${WORKER_NAME}"
-(cd "${REPO_ROOT}/sync-worker" && npx wrangler deploy --config "${OUT_TOML}")
+(cd "${REPO_ROOT}/apps/sync" && npx wrangler deploy --config "${OUT_TOML}")
 
 WORKER_URL="https://${WORKER_NAME}.blue-darkness-7674.workers.dev"
 echo "[pr-db-fork] done"

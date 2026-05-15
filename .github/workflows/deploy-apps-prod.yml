@@ -4,16 +4,18 @@ name: Deploy apps to production
 # `wrangler deploy --env=production`. Mirrors deploy-all-apps.yml's
 # discovery + matrix structure but for prod, not per-PR previews.
 #
-# Skips:
-#   - apps/front-door — the apex `/` is served by Pages (_redirects bounces
-#                       / → /projects). Re-enabling front-door would need
-#                       an `aquilla.app/*` route claim that fully replaces
-#                       Pages, which is a bigger change.
-#   - apps/frontier-server — already deployed by deploy-workers.yml.
+# Currently skips:
+#   - apps/front-door — uses a wildcard `aquilla.app/*` route claim and
+#                       depends on a careful manual review for changes.
+#                       Deploy it explicitly via `workflow_dispatch app=front-door`
+#                       or invoke wrangler manually. This skip is conservative
+#                       (front-door is the apex catch-all) and may be lifted
+#                       once front-door changes are routinely safe.
 #
-# So this workflow handles the SPA apps with discrete /<slug>/* mounts:
-# billing, export, import, login, migrate, org, projects, reset, signup,
-# and workspace (/w/*).
+# This workflow handles every other app under apps/*. SPA apps
+# (billing, export, import, login, migrate, org, projects, reset,
+# signup, workspace) get a `pnpm build` to produce dist/ before deploy;
+# non-SPA workers (identity, sync, chat) skip the build step.
 #
 # `pnpm build` runs per-app before `wrangler deploy` (the Worker's
 # [assets] binding requires dist/ to exist). The route claim in each
@@ -26,7 +28,9 @@ on:
     branches: [main]
     paths:
       - 'apps/billing/**'
+      - 'apps/chat/**'
       - 'apps/export/**'
+      - 'apps/identity/**'
       - 'apps/import/**'
       - 'apps/login/**'
       - 'apps/migrate/**'
@@ -34,6 +38,7 @@ on:
       - 'apps/projects/**'
       - 'apps/reset/**'
       - 'apps/signup/**'
+      - 'apps/sync/**'
       - 'apps/workspace/**'
       - 'packages/**'
       - 'pnpm-lock.yaml'
@@ -61,9 +66,9 @@ jobs:
         id: matrix
         run: |
           set -euo pipefail
-          # User-facing SPA apps with discrete mounts. Hand-curated:
-          # front-door + frontier-server are excluded per the workflow header.
-          all=(billing export import login migrate org projects reset signup workspace)
+          # Every app under apps/* except front-door (still gated behind
+          # the Pages-retirement step).
+          all=(billing chat export identity import login migrate org projects reset signup sync workspace)
           requested='${{ github.event.inputs.app }}'
           if [ -n "$requested" ] && [ "$requested" != "all" ]; then
             # workflow_dispatch with a single slug → only that app.
@@ -95,9 +100,15 @@ jobs:
       - run: pnpm install --frozen-lockfile
 
       - name: Build app
+        # Non-SPA workers (identity, sync, chat) skip the Vite build —
+        # they don't ship a dist/ for Workers Assets to bind.
+        if: matrix.app != 'identity' && matrix.app != 'sync' && matrix.app != 'chat'
         run: pnpm --filter @aquilla/${{ matrix.app }} build
         env:
-          VITE_AUTH_BASE: https://aquilla-frontier-server.blue-darkness-7674.workers.dev
+          # Identity is mounted at aquilla.app/api/identity/* via Workers
+          # Routes; the SPAs hit it through the apex. Sync + chat are
+          # still on workers.dev (no public path mount yet).
+          VITE_AUTH_BASE: https://aquilla.app/api/identity
           VITE_SYNC_WORKER_HOST: aquilla-sync-worker.blue-darkness-7674.workers.dev
           VITE_CHAT_BASE: https://aquilla-chat-worker.blue-darkness-7674.workers.dev
 
@@ -112,6 +123,9 @@ jobs:
           pnpm exec wrangler deploy --env=production
 
       - name: Smoke-test prod URL
+        # Skip for workers that don't have a public path mount yet
+        # (sync, chat are still on their workers.dev URLs).
+        if: matrix.app != 'sync' && matrix.app != 'chat'
         run: |
           slug='${{ matrix.app }}'
           path=$(jq -r --arg slug "$slug" '.[$slug] // empty' routes.json)

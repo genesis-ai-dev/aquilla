@@ -1,4 +1,4 @@
-// Client helpers for frontier-server's project-invite endpoints.
+// Client helpers for identity's project-invite endpoints.
 //
 // Graceful degradation: helpers return null on failure (no jwt, HTTP error,
 // network error). Callers surface null as "couldn't create / preview / accept"

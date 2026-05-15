@@ -1,6 +1,6 @@
 // Types for the sync-worker project-wide search API (Phase 2b).
 //
-// Mirror of `sync-worker/src/events/search-route.ts`.
+// Mirror of `apps/sync/src/events/search-route.ts`.
 
 export interface SearchResult {
   cellId: string

@@ -2,7 +2,7 @@
 //
 // Wraps the identity-service REST endpoints currently served by
 // auth-worker (`/api/v2/auth/*`). The auth-worker is being renamed to
-// `aquilla-frontier-server` in Phase 3e, but every callsite goes through
+// `aquilla-identity` in Phase 3e, but every callsite goes through
 // `VITE_AUTH_BASE`, so flipping the env var at deploy time is the only
 // change required when the rename lands.
 //
@@ -34,7 +34,7 @@ function readBase(): string {
   const trimmed = base ? base.replace(/\/+$/, "") : ""
   return (
     trimmed ||
-    "https://aquilla-frontier-server.blue-darkness-7674.workers.dev"
+    "https://aquilla-identity.blue-darkness-7674.workers.dev"
   )
 }
 

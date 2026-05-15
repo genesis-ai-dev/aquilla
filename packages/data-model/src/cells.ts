@@ -1,6 +1,6 @@
 // Cells / Files read-API types — the canonical shape every consumer of the
 // sync-worker projection reads from. Mirrors the response shapes in
-// `sync-worker/src/events/files-read-route.ts` and `cells-read-route.ts`.
+// `apps/sync/src/events/files-read-route.ts` and `cells-read-route.ts`.
 //
 // AD-2: every cell row carries `eventId` — the chain head id.
 // AD-9: target rows carry `sourceEventId` — the staleness pin onto the

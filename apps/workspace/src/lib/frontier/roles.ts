@@ -1,8 +1,8 @@
 /**
  * Codex's CF-native numeric role ladder. Single source of truth for the
  * 7-level scheme used across InviteStep, SharePanel, MembersPage, and the
- * frontier-server (mirrored in
- * `frontier-server/cloudflare/src/services/project-permissions.ts` —
+ * identity (mirrored in
+ * `identity/cloudflare/src/services/project-permissions.ts` —
  * see migration 0013).
  *
  * The ladder is intentionally richer than GitLab's 5 rungs (10/20/30/40/50)

@@ -184,7 +184,7 @@ export function eventsToHistoryEntries(events: CellHistoryEvent[]): CellHistoryE
 // main reason a 15+ MB Y.Doc can hit the Cloudflare DO 128 MiB memory cap
 // at runtime. The HistoryDrawer UI shows the most recent entries; older
 // entries are mostly invisible. Mirror of HISTORY_CAP_PER_CELL in
-// sync-worker/src/index.ts (server safety net).
+// apps/sync/src/index.ts (server safety net).
 const HISTORY_CAP_PER_CELL = 100
 
 /**

@@ -55,7 +55,15 @@ export function ExpandableFileList({
         <div className="relative">
           <SearchIcon className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
           <input
-            type="text"
+            type="search"
+            name="aquilla-file-filter-query"
+            aria-label="Filter files"
+            autoComplete="off"
+            autoCapitalize="none"
+            spellCheck={false}
+            data-1p-ignore="true"
+            data-lpignore="true"
+            data-form-type="other"
             value={filter}
             onChange={(e) => setFilter(e.target.value)}
             placeholder="Filter files..."

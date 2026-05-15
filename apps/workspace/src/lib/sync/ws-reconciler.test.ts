@@ -62,21 +62,27 @@ class FakeWebSocket {
 const FakeWsCtor = FakeWebSocket as unknown as typeof WebSocket
 
 describe("buildProjectWsUrl", () => {
-  it("upgrades https → wss and embeds token", () => {
-    expect(buildProjectWsUrl("https://example.com", "proj-1", "tok")).toBe(
-      "wss://example.com/parties/project-sync/proj-1?token=tok",
+  it("upgrades https → wss and embeds user + token", () => {
+    expect(buildProjectWsUrl("https://example.com", "proj-1", "alice", "tok")).toBe(
+      "wss://example.com/parties/project-sync/proj-1?user=alice&token=tok",
     )
   })
 
-  it("upgrades http → ws for local dev", () => {
-    expect(buildProjectWsUrl("http://127.0.0.1:8787", "p", null)).toBe(
-      "ws://127.0.0.1:8787/parties/project-sync/p",
+  it("upgrades http → ws for local dev (no token still includes user)", () => {
+    expect(buildProjectWsUrl("http://127.0.0.1:8787", "p", "bob", null)).toBe(
+      "ws://127.0.0.1:8787/parties/project-sync/p?user=bob",
     )
   })
 
   it("accepts ws:// / wss:// inputs unchanged", () => {
-    expect(buildProjectWsUrl("ws://localhost", "p", null)).toBe(
-      "ws://localhost/parties/project-sync/p",
+    expect(buildProjectWsUrl("ws://localhost", "p", "carol", null)).toBe(
+      "ws://localhost/parties/project-sync/p?user=carol",
+    )
+  })
+
+  it("url-encodes special chars in user param", () => {
+    expect(buildProjectWsUrl("wss://h", "p", "name with space", "t")).toBe(
+      "wss://h/parties/project-sync/p?user=name+with+space&token=t",
     )
   })
 })
@@ -165,6 +171,7 @@ describe("createWsReconciler", () => {
     const r = createWsReconciler(
       {
         projectId: "p",
+        userId: "test",
         baseUrl: "https://example.com",
         getToken: async () => "tok",
         webSocketCtor: FakeWsCtor,
@@ -189,6 +196,7 @@ describe("createWsReconciler", () => {
     const r = createWsReconciler(
       {
         projectId: "p",
+        userId: "test",
         baseUrl: "https://example.com",
         getToken: async () => "tok",
         webSocketCtor: FakeWsCtor,
@@ -224,6 +232,7 @@ describe("createWsReconciler", () => {
     const r = createWsReconciler(
       {
         projectId: "p",
+        userId: "test",
         baseUrl: "https://example.com",
         getToken: async () => "tok",
         webSocketCtor: FakeWsCtor,
@@ -242,6 +251,7 @@ describe("createWsReconciler", () => {
   it("send returns false when not OPEN", async () => {
     const r = createWsReconciler({
       projectId: "p",
+      userId: "test",
       baseUrl: "https://example.com",
       getToken: async () => "tok",
       webSocketCtor: FakeWsCtor,
@@ -255,6 +265,7 @@ describe("createWsReconciler", () => {
   it("send forwards a JSON-encoded frame when OPEN", async () => {
     const r = createWsReconciler({
       projectId: "p",
+      userId: "test",
       baseUrl: "https://example.com",
       getToken: async () => "tok",
       webSocketCtor: FakeWsCtor,
@@ -273,6 +284,7 @@ describe("createWsReconciler", () => {
     vi.useFakeTimers()
     const r = createWsReconciler({
       projectId: "p",
+      userId: "test",
       baseUrl: "https://example.com",
       getToken: async () => "tok",
       webSocketCtor: FakeWsCtor,
@@ -298,6 +310,7 @@ describe("createWsReconciler", () => {
     vi.useFakeTimers()
     const r = createWsReconciler({
       projectId: "p",
+      userId: "test",
       baseUrl: "https://example.com",
       getToken: async () => "tok",
       webSocketCtor: FakeWsCtor,

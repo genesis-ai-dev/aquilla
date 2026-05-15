@@ -73,7 +73,10 @@ export async function fetchProjectSettings(
 }
 
 /**
- * PATCH /api/v2/projects/:id/settings. The server merges top-level keys.
+ * PUT /api/v2/projects/:id/settings. Server REPLACES the settings blob
+ * (does not deep-merge — caller is responsible for sending the full
+ * desired shape).
+ *
  * Caller must include `ifMatchVersion`; mismatched version returns
  * `{kind: "conflict", latest}`. Sub-PROJECT_LEAD callers get
  * `{kind: "forbidden", required, role}`.
@@ -90,7 +93,7 @@ export async function patchProjectSettings(
     res = await fetch(
       `${apiUrl}/api/v2/projects/${encodeURIComponent(projectId)}/settings`,
       {
-        method: "PATCH",
+        method: "PUT",
         headers: authHeaders(jwt),
         body: JSON.stringify({ settings, ifMatchVersion }),
       },

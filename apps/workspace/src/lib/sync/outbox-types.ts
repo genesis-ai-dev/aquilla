@@ -1,6 +1,6 @@
 /**
  * Client-side mirror of the sync-worker's AD-2 event grammar
- * (`sync-worker/src/events/types.ts`). Keep field names aligned with the
+ * (`apps/sync/src/events/types.ts`). Keep field names aligned with the
  * server's `RawEvent<K>` — the wire format is identical.
  *
  * Differences from the legacy `cqrs-types.ts` (kept around during 2c-α for
@@ -18,7 +18,7 @@
  * extensions) are NOT in scope here — they remain stubbed per 2b.
  */
 
-// ── Kind union (must mirror sync-worker/src/events/types.ts) ──────────────
+// ── Kind union (must mirror apps/sync/src/events/types.ts) ──────────────
 
 export type OutboxEventKind =
   // Source-side cell events (importer / admin only).

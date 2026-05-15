@@ -2,7 +2,7 @@ import { test, expect } from "../../helpers/multi-user"
 import { Dashboard } from "../../helpers/page-objects/Dashboard"
 import { Workspace } from "../../helpers/page-objects/Workspace"
 import { ensureAuthState } from "../../helpers/auth"
-import { createProjectServerSide, addProjectMember, ROLE } from "../../helpers/frontier-api"
+import { createProjectServerSide, addProjectMember, ROLE } from "../../helpers/identity-api"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
 

@@ -157,13 +157,13 @@ normal editing.
 
 ```bash
 # 1. POST events for each cell.
-curl -X POST https://sync-worker/events \
+curl -X POST https://apps/sync/events \
   -H "Authorization: Bearer $SYNC_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"events":[ ...batch... ]}'
 
 # 2. Verify the projection.
-curl https://sync-worker/cells/audit-stats?fileId=$FILE_ID \
+curl https://apps/sync/cells/audit-stats?fileId=$FILE_ID \
   -H "Authorization: Bearer $SYNC_TOKEN"
 # → { cells: [{ cellId, editCount: 1, ... }, ...] }
 

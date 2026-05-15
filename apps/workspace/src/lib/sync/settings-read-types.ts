@@ -1,4 +1,4 @@
-// Types for the frontier-server project-settings read/write API (Phase 2b).
+// Types for the identity project-settings read/write API (Phase 2b).
 //
 // Re-exports the shape already defined in `project-settings.ts` so all the
 // Phase 2b read wrappers live under one consistent naming scheme. The

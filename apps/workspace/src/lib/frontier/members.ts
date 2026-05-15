@@ -9,7 +9,7 @@ export interface ProjectMemberRole {
   level: number;
   name: string;
   /**
-   * Where this role came from in frontier-server's resolveProjectRole tier:
+   * Where this role came from in identity's resolveProjectRole tier:
    *   - "override": explicit row in project_members for this user+project
    *   - "creator":  user is the project's `created_by`
    *   - "org":      user has an org_members row for this project's org

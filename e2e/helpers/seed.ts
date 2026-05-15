@@ -13,7 +13,7 @@ export const SEED_USERS: SeedUser[] = [
   { username: "carol", email: "carol@example.test", password: "carol-test-pw" },
 ]
 
-/** Hits the /__test__/reset route on frontier-server to truncate + reseed
+/** Hits the /__test__/reset route on identity to truncate + reseed
  * the local D1. Throws on any non-2xx response. */
 export async function resetBackend(): Promise<void> {
   const r = await fetch(`${AUTH_BASE}/__test__/reset`, { method: "POST" })

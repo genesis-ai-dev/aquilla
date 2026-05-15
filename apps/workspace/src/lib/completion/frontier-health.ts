@@ -1,11 +1,11 @@
 // src/lib/completion/frontier-health.ts
-// Lightweight availability probe for the frontier-server identity worker.
+// Lightweight availability probe for the identity worker.
 // The chat-completions endpoint is the default LLM provider; we hit
 // /api/v2/health once per tab (cached for 60s) so the UI can enable AI
 // controls without every callsite making its own network check.
 //
 // Historically this probed api.frontierrnd.com — the legacy frontier-server.
-// Now it probes apps/frontier-server (same JWT, same liveness signal).
+// Now it probes apps/identity (same JWT, same liveness signal).
 
 import { useCallback, useEffect, useState } from "react"
 import { subscribeSession } from "@/lib/frontier/session-store"

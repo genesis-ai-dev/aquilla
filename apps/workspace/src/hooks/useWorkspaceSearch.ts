@@ -156,7 +156,7 @@ export function useWorkspaceSearch(
     try {
       // The project-scope sync-token is minted per file; pick any file in
       // the project as the scope target. When `files` is empty we fall
-      // back to a sentinel — frontier-server mints project-scoped tokens off
+      // back to a sentinel — identity mints project-scoped tokens off
       // the projectId; the fileId in the token is unused on these reads.
       const scopeFile = opts.fileId ?? filesRef.current?.[0]?.id ?? "any"
       const token = fetchToken ? await fetchToken(scopeFile) : null

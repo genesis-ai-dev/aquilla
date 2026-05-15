@@ -1,20 +1,26 @@
 name: PR DB fork
 
-# Provisions a per-PR D1 + sync-worker variant when a PR touches a
-# migration file under sync-worker/migrations/. Idempotent — re-running
-# on subsequent pushes only applies new migrations, doesn't recreate
-# the DB.
+# Provisions a per-PR D1 (`aquilla-pr-<N>`) + sync-worker variant when a
+# PR touches ANY app's migrations under `apps/*/migrations/**.sql`.
+# Idempotent — re-running on subsequent pushes only applies new
+# migrations, doesn't recreate the DB.
 #
-# The PR-specific worker shares R2 with the staging bucket but uses
-# R2_KEY_PREFIX=pr-<N> so its objects are isolated. Cleanup runs on
-# PR close — see pr-db-cleanup.yml.
+# Per AD-11 / spec §"Preview databases (Tier 2)": one D1 per PR, shared
+# across all per-PR workers that need persistence. The first per-PR
+# worker we materialize is sync (because it carries the most state); the
+# remaining apps still resolve their D1 binding to staging via their
+# `[env.preview]` blocks until they get their own per-PR variants.
+#
+# The PR-specific sync worker shares R2 with the staging bucket but uses
+# R2_KEY_PREFIX=pr-<N> so its objects are isolated. Cleanup runs on PR
+# close — see pr-db-cleanup.yml.
 
 on:
   pull_request:
     branches: [dev, main]
     types: [opened, synchronize, reopened]
     paths:
-      - 'sync-worker/migrations/**.sql'
+      - 'apps/*/migrations/**.sql'
 
 # Cancel an in-flight fork run when a new push lands; the latest commit
 # wins.
@@ -38,13 +44,13 @@ jobs:
         with:
           node-version: 22
           cache: npm
-          cache-dependency-path: sync-worker/package-lock.json
+          cache-dependency-path: apps/sync/package-lock.json
 
       # sync-worker's deps must be present before the fork script runs
       # `wrangler deploy` against the rendered per-PR toml. Without this,
       # esbuild fails to resolve partyserver / yjs / hono.
       - run: npm ci
-        working-directory: sync-worker
+        working-directory: apps/sync
 
       - name: Run fork script
         id: fork
@@ -59,17 +65,17 @@ jobs:
         with:
           header: pr-db-fork
           message: |
-            **Per-PR sync-worker provisioned**
+            **Per-PR database provisioned**
 
-            This PR touches migration files under `sync-worker/migrations/`. To
-            isolate the migration from the shared staging DB, a per-PR sync
-            stack has been spun up:
+            This PR touches migration files under `apps/*/migrations/`. To
+            isolate the migration from the shared dev DB, a per-PR D1 has
+            been spun up along with a sync-worker variant bound to it:
 
-            - D1: `${{ steps.fork.outputs.db_name }}` (forked from staging schema; new migrations applied)
-            - Worker: ${{ steps.fork.outputs.worker_url }}
+            - D1: `${{ steps.fork.outputs.db_name }}` (forked from `aquilla-db-staging`; new migrations applied)
+            - Sync worker: ${{ steps.fork.outputs.worker_url }}
             - R2: shared `aquilla-snapshots-staging` bucket, namespaced under `pr-${{ github.event.pull_request.number }}/`
 
-            The PR's preview Pages bundle is built with `VITE_SYNC_WORKER_HOST`
+            The PR's preview bundle is built with `VITE_SYNC_WORKER_HOST`
             pointing at the worker above. Auth is disabled on the PR variant
             (`ALLOW_UNAUTHENTICATED=true`) — fine for the staging sandbox, not
             a model for prod.

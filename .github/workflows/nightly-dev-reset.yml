@@ -1,0 +1,39 @@
+name: Nightly aquilla-dev reset
+
+# Per AD-11 / spec §"Nightly aquilla-dev reset": drop the shared dev DB,
+# reapply migrations from main in order, re-run seed.sql. Keeps the
+# shared `aquilla-db-staging` (the PR-shared DB) from drifting under PRs
+# that don't fork their own per-PR D1.
+#
+# The DB id stays stable across resets — `wrangler d1 execute --remote
+# --file ...` runs DDL against the existing DB; we don't actually drop
+# the D1 itself (CF doesn't expose a "truncate database" primitive, and
+# recreating the D1 would change its id and break every staging worker
+# binding). Instead, we drop every user table inside it and reapply.
+#
+# Runs nightly at 07:00 UTC (≈midnight Pacific) and on workflow_dispatch.
+
+on:
+  schedule:
+    - cron: '0 7 * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: nightly-dev-reset
+  cancel-in-progress: false
+
+jobs:
+  reset:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Reset aquilla-db-staging
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: 6a80496d1e59948a9cbaa3c643ba81d7
+        run: ./scripts/nightly-dev-reset.sh

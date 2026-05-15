@@ -6,7 +6,7 @@
  * outbox; the reconciler ships events over this WS when healthy and
  * falls back to POST `/events` otherwise.
  *
- * Server protocol (mirror of `sync-worker/src/project-do.ts`):
+ * Server protocol (mirror of `apps/sync/src/project-do.ts`):
  *
  *   ── Server → client ────────────────────────────────────────────────
  *   { t: "event.applied", id, kind, project, file?, cell? }
@@ -28,7 +28,7 @@
  *   { t: "focus.release", cellId }
  *
  * This file is the *client*. The server-side DO ships in
- * `sync-worker/src/project-do.ts`. Both must remain wire-compatible.
+ * `apps/sync/src/project-do.ts`. Both must remain wire-compatible.
  */
 
 import type { OutboxRawEvent, OutboxEventKind } from "./outbox-types"

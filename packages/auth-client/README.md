@@ -36,9 +36,9 @@ callers can surface the server's intended copy verbatim.
 ## Base URL
 
 `AUTH_BASE` reads `import.meta.env.VITE_AUTH_BASE`, falling back to the
-current production aquilla-frontier-server host. Each consuming app sets its
+current production aquilla-identity host. Each consuming app sets its
 own `VITE_AUTH_BASE` at build time (see each app's `wrangler.toml`
-`[vars]`). The auth-worker is being renamed `aquilla-frontier-server` in
+`[vars]`). The auth-worker is being renamed `aquilla-identity` in
 Phase 3e; consumers don't need to care — they go through the env var.
 
 ## Cookie behavior

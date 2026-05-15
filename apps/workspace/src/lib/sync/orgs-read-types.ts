@@ -1,5 +1,5 @@
-// Types for the frontier-server orgs read API (Phase 2b).
-// Mirror of `apps/frontier-server/src/routes/orgs.ts`.
+// Types for the identity orgs read API (Phase 2b).
+// Mirror of `apps/identity/src/routes/orgs.ts`.
 
 export interface OrgRole {
   level: number

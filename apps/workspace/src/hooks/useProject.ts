@@ -1,6 +1,6 @@
 // Phase 2c-β: server-first project hydration (AD-3 v1).
 //
-// Project identity, role, and membership come from frontier-server on demand.
+// Project identity, role, and membership come from identity on demand.
 // The file projection can lag behind the local import transaction in dev/E2E
 // topologies where workers do not share a D1 instance, so locally known file
 // refs are merged as a narrow overlay after the server record is resolved.

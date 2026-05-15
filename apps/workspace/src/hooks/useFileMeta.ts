@@ -1,7 +1,7 @@
 // Phase 2b: per-file UI preferences (line numbers, text direction overrides,
 // RTL hint dismissal) move off Y.Doc onto localStorage. The synced
 // "language" inputs come from useProject / useProjectSettings — they're
-// already frontier-server-backed.
+// already identity-backed.
 //
 // Storing UI prefs locally is the correct call for v1: AD-3 v1 thin client
 // has no per-user-pref sync path (Q18 in the spec is still tentative),

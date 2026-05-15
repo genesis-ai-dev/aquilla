@@ -55,7 +55,7 @@ run_worker_first = ["/export/*", "!/export/assets/*"]
 [env.staging]
 name = "aquilla-dev-export"
 account_id = "6a80496d1e59948a9cbaa3c643ba81d7"
-# routes = ["dev.aquilla.app/export/*"]  # TODO: uncomment after aquilla.app zone is provisioned in Cloudflare
+routes = ["dev.aquilla.app/export/*"]  # Claimed in staging via Workers Routes
 
 [env.staging.vars]
 ENV = "preview"
@@ -74,7 +74,7 @@ not_found_handling = "single-page-application"
 [env.preview]
 name = "aquilla-pr-__PR__-export"
 account_id = "6a80496d1e59948a9cbaa3c643ba81d7"
-# routes = ["pr-__PR__.aquilla.app/export/*"]  # TODO: uncomment after aquilla.app zone is provisioned in Cloudflare
+routes = ["pr-__PR__.aquilla.app/export/*"]  # Claimed in preview via Workers Routes
 
 [env.preview.vars]
 ENV = "preview"

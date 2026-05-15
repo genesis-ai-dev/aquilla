@@ -1,4 +1,4 @@
-// Auth types — frontier-server identity service (apps/frontier-server/ once
+// Auth types — identity service (apps/identity/ once
 // 3e merges; currently auth-worker/).
 
 export interface User {

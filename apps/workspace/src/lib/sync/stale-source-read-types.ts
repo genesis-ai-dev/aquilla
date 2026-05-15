@@ -1,6 +1,6 @@
 // Types for the sync-worker stale-source read API (Phase 5 / AD-9).
 //
-// Mirror of `sync-worker/src/events/stale-source-route.ts`.
+// Mirror of `apps/sync/src/events/stale-source-route.ts`.
 
 /**
  * One cell id whose source-side `event_id` no longer matches the target

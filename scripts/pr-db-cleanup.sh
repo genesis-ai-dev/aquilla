@@ -9,9 +9,9 @@ set -euo pipefail
 : "${PR_NUMBER:?need PR_NUMBER}"
 : "${CLOUDFLARE_ACCOUNT_ID:?need CLOUDFLARE_ACCOUNT_ID}"
 
-DB_NAME="codex-db-pr-${PR_NUMBER}"
+DB_NAME="aquilla-pr-${PR_NUMBER}"
 WORKER_NAME="aquilla-sync-worker-pr-${PR_NUMBER}"
-R2_BUCKET="codex-snapshots-staging"  # TODO: rename once provisioned in CF (see sync-worker/wrangler.toml)
+R2_BUCKET="codex-snapshots-staging"  # TODO: rename to aquilla-snapshots-staging once the bucket exists in CF; sync-worker wrangler still binds the old name.
 R2_PREFIX="pr-${PR_NUMBER}/"
 
 echo "[pr-db-cleanup] PR=${PR_NUMBER}"

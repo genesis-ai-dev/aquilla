@@ -1,0 +1,157 @@
+name: Deploy apps to staging
+
+# Push to dev → matrix-deploy each app under apps/* with
+# `wrangler deploy --env=staging`. Mirrors deploy-apps-prod.yml but
+# targets `aquilla-dev-*` Workers + `aquilla-db-staging` on dev.aquilla.app.
+#
+# Identity runs `wrangler d1 migrations apply aquilla-db-staging --remote`
+# BEFORE deploy so the new worker code never serves traffic against an
+# older schema. Same convention as prod.
+#
+# Front-door is included here (unlike prod) — its dev.aquilla.app/*
+# catch-all is symmetric with the SPA routes and there's no apex
+# blast-radius concern on dev. If a front-door change goes wrong on
+# staging, that's exactly what staging is for.
+
+on:
+  push:
+    branches: [dev]
+    paths:
+      - 'apps/billing/**'
+      - 'apps/chat/**'
+      - 'apps/export/**'
+      - 'apps/front-door/**'
+      - 'apps/identity/**'
+      - 'apps/import/**'
+      - 'apps/login/**'
+      - 'apps/migrate/**'
+      - 'apps/org/**'
+      - 'apps/projects/**'
+      - 'apps/reset/**'
+      - 'apps/signup/**'
+      - 'apps/sync/**'
+      - 'apps/workspace/**'
+      - 'packages/**'
+      - 'pnpm-lock.yaml'
+      - '.github/workflows/deploy-apps-staging.yml'
+  workflow_dispatch:
+    inputs:
+      app:
+        description: 'Which app to deploy (all, or a single slug like "projects")'
+        required: false
+        default: 'all'
+
+concurrency:
+  group: deploy-apps-staging
+  cancel-in-progress: false
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      apps: ${{ steps.matrix.outputs.apps }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build deploy matrix
+        id: matrix
+        run: |
+          set -euo pipefail
+          all=(billing chat export front-door identity import login migrate org projects reset signup sync workspace)
+          requested='${{ github.event.inputs.app }}'
+          if [ -n "$requested" ] && [ "$requested" != "all" ]; then
+            json=$(printf '%s\n' "$requested" | jq -R . | jq -s -c .)
+          else
+            json=$(printf '%s\n' "${all[@]}" | jq -R . | jq -s -c .)
+          fi
+          echo "apps=$json" >> "$GITHUB_OUTPUT"
+
+  deploy-app:
+    needs: plan
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        app: ${{ fromJson(needs.plan.outputs.apps) }}
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: 6a80496d1e59948a9cbaa3c643ba81d7
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+
+      - name: Apply D1 migrations (identity only)
+        # Identity owns the aquilla-db-staging schema. Apply migrations
+        # BEFORE the worker deploy so the new worker code never serves
+        # traffic against an older schema. Idempotent — wrangler tracks
+        # applied migrations in d1_migrations and only runs pending files.
+        if: matrix.app == 'identity'
+        working-directory: apps/identity
+        run: pnpm exec wrangler d1 migrations apply aquilla-db-staging --remote
+
+      - name: Build app
+        # Non-SPA workers (identity, sync, chat, front-door) skip the
+        # Vite build — they don't ship a dist/ for Workers Assets to bind
+        # (front-door uses its own public/ directly, not a built dist/).
+        if: matrix.app != 'identity' && matrix.app != 'sync' && matrix.app != 'chat' && matrix.app != 'front-door'
+        run: pnpm --filter @aquilla/${{ matrix.app }} build
+        env:
+          # Identity is mounted at dev.aquilla.app/api/identity/* via
+          # Workers Routes. Sync + chat remain on workers.dev (no public
+          # path mount yet).
+          VITE_AUTH_BASE: https://dev.aquilla.app/api/identity
+          VITE_SYNC_WORKER_HOST: aquilla-sync-worker-staging.blue-darkness-7674.workers.dev
+          VITE_CHAT_BASE: https://aquilla-chat-worker-staging.blue-darkness-7674.workers.dev
+
+      - name: Deploy
+        working-directory: apps/${{ matrix.app }}
+        run: |
+          # The staging route claims already exist in Cloudflare. The CI
+          # token can upload Workers/assets, but it intentionally does not
+          # have zone route mutation permission, so strip route declarations
+          # from the temporary checkout before deploying.
+          perl -0pi -e 's/^\s*routes\s*=.*\n//mg' wrangler.toml
+          pnpm exec wrangler deploy --env=staging
+
+      - name: Smoke-test staging URL
+        # Skip for workers without a public dev.aquilla.app mount.
+        # continue-on-error until `dev.aquilla.app` is provisioned in DNS —
+        # see zone-provisioning notes. Deploys still upload to
+        # aquilla-dev-* Workers regardless; this only fails when the
+        # hostname resolves but returns 5xx / unexpected status.
+        if: matrix.app != 'sync' && matrix.app != 'chat'
+        continue-on-error: true
+        run: |
+          slug='${{ matrix.app }}'
+          if [ "$slug" = "front-door" ]; then
+            path="/"
+          else
+            path=$(jq -r --arg slug "$slug" '.[$slug] // empty' routes.json)
+          fi
+          if [ -z "$path" ]; then
+            path="/${slug}"
+          fi
+          [ "${path%/}" = "$path" ] && path="${path}/"
+          url="https://dev.aquilla.app${path}"
+          echo "Smoke-testing $url"
+          # Workers Routes propagation can take a few seconds after deploy.
+          for attempt in 1 2 3 4 5; do
+            code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 20 "$url" || echo "000")
+            echo "  attempt $attempt: HTTP $code"
+            case "$code" in
+              2*|3*|401|403)
+                echo "::notice::$slug is live on staging ($code)"
+                exit 0
+                ;;
+            esac
+            sleep 10
+          done
+          echo "::error::Staging smoke test failed for $slug (HTTP $code) after retries"
+          exit 1

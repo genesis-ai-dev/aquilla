@@ -89,7 +89,18 @@ export interface OutboxEventPayloads {
 
   "file.create": {
     name: string
-    fileType: string
+    /** Legacy alias for `kind`; kept until every emitter moves to role+kind. */
+    fileType?: string
+    /** Spec §"File" semantic side: 'source' | 'target' | 'dictionary' | 'translationNotes'. */
+    role?: string
+    /** Spec §"File" shape: 'codex' | 'usfm' | 'docx' | 'pptx' | 'vtt' | 'srt' | 'txt' | 'md'. */
+    kind?: string
+    bookCode?: string
+    sourceFileId?: string
+    anchorFileId?: string
+    r2Key?: string
+    importFormat?: string
+    parserVersion?: string
     sourceLanguage?: string
     targetLanguage?: string
   }

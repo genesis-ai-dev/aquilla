@@ -366,29 +366,56 @@ export function buildEventProjectionStmts(
       }
       // Counters left at zero on first insert and untouched on conflict —
       // cell commit projections maintain those.
+      //
+      // Spec §"File" added role/kind/book_code/source_file_id/anchor_file_id/
+      // r2_key/import_format/parser_version to the file.create payload. The
+      // legacy `file_type` column is kept in sync from
+      // `fileType ?? kind ?? role ?? 'codex'` so pre-spec reads stay valid.
+      const legacyFileType = p.fileType ?? p.kind ?? p.role ?? 'codex'
       stmts.push(
         db
           .prepare(
             `INSERT INTO files (
               id, project_id, name, file_type, source_language, target_language,
               cell_count, approved_count, word_count, last_edit_at, projected_from,
-              updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, 0, 0, 0, NULL, ?, unixepoch('now') * 1000)
+              updated_at,
+              role, kind, book_code, source_file_id, anchor_file_id,
+              r2_key, import_format, parser_version
+            ) VALUES (
+              ?, ?, ?, ?, ?, ?, 0, 0, 0, NULL, ?, unixepoch('now') * 1000,
+              ?, ?, ?, ?, ?, ?, ?, ?
+            )
             ON CONFLICT(id) DO UPDATE SET
               name = excluded.name,
               file_type = excluded.file_type,
               source_language = excluded.source_language,
               target_language = excluded.target_language,
+              role = excluded.role,
+              kind = excluded.kind,
+              book_code = excluded.book_code,
+              source_file_id = excluded.source_file_id,
+              anchor_file_id = excluded.anchor_file_id,
+              r2_key = excluded.r2_key,
+              import_format = excluded.import_format,
+              parser_version = excluded.parser_version,
               updated_at = unixepoch('now') * 1000`,
           )
           .bind(
             event.fileId,
             event.projectId,
             p.name,
-            p.fileType,
+            legacyFileType,
             p.sourceLanguage ?? null,
             p.targetLanguage ?? null,
             `event:${event.id}`,
+            p.role ?? null,
+            p.kind ?? null,
+            p.bookCode ?? null,
+            p.sourceFileId ?? null,
+            p.anchorFileId ?? null,
+            p.r2Key ?? null,
+            p.importFormat ?? null,
+            p.parserVersion ?? null,
           ),
       )
       return ['files']

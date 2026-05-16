@@ -136,6 +136,72 @@ describe("POST /api/v2/sync-token", () => {
     })
   })
 
+  it("AD-12: honors a group grant when no direct override exists", async () => {
+    const db = makeFakeD1({
+      users: [makeUser()],
+      organizations: [{ id: 1, name: "Acme", owner_user_id: 99 }],
+      projects: [
+        {
+          id: "proj-1",
+          name: "Test",
+          org_id: 1,
+          created_by: 99, // not the caller
+          archived_at: null,
+        },
+      ],
+      groups: [
+        {
+          id: 10,
+          org_id: 1,
+          name: "Translators",
+          description: null,
+          created_by: 99,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        },
+      ],
+      group_members: [
+        {
+          group_id: 10,
+          user_id: 42,
+          added_by: 99,
+          added_at: new Date().toISOString(),
+        },
+      ],
+      group_project_grants: [
+        {
+          group_id: 10,
+          project_id: "proj-1",
+          role_level: 400,
+          granted_by: 99,
+          granted_at: new Date().toISOString(),
+        },
+      ],
+    })
+    const jwt = await frontierJwt("alice")
+    const res = await app.request(
+      "/api/v2/sync-token",
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${jwt}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ projectId: "proj-1", fileId: "file-a" }),
+      },
+      makeEnv(db),
+    )
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as {
+      role: { level: number; name: string; source: string }
+    }
+    expect(body.role).toEqual({
+      level: 400,
+      name: "contributor",
+      source: "group",
+    })
+  })
+
   it("auto-registers an unknown project when projectName is supplied", async () => {
     const db = makeFakeD1({ users: [makeUser()] })
     const jwt = await frontierJwt("alice")

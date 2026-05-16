@@ -3,9 +3,16 @@
 // Writes the canonical event row PLUS a `files` UPSERT so the file shows
 // up in the project listing immediately after import — before any user
 // opens the file. UPSERT semantics: administrative fields (name, type,
-// languages) always overwrite; counters (cell_count, approved_count,
-// word_count, last_edit_at) are NOT touched here — they're maintained by
-// the cell-event projection path.
+// languages, role/kind/import metadata) always overwrite; counters
+// (cell_count, approved_count, word_count, last_edit_at) are NOT touched
+// here — they're maintained by the cell-event projection path.
+//
+// Spec alignment (03-data-model.md §"File"): the row carries `role`,
+// `kind`, `book_code`, `source_file_id`, `anchor_file_id`, `r2_key`,
+// `import_format`, `parser_version` from the event payload. The legacy
+// `file_type` column is kept in lockstep (`payload.fileType ?? payload.kind
+// ?? payload.role ?? 'codex'`) so existing reads in `files-read-route.ts`
+// keep returning a non-null value.
 
 import type { AuthorizedEvent } from '../authorize'
 import type { RealtimeMessage, ProjectionTable } from '../realtime'
@@ -49,28 +56,54 @@ export function handleFileCreate(
       opts.serverSeq,
     )
 
+  // Legacy column fallback: keep `file_type` populated so pre-spec reads
+  // keep working. New rows should set `role` + `kind` directly.
+  const legacyFileType =
+    event.payload.fileType ?? event.payload.kind ?? event.payload.role ?? 'codex'
+
   const fileUpsert = db
     .prepare(
       `INSERT INTO files (
         id, project_id, name, file_type, source_language, target_language,
         cell_count, approved_count, word_count, last_edit_at, projected_from,
-        updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, 0, 0, 0, NULL, ?, unixepoch('now') * 1000)
+        updated_at,
+        role, kind, book_code, source_file_id, anchor_file_id,
+        r2_key, import_format, parser_version
+      ) VALUES (
+        ?, ?, ?, ?, ?, ?, 0, 0, 0, NULL, ?, unixepoch('now') * 1000,
+        ?, ?, ?, ?, ?, ?, ?, ?
+      )
       ON CONFLICT(id) DO UPDATE SET
         name = excluded.name,
         file_type = excluded.file_type,
         source_language = excluded.source_language,
         target_language = excluded.target_language,
+        role = excluded.role,
+        kind = excluded.kind,
+        book_code = excluded.book_code,
+        source_file_id = excluded.source_file_id,
+        anchor_file_id = excluded.anchor_file_id,
+        r2_key = excluded.r2_key,
+        import_format = excluded.import_format,
+        parser_version = excluded.parser_version,
         updated_at = unixepoch('now') * 1000`,
     )
     .bind(
       event.fileId,
       event.projectId,
       event.payload.name,
-      event.payload.fileType,
+      legacyFileType,
       event.payload.sourceLanguage ?? null,
       event.payload.targetLanguage ?? null,
       `event:${event.id}`,
+      event.payload.role ?? null,
+      event.payload.kind ?? null,
+      event.payload.bookCode ?? null,
+      event.payload.sourceFileId ?? null,
+      event.payload.anchorFileId ?? null,
+      event.payload.r2Key ?? null,
+      event.payload.importFormat ?? null,
+      event.payload.parserVersion ?? null,
     )
 
   const eventFrame: Extract<RealtimeMessage, { t: 'event' }> = {

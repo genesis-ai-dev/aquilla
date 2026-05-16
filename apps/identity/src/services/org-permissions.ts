@@ -186,13 +186,21 @@ export interface EffectiveMember {
   userId: number
   username: string
   roleLevel: number
-  source: "override" | "creator" | "org"
+  /** Path that produced the user's max-wins role (AD-12). */
+  source: "override" | "group" | "org" | "creator"
 }
 
 /**
- * Effective members for a project = direct project_members ∪ org_members of
- * the project's org, plus the creator if not already represented. Direct
- * project_members rows shadow org_members rows for the same user.
+ * Effective members for a project — per AD-12, max-wins across direct +
+ * group + org + creator. A user gets one row, attributed to whichever path
+ * produced the highest role_level. Ties resolve by declaration order
+ * (override > group > org > creator) so an explicit project grant gets
+ * attribution credit when it ties with an inherited grant.
+ *
+ * Per spec 02-foundations.md AD-12 "Required ops surfaces (members UI)":
+ * the per-path breakdown is "non-negotiable in v1". That richer surface
+ * lands in the members-panel work (Pass C); this function returns just the
+ * max-wins row to keep the existing members endpoint coherent for now.
  */
 export async function listEffectiveProjectMembers(
   env: Env,
@@ -200,6 +208,8 @@ export async function listEffectiveProjectMembers(
   orgId: number | null,
   createdBy: number,
 ): Promise<EffectiveMember[]> {
+  // Each path is fetched separately and merged via max-wins so attribution
+  // is exact (a JOIN-based approach would lose per-user attribution).
   const direct = await env.AQUILLA_DB.prepare(
     `SELECT pm.user_id AS user_id, u.username AS username, pm.role_level AS role_level
      FROM project_members pm
@@ -209,14 +219,69 @@ export async function listEffectiveProjectMembers(
     .bind(projectId)
     .all<{ user_id: number; username: string; role_level: number }>()
 
-  const directMap = new Map<number, EffectiveMember>()
+  const merged = new Map<number, EffectiveMember>()
+
+  const consider = (
+    candidate: EffectiveMember,
+    priority: number,
+  ): void => {
+    const existing = merged.get(candidate.userId)
+    if (!existing) {
+      merged.set(candidate.userId, candidate)
+      return
+    }
+    if (candidate.roleLevel > existing.roleLevel) {
+      merged.set(candidate.userId, candidate)
+      return
+    }
+    // Tie on roleLevel — prefer the higher-priority source.
+    if (candidate.roleLevel === existing.roleLevel) {
+      const existingPriority = SOURCE_PRIORITY[existing.source]
+      if (priority > existingPriority) {
+        merged.set(candidate.userId, candidate)
+      }
+    }
+  }
+
   for (const r of direct.results ?? []) {
-    directMap.set(r.user_id, {
-      userId: r.user_id,
-      username: r.username,
-      roleLevel: r.role_level,
-      source: "override",
-    })
+    consider(
+      {
+        userId: r.user_id,
+        username: r.username,
+        roleLevel: r.role_level,
+        source: "override",
+      },
+      SOURCE_PRIORITY.override,
+    )
+  }
+
+  // AD-12: surface every user who reaches the project via a group attached
+  // to it. MAX-aggregate across group memberships gives the user's best
+  // group-level grant; the per-group breakdown is a Pass C concern.
+  const groupRows = await env.AQUILLA_DB.prepare(
+    `SELECT gm.user_id AS user_id,
+            u.username AS username,
+            MAX(gpg.role_level) AS role_level
+       FROM group_project_grants gpg
+       JOIN group_members gm ON gm.group_id = gpg.group_id
+       JOIN users u          ON u.id = gm.user_id
+      WHERE gpg.project_id = ?
+      GROUP BY gm.user_id, u.username`,
+  )
+    .bind(projectId)
+    .all<{ user_id: number; username: string; role_level: number | null }>()
+
+  for (const r of groupRows.results ?? []) {
+    if (r.role_level == null) continue
+    consider(
+      {
+        userId: r.user_id,
+        username: r.username,
+        roleLevel: r.role_level,
+        source: "group",
+      },
+      SOURCE_PRIORITY.group,
+    )
   }
 
   if (orgId != null) {
@@ -230,36 +295,45 @@ export async function listEffectiveProjectMembers(
       .all<{ user_id: number; username: string; role_level: number }>()
 
     for (const r of orgMembers.results ?? []) {
-      if (!directMap.has(r.user_id)) {
-        directMap.set(r.user_id, {
+      consider(
+        {
           userId: r.user_id,
           username: r.username,
           roleLevel: r.role_level,
           source: "org",
-        })
-      }
+        },
+        SOURCE_PRIORITY.org,
+      )
     }
   }
 
-  if (!directMap.has(createdBy)) {
-    const creator = await env.AQUILLA_DB.prepare(
-      "SELECT id, username FROM users WHERE id = ?",
-    )
-      .bind(createdBy)
-      .first<{ id: number; username: string }>()
-    if (creator) {
-      directMap.set(creator.id, {
-        userId: creator.id,
-        username: creator.username,
+  const creatorRow = await env.AQUILLA_DB.prepare(
+    "SELECT id, username FROM users WHERE id = ?",
+  )
+    .bind(createdBy)
+    .first<{ id: number; username: string }>()
+  if (creatorRow) {
+    consider(
+      {
+        userId: creatorRow.id,
+        username: creatorRow.username,
         roleLevel: 700,
         source: "creator",
-      })
-    }
+      },
+      SOURCE_PRIORITY.creator,
+    )
   }
 
-  return Array.from(directMap.values()).sort(
+  return Array.from(merged.values()).sort(
     (a, b) => b.roleLevel - a.roleLevel || a.username.localeCompare(b.username),
   )
+}
+
+const SOURCE_PRIORITY: Record<EffectiveMember["source"], number> = {
+  override: 4,
+  group: 3,
+  org: 2,
+  creator: 1,
 }
 
 export interface ProjectMembershipInOrg {

@@ -5,7 +5,20 @@ import type { FrontierSession } from "@/lib/frontier/types"
 import { setPlainText } from "@/lib/richtext/translated-xml"
 import type { ScoredPair } from "@/lib/search/dual-index"
 
-type SearchFn = (query: string, limit?: number, excludeId?: string) => ScoredPair[]
+/**
+ * Few-shot retrieval for the AI copilot. As of AD-13 (branching search) the
+ * canonical implementation hits the server-side endpoint; this signature is
+ * async so the ProjectWorkspace can wire it through `fetchBranchingSearch`.
+ *
+ * The result shape stays `ScoredPair` for now — internal consumers (history
+ * entries, ExamplePanel) read `coverageWeight` and source/target text only,
+ * and adapting at the call site keeps the rewire small.
+ */
+type SearchFn = (
+  query: string,
+  limit?: number,
+  excludeId?: string,
+) => Promise<ScoredPair[]>
 import type { CellData } from "./useCells"
 import { buildPrompt, buildBatchPrompt, complete, resolveProvider, DEFAULT_SYSTEM_PROMPT, type PassageExample } from "@/lib/completion/completion-service"
 import type { PassageHit } from "./useSearchIndex"
@@ -71,7 +84,16 @@ export function useCompletion(
     setCompleting((p) => new Map(p).set(cell.id, "searching"))
     // Exclude the cell itself — re-completing an already-translated cell would
     // otherwise show the model its own (source, target) pair and get an echo.
-    const found = search(cell.original, 5, cell.id)
+    //
+    // AD-13: `search` is now an async server fetch (branching-search route);
+    // it falls back to an empty result on network error so a transient
+    // outage degrades to a zero-shot completion rather than a hard failure.
+    let found: ScoredPair[] = []
+    try {
+      found = await search(cell.original, 5, cell.id)
+    } catch (err) {
+      console.warn("[useCompletion] few-shot retrieval failed:", err)
+    }
     setExamples((p) => new Map(p).set(cell.id, found))
     setCompleting((p) => new Map(p).set(cell.id, "generating"))
 

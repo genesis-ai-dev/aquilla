@@ -821,6 +821,61 @@ export function makeInMemoryD1(tables: Partial<Tables> = {}): InMemoryD1 {
       return stale
     }
 
+    // ── AD-13 branching-search corpus load ─────────────────────────────
+    // From apps/sync/src/lib/branching-search/corpus.ts. Reads source rows
+    // from `COALESCE(upstream, projectId)`; LEFT JOINs target rows from the
+    // calling project. Optional `validatedOnly` and `excludeCellId` clauses.
+    //
+    // Bind order: 0=projectId (target side, always), 1=upstream_or_null,
+    //             2=projectId (source-side fallback), 3=excludeCellId (only
+    //             when the exclude clause is present).
+    {
+      const corpusRe =
+        /^SELECT s\.cell_id AS cell_id, s\.value AS source_text, s\.event_id AS source_event_id, COALESCE\(t\.value, ''\) AS target_text, COALESCE\(t\.validated, 0\) AS target_validated FROM cells s LEFT JOIN cells t ON t\.project_id = \? AND t\.cell_id = s\.cell_id AND t\.side = 'target' WHERE s\.project_id = COALESCE\(\?, \?\) AND s\.side = 'source'( AND t\.validated = 1)?( AND s\.cell_id != \?)? ORDER BY s\.cell_id$/
+      const m = normalized.match(corpusRe)
+      if (m) {
+        const targetSideProjectId = args[0] as string
+        const upstreamOrNull = args[1] as string | null
+        const sourceFallbackProjectId = args[2] as string
+        const validatedOnly = m[1] !== undefined
+        const hasExcludeCell = m[2] !== undefined
+        const excludeCellId = hasExcludeCell ? (args[3] as string) : null
+
+        const sourceProjectId = upstreamOrNull ?? sourceFallbackProjectId
+        type CorpusRow = {
+          cell_id: string
+          source_text: string
+          source_event_id: string
+          target_text: string
+          target_validated: number
+        }
+        const rows: CorpusRow[] = []
+        for (const s of db.cells) {
+          if (s.project_id !== sourceProjectId) continue
+          if (s.side !== "source") continue
+          if (excludeCellId && s.cell_id === excludeCellId) continue
+          const t = db.cells.find(
+            (c) =>
+              c.project_id === targetSideProjectId &&
+              c.cell_id === s.cell_id &&
+              c.side === "target",
+          )
+          if (validatedOnly && (!t || t.validated !== 1)) continue
+          rows.push({
+            cell_id: s.cell_id,
+            source_text: s.value,
+            source_event_id: s.event_id,
+            target_text: t?.value ?? "",
+            target_validated: t?.validated ?? 0,
+          })
+        }
+        rows.sort((a, b) =>
+          a.cell_id < b.cell_id ? -1 : a.cell_id > b.cell_id ? 1 : 0,
+        )
+        return rows
+      }
+    }
+
     // ── UPDATE cells SET validated = (...) ─────────────────────────────
     // From validate/unvalidate: re-evaluate validated against the current
     // chain head (cells.event_id).

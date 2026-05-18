@@ -10,6 +10,8 @@ import { useCells } from "@/hooks/useCells"
 import { useStaleSourceCells } from "@/hooks/useStaleSourceCells"
 import { useSearchIndex } from "@/hooks/useSearchIndex"
 import { useCompletion } from "@/hooks/useCompletion"
+import { fetchBranchingSearch } from "@/lib/sync/branching-search-read"
+import type { ScoredPair } from "@/lib/search/dual-index"
 import { useHealth } from "@/hooks/useHealth"
 import { useRules } from "@/hooks/useRules"
 import { updateProject, patchProject, getProject } from "@/lib/store/project-index"
@@ -413,6 +415,54 @@ export function ProjectWorkspace() {
   }, [fileCells])
 
   const { search, searchPassages } = useSearchIndex(project?.files || [], allProjectCells)
+
+  // AD-13 branching-search adapter — single-cell completion's few-shot
+  // retrieval. Replaces the in-memory dual-index call with a server fetch
+  // so the AI copilot uses the same retrieval primitive every other AD-13
+  // consumer will (AD-14 decay endorsement included). The batch path still
+  // uses `searchPassages` (passage-grouped); rewiring that is a separate
+  // pass once AD-13 grows a passage-mode return shape.
+  //
+  // Falls back to the in-memory `search()` if the server fetch fails for
+  // any reason (offline, JWT issue, etc.) — losing the retrieval makes the
+  // copilot zero-shot, which is a worse generation but still better than
+  // failing the whole completion.
+  const branchingSearch = useCallback(
+    async (
+      query: string,
+      limit?: number,
+      excludeId?: string,
+    ): Promise<ScoredPair[]> => {
+      const pid = project?.id
+      const fid = activeFileId
+      if (!pid || !fid) return search(query, limit, excludeId)
+      const jwt = await getTokenForFile(fid)
+      if (!jwt) return search(query, limit, excludeId)
+      try {
+        const res = await fetchBranchingSearch({
+          projectId: pid,
+          query,
+          jwt,
+          topK: limit,
+          excludeCellId: excludeId,
+        })
+        return res.results.map((r) => ({
+          cellId: r.cellId,
+          fileId: "",
+          source: r.sourceText,
+          target: r.targetText,
+          score: 1,
+          matchedTokens: res.provenance[r.cellId] ?? [],
+          coverageWeight: r.queryCoverage,
+        }))
+      } catch (err) {
+        console.warn("[ProjectWorkspace] branching-search fetch failed, falling back to local index:", err)
+        return search(query, limit, excludeId)
+      }
+    },
+    [project?.id, activeFileId, getTokenForFile, search],
+  )
+
   const commitCompletedCell = useCallback(async (cell: CellData, text: string, author: string) => {
     if (!project?.id) return
     await emitTargetCellCommit({
@@ -430,7 +480,7 @@ export function ProjectWorkspace() {
     revalidateCells()
   }, [project?.id, getTokenForFile, refreshOutboxPending, revalidateAuditStats, revalidateCells])
   const { completeSingle, completeBatch, isConfigured, isAvailable: isCompletionAvailable, completing, examples, errors } = useCompletion(
-    doc, project?.completionSettings, project?.sourceLanguage || "", project?.targetLanguage || "", search, searchPassages, frontierSession, commitCompletedCell
+    doc, project?.completionSettings, project?.sourceLanguage || "", project?.targetLanguage || "", branchingSearch, searchPassages, frontierSession, commitCompletedCell
   )
 
   const findBacktranslationExamples = useCallback((target: CellData) => {

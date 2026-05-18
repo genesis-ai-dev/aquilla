@@ -69,6 +69,32 @@ export interface OrgMemberRow {
   last_active_at: string | null
 }
 
+/** AD-12 groups (migration 0007). */
+export interface GroupRow {
+  id: number
+  org_id: number
+  name: string
+  description: string | null
+  created_by: number
+  created_at: string
+  updated_at: string
+}
+
+export interface GroupMemberRow {
+  group_id: number
+  user_id: number
+  added_by: number | null
+  added_at: string
+}
+
+export interface GroupProjectGrantRow {
+  group_id: number
+  project_id: string
+  role_level: number
+  granted_by: number | null
+  granted_at: string
+}
+
 /** Project-settings row (Phase 1C migration 0005). */
 export interface ProjectSettingsRow {
   project_id: string
@@ -119,6 +145,10 @@ export interface FakeTables {
   events: EventRow[]
   /** Phase 1A's AD-9 cells projection. Phase 1C reads it for source snapshots. */
   cells: CellProjectionRow[]
+  /** AD-12: org-scoped permission bundles (migration 0007). */
+  groups: GroupRow[]
+  group_members: GroupMemberRow[]
+  group_project_grants: GroupProjectGrantRow[]
 }
 
 export type FakeD1 = D1Database & {
@@ -141,6 +171,9 @@ export function makeFakeD1(initial: Partial<FakeTables> = {}): FakeD1 {
     project_settings: initial.project_settings ?? [],
     events: initial.events ?? [],
     cells: initial.cells ?? [],
+    groups: initial.groups ?? [],
+    group_members: initial.group_members ?? [],
+    group_project_grants: initial.group_project_grants ?? [],
   }
   const issued: Array<{ sql: string; args: unknown[] }> = []
 
@@ -214,6 +247,72 @@ export function makeFakeD1(initial: Partial<FakeTables> = {}): FakeD1 {
         first: m ? { role_level: m.role_level } : null,
         results: m ? [{ role_level: m.role_level }] : [],
       }
+    }
+
+    // ─── SELECT MAX(role_level) FROM group_project_grants JOIN group_members
+    // AD-12 max-wins resolver query. Returns the highest role_level for any
+    // group the user belongs to that is attached to this project. Aggregate
+    // queries always return a row in SQLite — when no rows match, role_level
+    // is NULL; mirror that.
+    if (
+      n.startsWith(
+        "SELECT MAX(gpg.role_level) AS role_level FROM group_project_grants gpg JOIN group_members gm ON gm.group_id = gpg.group_id WHERE gpg.project_id = ? AND gm.user_id = ?",
+      )
+    ) {
+      const projectId = args[0] as string
+      const userId = args[1] as number
+      const grants = tables.group_project_grants.filter(
+        (g) => g.project_id === projectId,
+      )
+      let maxLevel: number | null = null
+      for (const grant of grants) {
+        const isMember = tables.group_members.some(
+          (gm) => gm.group_id === grant.group_id && gm.user_id === userId,
+        )
+        if (isMember && (maxLevel == null || grant.role_level > maxLevel)) {
+          maxLevel = grant.role_level
+        }
+      }
+      const row = { role_level: maxLevel }
+      return { first: row, results: [row] }
+    }
+
+    // ─── SELECT … FROM group_project_grants JOIN group_members JOIN users …
+    // GROUP BY user (effective-members enumeration for a project). Returns
+    // one row per user reached via any group attached to this project, with
+    // their MAX group role_level.
+    if (
+      n.startsWith(
+        "SELECT gm.user_id AS user_id, u.username AS username, MAX(gpg.role_level) AS role_level FROM group_project_grants gpg JOIN group_members gm ON gm.group_id = gpg.group_id JOIN users u ON u.id = gm.user_id WHERE gpg.project_id = ?",
+      )
+    ) {
+      const projectId = args[0] as string
+      const perUserMax = new Map<number, { username: string; level: number }>()
+      const grants = tables.group_project_grants.filter(
+        (g) => g.project_id === projectId,
+      )
+      for (const grant of grants) {
+        const members = tables.group_members.filter(
+          (gm) => gm.group_id === grant.group_id,
+        )
+        for (const gm of members) {
+          const u = tables.users.find((x) => x.id === gm.user_id)
+          if (!u) continue
+          const prev = perUserMax.get(gm.user_id)
+          if (!prev || grant.role_level > prev.level) {
+            perUserMax.set(gm.user_id, {
+              username: u.username,
+              level: grant.role_level,
+            })
+          }
+        }
+      }
+      const results = Array.from(perUserMax.entries()).map(([userId, v]) => ({
+        user_id: userId,
+        username: v.username,
+        role_level: v.level,
+      }))
+      return { first: results[0] ?? null, results }
     }
 
     // ─── SELECT project_invites ──────────────────────────────────────

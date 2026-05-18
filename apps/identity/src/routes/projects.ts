@@ -188,13 +188,31 @@ projects.post(
 projects.get("/", authMiddleware, async (c) => {
   const user = c.get("user")
 
+  // AD-12 max-wins across direct + group + org + creator. Each path is
+  // computed in the same query; role_level = MAX(coalesced levels). On a
+  // tie, attribution credit goes in declaration order (override > group >
+  // org > creator) to match the resolver in project-permissions.ts.
   const rows = await c.env.AQUILLA_DB.prepare(
     `SELECT p.id, p.name,
-            COALESCE(pm.role_level, om.role_level, 700) AS role_level,
+            MAX(
+              COALESCE(pm.role_level, 0),
+              COALESCE(gg.max_grant,  0),
+              COALESCE(om.role_level, 0),
+              CASE WHEN p.created_by = ? THEN 700 ELSE 0 END
+            ) AS role_level,
             CASE
-              WHEN pm.user_id IS NOT NULL THEN 'override'
-              WHEN p.created_by = ? THEN 'creator'
-              WHEN om.user_id IS NOT NULL THEN 'org'
+              WHEN pm.role_level IS NOT NULL
+                AND pm.role_level >= COALESCE(gg.max_grant, 0)
+                AND pm.role_level >= COALESCE(om.role_level, 0)
+                AND pm.role_level >= (CASE WHEN p.created_by = ? THEN 700 ELSE 0 END)
+              THEN 'override'
+              WHEN gg.max_grant IS NOT NULL
+                AND gg.max_grant >= COALESCE(om.role_level, 0)
+                AND gg.max_grant >= (CASE WHEN p.created_by = ? THEN 700 ELSE 0 END)
+              THEN 'group'
+              WHEN om.role_level IS NOT NULL
+                AND om.role_level >= (CASE WHEN p.created_by = ? THEN 700 ELSE 0 END)
+              THEN 'org'
               ELSE 'creator'
             END AS role_source
        FROM projects p
@@ -202,20 +220,34 @@ projects.get("/", authMiddleware, async (c) => {
          ON pm.project_id = p.id AND pm.user_id = ?
        LEFT JOIN org_members om
          ON om.org_id = p.org_id AND om.user_id = ?
+       LEFT JOIN (
+         SELECT gpg.project_id, MAX(gpg.role_level) AS max_grant
+           FROM group_project_grants gpg
+           JOIN group_members gm
+             ON gm.group_id = gpg.group_id
+          WHERE gm.user_id = ?
+          GROUP BY gpg.project_id
+       ) gg
+         ON gg.project_id = p.id
       WHERE p.archived_at IS NULL
         AND (
           p.created_by = ?
           OR pm.user_id = ?
+          OR gg.max_grant IS NOT NULL
           OR (p.org_id IS NOT NULL AND om.user_id = ?)
         )
       ORDER BY p.name COLLATE NOCASE`,
   )
-    .bind(user.id, user.id, user.id, user.id, user.id, user.id)
+    .bind(
+      user.id, user.id, user.id, user.id,  // 4 CASE-when-creator
+      user.id, user.id, user.id,           // pm.user_id, om.user_id, gm.user_id
+      user.id, user.id, user.id,           // WHERE: created_by, pm, om
+    )
     .all<{
       id: string
       name: string
       role_level: number
-      role_source: "creator" | "override" | "org"
+      role_source: "creator" | "override" | "org" | "group"
     }>()
 
   const projectIds = (rows.results ?? []).map((r) => r.id)

@@ -1,15 +1,24 @@
-// Project-permission helpers — the canonical role ladder and a three-tier
-// project-role resolver. Mirrors frontier-server's
-// `cloudflare/src/services/project-permissions.ts` minus the GitLab fallback
-// tier: codex-web has no GitLab integration, so projects without an
-// override/creator/org row simply return null.
+// Project-permission helpers — the canonical role ladder and an AD-12
+// max-wins resolver across all four grant paths:
+//
+//   1. Direct `project_members` row (`override`).
+//   2. Group attachments: `group_project_grants` JOIN `group_members`
+//      (`group`). Added in migration 0007 per spec §"Group project grant".
+//   3. Org-wide grant: `org_members` when `project.org_id IS NOT NULL`
+//      (`org`).
+//   4. Creator fallback: `projects.created_by = user.id` → owner (`creator`).
+//
+// **Effective role = max(role_level) over every path that grants something.**
+// Per spec 02-foundations.md AD-12, adding an explicit override at a lower
+// level than the user's group/org grant does NOT demote — the higher grant
+// wins. Demotion requires removing every additive grant path.
 //
 // Mirrored on the client at `src/lib/frontier/roles.ts` (ROLE.* and
-// ROLE_NAMES). Roles.test.ts will fail if these drift apart — that's the
-// early-warning signal that a coordinated update is needed.
+// ROLE_NAMES). Tests will fail if these drift apart — early-warning signal
+// that a coordinated update is needed.
 
 import type { Env } from "../types"
-import type { AuthUser } from "../types"
+import type { AuthUser, RoleResolution } from "../types"
 
 export const ROLE_NAMES: Record<number, string> = {
   100: "viewer",
@@ -36,18 +45,11 @@ export function isLinkRoleLevel(n: number): n is LinkRoleLevel {
   return (LINK_ROLE_ALLOWED as readonly number[]).includes(n)
 }
 
-export interface ResolvedRole {
-  level: number
-  name: string
-  source: "override" | "creator" | "org"
-}
+export type ResolvedRole = RoleResolution
 
 /**
- * Resolve a user's role on a codex project. Three-tier:
- *   1. D1 project_members override wins when present (source: "override").
- *   2. Else: projects.created_by == user.id implies owner (source: "creator").
- *   3. Else: org_members row for projects.org_id grants role on every project
- *      in that org (source: "org").
+ * Resolve a user's effective role on a project — max-wins across direct,
+ * group, org, and creator paths (AD-12).
  *
  * Archived projects return null (as if they didn't exist) so normal
  * /sync-token traffic 403s cleanly. Use `resolveProjectRoleIncludingArchived`
@@ -74,6 +76,11 @@ export async function resolveProjectRoleIncludingArchived(
   return resolveProjectRoleInternal(env, user, projectId, { includeArchived: true })
 }
 
+interface PathContribution {
+  source: ResolvedRole["source"]
+  level: number
+}
+
 async function resolveProjectRoleInternal(
   env: Env,
   user: AuthUser,
@@ -94,43 +101,61 @@ async function resolveProjectRoleInternal(
   if (!project) return null
   if (!opts.includeArchived && project.archived_at) return null
 
-  // Tier 1: explicit override.
-  const override = await env.AQUILLA_DB.prepare(
-    "SELECT role_level FROM project_members WHERE project_id = ? AND user_id = ?",
-  )
-    .bind(projectId, user.id)
-    .first<{ role_level: number }>()
-
-  if (override) {
-    return {
-      level: override.role_level,
-      name: ROLE_NAMES[override.role_level] ?? "unknown",
-      source: "override",
-    }
-  }
-
-  // Tier 2: implicit owner via created_by.
-  if (project.created_by === user.id) {
-    return { level: 700, name: "owner", source: "creator" }
-  }
-
-  // Tier 3: org membership grants role on every project in that org.
-  if (project.org_id != null) {
-    const orgRow = await env.AQUILLA_DB.prepare(
-      "SELECT role_level FROM org_members WHERE org_id = ? AND user_id = ?",
+  // All four path queries run in parallel — they're independent reads.
+  const [override, group, org] = await Promise.all([
+    env.AQUILLA_DB.prepare(
+      `SELECT role_level FROM project_members
+       WHERE project_id = ? AND user_id = ?`,
     )
-      .bind(project.org_id, user.id)
-      .first<{ role_level: number }>()
-    if (orgRow) {
-      return {
-        level: orgRow.role_level,
-        name: ROLE_NAMES[orgRow.role_level] ?? "unknown",
-        source: "org",
-      }
-    }
-  }
+      .bind(projectId, user.id)
+      .first<{ role_level: number }>(),
+    env.AQUILLA_DB.prepare(
+      `SELECT MAX(gpg.role_level) AS role_level
+       FROM group_project_grants gpg
+       JOIN group_members gm
+         ON gm.group_id = gpg.group_id
+       WHERE gpg.project_id = ? AND gm.user_id = ?`,
+    )
+      .bind(projectId, user.id)
+      .first<{ role_level: number | null }>(),
+    project.org_id != null
+      ? env.AQUILLA_DB.prepare(
+          `SELECT role_level FROM org_members
+           WHERE org_id = ? AND user_id = ?`,
+        )
+          .bind(project.org_id, user.id)
+          .first<{ role_level: number }>()
+      : Promise.resolve(null),
+  ])
 
-  return null
+  const contributions: PathContribution[] = []
+  if (override) contributions.push({ source: "override", level: override.role_level })
+  if (group?.role_level != null)
+    contributions.push({ source: "group", level: group.role_level })
+  if (org) contributions.push({ source: "org", level: org.role_level })
+  if (project.created_by === user.id)
+    contributions.push({ source: "creator", level: 700 })
+
+  if (contributions.length === 0) return null
+
+  // Max-wins. On ties, declaration order (override > group > org > creator)
+  // wins attribution — see RoleResolution.source jsdoc.
+  const sourcePriority: Record<ResolvedRole["source"], number> = {
+    override: 4,
+    group: 3,
+    org: 2,
+    creator: 1,
+  }
+  contributions.sort((a, b) => {
+    if (a.level !== b.level) return b.level - a.level
+    return sourcePriority[b.source] - sourcePriority[a.source]
+  })
+  const winner = contributions[0]
+  return {
+    level: winner.level,
+    name: ROLE_NAMES[winner.level] ?? "unknown",
+    source: winner.source,
+  }
 }
 
 /**

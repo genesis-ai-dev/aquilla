@@ -82,6 +82,15 @@ export interface FileRow {
   word_count?: number
   last_edit_at?: number | null
   projected_from?: string | null
+  // Spec §"File" columns added in migration 0008.
+  role?: string | null
+  kind?: string | null
+  book_code?: string | null
+  source_file_id?: string | null
+  anchor_file_id?: string | null
+  r2_key?: string | null
+  import_format?: string | null
+  parser_version?: string | null
 }
 
 export type InMemoryD1 = D1Database & {
@@ -620,7 +629,62 @@ export function makeInMemoryD1(tables: Partial<Tables> = {}): InMemoryD1 {
       return []
     }
 
-    // ── INSERT files (UPSERT) ───────────────────────────────────────────
+    // ── INSERT files (UPSERT from file.create handler) ───────────────────
+    // Spec §"File" added 8 spec metadata columns after `projected_from`
+    // (`role, kind, book_code, source_file_id, anchor_file_id, r2_key,
+    // import_format, parser_version`). The pre-spec shape is kept matching
+    // too (older handlers / tests may still emit it) — branched on whether
+    // 8 extra `?` placeholders trail the timestamp expression.
+    if (
+      /^INSERT INTO files \([^)]*\) VALUES \(\?, \?, \?, \?, \?, \?, 0, 0, 0, NULL, \?, unixepoch\('now'\) \* 1000, \?, \?, \?, \?, \?, \?, \?, \?\)/.test(
+        normalized,
+      )
+    ) {
+      const row: FileRow = {
+        id: args[0] as string,
+        project_id: args[1] as string,
+        name: args[2] as string,
+        file_type: args[3] as string,
+        source_language: args[4] as string | null,
+        target_language: args[5] as string | null,
+        cell_count: 0,
+        approved_count: 0,
+        word_count: 0,
+        last_edit_at: null,
+        projected_from: args[6] as string,
+        role: args[7] as string | null,
+        kind: args[8] as string | null,
+        book_code: args[9] as string | null,
+        source_file_id: args[10] as string | null,
+        anchor_file_id: args[11] as string | null,
+        r2_key: args[12] as string | null,
+        import_format: args[13] as string | null,
+        parser_version: args[14] as string | null,
+      }
+      const idx = db.files.findIndex((f) => f.id === row.id)
+      if (idx === -1) {
+        db.files.push(row)
+      } else {
+        db.files[idx] = {
+          ...db.files[idx],
+          name: row.name,
+          file_type: row.file_type,
+          source_language: row.source_language,
+          target_language: row.target_language,
+          role: row.role,
+          kind: row.kind,
+          book_code: row.book_code,
+          source_file_id: row.source_file_id,
+          anchor_file_id: row.anchor_file_id,
+          r2_key: row.r2_key,
+          import_format: row.import_format,
+          parser_version: row.parser_version,
+        }
+      }
+      return []
+    }
+
+    // ── INSERT files (UPSERT — pre-spec shape kept for older emitters) ──
     if (
       /^INSERT INTO files \([^)]*\) VALUES \(\?, \?, \?, \?, \?, \?, 0, 0, 0, NULL, \?, unixepoch\('now'\) \* 1000\)/.test(
         normalized,

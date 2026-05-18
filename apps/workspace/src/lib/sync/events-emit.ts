@@ -253,7 +253,18 @@ export interface FileCreateInput {
   projectId: string
   fileId: string
   name: string
-  fileType: string
+  /** Legacy alias for `kind`. Existing callers pass this; new callers should set role + kind. */
+  fileType?: string
+  /** Spec §"File": 'source' | 'target' | 'dictionary' | 'translationNotes'. */
+  role?: string
+  /** Spec §"File": 'codex' | 'usfm' | 'docx' | ... */
+  kind?: string
+  bookCode?: string
+  sourceFileId?: string
+  anchorFileId?: string
+  r2Key?: string
+  importFormat?: string
+  parserVersion?: string
   sourceLanguage?: string
   targetLanguage?: string
   author: string
@@ -263,6 +274,11 @@ export interface FileCreateInput {
 /**
  * Emit a `file.create` event. Project-level event — not part of any cell
  * chain (`parentId = null`).
+ *
+ * Spec §"File" added role/kind/book_code/source_file_id/anchor_file_id/
+ * r2_key/import_format/parser_version to the payload. Existing callers
+ * pass `fileType` for legacy compatibility; the server keeps `files.file_type`
+ * in sync from `fileType ?? kind ?? role ?? 'codex'`.
  */
 export async function emitFileCreate(input: FileCreateInput): Promise<string> {
   const { eventId } = await enqueueEvent({
@@ -273,7 +289,15 @@ export async function emitFileCreate(input: FileCreateInput): Promise<string> {
     author: input.author,
     payload: {
       name: input.name,
-      fileType: input.fileType,
+      ...(input.fileType !== undefined ? { fileType: input.fileType } : {}),
+      ...(input.role !== undefined ? { role: input.role } : {}),
+      ...(input.kind !== undefined ? { kind: input.kind } : {}),
+      ...(input.bookCode !== undefined ? { bookCode: input.bookCode } : {}),
+      ...(input.sourceFileId !== undefined ? { sourceFileId: input.sourceFileId } : {}),
+      ...(input.anchorFileId !== undefined ? { anchorFileId: input.anchorFileId } : {}),
+      ...(input.r2Key !== undefined ? { r2Key: input.r2Key } : {}),
+      ...(input.importFormat !== undefined ? { importFormat: input.importFormat } : {}),
+      ...(input.parserVersion !== undefined ? { parserVersion: input.parserVersion } : {}),
       ...(input.sourceLanguage !== undefined ? { sourceLanguage: input.sourceLanguage } : {}),
       ...(input.targetLanguage !== undefined ? { targetLanguage: input.targetLanguage } : {}),
     },

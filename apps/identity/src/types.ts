@@ -104,10 +104,19 @@ export interface SyncTokenClaims {
   exp: number
 }
 
+/**
+ * Resolved project-role with attribution. Per AD-12 (max-wins resolution
+ * across direct + group + org + creator paths), `source` is the path that
+ * produced the winning role; ties resolve in declaration order
+ * (`override` > `group` > `org` > `creator`) so an explicit grant gets
+ * attribution credit when it ties with an inherited one. UIs that need to
+ * show every contributing path should call the resolver's `breakdown`
+ * helper instead of reading `source` alone.
+ */
 export interface RoleResolution {
   level: number
   name: string
-  source: "override" | "creator" | "org"
+  source: "override" | "group" | "org" | "creator"
 }
 
 export interface SyncTokenResponse {

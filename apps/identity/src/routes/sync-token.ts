@@ -9,12 +9,12 @@
 //   { userId, username, projectId, fileId, role, aud: "sync", iat, exp }
 // Signed HS256 with SYNC_SECRET_KEY (distinct from SECRET_KEY).
 //
-// Role resolution priority:
-//   1. project_members override (D1).
-//   2. Implicit creator: row in `projects` where `created_by = me` => OWNER.
-//   3. Auto-register: if projectId is unknown AND a bootstrap payload was
-//      sent, insert a `projects` row owned by the caller and grant OWNER.
-//   4. Fall through => 403.
+// Role resolution: delegates to project-permissions.resolveProjectRole,
+// which implements AD-12 max-wins across direct + group + org + creator
+// paths. Auto-register (when projectId is unknown AND a bootstrap payload
+// was sent) stays here because it's a project-creation path, not a
+// resolution path; the inserted creator grant resolves to OWNER on the
+// next refresh.
 
 import { Hono } from "hono"
 import { zValidator } from "@hono/zod-validator"
@@ -24,11 +24,11 @@ import { authMiddleware } from "../middleware/auth"
 import type { AuthHonoEnv } from "../middleware/auth"
 import {
   ROLE,
-  type ProjectRow,
   type RoleResolution,
   type SyncTokenClaims,
   type SyncTokenResponse,
 } from "../types"
+import { resolveProjectRole } from "../services/project-permissions"
 
 const syncToken = new Hono<AuthHonoEnv>()
 
@@ -67,12 +67,13 @@ syncToken.post(
     const user = c.get("user")
     const { projectId, fileId, projectName } = c.req.valid("json")
 
+    // Cheap existence + archived check first so we can short-circuit on
+    // archived and branch to auto-register when the project is unknown.
     const project = await c.env.AQUILLA_DB.prepare(
-      `SELECT id, name, org_id, created_by, archived_at
-       FROM projects WHERE id = ?`,
+      `SELECT id, archived_at FROM projects WHERE id = ?`,
     )
       .bind(projectId)
-      .first<ProjectRow>()
+      .first<{ id: string; archived_at: string | null }>()
 
     let resolved: RoleResolution | null = null
 
@@ -80,30 +81,8 @@ syncToken.post(
       if (project.archived_at) {
         return c.json({ error: "Project is archived" }, 403)
       }
-
-      // 1. project_members override.
-      const member = await c.env.AQUILLA_DB.prepare(
-        `SELECT role_level FROM project_members
-         WHERE project_id = ? AND user_id = ?`,
-      )
-        .bind(projectId, user.id)
-        .first<{ role_level: number }>()
-      if (member) {
-        resolved = {
-          level: member.role_level,
-          name: roleNameFor(member.role_level),
-          source: "override",
-        }
-      }
-
-      // 2. Implicit creator.
-      if (!resolved && project.created_by === user.id) {
-        resolved = {
-          level: ROLE.OWNER,
-          name: roleNameFor(ROLE.OWNER),
-          source: "creator",
-        }
-      }
+      // AD-12 max-wins across direct + group + org + creator.
+      resolved = await resolveProjectRole(c.env, user, projectId)
     } else if (projectName) {
       // 3. Auto-register an unknown projectId. The bootstrap payload (project
       //    name) is supplied by the client; the caller becomes the owner.

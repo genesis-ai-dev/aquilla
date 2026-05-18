@@ -93,11 +93,34 @@ export interface EventPayloads {
   }
 
   // ── File lifecycle ─────────────────────────────────────────────────────
+  //
+  // Spec §"File" (03-data-model.md) reshapes the file.create payload to
+  // carry role/kind/book_code/source_file_id/anchor_file_id/r2_key/
+  // import_format/parser_version. The legacy `fileType` field is kept so
+  // older clients continue to author valid events; the projection writes
+  // both `role` (preferred) and `file_type` (legacy column) to the
+  // `files` row.
   'file.create': {
     /** Display name for the file in the project sidebar. */
     name: string
-    /** "codex" | "vtt" | "srt" | etc. — matches `files.file_type`. */
-    fileType: string
+    /** Legacy: "codex" | "vtt" | "srt" | etc. — pre-spec column on files. */
+    fileType?: string
+    /** Spec semantic side: 'source' | 'target' | 'dictionary' | 'translationNotes'. */
+    role?: string
+    /** Spec file shape: 'codex' | 'usfm' | 'docx' | 'pptx' | 'vtt' | 'srt' | 'txt' | 'md'. */
+    kind?: string
+    /** Scripture book code ('GEN', 'EXO', ...). Null for non-scripture. */
+    bookCode?: string
+    /** File-level pairing — the upstream source file this target file pairs with. */
+    sourceFileId?: string
+    /** Ordering anchor for the file's position in the project file browser. */
+    anchorFileId?: string
+    /** R2 key for the original imported blob (AD-4). Null for non-imported files. */
+    r2Key?: string
+    /** Format the original blob was parsed as ('usfm', 'docx', ...). */
+    importFormat?: string
+    /** Parser revision that produced this file's cells; enables re-parse. */
+    parserVersion?: string
     /** ISO codes; null/undefined when unknown at import time. */
     sourceLanguage?: string
     targetLanguage?: string

@@ -258,6 +258,53 @@ describe('buildEventProjectionStmts — file.create', () => {
     expect(recorded[0].args[0]).toBe('file-a')
     expect(recorded[0].args[2]).toBe('Genesis')
   })
+
+  it('persists the spec §"File" payload fields (role/kind/r2_key/etc.)', () => {
+    const { db, recorded } = makeD1Stub()
+    const stmts: D1PreparedStatement[] = []
+    buildEventProjectionStmts(
+      db,
+      makeEvent(
+        'file.create',
+        {
+          name: 'Genesis',
+          role: 'source',
+          kind: 'usfm',
+          bookCode: 'GEN',
+          r2Key: 'projects/p/files/f/original.usfm',
+          importFormat: 'usfm',
+          parserVersion: 'usfm-2026.04',
+          sourceLanguage: 'en',
+        },
+        { cellId: null },
+      ),
+      stmts,
+    )
+    // Argument order matches the new INSERT in event-projection.ts:
+    //   id, project_id, name, file_type, source_lang, target_lang,
+    //   projected_from, role, kind, book_code, source_file_id,
+    //   anchor_file_id, r2_key, import_format, parser_version
+    const args = recorded[0].args
+    expect(args[3]).toBe('usfm')                                     // legacy file_type ← kind
+    expect(args[7]).toBe('source')                                   // role
+    expect(args[8]).toBe('usfm')                                     // kind
+    expect(args[9]).toBe('GEN')                                      // book_code
+    expect(args[12]).toBe('projects/p/files/f/original.usfm')        // r2_key
+    expect(args[13]).toBe('usfm')                                    // import_format
+    expect(args[14]).toBe('usfm-2026.04')                            // parser_version
+  })
+
+  it('falls back legacy file_type to kind/role/codex when fileType is omitted', () => {
+    const { db, recorded } = makeD1Stub()
+    const stmts: D1PreparedStatement[] = []
+    buildEventProjectionStmts(
+      db,
+      makeEvent('file.create', { name: 'Notes', role: 'translationNotes' }, { cellId: null }),
+      stmts,
+    )
+    // file_type ← role since fileType + kind are absent
+    expect(recorded[0].args[3]).toBe('translationNotes')
+  })
 })
 
 describe('buildEventProjectionStmts — error paths', () => {

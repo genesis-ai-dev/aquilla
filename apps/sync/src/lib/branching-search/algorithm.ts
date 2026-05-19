@@ -22,6 +22,13 @@ export interface CorpusCell {
   targetText: string
   /** Whether the cell is validated. Routes may filter on this before calling. */
   validated?: boolean
+  /** Source-side file id. Populated by `loadCorpus`; used by the passages
+   *  route for ±radius expansion. The ranking algorithm ignores it. */
+  fileId?: string
+  /** Anchor-chain pointer (predecessor cell in the file's anchor chain).
+   *  Populated by `loadCorpus`; used by the passages route to walk the
+   *  chain. Ranking algorithm ignores it. */
+  anchorCellId?: string | null
 }
 
 export interface BranchingSearchResult {

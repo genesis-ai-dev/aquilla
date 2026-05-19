@@ -40,6 +40,7 @@ import { handleCellHistoryReadRequest } from "./events/cell-history-read-route"
 import { handleSearchReadRequest } from "./events/search-route"
 import { handleStaleSourceRequest } from "./events/stale-source-route"
 import { handleBranchingSearchRequest } from "./events/branching-search-route"
+import { handleBranchingSearchPassagesRequest } from "./events/branching-search-passages-route"
 import { handleCorsPreflight, withCors } from "./cors"
 import { notifyFileDo } from "./archive-broadcast"
 import { parseRealtimeMessage } from "./events/realtime"
@@ -666,6 +667,10 @@ export default {
     if (staleSourceResponse) return withCors(staleSourceResponse, request)
     const searchResponse = await handleSearchReadRequest(request, env)
     if (searchResponse) return withCors(searchResponse, request)
+    // Passages route must come BEFORE the flat route — its path is a
+    // strict prefix of the flat route's, so chaining order matters.
+    const branchingPassagesResponse = await handleBranchingSearchPassagesRequest(request, env)
+    if (branchingPassagesResponse) return withCors(branchingPassagesResponse, request)
     const branchingSearchResponse = await handleBranchingSearchRequest(request, env)
     if (branchingSearchResponse) return withCors(branchingSearchResponse, request)
     const eventsWriteResponse = await handleEventsWriteRequest(request, env)

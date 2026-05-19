@@ -8,12 +8,20 @@ import { describe, it, expect } from "vitest"
 import { handleBranchingSearchRequest } from "../events/branching-search-route"
 import type { BranchingSearchResponse } from "../events/branching-search-route"
 import { makeInMemoryD1, type CellRow, type ProjectRow } from "./helpers/d1-fake"
+import { makeInMemoryKV } from "./helpers/kv-fake"
 import { makeTestToken } from "./helpers/auth"
 
 const SECRET = "branching-search-secret"
 
 function envWith(db: ReturnType<typeof makeInMemoryD1>) {
   return { AQUILLA_DB: db, SYNC_SECRET_KEY: SECRET }
+}
+
+function envWithCache(
+  db: ReturnType<typeof makeInMemoryD1>,
+  kv: ReturnType<typeof makeInMemoryKV>,
+) {
+  return { AQUILLA_DB: db, SYNC_SECRET_KEY: SECRET, BRANCHING_SEARCH_KV: kv }
 }
 
 function makeCell(
@@ -394,6 +402,110 @@ describe("GET /api/v1/projects/:projectId/branching-search", () => {
     const body = (await res.json()) as BranchingSearchResponse
     // Query-string topK=2 wins over project_settings topK=3.
     expect(body.results.length).toBe(2)
+  })
+
+  // ─── KV cache ───────────────────────────────────────────────────────
+
+  it("populates the cache on a miss and reads it on the next hit", async () => {
+    const db = makeInMemoryD1({
+      projects: [makeProject({ id: "p1" })],
+      cells: [
+        makeCell({ cell_id: "c1", side: "source", event_id: "e1", value: "the cat sat" }),
+      ],
+    })
+    const kv = makeInMemoryKV()
+    const env = envWithCache(db, kv)
+
+    const req1 = await authedRequest(
+      "https://w/api/v1/projects/p1/branching-search?q=the%20cat",
+    )
+    const res1 = (await handleBranchingSearchRequest(req1, env))!
+    expect(res1.status).toBe(200)
+    const body1 = (await res1.json()) as BranchingSearchResponse
+    expect(body1.results[0].cellId).toBe("c1")
+    expect(kv._puts().length).toBe(1)
+    expect(kv._puts()[0].key).toMatch(/^bs:v1:p1:e1:/)
+    expect(kv._puts()[0].ttl).toBe(60)
+
+    // Second identical request — KV.get returns the cached body, KV.put
+    // is not called again, and the response body matches.
+    const req2 = await authedRequest(
+      "https://w/api/v1/projects/p1/branching-search?q=the%20cat",
+    )
+    const res2 = (await handleBranchingSearchRequest(req2, env))!
+    expect(res2.status).toBe(200)
+    const body2 = (await res2.json()) as BranchingSearchResponse
+    expect(body2).toEqual(body1)
+    expect(kv._puts().length).toBe(1) // no new write
+    expect(kv._gets().length).toBe(2) // get called once per request
+  })
+
+  it("different queries miss the same cache key — separate entries", async () => {
+    const db = makeInMemoryD1({
+      projects: [makeProject({ id: "p1" })],
+      cells: [
+        makeCell({ cell_id: "c1", side: "source", event_id: "e1", value: "the cat sat" }),
+        makeCell({ cell_id: "c2", side: "source", event_id: "e2", value: "the dog ran" }),
+      ],
+    })
+    const kv = makeInMemoryKV()
+    const env = envWithCache(db, kv)
+
+    const req1 = await authedRequest(
+      "https://w/api/v1/projects/p1/branching-search?q=the%20cat",
+    )
+    await handleBranchingSearchRequest(req1, env)
+    const req2 = await authedRequest(
+      "https://w/api/v1/projects/p1/branching-search?q=the%20dog",
+    )
+    await handleBranchingSearchRequest(req2, env)
+    expect(kv._puts().length).toBe(2)
+    expect(kv._puts()[0].key).not.toBe(kv._puts()[1].key)
+  })
+
+  it("corpus advance invalidates the cache — new event_id → different key", async () => {
+    const db = makeInMemoryD1({
+      projects: [makeProject({ id: "p1" })],
+      cells: [
+        makeCell({ cell_id: "c1", side: "source", event_id: "e1", value: "the cat sat" }),
+      ],
+    })
+    const kv = makeInMemoryKV()
+    const env = envWithCache(db, kv)
+
+    const req1 = await authedRequest(
+      "https://w/api/v1/projects/p1/branching-search?q=the%20cat",
+    )
+    await handleBranchingSearchRequest(req1, env)
+    const firstKey = kv._puts()[0].key
+    expect(firstKey).toContain(":e1:")
+
+    // Advance the corpus event_id. A subsequent request builds a new key.
+    db._tables().cells[0].event_id = "e2"
+
+    const req2 = await authedRequest(
+      "https://w/api/v1/projects/p1/branching-search?q=the%20cat",
+    )
+    await handleBranchingSearchRequest(req2, env)
+    expect(kv._puts().length).toBe(2)
+    expect(kv._puts()[1].key).toContain(":e2:")
+    expect(kv._puts()[1].key).not.toBe(firstKey)
+  })
+
+  it("no KV binding → no caching, no errors", async () => {
+    const db = makeInMemoryD1({
+      projects: [makeProject({ id: "p1" })],
+      cells: [
+        makeCell({ cell_id: "c1", side: "source", event_id: "e1", value: "the cat sat" }),
+      ],
+    })
+    const req = await authedRequest(
+      "https://w/api/v1/projects/p1/branching-search?q=the%20cat",
+    )
+    const res = (await handleBranchingSearchRequest(req, envWith(db)))!
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as BranchingSearchResponse
+    expect(body.results[0].cellId).toBe("c1")
   })
 
   // ─── corpusEventMax ─────────────────────────────────────────────────

@@ -833,6 +833,23 @@ export function makeInMemoryD1(tables: Partial<Tables> = {}): InMemoryD1 {
       return stale
     }
 
+    // ── AD-13 cache: max source event_id for a project ─────────────────
+    // `SELECT MAX(event_id) AS max_id FROM cells WHERE project_id = ? AND side = 'source'`
+    if (
+      /^SELECT MAX\(event_id\) AS max_id FROM cells WHERE project_id = \? AND side = 'source'$/.test(
+        normalized,
+      )
+    ) {
+      const pid = args[0] as string
+      let max: string | null = null
+      for (const c of db.cells) {
+        if (c.project_id !== pid) continue
+        if (c.side !== "source") continue
+        if (max === null || c.event_id > max) max = c.event_id
+      }
+      return [{ max_id: max }]
+    }
+
     // ── AD-13 / AD-14 project_settings loader ──────────────────────────
     // `SELECT settings FROM project_settings WHERE project_id = ?`
     if (
@@ -855,7 +872,7 @@ export function makeInMemoryD1(tables: Partial<Tables> = {}): InMemoryD1 {
     //             when the exclude clause is present).
     {
       const corpusRe =
-        /^SELECT s\.cell_id AS cell_id, s\.value AS source_text, s\.event_id AS source_event_id, COALESCE\(t\.value, ''\) AS target_text, COALESCE\(t\.validated, 0\) AS target_validated FROM cells s LEFT JOIN cells t ON t\.project_id = \? AND t\.cell_id = s\.cell_id AND t\.side = 'target' WHERE s\.project_id = COALESCE\(\?, \?\) AND s\.side = 'source'( AND t\.validated = 1)?( AND s\.cell_id != \?)? ORDER BY s\.cell_id$/
+        /^SELECT s\.cell_id AS cell_id, s\.file_id AS file_id, s\.anchor_cell_id AS anchor_cell_id, s\.value AS source_text, s\.event_id AS source_event_id, COALESCE\(t\.value, ''\) AS target_text, COALESCE\(t\.validated, 0\) AS target_validated FROM cells s LEFT JOIN cells t ON t\.project_id = \? AND t\.cell_id = s\.cell_id AND t\.side = 'target' WHERE s\.project_id = COALESCE\(\?, \?\) AND s\.side = 'source'( AND t\.validated = 1)?( AND s\.cell_id != \?)? ORDER BY s\.cell_id$/
       const m = normalized.match(corpusRe)
       if (m) {
         const targetSideProjectId = args[0] as string
@@ -868,6 +885,8 @@ export function makeInMemoryD1(tables: Partial<Tables> = {}): InMemoryD1 {
         const sourceProjectId = upstreamOrNull ?? sourceFallbackProjectId
         type CorpusRow = {
           cell_id: string
+          file_id: string
+          anchor_cell_id: string | null
           source_text: string
           source_event_id: string
           target_text: string
@@ -887,6 +906,8 @@ export function makeInMemoryD1(tables: Partial<Tables> = {}): InMemoryD1 {
           if (validatedOnly && (!t || t.validated !== 1)) continue
           rows.push({
             cell_id: s.cell_id,
+            file_id: s.file_id,
+            anchor_cell_id: s.anchor_cell_id ?? null,
             source_text: s.value,
             source_event_id: s.event_id,
             target_text: t?.value ?? "",

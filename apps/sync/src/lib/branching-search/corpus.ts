@@ -82,9 +82,11 @@ export async function loadCorpus(
   // only projects have none, LEFT JOIN handles that with NULL → "").
   const parts: string[] = [
     "SELECT",
-    "  s.cell_id   AS cell_id,",
-    "  s.value     AS source_text,",
-    "  s.event_id  AS source_event_id,",
+    "  s.cell_id        AS cell_id,",
+    "  s.file_id        AS file_id,",
+    "  s.anchor_cell_id AS anchor_cell_id,",
+    "  s.value          AS source_text,",
+    "  s.event_id       AS source_event_id,",
     "  COALESCE(t.value, '')   AS target_text,",
     "  COALESCE(t.validated, 0) AS target_validated",
     "FROM cells s",
@@ -115,6 +117,8 @@ export async function loadCorpus(
     .bind(...binds)
     .all<{
       cell_id: string
+      file_id: string
+      anchor_cell_id: string | null
       source_text: string
       source_event_id: string
       target_text: string
@@ -126,6 +130,8 @@ export async function loadCorpus(
   for (const row of res.results ?? []) {
     cells.push({
       cellId: row.cell_id,
+      fileId: row.file_id,
+      anchorCellId: row.anchor_cell_id,
       sourceText: row.source_text,
       targetText: row.target_text,
       validated: row.target_validated === 1,

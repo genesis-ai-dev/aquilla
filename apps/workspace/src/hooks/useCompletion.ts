@@ -45,13 +45,28 @@ const FALLBACK_SETTINGS: CompletionSettings = {
 
 type CommitCompletedCell = (cell: CellData, text: string, author: string) => Promise<void>
 
+/**
+ * Passage-mode retrieval for the batch completion path. As of AD-13 the
+ * canonical implementation hits the server `/branching-search/passages`
+ * endpoint; signature is async so the ProjectWorkspace can inject a
+ * fetcher that maps server `Passage` to the existing `PassageHit` shape.
+ *
+ * Fallback to a local in-memory index is the consumer's responsibility
+ * (transient network failure shouldn't break batch translation outright).
+ */
+type SearchPassagesFn = (
+  query: string,
+  hits?: number,
+  radius?: number,
+) => Promise<PassageHit[]>
+
 export function useCompletion(
   doc: Y.Doc | null,
   settings: CompletionSettings | undefined,
   sourceLanguage: string,
   targetLanguage: string,
   search: SearchFn,
-  searchPassages: (query: string, hits?: number, radius?: number) => PassageHit[],
+  searchPassages: SearchPassagesFn,
   session: FrontierSession | null = null,
   commitCompletedCell?: CommitCompletedCell,
 ) {
@@ -197,9 +212,17 @@ export function useCompletion(
     for (const chunk of chunks) {
       // 1. Retrieve passage examples once for the whole sub-batch. Branching
       //    search is built for long queries — concatenating is the right call.
+      //    AD-13: this hits the server `/branching-search/passages` endpoint
+      //    via the injected fetcher. Failure falls back to no examples (zero-
+      //    shot) rather than failing the batch.
       for (const c of chunk) setCompleting((p) => new Map(p).set(c.id, "searching"))
       const concatenated = chunk.map((c) => c.original).join(" ")
-      const passages = searchPassages(concatenated, 3, 2)
+      let passages: PassageHit[] = []
+      try {
+        passages = await searchPassages(concatenated, 3, 2)
+      } catch (err) {
+        console.warn("[useCompletion] passage retrieval failed:", err)
+      }
       const flatExamples: ScoredPair[] = passages.flatMap((p) =>
         p.cells.filter((c) => c.hit).map((c) => ({
           cellId: c.cellId, fileId: p.fileId, source: c.source, target: c.target,

@@ -20,22 +20,34 @@
 //     project_settings provides per-project tuning; defaults apply when
 //     neither is set.
 //
-// Caching: not implemented in v1. Spec says results are cacheable by
-// `(project_id, query_hash, corpus_event_max)` — that requires a KV
-// binding we don't yet have. See `corpusEventMax` in the response — it's
-// the cache key when caching lands.
+// Caching: result responses are cached on the optional KV binding
+// `BRANCHING_SEARCH_KV` per spec — key includes `corpus_event_max` so an
+// upstream source edit naturally invalidates without explicit purge. The
+// cache is opt-in by binding presence; without the binding the route runs
+// the algorithm fresh on every request. See lib/branching-search/cache.ts
+// for provisioning instructions.
 
 import { verifyTokenForProject } from "../auth"
 import { branchingSearch } from "../lib/branching-search/algorithm"
-import { loadCorpus } from "../lib/branching-search/corpus"
+import { loadCorpus, resolveUpstreamProjectId } from "../lib/branching-search/corpus"
 import {
   applyBranchingSearchDefaults,
   loadBranchingSearchSettings,
 } from "../lib/branching-search/settings"
+import {
+  buildCacheKey,
+  CACHE_TTL_SECONDS,
+  hashQueryParams,
+  resolveCorpusEventMax,
+} from "../lib/branching-search/cache"
 
 export interface BranchingSearchEnv {
   AQUILLA_DB?: D1Database
   SYNC_SECRET_KEY?: string
+  /** Optional. When bound, GET responses are cached by
+   *  `(projectId, corpusEventMax, queryHash)` with a 60s TTL. Absence
+   *  disables the cache; behavior is otherwise identical. */
+  BRANCHING_SEARCH_KV?: KVNamespace
 }
 
 const PATH_RE = /^\/api\/v1\/projects\/([^/]+)\/branching-search$/
@@ -113,6 +125,36 @@ export async function handleBranchingSearchRequest(
   const validatedOnly = url.searchParams.get("validatedOnly") === "true"
   const excludeCellId = url.searchParams.get("excludeCellId") ?? undefined
 
+  // Cache lookup. Build the key from a cheap MAX(event_id) query — we
+  // can't use the corpus loader's corpusEventMax here because the corpus
+  // load is the expensive step we're trying to skip. Cache is opt-in by
+  // binding presence; on any failure we soft-fail through to the
+  // uncached path.
+  let cacheKey: string | null = null
+  if (env.BRANCHING_SEARCH_KV) {
+    try {
+      const upstream = await resolveUpstreamProjectId(env, projectId)
+      const sourceProjectId = upstream ?? projectId
+      const corpusEventMax = await resolveCorpusEventMax(env, sourceProjectId)
+      if (corpusEventMax) {
+        const queryHash = await hashQueryParams({
+          q,
+          topK: settings.topK,
+          validatedOnly,
+          excludeCellId: excludeCellId ?? null,
+        })
+        cacheKey = buildCacheKey(projectId, corpusEventMax, queryHash)
+        const cached = await env.BRANCHING_SEARCH_KV.get(cacheKey, "json")
+        if (cached) {
+          return Response.json(cached)
+        }
+      }
+    } catch {
+      // Cache lookup failure must not break retrieval. Fall through.
+      cacheKey = null
+    }
+  }
+
   let corpus
   try {
     corpus = await loadCorpus(env, {
@@ -137,5 +179,19 @@ export async function handleBranchingSearchRequest(
     corpusEventMax: corpus.corpusEventMax,
     corpusSize: corpus.cells.length,
   }
+
+  // Cache write. Synchronous because the route handler doesn't get an
+  // ExecutionContext; this adds ~5-10ms but is a small price for the
+  // simplicity. Failures don't surface — cache is best-effort.
+  if (cacheKey && env.BRANCHING_SEARCH_KV) {
+    try {
+      await env.BRANCHING_SEARCH_KV.put(cacheKey, JSON.stringify(body), {
+        expirationTtl: CACHE_TTL_SECONDS,
+      })
+    } catch {
+      // best-effort
+    }
+  }
+
   return Response.json(body)
 }

@@ -30,3 +30,16 @@ export type { FormRowProps } from "./form-row"
 export { Skeleton } from "./skeleton"
 
 export { cn } from "./cn"
+
+export {
+  ThemeProvider,
+  ThemeToggle,
+  useTheme,
+  applyStoredTheme,
+  THEME_STORAGE_KEY,
+} from "./theme-mode"
+export type { ThemeMode, ResolvedTheme } from "./theme-mode"
+
+export { AppHeader } from "./app-header"
+
+export { FloatingThemeToggle } from "./floating-theme-toggle"

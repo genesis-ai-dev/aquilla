@@ -5,6 +5,23 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Sign in — Aquilla</title>
     <meta name="description" content="Sign in to your Aquilla account." />
+    <!--
+      Pre-paint theme bootstrap. Keep in sync with packages/ui/src/theme-mode.tsx
+      (THEME_STORAGE_KEY = "codex-theme"). Runs synchronously before any
+      module loads so the dark class is on `<html>` for the first frame.
+      Every app on aquilla.app duplicates this script so localStorage stays
+      authoritative across all worker bundles.
+    -->
+    <script>
+      (function () {
+        try {
+          var stored = localStorage.getItem("codex-theme");
+          var prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+          var dark = stored === "dark" || ((stored === "system" || !stored) && prefersDark);
+          if (dark) document.documentElement.classList.add("dark");
+        } catch (e) {}
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

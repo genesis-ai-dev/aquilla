@@ -19,6 +19,7 @@ import {
   CardFooter,
   CardHeader,
   CardTitle,
+  FloatingThemeToggle,
   FormRow,
   Input,
 } from "@aquilla/ui"
@@ -58,6 +59,7 @@ export function RequestForm({
 
   return (
     <main className="flex min-h-[100vh] items-center justify-center px-4 py-12">
+      <FloatingThemeToggle />
       <div className="w-full max-w-sm">
         <Card>
           <CardHeader>

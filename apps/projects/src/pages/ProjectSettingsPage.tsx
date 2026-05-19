@@ -24,6 +24,7 @@ import {
 } from "@aquilla/auth-client"
 import {
   Alert,
+  AppHeader,
   Button,
   Card,
   CardContent,
@@ -97,16 +98,19 @@ export function ProjectSettingsPage() {
   const isOwner = project?.role.level === 700
 
   return (
-    <div className="mx-auto max-w-3xl px-6 py-8">
-      <div className="mb-4">
-        <Link to="/">
-          <Button variant="ghost" size="sm">
-            ← All projects
-          </Button>
-        </Link>
-      </div>
-
-      <h1 className="text-2xl font-semibold">Project settings</h1>
+    <div className="min-h-screen bg-background">
+      <AppHeader
+        title="Project settings"
+        titleHref="/projects/"
+        actions={
+          <Link to="/">
+            <Button variant="ghost" size="sm">
+              ← All projects
+            </Button>
+          </Link>
+        }
+      />
+      <div className="mx-auto max-w-3xl px-6 py-8">
 
       {loading && <p className="mt-4 text-sm text-muted-foreground">Loading…</p>}
       {error && (
@@ -179,6 +183,7 @@ export function ProjectSettingsPage() {
           )}
         </>
       )}
+      </div>
     </div>
   )
 }

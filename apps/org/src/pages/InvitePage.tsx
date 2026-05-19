@@ -26,6 +26,7 @@ import {
 } from "@aquilla/auth-client"
 import {
   Alert,
+  AppHeader,
   Button,
   Card,
   CardContent,
@@ -132,15 +133,19 @@ export function InvitePage() {
   }
 
   return (
-    <div className="mx-auto max-w-2xl px-6 py-8">
-      <div className="mb-4">
-        <Link to="/">
-          <Button variant="ghost" size="sm">
-            ← Organization
-          </Button>
-        </Link>
-      </div>
-
+    <div className="min-h-screen bg-background">
+      <AppHeader
+        title="Invite"
+        titleHref="/org/"
+        actions={
+          <Link to="/">
+            <Button variant="ghost" size="sm">
+              ← Organization
+            </Button>
+          </Link>
+        }
+      />
+      <div className="mx-auto max-w-2xl px-6 py-8">
       <h1 className="text-2xl font-semibold">Invite to a project</h1>
       <p className="mt-1 text-sm text-muted-foreground">
         Mint a share-link invite for one of your projects. Anyone with the
@@ -252,6 +257,7 @@ export function InvitePage() {
           </CardContent>
         </Card>
       )}
+      </div>
     </div>
   )
 }

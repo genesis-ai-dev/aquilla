@@ -30,6 +30,7 @@
 
 import routesJson from "../../../routes.json"
 import { assertEnvBindings, assertNotPreviewInProd } from "@aquilla/errors/env-assertion"
+import { THEME_BOOTSTRAP_INLINE_SCRIPT_SHA256 } from "@aquilla/errors/theme-bootstrap-csp"
 
 type Routes = Record<string, string>
 const routes = routesJson as Routes
@@ -91,7 +92,7 @@ interface Env {
 // /__routes, and 404 fallbacks).
 const BASELINE_CSP =
   "default-src 'self'; " +
-  "script-src 'self'; " +
+  `script-src 'self' ${THEME_BOOTSTRAP_INLINE_SCRIPT_SHA256}; ` +
   "style-src 'self' 'unsafe-inline'; " +
   "img-src 'self' data:; " +
   "connect-src 'self'; " +

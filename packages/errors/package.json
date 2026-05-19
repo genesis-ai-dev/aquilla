@@ -9,7 +9,8 @@
   "exports": {
     ".": "./src/index.ts",
     "./env-assertion": "./src/env-assertion.ts",
-    "./asset-fallback": "./src/asset-fallback.ts"
+    "./asset-fallback": "./src/asset-fallback.ts",
+    "./theme-bootstrap-csp": "./src/theme-bootstrap-csp.ts"
   },
   "scripts": {
     "test": "vitest run"

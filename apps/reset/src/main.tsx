@@ -1,6 +1,7 @@
 import React from "react"
 import { createRoot } from "react-dom/client"
 import { BrowserRouter, Routes, Route } from "react-router-dom"
+import { ThemeProvider } from "@aquilla/ui"
 import { RequestForm } from "./RequestForm"
 import { SubmitForm } from "./SubmitForm"
 import "./index.css"
@@ -20,13 +21,15 @@ if (!rootEl) {
 // permissive (the current auth-worker uses query params).
 createRoot(rootEl).render(
   <React.StrictMode>
-    <BrowserRouter basename="/reset">
-      <Routes>
-        <Route path="/" element={<RequestForm />} />
-        <Route path="/:token" element={<SubmitForm />} />
-        {/* Fallback to the request form for any unknown sub-path. */}
-        <Route path="*" element={<RequestForm />} />
-      </Routes>
-    </BrowserRouter>
+    <ThemeProvider>
+      <BrowserRouter basename="/reset">
+        <Routes>
+          <Route path="/" element={<RequestForm />} />
+          <Route path="/:token" element={<SubmitForm />} />
+          {/* Fallback to the request form for any unknown sub-path. */}
+          <Route path="*" element={<RequestForm />} />
+        </Routes>
+      </BrowserRouter>
+    </ThemeProvider>
   </React.StrictMode>,
 )

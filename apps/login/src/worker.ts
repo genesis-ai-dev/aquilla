@@ -17,6 +17,7 @@ import {
   assertNotPreviewInProd,
 } from "@aquilla/errors/env-assertion"
 import { rejectStaleAssetFallback } from "@aquilla/errors/asset-fallback"
+import { THEME_BOOTSTRAP_INLINE_SCRIPT_SHA256 } from "@aquilla/errors/theme-bootstrap-csp"
 
 // EnvLike is `Record<string, unknown>` — extending it keeps the
 // assertEnvBindings() helper type-compatible without an explicit cast.
@@ -30,7 +31,7 @@ const PRODUCTION_HOSTS = new Set<string>(["aquilla.app", "www.aquilla.app"])
 
 const BASELINE_CSP =
   "default-src 'self'; " +
-  "script-src 'self'; " +
+  `script-src 'self' ${THEME_BOOTSTRAP_INLINE_SCRIPT_SHA256}; ` +
   "style-src 'self' 'unsafe-inline'; " +
   "img-src 'self' data:; " +
   // The auth-worker host is provided at build time via VITE_AUTH_BASE; we

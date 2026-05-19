@@ -16,7 +16,10 @@
     "./card": "./src/card.tsx",
     "./alert": "./src/alert.tsx",
     "./form-row": "./src/form-row.tsx",
-    "./cn": "./src/cn.ts"
+    "./cn": "./src/cn.ts",
+    "./theme-mode": "./src/theme-mode.tsx",
+    "./app-header": "./src/app-header.tsx",
+    "./floating-theme-toggle": "./src/floating-theme-toggle.tsx"
   },
   "scripts": {
     "test": "vitest run",

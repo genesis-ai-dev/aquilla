@@ -19,6 +19,7 @@ import {
 } from "@aquilla/auth-client"
 import {
   Alert,
+  AppHeader,
   Button,
   Card,
   CardContent,
@@ -80,15 +81,19 @@ export function ProjectCreatePage() {
   }
 
   return (
-    <div className="mx-auto max-w-xl px-6 py-12">
-      <div className="mb-4">
-        <Link to="/">
-          <Button variant="ghost" size="sm">
-            ← All projects
-          </Button>
-        </Link>
-      </div>
-
+    <div className="min-h-screen bg-background">
+      <AppHeader
+        title="New project"
+        titleHref="/projects/"
+        actions={
+          <Link to="/">
+            <Button variant="ghost" size="sm">
+              ← All projects
+            </Button>
+          </Link>
+        }
+      />
+      <div className="mx-auto max-w-xl px-6 py-12">
       <Card>
         <CardHeader>
           <CardTitle>Create a project</CardTitle>
@@ -124,6 +129,7 @@ export function ProjectCreatePage() {
           </form>
         </CardContent>
       </Card>
+      </div>
     </div>
   )
 }

@@ -9,7 +9,7 @@ import { useEffect, useState } from "react"
 import { useNavigate } from "react-router-dom"
 import { fetchUserOrgs, type MyOrg } from "@aquilla/api-client"
 import { getJwt, redirectToLogin } from "@aquilla/auth-client"
-import { Button, Card, CardContent, CardHeader, CardTitle } from "@aquilla/ui"
+import { AppHeader, Button, Card, CardContent, CardHeader, CardTitle } from "@aquilla/ui"
 
 export function OrgListPage() {
   const [org, setOrg] = useState<MyOrg | null>(null)
@@ -40,9 +40,11 @@ export function OrgListPage() {
   }, [])
 
   return (
-    <div className="mx-auto max-w-3xl px-6 py-8">
-      <h1 className="text-2xl font-semibold">Organization</h1>
-      <p className="mt-1 text-sm text-muted-foreground">
+    <div className="min-h-screen bg-background">
+      <AppHeader title="Organization" titleHref="/projects/" />
+
+      <div className="mx-auto max-w-3xl px-6 py-8">
+      <p className="text-sm text-muted-foreground">
         Manage org-wide membership across all projects you have admin rights on.
       </p>
 
@@ -71,6 +73,7 @@ export function OrgListPage() {
           </CardContent>
         </Card>
       )}
+      </div>
     </div>
   )
 }

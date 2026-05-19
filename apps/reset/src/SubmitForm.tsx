@@ -20,6 +20,7 @@ import {
   CardFooter,
   CardHeader,
   CardTitle,
+  FloatingThemeToggle,
   FormRow,
   Input,
 } from "@aquilla/ui"
@@ -112,6 +113,7 @@ export function SubmitForm({
   if (!token || !username) {
     return (
       <main className="flex min-h-[100vh] items-center justify-center px-4 py-12">
+        <FloatingThemeToggle />
         <div className="w-full max-w-sm">
           <Card>
             <CardHeader>
@@ -135,6 +137,7 @@ export function SubmitForm({
   if (verifyState === "invalid") {
     return (
       <main className="flex min-h-[100vh] items-center justify-center px-4 py-12">
+        <FloatingThemeToggle />
         <div className="w-full max-w-sm">
           <Card>
             <CardHeader>
@@ -157,6 +160,7 @@ export function SubmitForm({
 
   return (
     <main className="flex min-h-[100vh] items-center justify-center px-4 py-12">
+      <FloatingThemeToggle />
       <div className="w-full max-w-sm">
         <Card>
           <CardHeader>

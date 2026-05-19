@@ -12,7 +12,13 @@
 //   /webhook       — Stripe webhook receiver (server-side; not a page)
 
 import { BrowserRouter, Routes, Route } from "react-router-dom"
-import { Card, CardContent, CardHeader, CardTitle } from "@aquilla/ui"
+import {
+  AppHeader,
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+} from "@aquilla/ui"
 
 export function App() {
   return (
@@ -26,25 +32,28 @@ export function App() {
 
 function ComingSoonPage() {
   return (
-    <div className="mx-auto flex min-h-screen max-w-xl items-center px-6 py-12">
-      <Card className="w-full">
-        <CardHeader>
-          <CardTitle>Billing &mdash; coming soon</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-4 text-sm text-muted-foreground">
-          <p>
-            Aquilla is in early access and there&rsquo;s nothing to pay for
-            yet. Plans, usage tracking, and invoice history will land here as
-            the billing surface comes online.
-          </p>
-          <a
-            href="/projects/"
-            className="inline-flex items-center text-sm text-primary hover:underline"
-          >
-            ← Back to projects
-          </a>
-        </CardContent>
-      </Card>
+    <div className="min-h-screen bg-background">
+      <AppHeader title="Billing" titleHref="/projects/" />
+      <div className="mx-auto flex max-w-xl items-center px-6 py-12">
+        <Card className="w-full">
+          <CardHeader>
+            <CardTitle>Billing &mdash; coming soon</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4 text-sm text-muted-foreground">
+            <p>
+              Aquilla is in early access and there&rsquo;s nothing to pay for
+              yet. Plans, usage tracking, and invoice history will land here as
+              the billing surface comes online.
+            </p>
+            <a
+              href="/projects/"
+              className="inline-flex items-center text-sm text-primary hover:underline"
+            >
+              ← Back to projects
+            </a>
+          </CardContent>
+        </Card>
+      </div>
     </div>
   )
 }

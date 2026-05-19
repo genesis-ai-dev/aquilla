@@ -18,6 +18,7 @@ import {
   type ProjectListItem,
 } from "@aquilla/api-client"
 import {
+  AppHeader,
   Card,
   CardContent,
   CardHeader,
@@ -77,14 +78,10 @@ export function ProjectListPage() {
 
   return (
     <div className="min-h-screen bg-background">
-      <header className="border-b">
-        <div className="flex items-center justify-between gap-2 px-4 py-4 sm:px-6">
-          <h1 className="text-xl font-semibold">Projects</h1>
-          <div className="flex items-center gap-2">
-            <Button onClick={() => navigate("/new")}>New project</Button>
-          </div>
-        </div>
-      </header>
+      <AppHeader
+        title="Projects"
+        actions={<Button onClick={() => navigate("/new")}>New project</Button>}
+      />
 
       <main className="px-6 py-6">
         {error && (

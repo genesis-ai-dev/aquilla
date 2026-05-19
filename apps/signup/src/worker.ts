@@ -6,6 +6,7 @@ import {
   assertNotPreviewInProd,
 } from "@aquilla/errors/env-assertion"
 import { rejectStaleAssetFallback } from "@aquilla/errors/asset-fallback"
+import { THEME_BOOTSTRAP_INLINE_SCRIPT_SHA256 } from "@aquilla/errors/theme-bootstrap-csp"
 
 interface Env extends Record<string, unknown> {
   ENV: string
@@ -17,7 +18,7 @@ const PRODUCTION_HOSTS = new Set<string>(["aquilla.app", "www.aquilla.app"])
 
 const BASELINE_CSP =
   "default-src 'self'; " +
-  "script-src 'self'; " +
+  `script-src 'self' ${THEME_BOOTSTRAP_INLINE_SCRIPT_SHA256}; ` +
   "style-src 'self' 'unsafe-inline'; " +
   "img-src 'self' data:; " +
   "connect-src 'self' https: wss:; " +

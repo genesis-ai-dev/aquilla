@@ -6,6 +6,8 @@
 // workflow can pick the app up in its matrix and routes.json's `/export`
 // mount owns the AD-11 route handoff from the workspace.
 
+import { AppHeader } from "@aquilla/ui"
+
 const PLANNED_FORMATS = [
   { ext: "USFM", note: "scripture (paratext)" },
   { ext: "DOCX", note: "Microsoft Word" },
@@ -37,63 +39,66 @@ export function App() {
   const { projectId, fileId, returnTo } = launchContext()
 
   return (
-    <main className="mx-auto flex min-h-screen max-w-3xl flex-col gap-8 px-6 py-12 text-slate-800">
-      <header className="flex flex-col gap-2">
-        <p className="text-xs font-medium uppercase tracking-wider text-slate-500">
-          Aquilla / Export
-        </p>
-        <h1 className="text-3xl font-semibold text-slate-900">
-          Export translations
-        </h1>
-        <p className="text-base text-slate-600">
-          This focused export surface receives project context from the
-          workspace and will rebuild deliverables from server state.
-        </p>
-        {projectId && (
-          <p className="text-sm text-slate-500">
-            Project: <span className="font-mono text-slate-700">{projectId}</span>
-            {fileId ? (
-              <>
-                {" "}/ File: <span className="font-mono text-slate-700">{fileId}</span>
-              </>
-            ) : null}
+    <div className="min-h-screen bg-background">
+      <AppHeader title="Export" titleHref="/projects/" />
+      <main className="mx-auto flex max-w-3xl flex-col gap-8 px-6 py-12">
+        <header className="flex flex-col gap-2">
+          <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
+            Aquilla / Export
           </p>
-        )}
-        <a
-          href={returnTo}
-          className="mt-2 inline-flex items-center text-sm text-primary hover:underline"
-        >
-          Return
-        </a>
-      </header>
+          <h1 className="text-3xl font-semibold">Export translations</h1>
+          <p className="text-base text-muted-foreground">
+            This focused export surface receives project context from the
+            workspace and will rebuild deliverables from server state.
+          </p>
+          {projectId && (
+            <p className="text-sm text-muted-foreground">
+              Project:{" "}
+              <span className="font-mono text-foreground">{projectId}</span>
+              {fileId ? (
+                <>
+                  {" "}/ File:{" "}
+                  <span className="font-mono text-foreground">{fileId}</span>
+                </>
+              ) : null}
+            </p>
+          )}
+          <a
+            href={returnTo}
+            className="mt-2 inline-flex items-center text-sm text-primary hover:underline"
+          >
+            Return
+          </a>
+        </header>
 
-      <section className="rounded-lg border border-slate-200 bg-white p-6 shadow-sm">
-        <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-500">
-          Output formats
-        </h2>
-        <ul className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
-          {PLANNED_FORMATS.map((f) => (
-            <li key={f.ext} className="flex items-center justify-between gap-2">
-              <div className="flex items-baseline gap-2">
-                <span className="font-mono text-sm text-slate-800">{f.ext}</span>
-                <span className="text-xs text-slate-500">{f.note}</span>
-              </div>
-              <button
-                type="button"
-                disabled
-                aria-label={`Export as ${f.ext} (disabled — coming soon)`}
-                className="cursor-not-allowed rounded-md bg-slate-200 px-3 py-1 text-xs font-medium text-slate-500"
-              >
-                Export
-              </button>
-            </li>
-          ))}
-        </ul>
-      </section>
+        <section className="rounded-lg border bg-card p-6 shadow-sm">
+          <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+            Output formats
+          </h2>
+          <ul className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
+            {PLANNED_FORMATS.map((f) => (
+              <li key={f.ext} className="flex items-center justify-between gap-2">
+                <div className="flex items-baseline gap-2">
+                  <span className="font-mono text-sm">{f.ext}</span>
+                  <span className="text-xs text-muted-foreground">{f.note}</span>
+                </div>
+                <button
+                  type="button"
+                  disabled
+                  aria-label={`Export as ${f.ext} (disabled — coming soon)`}
+                  className="cursor-not-allowed rounded-md bg-muted px-3 py-1 text-xs font-medium text-muted-foreground"
+                >
+                  Export
+                </button>
+              </li>
+            ))}
+          </ul>
+        </section>
 
-      <p className="text-xs text-slate-400">
-        Standalone exporting is not wired up yet.
-      </p>
-    </main>
+        <p className="text-xs text-muted-foreground">
+          Standalone exporting is not wired up yet.
+        </p>
+      </main>
+    </div>
   )
 }

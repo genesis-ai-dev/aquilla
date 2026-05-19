@@ -16,6 +16,7 @@
 import {
   assertEnvBindings,
   assertNotPreviewInProd,
+  THEME_BOOTSTRAP_INLINE_SCRIPT_SHA256,
 } from "@aquilla/errors"
 
 interface Env extends Record<string, unknown> {
@@ -31,11 +32,15 @@ const PRODUCTION_HOSTS = new Set<string>(["aquilla.app", "www.aquilla.app"])
 // WebSocket (wss:), worker-based AI models served from same-origin or
 // HuggingFace CDN (https:), and PostHog telemetry. Tighten later by
 // pinning the exact origins via build-time env vars.
-const THEME_BOOTSTRAP_SHA256 = "'sha256-qASoVislclNht+FyDihDFZAHUgKCDmNzun5cx3Ju+WY='"
+//
+// The theme-bootstrap inline-script hash is shared across every Aquilla
+// worker via @aquilla/errors so all apps stay in sync when the script
+// changes — keep the inline `<script>` body in each app's index.html
+// byte-identical.
 
 const BASELINE_CSP =
   "default-src 'self'; " +
-  `script-src 'self' 'wasm-unsafe-eval' ${THEME_BOOTSTRAP_SHA256} https://static.cloudflareinsights.com; ` +
+  `script-src 'self' 'wasm-unsafe-eval' ${THEME_BOOTSTRAP_INLINE_SCRIPT_SHA256} https://static.cloudflareinsights.com; ` +
   "style-src 'self' 'unsafe-inline'; " +
   "img-src 'self' data: blob: https:; " +
   "media-src 'self' blob:; " +

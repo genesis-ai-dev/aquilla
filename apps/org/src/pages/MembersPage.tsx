@@ -26,6 +26,7 @@ import {
 } from "@aquilla/auth-client"
 import {
   Alert,
+  AppHeader,
   Button,
   Card,
   CardContent,
@@ -100,17 +101,20 @@ export function MembersPage() {
   const isOwner = org?.role.level === 700
 
   return (
-    <div className="mx-auto max-w-5xl px-6 py-8">
-      <div className="mb-4">
-        <Link to="/">
-          <Button variant="ghost" size="sm">
-            ← Organization
-          </Button>
-        </Link>
-      </div>
-
-      <h1 className="text-2xl font-semibold">Members</h1>
-      <p className="mt-1 text-sm text-muted-foreground">
+    <div className="min-h-screen bg-background">
+      <AppHeader
+        title="Members"
+        titleHref="/org/"
+        actions={
+          <Link to="/">
+            <Button variant="ghost" size="sm">
+              ← Organization
+            </Button>
+          </Link>
+        }
+      />
+      <div className="mx-auto max-w-5xl px-6 py-8">
+      <p className="text-sm text-muted-foreground">
         Everyone with access to {org?.name ?? "your organization"}.
       </p>
 
@@ -191,6 +195,7 @@ export function MembersPage() {
           No members yet.
         </p>
       )}
+      </div>
     </div>
   )
 }

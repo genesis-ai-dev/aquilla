@@ -15,9 +15,10 @@
 //                      this project's own target rows.
 //
 // Tunables (AD-13):
-//   - Hard-coded to spec defaults for v1; the BranchingSearchSettings JSON
-//     subkey of project_settings is a follow-up. The endpoint accepts a
-//     `topK` query param so the AI copilot can override per-call.
+//   - Precedence on the route: defaults < project_settings.branchingSearch
+//     < query-string override. The AI copilot may pass `topK` per-call;
+//     project_settings provides per-project tuning; defaults apply when
+//     neither is set.
 //
 // Caching: not implemented in v1. Spec says results are cacheable by
 // `(project_id, query_hash, corpus_event_max)` — that requires a KV
@@ -29,7 +30,7 @@ import { branchingSearch } from "../lib/branching-search/algorithm"
 import { loadCorpus } from "../lib/branching-search/corpus"
 import {
   applyBranchingSearchDefaults,
-  BRANCHING_SEARCH_DEFAULTS,
+  loadBranchingSearchSettings,
 } from "../lib/branching-search/settings"
 
 export interface BranchingSearchEnv {
@@ -93,10 +94,10 @@ export async function handleBranchingSearchRequest(
     return new Response("missing q", { status: 400 })
   }
 
-  // Settings: defaults today; per-project tunables when we wire the
-  // project_settings.branchingSearch subkey (TODO before AD-14 ships,
-  // since decay endorsement uses the same retrieval).
-  let settings = BRANCHING_SEARCH_DEFAULTS
+  // Settings layering: defaults < project_settings.branchingSearch <
+  // query-string override. AD-14 endorsement will use the same loader so
+  // the AI copilot and decay bookkeeping never diverge.
+  let settings = await loadBranchingSearchSettings(env, projectId)
 
   const qTopK = url.searchParams.get("topK")
   if (qTopK !== null) {

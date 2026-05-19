@@ -329,6 +329,73 @@ describe("GET /api/v1/projects/:projectId/branching-search", () => {
     expect(body.provenance["c1"].length).toBeGreaterThan(0)
   })
 
+  // ─── project_settings tunables ──────────────────────────────────────
+
+  it("reads topK from project_settings.branchingSearch", async () => {
+    const cells: CellRow[] = []
+    for (let i = 1; i <= 10; i++) {
+      cells.push(
+        makeCell({
+          cell_id: `c${i}`,
+          side: "source",
+          event_id: `e${i}`,
+          value: "the cat sat on the mat",
+        }),
+      )
+    }
+    const db = makeInMemoryD1({
+      projects: [makeProject({ id: "p1" })],
+      cells,
+      project_settings: [
+        {
+          project_id: "p1",
+          settings: JSON.stringify({
+            branchingSearch: { topK: 3 },
+          }),
+        },
+      ],
+    })
+    const req = await authedRequest(
+      "https://w/api/v1/projects/p1/branching-search?q=the%20cat%20sat",
+    )
+    const res = (await handleBranchingSearchRequest(req, envWith(db)))!
+    const body = (await res.json()) as BranchingSearchResponse
+    expect(body.results.length).toBe(3)
+  })
+
+  it("query-string topK overrides project_settings", async () => {
+    const cells: CellRow[] = []
+    for (let i = 1; i <= 10; i++) {
+      cells.push(
+        makeCell({
+          cell_id: `c${i}`,
+          side: "source",
+          event_id: `e${i}`,
+          value: "the cat sat on the mat",
+        }),
+      )
+    }
+    const db = makeInMemoryD1({
+      projects: [makeProject({ id: "p1" })],
+      cells,
+      project_settings: [
+        {
+          project_id: "p1",
+          settings: JSON.stringify({
+            branchingSearch: { topK: 3 },
+          }),
+        },
+      ],
+    })
+    const req = await authedRequest(
+      "https://w/api/v1/projects/p1/branching-search?q=the%20cat%20sat&topK=2",
+    )
+    const res = (await handleBranchingSearchRequest(req, envWith(db)))!
+    const body = (await res.json()) as BranchingSearchResponse
+    // Query-string topK=2 wins over project_settings topK=3.
+    expect(body.results.length).toBe(2)
+  })
+
   // ─── corpusEventMax ─────────────────────────────────────────────────
 
   it("returns the max source event_id seen as corpusEventMax", async () => {

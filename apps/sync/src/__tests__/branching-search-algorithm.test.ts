@@ -14,8 +14,10 @@ import {
 import {
   BRANCHING_SEARCH_DEFAULTS,
   applyBranchingSearchDefaults,
+  loadBranchingSearchSettings,
   type BranchingSearchSettings,
 } from "../lib/branching-search/settings"
+import { makeInMemoryD1 } from "./helpers/d1-fake"
 
 // Local helper: pretend-internal access to test bm25Score directly. The
 // algorithm module doesn't expose TokenizedCell or CorpusStats; we
@@ -348,5 +350,93 @@ describe("settings sanity", () => {
       maxRestarts: 3,
     }
     expect(BRANCHING_SEARCH_DEFAULTS).toEqual(expected)
+  })
+})
+
+describe("loadBranchingSearchSettings", () => {
+  it("returns defaults when AQUILLA_DB binding is missing", async () => {
+    const settings = await loadBranchingSearchSettings({}, "p1")
+    expect(settings).toEqual(BRANCHING_SEARCH_DEFAULTS)
+  })
+
+  it("returns defaults when no settings row exists for the project", async () => {
+    const db = makeInMemoryD1()
+    const settings = await loadBranchingSearchSettings({ AQUILLA_DB: db }, "p1")
+    expect(settings).toEqual(BRANCHING_SEARCH_DEFAULTS)
+  })
+
+  it("returns defaults when settings JSON has no branchingSearch key", async () => {
+    const db = makeInMemoryD1({
+      project_settings: [
+        { project_id: "p1", settings: JSON.stringify({ sourceLanguage: "en" }) },
+      ],
+    })
+    const settings = await loadBranchingSearchSettings({ AQUILLA_DB: db }, "p1")
+    expect(settings).toEqual(BRANCHING_SEARCH_DEFAULTS)
+  })
+
+  it("merges partial branchingSearch over defaults", async () => {
+    const db = makeInMemoryD1({
+      project_settings: [
+        {
+          project_id: "p1",
+          settings: JSON.stringify({
+            branchingSearch: { topK: 10, coverageWeight: 0.9 },
+          }),
+        },
+      ],
+    })
+    const settings = await loadBranchingSearchSettings({ AQUILLA_DB: db }, "p1")
+    expect(settings.topK).toBe(10)
+    expect(settings.coverageWeight).toBe(0.9)
+    // Unset fields fall back.
+    expect(settings.bm25K1).toBe(BRANCHING_SEARCH_DEFAULTS.bm25K1)
+    expect(settings.maxRestarts).toBe(BRANCHING_SEARCH_DEFAULTS.maxRestarts)
+  })
+
+  it("soft-fails to defaults on malformed JSON", async () => {
+    const db = makeInMemoryD1({
+      project_settings: [{ project_id: "p1", settings: "not valid json {{" }],
+    })
+    const settings = await loadBranchingSearchSettings({ AQUILLA_DB: db }, "p1")
+    expect(settings).toEqual(BRANCHING_SEARCH_DEFAULTS)
+  })
+
+  it("soft-fails to defaults when settings is null", async () => {
+    const db = makeInMemoryD1({
+      project_settings: [{ project_id: "p1", settings: null }],
+    })
+    const settings = await loadBranchingSearchSettings({ AQUILLA_DB: db }, "p1")
+    expect(settings).toEqual(BRANCHING_SEARCH_DEFAULTS)
+  })
+
+  it("soft-fails to defaults when branchingSearch isn't an object", async () => {
+    const db = makeInMemoryD1({
+      project_settings: [
+        {
+          project_id: "p1",
+          settings: JSON.stringify({ branchingSearch: "not an object" }),
+        },
+      ],
+    })
+    const settings = await loadBranchingSearchSettings({ AQUILLA_DB: db }, "p1")
+    expect(settings).toEqual(BRANCHING_SEARCH_DEFAULTS)
+  })
+
+  it("clamps invalid field values per applyBranchingSearchDefaults rules", async () => {
+    const db = makeInMemoryD1({
+      project_settings: [
+        {
+          project_id: "p1",
+          settings: JSON.stringify({
+            branchingSearch: { topK: 0, coverageWeight: -1, maxRestarts: 2.7 },
+          }),
+        },
+      ],
+    })
+    const settings = await loadBranchingSearchSettings({ AQUILLA_DB: db }, "p1")
+    expect(settings.topK).toBe(1) // floored + clamped to >=1
+    expect(settings.coverageWeight).toBe(BRANCHING_SEARCH_DEFAULTS.coverageWeight) // negative → default
+    expect(settings.maxRestarts).toBe(2) // floored
   })
 })

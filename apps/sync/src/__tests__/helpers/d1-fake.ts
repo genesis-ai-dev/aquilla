@@ -13,6 +13,17 @@ export interface Tables {
    *  route. The auth-worker side of the codebase owns this table; we
    *  model just the columns the sync-worker reads. */
   projects: ProjectRow[]
+  /** Per-project settings JSON. Identity owns the writes; sync reads the
+   *  blob for AD-13 / AD-14 tunables. We model just the columns we read. */
+  project_settings: ProjectSettingsRow[]
+}
+
+export interface ProjectSettingsRow {
+  project_id: string
+  /** Raw JSON string as stored in D1 (no parsing done here — matches what
+   *  the loader sees in production). */
+  settings: string | null
+  version?: number
 }
 
 export interface ProjectRow {
@@ -105,6 +116,7 @@ export function makeInMemoryD1(tables: Partial<Tables> = {}): InMemoryD1 {
     cell_validators: tables.cell_validators ?? [],
     files: tables.files ?? [],
     projects: tables.projects ?? [],
+    project_settings: tables.project_settings ?? [],
   }
 
   const issuedStmts: Array<{ sql: string; args: unknown[] }> = []
@@ -819,6 +831,18 @@ export function makeInMemoryD1(tables: Partial<Tables> = {}): InMemoryD1 {
         }
       }
       return stale
+    }
+
+    // ── AD-13 / AD-14 project_settings loader ──────────────────────────
+    // `SELECT settings FROM project_settings WHERE project_id = ?`
+    if (
+      /^SELECT settings FROM project_settings WHERE project_id = \?$/.test(
+        normalized,
+      )
+    ) {
+      const pid = args[0] as string
+      const row = db.project_settings.find((r) => r.project_id === pid)
+      return row ? [{ settings: row.settings }] : []
     }
 
     // ── AD-13 branching-search corpus load ─────────────────────────────

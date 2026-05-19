@@ -1,10 +1,14 @@
-// AD-13 branching-search tunables — spec defaults + partial-merge helper.
+// AD-13 branching-search tunables — spec defaults, partial-merge helper,
+// and D1-backed loader for the `project_settings.branchingSearch` JSON
+// subkey.
 //
-// Per the spec these live in `project_settings.branchingSearch`. For v1 we
-// hard-code defaults at the call site; reading from D1 settings is a follow-up
-// once we have a real need to tune per-project (TODO before AD-14 lands —
-// decay's endorsement bookkeeping has to use the same tunables this endpoint
-// uses, so the source of truth has to migrate to D1 before then).
+// The defaults match the spec verbatim and are applied:
+//   - when the project has no settings row,
+//   - when the settings row exists but `branchingSearch` is unset,
+//   - when individual fields are missing / NaN / negative.
+//
+// AD-14's decay endorsement will use the same tunables — keeping this in
+// one place so the AI copilot and the endorsement bookkeeping never drift.
 
 export interface BranchingSearchSettings {
   /** Number of result cells to return. Spec default 5 (matches the existing
@@ -50,5 +54,50 @@ export function applyBranchingSearchDefaults(
     bm25K1: pick("bm25K1"),
     bm25B: pick("bm25B"),
     maxRestarts: Math.max(0, Math.floor(pick("maxRestarts"))),
+  }
+}
+
+export interface SettingsLoaderEnv {
+  AQUILLA_DB?: D1Database
+}
+
+/**
+ * Load branching-search tunables for `projectId` from D1's `project_settings`
+ * row. Soft-fails to spec defaults on any error (missing binding, missing
+ * row, missing key, malformed JSON, malformed values). Never throws — the
+ * caller's retrieval should never break because of a settings parse problem.
+ *
+ * Wire into the route before invoking the algorithm. Layering precedence at
+ * the call site is: defaults < project_settings.branchingSearch < query-string
+ * override (e.g., the AI copilot's per-call `topK`).
+ */
+export async function loadBranchingSearchSettings(
+  env: SettingsLoaderEnv,
+  projectId: string,
+): Promise<BranchingSearchSettings> {
+  if (!env.AQUILLA_DB) return BRANCHING_SEARCH_DEFAULTS
+  try {
+    const row = await env.AQUILLA_DB.prepare(
+      "SELECT settings FROM project_settings WHERE project_id = ?",
+    )
+      .bind(projectId)
+      .first<{ settings: string | null }>()
+    if (!row?.settings) return BRANCHING_SEARCH_DEFAULTS
+    let parsed: unknown
+    try {
+      parsed = JSON.parse(row.settings)
+    } catch {
+      return BRANCHING_SEARCH_DEFAULTS
+    }
+    if (!parsed || typeof parsed !== "object") return BRANCHING_SEARCH_DEFAULTS
+    const branchingSearch = (parsed as Record<string, unknown>).branchingSearch
+    if (!branchingSearch || typeof branchingSearch !== "object") {
+      return BRANCHING_SEARCH_DEFAULTS
+    }
+    return applyBranchingSearchDefaults(
+      branchingSearch as Partial<BranchingSearchSettings>,
+    )
+  } catch {
+    return BRANCHING_SEARCH_DEFAULTS
   }
 }

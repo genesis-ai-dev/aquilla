@@ -1,4 +1,4 @@
-import { useState, useMemo, useRef, useEffect, useCallback } from "react"
+import { Suspense, lazy, useState, useMemo, useRef, useEffect, useCallback } from "react"
 import { useParams, useNavigate, useSearchParams } from "react-router-dom"
 import { useProject } from "@/hooks/useProject"
 import { useFileDoc } from "@/hooks/useFileDoc"
@@ -17,7 +17,6 @@ import type { PassageHit } from "@/hooks/useSearchIndex"
 import { useHealth } from "@/hooks/useHealth"
 import { useRules } from "@/hooks/useRules"
 import { updateProject, patchProject, getProject } from "@/lib/store/project-index"
-import { exportFile, downloadBlob } from "@/lib/export/export-service"
 import { MAX_BATCH_COMPLETIONS } from "@/lib/workspace-actions/registry"
 import type { FileReference, CellHealthBreakdown } from "@/lib/parsers/types"
 import type { CellData } from "@/hooks/useCells"
@@ -30,7 +29,6 @@ import type { WorkspaceSearchResult } from "@/lib/search/workspace-index"
 import { StatusBar } from "./StatusBar"
 import { SyncStatusIndicator } from "./SyncStatusIndicator"
 import { OutboxSyncIndicator } from "./OutboxSyncIndicator"
-import { ImportDialog } from "./ImportDialog"
 import { EditorTable } from "./EditorTable"
 import { AudioRecordingModal } from "./AudioRecorder/AudioRecordingModal"
 import { RuleDrawer } from "./RuleDrawer"
@@ -101,6 +99,17 @@ import { useFeatureFlag } from "@/hooks/useFeatureFlag"
 import { NextUnfinishedButton } from "./NextUnfinishedButton"
 import { useNextUnfinished } from "@/hooks/useNextUnfinished"
 import { AiSetupDialog } from "./AiSetupDialog"
+import {
+  buildExportHandoffUrl,
+  buildImportHandoffUrl,
+  buildProjectSettingsHandoffUrl,
+  workspaceReturnPath,
+} from "@/lib/ad11/navigation"
+
+const ENABLE_INLINE_IMPORT_FOR_SMOKE = import.meta.env.MODE === "test"
+const SmokeImportDialog = ENABLE_INLINE_IMPORT_FOR_SMOKE
+  ? lazy(() => import("./ImportDialog").then((mod) => ({ default: mod.ImportDialog })))
+  : null
 
 export function ProjectWorkspace() {
   const { id: projectId, fileId: routeFileId } = useParams<{ id: string; fileId?: string }>()
@@ -957,7 +966,13 @@ export function ProjectWorkspace() {
       { id: "share", label: "Share", icon: Share2,
         onClick: () => setShareOpen(true) },
       { id: "settings", label: "Settings", icon: SettingsIcon,
-        onClick: () => navigate(`/project/${projectId}/settings`) },
+        onClick: () => {
+          if (!projectId) return
+          window.location.assign(buildProjectSettingsHandoffUrl({
+            projectId,
+            returnTo: workspaceReturnPath(projectId, activeFileId),
+          }))
+        } },
     ]
     if (livingMemoryEnabled) {
       // Insert before Share so it sits with Rules/Comments/Snapshots.
@@ -970,7 +985,7 @@ export function ProjectWorkspace() {
       })
     }
     return items
-  }, [projectId, navigate, openCommentCount, livingMemoryEnabled])
+  }, [projectId, activeFileId, navigate, openCommentCount, livingMemoryEnabled])
 
   const audioCounts = useMemo(() => ({
     untranscribed: countTranscribeTargets(cells),
@@ -999,32 +1014,44 @@ export function ProjectWorkspace() {
     audioCounts,
   }), [project, activeFileId, fileProgress, audioCounts])
 
-  async function handleExport() {
-    if (!activeFileId) return
-    try {
-      const { blob, filename } = await exportFile(activeFileId)
-      downloadBlob(blob, filename)
-    } catch (err) {
-      alert(`Export failed: ${err instanceof Error ? err.message : "Unknown error"}`)
+  const openImportFlow = useCallback(() => {
+    if (!project) return
+    if (ENABLE_INLINE_IMPORT_FOR_SMOKE) {
+      setImportOpen(true)
+      return
     }
-  }
+    window.location.assign(buildImportHandoffUrl({
+      projectId: project.id,
+      fileId: activeFileId,
+      returnTo: workspaceReturnPath(project.id, activeFileId),
+    }))
+  }, [project, activeFileId])
+
+  const openExportFlow = useCallback(() => {
+    if (!project) return
+    window.location.assign(buildExportHandoffUrl({
+      projectId: project.id,
+      fileId: activeFileId,
+      returnTo: workspaceReturnPath(project.id, activeFileId),
+    }))
+  }, [project, activeFileId])
 
   const actionArgs = useMemo(() => ({
-    openImport: () => setImportOpen(true),
+    openImport: openImportFlow,
     runCompletions: () => {
       if (!activeFileId) return
       const untranslated = cells.filter((c) => !c.translated.trim())
       if (untranslated.length === 0) return
       completeBatch(untranslated.slice(0, MAX_BATCH_COMPLETIONS))
     },
-    runExport: () => handleExport(),
+    runExport: openExportFlow,
     runBatchValidate: () => {
       console.info("batch-validate triggered (placeholder runner)")
     },
     runAgentInput: () => {
       console.info("agent-input triggered (placeholder runner)")
     },
-    runImportWip: () => setImportOpen(true),
+    runImportWip: openImportFlow,
     runTranscribeAll: () => {
       if (!doc || !project || !frontierSession) return
       void transcribeAllInFile({ doc, cells, project, session: frontierSession })
@@ -1037,7 +1064,7 @@ export function ProjectWorkspace() {
       })
     },
     navigate,
-  }), [activeFileId, completeBatch, cells, doc, project, frontierSession, navigate])
+  }), [activeFileId, completeBatch, cells, doc, project, frontierSession, navigate, openImportFlow, openExportFlow])
 
   const handleCellCommitted = useCallback(async () => {
     await flushOutboxBatch({ getTokenForFile })
@@ -1353,7 +1380,7 @@ export function ProjectWorkspace() {
           <CellAreaPlaceholder
             state={cellAreaState}
             fileName={activeFile?.name}
-            onImportClick={() => setImportOpen(true)}
+            onImportClick={openImportFlow}
           />
         )}
         aside={
@@ -1458,11 +1485,15 @@ export function ProjectWorkspace() {
           onClose={() => setRecordingCellId(null)}
         />
       )}
-      <ImportDialog open={importOpen} onOpenChange={setImportOpen}
-        projectId={project.id}
-        username={currentUsername}
-        sourceLanguage={project.sourceLanguage} targetLanguage={project.targetLanguage}
-        onImported={handleImported} />
+      {SmokeImportDialog && (
+        <Suspense fallback={null}>
+          <SmokeImportDialog open={importOpen} onOpenChange={setImportOpen}
+            projectId={project.id}
+            username={currentUsername}
+            sourceLanguage={project.sourceLanguage} targetLanguage={project.targetLanguage}
+            onImported={handleImported} />
+        </Suspense>
+      )}
       <ParallelPassagesPanel
         open={parallelOpen}
         onOpenChange={setParallelOpen}

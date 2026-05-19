@@ -34,8 +34,14 @@ export type OutboxEventKind =
   // Validation.
   | "cell.validate"
   | "cell.unvalidate"
+  // Server-emitted validation endorsements. Client outbox must not author
+  // these directly, but the reconciler can receive/broadcast them.
+  | "cell.endorsement"
+  | "cell.endorsement.revoke"
   // File lifecycle.
   | "file.create"
+  // Project lifecycle.
+  | "project.link-source"
 
 // ── Per-kind payload shapes ───────────────────────────────────────────────
 
@@ -86,6 +92,15 @@ export interface OutboxEventPayloads {
   "cell.unvalidate": {
     editEventId: string
   }
+  "cell.endorsement": {
+    endorsedCellId: string
+    endorsingCellId: string
+    validatorUserId: number
+    retrievalQueryEventId: string
+  }
+  "cell.endorsement.revoke": {
+    endorsementEventId: string
+  }
 
   "file.create": {
     name: string
@@ -103,6 +118,9 @@ export interface OutboxEventPayloads {
     parserVersion?: string
     sourceLanguage?: string
     targetLanguage?: string
+  }
+  "project.link-source": {
+    sourceProjectId: string | null
   }
 }
 

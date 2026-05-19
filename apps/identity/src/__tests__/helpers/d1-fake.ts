@@ -111,11 +111,13 @@ export interface EventRow {
   project_id: string
   file_id: string | null
   cell_id: string | null
+  parent_id: string | null
   kind: string
   author: string
   payload: string
   client_ts: number
   server_ts: number
+  server_seq: number
 }
 
 /**
@@ -129,6 +131,16 @@ export interface CellProjectionRow {
   side: "source" | "target"
   value: string
   value_html: string | null
+  type?: string | null
+  canonical_ref?: string | null
+  anchor_cell_id?: string | null
+  event_id?: string
+  source_event_id?: string | null
+  last_editor?: string | null
+  last_edit_at?: number
+  validated?: number
+  word_count?: number
+  content_hash?: string
 }
 
 export interface FakeTables {
@@ -170,7 +182,19 @@ export function makeFakeD1(initial: Partial<FakeTables> = {}): FakeD1 {
     org_members: initial.org_members ?? [],
     project_settings: initial.project_settings ?? [],
     events: initial.events ?? [],
-    cells: initial.cells ?? [],
+    cells: (initial.cells ?? []).map((c) => ({
+      ...c,
+      type: c.type ?? null,
+      canonical_ref: c.canonical_ref ?? null,
+      anchor_cell_id: c.anchor_cell_id ?? null,
+      event_id: c.event_id ?? `evt-${c.project_id}-${c.cell_id}`,
+      source_event_id: c.source_event_id ?? null,
+      last_editor: c.last_editor ?? null,
+      last_edit_at: c.last_edit_at ?? Date.now(),
+      validated: c.validated ?? 0,
+      word_count: c.word_count ?? 0,
+      content_hash: c.content_hash ?? "",
+    })),
     groups: initial.groups ?? [],
     group_members: initial.group_members ?? [],
     group_project_grants: initial.group_project_grants ?? [],
@@ -595,11 +619,80 @@ export function makeFakeD1(initial: Partial<FakeTables> = {}): FakeD1 {
     // 1A owns the events table; the FakeD1 stores them here so tests can
     // assert the durable record exists.
     // ───────────────────────────────────────────────────────────────────
+    if (
+      n.startsWith(
+        "SELECT COALESCE(MAX(server_seq), 0) + 1 AS next_seq FROM events WHERE project_id = ?",
+      )
+    ) {
+      const max = tables.events
+        .filter((e) => e.project_id === args[0])
+        .reduce((acc, e) => Math.max(acc, e.server_seq ?? 0), 0)
+      return { first: { next_seq: max + 1 }, results: [{ next_seq: max + 1 }] }
+    }
     if (n.startsWith("INSERT INTO events")) {
       const [id, project_id, ...rest] = args as unknown[]
       // Match the two shapes used by source-linking.ts:
       //   project-scope:  (id, project_id, author, payload, client_ts, server_ts)
       //   cell-scope:     (id, project_id, file_id, cell_id, author, payload, client_ts, server_ts)
+      if (rest.length === 5) {
+        const [author, payload, client_ts, server_ts, server_seq] = rest as [
+          string,
+          string,
+          number,
+          number,
+          number,
+        ]
+        tables.events.push({
+          id: id as string,
+          schema_version: 1,
+          project_id: project_id as string,
+          file_id: null,
+          cell_id: null,
+          parent_id: null,
+          kind: "project.link-source",
+          author,
+          payload,
+          client_ts,
+          server_ts,
+          server_seq,
+        })
+      } else if (rest.length === 9) {
+        const [
+          file_id,
+          cell_id,
+          parent_id,
+          kind,
+          author,
+          payload,
+          client_ts,
+          server_ts,
+          server_seq,
+        ] = rest as [
+          string,
+          string,
+          string | null,
+          string,
+          string,
+          string,
+          number,
+          number,
+          number,
+        ]
+        tables.events.push({
+          id: id as string,
+          schema_version: 1,
+          project_id: project_id as string,
+          file_id,
+          cell_id,
+          parent_id,
+          kind,
+          author,
+          payload,
+          client_ts,
+          server_ts,
+          server_seq,
+        })
+      } else
       if (rest.length === 4) {
         const [author, payload, client_ts, server_ts] = rest as [
           string,
@@ -614,11 +707,13 @@ export function makeFakeD1(initial: Partial<FakeTables> = {}): FakeD1 {
           project_id: project_id as string,
           file_id: null,
           cell_id: null,
+          parent_id: null,
           kind: kindMatch ? kindMatch[1] : "unknown",
           author,
           payload,
           client_ts,
           server_ts,
+          server_seq: 0,
         })
       } else {
         const [file_id, cell_id, author, payload, client_ts, server_ts] = rest as [
@@ -636,11 +731,13 @@ export function makeFakeD1(initial: Partial<FakeTables> = {}): FakeD1 {
           project_id: project_id as string,
           file_id,
           cell_id,
+          parent_id: null,
           kind: kindMatch ? kindMatch[1] : "unknown",
           author,
           payload,
           client_ts,
           server_ts,
+          server_seq: 0,
         })
       }
       return { first: null, results: [] }
@@ -651,7 +748,7 @@ export function makeFakeD1(initial: Partial<FakeTables> = {}): FakeD1 {
     // ───────────────────────────────────────────────────────────────────
     if (
       n.startsWith(
-        "SELECT file_id, cell_id, value, value_html FROM cells WHERE project_id = ? AND side = 'source'",
+        "SELECT file_id, cell_id, value, value_html, type, canonical_ref, anchor_cell_id FROM cells WHERE project_id = ? AND side = 'source'",
       )
     ) {
       const rows = tables.cells
@@ -661,8 +758,122 @@ export function makeFakeD1(initial: Partial<FakeTables> = {}): FakeD1 {
           cell_id: x.cell_id,
           value: x.value,
           value_html: x.value_html,
+          type: x.type ?? null,
+          canonical_ref: x.canonical_ref ?? null,
+          anchor_cell_id: x.anchor_cell_id ?? null,
         }))
       return { first: rows[0] ?? null, results: rows }
+    }
+    if (
+      n.startsWith(
+        "SELECT event_id FROM cells WHERE project_id = ? AND file_id = ? AND cell_id = ? AND side = 'source'",
+      )
+    ) {
+      const row = tables.cells.find(
+        (x) =>
+          x.project_id === args[0] &&
+          x.file_id === args[1] &&
+          x.cell_id === args[2] &&
+          x.side === "source",
+      )
+      const out = row ? { event_id: row.event_id } : null
+      return { first: out, results: out ? [out] : [] }
+    }
+    if (
+      n.startsWith(
+        "UPDATE cells SET value = ?, value_html = ?, event_id = ?, last_editor = ?, last_edit_at = ?, word_count = ?, content_hash = ? WHERE project_id = ? AND file_id = ? AND cell_id = ? AND side = 'source'",
+      )
+    ) {
+      const [
+        value,
+        value_html,
+        event_id,
+        last_editor,
+        last_edit_at,
+        word_count,
+        content_hash,
+        project_id,
+        file_id,
+        cell_id,
+      ] = args as [
+        string,
+        string | null,
+        string,
+        string,
+        number,
+        number,
+        string,
+        string,
+        string,
+        string,
+      ]
+      const row = tables.cells.find(
+        (x) =>
+          x.project_id === project_id &&
+          x.file_id === file_id &&
+          x.cell_id === cell_id &&
+          x.side === "source",
+      )
+      if (row) {
+        row.value = value
+        row.value_html = value_html
+        row.event_id = event_id
+        row.last_editor = last_editor
+        row.last_edit_at = last_edit_at
+        row.word_count = word_count
+        row.content_hash = content_hash
+      }
+      return { first: null, results: [] }
+    }
+    if (n.startsWith("INSERT INTO cells ( project_id, file_id, cell_id, side,")) {
+      const [
+        project_id,
+        file_id,
+        cell_id,
+        value,
+        value_html,
+        type,
+        canonical_ref,
+        anchor_cell_id,
+        event_id,
+        last_editor,
+        last_edit_at,
+        word_count,
+        content_hash,
+      ] = args as [
+        string,
+        string,
+        string,
+        string,
+        string | null,
+        string | null,
+        string | null,
+        string | null,
+        string,
+        string,
+        number,
+        number,
+        string,
+      ]
+      tables.cells.push({
+        project_id,
+        file_id,
+        cell_id,
+        side: "source",
+        value,
+        value_html,
+        type,
+        canonical_ref,
+        anchor_cell_id,
+        event_id,
+        source_event_id: null,
+        last_editor,
+        last_edit_at,
+        validated: 0,
+        word_count,
+        content_hash,
+      })
+      return { first: null, results: [] }
     }
 
     // ───────────────────────────────────────────────────────────────────

@@ -67,6 +67,7 @@ export interface CellRow {
   last_editor: string | null
   last_edit_at: number
   validated: number
+  endorsement_count?: number
   word_count: number
   content_hash?: string | null
 }
@@ -112,7 +113,10 @@ export type InMemoryD1 = D1Database & {
 export function makeInMemoryD1(tables: Partial<Tables> = {}): InMemoryD1 {
   const db: Tables = {
     events: tables.events ?? [],
-    cells: tables.cells ?? [],
+    cells: (tables.cells ?? []).map((cell) => ({
+      ...cell,
+      endorsement_count: cell.endorsement_count ?? 0,
+    })),
     cell_validators: tables.cell_validators ?? [],
     files: tables.files ?? [],
     projects: tables.projects ?? [],
@@ -172,31 +176,33 @@ export function makeInMemoryD1(tables: Partial<Tables> = {}): InMemoryD1 {
     // CHAIN_MUTATING_KINDS). The fake extracts the kinds from the IN(...)
     // clause to keep itself in sync with the source.
     if (
-      /^SELECT id, server_seq FROM events WHERE project_id = \? AND file_id = \? AND cell_id = \? AND parent_id IS NULL AND kind IN \([^)]*\) ORDER BY server_seq ASC, id ASC LIMIT 1$/.test(
+	      /^SELECT id, server_seq FROM events WHERE project_id = \? AND file_id = \? AND cell_id = \? AND parent_id IS NULL AND kind IN \([^)]*\) AND kind LIKE \? ORDER BY server_seq ASC, id ASC LIMIT 1$/.test(
         normalized,
       )
     ) {
       const pid = args[0] as string
       const fid = args[1] as string
-      const cid = args[2] as string
-      const kinds = parseKindList(normalized)
-      const matches = db.events
-        .filter((e) => e.project_id === pid && e.file_id === fid && e.cell_id === cid && e.parent_id === null && kinds.has(e.kind))
+	      const cid = args[2] as string
+	      const sideLike = args[3] as string
+	      const kinds = parseKindList(normalized)
+	      const matches = db.events
+	        .filter((e) => e.project_id === pid && e.file_id === fid && e.cell_id === cid && e.parent_id === null && kinds.has(e.kind) && e.kind.startsWith(sideLike.replace('%', '')))
         .sort((a, b) => (a.server_seq - b.server_seq) || a.id.localeCompare(b.id))
       return matches.length ? [{ id: matches[0].id, server_seq: matches[0].server_seq }] : []
     }
     if (
-      /^SELECT id, server_seq FROM events WHERE project_id = \? AND file_id = \? AND cell_id = \? AND parent_id = \? AND kind IN \([^)]*\) ORDER BY server_seq ASC, id ASC LIMIT 1$/.test(
+	      /^SELECT id, server_seq FROM events WHERE project_id = \? AND file_id = \? AND cell_id = \? AND parent_id = \? AND kind IN \([^)]*\) AND kind LIKE \? ORDER BY server_seq ASC, id ASC LIMIT 1$/.test(
         normalized,
       )
     ) {
       const pid = args[0] as string
       const fid = args[1] as string
       const cid = args[2] as string
-      const parent = args[3] as string
-      const kinds = parseKindList(normalized)
-      const matches = db.events
-        .filter((e) => e.project_id === pid && e.file_id === fid && e.cell_id === cid && e.parent_id === parent && kinds.has(e.kind))
+	      const parent = args[3] as string
+	      const sideLike = args[4] as string
+	      const kinds = parseKindList(normalized)
+	      const matches = db.events
+	        .filter((e) => e.project_id === pid && e.file_id === fid && e.cell_id === cid && e.parent_id === parent && kinds.has(e.kind) && e.kind.startsWith(sideLike.replace('%', '')))
         .sort((a, b) => (a.server_seq - b.server_seq) || a.id.localeCompare(b.id))
       return matches.length ? [{ id: matches[0].id, server_seq: matches[0].server_seq }] : []
     }
@@ -439,7 +445,23 @@ export function makeInMemoryD1(tables: Partial<Tables> = {}): InMemoryD1 {
 
     // ── GET /api/v1/projects/:projectId/files/:fileId/cells ────────────
     if (
-      /^SELECT cell_id, side, value, value_html, type, canonical_ref, anchor_cell_id, event_id, source_event_id, last_editor, last_edit_at, validated, word_count FROM cells WHERE project_id = \? AND file_id = \?/.test(
+      /^SELECT p\.source_project_id AS source_project_id, f\.source_file_id AS source_file_id FROM projects p LEFT JOIN files f ON f\.project_id = p\.id AND f\.id = \? WHERE p\.id = \?$/.test(
+        normalized,
+      )
+    ) {
+      const fileId = args[0] as string
+      const projectId = args[1] as string
+      const project = db.projects.find((p) => p.id === projectId)
+      const file = db.files.find((f) => f.project_id === projectId && f.id === fileId)
+      return project
+        ? [{
+            source_project_id: project.source_project_id,
+            source_file_id: file?.source_file_id ?? null,
+          }]
+        : []
+    }
+    if (
+      /^SELECT cell_id, side, value, value_html, type, canonical_ref, anchor_cell_id, event_id, source_event_id, last_editor, last_edit_at, validated, endorsement_count, word_count FROM cells WHERE project_id = \? AND file_id = \?/.test(
         normalized,
       )
     ) {
@@ -464,12 +486,13 @@ export function makeInMemoryD1(tables: Partial<Tables> = {}): InMemoryD1 {
           anchor_cell_id: c.anchor_cell_id ?? null,
           event_id: c.event_id,
           source_event_id: c.source_event_id ?? null,
-          last_editor: c.last_editor,
-          last_edit_at: c.last_edit_at,
-          validated: c.validated,
-          word_count: c.word_count,
-        }))
-    }
+	          last_editor: c.last_editor,
+	          last_edit_at: c.last_edit_at,
+	          validated: c.validated,
+	          endorsement_count: c.endorsement_count ?? 0,
+	          word_count: c.word_count,
+	        }))
+	    }
 
     // ── Rebuild DELETE ─────────────────────────────────────────────────
     if (/^DELETE FROM cell_validators WHERE project_id = \?$/.test(normalized)) {
@@ -484,8 +507,8 @@ export function makeInMemoryD1(tables: Partial<Tables> = {}): InMemoryD1 {
     }
 
     // ── Single-cell DELETE (source.cell.delete / target.cell.delete) ────
-    if (/^DELETE FROM cells WHERE project_id = \? AND file_id = \? AND cell_id = \?$/.test(normalized)) {
-      const pid = args[0] as string
+	    if (/^DELETE FROM cells WHERE project_id = \? AND file_id = \? AND cell_id = \?$/.test(normalized)) {
+	      const pid = args[0] as string
       const fid = args[1] as string
       const cid = args[2] as string
       db.cells = db.cells.filter(
@@ -496,10 +519,110 @@ export function makeInMemoryD1(tables: Partial<Tables> = {}): InMemoryD1 {
 
     // ── INSERT events (canonical audit row) ────────────────────────────
     // Bind order from handlers/cell-events.ts and file-create.ts:
-    //   0=id, 1=schema_version, 2=project_id, 3=file_id, 4=cell_id,
-    //   5=parent_id, 6=kind, 7=author, 8=payload, 9=client_ts,
-    //   10=server_ts, 11=server_seq
-    if (/^INSERT OR IGNORE INTO events\s*\(/.test(normalized)) {
+	    //   0=id, 1=schema_version, 2=project_id, 3=file_id, 4=cell_id,
+	    //   5=parent_id, 6=kind, 7=author, 8=payload, 9=client_ts,
+	    //   10=server_ts, 11=server_seq
+	    if (
+	      /^INSERT OR IGNORE INTO events \( id, schema_version, project_id, file_id, cell_id, parent_id, kind, author, payload, client_ts, server_ts, server_seq \) VALUES \(\?, 1, \?, \?, \?, NULL, 'cell\.endorsement'/.test(
+	        normalized,
+	      )
+	    ) {
+	      const row: EventRow = {
+	        id: args[0] as string,
+	        schema_version: 1,
+	        project_id: args[1] as string,
+	        file_id: args[2] as string | null,
+	        cell_id: args[3] as string | null,
+	        parent_id: null,
+	        kind: 'cell.endorsement',
+	        author: args[4] as string,
+	        payload: args[5] as string,
+	        client_ts: args[6] as number,
+	        server_ts: args[7] as number,
+	        server_seq: args[8] as number,
+	      }
+	      if (!db.events.some((e) => e.id === row.id)) db.events.push(row)
+	      return []
+	    }
+
+	    // ── AD-14 validation endorsement prelude ───────────────────────────
+	    if (
+	      /^SELECT event_id FROM cells WHERE project_id = \? AND file_id = \? AND cell_id = \? AND side = 'target'$/.test(
+	        normalized,
+	      )
+	    ) {
+	      const cell = db.cells.find(
+	        (c) =>
+	          c.project_id === args[0] &&
+	          c.file_id === args[1] &&
+	          c.cell_id === args[2] &&
+	          c.side === 'target',
+	      )
+	      return cell ? [{ event_id: cell.event_id }] : []
+	    }
+
+	    if (
+	      /^SELECT e\.id FROM events e WHERE e\.project_id = \? AND e\.kind = 'cell\.endorsement'/.test(
+	        normalized,
+	      )
+	    ) {
+	      const projectId = args[0] as string
+	      const endorsingCellId = args[1] as string
+	      const validatorUserId = args[2] as number
+	      return db.events
+	        .filter((event) => {
+	          if (event.project_id !== projectId || event.kind !== 'cell.endorsement') {
+	            return false
+	          }
+	          const payload = JSON.parse(event.payload) as {
+	            endorsingCellId?: string
+	            validatorUserId?: number
+	          }
+	          if (
+	            payload.endorsingCellId !== endorsingCellId ||
+	            payload.validatorUserId !== validatorUserId
+	          ) {
+	            return false
+	          }
+	          return !db.events.some((rev) => {
+	            if (
+	              rev.project_id !== projectId ||
+	              rev.kind !== 'cell.endorsement.revoke'
+	            ) {
+	              return false
+	            }
+	            const revPayload = JSON.parse(rev.payload) as {
+	              endorsementEventId?: string
+	            }
+	            return revPayload.endorsementEventId === event.id
+	          })
+	        })
+	        .sort((a, b) => a.server_seq - b.server_seq)
+	        .map((event) => ({ id: event.id }))
+	    }
+	    if (
+	      /^INSERT OR IGNORE INTO events \( id, schema_version, project_id, file_id, cell_id, parent_id, kind, author, payload, client_ts, server_ts, server_seq \) VALUES \(\?, 1, \?, \?, \?, NULL, 'cell\.endorsement\.revoke'/.test(
+	        normalized,
+	      )
+	    ) {
+	      const row: EventRow = {
+	        id: args[0] as string,
+	        schema_version: 1,
+	        project_id: args[1] as string,
+	        file_id: args[2] as string | null,
+	        cell_id: args[3] as string | null,
+	        parent_id: null,
+	        kind: 'cell.endorsement.revoke',
+	        author: args[4] as string,
+	        payload: args[5] as string,
+	        client_ts: args[6] as number,
+	        server_ts: args[7] as number,
+	        server_seq: args[8] as number,
+	      }
+	      if (!db.events.some((e) => e.id === row.id)) db.events.push(row)
+	      return []
+	    }
+	    if (/^INSERT OR IGNORE INTO events\s*\(/.test(normalized)) {
       const row: EventRow = {
         id: args[0] as string,
         schema_version: args[1] as number,
@@ -520,7 +643,7 @@ export function makeInMemoryD1(tables: Partial<Tables> = {}): InMemoryD1 {
     }
 
     // ── INSERT cells (cell create handlers) ─────────────────────────────
-    if (/^INSERT INTO cells \(\s*project_id, file_id, cell_id, side, value, value_html, type, canonical_ref, anchor_cell_id, event_id, source_event_id, last_editor, last_edit_at, validated, word_count, content_hash\s*\)/.test(
+	    if (/^INSERT INTO cells \(\s*project_id, file_id, cell_id, side, value, value_html, type, canonical_ref, anchor_cell_id, event_id, source_event_id, last_editor, last_edit_at, validated, word_count, content_hash\s*\)/.test(
       normalized,
     )) {
       const row: CellRow = {
@@ -538,6 +661,7 @@ export function makeInMemoryD1(tables: Partial<Tables> = {}): InMemoryD1 {
         last_editor: args[10] as string | null,
         last_edit_at: args[11] as number,
         validated: 0,
+        endorsement_count: 0,
         word_count: args[12] as number,
         content_hash: args[13] as string | null,
       }
@@ -925,8 +1049,8 @@ export function makeInMemoryD1(tables: Partial<Tables> = {}): InMemoryD1 {
     // From validate/unvalidate: re-evaluate validated against the current
     // chain head (cells.event_id).
     // Bind order: 0=project_id, 1=file_id, 2=cell_id (subquery), 3=project_id, 4=file_id, 5=cell_id (WHERE).
-    if (/^UPDATE cells SET validated/.test(normalized)) {
-      const projectId = args[0] as string
+	    if (/^UPDATE cells SET validated/.test(normalized)) {
+	      const projectId = args[0] as string
       const fileId = args[4] as string
       const cellId = args[5] as string
       const cell = findCell(projectId, fileId, cellId)
@@ -940,11 +1064,66 @@ export function makeInMemoryD1(tables: Partial<Tables> = {}): InMemoryD1 {
             v.edit_event_id === cell.event_id,
         )
         cell.validated = activeForHead ? 1 : 0
-      }
-      return []
-    }
+	      }
+	      return []
+	    }
 
-    return []
+	    if (
+	      /^UPDATE cells SET endorsement_count = endorsement_count \+ 1 WHERE project_id = \? AND cell_id = \? AND side = 'target'$/.test(
+	        normalized,
+	      )
+	    ) {
+	      const projectId = args[0] as string
+	      const cellId = args[1] as string
+	      for (const cell of db.cells) {
+	        if (
+	          cell.project_id === projectId &&
+	          cell.cell_id === cellId &&
+	          cell.side === 'target'
+	        ) {
+	          cell.endorsement_count = (cell.endorsement_count ?? 0) + 1
+	        }
+	      }
+	      return []
+	    }
+
+	    if (
+	      /^UPDATE cells SET endorsement_count = max\(0, endorsement_count - 1\) WHERE project_id = \? AND cell_id =/.test(
+	        normalized,
+	      )
+	    ) {
+	      const projectId = args[0] as string
+	      const endorsementEventId = args[1] as string
+	      const endorsement = db.events.find(
+	        (event) => event.id === endorsementEventId && event.kind === 'cell.endorsement',
+	      )
+	      if (!endorsement) return []
+	      const payload = JSON.parse(endorsement.payload) as { endorsedCellId?: string }
+	      for (const cell of db.cells) {
+	        if (
+	          cell.project_id === projectId &&
+	          cell.cell_id === payload.endorsedCellId &&
+	          cell.side === 'target'
+	        ) {
+	          cell.endorsement_count = Math.max(0, (cell.endorsement_count ?? 0) - 1)
+	        }
+	      }
+	      return []
+	    }
+
+	    if (
+	      /^UPDATE projects SET source_project_id = \?, updated_at = CURRENT_TIMESTAMP WHERE id = \?$/.test(
+	        normalized,
+	      )
+	    ) {
+	      const sourceProjectId = args[0] as string | null
+	      const projectId = args[1] as string
+	      const project = db.projects.find((p) => p.id === projectId)
+	      if (project) project.source_project_id = sourceProjectId
+	      return []
+	    }
+
+	    return []
   }
 
   function makePrepared(sql: string) {

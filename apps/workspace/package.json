@@ -13,12 +13,12 @@
     "test:watch": "vitest"
   },
   "dependencies": {
-    "@aquilla/api-client": "workspace:*",
-    "@aquilla/auth-client": "workspace:*",
-    "@aquilla/data-model": "workspace:*",
-    "@aquilla/errors": "workspace:*",
-    "@aquilla/telemetry": "workspace:*",
-    "@aquilla/ui": "workspace:*",
+    "@aquilla/api-client": "file:../../packages/api-client",
+    "@aquilla/auth-client": "file:../../packages/auth-client",
+    "@aquilla/data-model": "file:../../packages/data-model",
+    "@aquilla/errors": "file:../../packages/errors",
+    "@aquilla/telemetry": "file:../../packages/telemetry",
+    "@aquilla/ui": "file:../../packages/ui",
     "@base-ui/react": "^1.4.0",
     "@fontsource-variable/geist": "^5.2.8",
     "@huggingface/transformers": "^4.2.0",

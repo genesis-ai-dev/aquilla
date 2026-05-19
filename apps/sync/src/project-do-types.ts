@@ -15,7 +15,10 @@ export type OutboxEventKind =
   | "target.cell.reorder"
   | "cell.validate"
   | "cell.unvalidate"
+  | "cell.endorsement"
+  | "cell.endorsement.revoke"
   | "file.create"
+  | "project.link-source"
 
 export interface OutboxRawEvent {
   id: string

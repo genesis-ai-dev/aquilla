@@ -59,6 +59,9 @@ export function dispatchEvent(
     case 'target.cell.reorder':
     case 'cell.validate':
     case 'cell.unvalidate':
+    case 'cell.endorsement':
+    case 'cell.endorsement.revoke':
+    case 'project.link-source':
       return {
         ok: true,
         result: handleCellEvent(

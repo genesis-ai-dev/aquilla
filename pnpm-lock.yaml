@@ -211,10 +211,10 @@ importers:
   apps/billing:
     dependencies:
       '@aquilla/errors':
-        specifier: workspace:*
+        specifier: file:../../packages/errors
         version: link:../../packages/errors
       '@aquilla/ui':
-        specifier: workspace:*
+        specifier: file:../../packages/ui
         version: link:../../packages/ui
     devDependencies:
       '@cloudflare/workers-types':
@@ -300,13 +300,13 @@ importers:
   apps/export:
     dependencies:
       '@aquilla/auth-client':
-        specifier: workspace:*
+        specifier: file:../../packages/auth-client
         version: link:../../packages/auth-client
       '@aquilla/errors':
-        specifier: workspace:*
+        specifier: file:../../packages/errors
         version: link:../../packages/errors
       '@aquilla/ui':
-        specifier: workspace:*
+        specifier: file:../../packages/ui
         version: link:../../packages/ui
       react:
         specifier: ^19.2.4
@@ -355,7 +355,7 @@ importers:
   apps/front-door:
     dependencies:
       '@aquilla/errors':
-        specifier: workspace:*
+        specifier: file:../../packages/errors
         version: link:../../packages/errors
     devDependencies:
       '@cloudflare/workers-types':
@@ -408,13 +408,13 @@ importers:
   apps/import:
     dependencies:
       '@aquilla/auth-client':
-        specifier: workspace:*
+        specifier: file:../../packages/auth-client
         version: link:../../packages/auth-client
       '@aquilla/errors':
-        specifier: workspace:*
+        specifier: file:../../packages/errors
         version: link:../../packages/errors
       '@aquilla/ui':
-        specifier: workspace:*
+        specifier: file:../../packages/ui
         version: link:../../packages/ui
       react:
         specifier: ^19.2.4
@@ -463,13 +463,13 @@ importers:
   apps/login:
     dependencies:
       '@aquilla/auth-client':
-        specifier: workspace:*
+        specifier: file:../../packages/auth-client
         version: link:../../packages/auth-client
       '@aquilla/errors':
-        specifier: workspace:*
+        specifier: file:../../packages/errors
         version: link:../../packages/errors
       '@aquilla/ui':
-        specifier: workspace:*
+        specifier: file:../../packages/ui
         version: link:../../packages/ui
       react:
         specifier: ^19.2.4
@@ -524,13 +524,13 @@ importers:
   apps/migrate:
     dependencies:
       '@aquilla/auth-client':
-        specifier: workspace:*
+        specifier: file:../../packages/auth-client
         version: link:../../packages/auth-client
       '@aquilla/errors':
-        specifier: workspace:*
+        specifier: file:../../packages/errors
         version: link:../../packages/errors
       '@aquilla/ui':
-        specifier: workspace:*
+        specifier: file:../../packages/ui
         version: link:../../packages/ui
       react:
         specifier: ^19.2.4
@@ -579,16 +579,16 @@ importers:
   apps/org:
     dependencies:
       '@aquilla/api-client':
-        specifier: workspace:*
+        specifier: file:../../packages/api-client
         version: link:../../packages/api-client
       '@aquilla/auth-client':
-        specifier: workspace:*
+        specifier: file:../../packages/auth-client
         version: link:../../packages/auth-client
       '@aquilla/errors':
-        specifier: workspace:*
+        specifier: file:../../packages/errors
         version: link:../../packages/errors
       '@aquilla/ui':
-        specifier: workspace:*
+        specifier: file:../../packages/ui
         version: link:../../packages/ui
     devDependencies:
       '@cloudflare/workers-types':
@@ -646,16 +646,16 @@ importers:
   apps/projects:
     dependencies:
       '@aquilla/api-client':
-        specifier: workspace:*
+        specifier: file:../../packages/api-client
         version: link:../../packages/api-client
       '@aquilla/auth-client':
-        specifier: workspace:*
+        specifier: file:../../packages/auth-client
         version: link:../../packages/auth-client
       '@aquilla/errors':
-        specifier: workspace:*
+        specifier: file:../../packages/errors
         version: link:../../packages/errors
       '@aquilla/ui':
-        specifier: workspace:*
+        specifier: file:../../packages/ui
         version: link:../../packages/ui
     devDependencies:
       '@cloudflare/workers-types':
@@ -713,13 +713,13 @@ importers:
   apps/reset:
     dependencies:
       '@aquilla/auth-client':
-        specifier: workspace:*
+        specifier: file:../../packages/auth-client
         version: link:../../packages/auth-client
       '@aquilla/errors':
-        specifier: workspace:*
+        specifier: file:../../packages/errors
         version: link:../../packages/errors
       '@aquilla/ui':
-        specifier: workspace:*
+        specifier: file:../../packages/ui
         version: link:../../packages/ui
       react:
         specifier: ^19.2.4
@@ -774,13 +774,13 @@ importers:
   apps/signup:
     dependencies:
       '@aquilla/auth-client':
-        specifier: workspace:*
+        specifier: file:../../packages/auth-client
         version: link:../../packages/auth-client
       '@aquilla/errors':
-        specifier: workspace:*
+        specifier: file:../../packages/errors
         version: link:../../packages/errors
       '@aquilla/ui':
-        specifier: workspace:*
+        specifier: file:../../packages/ui
         version: link:../../packages/ui
       react:
         specifier: ^19.2.4
@@ -863,22 +863,22 @@ importers:
   apps/workspace:
     dependencies:
       '@aquilla/api-client':
-        specifier: workspace:*
+        specifier: file:../../packages/api-client
         version: link:../../packages/api-client
       '@aquilla/auth-client':
-        specifier: workspace:*
+        specifier: file:../../packages/auth-client
         version: link:../../packages/auth-client
       '@aquilla/data-model':
-        specifier: workspace:*
+        specifier: file:../../packages/data-model
         version: link:../../packages/data-model
       '@aquilla/errors':
-        specifier: workspace:*
+        specifier: file:../../packages/errors
         version: link:../../packages/errors
       '@aquilla/telemetry':
-        specifier: workspace:*
+        specifier: file:../../packages/telemetry
         version: link:../../packages/telemetry
       '@aquilla/ui':
-        specifier: workspace:*
+        specifier: file:../../packages/ui
         version: link:../../packages/ui
       '@base-ui/react':
         specifier: ^1.4.0

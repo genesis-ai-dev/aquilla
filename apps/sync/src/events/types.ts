@@ -33,8 +33,13 @@ export type EventKind =
   // Validation (reviewer-level).
   | 'cell.validate'
   | 'cell.unvalidate'
+  // Validation-driven decay endorsements (server-emitted by sync-worker).
+  | 'cell.endorsement'
+  | 'cell.endorsement.revoke'
   // File lifecycle.
   | 'file.create'
+  // Project lifecycle.
+  | 'project.link-source'
 
 // Payload shape per event kind. Using an interface (not Record) so that
 // EventPayloads[K] gives type-safe lookups without `as` casts.
@@ -91,6 +96,15 @@ export interface EventPayloads {
     /** The target commit event whose validation is being withdrawn. */
     editEventId: string
   }
+  'cell.endorsement': {
+    endorsedCellId: string
+    endorsingCellId: string
+    validatorUserId: number
+    retrievalQueryEventId: string
+  }
+  'cell.endorsement.revoke': {
+    endorsementEventId: string
+  }
 
   // ── File lifecycle ─────────────────────────────────────────────────────
   //
@@ -124,6 +138,9 @@ export interface EventPayloads {
     /** ISO codes; null/undefined when unknown at import time. */
     sourceLanguage?: string
     targetLanguage?: string
+  }
+  'project.link-source': {
+    sourceProjectId: string | null
   }
 }
 

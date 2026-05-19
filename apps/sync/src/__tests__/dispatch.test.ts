@@ -22,18 +22,26 @@ async function makeAuthorized<K extends EventKind>(kind: K, role = 500) {
     'target.cell.commit': { value: 'x' },
     'target.cell.delete': {},
     'target.cell.reorder': { anchorCellId: null },
-    'cell.validate': { editEventId: 'evt-1' },
-    'cell.unvalidate': { editEventId: 'evt-1' },
-    'file.create': { name: 'Genesis', fileType: 'codex' },
-  }
+	    'cell.validate': { editEventId: 'evt-1' },
+	    'cell.unvalidate': { editEventId: 'evt-1' },
+	    'cell.endorsement': {
+	      endorsedCellId: 'cell-1',
+	      endorsingCellId: 'cell-1',
+	      validatorUserId: 1,
+	      retrievalQueryEventId: 'evt-src-1',
+	    },
+	    'cell.endorsement.revoke': { endorsementEventId: 'evt-endorsement-1' },
+	    'file.create': { name: 'Genesis', fileType: 'codex' },
+	    'project.link-source': { sourceProjectId: 'source-proj' },
+	  }
 
   const raw = {
     id: 'evt-00000000-0000-7000-0000-000000000001',
     schemaVersion: 1,
     kind,
     projectId: 'proj-a',
-    fileId: 'file-x',
-    cellId: kind === 'file.create' ? undefined : 'cell-1',
+	    fileId: kind === 'project.link-source' ? undefined : 'file-x',
+	    cellId: kind === 'file.create' || kind === 'project.link-source' ? undefined : 'cell-1',
     parentId: null,
     author: 'alice',
     payload: payloads[kind],

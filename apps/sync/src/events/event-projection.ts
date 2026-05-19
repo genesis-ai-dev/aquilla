@@ -359,6 +359,42 @@ export function buildEventProjectionStmts(
       return ['cell_validators', 'cells']
     }
 
+    case 'cell.endorsement': {
+      const p = event.payload as EventPayloads['cell.endorsement']
+      stmts.push(
+        db
+          .prepare(
+            `UPDATE cells
+                SET endorsement_count = endorsement_count + 1
+              WHERE project_id = ?
+                AND cell_id = ?
+                AND side = 'target'`,
+          )
+          .bind(event.projectId, p.endorsedCellId),
+      )
+      return ['cells']
+    }
+
+    case 'cell.endorsement.revoke': {
+      const p = event.payload as EventPayloads['cell.endorsement.revoke']
+      stmts.push(
+        db
+          .prepare(
+            `UPDATE cells
+                SET endorsement_count = max(0, endorsement_count - 1)
+              WHERE project_id = ?
+                AND cell_id = (
+                  SELECT json_extract(payload, '$.endorsedCellId')
+                    FROM events
+                   WHERE id = ? AND kind = 'cell.endorsement'
+                )
+                AND side = 'target'`,
+          )
+          .bind(event.projectId, p.endorsementEventId),
+      )
+      return ['cells']
+    }
+
     case 'file.create': {
       const p = event.payload as EventPayloads['file.create']
       if (!event.fileId) {
@@ -419,6 +455,21 @@ export function buildEventProjectionStmts(
           ),
       )
       return ['files']
+    }
+
+    case 'project.link-source': {
+      const p = event.payload as EventPayloads['project.link-source']
+      stmts.push(
+        db
+          .prepare(
+            `UPDATE projects
+                SET source_project_id = ?,
+                    updated_at = CURRENT_TIMESTAMP
+              WHERE id = ?`,
+          )
+          .bind(p.sourceProjectId, event.projectId),
+      )
+      return []
     }
 
     default: {

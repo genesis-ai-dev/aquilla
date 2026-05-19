@@ -53,6 +53,7 @@ export interface CellRow {
   lastEditor: string | null
   lastEditAt: number
   validated: boolean
+  endorsementCount?: number
   wordCount: number
 }
 

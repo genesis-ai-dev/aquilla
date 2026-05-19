@@ -90,7 +90,7 @@ describe("POST /api/v2/projects/:projectId/link-source", () => {
       kind: "project.link-source",
       author: "alice",
     })
-    expect(JSON.parse(events[0].payload)).toEqual({ source_project_id: "source" })
+    expect(JSON.parse(events[0].payload)).toEqual({ sourceProjectId: "source" })
   })
 
   it("403s callers below project_lead (500)", async () => {
@@ -312,9 +312,9 @@ describe("POST /api/v2/projects/:projectId/detach-source", () => {
     expect(target?.source_project_id).toBeNull()
 
     const events = db._tables().events
-    // 1 project.link-source + 2 source.cell.commit
+    // 1 project.link-source + 2 source.cell.create snapshots.
     expect(events.filter((e) => e.kind === "project.link-source")).toHaveLength(1)
-    const burst = events.filter((e) => e.kind === "source.cell.commit")
+    const burst = events.filter((e) => e.kind === "source.cell.create")
     expect(burst).toHaveLength(2)
     expect(burst.every((e) => e.project_id === "target")).toBe(true)
     expect(burst.map((e) => JSON.parse(e.payload).value).sort()).toEqual([

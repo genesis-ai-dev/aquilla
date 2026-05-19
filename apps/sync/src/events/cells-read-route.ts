@@ -44,6 +44,7 @@ interface CellRowRaw {
   last_editor: string | null
   last_edit_at: number
   validated: number
+  endorsement_count: number
   word_count: number
 }
 
@@ -60,6 +61,7 @@ interface CellRowOut {
   lastEditor: string | null
   lastEditAt: number
   validated: boolean
+  endorsementCount: number
   wordCount: number
 }
 
@@ -77,6 +79,7 @@ function mapRow(row: CellRowRaw): CellRowOut {
     lastEditor: row.last_editor,
     lastEditAt: row.last_edit_at,
     validated: row.validated === 1,
+    endorsementCount: row.endorsement_count,
     wordCount: row.word_count,
   }
 }
@@ -242,22 +245,64 @@ export async function handleCellsReadRequest(
   // walk dominates only at >10x current file sizes.
   const columns =
     "cell_id, side, value, value_html, type, canonical_ref, anchor_cell_id, " +
-    "event_id, source_event_id, last_editor, last_edit_at, validated, word_count"
+    "event_id, source_event_id, last_editor, last_edit_at, validated, endorsement_count, word_count"
 
-  const parts: string[] = [
-    `SELECT ${columns}`,
-    "FROM cells",
-    "WHERE project_id = ? AND file_id = ?",
-  ]
-  const binds: unknown[] = [projectId, fileId]
-  if (sideFilter !== null) {
-    parts.push("AND side = ?")
-    binds.push(sideFilter)
+  let upstreamProjectId: string | null = null
+  let upstreamSourceFileId = fileId
+  try {
+    const link = await env.AQUILLA_DB.prepare(
+      `SELECT p.source_project_id AS source_project_id,
+              f.source_file_id    AS source_file_id
+         FROM projects p
+         LEFT JOIN files f
+           ON f.project_id = p.id AND f.id = ?
+        WHERE p.id = ?`,
+    )
+      .bind(fileId, projectId)
+      .first<{ source_project_id: string | null; source_file_id: string | null }>()
+    upstreamProjectId = link?.source_project_id ?? null
+    upstreamSourceFileId = link?.source_file_id ?? fileId
+  } catch {
+    upstreamProjectId = null
   }
-  const sql = parts.join(" ")
 
-  const result = await env.AQUILLA_DB.prepare(sql).bind(...binds).all<CellRowRaw>()
-  const allRows = result.results
+  let allRows: CellRowRaw[]
+  if (upstreamProjectId && sideFilter !== "target") {
+    const sourceRows = await env.AQUILLA_DB.prepare(
+      `SELECT ${columns}
+         FROM cells
+        WHERE project_id = ? AND file_id = ? AND side = 'source'`,
+    )
+      .bind(upstreamProjectId, upstreamSourceFileId)
+      .all<CellRowRaw>()
+
+    if (sideFilter === "source") {
+      allRows = sourceRows.results
+    } else {
+      const targetRows = await env.AQUILLA_DB.prepare(
+        `SELECT ${columns}
+           FROM cells
+          WHERE project_id = ? AND file_id = ? AND side = 'target'`,
+      )
+        .bind(projectId, fileId)
+        .all<CellRowRaw>()
+      allRows = [...sourceRows.results, ...targetRows.results]
+    }
+  } else {
+    const parts: string[] = [
+      `SELECT ${columns}`,
+      "FROM cells",
+      "WHERE project_id = ? AND file_id = ?",
+    ]
+    const binds: unknown[] = [projectId, fileId]
+    if (sideFilter !== null) {
+      parts.push("AND side = ?")
+      binds.push(sideFilter)
+    }
+    const sql = parts.join(" ")
+    const result = await env.AQUILLA_DB.prepare(sql).bind(...binds).all<CellRowRaw>()
+    allRows = result.results
+  }
 
   let ordered: CellRowRaw[]
   if (sideFilter === null) {

@@ -21,6 +21,8 @@ export interface ProjectWideSettings {
   systemPrompt?: string
   rules?: TranslationRule[]
   rulePenalties?: RulePenalties
+  decaySettings?: HealthSettings
+  /** @deprecated Use decaySettings. Kept until the settings UI is renamed. */
   healthSettings?: HealthSettings
   validationCount?: number
   validationCountAudio?: number

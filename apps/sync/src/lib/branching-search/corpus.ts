@@ -132,6 +132,7 @@ export async function loadCorpus(
       cellId: row.cell_id,
       fileId: row.file_id,
       anchorCellId: row.anchor_cell_id,
+      sourceEventId: row.source_event_id,
       sourceText: row.source_text,
       targetText: row.target_text,
       validated: row.target_validated === 1,

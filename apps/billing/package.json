@@ -16,8 +16,8 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@aquilla/errors": "workspace:*",
-    "@aquilla/ui": "workspace:*"
+    "@aquilla/errors": "file:../../packages/errors",
+    "@aquilla/ui": "file:../../packages/ui"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20240117.0",

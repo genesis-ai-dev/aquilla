@@ -5,7 +5,7 @@
 
 import type { EventKind, EventClaims, RawEvent } from './types'
 import { requiredRoleFor } from './role-policy'
-import { verifyTokenForDoc, type SyncTokenClaims } from '../auth'
+import { verifyTokenForDoc, verifyTokenForProject, type SyncTokenClaims } from '../auth'
 
 // Private symbol — NOT exported. Code outside this file cannot reproduce
 // the brand on a fake AuthorizedEvent, even via Object.assign or JSON.parse/
@@ -69,17 +69,19 @@ export async function authorize<K extends EventKind>(
   if (!token) {
     return { ok: false, status: 401, reason: 'missing token' }
   }
-  // 3. Phase 0: every event must be file-scoped.
-  if (!raw.fileId) {
-    return { ok: false, status: 400, reason: 'event missing fileId' }
+  // Server-emitted AD-14 events are append-only side effects of validation.
+  // Clients must not author them directly through POST /events.
+  if (raw.kind === 'cell.endorsement' || raw.kind === 'cell.endorsement.revoke') {
+    return { ok: false, status: 400, reason: `${raw.kind} is server-emitted` }
   }
 
-  // 4. Verify JWT — fileId is now guaranteed to be a string.
-  const authResult = await verifyTokenForDoc(
-    token,
-    { projectId: raw.projectId, fileId: raw.fileId },
-    secret,
-  )
+  const authResult = raw.fileId
+    ? await verifyTokenForDoc(
+        token,
+        { projectId: raw.projectId, fileId: raw.fileId },
+        secret,
+      )
+    : await verifyTokenForProject(token, raw.projectId, secret)
 
   if (!authResult.ok) {
     // AuthResult.status is 401 | 403 | 500, which is a subset of our 400 | 401 | 403 | 500.

@@ -49,9 +49,17 @@ export const REQUIRED_ROLE: Record<EventKind, number> = {
   // Validation gate.
   'cell.validate': ROLE.REVIEWER,
   'cell.unvalidate': ROLE.REVIEWER,
+  // Server-emitted as a side effect of validation. authorize() rejects direct
+  // client-authored endorsement events before this table is consulted in
+  // normal traffic; OWNER keeps accidental direct calls privileged.
+  'cell.endorsement': ROLE.OWNER,
+  'cell.endorsement.revoke': ROLE.OWNER,
 
   // file.create is a structural change.
   'file.create': ROLE.PROJECT_LEAD,
+
+  // Source-project lifecycle.
+  'project.link-source': ROLE.PROJECT_LEAD,
 }
 
 export function requiredRoleFor(kind: EventKind): number {

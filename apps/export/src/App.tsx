@@ -4,7 +4,7 @@
 // is deferred until after Phase 2c-β rewrites the underlying parser +
 // import pipeline. For now this surface exists only so the deploy-all-apps
 // workflow can pick the app up in its matrix and routes.json's `/export`
-// mount serves something coherent on preview.
+// mount owns the AD-11 route handoff from the workspace.
 
 const PLANNED_FORMATS = [
   { ext: "USFM", note: "scripture (paratext)" },
@@ -15,7 +15,27 @@ const PLANNED_FORMATS = [
   { ext: "VTT / SRT", note: "subtitles" },
 ] as const
 
+function launchContext(): {
+  projectId: string | null
+  fileId: string | null
+  returnTo: string
+} {
+  if (typeof window === "undefined") {
+    return { projectId: null, fileId: null, returnTo: "/projects/" }
+  }
+  const params = new URLSearchParams(window.location.search)
+  const projectId = params.get("project")
+  const fileId = params.get("file")
+  return {
+    projectId,
+    fileId,
+    returnTo: params.get("return") || (projectId ? `/w/${projectId}/` : "/projects/"),
+  }
+}
+
 export function App() {
+  const { projectId, fileId, returnTo } = launchContext()
+
   return (
     <main className="mx-auto flex min-h-screen max-w-3xl flex-col gap-8 px-6 py-12 text-slate-800">
       <header className="flex flex-col gap-2">
@@ -26,15 +46,24 @@ export function App() {
           Export translations
         </h1>
         <p className="text-base text-slate-600">
-          Coming soon. Standalone exporting will live here. For now, open a
-          project from your dashboard and use the workspace's export
-          surface.
+          This focused export surface receives project context from the
+          workspace and will rebuild deliverables from server state.
         </p>
+        {projectId && (
+          <p className="text-sm text-slate-500">
+            Project: <span className="font-mono text-slate-700">{projectId}</span>
+            {fileId ? (
+              <>
+                {" "}/ File: <span className="font-mono text-slate-700">{fileId}</span>
+              </>
+            ) : null}
+          </p>
+        )}
         <a
-          href="/projects/"
+          href={returnTo}
           className="mt-2 inline-flex items-center text-sm text-primary hover:underline"
         >
-          ← Back to projects
+          Return
         </a>
       </header>
 

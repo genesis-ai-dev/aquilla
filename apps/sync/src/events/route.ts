@@ -20,16 +20,46 @@
 //   parent-chain guard is naturally idempotent — replaying the winning
 //   event sees its own row as the existing one and continues to win.
 
-import type { RawEvent } from './types'
+import type { EventKind, RawEvent } from './types'
 import type { RealtimeMessage, ProjectionTable } from './realtime'
 import { authorize } from './authorize'
 import { dispatchEvent } from './dispatch'
 import { isWinningChild, type PersistedEvent } from './event-projection'
 import { broadcastRealtime } from './broadcast'
 import type { BroadcastEnv } from './broadcast'
+import { branchingSearch } from '../lib/branching-search/algorithm'
+import { loadCorpus } from '../lib/branching-search/corpus'
+import { loadBranchingSearchSettings } from '../lib/branching-search/settings'
 
 // Cloudflare D1 max statements per db.batch() call.
 const D1_BATCH_LIMIT = 100
+
+function isChainMutatingKind(kind: EventKind): boolean {
+  return (
+    kind === 'source.cell.create' ||
+    kind === 'source.cell.commit' ||
+    kind === 'source.cell.delete' ||
+    kind === 'source.cell.reorder' ||
+    kind === 'target.cell.create' ||
+    kind === 'target.cell.commit' ||
+    kind === 'target.cell.delete' ||
+    kind === 'target.cell.reorder'
+  )
+}
+
+function chainWinnerKey(event: RawEvent): string | null {
+  if (!event.fileId || !event.cellId || !isChainMutatingKind(event.kind)) {
+    return null
+  }
+  const side = event.kind.startsWith('target.') ? 'target' : 'source'
+  return [
+    event.projectId,
+    event.fileId,
+    event.cellId,
+    event.parentId ?? '',
+    side,
+  ].join('\u001f')
+}
 
 export interface EventsRouteEnv {
   AQUILLA_DB?: D1Database
@@ -174,6 +204,167 @@ export async function handleEventsWriteRequest(
     return assigned
   }
 
+  function makeServerEventId(): string {
+    return crypto.randomUUID()
+  }
+
+  async function buildValidationEndorsementStmts(
+    event: RawEvent<'cell.validate'>,
+    author: { username: string; userId: number },
+  ): Promise<D1PreparedStatement[]> {
+    if (!event.fileId || !event.cellId) return []
+    const payload = event.payload as { editEventId?: string }
+    if (!payload.editEventId) return []
+
+    const target = await db
+      .prepare(
+        `SELECT event_id
+           FROM cells
+          WHERE project_id = ? AND file_id = ? AND cell_id = ? AND side = 'target'`,
+      )
+      .bind(event.projectId, event.fileId, event.cellId)
+      .first<{ event_id: string }>()
+
+    // Do not endorse stale validations against an old target edit.
+    if (!target || target.event_id !== payload.editEventId) return []
+
+    const corpus = await loadCorpus(env, { projectId: event.projectId })
+    const queryCell = corpus.cells.find((cell) => cell.cellId === event.cellId)
+    if (!queryCell?.sourceText || !queryCell.sourceEventId) return []
+
+    const settings = await loadBranchingSearchSettings(env, event.projectId)
+    const { results } = branchingSearch(queryCell.sourceText, corpus.cells, settings)
+    const endorsedCellIds = results.map((result) => result.cellId)
+
+    // AD-14 requires self-endorsement on validation. The branching search will
+    // usually return the query cell; add it defensively if ranking does not.
+    if (!endorsedCellIds.includes(event.cellId)) {
+      endorsedCellIds.unshift(event.cellId)
+    }
+
+    const stmts: D1PreparedStatement[] = []
+    for (const endorsedCellId of endorsedCellIds) {
+      const endorsementId = makeServerEventId()
+      const serverTs = nextServerTs++
+      const serverSeq = await reserveSeq(event.projectId)
+      const endorsementPayload = {
+        endorsedCellId,
+        endorsingCellId: event.cellId,
+        validatorUserId: author.userId,
+        retrievalQueryEventId: queryCell.sourceEventId,
+      }
+
+      stmts.push(
+        db
+          .prepare(
+            `INSERT OR IGNORE INTO events (
+              id, schema_version, project_id, file_id, cell_id, parent_id, kind,
+              author, payload, client_ts, server_ts, server_seq
+            ) VALUES (?, 1, ?, ?, ?, NULL, 'cell.endorsement', ?, ?, ?, ?, ?)`,
+          )
+          .bind(
+            endorsementId,
+            event.projectId,
+            event.fileId,
+            endorsedCellId,
+            author.username,
+            JSON.stringify(endorsementPayload),
+            event.clientTs,
+            serverTs,
+            serverSeq,
+          ),
+      )
+      stmts.push(
+        db
+          .prepare(
+            `UPDATE cells
+                SET endorsement_count = endorsement_count + 1
+              WHERE project_id = ?
+                AND cell_id = ?
+                AND side = 'target'`,
+          )
+          .bind(event.projectId, endorsedCellId),
+      )
+    }
+    return stmts
+  }
+
+  const pendingRevokedEndorsements = new Set<string>()
+  async function buildEndorsementRevokeStmts(
+    event: RawEvent<'cell.unvalidate'>,
+    author: { username: string; userId: number },
+  ): Promise<D1PreparedStatement[]> {
+    if (!event.cellId) return []
+
+    const rows = await db
+      .prepare(
+        `SELECT e.id
+           FROM events e
+          WHERE e.project_id = ?
+            AND e.kind = 'cell.endorsement'
+            AND json_extract(e.payload, '$.endorsingCellId') = ?
+            AND json_extract(e.payload, '$.validatorUserId') = ?
+            AND NOT EXISTS (
+              SELECT 1
+                FROM events r
+               WHERE r.project_id = e.project_id
+                 AND r.kind = 'cell.endorsement.revoke'
+                 AND json_extract(r.payload, '$.endorsementEventId') = e.id
+            )
+          ORDER BY e.server_seq ASC`,
+      )
+      .bind(event.projectId, event.cellId, author.userId)
+      .all<{ id: string }>()
+
+    const stmts: D1PreparedStatement[] = []
+    for (const row of rows.results ?? []) {
+      if (pendingRevokedEndorsements.has(row.id)) continue
+      pendingRevokedEndorsements.add(row.id)
+
+      const revokeId = makeServerEventId()
+      const serverTs = nextServerTs++
+      const serverSeq = await reserveSeq(event.projectId)
+      const revokePayload = { endorsementEventId: row.id }
+
+      stmts.push(
+        db
+          .prepare(
+            `INSERT OR IGNORE INTO events (
+              id, schema_version, project_id, file_id, cell_id, parent_id, kind,
+              author, payload, client_ts, server_ts, server_seq
+            ) VALUES (?, 1, ?, ?, ?, NULL, 'cell.endorsement.revoke', ?, ?, ?, ?, ?)`,
+          )
+          .bind(
+            revokeId,
+            event.projectId,
+            event.fileId ?? null,
+            event.cellId,
+            author.username,
+            JSON.stringify(revokePayload),
+            event.clientTs,
+            serverTs,
+            serverSeq,
+          ),
+      )
+      stmts.push(
+        db
+          .prepare(
+            `UPDATE cells
+                SET endorsement_count = max(0, endorsement_count - 1)
+              WHERE project_id = ?
+                AND cell_id = (
+                  SELECT json_extract(payload, '$.endorsedCellId')
+                    FROM events
+                   WHERE id = ? AND kind = 'cell.endorsement'
+                )
+                AND side = 'target'`,
+          )
+          .bind(event.projectId, row.id),
+      )
+    }
+    return stmts
+  }
+
   const accepted: AcceptedEntry[] = []
   const rejected: RejectedEntry[] = []
 
@@ -190,6 +381,7 @@ export async function handleEventsWriteRequest(
   const pendingStmts: D1PreparedStatement[] = []
   const pendingEntries: PendingEntry[] = []
   const seenEventIds = new Set<string>()
+  const pendingChainWinners = new Set<string>()
 
   for (const rawEvent of rawEvents) {
     // Authorize.
@@ -245,13 +437,16 @@ export async function handleEventsWriteRequest(
       serverTs,
       serverSeq,
     }
-    const isChainMutating =
-      rawEvent.kind !== 'cell.validate' &&
-      rawEvent.kind !== 'cell.unvalidate' &&
-      rawEvent.kind !== 'file.create'
-    const updateProjection = isChainMutating
-      ? await isWinningChild(db, candidate)
-      : true
+    const chainKey = chainWinnerKey(rawEvent)
+    let updateProjection = true
+    if (chainKey) {
+      if (pendingChainWinners.has(chainKey)) {
+        updateProjection = false
+      } else {
+        updateProjection = await isWinningChild(db, candidate)
+        if (updateProjection) pendingChainWinners.add(chainKey)
+      }
+    }
 
     // Dispatch.
     const outcome = dispatchEvent(db, authResult.event, serverTs, {
@@ -267,8 +462,26 @@ export async function handleEventsWriteRequest(
       continue
     }
 
+    const eventStmts = [...outcome.result.stmts]
+    if (updateProjection && rawEvent.kind === 'cell.validate') {
+      eventStmts.push(
+        ...(await buildValidationEndorsementStmts(
+          rawEvent as RawEvent<'cell.validate'>,
+          authResult.event.claims,
+        )),
+      )
+    }
+    if (updateProjection && rawEvent.kind === 'cell.unvalidate') {
+      eventStmts.push(
+        ...(await buildEndorsementRevokeStmts(
+          rawEvent as RawEvent<'cell.unvalidate'>,
+          authResult.event.claims,
+        )),
+      )
+    }
+
     const stmtsBefore = pendingStmts.length
-    for (const stmt of outcome.result.stmts) {
+    for (const stmt of eventStmts) {
       pendingStmts.push(stmt)
     }
 

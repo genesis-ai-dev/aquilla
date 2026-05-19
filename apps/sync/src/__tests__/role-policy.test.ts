@@ -75,10 +75,13 @@ describe("REQUIRED_ROLE table completeness", () => {
       'target.cell.commit',
       'target.cell.delete',
       'target.cell.reorder',
-      'cell.validate',
-      'cell.unvalidate',
-      'file.create',
-    ]
+	      'cell.validate',
+	      'cell.unvalidate',
+	      'cell.endorsement',
+	      'cell.endorsement.revoke',
+	      'file.create',
+	      'project.link-source',
+	    ]
     for (const kind of expected) {
       expect(REQUIRED_ROLE).toHaveProperty(kind)
     }

@@ -1,6 +1,9 @@
-import { Link } from "react-router-dom"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { DEFAULT_SYSTEM_PROMPT } from "@/lib/completion/completion-service"
+import {
+  buildProjectSettingsHandoffUrl,
+  workspaceReturnPath,
+} from "@/lib/ad11/navigation"
 
 interface Props {
   projectId: string
@@ -31,12 +34,16 @@ export function InstructionsSection({
         <pre className="whitespace-pre-wrap rounded bg-muted p-3 text-sm font-sans">
           {resolved}
         </pre>
-        <Link
-          to={`/project/${projectId}/settings`}
+        <a
+          href={buildProjectSettingsHandoffUrl({
+            projectId,
+            section: "ai",
+            returnTo: workspaceReturnPath(projectId),
+          })}
           className="text-sm text-primary hover:underline"
         >
           Edit in Project Settings →
-        </Link>
+        </a>
       </CardContent>
     </Card>
   )

@@ -15,9 +15,9 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@aquilla/auth-client": "workspace:*",
-    "@aquilla/errors": "workspace:*",
-    "@aquilla/ui": "workspace:*",
+    "@aquilla/auth-client": "file:../../packages/auth-client",
+    "@aquilla/errors": "file:../../packages/errors",
+    "@aquilla/ui": "file:../../packages/ui",
     "react": "^19.2.4",
     "react-dom": "^19.2.4"
   },

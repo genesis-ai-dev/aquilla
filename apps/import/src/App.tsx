@@ -3,9 +3,8 @@
 // The real import flow — parsers, file ingestion, event emission — is
 // deferred until after Phase 2c-β lands its parser + import-pipeline
 // rewrite (parsers will emit `source.cell.create` events directly). For
-// now this surface exists only so the deploy-all-apps workflow can pick
-// the app up in its matrix and routes.json's `/import` mount serves
-// something coherent on preview.
+// now this surface owns the AD-11 route handoff from the workspace while
+// the parser commit path is still being extracted into a shared package.
 
 const PLANNED_FORMATS = [
   { ext: "USFM", note: "scripture (paratext)" },
@@ -16,7 +15,24 @@ const PLANNED_FORMATS = [
   { ext: "VTT / SRT", note: "subtitles" },
 ] as const
 
+function launchContext(): {
+  projectId: string | null
+  returnTo: string
+} {
+  if (typeof window === "undefined") {
+    return { projectId: null, returnTo: "/projects/" }
+  }
+  const params = new URLSearchParams(window.location.search)
+  const projectId = params.get("project")
+  return {
+    projectId,
+    returnTo: params.get("return") || (projectId ? `/w/${projectId}/` : "/projects/"),
+  }
+}
+
 export function App() {
+  const { projectId, returnTo } = launchContext()
+
   return (
     <main className="mx-auto flex min-h-screen max-w-3xl flex-col gap-8 px-6 py-12 text-slate-800">
       <header className="flex flex-col gap-2">
@@ -27,14 +43,20 @@ export function App() {
           Import source documents
         </h1>
         <p className="text-base text-slate-600">
-          Coming soon. Importing source documents into a project will live
-          here. For now, create a project and add files from the workspace.
+          This focused import surface receives project context from the
+          workspace and writes parsed source cells through the event log.
+          Parser commit wiring is the remaining implementation step.
         </p>
+        {projectId && (
+          <p className="text-sm text-slate-500">
+            Project: <span className="font-mono text-slate-700">{projectId}</span>
+          </p>
+        )}
         <a
-          href="/projects/"
+          href={returnTo}
           className="mt-2 inline-flex items-center text-sm text-primary hover:underline"
         >
-          ← Back to projects
+          Return
         </a>
       </header>
 
@@ -75,7 +97,7 @@ export function App() {
           />
         </div>
         <p className="mt-3 text-xs text-slate-400">
-          Standalone import is not wired up yet.
+          Standalone import is not wired up yet; the route boundary is ready.
         </p>
       </section>
     </main>

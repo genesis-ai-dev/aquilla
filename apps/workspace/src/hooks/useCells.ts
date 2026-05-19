@@ -52,6 +52,7 @@ export interface CellData {
   type: string
   status: "empty" | "unvalidated" | "validated"
   validationStatus: ValidationStatus
+  endorsementCount?: number
   activeValidators: string[]
   /** Empty in Phase 2a — useCellEditHistory will own this in Phase 2b. */
   validationHistory: EditValidationSummary[]
@@ -146,6 +147,7 @@ function buildCellData(
     type: target?.type ?? source?.type ?? "text",
     status: deriveStatus(translated, validatedForStatus),
     validationStatus,
+    endorsementCount: target?.endorsementCount ?? source?.endorsementCount ?? 0,
     activeValidators,
     validationHistory: EMPTY_VALIDATION_HISTORY,
     history: EMPTY_HISTORY,

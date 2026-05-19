@@ -71,6 +71,11 @@ export interface ProjectSettings {
     systemPrompt?: string
     rules?: TranslationRule[]
     rulePenalties?: Record<string, number>
+    decaySettings?: {
+      endorsementTarget?: number
+      decayWarnThreshold?: number
+    }
+    /** @deprecated Use decaySettings. Kept as a read/write alias during migration. */
     healthSettings?: Record<string, unknown>
     validationCount?: number
     validationCountAudio?: number

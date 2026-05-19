@@ -58,6 +58,7 @@ describe("@aquilla/data-model", () => {
       lastEditor: "alice",
       lastEditAt: 1_700_000_000_000,
       validated: false,
+      endorsementCount: 0,
       wordCount: 1,
     }
     expect(target.sourceEventId).not.toBeNull()

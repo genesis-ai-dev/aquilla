@@ -16,16 +16,37 @@
 // fails loudly — by design. The PR description records this ordering.
 //
 // Event emission: link / detach / source-snapshot writes a row directly
-// into the `events` table created by Phase 1A's `0002_events.sql`. The
-// projection handlers that consume `project.link-source` and
-// `source.cell.commit` are owned by 1A and may not be merged yet — that's
-// fine, the events are durable and 1A's projector will catch up.
+// into the `events` table created by Phase 1A's `0002_events.sql`. The sync
+// worker consumes `project.link-source`, `source.cell.create`, and
+// `source.cell.commit` events to keep projections aligned.
 
 import type { Env } from "../types"
 
-/** UUIDv7-ish event id (no dashes, hex-only). Sufficient for D1 PK. */
+/** Server-generated event id for identity-side maintenance events. */
 export function makeEventId(): string {
-  return crypto.randomUUID().replace(/-/g, "")
+  return crypto.randomUUID()
+}
+
+async function nextServerSeq(env: Env, projectId: string): Promise<number> {
+  const row = await env.AQUILLA_DB.prepare(
+    "SELECT COALESCE(MAX(server_seq), 0) + 1 AS next_seq FROM events WHERE project_id = ?",
+  )
+    .bind(projectId)
+    .first<{ next_seq: number }>()
+  return row?.next_seq ?? 1
+}
+
+function contentHash(text: string): string {
+  let h = 5381
+  for (let i = 0; i < text.length; i++) {
+    h = ((h << 5) + h + text.charCodeAt(i)) | 0
+  }
+  return (h >>> 0).toString(16).padStart(8, "0")
+}
+
+function countWords(text: string): number {
+  const trimmed = text.trim()
+  return trimmed ? trimmed.split(/\s+/).length : 0
 }
 
 export interface SourceLinkProject {
@@ -131,17 +152,18 @@ export async function emitLinkSourceEvent(
   if (!env.AQUILLA_DB) return
   const now = Date.now()
   const id = makeEventId()
-  const payload = JSON.stringify({ source_project_id: args.sourceProjectId })
+  const payload = JSON.stringify({ sourceProjectId: args.sourceProjectId })
 
   try {
+    const serverSeq = await nextServerSeq(env, args.projectId)
     await env.AQUILLA_DB.prepare(
       `INSERT INTO events
-         (id, schema_version, project_id, file_id, cell_id, kind,
-          author, payload, client_ts, server_ts)
-       VALUES (?, 1, ?, NULL, NULL, 'project.link-source',
-               ?, ?, ?, ?)`,
+         (id, schema_version, project_id, file_id, cell_id, parent_id, kind,
+          author, payload, client_ts, server_ts, server_seq)
+       VALUES (?, 1, ?, NULL, NULL, NULL, 'project.link-source',
+               ?, ?, ?, ?, ?)`,
     )
-      .bind(id, args.projectId, args.authorUsername, payload, now, now)
+      .bind(id, args.projectId, args.authorUsername, payload, now, now, serverSeq)
       .run()
   } catch (err) {
     // 1A's events table missing OR table shape unknown (e.g. STRICT
@@ -154,13 +176,13 @@ export async function emitLinkSourceEvent(
 
 /**
  * Snapshot every source-side cell from `upstreamProjectId` as a burst of
- * `source.cell.commit` events on `targetProjectId`. Used by the detach
- * flow (project lifecycle step 4): after the link is cleared, the
- * upstream's current source cells become this project's local source.
+ * local source events on `targetProjectId`. Used by the detach flow
+ * (project lifecycle step 4): after the link is cleared, the upstream's
+ * current source cells become this project's local source.
  *
- * Each event copies the upstream cell's value into a new `source.cell.commit`
- * payload, authored by the detacher. Event ids are fresh UUIDv7s; the
- * projector will chain them into the target project's source side.
+ * Existing local source cells receive `source.cell.commit` events chained to
+ * their current head; missing rows receive `source.cell.create` genesis
+ * events. Events are authored by the detacher.
  *
  * Returns the count of events emitted (0 if the cells projection isn't
  * available yet — same defensive posture as emitLinkSourceEvent).
@@ -189,10 +211,13 @@ export async function snapshotSourceCells(
     cell_id: string
     value: string
     value_html: string | null
+    type: string | null
+    canonical_ref: string | null
+    anchor_cell_id: string | null
   }> = []
   try {
     const rows = await env.AQUILLA_DB.prepare(
-      `SELECT file_id, cell_id, value, value_html
+      `SELECT file_id, cell_id, value, value_html, type, canonical_ref, anchor_cell_id
          FROM cells
         WHERE project_id = ? AND side = 'source'`,
     )
@@ -202,6 +227,9 @@ export async function snapshotSourceCells(
         cell_id: string
         value: string
         value_html: string | null
+        type: string | null
+        canonical_ref: string | null
+        anchor_cell_id: string | null
       }>()
     cells = rows.results ?? []
   } catch {
@@ -210,38 +238,111 @@ export async function snapshotSourceCells(
 
   if (cells.length === 0) return 0
 
-  // Best-effort batch insert. Each event is a fresh UUIDv7; we don't
-  // chain `parent_id` here because we don't have the destination
-  // project's source-side chain head in this worker — the projector will
-  // anchor these as new genesis events on the target project's source
-  // side. (1A's projection handler is the canonical authority on chain
-  // semantics; this route only persists the durable records.)
+  // Best-effort batch insert. Existing target rows are committed against
+  // their current source-side chain head; missing rows are created as source
+  // genesis events so a detached project becomes self-contained.
   let emitted = 0
   for (const cell of cells) {
     const id = makeEventId()
-    const payload = JSON.stringify({
-      value: cell.value,
-      value_html: cell.value_html,
-    })
     try {
+      const existing = await env.AQUILLA_DB.prepare(
+        `SELECT event_id
+           FROM cells
+          WHERE project_id = ? AND file_id = ? AND cell_id = ? AND side = 'source'`,
+      )
+        .bind(args.targetProjectId, cell.file_id, cell.cell_id)
+        .first<{ event_id: string }>()
+
+      const kind = existing ? "source.cell.commit" : "source.cell.create"
+      const payload = existing
+        ? JSON.stringify({
+            value: cell.value,
+            valueHtml: cell.value_html ?? undefined,
+          })
+        : JSON.stringify({
+            cellId: cell.cell_id,
+            anchorCellId: cell.anchor_cell_id,
+            value: cell.value,
+            valueHtml: cell.value_html ?? undefined,
+            type: cell.type ?? undefined,
+            canonicalRef: cell.canonical_ref ?? undefined,
+          })
+      const serverSeq = await nextServerSeq(env, args.targetProjectId)
+
       await env.AQUILLA_DB.prepare(
         `INSERT INTO events
-           (id, schema_version, project_id, file_id, cell_id, kind,
-            author, payload, client_ts, server_ts)
-         VALUES (?, 1, ?, ?, ?, 'source.cell.commit',
-                 ?, ?, ?, ?)`,
+           (id, schema_version, project_id, file_id, cell_id, parent_id, kind,
+            author, payload, client_ts, server_ts, server_seq)
+         VALUES (?, 1, ?, ?, ?, ?, ?,
+                 ?, ?, ?, ?, ?)`,
       )
         .bind(
           id,
           args.targetProjectId,
           cell.file_id,
           cell.cell_id,
+          existing?.event_id ?? null,
+          kind,
           args.authorUsername,
           payload,
           now,
           now,
+          serverSeq,
         )
         .run()
+
+      const hash = contentHash(cell.value)
+      const wordCount = countWords(cell.value)
+      if (existing) {
+        await env.AQUILLA_DB.prepare(
+          `UPDATE cells
+              SET value = ?,
+                  value_html = ?,
+                  event_id = ?,
+                  last_editor = ?,
+                  last_edit_at = ?,
+                  word_count = ?,
+                  content_hash = ?
+            WHERE project_id = ? AND file_id = ? AND cell_id = ? AND side = 'source'`,
+        )
+          .bind(
+            cell.value,
+            cell.value_html,
+            id,
+            args.authorUsername,
+            now,
+            wordCount,
+            hash,
+            args.targetProjectId,
+            cell.file_id,
+            cell.cell_id,
+          )
+          .run()
+      } else {
+        await env.AQUILLA_DB.prepare(
+          `INSERT INTO cells (
+            project_id, file_id, cell_id, side, value, value_html, type,
+            canonical_ref, anchor_cell_id, event_id, source_event_id,
+            last_editor, last_edit_at, validated, word_count, content_hash
+          ) VALUES (?, ?, ?, 'source', ?, ?, ?, ?, ?, ?, NULL, ?, ?, 0, ?, ?)`,
+        )
+          .bind(
+            args.targetProjectId,
+            cell.file_id,
+            cell.cell_id,
+            cell.value,
+            cell.value_html,
+            cell.type,
+            cell.canonical_ref,
+            cell.anchor_cell_id,
+            id,
+            args.authorUsername,
+            now,
+            wordCount,
+            hash,
+          )
+          .run()
+      }
       emitted++
     } catch (err) {
       console.warn(

@@ -13,7 +13,7 @@
 // with the now-stored row.
 //
 // Settings keys (all optional per spec): sourceLanguage, targetLanguage,
-// systemPrompt, rules, rulePenalties, healthSettings, validationCount,
+// systemPrompt, rules, rulePenalties, decaySettings, validationCount,
 // validationCountAudio. We don't enforce the key set here — the server is
 // a dumb store, the client owns the shape. The spec note about
 // `targetLanguage` left unset identifying a source-only project (AD-9) is
@@ -49,6 +49,19 @@ interface ProjectSettingsResponse {
   updatedBy: number | null
 }
 
+function normalizeSettings(settings: Record<string, unknown>): Record<string, unknown> {
+  const next = { ...settings }
+  if (next.decaySettings == null && next.healthSettings != null) {
+    next.decaySettings = next.healthSettings
+  }
+  // Backward-compatible read alias while the workspace health UI still uses
+  // healthSettings. New writers should prefer decaySettings.
+  if (next.healthSettings == null && next.decaySettings != null) {
+    next.healthSettings = next.decaySettings
+  }
+  return next
+}
+
 function rowToResponse(row: ProjectSettingsRow): ProjectSettingsResponse {
   let settings: Record<string, unknown> = {}
   try {
@@ -63,7 +76,7 @@ function rowToResponse(row: ProjectSettingsRow): ProjectSettingsResponse {
   }
   return {
     projectId: row.project_id,
-    settings,
+    settings: normalizeSettings(settings),
     version: row.version,
     updatedAt: row.updated_at,
     updatedBy: row.updated_by,
@@ -181,7 +194,7 @@ projectSettings.put(
       )
     }
 
-    const newSettingsJson = JSON.stringify(body.settings)
+    const newSettingsJson = JSON.stringify(normalizeSettings(body.settings))
     const newVersion = current.version + 1
 
     // No existing row yet — INSERT. Otherwise UPDATE with a version guard

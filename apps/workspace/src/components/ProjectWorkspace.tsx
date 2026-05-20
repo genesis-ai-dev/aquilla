@@ -1,5 +1,5 @@
 import { Suspense, lazy, useState, useMemo, useRef, useEffect, useCallback } from "react"
-import { useParams, useNavigate, useSearchParams } from "react-router-dom"
+import { useParams, useNavigate, useSearchParams, useLocation } from "react-router-dom"
 import { useProject } from "@/hooks/useProject"
 import { useFileDoc } from "@/hooks/useFileDoc"
 import { deriveCellAreaState } from "@/lib/editor/cell-area-state"
@@ -181,14 +181,34 @@ export function ProjectWorkspace() {
     setActiveFileId,
   })
 
-  // After a detour through a Project subpage (Rules/Comments/Snapshots/...),
-  // the URL drops back to `/project/:id` with no fileId. Restore the
-  // previously open file so #38's "closes currently selected file" symptom
-  // doesn't happen. Reads localStorage directly because it only needs to fire
-  // on the no-fileId render; making it stateful would require deriving state
-  // from props inside an effect.
+  // Single source of truth for the fileId in the URL. This used to be two
+  // separate effects — one that *restored* a file when the URL had none
+  // (after a detour through Rules/Comments/Snapshots), and one further down
+  // that *stripped* a fileId the project didn't recognize. They fought:
+  // restore → strip → restore → …, each hop a `navigate({replace:true})` =
+  // a `history.replaceState`. The browser caps that at 100/10s and throws
+  // SecurityError, and the re-render storm also tore the project WebSocket
+  // down before it could connect. Merging them — and only navigating when
+  // the destination differs from the current path — makes the redirect
+  // converge in one hop. Reads localStorage directly because it only needs
+  // to fire on the no-fileId render.
+  const location = useLocation()
   useEffect(() => {
-    if (routeFileId || !projectId) return
+    if (!project || !projectId) return
+
+    // A file is already in the URL: leave it unless the project genuinely
+    // doesn't have it (and it isn't a still-pending optimistic import).
+    if (routeFileId) {
+      const known =
+        fileIds.includes(routeFileId) ||
+        optimisticFileIdsRef.current.has(routeFileId)
+      if (known) return
+      const target = `/project/${projectId}`
+      if (location.pathname !== target) navigate(target, { replace: true })
+      return
+    }
+
+    // No file in the URL: restore the last/only file if there is a valid one.
     const last = readLastActiveFileId(projectId)
     const firstOpenTab = workspaceTabs.tabs[0]?.fileId ?? null
     const onlyFile = projectFiles.length === 1 ? projectFiles[0]?.id : null
@@ -198,11 +218,21 @@ export function ProjectWorkspace() {
         : firstOpenTab && fileIds.includes(firstOpenTab)
           ? firstOpenTab
           : onlyFile
-    if (nextFileId) {
-      setSelectedFileId(nextFileId)
-      navigate(`/project/${projectId}/file/${nextFileId}`, { replace: true })
-    }
-  }, [routeFileId, fileIds, navigate, projectId, projectFiles, workspaceTabs.tabs])
+    if (!nextFileId) return
+    const target = `/project/${projectId}/file/${nextFileId}`
+    if (location.pathname === target) return
+    setSelectedFileId(nextFileId)
+    navigate(target, { replace: true })
+  }, [
+    project,
+    projectId,
+    routeFileId,
+    fileIds,
+    projectFiles,
+    workspaceTabs.tabs,
+    navigate,
+    location.pathname,
+  ])
   const [importOpen, setImportOpen] = useState(false)
   const [drawerRuleId, setDrawerRuleId] = useState<string | null>(null)
   const [searchParams] = useSearchParams()
@@ -653,16 +683,6 @@ export function ProjectWorkspace() {
     return () => document.removeEventListener("keydown", handler)
   }, [activeFileId, hasUnfinished, handleJumpNextUnfinished])
 
-  useEffect(() => {
-    if (!project || !routeFileId) return
-    const exists =
-      project.files.some((f) => f.id === routeFileId) ||
-      optimisticFileIdsRef.current.has(routeFileId)
-    if (!exists) {
-      navigate(`/project/${projectId}`, { replace: true })
-    }
-  }, [project, routeFileId, projectId, navigate])
-
   // Legacy sync status shim. AD-1 live coordination uses the project
   // WebSocket below; this hook only feeds the existing status indicator.
   const { peers: fileLevelPeers, status: fileSyncStatus } = useFileSync({
@@ -689,6 +709,11 @@ export function ProjectWorkspace() {
   const [cellsWithRemoteChange, setCellsWithRemoteChange] = useState<Set<string>>(() => new Set())
   const focusedCellIdRef = useRef<string | null>(null)
   const reconcilerRef = useRef<import("@/lib/sync/ws-reconciler").WsReconciler | null>(null)
+  // Read the current file list inside the WS connect path without making it a
+  // reconnect trigger — otherwise every file-list change (e.g. each batch of a
+  // large import landing) tears the socket down and recreates it.
+  const projectFilesRef = useRef(projectFiles)
+  projectFilesRef.current = projectFiles
 
   useEffect(() => {
     if (!project?.id || !frontierSession?.jwt) return
@@ -705,7 +730,7 @@ export function ProjectWorkspace() {
           userId: currentUsername,
           baseUrl: syncWorkerHttpOrigin(),
           getToken: async () => {
-            const aFile = projectFiles[0]?.id ?? ""
+            const aFile = projectFilesRef.current[0]?.id ?? ""
             if (!aFile) return null
             return getTokenForFile(aFile)
           },
@@ -772,7 +797,7 @@ export function ProjectWorkspace() {
       reconcilerRef.current = null
       reconciler?.close()
     }
-  }, [project?.id, frontierSession?.jwt, getTokenForFile, revalidateCells, projectFiles, currentUsername, refresh])
+  }, [project?.id, frontierSession?.jwt, getTokenForFile, revalidateCells, currentUsername, refresh])
 
   const handleClaimCell = useCallback((cellId: string) => {
     focusedCellIdRef.current = cellId

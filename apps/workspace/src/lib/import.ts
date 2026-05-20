@@ -25,7 +25,12 @@ import { extractVttStrings, extractSrtStrings } from "./parsers/subtitle"
 import { extractUsfmStrings } from "./parsers/usfm"
 import { extractDocxStrings } from "./parsers/docx"
 import { extractPptxStrings } from "./parsers/pptx"
-import { emitFileCreate, emitSourceCellCreate } from "./sync/events-emit"
+import {
+  buildFileCreate,
+  buildSourceCellCreate,
+  enqueueBuiltEvents,
+} from "./sync/events-emit"
+import type { OutboxEventKind, OutboxRawEvent } from "./sync/outbox-types"
 import {
   fetchTranslationText,
   parseEBibleCorpus,
@@ -132,44 +137,52 @@ export async function emitParsedFile(
 ): Promise<FileReference> {
   const fileId = uuidv7()
 
-  await emitFileCreate({
-    projectId: ctx.projectId,
-    fileId,
-    name: result.name,
-    fileType,
-    role: "source",
-    kind: fileType,
-    importFormat: fileType,
-    parserVersion: "workspace-import-v1",
-    sourceLanguage: ctx.sourceLanguage,
-    targetLanguage: ctx.targetLanguage,
-    author: ctx.author,
-  })
+  // Build every envelope in memory first, then land them in a single bulk
+  // outbox write. Looping a per-event enqueue here would open one IDB
+  // transaction (and fire one flusher recount + re-render) per verse — fatal
+  // for a ~31k-verse eBible. See `enqueueBuiltEvents` / `enqueueOutboxEvents`.
+  const events: OutboxRawEvent<OutboxEventKind>[] = [
+    buildFileCreate({
+      projectId: ctx.projectId,
+      fileId,
+      name: result.name,
+      fileType,
+      role: "source",
+      kind: fileType,
+      importFormat: fileType,
+      parserVersion: "workspace-import-v1",
+      sourceLanguage: ctx.sourceLanguage,
+      targetLanguage: ctx.targetLanguage,
+      author: ctx.author,
+    }),
+  ]
 
   // Chain cells via anchorCellId. The first cell's anchor is null (genesis
   // anchor — first in file); each subsequent cell anchors on the prior id.
   let prevCellId: string | null = null
-  let enqueued = 0
   const total = result.strings.length
   for (const str of result.strings) {
     // Use the parser-supplied id when present (USFM gives stable verse refs);
     // otherwise mint a fresh UUIDv7.
     const cellId = str.id || uuidv7()
-    await emitSourceCellCreate({
-      projectId: ctx.projectId,
-      fileId,
-      cellId,
-      anchorCellId: prevCellId,
-      value: str.original,
-      ...(str.originalHtml ? { valueHtml: str.originalHtml } : {}),
-      type: str.type,
-      ...(str.group ? { canonicalRef: str.group } : {}),
-      author: ctx.author,
-    })
+    events.push(
+      buildSourceCellCreate({
+        projectId: ctx.projectId,
+        fileId,
+        cellId,
+        anchorCellId: prevCellId,
+        value: str.original,
+        ...(str.originalHtml ? { valueHtml: str.originalHtml } : {}),
+        type: str.type,
+        ...(str.group ? { canonicalRef: str.group } : {}),
+        author: ctx.author,
+      }),
+    )
     prevCellId = cellId
-    enqueued++
-    ctx.onCellEnqueued?.(enqueued, total)
   }
+
+  await enqueueBuiltEvents(events)
+  ctx.onCellEnqueued?.(total, total)
 
   return {
     id: fileId,

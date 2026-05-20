@@ -15,7 +15,7 @@
  */
 
 import { v7 as uuidv7 } from "uuid"
-import { enqueueOutboxEvent } from "./outbox"
+import { enqueueOutboxEvent, enqueueOutboxEvents } from "./outbox"
 import {
   OUTBOX_SCHEMA_VERSION,
   type OutboxEventKind,
@@ -220,15 +220,19 @@ export interface SourceCellCreateInput {
 }
 
 /**
- * Emit a `source.cell.create` event. Always genesis (`parentId = null`).
- * The importer chains cells by passing the previous cell's `cellId` as
- * `anchorCellId`; the projection walks the anchor chain to reconstruct
- * file-internal order (AD-2 anchor-pointer ordering).
+ * Build a `source.cell.create` envelope without enqueuing it. Always genesis
+ * (`parentId = null`). The importer chains cells by passing the previous
+ * cell's `cellId` as `anchorCellId`; the projection walks the anchor chain to
+ * reconstruct file-internal order (AD-2 anchor-pointer ordering).
+ *
+ * Split out from `emitSourceCellCreate` so bulk producers (the importer) can
+ * build N envelopes in memory and write them in one batch — see
+ * `enqueueBuiltEvents`.
  */
-export async function emitSourceCellCreate(
+export function buildSourceCellCreate(
   input: SourceCellCreateInput,
-): Promise<string> {
-  const { eventId } = await enqueueEvent({
+): OutboxRawEvent<"source.cell.create"> {
+  return buildRawEvent({
     kind: "source.cell.create",
     projectId: input.projectId,
     fileId: input.fileId,
@@ -246,7 +250,17 @@ export async function emitSourceCellCreate(
     },
     clientTs: input.clientTs,
   })
-  return eventId
+}
+
+/** Emit a single `source.cell.create` event. */
+export async function emitSourceCellCreate(
+  input: SourceCellCreateInput,
+): Promise<string> {
+  const event = buildSourceCellCreate(input)
+  await enqueueOutboxEvent(
+    event as unknown as Parameters<typeof enqueueOutboxEvent>[0],
+  )
+  return event.id
 }
 
 export interface FileCreateInput {
@@ -280,8 +294,10 @@ export interface FileCreateInput {
  * pass `fileType` for legacy compatibility; the server keeps `files.file_type`
  * in sync from `fileType ?? kind ?? role ?? 'codex'`.
  */
-export async function emitFileCreate(input: FileCreateInput): Promise<string> {
-  const { eventId } = await enqueueEvent({
+export function buildFileCreate(
+  input: FileCreateInput,
+): OutboxRawEvent<"file.create"> {
+  return buildRawEvent({
     kind: "file.create",
     projectId: input.projectId,
     fileId: input.fileId,
@@ -303,5 +319,26 @@ export async function emitFileCreate(input: FileCreateInput): Promise<string> {
     },
     clientTs: input.clientTs,
   })
-  return eventId
+}
+
+/** Emit a single `file.create` event. */
+export async function emitFileCreate(input: FileCreateInput): Promise<string> {
+  const event = buildFileCreate(input)
+  await enqueueOutboxEvent(
+    event as unknown as Parameters<typeof enqueueOutboxEvent>[0],
+  )
+  return event.id
+}
+
+/**
+ * Bulk-enqueue pre-built event envelopes in one IDB transaction. The fast
+ * path for importers: build all envelopes with the `build*` helpers, then
+ * land them with a single write + a single outbox notify.
+ */
+export async function enqueueBuiltEvents(
+  events: OutboxRawEvent<OutboxEventKind>[],
+): Promise<void> {
+  await enqueueOutboxEvents(
+    events as unknown as Parameters<typeof enqueueOutboxEvents>[0],
+  )
 }

@@ -1,12 +1,12 @@
 // CORS for browser-facing CQRS endpoints.
 //
-// The sync-worker is otherwise reached either as a partyserver WebSocket
+// The sync-worker is otherwise reached either as the ProjectSync WebSocket
 // (no preflight needed) or by identity using SYNC_SECRET_KEY
 // (server-to-server, no preflight). The CQRS HTTP routes — /events,
 // /cells/audit-stats, /cell-validators, and the /api/v1/projects/*
 // read namespace — are the only paths the browser
 // hits cross-origin, so we add CORS headers narrowly here rather than
-// globally to keep partyserver upgrade responses untouched.
+// globally to keep WebSocket upgrade responses untouched.
 //
 // Auth travels in `Authorization: Bearer <jwt>`, never cookies, so
 // `Access-Control-Allow-Origin: *` is safe (and avoids hard-coding a list
@@ -43,7 +43,7 @@ export function handleCorsPreflight(request: Request): Response | null {
 }
 
 /** Add CORS headers to a response if the request path is browser-facing.
- * No-op for admin / partyserver paths. */
+ * No-op for admin / ProjectSync paths. */
 export function withCors(response: Response, request: Request): Response {
   const url = new URL(request.url)
   if (!isBrowserCorsPath(url.pathname)) return response

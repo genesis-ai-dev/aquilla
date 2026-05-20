@@ -1,4 +1,4 @@
-import { SYNC_WORKER_HOST } from "./partyserver-provider"
+import { SYNC_WORKER_HOST } from "./sync-worker-host"
 
 function isLocalHost(host: string): boolean {
   return /^(127\.|localhost|0\.0\.0\.0)/.test(host)

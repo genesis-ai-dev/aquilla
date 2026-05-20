@@ -1,7 +1,6 @@
 // NOTE: This file defines the protocol only. The `broadcastRealtime()` helper
 // referenced in the CQRS plan is wired up in Task 5 (the POST /events route)
-// because it requires access to the partyserver Connection set, which only
-// exists at the route/DO boundary.
+// because it requires access to the ProjectSync Durable Object binding.
 
 import type { EventKind } from './types'
 

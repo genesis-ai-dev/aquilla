@@ -40,11 +40,9 @@ import { ResizableVideoPanel } from "./ResizableVideoPanel"
 import { VideoAttachmentDialog } from "./VideoAttachmentDialog"
 import { useVideoAttachment } from "@/hooks/useVideoAttachment"
 import { parseTimestampRange, extractCuesFromCells } from "@/lib/video/vtt-generator"
-import { useFileSync, peerColor as peerColorLocal } from "@/hooks/useFileSync"
-import { useProjectTombstoneObserver } from "@/hooks/useProjectTombstoneObserver"
+import { useFileSync } from "@/hooks/useFileSync"
 import { useFileMeta } from "@/hooks/useFileMeta"
 import { useCellLabelsPreference } from "@/hooks/useCellLabelsPreference"
-import { displayNameFor } from "@/lib/sync/anonymous-name"
 import { useProjectPermissions } from "@/hooks/useProjectPermissions"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import {
@@ -101,15 +99,20 @@ import { useNextUnfinished } from "@/hooks/useNextUnfinished"
 import { AiSetupDialog } from "./AiSetupDialog"
 import {
   buildExportHandoffUrl,
-  buildImportHandoffUrl,
   buildProjectSettingsHandoffUrl,
   workspaceReturnPath,
 } from "@/lib/ad11/navigation"
 
-const ENABLE_INLINE_IMPORT_FOR_SMOKE = import.meta.env.MODE === "test"
-const SmokeImportDialog = ENABLE_INLINE_IMPORT_FOR_SMOKE
-  ? lazy(() => import("./ImportDialog").then((mod) => ({ default: mod.ImportDialog })))
-  : null
+// Import runs inline in the workspace (upload + eBible corpus tabs). The
+// AD-11 plan carves import into a standalone apps/import Worker, but that
+// app is still a placeholder shell — routing users there is a dead end.
+// The import pipeline (parsers + outbox + events-emit) is workspace-
+// internal and not yet extracted into a shared package the standalone app
+// could consume, so the working ImportDialog stays hosted here. Lazy-loaded
+// because the eBible parser bundles a ~2MB vref table.
+const ImportDialog = lazy(() =>
+  import("./ImportDialog").then((mod) => ({ default: mod.ImportDialog })),
+)
 
 export function ProjectWorkspace() {
   const { id: projectId, fileId: routeFileId } = useParams<{ id: string; fileId?: string }>()
@@ -660,11 +663,9 @@ export function ProjectWorkspace() {
     }
   }, [project, routeFileId, projectId, navigate])
 
-  // Always-on file sync via the codex sync-worker (y-partyserver DO + R2).
-  // This keeps every open file in lockstep across devices for the same user,
-  // not just collaborators — and is also the share-link path now that
-  // joiners are added to project_members on /join/:token redemption.
-  const { peers: fileLevelPeers, provider: syncProvider, status: fileSyncStatus } = useFileSync({
+  // Legacy sync status shim. AD-1 live coordination uses the project
+  // WebSocket below; this hook only feeds the existing status indicator.
+  const { peers: fileLevelPeers, status: fileSyncStatus } = useFileSync({
     doc,
     projectId: project?.id ?? null,
     fileId: activeFileId || null,
@@ -675,11 +676,6 @@ export function ProjectWorkspace() {
     gitlabProjectId:
       project?.origin?.kind === "git" ? project.origin.gitlabProjectId : null,
   })
-
-  // When the owner archives the project, the sync-worker DO flips
-  // meta.projectDeletedAt; this observer reconciles IDB so the
-  // TrashedProjectScreen renders on the next refresh.
-  useProjectTombstoneObserver(doc, project?.id ?? null, refresh)
 
   // Cross-collaborator sync for AI provider/instructions: piggybacks on the
   // active file's Y.Doc meta so settings flow between clients without a
@@ -750,6 +746,21 @@ export function ProjectWorkspace() {
                 next.delete(msg.cellId)
                 return next
               })
+            } else if (msg.t === "project.archived") {
+              if (msg.project !== pid) return
+              void patchProject(pid, (p) => {
+                if (msg.archivedAt) {
+                  return {
+                    ...p,
+                    deletedAt: msg.archivedAt,
+                    deletedBy: msg.deletedBy ?? p.deletedBy,
+                  }
+                }
+                const next = { ...p }
+                delete next.deletedAt
+                delete next.deletedBy
+                return next
+              }).then(() => refresh())
             }
           },
         },
@@ -761,7 +772,7 @@ export function ProjectWorkspace() {
       reconcilerRef.current = null
       reconciler?.close()
     }
-  }, [project?.id, frontierSession?.jwt, getTokenForFile, revalidateCells, projectFiles, currentUsername])
+  }, [project?.id, frontierSession?.jwt, getTokenForFile, revalidateCells, projectFiles, currentUsername, refresh])
 
   const handleClaimCell = useCallback((cellId: string) => {
     focusedCellIdRef.current = cellId
@@ -801,15 +812,6 @@ export function ProjectWorkspace() {
   // sync-worker doesn't fan out cross-file awareness yet — file-level only
   // for now.
   const peers = fileLevelPeers
-
-  const collabUser = useMemo(() => {
-    if (!syncProvider) return undefined
-    const clientId = String(syncProvider.awareness.clientID)
-    return {
-      name: displayNameFor(currentUsername, clientId),
-      color: peerColorLocal(clientId),
-    }
-  }, [syncProvider, currentUsername])
 
   async function handleSearchSelect(result: WorkspaceSearchResult, query: string) {
     const flash = () => {
@@ -1016,16 +1018,8 @@ export function ProjectWorkspace() {
 
   const openImportFlow = useCallback(() => {
     if (!project) return
-    if (ENABLE_INLINE_IMPORT_FOR_SMOKE) {
-      setImportOpen(true)
-      return
-    }
-    window.location.assign(buildImportHandoffUrl({
-      projectId: project.id,
-      fileId: activeFileId,
-      returnTo: workspaceReturnPath(project.id, activeFileId),
-    }))
-  }, [project, activeFileId])
+    setImportOpen(true)
+  }, [project])
 
   const openExportFlow = useCallback(() => {
     if (!project) return
@@ -1355,7 +1349,6 @@ export function ProjectWorkspace() {
             onOpenHistory={(cellId) => {
               setDrawerRuleId(null); setCommentsCellId(null); setHistoryCellId(cellId)
             }}
-            syncProvider={syncProvider} collabUser={collabUser}
             activeCueIndex={activeCueIndex >= 0 ? activeCueIndex : undefined}
             onSeekToCue={isSubtitleFile ? handleCueSeek : undefined}
             lineNumbersEnabled={fileMeta.lineNumbersEnabled}
@@ -1485,15 +1478,13 @@ export function ProjectWorkspace() {
           onClose={() => setRecordingCellId(null)}
         />
       )}
-      {SmokeImportDialog && (
-        <Suspense fallback={null}>
-          <SmokeImportDialog open={importOpen} onOpenChange={setImportOpen}
-            projectId={project.id}
-            username={currentUsername}
-            sourceLanguage={project.sourceLanguage} targetLanguage={project.targetLanguage}
-            onImported={handleImported} />
-        </Suspense>
-      )}
+      <Suspense fallback={null}>
+        <ImportDialog open={importOpen} onOpenChange={setImportOpen}
+          projectId={project.id}
+          username={currentUsername}
+          sourceLanguage={project.sourceLanguage} targetLanguage={project.targetLanguage}
+          onImported={handleImported} />
+      </Suspense>
       <ParallelPassagesPanel
         open={parallelOpen}
         onOpenChange={setParallelOpen}

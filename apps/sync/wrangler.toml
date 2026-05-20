@@ -7,12 +7,13 @@ compatibility_flags = ["nodejs_compat"]
 # doesn't prompt interactively and lands on the wrong account by accident.
 account_id = "6a80496d1e59948a9cbaa3c643ba81d7"
 
-# y-partyserver wires one Durable Object per file (room name = fileId).
+# Legacy binding retained so existing Durable Object migrations remain valid.
+# The exported class returns 410; no route dispatches to this DO.
 [[durable_objects.bindings]]
 name = "FileSync"
 class_name = "FileSync"
 
-# Per-project DO (Phase 2c). Holds focus locks + presence + an event-fanout
+# Per-project DO (AD-1). Holds focus locks + presence + an event-fanout
 # relay. Transient state only; no D1/R2 writes from inside the DO itself.
 [[durable_objects.bindings]]
 name = "ProjectSync"
@@ -26,8 +27,7 @@ new_sqlite_classes = ["FileSync"]
 tag = "v2"
 new_sqlite_classes = ["ProjectSync"]
 
-# R2 holds canonical Y.Doc snapshots and tail updates.
-# Key layout: projects/{projectId}/files/{fileId}/{snapshot.bin,tail/{seq}.bin,checkpoints/{id}.bin}
+# R2 holds media/original-import blobs. It no longer stores Y.Doc state.
 [[r2_buckets]]
 binding = "SNAPSHOTS"
 bucket_name = "aquilla-snapshots"

@@ -11,7 +11,7 @@ const SAMPLE_MD = path.resolve(__dirname, "../../fixtures/sample.md")
 
 /**
  * Cell-level concurrent edit: alice types into cell 0, bob (with that
- * file open) sees the edit propagate via Yjs through the partyserver DO.
+ * file open) sees the edit propagate through ProjectSync/event projection.
  *
  * Setup mirrors file-propagation.smoke: alice creates locally, then we
  * bridge local→synced via API.
@@ -19,7 +19,7 @@ const SAMPLE_MD = path.resolve(__dirname, "../../fixtures/sample.md")
 // TODO(e2e): regressed between 5a808b4 and now, almost certainly tied to
 // c6d0753 ("improve sync memory usage") which touched sync-worker and
 // useFileSync. After server-side membership is added, bob's project still
-// renders "Local only / Sync disabled" in the footer — the partyserver DO
+// renders "Local only / Sync disabled" in the footer — the project sync
 // connection isn't establishing, so cell edits never propagate. Re-enable
 // once the local→synced bridge updates client-side project flags.
 test.fixme("alice's edit on cell 0 is visible in bob's open editor within 10s", async ({ alice, bob }) => {

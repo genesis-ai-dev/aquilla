@@ -7,7 +7,7 @@
 #   so the migration can be applied without polluting the shared staging
 #   DB.
 # - R2 is shared with staging (aquilla-snapshots-staging) but namespaced
-#   via R2_KEY_PREFIX=pr-N so snapshots from different PRs don't collide.
+#   via R2_KEY_PREFIX=pr-N so media/original-import blobs don't collide.
 # - Durable Object namespace is implicitly per-worker (different worker
 #   name → different namespace).
 # - Runs in ALLOW_UNAUTHENTICATED mode — the PR-specific worker URL is
@@ -26,6 +26,8 @@ account_id = "6a80496d1e59948a9cbaa3c643ba81d7"
 [[durable_objects.bindings]]
 name = "FileSync"
 class_name = "FileSync"
+# Legacy binding retained so existing Durable Object migrations remain valid.
+# The exported class returns 410; no route dispatches to this DO.
 
 [[durable_objects.bindings]]
 name = "ProjectSync"

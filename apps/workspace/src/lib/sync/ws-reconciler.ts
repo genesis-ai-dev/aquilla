@@ -20,6 +20,8 @@
  *   { t: "lock.claimed", cellId, by: { userId, ts } }
  *   { t: "lock.released", cellId, by: { userId, ts } }
  *       Focus-lock transitions by another user.
+ *   { t: "project.archived", project, archivedAt, deletedBy? }
+ *       Project archive/restore notification from identity via sync-worker.
  *
  *   ── Client → server ────────────────────────────────────────────────
  *   { t: "outbox.event", event: OutboxRawEvent }
@@ -52,6 +54,12 @@ export type ProjectWsServerMessage =
   | { t: "presence"; users: PresenceUser[] }
   | { t: "lock.claimed"; cellId: string; by: { userId: string; ts: number } }
   | { t: "lock.released"; cellId: string; by: { userId: string; ts: number } }
+  | {
+      t: "project.archived"
+      project: string
+      archivedAt: string | null
+      deletedBy?: string | null
+    }
 
 export type ProjectWsClientMessage =
   | { t: "outbox.event"; event: OutboxRawEvent }
@@ -113,8 +121,8 @@ interface WsHostShape {
 
 /**
  * Build the WS URL for a project. `baseUrl` may be http(s); we normalize to
- * ws(s). Path is `/parties/project-sync/<projectId>` to match partyserver's
- * conventional layout, mirroring `parties/file-sync/...`.
+ * ws(s). Path is `/parties/project-sync/<projectId>` to match the sync-worker
+ * routing convention.
  */
 export function buildProjectWsUrl(
   baseUrl: string,
@@ -347,6 +355,22 @@ export function parseProjectWsMessage(raw: string): ProjectWsServerMessage | nul
       t,
       cellId: m.cellId,
       by: { userId: b.userId, ts: b.ts },
+    }
+  }
+  if (t === "project.archived") {
+    if (
+      typeof m.project !== "string" ||
+      !(typeof m.archivedAt === "string" || m.archivedAt === null)
+    ) {
+      return null
+    }
+    return {
+      t: "project.archived",
+      project: m.project,
+      archivedAt: m.archivedAt,
+      ...(typeof m.deletedBy === "string" || m.deletedBy === null
+        ? { deletedBy: m.deletedBy }
+        : {}),
     }
   }
   return null

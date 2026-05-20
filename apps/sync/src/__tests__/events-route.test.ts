@@ -1,14 +1,6 @@
 // Tests for handleEventsWriteRequest (POST /events) under AD-2 / AD-9.
 
-import { describe, it, expect, vi } from 'vitest'
-
-// route.ts imports broadcast.ts → partyserver (cloudflare:* imports).
-// Mock partyserver so Node's ESM loader doesn't choke.
-vi.mock('partyserver', () => ({
-  getServerByName: vi.fn().mockResolvedValue({
-    fetch: vi.fn().mockResolvedValue(new Response(JSON.stringify({ ok: true }), { status: 200 })),
-  }),
-}))
+import { describe, it, expect } from 'vitest'
 
 import { handleEventsWriteRequest } from '../events/route'
 import { makeInMemoryD1 } from './helpers/d1-fake'

@@ -1,7 +1,5 @@
-// Integration-style test for the sync-worker admin endpoint. Uses the SELF
-// fetcher partyserver exposes when the worker is invoked via wrangler dev's
-// cloudflare:test binding… well, we don't have miniflare bootstrapped here,
-// so instead we call the default export's fetch handler directly with a
+// Integration-style test for the sync-worker admin endpoint. We don't have
+// miniflare bootstrapped here, so we call the handler directly with a
 // hand-rolled Env that stubs SNAPSHOTS. Tight enough to pin the auth +
 // routing invariants without the whole DO substrate.
 

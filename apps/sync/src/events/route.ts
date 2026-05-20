@@ -9,7 +9,7 @@
 //      writes are skipped for stale siblings.
 //   5. Dispatch to the kind-specific handler to build D1 statements.
 //   6. Batch-commit in D1_BATCH_LIMIT chunks.
-//   7. Broadcast realtime frames + projection.dirty messages.
+//   7. Broadcast event.applied frames to the project DO.
 //
 // Auth: Authorization: Bearer <sync-token JWT> (same token used for WS upgrades).
 //       Each event is authorized independently so a single bad event doesn't
@@ -64,8 +64,8 @@ function chainWinnerKey(event: RawEvent): string | null {
 export interface EventsRouteEnv {
   AQUILLA_DB?: D1Database
   SYNC_SECRET_KEY?: string
-  /** Optional — when present, successful D1 commits broadcast Realtime frames. */
-  FileSync?: DurableObjectNamespace
+  /** Optional — when present, successful D1 commits broadcast ProjectSync frames. */
+  ProjectSync?: DurableObjectNamespace
 }
 
 interface AcceptedEntry {
@@ -574,38 +574,15 @@ export async function handleEventsWriteRequest(
     }
 
     // Broadcast — non-fatal.
-    if (env.FileSync && env.SYNC_SECRET_KEY) {
+    if (env.ProjectSync && env.SYNC_SECRET_KEY) {
       const broadcastEnv: BroadcastEnv = {
-        FileSync: env.FileSync,
+        ProjectSync: env.ProjectSync,
         SYNC_SECRET_KEY: env.SYNC_SECRET_KEY,
-      }
-
-      // Coalesce dirty tables per (project, file) before broadcast.
-      const dirtyByScope = new Map<string, { project: string; file: string; tables: Set<ProjectionTable> }>()
-      for (const entry of committedEntries) {
-        if (!entry.dirtyEntry) continue
-        const dirty = entry.dirtyEntry
-        const key = `${dirty.project}|${dirty.file}`
-        const existing = dirtyByScope.get(key)
-        if (existing) {
-          for (const t of dirty.tables) existing.tables.add(t)
-        } else {
-          dirtyByScope.set(key, { project: dirty.project, file: dirty.file, tables: new Set(dirty.tables) })
-        }
       }
 
       const broadcasts: Promise<void>[] = []
       for (const entry of committedEntries) {
         broadcasts.push(broadcastRealtime(broadcastEnv, entry.eventFrame))
-      }
-      for (const { project, file, tables } of dirtyByScope.values()) {
-        broadcasts.push(broadcastRealtime(broadcastEnv, {
-          v: 1,
-          t: 'projection.dirty',
-          project,
-          file,
-          tables: [...tables],
-        }))
       }
 
       await Promise.all(broadcasts)

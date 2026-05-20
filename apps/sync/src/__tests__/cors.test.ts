@@ -32,8 +32,8 @@ describe("isBrowserCorsPath", () => {
     expect(isBrowserCorsPath("/admin/projects/p1/archive")).toBe(false)
   })
 
-  it("does not match a partyserver party path", () => {
-    expect(isBrowserCorsPath("/parties/file-sync/proj-a:file-x")).toBe(false)
+  it("does not match a ProjectSync party path", () => {
+    expect(isBrowserCorsPath("/parties/project-sync/proj-a")).toBe(false)
   })
 })
 
@@ -62,9 +62,9 @@ describe("handleCorsPreflight", () => {
     expect(handleCorsPreflight(req("POST", "/events"))).toBeNull()
   })
 
-  it("returns null for OPTIONS on non-browser paths so partyserver/admin are untouched", () => {
+  it("returns null for OPTIONS on non-browser paths so ProjectSync/admin are untouched", () => {
     expect(handleCorsPreflight(req("OPTIONS", "/admin/files/p1/f1/compact-doc"))).toBeNull()
-    expect(handleCorsPreflight(req("OPTIONS", "/parties/file-sync/proj-a:file-x"))).toBeNull()
+    expect(handleCorsPreflight(req("OPTIONS", "/parties/project-sync/proj-a"))).toBeNull()
   })
 })
 

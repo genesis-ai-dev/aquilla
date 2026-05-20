@@ -1,6 +1,6 @@
 // Tests for the per-cell audio R2 endpoints. Mirrors the patterns in
 // admin.test.ts (stub R2 + direct fetch handler invocation) rather than
-// spinning up partyserver/miniflare so we can iterate fast.
+// spinning up miniflare so we can iterate fast.
 
 import { describe, it, expect } from "vitest"
 import { sign } from "hono/jwt"

@@ -29,8 +29,8 @@ both live in this repo, and the D1 schema is applied via
 1. `identity` (aquilla-identity) via `wrangler dev --local`
    on port 8787 (auth, orgs, members, projects, sync-token, users,
    `/__test__/reset`)
-2. `aquilla-sync-worker` via `wrangler dev --local` on port 8788 (y-partyserver
-   collab DOs)
+2. `aquilla-sync-worker` via `wrangler dev --local` on port 8788 (D1 event
+   routes, R2 media routes, ProjectSync presence/focus-lock DO)
 3. `MockLLMServer` on a random port (OpenAI-compatible)
 4. `vite --mode test` on port 5173
 

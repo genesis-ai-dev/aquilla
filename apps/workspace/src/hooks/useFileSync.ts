@@ -1,13 +1,12 @@
-// Phase 2b: useFileSync is stubbed to a static "live" state.
+// AD-1: useFileSync is a legacy compatibility shim with no file-level CRDT
+// transport.
 //
-// Pre-Phase 2b this hook owned the y-partyserver provider + Yjs awareness
-// roster for the current file. Phase 2b moves cells reads onto the
-// sync-worker projection (D1), but writes still flow through the legacy
-// Y.Doc — the real WS reconciler arrives in Phase 2c.
+// Pre-AD-1 this hook owned the file-scoped provider + awareness roster for
+// the current file. Realtime coordination now lives on the project-scoped
+// ProjectSync WebSocket; this hook remains only so older call sites can keep
+// a stable sync status signal while they are migrated.
 //
-// To keep ProjectWorkspace + SyncStatusIndicator compiling without leaking
-// a half-working y-partyserver connection into the migrated UI, this hook
-// now returns:
+// It returns:
 //   - `peers: []`     — peer roster comes back when Phase 2c rebuilds
 //                       presence on the new WS event channel.
 //   - `connected: true` — best-effort online state; the UI's "live" indicator
@@ -20,16 +19,14 @@
 //                       "live" when the browser is online and the hook is
 //                       enabled; "disabled" otherwise.
 //
-// The old options interface (doc, projectId, fileId, username, session, …)
+// The old options interface (doc, projectId, fileId, username, session, ...)
 // is preserved so call sites keep type-checking unchanged.
 
 import { useEffect, useState } from "react"
-import type * as Y from "yjs"
-import type YProvider from "y-partyserver/provider"
 import type { FrontierSession } from "@/lib/frontier/types"
 import type { SyncStatus } from "@/components/SyncStatusIndicator"
 
-/** Awareness payload for a single connected peer in a file-sync room.
+/** Awareness payload for a single connected peer in a project-sync room.
  *  Phase 2b leaves the type intact for compile-time stability; the runtime
  *  list is always empty until Phase 2c. */
 export interface PeerState {
@@ -58,7 +55,7 @@ export function peerColor(peerId: string): string {
 }
 
 interface UseFileSyncOptions {
-  doc: Y.Doc | null
+  doc: unknown | null
   projectId: string | null
   fileId: string | null
   username: string
@@ -71,7 +68,7 @@ interface UseFileSyncOptions {
 export function useFileSync(options: UseFileSyncOptions): {
   peers: PeerState[]
   connected: boolean
-  provider: YProvider | null
+  provider: null
   status: SyncStatus
 } {
   const { enabled } = options

@@ -277,8 +277,6 @@ interface EditorTableProps {
   cellOpenCommentCount?: Map<string, number>
   onOpenComments?: (cellId: string) => void
   onOpenHistory?: (cellId: string) => void
-  syncProvider?: import("y-partyserver/provider").default | null
-  collabUser?: { name: string; color: string }
   activeCueIndex?: number
   onSeekToCue?: (cellId: string) => void
   lineNumbersEnabled: boolean
@@ -309,7 +307,6 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   infractions = new Map(), rules = [], onInfractionClick,
   isBacktranslationConfigured, onBacktranslate, backtranslating, backtranslationErrors,
   cellOpenCommentCount, onOpenComments, onOpenHistory,
-  syncProvider, collabUser,
   activeCueIndex, onSeekToCue,
   lineNumbersEnabled, cellLabelsEnabled, sourceTextDirection, targetTextDirection,
   isAnonymous, breakdownMap, onJumpToCell, onAiSetupNeeded, onOpenRecording,
@@ -665,8 +662,6 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
                 cellOpenCommentCount={cellOpenCommentCount}
                 onOpenComments={onOpenComments}
                 onOpenHistory={onOpenHistory}
-                syncProvider={syncProvider}
-                collabUser={collabUser}
                 activeCueIndex={activeCueIndex}
                 onSeekToCue={onSeekToCue}
                 rowIndex={virtualRow.index}
@@ -739,8 +734,6 @@ interface MemoizedRowProps {
   cellOpenCommentCount?: Map<string, number>
   onOpenComments?: (cellId: string) => void
   onOpenHistory?: (cellId: string) => void
-  syncProvider?: import("y-partyserver/provider").default | null
-  collabUser?: { name: string; color: string }
   activeCueIndex?: number
   onSeekToCue?: (cellId: string) => void
   rowIndex: number
@@ -776,7 +769,7 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
     project, doc, username, editable, isCompletionConfigured, isCompletionAvailable,
     ruleMap, onCompleteSingle, onInfractionClick,
     isBacktranslationConfigured, onBacktranslate,
-    onOpenComments, onOpenHistory, syncProvider, collabUser,
+    onOpenComments, onOpenHistory,
     onSeekToCue, lineNumbersEnabled, cellLabelsEnabled,
     sourceTextDirection, targetTextDirection, isAnonymous,
     onJumpToCell, onAiSetupNeeded, onOpenRecording, onProjectChanged,
@@ -853,8 +846,6 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
         openCommentCount={openCommentCount}
         onOpenComments={onOpenComments}
         onOpenHistory={onOpenHistory}
-        syncProvider={syncProvider}
-        collabUser={collabUser}
         isActiveCue={isActiveCue}
         onSeekToCue={onSeekToCue}
         rowIndex={rowIndex}
@@ -919,8 +910,6 @@ interface EditorRowProps {
   openCommentCount: number
   onOpenComments?: (cellId: string) => void
   onOpenHistory?: (cellId: string) => void
-  syncProvider?: import("y-partyserver/provider").default | null
-  collabUser?: { name: string; color: string }
   isActiveCue?: boolean
   onSeekToCue?: (cellId: string) => void
   onDragStart: () => void
@@ -948,7 +937,6 @@ function EditorRow({
   onCompleteSingle, onInfractionClick,
   isBacktranslationConfigured, isBacktranslating, backtranslationError, onBacktranslate,
   openCommentCount, onOpenComments, onOpenHistory,
-  syncProvider: _syncProvider, collabUser: _collabUser,
   isActiveCue: _isActiveCue, onSeekToCue,
   onDragStart, onDragEnter, onSelectionPointerDown,
   rowIndex, lineNumbersEnabled, cellLabelsEnabled, sourceTextDirection, targetTextDirection, gridCols,

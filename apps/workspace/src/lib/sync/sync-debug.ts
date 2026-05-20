@@ -1,12 +1,19 @@
-// Sync debug logger. Gated on:
-//   1. Vite dev mode (always on in `npm run dev`)
-//   2. sessionStorage["codex.debug.sync"] === "1" (turn on in prod via console)
+// Sync debug logger for the legacy provider path.
 //
-// Logs: effect lifecycle, provider status/sync/close/error events, idle
-// disconnect transitions. Each line is prefixed with the connection's `_pk`
-// so client logs correlate 1:1 with the worker's `setName` lines.
+// AD-1 removes the file provider from production. This helper remains as a
+// small compatibility surface for older imports while the project WebSocket
+// owns live coordination.
 
-import type YProvider from "y-partyserver/provider"
+interface LegacySyncDebugProvider {
+  id: string
+  wsconnected?: boolean
+  wsconnecting?: boolean
+  synced?: boolean
+  bcconnected?: boolean
+  wsUnsuccessfulReconnects?: number
+  on(event: string, handler: (...args: unknown[]) => void): void
+  off(event: string, handler: (...args: unknown[]) => void): void
+}
 
 export function isSyncDebugEnabled(): boolean {
   if (import.meta.env.DEV) return true
@@ -19,11 +26,10 @@ export function isSyncDebugEnabled(): boolean {
 
 function ts(): string {
   const d = new Date()
-  return d.toISOString().slice(11, 23) // HH:MM:SS.mmm
+  return d.toISOString().slice(11, 23)
 }
 
 function log(label: string, pk: string, msg: string, ...rest: unknown[]): void {
-  // eslint-disable-next-line no-console
   console.log(`[sync ${ts()}] ${label} pk=${pk} ${msg}`, ...rest)
 }
 
@@ -41,7 +47,7 @@ export interface SyncDebugAttach {
 }
 
 export function attachSyncDebug(
-  provider: YProvider,
+  provider: LegacySyncDebugProvider,
   label: string
 ): SyncDebugAttach {
   if (!isSyncDebugEnabled()) {
@@ -86,23 +92,22 @@ export function attachSyncDebug(
 
   const onError = (event: unknown) => {
     log(label, pk, "connection-error", {
-      // The Event itself is mostly opaque; capture what we can.
       type: (event as { type?: string })?.type,
       reconnects: provider.wsUnsuccessfulReconnects,
     })
   }
 
-  provider.on("status", onStatus)
-  provider.on("sync", onSync)
-  provider.on("connection-close", onClose)
-  provider.on("connection-error", onError)
+  provider.on("status", onStatus as (...args: unknown[]) => void)
+  provider.on("sync", onSync as (...args: unknown[]) => void)
+  provider.on("connection-close", onClose as (...args: unknown[]) => void)
+  provider.on("connection-error", onError as (...args: unknown[]) => void)
 
   return {
     detach: () => {
-      provider.off("status", onStatus)
-      provider.off("sync", onSync)
-      provider.off("connection-close", onClose)
-      provider.off("connection-error", onError)
+      provider.off("status", onStatus as (...args: unknown[]) => void)
+      provider.off("sync", onSync as (...args: unknown[]) => void)
+      provider.off("connection-close", onClose as (...args: unknown[]) => void)
+      provider.off("connection-error", onError as (...args: unknown[]) => void)
       log(label, pk, "detach", { uptimeMs: Date.now() - startedAt })
     },
     logEffectRun: (deps) => log(label, pk, "effect run", deps),
@@ -111,14 +116,10 @@ export function attachSyncDebug(
   }
 }
 
-// Standalone effect logger for the case where there is no provider yet
-// (deps caused effect to short-circuit). Lets us see *why* useFileSync didn't
-// instantiate a provider this render.
 export function logEffectShortCircuit(
   label: string,
   deps: Record<string, unknown>
 ): void {
   if (!isSyncDebugEnabled()) return
-  // eslint-disable-next-line no-console
   console.log(`[sync ${ts()}] ${label} pk=- effect short-circuit`, deps)
 }

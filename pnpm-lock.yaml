@@ -110,9 +110,6 @@ importers:
       y-indexeddb:
         specifier: ^9.0.12
         version: 9.0.12(yjs@13.6.30)
-      y-partyserver:
-        specifier: ^2.1.4
-        version: 2.2.0(@cloudflare/workers-types@4.20260425.1)(partyserver@0.5.2(@cloudflare/workers-types@4.20260425.1))(yjs@13.6.30)
       y-prosemirror:
         specifier: ^1.3.7
         version: 1.3.7(prosemirror-model@1.25.4)(prosemirror-state@1.4.4)(prosemirror-view@1.41.8)(y-protocols@1.0.7(yjs@13.6.30))(yjs@13.6.30)
@@ -837,15 +834,6 @@ importers:
       hono:
         specifier: ^4.12.14
         version: 4.12.14
-      partyserver:
-        specifier: ^0.4.1
-        version: 0.4.1(@cloudflare/workers-types@4.20260425.1)
-      y-partyserver:
-        specifier: ^2.1.4
-        version: 2.2.0(@cloudflare/workers-types@4.20260425.1)(partyserver@0.4.1(@cloudflare/workers-types@4.20260425.1))(yjs@13.6.30)
-      yjs:
-        specifier: ^13.6.30
-        version: 13.6.30
     devDependencies:
       '@cloudflare/workers-types':
         specifier: ^4.20241218.0
@@ -979,9 +967,6 @@ importers:
       y-indexeddb:
         specifier: ^9.0.12
         version: 9.0.12(yjs@13.6.30)
-      y-partyserver:
-        specifier: ^2.1.4
-        version: 2.2.0(@cloudflare/workers-types@4.20260425.1)(partyserver@0.5.2(@cloudflare/workers-types@4.20260425.1))(yjs@13.6.30)
       y-prosemirror:
         specifier: ^1.3.7
         version: 1.3.7(prosemirror-model@1.25.4)(prosemirror-state@1.4.4)(prosemirror-view@1.41.8)(y-protocols@1.0.7(yjs@13.6.30))(yjs@13.6.30)
@@ -4595,9 +4580,6 @@ packages:
     resolution: {integrity: sha512-iPZK6eYjbxRu3uB4/WZ3EsEIMJFMqAoopl3R+zuq0UjcAm/MO6KCweDgPfP3elTztoKP3KtnVHxTn2NHBSDVUw==}
     engines: {node: '>=10'}
 
-  lodash.debounce@4.0.8:
-    resolution: {integrity: sha512-FT1yDzDYEoYWhnSGnpE/4Kj1fLZkDFyqRb7fNt6FdYOSxlUWAtp42Eh6Wb0rGIv/m9Bgo7x4GhQbm5Ys4SG5ow==}
-
   lodash.merge@4.6.2:
     resolution: {integrity: sha512-0KpjqXRVvrYyCsX1swR/XTK0va6VQkQM6MNo7PqW77ByjAhoARA8EfrP1N4+KlKj8YS0ZUCtRT/YUuhyYDujIQ==}
 
@@ -4775,11 +4757,6 @@ packages:
     engines: {node: ^10 || ^12 || ^13.7 || ^14 || >=15.0.1}
     hasBin: true
 
-  nanoid@5.1.9:
-    resolution: {integrity: sha512-ZUvP7KeBLe3OZ1ypw6dI/TzYJuvHP77IM4Ry73waSQTLn8/g8rpdjfyVAh7t1/+FjBtG4lCP42MEbDxOsRpBMw==}
-    engines: {node: ^18 || >=20}
-    hasBin: true
-
   native-promise-only@0.8.1:
     resolution: {integrity: sha512-zkVhZUA3y8mbz652WrL5x0fB0ehrBkulWT3TomAQ9iDtyXZvzKeEA6GPxAItBYeNYl5yngKRX612qHOhvMkDeg==}
 
@@ -4936,16 +4913,6 @@ packages:
   parseurl@1.3.3:
     resolution: {integrity: sha512-CiyeOxFT/JZyN5m0z9PfXw4SCBJ6Sygz1Dpl0wqjlhDEGGBP1GnsUVEL0p63hoG1fcj3fHynXi9NYO4nWOL+qQ==}
     engines: {node: '>= 0.8'}
-
-  partyserver@0.4.1:
-    resolution: {integrity: sha512-StSs0oY8RmTxjGNil7VbCG4gnTN+4rYX20fiUIItAxTPpr/5rPDZT6PIvMROkk9M1Gn7GzE1wuQXwhxceaGhXA==}
-    peerDependencies:
-      '@cloudflare/workers-types': ^4.20240729.0
-
-  partyserver@0.5.2:
-    resolution: {integrity: sha512-OlPHIRiHI5QrBLptAKg8xtrEOOTQj7sjR0Wwe1egqct3Fpc0kfntxdpA8N2LiHGNdsioF20RqRrk5byZdKk4Mw==}
-    peerDependencies:
-      '@cloudflare/workers-types': ^4.20260424.1
 
   path-browserify@1.0.1:
     resolution: {integrity: sha512-b7uo2UCUOYZcnF/3ID0lulOJi/bafxa1xPe7ZPsammBSpjSWQkjNxlt635YGS2MiR9GjvuXCtz2emr3jbsz98g==}
@@ -5967,13 +5934,6 @@ packages:
     engines: {node: '>=16.0.0', npm: '>=8.0.0'}
     peerDependencies:
       yjs: ^13.0.0
-
-  y-partyserver@2.2.0:
-    resolution: {integrity: sha512-AIsTEZ3jPicBe3VHO5c/VdSGSaFr0J9cAGj6+sgRL/RnXLTNSkP3oQXyXf1y8hQNeXv/j9zYDT5NnRv2k1eMGA==}
-    peerDependencies:
-      '@cloudflare/workers-types': ^4.20260424.1
-      partyserver: '>=0.2.0 <1.0.0'
-      yjs: ^13.6.14
 
   y-prosemirror@1.3.7:
     resolution: {integrity: sha512-NpM99WSdD4Fx4if5xOMDpPtU3oAmTSjlzh5U4353ABbRHl1HtAFUx6HlebLZfyFxXN9jzKMDkVbcRjqOZVkYQg==}
@@ -9362,8 +9322,6 @@ snapshots:
     dependencies:
       p-locate: 5.0.0
 
-  lodash.debounce@4.0.8: {}
-
   lodash.merge@4.6.2: {}
 
   log-symbols@6.0.0:
@@ -9602,8 +9560,6 @@ snapshots:
 
   nanoid@3.3.11: {}
 
-  nanoid@5.1.9: {}
-
   native-promise-only@0.8.1: {}
 
   natural-compare@1.4.0: {}
@@ -9807,16 +9763,6 @@ snapshots:
   parse-ms@4.0.0: {}
 
   parseurl@1.3.3: {}
-
-  partyserver@0.4.1(@cloudflare/workers-types@4.20260425.1):
-    dependencies:
-      '@cloudflare/workers-types': 4.20260425.1
-      nanoid: 5.1.9
-
-  partyserver@0.5.2(@cloudflare/workers-types@4.20260425.1):
-    dependencies:
-      '@cloudflare/workers-types': 4.20260425.1
-      nanoid: 5.1.9
 
   path-browserify@1.0.1: {}
 
@@ -11090,26 +11036,6 @@ snapshots:
   y-indexeddb@9.0.12(yjs@13.6.30):
     dependencies:
       lib0: 0.2.117
-      yjs: 13.6.30
-
-  y-partyserver@2.2.0(@cloudflare/workers-types@4.20260425.1)(partyserver@0.4.1(@cloudflare/workers-types@4.20260425.1))(yjs@13.6.30):
-    dependencies:
-      '@cloudflare/workers-types': 4.20260425.1
-      lib0: 0.2.117
-      lodash.debounce: 4.0.8
-      nanoid: 5.1.9
-      partyserver: 0.4.1(@cloudflare/workers-types@4.20260425.1)
-      y-protocols: 1.0.7(yjs@13.6.30)
-      yjs: 13.6.30
-
-  y-partyserver@2.2.0(@cloudflare/workers-types@4.20260425.1)(partyserver@0.5.2(@cloudflare/workers-types@4.20260425.1))(yjs@13.6.30):
-    dependencies:
-      '@cloudflare/workers-types': 4.20260425.1
-      lib0: 0.2.117
-      lodash.debounce: 4.0.8
-      nanoid: 5.1.9
-      partyserver: 0.5.2(@cloudflare/workers-types@4.20260425.1)
-      y-protocols: 1.0.7(yjs@13.6.30)
       yjs: 13.6.30
 
   y-prosemirror@1.3.7(prosemirror-model@1.25.4)(prosemirror-state@1.4.4)(prosemirror-view@1.41.8)(y-protocols@1.0.7(yjs@13.6.30))(yjs@13.6.30):

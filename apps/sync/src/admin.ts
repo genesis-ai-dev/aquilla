@@ -1,7 +1,6 @@
 // Admin HTTP endpoint for R2 cleanup after a file is deleted from codex-db.
 // Exported as a standalone function so it can be unit-tested without pulling
-// the partyserver import graph (which references cloudflare:* URLs Node
-// doesn't resolve).
+// in the worker dispatcher or a Durable Object host.
 
 export interface AdminEnv {
   SNAPSHOTS: R2Bucket
@@ -16,7 +15,7 @@ function r2KeyPrefix(env: Pick<AdminEnv, "R2_KEY_PREFIX">): string {
 
 /**
  * Handles DELETE /admin/files/:projectId/:fileId. Returns null when the path
- * isn't an admin route so the caller can fall through to partyserver.
+ * isn't an admin route so the caller can fall through to the remaining routes.
  *
  * Auth: Authorization: Bearer ${SYNC_SECRET_KEY}. Reuses the JWT-signing
  * secret as a shared admin key — only identity (which already holds

@@ -30,7 +30,12 @@ export function AppHeader({
     <span className="text-base font-semibold tracking-tight">{title}</span>
   )
   return (
-    <header className={cn("border-b bg-background", className)}>
+    <header
+      className={cn(
+        "bg-background shadow-[0_5px_14px_-8px_var(--neu-dark)]",
+        className,
+      )}
+    >
       <div className="flex items-center justify-between gap-3 px-4 py-3 sm:px-6">
         <div className="flex min-w-0 items-center gap-2">
           {titleHref ? (

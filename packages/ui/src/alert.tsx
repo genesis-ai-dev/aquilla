@@ -7,11 +7,11 @@ import { cva, type VariantProps } from "class-variance-authority"
 import { cn } from "./cn"
 
 const alertVariants = cva(
-  "relative w-full rounded-lg border px-3 py-2 text-sm",
+  "relative w-full rounded-xl border px-3 py-2 text-sm",
   {
     variants: {
       tone: {
-        info: "border-border bg-muted/60 text-foreground",
+        info: "border-transparent bg-background text-foreground shadow-neu-inset",
         success:
           "border-emerald-500/30 bg-emerald-500/10 text-emerald-900 dark:text-emerald-200",
         error:

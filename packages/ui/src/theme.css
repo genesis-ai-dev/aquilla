@@ -64,6 +64,27 @@
   }
 }
 
+/* Neumorphic surface helpers for arbitrary panels/divs that aren't shadcn
+   components. neu-raised lifts off the page; neu-inset carves into it. Both
+   sit on the shared surface color and use no hard border. */
+@utility neu-raised {
+  background-color: var(--card);
+  box-shadow: var(--shadow-neu);
+  border: 1px solid transparent;
+}
+
+@utility neu-flat {
+  background-color: var(--card);
+  box-shadow: var(--shadow-neu-sm);
+  border: 1px solid transparent;
+}
+
+@utility neu-inset {
+  background-color: var(--card);
+  box-shadow: var(--shadow-neu-inset);
+  border: 1px solid transparent;
+}
+
 @source "./**/*.{ts,tsx}";
 @source "../../auth-client/src/**/*.{ts,tsx}";
 
@@ -112,78 +133,115 @@
   --radius-2xl: calc(var(--radius) * 1.8);
   --radius-3xl: calc(var(--radius) * 2.2);
   --radius-4xl: calc(var(--radius) * 2.6);
+
+  /* Neumorphic elevation. Dual-tone soft shadows derived from the surface's
+     own --neu-light (top-left highlight) and --neu-dark (bottom-right shade),
+     so depth reads on the single shared surface color in both light + dark.
+     Available as the Tailwind utilities shadow-neu-xs … shadow-neu-lg,
+     shadow-neu-inset, shadow-neu-pressed. */
+  --shadow-neu-xs: 2px 2px 4px var(--neu-dark), -2px -2px 4px var(--neu-light);
+  --shadow-neu-sm: 3px 3px 7px var(--neu-dark), -3px -3px 6px var(--neu-light);
+  --shadow-neu: 6px 6px 13px var(--neu-dark), -5px -5px 11px var(--neu-light);
+  --shadow-neu-lg: 11px 11px 24px var(--neu-dark), -9px -9px 19px var(--neu-light);
+  --shadow-neu-inset: inset 3px 3px 6px var(--neu-dark), inset -3px -3px 6px var(--neu-light);
+  --shadow-neu-pressed: inset 2px 2px 5px var(--neu-dark), inset -2px -2px 4px var(--neu-light);
+
+  /* Remap Tailwind's default elevation scale onto the neumorphic shadows so
+     every existing shadow-xs … shadow-2xl across all apps reads as soft
+     dual-tone depth without touching each call site. */
+  --shadow-2xs: var(--shadow-neu-xs);
+  --shadow-xs: var(--shadow-neu-xs);
+  --shadow-sm: var(--shadow-neu-sm);
+  --shadow: var(--shadow-neu-sm);
+  --shadow-md: var(--shadow-neu);
+  --shadow-lg: var(--shadow-neu-lg);
+  --shadow-xl: var(--shadow-neu-lg);
+  --shadow-2xl: var(--shadow-neu-lg);
 }
 
 @layer base {
   :where(:root) {
     color-scheme: light;
-    --radius: 0.65rem;
-    --background: oklch(0.985 0.005 280);
-    --foreground: oklch(0.22 0.04 280);
-    --card: oklch(1 0.003 280);
-    --card-foreground: oklch(0.22 0.04 280);
-    --popover: oklch(0.998 0.003 280);
-    --popover-foreground: oklch(0.22 0.04 280);
+    --radius: 0.85rem;
+    /* Neumorphism: background, card, popover and sidebar all share one soft
+       mid-light surface so depth comes from shadow, not from contrasting
+       fills. --neu-light / --neu-dark are the highlight + shade for that
+       surface and drive every shadow-neu* utility. */
+    --surface: oklch(0.94 0.006 286);
+    --background: var(--surface);
+    --foreground: oklch(0.28 0.035 286);
+    --card: var(--surface);
+    --card-foreground: oklch(0.28 0.035 286);
+    --popover: oklch(0.95 0.006 286);
+    --popover-foreground: oklch(0.28 0.035 286);
     --primary: oklch(0.55 0.2 278);
     --primary-foreground: oklch(0.99 0.005 280);
-    --secondary: oklch(0.95 0.025 280);
-    --secondary-foreground: oklch(0.3 0.06 280);
-    --muted: oklch(0.96 0.018 280);
-    --muted-foreground: oklch(0.5 0.04 280);
-    --accent: oklch(0.92 0.045 278);
-    --accent-foreground: oklch(0.3 0.08 280);
+    --secondary: var(--surface);
+    --secondary-foreground: oklch(0.34 0.05 280);
+    --muted: oklch(0.915 0.007 286);
+    --muted-foreground: oklch(0.52 0.03 286);
+    --accent: oklch(0.92 0.025 286);
+    --accent-foreground: oklch(0.32 0.07 280);
     --destructive: oklch(0.577 0.245 27.325);
     --destructive-foreground: oklch(0.99 0.005 280);
-    --border: oklch(0.9 0.025 280);
-    --input: oklch(0.9 0.025 280);
+    --border: oklch(0.89 0.008 286);
+    --input: oklch(0.92 0.008 286);
     --ring: oklch(0.55 0.2 278);
+    --neu-light: oklch(0.995 0.002 286);
+    --neu-dark: oklch(0.85 0.014 286);
     --chart-1: oklch(0.62 0.18 278);
     --chart-2: oklch(0.55 0.16 270);
     --chart-3: oklch(0.7 0.14 240);
     --chart-4: oklch(0.65 0.12 310);
     --chart-5: oklch(0.5 0.18 290);
-    --sidebar: oklch(0.97 0.012 280);
-    --sidebar-foreground: oklch(0.22 0.04 280);
+    --sidebar: var(--surface);
+    --sidebar-foreground: oklch(0.28 0.035 286);
     --sidebar-primary: oklch(0.55 0.2 278);
     --sidebar-primary-foreground: oklch(0.99 0.005 280);
-    --sidebar-accent: oklch(0.93 0.04 278);
-    --sidebar-accent-foreground: oklch(0.3 0.08 280);
-    --sidebar-border: oklch(0.9 0.025 280);
+    --sidebar-accent: oklch(0.92 0.025 286);
+    --sidebar-accent-foreground: oklch(0.32 0.07 280);
+    --sidebar-border: oklch(0.89 0.008 286);
     --sidebar-ring: oklch(0.55 0.2 278);
   }
 
   :where(html.dark) {
-    --background: oklch(0.18 0.03 282);
-    --foreground: oklch(0.96 0.012 280);
-    --card: oklch(0.22 0.04 282);
-    --card-foreground: oklch(0.96 0.012 280);
-    --popover: oklch(0.22 0.04 282);
-    --popover-foreground: oklch(0.96 0.012 280);
+    /* Dark neumorphism: a single muted charcoal surface; the highlight is a
+       lifted grey and the shade a deeper one, both close to the surface so
+       elevation stays soft rather than glassy. */
+    --surface: oklch(0.27 0.018 286);
+    --background: var(--surface);
+    --foreground: oklch(0.95 0.012 286);
+    --card: var(--surface);
+    --card-foreground: oklch(0.95 0.012 286);
+    --popover: oklch(0.285 0.02 286);
+    --popover-foreground: oklch(0.95 0.012 286);
     --primary: oklch(0.7 0.18 278);
     --primary-foreground: oklch(0.18 0.04 282);
-    --secondary: oklch(0.28 0.05 280);
-    --secondary-foreground: oklch(0.96 0.012 280);
-    --muted: oklch(0.27 0.04 280);
-    --muted-foreground: oklch(0.74 0.04 280);
-    --accent: oklch(0.32 0.07 278);
-    --accent-foreground: oklch(0.96 0.012 280);
+    --secondary: var(--surface);
+    --secondary-foreground: oklch(0.95 0.012 286);
+    --muted: oklch(0.305 0.02 286);
+    --muted-foreground: oklch(0.74 0.035 286);
+    --accent: oklch(0.34 0.04 286);
+    --accent-foreground: oklch(0.95 0.012 286);
     --destructive: oklch(0.704 0.191 22.216);
     --destructive-foreground: oklch(0.96 0.012 280);
-    --border: oklch(1 0 0 / 12%);
-    --input: oklch(1 0 0 / 16%);
+    --border: oklch(1 0 0 / 8%);
+    --input: oklch(1 0 0 / 10%);
     --ring: oklch(0.7 0.18 278);
+    --neu-light: oklch(0.33 0.022 286);
+    --neu-dark: oklch(0.20 0.013 286);
     --chart-1: oklch(0.7 0.18 278);
     --chart-2: oklch(0.62 0.16 270);
     --chart-3: oklch(0.74 0.14 240);
     --chart-4: oklch(0.7 0.14 310);
     --chart-5: oklch(0.55 0.18 290);
-    --sidebar: oklch(0.2 0.035 282);
-    --sidebar-foreground: oklch(0.96 0.012 280);
+    --sidebar: var(--surface);
+    --sidebar-foreground: oklch(0.95 0.012 286);
     --sidebar-primary: oklch(0.7 0.18 278);
     --sidebar-primary-foreground: oklch(0.18 0.04 282);
-    --sidebar-accent: oklch(0.3 0.06 278);
-    --sidebar-accent-foreground: oklch(0.96 0.012 280);
-    --sidebar-border: oklch(1 0 0 / 12%);
+    --sidebar-accent: oklch(0.34 0.04 286);
+    --sidebar-accent-foreground: oklch(0.95 0.012 286);
+    --sidebar-border: oklch(1 0 0 / 8%);
     --sidebar-ring: oklch(0.7 0.18 278);
   }
 

@@ -29,7 +29,7 @@ function PopoverContent({
         <PopoverPrimitive.Popup
           data-slot="popover-content"
           className={cn(
-            "z-40 rounded-md bg-popover text-popover-foreground shadow-md ring-1 ring-foreground/10 outline-none",
+            "z-40 rounded-xl bg-popover text-popover-foreground shadow-neu-lg outline-none",
             "data-closed:pointer-events-none data-closed:opacity-0",
             className
           )}

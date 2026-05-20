@@ -16,7 +16,7 @@ export function FloatingThemeToggle({ className }: FloatingThemeToggleProps) {
   return (
     <div
       className={cn(
-        "fixed right-3 top-3 z-50 rounded-md border bg-background/80 shadow-sm backdrop-blur",
+        "fixed right-3 top-3 z-50 rounded-xl border border-transparent bg-background shadow-neu-sm",
         className,
       )}
     >

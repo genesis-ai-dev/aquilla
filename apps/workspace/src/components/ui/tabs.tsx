@@ -64,7 +64,7 @@ export function TabsList({
       role="tablist"
       onKeyDown={onKeyDown}
       className={cn(
-        "inline-flex items-center gap-0.5 rounded-full bg-muted/40 p-0.5",
+        "inline-flex items-center gap-0.5 rounded-full bg-background p-0.5 shadow-neu-inset",
         className,
       )}
     >
@@ -107,7 +107,7 @@ export function TabsTrigger({
         "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40",
         "disabled:cursor-not-allowed disabled:opacity-40",
         active
-          ? "bg-background text-foreground shadow-sm ring-1 ring-foreground/5"
+          ? "bg-background text-foreground shadow-neu-xs"
           : "text-muted-foreground hover:text-foreground",
         className,
       )}

@@ -4,8 +4,9 @@ import { PanelLeftClose, PanelLeftOpen } from "lucide-react"
 // Project-wide z-index scale (Tailwind v4 dynamic):
 //   z-10 — content stickies (table headers, sticky cells)
 //   z-20 — in-content floats (action rails, expansion glyphs)
-//   z-30 — app chrome (workspace header, fixed top/bottom banners, status chips)
-//   z-40 — popovers, menus, dropdowns, autocomplete
+//   z-30 — in-flow app chrome (workspace header, status bar, bottom action chips)
+//   z-40 — fixed overlay banners, popovers, menus, dropdowns, autocomplete
+//          (banners sit above z-30 chrome but below modal dialogs)
 //   z-50 — modals, sheets, dialogs (+ their backdrops)
 //   z-60 — toasts / transient notices that must beat everything
 // Anything else is a bug. Don't reach for z-[999].

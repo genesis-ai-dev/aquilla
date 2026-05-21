@@ -13,10 +13,10 @@ import { CQRS_SCHEMA_VERSION } from "./cqrs-types"
 import { flushOutboxBatch } from "./outbox-flush"
 
 describe("cqrs outbox", () => {
-  const sample: CqrsRawEvent<"cell.commit"> = {
+  const sample: CqrsRawEvent<"target.cell.commit"> = {
     id: "e1",
     schemaVersion: CQRS_SCHEMA_VERSION,
-    kind: "cell.commit",
+    kind: "target.cell.commit",
     projectId: "p",
     fileId: "f",
     cellId: "c",

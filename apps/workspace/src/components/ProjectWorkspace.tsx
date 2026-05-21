@@ -753,8 +753,14 @@ export function ProjectWorkspace() {
           userId: currentUsername,
           baseUrl: syncWorkerHttpOrigin(),
           getToken: async () => {
-            const aFile = projectFilesRef.current[0]?.id ?? ""
-            if (!aFile) return null
+            // The per-project DO authenticates with verifyTokenForProject,
+            // which checks only projectId and ignores the token's fileId. The
+            // workspace's only mint path is file-scoped, so for a fileless
+            // project (nothing imported yet) we'd otherwise return null and the
+            // WS would never authenticate — breaking presence/focus-locks until
+            // the first file lands. Mint against a sentinel fileId instead; the
+            // DO discards it. (identity's /sync-token requires fileId.min(1).)
+            const aFile = projectFilesRef.current[0]?.id ?? "__project__"
             return getTokenForFile(aFile)
           },
         },

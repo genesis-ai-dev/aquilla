@@ -119,11 +119,14 @@ jobs:
         if: matrix.app != 'identity' && matrix.app != 'sync' && matrix.app != 'chat'
         run: pnpm --filter @aquilla/${{ matrix.app }} build
         env:
-          # Identity is mounted at aquilla.app/api/identity/* via Workers
-          # Routes; the SPAs hit it through the apex. Sync + chat are
-          # still on workers.dev (no public path mount yet).
+          # Identity + sync are mounted under the apex via Workers Routes
+          # (aquilla.app/api/identity/*, aquilla.app/api/sync/*) so the SPAs
+          # reach them through aquilla.app — Safari handles *.workers.dev
+          # unreliably (dropped WS + failed POSTs). Chat is still on workers.dev.
+          # NOTE: the aquilla.app/api/sync/* Workers Route must exist in
+          # Cloudflare before this lands (CI can't create routes).
           VITE_AUTH_BASE: https://aquilla.app/api/identity
-          VITE_SYNC_WORKER_HOST: aquilla-sync-worker.blue-darkness-7674.workers.dev
+          VITE_SYNC_WORKER_HOST: aquilla.app/api/sync
           VITE_CHAT_BASE: https://aquilla-chat-worker.blue-darkness-7674.workers.dev
 
       - name: Deploy

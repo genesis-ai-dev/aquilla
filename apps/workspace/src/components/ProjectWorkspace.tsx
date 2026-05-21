@@ -1180,10 +1180,11 @@ export function ProjectWorkspace() {
       return next
     })
     if (refs.length > 0) workspaceTabs.openFile(refs[0].id)
-    void flushOutboxBatch({ getTokenForFile }).then(() => {
-      refresh()
-      revalidateCells()
-    })
+    // The bulk importer (lib/import.ts → POST /import) has already persisted
+    // file.create + every source.cell.create server-side before resolving, so
+    // there's nothing to flush — just pull the fresh projection in.
+    refresh()
+    revalidateCells()
   }
 
   // ── Render ────────────────────────────────────────────────────────────────
@@ -1530,6 +1531,7 @@ export function ProjectWorkspace() {
         <ImportDialog open={importOpen} onOpenChange={setImportOpen}
           projectId={project.id}
           username={currentUsername}
+          getToken={getTokenForFile}
           sourceLanguage={project.sourceLanguage} targetLanguage={project.targetLanguage}
           onImported={handleImported} />
       </Suspense>

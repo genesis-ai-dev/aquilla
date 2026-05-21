@@ -14,6 +14,7 @@
 
 const BROWSER_PATH_PREFIXES = [
   "/events",
+  "/import",
   "/cells/",
   "/cell-validators",
   "/api/v1/projects/",

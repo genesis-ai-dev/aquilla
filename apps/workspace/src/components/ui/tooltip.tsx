@@ -25,11 +25,16 @@ function TooltipContent({
 }: TooltipPrimitive.Popup.Props & { side?: "top" | "bottom" | "left" | "right" }) {
   return (
     <TooltipPrimitive.Portal>
-      <TooltipPrimitive.Positioner side={side}>
+      {/* z-40 has to live on the Positioner, not the Popup. Base UI's Positioner
+          uses `transform` for placement, which establishes a stacking context;
+          any z-index on the Popup is sealed inside that context. With the
+          Positioner at z:auto, the whole portal subtree orders at z:0 in body
+          and paints BEHIND the editor table's sticky header (z-10). */}
+      <TooltipPrimitive.Positioner side={side} className="z-40">
         <TooltipPrimitive.Popup
           data-slot="tooltip-content"
           className={cn(
-            "z-40 rounded-lg bg-popover px-3 py-1.5 text-xs text-popover-foreground shadow-neu outline-none",
+            "rounded-lg bg-popover px-3 py-1.5 text-xs text-popover-foreground shadow-neu outline-none",
             className
           )}
           {...props}

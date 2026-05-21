@@ -73,6 +73,12 @@ database_id = "11828e9d-998b-4d3f-a405-91d9f624f94a"
 [env.staging]
 name = "aquilla-sync-worker-staging"
 account_id = "6a80496d1e59948a9cbaa3c643ba81d7"
+# Mounted under the apex via Workers Routes so browsers reach it through the
+# real `aquilla.app` zone (Safari is unreliable against `*.workers.dev`). The
+# worker strips the `/api/sync` prefix (see src/index.ts). CI deploys strip
+# route lines (the CI token lacks zone-route perms); the route is created
+# out-of-band via dashboard / local `wrangler deploy`.
+routes = ["dev.aquilla.app/api/sync/*"]
 
 [[env.staging.durable_objects.bindings]]
 name = "FileSync"
@@ -108,6 +114,10 @@ database_id = "c995bf9a-97c0-4966-a112-053a2d04d8f9"
 [env.production]
 name = "aquilla-sync-worker"
 account_id = "6a80496d1e59948a9cbaa3c643ba81d7"
+# Browser-facing apex mount (see [env.staging] note). The worker strips the
+# `/api/sync` prefix in src/index.ts. Route is created out-of-band; CI strips
+# route lines before deploying.
+routes = ["aquilla.app/api/sync/*"]
 
 [[env.production.durable_objects.bindings]]
 name = "FileSync"

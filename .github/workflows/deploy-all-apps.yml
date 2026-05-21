@@ -136,7 +136,10 @@ jobs:
         run: pnpm --filter @aquilla/${{ matrix.app }} build
         env:
           # Per-PR identity is mounted at pr-<N>.aquilla.app/api/identity/*.
-          # Sync still on workers.dev for staging (no public-path mount yet).
+          # Sync stays on the shared-staging workers.dev host for now: the
+          # apex mount (dev.aquilla.app/api/sync/*) is declared in
+          # apps/sync/wrangler.toml but inert until dev.aquilla.app gets a
+          # proxied DNS record. Prod already moved to aquilla.app/api/sync.
           VITE_AUTH_BASE: https://pr-${{ env.PR }}.aquilla.app/api/identity
           VITE_SYNC_WORKER_HOST: aquilla-sync-worker-staging.blue-darkness-7674.workers.dev
 

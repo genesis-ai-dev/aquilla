@@ -17,6 +17,7 @@ import { handleCellsReadRequest } from "./events/cells-read-route"
 import { handleEventsReadRequest } from "./events/read-route"
 import { handleEventsWriteRequest } from "./events/route"
 import { handleFilesReadRequest } from "./events/files-read-route"
+import { handleBulkImportRequest } from "./events/import-route"
 import { handleRebuildProjectionRequest } from "./events/rebuild"
 import { handleSearchReadRequest } from "./events/search-route"
 import { handleStaleSourceRequest } from "./events/stale-source-route"
@@ -138,6 +139,8 @@ export default {
     if (branchingPassagesResponse) return withCors(branchingPassagesResponse, request)
     const branchingSearchResponse = await handleBranchingSearchRequest(request, env)
     if (branchingSearchResponse) return withCors(branchingSearchResponse, request)
+    const bulkImportResponse = await handleBulkImportRequest(request, env)
+    if (bulkImportResponse) return bulkImportResponse
     const eventsWriteResponse = await handleEventsWriteRequest(request, env)
     if (eventsWriteResponse) return withCors(eventsWriteResponse, request)
 

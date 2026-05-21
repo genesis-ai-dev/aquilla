@@ -84,8 +84,29 @@ function routeProjectSync(request: Request, env: Env): Response | Promise<Respon
   return stub.fetch(new Request(inner.toString(), request))
 }
 
+/** Path prefix when the worker is mounted under the apex via Workers Routes
+ *  (`aquilla.app/api/sync/*`). Stripped before any routing so the handlers
+ *  keep their bare paths (`/events`, `/parties/...`, `/api/v1/...`). Mirrors
+ *  identity's `/api/identity` strip. Conditional, so direct `workers.dev` /
+ *  local `wrangler dev` calls (no prefix) keep working unchanged. */
+const APEX_PREFIX = "/api/sync"
+
+function stripApexPrefix(request: Request): Request {
+  const url = new URL(request.url)
+  if (url.pathname !== APEX_PREFIX && !url.pathname.startsWith(`${APEX_PREFIX}/`)) {
+    return request
+  }
+  url.pathname = url.pathname.slice(APEX_PREFIX.length) || "/"
+  // Preserve method, headers (incl. `Upgrade: websocket`), and body so WS
+  // upgrades and POST bodies survive the rewrite.
+  return new Request(url.toString(), request)
+}
+
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
+    // Must run before CORS / route matching — those test bare paths.
+    request = stripApexPrefix(request)
+
     const preflight = handleCorsPreflight(request)
     if (preflight) return preflight
 

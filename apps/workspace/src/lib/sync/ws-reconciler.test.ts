@@ -85,6 +85,12 @@ describe("buildProjectWsUrl", () => {
       "wss://h/parties/project-sync/p?user=name+with+space&token=t",
     )
   })
+
+  it("preserves an apex path prefix (Workers Routes mount aquilla.app/api/sync)", () => {
+    expect(buildProjectWsUrl("https://aquilla.app/api/sync", "proj-1", "alice", "tok")).toBe(
+      "wss://aquilla.app/api/sync/parties/project-sync/proj-1?user=alice&token=tok",
+    )
+  })
 })
 
 describe("parseProjectWsMessage", () => {

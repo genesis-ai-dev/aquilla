@@ -1,13 +1,16 @@
 // Authorization middleware. Verifies a frontier-style JWT (HS256, claim
-// `sub` = username) against AUTH_DB and stashes the hydrated user on the
-// Hono context.
+// `sub` = username) and stashes a JWT-derived user on the Hono context.
 //
-// Copied from aquilla-identity (apps/identity/src/middleware/auth.ts). Kept
-// 1:1 so any tightening of the auth path can be applied uniformly across
-// both workers.
+// We trust the JWT signature — anyone who can mint a token under the shared
+// SECRET_KEY (aquilla-identity, or the legacy frontier-server) is a valid
+// caller. The codex-web user landscape spans both directories (new users
+// land in aquilla-db; legacy users live in frontier-db-v2) and there is no
+// per-request data on the user record the chat route actually needs. A DB
+// lookup against either directory in isolation would lock out half the
+// population. The route never reads any user field beyond auth-success.
 
 import type { Context, Next } from "hono"
-import type { Env, Variables } from "../types"
+import type { AuthUser, Env, Variables } from "../types"
 import { JWTService } from "../auth/jwt"
 
 export type AuthHonoEnv = { Bindings: Env; Variables: Variables }
@@ -37,11 +40,27 @@ export const authMiddleware = async (
     return c.json({ error: "Token expired" }, 401)
   }
 
-  const user = await jwtService.getUserByUsername(payload.sub)
-  if (!user) {
-    return c.json({ error: "User not found" }, 401)
+  if (typeof payload.sub !== "string" || !payload.sub) {
+    return c.json({ error: "Invalid token claims" }, 401)
   }
 
-  c.set("user", user)
+  c.set("user", userFromClaims(payload.sub))
   await next()
+}
+
+function userFromClaims(username: string): AuthUser {
+  return {
+    id: 0,
+    username,
+    email: "",
+    password_hash: "",
+    gitlab_user_id: null,
+    gitlab_username: null,
+    gitlab_token: null,
+    stripe_customer_id: null,
+    subscription_tier: null,
+    preferences: {},
+    created_at: "",
+    updated_at: "",
+  }
 }

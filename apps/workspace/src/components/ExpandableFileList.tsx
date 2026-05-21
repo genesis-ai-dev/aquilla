@@ -20,6 +20,7 @@ interface Props {
   fileProgress: Map<string, FileStats>
   suggestionFileIds: Set<string>
   validationCount: number
+  getTokenForFile: (fileId: string) => Promise<string | null>
   onSelectFile: (fileId: string) => void
   onRename: (fileId: string, newName: string) => void
   onMove: (fileId: string) => void
@@ -30,7 +31,7 @@ interface Props {
 
 export function ExpandableFileList({
   projectId, files, activeFileId, fileProgress,
-  suggestionFileIds, validationCount, onSelectFile, onRename, onMove, onDelete,
+  suggestionFileIds, validationCount, getTokenForFile, onSelectFile, onRename, onMove, onDelete,
   onApplySuggestion, onRenameCorpus,
 }: Props) {
   const { expanded, toggle } = useSidebarExpansion(projectId)
@@ -169,8 +170,10 @@ export function ExpandableFileList({
                           />
                           {isExpanded && (
                             <FileSectionGrid
+                              projectId={projectId}
                               fileId={file.id}
                               validationCount={validationCount}
+                              getTokenForFile={getTokenForFile}
                               onSectionClick={(label) => {
                                 if (file.id !== activeFileId) {
                                   onSelectFile(file.id)

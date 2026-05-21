@@ -740,6 +740,13 @@ export function ProjectWorkspace() {
             if (msg.t === "event.applied") {
               if (!msg.cell || msg.project !== pid) return
               revalidateCells()
+              // Don't pop the "remote changed" banner for our own writes —
+              // the editor just committed; bouncing the same event back via
+              // WS is expected. `by` is populated by post-2c-γ sync workers;
+              // older builds omit it and fall through to the legacy
+              // "always banner on focused cell" path so the user can still
+              // tell something happened.
+              if (msg.by && msg.by === currentUsername) return
               if (focusedCellIdRef.current === msg.cell) {
                 setCellsWithRemoteChange((cur) => {
                   if (cur.has(msg.cell!)) return cur
@@ -1187,6 +1194,7 @@ export function ProjectWorkspace() {
               fileProgress={fileProgress}
               suggestionFileIds={suggestionFileIds}
               validationCount={validationCount}
+              getTokenForFile={getTokenForFile}
               onSelectFile={workspaceTabs.openFile}
               onRename={handleRename}
               onMove={(fileId) => {

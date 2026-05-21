@@ -32,6 +32,10 @@ export type RealtimeMessage =
       file?: string
       cell?: string
       ts: number                  // server_ts (unix ms)
+      /** Username of the actor that produced the event. Optional for back-
+       *  compat with older producers; clients use it to filter their own
+       *  writes out of remote-change banners. */
+      by?: string
     }
   | {
       v: 1
@@ -82,6 +86,7 @@ export function parseRealtimeMessage(raw: string): RealtimeMessage | null {
       file: typeof m.file === 'string' ? m.file : undefined,
       cell: typeof m.cell === 'string' ? m.cell : undefined,
       ts: m.ts,
+      ...(typeof m.by === 'string' ? { by: m.by } : {}),
     }
   }
   if (m.t === 'projection.dirty') {

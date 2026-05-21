@@ -10,7 +10,7 @@
 // overlay on top of the server-side ProjectRecord; that's the canonical
 // path for those keys.
 
-import { useCallback, useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import type { ProjectRecord } from "@/lib/parsers/types"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { minimalProjectRecord, resolveCloudProject } from "@/lib/sync/cloud-projects"
@@ -121,7 +121,14 @@ export function useProject(projectId: string) {
   // per-callsite changes.
   const roleLevel = project?.syncRole?.level ?? null
   const { settings: syncedSettings } = useProjectSettings(projectId, roleLevel)
-  const overlaid = project ? overlaySettings(project, syncedSettings) : null
+  // Memoize so the returned record keeps a stable identity across renders.
+  // overlaySettings() spreads into a fresh object; recomputing it inline every
+  // render churned `project` downstream, re-running effects keyed on it (e.g.
+  // ProjectWorkspace's URL-redirect effect) on every render.
+  const overlaid = useMemo(
+    () => (project ? overlaySettings(project, syncedSettings) : null),
+    [project, syncedSettings],
+  )
 
   return {
     project: overlaid,

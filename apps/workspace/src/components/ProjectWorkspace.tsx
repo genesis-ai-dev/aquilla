@@ -193,6 +193,30 @@ export function ProjectWorkspace() {
   // converge in one hop. Reads localStorage directly because it only needs
   // to fire on the no-fileId render.
   const location = useLocation()
+  // `navigate(replace)` calls `history.replaceState` synchronously, but the
+  // matching `useLocation()` / `useParams()` update only lands on a later
+  // commit. During an import the WS reconnect + revalidate + optimistic-file
+  // reconciliation drive a burst of renders, and this effect re-runs on every
+  // one (its `project` dep is a fresh object each render). Guarding solely on
+  // `location.pathname` isn't enough: across the burst it stays stale, so the
+  // same `navigate(replace)` fires dozens of times before the URL settles —
+  // tripping the browser's 100-replaceState/10s cap (SecurityError → blank
+  // page). `pendingNavRef` remembers the target we last issued and suppresses
+  // a repeat until the router actually commits it.
+  const pendingNavRef = useRef<string | null>(null)
+  const redirectTo = useCallback(
+    (target: string) => {
+      if (location.pathname === target) {
+        pendingNavRef.current = null
+        return false
+      }
+      if (pendingNavRef.current === target) return false
+      pendingNavRef.current = target
+      navigate(target, { replace: true })
+      return true
+    },
+    [location.pathname, navigate],
+  )
   useEffect(() => {
     if (!project || !projectId) return
 
@@ -202,9 +226,11 @@ export function ProjectWorkspace() {
       const known =
         fileIds.includes(routeFileId) ||
         optimisticFileIdsRef.current.has(routeFileId)
-      if (known) return
-      const target = `/project/${projectId}`
-      if (location.pathname !== target) navigate(target, { replace: true })
+      if (known) {
+        pendingNavRef.current = null
+        return
+      }
+      redirectTo(`/project/${projectId}`)
       return
     }
 
@@ -220,9 +246,7 @@ export function ProjectWorkspace() {
           : onlyFile
     if (!nextFileId) return
     const target = `/project/${projectId}/file/${nextFileId}`
-    if (location.pathname === target) return
-    setSelectedFileId(nextFileId)
-    navigate(target, { replace: true })
+    if (redirectTo(target)) setSelectedFileId(nextFileId)
   }, [
     project,
     projectId,
@@ -230,8 +254,7 @@ export function ProjectWorkspace() {
     fileIds,
     projectFiles,
     workspaceTabs.tabs,
-    navigate,
-    location.pathname,
+    redirectTo,
   ])
   const [importOpen, setImportOpen] = useState(false)
   const [drawerRuleId, setDrawerRuleId] = useState<string | null>(null)

@@ -25,11 +25,20 @@ function PopoverContent({
 }) {
   return (
     <PopoverPrimitive.Portal>
-      <PopoverPrimitive.Positioner side={side} align={align} anchor={anchor} sideOffset={sideOffset}>
+      {/* z-40 has to live on the Positioner — see TooltipContent for the
+          rationale. The Popup's z-index would otherwise be sealed inside
+          the Positioner's transform-induced stacking context. */}
+      <PopoverPrimitive.Positioner
+        side={side}
+        align={align}
+        anchor={anchor}
+        sideOffset={sideOffset}
+        className="z-40"
+      >
         <PopoverPrimitive.Popup
           data-slot="popover-content"
           className={cn(
-            "z-40 rounded-md bg-popover text-popover-foreground shadow-md ring-1 ring-foreground/10 outline-none",
+            "rounded-xl border border-border bg-popover text-popover-foreground shadow-soft-lg outline-none",
             "data-closed:pointer-events-none data-closed:opacity-0",
             className
           )}

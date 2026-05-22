@@ -25,11 +25,15 @@ function TooltipContent({
 }: TooltipPrimitive.Popup.Props & { side?: "top" | "bottom" | "left" | "right" }) {
   return (
     <TooltipPrimitive.Portal>
-      <TooltipPrimitive.Positioner side={side}>
+      {/* z-index lives on the Positioner, not the Popup: Base UI's Positioner
+          uses `transform` for placement, which establishes a stacking context
+          that seals any z-index on the Popup. z-[60] keeps tooltips above
+          dialog content (z-50) and the editor table's sticky header (z-10). */}
+      <TooltipPrimitive.Positioner side={side} className="z-[60]">
         <TooltipPrimitive.Popup
           data-slot="tooltip-content"
           className={cn(
-            "z-40 rounded-md bg-popover px-3 py-1.5 text-xs text-popover-foreground shadow-md ring-1 ring-foreground/10 outline-none",
+            "rounded-xl border border-border bg-popover px-3 py-1.5 text-xs text-popover-foreground shadow-soft outline-none",
             className
           )}
           {...props}

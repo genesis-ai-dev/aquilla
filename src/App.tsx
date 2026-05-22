@@ -32,7 +32,7 @@ function SyncFreezeOverlay() {
   const { syncing } = useSyncing()
   if (!syncing) return null
   return (
-    <div className="fixed top-0 left-0 right-0 z-30 bg-amber-50 text-amber-800 border-b border-amber-200 px-3 py-1 text-xs text-center">
+    <div className="fixed top-0 left-0 right-0 z-40 bg-amber-50 text-amber-800 border-b border-amber-200 px-3 py-1 text-xs text-center">
       Merging incoming changes…
     </div>
   )
@@ -68,6 +68,10 @@ function AppRoutes() {
       <Route path="/project/:id/comments/debug" element={<DebugView />} />
       <Route path="/project/:id/snapshots" element={<SnapshotsPage />} />
       <Route path="/project/:id/snapshots/debug" element={<DebugView />} />
+      {/* In dev there is no front-door Worker, so without an explicit
+          /projects route the `/:id` workspace catch-all eats it and tries
+          to load a project named "projects". Same shape for /onboarding. */}
+      <Route path="/projects" element={<Dashboard />} />
       <Route path="/join/:token" element={<JoinPage />} />
       <Route path="/onboarding" element={<OnboardingWizard />} />
       <Route path="/settings" element={<Settings />} />

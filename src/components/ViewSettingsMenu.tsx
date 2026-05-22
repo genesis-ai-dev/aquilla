@@ -112,8 +112,9 @@ export function ViewSettingsMenu({
           }
         />
         <Menu.Portal>
-          <Menu.Positioner sideOffset={4}>
-            <Menu.Popup className="z-40 min-w-60 rounded-md border bg-popover p-1 text-popover-foreground shadow-md">
+          {/* z-40 on Positioner, not Popup — see ui/tooltip.tsx for rationale. */}
+          <Menu.Positioner sideOffset={4} className="z-40">
+            <Menu.Popup className="min-w-60 rounded-xl border bg-popover p-1 text-popover-foreground shadow-soft-lg">
               <Menu.Item
                 disabled={!fileOpen}
                 onClick={() => onLineNumbersChange(!lineNumbersEnabled)}

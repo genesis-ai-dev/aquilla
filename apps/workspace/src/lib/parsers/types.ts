@@ -244,8 +244,10 @@ export interface ProjectRecord {
    * projects without this field fall back to registry defaults.
    */
   experimentalFlags?: Record<string, boolean>
-  /** Caps and knobs for the composite-health scorer. Absent → use HEALTH_DEFAULTS. */
+  /** @deprecated Four-sub-score health config — retired by AD-14 (decay). */
   healthSettings?: HealthSettings
+  /** AD-14 decay tunables (endorsementTarget, decayWarnThreshold). Absent → DECAY_DEFAULTS. */
+  decaySettings?: DecaySettings
   /** Required distinct validators for a text cell to count as "fully validated". Clamped [1, 15]. Default 1. Mirrors desktop manifest. */
   validationCount?: number
   /** Required distinct validators for audio. Clamped [1, 15]. Default 1. */
@@ -439,6 +441,17 @@ export interface HealthSettings {
   followDefaults: boolean
   /** Partial override of HEALTH_DEFAULTS, merged at resolution time. */
   overrides?: DeepPartial<HealthConfig>
+}
+
+/**
+ * AD-14 decay tunables (persisted in project_settings; both keys optional —
+ * absent keys fall back to DECAY_DEFAULTS in the decay engine).
+ */
+export interface DecaySettings {
+  /** Endorsement count at which a cell reaches decay = 0. Default 5. */
+  endorsementTarget?: number
+  /** Decay above which the cell editor shows "needs attention". Default 0.66. */
+  decayWarnThreshold?: number
 }
 
 export interface CellHealthBreakdown {

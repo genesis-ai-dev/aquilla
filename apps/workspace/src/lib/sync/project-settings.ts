@@ -3,6 +3,7 @@ import type {
   TranslationRule,
   RulePenalties,
   HealthSettings,
+  DecaySettings,
 } from "@/lib/parsers/types"
 
 /** Initial server version for projects with no settings row. */
@@ -21,8 +22,9 @@ export interface ProjectWideSettings {
   systemPrompt?: string
   rules?: TranslationRule[]
   rulePenalties?: RulePenalties
-  decaySettings?: HealthSettings
-  /** @deprecated Use decaySettings. Kept until the settings UI is renamed. */
+  /** AD-14 decay tunables. */
+  decaySettings?: DecaySettings
+  /** @deprecated Four-sub-score health config — retired by AD-14 (decay). */
   healthSettings?: HealthSettings
   validationCount?: number
   validationCountAudio?: number

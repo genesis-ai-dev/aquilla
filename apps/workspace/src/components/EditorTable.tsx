@@ -16,7 +16,7 @@ import { getFragmentHtml } from "@/lib/richtext/translated-xml"
 import { emitTargetCellCommit, emitCellValidate, emitCellUnvalidate } from "@/lib/sync/events-emit"
 import { ExamplePanel } from "./ExamplePanel"
 import { HighlightedText, buildHighlightsFromExamples } from "./HighlightedText"
-import { HealthRing } from "./HealthRing"
+import { needsAttention } from "@/lib/health/decay-engine"
 import { HealthBreakdown } from "./HealthBreakdown/HealthBreakdown"
 import { StaleSourceIndicator } from "./StaleSourceIndicator"
 import { BreakdownContent } from "./HealthBreakdown/BreakdownContent"
@@ -1221,6 +1221,11 @@ function EditorRow({
 
   const hasContent = Boolean(cell.translated && cell.translated.trim())
 
+  // AD-14: a translated cell shows an inline "needs attention" marker when its
+  // decay is above the warn threshold (endorsement_count too low). Absence is
+  // silence, not endorsement — there is no green "done" ring at cell scope.
+  const cellNeedsAttention = hasContent && needsAttention(cell.endorsementCount ?? 0)
+
   const hasMajorInfraction = cellInfractions.some(
     (i) => ruleMap.get(i.ruleId)?.severity === "major",
   )
@@ -1251,16 +1256,22 @@ function EditorRow({
             title={healthTooltip}
             disabled={!editable}
           >
-            <HealthRing health={healthValue} size={18} strokeWidth={2}>
-              <ValidationIcon
-                className="h-3 w-3"
-                strokeWidth={2.5}
-                {...(vs === "others" ? { fill: "currentColor" } : {})}
-              />
-            </HealthRing>
+            <ValidationIcon
+              className="h-3.5 w-3.5"
+              strokeWidth={2.5}
+              {...(vs === "others" ? { fill: "currentColor" } : {})}
+            />
           </button>
         }
       />
+      {cellNeedsAttention && (
+        <span
+          className="pointer-events-none absolute -right-1 -top-1 text-amber-500"
+          title="Needs attention — this cell's neighborhood isn't validated yet"
+        >
+          <AlertTriangle className="h-2.5 w-2.5" strokeWidth={2.5} />
+        </span>
+      )}
       {vs !== "empty" && (
         <PopoverContent
           side="right"

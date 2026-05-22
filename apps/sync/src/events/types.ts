@@ -131,6 +131,8 @@ export interface EventPayloads {
     anchorFileId?: string
     /** R2 key for the original imported blob (AD-4). Null for non-imported files. */
     r2Key?: string
+    /** Source-system content hash of the original blob (change-detect key). */
+    blobSha?: string
     /** Format the original blob was parsed as ('usfm', 'docx', ...). */
     importFormat?: string
     /** Parser revision that produced this file's cells; enables re-parse. */

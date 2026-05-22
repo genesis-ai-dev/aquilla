@@ -1,18 +1,21 @@
 import { useMemo, useRef } from "react"
-import { computeHealthMap, type HealthStats } from "@/lib/health/health-engine"
-import { useCompositeHealth } from "./useCompositeHealth"
+import type { HealthStats } from "@/lib/health/health-engine"
+import { computeDecayHealth, DECAY_DEFAULTS } from "@/lib/health/decay-engine"
+import { checkRules } from "@/lib/rules/rule-engine"
 import type { CellData } from "./useCells"
-import type { TranslationRule, RulePenalties, HealthConfig, CellHealthBreakdown, RuleInfraction } from "@/lib/parsers/types"
-import { HEALTH_DEFAULTS } from "@/lib/health/defaults"
+import type { TranslationRule, HealthConfig, CellHealthBreakdown, RuleInfraction, DecaySettings } from "@/lib/parsers/types"
 import { perfMark } from "@/lib/perf-log"
 import type { CellAuditStats } from "./useCellsAuditStats"
 
 interface HealthDispatchOptions {
-  composite: boolean
+  /** AD-14 decay tunables (endorsementTarget, decayWarnThreshold). */
+  decaySettings?: DecaySettings
+  /** @deprecated four-sub-score flag — ignored since AD-14 (decay). */
+  composite?: boolean
+  /** @deprecated four-sub-score config — ignored since AD-14. */
   compositeConfig?: HealthConfig
   requiredValidations?: number
-  /** D1-backed per-cell audit stats, passed through to useCompositeHealth for
-   *  richer change-detection. Optional — falls back to Y.Doc history.length. */
+  /** @deprecated audit stats fed the composite worker — no longer used. */
   auditStats?: Map<string, CellAuditStats>
 }
 
@@ -105,23 +108,13 @@ function healthStatsEqual(a: HealthStats, b: HealthStats): boolean {
   return true
 }
 
-// Single shared empty result used as the legacy stand-in when composite is on.
-// Stable reference so the composite-mode useMemo below doesn't re-trigger.
-const EMPTY_HEALTH_STATS: HealthStats = {
-  healthMap: new Map(),
-  fileHealth: new Map(),
-  projectHealth: 0,
-  fileProgress: new Map(),
-  infractions: new Map(),
-  openCommentCount: new Map(),
-  projectOpenCommentCount: 0,
-  cellOpenCommentCount: new Map(),
-  breakdownMap: new Map(),
-}
+// Four-sub-score breakdown is retired by AD-14 — the breakdown popover
+// self-hides when this map is empty (StatusBar passes undefined). Stable
+// shared reference so the assembled result stays referentially stable.
+const EMPTY_BREAKDOWN: Map<string, CellHealthBreakdown> = new Map()
 
-// Composite-on path still needs file progress + comment counts (the composite
-// engine doesn't compute those). Cheap auxiliary derivation, O(N) but only the
-// counting bits — no rule checks, no LLM-chain scoring.
+// Health derives from decay (endorsement_count). File progress + comment
+// counts are a cheap O(N) auxiliary derivation — no rule checks, no scoring.
 function deriveAuxStats(fileCells: Map<string, CellData[]>): {
   fileProgress: HealthStats["fileProgress"]
   openCommentCount: HealthStats["openCommentCount"]
@@ -156,57 +149,52 @@ function deriveAuxStats(fileCells: Map<string, CellData[]>): {
 
 export function useHealth(
   fileCells: Map<string, CellData[]>,
-  llmHealthPenalty = 0.1,
   rules: TranslationRule[] = [],
-  penalties: RulePenalties = { major: 15, minor: 5 },
-  options: HealthDispatchOptions = { composite: false },
+  options: HealthDispatchOptions = {},
 ): HealthStats {
-  const multiplier = 1 - llmHealthPenalty
+  const decaySettingsKey = JSON.stringify(options.decaySettings ?? null)
 
-  // Legacy result — only computed when the legacy path will actually be used
-  // (composite flag off). Skipping this when composite is on saves a full
-  // O(N) sweep + checkRules over every cell on every keystroke.
-  const legacyRaw = useMemo(() => {
-    if (options.composite) return EMPTY_HEALTH_STATS
-    const end = perfMark("useHealth.legacy.computeHealthMap")
-    const r = computeHealthMap(fileCells, multiplier, rules, penalties)
+  // AD-14: health (project / file / per-cell) derives from decay, computed
+  // purely from each cell's endorsement_count.
+  const decay = useMemo(() => {
+    const end = perfMark("useHealth.computeDecayHealth")
+    const settings = {
+      endorsementTarget: options.decaySettings?.endorsementTarget ?? DECAY_DEFAULTS.endorsementTarget,
+      decayWarnThreshold: options.decaySettings?.decayWarnThreshold ?? DECAY_DEFAULTS.decayWarnThreshold,
+    }
+    const r = computeDecayHealth(fileCells, settings)
     end()
     return r
-  }, [options.composite, fileCells, multiplier, rules, penalties])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fileCells, decaySettingsKey])
 
-  // Composite — only meaningful when flag on, but the hook must run unconditionally (Rules of Hooks)
-  const composite = useCompositeHealth({
-    fileCells: options.composite ? fileCells : new Map(),
-    rules,
-    config: options.compositeConfig ?? HEALTH_DEFAULTS,
-    requiredValidations: options.requiredValidations ?? 1,
-    auditStats: options.auditStats,
-  })
+  // Rule / built-in-check violations — a SEPARATE sibling surface (AD-14), not
+  // folded into health. Same standalone pass the legacy engine used.
+  const infractions = useMemo(() => {
+    const end = perfMark("useHealth.checkRules")
+    const r = checkRules(fileCells, rules)
+    end()
+    return r
+  }, [fileCells, rules])
 
-  // Auxiliary stats that the composite worker doesn't produce (file progress,
-  // comment counts). Only needed in composite mode; legacy result already
-  // contains these.
-  const aux = useMemo(() => {
-    if (!options.composite) return null
-    return deriveAuxStats(fileCells)
-  }, [options.composite, fileCells])
+  // File progress + open-comment counts.
+  const aux = useMemo(() => deriveAuxStats(fileCells), [fileCells])
 
   // Assemble the raw result that will be returned to callers.
-  const raw: HealthStats = useMemo(() => {
-    if (!options.composite) return legacyRaw
-    const breakdownMap: Map<string, CellHealthBreakdown> = composite.stats.breakdownMap
-    return {
-      healthMap: composite.stats.healthMap,
-      fileHealth: composite.stats.fileHealth,
-      projectHealth: composite.stats.projectHealth,
-      fileProgress: aux?.fileProgress ?? new Map(),
-      infractions: composite.stats.infractions,
-      openCommentCount: aux?.openCommentCount ?? new Map(),
-      projectOpenCommentCount: aux?.projectOpenCommentCount ?? 0,
-      cellOpenCommentCount: aux?.cellOpenCommentCount ?? new Map(),
-      breakdownMap,
-    }
-  }, [options.composite, legacyRaw, composite.stats, aux])
+  const raw: HealthStats = useMemo(
+    () => ({
+      healthMap: decay.healthMap,
+      fileHealth: decay.fileHealth,
+      projectHealth: decay.projectHealth,
+      fileProgress: aux.fileProgress,
+      infractions,
+      openCommentCount: aux.openCommentCount,
+      projectOpenCommentCount: aux.projectOpenCommentCount,
+      cellOpenCommentCount: aux.cellOpenCommentCount,
+      breakdownMap: EMPTY_BREAKDOWN,
+    }),
+    [decay, infractions, aux],
+  )
 
   // Structural stability: if the raw result is semantically unchanged from
   // last render, return the previous reference so React.memo on downstream

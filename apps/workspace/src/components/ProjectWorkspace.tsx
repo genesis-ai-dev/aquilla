@@ -18,7 +18,7 @@ import { useHealth } from "@/hooks/useHealth"
 import { useRules } from "@/hooks/useRules"
 import { updateProject, patchProject, getProject } from "@/lib/store/project-index"
 import { MAX_BATCH_COMPLETIONS } from "@/lib/workspace-actions/registry"
-import type { FileReference, CellHealthBreakdown } from "@/lib/parsers/types"
+import type { FileReference } from "@/lib/parsers/types"
 import type { CellData } from "@/hooks/useCells"
 import { useWorkspaceSearch } from "@/hooks/useWorkspaceSearch"
 import { useBacktranslation } from "@/hooks/useBacktranslation"
@@ -87,7 +87,6 @@ import {
 } from "@/components/ui/dialog"
 import type { ProjectRecord } from "@/lib/parsers/types"
 import { readValidationCount } from "@/lib/progress/read-validation-count"
-import { resolveHealthConfig } from "@/lib/health/config-resolver"
 import { useSetupChecklist } from "@/hooks/useSetupChecklist"
 import { useProjectSettingsSync } from "@/hooks/useProjectSettingsSync"
 import { SetupChecklistDrawer } from "./onboarding/SetupChecklistDrawer"
@@ -460,7 +459,7 @@ export function ProjectWorkspace() {
   const cellsRef = useRef(cells)
   useEffect(() => { cellsRef.current = cells }, [cells])
 
-  const { rules, penalties } = useRules(project ?? null, refresh)
+  const { rules } = useRules(project ?? null, refresh)
   const { addThread, addMessage, resolveThread, reopenThread } = useComments(doc, currentUsername)
   const commentsCell = commentsCellId ? cells.find((c) => c.id === commentsCellId) : null
   const historyCell = historyCellId ? cells.find((c) => c.id === historyCellId) : null
@@ -610,57 +609,20 @@ export function ProjectWorkspace() {
     frontierSession,
   )
 
-  const compositeFlag = useFeatureFlag("composite-health", project ?? null)
-  const healthConfig = useMemo(() => resolveHealthConfig(project ?? null), [project])
   const requiredValidations = project ? readValidationCount(project) : 1
 
+  // AD-14: health derives from decay (endorsement_count). The legacy
+  // four-sub-score "composite-health" path is retired.
   const health = useHealth(
     fileCells,
-    project?.completionSettings?.llmHealthPenalty ?? 0.1,
     rules,
-    penalties,
-    { composite: compositeFlag, compositeConfig: healthConfig, requiredValidations, auditStats: auditStatsByCellId },
+    { decaySettings: project?.decaySettings, requiredValidations },
   )
   const { healthMap, fileHealth: _fileHealth, projectHealth, fileProgress, infractions, openCommentCount, cellOpenCommentCount } = health
 
-  const projectBreakdown: CellHealthBreakdown | undefined = useMemo(() => {
-    if (!compositeFlag) return undefined
-    const bs = Array.from(health.breakdownMap.values())
-    if (bs.length === 0) return undefined
-    const avg = (f: (b: CellHealthBreakdown) => number) =>
-      Math.round(bs.reduce((a, b) => a + f(b), 0) / bs.length)
-    return {
-      cellId: "__project__",
-      score: health.projectHealth,
-      validationGap: avg((b) => b.validationGap),
-      ancestryPenalty: avg((b) => b.ancestryPenalty),
-      neighborhoodPenalty: avg((b) => b.neighborhoodPenalty),
-      rulePenalty: avg((b) => b.rulePenalty),
-      signals: {
-        validatorCount: 0,
-        requiredValidations: requiredValidations,
-        ancestryExamples: bs
-          .flatMap((b) => b.signals.ancestryExamples)
-          .sort((a, b) => b.health - a.health)
-          .slice(0, 5),
-        neighborhoodSourceCellIds: [],
-        neighborhoodTargetCellIds: [],
-        idJaccard: 0,
-        tfidfTokenOverlap: 0,
-        infractions: [],
-      },
-    }
-  }, [compositeFlag, health, requiredValidations])
-
-  const biggestDrags = useMemo(() => {
-    if (!compositeFlag) return undefined
-    const entries: Array<{ cellId: string; score: number }> = []
-    for (const b of health.breakdownMap.values()) {
-      entries.push({ cellId: b.cellId, score: b.score })
-    }
-    entries.sort((a, b) => a.score - b.score)
-    return entries.slice(0, 3)
-  }, [compositeFlag, health.breakdownMap])
+  // AD-14: the four-sub-score breakdown popover is retired. The project ring
+  // shows decay-derived health; the "biggest drags" popover redesign (cells
+  // sorted by descending decay) is a deferred follow-up.
 
   const jumpToCellId = useCallback((cellId: string) => {
     const idx = cells.findIndex((c) => c.id === cellId)
@@ -1480,8 +1442,6 @@ export function ProjectWorkspace() {
             <StatusBar
               cells={cells}
               projectHealth={projectHealth}
-              projectBreakdown={projectBreakdown}
-              biggestDrags={biggestDrags}
               onJumpToCell={jumpToCellId}
             />
           </>

@@ -3,10 +3,10 @@
 -- Applied to every per-PR D1 (`aquilla-pr-<N>`) and to the shared dev DB
 -- (`aquilla-dev`) after migrations run. Re-runs on the nightly dev reset.
 --
--- Schema target: the current shape in apps/identity/migrations/0001_initial.sql.
--- Phase 1A (separate stream) is reshaping the schema toward AD-2's event-log
--- model; once that lands, this seed file gets revised in lockstep with the
--- migration that introduces the new tables.
+-- Schema target: the current shape after all migrations in
+-- apps/identity/migrations/ (through 0012). The AD-2 event-log reshape has
+-- landed: `cells` and `files` are projections keyed by `event_id` FKs into
+-- `events`, so the cell/file rows below are seeded alongside genesis events.
 --
 -- ── Cast ──────────────────────────────────────────────────────────────
 --
@@ -72,18 +72,33 @@ INSERT INTO project_members (project_id, user_id, role_level, granted_by) VALUES
   ('proj-preview-sample', 3, 300, 1);  -- carol — reviewer
   -- dave is NOT a project member — drives negative-permission tests.
 
--- ── Sample file + a few cells ─────────────────────────────────────────
+-- ── Sample file + a few cells (AD-2 event-log shape) ──────────────────
 --
--- This shape matches what sync-worker projects on Y.Doc onSave. Phase 1A
--- will replace the direct INSERT into `cells` with INSERT INTO `events`
--- once the event-log projection lands; for now we write the projection
--- table directly so the preview UI has something to render before any
--- live editing happens.
+-- Post-reshape (migrations 0002/0003/0006/0008/0011/0012): `cells.event_id`
+-- and `files.event_id` are NOT NULL FKs to `events(id)`, so we seed genesis
+-- events FIRST, then the projection rows that reference them. One paired
+-- source + target cell per verse (shared cell_id, differing `side`).
 
-INSERT INTO files (id, project_id, name, file_type, source_language, target_language, cell_count, last_edit_at) VALUES
-  ('file-preview-sample', 'proj-preview-sample', 'Genesis 1', 'usfm', 'en', 'es', 3, 0);
+-- Genesis events: one file.create + per-cell source/target create events.
+INSERT INTO events (id, schema_version, project_id, file_id, cell_id, kind, author, payload, client_ts, server_ts, parent_id, server_seq) VALUES
+  ('seed-ev-file',  1, 'proj-preview-sample', 'file-preview-sample', NULL,      'file.create',        'alice', '{"name":"Genesis 1","role":"target","kind":"codex","bookCode":"GEN","sourceLanguage":"en","targetLanguage":"es"}', 0, 0, NULL, 1),
+  ('seed-ev-c1-s',  1, 'proj-preview-sample', 'file-preview-sample', 'GEN 1:1', 'source.cell.create', 'alice', '{"cellId":"GEN 1:1","value":"In the beginning God created the heavens and the earth.","type":"verse","canonicalRef":"GEN 1:1"}', 0, 0, NULL, 2),
+  ('seed-ev-c1-t',  1, 'proj-preview-sample', 'file-preview-sample', 'GEN 1:1', 'target.cell.create', 'alice', '{"cellId":"GEN 1:1","value":"En el principio creó Dios los cielos y la tierra."}', 0, 0, NULL, 3),
+  ('seed-ev-c2-s',  1, 'proj-preview-sample', 'file-preview-sample', 'GEN 1:2', 'source.cell.create', 'alice', '{"cellId":"GEN 1:2","value":"Now the earth was formless and empty.","type":"verse","canonicalRef":"GEN 1:2"}', 0, 0, NULL, 4),
+  ('seed-ev-c2-t',  1, 'proj-preview-sample', 'file-preview-sample', 'GEN 1:2', 'target.cell.create', 'alice', '{"cellId":"GEN 1:2","value":"Y la tierra estaba desordenada y vacía."}', 0, 0, NULL, 5),
+  ('seed-ev-c3-s',  1, 'proj-preview-sample', 'file-preview-sample', 'GEN 1:3', 'source.cell.create', 'alice', '{"cellId":"GEN 1:3","value":"And God said, \"Let there be light,\" and there was light.","type":"verse","canonicalRef":"GEN 1:3"}', 0, 0, NULL, 6),
+  ('seed-ev-c3-t',  1, 'proj-preview-sample', 'file-preview-sample', 'GEN 1:3', 'target.cell.create', 'alice', '{"cellId":"GEN 1:3","value":"Y dijo Dios: Sea la luz; y fue la luz."}', 0, 0, NULL, 7);
 
-INSERT INTO cells (file_id, cell_id, content_text, content_hash, validated, word_count, last_editor, last_edit_at, edit_count) VALUES
-  ('file-preview-sample', 'GEN 1:1', 'In the beginning God created the heavens and the earth.', 'sha-placeholder-1', 0,  10, 'alice', 0, 1),
-  ('file-preview-sample', 'GEN 1:2', 'Now the earth was formless and empty.',                      'sha-placeholder-2', 0,   7, 'alice', 0, 1),
-  ('file-preview-sample', 'GEN 1:3', 'And God said, "Let there be light," and there was light.',   'sha-placeholder-3', 0,  11, 'alice', 0, 1);
+-- File projection row (0012 shape: role/kind/book_code columns, event_id
+-- chain head, provenance + languages in JSON meta).
+INSERT INTO files (id, project_id, name, role, kind, book_code, event_id, cell_count, approved_count, word_count, last_edit_at, created_by, created_at, updated_at, meta) VALUES
+  ('file-preview-sample', 'proj-preview-sample', 'Genesis 1', 'target', 'codex', 'GEN', 'seed-ev-file', 3, 0, 0, 0, 'alice', 0, 0, '{"source_language":"en","target_language":"es","import_format":"usfm"}');
+
+-- Cell projection rows: paired source + target per verse.
+INSERT INTO cells (project_id, file_id, cell_id, side, value, type, canonical_ref, event_id, last_editor, last_edit_at, validated, word_count) VALUES
+  ('proj-preview-sample', 'file-preview-sample', 'GEN 1:1', 'source', 'In the beginning God created the heavens and the earth.', 'verse', 'GEN 1:1', 'seed-ev-c1-s', 'alice', 0, 0, 10),
+  ('proj-preview-sample', 'file-preview-sample', 'GEN 1:1', 'target', 'En el principio creó Dios los cielos y la tierra.',       'verse', 'GEN 1:1', 'seed-ev-c1-t', 'alice', 0, 0, 9),
+  ('proj-preview-sample', 'file-preview-sample', 'GEN 1:2', 'source', 'Now the earth was formless and empty.',                   'verse', 'GEN 1:2', 'seed-ev-c2-s', 'alice', 0, 0, 7),
+  ('proj-preview-sample', 'file-preview-sample', 'GEN 1:2', 'target', 'Y la tierra estaba desordenada y vacía.',                 'verse', 'GEN 1:2', 'seed-ev-c2-t', 'alice', 0, 0, 7),
+  ('proj-preview-sample', 'file-preview-sample', 'GEN 1:3', 'source', 'And God said, "Let there be light," and there was light.', 'verse', 'GEN 1:3', 'seed-ev-c3-s', 'alice', 0, 0, 11),
+  ('proj-preview-sample', 'file-preview-sample', 'GEN 1:3', 'target', 'Y dijo Dios: Sea la luz; y fue la luz.',                  'verse', 'GEN 1:3', 'seed-ev-c3-t', 'alice', 0, 0, 8);

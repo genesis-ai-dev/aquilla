@@ -36,6 +36,7 @@ function overlaySettings(record: ProjectRecord, settings: ProjectWideSettings): 
   if (settings.rules != null) next.rules = settings.rules
   if (settings.rulePenalties != null) next.rulePenalties = settings.rulePenalties
   if (settings.healthSettings != null) next.healthSettings = settings.healthSettings
+  if (settings.decaySettings != null) next.decaySettings = settings.decaySettings
   if (settings.validationCount != null) next.validationCount = settings.validationCount
   if (settings.validationCountAudio != null) next.validationCountAudio = settings.validationCountAudio
   return next

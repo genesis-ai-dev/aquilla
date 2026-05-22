@@ -43,7 +43,7 @@ function SheetContent({
       <DialogPrimitive.Popup
         data-slot="sheet-content"
         className={cn(
-          "fixed top-0 z-50 flex h-full w-80 flex-col bg-background shadow-neu-lg outline-none",
+          "fixed top-0 z-50 flex h-full w-80 flex-col border-l border-border bg-background shadow-soft-lg outline-none",
           "data-closed:pointer-events-none data-closed:opacity-0",
           sideClasses,
           className

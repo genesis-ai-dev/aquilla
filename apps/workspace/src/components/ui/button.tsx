@@ -11,11 +11,11 @@ const buttonVariants = cva(
       // and press inward on :active. ghost/link/destructive stay flat.
       variant: {
         default:
-          "bg-primary text-primary-foreground shadow-neu-sm [a]:hover:bg-primary/80 hover:shadow-neu active:shadow-neu-pressed",
+          "bg-primary text-primary-foreground shadow-neu-sm [a]:hover:bg-primary/95 hover:shadow-neu active:shadow-neu-pressed",
         outline:
-          "bg-background shadow-neu-sm hover:bg-muted hover:text-foreground hover:shadow-neu active:shadow-neu-pressed aria-expanded:bg-muted aria-expanded:text-foreground dark:bg-input/30 dark:hover:bg-input/50",
+          "border border-input bg-background hover:bg-muted hover:text-foreground active:bg-muted aria-expanded:bg-muted aria-expanded:text-foreground dark:bg-input/30 dark:hover:bg-input/50",
         secondary:
-          "bg-secondary text-secondary-foreground shadow-neu-sm hover:shadow-neu active:shadow-neu-pressed aria-expanded:bg-secondary aria-expanded:text-secondary-foreground",
+          "bg-muted/60 text-secondary-foreground hover:bg-muted active:bg-muted aria-expanded:bg-muted",
         ghost:
           "hover:bg-muted hover:text-foreground aria-expanded:bg-muted aria-expanded:text-foreground dark:hover:bg-muted/50",
         destructive:

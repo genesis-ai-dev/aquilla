@@ -42,6 +42,7 @@ import { AiModelConsentDialog } from "@/components/AiModelConsentDialog"
 import { AiModelDownloadChip } from "@/components/AiModelDownloadChip"
 import { AudioBulkProgressBanner } from "@/components/AudioBulkProgressBanner"
 import { PrivateModeBanner } from "@/components/PrivateModeBanner"
+import { DeployUpdateBanner } from "@/components/DeployUpdateBanner"
 import { hydratePrefetchStatus } from "@/lib/audio/prefetch"
 import { probeOpfsAvailability } from "@/lib/storage/opfs-availability"
 import { useGlobalAudioShortcuts } from "@/hooks/useGlobalAudioShortcuts"
@@ -80,6 +81,7 @@ function SyncFreezeOverlay() {
 export default function App() {
   return (
     <SyncingProvider>
+      <DeployUpdateBanner />
       <PrivateModeBanner />
       <SyncFreezeOverlay />
       <AppRoutes />

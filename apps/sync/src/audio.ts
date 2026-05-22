@@ -20,7 +20,7 @@ export interface AudioEnv {
   R2_KEY_PREFIX?: string
 }
 
-function r2KeyPrefix(env: Pick<AudioEnv, "R2_KEY_PREFIX">): string {
+export function r2KeyPrefix(env: Pick<AudioEnv, "R2_KEY_PREFIX">): string {
   const p = env.R2_KEY_PREFIX?.trim().replace(/^\/+|\/+$/g, "") ?? ""
   return p ? `${p}/` : ""
 }

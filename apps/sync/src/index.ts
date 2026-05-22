@@ -8,6 +8,7 @@
 import { DurableObject } from "cloudflare:workers"
 import { handleAdminRequest } from "./admin"
 import { handleAudioRequest } from "./audio"
+import { handleVoiceConvertRequest } from "./voice-convert"
 import { notifyProjectDo } from "./archive-broadcast"
 import { handleCorsPreflight, withCors } from "./cors"
 import { handleProjectArchiveRequest } from "./project-archive"
@@ -49,6 +50,10 @@ declare global {
       ALLOW_UNAUTHENTICATED?: string
       /** Optional R2 key prefix for PR/staging isolation. */
       R2_KEY_PREFIX?: string
+      /** Seed-VC voice-clone Modal endpoint (infra/modal/seed_vc.py). */
+      SEED_VC_URL?: string
+      /** Shared secret for the Seed-VC endpoint (matches its SEED_VC_TOKEN). */
+      SEED_VC_TOKEN?: string
     }
   }
 }
@@ -119,6 +124,8 @@ export default {
     if (adminResponse) return adminResponse
     const audioResponse = await handleAudioRequest(request, env)
     if (audioResponse) return audioResponse
+    const voiceConvertResponse = await handleVoiceConvertRequest(request, env)
+    if (voiceConvertResponse) return withCors(voiceConvertResponse, request)
     const eventsReadResponse = await handleEventsReadRequest(request, env)
     if (eventsReadResponse) return withCors(eventsReadResponse, request)
     const validatorsReadResponse = await handleValidatorsReadRequest(request, env)

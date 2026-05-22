@@ -18,6 +18,7 @@ const BROWSER_PATH_PREFIXES = [
   "/cells/",
   "/cell-validators",
   "/api/v1/projects/",
+  "/api/v1/voice/",
 ]
 
 export function isBrowserCorsPath(pathname: string): boolean {

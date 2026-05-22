@@ -201,7 +201,7 @@ export function ProjectCreateDialog({ onCreated }: ProjectCreateDialogProps) {
               so the dashboard create flow shows only name + languages by
               default. Self-contained is the assumed shape and matches the
               VS-Code-extension muscle memory. */}
-          <details className="rounded border px-3 py-2 [&[open]>summary]:mb-2">
+          <details className="rounded-xl border px-3 py-2 [&[open]>summary]:mb-2">
             <summary className="cursor-pointer text-xs font-medium text-muted-foreground select-none">
               Advanced: project shape
             </summary>

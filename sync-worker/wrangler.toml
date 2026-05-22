@@ -40,6 +40,13 @@ binding = "AQUILLA_DB"
 database_name = "aquilla-db"
 database_id = "11828e9d-998b-4d3f-a405-91d9f624f94a"
 
+# AD-13 branching-search KV result cache (optional — see lib/branching-search/cache.ts).
+# Provision: `wrangler kv:namespace create BRANCHING_SEARCH_KV`
+# Until provisioned, the cache binding is absent and the route runs fresh every request.
+# [[kv_namespaces]]
+# binding = "BRANCHING_SEARCH_KV"
+# id = "<prod-namespace-id>"
+
 # Auth:
 #   SYNC_SECRET_KEY (shared with frontier-server for JWT signing — distinct
 #   from Frontier's main SECRET_KEY) and ALLOW_UNAUTHENTICATED live in

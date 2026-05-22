@@ -54,6 +54,10 @@ declare global {
       SEED_VC_URL?: string
       /** Shared secret for the Seed-VC endpoint (matches its SEED_VC_TOKEN). */
       SEED_VC_TOKEN?: string
+      /** Optional KV namespace for AD-13 branching-search result cache.
+       *  When absent, the route runs the algorithm fresh on every request.
+       *  Provision: `wrangler kv:namespace create BRANCHING_SEARCH_KV`. */
+      BRANCHING_SEARCH_KV?: KVNamespace
     }
   }
 }

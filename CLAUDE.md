@@ -120,7 +120,7 @@ Codex-web tracks the `genesis-ai-dev/aquilla-specs` data model closely. A few di
 - **A root pnpm workspace is retained.** AD-11 says "no root workspace / no root lockfile." The repo keeps `pnpm-workspace.yaml` + root lockfiles, but cross-package deps use `file:../../packages/x` (not `workspace:*`) and there are zero cross-app runtime imports — so AD-11's actual goal (codegen blast-radius isolation) holds. The workspace is a tooling convenience, not a coupling.
 - **No `roles` lookup table.** Role levels are INTEGER constants in code (`src/lib/frontier/roles.ts`, `apps/identity/src/services/project-permissions.ts`), per the note in `0001_initial.sql`. The spec models `roles.level` as an FK target; constants-in-code are equivalent.
 
-Other spec surfaces deferred per the spec itself (not divergences): `system_members`/admin (AD-15), comments/threads/attachments tables and their event kinds, and the "biggest drags" health-breakdown popover redesign (AD-14) — the decay metric itself is live; only the breakdown popover UI is deferred.
+Other spec surfaces deferred per the spec itself (not divergences): `system_members`/admin (AD-15), comments/threads/attachments tables and their event kinds. AD-14 is now fully landed UI-side — decay metric, per-cell "needs attention" marker, and the "biggest drags" breakdown popover (`components/DecayBreakdown.tsx`) all ship; the legacy four-sub-score health modules (composite engine, health worker, `HealthBreakdown/*`, config-resolver) were deleted.
 
 ## CI / deploy lifecycle
 

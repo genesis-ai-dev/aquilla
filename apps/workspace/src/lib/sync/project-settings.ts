@@ -2,7 +2,6 @@ import { FRONTIER_API_URL } from "./sync-token"
 import type {
   TranslationRule,
   RulePenalties,
-  HealthSettings,
   DecaySettings,
 } from "@/lib/parsers/types"
 
@@ -24,8 +23,6 @@ export interface ProjectWideSettings {
   rulePenalties?: RulePenalties
   /** AD-14 decay tunables. */
   decaySettings?: DecaySettings
-  /** @deprecated Four-sub-score health config — retired by AD-14 (decay). */
-  healthSettings?: HealthSettings
   validationCount?: number
   validationCountAudio?: number
 }

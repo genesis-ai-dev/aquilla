@@ -244,8 +244,6 @@ export interface ProjectRecord {
    * projects without this field fall back to registry defaults.
    */
   experimentalFlags?: Record<string, boolean>
-  /** @deprecated Four-sub-score health config — retired by AD-14 (decay). */
-  healthSettings?: HealthSettings
   /** AD-14 decay tunables (endorsementTarget, decayWarnThreshold). Absent → DECAY_DEFAULTS. */
   decaySettings?: DecaySettings
   /** Required distinct validators for a text cell to count as "fully validated". Clamped [1, 15]. Default 1. Mirrors desktop manifest. */
@@ -406,71 +404,17 @@ export interface ProjectPermissions {
   accessLevel?: number
 }
 
-// ─── Health settings (composite-health flag) ────────────────────────────
-
-export interface HealthCaps {
-  validationGap: number
-  ancestryPenalty: number
-  neighborhoodPenalty: number
-  rulePenalty: number
-}
-
-export interface HealthRulePenaltiesConfig {
-  major: number
-  minor: number
-}
-
-export interface NeighborhoodWeights {
-  idJaccard: number
-  tfidfTokenOverlap: number
-}
-
-export interface HealthConfig {
-  caps: HealthCaps
-  rulePenalties: HealthRulePenaltiesConfig
-  neighborhoodWeights: NeighborhoodWeights
-  neighborhoodSearchLimit: number
-}
-
-export type DeepPartial<T> = {
-  [K in keyof T]?: T[K] extends object ? DeepPartial<T[K]> : T[K]
-}
-
-export interface HealthSettings {
-  /** When true, ignore `overrides` and always use HEALTH_DEFAULTS. */
-  followDefaults: boolean
-  /** Partial override of HEALTH_DEFAULTS, merged at resolution time. */
-  overrides?: DeepPartial<HealthConfig>
-}
+// ─── AD-14 decay tunables ───────────────────────────────────────────────
 
 /**
- * AD-14 decay tunables (persisted in project_settings; both keys optional —
- * absent keys fall back to DECAY_DEFAULTS in the decay engine).
+ * Persisted in project_settings; both keys optional — absent keys fall back
+ * to DECAY_DEFAULTS in the decay engine.
  */
 export interface DecaySettings {
   /** Endorsement count at which a cell reaches decay = 0. Default 5. */
   endorsementTarget?: number
   /** Decay above which the cell editor shows "needs attention". Default 0.66. */
   decayWarnThreshold?: number
-}
-
-export interface CellHealthBreakdown {
-  cellId: string
-  score: number
-  validationGap: number
-  ancestryPenalty: number
-  neighborhoodPenalty: number
-  rulePenalty: number
-  signals: {
-    validatorCount: number
-    requiredValidations: number
-    ancestryExamples: Array<{ cellId: string; health: number; weight: number }>
-    neighborhoodSourceCellIds: string[]
-    neighborhoodTargetCellIds: string[]
-    idJaccard: number
-    tfidfTokenOverlap: number
-    infractions: RuleInfraction[]
-  }
 }
 
 export function detectFileType(fileName: string): FileType | null {

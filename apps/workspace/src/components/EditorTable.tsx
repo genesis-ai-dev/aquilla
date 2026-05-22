@@ -9,7 +9,7 @@ import {
 } from "lucide-react"
 import type { CellData } from "@/hooks/useCells"
 import type { ScoredPair } from "@/lib/search/dual-index"
-import type { TranslationRule, RuleInfraction, ProjectRecord, CellHealthBreakdown } from "@/lib/parsers/types"
+import type { TranslationRule, RuleInfraction, ProjectRecord } from "@/lib/parsers/types"
 import { useProjectPermissions } from "@/hooks/useProjectPermissions"
 import { toggleCellValidation } from "@/hooks/useCellHistory"
 import { getFragmentHtml } from "@/lib/richtext/translated-xml"
@@ -17,9 +17,7 @@ import { emitTargetCellCommit, emitCellValidate, emitCellUnvalidate } from "@/li
 import { ExamplePanel } from "./ExamplePanel"
 import { HighlightedText, buildHighlightsFromExamples } from "./HighlightedText"
 import { needsAttention } from "@/lib/health/decay-engine"
-import { HealthBreakdown } from "./HealthBreakdown/HealthBreakdown"
 import { StaleSourceIndicator } from "./StaleSourceIndicator"
-import { BreakdownContent } from "./HealthBreakdown/BreakdownContent"
 import { TranslatedEditor } from "./TranslatedEditor"
 import { CellWaveform } from "./CellWaveform"
 import { CellAudioButton } from "./CellAudioButton"
@@ -284,7 +282,6 @@ interface EditorTableProps {
   sourceTextDirection: "ltr" | "rtl"
   targetTextDirection: "ltr" | "rtl"
   isAnonymous?: boolean
-  breakdownMap?: Map<string, CellHealthBreakdown>
   onJumpToCell?: (cellId: string) => void
   /** Called when user clicks a disabled sparkle while AI is not yet configured. */
   onAiSetupNeeded?: () => void
@@ -309,7 +306,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   cellOpenCommentCount, onOpenComments, onOpenHistory,
   activeCueIndex, onSeekToCue,
   lineNumbersEnabled, cellLabelsEnabled, sourceTextDirection, targetTextDirection,
-  isAnonymous, breakdownMap, onJumpToCell, onAiSetupNeeded, onOpenRecording,
+  isAnonymous, onJumpToCell, onAiSetupNeeded, onOpenRecording,
   onProjectChanged,
   onCellCommitted,
   cellLockHolders,
@@ -671,7 +668,6 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
                 targetTextDirection={targetTextDirection}
                 gridCols={gridCols}
                 isAnonymous={isAnonymous}
-                breakdownMap={breakdownMap}
                 onJumpToCell={onJumpToCell}
                 onAiSetupNeeded={onAiSetupNeeded}
                 onOpenRecording={onOpenRecording}
@@ -743,7 +739,6 @@ interface MemoizedRowProps {
   targetTextDirection: "ltr" | "rtl"
   gridCols: "grid-cols-[44px_1fr_1fr]"
   isAnonymous?: boolean
-  breakdownMap?: Map<string, CellHealthBreakdown>
   onJumpToCell?: (cellId: string) => void
   onAiSetupNeeded?: () => void
   onOpenRecording?: (cellId: string) => void
@@ -761,7 +756,7 @@ interface MemoizedRowProps {
 const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
   const {
     cell, examples, completing, errors, healthMap, infractions,
-    backtranslating, backtranslationErrors, cellOpenCommentCount, breakdownMap,
+    backtranslating, backtranslationErrors, cellOpenCommentCount,
     activeCueIndex, rowIndex, gridCols,
     onDragStart: onDragStartParent, onDragEnter: onDragEnterParent,
     onSelectionPointerDown: onSelectionPointerDownParent,
@@ -800,7 +795,6 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
   const backtranslationError = backtranslationErrors?.get(cellId)
   const openCommentCount = cellOpenCommentCount?.get(cellId) ?? 0
   const hasOpenComments = openCommentCount > 0
-  const breakdown = breakdownMap?.get(cellId)
   const isActiveCue = activeCueIndex !== undefined && activeCueIndex === rowIndex
 
   // Bind the stable parent (cellId) => void handlers to this row's cellId.
@@ -855,7 +849,6 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
         targetTextDirection={targetTextDirection}
         gridCols={gridCols}
         isAnonymous={isAnonymous}
-        breakdown={breakdown}
         onJumpToCell={onJumpToCell}
         onAiSetupNeeded={onAiSetupNeeded}
         onOpenRecording={onOpenRecording}
@@ -923,7 +916,6 @@ interface EditorRowProps {
   targetTextDirection: "ltr" | "rtl"
   gridCols: "grid-cols-[44px_1fr_1fr]"
   isAnonymous?: boolean
-  breakdown?: CellHealthBreakdown
   onJumpToCell?: (cellId: string) => void
   onAiSetupNeeded?: () => void
   onOpenRecording?: (cellId: string) => void
@@ -940,7 +932,7 @@ function EditorRow({
   isActiveCue: _isActiveCue, onSeekToCue,
   onDragStart, onDragEnter, onSelectionPointerDown,
   rowIndex, lineNumbersEnabled, cellLabelsEnabled, sourceTextDirection, targetTextDirection, gridCols,
-  isAnonymous, breakdown, onJumpToCell, onAiSetupNeeded, onOpenRecording,
+  isAnonymous, onAiSetupNeeded, onOpenRecording,
   onCellCommitted, lockHolderLabel, remoteChangedWhileFocused,
   onClaimCell, onReleaseCell, onAckRemoteChange,
   isStaleSource,
@@ -1312,16 +1304,6 @@ function EditorRow({
         </PopoverContent>
       )}
     </Popover>
-    {breakdown && (
-      <HealthBreakdown
-        breakdown={breakdown}
-        scopeLabel="cell health"
-        onCellClick={onJumpToCell}
-        majorInfractionCount={breakdown.signals.infractions.length}
-      >
-        <span className="sr-only">Breakdown</span>
-      </HealthBreakdown>
-    )}
     {/* Phase 5 / AD-9: source-changed indicator. Parent-managed mode —
         membership lookup happens once per file at ProjectWorkspace and is
         flattened to a per-row boolean here, so we pass a one-element set
@@ -1831,23 +1813,20 @@ function EditorRow({
             {
               value: "health",
               icon: <Activity className="h-3 w-3" />,
-              label: "Health",
-              disabled: !breakdown,
-              content: breakdown ? (
-                <BreakdownContent
-                  breakdown={breakdown}
-                  scopeLabel="cell health"
-                  onCellClick={onJumpToCell}
-                  majorInfractionCount={cellInfractions.filter(
-                    (i) => ruleMap.get(i.ruleId)?.severity === "major",
-                  ).length}
-                  variant="inline"
-                />
-              ) : (
-                <p className="py-3 text-center text-xs text-muted-foreground">
-                  Composite health is off — turn it on in project settings to
-                  see this cell's breakdown.
-                </p>
+              label: "Decay",
+              content: (
+                <div className="space-y-1.5 py-3 text-xs text-muted-foreground">
+                  <p>
+                    <span className="font-medium text-foreground">{cell.endorsementCount ?? 0}</span>
+                    {" "}endorsement{(cell.endorsementCount ?? 0) === 1 ? "" : "s"} · health{" "}
+                    <span className="font-medium text-foreground">{healthValue}%</span>
+                  </p>
+                  <p>
+                    {cellNeedsAttention
+                      ? "Needs attention — this cell's retrieval neighborhood hasn't been validated yet (AD-14)."
+                      : "No attention needed — enough of this cell's neighborhood is validated."}
+                  </p>
+                </div>
               ),
             },
             {

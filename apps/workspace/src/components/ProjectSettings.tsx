@@ -12,17 +12,15 @@ import { useProjectSettings } from "@/hooks/useProjectSettings"
 import { getProject, updateProject } from "@/lib/store/project-index"
 import { fetchModels, resolveProvider } from "@/lib/completion/completion-service"
 import { useSaveCompletionSettings, DEFAULT_SYSTEM_PROMPT } from "@/hooks/useCompletionSettings"
-import type { ProjectRecord, CompletionProvider, ProjectTtsSettings, RulePenalties } from "@/lib/parsers/types"
-import { HEALTH_DEFAULTS } from "@/lib/health/defaults"
+import type { ProjectRecord, CompletionProvider, ProjectTtsSettings } from "@/lib/parsers/types"
 import { listFlags } from "@/lib/features/flags"
 import { useFeatureFlag, setFeatureFlag } from "@/hooks/useFeatureFlag"
 import { ValidationSettingsSection } from "./ProjectSettings/ValidationSettingsSection"
-import { HealthSettingsSection } from "./ProjectSettings/HealthSettingsSection"
+import { DecaySettingsSection } from "./ProjectSettings/DecaySettingsSection"
 import { AudioMediaStrategySection } from "./ProjectSettings/AudioMediaStrategySection"
 import { VoiceLibrarySection } from "./ProjectSettings/VoiceLibrarySection"
 import { SourceLinkingPanel } from "./ProjectSettings/SourceLinkingPanel"
 import { ApiKeyField } from "./ApiKeyField"
-import type { HealthSettings } from "@/lib/parsers/types"
 import { readValidationCount, readValidationCountAudio } from "@/lib/progress/read-validation-count"
 import { setUserApiKey, useUserApiKey } from "@/lib/store/user-api-keys"
 
@@ -102,7 +100,6 @@ export function ProjectSettings() {
   const [maxTokens, setMaxTokens] = useState(512)
   const [temperature, setTemperature] = useState(0.3)
   const [systemPrompt, setSystemPrompt] = useState(DEFAULT_SYSTEM_PROMPT)
-  const [llmHealthPenalty, setLlmHealthPenalty] = useState(0.1)
 
   const [autoSyncEnabled, setAutoSyncEnabled] = useState(false)
   const [autoSyncInterval, setAutoSyncInterval] = useState(5)
@@ -131,7 +128,6 @@ export function ProjectSettings() {
       setMaxTokens(project.completionSettings.maxTokens)
       setTemperature(project.completionSettings.temperature)
       setSystemPrompt(project.completionSettings.systemPrompt || DEFAULT_SYSTEM_PROMPT)
-      setLlmHealthPenalty(project.completionSettings.llmHealthPenalty ?? 0.1)
     }
     setAutoSyncEnabled(project.syncSettings?.autoSync.enabled ?? false)
     setAutoSyncInterval(project.syncSettings?.autoSync.intervalMinutes ?? 5)
@@ -188,25 +184,6 @@ export function ProjectSettings() {
     flash()
   }, [id, refresh, flash])
 
-  const compositeFlag = useFeatureFlag("composite-health", project ?? null)
-  const [healthSettings, setHealthSettings] = useState<HealthSettings>({ followDefaults: true })
-
-  useEffect(() => {
-    if (project?.healthSettings) setHealthSettings(project.healthSettings)
-  }, [project?.healthSettings])
-
-  async function saveHealthSettings(next: HealthSettings) {
-    setHealthSettings(next)
-    // Route through the synced patch pipe. `saveField` would only write to
-    // local IDB, and `useProject`'s overlay with `useProjectSettings.settings`
-    // then re-applies the stale server value on the next render, reverting
-    // the edit silently.
-    await savePartialShared({ healthSettings: next })
-  }
-
-  async function resetHealthOverrides() {
-    await saveHealthSettings({ ...healthSettings, overrides: undefined })
-  }
 
   function handlePresetChange(nextPresetId: string) {
     setPresetId(nextPresetId)
@@ -479,15 +456,6 @@ export function ProjectSettings() {
               </div>
             </div>
 
-            {!compositeFlag && (
-              <div>
-                <Label>LLM Health Penalty ({Math.round(llmHealthPenalty * 100)}%)</Label>
-                <input type="range" min="0" max="0.5" step="0.05" value={llmHealthPenalty} onChange={(e) => setLlmHealthPenalty(Number(e.target.value))} onMouseUp={() => saveCompletionSettings({ llmHealthPenalty })} className="mt-2 w-full" />
-                <p className="mt-1 text-xs text-muted-foreground">
-                  LLM translations are penalized by this amount in health calculations. 0% = full trust, 50% = heavy penalty. Default: 10%.
-                </p>
-              </div>
-            )}
           </div>
         </details>
 
@@ -496,20 +464,15 @@ export function ProjectSettings() {
           onChange={saveTtsSettings}
         />
 
-        {compositeFlag && (
-          <HealthSettingsSection
-            settings={healthSettings}
-            rulePenalties={project?.rulePenalties ?? HEALTH_DEFAULTS.rulePenalties}
-            onChange={saveHealthSettings}
-            onRulePenaltiesChange={(rp: RulePenalties) => savePartialShared({ rulePenalties: rp })}
-            onReset={resetHealthOverrides}
-            // Only block editing when the project IS synced — for unsynced
-            // (local-only) projects, roleLevel is null so canEditShared is
-            // false too, but local edits are still meaningful.
-            disabled={!canEditShared && project?.syncRole != null}
-            disabledTooltip={sharedDisabledTooltip ?? undefined}
-          />
-        )}
+        <DecaySettingsSection
+          settings={project?.decaySettings}
+          onChange={(next) => savePartialShared({ decaySettings: next })}
+          // Only block editing when the project IS synced — for unsynced
+          // (local-only) projects, roleLevel is null so canEditShared is
+          // false too, but local edits are still meaningful.
+          disabled={!canEditShared && project?.syncRole != null}
+          disabledTooltip={sharedDisabledTooltip ?? undefined}
+        />
 
         <ValidationSettingsSection
           validationCount={validationCount}

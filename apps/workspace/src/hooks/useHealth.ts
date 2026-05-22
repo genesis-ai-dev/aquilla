@@ -1,22 +1,14 @@
 import { useMemo, useRef } from "react"
-import type { HealthStats } from "@/lib/health/health-engine"
-import { computeDecayHealth, DECAY_DEFAULTS } from "@/lib/health/decay-engine"
+import { computeDecayHealth, DECAY_DEFAULTS, type HealthStats } from "@/lib/health/decay-engine"
 import { checkRules } from "@/lib/rules/rule-engine"
 import type { CellData } from "./useCells"
-import type { TranslationRule, HealthConfig, CellHealthBreakdown, RuleInfraction, DecaySettings } from "@/lib/parsers/types"
+import type { TranslationRule, RuleInfraction, DecaySettings } from "@/lib/parsers/types"
 import { perfMark } from "@/lib/perf-log"
-import type { CellAuditStats } from "./useCellsAuditStats"
 
 interface HealthDispatchOptions {
   /** AD-14 decay tunables (endorsementTarget, decayWarnThreshold). */
   decaySettings?: DecaySettings
-  /** @deprecated four-sub-score flag — ignored since AD-14 (decay). */
-  composite?: boolean
-  /** @deprecated four-sub-score config — ignored since AD-14. */
-  compositeConfig?: HealthConfig
   requiredValidations?: number
-  /** @deprecated audit stats fed the composite worker — no longer used. */
-  auditStats?: Map<string, CellAuditStats>
 }
 
 // ---------------------------------------------------------------------------
@@ -76,24 +68,6 @@ function progressMapsEqual(
   return true
 }
 
-function breakdownMapsEqual(
-  a: Map<string, CellHealthBreakdown>,
-  b: Map<string, CellHealthBreakdown>,
-): boolean {
-  if (a === b) return true
-  if (a.size !== b.size) return false
-  for (const [k, av] of a) {
-    const bv = b.get(k)
-    if (!bv) return false
-    if (av.score !== bv.score) return false
-    if (av.validationGap !== bv.validationGap) return false
-    if (av.ancestryPenalty !== bv.ancestryPenalty) return false
-    if (av.neighborhoodPenalty !== bv.neighborhoodPenalty) return false
-    if (av.rulePenalty !== bv.rulePenalty) return false
-  }
-  return true
-}
-
 function healthStatsEqual(a: HealthStats, b: HealthStats): boolean {
   if (a === b) return true
   if (a.projectHealth !== b.projectHealth) return false
@@ -104,14 +78,8 @@ function healthStatsEqual(a: HealthStats, b: HealthStats): boolean {
   if (!primitiveMapsEqual(a.cellOpenCommentCount, b.cellOpenCommentCount)) return false
   if (!progressMapsEqual(a.fileProgress, b.fileProgress)) return false
   if (!infractionMapsEqual(a.infractions, b.infractions)) return false
-  if (!breakdownMapsEqual(a.breakdownMap, b.breakdownMap)) return false
   return true
 }
-
-// Four-sub-score breakdown is retired by AD-14 — the breakdown popover
-// self-hides when this map is empty (StatusBar passes undefined). Stable
-// shared reference so the assembled result stays referentially stable.
-const EMPTY_BREAKDOWN: Map<string, CellHealthBreakdown> = new Map()
 
 // Health derives from decay (endorsement_count). File progress + comment
 // counts are a cheap O(N) auxiliary derivation — no rule checks, no scoring.
@@ -191,7 +159,6 @@ export function useHealth(
       openCommentCount: aux.openCommentCount,
       projectOpenCommentCount: aux.projectOpenCommentCount,
       cellOpenCommentCount: aux.cellOpenCommentCount,
-      breakdownMap: EMPTY_BREAKDOWN,
     }),
     [decay, infractions, aux],
   )

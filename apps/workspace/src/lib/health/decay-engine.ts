@@ -11,6 +11,27 @@
 // here (AD-14: "rules and built-in checks stay separate").
 
 import type { CellData } from "@/hooks/useCells"
+import type { RuleInfraction } from "@/lib/parsers/types"
+
+/**
+ * The shape returned by `useHealth`. Health numbers come from decay (AD-14);
+ * rule infractions, file progress, and open-comment counts are sibling
+ * surfaces carried alongside (NOT folded into health).
+ */
+export interface HealthStats {
+  /** cellId → per-cell health 0-100 (1 - decay). */
+  healthMap: Map<string, number>
+  /** fileId → file health 0-100. */
+  fileHealth: Map<string, number>
+  /** Overall project health 0-100. */
+  projectHealth: number
+  fileProgress: Map<string, { translated: number; validated: number; total: number }>
+  /** Rule / built-in-check violations — separate sibling surface (AD-14). */
+  infractions: Map<string, RuleInfraction[]>
+  openCommentCount: Map<string, number>
+  projectOpenCommentCount: number
+  cellOpenCommentCount: Map<string, number>
+}
 
 /** Endorsements at which a cell reaches decay = 0 (project_settings default). */
 export const DEFAULT_ENDORSEMENT_TARGET = 5

@@ -1367,7 +1367,6 @@ export function ProjectWorkspace() {
             sourceTextDirection={fileMeta.sourceTextDirection}
             targetTextDirection={fileMeta.targetTextDirection}
             isAnonymous={!frontierSession}
-            breakdownMap={health.breakdownMap}
             onJumpToCell={jumpToCellId}
             onAiSetupNeeded={() => setAiSetupOpen(true)}
             onOpenRecording={(cellId) => setRecordingCellId(cellId)}
@@ -1442,6 +1441,8 @@ export function ProjectWorkspace() {
             <StatusBar
               cells={cells}
               projectHealth={projectHealth}
+              healthMap={healthMap}
+              staleSourceCount={staleCellIds.size}
               onJumpToCell={jumpToCellId}
             />
           </>

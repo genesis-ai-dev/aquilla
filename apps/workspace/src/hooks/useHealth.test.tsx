@@ -26,10 +26,12 @@ describe("useHealth — AD-14 decay", () => {
     expect(result.current.healthMap.get("b")).toBe(0)
   })
 
-  it("retires the four-sub-score breakdown (breakdownMap always empty)", async () => {
+  it("carries rule infractions as a separate surface (not folded into health)", async () => {
     const fileCells = new Map([["f", [cell("a", "bonjour", 3)]]])
     const { result } = renderHook(() => useHealth(fileCells, []))
     await waitFor(() => expect(result.current.healthMap.size).toBe(1))
-    expect(result.current.breakdownMap.size).toBe(0)
+    // health from decay; infractions present as their own map.
+    expect(result.current.infractions instanceof Map).toBe(true)
+    expect(result.current.healthMap.get("a")).toBe(60) // 3/5 endorsed → decay .4 → health 60
   })
 })

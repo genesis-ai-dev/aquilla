@@ -85,7 +85,7 @@ export function ProjectCard({
           <div className="flex items-center gap-1.5">
             {!isTrashed && myRoleLabel && (
               <span
-                className="inline-flex items-center rounded-full border bg-primary/10 text-primary px-2 py-0.5 text-[10px] font-medium capitalize"
+                className="inline-flex items-center rounded-full bg-accent text-accent-foreground px-2 py-0.5 text-[10px] font-medium capitalize"
                 title="Your role on this project"
               >
                 {myRoleLabel.replace(/_/g, " ")}

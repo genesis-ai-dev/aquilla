@@ -33,12 +33,12 @@ export function FrontierLoginForm({
   }
 
   return (
-    <form onSubmit={onSubmit} className="space-y-3">
-      <div>
+    <form onSubmit={onSubmit} className="space-y-4">
+      <div className="space-y-2">
         <Label htmlFor="f-user">Frontier username or email</Label>
         <Input id="f-user" value={username} onChange={(e) => setUsername(e.target.value)} autoComplete="username" />
       </div>
-      <div>
+      <div className="space-y-2">
         <div className="flex items-center justify-between">
           <Label htmlFor="f-pass">Password</Label>
           {onForgotPassword && (

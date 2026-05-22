@@ -33,6 +33,12 @@ export async function spawnWranglerDev(opts: {
   env?: Record<string, string>
   logFile?: WriteStream
   streamToParent?: boolean
+  /**
+   * Extra CLI flags appended after the wrangler defaults — `--persist-to
+   * <shared-path>` is the main use, so multiple workers can read each
+   * other's writes against a shared local D1/R2/KV. Empty by default.
+   */
+  extraArgs?: string[]
 }): Promise<SpawnedWorker> {
   // wrangler doesn't propagate arbitrary parent process env vars into the
   // worker's `c.env`. Anything we want the worker runtime to see has to be
@@ -57,6 +63,7 @@ export async function spawnWranglerDev(opts: {
       "--ip",
       "127.0.0.1",
       ...varFlags,
+      ...(opts.extraArgs ?? []),
     ],
     {
       cwd: opts.cwd,

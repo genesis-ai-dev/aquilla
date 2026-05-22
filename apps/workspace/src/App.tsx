@@ -30,6 +30,7 @@
 
 import { Routes, Route } from "react-router-dom"
 import { Dashboard } from "@/components/Dashboard"
+import { OnboardingWizard } from "@/components/onboarding/OnboardingWizard"
 import { ProjectWorkspace } from "@/components/ProjectWorkspace"
 import { DebugView } from "@/components/DebugView"
 import { RulesPage } from "@/components/RulesPage"
@@ -48,7 +49,13 @@ import { useGlobalAudioShortcuts } from "@/hooks/useGlobalAudioShortcuts"
 void hydratePrefetchStatus()
 void probeOpfsAvailability()
 
-const ENABLE_SMOKE_DASHBOARD_ROUTE = import.meta.env.MODE === "test"
+// Production hands `/` to apps/projects/ via the front-door Worker, so the
+// workspace SPA deliberately leaves `/` unmounted in a prod build. In dev
+// (`pnpm dev`) and the smoke suite there is no front-door, so render the
+// workspace Dashboard at `/` as a project-picker entry point. The condition
+// fires for `vite dev` (MODE=development) and `vite --mode test` (MODE=test);
+// `vite build` defaults to MODE=production and stays unaffected.
+const ENABLE_SMOKE_DASHBOARD_ROUTE = import.meta.env.MODE !== "production"
 
 const workspacePaths = (suffix = "") => [
   `/project/:id${suffix}`,
@@ -102,7 +109,14 @@ export function AppRoutes() {
           the root dashboard. Keep this route test-only so production continues
           to hand `/` to apps/projects/ via the front-door Worker. */}
       {ENABLE_SMOKE_DASHBOARD_ROUTE ? (
-        <Route path="/" element={<Dashboard />} />
+        <>
+          <Route path="/" element={<Dashboard />} />
+          {/* Dashboard <Navigate to="/onboarding" /> needs a real route in dev,
+              otherwise the `/:id` workspace catch-all matches and treats
+              "onboarding" as a project id. Production routes /onboarding to
+              apps/projects/onboarding via the front-door Worker. */}
+          <Route path="/onboarding" element={<OnboardingWizard />} />
+        </>
       ) : null}
 
       {/* Workspace surfaces — kept here until Phase 3a relocates them. */}

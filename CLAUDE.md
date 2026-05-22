@@ -29,7 +29,10 @@ Backed by Cloudflare Workers in this repo (`apps/identity/`, `apps/sync/`, `apps
 
 ```bash
 pnpm i              # install
-pnpm dev            # vite dev server
+pnpm dev            # full local stack: identity + sync (wrangler dev) + vite
+pnpm dev:chat       # full stack including apps/chat (needs OPENROUTER_API_KEY)
+pnpm dev:verbose    # same as `pnpm dev` but streams each worker's stdout/stderr
+pnpm dev:vite       # bare Vite only — escape hatch for SPA-only iteration
 pnpm build          # tsc -b && vite build
 pnpm preview        # preview built bundle
 pnpm lint           # eslint
@@ -42,6 +45,27 @@ pnpm test -t "splits by verse"
 ```
 
 Vitest runs in `happy-dom` with `fake-indexeddb/auto` loaded via `apps/workspace/src/test-setup.ts`, so tests that use IndexedDB / idb work without a browser. Path alias `@/` resolves to `apps/workspace/src/` (post-Phase-3a-final).
+
+### Local backend dev (`scripts/dev-stack.ts`)
+
+`pnpm dev` runs `scripts/dev-stack.ts`, which boots the workspace SPA's backends locally via `wrangler dev --local`:
+
+| Service         | Port  | Source            |
+| --------------- | ----- | ----------------- |
+| `apps/identity` | 8788  | `wrangler dev`    |
+| `apps/sync`     | 8789  | `wrangler dev`    |
+| `apps/chat`     | 8790  | only with `--chat`|
+| Vite (SPA)      | 5173  | the workspace bundle |
+
+What it does:
+
+- Auto-creates each backend's `.dev.vars` from its `.dev.vars.example` on first boot (gitignored — edit freely).
+- Applies `apps/identity/migrations/*.sql` to the local D1 (idempotent — wrangler tracks applied migrations).
+- Persists wrangler local state to `.wrangler-dev-state/` at the repo root, **shared between identity and sync** so the project rows identity writes are visible to sync. Delete that directory to reset the local DB.
+- Writes a managed `.env.development.local` so the Vite client bundle resolves `VITE_AUTH_BASE` / `VITE_SYNC_WORKER_HOST` to the local ports. The file is deleted on clean shutdown so `pnpm dev:vite` returns to whatever the user has in `.env.local`.
+- Streams each Worker's output to `.dev-stack-logs/{identity,sync,chat,vite}.log`; pass `--verbose` to also tee to the terminal.
+
+Nothing in dev-stack touches `wrangler.toml`, CI workflows, or remote Cloudflare resources. The remote Workers (`aquilla-prod-identity`, `aquilla-sync-worker`, `aquilla-prod-projects`, …) and their `[env.production]` / `[env.staging]` / `[env.preview]` blocks are unaffected.
 
 ## Architecture
 

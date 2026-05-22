@@ -167,6 +167,15 @@ export async function tombstoneProject(
 
   if (opts.jwt) {
     remote = await archiveProjectRemote(project.id, opts.jwt)
+    // Identity returns 403 for both "no role on this project" AND "no such
+    // project" — deliberate existence-privacy. When the local record is
+    // local-only-shaped (no origin, no syncRole — same check `canTrash`
+    // uses), a 403 here actually means "server has no row for this id."
+    // Reclassify so orphan IDB rows from a wizard run that pre-dated the
+    // remote-create fix can still be trashed.
+    if (remote.kind === "forbidden" && !project.origin && !project.syncRole) {
+      remote = { kind: "local-only" }
+    }
     if (remote.kind === "forbidden" || remote.kind === "error") {
       return { project: project, remote }
     }

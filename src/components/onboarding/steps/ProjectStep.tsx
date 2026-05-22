@@ -3,7 +3,9 @@ import { v4 as uuid } from "uuid"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { createProject } from "@/lib/store/project-index"
+import { createProject as createLocalProject } from "@/lib/store/project-index"
+import { createRemoteProject } from "@/lib/frontier/members"
+import { useFrontierSession } from "@/hooks/useFrontierSession"
 import type { ProjectRecord } from "@/lib/parsers/types"
 
 export function ProjectStep({
@@ -21,13 +23,16 @@ export function ProjectStep({
   const [sourceLanguage, setSourceLanguage] = useState("")
   const [targetLanguage, setTargetLanguage] = useState("")
   const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const { session } = useFrontierSession()
 
   async function handleCreate(e: React.FormEvent) {
     e.preventDefault()
     if (!name.trim() || !sourceLanguage.trim() || !targetLanguage.trim()) return
     setBusy(true)
+    setError(null)
     try {
-      const project: ProjectRecord = {
+      let project: ProjectRecord = {
         id: uuid(),
         name: name.trim(),
         sourceLanguage: sourceLanguage.trim(),
@@ -37,8 +42,33 @@ export function ProjectStep({
         members: [{ userId: "local", role: "owner" }],
         username: displayName || "Anonymous",
       }
-      await createProject(project)
+      // Mirror ProjectCreateDialog: if signed in, create the server row
+      // first so useProject() (server-only per AD-3) can resolve it after
+      // the wizard navigates to /project/:id. The local IDB record carries
+      // the language fields the server doesn't track.
+      if (session?.jwt) {
+        const created = await createRemoteProject(
+          { id: project.id, name: project.name },
+          session.jwt,
+        )
+        project = {
+          ...project,
+          syncRole: {
+            ...created.role,
+            source: created.role.source,
+            fetchedAt: new Date().toISOString(),
+          },
+        }
+      }
+      await createLocalProject(project)
       onCreated(project)
+    } catch (err) {
+      // Surface remote-create failures rather than silently navigating to a
+      // 404 project page. Common shapes: 401 stale jwt, 409 id collision,
+      // 5xx transient.
+      const message =
+        err instanceof Error ? err.message : "Failed to create project."
+      setError(message)
     } finally {
       setBusy(false)
     }
@@ -53,7 +83,7 @@ export function ProjectStep({
         </p>
       </div>
       <form onSubmit={handleCreate} className="space-y-4">
-        <div>
+        <div className="space-y-2">
           <Label htmlFor="proj-name">Project name</Label>
           <Input
             id="proj-name"
@@ -63,7 +93,7 @@ export function ProjectStep({
             autoFocus
           />
         </div>
-        <div>
+        <div className="space-y-2">
           <Label htmlFor="src-lang">Source language</Label>
           <Input
             id="src-lang"
@@ -72,7 +102,7 @@ export function ProjectStep({
             placeholder="English"
           />
         </div>
-        <div>
+        <div className="space-y-2">
           <Label htmlFor="tgt-lang">Target language</Label>
           <Input
             id="tgt-lang"
@@ -81,6 +111,11 @@ export function ProjectStep({
             placeholder="French"
           />
         </div>
+        {error ? (
+          <p className="text-sm text-destructive" role="alert">
+            {error}
+          </p>
+        ) : null}
         <Button
           type="submit"
           size="lg"

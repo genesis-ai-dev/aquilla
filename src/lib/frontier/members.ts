@@ -1,4 +1,4 @@
-import { FRONTIER_BASE } from "./auth";
+import { FRONTIER_BASE, AUTH_BASE } from "./auth";
 
 export interface LookedUpUser {
   id: number;
@@ -99,4 +99,35 @@ export async function removeProjectMember(
     const text = await res.text();
     throw new Error(`removeProjectMember failed: HTTP ${res.status} — ${text}`);
   }
+}
+
+export interface RemoteProjectCreateResult {
+  id: string
+  name: string
+  orgId: number | null
+  role: { level: number; name: string; source: string }
+}
+
+/**
+ * POST /api/v2/projects — create a server-side project row in identity.
+ * Mirrors the ProjectCreateDialog / main's @aquilla/api-client.createProject.
+ * Throws on non-2xx so the caller can surface the error.
+ */
+export async function createRemoteProject(
+  project: { id: string; name: string },
+  jwt: string,
+): Promise<RemoteProjectCreateResult> {
+  const res = await fetch(`${AUTH_BASE}/api/v2/projects`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${jwt}`,
+    },
+    body: JSON.stringify({ id: project.id, name: project.name }),
+  });
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(`createRemoteProject failed: HTTP ${res.status}${text ? ` — ${text}` : ""}`);
+  }
+  return (await res.json()) as RemoteProjectCreateResult;
 }

@@ -158,8 +158,20 @@ describe("project-index trash", () => {
     expect(fetched?.deletedAt).toBeDefined()
   })
 
-  it("tombstoneProject leaves local state unchanged on 403", async () => {
-    const project = makeProject({ id: "p4" })
+  it("tombstoneProject leaves local state unchanged on 403 when project has an origin", async () => {
+    // A cloud-synced project (has origin) getting 403 means the caller lacks
+    // permission — don't apply the local tombstone.
+    const project = makeProject({
+      id: "p4",
+      origin: {
+        kind: "git",
+        cloneUrl: "https://gitlab.example.com/org/repo.git",
+        gitlabProjectId: 42,
+        branch: "main",
+        headSha: "abc123",
+        importedAt: new Date().toISOString(),
+      },
+    })
     await createProject(project)
     globalThis.fetch = vi.fn(
       async () =>
@@ -169,6 +181,21 @@ describe("project-index trash", () => {
     expect(result.remote.kind).toBe("forbidden")
     const fetched = await getProject("p4")
     expect(fetched?.deletedAt).toBeUndefined()
+  })
+
+  it("tombstoneProject reclassifies 403 as local-only for orphan IDB rows", async () => {
+    // A local-only-shaped project (no origin, no syncRole) that gets a 403
+    // means the server has no row for this id — reclassify and tombstone locally.
+    const project = makeProject({ id: "p4b" })
+    await createProject(project)
+    globalThis.fetch = vi.fn(
+      async () =>
+        new Response(JSON.stringify({ error: "not found or no role" }), { status: 403 })
+    ) as typeof fetch
+    const result = await tombstoneProject(project, { jwt: "fake-jwt" })
+    expect(result.remote.kind).toBe("local-only")
+    const fetched = await getProject("p4b")
+    expect(fetched?.deletedAt).toBeDefined()
   })
 
   it("restoreProject clears local deletedAt and deletedBy", async () => {

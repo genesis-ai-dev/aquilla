@@ -1,9 +1,9 @@
-name = "codex-sync-worker"
+name = "aquilla-sync-worker"
 main = "src/index.ts"
 compatibility_date = "2024-12-01"
 compatibility_flags = ["nodejs_compat"]
 
-# Same CF account as frontier-server and codex-db. Pinned so `wrangler deploy`
+# Same CF account as frontier-server and aquilla-db. Pinned so `wrangler deploy`
 # doesn't prompt interactively and lands on the wrong account by accident.
 account_id = "6a80496d1e59948a9cbaa3c643ba81d7"
 
@@ -30,15 +30,15 @@ new_sqlite_classes = ["ProjectSync"]
 # Key layout: projects/{projectId}/files/{fileId}/{snapshot.bin,tail/{seq}.bin,checkpoints/{id}.bin}
 [[r2_buckets]]
 binding = "SNAPSHOTS"
-bucket_name = "codex-snapshots"
+bucket_name = "aquilla-snapshots"
 # For local `wrangler dev`, wrangler will use a local simulator if the bucket doesn't exist.
 
 # Shared D1 with frontier-server. Schema owned there (cloudflare/codex_migrations);
 # sync-worker is a writer only (projects files + cells on every onSave).
 [[d1_databases]]
-binding = "CODEX_DB"
-database_name = "codex-db"
-database_id = "cf7133b2-227f-4f0a-9d8f-ad81ee05f27d"
+binding = "AQUILLA_DB"
+database_name = "aquilla-db"
+database_id = "11828e9d-998b-4d3f-a405-91d9f624f94a"
 
 # Auth:
 #   SYNC_SECRET_KEY (shared with frontier-server for JWT signing — distinct
@@ -50,10 +50,47 @@ database_id = "cf7133b2-227f-4f0a-9d8f-ad81ee05f27d"
 #   some reason, set ALLOW_UNAUTHENTICATED="true" via `wrangler secret put`.
 
 # ---------------------------------------------------------------------------
+# Production environment — routes traffic via aquilla.app/api/sync/* so
+# Safari (which blocks *.workers.dev WebSockets) hits the real zone.
+# NOTE: CI strips `routes` lines before deploying (its token lacks
+# zone-route perms). Routes are created out-of-band via CF dashboard or
+# local `wrangler deploy --env production`.
+# ---------------------------------------------------------------------------
+[env.production]
+name = "aquilla-sync-worker"
+account_id = "6a80496d1e59948a9cbaa3c643ba81d7"
+routes = ["aquilla.app/api/sync/*"]
+
+[[env.production.durable_objects.bindings]]
+name = "FileSync"
+class_name = "FileSync"
+
+[[env.production.durable_objects.bindings]]
+name = "ProjectSync"
+class_name = "ProjectSync"
+
+[[env.production.migrations]]
+tag = "v1"
+new_sqlite_classes = ["FileSync"]
+
+[[env.production.migrations]]
+tag = "v2"
+new_sqlite_classes = ["ProjectSync"]
+
+[[env.production.r2_buckets]]
+binding = "SNAPSHOTS"
+bucket_name = "aquilla-snapshots"
+
+[[env.production.d1_databases]]
+binding = "AQUILLA_DB"
+database_name = "aquilla-db"
+database_id = "11828e9d-998b-4d3f-a405-91d9f624f94a"
+
+# ---------------------------------------------------------------------------
 # Staging environment — physically separate D1, R2, DO namespace.
 # Auth model unchanged: same SYNC_SECRET_KEY as prod, same frontier-server
 # issues sync-tokens. A logged-in user can use the staging frontend and
-# their writes land in codex-db-staging / codex-snapshots-staging, leaving
+# their writes land in aquilla-db-staging / aquilla-snapshots-staging, leaving
 # prod data untouched.
 #
 # Deploy: `wrangler deploy --env staging` (CI does this on push to dev).
@@ -61,8 +98,9 @@ database_id = "cf7133b2-227f-4f0a-9d8f-ad81ee05f27d"
 #   `wrangler secret put SYNC_SECRET_KEY --env staging`
 # ---------------------------------------------------------------------------
 [env.staging]
-name = "codex-sync-worker-staging"
+name = "aquilla-sync-worker-staging"
 account_id = "6a80496d1e59948a9cbaa3c643ba81d7"
+routes = ["dev.aquilla.app/api/sync/*"]
 
 [[env.staging.durable_objects.bindings]]
 name = "FileSync"
@@ -82,9 +120,9 @@ new_sqlite_classes = ["ProjectSync"]
 
 [[env.staging.r2_buckets]]
 binding = "SNAPSHOTS"
-bucket_name = "codex-snapshots-staging"
+bucket_name = "aquilla-snapshots-staging"
 
 [[env.staging.d1_databases]]
-binding = "CODEX_DB"
-database_name = "codex-db-staging"
-database_id = "2afa2bb5-667a-4f0d-bc1e-fffa3c9f256f"
+binding = "AQUILLA_DB"
+database_name = "aquilla-db-staging"
+database_id = "c995bf9a-97c0-4966-a112-053a2d04d8f9"

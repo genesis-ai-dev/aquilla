@@ -4,8 +4,15 @@ import { Button } from "@/components/ui/button"
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger,
 } from "@/components/ui/dialog"
-import { collectValidatedPairs } from "@/lib/store/file-doc"
 import { suggestRulesFromPairs, type RuleSuggestion } from "@/lib/rules/rule-suggester"
+
+// Phase 2c-gamma: collectValidatedPairs read per-file Y.Doc maps to gather
+// (source, target) pairs marked human-validated. Until the cells-projection
+// equivalent lands, return an empty list — the dialog already handles the
+// "no validated pairs" branch with a useful error message.
+async function collectValidatedPairs(_fileIds: string[]): Promise<{ source: string; target: string }[]> {
+  return []
+}
 import { resolveProvider, DEFAULT_SYSTEM_PROMPT } from "@/lib/completion/completion-service"
 import { useFrontierHealth } from "@/lib/completion/frontier-health"
 import { useFrontierSession } from "@/hooks/useFrontierSession"

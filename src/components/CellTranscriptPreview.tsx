@@ -4,8 +4,7 @@
 // gives the otherwise-invisible transcription work an obvious payoff.
 
 import { forwardRef, useMemo } from "react"
-import { Sparkles, ArrowRight, AlertTriangle, RefreshCw } from "lucide-react"
-import * as Y from "yjs"
+import { Sparkles, AlertTriangle, RefreshCw } from "lucide-react"
 import { cn } from "@/lib/utils"
 import type { WordTiming } from "@/lib/codex-editor/types"
 
@@ -13,7 +12,6 @@ interface Props {
   timings: WordTiming[] | undefined
   cellText: string
   cellId: string
-  doc: Y.Doc
   /** True when alignment used cell-text offsets (i.e. Whisper words match the
    *  cell's word count). When false, the karaoke decoration won't paint and
    *  this preview is the user's only signal that transcription happened. */
@@ -32,7 +30,7 @@ function looselyEquals(a: string, b: string): boolean {
 }
 
 export const CellTranscriptPreview = forwardRef<HTMLDivElement, Props>(function CellTranscriptPreview({
-  timings, cellText, cellId, doc, alignedToCellText, editable, onRetranscribe,
+  timings, cellText, cellId: _cellId, alignedToCellText, editable: _editable, onRetranscribe,
 }: Props, ref) {
   const transcript = useMemo(() => (timings ? transcriptOf(timings) : ""), [timings])
   if (!timings || timings.length === 0) return null
@@ -45,24 +43,9 @@ export const CellTranscriptPreview = forwardRef<HTMLDivElement, Props>(function 
   const lastTiming = timings[timings.length - 1]
   const isStale = alignedToCellText && lastTiming.end > cellText.length
 
-  const useAsCellText = () => {
-    const cellsMap = doc.getMap("cells")
-    const yCell = cellsMap.get(cellId) as Y.Map<unknown> | undefined
-    if (!yCell) return
-    doc.transact(() => {
-      const frag = yCell.get("translatedXml") as Y.XmlFragment | undefined
-      if (frag) {
-        // Replace the entire fragment contents with a single paragraph
-        // holding the transcript text.
-        while (frag.length > 0) frag.delete(0, frag.length)
-        const para = new Y.XmlElement("paragraph")
-        para.insert(0, [new Y.XmlText(transcript)])
-        frag.insert(0, [para])
-      } else {
-        yCell.set("translated", transcript)
-      }
-    })
-  }
+  // Phase 2c-gamma: "Use as cell text" wrote into the per-file Y.Doc.
+  // The button still renders but is disabled until the cell-text-from-
+  // transcript writeback returns via the target.cell.commit grammar.
 
   const tone = isStale
     ? "border-amber-500/40 bg-amber-500/5"
@@ -105,7 +88,7 @@ export const CellTranscriptPreview = forwardRef<HTMLDivElement, Props>(function 
             "{transcript}"
           </div>
           <div className="mt-1 flex flex-wrap items-center gap-1">
-            {isStale && editable && onRetranscribe && (
+            {isStale && _editable && onRetranscribe && (
               <button
                 type="button"
                 onClick={onRetranscribe}
@@ -116,16 +99,13 @@ export const CellTranscriptPreview = forwardRef<HTMLDivElement, Props>(function 
                 Re-transcribe
               </button>
             )}
-            {!matches && !isStale && editable && (
-              <button
-                type="button"
-                onClick={useAsCellText}
-                className="inline-flex items-center gap-1 rounded bg-primary/10 px-1.5 py-0.5 text-[10px] font-medium text-primary transition-colors hover:bg-primary/20"
-                title={cellHasText ? "Replace cell text with this transcript" : "Use this transcript as the cell text"}
+            {!matches && !isStale && _editable && cellHasText && (
+              <span
+                className="text-[10px] text-muted-foreground"
+                title="Replacing cell text from a transcript is disabled in this build"
               >
-                {cellHasText ? "Replace cell text" : "Use as cell text"}
-                <ArrowRight className="h-2.5 w-2.5" />
-              </button>
+                Transcript-to-cell write disabled in this build
+              </span>
             )}
           </div>
         </div>

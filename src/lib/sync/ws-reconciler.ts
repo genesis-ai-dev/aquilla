@@ -47,11 +47,14 @@ export type ProjectWsServerMessage =
       project: string
       file?: string
       cell?: string
+      /** Actor username — populated by post-2c-γ sync workers. */
+      by?: string
     }
   | { t: "event.stale"; id: string; reason: string }
   | { t: "presence"; users: PresenceUser[] }
   | { t: "lock.claimed"; cellId: string; by: { userId: string; ts: number } }
   | { t: "lock.released"; cellId: string; by: { userId: string; ts: number } }
+  | { t: "project.archived"; project: string; archivedAt?: string; deletedBy?: string }
 
 export type ProjectWsClientMessage =
   | { t: "outbox.event"; event: OutboxRawEvent }
@@ -72,6 +75,8 @@ export interface WsReconcilerHandlers {
 
 export interface WsReconcilerOptions {
   projectId: string
+  /** Username / userId for presence messages. Optional — used by ProjectWorkspace. */
+  userId?: string
   /**
    * Returns a fresh JWT for the project DO. Called on each connect. Return
    * null when no session — the reconciler stays in the disconnected state

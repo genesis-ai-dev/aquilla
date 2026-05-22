@@ -12,13 +12,28 @@
 // are scheduled for rip in Phase 2c-γ.
 
 import { useCallback, useEffect, useRef, useState } from "react"
-import type * as Y from "yjs"
 import type { CellHistoryEntry, SourceLocation, CommentThread, CellTtsSettings } from "@/lib/parsers/types"
-import type { CodexCellAttachment, WordTiming } from "@/lib/codex-editor/types"
-import type { EditValidationSummary } from "@/lib/codex-editor/edits/types"
+import type { CodexCellAttachment, EditTypeValue, ValidationEntry, WordTiming } from "@/lib/codex-editor/types"
 import type { CellAuditStats } from "./useCellsAuditStats"
 import { fetchAllFileCells } from "@/lib/sync/cells-read"
 import type { CellRow } from "@/lib/sync/cells-read-types"
+
+/**
+ * Per-edit summary used by the validation popover timeline. Was previously
+ * exported from `@/lib/codex-editor/edits/types`; inlined here when the
+ * `cell.edits` Y.Doc grammar went away. The shape is preserved so the
+ * timeline UI keeps compiling; the read path that populates it is deferred
+ * to v1.x — `validationHistory` is empty in this build.
+ */
+export interface EditValidationSummary {
+  authors: string[]
+  timestamp: number
+  type: EditTypeValue
+  editMap: string[]
+  value: unknown
+  validatorsActive: string[]
+  validatorsAll: ValidationEntry[]
+}
 
 export type ValidationStatus = "empty" | "none" | "others" | "self" | "full"
 
@@ -29,10 +44,6 @@ export interface CellData {
   original: string
   originalHtml?: string
   translated: string
-  /** Phase 2c-β: residual legacy field. The plain-TipTap editor reads from
-   *  `translatedHtml` / `translated`. Y.Doc-dependent feature paths still
-   *  read this; it stays optional until the Phase 2c-γ rip lands. */
-  translatedXml?: Y.XmlFragment
   /** Rich-text variant of the target value, populated from `cells.value_html`.
    *  Hydrates the plain TipTap editor on mount. */
   translatedHtml?: string
@@ -52,6 +63,7 @@ export interface CellData {
   type: string
   status: "empty" | "unvalidated" | "validated"
   validationStatus: ValidationStatus
+  endorsementCount?: number
   activeValidators: string[]
   /** Empty in Phase 2a — useCellEditHistory will own this in Phase 2b. */
   validationHistory: EditValidationSummary[]
@@ -118,7 +130,11 @@ function buildCellData(
   const validationStatus: ValidationStatus =
     !translated.trim()
       ? "empty"
-      : classifyValidators(activeValidators, username, requiredValidations)
+      : activeValidators.length > 0
+        ? classifyValidators(activeValidators, username, requiredValidations)
+        : target?.validated
+          ? "full"
+          : "none"
 
   // Prefer the target row's `validated` flag as the source of truth for the
   // simple "is it green?" UI. When no stats are present, this is the only
@@ -142,6 +158,7 @@ function buildCellData(
     type: target?.type ?? source?.type ?? "text",
     status: deriveStatus(translated, validatedForStatus),
     validationStatus,
+    endorsementCount: target?.endorsementCount ?? source?.endorsementCount ?? 0,
     activeValidators,
     validationHistory: EMPTY_VALIDATION_HISTORY,
     history: EMPTY_HISTORY,

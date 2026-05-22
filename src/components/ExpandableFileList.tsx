@@ -20,6 +20,7 @@ interface Props {
   fileProgress: Map<string, FileStats>
   suggestionFileIds: Set<string>
   validationCount: number
+  getTokenForFile: (fileId: string) => Promise<string | null>
   onSelectFile: (fileId: string) => void
   onRename: (fileId: string, newName: string) => void
   onMove: (fileId: string) => void
@@ -30,7 +31,7 @@ interface Props {
 
 export function ExpandableFileList({
   projectId, files, activeFileId, fileProgress,
-  suggestionFileIds, validationCount, onSelectFile, onRename, onMove, onDelete,
+  suggestionFileIds, validationCount, getTokenForFile, onSelectFile, onRename, onMove, onDelete,
   onApplySuggestion, onRenameCorpus,
 }: Props) {
   const { expanded, toggle } = useSidebarExpansion(projectId)
@@ -55,7 +56,15 @@ export function ExpandableFileList({
         <div className="relative">
           <SearchIcon className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
           <input
-            type="text"
+            type="search"
+            name="aquilla-file-filter-query"
+            aria-label="Filter files"
+            autoComplete="off"
+            autoCapitalize="none"
+            spellCheck={false}
+            data-1p-ignore="true"
+            data-lpignore="true"
+            data-form-type="other"
             value={filter}
             onChange={(e) => setFilter(e.target.value)}
             placeholder="Filter files..."
@@ -161,8 +170,10 @@ export function ExpandableFileList({
                           />
                           {isExpanded && (
                             <FileSectionGrid
+                              projectId={projectId}
                               fileId={file.id}
                               validationCount={validationCount}
+                              getTokenForFile={getTokenForFile}
                               onSectionClick={(label) => {
                                 if (file.id !== activeFileId) {
                                   onSelectFile(file.id)

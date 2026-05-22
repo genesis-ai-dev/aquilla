@@ -1,31 +1,31 @@
-import { useState, useMemo, useRef, useEffect, useCallback } from "react"
-import { useParams, useNavigate, useSearchParams } from "react-router-dom"
+import { Suspense, lazy, useState, useMemo, useRef, useEffect, useCallback } from "react"
+import { useParams, useNavigate, useSearchParams, useLocation } from "react-router-dom"
 import { useProject } from "@/hooks/useProject"
-import { useFileDoc } from "@/hooks/useFileDoc"
 import { deriveCellAreaState } from "@/lib/editor/cell-area-state"
 import { CellAreaPlaceholder } from "./CellAreaPlaceholder"
 import { TabStrip } from "./TabStrip"
 import { useWorkspaceTabs, readLastActiveFileId } from "@/hooks/useWorkspaceTabs"
 import { useCells } from "@/hooks/useCells"
+import { useStaleSourceCells } from "@/hooks/useStaleSourceCells"
 import { useSearchIndex } from "@/hooks/useSearchIndex"
 import { useCompletion } from "@/hooks/useCompletion"
+import { fetchBranchingSearch } from "@/lib/sync/branching-search-read"
+import { fetchBranchingSearchPassages } from "@/lib/sync/branching-search-passages-read"
+import type { ScoredPair } from "@/lib/search/dual-index"
+import type { PassageHit } from "@/hooks/useSearchIndex"
 import { useHealth } from "@/hooks/useHealth"
 import { useRules } from "@/hooks/useRules"
 import { updateProject, patchProject, getProject } from "@/lib/store/project-index"
-import { exportFile, downloadBlob } from "@/lib/export/export-service"
 import { MAX_BATCH_COMPLETIONS } from "@/lib/workspace-actions/registry"
-import type { FileReference, CellHealthBreakdown } from "@/lib/parsers/types"
+import type { FileReference } from "@/lib/parsers/types"
 import type { CellData } from "@/hooks/useCells"
 import { useWorkspaceSearch } from "@/hooks/useWorkspaceSearch"
-import { useBacktranslation } from "@/hooks/useBacktranslation"
-import { useComments } from "@/hooks/useComments"
 import { ParallelPassagesPanel, type ParallelPanelMode, type ParallelPanelScope } from "./ParallelPassagesPanel"
 import type { EditorTableHandle } from "./EditorTable"
-import type { WorkspaceSearchResult } from "@/lib/search/workspace-index"
+import type { WorkspaceSearchResult } from "@/hooks/useWorkspaceSearch"
 import { StatusBar } from "./StatusBar"
 import { SyncStatusIndicator } from "./SyncStatusIndicator"
 import { OutboxSyncIndicator } from "./OutboxSyncIndicator"
-import { ImportDialog } from "./ImportDialog"
 import { EditorTable } from "./EditorTable"
 import { AudioRecordingModal } from "./AudioRecorder/AudioRecordingModal"
 import { RuleDrawer } from "./RuleDrawer"
@@ -35,19 +35,12 @@ import { SharePanel } from "./SharePanel"
 import { VideoPlayer, type VideoPlayerHandle } from "./VideoPlayer"
 import { ResizableVideoPanel } from "./ResizableVideoPanel"
 import { VideoAttachmentDialog } from "./VideoAttachmentDialog"
-import { useVideoAttachment } from "@/hooks/useVideoAttachment"
 import { parseTimestampRange, extractCuesFromCells } from "@/lib/video/vtt-generator"
-import { useFileSync, peerColor as peerColorLocal } from "@/hooks/useFileSync"
-import { useProjectTombstoneObserver } from "@/hooks/useProjectTombstoneObserver"
+import { useFileSync } from "@/hooks/useFileSync"
 import { useFileMeta } from "@/hooks/useFileMeta"
 import { useCellLabelsPreference } from "@/hooks/useCellLabelsPreference"
-import { displayNameFor } from "@/lib/sync/anonymous-name"
 import { useProjectPermissions } from "@/hooks/useProjectPermissions"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
-import {
-  countSynthTargets, countTranscribeTargets,
-  synthAllInFile, transcribeAllInFile,
-} from "@/lib/audio/bulk-audio"
 import { eagerlyPrefetchPeaks } from "@/lib/audio/eager-peaks"
 import { useOutboxFlusher } from "@/hooks/useOutboxFlusher"
 import { usePendingOutboxRecords } from "@/hooks/usePendingOutboxRecords"
@@ -55,6 +48,8 @@ import {
   setCqrsOutboxBridge,
   buildFileScopedTokenFetcher,
 } from "@/lib/sync/cqrs-bridge"
+import { emitTargetCellCommit } from "@/lib/sync/events-emit"
+import { flushOutboxBatch } from "@/lib/sync/outbox-flush"
 import { useCellsAuditStatsWithOverlay } from "@/hooks/useCellsAuditStatsWithOverlay"
 import { Film, Scale, MessagesSquare, Camera, Share2, Settings as SettingsIcon, Lock, ClipboardList, Brain, Trash2, Undo2, Search as SearchIcon, Sparkles } from "lucide-react"
 import { restoreProject } from "@/lib/store/project-index"
@@ -84,9 +79,7 @@ import {
 } from "@/components/ui/dialog"
 import type { ProjectRecord } from "@/lib/parsers/types"
 import { readValidationCount } from "@/lib/progress/read-validation-count"
-import { resolveHealthConfig } from "@/lib/health/config-resolver"
 import { useSetupChecklist } from "@/hooks/useSetupChecklist"
-import { useProjectSettingsSync } from "@/hooks/useProjectSettingsSync"
 import { SetupChecklistDrawer } from "./onboarding/SetupChecklistDrawer"
 import { SystemPromptNudge } from "./onboarding/SystemPromptNudge"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
@@ -94,24 +87,83 @@ import { useFeatureFlag } from "@/hooks/useFeatureFlag"
 import { NextUnfinishedButton } from "./NextUnfinishedButton"
 import { useNextUnfinished } from "@/hooks/useNextUnfinished"
 import { AiSetupDialog } from "./AiSetupDialog"
+import {
+  buildExportHandoffUrl,
+  buildProjectSettingsHandoffUrl,
+  workspaceReturnPath,
+} from "@/lib/ad11/navigation"
+
+// Import runs inline in the workspace (upload + eBible corpus tabs). The
+// AD-11 plan carves import into a standalone apps/import Worker, but that
+// app is still a placeholder shell — routing users there is a dead end.
+// The import pipeline (parsers + outbox + events-emit) is workspace-
+// internal and not yet extracted into a shared package the standalone app
+// could consume, so the working ImportDialog stays hosted here. Lazy-loaded
+// because the eBible parser bundles a ~2MB vref table.
+const ImportDialog = lazy(() =>
+  import("./ImportDialog").then((mod) => ({ default: mod.ImportDialog })),
+)
 
 export function ProjectWorkspace() {
   const { id: projectId, fileId: routeFileId } = useParams<{ id: string; fileId?: string }>()
   const navigate = useNavigate()
-  const { project, status, refresh } = useProject(projectId!)
+  const goToProjects = useCallback(() => {
+    window.location.assign("/projects/")
+  }, [])
+  const { project: loadedProject, status, refresh } = useProject(projectId!)
 
-  const activeFileId = routeFileId ?? null
+  const [selectedFileId, setSelectedFileId] = useState<string | null>(routeFileId ?? null)
+  const activeFileId = routeFileId ?? selectedFileId
 
   const setActiveFileId = useCallback((fileId: string | null) => {
     if (!projectId) return
+    setSelectedFileId(fileId)
     if (fileId) {
       navigate(`/project/${projectId}/file/${fileId}`)
     } else {
       navigate(`/project/${projectId}`)
     }
   }, [projectId, navigate])
-  const projectFiles = project?.files ?? []
+  useEffect(() => {
+    if (routeFileId) setSelectedFileId(routeFileId)
+  }, [routeFileId])
+  const [optimisticFiles, setOptimisticFiles] = useState<FileReference[]>([])
+  const optimisticFileIdsRef = useRef<Set<string>>(new Set())
+  useEffect(() => {
+    optimisticFileIdsRef.current = new Set()
+    setOptimisticFiles([])
+  }, [projectId])
+
+  const projectFiles = useMemo(() => {
+    const serverFiles = loadedProject?.files ?? []
+    if (optimisticFiles.length === 0) return serverFiles
+
+    const seen = new Set(serverFiles.map((file) => file.id))
+    const pending = optimisticFiles.filter((file) => !seen.has(file.id))
+    return pending.length > 0 ? [...serverFiles, ...pending] : serverFiles
+  }, [loadedProject?.files, optimisticFiles])
+
+  const project = useMemo<ProjectRecord | null>(() => {
+    if (!loadedProject) return null
+    if (projectFiles === loadedProject.files) return loadedProject
+    return { ...loadedProject, files: projectFiles }
+  }, [loadedProject, projectFiles])
+
+  useEffect(() => {
+    if (!loadedProject || optimisticFiles.length === 0) return
+    const serverIds = new Set(loadedProject.files.map((file) => file.id))
+    setOptimisticFiles((current) => {
+      const next = current.filter((file) => !serverIds.has(file.id))
+      optimisticFileIdsRef.current = new Set(next.map((file) => file.id))
+      return next
+    })
+  }, [loadedProject, optimisticFiles.length])
+
   const fileIds = useMemo(() => projectFiles.map((f) => f.id), [projectFiles])
+  useEffect(() => {
+    if (!selectedFileId || fileIds.length === 0 || fileIds.includes(selectedFileId)) return
+    setSelectedFileId(null)
+  }, [selectedFileId, fileIds])
   const workspaceTabs = useWorkspaceTabs({
     projectId: projectId ?? "",
     fileIds,
@@ -119,19 +171,81 @@ export function ProjectWorkspace() {
     setActiveFileId,
   })
 
-  // After a detour through a Project subpage (Rules/Comments/Snapshots/...),
-  // the URL drops back to `/project/:id` with no fileId. Restore the
-  // previously open file so #38's "closes currently selected file" symptom
-  // doesn't happen. Reads localStorage directly because it only needs to fire
-  // on the no-fileId render; making it stateful would require deriving state
-  // from props inside an effect.
+  // Single source of truth for the fileId in the URL. This used to be two
+  // separate effects — one that *restored* a file when the URL had none
+  // (after a detour through Rules/Comments/Snapshots), and one further down
+  // that *stripped* a fileId the project didn't recognize. They fought:
+  // restore → strip → restore → …, each hop a `navigate({replace:true})` =
+  // a `history.replaceState`. The browser caps that at 100/10s and throws
+  // SecurityError, and the re-render storm also tore the project WebSocket
+  // down before it could connect. Merging them — and only navigating when
+  // the destination differs from the current path — makes the redirect
+  // converge in one hop. Reads localStorage directly because it only needs
+  // to fire on the no-fileId render.
+  const location = useLocation()
+  // `navigate(replace)` calls `history.replaceState` synchronously, but the
+  // matching `useLocation()` / `useParams()` update only lands on a later
+  // commit. During an import the WS reconnect + revalidate + optimistic-file
+  // reconciliation drive a burst of renders, and this effect re-runs on every
+  // one (its `project` dep is a fresh object each render). Guarding solely on
+  // `location.pathname` isn't enough: across the burst it stays stale, so the
+  // same `navigate(replace)` fires dozens of times before the URL settles —
+  // tripping the browser's 100-replaceState/10s cap (SecurityError → blank
+  // page). `pendingNavRef` remembers the target we last issued and suppresses
+  // a repeat until the router actually commits it.
+  const pendingNavRef = useRef<string | null>(null)
+  const redirectTo = useCallback(
+    (target: string) => {
+      if (location.pathname === target) {
+        pendingNavRef.current = null
+        return false
+      }
+      if (pendingNavRef.current === target) return false
+      pendingNavRef.current = target
+      navigate(target, { replace: true })
+      return true
+    },
+    [location.pathname, navigate],
+  )
   useEffect(() => {
-    if (routeFileId || !projectId) return
-    const last = readLastActiveFileId(projectId)
-    if (last && fileIds.includes(last)) {
-      navigate(`/project/${projectId}/file/${last}`, { replace: true })
+    if (!project || !projectId) return
+
+    // A file is already in the URL: leave it unless the project genuinely
+    // doesn't have it (and it isn't a still-pending optimistic import).
+    if (routeFileId) {
+      const known =
+        fileIds.includes(routeFileId) ||
+        optimisticFileIdsRef.current.has(routeFileId)
+      if (known) {
+        pendingNavRef.current = null
+        return
+      }
+      redirectTo(`/project/${projectId}`)
+      return
     }
-  }, [routeFileId, fileIds, navigate, projectId])
+
+    // No file in the URL: restore the last/only file if there is a valid one.
+    const last = readLastActiveFileId(projectId)
+    const firstOpenTab = workspaceTabs.tabs[0]?.fileId ?? null
+    const onlyFile = projectFiles.length === 1 ? projectFiles[0]?.id : null
+    const nextFileId =
+      last && fileIds.includes(last)
+        ? last
+        : firstOpenTab && fileIds.includes(firstOpenTab)
+          ? firstOpenTab
+          : onlyFile
+    if (!nextFileId) return
+    const target = `/project/${projectId}/file/${nextFileId}`
+    if (redirectTo(target)) setSelectedFileId(nextFileId)
+  }, [
+    project,
+    projectId,
+    routeFileId,
+    fileIds,
+    projectFiles,
+    workspaceTabs.tabs,
+    redirectTo,
+  ])
   const [importOpen, setImportOpen] = useState(false)
   const [drawerRuleId, setDrawerRuleId] = useState<string | null>(null)
   const [searchParams] = useSearchParams()
@@ -149,7 +263,11 @@ export function ProjectWorkspace() {
   const [recordingCellId, setRecordingCellId] = useState<string | null>(null)
   const editorRef = useRef<EditorTableHandle>(null)
   const speakBarEnabled = useSpeakBarEnabled(project?.id)
-  const { doc, loading: docLoading } = useFileDoc(activeFileId)
+  // Phase 2c-gamma: the per-file Y.Doc is gone. The editor hydrates from the
+  // cells projection and writes via the outbox. `doc`/`docLoading` are
+  // retained as no-op constants so downstream cellAreaState + props don't
+  // need a wider refactor.
+  const doc: null = null
   // Prefer the Frontier session username (authenticated identity) over the
   // project-level username setting. Validation entries and edit history
   // should attribute to the actual signed-in user.
@@ -209,8 +327,12 @@ export function ProjectWorkspace() {
     return () => setCqrsOutboxBridge(null)
   }, [project?.id, activeFileId, currentUsername])
 
-  const outboxFlushEnabled = Boolean(project?.id && activeFileId && frontierSession?.jwt)
-  const { pendingCount: outboxPending, failureStreak: outboxFailures } = useOutboxFlusher({
+  const outboxFlushEnabled = Boolean(project?.id && frontierSession?.jwt)
+  const {
+    pendingCount: outboxPending,
+    failureStreak: outboxFailures,
+    refreshPending: refreshOutboxPending,
+  } = useOutboxFlusher({
     enabled: outboxFlushEnabled,
     getTokenForFile,
   })
@@ -223,7 +345,10 @@ export function ProjectWorkspace() {
   // on top — pending commits/validates show up immediately, before the next
   // 30s refetch. Source of truth for project-wide validation views.
   const auditStatsEnabled = Boolean(project?.id && activeFileId && frontierSession?.jwt)
-  const { byCellId: auditStatsByCellId } = useCellsAuditStatsWithOverlay({
+  const {
+    byCellId: auditStatsByCellId,
+    revalidate: revalidateAuditStats,
+  } = useCellsAuditStatsWithOverlay({
     enabled: auditStatsEnabled,
     fileId: activeFileId,
     getTokenForFile,
@@ -243,6 +368,17 @@ export function ProjectWorkspace() {
     getToken: getTokenForFile,
     enabled: Boolean(project?.id && activeFileId && frontierSession?.jwt),
   })
+  // Phase 5 / AD-9 — Phase 3a-final wiring. Fetch the set of cell ids
+  // whose source has advanced since the translator's last commit, so the
+  // editor table can decorate stale rows with the AlertTriangle badge.
+  // One fetch per (projectId, fileId) — flattened to a boolean per row
+  // inside EditorTable.
+  const { staleCellIds } = useStaleSourceCells({
+    projectId: project?.id ?? null,
+    fileId: activeFileId,
+    getToken: getTokenForFile,
+    enabled: Boolean(project?.id && activeFileId && frontierSession?.jwt),
+  })
   const { hasAny: hasUnfinished, findNext: findNextUnfinished } = useNextUnfinished(cells, validationCount)
   const handleJumpNextUnfinished = useCallback(() => {
     const currentIndex = editorRef.current?.getCurrentIndex?.() ?? 0
@@ -258,8 +394,13 @@ export function ProjectWorkspace() {
   const [videoDialogOpen, setVideoDialogOpen] = useState(false)
   const [currentVideoTime, setCurrentVideoTime] = useState(0)
   const videoPlayerRef = useRef<VideoPlayerHandle>(null)
-  const { attachment: videoAttachment, resolvedSrc: videoSrc, blobUnavailable, save: saveVideo } =
-    useVideoAttachment(isSubtitleFile ? doc : null)
+  // Phase 2c-gamma: video attachments lived on Y.Doc meta. Disabled here so
+  // the editor still renders for subtitle files; the attach/play workflow
+  // comes back via the event grammar in v1.x.
+  const videoAttachment: { videoStartOffset?: number; videoUrl?: string } = {}
+  const videoSrc: string | null = null
+  const blobUnavailable = false
+  const saveVideo: (..._: unknown[]) => void = () => {}
 
   // Live cues for the VideoPlayer's overlay (bypasses iframe CC). We drive
   // rendering from cell data directly so edits appear immediately without a
@@ -318,8 +459,15 @@ export function ProjectWorkspace() {
   const cellsRef = useRef(cells)
   useEffect(() => { cellsRef.current = cells }, [cells])
 
-  const { rules, penalties } = useRules(project ?? null, refresh)
-  const { addThread, addMessage, resolveThread, reopenThread } = useComments(doc, currentUsername)
+  // Merge: AD-14 (this branch) retired the composite-health `penalties` path,
+  // so destructure only `rules`. Comments handlers take main's Phase 2c-gamma
+  // rip — threads/messages lived on Y.Doc maps and the v1.x event grammar isn't
+  // in this build, so these are no-ops and the drawer renders empty.
+  const { rules } = useRules(project ?? null, refresh)
+  const addThread: (..._: unknown[]) => void = () => {}
+  const addMessage: (..._: unknown[]) => void = () => {}
+  const resolveThread: (..._: unknown[]) => void = () => {}
+  const reopenThread: (..._: unknown[]) => void = () => {}
   const commentsCell = commentsCellId ? cells.find((c) => c.id === commentsCellId) : null
   const historyCell = historyCellId ? cells.find((c) => c.id === historyCellId) : null
 
@@ -340,82 +488,134 @@ export function ProjectWorkspace() {
   }, [fileCells])
 
   const { search, searchPassages } = useSearchIndex(project?.files || [], allProjectCells)
+
+  // AD-13 branching-search adapters — single-cell completion's few-shot
+  // retrieval (`branchingSearch`) and the batch completion's passage
+  // retrieval (`branchingSearchPassages`). Replace the in-memory dual-
+  // index calls with server fetches so the AI copilot uses the same
+  // retrieval primitive every other AD-13 consumer will (AD-14 decay
+  // endorsement included).
+  //
+  // Both fall back to the in-memory index if the server fetch fails for
+  // any reason (offline, JWT issue, etc.) — losing retrieval makes the
+  // copilot zero-shot, which is a worse generation but still better than
+  // failing the whole completion.
+  const branchingSearch = useCallback(
+    async (
+      query: string,
+      limit?: number,
+      excludeId?: string,
+    ): Promise<ScoredPair[]> => {
+      const pid = project?.id
+      const fid = activeFileId
+      if (!pid || !fid) return search(query, limit, excludeId)
+      const jwt = await getTokenForFile(fid)
+      if (!jwt) return search(query, limit, excludeId)
+      try {
+        const res = await fetchBranchingSearch({
+          projectId: pid,
+          query,
+          jwt,
+          topK: limit,
+          excludeCellId: excludeId,
+        })
+        return res.results.map((r) => ({
+          cellId: r.cellId,
+          fileId: "",
+          source: r.sourceText,
+          target: r.targetText,
+          score: 1,
+          matchedTokens: res.provenance[r.cellId] ?? [],
+          coverageWeight: r.queryCoverage,
+        }))
+      } catch (err) {
+        console.warn("[ProjectWorkspace] branching-search fetch failed, falling back to local index:", err)
+        return search(query, limit, excludeId)
+      }
+    },
+    [project?.id, activeFileId, getTokenForFile, search],
+  )
+
+  const branchingSearchPassages = useCallback(
+    async (
+      query: string,
+      hits?: number,
+      radius?: number,
+    ): Promise<PassageHit[]> => {
+      const pid = project?.id
+      const fid = activeFileId
+      if (!pid || !fid) return Promise.resolve(searchPassages(query, hits, radius))
+      const jwt = await getTokenForFile(fid)
+      if (!jwt) return Promise.resolve(searchPassages(query, hits, radius))
+      try {
+        const res = await fetchBranchingSearchPassages({
+          projectId: pid,
+          query,
+          jwt,
+          topK: hits,
+          radius,
+        })
+        // Map server `Passage` → existing `PassageHit` shape. Drops
+        // `hitCellId` (derivable from cells.find(c => c.hit)) and
+        // `anchorCellId` (unused by the prompt builder).
+        return res.passages.map((p) => ({
+          fileId: p.fileId,
+          cells: p.cells.map((c) => ({
+            cellId: c.cellId,
+            source: c.sourceText,
+            target: c.targetText,
+            hit: c.hit,
+          })),
+        }))
+      } catch (err) {
+        console.warn("[ProjectWorkspace] branching-search-passages fetch failed, falling back to local index:", err)
+        return searchPassages(query, hits, radius)
+      }
+    },
+    [project?.id, activeFileId, getTokenForFile, searchPassages],
+  )
+
+  const commitCompletedCell = useCallback(async (cell: CellData, text: string, author: string) => {
+    if (!project?.id) return
+    await emitTargetCellCommit({
+      projectId: project.id,
+      fileId: cell.fileId,
+      cellId: cell.id,
+      parentId: cell.targetEventId ?? cell.sourceEventId ?? null,
+      sourceEventId: cell.sourceEventId ?? null,
+      value: text,
+      author,
+    })
+    await flushOutboxBatch({ getTokenForFile })
+    await refreshOutboxPending()
+    revalidateAuditStats()
+    revalidateCells()
+  }, [project?.id, getTokenForFile, refreshOutboxPending, revalidateAuditStats, revalidateCells])
   const { completeSingle, completeBatch, isConfigured, isAvailable: isCompletionAvailable, completing, examples, errors } = useCompletion(
-    doc, project?.completionSettings, project?.sourceLanguage || "", project?.targetLanguage || "", search, searchPassages, frontierSession
+    project?.completionSettings, project?.sourceLanguage || "", project?.targetLanguage || "", branchingSearch, branchingSearchPassages, frontierSession, commitCompletedCell
   )
 
-  const findBacktranslationExamples = useCallback((target: CellData) => {
-    return cells
-      .filter((c) => c.id !== target.id && c.backtranslation && c.backtranslationForText === c.translated)
-      .map((c) => ({ target: c.translated, backtranslation: c.backtranslation! }))
-      .slice(0, 3)
-  }, [cells])
+  // Phase 2c-gamma: backtranslation wrote through Y.Doc; the writeback hookup
+  // is deferred to v1.x. The button still renders disabled.
+  const runBacktranslation: (..._: unknown[]) => Promise<void> = async () => {}
+  const backtranslating: Set<string> = new Set()
+  const backtranslationErrors: Map<string, string> = new Map()
+  const isBacktranslationConfigured = false
 
-  const {
-    generate: runBacktranslation,
-    generating: backtranslating,
-    errors: backtranslationErrors,
-    isConfigured: isBacktranslationConfigured,
-  } = useBacktranslation(
-    doc,
-    project?.completionSettings,
-    project?.sourceLanguage || "",
-    project?.targetLanguage || "",
-    findBacktranslationExamples,
-    frontierSession,
-  )
-
-  const compositeFlag = useFeatureFlag("composite-health", project ?? null)
-  const healthConfig = useMemo(() => resolveHealthConfig(project ?? null), [project])
   const requiredValidations = project ? readValidationCount(project) : 1
 
+  // AD-14: health derives from decay (endorsement_count). The legacy
+  // four-sub-score "composite-health" path is retired.
   const health = useHealth(
     fileCells,
-    project?.completionSettings?.llmHealthPenalty ?? 0.1,
     rules,
-    penalties,
-    { composite: compositeFlag, compositeConfig: healthConfig, requiredValidations, auditStats: auditStatsByCellId },
+    { decaySettings: project?.decaySettings, requiredValidations },
   )
   const { healthMap, fileHealth: _fileHealth, projectHealth, fileProgress, infractions, openCommentCount, cellOpenCommentCount } = health
 
-  const projectBreakdown: CellHealthBreakdown | undefined = useMemo(() => {
-    if (!compositeFlag) return undefined
-    const bs = Array.from(health.breakdownMap.values())
-    if (bs.length === 0) return undefined
-    const avg = (f: (b: CellHealthBreakdown) => number) =>
-      Math.round(bs.reduce((a, b) => a + f(b), 0) / bs.length)
-    return {
-      cellId: "__project__",
-      score: health.projectHealth,
-      validationGap: avg((b) => b.validationGap),
-      ancestryPenalty: avg((b) => b.ancestryPenalty),
-      neighborhoodPenalty: avg((b) => b.neighborhoodPenalty),
-      rulePenalty: avg((b) => b.rulePenalty),
-      signals: {
-        validatorCount: 0,
-        requiredValidations: requiredValidations,
-        ancestryExamples: bs
-          .flatMap((b) => b.signals.ancestryExamples)
-          .sort((a, b) => b.health - a.health)
-          .slice(0, 5),
-        neighborhoodSourceCellIds: [],
-        neighborhoodTargetCellIds: [],
-        idJaccard: 0,
-        tfidfTokenOverlap: 0,
-        infractions: [],
-      },
-    }
-  }, [compositeFlag, health, requiredValidations])
-
-  const biggestDrags = useMemo(() => {
-    if (!compositeFlag) return undefined
-    const entries: Array<{ cellId: string; score: number }> = []
-    for (const b of health.breakdownMap.values()) {
-      entries.push({ cellId: b.cellId, score: b.score })
-    }
-    entries.sort((a, b) => a.score - b.score)
-    return entries.slice(0, 3)
-  }, [compositeFlag, health.breakdownMap])
+  // AD-14: the four-sub-score breakdown popover is retired. The project ring
+  // shows decay-derived health; the "biggest drags" popover redesign (cells
+  // sorted by descending decay) is a deferred follow-up.
 
   const jumpToCellId = useCallback((cellId: string) => {
     const idx = cells.findIndex((c) => c.id === cellId)
@@ -461,39 +661,23 @@ export function ProjectWorkspace() {
     return () => document.removeEventListener("keydown", handler)
   }, [activeFileId, hasUnfinished, handleJumpNextUnfinished])
 
-  useEffect(() => {
-    if (!project || !routeFileId) return
-    const exists = project.files.some((f) => f.id === routeFileId)
-    if (!exists) {
-      navigate(`/project/${projectId}`, { replace: true })
-    }
-  }, [project, routeFileId, projectId, navigate])
-
-  // Always-on file sync via the codex sync-worker (y-partyserver DO + R2).
-  // This keeps every open file in lockstep across devices for the same user,
-  // not just collaborators — and is also the share-link path now that
-  // joiners are added to project_members on /join/:token redemption.
-  const { peers: fileLevelPeers, provider: syncProvider, status: fileSyncStatus } = useFileSync({
+  // Legacy sync status shim. AD-1 live coordination uses the project
+  // WebSocket below; this hook only feeds the existing status indicator.
+  const { peers: fileLevelPeers, status: fileSyncStatus } = useFileSync({
     doc,
     projectId: project?.id ?? null,
     fileId: activeFileId || null,
     username: currentUsername,
-    enabled: Boolean(project && activeFileId && doc),
+    enabled: Boolean(project && activeFileId),
     session: frontierSession,
     projectName: project?.name ?? null,
     gitlabProjectId:
       project?.origin?.kind === "git" ? project.origin.gitlabProjectId : null,
   })
 
-  // When the owner archives the project, the sync-worker DO flips
-  // meta.projectDeletedAt; this observer reconciles IDB so the
-  // TrashedProjectScreen renders on the next refresh.
-  useProjectTombstoneObserver(doc, project?.id ?? null, refresh)
-
-  // Cross-collaborator sync for AI provider/instructions: piggybacks on the
-  // active file's Y.Doc meta so settings flow between clients without a
-  // dedicated project-meta room.
-  useProjectSettingsSync(doc, project ?? null, refresh)
+  // Phase 2c-gamma: cross-collaborator settings sync was piggybacked on the
+  // active file's Y.Doc meta; that broadcast channel is gone. Settings still
+  // persist locally and via the project record fetch.
 
   // Phase 2c-β: per-project WS reconciler. Subscribes to the per-project
   // Durable Object for presence + focus locks + `event.applied` broadcasts.
@@ -502,6 +686,11 @@ export function ProjectWorkspace() {
   const [cellsWithRemoteChange, setCellsWithRemoteChange] = useState<Set<string>>(() => new Set())
   const focusedCellIdRef = useRef<string | null>(null)
   const reconcilerRef = useRef<import("@/lib/sync/ws-reconciler").WsReconciler | null>(null)
+  // Read the current file list inside the WS connect path without making it a
+  // reconnect trigger — otherwise every file-list change (e.g. each batch of a
+  // large import landing) tears the socket down and recreates it.
+  const projectFilesRef = useRef(projectFiles)
+  projectFilesRef.current = projectFiles
 
   useEffect(() => {
     if (!project?.id || !frontierSession?.jwt) return
@@ -515,10 +704,17 @@ export function ProjectWorkspace() {
       reconciler = createWsReconciler(
         {
           projectId: pid,
+          userId: currentUsername,
           baseUrl: syncWorkerHttpOrigin(),
           getToken: async () => {
-            const aFile = projectFiles[0]?.id ?? ""
-            if (!aFile) return null
+            // The per-project DO authenticates with verifyTokenForProject,
+            // which checks only projectId and ignores the token's fileId. The
+            // workspace's only mint path is file-scoped, so for a fileless
+            // project (nothing imported yet) we'd otherwise return null and the
+            // WS would never authenticate — breaking presence/focus-locks until
+            // the first file lands. Mint against a sentinel fileId instead; the
+            // DO discards it. (identity's /sync-token requires fileId.min(1).)
+            const aFile = projectFilesRef.current[0]?.id ?? "__project__"
             return getTokenForFile(aFile)
           },
         },
@@ -527,6 +723,13 @@ export function ProjectWorkspace() {
             if (msg.t === "event.applied") {
               if (!msg.cell || msg.project !== pid) return
               revalidateCells()
+              // Don't pop the "remote changed" banner for our own writes —
+              // the editor just committed; bouncing the same event back via
+              // WS is expected. `by` is populated by post-2c-γ sync workers;
+              // older builds omit it and fall through to the legacy
+              // "always banner on focused cell" path so the user can still
+              // tell something happened.
+              if (msg.by && msg.by === currentUsername) return
               if (focusedCellIdRef.current === msg.cell) {
                 setCellsWithRemoteChange((cur) => {
                   if (cur.has(msg.cell!)) return cur
@@ -558,6 +761,21 @@ export function ProjectWorkspace() {
                 next.delete(msg.cellId)
                 return next
               })
+            } else if (msg.t === "project.archived") {
+              if (msg.project !== pid) return
+              void patchProject(pid, (p) => {
+                if (msg.archivedAt) {
+                  return {
+                    ...p,
+                    deletedAt: msg.archivedAt,
+                    deletedBy: msg.deletedBy ?? p.deletedBy,
+                  }
+                }
+                const next = { ...p }
+                delete next.deletedAt
+                delete next.deletedBy
+                return next
+              }).then(() => refresh())
             }
           },
         },
@@ -569,7 +787,7 @@ export function ProjectWorkspace() {
       reconcilerRef.current = null
       reconciler?.close()
     }
-  }, [project?.id, frontierSession?.jwt, getTokenForFile, revalidateCells, projectFiles, currentUsername])
+  }, [project?.id, frontierSession?.jwt, getTokenForFile, revalidateCells, currentUsername, refresh])
 
   const handleClaimCell = useCallback((cellId: string) => {
     focusedCellIdRef.current = cellId
@@ -594,12 +812,10 @@ export function ProjectWorkspace() {
   const cellAreaState = useMemo(
     () => deriveCellAreaState({
       activeFileId,
-      docLoading,
-      hasDoc: Boolean(doc),
       cellCount: cells.length,
       syncStatus: fileSyncStatus,
     }),
-    [activeFileId, docLoading, doc, cells.length, fileSyncStatus]
+    [activeFileId, cells.length, fileSyncStatus]
   )
 
   // Presence visible in the status bar is the file-level set the sync-worker
@@ -609,15 +825,6 @@ export function ProjectWorkspace() {
   // sync-worker doesn't fan out cross-file awareness yet — file-level only
   // for now.
   const peers = fileLevelPeers
-
-  const collabUser = useMemo(() => {
-    if (!syncProvider) return undefined
-    const clientId = String(syncProvider.awareness.clientID)
-    return {
-      name: displayNameFor(currentUsername, clientId),
-      color: peerColorLocal(clientId),
-    }
-  }, [syncProvider, currentUsername])
 
   async function handleSearchSelect(result: WorkspaceSearchResult, query: string) {
     const flash = () => {
@@ -706,7 +913,7 @@ export function ProjectWorkspace() {
     await patchProject(project.id, (p) => deleteFile(p, fileId))
     refresh()
     if (activeFileId === fileId) setActiveFileId(null)
-    // Tell frontier-server to drop the projection rows for this file too.
+    // Tell identity to drop the projection rows for this file too.
     // Best-effort: a failure here doesn't roll back the local delete — the
     // D1 row just becomes an orphan until a future sweep.
     void deleteFileProjection({
@@ -774,7 +981,13 @@ export function ProjectWorkspace() {
       { id: "share", label: "Share", icon: Share2,
         onClick: () => setShareOpen(true) },
       { id: "settings", label: "Settings", icon: SettingsIcon,
-        onClick: () => navigate(`/project/${projectId}/settings`) },
+        onClick: () => {
+          if (!projectId) return
+          window.location.assign(buildProjectSettingsHandoffUrl({
+            projectId,
+            returnTo: workspaceReturnPath(projectId, activeFileId),
+          }))
+        } },
     ]
     if (livingMemoryEnabled) {
       // Insert before Share so it sits with Rules/Comments/Snapshots.
@@ -787,12 +1000,12 @@ export function ProjectWorkspace() {
       })
     }
     return items
-  }, [projectId, navigate, openCommentCount, livingMemoryEnabled])
+  }, [projectId, activeFileId, navigate, openCommentCount, livingMemoryEnabled])
 
-  const audioCounts = useMemo(() => ({
-    untranscribed: countTranscribeTargets(cells),
-    unsynthesized: countSynthTargets(cells, false),
-  }), [cells])
+  // Phase 2c-gamma: countTranscribeTargets/countSynthTargets lived in bulk-audio
+  // (Y.Doc-coupled). They're zeroed until the audio-attachment event grammar
+  // lands; the "Transcribe all" / "Synth all" menu items can still render.
+  const audioCounts = useMemo(() => ({ untranscribed: 0, unsynthesized: 0 }), [])
 
   // Eager media strategy: prefetch every recording's waveform peaks into the
   // OPFS cache once the file is open, so even cells the user hasn't scrolled
@@ -816,58 +1029,67 @@ export function ProjectWorkspace() {
     audioCounts,
   }), [project, activeFileId, fileProgress, audioCounts])
 
-  async function handleExport() {
-    if (!activeFileId) return
-    try {
-      const { blob, filename } = await exportFile(activeFileId)
-      downloadBlob(blob, filename)
-    } catch (err) {
-      alert(`Export failed: ${err instanceof Error ? err.message : "Unknown error"}`)
-    }
-  }
+  const openImportFlow = useCallback(() => {
+    if (!project) return
+    setImportOpen(true)
+  }, [project])
+
+  const openExportFlow = useCallback(() => {
+    if (!project) return
+    window.location.assign(buildExportHandoffUrl({
+      projectId: project.id,
+      fileId: activeFileId,
+      returnTo: workspaceReturnPath(project.id, activeFileId),
+    }))
+  }, [project, activeFileId])
 
   const actionArgs = useMemo(() => ({
-    openImport: () => setImportOpen(true),
+    openImport: openImportFlow,
     runCompletions: () => {
       if (!activeFileId) return
       const untranslated = cells.filter((c) => !c.translated.trim())
       if (untranslated.length === 0) return
       completeBatch(untranslated.slice(0, MAX_BATCH_COMPLETIONS))
     },
-    runExport: () => handleExport(),
+    runExport: openExportFlow,
     runBatchValidate: () => {
       console.info("batch-validate triggered (placeholder runner)")
     },
     runAgentInput: () => {
       console.info("agent-input triggered (placeholder runner)")
     },
-    runImportWip: () => setImportOpen(true),
+    runImportWip: openImportFlow,
+    // Phase 2c-gamma: bulk transcribe/synth wrote attachments to Y.Doc; the
+    // writeback grammar lands in v1.x. Stubbed so the workspace actions menu
+    // still renders without crashing.
     runTranscribeAll: () => {
-      if (!doc || !project || !frontierSession) return
-      void transcribeAllInFile({ doc, cells, project, session: frontierSession })
+      console.warn("[ProjectWorkspace] transcribe-all disabled in Phase 2c-gamma")
     },
     runSynthAll: () => {
-      if (!doc || !project || !frontierSession) return
-      void synthAllInFile({
-        doc, cells, project, session: frontierSession,
-        username: project.username || "anonymous",
-      })
+      console.warn("[ProjectWorkspace] synth-all disabled in Phase 2c-gamma")
     },
     navigate,
-  }), [activeFileId, completeBatch, cells, doc, project, frontierSession, navigate])
+  }), [activeFileId, completeBatch, cells, project, frontierSession, navigate, openImportFlow, openExportFlow])
+
+  const handleCellCommitted = useCallback(async () => {
+    await flushOutboxBatch({ getTokenForFile })
+    await refreshOutboxPending()
+    revalidateAuditStats()
+    revalidateCells()
+  }, [getTokenForFile, refreshOutboxPending, revalidateAuditStats, revalidateCells])
 
   if (status === "loading") return <div className="p-8 text-muted-foreground">Loading...</div>
   if (status === "no-session") {
     return (
       <div className="p-8 text-muted-foreground">
-        This project isn't on this device. <button className="underline" onClick={() => navigate("/")}>Sign in</button> to open it from the cloud.
+        This project isn't on this device. <button className="underline" onClick={goToProjects}>Sign in</button> to open it from the cloud.
       </div>
     )
   }
   if (status === "not-found" || !project) {
     return (
       <div className="p-8 text-muted-foreground">
-        Project not found, or you don't have access. <button className="underline" onClick={() => navigate("/")}>Back to dashboard</button>.
+        Project not found, or you don't have access. <button className="underline" onClick={goToProjects}>Back to dashboard</button>.
       </div>
     )
   }
@@ -876,7 +1098,7 @@ export function ProjectWorkspace() {
     return (
       <TrashedProjectScreen
         project={project}
-        onClose={() => navigate("/")}
+        onClose={goToProjects}
         onRestore={async () => {
           const result = await restoreProject(project, { jwt: frontierSession?.jwt ?? null })
           if (result.remote.kind === "forbidden" || result.remote.kind === "error") {
@@ -890,9 +1112,42 @@ export function ProjectWorkspace() {
 
   async function handleImported(refs: FileReference[]) {
     if (!project) return
-    await patchProject(project.id, (p) => ({ ...p, files: [...p.files, ...refs] }))
-    refresh()
+    const localProject = await getProject(project.id).catch(() => undefined)
+    const baseProject = localProject ?? project
+    const nextFiles = [...baseProject.files]
+    const seenFileIds = new Set(nextFiles.map((file) => file.id))
+    for (const ref of refs) {
+      if (seenFileIds.has(ref.id)) continue
+      nextFiles.push(ref)
+      seenFileIds.add(ref.id)
+    }
+    await updateProject({
+      ...project,
+      ...baseProject,
+      sourceLanguage: project.sourceLanguage || baseProject.sourceLanguage,
+      targetLanguage: project.targetLanguage || baseProject.targetLanguage,
+      syncRole: project.syncRole ?? baseProject.syncRole,
+      files: nextFiles,
+    })
+    optimisticFileIdsRef.current = new Set([
+      ...optimisticFileIdsRef.current,
+      ...refs.map((ref) => ref.id),
+    ])
+    setOptimisticFiles((current) => {
+      const seen = new Set(current.map((file) => file.id))
+      const next = [...current]
+      for (const ref of refs) {
+        if (!seen.has(ref.id)) next.push(ref)
+      }
+      optimisticFileIdsRef.current = new Set(next.map((file) => file.id))
+      return next
+    })
     if (refs.length > 0) workspaceTabs.openFile(refs[0].id)
+    // The bulk importer (lib/import.ts → POST /import) has already persisted
+    // file.create + every source.cell.create server-side before resolving, so
+    // there's nothing to flush — just pull the fresh projection in.
+    refresh()
+    revalidateCells()
   }
 
   // ── Render ────────────────────────────────────────────────────────────────
@@ -919,6 +1174,7 @@ export function ProjectWorkspace() {
               fileProgress={fileProgress}
               suggestionFileIds={suggestionFileIds}
               validationCount={validationCount}
+              getTokenForFile={getTokenForFile}
               onSelectFile={workspaceTabs.openFile}
               onRename={handleRename}
               onMove={(fileId) => {
@@ -935,7 +1191,7 @@ export function ProjectWorkspace() {
         header={
           <WorkspaceHeader
             project={project}
-            onBack={() => navigate("/")}
+            onBack={goToProjects}
             extraMenuItems={
               suggestions.length > 0 && project.suggestionsDismissedAt
                 ? [{
@@ -1024,13 +1280,12 @@ export function ProjectWorkspace() {
               onActivate={workspaceTabs.activateTab}
               onClose={workspaceTabs.closeTab}
             />
-            {project && doc && activeFileId && (
+            {project && activeFileId && (
               <>
                 {speakBarEnabled && (
                   <VoiceBar
                     project={project}
                     cells={cells}
-                    doc={doc}
                     username={currentUsername}
                     session={frontierSession}
                     editorRef={editorRef}
@@ -1042,7 +1297,6 @@ export function ProjectWorkspace() {
                 <SelectionBar
                   project={project}
                   cells={cells}
-                  doc={doc}
                   session={frontierSession}
                   username={currentUsername}
                   completeSingle={completeSingle}
@@ -1084,9 +1338,9 @@ export function ProjectWorkspace() {
             )}
           </>
         }
-        main={cellAreaState.kind === "ready" && doc ? (
+        main={cellAreaState.kind === "ready" ? (
           <EditorTable
-            ref={editorRef} project={project} cells={cells} doc={doc}
+            ref={editorRef} project={project} cells={cells}
             username={currentUsername}
             isCompletionConfigured={isConfigured} isCompletionAvailable={isCompletionAvailable} completing={completing}
             examples={examples} errors={errors}
@@ -1106,7 +1360,6 @@ export function ProjectWorkspace() {
             onOpenHistory={(cellId) => {
               setDrawerRuleId(null); setCommentsCellId(null); setHistoryCellId(cellId)
             }}
-            syncProvider={syncProvider} collabUser={collabUser}
             activeCueIndex={activeCueIndex >= 0 ? activeCueIndex : undefined}
             onSeekToCue={isSubtitleFile ? handleCueSeek : undefined}
             lineNumbersEnabled={fileMeta.lineNumbersEnabled}
@@ -1114,23 +1367,23 @@ export function ProjectWorkspace() {
             sourceTextDirection={fileMeta.sourceTextDirection}
             targetTextDirection={fileMeta.targetTextDirection}
             isAnonymous={!frontierSession}
-            breakdownMap={health.breakdownMap}
             onJumpToCell={jumpToCellId}
             onAiSetupNeeded={() => setAiSetupOpen(true)}
             onOpenRecording={(cellId) => setRecordingCellId(cellId)}
             onProjectChanged={refresh}
-            onCellCommitted={revalidateCells}
+            onCellCommitted={handleCellCommitted}
             cellLockHolders={cellLockHolders}
             cellsWithRemoteChange={cellsWithRemoteChange}
             onClaimCell={handleClaimCell}
             onReleaseCell={handleReleaseCell}
             onAckRemoteChange={handleAckRemoteChange}
+            staleCellIds={staleCellIds}
           />
         ) : (
           <CellAreaPlaceholder
             state={cellAreaState}
             fileName={activeFile?.name}
-            onImportClick={() => setImportOpen(true)}
+            onImportClick={openImportFlow}
           />
         )}
         aside={
@@ -1143,7 +1396,6 @@ export function ProjectWorkspace() {
                 onClose={() => setDrawerRuleId(null)}
                 onNavigateToCell={() => {}}
                 project={project}
-                doc={doc}
                 username={currentUsername}
                 refresh={refresh}
                 cellsByFile={fileCells}
@@ -1188,8 +1440,8 @@ export function ProjectWorkspace() {
             <StatusBar
               cells={cells}
               projectHealth={projectHealth}
-              projectBreakdown={projectBreakdown}
-              biggestDrags={biggestDrags}
+              healthMap={healthMap}
+              staleSourceCount={staleCellIds.size}
               onJumpToCell={jumpToCellId}
             />
           </>
@@ -1217,11 +1469,10 @@ export function ProjectWorkspace() {
           onUpdated={handleProjectUpdated}
         />
       )}
-      {project && doc && (
+      {project && (
         <AudioRecordingModal
           open={recordingCellId !== null}
           project={project}
-          doc={doc}
           cells={cells}
           activeCellId={recordingCellId}
           username={currentUsername}
@@ -1235,11 +1486,14 @@ export function ProjectWorkspace() {
           onClose={() => setRecordingCellId(null)}
         />
       )}
-      <ImportDialog open={importOpen} onOpenChange={setImportOpen}
-        projectId={project.id}
-        username={currentUsername}
-        sourceLanguage={project.sourceLanguage} targetLanguage={project.targetLanguage}
-        onImported={handleImported} />
+      <Suspense fallback={null}>
+        <ImportDialog open={importOpen} onOpenChange={setImportOpen}
+          projectId={project.id}
+          username={currentUsername}
+          getToken={getTokenForFile}
+          sourceLanguage={project.sourceLanguage} targetLanguage={project.targetLanguage}
+          onImported={handleImported} />
+      </Suspense>
       <ParallelPassagesPanel
         open={parallelOpen}
         onOpenChange={setParallelOpen}

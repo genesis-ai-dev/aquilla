@@ -1,6 +1,5 @@
 import React, { useEffect, useRef, useCallback, useMemo, useState, forwardRef, useImperativeHandle } from "react"
 import { useVirtualizer } from "@tanstack/react-virtual"
-import * as Y from "yjs"
 import DOMPurify from "dompurify"
 import {
   Check, CheckCheck, Circle, Trash2, AlertTriangle, AlertCircle, RefreshCw,
@@ -9,16 +8,13 @@ import {
 } from "lucide-react"
 import type { CellData } from "@/hooks/useCells"
 import type { ScoredPair } from "@/lib/search/dual-index"
-import type { TranslationRule, RuleInfraction, ProjectRecord, CellHealthBreakdown } from "@/lib/parsers/types"
+import type { TranslationRule, RuleInfraction, ProjectRecord } from "@/lib/parsers/types"
 import { useProjectPermissions } from "@/hooks/useProjectPermissions"
-import { toggleCellValidation } from "@/hooks/useCellHistory"
-import { getFragmentHtml } from "@/lib/richtext/translated-xml"
 import { emitTargetCellCommit, emitCellValidate, emitCellUnvalidate } from "@/lib/sync/events-emit"
 import { ExamplePanel } from "./ExamplePanel"
 import { HighlightedText, buildHighlightsFromExamples } from "./HighlightedText"
-import { HealthRing } from "./HealthRing"
-import { HealthBreakdown } from "./HealthBreakdown/HealthBreakdown"
-import { BreakdownContent } from "./HealthBreakdown/BreakdownContent"
+import { needsAttention } from "@/lib/health/decay-engine"
+import { StaleSourceIndicator } from "./StaleSourceIndicator"
 import { TranslatedEditor } from "./TranslatedEditor"
 import { CellWaveform } from "./CellWaveform"
 import { CellAudioButton } from "./CellAudioButton"
@@ -28,11 +24,8 @@ import { CellActionRail, RailButton, isInteractiveTarget } from "./CellActionRai
 import { CellExpansion } from "./CellExpansion"
 import { tokenizeWords } from "@/lib/audio/timings"
 import { useCellAudio } from "@/hooks/useCellAudio"
-import { transcribeAndStoreTimings } from "@/lib/audio/transcribe"
 import { setTranscribeStatus, useTranscribeStatus } from "@/lib/audio/transcribe-status"
-import { whisperLanguageFromTag } from "@/lib/audio/language"
 import { handleVoiceDropOnCell, VOICE_DRAG_MIME } from "./VoiceBar"
-import { AiModelConsentDeniedError } from "@/lib/audio/ai-consent"
 import {
   MAX_SELECTED,
   clearSelection,
@@ -50,7 +43,6 @@ import { openVoiceModalFromAnywhere } from "./VoiceBar"
 import { cn } from "@/lib/utils"
 import { isPerfLogEnabled } from "@/lib/perf-log"
 import { partitionInfractions, addWaiver, removeWaiver } from "@/lib/rules/waivers"
-import { setCellWaivers } from "@/hooks/useCellWaivers"
 import { ViolationPopover } from "./ViolationPopover"
 import type { RangeHighlight } from "./HighlightedText"
 
@@ -159,7 +151,7 @@ function SynthStatusBadge({
 function ValidationHistoryTimeline({
   entries, currentUsername,
 }: {
-  entries: import("@/lib/codex-editor/edits/types").EditValidationSummary[]
+  entries: import("@/hooks/useCells").EditValidationSummary[]
   currentUsername: string
 }) {
   const [expandedIdx, setExpandedIdx] = useState<number | null>(null)
@@ -242,11 +234,10 @@ export interface EditorTableHandle {
 interface EditorTableProps {
   project: ProjectRecord
   cells: CellData[]
-  doc: Y.Doc
   username: string
   /** Called after a successful `target.cell.commit` enqueue so the parent
    *  refetches the cells projection. */
-  onCellCommitted?: () => void
+  onCellCommitted?: () => void | Promise<void>
   /** Map of cellId → presence holder label. When present, the cell editor
    *  goes read-only with an "Alice is editing" banner. */
   cellLockHolders?: ReadonlyMap<string, string>
@@ -276,8 +267,6 @@ interface EditorTableProps {
   cellOpenCommentCount?: Map<string, number>
   onOpenComments?: (cellId: string) => void
   onOpenHistory?: (cellId: string) => void
-  syncProvider?: import("y-partyserver/provider").default | null
-  collabUser?: { name: string; color: string }
   activeCueIndex?: number
   onSeekToCue?: (cellId: string) => void
   lineNumbersEnabled: boolean
@@ -285,7 +274,6 @@ interface EditorTableProps {
   sourceTextDirection: "ltr" | "rtl"
   targetTextDirection: "ltr" | "rtl"
   isAnonymous?: boolean
-  breakdownMap?: Map<string, CellHealthBreakdown>
   onJumpToCell?: (cellId: string) => void
   /** Called when user clicks a disabled sparkle while AI is not yet configured. */
   onAiSetupNeeded?: () => void
@@ -294,24 +282,29 @@ interface EditorTableProps {
   onOpenRecording?: (cellId: string) => void
   /** Re-read the project record from IDB after a settings change (e.g. voice library edits). */
   onProjectChanged?: () => void
+  /** Phase 5 / AD-9 — set of cell ids whose source has advanced since the
+   *  translator's last commit. When provided, each row renders the small
+   *  StaleSourceIndicator badge next to its validation status. Parent fetches
+   *  once per file via `useStaleSourceCells` so we don't issue N requests. */
+  staleCellIds?: ReadonlySet<string>
 }
 
 export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(function EditorTable({
-  project, cells, doc, username, isCompletionConfigured, isCompletionAvailable,
+  project, cells, username, isCompletionConfigured, isCompletionAvailable,
   completing, examples, errors,
   onCompleteSingle, onCompleteBatch, healthMap,
   infractions = new Map(), rules = [], onInfractionClick,
   isBacktranslationConfigured, onBacktranslate, backtranslating, backtranslationErrors,
   cellOpenCommentCount, onOpenComments, onOpenHistory,
-  syncProvider, collabUser,
   activeCueIndex, onSeekToCue,
   lineNumbersEnabled, cellLabelsEnabled, sourceTextDirection, targetTextDirection,
-  isAnonymous, breakdownMap, onJumpToCell, onAiSetupNeeded, onOpenRecording,
+  isAnonymous, onJumpToCell, onAiSetupNeeded, onOpenRecording,
   onProjectChanged,
   onCellCommitted,
   cellLockHolders,
   cellsWithRemoteChange,
   onClaimCell, onReleaseCell, onAckRemoteChange,
+  staleCellIds,
 }, ref) {
   const permissions = useProjectPermissions(project)
   const canEdit = permissions.canEditContent
@@ -631,7 +624,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
               <MemoizedRow
                 project={project}
                 cell={cell}
-                doc={doc}
+                isStaleSource={staleCellIds?.has(cell.id) ?? false}
                 username={username}
                 editable={canEdit}
                 onCellCommitted={onCellCommitted}
@@ -657,8 +650,6 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
                 cellOpenCommentCount={cellOpenCommentCount}
                 onOpenComments={onOpenComments}
                 onOpenHistory={onOpenHistory}
-                syncProvider={syncProvider}
-                collabUser={collabUser}
                 activeCueIndex={activeCueIndex}
                 onSeekToCue={onSeekToCue}
                 rowIndex={virtualRow.index}
@@ -668,7 +659,6 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
                 targetTextDirection={targetTextDirection}
                 gridCols={gridCols}
                 isAnonymous={isAnonymous}
-                breakdownMap={breakdownMap}
                 onJumpToCell={onJumpToCell}
                 onAiSetupNeeded={onAiSetupNeeded}
                 onOpenRecording={onOpenRecording}
@@ -701,10 +691,13 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
 interface MemoizedRowProps {
   project: ProjectRecord
   cell: CellData
-  doc: Y.Doc
   username: string
   editable: boolean
-  onCellCommitted?: () => void
+  /** Phase 5 / AD-9: source has advanced since this target was last committed.
+   *  Resolved once per file by the parent (membership look-up) so this prop
+   *  is just a stable boolean — preserves the row's React.memo invariant. */
+  isStaleSource: boolean
+  onCellCommitted?: () => void | Promise<void>
   lockHolderLabel: string | null
   remoteChangedWhileFocused: boolean
   onClaimCell?: (cellId: string) => void
@@ -727,8 +720,6 @@ interface MemoizedRowProps {
   cellOpenCommentCount?: Map<string, number>
   onOpenComments?: (cellId: string) => void
   onOpenHistory?: (cellId: string) => void
-  syncProvider?: import("y-partyserver/provider").default | null
-  collabUser?: { name: string; color: string }
   activeCueIndex?: number
   onSeekToCue?: (cellId: string) => void
   rowIndex: number
@@ -738,7 +729,6 @@ interface MemoizedRowProps {
   targetTextDirection: "ltr" | "rtl"
   gridCols: "grid-cols-[44px_1fr_1fr]"
   isAnonymous?: boolean
-  breakdownMap?: Map<string, CellHealthBreakdown>
   onJumpToCell?: (cellId: string) => void
   onAiSetupNeeded?: () => void
   onOpenRecording?: (cellId: string) => void
@@ -756,20 +746,21 @@ interface MemoizedRowProps {
 const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
   const {
     cell, examples, completing, errors, healthMap, infractions,
-    backtranslating, backtranslationErrors, cellOpenCommentCount, breakdownMap,
+    backtranslating, backtranslationErrors, cellOpenCommentCount,
     activeCueIndex, rowIndex, gridCols,
     onDragStart: onDragStartParent, onDragEnter: onDragEnterParent,
     onSelectionPointerDown: onSelectionPointerDownParent,
     getVoiceTakeCells,
-    project, doc, username, editable, isCompletionConfigured, isCompletionAvailable,
+    project, username, editable, isCompletionConfigured, isCompletionAvailable,
     ruleMap, onCompleteSingle, onInfractionClick,
     isBacktranslationConfigured, onBacktranslate,
-    onOpenComments, onOpenHistory, syncProvider, collabUser,
+    onOpenComments, onOpenHistory,
     onSeekToCue, lineNumbersEnabled, cellLabelsEnabled,
     sourceTextDirection, targetTextDirection, isAnonymous,
     onJumpToCell, onAiSetupNeeded, onOpenRecording, onProjectChanged,
     onCellCommitted, lockHolderLabel, remoteChangedWhileFocused,
     onClaimCell, onReleaseCell, onAckRemoteChange,
+    isStaleSource,
   } = props
 
   const cellId = cell.id
@@ -794,7 +785,6 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
   const backtranslationError = backtranslationErrors?.get(cellId)
   const openCommentCount = cellOpenCommentCount?.get(cellId) ?? 0
   const hasOpenComments = openCommentCount > 0
-  const breakdown = breakdownMap?.get(cellId)
   const isActiveCue = activeCueIndex !== undefined && activeCueIndex === rowIndex
 
   // Bind the stable parent (cellId) => void handlers to this row's cellId.
@@ -817,9 +807,9 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
       <EditorRow
         project={project}
         cell={cell}
-        doc={doc}
         username={username}
         editable={editable}
+        isStaleSource={isStaleSource}
         isCompletionConfigured={isCompletionConfigured}
         isCompletionAvailable={isCompletionAvailable}
         isLoading={isLoading}
@@ -839,8 +829,6 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
         openCommentCount={openCommentCount}
         onOpenComments={onOpenComments}
         onOpenHistory={onOpenHistory}
-        syncProvider={syncProvider}
-        collabUser={collabUser}
         isActiveCue={isActiveCue}
         onSeekToCue={onSeekToCue}
         rowIndex={rowIndex}
@@ -850,7 +838,6 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
         targetTextDirection={targetTextDirection}
         gridCols={gridCols}
         isAnonymous={isAnonymous}
-        breakdown={breakdown}
         onJumpToCell={onJumpToCell}
         onAiSetupNeeded={onAiSetupNeeded}
         onOpenRecording={onOpenRecording}
@@ -873,9 +860,12 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
 interface EditorRowProps {
   project: ProjectRecord
   cell: CellData
-  doc: Y.Doc
   username: string
   editable: boolean
+  /** Phase 5 / AD-9 — true when the source has advanced since the last
+   *  target commit. Renders a small warning badge next to the validation
+   *  status. Computed once-per-file by the parent. */
+  isStaleSource: boolean
   onCellCommitted?: () => void
   lockHolderLabel: string | null
   remoteChangedWhileFocused: boolean
@@ -901,8 +891,6 @@ interface EditorRowProps {
   openCommentCount: number
   onOpenComments?: (cellId: string) => void
   onOpenHistory?: (cellId: string) => void
-  syncProvider?: import("y-partyserver/provider").default | null
-  collabUser?: { name: string; color: string }
   isActiveCue?: boolean
   onSeekToCue?: (cellId: string) => void
   onDragStart: () => void
@@ -916,7 +904,6 @@ interface EditorRowProps {
   targetTextDirection: "ltr" | "rtl"
   gridCols: "grid-cols-[44px_1fr_1fr]"
   isAnonymous?: boolean
-  breakdown?: CellHealthBreakdown
   onJumpToCell?: (cellId: string) => void
   onAiSetupNeeded?: () => void
   onOpenRecording?: (cellId: string) => void
@@ -924,23 +911,28 @@ interface EditorRowProps {
 }
 
 function EditorRow({
-  project, cell, doc, username, editable, isCompletionConfigured, isCompletionAvailable, isLoading,
+  project, cell, username, editable, isCompletionConfigured, isCompletionAvailable, isLoading,
   cellExamples, highlights, error, health,
   cellInfractions, waivedInfractions, ruleMap,
   onCompleteSingle, onInfractionClick,
   isBacktranslationConfigured, isBacktranslating, backtranslationError, onBacktranslate,
   openCommentCount, onOpenComments, onOpenHistory,
-  syncProvider: _syncProvider, collabUser: _collabUser,
   isActiveCue: _isActiveCue, onSeekToCue,
   onDragStart, onDragEnter, onSelectionPointerDown,
   rowIndex, lineNumbersEnabled, cellLabelsEnabled, sourceTextDirection, targetTextDirection, gridCols,
-  isAnonymous, breakdown, onJumpToCell, onAiSetupNeeded, onOpenRecording,
+  isAnonymous, onAiSetupNeeded, onOpenRecording,
   onCellCommitted, lockHolderLabel, remoteChangedWhileFocused,
   onClaimCell, onReleaseCell, onAckRemoteChange,
+  isStaleSource,
 }: EditorRowProps) {
   const [openRuleId, setOpenRuleId] = useState<string | null>(null)
   const [openRuleAnchor, setOpenRuleAnchor] = useState<HTMLElement | null>(null)
   const [examplesExpanded, setExamplesExpanded] = useState(false)
+  const pendingTargetEventIdRef = useRef<string | null>(cell.targetEventId ?? null)
+
+  useEffect(() => {
+    if (cell.targetEventId) pendingTargetEventIdRef.current = cell.targetEventId
+  }, [cell.targetEventId])
 
   const ruleSeverity = useMemo(() => {
     const m = new Map<string, "major" | "minor">()
@@ -953,17 +945,17 @@ function EditorRow({
     [cell.waivers],
   )
 
-  const handleWaive = useCallback((input: { ruleId: string; reason?: string }) => {
-    const next = addWaiver(cell.waivers ?? [], input, username)
-    setCellWaivers(doc, cell.id, next)
+  const handleWaive = useCallback((_input: { ruleId: string; reason?: string }) => {
+    // Phase 2c-gamma: waivers wrote to Y.Doc; the event-grammar version
+    // is deferred to v1.x. The popover still closes so the click feels live.
+    addWaiver(cell.waivers ?? [], _input, username)
     setOpenRuleId(null)
-  }, [cell.waivers, cell.id, doc, username])
+  }, [cell.waivers, username])
 
   const handleUnwaive = useCallback((ruleId: string) => {
-    const next = removeWaiver(cell.waivers ?? [], ruleId)
-    setCellWaivers(doc, cell.id, next)
+    removeWaiver(cell.waivers ?? [], ruleId)
     setOpenRuleId(null)
-  }, [cell.waivers, cell.id, doc])
+  }, [cell.waivers])
 
   const sourceRanges = useMemo<RangeHighlight[]>(() => {
     const out: RangeHighlight[] = []
@@ -1000,17 +992,35 @@ function EditorRow({
       projectId: project.id,
       fileId: cell.fileId,
       cellId: cell.id,
-      parentId: cell.targetEventId ?? null,
+      parentId: cell.targetEventId ?? cell.sourceEventId ?? null,
       sourceEventId: cell.sourceEventId ?? null,
       value,
       valueHtml,
       author: username,
-    }).then(() => {
-      onCellCommitted?.()
+    }).then((eventId) => {
+      pendingTargetEventIdRef.current = eventId
+      void onCellCommitted?.()
     }).catch((err) => {
       console.warn("[editor-commit] enqueue failed:", err)
     })
   }, [editable, project.id, cell.fileId, cell.id, cell.targetEventId, cell.sourceEventId, username, onCellCommitted])
+
+  const emitValidationChange = useCallback((validated: boolean) => {
+    const editEventId = cell.targetEventId ?? pendingTargetEventIdRef.current
+    if (!project.id || !editEventId) return
+    const emit = validated ? emitCellValidate : emitCellUnvalidate
+    void emit({
+      projectId: project.id,
+      fileId: cell.fileId,
+      cellId: cell.id,
+      editEventId,
+      author: username,
+    }).then(() => {
+      void onCellCommitted?.()
+    }).catch((err) => {
+      console.warn(`[${validated ? "validate" : "unvalidate"}] emit failed:`, err)
+    })
+  }, [cell.fileId, cell.id, cell.targetEventId, project.id, username, onCellCommitted])
 
   const handleEditorFocus = useCallback(() => {
     onClaimCell?.(cell.id)
@@ -1028,7 +1038,7 @@ function EditorRow({
 
   // Detect formatting loss: source has inline style marks that the target doesn't.
   const sourceHasFormatting = Boolean(cell.originalHtml && /<(b|strong|i|em|u|s|strike|del|code)\b/i.test(cell.originalHtml))
-  const targetHtml = cell.translatedXml ? getFragmentHtml(cell.translatedXml) : ""
+  const targetHtml = cell.translatedHtml ?? ""
   const targetHasFormatting = /<(b|strong|i|em|u|s|strike|del|code)\b/i.test(targetHtml)
   const showFormattingLossWarning =
     sourceHasFormatting && !targetHasFormatting && cell.translated.trim().length > 0
@@ -1104,35 +1114,13 @@ function EditorRow({
   const transcriptPreviewRef = useRef<HTMLDivElement | null>(null)
 
   const handleTranscribe = useCallback(async () => {
+    // Phase 2c-gamma: transcribeAndStoreTimings wrote per-word timings into
+    // the per-file Y.Doc. The grammar that brings forced-alignment writebacks
+    // to the event log lands in v1.x; this gesture is a no-op for now.
     const audioId = cell.selectedAudioId
     if (!audioId) return
-    setTranscribeStatus(audioId, { kind: "loading", loaded: 0, total: 0, file: "" })
-    const startedAt = Date.now()
-    try {
-      const bytes = await audioController.ensureBytes()
-      const out = await transcribeAndStoreTimings(doc, cell.id, audioId, bytes, {
-        cellText: cell.translated,
-        language: whisperLanguageFromTag(project.targetLanguage),
-        onProgress: (p) => {
-          setTranscribeStatus(audioId, { kind: "loading", loaded: p.loaded, total: p.total, file: p.file })
-          if (p.status === "ready" || (p.total > 0 && p.loaded >= p.total)) {
-            setTranscribeStatus(audioId, { kind: "transcribing" })
-          }
-        },
-      })
-      setTranscribeStatus(audioId, {
-        kind: "done", wordCount: out.timings.length, durationMs: Date.now() - startedAt,
-      })
-    } catch (e) {
-      if (e instanceof AiModelConsentDeniedError) {
-        setTranscribeStatus(audioId, { kind: "idle" })
-        return
-      }
-      setTranscribeStatus(audioId, {
-        kind: "error", message: e instanceof Error ? e.message : String(e),
-      })
-    }
-  }, [cell.id, cell.selectedAudioId, cell.translated, audioController, doc, project.targetLanguage])
+    setTranscribeStatus(audioId, { kind: "idle" })
+  }, [cell.selectedAudioId])
 
   // Build tooltip detail
   const lastEntry = cell.history[cell.history.length - 1]
@@ -1164,18 +1152,7 @@ function EditorRow({
     }
     if (details.reason === "trigger-press") {
       if (editable && !isSelfValidated) {
-        toggleCellValidation(doc, cell.id, username, true)
-        const editEventId = cell.targetEventId ?? null
-        if (project.id && editEventId) {
-          void emitCellValidate({
-            projectId: project.id,
-            fileId: cell.fileId,
-            cellId: cell.id,
-            editEventId,
-            author: username,
-          }).then(() => { onCellCommitted?.() })
-            .catch((err) => console.warn("[validate] emit failed:", err))
-        }
+        emitValidationChange(true)
         details.cancel()
         return
       }
@@ -1200,6 +1177,11 @@ function EditorRow({
     "text-muted-foreground/30"
 
   const hasContent = Boolean(cell.translated && cell.translated.trim())
+
+  // AD-14: a translated cell shows an inline "needs attention" marker when its
+  // decay is above the warn threshold (endorsement_count too low). Absence is
+  // silence, not endorsement — there is no green "done" ring at cell scope.
+  const cellNeedsAttention = hasContent && needsAttention(cell.endorsementCount ?? 0)
 
   const hasMajorInfraction = cellInfractions.some(
     (i) => ruleMap.get(i.ruleId)?.severity === "major",
@@ -1231,16 +1213,22 @@ function EditorRow({
             title={healthTooltip}
             disabled={!editable}
           >
-            <HealthRing health={healthValue} size={18} strokeWidth={2}>
-              <ValidationIcon
-                className="h-3 w-3"
-                strokeWidth={2.5}
-                {...(vs === "others" ? { fill: "currentColor" } : {})}
-              />
-            </HealthRing>
+            <ValidationIcon
+              className="h-3.5 w-3.5"
+              strokeWidth={2.5}
+              {...(vs === "others" ? { fill: "currentColor" } : {})}
+            />
           </button>
         }
       />
+      {cellNeedsAttention && (
+        <span
+          className="pointer-events-none absolute -right-1 -top-1 text-amber-500"
+          title="Needs attention — this cell's neighborhood isn't validated yet"
+        >
+          <AlertTriangle className="h-2.5 w-2.5" strokeWidth={2.5} />
+        </span>
+      )}
       {vs !== "empty" && (
         <PopoverContent
           side="right"
@@ -1263,18 +1251,7 @@ function EditorRow({
                       className="flex-shrink-0 rounded p-0.5 text-muted-foreground/70 transition-colors hover:bg-destructive/10 hover:text-destructive"
                       title="Remove your validation"
                       onClick={() => {
-                        toggleCellValidation(doc, cell.id, username, false)
-                        const editEventId = cell.targetEventId ?? null
-                        if (project.id && editEventId) {
-                          void emitCellUnvalidate({
-                            projectId: project.id,
-                            fileId: cell.fileId,
-                            cellId: cell.id,
-                            editEventId,
-                            author: username,
-                          }).then(() => { onCellCommitted?.() })
-                            .catch((err) => console.warn("[unvalidate] emit failed:", err))
-                        }
+                        emitValidationChange(false)
                         setValidationPopoverOpen(false)
                       }}
                     >
@@ -1291,15 +1268,17 @@ function EditorRow({
         </PopoverContent>
       )}
     </Popover>
-    {breakdown && (
-      <HealthBreakdown
-        breakdown={breakdown}
-        scopeLabel="cell health"
-        onCellClick={onJumpToCell}
-        majorInfractionCount={breakdown.signals.infractions.length}
-      >
-        <span className="sr-only">Breakdown</span>
-      </HealthBreakdown>
+    {/* Phase 5 / AD-9: source-changed indicator. Parent-managed mode —
+        membership lookup happens once per file at ProjectWorkspace and is
+        flattened to a per-row boolean here, so we pass a one-element set
+        the indicator resolves trivially. Skipping the component entirely
+        when !isStaleSource keeps the common (non-stale) case zero-cost
+        and avoids the per-row allocation. */}
+    {isStaleSource && (
+      <StaleSourceIndicator
+        cellId={cell.id}
+        staleCellIds={new Set([cell.id])}
+      />
     )}
     {infractionCount > 0 && (
       <span
@@ -1798,23 +1777,20 @@ function EditorRow({
             {
               value: "health",
               icon: <Activity className="h-3 w-3" />,
-              label: "Health",
-              disabled: !breakdown,
-              content: breakdown ? (
-                <BreakdownContent
-                  breakdown={breakdown}
-                  scopeLabel="cell health"
-                  onCellClick={onJumpToCell}
-                  majorInfractionCount={cellInfractions.filter(
-                    (i) => ruleMap.get(i.ruleId)?.severity === "major",
-                  ).length}
-                  variant="inline"
-                />
-              ) : (
-                <p className="py-3 text-center text-xs text-muted-foreground">
-                  Composite health is off — turn it on in project settings to
-                  see this cell's breakdown.
-                </p>
+              label: "Decay",
+              content: (
+                <div className="space-y-1.5 py-3 text-xs text-muted-foreground">
+                  <p>
+                    <span className="font-medium text-foreground">{cell.endorsementCount ?? 0}</span>
+                    {" "}endorsement{(cell.endorsementCount ?? 0) === 1 ? "" : "s"} · health{" "}
+                    <span className="font-medium text-foreground">{healthValue}%</span>
+                  </p>
+                  <p>
+                    {cellNeedsAttention
+                      ? "Needs attention — this cell's retrieval neighborhood hasn't been validated yet (AD-14)."
+                      : "No attention needed — enough of this cell's neighborhood is validated."}
+                  </p>
+                </div>
               ),
             },
             {
@@ -1907,7 +1883,6 @@ function EditorRow({
                           timings={cellAudioTimings}
                           cellText={cell.translated}
                           cellId={cell.id}
-                          doc={doc}
                           alignedToCellText={
                             tokenizeWords(cell.translated).length === cellAudioTimings.length
                           }
@@ -1958,7 +1933,6 @@ function EditorRow({
                           timings={generatedVoiceTimings}
                           cellText={cell.translated}
                           cellId={cell.id}
-                          doc={doc}
                           alignedToCellText={
                             tokenizeWords(cell.translated).length === generatedVoiceTimings.length
                           }

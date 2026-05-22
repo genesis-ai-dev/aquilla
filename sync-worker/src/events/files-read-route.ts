@@ -10,7 +10,7 @@
 //
 // Auth: Authorization: Bearer <sync-token JWT>. The token's `projectId`
 // claim must match the path's :projectId. Token role is implicitly the
-// project-membership check (auth-worker mints tokens only for members).
+// project-membership check (identity mints tokens only for members).
 
 import { verifyTokenForProject } from "../auth"
 
@@ -23,9 +23,10 @@ interface FileRowRaw {
   id: string
   project_id: string
   name: string
-  file_type: string
-  source_language: string | null
-  target_language: string | null
+  role: string | null
+  kind: string | null
+  event_id: string
+  meta: string
   cell_count: number
   approved_count: number
   word_count: number
@@ -36,7 +37,11 @@ interface FileSummary {
   fileId: string
   projectId: string
   name: string
+  /** Backward-compatible: derived from `kind ?? role ?? 'codex'`. */
   fileType: string
+  role: string | null
+  kind: string | null
+  eventId: string
   sourceLanguage: string | null
   targetLanguage: string | null
   cellCount: number
@@ -46,13 +51,22 @@ interface FileSummary {
 }
 
 function mapRow(row: FileRowRaw): FileSummary {
+  let meta: { source_language?: string; target_language?: string } = {}
+  try {
+    meta = row.meta ? JSON.parse(row.meta) : {}
+  } catch {
+    meta = {}
+  }
   return {
     fileId: row.id,
     projectId: row.project_id,
     name: row.name,
-    fileType: row.file_type,
-    sourceLanguage: row.source_language,
-    targetLanguage: row.target_language,
+    fileType: row.kind ?? row.role ?? 'codex',
+    role: row.role,
+    kind: row.kind,
+    eventId: row.event_id,
+    sourceLanguage: meta.source_language ?? null,
+    targetLanguage: meta.target_language ?? null,
     cellCount: row.cell_count,
     approvedCount: row.approved_count,
     wordCount: row.word_count,
@@ -93,7 +107,7 @@ export async function handleFilesReadRequest(
   }
 
   const columns =
-    "id, project_id, name, file_type, source_language, target_language, " +
+    "id, project_id, name, role, kind, event_id, meta, " +
     "cell_count, approved_count, word_count, last_edit_at"
 
   if (fileId) {

@@ -1,20 +1,19 @@
-// Phase 2c-β: parsers feed the outbox.
+// Source import → AD-2 event log (server-first bulk upload).
 //
-// Pre-Phase 2c-β this module wrote into a per-file Y.Doc via createFileDoc
-// and persisted to IndexedDB. AD-2 makes the event log the source of truth,
-// so after parsing we emit:
+// AD-2 makes the event log the source of truth. After parsing a file we emit:
 //
 //   1. file.create (genesis; project-scope)
-//   2. one source.cell.create event per parsed cell, chained via
-//      anchor_cell_id (the previous cell's id, or null for the first)
+//   2. one source.cell.create per parsed cell, chained via anchor_cell_id
+//      (the previous cell's id, or null for the first)
 //
-// The outbox drains the events to the server via WS (primary) or
-// `POST /events` (fallback). The cells projection lands as the server
-// applies each event.
+// These are streamed straight to the sync worker's `POST /import` bulk endpoint
+// in large chunks (see lib/sync/bulk-import.ts) rather than dripped through the
+// outbox — a full eBible is ~31k cells, and the 100-per-5s outbox flush made
+// that take minutes and fail silently. The cells projection lands as the server
+// applies each chunk; the importer awaits completion and surfaces any error.
 //
-// `originals` (DOCX/PPTX blob storage in IDB) is dropped — AD-4 puts
-// imported source blobs in R2; the future re-parse path fetches from R2.
-// Locally we no longer keep a copy.
+// `originals` (DOCX/PPTX blob storage in IDB) is dropped — AD-4 puts imported
+// source blobs in R2; the future re-parse path fetches from R2.
 
 import { v7 as uuidv7 } from "uuid"
 import type { FileType, FileReference, TranslatableString } from "./parsers/types"
@@ -25,7 +24,7 @@ import { extractVttStrings, extractSrtStrings } from "./parsers/subtitle"
 import { extractUsfmStrings } from "./parsers/usfm"
 import { extractDocxStrings } from "./parsers/docx"
 import { extractPptxStrings } from "./parsers/pptx"
-import { emitFileCreate, emitSourceCellCreate } from "./sync/events-emit"
+import { bulkUploadSource, type BulkImportCell } from "./sync/bulk-import"
 import {
   fetchTranslationText,
   parseEBibleCorpus,
@@ -37,7 +36,7 @@ export interface EBibleProgress {
   phase: EBibleImportPhase
   received?: number
   total?: number
-  /** New in Phase 2c-β: number of `source.cell.create` events flushed so far. */
+  /** During the "save" phase: cells uploaded so far / total. */
   cellsEnqueued?: number
   cellsTotal?: number
 }
@@ -55,8 +54,12 @@ export interface ImportContext {
   /** Optional language pair to stamp on the `file.create` payload. */
   sourceLanguage?: string
   targetLanguage?: string
-  /** Optional callback fired per enqueued cell — drives the dialog progress UI. */
-  onCellEnqueued?: (count: number, total: number) => void
+  /** Mints a sync-token scoped to (projectId, fileId) for the bulk upload. */
+  getToken: (fileId: string) => Promise<string | null>
+  /** Fired as cells upload — drives the dialog progress UI. */
+  onCellEnqueued?: (uploaded: number, total: number) => void
+  /** Aborts the in-flight upload (dialog close / cancel). */
+  signal?: AbortSignal
 }
 
 /**
@@ -113,6 +116,7 @@ export async function importEBible(
     "ebible",
     {
       ...ctx,
+      signal: signal ?? ctx.signal,
       onCellEnqueued: (count, total) => {
         onProgress?.({ phase: "save", cellsEnqueued: count, cellsTotal: total })
         ctx.onCellEnqueued?.(count, total)
@@ -122,8 +126,9 @@ export async function importEBible(
 }
 
 /**
- * Emits `file.create` + N `source.cell.create` events into the outbox.
- * Returns a `FileReference` shaped like the legacy API for caller ergonomics.
+ * Build `file.create` + N chained `source.cell.create` and stream them to the
+ * server's bulk-import endpoint. Returns a `FileReference` once every cell has
+ * landed. Throws (with a human-readable message) if the upload fails.
  */
 export async function emitParsedFile(
   result: ImportResult,
@@ -132,47 +137,52 @@ export async function emitParsedFile(
 ): Promise<FileReference> {
   const fileId = uuidv7()
 
-  await emitFileCreate({
-    projectId: ctx.projectId,
-    fileId,
-    name: result.name,
-    fileType,
-    sourceLanguage: ctx.sourceLanguage,
-    targetLanguage: ctx.targetLanguage,
-    author: ctx.author,
-  })
-
-  // Chain cells via anchorCellId. The first cell's anchor is null (genesis
-  // anchor — first in file); each subsequent cell anchors on the prior id.
+  // Chain cells via anchorCellId: the first cell's anchor is null (genesis —
+  // first in file); each subsequent cell anchors on the prior cell's id.
+  const cells: BulkImportCell[] = []
   let prevCellId: string | null = null
-  let enqueued = 0
-  const total = result.strings.length
   for (const str of result.strings) {
     // Use the parser-supplied id when present (USFM gives stable verse refs);
     // otherwise mint a fresh UUIDv7.
     const cellId = str.id || uuidv7()
-    await emitSourceCellCreate({
-      projectId: ctx.projectId,
-      fileId,
+    cells.push({
+      id: uuidv7(),
       cellId,
       anchorCellId: prevCellId,
       value: str.original,
       ...(str.originalHtml ? { valueHtml: str.originalHtml } : {}),
-      type: str.type,
+      ...(str.type !== undefined ? { type: str.type } : {}),
       ...(str.group ? { canonicalRef: str.group } : {}),
-      author: ctx.author,
     })
     prevCellId = cellId
-    enqueued++
-    ctx.onCellEnqueued?.(enqueued, total)
   }
+
+  await bulkUploadSource({
+    projectId: ctx.projectId,
+    fileId,
+    file: {
+      id: uuidv7(),
+      name: result.name,
+      fileType,
+      role: "source",
+      kind: fileType,
+      importFormat: fileType,
+      parserVersion: "workspace-import-v1",
+      sourceLanguage: ctx.sourceLanguage,
+      targetLanguage: ctx.targetLanguage,
+    },
+    cells,
+    getToken: ctx.getToken,
+    onProgress: ctx.onCellEnqueued,
+    signal: ctx.signal,
+  })
 
   return {
     id: fileId,
     name: result.name,
     type: fileType,
     createdAt: new Date().toISOString(),
-    cellCount: total,
+    cellCount: cells.length,
   }
 }
 

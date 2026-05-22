@@ -244,6 +244,8 @@ export interface ProjectRecord {
    * projects without this field fall back to registry defaults.
    */
   experimentalFlags?: Record<string, boolean>
+  /** AD-14 decay tunables. Absent → use DECAY_DEFAULTS. */
+  decaySettings?: DecaySettings
   /** Caps and knobs for the composite-health scorer. Absent → use HEALTH_DEFAULTS. */
   healthSettings?: HealthSettings
   /** Required distinct validators for a text cell to count as "fully validated". Clamped [1, 15]. Default 1. Mirrors desktop manifest. */
@@ -465,4 +467,11 @@ export function detectFileType(fileName: string): FileType | null {
     sfm: "usfm",
   }
   return map[ext || ""] || null
+}
+
+export interface DecaySettings {
+  /** Endorsement count at which a cell reaches decay = 0. Default 5. */
+  endorsementTarget?: number
+  /** Decay above which the cell editor shows "needs attention". Default 0.66. */
+  decayWarnThreshold?: number
 }

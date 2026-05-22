@@ -9,10 +9,7 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "hono": "^4.12.14",
-    "partyserver": "^0.4.1",
-    "y-partyserver": "^2.1.4",
-    "yjs": "^13.6.30"
+    "hono": "^4.12.14"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20241218.0",

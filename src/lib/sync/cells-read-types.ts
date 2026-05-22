@@ -54,6 +54,7 @@ export interface CellRow {
   lastEditAt: number
   validated: boolean
   wordCount: number
+  endorsementCount?: number
 }
 
 /** Pagination response shape. */

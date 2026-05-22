@@ -25,7 +25,9 @@ interface ImportDialogProps {
   username: string
   sourceLanguage: string
   targetLanguage: string
-  onImported: (refs: FileReference[]) => void
+  /** Mints a sync-token scoped to (projectId, fileId) for the bulk upload. */
+  getToken: (fileId: string) => Promise<string | null>
+  onImported: (refs: FileReference[]) => void | Promise<void>
 }
 
 export function ImportDialog({
@@ -35,6 +37,7 @@ export function ImportDialog({
   username,
   sourceLanguage,
   targetLanguage,
+  getToken,
   onImported,
 }: ImportDialogProps) {
   const [tab, setTab] = useState<Tab>("upload")
@@ -79,8 +82,9 @@ export function ImportDialog({
             username={username}
             sourceLanguage={sourceLanguage}
             targetLanguage={targetLanguage}
-            onImported={(refs) => {
-              onImported(refs)
+            getToken={getToken}
+            onImported={async (refs) => {
+              await onImported(refs)
               onOpenChange(false)
             }}
           />
@@ -90,8 +94,9 @@ export function ImportDialog({
             username={username}
             sourceLanguage={sourceLanguage}
             targetLanguage={targetLanguage}
-            onImported={(ref) => {
-              onImported([ref])
+            getToken={getToken}
+            onImported={async (ref) => {
+              await onImported([ref])
               onOpenChange(false)
             }}
           />
@@ -106,13 +111,15 @@ interface UploadPanelProps {
   username: string
   sourceLanguage: string
   targetLanguage: string
-  onImported: (refs: FileReference[]) => void
+  getToken: (fileId: string) => Promise<string | null>
+  onImported: (refs: FileReference[]) => void | Promise<void>
 }
 
-function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, onImported }: UploadPanelProps) {
+function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, getToken, onImported }: UploadPanelProps) {
   const [importing, setImporting] = useState(false)
   const [dragOver, setDragOver] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [phase, setPhase] = useState<string>("")
   const [progress, setProgress] = useState<{ count: number; total: number } | null>(null)
 
   const handleFiles = useCallback(
@@ -123,25 +130,34 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, onIm
       const allRefs: FileReference[] = []
 
       try {
-        for (const file of Array.from(files)) {
+        const list = Array.from(files)
+        for (const file of list) {
+          setPhase(`Parsing ${file.name}…`)
+          setProgress(null)
           const refs = await importFile(file, {
             projectId,
             author: username,
             sourceLanguage,
             targetLanguage,
-            onCellEnqueued: (count, total) => setProgress({ count, total }),
+            getToken,
+            onCellEnqueued: (count, total) => {
+              setPhase(`Uploading ${file.name}`)
+              setProgress({ count, total })
+            },
           })
           allRefs.push(...refs)
         }
-        onImported(allRefs)
+        setPhase("Finishing up…")
+        await onImported(allRefs)
       } catch (err) {
         setError(err instanceof Error ? err.message : "Import failed")
       } finally {
         setImporting(false)
         setProgress(null)
+        setPhase("")
       }
     },
-    [projectId, username, sourceLanguage, targetLanguage, onImported]
+    [projectId, username, sourceLanguage, targetLanguage, getToken, onImported]
   )
 
   function handleDrop(e: React.DragEvent) {
@@ -172,9 +188,24 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, onIm
       onDrop={handleDrop}
     >
       {importing ? (
-        <p className="text-sm text-muted-foreground">
-          Importing{progress ? ` (${progress.count} / ${progress.total} cells)…` : "…"}
-        </p>
+        <div className="w-full max-w-sm text-center">
+          <p className="text-sm font-medium">{phase || "Importing…"}</p>
+          {progress && progress.total > 0 ? (
+            <>
+              <div className="mt-3 h-2 w-full overflow-hidden rounded-full bg-muted">
+                <div
+                  className="h-full bg-primary transition-all"
+                  style={{ width: `${Math.round((progress.count / progress.total) * 100)}%` }}
+                />
+              </div>
+              <p className="mt-1.5 text-xs text-muted-foreground">
+                {progress.count.toLocaleString()} / {progress.total.toLocaleString()} cells
+              </p>
+            </>
+          ) : (
+            <p className="mt-2 text-xs text-muted-foreground">Working…</p>
+          )}
+        </div>
       ) : (
         <>
           <p className="mb-2 text-sm text-muted-foreground">
@@ -205,10 +236,11 @@ interface EBiblePanelProps {
   username: string
   sourceLanguage: string
   targetLanguage: string
-  onImported: (ref: FileReference) => void
+  getToken: (fileId: string) => Promise<string | null>
+  onImported: (ref: FileReference) => void | Promise<void>
 }
 
-function EBiblePanel({ projectId, username, sourceLanguage, targetLanguage, onImported }: EBiblePanelProps) {
+function EBiblePanel({ projectId, username, sourceLanguage, targetLanguage, getToken, onImported }: EBiblePanelProps) {
   const [translations, setTranslations] = useState<EBibleTranslation[] | null>(null)
   const [loadErr, setLoadErr] = useState<string | null>(null)
   const [query, setQuery] = useState("")
@@ -263,11 +295,12 @@ function EBiblePanel({ projectId, username, sourceLanguage, targetLanguage, onIm
           author: username,
           sourceLanguage,
           targetLanguage,
+          getToken,
         },
         setProgress,
         abortRef.current.signal
       )
-      onImported(ref)
+      await onImported(ref)
     } catch (err) {
       setImportErr(err instanceof Error ? err.message : "Import failed")
     } finally {
@@ -354,15 +387,27 @@ function EBiblePanel({ projectId, username, sourceLanguage, targetLanguage, onIm
       )}
 
       {progress && (
-        <p className="text-xs text-muted-foreground">
-          {progress.phase === "download"
-            ? `Downloading ${selected?.id ?? ""}... ${formatProgress(progress.received, progress.total)}`
-            : progress.phase === "parse"
-              ? "Parsing verses..."
-              : progress.cellsTotal
-                ? `Enqueuing cells: ${progress.cellsEnqueued ?? 0} / ${progress.cellsTotal}…`
-                : "Saving to project..."}
-        </p>
+        <div className="text-xs text-muted-foreground">
+          <p>
+            {progress.phase === "download"
+              ? `Downloading ${selected?.id ?? ""}… ${formatProgress(progress.received, progress.total)}`
+              : progress.phase === "parse"
+                ? "Parsing verses…"
+                : progress.cellsTotal
+                  ? `Uploading verses: ${(progress.cellsEnqueued ?? 0).toLocaleString()} / ${progress.cellsTotal.toLocaleString()}`
+                  : "Uploading to project…"}
+          </p>
+          {progress.phase === "save" && progress.cellsTotal ? (
+            <div className="mt-1.5 h-2 w-full overflow-hidden rounded-full bg-muted">
+              <div
+                className="h-full bg-primary transition-all"
+                style={{
+                  width: `${Math.round(((progress.cellsEnqueued ?? 0) / progress.cellsTotal) * 100)}%`,
+                }}
+              />
+            </div>
+          ) : null}
+        </div>
       )}
       {importErr && <p className="text-sm text-destructive">{importErr}</p>}
 

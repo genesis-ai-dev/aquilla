@@ -3,10 +3,10 @@
 # (__PR__, __DB_ID__) are sed-substituted before wrangler reads it.
 #
 # Behavior:
-# - Each PR with migration changes gets its own forked D1 (codex-db-pr-N)
+# - Each PR with migration changes gets its own forked D1 (aquilla-pr-N)
 #   so the migration can be applied without polluting the shared staging
 #   DB.
-# - R2 is shared with staging (codex-snapshots-staging) but namespaced
+# - R2 is shared with staging (aquilla-snapshots-staging) but namespaced
 #   via R2_KEY_PREFIX=pr-N so snapshots from different PRs don't collide.
 # - Durable Object namespace is implicitly per-worker (different worker
 #   name → different namespace).
@@ -17,7 +17,7 @@
 #
 # DO NOT edit the placeholders by hand. The workflow substitutes them.
 
-name = "codex-sync-worker-pr-__PR__"
+name = "aquilla-pr-__PR__-sync"
 main = "src/index.ts"
 compatibility_date = "2024-12-01"
 compatibility_flags = ["nodejs_compat"]
@@ -41,11 +41,11 @@ new_sqlite_classes = ["ProjectSync"]
 
 [[r2_buckets]]
 binding = "SNAPSHOTS"
-bucket_name = "codex-snapshots-staging"
+bucket_name = "aquilla-snapshots-staging"
 
 [[d1_databases]]
-binding = "CODEX_DB"
-database_name = "codex-db-pr-__PR__"
+binding = "AQUILLA_DB"
+database_name = "aquilla-pr-__PR__"
 database_id = "__DB_ID__"
 
 [vars]

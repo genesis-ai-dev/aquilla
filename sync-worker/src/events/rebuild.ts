@@ -19,7 +19,7 @@ import type { EventKind } from './types'
 const D1_BATCH_LIMIT = 100
 
 export interface RebuildEnv {
-  CODEX_DB?: D1Database
+  AQUILLA_DB?: D1Database
   SYNC_SECRET_KEY?: string
 }
 
@@ -60,11 +60,11 @@ export async function handleRebuildProjectionRequest(
     return new Response('unauthorized', { status: 401 })
   }
 
-  if (!env.CODEX_DB) {
-    return new Response('CODEX_DB binding not configured', { status: 500 })
+  if (!env.AQUILLA_DB) {
+    return new Response('AQUILLA_DB binding not configured', { status: 500 })
   }
 
-  const db = env.CODEX_DB
+  const db = env.AQUILLA_DB
   const projectId = decodeURIComponent(match[1])
   const startedAt = Date.now()
 

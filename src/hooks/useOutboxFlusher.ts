@@ -83,7 +83,7 @@ export function useOutboxFlusher(options: UseOutboxFlusherOptions): {
 
     void navigator.locks
       .request(
-        "codex-cqrs-outbox-flush",
+        "aquilla-cqrs-outbox-flush",
         { signal: ac.signal },
         async () => {
           while (!ac.signal.aborted) {

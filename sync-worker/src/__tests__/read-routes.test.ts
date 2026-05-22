@@ -8,7 +8,7 @@ import { makeTestToken } from './helpers/auth'
 const SECRET = 'read-route-secret'
 
 function envWith(db: ReturnType<typeof makeInMemoryD1>) {
-  return { CODEX_DB: db, SYNC_SECRET_KEY: SECRET }
+  return { AQUILLA_DB: db, SYNC_SECRET_KEY: SECRET }
 }
 
 describe('GET /events', () => {
@@ -56,17 +56,19 @@ describe('GET /events', () => {
 
 describe('GET /cell-validators', () => {
   it('returns validator rows newest-first', async () => {
+    // DELETE-on-unvalidate: each row = one active validator. Two rows from
+    // different timestamps; newest-first ordering checked below.
     const db = makeInMemoryD1({
       cell_validators: [
         {
           project_id: 'proj-a', file_id: 'file-x', cell_id: 'c1',
-          edit_event_id: 'ev1', username: 'bob',
-          is_active: 1, decided_ts: 50,
+          event_id: 'ev1', username: 'bob',
+          decided_ts: 50,
         },
         {
           project_id: 'proj-a', file_id: 'file-x', cell_id: 'c1',
-          edit_event_id: 'ev1', username: 'bob',
-          is_active: 0, decided_ts: 100,
+          event_id: 'ev2', username: 'alice',
+          decided_ts: 100,
         },
       ],
     })
@@ -78,11 +80,10 @@ describe('GET /cell-validators', () => {
     const res = (await handleValidatorsReadRequest(req, envWith(db)))!
     expect(res.status).toBe(200)
     const body = (await res.json()) as {
-      validators: { editEventId: string; isActive: boolean; decidedTs: number }[]
+      validators: { editEventId: string; decidedTs: number }[]
     }
     expect(body.validators).toHaveLength(2)
     expect(body.validators[0].decidedTs).toBe(100)
-    expect(body.validators[0].isActive).toBe(false)
   })
 })
 
@@ -107,19 +108,19 @@ describe('GET /cells/audit-stats', () => {
         // Active validators tied to the current chain head on c1.
         {
           project_id: 'proj-x', file_id: 'file-x', cell_id: 'c1',
-          edit_event_id: 'ev-current', username: 'alice',
-          is_active: 1, decided_ts: 1750,
+          event_id: 'ev-current', username: 'alice',
+          decided_ts: 1750,
         },
         {
           project_id: 'proj-x', file_id: 'file-x', cell_id: 'c1',
-          edit_event_id: 'ev-current', username: 'bob',
-          is_active: 1, decided_ts: 1751,
+          event_id: 'ev-current', username: 'bob',
+          decided_ts: 1751,
         },
         // Validator on a prior edit — does not count for the current head.
         {
           project_id: 'proj-x', file_id: 'file-x', cell_id: 'c1',
-          edit_event_id: 'ev-old', username: 'carol',
-          is_active: 1, decided_ts: 1600,
+          event_id: 'ev-old', username: 'carol',
+          decided_ts: 1600,
         },
       ],
     })

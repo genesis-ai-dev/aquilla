@@ -10,7 +10,7 @@
 
 import type { CqrsRawEvent } from "./cqrs-types"
 
-const DB_NAME = "codex-cqrs-outbox"
+const DB_NAME = "aquilla-cqrs-outbox"
 /** v2: adds `attempts`, `lastAttemptAt`, `lastError` to existing rows. */
 const DB_VERSION = 2
 const STORE = "outbox"

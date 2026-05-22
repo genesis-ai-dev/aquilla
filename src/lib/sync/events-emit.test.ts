@@ -20,7 +20,7 @@ describe("events-emit", () => {
   beforeEach(async () => {
     await resetOutboxConnectionForTests()
     await new Promise<void>((resolve, reject) => {
-      const d = indexedDB.deleteDatabase("codex-cqrs-outbox")
+      const d = indexedDB.deleteDatabase("aquilla-cqrs-outbox")
       d.onblocked = () => resolve()
       d.onsuccess = () => resolve()
       d.onerror = () => reject(d.error)

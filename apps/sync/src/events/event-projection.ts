@@ -58,7 +58,7 @@ function countWords(text: string): number {
 }
 
 /** Caller hint: which projection tables this event will touch. */
-export type ProjectionTouches = 'cells' | 'cell_validators' | 'files'
+export type ProjectionTouches = 'cells' | 'cell_validators' | 'files' | 'cell_audio'
 
 /**
  * Apply one event to the projection (without the AD-2 sibling guard — the
@@ -407,6 +407,103 @@ export function buildEventProjectionStmts(
           .bind(event.projectId, p.endorsementEventId),
       )
       return ['cells']
+    }
+
+    case 'cell.audio.attach': {
+      const p = event.payload as EventPayloads['cell.audio.attach']
+      if (!event.fileId || !event.cellId) {
+        throw new Error(`${event.kind} event ${event.id} is missing fileId or cellId`)
+      }
+      // Deselect any other clip in the same slot, then upsert this one as the
+      // selected, live clip. `audio_id != ?` so the deselect never touches the
+      // row we're about to (re)insert as selected.
+      stmts.push(
+        db
+          .prepare(
+            `UPDATE cell_audio SET selected = 0
+              WHERE project_id = ? AND file_id = ? AND cell_id = ? AND slot = ? AND audio_id != ?`,
+          )
+          .bind(event.projectId, event.fileId, event.cellId, p.slot, p.audioId),
+      )
+      stmts.push(
+        db
+          .prepare(
+            `INSERT INTO cell_audio (
+              project_id, file_id, cell_id, audio_id, slot, url, mime_type,
+              voice_id, reference_audio_id, duration_ms, timings_json,
+              selected, deleted, event_id, created_ts
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 0, ?, ?)
+            ON CONFLICT(project_id, file_id, cell_id, audio_id) DO UPDATE SET
+              slot               = excluded.slot,
+              url                = excluded.url,
+              mime_type          = excluded.mime_type,
+              voice_id           = excluded.voice_id,
+              reference_audio_id = excluded.reference_audio_id,
+              duration_ms        = excluded.duration_ms,
+              timings_json       = excluded.timings_json,
+              selected           = 1,
+              deleted            = 0,
+              event_id           = excluded.event_id`,
+          )
+          .bind(
+            event.projectId,
+            event.fileId,
+            event.cellId,
+            p.audioId,
+            p.slot,
+            p.url,
+            p.mimeType ?? null,
+            p.voiceId ?? null,
+            p.referenceAudioId ?? null,
+            p.durationMs ?? null,
+            p.timings ? JSON.stringify(p.timings) : null,
+            event.id,
+            event.serverTs,
+          ),
+      )
+      return ['cell_audio']
+    }
+
+    case 'cell.audio.select': {
+      const p = event.payload as EventPayloads['cell.audio.select']
+      if (!event.fileId || !event.cellId) {
+        throw new Error(`${event.kind} event ${event.id} is missing fileId or cellId`)
+      }
+      stmts.push(
+        db
+          .prepare(
+            `UPDATE cell_audio SET selected = 0
+              WHERE project_id = ? AND file_id = ? AND cell_id = ? AND slot = ? AND audio_id != ?`,
+          )
+          .bind(event.projectId, event.fileId, event.cellId, p.slot, p.audioId),
+      )
+      stmts.push(
+        db
+          .prepare(
+            `UPDATE cell_audio SET selected = 1, deleted = 0
+              WHERE project_id = ? AND file_id = ? AND cell_id = ? AND audio_id = ?`,
+          )
+          .bind(event.projectId, event.fileId, event.cellId, p.audioId),
+      )
+      return ['cell_audio']
+    }
+
+    case 'cell.audio.remove': {
+      const p = event.payload as EventPayloads['cell.audio.remove']
+      if (!event.fileId || !event.cellId) {
+        throw new Error(`${event.kind} event ${event.id} is missing fileId or cellId`)
+      }
+      // Soft-delete + deselect. The next live clip is NOT auto-promoted; the
+      // client emits an explicit cell.audio.select to switch.
+      stmts.push(
+        db
+          .prepare(
+            `UPDATE cell_audio SET deleted = 1, selected = 0
+              WHERE project_id = ? AND file_id = ? AND cell_id = ? AND audio_id = ?`,
+          )
+          .bind(event.projectId, event.fileId, event.cellId, p.audioId),
+      )
+      return ['cell_audio']
     }
 
     case 'file.create': {

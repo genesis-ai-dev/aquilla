@@ -43,7 +43,6 @@ import {
   existsSync,
   copyFileSync,
   mkdirSync,
-  readdirSync,
   rmSync,
   writeFileSync,
 } from "node:fs"

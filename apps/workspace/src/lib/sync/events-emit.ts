@@ -202,6 +202,100 @@ export async function emitCellUnvalidate(input: CellValidateInput): Promise<stri
   return eventId
 }
 
+// ── Cell audio helpers ────────────────────────────────────────────────────
+// Non-chain-mutating (parentId omitted), like validation. Bytes are uploaded
+// to R2 first (uploadCellAudio / the voice-convert worker), then the attach
+// event records the metadata + selects the clip in its slot.
+
+export interface CellAudioAttachInput {
+  projectId: string
+  fileId: string
+  cellId: string
+  audioId: string
+  url: string
+  slot: "recording" | "generatedVoice"
+  mimeType?: string
+  voiceId?: string
+  referenceAudioId?: string
+  durationMs?: number
+  timings?: { word: string; t0: number; t1: number; start: number; end: number }[]
+  author: string
+  clientTs?: number
+}
+
+/** Emit a `cell.audio.attach` — records a clip and selects it in its slot. */
+export async function emitCellAudioAttach(input: CellAudioAttachInput): Promise<string> {
+  const { eventId } = await enqueueEvent({
+    kind: "cell.audio.attach",
+    projectId: input.projectId,
+    fileId: input.fileId,
+    cellId: input.cellId,
+    parentId: null,
+    author: input.author,
+    payload: {
+      audioId: input.audioId,
+      url: input.url,
+      slot: input.slot,
+      ...(input.mimeType !== undefined ? { mimeType: input.mimeType } : {}),
+      ...(input.voiceId !== undefined ? { voiceId: input.voiceId } : {}),
+      ...(input.referenceAudioId !== undefined ? { referenceAudioId: input.referenceAudioId } : {}),
+      ...(input.durationMs !== undefined ? { durationMs: input.durationMs } : {}),
+      ...(input.timings !== undefined ? { timings: input.timings } : {}),
+    },
+    clientTs: input.clientTs,
+  })
+  return eventId
+}
+
+export interface CellAudioSelectInput {
+  projectId: string
+  fileId: string
+  cellId: string
+  audioId: string
+  slot: "recording" | "generatedVoice"
+  author: string
+  clientTs?: number
+}
+
+/** Emit a `cell.audio.select` — switch the active clip within a slot. */
+export async function emitCellAudioSelect(input: CellAudioSelectInput): Promise<string> {
+  const { eventId } = await enqueueEvent({
+    kind: "cell.audio.select",
+    projectId: input.projectId,
+    fileId: input.fileId,
+    cellId: input.cellId,
+    parentId: null,
+    author: input.author,
+    payload: { audioId: input.audioId, slot: input.slot },
+    clientTs: input.clientTs,
+  })
+  return eventId
+}
+
+export interface CellAudioRemoveInput {
+  projectId: string
+  fileId: string
+  cellId: string
+  audioId: string
+  author: string
+  clientTs?: number
+}
+
+/** Emit a `cell.audio.remove` — soft-delete + deselect a clip. */
+export async function emitCellAudioRemove(input: CellAudioRemoveInput): Promise<string> {
+  const { eventId } = await enqueueEvent({
+    kind: "cell.audio.remove",
+    projectId: input.projectId,
+    fileId: input.fileId,
+    cellId: input.cellId,
+    parentId: null,
+    author: input.author,
+    payload: { audioId: input.audioId },
+    clientTs: input.clientTs,
+  })
+  return eventId
+}
+
 // ── Importer helpers (consumed by Phase 2c-β `import.ts` rewrite) ─────────
 
 export interface SourceCellCreateInput {

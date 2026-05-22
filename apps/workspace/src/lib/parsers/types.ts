@@ -189,6 +189,13 @@ export interface Voice {
   prompt?: string
   /** Preset voices shipped with the app. Cannot be deleted, only forked. */
   builtIn?: boolean
+  /**
+   * Voice-clone reference clip id (object name incl. ext) stored project-scoped
+   * in R2. When set, TTS output is re-voiced into this clip's timbre via Seed-VC
+   * (sync-worker POST /api/v1/voice/convert) before being attached. Absent means
+   * plain TTS, no conversion.
+   */
+  referenceAudioId?: string
 }
 
 export interface ProjectTtsSettings {

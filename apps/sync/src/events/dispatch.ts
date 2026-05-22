@@ -61,6 +61,9 @@ export function dispatchEvent(
     case 'cell.unvalidate':
     case 'cell.endorsement':
     case 'cell.endorsement.revoke':
+    case 'cell.audio.attach':
+    case 'cell.audio.select':
+    case 'cell.audio.remove':
     case 'project.link-source':
       return {
         ok: true,

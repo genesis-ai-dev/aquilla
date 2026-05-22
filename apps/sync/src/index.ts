@@ -8,13 +8,14 @@
 import { DurableObject } from "cloudflare:workers"
 import { handleAdminRequest } from "./admin"
 import { handleAudioRequest } from "./audio"
-import { handleVoiceConvertRequest } from "./voice-convert"
+import { handleVoiceConvertRequest, handleVoiceReferenceRequest } from "./voice-convert"
 import { notifyProjectDo } from "./archive-broadcast"
 import { handleCorsPreflight, withCors } from "./cors"
 import { handleProjectArchiveRequest } from "./project-archive"
 import { handleCellsAuditReadRequest } from "./events/cells-audit-read-route"
 import { handleCellHistoryReadRequest } from "./events/cell-history-read-route"
 import { handleCellsReadRequest } from "./events/cells-read-route"
+import { handleCellAudioReadRequest } from "./events/cell-audio-read-route"
 import { handleEventsReadRequest } from "./events/read-route"
 import { handleEventsWriteRequest } from "./events/route"
 import { handleFilesReadRequest } from "./events/files-read-route"
@@ -126,6 +127,8 @@ export default {
     if (audioResponse) return audioResponse
     const voiceConvertResponse = await handleVoiceConvertRequest(request, env)
     if (voiceConvertResponse) return withCors(voiceConvertResponse, request)
+    const voiceReferenceResponse = await handleVoiceReferenceRequest(request, env)
+    if (voiceReferenceResponse) return withCors(voiceReferenceResponse, request)
     const eventsReadResponse = await handleEventsReadRequest(request, env)
     if (eventsReadResponse) return withCors(eventsReadResponse, request)
     const validatorsReadResponse = await handleValidatorsReadRequest(request, env)
@@ -136,6 +139,8 @@ export default {
     if (filesReadResponse) return withCors(filesReadResponse, request)
     const cellsReadResponse = await handleCellsReadRequest(request, env)
     if (cellsReadResponse) return withCors(cellsReadResponse, request)
+    const cellAudioReadResponse = await handleCellAudioReadRequest(request, env)
+    if (cellAudioReadResponse) return withCors(cellAudioReadResponse, request)
     const cellHistoryResponse = await handleCellHistoryReadRequest(request, env)
     if (cellHistoryResponse) return withCors(cellHistoryResponse, request)
     const staleSourceResponse = await handleStaleSourceRequest(request, env)

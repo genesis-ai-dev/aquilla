@@ -246,8 +246,6 @@ export interface ProjectRecord {
   experimentalFlags?: Record<string, boolean>
   /** AD-14 decay tunables. Absent → use DECAY_DEFAULTS. */
   decaySettings?: DecaySettings
-  /** Caps and knobs for the composite-health scorer. Absent → use HEALTH_DEFAULTS. */
-  healthSettings?: HealthSettings
   /** Required distinct validators for a text cell to count as "fully validated". Clamped [1, 15]. Default 1. Mirrors desktop manifest. */
   validationCount?: number
   /** Required distinct validators for audio. Clamped [1, 15]. Default 1. */
@@ -395,62 +393,6 @@ export interface ProjectPermissions {
   canResolveComments: boolean
   canPush: boolean
   accessLevel?: number
-}
-
-// ─── Health settings (composite-health flag) ────────────────────────────
-
-export interface HealthCaps {
-  validationGap: number
-  ancestryPenalty: number
-  neighborhoodPenalty: number
-  rulePenalty: number
-}
-
-export interface HealthRulePenaltiesConfig {
-  major: number
-  minor: number
-}
-
-export interface NeighborhoodWeights {
-  idJaccard: number
-  tfidfTokenOverlap: number
-}
-
-export interface HealthConfig {
-  caps: HealthCaps
-  rulePenalties: HealthRulePenaltiesConfig
-  neighborhoodWeights: NeighborhoodWeights
-  neighborhoodSearchLimit: number
-}
-
-export type DeepPartial<T> = {
-  [K in keyof T]?: T[K] extends object ? DeepPartial<T[K]> : T[K]
-}
-
-export interface HealthSettings {
-  /** When true, ignore `overrides` and always use HEALTH_DEFAULTS. */
-  followDefaults: boolean
-  /** Partial override of HEALTH_DEFAULTS, merged at resolution time. */
-  overrides?: DeepPartial<HealthConfig>
-}
-
-export interface CellHealthBreakdown {
-  cellId: string
-  score: number
-  validationGap: number
-  ancestryPenalty: number
-  neighborhoodPenalty: number
-  rulePenalty: number
-  signals: {
-    validatorCount: number
-    requiredValidations: number
-    ancestryExamples: Array<{ cellId: string; health: number; weight: number }>
-    neighborhoodSourceCellIds: string[]
-    neighborhoodTargetCellIds: string[]
-    idJaccard: number
-    tfidfTokenOverlap: number
-    infractions: RuleInfraction[]
-  }
 }
 
 export function detectFileType(fileName: string): FileType | null {

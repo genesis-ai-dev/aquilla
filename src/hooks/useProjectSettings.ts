@@ -69,7 +69,6 @@ function localSettingsFrom(
     out.systemPrompt = record.completionSettings.systemPrompt
   if (record.rules != null) out.rules = record.rules
   if (record.rulePenalties != null) out.rulePenalties = record.rulePenalties
-  if (record.healthSettings != null) out.healthSettings = record.healthSettings
   if (record.validationCount != null) out.validationCount = record.validationCount
   if (record.validationCountAudio != null)
     out.validationCountAudio = record.validationCountAudio
@@ -139,9 +138,6 @@ export function useProjectSettings(
           ...(got.settings.rules != null ? { rules: got.settings.rules } : {}),
           ...(got.settings.rulePenalties != null
             ? { rulePenalties: got.settings.rulePenalties }
-            : {}),
-          ...(got.settings.healthSettings != null
-            ? { healthSettings: got.settings.healthSettings }
             : {}),
           ...(got.settings.validationCount != null
             ? { validationCount: got.settings.validationCount }

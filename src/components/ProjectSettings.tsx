@@ -12,16 +12,14 @@ import { useProjectSettings } from "@/hooks/useProjectSettings"
 import { getProject, updateProject } from "@/lib/store/project-index"
 import { fetchModels, resolveProvider } from "@/lib/completion/completion-service"
 import { useSaveCompletionSettings, DEFAULT_SYSTEM_PROMPT } from "@/hooks/useCompletionSettings"
-import type { ProjectRecord, CompletionProvider, ProjectTtsSettings, RulePenalties } from "@/lib/parsers/types"
-import { HEALTH_DEFAULTS } from "@/lib/health/defaults"
+import type { ProjectRecord, CompletionProvider, ProjectTtsSettings, DecaySettings } from "@/lib/parsers/types"
 import { listFlags } from "@/lib/features/flags"
 import { useFeatureFlag, setFeatureFlag } from "@/hooks/useFeatureFlag"
 import { ValidationSettingsSection } from "./ProjectSettings/ValidationSettingsSection"
-import { HealthSettingsSection } from "./ProjectSettings/HealthSettingsSection"
+import { DecaySettingsSection } from "./ProjectSettings/DecaySettingsSection"
 import { AudioMediaStrategySection } from "./ProjectSettings/AudioMediaStrategySection"
 import { VoiceLibrarySection } from "./ProjectSettings/VoiceLibrarySection"
 import { ApiKeyField } from "./ApiKeyField"
-import type { HealthSettings } from "@/lib/parsers/types"
 import { readValidationCount, readValidationCountAudio } from "@/lib/progress/read-validation-count"
 import { setUserApiKey, useUserApiKey } from "@/lib/store/user-api-keys"
 
@@ -187,24 +185,15 @@ export function ProjectSettings() {
     flash()
   }, [id, refresh, flash])
 
-  const compositeFlag = useFeatureFlag("composite-health", project ?? null)
-  const [healthSettings, setHealthSettings] = useState<HealthSettings>({ followDefaults: true })
+  const [decaySettings, setDecaySettings] = useState<DecaySettings | undefined>(undefined)
 
   useEffect(() => {
-    if (project?.healthSettings) setHealthSettings(project.healthSettings)
-  }, [project?.healthSettings])
+    if (project?.decaySettings) setDecaySettings(project.decaySettings)
+  }, [project?.decaySettings])
 
-  async function saveHealthSettings(next: HealthSettings) {
-    setHealthSettings(next)
-    // Route through the synced patch pipe. `saveField` would only write to
-    // local IDB, and `useProject`'s overlay with `useProjectSettings.settings`
-    // then re-applies the stale server value on the next render, reverting
-    // the edit silently.
-    await savePartialShared({ healthSettings: next })
-  }
-
-  async function resetHealthOverrides() {
-    await saveHealthSettings({ ...healthSettings, overrides: undefined })
+  async function saveDecaySettings(next: DecaySettings) {
+    setDecaySettings(next)
+    await saveField({ decaySettings: next })
   }
 
   function handlePresetChange(nextPresetId: string) {
@@ -471,7 +460,7 @@ export function ProjectSettings() {
               </div>
             </div>
 
-            {!compositeFlag && (
+            {(
               <div>
                 <Label>LLM Health Penalty ({Math.round(llmHealthPenalty * 100)}%)</Label>
                 <input type="range" min="0" max="0.5" step="0.05" value={llmHealthPenalty} onChange={(e) => setLlmHealthPenalty(Number(e.target.value))} onMouseUp={() => saveCompletionSettings({ llmHealthPenalty })} className="mt-2 w-full" />
@@ -488,20 +477,10 @@ export function ProjectSettings() {
           onChange={saveTtsSettings}
         />
 
-        {compositeFlag && (
-          <HealthSettingsSection
-            settings={healthSettings}
-            rulePenalties={project?.rulePenalties ?? HEALTH_DEFAULTS.rulePenalties}
-            onChange={saveHealthSettings}
-            onRulePenaltiesChange={(rp: RulePenalties) => savePartialShared({ rulePenalties: rp })}
-            onReset={resetHealthOverrides}
-            // Only block editing when the project IS synced — for unsynced
-            // (local-only) projects, roleLevel is null so canEditShared is
-            // false too, but local edits are still meaningful.
-            disabled={!canEditShared && project?.syncRole != null}
-            disabledTooltip={sharedDisabledTooltip ?? undefined}
-          />
-        )}
+        <DecaySettingsSection
+          settings={decaySettings}
+          onChange={saveDecaySettings}
+        />
 
         <ValidationSettingsSection
           validationCount={validationCount}

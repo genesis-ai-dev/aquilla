@@ -2,7 +2,6 @@ import { FRONTIER_API_URL } from "./sync-token"
 import type {
   TranslationRule,
   RulePenalties,
-  HealthSettings,
 } from "@/lib/parsers/types"
 
 /** Initial server version for projects with no settings row. */
@@ -21,7 +20,6 @@ export interface ProjectWideSettings {
   systemPrompt?: string
   rules?: TranslationRule[]
   rulePenalties?: RulePenalties
-  healthSettings?: HealthSettings
   validationCount?: number
   validationCountAudio?: number
 }

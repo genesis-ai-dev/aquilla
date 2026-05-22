@@ -14,12 +14,6 @@ export const FLAGS = {
       "A view of what Codex has learned about this project — instructions, standards, and the examples the AI is drawing from.",
     default: false,
   },
-  "composite-health": {
-    label: "Composite health scoring",
-    description:
-      "Replaces validation-as-override with a four-dimension composite score: Reviewed, Examples, Consistency, Rules — each a capped subtraction from 100.",
-    default: true,
-  },
 } as const satisfies Record<string, FlagDefinition>
 
 export type FlagKey = keyof typeof FLAGS

@@ -281,30 +281,44 @@ export function buildEventProjectionStmts(
       if (!event.fileId || !event.cellId) {
         throw new Error(`${event.kind} event ${event.id} is missing fileId or cellId`)
       }
-      const isActive = event.kind === 'cell.validate' ? 1 : 0
 
-      stmts.push(
-        db
-          .prepare(
-            `INSERT INTO cell_validators (
-              project_id, file_id, cell_id, edit_event_id, username,
-              is_active, decided_ts
-            ) VALUES (?, ?, ?, ?, ?, ${isActive}, ?)
-            ON CONFLICT(project_id, file_id, cell_id, edit_event_id, username)
-            DO UPDATE SET
-              is_active  = excluded.is_active,
-              decided_ts = excluded.decided_ts
-            WHERE excluded.decided_ts > cell_validators.decided_ts`,
-          )
-          .bind(
-            event.projectId,
-            event.fileId,
-            event.cellId,
-            p.editEventId,
-            event.author,
-            event.serverTs,
-          ),
-      )
+      // DELETE-on-unvalidate (spec §"Validator record"): a row exists iff
+      // the validator currently endorses the cell. `cell.validate` upserts
+      // one row per (cell, validator) carrying the validated commit's
+      // `event_id`; `cell.unvalidate` deletes it. The decided_ts guard keeps
+      // out-of-order replays from clobbering a newer decision.
+      if (event.kind === 'cell.validate') {
+        stmts.push(
+          db
+            .prepare(
+              `INSERT INTO cell_validators (
+                project_id, file_id, cell_id, event_id, username, decided_ts
+              ) VALUES (?, ?, ?, ?, ?, ?)
+              ON CONFLICT(project_id, file_id, cell_id, username)
+              DO UPDATE SET
+                event_id   = excluded.event_id,
+                decided_ts = excluded.decided_ts
+              WHERE excluded.decided_ts > cell_validators.decided_ts`,
+            )
+            .bind(
+              event.projectId,
+              event.fileId,
+              event.cellId,
+              p.editEventId,
+              event.author,
+              event.serverTs,
+            ),
+        )
+      } else {
+        stmts.push(
+          db
+            .prepare(
+              `DELETE FROM cell_validators
+                WHERE project_id = ? AND file_id = ? AND cell_id = ? AND username = ?`,
+            )
+            .bind(event.projectId, event.fileId, event.cellId, event.author),
+        )
+      }
 
       // Recompute the denormalized `cells.validated` flag against the
       // CURRENT chain head (`cells.event_id`). Validating an old edit no
@@ -320,10 +334,9 @@ export function buildEventProjectionStmts(
               WHERE project_id = ?
                 AND file_id    = ?
                 AND cell_id    = ?
-                AND is_active  = 1
-                AND edit_event_id = cells.event_id
+                AND event_id   = cells.event_id
             )
-            WHERE project_id = ? AND file_id = ? AND cell_id = ?`,
+            WHERE project_id = ? AND file_id = ? AND cell_id = ? AND side = 'target'`,
           )
           .bind(
             event.projectId,

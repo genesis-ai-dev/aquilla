@@ -216,7 +216,7 @@ describe('buildEventProjectionStmts — *.cell.reorder', () => {
 })
 
 describe('buildEventProjectionStmts — cell.validate / cell.unvalidate', () => {
-  it('cell.validate emits validator UPSERT (is_active=1) + cells.validated recompute', () => {
+  it('cell.validate emits validator UPSERT (INSERT) + cells.validated recompute', () => {
     const { db, recorded } = makeD1Stub()
     const stmts: D1PreparedStatement[] = []
     buildEventProjectionStmts(
@@ -226,13 +226,16 @@ describe('buildEventProjectionStmts — cell.validate / cell.unvalidate', () => 
     )
     expect(stmts).toHaveLength(2)
     expect(recorded[0].sql).toContain('INSERT INTO cell_validators')
-    expect(recorded[0].sql).toMatch(/VALUES \([^)]*?, 1, \?\)/)
+    // 0012: columns are (project_id, file_id, cell_id, event_id, username, decided_ts) — no is_active
+    expect(recorded[0].sql).toContain('event_id')
+    expect(recorded[0].sql).not.toContain('is_active')
     expect(recorded[1].sql).toContain('UPDATE cells')
     expect(recorded[1].sql).toContain('SET validated')
-    expect(recorded[1].sql).toContain('edit_event_id = cells.event_id')
+    // Recompute references event_id (not edit_event_id) per 0012 schema
+    expect(recorded[1].sql).toContain('event_id = cells.event_id')
   })
 
-  it('cell.unvalidate emits validator UPSERT (is_active=0) + recompute', () => {
+  it('cell.unvalidate emits DELETE (not UPSERT) + cells.validated recompute', () => {
     const { db, recorded } = makeD1Stub()
     const stmts: D1PreparedStatement[] = []
     buildEventProjectionStmts(
@@ -240,8 +243,11 @@ describe('buildEventProjectionStmts — cell.validate / cell.unvalidate', () => 
       makeEvent('cell.unvalidate', { editEventId: 'evt-commit-id' }),
       stmts,
     )
+    // DELETE stmt + UPDATE cells.validated recompute
     expect(stmts).toHaveLength(2)
-    expect(recorded[0].sql).toMatch(/VALUES \([^)]*?, 0, \?\)/)
+    expect(recorded[0].sql).toContain('DELETE FROM cell_validators')
+    expect(recorded[1].sql).toContain('UPDATE cells')
+    expect(recorded[1].sql).toContain('SET validated')
   })
 })
 

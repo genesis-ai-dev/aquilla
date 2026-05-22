@@ -58,10 +58,11 @@ export async function handleCellsAuditReadRequest(
     WHERE project_id = ? AND file_id = ?
   `
 
+  // DELETE-on-unvalidate: every row is active (no is_active filter needed).
   const validatorsSql = `
-    SELECT cell_id, edit_event_id, username
+    SELECT cell_id, event_id, username
     FROM cell_validators
-    WHERE project_id = ? AND file_id = ? AND is_active = 1
+    WHERE project_id = ? AND file_id = ?
   `
 
   interface CellRow {
@@ -74,7 +75,7 @@ export async function handleCellsAuditReadRequest(
   }
   interface ValidatorRow {
     cell_id: string
-    edit_event_id: string
+    event_id: string
     username: string
   }
 
@@ -83,7 +84,7 @@ export async function handleCellsAuditReadRequest(
     env.AQUILLA_DB.prepare(validatorsSql).bind(projectId, fileId).all<ValidatorRow>(),
   ])
 
-  // Bucket validators by cell_id → edit_event_id → usernames[].
+  // Bucket validators by cell_id → event_id → usernames[].
   const byCell = new Map<string, Map<string, string[]>>()
   for (const v of validatorsRes.results) {
     let perEdit = byCell.get(v.cell_id)
@@ -91,10 +92,10 @@ export async function handleCellsAuditReadRequest(
       perEdit = new Map()
       byCell.set(v.cell_id, perEdit)
     }
-    let names = perEdit.get(v.edit_event_id)
+    let names = perEdit.get(v.event_id)
     if (!names) {
       names = []
-      perEdit.set(v.edit_event_id, names)
+      perEdit.set(v.event_id, names)
     }
     names.push(v.username)
   }

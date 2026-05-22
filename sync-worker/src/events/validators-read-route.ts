@@ -3,7 +3,7 @@
 import { verifyTokenForFile } from '../auth'
 
 export interface ValidatorsReadEnv {
-  CODEX_DB?: D1Database
+  AQUILLA_DB?: D1Database
   SYNC_SECRET_KEY?: string
 }
 
@@ -18,8 +18,8 @@ export async function handleValidatorsReadRequest(
   if (!env.SYNC_SECRET_KEY) {
     return new Response('SYNC_SECRET_KEY not configured', { status: 500 })
   }
-  if (!env.CODEX_DB) {
-    return new Response('CODEX_DB binding not configured', { status: 500 })
+  if (!env.AQUILLA_DB) {
+    return new Response('AQUILLA_DB binding not configured', { status: 500 })
   }
 
   const token = (request.headers.get('Authorization') ?? '').startsWith('Bearer ')
@@ -38,28 +38,27 @@ export async function handleValidatorsReadRequest(
 
   const projectId = auth.claims.projectId
 
+  // DELETE-on-unvalidate: a row's presence IS "active". No is_active column.
   const sql = `
-    SELECT edit_event_id, username, is_active, decided_ts
+    SELECT event_id, username, decided_ts
     FROM cell_validators
     WHERE project_id = ? AND file_id = ? AND cell_id = ?
     ORDER BY decided_ts DESC
   `
 
   interface Row {
-    edit_event_id: string
+    event_id: string
     username: string
-    is_active: number
     decided_ts: number
   }
 
-  const res = await env.CODEX_DB.prepare(sql)
+  const res = await env.AQUILLA_DB.prepare(sql)
     .bind(projectId, fileId, cellId)
     .all<Row>()
 
   const validators = res.results.map((r) => ({
-    editEventId: r.edit_event_id,
+    editEventId: r.event_id,
     username: r.username,
-    isActive: r.is_active === 1,
     decidedTs: r.decided_ts,
   }))
 

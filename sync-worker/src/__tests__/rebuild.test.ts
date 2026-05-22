@@ -212,7 +212,8 @@ describe('handleRebuildProjectionRequest — successful replay', () => {
     const tables = (db as any)._tables()
     expect(tables.cell_validators).toHaveLength(1)
     expect(tables.cell_validators[0].username).toBe('bob')
-    expect(tables.cell_validators[0].is_active).toBe(1)
+    // 0012: DELETE-on-unvalidate — a row's presence = active (no is_active column)
+    expect(tables.cell_validators[0].event_id).toBeDefined()
     expect(tables.cells[0].validated).toBe(1)
   })
 

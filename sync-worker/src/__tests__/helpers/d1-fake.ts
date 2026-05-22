@@ -53,9 +53,9 @@ export interface ValidatorRow {
   project_id: string
   file_id: string
   cell_id: string
-  edit_event_id: string
+  /** The validated commit's event_id (renamed from edit_event_id in 0012). */
+  event_id: string
   username: string
-  is_active: number
   decided_ts: number
 }
 
@@ -292,7 +292,7 @@ export function makeInMemoryD1(tables: Partial<Tables> = {}): InMemoryD1 {
 
     // ── GET /cell-validators read route ─────────────────────────────────
     if (
-      /^SELECT edit_event_id, username, is_active, decided_ts FROM cell_validators WHERE project_id = \? AND file_id = \? AND cell_id = \? ORDER BY decided_ts DESC/.test(
+      /^SELECT event_id, username, decided_ts FROM cell_validators WHERE project_id = \? AND file_id = \? AND cell_id = \? ORDER BY decided_ts DESC/.test(
         normalized,
       )
     ) {
@@ -303,9 +303,8 @@ export function makeInMemoryD1(tables: Partial<Tables> = {}): InMemoryD1 {
         .filter((v) => v.project_id === projectId && v.file_id === fileId && v.cell_id === cellId)
         .sort((a, b) => b.decided_ts - a.decided_ts)
         .map((v) => ({
-          edit_event_id: v.edit_event_id,
+          event_id: v.event_id,
           username: v.username,
-          is_active: v.is_active,
           decided_ts: v.decided_ts,
         }))
     }
@@ -331,18 +330,19 @@ export function makeInMemoryD1(tables: Partial<Tables> = {}): InMemoryD1 {
     }
 
     // ── GET /cells/audit-stats — validators select ─────────────────────
+    // DELETE-on-unvalidate: every row is active, no is_active filter.
     if (
-      /^SELECT cell_id, edit_event_id, username FROM cell_validators WHERE project_id = \? AND file_id = \? AND is_active = 1$/.test(
+      /^SELECT cell_id, event_id, username FROM cell_validators WHERE project_id = \? AND file_id = \?$/.test(
         normalized,
       )
     ) {
       const projectId = args[0] as string
       const fileId = args[1] as string
       return db.cell_validators
-        .filter((v) => v.project_id === projectId && v.file_id === fileId && v.is_active === 1)
+        .filter((v) => v.project_id === projectId && v.file_id === fileId)
         .map((v) => ({
           cell_id: v.cell_id,
-          edit_event_id: v.edit_event_id,
+          event_id: v.event_id,
           username: v.username,
         }))
     }
@@ -670,17 +670,14 @@ export function makeInMemoryD1(tables: Partial<Tables> = {}): InMemoryD1 {
       return []
     }
 
-    // ── INSERT cell_validators (UPSERT) ────────────────────────────────
+    // ── INSERT cell_validators (UPSERT — cell.validate, 0012) ──────────
     if (/^INSERT INTO cell_validators/.test(normalized)) {
-      const isActiveMatch = normalized.match(/VALUES \([^)]*?,\s*(0|1),\s*\?\)/)
-      const isActive = isActiveMatch ? parseInt(isActiveMatch[1], 10) : 1
       const row: ValidatorRow = {
         project_id: args[0] as string,
         file_id: args[1] as string,
         cell_id: args[2] as string,
-        edit_event_id: args[3] as string,
+        event_id: args[3] as string,
         username: args[4] as string,
-        is_active: isActive,
         decided_ts: args[5] as number,
       }
       const idx = db.cell_validators.findIndex(
@@ -688,7 +685,6 @@ export function makeInMemoryD1(tables: Partial<Tables> = {}): InMemoryD1 {
           v.project_id === row.project_id &&
           v.file_id === row.file_id &&
           v.cell_id === row.cell_id &&
-          v.edit_event_id === row.edit_event_id &&
           v.username === row.username,
       )
       if (idx === -1) {
@@ -699,9 +695,25 @@ export function makeInMemoryD1(tables: Partial<Tables> = {}): InMemoryD1 {
       return []
     }
 
+    // ── DELETE cell_validators (cell.unvalidate, 0012) ─────────────────
+    if (
+      /^DELETE FROM cell_validators WHERE project_id = \? AND file_id = \? AND cell_id = \? AND username = \?$/.test(
+        normalized,
+      )
+    ) {
+      const pid = args[0] as string
+      const fid = args[1] as string
+      const cid = args[2] as string
+      const user = args[3] as string
+      db.cell_validators = db.cell_validators.filter(
+        (v) => !(v.project_id === pid && v.file_id === fid && v.cell_id === cid && v.username === user),
+      )
+      return []
+    }
+
     // ── UPDATE cells SET validated = (...) ─────────────────────────────
     // From validate/unvalidate: re-evaluate validated against the current
-    // chain head (cells.event_id).
+    // chain head (cells.event_id). side='target' filter matches 0012 SQL.
     // Bind order: 0=project_id, 1=file_id, 2=cell_id (subquery), 3=project_id, 4=file_id, 5=cell_id (WHERE).
     if (/^UPDATE cells SET validated/.test(normalized)) {
       const projectId = args[0] as string
@@ -714,8 +726,7 @@ export function makeInMemoryD1(tables: Partial<Tables> = {}): InMemoryD1 {
             v.project_id === projectId &&
             v.file_id === fileId &&
             v.cell_id === cellId &&
-            v.is_active === 1 &&
-            v.edit_event_id === cell.event_id,
+            v.event_id === cell.event_id,
         )
         cell.validated = activeForHead ? 1 : 0
       }

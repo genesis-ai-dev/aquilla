@@ -31,12 +31,15 @@ export async function spawnWranglerDev(opts: {
   port: number
   label: string
   env?: Record<string, string>
+  /** Extra flags appended to the `wrangler dev` invocation, e.g.
+   * `["--persist-to", ".wrangler-dev-state"]` to share local D1 state. */
+  extraArgs?: string[]
   logFile?: WriteStream
   streamToParent?: boolean
 }): Promise<SpawnedWorker> {
   const child = spawn(
     "npx",
-    ["wrangler", "dev", "--local", "--port", String(opts.port), "--ip", "127.0.0.1"],
+    ["wrangler", "dev", "--local", "--port", String(opts.port), "--ip", "127.0.0.1", ...(opts.extraArgs ?? [])],
     {
       cwd: opts.cwd,
       env: { ...process.env, ...opts.env },

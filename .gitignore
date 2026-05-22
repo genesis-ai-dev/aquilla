@@ -47,3 +47,7 @@ playwright/.cache/
 # E2E suite — local-only state
 e2e/.auth/
 .e2e-logs/
+
+# Local dev-stack state (wrangler local D1/R2/DO sqlite + worker logs)
+.wrangler-dev-state/
+.dev-stack-logs/

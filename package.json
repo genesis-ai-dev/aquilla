@@ -4,8 +4,9 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "predev": "node scripts/ensure-port-free.mjs 5173",
-    "dev": "vite",
+    "dev": "tsx scripts/dev-stack.ts",
+    "dev:vite": "vite",
+    "predev:vite": "node scripts/ensure-port-free.mjs 5173",
     "predev:codex": "node scripts/ensure-port-free.mjs 5173",
     "dev:codex": "BRAND=codex vite",
     "predev:honeycomb": "node scripts/ensure-port-free.mjs 5173",

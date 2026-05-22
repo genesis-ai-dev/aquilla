@@ -15,7 +15,7 @@ describe("login", () => {
     );
     const s = await login({ username: "alice", password: "pw" });
     expect(fetchSpy).toHaveBeenCalledWith(
-      "https://api.frontierrnd.com/api/v1/auth/token",
+      "https://aquilla-identity.blue-darkness-7674.workers.dev/api/v2/auth/token",
       expect.objectContaining({ method: "POST" })
     );
     expect(s.jwt).toBe("jwt-1");
@@ -30,23 +30,23 @@ describe("login", () => {
   });
 });
 
-describe("FRONTIER_BASE env override", () => {
+describe("AUTH_BASE env override", () => {
   afterEach(() => {
     vi.unstubAllEnvs();
     vi.resetModules();
   });
 
-  it("uses VITE_FRONTIER_BASE when set", async () => {
-    vi.stubEnv("VITE_FRONTIER_BASE", "http://127.0.0.1:8787");
+  it("uses VITE_AUTH_BASE when set", async () => {
+    vi.stubEnv("VITE_AUTH_BASE", "http://127.0.0.1:8787");
     vi.resetModules();
     const mod = await import("./auth");
-    expect(mod.FRONTIER_BASE).toBe("http://127.0.0.1:8787");
+    expect(mod.AUTH_BASE).toBe("http://127.0.0.1:8787");
   });
 
-  it("falls back to api.frontierrnd.com when env is unset", async () => {
-    vi.stubEnv("VITE_FRONTIER_BASE", "");
+  it("falls back to aquilla-identity prod when env is unset", async () => {
+    vi.stubEnv("VITE_AUTH_BASE", "");
     vi.resetModules();
     const mod = await import("./auth");
-    expect(mod.FRONTIER_BASE).toBe("https://api.frontierrnd.com");
+    expect(mod.AUTH_BASE).toBe("https://aquilla-identity.blue-darkness-7674.workers.dev");
   });
 });

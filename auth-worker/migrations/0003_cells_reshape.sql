@@ -1,9 +1,8 @@
 -- Migration: 0003_cells_reshape.sql
 -- Description: Destructive reshape of the cells projection table to match
 --   spec 03-data-model.md "Indicative schemas". The new shape carries:
---     - project_id, file_id, cell_id as a composite PK (paired source/target
---       cells share a cell_id but live in separate files, so the file_id is
---       still part of the key)
+--     - project_id, file_id, cell_id, side as a composite PK (paired
+--       source/target rows share cell_id inside the same imported file)
 --     - side  — 'source' | 'target'. The same cell_id can have rows on both
 --       sides in different files.
 --     - value, value_html — translation/source content (was: content_text)
@@ -44,7 +43,7 @@ CREATE TABLE cells (
     validated       INTEGER NOT NULL DEFAULT 0,
     word_count      INTEGER NOT NULL DEFAULT 0,
     content_hash    TEXT,                       -- djb2; cheap FTS short-circuit fingerprint
-    PRIMARY KEY (project_id, file_id, cell_id),
+    PRIMARY KEY (project_id, file_id, cell_id, side),
     FOREIGN KEY (event_id) REFERENCES events(id),
     FOREIGN KEY (source_event_id) REFERENCES events(id)
 );

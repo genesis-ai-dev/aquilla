@@ -7,18 +7,19 @@
 // old frontier-server still work. The plain `FRONTIER_API_URL` re-export is
 // kept around for chat/LLM/payments routes that haven't been ported.
 
-const FRONTIER_DEFAULT = "https://api.frontierrnd.com"
-
-const FRONTIER_BASE =
+// Phase D: default points at codex-auth-worker (aquilla-identity).
+// VITE_FRONTIER_BASE is retained as a fallback for E2E test environments that
+// set it to a mock server URL.
+const AUTH_FALLBACK =
   ((import.meta.env.VITE_FRONTIER_BASE as string | undefined)?.replace(/\/+$/, "")) ||
-  FRONTIER_DEFAULT
+  "https://aquilla-identity.blue-darkness-7674.workers.dev"
 
 export const AUTH_API_URL =
   ((import.meta.env.VITE_AUTH_BASE as string | undefined)?.replace(/\/+$/, "")) ||
-  FRONTIER_BASE
+  AUTH_FALLBACK
 
-/** @deprecated for routes ported to auth-worker; prefer AUTH_API_URL. */
-export const FRONTIER_API_URL = FRONTIER_BASE
+/** @deprecated Use AUTH_API_URL. Kept for callers not yet migrated. */
+export const FRONTIER_API_URL = AUTH_API_URL
 
 export interface SyncTokenResponse {
   token: string

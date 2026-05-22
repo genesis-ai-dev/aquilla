@@ -1,19 +1,25 @@
-import type { FrontierSession } from "./types";
-import { saveSession } from "./session-store";
-
-// `||` (not `??`) so empty-string env values fall back too — `vi.stubEnv` sets
-// "" to simulate "unset" in tests, and an accidental empty value in a prod
-// .env should also use the default rather than break network calls.
-export const FRONTIER_BASE =
-  ((import.meta.env.VITE_FRONTIER_BASE as string | undefined)?.replace(/\/+$/, "")) ||
-  "https://api.frontierrnd.com";
-
-// Auth + sync-token + invite routes have been ported into the codex-auth-worker
-// in this repo. Default to FRONTIER_BASE so unconfigured environments still hit
-// the legacy frontier-server. CI wires VITE_AUTH_BASE per-branch.
+// Workspace auth module — wraps the codex-auth-worker (/api/v2/auth/*).
+//
+// History: this file previously fetched /api/v1/auth/* against the legacy
+// frontier-server (api.frontierrnd.com). Phase D cuts that dependency:
+// codex-auth-worker is now the canonical identity surface and serves /api/v2/*.
+//
+// `AUTH_BASE` is re-exported so callers that construct identity URLs directly
+// (orgs.ts, members.ts, useUserSearch, frontier-health) work unchanged.
+//
+// `||` (not `??`) so empty-string env values fall back too — `vi.stubEnv`
+// uses "" to simulate "unset" in tests, and accidental empty values in a
+// prod .env should also use the default rather than break network calls.
 export const AUTH_BASE =
   ((import.meta.env.VITE_AUTH_BASE as string | undefined)?.replace(/\/+$/, "")) ||
-  FRONTIER_BASE;
+  "https://aquilla-identity.blue-darkness-7674.workers.dev";
+
+/** @deprecated Use AUTH_BASE directly. Kept as an alias so existing callers
+ *  (orgs.ts, members.ts, useUserSearch) compile without churn. */
+export const FRONTIER_BASE = AUTH_BASE;
+
+import type { FrontierSession } from "./types";
+import { saveSession } from "./session-store";
 
 export class FrontierAuthError extends Error {
   public status: number;
@@ -32,7 +38,7 @@ interface AuthResponse {
 }
 
 export async function login(args: LoginArgs): Promise<FrontierSession> {
-  const res = await fetch(`${AUTH_BASE}/api/v1/auth/token`, {
+  const res = await fetch(`${AUTH_BASE}/api/v2/auth/token`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(args),
@@ -48,7 +54,7 @@ export async function login(args: LoginArgs): Promise<FrontierSession> {
 }
 
 export async function register(args: RegisterArgs): Promise<FrontierSession> {
-  const res = await fetch(`${AUTH_BASE}/api/v1/auth/register`, {
+  const res = await fetch(`${AUTH_BASE}/api/v2/auth/register`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(args),
@@ -69,7 +75,7 @@ export async function register(args: RegisterArgs): Promise<FrontierSession> {
 }
 
 export async function requestPasswordReset(email: string): Promise<void> {
-  const res = await fetch(`${AUTH_BASE}/api/v1/auth/password-reset/request`, {
+  const res = await fetch(`${AUTH_BASE}/api/v2/auth/password-reset/request`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ email }),

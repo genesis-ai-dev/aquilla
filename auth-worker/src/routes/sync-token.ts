@@ -1,21 +1,20 @@
-// POST /api/v2/sync-token — mints a short-lived JWT for codex-sync-worker.
+// POST /api/v2/sync-token — mints a short-lived JWT for aquilla-sync-worker.
 //
 // Spec: docs/SYNC.md ("The flow (single-user, single-file)") in this repo.
 //
-// Request: { projectId, fileId, projectName?, gitlabProjectId? } + Bearer JWT.
+// Request: { projectId, fileId, projectName? } + Bearer JWT.
 // Response: { token, expiresIn: 900, role: { level, name, source } }.
 //
-// Token claims must match codex-sync-worker/src/auth.ts SyncTokenClaims:
+// Token claims must match apps/sync/src/auth.ts SyncTokenClaims:
 //   { userId, username, projectId, fileId, role, aud: "sync", iat, exp }
 // Signed HS256 with SYNC_SECRET_KEY (distinct from SECRET_KEY).
 //
-// Role resolution priority:
-//   1. project_members override (D1).
-//   2. Implicit creator: row in `projects` where `created_by = me` => OWNER.
-//   3. Auto-register: if projectId is unknown AND a bootstrap payload was
-//      sent, insert a `projects` row owned by the caller and grant OWNER.
-//   4. Fall through => 403. (GitLab membership fallback is intentionally
-//      deferred — without it, joiners must be added via /accept-invite.)
+// Role resolution: delegates to project-permissions.resolveProjectRole,
+// which implements AD-12 max-wins across direct + group + org + creator
+// paths. Auto-register (when projectId is unknown AND a bootstrap payload
+// was sent) stays here because it's a project-creation path, not a
+// resolution path; the inserted creator grant resolves to OWNER on the
+// next refresh.
 
 import { Hono } from "hono"
 import { zValidator } from "@hono/zod-validator"
@@ -25,11 +24,11 @@ import { authMiddleware } from "../middleware/auth"
 import type { AuthHonoEnv } from "../middleware/auth"
 import {
   ROLE,
-  type ProjectRow,
   type RoleResolution,
   type SyncTokenClaims,
   type SyncTokenResponse,
 } from "../types"
+import { resolveProjectRole } from "../services/project-permissions"
 
 const syncToken = new Hono<AuthHonoEnv>()
 
@@ -39,7 +38,6 @@ const syncTokenSchema = z.object({
   // Optional bootstrap so an unknown projectId can be auto-registered
   // on the caller's first request.
   projectName: z.string().optional(),
-  gitlabProjectId: z.number().int().optional(),
 })
 
 // 15-minute lifetime — matches the value documented in docs/SYNC.md.
@@ -67,15 +65,15 @@ syncToken.post(
       return c.json({ error: "SYNC_SECRET_KEY not configured" }, 503)
     }
     const user = c.get("user")
-    const { projectId, fileId, projectName, gitlabProjectId } =
-      c.req.valid("json")
+    const { projectId, fileId, projectName } = c.req.valid("json")
 
-    const project = await c.env.AUTH_DB.prepare(
-      `SELECT id, name, gitlab_project_id, org_id, created_by, archived_at
-       FROM projects WHERE id = ?`,
+    // Cheap existence + archived check first so we can short-circuit on
+    // archived and branch to auto-register when the project is unknown.
+    const project = await c.env.AQUILLA_DB.prepare(
+      `SELECT id, archived_at FROM projects WHERE id = ?`,
     )
       .bind(projectId)
-      .first<ProjectRow>()
+      .first<{ id: string; archived_at: string | null }>()
 
     let resolved: RoleResolution | null = null
 
@@ -83,41 +81,18 @@ syncToken.post(
       if (project.archived_at) {
         return c.json({ error: "Project is archived" }, 403)
       }
-
-      // 1. project_members override.
-      const member = await c.env.AUTH_DB.prepare(
-        `SELECT role_level FROM project_members
-         WHERE project_id = ? AND user_id = ?`,
-      )
-        .bind(projectId, user.id)
-        .first<{ role_level: number }>()
-      if (member) {
-        resolved = {
-          level: member.role_level,
-          name: roleNameFor(member.role_level),
-          source: "override",
-        }
-      }
-
-      // 2. Implicit creator.
-      if (!resolved && project.created_by === user.id) {
-        resolved = {
-          level: ROLE.OWNER,
-          name: roleNameFor(ROLE.OWNER),
-          source: "creator",
-        }
-      }
+      // AD-12 max-wins across direct + group + org + creator.
+      resolved = await resolveProjectRole(c.env, user, projectId)
     } else if (projectName) {
       // 3. Auto-register an unknown projectId. The bootstrap payload (project
-      //    name, optional gitlab project id) is supplied by the client; the
-      //    caller becomes the owner. Matches the auto-registration behaviour
-      //    described in docs/SYNC.md.
+      //    name) is supplied by the client; the caller becomes the owner.
+      //    Matches the auto-registration behaviour described in docs/SYNC.md.
       try {
-        await c.env.AUTH_DB.prepare(
-          `INSERT INTO projects (id, name, gitlab_project_id, created_by)
-           VALUES (?, ?, ?, ?)`,
+        await c.env.AQUILLA_DB.prepare(
+          `INSERT INTO projects (id, name, created_by)
+           VALUES (?, ?, ?)`,
         )
-          .bind(projectId, projectName, gitlabProjectId ?? null, user.id)
+          .bind(projectId, projectName, user.id)
           .run()
         resolved = {
           level: ROLE.OWNER,

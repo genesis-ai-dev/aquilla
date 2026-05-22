@@ -113,10 +113,12 @@ export function AppRoutes() {
       {ENABLE_SMOKE_DASHBOARD_ROUTE ? (
         <>
           <Route path="/" element={<Dashboard />} />
-          {/* Dashboard <Navigate to="/onboarding" /> needs a real route in dev,
-              otherwise the `/:id` workspace catch-all matches and treats
-              "onboarding" as a project id. Production routes /onboarding to
-              apps/projects/onboarding via the front-door Worker. */}
+          {/* In prod /projects is owned by apps/projects/ via Workers Routes
+              (routes.json). In dev there is no front-door, so without an
+              explicit /projects route the `/:id` workspace catch-all eats
+              it and tries to load a project named "projects". Same shape
+              for /onboarding. */}
+          <Route path="/projects" element={<Dashboard />} />
           <Route path="/onboarding" element={<OnboardingWizard />} />
         </>
       ) : null}

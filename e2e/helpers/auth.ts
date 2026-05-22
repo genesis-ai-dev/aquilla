@@ -40,7 +40,7 @@ export async function ensureAuthState(username: SeedUser["username"]): Promise<P
 
   const ctx = await pwRequest.newContext()
   try {
-    const r = await ctx.post(`${AUTH_BASE}/api/v1/auth/token`, {
+    const r = await ctx.post(`${AUTH_BASE}/api/v2/auth/token`, {
       data: { username: u.username, password: u.password },
     })
     if (!r.ok()) {

@@ -145,11 +145,6 @@ app.route("/api/v2/invites", invitesRoutes)
 // WRANGLER_LOCAL inside the handler — see routes/test-reset.ts.
 app.route("/__test__", testResetRoutes)
 
-// Legacy v1 alias — the codex-web frontend still calls /api/v1/auth/*
-// (see src/lib/frontier/auth.ts). Mount the same router at v1 so we don't
-// need a coordinated client+server cutover.
-app.route("/api/v1/auth", authRoutes)
-
 app.notFound((c) => c.json({ error: "Not found" }, 404))
 
 app.onError((err, c) => {

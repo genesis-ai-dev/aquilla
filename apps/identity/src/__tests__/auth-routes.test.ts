@@ -112,22 +112,6 @@ describe("POST /api/v2/auth/token", () => {
     expect(res.status).toBe(200)
   })
 
-  it("is mounted at /api/v1/auth/token too for legacy clients", async () => {
-    const db = makeFakeD1({ users: [await makeUserRow()] })
-    const res = await app.request(
-      "/api/v1/auth/token",
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          username: "alice",
-          password: "correct-password",
-        }),
-      },
-      makeEnv(db),
-    )
-    expect(res.status).toBe(200)
-  })
 })
 
 describe("GET /api/v2/auth/me", () => {

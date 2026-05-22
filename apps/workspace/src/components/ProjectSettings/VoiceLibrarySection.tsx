@@ -47,7 +47,7 @@ export function VoiceLibrarySection({ settings, onChange }: Props) {
             userKey={userKey}
             onProjectKeyChange={(v) => onChange({ apiKey: v || undefined })}
             onUserKeyChange={(v) => setUserApiKey("gemini-tts", v)}
-            help="Sent directly to Google. Never uploaded to Frontier."
+            help="Sent directly to Google. Never uploaded to our servers."
           />
         )}
 

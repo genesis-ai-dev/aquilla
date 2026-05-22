@@ -311,7 +311,7 @@ export function ProjectSettings() {
             <span className="flex items-center justify-between">
               <span>Advanced LLM settings</span>
               <span className="text-xs text-muted-foreground">
-                {provider === "frontier" ? "Frontier (default)" : `Custom: ${endpoint || "not set"}`}
+                {provider === "frontier" ? "Aquilla AI (default)" : `Custom: ${endpoint || "not set"}`}
               </span>
             </span>
           </summary>
@@ -328,8 +328,8 @@ export function ProjectSettings() {
                     onChange={() => { setProvider("frontier"); saveCompletionSettings({ provider: "frontier" }) }}
                   />
                   <span>
-                    <strong>Frontier</strong> (recommended) — calls <code className="rounded bg-muted px-1">api.frontierrnd.com</code>{" "}
-                    using your Frontier login. Works out of the box.
+                    <strong>Aquilla AI</strong> (recommended) — uses your
+                    Aquilla account. Works out of the box.
                   </span>
                 </label>
                 <label className="flex items-start gap-2 text-sm">
@@ -397,7 +397,7 @@ export function ProjectSettings() {
                       saveCompletionSettings({ apiKey: v || undefined })
                     }}
                     onUserKeyChange={(v) => setUserApiKey("completion", v)}
-                    help="Sent as Authorization: Bearer <key>. Stored locally in your browser; never uploaded to Frontier."
+                    help="Sent as Authorization: Bearer <key>. Stored locally in your browser; never uploaded to our servers."
                   />
                   <p className="text-xs text-muted-foreground">
                     Stays on this device — not shared with collaborators.
@@ -437,7 +437,7 @@ export function ProjectSettings() {
                   value={model}
                   onChange={(e) => setModel(e.target.value)}
                   onBlur={() => saveCompletionSettings({ model })}
-                  placeholder="Leave blank for Frontier's default"
+                  placeholder="Leave blank for the default model"
                 />
                 <p className="mt-1 text-xs text-muted-foreground">
                   Optionally specify an OpenRouter model (e.g. <code className="rounded bg-muted px-1">anthropic/claude-3.5-sonnet</code>).

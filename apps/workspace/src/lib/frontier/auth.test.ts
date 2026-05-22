@@ -15,7 +15,7 @@ describe("login", () => {
     );
     const s = await login({ username: "alice", password: "pw" });
     expect(fetchSpy).toHaveBeenCalledWith(
-      "https://aquilla-identity.blue-darkness-7674.workers.dev/api/v1/auth/token",
+      "https://aquilla-identity.blue-darkness-7674.workers.dev/api/v2/auth/token",
       expect.objectContaining({ method: "POST" })
     );
     expect(s.jwt).toBe("jwt-1");
@@ -41,8 +41,6 @@ describe("AUTH_BASE env override", () => {
     vi.resetModules();
     const mod = await import("./auth");
     expect(mod.AUTH_BASE).toBe("http://127.0.0.1:8787");
-    // FRONTIER_BASE is a deprecated alias of AUTH_BASE.
-    expect(mod.FRONTIER_BASE).toBe("http://127.0.0.1:8787");
   });
 
   it("falls back to aquilla-identity prod when env is unset", async () => {

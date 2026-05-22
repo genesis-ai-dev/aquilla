@@ -265,7 +265,7 @@ function InviteLinkTab({ projectId, onSharesChanged }: InviteLinkTabProps) {
         ) : (
           <p className="text-[10px] text-muted-foreground">
             {inviteEmail.trim()
-              ? "If they don't have a Frontier account, the join page prefills sign-up with this email."
+              ? "If they don't have an account, the join page prefills sign-up with this email."
               : "Leave blank for an open link anyone signed in can redeem."}
           </p>
         )}

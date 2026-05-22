@@ -1,4 +1,4 @@
-import { FRONTIER_BASE } from "./auth";
+import { AUTH_BASE } from "./auth";
 
 export interface LookedUpUser {
   id: number;
@@ -34,7 +34,7 @@ function authHeaders(jwt: string): HeadersInit {
 
 export async function lookupUser(jwt: string, username: string): Promise<LookedUpUser | null> {
   const res = await fetch(
-    `${FRONTIER_BASE}/api/v2/users/lookup?username=${encodeURIComponent(username)}`,
+    `${AUTH_BASE}/api/v2/users/lookup?username=${encodeURIComponent(username)}`,
     { headers: authHeaders(jwt) }
   );
   if (res.status === 404) return null;
@@ -56,7 +56,7 @@ export async function listProjectMembers(
   projectId: string
 ): Promise<ProjectMember[] | null> {
   const res = await fetch(
-    `${FRONTIER_BASE}/api/v2/projects/${encodeURIComponent(projectId)}/members`,
+    `${AUTH_BASE}/api/v2/projects/${encodeURIComponent(projectId)}/members`,
     { headers: authHeaders(jwt) }
   );
   if (res.status === 403 || res.status === 404) return null;
@@ -72,7 +72,7 @@ export async function addProjectMember(
   role: number
 ): Promise<ProjectMember> {
   const res = await fetch(
-    `${FRONTIER_BASE}/api/v2/projects/${encodeURIComponent(projectId)}/members`,
+    `${AUTH_BASE}/api/v2/projects/${encodeURIComponent(projectId)}/members`,
     {
       method: "POST",
       headers: authHeaders(jwt),
@@ -92,7 +92,7 @@ export async function removeProjectMember(
   userId: number
 ): Promise<void> {
   const res = await fetch(
-    `${FRONTIER_BASE}/api/v2/projects/${encodeURIComponent(projectId)}/members/${userId}`,
+    `${AUTH_BASE}/api/v2/projects/${encodeURIComponent(projectId)}/members/${userId}`,
     { method: "DELETE", headers: authHeaders(jwt) }
   );
   if (!res.ok) {

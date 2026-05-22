@@ -2,8 +2,10 @@ import { useSectionProgress } from "@/hooks/useSectionProgress"
 import { cn } from "@/lib/utils"
 
 interface Props {
+  projectId: string
   fileId: string
   validationCount: number
+  getTokenForFile: (fileId: string) => Promise<string | null>
   onSectionClick: (sectionLabel: string) => void
 }
 
@@ -12,8 +14,8 @@ interface Props {
  * is a clickable row (like a sub-file) with a small progress bar, replacing
  * the old dot-grid which was hard to interpret.
  */
-export function FileSectionGrid({ fileId, validationCount, onSectionClick }: Props) {
-  const sections = useSectionProgress(fileId, validationCount)
+export function FileSectionGrid({ projectId, fileId, validationCount, getTokenForFile, onSectionClick }: Props) {
+  const sections = useSectionProgress(projectId, fileId, validationCount, getTokenForFile)
 
   if (sections === null) {
     return <div className="px-6 py-1 text-[10px] text-muted-foreground">Loading…</div>

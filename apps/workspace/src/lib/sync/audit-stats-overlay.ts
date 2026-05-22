@@ -64,7 +64,7 @@ export function applyOutboxOverlay(
       out.set(cellId, stats)
     }
 
-    if (ev.kind === "cell.commit") {
+    if (ev.kind === "target.cell.commit" || ev.kind === "target.cell.create") {
       stats.editCount += 1
       stats.lastEditAt = ev.clientTs
       stats.lastEditEventId = ev.id

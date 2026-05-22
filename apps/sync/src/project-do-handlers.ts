@@ -33,6 +33,10 @@ export interface ServerEventApplied {
   project: string
   file?: string
   cell?: string
+  /** Username of the actor that produced the event. Lets the receiving
+   *  client distinguish its own writes from those of other collaborators —
+   *  the "remote changed while editing" banner only triggers on the latter. */
+  by?: string
 }
 export interface ServerEventStale {
   t: "event.stale"

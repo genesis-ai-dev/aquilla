@@ -1,7 +1,6 @@
 import { Suspense, lazy, useState, useMemo, useRef, useEffect, useCallback } from "react"
 import { useParams, useNavigate, useSearchParams, useLocation } from "react-router-dom"
 import { useProject } from "@/hooks/useProject"
-import { useFileDoc } from "@/hooks/useFileDoc"
 import { deriveCellAreaState } from "@/lib/editor/cell-area-state"
 import { CellAreaPlaceholder } from "./CellAreaPlaceholder"
 import { TabStrip } from "./TabStrip"
@@ -21,11 +20,9 @@ import { MAX_BATCH_COMPLETIONS } from "@/lib/workspace-actions/registry"
 import type { FileReference } from "@/lib/parsers/types"
 import type { CellData } from "@/hooks/useCells"
 import { useWorkspaceSearch } from "@/hooks/useWorkspaceSearch"
-import { useBacktranslation } from "@/hooks/useBacktranslation"
-import { useComments } from "@/hooks/useComments"
 import { ParallelPassagesPanel, type ParallelPanelMode, type ParallelPanelScope } from "./ParallelPassagesPanel"
 import type { EditorTableHandle } from "./EditorTable"
-import type { WorkspaceSearchResult } from "@/lib/search/workspace-index"
+import type { WorkspaceSearchResult } from "@/hooks/useWorkspaceSearch"
 import { StatusBar } from "./StatusBar"
 import { SyncStatusIndicator } from "./SyncStatusIndicator"
 import { OutboxSyncIndicator } from "./OutboxSyncIndicator"
@@ -38,17 +35,12 @@ import { SharePanel } from "./SharePanel"
 import { VideoPlayer, type VideoPlayerHandle } from "./VideoPlayer"
 import { ResizableVideoPanel } from "./ResizableVideoPanel"
 import { VideoAttachmentDialog } from "./VideoAttachmentDialog"
-import { useVideoAttachment } from "@/hooks/useVideoAttachment"
 import { parseTimestampRange, extractCuesFromCells } from "@/lib/video/vtt-generator"
 import { useFileSync } from "@/hooks/useFileSync"
 import { useFileMeta } from "@/hooks/useFileMeta"
 import { useCellLabelsPreference } from "@/hooks/useCellLabelsPreference"
 import { useProjectPermissions } from "@/hooks/useProjectPermissions"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
-import {
-  countSynthTargets, countTranscribeTargets,
-  synthAllInFile, transcribeAllInFile,
-} from "@/lib/audio/bulk-audio"
 import { eagerlyPrefetchPeaks } from "@/lib/audio/eager-peaks"
 import { useOutboxFlusher } from "@/hooks/useOutboxFlusher"
 import { usePendingOutboxRecords } from "@/hooks/usePendingOutboxRecords"
@@ -88,7 +80,6 @@ import {
 import type { ProjectRecord } from "@/lib/parsers/types"
 import { readValidationCount } from "@/lib/progress/read-validation-count"
 import { useSetupChecklist } from "@/hooks/useSetupChecklist"
-import { useProjectSettingsSync } from "@/hooks/useProjectSettingsSync"
 import { SetupChecklistDrawer } from "./onboarding/SetupChecklistDrawer"
 import { SystemPromptNudge } from "./onboarding/SystemPromptNudge"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
@@ -272,7 +263,11 @@ export function ProjectWorkspace() {
   const [recordingCellId, setRecordingCellId] = useState<string | null>(null)
   const editorRef = useRef<EditorTableHandle>(null)
   const speakBarEnabled = useSpeakBarEnabled(project?.id)
-  const { doc, loading: docLoading } = useFileDoc(activeFileId)
+  // Phase 2c-gamma: the per-file Y.Doc is gone. The editor hydrates from the
+  // cells projection and writes via the outbox. `doc`/`docLoading` are
+  // retained as no-op constants so downstream cellAreaState + props don't
+  // need a wider refactor.
+  const doc: null = null
   // Prefer the Frontier session username (authenticated identity) over the
   // project-level username setting. Validation entries and edit history
   // should attribute to the actual signed-in user.
@@ -399,8 +394,13 @@ export function ProjectWorkspace() {
   const [videoDialogOpen, setVideoDialogOpen] = useState(false)
   const [currentVideoTime, setCurrentVideoTime] = useState(0)
   const videoPlayerRef = useRef<VideoPlayerHandle>(null)
-  const { attachment: videoAttachment, resolvedSrc: videoSrc, blobUnavailable, save: saveVideo } =
-    useVideoAttachment(isSubtitleFile ? doc : null)
+  // Phase 2c-gamma: video attachments lived on Y.Doc meta. Disabled here so
+  // the editor still renders for subtitle files; the attach/play workflow
+  // comes back via the event grammar in v1.x.
+  const videoAttachment: { videoStartOffset?: number; videoUrl?: string } = {}
+  const videoSrc: string | null = null
+  const blobUnavailable = false
+  const saveVideo: (..._: unknown[]) => void = () => {}
 
   // Live cues for the VideoPlayer's overlay (bypasses iframe CC). We drive
   // rendering from cell data directly so edits appear immediately without a
@@ -459,8 +459,15 @@ export function ProjectWorkspace() {
   const cellsRef = useRef(cells)
   useEffect(() => { cellsRef.current = cells }, [cells])
 
+  // Merge: AD-14 (this branch) retired the composite-health `penalties` path,
+  // so destructure only `rules`. Comments handlers take main's Phase 2c-gamma
+  // rip — threads/messages lived on Y.Doc maps and the v1.x event grammar isn't
+  // in this build, so these are no-ops and the drawer renders empty.
   const { rules } = useRules(project ?? null, refresh)
-  const { addThread, addMessage, resolveThread, reopenThread } = useComments(doc, currentUsername)
+  const addThread: (..._: unknown[]) => void = () => {}
+  const addMessage: (..._: unknown[]) => void = () => {}
+  const resolveThread: (..._: unknown[]) => void = () => {}
+  const reopenThread: (..._: unknown[]) => void = () => {}
   const commentsCell = commentsCellId ? cells.find((c) => c.id === commentsCellId) : null
   const historyCell = historyCellId ? cells.find((c) => c.id === historyCellId) : null
 
@@ -585,29 +592,15 @@ export function ProjectWorkspace() {
     revalidateCells()
   }, [project?.id, getTokenForFile, refreshOutboxPending, revalidateAuditStats, revalidateCells])
   const { completeSingle, completeBatch, isConfigured, isAvailable: isCompletionAvailable, completing, examples, errors } = useCompletion(
-    doc, project?.completionSettings, project?.sourceLanguage || "", project?.targetLanguage || "", branchingSearch, branchingSearchPassages, frontierSession, commitCompletedCell
+    project?.completionSettings, project?.sourceLanguage || "", project?.targetLanguage || "", branchingSearch, branchingSearchPassages, frontierSession, commitCompletedCell
   )
 
-  const findBacktranslationExamples = useCallback((target: CellData) => {
-    return cells
-      .filter((c) => c.id !== target.id && c.backtranslation && c.backtranslationForText === c.translated)
-      .map((c) => ({ target: c.translated, backtranslation: c.backtranslation! }))
-      .slice(0, 3)
-  }, [cells])
-
-  const {
-    generate: runBacktranslation,
-    generating: backtranslating,
-    errors: backtranslationErrors,
-    isConfigured: isBacktranslationConfigured,
-  } = useBacktranslation(
-    doc,
-    project?.completionSettings,
-    project?.sourceLanguage || "",
-    project?.targetLanguage || "",
-    findBacktranslationExamples,
-    frontierSession,
-  )
+  // Phase 2c-gamma: backtranslation wrote through Y.Doc; the writeback hookup
+  // is deferred to v1.x. The button still renders disabled.
+  const runBacktranslation: (..._: unknown[]) => Promise<void> = async () => {}
+  const backtranslating: Set<string> = new Set()
+  const backtranslationErrors: Map<string, string> = new Map()
+  const isBacktranslationConfigured = false
 
   const requiredValidations = project ? readValidationCount(project) : 1
 
@@ -675,17 +668,16 @@ export function ProjectWorkspace() {
     projectId: project?.id ?? null,
     fileId: activeFileId || null,
     username: currentUsername,
-    enabled: Boolean(project && activeFileId && doc),
+    enabled: Boolean(project && activeFileId),
     session: frontierSession,
     projectName: project?.name ?? null,
     gitlabProjectId:
       project?.origin?.kind === "git" ? project.origin.gitlabProjectId : null,
   })
 
-  // Cross-collaborator sync for AI provider/instructions: piggybacks on the
-  // active file's Y.Doc meta so settings flow between clients without a
-  // dedicated project-meta room.
-  useProjectSettingsSync(doc, project ?? null, refresh)
+  // Phase 2c-gamma: cross-collaborator settings sync was piggybacked on the
+  // active file's Y.Doc meta; that broadcast channel is gone. Settings still
+  // persist locally and via the project record fetch.
 
   // Phase 2c-β: per-project WS reconciler. Subscribes to the per-project
   // Durable Object for presence + focus locks + `event.applied` broadcasts.
@@ -715,8 +707,14 @@ export function ProjectWorkspace() {
           userId: currentUsername,
           baseUrl: syncWorkerHttpOrigin(),
           getToken: async () => {
-            const aFile = projectFilesRef.current[0]?.id ?? ""
-            if (!aFile) return null
+            // The per-project DO authenticates with verifyTokenForProject,
+            // which checks only projectId and ignores the token's fileId. The
+            // workspace's only mint path is file-scoped, so for a fileless
+            // project (nothing imported yet) we'd otherwise return null and the
+            // WS would never authenticate — breaking presence/focus-locks until
+            // the first file lands. Mint against a sentinel fileId instead; the
+            // DO discards it. (identity's /sync-token requires fileId.min(1).)
+            const aFile = projectFilesRef.current[0]?.id ?? "__project__"
             return getTokenForFile(aFile)
           },
         },
@@ -725,6 +723,13 @@ export function ProjectWorkspace() {
             if (msg.t === "event.applied") {
               if (!msg.cell || msg.project !== pid) return
               revalidateCells()
+              // Don't pop the "remote changed" banner for our own writes —
+              // the editor just committed; bouncing the same event back via
+              // WS is expected. `by` is populated by post-2c-γ sync workers;
+              // older builds omit it and fall through to the legacy
+              // "always banner on focused cell" path so the user can still
+              // tell something happened.
+              if (msg.by && msg.by === currentUsername) return
               if (focusedCellIdRef.current === msg.cell) {
                 setCellsWithRemoteChange((cur) => {
                   if (cur.has(msg.cell!)) return cur
@@ -807,12 +812,10 @@ export function ProjectWorkspace() {
   const cellAreaState = useMemo(
     () => deriveCellAreaState({
       activeFileId,
-      docLoading,
-      hasDoc: Boolean(doc),
       cellCount: cells.length,
       syncStatus: fileSyncStatus,
     }),
-    [activeFileId, docLoading, doc, cells.length, fileSyncStatus]
+    [activeFileId, cells.length, fileSyncStatus]
   )
 
   // Presence visible in the status bar is the file-level set the sync-worker
@@ -999,10 +1002,10 @@ export function ProjectWorkspace() {
     return items
   }, [projectId, activeFileId, navigate, openCommentCount, livingMemoryEnabled])
 
-  const audioCounts = useMemo(() => ({
-    untranscribed: countTranscribeTargets(cells),
-    unsynthesized: countSynthTargets(cells, false),
-  }), [cells])
+  // Phase 2c-gamma: countTranscribeTargets/countSynthTargets lived in bulk-audio
+  // (Y.Doc-coupled). They're zeroed until the audio-attachment event grammar
+  // lands; the "Transcribe all" / "Synth all" menu items can still render.
+  const audioCounts = useMemo(() => ({ untranscribed: 0, unsynthesized: 0 }), [])
 
   // Eager media strategy: prefetch every recording's waveform peaks into the
   // OPFS cache once the file is open, so even cells the user hasn't scrolled
@@ -1056,19 +1059,17 @@ export function ProjectWorkspace() {
       console.info("agent-input triggered (placeholder runner)")
     },
     runImportWip: openImportFlow,
+    // Phase 2c-gamma: bulk transcribe/synth wrote attachments to Y.Doc; the
+    // writeback grammar lands in v1.x. Stubbed so the workspace actions menu
+    // still renders without crashing.
     runTranscribeAll: () => {
-      if (!doc || !project || !frontierSession) return
-      void transcribeAllInFile({ doc, cells, project, session: frontierSession })
+      console.warn("[ProjectWorkspace] transcribe-all disabled in Phase 2c-gamma")
     },
     runSynthAll: () => {
-      if (!doc || !project || !frontierSession) return
-      void synthAllInFile({
-        doc, cells, project, session: frontierSession,
-        username: project.username || "anonymous",
-      })
+      console.warn("[ProjectWorkspace] synth-all disabled in Phase 2c-gamma")
     },
     navigate,
-  }), [activeFileId, completeBatch, cells, doc, project, frontierSession, navigate, openImportFlow, openExportFlow])
+  }), [activeFileId, completeBatch, cells, project, frontierSession, navigate, openImportFlow, openExportFlow])
 
   const handleCellCommitted = useCallback(async () => {
     await flushOutboxBatch({ getTokenForFile })
@@ -1173,6 +1174,7 @@ export function ProjectWorkspace() {
               fileProgress={fileProgress}
               suggestionFileIds={suggestionFileIds}
               validationCount={validationCount}
+              getTokenForFile={getTokenForFile}
               onSelectFile={workspaceTabs.openFile}
               onRename={handleRename}
               onMove={(fileId) => {
@@ -1278,13 +1280,12 @@ export function ProjectWorkspace() {
               onActivate={workspaceTabs.activateTab}
               onClose={workspaceTabs.closeTab}
             />
-            {project && doc && activeFileId && (
+            {project && activeFileId && (
               <>
                 {speakBarEnabled && (
                   <VoiceBar
                     project={project}
                     cells={cells}
-                    doc={doc}
                     username={currentUsername}
                     session={frontierSession}
                     editorRef={editorRef}
@@ -1296,7 +1297,6 @@ export function ProjectWorkspace() {
                 <SelectionBar
                   project={project}
                   cells={cells}
-                  doc={doc}
                   session={frontierSession}
                   username={currentUsername}
                   completeSingle={completeSingle}
@@ -1338,9 +1338,9 @@ export function ProjectWorkspace() {
             )}
           </>
         }
-        main={cellAreaState.kind === "ready" && doc ? (
+        main={cellAreaState.kind === "ready" ? (
           <EditorTable
-            ref={editorRef} project={project} cells={cells} doc={doc}
+            ref={editorRef} project={project} cells={cells}
             username={currentUsername}
             isCompletionConfigured={isConfigured} isCompletionAvailable={isCompletionAvailable} completing={completing}
             examples={examples} errors={errors}
@@ -1396,7 +1396,6 @@ export function ProjectWorkspace() {
                 onClose={() => setDrawerRuleId(null)}
                 onNavigateToCell={() => {}}
                 project={project}
-                doc={doc}
                 username={currentUsername}
                 refresh={refresh}
                 cellsByFile={fileCells}
@@ -1470,11 +1469,10 @@ export function ProjectWorkspace() {
           onUpdated={handleProjectUpdated}
         />
       )}
-      {project && doc && (
+      {project && (
         <AudioRecordingModal
           open={recordingCellId !== null}
           project={project}
-          doc={doc}
           cells={cells}
           activeCellId={recordingCellId}
           username={currentUsername}

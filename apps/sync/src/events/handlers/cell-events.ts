@@ -108,6 +108,7 @@ export function handleCellEvent(
     file: event.fileId,
     cell: event.cellId,
     ts: serverTs,
+    by: claims.username,
   }
 
   return {

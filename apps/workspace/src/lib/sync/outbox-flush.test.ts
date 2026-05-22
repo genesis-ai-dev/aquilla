@@ -34,12 +34,12 @@ let _eventSeq = 0
 function makeEvent(
   id: string,
   fileId?: string,
-  overrides: Partial<CqrsRawEvent<"cell.commit">> = {},
-): CqrsRawEvent<"cell.commit"> {
+  overrides: Partial<CqrsRawEvent<"target.cell.commit">> = {},
+): CqrsRawEvent<"target.cell.commit"> {
   return {
     id,
     schemaVersion: CQRS_SCHEMA_VERSION,
-    kind: "cell.commit",
+    kind: "target.cell.commit",
     projectId: "proj",
     fileId,
     cellId: "cell-1",

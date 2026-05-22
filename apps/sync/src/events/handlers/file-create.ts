@@ -116,6 +116,7 @@ export function handleFileCreate(
     project: event.projectId,
     file: event.fileId,
     ts: serverTs,
+    by: claims.username,
   }
 
   return {

@@ -64,7 +64,7 @@ function SyncFreezeOverlay() {
   const { syncing } = useSyncing()
   if (!syncing) return null
   return (
-    <div className="fixed top-0 left-0 right-0 z-30 bg-amber-50 text-amber-800 border-b border-amber-200 px-3 py-1 text-xs text-center">
+    <div className="fixed top-0 left-0 right-0 z-40 bg-amber-50 text-amber-800 border-b border-amber-200 px-3 py-1 text-xs text-center">
       Merging incoming changes…
     </div>
   )

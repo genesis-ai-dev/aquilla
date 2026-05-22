@@ -12,27 +12,8 @@ import type { SearchResult } from "@/lib/sync/search-read-types"
 import type { MatchField } from "@/lib/search/workspace-index"
 import type { FileReference } from "@/lib/parsers/types"
 
-/** Public result shape — kept loosely compatible with the pre-Phase 2b
- *  `WorkspaceSearchResult` so SearchResultsList et al. don't have to
- *  reshape their props. `original`/`translated` carry the cell's value on
- *  the matched side; the unmatched side comes back empty (server returns
- *  only the matched row). `fileName` is empty until callers join with
- *  `files` themselves. */
-export interface WorkspaceSearchResult {
-  cellId: string
-  fileId: string
-  fileName: string
-  original: string
-  translated: string
-  context: string
-  matchedFields: Set<MatchField>
-  matchCount: number
-  matchedTokens: string[]
-  /** Phase 2b additions — surfaced for callers that want to render the
-   *  server snippet directly instead of re-tokenizing. */
-  snippet: string
-  rank: number
-}
+export type { WorkspaceSearchResult } from "@/lib/search/workspace-index"
+import type { WorkspaceSearchResult } from "@/lib/search/workspace-index"
 
 export interface UseWorkspaceSearchOptions {
   projectId: string | null

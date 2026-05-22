@@ -55,7 +55,8 @@ function statusLabel(status: Status): string {
 
 function eventLabel(kind: CqrsEventKind): string {
   switch (kind) {
-    case "cell.commit":
+    case "target.cell.commit":
+    case "target.cell.create":
       return "Edit"
     case "cell.validate":
       return "Validate"
@@ -95,7 +96,7 @@ export function OutboxInspectorPopover({ trigger, records }: Props) {
   const summary = useMemo(() => {
     const counts = { commit: 0, validate: 0, unvalidate: 0 }
     for (const { rec } of rows) {
-      if (rec.event.kind === "cell.commit") counts.commit += 1
+      if (rec.event.kind === "target.cell.commit" || rec.event.kind === "target.cell.create") counts.commit += 1
       else if (rec.event.kind === "cell.validate") counts.validate += 1
       else if (rec.event.kind === "cell.unvalidate") counts.unvalidate += 1
     }

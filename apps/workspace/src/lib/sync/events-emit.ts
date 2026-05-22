@@ -8,10 +8,10 @@
  * "give me a typed event for this user action" layer. Tests use the
  * outbox API directly; UI hooks/components use these helpers.
  *
- * The legacy `cqrs-bridge.ts` is the Y.Doc-coupled equivalent. It still
- * works during 2c-α (Y.Doc remains the load path for cells); 2c-β will
- * delete it once the editor is rewritten to read from the cells projection
- * directly.
+ * Phase 2c-γ: the legacy `cqrs-bridge.ts` is now a thin shim for the
+ * workspace-scoped (projectId, fileId, username) identity + the per-file
+ * sync-token fetcher. It no longer touches Y.Doc — writes flow exclusively
+ * through these helpers.
  */
 
 import { v7 as uuidv7 } from "uuid"

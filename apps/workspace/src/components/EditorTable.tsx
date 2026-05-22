@@ -1,6 +1,5 @@
 import React, { useEffect, useRef, useCallback, useMemo, useState, forwardRef, useImperativeHandle } from "react"
 import { useVirtualizer } from "@tanstack/react-virtual"
-import * as Y from "yjs"
 import DOMPurify from "dompurify"
 import {
   Check, CheckCheck, Circle, Trash2, AlertTriangle, AlertCircle, RefreshCw,
@@ -11,8 +10,6 @@ import type { CellData } from "@/hooks/useCells"
 import type { ScoredPair } from "@/lib/search/dual-index"
 import type { TranslationRule, RuleInfraction, ProjectRecord } from "@/lib/parsers/types"
 import { useProjectPermissions } from "@/hooks/useProjectPermissions"
-import { toggleCellValidation } from "@/hooks/useCellHistory"
-import { getFragmentHtml } from "@/lib/richtext/translated-xml"
 import { emitTargetCellCommit, emitCellValidate, emitCellUnvalidate } from "@/lib/sync/events-emit"
 import { ExamplePanel } from "./ExamplePanel"
 import { HighlightedText, buildHighlightsFromExamples } from "./HighlightedText"
@@ -27,11 +24,8 @@ import { CellActionRail, RailButton, isInteractiveTarget } from "./CellActionRai
 import { CellExpansion } from "./CellExpansion"
 import { tokenizeWords } from "@/lib/audio/timings"
 import { useCellAudio } from "@/hooks/useCellAudio"
-import { transcribeAndStoreTimings } from "@/lib/audio/transcribe"
 import { setTranscribeStatus, useTranscribeStatus } from "@/lib/audio/transcribe-status"
-import { whisperLanguageFromTag } from "@/lib/audio/language"
 import { handleVoiceDropOnCell, VOICE_DRAG_MIME } from "./VoiceBar"
-import { AiModelConsentDeniedError } from "@/lib/audio/ai-consent"
 import {
   MAX_SELECTED,
   clearSelection,
@@ -49,7 +43,6 @@ import { openVoiceModalFromAnywhere } from "./VoiceBar"
 import { cn } from "@/lib/utils"
 import { isPerfLogEnabled } from "@/lib/perf-log"
 import { partitionInfractions, addWaiver, removeWaiver } from "@/lib/rules/waivers"
-import { setCellWaivers } from "@/hooks/useCellWaivers"
 import { ViolationPopover } from "./ViolationPopover"
 import type { RangeHighlight } from "./HighlightedText"
 
@@ -158,7 +151,7 @@ function SynthStatusBadge({
 function ValidationHistoryTimeline({
   entries, currentUsername,
 }: {
-  entries: import("@/lib/codex-editor/edits/types").EditValidationSummary[]
+  entries: import("@/hooks/useCells").EditValidationSummary[]
   currentUsername: string
 }) {
   const [expandedIdx, setExpandedIdx] = useState<number | null>(null)
@@ -241,7 +234,6 @@ export interface EditorTableHandle {
 interface EditorTableProps {
   project: ProjectRecord
   cells: CellData[]
-  doc: Y.Doc
   username: string
   /** Called after a successful `target.cell.commit` enqueue so the parent
    *  refetches the cells projection. */
@@ -298,7 +290,7 @@ interface EditorTableProps {
 }
 
 export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(function EditorTable({
-  project, cells, doc, username, isCompletionConfigured, isCompletionAvailable,
+  project, cells, username, isCompletionConfigured, isCompletionAvailable,
   completing, examples, errors,
   onCompleteSingle, onCompleteBatch, healthMap,
   infractions = new Map(), rules = [], onInfractionClick,
@@ -633,7 +625,6 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
                 project={project}
                 cell={cell}
                 isStaleSource={staleCellIds?.has(cell.id) ?? false}
-                doc={doc}
                 username={username}
                 editable={canEdit}
                 onCellCommitted={onCellCommitted}
@@ -700,7 +691,6 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
 interface MemoizedRowProps {
   project: ProjectRecord
   cell: CellData
-  doc: Y.Doc
   username: string
   editable: boolean
   /** Phase 5 / AD-9: source has advanced since this target was last committed.
@@ -761,7 +751,7 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
     onDragStart: onDragStartParent, onDragEnter: onDragEnterParent,
     onSelectionPointerDown: onSelectionPointerDownParent,
     getVoiceTakeCells,
-    project, doc, username, editable, isCompletionConfigured, isCompletionAvailable,
+    project, username, editable, isCompletionConfigured, isCompletionAvailable,
     ruleMap, onCompleteSingle, onInfractionClick,
     isBacktranslationConfigured, onBacktranslate,
     onOpenComments, onOpenHistory,
@@ -817,7 +807,6 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
       <EditorRow
         project={project}
         cell={cell}
-        doc={doc}
         username={username}
         editable={editable}
         isStaleSource={isStaleSource}
@@ -871,7 +860,6 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
 interface EditorRowProps {
   project: ProjectRecord
   cell: CellData
-  doc: Y.Doc
   username: string
   editable: boolean
   /** Phase 5 / AD-9 — true when the source has advanced since the last
@@ -923,7 +911,7 @@ interface EditorRowProps {
 }
 
 function EditorRow({
-  project, cell, doc, username, editable, isCompletionConfigured, isCompletionAvailable, isLoading,
+  project, cell, username, editable, isCompletionConfigured, isCompletionAvailable, isLoading,
   cellExamples, highlights, error, health,
   cellInfractions, waivedInfractions, ruleMap,
   onCompleteSingle, onInfractionClick,
@@ -957,17 +945,17 @@ function EditorRow({
     [cell.waivers],
   )
 
-  const handleWaive = useCallback((input: { ruleId: string; reason?: string }) => {
-    const next = addWaiver(cell.waivers ?? [], input, username)
-    setCellWaivers(doc, cell.id, next)
+  const handleWaive = useCallback((_input: { ruleId: string; reason?: string }) => {
+    // Phase 2c-gamma: waivers wrote to Y.Doc; the event-grammar version
+    // is deferred to v1.x. The popover still closes so the click feels live.
+    addWaiver(cell.waivers ?? [], _input, username)
     setOpenRuleId(null)
-  }, [cell.waivers, cell.id, doc, username])
+  }, [cell.waivers, username])
 
   const handleUnwaive = useCallback((ruleId: string) => {
-    const next = removeWaiver(cell.waivers ?? [], ruleId)
-    setCellWaivers(doc, cell.id, next)
+    removeWaiver(cell.waivers ?? [], ruleId)
     setOpenRuleId(null)
-  }, [cell.waivers, cell.id, doc])
+  }, [cell.waivers])
 
   const sourceRanges = useMemo<RangeHighlight[]>(() => {
     const out: RangeHighlight[] = []
@@ -1050,7 +1038,7 @@ function EditorRow({
 
   // Detect formatting loss: source has inline style marks that the target doesn't.
   const sourceHasFormatting = Boolean(cell.originalHtml && /<(b|strong|i|em|u|s|strike|del|code)\b/i.test(cell.originalHtml))
-  const targetHtml = cell.translatedXml ? getFragmentHtml(cell.translatedXml) : ""
+  const targetHtml = cell.translatedHtml ?? ""
   const targetHasFormatting = /<(b|strong|i|em|u|s|strike|del|code)\b/i.test(targetHtml)
   const showFormattingLossWarning =
     sourceHasFormatting && !targetHasFormatting && cell.translated.trim().length > 0
@@ -1126,35 +1114,13 @@ function EditorRow({
   const transcriptPreviewRef = useRef<HTMLDivElement | null>(null)
 
   const handleTranscribe = useCallback(async () => {
+    // Phase 2c-gamma: transcribeAndStoreTimings wrote per-word timings into
+    // the per-file Y.Doc. The grammar that brings forced-alignment writebacks
+    // to the event log lands in v1.x; this gesture is a no-op for now.
     const audioId = cell.selectedAudioId
     if (!audioId) return
-    setTranscribeStatus(audioId, { kind: "loading", loaded: 0, total: 0, file: "" })
-    const startedAt = Date.now()
-    try {
-      const bytes = await audioController.ensureBytes()
-      const out = await transcribeAndStoreTimings(doc, cell.id, audioId, bytes, {
-        cellText: cell.translated,
-        language: whisperLanguageFromTag(project.targetLanguage),
-        onProgress: (p) => {
-          setTranscribeStatus(audioId, { kind: "loading", loaded: p.loaded, total: p.total, file: p.file })
-          if (p.status === "ready" || (p.total > 0 && p.loaded >= p.total)) {
-            setTranscribeStatus(audioId, { kind: "transcribing" })
-          }
-        },
-      })
-      setTranscribeStatus(audioId, {
-        kind: "done", wordCount: out.timings.length, durationMs: Date.now() - startedAt,
-      })
-    } catch (e) {
-      if (e instanceof AiModelConsentDeniedError) {
-        setTranscribeStatus(audioId, { kind: "idle" })
-        return
-      }
-      setTranscribeStatus(audioId, {
-        kind: "error", message: e instanceof Error ? e.message : String(e),
-      })
-    }
-  }, [cell.id, cell.selectedAudioId, cell.translated, audioController, doc, project.targetLanguage])
+    setTranscribeStatus(audioId, { kind: "idle" })
+  }, [cell.selectedAudioId])
 
   // Build tooltip detail
   const lastEntry = cell.history[cell.history.length - 1]
@@ -1186,7 +1152,6 @@ function EditorRow({
     }
     if (details.reason === "trigger-press") {
       if (editable && !isSelfValidated) {
-        toggleCellValidation(doc, cell.id, username, true)
         emitValidationChange(true)
         details.cancel()
         return
@@ -1286,7 +1251,6 @@ function EditorRow({
                       className="flex-shrink-0 rounded p-0.5 text-muted-foreground/70 transition-colors hover:bg-destructive/10 hover:text-destructive"
                       title="Remove your validation"
                       onClick={() => {
-                        toggleCellValidation(doc, cell.id, username, false)
                         emitValidationChange(false)
                         setValidationPopoverOpen(false)
                       }}
@@ -1919,7 +1883,6 @@ function EditorRow({
                           timings={cellAudioTimings}
                           cellText={cell.translated}
                           cellId={cell.id}
-                          doc={doc}
                           alignedToCellText={
                             tokenizeWords(cell.translated).length === cellAudioTimings.length
                           }
@@ -1970,7 +1933,6 @@ function EditorRow({
                           timings={generatedVoiceTimings}
                           cellText={cell.translated}
                           cellId={cell.id}
-                          doc={doc}
                           alignedToCellText={
                             tokenizeWords(cell.translated).length === generatedVoiceTimings.length
                           }

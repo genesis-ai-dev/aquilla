@@ -74,21 +74,37 @@ describe("POST /api/v1/chat/completions — auth", () => {
     expect(res.status).toBe(401)
   })
 
-  it("returns 401 when the bearer's user no longer exists", async () => {
-    const db = makeFakeD1() // no users
-    const res = await app.request(
-      "/api/v1/chat/completions",
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: await makeBearer("ghost"),
-        },
-        body: JSON.stringify({ model: "default", messages: [] }),
-      },
-      makeEnv(db),
+  it("accepts a valid JWT even when the bearer has no row in AUTH_DB", async () => {
+    // The chat worker trusts the JWT signature; a directory lookup would
+    // lock out the half of the user population that lives only in
+    // aquilla-db (new aquilla-identity signups). OpenRouter still needs a
+    // working OPENROUTER_API_KEY, so we stub fetch to keep the test pure.
+    const fetchMock = vi.fn<typeof fetch>(async () =>
+      new Response(
+        JSON.stringify({ choices: [{ message: { content: "ok" } }] }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ),
     )
-    expect(res.status).toBe(401)
+    const originalFetch = global.fetch
+    global.fetch = fetchMock as unknown as typeof fetch
+    try {
+      const db = makeFakeD1() // no users
+      const res = await app.request(
+        "/api/v1/chat/completions",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: await makeBearer("ghost"),
+          },
+          body: JSON.stringify({ model: "default", messages: [] }),
+        },
+        makeEnv(db),
+      )
+      expect(res.status).toBe(200)
+    } finally {
+      global.fetch = originalFetch
+    }
   })
 })
 

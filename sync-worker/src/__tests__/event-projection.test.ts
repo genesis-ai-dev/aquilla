@@ -191,17 +191,25 @@ describe('buildEventProjectionStmts — source.cell.commit', () => {
 })
 
 describe('buildEventProjectionStmts — *.cell.delete', () => {
-  it('emits a DELETE FROM cells statement', () => {
+  it('emits a DELETE FROM cells scoped to the event side', () => {
     const { db, recorded } = makeD1Stub()
     const stmts: D1PreparedStatement[] = []
     buildEventProjectionStmts(db, makeEvent('target.cell.delete', {}), stmts)
     expect(recorded[0].sql).toContain('DELETE FROM cells')
-    expect(recorded[0].args).toEqual(['proj-1', 'file-a', 'cell-1'])
+    expect(recorded[0].sql).toContain('side = ?')
+    expect(recorded[0].args).toEqual(['proj-1', 'file-a', 'cell-1', 'target'])
+  })
+
+  it('source.cell.delete binds side=source', () => {
+    const { db, recorded } = makeD1Stub()
+    const stmts: D1PreparedStatement[] = []
+    buildEventProjectionStmts(db, makeEvent('source.cell.delete', {}), stmts)
+    expect(recorded[0].args).toEqual(['proj-1', 'file-a', 'cell-1', 'source'])
   })
 })
 
 describe('buildEventProjectionStmts — *.cell.reorder', () => {
-  it('UPDATEs anchor_cell_id and event_id', () => {
+  it('UPDATEs anchor_cell_id and event_id, scoped to side', () => {
     const { db, recorded } = makeD1Stub()
     const stmts: D1PreparedStatement[] = []
     buildEventProjectionStmts(
@@ -210,9 +218,61 @@ describe('buildEventProjectionStmts — *.cell.reorder', () => {
       stmts,
     )
     expect(recorded[0].sql).toContain('UPDATE cells SET anchor_cell_id')
+    expect(recorded[0].sql).toContain('side = ?')
     expect(recorded[0].args[0]).toBe('cell-7')
     expect(recorded[0].args[1]).toBe('evt-test-id') // event_id
+    // Last positional arg is the bound `side`.
+    expect(recorded[0].args[recorded[0].args.length - 1]).toBe('target')
   })
+
+  it('source.cell.reorder binds side=source', () => {
+    const { db, recorded } = makeD1Stub()
+    const stmts: D1PreparedStatement[] = []
+    buildEventProjectionStmts(
+      db,
+      makeEvent('source.cell.reorder', { anchorCellId: 'cell-9' }),
+      stmts,
+    )
+    expect(recorded[0].args[recorded[0].args.length - 1]).toBe('source')
+  })
+})
+
+// Regression test for the bug where editing a target cell overwrote the
+// source cell. Cells PK is (project_id, file_id, cell_id, side), so every
+// mutation MUST scope its WHERE clause by `side`, otherwise a target-side
+// event hits the source-side row of the same pair (and vice versa).
+describe('buildEventProjectionStmts — side scoping (regression: target edits must not overwrite source)', () => {
+  const sideAffectingKinds = [
+    { kind: 'target.cell.commit', payload: { value: 'translated' }, expectedSide: 'target' },
+    { kind: 'source.cell.commit', payload: { value: 'updated source' }, expectedSide: 'source' },
+    { kind: 'target.cell.delete', payload: {}, expectedSide: 'target' },
+    { kind: 'source.cell.delete', payload: {}, expectedSide: 'source' },
+    { kind: 'target.cell.reorder', payload: { anchorCellId: 'a' }, expectedSide: 'target' },
+    { kind: 'source.cell.reorder', payload: { anchorCellId: 'a' }, expectedSide: 'source' },
+  ] as const
+
+  for (const { kind, payload, expectedSide } of sideAffectingKinds) {
+    it(`${kind} scopes its WHERE clause to side='${expectedSide}'`, () => {
+      const { db, recorded } = makeD1Stub()
+      const stmts: D1PreparedStatement[] = []
+      buildEventProjectionStmts(db, makeEvent(kind, payload), stmts)
+
+      // First emitted statement is always the cells mutation for these kinds.
+      const sql = recorded[0].sql
+      // Either a literal `side = 'target'` / `side = 'source'` in the SQL,
+      // or a parametrised `side = ?` with the matching value in args.
+      const litMatch = sql.match(/side\s*=\s*'(source|target)'/)
+      if (litMatch) {
+        expect(litMatch[1]).toBe(expectedSide)
+      } else {
+        expect(sql).toContain('side = ?')
+        expect(recorded[0].args).toContain(expectedSide)
+        // Make sure we didn't accidentally bind the OTHER side too.
+        const opposite = expectedSide === 'target' ? 'source' : 'target'
+        expect(recorded[0].args).not.toContain(opposite)
+      }
+    })
+  }
 })
 
 describe('buildEventProjectionStmts — cell.validate / cell.unvalidate', () => {

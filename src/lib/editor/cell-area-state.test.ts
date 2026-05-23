@@ -7,6 +7,7 @@ describe("deriveCellAreaState", () => {
     activeFileId: "file-1" as string | null,
     cellCount: 1,
     syncStatus: "live" as "live" | "connecting" | "offline" | "idle" | "disabled",
+    cellsLoading: false,
   }
 
   it("returns no-file when nothing is selected", () => {
@@ -22,9 +23,18 @@ describe("deriveCellAreaState", () => {
     ).toBe("syncing-empty")
   })
 
-  it("returns ready-empty when sync is live and there are genuinely no cells", () => {
+  it("returns syncing-empty when the cells fetch is still in flight even after the WS is live", () => {
+    // Reload-from-cloud path: the WS reports `live` long before the paginated
+    // cells fetch completes. Without the cellsLoading guard we used to flash
+    // 'Import content, or start typing in the first cell.' for the entire load.
     expect(
-      deriveCellAreaState({ ...open, cellCount: 0, syncStatus: "live" }).kind
+      deriveCellAreaState({ ...open, cellCount: 0, syncStatus: "live", cellsLoading: true }).kind
+    ).toBe("syncing-empty")
+  })
+
+  it("returns ready-empty when sync is live, cells finished loading, and there are genuinely no cells", () => {
+    expect(
+      deriveCellAreaState({ ...open, cellCount: 0, syncStatus: "live", cellsLoading: false }).kind
     ).toBe("ready-empty")
   })
 

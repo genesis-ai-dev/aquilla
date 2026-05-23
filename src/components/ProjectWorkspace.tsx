@@ -3,6 +3,7 @@ import { useParams, useNavigate, useSearchParams, useLocation } from "react-rout
 import { useProject } from "@/hooks/useProject"
 import { deriveCellAreaState } from "@/lib/editor/cell-area-state"
 import { CellAreaPlaceholder } from "./CellAreaPlaceholder"
+import { WorkspaceSkeleton } from "./WorkspaceSkeleton"
 import { TabStrip } from "./TabStrip"
 import { useWorkspaceTabs, readLastActiveFileId } from "@/hooks/useWorkspaceTabs"
 import { useCells } from "@/hooks/useCells"
@@ -359,7 +360,7 @@ export function ProjectWorkspace() {
   // The Y.Doc is still wired for writes + the Tiptap editor; this just
   // changes the load path for the cells list. See useCells.ts for the full
   // story.
-  const { cells, revalidate: revalidateCells } = useCells({
+  const { cells, revalidate: revalidateCells, isLoading: cellsLoading } = useCells({
     projectId: project?.id ?? null,
     fileId: activeFileId,
     username: currentUsername,
@@ -814,8 +815,9 @@ export function ProjectWorkspace() {
       activeFileId,
       cellCount: cells.length,
       syncStatus: fileSyncStatus,
+      cellsLoading,
     }),
-    [activeFileId, cells.length, fileSyncStatus]
+    [activeFileId, cells.length, fileSyncStatus, cellsLoading]
   )
 
   // Presence visible in the status bar is the file-level set the sync-worker
@@ -1078,7 +1080,7 @@ export function ProjectWorkspace() {
     revalidateCells()
   }, [getTokenForFile, refreshOutboxPending, revalidateAuditStats, revalidateCells])
 
-  if (status === "loading") return <div className="p-8 text-muted-foreground">Loading...</div>
+  if (status === "loading") return <WorkspaceSkeleton />
   if (status === "no-session") {
     return (
       <div className="p-8 text-muted-foreground">

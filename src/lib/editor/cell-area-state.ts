@@ -16,21 +16,29 @@ export interface CellAreaStateInput {
   activeFileId: string | null
   cellCount: number
   syncStatus: SyncStatus
+  /** True while the cells-projection fetch is in flight. The WS lifecycle
+   *  (syncStatus) is independent of the HTTP cells fetch — on reload the
+   *  socket goes `live` long before `fetchAllFileCells` finishes paginating.
+   *  Without this we'd flash `ready-empty` for the whole load. */
+  cellsLoading: boolean
 }
 
 export type CellAreaState =
   | { kind: "no-file" }
-  /** Sync is still negotiating; cells may arrive any moment — render a
-   *  skeleton rather than an empty state. */
+  /** Either the WS is still negotiating or the cells fetch is in flight;
+   *  cells may arrive any moment — render a skeleton rather than an empty
+   *  state. */
   | { kind: "syncing-empty" }
-  /** Sync is settled (or irrelevant), genuinely no cells. */
+  /** Sync is settled, cells fetch is done, genuinely no cells. */
   | { kind: "ready-empty" }
   | { kind: "ready" }
 
 export function deriveCellAreaState(input: CellAreaStateInput): CellAreaState {
   if (!input.activeFileId) return { kind: "no-file" }
   if (input.cellCount === 0) {
-    if (input.syncStatus === "connecting") return { kind: "syncing-empty" }
+    if (input.cellsLoading || input.syncStatus === "connecting") {
+      return { kind: "syncing-empty" }
+    }
     return { kind: "ready-empty" }
   }
   return { kind: "ready" }

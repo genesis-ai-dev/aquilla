@@ -15,7 +15,7 @@ import { useCallback, useEffect, useRef, useState } from "react"
 import type { CellHistoryEntry, SourceLocation, CommentThread, CellTtsSettings } from "@/lib/parsers/types"
 import type { CodexCellAttachment, EditTypeValue, ValidationEntry, WordTiming } from "@/lib/codex-editor/types"
 import type { CellAuditStats } from "./useCellsAuditStats"
-import { fetchAllFileCells } from "@/lib/sync/cells-read"
+import { streamFileCells } from "@/lib/sync/cells-read"
 import type { CellRow } from "@/lib/sync/cells-read-types"
 
 /**
@@ -309,6 +309,12 @@ export function useCells(opts: UseCellsOptions): UseCellsResult {
       return
     }
     const gen = ++generationRef.current
+    // Reset the visible cells immediately so we don't render the previous
+    // file's rows while the new file's first page is in flight. The
+    // CellAreaState machine drops to `syncing-empty` (skeleton) until the
+    // first page lands.
+    rowsRef.current = []
+    setCells([])
     setIsLoading(true)
     setIsError(false)
     try {
@@ -319,10 +325,19 @@ export function useCells(opts: UseCellsOptions): UseCellsResult {
         setIsLoading(false)
         return
       }
-      const rows = await fetchAllFileCells(projectId, fileId, token)
+      // Stream pages in: append each page to the row cache and rebuild the
+      // paired view so the first 500 rows paint immediately on Bible-sized
+      // files (~30k cells × ~60 round-trips). The `gen` fence aborts the
+      // stream if the caller switches files mid-flight.
+      await streamFileCells(projectId, fileId, token, (rows) => {
+        if (generationRef.current !== gen) return false
+        if (rows.length === 0) return
+        rowsRef.current = rowsRef.current.length === 0
+          ? rows.slice()
+          : rowsRef.current.concat(rows)
+        rebuildFromCache()
+      })
       if (generationRef.current !== gen) return
-      rowsRef.current = rows
-      rebuildFromCache()
       setIsLoading(false)
     } catch (err) {
       if (generationRef.current !== gen) return

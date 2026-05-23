@@ -106,14 +106,44 @@ export async function fetchFileCells(
 }
 
 /**
- * Paginate through every page of cells for a file. Returns the flat array of
- * `CellRow`s in anchor-chain order. Calls `fetchFileCells` repeatedly until
- * `nextCursor` is null.
+ * Stream every page of cells for a file. Invokes `onPage(rows, isLast)` after
+ * each successful page fetch so the caller can render incrementally instead
+ * of waiting for the whole file. Pages arrive in server order: source rows in
+ * anchor-chain order first, then target rows in anchor-chain order.
  *
- * Convenience for the v1 hook — pages are still individually small enough to
- * stream into a single state update, so we don't expose the page stream
- * externally. Bible-sized files (~30k cells) take ~3-5 round trips at the
- * default page size; future tier 2 caching will eliminate this.
+ * `onPage` may return `false` (or a Promise resolving to `false`) to abort
+ * pagination — typically because the caller switched files mid-stream and
+ * the in-flight result is no longer wanted.
+ */
+export async function streamFileCells(
+  projectId: string,
+  fileId: string,
+  jwt: string,
+  onPage: (rows: CellRow[], isLast: boolean) => boolean | void | Promise<boolean | void>,
+  side?: "source" | "target",
+): Promise<void> {
+  let cursor: string | undefined
+  // Hard cap on page iterations as a safety belt against a malformed nextCursor
+  // loop. At max page size (2000) this allows up to 200k cells per file.
+  const MAX_PAGES = 100
+  for (let i = 0; i < MAX_PAGES; i++) {
+    const page = await fetchFileCells(projectId, fileId, { side, cursor }, jwt)
+    const nextCursor = page.nextCursor ?? undefined
+    const isLast = nextCursor === undefined
+    const cont = await onPage(page.cells, isLast)
+    if (cont === false) return
+    if (isLast) return
+    cursor = nextCursor
+  }
+  throw new CellsReadError(0, `pagination exceeded ${MAX_PAGES} pages for fileId=${fileId}`)
+}
+
+/**
+ * Paginate through every page of cells for a file. Returns the flat array of
+ * `CellRow`s in anchor-chain order. Convenience wrapper over
+ * `streamFileCells` for callers that only need the final result (tests,
+ * non-UI consumers). The editor read path uses `streamFileCells` directly so
+ * the first page paints before the bible-sized tail is in.
  */
 export async function fetchAllFileCells(
   projectId: string,
@@ -122,15 +152,14 @@ export async function fetchAllFileCells(
   side?: "source" | "target",
 ): Promise<CellRow[]> {
   const out: CellRow[] = []
-  let cursor: string | undefined
-  // Hard cap on page iterations as a safety belt against a malformed nextCursor
-  // loop. At max page size (2000) this allows up to 200k cells per file.
-  const MAX_PAGES = 100
-  for (let i = 0; i < MAX_PAGES; i++) {
-    const page = await fetchFileCells(projectId, fileId, { side, cursor }, jwt)
-    out.push(...page.cells)
-    if (!page.nextCursor) return out
-    cursor = page.nextCursor
-  }
-  throw new CellsReadError(0, `pagination exceeded ${MAX_PAGES} pages for fileId=${fileId}`)
+  await streamFileCells(
+    projectId,
+    fileId,
+    jwt,
+    (rows) => {
+      out.push(...rows)
+    },
+    side,
+  )
+  return out
 }

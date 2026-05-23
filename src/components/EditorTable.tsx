@@ -238,6 +238,11 @@ interface EditorTableProps {
   /** Called after a successful `target.cell.commit` enqueue so the parent
    *  refetches the cells projection. */
   onCellCommitted?: () => void | Promise<void>
+  /** Optimistic local patch fired BEFORE the outbox enqueue so the editor's
+   *  rule infractions + per-cell UI re-derive instantly without waiting for
+   *  the projection round-trip. The follow-up `onCellCommitted` -> revalidate
+   *  overwrites this with the authoritative server projection. */
+  onOptimisticEdit?: (cellId: string, patch: { value: string; valueHtml?: string }) => void
   /** Map of cellId → presence holder label. When present, the cell editor
    *  goes read-only with an "Alice is editing" banner. */
   cellLockHolders?: ReadonlyMap<string, string>
@@ -301,6 +306,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   isAnonymous, onJumpToCell, onAiSetupNeeded, onOpenRecording,
   onProjectChanged,
   onCellCommitted,
+  onOptimisticEdit,
   cellLockHolders,
   cellsWithRemoteChange,
   onClaimCell, onReleaseCell, onAckRemoteChange,
@@ -628,6 +634,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
                 username={username}
                 editable={canEdit}
                 onCellCommitted={onCellCommitted}
+                onOptimisticEdit={onOptimisticEdit}
                 lockHolderLabel={cellLockHolders?.get(cell.id) ?? null}
                 remoteChangedWhileFocused={cellsWithRemoteChange?.has(cell.id) ?? false}
                 onClaimCell={onClaimCell}
@@ -698,6 +705,7 @@ interface MemoizedRowProps {
    *  is just a stable boolean — preserves the row's React.memo invariant. */
   isStaleSource: boolean
   onCellCommitted?: () => void | Promise<void>
+  onOptimisticEdit?: (cellId: string, patch: { value: string; valueHtml?: string }) => void
   lockHolderLabel: string | null
   remoteChangedWhileFocused: boolean
   onClaimCell?: (cellId: string) => void
@@ -758,7 +766,7 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
     onSeekToCue, lineNumbersEnabled, cellLabelsEnabled,
     sourceTextDirection, targetTextDirection, isAnonymous,
     onJumpToCell, onAiSetupNeeded, onOpenRecording, onProjectChanged,
-    onCellCommitted, lockHolderLabel, remoteChangedWhileFocused,
+    onCellCommitted, onOptimisticEdit, lockHolderLabel, remoteChangedWhileFocused,
     onClaimCell, onReleaseCell, onAckRemoteChange,
     isStaleSource,
   } = props
@@ -847,6 +855,7 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
         onSelectionPointerDown={handleSelectionPointerDown}
         getVoiceTakeCells={getVoiceTakeCells}
         onCellCommitted={onCellCommitted}
+        onOptimisticEdit={onOptimisticEdit}
         lockHolderLabel={lockHolderLabel}
         remoteChangedWhileFocused={remoteChangedWhileFocused}
         onClaimCell={onClaimCell}
@@ -867,6 +876,7 @@ interface EditorRowProps {
    *  status. Computed once-per-file by the parent. */
   isStaleSource: boolean
   onCellCommitted?: () => void
+  onOptimisticEdit?: (cellId: string, patch: { value: string; valueHtml?: string }) => void
   lockHolderLabel: string | null
   remoteChangedWhileFocused: boolean
   onClaimCell?: (cellId: string) => void
@@ -921,7 +931,7 @@ function EditorRow({
   onDragStart, onDragEnter, onSelectionPointerDown,
   rowIndex, lineNumbersEnabled, cellLabelsEnabled, sourceTextDirection, targetTextDirection, gridCols,
   isAnonymous, onAiSetupNeeded, onOpenRecording,
-  onCellCommitted, lockHolderLabel, remoteChangedWhileFocused,
+  onCellCommitted, onOptimisticEdit, lockHolderLabel, remoteChangedWhileFocused,
   onClaimCell, onReleaseCell, onAckRemoteChange,
   isStaleSource,
 }: EditorRowProps) {
@@ -988,6 +998,12 @@ function EditorRow({
   const handleEditorCommit = useCallback(({ value, valueHtml }: { value: string; valueHtml: string }) => {
     if (!editable) return
     if (!project.id) return
+    // Optimistic local patch: applies BEFORE the outbox enqueue so this row's
+    // signature (`status original translated`) shifts and `useHealth` re-runs
+    // `checkRulesForCell` for this one cell on the next render — no other
+    // cell's cached infractions are invalidated. The server projection
+    // arrives via `onCellCommitted` -> revalidate and overwrites this.
+    onOptimisticEdit?.(cell.id, { value, valueHtml })
     void emitTargetCellCommit({
       projectId: project.id,
       fileId: cell.fileId,
@@ -1003,7 +1019,7 @@ function EditorRow({
     }).catch((err) => {
       console.warn("[editor-commit] enqueue failed:", err)
     })
-  }, [editable, project.id, cell.fileId, cell.id, cell.targetEventId, cell.sourceEventId, username, onCellCommitted])
+  }, [editable, project.id, cell.fileId, cell.id, cell.targetEventId, cell.sourceEventId, username, onCellCommitted, onOptimisticEdit])
 
   const emitValidationChange = useCallback((validated: boolean) => {
     const editEventId = cell.targetEventId ?? pendingTargetEventIdRef.current

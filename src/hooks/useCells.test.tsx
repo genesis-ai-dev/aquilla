@@ -267,4 +267,55 @@ describe("useCells (Phase 2a, D1-backed)", () => {
     // No refetch — only the in-memory derivation refreshed.
     expect(fetchAllMock).toHaveBeenCalledTimes(1)
   })
+
+  it("applyOptimisticTargetEdit updates the cell's translated value without a refetch", async () => {
+    // A paired source+target row for cell c1. Translated starts blank.
+    fetchAllMock.mockResolvedValueOnce([
+      makeRow({ cellId: "c1", side: "source", value: "Hello world" }),
+      makeRow({ cellId: "c1", side: "target", value: "" }),
+    ])
+    const { result } = renderHook(() =>
+      useCells({
+        projectId: "proj-a",
+        fileId: "file-x",
+        username: "alice",
+        getToken,
+        enabled: true,
+      }),
+    )
+    await waitFor(() => expect(result.current.cells).toHaveLength(1))
+    expect(result.current.cells[0].translated).toBe("")
+    expect(result.current.cells[0].status).toBe("empty")
+
+    act(() => {
+      result.current.applyOptimisticTargetEdit("c1", { value: "Hola mundo" })
+    })
+
+    // The cell is updated in-place — useHealth's signature for this cellId
+    // will shift, triggering a per-cell rule re-evaluation on the next render.
+    expect(result.current.cells[0].translated).toBe("Hola mundo")
+    expect(result.current.cells[0].status).not.toBe("empty")
+    expect(result.current.cells[0].original).toBe("Hello world") // source untouched
+    // No refetch fired.
+    expect(fetchAllMock).toHaveBeenCalledTimes(1)
+  })
+
+  it("applyOptimisticTargetEdit synthesizes a target row when only source exists", async () => {
+    // Source-only pair — the very first commit on this cell.
+    fetchAllMock.mockResolvedValueOnce([
+      makeRow({ cellId: "c1", side: "source", value: "Hello" }),
+    ])
+    const { result } = renderHook(() =>
+      useCells({ projectId: "proj-a", fileId: "file-x", getToken, enabled: true }),
+    )
+    await waitFor(() => expect(result.current.cells).toHaveLength(1))
+    expect(result.current.cells[0].translated).toBe("")
+
+    act(() => {
+      result.current.applyOptimisticTargetEdit("c1", { value: "Hola" })
+    })
+
+    expect(result.current.cells[0].translated).toBe("Hola")
+    expect(result.current.cells[0].original).toBe("Hello")
+  })
 })

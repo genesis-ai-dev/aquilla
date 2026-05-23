@@ -222,6 +222,11 @@ export interface UseCellsResult {
   cells: CellData[]
   /** Manual refetch — call after a known write so the UI reflects it. */
   revalidate: () => void
+  /** Optimistically patch a target-side cell's value in the local cache.
+   *  Used by the editor commit path so rule infractions + per-cell UI
+   *  re-derive instantly (no round-trip wait). The follow-up server fetch
+   *  (`revalidate()`) overwrites this with the authoritative projection. */
+  applyOptimisticTargetEdit: (cellId: string, patch: { value: string; valueHtml?: string }) => void
   isLoading: boolean
   isError: boolean
 }
@@ -386,5 +391,52 @@ export function useCells(opts: UseCellsOptions): UseCellsResult {
     void doFetch()
   }, [doFetch])
 
-  return { cells, revalidate, isLoading, isError }
+  // Optimistic local patch for the target row of a single cell. We mutate
+  // the cached `rowsRef` entry in place (creating one if no target row yet
+  // exists — first-time commits on source-only pairs) and rebuild the
+  // paired view. `useHealth` keys its per-cell cache on
+  // `${status} ${original} ${translated}`, so the changed cell's signature
+  // shifts and rules re-run for that one cell on the next render; every
+  // other cell's cache entry remains valid.
+  //
+  // The next `revalidate()` (called by the parent after outbox flush) will
+  // overwrite this with the authoritative server projection.
+  const applyOptimisticTargetEdit = useCallback(
+    (cellId: string, patch: { value: string; valueHtml?: string }) => {
+      const rows = rowsRef.current
+      let touched = false
+      for (let i = 0; i < rows.length; i++) {
+        const r = rows[i]
+        if (r.cellId !== cellId || r.side !== "target") continue
+        rows[i] = { ...r, value: patch.value, valueHtml: patch.valueHtml ?? null }
+        touched = true
+        break
+      }
+      if (!touched) {
+        // No target row yet — first commit against a source-only pair. Mint
+        // a synthetic target row by cloning the source row's anchor/cellId
+        // and replacing the value-bearing fields. event_id stays null until
+        // the server projection lands; useHealth doesn't care about event_id.
+        const src = rows.find((r) => r.cellId === cellId && r.side === "source")
+        if (!src) return // unknown cellId — nothing to optimise
+        rows.push({
+          ...src,
+          side: "target",
+          value: patch.value,
+          valueHtml: patch.valueHtml ?? null,
+          // Sentinel until the server projection lands and revalidate() runs.
+          eventId: "",
+          sourceEventId: src.eventId,
+          lastEditor: usernameRef.current,
+          lastEditAt: Date.now(),
+          validated: false,
+          wordCount: patch.value.trim() ? patch.value.trim().split(/\s+/).length : 0,
+        })
+      }
+      rebuildFromCache()
+    },
+    [rebuildFromCache],
+  )
+
+  return { cells, revalidate, applyOptimisticTargetEdit, isLoading, isError }
 }

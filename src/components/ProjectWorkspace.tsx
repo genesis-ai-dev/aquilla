@@ -360,7 +360,7 @@ export function ProjectWorkspace() {
   // The Y.Doc is still wired for writes + the Tiptap editor; this just
   // changes the load path for the cells list. See useCells.ts for the full
   // story.
-  const { cells, revalidate: revalidateCells, isLoading: cellsLoading } = useCells({
+  const { cells, revalidate: revalidateCells, applyOptimisticTargetEdit, isLoading: cellsLoading } = useCells({
     projectId: project?.id ?? null,
     fileId: activeFileId,
     username: currentUsername,
@@ -1374,6 +1374,7 @@ export function ProjectWorkspace() {
             onOpenRecording={(cellId) => setRecordingCellId(cellId)}
             onProjectChanged={refresh}
             onCellCommitted={handleCellCommitted}
+            onOptimisticEdit={applyOptimisticTargetEdit}
             cellLockHolders={cellLockHolders}
             cellsWithRemoteChange={cellsWithRemoteChange}
             onClaimCell={handleClaimCell}

@@ -7,7 +7,7 @@ import type { EventKind } from './types'
 // Tables that can be invalidated via projection.dirty messages.
 // Adding a new projection table requires adding it here so clients can
 // invalidate the corresponding query keys.
-export type ProjectionTable = 'events' | 'cells' | 'files' | 'cell_validators'
+export type ProjectionTable = 'events' | 'cells' | 'files' | 'cell_validators' | 'cell_audio'
 
 // Single source of truth for valid ProjectionTable runtime values. The Set
 // and the type must stay in sync — adding a new table requires updating both.
@@ -17,6 +17,7 @@ const PROJECTION_TABLES: ReadonlySet<string> = new Set<ProjectionTable>([
   'cells',
   'files',
   'cell_validators',
+  'cell_audio',
 ])
 
 // Discriminated union for client-bound Realtime messages. Adding a new
@@ -32,6 +33,10 @@ export type RealtimeMessage =
       file?: string
       cell?: string
       ts: number                  // server_ts (unix ms)
+      /** Username of the actor that produced the event. Optional for back-
+       *  compat with older producers; clients use it to filter their own
+       *  writes out of remote-change banners. */
+      by?: string
     }
   | {
       v: 1
@@ -82,6 +87,7 @@ export function parseRealtimeMessage(raw: string): RealtimeMessage | null {
       file: typeof m.file === 'string' ? m.file : undefined,
       cell: typeof m.cell === 'string' ? m.cell : undefined,
       ts: m.ts,
+      ...(typeof m.by === 'string' ? { by: m.by } : {}),
     }
   }
   if (m.t === 'projection.dirty') {

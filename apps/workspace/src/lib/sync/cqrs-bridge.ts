@@ -1,14 +1,11 @@
-/**
- * Workspace-scoped bridge so low-level Yjs helpers can enqueue CQRS events
- * without threading project/file IDs through every call site.
- */
+// Phase 2c-gamma slim shim. The original cqrs-bridge.ts threaded the
+// active project/file into Y.Doc-coupled writers (commitCellEdit, etc.).
+// All those writers are gone in this build. What remains is a thin
+// per-file sync-token fetcher and a workspace-scoped bridge identity
+// (projectId / activeFileId / username) that callers still read for
+// per-file rooms and event authorship. The actual writes flow through
+// events-emit.ts now.
 
-import * as Y from "yjs"
-import { v7 as uuidv7 } from "uuid"
-import { getPlainText, getFragmentHtml } from "@/lib/richtext/translated-xml"
-import { enqueueOutboxEvent } from "./outbox"
-import type { CqrsRawEvent } from "./cqrs-types"
-import { CQRS_SCHEMA_VERSION } from "./cqrs-types"
 import {
   makeSyncTokenFetcher,
   type ProjectBootstrap,
@@ -24,12 +21,12 @@ export interface CqrsOutboxBridge {
 
 let bridge: CqrsOutboxBridge | null = null
 
-/** Latest client-generated cell.commit id per cell (session) for validate/unvalidate payloads. */
-const lastCommitEventIdByCell = new Map<string, string>()
-
 export function setCqrsOutboxBridge(next: CqrsOutboxBridge | null): void {
   bridge = next
-  if (!next) lastCommitEventIdByCell.clear()
+}
+
+export function getCqrsOutboxBridge(): CqrsOutboxBridge | null {
+  return bridge
 }
 
 export function buildFileScopedTokenFetcher(
@@ -55,108 +52,4 @@ export function buildFileScopedTokenFetcher(
     }
     return fetcher()
   }
-}
-
-function readCellSnapshot(
-  doc: Y.Doc,
-  cellId: string,
-): { plain: string; html: string } | null {
-  const cellsMap = doc.getMap("cells")
-  const cell = cellsMap.get(cellId) as Y.Map<unknown> | undefined
-  if (!cell) return null
-  const frag = cell.get("translatedXml") as Y.XmlFragment | undefined
-  if (frag) {
-    return { plain: getPlainText(frag), html: getFragmentHtml(frag) }
-  }
-  const t = (cell.get("translated") as string) || ""
-  return { plain: t, html: "" }
-}
-
-/**
- * After a value edit lands in the Y.Doc, mirror it to the CQRS outbox.
- *
- * `fileIdOverride` lets cross-file callers (batch replace, parallel passages)
- * stamp the event with the correct fileId instead of the bridge's active
- * editor file. Without it, events on non-active files would be misfiled
- * in D1 — the audit trail would point at the wrong file.
- */
-export function enqueueCellCommitAfterValueEdit(
-  doc: Y.Doc,
-  cellId: string,
-  clientTs: number = Date.now(),
-  fileIdOverride?: string,
-): string | null {
-  const b = bridge
-  if (!b) return null
-  const fileId = fileIdOverride ?? b.activeFileId
-  if (!fileId) return null
-  const snap = readCellSnapshot(doc, cellId)
-  if (!snap) return null
-  const id = uuidv7()
-  const prev = lastCommitEventIdByCell.get(cellId)
-  const event: CqrsRawEvent<"cell.commit"> = {
-    id,
-    schemaVersion: CQRS_SCHEMA_VERSION,
-    kind: "cell.commit",
-    projectId: b.projectId,
-    fileId,
-    cellId,
-    author: b.username,
-    payload: {
-      value: snap.plain,
-      valueHtml: snap.html,
-      ...(prev ? { prevEventId: prev } : {}),
-    },
-    clientTs,
-  }
-  lastCommitEventIdByCell.set(cellId, id)
-  void enqueueOutboxEvent(event)
-  return id
-}
-
-/**
- * `fileIdOverride` — see enqueueCellCommitAfterValueEdit. Same rationale:
- * cross-file batch operations need to stamp the correct fileId.
- */
-export function enqueueCellValidateToggle(
-  cellId: string,
-  validate: boolean,
-  clientTs: number = Date.now(),
-  fileIdOverride?: string,
-  editEventIdOverride?: string,
-): void {
-  const b = bridge
-  if (!b) return
-  const fileId = fileIdOverride ?? b.activeFileId
-  if (!fileId) return
-  const editEventId =
-    editEventIdOverride ?? lastCommitEventIdByCell.get(cellId) ?? `legacy:${fileId}:${cellId}`
-
-  const id = uuidv7()
-  const event: CqrsRawEvent =
-    validate
-      ? {
-          id,
-          schemaVersion: CQRS_SCHEMA_VERSION,
-          kind: "cell.validate",
-          projectId: b.projectId,
-          fileId,
-          cellId,
-          author: b.username,
-          payload: { editEventId },
-          clientTs,
-        }
-      : {
-          id,
-          schemaVersion: CQRS_SCHEMA_VERSION,
-          kind: "cell.unvalidate",
-          projectId: b.projectId,
-          fileId,
-          cellId,
-          author: b.username,
-          payload: { editEventId },
-          clientTs,
-        }
-
-  void enqueueOutboxEvent(event)
 }

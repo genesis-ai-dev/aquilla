@@ -47,3 +47,11 @@ playwright/.cache/
 # E2E suite — local-only state
 e2e/.auth/
 .e2e-logs/
+
+# Local dev stack (`pnpm dev` via scripts/dev-stack.ts) — shared wrangler
+# local state for identity + sync, plus per-Worker logs.
+.wrangler-dev-state/
+.dev-stack-logs/
+
+# Per-Worker dev secrets (created from .dev.vars.example on first `pnpm dev`).
+apps/*/.dev.vars

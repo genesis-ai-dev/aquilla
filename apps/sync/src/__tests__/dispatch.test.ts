@@ -31,6 +31,9 @@ async function makeAuthorized<K extends EventKind>(kind: K, role = 500) {
 	      retrievalQueryEventId: 'evt-src-1',
 	    },
 	    'cell.endorsement.revoke': { endorsementEventId: 'evt-endorsement-1' },
+	    'cell.audio.attach': { audioId: 'audio-1.wav', url: 'frontier-audio://audio-1.wav', slot: 'recording' },
+	    'cell.audio.select': { audioId: 'audio-1.wav', slot: 'recording' },
+	    'cell.audio.remove': { audioId: 'audio-1.wav' },
 	    'file.create': { name: 'Genesis', fileType: 'codex' },
 	    'project.link-source': { sourceProjectId: 'source-proj' },
 	  }

@@ -7,18 +7,16 @@ export const DEFAULT_SYSTEM_PROMPT =
   "You are translating a project from {sourceLanguage} into {targetLanguage}.\n" +
   "Match the tone and formality of the provided examples. Return only the translated text — no explanations, no source text, no commentary."
 
-// VITE_CHAT_BASE points at aquilla-chat-worker (the in-repo replacement for the
-// legacy frontier-server `/api/v1/chat/completions` route). VITE_FRONTIER_BASE
-// is retained as the umbrella fallback so the E2E suite — which spins up a
-// mock LLM server and sets VITE_FRONTIER_BASE — still works without having to
-// know about the per-route split. CI wires VITE_CHAT_BASE per-branch (prod →
-// aquilla-chat-worker, anything else → aquilla-chat-worker-staging); see
-// .github/workflows/deploy.yml.
-const FRONTIER_BASE_OVERRIDE =
+// VITE_CHAT_BASE points at aquilla-chat-worker — the in-repo chat-completions
+// service. CI wires it per-branch (prod → aquilla-chat-worker, anything else
+// → aquilla-chat-worker-staging); see .github/workflows/deploy-apps-prod.yml.
+// VITE_FRONTIER_BASE is retained as a fallback so the E2E suite — which
+// spins up a mock LLM server and sets that env var — keeps working.
+const CHAT_BASE_FALLBACK =
   ((import.meta.env.VITE_FRONTIER_BASE as string | undefined)?.replace(/\/+$/, "")) || ""
 const CHAT_BASE_OVERRIDE =
   ((import.meta.env.VITE_CHAT_BASE as string | undefined)?.replace(/\/+$/, "")) || ""
-export const FRONTIER_CHAT_URL = `${CHAT_BASE_OVERRIDE || FRONTIER_BASE_OVERRIDE || "https://api.frontierrnd.com"}/api/v1/chat/completions`
+export const FRONTIER_CHAT_URL = `${CHAT_BASE_OVERRIDE || CHAT_BASE_FALLBACK || "https://aquilla-chat-worker.blue-darkness-7674.workers.dev"}/api/v1/chat/completions`
 
 interface ChatMessage { role: "system" | "user" | "assistant"; content: string }
 

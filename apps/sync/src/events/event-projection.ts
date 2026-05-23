@@ -19,6 +19,7 @@
 // fingerprint on `content_hash`.
 
 import type { EventKind, EventPayloads } from './types'
+import { buildFileMeta } from './file-meta'
 
 // A single event row as it lives in D1. JSON.parse on `payload` is the
 // caller's responsibility — `payload` here is already an object.
@@ -57,7 +58,7 @@ function countWords(text: string): number {
 }
 
 /** Caller hint: which projection tables this event will touch. */
-export type ProjectionTouches = 'cells' | 'cell_validators' | 'files'
+export type ProjectionTouches = 'cells' | 'cell_validators' | 'files' | 'cell_audio'
 
 /**
  * Apply one event to the projection (without the AD-2 sibling guard — the
@@ -303,30 +304,44 @@ export function buildEventProjectionStmts(
       if (!event.fileId || !event.cellId) {
         throw new Error(`${event.kind} event ${event.id} is missing fileId or cellId`)
       }
-      const isActive = event.kind === 'cell.validate' ? 1 : 0
 
-      stmts.push(
-        db
-          .prepare(
-            `INSERT INTO cell_validators (
-              project_id, file_id, cell_id, edit_event_id, username,
-              is_active, decided_ts
-            ) VALUES (?, ?, ?, ?, ?, ${isActive}, ?)
-            ON CONFLICT(project_id, file_id, cell_id, edit_event_id, username)
-            DO UPDATE SET
-              is_active  = excluded.is_active,
-              decided_ts = excluded.decided_ts
-            WHERE excluded.decided_ts > cell_validators.decided_ts`,
-          )
-          .bind(
-            event.projectId,
-            event.fileId,
-            event.cellId,
-            p.editEventId,
-            event.author,
-            event.serverTs,
-          ),
-      )
+      // DELETE-on-unvalidate (spec §"Validator record"): a row exists iff
+      // the validator currently endorses the cell. `cell.validate` upserts
+      // one row per (cell, validator) carrying the validated commit's
+      // `event_id`; `cell.unvalidate` deletes it. The decided_ts guard keeps
+      // out-of-order replays from clobbering a newer decision.
+      if (event.kind === 'cell.validate') {
+        stmts.push(
+          db
+            .prepare(
+              `INSERT INTO cell_validators (
+                project_id, file_id, cell_id, event_id, username, decided_ts
+              ) VALUES (?, ?, ?, ?, ?, ?)
+              ON CONFLICT(project_id, file_id, cell_id, username)
+              DO UPDATE SET
+                event_id   = excluded.event_id,
+                decided_ts = excluded.decided_ts
+              WHERE excluded.decided_ts > cell_validators.decided_ts`,
+            )
+            .bind(
+              event.projectId,
+              event.fileId,
+              event.cellId,
+              p.editEventId,
+              event.author,
+              event.serverTs,
+            ),
+        )
+      } else {
+        stmts.push(
+          db
+            .prepare(
+              `DELETE FROM cell_validators
+                WHERE project_id = ? AND file_id = ? AND cell_id = ? AND username = ?`,
+            )
+            .bind(event.projectId, event.fileId, event.cellId, event.author),
+        )
+      }
 
       // Recompute the denormalized `cells.validated` flag against the
       // CURRENT chain head (`cells.event_id`). Validating an old edit no
@@ -342,8 +357,7 @@ export function buildEventProjectionStmts(
               WHERE project_id = ?
                 AND file_id    = ?
                 AND cell_id    = ?
-                AND is_active  = 1
-                AND edit_event_id = cells.event_id
+                AND event_id   = cells.event_id
             )
             WHERE project_id = ? AND file_id = ? AND cell_id = ? AND side = 'target'`,
           )
@@ -395,6 +409,103 @@ export function buildEventProjectionStmts(
       return ['cells']
     }
 
+    case 'cell.audio.attach': {
+      const p = event.payload as EventPayloads['cell.audio.attach']
+      if (!event.fileId || !event.cellId) {
+        throw new Error(`${event.kind} event ${event.id} is missing fileId or cellId`)
+      }
+      // Deselect any other clip in the same slot, then upsert this one as the
+      // selected, live clip. `audio_id != ?` so the deselect never touches the
+      // row we're about to (re)insert as selected.
+      stmts.push(
+        db
+          .prepare(
+            `UPDATE cell_audio SET selected = 0
+              WHERE project_id = ? AND file_id = ? AND cell_id = ? AND slot = ? AND audio_id != ?`,
+          )
+          .bind(event.projectId, event.fileId, event.cellId, p.slot, p.audioId),
+      )
+      stmts.push(
+        db
+          .prepare(
+            `INSERT INTO cell_audio (
+              project_id, file_id, cell_id, audio_id, slot, url, mime_type,
+              voice_id, reference_audio_id, duration_ms, timings_json,
+              selected, deleted, event_id, created_ts
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 0, ?, ?)
+            ON CONFLICT(project_id, file_id, cell_id, audio_id) DO UPDATE SET
+              slot               = excluded.slot,
+              url                = excluded.url,
+              mime_type          = excluded.mime_type,
+              voice_id           = excluded.voice_id,
+              reference_audio_id = excluded.reference_audio_id,
+              duration_ms        = excluded.duration_ms,
+              timings_json       = excluded.timings_json,
+              selected           = 1,
+              deleted            = 0,
+              event_id           = excluded.event_id`,
+          )
+          .bind(
+            event.projectId,
+            event.fileId,
+            event.cellId,
+            p.audioId,
+            p.slot,
+            p.url,
+            p.mimeType ?? null,
+            p.voiceId ?? null,
+            p.referenceAudioId ?? null,
+            p.durationMs ?? null,
+            p.timings ? JSON.stringify(p.timings) : null,
+            event.id,
+            event.serverTs,
+          ),
+      )
+      return ['cell_audio']
+    }
+
+    case 'cell.audio.select': {
+      const p = event.payload as EventPayloads['cell.audio.select']
+      if (!event.fileId || !event.cellId) {
+        throw new Error(`${event.kind} event ${event.id} is missing fileId or cellId`)
+      }
+      stmts.push(
+        db
+          .prepare(
+            `UPDATE cell_audio SET selected = 0
+              WHERE project_id = ? AND file_id = ? AND cell_id = ? AND slot = ? AND audio_id != ?`,
+          )
+          .bind(event.projectId, event.fileId, event.cellId, p.slot, p.audioId),
+      )
+      stmts.push(
+        db
+          .prepare(
+            `UPDATE cell_audio SET selected = 1, deleted = 0
+              WHERE project_id = ? AND file_id = ? AND cell_id = ? AND audio_id = ?`,
+          )
+          .bind(event.projectId, event.fileId, event.cellId, p.audioId),
+      )
+      return ['cell_audio']
+    }
+
+    case 'cell.audio.remove': {
+      const p = event.payload as EventPayloads['cell.audio.remove']
+      if (!event.fileId || !event.cellId) {
+        throw new Error(`${event.kind} event ${event.id} is missing fileId or cellId`)
+      }
+      // Soft-delete + deselect. The next live clip is NOT auto-promoted; the
+      // client emits an explicit cell.audio.select to switch.
+      stmts.push(
+        db
+          .prepare(
+            `UPDATE cell_audio SET deleted = 1, selected = 0
+              WHERE project_id = ? AND file_id = ? AND cell_id = ? AND audio_id = ?`,
+          )
+          .bind(event.projectId, event.fileId, event.cellId, p.audioId),
+      )
+      return ['cell_audio']
+    }
+
     case 'file.create': {
       const p = event.payload as EventPayloads['file.create']
       if (!event.fileId) {
@@ -403,55 +514,51 @@ export function buildEventProjectionStmts(
       // Counters left at zero on first insert and untouched on conflict —
       // cell commit projections maintain those.
       //
-      // Spec §"File" added role/kind/book_code/source_file_id/anchor_file_id/
-      // r2_key/import_format/parser_version to the file.create payload. The
-      // legacy `file_type` column is kept in sync from
-      // `fileType ?? kind ?? role ?? 'codex'` so pre-spec reads stay valid.
-      const legacyFileType = p.fileType ?? p.kind ?? p.role ?? 'codex'
+      // Spec §"File" (2026-05-21): role/kind/book_code/pairing are columns;
+      // `event_id` is the AD-2 chain head; sparse provenance + per-file
+      // languages go into the JSON `meta` column (§"Column vs JSON meta").
+      const meta = buildFileMeta(p)
       stmts.push(
         db
           .prepare(
             `INSERT INTO files (
-              id, project_id, name, file_type, source_language, target_language,
-              cell_count, approved_count, word_count, last_edit_at, projected_from,
-              updated_at,
+              id, project_id, name,
               role, kind, book_code, source_file_id, anchor_file_id,
-              r2_key, import_format, parser_version
+              event_id,
+              cell_count, approved_count, word_count, last_edit_at,
+              created_by, created_at, updated_at,
+              meta
             ) VALUES (
-              ?, ?, ?, ?, ?, ?, 0, 0, 0, NULL, ?, unixepoch('now') * 1000,
-              ?, ?, ?, ?, ?, ?, ?, ?
+              ?, ?, ?,
+              ?, ?, ?, ?, ?,
+              ?,
+              0, 0, 0, NULL,
+              ?, unixepoch('now') * 1000, unixepoch('now') * 1000,
+              ?
             )
             ON CONFLICT(id) DO UPDATE SET
               name = excluded.name,
-              file_type = excluded.file_type,
-              source_language = excluded.source_language,
-              target_language = excluded.target_language,
               role = excluded.role,
               kind = excluded.kind,
               book_code = excluded.book_code,
               source_file_id = excluded.source_file_id,
               anchor_file_id = excluded.anchor_file_id,
-              r2_key = excluded.r2_key,
-              import_format = excluded.import_format,
-              parser_version = excluded.parser_version,
+              event_id = excluded.event_id,
+              meta = excluded.meta,
               updated_at = unixepoch('now') * 1000`,
           )
           .bind(
             event.fileId,
             event.projectId,
             p.name,
-            legacyFileType,
-            p.sourceLanguage ?? null,
-            p.targetLanguage ?? null,
-            `event:${event.id}`,
             p.role ?? null,
             p.kind ?? null,
             p.bookCode ?? null,
             p.sourceFileId ?? null,
             p.anchorFileId ?? null,
-            p.r2Key ?? null,
-            p.importFormat ?? null,
-            p.parserVersion ?? null,
+            event.id,
+            event.author,
+            meta,
           ),
       )
       return ['files']

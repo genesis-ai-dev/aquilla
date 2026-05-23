@@ -30,6 +30,7 @@
 
 import { Routes, Route } from "react-router-dom"
 import { Dashboard } from "@/components/Dashboard"
+import { OnboardingWizard } from "@/components/onboarding/OnboardingWizard"
 import { ProjectWorkspace } from "@/components/ProjectWorkspace"
 import { DebugView } from "@/components/DebugView"
 import { RulesPage } from "@/components/RulesPage"
@@ -41,6 +42,7 @@ import { AiModelConsentDialog } from "@/components/AiModelConsentDialog"
 import { AiModelDownloadChip } from "@/components/AiModelDownloadChip"
 import { AudioBulkProgressBanner } from "@/components/AudioBulkProgressBanner"
 import { PrivateModeBanner } from "@/components/PrivateModeBanner"
+import { DeployUpdateBanner } from "@/components/DeployUpdateBanner"
 import { hydratePrefetchStatus } from "@/lib/audio/prefetch"
 import { probeOpfsAvailability } from "@/lib/storage/opfs-availability"
 import { useGlobalAudioShortcuts } from "@/hooks/useGlobalAudioShortcuts"
@@ -48,7 +50,13 @@ import { useGlobalAudioShortcuts } from "@/hooks/useGlobalAudioShortcuts"
 void hydratePrefetchStatus()
 void probeOpfsAvailability()
 
-const ENABLE_SMOKE_DASHBOARD_ROUTE = import.meta.env.MODE === "test"
+// Production hands `/` to apps/projects/ via the front-door Worker, so the
+// workspace SPA deliberately leaves `/` unmounted in a prod build. In dev
+// (`pnpm dev`) and the smoke suite there is no front-door, so render the
+// workspace Dashboard at `/` as a project-picker entry point. The condition
+// fires for `vite dev` (MODE=development) and `vite --mode test` (MODE=test);
+// `vite build` defaults to MODE=production and stays unaffected.
+const ENABLE_SMOKE_DASHBOARD_ROUTE = import.meta.env.MODE !== "production"
 
 const workspacePaths = (suffix = "") => [
   `/project/:id${suffix}`,
@@ -73,6 +81,7 @@ function SyncFreezeOverlay() {
 export default function App() {
   return (
     <SyncingProvider>
+      <DeployUpdateBanner />
       <PrivateModeBanner />
       <SyncFreezeOverlay />
       <AppRoutes />
@@ -102,7 +111,16 @@ export function AppRoutes() {
           the root dashboard. Keep this route test-only so production continues
           to hand `/` to apps/projects/ via the front-door Worker. */}
       {ENABLE_SMOKE_DASHBOARD_ROUTE ? (
-        <Route path="/" element={<Dashboard />} />
+        <>
+          <Route path="/" element={<Dashboard />} />
+          {/* In prod /projects is owned by apps/projects/ via Workers Routes
+              (routes.json). In dev there is no front-door, so without an
+              explicit /projects route the `/:id` workspace catch-all eats
+              it and tries to load a project named "projects". Same shape
+              for /onboarding. */}
+          <Route path="/projects" element={<Dashboard />} />
+          <Route path="/onboarding" element={<OnboardingWizard />} />
+        </>
       ) : null}
 
       {/* Workspace surfaces — kept here until Phase 3a relocates them. */}

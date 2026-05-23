@@ -36,6 +36,11 @@ export type EventKind =
   // Validation-driven decay endorsements (server-emitted by sync-worker).
   | 'cell.endorsement'
   | 'cell.endorsement.revoke'
+  // Cell audio attachments (contributor-level). Metadata only; bytes in R2.
+  // Non-chain-mutating — they don't move cells.event_id.
+  | 'cell.audio.attach'
+  | 'cell.audio.select'
+  | 'cell.audio.remove'
   // File lifecycle.
   | 'file.create'
   // Project lifecycle.
@@ -106,6 +111,28 @@ export interface EventPayloads {
     endorsementEventId: string
   }
 
+  // ── Cell audio ─────────────────────────────────────────────────────────
+  // `attach` records (and selects) a clip in its slot; `select` switches the
+  // active clip; `remove` soft-deletes one. Bytes are already in R2
+  // (frontier-audio:// url) before these are emitted.
+  'cell.audio.attach': {
+    audioId: string
+    url: string
+    slot: 'recording' | 'generatedVoice'
+    mimeType?: string
+    voiceId?: string
+    referenceAudioId?: string
+    durationMs?: number
+    timings?: { word: string; t0: number; t1: number; start: number; end: number }[]
+  }
+  'cell.audio.select': {
+    audioId: string
+    slot: 'recording' | 'generatedVoice'
+  }
+  'cell.audio.remove': {
+    audioId: string
+  }
+
   // ── File lifecycle ─────────────────────────────────────────────────────
   //
   // Spec §"File" (03-data-model.md) reshapes the file.create payload to
@@ -131,6 +158,8 @@ export interface EventPayloads {
     anchorFileId?: string
     /** R2 key for the original imported blob (AD-4). Null for non-imported files. */
     r2Key?: string
+    /** Source-system content hash of the original blob (change-detect key). */
+    blobSha?: string
     /** Format the original blob was parsed as ('usfm', 'docx', ...). */
     importFormat?: string
     /** Parser revision that produced this file's cells; enables re-parse. */

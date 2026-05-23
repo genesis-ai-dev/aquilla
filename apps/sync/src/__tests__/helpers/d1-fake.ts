@@ -76,9 +76,9 @@ export interface ValidatorRow {
   project_id: string
   file_id: string
   cell_id: string
-  edit_event_id: string
+  /** The validated commit's event_id (renamed from edit_event_id in 0012). */
+  event_id: string
   username: string
-  is_active: number
   decided_ts: number
 }
 
@@ -86,20 +86,27 @@ export interface FileRow {
   id: string
   project_id: string
   name?: string
-  file_type?: string
-  source_language?: string | null
-  target_language?: string | null
   cell_count?: number
   approved_count?: number
   word_count?: number
   last_edit_at?: number | null
-  projected_from?: string | null
-  // Spec §"File" columns added in migration 0008.
+  // Spec §"File" columns (0008) — role/kind/book_code/pairing as columns.
   role?: string | null
   kind?: string | null
   book_code?: string | null
   source_file_id?: string | null
   anchor_file_id?: string | null
+  // 0012: event_id chain head + JSON meta; created_* audit.
+  event_id?: string
+  meta?: string | null
+  created_by?: string | null
+  created_at?: number | null
+  updated_at?: number | null
+  // Legacy columns kept optional so pre-0012 matchers still typecheck.
+  file_type?: string
+  source_language?: string | null
+  target_language?: string | null
+  projected_from?: string | null
   r2_key?: string | null
   import_format?: string | null
   parser_version?: string | null
@@ -331,7 +338,7 @@ export function makeInMemoryD1(tables: Partial<Tables> = {}): InMemoryD1 {
 
     // ── GET /cell-validators read route ─────────────────────────────────
     if (
-      /^SELECT edit_event_id, username, is_active, decided_ts FROM cell_validators WHERE project_id = \? AND file_id = \? AND cell_id = \? ORDER BY decided_ts DESC/.test(
+      /^SELECT event_id, username, decided_ts FROM cell_validators WHERE project_id = \? AND file_id = \? AND cell_id = \? ORDER BY decided_ts DESC/.test(
         normalized,
       )
     ) {
@@ -342,9 +349,8 @@ export function makeInMemoryD1(tables: Partial<Tables> = {}): InMemoryD1 {
         .filter((v) => v.project_id === projectId && v.file_id === fileId && v.cell_id === cellId)
         .sort((a, b) => b.decided_ts - a.decided_ts)
         .map((v) => ({
-          edit_event_id: v.edit_event_id,
+          event_id: v.event_id,
           username: v.username,
-          is_active: v.is_active,
           decided_ts: v.decided_ts,
         }))
     }
@@ -371,24 +377,24 @@ export function makeInMemoryD1(tables: Partial<Tables> = {}): InMemoryD1 {
 
     // ── GET /cells/audit-stats — validators select ─────────────────────
     if (
-      /^SELECT cell_id, edit_event_id, username FROM cell_validators WHERE project_id = \? AND file_id = \? AND is_active = 1$/.test(
+      /^SELECT cell_id, event_id, username FROM cell_validators WHERE project_id = \? AND file_id = \?$/.test(
         normalized,
       )
     ) {
       const projectId = args[0] as string
       const fileId = args[1] as string
       return db.cell_validators
-        .filter((v) => v.project_id === projectId && v.file_id === fileId && v.is_active === 1)
+        .filter((v) => v.project_id === projectId && v.file_id === fileId)
         .map((v) => ({
           cell_id: v.cell_id,
-          edit_event_id: v.edit_event_id,
+          event_id: v.event_id,
           username: v.username,
         }))
     }
 
     // ── GET /api/v1/projects/:projectId/files (list) ──────────────────
     if (
-      /^SELECT id, project_id, name, file_type, source_language, target_language, cell_count, approved_count, word_count, last_edit_at FROM files WHERE project_id = \? ORDER BY/.test(
+      /^SELECT id, project_id, name, role, kind, event_id, meta, cell_count, approved_count, word_count, last_edit_at FROM files WHERE project_id = \? ORDER BY/.test(
         normalized,
       )
     ) {
@@ -399,9 +405,10 @@ export function makeInMemoryD1(tables: Partial<Tables> = {}): InMemoryD1 {
           id: f.id,
           project_id: f.project_id,
           name: f.name ?? "",
-          file_type: f.file_type ?? "",
-          source_language: f.source_language ?? null,
-          target_language: f.target_language ?? null,
+          role: f.role ?? null,
+          kind: f.kind ?? null,
+          event_id: f.event_id ?? "",
+          meta: f.meta ?? "{}",
           cell_count: f.cell_count ?? 0,
           approved_count: f.approved_count ?? 0,
           word_count: f.word_count ?? 0,
@@ -413,13 +420,13 @@ export function makeInMemoryD1(tables: Partial<Tables> = {}): InMemoryD1 {
           if (aEdit !== null && bEdit !== null) return bEdit - aEdit
           if (aEdit === null && bEdit !== null) return 1
           if (aEdit !== null && bEdit === null) return -1
-          return a.name.localeCompare(b.name)
+          return (a.name as string).localeCompare(b.name as string)
         })
     }
 
     // ── GET /api/v1/projects/:projectId/files/:fileId (single) ────────
     if (
-      /^SELECT id, project_id, name, file_type, source_language, target_language, cell_count, approved_count, word_count, last_edit_at FROM files WHERE project_id = \? AND id = \?$/.test(
+      /^SELECT id, project_id, name, role, kind, event_id, meta, cell_count, approved_count, word_count, last_edit_at FROM files WHERE project_id = \? AND id = \?$/.test(
         normalized,
       )
     ) {
@@ -432,9 +439,10 @@ export function makeInMemoryD1(tables: Partial<Tables> = {}): InMemoryD1 {
           id: f.id,
           project_id: f.project_id,
           name: f.name ?? "",
-          file_type: f.file_type ?? "",
-          source_language: f.source_language ?? null,
-          target_language: f.target_language ?? null,
+          role: f.role ?? null,
+          kind: f.kind ?? null,
+          event_id: f.event_id ?? "",
+          meta: f.meta ?? "{}",
           cell_count: f.cell_count ?? 0,
           approved_count: f.approved_count ?? 0,
           word_count: f.word_count ?? 0,
@@ -765,14 +773,13 @@ export function makeInMemoryD1(tables: Partial<Tables> = {}): InMemoryD1 {
       return []
     }
 
-    // ── INSERT files (UPSERT from file.create handler) ───────────────────
-    // Spec §"File" added 8 spec metadata columns after `projected_from`
-    // (`role, kind, book_code, source_file_id, anchor_file_id, r2_key,
-    // import_format, parser_version`). The pre-spec shape is kept matching
-    // too (older handlers / tests may still emit it) — branched on whether
-    // 8 extra `?` placeholders trail the timestamp expression.
+    // ── INSERT files (UPSERT from file.create handler, 0012 shape) ───────
+    // Columns: id, project_id, name, role, kind, book_code, source_file_id,
+    // anchor_file_id, event_id, [counters/NULL], created_by, [timestamps],
+    // meta. Bind: 0=id,1=project_id,2=name,3=role,4=kind,5=book_code,
+    // 6=source_file_id,7=anchor_file_id,8=event_id,9=created_by,10=meta.
     if (
-      /^INSERT INTO files \([^)]*\) VALUES \(\?, \?, \?, \?, \?, \?, 0, 0, 0, NULL, \?, unixepoch\('now'\) \* 1000, \?, \?, \?, \?, \?, \?, \?, \?\)/.test(
+      /^INSERT INTO files \( id, project_id, name, role, kind, book_code, source_file_id, anchor_file_id, event_id, cell_count, approved_count, word_count, last_edit_at, created_by, created_at, updated_at, meta \) VALUES \( \?, \?, \?, \?, \?, \?, \?, \?, \?, 0, 0, 0, NULL, \?, unixepoch\('now'\) \* 1000, unixepoch\('now'\) \* 1000, \? \)/.test(
         normalized,
       )
     ) {
@@ -780,22 +787,18 @@ export function makeInMemoryD1(tables: Partial<Tables> = {}): InMemoryD1 {
         id: args[0] as string,
         project_id: args[1] as string,
         name: args[2] as string,
-        file_type: args[3] as string,
-        source_language: args[4] as string | null,
-        target_language: args[5] as string | null,
+        role: args[3] as string | null,
+        kind: args[4] as string | null,
+        book_code: args[5] as string | null,
+        source_file_id: args[6] as string | null,
+        anchor_file_id: args[7] as string | null,
+        event_id: args[8] as string,
         cell_count: 0,
         approved_count: 0,
         word_count: 0,
         last_edit_at: null,
-        projected_from: args[6] as string,
-        role: args[7] as string | null,
-        kind: args[8] as string | null,
-        book_code: args[9] as string | null,
-        source_file_id: args[10] as string | null,
-        anchor_file_id: args[11] as string | null,
-        r2_key: args[12] as string | null,
-        import_format: args[13] as string | null,
-        parser_version: args[14] as string | null,
+        created_by: args[9] as string | null,
+        meta: args[10] as string,
       }
       const idx = db.files.findIndex((f) => f.id === row.id)
       if (idx === -1) {
@@ -804,17 +807,13 @@ export function makeInMemoryD1(tables: Partial<Tables> = {}): InMemoryD1 {
         db.files[idx] = {
           ...db.files[idx],
           name: row.name,
-          file_type: row.file_type,
-          source_language: row.source_language,
-          target_language: row.target_language,
           role: row.role,
           kind: row.kind,
           book_code: row.book_code,
           source_file_id: row.source_file_id,
           anchor_file_id: row.anchor_file_id,
-          r2_key: row.r2_key,
-          import_format: row.import_format,
-          parser_version: row.parser_version,
+          event_id: row.event_id,
+          meta: row.meta,
         }
       }
       return []
@@ -882,17 +881,16 @@ export function makeInMemoryD1(tables: Partial<Tables> = {}): InMemoryD1 {
       return []
     }
 
-    // ── INSERT cell_validators (UPSERT) ────────────────────────────────
+    // ── INSERT cell_validators (UPSERT, 0012 shape) ────────────────────
+    // cell.validate only. Bind: 0=project_id,1=file_id,2=cell_id,
+    // 3=event_id,4=username,5=decided_ts. Conflict on (cell, username).
     if (/^INSERT INTO cell_validators/.test(normalized)) {
-      const isActiveMatch = normalized.match(/VALUES \([^)]*?,\s*(0|1),\s*\?\)/)
-      const isActive = isActiveMatch ? parseInt(isActiveMatch[1], 10) : 1
       const row: ValidatorRow = {
         project_id: args[0] as string,
         file_id: args[1] as string,
         cell_id: args[2] as string,
-        edit_event_id: args[3] as string,
+        event_id: args[3] as string,
         username: args[4] as string,
-        is_active: isActive,
         decided_ts: args[5] as number,
       }
       const idx = db.cell_validators.findIndex(
@@ -900,7 +898,6 @@ export function makeInMemoryD1(tables: Partial<Tables> = {}): InMemoryD1 {
           v.project_id === row.project_id &&
           v.file_id === row.file_id &&
           v.cell_id === row.cell_id &&
-          v.edit_event_id === row.edit_event_id &&
           v.username === row.username,
       )
       if (idx === -1) {
@@ -908,6 +905,22 @@ export function makeInMemoryD1(tables: Partial<Tables> = {}): InMemoryD1 {
       } else if (row.decided_ts > db.cell_validators[idx].decided_ts) {
         db.cell_validators[idx] = row
       }
+      return []
+    }
+
+    // ── DELETE cell_validators (cell.unvalidate, 0012) ─────────────────
+    if (
+      /^DELETE FROM cell_validators WHERE project_id = \? AND file_id = \? AND cell_id = \? AND username = \?$/.test(
+        normalized,
+      )
+    ) {
+      const pid = args[0] as string
+      const fid = args[1] as string
+      const cid = args[2] as string
+      const user = args[3] as string
+      db.cell_validators = db.cell_validators.filter(
+        (v) => !(v.project_id === pid && v.file_id === fid && v.cell_id === cid && v.username === user),
+      )
       return []
     }
 
@@ -1060,8 +1073,7 @@ export function makeInMemoryD1(tables: Partial<Tables> = {}): InMemoryD1 {
             v.project_id === projectId &&
             v.file_id === fileId &&
             v.cell_id === cellId &&
-            v.is_active === 1 &&
-            v.edit_event_id === cell.event_id,
+            v.event_id === cell.event_id,
         )
         cell.validated = activeForHead ? 1 : 0
 	      }

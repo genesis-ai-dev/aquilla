@@ -1,8 +1,12 @@
+// Phase 2c-gamma: useCompletion still drives the LLM stream and reports
+// per-cell completion status, but writebacks into the cell text are gone.
+// Streaming output is collected in-memory; the UI surfaces it via
+// previews + completing. Persisting the result requires a target.cell.commit
+// writeback from completion - that hookup is deferred to v1.x.
+
 import { useState, useCallback } from "react"
-import * as Y from "yjs"
 import type { CompletionSettings } from "@/lib/parsers/types"
 import type { FrontierSession } from "@/lib/frontier/types"
-import { setPlainText } from "@/lib/richtext/translated-xml"
 import type { ScoredPair } from "@/lib/search/dual-index"
 
 /**
@@ -23,7 +27,6 @@ import type { CellData } from "./useCells"
 import { buildPrompt, buildBatchPrompt, complete, resolveProvider, DEFAULT_SYSTEM_PROMPT, type PassageExample } from "@/lib/completion/completion-service"
 import type { PassageHit } from "./useSearchIndex"
 import { useFrontierHealth } from "@/lib/completion/frontier-health"
-import { appendCellHistory, dropLlmSeedHistory, recordHistoryEntry } from "./useCellHistory"
 import posthog from "@/lib/posthog"
 
 // Cap per LLM call. Above this we split sequentially and chain via priorBatch.
@@ -61,7 +64,6 @@ type SearchPassagesFn = (
 ) => Promise<PassageHit[]>
 
 export function useCompletion(
-  doc: Y.Doc | null,
   settings: CompletionSettings | undefined,
   sourceLanguage: string,
   targetLanguage: string,
@@ -73,6 +75,8 @@ export function useCompletion(
   const [completing, setCompleting] = useState<Map<string, string>>(new Map())
   const [examples, setExamples] = useState<Map<string, ScoredPair[]>>(new Map())
   const [errors, setErrors] = useState<Map<string, string>>(new Map())
+  // Phase 2c-gamma: streaming output is held here until a writeback path lands.
+  const [previews, setPreviews] = useState<Map<string, string>>(new Map())
 
   // Missing settings means "Frontier default with in-memory fallback" — we
   // don't persist anything until the user customizes.
@@ -94,15 +98,9 @@ export function useCompletion(
   const isAvailable = provider === "frontier" ? frontierAvailable : true
 
   const completeSingle = useCallback(async (cell: CellData) => {
-    if (!doc || !isConfigured || !isAvailable) return
+    if (!isConfigured || !isAvailable) return
 
     setCompleting((p) => new Map(p).set(cell.id, "searching"))
-    // Exclude the cell itself — re-completing an already-translated cell would
-    // otherwise show the model its own (source, target) pair and get an echo.
-    //
-    // AD-13: `search` is now an async server fetch (branching-search route);
-    // it falls back to an empty result on network error so a transient
-    // outage degrades to a zero-shot completion rather than a hard failure.
     let found: ScoredPair[] = []
     try {
       found = await search(cell.original, 5, cell.id)
@@ -113,16 +111,6 @@ export function useCompletion(
     setCompleting((p) => new Map(p).set(cell.id, "generating"))
 
     const llmAuthor = effectiveSettings.model || "frontier-default"
-    // Seed an LLM history entry with validated:false BEFORE the stream starts.
-    // Without this, deriveStatus's "translated text + empty history → validated"
-    // fallback flips the cell to a green/validated state for the entire
-    // streaming window, which the user sees as "auto-validated by the LLM."
-    // The seed is collapsed into the final history entry below.
-    dropLlmSeedHistory(doc, cell.id, llmAuthor)
-    recordHistoryEntry(doc, cell.id, {
-      value: "", source: "llm", author: llmAuthor, validated: false,
-      examples: found.map((e) => ({ cellId: e.cellId, weight: e.coverageWeight })),
-    })
 
     try {
       const messages = buildPrompt({
@@ -136,25 +124,11 @@ export function useCompletion(
         messages,
         stream: true,
         onChunk: (text) => {
-          const cells = doc.getMap("cells")
-          const yCell = cells.get(cell.id) as Y.Map<unknown> | undefined
-          if (yCell) {
-            const frag = yCell.get("translatedXml") as Y.XmlFragment | undefined
-            if (frag) {
-              setPlainText(frag, text)
-            } else {
-              doc.transact(() => { yCell.set("translated", text) })
-            }
-          }
+          setPreviews((p) => new Map(p).set(cell.id, text))
         },
       })
       await commitCompletedCell?.(cell, result, llmAuthor)
-      // Collapse the start-of-stream seed into the final entry.
-      dropLlmSeedHistory(doc, cell.id, llmAuthor)
-      appendCellHistory(doc, cell.id, {
-        value: result, source: "llm", author: llmAuthor,
-        validated: false, examples: found.map((e) => ({ cellId: e.cellId, weight: e.coverageWeight })),
-      })
+      setPreviews((p) => new Map(p).set(cell.id, result))
       posthog.capture("ai translation completed", {
         provider,
         model: effectiveSettings.model || "frontier-default",
@@ -164,14 +138,11 @@ export function useCompletion(
       })
       setCompleting((p) => new Map(p).set(cell.id, "done"))
     } catch (err) {
-      // Stream failed — drop the seed so the cell isn't left with a phantom
-      // empty LLM entry in its history.
-      dropLlmSeedHistory(doc, cell.id, llmAuthor)
       posthog.captureException(err instanceof Error ? err : new Error(String(err)))
       setCompleting((p) => new Map(p).set(cell.id, "error"))
       setErrors((p) => new Map(p).set(cell.id, err instanceof Error ? err.message : "Failed"))
     }
-  }, [doc, effectiveSettings, isConfigured, isAvailable, sourceLanguage, targetLanguage, search, session, provider, commitCompletedCell])
+  }, [effectiveSettings, isConfigured, isAvailable, sourceLanguage, targetLanguage, search, session, provider, commitCompletedCell])
 
   // Segmented batch translation: each sub-batch goes out as one <vN>-framed
   // prompt and the response is demuxed back to cells. LLMs translate a passage
@@ -180,7 +151,7 @@ export function useCompletion(
   // missing/malformed in the response fall through to single-cell completion;
   // the batch as a whole does not fail.
   const completeBatch = useCallback(async (cells: CellData[]) => {
-    if (!doc || !isConfigured || !isAvailable) return
+    if (!isConfigured || !isAvailable) return
 
     const chunks: CellData[][] = []
     for (let i = 0; i < cells.length; i += MAX_CELLS_PER_CALL) {
@@ -197,24 +168,10 @@ export function useCompletion(
       max_cells_per_call: MAX_CELLS_PER_CALL,
     })
 
-    const writeCell = (cellId: string, text: string) => {
-      const yCells = doc.getMap("cells")
-      const yCell = yCells.get(cellId) as Y.Map<unknown> | undefined
-      if (!yCell) return
-      const frag = yCell.get("translatedXml") as Y.XmlFragment | undefined
-      if (frag) setPlainText(frag, text)
-      else doc.transact(() => { yCell.set("translated", text) })
-    }
-
     let priorBatch: { source: string; target: string }[] = []
     const fallbackQueue: CellData[] = []
 
     for (const chunk of chunks) {
-      // 1. Retrieve passage examples once for the whole sub-batch. Branching
-      //    search is built for long queries — concatenating is the right call.
-      //    AD-13: this hits the server `/branching-search/passages` endpoint
-      //    via the injected fetcher. Failure falls back to no examples (zero-
-      //    shot) rather than failing the batch.
       for (const c of chunk) setCompleting((p) => new Map(p).set(c.id, "searching"))
       const concatenated = chunk.map((c) => c.original).join(" ")
       let passages: PassageHit[] = []
@@ -233,21 +190,8 @@ export function useCompletion(
       for (const c of chunk) {
         setExamples((p) => new Map(p).set(c.id, flatExamples))
         setCompleting((p) => new Map(p).set(c.id, "generating"))
-        // Seed an LLM history entry with validated:false BEFORE streaming
-        // starts. Otherwise deriveStatus's "translated text + empty history →
-        // validated" fallback makes every cell light up validated for the
-        // (multi-second) duration of the LLM call.
-        dropLlmSeedHistory(doc, c.id, llmAuthor)
-        recordHistoryEntry(doc, c.id, {
-          value: "", source: "llm", author: llmAuthor, validated: false,
-          examples: flatExamples.map((e) => ({ cellId: e.cellId, weight: e.coverageWeight })),
-        })
       }
 
-      // 2. Stream the segmented response and route closed <vN>...</vN> blocks
-      //    to each cell as they arrive. Re-scanning the cumulative buffer is
-      //    O(N²) but trivial at our scale; the regex naturally ignores any
-      //    unclosed trailing tag.
       const filledText = new Map<number, string>()
       const completedRe = /<v(\d+)>([\s\S]*?)<\/v\1>/g
       const consumeFull = (full: string) => {
@@ -259,7 +203,7 @@ export function useCompletion(
           const cell = chunk[idx - 1]
           if (!cell) continue
           const text = m[2].trim()
-          writeCell(cell.id, text)
+          setPreviews((p) => new Map(p).set(cell.id, text))
           filledText.set(idx, text)
         }
       }
@@ -291,8 +235,6 @@ export function useCompletion(
         for (let i = 0; i < chunk.length; i++) {
           if (filledText.has(i + 1)) continue
           const c = chunk[i]
-          // Drop the seed so the cell isn't stuck with an empty LLM entry.
-          dropLlmSeedHistory(doc, c.id, llmAuthor)
           setCompleting((p) => new Map(p).set(c.id, "error"))
           setErrors((p) => new Map(p).set(c.id, msg))
         }
@@ -300,30 +242,15 @@ export function useCompletion(
         return
       }
 
-      // Final pass: in non-streaming mode (frontier path) onChunk never fired,
-      // so we parse the returned text now. Idempotent in stream mode.
       consumeFull(result)
 
-      // Record history + status for cells that round-tripped; queue the rest
-      // for single-cell fallback so a couple of dropped tags don't lose the
-      // user's whole batch. In both cases drop the seed entry first so we
-      // don't accumulate phantom empty-LLM entries — completeSingle seeds
-      // its own when it picks up a fallback.
       for (let i = 0; i < chunk.length; i++) {
         const cell = chunk[i]
         const text = filledText.get(i + 1)
-        dropLlmSeedHistory(doc, cell.id, llmAuthor)
         if (text !== undefined) {
           if (commitCompletedCell) {
             await commitCompletedCell(cell, text, llmAuthor)
           }
-          appendCellHistory(doc, cell.id, {
-            value: text,
-            source: "llm",
-            author: llmAuthor,
-            validated: false,
-            examples: flatExamples.map((e) => ({ cellId: e.cellId, weight: e.coverageWeight })),
-          })
           setCompleting((p) => new Map(p).set(cell.id, "done"))
         } else {
           fallbackQueue.push(cell)
@@ -353,7 +280,7 @@ export function useCompletion(
     for (const cell of fallbackQueue) {
       await completeSingle(cell)
     }
-  }, [doc, effectiveSettings, isConfigured, isAvailable, sourceLanguage, targetLanguage, searchPassages, session, provider, completeSingle, commitCompletedCell])
+  }, [effectiveSettings, isConfigured, isAvailable, sourceLanguage, targetLanguage, searchPassages, session, provider, completeSingle, commitCompletedCell])
 
-  return { completeSingle, completeBatch, isConfigured, isAvailable, completing, examples, errors }
+  return { completeSingle, completeBatch, isConfigured, isAvailable, completing, examples, errors, previews }
 }

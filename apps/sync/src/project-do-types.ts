@@ -17,6 +17,9 @@ export type OutboxEventKind =
   | "cell.unvalidate"
   | "cell.endorsement"
   | "cell.endorsement.revoke"
+  | "cell.audio.attach"
+  | "cell.audio.select"
+  | "cell.audio.remove"
   | "file.create"
   | "project.link-source"
 

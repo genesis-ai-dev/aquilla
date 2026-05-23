@@ -2,21 +2,25 @@
 //
 // Writes the canonical event row PLUS a `files` UPSERT so the file shows
 // up in the project listing immediately after import — before any user
-// opens the file. UPSERT semantics: administrative fields (name, type,
-// languages, role/kind/import metadata) always overwrite; counters
-// (cell_count, approved_count, word_count, last_edit_at) are NOT touched
-// here — they're maintained by the cell-event projection path.
+// opens the file. UPSERT semantics: administrative fields (name, role,
+// kind, semantics, meta) and the `event_id` chain head always overwrite;
+// counters (cell_count, approved_count, word_count, last_edit_at) and the
+// created_* audit fields are NOT touched on conflict — counters are
+// maintained by the cell-event projection path.
 //
-// Spec alignment (03-data-model.md §"File"): the row carries `role`,
-// `kind`, `book_code`, `source_file_id`, `anchor_file_id`, `r2_key`,
-// `import_format`, `parser_version` from the event payload. The legacy
-// `file_type` column is kept in lockstep (`payload.fileType ?? payload.kind
-// ?? payload.role ?? 'codex'`) so existing reads in `files-read-route.ts`
-// keep returning a non-null value.
+// Spec alignment (03-data-model.md §"File", 2026-05-21 revision): the row
+// carries `role`, `kind`, `book_code`, `source_file_id`, `anchor_file_id`
+// as columns and an `event_id` chain head; sparse provenance + per-file
+// language overrides (`r2_key`, `blob_sha`, `import_format`,
+// `parser_version`, `source_language`, `target_language`) are consolidated
+// into the JSON `meta` column per §"Column vs JSON meta". The legacy
+// `file_type` column is gone — files-read derives a compatible `fileType`
+// from `kind ?? role ?? 'codex'`.
 
 import type { AuthorizedEvent } from '../authorize'
 import type { RealtimeMessage, ProjectionTable } from '../realtime'
 import type { DispatchResult } from './types'
+import { buildFileMeta } from '../file-meta'
 
 export interface HandleFileCreateOptions {
   serverSeq: number
@@ -56,54 +60,52 @@ export function handleFileCreate(
       opts.serverSeq,
     )
 
-  // Legacy column fallback: keep `file_type` populated so pre-spec reads
-  // keep working. New rows should set `role` + `kind` directly.
-  const legacyFileType =
-    event.payload.fileType ?? event.payload.kind ?? event.payload.role ?? 'codex'
+  // Sparse provenance + per-file language overrides go into `meta` (JSON);
+  // role/kind/book_code/pairing stay as columns. `event_id` is this
+  // file.create's id (the AD-2 chain head). created_* are set on insert
+  // only; counters are maintained by the cell-event projection path.
+  const meta = buildFileMeta(event.payload)
 
   const fileUpsert = db
     .prepare(
       `INSERT INTO files (
-        id, project_id, name, file_type, source_language, target_language,
-        cell_count, approved_count, word_count, last_edit_at, projected_from,
-        updated_at,
+        id, project_id, name,
         role, kind, book_code, source_file_id, anchor_file_id,
-        r2_key, import_format, parser_version
+        event_id,
+        cell_count, approved_count, word_count, last_edit_at,
+        created_by, created_at, updated_at,
+        meta
       ) VALUES (
-        ?, ?, ?, ?, ?, ?, 0, 0, 0, NULL, ?, unixepoch('now') * 1000,
-        ?, ?, ?, ?, ?, ?, ?, ?
+        ?, ?, ?,
+        ?, ?, ?, ?, ?,
+        ?,
+        0, 0, 0, NULL,
+        ?, unixepoch('now') * 1000, unixepoch('now') * 1000,
+        ?
       )
       ON CONFLICT(id) DO UPDATE SET
         name = excluded.name,
-        file_type = excluded.file_type,
-        source_language = excluded.source_language,
-        target_language = excluded.target_language,
         role = excluded.role,
         kind = excluded.kind,
         book_code = excluded.book_code,
         source_file_id = excluded.source_file_id,
         anchor_file_id = excluded.anchor_file_id,
-        r2_key = excluded.r2_key,
-        import_format = excluded.import_format,
-        parser_version = excluded.parser_version,
+        event_id = excluded.event_id,
+        meta = excluded.meta,
         updated_at = unixepoch('now') * 1000`,
     )
     .bind(
       event.fileId,
       event.projectId,
       event.payload.name,
-      legacyFileType,
-      event.payload.sourceLanguage ?? null,
-      event.payload.targetLanguage ?? null,
-      `event:${event.id}`,
       event.payload.role ?? null,
       event.payload.kind ?? null,
       event.payload.bookCode ?? null,
       event.payload.sourceFileId ?? null,
       event.payload.anchorFileId ?? null,
-      event.payload.r2Key ?? null,
-      event.payload.importFormat ?? null,
-      event.payload.parserVersion ?? null,
+      event.id,
+      claims.username,
+      meta,
     )
 
   const eventFrame: Extract<RealtimeMessage, { t: 'event' }> = {
@@ -114,6 +116,7 @@ export function handleFileCreate(
     project: event.projectId,
     file: event.fileId,
     ts: serverTs,
+    by: claims.username,
   }
 
   return {

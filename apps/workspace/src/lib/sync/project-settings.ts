@@ -2,7 +2,7 @@ import { FRONTIER_API_URL } from "./sync-token"
 import type {
   TranslationRule,
   RulePenalties,
-  HealthSettings,
+  DecaySettings,
 } from "@/lib/parsers/types"
 
 /** Initial server version for projects with no settings row. */
@@ -21,9 +21,8 @@ export interface ProjectWideSettings {
   systemPrompt?: string
   rules?: TranslationRule[]
   rulePenalties?: RulePenalties
-  decaySettings?: HealthSettings
-  /** @deprecated Use decaySettings. Kept until the settings UI is renamed. */
-  healthSettings?: HealthSettings
+  /** AD-14 decay tunables. */
+  decaySettings?: DecaySettings
   validationCount?: number
   validationCountAudio?: number
 }

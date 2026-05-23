@@ -2,11 +2,17 @@ import { useEffect, useState, type ReactNode } from "react"
 import { PanelLeftClose, PanelLeftOpen } from "lucide-react"
 
 // Project-wide z-index scale (Tailwind v4 dynamic):
+//   (no z) — in-flow chrome (workspace header, status bar, sidebar). It sits
+//            above main content physically via flex layout — adding z-index
+//            would only trap dropdowns inside the chrome's stacking context
+//            and (because Base UI's portal-Positioner uses `transform`)
+//            cause portal'd menus/tooltips to paint BEHIND the chrome.
 //   z-10 — content stickies (table headers, sticky cells)
 //   z-20 — in-content floats (action rails, expansion glyphs)
-//   z-30 — in-flow app chrome (workspace header, status bar, bottom action chips)
-//   z-40 — fixed overlay banners, popovers, menus, dropdowns, autocomplete
-//          (banners sit above z-30 chrome but below modal dialogs)
+//   z-30 — fixed bottom action chips/bars (SelectionBar, AiModelDownloadChip,
+//          AudioBulkProgressBanner) that float over the editor
+//   z-40 — fixed overlay banners (PrivateMode, SyncFreeze), popovers, menus,
+//          dropdowns, tooltips, autocomplete
 //   z-50 — modals, sheets, dialogs (+ their backdrops)
 //   z-60 — toasts / transient notices that must beat everything
 // Anything else is a bug. Don't reach for z-[999].
@@ -44,7 +50,7 @@ export function AppShell({ sidebar, header, statusBar, beforeMain, main, aside }
         {sidebar}
       </aside>
       <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
-        <div className="relative z-30 flex items-stretch">
+        <div className="flex items-stretch">
           <button
             type="button"
             onClick={() => setCollapsed((c) => !c)}

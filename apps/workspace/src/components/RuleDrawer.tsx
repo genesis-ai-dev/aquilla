@@ -1,13 +1,8 @@
-import { useState } from "react"
 import { useNavigate } from "react-router-dom"
 import { X, AlertTriangle, AlertCircle, Sparkles, Wand2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import { FixReviewPanel } from "./FixReviewPanel"
 import type { TranslationRule, RuleInfraction, ProjectRecord } from "@/lib/parsers/types"
 import type { CellData } from "@/hooks/useCells"
-import type { FixProposal } from "@/lib/rules/autofix"
-import { useAutofix } from "@/hooks/useAutofix"
-import type * as Y from "yjs"
 
 interface RuleDrawerProps {
   rule: TranslationRule | null
@@ -16,20 +11,19 @@ interface RuleDrawerProps {
   onClose: () => void
   onNavigateToCell: (cellId: string) => void
   project: ProjectRecord | null
-  doc: Y.Doc | null
-  username: string
-  refresh: () => void
-  cellsByFile: Map<string, CellData[]>
+  username?: string
+  refresh?: () => void
+  cellsByFile?: Map<string, CellData[]>
 }
 
 export function RuleDrawer({
   rule, infractions, cells, onClose, onNavigateToCell,
-  project, doc, username, refresh, cellsByFile,
+  project,
 }: RuleDrawerProps) {
   const navigate = useNavigate()
-  const autofix = useAutofix({ project: project!, doc, username, refresh, cellsByFile })
-  const [panelProposal, setPanelProposal] = useState<FixProposal | null>(null)
-  const [surgicalFor, setSurgicalFor] = useState<{ cellId: string; proposal: FixProposal } | null>(null)
+  // Phase 2c-gamma: autofix applied via Y.Doc edits; the writeback path is
+  // gone. The "Try to fix" buttons render disabled until the event-grammar
+  // equivalent lands.
 
   if (!rule || !project) return null
 
@@ -40,33 +34,6 @@ export function RuleDrawer({
 
   const SeverityIcon = rule.severity === "major" ? AlertTriangle : AlertCircle
   const severityColor = rule.severity === "major" ? "text-red-500" : "text-amber-500"
-
-  const isBusy = autofix.busyRuleId === rule.id
-  const hasSavedFix = !!rule.autofix
-
-  async function onTryFixAll() {
-    if (!rule) return
-    const proposal = await autofix.tryFixAll(rule)
-    setPanelProposal(proposal)
-  }
-
-  async function onTryFixOne(cell: CellData) {
-    if (!rule) return
-    const proposal = await autofix.tryFixOne(rule, cell)
-    setSurgicalFor({ cellId: cell.id, proposal })
-  }
-
-  async function onApplyPanel(selected: Set<string>) {
-    if (!rule || !panelProposal) return
-    await autofix.applyProposal(rule, panelProposal, selected)
-    setPanelProposal(null)
-  }
-
-  async function onApplySurgical() {
-    if (!rule || !surgicalFor) return
-    await autofix.applyProposal(rule, surgicalFor.proposal, new Set([surgicalFor.cellId]))
-    setSurgicalFor(null)
-  }
 
   function onAmendRule() {
     navigate(`/project/${project!.id}/rules?ruleId=${rule!.id}&focus=autofix`)
@@ -85,16 +52,16 @@ export function RuleDrawer({
       </div>
 
       <div className="flex items-center gap-2 border-b px-3 py-2">
-        <Button size="sm" onClick={onTryFixAll} disabled={isBusy || infractions.length === 0}>
+        <Button size="sm" disabled title="Autofix is unavailable in this build">
           <Wand2 className="mr-1 h-3.5 w-3.5" />
-          {isBusy ? (hasSavedFix ? "Applying cached fix…" : "Analyzing…") : "Try to fix all"}
+          Try to fix all
         </Button>
         <Button variant="ghost" size="sm" onClick={onAmendRule}>Amend rule</Button>
       </div>
 
       <div className="border-b px-3 py-1 text-[10px] text-muted-foreground">
-        {hasSavedFix
-          ? `Saved autofix: /${rule.autofix!.pattern}/${rule.autofix!.flags} → ${rule.autofix!.replacement}`
+        {rule.autofix
+          ? `Saved autofix: /${rule.autofix.pattern}/${rule.autofix.flags} → ${rule.autofix.replacement}`
           : "No saved fix yet"}
       </div>
 
@@ -118,7 +85,7 @@ export function RuleDrawer({
                     <div className="truncate text-muted-foreground">{cell!.original.slice(0, 60)}...</div>
                     <div className="truncate font-medium">{cell!.translated.slice(0, 60)}...</div>
                   </button>
-                  <Button variant="ghost" size="sm" className="h-6 px-1" disabled={isBusy} onClick={() => onTryFixOne(cell!)}>
+                  <Button variant="ghost" size="sm" className="h-6 px-1" disabled title="Autofix is unavailable in this build">
                     <Sparkles className="h-3 w-3" />
                   </Button>
                 </li>
@@ -151,20 +118,6 @@ export function RuleDrawer({
         </div>
       </div>
 
-      {panelProposal && (
-        <FixReviewPanel
-          open={!!panelProposal} rule={rule} proposal={panelProposal}
-          onClose={() => setPanelProposal(null)} onApply={onApplyPanel} onAmendRule={onAmendRule}
-        />
-      )}
-      {surgicalFor && (
-        <FixReviewPanel
-          open={!!surgicalFor} rule={rule} proposal={surgicalFor.proposal}
-          onClose={() => setSurgicalFor(null)}
-          onApply={onApplySurgical}
-          onAmendRule={onAmendRule}
-        />
-      )}
     </div>
   )
 }

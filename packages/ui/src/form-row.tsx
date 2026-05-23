@@ -26,7 +26,7 @@ export function FormRow({
 }: FormRowProps) {
   const messageId = `${htmlFor}-msg`
   return (
-    <div className={cn("flex flex-col gap-1.5", className)}>
+    <div className={cn("flex flex-col gap-2", className)}>
       <Label htmlFor={htmlFor}>{label}</Label>
       {children}
       {(error || hint) && (
@@ -34,7 +34,7 @@ export function FormRow({
           id={messageId}
           data-slot={error ? "form-error" : "form-hint"}
           className={cn(
-            "text-xs",
+            "-mt-0.5 text-xs",
             error ? "text-destructive" : "text-muted-foreground",
           )}
         >

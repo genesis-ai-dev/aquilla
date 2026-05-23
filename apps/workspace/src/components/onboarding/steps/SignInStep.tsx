@@ -37,8 +37,8 @@ export function SignInStep({ onNext, onBack }: { onNext: () => void; onBack: () 
   const isForgot = mode === "forgot"
 
   const headings: Record<Mode, string> = {
-    signup: "Create your Frontier account",
-    login: "Sign in to Frontier",
+    signup: "Create your account",
+    login: "Sign in",
     forgot: "Reset your password",
   }
 
@@ -64,7 +64,7 @@ export function SignInStep({ onNext, onBack }: { onNext: () => void; onBack: () 
 
       {!isForgot && (
         <p className="text-center text-sm text-muted-foreground">
-          {isSignup ? "Already have an account?" : "New to Frontier?"}{" "}
+          {isSignup ? "Already have an account?" : "New here?"}{" "}
           <button
             type="button"
             onClick={() => setMode(isSignup ? "login" : "signup")}

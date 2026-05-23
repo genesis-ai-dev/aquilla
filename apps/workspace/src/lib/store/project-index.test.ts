@@ -158,8 +158,13 @@ describe("project-index trash", () => {
     expect(fetched?.deletedAt).toBeDefined()
   })
 
-  it("tombstoneProject leaves local state unchanged on 403", async () => {
-    const project = makeProject({ id: "p4" })
+  it("tombstoneProject leaves local state unchanged on 403 for server-known projects", async () => {
+    const project = makeProject({
+      id: "p4",
+      // syncRole present => the project is known to the server; a 403 truly
+      // means "you're not the owner", not "no such row".
+      syncRole: { level: 400, name: "contributor", source: "creator", fetchedAt: new Date().toISOString() },
+    })
     await createProject(project)
     globalThis.fetch = vi.fn(
       async () =>
@@ -169,6 +174,22 @@ describe("project-index trash", () => {
     expect(result.remote.kind).toBe("forbidden")
     const fetched = await getProject("p4")
     expect(fetched?.deletedAt).toBeUndefined()
+  })
+
+  it("tombstoneProject reclassifies 403 to local-only when project is local-only-shape", async () => {
+    // Identity returns 403 for both "no role" and "no such project" (privacy).
+    // For a local-only-shape record (no origin, no syncRole), the 403 must
+    // mean "server has no row" — fall through and write the local tombstone.
+    const project = makeProject({ id: "p4-orphan" })
+    await createProject(project)
+    globalThis.fetch = vi.fn(
+      async () =>
+        new Response(JSON.stringify({ error: "not found or no access" }), { status: 403 })
+    ) as typeof fetch
+    const result = await tombstoneProject(project, { jwt: "fake-jwt" })
+    expect(result.remote.kind).toBe("local-only")
+    const fetched = await getProject("p4-orphan")
+    expect(fetched?.deletedAt).toBeDefined()
   })
 
   it("restoreProject clears local deletedAt and deletedBy", async () => {

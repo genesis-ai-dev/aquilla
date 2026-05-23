@@ -61,12 +61,12 @@ export function AiProviderStep({ project, onUpdated, onSaved }: AiProviderStepPr
 
       <ProviderOption
         icon={<Sparkles className="h-4 w-4" />}
-        label="Frontier AI"
+        label="Aquilla AI"
         badge="Recommended"
         description={
           session
             ? `Signed in as ${session.username} — no setup needed.`
-            : "Sign in with a Frontier account to use the managed model."
+            : "Sign in to use the managed model."
         }
         selected={selected === "frontier"}
         onClick={() => setSelected("frontier")}

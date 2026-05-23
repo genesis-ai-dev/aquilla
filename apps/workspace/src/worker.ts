@@ -18,6 +18,7 @@ import {
   assertNotPreviewInProd,
   THEME_BOOTSTRAP_INLINE_SCRIPT_SHA256,
 } from "@aquilla/errors"
+import { rejectStaleAssetFallback } from "@aquilla/errors/asset-fallback"
 
 interface Env extends Record<string, unknown> {
   ENV: string
@@ -84,7 +85,7 @@ export default {
       )
     }
 
-    const assetRes = await env.ASSETS.fetch(req)
+    const rawAssetRes = await env.ASSETS.fetch(req)
 
     // Workers Assets `not_found_handling = "single-page-application"`
     // falls back to the directory-root index.html (./dist/index.html) —
@@ -93,17 +94,17 @@ export default {
     // (/w/debug, /w/project/abc, …). Re-fetch the slug's index.html as
     // the SPA-fallback so client-side React Router can take over.
     if (
-      assetRes.status === 404 &&
+      rawAssetRes.status === 404 &&
       url.pathname.startsWith("/w/") &&
       !/\.[a-z0-9]+$/i.test(url.pathname)
     ) {
       const fallback = new Request(new URL("/w/", url).toString(), req)
       const fallbackRes = await env.ASSETS.fetch(fallback)
       if (fallbackRes.ok) {
-        return withSecurityHeaders(fallbackRes)
+        return withSecurityHeaders(rejectStaleAssetFallback(req, fallbackRes))
       }
     }
 
-    return withSecurityHeaders(assetRes)
+    return withSecurityHeaders(rejectStaleAssetFallback(req, rawAssetRes))
   },
 }

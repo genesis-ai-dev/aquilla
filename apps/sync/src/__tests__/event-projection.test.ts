@@ -216,7 +216,7 @@ describe('buildEventProjectionStmts — *.cell.reorder', () => {
 })
 
 describe('buildEventProjectionStmts — cell.validate / cell.unvalidate', () => {
-  it('cell.validate emits validator UPSERT (is_active=1) + cells.validated recompute', () => {
+  it('cell.validate emits validator UPSERT + cells.validated recompute (0012: event-anchored, no is_active)', () => {
     const { db, recorded } = makeD1Stub()
     const stmts: D1PreparedStatement[] = []
     buildEventProjectionStmts(
@@ -226,13 +226,16 @@ describe('buildEventProjectionStmts — cell.validate / cell.unvalidate', () => 
     )
     expect(stmts).toHaveLength(2)
     expect(recorded[0].sql).toContain('INSERT INTO cell_validators')
-    expect(recorded[0].sql).toMatch(/VALUES \([^)]*?, 1, \?\)/)
+    expect(recorded[0].sql).not.toContain('is_active')
+    // Bind: 0=project_id,1=file_id,2=cell_id,3=event_id,4=username,5=decided_ts
+    expect(recorded[0].args[3]).toBe('evt-commit-id')
     expect(recorded[1].sql).toContain('UPDATE cells')
     expect(recorded[1].sql).toContain('SET validated')
-    expect(recorded[1].sql).toContain('edit_event_id = cells.event_id')
+    expect(recorded[1].sql).toContain('event_id = cells.event_id')
+    expect(recorded[1].sql).not.toContain('is_active')
   })
 
-  it('cell.unvalidate emits validator UPSERT (is_active=0) + recompute', () => {
+  it('cell.unvalidate DELETEs the (cell, validator) row + recompute (0012: DELETE-on-unvalidate)', () => {
     const { db, recorded } = makeD1Stub()
     const stmts: D1PreparedStatement[] = []
     buildEventProjectionStmts(
@@ -241,7 +244,10 @@ describe('buildEventProjectionStmts — cell.validate / cell.unvalidate', () => 
       stmts,
     )
     expect(stmts).toHaveLength(2)
-    expect(recorded[0].sql).toMatch(/VALUES \([^)]*?, 0, \?\)/)
+    expect(recorded[0].sql).toContain('DELETE FROM cell_validators')
+    expect(recorded[0].sql).toContain('username = ?')
+    // Bind: 0=project_id,1=file_id,2=cell_id,3=username
+    expect(recorded[0].args).toEqual(['proj-1', 'file-a', 'cell-1', 'alice'])
   })
 })
 
@@ -259,7 +265,7 @@ describe('buildEventProjectionStmts — file.create', () => {
     expect(recorded[0].args[2]).toBe('Genesis')
   })
 
-  it('persists the spec §"File" payload fields (role/kind/r2_key/etc.)', () => {
+  it('persists role/kind/book_code as columns, event_id chain head, and provenance into meta JSON (0012)', () => {
     const { db, recorded } = makeD1Stub()
     const stmts: D1PreparedStatement[] = []
     buildEventProjectionStmts(
@@ -276,34 +282,24 @@ describe('buildEventProjectionStmts — file.create', () => {
           parserVersion: 'usfm-2026.04',
           sourceLanguage: 'en',
         },
-        { cellId: null },
+        { cellId: null, id: 'evt-file-1' },
       ),
       stmts,
     )
-    // Argument order matches the new INSERT in event-projection.ts:
-    //   id, project_id, name, file_type, source_lang, target_lang,
-    //   projected_from, role, kind, book_code, source_file_id,
-    //   anchor_file_id, r2_key, import_format, parser_version
+    // 0012 bind order: 0=id, 1=project_id, 2=name, 3=role, 4=kind,
+    //   5=book_code, 6=source_file_id, 7=anchor_file_id, 8=event_id,
+    //   9=created_by, 10=meta (JSON).
     const args = recorded[0].args
-    expect(args[3]).toBe('usfm')                                     // legacy file_type ← kind
-    expect(args[7]).toBe('source')                                   // role
-    expect(args[8]).toBe('usfm')                                     // kind
-    expect(args[9]).toBe('GEN')                                      // book_code
-    expect(args[12]).toBe('projects/p/files/f/original.usfm')        // r2_key
-    expect(args[13]).toBe('usfm')                                    // import_format
-    expect(args[14]).toBe('usfm-2026.04')                            // parser_version
-  })
-
-  it('falls back legacy file_type to kind/role/codex when fileType is omitted', () => {
-    const { db, recorded } = makeD1Stub()
-    const stmts: D1PreparedStatement[] = []
-    buildEventProjectionStmts(
-      db,
-      makeEvent('file.create', { name: 'Notes', role: 'translationNotes' }, { cellId: null }),
-      stmts,
-    )
-    // file_type ← role since fileType + kind are absent
-    expect(recorded[0].args[3]).toBe('translationNotes')
+    expect(recorded[0].sql).not.toContain('file_type')
+    expect(args[3]).toBe('source')        // role
+    expect(args[4]).toBe('usfm')          // kind
+    expect(args[5]).toBe('GEN')           // book_code
+    expect(args[8]).toBe('evt-file-1')    // event_id chain head
+    const meta = JSON.parse(args[10] as string)
+    expect(meta.r2_key).toBe('projects/p/files/f/original.usfm')
+    expect(meta.import_format).toBe('usfm')
+    expect(meta.parser_version).toBe('usfm-2026.04')
+    expect(meta.source_language).toBe('en')
   })
 })
 

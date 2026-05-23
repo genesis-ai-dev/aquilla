@@ -40,7 +40,7 @@ interface Props {
  *     selection — `value.resolved` carries the verified user record.
  *   - Sub-2-char input renders a hint instead of a request.
  *   - "No matches" renders explicitly so the user knows the username
- *     they typed isn't a Frontier account (use email mode instead).
+ *     they typed isn't a registered account (use email mode instead).
  *
  * Email mode:
  *   - Plain email input. Caller validates / passes through to the
@@ -147,7 +147,7 @@ export function UsernameTypeahead({
               placeholder?.[value.mode] ??
               (value.mode === "email"
                 ? "name@example.com"
-                : "Frontier username")
+                : "Username")
             }
           />
           {value.mode === "username" && value.resolved && (

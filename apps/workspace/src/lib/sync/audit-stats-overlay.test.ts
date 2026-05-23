@@ -11,11 +11,11 @@ function commit(
   cellId: string,
   author: string,
   clientTs: number,
-): CqrsRawEvent<"cell.commit"> {
+): CqrsRawEvent<"target.cell.commit"> {
   return {
     id,
     schemaVersion: SCHEMA,
-    kind: "cell.commit",
+    kind: "target.cell.commit",
     projectId: "p",
     fileId: "f",
     cellId,
@@ -225,10 +225,10 @@ describe("applyOutboxOverlay", () => {
 
   it("ignores events without a cellId (project-level events)", () => {
     const base = new Map([["c1", baseStats()]])
-    const evNoCell: CqrsRawEvent<"cell.commit"> = {
+    const evNoCell: CqrsRawEvent<"target.cell.commit"> = {
       id: "p1",
       schemaVersion: SCHEMA,
-      kind: "cell.commit",
+      kind: "target.cell.commit",
       projectId: "p",
       author: "alice",
       payload: { value: "x", valueHtml: "<p>x</p>" },

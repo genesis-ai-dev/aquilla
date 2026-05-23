@@ -29,7 +29,10 @@ Backed by Cloudflare Workers in this repo (`apps/identity/`, `apps/sync/`, `apps
 
 ```bash
 pnpm i              # install
-pnpm dev            # vite dev server
+pnpm dev            # full local stack: identity + sync (wrangler dev) + vite
+pnpm dev:chat       # full stack including apps/chat (needs OPENROUTER_API_KEY)
+pnpm dev:verbose    # same as `pnpm dev` but streams each worker's stdout/stderr
+pnpm dev:vite       # bare Vite only — escape hatch for SPA-only iteration
 pnpm build          # tsc -b && vite build
 pnpm preview        # preview built bundle
 pnpm lint           # eslint
@@ -42,6 +45,27 @@ pnpm test -t "splits by verse"
 ```
 
 Vitest runs in `happy-dom` with `fake-indexeddb/auto` loaded via `apps/workspace/src/test-setup.ts`, so tests that use IndexedDB / idb work without a browser. Path alias `@/` resolves to `apps/workspace/src/` (post-Phase-3a-final).
+
+### Local backend dev (`scripts/dev-stack.ts`)
+
+`pnpm dev` runs `scripts/dev-stack.ts`, which boots the workspace SPA's backends locally via `wrangler dev --local`:
+
+| Service         | Port  | Source            |
+| --------------- | ----- | ----------------- |
+| `apps/identity` | 8788  | `wrangler dev`    |
+| `apps/sync`     | 8789  | `wrangler dev`    |
+| `apps/chat`     | 8790  | only with `--chat`|
+| Vite (SPA)      | 5173  | the workspace bundle |
+
+What it does:
+
+- Auto-creates each backend's `.dev.vars` from its `.dev.vars.example` on first boot (gitignored — edit freely).
+- Applies `apps/identity/migrations/*.sql` to the local D1 (idempotent — wrangler tracks applied migrations).
+- Persists wrangler local state to `.wrangler-dev-state/` at the repo root, **shared between identity and sync** so the project rows identity writes are visible to sync. Delete that directory to reset the local DB.
+- Writes a managed `.env.development.local` so the Vite client bundle resolves `VITE_AUTH_BASE` / `VITE_SYNC_WORKER_HOST` to the local ports. The file is deleted on clean shutdown so `pnpm dev:vite` returns to whatever the user has in `.env.local`.
+- Streams each Worker's output to `.dev-stack-logs/{identity,sync,chat,vite}.log`; pass `--verbose` to also tee to the terminal.
+
+Nothing in dev-stack touches `wrangler.toml`, CI workflows, or remote Cloudflare resources. The remote Workers (`aquilla-prod-identity`, `aquilla-sync-worker`, `aquilla-prod-projects`, …) and their `[env.production]` / `[env.staging]` / `[env.preview]` blocks are unaffected.
 
 ## Architecture
 
@@ -111,6 +135,16 @@ Codex-web hosts its own Cloudflare Workers in this repo, independent of the olde
 Each worker has a `[env.staging]` block pointing at staging-suffixed resources (`aquilla-db-staging`, `aquilla-snapshots-staging`). `apps/identity/` additionally has an `[env.preview]` block (per-PR; `aquilla-pr-<N>-identity`) that CI substitutes `__PR__` into. Production and staging share zero data.
 
 The frontend wires worker URLs via build-time env vars: `VITE_AUTH_BASE`, `VITE_CHAT_BASE`, `VITE_SYNC_WORKER_HOST`. The deploy workflow injects prod vs staging hosts based on the branch.
+
+## Spec divergences (deliberate)
+
+Codex-web tracks the `genesis-ai-dev/aquilla-specs` data model closely. A few divergences are intentional — implementers may rename columns / pick their own stack, and these are conscious calls (not drift). When reconciling, amend the spec text rather than "fixing" the code:
+
+- **AD-2 is scoped to content, not the full project lifecycle.** Only cell-level changes (`source.*`/`target.*` cell events), validation, endorsement, and `project.link-source` flow through the append-only `events` log. Project / org / member / settings / invite lifecycle is plain relational CRUD in `apps/identity` (`INSERT`/`UPDATE` against `projects`, `project_members`, `project_settings`, …). AD-2's literal "every change is an event" is read as applying to the translation corpus, where history/snapshots/audit actually matter — not to low-frequency relational facts. Event-sourcing the lifecycle is a possible future change, not a bug.
+- **A root pnpm workspace is retained.** AD-11 says "no root workspace / no root lockfile." The repo keeps `pnpm-workspace.yaml` + root lockfiles, but cross-package deps use `file:../../packages/x` (not `workspace:*`) and there are zero cross-app runtime imports — so AD-11's actual goal (codegen blast-radius isolation) holds. The workspace is a tooling convenience, not a coupling.
+- **No `roles` lookup table.** Role levels are INTEGER constants in code (`src/lib/frontier/roles.ts`, `apps/identity/src/services/project-permissions.ts`), per the note in `0001_initial.sql`. The spec models `roles.level` as an FK target; constants-in-code are equivalent.
+
+Other spec surfaces deferred per the spec itself (not divergences): `system_members`/admin (AD-15), comments/threads/attachments tables and their event kinds. AD-14 is now fully landed UI-side — decay metric, per-cell "needs attention" marker, and the "biggest drags" breakdown popover (`components/DecayBreakdown.tsx`) all ship; the legacy four-sub-score health modules (composite engine, health worker, `HealthBreakdown/*`, config-resolver) were deleted.
 
 ## CI / deploy lifecycle
 

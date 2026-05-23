@@ -1,4 +1,4 @@
-import { FRONTIER_BASE } from "./auth";
+import { AUTH_BASE } from "./auth";
 
 /**
  * Default timeout for org/members fetches. Errors out as
@@ -97,7 +97,7 @@ function authHeaders(jwt: string): HeadersInit {
 }
 
 export async function getOrCreateMyOrg(jwt: string): Promise<MyOrg> {
-  const res = await fetchWithTimeout(`${FRONTIER_BASE}/api/v2/orgs/me`, {
+  const res = await fetchWithTimeout(`${AUTH_BASE}/api/v2/orgs/me`, {
     headers: authHeaders(jwt),
   });
   if (!res.ok) throw new Error(`getOrCreateMyOrg failed: HTTP ${res.status}`);
@@ -105,7 +105,7 @@ export async function getOrCreateMyOrg(jwt: string): Promise<MyOrg> {
 }
 
 export async function listOrgMembers(jwt: string, orgId: number): Promise<OrgMember[]> {
-  const res = await fetchWithTimeout(`${FRONTIER_BASE}/api/v2/orgs/${orgId}/members`, {
+  const res = await fetchWithTimeout(`${AUTH_BASE}/api/v2/orgs/${orgId}/members`, {
     headers: authHeaders(jwt),
   });
   if (!res.ok) throw new Error(`listOrgMembers failed: HTTP ${res.status}`);
@@ -115,7 +115,7 @@ export async function listOrgMembers(jwt: string, orgId: number): Promise<OrgMem
 export async function addOrgMember(
   jwt: string, orgId: number, username: string, role: number
 ): Promise<OrgMember> {
-  const res = await fetch(`${FRONTIER_BASE}/api/v2/orgs/${orgId}/members`, {
+  const res = await fetch(`${AUTH_BASE}/api/v2/orgs/${orgId}/members`, {
     method: "POST",
     headers: authHeaders(jwt),
     body: JSON.stringify({ username, role }),
@@ -130,7 +130,7 @@ export async function addOrgMember(
 export async function removeOrgMember(
   jwt: string, orgId: number, userId: number
 ): Promise<void> {
-  const res = await fetch(`${FRONTIER_BASE}/api/v2/orgs/${orgId}/members/${userId}`, {
+  const res = await fetch(`${AUTH_BASE}/api/v2/orgs/${orgId}/members/${userId}`, {
     method: "DELETE",
     headers: authHeaders(jwt),
   });
@@ -144,7 +144,7 @@ export async function listOrgMemberProjects(
   jwt: string, orgId: number, userId: number
 ): Promise<OrgMemberProject[]> {
   const res = await fetch(
-    `${FRONTIER_BASE}/api/v2/orgs/${orgId}/members/${userId}/projects`,
+    `${AUTH_BASE}/api/v2/orgs/${orgId}/members/${userId}/projects`,
     { headers: authHeaders(jwt) }
   );
   if (!res.ok) throw new Error(`listOrgMemberProjects failed: HTTP ${res.status}`);
@@ -161,7 +161,7 @@ export async function listPendingOrgInvites(
   jwt: string,
   orgId: number
 ): Promise<PendingOrgInvite[] | null> {
-  const res = await fetch(`${FRONTIER_BASE}/api/v2/orgs/${orgId}/invites`, {
+  const res = await fetch(`${AUTH_BASE}/api/v2/orgs/${orgId}/invites`, {
     headers: authHeaders(jwt),
   });
   if (res.status === 403) return null;
@@ -181,7 +181,7 @@ export async function revokeProjectInvite(
   token: string
 ): Promise<boolean> {
   const res = await fetch(
-    `${FRONTIER_BASE}/api/v2/projects/${encodeURIComponent(
+    `${AUTH_BASE}/api/v2/projects/${encodeURIComponent(
       projectId
     )}/invites/${encodeURIComponent(token)}`,
     { method: "DELETE", headers: authHeaders(jwt) }

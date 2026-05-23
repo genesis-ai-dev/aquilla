@@ -8,7 +8,6 @@
 // preview/retake step between stop and upload.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import * as Y from "yjs"
 import { ChevronLeft, ChevronRight, Mic, Play, Square, X, Loader2, Volume2, VolumeX, RefreshCw, Check } from "lucide-react"
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
@@ -21,18 +20,15 @@ import { useCountdown } from "./useCountdown"
 import { AudioWaveform } from "./AudioWaveform"
 import { DurationBar } from "./DurationBar"
 import { buildAudioId, uploadCellAudio } from "@/lib/audio/upload"
+import { emitCellAudioAttach } from "@/lib/sync/events-emit"
+import { notifyAudioAttachmentsChanged } from "@/lib/audio/audio-attachments-bus"
 import { audioSyncTokenFetcherForSession } from "@/lib/audio/sync-token-fetcher"
-import { attachAudioToCell } from "@/lib/audio/attach"
 import { markProjectHasAudioDataSoon } from "@/lib/audio/project-audio-state"
-import { transcribeAndStoreTimings } from "@/lib/audio/transcribe"
-import { whisperLanguageFromTag } from "@/lib/audio/language"
 import { setTranscribeStatus } from "@/lib/audio/transcribe-status"
-import { AiModelConsentDeniedError } from "@/lib/audio/ai-consent"
 
 interface Props {
   open: boolean
   project: ProjectRecord
-  doc: Y.Doc
   cells: CellData[]
   activeCellId: string | null
   username: string
@@ -43,7 +39,7 @@ interface Props {
 type Phase = "idle" | "counting" | "recording" | "preview" | "uploading" | "saved" | "error"
 
 export function AudioRecordingModal({
-  open, project, doc, cells, activeCellId, username,
+  open, project, cells, activeCellId, username,
   onActiveCellChange, onClose,
 }: Props) {
   const recorder = useAudioRecorder()
@@ -155,49 +151,24 @@ export function AudioRecordingModal({
         blob,
         getSyncToken: audioSyncTokenFetcherForSession(session),
       })
-      attachAudioToCell(doc, activeCell.id, {
-        audioId: result.audioId,
-        url: result.url,
-        username,
-        mimeType: recorder.state.mimeType,
-      })
-      markProjectHasAudioDataSoon(project.id)
-      // Fire-and-forget transcription. The modal returns to idle/saved
-      // immediately; the per-cell badge in EditorTable surfaces progress.
-      const cellId = activeCell.id
+      // Attach the upload to the cell via the AD-2 audio grammar
+      // (cell.audio.attach → cell_audio projection). The event.applied broadcast
+      // pokes the per-file audio read so the clip surfaces; poke locally too so
+      // it shows even if the WS is momentarily down.
       const savedAudioId = result.audioId
-      const cellTextSnapshot = activeCell.translated
-      const audioBytes = new Uint8Array(await blob.arrayBuffer())
-      void (async () => {
-        setTranscribeStatus(savedAudioId, { kind: "loading", loaded: 0, total: 0, file: "" })
-        const startedAt = Date.now()
-        try {
-          const out = await transcribeAndStoreTimings(doc, cellId, savedAudioId, audioBytes, {
-            cellText: cellTextSnapshot,
-            language: whisperLanguageFromTag(project.targetLanguage),
-            onProgress: (p) => {
-              setTranscribeStatus(savedAudioId, { kind: "loading", loaded: p.loaded, total: p.total, file: p.file })
-              if (p.status === "ready" || (p.total > 0 && p.loaded >= p.total)) {
-                setTranscribeStatus(savedAudioId, { kind: "transcribing" })
-              }
-            },
-          })
-          setTranscribeStatus(savedAudioId, {
-            kind: "done",
-            wordCount: out.timings.length,
-            durationMs: Date.now() - startedAt,
-          })
-        } catch (e) {
-          if (e instanceof AiModelConsentDeniedError) {
-            setTranscribeStatus(savedAudioId, { kind: "idle" })
-          } else {
-            setTranscribeStatus(savedAudioId, {
-              kind: "error",
-              message: e instanceof Error ? e.message : String(e),
-            })
-          }
-        }
-      })()
+      setTranscribeStatus(savedAudioId, { kind: "idle" })
+      markProjectHasAudioDataSoon(project.id)
+      await emitCellAudioAttach({
+        projectId: project.id,
+        fileId: activeCell.fileId,
+        cellId: activeCell.id,
+        audioId: `${result.audioId}.${result.ext}`,
+        url: result.url,
+        slot: "recording",
+        mimeType: blob.type || undefined,
+        author: username,
+      })
+      notifyAudioAttachmentsChanged(activeCell.fileId)
       setPhase("saved")
       // Auto-advance: settle on the new cell after a brief success indication.
       setTimeout(() => {
@@ -212,7 +183,7 @@ export function AudioRecordingModal({
       setErrorMessage(e instanceof Error ? e.message : String(e))
       setPhase("error")
     }
-  }, [recorder.state, session, activeCell, project.id, doc, username, activeIndex, cells, onActiveCellChange, onClose])
+  }, [recorder.state, session, activeCell, project.id, username, activeIndex, cells, onActiveCellChange, onClose])
 
   const canNav = phase === "idle" || phase === "preview" || phase === "error" || phase === "saved"
   const gotoIndex = useCallback((idx: number) => {

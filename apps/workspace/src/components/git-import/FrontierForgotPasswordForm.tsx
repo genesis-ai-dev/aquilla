@@ -40,8 +40,8 @@ export function FrontierForgotPasswordForm({ onBack }: { onBack: () => void }) {
   }
 
   return (
-    <form onSubmit={onSubmit} className="space-y-3">
-      <div>
+    <form onSubmit={onSubmit} className="space-y-4">
+      <div className="space-y-2">
         <Label htmlFor="r-email">Email</Label>
         <Input
           id="r-email"
@@ -50,7 +50,7 @@ export function FrontierForgotPasswordForm({ onBack }: { onBack: () => void }) {
           onChange={(e) => setEmail(e.target.value)}
           autoComplete="email"
         />
-        <p className="mt-1 text-xs text-muted-foreground">
+        <p className="text-xs text-muted-foreground">
           We'll send a link to reset your password.
         </p>
       </div>

@@ -47,6 +47,7 @@ export async function broadcastRealtime(
     project: message.project,
     ...(message.file ? { file: message.file } : {}),
     ...(message.cell ? { cell: message.cell } : {}),
+    ...(message.by ? { by: message.by } : {}),
   }
 
   try {

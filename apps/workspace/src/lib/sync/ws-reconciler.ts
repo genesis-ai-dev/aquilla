@@ -49,6 +49,9 @@ export type ProjectWsServerMessage =
       project: string
       file?: string
       cell?: string
+      /** Actor username — present on server builds that include it. Older
+       *  servers won't send this; consumers must tolerate `undefined`. */
+      by?: string
     }
   | { t: "event.stale"; id: string; reason: string }
   | { t: "presence"; users: PresenceUser[] }
@@ -326,6 +329,7 @@ export function parseProjectWsMessage(raw: string): ProjectWsServerMessage | nul
       project: m.project,
       ...(typeof m.file === "string" ? { file: m.file } : {}),
       ...(typeof m.cell === "string" ? { cell: m.cell } : {}),
+      ...(typeof m.by === "string" ? { by: m.by } : {}),
     }
   }
   if (t === "event.stale") {

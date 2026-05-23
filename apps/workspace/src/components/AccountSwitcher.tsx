@@ -21,8 +21,8 @@ function AuthDialogBody({
 }) {
   const [mode, setMode] = useState<AuthMode>("login")
   const titles: Record<AuthMode, string> = {
-    login: isAdditional ? "Add Frontier account" : "Log in to Frontier",
-    signup: "Create a Frontier account",
+    login: isAdditional ? "Add account" : "Log in",
+    signup: "Create an account",
     forgot: "Reset your password",
   }
   return (
@@ -35,7 +35,7 @@ function AuthDialogBody({
             onForgotPassword={() => setMode("forgot")}
           />
           <p className="text-center text-sm text-muted-foreground">
-            New to Frontier?{" "}
+            New here?{" "}
             <button
               type="button"
               onClick={() => setMode("signup")}

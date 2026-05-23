@@ -34,8 +34,8 @@ export function FrontierSignupForm({ onSuccess }: { onSuccess: () => void }) {
   }
 
   return (
-    <form onSubmit={onSubmit} className="space-y-3">
-      <div>
+    <form onSubmit={onSubmit} className="space-y-4">
+      <div className="space-y-2">
         <Label htmlFor="s-user">Username</Label>
         <Input
           id="s-user"
@@ -46,7 +46,7 @@ export function FrontierSignupForm({ onSuccess }: { onSuccess: () => void }) {
           maxLength={50}
         />
       </div>
-      <div>
+      <div className="space-y-2">
         <Label htmlFor="s-email">Email</Label>
         <Input
           id="s-email"
@@ -56,7 +56,7 @@ export function FrontierSignupForm({ onSuccess }: { onSuccess: () => void }) {
           autoComplete="email"
         />
       </div>
-      <div>
+      <div className="space-y-2">
         <Label htmlFor="s-pass">Password</Label>
         <Input
           id="s-pass"
@@ -66,7 +66,7 @@ export function FrontierSignupForm({ onSuccess }: { onSuccess: () => void }) {
           autoComplete="new-password"
           minLength={8}
         />
-        <p className="mt-1 text-xs text-muted-foreground">
+        <p className="text-xs text-muted-foreground">
           At least 8 characters. Choose something strong and unique.
         </p>
       </div>

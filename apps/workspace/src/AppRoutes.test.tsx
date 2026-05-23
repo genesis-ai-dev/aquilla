@@ -48,6 +48,10 @@ vi.mock("@/components/PrivateModeBanner", () => ({
   PrivateModeBanner: () => null,
 }))
 
+vi.mock("@/components/DeployUpdateBanner", () => ({
+  DeployUpdateBanner: () => null,
+}))
+
 vi.mock("@/context/SyncingContext", () => ({
   SyncingProvider: ({ children }: { children: ReactNode }) => <>{children}</>,
   useSyncing: () => ({ syncing: false }),

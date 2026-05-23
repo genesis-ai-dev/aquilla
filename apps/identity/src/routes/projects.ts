@@ -78,7 +78,7 @@ async function loadFilesByProject(
 
   const placeholders = projectIds.map(() => "?").join(",")
   const rows = await env.AQUILLA_DB.prepare(
-    `SELECT id, project_id, name, file_type, cell_count
+    `SELECT id, project_id, name, kind, role, cell_count
        FROM files
       WHERE project_id IN (${placeholders})
       ORDER BY name COLLATE NOCASE`,
@@ -88,7 +88,8 @@ async function loadFilesByProject(
       id: string
       project_id: string
       name: string
-      file_type: string
+      kind: string | null
+      role: string | null
       cell_count: number | null
     }>()
 
@@ -97,7 +98,8 @@ async function loadFilesByProject(
     list.push({
       id: f.id,
       name: f.name,
-      type: f.file_type,
+      // `file_type` collapsed into role + kind (0012); derive a compatible value.
+      type: f.kind ?? f.role ?? "codex",
       cellCount: f.cell_count ?? 0,
     })
     byProject.set(f.project_id, list)

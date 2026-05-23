@@ -38,6 +38,10 @@ export type OutboxEventKind =
   // these directly, but the reconciler can receive/broadcast them.
   | "cell.endorsement"
   | "cell.endorsement.revoke"
+  // Cell audio attachments (contributor-level; non-chain-mutating).
+  | "cell.audio.attach"
+  | "cell.audio.select"
+  | "cell.audio.remove"
   // File lifecycle.
   | "file.create"
   // Project lifecycle.
@@ -100,6 +104,25 @@ export interface OutboxEventPayloads {
   }
   "cell.endorsement.revoke": {
     endorsementEventId: string
+  }
+
+  // Audio attachments. Bytes already live in R2 before these are emitted.
+  "cell.audio.attach": {
+    audioId: string
+    url: string
+    slot: "recording" | "generatedVoice"
+    mimeType?: string
+    voiceId?: string
+    referenceAudioId?: string
+    durationMs?: number
+    timings?: { word: string; t0: number; t1: number; start: number; end: number }[]
+  }
+  "cell.audio.select": {
+    audioId: string
+    slot: "recording" | "generatedVoice"
+  }
+  "cell.audio.remove": {
+    audioId: string
   }
 
   "file.create": {

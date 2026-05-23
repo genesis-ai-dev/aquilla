@@ -39,7 +39,7 @@ export function NameStep({
           This name appears on your edits and comments.
         </p>
       </div>
-      <div>
+      <div className="space-y-2">
         <Label htmlFor="display-name">Display name</Label>
         <Input
           id="display-name"

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react"
-import { FRONTIER_BASE } from "@/lib/frontier/auth"
+import { AUTH_BASE } from "@/lib/frontier/auth"
 import { useFrontierSession } from "./useFrontierSession"
 
 export interface UserSearchResult {
@@ -92,7 +92,7 @@ export function useUserSearch(
     setLastFetchOk(false)
 
     fetch(
-      `${FRONTIER_BASE}/api/v2/users/search?prefix=${encodeURIComponent(trimmed)}&limit=${limit}`,
+      `${AUTH_BASE}/api/v2/users/search?prefix=${encodeURIComponent(trimmed)}&limit=${limit}`,
       {
         headers: { Authorization: `Bearer ${jwt}` },
         signal: controller.signal,

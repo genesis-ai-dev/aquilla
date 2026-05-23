@@ -172,8 +172,8 @@ export function VoiceModal({
               onProjectKeyChange={(v) => void onSettingsChange({ apiKey: v || undefined })}
               onUserKeyChange={(v) => setUserApiKey("gemini-tts", v)}
               help={!apiKey
-                ? "Get a key at aistudio.google.com/apikey. Sent directly to Google; never uploaded to Frontier."
-                : "Sent directly to Google. Never uploaded to Frontier."}
+                ? "Get a key at aistudio.google.com/apikey. Sent directly to Google; never uploaded to our servers."
+                : "Sent directly to Google. Never uploaded to our servers."}
             />
           </div>
         )}

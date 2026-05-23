@@ -1,55 +1,22 @@
-/**
- * Client mirror of sync-worker `events/types.ts` for kinds the web app sends
- * in CQRS Phase 2. Keep field names aligned with RawEvent on the server.
- */
+// Phase 2c-gamma compatibility shim.
+//
+// The legacy "Cqrs*" type names predate the AD-2 event grammar in
+// outbox-types.ts. The outbox + flusher + audit-stats overlay still
+// reference them by name; rather than rename across every call site,
+// re-export the modern outbox-types under the old names. Drop this
+// file entirely once those modules are renamed.
 
-export type CqrsEventKind = "cell.commit" | "cell.validate" | "cell.unvalidate"
+import type {
+  OutboxEventKind,
+  OutboxEventPayloads,
+  OutboxPayloadFor,
+  OutboxRawEvent,
+} from "./outbox-types"
+import { OUTBOX_SCHEMA_VERSION } from "./outbox-types"
 
-/**
- * Cell creation metadata captured on first commit (typically during legacy
- * gitlab import). Mirrors `CellSeedMeta` in apps/sync/events/types.ts.
- * Phase 4d hydration on the server reads these to reconstruct a Y.Doc when
- * no R2 snapshot exists yet.
- */
-export interface CqrsCellSeedMeta {
-  original?: string
-  originalHtml?: string
-  context?: string
-  group?: string
-  type?: string
-  sourceLocation?: { startTime?: number; endTime?: number; [k: string]: unknown }
-  globalReferences?: string[]
-  cellLabel?: string
-}
+export type CqrsEventKind = OutboxEventKind
+export type CqrsEventPayloads = OutboxEventPayloads
+export type CqrsPayloadFor<K extends OutboxEventKind> = OutboxPayloadFor<K>
+export type CqrsRawEvent<K extends OutboxEventKind = OutboxEventKind> = OutboxRawEvent<K>
 
-export interface CqrsEventPayloads {
-  "cell.commit": {
-    value: string
-    valueHtml: string
-    prevEventId?: string
-    /** Optional one-time seed metadata; populated on first commit during import. */
-    meta?: CqrsCellSeedMeta
-  }
-  "cell.validate": {
-    editEventId: string
-  }
-  "cell.unvalidate": {
-    editEventId: string
-  }
-}
-
-export type CqrsPayloadFor<K extends CqrsEventKind> = CqrsEventPayloads[K]
-
-export interface CqrsRawEvent<K extends CqrsEventKind = CqrsEventKind> {
-  id: string
-  schemaVersion: number
-  kind: K
-  projectId: string
-  fileId?: string
-  cellId?: string
-  author: string
-  payload: CqrsPayloadFor<K>
-  clientTs: number
-}
-
-export const CQRS_SCHEMA_VERSION = 1
+export const CQRS_SCHEMA_VERSION = OUTBOX_SCHEMA_VERSION

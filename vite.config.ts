@@ -54,9 +54,18 @@ export default defineConfig(({ mode }) => ({
     // macOS, which Vite then can't bind, leaving Tauri's HTTP probe
     // hanging.
     host: "127.0.0.1",
-    port: 1420,
-    strictPort: true,
-    hmr: { protocol: "ws", host: "127.0.0.1", port: 1421 },
+    // Tauri owns 1420 for its webview shell and needs HMR on a separate
+    // socket (1421). For plain web dev (`pnpm dev` / `pnpm dev:vite`) Vite
+    // picks the port via --port (dev-stack passes 5173) and HMR rides on
+    // the same socket — overriding it here would mismatch the bundled
+    // client. `tauri dev` sets TAURI_ENV_PLATFORM, so gate on that.
+    ...(process.env.TAURI_ENV_PLATFORM
+      ? {
+          port: 1420,
+          strictPort: true,
+          hmr: { protocol: "ws", host: "127.0.0.1", port: 1421 },
+        }
+      : {}),
     watch: {
       ignored: [
         "**/src-tauri/**",

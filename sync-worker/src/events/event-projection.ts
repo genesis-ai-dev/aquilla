@@ -178,7 +178,7 @@ export function buildEventProjectionStmts(
                 word_count      = ?,
                 content_hash    = ?,
                 validated       = 0
-              WHERE project_id = ? AND file_id = ? AND cell_id = ?`,
+              WHERE project_id = ? AND file_id = ? AND cell_id = ? AND side = 'target'`,
             )
             .bind(
               value,
@@ -210,7 +210,7 @@ export function buildEventProjectionStmts(
                 last_edit_at  = ?,
                 word_count    = ?,
                 content_hash  = ?
-              WHERE project_id = ? AND file_id = ? AND cell_id = ?`,
+              WHERE project_id = ? AND file_id = ? AND cell_id = ? AND side = 'source'`,
             )
             .bind(
               value,
@@ -235,13 +235,15 @@ export function buildEventProjectionStmts(
         throw new Error(`${event.kind} event ${event.id} is missing fileId or cellId`)
       }
       // Cell row leaves the projection; events stay queryable.
+      // Only the side this event targets — the opposite side stays put.
+      const side = event.kind === 'target.cell.delete' ? 'target' : 'source'
       stmts.push(
         db
           .prepare(
             `DELETE FROM cells
-             WHERE project_id = ? AND file_id = ? AND cell_id = ?`,
+             WHERE project_id = ? AND file_id = ? AND cell_id = ? AND side = ?`,
           )
-          .bind(event.projectId, event.fileId, event.cellId),
+          .bind(event.projectId, event.fileId, event.cellId, side),
       )
       return ['cells']
     }
@@ -252,6 +254,7 @@ export function buildEventProjectionStmts(
       if (!event.fileId || !event.cellId) {
         throw new Error(`${event.kind} event ${event.id} is missing fileId or cellId`)
       }
+      const side = event.kind === 'target.cell.reorder' ? 'target' : 'source'
       stmts.push(
         db
           .prepare(
@@ -260,7 +263,7 @@ export function buildEventProjectionStmts(
               event_id       = ?,
               last_editor    = ?,
               last_edit_at   = ?
-            WHERE project_id = ? AND file_id = ? AND cell_id = ?`,
+            WHERE project_id = ? AND file_id = ? AND cell_id = ? AND side = ?`,
           )
           .bind(
             p.anchorCellId ?? null,
@@ -270,6 +273,7 @@ export function buildEventProjectionStmts(
             event.projectId,
             event.fileId,
             event.cellId,
+            side,
           ),
       )
       return ['cells']

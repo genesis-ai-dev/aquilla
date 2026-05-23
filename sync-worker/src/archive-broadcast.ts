@@ -1,30 +1,32 @@
-// Live broadcast of project-archive updates to file DOs. Kept in its own
-// module because importing `partyserver` pulls in cloudflare:* URLs that
-// Node doesn't resolve — isolating it lets project-archive.ts stay pure
-// and unit-testable without a DO runtime.
+// Live broadcast of project-archive updates to the project DO. Kept in its own
+// module so project-archive.ts stays pure and unit-testable without a DO runtime.
 
-import type { Server } from "partyserver"
-import { getServerByName } from "partyserver"
-import type { ArchiveMarker, FileBroadcaster, ProjectArchiveEnv } from "./project-archive"
+import type { ArchiveMarker, ProjectArchiveBroadcaster, ProjectArchiveEnv } from "./project-archive"
+import type { ProjectDoServerMessage } from "./project-do-handlers"
 
-export const notifyFileDo: FileBroadcaster = async (
+export const notifyProjectDo: ProjectArchiveBroadcaster = async (
   env: ProjectArchiveEnv,
   projectId: string,
-  fileId: string,
   marker: ArchiveMarker
 ): Promise<void> => {
-  const docName = `${projectId}--${fileId}`
-  const stub = await getServerByName(
-    env.FileSync as unknown as DurableObjectNamespace<Server>,
-    docName
-  )
-  const res = await stub.fetch("http://do.internal/__admin/tombstone", {
+  if (!env.ProjectSync) {
+    throw new Error("ProjectSync DO not bound")
+  }
+  const id = env.ProjectSync.idFromName(projectId)
+  const stub = env.ProjectSync.get(id)
+  const body: ProjectDoServerMessage = {
+    t: "project.archived",
+    project: projectId,
+    archivedAt: marker.archivedAt,
+    deletedBy: marker.deletedBy,
+  }
+  const res = await stub.fetch("http://do.internal/__broadcast", {
     method: "POST",
     headers: {
       Authorization: `Bearer ${env.SYNC_SECRET_KEY}`,
       "Content-Type": "application/json",
     },
-    body: JSON.stringify(marker),
+    body: JSON.stringify(body),
   })
   if (!res.ok) {
     throw new Error(`DO returned HTTP ${res.status}`)

@@ -18,6 +18,17 @@ type HonoEnv = { Bindings: Env; Variables: Variables }
 
 const app = new Hono<HonoEnv>()
 
+// Workers Routes mount: if a zone routes `aquilla.app/api/chat/*` to this
+// worker, strip the prefix so the bare /api/v1/... paths work unchanged.
+app.use("*", async (c, next) => {
+  if (c.req.path.startsWith("/api/chat")) {
+    const url = new URL(c.req.url)
+    url.pathname = url.pathname.slice("/api/chat".length) || "/"
+    return app.fetch(new Request(url.toString(), c.req.raw), c.env, c.executionCtx)
+  }
+  return next()
+})
+
 // CORS for browser callers. The frontend sends Authorization as a Bearer
 // header, never cookies, so `Access-Control-Allow-Origin: *` is safe and
 // avoids hard-coding preview / prod / local origins.

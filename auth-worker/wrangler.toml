@@ -3,6 +3,11 @@ main = "src/index.ts"
 compatibility_date = "2024-12-01"
 compatibility_flags = ["nodejs_compat"]
 account_id = "6a80496d1e59948a9cbaa3c643ba81d7"
+# Browser-facing mount: same-origin under aquilla.app so Safari (which drops
+# *.workers.dev) works. The worker strips the /api/identity prefix (index.ts).
+# CI's token can't set zone routes — applied out-of-band via local
+# `wrangler deploy` or the CF dashboard, same as sync-worker.
+routes = ["aquilla.app/api/identity/*"]
 
 # Phase D: auth-worker is the full identity surface. AQUILLA_DB owns the
 # complete schema (identity + orgs + projects + members + invites + file/cell
@@ -40,6 +45,7 @@ ENVIRONMENT = "production"
 [env.staging]
 name = "aquilla-dev-identity"
 account_id = "6a80496d1e59948a9cbaa3c643ba81d7"
+routes = ["dev.aquilla.app/api/identity/*"]
 
 [[env.staging.d1_databases]]
 binding = "AQUILLA_DB"

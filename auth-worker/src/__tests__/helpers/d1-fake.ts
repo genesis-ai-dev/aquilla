@@ -133,7 +133,10 @@ export function makeFakeD1(initial: Partial<FakeTables> = {}): FakeD1 {
     }
 
     // ─── SELECT projects ──────────────────────────────────────────────
-    if (n.startsWith("SELECT id, name, gitlab_project_id, org_id, created_by, archived_at FROM projects WHERE id = ?")) {
+    // Match any column subset (id, archived_at / id, org_id, created_by,
+    // archived_at / etc.) — the stored row carries every column, so callers
+    // get whatever projection they asked for.
+    if (/^SELECT .+ FROM projects WHERE id = \?/.test(n)) {
       const p = tables.projects.find((x) => x.id === args[0])
       return { first: p ?? null, results: p ? [p] : [] }
     }
@@ -168,19 +171,24 @@ export function makeFakeD1(initial: Partial<FakeTables> = {}): FakeD1 {
 
     // ─── INSERTs ──────────────────────────────────────────────────────
     if (n.startsWith("INSERT INTO projects")) {
-      const [id, name, gitlab_project_id, created_by] = args as [
-        string,
-        string,
-        number | null,
-        number,
-      ]
+      // Column-aware: production has multiple INSERT shapes — e.g.
+      // (id, name, org_id, created_by) and (id, name, created_by). Map each
+      // bound arg to its declared column so created_by/org_id land correctly
+      // regardless of which projection the caller used.
+      const cols = (n.match(/INSERT INTO projects\s*\(([^)]+)\)/i)?.[1] ?? "")
+        .split(",")
+        .map((s) => s.trim())
+      const row: Record<string, unknown> = {}
+      cols.forEach((col, i) => {
+        row[col] = args[i]
+      })
       tables.projects.push({
-        id,
-        name,
-        gitlab_project_id: gitlab_project_id ?? null,
-        org_id: null,
-        created_by,
-        archived_at: null,
+        id: row.id as string,
+        name: row.name as string,
+        gitlab_project_id: (row.gitlab_project_id ?? null) as number | null,
+        org_id: (row.org_id ?? null) as number | null,
+        created_by: row.created_by as number,
+        archived_at: (row.archived_at ?? null) as string | null,
       })
       return { first: null, results: [] }
     }

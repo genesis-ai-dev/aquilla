@@ -116,6 +116,9 @@ app.get("/healthz", (c) => c.json({ ok: true }))
 app.get("/api/v2/health", (c) => c.json({ ok: true, name: "codex-auth-worker" }))
 
 app.route("/api/v2/auth", authRoutes)
+// Legacy alias: old clients (and frontier-server-era tokens) still hit
+// /api/v1/auth/* — keep the auth surface mounted there too.
+app.route("/api/v1/auth", authRoutes)
 app.route("/api/v2/sync-token", syncTokenRoutes)
 app.route("/api/v2/users", usersRoutes)
 app.route("/api/v2/orgs", orgsRoutes)

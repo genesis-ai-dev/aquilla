@@ -33,6 +33,10 @@ export type EventKind =
   // Validation (reviewer-level).
   | 'cell.validate'
   | 'cell.unvalidate'
+  // Cell audio attachments (contributor-level). Metadata only; bytes in R2.
+  | 'cell.audio.attach'
+  | 'cell.audio.select'
+  | 'cell.audio.remove'
   // File lifecycle.
   | 'file.create'
 
@@ -90,6 +94,28 @@ export interface EventPayloads {
   'cell.unvalidate': {
     /** The target commit event whose validation is being withdrawn. */
     editEventId: string
+  }
+
+  // ── Cell audio ─────────────────────────────────────────────────────────
+  // `attach` records (and selects) a clip in its slot; `select` switches the
+  // active clip; `remove` soft-deletes one. Bytes are already in R2
+  // (frontier-audio:// url) before these are emitted.
+  'cell.audio.attach': {
+    audioId: string
+    url: string
+    slot: 'recording' | 'generatedVoice'
+    mimeType?: string
+    voiceId?: string
+    referenceAudioId?: string
+    durationMs?: number
+    timings?: { word: string; t0: number; t1: number; start: number; end: number }[]
+  }
+  'cell.audio.select': {
+    audioId: string
+    slot: 'recording' | 'generatedVoice'
+  }
+  'cell.audio.remove': {
+    audioId: string
   }
 
   // ── File lifecycle ─────────────────────────────────────────────────────

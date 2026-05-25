@@ -50,6 +50,11 @@ export const REQUIRED_ROLE: Record<EventKind, number> = {
   'cell.validate': ROLE.REVIEWER,
   'cell.unvalidate': ROLE.REVIEWER,
 
+  // Cell audio: translator-level, like target.* edits.
+  'cell.audio.attach': ROLE.CONTRIBUTOR,
+  'cell.audio.select': ROLE.CONTRIBUTOR,
+  'cell.audio.remove': ROLE.CONTRIBUTOR,
+
   // file.create is a structural change.
   'file.create': ROLE.PROJECT_LEAD,
 }

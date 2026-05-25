@@ -43,6 +43,7 @@ import { useCellLabelsPreference } from "@/hooks/useCellLabelsPreference"
 import { useProjectPermissions } from "@/hooks/useProjectPermissions"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { eagerlyPrefetchPeaks } from "@/lib/audio/eager-peaks"
+import { notifyAudioAttachmentsChanged } from "@/lib/audio/audio-attachments-bus"
 import { useOutboxFlusher } from "@/hooks/useOutboxFlusher"
 import { usePendingOutboxRecords } from "@/hooks/usePendingOutboxRecords"
 import {
@@ -724,6 +725,11 @@ export function ProjectWorkspace() {
             if (msg.t === "event.applied") {
               if (!msg.cell || msg.project !== pid) return
               revalidateCells()
+              // Audio attachment events project into cell_audio (not cells);
+              // poke the per-file audio read so the new clip surfaces.
+              if (msg.kind?.startsWith("cell.audio.") && msg.file) {
+                notifyAudioAttachmentsChanged(msg.file)
+              }
               // Don't pop the "remote changed" banner for our own writes —
               // the editor just committed; bouncing the same event back via
               // WS is expected. `by` is populated by post-2c-γ sync workers;

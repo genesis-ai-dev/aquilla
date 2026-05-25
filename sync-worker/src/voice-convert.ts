@@ -20,7 +20,7 @@
 // verified projectId claim.
 
 import { audioObjectKey, r2KeyPrefix } from "./audio"
-import { verifyTokenForFile } from "./auth"
+import { verifyTokenForFile, verifyTokenForProject } from "./auth"
 
 export interface VoiceConvertEnv {
   SNAPSHOTS: R2Bucket
@@ -41,6 +41,59 @@ export function voiceRefObjectKey(
   referenceAudioId: string,
 ): string {
   return `${r2KeyPrefix(env)}projects/${projectId}/voices/${referenceAudioId}`
+}
+
+const VOICE_REF_PATH_RE = /^\/api\/v1\/voice\/reference\/([^/]+)\/([^/]+)$/
+
+/**
+ * GET/PUT /api/v1/voice/reference/:projectId/:referenceAudioId — project-scoped
+ * voice-clone reference clips (the timbre a clone Voice points at). Auth is a
+ * sync-token for the project (verifyTokenForProject); reference clips aren't
+ * tied to a single file, so any of the project's files' tokens work. Returns
+ * null when the path/method doesn't match so the dispatcher falls through.
+ */
+export async function handleVoiceReferenceRequest(
+  request: Request,
+  env: VoiceConvertEnv,
+): Promise<Response | null> {
+  const url = new URL(request.url)
+  const match = url.pathname.match(VOICE_REF_PATH_RE)
+  if (!match) return null
+  if (request.method !== "PUT" && request.method !== "GET") {
+    return new Response("method not allowed", { status: 405 })
+  }
+
+  const projectId = decodeURIComponent(match[1])
+  const referenceAudioId = decodeURIComponent(match[2])
+
+  const header = request.headers.get("Authorization") ?? ""
+  const token = header.startsWith("Bearer ") ? header.slice("Bearer ".length) : null
+  const verified = await verifyTokenForProject(token, projectId, env.SYNC_SECRET_KEY)
+  if (!verified.ok) {
+    return new Response(verified.reason, { status: verified.status })
+  }
+
+  const key = voiceRefObjectKey(env, projectId, referenceAudioId)
+
+  if (request.method === "PUT") {
+    const body = await request.arrayBuffer()
+    const contentType = request.headers.get("Content-Type") || "application/octet-stream"
+    await env.SNAPSHOTS.put(key, body, { httpMetadata: { contentType } })
+    return Response.json({ ok: true, referenceAudioId, bytes: body.byteLength })
+  }
+
+  // GET
+  const obj = await env.SNAPSHOTS.get(key)
+  if (!obj) return new Response("not found", { status: 404 })
+  const buf = await obj.arrayBuffer()
+  return new Response(buf, {
+    status: 200,
+    headers: {
+      "Content-Type": obj.httpMetadata?.contentType || "application/octet-stream",
+      "Content-Length": String(buf.byteLength),
+      "Cache-Control": "private, max-age=0, must-revalidate",
+    },
+  })
 }
 
 function clampSteps(raw: unknown): number {

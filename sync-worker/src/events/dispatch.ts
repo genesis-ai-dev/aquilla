@@ -59,6 +59,9 @@ export function dispatchEvent(
     case 'target.cell.reorder':
     case 'cell.validate':
     case 'cell.unvalidate':
+    case 'cell.audio.attach':
+    case 'cell.audio.select':
+    case 'cell.audio.remove':
       return {
         ok: true,
         result: handleCellEvent(

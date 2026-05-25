@@ -7,6 +7,8 @@ import {
   ArrowRight, Activity,
 } from "lucide-react"
 import type { CellData } from "@/hooks/useCells"
+import type { CodexCellAttachment, WordTiming } from "@/lib/codex-editor/types"
+import { useFileAudioAttachments } from "@/hooks/useFileAudioAttachments"
 import type { ScoredPair } from "@/lib/search/dual-index"
 import type { TranslationRule, RuleInfraction, ProjectRecord } from "@/lib/parsers/types"
 import { useProjectPermissions } from "@/hooks/useProjectPermissions"
@@ -25,7 +27,7 @@ import { CellExpansion } from "./CellExpansion"
 import { tokenizeWords } from "@/lib/audio/timings"
 import { useCellAudio } from "@/hooks/useCellAudio"
 import { setTranscribeStatus, useTranscribeStatus } from "@/lib/audio/transcribe-status"
-import { handleVoiceDropOnCell, VOICE_DRAG_MIME } from "./VoiceBar"
+import { handleVoiceDropOnCell, VOICE_DRAG_MIME } from "@/lib/audio/voice-actions"
 import {
   MAX_SELECTED,
   clearSelection,
@@ -39,7 +41,7 @@ import { setTtsStatus, ttsStatusKey, useTtsStatus } from "@/lib/audio/tts"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { categorizeAiError } from "@/lib/audio/ai-error"
 import { CellAiStatusPopover } from "./CellAiStatusPopover"
-import { openVoiceModalFromAnywhere } from "./VoiceBar"
+import { openVoiceModalFromAnywhere } from "@/lib/audio/voice-actions"
 import { cn } from "@/lib/utils"
 import { isPerfLogEnabled } from "@/lib/perf-log"
 import { partitionInfractions, addWaiver, removeWaiver } from "@/lib/rules/waivers"
@@ -335,6 +337,30 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     cellsRef.current = cells
   }, [cells])
 
+  // Durable cell audio (AD-2 cell.audio.* grammar). Per-file read; overlay each
+  // cell's attachments + selected clips onto CellData so the existing audio
+  // controllers (which read cell.attachments / selectedAudioId) light up.
+  const audioFileId = cells[0]?.fileId ?? null
+  const { byCellId: audioByCellId } = useFileAudioAttachments(project.id, audioFileId)
+  const cellsWithAudio = useMemo(() => {
+    if (audioByCellId.size === 0) return cells
+    return cells.map((c) => {
+      const entry = audioByCellId.get(c.id)
+      if (!entry) return c
+      const attachments: Record<string, CodexCellAttachment> = {}
+      for (const [audioId, a] of Object.entries(entry.attachments)) {
+        attachments[audioId] = { url: a.url, type: "audio" }
+      }
+      return {
+        ...c,
+        attachments,
+        selectedAudioId: entry.selectedAudioId ?? undefined,
+        selectedGeneratedVoiceAudioId: entry.selectedGeneratedVoiceAudioId ?? undefined,
+        audioTimings: entry.audioTimings as Record<string, WordTiming[]>,
+      }
+    })
+  }, [cells, audioByCellId])
+
   const ruleMap = useMemo(() => new Map(rules.map((r) => [r.id, r])), [rules])
 
   const virtualizer = useVirtualizer({
@@ -607,7 +633,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
 
       <div style={{ height: `${virtualizer.getTotalSize()}px`, width: "100%", position: "relative" }}>
         {virtualizer.getVirtualItems().map((virtualRow) => {
-          const cell = cells[virtualRow.index]
+          const cell = cellsWithAudio[virtualRow.index]
           // The positioning wrapper lives OUTSIDE MemoizedRow. When the typed
           // cell grows in height, every row below it gets a new virtualRow.start
           // — if that value crossed the memo boundary, every shifted row would

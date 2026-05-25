@@ -20,6 +20,8 @@ import { useCountdown } from "./useCountdown"
 import { AudioWaveform } from "./AudioWaveform"
 import { DurationBar } from "./DurationBar"
 import { buildAudioId, uploadCellAudio } from "@/lib/audio/upload"
+import { emitCellAudioAttach } from "@/lib/sync/events-emit"
+import { notifyAudioAttachmentsChanged } from "@/lib/audio/audio-attachments-bus"
 import { audioSyncTokenFetcherForSession } from "@/lib/audio/sync-token-fetcher"
 import { markProjectHasAudioDataSoon } from "@/lib/audio/project-audio-state"
 import { setTranscribeStatus } from "@/lib/audio/transcribe-status"
@@ -37,7 +39,7 @@ interface Props {
 type Phase = "idle" | "counting" | "recording" | "preview" | "uploading" | "saved" | "error"
 
 export function AudioRecordingModal({
-  open, project, cells, activeCellId, username: _username,
+  open, project, cells, activeCellId, username,
   onActiveCellChange, onClose,
 }: Props) {
   const recorder = useAudioRecorder()
@@ -149,17 +151,24 @@ export function AudioRecordingModal({
         blob,
         getSyncToken: audioSyncTokenFetcherForSession(session),
       })
-      // Phase 2c-gamma: attaching the upload to the cell + kicking off
-      // transcription wrote into the per-file Y.Doc. Both writebacks are
-      // disabled until the audio-attachment event grammar lands; the audio
-      // file itself was successfully uploaded to R2 and can be associated
-      // later. Surface a notice in the per-audio status so the user knows
-      // the recording is safe but unwired.
+      // Attach the upload to the cell via the AD-2 audio grammar
+      // (cell.audio.attach → cell_audio projection). The event.applied broadcast
+      // pokes the per-file audio read so the clip surfaces; poke locally too so
+      // it shows even if the WS is momentarily down.
       const savedAudioId = result.audioId
       setTranscribeStatus(savedAudioId, { kind: "idle" })
       markProjectHasAudioDataSoon(project.id)
-      void (async () => {
-      })()
+      await emitCellAudioAttach({
+        projectId: project.id,
+        fileId: activeCell.fileId,
+        cellId: activeCell.id,
+        audioId: `${result.audioId}.${result.ext}`,
+        url: result.url,
+        slot: "recording",
+        mimeType: blob.type || undefined,
+        author: username,
+      })
+      notifyAudioAttachmentsChanged(activeCell.fileId)
       setPhase("saved")
       // Auto-advance: settle on the new cell after a brief success indication.
       setTimeout(() => {
@@ -174,7 +183,7 @@ export function AudioRecordingModal({
       setErrorMessage(e instanceof Error ? e.message : String(e))
       setPhase("error")
     }
-  }, [recorder.state, session, activeCell, project.id, activeIndex, cells, onActiveCellChange, onClose])
+  }, [recorder.state, session, activeCell, project.id, username, activeIndex, cells, onActiveCellChange, onClose])
 
   const canNav = phase === "idle" || phase === "preview" || phase === "error" || phase === "saved"
   const gotoIndex = useCallback((idx: number) => {

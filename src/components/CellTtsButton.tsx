@@ -10,6 +10,7 @@ import { useCallback, useEffect, useRef, useState } from "react"
 import { AlertCircle, Loader2, Pause, Volume2 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { synthesizeForCell, setTtsStatus, ttsStatusKey, useTtsStatus } from "@/lib/audio/tts"
+import { generateAndAttachCellVoice } from "@/lib/audio/generate-voice"
 import { AiModelConsentDeniedError } from "@/lib/audio/ai-consent"
 import { useModelStatus } from "@/lib/audio/prefetch"
 import { fetchCellAudio, parseFrontierAudioUrl } from "@/lib/audio/upload"
@@ -164,25 +165,41 @@ export function CellTtsButton({
           url = URL.createObjectURL(blob)
           rememberUrl(key, url)
         } else {
-          // No attached generated voice — synth on demand using the resolved voice.
+          // No attached generated voice — synthesize on demand. With project/
+          // file/session context we generate DURABLY (upload + cell.audio.attach,
+          // and for clone voices re-voice the TTS through Seed-VC); otherwise we
+          // fall back to a transient preview synth.
           setTtsStatus(statusKey, { kind: "loading", loaded: 0, total: 0, file: "" })
-          const blob = await synthesizeForCell(trimmed, {
-            projectTtsSettings,
-            cellVoiceId: cellTtsSettings?.voiceId,
-            geminiContext: {
-              sourceLanguage,
-              targetLanguage,
-              original,
-              context,
-              cellLabel,
-            },
-            onProgress: (p) => {
-              setTtsStatus(statusKey, { kind: "loading", loaded: p.loaded, total: p.total, file: p.file })
-              if (p.status === "ready" || (p.total > 0 && p.loaded >= p.total)) {
-                setTtsStatus(statusKey, { kind: "synthesizing" })
-              }
-            },
-          })
+          const geminiContext = { sourceLanguage, targetLanguage, original, context, cellLabel }
+          const onProgress: Parameters<typeof synthesizeForCell>[1]["onProgress"] = (p) => {
+            setTtsStatus(statusKey, { kind: "loading", loaded: p.loaded, total: p.total, file: p.file })
+            if (p.status === "ready" || (p.total > 0 && p.loaded >= p.total)) {
+              setTtsStatus(statusKey, { kind: "synthesizing" })
+            }
+          }
+          let blob: Blob
+          if (projectId && fileId && session?.jwt) {
+            const gen = await generateAndAttachCellVoice({
+              projectId,
+              fileId,
+              cellId,
+              text: trimmed,
+              projectTtsSettings,
+              cellVoiceId: cellTtsSettings?.voiceId,
+              geminiContext,
+              session,
+              username: session.username,
+              onProgress,
+            })
+            blob = gen.blob
+          } else {
+            blob = await synthesizeForCell(trimmed, {
+              projectTtsSettings,
+              cellVoiceId: cellTtsSettings?.voiceId,
+              geminiContext,
+              onProgress,
+            })
+          }
           url = URL.createObjectURL(blob)
           rememberUrl(key, url)
         }

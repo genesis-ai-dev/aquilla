@@ -43,6 +43,7 @@ import { useCellLabelsPreference } from "@/hooks/useCellLabelsPreference"
 import { useProjectPermissions } from "@/hooks/useProjectPermissions"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { eagerlyPrefetchPeaks } from "@/lib/audio/eager-peaks"
+import { notifyAudioAttachmentsChanged } from "@/lib/audio/audio-attachments-bus"
 import { useOutboxFlusher } from "@/hooks/useOutboxFlusher"
 import { usePendingOutboxRecords } from "@/hooks/usePendingOutboxRecords"
 import {
@@ -52,11 +53,13 @@ import {
 import { emitTargetCellCommit } from "@/lib/sync/events-emit"
 import { flushOutboxBatch } from "@/lib/sync/outbox-flush"
 import { useCellsAuditStatsWithOverlay } from "@/hooks/useCellsAuditStatsWithOverlay"
-import { Film, Scale, MessagesSquare, Camera, Share2, Settings as SettingsIcon, Lock, ClipboardList, Brain, Trash2, Undo2, Search as SearchIcon, Sparkles } from "lucide-react"
+import { Film, Scale, MessagesSquare, Camera, Share2, Settings as SettingsIcon, Lock, ClipboardList, Brain, Trash2, Undo2, Search as SearchIcon, Sparkles, Mic2 } from "lucide-react"
 import { restoreProject } from "@/lib/store/project-index"
 import { AppShell } from "./AppShell"
 import { WorkspaceHeader } from "./WorkspaceHeader"
 import { VoiceBar } from "./VoiceBar"
+import { VoiceController } from "./VoiceController"
+import { EditorModeToggle } from "./EditorModeToggle"
 import { SpeakBarToggle } from "./SpeakBarToggle"
 import { setSpeakBarEnabled, useSpeakBarEnabled } from "@/lib/audio/speak-bar-pref"
 import { SelectionBar } from "./SelectionBar"
@@ -724,6 +727,11 @@ export function ProjectWorkspace() {
             if (msg.t === "event.applied") {
               if (!msg.cell || msg.project !== pid) return
               revalidateCells()
+              // Audio attachment events project into cell_audio (not cells);
+              // poke the per-file audio read so the new clip surfaces.
+              if (msg.kind?.startsWith("cell.audio.") && msg.file) {
+                notifyAudioAttachmentsChanged(msg.file)
+              }
               // Don't pop the "remote changed" banner for our own writes —
               // the editor just committed; bouncing the same event back via
               // WS is expected. `by` is populated by post-2c-γ sync workers;
@@ -980,6 +988,8 @@ export function ProjectWorkspace() {
         onClick: () => navigate(`/project/${projectId}/comments`) },
       { id: "snapshots", label: "Snapshots", icon: Camera,
         onClick: () => navigate(`/project/${projectId}/snapshots`) },
+      { id: "voice-studio", label: "Voice Studio", icon: Mic2,
+        onClick: () => navigate(`/project/${projectId}/voice`) },
       { id: "share", label: "Share", icon: Share2,
         onClick: () => setShareOpen(true) },
       { id: "settings", label: "Settings", icon: SettingsIcon,
@@ -1265,6 +1275,9 @@ export function ProjectWorkspace() {
               disabled={!activeFileId || !hasUnfinished}
             />
             {project && (
+              <EditorModeToggle projectId={project.id} mode="translate" activeFileId={activeFileId} />
+            )}
+            {project && (
               <SpeakBarToggle
                 enabled={speakBarEnabled}
                 onToggle={() => setSpeakBarEnabled(project.id, !speakBarEnabled)}
@@ -1284,6 +1297,14 @@ export function ProjectWorkspace() {
             />
             {project && activeFileId && (
               <>
+                <VoiceController
+                  project={project}
+                  activeFileId={activeFileId}
+                  cells={cells}
+                  username={currentUsername}
+                  session={frontierSession}
+                  onProjectChanged={refresh}
+                />
                 {speakBarEnabled && (
                   <VoiceBar
                     project={project}

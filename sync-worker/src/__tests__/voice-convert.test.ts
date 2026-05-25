@@ -5,7 +5,11 @@
 import { describe, it, expect, afterEach } from "vitest"
 import { sign } from "hono/jwt"
 import { audioObjectKey } from "../audio"
-import { handleVoiceConvertRequest, voiceRefObjectKey } from "../voice-convert"
+import {
+  handleVoiceConvertRequest,
+  handleVoiceReferenceRequest,
+  voiceRefObjectKey,
+} from "../voice-convert"
 import type { SyncTokenClaims } from "../auth"
 
 const SECRET = "voice-tests-secret"
@@ -263,5 +267,56 @@ describe("POST /api/v1/voice/convert", () => {
     expect(res.status).toBe(200)
     const body = (await res.json()) as { objectName: string }
     expect(env.SNAPSHOTS._allKeys()).toContain(`pr-7/projects/p1/files/f1/audio/${body.objectName}`)
+  })
+})
+
+describe("GET/PUT /api/v1/voice/reference/:projectId/:referenceAudioId", () => {
+  function refReq(method: "GET" | "PUT", refId: string, token?: string, body?: Uint8Array) {
+    return new Request(`https://w/api/v1/voice/reference/p1/${refId}`, {
+      method,
+      body,
+      headers: token
+        ? { Authorization: `Bearer ${token}`, "Content-Type": "audio/webm" }
+        : {},
+    })
+  }
+  const callRef = (env: StubEnv, req: Request) =>
+    handleVoiceReferenceRequest(req, env as unknown as Parameters<typeof handleVoiceReferenceRequest>[1])
+
+  it("returns null for unrelated paths", async () => {
+    expect(await callRef(makeEnv(), new Request("https://w/audio/p1/f1/x.webm"))).toBeNull()
+  })
+
+  it("401 without a valid token", async () => {
+    const res = (await callRef(makeEnv(), refReq("PUT", "ref1.webm", undefined, new Uint8Array([1]))))!
+    expect(res.status).toBe(401)
+  })
+
+  it("PUT then GET round-trips a project-scoped reference clip", async () => {
+    const env = makeEnv()
+    const token = await makeToken()
+    const put = (await callRef(env, refReq("PUT", "ref1.webm", token, new Uint8Array([3, 3, 3]))))!
+    expect(put.status).toBe(200)
+    expect(env.SNAPSHOTS._allKeys()).toContain(voiceRefObjectKey(env, "p1", "ref1.webm"))
+
+    const get = (await callRef(env, refReq("GET", "ref1.webm", token)))!
+    expect(get.status).toBe(200)
+    expect(Array.from(new Uint8Array(await get.arrayBuffer()))).toEqual([3, 3, 3])
+  })
+
+  it("accepts a file-scoped token (project-level auth) and 404s missing clips", async () => {
+    const env = makeEnv()
+    // token carries a different fileId, but project matches — project-scoped
+    // auth must still allow it.
+    const token = await makeToken({ fileId: "some-other-file" })
+    const res = (await callRef(env, refReq("GET", "missing.webm", token)))!
+    expect(res.status).toBe(404)
+  })
+
+  it("403 for a token scoped to a different project", async () => {
+    const env = makeEnv()
+    const token = await makeToken({ projectId: "other" })
+    const res = (await callRef(env, refReq("GET", "ref1.webm", token)))!
+    expect(res.status).toBe(403)
   })
 })

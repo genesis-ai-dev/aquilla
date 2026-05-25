@@ -34,6 +34,10 @@ export type OutboxEventKind =
   // Validation.
   | "cell.validate"
   | "cell.unvalidate"
+  // Cell audio attachments (contributor-level; non-chain-mutating).
+  | "cell.audio.attach"
+  | "cell.audio.select"
+  | "cell.audio.remove"
   // File lifecycle.
   | "file.create"
 
@@ -85,6 +89,25 @@ export interface OutboxEventPayloads {
   }
   "cell.unvalidate": {
     editEventId: string
+  }
+
+  // Audio attachments. Bytes already live in R2 before these are emitted.
+  "cell.audio.attach": {
+    audioId: string
+    url: string
+    slot: "recording" | "generatedVoice"
+    mimeType?: string
+    voiceId?: string
+    referenceAudioId?: string
+    durationMs?: number
+    timings?: { word: string; t0: number; t1: number; start: number; end: number }[]
+  }
+  "cell.audio.select": {
+    audioId: string
+    slot: "recording" | "generatedVoice"
+  }
+  "cell.audio.remove": {
+    audioId: string
   }
 
   "file.create": {

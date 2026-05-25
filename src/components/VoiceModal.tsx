@@ -5,7 +5,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react"
 import {
-  Check, Copy, KeyRound, Loader2, Pause, Play, Plus, Star, Trash2,
+  Check, Copy, KeyRound, Loader2, Pause, Play, Plus, Sparkles, Star, Trash2,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -32,6 +32,8 @@ import {
 import { setUserApiKey, useUserApiKey } from "@/lib/store/user-api-keys"
 import { defaultVoiceNameForProvider, normalizeVoiceForProvider } from "@/lib/audio/tts-providers"
 import { ApiKeyField } from "@/components/ApiKeyField"
+import type { FrontierSession } from "@/lib/frontier/types"
+import { VoiceCloneSection } from "./VoiceCloneSection"
 
 const SAMPLE_TEXT = "The quick brown fox jumps over the lazy dog."
 
@@ -47,10 +49,16 @@ interface Props {
    *  "apiKey" pins an inline ApiKeyField at the top of the dialog. Used by
    *  the disabled voice chip flow so the user lands directly on the fix. */
   initialFocus?: "apiKey"
+  /** Project context for voice-clone reference uploads. When absent the clone
+   *  section renders a "context unavailable" hint instead of the record UI. */
+  projectId?: string
+  fileId?: string | null
+  session?: FrontierSession | null
 }
 
 export function VoiceModal({
   open, onOpenChange, targetLanguage, settings, onSettingsChange, initialFocus,
+  projectId, fileId, session,
 }: Props) {
   const provider = settings?.provider ?? DEFAULT_TTS_PROVIDER
   // Resolve the API key with project → user-saved fallback so the Test
@@ -197,6 +205,9 @@ export function VoiceModal({
               onDuplicate={duplicateSelected}
               onDelete={deleteSelected}
               onSetDefault={setDefault}
+              projectId={projectId}
+              fileId={fileId}
+              session={session}
             />
           ) : (
             <div className="text-sm text-muted-foreground">No voice selected.</div>
@@ -247,6 +258,9 @@ function VoiceList({ library, selectedId, defaultVoiceId, onSelect, onAdd }: Voi
                 style={{ backgroundColor: voice.color || "#94a3b8" }}
               />
               <span className="flex-1 truncate">{voice.name}</span>
+              {voice.referenceAudioId && (
+                <Sparkles className="h-3 w-3 text-violet-500" aria-label="Voice clone" />
+              )}
               {voice.id === defaultVoiceId && (
                 <Star className="h-3 w-3 text-primary" aria-label="Default" />
               )}
@@ -271,6 +285,9 @@ interface VoiceEditorProps {
   onDuplicate: () => void
   onDelete: () => void
   onSetDefault: () => void
+  projectId?: string
+  fileId?: string | null
+  session?: FrontierSession | null
 }
 
 type PreviewState =
@@ -282,6 +299,7 @@ type PreviewState =
 function VoiceEditor({
   voice, provider, apiKey, targetLanguage, isDefault,
   onChange, onDuplicate, onDelete, onSetDefault,
+  projectId, fileId, session,
 }: VoiceEditorProps) {
   const [preview, setPreview] = useState<PreviewState>({ kind: "idle" })
   const audioRef = useRef<HTMLAudioElement | null>(null)
@@ -460,6 +478,14 @@ function VoiceEditor({
           />
         </div>
       )}
+
+      <VoiceCloneSection
+        voice={voice}
+        projectId={projectId}
+        fileId={fileId}
+        session={session}
+        onChange={onChange}
+      />
 
       <div className="flex flex-wrap items-center gap-2 pt-1">
         {!isDefault && (

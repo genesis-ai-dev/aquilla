@@ -24,6 +24,9 @@ async function makeAuthorized<K extends EventKind>(kind: K, role = 500) {
     'target.cell.reorder': { anchorCellId: null },
     'cell.validate': { editEventId: 'evt-1' },
     'cell.unvalidate': { editEventId: 'evt-1' },
+    'cell.audio.attach': { audioId: 'audio-1.wav', url: 'frontier-audio://audio-1.wav', slot: 'recording' },
+    'cell.audio.select': { audioId: 'audio-1.wav', slot: 'recording' },
+    'cell.audio.remove': { audioId: 'audio-1.wav' },
     'file.create': { name: 'Genesis', fileType: 'codex' },
   }
 

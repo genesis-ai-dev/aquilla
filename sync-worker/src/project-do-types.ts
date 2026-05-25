@@ -15,6 +15,9 @@ export type OutboxEventKind =
   | "target.cell.reorder"
   | "cell.validate"
   | "cell.unvalidate"
+  | "cell.audio.attach"
+  | "cell.audio.select"
+  | "cell.audio.remove"
   | "file.create"
 
 export interface OutboxRawEvent {

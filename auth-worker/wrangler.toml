@@ -1,4 +1,4 @@
-name = "aquilla-identity"
+name = "codex-auth-worker"
 main = "src/index.ts"
 compatibility_date = "2024-12-01"
 compatibility_flags = ["nodejs_compat"]
@@ -43,7 +43,7 @@ ENVIRONMENT = "production"
 # during cross-env testing (set via `wrangler secret put --env staging`).
 # ---------------------------------------------------------------------------
 [env.staging]
-name = "aquilla-dev-identity"
+name = "codex-auth-worker-staging"
 account_id = "6a80496d1e59948a9cbaa3c643ba81d7"
 routes = ["dev.aquilla.app/api/identity/*"]
 

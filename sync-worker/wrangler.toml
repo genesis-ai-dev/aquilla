@@ -1,4 +1,4 @@
-name = "aquilla-sync-worker"
+name = "codex-sync-worker"
 main = "src/index.ts"
 compatibility_date = "2024-12-01"
 compatibility_flags = ["nodejs_compat"]
@@ -64,7 +64,7 @@ database_id = "11828e9d-998b-4d3f-a405-91d9f624f94a"
 # local `wrangler deploy --env production`.
 # ---------------------------------------------------------------------------
 [env.production]
-name = "aquilla-sync-worker"
+name = "codex-sync-worker"
 account_id = "6a80496d1e59948a9cbaa3c643ba81d7"
 routes = ["aquilla.app/api/sync/*"]
 
@@ -105,7 +105,7 @@ database_id = "11828e9d-998b-4d3f-a405-91d9f624f94a"
 #   `wrangler secret put SYNC_SECRET_KEY --env staging`
 # ---------------------------------------------------------------------------
 [env.staging]
-name = "aquilla-sync-worker-staging"
+name = "codex-sync-worker-staging"
 account_id = "6a80496d1e59948a9cbaa3c643ba81d7"
 routes = ["dev.aquilla.app/api/sync/*"]
 

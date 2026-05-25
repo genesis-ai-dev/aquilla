@@ -1,5 +1,5 @@
 // src/lib/completion/frontier-health.ts
-// Lightweight availability probe for the codex-auth-worker health endpoint.
+// Lightweight availability probe for the aquilla-identity health endpoint.
 // We hit /api/v2/health once per tab (cached for 60s) so the UI can enable AI
 // controls without every callsite making its own network check.
 

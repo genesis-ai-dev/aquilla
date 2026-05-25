@@ -1,7 +1,7 @@
 // Shared types for the codex-chat-worker.
 //
 // This worker verifies a frontier-style JWT against frontier-db-v2 (shared
-// with codex-auth-worker and the legacy frontier-server) and forwards
+// with aquilla-identity and the legacy frontier-server) and forwards
 // completion requests to OpenRouter. No billing tables are read or written
 // here; we only need the fields that prove the bearer is a valid user.
 
@@ -9,7 +9,7 @@ export interface Env {
   /** Bound to frontier-db-v2 (prod) or frontier-db-v2-staging (staging). */
   AUTH_DB: D1Database
 
-  // Frontier JWT signing — MUST match codex-auth-worker.
+  // Frontier JWT signing — MUST match aquilla-identity.
   SECRET_KEY: string
   ALGORITHM: string
 

@@ -1,13 +1,13 @@
-// Fetch short-lived JWTs from the codex-auth-worker's POST /api/v2/sync-token.
+// Fetch short-lived JWTs from the aquilla-identity's POST /api/v2/sync-token.
 // One token per (projectId, fileId) scope; 15-min TTL. Cache the token in memory
 // and refresh when within 30 s of expiry so reconnects don't race with expiration.
 //
-// AUTH_API_URL points at codex-auth-worker (auth, sync-token, invites). It
+// AUTH_API_URL points at aquilla-identity (auth, sync-token, invites). It
 // falls back to VITE_FRONTIER_BASE so legacy environments that only have the
 // old frontier-server still work. The plain `FRONTIER_API_URL` re-export is
 // kept around for chat/LLM/payments routes that haven't been ported.
 
-// Phase D: default points at codex-auth-worker (aquilla-identity).
+// Phase D: default points at aquilla-identity (aquilla-identity).
 // VITE_FRONTIER_BASE is retained as a fallback for E2E test environments that
 // set it to a mock server URL.
 const AUTH_FALLBACK =

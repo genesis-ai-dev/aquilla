@@ -1,4 +1,4 @@
-// codex-auth-worker (Phase D) — full identity worker for the codex-web frontend.
+// aquilla-identity (Phase D) — full identity worker for the codex-web frontend.
 //
 // Promoted from stub auth surface to the complete identity + project surface.
 // Legacy frontier-server is no longer part of the codex-web runtime.
@@ -96,7 +96,7 @@ app.use("*", async (c, next) => {
 
 app.get("/", (c) =>
   c.json({
-    name: "codex-auth-worker",
+    name: "aquilla-identity",
     routes: [
       "/api/v2/auth/*",
       "/api/v2/sync-token",
@@ -113,7 +113,7 @@ app.get("/healthz", (c) => c.json({ ok: true }))
 
 // Liveness probe for the frontend (replaces the old api.frontierrnd.com
 // /api/v2/health that the AI controls used to gate on).
-app.get("/api/v2/health", (c) => c.json({ ok: true, name: "codex-auth-worker" }))
+app.get("/api/v2/health", (c) => c.json({ ok: true, name: "aquilla-identity" }))
 
 app.route("/api/v2/auth", authRoutes)
 app.route("/api/v2/sync-token", syncTokenRoutes)

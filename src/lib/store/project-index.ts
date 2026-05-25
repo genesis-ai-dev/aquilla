@@ -77,6 +77,22 @@ export async function _resetDbForTesting(): Promise<void> {
   }
 }
 
+/**
+ * Wipe all locally-cached project state. The server (auth-worker
+ * GET /api/v2/projects + sync) is the source of truth for this thin client;
+ * the IDB mirror is just a cache. Called on logout / account switch so no
+ * stale projects, originals, or snapshots survive a session change (they
+ * otherwise lingered — a local-first holdover from the pre-AD-3 architecture).
+ */
+export async function clearAllLocalData(): Promise<void> {
+  const db = await getDb()
+  await Promise.all([
+    db.clear("projects"),
+    db.clear("originals"),
+    db.clear("snapshots"),
+  ])
+}
+
 export interface ListProjectsOptions {
   /** Include soft-deleted (trashed) projects. Default: false. */
   includeTrashed?: boolean

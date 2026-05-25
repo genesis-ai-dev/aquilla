@@ -4,6 +4,7 @@ import {
   loadActiveSession, subscribeSession,
   type SessionSummary,
 } from "@/lib/frontier/session-store"
+import { clearAllLocalData } from "@/lib/store/project-index"
 import type { FrontierSession } from "@/lib/frontier/types"
 
 export function useAccounts() {
@@ -26,7 +27,9 @@ export function useAccounts() {
   }, [refresh])
 
   const add = useCallback(async (s: FrontierSession) => { await addSession(s) }, [])
-  const activate = useCallback(async (key: string) => { await activateSession(key) }, [])
+  // Switching accounts drops the prior account's cached projects (thin
+  // client: the server re-supplies them for the newly-active session).
+  const activate = useCallback(async (key: string) => { await activateSession(key); await clearAllLocalData() }, [])
   const remove = useCallback(async (key: string) => { await removeSession(key) }, [])
 
   return { active, sessions, loading, add, activate, remove }

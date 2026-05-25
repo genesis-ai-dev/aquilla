@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from "react"
 import { ChevronsUpDown, LogIn, LogOut, UserPlus, Check } from "lucide-react"
 import { useAccounts } from "@/hooks/useAccounts"
 import { clearSession } from "@/lib/frontier/session-store"
+import { clearAllLocalData } from "@/lib/store/project-index"
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog"
@@ -181,7 +182,7 @@ export function AccountSwitcher({ variant = "sidebar" }: { variant?: "sidebar" |
           </button>
           <button
             className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-sm hover:bg-accent"
-            onClick={() => { setOpen(false); clearSession() }}
+            onClick={async () => { setOpen(false); await clearSession(); await clearAllLocalData() }}
           >
             <LogOut className="h-4 w-4" />
             <span>Log out</span>

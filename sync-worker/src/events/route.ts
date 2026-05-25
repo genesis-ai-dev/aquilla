@@ -248,6 +248,9 @@ export async function handleEventsWriteRequest(
     const isChainMutating =
       rawEvent.kind !== 'cell.validate' &&
       rawEvent.kind !== 'cell.unvalidate' &&
+      rawEvent.kind !== 'cell.audio.attach' &&
+      rawEvent.kind !== 'cell.audio.select' &&
+      rawEvent.kind !== 'cell.audio.remove' &&
       rawEvent.kind !== 'file.create'
     const updateProjection = isChainMutating
       ? await isWinningChild(db, candidate)

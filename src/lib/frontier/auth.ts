@@ -1,8 +1,8 @@
-// Workspace auth module — wraps the codex-auth-worker (/api/v2/auth/*).
+// Workspace auth module — wraps the aquilla-identity (/api/v2/auth/*).
 //
 // History: this file previously fetched /api/v1/auth/* against the legacy
 // frontier-server (api.frontierrnd.com). Phase D cuts that dependency:
-// codex-auth-worker is now the canonical identity surface and serves /api/v2/*.
+// aquilla-identity is now the canonical identity surface and serves /api/v2/*.
 //
 // `AUTH_BASE` is re-exported so callers that construct identity URLs directly
 // (orgs.ts, members.ts, useUserSearch, frontier-health) work unchanged.

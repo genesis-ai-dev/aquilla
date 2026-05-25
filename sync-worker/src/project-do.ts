@@ -88,17 +88,27 @@ export class ProjectSync extends DurableObject<DOEnv> {
     }
 
     const projectId = url.searchParams.get("project")
-    const userId = url.searchParams.get("user")
-    if (!projectId || !userId) {
-      return new Response("missing project or user", { status: 400 })
+    if (!projectId) {
+      return new Response("missing project", { status: 400 })
     }
 
+    // Identity comes from the verified token, not a client query param: the
+    // connect URL only carries `?token=` (see buildProjectWsUrl), so reading a
+    // `user` param here always yielded null → 400, breaking every WS handshake
+    // and pinning the client in a reconnect loop. The sync-token stamps the
+    // Frontier username (claims.username), which matches the `currentUsername`
+    // the client uses for presence/lock filtering. ALLOW_UNAUTHENTICATED dev
+    // has no token, so fall back to the optional `user` param or "anon".
+    let userId: string
     if (this.env.ALLOW_UNAUTHENTICATED !== "true") {
       const token = url.searchParams.get("token")
       const auth = await verifyTokenForProject(token, projectId, this.env.SYNC_SECRET_KEY)
       if (!auth.ok) {
         return new Response(auth.reason, { status: auth.status })
       }
+      userId = auth.claims.username ?? `user:${auth.claims.userId}`
+    } else {
+      userId = url.searchParams.get("user") ?? "anon"
     }
 
     const pair = new WebSocketPair()

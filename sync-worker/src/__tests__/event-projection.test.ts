@@ -100,7 +100,7 @@ describe('buildEventProjectionStmts — source.cell.create', () => {
     expect(stmts).toHaveLength(1)
     const { sql, args } = recorded[0]
     expect(sql).toContain('INSERT INTO cells')
-    expect(sql).toContain('ON CONFLICT(project_id, file_id, cell_id)')
+    expect(sql).toContain('ON CONFLICT(project_id, file_id, cell_id, side)')
     // 0=project_id, 1=file_id, 2=cell_id, 3=side, 4=value, 5=value_html,
     // 6=type, 7=canonical_ref, 8=anchor_cell_id, 9=event_id,
     // 10=last_editor, 11=last_edit_at, 12=word_count, 13=content_hash

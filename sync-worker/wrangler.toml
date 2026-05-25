@@ -1,7 +1,10 @@
-name = "codex-sync-worker"
+name = "aquilla-sync-worker"
 main = "src/index.ts"
 compatibility_date = "2024-12-01"
 compatibility_flags = ["nodejs_compat"]
+# Keep the *.workers.dev subdomain enabled (the SPA calls it directly) — a
+# routed deploy would otherwise disable it.
+workers_dev = true
 
 # Same CF account as frontier-server and aquilla-db. Pinned so `wrangler deploy`
 # doesn't prompt interactively and lands on the wrong account by accident.
@@ -64,7 +67,7 @@ database_id = "11828e9d-998b-4d3f-a405-91d9f624f94a"
 # local `wrangler deploy --env production`.
 # ---------------------------------------------------------------------------
 [env.production]
-name = "codex-sync-worker"
+name = "aquilla-sync-worker"
 account_id = "6a80496d1e59948a9cbaa3c643ba81d7"
 routes = ["aquilla.app/api/sync/*"]
 
@@ -105,7 +108,7 @@ database_id = "11828e9d-998b-4d3f-a405-91d9f624f94a"
 #   `wrangler secret put SYNC_SECRET_KEY --env staging`
 # ---------------------------------------------------------------------------
 [env.staging]
-name = "codex-sync-worker-staging"
+name = "aquilla-sync-worker-staging"
 account_id = "6a80496d1e59948a9cbaa3c643ba81d7"
 routes = ["dev.aquilla.app/api/sync/*"]
 

@@ -53,12 +53,19 @@ export interface ServerLockReleased {
   cellId: string
   by: { userId: string; ts: number }
 }
+export interface ServerProjectArchived {
+  t: "project.archived"
+  project: string
+  archivedAt: string | null
+  deletedBy: string | null
+}
 export type ProjectDoServerMessage =
   | ServerEventApplied
   | ServerEventStale
   | ServerPresence
   | ServerLockClaimed
   | ServerLockReleased
+  | ServerProjectArchived
 
 // ── Client → server frames ───────────────────────────────────────────────
 

@@ -2,6 +2,7 @@
   "name": "codex-sync-worker",
   "private": true,
   "version": "0.0.1",
+  "type": "module",
   "scripts": {
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
@@ -9,7 +10,8 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "hono": "^4.12.14"
+    "hono": "^4.12.14",
+    "partyserver": "^0.5.2"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20241218.0",

@@ -157,30 +157,41 @@ export function buildEventProjectionStmts(
         const tp = p as EventPayloads['target.cell.commit']
         const sourceEventId = tp.sourceEventId ?? null
 
-        // For target commits we update value-level fields and pin
-        // `source_event_id` from the payload. We don't touch side / type /
-        // anchor here — they were set by the preceding *.create event.
-        // `event_id` advances to this event id (chain head). The
-        // `validated` flag resets to 0 because the chain head moved —
-        // validators targeting the prior edit are no longer "current".
-        // A subsequent cell.validate against this new event_id will flip
-        // it back on.
+        // UPSERT, not UPDATE: the client never emits `target.cell.create` —
+        // the first translation of a cell arrives straight as a
+        // `target.cell.commit`, and import only seeds source-side rows. A
+        // plain UPDATE ... WHERE side='target' would match zero rows and the
+        // translation would be silently lost (the event still 200-accepts but
+        // never projects). So the first commit INSERTs the target row;
+        // subsequent commits hit ON CONFLICT and UPDATE it. `side` is the
+        // literal 'target'; type/canonical_ref/anchor have no source on a
+        // target row created this way (null). `event_id` is the chain head;
+        // `validated` resets to 0 because the chain head moved — a later
+        // cell.validate against this new event_id flips it back on. Columns
+        // mirror the create-path INSERT so the NOT NULL set is satisfied.
         stmts.push(
           db
             .prepare(
-              `UPDATE cells SET
-                value           = ?,
-                value_html      = ?,
-                event_id        = ?,
-                source_event_id = ?,
-                last_editor     = ?,
-                last_edit_at    = ?,
-                word_count      = ?,
-                content_hash    = ?,
-                validated       = 0
-              WHERE project_id = ? AND file_id = ? AND cell_id = ? AND side = 'target'`,
+              `INSERT INTO cells (
+                project_id, file_id, cell_id, side, value, value_html, type,
+                canonical_ref, anchor_cell_id, event_id, source_event_id,
+                last_editor, last_edit_at, validated, word_count, content_hash
+              ) VALUES (?, ?, ?, 'target', ?, ?, NULL, NULL, NULL, ?, ?, ?, ?, 0, ?, ?)
+              ON CONFLICT(project_id, file_id, cell_id, side) DO UPDATE SET
+                value           = excluded.value,
+                value_html      = excluded.value_html,
+                event_id        = excluded.event_id,
+                source_event_id = excluded.source_event_id,
+                last_editor     = excluded.last_editor,
+                last_edit_at    = excluded.last_edit_at,
+                word_count      = excluded.word_count,
+                content_hash    = excluded.content_hash,
+                validated       = 0`,
             )
             .bind(
+              event.projectId,
+              event.fileId,
+              event.cellId,
               value,
               valueHtml,
               event.id,
@@ -189,9 +200,6 @@ export function buildEventProjectionStmts(
               event.serverTs,
               wordCount,
               hash,
-              event.projectId,
-              event.fileId,
-              event.cellId,
             ),
         )
       } else {

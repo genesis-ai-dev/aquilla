@@ -136,7 +136,7 @@ describe('buildEventProjectionStmts — target.cell.create', () => {
 })
 
 describe('buildEventProjectionStmts — target.cell.commit', () => {
-  it('UPDATEs value, event_id, and source_event_id', () => {
+  it('UPSERTs value, event_id, and source_event_id (first commit creates the target row)', () => {
     const { db, recorded } = makeD1Stub()
     const stmts: D1PreparedStatement[] = []
     buildEventProjectionStmts(
@@ -150,17 +150,21 @@ describe('buildEventProjectionStmts — target.cell.commit', () => {
     )
     expect(stmts).toHaveLength(1)
     const { sql, args } = recorded[0]
-    expect(sql).toContain('UPDATE cells SET')
-    expect(sql).toContain('event_id = ?')
-    expect(sql).toContain('source_event_id = ?')
-    // 0=value, 1=value_html, 2=event_id, 3=source_event_id,
-    // 4=last_editor, 5=last_edit_at, 6=word_count, 7=content_hash,
-    // 8=project_id, 9=file_id, 10=cell_id
-    expect(args[0]).toBe('new text')
-    expect(args[2]).toBe('evt-test-id')
-    expect(args[3]).toBe('src-event-99')
-    expect(args[8]).toBe('proj-1')
-    expect(args[10]).toBe('cell-1')
+    // The client never emits target.cell.create, so the commit is an UPSERT:
+    // INSERT the target row on first translation, ON CONFLICT UPDATE after.
+    expect(sql).toContain('INSERT INTO cells')
+    expect(sql).toContain('ON CONFLICT(project_id, file_id, cell_id, side) DO UPDATE SET')
+    expect(sql).toContain('event_id = excluded.event_id')
+    expect(sql).toContain('source_event_id = excluded.source_event_id')
+    // bind order (mirrors the INSERT column list):
+    // 0=project_id, 1=file_id, 2=cell_id, 3=value, 4=value_html,
+    // 5=event_id, 6=source_event_id, 7=last_editor, 8=last_edit_at,
+    // 9=word_count, 10=content_hash
+    expect(args[0]).toBe('proj-1')
+    expect(args[2]).toBe('cell-1')
+    expect(args[3]).toBe('new text')
+    expect(args[5]).toBe('evt-test-id')
+    expect(args[6]).toBe('src-event-99')
   })
 
   it('writes NULL source_event_id when omitted', () => {
@@ -171,7 +175,7 @@ describe('buildEventProjectionStmts — target.cell.commit', () => {
       makeEvent('target.cell.commit', { value: 'x' }),
       stmts,
     )
-    expect(recorded[0].args[3]).toBe(null)
+    expect(recorded[0].args[6]).toBe(null)
   })
 })
 
@@ -259,11 +263,20 @@ describe('buildEventProjectionStmts — side scoping (regression: target edits m
 
       // First emitted statement is always the cells mutation for these kinds.
       const sql = recorded[0].sql
-      // Either a literal `side = 'target'` / `side = 'source'` in the SQL,
-      // or a parametrised `side = ?` with the matching value in args.
+      // Three accepted forms, all of which keep the mutation scoped to one side:
+      //  1. a literal `side = 'target'` / `side = 'source'` WHERE clause
+      //     (source.cell.commit UPDATE),
+      //  2. the side literal in an UPSERT's VALUES list (target.cell.commit),
+      //  3. a parametrised `side = ?` with the matching value in args
+      //     (deletes, reorders).
       const litMatch = sql.match(/side\s*=\s*'(source|target)'/)
+      const valuesMatch = sql.match(/VALUES\s*\([^)]*'(source|target)'/)
       if (litMatch) {
         expect(litMatch[1]).toBe(expectedSide)
+      } else if (valuesMatch) {
+        expect(valuesMatch[1]).toBe(expectedSide)
+        const opposite = expectedSide === 'target' ? 'source' : 'target'
+        expect(sql).not.toContain(`'${opposite}'`)
       } else {
         expect(sql).toContain('side = ?')
         expect(recorded[0].args).toContain(expectedSide)

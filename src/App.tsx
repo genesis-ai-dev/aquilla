@@ -16,6 +16,7 @@ import { AiModelConsentDialog } from "@/components/AiModelConsentDialog"
 import { AiModelDownloadChip } from "@/components/AiModelDownloadChip"
 import { AudioBulkProgressBanner } from "@/components/AudioBulkProgressBanner"
 import { PrivateModeBanner } from "@/components/PrivateModeBanner"
+import { VersionBadge } from "@/components/VersionBadge"
 import { hydratePrefetchStatus } from "@/lib/audio/prefetch"
 import { probeOpfsAvailability } from "@/lib/storage/opfs-availability"
 import { useGlobalAudioShortcuts } from "@/hooks/useGlobalAudioShortcuts"
@@ -48,6 +49,7 @@ export default function App() {
       <AiModelDownloadChip />
       <AudioBulkProgressBanner />
       <GlobalAudioShortcuts />
+      <VersionBadge />
     </SyncingProvider>
   )
 }

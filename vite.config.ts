@@ -1,5 +1,7 @@
 /// <reference types="vitest" />
 import path from "path"
+import { execFileSync } from "node:child_process"
+import { readFileSync } from "node:fs"
 import { defineConfig } from "vite"
 import react, { reactCompilerPreset } from "@vitejs/plugin-react"
 import babel from "@rolldown/plugin-babel"
@@ -8,6 +10,19 @@ import { nodePolyfills } from "vite-plugin-node-polyfills"
 import { brandingHtmlPlugin } from "./scripts/vite-html-branding"
 import { BRAND_DATA, BRAND_DATA_IDS } from "./src/branding/brands/data"
 import type { BrandId } from "./src/branding/types"
+
+// Cloudflare Pages exposes CF_PAGES_BRANCH / CF_PAGES_COMMIT_SHA in CI builds.
+// Locally we fall back to git so dev shells still show something useful.
+function git(args: string[]): string {
+  try {
+    return execFileSync("git", args, { stdio: ["ignore", "pipe", "ignore"] }).toString().trim()
+  } catch {
+    return ""
+  }
+}
+const pkgVersion = JSON.parse(readFileSync("./package.json", "utf8")).version as string
+const buildBranch = process.env.CF_PAGES_BRANCH || git(["rev-parse", "--abbrev-ref", "HEAD"]) || "unknown"
+const buildSha = (process.env.CF_PAGES_COMMIT_SHA || git(["rev-parse", "HEAD"])).slice(0, 7)
 
 function resolveBuildBrand(): BrandId {
   const raw = process.env.BRAND ?? "aquilla"
@@ -24,6 +39,9 @@ export default defineConfig(({ mode }) => ({
   envPrefix: ["VITE_", "TAURI_ENV_"],
   define: {
     "import.meta.env.VITE_BRAND": JSON.stringify(brandId),
+    __APP_VERSION__: JSON.stringify(pkgVersion),
+    __APP_BRANCH__: JSON.stringify(buildBranch),
+    __APP_SHA__: JSON.stringify(buildSha),
   },
   server: {
     // Bind to 127.0.0.1 explicitly; "localhost" can resolve to ::1 on

@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// One-shot snapshot rebuilder for codex-sync-worker R2 snapshots.
+// One-shot snapshot rebuilder for aquilla-sync-worker R2 snapshots.
 //
 // Why: a Yjs doc that accumulated tens of thousands of per-cell edits/history
 // entries can encode to >10 MiB. The Cloudflare DO that hosts it ends up

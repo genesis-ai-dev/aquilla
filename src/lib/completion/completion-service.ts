@@ -7,9 +7,9 @@ export const DEFAULT_SYSTEM_PROMPT =
   "You are translating a project from {sourceLanguage} into {targetLanguage}.\n" +
   "Match the tone and formality of the provided examples. Return only the translated text — no explanations, no source text, no commentary."
 
-// VITE_CHAT_BASE points at codex-chat-worker — the in-repo chat-completions
-// service. CI wires it per-branch (prod → codex-chat-worker, anything else
-// → codex-chat-worker-staging).
+// VITE_CHAT_BASE points at aquilla-chat-worker — the in-repo chat-completions
+// service. CI wires it per-branch (prod → aquilla-chat-worker, anything else
+// → aquilla-chat-worker-staging).
 // VITE_FRONTIER_BASE is retained as a fallback so the E2E suite — which
 // spins up a mock LLM server and sets that env var — keeps working.
 const CHAT_BASE_FALLBACK =

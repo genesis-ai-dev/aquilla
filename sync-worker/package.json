@@ -1,5 +1,5 @@
 {
-  "name": "codex-sync-worker",
+  "name": "aquilla-sync-worker",
   "private": true,
   "version": "0.0.1",
   "type": "module",

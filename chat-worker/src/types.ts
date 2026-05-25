@@ -1,4 +1,4 @@
-// Shared types for the codex-chat-worker.
+// Shared types for the aquilla-chat-worker.
 //
 // This worker verifies a frontier-style JWT against frontier-db-v2 (shared
 // with aquilla-identity and the legacy frontier-server) and forwards

@@ -49,28 +49,47 @@ export function handleFileCreate(
       opts.serverSeq,
     )
 
+  // Post-0012 `files` schema: `file_type` was collapsed into `role`/`kind`
+  // and languages moved into the `meta` JSON (they're not file columns). The
+  // legacy fileType maps onto `kind`; the read side resolves fileType as
+  // `kind ?? role ?? 'codex'`. `event_id` (this file.create's id) is the
+  // NOT NULL AD-2 chain head.
+  const langMeta: Record<string, string> = {}
+  if (event.payload.sourceLanguage) langMeta.sourceLanguage = event.payload.sourceLanguage
+  if (event.payload.targetLanguage) langMeta.targetLanguage = event.payload.targetLanguage
+
   const fileUpsert = db
     .prepare(
       `INSERT INTO files (
-        id, project_id, name, file_type, source_language, target_language,
-        cell_count, approved_count, word_count, last_edit_at, projected_from,
-        updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, 0, 0, 0, NULL, ?, unixepoch('now') * 1000)
+        id, project_id, name,
+        role, kind, book_code, source_file_id, anchor_file_id,
+        event_id,
+        cell_count, approved_count, word_count, last_edit_at,
+        created_by, created_at, updated_at,
+        meta
+      ) VALUES (
+        ?, ?, ?,
+        NULL, ?, NULL, NULL, NULL,
+        ?,
+        0, 0, 0, NULL,
+        ?, unixepoch('now') * 1000, unixepoch('now') * 1000,
+        ?
+      )
       ON CONFLICT(id) DO UPDATE SET
         name = excluded.name,
-        file_type = excluded.file_type,
-        source_language = excluded.source_language,
-        target_language = excluded.target_language,
+        kind = excluded.kind,
+        event_id = excluded.event_id,
+        meta = excluded.meta,
         updated_at = unixepoch('now') * 1000`,
     )
     .bind(
       event.fileId,
       event.projectId,
       event.payload.name,
-      event.payload.fileType,
-      event.payload.sourceLanguage ?? null,
-      event.payload.targetLanguage ?? null,
-      `event:${event.id}`,
+      event.payload.fileType ?? null,
+      event.id,
+      claims.username,
+      JSON.stringify(langMeta),
     )
 
   const eventFrame: Extract<RealtimeMessage, { t: 'event' }> = {

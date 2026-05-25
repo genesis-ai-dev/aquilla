@@ -456,30 +456,45 @@ case 'cell.audio.attach': {
         throw new Error(`file.create event ${event.id} is missing fileId`)
       }
       // Counters left at zero on first insert and untouched on conflict —
-      // cell commit projections maintain those.
+      // cell commit projections maintain those. Post-0012 schema: file_type
+      // collapsed into role/kind; languages live in meta (JSON); event_id is
+      // this file.create's id (NOT NULL AD-2 chain head).
+      const langMeta: Record<string, string> = {}
+      if (p.sourceLanguage) langMeta.sourceLanguage = p.sourceLanguage
+      if (p.targetLanguage) langMeta.targetLanguage = p.targetLanguage
       stmts.push(
         db
           .prepare(
             `INSERT INTO files (
-              id, project_id, name, file_type, source_language, target_language,
-              cell_count, approved_count, word_count, last_edit_at, projected_from,
-              updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, 0, 0, 0, NULL, ?, unixepoch('now') * 1000)
+              id, project_id, name,
+              role, kind, book_code, source_file_id, anchor_file_id,
+              event_id,
+              cell_count, approved_count, word_count, last_edit_at,
+              created_by, created_at, updated_at,
+              meta
+            ) VALUES (
+              ?, ?, ?,
+              NULL, ?, NULL, NULL, NULL,
+              ?,
+              0, 0, 0, NULL,
+              ?, unixepoch('now') * 1000, unixepoch('now') * 1000,
+              ?
+            )
             ON CONFLICT(id) DO UPDATE SET
               name = excluded.name,
-              file_type = excluded.file_type,
-              source_language = excluded.source_language,
-              target_language = excluded.target_language,
+              kind = excluded.kind,
+              event_id = excluded.event_id,
+              meta = excluded.meta,
               updated_at = unixepoch('now') * 1000`,
           )
           .bind(
             event.fileId,
             event.projectId,
             p.name,
-            p.fileType,
-            p.sourceLanguage ?? null,
-            p.targetLanguage ?? null,
-            `event:${event.id}`,
+            p.fileType ?? null,
+            event.id,
+            event.author,
+            JSON.stringify(langMeta),
           ),
       )
       return ['files']

@@ -1,3 +1,7 @@
+// TODO(v1.x — comments): implement via event grammar `comment.create`,
+// `comment.resolve`, `comment.reopen`, `comment.message`. Until then this
+// hook is a no-op stub; call sites compile but nothing persists or syncs.
+//
 // Phase 2b: comments dropped from v1 event grammar (see 03-data-model.md);
 // stubbed. Future v1.x feature.
 //

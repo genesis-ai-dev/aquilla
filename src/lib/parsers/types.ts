@@ -358,7 +358,9 @@ export interface SnapshotFile {
   fileId: string
   fileName: string
   fileType: FileType
-  ydocState: string  // base64 encoded Y.encodeStateAsUpdate output
+  /** @deprecated v2-era field; no longer written or read. Kept optional for
+   *  backward-compat deserialization of old snapshots. */
+  ydocState?: string
 }
 
 export interface ProjectSnapshot {

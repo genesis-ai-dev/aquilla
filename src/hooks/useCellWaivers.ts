@@ -1,3 +1,7 @@
+// TODO(v1.x — cell waivers): implement via event grammar `cell.waiver.add` /
+// `cell.waiver.remove`. Until then read+write helpers are no-op stubs;
+// call sites compile but nothing persists or syncs.
+//
 // Phase 2b: cell waivers dropped from v1 event grammar (see 03-data-model.md);
 // stubbed. Future v1.x feature.
 //

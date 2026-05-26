@@ -8,7 +8,7 @@
  * a failed write doesn't block the flusher.
  */
 
-import type { CqrsRawEvent } from "./cqrs-types"
+import type { CqrsRawEvent } from "./outbox-types"
 
 const DB_NAME = "aquilla-cqrs-outbox"
 /** v2: adds `attempts`, `lastAttemptAt`, `lastError` to existing rows. */

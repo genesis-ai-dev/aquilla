@@ -3,7 +3,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { cn } from "@/lib/utils"
 import type { OutboxRecord } from "@/lib/sync/outbox"
-import type { CqrsEventKind } from "@/lib/sync/cqrs-types"
+import type { CqrsEventKind } from "@/lib/sync/outbox-types"
 
 interface Props {
   /** Trigger element that opens the popover. Receives no props — wrap as needed. */

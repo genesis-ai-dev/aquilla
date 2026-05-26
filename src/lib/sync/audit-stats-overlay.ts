@@ -25,7 +25,7 @@
 
 import type { CellAuditStats } from "@/hooks/useCellsAuditStats"
 import type { OutboxRecord } from "./outbox"
-import type { CqrsEventKind, CqrsPayloadFor } from "./cqrs-types"
+import type { CqrsEventKind, CqrsPayloadFor } from "./outbox-types"
 
 export interface OverlayInput {
   base: ReadonlyMap<string, CellAuditStats>

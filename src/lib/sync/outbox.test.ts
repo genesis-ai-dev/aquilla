@@ -8,8 +8,8 @@ import {
   outboxPendingCount,
   resetOutboxConnectionForTests,
 } from "./outbox"
-import type { CqrsRawEvent } from "./cqrs-types"
-import { CQRS_SCHEMA_VERSION } from "./cqrs-types"
+import type { CqrsRawEvent } from "./outbox-types"
+import { CQRS_SCHEMA_VERSION } from "./outbox-types"
 import { flushOutboxBatch } from "./outbox-flush"
 
 describe("cqrs outbox", () => {

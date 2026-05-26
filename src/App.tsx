@@ -72,17 +72,15 @@ function AppRoutes() {
       <Route path="/project/:id/comments/debug" element={<DebugView />} />
       <Route path="/project/:id/snapshots" element={<SnapshotsPage />} />
       <Route path="/project/:id/snapshots/debug" element={<DebugView />} />
-      {/* In dev there is no front-door Worker, so without an explicit
-          /projects route the `/:id` workspace catch-all eats it and tries
-          to load a project named "projects". Same shape for /onboarding. */}
-      <Route path="/projects" element={<Dashboard />} />
+      {/* Backward-compat: external links / bookmarks that point at /projects
+          are redirected to the canonical dashboard at /.
+          In dev there is no front-door Worker, so this explicit route also
+          prevents the `/:id` catch-all from eating the path. */}
+      <Route path="/projects" element={<Navigate to="/" replace />} />
       <Route path="/join/:token" element={<JoinPage />} />
       <Route path="/onboarding" element={<OnboardingWizard />} />
       <Route path="/settings" element={<Settings />} />
       <Route path="/members" element={<MembersPage />} />
-      {/* Backward-compat: the old admin-flavored URL still resolves but
-          permanently redirects to the operational /members surface. */}
-      <Route path="/settings/org" element={<Navigate to="/members" replace />} />
     </Routes>
   )
 }

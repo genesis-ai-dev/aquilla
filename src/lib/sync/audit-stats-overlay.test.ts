@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest"
 import { applyOutboxOverlay } from "./audit-stats-overlay"
 import type { CellAuditStats } from "@/hooks/useCellsAuditStats"
 import type { OutboxRecord } from "./outbox"
-import type { CqrsRawEvent } from "./cqrs-types"
+import type { CqrsRawEvent } from "./outbox-types"
 
 const SCHEMA = 1
 

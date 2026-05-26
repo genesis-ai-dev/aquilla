@@ -5,7 +5,6 @@
 // D1 events/projections plus R2 media blobs; this worker no longer exposes
 // a CRDT document runtime.
 
-import { DurableObject } from "cloudflare:workers"
 import { handleAdminRequest } from "./admin"
 import { handleAudioRequest } from "./audio"
 import { handleVoiceConvertRequest, handleVoiceReferenceRequest } from "./voice-convert"
@@ -31,8 +30,6 @@ export { ProjectSync } from "./project-do"
 declare global {
   namespace Cloudflare {
     interface Env {
-      /** Legacy binding kept only so existing deployments/migrations remain valid. */
-      FileSync?: DurableObjectNamespace
       /**
        * Per-project Durable Object holding live coordination state — focus
        * locks + presence + the relay for `event.applied` broadcasts.
@@ -64,19 +61,6 @@ declare global {
 }
 
 type Env = Cloudflare.Env
-
-/**
- * Compatibility Durable Object for the old per-file CRDT room binding.
- * No dispatcher routes traffic here anymore; direct callers receive a clear
- * 410 rather than reviving CRDT document state.
- */
-export class FileSync extends DurableObject<Env> {
-  fetch(): Response {
-    return new Response("FileSync CRDT runtime removed; use ProjectSync and /events", {
-      status: 410,
-    })
-  }
-}
 
 function routeProjectSync(request: Request, env: Env): Response | Promise<Response> | null {
   const url = new URL(request.url)

@@ -10,11 +10,6 @@ workers_dev = true
 # doesn't prompt interactively and lands on the wrong account by accident.
 account_id = "6a80496d1e59948a9cbaa3c643ba81d7"
 
-# y-partyserver wires one Durable Object per file (room name = fileId).
-[[durable_objects.bindings]]
-name = "FileSync"
-class_name = "FileSync"
-
 # Per-project DO (Phase 2c). Holds focus locks + presence + an event-fanout
 # relay. Transient state only; no D1/R2 writes from inside the DO itself.
 [[durable_objects.bindings]]
@@ -29,8 +24,9 @@ new_sqlite_classes = ["FileSync"]
 tag = "v2"
 new_sqlite_classes = ["ProjectSync"]
 
-# R2 holds canonical Y.Doc snapshots and tail updates.
-# Key layout: projects/{projectId}/files/{fileId}/{snapshot.bin,tail/{seq}.bin,checkpoints/{id}.bin}
+# R2 holds media blobs only (audio recordings, generated voice files).
+# Key layout: projects/{projectId}/cells/{cellId}/audio/{audioId}.{ext}
+# There are no Y.Doc snapshots, tail updates, or compaction artifacts here.
 [[r2_buckets]]
 binding = "SNAPSHOTS"
 bucket_name = "aquilla-snapshots"
@@ -72,10 +68,6 @@ account_id = "6a80496d1e59948a9cbaa3c643ba81d7"
 routes = ["aquilla.app/api/sync/*"]
 
 [[env.production.durable_objects.bindings]]
-name = "FileSync"
-class_name = "FileSync"
-
-[[env.production.durable_objects.bindings]]
 name = "ProjectSync"
 class_name = "ProjectSync"
 
@@ -111,10 +103,6 @@ database_id = "11828e9d-998b-4d3f-a405-91d9f624f94a"
 name = "aquilla-sync-worker-staging"
 account_id = "6a80496d1e59948a9cbaa3c643ba81d7"
 routes = ["dev.aquilla.app/api/sync/*"]
-
-[[env.staging.durable_objects.bindings]]
-name = "FileSync"
-class_name = "FileSync"
 
 [[env.staging.durable_objects.bindings]]
 name = "ProjectSync"

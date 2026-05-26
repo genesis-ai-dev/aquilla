@@ -155,6 +155,16 @@ export interface OutboxRawEvent<K extends OutboxEventKind = OutboxEventKind> {
 /** Schema version that ships with Phase 2c-α. Bump on payload changes. */
 export const OUTBOX_SCHEMA_VERSION = 1
 
+// ── Legacy Cqrs* aliases (moved from the now-deleted cqrs-types.ts shim) ──
+// These names predate the AD-2 OutboxRawEvent grammar. Callers still using
+// them are correct; no rename is required. Do not add new callers — prefer
+// the Outbox* names in new code.
+export type CqrsEventKind = OutboxEventKind
+export type CqrsEventPayloads = OutboxEventPayloads
+export type CqrsPayloadFor<K extends OutboxEventKind> = OutboxPayloadFor<K>
+export type CqrsRawEvent<K extends OutboxEventKind = OutboxEventKind> = OutboxRawEvent<K>
+export const CQRS_SCHEMA_VERSION = OUTBOX_SCHEMA_VERSION
+
 // ── Type guards ───────────────────────────────────────────────────────────
 
 const CHAIN_MUTATING_KINDS: ReadonlySet<OutboxEventKind> = new Set<OutboxEventKind>([

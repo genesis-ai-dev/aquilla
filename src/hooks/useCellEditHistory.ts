@@ -19,6 +19,7 @@ import { useCallback, useEffect, useRef, useState } from "react"
 import type { CellHistoryEntry } from "@/lib/parsers/types"
 import { fetchCellHistory } from "@/lib/sync/history-read"
 import type { CellHistoryEvent } from "@/lib/sync/history-read-types"
+import { subscribeToOutbox } from "@/lib/sync/outbox"
 
 export interface UseCellEditHistoryOptions {
   enabled: boolean
@@ -41,20 +42,31 @@ export interface UseCellEditHistoryResult {
 }
 
 function mapEventsToEntries(events: CellHistoryEvent[]): CellHistoryEntry[] {
-  // Filter to `*.cell.commit` events — drawer renders value history, not
-  // file/project lifecycle events. Server returns newest-first; reverse
-  // for HistoryDrawer.groupHistory() which expects chronological.
+  // Walk events chronologically. Each commit becomes a history entry; each
+  // validate/unvalidate flips the `validated` flag on the entry whose
+  // editEventId it references. Server returns newest-first, so we reverse.
   const entries: CellHistoryEntry[] = []
+  const indexByCommitId = new Map<string, number>()
   for (const e of [...events].reverse()) {
-    if (e.kind !== "target.cell.commit" && e.kind !== "source.cell.commit") continue
-    const payload = e.payload as { value?: string } | null
-    entries.push({
-      timestamp: new Date(e.serverTs).toISOString(),
-      value: payload?.value ?? "",
-      source: "human",
-      author: e.author,
-      validated: false,
-    })
+    if (e.kind === "target.cell.commit" || e.kind === "source.cell.commit") {
+      const payload = e.payload as { value?: string } | null
+      const idx = entries.length
+      entries.push({
+        timestamp: new Date(e.serverTs).toISOString(),
+        value: payload?.value ?? "",
+        source: "human",
+        author: e.author,
+        validated: false,
+      })
+      indexByCommitId.set(e.id, idx)
+    } else if (e.kind === "cell.validate" || e.kind === "cell.unvalidate") {
+      const payload = e.payload as { editEventId?: string } | null
+      const targetId = payload?.editEventId
+      if (!targetId) continue
+      const idx = indexByCommitId.get(targetId)
+      if (idx === undefined) continue
+      entries[idx] = { ...entries[idx], validated: e.kind === "cell.validate" }
+    }
   }
   return entries
 }
@@ -138,6 +150,27 @@ export function useCellEditHistory(opts: UseCellEditHistoryOptions): UseCellEdit
       }
     }
   }, [doFetch])
+
+  // Auto-revalidate when the local outbox changes — covers the case where the
+  // user commits/validates/unvalidates this cell from the same window: the
+  // remove-after-flush notification triggers a refetch so the drawer keeps up.
+  // Debounced to coalesce burst notifications and to give the server projection
+  // a beat to land after the flusher posts the event.
+  useEffect(() => {
+    if (!enabledRef.current) return
+    let timer: number | null = null
+    const unsubscribe = subscribeToOutbox(() => {
+      if (timer !== null) window.clearTimeout(timer)
+      timer = window.setTimeout(() => {
+        timer = null
+        void doFetch()
+      }, 400)
+    })
+    return () => {
+      if (timer !== null) window.clearTimeout(timer)
+      unsubscribe()
+    }
+  }, [doFetch, enabled])
 
   const revalidate = useCallback(() => {
     void doFetch()

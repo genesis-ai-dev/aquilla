@@ -22,6 +22,7 @@ export type AudioErrorKind =
   | "pointer-missing"
   | "pointer-invalid"
   | "download-failed"
+  | "audio-deleted"
   | "no-session"
 
 export interface AudioError {
@@ -158,6 +159,17 @@ export function useCellAudio(
       bytesRef.current = bytes
       return bytes
     } catch (e) {
+      // F10: distinguish permanent deletion (404) from transient errors.
+      // 404 → "audio-deleted" so the UI can show "re-record" instead of
+      // a generic error with a retry spinner.
+      const is404 =
+        (e && typeof e === "object" && "status" in e && (e as { status: unknown }).status === 404)
+      if (is404) {
+        throw {
+          kind: "audio-deleted",
+          message: "This audio recording has been deleted and cannot be played.",
+        } as AudioError
+      }
       throw {
         kind: "download-failed",
         message: e instanceof Error ? e.message : String(e),

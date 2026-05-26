@@ -19,9 +19,17 @@ export function useOutboxFlusher(options: UseOutboxFlusherOptions): {
   pendingCount: number
   failureStreak: number
   refreshPending: () => Promise<void>
+  /** F6: increments whenever a flush returns stale-sibling dead-letters.
+   *  Caller should surface "Some changes were rejected — newer edits won." */
+  staleSiblingCount: number
+  /** F5: increments whenever a flush returns stale-source pins.
+   *  Caller should surface "Source changed — please re-confirm." */
+  staleSourceCount: number
 } {
   const [pending, setPending] = useState(0)
   const [failureStreak, setFailureStreak] = useState(0)
+  const [staleSiblingCount, setStaleSiblingCount] = useState(0)
+  const [staleSourceCount, setStaleSourceCount] = useState(0)
   const backoffExp = useRef(0)
   const tokenRef = useRef(options.getTokenForFile)
   tokenRef.current = options.getTokenForFile
@@ -52,6 +60,12 @@ export function useOutboxFlusher(options: UseOutboxFlusherOptions): {
     const runFlushCycle = async () => {
       const result = await flushOutboxBatch({
         getTokenForFile: (fid) => tokenRef.current(fid),
+        onStaleSiblings: (count) => {
+          setStaleSiblingCount((n) => n + count)
+        },
+        onStaleSource: (entries) => {
+          setStaleSourceCount((n) => n + entries.length)
+        },
       })
       await refreshPending()
       const failedHard = result.posted > 0 && result.accepted === 0
@@ -104,5 +118,5 @@ export function useOutboxFlusher(options: UseOutboxFlusherOptions): {
     }
   }, [options.enabled, refreshPending])
 
-  return { pendingCount: pending, failureStreak, refreshPending }
+  return { pendingCount: pending, failureStreak, refreshPending, staleSiblingCount, staleSourceCount }
 }

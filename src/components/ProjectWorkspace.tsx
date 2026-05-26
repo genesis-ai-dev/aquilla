@@ -92,7 +92,6 @@ import { NextUnfinishedButton } from "./NextUnfinishedButton"
 import { useNextUnfinished } from "@/hooks/useNextUnfinished"
 import { AiSetupDialog } from "./AiSetupDialog"
 import {
-  buildExportHandoffUrl,
   buildProjectSettingsHandoffUrl,
   workspaceReturnPath,
 } from "@/lib/ad11/navigation"
@@ -112,8 +111,8 @@ export function ProjectWorkspace() {
   const { id: projectId, fileId: routeFileId } = useParams<{ id: string; fileId?: string }>()
   const navigate = useNavigate()
   const goToProjects = useCallback(() => {
-    window.location.assign("/projects/")
-  }, [])
+    navigate("/")
+  }, [navigate])
   const { project: loadedProject, status, refresh } = useProject(projectId!)
 
   const [selectedFileId, setSelectedFileId] = useState<string | null>(routeFileId ?? null)
@@ -336,10 +335,17 @@ export function ProjectWorkspace() {
     pendingCount: outboxPending,
     failureStreak: outboxFailures,
     refreshPending: refreshOutboxPending,
+    staleSiblingCount: outboxStaleSiblingCount,
+    staleSourceCount: outboxStaleSourceCount,
   } = useOutboxFlusher({
     enabled: outboxFlushEnabled,
     getTokenForFile,
   })
+  // F5/F6: dismiss the notification banners after the user has seen them.
+  const [staleSiblingBannerDismissed, setStaleSiblingBannerDismissed] = useState(0)
+  const [staleSourceBannerDismissed, setStaleSourceBannerDismissed] = useState(0)
+  const showStaleSiblingBanner = outboxStaleSiblingCount > staleSiblingBannerDismissed
+  const showStaleSourceBanner = outboxStaleSourceCount > staleSourceBannerDismissed
   const outboxRecords = usePendingOutboxRecords({
     enabled: Boolean(project?.id),
     fileId: null,
@@ -1046,14 +1052,11 @@ export function ProjectWorkspace() {
     setImportOpen(true)
   }, [project])
 
+  // Export handoff (/export/) does not exist as a route yet — stub until the
+  // standalone export Worker is wired in.
   const openExportFlow = useCallback(() => {
-    if (!project) return
-    window.location.assign(buildExportHandoffUrl({
-      projectId: project.id,
-      fileId: activeFileId,
-      returnTo: workspaceReturnPath(project.id, activeFileId),
-    }))
-  }, [project, activeFileId])
+    console.warn("[ProjectWorkspace] export flow not yet available")
+  }, [])
 
   const actionArgs = useMemo(() => ({
     openImport: openImportFlow,
@@ -1357,6 +1360,32 @@ export function ProjectWorkspace() {
             {isSubtitleFile && blobUnavailable && !videoAttachment.videoUrl && (
               <div className="bg-amber-50 px-4 py-2 text-xs text-amber-700 dark:bg-amber-950 dark:text-amber-400">
                 Video file not available on this device. Attach it locally or paste a URL via the Film icon.
+              </div>
+            )}
+            {/* F6: stale-sibling dead-letter banner */}
+            {showStaleSiblingBanner && (
+              <div className="flex items-center justify-between gap-2 bg-amber-50 px-4 py-2 text-xs text-amber-800 dark:bg-amber-950 dark:text-amber-300">
+                <span>Some changes were rejected because they conflicted with newer edits from another session.</span>
+                <button
+                  type="button"
+                  onClick={() => setStaleSiblingBannerDismissed(outboxStaleSiblingCount)}
+                  className="ml-2 rounded bg-amber-200/60 px-2 py-0.5 hover:bg-amber-200 dark:bg-amber-800/50 dark:hover:bg-amber-800"
+                >
+                  Dismiss
+                </button>
+              </div>
+            )}
+            {/* F5: stale-source pin banner */}
+            {showStaleSourceBanner && (
+              <div className="flex items-center justify-between gap-2 bg-blue-50 px-4 py-2 text-xs text-blue-800 dark:bg-blue-950 dark:text-blue-300">
+                <span>Source text changed since your last edit — your translation was saved, but please re-confirm it reflects the latest source.</span>
+                <button
+                  type="button"
+                  onClick={() => setStaleSourceBannerDismissed(outboxStaleSourceCount)}
+                  className="ml-2 rounded bg-blue-200/60 px-2 py-0.5 hover:bg-blue-200 dark:bg-blue-800/50 dark:hover:bg-blue-800"
+                >
+                  Dismiss
+                </button>
               </div>
             )}
           </>

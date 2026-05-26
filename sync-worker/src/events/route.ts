@@ -48,6 +48,11 @@ interface RejectedEntry {
   reason: string
 }
 
+interface StaleSourceEntry {
+  id: string
+  currentSourceEventId: string
+}
+
 interface ExistingEventRow {
   server_ts: number
   server_seq: number
@@ -180,6 +185,10 @@ export async function handleEventsWriteRequest(
   // advance the projection — stale siblings. Surfaced to the client so an
   // edit that had no effect is visible rather than silently dropped.
   const staleIds = new Set<string>()
+  // F5: target.cell.commit events whose sourceEventId pin is stale (source
+  // has advanced since the translator last fetched). Accepted + projected
+  // (LWW) but flagged so the client can surface a "source changed" banner.
+  const staleSourceEntries: StaleSourceEntry[] = []
 
   // ── Per-event accumulation ─────────────────────────────────────────────
 
@@ -278,6 +287,31 @@ export async function handleEventsWriteRequest(
     // treating "accepted" as "saved" (the old silent-loss bug).
     if (isChainMutating && !updateProjection) {
       staleIds.add(rawEvent.id)
+    }
+
+    // F5: AD-9 sourceEventId staleness validation for target.cell.commit.
+    // If the commit carries a sourceEventId pin and the source row has
+    // advanced beyond it, flag it so the client can surface a
+    // "source changed — please re-confirm" hint. The event is still accepted
+    // and projected (LWW) so the translator's work is not lost.
+    if (rawEvent.kind === 'target.cell.commit' && rawEvent.fileId && rawEvent.cellId) {
+      const tp = rawEvent.payload as { sourceEventId?: string | null }
+      if (tp.sourceEventId) {
+        const sourceRow = await db
+          .prepare(
+            `SELECT event_id FROM cells
+             WHERE project_id = ? AND file_id = ? AND cell_id = ? AND side = 'source'
+             LIMIT 1`,
+          )
+          .bind(rawEvent.projectId, rawEvent.fileId, rawEvent.cellId)
+          .first<{ event_id: string }>()
+        if (sourceRow && sourceRow.event_id !== tp.sourceEventId) {
+          staleSourceEntries.push({
+            id: rawEvent.id,
+            currentSourceEventId: sourceRow.event_id,
+          })
+        }
+      }
     }
 
     // Dispatch.
@@ -381,7 +415,12 @@ export async function handleEventsWriteRequest(
       }
 
       return Response.json(
-        { accepted, rejected, stale: accepted.filter((a) => staleIds.has(a.id)) },
+        {
+          accepted,
+          rejected,
+          stale: accepted.filter((a) => staleIds.has(a.id)),
+          staleSource: staleSourceEntries,
+        },
         { status: 200 },
       )
     }
@@ -429,5 +468,10 @@ export async function handleEventsWriteRequest(
     }
   }
 
-  return Response.json({ accepted, rejected, stale: accepted.filter((a) => staleIds.has(a.id)) })
+  return Response.json({
+    accepted,
+    rejected,
+    stale: accepted.filter((a) => staleIds.has(a.id)),
+    staleSource: staleSourceEntries,
+  })
 }

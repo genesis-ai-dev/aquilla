@@ -11,7 +11,13 @@
 // `Access-Control-Allow-Origin: *` is safe (and avoids hard-coding a list
 // of frontend origins as the app moves between Vercel previews / local).
 
-const BROWSER_PATH_PREFIXES = ["/events", "/cells/", "/cell-validators", "/import"]
+const BROWSER_PATH_PREFIXES = [
+  "/events",
+  "/cells/",
+  "/cell-validators",
+  "/import",
+  "/api/v1/",
+]
 
 export function isBrowserCorsPath(pathname: string): boolean {
   return BROWSER_PATH_PREFIXES.some(

@@ -85,11 +85,27 @@ export async function handleAudioRequest(
 
   if (request.method === "DELETE") {
     const auth = request.headers.get("Authorization") ?? ""
-    const expected = env.SYNC_SECRET_KEY
+    const adminExpected = env.SYNC_SECRET_KEY
       ? `Bearer ${env.SYNC_SECRET_KEY}`
       : null
-    if (!expected || auth !== expected) {
+    if (adminExpected && auth === adminExpected) {
+      // Admin DELETE: no extra scope check.
+      await env.SNAPSHOTS.delete(key)
+      return withAudioCors(Response.json({ ok: true }))
+    }
+    // F8: also allow the sync-token owner (contributor+) to DELETE — used by the
+    // client to clean up an orphaned R2 blob when `emitCellAudioAttach` fails
+    // after a successful PUT. The token must be scoped to the same
+    // (projectId, fileId) as the URL params.
+    const token = auth.startsWith("Bearer ") ? auth.slice("Bearer ".length) : null
+    const verified = await verifyTokenForFile(token, fileId, env.SYNC_SECRET_KEY)
+    if (!verified.ok) {
       return withAudioCors(new Response("unauthorized", { status: 401 }))
+    }
+    if (verified.claims.projectId !== projectId) {
+      return withAudioCors(
+        new Response("token scoped to different project", { status: 403 }),
+      )
     }
     await env.SNAPSHOTS.delete(key)
     return withAudioCors(Response.json({ ok: true }))

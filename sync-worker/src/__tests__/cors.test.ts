@@ -23,6 +23,12 @@ describe("isBrowserCorsPath", () => {
     expect(isBrowserCorsPath("/cell-validators")).toBe(true)
   })
 
+  it("matches /api/v1/projects/.../cells under the /api/v1/ prefix", () => {
+    expect(
+      isBrowserCorsPath("/api/v1/projects/proj-a/files/file-x/cells"),
+    ).toBe(true)
+  })
+
   it("does not match admin paths", () => {
     expect(isBrowserCorsPath("/admin/projects/p1/archive")).toBe(false)
   })

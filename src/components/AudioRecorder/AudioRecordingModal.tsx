@@ -19,7 +19,7 @@ import { pushAudioShortcutOverride } from "@/lib/audio/audio-coordinator"
 import { useCountdown } from "./useCountdown"
 import { AudioWaveform } from "./AudioWaveform"
 import { DurationBar } from "./DurationBar"
-import { buildAudioId, uploadCellAudio } from "@/lib/audio/upload"
+import { buildAudioId, uploadCellAudio, deleteCellAudio } from "@/lib/audio/upload"
 import { emitCellAudioAttach } from "@/lib/sync/events-emit"
 import { notifyAudioAttachmentsChanged } from "@/lib/audio/audio-attachments-bus"
 import { audioSyncTokenFetcherForSession } from "@/lib/audio/sync-token-fetcher"
@@ -158,16 +158,30 @@ export function AudioRecordingModal({
       const savedAudioId = result.audioId
       setTranscribeStatus(savedAudioId, { kind: "idle" })
       markProjectHasAudioDataSoon(project.id)
-      await emitCellAudioAttach({
-        projectId: project.id,
-        fileId: activeCell.fileId,
-        cellId: activeCell.id,
-        audioId: `${result.audioId}.${result.ext}`,
-        url: result.url,
-        slot: "recording",
-        mimeType: blob.type || undefined,
-        author: username,
-      })
+      try {
+        await emitCellAudioAttach({
+          projectId: project.id,
+          fileId: activeCell.fileId,
+          cellId: activeCell.id,
+          audioId: `${result.audioId}.${result.ext}`,
+          url: result.url,
+          slot: "recording",
+          mimeType: blob.type || undefined,
+          author: username,
+        })
+      } catch (emitErr) {
+        // F8: R2 upload succeeded but event emit failed — delete the orphaned
+        // R2 object so it doesn't waste storage. Error is non-fatal for the
+        // cleanup itself; we always re-throw the original emit error.
+        void deleteCellAudio({
+          projectId: project.id,
+          fileId: activeCell.fileId,
+          audioId: result.audioId,
+          ext: result.ext,
+          getSyncToken: audioSyncTokenFetcherForSession(session),
+        })
+        throw emitErr
+      }
       notifyAudioAttachmentsChanged(activeCell.fileId)
       setPhase("saved")
       // Auto-advance: settle on the new cell after a brief success indication.

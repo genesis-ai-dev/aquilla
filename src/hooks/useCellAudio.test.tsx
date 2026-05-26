@@ -149,6 +149,21 @@ describe("useCellAudio", () => {
     expect(result.current.error?.kind).toBe("download-failed")
   })
 
+  it("F10: surfaces audio-deleted (not download-failed) when sync-worker returns 404", async () => {
+    fetchMock.mockResolvedValueOnce(new Response("not found", { status: 404 }))
+
+    const project = makeProject()
+    const cell = makeCell("a-deleted", buildFrontierAudioUrl("a-deleted", "webm"))
+    const { result } = renderHook(() => useCellAudio(project, cell, "file-1"))
+
+    await act(async () => { await result.current.play() })
+    expect(result.current.state).toBe("error")
+    // Must be "audio-deleted", not the generic "download-failed" —
+    // so the UI knows not to show a retry affordance.
+    expect(result.current.error?.kind).toBe("audio-deleted")
+    expect(result.current.error?.message).toMatch(/deleted/)
+  })
+
   it("does not re-fetch bytes on a second play after the audio element exists", async () => {
     const bytes = new TextEncoder().encode("cached-audio")
     fetchMock.mockResolvedValueOnce(new Response(bytes.buffer as ArrayBuffer, { status: 200 }))

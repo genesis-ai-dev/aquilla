@@ -2,7 +2,7 @@
  * POST batches to /events; groups by fileId for per-file sync JWT scope.
  */
 
-import type { CqrsRawEvent } from "./cqrs-types"
+import type { CqrsRawEvent } from "./outbox-types"
 import {
   markOutboxAttempt,
   peekOutboxBatch,
@@ -21,11 +21,21 @@ interface PostBody {
    *  the projection — stale siblings that had no visible effect. Surfaced so
    *  "accepted" is never silently mistaken for "saved". */
   stale?: Array<{ id: string }>
+  /** F5: target.cell.commit events whose sourceEventId pin is stale — the
+   *  source row advanced since the translator last fetched. Event was accepted
+   *  and projected (LWW) but flagged so the UI can surface a banner. */
+  staleSource?: Array<{ id: string; currentSourceEventId: string }>
 }
 
 export interface FlushDeps {
   getTokenForFile: (fileId: string) => Promise<string | null>
   fetchImpl?: typeof fetch
+  /** F5: called when one or more target.cell.commit events had a stale
+   *  sourceEventId. The caller should surface a "source changed" hint. */
+  onStaleSource?: (entries: Array<{ id: string; currentSourceEventId: string }>) => void
+  /** F6: called when one or more events were dead-lettered as stale siblings.
+   *  The caller should surface a "some changes were rejected" toast. */
+  onStaleSiblings?: (count: number) => void
 }
 
 function groupOldestFileFirst(records: OutboxRecord[]): OutboxRecord[] {
@@ -49,21 +59,23 @@ export async function flushOutboxBatch(deps: FlushDeps): Promise<{
   posted: number
   accepted: number
   networkError: boolean
+  staleSiblingCount: number
+  staleSourceCount: number
 }> {
   const fetchFn = deps.fetchImpl ?? fetch
   const records = await peekOutboxBatch(MAX_BATCH * 2)
   if (records.length === 0) {
-    return { posted: 0, accepted: 0, networkError: false }
+    return { posted: 0, accepted: 0, networkError: false, staleSiblingCount: 0, staleSourceCount: 0 }
   }
   const batch = groupOldestFileFirst(records)
   const fileId = batch[0].event.fileId
   if (!fileId) {
     await removeOutboxEvents([batch[0].id])
-    return { posted: 0, accepted: 0, networkError: false }
+    return { posted: 0, accepted: 0, networkError: false, staleSiblingCount: 0, staleSourceCount: 0 }
   }
   const token = await deps.getTokenForFile(fileId)
   if (!token) {
-    return { posted: 0, accepted: 0, networkError: false }
+    return { posted: 0, accepted: 0, networkError: false, staleSiblingCount: 0, staleSourceCount: 0 }
   }
   const events: CqrsRawEvent[] = batch.map((r) => r.event)
   const url = `${syncWorkerHttpOrigin()}/events`
@@ -83,7 +95,7 @@ export async function flushOutboxBatch(deps: FlushDeps): Promise<{
       batch.map((r) => r.id),
       { error: { status: 0, reason } },
     )
-    return { posted: events.length, accepted: 0, networkError: true }
+    return { posted: events.length, accepted: 0, networkError: true, staleSiblingCount: 0, staleSourceCount: 0 }
   }
 
   if (!res.ok) {
@@ -91,7 +103,7 @@ export async function flushOutboxBatch(deps: FlushDeps): Promise<{
       batch.map((r) => r.id),
       { error: { status: res.status, reason: `HTTP ${res.status}` } },
     )
-    return { posted: events.length, accepted: 0, networkError: true }
+    return { posted: events.length, accepted: 0, networkError: true, staleSiblingCount: 0, staleSourceCount: 0 }
   }
 
   let body: PostBody
@@ -102,7 +114,7 @@ export async function flushOutboxBatch(deps: FlushDeps): Promise<{
       batch.map((r) => r.id),
       { error: { status: 0, reason: "malformed server response" } },
     )
-    return { posted: events.length, accepted: 0, networkError: true }
+    return { posted: events.length, accepted: 0, networkError: true, staleSiblingCount: 0, staleSourceCount: 0 }
   }
 
   // Surface failures loudly instead of swallowing them. A rejected event
@@ -118,6 +130,16 @@ export async function flushOutboxBatch(deps: FlushDeps): Promise<{
       "[outbox-flush] server accepted but did NOT apply (stale siblings):",
       body.stale.map((s) => s.id),
     )
+    // F6: surface stale sibling dead-letters to the caller so a toast can be shown.
+    deps.onStaleSiblings?.(body.stale.length)
+  }
+  // F5: surface stale-source pins to the caller so a "source changed" hint can appear.
+  if (body.staleSource && body.staleSource.length > 0) {
+    console.warn(
+      "[outbox-flush] target.cell.commit events had stale sourceEventId pins:",
+      body.staleSource.map((s) => s.id),
+    )
+    deps.onStaleSource?.(body.staleSource)
   }
 
   const acceptedIds = new Set((body.accepted ?? []).map((a) => a.id))
@@ -167,5 +189,7 @@ export async function flushOutboxBatch(deps: FlushDeps): Promise<{
     posted: events.length,
     accepted: acceptedIds.size,
     networkError: false,
+    staleSiblingCount: body.stale?.length ?? 0,
+    staleSourceCount: body.staleSource?.length ?? 0,
   }
 }

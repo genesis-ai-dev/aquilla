@@ -22,8 +22,8 @@ import {
   outboxPendingCount,
   resetOutboxConnectionForTests,
 } from "./outbox"
-import type { CqrsRawEvent } from "./cqrs-types"
-import { CQRS_SCHEMA_VERSION } from "./cqrs-types"
+import type { CqrsRawEvent } from "./outbox-types"
+import { CQRS_SCHEMA_VERSION } from "./outbox-types"
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -88,7 +88,7 @@ describe("flushOutboxBatch", () => {
       getTokenForFile: TOKEN_FN,
       fetchImpl: fetchMock as unknown as typeof fetch,
     })
-    expect(result).toEqual({ posted: 0, accepted: 0, networkError: false })
+    expect(result).toMatchObject({ posted: 0, accepted: 0, networkError: false })
     expect(fetchMock).not.toHaveBeenCalled()
   })
 
@@ -101,7 +101,7 @@ describe("flushOutboxBatch", () => {
       getTokenForFile: NULL_TOKEN_FN,
       fetchImpl: fetchMock as unknown as typeof fetch,
     })
-    expect(result).toEqual({ posted: 0, accepted: 0, networkError: false })
+    expect(result).toMatchObject({ posted: 0, accepted: 0, networkError: false })
     expect(fetchMock).not.toHaveBeenCalled()
   })
 
@@ -129,7 +129,7 @@ describe("flushOutboxBatch", () => {
     const bodyEvents = JSON.parse(init.body as string).events as CqrsRawEvent[]
     expect(bodyEvents).toHaveLength(3)
 
-    expect(result).toEqual({ posted: 3, accepted: 3, networkError: false })
+    expect(result).toMatchObject({ posted: 3, accepted: 3, networkError: false })
     expect(await outboxPendingCount()).toBe(0)
   })
 
@@ -154,7 +154,7 @@ describe("flushOutboxBatch", () => {
       fetchImpl: fetchMock as unknown as typeof fetch,
     })
 
-    expect(result).toEqual({ posted: 3, accepted: 1, networkError: false })
+    expect(result).toMatchObject({ posted: 3, accepted: 1, networkError: false })
     expect(await outboxPendingCount()).toBe(0)
   })
 
@@ -177,7 +177,7 @@ describe("flushOutboxBatch", () => {
       fetchImpl: fetchMock as unknown as typeof fetch,
     })
 
-    expect(result).toEqual({ posted: 3, accepted: 1, networkError: false })
+    expect(result).toMatchObject({ posted: 3, accepted: 1, networkError: false })
     expect(await outboxPendingCount()).toBe(2)
   })
 
@@ -194,7 +194,7 @@ describe("flushOutboxBatch", () => {
       fetchImpl: fetchMock as unknown as typeof fetch,
     })
 
-    expect(result).toEqual({ posted: 3, accepted: 0, networkError: true })
+    expect(result).toMatchObject({ posted: 3, accepted: 0, networkError: true })
     expect(await outboxPendingCount()).toBe(3)
   })
 
@@ -211,7 +211,7 @@ describe("flushOutboxBatch", () => {
       fetchImpl: fetchMock as unknown as typeof fetch,
     })
 
-    expect(result).toEqual({ posted: 3, accepted: 0, networkError: true })
+    expect(result).toMatchObject({ posted: 3, accepted: 0, networkError: true })
     expect(await outboxPendingCount()).toBe(3)
   })
 
@@ -263,7 +263,7 @@ describe("flushOutboxBatch", () => {
     // Only f1 events should be in the request body
     expect(bodyEvents.map((e) => e.fileId)).toEqual(["f1", "f1", "f1"])
 
-    expect(result).toEqual({ posted: 3, accepted: 3, networkError: false })
+    expect(result).toMatchObject({ posted: 3, accepted: 3, networkError: false })
     // f2 events must still be in the outbox
     expect(await outboxPendingCount()).toBe(2)
   })
@@ -322,7 +322,7 @@ describe("flushOutboxBatch", () => {
       fetchImpl: fetchMock as unknown as typeof fetch,
     })
 
-    expect(result).toEqual({ posted: 0, accepted: 0, networkError: false })
+    expect(result).toMatchObject({ posted: 0, accepted: 0, networkError: false })
     expect(fetchMock).not.toHaveBeenCalled()
     expect(await outboxPendingCount()).toBe(0)
   })
@@ -342,7 +342,52 @@ describe("flushOutboxBatch", () => {
       fetchImpl: fetchMock as unknown as typeof fetch,
     })
 
-    expect(result).toEqual({ posted: 3, accepted: 0, networkError: true })
+    expect(result).toMatchObject({ posted: 3, accepted: 0, networkError: true })
     expect(await outboxPendingCount()).toBe(3)
+  })
+
+  // ── F6 regression: stale-sibling callback ─────────────────────────────────
+
+  it("F6: calls onStaleSiblings with the stale count when server returns stale events", async () => {
+    await enqueueOutboxEvent(makeEvent("e1", "f1"))
+    await enqueueOutboxEvent(makeEvent("e2", "f1"))
+
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse({
+        accepted: [{ id: "e1" }, { id: "e2" }],
+        rejected: [],
+        stale: [{ id: "e2" }],
+      }),
+    )
+    const onStaleSiblings = vi.fn()
+    await flushOutboxBatch({
+      getTokenForFile: TOKEN_FN,
+      fetchImpl: fetchMock as unknown as typeof fetch,
+      onStaleSiblings,
+    })
+
+    expect(onStaleSiblings).toHaveBeenCalledWith(1)
+  })
+
+  // ── F5 regression: stale-source callback ──────────────────────────────────
+
+  it("F5: calls onStaleSource with entries when server flags stale sourceEventId pins", async () => {
+    await enqueueOutboxEvent(makeEvent("e1", "f1"))
+
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse({
+        accepted: [{ id: "e1" }],
+        rejected: [],
+        staleSource: [{ id: "e1", currentSourceEventId: "src-evt-999" }],
+      }),
+    )
+    const onStaleSource = vi.fn()
+    await flushOutboxBatch({
+      getTokenForFile: TOKEN_FN,
+      fetchImpl: fetchMock as unknown as typeof fetch,
+      onStaleSource,
+    })
+
+    expect(onStaleSource).toHaveBeenCalledWith([{ id: "e1", currentSourceEventId: "src-evt-999" }])
   })
 })

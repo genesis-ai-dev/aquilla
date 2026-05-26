@@ -1024,6 +1024,16 @@ function EditorRow({
   const handleEditorCommit = useCallback(({ value, valueHtml }: { value: string; valueHtml: string }) => {
     if (!editable) return
     if (!project.id) return
+    // F4 — Lock re-check at commit time. If another user now holds the lock
+    // (lockHolderLabel is set at call time), the editor should already be
+    // read-only, but the idle timer or an in-flight blur event may have
+    // queued a commit just before or after the lock was taken. Abort and
+    // trigger a soft revalidate so the user sees the latest projection.
+    if (lockHolderLabel) {
+      console.warn("[editor-commit] aborting: lock held by", lockHolderLabel)
+      void onCellCommitted?.()
+      return
+    }
     // Optimistic local patch: applies BEFORE the outbox enqueue so this row's
     // signature (`status original translated`) shifts and `useHealth` re-runs
     // `checkRulesForCell` for this one cell on the next render — no other
@@ -1045,7 +1055,7 @@ function EditorRow({
     }).catch((err) => {
       console.warn("[editor-commit] enqueue failed:", err)
     })
-  }, [editable, project.id, cell.fileId, cell.id, cell.targetEventId, cell.sourceEventId, username, onCellCommitted, onOptimisticEdit])
+  }, [editable, project.id, cell.fileId, cell.id, cell.targetEventId, cell.sourceEventId, username, onCellCommitted, onOptimisticEdit, lockHolderLabel])
 
   const emitValidationChange = useCallback((validated: boolean) => {
     const editEventId = cell.targetEventId ?? pendingTargetEventIdRef.current

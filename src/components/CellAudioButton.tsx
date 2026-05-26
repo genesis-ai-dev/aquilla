@@ -2,7 +2,7 @@
 // Compact ▶/⏸ button. The audio controller is owned by the parent EditorRow
 // so the button and the waveform stay in lock-step on play / pause / seek.
 
-import { AlertCircle, CloudOff, FileQuestion, Loader2, Pause, Play } from "lucide-react"
+import { AlertCircle, CloudOff, FileQuestion, Loader2, Pause, Play, Trash2 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import type { UseCellAudioResult } from "@/hooks/useCellAudio"
 
@@ -62,6 +62,9 @@ function errorIcon(kind: string | undefined) {
     case "no-git-origin":
     case "batch-failed":
       return <CloudOff className="h-3 w-3" />
+    case "audio-deleted":
+      // F10: permanent deletion — show a trash icon instead of a generic error
+      return <Trash2 className="h-3 w-3" />
     default:
       return <AlertCircle className="h-3 w-3" />
   }
@@ -72,7 +75,8 @@ function errorTooltip(kind: string): string {
     case "pointer-missing": return "Audio not available — sync the project"
     case "pointer-invalid": return "Audio format unrecognized"
     case "batch-failed": return "Couldn't reach audio server"
-    case "download-failed": return "Audio download corrupted — try again"
+    case "audio-deleted": return "Audio was deleted — re-record this cell"
+    case "download-failed": return "Audio download failed — try again"
     case "no-session": return "Sign in to play audio"
     case "no-git-origin": return "This project isn't connected to git"
     default: return "Audio error"

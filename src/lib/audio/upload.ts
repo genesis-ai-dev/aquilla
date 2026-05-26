@@ -104,6 +104,33 @@ export interface FetchCellAudioArgs {
   getSyncToken: SyncTokenForFile
 }
 
+export interface DeleteCellAudioArgs {
+  projectId: string
+  fileId: string
+  audioId: string
+  ext: string
+  getSyncToken: SyncTokenForFile
+}
+
+/**
+ * F8: Delete an uploaded audio blob from sync-worker R2. Used to clean up an
+ * orphaned object when the R2 PUT succeeded but the subsequent
+ * `emitCellAudioAttach` failed. Non-fatal — a failure here is logged but
+ * doesn't re-throw (the user already got the primary error).
+ */
+export async function deleteCellAudio(args: DeleteCellAudioArgs): Promise<void> {
+  const { projectId, fileId, audioId, ext, getSyncToken } = args
+  const token = await getSyncToken(projectId, fileId)
+  if (!token) return // not signed in — orphan will be cleaned up by a future admin sweep
+
+  await fetch(audioEndpoint(projectId, fileId, audioId, ext), {
+    method: "DELETE",
+    headers: { Authorization: `Bearer ${token}` },
+  }).catch((e) => {
+    console.warn("[audio/delete] orphan cleanup failed:", e)
+  })
+}
+
 /** Fetch an uploaded audio blob back from sync-worker. Returns the raw
  *  bytes; the caller wraps them in a Blob for the <audio> element. */
 export async function fetchCellAudio(args: FetchCellAudioArgs): Promise<Uint8Array> {
@@ -116,6 +143,13 @@ export async function fetchCellAudio(args: FetchCellAudioArgs): Promise<Uint8Arr
   })
   if (!res.ok) {
     const text = await res.text().catch(() => "")
+    // F10: surface 404 as a distinct sentinel so callers can render a
+    // "deleted" state instead of a generic error / retry affordance.
+    if (res.status === 404) {
+      const err = new Error(`audio not found (404): ${text || res.statusText}`) as Error & { status: 404 }
+      err.status = 404
+      throw err
+    }
     throw new Error(`audio fetch failed (${res.status}): ${text || res.statusText}`)
   }
   const buf = await res.arrayBuffer()

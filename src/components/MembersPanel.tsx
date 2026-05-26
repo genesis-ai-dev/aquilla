@@ -9,7 +9,7 @@ export interface MembersPanelMember {
   username: string;
   roleLevel: number;
   roleName: string;
-  source: "override" | "creator" | "org" | "owner-of-org" | "gitlab";
+  source: "override" | "group" | "creator" | "org" | "owner-of-org";
   /** True when removing this row is not possible from this UI surface. */
   isLocked: boolean;
   lockedHint?: string;
@@ -90,11 +90,11 @@ export function MembersPanel({
               {m.source === "org" && (
                 <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">via org</span>
               )}
+              {m.source === "group" && (
+                <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">via group</span>
+              )}
               {m.source === "creator" && (
                 <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">creator</span>
-              )}
-              {m.source === "gitlab" && (
-                <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">via gitlab</span>
               )}
               <LastActiveChip lastActiveAt={m.lastActiveAt} />
               <div className="ml-auto flex items-center gap-2">

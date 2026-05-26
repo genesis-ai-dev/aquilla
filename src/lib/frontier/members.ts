@@ -9,14 +9,17 @@ export interface ProjectMemberRole {
   level: number;
   name: string;
   /**
-   * Where this role came from in frontier-server's resolveProjectRole tier:
+   * Where this role came from in auth-worker's resolveProjectRole tier
+   * (AD-12 max-wins across four paths):
    *   - "override": explicit row in project_members for this user+project
-   *   - "creator":  user is the project's `created_by`
+   *   - "group":    user has access via a group_project_grants + group_members join
    *   - "org":      user has an org_members row for this project's org
-   *   - "gitlab":   resolved via GitLab pass-through for legacy projects
-   *                 (only ever set when the project has a gitlab_project_id)
+   *   - "creator":  user is the project's `created_by`
+   *
+   * "gitlab" was a v1 legacy field for GitLab pass-through projects. The D1
+   * schema has no gitlab_project_id column and auth-worker never returns it.
    */
-  source: "override" | "creator" | "org" | "gitlab";
+  source: "override" | "group" | "creator" | "org";
 }
 
 export interface ProjectMember {

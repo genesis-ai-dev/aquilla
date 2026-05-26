@@ -1,4 +1,18 @@
-// Client helpers for frontier-server's project-invite endpoints.
+// Client helpers for auth-worker's project-invite endpoints.
+//
+// TWO INVITE FLOWS — intentionally separate UX surfaces:
+//
+//   Single-project invite (this file + auth-worker/routes/projects-invites.ts):
+//     Used by the project Share panel (Dashboard → ProjectCard → ShareDialog).
+//     Creates one invite token scoped to a single projectId. Any role up to
+//     ROLE.CONTRIBUTOR (400) is allowed. This is the standard "share this
+//     project" flow for project owners/leads.
+//
+//   Multi-project invite (auth-worker/routes/invites.ts POST /multi):
+//     Used by MembersPage → MultiProjectInviteDialog (org-admin surface only).
+//     Creates one token that spans N projects in a single accept call. Intended
+//     for org admins onboarding a whole team to a workspace. Not wired to
+//     Dashboard; org-admin-only by design.
 //
 // Graceful degradation: helpers return null on failure (no jwt, HTTP error,
 // network error). Callers surface null as "couldn't create / preview / accept"

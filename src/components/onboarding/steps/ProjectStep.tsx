@@ -26,39 +26,64 @@ export function ProjectStep({
   const [error, setError] = useState<string | null>(null)
   const { session } = useFrontierSession()
 
+  // Guard: project creation requires a server session (AD-3 projects are
+  // server-only reads; a local-only project will 403 the moment the user
+  // opens it after signing in). Mirror ProjectCreateDialog which rejects
+  // with "You need to be signed in." on the Dashboard. Show an inline
+  // sign-in prompt here rather than silently producing a broken project.
+  if (!session?.jwt) {
+    return (
+      <div className="space-y-6">
+        <div className="text-center space-y-2">
+          <h2 className="text-2xl font-semibold">Sign in to create a project</h2>
+          <p className="text-sm text-muted-foreground">
+            Projects are stored on the server. You need to be signed in so the
+            project is accessible on all your devices and won't 403 when you
+            open it.
+          </p>
+        </div>
+        <Button variant="outline" size="lg" className="w-full" onClick={onBack}>
+          ← Back to sign in
+        </Button>
+        <button
+          type="button"
+          onClick={onSkip}
+          className="w-full text-xs text-muted-foreground hover:text-foreground underline-offset-4 hover:underline"
+        >
+          Do this later — you can create a project anytime
+        </button>
+      </div>
+    )
+  }
+
   async function handleCreate(e: React.FormEvent) {
     e.preventDefault()
     if (!name.trim() || !sourceLanguage.trim() || !targetLanguage.trim()) return
     setBusy(true)
     setError(null)
     try {
-      let project: ProjectRecord = {
-        id: uuid(),
+      // Create the server row first — reads are server-only (AD-3), so
+      // without it the project 403s the moment you open it. Mirror
+      // ProjectCreateDialog which enforces this same ordering.
+      const created = await createRemoteProject(
+        { id: uuid(), name: name.trim() },
+        session.jwt,
+      )
+      const project: ProjectRecord = {
+        id: created.id,
         name: name.trim(),
         sourceLanguage: sourceLanguage.trim(),
         targetLanguage: targetLanguage.trim(),
         createdAt: new Date().toISOString(),
         files: [],
-        members: [{ userId: "local", role: "owner" }],
-        username: displayName || "Anonymous",
-      }
-      // Mirror ProjectCreateDialog: if signed in, create the server row
-      // first so useProject() (server-only per AD-3) can resolve it after
-      // the wizard navigates to /project/:id. The local IDB record carries
-      // the language fields the server doesn't track.
-      if (session?.jwt) {
-        const created = await createRemoteProject(
-          { id: project.id, name: project.name },
-          session.jwt,
-        )
-        project = {
-          ...project,
-          syncRole: {
-            ...created.role,
-            source: created.role.source,
-            fetchedAt: new Date().toISOString(),
-          },
-        }
+        members: [{ userId: session.username, role: "owner" }],
+        username: displayName || session.username,
+        syncRole: {
+          level: created.role.level,
+          name: created.role.name,
+          source: created.role.source as "override" | "creator" | "org",
+          fetchedAt: new Date().toISOString(),
+        },
       }
       await createLocalProject(project)
       onCreated(project)

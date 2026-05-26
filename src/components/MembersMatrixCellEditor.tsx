@@ -34,17 +34,16 @@ type Status = "idle" | "submitting" | "error"
  *
  *   - empty (no cell)                → "Add to project" popover with role pick
  *   - source: "override"             → role-pick + Remove (full edit)
- *   - source: "org" / "creator" /    → read-only with explanation; "make
- *     "gitlab"                         exception" affordance for org-source
+ *   - source: "org" / "group" /      → read-only with explanation; "make
+ *     "creator"                        exception" affordance for org/group-source
  *                                      (creates an override that supersedes
  *                                      the inherited grant)
  *
- * Why distinguish: editing creator/gitlab cells from the matrix would be
- * a lie — those grants live elsewhere (project ownership, GitLab access)
- * and silently overwriting them via a project_members override is exactly
- * the "system did something behind your back" failure the design loop
- * called out. The popover names the source so the operator knows where
- * to go to actually edit.
+ * Why distinguish: editing creator/group/org cells from the matrix would be
+ * a lie — those grants live elsewhere (project ownership, org membership,
+ * group membership) and silently overwriting them via a project_members
+ * override is exactly the "system did something behind your back" failure.
+ * The popover names the source so the operator knows where to go to edit.
  */
 export function MembersMatrixCellEditor({
   cell,
@@ -62,7 +61,7 @@ export function MembersMatrixCellEditor({
 
   const source = cell?.role.source
   const isImmutable =
-    source === "creator" || source === "gitlab" || source === "org"
+    source === "creator" || source === "group" || source === "org"
   const canEdit = !isImmutable && Boolean(session?.jwt)
 
   async function applyRole(level: RoleLevel) {
@@ -294,13 +293,13 @@ function ImmutableBody({
       </div>
     )
   }
-  if (source === "gitlab") {
+  if (source === "group") {
     return (
       <div className="space-y-1 text-xs">
-        <p className="font-medium">Granted via GitLab access</p>
+        <p className="font-medium">Granted via group membership</p>
         <p className="text-muted-foreground">
-          This role comes from the legacy GitLab project. Edit access in
-          GitLab; codex will reflect the change on next sync.
+          This role comes from a group that has access to this project. Edit
+          the group's membership to change or remove this grant.
         </p>
       </div>
     )

@@ -5,7 +5,7 @@
 export interface ProjectMemberRole {
   level: number
   name: string
-  /** "override" | "creator" | "org" | "gitlab". */
+  /** "override" | "group" | "creator" | "org". See AD-12 in project-permissions.ts. */
   source: string
 }
 

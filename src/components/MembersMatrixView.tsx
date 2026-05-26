@@ -199,9 +199,9 @@ function colorForRole(level: number): string {
 function sourceLabel(source: string): string {
   switch (source) {
     case "override": return "direct"
+    case "group": return "via group"
     case "creator": return "creator"
     case "org": return "via org"
-    case "gitlab": return "via gitlab"
     default: return ""
   }
 }

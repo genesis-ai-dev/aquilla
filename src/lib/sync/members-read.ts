@@ -38,8 +38,16 @@ function authHeaders(jwt: string): HeadersInit {
  * GET /api/v2/projects/:projectId/members.
  *
  * Resolves to the effective member list — explicit project_members rows
- * plus org_members grants plus the creator. The server resolves the
- * highest-priority role per user.
+ * plus group grants plus org_members grants plus the creator. The server
+ * resolves the highest-priority role per user (AD-12 max-wins).
+ *
+ * NOTE (F4): org members who joined *after* a project was first opened
+ * won't appear in the ProjectCard avatar stack until the list is
+ * re-fetched. The hook (useProjectMembers) only fetches on mount and on
+ * explicit `refresh()`. A future improvement would be to re-fetch on
+ * window focus or on project-open events so the avatar stack stays live.
+ * This is intentionally left as a known limitation rather than adding
+ * background polling.
  */
 export async function fetchProjectMembers(
   projectId: string,

@@ -35,6 +35,33 @@ export interface CloudProjectSummary {
 }
 
 /**
+ * POST /api/v2/projects — create the server-side project row so the creator
+ * is recognized as owner (`created_by`). REQUIRED on create: reads are
+ * server-only (AD-3, no IDB fallback in useProject), so a project that exists
+ * only in IndexedDB 403s the moment you open it ("not found or no access").
+ * Throws on failure so the caller can surface it instead of silently leaving
+ * a local-only orphan.
+ */
+export async function createCloudProject(
+  jwt: string,
+  project: { id: string; name: string },
+  apiUrl: string = FRONTIER_API_URL,
+): Promise<void> {
+  const res = await fetch(`${apiUrl}/api/v2/projects`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${jwt}`,
+    },
+    body: JSON.stringify({ id: project.id, name: project.name }),
+  })
+  if (!res.ok) {
+    const body = await res.text().catch(() => "")
+    throw new Error(`create project failed: HTTP ${res.status} — ${body.slice(0, 200)}`)
+  }
+}
+
+/**
  * GET /api/v2/projects — every non-archived project the caller can access.
  * Returns [] on any non-2xx or network error (no throw) so Dashboard can
  * render local state even when offline or when the server is unreachable.

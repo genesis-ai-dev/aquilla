@@ -18,6 +18,9 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip"
 import { createProject } from "@/lib/store/project-index"
+import { createCloudProject } from "@/lib/sync/cloud-projects"
+import { patchProjectSettings } from "@/lib/sync/project-settings"
+import { useFrontierSession } from "@/hooks/useFrontierSession"
 import type { ProjectRecord } from "@/lib/parsers/types"
 import posthog from "@/lib/posthog"
 
@@ -34,11 +37,14 @@ interface ProjectCreateDialogProps {
 type ProjectShape = "self-contained" | "source-only" | "linked-target"
 
 export function ProjectCreateDialog({ onCreated }: ProjectCreateDialogProps) {
+  const { session } = useFrontierSession()
   const [open, setOpen] = useState(false)
   const [name, setName] = useState("")
   const [sourceLanguage, setSourceLanguage] = useState("")
   const [targetLanguage, setTargetLanguage] = useState("")
   const [shape, setShape] = useState<ProjectShape>("self-contained")
+  const [error, setError] = useState<string | null>(null)
+  const [submitting, setSubmitting] = useState(false)
 
   function pickShape(next: ProjectShape) {
     setShape(next)
@@ -53,7 +59,14 @@ export function ProjectCreateDialog({ onCreated }: ProjectCreateDialogProps) {
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
-    if (!canSubmit()) return
+    if (!canSubmit() || submitting) return
+    setError(null)
+
+    const jwt = session?.jwt
+    if (!jwt) {
+      setError("You need to be signed in to create a project.")
+      return
+    }
 
     const project: ProjectRecord = {
       id: uuid(),
@@ -62,7 +75,31 @@ export function ProjectCreateDialog({ onCreated }: ProjectCreateDialogProps) {
       targetLanguage: shape === "source-only" ? "" : targetLanguage.trim(),
       createdAt: new Date().toISOString(),
       files: [],
-      members: [{ userId: "local", role: "owner" }],
+      members: [{ userId: session.username, role: "owner" }],
+    }
+
+    setSubmitting(true)
+    try {
+      // Create the SERVER row first — reads are server-only (AD-3), so without
+      // it the project 403s the moment you open it. This must succeed before
+      // we cache locally or navigate.
+      await createCloudProject(jwt, { id: project.id, name: project.name })
+      // Persist the languages the user just typed (creator is owner/700, well
+      // above the maintainer(600) write gate). Best-effort: a project that
+      // exists but lacks languages is still openable.
+      try {
+        await patchProjectSettings(jwt, project.id, {
+          sourceLanguage: project.sourceLanguage,
+          targetLanguage: project.targetLanguage,
+        }, 0)
+      } catch (err) {
+        console.warn("[project-create] settings write failed (non-fatal):", err)
+      }
+    } catch (err) {
+      console.error("[project-create] failed:", err)
+      setError(err instanceof Error ? err.message : "Failed to create project. Please try again.")
+      setSubmitting(false)
+      return
     }
 
     await createProject(project)
@@ -72,11 +109,13 @@ export function ProjectCreateDialog({ onCreated }: ProjectCreateDialogProps) {
       source_language: project.sourceLanguage,
       target_language: project.targetLanguage,
     })
+    setSubmitting(false)
     onCreated(project)
     setName("")
     setSourceLanguage("")
     setTargetLanguage("")
     setShape("self-contained")
+    setError(null)
     setOpen(false)
   }
 
@@ -183,8 +222,14 @@ export function ProjectCreateDialog({ onCreated }: ProjectCreateDialogProps) {
             </div>
           )}
 
-          <Button type="submit" className="w-full" disabled={!canSubmit()}>
-            Create Project
+          {error && (
+            <p className="text-sm text-destructive" role="alert">
+              {error}
+            </p>
+          )}
+
+          <Button type="submit" className="w-full" disabled={!canSubmit() || submitting}>
+            {submitting ? "Creating…" : "Create Project"}
           </Button>
         </form>
       </DialogContent>

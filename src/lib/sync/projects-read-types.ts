@@ -13,7 +13,7 @@ export interface ProjectFileSummary {
 export interface ProjectMemberRoleSource {
   level: number
   name: string
-  /** "override" (explicit project_members) | "creator" | "org" (org_members) | "gitlab" (legacy). */
+  /** "override" (explicit project_members) | "group" (group_project_grants) | "org" (org_members) | "creator". See AD-12. */
   source: string
 }
 

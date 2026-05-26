@@ -156,11 +156,13 @@ export function ProjectSettings() {
       flash()
     } else if (out.kind === "conflict") {
       setConflictBy(out.latest.updatedBy?.username ?? "another collaborator")
+      // Re-read IDB so form fields snap to the conflict winner.
+      refresh()
     }
     // "blocked" never fires in normal flow because disabled fields prevent
     // the call. "error" is a network/server problem; we leave it silent for
     // now (the field will look unsaved; user can re-blur to retry).
-  }, [patchShared, flash])
+  }, [patchShared, flash, refresh])
 
   /** Save completion settings via shared abstraction. */
   const saveCompletionSettings = useSaveCompletionSettings(id, () => {

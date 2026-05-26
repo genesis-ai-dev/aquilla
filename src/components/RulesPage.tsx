@@ -6,6 +6,7 @@ import { Input } from "@/components/ui/input"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { getProject } from "@/lib/store/project-index"
 import { useRules } from "@/hooks/useRules"
+import { useProjectSettings } from "@/hooks/useProjectSettings"
 import { RuleCreateDialog } from "./RuleCreateDialog"
 import { RuleSuggestDialog } from "./RuleSuggestDialog"
 import { BuiltinChecksList } from "./BuiltinChecksList"
@@ -43,7 +44,8 @@ export function RulesPage() {
     }
   }, [searchParams, project])
 
-  const { userRules, builtinRules, addRule, updateRule, deleteRule, setBuiltinOverride } = useRules(project, refresh)
+  const { patch: patchShared } = useProjectSettings(id ?? null, project?.syncRole?.level ?? null)
+  const { userRules, builtinRules, addRule, updateRule, deleteRule, setBuiltinOverride } = useRules(project, refresh, patchShared)
 
   const usageSummary = useMemo(() => {
     const u = project?.usage

@@ -9,8 +9,19 @@ import type {
 } from "@/lib/parsers/types"
 import { patchProject } from "@/lib/store/project-index"
 import { resolveBuiltinRules } from "@/lib/lqa/builtin-resolver"
+import type { ProjectWideSettings } from "@/lib/sync/project-settings"
 
-export function useRules(project: ProjectRecord | null, refresh: () => void) {
+/**
+ * Optional callback that syncs the given partial settings slice to D1.
+ * Pass `useProjectSettings(...).patch` from the caller.
+ */
+type PatchSharedFn = (partial: ProjectWideSettings) => Promise<unknown>
+
+export function useRules(
+  project: ProjectRecord | null,
+  refresh: () => void,
+  patchShared?: PatchSharedFn,
+) {
   const userRules = project?.rules || []
   const algorithmicChecks = project?.algorithmicChecks
   const penalties: RulePenalties = project?.rulePenalties || { major: 15, minor: 5 }
@@ -30,36 +41,40 @@ export function useRules(project: ProjectRecord | null, refresh: () => void) {
   const addRule = useCallback(async (rule: Omit<TranslationRule, "id" | "createdAt">) => {
     if (!project) return
     const newRule: TranslationRule = { ...rule, id: uuid(), createdAt: new Date().toISOString() }
-    await patchProject(project.id, (p) => ({ ...p, rules: [...(p.rules || []), newRule] }))
+    const updated = await patchProject(project.id, (p) => ({ ...p, rules: [...(p.rules || []), newRule] }))
+    void patchShared?.({ rules: updated?.rules ?? [...(project.rules || []), newRule] })
     refresh()
-  }, [project, refresh])
+  }, [project, refresh, patchShared])
 
   const updateRule = useCallback(async (ruleId: string, updates: Partial<TranslationRule>) => {
     if (!project) return
     // Built-in rules update via setBuiltinOverride; reject here.
     if (ruleId.startsWith("builtin:")) return
-    await patchProject(project.id, (p) => ({
+    const updated = await patchProject(project.id, (p) => ({
       ...p,
       rules: (p.rules || []).map((r) => r.id === ruleId ? { ...r, ...updates } : r),
     }))
+    void patchShared?.({ rules: updated?.rules ?? (project.rules || []).map((r) => r.id === ruleId ? { ...r, ...updates } : r) })
     refresh()
-  }, [project, refresh])
+  }, [project, refresh, patchShared])
 
   const deleteRule = useCallback(async (ruleId: string) => {
     if (!project) return
     if (ruleId.startsWith("builtin:")) return
-    await patchProject(project.id, (p) => ({
+    const updated = await patchProject(project.id, (p) => ({
       ...p,
       rules: (p.rules || []).filter((r) => r.id !== ruleId),
     }))
+    void patchShared?.({ rules: updated?.rules ?? (project.rules || []).filter((r) => r.id !== ruleId) })
     refresh()
-  }, [project, refresh])
+  }, [project, refresh, patchShared])
 
   const updatePenalties = useCallback(async (newPenalties: RulePenalties) => {
     if (!project) return
     await patchProject(project.id, (p) => ({ ...p, rulePenalties: newPenalties }))
+    void patchShared?.({ rulePenalties: newPenalties })
     refresh()
-  }, [project, refresh])
+  }, [project, refresh, patchShared])
 
   const setBuiltinOverride = useCallback(async (
     checkId: BuiltinCheckId,
@@ -70,6 +85,7 @@ export function useRules(project: ProjectRecord | null, refresh: () => void) {
       ...p,
       algorithmicChecks: { ...(p.algorithmicChecks ?? {}), [checkId]: override },
     }))
+    // algorithmicChecks is device-local; not synced to D1.
     refresh()
   }, [project, refresh])
 

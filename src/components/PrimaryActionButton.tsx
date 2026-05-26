@@ -45,10 +45,14 @@ export function PrimaryActionButton({ ctx, run }: Props) {
   }
 
   return (
-    <div ref={rootRef} className="relative inline-flex">
+    <div
+      ref={rootRef}
+      data-slot="button-group"
+      className="relative inline-flex rounded-lg shadow-neu-sm hover:shadow-neu active:shadow-neu-pressed transition-shadow"
+    >
       <Button
         size="sm"
-        className="rounded-r-none"
+        className="rounded-r-none shadow-none hover:shadow-none active:shadow-none"
         onClick={() => handleRun(defaultAction)}
       >
         {defaultAction.icon && <defaultAction.icon className="h-4 w-4 mr-1.5" />}
@@ -56,7 +60,7 @@ export function PrimaryActionButton({ ctx, run }: Props) {
       </Button>
       <Button
         size="sm"
-        className="rounded-l-none border-l border-primary-foreground/20 px-1.5"
+        className="rounded-l-none border-l border-black/15 px-1.5 shadow-none hover:shadow-none active:shadow-none dark:border-white/10"
         onClick={() => setOpen((v) => !v)}
         aria-label="More actions"
       >

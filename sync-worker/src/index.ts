@@ -20,7 +20,7 @@ import { handleEventsWriteRequest } from "./events/route"
 import { handleFilesReadRequest } from "./events/files-read-route"
 import { handleBulkImportRequest } from "./events/import-route"
 import { handleRebuildProjectionRequest } from "./events/rebuild"
-import { handleSearchReadRequest } from "./events/search-route"
+import { handleSearchReadRequest, handleSearchPassagesRequest } from "./events/search-route"
 import { handleStaleSourceRequest } from "./events/stale-source-route"
 import { handleValidatorsReadRequest } from "./events/validators-read-route"
 import { handleBranchingSearchRequest } from "./events/branching-search-route"
@@ -136,6 +136,11 @@ export default {
     if (staleSourceResponse) return withCors(staleSourceResponse, request)
     const commentsReadResponse = await handleCommentsReadRequest(request, env)
     if (commentsReadResponse) return withCors(commentsReadResponse, request)
+    // /search/passages must be checked BEFORE /search — PATH_RE for /search is
+    // anchored with $ so it won't match /search/passages, but ordering here
+    // makes the intent explicit and guards against future regex changes.
+    const searchPassagesResponse = await handleSearchPassagesRequest(request, env)
+    if (searchPassagesResponse) return withCors(searchPassagesResponse, request)
     const searchResponse = await handleSearchReadRequest(request, env)
     if (searchResponse) return withCors(searchResponse, request)
     const branchingPassagesResponse = await handleBranchingSearchPassagesRequest(request, env)

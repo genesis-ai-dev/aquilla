@@ -2,7 +2,7 @@
 // fetcher partyserver exposes when the worker is invoked via wrangler dev's
 // cloudflare:test binding… well, we don't have miniflare bootstrapped here,
 // so instead we call the default export's fetch handler directly with a
-// hand-rolled Env that stubs SNAPSHOTS. Tight enough to pin the auth +
+// hand-rolled Env that stubs R2. Tight enough to pin the auth +
 // routing invariants without the whole DO substrate.
 
 import { describe, it, expect } from "vitest"
@@ -75,7 +75,6 @@ function makeEnv(secret = "shared-secret") {
 
 function seedFile(env: any, projectId: string, fileId: string, tails: number) {
   const prefix = `projects/${projectId}/files/${fileId}`
-  env.SNAPSHOTS._seed(`${prefix}/snapshot.bin`, new Uint8Array([1, 2, 3]))
   for (let i = 0; i < tails; i++) {
     env.SNAPSHOTS._seed(
       `${prefix}/tail/${String(i).padStart(16, "0")}.bin`,
@@ -148,7 +147,7 @@ describe("DELETE /admin/files/:projectId/:fileId", () => {
     expect(res.status).toBe(200)
     const body = (await res.json()) as any
     expect(body.ok).toBe(true)
-    expect(body.deleted).toBe(5) // 1 snapshot + 3 tails + 1 checkpoint
+    expect(body.deleted).toBe(5) // 3 tails + 1 checkpoint × 2 files = 5 in file-a
 
     // file-a fully gone, file-b untouched
     expect(env.SNAPSHOTS._allKeys().every((k: string) => !k.includes("file-a"))).toBe(true)
@@ -169,7 +168,7 @@ describe("DELETE /admin/files/:projectId/:fileId", () => {
     ) as Response
     expect(res.status).toBe(200)
     const body = (await res.json()) as any
-    expect(body.deleted).toBe(14) // 1 snap + 12 tails + 1 checkpoint
+    expect(body.deleted).toBe(13) // 12 tails + 1 checkpoint
     expect(env.SNAPSHOTS._size()).toBe(0)
   })
 
@@ -208,11 +207,12 @@ describe("DELETE /admin/files/:projectId/:fileId", () => {
     // staging objects sharing the same bucket.
     const env = makeEnv("k")
     env.R2_KEY_PREFIX = "pr-7"
-    env.SNAPSHOTS._seed("pr-7/projects/p/files/f/snapshot.bin", new Uint8Array([1]))
     env.SNAPSHOTS._seed("pr-7/projects/p/files/f/tail/0.bin", new Uint8Array([2]))
     env.SNAPSHOTS._seed("pr-7/projects/p/files/f/audio/clip.webm", new Uint8Array([3]))
-    // Same-shaped key in a different prefix must NOT be touched.
-    env.SNAPSHOTS._seed("projects/p/files/f/snapshot.bin", new Uint8Array([9]))
+    env.SNAPSHOTS._seed("pr-7/projects/p/files/f/checkpoints/ckp-1.bin", new Uint8Array([4]))
+    // Same-shaped keys in a different prefix must NOT be touched.
+    env.SNAPSHOTS._seed("projects/p/files/f/tail/0.bin", new Uint8Array([9]))
+    env.SNAPSHOTS._seed("projects/p/files/f/checkpoints/ckp-1.bin", new Uint8Array([10]))
 
     const res = await handleAdminRequest(
       new Request("https://worker/admin/files/p/f", {
@@ -224,14 +224,13 @@ describe("DELETE /admin/files/:projectId/:fileId", () => {
     expect(res.status).toBe(200)
     const body = (await res.json()) as any
     expect(body.deleted).toBe(3)
-    expect(env.SNAPSHOTS._allKeys()).toEqual(["projects/p/files/f/snapshot.bin"])
+    expect(env.SNAPSHOTS._allKeys()).toEqual(["projects/p/files/f/checkpoints/ckp-1.bin", "projects/p/files/f/tail/0.bin"])
   })
 
-  it("admin DELETE wipes the audio subdirectory along with snapshot/tails", async () => {
+  it("admin DELETE wipes the audio subdirectory along with tails", async () => {
     // The audio endpoints write under projects/{pid}/files/{fid}/audio/...
     // so the existing prefix listing should pick them up automatically.
     const env = makeEnv("k")
-    env.SNAPSHOTS._seed("projects/p1/files/f1/snapshot.bin", new Uint8Array([1]))
     env.SNAPSHOTS._seed("projects/p1/files/f1/tail/0000000000000001.bin", new Uint8Array([2]))
     env.SNAPSHOTS._seed("projects/p1/files/f1/audio/clip.webm", new Uint8Array([3, 3, 3]))
 
@@ -244,7 +243,7 @@ describe("DELETE /admin/files/:projectId/:fileId", () => {
     ) as Response
     expect(res.status).toBe(200)
     const body = (await res.json()) as any
-    expect(body.deleted).toBe(3)
+    expect(body.deleted).toBe(2)
     expect(env.SNAPSHOTS._size()).toBe(0)
   })
 })

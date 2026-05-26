@@ -53,7 +53,7 @@ import {
 import { emitTargetCellCommit } from "@/lib/sync/events-emit"
 import { flushOutboxBatch } from "@/lib/sync/outbox-flush"
 import { useCellsAuditStatsWithOverlay } from "@/hooks/useCellsAuditStatsWithOverlay"
-import { Film, Scale, MessagesSquare, Camera, Share2, Settings as SettingsIcon, Lock, ClipboardList, Trash2, Undo2, Search as SearchIcon, Sparkles, Mic2 } from "lucide-react"
+import { Film, Scale, MessagesSquare, Share2, Settings as SettingsIcon, Lock, ClipboardList, Trash2, Undo2, Search as SearchIcon, Sparkles, Mic2 } from "lucide-react"
 import { restoreProject } from "@/lib/store/project-index"
 import { AppShell } from "./AppShell"
 import { WorkspaceHeader } from "./WorkspaceHeader"
@@ -175,7 +175,7 @@ export function ProjectWorkspace() {
 
   // Single source of truth for the fileId in the URL. This used to be two
   // separate effects — one that *restored* a file when the URL had none
-  // (after a detour through Rules/Comments/Snapshots), and one further down
+  // (after a detour through Rules/Comments), and one further down
   // that *stripped* a fileId the project didn't recognize. They fought:
   // restore → strip → restore → …, each hop a `navigate({replace:true})` =
   // a `history.replaceState`. The browser caps that at 100/10s and throws
@@ -990,8 +990,6 @@ export function ProjectWorkspace() {
       { id: "comments", label: "Comments", icon: MessagesSquare,
         badge: Array.from(openCommentCount.values()).reduce((a, b) => a + b, 0),
         onClick: () => navigate(`/project/${projectId}/comments`) },
-      { id: "snapshots", label: "Snapshots", icon: Camera,
-        onClick: () => navigate(`/project/${projectId}/snapshots`) },
       { id: "voice-studio", label: "Voice Studio", icon: Mic2,
         onClick: () => navigate(`/project/${projectId}/voice`) },
       { id: "share", label: "Share", icon: Share2,

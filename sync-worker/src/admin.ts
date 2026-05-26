@@ -57,7 +57,6 @@ export async function handleAdminRequest(
       for (const obj of page.objects) objects.push({ key: obj.key, size: obj.size })
       cursor = page.truncated ? page.cursor : undefined
     } while (cursor)
-    let snapshotSize = 0
     let tailCount = 0
     let tailBytes = 0
     let tailMaxBytes = 0
@@ -65,9 +64,7 @@ export async function handleAdminRequest(
     let otherBytes = 0
     for (const o of objects) {
       const tail = `${prefix}tail/`
-      const snap = `${prefix}snapshot.bin`
-      if (o.key === snap) snapshotSize = o.size
-      else if (o.key.startsWith(tail)) {
+      if (o.key.startsWith(tail)) {
         tailCount++
         tailBytes += o.size
         if (o.size > tailMaxBytes) tailMaxBytes = o.size
@@ -79,7 +76,6 @@ export async function handleAdminRequest(
     return Response.json({
       ok: true,
       prefix,
-      snapshotBytes: snapshotSize,
       tail: { count: tailCount, totalBytes: tailBytes, maxBytes: tailMaxBytes },
       other: { count: otherCount, totalBytes: otherBytes },
       total: objects.length,
@@ -92,8 +88,8 @@ export async function handleAdminRequest(
   const projectId = decodeURIComponent(match[1])
   const fileId = decodeURIComponent(match[2])
 
-  // Enumerate every object under projects/{pid}/files/{fid}/ so snapshot,
-  // tails, checkpoints, and per-cell audio all disappear in one call.
+  // Enumerate every object under projects/{pid}/files/{fid}/ so tails,
+  // checkpoints, and per-cell audio all disappear in one call.
   // list() paginates at 1000 keys by default — loop with cursor until drained.
   const prefix = `${r2KeyPrefix(env)}projects/${projectId}/files/${fileId}/`
   const allKeys: string[] = []

@@ -6,7 +6,6 @@ import { DebugView } from "@/components/DebugView"
 import { RulesPage } from "@/components/RulesPage"
 import { VoiceStudioPage } from "@/components/VoiceStudioPage"
 import { CommentsPage } from "@/components/CommentsPage"
-import { SnapshotsPage } from "@/components/SnapshotsPage"
 import { JoinPage } from "@/components/JoinPage"
 import { OnboardingWizard } from "@/components/onboarding/OnboardingWizard"
 import { MembersPage } from "@/pages/MembersPage"
@@ -68,8 +67,6 @@ function AppRoutes() {
       <Route path="/project/:id/voice" element={<VoiceStudioPage />} />
       <Route path="/project/:id/comments" element={<CommentsPage />} />
       <Route path="/project/:id/comments/debug" element={<DebugView />} />
-      <Route path="/project/:id/snapshots" element={<SnapshotsPage />} />
-      <Route path="/project/:id/snapshots/debug" element={<DebugView />} />
       {/* Backward-compat: external links / bookmarks that point at /projects
           are redirected to the canonical dashboard at /.
           In dev there is no front-door Worker, so this explicit route also

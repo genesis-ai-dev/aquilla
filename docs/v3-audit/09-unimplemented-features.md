@@ -1,7 +1,7 @@
 # v3 Audit — Unimplemented / Disabled Features
 
 ## Summary
-The v3 codebase has migrated from Yjs-backed per-file Y.Docs to a D1 event-log projection model. This caused six major user-facing features to be stubbed out: Comments, Snapshots, Parallel Passages (project-wide search), Living Memory, transcript-to-cell writeback, and autofix rule suggestions. Routes, components, and hooks for these features still exist, rendering "unavailable in this build" placeholders. Full re-implementation is deferred to v1.x pending the event grammar for each feature.
+The v3 codebase has migrated from Yjs-backed per-file Y.Docs to a D1 event-log projection model. This caused five major user-facing features to be stubbed out: Comments, Parallel Passages (project-wide search), Living Memory, transcript-to-cell writeback, and autofix rule suggestions. Routes, components, and hooks for these features still exist, rendering "unavailable in this build" placeholders. Full re-implementation is deferred to v1.x pending the event grammar for each feature. Snapshots were removed entirely (they were Y.Doc state vectors with no equivalent in the v3 event-log architecture).
 
 ## Features by status
 
@@ -16,20 +16,7 @@ The v3 codebase has migrated from Yjs-backed per-file Y.Docs to a D1 event-log p
 - **Event grammar needed (v1.x)**: `comment.create`, `comment.message`, `comment.resolve`, `comment.reopen` (OutboxEventKind extensions)
 - **Re-impl scope**: **medium** (grammar + hook + drawer surface)
 
-#### A2. Snapshots (REMOVE entirely per user)
-- **Routes**: `/project/:id/snapshots` + debug route at `/project/:id/snapshots/debug` (in `src/App.tsx`)
-- **Components**: `SnapshotsPage` (renders placeholder); referenced in `EditorTable` and `ProjectWorkspace` nav
-- **Hooks**: None; snapshots were Y.Doc state vectors, no active hook
-- **Server-side**: 
-  - R2 objects: `projects/{pid}/files/{fid}/snapshot.bin` (referenced in `sync-worker/src/admin.ts` and tests)
-  - No D1 schema; snapshots metadata lived in Y.Doc
-- **Other touchpoints**: 
-  - Navigation: `ProjectWorkspace.tsx` has snapshots button (should be removed)
-  - Admin: `sync-worker/src/admin.ts` has snapshot size tracking in bulk-delete flow
-  - Tests: `sync-worker/src/__tests__/admin.test.ts` seeds snapshot.bin files for DELETE testing
-- **Removal scope**: **medium** (UI nav, admin handlers, R2 lifecycle, test cleanup)
-
-#### A3. Parallel passages + project-wide search
+#### A2. Parallel passages + project-wide search
 - **UI message location**: `src/components/ParallelPassagesPanel.tsx:49–54` — "Parallel passages unavailable" dialog
 - **Routes**: No dedicated route; activated via keyboard shortcut or command palette (wired but feature disabled)
 - **Components**: `ParallelPassagesPanel` (renders placeholder only); signature preserved, no logic
@@ -43,7 +30,7 @@ The v3 codebase has migrated from Yjs-backed per-file Y.Docs to a D1 event-log p
 - **Event grammar needed (v1.x)**: Search index metadata (likely tied to project structure events, not outbox)
 - **Re-impl scope**: **large** (server index + fetch adapters + client UI + bulk-replace writer)
 
-#### A4. Living Memory
+#### A3. Living Memory
 - **UI message location**: `src/components/LivingMemoryPage.tsx:22–25` — "Living Memory unavailable in this build"
 - **Routes**: `/project/:id/memory` (in `src/App.tsx`); navigation button conditionally rendered if `livingMemoryEnabled` feature flag is true
 - **Components**: `LivingMemoryPage` (placeholder); button in `ProjectWorkspace.tsx` nav items
@@ -97,12 +84,10 @@ The v3 codebase has migrated from Yjs-backed per-file Y.Docs to a D1 event-log p
 - Should the Living Memory button render at all if the feature is permanently flagged off? (Currently hidden behind `livingMemoryEnabled` feature flag check.)
 - Is the branching-search index meant to live in D1 or be computed on-the-fly from the event log?
 - Should transcript-to-cell writeback be prioritized before autofix, or are both low-priority?
-- Is the snapshots R2 bucket actively used by any other feature, or can it be fully decommissioned?
 
 ## Files reviewed
 - `src/App.tsx` — route definitions
 - `src/components/CommentsPage.tsx` — placeholder
-- `src/components/SnapshotsPage.tsx` — placeholder
 - `src/components/ParallelPassagesPanel.tsx` — placeholder + feature unavailable message
 - `src/components/LivingMemoryPage.tsx` — placeholder
 - `src/components/CellTranscriptPreview.tsx` — disabled writeback button
@@ -115,5 +100,3 @@ The v3 codebase has migrated from Yjs-backed per-file Y.Docs to a D1 event-log p
 - `src/lib/workspace-actions/registry.ts` — "coming soon" action definitions
 - `src/lib/sync/branching-search-read.ts` — fetch stub
 - `src/lib/sync/branching-search-passages-read.ts` — fetch stub
-- `sync-worker/src/admin.ts` — snapshot size tracking in DELETE flow
-- `sync-worker/src/__tests__/admin.test.ts` — snapshot test fixtures

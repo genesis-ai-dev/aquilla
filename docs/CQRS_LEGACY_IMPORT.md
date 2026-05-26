@@ -1,4 +1,6 @@
-# Legacy GitLab → CQRS event import
+> **Historical (v1).** This describes how v1 Yjs docs were imported into v2 via the `FileSync` Durable Object and R2 snapshot path. v3 has no Yjs and no import path of this kind — cells are read directly from the D1 `cells` projection and writes go through `POST /events`. This doc is retained for reference only.
+
+# Legacy GitLab → CQRS event import (v1 historical)
 
 How to import an existing GitLab project (or any external source) into codex
 as a single durable POST: events flow into D1, the editor reconstructs the

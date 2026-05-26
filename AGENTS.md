@@ -30,7 +30,7 @@ Before claiming any feature is complete:
 
 - Whenever a feature exists in both the VS Code extension and this app, mirror the extension's conventions. (See `~/.claude/projects/-Users-ryderwishart-prototypes-codex-web-app/memory/MEMORY.md`.)
 - GitLab sync is transitional (legacy compat only). Don't build on top of it.
-- The sync stack is y-partyserver on Cloudflare Durable Objects + R2; identity/permissions live in `frontier-server` (sibling repo at `~/frontierrnd/frontier-server`).
+- The sync stack is event-sourced to D1: the client enqueues events in an IndexedDB outbox and flushes them asynchronously via `POST /events` (HTTP) with a per-file JWT. The sync-worker writes each event to the D1 event log and projects it into the `cells`/`files` tables. A per-project `ProjectSync` Durable Object (one instance per project) handles presence, focus-lock leases, and real-time broadcast relay — it holds no durable state (no D1/R2 writes from inside the DO). R2 stores media blobs (audio recordings, generated voice) only. Identity/permissions live in `frontier-server` (sibling repo at `~/frontierrnd/frontier-server`).
 
 ## Useful slash commands
 

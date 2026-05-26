@@ -270,6 +270,13 @@ export function useCells(opts: UseCellsOptions): UseCellsResult {
   // generation < current. Prevents an in-flight slow fetch from clobbering
   // state after the caller switched files.
   const generationRef = useRef(0)
+  // True while a fetch is streaming. A soft refetch (revalidate) must NOT
+  // interrupt an in-flight fetch: doing so aborts it via the gen fence,
+  // strands `isLoading` at true (the `setIsLoading(false)` is gated behind a
+  // gen check that now fails), and — under the burst of `event.applied`
+  // broadcasts that arrive on connect — starves the stream so cells never
+  // arrive. Hard fetches (file switch / first load) still take over.
+  const inFlightRef = useRef(false)
 
   statsRef.current = auditStats
   usernameRef.current = username
@@ -320,7 +327,13 @@ export function useCells(opts: UseCellsOptions): UseCellsResult {
       rowsRef.current = []
       return
     }
+    // A soft refetch never interrupts an in-flight fetch — it would abort the
+    // load and strand the loading state (see inFlightRef). Drop it; the
+    // in-flight fetch already pulls the latest state, and the next revalidate
+    // after it settles will pick up anything newer.
+    if (soft && inFlightRef.current) return
     const gen = ++generationRef.current
+    inFlightRef.current = true
     if (!soft) {
       // CellAreaState drops to `syncing-empty` (skeleton) until the first
       // page lands.
@@ -334,7 +347,7 @@ export function useCells(opts: UseCellsOptions): UseCellsResult {
       if (!token) {
         if (generationRef.current !== gen) return
         setIsError(true)
-        if (!soft) setIsLoading(false)
+        setIsLoading(false)
         return
       }
       // Stream pages in: on a hard fetch, append each page to the cache and
@@ -360,14 +373,20 @@ export function useCells(opts: UseCellsOptions): UseCellsResult {
       if (soft) {
         rowsRef.current = buffer
         rebuildFromCache()
-      } else {
-        setIsLoading(false)
       }
+      // Always clear loading on completion — including when a soft refetch
+      // finishes after a hard load that got superseded — so the skeleton can
+      // never get stuck on.
+      setIsLoading(false)
     } catch (err) {
       if (generationRef.current !== gen) return
       console.warn("[useCells] fetch failed:", err)
       setIsError(true)
-      if (!soft) setIsLoading(false)
+      setIsLoading(false)
+    } finally {
+      // Only the current-generation fetch owns the in-flight flag; a
+      // superseded fetch must not clear it out from under its successor.
+      if (generationRef.current === gen) inFlightRef.current = false
     }
   }, [rebuildFromCache])
 

@@ -27,13 +27,24 @@ export function useSectionProgress(
       return
     }
     let cancelled = false
+    let retry: ReturnType<typeof setTimeout> | null = null
+    let attempt = 0
     setSections(null)
-    void (async () => {
+    const run = async () => {
       try {
         const token = await getTokenForFile(fileId)
         if (cancelled) return
         if (!token) {
-          setSections([])
+          // Auth race — keep `sections` null (loading) and retry with
+          // backoff. After ~6 attempts fall back to [] so the sidebar
+          // doesn't spin forever on a real permission failure.
+          attempt++
+          if (attempt >= 6) {
+            setSections([])
+            return
+          }
+          const delay = Math.min(4000, 250 * 2 ** (attempt - 1))
+          retry = setTimeout(() => { retry = null; void run() }, delay)
           return
         }
         const rows = await fetchAllFileCells(projectId, fileId, token)
@@ -43,9 +54,11 @@ export function useSectionProgress(
         console.warn("[useSectionProgress] fetch failed:", err)
         if (!cancelled) setSections([])
       }
-    })()
+    }
+    void run()
     return () => {
       cancelled = true
+      if (retry) clearTimeout(retry)
     }
   }, [projectId, fileId, validationCount, getTokenForFile])
 

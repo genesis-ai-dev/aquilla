@@ -277,6 +277,12 @@ export function useCells(opts: UseCellsOptions): UseCellsResult {
   // broadcasts that arrive on connect — starves the stream so cells never
   // arrive. Hard fetches (file switch / first load) still take over.
   const inFlightRef = useRef(false)
+  // Backoff state for token-null retries. Auth races (JWT arrives a tick
+  // after `enabled` flips true) and transient /sync-token failures resolve
+  // on their own; we keep the skeleton up and retry rather than dropping to
+  // the empty-state UI as if the file genuinely has no cells.
+  const tokenRetryRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const tokenAttemptsRef = useRef(0)
 
   statsRef.current = auditStats
   usernameRef.current = username
@@ -325,6 +331,11 @@ export function useCells(opts: UseCellsOptions): UseCellsResult {
       setIsLoading(false)
       setIsError(false)
       rowsRef.current = []
+      if (tokenRetryRef.current) {
+        clearTimeout(tokenRetryRef.current)
+        tokenRetryRef.current = null
+      }
+      tokenAttemptsRef.current = 0
       return
     }
     // A soft refetch never interrupts an in-flight fetch — it would abort the
@@ -346,10 +357,26 @@ export function useCells(opts: UseCellsOptions): UseCellsResult {
       const token = getToken ? await getToken(fileId) : null
       if (!token) {
         if (generationRef.current !== gen) return
-        setIsError(true)
-        setIsLoading(false)
+        // Token unavailable: probably an auth race or transient /sync-token
+        // failure. Keep the skeleton up and retry with backoff (250ms → 4s)
+        // so the file appears as soon as auth resolves. After ~6 attempts
+        // surface isError so the UI can show a real failure state.
+        const attempt = ++tokenAttemptsRef.current
+        inFlightRef.current = false
+        if (attempt >= 6) {
+          setIsError(true)
+          setIsLoading(false)
+          return
+        }
+        const delay = Math.min(4000, 250 * 2 ** (attempt - 1))
+        if (tokenRetryRef.current) clearTimeout(tokenRetryRef.current)
+        tokenRetryRef.current = setTimeout(() => {
+          tokenRetryRef.current = null
+          if (generationRef.current === gen) void doFetch(soft)
+        }, delay)
         return
       }
+      tokenAttemptsRef.current = 0
       // Stream pages in: on a hard fetch, append each page to the cache and
       // rebuild so the first 500 rows paint immediately on Bible-sized files
       // (~30k cells × ~60 round-trips). On a soft refetch, accumulate into a
@@ -401,6 +428,14 @@ export function useCells(opts: UseCellsOptions): UseCellsResult {
     rebuildFromCache()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [auditStats, username, requiredValidations])
+
+  // Cancel any pending token-retry on unmount.
+  useEffect(() => () => {
+    if (tokenRetryRef.current) {
+      clearTimeout(tokenRetryRef.current)
+      tokenRetryRef.current = null
+    }
+  }, [])
 
   // Refetch on focus / visibility return. Insurance against drift while
   // writes still flow through Y.Doc — a peer's commit becomes visible

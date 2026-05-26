@@ -182,6 +182,14 @@ export function createWsReconciler(
       return
     }
     if (closed) return
+    if (!token) {
+      // Don't open a doomed socket — the DO 1008-closes on bad/missing
+      // tokens which would just trigger another reconnect immediately.
+      // Back off and try again; getToken() will succeed once the JWT race
+      // or /sync-token outage resolves.
+      scheduleReconnect()
+      return
+    }
 
     let ws: WebSocket
     try {

@@ -51,6 +51,8 @@ export function useStaleSourceCells(
   const fileRef = useRef(fileId)
   const enabledRef = useRef(enabled)
   const tokenRef = useRef(getToken)
+  const tokenRetryRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const tokenAttemptsRef = useRef(0)
   projectRef.current = projectId
   fileRef.current = fileId
   enabledRef.current = enabled
@@ -74,10 +76,25 @@ export function useStaleSourceCells(
       const jwt = getToken ? await getToken(fid) : null
       if (!jwt) {
         if (generationRef.current !== gen) return
-        setIsError(true)
-        setIsLoading(false)
+        // Auth race — retry with backoff rather than reporting error. After
+        // ~6 attempts give up; staleness is a soft signal so empty-but-quiet
+        // is the right fallback.
+        const attempt = ++tokenAttemptsRef.current
+        if (attempt >= 6) {
+          setStaleCellIds(EMPTY)
+          setIsLoading(false)
+          setIsError(false)
+          return
+        }
+        const delay = Math.min(4000, 250 * 2 ** (attempt - 1))
+        if (tokenRetryRef.current) clearTimeout(tokenRetryRef.current)
+        tokenRetryRef.current = setTimeout(() => {
+          tokenRetryRef.current = null
+          if (generationRef.current === gen) void doFetch()
+        }, delay)
         return
       }
+      tokenAttemptsRef.current = 0
       const ids = await fetchStaleSourceCells(pid, fid, jwt)
       if (generationRef.current !== gen) return
       setStaleCellIds(new Set(ids))
@@ -101,6 +118,13 @@ export function useStaleSourceCells(
     void doFetch()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId, fileId, enabled])
+
+  useEffect(() => () => {
+    if (tokenRetryRef.current) {
+      clearTimeout(tokenRetryRef.current)
+      tokenRetryRef.current = null
+    }
+  }, [])
 
   // Refetch on window focus — same drift mitigation pattern as `useCells`.
   // When a peer commits an upstream source edit the indicator should

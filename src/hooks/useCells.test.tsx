@@ -162,7 +162,32 @@ describe("useCells (Phase 2a, D1-backed)", () => {
     expect(fetchAllMock).not.toHaveBeenCalled()
   })
 
-  it("surfaces isError=true when getToken returns null", async () => {
+  it("retries on null token (keeps skeleton up) and succeeds once it resolves", async () => {
+    fetchAllMock.mockResolvedValueOnce([
+      makeRow({ cellId: "c1", side: "target", value: "ok" }),
+    ])
+    let calls = 0
+    const flakyToken = async () => {
+      calls++
+      return calls < 2 ? null : "jwt"
+    }
+    const { result } = renderHook(() =>
+      useCells({
+        projectId: "proj-a",
+        fileId: "file-x",
+        getToken: flakyToken,
+        enabled: true,
+      }),
+    )
+    // First attempt sees null → must NOT flip to isError; the skeleton stays.
+    await waitFor(() => expect(calls).toBeGreaterThanOrEqual(1))
+    expect(result.current.isError).toBe(false)
+    // After the backoff retry resolves, cells appear.
+    await waitFor(() => expect(result.current.cells.length).toBe(1), { timeout: 2000 })
+    expect(result.current.isError).toBe(false)
+  })
+
+  it("eventually surfaces isError=true if getToken keeps returning null", async () => {
     const nullToken = async () => null
     const { result } = renderHook(() =>
       useCells({
@@ -172,10 +197,11 @@ describe("useCells (Phase 2a, D1-backed)", () => {
         enabled: true,
       }),
     )
-    await waitFor(() => expect(result.current.isError).toBe(true))
+    // 6 attempts with 250→4000ms backoff exhausts in ~7.75s; allow headroom.
+    await waitFor(() => expect(result.current.isError).toBe(true), { timeout: 10_000 })
     expect(result.current.cells).toEqual([])
     expect(fetchAllMock).not.toHaveBeenCalled()
-  })
+  }, 12_000)
 
   it("overlays activeValidators from auditStats over the empty default", async () => {
     fetchAllMock.mockResolvedValueOnce([

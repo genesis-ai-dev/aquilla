@@ -69,7 +69,11 @@ export function useOutboxFlusher(options: UseOutboxFlusherOptions): {
       })
       await refreshPending()
       const failedHard = result.posted > 0 && result.accepted === 0
-      if (failedHard) {
+      // `authError` fires when there are queued rows but the token mint
+      // failed. Without backoff this loop would re-mint every BASE_INTERVAL_MS
+      // and hammer the auth-worker — visible to the user as constant token
+      // requests / a "refreshing" feel even though nothing is succeeding.
+      if (failedHard || result.authError) {
         setFailureStreak((s) => s + 1)
         backoffExp.current = Math.min(8, backoffExp.current + 1)
       } else {

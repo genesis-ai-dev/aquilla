@@ -70,7 +70,7 @@ describe("useStaleSourceCells", () => {
     expect(fetchMock).toHaveBeenCalledTimes(2)
   })
 
-  it("flags isError=true when getToken returns null", async () => {
+  it("retries on null token without surfacing isError, then falls back quietly", async () => {
     const { result } = renderHook(() =>
       useStaleSourceCells({
         projectId: "p1",
@@ -78,7 +78,15 @@ describe("useStaleSourceCells", () => {
         getToken: async () => null,
       }),
     )
-    await waitFor(() => expect(result.current.isError).toBe(true))
+    // First null shouldn't flip to error — staleness is a soft signal.
+    await new Promise((r) => setTimeout(r, 100))
+    expect(result.current.isError).toBe(false)
     expect(fetchMock).not.toHaveBeenCalled()
-  })
+    // After ~6 backoff attempts the hook gives up and shows empty (no error).
+    await waitFor(
+      () => expect(result.current.staleCellIds.size).toBe(0),
+      { timeout: 10_000 },
+    )
+    expect(result.current.isError).toBe(false)
+  }, 12_000)
 })

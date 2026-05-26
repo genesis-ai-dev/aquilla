@@ -59,23 +59,28 @@ export async function flushOutboxBatch(deps: FlushDeps): Promise<{
   posted: number
   accepted: number
   networkError: boolean
+  /** True when the token fetch returned null with rows actually queued — the
+   *  flush could not proceed because auth (or the /sync-token endpoint) is
+   *  unavailable. Distinct from `networkError` so the caller can back off
+   *  on persistent auth failure without conflating "queue is empty". */
+  authError: boolean
   staleSiblingCount: number
   staleSourceCount: number
 }> {
   const fetchFn = deps.fetchImpl ?? fetch
   const records = await peekOutboxBatch(MAX_BATCH * 2)
   if (records.length === 0) {
-    return { posted: 0, accepted: 0, networkError: false, staleSiblingCount: 0, staleSourceCount: 0 }
+    return { posted: 0, accepted: 0, networkError: false, authError: false, staleSiblingCount: 0, staleSourceCount: 0 }
   }
   const batch = groupOldestFileFirst(records)
   const fileId = batch[0].event.fileId
   if (!fileId) {
     await removeOutboxEvents([batch[0].id])
-    return { posted: 0, accepted: 0, networkError: false, staleSiblingCount: 0, staleSourceCount: 0 }
+    return { posted: 0, accepted: 0, networkError: false, authError: false, staleSiblingCount: 0, staleSourceCount: 0 }
   }
   const token = await deps.getTokenForFile(fileId)
   if (!token) {
-    return { posted: 0, accepted: 0, networkError: false, staleSiblingCount: 0, staleSourceCount: 0 }
+    return { posted: 0, accepted: 0, networkError: false, authError: true, staleSiblingCount: 0, staleSourceCount: 0 }
   }
   const events: CqrsRawEvent[] = batch.map((r) => r.event)
   const url = `${syncWorkerHttpOrigin()}/events`
@@ -95,7 +100,7 @@ export async function flushOutboxBatch(deps: FlushDeps): Promise<{
       batch.map((r) => r.id),
       { error: { status: 0, reason } },
     )
-    return { posted: events.length, accepted: 0, networkError: true, staleSiblingCount: 0, staleSourceCount: 0 }
+    return { posted: events.length, accepted: 0, networkError: true, authError: false, staleSiblingCount: 0, staleSourceCount: 0 }
   }
 
   if (!res.ok) {
@@ -103,7 +108,7 @@ export async function flushOutboxBatch(deps: FlushDeps): Promise<{
       batch.map((r) => r.id),
       { error: { status: res.status, reason: `HTTP ${res.status}` } },
     )
-    return { posted: events.length, accepted: 0, networkError: true, staleSiblingCount: 0, staleSourceCount: 0 }
+    return { posted: events.length, accepted: 0, networkError: true, authError: false, staleSiblingCount: 0, staleSourceCount: 0 }
   }
 
   let body: PostBody
@@ -114,7 +119,7 @@ export async function flushOutboxBatch(deps: FlushDeps): Promise<{
       batch.map((r) => r.id),
       { error: { status: 0, reason: "malformed server response" } },
     )
-    return { posted: events.length, accepted: 0, networkError: true, staleSiblingCount: 0, staleSourceCount: 0 }
+    return { posted: events.length, accepted: 0, networkError: true, authError: false, staleSiblingCount: 0, staleSourceCount: 0 }
   }
 
   // Surface failures loudly instead of swallowing them. A rejected event
@@ -189,6 +194,7 @@ export async function flushOutboxBatch(deps: FlushDeps): Promise<{
     posted: events.length,
     accepted: acceptedIds.size,
     networkError: false,
+    authError: false,
     staleSiblingCount: body.stale?.length ?? 0,
     staleSourceCount: body.staleSource?.length ?? 0,
   }

@@ -97,8 +97,10 @@ describe('buildEventProjectionStmts — source.cell.create', () => {
       stmts,
     )
 
-    expect(stmts).toHaveLength(1)
-    const { sql, args } = recorded[0]
+    // FTS maintenance adds 2 extra statements (delete + insert) around the cells DML.
+    expect(stmts).toHaveLength(3)
+    const cellsStmts = recorded.filter(r => !r.sql.includes('cells_fts'))
+    const { sql, args } = cellsStmts[0]
     expect(sql).toContain('INSERT INTO cells')
     expect(sql).toContain('ON CONFLICT(project_id, file_id, cell_id, side)')
     // 0=project_id, 1=file_id, 2=cell_id, 3=side, 4=value, 5=value_html,
@@ -128,7 +130,8 @@ describe('buildEventProjectionStmts — target.cell.create', () => {
       }),
       stmts,
     )
-    const { args } = recorded[0]
+    const cellsStmts = recorded.filter(r => !r.sql.includes('cells_fts'))
+    const { args } = cellsStmts[0]
     expect(args[3]).toBe('target')
     expect(args[8]).toBe('cell-0')   // anchor_cell_id
     expect(args[9]).toBe('evt-test-id') // event_id
@@ -148,8 +151,10 @@ describe('buildEventProjectionStmts — target.cell.commit', () => {
       }),
       stmts,
     )
-    expect(stmts).toHaveLength(1)
-    const { sql, args } = recorded[0]
+    // FTS maintenance adds 2 extra statements (delete + insert) around the cells DML.
+    expect(stmts).toHaveLength(3)
+    const cellsStmts = recorded.filter(r => !r.sql.includes('cells_fts'))
+    const { sql, args } = cellsStmts[0]
     // The client never emits target.cell.create, so the commit is an UPSERT:
     // INSERT the target row on first translation, ON CONFLICT UPDATE after.
     expect(sql).toContain('INSERT INTO cells')
@@ -175,7 +180,8 @@ describe('buildEventProjectionStmts — target.cell.commit', () => {
       makeEvent('target.cell.commit', { value: 'x' }),
       stmts,
     )
-    expect(recorded[0].args[6]).toBe(null)
+    const cellsStmts = recorded.filter(r => !r.sql.includes('cells_fts'))
+    expect(cellsStmts[0].args[6]).toBe(null)
   })
 })
 
@@ -188,7 +194,8 @@ describe('buildEventProjectionStmts — source.cell.commit', () => {
       makeEvent('source.cell.commit', { value: 'updated source' }),
       stmts,
     )
-    const { sql } = recorded[0]
+    const cellsStmts = recorded.filter(r => !r.sql.includes('cells_fts'))
+    const { sql } = cellsStmts[0]
     expect(sql).toContain('UPDATE cells SET')
     expect(sql).not.toContain('source_event_id =')
   })
@@ -199,16 +206,18 @@ describe('buildEventProjectionStmts — *.cell.delete', () => {
     const { db, recorded } = makeD1Stub()
     const stmts: D1PreparedStatement[] = []
     buildEventProjectionStmts(db, makeEvent('target.cell.delete', {}), stmts)
-    expect(recorded[0].sql).toContain('DELETE FROM cells')
-    expect(recorded[0].sql).toContain('side = ?')
-    expect(recorded[0].args).toEqual(['proj-1', 'file-a', 'cell-1', 'target'])
+    const cellsStmts = recorded.filter(r => !r.sql.includes('cells_fts'))
+    expect(cellsStmts[0].sql).toContain('DELETE FROM cells')
+    expect(cellsStmts[0].sql).toContain('side = ?')
+    expect(cellsStmts[0].args).toEqual(['proj-1', 'file-a', 'cell-1', 'target'])
   })
 
   it('source.cell.delete binds side=source', () => {
     const { db, recorded } = makeD1Stub()
     const stmts: D1PreparedStatement[] = []
     buildEventProjectionStmts(db, makeEvent('source.cell.delete', {}), stmts)
-    expect(recorded[0].args).toEqual(['proj-1', 'file-a', 'cell-1', 'source'])
+    const cellsStmts = recorded.filter(r => !r.sql.includes('cells_fts'))
+    expect(cellsStmts[0].args).toEqual(['proj-1', 'file-a', 'cell-1', 'source'])
   })
 })
 
@@ -261,8 +270,9 @@ describe('buildEventProjectionStmts — side scoping (regression: target edits m
       const stmts: D1PreparedStatement[] = []
       buildEventProjectionStmts(db, makeEvent(kind, payload), stmts)
 
-      // First emitted statement is always the cells mutation for these kinds.
-      const sql = recorded[0].sql
+      // First non-FTS statement is the cells mutation for these kinds.
+      const cellsStmts = recorded.filter(r => !r.sql.includes('cells_fts'))
+      const sql = cellsStmts[0].sql
       // Three accepted forms, all of which keep the mutation scoped to one side:
       //  1. a literal `side = 'target'` / `side = 'source'` WHERE clause
       //     (source.cell.commit UPDATE),
@@ -279,10 +289,10 @@ describe('buildEventProjectionStmts — side scoping (regression: target edits m
         expect(sql).not.toContain(`'${opposite}'`)
       } else {
         expect(sql).toContain('side = ?')
-        expect(recorded[0].args).toContain(expectedSide)
+        expect(cellsStmts[0].args).toContain(expectedSide)
         // Make sure we didn't accidentally bind the OTHER side too.
         const opposite = expectedSide === 'target' ? 'source' : 'target'
-        expect(recorded[0].args).not.toContain(opposite)
+        expect(cellsStmts[0].args).not.toContain(opposite)
       }
     })
   }

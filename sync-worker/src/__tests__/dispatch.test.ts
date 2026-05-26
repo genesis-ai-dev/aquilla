@@ -85,7 +85,8 @@ describe('dispatchEvent', () => {
     const outcome = dispatchEvent(makeNoOpD1(), authed, 9999, { updateProjection: true, serverSeq: 1 })
     expect(outcome.ok).toBe(true)
     if (!outcome.ok) throw new Error('unreachable')
-    expect(outcome.result.stmts.length).toBe(2)
+    // 1 events INSERT + 1 FTS delete + 1 cells INSERT + 1 FTS insert = 4
+    expect(outcome.result.stmts.length).toBe(4)
     expect(outcome.result.dirtyTables).toContain('events')
     expect(outcome.result.dirtyTables).toContain('cells')
   })

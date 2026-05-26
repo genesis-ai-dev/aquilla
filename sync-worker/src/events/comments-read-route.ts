@@ -1,0 +1,138 @@
+// Project-wide and cell-scoped comment read API.
+//
+//   GET /api/v1/projects/:projectId/comments
+//   Query params (all optional):
+//     fileId  — filter to a specific file
+//     cellId  — filter to a specific cell (requires fileId)
+//
+// Returns { comments: CommentRow[] } ordered by created_at ASC.
+//
+// Auth: sync-token JWT scoped to projectId; minimum role COMMENTER (200).
+// Every query is double-scoped by the verified projectId from the JWT so a
+// token for project A cannot read comments from project B.
+
+import { verifyTokenForProject } from '../auth'
+
+export interface CommentsReadEnv {
+  AQUILLA_DB?: D1Database
+  SYNC_SECRET_KEY?: string
+}
+
+interface CommentRowRaw {
+  comment_id: string
+  project_id: string
+  scope_kind: string
+  file_id: string | null
+  cell_id: string | null
+  parent_comment_id: string | null
+  body: string
+  resolved: number
+  author_id: string
+  author_label: string | null
+  created_at: number
+  updated_at: number
+  deleted_at: number | null
+}
+
+export interface CommentRowOut {
+  commentId: string
+  projectId: string
+  scopeKind: 'cell' | 'file' | 'project'
+  fileId: string | null
+  cellId: string | null
+  parentCommentId: string | null
+  body: string
+  resolved: boolean
+  authorId: string
+  authorLabel: string | null
+  createdAt: number
+  updatedAt: number
+  deletedAt: number | null
+}
+
+function toOut(row: CommentRowRaw): CommentRowOut {
+  return {
+    commentId: row.comment_id,
+    projectId: row.project_id,
+    scopeKind: row.scope_kind as 'cell' | 'file' | 'project',
+    fileId: row.file_id,
+    cellId: row.cell_id,
+    parentCommentId: row.parent_comment_id,
+    body: row.body,
+    resolved: row.resolved === 1,
+    authorId: row.author_id,
+    authorLabel: row.author_label,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+    deletedAt: row.deleted_at,
+  }
+}
+
+const PATH_RE = /^\/api\/v1\/projects\/([^/]+)\/comments$/
+
+export async function handleCommentsReadRequest(
+  request: Request,
+  env: CommentsReadEnv,
+): Promise<Response | null> {
+  const url = new URL(request.url)
+  const match = url.pathname.match(PATH_RE)
+  if (!match) return null
+  if (request.method !== 'GET') return null
+
+  if (!env.SYNC_SECRET_KEY) {
+    return new Response('SYNC_SECRET_KEY not configured', { status: 500 })
+  }
+  if (!env.AQUILLA_DB) {
+    return new Response('AQUILLA_DB binding not configured', { status: 500 })
+  }
+
+  const projectId = decodeURIComponent(match[1])
+
+  const authHeader = request.headers.get('Authorization') ?? ''
+  const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : null
+  if (!token) {
+    return new Response('missing Authorization header', { status: 401 })
+  }
+
+  const auth = await verifyTokenForProject(token, projectId, env.SYNC_SECRET_KEY)
+  if (!auth.ok) {
+    return new Response(auth.reason, { status: auth.status })
+  }
+
+  const fileId = url.searchParams.get('fileId')
+  const cellId = url.searchParams.get('cellId')
+
+  // Build the query. Always scope to the verified projectId first.
+  const parts: string[] = [
+    'SELECT',
+    '  comment_id, project_id, scope_kind, file_id, cell_id,',
+    '  parent_comment_id, body, resolved, author_id, author_label,',
+    '  created_at, updated_at, deleted_at',
+    'FROM comments',
+    'WHERE project_id = ?',
+  ]
+  const binds: unknown[] = [projectId]
+
+  if (fileId !== null && cellId !== null) {
+    parts.push("AND scope_kind = 'cell' AND file_id = ? AND cell_id = ?")
+    binds.push(fileId, cellId)
+  } else if (fileId !== null) {
+    parts.push("AND file_id = ?")
+    binds.push(fileId)
+  }
+
+  parts.push('ORDER BY created_at ASC')
+
+  const sql = parts.join(' ')
+
+  try {
+    const result = await env.AQUILLA_DB.prepare(sql)
+      .bind(...binds)
+      .all<CommentRowRaw>()
+    const comments: CommentRowOut[] = result.results.map(toOut)
+    return Response.json({ comments })
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    return new Response(`comments read failed: ${message}`, { status: 500 })
+  }
+}

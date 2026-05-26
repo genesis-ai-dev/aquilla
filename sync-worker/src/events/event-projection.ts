@@ -18,7 +18,7 @@
 // Hash function: djb2 (32-bit), unchanged. Kept as a cheap FTS-skipping
 // fingerprint on `content_hash`.
 
-import type { EventKind, EventPayloads } from './types'
+import type { EventKind, EventPayloads, CommentScope } from './types'
 
 // A single event row as it lives in D1. JSON.parse on `payload` is the
 // caller's responsibility — `payload` here is already an object.
@@ -57,7 +57,7 @@ function countWords(text: string): number {
 }
 
 /** Caller hint: which projection tables this event will touch. */
-export type ProjectionTouches = 'cells' | 'cell_validators' | 'files' | 'cell_audio'
+export type ProjectionTouches = 'cells' | 'cell_validators' | 'files' | 'cell_audio' | 'comments'
 
 /**
  * Apply one event to the projection (without the AD-2 sibling guard — the
@@ -506,6 +506,82 @@ case 'cell.audio.attach': {
           ),
       )
       return ['files']
+    }
+
+    case 'comment.create': {
+      const p = event.payload as EventPayloads['comment.create']
+      const scope: CommentScope = p.scope
+      const scopeKind = scope.kind
+      const fileId = scopeKind === 'cell' ? scope.fileId : scopeKind === 'file' ? scope.fileId : null
+      const cellId = scopeKind === 'cell' ? scope.cellId : null
+      stmts.push(
+        db
+          .prepare(
+            `INSERT INTO comments (
+              comment_id, project_id, scope_kind, file_id, cell_id,
+              parent_comment_id, body, resolved, author_id, author_label,
+              created_at, updated_at, deleted_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, NULL)
+            ON CONFLICT(comment_id) DO NOTHING`,
+          )
+          .bind(
+            p.commentId,
+            event.projectId,
+            scopeKind,
+            fileId,
+            cellId,
+            p.parentCommentId,
+            p.body,
+            event.author,
+            event.author,
+            event.serverTs,
+            event.serverTs,
+          ),
+      )
+      return ['comments']
+    }
+
+    case 'comment.edit': {
+      const p = event.payload as EventPayloads['comment.edit']
+      stmts.push(
+        db
+          .prepare(
+            `UPDATE comments SET body = ?, updated_at = ?
+             WHERE comment_id = ? AND author_id = ? AND deleted_at IS NULL`,
+          )
+          .bind(p.body, event.serverTs, p.commentId, event.author),
+      )
+      return ['comments']
+    }
+
+    case 'comment.delete': {
+      const p = event.payload as EventPayloads['comment.delete']
+      // Soft-delete: preserve the row so threads remain navigable.
+      // Body cleared; deleted_at set. UI renders "[deleted]".
+      stmts.push(
+        db
+          .prepare(
+            `UPDATE comments SET body = '', deleted_at = ?, updated_at = ?
+             WHERE comment_id = ? AND author_id = ? AND deleted_at IS NULL`,
+          )
+          .bind(event.serverTs, event.serverTs, p.commentId, event.author),
+      )
+      return ['comments']
+    }
+
+    case 'comment.resolve': {
+      const p = event.payload as EventPayloads['comment.resolve']
+      // Only resolve top-level comments (parent_comment_id IS NULL).
+      // Server noops on a reply id per spec.
+      stmts.push(
+        db
+          .prepare(
+            `UPDATE comments SET resolved = ?, updated_at = ?
+             WHERE comment_id = ? AND parent_comment_id IS NULL AND deleted_at IS NULL`,
+          )
+          .bind(p.resolved ? 1 : 0, event.serverTs, p.commentId),
+      )
+      return ['comments']
     }
 
     default: {

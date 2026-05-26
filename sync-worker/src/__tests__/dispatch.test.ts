@@ -28,6 +28,10 @@ async function makeAuthorized<K extends EventKind>(kind: K, role = 500) {
     'cell.audio.select': { audioId: 'audio-1.wav', slot: 'recording' },
     'cell.audio.remove': { audioId: 'audio-1.wav' },
     'file.create': { name: 'Genesis', fileType: 'codex' },
+    'comment.create': { commentId: 'cmt-1', scope: { kind: 'project' }, body: 'hi', parentCommentId: null },
+    'comment.edit': { commentId: 'cmt-1', body: 'updated' },
+    'comment.delete': { commentId: 'cmt-1' },
+    'comment.resolve': { commentId: 'cmt-1', resolved: true },
   }
 
   const raw = {

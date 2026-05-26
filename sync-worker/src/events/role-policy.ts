@@ -57,6 +57,15 @@ export const REQUIRED_ROLE: Record<EventKind, number> = {
 
   // file.create is a structural change.
   'file.create': ROLE.PROJECT_LEAD,
+
+  // Comments: any contributor+ can write, edit, delete, or resolve their own
+  // comment. Server-side ownership enforcement (only the author can edit/delete
+  // their own comment) is done in the projector; the role gate is just the
+  // minimum bar to participate.
+  'comment.create': ROLE.COMMENTER,
+  'comment.edit': ROLE.COMMENTER,
+  'comment.delete': ROLE.COMMENTER,
+  'comment.resolve': ROLE.COMMENTER,
 }
 
 export function requiredRoleFor(kind: EventKind): number {

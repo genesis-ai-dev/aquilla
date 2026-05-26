@@ -13,9 +13,6 @@
  *    cell-mutating kind except `*.create` (genesis) and `file.create`.
  *  - `target.cell.commit` carries `sourceEventId` in its payload — the AD-9
  *    pin onto the source row's `event_id` as observed at commit time.
- *
- * v1.x event kinds (comments, threads, waivers, validation grammar
- * extensions) are NOT in scope here — they remain stubbed per 2b.
  */
 
 // ── Kind union (must mirror sync-worker/src/events/types.ts) ──────────────
@@ -40,6 +37,23 @@ export type OutboxEventKind =
   | "cell.audio.remove"
   // File lifecycle.
   | "file.create"
+  // Comments (non-chain-mutating; contributor-level).
+  | "comment.create"
+  | "comment.edit"
+  | "comment.delete"
+  | "comment.resolve"
+
+// ── Comment scope ─────────────────────────────────────────────────────────
+
+/**
+ * Discriminated union for where a comment is anchored. The `kind` field lets
+ * the server projection and the read API handle all three variants without
+ * any schema migration when new scopes are added.
+ */
+export type CommentScope =
+  | { kind: "cell"; fileId: string; cellId: string }
+  | { kind: "file"; fileId: string }
+  | { kind: "project" }
 
 // ── Per-kind payload shapes ───────────────────────────────────────────────
 
@@ -115,6 +129,25 @@ export interface OutboxEventPayloads {
     fileType: string
     sourceLanguage?: string
     targetLanguage?: string
+  }
+
+  // ── Comments (non-chain-mutating) ────────────────────────────────────────
+  "comment.create": {
+    commentId: string // client-generated ulid
+    scope: CommentScope
+    body: string // markdown OK
+    parentCommentId: string | null // null = top-level thread; non-null = reply
+  }
+  "comment.edit": {
+    commentId: string
+    body: string
+  }
+  "comment.delete": {
+    commentId: string // soft-delete: sets body="" and deleted_at
+  }
+  "comment.resolve": {
+    commentId: string // top-level only; server noops on a reply id
+    resolved: boolean
   }
 }
 

@@ -40,6 +40,23 @@ export type EventKind =
   | 'cell.audio.remove'
   // File lifecycle.
   | 'file.create'
+  // Comments (non-chain-mutating; contributor-level).
+  | 'comment.create'
+  | 'comment.edit'
+  | 'comment.delete'
+  | 'comment.resolve'
+
+// ── Comment scope ─────────────────────────────────────────────────────────
+
+/**
+ * Discriminated union for where a comment is anchored. Adding a new variant
+ * (e.g. {kind:"project"}) requires no grammar migration — just a new union
+ * member here and a corresponding branch in the projector.
+ */
+export type CommentScope =
+  | { kind: 'cell'; fileId: string; cellId: string }
+  | { kind: 'file'; fileId: string }
+  | { kind: 'project' }
 
 // Payload shape per event kind. Using an interface (not Record) so that
 // EventPayloads[K] gives type-safe lookups without `as` casts.
@@ -128,6 +145,25 @@ export interface EventPayloads {
     /** ISO codes; null/undefined when unknown at import time. */
     sourceLanguage?: string
     targetLanguage?: string
+  }
+
+  // ── Comments (non-chain-mutating) ──────────────────────────────────────
+  'comment.create': {
+    commentId: string // client-generated ulid
+    scope: CommentScope
+    body: string // markdown OK
+    parentCommentId: string | null // null = top-level; non-null = reply
+  }
+  'comment.edit': {
+    commentId: string
+    body: string
+  }
+  'comment.delete': {
+    commentId: string // soft-delete: sets body="" and deleted_at
+  }
+  'comment.resolve': {
+    commentId: string // top-level only; server noops on a reply id
+    resolved: boolean
   }
 }
 

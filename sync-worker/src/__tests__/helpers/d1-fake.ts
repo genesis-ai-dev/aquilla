@@ -9,6 +9,23 @@ export interface Tables {
   cells: CellRow[]
   cell_validators: ValidatorRow[]
   files: FileRow[]
+  comments: CommentRow[]
+}
+
+export interface CommentRow {
+  comment_id: string
+  project_id: string
+  scope_kind: string
+  file_id: string | null
+  cell_id: string | null
+  parent_comment_id: string | null
+  body: string
+  resolved: number
+  author_id: string
+  author_label: string | null
+  created_at: number
+  updated_at: number
+  deleted_at: number | null
 }
 
 export interface EventRow {
@@ -84,6 +101,7 @@ export function makeInMemoryD1(tables: Partial<Tables> = {}): InMemoryD1 {
     cells: tables.cells ?? [],
     cell_validators: tables.cell_validators ?? [],
     files: tables.files ?? [],
+    comments: tables.comments ?? [],
   }
 
   const issuedStmts: Array<{ sql: string; args: unknown[] }> = []
@@ -731,6 +749,86 @@ export function makeInMemoryD1(tables: Partial<Tables> = {}): InMemoryD1 {
         cell.validated = activeForHead ? 1 : 0
       }
       return []
+    }
+
+    // ── INSERT INTO comments (comment.create) ───────────────────────────
+    if (/^INSERT INTO comments \(/.test(normalized)) {
+      const row: CommentRow = {
+        comment_id: args[0] as string,
+        project_id: args[1] as string,
+        scope_kind: args[2] as string,
+        file_id: args[3] as string | null,
+        cell_id: args[4] as string | null,
+        parent_comment_id: args[5] as string | null,
+        body: args[6] as string,
+        resolved: 0,
+        author_id: args[7] as string,
+        author_label: args[8] as string | null,
+        created_at: args[9] as number,
+        updated_at: args[10] as number,
+        deleted_at: null,
+      }
+      const exists = db.comments.some((c) => c.comment_id === row.comment_id)
+      if (!exists) db.comments.push(row)
+      return []
+    }
+
+    // ── UPDATE comments SET body = ?, updated_at = ? (comment.edit) ────
+    if (/^UPDATE comments SET body = \?, updated_at = \? WHERE comment_id = \? AND author_id = \? AND deleted_at IS NULL$/.test(normalized)) {
+      const body = args[0] as string
+      const updatedAt = args[1] as number
+      const commentId = args[2] as string
+      const authorId = args[3] as string
+      const row = db.comments.find((c) => c.comment_id === commentId && c.author_id === authorId && c.deleted_at === null)
+      if (row) {
+        row.body = body
+        row.updated_at = updatedAt
+      }
+      return []
+    }
+
+    // ── UPDATE comments SET body = '', deleted_at = ? (comment.delete) ──
+    if (/^UPDATE comments SET body = '', deleted_at = \?, updated_at = \? WHERE comment_id = \? AND author_id = \? AND deleted_at IS NULL$/.test(normalized)) {
+      const deletedAt = args[0] as number
+      const updatedAt = args[1] as number
+      const commentId = args[2] as string
+      const authorId = args[3] as string
+      const row = db.comments.find((c) => c.comment_id === commentId && c.author_id === authorId && c.deleted_at === null)
+      if (row) {
+        row.body = ''
+        row.deleted_at = deletedAt
+        row.updated_at = updatedAt
+      }
+      return []
+    }
+
+    // ── UPDATE comments SET resolved = ? (comment.resolve) ─────────────
+    if (/^UPDATE comments SET resolved = \?, updated_at = \? WHERE comment_id = \? AND parent_comment_id IS NULL AND deleted_at IS NULL$/.test(normalized)) {
+      const resolved = args[0] as number
+      const updatedAt = args[1] as number
+      const commentId = args[2] as string
+      const row = db.comments.find((c) => c.comment_id === commentId && c.parent_comment_id === null && c.deleted_at === null)
+      if (row) {
+        row.resolved = resolved
+        row.updated_at = updatedAt
+      }
+      return []
+    }
+
+    // ── SELECT comments (comments-read-route) ────────────────────────────
+    if (/^SELECT comment_id, project_id, scope_kind, file_id, cell_id, parent_comment_id, body, resolved, author_id, author_label, created_at, updated_at, deleted_at FROM comments WHERE project_id = \?/.test(normalized)) {
+      const pid = args[0] as string
+      let rows = db.comments.filter((c) => c.project_id === pid)
+      // Optional fileId / cellId filters.
+      if (normalized.includes("AND scope_kind = 'cell' AND file_id = ? AND cell_id = ?")) {
+        const fileId = args[1] as string
+        const cellId = args[2] as string
+        rows = rows.filter((c) => c.scope_kind === 'cell' && c.file_id === fileId && c.cell_id === cellId)
+      } else if (normalized.includes('AND file_id = ?')) {
+        const fileId = args[1] as string
+        rows = rows.filter((c) => c.file_id === fileId)
+      }
+      return rows.sort((a, b) => a.created_at - b.created_at)
     }
 
     return []

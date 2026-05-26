@@ -264,7 +264,11 @@ export async function handleEventsWriteRequest(
       rawEvent.kind !== 'cell.audio.attach' &&
       rawEvent.kind !== 'cell.audio.select' &&
       rawEvent.kind !== 'cell.audio.remove' &&
-      rawEvent.kind !== 'file.create'
+      rawEvent.kind !== 'file.create' &&
+      rawEvent.kind !== 'comment.create' &&
+      rawEvent.kind !== 'comment.edit' &&
+      rawEvent.kind !== 'comment.delete' &&
+      rawEvent.kind !== 'comment.resolve'
     // Last-write-wins for cell commits: a contributor's own edit must never be
     // silently dropped by the AD-2 first-child-of-parent rule. That rule
     // exists to MERGE concurrent OFFLINE edits from multiple people — for a

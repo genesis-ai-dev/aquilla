@@ -4,7 +4,7 @@
 // contextual/infrequent ones (re-record, history, regenerate backtranslation).
 
 import { useState } from "react"
-import { MoreHorizontal, Mic, History as HistoryIcon, Languages, Sparkles, Wand2 } from "lucide-react"
+import { MoreHorizontal, Mic, History as HistoryIcon, Languages, Sparkles, Wand2, MessageCircle } from "lucide-react"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { cn } from "@/lib/utils"
 import type { CellData } from "@/hooks/useCells"
@@ -24,6 +24,8 @@ interface Props {
   onBacktranslate?: (cell: CellData) => void
   onTranscribe?: (cell: CellData) => void
   onSynthesizeAudio?: (cell: CellData) => void
+  /** Called when the user chooses "Add comment" from the menu. */
+  onAddComment?: (cellId: string) => void
   /** D1-backed per-cell audit stats for this file. When provided, editCount is
    *  preferred over cell.history.length for the history count badge. */
   auditStatsByCellId?: Map<string, CellAuditStats>
@@ -33,6 +35,7 @@ export function CellActionsMenu({
   cell, editable, hasAudio, isGitProject,
   isBacktranslationConfigured, isBacktranslating, isTranscribing, isSynthesizing,
   onOpenRecording, onOpenHistory, onBacktranslate, onTranscribe, onSynthesizeAudio,
+  onAddComment,
   auditStatsByCellId,
 }: Props) {
   const [open, setOpen] = useState(false)
@@ -45,6 +48,14 @@ export function CellActionsMenu({
     | { key: string; icon: React.ReactNode; label: string; disabled?: boolean; onSelect: () => void }
     | null
   > = [
+    onAddComment
+      ? {
+          key: "addcomment",
+          icon: <MessageCircle className="h-3.5 w-3.5" />,
+          label: "Add comment",
+          onSelect: () => { onAddComment(cell.id); setOpen(false) },
+        }
+      : null,
     hasAudio && onOpenRecording
       ? {
           key: "rerecord",

@@ -25,6 +25,7 @@ import { handleStaleSourceRequest } from "./events/stale-source-route"
 import { handleValidatorsReadRequest } from "./events/validators-read-route"
 import { handleBranchingSearchRequest } from "./events/branching-search-route"
 import { handleBranchingSearchPassagesRequest } from "./events/branching-search-passages-route"
+import { handleCommentsReadRequest } from "./events/comments-read-route"
 export { ProjectSync } from "./project-do"
 
 declare global {
@@ -133,6 +134,8 @@ export default {
     if (cellHistoryResponse) return withCors(cellHistoryResponse, request)
     const staleSourceResponse = await handleStaleSourceRequest(request, env)
     if (staleSourceResponse) return withCors(staleSourceResponse, request)
+    const commentsReadResponse = await handleCommentsReadRequest(request, env)
+    if (commentsReadResponse) return withCors(commentsReadResponse, request)
     const searchResponse = await handleSearchReadRequest(request, env)
     if (searchResponse) return withCors(searchResponse, request)
     const branchingPassagesResponse = await handleBranchingSearchPassagesRequest(request, env)

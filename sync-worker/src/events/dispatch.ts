@@ -15,6 +15,7 @@ import type { AuthorizedEvent } from './authorize'
 import type { EventKind } from './types'
 import { handleCellEvent, type CellEventKind } from './handlers/cell-events'
 import { handleFileCreate } from './handlers/file-create'
+import { handleCommentEvent, type CommentEventKind } from './handlers/comment-events'
 import type { DispatchResult } from './handlers/types'
 
 export type { DispatchResult } from './handlers/types'
@@ -78,6 +79,20 @@ export function dispatchEvent(
         result: handleFileCreate(
           db,
           authed as AuthorizedEvent<'file.create'>,
+          serverTs,
+          { serverSeq: opts.serverSeq },
+        ),
+      }
+
+    case 'comment.create':
+    case 'comment.edit':
+    case 'comment.delete':
+    case 'comment.resolve':
+      return {
+        ok: true,
+        result: handleCommentEvent(
+          db,
+          authed as AuthorizedEvent<CommentEventKind>,
           serverTs,
           { serverSeq: opts.serverSeq },
         ),

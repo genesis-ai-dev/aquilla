@@ -4,12 +4,19 @@
 // strings are normalized (collapse whitespace) before matching so a code
 // change that only reformats SQL doesn't silently break the fake.
 
+/** Mirrors a single row in the cells_fts virtual table (external-content). */
+export interface CellsFtsRow {
+  rowid: number
+  value: string
+}
+
 export interface Tables {
   events: EventRow[]
   cells: CellRow[]
   cell_validators: ValidatorRow[]
   files: FileRow[]
   comments: CommentRow[]
+  cells_fts: CellsFtsRow[]
 }
 
 export interface CommentRow {
@@ -93,6 +100,9 @@ export interface FileRow {
 export type InMemoryD1 = D1Database & {
   _tables(): Tables
   _issuedStmts(): Array<{ sql: string; args: unknown[] }>
+  /** Assign stable rowids to cells (1-based index order) so FTS tests can
+   *  assert against them. Call after seeding cells. */
+  _assignRowids(): void
 }
 
 export function makeInMemoryD1(tables: Partial<Tables> = {}): InMemoryD1 {
@@ -102,6 +112,20 @@ export function makeInMemoryD1(tables: Partial<Tables> = {}): InMemoryD1 {
     cell_validators: tables.cell_validators ?? [],
     files: tables.files ?? [],
     comments: tables.comments ?? [],
+    cells_fts: tables.cells_fts ?? [],
+  }
+
+  // Stable rowid map: cell array-index → 1-based rowid. Populated lazily on
+  // the first cells_fts SELECT so callers don't need to call _assignRowids()
+  // manually. Each new cell pushed after the map was built gets the next id.
+  const rowidMap = new Map<CellRow, number>()
+  let nextRowid = 1
+
+  function getRowid(cell: CellRow): number {
+    if (!rowidMap.has(cell)) {
+      rowidMap.set(cell, nextRowid++)
+    }
+    return rowidMap.get(cell)!
   }
 
   const issuedStmts: Array<{ sql: string; args: unknown[] }> = []
@@ -815,6 +839,40 @@ export function makeInMemoryD1(tables: Partial<Tables> = {}): InMemoryD1 {
       return []
     }
 
+    // ── SELECT rowid, value FROM cells (rebuild-fts cursor page) ──────────
+    // Pattern: SELECT rowid, value FROM cells WHERE project_id = ? AND rowid > ? ORDER BY rowid LIMIT 1000
+    if (/^SELECT rowid, value FROM cells WHERE project_id = \? AND rowid > \? ORDER BY rowid LIMIT 1000$/.test(normalized)) {
+      const pid = args[0] as string
+      const afterRowid = args[1] as number
+      // Ensure every cell in the project has a stable rowid assigned.
+      for (const c of db.cells) getRowid(c)
+      return db.cells
+        .filter((c) => c.project_id === pid && getRowid(c) > afterRowid)
+        .sort((a, b) => getRowid(a) - getRowid(b))
+        .slice(0, 1000)
+        .map((c) => ({ rowid: getRowid(c), value: c.value }))
+    }
+
+    // ── INSERT INTO cells_fts(cells_fts, rowid, value) — FTS5 delete ─────
+    if (/^INSERT INTO cells_fts\(cells_fts, rowid, value\) VALUES \(\?, \?, \?\)$/.test(normalized)) {
+      const cmd = args[0] as string
+      const rowid = args[1] as number
+      if (cmd === 'delete') {
+        db.cells_fts = db.cells_fts.filter((r) => r.rowid !== rowid)
+      }
+      return []
+    }
+
+    // ── INSERT INTO cells_fts(rowid, value) — FTS5 insert ─────────────────
+    if (/^INSERT INTO cells_fts\(rowid, value\) VALUES \(\?, \?\)$/.test(normalized)) {
+      const rowid = args[0] as number
+      const value = args[1] as string
+      // Remove any stale entry then add fresh (idempotent within the fake).
+      db.cells_fts = db.cells_fts.filter((r) => r.rowid !== rowid)
+      db.cells_fts.push({ rowid, value })
+      return []
+    }
+
     // ── SELECT comments (comments-read-route) ────────────────────────────
     if (/^SELECT comment_id, project_id, scope_kind, file_id, cell_id, parent_comment_id, body, resolved, author_id, author_label, created_at, updated_at, deleted_at FROM comments WHERE project_id = \?/.test(normalized)) {
       const pid = args[0] as string
@@ -883,6 +941,9 @@ export function makeInMemoryD1(tables: Partial<Tables> = {}): InMemoryD1 {
     },
     _issuedStmts() {
       return issuedStmts
+    },
+    _assignRowids() {
+      for (const c of db.cells) getRowid(c)
     },
   } as unknown as InMemoryD1
 

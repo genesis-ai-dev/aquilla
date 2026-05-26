@@ -20,6 +20,7 @@ import { handleEventsWriteRequest } from "./events/route"
 import { handleFilesReadRequest } from "./events/files-read-route"
 import { handleBulkImportRequest } from "./events/import-route"
 import { handleRebuildProjectionRequest } from "./events/rebuild"
+import { handleRebuildFtsRequest } from "./events/rebuild-fts"
 import { handleSearchReadRequest, handleSearchPassagesRequest } from "./events/search-route"
 import { handleStaleSourceRequest } from "./events/stale-source-route"
 import { handleValidatorsReadRequest } from "./events/validators-read-route"
@@ -110,6 +111,8 @@ export default {
     if (projectArchiveResponse) return projectArchiveResponse
     const rebuildResponse = await handleRebuildProjectionRequest(request, env)
     if (rebuildResponse) return rebuildResponse
+    const rebuildFtsResponse = await handleRebuildFtsRequest(request, env)
+    if (rebuildFtsResponse) return rebuildFtsResponse
     const adminResponse = await handleAdminRequest(request, env)
     if (adminResponse) return adminResponse
     const audioResponse = await handleAudioRequest(request, env)

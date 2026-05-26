@@ -332,6 +332,73 @@ export function makeInMemoryD1(tables: Partial<Tables> = {}): InMemoryD1 {
       return matched
     }
 
+    // ── GET /api/v1/projects/:projectId/search/passages ───────────────────
+    // queryScopedExact SQL (after whitespace-collapse):
+    //   SELECT cells.cell_id AS cell_id, cells.file_id AS file_id,
+    //          cells.side AS side, cells.value AS value,
+    //          snippet(cells_fts, 0, '<mark>', '</mark>', '...', 16) AS snippet,
+    //          cells_fts.rank AS rank, paired.value AS paired_value
+    //     FROM cells_fts
+    //     JOIN cells ON cells.rowid = cells_fts.rowid
+    //     LEFT JOIN cells AS paired
+    //       ON paired.project_id = cells.project_id
+    //      AND paired.file_id = cells.file_id
+    //      AND paired.cell_id = cells.cell_id
+    //      AND paired.side = CASE cells.side WHEN 'source' THEN 'target' ELSE 'source' END
+    //    WHERE cells_fts MATCH ? AND cells.project_id = ?
+    //      [AND cells.side = ?]
+    //    ORDER BY rank ASC LIMIT ?
+    if (
+      /^SELECT cells\.cell_id AS cell_id, cells\.file_id AS file_id, cells\.side AS side, cells\.value AS value, snippet\(cells_fts, 0, '<mark>', '<\/mark>', '\.\.\.', 16\) AS snippet, cells_fts\.rank AS rank, paired\.value AS paired_value FROM cells_fts JOIN cells ON cells\.rowid = cells_fts\.rowid LEFT JOIN cells AS paired ON paired\.project_id = cells\.project_id AND paired\.file_id = cells\.file_id AND paired\.cell_id = cells\.cell_id AND paired\.side = CASE cells\.side WHEN 'source' THEN 'target' ELSE 'source' END WHERE cells_fts MATCH \? AND cells\.project_id = \?/.test(
+        normalized,
+      )
+    ) {
+      const ftsQuery = args[0] as string
+      const pid = args[1] as string
+      const hasSide = normalized.includes("AND cells.side = ?")
+      const side = hasSide ? (args[2] as string) : null
+      const limit = args[hasSide ? 3 : 2] as number
+
+      // Parse quoted tokens from the sanitized FTS query (exact phrase is one
+      // double-quoted token containing spaces, e.g. `"foo bar"`).
+      const tokens = (ftsQuery.match(/"[^"]+"/g) ?? []).map((t) =>
+        t.slice(1, -1).toLowerCase(),
+      )
+
+      const matched = db.cells
+        .filter((c) => c.project_id === pid)
+        .filter((c) => side === null || c.side === side)
+        .filter((c) => {
+          if (tokens.length === 0) return false
+          const v = c.value.toLowerCase()
+          // For the exact-phrase fake, each token string is the full phrase
+          // (possibly multi-word). Check that every token appears in the value.
+          return tokens.every((t) => v.includes(t))
+        })
+        .map((c, idx) => {
+          // Resolve the paired-side cell at the same (project_id, file_id, cell_id).
+          const pairedSide = c.side === 'source' ? 'target' : 'source'
+          const paired = db.cells.find(
+            (p) =>
+              p.project_id === c.project_id &&
+              p.file_id === c.file_id &&
+              p.cell_id === c.cell_id &&
+              p.side === pairedSide,
+          )
+          return {
+            cell_id: c.cell_id,
+            file_id: c.file_id,
+            side: c.side,
+            value: c.value,
+            snippet: c.value,
+            rank: idx,
+            paired_value: paired?.value ?? null,
+          }
+        })
+        .slice(0, limit)
+      return matched
+    }
+
     // ── GET /cell-validators read route ─────────────────────────────────
     if (
       /^SELECT event_id, username, decided_ts FROM cell_validators WHERE project_id = \? AND file_id = \? AND cell_id = \? ORDER BY decided_ts DESC/.test(
@@ -503,6 +570,18 @@ export function makeInMemoryD1(tables: Partial<Tables> = {}): InMemoryD1 {
       return []
     }
 
+    // ── Single-cell DELETE scoped by side (event-projection *.cell.delete) ─
+    if (/^DELETE FROM cells WHERE project_id = \? AND file_id = \? AND cell_id = \? AND side = \?$/.test(normalized)) {
+      const pid = args[0] as string
+      const fid = args[1] as string
+      const cid = args[2] as string
+      const side = args[3] as string
+      db.cells = db.cells.filter(
+        (c) => !(c.project_id === pid && c.file_id === fid && c.cell_id === cid && c.side === side),
+      )
+      return []
+    }
+
     // ── INSERT events (canonical audit row) ────────────────────────────
     // Bind order from handlers/cell-events.ts and file-create.ts:
     //   0=id, 1=schema_version, 2=project_id, 3=file_id, 4=cell_id,
@@ -525,6 +604,61 @@ export function makeInMemoryD1(tables: Partial<Tables> = {}): InMemoryD1 {
       }
       const exists = db.events.some((e) => e.id === row.id)
       if (!exists) db.events.push(row)
+      return []
+    }
+
+    // ── INSERT cells (target.cell.commit UPSERT — literal 'target' in VALUES) ─
+    // Bind order: 0=project_id, 1=file_id, 2=cell_id, 3=value, 4=value_html,
+    //             5=event_id, 6=source_event_id, 7=last_editor, 8=last_edit_at,
+    //             9=word_count, 10=content_hash
+    if (/^INSERT INTO cells \(\s*project_id, file_id, cell_id, side, value, value_html, type, canonical_ref, anchor_cell_id, event_id, source_event_id, last_editor, last_edit_at, validated, word_count, content_hash\s*\) VALUES \(\?, \?, \?, 'target',/.test(
+      normalized,
+    )) {
+      const projectId = args[0] as string
+      const fileId = args[1] as string
+      const cellId = args[2] as string
+      const value = args[3] as string
+      const valueHtml = args[4] as string | null
+      const eventId = args[5] as string
+      const sourceEventId = args[6] as string | null
+      const lastEditor = args[7] as string | null
+      const lastEditAt = args[8] as number
+      const wordCount = args[9] as number
+      const contentHash = args[10] as string | null
+
+      const existing = db.cells.find(
+        (c) => c.project_id === projectId && c.file_id === fileId && c.cell_id === cellId && c.side === 'target',
+      )
+      if (!existing) {
+        db.cells.push({
+          project_id: projectId,
+          file_id: fileId,
+          cell_id: cellId,
+          side: 'target',
+          value,
+          value_html: valueHtml,
+          type: null,
+          canonical_ref: null,
+          anchor_cell_id: null,
+          event_id: eventId,
+          source_event_id: sourceEventId,
+          last_editor: lastEditor,
+          last_edit_at: lastEditAt,
+          validated: 0,
+          word_count: wordCount,
+          content_hash: contentHash,
+        })
+      } else {
+        existing.value = value
+        existing.value_html = valueHtml
+        existing.event_id = eventId
+        existing.source_event_id = sourceEventId
+        existing.last_editor = lastEditor
+        existing.last_edit_at = lastEditAt
+        existing.word_count = wordCount
+        existing.content_hash = contentHash
+        existing.validated = 0
+      }
       return []
     }
 
@@ -603,7 +737,7 @@ export function makeInMemoryD1(tables: Partial<Tables> = {}): InMemoryD1 {
     }
 
     // ── UPDATE cells (source.cell.commit) ───────────────────────────────
-    if (/^UPDATE cells SET value = \?, value_html = \?, event_id = \?, last_editor = \?, last_edit_at = \?, word_count = \?, content_hash = \? WHERE project_id = \? AND file_id = \? AND cell_id = \?$/.test(
+    if (/^UPDATE cells SET value = \?, value_html = \?, event_id = \?, last_editor = \?, last_edit_at = \?, word_count = \?, content_hash = \? WHERE project_id = \? AND file_id = \? AND cell_id = \?( AND side = 'source')?$/.test(
       normalized,
     )) {
       const value = args[0] as string
@@ -616,7 +750,11 @@ export function makeInMemoryD1(tables: Partial<Tables> = {}): InMemoryD1 {
       const projectId = args[7] as string
       const fileId = args[8] as string
       const cellId = args[9] as string
-      const cell = findCell(projectId, fileId, cellId)
+      // Find the source-side cell (the literal `AND side = 'source'` in SQL
+      // ensures only the source row is updated in real D1; replicate that here).
+      const cell = db.cells.find(
+        (c) => c.project_id === projectId && c.file_id === fileId && c.cell_id === cellId && c.side === 'source',
+      )
       if (cell) {
         cell.value = value
         cell.value_html = valueHtml
@@ -854,6 +992,7 @@ export function makeInMemoryD1(tables: Partial<Tables> = {}): InMemoryD1 {
     }
 
     // ── INSERT INTO cells_fts(cells_fts, rowid, value) — FTS5 delete ─────
+    // VALUES form (from rebuild-fts, direct rowid):
     if (/^INSERT INTO cells_fts\(cells_fts, rowid, value\) VALUES \(\?, \?, \?\)$/.test(normalized)) {
       const cmd = args[0] as string
       const rowid = args[1] as number
@@ -863,13 +1002,56 @@ export function makeInMemoryD1(tables: Partial<Tables> = {}): InMemoryD1 {
       return []
     }
 
+    // SELECT form (from event-projection.ts ftsDeleteStmt):
+    //   INSERT INTO cells_fts(cells_fts, rowid, value)
+    //     SELECT 'delete', rowid, value FROM cells
+    //     WHERE project_id = ? AND file_id = ? AND cell_id = ? AND side = ?
+    if (/^INSERT INTO cells_fts\(cells_fts, rowid, value\) SELECT 'delete', rowid, value FROM cells WHERE project_id = \? AND file_id = \? AND cell_id = \? AND side = \?$/.test(normalized)) {
+      const pid = args[0] as string
+      const fid = args[1] as string
+      const cid = args[2] as string
+      const side = args[3] as string
+      // Find the matching cells row to get its rowid, then remove from cells_fts.
+      const cellRow = db.cells.find(
+        (c) => c.project_id === pid && c.file_id === fid && c.cell_id === cid && c.side === side,
+      )
+      if (cellRow) {
+        const rowid = getRowid(cellRow)
+        db.cells_fts = db.cells_fts.filter((r) => r.rowid !== rowid)
+      }
+      // No-op if no matching cells row exists (genuine first create).
+      return []
+    }
+
     // ── INSERT INTO cells_fts(rowid, value) — FTS5 insert ─────────────────
+    // VALUES form (from rebuild-fts, direct rowid):
     if (/^INSERT INTO cells_fts\(rowid, value\) VALUES \(\?, \?\)$/.test(normalized)) {
       const rowid = args[0] as number
       const value = args[1] as string
       // Remove any stale entry then add fresh (idempotent within the fake).
       db.cells_fts = db.cells_fts.filter((r) => r.rowid !== rowid)
       db.cells_fts.push({ rowid, value })
+      return []
+    }
+
+    // SELECT form (from event-projection.ts ftsInsertStmt):
+    //   INSERT INTO cells_fts(rowid, value)
+    //     SELECT rowid, value FROM cells
+    //     WHERE project_id = ? AND file_id = ? AND cell_id = ? AND side = ?
+    if (/^INSERT INTO cells_fts\(rowid, value\) SELECT rowid, value FROM cells WHERE project_id = \? AND file_id = \? AND cell_id = \? AND side = \?$/.test(normalized)) {
+      const pid = args[0] as string
+      const fid = args[1] as string
+      const cid = args[2] as string
+      const side = args[3] as string
+      const cellRow = db.cells.find(
+        (c) => c.project_id === pid && c.file_id === fid && c.cell_id === cid && c.side === side,
+      )
+      if (cellRow) {
+        const rowid = getRowid(cellRow)
+        // Remove any stale entry then add fresh (idempotent within the fake).
+        db.cells_fts = db.cells_fts.filter((r) => r.rowid !== rowid)
+        db.cells_fts.push({ rowid, value: cellRow.value })
+      }
       return []
     }
 

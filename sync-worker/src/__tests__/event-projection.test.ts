@@ -10,6 +10,7 @@ import {
   type PersistedEvent,
 } from '../events/event-projection'
 import type { EventKind } from '../events/types'
+import { makeInMemoryD1 } from './helpers/d1-fake'
 
 interface RecordedStmt {
   sql: string
@@ -371,5 +372,107 @@ describe('buildEventProjectionStmts — error paths', () => {
         [],
       ),
     ).toThrow(/unknown event kind/)
+  })
+})
+
+// ── Integration: FTS5 SELECT-form handlers in d1-fake ───────────────────────
+//
+// These tests run real D1PreparedStatements through the InMemoryD1 (via
+// db.batch) to verify the SELECT-form ftsInsertStmt / ftsDeleteStmt SQL
+// patterns are correctly handled by the fake.  This is the integration test
+// that justifies Part A of the test infrastructure work.
+
+describe('FTS5 integration via InMemoryD1 — SELECT-form insert/delete', () => {
+  it('source.cell.create populates cells_fts via SELECT-form insert', async () => {
+    const db = makeInMemoryD1()
+
+    // Step 1: process a source.cell.create event.
+    const createStmts: D1PreparedStatement[] = []
+    buildEventProjectionStmts(
+      db,
+      makeEvent('source.cell.create', {
+        cellId: 'cell-1',
+        value: 'In the beginning',
+        anchorCellId: null,
+      }),
+      createStmts,
+    )
+    await db.batch(createStmts)
+
+    const tables = db._tables()
+    // The cells row must exist.
+    expect(tables.cells).toHaveLength(1)
+    expect(tables.cells[0].value).toBe('In the beginning')
+    // cells_fts must contain an entry for the row.
+    expect(tables.cells_fts).toHaveLength(1)
+    expect(tables.cells_fts[0].value).toBe('In the beginning')
+  })
+
+  it('source.cell.commit updates the cells_fts value', async () => {
+    const db = makeInMemoryD1()
+
+    // First create the cell.
+    const createStmts: D1PreparedStatement[] = []
+    buildEventProjectionStmts(
+      db,
+      makeEvent('source.cell.create', {
+        cellId: 'cell-1',
+        value: 'In the beginning',
+        anchorCellId: null,
+      }),
+      createStmts,
+    )
+    await db.batch(createStmts)
+
+    // Then commit a new value.
+    const commitStmts: D1PreparedStatement[] = []
+    buildEventProjectionStmts(
+      db,
+      makeEvent('source.cell.commit', {
+        value: 'In the beginning God created',
+      }, { id: 'evt-commit', parentId: 'evt-test-id' }),
+      commitStmts,
+    )
+    await db.batch(commitStmts)
+
+    const tables = db._tables()
+    // cells should have the updated value.
+    expect(tables.cells[0].value).toBe('In the beginning God created')
+    // cells_fts should reflect the new value (old entry replaced).
+    expect(tables.cells_fts).toHaveLength(1)
+    expect(tables.cells_fts[0].value).toBe('In the beginning God created')
+  })
+
+  it('source.cell.delete removes the cells_fts entry', async () => {
+    const db = makeInMemoryD1()
+
+    // Create then delete.
+    const createStmts: D1PreparedStatement[] = []
+    buildEventProjectionStmts(
+      db,
+      makeEvent('source.cell.create', {
+        cellId: 'cell-1',
+        value: 'Verse text',
+        anchorCellId: null,
+      }),
+      createStmts,
+    )
+    await db.batch(createStmts)
+
+    expect(db._tables().cells_fts).toHaveLength(1)
+
+    const deleteStmts: D1PreparedStatement[] = []
+    buildEventProjectionStmts(
+      db,
+      makeEvent('source.cell.delete', {}),
+      deleteStmts,
+    )
+    await db.batch(deleteStmts)
+
+    const tables = db._tables()
+    // cells row is gone.
+    expect(tables.cells).toHaveLength(0)
+    // cells_fts entry is also removed.
+    expect(tables.cells_fts).toHaveLength(0)
   })
 })

@@ -17,6 +17,10 @@ const MAX_BATCH = 100
 interface PostBody {
   accepted: Array<{ id: string }>
   rejected: Array<{ id: string; status: number; reason: string }>
+  /** Chain-mutating events the server accepted (logged) but did NOT apply to
+   *  the projection — stale siblings that had no visible effect. Surfaced so
+   *  "accepted" is never silently mistaken for "saved". */
+  stale?: Array<{ id: string }>
 }
 
 export interface FlushDeps {
@@ -99,6 +103,21 @@ export async function flushOutboxBatch(deps: FlushDeps): Promise<{
       { error: { status: 0, reason: "malformed server response" } },
     )
     return { posted: events.length, accepted: 0, networkError: true }
+  }
+
+  // Surface failures loudly instead of swallowing them. A rejected event
+  // (bad shape, forbidden, server error) and a stale event (accepted but not
+  // applied to the projection) both previously vanished without a trace — the
+  // root of the "edits silently don't save" bug. These logs are the minimum
+  // visible signal; the OutboxSyncIndicator reflects pending/failed counts.
+  if (body.rejected && body.rejected.length > 0) {
+    console.error("[outbox-flush] server REJECTED events:", body.rejected)
+  }
+  if (body.stale && body.stale.length > 0) {
+    console.error(
+      "[outbox-flush] server accepted but did NOT apply (stale siblings):",
+      body.stale.map((s) => s.id),
+    )
   }
 
   const acceptedIds = new Set((body.accepted ?? []).map((a) => a.id))

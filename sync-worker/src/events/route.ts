@@ -176,6 +176,10 @@ export async function handleEventsWriteRequest(
 
   const accepted: AcceptedEntry[] = []
   const rejected: RejectedEntry[] = []
+  // Ids of chain-mutating events that were accepted (logged) but did NOT
+  // advance the projection — stale siblings. Surfaced to the client so an
+  // edit that had no effect is visible rather than silently dropped.
+  const staleIds = new Set<string>()
 
   // ── Per-event accumulation ─────────────────────────────────────────────
 
@@ -252,9 +256,29 @@ export async function handleEventsWriteRequest(
       rawEvent.kind !== 'cell.audio.select' &&
       rawEvent.kind !== 'cell.audio.remove' &&
       rawEvent.kind !== 'file.create'
-    const updateProjection = isChainMutating
-      ? await isWinningChild(db, candidate)
-      : true
+    // Last-write-wins for cell commits: a contributor's own edit must never be
+    // silently dropped by the AD-2 first-child-of-parent rule. That rule
+    // exists to MERGE concurrent OFFLINE edits from multiple people — for a
+    // single editor (re)committing a cell it only causes silent loss, because
+    // a commit whose parentId doesn't match the live head loses the race and
+    // is accepted-but-not-projected. The commit being processed has the
+    // highest server_seq for this cell, so it always becomes the projection
+    // head; full history still lands in `events`. Creates / reorders / deletes
+    // keep first-child resolution (they shouldn't double-apply).
+    const isCellCommit =
+      rawEvent.kind === 'target.cell.commit' || rawEvent.kind === 'source.cell.commit'
+    const updateProjection = isCellCommit
+      ? true
+      : isChainMutating
+        ? await isWinningChild(db, candidate)
+        : true
+    // A chain-mutating event that does NOT advance the projection is a stale
+    // sibling: it's still logged + 200-accepted, but the caller's change had
+    // no visible effect. Report it so the client surfaces it instead of
+    // treating "accepted" as "saved" (the old silent-loss bug).
+    if (isChainMutating && !updateProjection) {
+      staleIds.add(rawEvent.id)
+    }
 
     // Dispatch.
     const outcome = dispatchEvent(db, authResult.event, serverTs, {
@@ -356,7 +380,10 @@ export async function handleEventsWriteRequest(
         }
       }
 
-      return Response.json({ accepted, rejected }, { status: 200 })
+      return Response.json(
+        { accepted, rejected, stale: accepted.filter((a) => staleIds.has(a.id)) },
+        { status: 200 },
+      )
     }
 
     for (const entry of committedEntries) {
@@ -402,5 +429,5 @@ export async function handleEventsWriteRequest(
     }
   }
 
-  return Response.json({ accepted, rejected })
+  return Response.json({ accepted, rejected, stale: accepted.filter((a) => staleIds.has(a.id)) })
 }

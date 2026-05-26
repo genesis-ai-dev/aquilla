@@ -215,7 +215,7 @@ describe('POST /events — server_seq', () => {
 // ── AD-2 parent-chain rule ─────────────────────────────────────────────
 
 describe('POST /events — AD-2 first-child-of-parent', () => {
-  it('first sibling wins; second sibling is recorded but does NOT advance the projection', async () => {
+  it('cell commits are last-write-wins: a later sibling overwrites the projection', async () => {
     const token = await makeToken()
     const db = makeInMemoryD1()
 
@@ -224,40 +224,44 @@ describe('POST /events — AD-2 first-child-of-parent', () => {
     const r0 = await handleEventsWriteRequest(await makeRequest([create], token), makeEnv(db))
     expect((await r0!.json() as any).accepted).toHaveLength(1)
 
-    // Two commits with the SAME parent_id — only the first wins.
-    const winner = targetCommit({
-      id: 'evt-winner',
+    // Two commits with the SAME parent_id. Under the AD-2 first-child rule a
+    // sibling would be dropped, but cell commits are deliberately LWW: a
+    // contributor's own re-edit must never be silently lost, so the LATER
+    // commit (higher server_seq) takes the projection. The first-child rule
+    // still governs creates / reorders / deletes.
+    const first = targetCommit({
+      id: 'evt-first',
       parentId: 'evt-create-001',
-      payload: { value: 'WINNER' },
+      payload: { value: 'FIRST' },
     })
-    const stale = targetCommit({
-      id: 'evt-stale',
+    const second = targetCommit({
+      id: 'evt-second',
       parentId: 'evt-create-001',
-      payload: { value: 'STALE' },
+      payload: { value: 'SECOND' },
     })
 
-    // First commit lands.
-    const r1 = await handleEventsWriteRequest(await makeRequest([winner], token), makeEnv(db))
+    const r1 = await handleEventsWriteRequest(await makeRequest([first], token), makeEnv(db))
     expect((await r1!.json() as any).accepted).toHaveLength(1)
 
     let cell = (db as any)._tables().cells[0]
-    expect(cell.value).toBe('WINNER')
-    expect(cell.event_id).toBe('evt-winner')
+    expect(cell.value).toBe('FIRST')
+    expect(cell.event_id).toBe('evt-first')
 
-    // Second commit with the same parent_id is accepted (recorded in events)
-    // but the projection should NOT advance.
-    const r2 = await handleEventsWriteRequest(await makeRequest([stale], token), makeEnv(db))
+    // Second commit with the same parent_id is accepted AND applied (LWW) —
+    // it is NOT reported as stale.
+    const r2 = await handleEventsWriteRequest(await makeRequest([second], token), makeEnv(db))
     const body2 = await r2!.json() as any
     expect(body2.accepted).toHaveLength(1)
     expect(body2.rejected).toHaveLength(0)
+    expect(body2.stale ?? []).toHaveLength(0)
 
     const events = (db as any)._tables().events
-    expect(events.find((e: any) => e.id === 'evt-stale')).toBeDefined()
+    expect(events.find((e: any) => e.id === 'evt-second')).toBeDefined()
 
     cell = (db as any)._tables().cells[0]
-    // Projection stayed on the winner.
-    expect(cell.value).toBe('WINNER')
-    expect(cell.event_id).toBe('evt-winner')
+    // Projection advanced to the later commit.
+    expect(cell.value).toBe('SECOND')
+    expect(cell.event_id).toBe('evt-second')
   })
 
   it('idempotent replay: the same event id replayed twice keeps the same chain head', async () => {

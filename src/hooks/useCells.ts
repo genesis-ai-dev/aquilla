@@ -301,7 +301,14 @@ export function useCells(opts: UseCellsOptions): UseCellsResult {
     setCells(out)
   }, [])
 
-  const doFetch = useCallback(async () => {
+  // `soft`: a same-file refetch (revalidate after a commit, focus/visibility
+  // drift check). It must NOT blank the view — otherwise leaving a cell or
+  // returning to the tab flashes the whole list to a skeleton and back. Soft
+  // mode streams into a buffer and swaps it in atomically once complete,
+  // leaving the current rows (already optimistically patched) visible
+  // throughout. A hard fetch (file switch / first load) blanks + shows the
+  // skeleton so we never paint the previous file's rows.
+  const doFetch = useCallback(async (soft = false) => {
     const projectId = projectRef.current
     const fileId = fileRef.current
     const enabled = enabledRef.current
@@ -314,41 +321,53 @@ export function useCells(opts: UseCellsOptions): UseCellsResult {
       return
     }
     const gen = ++generationRef.current
-    // Reset the visible cells immediately so we don't render the previous
-    // file's rows while the new file's first page is in flight. The
-    // CellAreaState machine drops to `syncing-empty` (skeleton) until the
-    // first page lands.
-    rowsRef.current = []
-    setCells([])
-    setIsLoading(true)
+    if (!soft) {
+      // CellAreaState drops to `syncing-empty` (skeleton) until the first
+      // page lands.
+      rowsRef.current = []
+      setCells([])
+      setIsLoading(true)
+    }
     setIsError(false)
     try {
       const token = getToken ? await getToken(fileId) : null
       if (!token) {
         if (generationRef.current !== gen) return
         setIsError(true)
-        setIsLoading(false)
+        if (!soft) setIsLoading(false)
         return
       }
-      // Stream pages in: append each page to the row cache and rebuild the
-      // paired view so the first 500 rows paint immediately on Bible-sized
-      // files (~30k cells × ~60 round-trips). The `gen` fence aborts the
-      // stream if the caller switches files mid-flight.
+      // Stream pages in: on a hard fetch, append each page to the cache and
+      // rebuild so the first 500 rows paint immediately on Bible-sized files
+      // (~30k cells × ~60 round-trips). On a soft refetch, accumulate into a
+      // buffer and swap it in once at the end so the visible list never
+      // flickers (and never shrink-then-grows across pages). The `gen` fence
+      // aborts the stream if the caller switches files mid-flight.
+      const buffer: CellRow[] = []
       await streamFileCells(projectId, fileId, token, (rows) => {
         if (generationRef.current !== gen) return false
         if (rows.length === 0) return
+        if (soft) {
+          for (const r of rows) buffer.push(r)
+          return
+        }
         rowsRef.current = rowsRef.current.length === 0
           ? rows.slice()
           : rowsRef.current.concat(rows)
         rebuildFromCache()
       })
       if (generationRef.current !== gen) return
-      setIsLoading(false)
+      if (soft) {
+        rowsRef.current = buffer
+        rebuildFromCache()
+      } else {
+        setIsLoading(false)
+      }
     } catch (err) {
       if (generationRef.current !== gen) return
       console.warn("[useCells] fetch failed:", err)
       setIsError(true)
-      setIsLoading(false)
+      if (!soft) setIsLoading(false)
     }
   }, [rebuildFromCache])
 
@@ -369,10 +388,10 @@ export function useCells(opts: UseCellsOptions): UseCellsResult {
   // without a manual reload.
   useEffect(() => {
     if (typeof window === "undefined") return
-    function onFocus() { void doFetch() }
+    function onFocus() { void doFetch(true) }
     function onVis() {
       if (typeof document !== "undefined" && document.visibilityState === "visible") {
-        void doFetch()
+        void doFetch(true)
       }
     }
     window.addEventListener("focus", onFocus)
@@ -388,7 +407,7 @@ export function useCells(opts: UseCellsOptions): UseCellsResult {
   }, [doFetch])
 
   const revalidate = useCallback(() => {
-    void doFetch()
+    void doFetch(true)
   }, [doFetch])
 
   // Optimistic local patch for the target row of a single cell. We mutate

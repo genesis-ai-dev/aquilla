@@ -79,6 +79,15 @@ describe("buildProjectWsUrl", () => {
       "ws://localhost/parties/project-sync/p",
     )
   })
+
+  it("appends user param so dev ALLOW_UNAUTHENTICATED identity matches the client", () => {
+    expect(buildProjectWsUrl("http://localhost", "p", null, "ryder")).toBe(
+      "ws://localhost/parties/project-sync/p?user=ryder",
+    )
+    expect(buildProjectWsUrl("https://example.com", "p", "tok", "ry der")).toBe(
+      "wss://example.com/parties/project-sync/p?token=tok&user=ry%20der",
+    )
+  })
 })
 
 describe("parseProjectWsMessage", () => {

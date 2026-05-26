@@ -114,12 +114,25 @@ interface WsHostShape {
  * ws(s). Path is `/parties/project-sync/<projectId>` to match partyserver's
  * conventional layout, mirroring `parties/file-sync/...`.
  */
-export function buildProjectWsUrl(baseUrl: string, projectId: string, token: string | null): string {
+export function buildProjectWsUrl(
+  baseUrl: string,
+  projectId: string,
+  token: string | null,
+  userId?: string | null,
+): string {
   const wsBase = baseUrl
     .replace(/^https?:\/\//, (m) => (m === "https://" ? "wss://" : "ws://"))
     .replace(/\/+$/, "")
-  const tokenSuffix = token ? `?token=${encodeURIComponent(token)}` : ""
-  return `${wsBase}/parties/project-sync/${encodeURIComponent(projectId)}${tokenSuffix}`
+  const params: string[] = []
+  if (token) params.push(`token=${encodeURIComponent(token)}`)
+  // ALLOW_UNAUTHENTICATED dev: the DO ignores the token and reads identity
+  // from `?user=`, falling back to "anon". Without this the client connects
+  // as "anon" while `currentUsername` is something else, so the client's own
+  // presence entry is not filtered out and ends up as a self-held focus lock
+  // that blocks commits. Auth mode ignores this param (uses claims.username).
+  if (userId) params.push(`user=${encodeURIComponent(userId)}`)
+  const suffix = params.length ? `?${params.join("&")}` : ""
+  return `${wsBase}/parties/project-sync/${encodeURIComponent(projectId)}${suffix}`
 }
 
 /**
@@ -193,7 +206,7 @@ export function createWsReconciler(
 
     let ws: WebSocket
     try {
-      const url = buildProjectWsUrl(options.baseUrl, options.projectId, token)
+      const url = buildProjectWsUrl(options.baseUrl, options.projectId, token, options.userId)
       ws = new host.Send(url)
     } catch (err) {
       const e = err instanceof Error ? err : new Error(String(err))

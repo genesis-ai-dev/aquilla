@@ -586,6 +586,17 @@ export function ProjectWorkspace() {
 
   const commitCompletedCell = useCallback(async (cell: CellData, text: string, author: string) => {
     if (!project?.id) return
+    // Optimistic local patch BEFORE the outbox enqueue. Mirrors what
+    // handleEditorCommit in EditorTable does for hand-typed edits, and
+    // collapses the race window where `cells.translated` would otherwise
+    // stay at the old value until `revalidateCells` fetched from the
+    // server. Without this, TipTap's `initialPlain` is briefly stale and
+    // any TipTap-side commit fired during that window (DOM reflow when
+    // the loading overlay vanishes, a virtualizer remount, a focus
+    // bounce) chains a *revert* event with the pre-gen text onto the
+    // gen — producing the "two events at 5:08, second one identical to
+    // 2:28" history pattern.
+    applyOptimisticTargetEdit(cell.id, { value: text })
     await emitTargetCellCommit({
       projectId: project.id,
       fileId: cell.fileId,
@@ -599,8 +610,8 @@ export function ProjectWorkspace() {
     await refreshOutboxPending()
     revalidateAuditStats()
     revalidateCells()
-  }, [project?.id, getTokenForFile, refreshOutboxPending, revalidateAuditStats, revalidateCells])
-  const { completeSingle, completeBatch, isConfigured, isAvailable: isCompletionAvailable, completing, examples, errors } = useCompletion(
+  }, [project?.id, applyOptimisticTargetEdit, getTokenForFile, refreshOutboxPending, revalidateAuditStats, revalidateCells])
+  const { completeSingle, completeBatch, isConfigured, isAvailable: isCompletionAvailable, completing, examples, errors, previews } = useCompletion(
     project?.completionSettings, project?.sourceLanguage || "", project?.targetLanguage || "", branchingSearch, branchingSearchPassages, frontierSession, commitCompletedCell
   )
 
@@ -1381,7 +1392,7 @@ export function ProjectWorkspace() {
             ref={editorRef} project={project} cells={cells}
             username={currentUsername}
             isCompletionConfigured={isConfigured} isCompletionAvailable={isCompletionAvailable} completing={completing}
-            examples={examples} errors={errors}
+            examples={examples} errors={errors} previews={previews}
             onCompleteSingle={completeSingle} onCompleteBatch={completeBatch}
             healthMap={healthMap} infractions={infractions} rules={rules}
             onInfractionClick={(ruleId) => {

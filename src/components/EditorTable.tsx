@@ -4,7 +4,7 @@ import DOMPurify from "dompurify"
 import {
   Check, CheckCheck, Circle, Trash2, AlertTriangle, AlertCircle, RefreshCw,
   MessageCircle, Play, Pause, Mic, MicOff, Sparkles, FileText, History as HistoryIcon,
-  ArrowRight, Activity,
+  ArrowRight, Activity, Loader2,
 } from "lucide-react"
 import type { CellData } from "@/hooks/useCells"
 import type { CodexCellAttachment, WordTiming } from "@/lib/codex-editor/types"
@@ -262,6 +262,12 @@ interface EditorTableProps {
   completing: Map<string, string>
   examples: Map<string, ScoredPair[]>
   errors: Map<string, string>
+  /** Streaming completion text keyed by cell id. Populated chunk-by-chunk
+   *  by `useCompletion.completeSingle`; rendered in the target column as a
+   *  non-editable overlay while `completing` is "searching"/"generating"
+   *  so the user sees progress immediately instead of waiting for the
+   *  commit + outbox flush to land. */
+  previews: Map<string, string>
   onCompleteSingle: (cell: CellData) => void
   onCompleteBatch: (cells: CellData[]) => void
   healthMap: Map<string, number>
@@ -302,7 +308,7 @@ interface EditorTableProps {
 
 export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(function EditorTable({
   project, cells, username, isCompletionConfigured, isCompletionAvailable,
-  completing, examples, errors,
+  completing, examples, errors, previews,
   onCompleteSingle, onCompleteBatch, healthMap,
   infractions = new Map(), rules = [], onInfractionClick,
   isBacktranslationConfigured, onBacktranslate, backtranslating, backtranslationErrors,
@@ -676,6 +682,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
                 examples={examples}
                 completing={completing}
                 errors={errors}
+                previews={previews}
                 healthMap={healthMap}
                 infractions={infractions}
                 ruleMap={ruleMap}
@@ -748,6 +755,7 @@ interface MemoizedRowProps {
   examples: Map<string, ScoredPair[]>
   completing: Map<string, string>
   errors: Map<string, string>
+  previews: Map<string, string>
   healthMap: Map<string, number>
   infractions: Map<string, RuleInfraction[]>
   ruleMap: Map<string, TranslationRule>
@@ -786,7 +794,7 @@ interface MemoizedRowProps {
 
 const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
   const {
-    cell, examples, completing, errors, healthMap, infractions,
+    cell, examples, completing, errors, previews, healthMap, infractions,
     backtranslating, backtranslationErrors, cellOpenCommentCount,
     activeCueIndex, rowIndex, gridCols,
     onDragStart: onDragStartParent, onDragEnter: onDragEnterParent,
@@ -821,6 +829,17 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
 
   const completingState = completing.get(cellId)
   const isLoading = completingState === "searching" || completingState === "generating"
+  // Streaming preview text — populated chunk-by-chunk by useCompletion's
+  // onChunk handler. We surface it in the target column so the user sees
+  // tokens arrive in real time instead of waiting for the LLM to finish
+  // AND the commit-to-outbox chain to land (which adds a network hop).
+  const completionPreview = previews.get(cellId)
+  const loadingPhase: "searching" | "generating" | null =
+    completingState === "searching"
+      ? "searching"
+      : completingState === "generating"
+        ? "generating"
+        : null
   const error = errors.get(cellId)
   const health = healthMap.get(cellId)
   const isBacktranslating = backtranslating?.has(cellId)
@@ -855,6 +874,8 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
         isCompletionConfigured={isCompletionConfigured}
         isCompletionAvailable={isCompletionAvailable}
         isLoading={isLoading}
+        completionPreview={completionPreview}
+        loadingPhase={loadingPhase}
         cellExamples={cellExamples}
         highlights={highlights}
         error={error}
@@ -920,6 +941,13 @@ interface EditorRowProps {
   isCompletionConfigured: boolean
   isCompletionAvailable: boolean
   isLoading: boolean
+  /** Streaming completion text for this cell, while `isLoading` is true.
+   *  Undefined when no completion is in flight. Empty string is possible
+   *  in the brief window between "searching" and the first token. */
+  completionPreview: string | undefined
+  /** Which phase of the completion is currently running, if any. Drives the
+   *  placeholder copy ("Looking up examples…" vs "Generating…"). */
+  loadingPhase: "searching" | "generating" | null
   cellExamples: ScoredPair[]
   highlights: ReturnType<typeof buildHighlightsFromExamples>
   error?: string
@@ -958,6 +986,7 @@ interface EditorRowProps {
 
 function EditorRow({
   project, cell, username, editable, isCompletionConfigured, isCompletionAvailable, isLoading,
+  completionPreview, loadingPhase,
   cellExamples, highlights, error, health,
   cellInfractions, waivedInfractions, ruleMap,
   onCompleteSingle, onInfractionClick,
@@ -1670,7 +1699,7 @@ function EditorRow({
             )}
           </button>
           <div className="flex flex-1 flex-col">
-            <div className="flex min-h-[40px] flex-1 flex-col">
+            <div className="relative flex min-h-[40px] flex-1 flex-col">
               <TranslatedEditor
                 cellId={cell.id}
                 initialPlain={cell.translated}
@@ -1678,8 +1707,8 @@ function EditorRow({
                 onCommit={handleEditorCommit}
                 onFocus={handleEditorFocus}
                 onBlur={handleEditorBlurOuter}
-                className="w-full"
-                editable={editable}
+                className={cn("w-full", isLoading && "opacity-30 transition-opacity")}
+                editable={editable && !isLoading}
                 heldByLabel={lockHolderLabel}
                 infractions={[...cellInfractions, ...waivedInfractions]}
                 ruleSeverity={ruleSeverity}
@@ -1691,6 +1720,47 @@ function EditorRow({
                 remoteChangedDuringEdit={remoteChangedWhileFocused}
                 onDiscardLocal={handleDiscardLocalAndReload}
               />
+              {/* Streaming preview overlay — visible while the LLM is
+                  running. We show the text as it streams in so the user
+                  sees progress instead of waiting for the commit + outbox
+                  flush to land. Pointer-events-none so it doesn't fight
+                  the underlying TipTap editor (we just dim TipTap to
+                  opacity-30 to keep it as the canonical layer). When
+                  isLoading flips off post-commit, TipTap re-renders with
+                  `cell.translated` and the overlay disappears — no
+                  flicker because the text matches. */}
+              {isLoading && (
+                <div
+                  aria-live="polite"
+                  aria-busy="true"
+                  className="pointer-events-none absolute inset-0 flex text-sm"
+                >
+                  {completionPreview ? (
+                    /* Streaming preview flows top-down like normal cell
+                       text — same metrics as TipTap underneath so the
+                       handoff at isLoading=false has no visible jump. */
+                    <p className="whitespace-pre-wrap px-2 py-1 leading-relaxed text-foreground/90">
+                      {completionPreview}
+                      <span
+                        aria-hidden
+                        className="ml-0.5 inline-block h-3.5 w-[2px] -mb-0.5 animate-pulse bg-primary/70 align-middle"
+                      />
+                    </p>
+                  ) : (
+                    /* Pre-stream spinner — centered so it doesn't overlap
+                       any existing target text peeking through the dimmed
+                       editor underneath. */
+                    <div className="m-auto flex items-center gap-1.5 rounded-md bg-background/70 px-2 py-1 text-muted-foreground backdrop-blur-sm">
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
+                      <span>
+                        {loadingPhase === "searching"
+                          ? "Looking up similar examples…"
+                          : "Generating translation…"}
+                      </span>
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
             {error && <p className="mt-0.5 text-xs text-destructive">{error}</p>}
           </div>

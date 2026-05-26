@@ -265,7 +265,7 @@ export function useProjectSettings(
     }
     setServer(optimistic)
 
-    const result: PatchResult = await patchProjectSettings(jwt, projectId, partial, baseVersion)
+    const result: PatchResult = await patchProjectSettings(jwt, projectId, optimistic.settings, baseVersion)
     if (!aliveRef.current) return { kind: "ok" }
 
     if (result.kind === "ok") {

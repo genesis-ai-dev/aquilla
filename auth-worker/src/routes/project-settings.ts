@@ -4,13 +4,14 @@
 //
 //   GET  /:projectId/settings        any project member
 //   PUT  /:projectId/settings        maintainer (600)+ per AD-6
+//   PATCH /:projectId/settings       compatibility alias for older web builds
 //
-// The PUT requires `ifMatchVersion` (query string or header). On mismatch
-// the response is 409 with the current row attached so the client can show
+// Writes require `ifMatchVersion` (query string or header). On mismatch the
+// response is 409 with the current row attached so the client can show
 // "settings changed elsewhere — refresh and reapply." On match we run a
-// single atomic UPDATE that re-checks the version inside the WHERE clause
-// — meta.changes == 0 means a concurrent writer landed first and we 409
-// with the now-stored row.
+// single atomic UPDATE that re-checks the version inside the WHERE clause —
+// meta.changes == 0 means a concurrent writer landed first and we 409 with
+// the now-stored row.
 //
 // Settings keys (all optional per spec): sourceLanguage, targetLanguage,
 // systemPrompt, rules, rulePenalties, decaySettings, validationCount,
@@ -124,7 +125,7 @@ projectSettings.get("/:projectId/settings", authMiddleware, async (c) => {
 })
 
 // ──────────────────────────────────────────────────────────────────────────
-// PUT /api/v2/projects/:projectId/settings
+// PUT/PATCH /api/v2/projects/:projectId/settings
 //
 // Body shape:
 //   { settings: object, ifMatchVersion?: number }
@@ -149,7 +150,8 @@ function parseIntOrNull(s: string | undefined): number | null {
   return Number.isFinite(n) && n >= 0 ? n : null
 }
 
-projectSettings.put(
+projectSettings.on(
+  ["PUT", "PATCH"],
   "/:projectId/settings",
   authMiddleware,
   zValidator("json", updateSettingsSchema),

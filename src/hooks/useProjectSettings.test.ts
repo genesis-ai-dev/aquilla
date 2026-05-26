@@ -168,13 +168,13 @@ describe("useProjectSettings — write path", () => {
   it("optimistic write + server confirm", async () => {
     vi.spyOn(restClient, "fetchProjectSettings").mockResolvedValue({
       version: 1, updatedAt: "x", updatedBy: { id: 1, username: "ryder" },
-      settings: { sourceLanguage: "en" },
+      settings: { sourceLanguage: "en", targetLanguage: "swh" },
     })
     const patchSpy = vi.spyOn(restClient, "patchProjectSettings").mockResolvedValue({
       kind: "ok",
       value: {
         version: 2, updatedAt: "y", updatedBy: { id: 1, username: "ryder" },
-        settings: { sourceLanguage: "fr" },
+        settings: { sourceLanguage: "fr", targetLanguage: "swh" },
       },
     })
     const { result } = renderHook(() => useProjectSettings("p1", 700))
@@ -184,7 +184,12 @@ describe("useProjectSettings — write path", () => {
       res = await result.current.patch({ sourceLanguage: "fr" })
     })
     expect(res.kind).toBe("ok")
-    expect(patchSpy).toHaveBeenCalledWith("test-jwt", "p1", { sourceLanguage: "fr" }, 1)
+    expect(patchSpy).toHaveBeenCalledWith(
+      "test-jwt",
+      "p1",
+      { sourceLanguage: "fr", targetLanguage: "swh" },
+      1,
+    )
     expect(result.current.settings.sourceLanguage).toBe("fr")
     expect(result.current.version).toBe(2)
   })

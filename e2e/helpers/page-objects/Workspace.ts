@@ -34,6 +34,12 @@ export class Workspace {
     return this.page.locator("[data-cell-id]").nth(index)
   }
 
+  private editableTarget(index: number): Locator {
+    return this.cellRow(index)
+      .locator('textarea, .ProseMirror[contenteditable="true"], [contenteditable="true"]')
+      .first()
+  }
+
   /** Click into a cell, type text, blur. Persists on blur per editor design.
    *
    * Cell editable surface is either:
@@ -48,13 +54,21 @@ export class Workspace {
   async editCell(index: number, text: string): Promise<void> {
     const row = this.cellRow(index)
     await row.scrollIntoViewIfNeeded()
-    const target = row
-      .locator('textarea, .ProseMirror[contenteditable="true"], [contenteditable="true"]')
-      .first()
+    const target = this.editableTarget(index)
     await target.waitFor({ state: "visible", timeout: 10_000 })
     await target.click()
     await this.page.keyboard.type(text)
     await this.page.locator("aside").click() // blur outside editor
+  }
+
+  async editCellWithoutServerWait(index: number, text: string): Promise<void> {
+    const row = this.cellRow(index)
+    await row.scrollIntoViewIfNeeded()
+    const target = this.editableTarget(index)
+    await target.waitFor({ state: "visible", timeout: 10_000 })
+    await target.click()
+    await this.page.keyboard.type(text)
+    await this.page.locator("aside").click()
   }
 
   async readCell(index: number): Promise<string> {

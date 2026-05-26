@@ -11,6 +11,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { renderHook, waitFor, act } from "@testing-library/react"
 import type { CellRow } from "@/lib/sync/cells-read-types"
+import type { OutboxRecord } from "@/lib/sync/outbox"
 
 const fetchAllMock = vi.fn<(projectId: string, fileId: string, jwt: string, side?: "source" | "target") => Promise<CellRow[]>>()
 // Optional override: a queue of pages to deliver one-at-a-time. When non-empty,
@@ -62,6 +63,41 @@ function makeRow(over: Partial<CellRow> & Pick<CellRow, "cellId" | "side">): Cel
     validated: false,
     wordCount: 0,
     ...over,
+  }
+}
+
+function pendingTargetCommit(over: {
+  id?: string
+  projectId?: string
+  fileId?: string
+  cellId: string
+  value: string
+  valueHtml?: string
+  clientTs?: number
+}): OutboxRecord {
+  const id = over.id ?? `pending-${over.cellId}`
+  return {
+    id,
+    enqueuedAt: over.clientTs ?? 1_000,
+    attempts: 0,
+    lastAttemptAt: null,
+    lastError: null,
+    event: {
+      id,
+      schemaVersion: 1,
+      kind: "target.cell.commit",
+      projectId: over.projectId ?? "proj-a",
+      fileId: over.fileId ?? "file-x",
+      cellId: over.cellId,
+      parentId: "source-event",
+      author: "alice",
+      clientTs: over.clientTs ?? 1_000,
+      payload: {
+        value: over.value,
+        ...(over.valueHtml !== undefined ? { valueHtml: over.valueHtml } : {}),
+        sourceEventId: "source-event",
+      },
+    },
   }
 }
 
@@ -150,6 +186,53 @@ describe("useCells (Phase 2a, D1-backed)", () => {
     act(() => { result.current.revalidate() })
     await waitFor(() => expect(result.current.cells[0].translated).toBe("v2"))
     expect(fetchAllMock).toHaveBeenCalledTimes(2)
+  })
+
+  it("overlays a pending target commit over stale D1 rows", async () => {
+    fetchAllMock.mockResolvedValueOnce([
+      makeRow({ cellId: "c1", side: "source", value: "src", eventId: "source-event" }),
+      makeRow({ cellId: "c1", side: "target", value: "old target", eventId: "old-target" }),
+    ])
+    const pending = [pendingTargetCommit({ id: "pending-1", cellId: "c1", value: "queued target" })]
+    const { result } = renderHook(() =>
+      useCells({
+        projectId: "proj-a",
+        fileId: "file-x",
+        getToken,
+        enabled: true,
+        pendingOutboxRecords: pending,
+      }),
+    )
+    await waitFor(() => expect(result.current.cells).toHaveLength(1))
+    expect(result.current.cells[0].translated).toBe("queued target")
+    expect(result.current.cells[0].targetEventId).toBe("pending-1")
+    expect(result.current.cells[0].targetSourceEventId).toBe("source-event")
+  })
+
+  it("creates a target-side cell from a pending commit when D1 only has source", async () => {
+    fetchAllMock.mockResolvedValueOnce([
+      makeRow({
+        cellId: "c1",
+        side: "source",
+        value: "src",
+        canonicalRef: "GEN 1:1",
+        eventId: "source-event",
+      }),
+    ])
+    const pending = [pendingTargetCommit({ cellId: "c1", value: "queued target" })]
+    const { result } = renderHook(() =>
+      useCells({
+        projectId: "proj-a",
+        fileId: "file-x",
+        getToken,
+        enabled: true,
+        pendingOutboxRecords: pending,
+      }),
+    )
+    await waitFor(() => expect(result.current.cells).toHaveLength(1))
+    expect(result.current.cells[0].original).toBe("src")
+    expect(result.current.cells[0].translated).toBe("queued target")
+    expect(result.current.cells[0].globalReferences).toEqual(["GEN 1:1"])
   })
 
   it("returns empty cells when disabled, without fetching", async () => {

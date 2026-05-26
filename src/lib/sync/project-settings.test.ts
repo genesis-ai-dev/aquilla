@@ -77,6 +77,27 @@ describe("patchProjectSettings", () => {
     }
   })
 
+  it("accepts identity's current field on 409 conflicts", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(
+      JSON.stringify({
+        error: "version mismatch",
+        current: {
+          version: 8,
+          updatedAt: "2026-04-29T10:03:00Z",
+          updatedBy: { id: 14, username: "morgan" },
+          settings: { targetLanguage: "pt" },
+        },
+      }),
+      { status: 409, headers: { "content-type": "application/json" } }
+    ))
+    const got = await patchProjectSettings("jwt", "p1", { targetLanguage: "es" }, 7, API)
+    expect(got.kind).toBe("conflict")
+    if (got.kind === "conflict") {
+      expect(got.latest.version).toBe(8)
+      expect(got.latest.settings.targetLanguage).toBe("pt")
+    }
+  })
+
   it("returns forbidden + required level on 403", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(
       JSON.stringify({ error: "forbidden", required: 500, role: 400 }),

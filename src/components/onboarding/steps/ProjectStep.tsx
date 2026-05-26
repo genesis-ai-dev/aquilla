@@ -55,6 +55,8 @@ export function ProjectStep({
       </div>
     )
   }
+  const sessionJwt = session.jwt
+  const sessionUsername = session.username
 
   async function handleCreate(e: React.FormEvent) {
     e.preventDefault()
@@ -67,7 +69,7 @@ export function ProjectStep({
       // ProjectCreateDialog which enforces this same ordering.
       const created = await createRemoteProject(
         { id: uuid(), name: name.trim() },
-        session.jwt,
+        sessionJwt,
       )
       const project: ProjectRecord = {
         id: created.id,
@@ -76,8 +78,8 @@ export function ProjectStep({
         targetLanguage: targetLanguage.trim(),
         createdAt: new Date().toISOString(),
         files: [],
-        members: [{ userId: session.username, role: "owner" }],
-        username: displayName || session.username,
+        members: [{ userId: sessionUsername, role: "owner" }],
+        username: displayName || sessionUsername,
         syncRole: {
           level: created.role.level,
           name: created.role.name,

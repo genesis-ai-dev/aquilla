@@ -102,8 +102,13 @@ export async function patchProjectSettings(
     return { kind: "ok", value }
   }
   if (res.status === 409) {
-    const body = (await res.json()) as { latest: ProjectSettingsResponse }
-    return { kind: "conflict", latest: body.latest }
+    const body = (await res.json()) as {
+      latest?: ProjectSettingsResponse
+      current?: ProjectSettingsResponse
+    }
+    const latest = body.latest ?? body.current
+    if (latest) return { kind: "conflict", latest }
+    return { kind: "error", status: res.status, message: "version conflict" }
   }
   if (res.status === 403) {
     const body = (await res.json().catch(() => ({}))) as { required?: number; role?: number }

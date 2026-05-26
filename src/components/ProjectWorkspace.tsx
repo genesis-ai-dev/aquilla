@@ -53,7 +53,7 @@ import {
 import { emitTargetCellCommit } from "@/lib/sync/events-emit"
 import { flushOutboxBatch } from "@/lib/sync/outbox-flush"
 import { useCellsAuditStatsWithOverlay } from "@/hooks/useCellsAuditStatsWithOverlay"
-import { Film, Scale, MessagesSquare, Camera, Share2, Settings as SettingsIcon, Lock, ClipboardList, Brain, Trash2, Undo2, Search as SearchIcon, Sparkles, Mic2 } from "lucide-react"
+import { Film, Scale, MessagesSquare, Camera, Share2, Settings as SettingsIcon, Lock, ClipboardList, Trash2, Undo2, Search as SearchIcon, Sparkles, Mic2 } from "lucide-react"
 import { restoreProject } from "@/lib/store/project-index"
 import { AppShell } from "./AppShell"
 import { WorkspaceHeader } from "./WorkspaceHeader"
@@ -87,7 +87,6 @@ import { useSetupChecklist } from "@/hooks/useSetupChecklist"
 import { SetupChecklistDrawer } from "./onboarding/SetupChecklistDrawer"
 import { SystemPromptNudge } from "./onboarding/SystemPromptNudge"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
-import { useFeatureFlag } from "@/hooks/useFeatureFlag"
 import { NextUnfinishedButton } from "./NextUnfinishedButton"
 import { useNextUnfinished } from "@/hooks/useNextUnfinished"
 import { AiSetupDialog } from "./AiSetupDialog"
@@ -862,7 +861,6 @@ export function ProjectWorkspace() {
   const { state: checklistState, dismissed: checklistDismissed, dismiss: dismissChecklist, refreshShares: refreshChecklistShares } = useSetupChecklist(project ?? null)
   const [checklistOpen, setChecklistOpen] = useState(false)
   const [showChipTooltip, setShowChipTooltip] = useState(false)
-  const livingMemoryEnabled = useFeatureFlag("living-memory-view", project)
 
   const handleChecklistOpenChange = useCallback((next: boolean) => {
     setChecklistOpen(next)
@@ -1007,18 +1005,8 @@ export function ProjectWorkspace() {
           }))
         } },
     ]
-    if (livingMemoryEnabled) {
-      // Insert before Share so it sits with Rules/Comments/Snapshots.
-      const insertIdx = items.findIndex((i) => i.id === "share")
-      items.splice(insertIdx, 0, {
-        id: "living-memory",
-        label: "Living Memory",
-        icon: Brain,
-        onClick: () => navigate(`/project/${projectId}/memory`),
-      })
-    }
     return items
-  }, [projectId, activeFileId, navigate, openCommentCount, livingMemoryEnabled])
+  }, [projectId, activeFileId, navigate, openCommentCount])
 
   // Phase 2c-gamma: countTranscribeTargets/countSynthTargets lived in bulk-audio
   // (Y.Doc-coupled). They're zeroed until the audio-attachment event grammar

@@ -5,7 +5,6 @@ import { ProjectSettings } from "@/components/ProjectSettings"
 import { DebugView } from "@/components/DebugView"
 import { RulesPage } from "@/components/RulesPage"
 import { VoiceStudioPage } from "@/components/VoiceStudioPage"
-import { LivingMemoryPage } from "@/components/LivingMemoryPage"
 import { CommentsPage } from "@/components/CommentsPage"
 import { SnapshotsPage } from "@/components/SnapshotsPage"
 import { JoinPage } from "@/components/JoinPage"
@@ -67,7 +66,6 @@ function AppRoutes() {
       <Route path="/project/:id/settings/debug" element={<DebugView />} />
       <Route path="/project/:id/rules" element={<RulesPage />} />
       <Route path="/project/:id/voice" element={<VoiceStudioPage />} />
-      <Route path="/project/:id/memory" element={<LivingMemoryPage />} />
       <Route path="/project/:id/comments" element={<CommentsPage />} />
       <Route path="/project/:id/comments/debug" element={<DebugView />} />
       <Route path="/project/:id/snapshots" element={<SnapshotsPage />} />

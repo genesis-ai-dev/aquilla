@@ -13,8 +13,6 @@ import { getProject, updateProject } from "@/lib/store/project-index"
 import { fetchModels, resolveProvider } from "@/lib/completion/completion-service"
 import { useSaveCompletionSettings, DEFAULT_SYSTEM_PROMPT } from "@/hooks/useCompletionSettings"
 import type { ProjectRecord, CompletionProvider, ProjectTtsSettings, DecaySettings } from "@/lib/parsers/types"
-import { listFlags } from "@/lib/features/flags"
-import { useFeatureFlag, setFeatureFlag } from "@/hooks/useFeatureFlag"
 import { ValidationSettingsSection } from "./ProjectSettings/ValidationSettingsSection"
 import { DecaySettingsSection } from "./ProjectSettings/DecaySettingsSection"
 import { AudioMediaStrategySection } from "./ProjectSettings/AudioMediaStrategySection"
@@ -544,36 +542,6 @@ export function ProjectSettings() {
           </Card>
         )}
 
-        <Card>
-          <CardHeader>
-            <CardTitle>Experimental</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <p className="text-sm text-muted-foreground">
-              These features are in active development. They may change, move, or be
-              removed. Expect rough edges.
-            </p>
-            {listFlags().length === 0 ? (
-              <p className="text-sm text-muted-foreground">
-                No experimental features available.
-              </p>
-            ) : (
-              <div className="space-y-3">
-                {listFlags().map(({ key, def }) => (
-                  <ExperimentalFlagRow
-                    key={key}
-                    flagKey={key}
-                    label={def.label}
-                    description={def.description}
-                    project={project}
-                    onToggled={refresh}
-                  />
-                ))}
-              </div>
-            )}
-          </CardContent>
-        </Card>
-
         <p className="text-xs text-muted-foreground text-center pb-8">
           All changes save automatically.
         </p>
@@ -587,49 +555,6 @@ export function ProjectSettings() {
           Synced settings update from <span className="font-medium">{conflictBy}</span>.
         </div>
       )}
-    </div>
-  )
-}
-
-function ExperimentalFlagRow({
-  flagKey,
-  label,
-  description,
-  project,
-  onToggled,
-}: {
-  flagKey: Parameters<typeof useFeatureFlag>[0]
-  label: string
-  description: string
-  project: ProjectRecord | null
-  onToggled: () => void
-}) {
-  const value = useFeatureFlag(flagKey, project)
-  const [saving, setSaving] = useState(false)
-
-  const handleChange = async (next: boolean) => {
-    if (!project) return
-    setSaving(true)
-    try {
-      await setFeatureFlag(project.id, flagKey, next)
-      onToggled()
-    } finally {
-      setSaving(false)
-    }
-  }
-
-  return (
-    <div className="flex items-start justify-between gap-4 rounded-md border p-3">
-      <div className="flex-1">
-        <div className="text-sm font-medium">{label}</div>
-        <p className="text-sm text-muted-foreground">{description}</p>
-      </div>
-      <Switch
-        checked={value}
-        onCheckedChange={handleChange}
-        disabled={saving}
-        aria-label={`Toggle ${label}`}
-      />
     </div>
   )
 }

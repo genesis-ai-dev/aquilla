@@ -56,6 +56,56 @@ function countWords(text: string): number {
   return trimmed.split(/\s+/).length
 }
 
+/**
+ * FTS5 external-content maintenance helpers.
+ *
+ * `cells_fts` uses content='cells', content_rowid='rowid'. The application
+ * must keep the shadow index in sync manually:
+ *   - ftsDeleteStmt: emits an FTS5 'delete' command so the OLD indexed value
+ *     is removed. Must be pushed BEFORE any cells DML so the old value is
+ *     still readable. No-ops if no matching cells row exists.
+ *   - ftsInsertStmt: inserts the current cells row's value into the index.
+ *     Must be pushed AFTER the cells DML so the new value is in `cells`.
+ */
+function ftsDeleteStmt(
+  db: D1Database,
+  projectId: string,
+  fileId: string,
+  cellId: string,
+  side: string,
+): D1PreparedStatement {
+  // FTS5 external-content delete: first column is the literal command 'delete',
+  // second is the rowid, third is the OLD value. Using SELECT from `cells`
+  // before the cells DML runs means we read the current (pre-change) value.
+  // If the row does not exist yet (first-time create), this SELECT returns
+  // nothing and the INSERT is a no-op.
+  return db
+    .prepare(
+      `INSERT INTO cells_fts(cells_fts, rowid, value)
+       SELECT 'delete', rowid, value FROM cells
+       WHERE project_id = ? AND file_id = ? AND cell_id = ? AND side = ?`,
+    )
+    .bind(projectId, fileId, cellId, side)
+}
+
+function ftsInsertStmt(
+  db: D1Database,
+  projectId: string,
+  fileId: string,
+  cellId: string,
+  side: string,
+): D1PreparedStatement {
+  // Insert the post-DML value into the FTS index. Must run AFTER the cells
+  // UPSERT/UPDATE so the new value is already in `cells`.
+  return db
+    .prepare(
+      `INSERT INTO cells_fts(rowid, value)
+       SELECT rowid, value FROM cells
+       WHERE project_id = ? AND file_id = ? AND cell_id = ? AND side = ?`,
+    )
+    .bind(projectId, fileId, cellId, side)
+}
+
 /** Caller hint: which projection tables this event will touch. */
 export type ProjectionTouches = 'cells' | 'cell_validators' | 'files' | 'cell_audio' | 'comments'
 
@@ -100,6 +150,12 @@ export function buildEventProjectionStmts(
       // Both create kinds are genesis events on the cell's chain — their
       // event_id IS the new row's chain head. source_event_id is null on
       // both sides at create time; target commits set it later.
+
+      // FTS5 maintenance (pre-DML): delete the old indexed value if a cells
+      // row already exists for this key. No-op when this is a genuine first
+      // insert.
+      stmts.push(ftsDeleteStmt(db, event.projectId, event.fileId, cellId, side))
+
       stmts.push(
         db
           .prepare(
@@ -139,6 +195,11 @@ export function buildEventProjectionStmts(
             hash,
           ),
       )
+
+      // FTS5 maintenance (post-DML): insert the new value now that the cells
+      // row reflects the post-create/update state.
+      stmts.push(ftsInsertStmt(db, event.projectId, event.fileId, cellId, side))
+
       return ['cells']
     }
 
@@ -152,6 +213,14 @@ export function buildEventProjectionStmts(
       const valueHtml = p.valueHtml ?? null
       const hash = contentHash(value)
       const wordCount = countWords(value)
+
+      const commitSide: 'source' | 'target' =
+        event.kind === 'source.cell.commit' ? 'source' : 'target'
+
+      // FTS5 maintenance (pre-DML): remove the OLD indexed value before we
+      // overwrite the cells row. Must run first so the old value is still
+      // readable from `cells`.
+      stmts.push(ftsDeleteStmt(db, event.projectId, event.fileId, event.cellId, commitSide))
 
       if (event.kind === 'target.cell.commit') {
         const tp = p as EventPayloads['target.cell.commit']
@@ -234,6 +303,11 @@ export function buildEventProjectionStmts(
             ),
         )
       }
+
+      // FTS5 maintenance (post-DML): insert the new indexed value now that
+      // the cells row has been updated/upserted.
+      stmts.push(ftsInsertStmt(db, event.projectId, event.fileId, event.cellId, commitSide))
+
       return ['cells']
     }
 
@@ -245,6 +319,12 @@ export function buildEventProjectionStmts(
       // Cell row leaves the projection; events stay queryable.
       // Only the side this event targets — the opposite side stays put.
       const side = event.kind === 'target.cell.delete' ? 'target' : 'source'
+
+      // FTS5 maintenance (pre-DML): remove the indexed value BEFORE deleting
+      // the cells row so the OLD value is still readable for the 'delete'
+      // command.
+      stmts.push(ftsDeleteStmt(db, event.projectId, event.fileId, event.cellId, side))
+
       stmts.push(
         db
           .prepare(

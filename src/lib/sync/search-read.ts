@@ -6,6 +6,9 @@
 import { syncWorkerHttpOrigin } from "./sync-worker-url"
 import type {
   FetchSearchOptions,
+  FetchParallelPassagesOptions,
+  ParallelPassageResult,
+  ParallelPassagesResponse,
   SearchResponse,
   SearchResult,
 } from "./search-read-types"
@@ -61,4 +64,62 @@ export async function fetchProjectSearch(
   const res = await fetch(url, { headers: authHeaders(jwt) })
   const body = await readJson<SearchResponse>(res)
   return body.results
+}
+
+/**
+ * GET /api/v1/projects/:projectId/search/passages?q=&side=&limit=
+ *
+ * Returns FTS5-ranked results that also include the paired-side cell value
+ * at the same (fileId, cellId). The `projectId` field is stitched on by
+ * the client after the fetch — the server URL already carries that context.
+ */
+export async function fetchProjectParallelPassages(
+  projectId: string,
+  q: string,
+  opts: FetchParallelPassagesOptions,
+  jwt: string,
+): Promise<ParallelPassageResult[]> {
+  const params = new URLSearchParams()
+  params.set("q", q)
+  if (opts.side) params.set("side", opts.side)
+  if (typeof opts.limit === "number") params.set("limit", String(opts.limit))
+  const url =
+    `${syncWorkerHttpOrigin()}/api/v1/projects/${encodeURIComponent(projectId)}` +
+    `/search/passages?${params.toString()}`
+  const res = await fetch(url, { headers: authHeaders(jwt) })
+  const body = await readJson<ParallelPassagesResponse>(res)
+  return body.results.map((r) => ({ ...r, projectId }))
+}
+
+/**
+ * Multi-project fan-out: calls `fetchProjectParallelPassages` for every
+ * projectId via `Promise.all` and flattens the results. Skips projects
+ * where `getToken` returns null (no access). Per-project failures are
+ * caught and warned — a single bad project does not poison the whole fan-out.
+ */
+export async function fetchParallelPassages(
+  q: string,
+  opts: { projectIds: string[]; side?: "source" | "target"; limit?: number },
+  getToken: (projectId: string) => Promise<string | null>,
+): Promise<ParallelPassageResult[]> {
+  if (opts.projectIds.length === 0) return []
+
+  const perProject = opts.projectIds.map(async (projectId) => {
+    try {
+      const token = await getToken(projectId)
+      if (!token) return []
+      return await fetchProjectParallelPassages(
+        projectId,
+        q,
+        { side: opts.side, limit: opts.limit },
+        token,
+      )
+    } catch (err) {
+      console.warn(`[fetchParallelPassages] fetch failed for project ${projectId}:`, err)
+      return []
+    }
+  })
+
+  const settled = await Promise.all(perProject)
+  return settled.flat()
 }

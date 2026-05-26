@@ -19,6 +19,9 @@ export interface WorkspaceSearchResult {
   matchedTokens: string[]
   snippet: string
   rank: number
+  /** Optional paired-side snippet for parallel passage results. Populated
+   *  by `searchParallelPassages`; absent on regular `search` results. */
+  paired?: string | null
 }
 
 export interface SearchOptions {

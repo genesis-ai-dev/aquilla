@@ -24,3 +24,22 @@ export interface FetchSearchOptions {
   /** Server clamps to [1, 500]; default 50. */
   limit?: number
 }
+
+export interface ParallelPassageResult extends SearchResult {
+  /** The paired-side cell value at the same (fileId, cellId), if it exists.
+   *  null when no opposite-side cell is present. */
+  pairedValue: string | null
+  /** Which project this hit came from. Identical to the projectId query for
+   *  single-project lookups; populated by the multi-project fan-out wrapper
+   *  to disambiguate results from concurrent fetches. */
+  projectId: string
+}
+
+export interface ParallelPassagesResponse {
+  results: Omit<ParallelPassageResult, "projectId">[]
+}
+
+export interface FetchParallelPassagesOptions {
+  side?: "source" | "target"
+  limit?: number
+}

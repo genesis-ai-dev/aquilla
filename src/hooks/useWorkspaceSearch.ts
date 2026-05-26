@@ -7,8 +7,8 @@
 // exposed alongside.
 
 import { useCallback, useEffect, useRef, useState } from "react"
-import { fetchProjectSearch } from "@/lib/sync/search-read"
-import type { SearchResult } from "@/lib/sync/search-read-types"
+import { fetchProjectSearch, fetchParallelPassages } from "@/lib/sync/search-read"
+import type { ParallelPassageResult, SearchResult } from "@/lib/sync/search-read-types"
 import type { MatchField } from "@/lib/search/workspace-index"
 import type { FileReference } from "@/lib/parsers/types"
 
@@ -59,6 +59,14 @@ function makeResult(row: SearchResult, files: FileReference[] | undefined): Work
   }
 }
 
+function makePassageResult(
+  row: ParallelPassageResult,
+  files: FileReference[] | undefined,
+): WorkspaceSearchResult {
+  const base = makeResult(row, files)
+  return { ...base, paired: row.pairedValue }
+}
+
 /**
  * Server-backed search. The hook tracks `loading` while a fetch is in
  * flight and `ready` as a sentinel ("at least one search resolved") for
@@ -75,6 +83,10 @@ export function useWorkspaceSearch(
   buildIndex: () => Promise<void>
   rebuild: () => Promise<void>
   search: (query: string, options?: SearchOptionsApi) => Promise<void>
+  searchParallelPassages: (
+    query: string,
+    opts?: { projectIds?: string[]; side?: "source" | "target"; limit?: number },
+  ) => Promise<void>
   clear: () => void
   results: WorkspaceSearchResult[]
   loading: boolean
@@ -169,6 +181,65 @@ export function useWorkspaceSearch(
     }
   }, [])
 
+  const searchParallelPassages = useCallback(
+    async (
+      query: string,
+      opts: { projectIds?: string[]; side?: "source" | "target"; limit?: number } = {},
+    ) => {
+      const pid = projectRef.current
+      const fetchToken = tokenFetcherRef.current
+      if (!enabledRef.current || !pid) {
+        setResults([])
+        return
+      }
+      const cleaned = query.trim()
+      if (!cleaned) {
+        setResults([])
+        return
+      }
+      // Default to the current project when no explicit list is given.
+      const projectIds =
+        opts.projectIds && opts.projectIds.length > 0 ? opts.projectIds : [pid]
+
+      const gen = ++generationRef.current
+      setLoading(true)
+      try {
+        // Build a token getter that uses the first file in the project as the
+        // scope target (consistent with `search()`). For multi-project use,
+        // callers are expected to pass a fetcher that handles each projectId.
+        const tokenGetter = fetchToken
+          ? async (targetProjectId: string) => {
+              // For the current project, mint via an arbitrary file scope.
+              if (targetProjectId === pid) {
+                const scopeFile = filesRef.current?.[0]?.id ?? "any"
+                return fetchToken(scopeFile)
+              }
+              // For foreign projects we have no file list — attempt with a
+              // sentinel; the server mints project-scoped tokens off projectId.
+              return fetchToken("any")
+            }
+          : async (_id: string) => null as string | null
+
+        const rows = await fetchParallelPassages(
+          cleaned,
+          { projectIds, side: opts.side, limit: opts.limit },
+          tokenGetter,
+        )
+        if (generationRef.current !== gen) return
+        const mapped = rows.map((r) => makePassageResult(r, filesRef.current))
+        setResults(mapped)
+        setReady(true)
+        setLoading(false)
+      } catch (err) {
+        if (generationRef.current !== gen) return
+        console.warn("[useWorkspaceSearch] searchParallelPassages failed:", err)
+        setResults([])
+        setLoading(false)
+      }
+    },
+    [],
+  )
+
   const clear = useCallback(() => {
     setResults([])
   }, [])
@@ -185,5 +256,5 @@ export function useWorkspaceSearch(
     return buildIndex()
   }, [buildIndex])
 
-  return { buildIndex, rebuild, search, clear, results, loading, ready }
+  return { buildIndex, rebuild, search, searchParallelPassages, clear, results, loading, ready }
 }

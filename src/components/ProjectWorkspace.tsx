@@ -1398,6 +1398,7 @@ export function ProjectWorkspace() {
             onOpenHistory={(cellId) => {
               setDrawerRuleId(null); setCommentsCellId(null); setHistoryCellId(cellId)
             }}
+            getTokenForFile={getTokenForFile}
             activeCueIndex={activeCueIndex >= 0 ? activeCueIndex : undefined}
             onSeekToCue={isSubtitleFile ? handleCueSeek : undefined}
             lineNumbersEnabled={fileMeta.lineNumbersEnabled}

@@ -26,6 +26,7 @@ import { CellActionRail, RailButton, isInteractiveTarget } from "./CellActionRai
 import { CellExpansion } from "./CellExpansion"
 import { tokenizeWords } from "@/lib/audio/timings"
 import { useCellAudio } from "@/hooks/useCellAudio"
+import { useCellEditHistory } from "@/hooks/useCellEditHistory"
 import { setTranscribeStatus, useTranscribeStatus } from "@/lib/audio/transcribe-status"
 import { handleVoiceDropOnCell, VOICE_DRAG_MIME } from "@/lib/audio/voice-actions"
 import {
@@ -294,6 +295,9 @@ interface EditorTableProps {
    *  StaleSourceIndicator badge next to its validation status. Parent fetches
    *  once per file via `useStaleSourceCells` so we don't issue N requests. */
   staleCellIds?: ReadonlySet<string>
+  /** Token fetcher for project-scoped sync reads. Required for the inline
+   *  History tab to query the D1 event log on demand. */
+  getTokenForFile?: (fileId: string) => Promise<string | null>
 }
 
 export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(function EditorTable({
@@ -313,6 +317,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   cellsWithRemoteChange,
   onClaimCell, onReleaseCell, onAckRemoteChange,
   staleCellIds,
+  getTokenForFile,
 }, ref) {
   const permissions = useProjectPermissions(project)
   const canEdit = permissions.canEditContent
@@ -700,6 +705,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
                 onDragEnter={handleDragEnter}
                 onSelectionPointerDown={handleSelectionPointerDown}
                 getVoiceTakeCells={getVoiceTakeCells}
+                getTokenForFile={getTokenForFile}
               />
             </div>
           )
@@ -775,6 +781,7 @@ interface MemoizedRowProps {
     e: React.PointerEvent<HTMLButtonElement>,
   ) => void
   getVoiceTakeCells: (startIndex: number, count: number) => CellData[]
+  getTokenForFile?: (fileId: string) => Promise<string | null>
 }
 
 const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
@@ -785,6 +792,7 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
     onDragStart: onDragStartParent, onDragEnter: onDragEnterParent,
     onSelectionPointerDown: onSelectionPointerDownParent,
     getVoiceTakeCells,
+    getTokenForFile,
     project, username, editable, isCompletionConfigured, isCompletionAvailable,
     ruleMap, onCompleteSingle, onInfractionClick,
     isBacktranslationConfigured, onBacktranslate,
@@ -880,6 +888,7 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
         onDragEnter={handleDragEnter}
         onSelectionPointerDown={handleSelectionPointerDown}
         getVoiceTakeCells={getVoiceTakeCells}
+        getTokenForFile={getTokenForFile}
         onCellCommitted={onCellCommitted}
         onOptimisticEdit={onOptimisticEdit}
         lockHolderLabel={lockHolderLabel}
@@ -944,6 +953,7 @@ interface EditorRowProps {
   onAiSetupNeeded?: () => void
   onOpenRecording?: (cellId: string) => void
   onProjectChanged?: () => void
+  getTokenForFile?: (fileId: string) => Promise<string | null>
 }
 
 function EditorRow({
@@ -960,6 +970,7 @@ function EditorRow({
   onCellCommitted, onOptimisticEdit, lockHolderLabel, remoteChangedWhileFocused,
   onClaimCell, onReleaseCell, onAckRemoteChange,
   isStaleSource,
+  getTokenForFile,
 }: EditorRowProps) {
   const [openRuleId, setOpenRuleId] = useState<string | null>(null)
   const [openRuleAnchor, setOpenRuleAnchor] = useState<HTMLElement | null>(null)
@@ -1363,6 +1374,24 @@ function EditorRow({
   // ── Expansion state ───────────────────────────────────────────────────────
   const [expanded, setExpanded] = useState(false)
   const [expansionTab, setExpansionTab] = useState<string>("backtranslation")
+
+  // History tab: fetch the D1 event log on demand only when the History tab is
+  // visible. `cell.history` from useCells is intentionally empty (EMPTY_HISTORY)
+  // — the audit trail lives in the sync-worker, not the cell projection.
+  const historyTokenFetcher = useMemo(() => {
+    return getTokenForFile ?? (async (_fileId: string) => null as string | null)
+  }, [getTokenForFile])
+  const {
+    history: fetchedHistory,
+    isLoading: isHistoryLoading,
+    isError: isHistoryError,
+  } = useCellEditHistory({
+    enabled: expanded && expansionTab === "history" && Boolean(getTokenForFile),
+    projectId: project?.id ?? null,
+    fileId: cell.fileId ?? null,
+    cellId: cell.id,
+    getTokenForFile: historyTokenFetcher,
+  })
 
   // ── Compute attention signals for chevron + tab dots ──────────────────────
   const isBtStale = Boolean(
@@ -2109,10 +2138,17 @@ function EditorRow({
               value: "history",
               icon: <HistoryIcon className="h-3 w-3" />,
               label: "History",
-              disabled: cell.history.length === 0,
               content: (
                 <div className="flex flex-col gap-2">
-                  {cell.history.length === 0 ? (
+                  {isHistoryLoading ? (
+                    <p className="py-3 text-center text-xs text-muted-foreground">
+                      Loading edit history…
+                    </p>
+                  ) : isHistoryError ? (
+                    <p className="py-3 text-center text-xs text-destructive">
+                      Failed to load edit history.
+                    </p>
+                  ) : fetchedHistory.length === 0 ? (
                     <p className="py-3 text-center text-xs text-muted-foreground">
                       No edit history yet.
                     </p>
@@ -2128,7 +2164,7 @@ function EditorRow({
                         Open full history
                       </button>
                       <ul className="divide-y divide-border/40 rounded border border-border/40 bg-background/40">
-                        {[...cell.history].slice(-5).reverse().map((entry, i) => {
+                        {[...fetchedHistory].slice(-5).reverse().map((entry, i) => {
                           const date = new Date(entry.timestamp).toLocaleString(undefined, {
                             month: "short",
                             day: "numeric",

@@ -30,6 +30,11 @@ export interface Env {
 
   ENVIRONMENT?: string
 
+  // Chat-completion proxy (folded in from the former aquilla-chat-worker
+  // on 2026-05-26 — see routes/chat.ts).
+  OPENROUTER_API_KEY?: string
+  DEFAULT_LLM_MODEL?: string
+
   /**
    * When set to "1", exposes `/__test__/reset` and skips authentication on
    * sensitive routes that the E2E harness needs to seed. NEVER set in

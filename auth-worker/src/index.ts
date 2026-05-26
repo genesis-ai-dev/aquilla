@@ -44,6 +44,8 @@
 //   POST /api/v2/invites/:token/accept
 //   GET  /api/v2/health
 //   POST /__test__/reset (WRANGLER_LOCAL only)
+//   POST /__dev__/seed   (WRANGLER_LOCAL only)
+//   POST /__dev__/login  (WRANGLER_LOCAL only)
 
 import { Hono } from "hono"
 import type { Env, Variables } from "./types"
@@ -56,6 +58,8 @@ import invitesRoutes from "./routes/invites"
 import orgsRoutes from "./routes/orgs"
 import usersRoutes from "./routes/users"
 import testResetRoutes from "./routes/test-reset"
+import devSeedRoutes from "./routes/dev-seed"
+import chatRoutes from "./routes/chat"
 
 type HonoEnv = { Bindings: Env; Variables: Variables }
 
@@ -72,13 +76,19 @@ const CORS_HEADERS: Record<string, string> = {
   Vary: "Origin",
 }
 
-// Workers Routes mount: if a zone routes `aquilla.app/api/identity/*` to this
-// worker, strip the prefix so bare /api/v2/... paths work unchanged.
+// Workers Routes mount: this worker is routed under two prefixes on the
+// aquilla.app zone — `/api/identity/*` for the identity surface (v1/v2 auth,
+// orgs, projects, invites…) and `/api/chat/*` for the OpenRouter proxy
+// (folded in from the former aquilla-chat-worker, 2026-05-26). Strip
+// whichever prefix matched so the bare `/api/v1/…` / `/api/v2/…` paths
+// declared on the routers work unchanged.
 app.use("*", async (c, next) => {
-  if (c.req.path.startsWith("/api/identity")) {
-    const url = new URL(c.req.url)
-    url.pathname = url.pathname.slice("/api/identity".length) || "/"
-    return app.fetch(new Request(url.toString(), c.req.raw), c.env, c.executionCtx)
+  for (const prefix of ["/api/identity", "/api/chat"]) {
+    if (c.req.path.startsWith(prefix)) {
+      const url = new URL(c.req.url)
+      url.pathname = url.pathname.slice(prefix.length) || "/"
+      return app.fetch(new Request(url.toString(), c.req.raw), c.env, c.executionCtx)
+    }
   }
   return next()
 })
@@ -105,6 +115,7 @@ app.get("/", (c) =>
       "/api/v2/projects/*",
       "/api/v2/invites/*",
       "/api/v2/health",
+      "/api/v1/chat/completions",
     ],
   }),
 )
@@ -130,8 +141,15 @@ app.route("/api/v2/projects", projectsRoutes)
 // Multi-project invite surface.
 app.route("/api/v2/invites", invitesRoutes)
 
+// Chat-completion proxy to OpenRouter (formerly aquilla-chat-worker). The
+// path is kept at /api/v1/chat/completions so the codex-web client doesn't
+// need to change — it just points VITE_CHAT_BASE at aquilla.app/api/chat.
+app.route("/api/v1/chat", chatRoutes)
+
 // Test-only reset endpoint (WRANGLER_LOCAL only — see routes/test-reset.ts).
 app.route("/__test__", testResetRoutes)
+// Dev-only seed + login bypass (WRANGLER_LOCAL only — see routes/dev-seed.ts).
+app.route("/__dev__", devSeedRoutes)
 
 app.notFound((c) => c.json({ error: "Not found" }, 404))
 

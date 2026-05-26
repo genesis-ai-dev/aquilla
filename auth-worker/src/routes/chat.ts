@@ -2,16 +2,16 @@
 // OpenRouter. Streams via SSE when `stream: true`; otherwise returns the
 // upstream JSON verbatim so codex-web's existing client code keeps working.
 //
-// Ported from the legacy frontier-server (cloudflare/src/routes/chat.ts) and
-// stripped of every billing / usage-tracking concern: codex-web doesn't gate
-// on tier and we don't want to write to D1 on every completion. What remains:
-//   1. Verify the Bearer JWT against frontier-db-v2 (via authMiddleware).
+// Folded in from the former aquilla-chat-worker (2026-05-26): the chat
+// route only ever needed the same JWT + user lookup the identity worker
+// already does, so keeping it in a separate worker meant a second
+// SECRET_KEY that drifted. One worker, one secret.
+//
+// Behaviour kept identical to the old chat-worker:
+//   1. Verify the Bearer JWT via authMiddleware (against AQUILLA_DB).
 //   2. Map "default" / "free-tier" / "" to DEFAULT_LLM_MODEL.
 //   3. Forward to OpenRouter with OPENROUTER_API_KEY.
 //   4. Pass the response through unchanged (streaming or JSON).
-//
-// A/B testing, mock-LLM mode, the GET variants, and the per-cost rate-limit
-// path are intentionally dropped — codex-web doesn't call any of them.
 
 import { Hono } from "hono"
 import { zValidator } from "@hono/zod-validator"
@@ -28,9 +28,6 @@ const messageSchema = z.object({
   content: z.string(),
 })
 
-// Mirrors the legacy frontier-server schema, minus `ab_eligible` which only
-// fed the dropped A/B test path. `response_format` is a free-form OpenAI
-// object so we keep it as a record of unknown rather than tightening it.
 const chatCompletionRequestSchema = z.object({
   model: z.string(),
   messages: z.array(messageSchema),
@@ -53,11 +50,6 @@ function resolveModel(env: Env, requested: string): string {
   return requested
 }
 
-/**
- * Build the OpenRouter request body. We always ask for cost-inclusive usage
- * and disable reasoning tokens (codex-web translation prompts never benefit
- * from chain-of-thought spend).
- */
 function buildOpenRouterBody(request: ChatRequest, model: string): string {
   const messages = request.messages.map((m) => ({
     role: m.role,
@@ -81,10 +73,7 @@ chat.post(
   zValidator("json", chatCompletionRequestSchema),
   async (c) => {
     if (!c.env.OPENROUTER_API_KEY) {
-      return c.json(
-        { error: "OPENROUTER_API_KEY is not configured" },
-        500,
-      )
+      return c.json({ error: "OPENROUTER_API_KEY is not configured" }, 500)
     }
 
     const request = c.req.valid("json")
@@ -102,8 +91,6 @@ chat.post(
 
       if (!upstream.ok) {
         const errorText = await upstream.text()
-        // Forward OpenRouter's status so the client can branch on 401/402/429
-        // without inspecting the message body.
         return new Response(
           JSON.stringify({
             error: "openrouter_error",
@@ -118,12 +105,6 @@ chat.post(
       }
 
       if (request.stream) {
-        // Pass the upstream body straight through — OpenRouter already emits
-        // OpenAI-compatible SSE frames, and the codex-web client knows how to
-        // consume them. The legacy frontier-server parsed every frame to
-        // re-emit a "usage" sidecar; codex-web doesn't read that sidecar so
-        // we save the round-trip and the parsing-boundary bugs that came
-        // with it (see completion-service.ts comment about straddled chunks).
         return new Response(upstream.body, {
           status: 200,
           headers: {
@@ -134,20 +115,13 @@ chat.post(
         })
       }
 
-      // Non-streaming: forward the JSON verbatim.
       const data = await upstream.json()
       return c.json(data as Record<string, unknown>)
     } catch (error) {
       const message =
         error instanceof Error ? error.message : String(error)
       console.error("Error in chat completion:", error)
-      return c.json(
-        {
-          error: "internal_error",
-          message,
-        },
-        500,
-      )
+      return c.json({ error: "internal_error", message }, 500)
     }
   },
 )

@@ -2,15 +2,15 @@
 //
 // `pnpm dev` calls this. It boots the workspace SPA's backend Workers
 // locally via `wrangler dev --local` and starts the Vite dev server with
-// `VITE_AUTH_BASE` / `VITE_SYNC_WORKER_HOST` (and optionally
-// `VITE_CHAT_BASE`) pointed at the local Worker ports. Nothing in this
-// script touches wrangler.toml, CI workflows, or remote resources — local
-// iteration only.
+// `VITE_AUTH_BASE` / `VITE_SYNC_WORKER_HOST` / `VITE_CHAT_BASE` pointed at
+// the local Worker ports. Nothing in this script touches wrangler.toml,
+// CI workflows, or remote resources — local iteration only.
 //
 // What runs:
-//   * auth-worker   on 127.0.0.1:8788       (always)
+//   * auth-worker   on 127.0.0.1:8788       (always — also serves /api/chat
+//                                            since the chat-worker was folded
+//                                            in on 2026-05-26)
 //   * sync-worker   on 127.0.0.1:8789       (always)
-//   * chat-worker   on 127.0.0.1:8790       (only with --chat)
 //   * Vite dev      on :5173                (the existing `vite` command)
 //
 // Wrangler's local D1 / R2 / DO state is persisted to a single shared
@@ -30,7 +30,6 @@
 // user has in `.env.local`.
 //
 // Flags:
-//   --chat       also boot chat-worker (needs OPENROUTER_API_KEY in .dev.vars)
 //   --no-sync    skip sync-worker (rare; some flows need only auth)
 //   --vite-port  override the Vite port (default 5173)
 //   --verbose    stream each Worker's stdout/stderr to this terminal
@@ -61,7 +60,6 @@ const REPO_ROOT = path.resolve(__dirname, "..")
 
 const IDENTITY_DIR = path.join(REPO_ROOT, "auth-worker")
 const SYNC_DIR = path.join(REPO_ROOT, "sync-worker")
-const CHAT_DIR = path.join(REPO_ROOT, "chat-worker")
 
 // Shared wrangler state so auth-worker + sync-worker read each other's writes
 // to aquilla-db. Wrangler defaults to `<cwd>/.wrangler/state` which would
@@ -72,11 +70,9 @@ const LOG_DIR = path.join(REPO_ROOT, ".dev-stack-logs")
 
 const IDENTITY_PORT = 8788
 const SYNC_PORT = 8789
-const CHAT_PORT = 8790
 const DEFAULT_VITE_PORT = 5173
 
 const args = process.argv.slice(2)
-const WITH_CHAT = args.includes("--chat")
 const WITHOUT_SYNC = args.includes("--no-sync")
 const VERBOSE = args.includes("--verbose") || process.env.DEV_STACK_VERBOSE === "1"
 const VITE_PORT_ARG = args.find((a) => a.startsWith("--vite-port="))
@@ -210,9 +206,10 @@ function writeManagedEnvFile(): void {
     WITHOUT_SYNC
       ? `# VITE_SYNC_WORKER_HOST omitted — booted with --no-sync.`
       : `VITE_SYNC_WORKER_HOST=127.0.0.1:${SYNC_PORT}`,
-    WITH_CHAT
-      ? `VITE_CHAT_BASE=http://127.0.0.1:${CHAT_PORT}`
-      : `# VITE_CHAT_BASE omitted — pass --chat to also boot chat-worker.`,
+    // Identity worker also serves /api/chat (folded in from the former
+    // chat-worker). The prefix-strip middleware in auth-worker/src/index.ts
+    // turns /api/chat/api/v1/... into /api/v1/... before routing.
+    `VITE_CHAT_BASE=http://127.0.0.1:${IDENTITY_PORT}/api/chat`,
     "",
   ]
   writeFileSync(MANAGED_ENV_FILE, lines.join("\n"))
@@ -241,12 +238,10 @@ async function main(): Promise<void> {
   // First-run prerequisites (idempotent).
   ensureDevVars(IDENTITY_DIR, "identity")
   if (!WITHOUT_SYNC) ensureDevVars(SYNC_DIR, "sync")
-  if (WITH_CHAT) ensureDevVars(CHAT_DIR, "chat")
 
   // Free any ports left behind by an aborted prior run.
   await freePort(IDENTITY_PORT)
   if (!WITHOUT_SYNC) await freePort(SYNC_PORT)
-  if (WITH_CHAT) await freePort(CHAT_PORT)
   await freePort(VITE_PORT)
 
   applyIdentityMigrations()
@@ -263,6 +258,8 @@ async function main(): Promise<void> {
       SYNC_WORKER_URL: `http://127.0.0.1:${SYNC_PORT}`,
       // Loud env tag so logs make it obvious this is the local dev stack.
       ENVIRONMENT: "development",
+      // Unlocks /__test__/reset and /__dev__/{seed,login}. NEVER set in prod.
+      WRANGLER_LOCAL: "1",
     },
     extraArgs: ["--persist-to", PERSIST_DIR],
     logFile: openLogFile(path.join(LOG_DIR, "identity.log")),
@@ -286,23 +283,6 @@ async function main(): Promise<void> {
       streamToParent: VERBOSE,
     })
     cleanup.push(() => sync!.kill())
-  }
-
-  let chat: SpawnedWorker | null = null
-  if (WITH_CHAT) {
-    console.log(`[dev-stack] starting chat-worker on :${CHAT_PORT}…`)
-    chat = await spawnWranglerDev({
-      cwd: CHAT_DIR,
-      port: CHAT_PORT,
-      label: "chat",
-      env: {
-        ENVIRONMENT: "development",
-      },
-      extraArgs: ["--persist-to", PERSIST_DIR],
-      logFile: openLogFile(path.join(LOG_DIR, "chat.log")),
-      streamToParent: VERBOSE,
-    })
-    cleanup.push(() => chat!.kill())
   }
 
   // Write `.env.development.local` AFTER the Workers are reachable so a
@@ -354,7 +334,6 @@ async function main(): Promise<void> {
   }
   watchExit(identity, "identity")
   watchExit(sync, "sync")
-  watchExit(chat, "chat")
   vite.once("exit", (code, signal) => {
     if (shuttingDown) return
     console.error(
@@ -371,9 +350,7 @@ async function main(): Promise<void> {
     sync
       ? `         sync     -> http://127.0.0.1:${SYNC_PORT}/  (logs: ${path.relative(REPO_ROOT, path.join(LOG_DIR, "sync.log"))})`
       : `         sync     -> skipped (--no-sync)`,
-    chat
-      ? `         chat     -> http://127.0.0.1:${CHAT_PORT}/  (logs: ${path.relative(REPO_ROOT, path.join(LOG_DIR, "chat.log"))})`
-      : `         chat     -> skipped (pass --chat to boot)`,
+    `         chat     -> http://127.0.0.1:${IDENTITY_PORT}/api/chat/  (served by identity worker)`,
     `         state    -> ${path.relative(REPO_ROOT, PERSIST_DIR)}/  (delete to reset local D1)`,
     "[dev-stack] press Ctrl+C to stop",
     "",

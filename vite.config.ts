@@ -143,7 +143,6 @@ export default defineConfig(({ mode }) => ({
       // doesn't have. deploy-workers.yml runs each worker's tests in its
       // own directory.
       "auth-worker/**",
-      "chat-worker/**",
       "sync-worker/**",
     ],
   },

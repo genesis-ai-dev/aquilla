@@ -108,9 +108,11 @@ jobs:
       #   main                        → prod          (codex-sync-worker.*)
       #   PR with migrations          → per-PR fork   (codex-sync-worker-pr-<N>.*)
       #   anything else (dev, PR)     → staging       (codex-sync-worker-staging.*)
-      # VITE_AUTH_BASE targets codex-auth-worker for auth / sync-token /
-      # invite routes. VITE_CHAT_BASE targets codex-chat-worker for the
-      # LLM completion proxy. The rest of the frontier API (payments,
+      # VITE_AUTH_BASE targets aquilla-identity for auth / sync-token /
+      # invite routes. VITE_CHAT_BASE targets aquilla-identity's
+      # /api/chat mount for the LLM completion proxy (folded in from the
+      # former aquilla-chat-worker on 2026-05-26 — same JWT secret, one
+      # worker). The rest of the frontier API (payments,
       # members, orgs — none of which codex-web calls today) would still
       # use VITE_FRONTIER_BASE if we ever needed it.
       - run: npm run build

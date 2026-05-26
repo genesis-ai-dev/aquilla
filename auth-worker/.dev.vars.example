@@ -26,3 +26,15 @@ BASE_URL="http://127.0.0.1:5173"
 
 # Optional. Marks the runtime so routes can dial back error verbosity.
 ENVIRONMENT="development"
+
+# OpenRouter key for the /api/v1/chat/completions proxy (folded in from
+# the former aquilla-chat-worker on 2026-05-26). Without this, chat
+# requests return 500. Grab a key at https://openrouter.ai/keys.
+OPENROUTER_API_KEY=""
+DEFAULT_LLM_MODEL="anthropic/claude-sonnet-4.5"
+
+# DO NOT put WRANGLER_LOCAL in this file (or in any deployed env). It's
+# injected by `scripts/dev-stack.ts` only and unlocks /__test__/reset and
+# /__dev__/{seed,login} — see routes/dev-seed.ts and routes/test-reset.ts.
+# If you launch auth-worker manually via `wrangler dev`, prepend
+# `WRANGLER_LOCAL=1` on the command line; never persist it.

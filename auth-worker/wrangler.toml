@@ -4,10 +4,18 @@ compatibility_date = "2024-12-01"
 compatibility_flags = ["nodejs_compat"]
 account_id = "6a80496d1e59948a9cbaa3c643ba81d7"
 # Browser-facing mount: same-origin under aquilla.app so Safari (which drops
-# *.workers.dev) works. The worker strips the /api/identity prefix (index.ts).
-# CI's token can't set zone routes — applied out-of-band via local
-# `wrangler deploy` or the CF dashboard, same as sync-worker.
-routes = ["aquilla.app/api/identity/*"]
+# *.workers.dev) works. The worker strips the /api/identity and /api/chat
+# prefixes (index.ts). CI's token can't set zone routes — applied
+# out-of-band via local `wrangler deploy` or the CF dashboard, same as
+# sync-worker.
+#
+# /api/chat/* was previously routed to aquilla-chat-worker (deleted
+# 2026-05-26). Folded in here so the JWT SECRET_KEY only lives in one
+# worker; OPENROUTER_API_KEY moved alongside it.
+routes = [
+  "aquilla.app/api/identity/*",
+  "aquilla.app/api/chat/*",
+]
 
 # Phase D: auth-worker is the full identity surface. AQUILLA_DB owns the
 # complete schema (identity + orgs + projects + members + invites + file/cell
@@ -26,6 +34,8 @@ migrations_dir = "migrations"
 #                     frontier-server so access tokens are interchangeable.
 #   SYNC_SECRET_KEY — signs /sync-token JWTs. MUST match aquilla-sync-worker.
 #   RESEND_API_KEY  — used by /password-reset/request to send email.
+#   OPENROUTER_API_KEY — Bearer key forwarded by /api/v1/chat/completions
+#                        to OpenRouter (folded in from aquilla-chat-worker).
 # Plain vars: see types.ts for the full list.
 
 [vars]
@@ -34,6 +44,7 @@ ACCESS_TOKEN_EXPIRE_MINUTES = "43200"
 EMAIL_FROM = "noreply@aquilla.app"
 BASE_URL = "https://aquilla.app"
 SYNC_WORKER_URL = "https://aquilla.app/api/sync"
+DEFAULT_LLM_MODEL = "anthropic/claude-sonnet-4.5"
 ENVIRONMENT = "production"
 
 # ---------------------------------------------------------------------------
@@ -45,7 +56,10 @@ ENVIRONMENT = "production"
 [env.staging]
 name = "aquilla-dev-identity"
 account_id = "6a80496d1e59948a9cbaa3c643ba81d7"
-routes = ["dev.aquilla.app/api/identity/*"]
+routes = [
+  "dev.aquilla.app/api/identity/*",
+  "dev.aquilla.app/api/chat/*",
+]
 
 [[env.staging.d1_databases]]
 binding = "AQUILLA_DB"
@@ -58,4 +72,5 @@ ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = "43200"
 EMAIL_FROM = "noreply@aquilla.app"
 BASE_URL = "https://dev.aquilla.app"
+DEFAULT_LLM_MODEL = "anthropic/claude-sonnet-4.5"
 ENVIRONMENT = "staging"

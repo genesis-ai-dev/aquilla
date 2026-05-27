@@ -97,6 +97,30 @@ export function useProjectSettings(
 
   const mountAtRef = useRef(performance.now())
 
+  // All server-side writes (the one-shot migration + every user `patch`) go
+  // through this promise chain. Without it, the migration's PATCH and a fast
+  // user blur both hit the server with `ifMatchVersion=0` against a fresh
+  // settings row — one wins and the other 409s. Serializing means the second
+  // write reads the just-bumped `server.version`, so its `ifMatchVersion`
+  // matches and the user's edit lands without a console error.
+  const writeChainRef = useRef<Promise<unknown>>(Promise.resolve())
+  const runSerialized = useCallback(<T,>(fn: () => Promise<T>): Promise<T> => {
+    const next = writeChainRef.current.then(fn, fn)
+    writeChainRef.current = next.catch(() => {})
+    return next
+  }, [])
+
+  // Live ref to the latest server snapshot so serialized writers see the
+  // version bumped by the writer ahead of them in the queue. MUST stay in
+  // lockstep with `setServer` calls — a useEffect mirror is too late, because
+  // the next queued PATCH runs in the same microtask the previous one
+  // resolves, well before React commits and runs the effect.
+  const serverRef = useRef<ProjectSettingsResponse | null>(null)
+  const writeServer = useCallback((next: ProjectSettingsResponse | null) => {
+    serverRef.current = next
+    setServer(next)
+  }, [])
+
   // Keep a ref so refresh's identity is stable across connectivity changes.
   const isOnlineRef = useRef(isOnline)
   useEffect(() => {
@@ -108,7 +132,7 @@ export function useProjectSettings(
     if (!isOnlineRef.current) return null
     const got = await fetchProjectSettings(jwt, projectId)
     if (!aliveRef.current) return null
-    setServer(got)
+    writeServer(got)
     setHasFetched(true)
     if (got) {
       posthog.capture("project settings hydrated", {
@@ -210,20 +234,23 @@ export function useProjectSettings(
     // cannot double-fire within this hook instance.
     migrationFiredRef.current = true
     void (async () => {
-      const out = await patchProjectSettings(jwt, projectId, local, 0)
+      const baseVersion = serverRef.current?.version ?? 0
+      const out = await runSerialized(() =>
+        patchProjectSettings(jwt, projectId, local, baseVersion),
+      )
       if (!aliveRef.current) return
       const nonEmptyCount = Object.keys(local).filter((k) => {
         const v = (local as any)[k]
         return v !== "" && v != null
       }).length
       if (out.kind === "ok") {
-        setServer(out.value)
+        writeServer(out.value)
         posthog.capture("project settings migrated", {
           project_id: projectId,
           fields_count: nonEmptyCount,
         })
       } else if (out.kind === "conflict") {
-        setServer(out.latest)
+        writeServer(out.latest)
         posthog.capture("project settings migration conflict", {
           project_id: projectId,
           fields_count: nonEmptyCount,
@@ -255,25 +282,55 @@ export function useProjectSettings(
     if (!isOnlineRef.current) return { kind: "blocked", reason: "offline" }
     if (roleLevel == null || roleLevel < EDIT_ROLE_FLOOR) return { kind: "blocked", reason: "role" }
 
-    // Optimistic server-side state so the UI feels instant for synced projects.
-    const baseVersion = server?.version ?? 0
-    const optimistic: ProjectSettingsResponse = {
-      version: baseVersion,
-      updatedAt: server?.updatedAt ?? new Date().toISOString(),
-      updatedBy: server?.updatedBy ?? null,
-      settings: { ...(server?.settings ?? {}), ...partial },
-    }
-    setServer(optimistic)
+    // Serialize the network write so it can't race the one-shot migration or a
+    // prior user patch. Reading server state from the ref *inside* the
+    // serialized callback means we always see the version bumped by the
+    // writer ahead of us in the queue.
+    let result: PatchResult = await runSerialized(async () => {
+      // Fetch the latest server snapshot right before the write. This is the
+      // belt-and-suspenders fix for the persistent 409s: even with our write
+      // queue and live `serverRef`, the cached version can drift from the
+      // real DB row (initial fetch hadn't landed, a previous tab wrote, an
+      // earlier session's migration succeeded but its response was dropped,
+      // etc.). One extra GET per save eliminates the whole class of bug.
+      const fresh = (await fetchProjectSettings(jwt, projectId)) ?? serverRef.current
+      const baseVersion = fresh?.version ?? 0
+      const optimistic: ProjectSettingsResponse = {
+        version: baseVersion,
+        updatedAt: fresh?.updatedAt ?? new Date().toISOString(),
+        updatedBy: fresh?.updatedBy ?? null,
+        settings: { ...(fresh?.settings ?? {}), ...partial },
+      }
+      writeServer(optimistic)
 
-    const result: PatchResult = await patchProjectSettings(jwt, projectId, optimistic.settings, baseVersion)
+      // Retry once for the (now rare) case that a concurrent writer slipped
+      // in between the GET above and our PATCH.
+      const first = await patchProjectSettings(jwt, projectId, optimistic.settings, baseVersion)
+      const outcome =
+        first.kind === "conflict"
+          ? await patchProjectSettings(
+              jwt,
+              projectId,
+              { ...first.latest.settings, ...partial },
+              first.latest.version,
+            )
+          : first
+      // Commit the authoritative result to `serverRef` *before* the next
+      // serialized writer runs. Without this, a back-to-back save would read
+      // the optimistic version we wrote above and send the same `ifMatchVersion`
+      // twice — guaranteed 409.
+      if (outcome.kind === "ok") writeServer(outcome.value)
+      else if (outcome.kind === "conflict") writeServer(outcome.latest)
+      return outcome
+    })
     if (!aliveRef.current) return { kind: "ok" }
 
     if (result.kind === "ok") {
-      setServer(result.value)
+      writeServer(result.value)
       return { kind: "ok" }
     }
     if (result.kind === "conflict") {
-      setServer(result.latest)
+      writeServer(result.latest)
       // Snap local + IDB to the conflict winner so the overlay stops lying
       // about what state we're in. Without this, `local` keeps the user's
       // doomed edit and the overlay merges it on top of the server truth.
@@ -293,7 +350,7 @@ export function useProjectSettings(
     }
     void refresh()
     return { kind: "error", message: result.message }
-  }, [projectId, jwt, roleLevel, server, refresh])
+  }, [projectId, jwt, roleLevel, refresh, runSerialized])
 
   return {
     settings,

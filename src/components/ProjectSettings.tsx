@@ -1,23 +1,39 @@
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useParams, useNavigate } from "react-router-dom"
-import { ArrowLeft, CheckCircle, XCircle, Loader2, Sparkles, Check } from "lucide-react"
+import { ArrowLeft, CheckCircle, XCircle, ChevronDown, Loader2, Sparkles, Save } from "lucide-react"
+import { Menu } from "@base-ui/react/menu"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
 import { DisabledFieldTooltip } from "./ProjectSettings/DisabledFieldTooltip"
 import { useProject } from "@/hooks/useProject"
 import { useProjectSettings } from "@/hooks/useProjectSettings"
 import { getProject, updateProject } from "@/lib/store/project-index"
 import { fetchModels, resolveProvider } from "@/lib/completion/completion-service"
-import { useSaveCompletionSettings, DEFAULT_SYSTEM_PROMPT } from "@/hooks/useCompletionSettings"
-import type { ProjectRecord, CompletionProvider, DecaySettings } from "@/lib/parsers/types"
+import { buildCompletionSettings, DEFAULT_SYSTEM_PROMPT } from "@/hooks/useCompletionSettings"
+import type {
+  AudioMediaStrategy,
+  CompletionProvider,
+  CompletionSettings,
+  DecaySettings,
+  ProjectRecord,
+} from "@/lib/parsers/types"
 import { ValidationSettingsSection } from "./ProjectSettings/ValidationSettingsSection"
 import { DecaySettingsSection } from "./ProjectSettings/DecaySettingsSection"
 import { AudioMediaStrategySection } from "./ProjectSettings/AudioMediaStrategySection"
 import { ApiKeyField } from "./ApiKeyField"
 import { readValidationCount, readValidationCountAudio } from "@/lib/progress/read-validation-count"
 import { setUserApiKey, useUserApiKey } from "@/lib/store/user-api-keys"
+import type { ProjectWideSettings } from "@/lib/sync/project-settings"
 
 // Well-known OpenAI-compatible providers.
 const CUSTOM_PRESETS: { id: string; label: string; endpoint: string; requiresKey: boolean; keyHint?: string }[] = [
@@ -42,22 +58,63 @@ function presetIdForEndpoint(endpoint: string): string {
   return "custom"
 }
 
-/** Briefly show "Saved" indicator. */
-function useSavedFlash() {
-  const [visible, setVisible] = useState(false)
-  const flash = useCallback(() => {
-    setVisible(true)
-    const t = setTimeout(() => setVisible(false), 1500)
-    return () => clearTimeout(t)
-  }, [])
-  return { visible, flash }
+interface Baseline {
+  name: string
+  sourceLanguage: string
+  targetLanguage: string
+  username: string
+  provider: CompletionProvider
+  endpoint: string
+  apiKey: string
+  model: string
+  maxTokens: number
+  temperature: number
+  systemPrompt: string
+  llmHealthPenalty: number
+  autoSyncEnabled: boolean
+  autoSyncInterval: number
+  validationCount: number
+  validationCountAudio: number
+  decaySettings: DecaySettings | undefined
+  audioMediaStrategy: AudioMediaStrategy
 }
+
+function buildBaseline(project: ProjectRecord): Baseline {
+  return {
+    name: project.name,
+    sourceLanguage: project.sourceLanguage,
+    targetLanguage: project.targetLanguage,
+    username: project.username || "local",
+    provider: project.completionSettings ? resolveProvider(project.completionSettings) : "frontier",
+    endpoint: project.completionSettings?.endpoint ?? "",
+    apiKey: project.completionSettings?.apiKey ?? "",
+    model: project.completionSettings?.model ?? "",
+    maxTokens: project.completionSettings?.maxTokens ?? 512,
+    temperature: project.completionSettings?.temperature ?? 0.3,
+    systemPrompt: project.completionSettings?.systemPrompt || DEFAULT_SYSTEM_PROMPT,
+    llmHealthPenalty: project.completionSettings?.llmHealthPenalty ?? 0.1,
+    autoSyncEnabled: project.syncSettings?.autoSync.enabled ?? false,
+    autoSyncInterval: project.syncSettings?.autoSync.intervalMinutes ?? 5,
+    validationCount: readValidationCount(project),
+    validationCountAudio: readValidationCountAudio(project),
+    decaySettings: project.decaySettings,
+    audioMediaStrategy: project.audioMediaStrategy ?? "lazy",
+  }
+}
+
+function decayEqual(a: DecaySettings | undefined, b: DecaySettings | undefined): boolean {
+  if (a === b) return true
+  if (!a || !b) return false
+  return JSON.stringify(a) === JSON.stringify(b)
+}
+
+const ITEM_CLASS =
+  "flex cursor-pointer select-none items-center gap-2 rounded-sm px-2 py-1.5 text-sm outline-none data-[highlighted]:bg-accent"
 
 export function ProjectSettings() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
   const { project, loading, refresh } = useProject(id!)
-  const { visible: savedFlash, flash } = useSavedFlash()
 
   const [conflictBy, setConflictBy] = useState<string | null>(null)
   useEffect(() => {
@@ -80,114 +137,136 @@ export function ProjectSettings() {
     : reasonCannotEdit === "role" ? "Project Lead or higher can edit shared settings."
     : null
 
-  // ── Local form state (mirrors project, auto-saves on blur) ──────────
+  // Baseline is the last-saved snapshot of every field on the page. The diff
+  // between baseline and the form state determines `isDirty` and which writes
+  // we actually have to fire on Save.
+  const [baseline, setBaseline] = useState<Baseline | null>(null)
+
+  // Draft state — what the user is currently editing. Seeded once from the
+  // baseline; never overwritten by background project re-renders (that's what
+  // caused the "typed letter flashes then disappears" bug under auto-save).
   const [name, setName] = useState("")
   const [sourceLanguage, setSourceLanguage] = useState("")
   const [targetLanguage, setTargetLanguage] = useState("")
   const [username, setUsername] = useState("")
-
   const [provider, setProvider] = useState<CompletionProvider>("frontier")
   const [endpoint, setEndpoint] = useState("")
   const [apiKey, setApiKey] = useState("")
-  const completionUserKey = useUserApiKey("completion") ?? ""
   const [presetId, setPresetId] = useState<string>("local")
   const [model, setModel] = useState("")
   const [maxTokens, setMaxTokens] = useState(512)
   const [temperature, setTemperature] = useState(0.3)
   const [systemPrompt, setSystemPrompt] = useState(DEFAULT_SYSTEM_PROMPT)
   const [llmHealthPenalty, setLlmHealthPenalty] = useState(0.1)
-
   const [autoSyncEnabled, setAutoSyncEnabled] = useState(false)
   const [autoSyncInterval, setAutoSyncInterval] = useState(5)
-
   const [validationCount, setValidationCount] = useState(1)
   const [validationCountAudio, setValidationCountAudio] = useState(1)
+  const [decaySettings, setDecaySettings] = useState<DecaySettings | undefined>(undefined)
+  const [audioMediaStrategy, setAudioMediaStrategy] = useState<AudioMediaStrategy>("lazy")
+
+  // Per-device user-scoped key — not part of the project record, not server-
+  // synced, no race with the project save flow. Kept on its own immediate-save
+  // path so the deferred-save bar isn't responsible for cross-project state.
+  const completionUserKey = useUserApiKey("completion") ?? ""
 
   const [models, setModels] = useState<string[]>([])
   const [connecting, setConnecting] = useState(false)
   const [connectionError, setConnectionError] = useState<string | null>(null)
   const [connected, setConnected] = useState(false)
 
-  // Sync local state from project record
+  const seededRef = useRef(false)
+
+  const applyBaseline = useCallback((b: Baseline) => {
+    setName(b.name)
+    setSourceLanguage(b.sourceLanguage)
+    setTargetLanguage(b.targetLanguage)
+    setUsername(b.username)
+    setProvider(b.provider)
+    setEndpoint(b.endpoint)
+    setApiKey(b.apiKey)
+    setPresetId(presetIdForEndpoint(b.endpoint))
+    setModel(b.model)
+    setMaxTokens(b.maxTokens)
+    setTemperature(b.temperature)
+    setSystemPrompt(b.systemPrompt)
+    setLlmHealthPenalty(b.llmHealthPenalty)
+    setAutoSyncEnabled(b.autoSyncEnabled)
+    setAutoSyncInterval(b.autoSyncInterval)
+    setValidationCount(b.validationCount)
+    setValidationCountAudio(b.validationCountAudio)
+    setDecaySettings(b.decaySettings)
+    setAudioMediaStrategy(b.audioMediaStrategy)
+  }, [])
+
+  // Seed once when the project first loads. We intentionally don't reseed on
+  // every `project` identity change — background sync writes to IDB shouldn't
+  // wipe the user's in-progress edits. After save/discard we reseed manually.
   useEffect(() => {
-    if (!project) return
-    setName(project.name)
-    setSourceLanguage(project.sourceLanguage)
-    setTargetLanguage(project.targetLanguage)
-    setUsername(project.username || "local")
-    if (project.completionSettings) {
-      setProvider(resolveProvider(project.completionSettings))
-      setEndpoint(project.completionSettings.endpoint)
-      setApiKey(project.completionSettings.apiKey ?? "")
-      setPresetId(presetIdForEndpoint(project.completionSettings.endpoint))
-      setModel(project.completionSettings.model)
-      setMaxTokens(project.completionSettings.maxTokens)
-      setTemperature(project.completionSettings.temperature)
-      setSystemPrompt(project.completionSettings.systemPrompt || DEFAULT_SYSTEM_PROMPT)
-      setLlmHealthPenalty(project.completionSettings.llmHealthPenalty ?? 0.1)
-    }
-    setAutoSyncEnabled(project.syncSettings?.autoSync.enabled ?? false)
-    setAutoSyncInterval(project.syncSettings?.autoSync.intervalMinutes ?? 5)
-    setValidationCount(readValidationCount(project))
-    setValidationCountAudio(readValidationCountAudio(project))
-  }, [project])
+    if (!project || seededRef.current) return
+    const b = buildBaseline(project)
+    setBaseline(b)
+    applyBaseline(b)
+    seededRef.current = true
+  }, [project, applyBaseline])
 
-  // ── Race-safe save helpers ──────────────────────────────────────────
+  const isDirty = useMemo(() => {
+    if (!baseline) return false
+    return (
+      name !== baseline.name ||
+      sourceLanguage !== baseline.sourceLanguage ||
+      targetLanguage !== baseline.targetLanguage ||
+      username !== baseline.username ||
+      provider !== baseline.provider ||
+      endpoint !== baseline.endpoint ||
+      apiKey !== baseline.apiKey ||
+      model !== baseline.model ||
+      maxTokens !== baseline.maxTokens ||
+      temperature !== baseline.temperature ||
+      systemPrompt !== baseline.systemPrompt ||
+      llmHealthPenalty !== baseline.llmHealthPenalty ||
+      autoSyncEnabled !== baseline.autoSyncEnabled ||
+      autoSyncInterval !== baseline.autoSyncInterval ||
+      validationCount !== baseline.validationCount ||
+      validationCountAudio !== baseline.validationCountAudio ||
+      audioMediaStrategy !== baseline.audioMediaStrategy ||
+      !decayEqual(decaySettings, baseline.decaySettings)
+    )
+  }, [
+    baseline, name, sourceLanguage, targetLanguage, username, provider, endpoint, apiKey,
+    model, maxTokens, temperature, systemPrompt, llmHealthPenalty, autoSyncEnabled,
+    autoSyncInterval, validationCount, validationCountAudio, audioMediaStrategy, decaySettings,
+  ])
 
-  /** Save project-level fields by reading latest from IDB first. */
-  const saveField = useCallback(async (updates: Partial<ProjectRecord>) => {
-    if (!id) return
-    const latest = await getProject(id)
-    if (!latest) return
-    const updated = { ...latest, ...updates }
-    await updateProject(updated)
-    refresh()
-    flash()
-  }, [id, refresh, flash])
-
-  /** Save project-wide synced fields through the server-authoritative patch. */
-  const savePartialShared = useCallback(async (partial: Parameters<typeof patchShared>[0]) => {
-    const out = await patchShared(partial)
-    if (out.kind === "ok") {
-      flash()
-    } else if (out.kind === "conflict") {
-      setConflictBy(out.latest.updatedBy?.username ?? "another collaborator")
-      // Re-read IDB so form fields snap to the conflict winner.
-      refresh()
-    }
-    // "blocked" never fires in normal flow because disabled fields prevent
-    // the call. "error" is a network/server problem; we leave it silent for
-    // now (the field will look unsaved; user can re-blur to retry).
-  }, [patchShared, flash, refresh])
-
-  /** Save completion settings via shared abstraction. */
-  const saveCompletionSettings = useSaveCompletionSettings(id, () => {
-    refresh()
-    flash()
-  })
-
-  const [decaySettings, setDecaySettings] = useState<DecaySettings | undefined>(undefined)
-
+  // Warn before browser-level navigation (back button, tab close, reload).
   useEffect(() => {
-    if (project?.decaySettings) setDecaySettings(project.decaySettings)
-  }, [project?.decaySettings])
+    if (!isDirty) return
+    const handler = (e: BeforeUnloadEvent) => {
+      e.preventDefault()
+      e.returnValue = ""
+    }
+    window.addEventListener("beforeunload", handler)
+    return () => window.removeEventListener("beforeunload", handler)
+  }, [isDirty])
 
-  async function saveDecaySettings(next: DecaySettings) {
-    setDecaySettings(next)
-    await saveField({ decaySettings: next })
-  }
+  const [discardOpen, setDiscardOpen] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const [saveError, setSaveError] = useState<string | null>(null)
 
-  function handlePresetChange(nextPresetId: string) {
-    setPresetId(nextPresetId)
-    const preset = CUSTOM_PRESETS.find((p) => p.id === nextPresetId)
-    if (!preset) return
-    const nextEndpoint = preset.id === "custom" ? endpoint : preset.endpoint
-    setEndpoint(nextEndpoint)
-    setConnected(false)
-    setConnectionError(null)
-    setModels([])
-    saveCompletionSettings({ endpoint: nextEndpoint })
-  }
+  // Pending in-app navigation target. Set when the user clicks something that
+  // would leave the page while dirty; cleared when they confirm discard (we
+  // navigate) or cancel (we drop the target). The app uses classic
+  // BrowserRouter, so useBlocker isn't available — instead every nav button
+  // on this page routes through requestNavigate.
+  const [pendingNav, setPendingNav] = useState<string | null>(null)
+  const requestNavigate = useCallback((target: string) => {
+    if (isDirty) {
+      setPendingNav(target)
+      setDiscardOpen(true)
+    } else {
+      navigate(target)
+    }
+  }, [isDirty, navigate])
 
   async function handleConnect() {
     if (!endpoint.trim()) return
@@ -206,21 +285,210 @@ export function ProjectSettings() {
     }
   }
 
+  function handlePresetChange(nextPresetId: string) {
+    setPresetId(nextPresetId)
+    const preset = CUSTOM_PRESETS.find((p) => p.id === nextPresetId)
+    if (!preset) return
+    const nextEndpoint = preset.id === "custom" ? endpoint : preset.endpoint
+    setEndpoint(nextEndpoint)
+    setConnected(false)
+    setConnectionError(null)
+    setModels([])
+  }
+
+  // ── Save orchestration ─────────────────────────────────────────────
+  // Order matters: local IDB writes first (cheap, can't fail meaningfully),
+  // then the shared/server PATCH (the only one that can 409). If the PATCH
+  // fails we leave local writes in place — they're idempotent and not the
+  // source of truth for shared fields anyway.
+  const handleSave = useCallback(async (): Promise<boolean> => {
+    if (!id || !baseline) return false
+    setSaving(true)
+    setSaveError(null)
+    try {
+      const completionUpdates: Partial<CompletionSettings> = {}
+      if (provider !== baseline.provider) completionUpdates.provider = provider
+      if (endpoint.trim() !== baseline.endpoint) completionUpdates.endpoint = endpoint.trim()
+      if (apiKey !== baseline.apiKey) completionUpdates.apiKey = apiKey || undefined
+      if (model !== baseline.model) completionUpdates.model = model
+      if (maxTokens !== baseline.maxTokens) completionUpdates.maxTokens = maxTokens
+      if (temperature !== baseline.temperature) completionUpdates.temperature = temperature
+      if (llmHealthPenalty !== baseline.llmHealthPenalty) completionUpdates.llmHealthPenalty = llmHealthPenalty
+
+      const localUpdates: Partial<ProjectRecord> = {}
+      if (name !== baseline.name) localUpdates.name = name
+      if (username !== baseline.username) localUpdates.username = username
+      if (!decayEqual(decaySettings, baseline.decaySettings)) localUpdates.decaySettings = decaySettings
+      if (audioMediaStrategy !== baseline.audioMediaStrategy) localUpdates.audioMediaStrategy = audioMediaStrategy
+      if (
+        autoSyncEnabled !== baseline.autoSyncEnabled ||
+        autoSyncInterval !== baseline.autoSyncInterval
+      ) {
+        localUpdates.syncSettings = {
+          autoSync: { enabled: autoSyncEnabled, intervalMinutes: Math.max(1, autoSyncInterval) },
+        }
+      }
+
+      const hasLocalWork =
+        Object.keys(localUpdates).length > 0 || Object.keys(completionUpdates).length > 0
+      if (hasLocalWork) {
+        const latest = await getProject(id)
+        if (!latest) throw new Error("Project not found")
+        const nextCompletion = Object.keys(completionUpdates).length
+          ? buildCompletionSettings(latest.completionSettings, completionUpdates)
+          : latest.completionSettings
+        await updateProject({ ...latest, ...localUpdates, completionSettings: nextCompletion })
+      }
+
+      const sharedUpdates: ProjectWideSettings = {}
+      if (sourceLanguage !== baseline.sourceLanguage) sharedUpdates.sourceLanguage = sourceLanguage
+      if (targetLanguage !== baseline.targetLanguage) sharedUpdates.targetLanguage = targetLanguage
+      if (systemPrompt !== baseline.systemPrompt) sharedUpdates.systemPrompt = systemPrompt
+      if (validationCount !== baseline.validationCount) sharedUpdates.validationCount = validationCount
+      if (validationCountAudio !== baseline.validationCountAudio) {
+        sharedUpdates.validationCountAudio = validationCountAudio
+      }
+
+      if (Object.keys(sharedUpdates).length > 0) {
+        const out = await patchShared(sharedUpdates)
+        if (out.kind === "conflict") {
+          setConflictBy(out.latest.updatedBy?.username ?? "another collaborator")
+          setSaveError("Someone else updated shared settings. Refresh to reapply your edits.")
+          return false
+        }
+        if (out.kind === "blocked") {
+          setSaveError(
+            out.reason === "offline"
+              ? "You're offline. Reconnect to save shared fields."
+              : "You don't have permission to change shared settings.",
+          )
+          return false
+        }
+        if (out.kind === "error") {
+          setSaveError(out.message || "Saving shared settings failed.")
+          return false
+        }
+      }
+
+      // Re-baseline from current form state. Reading IDB here was racy —
+      // `patchShared` mirrors shared fields to IDB via a fire-and-forget write
+      // that hasn't necessarily flushed yet, so the read would return stale
+      // values and `applyBaseline` would wipe what the user just saved. We
+      // wrote the values; we know what they are.
+      const newBaseline: Baseline = {
+        name,
+        sourceLanguage,
+        targetLanguage,
+        username,
+        provider,
+        endpoint: endpoint.trim(),
+        apiKey,
+        model,
+        maxTokens,
+        temperature,
+        systemPrompt,
+        llmHealthPenalty,
+        autoSyncEnabled,
+        autoSyncInterval: Math.max(1, autoSyncInterval),
+        validationCount,
+        validationCountAudio,
+        decaySettings,
+        audioMediaStrategy,
+      }
+      setBaseline(newBaseline)
+      // Refresh `useProject` in the background so other components see the
+      // updated IDB record. We don't await it — the form is already correct.
+      refresh()
+      return true
+    } catch (err) {
+      setSaveError(err instanceof Error ? err.message : String(err))
+      return false
+    } finally {
+      setSaving(false)
+    }
+  }, [
+    id, baseline, name, sourceLanguage, targetLanguage, username, provider, endpoint, apiKey,
+    model, maxTokens, temperature, systemPrompt, llmHealthPenalty, autoSyncEnabled,
+    autoSyncInterval, validationCount, validationCountAudio, audioMediaStrategy, decaySettings,
+    patchShared, refresh, applyBaseline,
+  ])
+
+  const handleSaveAndClose = useCallback(async () => {
+    const ok = await handleSave()
+    // `saveError` from the render closure is stale (set inside handleSave
+    // during this same tick); rely on the returned boolean instead.
+    if (!ok) return
+    navigate(`/project/${id}`)
+  }, [handleSave, navigate, id])
+
+  const handleDiscardConfirm = useCallback(() => {
+    if (baseline) applyBaseline(baseline)
+    setDiscardOpen(false)
+    const target = pendingNav ?? `/project/${id}`
+    setPendingNav(null)
+    navigate(target)
+  }, [baseline, applyBaseline, pendingNav, navigate, id])
+
+  const handleDiscardCancel = useCallback(() => {
+    setDiscardOpen(false)
+    setPendingNav(null)
+  }, [])
+
   if (loading) return <div className="p-8 text-muted-foreground">Loading...</div>
+
+  const preset = CUSTOM_PRESETS.find((p) => p.id === presetId) ?? CUSTOM_PRESETS[0]
 
   return (
     <div className="min-h-screen bg-background">
-      <header className="flex items-center gap-4 border-b px-4 py-2">
-        <Button variant="ghost" size="sm" onClick={() => navigate(`/project/${id}`)}>
-          <ArrowLeft className="mr-1 h-4 w-4" /> Back to Editor
-        </Button>
+      <header className="sticky top-0 z-30 flex items-center gap-3 border-b bg-background/95 px-4 py-2 backdrop-blur supports-backdrop-filter:bg-background/80">
+        {isDirty ? (
+          <div className="flex items-stretch">
+            <Button
+              size="sm"
+              onClick={handleSaveAndClose}
+              disabled={saving}
+              className="rounded-r-none"
+            >
+              {saving ? (
+                <Loader2 className="mr-1 h-4 w-4 animate-spin" />
+              ) : (
+                <Save className="mr-1 h-4 w-4" />
+              )}
+              Save changes
+            </Button>
+            <Menu.Root>
+              <Menu.Trigger
+                render={
+                  <Button
+                    size="sm"
+                    disabled={saving}
+                    className="rounded-l-none border-l border-primary-foreground/20 px-2"
+                    aria-label="More save options"
+                  >
+                    <ChevronDown className="h-4 w-4" />
+                  </Button>
+                }
+              />
+              <Menu.Portal>
+                <Menu.Positioner sideOffset={4} align="start" className="z-40">
+                  <Menu.Popup className="min-w-56 rounded-xl border bg-popover p-1 text-popover-foreground shadow-soft-lg">
+                    <Menu.Item onClick={() => setDiscardOpen(true)} className={ITEM_CLASS}>
+                      Close without saving
+                    </Menu.Item>
+                  </Menu.Popup>
+                </Menu.Positioner>
+              </Menu.Portal>
+            </Menu.Root>
+          </div>
+        ) : (
+          <Button variant="ghost" size="sm" onClick={() => requestNavigate(`/project/${id}`)}>
+            <ArrowLeft className="mr-1 h-4 w-4" /> Back to Editor
+          </Button>
+        )}
         <h2 className="font-semibold">Project Settings</h2>
-        <div className="ml-auto flex items-center gap-2">
-          {savedFlash && (
-            <span className="flex items-center gap-1 text-xs text-green-600 animate-in fade-in duration-200">
-              <Check className="h-3 w-3" /> Saved
-            </span>
-          )}
+        <div className="ml-auto flex items-center gap-2 text-xs text-muted-foreground">
+          {isDirty && !saving && <span>Unsaved changes</span>}
+          {saveError && <span className="text-destructive">{saveError}</span>}
         </div>
       </header>
       <main className="mx-auto max-w-2xl space-y-6 p-6">
@@ -229,7 +497,7 @@ export function ProjectSettings() {
           <CardContent className="space-y-4">
             <div>
               <Label htmlFor="pname">Project Name</Label>
-              <Input id="pname" value={name} onChange={(e) => setName(e.target.value)} onBlur={() => saveField({ name })} />
+              <Input id="pname" value={name} onChange={(e) => setName(e.target.value)} />
             </div>
             {sharedUpdatedBy && sharedUpdatedAt && sharedVersion != null && sharedVersion > 0 && (
               <p className="text-xs text-muted-foreground">
@@ -241,13 +509,13 @@ export function ProjectSettings() {
               <div>
                 <Label htmlFor="sl">Source Language</Label>
                 <DisabledFieldTooltip disabled={!canEditShared} tooltip={sharedDisabledTooltip}>
-                  <Input id="sl" value={sourceLanguage} onChange={(e) => setSourceLanguage(e.target.value)} onBlur={() => savePartialShared({ sourceLanguage })} disabled={!canEditShared} />
+                  <Input id="sl" value={sourceLanguage} onChange={(e) => setSourceLanguage(e.target.value)} disabled={!canEditShared} />
                 </DisabledFieldTooltip>
               </div>
               <div>
                 <Label htmlFor="tl">Target Language</Label>
                 <DisabledFieldTooltip disabled={!canEditShared} tooltip={sharedDisabledTooltip}>
-                  <Input id="tl" value={targetLanguage} onChange={(e) => setTargetLanguage(e.target.value)} onBlur={() => savePartialShared({ targetLanguage })} disabled={!canEditShared} />
+                  <Input id="tl" value={targetLanguage} onChange={(e) => setTargetLanguage(e.target.value)} disabled={!canEditShared} />
                 </DisabledFieldTooltip>
               </div>
             </div>
@@ -258,7 +526,7 @@ export function ProjectSettings() {
           <CardHeader><CardTitle>User</CardTitle></CardHeader>
           <CardContent>
             <Label htmlFor="un">Username</Label>
-            <Input id="un" value={username} onChange={(e) => setUsername(e.target.value)} onBlur={() => saveField({ username })} placeholder="local" />
+            <Input id="un" value={username} onChange={(e) => setUsername(e.target.value)} placeholder="local" />
             <p className="mt-1 text-xs text-muted-foreground">Used as author name in translation history.</p>
           </CardContent>
         </Card>
@@ -276,7 +544,6 @@ export function ProjectSettings() {
                 id="sp"
                 value={systemPrompt}
                 onChange={(e) => setSystemPrompt(e.target.value)}
-                onBlur={() => savePartialShared({ systemPrompt })}
                 rows={6}
                 disabled={!canEditShared}
                 className="w-full rounded border bg-background px-3 py-2 font-mono text-sm disabled:cursor-not-allowed disabled:opacity-50"
@@ -310,7 +577,7 @@ export function ProjectSettings() {
                     name="provider"
                     className="mt-1"
                     checked={provider === "frontier"}
-                    onChange={() => { setProvider("frontier"); saveCompletionSettings({ provider: "frontier" }) }}
+                    onChange={() => setProvider("frontier")}
                   />
                   <span>
                     <strong>Frontier</strong> (recommended) — calls <code className="rounded bg-muted px-1">api.frontierrnd.com</code>{" "}
@@ -323,7 +590,7 @@ export function ProjectSettings() {
                     name="provider"
                     className="mt-1"
                     checked={provider === "custom"}
-                    onChange={() => { setProvider("custom"); saveCompletionSettings({ provider: "custom" }) }}
+                    onChange={() => setProvider("custom")}
                   />
                   <span>
                     <strong>Custom endpoint</strong> — localhost, self-hosted, or a third-party OpenAI-compatible
@@ -333,86 +600,78 @@ export function ProjectSettings() {
               </div>
             </div>
 
-            {provider === "custom" && (() => {
-              const preset = CUSTOM_PRESETS.find((p) => p.id === presetId) ?? CUSTOM_PRESETS[0]
-              return (
-                <>
+            {provider === "custom" && (
+              <>
+                <div>
+                  <Label htmlFor="preset">Provider preset</Label>
+                  <select
+                    id="preset"
+                    value={presetId}
+                    onChange={(e) => handlePresetChange(e.target.value)}
+                    className="w-full rounded border bg-background px-3 py-2 text-sm"
+                  >
+                    {CUSTOM_PRESETS.map((p) => (
+                      <option key={p.id} value={p.id}>{p.label}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <Label htmlFor="ep">Endpoint URL</Label>
+                  <div className="flex gap-2">
+                    <Input
+                      id="ep"
+                      value={endpoint}
+                      onChange={(e) => { setEndpoint(e.target.value); setPresetId(presetIdForEndpoint(e.target.value)) }}
+                      placeholder="http://localhost:8000"
+                      className="flex-1"
+                    />
+                    <Button size="sm" onClick={handleConnect} disabled={connecting || !endpoint.trim()}>
+                      {connecting ? <Loader2 className="h-4 w-4 animate-spin" /> : "Connect"}
+                    </Button>
+                  </div>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    Base URL. Trailing <code className="rounded bg-muted px-1">/v1</code> or
+                    {" "}<code className="rounded bg-muted px-1">/chat/completions</code> is accepted.
+                  </p>
+                  {connected && <p className="mt-1 flex items-center gap-1 text-xs text-green-600"><CheckCircle className="h-3 w-3" /> Connected — {models.length} model(s)</p>}
+                  {connectionError && <p className="mt-1 flex items-center gap-1 text-xs text-destructive"><XCircle className="h-3 w-3" /> {connectionError}</p>}
+                </div>
+                <ApiKeyField
+                  label={`API key${preset.requiresKey ? " *" : " (optional)"}`}
+                  placeholder={preset.keyHint ?? (preset.requiresKey ? "Paste your API key" : "Leave blank for no auth")}
+                  projectKey={apiKey}
+                  userKey={completionUserKey}
+                  onProjectKeyChange={setApiKey}
+                  onUserKeyChange={(v) => setUserApiKey("completion", v)}
+                  help="Sent as Authorization: Bearer <key>. Stored locally in your browser; never uploaded to Frontier."
+                />
+                <p className="text-xs text-muted-foreground">
+                  Stays on this device — not shared with collaborators.
+                </p>
+                {models.length > 0 && (
                   <div>
-                    <Label htmlFor="preset">Provider preset</Label>
-                    <select
-                      id="preset"
-                      value={presetId}
-                      onChange={(e) => handlePresetChange(e.target.value)}
-                      className="w-full rounded border bg-background px-3 py-2 text-sm"
-                    >
-                      {CUSTOM_PRESETS.map((p) => (
-                        <option key={p.id} value={p.id}>{p.label}</option>
-                      ))}
+                    <Label htmlFor="mdl">Model</Label>
+                    <select id="mdl" value={model} onChange={(e) => setModel(e.target.value)} className="w-full rounded border bg-background px-3 py-2 text-sm">
+                      {models.map((m) => <option key={m} value={m}>{m}</option>)}
                     </select>
                   </div>
+                )}
+                {models.length === 0 && (
                   <div>
-                    <Label htmlFor="ep">Endpoint URL</Label>
-                    <div className="flex gap-2">
-                      <Input
-                        id="ep"
-                        value={endpoint}
-                        onChange={(e) => { setEndpoint(e.target.value); setPresetId(presetIdForEndpoint(e.target.value)) }}
-                        onBlur={() => saveCompletionSettings({ endpoint: endpoint.trim() })}
-                        placeholder="http://localhost:8000"
-                        className="flex-1"
-                      />
-                      <Button size="sm" onClick={handleConnect} disabled={connecting || !endpoint.trim()}>
-                        {connecting ? <Loader2 className="h-4 w-4 animate-spin" /> : "Connect"}
-                      </Button>
-                    </div>
+                    <Label htmlFor="mdl-manual">Model (if not listed)</Label>
+                    <Input
+                      id="mdl-manual"
+                      value={model}
+                      onChange={(e) => setModel(e.target.value)}
+                      placeholder={presetId === "openrouter" ? "anthropic/claude-3.5-sonnet" : "Type a model id"}
+                    />
                     <p className="mt-1 text-xs text-muted-foreground">
-                      Base URL. Trailing <code className="rounded bg-muted px-1">/v1</code> or
-                      {" "}<code className="rounded bg-muted px-1">/chat/completions</code> is accepted.
+                      Click Connect to discover models, or type one manually (required for providers that don't expose <code className="rounded bg-muted px-1">/models</code>).
                     </p>
-                    {connected && <p className="mt-1 flex items-center gap-1 text-xs text-green-600"><CheckCircle className="h-3 w-3" /> Connected — {models.length} model(s)</p>}
-                    {connectionError && <p className="mt-1 flex items-center gap-1 text-xs text-destructive"><XCircle className="h-3 w-3" /> {connectionError}</p>}
                   </div>
-                  <ApiKeyField
-                    label={`API key${preset.requiresKey ? " *" : " (optional)"}`}
-                    placeholder={preset.keyHint ?? (preset.requiresKey ? "Paste your API key" : "Leave blank for no auth")}
-                    projectKey={apiKey}
-                    userKey={completionUserKey}
-                    onProjectKeyChange={(v) => {
-                      setApiKey(v)
-                      saveCompletionSettings({ apiKey: v || undefined })
-                    }}
-                    onUserKeyChange={(v) => setUserApiKey("completion", v)}
-                    help="Sent as Authorization: Bearer <key>. Stored locally in your browser; never uploaded to Frontier."
-                  />
-                  <p className="text-xs text-muted-foreground">
-                    Stays on this device — not shared with collaborators.
-                  </p>
-                  {models.length > 0 && (
-                    <div>
-                      <Label htmlFor="mdl">Model</Label>
-                      <select id="mdl" value={model} onChange={(e) => { setModel(e.target.value); saveCompletionSettings({ model: e.target.value }) }} className="w-full rounded border bg-background px-3 py-2 text-sm">
-                        {models.map((m) => <option key={m} value={m}>{m}</option>)}
-                      </select>
-                    </div>
-                  )}
-                  {models.length === 0 && (
-                    <div>
-                      <Label htmlFor="mdl-manual">Model (if not listed)</Label>
-                      <Input
-                        id="mdl-manual"
-                        value={model}
-                        onChange={(e) => setModel(e.target.value)}
-                        onBlur={() => saveCompletionSettings({ model })}
-                        placeholder={presetId === "openrouter" ? "anthropic/claude-3.5-sonnet" : "Type a model id"}
-                      />
-                      <p className="mt-1 text-xs text-muted-foreground">
-                        Click Connect to discover models, or type one manually (required for providers that don't expose <code className="rounded bg-muted px-1">/models</code>).
-                      </p>
-                    </div>
-                  )}
-                </>
-              )
-            })()}
+                )}
+              </>
+            )}
 
             {provider === "frontier" && (
               <div>
@@ -421,7 +680,6 @@ export function ProjectSettings() {
                   id="mdl-frontier"
                   value={model}
                   onChange={(e) => setModel(e.target.value)}
-                  onBlur={() => saveCompletionSettings({ model })}
                   placeholder="Leave blank for Frontier's default"
                 />
                 <p className="mt-1 text-xs text-muted-foreground">
@@ -433,23 +691,21 @@ export function ProjectSettings() {
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <Label htmlFor="mt">Max Tokens</Label>
-                <Input id="mt" type="number" value={maxTokens} onChange={(e) => setMaxTokens(Number(e.target.value))} onBlur={() => saveCompletionSettings({ maxTokens })} />
+                <Input id="mt" type="number" value={maxTokens} onChange={(e) => setMaxTokens(Number(e.target.value))} />
               </div>
               <div>
                 <Label>Temperature ({temperature})</Label>
-                <input type="range" min="0" max="1" step="0.05" value={temperature} onChange={(e) => setTemperature(Number(e.target.value))} onMouseUp={() => saveCompletionSettings({ temperature })} className="mt-2 w-full" />
+                <input type="range" min="0" max="1" step="0.05" value={temperature} onChange={(e) => setTemperature(Number(e.target.value))} className="mt-2 w-full" />
               </div>
             </div>
 
-            {(
-              <div>
-                <Label>LLM Health Penalty ({Math.round(llmHealthPenalty * 100)}%)</Label>
-                <input type="range" min="0" max="0.5" step="0.05" value={llmHealthPenalty} onChange={(e) => setLlmHealthPenalty(Number(e.target.value))} onMouseUp={() => saveCompletionSettings({ llmHealthPenalty })} className="mt-2 w-full" />
-                <p className="mt-1 text-xs text-muted-foreground">
-                  LLM translations are penalized by this amount in health calculations. 0% = full trust, 50% = heavy penalty. Default: 10%.
-                </p>
-              </div>
-            )}
+            <div>
+              <Label>LLM Health Penalty ({Math.round(llmHealthPenalty * 100)}%)</Label>
+              <input type="range" min="0" max="0.5" step="0.05" value={llmHealthPenalty} onChange={(e) => setLlmHealthPenalty(Number(e.target.value))} className="mt-2 w-full" />
+              <p className="mt-1 text-xs text-muted-foreground">
+                LLM translations are penalized by this amount in health calculations. 0% = full trust, 50% = heavy penalty. Default: 10%.
+              </p>
+            </div>
           </div>
         </details>
 
@@ -463,7 +719,7 @@ export function ProjectSettings() {
             <p className="text-sm text-muted-foreground">
               The TTS engine, Gemini API key, voice library, and voice cloning now live in the Voice Studio.
             </p>
-            <Button variant="outline" onClick={() => navigate(`/project/${id}/voice`)} className="shrink-0">
+            <Button variant="outline" onClick={() => requestNavigate(`/project/${id}/voice`)} className="shrink-0">
               Open Voice Studio
             </Button>
           </CardContent>
@@ -471,7 +727,7 @@ export function ProjectSettings() {
 
         <DecaySettingsSection
           settings={decaySettings}
-          onChange={saveDecaySettings}
+          onChange={setDecaySettings}
         />
 
         <ValidationSettingsSection
@@ -481,20 +737,14 @@ export function ProjectSettings() {
           disabled={!canEditShared}
           disabledTooltip={sharedDisabledTooltip ?? undefined}
           onChange={(u) => {
-            if (u.validationCount !== undefined) {
-              setValidationCount(u.validationCount)
-              void savePartialShared({ validationCount: u.validationCount })
-            }
-            if (u.validationCountAudio !== undefined) {
-              setValidationCountAudio(u.validationCountAudio)
-              void savePartialShared({ validationCountAudio: u.validationCountAudio })
-            }
+            if (u.validationCount !== undefined) setValidationCount(u.validationCount)
+            if (u.validationCountAudio !== undefined) setValidationCountAudio(u.validationCountAudio)
           }}
         />
 
         <AudioMediaStrategySection
-          value={project?.audioMediaStrategy ?? "lazy"}
-          onChange={(v) => saveField({ audioMediaStrategy: v })}
+          value={audioMediaStrategy}
+          onChange={setAudioMediaStrategy}
         />
 
         {project?.origin?.kind === "git" && (
@@ -509,11 +759,7 @@ export function ProjectSettings() {
                   type="checkbox"
                   id="auto-sync"
                   checked={autoSyncEnabled}
-                  onChange={(e) => {
-                    const enabled = e.target.checked
-                    setAutoSyncEnabled(enabled)
-                    saveField({ syncSettings: { autoSync: { enabled, intervalMinutes: autoSyncInterval } } })
-                  }}
+                  onChange={(e) => setAutoSyncEnabled(e.target.checked)}
                 />
                 <Label htmlFor="auto-sync" className="text-sm">Auto-sync every</Label>
                 <Input
@@ -523,7 +769,6 @@ export function ProjectSettings() {
                   className="h-8 w-20"
                   value={autoSyncInterval}
                   onChange={(e) => setAutoSyncInterval(Math.max(1, Number(e.target.value) || 1))}
-                  onBlur={() => saveField({ syncSettings: { autoSync: { enabled: autoSyncEnabled, intervalMinutes: Math.max(1, autoSyncInterval) } } })}
                 />
                 <span className="text-sm">minutes (only when there are changes)</span>
               </div>
@@ -533,11 +778,22 @@ export function ProjectSettings() {
             </CardContent>
           </Card>
         )}
-
-        <p className="text-xs text-muted-foreground text-center pb-8">
-          All changes save automatically.
-        </p>
       </main>
+
+      <Dialog open={discardOpen} onOpenChange={(open) => (open ? setDiscardOpen(true) : handleDiscardCancel())}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Discard changes?</DialogTitle>
+            <DialogDescription>
+              You have unsaved changes to project settings. They will be lost if you leave now.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="ghost" onClick={handleDiscardCancel}>Keep editing</Button>
+            <Button variant="destructive" onClick={handleDiscardConfirm}>Discard</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {conflictBy && (
         <div

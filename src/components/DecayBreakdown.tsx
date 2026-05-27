@@ -49,7 +49,7 @@ export function DecayBreakdown({
 
   return (
     <Popover>
-      <PopoverTrigger openOnHover delay={300} closeDelay={120} render={<span className="inline-flex">{children}</span>} />
+      <PopoverTrigger nativeButton={false} openOnHover delay={300} closeDelay={120} render={<span className="inline-flex">{children}</span>} />
       <PopoverContent side="top" align="start" className="neu-raised w-72 rounded-2xl border-0 bg-card p-3">
         <div className="mb-2 flex items-baseline justify-between">
           <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">

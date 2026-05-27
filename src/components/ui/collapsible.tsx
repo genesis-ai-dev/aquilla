@@ -38,12 +38,17 @@ function Collapsible({ open, onOpenChange, className, children }: CollapsiblePro
 interface CollapsibleTriggerProps {
   /** When set, render the single child element and merge the toggle handler. */
   asChild?: boolean
+  disabled?: boolean
+  className?: string
   children: ReactNode
 }
 
-function CollapsibleTrigger({ asChild, children }: CollapsibleTriggerProps) {
+function CollapsibleTrigger({ asChild, disabled, className, children }: CollapsibleTriggerProps) {
   const { open, onOpenChange } = useCollapsible()
-  const toggle = () => onOpenChange(!open)
+  const toggle = () => {
+    if (disabled) return
+    onOpenChange(!open)
+  }
 
   if (asChild && isValidElement(children)) {
     const child = children as ReactElement<{ onClick?: (e: MouseEvent) => void }>
@@ -56,16 +61,22 @@ function CollapsibleTrigger({ asChild, children }: CollapsibleTriggerProps) {
   }
 
   return (
-    <button type="button" data-slot="collapsible-trigger" onClick={toggle}>
+    <button
+      type="button"
+      data-slot="collapsible-trigger"
+      disabled={disabled}
+      className={className}
+      onClick={toggle}
+    >
       {children}
     </button>
   )
 }
 
-function CollapsibleContent({ children }: { children: ReactNode }) {
+function CollapsibleContent({ className, children }: { className?: string; children: ReactNode }) {
   const { open } = useCollapsible()
   if (!open) return null
-  return <div data-slot="collapsible-content">{children}</div>
+  return <div data-slot="collapsible-content" className={className}>{children}</div>
 }
 
 export { Collapsible, CollapsibleTrigger, CollapsibleContent }

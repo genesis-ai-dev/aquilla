@@ -3,6 +3,7 @@ import { Menu } from "@base-ui/react/menu"
 import { MoreHorizontal } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { ThemeToggle } from "@/branding/ThemeMode"
+import { ColorThemePicker } from "@/branding/ColorTheme"
 
 export interface OverflowMenuItem {
   id: string
@@ -51,6 +52,10 @@ export function OverflowMenu({ items, includeTheme = true }: Props) {
                 <div className="flex items-center justify-between gap-2 px-2 py-1 text-sm">
                   <span className="text-muted-foreground">Theme</span>
                   <ThemeToggle />
+                </div>
+                <div className="flex items-center justify-between gap-2 px-2 py-1 text-sm">
+                  <span className="text-muted-foreground">Color</span>
+                  <ColorThemePicker />
                 </div>
               </>
             )}

@@ -8,6 +8,7 @@ import { brand } from "./branding/current-brand"
 import { applyTheme } from "./branding/apply-theme"
 import { BrandProvider } from "./branding/BrandProvider"
 import { ThemeModeProvider } from "./branding/ThemeMode"
+import { ColorThemeProvider } from "./branding/ColorTheme"
 // Buffer/crypto/etc. provided by vite-plugin-node-polyfills (see vite.config.ts)
 
 applyTheme(brand)
@@ -29,9 +30,11 @@ createRoot(document.getElementById("root")!).render(
     <QueryClientProvider client={queryClient}>
       <BrandProvider>
         <ThemeModeProvider>
-          <BrowserRouter>
-            <App />
-          </BrowserRouter>
+          <ColorThemeProvider>
+            <BrowserRouter>
+              <App />
+            </BrowserRouter>
+          </ColorThemeProvider>
         </ThemeModeProvider>
       </BrandProvider>
     </QueryClientProvider>

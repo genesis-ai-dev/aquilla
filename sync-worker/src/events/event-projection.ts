@@ -247,15 +247,16 @@ export function buildEventProjectionStmts(
                 last_editor, last_edit_at, validated, word_count, content_hash
               ) VALUES (?, ?, ?, 'target', ?, ?, NULL, NULL, NULL, ?, ?, ?, ?, 0, ?, ?)
               ON CONFLICT(project_id, file_id, cell_id, side) DO UPDATE SET
-                value           = excluded.value,
-                value_html      = excluded.value_html,
-                event_id        = excluded.event_id,
-                source_event_id = excluded.source_event_id,
-                last_editor     = excluded.last_editor,
-                last_edit_at    = excluded.last_edit_at,
-                word_count      = excluded.word_count,
-                content_hash    = excluded.content_hash,
-                validated       = 0`,
+                value             = excluded.value,
+                value_html        = excluded.value_html,
+                event_id          = excluded.event_id,
+                source_event_id   = excluded.source_event_id,
+                last_editor       = excluded.last_editor,
+                last_edit_at      = excluded.last_edit_at,
+                word_count        = excluded.word_count,
+                content_hash      = excluded.content_hash,
+                validated         = 0,
+                endorsement_count = 0`,
             )
             .bind(
               event.projectId,
@@ -422,6 +423,41 @@ export function buildEventProjectionStmts(
             `UPDATE cells
             SET validated = (
               SELECT CASE WHEN COUNT(*) > 0 THEN 1 ELSE 0 END
+              FROM cell_validators
+              WHERE project_id = ?
+                AND file_id    = ?
+                AND cell_id    = ?
+                AND event_id   = cells.event_id
+            )
+            WHERE project_id = ? AND file_id = ? AND cell_id = ? AND side = 'target'`,
+          )
+          .bind(
+            event.projectId,
+            event.fileId,
+            event.cellId,
+            event.projectId,
+            event.fileId,
+            event.cellId,
+          ),
+      )
+
+      // AD-14 pass 1: endorsement_count = number of validators on the CURRENT
+      // chain head. Idempotent under replay (derives from the validators
+      // table, not an increment). Resets to 0 on cell.commit because that
+      // moves the chain head.
+      //
+      // TODO(AD-13/14): propagate endorsement to the validated cell's
+      // branching-search neighborhood. Today only the directly-validated
+      // cell gains health; nearby cells stay at 0 even though the spec says
+      // they should pick up partial endorsement. That's the loop that also
+      // makes retrieval examples appear for neighbors once a few cells in
+      // the region are validated.
+      stmts.push(
+        db
+          .prepare(
+            `UPDATE cells
+            SET endorsement_count = (
+              SELECT COUNT(*)
               FROM cell_validators
               WHERE project_id = ?
                 AND file_id    = ?

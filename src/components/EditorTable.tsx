@@ -1214,16 +1214,21 @@ function EditorRow({
     setTranscribeStatus(audioId, { kind: "idle" })
   }, [cell.selectedAudioId])
 
-  // Build tooltip detail
+  // Build tooltip detail. Prefer the live examples surfaced in the popover
+  // (cellExamples) over the history snapshot — history's `examples` only gets
+  // populated on commit, so an in-progress / freshly generated cell would
+  // otherwise read "no examples" while the popover clearly shows several.
   const lastEntry = cell.history[cell.history.length - 1]
-  const exampleIds = lastEntry?.examples || []
+  const exampleCount = cellExamples.length > 0
+    ? cellExamples.length
+    : (lastEntry?.examples?.length ?? 0)
   const healthTooltip = cell.status === "empty"
     ? undefined
     : cell.status === "validated"
       ? `Health: ${healthValue}% — validated`
-      : exampleIds.length === 0
+      : exampleCount === 0
         ? `Health: ${healthValue}% — no examples`
-        : `Health: ${healthValue}% — ${exampleIds.length} example${exampleIds.length !== 1 ? "s" : ""}`
+        : `Health: ${healthValue}% — ${exampleCount} example${exampleCount !== 1 ? "s" : ""}`
 
   const vs = cell.validationStatus
   const [validationPopoverOpen, setValidationPopoverOpen] = useState(false)

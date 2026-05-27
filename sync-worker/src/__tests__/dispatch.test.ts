@@ -91,13 +91,13 @@ describe('dispatchEvent', () => {
     expect(outcome.result.dirtyTables).toContain('cells')
   })
 
-  it('cell.validate routes to the cell handler with two projection stmts + recompute', async () => {
+  it('cell.validate routes to the cell handler with validator UPSERT + validated recompute + endorsement_count recompute', async () => {
     const authed = await makeAuthorized('cell.validate', 300)
     const outcome = dispatchEvent(makeNoOpD1(), authed, 9999, { updateProjection: true, serverSeq: 1 })
     expect(outcome.ok).toBe(true)
     if (!outcome.ok) throw new Error('unreachable')
-    // 1 events INSERT + 1 validator UPSERT + 1 recompute = 3
-    expect(outcome.result.stmts.length).toBe(3)
+    // 1 events INSERT + 1 validator UPSERT + 1 validated recompute + 1 endorsement_count recompute (AD-14 pass 1) = 4
+    expect(outcome.result.stmts.length).toBe(4)
     expect(outcome.result.dirtyTables).toContain('cell_validators')
   })
 

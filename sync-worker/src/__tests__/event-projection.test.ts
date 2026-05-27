@@ -308,7 +308,7 @@ describe('buildEventProjectionStmts — cell.validate / cell.unvalidate', () => 
       makeEvent('cell.validate', { editEventId: 'evt-commit-id' }),
       stmts,
     )
-    expect(stmts).toHaveLength(2)
+    expect(stmts).toHaveLength(3)
     expect(recorded[0].sql).toContain('INSERT INTO cell_validators')
     // 0012: columns are (project_id, file_id, cell_id, event_id, username, decided_ts) — no is_active
     expect(recorded[0].sql).toContain('event_id')
@@ -317,9 +317,12 @@ describe('buildEventProjectionStmts — cell.validate / cell.unvalidate', () => 
     expect(recorded[1].sql).toContain('SET validated')
     // Recompute references event_id (not edit_event_id) per 0012 schema
     expect(recorded[1].sql).toContain('event_id = cells.event_id')
+    // AD-14 pass 1: endorsement_count recompute against current chain head
+    expect(recorded[2].sql).toContain('SET endorsement_count')
+    expect(recorded[2].sql).toContain('cells.event_id')
   })
 
-  it('cell.unvalidate emits DELETE (not UPSERT) + cells.validated recompute', () => {
+  it('cell.unvalidate emits DELETE (not UPSERT) + cells.validated recompute + endorsement_count recompute', () => {
     const { db, recorded } = makeD1Stub()
     const stmts: D1PreparedStatement[] = []
     buildEventProjectionStmts(
@@ -327,11 +330,12 @@ describe('buildEventProjectionStmts — cell.validate / cell.unvalidate', () => 
       makeEvent('cell.unvalidate', { editEventId: 'evt-commit-id' }),
       stmts,
     )
-    // DELETE stmt + UPDATE cells.validated recompute
-    expect(stmts).toHaveLength(2)
+    // DELETE stmt + UPDATE cells.validated recompute + UPDATE cells.endorsement_count recompute
+    expect(stmts).toHaveLength(3)
     expect(recorded[0].sql).toContain('DELETE FROM cell_validators')
     expect(recorded[1].sql).toContain('UPDATE cells')
     expect(recorded[1].sql).toContain('SET validated')
+    expect(recorded[2].sql).toContain('SET endorsement_count')
   })
 })
 

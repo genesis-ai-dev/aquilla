@@ -3,10 +3,11 @@ interface HealthRingProps {
   size?: number            // px, default 20
   strokeWidth?: number     // px, default 2.5
   className?: string
+  style?: React.CSSProperties
   children?: React.ReactNode  // icon rendered inside the ring
 }
 
-export function HealthRing({ health, size = 20, strokeWidth = 2.5, className, children }: HealthRingProps) {
+export function HealthRing({ health, size = 20, strokeWidth = 2.5, className, style, children }: HealthRingProps) {
   const radius = (size - strokeWidth) / 2
   const circumference = 2 * Math.PI * radius
   const offset = circumference - (health / 100) * circumference
@@ -15,7 +16,7 @@ export function HealthRing({ health, size = 20, strokeWidth = 2.5, className, ch
   const color = health <= 33 ? "#ef4444" : health <= 66 ? "#f59e0b" : "#22c55e"
 
   return (
-    <div className={className} style={{ position: "relative", width: size, height: size }}>
+    <div className={className} style={{ position: "relative", width: size, height: size, ...style }}>
       <svg width={size} height={size} style={{ transform: "rotate(-90deg)" }}>
         {/* Background track */}
         <circle

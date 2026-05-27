@@ -1317,7 +1317,8 @@ function EditorRow({
               health={healthValue}
               size={22}
               strokeWidth={2}
-              className="pointer-events-none absolute inset-0"
+              className="pointer-events-none"
+              style={{ position: "absolute", inset: 0 }}
             />
             <ValidationIcon
               className="relative h-3.5 w-3.5"

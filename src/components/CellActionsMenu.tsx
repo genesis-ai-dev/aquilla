@@ -116,7 +116,7 @@ export function CellActionsMenu({
             title="More actions"
             aria-label="More actions"
             className={cn(
-              "flex h-5 w-5 items-center justify-center rounded transition-[transform,color] duration-150 ease-out active:scale-[0.92] hover:bg-muted/60",
+              "flex h-5 w-5 items-center justify-center rounded-full transition-[transform,color] duration-150 ease-out active:scale-[0.92] hover:bg-muted/60",
               open ? "text-foreground bg-muted/60" : "text-muted-foreground/50 hover:text-foreground",
             )}
           >
@@ -124,7 +124,7 @@ export function CellActionsMenu({
           </button>
         }
       />
-      <PopoverContent side="left" align="start" className="min-w-[180px] p-1">
+      <PopoverContent side="left" align="start" className="min-w-[180px] rounded-xl p-1">
         <ul role="menu" className="flex flex-col">
           {visibleItems.map((item) => (
             <li key={item.key} role="none">
@@ -134,7 +134,7 @@ export function CellActionsMenu({
                 disabled={item.disabled}
                 onClick={item.onSelect}
                 className={cn(
-                  "flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs transition-colors",
+                  "flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-xs transition-colors",
                   "hover:bg-muted focus-visible:bg-muted focus-visible:outline-none",
                   "disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent",
                 )}

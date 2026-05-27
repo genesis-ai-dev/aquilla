@@ -47,8 +47,8 @@ export function FileRow(props: FileRowProps) {
   return (
     <div
       className={cn(
-        "group relative flex items-center gap-1 rounded px-1 py-1 text-sm cursor-pointer",
-        active ? "bg-accent" : "hover:bg-accent/50",
+        "group relative flex items-center gap-1 rounded-xl px-2 py-1.5 text-sm cursor-pointer transition-shadow",
+        active ? "shadow-neu-inset" : "bg-card hover:shadow-neu-xs",
       )}
       onClick={() => { if (!editing) onSelect() }}
       onContextMenu={(e) => { e.preventDefault(); onOpenMenu(e.clientX, e.clientY) }}
@@ -62,7 +62,7 @@ export function FileRow(props: FileRowProps) {
     >
       {canExpand ? (
         <button
-          className="p-0.5 hover:bg-muted rounded"
+          className="p-0.5 rounded-full text-muted-foreground transition-shadow hover:shadow-neu-xs"
           onClick={(e) => { e.stopPropagation(); onToggleExpand() }}
           aria-label={expanded ? "Collapse" : "Expand"}
         >
@@ -82,7 +82,7 @@ export function FileRow(props: FileRowProps) {
               if (e.key === "Enter") { e.preventDefault(); onEditCommit(draft) }
               else if (e.key === "Escape") { e.preventDefault(); onEditCancel() }
             }}
-            className="w-full rounded border px-1 py-0 text-sm bg-background"
+            className="w-full rounded-lg bg-background px-2 py-0.5 text-sm shadow-neu-inset outline-none"
             onClick={(e) => e.stopPropagation()}
           />
         ) : (
@@ -98,17 +98,17 @@ export function FileRow(props: FileRowProps) {
       </div>
       {progress && progress.total > 0 && !editing && (
         <div className="flex items-center gap-0.5 shrink-0" aria-label={`${translatedPct}% translated, ${validatedPct}% validated`}>
-          <span className="h-2 w-6 rounded-full bg-muted overflow-hidden">
+          <span className="h-2 w-6 rounded-full bg-muted overflow-hidden shadow-neu-inset">
             <span className="block h-full bg-amber-500" style={{ width: `${translatedPct}%` }} />
           </span>
-          <span className="h-2 w-6 rounded-full bg-muted overflow-hidden">
+          <span className="h-2 w-6 rounded-full bg-muted overflow-hidden shadow-neu-inset">
             <span className="block h-full bg-emerald-500" style={{ width: `${validatedPct}%` }} />
           </span>
         </div>
       )}
       {!editing && (
         <button
-          className="p-1 rounded hover:bg-muted opacity-0 group-hover:opacity-100"
+          className="p-1 rounded-full text-muted-foreground opacity-0 transition-shadow hover:shadow-neu-xs group-hover:opacity-100"
           onClick={(e) => { e.stopPropagation(); onOpenMenu(e.clientX, e.clientY) }}
           aria-label="File actions"
         >
@@ -117,7 +117,7 @@ export function FileRow(props: FileRowProps) {
       )}
       {hasSuggestion && !editing && (
         <button
-          className="p-1 rounded hover:bg-muted shrink-0"
+          className="p-1 rounded-full shrink-0 transition-shadow hover:shadow-neu-xs"
           onClick={(e) => { e.stopPropagation(); onApplySuggestion?.() }}
           aria-label="Apply rename suggestion"
           title="A cleaner name was detected for this file. Click to apply, or use the Apply button at the top of the sidebar."

@@ -25,7 +25,7 @@ export function TabStrip({ tabs, activeTabId, files, onActivate, onClose }: Prop
     <div
       role="tablist"
       aria-label="Open files"
-      className="neu-flat relative z-10 flex items-stretch gap-px overflow-x-auto px-2"
+      className="neu-flat relative z-10 flex items-stretch gap-1.5 overflow-x-auto px-2 py-1.5"
     >
       {tabs.map((tab) => {
         const active = tab.id === activeTabId
@@ -36,10 +36,10 @@ export function TabStrip({ tabs, activeTabId, files, onActivate, onClose }: Prop
             role="tab"
             aria-selected={active}
             className={cn(
-              "group/tab relative flex shrink-0 items-center gap-1.5 border-b-2 px-3 py-1.5 text-xs transition-colors",
+              "group/tab relative flex shrink-0 items-center gap-1.5 rounded-full px-3 py-1 text-xs transition-all",
               active
-                ? "border-primary bg-background text-foreground"
-                : "border-transparent text-muted-foreground hover:bg-accent/50 hover:text-foreground",
+                ? "bg-card text-foreground shadow-neu-sm"
+                : "text-muted-foreground hover:text-foreground hover:shadow-neu-xs",
             )}
           >
             <button
@@ -60,7 +60,7 @@ export function TabStrip({ tabs, activeTabId, files, onActivate, onClose }: Prop
                 onClose(tab.id)
               }}
               aria-label={`Close ${name}`}
-              className="flex h-4 w-4 shrink-0 items-center justify-center rounded-sm text-muted-foreground/60 opacity-0 transition-opacity hover:bg-muted hover:text-foreground group-hover/tab:opacity-100 aria-[selected=true]:opacity-100"
+              className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full text-muted-foreground/60 opacity-0 transition-all hover:text-foreground hover:shadow-neu-xs group-hover/tab:opacity-100 aria-[selected=true]:opacity-100"
             >
               <X className="h-3 w-3" />
             </button>

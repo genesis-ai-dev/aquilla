@@ -50,7 +50,7 @@ export function DecayBreakdown({
   return (
     <Popover>
       <PopoverTrigger openOnHover delay={300} closeDelay={120} render={<span className="inline-flex">{children}</span>} />
-      <PopoverContent side="top" align="start" className="w-72 rounded-lg border p-3 shadow-lg">
+      <PopoverContent side="top" align="start" className="neu-raised w-72 rounded-2xl border-0 bg-card p-3">
         <div className="mb-2 flex items-baseline justify-between">
           <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
             {scopeLabel}
@@ -78,7 +78,7 @@ export function DecayBreakdown({
                 <li key={c.cellId}>
                   <button
                     type="button"
-                    className="flex w-full items-center justify-between gap-2 rounded px-1 py-1 text-left text-xs hover:bg-muted/60"
+                    className="flex w-full items-center justify-between gap-2 rounded-lg px-2 py-1 text-left text-xs transition-all hover:bg-card hover:shadow-neu-xs"
                     onClick={() => onJumpToCell?.(c.cellId)}
                     disabled={!onJumpToCell}
                   >

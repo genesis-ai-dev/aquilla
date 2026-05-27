@@ -72,18 +72,19 @@
     --radius-3xl: calc(var(--radius) * 2.2);
     --radius-4xl: calc(var(--radius) * 2.6);
 
-    /* Neumorphic elevation — RESERVED for key interactive elements (primary
-       CTA pill, switch track/handle, active tab). Dual-tone soft shadows from
-       the surface's own --neu-light (top-left highlight) + --neu-dark
-       (bottom-right shade) so depth reads on the shared surface in both
-       light + dark. Do NOT apply to cards, inputs, modals, popovers, or
-       anything else — those use --shadow-soft-* below. */
-    --shadow-neu-xs: 1px 2px 5px var(--neu-dark), -1px -1px 3px var(--neu-light);
-    --shadow-neu-sm: 2px 3px 9px var(--neu-dark), -2px -2px 6px var(--neu-light);
-    --shadow-neu: 4px 5px 14px var(--neu-dark), -3px -4px 10px var(--neu-light);
-    --shadow-neu-lg: 8px 10px 28px var(--neu-dark), -6px -7px 18px var(--neu-light);
-    --shadow-neu-inset: inset 2px 3px 7px var(--neu-dark), inset -2px -2px 5px var(--neu-light);
-    --shadow-neu-pressed: inset 1px 2px 5px var(--neu-dark), inset -1px -1px 3px var(--neu-light);
+    /* Neumorphic elevation — the core of the design language. Symmetric
+       dual-tone shadows: a light highlight to the top-left (--neu-light) and an
+       equal dark shade to the bottom-right (--neu-dark), both close in value to
+       the shared surface so elements read as gently extruded (raised) or carved
+       (inset) from the same material. Used broadly: cards, rows, buttons,
+       inputs, bars, the sidebar. Only floating layers (modals/popovers/tooltips)
+       use the --shadow-soft-* drop shadows below. */
+    --shadow-neu-xs: 1px 1px 3px var(--neu-dark), -1px -1px 3px var(--neu-light);
+    --shadow-neu-sm: 3px 3px 7px var(--neu-dark), -3px -3px 7px var(--neu-light);
+    --shadow-neu: 5px 5px 12px var(--neu-dark), -5px -5px 12px var(--neu-light);
+    --shadow-neu-lg: 9px 9px 20px var(--neu-dark), -9px -9px 20px var(--neu-light);
+    --shadow-neu-inset: inset 3px 3px 7px var(--neu-dark), inset -3px -3px 7px var(--neu-light);
+    --shadow-neu-pressed: inset 2px 2px 4px var(--neu-dark), inset -2px -2px 4px var(--neu-light);
 
     /* Soft single-direction elevation — for modals, popovers, sheets,
        tooltips, and cards. One slate-tinted shadow at low alpha. */
@@ -111,92 +112,95 @@
 @layer base {
   :where(:root) {
     color-scheme: light;
-    --radius: 0.85rem;
-    /* Bright lemon + warm cream. Surface is a warm ivory paper; primary is a
-       vivid lemon-gold used mainly as a FILL (with near-black text on it),
-       so chips/CTAs read sunny without straining contrast. Hovers, soft chips
-       and focus rings sit in pale lemon tints; the chart palette runs warm
-       (lemon / amber / sage / terracotta / coral). Neu shadows are warm to
-       match the cream so the soft-UI extrusion reads on the shared surface. */
-    --surface: oklch(0.985 0.01 95);
+    --radius: 1rem;
+    /* Neumorphic warm grey. The base is a soft warm light-GREY (not white) so a
+       pure-white highlight can read against it — neumorphism needs the surface
+       to sit below the highlight and above the shade. Everything (bg, card,
+       sidebar, inputs) shares this one surface; depth comes from shadow, not
+       color or borders. The accent is a SUBTLE muted gold used sparingly. One
+       warm hue (~85) at low chroma runs through the whole palette so nothing
+       fights. */
+    --surface: oklch(0.928 0.008 90);
     --background: var(--surface);
-    --foreground: oklch(0.27 0.015 80);
+    --foreground: oklch(0.34 0.012 75);
     --card: var(--surface);
-    --card-foreground: oklch(0.27 0.015 80);
-    --popover: oklch(0.99 0.008 95);
-    --popover-foreground: oklch(0.27 0.015 80);
-    /* Vivid lemon-gold. Light enough that it needs DARK text on top — it is a
-       fill/accent color, not a body-text color. */
-    --primary: oklch(0.85 0.17 92);
-    --primary-foreground: oklch(0.27 0.03 80);
+    --card-foreground: oklch(0.34 0.012 75);
+    --popover: oklch(0.95 0.006 90);
+    --popover-foreground: oklch(0.34 0.012 75);
+    /* Subtle muted gold — an accent, not a highlighter. Takes dark text. */
+    --primary: oklch(0.80 0.085 85);
+    --primary-foreground: oklch(0.30 0.03 75);
     --secondary: var(--surface);
-    --secondary-foreground: oklch(0.32 0.02 80);
-    --muted: oklch(0.955 0.012 95);
-    --muted-foreground: oklch(0.53 0.018 85);
-    /* Accent surfaces (hover, soft chips) get a pale lemon tint. */
-    --accent: oklch(0.94 0.06 95);
-    --accent-foreground: oklch(0.40 0.07 80);
-    --destructive: oklch(0.62 0.20 25);
-    --destructive-foreground: oklch(0.99 0.01 95);
-    --border: oklch(0.90 0.012 90);
-    --input: oklch(0.95 0.012 90);
-    --ring: oklch(0.80 0.15 92);
-    --neu-light: oklch(1 0 0);
-    --neu-dark: oklch(0.90 0.014 90);
-    /* Warm chart palette: lemon / amber / sage / terracotta / coral. */
-    --chart-1: oklch(0.85 0.165 92);
-    --chart-2: oklch(0.75 0.14 65);
-    --chart-3: oklch(0.80 0.10 135);
-    --chart-4: oklch(0.72 0.13 45);
-    --chart-5: oklch(0.68 0.13 25);
+    --secondary-foreground: oklch(0.40 0.02 80);
+    --muted: oklch(0.90 0.008 90);
+    --muted-foreground: oklch(0.52 0.015 80);
+    /* Hover/chip surfaces get a whisper of gold. */
+    --accent: oklch(0.87 0.045 86);
+    --accent-foreground: oklch(0.38 0.05 80);
+    --destructive: oklch(0.60 0.16 25);
+    --destructive-foreground: oklch(0.97 0.01 90);
+    --border: oklch(0.86 0.01 88);
+    --input: oklch(0.90 0.008 90);
+    --ring: oklch(0.76 0.09 85);
+    --neu-light: oklch(0.985 0.004 90);
+    --neu-dark: oklch(0.83 0.012 88);
+    /* Muted warm chart palette: gold / amber / sage / clay / rose. */
+    --chart-1: oklch(0.80 0.09 85);
+    --chart-2: oklch(0.72 0.08 60);
+    --chart-3: oklch(0.76 0.06 130);
+    --chart-4: oklch(0.70 0.09 40);
+    --chart-5: oklch(0.66 0.10 25);
     --sidebar: var(--surface);
-    --sidebar-foreground: oklch(0.27 0.015 80);
-    --sidebar-primary: oklch(0.85 0.17 92);
-    --sidebar-primary-foreground: oklch(0.27 0.03 80);
-    --sidebar-accent: oklch(0.94 0.06 95);
-    --sidebar-accent-foreground: oklch(0.40 0.07 80);
-    --sidebar-border: oklch(0.90 0.012 90);
-    --sidebar-ring: oklch(0.80 0.15 92);
+    --sidebar-foreground: oklch(0.34 0.012 75);
+    --sidebar-primary: oklch(0.80 0.085 85);
+    --sidebar-primary-foreground: oklch(0.30 0.03 75);
+    --sidebar-accent: oklch(0.87 0.045 86);
+    --sidebar-accent-foreground: oklch(0.38 0.05 80);
+    --sidebar-border: oklch(0.86 0.01 88);
+    --sidebar-ring: oklch(0.76 0.09 85);
   }
 
   :where(html.dark) {
-    /* Dark mode keeps the lemon personality — primary stays a bright gold
-       that pops on the deep warm-charcoal surface. */
-    --surface: oklch(0.215 0.012 80);
+    /* Dark neumorphism needs a MID grey, not near-black: the surface must be
+       light enough that --neu-dark can still go darker beneath it. Same warm
+       hue (~85), low chroma, soft (not pure-white) foreground, and the same
+       muted gold accent — so dark mode reads as the same material dimmed, with
+       nothing clashing. */
+    --surface: oklch(0.30 0.006 85);
     --background: var(--surface);
-    --foreground: oklch(0.94 0.008 90);
+    --foreground: oklch(0.90 0.006 85);
     --card: var(--surface);
-    --card-foreground: oklch(0.94 0.008 90);
-    --popover: oklch(0.25 0.014 80);
-    --popover-foreground: oklch(0.94 0.008 90);
-    --primary: oklch(0.86 0.17 92);
-    --primary-foreground: oklch(0.22 0.03 80);
+    --card-foreground: oklch(0.90 0.006 85);
+    --popover: oklch(0.34 0.008 85);
+    --popover-foreground: oklch(0.90 0.006 85);
+    --primary: oklch(0.80 0.09 85);
+    --primary-foreground: oklch(0.26 0.03 80);
     --secondary: var(--surface);
-    --secondary-foreground: oklch(0.94 0.008 90);
-    --muted: oklch(0.27 0.014 80);
-    --muted-foreground: oklch(0.72 0.016 85);
-    --accent: oklch(0.32 0.04 88);
-    --accent-foreground: oklch(0.87 0.10 92);
-    --destructive: oklch(0.70 0.16 25);
-    --destructive-foreground: oklch(0.20 0.04 25);
-    --border: oklch(1 0 0 / 8%);
-    --input: oklch(1 0 0 / 10%);
-    --ring: oklch(0.80 0.15 92);
-    --neu-light: oklch(0.27 0.014 80);
-    --neu-dark: oklch(0.15 0.008 80);
-    --chart-1: oklch(0.86 0.16 92);
-    --chart-2: oklch(0.77 0.13 65);
-    --chart-3: oklch(0.80 0.09 135);
-    --chart-4: oklch(0.74 0.12 45);
-    --chart-5: oklch(0.72 0.13 25);
+    --secondary-foreground: oklch(0.88 0.008 85);
+    --muted: oklch(0.34 0.008 85);
+    --muted-foreground: oklch(0.66 0.012 85);
+    --accent: oklch(0.37 0.035 85);
+    --accent-foreground: oklch(0.82 0.07 85);
+    --destructive: oklch(0.62 0.15 25);
+    --destructive-foreground: oklch(0.95 0.01 85);
+    --border: oklch(0.40 0.008 85);
+    --input: oklch(0.34 0.008 85);
+    --ring: oklch(0.74 0.09 85);
+    --neu-light: oklch(0.35 0.008 85);
+    --neu-dark: oklch(0.245 0.005 85);
+    --chart-1: oklch(0.80 0.09 85);
+    --chart-2: oklch(0.74 0.08 60);
+    --chart-3: oklch(0.78 0.06 130);
+    --chart-4: oklch(0.72 0.09 40);
+    --chart-5: oklch(0.68 0.10 25);
     --sidebar: var(--surface);
-    --sidebar-foreground: oklch(0.94 0.008 90);
-    --sidebar-primary: oklch(0.86 0.17 92);
-    --sidebar-primary-foreground: oklch(0.22 0.03 80);
-    --sidebar-accent: oklch(0.32 0.04 88);
-    --sidebar-accent-foreground: oklch(0.87 0.10 92);
-    --sidebar-border: oklch(1 0 0 / 8%);
-    --sidebar-ring: oklch(0.80 0.15 92);
+    --sidebar-foreground: oklch(0.90 0.006 85);
+    --sidebar-primary: oklch(0.80 0.09 85);
+    --sidebar-primary-foreground: oklch(0.26 0.03 80);
+    --sidebar-accent: oklch(0.37 0.035 85);
+    --sidebar-accent-foreground: oklch(0.82 0.07 85);
+    --sidebar-border: oklch(0.40 0.008 85);
+    --sidebar-ring: oklch(0.74 0.09 85);
     /* Dark mode: soft shadows need near-black at higher alpha. */
     --shadow-soft-xs: 0 1px 2px -1px oklch(0.05 0 0 / 0.40);
     --shadow-soft-sm: 0 2px 6px -1px oklch(0.05 0 0 / 0.40),

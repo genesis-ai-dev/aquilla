@@ -48,12 +48,12 @@ export const CellTranscriptPreview = forwardRef<HTMLDivElement, Props>(function 
   // transcript writeback returns via the target.cell.commit grammar.
 
   const tone = isStale
-    ? "border-amber-500/40 bg-amber-500/5"
+    ? "ring-1 ring-amber-500/40 ring-inset"
     : matches
-      ? "border-emerald-500/30 bg-emerald-500/5"
+      ? "ring-1 ring-emerald-500/30 ring-inset"
       : alignedToCellText
-        ? "border-muted-foreground/20 bg-muted/20"
-        : "border-amber-500/40 bg-amber-500/5"
+        ? ""
+        : "ring-1 ring-amber-500/40 ring-inset"
 
   const Icon = isStale ? AlertTriangle : Sparkles
   const iconTone = isStale || !matches
@@ -73,8 +73,8 @@ export const CellTranscriptPreview = forwardRef<HTMLDivElement, Props>(function 
       ref={ref}
       tabIndex={-1}
       className={cn(
-        "mt-1.5 rounded border px-2.5 py-1.5 text-xs scroll-mt-16 outline-none",
-        "focus:ring-2 focus:ring-primary/40",
+        "neu-inset mt-1.5 rounded-xl px-2.5 py-1.5 text-xs scroll-mt-16 outline-none",
+        "focus:ring-2 focus:ring-primary/40 focus:ring-inset",
         tone,
       )}
     >
@@ -92,7 +92,7 @@ export const CellTranscriptPreview = forwardRef<HTMLDivElement, Props>(function 
               <button
                 type="button"
                 onClick={onRetranscribe}
-                className="inline-flex items-center gap-1 rounded bg-primary/10 px-1.5 py-0.5 text-[10px] font-medium text-primary transition-colors hover:bg-primary/20"
+                className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-medium text-primary transition-colors hover:bg-primary/20"
                 title="Run Whisper again with the current cell text"
               >
                 <RefreshCw className="h-2.5 w-2.5" />

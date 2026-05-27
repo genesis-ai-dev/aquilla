@@ -33,7 +33,7 @@ function SheetContent({
   // removes it from the DOM. Dropping animations makes close instant but
   // correct; visual polish can be added later if the underlying CSS gets
   // fixed.
-  const sideClasses = side === "right" ? "right-0 border-l" : "left-0 border-r"
+  const sideClasses = side === "right" ? "right-0" : "left-0"
   return (
     <DialogPrimitive.Portal>
       <DialogPrimitive.Backdrop
@@ -43,7 +43,7 @@ function SheetContent({
       <DialogPrimitive.Popup
         data-slot="sheet-content"
         className={cn(
-          "fixed top-0 z-50 flex h-full w-80 flex-col bg-background shadow-xl ring-1 ring-foreground/10 outline-none",
+          "fixed top-0 z-50 flex h-full w-80 flex-col bg-background shadow-soft-lg outline-none",
           "data-closed:pointer-events-none data-closed:opacity-0",
           sideClasses,
           className

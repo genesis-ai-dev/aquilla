@@ -64,7 +64,7 @@ export function CellExpansion({
     <div
       ref={wrapperRef}
       className={cn(
-        "neu-inset mt-2 overflow-hidden rounded-lg",
+        "neu-inset mt-2 overflow-hidden rounded-xl",
         // Entrance animation. CSS-only so we don't pull in a motion lib.
         "data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:slide-in-from-top-1",
         className,
@@ -75,7 +75,7 @@ export function CellExpansion({
       onClick={(e) => e.stopPropagation()}
     >
       <Tabs value={tab} onValueChange={onTabChange} className="flex flex-col">
-        <div className="flex items-center justify-between border-b border-border/40 px-2 py-1.5">
+        <div className="flex items-center justify-between px-2 py-1.5">
           <TabsList>
             {tabs.map((t) => (
               <TabsTrigger

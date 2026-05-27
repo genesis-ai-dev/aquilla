@@ -64,8 +64,8 @@ const ChipButton = forwardRef<HTMLButtonElement, ChipProps>(function ChipButton(
       type="button"
       title={title}
       className={cn(
-        "rounded-sm px-1.5 py-0.5 text-xs tabular-nums transition-colors",
-        "hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+        "rounded-full px-2 py-0.5 text-xs tabular-nums transition-all",
+        "hover:bg-card hover:shadow-neu-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
         tone === "stuck" && "text-amber-600 dark:text-amber-500",
         tone === "queued" && "text-foreground",
         tone === "idle" && "text-muted-foreground/70",

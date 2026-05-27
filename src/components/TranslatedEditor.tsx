@@ -141,9 +141,11 @@ export function TranslatedEditor({
     editorProps: {
       attributes: {
         class: cn(
-          "prose prose-sm max-w-none h-full min-h-[40px] px-2 py-1 text-sm leading-relaxed focus:outline-none",
-          "rounded-sm transition-colors",
-          "hover:bg-muted/40 focus:bg-muted/30",
+          // The surrounding neu-inset well in EditorTable already reads as an
+          // input, so the editor surface itself stays transparent — no flat
+          // background tints competing with the soft recess.
+          "prose prose-sm max-w-none h-full min-h-[40px] px-1 py-0.5 text-sm leading-relaxed focus:outline-none",
+          "rounded-lg transition-colors",
           className
         ),
       },
@@ -272,12 +274,12 @@ export function TranslatedEditor({
         </div>
       )}
       {remoteChangedDuringEdit && onDiscardLocal && (
-        <div className="mb-1 flex items-center justify-between gap-2 rounded-sm border border-amber-300 bg-amber-50 px-2 py-1 text-[11px] text-amber-800 dark:border-amber-700 dark:bg-amber-950 dark:text-amber-300">
+        <div className="mb-1 flex items-center justify-between gap-2 rounded-xl bg-amber-50 px-2.5 py-1.5 text-[11px] text-amber-800 shadow-neu-sm dark:bg-amber-950 dark:text-amber-300">
           <span>This cell changed elsewhere while you were editing.</span>
           <button
             type="button"
             onClick={onDiscardLocal}
-            className="rounded bg-amber-500/20 px-2 py-0.5 text-amber-900 hover:bg-amber-500/30 dark:text-amber-100"
+            className="rounded-full bg-amber-500/20 px-2 py-0.5 text-amber-900 hover:bg-amber-500/30 dark:text-amber-100"
           >
             Discard and reload
           </button>
@@ -293,7 +295,7 @@ export function TranslatedEditor({
             type="button"
             onClick={() => editor.chain().focus().toggleBold().run()}
             className={cn(
-              "flex h-6 w-6 items-center justify-center rounded text-xs hover:bg-accent",
+              "flex h-6 w-6 items-center justify-center rounded-full text-xs hover:bg-accent",
               editor.isActive("bold") && "bg-accent"
             )}
             title="Bold (Cmd+B)"
@@ -304,7 +306,7 @@ export function TranslatedEditor({
             type="button"
             onClick={() => editor.chain().focus().toggleItalic().run()}
             className={cn(
-              "flex h-6 w-6 items-center justify-center rounded text-xs hover:bg-accent",
+              "flex h-6 w-6 items-center justify-center rounded-full text-xs hover:bg-accent",
               editor.isActive("italic") && "bg-accent"
             )}
             title="Italic (Cmd+I)"
@@ -315,7 +317,7 @@ export function TranslatedEditor({
             type="button"
             onClick={() => editor.chain().focus().toggleUnderline().run()}
             className={cn(
-              "flex h-6 w-6 items-center justify-center rounded text-xs hover:bg-accent",
+              "flex h-6 w-6 items-center justify-center rounded-full text-xs hover:bg-accent",
               editor.isActive("underline") && "bg-accent"
             )}
             title="Underline (Cmd+U)"
@@ -326,7 +328,7 @@ export function TranslatedEditor({
             type="button"
             onClick={() => editor.chain().focus().toggleStrike().run()}
             className={cn(
-              "flex h-6 w-6 items-center justify-center rounded text-xs hover:bg-accent",
+              "flex h-6 w-6 items-center justify-center rounded-full text-xs hover:bg-accent",
               editor.isActive("strike") && "bg-accent"
             )}
             title="Strikethrough"
@@ -337,7 +339,7 @@ export function TranslatedEditor({
             type="button"
             onClick={() => editor.chain().focus().toggleCode().run()}
             className={cn(
-              "flex h-6 w-6 items-center justify-center rounded text-xs hover:bg-accent",
+              "flex h-6 w-6 items-center justify-center rounded-full text-xs hover:bg-accent",
               editor.isActive("code") && "bg-accent"
             )}
             title="Inline code"

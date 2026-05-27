@@ -106,9 +106,9 @@ export function AccountSwitcher({ variant = "sidebar" }: { variant?: "sidebar" |
       <>
         <button
           className={cn(
-            "flex items-center gap-2 rounded px-2 py-1.5 text-sm hover:bg-accent",
+            "flex items-center gap-2 rounded-xl bg-card px-2 py-1.5 text-sm transition-shadow hover:shadow-neu-xs",
             !isHeader && "w-full",
-            isHeader && "border h-9",
+            isHeader && "shadow-neu-sm h-9",
           )}
           onClick={() => setLoginOpen(true)}
         >
@@ -131,7 +131,7 @@ export function AccountSwitcher({ variant = "sidebar" }: { variant?: "sidebar" |
     <div ref={rootRef} className="relative">
       <button
         className={cn(
-          "flex items-center gap-2 rounded px-2 py-1.5 text-sm hover:bg-accent",
+          "flex items-center gap-2 rounded-xl bg-card px-2 py-1.5 text-sm transition-shadow hover:shadow-neu-xs",
           !isHeader && "w-full",
           isHeader && "h-9",
         )}
@@ -149,7 +149,7 @@ export function AccountSwitcher({ variant = "sidebar" }: { variant?: "sidebar" |
       {open && (
         <div
           className={cn(
-            "absolute top-full mt-1 z-40 w-60 rounded-md border bg-popover p-1 shadow-md",
+            "neu-raised absolute top-full mt-2 z-40 w-60 rounded-2xl p-1.5",
             isHeader ? "right-0" : "left-0",
           )}
         >
@@ -159,7 +159,7 @@ export function AccountSwitcher({ variant = "sidebar" }: { variant?: "sidebar" |
           {activeSummary && <Entry summary={activeSummary} />}
           {others.length > 0 && (
             <>
-              <div className="my-1 h-px bg-border" />
+              <div className="my-1.5 h-px bg-foreground/5" />
               <div className="px-2 py-1.5 text-[10px] uppercase tracking-wide text-muted-foreground">
                 Switch to
               </div>
@@ -172,16 +172,16 @@ export function AccountSwitcher({ variant = "sidebar" }: { variant?: "sidebar" |
               ))}
             </>
           )}
-          <div className="my-1 h-px bg-border" />
+          <div className="my-1.5 h-px bg-foreground/5" />
           <button
-            className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-sm hover:bg-accent"
+            className="flex w-full items-center gap-2 rounded-xl bg-card px-2 py-1.5 text-sm transition-shadow hover:shadow-neu-xs"
             onClick={() => { setOpen(false); setLoginOpen(true) }}
           >
             <UserPlus className="h-4 w-4" />
             <span>Add another account…</span>
           </button>
           <button
-            className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-sm hover:bg-accent"
+            className="flex w-full items-center gap-2 rounded-xl bg-card px-2 py-1.5 text-sm transition-shadow hover:shadow-neu-xs"
             onClick={async () => { setOpen(false); await clearSession(); await clearAllLocalData() }}
           >
             <LogOut className="h-4 w-4" />
@@ -214,8 +214,9 @@ function Entry({
   return (
     <div
       className={cn(
-        "group flex items-center gap-2 rounded px-2 py-1.5 text-sm",
-        !summary.active && "hover:bg-accent cursor-pointer",
+        "group flex items-center gap-2 rounded-xl px-2 py-1.5 text-sm",
+        !summary.active && "bg-card cursor-pointer transition-shadow hover:shadow-neu-xs",
+        summary.active && "shadow-neu-inset",
       )}
       onClick={onClick}
     >
@@ -231,7 +232,7 @@ function Entry({
       {summary.active && <Check className="h-3.5 w-3.5 text-muted-foreground" />}
       {onRemove && !summary.active && (
         <button
-          className="ml-1 rounded px-1 text-[10px] text-muted-foreground opacity-0 group-hover:opacity-100 hover:text-foreground"
+          className="ml-1 rounded-full px-1 text-[10px] text-muted-foreground opacity-0 group-hover:opacity-100 hover:text-foreground"
           onClick={(e) => { e.stopPropagation(); onRemove() }}
           aria-label={`Remove ${summary.username}`}
         >

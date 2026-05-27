@@ -45,7 +45,7 @@ function SkeletonRows({ caption }: { caption: string }) {
     <div className="flex h-full flex-col">
       <div className="flex-1 space-y-2 overflow-hidden p-4" aria-label={caption}>
         {Array.from({ length: 8 }).map((_, i) => (
-          <div key={i} className={`grid ${GRID_COLS} gap-3 items-start`}>
+          <div key={i} className={`neu-flat grid ${GRID_COLS} items-start gap-3 rounded-2xl px-4 py-3`}>
             <Skeleton className="h-6 w-10" />
             <Skeleton className="h-16 w-full" />
             <Skeleton className="h-16 w-full" />
@@ -53,7 +53,7 @@ function SkeletonRows({ caption }: { caption: string }) {
           </div>
         ))}
       </div>
-      <div className="border-t px-4 py-2 text-xs text-muted-foreground">
+      <div className="px-4 py-2 text-xs text-muted-foreground">
         {caption}
       </div>
     </div>
@@ -87,7 +87,7 @@ function ReadyEmpty({
           <button
             type="button"
             onClick={onImportClick}
-            className="inline-flex items-center gap-1.5 rounded-md border border-input bg-background px-3 py-1.5 text-sm shadow-xs transition hover:bg-accent"
+            className="inline-flex items-center gap-1.5 rounded-full bg-card px-3 py-1.5 text-sm shadow-neu-sm transition-all hover:shadow-neu active:shadow-neu-pressed"
           >
             <Sparkles className="h-4 w-4" aria-hidden />
             Import content

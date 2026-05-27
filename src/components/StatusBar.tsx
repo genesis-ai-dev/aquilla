@@ -28,7 +28,7 @@ export function StatusBar({
   }))
 
   return (
-    <footer className="neu-flat relative z-10 flex items-center gap-2 px-4 py-1.5 text-sm text-muted-foreground">
+    <footer className="neu-flat relative z-10 flex items-center gap-2.5 px-4 py-2 text-sm text-muted-foreground">
       <DecayBreakdown
         health={projectHealth}
         scopeLabel="project health"
@@ -40,10 +40,14 @@ export function StatusBar({
           <span className="text-[7px] font-bold">{projectHealth}</span>
         </HealthRing>
       </DecayBreakdown>
-      <span>
-        {total.toLocaleString()} cells · {translated} translated ({pct}%)
-        {unvalidated > 0 && <span className="ml-2 text-amber-500">· {unvalidated} unvalidated</span>}
-        {validated > 0 && <span className="ml-2 text-green-500">· {validated} validated</span>}
+      <span className="flex items-center gap-2">
+        <span>{total.toLocaleString()} cells · {translated} translated ({pct}%)</span>
+        {unvalidated > 0 && (
+          <span className="neu-inset rounded-full px-2 py-0.5 text-xs text-amber-500">{unvalidated} unvalidated</span>
+        )}
+        {validated > 0 && (
+          <span className="neu-inset rounded-full px-2 py-0.5 text-xs text-green-500">{validated} validated</span>
+        )}
       </span>
     </footer>
   )

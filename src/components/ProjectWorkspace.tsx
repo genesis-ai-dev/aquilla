@@ -1176,7 +1176,7 @@ export function ProjectWorkspace() {
       <AppShell
         sidebar={
           <>
-            <div className="border-b p-2">
+            <div className="p-2">
               <AccountSwitcher />
             </div>
             <SuggestionBanner

@@ -16,23 +16,20 @@ export function WorkspaceHeader({ project, onBack, children, extraMenuItems }: P
     ...(extraMenuItems ?? []),
   ]
   return (
-    <header className="neu-flat relative z-10 flex items-center gap-3 px-4 py-2">
-      <nav className="flex items-center gap-1 text-sm min-w-0">
+    <header className="neu-flat relative z-10 flex items-center gap-3 px-4 py-2.5">
+      <nav className="flex items-center gap-1.5 text-sm min-w-0">
         <button
-          className="text-muted-foreground hover:text-foreground truncate"
+          className="rounded-full px-2.5 py-1 text-muted-foreground transition-all hover:bg-card hover:text-foreground hover:shadow-neu-xs truncate"
           onClick={onBack}
         >
           Dashboard
         </button>
-        <span className="text-muted-foreground">/</span>
-        <span className="font-medium truncate">{project.name}</span>
+        <span className="text-muted-foreground/60">/</span>
+        <span className="rounded-full px-2.5 py-1 font-medium truncate">{project.name}</span>
         {(project.sourceLanguage || project.targetLanguage) && (
-          <>
-            <span className="text-muted-foreground">·</span>
-            <span className="text-muted-foreground truncate">
-              {project.sourceLanguage || "?"} → {project.targetLanguage || "?"}
-            </span>
-          </>
+          <span className="neu-inset rounded-full px-2.5 py-1 text-xs text-muted-foreground truncate">
+            {project.sourceLanguage || "?"} → {project.targetLanguage || "?"}
+          </span>
         )}
       </nav>
       <div className="flex-1" />

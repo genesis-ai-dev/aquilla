@@ -34,7 +34,7 @@ export function VersionBadge() {
   return (
     <div
       title={title}
-      className="fixed bottom-3 left-3 z-30 font-mono text-[11px] leading-none text-muted-foreground/70 bg-background/70 backdrop-blur-sm border border-border/60 rounded-full px-2.5 py-1 shadow-sm select-none"
+      className="neu-flat fixed bottom-3 left-3 z-30 font-mono text-[11px] leading-none text-muted-foreground/70 rounded-full px-3 py-1.5 select-none"
     >
       {label}
     </div>

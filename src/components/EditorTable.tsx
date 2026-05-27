@@ -639,7 +639,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
       <div className={cn("neu-flat sticky top-0 z-10 grid gap-2 px-4 py-2 text-xs font-medium uppercase tracking-wide text-muted-foreground", gridCols)}>
         <div />
         <div>Source</div>
-        <div className="border-l border-border/60 pl-3">Target</div>
+        <div className="pl-3">Target</div>
       </div>
 
       <div style={{ height: `${virtualizer.getTotalSize()}px`, width: "100%", position: "relative" }}>
@@ -845,7 +845,6 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
   const isBacktranslating = backtranslating?.has(cellId)
   const backtranslationError = backtranslationErrors?.get(cellId)
   const openCommentCount = cellOpenCommentCount?.get(cellId) ?? 0
-  const hasOpenComments = openCommentCount > 0
   const isActiveCue = activeCueIndex !== undefined && activeCueIndex === rowIndex
 
   // Bind the stable parent (cellId) => void handlers to this row's cellId.
@@ -860,9 +859,11 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
   return (
     <div
       className={cn(
-        "transition-colors duration-150 ease-out hover:bg-muted/20",
-        hasOpenComments && "border-l-2 border-l-blue-400",
-        isActiveCue && "bg-primary/5 ring-1 ring-primary/30",
+        // Outer wrapper is the virtualizer's MEASURED spacer. It only carries
+        // inset padding so the inner neu card has room for its soft shadow —
+        // no card styling here (margins on absolutely-positioned virtual rows
+        // break measurement). The raised card lives on EditorRow's inner div.
+        "px-2 py-1",
       )}
     >
       <EditorRow
@@ -1330,7 +1331,7 @@ function EditorRow({
         <PopoverContent
           side="right"
           align="start"
-          className="w-72 rounded-lg border p-2 shadow-lg"
+          className="w-72 rounded-xl p-2 shadow-neu-lg"
         >
           <ul className="space-y-0.5">
             <li className="mb-1 px-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
@@ -1561,20 +1562,32 @@ function EditorRow({
   const isSynthError = synthStatus.kind === "error"
 
   return (
-    <div className="border-b">
+    // Each cell is an individual softly-raised neumorphic card. No divider
+    // lines: depth comes from the dual shadow. The rounded card lives on the
+    // grid element itself; the virtualizer-measured spacer (MemoizedRow's
+    // wrapper) supplies the surrounding gap.
+    <div>
       <div
         ref={rowRef}
         className={cn(
-          "group relative grid gap-2 px-4 py-2 transition-colors",
-          audioController.isPlaying && "bg-primary/[0.04]",
-          expanded && "bg-muted/10",
-          isMultiSelected && "ring-2 ring-primary/40 ring-inset bg-primary/[0.03]",
-          isVoiceDropTarget && "ring-2 ring-primary/70 ring-inset bg-primary/5",
-          // Pulsing ring while a voice is being generated for this cell. Gives
-          // the user a clear "something is happening" signal — drop, translate,
+          "group neu-flat relative grid gap-2 overflow-hidden rounded-2xl px-4 py-3 transition-shadow duration-200 ease-out",
+          // Hover lifts the card a little more off the shared surface.
+          "hover:shadow-neu",
+          // Active/expanded reads as a carved-in well.
+          expanded && "shadow-neu-inset",
+          audioController.isPlaying && "shadow-neu",
+          // Multi-select: pressed-in with a subtle gold ring.
+          isMultiSelected && "shadow-neu-pressed ring-1 ring-primary/40 ring-inset",
+          // Open-comments accent — a soft inset ring instead of a hard border.
+          openCommentCount > 0 && "ring-1 ring-blue-400/50 ring-inset",
+          // Active cue highlight reads as a gentle inset well + gold ring.
+          _isActiveCue && "shadow-neu-inset ring-1 ring-primary/40 ring-inset",
+          isVoiceDropTarget && "shadow-neu-inset ring-2 ring-primary/60 ring-inset",
+          // Pulsing while a voice is being generated for this cell. Gives the
+          // user a clear "something is happening" signal — drop, translate,
           // and bulk synth all flow through this status key.
-          isSynthBusy && "ring-2 ring-primary/60 ring-inset bg-primary/[0.04] animate-pulse",
-          isSynthError && "ring-2 ring-destructive/60 ring-inset bg-destructive/5",
+          isSynthBusy && "shadow-neu-inset ring-2 ring-primary/50 ring-inset animate-pulse",
+          isSynthError && "shadow-neu-inset ring-2 ring-destructive/50 ring-inset",
           gridCols,
         )}
         onMouseEnter={handleRowMouseEnter}
@@ -1610,7 +1623,7 @@ function EditorRow({
             )}
             {showCellLabel && (
               <span
-                className="rounded bg-muted/50 px-1 py-0.5 font-medium text-muted-foreground/80"
+                className="rounded-full bg-card px-1.5 py-0.5 font-medium text-muted-foreground/80 shadow-neu-xs"
                 title="Cell label"
               >
                 {cell.cellLabel}
@@ -1675,7 +1688,7 @@ function EditorRow({
             ever-present chevron at the right edge. */}
         <div
           className={cn(
-            "relative flex flex-col border-l border-border/50 pl-3 pr-9 transition-opacity",
+            "relative flex flex-col pl-3 pr-9 transition-opacity",
             isSynthBusy && "opacity-70",
           )}
           dir={targetTextDirection}
@@ -1704,7 +1717,10 @@ function EditorRow({
             )}
           </button>
           <div className="flex flex-1 flex-col">
-            <div className="relative flex min-h-[40px] flex-1 flex-col">
+            {/* Editable target reads as a carved-in well so it's recognizable
+                as an input without a hard border. Only chrome — no editor
+                logic touched. */}
+            <div className="neu-inset relative flex min-h-[40px] flex-1 flex-col rounded-xl px-2 py-1.5">
               <TranslatedEditor
                 cellId={cell.id}
                 initialPlain={cell.translated}
@@ -1755,7 +1771,7 @@ function EditorRow({
                     /* Pre-stream spinner — centered so it doesn't overlap
                        any existing target text peeking through the dimmed
                        editor underneath. */
-                    <div className="m-auto flex items-center gap-1.5 rounded-md bg-background/70 px-2 py-1 text-muted-foreground backdrop-blur-sm">
+                    <div className="m-auto flex items-center gap-1.5 rounded-full bg-card px-2.5 py-1 text-muted-foreground shadow-neu-sm">
                       <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
                       <span>
                         {loadingPhase === "searching"
@@ -1923,7 +1939,7 @@ function EditorRow({
       {/* Expansion panel — hosts the rich, lower-frequency context that used
           to clutter the inline row: health breakdown, backtranslation, audio
           waveform + transcript, infractions detail, edit history. */}
-      <div className="px-4 pb-2">
+      <div className="mt-1 px-1">
         <CellExpansion
           open={expanded}
           tab={expansionTab}
@@ -1998,7 +2014,7 @@ function EditorRow({
                       <div className="leading-relaxed">{cell.backtranslation}</div>
                     </div>
                   ) : (
-                    <p className="rounded border border-dashed border-border/60 px-3 py-3 text-center text-xs text-muted-foreground">
+                    <p className="neu-inset rounded-xl px-3 py-3 text-center text-xs text-muted-foreground">
                       {cell.translated.trim().length === 0
                         ? "Add a translation first, then generate a backtranslation."
                         : "No backtranslation yet. Click Generate to create one."}
@@ -2193,7 +2209,7 @@ function EditorRow({
                                 key={`waived-${inf.ruleId}`}
                                 type="button"
                                 onClick={() => setOpenRuleId(inf.ruleId)}
-                                className="flex w-full items-start gap-2 rounded border border-border/30 bg-background/20 px-2.5 py-1.5 text-left text-xs text-muted-foreground/70 transition-colors hover:bg-muted/30"
+                                className="neu-inset flex w-full items-start gap-2 rounded-xl px-2.5 py-1.5 text-left text-xs text-muted-foreground/70 transition-all hover:shadow-neu-sm"
                               >
                                 <Check className="mt-0.5 h-3 w-3 shrink-0" />
                                 <span className="flex-1">
@@ -2233,7 +2249,7 @@ function EditorRow({
                         type="button"
                         onClick={() => onOpenHistory?.(cell.id)}
                         disabled={!onOpenHistory}
-                        className="self-start inline-flex items-center gap-1.5 rounded-full border border-border bg-background px-2.5 py-1 text-[11px] font-medium text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-40"
+                        className="self-start inline-flex items-center gap-1.5 rounded-full bg-card px-2.5 py-1 text-[11px] font-medium text-foreground shadow-neu-sm transition-all hover:shadow-neu active:shadow-neu-pressed disabled:cursor-not-allowed disabled:opacity-40"
                       >
                         <HistoryIcon className="h-3 w-3" />
                         Open full history

@@ -33,7 +33,7 @@ function TooltipContent({
         <TooltipPrimitive.Popup
           data-slot="tooltip-content"
           className={cn(
-            "rounded-xl border border-border bg-popover px-3 py-1.5 text-xs text-popover-foreground shadow-soft outline-none",
+            "rounded-xl bg-popover px-3 py-1.5 text-xs text-popover-foreground shadow-soft outline-none",
             className
           )}
           {...props}

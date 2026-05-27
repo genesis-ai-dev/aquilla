@@ -279,7 +279,7 @@ export function CellTtsButton({
       title={tooltip}
       aria-label={tooltip}
       className={cn(
-        "flex h-5 items-center justify-center gap-1 rounded transition-[transform,color] duration-150 ease-out active:scale-[0.92] hover:bg-muted/60",
+        "flex h-5 items-center justify-center gap-1 rounded-full transition-[transform,color] duration-150 ease-out active:scale-[0.92] hover:bg-muted/60",
         isLoadingModel ? "w-auto px-1" : "w-5",
         isError
           ? "text-destructive hover:text-destructive/80"

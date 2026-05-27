@@ -76,7 +76,7 @@ export function ProjectCard({
 
   return (
     <Card
-      className={`${isTrashed ? "opacity-70" : "cursor-pointer hover:shadow-md"} transition-shadow`}
+      className={`${isTrashed ? "opacity-70" : "cursor-pointer hover:shadow-neu-lg"} transition-shadow`}
       onClick={isTrashed ? undefined : onClick}
     >
       <CardHeader className="pb-2">
@@ -85,14 +85,14 @@ export function ProjectCard({
           <div className="flex items-center gap-1.5">
             {!isTrashed && myRoleLabel && (
               <span
-                className="inline-flex items-center rounded-full border bg-primary/10 text-primary px-2 py-0.5 text-[10px] font-medium capitalize"
+                className="inline-flex items-center rounded-full bg-primary/10 text-primary px-2 py-0.5 text-[10px] font-medium capitalize"
                 title="Your role on this project"
               >
                 {myRoleLabel.replace(/_/g, " ")}
               </span>
             )}
             {isGit && (
-              <span className="inline-flex items-center gap-1 rounded-full border bg-muted px-2 py-0.5 text-[10px] font-medium text-muted-foreground">
+              <span className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-[10px] font-medium text-muted-foreground shadow-neu-inset">
                 <GitBranch className="h-3 w-3" /> git
               </span>
             )}
@@ -117,7 +117,7 @@ export function ProjectCard({
                 >
                   <button
                     type="button"
-                    className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-sm text-destructive hover:bg-destructive/10"
+                    className="flex w-full items-center gap-2 rounded-xl px-2 py-1.5 text-sm text-destructive hover:bg-destructive/10"
                     onClick={(e) => {
                       e.stopPropagation()
                       onTrash()

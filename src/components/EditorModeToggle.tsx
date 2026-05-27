@@ -21,13 +21,15 @@ export function EditorModeToggle({ projectId, mode, activeFileId }: Props) {
     : `/project/${projectId}`
 
   return (
-    <div className="flex items-center rounded-full border bg-muted/40 p-0.5 text-xs">
+    <div className="neu-inset flex items-center gap-0.5 rounded-full p-1 text-xs">
       <button
         type="button"
         onClick={() => mode !== "translate" && navigate(translateHref)}
         className={cn(
-          "flex items-center gap-1 rounded-full px-2.5 py-1 transition-colors",
-          mode === "translate" ? "bg-background font-medium shadow-sm" : "text-muted-foreground hover:text-foreground",
+          "flex items-center gap-1 rounded-full px-2.5 py-1 transition-all",
+          mode === "translate"
+            ? "bg-card font-medium text-foreground shadow-neu-xs"
+            : "text-muted-foreground hover:text-foreground",
         )}
         aria-pressed={mode === "translate"}
       >
@@ -37,8 +39,10 @@ export function EditorModeToggle({ projectId, mode, activeFileId }: Props) {
         type="button"
         onClick={() => mode !== "voice" && navigate(`/project/${projectId}/voice`)}
         className={cn(
-          "flex items-center gap-1 rounded-full px-2.5 py-1 transition-colors",
-          mode === "voice" ? "bg-background font-medium shadow-sm" : "text-muted-foreground hover:text-foreground",
+          "flex items-center gap-1 rounded-full px-2.5 py-1 transition-all",
+          mode === "voice"
+            ? "bg-card font-medium text-foreground shadow-neu-xs"
+            : "text-muted-foreground hover:text-foreground",
         )}
         aria-pressed={mode === "voice"}
       >

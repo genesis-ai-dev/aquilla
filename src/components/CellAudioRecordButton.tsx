@@ -39,7 +39,7 @@ export function CellAudioRecordButton({ onOpenRecording, disabled }: Props) {
       title={tooltip}
       aria-label={tooltip}
       className={cn(
-        "flex h-5 w-5 items-center justify-center rounded transition-[transform,color] duration-150 ease-out active:scale-[0.92] hover:bg-muted/60",
+        "flex h-5 w-5 items-center justify-center rounded-full transition-[transform,color] duration-150 ease-out active:scale-[0.92] hover:bg-muted/60",
         blocked
           ? "cursor-not-allowed text-muted-foreground/20"
           : "text-muted-foreground/50 hover:text-foreground",

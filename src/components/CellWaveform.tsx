@@ -104,10 +104,9 @@ export function CellWaveform({
   return (
     <div
       className={cn(
-        "group/wf relative w-full select-none rounded bg-muted/20 transition-colors",
-        hasPeaks ? "cursor-pointer hover:bg-muted/40" : "cursor-default",
-        peaksState === "error" && "bg-amber-500/5 border border-amber-500/30",
-        needsUserAction && "border border-dashed border-muted-foreground/30 bg-transparent",
+        "group/wf neu-inset relative w-full select-none rounded-xl transition-shadow",
+        hasPeaks ? "cursor-pointer" : "cursor-default",
+        peaksState === "error" && "ring-1 ring-amber-500/30 ring-inset",
         className,
       )}
       style={{ height, ["--waveform-bar" as string]: "var(--color-muted-foreground, #888)" } as React.CSSProperties}
@@ -147,7 +146,7 @@ export function CellWaveform({
         <button
           type="button"
           onClick={handleLoadClick}
-          className="absolute inset-0 flex items-center justify-center gap-1.5 rounded text-[10px] font-medium text-muted-foreground transition-colors hover:bg-muted/30 hover:text-foreground"
+          className="absolute inset-0 flex items-center justify-center gap-1.5 rounded-xl text-[10px] font-medium text-muted-foreground transition-colors hover:bg-muted/30 hover:text-foreground"
         >
           <Download className="h-3 w-3" />
           <span>Load waveform</span>
@@ -157,7 +156,7 @@ export function CellWaveform({
         <button
           type="button"
           onClick={handleRetryClick}
-          className="absolute inset-0 flex items-center justify-center gap-1.5 rounded text-[10px] font-medium text-amber-700 dark:text-amber-300 transition-colors hover:bg-amber-500/10"
+          className="absolute inset-0 flex items-center justify-center gap-1.5 rounded-xl text-[10px] font-medium text-amber-700 dark:text-amber-300 transition-colors hover:bg-amber-500/10"
           title="Couldn't load this clip's waveform — click to retry"
         >
           <RotateCw className="h-3 w-3" />

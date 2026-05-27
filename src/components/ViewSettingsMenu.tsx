@@ -57,7 +57,7 @@ export function ViewSettingsMenu({
         <div
           className={cn(
             "absolute right-full top-1/2 z-30 mr-2 flex -translate-y-1/2 items-center gap-2 whitespace-nowrap",
-            "rounded-lg border bg-popover px-3 py-2 text-xs shadow-lg",
+            "neu-raised rounded-2xl bg-card px-3 py-2 text-xs",
             "animate-in fade-in-0 slide-in-from-right-2 duration-200",
           )}
           role="status"
@@ -77,7 +77,7 @@ export function ViewSettingsMenu({
               setMenuOpen(true)
               handleDismissHint()
             }}
-            className="rounded px-1.5 py-0.5 text-[11px] font-medium text-primary transition-[transform,color] duration-150 ease-out hover:bg-primary/10 active:scale-[0.95]"
+            className="rounded-full px-2 py-0.5 text-[11px] font-medium text-primary transition-all duration-150 ease-out hover:bg-card hover:shadow-neu-xs active:scale-[0.95]"
           >
             Adjust
           </button>
@@ -85,13 +85,13 @@ export function ViewSettingsMenu({
             type="button"
             onClick={handleDismissHint}
             title="Dismiss"
-            className="flex h-5 w-5 items-center justify-center rounded text-muted-foreground/70 transition-[transform,color] duration-150 ease-out hover:bg-muted hover:text-foreground active:scale-[0.92]"
+            className="flex h-5 w-5 items-center justify-center rounded-full text-muted-foreground/70 transition-all duration-150 ease-out hover:bg-card hover:text-foreground hover:shadow-neu-xs active:scale-[0.92]"
           >
             <X className="h-3 w-3" />
           </button>
           {/* Arrow pointing to the eye icon */}
           <span
-            className="absolute left-full top-1/2 -translate-y-1/2 border-y-4 border-l-4 border-y-transparent border-l-popover"
+            className="absolute left-full top-1/2 -translate-y-1/2 border-y-4 border-l-4 border-y-transparent border-l-card"
             aria-hidden="true"
           />
         </div>
@@ -114,30 +114,30 @@ export function ViewSettingsMenu({
         <Menu.Portal>
           {/* z-40 on Positioner, not Popup — see ui/tooltip.tsx for rationale. */}
           <Menu.Positioner sideOffset={4} className="z-40">
-            <Menu.Popup className="min-w-60 rounded-xl border bg-popover p-1 text-popover-foreground shadow-soft-lg">
+            <Menu.Popup className="neu-raised min-w-60 rounded-2xl bg-card p-1.5 text-popover-foreground">
               <Menu.Item
                 disabled={!fileOpen}
                 onClick={() => onLineNumbersChange(!lineNumbersEnabled)}
-                className="flex cursor-pointer select-none items-center justify-between gap-2 rounded-sm px-2 py-1.5 text-sm outline-none data-[highlighted]:bg-accent data-[disabled]:opacity-50"
+                className="flex cursor-pointer select-none items-center justify-between gap-2 rounded-lg px-2 py-1.5 text-sm outline-none data-[highlighted]:bg-accent data-[disabled]:opacity-50"
               >
                 <span>Show line numbers</span>
                 <Pill on={lineNumbersEnabled} />
               </Menu.Item>
               <Menu.Item
                 onClick={() => onCellLabelsChange(!cellLabelsEnabled)}
-                className="flex cursor-pointer select-none items-center justify-between gap-2 rounded-sm px-2 py-1.5 text-sm outline-none data-[highlighted]:bg-accent"
+                className="flex cursor-pointer select-none items-center justify-between gap-2 rounded-lg px-2 py-1.5 text-sm outline-none data-[highlighted]:bg-accent"
               >
                 <span>Show cell labels</span>
                 <Pill on={cellLabelsEnabled} />
               </Menu.Item>
-              <div className="-mx-1 my-1 h-px bg-border" role="separator" />
+              <div className="-mx-1 my-1.5 h-px rounded-full shadow-neu-inset" role="separator" />
               <div className="px-2 py-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
                 Text Direction
               </div>
               <Menu.Item
                 disabled={!fileOpen}
                 onClick={() => onSourceTextDirectionChange(sourceTextDirection === "ltr" ? "rtl" : "ltr")}
-                className="flex cursor-pointer select-none items-center justify-between gap-2 rounded-sm px-2 py-1.5 text-sm outline-none data-[highlighted]:bg-accent data-[disabled]:opacity-50"
+                className="flex cursor-pointer select-none items-center justify-between gap-2 rounded-lg px-2 py-1.5 text-sm outline-none data-[highlighted]:bg-accent data-[disabled]:opacity-50"
               >
                 <span>Source</span>
                 <DirPill dir={sourceTextDirection} />
@@ -145,7 +145,7 @@ export function ViewSettingsMenu({
               <Menu.Item
                 disabled={!fileOpen}
                 onClick={() => onTargetTextDirectionChange(targetTextDirection === "ltr" ? "rtl" : "ltr")}
-                className="flex cursor-pointer select-none items-center justify-between gap-2 rounded-sm px-2 py-1.5 text-sm outline-none data-[highlighted]:bg-accent data-[disabled]:opacity-50"
+                className="flex cursor-pointer select-none items-center justify-between gap-2 rounded-lg px-2 py-1.5 text-sm outline-none data-[highlighted]:bg-accent data-[disabled]:opacity-50"
               >
                 <span>Target</span>
                 <DirPill dir={targetTextDirection} />

@@ -2,9 +2,9 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1254 1254" role="img" aria-label="Aquilla">
   <defs>
     <linearGradient id="aq-icon-grad" x1="0" y1="0" x2="1254" y2="1254" gradientUnits="userSpaceOnUse">
-      <stop offset="0%" stop-color="#6f72ee"/>
-      <stop offset="55%" stop-color="#4d4d91"/>
-      <stop offset="100%" stop-color="#252640"/>
+      <stop offset="0%" stop-color="#ffd24d"/>
+      <stop offset="55%" stop-color="#e0a21c"/>
+      <stop offset="100%" stop-color="#6e4a12"/>
     </linearGradient>
   </defs>
   <rect width="1254" height="1254" fill="url(#aq-icon-grad)"/>

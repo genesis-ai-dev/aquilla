@@ -112,90 +112,91 @@
   :where(:root) {
     color-scheme: light;
     --radius: 0.85rem;
-    /* White + pastel. Surface is near-paper white; chips, hovers, focus
-       rings and the chart palette all sit in soft pastel tints
-       (periwinkle / sky / mint / peach / coral). Primary stays mid-tone
-       so it reads both as a button surface (with white text) and as text
-       color on the white surface (icons, links, status pills). */
-    --surface: oklch(0.985 0.003 286);
+    /* Bright lemon + warm cream. Surface is a warm ivory paper; primary is a
+       vivid lemon-gold used mainly as a FILL (with near-black text on it),
+       so chips/CTAs read sunny without straining contrast. Hovers, soft chips
+       and focus rings sit in pale lemon tints; the chart palette runs warm
+       (lemon / amber / sage / terracotta / coral). Neu shadows are warm to
+       match the cream so the soft-UI extrusion reads on the shared surface. */
+    --surface: oklch(0.985 0.01 95);
     --background: var(--surface);
-    --foreground: oklch(0.28 0.025 280);
+    --foreground: oklch(0.27 0.015 80);
     --card: var(--surface);
-    --card-foreground: oklch(0.28 0.025 280);
-    --popover: oklch(0.99 0.003 286);
-    --popover-foreground: oklch(0.28 0.025 280);
-    /* Friendly mid-lavender — pastel-leaning but dark enough to read as
-       text on white and to take white-on-primary button text. */
-    --primary: oklch(0.62 0.12 278);
-    --primary-foreground: oklch(0.99 0.005 286);
+    --card-foreground: oklch(0.27 0.015 80);
+    --popover: oklch(0.99 0.008 95);
+    --popover-foreground: oklch(0.27 0.015 80);
+    /* Vivid lemon-gold. Light enough that it needs DARK text on top — it is a
+       fill/accent color, not a body-text color. */
+    --primary: oklch(0.85 0.17 92);
+    --primary-foreground: oklch(0.27 0.03 80);
     --secondary: var(--surface);
-    --secondary-foreground: oklch(0.32 0.03 280);
-    --muted: oklch(0.955 0.005 286);
-    --muted-foreground: oklch(0.55 0.018 286);
-    /* Accent surfaces (hover, soft chips) get a pale lavender tint. */
-    --accent: oklch(0.945 0.025 278);
-    --accent-foreground: oklch(0.38 0.08 278);
-    --destructive: oklch(0.70 0.13 25);
-    --destructive-foreground: oklch(0.99 0.005 286);
-    --border: oklch(0.92 0.005 286);
-    --input: oklch(0.96 0.005 286);
-    --ring: oklch(0.68 0.11 278);
+    --secondary-foreground: oklch(0.32 0.02 80);
+    --muted: oklch(0.955 0.012 95);
+    --muted-foreground: oklch(0.53 0.018 85);
+    /* Accent surfaces (hover, soft chips) get a pale lemon tint. */
+    --accent: oklch(0.94 0.06 95);
+    --accent-foreground: oklch(0.40 0.07 80);
+    --destructive: oklch(0.62 0.20 25);
+    --destructive-foreground: oklch(0.99 0.01 95);
+    --border: oklch(0.90 0.012 90);
+    --input: oklch(0.95 0.012 90);
+    --ring: oklch(0.80 0.15 92);
     --neu-light: oklch(1 0 0);
-    --neu-dark: oklch(0.90 0.008 286);
-    /* Pastel chart palette: periwinkle / sky / mint / peach / coral. */
-    --chart-1: oklch(0.74 0.10 278);
-    --chart-2: oklch(0.76 0.09 220);
-    --chart-3: oklch(0.80 0.08 155);
-    --chart-4: oklch(0.85 0.10 75);
-    --chart-5: oklch(0.74 0.10 25);
+    --neu-dark: oklch(0.90 0.014 90);
+    /* Warm chart palette: lemon / amber / sage / terracotta / coral. */
+    --chart-1: oklch(0.85 0.165 92);
+    --chart-2: oklch(0.75 0.14 65);
+    --chart-3: oklch(0.80 0.10 135);
+    --chart-4: oklch(0.72 0.13 45);
+    --chart-5: oklch(0.68 0.13 25);
     --sidebar: var(--surface);
-    --sidebar-foreground: oklch(0.28 0.025 280);
-    --sidebar-primary: oklch(0.62 0.12 278);
-    --sidebar-primary-foreground: oklch(0.99 0.005 286);
-    --sidebar-accent: oklch(0.945 0.025 278);
-    --sidebar-accent-foreground: oklch(0.38 0.08 278);
-    --sidebar-border: oklch(0.92 0.005 286);
-    --sidebar-ring: oklch(0.68 0.11 278);
+    --sidebar-foreground: oklch(0.27 0.015 80);
+    --sidebar-primary: oklch(0.85 0.17 92);
+    --sidebar-primary-foreground: oklch(0.27 0.03 80);
+    --sidebar-accent: oklch(0.94 0.06 95);
+    --sidebar-accent-foreground: oklch(0.40 0.07 80);
+    --sidebar-border: oklch(0.90 0.012 90);
+    --sidebar-ring: oklch(0.80 0.15 92);
   }
 
   :where(html.dark) {
-    /* Dark mode keeps the pastel personality — primary stays a soft
-       lavender that pops on the deep slate surface. */
-    --surface: oklch(0.225 0.012 286);
+    /* Dark mode keeps the lemon personality — primary stays a bright gold
+       that pops on the deep warm-charcoal surface. */
+    --surface: oklch(0.215 0.012 80);
     --background: var(--surface);
-    --foreground: oklch(0.94 0.005 286);
+    --foreground: oklch(0.94 0.008 90);
     --card: var(--surface);
-    --card-foreground: oklch(0.94 0.005 286);
-    --popover: oklch(0.255 0.014 286);
-    --popover-foreground: oklch(0.94 0.005 286);
-    --primary: oklch(0.80 0.10 278);
-    --primary-foreground: oklch(0.22 0.04 286);
+    --card-foreground: oklch(0.94 0.008 90);
+    --popover: oklch(0.25 0.014 80);
+    --popover-foreground: oklch(0.94 0.008 90);
+    --primary: oklch(0.86 0.17 92);
+    --primary-foreground: oklch(0.22 0.03 80);
     --secondary: var(--surface);
-    --secondary-foreground: oklch(0.94 0.005 286);
-    --muted: oklch(0.28 0.014 286);
-    --muted-foreground: oklch(0.72 0.018 286);
-    --accent: oklch(0.32 0.025 278);
-    --accent-foreground: oklch(0.85 0.06 278);
-    --destructive: oklch(0.75 0.13 25);
+    --secondary-foreground: oklch(0.94 0.008 90);
+    --muted: oklch(0.27 0.014 80);
+    --muted-foreground: oklch(0.72 0.016 85);
+    --accent: oklch(0.32 0.04 88);
+    --accent-foreground: oklch(0.87 0.10 92);
+    --destructive: oklch(0.70 0.16 25);
     --destructive-foreground: oklch(0.20 0.04 25);
     --border: oklch(1 0 0 / 8%);
     --input: oklch(1 0 0 / 10%);
-    --ring: oklch(0.75 0.10 278);
-    --neu-light: oklch(0.29 0.014 286);
-    --neu-dark: oklch(0.17 0.008 286);
-    --chart-1: oklch(0.76 0.09 278);
-    --chart-2: oklch(0.76 0.08 220);
-    --chart-3: oklch(0.80 0.07 155);
-    --chart-4: oklch(0.84 0.09 75);
-    --chart-5: oklch(0.76 0.09 25);
+    --ring: oklch(0.80 0.15 92);
+    --neu-light: oklch(0.27 0.014 80);
+    --neu-dark: oklch(0.15 0.008 80);
+    --chart-1: oklch(0.86 0.16 92);
+    --chart-2: oklch(0.77 0.13 65);
+    --chart-3: oklch(0.80 0.09 135);
+    --chart-4: oklch(0.74 0.12 45);
+    --chart-5: oklch(0.72 0.13 25);
     --sidebar: var(--surface);
-    --sidebar-foreground: oklch(0.94 0.005 286);
-    --sidebar-primary: oklch(0.80 0.10 278);
-    --sidebar-primary-foreground: oklch(0.22 0.04 286);
-    --sidebar-accent: oklch(0.32 0.025 278);
-    --sidebar-accent-foreground: oklch(0.85 0.06 278);
+    --sidebar-foreground: oklch(0.94 0.008 90);
+    --sidebar-primary: oklch(0.86 0.17 92);
+    --sidebar-primary-foreground: oklch(0.22 0.03 80);
+    --sidebar-accent: oklch(0.32 0.04 88);
+    --sidebar-accent-foreground: oklch(0.87 0.10 92);
     --sidebar-border: oklch(1 0 0 / 8%);
-    --sidebar-ring: oklch(0.75 0.10 278);
+    --sidebar-ring: oklch(0.80 0.15 92);
     /* Dark mode: soft shadows need near-black at higher alpha. */
     --shadow-soft-xs: 0 1px 2px -1px oklch(0.05 0 0 / 0.40);
     --shadow-soft-sm: 0 2px 6px -1px oklch(0.05 0 0 / 0.40),

@@ -102,9 +102,13 @@ jobs:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: 6a80496d1e59948a9cbaa3c643ba81d7
           workingDirectory: auth-worker
+          # NOTE: the "main" branch value must be a space, not '' — an empty
+          # string is falsy in GHA expressions, so `main && '' || '--env=staging'`
+          # would always fall through to staging (the deploy commands below
+          # already use ' ' for this reason).
           command: >-
             d1 migrations apply aquilla-db --remote
-            ${{ github.ref == 'refs/heads/main' && '' || '--env=staging' }}
+            ${{ github.ref == 'refs/heads/main' && ' ' || '--env=staging' }}
       - name: Deploy auth-worker
         uses: cloudflare/wrangler-action@v3
         with:

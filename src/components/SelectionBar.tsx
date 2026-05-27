@@ -1,8 +1,8 @@
 // Floating action bar that appears whenever the user has multi-selected
 // cells. Surfaces bulk Translate / Validate / Generate Audio / Both.
 //
-// Synth uses the project's default voice; users can also drag a voice
-// chip from the VoiceBar onto any selected cell to synth with that voice.
+// Synth uses the project's default voice; per-voice generation and the voice
+// library live in the Voice Studio.
 
 // Phase 2c-gamma: bulk synth + Y.Doc-driven validate are gone. The
 // selection bar still surfaces the count + Translate (via completeBatch,

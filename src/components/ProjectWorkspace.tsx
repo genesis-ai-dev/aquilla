@@ -57,11 +57,7 @@ import { Film, Scale, MessagesSquare, Share2, Settings as SettingsIcon, Lock, Cl
 import { restoreProject } from "@/lib/store/project-index"
 import { AppShell } from "./AppShell"
 import { WorkspaceHeader } from "./WorkspaceHeader"
-import { VoiceBar } from "./VoiceBar"
-import { VoiceController } from "./VoiceController"
 import { EditorModeToggle } from "./EditorModeToggle"
-import { SpeakBarToggle } from "./SpeakBarToggle"
-import { setSpeakBarEnabled, useSpeakBarEnabled } from "@/lib/audio/speak-bar-pref"
 import { SelectionBar } from "./SelectionBar"
 import { WorkspaceStatusBar } from "./WorkspaceStatusBar"
 import { PrimaryActionButton } from "./PrimaryActionButton"
@@ -264,7 +260,6 @@ export function ProjectWorkspace() {
   const [aiSetupOpen, setAiSetupOpen] = useState(false)
   const [recordingCellId, setRecordingCellId] = useState<string | null>(null)
   const editorRef = useRef<EditorTableHandle>(null)
-  const speakBarEnabled = useSpeakBarEnabled(project?.id)
   // Phase 2c-gamma: the per-file Y.Doc is gone. The editor hydrates from the
   // cells projection and writes via the outbox. `doc`/`docLoading` are
   // retained as no-op constants so downstream cellAreaState + props don't
@@ -1282,12 +1277,6 @@ export function ProjectWorkspace() {
             {project && (
               <EditorModeToggle projectId={project.id} mode="translate" activeFileId={activeFileId} />
             )}
-            {project && (
-              <SpeakBarToggle
-                enabled={speakBarEnabled}
-                onToggle={() => setSpeakBarEnabled(project.id, !speakBarEnabled)}
-              />
-            )}
             <PrimaryActionButton ctx={actionCtx} run={actionArgs} />
           </WorkspaceHeader>
         }
@@ -1302,26 +1291,6 @@ export function ProjectWorkspace() {
             />
             {project && activeFileId && (
               <>
-                <VoiceController
-                  project={project}
-                  activeFileId={activeFileId}
-                  cells={cells}
-                  username={currentUsername}
-                  session={frontierSession}
-                  onProjectChanged={refresh}
-                />
-                {speakBarEnabled && (
-                  <VoiceBar
-                    project={project}
-                    cells={cells}
-                    username={currentUsername}
-                    session={frontierSession}
-                    editorRef={editorRef}
-                    onProjectChanged={refresh}
-                    onCompleteSingle={completeSingle}
-                    onHide={() => setSpeakBarEnabled(project.id, false)}
-                  />
-                )}
                 <SelectionBar
                   project={project}
                   cells={cells}

@@ -1,8 +1,7 @@
 // Thin wrapper around generateAndAttachCellVoice that builds the synth args
 // from a CellData + project + session and drives the per-cell tts status badge
-// (the same status CellTtsButton shows). Shared by VoiceBar's "Generate all",
-// VoiceController's drop-to-generate, and the Voice Studio page so the three
-// surfaces synthesize identically.
+// (the same status CellTtsButton shows). Used by the Voice Studio's per-cell
+// and "Generate all" flows so every cell synthesizes identically.
 
 import { generateAndAttachCellVoice } from "./generate-voice"
 import { setTtsStatus, ttsStatusKey, synthesizeForCell } from "./tts"

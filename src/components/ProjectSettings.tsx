@@ -11,11 +11,10 @@ import { useProjectSettings } from "@/hooks/useProjectSettings"
 import { getProject, updateProject } from "@/lib/store/project-index"
 import { fetchModels, resolveProvider } from "@/lib/completion/completion-service"
 import { useSaveCompletionSettings, DEFAULT_SYSTEM_PROMPT } from "@/hooks/useCompletionSettings"
-import type { ProjectRecord, CompletionProvider, ProjectTtsSettings, DecaySettings } from "@/lib/parsers/types"
+import type { ProjectRecord, CompletionProvider, DecaySettings } from "@/lib/parsers/types"
 import { ValidationSettingsSection } from "./ProjectSettings/ValidationSettingsSection"
 import { DecaySettingsSection } from "./ProjectSettings/DecaySettingsSection"
 import { AudioMediaStrategySection } from "./ProjectSettings/AudioMediaStrategySection"
-import { VoiceLibrarySection } from "./ProjectSettings/VoiceLibrarySection"
 import { ApiKeyField } from "./ApiKeyField"
 import { readValidationCount, readValidationCountAudio } from "@/lib/progress/read-validation-count"
 import { setUserApiKey, useUserApiKey } from "@/lib/store/user-api-keys"
@@ -166,23 +165,6 @@ export function ProjectSettings() {
     refresh()
     flash()
   })
-
-  const saveTtsSettings = useCallback(async (overrides: Partial<ProjectTtsSettings>) => {
-    if (!id) return
-    const latest = await getProject(id)
-    if (!latest) return
-    const base = latest.ttsSettings
-    const merged: ProjectTtsSettings = {
-      provider: overrides.provider ?? base?.provider,
-      apiKey: Object.prototype.hasOwnProperty.call(overrides, "apiKey") ? overrides.apiKey : base?.apiKey,
-      voices: overrides.voices ?? base?.voices,
-      defaultVoiceId: Object.prototype.hasOwnProperty.call(overrides, "defaultVoiceId") ? overrides.defaultVoiceId : base?.defaultVoiceId,
-    }
-    const updated: ProjectRecord = { ...latest, ttsSettings: merged }
-    await updateProject(updated)
-    refresh()
-    flash()
-  }, [id, refresh, flash])
 
   const [decaySettings, setDecaySettings] = useState<DecaySettings | undefined>(undefined)
 
@@ -471,10 +453,21 @@ export function ProjectSettings() {
           </div>
         </details>
 
-        <VoiceLibrarySection
-          settings={project?.ttsSettings}
-          onChange={saveTtsSettings}
-        />
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Sparkles className="h-4 w-4 text-primary" /> Voice
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="flex items-center justify-between gap-4">
+            <p className="text-sm text-muted-foreground">
+              The TTS engine, Gemini API key, voice library, and voice cloning now live in the Voice Studio.
+            </p>
+            <Button variant="outline" onClick={() => navigate(`/project/${id}/voice`)} className="shrink-0">
+              Open Voice Studio
+            </Button>
+          </CardContent>
+        </Card>
 
         <DecaySettingsSection
           settings={decaySettings}

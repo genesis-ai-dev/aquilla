@@ -1,4 +1,4 @@
-// Voice-clone reference editor inside the VoiceModal. Lets the user attach a
+// Voice-clone reference editor inside the Voice Studio's voice editor. Lets the user attach a
 // short reference clip (record from the mic, or upload an audio file) whose
 // timbre TTS output is re-voiced into via Seed-VC. The clip is stored
 // project-scoped in R2 (uploadVoiceReference); the voice keeps a pointer to it

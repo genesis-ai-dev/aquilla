@@ -1,18 +1,21 @@
-// Voice Studio — the dedicated voice surface at /project/:id/voice.
+// Voice Studio — the single home for AI voice on a project (/project/:id/voice).
 //
-// Per-file cell list with: which voice each cell will generate with, a play
-// button for any already-generated audio (reusing CellTtsButton), per-cell
-// generate/regenerate, and a batch "Generate all". The voices row sets the
-// project default and previews clone references. Read-only on cells (no
-// translation editing here) — this is the audio production view.
+// Three zones: a left Voice Library rail (engine + key, voices, in-place
+// editor, cloning), a top transport bar (read-along play-through + batch
+// generate + a coverage meter + file switcher), and the production list — one
+// row per cell with its assigned voice, generation status, play, and
+// generate/regenerate. Drag a voice from the rail onto a row to assign it.
+// Translation editing lives on the translate page; this is the audio view.
 
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { useParams, useNavigate } from "react-router-dom"
-import { AlertCircle, ArrowLeft, Loader2, RefreshCw, Sparkles, Star, Volume2 } from "lucide-react"
+import {
+  AlertCircle, ArrowLeft, CheckCircle2, Loader2, Pause, Play, RefreshCw,
+  SkipBack, SkipForward, Sparkles, Square, Volume2,
+} from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
-import { getProject } from "@/lib/store/project-index"
-import { patchProject } from "@/lib/store/project-index"
+import { getProject, patchProject } from "@/lib/store/project-index"
 import { useCells } from "@/hooks/useCells"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { getVoiceLibrary, resolveVoice } from "@/lib/audio/voices"
@@ -20,52 +23,16 @@ import { generateCellVoice } from "@/lib/audio/voice-generate-helpers"
 import { audioSyncTokenFetcherForSession } from "@/lib/audio/sync-token-fetcher"
 import { setTtsStatus, ttsStatusKey, useTtsStatus } from "@/lib/audio/tts"
 import { categorizeAiError } from "@/lib/audio/ai-error"
-import { openVoiceModalFromAnywhere } from "@/lib/audio/voice-actions"
+import {
+  hasAnyPlayableAudio, pauseQueue, resumeQueue, skipBack, skipForward,
+  startQueue, stopQueue, updateQueueCells, useQueueState,
+} from "@/lib/audio/play-queue"
 import { CellTtsButton } from "./CellTtsButton"
 import { CellAiStatusPopover } from "./CellAiStatusPopover"
-import { VoiceController } from "./VoiceController"
 import { EditorModeToggle } from "./EditorModeToggle"
-import { ReferencePreview } from "./VoiceCloneSection"
+import { VoiceLibraryPanel, VOICE_ASSIGN_MIME } from "./VoiceLibraryPanel"
 import type { CellData } from "@/hooks/useCells"
-import type { ProjectRecord, ProjectTtsSettings } from "@/lib/parsers/types"
-
-/**
- * Surfaces a cell's failed-synth state in the studio. `generateCellVoice`
- * writes errors to the per-cell tts status map (the same key CellTtsButton
- * uses), but the studio's Generate button only spins and reverts — so without
- * this the failure was invisible until the cell happened to have audio. Mirrors
- * EditorTable's SynthStatusBadge so both editor modes report failures the same.
- */
-function CellVoiceError({ cellId }: { cellId: string }) {
-  const status = useTtsStatus(ttsStatusKey(cellId))
-  if (status.kind !== "error") return null
-  const error = categorizeAiError(status.message)
-  const dismiss = () => setTtsStatus(ttsStatusKey(cellId), { kind: "idle" })
-  const actions =
-    error.category === "missing-gemini-key"
-      ? [{ label: "Add Gemini API key", primary: true, onClick: () => openVoiceModalFromAnywhere("apiKey") }]
-      : error.category === "translation-not-configured" ||
-          error.category === "no-source-text" ||
-          error.category === "git-project-unsupported" ||
-          error.category === "sign-in-required"
-        ? []
-        : [{ label: "Open voice settings", onClick: () => openVoiceModalFromAnywhere() }]
-  return (
-    <CellAiStatusPopover
-      error={error}
-      actions={actions}
-      onDismiss={dismiss}
-      trigger={
-        <button
-          type="button"
-          className="inline-flex shrink-0 items-center gap-1 rounded-full bg-destructive/15 px-2 py-0.5 text-[11px] font-medium text-destructive hover:bg-destructive/25"
-        >
-          <AlertCircle className="h-3 w-3" /> Failed
-        </button>
-      }
-    />
-  )
-}
+import type { ProjectRecord, ProjectTtsSettings, Voice } from "@/lib/parsers/types"
 
 export function VoiceStudioPage() {
   const { id } = useParams<{ id: string }>()
@@ -76,7 +43,7 @@ export function VoiceStudioPage() {
   const [fileId, setFileId] = useState<string | null>(null)
   const [busy, setBusy] = useState<Set<string>>(new Set())
   const [batchProgress, setBatchProgress] = useState<{ done: number; total: number } | null>(null)
-  // Per-cell voice override chosen in the studio (defaults to project default).
+  // Per-row voice override (defaults to the project default).
   const [rowVoice, setRowVoice] = useState<Record<string, string>>({})
 
   const refresh = useCallback(() => {
@@ -115,6 +82,11 @@ export function VoiceStudioPage() {
     () => resolveVoice(project?.ttsSettings, undefined).id,
     [project?.ttsSettings],
   )
+  const voicesById = useMemo(() => {
+    const m = new Map<string, Voice>()
+    for (const v of voices) m.set(v.id, v)
+    return m
+  }, [voices])
 
   const saveTts = useCallback(
     async (overrides: Partial<ProjectTtsSettings>) => {
@@ -129,16 +101,15 @@ export function VoiceStudioPage() {
     () => cells.filter((c) => c.type !== "paratext" && c.translated?.trim()),
     [cells],
   )
+  const voicedCount = generatableCells.filter((c) => c.selectedGeneratedVoiceAudioId).length
+  const pendingCount = generatableCells.length - voicedCount
 
   const generateOne = useCallback(
     async (cell: CellData) => {
       if (!project) return
       setBusy((s) => new Set(s).add(cell.id))
       const ok = await generateCellVoice({
-        project,
-        cell,
-        session: session ?? null,
-        username,
+        project, cell, session: session ?? null, username,
         voiceId: rowVoice[cell.id] ?? defaultVoiceId,
       })
       setBusy((s) => { const n = new Set(s); n.delete(cell.id); return n })
@@ -154,10 +125,7 @@ export function VoiceStudioPage() {
     setBatchProgress({ done: 0, total: queue.length })
     for (let i = 0; i < queue.length; i++) {
       await generateCellVoice({
-        project,
-        cell: queue[i],
-        session: session ?? null,
-        username,
+        project, cell: queue[i], session: session ?? null, username,
         voiceId: rowVoice[queue[i].id] ?? defaultVoiceId,
       })
       setBatchProgress({ done: i + 1, total: queue.length })
@@ -166,10 +134,30 @@ export function VoiceStudioPage() {
     revalidate()
   }, [project, batchProgress, generatableCells, session, username, rowVoice, defaultVoiceId, revalidate])
 
+  // ── Read-along playback ────────────────────────────────────────────────
+  const queue = useQueueState()
+  const playingCellId = queue.kind === "playing" || queue.kind === "loading" || queue.kind === "paused"
+    ? queue.cellId
+    : undefined
+  const canPlay = hasAnyPlayableAudio(cells)
+
+  // Keep the queue's cell snapshot fresh as audio gets generated mid-session.
+  useEffect(() => { updateQueueCells(cells) }, [cells])
+  // Stop playback when leaving the studio.
+  useEffect(() => () => stopQueue(), [])
+
+  const togglePlayAll = useCallback(() => {
+    if (queue.kind === "playing") { pauseQueue(); return }
+    if (queue.kind === "paused") { void resumeQueue(); return }
+    if (!id || !session?.jwt) return
+    startQueue(
+      { cells, projectId: id, session, onCellChange: (_i, cid) => scrollRowIntoView(cid) },
+      0,
+    )
+  }, [queue.kind, id, session, cells])
+
   if (loading) return <div className="p-8 text-muted-foreground">Loading…</div>
   if (!project || !id) return <div className="p-8 text-muted-foreground">Project not found.</div>
-
-  const pendingCount = generatableCells.filter((c) => !c.selectedGeneratedVoiceAudioId).length
 
   return (
     <div className="flex h-screen flex-col">
@@ -187,176 +175,304 @@ export function VoiceStudioPage() {
         <EditorModeToggle projectId={id} mode="voice" />
       </header>
 
-      {/* Voices row */}
-      <div className="flex items-center gap-2 overflow-x-auto border-b bg-muted/30 px-4 py-2">
-        <span className="flex shrink-0 items-center gap-1 text-xs font-medium text-muted-foreground">
-          Voices
-        </span>
-        {voices.map((voice) => {
-          const isDefault = voice.id === defaultVoiceId
-          return (
-            <div
-              key={voice.id}
-              className={cn(
-                "flex shrink-0 items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs",
-                isDefault ? "border-primary/40 bg-primary/10" : "border-transparent bg-background",
-              )}
-            >
-              <button
-                type="button"
-                onClick={() => void saveTts({ voices, defaultVoiceId: voice.id })}
-                className="flex items-center gap-1.5"
-                title={isDefault ? "Project default" : `Set ${voice.name} as default`}
+      <div className="flex min-h-0 flex-1">
+        {/* Left rail — voice library */}
+        <aside className="w-[360px] shrink-0 border-r bg-muted/10">
+          <VoiceLibraryPanel
+            settings={project.ttsSettings}
+            onSettingsChange={saveTts}
+            targetLanguage={project.targetLanguage}
+            projectId={id}
+            fileId={fileId}
+            session={session ?? null}
+          />
+        </aside>
+
+        {/* Right — transport + production list */}
+        <div className="flex min-w-0 flex-1 flex-col">
+          {/* Transport bar */}
+          <div className="flex items-center gap-3 border-b bg-background px-4 py-2">
+            <div className="flex items-center gap-1">
+              <Button
+                variant="outline" size="icon" className="h-8 w-8"
+                onClick={() => skipBack()}
+                disabled={!canPlay || queue.kind === "idle"}
+                title="Previous"
               >
-                <span
-                  className="h-2.5 w-2.5 rounded-full border"
-                  style={{ backgroundColor: voice.color || "#94a3b8" }}
-                />
-                <span className="max-w-[10rem] truncate">{voice.name}</span>
-                {voice.referenceAudioId && <Sparkles className="h-3 w-3 text-violet-500" />}
-                {isDefault && <Star className="h-3 w-3 text-primary" />}
-              </button>
-              {voice.referenceAudioId && fileId && (
-                <ReferencePreview
-                  key={voice.referenceAudioId}
-                  projectId={id}
-                  fileId={fileId}
-                  referenceAudioId={voice.referenceAudioId}
-                  session={session ?? null}
-                />
+                <SkipBack className="h-4 w-4" />
+              </Button>
+              <Button
+                variant="default" size="icon" className="h-9 w-9"
+                onClick={togglePlayAll}
+                disabled={!canPlay}
+                title={queue.kind === "playing" ? "Pause" : "Play through"}
+              >
+                {queue.kind === "loading" ? <Loader2 className="h-4 w-4 animate-spin" />
+                  : queue.kind === "playing" ? <Pause className="h-4 w-4" />
+                  : <Play className="h-4 w-4" />}
+              </Button>
+              <Button
+                variant="outline" size="icon" className="h-8 w-8"
+                onClick={() => skipForward()}
+                disabled={!canPlay || queue.kind === "idle"}
+                title="Next"
+              >
+                <SkipForward className="h-4 w-4" />
+              </Button>
+              {queue.kind !== "idle" && (
+                <Button
+                  variant="ghost" size="icon" className="h-8 w-8"
+                  onClick={() => stopQueue()}
+                  title="Stop"
+                >
+                  <Square className="h-3.5 w-3.5" />
+                </Button>
               )}
             </div>
-          )
-        })}
-        <div className="ml-auto flex shrink-0 items-center gap-2">
-          {project.files.length > 1 && (
-            <select
-              value={fileId ?? ""}
-              onChange={(e) => setFileId(e.target.value)}
-              className="rounded border bg-background px-2 py-1 text-xs"
-            >
-              {project.files.map((f) => (
-                <option key={f.id} value={f.id}>{f.name}</option>
-              ))}
-            </select>
-          )}
-          {batchProgress ? (
-            <Button variant="outline" size="sm" disabled className="h-7">
-              <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />
-              <span className="tabular-nums">{batchProgress.done}/{batchProgress.total}</span>
-            </Button>
-          ) : (
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => void generateAll()}
-              disabled={pendingCount === 0}
-              className="h-7"
-            >
-              <Sparkles className="mr-1 h-3.5 w-3.5" /> Generate all
-              {pendingCount > 0 && <span className="ml-1 tabular-nums opacity-70">({pendingCount})</span>}
-            </Button>
-          )}
+
+            {/* Coverage meter */}
+            <div className="flex min-w-0 flex-1 items-center gap-2">
+              <div className="h-1.5 w-32 overflow-hidden rounded-full bg-muted">
+                <div
+                  className="h-full rounded-full bg-primary transition-all"
+                  style={{ width: `${generatableCells.length ? (voicedCount / generatableCells.length) * 100 : 0}%` }}
+                />
+              </div>
+              <span className="shrink-0 text-xs text-muted-foreground tabular-nums">
+                {voicedCount}/{generatableCells.length} voiced
+              </span>
+            </div>
+
+            {project.files.length > 1 && (
+              <select
+                value={fileId ?? ""}
+                onChange={(e) => { stopQueue(); setFileId(e.target.value) }}
+                className="rounded border bg-background px-2 py-1 text-xs"
+              >
+                {project.files.map((f) => (
+                  <option key={f.id} value={f.id}>{f.name}</option>
+                ))}
+              </select>
+            )}
+
+            {batchProgress ? (
+              <Button variant="outline" size="sm" disabled className="h-8">
+                <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />
+                <span className="tabular-nums">{batchProgress.done}/{batchProgress.total}</span>
+              </Button>
+            ) : (
+              <Button
+                variant="outline" size="sm" className="h-8"
+                onClick={() => void generateAll()}
+                disabled={pendingCount === 0}
+              >
+                <Sparkles className="mr-1 h-3.5 w-3.5" /> Generate all
+                {pendingCount > 0 && <span className="ml-1 tabular-nums opacity-70">({pendingCount})</span>}
+              </Button>
+            )}
+          </div>
+
+          {/* Production list */}
+          <div className="min-h-0 flex-1 overflow-y-auto p-3">
+            {cellsLoading && cells.length === 0 ? (
+              <div className="p-8 text-muted-foreground">Loading cells…</div>
+            ) : generatableCells.length === 0 ? (
+              <div className="p-8 text-muted-foreground">
+                No translated cells in this file yet. Translate cells first, then generate their audio here.
+              </div>
+            ) : (
+              <div className="space-y-1.5">
+                {cells.map((cell) => {
+                  const hasText = cell.type !== "paratext" && Boolean(cell.translated?.trim())
+                  if (!hasText) return null
+                  const hasAudio = Boolean(cell.selectedGeneratedVoiceAudioId)
+                  const isBusy = busy.has(cell.id)
+                  const selectedRowVoice = rowVoice[cell.id] ?? defaultVoiceId
+                  const voice = voicesById.get(selectedRowVoice)
+                  const isPlaying = cell.id === playingCellId
+                  return (
+                    <ProductionRow
+                      key={cell.id}
+                      cell={cell}
+                      project={project}
+                      projectId={id}
+                      hasAudio={hasAudio}
+                      isBusy={isBusy}
+                      batchRunning={Boolean(batchProgress)}
+                      isPlaying={isPlaying}
+                      voices={voices}
+                      voice={voice}
+                      selectedRowVoice={selectedRowVoice}
+                      onAssignVoice={(vid) => setRowVoice((m) => ({ ...m, [cell.id]: vid }))}
+                      onGenerate={() => void generateOne(cell)}
+                      session={session ?? null}
+                    />
+                  )
+                })}
+              </div>
+            )}
+          </div>
         </div>
       </div>
+    </div>
+  )
+}
 
-      {/* Cell list */}
-      <div className="min-h-0 flex-1 overflow-y-auto">
-        {cellsLoading && cells.length === 0 ? (
-          <div className="p-8 text-muted-foreground">Loading cells…</div>
-        ) : generatableCells.length === 0 ? (
-          <div className="p-8 text-muted-foreground">
-            No translated cells in this file yet. Translate cells first, then generate their audio here.
-          </div>
+function scrollRowIntoView(cellId: string) {
+  document.getElementById(`vs-row-${cellId}`)?.scrollIntoView({ block: "center", behavior: "smooth" })
+}
+
+// ── Production row ──────────────────────────────────────────────────────────
+
+interface RowProps {
+  cell: CellData
+  project: ProjectRecord
+  projectId: string
+  hasAudio: boolean
+  isBusy: boolean
+  batchRunning: boolean
+  isPlaying: boolean
+  voices: Voice[]
+  voice: Voice | undefined
+  selectedRowVoice: string
+  onAssignVoice: (voiceId: string) => void
+  onGenerate: () => void
+  session: import("@/lib/frontier/types").FrontierSession | null
+}
+
+function ProductionRow({
+  cell, project, projectId, hasAudio, isBusy, batchRunning, isPlaying,
+  voices, voice, selectedRowVoice, onAssignVoice, onGenerate,
+}: RowProps) {
+  const [dropActive, setDropActive] = useState(false)
+  const status = useTtsStatus(ttsStatusKey(cell.id))
+  const isError = status.kind === "error"
+  const isLoading = status.kind === "loading" || status.kind === "synthesizing"
+
+  return (
+    <div
+      id={`vs-row-${cell.id}`}
+      onDragOver={(e) => {
+        if (e.dataTransfer.types.includes(VOICE_ASSIGN_MIME)) {
+          e.preventDefault()
+          e.dataTransfer.dropEffect = "copy"
+          if (!dropActive) setDropActive(true)
+        }
+      }}
+      onDragLeave={() => dropActive && setDropActive(false)}
+      onDrop={(e) => {
+        const vid = e.dataTransfer.getData(VOICE_ASSIGN_MIME)
+        setDropActive(false)
+        if (vid) { e.preventDefault(); onAssignVoice(vid) }
+      }}
+      className={cn(
+        "flex items-center gap-3 rounded-xl border px-3 py-2 transition-colors",
+        isPlaying ? "border-primary/50 bg-primary/5"
+          : dropActive ? "border-primary/60 bg-primary/10"
+          : "border-transparent bg-muted/30 hover:bg-accent/30",
+      )}
+    >
+      <span className="w-24 shrink-0 truncate text-xs text-muted-foreground" title={cell.cellLabel}>
+        {cell.cellLabel ?? cell.id.slice(0, 8)}
+      </span>
+
+      <div className="min-w-0 flex-1">
+        <div className="line-clamp-2 text-sm leading-snug">{cell.translated?.trim()}</div>
+      </div>
+
+      {/* status */}
+      <div className="w-20 shrink-0 text-right">
+        {isError ? (
+          <CellVoiceError cellId={cell.id} />
+        ) : isLoading ? (
+          <span className="inline-flex items-center gap-1 text-xs text-primary">
+            <Loader2 className="h-3 w-3 animate-spin" /> Voicing
+          </span>
+        ) : hasAudio ? (
+          <span className="inline-flex items-center gap-1 text-xs text-emerald-600 dark:text-emerald-400">
+            <CheckCircle2 className="h-3 w-3" /> Ready
+          </span>
         ) : (
-          <table className="w-full border-collapse text-sm">
-            <tbody>
-              {cells.map((cell) => {
-                const hasText = cell.type !== "paratext" && Boolean(cell.translated?.trim())
-                const hasAudio = Boolean(cell.selectedGeneratedVoiceAudioId)
-                const isBusy = busy.has(cell.id)
-                const selectedVoiceId = rowVoice[cell.id] ?? defaultVoiceId
-                return (
-                  <tr key={cell.id} className="border-b last:border-0 hover:bg-accent/20">
-                    <td className="w-28 px-4 py-2 align-top text-xs text-muted-foreground">
-                      {cell.cellLabel ?? cell.id.slice(0, 8)}
-                    </td>
-                    <td className="px-2 py-2 align-top">
-                      <div className="line-clamp-2 leading-snug">
-                        {cell.translated?.trim() || (
-                          <span className="italic text-muted-foreground/60">not translated</span>
-                        )}
-                      </div>
-                    </td>
-                    {hasText && (
-                      <td className="w-[28rem] px-2 py-2 align-top">
-                        <div className="flex items-center justify-end gap-2">
-                          <CellVoiceError cellId={cell.id} />
-                          <select
-                            value={selectedVoiceId}
-                            onChange={(e) => setRowVoice((m) => ({ ...m, [cell.id]: e.target.value }))}
-                            className="max-w-[10rem] rounded border bg-background px-2 py-1 text-xs"
-                            title="Voice to generate this cell with"
-                          >
-                            {voices.map((v) => (
-                              <option key={v.id} value={v.id}>{v.name}</option>
-                            ))}
-                          </select>
-                          {hasAudio && (
-                            <CellTtsButton
-                              cellId={cell.id}
-                              text={cell.translated}
-                              original={cell.original}
-                              context={cell.context}
-                              cellLabel={cell.cellLabel}
-                              sourceLanguage={project.sourceLanguage}
-                              targetLanguage={project.targetLanguage}
-                              projectTtsSettings={project.ttsSettings}
-                              cellTtsSettings={cell.ttsSettings}
-                              generatedVoiceAudioId={cell.selectedGeneratedVoiceAudioId}
-                              attachments={cell.attachments}
-                              projectId={id}
-                              fileId={cell.fileId}
-                            />
-                          )}
-                          <Button
-                            variant={hasAudio ? "ghost" : "outline"}
-                            size="sm"
-                            className="h-7"
-                            disabled={isBusy || Boolean(batchProgress)}
-                            onClick={() => void generateOne(cell)}
-                          >
-                            {isBusy ? (
-                              <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />
-                            ) : hasAudio ? (
-                              <RefreshCw className="mr-1 h-3.5 w-3.5" />
-                            ) : (
-                              <Volume2 className="mr-1 h-3.5 w-3.5" />
-                            )}
-                            {hasAudio ? "Regenerate" : "Generate"}
-                          </Button>
-                        </div>
-                      </td>
-                    )}
-                  </tr>
-                )
-              })}
-            </tbody>
-          </table>
+          <span className="text-xs text-muted-foreground/60">No audio</span>
         )}
       </div>
 
-      {/* Hosts the VoiceModal and registers the imperative voice actions so the
-          per-cell error popover's "Add Gemini API key" / "Open voice settings"
-          links resolve here too (it's otherwise only mounted in the editor). */}
-      <VoiceController
-        project={project}
-        activeFileId={fileId}
-        cells={cells}
-        username={username}
-        session={session ?? null}
-        onProjectChanged={() => { refresh(); revalidate() }}
-      />
+      {/* voice chip / picker */}
+      <div className="relative shrink-0">
+        <span
+          className="pointer-events-none absolute left-2 top-1/2 h-2.5 w-2.5 -translate-y-1/2 rounded-full border"
+          style={{ backgroundColor: voice?.color || "#94a3b8" }}
+        />
+        <select
+          value={selectedRowVoice}
+          onChange={(e) => onAssignVoice(e.target.value)}
+          className="max-w-[9rem] rounded-full border bg-background py-1 pl-6 pr-2 text-xs"
+          title="Voice for this cell — or drag one from the library"
+        >
+          {voices.map((v) => (
+            <option key={v.id} value={v.id}>{v.name}</option>
+          ))}
+        </select>
+      </div>
+
+      {hasAudio && (
+        <CellTtsButton
+          cellId={cell.id}
+          text={cell.translated}
+          original={cell.original}
+          context={cell.context}
+          cellLabel={cell.cellLabel}
+          sourceLanguage={project.sourceLanguage}
+          targetLanguage={project.targetLanguage}
+          projectTtsSettings={project.ttsSettings}
+          cellTtsSettings={cell.ttsSettings}
+          generatedVoiceAudioId={cell.selectedGeneratedVoiceAudioId}
+          attachments={cell.attachments}
+          projectId={projectId}
+          fileId={cell.fileId}
+        />
+      )}
+
+      <Button
+        variant={hasAudio ? "ghost" : "outline"}
+        size="sm"
+        className="h-7 shrink-0"
+        disabled={isBusy || batchRunning}
+        onClick={onGenerate}
+      >
+        {isBusy ? <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />
+          : hasAudio ? <RefreshCw className="mr-1 h-3.5 w-3.5" />
+          : <Volume2 className="mr-1 h-3.5 w-3.5" />}
+        {hasAudio ? "Regenerate" : "Generate"}
+      </Button>
     </div>
+  )
+}
+
+/**
+ * Surfaces a cell's failed-synth state. `generateCellVoice` writes errors to
+ * the per-cell tts status map; without this the Generate button would just
+ * spin and revert. The Gemini-key field lives in the rail (auto-opened when
+ * absent), so the missing-key case needs no inline action here.
+ */
+function CellVoiceError({ cellId }: { cellId: string }) {
+  const status = useTtsStatus(ttsStatusKey(cellId))
+  if (status.kind !== "error") return null
+  const error = categorizeAiError(status.message)
+  const dismiss = () => setTtsStatus(ttsStatusKey(cellId), { kind: "idle" })
+  return (
+    <CellAiStatusPopover
+      error={error}
+      actions={[]}
+      onDismiss={dismiss}
+      trigger={
+        <button
+          type="button"
+          className="inline-flex items-center gap-1 rounded-full bg-destructive/15 px-2 py-0.5 text-[11px] font-medium text-destructive hover:bg-destructive/25"
+        >
+          <AlertCircle className="h-3 w-3" /> Failed
+        </button>
+      }
+    />
   )
 }

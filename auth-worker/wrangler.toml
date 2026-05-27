@@ -4,21 +4,20 @@ compatibility_date = "2024-12-01"
 compatibility_flags = ["nodejs_compat"]
 account_id = "6a80496d1e59948a9cbaa3c643ba81d7"
 # Browser-facing mount: same-origin under aquilla.app so Safari (which drops
-# *.workers.dev) works. The worker strips the /api/identity and /api/chat
-# prefixes (index.ts). CI's token can't set zone routes — applied
-# out-of-band via local `wrangler deploy` or the CF dashboard, same as
-# sync-worker.
+# *.workers.dev) works. The worker strips the /api/identity prefix (index.ts).
 #
-# The chat fold (93dbe4f) intended /api/chat/* to move here from the old
-# chat worker. That migration was never completed on prod: the route is
-# still owned by `codex-chat-worker`, which serves chat fine. Claiming it
-# here makes `wrangler deploy` fail with route conflict [10020], so we do
-# NOT claim it. The worker still mounts chatRoutes internally; finishing the
-# fold = detach the route from codex-chat-worker, then add it back here +
-# ensure OPENROUTER_API_KEY is set on aquilla-identity. Tracked as follow-up.
-routes = [
-  "aquilla.app/api/identity/*",
-]
+# NO `routes` in this top-level (CI) config ON PURPOSE. CI's token lacks
+# zone-route permission (Authentication error [10000] on /zones/.../workers/
+# routes), so a routed deploy fails. CI therefore deploys CODE only; the
+# `aquilla.app/api/identity/*` zone route is managed out-of-band (CF
+# dashboard, or a local `wrangler deploy` with a token that has zone perms).
+# A no-routes deploy does NOT remove existing routes, so the live mount is
+# preserved across CI deploys — same pattern as sync-worker.
+#
+# Chat: /api/chat/* is still owned by `codex-chat-worker` (the 93dbe4f fold
+# was never completed on prod; chat works there). Not claimed here — doing so
+# would also conflict [10020]. Finishing the fold = detach that route from
+# codex-chat-worker, then ensure OPENROUTER_API_KEY is on aquilla-identity.
 
 # Phase D: auth-worker is the full identity surface. AQUILLA_DB owns the
 # complete schema (identity + orgs + projects + members + invites + file/cell

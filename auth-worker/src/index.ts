@@ -58,7 +58,6 @@ import invitesRoutes from "./routes/invites"
 import orgsRoutes from "./routes/orgs"
 import usersRoutes from "./routes/users"
 import testResetRoutes from "./routes/test-reset"
-import devSeedRoutes from "./routes/dev-seed"
 import chatRoutes from "./routes/chat"
 
 type HonoEnv = { Bindings: Env; Variables: Variables }
@@ -148,8 +147,6 @@ app.route("/api/v1/chat", chatRoutes)
 
 // Test-only reset endpoint (WRANGLER_LOCAL only — see routes/test-reset.ts).
 app.route("/__test__", testResetRoutes)
-// Dev-only seed + login bypass (WRANGLER_LOCAL only — see routes/dev-seed.ts).
-app.route("/__dev__", devSeedRoutes)
 
 app.notFound((c) => c.json({ error: "Not found" }, 404))
 

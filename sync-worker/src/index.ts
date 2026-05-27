@@ -28,6 +28,9 @@ import { handleBranchingSearchRequest } from "./events/branching-search-route"
 import { handleBranchingSearchPassagesRequest } from "./events/branching-search-passages-route"
 import { handleCommentsReadRequest } from "./events/comments-read-route"
 export { ProjectSync } from "./project-do"
+// Inert legacy DO class — kept exported so deploys don't trip the
+// "script does not export class 'FileSync'" guard. See file-sync-legacy.ts.
+export { FileSync } from "./file-sync-legacy"
 
 declare global {
   namespace Cloudflare {

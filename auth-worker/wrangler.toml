@@ -9,12 +9,15 @@ account_id = "6a80496d1e59948a9cbaa3c643ba81d7"
 # out-of-band via local `wrangler deploy` or the CF dashboard, same as
 # sync-worker.
 #
-# /api/chat/* was previously routed to aquilla-chat-worker (deleted
-# 2026-05-26). Folded in here so the JWT SECRET_KEY only lives in one
-# worker; OPENROUTER_API_KEY moved alongside it.
+# The chat fold (93dbe4f) intended /api/chat/* to move here from the old
+# chat worker. That migration was never completed on prod: the route is
+# still owned by `codex-chat-worker`, which serves chat fine. Claiming it
+# here makes `wrangler deploy` fail with route conflict [10020], so we do
+# NOT claim it. The worker still mounts chatRoutes internally; finishing the
+# fold = detach the route from codex-chat-worker, then add it back here +
+# ensure OPENROUTER_API_KEY is set on aquilla-identity. Tracked as follow-up.
 routes = [
   "aquilla.app/api/identity/*",
-  "aquilla.app/api/chat/*",
 ]
 
 # Phase D: auth-worker is the full identity surface. AQUILLA_DB owns the

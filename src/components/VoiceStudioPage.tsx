@@ -8,7 +8,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { useParams, useNavigate } from "react-router-dom"
-import { ArrowLeft, Loader2, RefreshCw, Sparkles, Star, Volume2 } from "lucide-react"
+import { AlertCircle, ArrowLeft, Loader2, RefreshCw, Sparkles, Star, Volume2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 import { getProject } from "@/lib/store/project-index"
@@ -18,11 +18,54 @@ import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { getVoiceLibrary, resolveVoice } from "@/lib/audio/voices"
 import { generateCellVoice } from "@/lib/audio/voice-generate-helpers"
 import { audioSyncTokenFetcherForSession } from "@/lib/audio/sync-token-fetcher"
+import { setTtsStatus, ttsStatusKey, useTtsStatus } from "@/lib/audio/tts"
+import { categorizeAiError } from "@/lib/audio/ai-error"
+import { openVoiceModalFromAnywhere } from "@/lib/audio/voice-actions"
 import { CellTtsButton } from "./CellTtsButton"
+import { CellAiStatusPopover } from "./CellAiStatusPopover"
+import { VoiceController } from "./VoiceController"
 import { EditorModeToggle } from "./EditorModeToggle"
 import { ReferencePreview } from "./VoiceCloneSection"
 import type { CellData } from "@/hooks/useCells"
 import type { ProjectRecord, ProjectTtsSettings } from "@/lib/parsers/types"
+
+/**
+ * Surfaces a cell's failed-synth state in the studio. `generateCellVoice`
+ * writes errors to the per-cell tts status map (the same key CellTtsButton
+ * uses), but the studio's Generate button only spins and reverts — so without
+ * this the failure was invisible until the cell happened to have audio. Mirrors
+ * EditorTable's SynthStatusBadge so both editor modes report failures the same.
+ */
+function CellVoiceError({ cellId }: { cellId: string }) {
+  const status = useTtsStatus(ttsStatusKey(cellId))
+  if (status.kind !== "error") return null
+  const error = categorizeAiError(status.message)
+  const dismiss = () => setTtsStatus(ttsStatusKey(cellId), { kind: "idle" })
+  const actions =
+    error.category === "missing-gemini-key"
+      ? [{ label: "Add Gemini API key", primary: true, onClick: () => openVoiceModalFromAnywhere("apiKey") }]
+      : error.category === "translation-not-configured" ||
+          error.category === "no-source-text" ||
+          error.category === "git-project-unsupported" ||
+          error.category === "sign-in-required"
+        ? []
+        : [{ label: "Open voice settings", onClick: () => openVoiceModalFromAnywhere() }]
+  return (
+    <CellAiStatusPopover
+      error={error}
+      actions={actions}
+      onDismiss={dismiss}
+      trigger={
+        <button
+          type="button"
+          className="inline-flex shrink-0 items-center gap-1 rounded-full bg-destructive/15 px-2 py-0.5 text-[11px] font-medium text-destructive hover:bg-destructive/25"
+        >
+          <AlertCircle className="h-3 w-3" /> Failed
+        </button>
+      }
+    />
+  )
+}
 
 export function VoiceStudioPage() {
   const { id } = useParams<{ id: string }>()
@@ -248,6 +291,7 @@ export function VoiceStudioPage() {
                     {hasText && (
                       <td className="w-[28rem] px-2 py-2 align-top">
                         <div className="flex items-center justify-end gap-2">
+                          <CellVoiceError cellId={cell.id} />
                           <select
                             value={selectedVoiceId}
                             onChange={(e) => setRowVoice((m) => ({ ...m, [cell.id]: e.target.value }))}
@@ -301,6 +345,18 @@ export function VoiceStudioPage() {
           </table>
         )}
       </div>
+
+      {/* Hosts the VoiceModal and registers the imperative voice actions so the
+          per-cell error popover's "Add Gemini API key" / "Open voice settings"
+          links resolve here too (it's otherwise only mounted in the editor). */}
+      <VoiceController
+        project={project}
+        activeFileId={fileId}
+        cells={cells}
+        username={username}
+        session={session ?? null}
+        onProjectChanged={() => { refresh(); revalidate() }}
+      />
     </div>
   )
 }

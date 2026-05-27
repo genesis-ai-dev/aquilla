@@ -63,6 +63,18 @@ vi.mock("@/lib/sync/cells-read", () => ({
   },
   fetchAllFileCells: (...args: unknown[]) =>
     fetchAllMock(...(args as Parameters<typeof fetchAllMock>)),
+  fetchCellsByIds: async () => [],
+}))
+
+// Stub the IDB cells-cache. The hook reads/writes it on hard fetches; the
+// real impl is keyed by `${projectId}:${fileId}` and persists across tests
+// in fake-indexeddb, which bleeds rows between tests that share the same
+// (projectId, fileId) fixture. Tests assert against `fetchAllMock` output,
+// not cache contents, so a no-op stub is the right shape.
+vi.mock("@/lib/sync/cells-cache", () => ({
+  readCellsCache: async () => null,
+  writeCellsCache: async () => {},
+  resetCellsCacheConnectionForTests: async () => {},
 }))
 
 import { useCells } from "./useCells"

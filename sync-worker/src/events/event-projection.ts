@@ -452,6 +452,19 @@ export function buildEventProjectionStmts(
       // they should pick up partial endorsement. That's the loop that also
       // makes retrieval examples appear for neighbors once a few cells in
       // the region are validated.
+      //
+      // TODO(realtime): once the neighborhood loop lands it'll dirty many
+      // cells per validate. Move from "broadcast event.applied + client
+      // re-fetches the changed cell" to "broadcast the row payload itself
+      // on the WS frame" (Supabase-realtime style) so the client patches
+      // in place with zero round-trip and N-cell-per-event isn't N HTTP
+      // requests. The pieces exist — `projection.dirty` is already a
+      // defined variant in events/realtime.ts; the coalescer in
+      // events/coalescer.ts is the right hook for batching the row reads.
+      // This is an app-shaped change (protocol bump on the WS frame,
+      // post-commit row read on every projected event, coalescer wiring)
+      // so it's deferred behind the immediate single-cell refetch path
+      // in src/hooks/useCells.ts → revalidateCell().
       stmts.push(
         db
           .prepare(

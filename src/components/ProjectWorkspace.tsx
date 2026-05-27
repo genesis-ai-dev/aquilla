@@ -368,7 +368,7 @@ export function ProjectWorkspace() {
   // The Y.Doc is still wired for writes + the Tiptap editor; this just
   // changes the load path for the cells list. See useCells.ts for the full
   // story.
-  const { cells, revalidate: revalidateCells, applyOptimisticTargetEdit, isLoading: cellsLoading } = useCells({
+  const { cells, revalidate: revalidateCells, revalidateCell, applyOptimisticTargetEdit, isLoading: cellsLoading } = useCells({
     projectId: project?.id ?? null,
     fileId: activeFileId,
     username: currentUsername,
@@ -742,7 +742,10 @@ export function ProjectWorkspace() {
           onMessage(msg) {
             if (msg.t === "event.applied") {
               if (!msg.cell || msg.project !== pid) return
-              revalidateCells()
+              // Targeted single-cell refetch — avoids re-streaming every
+              // cell in the file for one remote change. Falls back to a
+              // full revalidate inside useCells on error.
+              revalidateCell(msg.cell)
               // Audio attachment events project into cell_audio (not cells);
               // poke the per-file audio read so the new clip surfaces.
               if (msg.kind?.startsWith("cell.audio.") && msg.file) {
@@ -812,7 +815,7 @@ export function ProjectWorkspace() {
       reconcilerRef.current = null
       reconciler?.close()
     }
-  }, [project?.id, frontierSession?.jwt, getTokenForFile, revalidateCells, currentUsername, refresh])
+  }, [project?.id, frontierSession?.jwt, getTokenForFile, revalidateCells, revalidateCell, currentUsername, refresh])
 
   const handleClaimCell = useCallback((cellId: string) => {
     focusedCellIdRef.current = cellId

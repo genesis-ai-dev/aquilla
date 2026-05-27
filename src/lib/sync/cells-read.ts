@@ -106,6 +106,30 @@ export async function fetchFileCells(
 }
 
 /**
+ * Targeted read: fetch a small set of cells by id without paying for the
+ * anchor-chain walk. Used by the WS-triggered single-cell revalidate path
+ * so a remote validate/commit doesn't refetch the whole file. Returns both
+ * sides of each requested cellId (one source row + one target row, if both
+ * exist in the projection). Server caps the list at 100.
+ */
+export async function fetchCellsByIds(
+  projectId: string,
+  fileId: string,
+  cellIds: string[],
+  jwt: string,
+): Promise<CellRow[]> {
+  if (cellIds.length === 0) return []
+  const params = new URLSearchParams()
+  params.set("cellIds", cellIds.join(","))
+  const url =
+    `${syncWorkerHttpOrigin()}/api/v1/projects/${encodeURIComponent(projectId)}` +
+    `/files/${encodeURIComponent(fileId)}/cells?${params.toString()}`
+  const res = await fetch(url, { headers: authHeaders(jwt) })
+  const page = await readJson<CellsPage>(res)
+  return page.cells
+}
+
+/**
  * Stream every page of cells for a file. Invokes `onPage(rows, isLast)` after
  * each successful page fetch so the caller can render incrementally instead
  * of waiting for the whole file. Pages arrive in server order: source rows in

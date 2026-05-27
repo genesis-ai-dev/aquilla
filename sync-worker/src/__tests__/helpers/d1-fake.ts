@@ -71,6 +71,7 @@ export interface CellRow {
   validated: number
   word_count: number
   content_hash?: string | null
+  endorsement_count?: number
 }
 
 export interface ValidatorRow {
@@ -515,20 +516,32 @@ export function makeInMemoryD1(tables: Partial<Tables> = {}): InMemoryD1 {
 
     // ── GET /api/v1/projects/:projectId/files/:fileId/cells ────────────
     if (
-      /^SELECT cell_id, side, value, value_html, type, canonical_ref, anchor_cell_id, event_id, source_event_id, last_editor, last_edit_at, validated, word_count FROM cells WHERE project_id = \? AND file_id = \?/.test(
+      /^SELECT cell_id, side, value, value_html, type, canonical_ref, anchor_cell_id, event_id, source_event_id, last_editor, last_edit_at, validated, word_count, endorsement_count FROM cells WHERE project_id = \? AND file_id = \?/.test(
         normalized,
       )
     ) {
       const pid = args[0] as string
       const fid = args[1] as string
       const hasSide = normalized.includes("AND side = ?")
-      const side = hasSide ? (args[2] as string) : null
+      const inMatch = normalized.match(/AND cell_id IN \(([^)]*)\)/)
+      // bind order: [pid, fid, side?, ...cellIds]
+      let bindIdx = 2
+      const side: string | null = hasSide ? (args[bindIdx++] as string) : null
+      const cellIdsFilter: string[] | null = inMatch
+        ? (() => {
+            const count = inMatch[1].split(",").length
+            const ids: string[] = []
+            for (let i = 0; i < count; i++) ids.push(args[bindIdx++] as string)
+            return ids
+          })()
+        : null
       return db.cells
         .filter(
           (c) =>
             c.project_id === pid &&
             c.file_id === fid &&
-            (side === null || c.side === side),
+            (side === null || c.side === side) &&
+            (cellIdsFilter === null || cellIdsFilter.includes(c.cell_id)),
         )
         .map((c) => ({
           cell_id: c.cell_id,
@@ -544,6 +557,7 @@ export function makeInMemoryD1(tables: Partial<Tables> = {}): InMemoryD1 {
           last_edit_at: c.last_edit_at,
           validated: c.validated,
           word_count: c.word_count,
+          endorsement_count: c.endorsement_count ?? 0,
         }))
     }
 

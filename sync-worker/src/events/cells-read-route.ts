@@ -45,6 +45,7 @@ interface CellRowRaw {
   last_edit_at: number
   validated: number
   word_count: number
+  endorsement_count: number
 }
 
 interface CellRowOut {
@@ -61,6 +62,7 @@ interface CellRowOut {
   lastEditAt: number
   validated: boolean
   wordCount: number
+  endorsementCount: number
 }
 
 function mapRow(row: CellRowRaw): CellRowOut {
@@ -78,6 +80,7 @@ function mapRow(row: CellRowRaw): CellRowOut {
     lastEditAt: row.last_edit_at,
     validated: row.validated === 1,
     wordCount: row.word_count,
+    endorsementCount: row.endorsement_count ?? 0,
   }
 }
 
@@ -242,7 +245,18 @@ export async function handleCellsReadRequest(
   // walk dominates only at >10x current file sizes.
   const columns =
     "cell_id, side, value, value_html, type, canonical_ref, anchor_cell_id, " +
-    "event_id, source_event_id, last_editor, last_edit_at, validated, word_count"
+    "event_id, source_event_id, last_editor, last_edit_at, validated, word_count, " +
+    "endorsement_count"
+
+  // Per-cell fast path: when `cellIds=a,b,c` is present we skip chain walking
+  // and just return matching rows. Used by the WS-triggered single-cell
+  // revalidate path so a remote validate doesn't trigger a full file refetch.
+  // Capped to keep this from being abused as a bulk read; legitimate WS
+  // bursts coalesce to a handful of cells at most.
+  const qCellIds = url.searchParams.get("cellIds")
+  const cellIdsFilter = qCellIds
+    ? qCellIds.split(",").map((s) => s.trim()).filter((s) => s.length > 0).slice(0, 100)
+    : null
 
   const parts: string[] = [
     `SELECT ${columns}`,
@@ -254,13 +268,35 @@ export async function handleCellsReadRequest(
     parts.push("AND side = ?")
     binds.push(sideFilter)
   }
+  if (cellIdsFilter && cellIdsFilter.length > 0) {
+    const placeholders = cellIdsFilter.map(() => "?").join(", ")
+    parts.push(`AND cell_id IN (${placeholders})`)
+    binds.push(...cellIdsFilter)
+  }
   const sql = parts.join(" ")
 
   const result = await env.AQUILLA_DB.prepare(sql).bind(...binds).all<CellRowRaw>()
   const allRows = result.results
 
   let ordered: CellRowRaw[]
-  if (sideFilter === null) {
+  if (cellIdsFilter && cellIdsFilter.length > 0) {
+    // Targeted read: skip chain walking; preserve request order so callers
+    // patching by index can rely on it. Pagination is moot at this scale.
+    const byId = new Map<string, CellRowRaw[]>()
+    for (const r of allRows) {
+      let bucket = byId.get(r.cell_id)
+      if (!bucket) {
+        bucket = []
+        byId.set(r.cell_id, bucket)
+      }
+      bucket.push(r)
+    }
+    ordered = []
+    for (const id of cellIdsFilter) {
+      const bucket = byId.get(id)
+      if (bucket) ordered.push(...bucket)
+    }
+  } else if (sideFilter === null) {
     // Chain-walk source and target independently; emit source first, then
     // target, each in chain order. The client pairs by cell_id.
     const sourceRows: CellRowRaw[] = []

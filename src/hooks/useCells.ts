@@ -15,8 +15,10 @@ import { useCallback, useEffect, useRef, useState } from "react"
 import type { CellHistoryEntry, SourceLocation, CommentThread, CellTtsSettings } from "@/lib/parsers/types"
 import type { CodexCellAttachment, EditTypeValue, ValidationEntry, WordTiming } from "@/lib/codex-editor/types"
 import type { CellAuditStats } from "./useCellsAuditStats"
-import { streamFileCells } from "@/lib/sync/cells-read"
+import { streamFileCells, fetchCellsByIds } from "@/lib/sync/cells-read"
 import type { CellRow } from "@/lib/sync/cells-read-types"
+import { readCellsCache, writeCellsCache } from "@/lib/sync/cells-cache"
+import { peekOutboxBatch, subscribeToOutbox } from "@/lib/sync/outbox"
 
 /**
  * Per-edit summary used by the validation popover timeline. Was previously
@@ -40,6 +42,11 @@ export type ValidationStatus = "empty" | "none" | "others" | "self" | "full"
 export interface CellData {
   id: string
   fileId: string
+  /** True iff a `target.cell.commit` / `target.cell.create` for this cell is
+   *  still sitting in the IndexedDB outbox (offline, retrying, or just enqueued).
+   *  When set, `translated` / `translatedHtml` reflect the *pending* value, not
+   *  the server projection. UI can render a subtle "queued" indicator. */
+  hasPendingEdit?: boolean
   cellLabel?: string
   original: string
   originalHtml?: string
@@ -222,6 +229,12 @@ export interface UseCellsResult {
   cells: CellData[]
   /** Manual refetch — call after a known write so the UI reflects it. */
   revalidate: () => void
+  /** Targeted refetch for a single cell. Used by the WS-triggered
+   *  `event.applied` handler so a remote validate/commit only pulls the
+   *  one changed cell instead of re-streaming every cell in the file.
+   *  Coalesces concurrent calls for the same id; falls back to a full
+   *  revalidate if the targeted fetch fails. */
+  revalidateCell: (cellId: string) => void
   /** Optimistically patch a target-side cell's value in the local cache.
    *  Used by the editor commit path so rule infractions + per-cell UI
    *  re-derive instantly (no round-trip wait). The follow-up server fetch
@@ -259,6 +272,12 @@ export function useCells(opts: UseCellsOptions): UseCellsResult {
   // load effect; that effect only re-runs when (projectId, fileId, enabled)
   // change. Stats/username/threshold updates rebuild from cached rows.
   const rowsRef = useRef<CellRow[]>([])
+  // Pending outbox overlay: per-cell pending value/valueHtml from
+  // target.cell.commit / target.cell.create events still in IndexedDB. Applied
+  // on top of the server projection in rebuildFromCache so refreshes (and
+  // initial loads) reflect locally-queued edits before sync lands. Cleared
+  // entries roll off automatically as the flusher removes them from IDB.
+  const pendingOverlayRef = useRef<Map<string, { value: string; valueHtml?: string }>>(new Map())
   const statsRef = useRef<ReadonlyMap<string, CellAuditStats>>(auditStats)
   const usernameRef = useRef(username)
   const requiredRef = useRef(requiredValidations)
@@ -298,7 +317,8 @@ export function useCells(opts: UseCellsOptions): UseCellsResult {
     // delivers them and `revalidate()` refetches — never as a client-side
     // read overlay (that's the v2 progressive-caching tier).
     const rows = rowsRef.current
-    if (rows.length === 0) {
+    const overlay = pendingOverlayRef.current
+    if (rows.length === 0 && overlay.size === 0) {
       setCells([])
       return
     }
@@ -315,6 +335,18 @@ export function useCells(opts: UseCellsOptions): UseCellsResult {
         statsRef.current.get(cellId),
       ),
     )
+    if (overlay.size > 0) {
+      for (const cell of out) {
+        const o = overlay.get(cell.id)
+        if (!o) continue
+        cell.translated = o.value
+        if (o.valueHtml !== undefined) cell.translatedHtml = o.valueHtml
+        // Pending edits are by definition unvalidated until they replay
+        // through the server projection.
+        cell.status = deriveStatus(o.value, false)
+        cell.hasPendingEdit = true
+      }
+    }
     setCells(out)
   }, [])
 
@@ -325,6 +357,12 @@ export function useCells(opts: UseCellsOptions): UseCellsResult {
   // leaving the current rows (already optimistically patched) visible
   // throughout. A hard fetch (file switch / first load) blanks + shows the
   // skeleton so we never paint the previous file's rows.
+  //
+  // Cache: a hard fetch first checks the IDB cache for `${projectId}:${fileId}`.
+  // A hit paints the cached rows immediately and promotes the refresh to soft
+  // mode so the user sees content in <50ms while the network fetch streams in
+  // and atomically replaces the snapshot. A miss falls through to the original
+  // skeleton-then-stream behavior.
   const doFetch = useCallback(async (soft = false) => {
     const projectId = projectRef.current
     const fileId = fileRef.current
@@ -349,13 +387,30 @@ export function useCells(opts: UseCellsOptions): UseCellsResult {
     if (soft && inFlightRef.current) return
     const gen = ++generationRef.current
     inFlightRef.current = true
+    let usedCache = false
     if (!soft) {
-      // CellAreaState drops to `syncing-empty` (skeleton) until the first
-      // page lands.
-      rowsRef.current = []
-      setCells([])
-      setIsLoading(true)
+      // Try the IDB cache before showing a skeleton. A hit paints cached rows
+      // synchronously into rowsRef, hides the skeleton, and demotes the rest
+      // of the fetch to soft mode (atomic swap on completion) so the user
+      // never flickers from cached rows → skeleton → fresh rows.
+      const cached = await readCellsCache(projectId, fileId)
+      if (generationRef.current !== gen) return
+      if (cached && cached.rows.length > 0) {
+        rowsRef.current = cached.rows
+        rebuildFromCache()
+        setIsLoading(false)
+        usedCache = true
+      } else {
+        // CellAreaState drops to `syncing-empty` (skeleton) until the first
+        // page lands.
+        rowsRef.current = []
+        setCells([])
+        setIsLoading(true)
+      }
     }
+    // If we hydrated from cache, the rest of this fetch behaves like a soft
+    // refetch: accumulate into a buffer and swap once at the end.
+    const effectiveSoft = soft || usedCache
     setIsError(false)
     try {
       const token = getToken ? await getToken(fileId) : null
@@ -391,7 +446,7 @@ export function useCells(opts: UseCellsOptions): UseCellsResult {
       const pushRows = (rows: CellRow[], rebuild: boolean): boolean | void => {
         if (generationRef.current !== gen) return false
         if (rows.length === 0) return
-        if (soft) {
+        if (effectiveSoft) {
           for (const r of rows) buffer.push(r)
           return
         }
@@ -412,7 +467,7 @@ export function useCells(opts: UseCellsOptions): UseCellsResult {
       if (generationRef.current !== gen) return
       await streamFileCells(projectId, fileId, token, (rows) => pushRows(rows, true), "source")
       if (generationRef.current !== gen) return
-      if (soft) {
+      if (effectiveSoft) {
         rowsRef.current = buffer
       }
       // Final rebuild: the source pass paints per page, but a target-only or
@@ -420,6 +475,10 @@ export function useCells(opts: UseCellsOptions): UseCellsResult {
       // target seed pass is intentionally silent. This also swaps in the soft
       // buffer. Cheap and idempotent on the hard path.
       rebuildFromCache()
+      // Persist the freshly-loaded snapshot. Best-effort; failures are
+      // swallowed inside writeCellsCache so a hostile IDB never breaks the
+      // load path.
+      void writeCellsCache(projectId, fileId, rowsRef.current)
       // Always clear loading on completion — including when a soft refetch
       // finishes after a hard load that got superseded — so the skeleton can
       // never get stuck on.
@@ -447,6 +506,43 @@ export function useCells(opts: UseCellsOptions): UseCellsResult {
     rebuildFromCache()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [auditStats, username, requiredValidations])
+
+  // Pending-outbox overlay: rebuild the per-cell map whenever the outbox
+  // changes (enqueue, attempt, removal-on-success), and also reload it when
+  // the active file changes. peekOutboxBatch returns rows in enqueuedAt asc
+  // order, so iterating once and writing into a Map yields last-write-wins
+  // per cellId — matching the order the server will eventually apply them in.
+  useEffect(() => {
+    if (!enabled || !fileId) {
+      pendingOverlayRef.current = new Map()
+      return
+    }
+    let cancelled = false
+    async function refresh() {
+      const all = await peekOutboxBatch(2000)
+      if (cancelled) return
+      const fid = fileRef.current
+      const next = new Map<string, { value: string; valueHtml?: string }>()
+      for (const r of all) {
+        if (fid && r.event.fileId !== fid) continue
+        const k = r.event.kind
+        if (k !== "target.cell.commit" && k !== "target.cell.create") continue
+        const cellId = r.event.cellId
+        if (!cellId) continue
+        const p = r.event.payload as { value?: string; valueHtml?: string }
+        if (typeof p.value !== "string") continue
+        next.set(cellId, { value: p.value, valueHtml: p.valueHtml })
+      }
+      pendingOverlayRef.current = next
+      rebuildFromCache()
+    }
+    void refresh()
+    const unsub = subscribeToOutbox(refresh)
+    return () => {
+      cancelled = true
+      unsub()
+    }
+  }, [enabled, fileId, rebuildFromCache])
 
   // Cancel any pending token-retry on unmount.
   useEffect(() => () => {
@@ -482,6 +578,57 @@ export function useCells(opts: UseCellsOptions): UseCellsResult {
   const revalidate = useCallback(() => {
     void doFetch(true)
   }, [doFetch])
+
+  // Targeted single-cell refetch. WS `event.applied` calls this with the
+  // changed cellId so a remote validate/commit only pulls one row instead
+  // of re-streaming the entire file (which is ~thousands of cells for a
+  // Bible book and was the dominant cause of slow remote-change feedback).
+  //
+  // Coalesces concurrent in-flight fetches per cellId, drops the patch if
+  // the file/project changed mid-flight, and falls back to a full
+  // revalidate on any error so we never end up with stale local state on a
+  // transient network blip.
+  //
+  // FUTURE: replace this HTTP round-trip with a server-pushed row payload
+  // on the existing `event.applied` WS frame (Supabase-realtime style). That
+  // saves a round-trip per change and is the right shape for the deferred
+  // AD-13/14 neighborhood propagation, which will dirty many cells per
+  // event — fanning out N targeted GETs would be worse than today's full
+  // refetch. See TODO in sync-worker/src/events/event-projection.ts.
+  const cellFetchInFlightRef = useRef<Set<string>>(new Set())
+  const revalidateCell = useCallback((cellId: string) => {
+    const projectId = projectRef.current
+    const fileId = fileRef.current
+    const enabled = enabledRef.current
+    const getToken = tokenFetcherRef.current
+    if (!enabled || !projectId || !fileId || !getToken) return
+    if (cellFetchInFlightRef.current.has(cellId)) return
+    cellFetchInFlightRef.current.add(cellId)
+    const gen = generationRef.current
+    void (async () => {
+      try {
+        const token = await getToken(fileId)
+        if (!token) return
+        if (generationRef.current !== gen) return
+        const rows = await fetchCellsByIds(projectId, fileId, [cellId], token)
+        if (generationRef.current !== gen) return
+        if (projectRef.current !== projectId || fileRef.current !== fileId) return
+        const cache = rowsRef.current
+        // Replace any existing rows for this cellId; rows arrive as one
+        // source + one target (either may be absent).
+        const next = cache.filter((r) => r.cellId !== cellId)
+        next.push(...rows)
+        rowsRef.current = next
+        rebuildFromCache()
+      } catch {
+        // Targeted fetch failed — fall back to the full file refetch so
+        // we never strand stale local state on a transient network blip.
+        if (generationRef.current === gen) void doFetch(true)
+      } finally {
+        cellFetchInFlightRef.current.delete(cellId)
+      }
+    })()
+  }, [doFetch, rebuildFromCache])
 
   // Optimistic local patch for the target row of a single cell. We mutate
   // the cached `rowsRef` entry in place (creating one if no target row yet
@@ -530,5 +677,5 @@ export function useCells(opts: UseCellsOptions): UseCellsResult {
     [rebuildFromCache],
   )
 
-  return { cells, revalidate, applyOptimisticTargetEdit, isLoading, isError }
+  return { cells, revalidate, revalidateCell, applyOptimisticTargetEdit, isLoading, isError }
 }

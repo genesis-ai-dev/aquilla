@@ -51,10 +51,20 @@ export function useProject(projectId: string) {
   const [project, setProject] = useState<ProjectRecord | null>(null)
   const [status, setStatus] = useState<ProjectLoadStatus>("loading")
   const hasLoaded = useRef(false)
-  const { session } = useFrontierSession()
+  const { session, loading: sessionLoading } = useFrontierSession()
 
   const refresh = useCallback(() => {
     if (!hasLoaded.current) setStatus("loading")
+
+    // The session store hydrates asynchronously on first load. Until it
+    // resolves, `session` is null but that does NOT mean "no session" — bailing
+    // to "no-session" here is what made the "not on this device" message flash
+    // on every load. Stay in "loading"; the effect re-runs once hydration
+    // finishes (sessionLoading flips false) and we resolve for real.
+    if (sessionLoading) {
+      setStatus("loading")
+      return () => {}
+    }
 
     let cancelled = false
     ;(async () => {
@@ -80,7 +90,7 @@ export function useProject(projectId: string) {
     })()
 
     return () => { cancelled = true }
-  }, [projectId, session?.jwt])
+  }, [projectId, session?.jwt, sessionLoading])
 
   useEffect(() => {
     const cleanup = refresh()

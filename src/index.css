@@ -112,7 +112,10 @@
 @layer base {
   :where(:root) {
     color-scheme: light;
-    --radius: 1rem;
+    /* Gently rounded, not pill-soft. This base feeds the whole radius scale
+       (rounded-lg = --radius, -xl = 1.4x, -2xl = 1.8x, -3xl = 2.2x), so tuning
+       it here dials roundness everywhere at once. */
+    --radius: 0.5rem;
     /* Neumorphic warm grey. The base is a soft warm light-GREY (not white) so a
        pure-white highlight can read against it — neumorphism needs the surface
        to sit below the highlight and above the shade. Everything (bg, card,

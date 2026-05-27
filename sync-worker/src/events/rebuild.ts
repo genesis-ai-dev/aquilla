@@ -106,14 +106,13 @@ export async function handleRebuildProjectionRequest(
   for (const row of eventRows) {
     eventsRead += 1
 
-    // Cell commits are last-write-wins (must match route.ts): every commit
-    // projects, and because we replay in server_seq ASC order the latest
-    // commit for a cell ends up as the projection head. The AD-2 first-child
-    // rule still governs creates / reorders / deletes.
+    // Strict AD-2 first-child-of-parent for every chain-mutating event,
+    // commits included (must match route.ts). We replay in server_seq ASC,
+    // so the first event at a given (project, file, cell, parent_id) slot
+    // is the winner; siblings stay in `events` (we're not rewriting the log)
+    // but do not contribute to the projection.
     let isWinner = true
-    const isCellCommit =
-      row.kind === 'target.cell.commit' || row.kind === 'source.cell.commit'
-    if (row.cell_id && !isCellCommit) {
+    if (row.cell_id) {
       const key = childKey(row)
       const winner = winningChildAt.get(key)
       if (!winner) {

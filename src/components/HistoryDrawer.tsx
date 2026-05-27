@@ -1,5 +1,5 @@
-import { useState } from "react"
-import { X, User, Bot, Check, BookOpen, ChevronDown, ChevronRight } from "lucide-react"
+import { useEffect, useRef, useState } from "react"
+import { X, User, Bot, Check, BookOpen, ChevronDown, ChevronRight, GitBranch } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import type { CellData } from "@/hooks/useCells"
 import type { CellHistoryEntry } from "@/lib/parsers/types"
@@ -60,6 +60,10 @@ function isSameEditSession(a: CellHistoryEntry, b: CellHistoryEntry): boolean {
   if (a.source === "llm" || b.source === "llm") return false
   // Validation flips (unvalidated → validated) should stay distinct.
   if (a.validated !== b.validated) return false
+  // Stale-branch commits never merge into a chain-winning group (or vice
+  // versa). A "session" collapses keystroke-level edits that ended in one
+  // committed value — mixing a bumped branch into that obscures both.
+  if ((a.isStale ?? false) !== (b.isStale ?? false)) return false
   // Within 2 minutes
   const aTime = new Date(a.timestamp).getTime()
   const bTime = new Date(b.timestamp).getTime()
@@ -104,6 +108,12 @@ function commonSuffixLength(a: string, b: string, prefixLen: number): number {
 
 export function HistoryDrawer({ cell, onClose, projectId, fileId, getTokenForFile }: HistoryDrawerProps) {
   const enabled = !!projectId && !!fileId && !!getTokenForFile
+  // Target side is the typical edit surface in this translation app, so we
+  // use `targetEventId` as the AD-2 chain head when computing stale-branch
+  // markers. If the user is viewing source-side history the head won't be
+  // in the returned events list and `computeOnChainSet` falls back to
+  // "everything is current" (safer than mis-flagging).
+  const currentEventId = cell.targetEventId || null
   const {
     history: d1History,
     isLoading: d1Loading,
@@ -114,6 +124,7 @@ export function HistoryDrawer({ cell, onClose, projectId, fileId, getTokenForFil
     fileId: fileId ?? null,
     cellId: cell.id,
     getTokenForFile: getTokenForFile ?? (() => Promise.resolve(null)),
+    currentEventId,
   })
 
   // Prefer D1 history when available; fall back to Y.Doc history when D1 is
@@ -124,6 +135,22 @@ export function HistoryDrawer({ cell, onClose, projectId, fileId, getTokenForFil
 
   const groups = groupHistory(history).slice().reverse() // most recent group first
   const hiddenCount = history.length - groups.length
+  // "Current" is the first ON-CHAIN group when reading newest-first. A
+  // stale-branch group can be more recent by wall-clock than the chain
+  // head (offline-reconnect scenario) — calling that the current value
+  // would be a lie. Falls back to the first group if no on-chain group
+  // exists (legacy entries without an `isStale` flag).
+  const currentGroupIndex = groups.findIndex((g) => !(g.terminal.isStale ?? false))
+  const hasAnyStale = groups.some((g) => g.terminal.isStale ?? false)
+  const firstStaleGroupRef = useRef<HTMLLIElement | null>(null)
+  // When the drawer opens with a stale-branch commit present (typical
+  // entry path: user clicked "View in history" from the F6 banner) the
+  // user's attention should land on the bumped edit, not the unchanged
+  // chain head at the top.
+  useEffect(() => {
+    if (!hasAnyStale) return
+    firstStaleGroupRef.current?.scrollIntoView({ block: "nearest" })
+  }, [hasAnyStale])
 
   function formatTimestamp(iso: string): string {
     try {
@@ -163,14 +190,22 @@ export function HistoryDrawer({ cell, onClose, projectId, fileId, getTokenForFil
               )}
             </p>
             <ol className="space-y-2">
-              {groups.map((group, i) => (
-                <GroupItem
-                  key={`${group.terminal.timestamp}-${group.startIndex}`}
-                  group={group}
-                  isCurrent={i === 0}
-                  formatTimestamp={formatTimestamp}
-                />
-              ))}
+              {groups.map((group, i) => {
+                const isStale = group.terminal.isStale ?? false
+                // First stale group in render order gets the ref so the
+                // open-drawer-from-banner flow can scroll it into view.
+                const isFirstStale =
+                  isStale && groups.findIndex((g) => g.terminal.isStale ?? false) === i
+                return (
+                  <GroupItem
+                    key={`${group.terminal.timestamp}-${group.startIndex}`}
+                    group={group}
+                    isCurrent={i === currentGroupIndex}
+                    formatTimestamp={formatTimestamp}
+                    refForFirstStale={isFirstStale ? firstStaleGroupRef : null}
+                  />
+                )
+              })}
             </ol>
           </>
         )}
@@ -183,13 +218,19 @@ function GroupItem({
   group,
   isCurrent,
   formatTimestamp,
+  refForFirstStale,
 }: {
   group: EntryGroup
   isCurrent: boolean
   formatTimestamp: (iso: string) => string
+  /** Ref attached to the first stale-branch group in the list, used by
+   *  HistoryDrawer to scroll the user's attention to it when the drawer
+   *  opens via the F6 banner. */
+  refForFirstStale: React.RefObject<HTMLLIElement | null> | null
 }) {
   const [expanded, setExpanded] = useState(false)
   const terminal = group.terminal
+  const isStale = terminal.isStale ?? false
   const Icon = terminal.source === "llm" ? Bot : User
   const sourceColor =
     terminal.source === "llm"
@@ -202,9 +243,16 @@ function GroupItem({
 
   return (
     <li
+      ref={refForFirstStale ?? undefined}
       className={cn(
         "rounded border p-2 text-sm",
-        isCurrent && "border-primary/40 bg-primary/5"
+        isCurrent && "border-primary/40 bg-primary/5",
+        // Stale-branch styling: dashed border + muted background so the
+        // user can scan and immediately see which entries are "your bumped
+        // edits" vs the chain lineage. We deliberately don't strike through
+        // the value — the text is still real edits the user might want to
+        // promote.
+        isStale && "border-dashed border-amber-300/70 bg-amber-50/40 dark:border-amber-700/60 dark:bg-amber-950/20",
       )}
     >
       <div className="mb-1 flex flex-wrap items-center gap-1 text-xs">
@@ -216,6 +264,15 @@ function GroupItem({
           {terminal.validated ? <Check className="h-3 w-3" /> : null}
           {terminal.validated ? "validated" : "unvalidated"}
         </span>
+        {isStale && (
+          <span
+            className="flex items-center gap-0.5 rounded bg-amber-200/60 px-1.5 py-0.5 font-medium text-amber-900 dark:bg-amber-800/50 dark:text-amber-200"
+            title="This edit lost the first-child-of-parent race for its slot. It was logged but never applied to the cell's current value."
+          >
+            <GitBranch className="h-3 w-3" />
+            stale branch
+          </span>
+        )}
         {hasSubEntries && (
           <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
             +{group.entries.length - 1} minor edit{group.entries.length - 1 !== 1 ? "s" : ""}
@@ -228,6 +285,11 @@ function GroupItem({
       <div className="text-xs text-muted-foreground">
         by <span className="font-medium">{terminal.author}</span>
         {isCurrent && <span className="ml-1.5 text-primary">· current</span>}
+        {isStale && (
+          <span className="ml-1.5 text-amber-700 dark:text-amber-300">
+            · bumped by a concurrent edit
+          </span>
+        )}
       </div>
       <div className="mt-1 whitespace-pre-wrap rounded bg-muted/40 p-2 text-xs">
         {terminal.value || <span className="italic text-muted-foreground">(empty)</span>}

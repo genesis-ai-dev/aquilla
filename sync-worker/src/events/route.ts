@@ -53,6 +53,18 @@ interface StaleSourceEntry {
   currentSourceEventId: string
 }
 
+/**
+ * Stale-sibling response entry. Carries `fileId` and `cellId` (when known —
+ * always set for chain-mutating cell events, which are the only events that
+ * can be flagged stale) so the client can navigate the user from the
+ * stale-sibling banner directly to the cell's history drawer.
+ */
+interface StaleEntry {
+  id: string
+  fileId: string | null
+  cellId: string | null
+}
+
 interface ExistingEventRow {
   server_ts: number
   server_seq: number
@@ -181,10 +193,11 @@ export async function handleEventsWriteRequest(
 
   const accepted: AcceptedEntry[] = []
   const rejected: RejectedEntry[] = []
-  // Ids of chain-mutating events that were accepted (logged) but did NOT
-  // advance the projection — stale siblings. Surfaced to the client so an
-  // edit that had no effect is visible rather than silently dropped.
-  const staleIds = new Set<string>()
+  // Chain-mutating events that were accepted (logged) but did NOT advance
+  // the projection — stale siblings. Keyed by event id so we can `has`-check
+  // when assembling the response; the value carries enough context for the
+  // client to navigate the user to the affected cell's history drawer.
+  const staleEntries = new Map<string, StaleEntry>()
   // F5: target.cell.commit events whose sourceEventId pin is stale (source
   // has advanced since the translator last fetched). Accepted + projected
   // (LWW) but flagged so the client can surface a "source changed" banner.
@@ -269,28 +282,34 @@ export async function handleEventsWriteRequest(
       rawEvent.kind !== 'comment.edit' &&
       rawEvent.kind !== 'comment.delete' &&
       rawEvent.kind !== 'comment.resolve'
-    // Last-write-wins for cell commits: a contributor's own edit must never be
-    // silently dropped by the AD-2 first-child-of-parent rule. That rule
-    // exists to MERGE concurrent OFFLINE edits from multiple people — for a
-    // single editor (re)committing a cell it only causes silent loss, because
-    // a commit whose parentId doesn't match the live head loses the race and
-    // is accepted-but-not-projected. The commit being processed has the
-    // highest server_seq for this cell, so it always becomes the projection
-    // head; full history still lands in `events`. Creates / reorders / deletes
-    // keep first-child resolution (they shouldn't double-apply).
-    const isCellCommit =
-      rawEvent.kind === 'target.cell.commit' || rawEvent.kind === 'source.cell.commit'
-    const updateProjection = isCellCommit
-      ? true
-      : isChainMutating
-        ? await isWinningChild(db, candidate)
-        : true
+    // Strict AD-2 first-child-of-parent for every chain-mutating event,
+    // commits included. Per the spec (03-data-model.md §AD-2): the first
+    // commit accepted at a given parent_id wins the chain slot; later
+    // siblings — including offline edits that flush long after a concurrent
+    // online edit has projected — land in `events` but do NOT advance the
+    // projection. The losing event is reported via `staleIds` so the client
+    // outbox can surface "your edit was bumped" and offer a promote-from-
+    // history affordance, rather than silently overwriting the newer winner.
+    //
+    // The previous code special-cased *.cell.commit as last-write-wins to
+    // avoid silently dropping a single editor's own re-commit when their
+    // parentId was briefly stale. The cost — a reconnected offline edit
+    // clobbering a newer online edit — contradicted the AD-2 invariant.
+    // The recovery path is the same as the multi-user case: the stale
+    // signal flows to the client, which prompts the user to rebase.
+    const updateProjection = isChainMutating
+      ? await isWinningChild(db, candidate)
+      : true
     // A chain-mutating event that does NOT advance the projection is a stale
     // sibling: it's still logged + 200-accepted, but the caller's change had
     // no visible effect. Report it so the client surfaces it instead of
     // treating "accepted" as "saved" (the old silent-loss bug).
     if (isChainMutating && !updateProjection) {
-      staleIds.add(rawEvent.id)
+      staleEntries.set(rawEvent.id, {
+        id: rawEvent.id,
+        fileId: rawEvent.fileId ?? null,
+        cellId: rawEvent.cellId ?? null,
+      })
     }
 
     // F5: AD-9 sourceEventId staleness validation for target.cell.commit.
@@ -422,7 +441,9 @@ export async function handleEventsWriteRequest(
         {
           accepted,
           rejected,
-          stale: accepted.filter((a) => staleIds.has(a.id)),
+          stale: accepted
+            .filter((a) => staleEntries.has(a.id))
+            .map((a) => staleEntries.get(a.id)!),
           staleSource: staleSourceEntries,
         },
         { status: 200 },
@@ -475,7 +496,9 @@ export async function handleEventsWriteRequest(
   return Response.json({
     accepted,
     rejected,
-    stale: accepted.filter((a) => staleIds.has(a.id)),
+    stale: accepted
+      .filter((a) => staleEntries.has(a.id))
+      .map((a) => staleEntries.get(a.id)!),
     staleSource: staleSourceEntries,
   })
 }

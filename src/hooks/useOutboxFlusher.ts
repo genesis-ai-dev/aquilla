@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef, useCallback } from "react"
-import { flushOutboxBatch } from "@/lib/sync/outbox-flush"
+import { flushOutboxBatch, type StaleSiblingEntry } from "@/lib/sync/outbox-flush"
 import { outboxPendingCount, subscribeToOutbox } from "@/lib/sync/outbox"
 
 const BASE_INTERVAL_MS = 5000
@@ -22,6 +22,16 @@ export function useOutboxFlusher(options: UseOutboxFlusherOptions): {
   /** F6: increments whenever a flush returns stale-sibling dead-letters.
    *  Caller should surface "Some changes were rejected — newer edits won." */
   staleSiblingCount: number
+  /** F6: the entries returned by the most recent flush that produced stale
+   *  siblings. Carries `cellId`/`fileId` so the banner can deep-link the user
+   *  to the affected cell's history drawer. Only the latest batch is kept —
+   *  notifications-track persistence is intentionally out of scope. Cleared
+   *  by `clearStaleSiblings()` when the user dismisses the banner. */
+  staleSiblingEntries: StaleSiblingEntry[]
+  /** Wipes `staleSiblingEntries` and resets `staleSiblingCount` to zero.
+   *  Used by the banner's dismiss / "after-navigate" hooks so the surface
+   *  doesn't keep re-firing for the same batch. */
+  clearStaleSiblings: () => void
   /** F5: increments whenever a flush returns stale-source pins.
    *  Caller should surface "Source changed — please re-confirm." */
   staleSourceCount: number
@@ -29,7 +39,12 @@ export function useOutboxFlusher(options: UseOutboxFlusherOptions): {
   const [pending, setPending] = useState(0)
   const [failureStreak, setFailureStreak] = useState(0)
   const [staleSiblingCount, setStaleSiblingCount] = useState(0)
+  const [staleSiblingEntries, setStaleSiblingEntries] = useState<StaleSiblingEntry[]>([])
   const [staleSourceCount, setStaleSourceCount] = useState(0)
+  const clearStaleSiblings = useCallback(() => {
+    setStaleSiblingCount(0)
+    setStaleSiblingEntries([])
+  }, [])
   const backoffExp = useRef(0)
   const tokenRef = useRef(options.getTokenForFile)
   tokenRef.current = options.getTokenForFile
@@ -60,8 +75,14 @@ export function useOutboxFlusher(options: UseOutboxFlusherOptions): {
     const runFlushCycle = async () => {
       const result = await flushOutboxBatch({
         getTokenForFile: (fid) => tokenRef.current(fid),
-        onStaleSiblings: (count) => {
-          setStaleSiblingCount((n) => n + count)
+        onStaleSiblings: (entries) => {
+          if (entries.length === 0) return
+          setStaleSiblingCount((n) => n + entries.length)
+          // Latest-batch wins. We deliberately don't merge with prior entries:
+          // the banner shows one click-through target at a time, and stacking
+          // ancient stale entries on top of fresh ones makes the action
+          // ambiguous. The user dismisses (or clicks through) to clear.
+          setStaleSiblingEntries(entries)
         },
         onStaleSource: (entries) => {
           setStaleSourceCount((n) => n + entries.length)
@@ -122,5 +143,13 @@ export function useOutboxFlusher(options: UseOutboxFlusherOptions): {
     }
   }, [options.enabled, refreshPending])
 
-  return { pendingCount: pending, failureStreak, refreshPending, staleSiblingCount, staleSourceCount }
+  return {
+    pendingCount: pending,
+    failureStreak,
+    refreshPending,
+    staleSiblingCount,
+    staleSiblingEntries,
+    clearStaleSiblings,
+    staleSourceCount,
+  }
 }

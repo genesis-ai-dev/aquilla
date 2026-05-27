@@ -335,15 +335,20 @@ export function ProjectWorkspace() {
     failureStreak: outboxFailures,
     refreshPending: refreshOutboxPending,
     staleSiblingCount: outboxStaleSiblingCount,
+    staleSiblingEntries: outboxStaleSiblingEntries,
+    clearStaleSiblings: clearStaleSiblings,
     staleSourceCount: outboxStaleSourceCount,
   } = useOutboxFlusher({
     enabled: outboxFlushEnabled,
     getTokenForFile,
   })
   // F5/F6: dismiss the notification banners after the user has seen them.
-  const [staleSiblingBannerDismissed, setStaleSiblingBannerDismissed] = useState(0)
+  // For stale siblings the banner is also dismissed implicitly when the
+  // user clicks "View in history" (we navigate them to the conflict — they
+  // shouldn't have to dismiss separately).
   const [staleSourceBannerDismissed, setStaleSourceBannerDismissed] = useState(0)
-  const showStaleSiblingBanner = outboxStaleSiblingCount > staleSiblingBannerDismissed
+  const showStaleSiblingBanner =
+    outboxStaleSiblingCount > 0 && outboxStaleSiblingEntries.length > 0
   const showStaleSourceBanner = outboxStaleSourceCount > staleSourceBannerDismissed
   const outboxRecords = usePendingOutboxRecords({
     enabled: Boolean(project?.id),
@@ -1359,17 +1364,48 @@ export function ProjectWorkspace() {
                 Video file not available on this device. Attach it locally or paste a URL via the Film icon.
               </div>
             )}
-            {/* F6: stale-sibling dead-letter banner */}
+            {/* F6: stale-sibling dead-letter banner. Clicking "View in
+                history" routes to the affected cell's history drawer where
+                the stale commit is preserved as a branch off its parent and
+                can be promoted (per the AD-2 recovery flow). When several
+                edits lost their race in the same flush we jump to the first
+                one — multi-conflict triage is out of scope for now. */}
             {showStaleSiblingBanner && (
               <div className="flex items-center justify-between gap-2 bg-amber-50 px-4 py-2 text-xs text-amber-800 dark:bg-amber-950 dark:text-amber-300">
-                <span>Some changes were rejected because they conflicted with newer edits from another session.</span>
-                <button
-                  type="button"
-                  onClick={() => setStaleSiblingBannerDismissed(outboxStaleSiblingCount)}
-                  className="ml-2 rounded bg-amber-200/60 px-2 py-0.5 hover:bg-amber-200 dark:bg-amber-800/50 dark:hover:bg-amber-800"
-                >
-                  Dismiss
-                </button>
+                <span>
+                  {outboxStaleSiblingCount === 1
+                    ? "1 change was rejected because it conflicted with a newer edit from another session."
+                    : `${outboxStaleSiblingCount} changes were rejected because they conflicted with newer edits from another session.`}
+                </span>
+                <div className="ml-2 flex items-center gap-1">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const first = outboxStaleSiblingEntries.find(
+                        (e) => e.cellId && e.fileId,
+                      )
+                      if (first?.cellId && first.fileId) {
+                        if (first.fileId !== activeFileId) {
+                          setActiveFileId(first.fileId)
+                        }
+                        setDrawerRuleId(null)
+                        setCommentsCellId(null)
+                        setHistoryCellId(first.cellId)
+                      }
+                      clearStaleSiblings()
+                    }}
+                    className="rounded bg-amber-200/60 px-2 py-0.5 hover:bg-amber-200 dark:bg-amber-800/50 dark:hover:bg-amber-800"
+                  >
+                    View in history
+                  </button>
+                  <button
+                    type="button"
+                    onClick={clearStaleSiblings}
+                    className="rounded bg-amber-200/40 px-2 py-0.5 hover:bg-amber-200 dark:bg-amber-800/30 dark:hover:bg-amber-800"
+                  >
+                    Dismiss
+                  </button>
+                </div>
               </div>
             )}
             {/* F5: stale-source pin banner */}

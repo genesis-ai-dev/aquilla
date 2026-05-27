@@ -32,6 +32,13 @@ export interface UseCellEditHistoryOptions {
   /** Server clamps to [1, 200]; default 50. */
   limit?: number
   getTokenForFile: (fileId: string) => Promise<string | null>
+  /**
+   * AD-2 chain head for this cell (the projection's current `event_id`).
+   * Used to mark stale-sibling commits in the returned history. When omitted
+   * the drawer falls back to "everything is current" rendering — safer than
+   * mis-flagging winning commits as stale.
+   */
+  currentEventId?: string | null
 }
 
 export interface UseCellEditHistoryResult {
@@ -41,10 +48,59 @@ export interface UseCellEditHistoryResult {
   revalidate: () => void
 }
 
-function mapEventsToEntries(events: CellHistoryEvent[]): CellHistoryEntry[] {
+/**
+ * Build the set of event ids that are currently on the AD-2 chain — the
+ * sequence reachable by walking back from the cell's chain head (current
+ * `cells.event_id`) via `parentId` pointers. Any commit not in this set is
+ * a stale sibling that lost its first-child-of-parent race; it stays in the
+ * log so the user can find it from the history drawer, but it never
+ * advanced the projection.
+ *
+ * If `currentEventId` is absent (no projection yet, or caller didn't pass
+ * one) we treat the whole list as on-chain — falling back to the pre-AD-2
+ * "everything is current" rendering, which is better than mis-flagging
+ * winning commits as stale.
+ */
+function computeOnChainSet(
+  events: CellHistoryEvent[],
+  currentEventId: string | null,
+): Set<string> | null {
+  if (!currentEventId) return null
+  const byId = new Map<string, CellHistoryEvent>()
+  for (const e of events) byId.set(e.id, e)
+  // If the supplied head doesn't appear in the events we just read, the
+  // caller passed a head for a different side of the cell (eg. target head
+  // while we're viewing source history) or for a chain that's outside the
+  // limit window. Fall back to null — flagging every commit stale would be
+  // strictly worse than not flagging at all.
+  if (!byId.has(currentEventId)) return null
+  const onChain = new Set<string>()
+  let cursor: string | null = currentEventId
+  // Guard against runaway walks if the data ever cycles. A cell's chain
+  // should never exceed the events we just read, so events.length is a
+  // safe upper bound.
+  let steps = events.length + 1
+  while (cursor && steps-- > 0) {
+    if (onChain.has(cursor)) break
+    onChain.add(cursor)
+    const node = byId.get(cursor)
+    if (!node) break
+    cursor = node.parentId
+  }
+  return onChain
+}
+
+function mapEventsToEntries(
+  events: CellHistoryEvent[],
+  currentEventId: string | null,
+): CellHistoryEntry[] {
   // Walk events chronologically. Each commit becomes a history entry; each
   // validate/unvalidate flips the `validated` flag on the entry whose
   // editEventId it references. Server returns newest-first, so we reverse.
+  // The on-chain set decides whether each commit is the current chain
+  // lineage or a stale branch — the drawer renders stale entries with a
+  // distinct visual treatment so the user can find their bumped edit.
+  const onChain = computeOnChainSet(events, currentEventId)
   const entries: CellHistoryEntry[] = []
   const indexByCommitId = new Map<string, number>()
   for (const e of [...events].reverse()) {
@@ -57,6 +113,10 @@ function mapEventsToEntries(events: CellHistoryEvent[]): CellHistoryEntry[] {
         source: "human",
         author: e.author,
         validated: false,
+        eventId: e.id,
+        // `onChain === null` means we couldn't compute (no head id passed) —
+        // treat everything as on-chain rather than risk false stale flags.
+        isStale: onChain ? !onChain.has(e.id) : false,
       })
       indexByCommitId.set(e.id, idx)
     } else if (e.kind === "cell.validate" || e.kind === "cell.unvalidate") {
@@ -72,7 +132,7 @@ function mapEventsToEntries(events: CellHistoryEvent[]): CellHistoryEntry[] {
 }
 
 export function useCellEditHistory(opts: UseCellEditHistoryOptions): UseCellEditHistoryResult {
-  const { enabled, projectId, fileId, cellId, limit, getTokenForFile } = opts
+  const { enabled, projectId, fileId, cellId, limit, getTokenForFile, currentEventId } = opts
 
   const [history, setHistory] = useState<CellHistoryEntry[]>([])
   const [isLoading, setIsLoading] = useState(false)
@@ -84,6 +144,7 @@ export function useCellEditHistory(opts: UseCellEditHistoryOptions): UseCellEdit
   const limitRef = useRef(limit)
   const tokenFetcherRef = useRef(getTokenForFile)
   const enabledRef = useRef(enabled)
+  const headRef = useRef(currentEventId ?? null)
   const generationRef = useRef(0)
 
   projectRef.current = projectId
@@ -92,6 +153,7 @@ export function useCellEditHistory(opts: UseCellEditHistoryOptions): UseCellEdit
   limitRef.current = limit
   tokenFetcherRef.current = getTokenForFile
   enabledRef.current = enabled
+  headRef.current = currentEventId ?? null
 
   const doFetch = useCallback(async () => {
     const pid = projectRef.current
@@ -116,7 +178,7 @@ export function useCellEditHistory(opts: UseCellEditHistoryOptions): UseCellEdit
       }
       const rows = await fetchCellHistory(pid, fid, cid, token, { limit: limitRef.current })
       if (generationRef.current !== gen) return
-      setHistory(mapEventsToEntries(rows))
+      setHistory(mapEventsToEntries(rows, headRef.current))
       setIsLoading(false)
     } catch (err) {
       if (generationRef.current !== gen) return

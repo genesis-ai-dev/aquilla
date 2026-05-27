@@ -148,10 +148,11 @@ describe('handleRebuildProjectionRequest — successful replay', () => {
     expect(cells[0].side).toBe('target')
   })
 
-  it('cell commits replay last-write-wins: the highest server_seq commit takes the projection', async () => {
-    // Two commits on the same cell — replayed in server_seq order, the later
-    // one wins (LWW, matching the live route). The first-child rule still
-    // governs creates/reorders/deletes, just not commits.
+  it('cell commits replay first-child-of-parent: the earliest sibling at a parent_id wins, later siblings stay as branches', async () => {
+    // Two commits on the same parent_id — replayed in server_seq ASC order,
+    // the EARLIER one wins the chain slot (AD-2). The later commit's row
+    // stays in `events` (we never rewrite the log) but does not contribute
+    // to the projection. Must match the live route's strict-AD-2 behavior.
     const db = makeInMemoryD1({
       events: [
         evt({
@@ -183,8 +184,8 @@ describe('handleRebuildProjectionRequest — successful replay', () => {
     )
     const cells = (db as any)._tables().cells
     expect(cells).toHaveLength(1)
-    expect(cells[0].value).toBe('LATEST')
-    expect(cells[0].event_id).toBe('evt-latest')
+    expect(cells[0].value).toBe('EARLIER')
+    expect(cells[0].event_id).toBe('evt-earlier')
   })
 
   it('cell_validators are written and cells.validated reflects the current chain head', async () => {

@@ -19,12 +19,20 @@ interface PostBody {
   rejected: Array<{ id: string; status: number; reason: string }>
   /** Chain-mutating events the server accepted (logged) but did NOT apply to
    *  the projection — stale siblings that had no visible effect. Surfaced so
-   *  "accepted" is never silently mistaken for "saved". */
-  stale?: Array<{ id: string }>
+   *  "accepted" is never silently mistaken for "saved". `fileId`/`cellId` are
+   *  carried so the UI can deep-link the user to the cell's history drawer
+   *  (where the stale commit is preserved as a branch off its parent). */
+  stale?: Array<StaleSiblingEntry>
   /** F5: target.cell.commit events whose sourceEventId pin is stale — the
    *  source row advanced since the translator last fetched. Event was accepted
    *  and projected (LWW) but flagged so the UI can surface a banner. */
   staleSource?: Array<{ id: string; currentSourceEventId: string }>
+}
+
+export interface StaleSiblingEntry {
+  id: string
+  fileId: string | null
+  cellId: string | null
 }
 
 export interface FlushDeps {
@@ -34,8 +42,9 @@ export interface FlushDeps {
    *  sourceEventId. The caller should surface a "source changed" hint. */
   onStaleSource?: (entries: Array<{ id: string; currentSourceEventId: string }>) => void
   /** F6: called when one or more events were dead-lettered as stale siblings.
-   *  The caller should surface a "some changes were rejected" toast. */
-  onStaleSiblings?: (count: number) => void
+   *  The caller passes the full entry list so the UI can deep-link the user
+   *  to the first affected cell's history drawer. */
+  onStaleSiblings?: (entries: StaleSiblingEntry[]) => void
 }
 
 function groupOldestFileFirst(records: OutboxRecord[]): OutboxRecord[] {
@@ -135,8 +144,10 @@ export async function flushOutboxBatch(deps: FlushDeps): Promise<{
       "[outbox-flush] server accepted but did NOT apply (stale siblings):",
       body.stale.map((s) => s.id),
     )
-    // F6: surface stale sibling dead-letters to the caller so a toast can be shown.
-    deps.onStaleSiblings?.(body.stale.length)
+    // F6: surface stale sibling dead-letters to the caller so a toast can be
+    // shown. The full entries (with fileId/cellId) flow through so the
+    // caller can deep-link to the affected cells.
+    deps.onStaleSiblings?.(body.stale)
   }
   // F5: surface stale-source pins to the caller so a "source changed" hint can appear.
   if (body.staleSource && body.staleSource.length > 0) {

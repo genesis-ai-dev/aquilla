@@ -333,6 +333,20 @@ export interface CellHistoryEntry {
    * composite-health scorer treats legacy entries as unknown lineage.
    */
   examples?: string[] | WeightedExample[]
+  /**
+   * AD-2 chain pointer. Present when the entry came from D1 (per-cell history
+   * endpoint); absent for legacy Y.Doc-derived entries. Used by the history
+   * drawer to distinguish chain-winning commits from stale branches and to
+   * surface a "promote this version" affordance.
+   */
+  eventId?: string
+  /**
+   * True when this commit lost the AD-2 first-child-of-parent race for its
+   * `parent_id` slot — the event is durably logged but never advanced the
+   * cell's projection. Computed by walking back from the cell's current
+   * chain head; everything not on that walk is a stale branch.
+   */
+  isStale?: boolean
 }
 
 export interface CommentMessage {

@@ -215,7 +215,7 @@ describe('POST /events — server_seq', () => {
 // ── AD-2 parent-chain rule ─────────────────────────────────────────────
 
 describe('POST /events — AD-2 first-child-of-parent', () => {
-  it('cell commits are last-write-wins: a later sibling overwrites the projection', async () => {
+  it('cell commits follow first-child-of-parent: a later sibling is logged but does NOT overwrite the projection', async () => {
     const token = await makeToken()
     const db = makeInMemoryD1()
 
@@ -224,11 +224,16 @@ describe('POST /events — AD-2 first-child-of-parent', () => {
     const r0 = await handleEventsWriteRequest(await makeRequest([create], token), makeEnv(db))
     expect((await r0!.json() as any).accepted).toHaveLength(1)
 
-    // Two commits with the SAME parent_id. Under the AD-2 first-child rule a
-    // sibling would be dropped, but cell commits are deliberately LWW: a
-    // contributor's own re-edit must never be silently lost, so the LATER
-    // commit (higher server_seq) takes the projection. The first-child rule
-    // still governs creates / reorders / deletes.
+    // Two commits with the SAME parent_id — the Alice/Bob race from the
+    // spec, or the equivalent offline-reconnect scenario where the
+    // reconnected client's queued commit flushes long after a concurrent
+    // online commit has already projected.
+    //
+    // Per AD-2 (03-data-model.md): the first commit accepted at this
+    // parent_id wins the chain slot; the second is durably logged but
+    // does NOT advance the projection. It is reported in `stale` so the
+    // client outbox can surface "your edit was bumped" and offer a
+    // promote-from-history affordance.
     const first = targetCommit({
       id: 'evt-first',
       parentId: 'evt-create-001',
@@ -247,21 +252,24 @@ describe('POST /events — AD-2 first-child-of-parent', () => {
     expect(cell.value).toBe('FIRST')
     expect(cell.event_id).toBe('evt-first')
 
-    // Second commit with the same parent_id is accepted AND applied (LWW) —
-    // it is NOT reported as stale.
+    // Second commit on the same parent: accepted (200, durable in `events`)
+    // but flagged stale and projection is unchanged.
     const r2 = await handleEventsWriteRequest(await makeRequest([second], token), makeEnv(db))
     const body2 = await r2!.json() as any
     expect(body2.accepted).toHaveLength(1)
     expect(body2.rejected).toHaveLength(0)
-    expect(body2.stale ?? []).toHaveLength(0)
+    expect(body2.stale).toHaveLength(1)
+    expect(body2.stale[0].id).toBe('evt-second')
 
     const events = (db as any)._tables().events
+    // Both events durably persisted.
+    expect(events.find((e: any) => e.id === 'evt-first')).toBeDefined()
     expect(events.find((e: any) => e.id === 'evt-second')).toBeDefined()
 
     cell = (db as any)._tables().cells[0]
-    // Projection advanced to the later commit.
-    expect(cell.value).toBe('SECOND')
-    expect(cell.event_id).toBe('evt-second')
+    // Projection still pinned to the first-child winner.
+    expect(cell.value).toBe('FIRST')
+    expect(cell.event_id).toBe('evt-first')
   })
 
   it('idempotent replay: the same event id replayed twice keeps the same chain head', async () => {

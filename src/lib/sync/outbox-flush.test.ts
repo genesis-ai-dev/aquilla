@@ -348,7 +348,7 @@ describe("flushOutboxBatch", () => {
 
   // ── F6 regression: stale-sibling callback ─────────────────────────────────
 
-  it("F6: calls onStaleSiblings with the stale count when server returns stale events", async () => {
+  it("F6: calls onStaleSiblings with the full stale entries (id + cellId + fileId) so the UI can deep-link", async () => {
     await enqueueOutboxEvent(makeEvent("e1", "f1"))
     await enqueueOutboxEvent(makeEvent("e2", "f1"))
 
@@ -356,7 +356,7 @@ describe("flushOutboxBatch", () => {
       jsonResponse({
         accepted: [{ id: "e1" }, { id: "e2" }],
         rejected: [],
-        stale: [{ id: "e2" }],
+        stale: [{ id: "e2", fileId: "f1", cellId: "c2" }],
       }),
     )
     const onStaleSiblings = vi.fn()
@@ -366,7 +366,11 @@ describe("flushOutboxBatch", () => {
       onStaleSiblings,
     })
 
-    expect(onStaleSiblings).toHaveBeenCalledWith(1)
+    // Entries pass through verbatim — the banner needs `cellId` to navigate
+    // the history drawer to the right cell.
+    expect(onStaleSiblings).toHaveBeenCalledWith([
+      { id: "e2", fileId: "f1", cellId: "c2" },
+    ])
   })
 
   // ── F5 regression: stale-source callback ──────────────────────────────────

@@ -52,15 +52,17 @@ export function PrimaryActionButton({ ctx, run }: Props) {
     >
       <Button
         size="sm"
+        variant="outline"
         className="rounded-r-none shadow-none hover:shadow-none active:shadow-none"
         onClick={() => handleRun(defaultAction)}
       >
-        {defaultAction.icon && <defaultAction.icon className="h-4 w-4 mr-1.5" />}
+        {defaultAction.icon && <defaultAction.icon className="h-4 w-4 mr-1.5 text-primary" />}
         {defaultAction.label}
       </Button>
       <Button
         size="sm"
-        className="rounded-l-none border-l border-black/15 px-1.5 shadow-none hover:shadow-none active:shadow-none dark:border-white/10"
+        variant="outline"
+        className="rounded-l-none border-l border-border/60 px-1.5 shadow-none hover:shadow-none active:shadow-none"
         onClick={() => setOpen((v) => !v)}
         aria-label="More actions"
       >

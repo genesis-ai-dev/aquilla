@@ -61,16 +61,6 @@ export class Workspace {
     await this.page.locator("aside").click() // blur outside editor
   }
 
-  async editCellWithoutServerWait(index: number, text: string): Promise<void> {
-    const row = this.cellRow(index)
-    await row.scrollIntoViewIfNeeded()
-    const target = this.editableTarget(index)
-    await target.waitFor({ state: "visible", timeout: 10_000 })
-    await target.click()
-    await this.page.keyboard.type(text)
-    await this.page.locator("aside").click()
-  }
-
   async readCell(index: number): Promise<string> {
     return (await this.cellRow(index).textContent()) ?? ""
   }

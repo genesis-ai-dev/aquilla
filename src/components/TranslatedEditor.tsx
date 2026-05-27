@@ -113,6 +113,10 @@ export function TranslatedEditor({
 
   const idleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const lastCommittedRef = useRef<string>(initialPlain)
+  // Latest typed-but-not-yet-committed snapshot. Held so the unmount cleanup
+  // can flush it (navigate-away / reload during the idle window must not drop
+  // the edit into the void — the commit has to reach the outbox to survive).
+  const pendingCommitRef = useRef<TranslatedEditorCommit | null>(null)
   const onCommitRef = useRef(onCommit)
   useEffect(() => { onCommitRef.current = onCommit }, [onCommit])
 
@@ -152,7 +156,9 @@ export function TranslatedEditor({
       if (idleTimerRef.current !== null) clearTimeout(idleTimerRef.current)
       const text = editor.getText()
       const html = editor.getHTML()
+      pendingCommitRef.current = { value: text, valueHtml: html }
       idleTimerRef.current = setTimeout(() => {
+        pendingCommitRef.current = null
         if (text === lastCommittedRef.current) return
         lastCommittedRef.current = text
         onCommitRef.current({ value: text, valueHtml: html })
@@ -168,6 +174,7 @@ export function TranslatedEditor({
       }
       const text = editor.getText()
       const html = editor.getHTML()
+      pendingCommitRef.current = null
       if (text !== lastCommittedRef.current) {
         lastCommittedRef.current = text
         onCommitRef.current({ value: text, valueHtml: html })
@@ -226,13 +233,21 @@ export function TranslatedEditor({
     editor.view.dispatch(editor.state.tr.setMeta(karaokePluginKey, "rebuild"))
   }, [editor, audioTimings, audioCurrentTime])
 
-  // Flush pending idle commit on unmount so a programmatic navigate-away
-  // doesn't drop work.
+  // Flush the pending idle commit on unmount so a programmatic navigate-away
+  // (file/tab switch, route change) doesn't drop work still inside the 1.2s
+  // idle window. The commit lands in the outbox (AD-3) and reconciles from
+  // there; without this it was silently discarded.
   useEffect(() => {
     return () => {
       if (idleTimerRef.current !== null) {
         clearTimeout(idleTimerRef.current)
         idleTimerRef.current = null
+      }
+      const pending = pendingCommitRef.current
+      pendingCommitRef.current = null
+      if (pending && pending.value !== lastCommittedRef.current) {
+        lastCommittedRef.current = pending.value
+        onCommitRef.current(pending)
       }
     }
   }, [])

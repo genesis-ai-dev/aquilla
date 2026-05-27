@@ -354,10 +354,6 @@ export function ProjectWorkspace() {
     enabled: Boolean(project?.id),
     fileId: null,
   })
-  const activeFileOutboxRecords = usePendingOutboxRecords({
-    enabled: Boolean(project?.id && activeFileId),
-    fileId: activeFileId,
-  })
 
   // D1-backed audit stats for the active file with the client outbox applied
   // on top — pending commits/validates show up immediately, before the next
@@ -385,7 +381,6 @@ export function ProjectWorkspace() {
     auditStats: auditStatsByCellId,
     getToken: getTokenForFile,
     enabled: Boolean(project?.id && activeFileId && frontierSession?.jwt),
-    pendingOutboxRecords: activeFileOutboxRecords,
   })
   // Phase 5 / AD-9 — Phase 3a-final wiring. Fetch the set of cell ids
   // whose source has advanced since the translator's last commit, so the

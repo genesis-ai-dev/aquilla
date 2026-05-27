@@ -17,8 +17,6 @@ import type { CodexCellAttachment, EditTypeValue, ValidationEntry, WordTiming } 
 import type { CellAuditStats } from "./useCellsAuditStats"
 import { streamFileCells } from "@/lib/sync/cells-read"
 import type { CellRow } from "@/lib/sync/cells-read-types"
-import type { OutboxRecord } from "@/lib/sync/outbox"
-import { applyCellOutboxOverlay } from "@/lib/sync/cell-outbox-overlay"
 
 /**
  * Per-edit summary used by the validation popover timeline. Was previously
@@ -91,7 +89,6 @@ const EMPTY_STATS: ReadonlyMap<string, CellAuditStats> = new Map()
 const EMPTY_VALIDATION_HISTORY: EditValidationSummary[] = []
 const EMPTY_HISTORY: CellHistoryEntry[] = []
 const EMPTY_THREADS: CommentThread[] = []
-const EMPTY_OUTBOX_RECORDS: readonly OutboxRecord[] = []
 
 function classifyValidators(
   active: string[],
@@ -219,8 +216,6 @@ export interface UseCellsOptions {
   getToken?: (fileId: string) => Promise<string | null>
   /** Disable the fetch (e.g. before identity loads). */
   enabled?: boolean
-  /** Pending local events for this file, applied over D1 until /events accepts them. */
-  pendingOutboxRecords?: readonly OutboxRecord[]
 }
 
 export interface UseCellsResult {
@@ -254,7 +249,6 @@ export function useCells(opts: UseCellsOptions): UseCellsResult {
     auditStats = EMPTY_STATS,
     getToken,
     enabled = true,
-    pendingOutboxRecords = EMPTY_OUTBOX_RECORDS,
   } = opts
 
   const [cells, setCells] = useState<CellData[]>([])
@@ -272,7 +266,6 @@ export function useCells(opts: UseCellsOptions): UseCellsResult {
   const projectRef = useRef(projectId)
   const fileRef = useRef(fileId)
   const enabledRef = useRef(enabled)
-  const pendingOutboxRef = useRef<readonly OutboxRecord[]>(pendingOutboxRecords)
   // Race fence: bumped on every fetch start; ignore responses whose
   // generation < current. Prevents an in-flight slow fetch from clobbering
   // state after the caller switched files.
@@ -298,13 +291,13 @@ export function useCells(opts: UseCellsOptions): UseCellsResult {
   projectRef.current = projectId
   fileRef.current = fileId
   enabledRef.current = enabled
-  pendingOutboxRef.current = pendingOutboxRecords
 
   const rebuildFromCache = useCallback(() => {
-    const rows = applyCellOutboxOverlay(rowsRef.current, pendingOutboxRef.current, {
-      projectId: projectRef.current,
-      fileId: fileRef.current,
-    })
+    // AD-3 v1 thin client: the view is exactly the D1 projection. Pending
+    // local writes live in the outbox and surface only after the reconciler
+    // delivers them and `revalidate()` refetches — never as a client-side
+    // read overlay (that's the v2 progressive-caching tier).
+    const rows = rowsRef.current
     if (rows.length === 0) {
       setCells([])
       return
@@ -438,7 +431,7 @@ export function useCells(opts: UseCellsOptions): UseCellsResult {
   useEffect(() => {
     rebuildFromCache()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [auditStats, username, requiredValidations, pendingOutboxRecords])
+  }, [auditStats, username, requiredValidations])
 
   // Cancel any pending token-retry on unmount.
   useEffect(() => () => {

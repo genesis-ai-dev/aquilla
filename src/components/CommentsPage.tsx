@@ -7,7 +7,7 @@ import { useMemo, useState } from "react"
 import { useNavigate, useParams } from "react-router-dom"
 import { ArrowLeft, MessageCircle, CheckCircle, ChevronDown, ChevronRight, Loader2, AlertCircle } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { Card, CardContent, CardHeader } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import { cn } from "@/lib/utils"
@@ -130,7 +130,7 @@ export function CommentsPage() {
   const { id: projectId } = useParams<{ id: string }>()
   const navigate = useNavigate()
   const { session } = useFrontierSession()
-  const { project } = useProject(projectId ?? null)
+  const { project } = useProject(projectId ?? "")
 
   const getToken = useMemo(() => {
     if (!projectId || !session?.jwt) {

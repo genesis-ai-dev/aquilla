@@ -41,6 +41,10 @@ interface Props {
   /** Required for the sync-worker R2 audio key. */
   fileId?: string
   disabled?: boolean
+  /** Play-only surfaces (e.g. the translate page) preview audio transiently
+   *  and never durably attach — voice *production* lives in the Voice Studio.
+   *  Existing attachments still play; cells without one synth a throwaway clip. */
+  playOnly?: boolean
 }
 
 const MAX_CACHE_ENTRIES = 64
@@ -96,6 +100,7 @@ export function CellTtsButton({
   projectId,
   fileId,
   disabled,
+  playOnly,
 }: Props) {
   const trimmed = text.trim()
   const statusKey = ttsStatusKey(cellId)
@@ -178,7 +183,7 @@ export function CellTtsButton({
             }
           }
           let blob: Blob
-          if (projectId && fileId && session?.jwt) {
+          if (!playOnly && projectId && fileId && session?.jwt) {
             const gen = await generateAndAttachCellVoice({
               projectId,
               fileId,
@@ -237,6 +242,7 @@ export function CellTtsButton({
     playableAttachId,
     generatedAttachmentUrl,
     projectId,
+    fileId,
     session,
     projectTtsSettings,
     cellTtsSettings?.voiceId,
@@ -245,6 +251,7 @@ export function CellTtsButton({
     original,
     context,
     cellLabel,
+    playOnly,
   ])
 
   if (!trimmed) return null

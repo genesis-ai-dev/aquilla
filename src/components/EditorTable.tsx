@@ -28,7 +28,6 @@ import { tokenizeWords } from "@/lib/audio/timings"
 import { useCellAudio } from "@/hooks/useCellAudio"
 import { useCellEditHistory } from "@/hooks/useCellEditHistory"
 import { setTranscribeStatus, useTranscribeStatus } from "@/lib/audio/transcribe-status"
-import { handleVoiceDropOnCell, VOICE_DRAG_MIME } from "@/lib/audio/voice-actions"
 import {
   MAX_SELECTED,
   clearSelection,
@@ -42,7 +41,7 @@ import { setTtsStatus, ttsStatusKey, useTtsStatus } from "@/lib/audio/tts"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { categorizeAiError } from "@/lib/audio/ai-error"
 import { CellAiStatusPopover } from "./CellAiStatusPopover"
-import { openVoiceModalFromAnywhere } from "@/lib/audio/voice-actions"
+import { useNavigate } from "react-router-dom"
 import { cn } from "@/lib/utils"
 import { isPerfLogEnabled } from "@/lib/perf-log"
 import { partitionInfractions, addWaiver, removeWaiver } from "@/lib/rules/waivers"
@@ -76,11 +75,13 @@ if (typeof window !== "undefined") {
  *  to the cell that's actually working, even if the row scrolls. Errors are
  *  click-to-expand: full message + actions (set Gemini key, dismiss). */
 function SynthStatusBadge({
-  status, cellId,
+  status, cellId, projectId,
 }: {
   status: ReturnType<typeof useTtsStatus>
   cellId: string
+  projectId: string
 }) {
+  const navigate = useNavigate()
   if (status.kind === "loading") {
     const isTranslating = status.file === "Translating…"
     const pct = !isTranslating && status.total > 0
@@ -114,22 +115,26 @@ function SynthStatusBadge({
   if (status.kind === "error") {
     const error = categorizeAiError(status.message)
     const dismiss = () => setTtsStatus(ttsStatusKey(cellId), { kind: "idle" })
+    // Voice setup (engine, Gemini key, library) now lives in the Voice Studio,
+    // so recovery actions route there rather than opening an inline modal.
     const actions = []
     if (error.category === "missing-gemini-key") {
       actions.push({
-        label: "Add Gemini API key",
+        label: "Open Voice Studio",
         primary: true,
-        onClick: () => openVoiceModalFromAnywhere("apiKey"),
+        onClick: () => navigate(`/project/${projectId}/voice`),
       })
-    } else if (error.category === "translation-not-configured" || error.category === "no-source-text") {
-      // Soft fixes — no inline action available; the popover body still
-      // explains what to do.
-    } else if (error.category === "git-project-unsupported" || error.category === "sign-in-required") {
-      // Same — body covers it.
+    } else if (
+      error.category === "translation-not-configured" ||
+      error.category === "no-source-text" ||
+      error.category === "git-project-unsupported" ||
+      error.category === "sign-in-required"
+    ) {
+      // Soft fixes — the popover body explains what to do; no inline action.
     } else {
       actions.push({
-        label: "Open voice settings",
-        onClick: () => openVoiceModalFromAnywhere(),
+        label: "Open Voice Studio",
+        onClick: () => navigate(`/project/${projectId}/voice`),
       })
     }
     return (
@@ -1285,10 +1290,6 @@ function EditorRow({
     (i) => ruleMap.get(i.ruleId)?.severity === "major",
   )
   const infractionCount = cellInfractions.length
-  const infractionTooltip =
-    infractionCount > 0
-      ? `${infractionCount} issue${infractionCount !== 1 ? "s" : ""}${hasMajorInfraction ? " (major)" : " (minor)"}`
-      : undefined
 
   const validationButton = hasContent ? (
     <div className="relative inline-flex items-center gap-0.5">
@@ -1319,14 +1320,6 @@ function EditorRow({
           </button>
         }
       />
-      {cellNeedsAttention && (
-        <span
-          className="pointer-events-none absolute -right-1 -top-1 text-amber-500"
-          title="Needs attention — this cell's neighborhood isn't validated yet"
-        >
-          <AlertTriangle className="h-2.5 w-2.5" strokeWidth={2.5} />
-        </span>
-      )}
       {vs !== "empty" && (
         <PopoverContent
           side="right"
@@ -1378,16 +1371,6 @@ function EditorRow({
         staleCellIds={new Set([cell.id])}
       />
     )}
-    {infractionCount > 0 && (
-      <span
-        aria-label={infractionTooltip}
-        title={infractionTooltip}
-        className={cn(
-          "pointer-events-none absolute -bottom-0.5 -right-0.5 h-1.5 w-1.5 rounded-full ring-1 ring-background",
-          hasMajorInfraction ? "bg-red-500" : "bg-amber-500",
-        )}
-      />
-    )}
     </div>
   ) : null
 
@@ -1396,6 +1379,78 @@ function EditorRow({
   // <s>, <code>). DOMPurify provides defense-in-depth against XSS.
   const showLineNumber = lineNumbersEnabled && cell.type !== "paratext"
   const showCellLabel = cellLabelsEnabled && cell.cellLabel
+
+  // The cell number IS the issue surface: a single pill (top-left of the card)
+  // that tints by worst severity and reveals the concrete issue list on hover.
+  // Replaces the old severity stripe, gutter warning triangle, and dot — there
+  // is now exactly one place that color-codes problems.
+  const hasAnyIssue = infractionCount > 0 || cellNeedsAttention
+  const numberTint = hasMajorInfraction
+    ? "text-red-600 dark:text-red-400"
+    : hasAnyIssue
+      ? "text-amber-600 dark:text-amber-400"
+      : "text-muted-foreground/70"
+  const numberLabel = showLineNumber ? String(rowIndex + 1) : null
+  const numberPillInner = (
+    <span
+      className={cn(
+        "inline-flex items-center gap-1 rounded-full bg-card px-1.5 py-0.5 text-[10px] font-medium leading-none tabular-nums shadow-neu-xs",
+        numberTint,
+      )}
+    >
+      {numberLabel && <span>{numberLabel}</span>}
+      {showCellLabel && <span className="text-muted-foreground/80">{cell.cellLabel}</span>}
+    </span>
+  )
+  const numberPill = !(showLineNumber || showCellLabel) ? null : hasAnyIssue ? (
+    <Popover>
+      <PopoverTrigger
+        openOnHover
+        delay={250}
+        closeDelay={100}
+        render={<button type="button" className="cursor-help">{numberPillInner}</button>}
+      />
+      <PopoverContent side="right" align="start" className="w-64 rounded-xl p-2 shadow-neu-lg">
+        <p className="mb-1 px-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+          {infractionCount > 0
+            ? `${infractionCount} issue${infractionCount !== 1 ? "s" : ""}`
+            : "Needs attention"}
+        </p>
+        <ul className="space-y-0.5">
+          {cellInfractions.map((inf) => {
+            const major = ruleMap.get(inf.ruleId)?.severity === "major"
+            return (
+              <li key={inf.ruleId} className="flex items-start gap-1.5 px-1 py-1 text-xs">
+                <span
+                  aria-hidden
+                  className={cn(
+                    "mt-1 h-1.5 w-1.5 shrink-0 rounded-full",
+                    major ? "bg-red-500" : "bg-amber-500",
+                  )}
+                />
+                <span className="flex-1">
+                  <span className="font-medium text-foreground">
+                    {ruleMap.get(inf.ruleId)?.name ?? inf.ruleId}
+                  </span>
+                  {inf.message && <span className="ml-1 text-muted-foreground">— {inf.message}</span>}
+                </span>
+              </li>
+            )
+          })}
+          {cellNeedsAttention && (
+            <li className="flex items-start gap-1.5 px-1 py-1 text-xs">
+              <span aria-hidden className="mt-1 h-1.5 w-1.5 shrink-0 rounded-full bg-amber-500" />
+              <span className="flex-1 text-muted-foreground">
+                Neighborhood not yet validated — needs attention.
+              </span>
+            </li>
+          )}
+        </ul>
+      </PopoverContent>
+    </Popover>
+  ) : (
+    <span title={numberLabel ? `Line ${numberLabel}` : "Cell label"}>{numberPillInner}</span>
+  )
 
   // ── Hover / focus / tap state for the floating action rail ───────────────
   // Three input sources OR'd together: row hover, focus-within, tap-selected
@@ -1537,25 +1592,6 @@ function EditorRow({
     setOpenRuleAnchor(anchor)
   }, [])
 
-  const [isVoiceDropTarget, setIsVoiceDropTarget] = useState(false)
-  const handleRowDragOver = useCallback((e: React.DragEvent<HTMLDivElement>) => {
-    if (e.dataTransfer.types.includes(VOICE_DRAG_MIME)) {
-      e.preventDefault()
-      e.dataTransfer.dropEffect = "copy"
-      if (!isVoiceDropTarget) setIsVoiceDropTarget(true)
-    }
-  }, [isVoiceDropTarget])
-  const handleRowDragLeave = useCallback(() => {
-    if (isVoiceDropTarget) setIsVoiceDropTarget(false)
-  }, [isVoiceDropTarget])
-  const handleRowDrop = useCallback((e: React.DragEvent<HTMLDivElement>) => {
-    const voiceId = e.dataTransfer.getData(VOICE_DRAG_MIME)
-    if (!voiceId) return
-    e.preventDefault()
-    setIsVoiceDropTarget(false)
-    void handleVoiceDropOnCell(cell.id, voiceId)
-  }, [cell.id])
-
   const isMultiSelected = useIsSelected(cell.id)
   const synthStatus = useTtsStatus(ttsStatusKey(cell.id))
   const isSynthBusy = synthStatus.kind === "loading" || synthStatus.kind === "synthesizing"
@@ -1582,7 +1618,6 @@ function EditorRow({
           openCommentCount > 0 && "ring-1 ring-blue-400/50 ring-inset",
           // Active cue highlight reads as a gentle inset well + gold ring.
           _isActiveCue && "shadow-neu-inset ring-1 ring-primary/40 ring-inset",
-          isVoiceDropTarget && "shadow-neu-inset ring-2 ring-primary/60 ring-inset",
           // Pulsing while a voice is being generated for this cell. Gives the
           // user a clear "something is happening" signal — drop, translate,
           // and bulk synth all flow through this status key.
@@ -1596,44 +1631,20 @@ function EditorRow({
         onBlurCapture={handleRowBlurCapture}
         onMouseDownCapture={handleRowMouseDownCapture}
         onClick={handleRowClick}
-        onDragOver={handleRowDragOver}
-        onDragLeave={handleRowDragLeave}
-        onDrop={handleRowDrop}
       >
-        {/* Severity stripe — absolutely positioned so layout (and vertical
-            alignment with rows that have no issue) stays identical. */}
-        {infractionCount > 0 && (
-          <div
-            aria-hidden
-            className={cn(
-              "pointer-events-none absolute inset-y-0 left-0 w-[3px]",
-              hasMajorInfraction ? "bg-red-500/80" : "bg-amber-500/80",
+        {/* Left gutter — the number pill pins to the top-left and the
+            validation circle to the bottom-left of the card. The number pill is
+            the single issue surface (tint + hover list); no stripe/dot/warning.
+            Selection lives on the source/target divider so range selection
+            follows the text. */}
+        <div className="flex h-full flex-col items-center justify-between gap-1 py-0.5">
+          {numberPill}
+          <div className="flex flex-col items-center gap-1">
+            {(isSynthBusy || isSynthError) && (
+              <SynthStatusBadge status={synthStatus} cellId={cell.id} projectId={project.id} />
             )}
-          />
-        )}
-
-        {/* Left gutter — line number/label + validation pill. Selection lives
-            on the source/target divider so range selection follows the text. */}
-        <div className="flex flex-col items-center gap-1 pt-1">
-          <div className="flex h-4 items-center gap-1 text-[10px] leading-none text-muted-foreground/60">
-            {showLineNumber && (
-              <span className="tabular-nums" title={`Line ${rowIndex + 1}`}>
-                {rowIndex + 1}
-              </span>
-            )}
-            {showCellLabel && (
-              <span
-                className="rounded-full bg-card px-1.5 py-0.5 font-medium text-muted-foreground/80 shadow-neu-xs"
-                title="Cell label"
-              >
-                {cell.cellLabel}
-              </span>
-            )}
+            {validationButton}
           </div>
-          {(isSynthBusy || isSynthError) && (
-            <SynthStatusBadge status={synthStatus} cellId={cell.id} />
-          )}
-          {validationButton}
         </div>
 
         {/* Source column */}
@@ -1903,6 +1914,7 @@ function EditorRow({
                   projectId={project.id}
                   fileId={cell.fileId}
                   disabled={!editable}
+                  playOnly
                 />
               )}
 

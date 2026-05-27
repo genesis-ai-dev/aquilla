@@ -1639,7 +1639,7 @@ export function ProjectWorkspace() {
         />
       )}
       {undo && (
-        <div className="fixed bottom-4 right-4 z-60 flex items-center gap-2 rounded border bg-background px-3 py-2 text-sm shadow-md">
+        <div className="fixed bottom-4 right-4 z-60 flex items-center gap-2 rounded-lg bg-card px-3 py-2 text-sm shadow-neu">
           <span>Applied renames.</span>
           <Button size="sm" variant="outline" onClick={async () => {
             if (!undo) return
@@ -1678,7 +1678,7 @@ function MoveToCorpusDialog({
         <select
           value={selection}
           onChange={(e) => setSelection(e.target.value)}
-          className="w-full rounded border bg-background px-2 py-1.5 text-sm"
+          className="neu-inset w-full rounded px-2 py-1.5 text-sm"
         >
           <option value="">Ungrouped</option>
           {existingMarkers.map((m) => <option key={m} value={m}>{m}</option>)}
@@ -1690,7 +1690,7 @@ function MoveToCorpusDialog({
             value={customValue}
             onChange={(e) => setCustomValue(e.target.value)}
             placeholder="New corpus name"
-            className="mt-2 w-full rounded border bg-background px-2 py-1 text-sm"
+            className="neu-inset mt-2 w-full rounded px-2 py-1 text-sm"
           />
         )}
         <DialogFooter>
@@ -1761,7 +1761,7 @@ function TrashedProjectScreen({ project, onClose, onRestore }: TrashedProjectScr
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-background px-6">
-      <div className="max-w-md rounded-lg border bg-card p-8 text-center shadow-sm">
+      <div className="neu-raised max-w-md rounded-2xl p-8 text-center">
         <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-muted">
           <Trash2 className="h-6 w-6 text-muted-foreground" />
         </div>

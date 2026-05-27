@@ -64,9 +64,7 @@ export function CellExpansion({
     <div
       ref={wrapperRef}
       className={cn(
-        "mt-2 overflow-hidden rounded-lg border border-border/60 bg-muted/20",
-        // Soft shadow gives the panel an Apple-card feel without dominating.
-        "shadow-[0_1px_0_rgba(0,0,0,0.02),0_8px_24px_-12px_rgba(0,0,0,0.12)]",
+        "neu-inset mt-2 overflow-hidden rounded-lg",
         // Entrance animation. CSS-only so we don't pull in a motion lib.
         "data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:slide-in-from-top-1",
         className,

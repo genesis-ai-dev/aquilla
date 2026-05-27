@@ -636,7 +636,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
 
   return (
     <div ref={parentRef} className="h-full overflow-auto" onMouseUp={handleMouseUp}>
-      <div className={cn("sticky top-0 z-10 grid gap-2 border-b bg-background px-4 py-2 text-xs font-medium uppercase tracking-wide text-muted-foreground", gridCols)}>
+      <div className={cn("neu-flat sticky top-0 z-10 grid gap-2 px-4 py-2 text-xs font-medium uppercase tracking-wide text-muted-foreground", gridCols)}>
         <div />
         <div>Source</div>
         <div className="border-l border-border/60 pl-3">Target</div>
@@ -1688,12 +1688,12 @@ function EditorRow({
             onPointerDown={onSelectionPointerDown}
             onClick={(e) => e.stopPropagation()}
             className={cn(
-              "absolute left-0 top-1/2 z-20 grid h-5 w-5 -translate-x-1/2 -translate-y-1/2 place-items-center rounded-full border shadow-sm",
-              "touch-none cursor-ns-resize transition-[opacity,transform,color,background-color,border-color] duration-150 ease-out",
+              "absolute left-0 top-1/2 z-20 grid h-5 w-5 -translate-x-1/2 -translate-y-1/2 place-items-center rounded-full border border-transparent",
+              "touch-none cursor-ns-resize transition-[opacity,transform,color,background-color,box-shadow] duration-150 ease-out",
               "focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 focus-visible:ring-offset-2",
               isMultiSelected
-                ? "border-primary bg-primary text-primary-foreground opacity-100"
-                : "border-border bg-background text-muted-foreground/70 opacity-60 hover:border-primary hover:text-primary group-hover:opacity-100",
+                ? "bg-primary text-primary-foreground opacity-100 shadow-neu-pressed"
+                : "bg-card text-muted-foreground/70 opacity-60 shadow-neu-xs hover:text-primary group-hover:opacity-100",
             )}
             title={isMultiSelected ? "Selected. Drag up or down to extend the range." : "Select cell. Drag up or down to select a range."}
           >
@@ -1988,7 +1988,7 @@ function EditorRow({
                   </div>
 
                   {cell.backtranslation ? (
-                    <div className="rounded border border-border/40 bg-background/40 px-3 py-2 text-sm italic text-muted-foreground">
+                    <div className="neu-inset rounded-lg px-3 py-2 text-sm italic text-muted-foreground">
                       {isBtStale && (
                         <div className="mb-1 inline-flex items-center gap-1 rounded-full bg-amber-500/10 px-2 py-0.5 text-[10px] font-medium not-italic text-amber-700 dark:text-amber-400">
                           <AlertTriangle className="h-2.5 w-2.5" />
@@ -2051,7 +2051,7 @@ function EditorRow({
                           type="button"
                           onClick={() => onOpenRecording?.(cell.id)}
                           disabled={!editable || !onOpenRecording}
-                          className="inline-flex items-center gap-1.5 rounded-full border border-border bg-background px-2.5 py-1 text-[11px] font-medium text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-40"
+                          className="inline-flex items-center gap-1.5 rounded-full bg-card px-2.5 py-1 text-[11px] font-medium text-foreground shadow-neu-sm transition-all hover:shadow-neu active:shadow-neu-pressed disabled:cursor-not-allowed disabled:opacity-40"
                         >
                           <Mic className="h-3 w-3" />
                           Re-record
@@ -2060,7 +2060,7 @@ function EditorRow({
                           type="button"
                           onClick={handleTranscribe}
                           disabled={!editable || isTranscribing}
-                          className="inline-flex items-center gap-1.5 rounded-full border border-border bg-background px-2.5 py-1 text-[11px] font-medium text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-40"
+                          className="inline-flex items-center gap-1.5 rounded-full bg-card px-2.5 py-1 text-[11px] font-medium text-foreground shadow-neu-sm transition-all hover:shadow-neu active:shadow-neu-pressed disabled:cursor-not-allowed disabled:opacity-40"
                         >
                           <Sparkles
                             className={cn(
@@ -2101,7 +2101,7 @@ function EditorRow({
                           type="button"
                           onClick={() => onOpenRecording?.(cell.id)}
                           disabled={!editable || !onOpenRecording}
-                          className="inline-flex items-center gap-1.5 rounded-full border border-border bg-background px-2.5 py-1 text-[11px] font-medium text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-40"
+                          className="inline-flex items-center gap-1.5 rounded-full bg-card px-2.5 py-1 text-[11px] font-medium text-foreground shadow-neu-sm transition-all hover:shadow-neu active:shadow-neu-pressed disabled:cursor-not-allowed disabled:opacity-40"
                         >
                           <Mic className="h-3 w-3" />
                           Record over
@@ -2161,7 +2161,7 @@ function EditorRow({
                             key={inf.ruleId}
                             type="button"
                             onClick={() => setOpenRuleId(inf.ruleId)}
-                            className="flex w-full items-start gap-2 rounded border border-border/40 bg-background/40 px-2.5 py-2 text-left text-xs transition-colors hover:bg-muted/40"
+                            className="neu-flat flex w-full items-start gap-2 rounded-lg px-2.5 py-2 text-left text-xs transition-all hover:shadow-neu active:shadow-neu-pressed"
                           >
                             <Icon
                               className={cn(
@@ -2238,7 +2238,7 @@ function EditorRow({
                         <HistoryIcon className="h-3 w-3" />
                         Open full history
                       </button>
-                      <ul className="divide-y divide-border/40 rounded border border-border/40 bg-background/40">
+                      <ul className="neu-inset divide-y divide-border/40 rounded-lg">
                         {[...fetchedHistory].slice(-5).reverse().map((entry, i) => {
                           const date = new Date(entry.timestamp).toLocaleString(undefined, {
                             month: "short",

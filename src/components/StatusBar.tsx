@@ -28,7 +28,7 @@ export function StatusBar({
   }))
 
   return (
-    <footer className="flex items-center gap-2 border-t px-4 py-1.5 text-sm text-muted-foreground">
+    <footer className="neu-flat relative z-10 flex items-center gap-2 px-4 py-1.5 text-sm text-muted-foreground">
       <DecayBreakdown
         health={projectHealth}
         scopeLabel="project health"

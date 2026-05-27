@@ -27,7 +27,7 @@ interface Props {
 export function AppShell({ sidebar, header, statusBar, beforeMain, main, aside }: Props) {
   return (
     <div className="flex h-screen min-w-0">
-      <aside className="flex w-64 shrink-0 flex-col overflow-hidden border-r bg-background">
+      <aside className="neu-flat relative z-10 flex w-64 shrink-0 flex-col overflow-hidden">
         {sidebar}
       </aside>
       <div className="flex min-w-0 flex-1 flex-col overflow-hidden">

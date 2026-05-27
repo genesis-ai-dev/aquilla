@@ -288,7 +288,7 @@ export function TranslatedEditor({
         shouldShow={({ editor, from, to }) => editor.isFocused && from !== to}
         options={{ placement: "top" }}
       >
-        <div className="flex gap-0.5 rounded border bg-background p-0.5 shadow-sm">
+        <div className="flex gap-0.5 rounded-lg bg-card p-0.5 shadow-neu-sm">
           <button
             type="button"
             onClick={() => editor.chain().focus().toggleBold().run()}

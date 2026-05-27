@@ -27,7 +27,7 @@ export function CommentsDrawer({ project, cell, onClose, onNewThread, onReply, o
   }
 
   return (
-    <div className="flex h-full w-96 flex-col border-l bg-background">
+    <div className="neu-flat relative z-10 flex h-full w-96 flex-col">
       <div className="flex items-center justify-between border-b px-3 py-2">
         <h3 className="text-sm font-semibold">
           Comments {cell.context && <span className="text-muted-foreground">· {cell.context}</span>}
@@ -75,7 +75,7 @@ export function CommentsDrawer({ project, cell, onClose, onNewThread, onReply, o
             onChange={(e) => setNewThreadText(e.target.value)}
             placeholder="Start a new comment thread..."
             rows={2}
-            className="w-full resize-none rounded border bg-background px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-ring"
+            className="neu-inset w-full resize-none rounded px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-ring"
           />
           <Button size="sm" onClick={handleCreate} disabled={!newThreadText.trim()} className="w-full">
             Post

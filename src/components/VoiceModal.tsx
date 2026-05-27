@@ -456,7 +456,7 @@ function VoiceEditor({
               value={voice.prompt ?? ""}
               onChange={(e) => onChange({ prompt: e.target.value || undefined })}
               rows={6}
-              className="w-full rounded border bg-background px-3 py-2 font-mono text-sm"
+              className="neu-inset w-full rounded px-3 py-2 font-mono text-sm"
               placeholder="Read this {target} text in a calm, clear voice…"
             />
             <p className="mt-1 text-xs text-muted-foreground">

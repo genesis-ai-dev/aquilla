@@ -53,7 +53,7 @@ export function CommentThread({ thread, currentTranslated, canReply = true, canR
   return (
     <div
       className={cn(
-        "rounded border p-2 text-sm",
+        "neu-flat rounded-lg p-2 text-sm",
         thread.status === "resolved" && "opacity-60"
       )}
     >
@@ -78,7 +78,7 @@ export function CommentThread({ thread, currentTranslated, canReply = true, canR
 
       <ul className="space-y-2">
         {thread.messages.map((m) => (
-          <li key={m.id} className="rounded bg-muted/40 p-2">
+          <li key={m.id} className="neu-inset rounded-lg p-2">
             <div className="flex items-baseline gap-1.5 text-xs">
               <span className="font-medium">{m.author}</span>
               <span className="text-muted-foreground">{formatTimestamp(m.timestamp)}</span>
@@ -101,7 +101,7 @@ export function CommentThread({ thread, currentTranslated, canReply = true, canR
                 onChange={(e) => setReplyText(e.target.value)}
                 placeholder="Reply..."
                 rows={2}
-                className="w-full resize-none rounded border bg-background px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-ring"
+                className="neu-inset w-full resize-none rounded px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-ring"
               />
             )}
             <div className="flex flex-wrap gap-1">

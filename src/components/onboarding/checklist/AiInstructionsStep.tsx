@@ -49,7 +49,7 @@ export function AiInstructionsStep({ project, onUpdated }: AiInstructionsStepPro
         value={prompt}
         onChange={(e) => setPrompt(e.target.value)}
         rows={6}
-        className="w-full resize-none rounded-md border bg-background px-3 py-2 text-sm font-mono leading-relaxed focus:outline-none focus:ring-1 focus:ring-ring"
+        className="neu-inset w-full resize-none rounded-md px-3 py-2 text-sm font-mono leading-relaxed focus:outline-none focus:ring-1 focus:ring-ring"
         spellCheck={false}
       />
       <div className="flex items-center justify-between text-[10px] text-muted-foreground">

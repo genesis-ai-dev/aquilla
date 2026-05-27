@@ -16,7 +16,7 @@ export function WorkspaceHeader({ project, onBack, children, extraMenuItems }: P
     ...(extraMenuItems ?? []),
   ]
   return (
-    <header className="flex items-center gap-3 border-b bg-background px-4 py-2">
+    <header className="neu-flat relative z-10 flex items-center gap-3 px-4 py-2">
       <nav className="flex items-center gap-1 text-sm min-w-0">
         <button
           className="text-muted-foreground hover:text-foreground truncate"

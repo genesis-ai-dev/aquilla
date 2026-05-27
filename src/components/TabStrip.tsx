@@ -25,7 +25,7 @@ export function TabStrip({ tabs, activeTabId, files, onActivate, onClose }: Prop
     <div
       role="tablist"
       aria-label="Open files"
-      className="flex items-stretch gap-px overflow-x-auto border-b bg-muted/30 px-2"
+      className="neu-flat relative z-10 flex items-stretch gap-px overflow-x-auto px-2"
     >
       {tabs.map((tab) => {
         const active = tab.id === activeTabId

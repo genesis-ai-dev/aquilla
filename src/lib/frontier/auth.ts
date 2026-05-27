@@ -74,6 +74,28 @@ export async function register(args: RegisterArgs): Promise<FrontierSession> {
   return finalizeSession(args.username, data);
 }
 
+/**
+ * Dev-only bypass: hits `/__dev__/login` on the local auth-worker, which
+ * upserts a seed user/org/project and mints a JWT. Returns null if the
+ * endpoint 404s (i.e. WRANGLER_LOCAL is not set — production), so callers
+ * can fall back silently. NEVER call this from a prod build.
+ */
+export async function devLogin(): Promise<FrontierSession | null> {
+  if (!import.meta.env.DEV) return null;
+  let res: Response;
+  try {
+    res = await fetch(`${AUTH_BASE}/__dev__/login`, { method: "POST" });
+  } catch {
+    return null;
+  }
+  if (res.status === 404) return null;
+  if (!res.ok) {
+    throw new FrontierAuthError(`Dev login failed (${res.status})`, res.status);
+  }
+  const data = (await res.json()) as AuthResponse & { username: string };
+  return finalizeSession(data.username, data);
+}
+
 export async function requestPasswordReset(email: string): Promise<void> {
   const res = await fetch(`${AUTH_BASE}/api/v2/auth/password-reset/request`, {
     method: "POST",

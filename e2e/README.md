@@ -62,6 +62,17 @@ Three pre-seeded users:
 
 Convention: when a test uses two or more users, list `alice` first. The backend-reset hook lives in the `alice` fixture; tests that don't include `alice` must call `await resetBackend()` themselves.
 
+## Dev login bypass (alternative to reset+login)
+
+For ad-hoc specs or manual browser sessions, `auth-worker` also exposes:
+
+- `POST /__dev__/seed`  — upsert user `dev` / org `Dev Org` / project `dev-project`.
+- `POST /__dev__/login` — same upsert, returns `{ access_token, username: "dev" }`.
+
+Same `WRANGLER_LOCAL=1` gate as `/__test__/reset`. Use this when you want a logged-in browser without going through the alice/bob/carol fixture — e.g. exploratory specs, debugging, manual `pnpm dev` sessions (the SignIn screen renders a "Dev login (skip auth)" button in dev builds).
+
+Do NOT use `/__dev__/login` for the maintained spec suite — it shares state across tests. Stick with `resetBackend()` + the multi-user fixture for anything checked in.
+
 ## Spec naming
 
 - `*.smoke.spec.ts` — runs on `git push`. Keep total suite <2 min.
@@ -76,6 +87,7 @@ See `e2e/JOURNEYS.md` for the canonical journey map and conventions.
 
 - **`wrangler dev` won't start** → confirm `~/frontierrnd/frontier-server` exists and `wrangler login` is current. Set `FRONTIER_SERVER_DIR` if checked out elsewhere.
 - **`/__test__/reset` returns 404** → `frontier-server` was started without `WRANGLER_LOCAL=1`, or you're running against an old build that doesn't have the route. Ensure the `feat/test-reset-route` PR has been merged on the frontier-server side.
+- **`/__dev__/login` returns 404** → same cause: auth-worker was started without `WRANGLER_LOCAL=1`. `pnpm dev` sets it automatically; if you ran `wrangler dev` directly in `auth-worker/`, prepend `WRANGLER_LOCAL=1`.
 - **Tests pass alone, fail in suite** → reset isn't running or isn't truncating something. Verify `resetBackend()` runs in the failing test's `beforeEach`, or that the test uses the `alice` fixture (which triggers reset).
 - **Mock LLM not connected** → `VITE_LLM_BASE_URL` isn't being passed to Vite. Check `.env.test.local` contents during a run; it should be regenerated each time `e2e-up.ts` boots.
 - **Port already in use** → another `wrangler dev` or `vite` is running. The orchestrator uses `--strictPort` so it won't silently land on a different port; kill the conflicting process first.

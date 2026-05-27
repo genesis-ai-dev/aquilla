@@ -4,6 +4,7 @@ import { FrontierLoginForm } from "@/components/git-import/FrontierLoginForm"
 import { FrontierSignupForm } from "@/components/git-import/FrontierSignupForm"
 import { FrontierForgotPasswordForm } from "@/components/git-import/FrontierForgotPasswordForm"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
+import { devLogin } from "@/lib/frontier/auth"
 import { Check } from "lucide-react"
 
 type Mode = "signup" | "login" | "forgot"
@@ -83,6 +84,20 @@ export function SignInStep({ onNext, onBack }: { onNext: () => void; onBack: () 
           Skip for now
         </button>
       </div>
+      {import.meta.env.DEV && (
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={async () => {
+            const session = await devLogin()
+            if (session) onNext()
+            else console.warn("[dev-login] endpoint unavailable — is WRANGLER_LOCAL=1 set on auth-worker?")
+          }}
+          className="w-full"
+        >
+          Dev login (skip auth)
+        </Button>
+      )}
       <Button variant="ghost" size="sm" onClick={onBack} className="w-full">
         ← Back
       </Button>

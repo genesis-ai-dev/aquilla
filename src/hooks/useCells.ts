@@ -388,7 +388,7 @@ export function useCells(opts: UseCellsOptions): UseCellsResult {
       // flickers (and never shrink-then-grows across pages). The `gen` fence
       // aborts the stream if the caller switches files mid-flight.
       const buffer: CellRow[] = []
-      await streamFileCells(projectId, fileId, token, (rows) => {
+      const pushRows = (rows: CellRow[], rebuild: boolean): boolean | void => {
         if (generationRef.current !== gen) return false
         if (rows.length === 0) return
         if (soft) {
@@ -398,13 +398,28 @@ export function useCells(opts: UseCellsOptions): UseCellsResult {
         rowsRef.current = rowsRef.current.length === 0
           ? rows.slice()
           : rowsRef.current.concat(rows)
-        rebuildFromCache()
-      })
+        if (rebuild) rebuildFromCache()
+      }
+      // Stream the TARGET side first. The combined read returns every source
+      // row before any target row, so on a Bible-sized file (~30k source cells
+      // vs. a handful of translated target cells) fetching both sides at once
+      // hides every translation behind the entire ~60-page source stream —
+      // committed edits look lost on reload until the whole file loads. The
+      // target side is tiny (one page), so loading it up front means a
+      // translated cell shows its value the moment its source row paints.
+      // Seed it silently (no rebuild) so we don't flash target-only orphan rows.
+      await streamFileCells(projectId, fileId, token, (rows) => pushRows(rows, false), "target")
+      if (generationRef.current !== gen) return
+      await streamFileCells(projectId, fileId, token, (rows) => pushRows(rows, true), "source")
       if (generationRef.current !== gen) return
       if (soft) {
         rowsRef.current = buffer
-        rebuildFromCache()
       }
+      // Final rebuild: the source pass paints per page, but a target-only or
+      // empty-source file yields no source page to trigger one — and the
+      // target seed pass is intentionally silent. This also swaps in the soft
+      // buffer. Cheap and idempotent on the hard path.
+      rebuildFromCache()
       // Always clear loading on completion — including when a soft refetch
       // finishes after a hard load that got superseded — so the skeleton can
       // never get stuck on.

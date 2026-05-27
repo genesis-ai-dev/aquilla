@@ -20,6 +20,13 @@ const pagesMock: { queue: CellRow[][]; pendingResolvers: Array<() => void> } = {
   pendingResolvers: [],
 }
 
+// The editor loads in two passes per fetch — target side first (tiny), then
+// source — so translations aren't hidden behind the full source stream on
+// large files. Tests still provide ONE combined dataset; cache it on the
+// target pass and reuse on the source pass so a `mockResolvedValueOnce` is
+// consumed once per load (call counts unchanged) and each pass gets its side.
+let sideCache: CellRow[] | null = null
+
 type OnPage = (rows: CellRow[], isLast: boolean) => boolean | void | Promise<boolean | void>
 
 vi.mock("@/lib/sync/cells-read", () => ({
@@ -31,6 +38,12 @@ vi.mock("@/lib/sync/cells-read", () => ({
     side?: "source" | "target",
   ) => {
     if (pagesMock.queue.length > 0) {
+      // Streaming/pagination fixtures are source pages; the target pass yields
+      // nothing so the source pass drains the queue.
+      if (side === "target") {
+        await onPage([], true)
+        return
+      }
       const pages = pagesMock.queue.splice(0)
       for (let i = 0; i < pages.length; i++) {
         const cont = await onPage(pages[i], i === pages.length - 1)
@@ -38,8 +51,15 @@ vi.mock("@/lib/sync/cells-read", () => ({
       }
       return
     }
-    const rows = await fetchAllMock(projectId, fileId, jwt, side)
-    await onPage(rows, true)
+    let rows: CellRow[]
+    if (side === "source" && sideCache !== null) {
+      rows = sideCache
+    } else {
+      rows = (await fetchAllMock(projectId, fileId, jwt, side)) ?? []
+      sideCache = rows
+    }
+    const filtered = side ? rows.filter((r) => r.side === side) : rows
+    await onPage(filtered, true)
   },
   fetchAllFileCells: (...args: unknown[]) =>
     fetchAllMock(...(args as Parameters<typeof fetchAllMock>)),
@@ -71,6 +91,7 @@ beforeEach(() => {
   fetchAllMock.mockReset()
   pagesMock.queue = []
   pagesMock.pendingResolvers = []
+  sideCache = null
 })
 
 describe("useCells (Phase 2a, D1-backed)", () => {
@@ -132,6 +153,25 @@ describe("useCells (Phase 2a, D1-backed)", () => {
     )
     await waitFor(() => expect(result.current.cells).toHaveLength(3))
     expect(result.current.cells.map((c) => c.id)).toEqual(["a", "b", "c"])
+  })
+
+  it("loads the target side first so translations aren't hidden behind the source stream", async () => {
+    // Regression: on a 30k-cell file with a few translations, the combined
+    // read returns all source rows before any target row, so translations
+    // only appeared after the entire file streamed in — committed edits
+    // looked lost on reload. The hook now fetches the target side first.
+    fetchAllMock.mockResolvedValue([
+      makeRow({ cellId: "c1", side: "source", value: "src" }),
+      makeRow({ cellId: "c1", side: "target", value: "tgt" }),
+    ])
+    const { result } = renderHook(() =>
+      useCells({ projectId: "proj-a", fileId: "file-x", getToken, enabled: true }),
+    )
+    await waitFor(() => expect(result.current.cells).toHaveLength(1))
+    expect(result.current.cells[0].translated).toBe("tgt")
+    expect(result.current.cells[0].original).toBe("src")
+    // The very first read pass targets the (small) target side.
+    expect(fetchAllMock.mock.calls[0][3]).toBe("target")
   })
 
   it("revalidate() triggers a refetch and reflects new data", async () => {

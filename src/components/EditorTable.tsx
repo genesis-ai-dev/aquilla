@@ -17,6 +17,7 @@ import { ExamplePanel } from "./ExamplePanel"
 import { HighlightedText, buildHighlightsFromExamples } from "./HighlightedText"
 import { needsAttention } from "@/lib/health/decay-engine"
 import { StaleSourceIndicator } from "./StaleSourceIndicator"
+import { HealthRing } from "./HealthRing"
 import { TranslatedEditor } from "./TranslatedEditor"
 import { CellWaveform } from "./CellWaveform"
 import { CellAudioButton } from "./CellAudioButton"
@@ -1302,7 +1303,7 @@ function EditorRow({
           <button
             type="button"
             className={cn(
-              "flex h-5 w-5 items-center justify-center rounded-full transition-[transform,color] duration-150 ease-out",
+              "relative flex h-[22px] w-[22px] items-center justify-center rounded-full transition-[transform,color] duration-150 ease-out",
               "active:scale-[0.92] disabled:cursor-not-allowed disabled:opacity-40",
               "hover:bg-muted/60",
               validationColorClass,
@@ -1312,8 +1313,14 @@ function EditorRow({
             title={healthTooltip}
             disabled={!editable}
           >
+            <HealthRing
+              health={healthValue}
+              size={22}
+              strokeWidth={2}
+              className="pointer-events-none absolute inset-0"
+            />
             <ValidationIcon
-              className="h-3.5 w-3.5"
+              className="relative h-3.5 w-3.5"
               strokeWidth={2.5}
               {...(vs === "others" ? { fill: "currentColor" } : {})}
             />

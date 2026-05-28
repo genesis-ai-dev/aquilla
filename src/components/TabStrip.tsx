@@ -25,7 +25,7 @@ export function TabStrip({ tabs, activeTabId, files, onActivate, onClose }: Prop
     <div
       role="tablist"
       aria-label="Open files"
-      className="neu-flat relative z-10 flex items-stretch gap-1.5 overflow-x-auto px-2 py-1.5"
+      className="relative z-10 flex items-stretch gap-1.5 overflow-x-auto border-b border-border px-2 py-1.5"
     >
       {tabs.map((tab) => {
         const active = tab.id === activeTabId
@@ -36,10 +36,10 @@ export function TabStrip({ tabs, activeTabId, files, onActivate, onClose }: Prop
             role="tab"
             aria-selected={active}
             className={cn(
-              "group/tab relative flex shrink-0 items-center gap-1.5 rounded-full px-3 py-1 text-xs transition-all",
+              "group/tab relative flex shrink-0 items-center gap-1.5 rounded-full px-3 py-1 text-xs transition-colors",
               active
-                ? "bg-card text-foreground shadow-neu-sm"
-                : "text-muted-foreground hover:text-foreground hover:shadow-neu-xs",
+                ? "bg-muted text-foreground"
+                : "text-muted-foreground hover:bg-muted/60 hover:text-foreground",
             )}
           >
             <button

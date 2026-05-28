@@ -27,18 +27,24 @@ interface Props {
 
 export function AppShell({ sidebar, header, statusBar, beforeMain, main, aside }: Props) {
   return (
-    <div className="flex h-screen min-w-0">
-      <aside className="neu-flat relative z-10 flex w-64 shrink-0 flex-col overflow-hidden">
+    // Linear "frame + floating panel" model: the sidebar, header, and status
+    // bar all share the chrome base (bg-sidebar) as one continuous layer; the
+    // main workspace is a distinct, lighter surface that sits ON TOP of it,
+    // tucked into the frame's inner corner with a rounded top-left edge.
+    <div className="flex h-screen min-w-0 bg-sidebar">
+      <aside className="relative z-10 flex w-64 shrink-0 flex-col overflow-hidden">
         {sidebar}
         <VersionTag />
       </aside>
       <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
         {header}
-        {beforeMain}
-        <main className="flex min-h-0 flex-1 overflow-hidden">
-          <div className="min-w-0 flex-1 overflow-hidden">{main}</div>
-          {aside}
-        </main>
+        <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-tl-xl border-l border-t border-border bg-background">
+          {beforeMain}
+          <main className="flex min-h-0 flex-1 overflow-hidden">
+            <div className="min-w-0 flex-1 overflow-hidden">{main}</div>
+            {aside}
+          </main>
+        </div>
         {statusBar}
       </div>
     </div>

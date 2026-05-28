@@ -642,7 +642,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
 
   return (
     <div ref={parentRef} className="h-full overflow-auto" onMouseUp={handleMouseUp}>
-      <div className={cn("neu-flat sticky top-0 z-10 grid gap-2 px-4 py-2 text-xs font-medium uppercase tracking-wide text-muted-foreground", gridCols)}>
+      <div className={cn("sticky top-0 z-10 grid gap-2 border-b border-border bg-background px-4 py-2 text-xs font-medium uppercase tracking-wide text-muted-foreground", gridCols)}>
         <div />
         <div className="flex items-center gap-2">
           Source
@@ -879,11 +879,10 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
   return (
     <div
       className={cn(
-        // Outer wrapper is the virtualizer's MEASURED spacer. It only carries
-        // inset padding so the inner neu card has room for its soft shadow —
-        // no card styling here (margins on absolutely-positioned virtual rows
-        // break measurement). The raised card lives on EditorRow's inner div.
-        "px-2 py-1",
+        // Outer wrapper is the virtualizer's MEASURED spacer. Rows are now a
+        // flush, continuous list (Linear flat model), so there's no inset/gap
+        // here — the row's own px-4 and its border-b divider do the work.
+        // (Margins on absolutely-positioned virtual rows break measurement.)
       )}
     >
       <EditorRow
@@ -1645,31 +1644,32 @@ function EditorRow({
   const isSynthError = synthStatus.kind === "error"
 
   return (
-    // Each cell is an individual softly-raised neumorphic card. No divider
-    // lines: depth comes from the dual shadow. The rounded card lives on the
-    // grid element itself; the virtualizer-measured spacer (MemoizedRow's
-    // wrapper) supplies the surrounding gap.
+    // Each cell is a flat row in a continuous list, separated by a hairline
+    // divider (border-b on the grid element). No card, no shadow — selection
+    // and hover are background overlays. The wrapper carries no gap.
     <div>
       <div
         ref={rowRef}
         className={cn(
-          "group neu-flat relative grid gap-2 overflow-hidden rounded-2xl px-4 py-3 transition-shadow duration-200 ease-out",
-          // Hover lifts the card a little more off the shared surface.
-          "hover:shadow-neu",
-          // Active/expanded reads as a carved-in well.
-          expanded && "shadow-neu-inset",
-          audioController.isPlaying && "shadow-neu",
-          // Multi-select: pressed-in with a subtle gold ring.
-          isMultiSelected && "shadow-neu-pressed ring-1 ring-primary/40 ring-inset",
-          // Open-comments accent — a soft inset ring instead of a hard border.
+          // Flat row in a continuous list: separated by a hairline divider and
+          // tinted by hover/selection overlays, not shadows. Depth is gone by
+          // design — the Linear model reserves elevation for floating layers.
+          "group relative grid gap-2 overflow-hidden border-b border-border px-4 py-2 transition-colors duration-150 ease-out",
+          // Hover/active well via a subtle background overlay.
+          "hover:bg-muted/50",
+          expanded && "bg-muted/50",
+          audioController.isPlaying && "bg-muted/40",
+          // Multi-select: tinted fill + a subtle gold inset ring.
+          isMultiSelected && "bg-primary/5 ring-1 ring-primary/40 ring-inset",
+          // Open-comments accent — a soft inset ring.
           openCommentCount > 0 && "ring-1 ring-blue-400/50 ring-inset",
-          // Active cue highlight reads as a gentle inset well + gold ring.
-          _isActiveCue && "shadow-neu-inset ring-1 ring-primary/40 ring-inset",
+          // Active cue highlight — tinted fill + gold ring.
+          _isActiveCue && "bg-primary/5 ring-1 ring-primary/40 ring-inset",
           // Pulsing while a voice is being generated for this cell. Gives the
           // user a clear "something is happening" signal — drop, translate,
           // and bulk synth all flow through this status key.
-          isSynthBusy && "shadow-neu-inset ring-2 ring-primary/50 ring-inset animate-pulse",
-          isSynthError && "shadow-neu-inset ring-2 ring-destructive/50 ring-inset",
+          isSynthBusy && "bg-primary/5 ring-2 ring-primary/50 ring-inset animate-pulse",
+          isSynthError && "bg-destructive/5 ring-2 ring-destructive/50 ring-inset",
           gridCols,
         )}
         onMouseEnter={handleRowMouseEnter}

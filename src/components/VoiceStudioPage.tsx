@@ -453,7 +453,7 @@ function ProductionRow({
         <select
           value={selectedRowVoice}
           onChange={(e) => onAssignVoice(e.target.value)}
-          className="max-w-[9rem] rounded-full border bg-background py-1 pl-6 pr-2 text-xs"
+          className="max-w-[9rem] rounded-full border bg-background py-1 pl-7 pr-2 text-xs"
           title="Voice for this cell — or drag one from the library"
         >
           {voices.map((v) => (

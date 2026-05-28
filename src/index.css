@@ -6,25 +6,23 @@
 @custom-variant dark (&:is(.dark *));
 
 /* Surface helpers for arbitrary panels/divs that aren't shadcn components.
-   "Stripe" style: white cards float on the faint page background via soft drop
-   shadows — no visible borders (kept transparent to preserve layout box).
-   neu-raised = full card lift; neu-flat = a whisper of lift for flat panels;
-   neu-inset = a recessed well (faint grey fill + soft inner shadow). */
+   "Linear" style: surfaces are FLAT — separated by stepped background lightness
+   and hover/selection overlays, not shadows or borders. neu-raised/neu-flat are
+   now just the content surface (no lift); neu-inset is a recessed well (a step
+   darker fill). Real elevation (shadow) is reserved for floating layers only —
+   popovers, dropdowns, dialogs, modals — via the --shadow-soft-* scale. */
 @utility neu-raised {
   background-color: var(--card);
-  box-shadow: var(--shadow-neu);
   border: 1px solid transparent;
 }
 
 @utility neu-flat {
   background-color: var(--card);
-  box-shadow: var(--shadow-neu-xs);
   border: 1px solid transparent;
 }
 
 @utility neu-inset {
   background-color: var(--muted);
-  box-shadow: var(--shadow-neu-inset);
   border: 1px solid transparent;
 }
 
@@ -74,18 +72,17 @@
     --radius-3xl: calc(var(--radius) * 2.2);
     --radius-4xl: calc(var(--radius) * 2.6);
 
-    /* Elevation — flattened to a hybrid "enterprise" style. Formerly dual-tone
-       neumorphic (extruded/carved) shadows; now single-direction faint drop
-       shadows that pair with the hairline borders carried by surfaces. The
-       neu-* names are kept so the ~70 existing call sites need no change; they
-       now alias the --shadow-soft-* drop shadows below. Inset is a soft inner
-       shadow for recessed wells (inputs, tracks). */
-    --shadow-neu-xs: var(--shadow-soft-xs);
-    --shadow-neu-sm: var(--shadow-soft-sm);
-    --shadow-neu: var(--shadow-soft);
+    /* Elevation — flat "Linear" model. In-page surfaces carry NO shadow; depth
+       comes from stepped background lightness + hover/selection overlays. The
+       neu-* names are kept so the ~70 call sites need no change: the small steps
+       resolve to nothing, and only -lg (used by popovers/floating panels) keeps
+       a real drop shadow. Inset wells rely on their darker fill, not a shadow. */
+    --shadow-neu-xs: none;
+    --shadow-neu-sm: none;
+    --shadow-neu: none;
     --shadow-neu-lg: var(--shadow-soft-lg);
-    --shadow-neu-inset: inset 0 1px 2px oklch(0.40 0.02 286 / 0.07);
-    --shadow-neu-pressed: inset 0 1px 3px oklch(0.40 0.02 286 / 0.11);
+    --shadow-neu-inset: none;
+    --shadow-neu-pressed: none;
 
     /* Soft single-direction elevation — for modals, popovers, sheets,
        tooltips, and cards. One slate-tinted shadow at low alpha. */
@@ -117,53 +114,48 @@
        (rounded-lg = --radius, -xl = 1.4x, -2xl = 1.8x, -3xl = 2.2x), so tuning
        it here dials roundness everywhere at once. */
     --radius: 0.375rem;
-    /* Default palette: a soft, subtle BLUE — surface anchored at #f0f4f9. Same
-       neumorphic recipe as before (the surface sits below a near-white highlight
-       and above a slightly darker shade, depth comes from shadow not borders),
-       just retuned to one cool hue (~250) at low chroma so the whole palette
-       reads as a single material. Color-theme presets in
-       [data-color-theme="…"] swap this for warm/sage/rose. */
-    /* Stripe-style separation: cards are pure white, the page behind them is a
-       barely-there cool grey that reads as white but lets white cards lift via
-       shadow. Greys are near-neutral (chroma ~0.004); the blue lives only in
-       --primary/--accent so it reads as a brand pop, not a tint on everything. */
+    /* Linear-style flat elevation: surfaces separate by stepped lightness, not
+       shadows. Chrome (sidebar) is a touch greyer than the content (background),
+       content sits below white cards/popovers. Greys are near-neutral (chroma
+       ~0.002); text is darkened for content contrast; the blue lives only in
+       --primary/--ring/selected states, never as a tint on the chrome. */
     --surface: oklch(1 0 0);
-    --background: oklch(0.985 0.004 250);
-    --foreground: oklch(0.34 0.018 250);
+    --background: oklch(0.985 0.002 264);
+    --foreground: oklch(0.27 0.008 264);
     --card: var(--surface);
-    --card-foreground: oklch(0.34 0.018 250);
+    --card-foreground: oklch(0.27 0.008 264);
     --popover: oklch(1 0 0);
-    --popover-foreground: oklch(0.34 0.018 250);
-    /* Subtle muted blue — an accent, not a highlighter. Takes dark text. */
+    --popover-foreground: oklch(0.27 0.008 264);
+    /* Muted blue accent — reserved for the primary action. Takes dark text. */
     --primary: oklch(0.78 0.07 245);
     --primary-foreground: oklch(0.28 0.04 250);
     --secondary: var(--surface);
-    --secondary-foreground: oklch(0.40 0.022 248);
-    --muted: oklch(0.955 0.004 250);
-    --muted-foreground: oklch(0.52 0.014 250);
-    /* Hover/chip surfaces get a whisper of blue. */
-    --accent: oklch(0.89 0.038 248);
-    --accent-foreground: oklch(0.38 0.06 248);
+    --secondary-foreground: oklch(0.30 0.01 264);
+    --muted: oklch(0.955 0.002 264);
+    --muted-foreground: oklch(0.48 0.008 264);
+    /* Neutral hover/selection overlay — no blue tint on the chrome. */
+    --accent: oklch(0.94 0.003 264);
+    --accent-foreground: oklch(0.27 0.008 264);
     --destructive: oklch(0.60 0.16 25);
     --destructive-foreground: oklch(0.97 0.01 250);
-    --border: oklch(0.915 0.004 250);
-    --input: oklch(0.955 0.004 250);
+    --border: oklch(0.92 0.002 264);
+    --input: oklch(0.955 0.002 264);
     --ring: oklch(0.72 0.09 245);
-    --neu-light: oklch(0.99 0.005 250);
-    --neu-dark: oklch(0.86 0.018 248);
+    --neu-light: oklch(0.99 0.002 264);
+    --neu-dark: oklch(0.92 0.002 264);
     /* Cool-leaning chart palette: blue / teal / sage / amber / rose. */
     --chart-1: oklch(0.72 0.10 245);
     --chart-2: oklch(0.74 0.09 200);
     --chart-3: oklch(0.76 0.07 150);
     --chart-4: oklch(0.74 0.10 70);
     --chart-5: oklch(0.66 0.12 25);
-    --sidebar: var(--surface);
-    --sidebar-foreground: oklch(0.34 0.018 250);
+    --sidebar: oklch(0.965 0.002 264);
+    --sidebar-foreground: oklch(0.32 0.008 264);
     --sidebar-primary: oklch(0.78 0.07 245);
     --sidebar-primary-foreground: oklch(0.28 0.04 250);
-    --sidebar-accent: oklch(0.89 0.038 248);
-    --sidebar-accent-foreground: oklch(0.38 0.06 248);
-    --sidebar-border: oklch(0.88 0.014 248);
+    --sidebar-accent: oklch(0.93 0.003 264);
+    --sidebar-accent-foreground: oklch(0.27 0.008 264);
+    --sidebar-border: oklch(0.92 0.002 264);
     --sidebar-ring: oklch(0.72 0.09 245);
   }
 
@@ -215,9 +207,9 @@
                    0 2px 6px -2px oklch(0.05 0 0 / 0.30);
     --shadow-soft-lg: 0 18px 40px -10px oklch(0.05 0 0 / 0.60),
                       0 4px 10px -2px oklch(0.05 0 0 / 0.40);
-    /* Inset wells need a darker inner shadow to read against the dim surface. */
-    --shadow-neu-inset: inset 0 1px 2px oklch(0.05 0 0 / 0.45);
-    --shadow-neu-pressed: inset 0 1px 3px oklch(0.05 0 0 / 0.55);
+    /* Flat model: inset wells rely on their darker fill, not an inner shadow. */
+    --shadow-neu-inset: none;
+    --shadow-neu-pressed: none;
   }
 
   * {

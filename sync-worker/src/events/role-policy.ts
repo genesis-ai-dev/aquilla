@@ -50,6 +50,11 @@ export const REQUIRED_ROLE: Record<EventKind, number> = {
   'cell.validate': ROLE.REVIEWER,
   'cell.unvalidate': ROLE.REVIEWER,
 
+  // QA waivers: a translator dismissing a (often false-positive) rule flag on
+  // their own cell is normal editing flow, so contributor-level like target.*.
+  'cell.waive': ROLE.CONTRIBUTOR,
+  'cell.unwaive': ROLE.CONTRIBUTOR,
+
   // Cell audio: translator-level, like target.* edits.
   'cell.audio.attach': ROLE.CONTRIBUTOR,
   'cell.audio.select': ROLE.CONTRIBUTOR,

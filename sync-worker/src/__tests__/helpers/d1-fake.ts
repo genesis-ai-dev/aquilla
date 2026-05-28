@@ -14,9 +14,20 @@ export interface Tables {
   events: EventRow[]
   cells: CellRow[]
   cell_validators: ValidatorRow[]
+  cell_waivers: WaiverRow[]
   files: FileRow[]
   comments: CommentRow[]
   cells_fts: CellsFtsRow[]
+}
+
+export interface WaiverRow {
+  project_id: string
+  file_id: string
+  cell_id: string
+  rule_id: string
+  reason: string | null
+  waived_by: string
+  waived_ts: number
 }
 
 export interface CommentRow {
@@ -112,6 +123,7 @@ export function makeInMemoryD1(tables: Partial<Tables> = {}): InMemoryD1 {
     events: tables.events ?? [],
     cells: tables.cells ?? [],
     cell_validators: tables.cell_validators ?? [],
+    cell_waivers: tables.cell_waivers ?? [],
     files: tables.files ?? [],
     comments: tables.comments ?? [],
     cells_fts: tables.cells_fts ?? [],
@@ -455,6 +467,26 @@ export function makeInMemoryD1(tables: Partial<Tables> = {}): InMemoryD1 {
           cell_id: v.cell_id,
           event_id: v.event_id,
           username: v.username,
+        }))
+    }
+
+    // ── GET /cells/audit-stats — waivers select ────────────────────────
+    // DELETE-on-unwaive: every row present is an active waiver.
+    if (
+      /^SELECT cell_id, rule_id, reason, waived_by, waived_ts FROM cell_waivers WHERE project_id = \? AND file_id = \?$/.test(
+        normalized,
+      )
+    ) {
+      const projectId = args[0] as string
+      const fileId = args[1] as string
+      return db.cell_waivers
+        .filter((w) => w.project_id === projectId && w.file_id === fileId)
+        .map((w) => ({
+          cell_id: w.cell_id,
+          rule_id: w.rule_id,
+          reason: w.reason,
+          waived_by: w.waived_by,
+          waived_ts: w.waived_ts,
         }))
     }
 
@@ -925,6 +957,48 @@ export function makeInMemoryD1(tables: Partial<Tables> = {}): InMemoryD1 {
         )
         cell.validated = activeForHead ? 1 : 0
       }
+      return []
+    }
+
+    // ── INSERT cell_waivers (UPSERT — cell.waive, 0017) ────────────────
+    if (/^INSERT INTO cell_waivers/.test(normalized)) {
+      const row: WaiverRow = {
+        project_id: args[0] as string,
+        file_id: args[1] as string,
+        cell_id: args[2] as string,
+        rule_id: args[3] as string,
+        reason: (args[4] as string | null) ?? null,
+        waived_by: args[5] as string,
+        waived_ts: args[6] as number,
+      }
+      const idx = db.cell_waivers.findIndex(
+        (w) =>
+          w.project_id === row.project_id &&
+          w.file_id === row.file_id &&
+          w.cell_id === row.cell_id &&
+          w.rule_id === row.rule_id,
+      )
+      if (idx === -1) {
+        db.cell_waivers.push(row)
+      } else if (row.waived_ts > db.cell_waivers[idx].waived_ts) {
+        db.cell_waivers[idx] = row
+      }
+      return []
+    }
+
+    // ── DELETE cell_waivers (cell.unwaive, 0017) ───────────────────────
+    if (
+      /^DELETE FROM cell_waivers WHERE project_id = \? AND file_id = \? AND cell_id = \? AND rule_id = \?$/.test(
+        normalized,
+      )
+    ) {
+      const pid = args[0] as string
+      const fid = args[1] as string
+      const cid = args[2] as string
+      const rid = args[3] as string
+      db.cell_waivers = db.cell_waivers.filter(
+        (w) => !(w.project_id === pid && w.file_id === fid && w.cell_id === cid && w.rule_id === rid),
+      )
       return []
     }
 

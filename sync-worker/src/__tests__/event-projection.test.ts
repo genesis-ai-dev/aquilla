@@ -348,6 +348,61 @@ describe('buildEventProjectionStmts — cell.validate / cell.unvalidate', () => 
   })
 })
 
+describe('buildEventProjectionStmts — cell.waive / cell.unwaive', () => {
+  it('cell.waive emits a single cell_waivers UPSERT (no cells/files recompute)', () => {
+    const { db, recorded } = makeD1Stub()
+    const stmts: D1PreparedStatement[] = []
+    const touches = buildEventProjectionStmts(
+      db,
+      makeEvent('cell.waive', { ruleId: 'no-double-space', reason: 'intentional' }),
+      stmts,
+    )
+    // Waivers don't move the chain head or counters — just the one upsert.
+    expect(stmts).toHaveLength(1)
+    expect(recorded[0].sql).toContain('INSERT INTO cell_waivers')
+    expect(recorded[0].sql).toContain('rule_id')
+    expect(recorded[0].sql).toContain('ON CONFLICT')
+    // Bind order: project, file, cell, ruleId, reason, author, serverTs.
+    expect(recorded[0].args).toEqual([
+      'proj-1', 'file-a', 'cell-1', 'no-double-space', 'intentional', 'alice', 2000,
+    ])
+    expect(touches).toEqual(['cell_waivers'])
+  })
+
+  it('cell.waive binds null reason when omitted', () => {
+    const { db, recorded } = makeD1Stub()
+    const stmts: D1PreparedStatement[] = []
+    buildEventProjectionStmts(db, makeEvent('cell.waive', { ruleId: 'rule-x' }), stmts)
+    expect(recorded[0].args[4]).toBeNull()
+  })
+
+  it('cell.unwaive emits a DELETE keyed by rule_id', () => {
+    const { db, recorded } = makeD1Stub()
+    const stmts: D1PreparedStatement[] = []
+    const touches = buildEventProjectionStmts(
+      db,
+      makeEvent('cell.unwaive', { ruleId: 'no-double-space' }),
+      stmts,
+    )
+    expect(stmts).toHaveLength(1)
+    expect(recorded[0].sql).toContain('DELETE FROM cell_waivers')
+    expect(recorded[0].sql).toContain('rule_id = ?')
+    expect(recorded[0].args).toEqual(['proj-1', 'file-a', 'cell-1', 'no-double-space'])
+    expect(touches).toEqual(['cell_waivers'])
+  })
+
+  it('throws when fileId or cellId is missing', () => {
+    const { db } = makeD1Stub()
+    expect(() =>
+      buildEventProjectionStmts(
+        db,
+        makeEvent('cell.waive', { ruleId: 'r' }, { cellId: null }),
+        [],
+      ),
+    ).toThrow(/missing fileId or cellId/)
+  })
+})
+
 describe('buildEventProjectionStmts — file.create', () => {
   it('emits an INSERT INTO files row', () => {
     const { db, recorded } = makeD1Stub()

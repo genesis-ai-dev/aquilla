@@ -8,6 +8,7 @@
 // its debounce on every keystroke.
 
 import { useCallback, useEffect, useRef, useState } from "react"
+import type { RuleWaiver } from "@/lib/parsers/types"
 import { syncWorkerHttpOrigin } from "@/lib/sync/sync-worker-url"
 
 export interface CellAuditStats {
@@ -23,6 +24,9 @@ export interface CellAuditStats {
   /** Active validators tied to lastEditEventId. Empty when the current edit has
    *  no approvals or when lastEditEventId is null. */
   activeValidators: string[]
+  /** Active QA rule waivers on this cell (one per dismissed rule). Empty when
+   *  no rule is currently waived. */
+  waivers: RuleWaiver[]
 }
 
 interface UseCellsAuditStatsOptions {
@@ -63,6 +67,7 @@ async function fetchCellsAuditStats(
       lastEditAt: row.lastEditAt ?? null,
       lastEditEventId: row.lastEditEventId ?? null,
       activeValidators: row.activeValidators ?? [],
+      waivers: row.waivers ?? [],
     })
   }
   return map

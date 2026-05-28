@@ -33,6 +33,10 @@ export type EventKind =
   // Validation (reviewer-level).
   | 'cell.validate'
   | 'cell.unvalidate'
+  // QA rule waivers (contributor-level). Non-chain-mutating — they record a
+  // per-(cell, rule) dismissal of a QA infraction; they don't move cells.event_id.
+  | 'cell.waive'
+  | 'cell.unwaive'
   // Cell audio attachments (contributor-level). Metadata only; bytes in R2.
   // Non-chain-mutating — they don't move cells.event_id.
   | 'cell.audio.attach'
@@ -112,6 +116,20 @@ export interface EventPayloads {
   'cell.unvalidate': {
     /** The target commit event whose validation is being withdrawn. */
     editEventId: string
+  }
+
+  // ── QA rule waivers ────────────────────────────────────────────────────
+  // `waive` dismisses a single QA rule infraction on a cell; `unwaive`
+  // restores it. Keyed by `ruleId` (one row per (cell, rule)). The DELETE-on-
+  // unwaive shape mirrors validators: a row exists iff the rule is waived.
+  'cell.waive': {
+    /** Stable id of the QA rule whose infraction is being dismissed. */
+    ruleId: string
+    /** Optional human-entered justification. */
+    reason?: string
+  }
+  'cell.unwaive': {
+    ruleId: string
   }
 
   // ── Cell audio ─────────────────────────────────────────────────────────

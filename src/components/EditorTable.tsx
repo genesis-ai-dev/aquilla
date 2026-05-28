@@ -12,7 +12,7 @@ import { useFileAudioAttachments } from "@/hooks/useFileAudioAttachments"
 import type { ScoredPair } from "@/lib/search/dual-index"
 import type { TranslationRule, RuleInfraction, ProjectRecord } from "@/lib/parsers/types"
 import { useProjectPermissions } from "@/hooks/useProjectPermissions"
-import { emitTargetCellCommit, emitCellValidate, emitCellUnvalidate } from "@/lib/sync/events-emit"
+import { emitTargetCellCommit, emitCellValidate, emitCellUnvalidate, emitCellWaive, emitCellUnwaive } from "@/lib/sync/events-emit"
 import { ExamplePanel } from "./ExamplePanel"
 import { HighlightedText, buildHighlightsFromExamples } from "./HighlightedText"
 import { needsAttention } from "@/lib/health/decay-engine"
@@ -45,7 +45,7 @@ import { CellAiStatusPopover } from "./CellAiStatusPopover"
 import { useNavigate } from "react-router-dom"
 import { cn } from "@/lib/utils"
 import { isPerfLogEnabled } from "@/lib/perf-log"
-import { partitionInfractions, addWaiver, removeWaiver } from "@/lib/rules/waivers"
+import { partitionInfractions } from "@/lib/rules/waivers"
 import { ViolationPopover } from "./ViolationPopover"
 import type { RangeHighlight } from "./HighlightedText"
 
@@ -1028,17 +1028,42 @@ function EditorRow({
     [cell.waivers],
   )
 
-  const handleWaive = useCallback((_input: { ruleId: string; reason?: string }) => {
-    // Phase 2c-gamma: waivers wrote to Y.Doc; the event-grammar version
-    // is deferred to v1.x. The popover still closes so the click feels live.
-    addWaiver(cell.waivers ?? [], _input, username)
+  const handleWaive = useCallback((input: { ruleId: string; reason?: string }) => {
     setOpenRuleId(null)
-  }, [cell.waivers, username])
+    if (!project.id) return
+    // Emits a `cell.waive` event into the outbox. The pending-outbox overlay
+    // (useCellsAuditStatsWithOverlay) reflects it on `cell.waivers` instantly
+    // so the blot drops to its waived style; onCellCommitted flushes + refetches
+    // the authoritative projection.
+    void emitCellWaive({
+      projectId: project.id,
+      fileId: cell.fileId,
+      cellId: cell.id,
+      ruleId: input.ruleId,
+      ...(input.reason ? { reason: input.reason } : {}),
+      author: username,
+    }).then(() => {
+      void onCellCommitted?.()
+    }).catch((err) => {
+      console.warn("[waive] emit failed:", err)
+    })
+  }, [project.id, cell.fileId, cell.id, username, onCellCommitted])
 
   const handleUnwaive = useCallback((ruleId: string) => {
-    removeWaiver(cell.waivers ?? [], ruleId)
     setOpenRuleId(null)
-  }, [cell.waivers])
+    if (!project.id) return
+    void emitCellUnwaive({
+      projectId: project.id,
+      fileId: cell.fileId,
+      cellId: cell.id,
+      ruleId,
+      author: username,
+    }).then(() => {
+      void onCellCommitted?.()
+    }).catch((err) => {
+      console.warn("[unwaive] emit failed:", err)
+    })
+  }, [project.id, cell.fileId, cell.id, username, onCellCommitted])
 
   const sourceRanges = useMemo<RangeHighlight[]>(() => {
     const out: RangeHighlight[] = []

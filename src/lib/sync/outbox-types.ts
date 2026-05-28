@@ -31,6 +31,9 @@ export type OutboxEventKind =
   // Validation.
   | "cell.validate"
   | "cell.unvalidate"
+  // QA rule waivers (contributor-level; non-chain-mutating).
+  | "cell.waive"
+  | "cell.unwaive"
   // Cell audio attachments (contributor-level; non-chain-mutating).
   | "cell.audio.attach"
   | "cell.audio.select"
@@ -103,6 +106,15 @@ export interface OutboxEventPayloads {
   }
   "cell.unvalidate": {
     editEventId: string
+  }
+
+  // QA rule waivers. One row per (cell, rule); DELETE-on-unwaive.
+  "cell.waive": {
+    ruleId: string
+    reason?: string
+  }
+  "cell.unwaive": {
+    ruleId: string
   }
 
   // Audio attachments. Bytes already live in R2 before these are emitted.

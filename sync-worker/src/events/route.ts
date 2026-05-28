@@ -274,6 +274,8 @@ export async function handleEventsWriteRequest(
     const isChainMutating =
       rawEvent.kind !== 'cell.validate' &&
       rawEvent.kind !== 'cell.unvalidate' &&
+      rawEvent.kind !== 'cell.waive' &&
+      rawEvent.kind !== 'cell.unwaive' &&
       rawEvent.kind !== 'cell.audio.attach' &&
       rawEvent.kind !== 'cell.audio.select' &&
       rawEvent.kind !== 'cell.audio.remove' &&

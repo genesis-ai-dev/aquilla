@@ -202,6 +202,64 @@ export async function emitCellUnvalidate(input: CellValidateInput): Promise<stri
   return eventId
 }
 
+// ── Cell waiver helpers ───────────────────────────────────────────────────
+// Non-chain-mutating (parentId omitted), like validation. A waiver dismisses
+// one QA rule's infraction on a cell; the projection keys on (cell, ruleId).
+
+export interface CellWaiveInput {
+  projectId: string
+  fileId: string
+  cellId: string
+  /** Stable id of the QA rule whose infraction is being dismissed. */
+  ruleId: string
+  /** Optional human-entered justification. */
+  reason?: string
+  author: string
+  clientTs?: number
+}
+
+/** Emit a `cell.waive` event — dismiss a QA rule infraction on a cell. */
+export async function emitCellWaive(input: CellWaiveInput): Promise<string> {
+  const { eventId } = await enqueueEvent({
+    kind: "cell.waive",
+    projectId: input.projectId,
+    fileId: input.fileId,
+    cellId: input.cellId,
+    parentId: null,
+    author: input.author,
+    payload: {
+      ruleId: input.ruleId,
+      ...(input.reason ? { reason: input.reason } : {}),
+    },
+    clientTs: input.clientTs,
+  })
+  return eventId
+}
+
+export interface CellUnwaiveInput {
+  projectId: string
+  fileId: string
+  cellId: string
+  ruleId: string
+  author: string
+  clientTs?: number
+}
+
+/** Mirror of `emitCellWaive` for the un-waive gesture. */
+export async function emitCellUnwaive(input: CellUnwaiveInput): Promise<string> {
+  const { eventId } = await enqueueEvent({
+    kind: "cell.unwaive",
+    projectId: input.projectId,
+    fileId: input.fileId,
+    cellId: input.cellId,
+    parentId: null,
+    author: input.author,
+    payload: { ruleId: input.ruleId },
+    clientTs: input.clientTs,
+  })
+  return eventId
+}
+
 // ── Cell audio helpers ────────────────────────────────────────────────────
 // Non-chain-mutating (parentId omitted), like validation. Bytes are uploaded
 // to R2 first (uploadCellAudio / the voice-convert worker), then the attach

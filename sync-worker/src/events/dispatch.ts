@@ -60,6 +60,8 @@ export function dispatchEvent(
     case 'target.cell.reorder':
     case 'cell.validate':
     case 'cell.unvalidate':
+    case 'cell.waive':
+    case 'cell.unwaive':
     case 'cell.audio.attach':
     case 'cell.audio.select':
     case 'cell.audio.remove':

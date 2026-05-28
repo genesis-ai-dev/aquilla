@@ -154,7 +154,7 @@ function fileCountersRecomputeStmt(
 }
 
 /** Caller hint: which projection tables this event will touch. */
-export type ProjectionTouches = 'cells' | 'cell_validators' | 'files' | 'cell_audio' | 'comments'
+export type ProjectionTouches = 'cells' | 'cell_validators' | 'cell_waivers' | 'files' | 'cell_audio' | 'comments'
 
 /**
  * Apply one event to the projection (without the AD-2 sibling guard — the
@@ -541,6 +541,57 @@ export function buildEventProjectionStmts(
       )
       stmts.push(fileCountersRecomputeStmt(db, event.projectId, event.fileId, event.serverTs))
       return ['cell_validators', 'cells', 'files']
+    }
+
+    case 'cell.waive':
+    case 'cell.unwaive': {
+      const p = event.payload as EventPayloads['cell.waive']
+      if (!event.fileId || !event.cellId) {
+        throw new Error(`${event.kind} event ${event.id} is missing fileId or cellId`)
+      }
+
+      // DELETE-on-unwaive (mirrors cell_validators): a row exists iff the rule
+      // is currently waived on this cell. `cell.waive` upserts one row per
+      // (cell, rule); `cell.unwaive` deletes it. The waived_ts guard keeps an
+      // out-of-order replay from clobbering a newer decision. Waivers do not
+      // touch cells.event_id or the file counters — they only suppress a QA
+      // blot in the client, so no `cells` / `files` recompute here.
+      if (event.kind === 'cell.waive') {
+        stmts.push(
+          db
+            .prepare(
+              `INSERT INTO cell_waivers (
+                project_id, file_id, cell_id, rule_id, reason, waived_by, waived_ts
+              ) VALUES (?, ?, ?, ?, ?, ?, ?)
+              ON CONFLICT(project_id, file_id, cell_id, rule_id)
+              DO UPDATE SET
+                reason     = excluded.reason,
+                waived_by  = excluded.waived_by,
+                waived_ts  = excluded.waived_ts
+              WHERE excluded.waived_ts > cell_waivers.waived_ts`,
+            )
+            .bind(
+              event.projectId,
+              event.fileId,
+              event.cellId,
+              p.ruleId,
+              p.reason ?? null,
+              event.author,
+              event.serverTs,
+            ),
+        )
+      } else {
+        stmts.push(
+          db
+            .prepare(
+              `DELETE FROM cell_waivers
+                WHERE project_id = ? AND file_id = ? AND cell_id = ? AND rule_id = ?`,
+            )
+            .bind(event.projectId, event.fileId, event.cellId, p.ruleId),
+        )
+      }
+
+      return ['cell_waivers']
     }
 
 case 'cell.audio.attach': {

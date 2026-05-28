@@ -65,6 +65,13 @@ export async function handleCellsAuditReadRequest(
     WHERE project_id = ? AND file_id = ?
   `
 
+  // DELETE-on-unwaive: every row present is an active waiver.
+  const waiversSql = `
+    SELECT cell_id, rule_id, reason, waived_by, waived_ts
+    FROM cell_waivers
+    WHERE project_id = ? AND file_id = ?
+  `
+
   interface CellRow {
     cell_id: string
     side: string
@@ -78,10 +85,18 @@ export async function handleCellsAuditReadRequest(
     event_id: string
     username: string
   }
+  interface WaiverRow {
+    cell_id: string
+    rule_id: string
+    reason: string | null
+    waived_by: string | null
+    waived_ts: number
+  }
 
-  const [cellsRes, validatorsRes] = await Promise.all([
+  const [cellsRes, validatorsRes, waiversRes] = await Promise.all([
     env.AQUILLA_DB.prepare(cellsSql).bind(projectId, fileId).all<CellRow>(),
     env.AQUILLA_DB.prepare(validatorsSql).bind(projectId, fileId).all<ValidatorRow>(),
+    env.AQUILLA_DB.prepare(waiversSql).bind(projectId, fileId).all<WaiverRow>(),
   ])
 
   // Bucket validators by cell_id → event_id → usernames[].
@@ -100,6 +115,27 @@ export async function handleCellsAuditReadRequest(
     names.push(v.username)
   }
 
+  // Bucket waivers by cell_id → RuleWaiver[]. Shape matches the client's
+  // `RuleWaiver` type (src/lib/parsers/types.ts): the projection stores the
+  // server clock in ms, surfaced here as an ISO timestamp.
+  const waiversByCell = new Map<
+    string,
+    { ruleId: string; reason?: string; waivedAt: string; waivedBy?: string }[]
+  >()
+  for (const w of waiversRes.results) {
+    let list = waiversByCell.get(w.cell_id)
+    if (!list) {
+      list = []
+      waiversByCell.set(w.cell_id, list)
+    }
+    list.push({
+      ruleId: w.rule_id,
+      ...(w.reason ? { reason: w.reason } : {}),
+      waivedAt: new Date(w.waived_ts).toISOString(),
+      ...(w.waived_by ? { waivedBy: w.waived_by } : {}),
+    })
+  }
+
   const cells = cellsRes.results.map((r) => {
     const activeValidators =
       byCell.get(r.cell_id)?.get(r.last_edit_event_id) ?? []
@@ -111,6 +147,7 @@ export async function handleCellsAuditReadRequest(
       lastEditEventId: r.last_edit_event_id,
       sourceEventId: r.source_event_id,
       activeValidators,
+      waivers: waiversByCell.get(r.cell_id) ?? [],
     }
   })
   return Response.json({ cells })

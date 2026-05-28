@@ -96,6 +96,7 @@ const EMPTY_STATS: ReadonlyMap<string, CellAuditStats> = new Map()
 const EMPTY_VALIDATION_HISTORY: EditValidationSummary[] = []
 const EMPTY_HISTORY: CellHistoryEntry[] = []
 const EMPTY_THREADS: CommentThread[] = []
+const EMPTY_WAIVERS: import("@/lib/parsers/types").RuleWaiver[] = []
 
 function classifyValidators(
   active: string[],
@@ -171,6 +172,7 @@ function buildCellData(
     history: EMPTY_HISTORY,
     threads: EMPTY_THREADS,
     globalReferences: source?.canonicalRef ? [source.canonicalRef] : undefined,
+    waivers: stats?.waivers ?? EMPTY_WAIVERS,
   }
 }
 

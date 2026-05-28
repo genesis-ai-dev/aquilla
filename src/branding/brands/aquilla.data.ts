@@ -1,10 +1,10 @@
 import type { BrandData } from "../types"
 
-// Subtle-blue neumorphic identity. Surface anchored at ~#f0f4f9 with a muted
-// blue accent used sparingly; one cool hue (~250) at low chroma runs through
-// everything so nothing clashes. Dark mode is a mid blue-grey (lifted off black
-// so neu shadows read) with the same blue. Mirrors the index.css base so the
-// neu shadow tones line up on the surface. Color-theme presets (see
+// Clean "Stripe" identity. White cards float on a barely-there cool-grey page
+// via soft drop shadows (no visible borders); greys are near-neutral and the
+// muted blue accent is used sparingly as a brand pop. Dark mode is a mid
+// blue-grey lifted off black. Mirrors the index.css base so the initial paint
+// matches before the brand stylesheet injects. Color-theme presets (see
 // branding/ColorTheme.tsx) override these at runtime via [data-color-theme].
 export const aquillaData: BrandData = {
   id: "aquilla",
@@ -23,36 +23,36 @@ export const aquillaData: BrandData = {
   },
   theme: {
     light: {
-      background: "oklch(0.955 0.012 250)",
+      background: "oklch(0.985 0.004 250)",
       foreground: "oklch(0.34 0.018 250)",
-      card: "oklch(0.955 0.012 250)",
+      card: "oklch(1 0 0)",
       cardForeground: "oklch(0.34 0.018 250)",
-      popover: "oklch(0.97 0.008 250)",
+      popover: "oklch(1 0 0)",
       popoverForeground: "oklch(0.34 0.018 250)",
       primary: "oklch(0.78 0.07 245)",
       primaryForeground: "oklch(0.28 0.04 250)",
-      secondary: "oklch(0.955 0.012 250)",
+      secondary: "oklch(1 0 0)",
       secondaryForeground: "oklch(0.40 0.022 248)",
-      muted: "oklch(0.925 0.012 250)",
-      mutedForeground: "oklch(0.52 0.018 248)",
+      muted: "oklch(0.955 0.004 250)",
+      mutedForeground: "oklch(0.52 0.014 250)",
       accent: "oklch(0.89 0.038 248)",
       accentForeground: "oklch(0.38 0.06 248)",
       destructive: "oklch(0.60 0.16 25)",
-      border: "oklch(0.88 0.014 248)",
-      input: "oklch(0.92 0.012 250)",
+      border: "oklch(0.915 0.004 250)",
+      input: "oklch(0.955 0.004 250)",
       ring: "oklch(0.72 0.09 245)",
       chart1: "oklch(0.72 0.10 245)",
       chart2: "oklch(0.74 0.09 200)",
       chart3: "oklch(0.76 0.07 150)",
       chart4: "oklch(0.74 0.10 70)",
       chart5: "oklch(0.66 0.12 25)",
-      sidebar: "oklch(0.955 0.012 250)",
+      sidebar: "oklch(1 0 0)",
       sidebarForeground: "oklch(0.34 0.018 250)",
       sidebarPrimary: "oklch(0.78 0.07 245)",
       sidebarPrimaryForeground: "oklch(0.28 0.04 250)",
       sidebarAccent: "oklch(0.89 0.038 248)",
       sidebarAccentForeground: "oklch(0.38 0.06 248)",
-      sidebarBorder: "oklch(0.88 0.014 248)",
+      sidebarBorder: "oklch(0.915 0.004 250)",
       sidebarRing: "oklch(0.72 0.09 245)",
     },
     dark: {

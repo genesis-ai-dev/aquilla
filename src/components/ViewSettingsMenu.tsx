@@ -100,7 +100,7 @@ export function ViewSettingsMenu({
       <Menu.Root open={menuOpen} onOpenChange={setMenuOpen}>
         <Menu.Trigger
           render={
-            <Button variant="ghost" size="sm" title="View settings" className="relative">
+            <Button variant="ghost" size="icon" title="View settings" className="relative">
               <Eye className="h-4 w-4" />
               {showHint && (
                 <span

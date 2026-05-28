@@ -10,15 +10,13 @@ export function NextUnfinishedButton({ onClick, disabled }: Props) {
   return (
     <Button
       variant="ghost"
-      size="sm"
+      size="icon"
       onClick={onClick}
       disabled={disabled}
       title="Jump to next unfinished cell (Cmd+.)"
       aria-label="Next unfinished"
-      className="gap-1"
     >
-      Next
-      <ArrowRight className="h-3.5 w-3.5" />
+      <ArrowRight className="h-4 w-4" />
     </Button>
   )
 }

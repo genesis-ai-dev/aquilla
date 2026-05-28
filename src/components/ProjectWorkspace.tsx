@@ -1207,39 +1207,26 @@ export function ProjectWorkspace() {
           <WorkspaceHeader
             project={project}
             onBack={goToProjects}
-            extraMenuItems={
-              suggestions.length > 0 && project.suggestionsDismissedAt
+            extraMenuItems={[
+              ...(isSubtitleFile
+                ? [{
+                    id: "attach-video",
+                    label: "Attach video",
+                    icon: Film,
+                    onClick: () => setVideoDialogOpen(true),
+                  }]
+                : []),
+              ...(suggestions.length > 0 && project.suggestionsDismissedAt
                 ? [{
                     id: "redetect-suggestions",
                     label: `Show ${suggestions.length} file name suggestion${suggestions.length === 1 ? "" : "s"}`,
                     icon: Sparkles,
                     onClick: handleReinviteSuggestions,
                   }]
-                : []
-            }
+                : []),
+            ]}
           >
-            <ViewSettingsMenu
-              fileOpen={Boolean(activeFileId)}
-              lineNumbersEnabled={fileMeta.lineNumbersEnabled}
-              sourceTextDirection={fileMeta.sourceTextDirection}
-              targetTextDirection={fileMeta.targetTextDirection}
-              cellLabelsEnabled={cellLabelsEnabled}
-              rtlHintDismissed={fileMeta.rtlHintDismissed}
-              onLineNumbersChange={fileMeta.setLineNumbersEnabled}
-              onSourceTextDirectionChange={fileMeta.setSourceTextDirection}
-              onTargetTextDirectionChange={fileMeta.setTargetTextDirection}
-              onCellLabelsChange={setCellLabelsEnabled}
-              onDismissRtlHint={fileMeta.dismissRtlHint}
-            />
-            {isSubtitleFile && (
-              <button
-                className="rounded p-1.5 hover:bg-accent"
-                onClick={() => setVideoDialogOpen(true)}
-                title="Attach video"
-              >
-                <Film className="h-4 w-4" />
-              </button>
-            )}
+            {/* Contextual onboarding status — self-removes once setup completes. */}
             {checklistState.totalCount > 0 && checklistState.completedCount < checklistState.totalCount && (
               <TooltipProvider delay={0}>
                 <Tooltip open={showChipTooltip} onOpenChange={setShowChipTooltip}>
@@ -1261,22 +1248,44 @@ export function ProjectWorkspace() {
                 </Tooltip>
               </TooltipProvider>
             )}
-            <button
-              className="flex items-center gap-1.5 rounded p-1.5 text-sm hover:bg-accent"
-              onClick={() => {
-                setParallelMode("search")
-                setParallelScope(activeFileId ? "file" : "project")
-                setParallelOpen(true)
-              }}
-              title="Search & replace (⌘F)"
-            >
-              <SearchIcon className="h-4 w-4" />
-              <span className="hidden text-xs sm:inline">Search</span>
-            </button>
-            <NextUnfinishedButton
-              onClick={handleJumpNextUnfinished}
-              disabled={!activeFileId || !hasUnfinished}
-            />
+
+            {/* Utility tools — icon-only, grouped tight so they read as one set. */}
+            <div className="flex items-center gap-0.5">
+              <ViewSettingsMenu
+                fileOpen={Boolean(activeFileId)}
+                lineNumbersEnabled={fileMeta.lineNumbersEnabled}
+                sourceTextDirection={fileMeta.sourceTextDirection}
+                targetTextDirection={fileMeta.targetTextDirection}
+                cellLabelsEnabled={cellLabelsEnabled}
+                rtlHintDismissed={fileMeta.rtlHintDismissed}
+                onLineNumbersChange={fileMeta.setLineNumbersEnabled}
+                onSourceTextDirectionChange={fileMeta.setSourceTextDirection}
+                onTargetTextDirectionChange={fileMeta.setTargetTextDirection}
+                onCellLabelsChange={setCellLabelsEnabled}
+                onDismissRtlHint={fileMeta.dismissRtlHint}
+              />
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => {
+                  setParallelMode("search")
+                  setParallelScope(activeFileId ? "file" : "project")
+                  setParallelOpen(true)
+                }}
+                title="Search & replace (⌘F)"
+                aria-label="Search & replace"
+              >
+                <SearchIcon className="h-4 w-4" />
+              </Button>
+              <NextUnfinishedButton
+                onClick={handleJumpNextUnfinished}
+                disabled={!activeFileId || !hasUnfinished}
+              />
+            </div>
+
+            <div className="mx-1 h-5 w-px bg-border" aria-hidden="true" />
+
+            {/* Primary zone — mode toggle + the one prominent action. */}
             {project && (
               <EditorModeToggle projectId={project.id} mode="translate" activeFileId={activeFileId} />
             )}

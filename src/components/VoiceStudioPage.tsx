@@ -32,6 +32,7 @@ import { CellTtsButton } from "./CellTtsButton"
 import { CellAiStatusPopover } from "./CellAiStatusPopover"
 import { EditorModeToggle } from "./EditorModeToggle"
 import { VoiceLibraryPanel, VOICE_ASSIGN_MIME } from "./VoiceLibraryPanel"
+import { VersionTag } from "./VersionBadge"
 import { AudioRecordingModal } from "./AudioRecorder/AudioRecordingModal"
 import type { CellData } from "@/hooks/useCells"
 import type { ProjectRecord, ProjectTtsSettings, Voice } from "@/lib/parsers/types"
@@ -193,15 +194,18 @@ export function VoiceStudioPage() {
 
       <div className="flex min-h-0 flex-1">
         {/* Left rail — voice library */}
-        <aside className="w-[360px] shrink-0 border-r bg-muted/10">
-          <VoiceLibraryPanel
-            settings={project.ttsSettings}
-            onSettingsChange={saveTts}
-            targetLanguage={project.targetLanguage}
-            projectId={id}
-            fileId={fileId}
-            session={session ?? null}
-          />
+        <aside className="flex w-[360px] shrink-0 flex-col border-r bg-muted/10">
+          <div className="min-h-0 flex-1">
+            <VoiceLibraryPanel
+              settings={project.ttsSettings}
+              onSettingsChange={saveTts}
+              targetLanguage={project.targetLanguage}
+              projectId={id}
+              fileId={fileId}
+              session={session ?? null}
+            />
+          </div>
+          <VersionTag />
         </aside>
 
         {/* Right — transport + production list */}

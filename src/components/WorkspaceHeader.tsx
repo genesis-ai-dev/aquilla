@@ -26,11 +26,6 @@ export function WorkspaceHeader({ project, onBack, children, extraMenuItems }: P
         </button>
         <span className="text-muted-foreground/60">/</span>
         <span className="rounded-full px-2.5 py-1 font-medium truncate">{project.name}</span>
-        {(project.sourceLanguage || project.targetLanguage) && (
-          <span className="neu-inset rounded-full px-2.5 py-1 text-xs text-muted-foreground truncate">
-            {project.sourceLanguage || "?"} → {project.targetLanguage || "?"}
-          </span>
-        )}
       </nav>
       <div className="flex-1" />
       <div className="flex items-center gap-1 shrink-0">

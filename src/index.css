@@ -5,9 +5,11 @@
 
 @custom-variant dark (&:is(.dark *));
 
-/* Neumorphic surface helpers for arbitrary panels/divs that aren't shadcn
-   components. neu-raised lifts off the page; neu-inset carves into it. Both
-   sit on the shared surface color and use no hard border. */
+/* Surface helpers for arbitrary panels/divs that aren't shadcn components.
+   "Stripe" style: white cards float on the faint page background via soft drop
+   shadows — no visible borders (kept transparent to preserve layout box).
+   neu-raised = full card lift; neu-flat = a whisper of lift for flat panels;
+   neu-inset = a recessed well (faint grey fill + soft inner shadow). */
 @utility neu-raised {
   background-color: var(--card);
   box-shadow: var(--shadow-neu);
@@ -16,12 +18,12 @@
 
 @utility neu-flat {
   background-color: var(--card);
-  box-shadow: var(--shadow-neu-sm);
+  box-shadow: var(--shadow-neu-xs);
   border: 1px solid transparent;
 }
 
 @utility neu-inset {
-  background-color: var(--card);
+  background-color: var(--muted);
   box-shadow: var(--shadow-neu-inset);
   border: 1px solid transparent;
 }
@@ -72,19 +74,18 @@
     --radius-3xl: calc(var(--radius) * 2.2);
     --radius-4xl: calc(var(--radius) * 2.6);
 
-    /* Neumorphic elevation — the core of the design language. Symmetric
-       dual-tone shadows: a light highlight to the top-left (--neu-light) and an
-       equal dark shade to the bottom-right (--neu-dark), both close in value to
-       the shared surface so elements read as gently extruded (raised) or carved
-       (inset) from the same material. Used broadly: cards, rows, buttons,
-       inputs, bars, the sidebar. Only floating layers (modals/popovers/tooltips)
-       use the --shadow-soft-* drop shadows below. */
-    --shadow-neu-xs: 1px 1px 3px var(--neu-dark), -1px -1px 3px var(--neu-light);
-    --shadow-neu-sm: 3px 3px 7px var(--neu-dark), -3px -3px 7px var(--neu-light);
-    --shadow-neu: 5px 5px 12px var(--neu-dark), -5px -5px 12px var(--neu-light);
-    --shadow-neu-lg: 9px 9px 20px var(--neu-dark), -9px -9px 20px var(--neu-light);
-    --shadow-neu-inset: inset 3px 3px 7px var(--neu-dark), inset -3px -3px 7px var(--neu-light);
-    --shadow-neu-pressed: inset 2px 2px 4px var(--neu-dark), inset -2px -2px 4px var(--neu-light);
+    /* Elevation — flattened to a hybrid "enterprise" style. Formerly dual-tone
+       neumorphic (extruded/carved) shadows; now single-direction faint drop
+       shadows that pair with the hairline borders carried by surfaces. The
+       neu-* names are kept so the ~70 existing call sites need no change; they
+       now alias the --shadow-soft-* drop shadows below. Inset is a soft inner
+       shadow for recessed wells (inputs, tracks). */
+    --shadow-neu-xs: var(--shadow-soft-xs);
+    --shadow-neu-sm: var(--shadow-soft-sm);
+    --shadow-neu: var(--shadow-soft);
+    --shadow-neu-lg: var(--shadow-soft-lg);
+    --shadow-neu-inset: inset 0 1px 2px oklch(0.40 0.02 286 / 0.07);
+    --shadow-neu-pressed: inset 0 1px 3px oklch(0.40 0.02 286 / 0.11);
 
     /* Soft single-direction elevation — for modals, popovers, sheets,
        tooltips, and cards. One slate-tinted shadow at low alpha. */
@@ -115,34 +116,38 @@
     /* Gently rounded, not pill-soft. This base feeds the whole radius scale
        (rounded-lg = --radius, -xl = 1.4x, -2xl = 1.8x, -3xl = 2.2x), so tuning
        it here dials roundness everywhere at once. */
-    --radius: 0.5rem;
+    --radius: 0.375rem;
     /* Default palette: a soft, subtle BLUE — surface anchored at #f0f4f9. Same
        neumorphic recipe as before (the surface sits below a near-white highlight
        and above a slightly darker shade, depth comes from shadow not borders),
        just retuned to one cool hue (~250) at low chroma so the whole palette
        reads as a single material. Color-theme presets in
        [data-color-theme="…"] swap this for warm/sage/rose. */
-    --surface: oklch(0.955 0.012 250);
-    --background: var(--surface);
+    /* Stripe-style separation: cards are pure white, the page behind them is a
+       barely-there cool grey that reads as white but lets white cards lift via
+       shadow. Greys are near-neutral (chroma ~0.004); the blue lives only in
+       --primary/--accent so it reads as a brand pop, not a tint on everything. */
+    --surface: oklch(1 0 0);
+    --background: oklch(0.985 0.004 250);
     --foreground: oklch(0.34 0.018 250);
     --card: var(--surface);
     --card-foreground: oklch(0.34 0.018 250);
-    --popover: oklch(0.97 0.008 250);
+    --popover: oklch(1 0 0);
     --popover-foreground: oklch(0.34 0.018 250);
     /* Subtle muted blue — an accent, not a highlighter. Takes dark text. */
     --primary: oklch(0.78 0.07 245);
     --primary-foreground: oklch(0.28 0.04 250);
     --secondary: var(--surface);
     --secondary-foreground: oklch(0.40 0.022 248);
-    --muted: oklch(0.925 0.012 250);
-    --muted-foreground: oklch(0.52 0.018 248);
+    --muted: oklch(0.955 0.004 250);
+    --muted-foreground: oklch(0.52 0.014 250);
     /* Hover/chip surfaces get a whisper of blue. */
     --accent: oklch(0.89 0.038 248);
     --accent-foreground: oklch(0.38 0.06 248);
     --destructive: oklch(0.60 0.16 25);
     --destructive-foreground: oklch(0.97 0.01 250);
-    --border: oklch(0.88 0.014 248);
-    --input: oklch(0.92 0.012 250);
+    --border: oklch(0.915 0.004 250);
+    --input: oklch(0.955 0.004 250);
     --ring: oklch(0.72 0.09 245);
     --neu-light: oklch(0.99 0.005 250);
     --neu-dark: oklch(0.86 0.018 248);
@@ -210,6 +215,9 @@
                    0 2px 6px -2px oklch(0.05 0 0 / 0.30);
     --shadow-soft-lg: 0 18px 40px -10px oklch(0.05 0 0 / 0.60),
                       0 4px 10px -2px oklch(0.05 0 0 / 0.40);
+    /* Inset wells need a darker inner shadow to read against the dim surface. */
+    --shadow-neu-inset: inset 0 1px 2px oklch(0.05 0 0 / 0.45);
+    --shadow-neu-pressed: inset 0 1px 3px oklch(0.05 0 0 / 0.55);
   }
 
   * {

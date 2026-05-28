@@ -644,8 +644,22 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     <div ref={parentRef} className="h-full overflow-auto" onMouseUp={handleMouseUp}>
       <div className={cn("neu-flat sticky top-0 z-10 grid gap-2 px-4 py-2 text-xs font-medium uppercase tracking-wide text-muted-foreground", gridCols)}>
         <div />
-        <div>Source</div>
-        <div className="pl-3">Target</div>
+        <div className="flex items-center gap-2">
+          Source
+          {project.sourceLanguage && (
+            <span className="rounded-full bg-muted px-2 py-0.5 text-[10px] font-normal normal-case tracking-normal text-muted-foreground">
+              {project.sourceLanguage}
+            </span>
+          )}
+        </div>
+        <div className="flex items-center gap-2 pl-3">
+          Target
+          {project.targetLanguage && (
+            <span className="rounded-full bg-muted px-2 py-0.5 text-[10px] font-normal normal-case tracking-normal text-muted-foreground">
+              {project.targetLanguage}
+            </span>
+          )}
+        </div>
       </div>
 
       <div style={{ height: `${virtualizer.getTotalSize()}px`, width: "100%", position: "relative" }}>

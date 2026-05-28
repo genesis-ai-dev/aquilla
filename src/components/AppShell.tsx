@@ -1,4 +1,5 @@
 import type { ReactNode } from "react"
+import { VersionTag } from "./VersionBadge"
 
 // Project-wide z-index scale (Tailwind v4 dynamic):
 //   (no z) — in-flow chrome (workspace header, status bar, sidebar). It sits
@@ -29,6 +30,7 @@ export function AppShell({ sidebar, header, statusBar, beforeMain, main, aside }
     <div className="flex h-screen min-w-0">
       <aside className="neu-flat relative z-10 flex w-64 shrink-0 flex-col overflow-hidden">
         {sidebar}
+        <VersionTag />
       </aside>
       <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
         {header}

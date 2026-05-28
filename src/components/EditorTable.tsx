@@ -10,7 +10,7 @@ import type { CellData } from "@/hooks/useCells"
 import type { CodexCellAttachment, WordTiming } from "@/lib/codex-editor/types"
 import { useFileAudioAttachments } from "@/hooks/useFileAudioAttachments"
 import type { ScoredPair } from "@/lib/search/dual-index"
-import type { TranslationRule, RuleInfraction, ProjectRecord } from "@/lib/parsers/types"
+import type { TranslationRule, RuleInfraction, ProjectRecord, Voice, ProjectTtsSettings } from "@/lib/parsers/types"
 import { useProjectPermissions } from "@/hooks/useProjectPermissions"
 import { emitTargetCellCommit, emitCellValidate, emitCellUnvalidate } from "@/lib/sync/events-emit"
 import { ExamplePanel } from "./ExamplePanel"
@@ -44,6 +44,8 @@ import { categorizeAiError } from "@/lib/audio/ai-error"
 import { CellAiStatusPopover } from "./CellAiStatusPopover"
 import { CellNumberPill } from "./cell/CellNumberPill"
 import { cellCardClassName } from "./cell/cellCard"
+import { CellAudioLensStrip } from "./cell/CellAudioLensStrip"
+import { assignedCastVoiceId } from "@/lib/audio/voices"
 import { useNavigate } from "react-router-dom"
 import { cn } from "@/lib/utils"
 import { isPerfLogEnabled } from "@/lib/perf-log"
@@ -78,13 +80,17 @@ if (typeof window !== "undefined") {
  *  to the cell that's actually working, even if the row scrolls. Errors are
  *  click-to-expand: full message + actions (set Gemini key, dismiss). */
 function SynthStatusBadge({
-  status, cellId, projectId,
+  status, cellId, projectId, onOpenAudioSetup,
 }: {
   status: ReturnType<typeof useTtsStatus>
   cellId: string
   projectId: string
+  /** Switch to the Audio lens + open the cast/voice library to fix setup. */
+  onOpenAudioSetup?: () => void
 }) {
   const navigate = useNavigate()
+  const openVoiceSetup = () =>
+    onOpenAudioSetup ? onOpenAudioSetup() : navigate(`/project/${projectId}/voice`)
   if (status.kind === "loading") {
     const isTranslating = status.file === "Translating…"
     const pct = !isTranslating && status.total > 0
@@ -123,9 +129,9 @@ function SynthStatusBadge({
     const actions = []
     if (error.category === "missing-gemini-key") {
       actions.push({
-        label: "Open Voice Studio",
+        label: "Open audio setup",
         primary: true,
-        onClick: () => navigate(`/project/${projectId}/voice`),
+        onClick: openVoiceSetup,
       })
     } else if (
       error.category === "translation-not-configured" ||
@@ -136,8 +142,8 @@ function SynthStatusBadge({
       // Soft fixes — the popover body explains what to do; no inline action.
     } else {
       actions.push({
-        label: "Open Voice Studio",
-        onClick: () => navigate(`/project/${projectId}/voice`),
+        label: "Open audio setup",
+        onClick: openVoiceSetup,
       })
     }
     return (
@@ -242,10 +248,26 @@ export interface EditorTableHandle {
   flashCell: (cellId: string, searchTerm: string) => void
 }
 
+/** Per-cell audio production data + actions, supplied only when the editor is
+ *  in the Audio lens. When null/undefined the editor renders plain text mode. */
+export interface AudioLensContext {
+  voices: Voice[]
+  /** Hydrated TTS settings (cast assignments) — source of truth for who voices a line. */
+  settings: ProjectTtsSettings | undefined
+  /** The project's default/narrator voice id, used when a line has no explicit cast. */
+  defaultVoiceId: string
+  onAssignCast: (cellId: string, voiceId: string) => void
+  onGenerateCell: (cell: CellData) => void
+}
+
 interface EditorTableProps {
   project: ProjectRecord
   cells: CellData[]
   username: string
+  /** When set, each row shows the Audio-lens strip (speaker chip + generate). */
+  audioLens?: AudioLensContext | null
+  /** Switch to the Audio lens and open the cast/voice library (error recovery). */
+  onOpenAudioSetup?: () => void
   /** Called after a successful `target.cell.commit` enqueue so the parent
    *  refetches the cells projection. */
   onCellCommitted?: () => void | Promise<void>
@@ -324,6 +346,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   activeCueIndex, onSeekToCue,
   lineNumbersEnabled, cellLabelsEnabled, sourceTextDirection, targetTextDirection,
   isAnonymous, onJumpToCell, onAiSetupNeeded, onOpenRecording,
+  audioLens, onOpenAudioSetup,
   onProjectChanged,
   onCellCommitted,
   onOptimisticEdit,
@@ -715,6 +738,8 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
                 onJumpToCell={onJumpToCell}
                 onAiSetupNeeded={onAiSetupNeeded}
                 onOpenRecording={onOpenRecording}
+                audioLens={audioLens ?? null}
+                onOpenAudioSetup={onOpenAudioSetup}
                 onProjectChanged={onProjectChanged}
                 onDragStart={handleDragStart}
                 onDragEnter={handleDragEnter}
@@ -788,6 +813,8 @@ interface MemoizedRowProps {
   onJumpToCell?: (cellId: string) => void
   onAiSetupNeeded?: () => void
   onOpenRecording?: (cellId: string) => void
+  audioLens: AudioLensContext | null
+  onOpenAudioSetup?: () => void
   onProjectChanged?: () => void
   onDragStart: (cellId: string) => void
   onDragEnter: (cellId: string) => void
@@ -816,6 +843,7 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
     onSeekToCue, lineNumbersEnabled, cellLabelsEnabled,
     sourceTextDirection, targetTextDirection, isAnonymous,
     onJumpToCell, onAiSetupNeeded, onOpenRecording, onProjectChanged,
+    audioLens, onOpenAudioSetup,
     onCellCommitted, onOptimisticEdit, lockHolderLabel, remoteChangedWhileFocused,
     onClaimCell, onReleaseCell, onAckRemoteChange,
     isStaleSource,
@@ -913,6 +941,8 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
         onJumpToCell={onJumpToCell}
         onAiSetupNeeded={onAiSetupNeeded}
         onOpenRecording={onOpenRecording}
+        audioLens={audioLens}
+        onOpenAudioSetup={onOpenAudioSetup}
         onProjectChanged={onProjectChanged}
         onDragStart={handleDragStart}
         onDragEnter={handleDragEnter}
@@ -989,6 +1019,8 @@ interface EditorRowProps {
   onJumpToCell?: (cellId: string) => void
   onAiSetupNeeded?: () => void
   onOpenRecording?: (cellId: string) => void
+  audioLens: AudioLensContext | null
+  onOpenAudioSetup?: () => void
   onProjectChanged?: () => void
   getTokenForFile?: (fileId: string) => Promise<string | null>
 }
@@ -1005,6 +1037,7 @@ function EditorRow({
   onDragStart, onDragEnter, onSelectionPointerDown,
   rowIndex, lineNumbersEnabled, cellLabelsEnabled, sourceTextDirection, targetTextDirection, gridCols,
   isAnonymous, onAiSetupNeeded, onOpenRecording,
+  audioLens, onOpenAudioSetup,
   onCellCommitted, onOptimisticEdit, lockHolderLabel, remoteChangedWhileFocused,
   onClaimCell, onReleaseCell, onAckRemoteChange,
   isStaleSource,
@@ -1635,7 +1668,7 @@ function EditorRow({
           {numberPill}
           <div className="flex flex-col items-center gap-1">
             {(isSynthBusy || isSynthError) && (
-              <SynthStatusBadge status={synthStatus} cellId={cell.id} projectId={project.id} />
+              <SynthStatusBadge status={synthStatus} cellId={cell.id} projectId={project.id} onOpenAudioSetup={onOpenAudioSetup} />
             )}
             {validationButton}
           </div>
@@ -1789,6 +1822,21 @@ function EditorRow({
               )}
             </div>
             {error && <p className="mt-0.5 text-xs text-destructive">{error}</p>}
+            {audioLens && hasContent && (() => {
+              const vid = assignedCastVoiceId(audioLens.settings, cell.id) ?? audioLens.defaultVoiceId
+              const voice = audioLens.voices.find((v) => v.id === vid)
+              return (
+                <CellAudioLensStrip
+                  cellId={cell.id}
+                  voice={voice}
+                  voices={audioLens.voices}
+                  hasGeneratedVoice={hasGeneratedVoice}
+                  disabled={!editable}
+                  onAssign={(voiceId) => audioLens.onAssignCast(cell.id, voiceId)}
+                  onGenerate={() => audioLens.onGenerateCell(cell)}
+                />
+              )
+            })()}
           </div>
         </div>
 

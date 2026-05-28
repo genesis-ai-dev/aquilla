@@ -7,7 +7,7 @@
 // CI workflows, or remote resources — local iteration only.
 //
 // What runs:
-//   * auth-worker   on 127.0.0.1:8788       (always — also serves /api/chat
+//   * auth-worker   on 127.0.0.1:8788       (always — also serves /chat
 //                                            since the chat-worker was folded
 //                                            in on 2026-05-26)
 //   * sync-worker   on 127.0.0.1:8789       (always)
@@ -206,10 +206,12 @@ function writeManagedEnvFile(): void {
     WITHOUT_SYNC
       ? `# VITE_SYNC_WORKER_HOST omitted — booted with --no-sync.`
       : `VITE_SYNC_WORKER_HOST=127.0.0.1:${SYNC_PORT}`,
-    // Identity worker also serves /api/chat (folded in from the former
+    // Identity worker also serves /chat (folded in from the former
     // chat-worker). The prefix-strip middleware in auth-worker/src/index.ts
-    // turns /api/chat/api/v1/... into /api/v1/... before routing.
-    `VITE_CHAT_BASE=http://127.0.0.1:${IDENTITY_PORT}/api/chat`,
+    // turns /chat/api/v1/... into /api/v1/... before routing — mirrors the
+    // prod mount at api.aquilla.app/chat/*. (Pre-2026-05-27 this was
+    // /api/chat under the aquilla.app apex; the dev URL changed to match.)
+    `VITE_CHAT_BASE=http://127.0.0.1:${IDENTITY_PORT}/chat`,
     "",
   ]
   writeFileSync(MANAGED_ENV_FILE, lines.join("\n"))
@@ -355,7 +357,7 @@ async function main(): Promise<void> {
     sync
       ? `         sync     -> http://127.0.0.1:${SYNC_PORT}/  (logs: ${path.relative(REPO_ROOT, path.join(LOG_DIR, "sync.log"))})`
       : `         sync     -> skipped (--no-sync)`,
-    `         chat     -> http://127.0.0.1:${IDENTITY_PORT}/api/chat/  (served by identity worker)`,
+    `         chat     -> http://127.0.0.1:${IDENTITY_PORT}/chat/  (served by identity worker)`,
     `         state    -> ${path.relative(REPO_ROOT, PERSIST_DIR)}/  (delete to reset local D1)`,
     "[dev-stack] press Ctrl+C to stop",
     "",

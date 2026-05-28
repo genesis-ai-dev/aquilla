@@ -3,21 +3,28 @@ main = "src/index.ts"
 compatibility_date = "2024-12-01"
 compatibility_flags = ["nodejs_compat"]
 account_id = "6a80496d1e59948a9cbaa3c643ba81d7"
-# Browser-facing mount: same-origin under aquilla.app so Safari (which drops
-# *.workers.dev) works. The worker strips the /api/identity prefix (index.ts).
+# Browser-facing mount: api.aquilla.app/identity/* (and api.aquilla.app/chat/*).
+# Auth uses bearer tokens, never cookies, so cross-subdomain calls from
+# web.aquilla.app are fine — see CORS_HEADERS in src/index.ts. Safari drops
+# *.workers.dev WebSockets, which is why the API lives on a real zone and
+# not the workers.dev URL. The worker strips the /identity or /chat prefix
+# (index.ts) before handing off to the route handlers.
 #
 # NO `routes` in this top-level (CI) config ON PURPOSE. CI's token lacks
 # zone-route permission (Authentication error [10000] on /zones/.../workers/
 # routes), so a routed deploy fails. CI therefore deploys CODE only; the
-# `aquilla.app/api/identity/*` zone route is managed out-of-band (CF
+# `api.aquilla.app/identity/*` zone route is managed out-of-band (CF
 # dashboard, or a local `wrangler deploy` with a token that has zone perms).
 # A no-routes deploy does NOT remove existing routes, so the live mount is
 # preserved across CI deploys — same pattern as sync-worker.
 #
-# Chat: /api/chat/* is still owned by `codex-chat-worker` (the 93dbe4f fold
-# was never completed on prod; chat works there). Not claimed here — doing so
-# would also conflict [10020]. Finishing the fold = detach that route from
-# codex-chat-worker, then ensure OPENROUTER_API_KEY is on aquilla-identity.
+# Chat: /chat/* on api.aquilla.app is still pending fold-in from the legacy
+# codex-chat-worker (the 93dbe4f fold was never completed on prod; chat
+# works there at the old /api/chat/* mount). Not claimed here — doing so
+# would also conflict [10020]. Finishing the fold = detach the legacy
+# aquilla.app/api/chat/* route from codex-chat-worker, attach
+# api.aquilla.app/chat/* to aquilla-identity, then ensure OPENROUTER_API_KEY
+# is on aquilla-identity.
 
 # Phase D: auth-worker is the full identity surface. AQUILLA_DB owns the
 # complete schema (identity + orgs + projects + members + invites + file/cell
@@ -44,8 +51,10 @@ migrations_dir = "migrations"
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = "43200"
 EMAIL_FROM = "noreply@aquilla.app"
-BASE_URL = "https://aquilla.app"
-SYNC_WORKER_URL = "https://aquilla.app/api/sync"
+# BASE_URL points at the SPA, not the API or the marketing apex — used to
+# construct password-reset / invite links sent in email.
+BASE_URL = "https://web.aquilla.app"
+SYNC_WORKER_URL = "https://api.aquilla.app/sync"
 DEFAULT_LLM_MODEL = "anthropic/claude-sonnet-4.5"
 ENVIRONMENT = "production"
 
@@ -59,8 +68,8 @@ ENVIRONMENT = "production"
 name = "aquilla-dev-identity"
 account_id = "6a80496d1e59948a9cbaa3c643ba81d7"
 routes = [
-  "dev.aquilla.app/api/identity/*",
-  "dev.aquilla.app/api/chat/*",
+  "api.dev.aquilla.app/identity/*",
+  "api.dev.aquilla.app/chat/*",
 ]
 
 [[env.staging.d1_databases]]
@@ -73,6 +82,6 @@ migrations_dir = "migrations"
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = "43200"
 EMAIL_FROM = "noreply@aquilla.app"
-BASE_URL = "https://dev.aquilla.app"
+BASE_URL = "https://web.dev.aquilla.app"
 DEFAULT_LLM_MODEL = "anthropic/claude-sonnet-4.5"
 ENVIRONMENT = "staging"

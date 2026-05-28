@@ -100,25 +100,28 @@ jobs:
           fi
 
       # Branch → worker host mapping:
-      #   main                        → prod          (codex-sync-worker.*)
-      #   PR with migrations          → per-PR fork   (codex-sync-worker-pr-<N>.*)
-      #   anything else (dev, PR)     → staging       (codex-sync-worker-staging.*)
+      #   main                        → prod          (aquilla-sync-worker)
+      #   PR with migrations          → per-PR fork   (aquilla-sync-worker-pr-<N>)
+      #   anything else (dev, PR)     → staging       (aquilla-sync-worker-staging)
       # VITE_AUTH_BASE targets aquilla-identity for auth / sync-token /
       # invite routes. VITE_CHAT_BASE targets aquilla-identity's
-      # /api/chat mount for the LLM completion proxy (folded in from the
+      # /chat mount for the LLM completion proxy (folded in from the
       # former aquilla-chat-worker on 2026-05-26 — same JWT secret, one
       # worker). The rest of the frontier API (payments,
-      # members, orgs — none of which codex-web calls today) would still
+      # members, orgs — none of which the SPA calls today) would still
       # use VITE_FRONTIER_BASE if we ever needed it.
       - run: npm run build
         if: steps.decide.outputs.deploy == 'true'
         env:
-          # Same-origin API mounts under the app's own domain (Safari drops
-          # *.workers.dev). Workers claim aquilla.app/api/{identity,sync,chat}/*
-          # via Workers Routes and strip the prefix internally.
-          VITE_SYNC_WORKER_HOST: ${{ github.ref == 'refs/heads/main' && 'aquilla.app/api/sync' || 'dev.aquilla.app/api/sync' }}
-          VITE_AUTH_BASE: ${{ github.ref == 'refs/heads/main' && 'https://aquilla.app/api/identity' || 'https://dev.aquilla.app/api/identity' }}
-          VITE_CHAT_BASE: ${{ github.ref == 'refs/heads/main' && 'https://aquilla.app/api/chat' || 'https://dev.aquilla.app/api/chat' }}
+          # API lives on its own subdomain (api.aquilla.app) — separate from
+          # the SPA (web.aquilla.app) and the marketing apex (aquilla.app).
+          # Auth is bearer-token-only so cross-subdomain CORS is permitted
+          # (see CORS_HEADERS in auth-worker/src/index.ts). Safari drops
+          # *.workers.dev WebSockets, which is why sync stays on a real zone
+          # via Workers Routes; the worker strips its /sync prefix internally.
+          VITE_SYNC_WORKER_HOST: ${{ github.ref == 'refs/heads/main' && 'api.aquilla.app/sync' || 'api.dev.aquilla.app/sync' }}
+          VITE_AUTH_BASE: ${{ github.ref == 'refs/heads/main' && 'https://api.aquilla.app/identity' || 'https://api.dev.aquilla.app/identity' }}
+          VITE_CHAT_BASE: ${{ github.ref == 'refs/heads/main' && 'https://api.aquilla.app/chat' || 'https://api.dev.aquilla.app/chat' }}
 
       # Workers' static-assets parser rejects the SPA `/*  /index.html  200`
       # rule in _redirects (error 100324 — "infinite loop"). SPA fallback is

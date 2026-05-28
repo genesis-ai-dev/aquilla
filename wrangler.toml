@@ -6,10 +6,12 @@
 #
 # Account: Frontier R&D (6a80496d1e59948a9cbaa3c643ba81d7)
 #
-# Backend Workers (aquilla-identity, aquilla-sync-worker) are reached from the
-# browser via zone routes on aquilla.app/api/*, so no service bindings needed
-# here — the SPA just fetch()es relative paths once aquilla.app points at this
-# Worker.
+# Backend Workers (aquilla-identity, aquilla-sync-worker) are reached from
+# the browser via Workers Routes on the api.aquilla.app subdomain (paths
+# /identity/*, /sync/*, /chat/*). Cross-subdomain calls work because auth is
+# bearer-token-only and both workers use `Access-Control-Allow-Origin: *`.
+# No service bindings needed — the SPA fetch()es absolute URLs from
+# VITE_AUTH_BASE / VITE_SYNC_WORKER_HOST / VITE_CHAT_BASE wired in deploy.yml.
 
 name = "aquilla-web"
 account_id = "6a80496d1e59948a9cbaa3c643ba81d7"
@@ -30,10 +32,11 @@ directory = "./dist"
 not_found_handling = "single-page-application"
 
 # NO `routes` here yet — first deploy goes to aquilla-web.<subdomain>.workers.dev
-# for smoke testing. Once verified, detach aquilla.app from the codex-web Pages
-# project and add the route here (or via dashboard):
+# for smoke testing. Once verified, attach web.aquilla.app via the dashboard
+# (or uncomment below and deploy locally with a zone-perm token):
 #
-#   routes = [{ pattern = "aquilla.app/*", zone_name = "aquilla.app" }]
+#   routes = [{ pattern = "web.aquilla.app/*", zone_name = "aquilla.app" }]
 #
-# Note the existing /api/identity/* and /api/sync/* routes on the backend
-# Workers take precedence over a /* route on this Worker, so they keep working.
+# The API lives on api.aquilla.app/{identity,sync,chat}/* on separate Workers,
+# so there's no route overlap with this one. The marketing apex (aquilla.app)
+# is whatever you point it at separately — it's not this Worker.

@@ -8,17 +8,18 @@ export const DEFAULT_SYSTEM_PROMPT =
   "Match the tone and formality of the provided examples. Return only the translated text — no explanations, no source text, no commentary."
 
 // VITE_CHAT_BASE points at the chat-completion proxy. Since 2026-05-26 this
-// is the aquilla-identity worker (mounted at aquilla.app/api/chat — the
+// is the aquilla-identity worker (mounted at api.aquilla.app/chat — the
 // former aquilla-chat-worker was folded in to consolidate the JWT secret).
-// CI wires it per-branch (prod → https://aquilla.app/api/chat, anything else
-// → https://dev.aquilla.app/api/chat).
+// CI wires it per-branch (prod → https://api.aquilla.app/chat, anything else
+// → https://api.dev.aquilla.app/chat). Pre-migration the URL was
+// aquilla.app/api/chat under the apex.
 // VITE_FRONTIER_BASE is retained as a fallback so the E2E suite — which
 // spins up a mock LLM server and sets that env var — keeps working.
 const CHAT_BASE_FALLBACK =
   ((import.meta.env.VITE_FRONTIER_BASE as string | undefined)?.replace(/\/+$/, "")) || ""
 const CHAT_BASE_OVERRIDE =
   ((import.meta.env.VITE_CHAT_BASE as string | undefined)?.replace(/\/+$/, "")) || ""
-export const FRONTIER_CHAT_URL = `${CHAT_BASE_OVERRIDE || CHAT_BASE_FALLBACK || "https://aquilla.app/api/chat"}/api/v1/chat/completions`
+export const FRONTIER_CHAT_URL = `${CHAT_BASE_OVERRIDE || CHAT_BASE_FALLBACK || "https://api.aquilla.app/chat"}/api/v1/chat/completions`
 
 interface ChatMessage { role: "system" | "user" | "assistant"; content: string }
 

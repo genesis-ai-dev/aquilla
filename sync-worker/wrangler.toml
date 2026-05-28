@@ -56,8 +56,11 @@ database_id = "11828e9d-998b-4d3f-a405-91d9f624f94a"
 #   some reason, set ALLOW_UNAUTHENTICATED="true" via `wrangler secret put`.
 
 # ---------------------------------------------------------------------------
-# Production environment — routes traffic via aquilla.app/api/sync/* so
-# Safari (which blocks *.workers.dev WebSockets) hits the real zone.
+# Production environment — routes traffic via api.aquilla.app/sync/* so
+# Safari (which blocks *.workers.dev WebSockets) hits the real zone, and so
+# the API surface lives on its own subdomain independent of the web app.
+# Pre-migration this was mounted at aquilla.app/api/sync/*; the path-strip
+# in src/index.ts (APEX_PREFIX) handles the new shape transparently.
 # NOTE: CI strips `routes` lines before deploying (its token lacks
 # zone-route perms). Routes are created out-of-band via CF dashboard or
 # local `wrangler deploy --env production`.
@@ -65,7 +68,7 @@ database_id = "11828e9d-998b-4d3f-a405-91d9f624f94a"
 [env.production]
 name = "aquilla-sync-worker"
 account_id = "6a80496d1e59948a9cbaa3c643ba81d7"
-routes = ["aquilla.app/api/sync/*"]
+routes = ["api.aquilla.app/sync/*"]
 
 [[env.production.durable_objects.bindings]]
 name = "ProjectSync"
@@ -102,7 +105,7 @@ database_id = "11828e9d-998b-4d3f-a405-91d9f624f94a"
 [env.staging]
 name = "aquilla-sync-worker-staging"
 account_id = "6a80496d1e59948a9cbaa3c643ba81d7"
-routes = ["dev.aquilla.app/api/sync/*"]
+routes = ["api.dev.aquilla.app/sync/*"]
 
 [[env.staging.durable_objects.bindings]]
 name = "ProjectSync"

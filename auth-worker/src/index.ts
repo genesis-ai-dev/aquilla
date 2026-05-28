@@ -77,13 +77,14 @@ const CORS_HEADERS: Record<string, string> = {
 }
 
 // Workers Routes mount: this worker is routed under two prefixes on the
-// aquilla.app zone — `/api/identity/*` for the identity surface (v1/v2 auth,
-// orgs, projects, invites…) and `/api/chat/*` for the OpenRouter proxy
-// (folded in from the former aquilla-chat-worker, 2026-05-26). Strip
+// api.aquilla.app subdomain — `/identity/*` for the identity surface
+// (v1/v2 auth, orgs, projects, invites…) and `/chat/*` for the OpenRouter
+// proxy (folded in from the former aquilla-chat-worker, 2026-05-26). Strip
 // whichever prefix matched so the bare `/api/v1/…` / `/api/v2/…` paths
-// declared on the routers work unchanged.
+// declared on the routers work unchanged. Pre-migration these were
+// `/api/identity` and `/api/chat` under the aquilla.app apex.
 app.use("*", async (c, next) => {
-  for (const prefix of ["/api/identity", "/api/chat"]) {
+  for (const prefix of ["/identity", "/chat"]) {
     if (c.req.path.startsWith(prefix)) {
       const url = new URL(c.req.url)
       url.pathname = url.pathname.slice(prefix.length) || "/"
@@ -143,7 +144,7 @@ app.route("/api/v2/invites", invitesRoutes)
 
 // Chat-completion proxy to OpenRouter (formerly aquilla-chat-worker). The
 // path is kept at /api/v1/chat/completions so the codex-web client doesn't
-// need to change — it just points VITE_CHAT_BASE at aquilla.app/api/chat.
+// need to change — it just points VITE_CHAT_BASE at api.aquilla.app/chat.
 app.route("/api/v1/chat", chatRoutes)
 
 // Test-only reset endpoint (WRANGLER_LOCAL only — see routes/test-reset.ts).

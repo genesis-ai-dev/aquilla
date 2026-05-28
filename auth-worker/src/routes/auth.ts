@@ -297,7 +297,7 @@ auth.post(
         .run()
 
       const encodedUsername = encodeURIComponent(user.username)
-      const baseUrl = c.env.BASE_URL || "https://codex-web.pages.dev"
+      const baseUrl = c.env.BASE_URL || "https://web.aquilla.app"
       const resetUrl = `${baseUrl}/reset-password?token=${token}&username=${encodedUsername}`
       await sendPasswordResetEmail(c.env, email, resetUrl)
 

@@ -84,12 +84,13 @@ function routeProjectSync(request: Request, env: Env): Response | Promise<Respon
   return stub.fetch(new Request(inner.toString(), request))
 }
 
-/** Path prefix when the worker is mounted under the apex via Workers Routes
- *  (`aquilla.app/api/sync/*`). Stripped before any routing so the handlers
- *  keep their bare paths (`/events`, `/parties/...`, `/api/v1/...`). Mirrors
- *  identity's `/api/identity` strip. Conditional, so direct `workers.dev` /
- *  local `wrangler dev` calls (no prefix) keep working unchanged. */
-const APEX_PREFIX = "/api/sync"
+/** Path prefix when the worker is mounted under the API subdomain via
+ *  Workers Routes (`api.aquilla.app/sync/*`). Stripped before any routing so
+ *  the handlers keep their bare paths (`/events`, `/parties/...`,
+ *  `/api/v1/...`). Mirrors identity's `/identity` strip. Conditional, so
+ *  direct `workers.dev` / local `wrangler dev` calls (no prefix) keep
+ *  working unchanged. Pre-migration this was `/api/sync` under the apex. */
+const APEX_PREFIX = "/sync"
 
 function stripApexPrefix(request: Request): Request {
   const url = new URL(request.url)

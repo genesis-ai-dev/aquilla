@@ -10,12 +10,13 @@
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { useParams, useNavigate } from "react-router-dom"
 import {
-  AlertCircle, ArrowLeft, CheckCircle2, Loader2, Pause, Play, RefreshCw,
+  AlertCircle, ArrowLeft, CheckCircle2, Loader2, Mic, Pause, Play, RefreshCw,
   SkipBack, SkipForward, Sparkles, Square, Volume2,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 import { getProject, patchProject } from "@/lib/store/project-index"
+import { useProject } from "@/hooks/useProject"
 import { useCells } from "@/hooks/useCells"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { getVoiceLibrary, resolveVoice } from "@/lib/audio/voices"
@@ -31,6 +32,7 @@ import { CellTtsButton } from "./CellTtsButton"
 import { CellAiStatusPopover } from "./CellAiStatusPopover"
 import { EditorModeToggle } from "./EditorModeToggle"
 import { VoiceLibraryPanel, VOICE_ASSIGN_MIME } from "./VoiceLibraryPanel"
+import { AudioRecordingModal } from "./AudioRecorder/AudioRecordingModal"
 import type { CellData } from "@/hooks/useCells"
 import type { ProjectRecord, ProjectTtsSettings, Voice } from "@/lib/parsers/types"
 
@@ -38,29 +40,34 @@ export function VoiceStudioPage() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
   const { session } = useFrontierSession()
-  const [project, setProject] = useState<ProjectRecord | null>(null)
-  const [loading, setLoading] = useState(true)
+  const { project: serverProject, status } = useProject(id ?? "")
+  const loading = status === "loading"
   const [fileId, setFileId] = useState<string | null>(null)
   const [busy, setBusy] = useState<Set<string>>(new Set())
   const [batchProgress, setBatchProgress] = useState<{ done: number; total: number } | null>(null)
   // Per-row voice override (defaults to the project default).
   const [rowVoice, setRowVoice] = useState<Record<string, string>>({})
-
-  const refresh = useCallback(() => {
-    if (!id) return
-    void getProject(id).then((p) => { if (p) setProject(p) })
-  }, [id])
+  // Booth-mode recording: when set, the AudioRecordingModal is open at this cell.
+  const [recordCellId, setRecordCellId] = useState<string | null>(null)
+  // TTS settings live in local IDB (engine, voices, API key). useProject reads
+  // the server record, which doesn't include ttsSettings — so we hydrate the
+  // local layer separately and overlay it onto the project for consumers.
+  const [localTts, setLocalTts] = useState<ProjectTtsSettings | undefined>(undefined)
 
   useEffect(() => {
     if (!id) return
-    void getProject(id).then((p) => {
-      if (p) {
-        setProject(p)
-        setFileId((cur) => cur ?? p.files[0]?.id ?? null)
-      }
-      setLoading(false)
-    })
+    void getProject(id).then((p) => { if (p) setLocalTts(p.ttsSettings) })
   }, [id])
+
+  const project = useMemo<ProjectRecord | null>(() => {
+    if (!serverProject) return null
+    return { ...serverProject, ttsSettings: localTts ?? serverProject.ttsSettings }
+  }, [serverProject, localTts])
+
+  useEffect(() => {
+    if (!project) return
+    setFileId((cur) => cur ?? project.files[0]?.id ?? null)
+  }, [project])
 
   const username = session?.username ?? project?.username ?? "anonymous"
 
@@ -91,10 +98,14 @@ export function VoiceStudioPage() {
   const saveTts = useCallback(
     async (overrides: Partial<ProjectTtsSettings>) => {
       if (!id) return
+      // Optimistic local update so the engine toggle reflects the choice
+      // immediately. patchProject persists to IDB; useProject's server-fetched
+      // record doesn't carry ttsSettings, so refresh() would otherwise stomp
+      // any local change.
+      setLocalTts((cur) => ({ ...(cur ?? {}), ...overrides } as ProjectTtsSettings))
       await patchProject(id, (p) => ({ ...p, ttsSettings: { ...p.ttsSettings, ...overrides } }))
-      refresh()
     },
-    [id, refresh],
+    [id],
   )
 
   const generatableCells = useMemo(
@@ -103,6 +114,11 @@ export function VoiceStudioPage() {
   )
   const voicedCount = generatableCells.filter((c) => c.selectedGeneratedVoiceAudioId).length
   const pendingCount = generatableCells.length - voicedCount
+  const recordedCount = generatableCells.filter((c) => c.selectedAudioId).length
+  const firstUnrecordedCellId = useMemo(
+    () => generatableCells.find((c) => !c.selectedAudioId)?.id ?? generatableCells[0]?.id ?? null,
+    [generatableCells],
+  )
 
   const generateOne = useCallback(
     async (cell: CellData) => {
@@ -255,6 +271,18 @@ export function VoiceStudioPage() {
               </select>
             )}
 
+            <Button
+              variant="outline" size="sm" className="h-8"
+              onClick={() => { if (firstUnrecordedCellId) { stopQueue(); setRecordCellId(firstUnrecordedCellId) } }}
+              disabled={!firstUnrecordedCellId || Boolean(batchProgress)}
+              title="Record takes — booth mode (Space to start, ←/→ to navigate)"
+            >
+              <Mic className="mr-1 h-3.5 w-3.5" /> Record takes
+              <span className="ml-1 tabular-nums opacity-70">
+                ({recordedCount}/{generatableCells.length})
+              </span>
+            </Button>
+
             {batchProgress ? (
               <Button variant="outline" size="sm" disabled className="h-8">
                 <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />
@@ -286,6 +314,7 @@ export function VoiceStudioPage() {
                   const hasText = cell.type !== "paratext" && Boolean(cell.translated?.trim())
                   if (!hasText) return null
                   const hasAudio = Boolean(cell.selectedGeneratedVoiceAudioId)
+                  const hasRecording = Boolean(cell.selectedAudioId)
                   const isBusy = busy.has(cell.id)
                   const selectedRowVoice = rowVoice[cell.id] ?? defaultVoiceId
                   const voice = voicesById.get(selectedRowVoice)
@@ -297,6 +326,7 @@ export function VoiceStudioPage() {
                       project={project}
                       projectId={id}
                       hasAudio={hasAudio}
+                      hasRecording={hasRecording}
                       isBusy={isBusy}
                       batchRunning={Boolean(batchProgress)}
                       isPlaying={isPlaying}
@@ -305,6 +335,7 @@ export function VoiceStudioPage() {
                       selectedRowVoice={selectedRowVoice}
                       onAssignVoice={(vid) => setRowVoice((m) => ({ ...m, [cell.id]: vid }))}
                       onGenerate={() => void generateOne(cell)}
+                      onRecord={() => { stopQueue(); setRecordCellId(cell.id) }}
                       session={session ?? null}
                     />
                   )
@@ -314,6 +345,16 @@ export function VoiceStudioPage() {
           </div>
         </div>
       </div>
+
+      <AudioRecordingModal
+        open={recordCellId !== null}
+        project={project}
+        cells={generatableCells}
+        activeCellId={recordCellId}
+        username={username}
+        onActiveCellChange={(cid) => setRecordCellId(cid)}
+        onClose={() => setRecordCellId(null)}
+      />
     </div>
   )
 }
@@ -329,6 +370,7 @@ interface RowProps {
   project: ProjectRecord
   projectId: string
   hasAudio: boolean
+  hasRecording: boolean
   isBusy: boolean
   batchRunning: boolean
   isPlaying: boolean
@@ -337,12 +379,13 @@ interface RowProps {
   selectedRowVoice: string
   onAssignVoice: (voiceId: string) => void
   onGenerate: () => void
+  onRecord: () => void
   session: import("@/lib/frontier/types").FrontierSession | null
 }
 
 function ProductionRow({
-  cell, project, projectId, hasAudio, isBusy, batchRunning, isPlaying,
-  voices, voice, selectedRowVoice, onAssignVoice, onGenerate,
+  cell, project, projectId, hasAudio, hasRecording, isBusy, batchRunning, isPlaying,
+  voices, voice, selectedRowVoice, onAssignVoice, onGenerate, onRecord,
 }: RowProps) {
   const [dropActive, setDropActive] = useState(false)
   const status = useTtsStatus(ttsStatusKey(cell.id))
@@ -444,6 +487,17 @@ function ProductionRow({
           : hasAudio ? <RefreshCw className="mr-1 h-3.5 w-3.5" />
           : <Volume2 className="mr-1 h-3.5 w-3.5" />}
         {hasAudio ? "Regenerate" : "Generate"}
+      </Button>
+
+      <Button
+        variant={hasRecording ? "ghost" : "outline"}
+        size="sm"
+        className="h-7 shrink-0"
+        onClick={onRecord}
+        title={hasRecording ? "Re-record this cell" : "Record a take for this cell"}
+      >
+        <Mic className={cn("mr-1 h-3.5 w-3.5", hasRecording && "text-emerald-600 dark:text-emerald-400")} />
+        {hasRecording ? "Re-record" : "Record"}
       </Button>
     </div>
   )

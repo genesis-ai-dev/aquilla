@@ -19,6 +19,8 @@ import { pushAudioShortcutOverride } from "@/lib/audio/audio-coordinator"
 import { useCountdown } from "./useCountdown"
 import { AudioWaveform } from "./AudioWaveform"
 import { DurationBar } from "./DurationBar"
+import { TakesStrip } from "./TakesStrip"
+import { useFileAudioAttachments } from "@/hooks/useFileAudioAttachments"
 import { buildAudioId, uploadCellAudio, deleteCellAudio } from "@/lib/audio/upload"
 import { emitCellAudioAttach } from "@/lib/sync/events-emit"
 import { notifyAudioAttachmentsChanged } from "@/lib/audio/audio-attachments-bus"
@@ -60,6 +62,17 @@ export function AudioRecordingModal({
   const targetSec = activeCell && activeCell.startTime != null && activeCell.endTime != null
     ? Math.max(0, activeCell.endTime - activeCell.startTime)
     : null
+
+  // Recording-slot takes for the active cell — drives the takes strip. The bus
+  // refetch (poked on save below) keeps this fresh as new takes land.
+  const { byCellId } = useFileAudioAttachments(open ? project.id : null, open ? (activeCell?.fileId ?? null) : null)
+  const audioEntry = activeCell ? byCellId.get(activeCell.id) : undefined
+  const recordingTakes = useMemo(
+    () => Object.values(audioEntry?.attachments ?? {})
+      .filter((a) => a.slot === "recording")
+      .sort((a, b) => a.audioId.localeCompare(b.audioId)),
+    [audioEntry],
+  )
 
   // Whenever the user switches cells, reset the capture state so the new cell
   // opens fresh.
@@ -252,7 +265,7 @@ export function AudioRecordingModal({
 
   return (
     <Dialog open={open} onOpenChange={(next) => { if (!next) onClose() }}>
-      <DialogContent className="max-w-2xl gap-0 p-0" showCloseButton={false}>
+      <DialogContent className="max-w-3xl gap-0 p-0" showCloseButton={false}>
         <DialogTitle className="sr-only">
           Record audio — {activeCell.cellLabel ?? `Cell ${activeIndex + 1}`}
         </DialogTitle>
@@ -273,13 +286,15 @@ export function AudioRecordingModal({
               </span>
             </div>
             <div className="space-y-0.5">
-              <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground/70">Source</div>
-              <div className="text-sm leading-snug">{activeCell.original || <span className="italic text-muted-foreground/60">empty</span>}</div>
+              <div className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground/60">Source</div>
+              <div className="text-xs leading-snug text-muted-foreground">
+                {activeCell.original || <span className="italic text-muted-foreground/60">empty</span>}
+              </div>
             </div>
-            <div className="space-y-0.5 pt-1">
-              <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground/70">Target</div>
-              <div className="text-sm leading-snug">
-                {activeCell.translated || <span className="italic text-muted-foreground/60">not translated</span>}
+            <div className="space-y-1 pt-2">
+              <div className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground/60">Read aloud</div>
+              <div className="text-2xl font-medium leading-relaxed">
+                {activeCell.translated || <span className="italic text-base text-muted-foreground/60">not translated</span>}
               </div>
             </div>
           </div>
@@ -387,6 +402,19 @@ export function AudioRecordingModal({
             </div>
           )}
         </div>
+
+        {/* Takes — audition / circle / delete prior recordings for this cell. */}
+        {(phase === "idle" || phase === "preview" || phase === "saved" || phase === "error") && activeCell && (
+          <TakesStrip
+            projectId={project.id}
+            fileId={activeCell.fileId}
+            cellId={activeCell.id}
+            takes={recordingTakes}
+            selectedAudioId={audioEntry?.selectedAudioId ?? null}
+            author={username}
+            session={session ?? null}
+          />
+        )}
 
         {/* Footer: nav + primary action */}
         <div className="flex items-center gap-2 border-t bg-muted/30 px-5 py-3">

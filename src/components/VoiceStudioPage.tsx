@@ -309,7 +309,7 @@ export function VoiceStudioPage() {
                 No translated cells in this file yet. Translate cells first, then generate their audio here.
               </div>
             ) : (
-              <div className="space-y-1.5">
+              <div className="space-y-2">
                 {cells.map((cell) => {
                   const hasText = cell.type !== "paratext" && Boolean(cell.translated?.trim())
                   if (!hasText) return null
@@ -409,13 +409,17 @@ function ProductionRow({
         if (vid) { e.preventDefault(); onAssignVoice(vid) }
       }}
       className={cn(
-        "flex items-center gap-3 rounded-xl border px-3 py-2 transition-colors",
-        isPlaying ? "border-primary/50 bg-primary/5"
-          : dropActive ? "border-primary/60 bg-primary/10"
-          : "border-transparent bg-muted/30 hover:bg-accent/30",
+        // Same neumorphic cell card as the translate editor, so the two modes
+        // read as one workspace — just target text instead of an editor.
+        "group neu-flat relative flex items-center gap-3 rounded-2xl px-4 py-3 transition-shadow duration-200 ease-out hover:shadow-neu",
+        isPlaying && "shadow-neu-inset ring-1 ring-primary/40 ring-inset",
+        dropActive && "shadow-neu-inset ring-2 ring-primary/60 ring-inset",
       )}
     >
-      <span className="w-24 shrink-0 truncate text-xs text-muted-foreground" title={cell.cellLabel}>
+      <span
+        className="inline-flex shrink-0 items-center gap-1 self-start rounded-full bg-card px-1.5 py-0.5 text-[10px] font-medium leading-none tabular-nums text-muted-foreground/80 shadow-neu-xs"
+        title={cell.cellLabel}
+      >
         {cell.cellLabel ?? cell.id.slice(0, 8)}
       </span>
 

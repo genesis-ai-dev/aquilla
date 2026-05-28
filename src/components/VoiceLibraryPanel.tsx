@@ -11,7 +11,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react"
 import {
-  Check, Copy, KeyRound, Loader2, Pause, Play, Plus, Settings2, Sparkles, Star, Trash2,
+  Check, Copy, KeyRound, Loader2, Mic, Pause, Play, Plus, Settings2, Sparkles, Star, Trash2,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -63,6 +63,9 @@ export function VoiceLibraryPanel({
   const [localSelectedId, setLocalSelectedId] = useState<string>("")
   const seededRef = useRef<string | null>(null)
   const [engineOpen, setEngineOpen] = useState(false)
+  // Bumped when the user creates a clone profile, so the editor scrolls its
+  // reference recorder into view and pulses it.
+  const [cloneFocusSignal, setCloneFocusSignal] = useState(0)
 
   // Seed the local library once per project. The studio mounts this only after
   // the project has loaded, so settings is available on first render.
@@ -118,6 +121,23 @@ export function VoiceLibraryPanel({
     }
     select(copy.id)
     writeBack([...voices, copy], defaultVoiceId)
+  }, [voices, provider, targetLanguage, writeBack, defaultVoiceId, select])
+
+  // Create a fresh voice and jump straight to its reference recorder — a clone
+  // profile is a normal voice whose TTS output is re-voiced into a recorded
+  // timbre, so the only extra step is capturing that reference.
+  const addClone = useCallback(() => {
+    const copy: Voice = {
+      id: newVoiceId(),
+      name: "New voice profile",
+      color: VOICE_PALETTE[voices.length % VOICE_PALETTE.length],
+      provider,
+      voiceName: defaultVoiceNameForProvider(provider, { targetLanguage }),
+      builtIn: false,
+    }
+    select(copy.id)
+    writeBack([...voices, copy], defaultVoiceId)
+    setCloneFocusSignal((n) => n + 1)
   }, [voices, provider, targetLanguage, writeBack, defaultVoiceId, select])
 
   const deleteSelected = useCallback(() => {
@@ -220,7 +240,9 @@ export function VoiceLibraryPanel({
                 title="Drag onto a row to assign this voice"
                 className={cn(
                   "group flex w-full cursor-grab items-center gap-2 rounded-xl border px-3 py-2 text-left text-sm transition-colors active:cursor-grabbing",
-                  active ? "border-primary/50 bg-primary/10" : "border-transparent bg-muted/30 hover:bg-accent/40",
+                  active ? "border-primary/50 bg-primary/10"
+                    : voice.referenceAudioId ? "border-violet-300/50 bg-violet-50/40 hover:bg-violet-100/50 dark:border-violet-500/20 dark:bg-violet-950/20"
+                    : "border-transparent bg-muted/30 hover:bg-accent/40",
                 )}
               >
                 <span
@@ -228,14 +250,23 @@ export function VoiceLibraryPanel({
                   style={{ backgroundColor: voice.color || "#94a3b8" }}
                 />
                 <span className="flex-1 truncate">{voice.name}</span>
-                {voice.referenceAudioId && <Sparkles className="h-3 w-3 shrink-0 text-violet-500" aria-label="Voice clone" />}
+                {voice.referenceAudioId && (
+                  <span className="inline-flex shrink-0 items-center gap-0.5 rounded-full bg-violet-500/15 px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-wide text-violet-600 dark:text-violet-300">
+                    <Sparkles className="h-2.5 w-2.5" /> Clone
+                  </span>
+                )}
                 {voice.id === defaultVoiceId && <Star className="h-3 w-3 shrink-0 text-primary" aria-label="Default" />}
               </button>
             )
           })}
-          <Button type="button" size="sm" variant="ghost" onClick={addBlank} className="w-full justify-start">
-            <Plus className="mr-1 h-3.5 w-3.5" /> New voice
-          </Button>
+          <div className="flex gap-1">
+            <Button type="button" size="sm" variant="ghost" onClick={addBlank} className="flex-1 justify-start">
+              <Plus className="mr-1 h-3.5 w-3.5" /> New voice
+            </Button>
+            <Button type="button" size="sm" variant="ghost" onClick={addClone} className="flex-1 justify-start text-violet-600 hover:text-violet-700 dark:text-violet-300">
+              <Mic className="mr-1 h-3.5 w-3.5" /> Clone voice
+            </Button>
+          </div>
         </div>
 
         {/* Editor — selected voice */}
@@ -254,6 +285,7 @@ export function VoiceLibraryPanel({
               projectId={projectId}
               fileId={fileId}
               session={session}
+              cloneFocusSignal={cloneFocusSignal}
             />
           </div>
         )}
@@ -281,6 +313,8 @@ interface VoiceEditorProps {
   projectId?: string
   fileId?: string | null
   session?: FrontierSession | null
+  /** Bumped to scroll the clone recorder into view (after "Clone voice"). */
+  cloneFocusSignal?: number
 }
 
 type PreviewState =
@@ -292,7 +326,7 @@ type PreviewState =
 function VoiceEditor({
   voice, provider, apiKey, targetLanguage, isDefault,
   onChange, onDuplicate, onDelete, onSetDefault,
-  projectId, fileId, session,
+  projectId, fileId, session, cloneFocusSignal,
 }: VoiceEditorProps) {
   const [preview, setPreview] = useState<PreviewState>({ kind: "idle" })
   const audioRef = useRef<HTMLAudioElement | null>(null)
@@ -462,6 +496,7 @@ function VoiceEditor({
         fileId={fileId}
         session={session}
         onChange={onChange}
+        focusSignal={cloneFocusSignal}
       />
 
       <div className="flex flex-wrap items-center gap-2 pt-1">

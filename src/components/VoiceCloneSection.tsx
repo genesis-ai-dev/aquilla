@@ -24,6 +24,9 @@ interface Props {
   fileId?: string | null
   session?: FrontierSession | null
   onChange: (patch: Partial<Voice>) => void
+  /** Bumped by the library when a clone profile is created — scrolls this
+   *  section into view and pulses it so the recorder is the obvious next step. */
+  focusSignal?: number
 }
 
 type Status =
@@ -33,13 +36,25 @@ type Status =
 
 const MAX_REFERENCE_BYTES = 8 * 1024 * 1024 // 8 MB — Seed-VC only needs a few seconds.
 
-export function VoiceCloneSection({ voice, projectId, fileId, session, onChange }: Props) {
+export function VoiceCloneSection({ voice, projectId, fileId, session, onChange, focusSignal }: Props) {
   const recorder = useAudioRecorder()
   const [status, setStatus] = useState<Status>({ kind: "idle" })
   const consumedBlobRef = useRef<Blob | null>(null)
   const fileInputRef = useRef<HTMLInputElement | null>(null)
+  const sectionRef = useRef<HTMLDivElement | null>(null)
+  const [pulse, setPulse] = useState(false)
 
   const hasContext = Boolean(projectId && fileId && session?.jwt)
+
+  // When the library asks us to (a clone profile was just created), bring the
+  // recorder into view and pulse so the next step is unmistakable.
+  useEffect(() => {
+    if (!focusSignal) return
+    sectionRef.current?.scrollIntoView({ block: "center", behavior: "smooth" })
+    setPulse(true)
+    const t = setTimeout(() => setPulse(false), 1600)
+    return () => clearTimeout(t)
+  }, [focusSignal])
   const isRecording = recorder.state.kind === "recording" || recorder.state.kind === "requesting"
 
   const upload = useCallback(
@@ -104,9 +119,15 @@ export function VoiceCloneSection({ voice, projectId, fileId, session, onChange 
   }, [onChange])
 
   return (
-    <div className="rounded-md border border-violet-200/60 bg-violet-50/40 p-3 dark:border-violet-500/20 dark:bg-violet-950/20">
+    <div
+      ref={sectionRef}
+      className={cn(
+        "rounded-md border border-violet-200/60 bg-violet-50/40 p-3 transition-shadow dark:border-violet-500/20 dark:bg-violet-950/20",
+        pulse && "ring-2 ring-violet-400/70 ring-offset-1",
+      )}
+    >
       <div className="mb-1 flex items-center gap-2 text-sm font-medium">
-        <Sparkles className="h-3.5 w-3.5 text-violet-500" /> Voice clone
+        <Sparkles className="h-3.5 w-3.5 text-violet-500" /> Voice profile (clone)
         {voice.referenceAudioId && (
           <span className="rounded-full bg-violet-500/15 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-violet-600 dark:text-violet-300">
             Active
@@ -114,8 +135,9 @@ export function VoiceCloneSection({ voice, projectId, fileId, session, onChange 
         )}
       </div>
       <p className="mb-3 text-xs text-muted-foreground">
-        Attach a short reference clip (5–15s of clean speech). Generated audio for this voice
-        is re-voiced into that timbre via Seed-VC after TTS.
+        Record or upload a short reference clip (5–15s of one clear speaker). This voice's
+        generated audio is then re-voiced into that timbre via Seed-VC — so the whole project
+        can speak in a single, consistent voice.
       </p>
 
       {!hasContext ? (
@@ -160,7 +182,6 @@ export function VoiceCloneSection({ voice, projectId, fileId, session, onChange 
             <Button
               type="button"
               size="sm"
-              variant="outline"
               onClick={() => void recorder.start()}
               disabled={status.kind === "uploading"}
             >

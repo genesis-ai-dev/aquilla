@@ -34,6 +34,7 @@
     "tauri:build": "tauri build",
     "tauri:build:mac": "bash -c 'set -a; [ -f .env.signing ] && . ./.env.signing; set +a; tauri build'",
     "deploy": "npm run build && wrangler pages deploy dist --project-name=codex-web --branch=manual --commit-dirty=true",
+    "deploy:aquilla:web": "npm run build && rm -f dist/_redirects && wrangler deploy",
     "deploy:codex": "npm run build:codex && wrangler pages deploy dist --project-name=codex-web --branch=manual --commit-dirty=true",
     "deploy:honeycomb": "npm run build:honeycomb && wrangler pages deploy dist --project-name=honeycomb-studio --commit-dirty=true",
     "deploy:context": "npm run build:context && wrangler pages deploy dist --project-name=context-studio --commit-dirty=true",

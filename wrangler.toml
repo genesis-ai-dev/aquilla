@@ -1,0 +1,39 @@
+# aquilla-web — Workers-with-static-assets deploy of the SPA (aquilla brand).
+#
+# This replaces the `codex-web` Cloudflare Pages project for the aquilla brand.
+# Other brands (codex, honeycomb, context) still ship via `wrangler pages deploy`
+# from package.json — leave those alone until each brand is migrated.
+#
+# Account: Frontier R&D (6a80496d1e59948a9cbaa3c643ba81d7)
+#
+# Backend Workers (aquilla-identity, aquilla-sync-worker) are reached from the
+# browser via zone routes on aquilla.app/api/*, so no service bindings needed
+# here — the SPA just fetch()es relative paths once aquilla.app points at this
+# Worker.
+
+name = "aquilla-web"
+account_id = "6a80496d1e59948a9cbaa3c643ba81d7"
+compatibility_date = "2025-05-01"
+workers_dev = true
+
+# Assets-only deploy: no `main` entry, Cloudflare serves dist/ directly.
+# `single-page-application` rewrites unknown paths to /index.html (replaces
+# the public/_redirects rule used under Pages).
+#
+# IMPORTANT: dist/_redirects must NOT be present at deploy time. Workers'
+# static-assets parser rejects the `/* /index.html 200` SPA rule as an
+# "infinite loop" (error 100324) — unlike Pages, which accepts it. The
+# deploy:aquilla:web script removes it post-build. public/_redirects stays
+# so the legacy Pages deploys for other brands keep working.
+[assets]
+directory = "./dist"
+not_found_handling = "single-page-application"
+
+# NO `routes` here yet — first deploy goes to aquilla-web.<subdomain>.workers.dev
+# for smoke testing. Once verified, detach aquilla.app from the codex-web Pages
+# project and add the route here (or via dashboard):
+#
+#   routes = [{ pattern = "aquilla.app/*", zone_name = "aquilla.app" }]
+#
+# Note the existing /api/identity/* and /api/sync/* routes on the backend
+# Workers take precedence over a /* route on this Worker, so they keep working.

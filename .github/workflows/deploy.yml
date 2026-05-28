@@ -1,5 +1,10 @@
-name: Deploy to Cloudflare Pages
+name: Deploy aquilla-web Worker
 
+# Deploys the aquilla brand of the SPA to the `aquilla-web` Cloudflare Worker
+# (Workers with static assets). Replaces the former `codex-web` Pages deploy.
+# PR previews use Workers version aliases:
+#   pr-<N>-aquilla-web.<subdomain>.workers.dev
+#
 # When previews are built:
 #   push to main / dev       → always (these are "real" deploys)
 #   PR opened / reopened     → always (give reviewers something to click)
@@ -78,16 +83,6 @@ jobs:
       - run: npm test
         if: steps.decide.outputs.deploy == 'true'
 
-      - name: Compute deploy branch alias
-        id: branch
-        if: steps.decide.outputs.deploy == 'true'
-        run: |
-          if [ "${{ github.event_name }}" = "pull_request" ]; then
-            echo "name=pr-${{ github.event.number }}" >> "$GITHUB_OUTPUT"
-          else
-            echo "name=${{ github.ref_name }}" >> "$GITHUB_OUTPUT"
-          fi
-
       # When a PR adds SQL migrations, pr-db-fork.yml spins up
       # codex-sync-worker-pr-<N> against a forked D1 + namespaced R2
       # prefix so the migration doesn't pollute shared staging. The build
@@ -125,14 +120,39 @@ jobs:
           VITE_AUTH_BASE: ${{ github.ref == 'refs/heads/main' && 'https://aquilla.app/api/identity' || 'https://dev.aquilla.app/api/identity' }}
           VITE_CHAT_BASE: ${{ github.ref == 'refs/heads/main' && 'https://aquilla.app/api/chat' || 'https://dev.aquilla.app/api/chat' }}
 
-      - name: Deploy to Cloudflare Pages
-        id: deploy
+      # Workers' static-assets parser rejects the SPA `/*  /index.html  200`
+      # rule in _redirects (error 100324 — "infinite loop"). SPA fallback is
+      # handled by `not_found_handling = "single-page-application"` in
+      # wrangler.toml, so strip the file before deploy. (public/_redirects
+      # stays in the repo for legacy Pages deploys of other brands.)
+      - name: Strip dist/_redirects (Workers static assets rejects it)
         if: steps.decide.outputs.deploy == 'true'
+        run: rm -f dist/_redirects
+
+      # Pushes to main/dev publish the live Worker. PRs upload a preview
+      # version aliased as `pr-<N>`, reachable at
+      # https://pr-<N>-aquilla-web.<workers-subdomain>.workers.dev without
+      # touching the production version.
+      - name: Deploy aquilla-web (main/dev)
+        id: deploy_prod
+        if: steps.decide.outputs.deploy == 'true' && github.event_name != 'pull_request'
         uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: 6a80496d1e59948a9cbaa3c643ba81d7
-          command: pages deploy dist --project-name=codex-web --branch=${{ steps.branch.outputs.name }}
+          command: deploy
+
+      - name: Upload aquilla-web preview (PR)
+        id: deploy_preview
+        if: steps.decide.outputs.deploy == 'true' && github.event_name == 'pull_request'
+        uses: cloudflare/wrangler-action@v3
+        env:
+          PR_NUMBER: ${{ github.event.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: 6a80496d1e59948a9cbaa3c643ba81d7
+          command: versions upload --preview-alias "pr-${PR_NUMBER}" --message "PR ${PR_NUMBER} @ ${HEAD_SHA}"
 
       - name: Comment preview URL on PR
         if: github.event_name == 'pull_request' && steps.decide.outputs.deploy == 'true'
@@ -140,10 +160,10 @@ jobs:
         with:
           header: pages-preview
           message: |
-            **Cloudflare Pages preview**
+            **aquilla-web Worker preview**
 
-            - Branch alias: https://${{ steps.branch.outputs.name }}.codex-web-4ih.pages.dev
-            - This deployment: ${{ steps.deploy.outputs.deployment-url }}
+            - Preview alias: `pr-${{ github.event.number }}-aquilla-web.<workers-subdomain>.workers.dev`
+              (see the "Upload aquilla-web preview" step output for the full URL — first PR after this CI change will reveal the subdomain; pin it here afterwards)
             - Commit: `${{ github.event.pull_request.head.sha }}`
 
-            Re-deploys on commits tagged `[preview]` (skip the tag to iterate without rebuilding).
+            Re-uploads on commits tagged `[preview]` (skip the tag to iterate without rebuilding).

@@ -106,6 +106,53 @@ function ftsInsertStmt(
     .bind(projectId, fileId, cellId, side)
 }
 
+/**
+ * Recompute the denormalized `files` rollup counters from the live `cells`
+ * rows for one file. Pushed AFTER the cells DML so the correlated subqueries
+ * observe the post-mutation state.
+ *
+ * Self-healing by design: every cell-mutating event re-derives the counters
+ * from scratch, so they converge to the truth regardless of AD-2 chain races,
+ * out-of-order delivery, or a replayed event log. Incremental +1/-1 deltas
+ * would drift the moment two events raced — the v3 projection is meant to be a
+ * pure function of the `cells` table, so we recompute rather than increment.
+ *
+ * Definitions:
+ *   cell_count     — distinct cell positions (paired source/target share an id)
+ *   approved_count — validated cells (only target rows ever carry validated=1)
+ *   word_count     — total target-side words (translation output)
+ *   last_edit_at   — most recent cell edit on the file (also drives file sort)
+ *
+ * NOTE: this is what was always meant by file-create's "counters are
+ * maintained by the cell commit projection path" comment — that maintenance
+ * never actually existed before, so every `files` row sat at cell_count=0.
+ */
+function fileCountersRecomputeStmt(
+  db: D1Database,
+  projectId: string,
+  fileId: string,
+  serverTs: number,
+): D1PreparedStatement {
+  return db
+    .prepare(
+      `UPDATE files SET
+        cell_count = (SELECT COUNT(DISTINCT cell_id) FROM cells WHERE project_id = ? AND file_id = ?),
+        approved_count = (SELECT COUNT(*) FROM cells WHERE project_id = ? AND file_id = ? AND validated = 1),
+        word_count = (SELECT COALESCE(SUM(word_count), 0) FROM cells WHERE project_id = ? AND file_id = ? AND side = 'target'),
+        last_edit_at = (SELECT MAX(last_edit_at) FROM cells WHERE project_id = ? AND file_id = ?),
+        updated_at = ?
+      WHERE id = ? AND project_id = ?`,
+    )
+    .bind(
+      projectId, fileId,
+      projectId, fileId,
+      projectId, fileId,
+      projectId, fileId,
+      serverTs,
+      fileId, projectId,
+    )
+}
+
 /** Caller hint: which projection tables this event will touch. */
 export type ProjectionTouches = 'cells' | 'cell_validators' | 'files' | 'cell_audio' | 'comments'
 
@@ -200,7 +247,8 @@ export function buildEventProjectionStmts(
       // row reflects the post-create/update state.
       stmts.push(ftsInsertStmt(db, event.projectId, event.fileId, cellId, side))
 
-      return ['cells']
+      stmts.push(fileCountersRecomputeStmt(db, event.projectId, event.fileId, event.serverTs))
+      return ['cells', 'files']
     }
 
     case 'source.cell.commit':
@@ -309,7 +357,8 @@ export function buildEventProjectionStmts(
       // the cells row has been updated/upserted.
       stmts.push(ftsInsertStmt(db, event.projectId, event.fileId, event.cellId, commitSide))
 
-      return ['cells']
+      stmts.push(fileCountersRecomputeStmt(db, event.projectId, event.fileId, event.serverTs))
+      return ['cells', 'files']
     }
 
     case 'source.cell.delete':
@@ -334,7 +383,8 @@ export function buildEventProjectionStmts(
           )
           .bind(event.projectId, event.fileId, event.cellId, side),
       )
-      return ['cells']
+      stmts.push(fileCountersRecomputeStmt(db, event.projectId, event.fileId, event.serverTs))
+      return ['cells', 'files']
     }
 
     case 'source.cell.reorder':
@@ -365,7 +415,8 @@ export function buildEventProjectionStmts(
             side,
           ),
       )
-      return ['cells']
+      stmts.push(fileCountersRecomputeStmt(db, event.projectId, event.fileId, event.serverTs))
+      return ['cells', 'files']
     }
 
     case 'cell.validate':
@@ -488,7 +539,8 @@ export function buildEventProjectionStmts(
             event.cellId,
           ),
       )
-      return ['cell_validators', 'cells']
+      stmts.push(fileCountersRecomputeStmt(db, event.projectId, event.fileId, event.serverTs))
+      return ['cell_validators', 'cells', 'files']
     }
 
 case 'cell.audio.attach': {

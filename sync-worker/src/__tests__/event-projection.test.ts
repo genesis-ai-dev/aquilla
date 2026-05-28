@@ -98,8 +98,9 @@ describe('buildEventProjectionStmts — source.cell.create', () => {
       stmts,
     )
 
-    // FTS maintenance adds 2 extra statements (delete + insert) around the cells DML.
-    expect(stmts).toHaveLength(3)
+    // FTS maintenance adds 2 statements (delete + insert) around the cells
+    // DML, and the files-counter recompute adds 1 more.
+    expect(stmts).toHaveLength(4)
     const cellsStmts = recorded.filter(r => !r.sql.includes('cells_fts'))
     const { sql, args } = cellsStmts[0]
     expect(sql).toContain('INSERT INTO cells')
@@ -152,8 +153,9 @@ describe('buildEventProjectionStmts — target.cell.commit', () => {
       }),
       stmts,
     )
-    // FTS maintenance adds 2 extra statements (delete + insert) around the cells DML.
-    expect(stmts).toHaveLength(3)
+    // FTS maintenance adds 2 statements (delete + insert) around the cells
+    // DML, and the files-counter recompute adds 1 more.
+    expect(stmts).toHaveLength(4)
     const cellsStmts = recorded.filter(r => !r.sql.includes('cells_fts'))
     const { sql, args } = cellsStmts[0]
     // The client never emits target.cell.create, so the commit is an UPSERT:
@@ -308,7 +310,9 @@ describe('buildEventProjectionStmts — cell.validate / cell.unvalidate', () => 
       makeEvent('cell.validate', { editEventId: 'evt-commit-id' }),
       stmts,
     )
-    expect(stmts).toHaveLength(3)
+    // validator UPSERT + cells.validated recompute + endorsement_count
+    // recompute + files counters recompute.
+    expect(stmts).toHaveLength(4)
     expect(recorded[0].sql).toContain('INSERT INTO cell_validators')
     // 0012: columns are (project_id, file_id, cell_id, event_id, username, decided_ts) — no is_active
     expect(recorded[0].sql).toContain('event_id')
@@ -320,6 +324,9 @@ describe('buildEventProjectionStmts — cell.validate / cell.unvalidate', () => 
     // AD-14 pass 1: endorsement_count recompute against current chain head
     expect(recorded[2].sql).toContain('SET endorsement_count')
     expect(recorded[2].sql).toContain('cells.event_id')
+    // approved_count moves on validate, so files counters are recomputed.
+    expect(recorded[3].sql).toContain('UPDATE files SET cell_count')
+    expect(recorded[3].sql).toContain('approved_count')
   })
 
   it('cell.unvalidate emits DELETE (not UPSERT) + cells.validated recompute + endorsement_count recompute', () => {
@@ -330,12 +337,14 @@ describe('buildEventProjectionStmts — cell.validate / cell.unvalidate', () => 
       makeEvent('cell.unvalidate', { editEventId: 'evt-commit-id' }),
       stmts,
     )
-    // DELETE stmt + UPDATE cells.validated recompute + UPDATE cells.endorsement_count recompute
-    expect(stmts).toHaveLength(3)
+    // DELETE stmt + UPDATE cells.validated recompute + UPDATE
+    // cells.endorsement_count recompute + files counters recompute.
+    expect(stmts).toHaveLength(4)
     expect(recorded[0].sql).toContain('DELETE FROM cell_validators')
     expect(recorded[1].sql).toContain('UPDATE cells')
     expect(recorded[1].sql).toContain('SET validated')
     expect(recorded[2].sql).toContain('SET endorsement_count')
+    expect(recorded[3].sql).toContain('UPDATE files SET cell_count')
   })
 })
 
@@ -478,5 +487,87 @@ describe('FTS5 integration via InMemoryD1 — SELECT-form insert/delete', () => 
     expect(tables.cells).toHaveLength(0)
     // cells_fts entry is also removed.
     expect(tables.cells_fts).toHaveLength(0)
+  })
+})
+
+describe('files counter projection via InMemoryD1', () => {
+  // Seed a files row so the recompute UPDATE has a target. The bug was that
+  // this row's cell_count sat at 0 forever because the cell projection never
+  // maintained it — these tests pin the maintenance.
+  function seedFile() {
+    return makeInMemoryD1({
+      files: [{ id: 'file-a', project_id: 'proj-1', name: 'Doc', cell_count: 0, approved_count: 0, word_count: 0, last_edit_at: null }],
+    })
+  }
+
+  it('source.cell.create bumps cell_count and last_edit_at on the files row', async () => {
+    const db = seedFile()
+    const stmts: D1PreparedStatement[] = []
+    buildEventProjectionStmts(
+      db,
+      makeEvent('source.cell.create', { cellId: 'cell-1', value: 'In the beginning', anchorCellId: null }),
+      stmts,
+    )
+    await db.batch(stmts)
+
+    const file = db._tables().files[0]
+    expect(file.cell_count).toBe(1)
+    expect(file.last_edit_at).toBe(2000) // serverTs from makeEvent
+  })
+
+  it('counts distinct cell positions, not source+target rows', async () => {
+    const db = seedFile()
+    // Source cell.
+    const s: D1PreparedStatement[] = []
+    buildEventProjectionStmts(
+      db,
+      makeEvent('source.cell.create', { cellId: 'cell-1', value: 'logos', anchorCellId: null }),
+      s,
+    )
+    await db.batch(s)
+    // Target translation of the SAME cell position (shares cell_id).
+    const t: D1PreparedStatement[] = []
+    buildEventProjectionStmts(
+      db,
+      makeEvent('target.cell.commit', { value: 'word' }, { id: 'evt-t', cellId: 'cell-1' }),
+      t,
+    )
+    await db.batch(t)
+
+    const file = db._tables().files[0]
+    // One position, two sides → cell_count is 1, not 2.
+    expect(file.cell_count).toBe(1)
+    // word_count is the target-side words only.
+    expect(file.word_count).toBe(1)
+  })
+
+  it('deleting the last cell returns cell_count to 0', async () => {
+    const db = seedFile()
+    const c: D1PreparedStatement[] = []
+    buildEventProjectionStmts(
+      db,
+      makeEvent('source.cell.create', { cellId: 'cell-1', value: 'x', anchorCellId: null }),
+      c,
+    )
+    await db.batch(c)
+    expect(db._tables().files[0].cell_count).toBe(1)
+
+    const d: D1PreparedStatement[] = []
+    buildEventProjectionStmts(db, makeEvent('source.cell.delete', {}), d)
+    await db.batch(d)
+
+    const file = db._tables().files[0]
+    expect(file.cell_count).toBe(0)
+    expect(file.last_edit_at).toBeNull()
+  })
+
+  it('reports files as a dirty table so clients refetch the listing', () => {
+    const { db } = makeD1Stub()
+    const touches = buildEventProjectionStmts(
+      db,
+      makeEvent('source.cell.create', { cellId: 'cell-1', value: 'x', anchorCellId: null }),
+      [],
+    )
+    expect(touches).toContain('files')
   })
 })

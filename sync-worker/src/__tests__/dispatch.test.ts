@@ -85,10 +85,12 @@ describe('dispatchEvent', () => {
     const outcome = dispatchEvent(makeNoOpD1(), authed, 9999, { updateProjection: true, serverSeq: 1 })
     expect(outcome.ok).toBe(true)
     if (!outcome.ok) throw new Error('unreachable')
-    // 1 events INSERT + 1 FTS delete + 1 cells INSERT + 1 FTS insert = 4
-    expect(outcome.result.stmts.length).toBe(4)
+    // 1 events INSERT + 1 FTS delete + 1 cells INSERT + 1 FTS insert
+    // + 1 files-counter recompute = 5
+    expect(outcome.result.stmts.length).toBe(5)
     expect(outcome.result.dirtyTables).toContain('events')
     expect(outcome.result.dirtyTables).toContain('cells')
+    expect(outcome.result.dirtyTables).toContain('files')
   })
 
   it('cell.validate routes to the cell handler with validator UPSERT + validated recompute + endorsement_count recompute', async () => {
@@ -96,9 +98,12 @@ describe('dispatchEvent', () => {
     const outcome = dispatchEvent(makeNoOpD1(), authed, 9999, { updateProjection: true, serverSeq: 1 })
     expect(outcome.ok).toBe(true)
     if (!outcome.ok) throw new Error('unreachable')
-    // 1 events INSERT + 1 validator UPSERT + 1 validated recompute + 1 endorsement_count recompute (AD-14 pass 1) = 4
-    expect(outcome.result.stmts.length).toBe(4)
+    // 1 events INSERT + 1 validator UPSERT + 1 validated recompute
+    // + 1 endorsement_count recompute (AD-14 pass 1) + 1 files-counter
+    // recompute (approved_count moves) = 5
+    expect(outcome.result.stmts.length).toBe(5)
     expect(outcome.result.dirtyTables).toContain('cell_validators')
+    expect(outcome.result.dirtyTables).toContain('files')
   })
 
   it('updateProjection=false produces only the events INSERT (AD-2 stale sibling)', async () => {

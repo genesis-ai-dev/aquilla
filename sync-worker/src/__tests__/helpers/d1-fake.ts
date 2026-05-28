@@ -95,6 +95,7 @@ export interface FileRow {
   approved_count?: number
   word_count?: number
   last_edit_at?: number | null
+  updated_at?: number
   projected_from?: string | null
 }
 
@@ -1065,6 +1066,30 @@ export function makeInMemoryD1(tables: Partial<Tables> = {}): InMemoryD1 {
         // Remove any stale entry then add fresh (idempotent within the fake).
         db.cells_fts = db.cells_fts.filter((r) => r.rowid !== rowid)
         db.cells_fts.push({ rowid, value: cellRow.value })
+      }
+      return []
+    }
+
+    // ── UPDATE files SET cell_count/... (fileCountersRecomputeStmt) ──────
+    // Recomputes the denormalized files rollup from the live cells rows.
+    // Binds: pid,fid (x4 subqueries), serverTs, then fid,pid in the WHERE.
+    if (/^UPDATE files SET cell_count = \(SELECT COUNT\(DISTINCT cell_id\) FROM cells WHERE project_id = \? AND file_id = \?\), approved_count = \(SELECT COUNT\(\*\) FROM cells WHERE project_id = \? AND file_id = \? AND validated = 1\), word_count = \(SELECT COALESCE\(SUM\(word_count\), 0\) FROM cells WHERE project_id = \? AND file_id = \? AND side = 'target'\), last_edit_at = \(SELECT MAX\(last_edit_at\) FROM cells WHERE project_id = \? AND file_id = \?\), updated_at = \? WHERE id = \? AND project_id = \?$/.test(normalized)) {
+      const pid = args[0] as string
+      const fid = args[1] as string
+      const serverTs = args[8] as number
+      const file = db.files.find((f) => f.id === fid && f.project_id === pid)
+      if (file) {
+        const fileCells = db.cells.filter((c) => c.project_id === pid && c.file_id === fid)
+        file.cell_count = new Set(fileCells.map((c) => c.cell_id)).size
+        file.approved_count = fileCells.filter((c) => c.validated === 1).length
+        file.word_count = fileCells
+          .filter((c) => c.side === 'target')
+          .reduce((sum, c) => sum + (c.word_count ?? 0), 0)
+        const editTimes = fileCells
+          .map((c) => c.last_edit_at)
+          .filter((t): t is number => typeof t === 'number')
+        file.last_edit_at = editTimes.length > 0 ? Math.max(...editTimes) : null
+        file.updated_at = serverTs
       }
       return []
     }

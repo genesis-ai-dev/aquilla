@@ -43,6 +43,9 @@ test-results/
 playwright-report/
 blob-report/
 playwright/.cache/
+# Ad-hoc screenshots dropped in the repo root (Playwright/manual captures).
+# Scoped to root so legit assets under public/, src/, etc. are unaffected.
+/*.png
 
 # E2E suite — local-only state
 e2e/.auth/

@@ -82,6 +82,39 @@ function markReady(model: ModelId): void {
   setStatus(model, READY)
 }
 
+/**
+ * Feed download progress observed during an on-demand synth/transcribe (i.e.
+ * not the explicit prefetch/onboarding path) into the shared store, so the
+ * floating AiModelDownloadChip lights up no matter what triggered the download
+ * — e.g. generating audio from the Voice Studio on a cold cache.
+ *
+ * setStatus's monotonic guard locks `total` to the largest file, so
+ * loaded >= total fires only when the biggest weight finishes — at which point
+ * the model is effectively downloaded and we flip to ready (the synthesis
+ * compute that follows is fast and not a download).
+ */
+export function noteModelDownloading(
+  model: ModelId,
+  p: { loaded: number; total: number; file: string },
+): void {
+  if (getModelStatus(model).kind === "ready") return
+  setStatus(model, { kind: "downloading", loaded: p.loaded, total: p.total, file: p.file })
+  const cur = getModelStatus(model)
+  if (cur.kind === "downloading" && cur.total > 0 && cur.loaded >= cur.total) markReady(model)
+}
+
+/**
+ * Settle the chip when a synth/transcribe finishes. Only acts if we were still
+ * showing a download (the total=0 case where the CDN omitted Content-Length and
+ * loaded>=total never tripped): success marks ready, failure clears back to
+ * idle so the chip hides — the per-cell badge surfaces the actual error.
+ */
+export function noteModelDownloadSettled(model: ModelId, ok: boolean): void {
+  if (getModelStatus(model).kind !== "downloading") return
+  if (ok) markReady(model)
+  else setStatus(model, IDLE)
+}
+
 // transformers.js v3 stores downloaded weights in CacheStorage under this key
 // (env.cacheKey default). Probing it is the most accurate way to know whether
 // a model is locally available — survives across sessions and tabs without us

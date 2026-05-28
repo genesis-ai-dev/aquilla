@@ -1,5 +1,7 @@
 import { describe, expect, it, beforeEach } from "vitest"
-import { clearPrefetchStatus, getModelStatus } from "./prefetch"
+import {
+  clearPrefetchStatus, getModelStatus, noteModelDownloading, noteModelDownloadSettled,
+} from "./prefetch"
 
 // We exercise setStatus indirectly through the public surface — the fact
 // that progress only ever moves forward is observable via getModelStatus.
@@ -38,5 +40,54 @@ describe("prefetch monotonic progress", () => {
     // Once a real progress comes in for the new file with a larger total, accept it.
     setter("whisper", { kind: "downloading", loaded: 1000, total: 200_000_000, file: "voices.bin" })
     expect(getModelStatus("whisper")).toMatchObject({ loaded: 1000, total: 200_000_000 })
+  })
+})
+
+// These power the floating download chip when a model downloads on-demand from
+// a synth (e.g. generating audio in the Voice Studio), not just the onboarding
+// prefetch path.
+describe("on-demand synth download reporting", () => {
+  beforeEach(async () => { await clearPrefetchStatus() })
+
+  it("surfaces a synth-triggered download, then flips to ready once the largest file completes", () => {
+    noteModelDownloading("kokoro", { loaded: 10_000, total: 92_000_000, file: "onnx/model_quantized.onnx" })
+    expect(getModelStatus("kokoro").kind).toBe("downloading")
+
+    // A small sibling file completing must NOT mark the model ready — the
+    // monotonic guard keeps the largest total, so loaded<total still holds.
+    noteModelDownloading("kokoro", { loaded: 44, total: 44, file: "config.json" })
+    expect(getModelStatus("kokoro").kind).toBe("downloading")
+
+    // The big weight finishing means the download is done → ready.
+    noteModelDownloading("kokoro", { loaded: 92_000_000, total: 92_000_000, file: "onnx/model_quantized.onnx" })
+    expect(getModelStatus("kokoro").kind).toBe("ready")
+  })
+
+  it("settles a Content-Length-less download (total stays 0) to ready on success", () => {
+    noteModelDownloading("mms", { loaded: 5_000, total: 0, file: "model.onnx" })
+    expect(getModelStatus("mms").kind).toBe("downloading")
+    noteModelDownloadSettled("mms", true)
+    expect(getModelStatus("mms").kind).toBe("ready")
+  })
+
+  it("clears the chip back to idle when a synth download fails", () => {
+    noteModelDownloading("mms", { loaded: 5_000, total: 0, file: "model.onnx" })
+    expect(getModelStatus("mms").kind).toBe("downloading")
+    noteModelDownloadSettled("mms", false)
+    expect(getModelStatus("mms").kind).toBe("idle")
+  })
+
+  it("does not re-open the chip for an already-ready model", () => {
+    noteModelDownloading("kokoro", { loaded: 1, total: 100, file: "f" })
+    noteModelDownloadSettled("kokoro", true)
+    expect(getModelStatus("kokoro").kind).toBe("ready")
+    // A later cached-read progress event must not flip ready→downloading.
+    noteModelDownloading("kokoro", { loaded: 1, total: 100, file: "f" })
+    expect(getModelStatus("kokoro").kind).toBe("ready")
+  })
+
+  it("is a no-op to settle a model that was never downloading", () => {
+    noteModelDownloadSettled("kokoro", true)
+    expect(getModelStatus("kokoro").kind).toBe("idle")
   })
 })

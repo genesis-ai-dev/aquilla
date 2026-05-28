@@ -15,6 +15,7 @@ import { synthesizeGeminiTtsToWavBlob, type GeminiTtsContext } from "./gemini-tt
 import { floatPcmToWavBlob } from "./wav"
 import { resolveVoice } from "./voices"
 import { resolveApiKey } from "@/lib/store/user-api-keys"
+import { noteModelDownloading, noteModelDownloadSettled } from "./prefetch"
 import {
   normalizeVoiceForProvider,
   resolveTtsProvider,
@@ -134,11 +135,12 @@ export async function synthesizeToWavBlob(
         if (m.requestId !== requestId) return
         if (m.type === "progress") {
           opts.onProgress?.({ loaded: m.loaded, total: m.total, file: m.file, status: m.status })
+          noteModelDownloading("mms", m)
           return
         }
         worker.removeEventListener("message", onMessage)
-        if (m.type === "result") resolve(m)
-        else reject(new Error(friendlyMmsError(m.message)))
+        if (m.type === "result") { noteModelDownloadSettled("mms", true); resolve(m) }
+        else { noteModelDownloadSettled("mms", false); reject(new Error(friendlyMmsError(m.message))) }
       }
       worker.addEventListener("message", onMessage)
       const req: MmsSynthRequest = { type: "synth", requestId, lang, text: cleanText }
@@ -158,11 +160,12 @@ export async function synthesizeToWavBlob(
       if (m.requestId !== requestId) return
       if (m.type === "progress") {
         opts.onProgress?.({ loaded: m.loaded, total: m.total, file: m.file, status: m.status })
+        noteModelDownloading("kokoro", m)
         return
       }
       worker.removeEventListener("message", onMessage)
-      if (m.type === "result") resolve(m)
-      else reject(new Error(m.message))
+      if (m.type === "result") { noteModelDownloadSettled("kokoro", true); resolve(m) }
+      else { noteModelDownloadSettled("kokoro", false); reject(new Error(m.message)) }
     }
     worker.addEventListener("message", onMessage)
     const req: SynthRequest = {

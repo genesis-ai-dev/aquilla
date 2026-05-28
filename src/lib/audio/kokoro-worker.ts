@@ -23,6 +23,27 @@ console.warn = (...args: unknown[]) => {
 const MODEL_ID = "onnx-community/Kokoro-82M-v1.0-ONNX"
 const DEFAULT_VOICE = "af_heart"
 
+// HF CDN frequently omits Content-Length for LFS files, so transformers.js
+// reports total=0 and the UI can't show a percentage. These are the actual
+// byte sizes of the files we load (probed against the resolve URL). Keyed by
+// path suffix so it survives whether the callback reports the bare filename
+// or the full repo-relative path.
+const KNOWN_SIZES: ReadonlyArray<readonly [string, number]> = [
+  ["onnx/model_quantized.onnx", 92_361_116],
+  ["voices/af_heart.bin", 522_240],
+  ["tokenizer.json", 3_497],
+  ["tokenizer_config.json", 113],
+  ["config.json", 44],
+]
+
+function knownTotalFor(file: string): number {
+  if (!file) return 0
+  for (const [suffix, size] of KNOWN_SIZES) {
+    if (file.endsWith(suffix)) return size
+  }
+  return 0
+}
+
 interface SynthRequest {
   type: "synth"
   requestId: string
@@ -69,12 +90,15 @@ async function getTts(requestId: string): Promise<KokoroTTS> {
   if (ttsPromise) return ttsPromise
   const progressCb = (info: unknown) => {
     const i = info as { status?: string; file?: string; loaded?: number; total?: number }
+    const file = i.file ?? ""
+    const reportedTotal = i.total ?? 0
+    const total = reportedTotal > 0 ? reportedTotal : knownTotalFor(file)
     const msg: ProgressMessage = {
       type: "progress",
       requestId,
       loaded: i.loaded ?? 0,
-      total: i.total ?? 0,
-      file: i.file ?? "",
+      total,
+      file,
       status: i.status ?? "",
     }
     ;(self as unknown as Worker).postMessage(msg)

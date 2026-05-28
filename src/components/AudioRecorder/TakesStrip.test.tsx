@@ -7,9 +7,9 @@ import { describe, it, expect, beforeEach, vi } from "vitest"
 import { render, screen, fireEvent, waitFor } from "@testing-library/react"
 import type { AudioAttachmentOut } from "@/lib/sync/cell-audio-read-types"
 
-const emitSelect = vi.fn(async () => "evt-1")
-const emitRemove = vi.fn(async () => "evt-2")
-const notify = vi.fn()
+const emitSelect = vi.fn(async (..._args: unknown[]) => "evt-1")
+const emitRemove = vi.fn(async (..._args: unknown[]) => "evt-2")
+const notify = vi.fn((..._args: unknown[]) => {})
 
 vi.mock("@/lib/sync/events-emit", () => ({
   emitCellAudioSelect: (...args: unknown[]) => emitSelect(...args),

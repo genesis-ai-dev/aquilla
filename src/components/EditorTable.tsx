@@ -42,6 +42,8 @@ import { setTtsStatus, ttsStatusKey, useTtsStatus } from "@/lib/audio/tts"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { categorizeAiError } from "@/lib/audio/ai-error"
 import { CellAiStatusPopover } from "./CellAiStatusPopover"
+import { CellNumberPill } from "./cell/CellNumberPill"
+import { cellCardClassName } from "./cell/cellCard"
 import { useNavigate } from "react-router-dom"
 import { cn } from "@/lib/utils"
 import { isPerfLogEnabled } from "@/lib/perf-log"
@@ -1393,22 +1395,13 @@ function EditorRow({
   // Replaces the old severity stripe, gutter warning triangle, and dot — there
   // is now exactly one place that color-codes problems.
   const hasAnyIssue = infractionCount > 0 || cellNeedsAttention
-  const numberTint = hasMajorInfraction
-    ? "text-red-600 dark:text-red-400"
-    : hasAnyIssue
-      ? "text-amber-600 dark:text-amber-400"
-      : "text-muted-foreground/70"
   const numberLabel = showLineNumber ? String(rowIndex + 1) : null
   const numberPillInner = (
-    <span
-      className={cn(
-        "inline-flex items-center gap-1 rounded-full bg-card px-1.5 py-0.5 text-[10px] font-medium leading-none tabular-nums shadow-neu-xs",
-        numberTint,
-      )}
-    >
-      {numberLabel && <span>{numberLabel}</span>}
-      {showCellLabel && <span className="text-muted-foreground/80">{cell.cellLabel}</span>}
-    </span>
+    <CellNumberPill
+      number={numberLabel}
+      label={showCellLabel ? cell.cellLabel : null}
+      tint={hasMajorInfraction ? "major" : hasAnyIssue ? "issue" : "none"}
+    />
   )
   const numberPill = !(showLineNumber || showCellLabel) ? null : hasAnyIssue ? (
     <Popover>
@@ -1614,23 +1607,16 @@ function EditorRow({
       <div
         ref={rowRef}
         className={cn(
-          "group neu-flat relative grid gap-2 overflow-hidden rounded-2xl px-4 py-3 transition-shadow duration-200 ease-out",
-          // Hover lifts the card a little more off the shared surface.
-          "hover:shadow-neu",
-          // Active/expanded reads as a carved-in well.
-          expanded && "shadow-neu-inset",
-          audioController.isPlaying && "shadow-neu",
-          // Multi-select: pressed-in with a subtle gold ring.
-          isMultiSelected && "shadow-neu-pressed ring-1 ring-primary/40 ring-inset",
-          // Open-comments accent — a soft inset ring instead of a hard border.
-          openCommentCount > 0 && "ring-1 ring-blue-400/50 ring-inset",
-          // Active cue highlight reads as a gentle inset well + gold ring.
-          _isActiveCue && "shadow-neu-inset ring-1 ring-primary/40 ring-inset",
-          // Pulsing while a voice is being generated for this cell. Gives the
-          // user a clear "something is happening" signal — drop, translate,
-          // and bulk synth all flow through this status key.
-          isSynthBusy && "shadow-neu-inset ring-2 ring-primary/50 ring-inset animate-pulse",
-          isSynthError && "shadow-neu-inset ring-2 ring-destructive/50 ring-inset",
+          cellCardClassName({
+            inset: expanded,
+            raised: audioController.isPlaying,
+            selected: isMultiSelected,
+            comments: openCommentCount > 0,
+            active: _isActiveCue,
+            busy: isSynthBusy,
+            error: isSynthError,
+          }),
+          "grid gap-2 overflow-hidden px-4 py-3",
           gridCols,
         )}
         onMouseEnter={handleRowMouseEnter}

@@ -258,10 +258,15 @@ async function main(): Promise<void> {
       SYNC_WORKER_URL: `http://127.0.0.1:${SYNC_PORT}`,
       // Loud env tag so logs make it obvious this is the local dev stack.
       ENVIRONMENT: "development",
-      // Unlocks /__test__/reset and /__dev__/{seed,login}. NEVER set in prod.
-      WRANGLER_LOCAL: "1",
     },
-    extraArgs: ["--persist-to", PERSIST_DIR],
+    // `--var` is the only reliable way to land a value in `c.env` for
+    // wrangler dev — process env alone does NOT propagate through to the
+    // worker's bindings. WRANGLER_LOCAL=1 unlocks /__test__/reset and
+    // /__dev__/{seed,login}. NEVER set in prod.
+    extraArgs: [
+      "--persist-to", PERSIST_DIR,
+      "--var", "WRANGLER_LOCAL:1",
+    ],
     logFile: openLogFile(path.join(LOG_DIR, "identity.log")),
     streamToParent: VERBOSE,
   })

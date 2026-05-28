@@ -32,6 +32,23 @@ Before claiming any feature is complete:
 - GitLab sync is transitional (legacy compat only). Don't build on top of it.
 - The sync stack is event-sourced to D1: the client enqueues events in an IndexedDB outbox and flushes them asynchronously via `POST /events` (HTTP) with a per-file JWT. The sync-worker writes each event to the D1 event log and projects it into the `cells`/`files` tables. A per-project `ProjectSync` Durable Object (one instance per project) handles presence, focus-lock leases, and real-time broadcast relay — it holds no durable state (no D1/R2 writes from inside the DO). R2 stores media blobs (audio recordings, generated voice) only. Identity/permissions live in `frontier-server` (sibling repo at `~/frontierrnd/frontier-server`).
 
+## Verifying UI changes — drive the app yourself
+
+Do NOT punt to the user with "on your side: reload and click X." If you have Playwright MCP available (tools named `mcp__plugin_playwright_playwright__*`), drive the app yourself. The seeded dev stack exists specifically to make this loop tight.
+
+Steps:
+
+1. Confirm `pnpm dev` is running (port 5173 reachable). If not, start it in the background.
+2. `browser_navigate http://127.0.0.1:5173/__dev/login` — calls the dev bypass, redirects to `/project/dev-project`. You are now logged in as user `dev` with OWNER on `Dev Org` and `dev-project`.
+3. Navigate to the surface your change touches, interact with it, then `browser_snapshot` / `browser_take_screenshot` to confirm.
+
+Only escalate to the human when:
+- the change depends on real-data shapes the seed doesn't produce (large multi-file projects, specific cell/event histories),
+- the bug only reproduces in their existing IDB state,
+- the change is a multi-window/multi-user collab scenario (use the e2e harness instead — see `e2e/README.md`).
+
+For the broader discipline, see the `verify` and `superpowers:verification-before-completion` skills. Project-specific glue lives in the `verify-dev-change` skill.
+
 ## Local dev — auth bypass
 
 `pnpm dev` boots the identity worker with `WRANGLER_LOCAL=1`, which unlocks two routes on `auth-worker`:
@@ -39,7 +56,7 @@ Before claiming any feature is complete:
 - `POST /__dev__/seed` — idempotent upsert of user `dev` / org `Dev Org` / project `dev-project` (dev user is OWNER of both).
 - `POST /__dev__/login` — runs seed, returns `{ access_token, username: "dev", user, org, project }`. Use this to sign in without typing a password.
 
-The SignIn step renders a **"Dev login (skip auth)"** button when `import.meta.env.DEV` — clicking it calls `/__dev__/login` and stores the session like a real login. From Playwright, hit the endpoint directly (no need for `/__test__/reset` if your test only needs one user).
+The SignIn step renders a **"Dev login (skip auth)"** button when `import.meta.env.DEV` — clicking it calls `/__dev__/login` and stores the session like a real login. For agents driving the app via Playwright MCP, prefer the auto-login URL **`http://127.0.0.1:5173/__dev/login`** — it logs in and redirects to `/project/dev-project` in one navigate.
 
 Both routes 404 unless `WRANGLER_LOCAL=1`. Prod `wrangler.toml` never sets it; the bypass also resolves to a hardcoded username, so the blast radius if it ever leaked is "log in as a user that doesn't exist in prod D1." See [auth-worker/src/routes/dev-seed.ts](auth-worker/src/routes/dev-seed.ts).
 

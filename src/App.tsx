@@ -8,6 +8,7 @@ import { VoiceStudioPage } from "@/components/VoiceStudioPage"
 import { CommentsPage } from "@/components/CommentsPage"
 import { JoinPage } from "@/components/JoinPage"
 import { OnboardingWizard } from "@/components/onboarding/OnboardingWizard"
+import { DevLoginRoute } from "@/components/DevLoginRoute"
 import { MembersPage } from "@/pages/MembersPage"
 import { Settings } from "@/pages/Settings"
 import { SyncingProvider, useSyncing } from "@/context/SyncingContext"
@@ -74,6 +75,8 @@ function AppRoutes() {
       <Route path="/projects" element={<Navigate to="/" replace />} />
       <Route path="/join/:token" element={<JoinPage />} />
       <Route path="/onboarding" element={<OnboardingWizard />} />
+      {/* Dev-only auto-login — see components/DevLoginRoute.tsx */}
+      <Route path="/__dev/login" element={<DevLoginRoute />} />
       <Route path="/settings" element={<Settings />} />
       <Route path="/members" element={<MembersPage />} />
     </Routes>

@@ -10,21 +10,42 @@ account_id = "6a80496d1e59948a9cbaa3c643ba81d7"
 # not the workers.dev URL. The worker strips the /identity or /chat prefix
 # (index.ts) before handing off to the route handlers.
 #
-# NO `routes` in this top-level (CI) config ON PURPOSE. CI's token lacks
-# zone-route permission (Authentication error [10000] on /zones/.../workers/
-# routes), so a routed deploy fails. CI therefore deploys CODE only; the
-# `api.aquilla.app/identity/*` zone route is managed out-of-band (CF
-# dashboard, or a local `wrangler deploy` with a token that has zone perms).
-# A no-routes deploy does NOT remove existing routes, so the live mount is
-# preserved across CI deploys — same pattern as sync-worker.
+# =============================================================================
+# ROUTE / ENV CONVENTION — read this before editing routes
+# =============================================================================
+# Routes for every environment live in `[env.<name>]` blocks below. This
+# file IS the source of truth for routes — do NOT add or remove routes via
+# the Cloudflare dashboard.
 #
-# Chat: /chat/* on api.aquilla.app is still pending fold-in from the legacy
-# codex-chat-worker (the 93dbe4f fold was never completed on prod; chat
-# works there at the old /api/chat/* mount). Not claimed here — doing so
-# would also conflict [10020]. Finishing the fold = detach the legacy
-# aquilla.app/api/chat/* route from codex-chat-worker, attach
-# api.aquilla.app/chat/* to aquilla-identity, then ensure OPENROUTER_API_KEY
-# is on aquilla-identity.
+# Why the top-level config has no `routes` block:
+#   CI's API token lacks `Zone.Workers Routes:Edit` on the aquilla.app zone,
+#   so a routed deploy fails with auth error [10000]. CI runs bare
+#   `wrangler deploy` (which uses this top-level config) and only ships CODE.
+#
+# Routes are applied by a LOCAL deploy with a zone-perm token:
+#   pnpm run deploy:aquilla:auth        # = wrangler deploy --env=production
+#   (cd auth-worker && wrangler deploy --env=staging)
+# These commands sync the worker's routes to match the env block — they
+# ADD routes new to the list and REMOVE routes that have been deleted.
+#
+# To add or change a route:
+#   1. Edit `routes = [...]` in the relevant `[env.<name>]` below.
+#   2. Run the deploy command above.
+#   3. Commit the wrangler.toml change.
+#
+# Future state: when CI's token is upgraded with zone-route perms,
+# `.github/workflows/deploy-workers.yml` can switch to
+# `wrangler deploy --env=production`, after which routes ship on every push
+# to main. Until then, route changes are a deliberate local step.
+# =============================================================================
+#
+# Chat: /chat/* on api.aquilla.app is owned by this worker (folded in from
+# the former aquilla-chat-worker on 2026-05-26 — same JWT secret, one
+# worker). OPENROUTER_API_KEY must be set on aquilla-identity (and
+# aquilla-dev-identity for staging) via `wrangler secret put`. The legacy
+# `aquilla.app/api/chat/*` route still lives on codex-chat-worker; once
+# this worker's `api.aquilla.app/chat/*` is verified the legacy route can
+# be detached.
 
 # Phase D: auth-worker is the full identity surface. AQUILLA_DB owns the
 # complete schema (identity + orgs + projects + members + invites + file/cell
@@ -53,6 +74,36 @@ ACCESS_TOKEN_EXPIRE_MINUTES = "43200"
 EMAIL_FROM = "noreply@aquilla.app"
 # BASE_URL points at the SPA, not the API or the marketing apex — used to
 # construct password-reset / invite links sent in email.
+BASE_URL = "https://web.aquilla.app"
+SYNC_WORKER_URL = "https://api.aquilla.app/sync"
+DEFAULT_LLM_MODEL = "anthropic/claude-sonnet-4.5"
+ENVIRONMENT = "production"
+
+# ---------------------------------------------------------------------------
+# Production environment — owns routes on api.aquilla.app for the identity
+# and chat surfaces. Same worker name as top-level (aquilla-identity), so
+# `wrangler deploy` (CI, code-only) and `wrangler deploy --env=production`
+# (local, code + routes) target the same Worker. Bindings + vars are
+# re-declared because env blocks don't inherit them.
+# ---------------------------------------------------------------------------
+[env.production]
+name = "aquilla-identity"
+account_id = "6a80496d1e59948a9cbaa3c643ba81d7"
+routes = [
+  "api.aquilla.app/identity/*",
+  "api.aquilla.app/chat/*",
+]
+
+[[env.production.d1_databases]]
+binding = "AQUILLA_DB"
+database_name = "aquilla-db"
+database_id = "11828e9d-998b-4d3f-a405-91d9f624f94a"
+migrations_dir = "migrations"
+
+[env.production.vars]
+ALGORITHM = "HS256"
+ACCESS_TOKEN_EXPIRE_MINUTES = "43200"
+EMAIL_FROM = "noreply@aquilla.app"
 BASE_URL = "https://web.aquilla.app"
 SYNC_WORKER_URL = "https://api.aquilla.app/sync"
 DEFAULT_LLM_MODEL = "anthropic/claude-sonnet-4.5"

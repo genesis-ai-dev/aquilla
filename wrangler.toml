@@ -12,6 +12,22 @@
 # bearer-token-only and both workers use `Access-Control-Allow-Origin: *`.
 # No service bindings needed — the SPA fetch()es absolute URLs from
 # VITE_AUTH_BASE / VITE_SYNC_WORKER_HOST / VITE_CHAT_BASE wired in deploy.yml.
+#
+# =============================================================================
+# ROUTE / ENV CONVENTION — same pattern as auth-worker / sync-worker
+# =============================================================================
+# Routes live in `[env.production]` below. This file is the source of truth
+# — don't touch routes via the Cloudflare dashboard. CI's token lacks
+# zone-route perms, so CI runs bare `wrangler deploy` (top-level config,
+# code only). Routes are applied by a LOCAL deploy with a zone-perm token:
+#
+#   pnpm run deploy:aquilla:spa          # builds + deploys SPA, syncs routes
+#   pnpm run deploy:aquilla:web          # umbrella: SPA + sync-worker + auth-worker
+#
+# To change a route: edit `routes` in `[env.production]`, run the deploy
+# command, commit the wrangler.toml change. See auth-worker/wrangler.toml
+# for the full convention doc.
+# =============================================================================
 
 name = "aquilla-web"
 account_id = "6a80496d1e59948a9cbaa3c643ba81d7"
@@ -25,18 +41,25 @@ workers_dev = true
 # IMPORTANT: dist/_redirects must NOT be present at deploy time. Workers'
 # static-assets parser rejects the `/* /index.html 200` SPA rule as an
 # "infinite loop" (error 100324) — unlike Pages, which accepts it. The
-# deploy:aquilla:web script removes it post-build. public/_redirects stays
+# deploy:aquilla:spa script removes it post-build. public/_redirects stays
 # so the legacy Pages deploys for other brands keep working.
 [assets]
 directory = "./dist"
 not_found_handling = "single-page-application"
 
-# NO `routes` here yet — first deploy goes to aquilla-web.<subdomain>.workers.dev
-# for smoke testing. Once verified, attach web.aquilla.app via the dashboard
-# (or uncomment below and deploy locally with a zone-perm token):
-#
-#   routes = [{ pattern = "web.aquilla.app/*", zone_name = "aquilla.app" }]
-#
-# The API lives on api.aquilla.app/{identity,sync,chat}/* on separate Workers,
-# so there's no route overlap with this one. The marketing apex (aquilla.app)
-# is whatever you point it at separately — it's not this Worker.
+# ---------------------------------------------------------------------------
+# Production environment — attaches web.aquilla.app/* to this Worker.
+# Same worker name as top-level (aquilla-web), so CI's bare `wrangler deploy`
+# and local `wrangler deploy --env=production` target the same Worker.
+# `[env.production.assets]` re-declared because env blocks don't inherit
+# the top-level assets binding.
+# ---------------------------------------------------------------------------
+[env.production]
+name = "aquilla-web"
+account_id = "6a80496d1e59948a9cbaa3c643ba81d7"
+workers_dev = true
+routes = ["web.aquilla.app/*"]
+
+[env.production.assets]
+directory = "./dist"
+not_found_handling = "single-page-application"

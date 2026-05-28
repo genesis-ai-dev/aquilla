@@ -6,6 +6,23 @@ compatibility_flags = ["nodejs_compat"]
 # routed deploy would otherwise disable it.
 workers_dev = true
 
+# =============================================================================
+# ROUTE / ENV CONVENTION — same pattern as auth-worker
+# =============================================================================
+# Routes live in `[env.production]` and `[env.staging]` below. This file is
+# the source of truth — don't add or remove routes via the Cloudflare
+# dashboard. CI's token lacks zone-route perms so CI runs bare
+# `wrangler deploy` (top-level, code only). Routes are applied by a LOCAL
+# deploy with a zone-perm token:
+#
+#   pnpm run deploy:aquilla:sync        # = wrangler deploy --env=production
+#   (cd sync-worker && wrangler deploy --env=staging)
+#
+# To change a route: edit `routes` in the relevant `[env.<name>]`, run the
+# deploy command, commit the wrangler.toml change. See
+# auth-worker/wrangler.toml for the full convention doc.
+# =============================================================================
+
 # Same CF account as frontier-server and aquilla-db. Pinned so `wrangler deploy`
 # doesn't prompt interactively and lands on the wrong account by accident.
 account_id = "6a80496d1e59948a9cbaa3c643ba81d7"

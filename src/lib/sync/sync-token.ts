@@ -12,7 +12,7 @@
 // set it to a mock server URL.
 const AUTH_FALLBACK =
   ((import.meta.env.VITE_FRONTIER_BASE as string | undefined)?.replace(/\/+$/, "")) ||
-  "https://aquilla-identity.blue-darkness-7674.workers.dev"
+  "https://api.aquilla.app/identity"
 
 export const AUTH_API_URL =
   ((import.meta.env.VITE_AUTH_BASE as string | undefined)?.replace(/\/+$/, "")) ||

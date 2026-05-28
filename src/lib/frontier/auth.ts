@@ -12,7 +12,7 @@
 // prod .env should also use the default rather than break network calls.
 export const AUTH_BASE =
   ((import.meta.env.VITE_AUTH_BASE as string | undefined)?.replace(/\/+$/, "")) ||
-  "https://aquilla-identity.blue-darkness-7674.workers.dev";
+  "https://api.aquilla.app/identity";
 
 /** @deprecated Use AUTH_BASE directly. Kept as an alias so existing callers
  *  (orgs.ts, members.ts, useUserSearch) compile without churn. */

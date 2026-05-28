@@ -15,7 +15,7 @@ describe("login", () => {
     );
     const s = await login({ username: "alice", password: "pw" });
     expect(fetchSpy).toHaveBeenCalledWith(
-      "https://aquilla-identity.blue-darkness-7674.workers.dev/api/v2/auth/token",
+      "https://api.aquilla.app/identity/api/v2/auth/token",
       expect.objectContaining({ method: "POST" })
     );
     expect(s.jwt).toBe("jwt-1");
@@ -47,6 +47,6 @@ describe("AUTH_BASE env override", () => {
     vi.stubEnv("VITE_AUTH_BASE", "");
     vi.resetModules();
     const mod = await import("./auth");
-    expect(mod.AUTH_BASE).toBe("https://aquilla-identity.blue-darkness-7674.workers.dev");
+    expect(mod.AUTH_BASE).toBe("https://api.aquilla.app/identity");
   });
 });

@@ -25,7 +25,9 @@ interface CellVoicePanelProps {
   cell: CellData
   project: Project
   projectId: string
-  settings: ProjectTtsSettings
+  /** Hydrated TTS settings — may be undefined before the user saves any. The
+   *  host resolves `resolvedVoice` from it; the panel keeps them in sync. */
+  settings?: ProjectTtsSettings
   /** The Cast — every character voice available to assign to this line. */
   voices: Voice[]
   /** The character currently voicing this cell, resolved by the host. */

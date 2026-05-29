@@ -1692,12 +1692,12 @@ function EditorRow({
             voice a line, so the column is REPLACED with this cell's voice
             controls (character picker, generate, play, make-a-character). In
             Text mode it shows the source text as usual. */}
-        {audioLens && hasContent ? (
+        {audioLens ? (
           (() => {
             const vid = assignedCastVoiceId(audioLens.settings, cell.id) ?? audioLens.defaultVoiceId
             const resolvedVoice =
               audioLens.voices.find((v) => v.id === vid) ?? audioLens.voices[0]
-            if (!audioLens.settings || !resolvedVoice) return <div />
+            if (!resolvedVoice) return <div />
             return (
               <div
                 className={cn("flex flex-col transition-opacity", isSynthBusy && "opacity-70")}

@@ -257,7 +257,6 @@ export interface AudioLensContext {
   /** The project's default/narrator voice id, used when a line has no explicit cast. */
   defaultVoiceId: string
   onAssignCast: (cellId: string, voiceId: string) => void
-  onGenerateCell: (cell: CellData) => void
 }
 
 interface EditorTableProps {
@@ -1831,9 +1830,7 @@ function EditorRow({
                   voice={voice}
                   voices={audioLens.voices}
                   hasGeneratedVoice={hasGeneratedVoice}
-                  disabled={!editable}
                   onAssign={(voiceId) => audioLens.onAssignCast(cell.id, voiceId)}
-                  onGenerate={() => audioLens.onGenerateCell(cell)}
                 />
               )
             })()}

@@ -29,12 +29,9 @@ import { SyncStatusIndicator } from "./SyncStatusIndicator"
 import { OutboxSyncIndicator } from "./OutboxSyncIndicator"
 import { EditorTable, type AudioLensContext } from "./EditorTable"
 import { AudioRecordingModal } from "./AudioRecorder/AudioRecordingModal"
-import { VoiceLibraryPanel } from "./VoiceLibraryPanel"
-import { VoiceTransportBar } from "./voice/VoiceTransportBar"
-import { CastAssignBar } from "./voice/CastAssignBar"
+import { VoiceSidebar } from "./voice/VoiceSidebar"
 import { useProjectTts } from "@/hooks/useProjectTts"
-import { generateCellVoice } from "@/lib/audio/voice-generate-helpers"
-import { resolveCastVoice } from "@/lib/audio/voices"
+import { useSelectedIds } from "@/lib/audio/selection"
 import { RuleDrawer } from "./RuleDrawer"
 import { CommentsDrawer } from "./CommentsDrawer"
 import { HistoryDrawer } from "./HistoryDrawer"
@@ -59,7 +56,7 @@ import {
 import { emitTargetCellCommit } from "@/lib/sync/events-emit"
 import { flushOutboxBatch } from "@/lib/sync/outbox-flush"
 import { useCellsAuditStatsWithOverlay } from "@/hooks/useCellsAuditStatsWithOverlay"
-import { Film, Scale, MessagesSquare, Share2, Settings as SettingsIcon, Lock, ClipboardList, Trash2, Undo2, Search as SearchIcon, Sparkles, Mic2, X } from "lucide-react"
+import { Film, Scale, MessagesSquare, Share2, Settings as SettingsIcon, Lock, ClipboardList, Trash2, Undo2, Search as SearchIcon, Sparkles, Mic2 } from "lucide-react"
 import { restoreProject } from "@/lib/store/project-index"
 import { AppShell } from "./AppShell"
 import { WorkspaceHeader } from "./WorkspaceHeader"
@@ -265,15 +262,16 @@ export function ProjectWorkspace() {
   const [shareOpen, setShareOpen] = useState(false)
   const [aiSetupOpen, setAiSetupOpen] = useState(false)
   const [recordingCellId, setRecordingCellId] = useState<string | null>(null)
-  // Text vs Audio lens — the same editor over the same cells. Audio mode adds
-  // the cast library drawer, transport bar, per-line speaker chips + generate.
+  // Text vs Audio lens — the same editor over the same cells. Audio mode swaps
+  // the left rail's body for the VoiceSidebar (cockpit + cast library) and adds
+  // per-line speaker chips; all other audio chrome lives in that rail now.
   const [lens, setLens] = useState<EditorLens>("text")
-  const [castDrawerOpen, setCastDrawerOpen] = useState(false)
-  // Active cast member in the library — its one-click assigns the selection.
-  const [activeCastId, setActiveCastId] = useState<string | undefined>(undefined)
+  // Selected cell ids (shared module store) — the VoiceSidebar's cockpit uses
+  // them for selection-aware generate / play / assign.
+  const selectedIds = useSelectedIds()
+  const selectedCellIds = useMemo(() => [...selectedIds], [selectedIds])
   const openAudioLens = useCallback(() => {
     setLens("audio")
-    setCastDrawerOpen(true)
   }, [])
   const editorRef = useRef<EditorTableHandle>(null)
   // Phase 2c-gamma: the per-file Y.Doc is gone. The editor hydrates from the
@@ -412,20 +410,6 @@ export function ProjectWorkspace() {
     () => (project ? { ...project, ttsSettings: tts.settings } : null),
     [project, tts.settings],
   )
-  const onGenerateCell = useCallback(
-    async (cell: CellData) => {
-      if (!audioProject) return
-      await generateCellVoice({
-        project: audioProject,
-        cell,
-        session: frontierSession ?? null,
-        username: currentUsername,
-        voiceId: resolveCastVoice(tts.settings, cell.id, cell.ttsSettings?.voiceId).id,
-      })
-      revalidateCells()
-    },
-    [audioProject, frontierSession, currentUsername, tts.settings, revalidateCells],
-  )
   const audioLens = useMemo<AudioLensContext | null>(
     () =>
       lens === "audio"
@@ -434,10 +418,9 @@ export function ProjectWorkspace() {
             settings: tts.settings,
             defaultVoiceId: tts.defaultVoiceId,
             onAssignCast: (cellId, voiceId) => tts.assignCells([cellId], voiceId),
-            onGenerateCell,
           }
         : null,
-    [lens, tts.voices, tts.settings, tts.defaultVoiceId, tts.assignCells, onGenerateCell],
+    [lens, tts.voices, tts.settings, tts.defaultVoiceId, tts.assignCells],
   )
 
   const { hasAny: hasUnfinished, findNext: findNextUnfinished } = useNextUnfinished(cells, validationCount)
@@ -1229,29 +1212,50 @@ export function ProjectWorkspace() {
             <div className="p-2">
               <AccountSwitcher />
             </div>
-            <SuggestionBanner
-              suggestions={bannerSuggestions}
-              onApply={handleApplySuggestions}
-              onDismiss={handleDismissBanner}
-            />
-            <ExpandableFileList
-              projectId={projectId!}
-              files={project.files}
-              activeFileId={activeFileId}
-              fileProgress={fileProgress}
-              suggestionFileIds={suggestionFileIds}
-              validationCount={validationCount}
-              getTokenForFile={getTokenForFile}
-              onSelectFile={workspaceTabs.openFile}
-              onRename={handleRename}
-              onMove={(fileId) => {
-                setMoveTargetId(fileId)
-                setMoveCorpus(project.files.find((f) => f.id === fileId)?.corpusMarker ?? "")
-              }}
-              onDelete={(fileId) => setPendingDeleteId(fileId)}
-              onApplySuggestion={handleApplyOneSuggestion}
-              onRenameCorpus={handleRenameCorpus}
-            />
+            {lens === "audio" && project ? (
+              <VoiceSidebar
+                cells={cells}
+                project={audioProject ?? project}
+                projectId={project.id}
+                tts={tts}
+                session={frontierSession ?? null}
+                username={currentUsername}
+                selectedCellIds={selectedCellIds}
+                onAfterGenerate={revalidateCells}
+                targetLanguage={project.targetLanguage}
+                fileId={activeFileId}
+                onRecord={() => {
+                  const first = cells.find((c) => c.type !== "paratext" && c.translated?.trim())
+                  if (first) setRecordingCellId(first.id)
+                }}
+              />
+            ) : (
+              <>
+                <SuggestionBanner
+                  suggestions={bannerSuggestions}
+                  onApply={handleApplySuggestions}
+                  onDismiss={handleDismissBanner}
+                />
+                <ExpandableFileList
+                  projectId={projectId!}
+                  files={project.files}
+                  activeFileId={activeFileId}
+                  fileProgress={fileProgress}
+                  suggestionFileIds={suggestionFileIds}
+                  validationCount={validationCount}
+                  getTokenForFile={getTokenForFile}
+                  onSelectFile={workspaceTabs.openFile}
+                  onRename={handleRename}
+                  onMove={(fileId) => {
+                    setMoveTargetId(fileId)
+                    setMoveCorpus(project.files.find((f) => f.id === fileId)?.corpusMarker ?? "")
+                  }}
+                  onDelete={(fileId) => setPendingDeleteId(fileId)}
+                  onApplySuggestion={handleApplyOneSuggestion}
+                  onRenameCorpus={handleRenameCorpus}
+                />
+              </>
+            )}
             <SidebarProjectSection items={projectNavItems} />
           </>
         }
@@ -1332,7 +1336,7 @@ export function ProjectWorkspace() {
             {project && (
               <EditorModeToggle
                 lens={lens}
-                onChange={(l) => { setLens(l); if (l === "audio") setCastDrawerOpen(true) }}
+                onChange={(l) => setLens(l)}
               />
             )}
             <PrimaryActionButton ctx={actionCtx} run={actionArgs} />
@@ -1347,22 +1351,6 @@ export function ProjectWorkspace() {
               onActivate={workspaceTabs.activateTab}
               onClose={workspaceTabs.closeTab}
             />
-            {project && activeFileId && lens === "audio" && (
-              <VoiceTransportBar
-                cells={cells}
-                project={audioProject ?? project}
-                projectId={project.id}
-                settings={tts.settings}
-                session={frontierSession ?? null}
-                username={currentUsername}
-                onAfterGenerate={revalidateCells}
-                onRecord={(cellId) => setRecordingCellId(cellId)}
-                onCellPlaying={(cellId) => {
-                  const idx = cells.findIndex((c) => c.id === cellId)
-                  if (idx >= 0) editorRef.current?.scrollToCellIndex(idx)
-                }}
-              />
-            )}
             {project && activeFileId && lens === "text" && (
               <>
                 <SelectionBar
@@ -1552,45 +1540,10 @@ export function ProjectWorkspace() {
                 getTokenForFile={getTokenForFile}
               />
             )}
-            {lens === "audio" && castDrawerOpen && !drawerRuleId && !commentsCell && !historyCell && project && (
-              <div className="flex h-full flex-col">
-                <div className="flex items-center justify-between border-b px-3 py-2">
-                  <span className="text-sm font-medium">Cast &amp; voices</span>
-                  <button
-                    type="button"
-                    onClick={() => setCastDrawerOpen(false)}
-                    className="rounded p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
-                    title="Close"
-                  >
-                    <X className="h-4 w-4" />
-                  </button>
-                </div>
-                <div className="min-h-0 flex-1 overflow-y-auto">
-                  <VoiceLibraryPanel
-                    settings={tts.settings}
-                    onSettingsChange={tts.saveTts}
-                    targetLanguage={project.targetLanguage}
-                    projectId={project.id}
-                    fileId={activeFileId}
-                    session={frontierSession ?? null}
-                    castStats={tts.castStats}
-                    selectedVoiceId={activeCastId}
-                    onSelectVoice={setActiveCastId}
-                  />
-                </div>
-              </div>
-            )}
           </>
         }
         statusBar={
           <>
-            {lens === "audio" && (
-              <CastAssignBar
-                voices={tts.voices}
-                activeCastId={activeCastId}
-                onAssign={tts.assignCells}
-              />
-            )}
             <WorkspaceStatusBar
               left={
                 <div className="flex items-center gap-3">

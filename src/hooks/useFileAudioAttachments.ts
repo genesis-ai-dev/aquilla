@@ -31,13 +31,22 @@ export function useFileAudioAttachments(
     () => makeAudioSyncTokenFetcher(() => sessionRef.current),
     [],
   )
+  // On a cold reload the session JWT isn't ready on first render, so the
+  // initial fetch bails with no token and — because getToken is stable — never
+  // retries on its own. Track the JWT so the fetch re-runs the moment auth
+  // lands. (Symptom without this: zero `audio-attachments` requests on reload;
+  // audio only appears after a generate pokes the bus.)
+  const jwt = session?.jwt ?? null
 
   const [byCellId, setByCellId] = useState<Map<string, CellAudioEntry>>(EMPTY)
   const [isLoading, setIsLoading] = useState(false)
   const generationRef = useRef(0)
 
   const doFetch = useCallback(async () => {
-    if (!projectId || !fileId) {
+    // No project/file, or auth not ready yet → nothing to read. Gating on `jwt`
+    // here (rather than only inside getToken) makes it a real dependency, so the
+    // fetch re-runs the moment the session lands on a cold reload.
+    if (!projectId || !fileId || !jwt) {
       setByCellId(EMPTY)
       return
     }
@@ -59,7 +68,7 @@ export function useFileAudioAttachments(
     } finally {
       if (gen === generationRef.current) setIsLoading(false)
     }
-  }, [projectId, fileId, getToken])
+  }, [projectId, fileId, getToken, jwt])
 
   useEffect(() => {
     void doFetch()

@@ -27,10 +27,11 @@ interface Props {
 
 export function AppShell({ sidebar, header, statusBar, beforeMain, main, aside }: Props) {
   return (
-    // Linear "frame + floating panel" model: the sidebar, header, and status
-    // bar all share the chrome base (bg-sidebar) as one continuous layer; the
-    // main workspace is a distinct, lighter surface that sits ON TOP of it,
-    // tucked into the frame's inner corner with a rounded top-left edge.
+    // Linear "frame + floating card" model: the sidebar, header, and status
+    // bar all share the chrome base (bg-sidebar) as one continuous, lower/darker
+    // layer; the main workspace is a distinct, lighter card that sits ON TOP of
+    // it — inset on every side (top, sides, bottom) and fully rounded so the
+    // chrome reads as a frame wrapping the whole editor.
     <div className="flex h-screen min-w-0 bg-sidebar">
       <aside className="relative z-10 flex w-64 shrink-0 flex-col overflow-hidden">
         {sidebar}
@@ -38,7 +39,7 @@ export function AppShell({ sidebar, header, statusBar, beforeMain, main, aside }
       </aside>
       <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
         {header}
-        <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-tl-xl border-l border-t border-border bg-background">
+        <div className="m-2 flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-border bg-background">
           {beforeMain}
           <main className="flex min-h-0 flex-1 overflow-hidden">
             <div className="min-w-0 flex-1 overflow-hidden">{main}</div>

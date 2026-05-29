@@ -15,14 +15,12 @@ const FRONTIER_BASE = process.env.VITE_FRONTIER_BASE ?? "http://127.0.0.1:8787"
 interface AuthResponse {
   access_token: string
   token_type: string
-  gitlab_token: string
-  gitlab_url: string
 }
 
+// Mirrors src/lib/frontier/types.ts FrontierSession — the aquilla-identity
+// token response no longer carries gitlab_* fields (frontier-server retired).
 export interface PersistedSession {
   jwt: string
-  gitlabToken: string
-  gitlabUrl: string
   username: string
   createdAt: string
 }
@@ -46,8 +44,6 @@ export async function ensureAuthState(username: SeedUser["username"]): Promise<P
     const auth = (await r.json()) as AuthResponse
     const session: PersistedSession = {
       jwt: auth.access_token,
-      gitlabToken: auth.gitlab_token,
-      gitlabUrl: auth.gitlab_url.replace(/\/+$/, ""),
       username: u.username,
       createdAt: new Date().toISOString(),
     }
@@ -74,7 +70,9 @@ export async function injectSession(page: Page, session: PersistedSession): Prom
     const DB = "frontier"
     const STORE = "session"
     const ENVELOPE_KEY = "envelope"
-    const sessionKey = `${s.gitlabUrl}::${s.username}`
+    // Mirrors sessionKey() in src/lib/frontier/session-store.ts — keyed by
+    // username alone now (the gitlabUrl::username scheme is retired).
+    const sessionKey = s.username
 
     // Open / create the IDB.
     const open = indexedDB.open(DB, 1)

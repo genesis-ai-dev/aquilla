@@ -1712,6 +1712,8 @@ function EditorRow({
           isSynthError && "bg-destructive/5 ring-2 ring-destructive/50 ring-inset",
           gridCols,
         )}
+        onMouseEnter={handleRowMouseEnter}
+        onMouseLeave={handleRowMouseLeave}
         onFocusCapture={handleRowFocusCapture}
         onBlurCapture={handleRowBlurCapture}
         onMouseDownCapture={handleRowMouseDownCapture}
@@ -1930,11 +1932,7 @@ function EditorRow({
             with auto z-index, so the row's local z-10 doesn't escape the
             sticky header's z-10 context). */}
         <div className="pointer-events-none absolute right-2 top-1.5 z-20 flex">
-          <div
-            className="pointer-events-auto"
-            onMouseEnter={handleRowMouseEnter}
-            onMouseLeave={handleRowMouseLeave}
-          >
+          <div className="pointer-events-auto">
             <CellActionRail
               revealed={railRevealed}
               expanded={expanded}

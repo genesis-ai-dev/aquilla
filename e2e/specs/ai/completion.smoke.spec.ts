@@ -18,7 +18,7 @@ const SAMPLE_MD = path.resolve(__dirname, "../../fixtures/sample.md")
  * compatible endpoint, the sparkle button populates a target cell with
  * the LLM's response.
  *
- * IDB layout: db "codex" v3, store "projects" keyed by id.
+ * IDB layout: db "codex" v4, store "projects" keyed by id.
  */
 test("sparkle button fills target cell from mock LLM (config injected via IDB)", async ({ alice }) => {
   const dash = new Dashboard(alice)
@@ -34,7 +34,7 @@ test("sparkle button fills target cell from mock LLM (config injected via IDB)",
   expect(llmBase).toMatch(/^http:\/\/127\.0\.0\.1:\d+$/)
 
   await alice.evaluate(async ({ id, endpoint }) => {
-    const open = indexedDB.open("codex", 3)
+    const open = indexedDB.open("codex", 4)
     await new Promise<void>((resolve, reject) => {
       open.onsuccess = () => resolve()
       open.onerror = () => reject(open.error)

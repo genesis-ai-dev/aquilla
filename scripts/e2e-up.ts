@@ -1,6 +1,5 @@
 import { spawn, spawnSync } from "node:child_process"
-import { existsSync, writeFileSync, rmSync, readdirSync, mkdirSync, readFileSync } from "node:fs"
-import { homedir } from "node:os"
+import { existsSync, writeFileSync, rmSync, copyFileSync, mkdirSync, readFileSync } from "node:fs"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
 import {
@@ -14,10 +13,17 @@ import { MockLLMServer } from "../e2e/helpers/mock-llm-server"
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const REPO_ROOT = path.resolve(__dirname, "..")
-const FRONTIER_SERVER_DIR =
-  process.env.FRONTIER_SERVER_DIR ?? path.join(homedir(), "frontierrnd/frontier-server")
+// Identity is the in-repo auth-worker (aquilla-identity) — it replaced the
+// retired frontier-server and owns the full aquilla-db schema + migrations.
+// It also serves /__test__/reset (gated by WRANGLER_LOCAL) and /api/v1/auth/*,
+// so the e2e helpers (seed.ts, auth.ts) work against it unchanged.
+const AUTH_WORKER_DIR = path.join(REPO_ROOT, "auth-worker")
 const SYNC_WORKER_DIR = path.join(REPO_ROOT, "sync-worker")
-const FRONTIER_PORT = 8787
+// Shared wrangler local state so auth-worker (writes users/orgs/projects) and
+// sync-worker (writes files/cells/events) see the same aquilla-db rows. Without
+// --persist-to each cwd gets its own isolated sqlite and the two drift apart.
+const PERSIST_DIR = path.join(REPO_ROOT, ".wrangler-e2e-state")
+const IDENTITY_PORT = 8787
 const SYNC_WORKER_PORT = 8788
 const VITE_PORT = 5173
 
@@ -116,10 +122,23 @@ async function freePort(port: number): Promise<void> {
   }
 }
 
+/** Copy a worker's `.dev.vars.example` → `.dev.vars` if missing, so a fresh
+ * checkout boots without a manual step. Both backends ship an example file. */
+function ensureDevVars(appDir: string, label: string): void {
+  const target = path.join(appDir, ".dev.vars")
+  const source = path.join(appDir, ".dev.vars.example")
+  if (existsSync(target)) return
+  if (!existsSync(source)) {
+    console.warn(`[e2e-up] ${label}: no .dev.vars and no .dev.vars.example — the worker may fail to boot.`)
+    return
+  }
+  copyFileSync(source, target)
+  console.log(`[e2e-up] ${label}: created .dev.vars from .dev.vars.example`)
+}
+
 async function main(): Promise<void> {
-  if (!existsSync(FRONTIER_SERVER_DIR)) {
-    console.error(`[e2e-up] frontier-server not found at ${FRONTIER_SERVER_DIR}`)
-    console.error(`[e2e-up] set FRONTIER_SERVER_DIR or clone the repo`)
+  if (!existsSync(AUTH_WORKER_DIR)) {
+    console.error(`[e2e-up] auth-worker not found at ${AUTH_WORKER_DIR}`)
     process.exit(1)
   }
   if (!existsSync(SYNC_WORKER_DIR)) {
@@ -128,7 +147,7 @@ async function main(): Promise<void> {
   }
 
   // 0. Free our managed ports — survives stale processes from a prior aborted run.
-  await freePort(FRONTIER_PORT)
+  await freePort(IDENTITY_PORT)
   await freePort(SYNC_WORKER_PORT)
   await freePort(VITE_PORT)
 
@@ -136,101 +155,78 @@ async function main(): Promise<void> {
   // mode so the developer's terminal stays clean. On test failure we tail
   // these files so problems are still discoverable.
   mkdirSync(LOG_DIR, { recursive: true })
-  logFiles.frontier = path.join(LOG_DIR, "frontier.log")
+  logFiles.identity = path.join(LOG_DIR, "identity.log")
   logFiles.sync = path.join(LOG_DIR, "sync.log")
   logFiles.vite = path.join(LOG_DIR, "vite.log")
   logFiles.migrations = path.join(LOG_DIR, "migrations.log")
   logFiles.build = path.join(LOG_DIR, "build.log")
+  // First-run prerequisites (idempotent): both workers need a .dev.vars.
+  ensureDevVars(AUTH_WORKER_DIR, "identity")
+  ensureDevVars(SYNC_WORKER_DIR, "sync")
+
+  // Reset the shared local D1 so every run starts from an empty schema (the
+  // /__test__/reset endpoint truncates data, but a fresh sqlite also picks up
+  // any migration changes since the last run).
   console.log(`[boot 1/8] resetting wrangler local state… (logs: ${LOG_DIR}/)`)
-  rmSync(path.join(FRONTIER_SERVER_DIR, ".wrangler"), { recursive: true, force: true })
-  rmSync(path.join(SYNC_WORKER_DIR, ".wrangler"), { recursive: true, force: true })
+  rmSync(PERSIST_DIR, { recursive: true, force: true })
+  mkdirSync(PERSIST_DIR, { recursive: true })
 
-  // 2. Apply frontier-db-v2 migrations (auth, orgs, members, sync-token).
-  console.log("[boot 2/8] applying frontier-db-v2 migrations…")
+  // 2. Apply aquilla-db migrations. auth-worker owns the full schema (identity
+  // + orgs + projects + members + file/cell projections) under migrations/;
+  // sync-worker binds the same D1 and reads it via the shared --persist-to dir.
+  console.log("[boot 2/8] applying aquilla-db migrations…")
   await runOnce(
     "npx",
-    ["wrangler", "d1", "migrations", "apply", "frontier-db-v2", "--local"],
-    FRONTIER_SERVER_DIR,
+    ["wrangler", "d1", "migrations", "apply", "aquilla-db", "--local", "--persist-to", PERSIST_DIR],
+    AUTH_WORKER_DIR,
     "migrations",
   )
 
-  // 2b. Apply codex-db schema to BOTH workers' local D1.
-  //
-  // codex-db is shared (frontier-server reads, sync-worker writes the
-  // `files`/`cells` projections on Y.Doc onSave). frontier-server owns the
-  // migrations (cloudflare/codex_migrations). sync-worker doesn't list a
-  // migrations_dir for it, so we apply by piping each .sql file to
-  // `wrangler d1 execute` against the sync-worker's local D1.
-  console.log("[boot 3/8] applying codex-db schema (both workers)…")
-  await runOnce(
-    "npx",
-    ["wrangler", "d1", "migrations", "apply", "codex-db", "--local"],
-    FRONTIER_SERVER_DIR,
-    "migrations",
-  )
-  const codexMigrationsDir = path.join(FRONTIER_SERVER_DIR, "cloudflare/codex_migrations")
-  const codexMigrations = readdirSync(codexMigrationsDir)
-    .filter((f) => f.endsWith(".sql"))
-    .sort()
-  for (const m of codexMigrations) {
-    await runOnce(
-      "npx",
-      ["wrangler", "d1", "execute", "codex-db", "--local", `--file=${path.join(codexMigrationsDir, m)}`],
-      SYNC_WORKER_DIR,
-      "migrations",
-    )
-  }
-
-  const codexPatchesDir = path.join(SYNC_WORKER_DIR, "codex-db-patches")
-  if (existsSync(codexPatchesDir)) {
-    const codexPatches = readdirSync(codexPatchesDir)
-      .filter((f) => f.endsWith(".sql"))
-      .sort()
-    for (const p of codexPatches) {
-      await runOnce(
-        "npx",
-        ["wrangler", "d1", "execute", "codex-db", "--local", `--file=${path.join(codexPatchesDir, p)}`],
-        SYNC_WORKER_DIR,
-        "migrations",
-      )
-    }
-  }
-
-  // 3. Boot frontier-server
-  console.log(`[boot 4/8] starting frontier-server on :${FRONTIER_PORT}…`)
-  const frontier: SpawnedWorker = await spawnWranglerDev({
-    cwd: FRONTIER_SERVER_DIR,
-    port: FRONTIER_PORT,
-    label: "frontier",
-    env: { WRANGLER_LOCAL: "1" },
-    logFile: openLogFile(logFiles.frontier),
+  // 3. Boot identity (auth-worker). --var WRANGLER_LOCAL:1 unlocks
+  // /__test__/reset (process env alone doesn't reach c.env bindings).
+  console.log(`[boot 3/8] starting identity (auth-worker) on :${IDENTITY_PORT}…`)
+  const identity: SpawnedWorker = await spawnWranglerDev({
+    cwd: AUTH_WORKER_DIR,
+    port: IDENTITY_PORT,
+    label: "identity",
+    env: {
+      SYNC_WORKER_URL: `http://127.0.0.1:${SYNC_WORKER_PORT}`,
+      ENVIRONMENT: "development",
+    },
+    extraArgs: ["--persist-to", PERSIST_DIR, "--var", "WRANGLER_LOCAL:1"],
+    logFile: openLogFile(logFiles.identity),
     streamToParent: VERBOSE,
   })
-  cleanup.push(() => frontier.kill())
+  cleanup.push(() => identity.kill())
 
-  // 4. Boot sync-worker
-  console.log(`[boot 5/8] starting sync-worker on :${SYNC_WORKER_PORT}…`)
+  // 4. Boot sync-worker — same shared local D1 via --persist-to.
+  console.log(`[boot 4/8] starting sync-worker on :${SYNC_WORKER_PORT}…`)
   const sync: SpawnedWorker = await spawnWranglerDev({
     cwd: SYNC_WORKER_DIR,
     port: SYNC_WORKER_PORT,
     label: "sync",
+    extraArgs: ["--persist-to", PERSIST_DIR],
     logFile: openLogFile(logFiles.sync),
     streamToParent: VERBOSE,
   })
   cleanup.push(() => sync.kill())
 
   // 5. Boot mock LLM
-  console.log("[boot 6/8] starting mock LLM…")
+  console.log("[boot 5/8] starting mock LLM…")
   const mockLLM = new MockLLMServer()
   await mockLLM.start()
   cleanup.push(async () => mockLLM.stop())
 
-  // 6. Write .env.test.local
+  // 6. Write .env.test.local. The browser app reads VITE_AUTH_BASE for auth +
+  // project data (auth.ts has NO VITE_FRONTIER_BASE fallback), so it must point
+  // at the local identity worker or the app calls prod. VITE_FRONTIER_BASE is
+  // kept for the completion-service mock-LLM fallback and the e2e helpers.
   const envFile = path.join(REPO_ROOT, ".env.test.local")
   writeFileSync(
     envFile,
     [
-      `VITE_FRONTIER_BASE=http://127.0.0.1:${FRONTIER_PORT}`,
+      `VITE_AUTH_BASE=http://127.0.0.1:${IDENTITY_PORT}`,
+      `VITE_FRONTIER_BASE=http://127.0.0.1:${IDENTITY_PORT}`,
       `VITE_SYNC_WORKER_HOST=127.0.0.1:${SYNC_WORKER_PORT}`,
       `VITE_LLM_BASE_URL=${mockLLM.baseUrl}`,
       "",
@@ -294,7 +290,8 @@ async function main(): Promise<void> {
     stdio: "inherit",
     env: {
       ...process.env,
-      VITE_FRONTIER_BASE: `http://127.0.0.1:${FRONTIER_PORT}`,
+      VITE_AUTH_BASE: `http://127.0.0.1:${IDENTITY_PORT}`,
+      VITE_FRONTIER_BASE: `http://127.0.0.1:${IDENTITY_PORT}`,
       VITE_SYNC_WORKER_HOST: `127.0.0.1:${SYNC_WORKER_PORT}`,
       VITE_LLM_BASE_URL: mockLLM.baseUrl,
     },

@@ -28,9 +28,12 @@ export class Dashboard {
     const target = opts.target ?? "fr"
 
     await this.page.getByRole("button", { name: /new project/i }).click()
-    await this.page.getByLabel("Project Name").fill(name)
-    await this.page.getByLabel("Source Language").fill(source)
-    await this.page.getByLabel("Target Language").fill(target)
+    // Exact match: the AD-9 "Advanced: project shape" radios carry long
+    // descriptions (e.g. the "Source-only" option mentions "target language"),
+    // so a substring getByLabel would resolve to multiple elements.
+    await this.page.getByLabel("Project Name", { exact: true }).fill(name)
+    await this.page.getByLabel("Source Language", { exact: true }).fill(source)
+    await this.page.getByLabel("Target Language", { exact: true }).fill(target)
     await this.page.getByRole("button", { name: "Create Project" }).click()
 
     await expect(this.page.getByText(name)).toBeVisible({ timeout: 5_000 })

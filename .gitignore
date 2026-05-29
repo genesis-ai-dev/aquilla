@@ -54,3 +54,5 @@ e2e/.auth/
 # Local dev-stack state (wrangler local D1/R2/DO sqlite + worker logs)
 .wrangler-dev-state/
 .dev-stack-logs/
+# E2E orchestrator's shared wrangler local D1/R2/DO state
+.wrangler-e2e-state/

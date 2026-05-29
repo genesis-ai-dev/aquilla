@@ -64,7 +64,10 @@ export function CellExpansion({
     <div
       ref={wrapperRef}
       className={cn(
-        "neu-inset mt-2 overflow-hidden rounded-xl",
+        // Faint, bordered, contained block — indented under its row (by the
+        // caller) and bounded with that row by the list divider, so it reads
+        // as the row's child rather than a sibling of the next row.
+        "mt-1.5 overflow-hidden rounded-lg border border-border bg-muted/40",
         // Entrance animation. CSS-only so we don't pull in a motion lib.
         "data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:slide-in-from-top-1",
         className,

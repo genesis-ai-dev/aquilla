@@ -1644,17 +1644,18 @@ function EditorRow({
   const isSynthError = synthStatus.kind === "error"
 
   return (
-    // Each cell is a flat row in a continuous list, separated by a hairline
-    // divider (border-b on the grid element). No card, no shadow — selection
-    // and hover are background overlays. The wrapper carries no gap.
+    // Each cell is a flat row in a continuous list — no dividers; rows separate
+    // by spacing and hover/selection overlays alone (Linear's quietest list).
+    // The expansion panel is indented + bordered so it still reads as the row's
+    // child. No card, no shadow.
     <div>
       <div
         ref={rowRef}
         className={cn(
-          // Flat row in a continuous list: separated by a hairline divider and
-          // tinted by hover/selection overlays, not shadows. Depth is gone by
-          // design — the Linear model reserves elevation for floating layers.
-          "group relative grid gap-2 overflow-hidden border-b border-border px-4 py-2 transition-colors duration-150 ease-out",
+          // Flat row in a continuous list: tinted by hover/selection overlays,
+          // not shadows. Depth is gone by design — the Linear model reserves
+          // elevation for floating layers.
+          "group relative grid gap-2 overflow-hidden px-4 py-2 transition-colors duration-150 ease-out",
           // Hover/active well via a subtle background overlay.
           "hover:bg-muted/50",
           expanded && "bg-muted/50",
@@ -1672,8 +1673,6 @@ function EditorRow({
           isSynthError && "bg-destructive/5 ring-2 ring-destructive/50 ring-inset",
           gridCols,
         )}
-        onMouseEnter={handleRowMouseEnter}
-        onMouseLeave={handleRowMouseLeave}
         onFocusCapture={handleRowFocusCapture}
         onBlurCapture={handleRowBlurCapture}
         onMouseDownCapture={handleRowMouseDownCapture}
@@ -1759,12 +1758,12 @@ function EditorRow({
             onPointerDown={onSelectionPointerDown}
             onClick={(e) => e.stopPropagation()}
             className={cn(
-              "absolute left-0 top-1/2 z-20 grid h-5 w-5 -translate-x-1/2 -translate-y-1/2 place-items-center rounded-full border border-transparent",
-              "touch-none cursor-ns-resize transition-[opacity,transform,color,background-color,box-shadow] duration-150 ease-out",
+              "absolute left-0 top-1/2 z-20 grid h-5 w-5 -translate-x-1/2 -translate-y-1/2 place-items-center rounded-full border",
+              "touch-none cursor-ns-resize transition-[opacity,transform,color,background-color] duration-150 ease-out",
               "focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 focus-visible:ring-offset-2",
               isMultiSelected
-                ? "bg-primary text-primary-foreground opacity-100 shadow-neu-pressed"
-                : "bg-card text-muted-foreground/70 opacity-60 shadow-neu-xs hover:text-primary group-hover:opacity-100",
+                ? "border-transparent bg-primary text-primary-foreground opacity-100"
+                : "border-border bg-card text-muted-foreground/70 opacity-60 hover:text-primary group-hover:opacity-100",
             )}
             title={isMultiSelected ? "Selected. Drag up or down to extend the range." : "Select cell. Drag up or down to select a range."}
           >
@@ -1775,10 +1774,17 @@ function EditorRow({
             )}
           </button>
           <div className="flex flex-1 flex-col">
-            {/* Editable target reads as a carved-in well so it's recognizable
-                as an input without a hard border. Only chrome — no editor
-                logic touched. */}
-            <div className="neu-inset relative flex min-h-[40px] flex-1 flex-col rounded-xl px-2 py-1.5">
+            {/* Editable target is flat at rest (symmetric with the source) and
+                only lifts into a muted well on hover/focus. Empty cells keep a
+                faint resting fill as a "translate here" cue. Chrome only — no
+                editor logic touched. */}
+            <div
+              className={cn(
+                "relative flex min-h-[40px] flex-1 flex-col rounded-lg px-2 py-1.5 transition-colors",
+                "hover:bg-muted/60 focus-within:bg-muted focus-within:ring-1 focus-within:ring-ring/40 focus-within:ring-inset",
+                !cell.translated?.trim() && "bg-muted/40",
+              )}
+            >
               <TranslatedEditor
                 cellId={cell.id}
                 initialPlain={cell.translated}
@@ -1852,7 +1858,11 @@ function EditorRow({
             with auto z-index, so the row's local z-10 doesn't escape the
             sticky header's z-10 context). */}
         <div className="pointer-events-none absolute right-2 top-1.5 z-20 flex">
-          <div className="pointer-events-auto">
+          <div
+            className="pointer-events-auto"
+            onMouseEnter={handleRowMouseEnter}
+            onMouseLeave={handleRowMouseLeave}
+          >
             <CellActionRail
               revealed={railRevealed}
               expanded={expanded}
@@ -1997,8 +2007,11 @@ function EditorRow({
 
       {/* Expansion panel — hosts the rich, lower-frequency context that used
           to clutter the inline row: health breakdown, backtranslation, audio
-          waveform + transcript, infractions detail, edit history. */}
-      <div className="mt-1 px-1">
+          waveform + transcript, infractions detail, edit history. Indented to
+          align under the content columns (past the gutter) so it reads as the
+          row's child, and only mounted while open so collapsed rows stay flush. */}
+      {expanded && (
+      <div className="pl-[3.75rem] pr-4 pb-2">
         <CellExpansion
           open={expanded}
           tab={expansionTab}
@@ -2342,6 +2355,7 @@ function EditorRow({
           ]}
         />
       </div>
+      )}
 
       {openRuleId && (() => {
         const inf = [...cellInfractions, ...waivedInfractions].find(

@@ -60,7 +60,8 @@ import { Film, Scale, MessagesSquare, Share2, Settings as SettingsIcon, Lock, Cl
 import { restoreProject } from "@/lib/store/project-index"
 import { AppShell } from "./AppShell"
 import { WorkspaceHeader } from "./WorkspaceHeader"
-import { EditorModeToggle, type EditorLens } from "./EditorModeToggle"
+import { EditorModeToggle } from "./EditorModeToggle"
+import { useEditorLensPreference } from "@/hooks/useEditorLensPreference"
 import { SelectionBar } from "./SelectionBar"
 import { WorkspaceStatusBar } from "./WorkspaceStatusBar"
 import { PrimaryActionButton } from "./PrimaryActionButton"
@@ -271,10 +272,10 @@ export function ProjectWorkspace() {
   // the left rail's body for the Cast studio (VoiceSidebar: cast roster + the
   // "make a character" dialog) and replaces each cell's SOURCE column with that
   // line's voice controls (CellVoicePanel); all other audio chrome lives there.
-  const [lens, setLens] = useState<EditorLens>("text")
+  const [lens, setLens] = useEditorLensPreference(projectId ?? "")
   const openAudioLens = useCallback(() => {
     setLens("audio")
-  }, [])
+  }, [setLens])
   const editorRef = useRef<EditorTableHandle>(null)
   // Phase 2c-gamma: the per-file Y.Doc is gone. The editor hydrates from the
   // cells projection and writes via the outbox. `doc`/`docLoading` are
@@ -427,9 +428,13 @@ export function ProjectWorkspace() {
             onAfterGenerate: refresh,
             // Play just this one line through the shared play-queue: hand it a
             // single-cell snapshot so it doesn't walk on to the next line.
-            onPlayCell: (cellId) => {
+            // Prefer the audio-enriched cell from the table — the raw `cells`
+            // row never carries selectedGeneratedVoiceAudioId/attachments, so
+            // pickPlayableAudio would find nothing and play would go silently
+            // IDLE right after a generate.
+            onPlayCell: (cellId, enrichedCell) => {
               if (!frontierSession?.jwt) return
-              const cell = cells.find((c) => c.id === cellId)
+              const cell = enrichedCell ?? cells.find((c) => c.id === cellId)
               if (!cell) return
               startQueue(
                 { cells: [cell], projectId: audioProject.id, session: frontierSession },

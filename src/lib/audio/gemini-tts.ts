@@ -29,7 +29,16 @@ interface GeminiTtsResponse {
 
 /**
  * Substitute {placeholders} in a prompt template against the cell context
- * + voice metadata. Falls back to appending text when {text} is missing.
+ * + voice metadata.
+ *
+ * The character creator collapses Accent / Pronunciation / Prompt into a single
+ * free-text "Guidance" field, stored on `voice.prompt`. Guidance is usually
+ * plain prose with no {placeholders} (e.g. "calm, warm, elderly; coastal
+ * Swahili reading"). When the template carries no {text} slot we treat it as
+ * that guidance and wrap it in protective framing so Gemini speaks the line —
+ * not the guidance — at the requested character. Full templates that DO include
+ * {text} (the built-in presets) are rendered inline and left otherwise as-is,
+ * so {accent}/{pronunciationReference} still work for legacy voices.
  */
 export function buildGeminiTtsPrompt(
   text: string,
@@ -54,7 +63,17 @@ export function buildGeminiTtsPrompt(
     (_match, key: string) => values[key] ?? "",
   ).trim()
   if (template.includes("{text}")) return rendered
-  return `${rendered}\n\n${text}`.trim()
+
+  // Plain guidance: instruction first, then the line to read, clearly fenced so
+  // the guidance itself is never spoken.
+  const language = values.target ? ` ${values.target}` : ""
+  const guidance = rendered ? `Voice direction: ${rendered}\n` : ""
+  return [
+    `Read the following${language} text aloud for an audio Scripture recording.`,
+    guidance + "Do not add any words that are not in the text. Read only the text below.",
+    "",
+    text,
+  ].join("\n").trim()
 }
 
 export async function synthesizeGeminiTtsToWavBlob(args: {

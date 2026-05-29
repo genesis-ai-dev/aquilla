@@ -2,19 +2,21 @@
 // is in Audio mode. In Text mode the left column shows source text (needed to
 // translate); in Audio mode there's no need for source text, so the column
 // instead carries the controls for *voicing* this line: which Cast character
-// speaks it, generate/play for this one line, and "Make a character from this
-// voice" — turning this take into a reusable Cast member. The target
+// speaks it, generate/play for this one line, and "create a character from this
+// take" — turning this take into a reusable Cast member. The target
 // (translation) column stays visible to the right; it's what we're voicing.
 //
-// Compact + vertical: this lives in a narrow source-width column. Per-cell
-// generate runs through generateCellVoice (the same helper batch flows use)
-// and play goes through the shared play-queue, so a single line behaves
-// exactly like a batch action scoped to one cell.
+// Compact: a character chip on top, then a single tight row of icon-sized
+// buttons (Generate / Play / +) and a tiny status dot. Per-cell generate runs
+// through generateCellVoice (the same helper batch flows use) and play goes
+// through the shared play-queue, so a single line behaves exactly like a batch
+// action scoped to one cell.
 
 import { useCallback } from "react"
-import { CheckCircle2, Loader2, Play, Sparkles, UserPlus } from "lucide-react"
+import { Loader2, Play, Sparkles, UserPlus } from "lucide-react"
 import { SpeakerChip } from "./SpeakerChip"
 import { Button } from "@/components/ui/button"
+import { cn } from "@/lib/utils"
 import { generateCellVoice } from "@/lib/audio/voice-generate-helpers"
 import { ttsStatusKey, useTtsStatus } from "@/lib/audio/tts"
 import type { CellData } from "@/hooks/useCells"
@@ -40,9 +42,11 @@ interface CellVoicePanelProps {
   onAfterGenerate: () => void
   /** Host plays just this cell via the shared play-queue. */
   onPlay: () => void
-  /** Open "make a character from this voice" for THIS cell's take. */
+  /** Open the character creator seeded with THIS cell's take. */
   onMakeCharacter: () => void
 }
+
+const ICON_BTN = "h-7 w-7"
 
 export function CellVoicePanel({
   cell,
@@ -65,8 +69,7 @@ export function CellVoicePanel({
   const status = useTtsStatus(ttsStatusKey(cell.id))
   const isVoicing = status.kind === "loading" || status.kind === "synthesizing"
 
-  const hasGenerated = Boolean(cell.selectedGeneratedVoiceAudioId)
-  const hasTake = Boolean(cell.selectedAudioId) || hasGenerated
+  const hasTake = Boolean(cell.selectedAudioId) || Boolean(cell.selectedGeneratedVoiceAudioId)
   const canGenerate = Boolean(cell.translated?.trim()) && cell.type !== "paratext"
 
   const generate = useCallback(async () => {
@@ -81,67 +84,78 @@ export function CellVoicePanel({
     if (ok) onAfterGenerate()
   }, [isVoicing, canGenerate, project, cell, sess, username, resolvedVoice.id, onAfterGenerate])
 
+  const generateTitle = !canGenerate
+    ? "Translate this line first"
+    : isVoicing
+      ? "Voicing…"
+      : "Generate this line in the selected character's voice"
+
   return (
-    <div className="flex w-full flex-col gap-1.5">
+    <div className="flex flex-col gap-1.5">
       {/* Character picker — which Cast member voices this line. */}
       <SpeakerChip voice={resolvedVoice} voices={voices} onAssign={onAssign} />
 
-      {/* Generate / Regenerate this one line. */}
-      <Button
-        variant="default"
-        size="sm"
-        className="h-7 justify-start text-xs"
-        onClick={() => void generate()}
-        disabled={isVoicing || !canGenerate}
-        title={canGenerate ? "Generate this line in the selected character's voice" : "Translate this line first"}
-      >
-        {isVoicing ? (
-          <Loader2 className="mr-1.5 h-3 w-3 animate-spin" />
-        ) : (
-          <Sparkles className="mr-1.5 h-3 w-3" />
-        )}
-        {hasGenerated ? "Regenerate" : "Generate"}
-      </Button>
+      {/* One tight row of icon-sized actions. */}
+      <div className="flex items-center gap-1">
+        {/* Generate / Regenerate this one line. */}
+        <Button
+          variant="default"
+          size="icon"
+          className={ICON_BTN}
+          onClick={() => void generate()}
+          disabled={isVoicing || !canGenerate}
+          title={generateTitle}
+          aria-label="Generate voice"
+        >
+          {isVoicing ? (
+            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+          ) : (
+            <Sparkles className="h-3.5 w-3.5" />
+          )}
+        </Button>
 
-      <div className="flex gap-1.5">
         {/* Play this one line. */}
         <Button
-          variant="outline"
-          size="sm"
-          className="h-7 flex-1 justify-center text-xs"
+          variant="ghost"
+          size="icon"
+          className={ICON_BTN}
           onClick={onPlay}
           disabled={!hasTake}
           title={hasTake ? "Play this line" : "No audio yet"}
+          aria-label="Play take"
         >
-          <Play className="mr-1 h-3 w-3" /> Play
+          <Play className="h-3.5 w-3.5" />
         </Button>
 
         {/* Turn this line's take into a reusable Cast character. */}
         <Button
-          variant="outline"
-          size="sm"
-          className="h-7 flex-1 justify-center text-xs"
+          variant="ghost"
+          size="icon"
+          className={ICON_BTN}
           onClick={onMakeCharacter}
           disabled={!hasTake}
-          title="Make a character from this voice — turn this take into a reusable Cast character you can assign to other lines"
+          title={hasTake ? "Create a character from this take" : "No take yet"}
+          aria-label="Create character from this take"
         >
-          <UserPlus className="mr-1 h-3 w-3" /> Character
+          <UserPlus className="h-3.5 w-3.5" />
         </Button>
-      </div>
 
-      {/* Minimal status line. */}
-      <div className="text-[11px]">
-        {isVoicing ? (
-          <span className="inline-flex items-center gap-1 text-primary">
-            <Loader2 className="h-2.5 w-2.5 animate-spin" /> Voicing…
+        {/* Tiny status: dot + 11px label. */}
+        <span className="ml-auto flex items-center gap-1 pr-0.5">
+          <span
+            className={cn(
+              "h-1.5 w-1.5 rounded-full",
+              isVoicing
+                ? "bg-amber-400 animate-pulse"
+                : hasTake
+                  ? "bg-emerald-500"
+                  : "bg-muted-foreground/40",
+            )}
+          />
+          <span className="text-[11px] leading-none text-muted-foreground">
+            {isVoicing ? "Voicing…" : hasTake ? "Ready" : "—"}
           </span>
-        ) : hasTake ? (
-          <span className="inline-flex items-center gap-1 text-emerald-600 dark:text-emerald-400">
-            <CheckCircle2 className="h-2.5 w-2.5" /> Ready
-          </span>
-        ) : (
-          <span className="text-muted-foreground/60">No audio yet</span>
-        )}
+        </span>
       </div>
     </div>
   )

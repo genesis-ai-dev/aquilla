@@ -267,8 +267,11 @@ export interface AudioLensContext {
   onAssignCast: (cellId: string, voiceId: string) => void
   /** Revalidate after a successful per-cell generate. */
   onAfterGenerate: () => void
-  /** Play just this one cell through the shared play-queue. */
-  onPlayCell: (cellId: string) => void
+  /** Play just this one cell through the shared play-queue. Pass the audio-
+   *  enriched cell (carries selectedGeneratedVoiceAudioId + attachments) so the
+   *  play-queue can resolve a take; the raw cell row alone cannot, which
+   *  silently stalls play right after a generate. */
+  onPlayCell: (cellId: string, enrichedCell?: CellData) => void
   /** Open the "make a character from this voice" flow seeded with this cell's take. */
   onMakeCharacterFromCell: (cellId: string) => void
 }
@@ -682,9 +685,11 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     <div ref={parentRef} className="h-full overflow-auto" onMouseUp={handleMouseUp}>
       <div className={cn("sticky top-0 z-10 grid gap-2 border-b border-border bg-background px-4 py-2 text-xs font-medium uppercase tracking-wide text-muted-foreground", gridCols)}>
         <div />
+        {/* In Audio mode the left column carries per-line voice controls, not
+            source text, so label it "Controls" (no source-language badge). */}
         <div className="flex items-center gap-2">
-          Source
-          {project.sourceLanguage && (
+          {audioLens ? "Controls" : "Source"}
+          {!audioLens && project.sourceLanguage && (
             <span className="rounded-full bg-muted px-2 py-0.5 text-[10px] font-normal normal-case tracking-normal text-muted-foreground">
               {project.sourceLanguage}
             </span>
@@ -1760,7 +1765,7 @@ function EditorRow({
                   username={audioLens.username}
                   onAssign={(voiceId) => audioLens.onAssignCast(cell.id, voiceId)}
                   onAfterGenerate={audioLens.onAfterGenerate}
-                  onPlay={() => audioLens.onPlayCell(cell.id)}
+                  onPlay={() => audioLens.onPlayCell(cell.id, cell)}
                   onMakeCharacter={() => audioLens.onMakeCharacterFromCell(cell.id)}
                 />
               </div>

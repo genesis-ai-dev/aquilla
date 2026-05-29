@@ -26,7 +26,7 @@ export function CellNumberPill({
   return (
     <span
       className={cn(
-        "inline-flex items-center gap-1 rounded-full bg-card px-1.5 py-0.5 text-[10px] font-medium leading-none tabular-nums shadow-neu-xs",
+        "inline-flex items-center gap-1 rounded-full border border-border bg-card px-1.5 py-0.5 text-[10px] font-medium leading-none tabular-nums",
         tintClass,
         className,
       )}

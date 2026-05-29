@@ -199,7 +199,7 @@ function CloneVoiceDialogBody({
       onClick={handleClose}
     >
       <div
-        className="neu-flat w-full max-w-md space-y-3 rounded-xl bg-popover p-4 text-popover-foreground"
+        className="w-full max-w-md space-y-3 rounded-xl border bg-popover p-4 text-popover-foreground shadow-soft-lg"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between">
@@ -220,11 +220,11 @@ function CloneVoiceDialogBody({
         </p>
 
         {sources.length === 0 ? (
-          <div className="neu-inset rounded-lg p-3 text-xs opacity-70">
+          <div className="rounded-lg border border-border bg-muted/40 p-3 text-xs opacity-70">
             No cells have recorded or generated audio yet.
           </div>
         ) : (
-          <div className="neu-inset max-h-48 space-y-1 overflow-auto rounded-lg p-1">
+          <div className="max-h-48 space-y-1 overflow-auto rounded-lg border border-border bg-muted/40 p-1">
             {sources.map((s) => {
               const k = keyFor(s)
               const active = k === selectedKey
@@ -235,7 +235,7 @@ function CloneVoiceDialogBody({
                   onClick={() => setSelectedKey(k)}
                   disabled={busy}
                   className={`flex w-full items-center justify-between gap-2 rounded-md px-2 py-1.5 text-left text-xs ${
-                    active ? "shadow-neu-xs neu-flat" : "hover:bg-black/5"
+                    active ? "bg-muted" : "hover:bg-muted/50"
                   }`}
                 >
                   <span className="truncate">{cellSnippet(s.cell)}</span>
@@ -261,7 +261,7 @@ function CloneVoiceDialogBody({
               onChange={(e) => setName(e.target.value)}
               placeholder="e.g. Mary, the Narrator, Villain"
               disabled={busy}
-              className="neu-inset w-full rounded-md px-2 py-1.5 text-xs outline-none"
+              className="w-full rounded-md border border-border bg-muted/40 px-2 py-1.5 text-xs outline-none focus:bg-muted focus:ring-1 focus:ring-ring/40"
             />
           </label>
 
@@ -296,7 +296,7 @@ function CloneVoiceDialogBody({
             type="button"
             onClick={() => void handleConfirm()}
             disabled={busy || !selected}
-            className="neu-flat shadow-neu-xs rounded-md px-3 py-1.5 text-xs font-medium disabled:opacity-40"
+            className="rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-40"
           >
             {busy ? "Creating…" : "Create character"}
           </button>

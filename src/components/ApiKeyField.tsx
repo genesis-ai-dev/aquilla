@@ -28,8 +28,14 @@ export function ApiKeyField({
 }: ApiKeyFieldProps) {
   const [draft, setDraft] = useState(projectKey || userKey)
   const [show, setShow] = useState(false)
-  // Default the toggle ON when there's already a user-saved key.
-  const [saveAcrossProjects, setSaveAcrossProjects] = useState(Boolean(userKey))
+  // Default the toggle ON unless this project already carries its own key.
+  // A BYOK key is set once and kept; the localStorage path (onUserKeyChange)
+  // reliably survives reloads, whereas the project-record path can be clobbered
+  // when the server-sourced project record is re-cached. So persist to
+  // localStorage by default — otherwise a first-time key is lost on reload.
+  const [saveAcrossProjects, setSaveAcrossProjects] = useState(
+    () => projectKey.trim().length === 0,
+  )
 
   useEffect(() => {
     setDraft(projectKey || userKey)

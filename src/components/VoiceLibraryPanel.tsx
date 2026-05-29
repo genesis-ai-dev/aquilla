@@ -269,7 +269,7 @@ export function VoiceLibraryPanel({
                     {isNarrator && <Star className="h-3 w-3 shrink-0 text-primary" aria-label="Narrator (default)" />}
                   </span>
                   <span className="block text-[10px] leading-tight text-muted-foreground">
-                    {voice.referenceAudioId ? "cloned voice · " : ""}
+                    {voice.referenceAudioId ? "character voice · " : ""}
                     {stats && stats.assigned > 0
                       ? `${stats.voiced}/${stats.assigned} lines voiced`
                       : isNarrator ? "unassigned lines" : "no lines yet"}
@@ -277,7 +277,7 @@ export function VoiceLibraryPanel({
                 </span>
                 {voice.referenceAudioId && (
                   <span className="inline-flex shrink-0 items-center gap-0.5 rounded-full bg-violet-500/15 px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-wide text-violet-600 dark:text-violet-300">
-                    <Sparkles className="h-2.5 w-2.5" /> Clone
+                    <Sparkles className="h-2.5 w-2.5" /> Character
                   </span>
                 )}
               </button>
@@ -287,8 +287,8 @@ export function VoiceLibraryPanel({
             <Button type="button" size="sm" variant="ghost" onClick={addBlank} className="flex-1 justify-start">
               <Plus className="mr-1 h-3.5 w-3.5" /> Add character
             </Button>
-            <Button type="button" size="sm" variant="ghost" onClick={addClone} className="flex-1 justify-start text-violet-600 hover:text-violet-700 dark:text-violet-300">
-              <Mic className="mr-1 h-3.5 w-3.5" /> Clone to actor
+            <Button type="button" size="sm" variant="ghost" onClick={addClone} className="flex-1 justify-start text-violet-600 hover:text-violet-700 dark:text-violet-300" title="Create a character voice from a fresh recording">
+              <Mic className="mr-1 h-3.5 w-3.5" /> Record a character
             </Button>
           </div>
         </div>

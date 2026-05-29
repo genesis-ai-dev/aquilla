@@ -1,12 +1,19 @@
-// The editor's Audio-lens left rail: the whole voice setup consolidated into
-// the w-64 app rail. Composes the compact VoiceCockpit (active profile,
-// generate, play, clone/record entries), the reused full cast library
-// (VoiceLibraryPanel), and the clone-from-existing-audio dialog. Replaces the
-// scattered audio chrome (transport bar, cast drawer, cast-assign bar) that
-// used to live around the editor.
+// The editor's Audio-lens left rail: the CAST STUDIO. This is where you craft
+// the project's character voices. A show translating its subtitles often has
+// only ONE voice actor; "Cast" is how that single actor becomes MANY distinct
+// characters — record/generate a take, turn it into a named character, then
+// reuse that character across many lines.
+//
+// Per-cell controls (which character voices a line, generate, play, "make a
+// character from this voice") now live INSIDE each cell's source column in
+// Audio mode (see CellVoicePanel), so this rail is purely the cast roster +
+// editor (VoiceLibraryPanel) plus the "make a character from existing audio"
+// dialog. The clone dialog's open state is owned by the host so the per-cell
+// "Make a character" control can drive the same dialog.
 
 import { useState } from "react"
-import { VoiceCockpit } from "./VoiceCockpit"
+import { UserPlus } from "lucide-react"
+import { Button } from "@/components/ui/button"
 import { CloneVoiceDialog } from "./CloneVoiceDialog"
 import { VoiceLibraryPanel } from "../VoiceLibraryPanel"
 import type { ProjectTtsApi } from "@/hooks/useProjectTts"
@@ -22,25 +29,30 @@ interface VoiceSidebarProps {
   tts: ProjectTtsApi
   session: FrontierSession | null
   username: string
-  selectedCellIds: string[]
-  onAfterGenerate: () => void
   targetLanguage?: string
   fileId?: string | null
-  /** Open the booth recorder (mirrors VoiceTransportBar's record entry). */
-  onRecord: () => void
+  /** Host-owned clone dialog state so the per-cell "Make a character" control
+   *  can open the same dialog seeded to a specific cell's take. */
+  cloneOpen: boolean
+  onCloneOpenChange: (open: boolean) => void
+  /** Cell whose take seeds the dialog (null = manual pick from the roster). */
+  cloneSeedCellId?: string | null
 }
 
 export function VoiceSidebar({
-  cells, project, projectId, tts, session, username, selectedCellIds,
-  onAfterGenerate, targetLanguage, fileId, onRecord,
+  cells, project, projectId, tts, session, username,
+  targetLanguage, fileId, cloneOpen, onCloneOpenChange, cloneSeedCellId,
 }: VoiceSidebarProps) {
-  // The active cast member: the cockpit's assign target + the library's
-  // highlighted/selected voice. Seeded from the project's default voice.
+  // `project` and `username` are part of the rail's contract (the studio is
+  // project-scoped) but the cast editor reads everything it needs off `tts`.
+  void project
+  void username
+
+  // The active cast member: the library's highlighted/selected character.
   const [activeVoiceId, setActiveVoiceId] = useState(tts.defaultVoiceId)
-  const [cloneOpen, setCloneOpen] = useState(false)
 
   // getVoiceLibrary always returns at least the presets, so settings being
-  // mid-hydration is fine — the cockpit just needs the resolved list.
+  // mid-hydration is fine — the dialog just needs the resolved list.
   const settings = tts.settings ?? {
     provider: "gemini" as const,
     voices: tts.voices,
@@ -50,24 +62,21 @@ export function VoiceSidebar({
 
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-2">
-      <VoiceCockpit
-        cells={cells}
-        project={project}
-        projectId={projectId}
-        settings={settings}
-        voices={tts.voices}
-        activeVoiceId={activeVoiceId}
-        selectedCellIds={selectedCellIds}
-        session={session}
-        username={username}
-        onAfterGenerate={onAfterGenerate}
-        onAssignToSelection={(voiceId) => tts.assignCells(selectedCellIds, voiceId)}
-        onRequestClone={() => setCloneOpen(true)}
-        onRecord={onRecord}
-      />
+      {/* Make a character from any existing take (recorded or generated). The
+          per-cell control opens this same dialog pre-seeded to one line. */}
+      <Button
+        variant="default"
+        size="sm"
+        className="h-8 justify-start"
+        onClick={() => onCloneOpenChange(true)}
+        title="Turn an existing take into a reusable Cast character"
+      >
+        <UserPlus className="mr-1.5 h-3.5 w-3.5" />
+        Make a character
+      </Button>
 
-      {/* The full cast library. It was a w-96 drawer; in the w-64 rail it
-          scrolls and clamps its width so nothing overflows horizontally. */}
+      {/* The full cast roster + editor. It was a w-96 drawer; in the w-64 rail
+          it scrolls and clamps its width so nothing overflows horizontally. */}
       <div className="min-h-0 flex-1 overflow-hidden rounded-xl border bg-background">
         <div className="h-full w-full overflow-x-hidden">
           <VoiceLibraryPanel
@@ -86,12 +95,13 @@ export function VoiceSidebar({
 
       <CloneVoiceDialog
         open={cloneOpen}
-        onClose={() => setCloneOpen(false)}
+        onClose={() => onCloneOpenChange(false)}
         cells={cells}
         settings={settings}
         projectId={projectId}
         session={session}
         onSave={tts.saveTts}
+        seedCellId={cloneSeedCellId}
       />
     </div>
   )

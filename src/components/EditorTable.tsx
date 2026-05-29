@@ -44,7 +44,7 @@ import { categorizeAiError } from "@/lib/audio/ai-error"
 import { CellAiStatusPopover } from "./CellAiStatusPopover"
 import { CellNumberPill } from "./cell/CellNumberPill"
 import { cellCardClassName } from "./cell/cellCard"
-import { CellAudioLensStrip } from "./cell/CellAudioLensStrip"
+import { CellVoicePanel } from "./cell/CellVoicePanel"
 import { assignedCastVoiceId } from "@/lib/audio/voices"
 import { useNavigate } from "react-router-dom"
 import { cn } from "@/lib/utils"
@@ -249,14 +249,29 @@ export interface EditorTableHandle {
 }
 
 /** Per-cell audio production data + actions, supplied only when the editor is
- *  in the Audio lens. When null/undefined the editor renders plain text mode. */
+ *  in the Audio lens. When null/undefined the editor renders plain text mode.
+ *  In Audio mode each cell's SOURCE column is replaced with CellVoicePanel —
+ *  the full per-line voice controls (character picker, generate, play, make-a-
+ *  character) — so this context carries everything that panel needs. */
 export interface AudioLensContext {
   voices: Voice[]
   /** Hydrated TTS settings (cast assignments) — source of truth for who voices a line. */
   settings: ProjectTtsSettings | undefined
   /** The project's default/narrator voice id, used when a line has no explicit cast. */
   defaultVoiceId: string
+  /** The TTS-overlaid project record (real engine/key/cast) used for generation. */
+  project: ProjectRecord
+  projectId: string
+  /** Frontier session for synth/playback token minting (kept opaque for the panel). */
+  session: unknown
+  username: string
   onAssignCast: (cellId: string, voiceId: string) => void
+  /** Revalidate after a successful per-cell generate. */
+  onAfterGenerate: () => void
+  /** Play just this one cell through the shared play-queue. */
+  onPlayCell: (cellId: string) => void
+  /** Open the "make a character from this voice" flow seeded with this cell's take. */
+  onMakeCharacterFromCell: (cellId: string) => void
 }
 
 interface EditorTableProps {
@@ -1673,51 +1688,84 @@ function EditorRow({
           </div>
         </div>
 
-        {/* Source column */}
-        <div
-          className={cn(
-            "flex flex-col transition-opacity",
-            isSynthBusy && "opacity-70",
-          )}
-          dir={sourceTextDirection}
-        >
-          <div className="mb-1 flex items-center gap-1 text-xs text-muted-foreground" dir="ltr">
-            <span>{cell.context}</span>
-            {showFormattingLossWarning && (
-              <span
-                title="Source has inline formatting (bold, italic, etc.) that the target doesn't preserve. Formatting will be lost on export."
-                className="inline-flex items-center gap-0.5 rounded bg-amber-100 px-1 py-0.5 text-[9px] font-medium text-amber-700 dark:bg-amber-950 dark:text-amber-400"
+        {/* Source column. In Audio mode there's no need for source text to
+            voice a line, so the column is REPLACED with this cell's voice
+            controls (character picker, generate, play, make-a-character). In
+            Text mode it shows the source text as usual. */}
+        {audioLens && hasContent ? (
+          (() => {
+            const vid = assignedCastVoiceId(audioLens.settings, cell.id) ?? audioLens.defaultVoiceId
+            const resolvedVoice =
+              audioLens.voices.find((v) => v.id === vid) ?? audioLens.voices[0]
+            if (!audioLens.settings || !resolvedVoice) return <div />
+            return (
+              <div
+                className={cn("flex flex-col transition-opacity", isSynthBusy && "opacity-70")}
+                dir="ltr"
               >
-                <AlertTriangle className="h-2.5 w-2.5" />
-                formatting
-              </span>
+                <CellVoicePanel
+                  cell={cell}
+                  project={audioLens.project}
+                  projectId={audioLens.projectId}
+                  settings={audioLens.settings}
+                  voices={audioLens.voices}
+                  resolvedVoice={resolvedVoice}
+                  session={audioLens.session}
+                  username={audioLens.username}
+                  onAssign={(voiceId) => audioLens.onAssignCast(cell.id, voiceId)}
+                  onAfterGenerate={audioLens.onAfterGenerate}
+                  onPlay={() => audioLens.onPlayCell(cell.id)}
+                  onMakeCharacter={() => audioLens.onMakeCharacterFromCell(cell.id)}
+                />
+              </div>
+            )
+          })()
+        ) : (
+          <div
+            className={cn(
+              "flex flex-col transition-opacity",
+              isSynthBusy && "opacity-70",
+            )}
+            dir={sourceTextDirection}
+          >
+            <div className="mb-1 flex items-center gap-1 text-xs text-muted-foreground" dir="ltr">
+              <span>{cell.context}</span>
+              {showFormattingLossWarning && (
+                <span
+                  title="Source has inline formatting (bold, italic, etc.) that the target doesn't preserve. Formatting will be lost on export."
+                  className="inline-flex items-center gap-0.5 rounded bg-amber-100 px-1 py-0.5 text-[9px] font-medium text-amber-700 dark:bg-amber-950 dark:text-amber-400"
+                >
+                  <AlertTriangle className="h-2.5 w-2.5" />
+                  formatting
+                </span>
+              )}
+            </div>
+            {cell.originalHtml ? (
+              <div
+                className="text-sm"
+                // eslint-disable-next-line react/no-danger
+                dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(cell.originalHtml) }}
+              />
+            ) : (
+              <div className="text-sm">
+                <HighlightedText
+                  text={cell.original}
+                  highlights={highlights}
+                  ranges={sourceRanges}
+                  showEvidence={examplesExpanded}
+                  onRangeClick={openInlineRule}
+                />
+              </div>
+            )}
+            {cellExamples.length > 0 && (
+              <ExamplePanel
+                examples={cellExamples}
+                expanded={examplesExpanded}
+                onExpandedChange={setExamplesExpanded}
+              />
             )}
           </div>
-          {cell.originalHtml ? (
-            <div
-              className="text-sm"
-              // eslint-disable-next-line react/no-danger
-              dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(cell.originalHtml) }}
-            />
-          ) : (
-            <div className="text-sm">
-              <HighlightedText
-                text={cell.original}
-                highlights={highlights}
-                ranges={sourceRanges}
-                showEvidence={examplesExpanded}
-                onRangeClick={openInlineRule}
-              />
-            </div>
-          )}
-          {cellExamples.length > 0 && (
-            <ExamplePanel
-              examples={cellExamples}
-              expanded={examplesExpanded}
-              onExpandedChange={setExamplesExpanded}
-            />
-          )}
-        </div>
+        )}
 
         {/* Target column — TipTap is inline so typing is unchanged. Everything
             else (waveform, transcript preview, backtranslation, infractions
@@ -1821,19 +1869,6 @@ function EditorRow({
               )}
             </div>
             {error && <p className="mt-0.5 text-xs text-destructive">{error}</p>}
-            {audioLens && hasContent && (() => {
-              const vid = assignedCastVoiceId(audioLens.settings, cell.id) ?? audioLens.defaultVoiceId
-              const voice = audioLens.voices.find((v) => v.id === vid)
-              return (
-                <CellAudioLensStrip
-                  cellId={cell.id}
-                  voice={voice}
-                  voices={audioLens.voices}
-                  hasGeneratedVoice={hasGeneratedVoice}
-                  onAssign={(voiceId) => audioLens.onAssignCast(cell.id, voiceId)}
-                />
-              )
-            })()}
           </div>
         </div>
 

@@ -30,8 +30,8 @@ import { OutboxSyncIndicator } from "./OutboxSyncIndicator"
 import { EditorTable, type AudioLensContext } from "./EditorTable"
 import { AudioRecordingModal } from "./AudioRecorder/AudioRecordingModal"
 import { VoiceSidebar } from "./voice/VoiceSidebar"
+import { startQueue } from "@/lib/audio/play-queue"
 import { useProjectTts } from "@/hooks/useProjectTts"
-import { useSelectedIds } from "@/lib/audio/selection"
 import { RuleDrawer } from "./RuleDrawer"
 import { CommentsDrawer } from "./CommentsDrawer"
 import { HistoryDrawer } from "./HistoryDrawer"
@@ -262,14 +262,16 @@ export function ProjectWorkspace() {
   const [shareOpen, setShareOpen] = useState(false)
   const [aiSetupOpen, setAiSetupOpen] = useState(false)
   const [recordingCellId, setRecordingCellId] = useState<string | null>(null)
+  // "Make a character from this voice" dialog (Cast studio). Owned here so the
+  // per-cell control in the editor's source column can open it seeded to a
+  // specific line's take, and the rail's button can open it for a manual pick.
+  const [makeCharacterOpen, setMakeCharacterOpen] = useState(false)
+  const [makeCharacterSeedCellId, setMakeCharacterSeedCellId] = useState<string | null>(null)
   // Text vs Audio lens — the same editor over the same cells. Audio mode swaps
-  // the left rail's body for the VoiceSidebar (cockpit + cast library) and adds
-  // per-line speaker chips; all other audio chrome lives in that rail now.
+  // the left rail's body for the Cast studio (VoiceSidebar: cast roster + the
+  // "make a character" dialog) and replaces each cell's SOURCE column with that
+  // line's voice controls (CellVoicePanel); all other audio chrome lives there.
   const [lens, setLens] = useState<EditorLens>("text")
-  // Selected cell ids (shared module store) — the VoiceSidebar's cockpit uses
-  // them for selection-aware generate / play / assign.
-  const selectedIds = useSelectedIds()
-  const selectedCellIds = useMemo(() => [...selectedIds], [selectedIds])
   const openAudioLens = useCallback(() => {
     setLens("audio")
   }, [])
@@ -412,15 +414,39 @@ export function ProjectWorkspace() {
   )
   const audioLens = useMemo<AudioLensContext | null>(
     () =>
-      lens === "audio"
+      lens === "audio" && audioProject
         ? {
             voices: tts.voices,
             settings: tts.settings,
             defaultVoiceId: tts.defaultVoiceId,
+            project: audioProject,
+            projectId: audioProject.id,
+            session: frontierSession ?? null,
+            username: currentUsername,
             onAssignCast: (cellId, voiceId) => tts.assignCells([cellId], voiceId),
+            onAfterGenerate: refresh,
+            // Play just this one line through the shared play-queue: hand it a
+            // single-cell snapshot so it doesn't walk on to the next line.
+            onPlayCell: (cellId) => {
+              if (!frontierSession?.jwt) return
+              const cell = cells.find((c) => c.id === cellId)
+              if (!cell) return
+              startQueue(
+                { cells: [cell], projectId: audioProject.id, session: frontierSession },
+                0,
+              )
+            },
+            // Turn this line's take into a reusable Cast character.
+            onMakeCharacterFromCell: (cellId) => {
+              setMakeCharacterSeedCellId(cellId)
+              setMakeCharacterOpen(true)
+            },
           }
         : null,
-    [lens, tts.voices, tts.settings, tts.defaultVoiceId, tts.assignCells],
+    [
+      lens, audioProject, tts.voices, tts.settings, tts.defaultVoiceId, tts.assignCells,
+      frontierSession, currentUsername, cells, refresh,
+    ],
   )
 
   const { hasAny: hasUnfinished, findNext: findNextUnfinished } = useNextUnfinished(cells, validationCount)
@@ -1220,14 +1246,14 @@ export function ProjectWorkspace() {
                 tts={tts}
                 session={frontierSession ?? null}
                 username={currentUsername}
-                selectedCellIds={selectedCellIds}
-                onAfterGenerate={revalidateCells}
                 targetLanguage={project.targetLanguage}
                 fileId={activeFileId}
-                onRecord={() => {
-                  const first = cells.find((c) => c.type !== "paratext" && c.translated?.trim())
-                  if (first) setRecordingCellId(first.id)
+                cloneOpen={makeCharacterOpen}
+                onCloneOpenChange={(open) => {
+                  setMakeCharacterOpen(open)
+                  if (!open) setMakeCharacterSeedCellId(null)
                 }}
+                cloneSeedCellId={makeCharacterSeedCellId}
               />
             ) : (
               <>

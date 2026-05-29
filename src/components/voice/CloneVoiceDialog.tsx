@@ -1,13 +1,17 @@
-// CloneVoiceDialog: clone a brand-new "actor" voice from audio that already
-// exists on a cell — either a human recording (selectedAudioId) or a previous
-// TTS render (selectedGeneratedVoiceAudioId). This is distinct from the
-// fresh-recording clone in VoiceLibraryPanel/VoiceCloneSection: here the
-// reference timbre is lifted from existing project audio rather than the mic.
+// CloneVoiceDialog: "Make a character from this voice" — turn an existing
+// take (a take = recorded or generated audio already on a cell) into a named,
+// reusable Cast character you can assign to many other lines. A show often has
+// ONE voice actor; this is how that single take becomes a distinct character.
 //
-// Flow: pick a cell + slot -> fetch that slot's audio bytes (fetchCellAudio)
-// -> upload them as a project-scoped reference clip (uploadVoiceReference) ->
-// append a new Voice with referenceAudioId set so future TTS for that voice
-// gets re-voiced into this timbre via Seed-VC.
+// The reference timbre is lifted from existing project audio (not the mic;
+// the mic flow lives in VoiceLibraryPanel/VoiceCloneSection).
+//
+// Flow: pick a take (cell + slot) -> fetch that slot's audio bytes
+// (fetchCellAudio) -> upload them as a project-scoped reference clip
+// (uploadVoiceReference) -> append a new character Voice with referenceAudioId
+// set so future TTS for that character gets re-voiced into this timbre via
+// Seed-VC. Pass `seedCellId` to preselect a specific cell's take (used by the
+// per-cell "Make a character from this voice" control).
 
 import { useCallback, useMemo, useState } from "react"
 import type { ProjectTtsSettings, Voice } from "@/lib/parsers/types"
@@ -26,8 +30,11 @@ export interface CloneVoiceDialogProps {
   projectId: string
   /** Needed to mint sync tokens for the R2 fetch + reference upload. */
   session: FrontierSession | null
-  /** = useProjectTts.saveTts; we append the new cloned Voice. */
+  /** = useProjectTts.saveTts; we append the new character Voice. */
   onSave: (next: ProjectTtsSettings) => void
+  /** Preselect this cell's take when the dialog opens (per-cell "Make a
+   *  character from this voice"). Prefers the recorded slot, else generated. */
+  seedCellId?: string | null
 }
 
 type Slot = "recorded" | "generated"
@@ -55,39 +62,62 @@ function nextColor(settings: ProjectTtsSettings): string {
   return VOICE_PALETTE.find((c) => !used.has(c)) ?? VOICE_PALETTE[0]
 }
 
-export function CloneVoiceDialog({
-  open,
+const keyFor = (s: AudioSource) => `${s.cell.id}:${s.slot}`
+
+/** Every (cell, slot) pair on these cells that actually has audio bytes. */
+function audioSources(cells: CellData[]): AudioSource[] {
+  const out: AudioSource[] = []
+  for (const cell of cells) {
+    if (cell.selectedAudioId && slotUrl(cell, cell.selectedAudioId)) {
+      out.push({ cell, slot: "recorded", audioId: cell.selectedAudioId })
+    }
+    if (
+      cell.selectedGeneratedVoiceAudioId &&
+      slotUrl(cell, cell.selectedGeneratedVoiceAudioId)
+    ) {
+      out.push({ cell, slot: "generated", audioId: cell.selectedGeneratedVoiceAudioId })
+    }
+  }
+  return out
+}
+
+/** The take to preselect for a seed cell — prefer the recorded slot. */
+function seedKey(sources: AudioSource[], seedCellId: string | null | undefined): string | null {
+  if (!seedCellId) return null
+  const seed =
+    sources.find((s) => s.cell.id === seedCellId && s.slot === "recorded") ??
+    sources.find((s) => s.cell.id === seedCellId)
+  return seed ? keyFor(seed) : null
+}
+
+export function CloneVoiceDialog(props: CloneVoiceDialogProps) {
+  // The dialog's selection seeds from `seedCellId` via a lazy initializer, so
+  // mount it fresh each time it opens (keyed by open + seed). This avoids
+  // seeding via an effect/ref (both flagged by the React Compiler lints).
+  if (!props.open) return null
+  return <CloneVoiceDialogBody key={`${props.seedCellId ?? ""}`} {...props} />
+}
+
+function CloneVoiceDialogBody({
   onClose,
   cells,
   settings,
   projectId,
   session,
   onSave,
+  seedCellId,
 }: CloneVoiceDialogProps) {
-  const [selectedKey, setSelectedKey] = useState<string | null>(null)
+  // Every (cell, slot) pair that actually has audio bytes behind it.
+  const sources = useMemo<AudioSource[]>(() => audioSources(cells), [cells])
+
+  const [selectedKey, setSelectedKey] = useState<string | null>(
+    () => seedKey(sources, seedCellId),
+  )
   const [name, setName] = useState("")
   const [color, setColor] = useState<string>(() => nextColor(settings))
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  // Every (cell, slot) pair that actually has audio bytes behind it.
-  const sources = useMemo<AudioSource[]>(() => {
-    const out: AudioSource[] = []
-    for (const cell of cells) {
-      if (cell.selectedAudioId && slotUrl(cell, cell.selectedAudioId)) {
-        out.push({ cell, slot: "recorded", audioId: cell.selectedAudioId })
-      }
-      if (
-        cell.selectedGeneratedVoiceAudioId &&
-        slotUrl(cell, cell.selectedGeneratedVoiceAudioId)
-      ) {
-        out.push({ cell, slot: "generated", audioId: cell.selectedGeneratedVoiceAudioId })
-      }
-    }
-    return out
-  }, [cells])
-
-  const keyFor = (s: AudioSource) => `${s.cell.id}:${s.slot}`
   const selected = sources.find((s) => keyFor(s) === selectedKey) ?? null
 
   const reset = useCallback(() => {
@@ -142,7 +172,7 @@ export function CloneVoiceDialog({
       })
       const newVoice: Voice = {
         id: newVoiceId(),
-        name: name.trim() || `Clone of ${cellSnippet(selected.cell)}`,
+        name: name.trim() || `Character from ${cellSnippet(selected.cell)}`,
         color,
         provider: settings.provider ?? "gemini",
         voiceName: "",
@@ -161,8 +191,6 @@ export function CloneVoiceDialog({
     }
   }, [selected, projectId, session, name, color, settings, onSave, reset, onClose])
 
-  if (!open) return null
-
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
@@ -175,7 +203,7 @@ export function CloneVoiceDialog({
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between">
-          <h2 className="text-sm font-semibold">Clone a voice from existing audio</h2>
+          <h2 className="text-sm font-semibold">Make a character from this voice</h2>
           <button
             type="button"
             className="text-xs opacity-60 hover:opacity-100"
@@ -187,7 +215,8 @@ export function CloneVoiceDialog({
         </div>
 
         <p className="text-xs opacity-70">
-          Pick a line that already has audio. Its timbre becomes a new cast voice.
+          Pick a take that already has audio. Its voice becomes a new Cast
+          character you can assign to other lines.
         </p>
 
         {sources.length === 0 ? (
@@ -225,12 +254,12 @@ export function CloneVoiceDialog({
 
         <div className="space-y-2">
           <label className="block space-y-1">
-            <span className="text-xs opacity-70">Voice name</span>
+            <span className="text-xs opacity-70">Character name</span>
             <input
               type="text"
               value={name}
               onChange={(e) => setName(e.target.value)}
-              placeholder="e.g. Mary, Narrator clone"
+              placeholder="e.g. Mary, the Narrator, Villain"
               disabled={busy}
               className="neu-inset w-full rounded-md px-2 py-1.5 text-xs outline-none"
             />
@@ -269,7 +298,7 @@ export function CloneVoiceDialog({
             disabled={busy || !selected}
             className="neu-flat shadow-neu-xs rounded-md px-3 py-1.5 text-xs font-medium disabled:opacity-40"
           >
-            {busy ? "Cloning…" : "Create cloned voice"}
+            {busy ? "Creating…" : "Create character"}
           </button>
         </div>
       </div>

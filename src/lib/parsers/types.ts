@@ -453,4 +453,10 @@ export interface DecaySettings {
   endorsementTarget?: number
   /** Decay above which the cell editor shows "needs attention". Default 0.66. */
   decayWarnThreshold?: number
+  /**
+   * AD-14 health-as-confidence: per-hop authority decay used when health ripples
+   * out from validated cells through the example graph. Lower = confidence fades
+   * faster with distance from a human. Default 0.8.
+   */
+  perHopDecay?: number
 }

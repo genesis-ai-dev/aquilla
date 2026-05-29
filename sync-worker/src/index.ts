@@ -14,6 +14,7 @@ import { handleProjectArchiveRequest } from "./project-archive"
 import { handleCellsAuditReadRequest } from "./events/cells-audit-read-route"
 import { handleCellHistoryReadRequest } from "./events/cell-history-read-route"
 import { handleCellsReadRequest } from "./events/cells-read-route"
+import { handleCellConfidenceRequest } from "./events/cell-confidence-route"
 import { handleCellAudioReadRequest } from "./events/cell-audio-read-route"
 import { handleEventsReadRequest } from "./events/read-route"
 import { handleEventsWriteRequest } from "./events/route"
@@ -135,6 +136,8 @@ export default {
     if (filesReadResponse) return withCors(filesReadResponse, request)
     const cellsReadResponse = await handleCellsReadRequest(request, env)
     if (cellsReadResponse) return withCors(cellsReadResponse, request)
+    const cellConfidenceResponse = await handleCellConfidenceRequest(request, env)
+    if (cellConfidenceResponse) return withCors(cellConfidenceResponse, request)
     const cellAudioReadResponse = await handleCellAudioReadRequest(request, env)
     if (cellAudioReadResponse) return withCors(cellAudioReadResponse, request)
     const cellHistoryResponse = await handleCellHistoryReadRequest(request, env)

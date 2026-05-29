@@ -15,6 +15,7 @@ import { fetchBranchingSearchPassages } from "@/lib/sync/branching-search-passag
 import type { ScoredPair } from "@/lib/search/dual-index"
 import type { PassageHit } from "@/hooks/useSearchIndex"
 import { useHealth } from "@/hooks/useHealth"
+import { useCellConfidence } from "@/hooks/useCellConfidence"
 import { useRules } from "@/hooks/useRules"
 import { updateProject, patchProject, getProject } from "@/lib/store/project-index"
 import { MAX_BATCH_COMPLETIONS } from "@/lib/workspace-actions/registry"
@@ -698,6 +699,25 @@ export function ProjectWorkspace() {
     { decaySettings: project?.decaySettings, requiredValidations },
   )
   const { healthMap, fileHealth: _fileHealth, projectHealth, fileProgress, infractions, openCommentCount, cellOpenCommentCount } = health
+
+  // PROTOTYPE (AD-14 health-as-confidence): derive per-cell health on read from
+  // FTS5 similarity to validated cells, and overlay it onto the endorsement
+  // healthMap for the editor rings/tooltip so we can compare the two live. The
+  // endorsement-based `healthMap` above is left intact; nothing is removed.
+  const confidence = useCellConfidence({
+    projectId: project?.id,
+    fileId: activeFileId ?? undefined,
+    getToken: activeFileId ? () => getTokenForFile(activeFileId) : undefined,
+    cells,
+    enabled: Boolean(project?.id && activeFileId && frontierSession?.jwt),
+    perHopDecay: project?.decaySettings?.perHopDecay,
+  })
+  const effectiveHealthMap = useMemo(() => {
+    if (confidence.healthMap.size === 0) return healthMap
+    const merged = new Map(healthMap)
+    for (const [cellId, h] of confidence.healthMap) merged.set(cellId, h)
+    return merged
+  }, [healthMap, confidence.healthMap])
 
   // AD-14: the four-sub-score breakdown popover is retired. The project ring
   // shows decay-derived health; the "biggest drags" popover redesign (cells
@@ -1501,7 +1521,7 @@ export function ProjectWorkspace() {
             isCompletionConfigured={isConfigured} isCompletionAvailable={isCompletionAvailable} completing={completing}
             examples={examples} errors={errors} previews={previews}
             onCompleteSingle={completeSingle} onCompleteBatch={completeBatch}
-            healthMap={healthMap} infractions={infractions} rules={rules}
+            healthMap={effectiveHealthMap} infractions={infractions} rules={rules}
             onInfractionClick={(ruleId) => {
               setCommentsCellId(null); setHistoryCellId(null); setDrawerRuleId(ruleId)
             }}

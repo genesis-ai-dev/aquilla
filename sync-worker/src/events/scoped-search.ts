@@ -139,6 +139,32 @@ export function sanitizeFtsExactPhrase(raw: string): string | null {
   return '"' + tokens.join(" ") + '"'
 }
 
+/**
+ * Sanitize free text into an FTS5 *any-term* (OR) query: `"t1" OR "t2" ...`.
+ *
+ * Unlike `sanitizeFtsQuery` (implicit-AND — every token must be present, right
+ * for short user searches), this retrieves cells sharing *any* term, which is
+ * what AD-14 health-as-confidence wants: feed a whole source cell as the query
+ * and pull every validated cell that overlaps it, then let bm25 rank and the
+ * coverage scorer decide. Tokenized with the same Unicode class as
+ * `tokenizeForConfidence` so the terms FTS matches on are exactly the terms the
+ * scorer measures coverage over. Deduped and capped at `maxTerms` to bound the
+ * query size on long verses. Returns null when nothing survives.
+ */
+export function sanitizeFtsAnyTerm(raw: string, maxTerms = 40): string | null {
+  const tokens = raw.toLowerCase().match(/[\p{L}\p{M}\p{N}]+/gu) ?? []
+  const seen = new Set<string>()
+  const out: string[] = []
+  for (const t of tokens) {
+    if (seen.has(t)) continue
+    seen.add(t)
+    out.push(t)
+    if (out.length >= maxTerms) break
+  }
+  if (out.length === 0) return null
+  return out.map((t) => `"${t}"`).join(" OR ")
+}
+
 // ---------------------------------------------------------------------------
 // Limit helpers
 // ---------------------------------------------------------------------------
@@ -287,5 +313,91 @@ export async function queryScopedExact(
     snippet: row.snippet,
     rank: row.rank,
     pairedValue: row.paired_value,
+  }))
+}
+
+// ---------------------------------------------------------------------------
+// queryValidatedNeighbors — AD-14 health-as-confidence candidate retrieval
+// ---------------------------------------------------------------------------
+
+/** A validated cell whose SOURCE lexically overlaps the query source text. */
+export interface ValidatedNeighbor {
+  cellId: string
+  /** The neighbor's SOURCE value (retrieval key; kept for observability). */
+  value: string
+  /** The neighbor's validated TARGET value — what the scorer compares against. */
+  targetValue: string
+  /** FTS5 bm25 rank (more negative = better). */
+  rank: number
+}
+
+/**
+ * Retrieve up to `topK` validated cells whose SOURCE lexically overlaps
+ * `queryText` (the asking cell's source), ranked by FTS5 bm25, returning each
+ * neighbor's validated TARGET.
+ *
+ * This is the one-hop example set for health-as-confidence, framed as a
+ * counterfactual: "if the validated cells this source retrieves were your
+ * few-shot examples, does your translation look like theirs?" Retrieval is by
+ * source (the stable key for "what would I translate this from"); the caller
+ * scores the asking cell's TARGET against these neighbors' TARGETS — so a
+ * familiar source with a wrong translation scores low. Excludes `excludeCellId`
+ * so a cell never endorses itself. SQL stays here (the project-scoped FTS
+ * choke-point); scoring is the caller's pure function. Returns [] when the
+ * query sanitizes away.
+ */
+export async function querySourceNeighbors(
+  db: D1Database,
+  verifiedProjectId: VerifiedProjectId,
+  queryText: string,
+  opts: { topK?: number; excludeCellId?: string; validatedOnly?: boolean },
+): Promise<ValidatedNeighbor[]> {
+  const ftsQuery = sanitizeFtsAnyTerm(queryText)
+  if (!ftsQuery) return []
+
+  const limit = clampLimit(opts.topK)
+
+  const parts: string[] = [
+    "SELECT c.cell_id AS cell_id, c.value AS value, t.value AS target_value, cells_fts.rank AS rank",
+    "FROM cells_fts",
+    "JOIN cells c ON c.rowid = cells_fts.rowid",
+    "JOIN cells t",
+    "  ON  t.project_id = c.project_id",
+    "  AND t.file_id    = c.file_id",
+    "  AND t.cell_id    = c.cell_id",
+    "  AND t.side       = 'target'",
+    "  AND t.value     != ''", // translated neighbors only — need a target to compare
+    "WHERE cells_fts MATCH ?",
+    "AND c.project_id = ?",
+    "AND c.side = 'source'",
+  ]
+  const binds: unknown[] = [ftsQuery, verifiedProjectId]
+
+  // Health propagation flows from ANY translated neighbor's health (one hop),
+  // so by default we don't restrict to validated; the caller anchors at
+  // validated cells separately. `validatedOnly` keeps the original behavior.
+  if (opts.validatedOnly) {
+    parts.push("AND t.validated = 1")
+  }
+  if (opts.excludeCellId !== undefined) {
+    parts.push("AND c.cell_id != ?")
+    binds.push(opts.excludeCellId)
+  }
+  parts.push("ORDER BY rank ASC")
+  parts.push("LIMIT ?")
+  binds.push(limit)
+
+  const sql = parts.join(" ")
+  const result = await db.prepare(sql).bind(...binds).all<{
+    cell_id: string
+    value: string
+    target_value: string
+    rank: number
+  }>()
+  return result.results.map((row) => ({
+    cellId: row.cell_id,
+    value: row.value,
+    targetValue: row.target_value,
+    rank: row.rank,
   }))
 }

@@ -27,8 +27,11 @@ import type { WorkspaceSearchResult } from "@/hooks/useWorkspaceSearch"
 import { StatusBar } from "./StatusBar"
 import { SyncStatusIndicator } from "./SyncStatusIndicator"
 import { OutboxSyncIndicator } from "./OutboxSyncIndicator"
-import { EditorTable } from "./EditorTable"
+import { EditorTable, type AudioLensContext } from "./EditorTable"
 import { AudioRecordingModal } from "./AudioRecorder/AudioRecordingModal"
+import { VoiceSidebar } from "./voice/VoiceSidebar"
+import { startQueue } from "@/lib/audio/play-queue"
+import { useProjectTts } from "@/hooks/useProjectTts"
 import { RuleDrawer } from "./RuleDrawer"
 import { CommentsDrawer } from "./CommentsDrawer"
 import { HistoryDrawer } from "./HistoryDrawer"
@@ -57,7 +60,7 @@ import { Film, Scale, MessagesSquare, Share2, Settings as SettingsIcon, Lock, Cl
 import { restoreProject } from "@/lib/store/project-index"
 import { AppShell } from "./AppShell"
 import { WorkspaceHeader } from "./WorkspaceHeader"
-import { EditorModeToggle } from "./EditorModeToggle"
+import { EditorModeToggle, type EditorLens } from "./EditorModeToggle"
 import { SelectionBar } from "./SelectionBar"
 import { WorkspaceStatusBar } from "./WorkspaceStatusBar"
 import { PrimaryActionButton } from "./PrimaryActionButton"
@@ -259,6 +262,19 @@ export function ProjectWorkspace() {
   const [shareOpen, setShareOpen] = useState(false)
   const [aiSetupOpen, setAiSetupOpen] = useState(false)
   const [recordingCellId, setRecordingCellId] = useState<string | null>(null)
+  // "Make a character from this voice" dialog (Cast studio). Owned here so the
+  // per-cell control in the editor's source column can open it seeded to a
+  // specific line's take, and the rail's button can open it for a manual pick.
+  const [makeCharacterOpen, setMakeCharacterOpen] = useState(false)
+  const [makeCharacterSeedCellId, setMakeCharacterSeedCellId] = useState<string | null>(null)
+  // Text vs Audio lens — the same editor over the same cells. Audio mode swaps
+  // the left rail's body for the Cast studio (VoiceSidebar: cast roster + the
+  // "make a character" dialog) and replaces each cell's SOURCE column with that
+  // line's voice controls (CellVoicePanel); all other audio chrome lives there.
+  const [lens, setLens] = useState<EditorLens>("text")
+  const openAudioLens = useCallback(() => {
+    setLens("audio")
+  }, [])
   const editorRef = useRef<EditorTableHandle>(null)
   // Phase 2c-gamma: the per-file Y.Doc is gone. The editor hydrates from the
   // cells projection and writes via the outbox. `doc`/`docLoading` are
@@ -388,6 +404,51 @@ export function ProjectWorkspace() {
     getToken: getTokenForFile,
     enabled: Boolean(project?.id && activeFileId && frontierSession?.jwt),
   })
+
+  // Audio lens: TTS settings (engine, voice library, cast) hydrated from IDB
+  // and overlaid onto the project so generation uses the real engine/key/cast.
+  const tts = useProjectTts(project?.id ?? null, project?.ttsSettings, cells)
+  const audioProject = useMemo(
+    () => (project ? { ...project, ttsSettings: tts.settings } : null),
+    [project, tts.settings],
+  )
+  const audioLens = useMemo<AudioLensContext | null>(
+    () =>
+      lens === "audio" && audioProject
+        ? {
+            voices: tts.voices,
+            settings: tts.settings,
+            defaultVoiceId: tts.defaultVoiceId,
+            project: audioProject,
+            projectId: audioProject.id,
+            session: frontierSession ?? null,
+            username: currentUsername,
+            onAssignCast: (cellId, voiceId) => tts.assignCells([cellId], voiceId),
+            onAfterGenerate: refresh,
+            // Play just this one line through the shared play-queue: hand it a
+            // single-cell snapshot so it doesn't walk on to the next line.
+            onPlayCell: (cellId) => {
+              if (!frontierSession?.jwt) return
+              const cell = cells.find((c) => c.id === cellId)
+              if (!cell) return
+              startQueue(
+                { cells: [cell], projectId: audioProject.id, session: frontierSession },
+                0,
+              )
+            },
+            // Turn this line's take into a reusable Cast character.
+            onMakeCharacterFromCell: (cellId) => {
+              setMakeCharacterSeedCellId(cellId)
+              setMakeCharacterOpen(true)
+            },
+          }
+        : null,
+    [
+      lens, audioProject, tts.voices, tts.settings, tts.defaultVoiceId, tts.assignCells,
+      frontierSession, currentUsername, cells, refresh,
+    ],
+  )
+
   const { hasAny: hasUnfinished, findNext: findNextUnfinished } = useNextUnfinished(cells, validationCount)
   const handleJumpNextUnfinished = useCallback(() => {
     const currentIndex = editorRef.current?.getCurrentIndex?.() ?? 0
@@ -1004,8 +1065,8 @@ export function ProjectWorkspace() {
       { id: "comments", label: "Comments", icon: MessagesSquare,
         badge: Array.from(openCommentCount.values()).reduce((a, b) => a + b, 0),
         onClick: () => navigate(`/project/${projectId}/comments`) },
-      { id: "voice-studio", label: "Voice Studio", icon: Mic2,
-        onClick: () => navigate(`/project/${projectId}/voice`) },
+      { id: "voice-studio", label: "Voice", icon: Mic2,
+        onClick: openAudioLens },
       { id: "share", label: "Share", icon: Share2,
         onClick: () => setShareOpen(true) },
       { id: "settings", label: "Settings", icon: SettingsIcon,
@@ -1018,7 +1079,7 @@ export function ProjectWorkspace() {
         } },
     ]
     return items
-  }, [projectId, activeFileId, navigate, openCommentCount])
+  }, [projectId, activeFileId, navigate, openCommentCount, openAudioLens])
 
   // Phase 2c-gamma: countTranscribeTargets/countSynthTargets lived in bulk-audio
   // (Y.Doc-coupled). They're zeroed until the audio-attachment event grammar
@@ -1177,29 +1238,50 @@ export function ProjectWorkspace() {
             <div className="p-2">
               <AccountSwitcher />
             </div>
-            <SuggestionBanner
-              suggestions={bannerSuggestions}
-              onApply={handleApplySuggestions}
-              onDismiss={handleDismissBanner}
-            />
-            <ExpandableFileList
-              projectId={projectId!}
-              files={project.files}
-              activeFileId={activeFileId}
-              fileProgress={fileProgress}
-              suggestionFileIds={suggestionFileIds}
-              validationCount={validationCount}
-              getTokenForFile={getTokenForFile}
-              onSelectFile={workspaceTabs.openFile}
-              onRename={handleRename}
-              onMove={(fileId) => {
-                setMoveTargetId(fileId)
-                setMoveCorpus(project.files.find((f) => f.id === fileId)?.corpusMarker ?? "")
-              }}
-              onDelete={(fileId) => setPendingDeleteId(fileId)}
-              onApplySuggestion={handleApplyOneSuggestion}
-              onRenameCorpus={handleRenameCorpus}
-            />
+            {lens === "audio" && project ? (
+              <VoiceSidebar
+                cells={cells}
+                project={audioProject ?? project}
+                projectId={project.id}
+                tts={tts}
+                session={frontierSession ?? null}
+                username={currentUsername}
+                targetLanguage={project.targetLanguage}
+                fileId={activeFileId}
+                cloneOpen={makeCharacterOpen}
+                onCloneOpenChange={(open) => {
+                  setMakeCharacterOpen(open)
+                  if (!open) setMakeCharacterSeedCellId(null)
+                }}
+                cloneSeedCellId={makeCharacterSeedCellId}
+              />
+            ) : (
+              <>
+                <SuggestionBanner
+                  suggestions={bannerSuggestions}
+                  onApply={handleApplySuggestions}
+                  onDismiss={handleDismissBanner}
+                />
+                <ExpandableFileList
+                  projectId={projectId!}
+                  files={project.files}
+                  activeFileId={activeFileId}
+                  fileProgress={fileProgress}
+                  suggestionFileIds={suggestionFileIds}
+                  validationCount={validationCount}
+                  getTokenForFile={getTokenForFile}
+                  onSelectFile={workspaceTabs.openFile}
+                  onRename={handleRename}
+                  onMove={(fileId) => {
+                    setMoveTargetId(fileId)
+                    setMoveCorpus(project.files.find((f) => f.id === fileId)?.corpusMarker ?? "")
+                  }}
+                  onDelete={(fileId) => setPendingDeleteId(fileId)}
+                  onApplySuggestion={handleApplyOneSuggestion}
+                  onRenameCorpus={handleRenameCorpus}
+                />
+              </>
+            )}
             <SidebarProjectSection items={projectNavItems} />
           </>
         }
@@ -1287,7 +1369,10 @@ export function ProjectWorkspace() {
 
             {/* Primary zone — mode toggle + the one prominent action. */}
             {project && (
-              <EditorModeToggle projectId={project.id} mode="translate" activeFileId={activeFileId} />
+              <EditorModeToggle
+                lens={lens}
+                onChange={(l) => setLens(l)}
+              />
             )}
             <PrimaryActionButton ctx={actionCtx} run={actionArgs} />
           </WorkspaceHeader>
@@ -1301,7 +1386,7 @@ export function ProjectWorkspace() {
               onActivate={workspaceTabs.activateTab}
               onClose={workspaceTabs.closeTab}
             />
-            {project && activeFileId && (
+            {project && activeFileId && lens === "text" && (
               <>
                 <SelectionBar
                   project={project}
@@ -1436,6 +1521,8 @@ export function ProjectWorkspace() {
             isAnonymous={!frontierSession}
             onJumpToCell={jumpToCellId}
             onAiSetupNeeded={() => setAiSetupOpen(true)}
+            audioLens={audioLens}
+            onOpenAudioSetup={openAudioLens}
             onOpenRecording={(cellId) => setRecordingCellId(cellId)}
             onProjectChanged={refresh}
             onCellCommitted={handleCellCommitted}

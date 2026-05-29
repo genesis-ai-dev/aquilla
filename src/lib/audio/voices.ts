@@ -85,6 +85,29 @@ export function resolveVoice(
   )
 }
 
+/**
+ * Resolve which cast member voices a specific cell, honoring a persisted
+ * line→cast assignment first, then the cell's own voiceId, then the project
+ * default. Used by the Voice Studio so every line speaks in its assigned
+ * character's voice.
+ */
+export function resolveCastVoice(
+  settings: ProjectTtsSettings | undefined,
+  cellId: string,
+  cellVoiceId?: string,
+): Voice {
+  const assigned = settings?.castAssignments?.[cellId]
+  return resolveVoice(settings, assigned ?? cellVoiceId)
+}
+
+/** The cast member assigned to a cell, if any explicit assignment exists. */
+export function assignedCastVoiceId(
+  settings: ProjectTtsSettings | undefined,
+  cellId: string,
+): string | undefined {
+  return settings?.castAssignments?.[cellId]
+}
+
 export function newVoiceId(): string {
   return globalThis.crypto?.randomUUID?.() ?? `voice-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
 }

@@ -203,10 +203,24 @@ export interface ProjectTtsSettings {
   provider?: TtsProvider
   /** Gemini API key for BYOK TTS. Stored in the local project record. */
   apiKey?: string
-  /** Project's voice library. Empty/absent means: use the built-in presets. */
+  /**
+   * Project's voice library. Empty/absent means: use the built-in presets.
+   * In the Voice Studio these are presented as the project's *cast* — each
+   * voice is a character/speaker (a base TTS voice + an optional actor-clone
+   * reference) that lines get assigned to.
+   */
   voices?: Voice[]
-  /** Voice id used when a cell doesn't specify one. */
+  /** Voice id used when a cell doesn't specify one (the narrator/default cast member). */
   defaultVoiceId?: string
+  /**
+   * Persisted line → cast assignment: `cellId → voiceId`. Lets the producer
+   * assign every line to a character once (e.g. all of Jesus's lines) and
+   * bulk-generate the episode later. Stored in the local project record
+   * alongside the rest of the TTS settings; a cell with no entry falls back to
+   * `defaultVoiceId`. Keyed by the project-unique cellId, so one map spans all
+   * files. Absent for projects that never opened the Studio.
+   */
+  castAssignments?: Record<string, string>
 }
 
 export interface CellTtsSettings {

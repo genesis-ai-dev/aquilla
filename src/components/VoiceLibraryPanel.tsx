@@ -11,7 +11,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react"
 import {
-  Check, Copy, KeyRound, Loader2, Pause, Play, Plus, Settings2, Sparkles, Star, Trash2,
+  Check, Copy, KeyRound, Loader2, Mic, Pause, Play, Plus, Settings2, Sparkles, Star, Trash2, Users,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -36,6 +36,13 @@ import type { FrontierSession } from "@/lib/frontier/types"
 
 const SAMPLE_TEXT = "The quick brown fox jumps over the lazy dog."
 
+export interface CastMemberStats {
+  /** Lines assigned to this cast member in the current file. */
+  assigned: number
+  /** Of the assigned lines, how many already have generated audio. */
+  voiced: number
+}
+
 interface Props {
   targetLanguage?: string
   settings: ProjectTtsSettings | undefined
@@ -43,15 +50,17 @@ interface Props {
   projectId?: string
   fileId?: string | null
   session?: FrontierSession | null
-  /** Notifies the page which voice id is selected (so it can offer "assign to
-   *  row" affordances). */
+  /** The active cast member — its lines highlight in the list and it's the
+   *  target of the "assign selected lines" action. */
   selectedVoiceId?: string
   onSelectVoice?: (voiceId: string) => void
+  /** Per-member line counts for the current file (voiceId → stats). */
+  castStats?: Map<string, CastMemberStats>
 }
 
 export function VoiceLibraryPanel({
   targetLanguage, settings, onSettingsChange, projectId, fileId, session,
-  selectedVoiceId, onSelectVoice,
+  selectedVoiceId, onSelectVoice, castStats,
 }: Props) {
   const provider = settings?.provider ?? DEFAULT_TTS_PROVIDER
   const userKey = useUserApiKey("gemini-tts")
@@ -63,6 +72,9 @@ export function VoiceLibraryPanel({
   const [localSelectedId, setLocalSelectedId] = useState<string>("")
   const seededRef = useRef<string | null>(null)
   const [engineOpen, setEngineOpen] = useState(false)
+  // Bumped when the user creates a clone profile, so the editor scrolls its
+  // reference recorder into view and pulses it.
+  const [cloneFocusSignal, setCloneFocusSignal] = useState(0)
 
   // Seed the local library once per project. The studio mounts this only after
   // the project has loaded, so settings is available on first render.
@@ -110,7 +122,7 @@ export function VoiceLibraryPanel({
   const addBlank = useCallback(() => {
     const copy: Voice = {
       id: newVoiceId(),
-      name: "New voice",
+      name: "New character",
       color: VOICE_PALETTE[voices.length % VOICE_PALETTE.length],
       provider,
       voiceName: defaultVoiceNameForProvider(provider, { targetLanguage }),
@@ -118,6 +130,23 @@ export function VoiceLibraryPanel({
     }
     select(copy.id)
     writeBack([...voices, copy], defaultVoiceId)
+  }, [voices, provider, targetLanguage, writeBack, defaultVoiceId, select])
+
+  // Create a fresh voice and jump straight to its reference recorder — a clone
+  // profile is a normal voice whose TTS output is re-voiced into a recorded
+  // timbre, so the only extra step is capturing that reference.
+  const addClone = useCallback(() => {
+    const copy: Voice = {
+      id: newVoiceId(),
+      name: "New character",
+      color: VOICE_PALETTE[voices.length % VOICE_PALETTE.length],
+      provider,
+      voiceName: defaultVoiceNameForProvider(provider, { targetLanguage }),
+      builtIn: false,
+    }
+    select(copy.id)
+    writeBack([...voices, copy], defaultVoiceId)
+    setCloneFocusSignal((n) => n + 1)
   }, [voices, provider, targetLanguage, writeBack, defaultVoiceId, select])
 
   const deleteSelected = useCallback(() => {
@@ -137,9 +166,11 @@ export function VoiceLibraryPanel({
     <div className="flex h-full min-h-0 flex-col">
       <div className="flex items-center justify-between border-b px-4 py-3">
         <h2 className="flex items-center gap-2 text-sm font-semibold">
-          <Sparkles className="h-4 w-4 text-primary" /> Voice library
+          <Users className="h-4 w-4 text-primary" /> Cast
         </h2>
-        <span className="text-xs text-muted-foreground">{voices.length}</span>
+        <span className="text-xs text-muted-foreground">
+          {voices.length} {voices.length === 1 ? "character" : "characters"}
+        </span>
       </div>
 
       <div className="min-h-0 flex-1 space-y-3 overflow-y-auto p-3">
@@ -203,10 +234,13 @@ export function VoiceLibraryPanel({
           )}
         </div>
 
-        {/* Library — cards */}
+        {/* Cast roster — one card per character. Click selects (highlights its
+            lines + becomes the assign target); drag onto a line assigns. */}
         <div className="space-y-1">
           {voices.map((voice) => {
             const active = voice.id === selected?.id
+            const stats = castStats?.get(voice.id)
+            const isNarrator = voice.id === defaultVoiceId
             return (
               <button
                 key={voice.id}
@@ -217,25 +251,46 @@ export function VoiceLibraryPanel({
                   e.dataTransfer.effectAllowed = "copy"
                 }}
                 onClick={() => select(voice.id)}
-                title="Drag onto a row to assign this voice"
+                title="Click to select · drag onto a line to assign"
                 className={cn(
                   "group flex w-full cursor-grab items-center gap-2 rounded-xl border px-3 py-2 text-left text-sm transition-colors active:cursor-grabbing",
-                  active ? "border-primary/50 bg-primary/10" : "border-transparent bg-muted/30 hover:bg-accent/40",
+                  active ? "border-primary/50 bg-primary/10"
+                    : voice.referenceAudioId ? "border-violet-300/50 bg-violet-50/40 hover:bg-violet-100/50 dark:border-violet-500/20 dark:bg-violet-950/20"
+                    : "border-transparent bg-muted/30 hover:bg-accent/40",
                 )}
               >
                 <span
                   className="h-3 w-3 shrink-0 rounded-full border"
                   style={{ backgroundColor: voice.color || "#94a3b8" }}
                 />
-                <span className="flex-1 truncate">{voice.name}</span>
-                {voice.referenceAudioId && <Sparkles className="h-3 w-3 shrink-0 text-violet-500" aria-label="Voice clone" />}
-                {voice.id === defaultVoiceId && <Star className="h-3 w-3 shrink-0 text-primary" aria-label="Default" />}
+                <span className="min-w-0 flex-1">
+                  <span className="flex items-center gap-1">
+                    <span className="truncate">{voice.name}</span>
+                    {isNarrator && <Star className="h-3 w-3 shrink-0 text-primary" aria-label="Narrator (default)" />}
+                  </span>
+                  <span className="block text-[10px] leading-tight text-muted-foreground">
+                    {voice.referenceAudioId ? "character voice · " : ""}
+                    {stats && stats.assigned > 0
+                      ? `${stats.voiced}/${stats.assigned} lines voiced`
+                      : isNarrator ? "unassigned lines" : "no lines yet"}
+                  </span>
+                </span>
+                {voice.referenceAudioId && (
+                  <span className="inline-flex shrink-0 items-center gap-0.5 rounded-full bg-violet-500/15 px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-wide text-violet-600 dark:text-violet-300">
+                    <Sparkles className="h-2.5 w-2.5" /> Character
+                  </span>
+                )}
               </button>
             )
           })}
-          <Button type="button" size="sm" variant="ghost" onClick={addBlank} className="w-full justify-start">
-            <Plus className="mr-1 h-3.5 w-3.5" /> New voice
-          </Button>
+          <div className="flex gap-1">
+            <Button type="button" size="sm" variant="ghost" onClick={addBlank} className="flex-1 justify-start">
+              <Plus className="mr-1 h-3.5 w-3.5" /> Add character
+            </Button>
+            <Button type="button" size="sm" variant="ghost" onClick={addClone} className="flex-1 justify-start text-violet-600 hover:text-violet-700 dark:text-violet-300" title="Create a character voice from a fresh recording">
+              <Mic className="mr-1 h-3.5 w-3.5" /> Record a character
+            </Button>
+          </div>
         </div>
 
         {/* Editor — selected voice */}
@@ -254,6 +309,7 @@ export function VoiceLibraryPanel({
               projectId={projectId}
               fileId={fileId}
               session={session}
+              cloneFocusSignal={cloneFocusSignal}
             />
           </div>
         )}
@@ -281,6 +337,8 @@ interface VoiceEditorProps {
   projectId?: string
   fileId?: string | null
   session?: FrontierSession | null
+  /** Bumped to scroll the clone recorder into view (after "Clone voice"). */
+  cloneFocusSignal?: number
 }
 
 type PreviewState =
@@ -292,7 +350,7 @@ type PreviewState =
 function VoiceEditor({
   voice, provider, apiKey, targetLanguage, isDefault,
   onChange, onDuplicate, onDelete, onSetDefault,
-  projectId, fileId, session,
+  projectId, fileId, session, cloneFocusSignal,
 }: VoiceEditorProps) {
   const [preview, setPreview] = useState<PreviewState>({ kind: "idle" })
   const audioRef = useRef<HTMLAudioElement | null>(null)
@@ -462,6 +520,7 @@ function VoiceEditor({
         fileId={fileId}
         session={session}
         onChange={onChange}
+        focusSignal={cloneFocusSignal}
       />
 
       <div className="flex flex-wrap items-center gap-2 pt-1">

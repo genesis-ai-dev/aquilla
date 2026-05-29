@@ -10,7 +10,7 @@ import type { CellData } from "@/hooks/useCells"
 import type { CodexCellAttachment, WordTiming } from "@/lib/codex-editor/types"
 import { useFileAudioAttachments } from "@/hooks/useFileAudioAttachments"
 import type { ScoredPair } from "@/lib/search/dual-index"
-import type { TranslationRule, RuleInfraction, ProjectRecord } from "@/lib/parsers/types"
+import type { TranslationRule, RuleInfraction, ProjectRecord, Voice, ProjectTtsSettings } from "@/lib/parsers/types"
 import { useProjectPermissions } from "@/hooks/useProjectPermissions"
 import { emitTargetCellCommit, emitCellValidate, emitCellUnvalidate, emitCellWaive, emitCellUnwaive } from "@/lib/sync/events-emit"
 import { ExamplePanel } from "./ExamplePanel"
@@ -42,6 +42,9 @@ import { setTtsStatus, ttsStatusKey, useTtsStatus } from "@/lib/audio/tts"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { categorizeAiError } from "@/lib/audio/ai-error"
 import { CellAiStatusPopover } from "./CellAiStatusPopover"
+import { CellNumberPill } from "./cell/CellNumberPill"
+import { CellVoicePanel } from "./cell/CellVoicePanel"
+import { assignedCastVoiceId } from "@/lib/audio/voices"
 import { useNavigate } from "react-router-dom"
 import { cn } from "@/lib/utils"
 import { isPerfLogEnabled } from "@/lib/perf-log"
@@ -76,13 +79,17 @@ if (typeof window !== "undefined") {
  *  to the cell that's actually working, even if the row scrolls. Errors are
  *  click-to-expand: full message + actions (set Gemini key, dismiss). */
 function SynthStatusBadge({
-  status, cellId, projectId,
+  status, cellId, projectId, onOpenAudioSetup,
 }: {
   status: ReturnType<typeof useTtsStatus>
   cellId: string
   projectId: string
+  /** Switch to the Audio lens + open the cast/voice library to fix setup. */
+  onOpenAudioSetup?: () => void
 }) {
   const navigate = useNavigate()
+  const openVoiceSetup = () =>
+    onOpenAudioSetup ? onOpenAudioSetup() : navigate(`/project/${projectId}/voice`)
   if (status.kind === "loading") {
     const isTranslating = status.file === "Translating…"
     const pct = !isTranslating && status.total > 0
@@ -121,9 +128,9 @@ function SynthStatusBadge({
     const actions = []
     if (error.category === "missing-gemini-key") {
       actions.push({
-        label: "Open Voice Studio",
+        label: "Open audio setup",
         primary: true,
-        onClick: () => navigate(`/project/${projectId}/voice`),
+        onClick: openVoiceSetup,
       })
     } else if (
       error.category === "translation-not-configured" ||
@@ -134,8 +141,8 @@ function SynthStatusBadge({
       // Soft fixes — the popover body explains what to do; no inline action.
     } else {
       actions.push({
-        label: "Open Voice Studio",
-        onClick: () => navigate(`/project/${projectId}/voice`),
+        label: "Open audio setup",
+        onClick: openVoiceSetup,
       })
     }
     return (
@@ -240,10 +247,40 @@ export interface EditorTableHandle {
   flashCell: (cellId: string, searchTerm: string) => void
 }
 
+/** Per-cell audio production data + actions, supplied only when the editor is
+ *  in the Audio lens. When null/undefined the editor renders plain text mode.
+ *  In Audio mode each cell's SOURCE column is replaced with CellVoicePanel —
+ *  the full per-line voice controls (character picker, generate, play, make-a-
+ *  character) — so this context carries everything that panel needs. */
+export interface AudioLensContext {
+  voices: Voice[]
+  /** Hydrated TTS settings (cast assignments) — source of truth for who voices a line. */
+  settings: ProjectTtsSettings | undefined
+  /** The project's default/narrator voice id, used when a line has no explicit cast. */
+  defaultVoiceId: string
+  /** The TTS-overlaid project record (real engine/key/cast) used for generation. */
+  project: ProjectRecord
+  projectId: string
+  /** Frontier session for synth/playback token minting (kept opaque for the panel). */
+  session: unknown
+  username: string
+  onAssignCast: (cellId: string, voiceId: string) => void
+  /** Revalidate after a successful per-cell generate. */
+  onAfterGenerate: () => void
+  /** Play just this one cell through the shared play-queue. */
+  onPlayCell: (cellId: string) => void
+  /** Open the "make a character from this voice" flow seeded with this cell's take. */
+  onMakeCharacterFromCell: (cellId: string) => void
+}
+
 interface EditorTableProps {
   project: ProjectRecord
   cells: CellData[]
   username: string
+  /** When set, each row shows the Audio-lens strip (speaker chip + generate). */
+  audioLens?: AudioLensContext | null
+  /** Switch to the Audio lens and open the cast/voice library (error recovery). */
+  onOpenAudioSetup?: () => void
   /** Called after a successful `target.cell.commit` enqueue so the parent
    *  refetches the cells projection. */
   onCellCommitted?: () => void | Promise<void>
@@ -322,6 +359,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   activeCueIndex, onSeekToCue,
   lineNumbersEnabled, cellLabelsEnabled, sourceTextDirection, targetTextDirection,
   isAnonymous, onJumpToCell, onAiSetupNeeded, onOpenRecording,
+  audioLens, onOpenAudioSetup,
   onProjectChanged,
   onCellCommitted,
   onOptimisticEdit,
@@ -727,6 +765,8 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
                 onJumpToCell={onJumpToCell}
                 onAiSetupNeeded={onAiSetupNeeded}
                 onOpenRecording={onOpenRecording}
+                audioLens={audioLens ?? null}
+                onOpenAudioSetup={onOpenAudioSetup}
                 onProjectChanged={onProjectChanged}
                 onDragStart={handleDragStart}
                 onDragEnter={handleDragEnter}
@@ -800,6 +840,8 @@ interface MemoizedRowProps {
   onJumpToCell?: (cellId: string) => void
   onAiSetupNeeded?: () => void
   onOpenRecording?: (cellId: string) => void
+  audioLens: AudioLensContext | null
+  onOpenAudioSetup?: () => void
   onProjectChanged?: () => void
   onDragStart: (cellId: string) => void
   onDragEnter: (cellId: string) => void
@@ -828,6 +870,7 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
     onSeekToCue, lineNumbersEnabled, cellLabelsEnabled,
     sourceTextDirection, targetTextDirection, isAnonymous,
     onJumpToCell, onAiSetupNeeded, onOpenRecording, onProjectChanged,
+    audioLens, onOpenAudioSetup,
     onCellCommitted, onOptimisticEdit, lockHolderLabel, remoteChangedWhileFocused,
     onClaimCell, onReleaseCell, onAckRemoteChange,
     isStaleSource,
@@ -924,6 +967,8 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
         onJumpToCell={onJumpToCell}
         onAiSetupNeeded={onAiSetupNeeded}
         onOpenRecording={onOpenRecording}
+        audioLens={audioLens}
+        onOpenAudioSetup={onOpenAudioSetup}
         onProjectChanged={onProjectChanged}
         onDragStart={handleDragStart}
         onDragEnter={handleDragEnter}
@@ -1000,6 +1045,8 @@ interface EditorRowProps {
   onJumpToCell?: (cellId: string) => void
   onAiSetupNeeded?: () => void
   onOpenRecording?: (cellId: string) => void
+  audioLens: AudioLensContext | null
+  onOpenAudioSetup?: () => void
   onProjectChanged?: () => void
   getTokenForFile?: (fileId: string) => Promise<string | null>
 }
@@ -1016,6 +1063,7 @@ function EditorRow({
   onDragStart, onDragEnter, onSelectionPointerDown,
   rowIndex, lineNumbersEnabled, cellLabelsEnabled, sourceTextDirection, targetTextDirection, gridCols,
   isAnonymous, onAiSetupNeeded, onOpenRecording,
+  audioLens, onOpenAudioSetup,
   onCellCommitted, onOptimisticEdit, lockHolderLabel, remoteChangedWhileFocused,
   onClaimCell, onReleaseCell, onAckRemoteChange,
   isStaleSource,
@@ -1431,22 +1479,13 @@ function EditorRow({
   // Replaces the old severity stripe, gutter warning triangle, and dot — there
   // is now exactly one place that color-codes problems.
   const hasAnyIssue = infractionCount > 0 || cellNeedsAttention
-  const numberTint = hasMajorInfraction
-    ? "text-red-600 dark:text-red-400"
-    : hasAnyIssue
-      ? "text-amber-600 dark:text-amber-400"
-      : "text-muted-foreground/70"
   const numberLabel = showLineNumber ? String(rowIndex + 1) : null
   const numberPillInner = (
-    <span
-      className={cn(
-        "inline-flex items-center gap-1 rounded-full bg-card px-1.5 py-0.5 text-[10px] font-medium leading-none tabular-nums shadow-neu-xs",
-        numberTint,
-      )}
-    >
-      {numberLabel && <span>{numberLabel}</span>}
-      {showCellLabel && <span className="text-muted-foreground/80">{cell.cellLabel}</span>}
-    </span>
+    <CellNumberPill
+      number={numberLabel}
+      label={showCellLabel ? cell.cellLabel : null}
+      tint={hasMajorInfraction ? "major" : hasAnyIssue ? "issue" : "none"}
+    />
   )
   const numberPill = !(showLineNumber || showCellLabel) ? null : hasAnyIssue ? (
     <Popover>
@@ -1687,57 +1726,90 @@ function EditorRow({
           {numberPill}
           <div className="flex flex-col items-center gap-1">
             {(isSynthBusy || isSynthError) && (
-              <SynthStatusBadge status={synthStatus} cellId={cell.id} projectId={project.id} />
+              <SynthStatusBadge status={synthStatus} cellId={cell.id} projectId={project.id} onOpenAudioSetup={onOpenAudioSetup} />
             )}
             {validationButton}
           </div>
         </div>
 
-        {/* Source column */}
-        <div
-          className={cn(
-            "flex flex-col transition-opacity",
-            isSynthBusy && "opacity-70",
-          )}
-          dir={sourceTextDirection}
-        >
-          <div className="mb-1 flex items-center gap-1 text-xs text-muted-foreground" dir="ltr">
-            <span>{cell.context}</span>
-            {showFormattingLossWarning && (
-              <span
-                title="Source has inline formatting (bold, italic, etc.) that the target doesn't preserve. Formatting will be lost on export."
-                className="inline-flex items-center gap-0.5 rounded bg-amber-100 px-1 py-0.5 text-[9px] font-medium text-amber-700 dark:bg-amber-950 dark:text-amber-400"
+        {/* Source column. In Audio mode there's no need for source text to
+            voice a line, so the column is REPLACED with this cell's voice
+            controls (character picker, generate, play, make-a-character). In
+            Text mode it shows the source text as usual. */}
+        {audioLens ? (
+          (() => {
+            const vid = assignedCastVoiceId(audioLens.settings, cell.id) ?? audioLens.defaultVoiceId
+            const resolvedVoice =
+              audioLens.voices.find((v) => v.id === vid) ?? audioLens.voices[0]
+            if (!resolvedVoice) return <div />
+            return (
+              <div
+                className={cn("flex flex-col transition-opacity", isSynthBusy && "opacity-70")}
+                dir="ltr"
               >
-                <AlertTriangle className="h-2.5 w-2.5" />
-                formatting
-              </span>
+                <CellVoicePanel
+                  cell={cell}
+                  project={audioLens.project}
+                  projectId={audioLens.projectId}
+                  settings={audioLens.settings}
+                  voices={audioLens.voices}
+                  resolvedVoice={resolvedVoice}
+                  session={audioLens.session}
+                  username={audioLens.username}
+                  onAssign={(voiceId) => audioLens.onAssignCast(cell.id, voiceId)}
+                  onAfterGenerate={audioLens.onAfterGenerate}
+                  onPlay={() => audioLens.onPlayCell(cell.id)}
+                  onMakeCharacter={() => audioLens.onMakeCharacterFromCell(cell.id)}
+                />
+              </div>
+            )
+          })()
+        ) : (
+          <div
+            className={cn(
+              "flex flex-col transition-opacity",
+              isSynthBusy && "opacity-70",
+            )}
+            dir={sourceTextDirection}
+          >
+            <div className="mb-1 flex items-center gap-1 text-xs text-muted-foreground" dir="ltr">
+              <span>{cell.context}</span>
+              {showFormattingLossWarning && (
+                <span
+                  title="Source has inline formatting (bold, italic, etc.) that the target doesn't preserve. Formatting will be lost on export."
+                  className="inline-flex items-center gap-0.5 rounded bg-amber-100 px-1 py-0.5 text-[9px] font-medium text-amber-700 dark:bg-amber-950 dark:text-amber-400"
+                >
+                  <AlertTriangle className="h-2.5 w-2.5" />
+                  formatting
+                </span>
+              )}
+            </div>
+            {cell.originalHtml ? (
+              <div
+                className="text-sm"
+                // eslint-disable-next-line react/no-danger
+                dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(cell.originalHtml) }}
+              />
+            ) : (
+              <div className="text-sm">
+                <HighlightedText
+                  text={cell.original}
+                  highlights={highlights}
+                  ranges={sourceRanges}
+                  showEvidence={examplesExpanded}
+                  onRangeClick={openInlineRule}
+                />
+              </div>
+            )}
+            {cellExamples.length > 0 && (
+              <ExamplePanel
+                examples={cellExamples}
+                expanded={examplesExpanded}
+                onExpandedChange={setExamplesExpanded}
+              />
             )}
           </div>
-          {cell.originalHtml ? (
-            <div
-              className="text-sm"
-              // eslint-disable-next-line react/no-danger
-              dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(cell.originalHtml) }}
-            />
-          ) : (
-            <div className="text-sm">
-              <HighlightedText
-                text={cell.original}
-                highlights={highlights}
-                ranges={sourceRanges}
-                showEvidence={examplesExpanded}
-                onRangeClick={openInlineRule}
-              />
-            </div>
-          )}
-          {cellExamples.length > 0 && (
-            <ExamplePanel
-              examples={cellExamples}
-              expanded={examplesExpanded}
-              onExpandedChange={setExamplesExpanded}
-            />
-          )}
-        </div>
+        )}
 
         {/* Target column — TipTap is inline so typing is unchanged. Everything
             else (waveform, transcript preview, backtranslation, infractions

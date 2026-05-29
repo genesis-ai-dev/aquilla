@@ -4,7 +4,6 @@ import { ProjectWorkspace } from "@/components/ProjectWorkspace"
 import { ProjectSettings } from "@/components/ProjectSettings"
 import { DebugView } from "@/components/DebugView"
 import { RulesPage } from "@/components/RulesPage"
-import { VoiceStudioPage } from "@/components/VoiceStudioPage"
 import { CommentsPage } from "@/components/CommentsPage"
 import { JoinPage } from "@/components/JoinPage"
 import { OnboardingWizard } from "@/components/onboarding/OnboardingWizard"
@@ -65,7 +64,6 @@ function AppRoutes() {
       <Route path="/project/:id/settings" element={<ProjectSettings />} />
       <Route path="/project/:id/settings/debug" element={<DebugView />} />
       <Route path="/project/:id/rules" element={<RulesPage />} />
-      <Route path="/project/:id/voice" element={<VoiceStudioPage />} />
       <Route path="/project/:id/comments" element={<CommentsPage />} />
       <Route path="/project/:id/comments/debug" element={<DebugView />} />
       {/* Backward-compat: external links / bookmarks that point at /projects

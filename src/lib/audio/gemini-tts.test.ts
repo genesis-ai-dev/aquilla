@@ -20,8 +20,31 @@ describe("Gemini TTS prompt rendering", () => {
     )).toBe("Say Bonjour in fr; source was Hello (1/paragraph). Accent: Parisian.")
   })
 
-  it("appends text when the template has no text placeholder", () => {
-    expect(buildGeminiTtsPrompt("Bonjour", "Read warmly.")).toBe("Read warmly.\n\nBonjour")
+  it("wraps plain guidance in protective framing so it isn't spoken", () => {
+    // A template with no {text} slot is treated as free-text Guidance: it's
+    // fenced as a "Voice direction" and the line to read is appended below, so
+    // Gemini speaks the text and not the guidance itself.
+    expect(buildGeminiTtsPrompt("Bonjour", "Read warmly.")).toBe(
+      [
+        "Read the following text aloud for an audio Scripture recording.",
+        "Voice direction: Read warmly.",
+        "Do not add any words that are not in the text. Read only the text below.",
+        "",
+        "Bonjour",
+      ].join("\n"),
+    )
+  })
+
+  it("includes the target language in the framing when provided", () => {
+    expect(buildGeminiTtsPrompt("Bonjour", "Read warmly.", { targetLanguage: "fr" })).toBe(
+      [
+        "Read the following fr text aloud for an audio Scripture recording.",
+        "Voice direction: Read warmly.",
+        "Do not add any words that are not in the text. Read only the text below.",
+        "",
+        "Bonjour",
+      ].join("\n"),
+    )
   })
 })
 

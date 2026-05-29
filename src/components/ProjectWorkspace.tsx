@@ -702,22 +702,35 @@ export function ProjectWorkspace() {
 
   // PROTOTYPE (AD-14 health-as-confidence): derive per-cell health on read from
   // FTS5 similarity to validated cells, and overlay it onto the endorsement
-  // healthMap for the editor rings/tooltip so we can compare the two live. The
-  // endorsement-based `healthMap` above is left intact; nothing is removed.
+  // healthMap for the editor rings/tooltip so we can compare the two live.
+  //
+  // OPT-IN, default OFF. The overlay's async refetch re-renders the editor when
+  // it resolves, which races fast in-cell interactions (it reset cells mid-edit
+  // and mid-completion, failing the validate + AI-completion e2e smokes). Until
+  // that re-render is made non-disruptive, keep it behind a flag. Enable while
+  // exploring with: `localStorage.setItem("health-confidence-overlay","1")` then
+  // reload. When off, the hook is fully inert and the editor matches baseline.
+  const confidenceOverlayEnabled = useMemo(() => {
+    try {
+      return localStorage.getItem("health-confidence-overlay") === "1"
+    } catch {
+      return false
+    }
+  }, [])
   const confidence = useCellConfidence({
     projectId: project?.id,
     fileId: activeFileId ?? undefined,
     getToken: activeFileId ? () => getTokenForFile(activeFileId) : undefined,
     cells,
-    enabled: Boolean(project?.id && activeFileId && frontierSession?.jwt),
+    enabled: confidenceOverlayEnabled && Boolean(project?.id && activeFileId && frontierSession?.jwt),
     perHopDecay: project?.decaySettings?.perHopDecay,
   })
   const effectiveHealthMap = useMemo(() => {
-    if (confidence.healthMap.size === 0) return healthMap
+    if (!confidenceOverlayEnabled || confidence.healthMap.size === 0) return healthMap
     const merged = new Map(healthMap)
     for (const [cellId, h] of confidence.healthMap) merged.set(cellId, h)
     return merged
-  }, [healthMap, confidence.healthMap])
+  }, [confidenceOverlayEnabled, healthMap, confidence.healthMap])
 
   // AD-14: the four-sub-score breakdown popover is retired. The project ring
   // shows decay-derived health; the "biggest drags" popover redesign (cells

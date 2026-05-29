@@ -60,6 +60,11 @@ export function useCellConfidence(args: {
   getTokenRef.current = getToken
 
   useEffect(() => {
+    // Fully inert when disabled: no state writes at all, so the editor renders
+    // exactly as it would without this hook (the overlay is opt-in — see the
+    // flag in ProjectWorkspace).
+    if (!enabled) return
+
     // Optimistic local seed (instant, no round-trip): a just-validated cell
     // snaps to 100 immediately, then the server ripple adjusts its neighbors.
     // Untranslated cells are skipped (not started — they fall through to the
@@ -70,7 +75,7 @@ export function useCellConfidence(args: {
     }
     setHealthMap(base)
 
-    if (!enabled || !projectId || !fileId || toQuery.length === 0) return
+    if (!projectId || !fileId || toQuery.length === 0) return
 
     const ctrl = new AbortController()
     ;(async () => {

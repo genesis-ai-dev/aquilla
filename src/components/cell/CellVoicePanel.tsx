@@ -6,11 +6,12 @@
 // take" — turning this take into a reusable Cast member. The target
 // (translation) column stays visible to the right; it's what we're voicing.
 //
-// Compact: a character chip on top, then a single tight row of icon-sized
-// buttons (Generate / Play / +) and a tiny status dot. Per-cell generate runs
-// through generateCellVoice (the same helper batch flows use) and play goes
-// through the shared play-queue, so a single line behaves exactly like a batch
-// action scoped to one cell.
+// The column is as wide as the target editor, so the controls spread across it:
+// a character chip + status on top, a full-width primary Generate, and a
+// secondary Play / Character row. Actions that can't do anything are HIDDEN
+// rather than shown disabled — Play and Character only appear once the line has
+// a take, and Generate is replaced by a short hint when there's nothing to
+// voice — so what's on screen is always something you can actually do.
 
 import { useCallback } from "react"
 import { Loader2, Play, Sparkles, UserPlus } from "lucide-react"
@@ -46,8 +47,6 @@ interface CellVoicePanelProps {
   onMakeCharacter: () => void
 }
 
-const ICON_BTN = "h-7 w-7"
-
 export function CellVoicePanel({
   cell,
   project,
@@ -69,8 +68,9 @@ export function CellVoicePanel({
   const status = useTtsStatus(ttsStatusKey(cell.id))
   const isVoicing = status.kind === "loading" || status.kind === "synthesizing"
 
+  const isParatext = cell.type === "paratext"
   const hasTake = Boolean(cell.selectedAudioId) || Boolean(cell.selectedGeneratedVoiceAudioId)
-  const canGenerate = Boolean(cell.translated?.trim()) && cell.type !== "paratext"
+  const canGenerate = Boolean(cell.translated?.trim()) && !isParatext
 
   const generate = useCallback(async () => {
     if (isVoicing || !canGenerate) return
@@ -84,79 +84,88 @@ export function CellVoicePanel({
     if (ok) onAfterGenerate()
   }, [isVoicing, canGenerate, project, cell, sess, username, resolvedVoice.id, onAfterGenerate])
 
-  const generateTitle = !canGenerate
-    ? "Translate this line first"
-    : isVoicing
-      ? "Voicing…"
-      : "Generate this line in the selected character's voice"
+  // Section breaks (paratext) aren't voiced — leave their controls column empty
+  // rather than showing controls that do nothing.
+  if (isParatext) return null
 
   return (
-    <div className="flex flex-col gap-1.5">
-      {/* Character picker — which Cast member voices this line. */}
-      <SpeakerChip voice={resolvedVoice} voices={voices} onAssign={onAssign} />
+    <div className="flex flex-col gap-2">
+      {/* Header: character chip on the left, voicing status on the right, so
+          the row spans the column instead of bunching up in the corner. */}
+      <div className="flex items-center justify-between gap-2">
+        <SpeakerChip voice={resolvedVoice} voices={voices} onAssign={onAssign} />
+        <span className="flex shrink-0 items-center gap-1.5">
+          <span
+            className={cn(
+              "h-1.5 w-1.5 rounded-full",
+              isVoicing
+                ? "animate-pulse bg-amber-400"
+                : hasTake
+                  ? "bg-emerald-500"
+                  : "bg-muted-foreground/30",
+            )}
+          />
+          <span className="text-[11px] leading-none text-muted-foreground">
+            {isVoicing ? "Voicing…" : hasTake ? "Ready" : "Not voiced"}
+          </span>
+        </span>
+      </div>
 
-      {/* One tight row of icon-sized actions. */}
-      <div className="flex items-center gap-1">
-        {/* Generate / Regenerate this one line. */}
+      {/* Primary action: Generate / Regenerate, full width. When the line has
+          no translation yet there's nothing to voice, so swap the button for a
+          short hint instead of a dead, disabled button. */}
+      {canGenerate ? (
         <Button
-          variant="default"
-          size="icon"
-          className={ICON_BTN}
+          variant={hasTake ? "outline" : "default"}
+          size="sm"
+          className="h-8 w-full justify-center gap-1.5"
           onClick={() => void generate()}
-          disabled={isVoicing || !canGenerate}
-          title={generateTitle}
-          aria-label="Generate voice"
+          disabled={isVoicing}
+          title={
+            isVoicing
+              ? "Voicing…"
+              : hasTake
+                ? "Regenerate this line in the selected character's voice"
+                : "Generate this line in the selected character's voice"
+          }
         >
           {isVoicing ? (
             <Loader2 className="h-3.5 w-3.5 animate-spin" />
           ) : (
             <Sparkles className="h-3.5 w-3.5" />
           )}
+          {isVoicing ? "Voicing…" : hasTake ? "Regenerate" : "Generate"}
         </Button>
+      ) : (
+        <p className="rounded-md border border-dashed px-2 py-2 text-center text-[11px] text-muted-foreground">
+          Translate this line to voice it
+        </p>
+      )}
 
-        {/* Play this one line. */}
-        <Button
-          variant="ghost"
-          size="icon"
-          className={ICON_BTN}
-          onClick={onPlay}
-          disabled={!hasTake}
-          title={hasTake ? "Play this line" : "No audio yet"}
-          aria-label="Play take"
-        >
-          <Play className="h-3.5 w-3.5" />
-        </Button>
-
-        {/* Turn this line's take into a reusable Cast character. */}
-        <Button
-          variant="ghost"
-          size="icon"
-          className={ICON_BTN}
-          onClick={onMakeCharacter}
-          disabled={!hasTake}
-          title={hasTake ? "Create a character from this take" : "No take yet"}
-          aria-label="Create character from this take"
-        >
-          <UserPlus className="h-3.5 w-3.5" />
-        </Button>
-
-        {/* Tiny status: dot + 11px label. */}
-        <span className="ml-auto flex items-center gap-1 pr-0.5">
-          <span
-            className={cn(
-              "h-1.5 w-1.5 rounded-full",
-              isVoicing
-                ? "bg-amber-400 animate-pulse"
-                : hasTake
-                  ? "bg-emerald-500"
-                  : "bg-muted-foreground/40",
-            )}
-          />
-          <span className="text-[11px] leading-none text-muted-foreground">
-            {isVoicing ? "Voicing…" : hasTake ? "Ready" : "—"}
-          </span>
-        </span>
-      </div>
+      {/* Secondary actions appear only once there's a take to act on, so a Play
+          button is never shown when there's nothing to play. */}
+      {hasTake && (
+        <div className="flex items-center gap-1.5">
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-7 flex-1 justify-center gap-1.5"
+            onClick={onPlay}
+            title="Play this line"
+          >
+            <Play className="h-3.5 w-3.5" /> Play
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-7 flex-1 justify-center gap-1.5"
+            onClick={onMakeCharacter}
+            title="Create a character from this take"
+          >
+            <UserPlus className="h-3.5 w-3.5" /> Character
+          </Button>
+        </div>
+      )}
     </div>
   )
 }

@@ -197,8 +197,19 @@ function CharacterModalBody({
     }
   }, [preview.kind, provider, apiKey, effectiveVoice, targetLanguage, stopPreview])
 
-  // ── "Use a take from a line" ────────────────────────────────────────────
-  const takes = useMemo(() => audioSources(cells), [cells])
+  // ── "Reuse audio from a line" ───────────────────────────────────────────
+  // Recorded (human) takes first — cloning from AI-generated audio is rarely
+  // useful, so generated takes sink to the bottom and are clearly captioned.
+  const takes = useMemo(() => {
+    const all = audioSources(cells)
+    return [
+      ...all.filter((t) => t.slot === "recorded"),
+      ...all.filter((t) => t.slot === "generated"),
+    ]
+  }, [cells])
+  // The per-cell "+" can seed this modal with a specific line's take; auto-open
+  // the (otherwise collapsed) reuse section so that seeded take is visible.
+  const seededTakePresent = seedCellId != null && takes.some((t) => t.cell.id === seedCellId)
   const [takeBusy, setTakeBusy] = useState(false)
   const [takeError, setTakeError] = useState<string | null>(null)
 
@@ -302,6 +313,8 @@ function CharacterModalBody({
             />
           ) : (
             <div className="space-y-3">
+              {/* Priority: record a segment or upload an audio file — a real
+                  target voice for this character. */}
               <VoiceCloneSection
                 voice={draft}
                 projectId={projectId}
@@ -309,47 +322,61 @@ function CharacterModalBody({
                 session={session}
                 onChange={update}
               />
+
+              {/* Secondary, collapsed: reuse audio already in the project. This
+                  is deliberately not a headline option — cloning from
+                  AI-generated audio in particular is rarely what you want. */}
               {takes.length > 0 && (
-                <div className="space-y-1.5">
-                  <Label>Or use a take from a line</Label>
-                  <div className="max-h-40 space-y-1 overflow-auto rounded-lg border bg-muted/20 p-1">
-                    {takes.map((t) => {
-                      const seeded = seedCellId != null && t.cell.id === seedCellId
-                      return (
-                        <button
-                          key={takeKey(t)}
-                          type="button"
-                          onClick={() => void useTake(t)}
-                          disabled={takeBusy}
-                          className={cn(
-                            "flex w-full items-center justify-between gap-2 rounded-md border px-2 py-1.5 text-left text-xs transition-colors disabled:opacity-50",
-                            seeded ? "border-primary bg-primary/10" : "border-transparent hover:bg-accent/40",
-                          )}
-                        >
-                          <span className="truncate">{cellSnippet(t.cell)}</span>
-                          <span
+                <details open={seededTakePresent} className="rounded-lg border bg-muted/10">
+                  <summary className="cursor-pointer px-3 py-2 text-xs font-medium text-muted-foreground hover:text-foreground">
+                    Or reuse audio from a line
+                  </summary>
+                  <div className="space-y-1.5 px-3 pb-3">
+                    <div className="max-h-40 space-y-1 overflow-auto rounded-lg border bg-muted/20 p-1">
+                      {takes.map((t) => {
+                        const seeded = seedCellId != null && t.cell.id === seedCellId
+                        return (
+                          <button
+                            key={takeKey(t)}
+                            type="button"
+                            onClick={() => void useTake(t)}
+                            disabled={takeBusy}
                             className={cn(
-                              "shrink-0 rounded px-1.5 py-0.5 text-[10px]",
-                              t.slot === "recorded" ? "bg-emerald-500/15" : "bg-indigo-500/15",
+                              "flex w-full items-center justify-between gap-2 rounded-md border px-2 py-1.5 text-left text-xs transition-colors disabled:opacity-50",
+                              seeded ? "border-primary bg-primary/10" : "border-transparent hover:bg-accent/40",
                             )}
                           >
-                            {t.slot === "recorded" ? "Recorded" : "Generated"}
-                          </span>
-                        </button>
-                      )
-                    })}
+                            <span className="truncate">{cellSnippet(t.cell)}</span>
+                            <span
+                              className={cn(
+                                "shrink-0 rounded px-1.5 py-0.5 text-[10px]",
+                                t.slot === "recorded"
+                                  ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300"
+                                  : "bg-muted text-muted-foreground",
+                              )}
+                            >
+                              {t.slot === "recorded" ? "Recorded" : "AI-generated"}
+                            </span>
+                          </button>
+                        )
+                      })}
+                    </div>
+                    <p className="text-[11px] leading-snug text-muted-foreground">
+                      Recorded human takes work best. AI-generated takes just echo an
+                      existing synthetic voice, so they rarely make a useful clone.
+                    </p>
+                    {takeBusy && (
+                      <p className="flex items-center gap-1 text-xs text-muted-foreground">
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" /> Lifting take…
+                      </p>
+                    )}
+                    {takeError && (
+                      <p className="rounded border border-destructive/30 bg-destructive/10 px-2 py-1.5 text-xs text-destructive">
+                        {takeError}
+                      </p>
+                    )}
                   </div>
-                  {takeBusy && (
-                    <p className="flex items-center gap-1 text-xs text-muted-foreground">
-                      <Loader2 className="h-3.5 w-3.5 animate-spin" /> Lifting take…
-                    </p>
-                  )}
-                  {takeError && (
-                    <p className="rounded border border-destructive/30 bg-destructive/10 px-2 py-1.5 text-xs text-destructive">
-                      {takeError}
-                    </p>
-                  )}
-                </div>
+                </details>
               )}
             </div>
           )}

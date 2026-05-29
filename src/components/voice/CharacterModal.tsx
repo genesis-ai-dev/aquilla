@@ -381,21 +381,25 @@ function CharacterModalBody({
             </div>
           )}
 
-          {/* Guidance — the single free-text knob; routes to Voice.prompt. */}
-          <div className="space-y-1.5">
-            <Label htmlFor="character-guidance">Guidance</Label>
-            <textarea
-              id="character-guidance"
-              value={draft.prompt ?? ""}
-              onChange={(e) => update({ prompt: e.target.value || undefined })}
-              rows={3}
-              className="w-full rounded border bg-muted/20 px-3 py-2 text-sm"
-              placeholder="calm, warm, elderly; coastal Swahili reading"
-            />
-            <p className="text-xs text-muted-foreground">
-              Describe how this character should sound and read. Shapes generation.
-            </p>
-          </div>
+          {/* Guidance — the single free-text knob; routes to Voice.prompt.
+              Only Gemini is promptable, so this field only appears for Gemini
+              characters; MMS/Kokoro ignore prose direction entirely. */}
+          {isGemini && (
+            <div className="space-y-1.5">
+              <Label htmlFor="character-guidance">Guidance</Label>
+              <textarea
+                id="character-guidance"
+                value={draft.prompt ?? ""}
+                onChange={(e) => update({ prompt: e.target.value || undefined })}
+                rows={3}
+                className="w-full rounded border bg-muted/20 px-3 py-2 text-sm"
+                placeholder="calm, warm, elderly; coastal Swahili reading"
+              />
+              <p className="text-xs text-muted-foreground">
+                Describe how this character should sound and read. Shapes generation.
+              </p>
+            </div>
+          )}
 
           {/* Preview */}
           <div className="space-y-1.5">

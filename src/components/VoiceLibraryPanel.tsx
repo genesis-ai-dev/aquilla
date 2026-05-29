@@ -212,13 +212,17 @@ export function VoiceLibraryPanel({
           )}
         </div>
 
-        {/* Cast roster — one row per character. Click opens the creator; drag
-            onto a line assigns the voice for that row's generation. */}
-        <div className="space-y-1">
-          {voices.map((voice) => {
+        {/* Cast roster — split into two clearly-distinct kinds: synthetic
+            engine VOICES, and CLONED CHARACTERS (built from a real recording).
+            Click opens the creator; drag onto a line assigns. */}
+        {(() => {
+          const cloned = voices.filter((v) => v.referenceAudioId)
+          const synthetic = voices.filter((v) => !v.referenceAudioId)
+          const renderRow = (voice: Voice) => {
             const active = voice.id === selectedId
             const stats = castStats?.get(voice.id)
             const isNarrator = voice.id === defaultVoiceId
+            const isClone = Boolean(voice.referenceAudioId)
             return (
               <button
                 key={voice.id}
@@ -233,12 +237,12 @@ export function VoiceLibraryPanel({
                 className={cn(
                   "group flex w-full cursor-grab items-center gap-2 rounded-xl border px-3 py-2 text-left text-sm transition-colors active:cursor-grabbing",
                   active ? "border-primary/50 bg-primary/10"
-                    : voice.referenceAudioId ? "border-violet-300/50 bg-violet-50/40 hover:bg-violet-100/50 dark:border-violet-500/20 dark:bg-violet-950/20"
+                    : isClone ? "border-violet-300/50 bg-violet-50/40 hover:bg-violet-100/50 dark:border-violet-500/20 dark:bg-violet-950/20"
                     : "border-transparent bg-muted/30 hover:bg-accent/40",
                 )}
               >
                 <span
-                  className="h-3 w-3 shrink-0 rounded-full border"
+                  className={cn("h-3 w-3 shrink-0 border", isClone ? "rounded-sm" : "rounded-full")}
                   style={{ backgroundColor: voice.color || "#94a3b8" }}
                 />
                 <span className="min-w-0 flex-1">
@@ -247,30 +251,48 @@ export function VoiceLibraryPanel({
                     {isNarrator && <Star className="h-3 w-3 shrink-0 text-primary" aria-label="Narrator (default)" />}
                   </span>
                   <span className="block text-[10px] leading-tight text-muted-foreground">
-                    {voice.referenceAudioId ? "character voice · " : ""}
                     {stats && stats.assigned > 0
                       ? `${stats.voiced}/${stats.assigned} lines voiced`
                       : isNarrator ? "unassigned lines" : "no lines yet"}
                   </span>
                 </span>
-                {voice.referenceAudioId && (
-                  <span className="inline-flex shrink-0 items-center gap-0.5 rounded-full bg-violet-500/15 px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-wide text-violet-600 dark:text-violet-300">
-                    <Sparkles className="h-2.5 w-2.5" /> Character
-                  </span>
-                )}
               </button>
             )
-          })}
-          <Button
-            type="button"
-            size="sm"
-            variant="ghost"
-            onClick={() => openNew(null)}
-            className="w-full justify-start"
-          >
-            <Plus className="mr-1 h-3.5 w-3.5" /> New character
-          </Button>
-        </div>
+          }
+          return (
+            <div className="space-y-3">
+              <div className="space-y-1">
+                <p className="px-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                  Voices
+                </p>
+                {synthetic.map(renderRow)}
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => openNew(null)}
+                  className="w-full justify-start"
+                >
+                  <Plus className="mr-1 h-3.5 w-3.5" /> New voice
+                </Button>
+              </div>
+
+              <div className="space-y-1">
+                <p className="flex items-center gap-1 px-1 text-[10px] font-semibold uppercase tracking-wide text-violet-600 dark:text-violet-300">
+                  <Sparkles className="h-2.5 w-2.5" /> Cloned characters
+                </p>
+                {cloned.length > 0 ? (
+                  cloned.map(renderRow)
+                ) : (
+                  <p className="rounded-lg border border-dashed px-3 py-2 text-[11px] leading-snug text-muted-foreground">
+                    None yet. Once a line has audio (recorded or generated), use its
+                    clone action to make a character voice from it.
+                  </p>
+                )}
+              </div>
+            </div>
+          )
+        })()}
       </div>
 
       {editing.kind !== "closed" && (

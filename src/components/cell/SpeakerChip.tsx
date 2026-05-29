@@ -29,11 +29,10 @@ export function SpeakerChip({ voice, voices, onAssign }: {
         }
       />
       <PopoverContent align="end" side="bottom" className="w-52 p-1">
-        <p className="px-2 py-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
-          Assign character
-        </p>
-        <div className="max-h-64 space-y-0.5 overflow-y-auto">
-          {voices.map((v) => (
+        {(() => {
+          const synthetic = voices.filter((v) => !v.referenceAudioId)
+          const cloned = voices.filter((v) => v.referenceAudioId)
+          const row = (v: Voice) => (
             <button
               key={v.id}
               type="button"
@@ -43,12 +42,31 @@ export function SpeakerChip({ voice, voices, onAssign }: {
                 v.id === voice?.id && "bg-primary/10",
               )}
             >
-              <span className="h-2.5 w-2.5 shrink-0 rounded-full border" style={{ backgroundColor: v.color || "#94a3b8" }} />
+              <span
+                className={cn("h-2.5 w-2.5 shrink-0 border", v.referenceAudioId ? "rounded-sm" : "rounded-full")}
+                style={{ backgroundColor: v.color || "#94a3b8" }}
+              />
               <span className="flex-1 truncate">{v.name}</span>
               {v.referenceAudioId && <Sparkles className="h-3 w-3 shrink-0 text-violet-500" />}
             </button>
-          ))}
-        </div>
+          )
+          return (
+            <div className="max-h-64 space-y-0.5 overflow-y-auto">
+              <p className="px-2 py-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+                Voices
+              </p>
+              {synthetic.map(row)}
+              {cloned.length > 0 && (
+                <>
+                  <p className="mt-1 flex items-center gap-1 px-2 py-1 text-[10px] font-medium uppercase tracking-wide text-violet-600 dark:text-violet-300">
+                    <Sparkles className="h-2.5 w-2.5" /> Cloned characters
+                  </p>
+                  {cloned.map(row)}
+                </>
+              )}
+            </div>
+          )
+        })()}
       </PopoverContent>
     </Popover>
   )

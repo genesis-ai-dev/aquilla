@@ -15,9 +15,10 @@ export const DEFAULT_PROMPT_TEMPLATE = [
 ].join("\n")
 
 /**
- * Built-in voices the user starts with. Three distinct moods — steady,
- * gentle, energetic — to cover most needs without overwhelming the
- * inventory. Editable in place.
+ * Built-in voices the user starts with. Just the Narrator — the project's
+ * default speaker. Everything else is a character the user crafts (a preset
+ * engine voice, or a cloned reference), so the cast starts clean instead of
+ * pre-stuffed with stock moods. Editable in place.
  */
 export const PRESET_VOICES: readonly Voice[] = [
   {
@@ -27,24 +28,6 @@ export const PRESET_VOICES: readonly Voice[] = [
     provider: "gemini",
     voiceName: "Charon",
     prompt: "Read this {target} passage as a steady, clear narrator. Preserve names and punctuation; do not translate.\n\n{text}",
-    builtIn: true,
-  },
-  {
-    id: "preset-calm",
-    name: "Calm",
-    color: "#14b8a6",
-    provider: "gemini",
-    voiceName: "Aoede",
-    prompt: "Read gently and breezily, with relaxed pacing.\n\n{text}",
-    builtIn: true,
-  },
-  {
-    id: "preset-excited",
-    name: "Excited",
-    color: "#f97316",
-    provider: "gemini",
-    voiceName: "Puck",
-    prompt: "Read with energetic, upbeat delivery — like an enthusiastic announcement.\n\n{text}",
     builtIn: true,
   },
 ] as const

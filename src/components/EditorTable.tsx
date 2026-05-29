@@ -15,7 +15,8 @@ import { useProjectPermissions } from "@/hooks/useProjectPermissions"
 import { emitTargetCellCommit, emitCellValidate, emitCellUnvalidate, emitCellWaive, emitCellUnwaive } from "@/lib/sync/events-emit"
 import { ExamplePanel } from "./ExamplePanel"
 import { HighlightedText, buildHighlightsFromExamples } from "./HighlightedText"
-import { needsAttention } from "@/lib/health/decay-engine"
+import { needsAttention, resolveDecayConfig } from "@/lib/health/decay-engine"
+import { readValidationCount } from "@/lib/progress/read-validation-count"
 import { StaleSourceIndicator } from "./StaleSourceIndicator"
 import { HealthRing } from "./HealthRing"
 import { TranslatedEditor } from "./TranslatedEditor"
@@ -1375,8 +1376,14 @@ function EditorRow({
 
   // AD-14: a translated cell shows an inline "needs attention" marker when its
   // decay is above the warn threshold (endorsement_count too low). Absence is
-  // silence, not endorsement — there is no green "done" ring at cell scope.
-  const cellNeedsAttention = hasContent && needsAttention(cell.endorsementCount ?? 0)
+  // silence, not endorsement — there is no green "done" ring at cell scope. The
+  // target defaults to the project's required-validations gate so a validated
+  // cell clears the marker (resolveDecayConfig).
+  const decayConfig = useMemo(
+    () => resolveDecayConfig(project.decaySettings, readValidationCount(project)),
+    [project.decaySettings, project.validationCount],
+  )
+  const cellNeedsAttention = hasContent && needsAttention(cell.endorsementCount ?? 0, decayConfig)
 
   const hasMajorInfraction = cellInfractions.some(
     (i) => ruleMap.get(i.ruleId)?.severity === "major",

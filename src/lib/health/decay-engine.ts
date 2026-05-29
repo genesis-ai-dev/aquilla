@@ -11,7 +11,7 @@
 // here (AD-14: "rules and built-in checks stay separate").
 
 import type { CellData } from "@/hooks/useCells"
-import type { RuleInfraction } from "@/lib/parsers/types"
+import type { RuleInfraction, DecaySettings } from "@/lib/parsers/types"
 
 /**
  * The shape returned by `useHealth`. Health numbers come from decay (AD-14);
@@ -33,7 +33,14 @@ export interface HealthStats {
   cellOpenCommentCount: Map<string, number>
 }
 
-/** Endorsements at which a cell reaches decay = 0 (project_settings default). */
+/**
+ * Pure-function fallback endorsement target, used ONLY when no project context
+ * is available. At runtime the effective target comes from `resolveDecayConfig`
+ * — it defaults to the project's required-validations gate, NOT this constant.
+ * The neighborhood-propagation loop that would grow endorsement_count past raw
+ * validator counts (AD-13/14) is not yet built, so tying the target to the
+ * validation gate is what makes a validated cell actually reach full health.
+ */
 export const DEFAULT_ENDORSEMENT_TARGET = 5
 /** Decay above which the cell editor shows a "needs attention" marker. */
 export const DEFAULT_DECAY_WARN_THRESHOLD = 0.66
@@ -46,6 +53,30 @@ export interface DecayConfig {
 export const DECAY_DEFAULTS: DecayConfig = {
   endorsementTarget: DEFAULT_ENDORSEMENT_TARGET,
   decayWarnThreshold: DEFAULT_DECAY_WARN_THRESHOLD,
+}
+
+/**
+ * Resolve the decay config that should actually be used for a project.
+ *
+ * The endorsement target defaults to the project's required-validations gate
+ * (`requiredValidations`, always >= 1) so that a cell which has met its
+ * validation requirement reaches decay 0 / full health. An explicit
+ * `decaySettings.endorsementTarget` overrides the gate when a project has
+ * deliberately tuned it. This replaces the prior behavior of comparing
+ * endorsement_count against a hard-coded 5, which left validated cells stuck
+ * near 20% health because the AD-13/14 neighborhood-propagation loop that was
+ * meant to grow endorsement_count was never built.
+ */
+export function resolveDecayConfig(
+  decaySettings: DecaySettings | undefined,
+  requiredValidations: number,
+): DecayConfig {
+  const gate = requiredValidations >= 1 ? requiredValidations : 1
+  const target = decaySettings?.endorsementTarget ?? gate
+  return {
+    endorsementTarget: target >= 1 ? target : 1,
+    decayWarnThreshold: decaySettings?.decayWarnThreshold ?? DEFAULT_DECAY_WARN_THRESHOLD,
+  }
 }
 
 /** AD-14: decay(cell) = max(0, 1 - endorsement_count / N). */

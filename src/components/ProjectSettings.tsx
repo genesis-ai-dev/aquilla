@@ -727,6 +727,7 @@ export function ProjectSettings() {
 
         <DecaySettingsSection
           settings={decaySettings}
+          requiredValidations={validationCount}
           onChange={setDecaySettings}
         />
 

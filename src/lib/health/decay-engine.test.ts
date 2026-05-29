@@ -4,7 +4,9 @@ import {
   cellHealth,
   needsAttention,
   computeDecayHealth,
+  resolveDecayConfig,
   DECAY_DEFAULTS,
+  DEFAULT_DECAY_WARN_THRESHOLD,
 } from "./decay-engine"
 import type { CellData } from "@/hooks/useCells"
 
@@ -78,5 +80,31 @@ describe("computeDecayHealth", () => {
 
   it("returns 0 health for an empty project", () => {
     expect(computeDecayHealth(new Map(), DECAY_DEFAULTS).projectHealth).toBe(0)
+  })
+})
+
+describe("resolveDecayConfig", () => {
+  it("defaults the target to the required-validations gate", () => {
+    expect(resolveDecayConfig(undefined, 1).endorsementTarget).toBe(1)
+    expect(resolveDecayConfig(undefined, 3).endorsementTarget).toBe(3)
+  })
+
+  it("clamps a non-positive gate up to 1", () => {
+    expect(resolveDecayConfig(undefined, 0).endorsementTarget).toBe(1)
+  })
+
+  it("lets an explicit endorsementTarget override the gate", () => {
+    expect(resolveDecayConfig({ endorsementTarget: 7 }, 2).endorsementTarget).toBe(7)
+  })
+
+  it("defaults the warn threshold but lets it be overridden", () => {
+    expect(resolveDecayConfig(undefined, 1).decayWarnThreshold).toBe(DEFAULT_DECAY_WARN_THRESHOLD)
+    expect(resolveDecayConfig({ decayWarnThreshold: 0.5 }, 1).decayWarnThreshold).toBe(0.5)
+  })
+
+  it("makes a single endorsement fully healthy at a gate of 1", () => {
+    const cfg = resolveDecayConfig(undefined, 1)
+    expect(cellHealth(1, cfg.endorsementTarget)).toBe(100)
+    expect(needsAttention(1, cfg)).toBe(false)
   })
 })

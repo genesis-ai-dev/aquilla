@@ -21,17 +21,47 @@ describe("useHealth — AD-14 decay", () => {
     ])
     const { result } = renderHook(() => useHealth(fileCells, []))
     await waitFor(() => expect(result.current.healthMap.size).toBe(2))
-    // endorsementCount 5 (target) → decay 0 → health 100; 0 → decay 1 → health 0.
+    // endorsement >= target → decay 0 → health 100; 0 → decay 1 → health 0.
     expect(result.current.healthMap.get("a")).toBe(100)
     expect(result.current.healthMap.get("b")).toBe(0)
+  })
+
+  it("reaches full health at the required-validations gate (default), not a hard-coded 5", async () => {
+    // The regression: a cell validated once must read 100 when the project
+    // requires a single validation — not stick at 20% against a phantom 5.
+    const fileCells = new Map([["f", [cell("a", "bonjour", 1)]]])
+    const { result } = renderHook(() =>
+      useHealth(fileCells, [], { requiredValidations: 1 }),
+    )
+    await waitFor(() => expect(result.current.healthMap.size).toBe(1))
+    expect(result.current.healthMap.get("a")).toBe(100)
+  })
+
+  it("interpolates against the required-validations gate", async () => {
+    const fileCells = new Map([["f", [cell("a", "bonjour", 3)]]])
+    const { result } = renderHook(() =>
+      useHealth(fileCells, [], { requiredValidations: 5 }),
+    )
+    await waitFor(() => expect(result.current.healthMap.size).toBe(1))
+    expect(result.current.healthMap.get("a")).toBe(60) // 3/5 endorsed → decay .4 → health 60
+  })
+
+  it("lets an explicit decaySettings.endorsementTarget override the gate", async () => {
+    const fileCells = new Map([["f", [cell("a", "bonjour", 1)]]])
+    const { result } = renderHook(() =>
+      useHealth(fileCells, [], {
+        requiredValidations: 1,
+        decaySettings: { endorsementTarget: 4 },
+      }),
+    )
+    await waitFor(() => expect(result.current.healthMap.size).toBe(1))
+    expect(result.current.healthMap.get("a")).toBe(25) // 1/4 endorsed → decay .75 → health 25
   })
 
   it("carries rule infractions as a separate surface (not folded into health)", async () => {
     const fileCells = new Map([["f", [cell("a", "bonjour", 3)]]])
     const { result } = renderHook(() => useHealth(fileCells, []))
     await waitFor(() => expect(result.current.healthMap.size).toBe(1))
-    // health from decay; infractions present as their own map.
     expect(result.current.infractions instanceof Map).toBe(true)
-    expect(result.current.healthMap.get("a")).toBe(60) // 3/5 endorsed → decay .4 → health 60
   })
 })

@@ -5,6 +5,12 @@ import { DECAY_DEFAULTS } from "@/lib/health/decay-engine"
 
 interface DecaySettingsSectionProps {
   settings?: DecaySettings
+  /**
+   * The project's required-validations gate. When no explicit endorsement
+   * target is set, the target defaults to this so a validated cell reaches full
+   * health (matches resolveDecayConfig at runtime).
+   */
+  requiredValidations: number
   onChange: (next: DecaySettings) => void
   disabled?: boolean
   disabledTooltip?: string
@@ -16,11 +22,12 @@ interface DecaySettingsSectionProps {
  */
 export function DecaySettingsSection({
   settings,
+  requiredValidations,
   onChange,
   disabled,
   disabledTooltip,
 }: DecaySettingsSectionProps) {
-  const endorsementTarget = settings?.endorsementTarget ?? DECAY_DEFAULTS.endorsementTarget
+  const endorsementTarget = settings?.endorsementTarget ?? requiredValidations
   const decayWarnThreshold = settings?.decayWarnThreshold ?? DECAY_DEFAULTS.decayWarnThreshold
 
   return (
@@ -48,7 +55,8 @@ export function DecaySettingsSection({
             }}
           />
           <p className="mt-1 text-xs text-muted-foreground">
-            Endorsements at which a cell reaches decay 0 (full health). Default {DECAY_DEFAULTS.endorsementTarget}.
+            Endorsements at which a cell reaches decay 0 (full health). Defaults to the
+            project&apos;s required validations ({requiredValidations}).
           </p>
         </div>
 

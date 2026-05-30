@@ -46,6 +46,9 @@ export interface UseCellAudioResult {
   /** Set playback volume 0..1. Applies live to the current element and to the
    *  next element created on play. */
   setVolume: (v: number) => void
+  /** Constrain playback to a [start,end] window in seconds; null = clip edge.
+   *  Both null (default) = unconstrained, byte-identical to no-trim behaviour. */
+  setTrim: (start: number | null, end: number | null) => void
   /** Decode and cache peaks for a target bin count. Safe to call repeatedly.
    *  Pass { force: true } to retry after a previous failure. */
   requestPeaks: (bins: number, opts?: { force?: boolean }) => Promise<void>
@@ -73,6 +76,7 @@ export function useCellAudio(
   const rafRef = useRef<number | null>(null)
   const peaksRequestedRef = useRef<number | null>(null)
   const volumeRef = useRef(1)
+  const trimRef = useRef<{ start: number | null; end: number | null }>({ start: null, end: null })
 
   // Keep the latest session reachable from the cached token fetcher without
   // recreating it (and trashing the per-(project,file) token cache) on every
@@ -184,6 +188,13 @@ export function useCellAudio(
   const tickPlayhead = useCallback(() => {
     const a = audioRef.current
     if (!a) return
+    const { start, end } = trimRef.current
+    if (end != null && a.currentTime >= end) {
+      a.pause()
+      a.currentTime = start ?? 0
+      setCurrentTime(start ?? 0)
+      return // onpause → stopTicking
+    }
     setCurrentTime(a.currentTime)
     rafRef.current = requestAnimationFrame(tickPlayhead)
   }, [])
@@ -203,7 +214,13 @@ export function useCellAudio(
   const play = useCallback(async () => {
     if (coordinatorControllerRef.current) setActiveAudio(coordinatorControllerRef.current)
     if (audioRef.current) {
-      try { await audioRef.current.play() } catch (e) {
+      const a = audioRef.current
+      const { start, end } = trimRef.current
+      // Restart from the window start if we're outside it (e.g. ended at trimEnd).
+      if (start != null && (a.currentTime < start || (end != null && a.currentTime >= end - 0.01))) {
+        a.currentTime = start
+      }
+      try { await a.play() } catch (e) {
         console.error("[useCellAudio] play() rejected", e)
       }
       return
@@ -222,8 +239,19 @@ export function useCellAudio(
       audio.onended = () => { setIsPlaying(false); stopTicking() }
       audio.onloadedmetadata = () => {
         if (Number.isFinite(audio.duration)) setDuration(audio.duration)
+        const { start } = trimRef.current
+        if (start != null && start > 0) { audio.currentTime = start; setCurrentTime(start) }
       }
-      audio.ontimeupdate = () => setCurrentTime(audio.currentTime)
+      audio.ontimeupdate = () => {
+        const { start, end } = trimRef.current
+        if (end != null && audio.currentTime >= end) {
+          audio.pause()
+          audio.currentTime = start ?? 0
+          setCurrentTime(start ?? 0)
+          return
+        }
+        setCurrentTime(audio.currentTime)
+      }
       audioRef.current = audio
       setState("ready")
       try {
@@ -251,10 +279,28 @@ export function useCellAudio(
     if (audioRef.current) audioRef.current.volume = clamped
   }, [])
 
+  const setTrim = useCallback((start: number | null, end: number | null) => {
+    trimRef.current = { start, end }
+    const a = audioRef.current
+    if (a && start != null && Number.isFinite(a.duration)) {
+      // Snap the playhead into the new window if it fell outside.
+      if (a.currentTime < start || (end != null && a.currentTime > end)) {
+        a.currentTime = start
+        setCurrentTime(start)
+      }
+    }
+  }, [])
+
+  const clampToTrim = (t: number, dur: number): number => {
+    const lo = trimRef.current.start ?? 0
+    const hi = trimRef.current.end ?? dur
+    return Math.max(lo, Math.min(t, hi))
+  }
+
   const seek = useCallback((t: number) => {
     const a = audioRef.current
     if (a) {
-      const clamped = Math.max(0, Math.min(t, Number.isFinite(a.duration) ? a.duration : t))
+      const clamped = clampToTrim(t, Number.isFinite(a.duration) ? a.duration : t)
       a.currentTime = clamped
       setCurrentTime(clamped)
       // Clicking the waveform implies "play from here" — resume if paused
@@ -270,7 +316,7 @@ export function useCellAudio(
       await play()
       const a2 = audioRef.current
       if (!a2) return
-      const clamped = Math.max(0, Math.min(t, Number.isFinite(a2.duration) ? a2.duration : t))
+      const clamped = clampToTrim(t, Number.isFinite(a2.duration) ? a2.duration : t)
       a2.currentTime = clamped
       setCurrentTime(clamped)
     })()
@@ -314,6 +360,6 @@ export function useCellAudio(
 
   return {
     state, error, isPlaying, currentTime, duration, peaks, peaksState,
-    play, pause, seek, setVolume, requestPeaks, ensureBytes,
+    play, pause, seek, setVolume, setTrim, requestPeaks, ensureBytes,
   }
 }

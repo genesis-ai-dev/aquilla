@@ -4,7 +4,7 @@
 // compact, Spotify-style player for *voicing* this one line.
 //
 // Anatomy (one row, left → right):
-//   ( ● )            primary button. No take yet → a "magic" violet sparkle that
+//   ( ● )            primary button. No take yet → a "magic" sparkle that
 //                    GENERATES then plays. Generating/loading → spinner. Has a
 //                    take → play / pause.
 //   [Character ▾]    which cast member speaks this line.
@@ -21,6 +21,7 @@ import {
   Loader2, MoreHorizontal, Pause, Play, RefreshCw, Sparkles, UserPlus, Volume2, VolumeX,
 } from "lucide-react"
 import { SpeakerChip } from "./SpeakerChip"
+import { CropButton } from "./CropEditor"
 import { cn } from "@/lib/utils"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { generateCellVoice } from "@/lib/audio/voice-generate-helpers"
@@ -246,7 +247,7 @@ export function CellVoicePanel({
   } as unknown as CodexCell), [cell.id, cell.type, cell.translated, cell.attachments, playableId])
 
   const audio = useCellAudio(project, cellForAudio, cell.fileId)
-  const { currentTime, duration, isPlaying, seek, play, pause, setVolume, state: audioState } = audio
+  const { currentTime, duration, isPlaying, seek, play, pause, setVolume, setTrim, state: audioState } = audio
 
   // Per-cell volume, client-owned (localStorage). Push it into the controller.
   const [volume, setVolumeState] = useState(() => getCellPref(projectId, cell.id)?.volume ?? 1)
@@ -255,6 +256,18 @@ export function CellVoicePanel({
     const clamped = clamp01(v)
     setVolumeState(clamped)
     setCellPref(projectId, cell.id, { volume: clamped })
+  }, [projectId, cell.id])
+
+  // Per-cell non-destructive crop, client-owned (localStorage). Push the window
+  // into the controller; null bounds = no constraint.
+  const [trim, setTrimState] = useState<{ start: number | null; end: number | null }>(() => {
+    const p = getCellPref(projectId, cell.id)
+    return { start: p?.trimStart ?? null, end: p?.trimEnd ?? null }
+  })
+  useEffect(() => { setTrim(trim.start, trim.end) }, [trim.start, trim.end, setTrim])
+  const changeTrim = useCallback((start: number | null, end: number | null) => {
+    setTrimState({ start, end })
+    setCellPref(projectId, cell.id, { trimStart: start ?? undefined, trimEnd: end ?? undefined })
   }, [projectId, cell.id])
 
   // Generate → autoplay: when the magic button generates a fresh take, start
@@ -296,7 +309,12 @@ export function CellVoicePanel({
   }
 
   const loading = isVoicing || audioState === "loading"
-  const fraction = duration > 0 ? currentTime / duration : 0
+  // Scrubber maps over the cropped window (full clip when untrimmed).
+  const effStart = trim.start ?? 0
+  const effEnd = trim.end ?? duration
+  const effDur = Math.max(0, effEnd - effStart)
+  const effCurrent = Math.max(0, Math.min(currentTime - effStart, effDur))
+  const fraction = effDur > 0 ? effCurrent / effDur : 0
   const primaryTitle = isVoicing
     ? "Voicing…"
     : !hasTake
@@ -339,18 +357,19 @@ export function CellVoicePanel({
             {isVoicing
               ? "Voicing…"
               : hasTake
-                ? `${fmtTime(currentTime)} / ${duration > 0 ? fmtTime(duration) : "–:––"}`
+                ? `${fmtTime(effCurrent)} / ${effDur > 0 ? fmtTime(effDur) : "–:––"}`
                 : "Tap ✦ to voice"}
           </span>
         </div>
         {hasTake ? (
-          <Scrubber fraction={fraction} onSeek={(f) => seek(f * (duration || 0))} />
+          <Scrubber fraction={fraction} onSeek={(f) => seek(effStart + f * effDur)} />
         ) : (
           <div className="h-1.5 rounded-full bg-muted/40" />
         )}
       </div>
 
-      {/* Volume — only meaningful with audio to play. */}
+      {/* Crop + volume — only meaningful with audio to play. */}
+      {hasTake && <CropButton controller={audio} trim={trim} onChange={changeTrim} />}
       {hasTake && <VolumeButton volume={volume} onChange={changeVolume} />}
 
       <OverflowMenu

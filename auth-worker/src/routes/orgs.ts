@@ -261,6 +261,12 @@ orgs.delete("/:orgId/members/:userId", async (c) => {
     .bind(orgId, targetUserId)
     .run()
 
+  await c.env.AQUILLA_DB.prepare(
+    `DELETE FROM group_members
+       WHERE user_id = ?
+         AND group_id IN (SELECT id FROM groups WHERE org_id = ?)`,
+  ).bind(targetUserId, orgId).run()
+
   return c.json({ removed: true })
 })
 

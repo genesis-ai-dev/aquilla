@@ -1,6 +1,7 @@
 import { NavLink } from "react-router-dom"
 import { useActiveOrg } from "@/context/OrgContext"
 import { OrgSwitcher } from "./OrgSwitcher"
+import { AccountSwitcher } from "@/components/AccountSwitcher"
 
 const link = ({ isActive }: { isActive: boolean }) =>
   `block rounded-md px-2 py-1.5 text-sm ${isActive ? "bg-accent font-medium" : "hover:bg-accent/60"}`
@@ -11,7 +12,7 @@ export function OrgSidebar() {
   return (
     <div className="flex h-full flex-col gap-1 p-2">
       <OrgSwitcher />
-      <nav className="mt-2 flex flex-col gap-0.5">
+      <nav className="mt-2 flex flex-1 flex-col gap-0.5">
         <NavLink to="/" end className={link}>Overview</NavLink>
         <NavLink to="/projects" className={link}>Projects</NavLink>
         <NavLink to="/teams" className={link}>Teams</NavLink>
@@ -21,6 +22,9 @@ export function OrgSidebar() {
           <NavLink to="/settings" className={link}>Settings</NavLink>
         </>}
       </nav>
+      <div className="mt-auto pt-2 border-t">
+        <AccountSwitcher variant="sidebar" />
+      </div>
     </div>
   )
 }

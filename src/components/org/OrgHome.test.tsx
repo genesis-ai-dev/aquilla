@@ -6,6 +6,7 @@ import { OrgHome } from "./OrgHome"
 
 vi.mock("@/hooks/useFrontierSession", () => ({ useFrontierSession: () => ({ session: { jwt: "jwt", username: "anna", createdAt: "x" }, loading: false }) }))
 vi.mock("@/lib/frontier/orgs", () => ({ listMyOrgs: vi.fn(async () => [{ id: 1, name: "Come and See", role: { level: 700, name: "owner" } }]) }))
+vi.mock("@/components/AccountSwitcher", () => ({ AccountSwitcher: () => null }))
 
 beforeEach(() => localStorage.clear())
 afterEach(() => vi.restoreAllMocks())

@@ -24,7 +24,7 @@ function withTimeout(ms: number = DEFAULT_TIMEOUT_MS): { signal: AbortSignal; ca
  * is unhelpful in catch blocks; this maps it to something the UI can
  * surface verbatim.
  */
-async function fetchWithTimeout(
+export async function fetchWithTimeout(
   url: string,
   init: RequestInit,
   ms: number = DEFAULT_TIMEOUT_MS

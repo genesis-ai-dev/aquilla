@@ -6,6 +6,7 @@ import { TeamsList } from "./TeamsList"
 
 vi.mock("@/hooks/useFrontierSession", () => ({ useFrontierSession: () => ({ session: { jwt: "jwt", username: "anna", createdAt: "x" }, loading: false }) }))
 vi.mock("@/lib/frontier/orgs", () => ({ listMyOrgs: vi.fn(async () => [{ id: 7, name: "Come and See", role: { level: 700, name: "owner" } }]) }))
+vi.mock("@/components/AccountSwitcher", () => ({ AccountSwitcher: () => null }))
 const listTeams = vi.fn()
 vi.mock("@/lib/frontier/teams", () => ({ listTeams: (...a: unknown[]) => listTeams(...a), getTeam: vi.fn() }))
 

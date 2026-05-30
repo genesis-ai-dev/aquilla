@@ -24,7 +24,7 @@ export function OrgProvider({ children }: { children: ReactNode }) {
     const raw = localStorage.getItem(STORAGE_KEY)
     return raw ? Number(raw) : null
   })
-  const [isLoading, setLoading] = useState(false)
+  const [isLoading, setLoading] = useState<boolean>(!!jwt)
   const [error, setError] = useState<string | null>(null)
 
   const refresh = useCallback(async () => {

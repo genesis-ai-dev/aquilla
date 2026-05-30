@@ -43,6 +43,9 @@ export interface UseCellAudioResult {
   play: () => Promise<void>
   pause: () => void
   seek: (t: number) => void
+  /** Set playback volume 0..1. Applies live to the current element and to the
+   *  next element created on play. */
+  setVolume: (v: number) => void
   /** Decode and cache peaks for a target bin count. Safe to call repeatedly.
    *  Pass { force: true } to retry after a previous failure. */
   requestPeaks: (bins: number, opts?: { force?: boolean }) => Promise<void>
@@ -69,6 +72,7 @@ export function useCellAudio(
   const bytesRef = useRef<Uint8Array | null>(null)
   const rafRef = useRef<number | null>(null)
   const peaksRequestedRef = useRef<number | null>(null)
+  const volumeRef = useRef(1)
 
   // Keep the latest session reachable from the cached token fetcher without
   // recreating it (and trashing the per-(project,file) token cache) on every
@@ -212,6 +216,7 @@ export function useCellAudio(
       const url = URL.createObjectURL(blob)
       urlRef.current = url
       const audio = new Audio(url)
+      audio.volume = volumeRef.current
       audio.onplay = () => { setIsPlaying(true); startTicking() }
       audio.onpause = () => { setIsPlaying(false); stopTicking() }
       audio.onended = () => { setIsPlaying(false); stopTicking() }
@@ -238,6 +243,12 @@ export function useCellAudio(
 
   const pause = useCallback(() => {
     audioRef.current?.pause()
+  }, [])
+
+  const setVolume = useCallback((v: number) => {
+    const clamped = Math.max(0, Math.min(1, v))
+    volumeRef.current = clamped
+    if (audioRef.current) audioRef.current.volume = clamped
   }, [])
 
   const seek = useCallback((t: number) => {
@@ -303,6 +314,6 @@ export function useCellAudio(
 
   return {
     state, error, isPlaying, currentTime, duration, peaks, peaksState,
-    play, pause, seek, requestPeaks, ensureBytes,
+    play, pause, seek, setVolume, requestPeaks, ensureBytes,
   }
 }

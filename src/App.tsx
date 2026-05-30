@@ -1,5 +1,5 @@
-import { Routes, Route, Navigate } from "react-router-dom"
-import { Dashboard } from "@/components/Dashboard"
+import { Routes, Route } from "react-router-dom"
+import { OrgHome } from "@/components/org/OrgHome"
 import { ProjectWorkspace } from "@/components/ProjectWorkspace"
 import { ProjectSettings } from "@/components/ProjectSettings"
 import { DebugView } from "@/components/DebugView"
@@ -12,6 +12,7 @@ import { DevLoginRoute } from "@/components/DevLoginRoute"
 import { MembersPage } from "@/pages/MembersPage"
 import { Settings } from "@/pages/Settings"
 import { SyncingProvider, useSyncing } from "@/context/SyncingContext"
+import { OrgProvider } from "@/context/OrgContext"
 import { AiModelConsentDialog } from "@/components/AiModelConsentDialog"
 import { AiModelDownloadChip } from "@/components/AiModelDownloadChip"
 import { AudioBulkProgressBanner } from "@/components/AudioBulkProgressBanner"
@@ -44,7 +45,9 @@ export default function App() {
     <SyncingProvider>
       <PrivateModeBanner />
       <SyncFreezeOverlay />
-      <AppRoutes />
+      <OrgProvider>
+        <AppRoutes />
+      </OrgProvider>
       <AiModelConsentDialog />
       <AiModelDownloadChip />
       <AudioBulkProgressBanner />
@@ -57,7 +60,7 @@ export default function App() {
 function AppRoutes() {
   return (
     <Routes>
-      <Route path="/" element={<Dashboard />} />
+      <Route path="/" element={<OrgHome />} />
       <Route path="/debug" element={<DebugView />} />
       <Route path="/project/:id" element={<ProjectWorkspace />} />
       <Route path="/project/:id/file/:fileId" element={<ProjectWorkspace />} />
@@ -67,11 +70,6 @@ function AppRoutes() {
       <Route path="/project/:id/rules" element={<RulesPage />} />
       <Route path="/project/:id/comments" element={<CommentsPage />} />
       <Route path="/project/:id/comments/debug" element={<DebugView />} />
-      {/* Backward-compat: external links / bookmarks that point at /projects
-          are redirected to the canonical dashboard at /.
-          In dev there is no front-door Worker, so this explicit route also
-          prevents the `/:id` catch-all from eating the path. */}
-      <Route path="/projects" element={<Navigate to="/" replace />} />
       <Route path="/join/:token" element={<JoinPage />} />
       <Route path="/homepage" element={<Homepage />} />
       <Route path="/onboarding" element={<OnboardingWizard />} />

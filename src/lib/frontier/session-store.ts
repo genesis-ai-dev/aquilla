@@ -47,9 +47,30 @@ async function readEnvelope(): Promise<Envelope> {
   return { active: null, sessions: {} }
 }
 
+// ---- auth-hint cookie ----
+// A non-credential, host-only 1-bit cookie that the aquilla-web Worker reads
+// at the edge to decide whether to serve the SPA or the homepage without
+// waiting for IDB. No Domain attribute → cookie is scoped to whichever host
+// (aquilla.app, dev.aquilla.app, localhost) wrote it, keeping envs isolated.
+const HINT_COOKIE = "aq_hint"
+
+function setAuthHint(): void {
+  document.cookie = `${HINT_COOKIE}=1; Path=/; Max-Age=31536000; SameSite=Lax`
+}
+
+export function clearAuthHint(): void {
+  document.cookie = `${HINT_COOKIE}=; Path=/; Max-Age=0; SameSite=Lax`
+}
+// --------------------------
+
 async function writeEnvelope(env: Envelope): Promise<void> {
   const d = await db()
   await d.put(STORE, env, ENVELOPE_KEY)
+  if (env.active != null) {
+    setAuthHint()
+  } else {
+    clearAuthHint()
+  }
   notify()
 }
 

@@ -121,3 +121,41 @@ describe("migration from single-session to envelope", () => {
     expect(sessions).toHaveLength(1)
   })
 })
+
+describe("aq_hint cookie", () => {
+  beforeEach(async () => {
+    const { _resetDbForTesting } = await import("./session-store")
+    await _resetDbForTesting()
+    // Also clear any residual cookie
+    document.cookie = "aq_hint=; Path=/; Max-Age=0"
+  })
+
+  function getHint(): string | null {
+    const match = document.cookie.match(/(?:^|;\s*)aq_hint=([^;]*)/)
+    return match && match[1] !== "" ? match[1] : null
+  }
+
+  it("sets aq_hint=1 after saveSession", async () => {
+    const { saveSession } = await import("./session-store")
+    await saveSession({ jwt: "tok", username: "alice", createdAt: "2026-01-01T00:00:00Z" })
+    expect(getHint()).toBe("1")
+  })
+
+  it("clears aq_hint after clearSession", async () => {
+    const { saveSession, clearSession } = await import("./session-store")
+    await saveSession({ jwt: "tok", username: "alice", createdAt: "2026-01-01T00:00:00Z" })
+    expect(getHint()).toBe("1")
+    await clearSession()
+    expect(getHint()).toBeNull()
+  })
+
+  it("keeps aq_hint=1 when switching between two active sessions", async () => {
+    const { addSession, activateSession, sessionKey } = await import("./session-store")
+    const a = { jwt: "tok-a", username: "alice", createdAt: "2026-01-01T00:00:00Z" }
+    const b = { jwt: "tok-b", username: "bob",   createdAt: "2026-01-01T00:00:00Z" }
+    await addSession(a)
+    await addSession(b)
+    await activateSession(sessionKey(b))
+    expect(getHint()).toBe("1")
+  })
+})

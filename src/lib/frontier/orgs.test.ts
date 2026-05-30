@@ -5,6 +5,7 @@ import {
   addOrgMember,
   removeOrgMember,
   listOrgMemberProjects,
+  listMyOrgs,
 } from "./orgs";
 
 const ORIG = global.fetch;
@@ -64,4 +65,21 @@ describe("listOrgMemberProjects", () => {
     expect(projects).toHaveLength(1);
     expect(projects[0].id).toBe("p1");
   });
+});
+
+describe("listMyOrgs", () => {
+  it("GETs /api/v2/orgs and returns the orgs array", async () => {
+    let calledUrl = ""
+    global.fetch = vi.fn(async (input) => {
+      calledUrl = typeof input === "string" ? input : (input as Request).url
+      return new Response(JSON.stringify({ orgs: [{ id: 1, name: "Come and See", role: { level: 600, name: "maintainer" } }] }), { status: 200 })
+    }) as unknown as typeof fetch
+    const orgs = await listMyOrgs("jwt-123")
+    expect(calledUrl).toMatch(/\/api\/v2\/orgs$/)
+    expect(orgs).toEqual([{ id: 1, name: "Come and See", role: { level: 600, name: "maintainer" } }])
+  })
+  it("throws on non-OK", async () => {
+    global.fetch = vi.fn(async () => new Response("nope", { status: 500 })) as unknown as typeof fetch
+    await expect(listMyOrgs("jwt")).rejects.toThrow(/HTTP 500/)
+  })
 });

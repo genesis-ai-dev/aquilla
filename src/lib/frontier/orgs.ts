@@ -96,6 +96,18 @@ function authHeaders(jwt: string): HeadersInit {
   return { "Content-Type": "application/json", Authorization: `Bearer ${jwt}` };
 }
 
+export interface OrgSummary {
+  id: number
+  name: string | null
+  role: OrgRole
+}
+
+export async function listMyOrgs(jwt: string): Promise<OrgSummary[]> {
+  const res = await fetchWithTimeout(`${FRONTIER_BASE}/api/v2/orgs`, { headers: authHeaders(jwt) })
+  if (!res.ok) throw new Error(`listMyOrgs failed: HTTP ${res.status}`)
+  return ((await res.json()) as { orgs: OrgSummary[] }).orgs
+}
+
 export async function getOrCreateMyOrg(jwt: string): Promise<MyOrg> {
   const res = await fetchWithTimeout(`${FRONTIER_BASE}/api/v2/orgs/me`, {
     headers: authHeaders(jwt),

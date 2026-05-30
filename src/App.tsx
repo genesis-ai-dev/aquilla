@@ -10,7 +10,6 @@ import { DebugView } from "@/components/DebugView"
 import { RulesPage } from "@/components/RulesPage"
 import { CommentsPage } from "@/components/CommentsPage"
 import { JoinPage } from "@/components/JoinPage"
-import { Homepage } from "@/pages/Homepage/Homepage"
 import { OnboardingWizard } from "@/components/onboarding/OnboardingWizard"
 import { DevLoginRoute } from "@/components/DevLoginRoute"
 import { MembersPage } from "@/pages/MembersPage"
@@ -77,7 +76,6 @@ function AppRoutes() {
       <Route path="/project/:id/comments" element={<CommentsPage />} />
       <Route path="/project/:id/comments/debug" element={<DebugView />} />
       <Route path="/join/:token" element={<JoinPage />} />
-      <Route path="/homepage" element={<Homepage />} />
       <Route path="/onboarding" element={<OnboardingWizard />} />
       {/* Dev-only auto-login — see components/DevLoginRoute.tsx */}
       <Route path="/__dev/login" element={<DevLoginRoute />} />

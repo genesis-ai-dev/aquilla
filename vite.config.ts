@@ -117,6 +117,13 @@ export default defineConfig(({ mode }) => ({
     // app bundle balloons past 2 MB, which trips Cloudflare Pages' asset
     // upload path (observed as repeated ECONNRESET at 26/27 files).
     rolldownOptions: {
+      // Multi-page build: the SPA shell (index.html) and the standalone,
+      // statically-served marketing homepage (homepage.html). The aquilla-web
+      // Worker picks between them at the edge via the aq_hint cookie.
+      input: {
+        index: path.resolve(__dirname, "index.html"),
+        homepage: path.resolve(__dirname, "homepage.html"),
+      },
       output: {
         manualChunks: (id: string) => {
           if (!id.includes("node_modules")) return

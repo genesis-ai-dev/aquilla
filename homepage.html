@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="%BRAND_FAVICON%" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="%BRAND_DESCRIPTION%" />
+    <title>%BRAND_TITLE%</title>
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="%BRAND_OG_URL%" />
+    <meta property="og:title" content="%BRAND_TITLE%" />
+    <meta property="og:description" content="%BRAND_DESCRIPTION%" />
+    <meta property="og:image" content="%BRAND_OG_IMAGE%" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="%BRAND_TITLE%" />
+    <meta name="twitter:description" content="%BRAND_DESCRIPTION%" />
+    <meta name="twitter:image" content="%BRAND_OG_IMAGE%" />
+    %BRAND_THEME_STYLE%
+    <script>
+      // Paint the ink/paper background immediately (matching the homepage's
+      // remembered theme) so there's no flash before the React homepage mounts.
+      (function () {
+        try {
+          var t = localStorage.getItem("aq-home-theme");
+          document.documentElement.style.background = t === "light" ? "#f6f8fc" : "#0c1018";
+        } catch (e) {
+          document.documentElement.style.background = "#0c1018";
+        }
+      })();
+    </script>
+    <style>
+      /* Pre-hydration hero — real content for crawlers / no-JS, replaced when
+         the React homepage mounts. Styled to match the dark hero so the swap
+         is seamless. */
+      .aq-pre {
+        min-height: 100vh; display: flex; flex-direction: column;
+        align-items: center; justify-content: center; gap: 24px; padding: 32px;
+        text-align: center; color: #e9edf7;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      }
+      .aq-pre h1 { font-size: clamp(40px, 8vw, 82px); font-weight: 500; letter-spacing: -0.02em; line-height: 1.04; }
+      .aq-pre h1 em { font-style: italic; color: #7db1ff; }
+      .aq-pre p { max-width: 58ch; font-size: 18px; line-height: 1.55; color: #aeb7ca; margin: 0; }
+      .aq-pre .row { display: flex; gap: 12px; flex-wrap: wrap; justify-content: center; }
+      .aq-pre a { display: inline-flex; align-items: center; padding: 13px 24px; border-radius: 12px; text-decoration: none; font-weight: 560; font-size: 15px; }
+      .aq-pre .p { background: #6aa6ff; color: #0c1018; }
+      .aq-pre .s { border: 1px solid #2a3550; color: #e9edf7; }
+    </style>
+  </head>
+  <body>
+    <div id="root">
+      <main class="aq-pre">
+        <h1>Translation, <em>lifted.</em></h1>
+        <p>
+          One workspace for Bible &amp; ministry translation — text, audio, and video under one
+          roof, with real-time guidance and a memory that learns. Free for everyone.
+        </p>
+        <div class="row">
+          <a class="p" href="/onboarding">Create account</a>
+          <a class="s" href="/onboarding">Sign in</a>
+        </div>
+      </main>
+    </div>
+    <script type="module" src="/src/homepage-main.tsx"></script>
+  </body>
+</html>

@@ -1,5 +1,4 @@
 import { useEffect, useRef, useState } from "react"
-import { Link } from "react-router-dom"
 import { useBrand } from "@/branding/use-brand"
 import { HealthRing } from "@/components/HealthRing"
 import { MultimodalWorkspace } from "./MultimodalWorkspace"
@@ -96,8 +95,8 @@ export function Homepage() {
             >
               {theme === "dark" ? <IconSun /> : <IconMoon />}
             </button>
-            <Link to="/" className="aq-btn aq-btn-ghost aq-btn-sm">Open app</Link>
-            <Link to="/" className="aq-btn aq-btn-gold aq-btn-sm">Start free</Link>
+            <a href="/onboarding" className="aq-btn aq-btn-ghost aq-btn-sm">Open app</a>
+            <a href="/onboarding" className="aq-btn aq-btn-gold aq-btn-sm">Start free</a>
           </div>
         </div>
       </nav>
@@ -117,7 +116,7 @@ export function Homepage() {
             language, in every medium it's heard, read, and watched.
           </p>
           <div className="aq-hero-actions aq-load aq-d4">
-            <Link to="/" className="aq-btn aq-btn-gold aq-btn-lg">Start translating free</Link>
+            <a href="/onboarding" className="aq-btn aq-btn-gold aq-btn-lg">Start translating free</a>
             <a href="#workspace" className="aq-btn aq-btn-ghost aq-btn-lg">See how it works <IconArrow /></a>
           </div>
           <div className="aq-hero-trust aq-load aq-d5">
@@ -396,7 +395,7 @@ export function Homepage() {
                 <li><IconCheck /> Cloud sync &amp; team collaboration</li>
                 <li><IconCheck /> On-device speech &amp; private mode</li>
               </ul>
-              <Link to="/" className="aq-btn aq-btn-gold">Start free</Link>
+              <a href="/onboarding" className="aq-btn aq-btn-gold">Start free</a>
             </div>
             <div className="aq-price" data-feature="true">
               <span className="aq-chip aq-chip-gold" style={{ position: "absolute", top: 20, right: 20 }}><IconSparkS /> Mission, not margin</span>
@@ -408,7 +407,7 @@ export function Homepage() {
                 <li><IconCheck /> Dedicated onboarding &amp; priority support</li>
                 <li><IconCheck /> Higher, managed AI usage limits</li>
               </ul>
-              <Link to="/" className="aq-btn aq-btn-ghost">Talk to us</Link>
+              <a href="/onboarding" className="aq-btn aq-btn-ghost">Talk to us</a>
             </div>
           </div>
           <p className="aq-price-note aq-reveal">AI usage runs on fair caps that keep Aquilla free and sustainable for everyone. Need more headroom? That's exactly what "talk to us" is for.</p>
@@ -420,7 +419,7 @@ export function Homepage() {
             <h2 className="aq-display">Translation, <span className="aq-gold-text aq-display-italic">lifted.</span></h2>
             <p>Open your source text, draft in any medium, and let the system steer alongside you. Start today — it's free.</p>
             <div className="aq-cta-actions">
-              <Link to="/" className="aq-btn aq-btn-gold aq-btn-lg">Start translating free</Link>
+              <a href="/onboarding" className="aq-btn aq-btn-gold aq-btn-lg">Start translating free</a>
               <a href="#workspace" className="aq-btn aq-btn-ghost aq-btn-lg">See the workspace</a>
             </div>
           </div>
@@ -445,8 +444,8 @@ export function Homepage() {
               </div>
               <div className="aq-footer-col">
                 <h5>Get started</h5>
-                <Link to="/">Open app</Link>
-                <Link to="/">Start free</Link>
+                <a href="/onboarding">Open app</a>
+                <a href="/onboarding">Start free</a>
                 <a href="#pricing">Enterprise</a>
               </div>
             </div>

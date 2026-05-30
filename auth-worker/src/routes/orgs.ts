@@ -13,6 +13,7 @@ import {
   listOrgMembersWithUsers,
   listPendingInvitesInOrg,
   listUserDirectMembershipsInOrg,
+  listUserOrgs,
 } from "../services/org-permissions"
 import {
   ALL_ROLE_LEVELS,
@@ -24,6 +25,19 @@ import { lookupUserByUsername } from "../services/user-lookup"
 const orgs = new Hono<AuthHonoEnv>()
 
 orgs.use("*", authMiddleware)
+
+/** GET /api/v2/orgs — every org the caller belongs to (owned + member). */
+orgs.get("/", async (c) => {
+  const user = c.get("user")
+  const list = await listUserOrgs(c.env, user)
+  return c.json({
+    orgs: list.map((o) => ({
+      id: o.id,
+      name: o.name,
+      role: { level: o.role, name: ROLE_NAMES[o.role] ?? "unknown" },
+    })),
+  })
+})
 
 /** GET /api/v2/orgs/me — caller's owned organization (lazy-created). */
 orgs.get("/me", async (c) => {

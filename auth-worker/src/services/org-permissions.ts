@@ -48,6 +48,48 @@ export async function getOrCreateUserOrg(
   return { id: inserted.id, name, role: 700 }
 }
 
+export interface UserOrgSummary {
+  id: number
+  name: string | null
+  role: number
+}
+
+/**
+ * Every org the user belongs to: owned orgs (role 700) unioned with
+ * org_members rows (role per row). Owner wins on conflict. Lazy-creates the
+ * personal org if the user has none yet, so the switcher always has >=1 entry.
+ */
+export async function listUserOrgs(env: Env, user: AuthUser): Promise<UserOrgSummary[]> {
+  const byId = new Map<number, UserOrgSummary>()
+
+  const owned = await env.AQUILLA_DB.prepare(
+    "SELECT id, name FROM organizations WHERE owner_user_id = ?",
+  ).bind(user.id).all<{ id: number; name: string | null }>()
+  for (const o of owned.results ?? []) {
+    byId.set(o.id, { id: o.id, name: o.name, role: 700 })
+  }
+
+  const memberships = await env.AQUILLA_DB.prepare(
+    `SELECT o.id AS id, o.name AS name, om.role_level AS role_level
+       FROM org_members om
+       JOIN organizations o ON o.id = om.org_id
+      WHERE om.user_id = ?`,
+  ).bind(user.id).all<{ id: number; name: string | null; role_level: number }>()
+  for (const m of memberships.results ?? []) {
+    const existing = byId.get(m.id)
+    if (!existing || m.role_level > existing.role) {
+      byId.set(m.id, { id: m.id, name: m.name, role: m.role_level })
+    }
+  }
+
+  if (byId.size === 0) {
+    const personal = await getOrCreateUserOrg(env, user)
+    byId.set(personal.id, { id: personal.id, name: personal.name, role: personal.role })
+  }
+
+  return Array.from(byId.values()).sort((a, b) => (a.name ?? "").localeCompare(b.name ?? ""))
+}
+
 /** Return the role_level of (org_id, user_id) or null if no row. */
 export async function getOrgMemberRole(
   env: Env,

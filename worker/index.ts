@@ -29,11 +29,15 @@ export default {
     }
 
     // Root: serve SPA or homepage based on the auth hint cookie.
+    // Must not be CDN-cached (response depends on Cookie header).
     if (url.pathname === "/") {
       const cookie = req.headers.get("Cookie") ?? ""
       const signedIn = /(?:^|;\s*)aq_hint=1(?:;|$)/.test(cookie)
       const target = new URL(signedIn ? "/index.html" : "/homepage.html", req.url)
-      return env.ASSETS.fetch(target.toString())
+      const asset = await env.ASSETS.fetch(target.toString())
+      const res = new Response(asset.body, asset)
+      res.headers.set("Cache-Control", "private, no-store")
+      return res
     }
 
     // Everything else: hand off to the static-asset binding.

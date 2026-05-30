@@ -18,10 +18,11 @@
     %BRAND_THEME_STYLE%
     <script>
       // Paint the ink/paper background immediately so there's no flash before
-      // the React homepage mounts. Saved choice wins; otherwise follow the OS.
+      // the React homepage mounts. Each visit follows the OS unless the visitor
+      // toggled this session (sessionStorage).
       (function () {
         try {
-          var t = localStorage.getItem("aq-home-theme");
+          var t = sessionStorage.getItem("aq-home-theme");
           if (t !== "light" && t !== "dark") {
             t = window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
           }

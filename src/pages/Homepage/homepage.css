@@ -662,7 +662,9 @@
 .aq-blitz-live i { width: 7px; height: 7px; border-radius: 50%; background: var(--aq-gold); box-shadow: 0 0 10px var(--aq-gold); animation: aq-pulse 1.4s ease-in-out infinite; }
 .aq-blitz-counter .aq-mono { color: var(--aq-dim); }
 
-.aq-blitz-stage { position: relative; padding: clamp(26px, 4vw, 40px); min-height: 320px; display: flex; flex-direction: column; }
+/* Fixed height so flipping through verses/names never resizes the board
+   (which would jitter the whole page below it). Inner content flexes + clips. */
+.aq-blitz-stage { position: relative; padding: clamp(26px, 4vw, 40px); height: clamp(336px, 44vw, 392px); display: flex; flex-direction: column; overflow: hidden; }
 .aq-blitz-scan {
   position: absolute; left: 0; right: 0; top: 0; height: 38%;
   background: linear-gradient(180deg, oklch(0.74 0.14 245 / 0.10), transparent);
@@ -670,7 +672,7 @@
 }
 .aq-blitz[data-phase='settle'] .aq-blitz-scan { opacity: 0; transition: opacity 0.3s; }
 
-.aq-blitz-head { display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap; }
+.aq-blitz-head { display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap; flex-shrink: 0; }
 .aq-blitz-name { font-size: clamp(30px, 5vw, 46px); line-height: 1.05; color: var(--aq-text); }
 .aq-blitz-meta { display: inline-flex; gap: 8px; align-items: center; }
 .aq-blitz-code {
@@ -686,7 +688,7 @@
   font-size: clamp(17px, 2.3vw, 22px);
   line-height: 1.6;
   color: var(--aq-dim);
-  flex: 1;
+  flex: 1; min-height: 0;
   display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden;
 }
 .aq-blitz[data-phase='settle'] .aq-blitz-verse { color: var(--aq-text); }
@@ -694,7 +696,7 @@
 .aq-blitz-foot {
   display: flex; align-items: center; justify-content: space-between; gap: 12px;
   margin-top: 22px; padding-top: 16px; border-top: 1px solid var(--aq-line);
-  font-size: 13px; color: var(--aq-faint); min-height: 30px;
+  font-size: 13px; color: var(--aq-faint); min-height: 30px; flex-shrink: 0;
 }
 .aq-blitz-status { display: inline-flex; align-items: center; gap: 9px; }
 .aq-blitz-dotwave { display: inline-flex; gap: 3px; }
@@ -703,7 +705,7 @@
 .aq-blitz-ready { display: inline-flex; align-items: center; gap: 7px; color: var(--aq-gold-soft); }
 .aq-blitz-tag { font-family: ui-monospace, monospace; color: var(--aq-faint); }
 
-.aq-blitz-roll { animation: aq-tick 0.1s ease-out both; }
+.aq-blitz-roll { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; animation: aq-tick 0.1s ease-out both; }
 .aq-blitz[data-phase='settle'] .aq-blitz-roll { animation: aq-settle 0.5s cubic-bezier(0.16,1,0.3,1) both; }
 
 /* breadth marquee */

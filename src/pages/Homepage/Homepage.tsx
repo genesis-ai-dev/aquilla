@@ -8,7 +8,7 @@ import "./homepage.css"
 /** Saved choice wins; otherwise follow the OS color scheme; else dark. */
 function readInitialTheme(): "light" | "dark" {
   try {
-    const saved = localStorage.getItem("aq-home-theme")
+    const saved = sessionStorage.getItem("aq-home-theme")
     if (saved === "light" || saved === "dark") return saved
   } catch { /* no storage */ }
   try {
@@ -24,19 +24,19 @@ export function Homepage() {
   const toggleTheme = () =>
     setTheme((t) => {
       const next = t === "dark" ? "light" : "dark"
-      try { localStorage.setItem("aq-home-theme", next) } catch { /* no storage */ }
+      try { sessionStorage.setItem("aq-home-theme", next) } catch { /* no storage */ }
       return next
     })
 
   // Follow the OS theme while the visitor hasn't explicitly toggled. Once they
-  // pick a theme (saved in localStorage) their choice wins and system changes
+  // pick a theme (saved in sessionStorage) their choice wins and system changes
   // are ignored.
   useEffect(() => {
     const mq = window.matchMedia?.("(prefers-color-scheme: dark)")
     if (!mq) return
     const onChange = (e: MediaQueryListEvent) => {
       try {
-        const saved = localStorage.getItem("aq-home-theme")
+        const saved = sessionStorage.getItem("aq-home-theme")
         if (saved === "light" || saved === "dark") return
       } catch { /* no storage */ }
       setTheme(e.matches ? "dark" : "light")

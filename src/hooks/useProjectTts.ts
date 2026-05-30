@@ -1,13 +1,16 @@
-// Project TTS settings, hydrated from IDB and overlaid on the server record.
+// Project TTS settings (engine, voice library, Gemini key, cast assignments).
 //
-// `useProject` returns the server project WITHOUT ttsSettings (engine, voice
-// library, Gemini key, cast assignments) — those live only in local IDB. The
-// Voice Studio used to hydrate them inline; now the editor's Audio lens needs
-// the same data, so the logic lives here once. Returns the resolved settings
-// plus the derived voice library / cast stats and the writers the lens needs.
+// Persistence lives in localStorage keyed by projectId (project-tts-store), NOT
+// the IDB project record: under the AD-3 thin client the project record is
+// server-sourced and re-hydrated on load, and patchProject no-ops when no IDB
+// row exists yet — so settings written only there were silently dropped on
+// reload (this is why a freshly created voice didn't persist). We still mirror
+// into the IDB record best-effort for any local-only project, but localStorage
+// is the source of truth on read.
 
-import { useCallback, useEffect, useMemo, useState } from "react"
-import { getProject, patchProject } from "@/lib/store/project-index"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { patchProject } from "@/lib/store/project-index"
+import { loadProjectTts, saveProjectTts } from "@/lib/store/project-tts-store"
 import {
   assignedCastVoiceId, getVoiceLibrary, resolveVoice,
 } from "@/lib/audio/voices"
@@ -16,7 +19,7 @@ import type { CellData } from "@/hooks/useCells"
 import type { ProjectTtsSettings, Voice } from "@/lib/parsers/types"
 
 export interface ProjectTtsApi {
-  /** Effective settings: local IDB overlay if hydrated, else the server copy. */
+  /** Effective settings: the localStorage overlay if present, else the server copy. */
   settings: ProjectTtsSettings | undefined
   voices: Voice[]
   /** The project's resolved default/narrator voice id. */
@@ -34,13 +37,19 @@ export function useProjectTts(
   serverSettings: ProjectTtsSettings | undefined,
   cells: CellData[],
 ): ProjectTtsApi {
-  // TTS settings live in local IDB; the server record returned by useProject
-  // omits them, so hydrate + overlay separately.
-  const [localTts, setLocalTts] = useState<ProjectTtsSettings | undefined>(undefined)
+  // Read durable settings synchronously from localStorage on first render (lazy
+  // init), so a reload sees the saved voice library immediately. Falls back to
+  // the server copy when nothing is stored yet.
+  const [localTts, setLocalTts] = useState<ProjectTtsSettings | undefined>(
+    () => (projectId ? loadProjectTts(projectId) : undefined),
+  )
 
+  // Re-read when the project changes (lazy init only runs for the first one).
+  const loadedForRef = useRef<string | null | undefined>(projectId)
   useEffect(() => {
-    if (!projectId) return
-    void getProject(projectId).then((p) => { if (p) setLocalTts(p.ttsSettings) })
+    if (loadedForRef.current === projectId) return
+    loadedForRef.current = projectId
+    setLocalTts(projectId ? loadProjectTts(projectId) : undefined)
   }, [projectId])
 
   const settings = localTts ?? serverSettings
@@ -48,13 +57,14 @@ export function useProjectTts(
   const saveTts = useCallback(
     async (overrides: Partial<ProjectTtsSettings>) => {
       if (!projectId) return
-      setLocalTts((cur) => ({ ...(cur ?? {}), ...overrides } as ProjectTtsSettings))
-      await patchProject(projectId, (p) => ({
-        ...p,
-        ttsSettings: { ...p.ttsSettings, ...overrides },
-      }))
+      const next = { ...(localTts ?? serverSettings ?? {}), ...overrides } as ProjectTtsSettings
+      setLocalTts(next)
+      // Source of truth: durable, client-owned, survives reload + pulls.
+      saveProjectTts(projectId, next)
+      // Best-effort mirror for local-only projects that DO have an IDB row.
+      await patchProject(projectId, (p) => ({ ...p, ttsSettings: next }))
     },
-    [projectId],
+    [projectId, localTts, serverSettings],
   )
 
   const assignCells = useCallback(

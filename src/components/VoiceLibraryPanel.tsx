@@ -1,19 +1,23 @@
-// The Voice Studio's left rail: a calm CAST ROSTER. The engine + Gemini key sit
-// in a small collapsible bit; below it is a clean list of characters (color dot,
-// name, line count, default star, character-voice badge) plus "+ New character".
+// The Voice Studio's left rail: a calm CAST ROSTER. The shared Gemini key sits
+// in a small collapsible bit at the top; below it is one flat list of voices
+// (color dot, name, the engine it uses, line count, default star, a "Cloned"
+// badge when it has a reference) plus "+ New voice".
 //
-// Crafting a character is a focused act — clicking a character (or "+ New
-// character") opens the CharacterModal (the "character creator"), not an
-// always-open inline inspector. A show often has ONE voice actor; characters are
-// how that single actor becomes many distinct voices. Each character just has a
-// VOICE SOURCE (a preset engine voice OR a reference recording); a reference
-// makes it what we used to call a "clone". There is no separate clone concept.
+// EVERY voice is the same primitive: a TTS engine + that engine's base voice,
+// optionally with a reference recording layered on top to "clone a timbre". The
+// engine is now PER-VOICE (chosen in the modal), so there's no project-level
+// engine picker here — only the shared Gemini API key. A voice with a reference
+// is what we used to call a "clone"; the only visual distinction is a small
+// violet "Cloned" badge — not a separate section.
+//
+// Crafting a voice is a focused act — clicking a voice (or "+ New voice") opens
+// the CharacterModal (the "voice creator"), not an always-open inline inspector.
 
 import { useCallback, useEffect, useRef, useState } from "react"
-import { KeyRound, Plus, Settings2, Sparkles, Star, Users } from "lucide-react"
+import { KeyRound, Plus, Sparkles, Star, Users } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
-import type { ProjectTtsSettings, Voice } from "@/lib/parsers/types"
+import type { ProjectTtsSettings, TtsProvider, Voice } from "@/lib/parsers/types"
 import type { CellData } from "@/hooks/useCells"
 import { PRESET_VOICES } from "@/lib/audio/voices"
 import { DEFAULT_TTS_PROVIDER, TTS_PROVIDER_INFOS } from "@/lib/audio/tts-providers"
@@ -50,11 +54,18 @@ interface Props {
   seedSignal?: number
 }
 
-/** A character being edited in the modal: an existing voice, or null = new. */
+/** A voice being edited in the modal: an existing voice, or null = new. */
 type Editing =
   | { kind: "closed" }
   | { kind: "edit"; voice: Voice }
   | { kind: "new"; seedCellId: string | null }
+
+/** Friendly label for the engine a voice uses (defaults to Gemini). */
+function engineLabel(provider: TtsProvider | undefined): string {
+  const id = provider ?? DEFAULT_TTS_PROVIDER
+  const info = TTS_PROVIDER_INFOS.find((p) => p.id === id)
+  return info?.shortTitle ?? info?.title ?? id
+}
 
 export function VoiceLibraryPanel({
   targetLanguage, settings, onSettingsChange, projectId, fileId, session,
@@ -63,13 +74,12 @@ export function VoiceLibraryPanel({
   const provider = settings?.provider ?? DEFAULT_TTS_PROVIDER
   const userKey = useUserApiKey("gemini-tts")
   const apiKey = (settings?.apiKey?.trim() || userKey) ?? ""
-  const needsKey = provider === "gemini" && !apiKey
 
   const [voices, setVoices] = useState<Voice[]>([])
   const [defaultVoiceId, setDefaultVoiceId] = useState<string | undefined>(undefined)
   const [localSelectedId, setLocalSelectedId] = useState<string>("")
   const seededRef = useRef<string | null>(null)
-  const [engineOpen, setEngineOpen] = useState(false)
+  const [keyOpen, setKeyOpen] = useState(false)
   const [editing, setEditing] = useState<Editing>({ kind: "closed" })
 
   // Seed the local library once per project. The studio mounts this only after
@@ -85,6 +95,11 @@ export function VoiceLibraryPanel({
   }, [projectId, settings])
 
   const selectedId = selectedVoiceId ?? localSelectedId
+
+  // Engine is per-voice now; a key is "needed" when any voice runs on Gemini
+  // (the default when provider is absent) and no shared key is set yet.
+  const anyGeminiVoice = voices.some((v) => (v.provider ?? DEFAULT_TTS_PROVIDER) === "gemini")
+  const needsKey = anyGeminiVoice && !apiKey
 
   const select = useCallback((id: string) => {
     setLocalSelectedId(id)
@@ -152,73 +167,46 @@ export function VoiceLibraryPanel({
       </div>
 
       <div className="min-h-0 flex-1 space-y-3 overflow-y-auto p-3">
-        {/* Engine — a small collapsible bit so the key + provider stay calm. */}
+        {/* Gemini API key — a shared credential across all Gemini voices (engine
+            is now per-voice, set in the voice creator). Kept here as a small
+            collapsible since Gemini is the default engine. */}
         <div className="overflow-hidden rounded-xl border bg-muted/20">
           <button
             type="button"
-            onClick={() => setEngineOpen((v) => !v)}
+            onClick={() => setKeyOpen((v) => !v)}
             className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs font-medium"
           >
-            <Settings2 className="h-3.5 w-3.5 text-muted-foreground" />
-            Engine
-            <span className="rounded-full bg-background px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-muted-foreground">
-              {provider}
-            </span>
+            <KeyRound className="h-3.5 w-3.5 text-muted-foreground" />
+            Gemini API key
             {needsKey && (
               <span className="ml-auto inline-flex items-center gap-1 rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium text-amber-700 dark:bg-amber-950/40 dark:text-amber-300">
                 <KeyRound className="h-2.5 w-2.5" /> Key needed
               </span>
             )}
           </button>
-          {(engineOpen || needsKey) && (
+          {(keyOpen || needsKey) && (
             <div className="space-y-3 border-t px-3 py-3">
-              <div className="grid grid-cols-3 gap-1.5">
-                {TTS_PROVIDER_INFOS.map((info) => (
-                  <button
-                    key={info.id}
-                    type="button"
-                    onClick={() => void onSettingsChange({ provider: info.id })}
-                    aria-pressed={provider === info.id}
-                    title={info.hint}
-                    className={cn(
-                      "rounded-lg border px-2 py-1.5 text-center text-xs transition-colors",
-                      provider === info.id ? "border-primary bg-primary/10 font-medium" : "hover:bg-accent/40",
-                    )}
-                  >
-                    {info.shortTitle ?? info.title}
-                  </button>
-                ))}
-              </div>
-              {provider === "gemini" ? (
-                <ApiKeyField
-                  label="Gemini API key"
-                  placeholder="AIza..."
-                  projectKey={settings?.apiKey ?? ""}
-                  userKey={userKey ?? ""}
-                  onProjectKeyChange={(v) => void onSettingsChange({ apiKey: v || undefined })}
-                  onUserKeyChange={(v) => setUserApiKey("gemini-tts", v)}
-                  help={needsKey
-                    ? "Get a key at aistudio.google.com/apikey. Sent directly to Google; never uploaded to Frontier."
-                    : "Sent directly to Google. Never uploaded to Frontier."}
-                />
-              ) : (
-                <p className="text-xs text-muted-foreground">
-                  {provider === "mms"
-                    ? "No API key. Each MMS voice is tied to one language code."
-                    : "No API key needed. Runs locally in your browser."}
-                </p>
-              )}
+              <ApiKeyField
+                label="Gemini API key"
+                placeholder="AIza..."
+                projectKey={settings?.apiKey ?? ""}
+                userKey={userKey ?? ""}
+                onProjectKeyChange={(v) => void onSettingsChange({ apiKey: v || undefined })}
+                onUserKeyChange={(v) => setUserApiKey("gemini-tts", v)}
+                help={needsKey
+                  ? "Get a key at aistudio.google.com/apikey. Sent directly to Google; never uploaded to Frontier."
+                  : "Sent directly to Google. Never uploaded to Frontier."}
+              />
             </div>
           )}
         </div>
 
-        {/* Cast roster — split into two clearly-distinct kinds: synthetic
-            engine VOICES, and CLONED CHARACTERS (built from a real recording).
-            Click opens the creator; drag onto a line assigns. */}
-        {(() => {
-          const cloned = voices.filter((v) => v.referenceAudioId)
-          const synthetic = voices.filter((v) => !v.referenceAudioId)
-          const renderRow = (voice: Voice) => {
+        {/* Cast roster — one flat list. Every voice is the same primitive (an
+            engine + base voice, optionally with a clone reference); a clone is
+            marked only by a small violet badge. Click opens the creator; drag
+            onto a line assigns. */}
+        <div className="space-y-1">
+          {voices.map((voice) => {
             const active = voice.id === selectedId
             const stats = castStats?.get(voice.id)
             const isNarrator = voice.id === defaultVoiceId
@@ -237,20 +225,26 @@ export function VoiceLibraryPanel({
                 className={cn(
                   "group flex w-full cursor-grab items-center gap-2 rounded-xl border px-3 py-2 text-left text-sm transition-colors active:cursor-grabbing",
                   active ? "border-primary/50 bg-primary/10"
-                    : isClone ? "border-violet-300/50 bg-violet-50/40 hover:bg-violet-100/50 dark:border-violet-500/20 dark:bg-violet-950/20"
                     : "border-transparent bg-muted/30 hover:bg-accent/40",
                 )}
               >
                 <span
-                  className={cn("h-3 w-3 shrink-0 border", isClone ? "rounded-sm" : "rounded-full")}
+                  className="h-3 w-3 shrink-0 rounded-full border"
                   style={{ backgroundColor: voice.color || "#94a3b8" }}
                 />
                 <span className="min-w-0 flex-1">
                   <span className="flex items-center gap-1">
                     <span className="truncate">{voice.name}</span>
                     {isNarrator && <Star className="h-3 w-3 shrink-0 text-primary" aria-label="Narrator (default)" />}
+                    {isClone && (
+                      <span className="inline-flex items-center gap-0.5 rounded-full bg-violet-100 px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-wide text-violet-700 dark:bg-violet-900/50 dark:text-violet-300">
+                        <Sparkles className="h-2 w-2" /> Cloned
+                      </span>
+                    )}
                   </span>
                   <span className="block text-[10px] leading-tight text-muted-foreground">
+                    {engineLabel(voice.provider)}
+                    {" · "}
                     {stats && stats.assigned > 0
                       ? `${stats.voiced}/${stats.assigned} lines voiced`
                       : isNarrator ? "unassigned lines" : "no lines yet"}
@@ -258,41 +252,17 @@ export function VoiceLibraryPanel({
                 </span>
               </button>
             )
-          }
-          return (
-            <div className="space-y-3">
-              <div className="space-y-1">
-                <p className="px-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-                  Voices
-                </p>
-                {synthetic.map(renderRow)}
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="ghost"
-                  onClick={() => openNew(null)}
-                  className="w-full justify-start"
-                >
-                  <Plus className="mr-1 h-3.5 w-3.5" /> New voice
-                </Button>
-              </div>
-
-              <div className="space-y-1">
-                <p className="flex items-center gap-1 px-1 text-[10px] font-semibold uppercase tracking-wide text-violet-600 dark:text-violet-300">
-                  <Sparkles className="h-2.5 w-2.5" /> Cloned characters
-                </p>
-                {cloned.length > 0 ? (
-                  cloned.map(renderRow)
-                ) : (
-                  <p className="rounded-lg border border-dashed px-3 py-2 text-[11px] leading-snug text-muted-foreground">
-                    None yet. Once a line has audio (recorded or generated), use its
-                    clone action to make a character voice from it.
-                  </p>
-                )}
-              </div>
-            </div>
-          )
-        })()}
+          })}
+          <Button
+            type="button"
+            size="sm"
+            variant="ghost"
+            onClick={() => openNew(null)}
+            className="w-full justify-start"
+          >
+            <Plus className="mr-1 h-3.5 w-3.5" /> New voice
+          </Button>
+        </div>
       </div>
 
       {editing.kind !== "closed" && (

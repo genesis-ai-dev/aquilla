@@ -46,16 +46,18 @@ export interface CloudProjectSummary {
  */
 export async function createCloudProject(
   jwt: string,
-  project: { id: string; name: string },
+  project: { id: string; name: string; orgId?: number },
   apiUrl: string = FRONTIER_API_URL,
 ): Promise<void> {
+  const body: Record<string, unknown> = { id: project.id, name: project.name }
+  if (project.orgId != null) body.orgId = project.orgId
   const res = await fetch(`${apiUrl}/api/v2/projects`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
       Authorization: `Bearer ${jwt}`,
     },
-    body: JSON.stringify({ id: project.id, name: project.name }),
+    body: JSON.stringify(body),
   })
   if (!res.ok) {
     const body = await res.text().catch(() => "")

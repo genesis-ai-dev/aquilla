@@ -1,5 +1,7 @@
 import { Routes, Route } from "react-router-dom"
 import { OrgHome } from "@/components/org/OrgHome"
+import { ProjectsList } from "@/components/org/ProjectsList"
+import { ProjectOverview } from "@/components/org/ProjectOverview"
 import { ProjectWorkspace } from "@/components/ProjectWorkspace"
 import { ProjectSettings } from "@/components/ProjectSettings"
 import { DebugView } from "@/components/DebugView"
@@ -61,6 +63,8 @@ function AppRoutes() {
   return (
     <Routes>
       <Route path="/" element={<OrgHome />} />
+      <Route path="/projects" element={<ProjectsList />} />
+      <Route path="/projects/:id" element={<ProjectOverview />} />
       <Route path="/debug" element={<DebugView />} />
       <Route path="/project/:id" element={<ProjectWorkspace />} />
       <Route path="/project/:id/file/:fileId" element={<ProjectWorkspace />} />

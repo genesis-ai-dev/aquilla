@@ -26,6 +26,8 @@ import posthog from "@/lib/posthog"
 
 interface ProjectCreateDialogProps {
   onCreated: (project: ProjectRecord) => void
+  /** Scope the new project to a specific org. Omit for personal/default org. */
+  orgId?: number
 }
 
 /**
@@ -36,7 +38,7 @@ interface ProjectCreateDialogProps {
  */
 type ProjectShape = "self-contained" | "source-only" | "linked-target"
 
-export function ProjectCreateDialog({ onCreated }: ProjectCreateDialogProps) {
+export function ProjectCreateDialog({ onCreated, orgId }: ProjectCreateDialogProps) {
   const { session } = useFrontierSession()
   const [open, setOpen] = useState(false)
   const [name, setName] = useState("")
@@ -83,7 +85,7 @@ export function ProjectCreateDialog({ onCreated }: ProjectCreateDialogProps) {
       // Create the SERVER row first — reads are server-only (AD-3), so without
       // it the project 403s the moment you open it. This must succeed before
       // we cache locally or navigate.
-      await createCloudProject(jwt, { id: project.id, name: project.name })
+      await createCloudProject(jwt, { id: project.id, name: project.name, orgId })
       // Persist the languages the user just typed (creator is owner/700, well
       // above the maintainer(600) write gate). Best-effort: a project that
       // exists but lacks languages is still openable.

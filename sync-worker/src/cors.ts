@@ -27,7 +27,12 @@ export function isBrowserCorsPath(pathname: string): boolean {
 
 const CORS_HEADERS: Record<string, string> = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+  // PUT/DELETE are needed by browser-facing /api/v1/ routes like voice
+  // reference clip storage (PUT /api/v1/voice/reference/...). Without them the
+  // global preflight answers before the route's own OPTIONS handler and the
+  // browser blocks the PUT. Allowing a method here only permits the preflight;
+  // each route still enforces what it actually accepts (405 otherwise).
+  "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
   "Access-Control-Allow-Headers": "Authorization, Content-Type",
   "Access-Control-Max-Age": "86400",
   Vary: "Origin",

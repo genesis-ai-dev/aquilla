@@ -30,6 +30,7 @@
 # =============================================================================
 
 name = "aquilla-web"
+main = "worker/index.ts"
 account_id = "6a80496d1e59948a9cbaa3c643ba81d7"
 compatibility_date = "2025-05-01"
 workers_dev = true
@@ -48,7 +49,7 @@ directory = "./dist"
 not_found_handling = "single-page-application"
 
 # ---------------------------------------------------------------------------
-# Production environment — attaches web.aquilla.app/* to this Worker.
+# Production environment — attaches aquilla.app/* (canonical) and web.aquilla.app/* (transitional) to this Worker.
 # Same worker name as top-level (aquilla-web), so CI's bare `wrangler deploy`
 # and local `wrangler deploy --env=production` target the same Worker.
 # `[env.production.assets]` re-declared because env blocks don't inherit
@@ -58,8 +59,23 @@ not_found_handling = "single-page-application"
 name = "aquilla-web"
 account_id = "6a80496d1e59948a9cbaa3c643ba81d7"
 workers_dev = true
-routes = ["web.aquilla.app/*"]
+routes = ["aquilla.app/*", "web.aquilla.app/*"]
 
 [env.production.assets]
+directory = "./dist"
+not_found_handling = "single-page-application"
+
+# ---------------------------------------------------------------------------
+# Staging environment — serves SPA at dev.aquilla.app/* with same hint-check
+# logic as production. Uses same Worker code; assets deploy is separate.
+# Deploy: wrangler deploy --env=staging
+# ---------------------------------------------------------------------------
+[env.staging]
+name = "aquilla-web-staging"
+account_id = "6a80496d1e59948a9cbaa3c643ba81d7"
+workers_dev = true
+routes = ["dev.aquilla.app/*"]
+
+[env.staging.assets]
 directory = "./dist"
 not_found_handling = "single-page-application"

@@ -50,6 +50,14 @@ describe("group CRUD", () => {
     const res = await app.request("/api/v2/orgs/1/groups/20", { method: "PATCH", headers: authHeader(await jwtFor("wendi")), body: JSON.stringify({ name: "Hijack" }) }, env)
     expect(res.status).toBe(404)
   })
+
+  it("rejects a caller who is not an org member at all with 403", async () => {
+    await seedOrg()
+    await seedUser(8, "stranger") // exists, but no org_members row in org 1
+    await env.AQUILLA_DB.prepare("INSERT INTO groups (id, org_id, name, created_by) VALUES (10, 1, 'WA', 1)").run()
+    const res = await app.request("/api/v2/orgs/1/groups/10", { method: "DELETE", headers: authHeader(await jwtFor("stranger")) }, env)
+    expect(res.status).toBe(403)
+  })
 })
 
 describe("team membership", () => {
@@ -122,6 +130,15 @@ describe("team project attachment", () => {
     await seedTeamProjects()
     // anna is org maintainer (600); granting owner (700) exceeds her level.
     const res = await app.request("/api/v2/orgs/1/groups/10/projects", { method: "POST", headers: authHeader(await jwtFor("anna")), body: JSON.stringify({ projectId: "pa", roleLevel: 700 }) }, env)
+    expect(res.status).toBe(403)
+  })
+
+  it("rejects PATCH granting above the caller's own org role with 403", async () => {
+    await seedTeamProjects()
+    // wendi (owner) attaches pa at contributor first
+    await app.request("/api/v2/orgs/1/groups/10/projects", { method: "POST", headers: authHeader(await jwtFor("wendi")), body: JSON.stringify({ projectId: "pa", roleLevel: 400 }) }, env)
+    // anna (maintainer 600) tries to PATCH it up to owner (700) → 403
+    const res = await app.request("/api/v2/orgs/1/groups/10/projects/pa", { method: "PATCH", headers: authHeader(await jwtFor("anna")), body: JSON.stringify({ roleLevel: 700 }) }, env)
     expect(res.status).toBe(403)
   })
 })

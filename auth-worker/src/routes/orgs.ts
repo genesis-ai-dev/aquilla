@@ -255,17 +255,12 @@ orgs.delete("/:orgId/members/:userId", async (c) => {
     return c.json({ error: "owner cannot remove self" }, 400)
   }
 
-  await c.env.AQUILLA_DB.prepare(
-    "DELETE FROM org_members WHERE org_id = ? AND user_id = ?",
-  )
-    .bind(orgId, targetUserId)
-    .run()
-
-  await c.env.AQUILLA_DB.prepare(
-    `DELETE FROM group_members
-       WHERE user_id = ?
-         AND group_id IN (SELECT id FROM groups WHERE org_id = ?)`,
-  ).bind(targetUserId, orgId).run()
+  await c.env.AQUILLA_DB.batch([
+    c.env.AQUILLA_DB.prepare("DELETE FROM org_members WHERE org_id = ? AND user_id = ?").bind(orgId, targetUserId),
+    c.env.AQUILLA_DB.prepare(
+      `DELETE FROM group_members WHERE user_id = ? AND group_id IN (SELECT id FROM groups WHERE org_id = ?)`,
+    ).bind(targetUserId, orgId),
+  ])
 
   return c.json({ removed: true })
 })

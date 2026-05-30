@@ -144,6 +144,7 @@ export default defineConfig(({ mode }) => ({
       // own directory.
       "auth-worker/**",
       "sync-worker/**",
+      "worker/**",
     ],
   },
 }))

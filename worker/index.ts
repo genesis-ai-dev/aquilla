@@ -1,23 +1,44 @@
 // aquilla-web Worker entry
 //
-// Phase A (initial deploy): this Worker is in passthrough mode — every
-// request is forwarded directly to the static-asset binding. The aq_hint
-// cookie check is enabled in Phase B (Task 5) once the hint has had time
-// to propagate to existing signed-in users.
+// Routes requests on aquilla.app to either the SPA (index.html) or the
+// static placeholder homepage (homepage.html) based on the presence of the
+// aq_hint=1 cookie — a non-credential, host-only 1-bit cookie written by the
+// SPA's session-store whenever there is an active IDB session.
+//
+// Request flow:
+//   /homepage          → always serve homepage.html (bypass for QA / sharing)
+//   /  (no aq_hint)   → serve homepage.html  (signed-out visitor)
+//   /  (aq_hint=1)    → serve index.html      (signed-in user)
+//   /* (anything else) → env.ASSETS.fetch(req) (SPA fallback, React Router handles it)
 //
 // See docs/superpowers/specs/2026-05-30-bare-domain-routing-design.md
 
-// Use a structural type instead of `Fetcher` from @cloudflare/workers-types
-// so this file compiles under the root tsconfig (which doesn't pull in
-// workers-types) and so worker/index.test.ts can call fetch() with a plain
-// mock without needing the full ExecutionContext.
+// Structural type avoids a @cloudflare/workers-types dependency in tests.
 export interface Env {
   ASSETS: { fetch(req: Request | string): Promise<Response> }
 }
 
 export default {
   async fetch(req: Request, env: Env): Promise<Response> {
-    // Phase A: unconditional passthrough — hint check not yet enabled.
+    const url = new URL(req.url)
+
+    // Bypass: always show the homepage regardless of hint state.
+    if (url.pathname === "/homepage") {
+      const target = new URL("/homepage.html", req.url)
+      return env.ASSETS.fetch(target.toString())
+    }
+
+    // Root: serve SPA or homepage based on the auth hint cookie.
+    if (url.pathname === "/") {
+      const cookie = req.headers.get("Cookie") ?? ""
+      const signedIn = /(?:^|;\s*)aq_hint=1(?:;|$)/.test(cookie)
+      const target = new URL(signedIn ? "/index.html" : "/homepage.html", req.url)
+      return env.ASSETS.fetch(target.toString())
+    }
+
+    // Everything else: hand off to the static-asset binding.
+    // Workers `not_found_handling = "single-page-application"` rewrites
+    // unknown paths to index.html — React Router handles the rest.
     return env.ASSETS.fetch(req)
   },
 }

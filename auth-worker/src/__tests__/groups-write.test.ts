@@ -51,3 +51,37 @@ describe("group CRUD", () => {
     expect(res.status).toBe(404)
   })
 })
+
+describe("team membership", () => {
+  async function seedTeam() {
+    await seedUser(1, "wendi")
+    await seedUser(2, "anna")    // org member
+    await seedUser(9, "outsider") // NOT an org member
+    await env.AQUILLA_DB.prepare("INSERT INTO organizations (id, name, owner_user_id) VALUES (1, 'CAS', 1)").run()
+    await env.AQUILLA_DB.prepare("INSERT INTO org_members (org_id, user_id, role_level, granted_by) VALUES (1, 1, 700, 1), (1, 2, 100, 1)").run()
+    await env.AQUILLA_DB.prepare("INSERT INTO groups (id, org_id, name, created_by) VALUES (10, 1, 'WA', 1)").run()
+  }
+
+  it("adds an org member to a team", async () => {
+    await seedTeam()
+    const res = await app.request("/api/v2/orgs/1/groups/10/members", { method: "POST", headers: authHeader(await jwtFor("wendi")), body: JSON.stringify({ username: "anna" }) }, env)
+    expect(res.status).toBe(200)
+    const row = await env.AQUILLA_DB.prepare("SELECT user_id FROM group_members WHERE group_id = 10 AND user_id = 2").first()
+    expect(row).not.toBeNull()
+  })
+
+  it("rejects adding a non-org-member with 409", async () => {
+    await seedTeam()
+    const res = await app.request("/api/v2/orgs/1/groups/10/members", { method: "POST", headers: authHeader(await jwtFor("wendi")), body: JSON.stringify({ username: "outsider" }) }, env)
+    expect(res.status).toBe(409)
+  })
+
+  it("removes a member", async () => {
+    await seedTeam()
+    await env.AQUILLA_DB.prepare("INSERT INTO group_members (group_id, user_id, added_by) VALUES (10, 2, 1)").run()
+    const res = await app.request("/api/v2/orgs/1/groups/10/members/2", { method: "DELETE", headers: authHeader(await jwtFor("wendi")) }, env)
+    expect(res.status).toBe(200)
+    const gone = await env.AQUILLA_DB.prepare("SELECT user_id FROM group_members WHERE group_id = 10 AND user_id = 2").first()
+    expect(gone).toBeNull()
+  })
+})

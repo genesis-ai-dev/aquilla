@@ -509,6 +509,20 @@ export async function deleteGroup(env: Env, orgId: number, groupId: number): Pro
   await env.AQUILLA_DB.prepare("DELETE FROM groups WHERE id = ? AND org_id = ?").bind(groupId, orgId).run()
 }
 
+/** Add an org member to a group. Returns "not-org-member" if the target isn't in the org. */
+export async function addGroupMember(env: Env, orgId: number, groupId: number, targetUserId: number, addedBy: number): Promise<"ok" | "not-org-member"> {
+  const orgRole = await getOrgMemberRole(env, orgId, targetUserId)
+  if (orgRole == null) return "not-org-member"
+  await env.AQUILLA_DB.prepare(
+    "INSERT INTO group_members (group_id, user_id, added_by) VALUES (?, ?, ?) ON CONFLICT(group_id, user_id) DO NOTHING",
+  ).bind(groupId, targetUserId, addedBy).run()
+  return "ok"
+}
+
+export async function removeGroupMember(env: Env, groupId: number, userId: number): Promise<void> {
+  await env.AQUILLA_DB.prepare("DELETE FROM group_members WHERE group_id = ? AND user_id = ?").bind(groupId, userId).run()
+}
+
 export interface ProjectMembershipInOrg {
   projectId: string
   projectName: string

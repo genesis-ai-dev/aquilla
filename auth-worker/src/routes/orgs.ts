@@ -8,6 +8,7 @@ import { z } from "zod"
 import { authMiddleware, type AuthHonoEnv } from "../middleware/auth"
 import { ROLE } from "../types"
 import {
+  addGroupMember,
   bumpOrgActivity,
   createGroup,
   deleteGroup,
@@ -20,6 +21,7 @@ import {
   listPendingInvitesInOrg,
   listUserDirectMembershipsInOrg,
   listUserOrgs,
+  removeGroupMember,
   updateGroup,
 } from "../services/org-permissions"
 import {
@@ -148,6 +150,37 @@ orgs.delete("/:orgId/groups/:groupId", async (c) => {
   if (callerRole == null || callerRole < ROLE.MAINTAINER) return c.json({ error: "org role >= maintainer required" }, 403)
   if (!(await groupExistsInOrg(c.env, orgId, groupId))) return c.json({ error: "group not found" }, 404)
   await deleteGroup(c.env, orgId, groupId)
+  return c.json({ removed: true })
+})
+
+const memberBody = z.object({ username: z.string().min(1) })
+
+orgs.post("/:orgId/groups/:groupId/members", zValidator("json", memberBody), async (c) => {
+  const user = c.get("user")
+  const orgId = parseInt(c.req.param("orgId"), 10)
+  const groupId = parseInt(c.req.param("groupId"), 10)
+  if (!Number.isFinite(orgId) || !Number.isFinite(groupId)) return c.json({ error: "invalid id" }, 400)
+  const callerRole = await getOrgMemberRole(c.env, orgId, user.id)
+  if (callerRole == null || callerRole < ROLE.MAINTAINER) return c.json({ error: "org role >= maintainer required" }, 403)
+  if (!(await groupExistsInOrg(c.env, orgId, groupId))) return c.json({ error: "group not found" }, 404)
+  const { username } = c.req.valid("json")
+  const target = await lookupUserByUsername(c.env, username)
+  if (!target) return c.json({ error: "user not found" }, 404)
+  const result = await addGroupMember(c.env, orgId, groupId, target.id, user.id)
+  if (result === "not-org-member") return c.json({ error: "user is not a member of this org" }, 409)
+  return c.json({ userId: target.id, username: target.username })
+})
+
+orgs.delete("/:orgId/groups/:groupId/members/:userId", async (c) => {
+  const user = c.get("user")
+  const orgId = parseInt(c.req.param("orgId"), 10)
+  const groupId = parseInt(c.req.param("groupId"), 10)
+  const targetUserId = parseInt(c.req.param("userId"), 10)
+  if (!Number.isFinite(orgId) || !Number.isFinite(groupId) || !Number.isFinite(targetUserId)) return c.json({ error: "invalid id" }, 400)
+  const callerRole = await getOrgMemberRole(c.env, orgId, user.id)
+  if (callerRole == null || callerRole < ROLE.MAINTAINER) return c.json({ error: "org role >= maintainer required" }, 403)
+  if (!(await groupExistsInOrg(c.env, orgId, groupId))) return c.json({ error: "group not found" }, 404)
+  await removeGroupMember(c.env, groupId, targetUserId)
   return c.json({ removed: true })
 })
 

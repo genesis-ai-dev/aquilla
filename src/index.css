@@ -252,3 +252,74 @@
   80% { box-shadow: inset 0 0 0 2px var(--color-primary, oklch(0.65 0.2 250));
         background-color: color-mix(in oklch, var(--color-primary, oklch(0.65 0.2 250)) 8%, transparent); }
 }
+
+/* ─────────────────────────── Homepage (marketing) ──────────────────────────
+   Scoped to the public landing page (src/components/HomePage.tsx). Every
+   animation is purely decorative and disabled under prefers-reduced-motion.
+   Classes are `hp-` prefixed so they never collide with product UI. */
+
+/* Slow drifting "aurora" blobs behind the hero. Transform-only so they stay
+   on the compositor and never thrash layout. */
+@keyframes hp-aurora-a {
+  0%   { transform: translate3d(-8%, -6%, 0) scale(1.05); }
+  50%  { transform: translate3d(6%, 4%, 0) scale(1.18); }
+  100% { transform: translate3d(-8%, -6%, 0) scale(1.05); }
+}
+@keyframes hp-aurora-b {
+  0%   { transform: translate3d(6%, 5%, 0) scale(1.12); }
+  50%  { transform: translate3d(-6%, -6%, 0) scale(0.98); }
+  100% { transform: translate3d(6%, 5%, 0) scale(1.12); }
+}
+.hp-aurora-a { animation: hp-aurora-a 20s ease-in-out infinite; }
+.hp-aurora-b { animation: hp-aurora-b 26s ease-in-out infinite; }
+
+/* Edge-to-edge marquee of language endonyms. Content is duplicated in the
+   markup so a -50% translate loops seamlessly. */
+@keyframes hp-marquee-l { from { transform: translateX(0); } to { transform: translateX(-50%); } }
+@keyframes hp-marquee-r { from { transform: translateX(-50%); } to { transform: translateX(0); } }
+.hp-marquee-l { animation: hp-marquee-l 60s linear infinite; }
+.hp-marquee-r { animation: hp-marquee-r 75s linear infinite; }
+.hp-marquee-track:hover { animation-play-state: paused; }
+
+/* Scroll-reveal: starts hidden, IntersectionObserver toggles `.hp-in`. */
+@keyframes hp-rise {
+  from { opacity: 0; transform: translateY(18px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.hp-reveal { opacity: 0; }
+.hp-reveal.hp-in { animation: hp-rise 0.7s cubic-bezier(0.22, 1, 0.36, 1) both; }
+
+/* Brand-violet gradient text with a slow, reverent shimmer. */
+@keyframes hp-shimmer { to { background-position: 200% center; } }
+.hp-grad-text {
+  background-image: linear-gradient(
+    100deg,
+    var(--primary),
+    oklch(0.68 0.15 250),
+    oklch(0.74 0.13 300),
+    var(--primary)
+  );
+  background-size: 220% auto;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: hp-shimmer 8s linear infinite;
+}
+
+/* Soft conic halo used behind the mission numerals. */
+.hp-halo {
+  background: conic-gradient(
+    from 180deg at 50% 50%,
+    color-mix(in oklch, var(--primary) 22%, transparent),
+    color-mix(in oklch, oklch(0.7 0.14 240) 18%, transparent),
+    color-mix(in oklch, var(--primary) 22%, transparent)
+  );
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hp-aurora-a, .hp-aurora-b,
+  .hp-marquee-l, .hp-marquee-r,
+  .hp-grad-text { animation: none !important; }
+  .hp-reveal { opacity: 1 !important; }
+  .hp-reveal.hp-in { animation: none !important; }
+}

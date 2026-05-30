@@ -9,6 +9,7 @@ import { LivingMemoryPage } from "@/components/LivingMemoryPage"
 import { CommentsPage } from "@/components/CommentsPage"
 import { SnapshotsPage } from "@/components/SnapshotsPage"
 import { JoinPage } from "@/components/JoinPage"
+import { HomePage } from "@/components/HomePage"
 import { OnboardingWizard } from "@/components/onboarding/OnboardingWizard"
 import { MembersPage } from "@/pages/MembersPage"
 import { Settings } from "@/pages/Settings"
@@ -74,6 +75,7 @@ function AppRoutes() {
           /projects route the `/:id` workspace catch-all eats it and tries
           to load a project named "projects". Same shape for /onboarding. */}
       <Route path="/projects" element={<Dashboard />} />
+      <Route path="/homepage" element={<HomePage />} />
       <Route path="/join/:token" element={<JoinPage />} />
       <Route path="/onboarding" element={<OnboardingWizard />} />
       <Route path="/settings" element={<Settings />} />

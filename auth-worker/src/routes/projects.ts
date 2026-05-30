@@ -43,6 +43,7 @@ import {
 } from "../services/project-permissions"
 import {
   bumpOrgActivity,
+  getOrgMemberRole,
   getOrCreateUserOrg,
   listEffectiveProjectMembers,
 } from "../services/org-permissions"
@@ -139,6 +140,7 @@ async function notifySyncWorkerOfArchive(
 const createProjectSchema = z.object({
   id: z.string().min(1).max(256),
   name: z.string().min(1).max(256),
+  orgId: z.number().int().optional(),
 })
 
 projects.post(
@@ -150,14 +152,20 @@ projects.post(
     const body = c.req.valid("json")
 
     let orgId: number | null = null
-    try {
-      orgId = (await getOrCreateUserOrg(c.env, user)).id
-    } catch (err) {
-      // Project ownership is still authoritative through `projects.created_by`.
-      // If personal-org provisioning is unavailable because the deployed D1
-      // schema is temporarily ahead/behind the worker, do not block the core
-      // user journey of creating a project.
-      console.warn("personal org setup failed; creating project without org:", err)
+    if (body.orgId != null) {
+      // Creating into a specific org is an org-level function: require the
+      // caller's org role >= maintainer (see spec Risk 3).
+      const orgRole = await getOrgMemberRole(c.env, body.orgId, user.id)
+      if (orgRole == null || orgRole < ROLE.MAINTAINER) {
+        return c.json({ error: "org role >= maintainer required to create a project here" }, 403)
+      }
+      orgId = body.orgId
+    } else {
+      try {
+        orgId = (await getOrCreateUserOrg(c.env, user)).id
+      } catch (err) {
+        console.warn("personal org setup failed; creating project without org:", err)
+      }
     }
 
     try {

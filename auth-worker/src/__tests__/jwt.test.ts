@@ -1,21 +1,10 @@
+import { env } from "cloudflare:test"
 import { describe, it, expect } from "vitest"
 import { sign } from "hono/jwt"
 import { JWTService } from "../auth/jwt"
-import type { Env } from "../types"
-
-function makeEnv(overrides: Partial<Env> = {}): Env {
-  return {
-    AQUILLA_DB: {} as unknown as D1Database,
-    SECRET_KEY: "test-secret",
-    ALGORITHM: "HS256",
-    ACCESS_TOKEN_EXPIRE_MINUTES: "60",
-    ...overrides,
-  }
-}
 
 describe("JWTService.createAccessToken / verifyToken", () => {
   it("round-trips a token signed with HS256", async () => {
-    const env = makeEnv()
     const svc = new JWTService(env)
     const token = await svc.createAccessToken("alice")
     const payload = await svc.verifyToken(token)
@@ -25,7 +14,6 @@ describe("JWTService.createAccessToken / verifyToken", () => {
   })
 
   it("rejects tokens signed with a different secret", async () => {
-    const env = makeEnv()
     const svc = new JWTService(env)
     const fake = await sign(
       { sub: "alice", iat: 0, exp: Math.floor(Date.now() / 1000) + 60 },
@@ -36,7 +24,9 @@ describe("JWTService.createAccessToken / verifyToken", () => {
   })
 
   it("returns null when SECRET_KEY is missing", async () => {
-    const svc = new JWTService(makeEnv({ SECRET_KEY: "" }))
+    // Use a local override for the empty-secret test since env.SECRET_KEY is configured
+    const emptyEnv = { ...env, SECRET_KEY: "" }
+    const svc = new JWTService(emptyEnv)
     const fake = await sign(
       { sub: "alice", iat: 0, exp: Math.floor(Date.now() / 1000) + 60 },
       "anything",
@@ -46,13 +36,14 @@ describe("JWTService.createAccessToken / verifyToken", () => {
   })
 
   it("throws when signing without a configured secret", async () => {
-    const svc = new JWTService(makeEnv({ SECRET_KEY: "" }))
+    const emptyEnv = { ...env, SECRET_KEY: "" }
+    const svc = new JWTService(emptyEnv)
     await expect(svc.createAccessToken("alice")).rejects.toThrow(/SECRET_KEY/)
   })
 })
 
 describe("JWTService.extractTokenFromHeader", () => {
-  const svc = new JWTService(makeEnv())
+  const svc = new JWTService(env)
 
   it("accepts the canonical Bearer scheme", () => {
     expect(svc.extractTokenFromHeader("Bearer abc.def.ghi")).toBe("abc.def.ghi")

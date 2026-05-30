@@ -1,39 +1,19 @@
+import { env } from "cloudflare:test"
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest"
 import app from "../index"
-import type { Env } from "../types"
-import { makeFakeD1, type UserRow } from "./helpers/d1-fake"
 import { hashPasswordWerkzeugScrypt } from "../utils/password"
 import { verify } from "hono/jwt"
+import { authHeader, jwtFor } from "./helpers/d1"
 
 const SECRET = "frontier-test-secret"
 
-async function makeUserRow(): Promise<UserRow> {
-  return {
-    id: 1,
-    username: "alice",
-    email: "alice@example.com",
-    password_hash: await hashPasswordWerkzeugScrypt("correct-password"),
-    gitlab_user_id: 1001,
-    gitlab_username: "alice",
-    gitlab_token: "glpat-fake",
-    stripe_customer_id: null,
-    subscription_tier: "free",
-    preferences: '{"theme":"dark"}',
-    created_at: new Date().toISOString(),
-    updated_at: new Date().toISOString(),
-  }
-}
-
-function makeEnv(db: ReturnType<typeof makeFakeD1>): Env {
-  return {
-    AQUILLA_DB: db,
-    SECRET_KEY: SECRET,
-    ALGORITHM: "HS256",
-    ACCESS_TOKEN_EXPIRE_MINUTES: "60",
-    // Leave GitLab unconfigured so /token doesn't try to refresh PATs against
-    // a real GitLab instance during the test. The route handles this by
-    // returning the stored token instead.
-  }
+async function seedAliceWithPassword(password: string): Promise<void> {
+  const hash = await hashPasswordWerkzeugScrypt(password)
+  await env.AQUILLA_DB.prepare(
+    "INSERT INTO users (id, username, email, password_hash, preferences) VALUES (1, 'alice', 'alice@example.com', ?, '{\"theme\":\"dark\"}')",
+  )
+    .bind(hash)
+    .run()
 }
 
 describe("POST /api/v2/auth/token", () => {
@@ -47,7 +27,7 @@ describe("POST /api/v2/auth/token", () => {
   })
 
   it("returns an access token for the right password", async () => {
-    const db = makeFakeD1({ users: [await makeUserRow()] })
+    await seedAliceWithPassword("correct-password")
     const res = await app.request(
       "/api/v2/auth/token",
       {
@@ -58,7 +38,7 @@ describe("POST /api/v2/auth/token", () => {
           password: "correct-password",
         }),
       },
-      makeEnv(db),
+      env,
     )
     expect(res.status).toBe(200)
     const body = (await res.json()) as {
@@ -73,7 +53,7 @@ describe("POST /api/v2/auth/token", () => {
   })
 
   it("returns 401 on a wrong password", async () => {
-    const db = makeFakeD1({ users: [await makeUserRow()] })
+    await seedAliceWithPassword("correct-password")
     const res = await app.request(
       "/api/v2/auth/token",
       {
@@ -81,13 +61,12 @@ describe("POST /api/v2/auth/token", () => {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ username: "alice", password: "wrong" }),
       },
-      makeEnv(db),
+      env,
     )
     expect(res.status).toBe(401)
   })
 
   it("returns 401 for unknown users (no enumeration)", async () => {
-    const db = makeFakeD1()
     const res = await app.request(
       "/api/v2/auth/token",
       {
@@ -95,13 +74,13 @@ describe("POST /api/v2/auth/token", () => {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ username: "ghost", password: "anything-1234" }),
       },
-      makeEnv(db),
+      env,
     )
     expect(res.status).toBe(401)
   })
 
   it("accepts login by email as well as username", async () => {
-    const db = makeFakeD1({ users: [await makeUserRow()] })
+    await seedAliceWithPassword("correct-password")
     const res = await app.request(
       "/api/v2/auth/token",
       {
@@ -112,13 +91,13 @@ describe("POST /api/v2/auth/token", () => {
           password: "correct-password",
         }),
       },
-      makeEnv(db),
+      env,
     )
     expect(res.status).toBe(200)
   })
 
   it("is mounted at /api/v1/auth/token too for legacy clients", async () => {
-    const db = makeFakeD1({ users: [await makeUserRow()] })
+    await seedAliceWithPassword("correct-password")
     const res = await app.request(
       "/api/v1/auth/token",
       {
@@ -129,7 +108,7 @@ describe("POST /api/v2/auth/token", () => {
           password: "correct-password",
         }),
       },
-      makeEnv(db),
+      env,
     )
     expect(res.status).toBe(200)
   })
@@ -137,9 +116,8 @@ describe("POST /api/v2/auth/token", () => {
 
 describe("GET /api/v2/auth/me", () => {
   it("returns the hydrated user from the JWT", async () => {
-    const db = makeFakeD1({ users: [await makeUserRow()] })
-    // First mint a token via /token so we don't have to duplicate the
-    // signing logic.
+    await seedAliceWithPassword("correct-password")
+    // Mint a token via /token
     const tokenRes = await app.request(
       "/api/v2/auth/token",
       {
@@ -150,7 +128,7 @@ describe("GET /api/v2/auth/me", () => {
           password: "correct-password",
         }),
       },
-      makeEnv(db),
+      env,
     )
     const { access_token } = (await tokenRes.json()) as {
       access_token: string
@@ -162,7 +140,7 @@ describe("GET /api/v2/auth/me", () => {
         method: "GET",
         headers: { Authorization: `Bearer ${access_token}` },
       },
-      makeEnv(db),
+      env,
     )
     expect(res.status).toBe(200)
     const body = (await res.json()) as {
@@ -176,11 +154,10 @@ describe("GET /api/v2/auth/me", () => {
   })
 
   it("returns 401 without an Authorization header", async () => {
-    const db = makeFakeD1({ users: [await makeUserRow()] })
     const res = await app.request(
       "/api/v2/auth/me",
       { method: "GET" },
-      makeEnv(db),
+      env,
     )
     expect(res.status).toBe(401)
   })
@@ -188,8 +165,6 @@ describe("GET /api/v2/auth/me", () => {
 
 describe("POST /api/v2/auth/register", () => {
   it("registers a new user and returns a bearer token (no GitLab provisioning)", async () => {
-    const db = makeFakeD1()
-    const env = makeEnv(db)
     const res = await app.request(
       "/api/v2/auth/register",
       {
@@ -213,8 +188,6 @@ describe("POST /api/v2/auth/register", () => {
   })
 
   it("returns 409 when the username already exists", async () => {
-    const db = makeFakeD1()
-    const env = makeEnv(db)
     const first = await app.request(
       "/api/v2/auth/register",
       {

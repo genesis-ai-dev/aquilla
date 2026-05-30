@@ -1,6 +1,6 @@
-import { useCallback } from "react"
+import { useCallback, useEffect } from "react"
 import { login as doLogin, register as doRegister } from "@/lib/frontier/auth"
-import { clearSession } from "@/lib/frontier/session-store"
+import { clearSession, clearAuthHint } from "@/lib/frontier/session-store"
 import { clearAllLocalData } from "@/lib/store/project-index"
 import { useAccounts } from "@/hooks/useAccounts"
 import { purgeAudioCachesOnSignOut } from "@/lib/audio/cache-cleanup"
@@ -30,6 +30,16 @@ export function useFrontierSession() {
     await clearAllLocalData()
     await purgeAudioCachesOnSignOut()
   }, [])
+
+  // Edge-case mitigation: if IDB is empty but aq_hint cookie was somehow
+  // set (storage cleared, old cookie, first deploy), clear the hint so the
+  // next cold visit to aquilla.app/ serves the homepage directly instead of
+  // briefly flashing the empty app shell.
+  useEffect(() => {
+    if (!loading && active === null) {
+      clearAuthHint()
+    }
+  }, [loading, active])
 
   return { session: active, loading, login, register, logout }
 }

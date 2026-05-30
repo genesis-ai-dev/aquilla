@@ -12,7 +12,7 @@ import {
   X,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import { useOrg, useOrgMembers } from "@/hooks/useOrg"
+import { useOrgMembers } from "@/hooks/useOrg"
 import { useAccessibleProjects } from "@/hooks/useAccessibleProjects"
 import { useOrgInvites } from "@/hooks/useOrgInvites"
 import { MembersPanel, type MembersPanelMember } from "@/components/MembersPanel"
@@ -22,6 +22,7 @@ import { RemoveOrgMemberDialog } from "@/components/RemoveOrgMemberDialog"
 import { ROLE, ORG_ROLE_PICKER, roleName } from "@/lib/frontier/roles"
 import { formatRelativeTime } from "@/lib/time/relative"
 import type { OrgMemberProject, PendingOrgInvite } from "@/lib/frontier/orgs"
+import { useActiveOrg } from "@/context/OrgContext"
 
 type View = "roster" | "matrix"
 
@@ -46,12 +47,35 @@ const ORG_ROLE_OPTIONS = ORG_ROLE_PICKER.map((level) => ({
  * design loop concluded operational PMs need.
  */
 export function MembersPage() {
-  const { state, refresh: refreshOrg } = useOrg()
+  const { activeOrg, isLoading, error } = useActiveOrg()
 
-  if (state.kind === "idle") {
-    // Signed out — distinct from "loading" so the user gets a real action,
-    // not a misleading spinner. Common when navigating to /members directly
-    // from a logged-out tab.
+  if (isLoading) {
+    return (
+      <PageShell>
+        <div className="flex items-center justify-center py-16 text-muted-foreground">
+          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+          <span className="text-sm">Loading…</span>
+        </div>
+      </PageShell>
+    )
+  }
+
+  if (error) {
+    return (
+      <PageShell>
+        <div className="rounded-md border border-destructive/30 bg-destructive/5 p-4">
+          <p className="text-sm font-medium text-destructive">Couldn't load your organization</p>
+          <p className="mt-1 text-xs text-muted-foreground">{error}</p>
+          <p className="mt-2 text-[10px] text-muted-foreground">
+            Common causes: the Frontier worker is unreachable, your session expired,
+            or the request timed out. Check your network and try again.
+          </p>
+        </div>
+      </PageShell>
+    )
+  }
+
+  if (!activeOrg) {
     return (
       <PageShell>
         <div className="rounded-md border bg-muted/30 p-6 text-center">
@@ -65,52 +89,7 @@ export function MembersPage() {
     )
   }
 
-  if (state.kind === "session-loading") {
-    return (
-      <PageShell>
-        <div className="flex items-center justify-center py-16 text-muted-foreground">
-          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-          <span className="text-sm">Waiting for session…</span>
-        </div>
-      </PageShell>
-    )
-  }
-
-  if (state.kind === "loading") {
-    return (
-      <PageShell>
-        <div className="flex items-center justify-center py-16 text-muted-foreground">
-          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-          <span className="text-sm">Loading members…</span>
-        </div>
-      </PageShell>
-    )
-  }
-
-  if (state.kind === "error") {
-    return (
-      <PageShell>
-        <div className="rounded-md border border-destructive/30 bg-destructive/5 p-4">
-          <p className="text-sm font-medium text-destructive">Couldn't load your organization</p>
-          <p className="mt-1 text-xs text-muted-foreground">{state.error}</p>
-          <p className="mt-2 text-[10px] text-muted-foreground">
-            Common causes: the Frontier worker is unreachable, your session expired,
-            or the request timed out. Check your network and try again.
-          </p>
-          <Button
-            variant="outline"
-            size="sm"
-            className="mt-3"
-            onClick={() => void refreshOrg()}
-          >
-            Retry
-          </Button>
-        </div>
-      </PageShell>
-    )
-  }
-
-  return <MembersPageContent orgId={state.org.id} orgName={state.org.name ?? "Organization"} />
+  return <MembersPageContent orgId={activeOrg.id} orgName={activeOrg.name ?? "Organization"} />
 }
 
 function PageShell({ children }: { children: React.ReactNode }) {

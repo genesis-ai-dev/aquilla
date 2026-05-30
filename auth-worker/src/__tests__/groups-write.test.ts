@@ -85,3 +85,43 @@ describe("team membership", () => {
     expect(gone).toBeNull()
   })
 })
+
+describe("team project attachment", () => {
+  async function seedTeamProjects() {
+    await seedUser(1, "wendi") // org owner (700)
+    await seedUser(2, "anna")  // org maintainer (600)
+    await env.AQUILLA_DB.prepare("INSERT INTO organizations (id, name, owner_user_id) VALUES (1, 'CAS', 1), (2, 'Other', 1)").run()
+    await env.AQUILLA_DB.prepare("INSERT INTO org_members (org_id, user_id, role_level, granted_by) VALUES (1, 1, 700, 1), (1, 2, 600, 1)").run()
+    await env.AQUILLA_DB.prepare("INSERT INTO groups (id, org_id, name, created_by) VALUES (10, 1, 'WA', 1)").run()
+    await env.AQUILLA_DB.prepare("INSERT INTO projects (id, name, org_id, created_by) VALUES ('pa', 'Bambara', 1, 1), ('pb', 'Foreign', 2, 1)").run()
+  }
+
+  it("attaches an org project at a role, then changes + detaches it", async () => {
+    await seedTeamProjects()
+    const attach = await app.request("/api/v2/orgs/1/groups/10/projects", { method: "POST", headers: authHeader(await jwtFor("wendi")), body: JSON.stringify({ projectId: "pa", roleLevel: 400 }) }, env)
+    expect(attach.status).toBe(200)
+    let row = await env.AQUILLA_DB.prepare("SELECT role_level FROM group_project_grants WHERE group_id = 10 AND project_id = 'pa'").first<{ role_level: number }>()
+    expect(row?.role_level).toBe(400)
+    const patch = await app.request("/api/v2/orgs/1/groups/10/projects/pa", { method: "PATCH", headers: authHeader(await jwtFor("wendi")), body: JSON.stringify({ roleLevel: 300 }) }, env)
+    expect(patch.status).toBe(200)
+    row = await env.AQUILLA_DB.prepare("SELECT role_level FROM group_project_grants WHERE group_id = 10 AND project_id = 'pa'").first<{ role_level: number }>()
+    expect(row?.role_level).toBe(300)
+    const det = await app.request("/api/v2/orgs/1/groups/10/projects/pa", { method: "DELETE", headers: authHeader(await jwtFor("wendi")) }, env)
+    expect(det.status).toBe(200)
+    const gone = await env.AQUILLA_DB.prepare("SELECT project_id FROM group_project_grants WHERE group_id = 10 AND project_id = 'pa'").first()
+    expect(gone).toBeNull()
+  })
+
+  it("rejects attaching a project from another org with 409", async () => {
+    await seedTeamProjects()
+    const res = await app.request("/api/v2/orgs/1/groups/10/projects", { method: "POST", headers: authHeader(await jwtFor("wendi")), body: JSON.stringify({ projectId: "pb", roleLevel: 400 }) }, env)
+    expect(res.status).toBe(409)
+  })
+
+  it("rejects granting above the caller's own org role with 403", async () => {
+    await seedTeamProjects()
+    // anna is org maintainer (600); granting owner (700) exceeds her level.
+    const res = await app.request("/api/v2/orgs/1/groups/10/projects", { method: "POST", headers: authHeader(await jwtFor("anna")), body: JSON.stringify({ projectId: "pa", roleLevel: 700 }) }, env)
+    expect(res.status).toBe(403)
+  })
+})

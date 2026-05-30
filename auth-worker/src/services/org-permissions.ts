@@ -523,6 +523,34 @@ export async function removeGroupMember(env: Env, groupId: number, userId: numbe
   await env.AQUILLA_DB.prepare("DELETE FROM group_members WHERE group_id = ? AND user_id = ?").bind(groupId, userId).run()
 }
 
+/** Attach (or re-grant) a project to a group. Returns "cross-org" if the project isn't in this org. */
+export async function attachGroupProject(env: Env, orgId: number, groupId: number, projectId: string, roleLevel: number, grantedBy: number): Promise<"ok" | "cross-org" | "no-project"> {
+  const proj = await env.AQUILLA_DB.prepare("SELECT org_id FROM projects WHERE id = ?").bind(projectId).first<{ org_id: number | null }>()
+  if (!proj) return "no-project"
+  if (proj.org_id !== orgId) return "cross-org"
+  await env.AQUILLA_DB.prepare(
+    `INSERT INTO group_project_grants (group_id, project_id, role_level, granted_by) VALUES (?, ?, ?, ?)
+     ON CONFLICT(group_id, project_id) DO UPDATE SET role_level = excluded.role_level, granted_by = excluded.granted_by`,
+  ).bind(groupId, projectId, roleLevel, grantedBy).run()
+  return "ok"
+}
+
+/** Change the granted role for an existing attachment. Returns false if no attachment. */
+export async function updateGroupProjectRole(env: Env, groupId: number, projectId: string, roleLevel: number): Promise<boolean> {
+  const existing = await env.AQUILLA_DB.prepare(
+    "SELECT role_level FROM group_project_grants WHERE group_id = ? AND project_id = ?",
+  ).bind(groupId, projectId).first()
+  if (!existing) return false
+  await env.AQUILLA_DB.prepare(
+    "UPDATE group_project_grants SET role_level = ? WHERE group_id = ? AND project_id = ?",
+  ).bind(roleLevel, groupId, projectId).run()
+  return true
+}
+
+export async function detachGroupProject(env: Env, groupId: number, projectId: string): Promise<void> {
+  await env.AQUILLA_DB.prepare("DELETE FROM group_project_grants WHERE group_id = ? AND project_id = ?").bind(groupId, projectId).run()
+}
+
 export interface ProjectMembershipInOrg {
   projectId: string
   projectName: string

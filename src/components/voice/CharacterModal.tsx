@@ -214,7 +214,7 @@ function CharacterModalBody({
   const [takeBusy, setTakeBusy] = useState(false)
   const [takeError, setTakeError] = useState<string | null>(null)
 
-  const useTake = useCallback(async (take: TakeSource) => {
+  const applyTake = useCallback(async (take: TakeSource) => {
     if (!projectId) {
       setTakeError("No project context to lift a take.")
       return
@@ -388,7 +388,7 @@ function CharacterModalBody({
                         <button
                           key={takeKey(t)}
                           type="button"
-                          onClick={() => void useTake(t)}
+                          onClick={() => void applyTake(t)}
                           disabled={takeBusy}
                           className={cn(
                             "flex w-full items-center justify-between gap-2 rounded-md border px-2 py-1.5 text-left text-xs transition-colors disabled:opacity-50",

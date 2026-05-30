@@ -9,10 +9,13 @@ import { authMiddleware, type AuthHonoEnv } from "../middleware/auth"
 import {
   bumpOrgActivity,
   getOrCreateUserOrg,
+  getOrgGroupDetail,
   getOrgMemberRole,
+  listOrgGroups,
   listOrgMembersWithUsers,
   listPendingInvitesInOrg,
   listUserDirectMembershipsInOrg,
+  listUserOrgs,
 } from "../services/org-permissions"
 import {
   ALL_ROLE_LEVELS,
@@ -24,6 +27,19 @@ import { lookupUserByUsername } from "../services/user-lookup"
 const orgs = new Hono<AuthHonoEnv>()
 
 orgs.use("*", authMiddleware)
+
+/** GET /api/v2/orgs — every org the caller belongs to (owned + member). */
+orgs.get("/", async (c) => {
+  const user = c.get("user")
+  const list = await listUserOrgs(c.env, user)
+  return c.json({
+    orgs: list.map((o) => ({
+      id: o.id,
+      name: o.name,
+      role: { level: o.role, name: ROLE_NAMES[o.role] ?? "unknown" },
+    })),
+  })
+})
 
 /** GET /api/v2/orgs/me — caller's owned organization (lazy-created). */
 orgs.get("/me", async (c) => {
@@ -56,6 +72,30 @@ orgs.get("/:orgId/members", async (c) => {
       lastActiveAt: m.lastActiveAt,
     })),
   })
+})
+
+/** GET /api/v2/orgs/:orgId/groups — read-only team list (org members). */
+orgs.get("/:orgId/groups", async (c) => {
+  const user = c.get("user")
+  const orgId = parseInt(c.req.param("orgId"), 10)
+  if (!Number.isFinite(orgId)) return c.json({ error: "invalid orgId" }, 400)
+  const role = await getOrgMemberRole(c.env, orgId, user.id)
+  if (role == null) return c.json({ error: "not an org member" }, 403)
+  const groups = await listOrgGroups(c.env, orgId, user.id)
+  return c.json({ groups })
+})
+
+/** GET /api/v2/orgs/:orgId/groups/:groupId — read-only team detail. */
+orgs.get("/:orgId/groups/:groupId", async (c) => {
+  const user = c.get("user")
+  const orgId = parseInt(c.req.param("orgId"), 10)
+  const groupId = parseInt(c.req.param("groupId"), 10)
+  if (!Number.isFinite(orgId) || !Number.isFinite(groupId)) return c.json({ error: "invalid id" }, 400)
+  const role = await getOrgMemberRole(c.env, orgId, user.id)
+  if (role == null) return c.json({ error: "not an org member" }, 403)
+  const detail = await getOrgGroupDetail(c.env, orgId, groupId)
+  if (!detail) return c.json({ error: "group not found" }, 404)
+  return c.json(detail)
 })
 
 // Strict role validation — only the seven canonical levels are accepted.

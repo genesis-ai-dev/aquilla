@@ -48,6 +48,48 @@ export async function getOrCreateUserOrg(
   return { id: inserted.id, name, role: 700 }
 }
 
+export interface UserOrgSummary {
+  id: number
+  name: string | null
+  role: number
+}
+
+/**
+ * Every org the user belongs to: owned orgs (role 700) unioned with
+ * org_members rows (role per row). Owner wins on conflict. Lazy-creates the
+ * personal org if the user has none yet, so the switcher always has >=1 entry.
+ */
+export async function listUserOrgs(env: Env, user: AuthUser): Promise<UserOrgSummary[]> {
+  const byId = new Map<number, UserOrgSummary>()
+
+  const owned = await env.AQUILLA_DB.prepare(
+    "SELECT id, name FROM organizations WHERE owner_user_id = ?",
+  ).bind(user.id).all<{ id: number; name: string | null }>()
+  for (const o of owned.results ?? []) {
+    byId.set(o.id, { id: o.id, name: o.name, role: 700 })
+  }
+
+  const memberships = await env.AQUILLA_DB.prepare(
+    `SELECT o.id AS id, o.name AS name, om.role_level AS role_level
+       FROM org_members om
+       JOIN organizations o ON o.id = om.org_id
+      WHERE om.user_id = ?`,
+  ).bind(user.id).all<{ id: number; name: string | null; role_level: number }>()
+  for (const m of memberships.results ?? []) {
+    const existing = byId.get(m.id)
+    if (!existing || m.role_level > existing.role) {
+      byId.set(m.id, { id: m.id, name: m.name, role: m.role_level })
+    }
+  }
+
+  if (byId.size === 0) {
+    const personal = await getOrCreateUserOrg(env, user)
+    byId.set(personal.id, { id: personal.id, name: personal.name, role: personal.role })
+  }
+
+  return Array.from(byId.values()).sort((a, b) => (a.name ?? "").localeCompare(b.name ?? ""))
+}
+
 /** Return the role_level of (org_id, user_id) or null if no row. */
 export async function getOrgMemberRole(
   env: Env,
@@ -334,6 +376,90 @@ const SOURCE_PRIORITY: Record<EffectiveMember["source"], number> = {
   group: 3,
   org: 2,
   creator: 1,
+}
+
+export interface OrgGroupSummary {
+  id: number
+  name: string
+  memberCount: number
+  projectCount: number
+  viewerIsMember: boolean
+}
+
+/** Groups in an org, with counts and whether the viewer is a member. */
+export async function listOrgGroups(
+  env: Env,
+  orgId: number,
+  viewerId: number,
+): Promise<OrgGroupSummary[]> {
+  const rows = await env.AQUILLA_DB.prepare(
+    `SELECT g.id AS id, g.name AS name,
+            (SELECT COUNT(*) FROM group_members gm WHERE gm.group_id = g.id) AS member_count,
+            (SELECT COUNT(*) FROM group_project_grants gpg WHERE gpg.group_id = g.id) AS project_count,
+            EXISTS (SELECT 1 FROM group_members gm2 WHERE gm2.group_id = g.id AND gm2.user_id = ?) AS viewer_is_member
+       FROM groups g
+      WHERE g.org_id = ?
+      ORDER BY g.name COLLATE NOCASE`,
+  )
+    .bind(viewerId, orgId)
+    .all<{ id: number; name: string; member_count: number; project_count: number; viewer_is_member: number }>()
+
+  return (rows.results ?? []).map((r) => ({
+    id: r.id,
+    name: r.name,
+    memberCount: r.member_count,
+    projectCount: r.project_count,
+    viewerIsMember: r.viewer_is_member === 1,
+  }))
+}
+
+export interface OrgGroupDetail {
+  id: number
+  name: string
+  members: Array<{ userId: number; username: string; roleLevel: number | null }>
+  projects: Array<{ id: string; name: string; grantedRoleLevel: number }>
+}
+
+/** Members + attached projects of a single group. Null if not in this org. */
+export async function getOrgGroupDetail(
+  env: Env,
+  orgId: number,
+  groupId: number,
+): Promise<OrgGroupDetail | null> {
+  const group = await env.AQUILLA_DB.prepare(
+    "SELECT id, name FROM groups WHERE id = ? AND org_id = ?",
+  )
+    .bind(groupId, orgId)
+    .first<{ id: number; name: string }>()
+  if (!group) return null
+
+  const members = await env.AQUILLA_DB.prepare(
+    `SELECT gm.user_id AS user_id, u.username AS username, om.role_level AS role_level
+       FROM group_members gm
+       JOIN users u ON u.id = gm.user_id
+       LEFT JOIN org_members om ON om.org_id = ? AND om.user_id = gm.user_id
+      WHERE gm.group_id = ?
+      ORDER BY u.username COLLATE NOCASE`,
+  )
+    .bind(orgId, groupId)
+    .all<{ user_id: number; username: string; role_level: number | null }>()
+
+  const projects = await env.AQUILLA_DB.prepare(
+    `SELECT gpg.project_id AS id, p.name AS name, gpg.role_level AS granted
+       FROM group_project_grants gpg
+       JOIN projects p ON p.id = gpg.project_id
+      WHERE gpg.group_id = ? AND p.org_id = ?
+      ORDER BY p.name COLLATE NOCASE`,
+  )
+    .bind(groupId, orgId)
+    .all<{ id: string; name: string; granted: number }>()
+
+  return {
+    id: group.id,
+    name: group.name,
+    members: (members.results ?? []).map((m) => ({ userId: m.user_id, username: m.username, roleLevel: m.role_level })),
+    projects: (projects.results ?? []).map((p) => ({ id: p.id, name: p.name, grantedRoleLevel: p.granted })),
+  }
 }
 
 export interface ProjectMembershipInOrg {

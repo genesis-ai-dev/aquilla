@@ -43,6 +43,7 @@ import {
 } from "../services/project-permissions"
 import {
   bumpOrgActivity,
+  getOrgMemberRole,
   getOrCreateUserOrg,
   listEffectiveProjectMembers,
 } from "../services/org-permissions"
@@ -139,6 +140,7 @@ async function notifySyncWorkerOfArchive(
 const createProjectSchema = z.object({
   id: z.string().min(1).max(256),
   name: z.string().min(1).max(256),
+  orgId: z.number().int().optional(),
 })
 
 projects.post(
@@ -150,14 +152,20 @@ projects.post(
     const body = c.req.valid("json")
 
     let orgId: number | null = null
-    try {
-      orgId = (await getOrCreateUserOrg(c.env, user)).id
-    } catch (err) {
-      // Project ownership is still authoritative through `projects.created_by`.
-      // If personal-org provisioning is unavailable because the deployed D1
-      // schema is temporarily ahead/behind the worker, do not block the core
-      // user journey of creating a project.
-      console.warn("personal org setup failed; creating project without org:", err)
+    if (body.orgId != null) {
+      // Creating into a specific org is an org-level function: require the
+      // caller's org role >= maintainer (see spec Risk 3).
+      const orgRole = await getOrgMemberRole(c.env, body.orgId, user.id)
+      if (orgRole == null || orgRole < ROLE.MAINTAINER) {
+        return c.json({ error: "org role >= maintainer required to create a project here" }, 403)
+      }
+      orgId = body.orgId
+    } else {
+      try {
+        orgId = (await getOrCreateUserOrg(c.env, user)).id
+      } catch (err) {
+        console.warn("personal org setup failed; creating project without org:", err)
+      }
     }
 
     try {
@@ -190,12 +198,26 @@ projects.post(
 projects.get("/", authMiddleware, async (c) => {
   const user = c.get("user")
 
+  const orgIdParam = c.req.query("orgId")
+  const orgFilter = orgIdParam != null && orgIdParam !== "" ? Number(orgIdParam) : null
+
+  if (orgFilter !== null && !Number.isInteger(orgFilter)) {
+    return c.json({ error: "invalid orgId" }, 400)
+  }
+
   // AD-12 max-wins across direct + group + org + creator. Each path is
   // computed in the same query; role_level = MAX(coalesced levels). On a
   // tie, attribution credit goes in declaration order (override > group >
   // org > creator) to match the resolver in project-permissions.ts.
+  //
+  // Params (positional ?): 10 user.id binds + 2 orgFilter binds at the end.
+  //   ?1-?4  : user.id for creator CASE expressions
+  //   ?5-?7  : user.id for LEFT JOIN conditions (pm, om, gm)
+  //   ?8-?10 : user.id for WHERE access check (created_by, pm, om)
+  //   ?11    : orgFilter (NULL or number) — IS NULL check (no-filter case)
+  //   ?12    : orgFilter (NULL or number) — equality check (filter case)
   const rows = await c.env.AQUILLA_DB.prepare(
-    `SELECT p.id, p.name,
+    `SELECT p.id, p.name, p.org_id,
             MAX(
               COALESCE(pm.role_level, 0),
               COALESCE(gg.max_grant,  0),
@@ -238,16 +260,19 @@ projects.get("/", authMiddleware, async (c) => {
           OR gg.max_grant IS NOT NULL
           OR (p.org_id IS NOT NULL AND om.user_id = ?)
         )
+        AND (? IS NULL OR p.org_id = ?)
       ORDER BY p.name COLLATE NOCASE`,
   )
     .bind(
-      user.id, user.id, user.id, user.id,  // 4 CASE-when-creator
-      user.id, user.id, user.id,           // pm.user_id, om.user_id, gm.user_id
-      user.id, user.id, user.id,           // WHERE: created_by, pm, om
+      user.id, user.id, user.id, user.id,  // ?1-?4: CASE-when-creator
+      user.id, user.id, user.id,           // ?5-?7: pm.user_id, om.user_id, gm.user_id
+      user.id, user.id, user.id,           // ?8-?10: WHERE: created_by, pm, om
+      orgFilter, orgFilter,                // ?11-?12: org filter (IS NULL bypass + equality)
     )
     .all<{
       id: string
       name: string
+      org_id: number | null
       role_level: number
       role_source: "creator" | "override" | "org" | "group"
     }>()
@@ -259,6 +284,7 @@ projects.get("/", authMiddleware, async (c) => {
     projects: (rows.results ?? []).map((row) => ({
       id: row.id,
       name: row.name,
+      orgId: row.org_id,
       role: {
         level: row.role_level,
         name: roleNameFor(row.role_level),

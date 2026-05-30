@@ -12,6 +12,8 @@ describe("real-D1 harness", () => {
   })
 
   it("isolates storage between tests", async () => {
+    const before = await env.AQUILLA_DB.prepare("SELECT COUNT(*) AS n FROM users").first<{ n: number }>()
+    expect(before?.n).toBe(0)
     await seedUser(1, "alice")
     const row = await env.AQUILLA_DB.prepare("SELECT username FROM users WHERE id = 1").first<{ username: string }>()
     expect(row?.username).toBe("alice")

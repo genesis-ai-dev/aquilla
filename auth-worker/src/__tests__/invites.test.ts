@@ -211,9 +211,7 @@ describe("POST /api/v2/projects/accept-invite", () => {
 
 describe("GET /api/v2/projects/invite-preview/:token", () => {
   it("returns project + role metadata for a valid token (no auth)", async () => {
-    await env.AQUILLA_DB.prepare(
-      "INSERT INTO users (id, username, email, password_hash) VALUES (1, 'creator', 'creator@example.com', 'hash')",
-    ).run()
+    await seedUser(1, "creator")
     await env.AQUILLA_DB.prepare(
       "INSERT INTO projects (id, name, org_id, created_by) VALUES (?, ?, NULL, 1)",
     )

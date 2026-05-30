@@ -5,23 +5,45 @@ import { MultimodalWorkspace } from "./MultimodalWorkspace"
 import { LanguageBlitz, LanguageMarquee } from "./LanguageBlitz"
 import "./homepage.css"
 
+/** Saved choice wins; otherwise follow the OS color scheme; else dark. */
+function readInitialTheme(): "light" | "dark" {
+  try {
+    const saved = localStorage.getItem("aq-home-theme")
+    if (saved === "light" || saved === "dark") return saved
+  } catch { /* no storage */ }
+  try {
+    return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light"
+  } catch { return "dark" }
+}
+
 export function Homepage() {
   const brand = useBrand()
   const rootRef = useRef<HTMLDivElement | null>(null)
   const [scrolled, setScrolled] = useState(false)
-  const [theme, setTheme] = useState<"light" | "dark">(() => {
-    try {
-      const saved = localStorage.getItem("aq-home-theme")
-      if (saved === "light" || saved === "dark") return saved
-    } catch { /* no storage */ }
-    return "dark"
-  })
+  const [theme, setTheme] = useState<"light" | "dark">(readInitialTheme)
   const toggleTheme = () =>
     setTheme((t) => {
       const next = t === "dark" ? "light" : "dark"
       try { localStorage.setItem("aq-home-theme", next) } catch { /* no storage */ }
       return next
     })
+
+  // Follow the OS theme while the visitor hasn't explicitly toggled. Once they
+  // pick a theme (saved in localStorage) their choice wins and system changes
+  // are ignored.
+  useEffect(() => {
+    const mq = window.matchMedia?.("(prefers-color-scheme: dark)")
+    if (!mq) return
+    const onChange = (e: MediaQueryListEvent) => {
+      try {
+        const saved = localStorage.getItem("aq-home-theme")
+        if (saved === "light" || saved === "dark") return
+      } catch { /* no storage */ }
+      setTheme(e.matches ? "dark" : "light")
+    }
+    mq.addEventListener("change", onChange)
+    return () => mq.removeEventListener("change", onChange)
+  }, [])
 
   // Load the Fraunces display face only while this page is mounted.
   useEffect(() => {

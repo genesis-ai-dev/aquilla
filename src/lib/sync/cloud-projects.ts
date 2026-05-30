@@ -19,6 +19,8 @@ export interface CloudProjectSummary {
   id: string
   name: string
   gitlabProjectId: number | null
+  /** The org this project belongs to. Present when fetched with an orgId filter. */
+  orgId?: number | null
   /** Present on the single-project endpoint; list endpoint filters archived rows. */
   archivedAt?: string | null
   /** Present on the single-project endpoint; used to show "archived by X" in Trash. */
@@ -44,16 +46,18 @@ export interface CloudProjectSummary {
  */
 export async function createCloudProject(
   jwt: string,
-  project: { id: string; name: string },
+  project: { id: string; name: string; orgId?: number },
   apiUrl: string = FRONTIER_API_URL,
 ): Promise<void> {
+  const body: Record<string, unknown> = { id: project.id, name: project.name }
+  if (project.orgId != null) body.orgId = project.orgId
   const res = await fetch(`${apiUrl}/api/v2/projects`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
       Authorization: `Bearer ${jwt}`,
     },
-    body: JSON.stringify({ id: project.id, name: project.name }),
+    body: JSON.stringify(body),
   })
   if (!res.ok) {
     const body = await res.text().catch(() => "")
@@ -63,15 +67,18 @@ export async function createCloudProject(
 
 /**
  * GET /api/v2/projects — every non-archived project the caller can access.
+ * Pass `orgId` to scope the list to a specific org (appends `?orgId=N`).
  * Returns [] on any non-2xx or network error (no throw) so Dashboard can
  * render local state even when offline or when the server is unreachable.
  */
 export async function fetchAccessibleProjects(
   jwt: string,
-  apiUrl: string = FRONTIER_API_URL
+  orgId?: number,
+  apiUrl: string = FRONTIER_API_URL,
 ): Promise<CloudProjectSummary[]> {
   try {
-    const res = await fetch(`${apiUrl}/api/v2/projects`, {
+    const url = orgId != null ? `${apiUrl}/api/v2/projects?orgId=${orgId}` : `${apiUrl}/api/v2/projects`
+    const res = await fetch(url, {
       method: "GET",
       headers: { Authorization: `Bearer ${jwt}` },
     })
@@ -138,6 +145,6 @@ export async function resolveCloudProject(
 ): Promise<ProjectStateResponse | CloudProjectSummary | null> {
   const direct = await fetchProjectState(projectId, jwt, apiUrl)
   if (direct) return direct
-  const list = await fetchAccessibleProjects(jwt, apiUrl)
+  const list = await fetchAccessibleProjects(jwt, undefined, apiUrl)
   return list.find((p) => p.id === projectId) ?? null
 }

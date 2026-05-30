@@ -42,7 +42,7 @@ describe("fetchAccessibleProjects", () => {
     })
     global.fetch = fetchMock as unknown as typeof fetch
 
-    const result = await fetchAccessibleProjects("jwt-user", API)
+    const result = await fetchAccessibleProjects("jwt-user", undefined, API)
 
     expect(result).toHaveLength(2)
     expect(result[0].id).toBe("p-1")
@@ -56,13 +56,13 @@ describe("fetchAccessibleProjects", () => {
 
   it("returns empty array on 401/500/network error instead of throwing", async () => {
     global.fetch = mockFetch(401, { error: "unauth" }) as unknown as typeof fetch
-    expect(await fetchAccessibleProjects("jwt", API)).toEqual([])
+    expect(await fetchAccessibleProjects("jwt", undefined, API)).toEqual([])
 
     global.fetch = mockFetch(500, "boom") as unknown as typeof fetch
-    expect(await fetchAccessibleProjects("jwt", API)).toEqual([])
+    expect(await fetchAccessibleProjects("jwt", undefined, API)).toEqual([])
 
     global.fetch = vi.fn(async () => { throw new Error("offline") }) as unknown as typeof fetch
-    expect(await fetchAccessibleProjects("jwt", API)).toEqual([])
+    expect(await fetchAccessibleProjects("jwt", undefined, API)).toEqual([])
   })
 })
 
@@ -271,5 +271,24 @@ describe("resolveCloudProject", () => {
 
     const result = await resolveCloudProject("p-missing", "jwt", API)
     expect(result).toBeNull()
+  })
+})
+
+describe("fetchAccessibleProjects orgId", () => {
+  it("appends ?orgId when given and surfaces orgId on results", async () => {
+    let url = ""
+    global.fetch = vi.fn(async (input) => {
+      url = typeof input === "string" ? input : (input as Request).url
+      return new Response(JSON.stringify({ projects: [{ id: "p1", name: "John", orgId: 7, role: { level: 700, name: "owner", source: "creator" }, files: [] }] }), { status: 200 })
+    }) as unknown as typeof fetch
+    const list = await fetchAccessibleProjects("jwt", 7)
+    expect(url).toMatch(/\/api\/v2\/projects\?orgId=7$/)
+    expect(list[0].orgId).toBe(7)
+  })
+  it("omits the query param when no orgId is given", async () => {
+    let url = ""
+    global.fetch = vi.fn(async (input) => { url = typeof input === "string" ? input : (input as Request).url; return new Response(JSON.stringify({ projects: [] }), { status: 200 }) }) as unknown as typeof fetch
+    await fetchAccessibleProjects("jwt")
+    expect(url).toMatch(/\/api\/v2\/projects$/)
   })
 })

@@ -24,7 +24,7 @@ function withTimeout(ms: number = DEFAULT_TIMEOUT_MS): { signal: AbortSignal; ca
  * is unhelpful in catch blocks; this maps it to something the UI can
  * surface verbatim.
  */
-async function fetchWithTimeout(
+export async function fetchWithTimeout(
   url: string,
   init: RequestInit,
   ms: number = DEFAULT_TIMEOUT_MS
@@ -94,6 +94,18 @@ export interface OrgMemberProject {
 
 function authHeaders(jwt: string): HeadersInit {
   return { "Content-Type": "application/json", Authorization: `Bearer ${jwt}` };
+}
+
+export interface OrgSummary {
+  id: number
+  name: string | null
+  role: OrgRole
+}
+
+export async function listMyOrgs(jwt: string): Promise<OrgSummary[]> {
+  const res = await fetchWithTimeout(`${FRONTIER_BASE}/api/v2/orgs`, { headers: authHeaders(jwt) })
+  if (!res.ok) throw new Error(`listMyOrgs failed: HTTP ${res.status}`)
+  return ((await res.json()) as { orgs: OrgSummary[] }).orgs
 }
 
 export async function getOrCreateMyOrg(jwt: string): Promise<MyOrg> {

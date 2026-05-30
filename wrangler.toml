@@ -13,6 +13,10 @@
 # No service bindings needed — the SPA fetch()es absolute URLs from
 # VITE_AUTH_BASE / VITE_SYNC_WORKER_HOST / VITE_CHAT_BASE wired in deploy.yml.
 #
+# aquilla.app is the canonical app domain. web.aquilla.app is retired.
+# Signed-out visitors see public/homepage.html; signed-in users go straight
+# to the SPA via the aq_hint cookie check in worker/index.ts.
+#
 # =============================================================================
 # ROUTE / ENV CONVENTION — same pattern as auth-worker / sync-worker
 # =============================================================================
@@ -49,7 +53,7 @@ directory = "./dist"
 not_found_handling = "single-page-application"
 
 # ---------------------------------------------------------------------------
-# Production environment — attaches aquilla.app/* (canonical) and web.aquilla.app/* (transitional) to this Worker.
+# Production environment — attaches aquilla.app/* to this Worker. web.aquilla.app is retired.
 # Same worker name as top-level (aquilla-web), so CI's bare `wrangler deploy`
 # and local `wrangler deploy --env=production` target the same Worker.
 # `[env.production.assets]` re-declared because env blocks don't inherit
@@ -59,7 +63,7 @@ not_found_handling = "single-page-application"
 name = "aquilla-web"
 account_id = "6a80496d1e59948a9cbaa3c643ba81d7"
 workers_dev = true
-routes = ["aquilla.app/*", "web.aquilla.app/*"]
+routes = ["aquilla.app/*"]
 
 [env.production.assets]
 directory = "./dist"

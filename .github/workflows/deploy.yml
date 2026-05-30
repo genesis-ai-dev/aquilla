@@ -114,7 +114,7 @@ jobs:
         if: steps.decide.outputs.deploy == 'true'
         env:
           # API lives on its own subdomain (api.aquilla.app) — separate from
-          # the SPA (web.aquilla.app) and the marketing apex (aquilla.app).
+          # the SPA (aquilla.app — the canonical app domain, no web. prefix).
           # Auth is bearer-token-only so cross-subdomain CORS is permitted
           # (see CORS_HEADERS in auth-worker/src/index.ts). Safari drops
           # *.workers.dev WebSockets, which is why sync stays on a real zone

@@ -1,6 +1,8 @@
 import { Routes, Route } from "react-router-dom"
 import { OrgHome } from "@/components/org/OrgHome"
 import { ProjectsList } from "@/components/org/ProjectsList"
+import { TeamsList } from "@/components/org/TeamsList"
+import { TeamDetail } from "@/components/org/TeamDetail"
 import { ProjectOverview } from "@/components/org/ProjectOverview"
 import { ProjectWorkspace } from "@/components/ProjectWorkspace"
 import { ProjectSettings } from "@/components/ProjectSettings"
@@ -81,6 +83,8 @@ function AppRoutes() {
       <Route path="/__dev/login" element={<DevLoginRoute />} />
       <Route path="/settings" element={<Settings />} />
       <Route path="/members" element={<MembersPage />} />
+      <Route path="/teams" element={<TeamsList />} />
+      <Route path="/teams/:groupId" element={<TeamDetail />} />
     </Routes>
   )
 }

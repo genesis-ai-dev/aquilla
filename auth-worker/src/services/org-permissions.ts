@@ -462,6 +462,53 @@ export async function getOrgGroupDetail(
   }
 }
 
+/** True if a group with this id exists in this org. */
+export async function groupExistsInOrg(env: Env, orgId: number, groupId: number): Promise<boolean> {
+  const row = await env.AQUILLA_DB.prepare(
+    "SELECT 1 AS ok FROM groups WHERE id = ? AND org_id = ?",
+  ).bind(groupId, orgId).first<{ ok: number }>()
+  return row != null
+}
+
+export interface GroupRow { id: number; name: string; description: string | null }
+
+/** Create a group. Returns null if the name already exists in the org. */
+export async function createGroup(env: Env, orgId: number, name: string, description: string | null, createdBy: number): Promise<GroupRow | null> {
+  const existing = await env.AQUILLA_DB.prepare(
+    "SELECT id FROM groups WHERE org_id = ? AND name = ?",
+  ).bind(orgId, name).first<{ id: number }>()
+  if (existing) return null
+  const row = await env.AQUILLA_DB.prepare(
+    "INSERT INTO groups (org_id, name, description, created_by) VALUES (?, ?, ?, ?) RETURNING id, name, description",
+  ).bind(orgId, name, description, createdBy).first<GroupRow>()
+  return row
+}
+
+/** Update name/description. Returns null on duplicate-name conflict. */
+export async function updateGroup(env: Env, orgId: number, groupId: number, name: string | undefined, description: string | undefined): Promise<GroupRow | null> {
+  if (name != null) {
+    const clash = await env.AQUILLA_DB.prepare(
+      "SELECT id FROM groups WHERE org_id = ? AND name = ? AND id != ?",
+    ).bind(orgId, name, groupId).first<{ id: number }>()
+    if (clash) return null
+  }
+  await env.AQUILLA_DB.prepare(
+    `UPDATE groups SET
+       name = COALESCE(?, name),
+       description = COALESCE(?, description),
+       updated_at = CURRENT_TIMESTAMP
+     WHERE id = ? AND org_id = ?`,
+  ).bind(name ?? null, description ?? null, groupId, orgId).run()
+  return env.AQUILLA_DB.prepare(
+    "SELECT id, name, description FROM groups WHERE id = ?",
+  ).bind(groupId).first<GroupRow>()
+}
+
+/** Delete a group (FK cascades members + grants). */
+export async function deleteGroup(env: Env, orgId: number, groupId: number): Promise<void> {
+  await env.AQUILLA_DB.prepare("DELETE FROM groups WHERE id = ? AND org_id = ?").bind(groupId, orgId).run()
+}
+
 export interface ProjectMembershipInOrg {
   projectId: string
   projectName: string

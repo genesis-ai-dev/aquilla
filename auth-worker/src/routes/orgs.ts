@@ -6,16 +6,21 @@ import { Hono } from "hono"
 import { zValidator } from "@hono/zod-validator"
 import { z } from "zod"
 import { authMiddleware, type AuthHonoEnv } from "../middleware/auth"
+import { ROLE } from "../types"
 import {
   bumpOrgActivity,
+  createGroup,
+  deleteGroup,
   getOrCreateUserOrg,
   getOrgGroupDetail,
   getOrgMemberRole,
+  groupExistsInOrg,
   listOrgGroups,
   listOrgMembersWithUsers,
   listPendingInvitesInOrg,
   listUserDirectMembershipsInOrg,
   listUserOrgs,
+  updateGroup,
 } from "../services/org-permissions"
 import {
   ALL_ROLE_LEVELS,
@@ -96,6 +101,54 @@ orgs.get("/:orgId/groups/:groupId", async (c) => {
   const detail = await getOrgGroupDetail(c.env, orgId, groupId)
   if (!detail) return c.json({ error: "group not found" }, 404)
   return c.json(detail)
+})
+
+const groupBody = z.object({
+  name: z.string().min(1).max(200),
+  description: z.string().max(2000).optional(),
+})
+
+orgs.post("/:orgId/groups", zValidator("json", groupBody), async (c) => {
+  const user = c.get("user")
+  const orgId = parseInt(c.req.param("orgId"), 10)
+  if (!Number.isFinite(orgId)) return c.json({ error: "invalid orgId" }, 400)
+  const callerRole = await getOrgMemberRole(c.env, orgId, user.id)
+  if (callerRole == null || callerRole < ROLE.MAINTAINER) return c.json({ error: "org role >= maintainer required" }, 403)
+  const { name, description } = c.req.valid("json")
+  const group = await createGroup(c.env, orgId, name, description ?? null, user.id)
+  if (!group) return c.json({ error: "a team with that name already exists" }, 409)
+  return c.json(group)
+})
+
+const groupPatchBody = z.object({
+  name: z.string().min(1).max(200).optional(),
+  description: z.string().max(2000).optional(),
+})
+
+orgs.patch("/:orgId/groups/:groupId", zValidator("json", groupPatchBody), async (c) => {
+  const user = c.get("user")
+  const orgId = parseInt(c.req.param("orgId"), 10)
+  const groupId = parseInt(c.req.param("groupId"), 10)
+  if (!Number.isFinite(orgId) || !Number.isFinite(groupId)) return c.json({ error: "invalid id" }, 400)
+  const callerRole = await getOrgMemberRole(c.env, orgId, user.id)
+  if (callerRole == null || callerRole < ROLE.MAINTAINER) return c.json({ error: "org role >= maintainer required" }, 403)
+  if (!(await groupExistsInOrg(c.env, orgId, groupId))) return c.json({ error: "group not found" }, 404)
+  const { name, description } = c.req.valid("json")
+  const updated = await updateGroup(c.env, orgId, groupId, name, description)
+  if (!updated) return c.json({ error: "a team with that name already exists" }, 409)
+  return c.json(updated)
+})
+
+orgs.delete("/:orgId/groups/:groupId", async (c) => {
+  const user = c.get("user")
+  const orgId = parseInt(c.req.param("orgId"), 10)
+  const groupId = parseInt(c.req.param("groupId"), 10)
+  if (!Number.isFinite(orgId) || !Number.isFinite(groupId)) return c.json({ error: "invalid id" }, 400)
+  const callerRole = await getOrgMemberRole(c.env, orgId, user.id)
+  if (callerRole == null || callerRole < ROLE.MAINTAINER) return c.json({ error: "org role >= maintainer required" }, 403)
+  if (!(await groupExistsInOrg(c.env, orgId, groupId))) return c.json({ error: "group not found" }, 404)
+  await deleteGroup(c.env, orgId, groupId)
+  return c.json({ removed: true })
 })
 
 // Strict role validation — only the seven canonical levels are accepted.

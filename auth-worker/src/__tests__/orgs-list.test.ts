@@ -34,4 +34,13 @@ describe("GET /api/v2/orgs", () => {
     expect(body.orgs[0].role.level).toBe(700)
     expect(body.orgs[0].name).toBe("newbie's workspace")
   })
+
+  it("does not list an org the caller has no membership in", async () => {
+    await seedUser(1, "alice")
+    await seedUser(2, "bob")
+    await env.AQUILLA_DB.prepare("INSERT INTO organizations (id, name, owner_user_id) VALUES (1, 'Alice Org', 1), (2, 'Bob Org', 2)").run()
+    await env.AQUILLA_DB.prepare("INSERT INTO org_members (org_id, user_id, role_level, granted_by) VALUES (1, 1, 700, 1), (2, 2, 700, 2)").run()
+    const { body } = await getOrgs("alice")
+    expect(body.orgs.map((o) => o.id)).toEqual([1])
+  })
 })

@@ -448,10 +448,10 @@ export async function getOrgGroupDetail(
     `SELECT gpg.project_id AS id, p.name AS name, gpg.role_level AS granted
        FROM group_project_grants gpg
        JOIN projects p ON p.id = gpg.project_id
-      WHERE gpg.group_id = ?
+      WHERE gpg.group_id = ? AND p.org_id = ?
       ORDER BY p.name COLLATE NOCASE`,
   )
-    .bind(groupId)
+    .bind(groupId, orgId)
     .all<{ id: string; name: string; granted: number }>()
 
   return {

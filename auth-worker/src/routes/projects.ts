@@ -201,6 +201,10 @@ projects.get("/", authMiddleware, async (c) => {
   const orgIdParam = c.req.query("orgId")
   const orgFilter = orgIdParam != null && orgIdParam !== "" ? Number(orgIdParam) : null
 
+  if (orgFilter !== null && !Number.isInteger(orgFilter)) {
+    return c.json({ error: "invalid orgId" }, 400)
+  }
+
   // AD-12 max-wins across direct + group + org + creator. Each path is
   // computed in the same query; role_level = MAX(coalesced levels). On a
   // tie, attribution credit goes in declaration order (override > group >

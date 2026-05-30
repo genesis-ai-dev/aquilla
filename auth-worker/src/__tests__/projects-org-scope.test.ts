@@ -26,6 +26,23 @@ describe("GET /api/v2/projects org scoping", () => {
     const ids = body.projects.map((p) => p.id).sort()
     expect(ids).toEqual(["p1", "p2"])
   })
+
+  it("rejects a non-numeric orgId with 400", async () => {
+    await seedTwoOrgProjects()
+    const res = await app.request("/api/v2/projects?orgId=abc", { headers: authHeader(await jwtFor("wendi")) }, env)
+    expect(res.status).toBe(400)
+  })
+
+  it("returns nothing from an org the caller is not a member of", async () => {
+    await seedUser(1, "wendi")
+    await seedUser(7, "stranger")
+    await env.AQUILLA_DB.prepare("INSERT INTO organizations (id, name, owner_user_id) VALUES (1, 'A', 1), (2, 'B', 7)").run()
+    await env.AQUILLA_DB.prepare("INSERT INTO org_members (org_id, user_id, role_level, granted_by) VALUES (1, 1, 700, 1), (2, 7, 700, 7)").run()
+    await env.AQUILLA_DB.prepare("INSERT INTO projects (id, name, org_id, created_by) VALUES ('a1', 'A1', 1, 1), ('b1', 'B1', 2, 7)").run()
+    const res = await app.request("/api/v2/projects?orgId=2", { headers: authHeader(await jwtFor("wendi")) }, env)
+    const body = (await res.json()) as { projects: Array<{ id: string }> }
+    expect(body.projects).toEqual([])
+  })
 })
 
 describe("POST /api/v2/projects org gating", () => {

@@ -41,4 +41,15 @@ describe("GET /api/v2/orgs/:orgId/groups/:groupId", () => {
     expect(body.members.map((m) => m.username).sort()).toEqual(["anna", "wendi"])
     expect(body.projects).toEqual([{ id: "pa", name: "Bambara", grantedRoleLevel: 400 }])
   })
+
+  it("excludes cross-org project grants from group detail", async () => {
+    await seedGroups()
+    await seedUser(8, "other")
+    await env.AQUILLA_DB.prepare("INSERT INTO organizations (id, name, owner_user_id) VALUES (2, 'Other Org', 8)").run()
+    await env.AQUILLA_DB.prepare("INSERT INTO projects (id, name, org_id, created_by) VALUES ('pb', 'Foreign', 2, 8)").run()
+    await env.AQUILLA_DB.prepare("INSERT INTO group_project_grants (group_id, project_id, role_level) VALUES (10, 'pb', 400)").run()
+    const res = await app.request("/api/v2/orgs/1/groups/10", { headers: authHeader(await jwtFor("wendi")) }, env)
+    const body = (await res.json()) as { projects: Array<{ id: string }> }
+    expect(body.projects.map((p) => p.id)).toEqual(["pa"]) // pb (org 2) excluded
+  })
 })

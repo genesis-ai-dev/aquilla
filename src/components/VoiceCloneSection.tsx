@@ -122,14 +122,14 @@ export function VoiceCloneSection({ voice, projectId, fileId, session, onChange,
     <div
       ref={sectionRef}
       className={cn(
-        "rounded-md border border-violet-200/60 bg-violet-50/40 p-3 transition-shadow dark:border-violet-500/20 dark:bg-violet-950/20",
-        pulse && "ring-2 ring-violet-400/70 ring-offset-1",
+        "rounded-md border border-border bg-muted/30 p-3 transition-shadow dark:border-border dark:bg-muted/30",
+        pulse && "ring-2 ring-primary/50 ring-offset-1",
       )}
     >
       <div className="mb-1 flex items-center gap-2 text-sm font-medium">
-        <Sparkles className="h-3.5 w-3.5 text-violet-500" /> Voice profile (clone)
+        <Sparkles className="h-3.5 w-3.5 text-muted-foreground" /> Voice profile (clone)
         {voice.referenceAudioId && (
-          <span className="rounded-full bg-violet-500/15 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-violet-600 dark:text-violet-300">
+          <span className="rounded-full bg-muted px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground dark:text-muted-foreground">
             Active
           </span>
         )}

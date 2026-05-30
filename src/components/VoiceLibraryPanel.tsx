@@ -237,7 +237,7 @@ export function VoiceLibraryPanel({
                     <span className="truncate">{voice.name}</span>
                     {isNarrator && <Star className="h-3 w-3 shrink-0 text-primary" aria-label="Narrator (default)" />}
                     {isClone && (
-                      <span className="inline-flex items-center gap-0.5 rounded-full bg-violet-100 px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-wide text-violet-700 dark:bg-violet-900/50 dark:text-violet-300">
+                      <span className="inline-flex items-center gap-0.5 rounded-full bg-muted px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-wide text-muted-foreground dark:bg-muted dark:text-muted-foreground">
                         <Sparkles className="h-2 w-2" /> Cloned
                       </span>
                     )}

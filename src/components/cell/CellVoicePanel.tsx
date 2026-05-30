@@ -186,7 +186,7 @@ function OverflowMenu({
             onClick={() => { setOpen(false); onMakeCharacter() }}
             className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm hover:bg-accent/50"
           >
-            <UserPlus className="h-3.5 w-3.5 shrink-0 text-violet-500" />
+            <UserPlus className="h-3.5 w-3.5 shrink-0" />
             <span className="flex-1">Clone a character</span>
           </button>
         )}
@@ -314,10 +314,10 @@ export function CellVoicePanel({
         title={primaryTitle}
         aria-label={primaryTitle}
         className={cn(
-          "grid h-9 w-9 shrink-0 place-items-center rounded-full transition-all",
+          "grid h-9 w-9 shrink-0 place-items-center rounded-full transition-colors",
           hasTake
-            ? "bg-foreground text-background hover:scale-105"
-            : "bg-gradient-to-br from-violet-500 to-fuchsia-500 text-white shadow-[0_0_12px_0_rgba(139,92,246,0.35)] hover:scale-105 hover:shadow-[0_0_20px_3px_rgba(139,92,246,0.5)]",
+            ? "bg-foreground text-background hover:opacity-90"
+            : "bg-primary text-primary-foreground hover:bg-primary/90",
         )}
       >
         {loading ? (

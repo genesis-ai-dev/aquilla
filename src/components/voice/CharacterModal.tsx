@@ -344,14 +344,14 @@ function CharacterModalBody({
 
           {/* Clone layer — optional. Layer a reference recording on top of the
               base voice to make it sound like a specific person. */}
-          <div className="space-y-3 rounded-xl border border-violet-300/50 bg-violet-50/40 p-3 dark:border-violet-500/20 dark:bg-violet-950/20">
+          <div className="space-y-3 rounded-xl border border-border bg-muted/30 p-3 dark:border-border dark:bg-muted/30">
             <div className="space-y-1">
               <div className="flex items-center gap-2">
                 <Label className="flex items-center gap-1.5">
-                  <Sparkles className="h-3.5 w-3.5 text-violet-500" /> Clone a voice (optional)
+                  <Sparkles className="h-3.5 w-3.5 text-muted-foreground" /> Clone a voice (optional)
                 </Label>
                 {isCloned && (
-                  <span className="inline-flex items-center gap-1 rounded-full bg-violet-100 px-1.5 py-0.5 text-[10px] font-medium text-violet-700 dark:bg-violet-900/50 dark:text-violet-300">
+                  <span className="inline-flex items-center gap-1 rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground dark:bg-muted dark:text-muted-foreground">
                     <Sparkles className="h-2.5 w-2.5" /> Cloned
                   </span>
                 )}

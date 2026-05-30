@@ -24,7 +24,7 @@ export function SpeakerChip({ voice, voices, onAssign }: {
           >
             <span className="h-2.5 w-2.5 shrink-0 rounded-full border" style={{ backgroundColor: voice?.color || "#94a3b8" }} />
             <span className="truncate">{voice?.name ?? "Unassigned"}</span>
-            {voice?.referenceAudioId && <Sparkles className="h-2.5 w-2.5 shrink-0 text-violet-500" />}
+            {voice?.referenceAudioId && <Sparkles className="h-2.5 w-2.5 shrink-0 text-muted-foreground" />}
           </button>
         }
       />
@@ -48,7 +48,7 @@ export function SpeakerChip({ voice, voices, onAssign }: {
                 style={{ backgroundColor: v.color || "#94a3b8" }}
               />
               <span className="flex-1 truncate">{v.name}</span>
-              {v.referenceAudioId && <Sparkles className="h-3 w-3 shrink-0 text-violet-500" />}
+              {v.referenceAudioId && <Sparkles className="h-3 w-3 shrink-0 text-muted-foreground" />}
             </button>
           ))}
         </div>

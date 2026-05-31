@@ -91,6 +91,28 @@ export async function fetchAccessibleProjects(
 }
 
 /**
+ * GET /api/v2/projects?orgId=N&archived=true — archived (untracked) projects in
+ * an org. Same access rules as the live list; returns [] on any error.
+ */
+export async function fetchArchivedProjects(
+  jwt: string,
+  orgId: number,
+  apiUrl: string = FRONTIER_API_URL,
+): Promise<CloudProjectSummary[]> {
+  try {
+    const res = await fetch(`${apiUrl}/api/v2/projects?orgId=${orgId}&archived=true`, {
+      method: "GET",
+      headers: { Authorization: `Bearer ${jwt}` },
+    })
+    if (!res.ok) return []
+    const body = (await res.json()) as { projects?: CloudProjectSummary[] }
+    return body.projects ?? []
+  } catch {
+    return []
+  }
+}
+
+/**
  * Build a minimal `ProjectRecord` from a server summary. Required ProjectRecord
  * fields (sourceLanguage, targetLanguage, files, members) don't exist
  * server-side — they live in Y.Doc state and IDB — so we seed empty defaults.

@@ -19,6 +19,7 @@ export function OrgSidebar() {
         {isAdmin && <>
           <div className="my-1 border-t" />
           <NavLink to="/members" className={link}>Members</NavLink>
+          <NavLink to="/projects/archived" className={link}>Archived</NavLink>
           <NavLink to="/settings" className={link}>Settings</NavLink>
         </>}
       </nav>

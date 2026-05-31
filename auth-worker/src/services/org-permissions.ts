@@ -48,6 +48,23 @@ export async function getOrCreateUserOrg(
   return { id: inserted.id, name, role: 700 }
 }
 
+export async function createOrgForUser(env: Env, user: AuthUser, name: string): Promise<{ id: number; name: string }> {
+  const inserted = await env.AQUILLA_DB.prepare(
+    "INSERT INTO organizations (name, owner_user_id) VALUES (?, ?) RETURNING id",
+  ).bind(name, user.id).first<{ id: number }>()
+  if (!inserted) throw new Error("failed to insert organization")
+  await env.AQUILLA_DB.prepare(
+    "INSERT INTO org_members (org_id, user_id, role_level, granted_by) VALUES (?, ?, 700, ?) ON CONFLICT(org_id, user_id) DO NOTHING",
+  ).bind(inserted.id, user.id, user.id).run()
+  return { id: inserted.id, name }
+}
+
+export async function renameOrg(env: Env, orgId: number, name: string): Promise<void> {
+  await env.AQUILLA_DB.prepare(
+    "UPDATE organizations SET name = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+  ).bind(name, orgId).run()
+}
+
 export interface UserOrgSummary {
   id: number
   name: string | null

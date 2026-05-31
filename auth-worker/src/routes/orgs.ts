@@ -12,6 +12,7 @@ import {
   attachGroupProject,
   bumpOrgActivity,
   createGroup,
+  createOrgForUser,
   deleteGroup,
   detachGroupProject,
   getOrCreateUserOrg,
@@ -25,6 +26,7 @@ import {
   listUserDirectMembershipsInOrg,
   listUserOrgs,
   removeGroupMember,
+  renameOrg,
   updateGroup,
   updateGroupProjectRole,
 } from "../services/org-permissions"
@@ -50,6 +52,28 @@ orgs.get("/", async (c) => {
       role: { level: o.role, name: ROLE_NAMES[o.role] ?? "unknown" },
     })),
   })
+})
+
+/** POST /api/v2/orgs — create a new named org; caller becomes owner. */
+const createOrgBody = z.object({ name: z.string().min(1).max(200) })
+orgs.post("/", zValidator("json", createOrgBody), async (c) => {
+  const user = c.get("user")
+  const { name } = c.req.valid("json")
+  const org = await createOrgForUser(c.env, user, name)
+  return c.json({ id: org.id, name: org.name, role: { level: 700, name: ROLE_NAMES[700] ?? "owner" } })
+})
+
+/** PATCH /api/v2/orgs/:orgId — rename the org (org role >= maintainer). */
+const renameOrgBody = z.object({ name: z.string().min(1).max(200) })
+orgs.patch("/:orgId", zValidator("json", renameOrgBody), async (c) => {
+  const user = c.get("user")
+  const orgId = parseInt(c.req.param("orgId"), 10)
+  if (!Number.isFinite(orgId)) return c.json({ error: "invalid orgId" }, 400)
+  const role = await getOrgMemberRole(c.env, orgId, user.id)
+  if (role == null || role < ROLE.MAINTAINER) return c.json({ error: "org role >= maintainer required" }, 403)
+  const { name } = c.req.valid("json")
+  await renameOrg(c.env, orgId, name)
+  return c.json({ id: orgId, name })
 })
 
 /** GET /api/v2/orgs/me — caller's owned organization (lazy-created). */

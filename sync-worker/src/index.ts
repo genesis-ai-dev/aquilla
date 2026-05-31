@@ -21,6 +21,7 @@ import { handleEventsWriteRequest } from "./events/route"
 import { handleFilesReadRequest } from "./events/files-read-route"
 import { handleBulkImportRequest } from "./events/import-route"
 import { handleExportSourceRequest } from "./events/export-route"
+import { handleExportBundleRequest } from "./events/export-bundle-route"
 import { handleRebuildProjectionRequest } from "./events/rebuild"
 import { handleRebuildFtsRequest } from "./events/rebuild-fts"
 import { handleSearchReadRequest, handleSearchPassagesRequest } from "./events/search-route"
@@ -162,6 +163,8 @@ export default {
     if (bulkImportResponse) return bulkImportResponse
     const exportSourceResponse = await handleExportSourceRequest(request, env)
     if (exportSourceResponse) return exportSourceResponse
+    const exportBundleResponse = await handleExportBundleRequest(request, env)
+    if (exportBundleResponse) return exportBundleResponse
     const eventsWriteResponse = await handleEventsWriteRequest(request, env)
     if (eventsWriteResponse) return withCors(eventsWriteResponse, request)
 

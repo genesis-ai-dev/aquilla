@@ -205,6 +205,10 @@ projects.get("/", authMiddleware, async (c) => {
     return c.json({ error: "invalid orgId" }, 400)
   }
 
+  const archivedParam = c.req.query("archived")
+  const wantArchived = archivedParam === "true" || archivedParam === "1"
+  const archivedClause = wantArchived ? "p.archived_at IS NOT NULL" : "p.archived_at IS NULL"
+
   // AD-12 max-wins across direct + group + org + creator. Each path is
   // computed in the same query; role_level = MAX(coalesced levels). On a
   // tie, attribution credit goes in declaration order (override > group >
@@ -217,7 +221,7 @@ projects.get("/", authMiddleware, async (c) => {
   //   ?11    : orgFilter (NULL or number) — IS NULL check (no-filter case)
   //   ?12    : orgFilter (NULL or number) — equality check (filter case)
   const rows = await c.env.AQUILLA_DB.prepare(
-    `SELECT p.id, p.name, p.org_id,
+    `SELECT p.id, p.name, p.org_id, p.archived_at,
             MAX(
               COALESCE(pm.role_level, 0),
               COALESCE(gg.max_grant,  0),
@@ -253,7 +257,7 @@ projects.get("/", authMiddleware, async (c) => {
           GROUP BY gpg.project_id
        ) gg
          ON gg.project_id = p.id
-      WHERE p.archived_at IS NULL
+      WHERE ${archivedClause}
         AND (
           p.created_by = ?
           OR pm.user_id = ?
@@ -273,6 +277,7 @@ projects.get("/", authMiddleware, async (c) => {
       id: string
       name: string
       org_id: number | null
+      archived_at: string | null
       role_level: number
       role_source: "creator" | "override" | "org" | "group"
     }>()
@@ -285,6 +290,7 @@ projects.get("/", authMiddleware, async (c) => {
       id: row.id,
       name: row.name,
       orgId: row.org_id,
+      archivedAt: row.archived_at,
       role: {
         level: row.role_level,
         name: roleNameFor(row.role_level),

@@ -1,20 +1,62 @@
+import { useEffect, useState } from "react"
+import { Link } from "react-router-dom"
 import { AppShell } from "@/components/AppShell"
 import { OrgSidebar } from "@/components/org/OrgSidebar"
 import { OrgBreadcrumb } from "@/components/org/OrgBreadcrumb"
-import { Switch } from "@/components/ui/switch"
+import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { useAnalyticsConsent } from "@/hooks/useAnalyticsConsent"
-import { PersonalProviderSection } from "@/components/settings/PersonalProviderSection"
+import { useActiveOrg } from "@/context/OrgContext"
+import { useFrontierSession } from "@/hooks/useFrontierSession"
+import { useOrgMembers } from "@/hooks/useOrg"
+import { renameOrg } from "@/lib/frontier/orgs"
+import { getPortfolio } from "@/lib/frontier/portfolio"
 
+/**
+ * Org-level settings — the manager's home for the organization itself. The old
+ * /settings page was admin-gated but personal-only; those personal prefs moved
+ * to /preferences (reachable by everyone via the AccountSwitcher). This page is
+ * the org surface: identity + rename (maintainer+), and at-a-glance facts.
+ */
 export function Settings() {
-  const { enabled, setEnabled } = useAnalyticsConsent()
+  const { activeOrg, activeOrgId, isLoading, refresh } = useActiveOrg()
+  const { session } = useFrontierSession()
+  const jwt = session?.jwt ?? null
 
-  // Settings is reached from the org sidebar, so it renders inside the same
-  // AppShell + OrgSidebar chrome as the other sections — keeping the org frame
-  // visible instead of ejecting to a bare page. (The preferences themselves are
-  // personal/device-scoped, as the subtitle states; the breadcrumb just shows
-  // which workspace you're in.) The main slot owns its scroll because
-  // AppShell's main wrapper is overflow-hidden.
+  const canRename = (activeOrg?.role.level ?? 0) >= 600
+  const [editing, setEditing] = useState(false)
+  const [name, setName] = useState("")
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const { members } = useOrgMembers(activeOrgId)
+  const [projectCount, setProjectCount] = useState<number | null>(null)
+  useEffect(() => {
+    if (!jwt || activeOrgId == null) return
+    let cancelled = false
+    getPortfolio(jwt, activeOrgId)
+      .then((list) => { if (!cancelled) setProjectCount(list.length) })
+      .catch(() => { if (!cancelled) setProjectCount(null) })
+    return () => { cancelled = true }
+  }, [jwt, activeOrgId])
+
+  async function handleSave() {
+    if (!jwt || activeOrgId == null) return
+    const trimmed = name.trim()
+    if (!trimmed) return
+    setBusy(true)
+    setError(null)
+    try {
+      await renameOrg(jwt, activeOrgId, trimmed)
+      await refresh()
+      setEditing(false)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setBusy(false)
+    }
+  }
+
   return (
     <AppShell
       sidebar={<OrgSidebar />}
@@ -23,46 +65,74 @@ export function Settings() {
       main={
         <div className="h-full overflow-y-auto">
           <div className="mx-auto max-w-2xl p-6">
-            <h1 className="mb-1 text-xl font-semibold">Settings</h1>
+            <h1 className="mb-1 text-xl font-semibold">Organization settings</h1>
             <p className="mb-6 text-sm text-muted-foreground">
-              Preferences that apply to you across all projects on this device.
+              Manage this organization. Personal preferences moved to{" "}
+              <Link to="/preferences" className="underline underline-offset-4">Preferences</Link>.
             </p>
 
-            <section className="space-y-3">
-              <div>
-                <h2 className="text-base font-semibold">Privacy</h2>
-                <p className="text-xs text-muted-foreground">
-                  Control what's shared with us about how you use the app.
-                </p>
-              </div>
-              <div className="rounded-lg border bg-card p-4">
-                <div className="flex items-start justify-between gap-4">
-                  <div className="space-y-1">
-                    <Label htmlFor="analytics-consent" className="text-sm font-medium">
-                      Share anonymous usage data
-                    </Label>
-                    <p className="text-xs text-muted-foreground">
-                      Events like project creation, exports, and AI translations. Never the contents of your
-                      translations or files.
-                    </p>
-                  </div>
-                  <Switch
-                    id="analytics-consent"
-                    checked={enabled}
-                    onCheckedChange={setEnabled}
-                  />
-                </div>
-                {!enabled && (
-                  <p className="mt-3 text-xs text-amber-600 dark:text-amber-400">
-                    With analytics disabled, we may not be able to help diagnose problems you encounter.
-                  </p>
-                )}
-              </div>
-            </section>
+            {isLoading ? (
+              <p className="text-sm text-muted-foreground">Loading…</p>
+            ) : !activeOrg ? (
+              <p className="text-sm text-muted-foreground">No active organization.</p>
+            ) : (
+              <div className="space-y-6">
+                {/* Identity */}
+                <section className="rounded-lg border bg-card p-4">
+                  <h2 className="text-base font-semibold">Identity</h2>
+                  {editing ? (
+                    <div className="mt-3 space-y-2">
+                      <Label htmlFor="org-name" className="text-xs">Organization name</Label>
+                      <Input
+                        id="org-name"
+                        value={name}
+                        onChange={(e) => setName(e.target.value)}
+                        disabled={busy}
+                      />
+                      {error && <p className="text-xs text-destructive">{error}</p>}
+                      <div className="flex gap-2">
+                        <Button size="sm" onClick={handleSave} disabled={busy || !name.trim()}>Save</Button>
+                        <Button size="sm" variant="outline" onClick={() => setEditing(false)} disabled={busy}>Cancel</Button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="mt-3 flex items-center justify-between gap-4">
+                      <div>
+                        <p className="text-lg font-medium">{activeOrg.name ?? "Untitled organization"}</p>
+                        <p className="text-xs text-muted-foreground">Your role: {activeOrg.role.name}</p>
+                      </div>
+                      {canRename && (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => { setName(activeOrg.name ?? ""); setEditing(true) }}
+                        >
+                          Rename
+                        </Button>
+                      )}
+                    </div>
+                  )}
+                </section>
 
-            <div className="mt-8">
-              <PersonalProviderSection />
-            </div>
+                {/* Facts */}
+                <section className="grid grid-cols-2 gap-4">
+                  <div className="rounded-lg border p-4 text-center">
+                    <p className="text-2xl font-bold">{members.length}</p>
+                    <p className="text-sm text-muted-foreground">Members</p>
+                  </div>
+                  <div className="rounded-lg border p-4 text-center">
+                    <p className="text-2xl font-bold">{projectCount ?? "—"}</p>
+                    <p className="text-sm text-muted-foreground">Projects</p>
+                  </div>
+                </section>
+
+                <div className="flex flex-wrap gap-2 text-sm">
+                  <Link to="/members" className="rounded-md border px-3 py-1.5 hover:bg-accent/40">Members</Link>
+                  <Link to="/teams" className="rounded-md border px-3 py-1.5 hover:bg-accent/40">Teams</Link>
+                  <Link to="/projects/archived" className="rounded-md border px-3 py-1.5 hover:bg-accent/40">Archived</Link>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       }

@@ -5,15 +5,20 @@ import { OrgSidebar } from "./OrgSidebar"
 import { OrgBreadcrumb } from "./OrgBreadcrumb"
 import { useActiveOrg } from "@/context/OrgContext"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
-import { listTeams, type TeamSummary } from "@/lib/frontier/teams"
+import { listTeams, createTeam, type TeamSummary } from "@/lib/frontier/teams"
 
 export function TeamsList() {
-  const { activeOrgId } = useActiveOrg()
+  const { activeOrgId, activeOrg } = useActiveOrg()
   const { session } = useFrontierSession()
   const jwt = session?.jwt ?? null
   const navigate = useNavigate()
   const [teams, setTeams] = useState<TeamSummary[]>([])
   const [loading, setLoading] = useState(true)
+  const [creating, setCreating] = useState(false)
+  const [name, setName] = useState("")
+  const [description, setDescription] = useState("")
+
+  const isAdmin = (activeOrg?.role.level ?? 0) >= 600
 
   useEffect(() => {
     if (!jwt || activeOrgId == null) return
@@ -32,6 +37,28 @@ export function TeamsList() {
       statusBar={null}
       main={
         <div className="p-6">
+          {isAdmin && (
+            <div className="mb-4">
+              {!creating ? (
+                <button onClick={() => setCreating(true)} className="rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground">New team</button>
+              ) : (
+                <form
+                  onSubmit={async (e) => {
+                    e.preventDefault()
+                    if (!jwt || activeOrgId == null || !name.trim()) return
+                    const t = await createTeam(jwt, activeOrgId, name.trim(), description.trim() || undefined)
+                    navigate(`/teams/${t.id}`)
+                  }}
+                  className="flex flex-wrap items-center gap-2"
+                >
+                  <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Team name" className="rounded-md border px-2 py-1 text-sm" />
+                  <input value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Description (optional)" className="rounded-md border px-2 py-1 text-sm" />
+                  <button type="submit" className="rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground">Create</button>
+                  <button type="button" onClick={() => setCreating(false)} className="text-sm text-muted-foreground">Cancel</button>
+                </form>
+              )}
+            </div>
+          )}
           {loading ? <p className="text-sm text-muted-foreground">Loading…</p> : (
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
               {teams.map((t) => (

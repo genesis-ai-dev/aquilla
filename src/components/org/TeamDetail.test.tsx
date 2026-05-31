@@ -93,13 +93,17 @@ describe("TeamDetail admin management", () => {
   it("removes a member", async () => {
     renderDetail()
     await waitFor(() => expect(screen.getByText("anna")).toBeInTheDocument())
-    await act(async () => { screen.getByRole("button", { name: /remove anna/i }).click() })
+    await act(async () => { (await screen.findByRole("button", { name: /remove anna/i })).click() })
     await waitFor(() => expect(removeTeamMember).toHaveBeenCalledWith("jwt", 1, 10, 2))
   })
 
   it("deletes the team after confirm", async () => {
     renderDetail()
-    await waitFor(() => expect(screen.getByText(/members/i)).toBeInTheDocument())
+    // Wait for the team heading to confirm both org and team data are loaded.
+    // Using role="heading" is unambiguous — unlike /members/i which also
+    // matches the sidebar nav link (visible before team data arrives) and
+    // causes a race when the full suite runs with concurrent file execution.
+    await waitFor(() => expect(screen.getByRole("heading", { name: "WA" })).toBeInTheDocument())
     await act(async () => { screen.getByRole("button", { name: /delete team/i }).click() })
     await act(async () => { screen.getByRole("button", { name: /confirm/i }).click() })
     await waitFor(() => expect(deleteTeam).toHaveBeenCalledWith("jwt", 1, 10))

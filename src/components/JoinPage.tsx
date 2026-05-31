@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react"
 import { useParams, useNavigate } from "react-router-dom"
-import { Loader2, AlertCircle, Users, LogIn } from "lucide-react"
+import { Loader2, AlertCircle, Users } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import {
@@ -9,14 +9,12 @@ import {
   type ServerInvitePreview,
 } from "@/lib/sync/invites"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
-
-/**
- * Where to send the user back after they sign in. Saved to localStorage so
- * the auth surface (which lives outside this route) can pick it up.
- */
-const POST_LOGIN_REDIRECT_KEY = "postLoginRedirect"
+import { FrontierLoginForm } from "@/components/git-import/FrontierLoginForm"
+import { FrontierSignupForm } from "@/components/git-import/FrontierSignupForm"
+import { FrontierForgotPasswordForm } from "@/components/git-import/FrontierForgotPasswordForm"
 
 type Phase = "initial" | "redeeming" | "error"
+type AuthMode = "login" | "signup" | "forgot"
 
 /**
  * Share-link landing page. The token in the URL identifies a server-side
@@ -35,6 +33,7 @@ export function JoinPage() {
   const [phase, setPhase] = useState<Phase>("initial")
   const [error, setError] = useState<string | null>(null)
   const [preview, setPreview] = useState<ServerInvitePreview | null>(null)
+  const [authMode, setAuthMode] = useState<AuthMode>("login")
 
   // Fetch invite preview (public endpoint) so we can show project + role
   // context before the recipient authenticates.
@@ -79,18 +78,6 @@ export function JoinPage() {
     navigate(`/project/${result.projectId}`)
   }
 
-  // Stash the post-login redirect so the auth surface returns the user here.
-  function rememberRedirectAndGoToLogin() {
-    if (!token) return
-    try {
-      localStorage.setItem(POST_LOGIN_REDIRECT_KEY, `/join/${token}`)
-    } catch {
-      // Private mode / quota / etc — non-fatal; user will land on dashboard
-      // after login and can re-paste the invite URL.
-    }
-    navigate("/")
-  }
-
   const isSignedOut = !sessionLoading && !session?.jwt
   const showPreviewCard = isSignedOut && phase === "initial"
 
@@ -131,15 +118,48 @@ export function JoinPage() {
                   Loading invitation details…
                 </p>
               )}
-              <Button
-                onClick={rememberRedirectAndGoToLogin}
-                className="w-full"
-              >
-                <LogIn className="mr-1.5 h-4 w-4" />
-                Sign in or sign up to continue
-              </Button>
+              {/* Inline auth — on success the session updates and the redeem
+                  effect above fires automatically, so the user never leaves. */}
+              <div className="rounded-md border p-3">
+                {authMode === "login" && (
+                  <div className="space-y-3">
+                    <FrontierLoginForm
+                      onSuccess={() => {}}
+                      onForgotPassword={() => setAuthMode("forgot")}
+                    />
+                    <p className="text-center text-xs text-muted-foreground">
+                      New here?{" "}
+                      <button
+                        type="button"
+                        onClick={() => setAuthMode("signup")}
+                        className="font-medium text-foreground underline-offset-4 hover:underline"
+                      >
+                        Create an account
+                      </button>
+                    </p>
+                  </div>
+                )}
+                {authMode === "signup" && (
+                  <div className="space-y-3">
+                    <FrontierSignupForm onSuccess={() => {}} />
+                    <p className="text-center text-xs text-muted-foreground">
+                      Already have an account?{" "}
+                      <button
+                        type="button"
+                        onClick={() => setAuthMode("login")}
+                        className="font-medium text-foreground underline-offset-4 hover:underline"
+                      >
+                        Log in
+                      </button>
+                    </p>
+                  </div>
+                )}
+                {authMode === "forgot" && (
+                  <FrontierForgotPasswordForm onBack={() => setAuthMode("login")} />
+                )}
+              </div>
               <p className="text-[10px] text-muted-foreground text-center">
-                After you sign in, you'll come back here automatically.
+                You'll join the moment you sign in — no need to come back.
               </p>
             </div>
           ) : phase === "redeeming" ? (

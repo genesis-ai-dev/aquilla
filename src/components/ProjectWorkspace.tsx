@@ -1705,6 +1705,22 @@ export function ProjectWorkspace() {
           onClose={() => setRecordingCellId(null)}
         />
       )}
+      {/* Manual boundary editor for a "Voice together" combined clip. */}
+      {combinedEditor && activeFileId && project && (
+        <CombinedBoundaryEditor
+          project={audioProject ?? project}
+          fileId={activeFileId}
+          audioId={combinedEditor.audioId}
+          url={combinedEditor.url}
+          voiceId={combinedEditor.voiceId}
+          referenceAudioId={combinedEditor.referenceAudioId}
+          cells={combinedEditor.cells}
+          session={frontierSession}
+          username={currentUsername}
+          onClose={() => setCombinedEditor(null)}
+          onSaved={() => { setCombinedEditor(null); revalidateCells() }}
+        />
+      )}
       <Suspense fallback={null}>
         <ImportDialog open={importOpen} onOpenChange={setImportOpen}
           projectId={project.id}

@@ -47,6 +47,11 @@ export interface BulkUploadArgs {
   fileId: string
   file: BulkImportFileMeta
   cells: BulkImportCell[]
+  /** Raw bytes of the source file for round-trip-fidelity formats (USFM
+   *  today). Sent with the first chunk so the worker can stash it in
+   *  `file_source_blobs` for export. */
+  rawSource?: string
+  rawSourceFormat?: string
   /** Mints a sync-token scoped to (projectId, fileId). */
   getToken: (fileId: string) => Promise<string | null>
   /** Fired after each chunk lands — drives the progress UI. */
@@ -86,7 +91,15 @@ export async function bulkUploadSource(args: BulkUploadArgs): Promise<void> {
       cells: chunk,
       clientTs: Date.now(),
     }
-    if (first) payload.file = args.file
+    if (first) {
+      payload.file = args.file
+      // Side-car raw bytes go alongside the first chunk so they land atomically
+      // with the file.create. Subsequent chunks omit them.
+      if (args.rawSource !== undefined && args.rawSourceFormat) {
+        payload.rawSource = args.rawSource
+        payload.rawSourceFormat = args.rawSourceFormat
+      }
+    }
 
     let res: Response
     try {

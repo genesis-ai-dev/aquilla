@@ -21,7 +21,7 @@ import { detectFileType } from "./parsers/types"
 import { extractPlaintextStrings } from "./parsers/plaintext"
 import { extractMarkdownStrings } from "./parsers/markdown"
 import { extractVttStrings, extractSrtStrings } from "./parsers/subtitle"
-import { extractUsfmStrings } from "./parsers/usfm"
+import { parseUsfmLossless } from "./parsers/usfm-lossless"
 import { extractDocxStrings } from "./parsers/docx"
 import { extractPptxStrings } from "./parsers/pptx"
 import { bulkUploadSource, type BulkImportCell } from "./sync/bulk-import"
@@ -44,6 +44,11 @@ export interface EBibleProgress {
 interface ImportResult {
   name: string
   strings: TranslatableString[]
+  /** Raw source bytes for round-trip-fidelity formats (USFM today). Stored
+   *  side-car so export can reconstruct the original markup with current
+   *  translations substituted. */
+  rawSource?: string
+  rawSourceFormat?: string
 }
 
 export interface ImportContext {
@@ -172,6 +177,8 @@ export async function emitParsedFile(
       targetLanguage: ctx.targetLanguage,
     },
     cells,
+    rawSource: result.rawSource,
+    rawSourceFormat: result.rawSourceFormat,
     getToken: ctx.getToken,
     onProgress: ctx.onCellEnqueued,
     signal: ctx.signal,
@@ -206,8 +213,71 @@ async function parseFile(file: File, fileType: FileType): Promise<ImportResult[]
     }
     case "usfm": {
       const text = await file.text()
-      const books = extractUsfmStrings(text)
-      return books.map((b) => ({ name: b.bookId, strings: b.strings }))
+      // Use the lossless parser: clean verse text (no leaked inline footnote
+      // markers like the legacy parser produced), stable canonical refs
+      // (`MAT 1:1`), and the raw bytes captured as a side-car so export can
+      // round-trip every marker we don't explicitly model.
+      //
+      // Multi-book files (concatenated with \id boundaries) get split here so
+      // each book becomes its own File — matches the legacy behavior and
+      // Paratext convention.
+      const sections = text.includes("\\id ")
+        ? text.split(/(?=\\id\s)/).filter((s) => s.trim().length > 0)
+        : [text]
+      return sections.map((section) => {
+        const doc = parseUsfmLossless(section)
+        const bookId = doc.bookId || "unknown"
+        // Surface duplicate \v refs (a real data-quality issue we see in the
+        // wild — e.g. two consecutive `\v 34`). Round-trip still works, but
+        // consultants should know their source has the bug.
+        const seen = new Set<string>()
+        const dups: string[] = []
+        for (const v of doc.verses) {
+          if (seen.has(v.ref)) dups.push(v.ref)
+          else seen.add(v.ref)
+        }
+        if (dups.length > 0) {
+          console.warn(
+            `[usfm import] ${file.name}: ${dups.length} duplicate verse ref(s) — `
+              + `${dups.slice(0, 5).join(", ")}${dups.length > 5 ? `, +${dups.length - 5} more` : ""}`,
+          )
+        }
+        // Verse cells + heading/title/intro cells in document order. The export
+        // route looks them up by canonicalRef regardless of cell type, so a
+        // translated heading appears in the exported .SFM at the right marker.
+        const allSpans = [
+          ...doc.verses.map((v) => ({
+            order: v.textStart,
+            ref: v.ref,
+            text: v.text.trim(),
+            section: `${bookId} ${v.chapter}`,
+            type: "verse" as const,
+          })),
+          ...doc.headings.map((h) => ({
+            order: h.textStart,
+            ref: h.ref,
+            text: h.text.trim(),
+            section: h.chapter > 0 ? `${bookId} ${h.chapter}` : bookId,
+            type: h.kind,
+          })),
+        ].sort((a, b) => a.order - b.order)
+        const strings: TranslatableString[] = allSpans.map((s) => ({
+          id: uuidv7(),
+          original: s.text,
+          translated: "",
+          context: s.ref,
+          group: s.ref,
+          section: s.section,
+          globalReferences: [s.ref],
+          type: s.type,
+        }))
+        return {
+          name: file.name === bookId ? bookId : sections.length > 1 ? bookId : file.name,
+          strings,
+          rawSource: section,
+          rawSourceFormat: "usfm",
+        }
+      })
     }
     case "docx": {
       const buffer = await file.arrayBuffer()

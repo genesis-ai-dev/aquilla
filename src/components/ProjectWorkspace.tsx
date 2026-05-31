@@ -1308,6 +1308,7 @@ export function ProjectWorkspace() {
                 />
                 <ExpandableFileList
                   projectId={projectId!}
+                  projectName={project.name}
                   files={project.files}
                   activeFileId={activeFileId}
                   fileProgress={fileProgress}

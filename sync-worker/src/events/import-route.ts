@@ -67,6 +67,14 @@ interface ImportBody {
   file?: { id: string } & ImportFileMeta
   cells: ImportCell[]
   clientTs?: number
+  /** Raw bytes of the source file for formats that need round-trip fidelity
+   *  (USFM today). Sent once with the first chunk alongside `file`. Stored in
+   *  `file_source_blobs`; the export route serialises this back with current
+   *  cell values substituted. */
+  rawSource?: string
+  /** Tag for which parser/serializer pair to use on export. Required when
+   *  rawSource is set. Currently only "usfm". */
+  rawSourceFormat?: string
 }
 
 function isImportBody(x: unknown): x is ImportBody {
@@ -210,6 +218,24 @@ export async function handleBulkImportRequest(
     }
     pushEventInsert(db, fileEvent, stmts)
     buildEventProjectionStmts(db, fileEvent, stmts)
+
+    // Side-car raw source for round-trip-fidelity formats. Only written on the
+    // first chunk (when `file` is present). UPSERT so re-imports replace.
+    if (body.rawSource !== undefined && body.rawSourceFormat) {
+      stmts.push(
+        db
+          .prepare(
+            `INSERT INTO file_source_blobs (file_id, project_id, format, raw_source, created_at)
+             VALUES (?, ?, ?, ?, ?)
+             ON CONFLICT(file_id) DO UPDATE SET
+               project_id = excluded.project_id,
+               format     = excluded.format,
+               raw_source = excluded.raw_source,
+               created_at = excluded.created_at`,
+          )
+          .bind(body.fileId, body.projectId, body.rawSourceFormat, body.rawSource, Date.now()),
+      )
+    }
   }
 
   // source.cell.create per cell — genesis (parent_id = null), chained by

@@ -26,6 +26,8 @@ dist-ssr
 *.sw?
 .playwright-mcp/
 .claude/worktrees/
+.claude/scheduled_tasks.lock
+.claire/
 .worktrees/
 
 # Glance memory shards

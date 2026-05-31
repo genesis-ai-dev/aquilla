@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { Search as SearchIcon, X, ChevronDown, Pencil } from "lucide-react"
 import type { FileReference } from "@/lib/parsers/types"
 import { fileTypeHasSections } from "@/lib/parsers/types"
@@ -10,11 +10,21 @@ import { groupByCorpus } from "@/lib/sidebar/group-by-corpus"
 import { useEditorScroll } from "@/context/EditorScrollContext"
 import { FileSectionGrid } from "./sidebar/FileSectionGrid"
 import { cn } from "@/lib/utils"
+import { Archive } from "lucide-react"
+import {
+  downloadSourceFile,
+  downloadProjectZip,
+  SourceExportError,
+} from "@/lib/sync/source-export"
+
+const EXPORTABLE_FILE_TYPES: ReadonlySet<FileReference["type"]> = new Set(["usfm"])
 
 interface FileStats { translated: number; validated: number; total: number }
 
 interface Props {
   projectId: string
+  /** Display name used for the project-zip filename. Falls back to projectId. */
+  projectName?: string
   files: FileReference[]
   activeFileId: string | null
   fileProgress: Map<string, FileStats>
@@ -30,7 +40,7 @@ interface Props {
 }
 
 export function ExpandableFileList({
-  projectId, files, activeFileId, fileProgress,
+  projectId, projectName, files, activeFileId, fileProgress,
   suggestionFileIds, validationCount, getTokenForFile, onSelectFile, onRename, onMove, onDelete,
   onApplySuggestion, onRenameCorpus,
 }: Props) {
@@ -42,7 +52,22 @@ export function ExpandableFileList({
   const [editingFileId, setEditingFileId] = useState<string | null>(null)
   const [filter, setFilter] = useState("")
   const [editingCorpus, setEditingCorpus] = useState<string | null>(null)
+  const [exportToast, setExportToast] = useState<{ msg: string; tone: "ok" | "err" } | null>(null)
+  const [zipExporting, setZipExporting] = useState<{ done: number; total: number } | null>(null)
   const { requestScrollToSection } = useEditorScroll()
+
+  const exportableCount = useMemo(
+    () => files.filter((f) => EXPORTABLE_FILE_TYPES.has(f.type)).length,
+    [files],
+  )
+
+  // Auto-dismiss the export toast after a few seconds — mirrors the Dashboard
+  // errorToast pattern (no external toast lib in this codebase).
+  useEffect(() => {
+    if (!exportToast) return
+    const t = setTimeout(() => setExportToast(null), 4500)
+    return () => clearTimeout(t)
+  }, [exportToast])
 
   const groups = useMemo(() => {
     const needle = filter.trim().toLowerCase()
@@ -52,6 +77,21 @@ export function ExpandableFileList({
 
   return (
     <>
+      {exportableCount > 1 && (
+        <div className="px-2 pt-2">
+          <button
+            onClick={exportAllUsfm}
+            disabled={!!zipExporting}
+            className="flex w-full items-center justify-center gap-1.5 rounded-xl bg-background py-1.5 text-xs shadow-neu-inset transition-opacity hover:opacity-80 disabled:opacity-50"
+            title={`Download all ${exportableCount} .SFM books as a .zip`}
+          >
+            <Archive className="h-3.5 w-3.5" />
+            {zipExporting
+              ? `Exporting ${zipExporting.done}/${zipExporting.total}…`
+              : `Export all ${exportableCount} books (.zip)`}
+          </button>
+        </div>
+      )}
       <div className="px-2 py-2">
         <div className="relative">
           <SearchIcon className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
@@ -195,15 +235,73 @@ export function ExpandableFileList({
           })}
         </div>
       </ScrollArea>
-      {menu && (
-        <FileActionMenu
-          x={menu.x} y={menu.y}
-          onClose={() => setMenu(null)}
-          onRename={() => setEditingFileId(menu.fileId)}
-          onMove={() => onMove(menu.fileId)}
-          onDelete={() => onDelete(menu.fileId)}
-        />
+      {menu && (() => {
+        const menuFile = files.find((f) => f.id === menu.fileId)
+        const canExport = !!menuFile && EXPORTABLE_FILE_TYPES.has(menuFile.type)
+        return (
+          <FileActionMenu
+            x={menu.x} y={menu.y}
+            onClose={() => setMenu(null)}
+            onRename={() => setEditingFileId(menu.fileId)}
+            onMove={() => onMove(menu.fileId)}
+            onDelete={() => onDelete(menu.fileId)}
+            onExportSource={canExport ? () => exportFile(menuFile!) : undefined}
+          />
+        )
+      })()}
+      {exportToast && (
+        <div
+          className={cn(
+            "fixed bottom-4 right-4 z-60 max-w-md rounded border px-3 py-2 text-sm shadow-md",
+            exportToast.tone === "err"
+              ? "bg-destructive text-destructive-foreground"
+              : "bg-background text-foreground",
+          )}
+        >
+          {exportToast.msg}
+        </div>
       )}
     </>
   )
+
+  async function exportFile(file: FileReference) {
+    const name = /\.(sfm|usfm)$/i.test(file.name) ? file.name : `${file.name}.SFM`
+    try {
+      await downloadSourceFile({
+        projectId, fileId: file.id, downloadName: name, getToken: getTokenForFile,
+      })
+      setExportToast({ msg: `Exported ${name}`, tone: "ok" })
+    } catch (err) {
+      const msg =
+        err instanceof SourceExportError && err.status === 404
+          ? "This file was imported before round-trip export was wired up. Re-import to enable it."
+          : err instanceof Error
+            ? `Export failed: ${err.message}`
+            : "Export failed."
+      setExportToast({ msg, tone: "err" })
+    }
+  }
+
+  async function exportAllUsfm() {
+    if (zipExporting) return
+    setZipExporting({ done: 0, total: exportableCount })
+    try {
+      const result = await downloadProjectZip({
+        projectId,
+        projectName: projectName ?? projectId,
+        files: files.map((f) => ({ id: f.id, name: f.name, type: f.type })),
+        getToken: getTokenForFile,
+        onProgress: (done, total) => setZipExporting({ done, total }),
+      })
+      const msg = result.skipped.length === 0
+        ? `Exported ${result.exported} books to .zip`
+        : `Exported ${result.exported}; skipped ${result.skipped.length} (older imports — re-import to enable)`
+      setExportToast({ msg, tone: result.skipped.length === 0 ? "ok" : "err" })
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Project export failed."
+      setExportToast({ msg, tone: "err" })
+    } finally {
+      setZipExporting(null)
+    }
+  }
 }

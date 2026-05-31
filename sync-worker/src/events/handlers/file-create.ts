@@ -11,15 +11,10 @@ import type { AuthorizedEvent } from '../authorize'
 import type { RealtimeMessage, ProjectionTable } from '../realtime'
 import type { DispatchResult } from './types'
 
-export interface HandleFileCreateOptions {
-  serverSeq: number
-}
-
 export function handleFileCreate(
   db: D1Database,
   authed: AuthorizedEvent<'file.create'>,
   serverTs: number,
-  opts: HandleFileCreateOptions,
 ): DispatchResult {
   const { event, claims } = authed
 
@@ -27,12 +22,15 @@ export function handleFileCreate(
     throw new Error(`file.create event ${event.id} is missing fileId`)
   }
 
+  // server_seq is derived atomically inside the INSERT — see import-route.ts.
   const eventInsert = db
     .prepare(
       `INSERT OR IGNORE INTO events (
         id, schema_version, project_id, file_id, cell_id, parent_id, kind,
         author, payload, client_ts, server_ts, server_seq
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+             COALESCE((SELECT MAX(server_seq) FROM events WHERE project_id = ?), 0) + 1`,
     )
     .bind(
       event.id,
@@ -46,7 +44,7 @@ export function handleFileCreate(
       JSON.stringify(event.payload),
       event.clientTs,
       serverTs,
-      opts.serverSeq,
+      event.projectId,
     )
 
   // Post-0012 `files` schema: `file_type` was collapsed into `role`/`kind`

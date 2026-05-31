@@ -24,7 +24,7 @@ import { TakesStrip } from "./TakesStrip"
 const session = { jwt: "jwt", username: "dir" } as never
 
 function take(id: string, durationMs: number): AudioAttachmentOut {
-  return { audioId: id, url: `frontier-audio://${id}.webm`, slot: "recording", mimeType: "audio/webm", voiceId: null, referenceAudioId: null, durationMs }
+  return { audioId: id, url: `frontier-audio://${id}.webm`, slot: "recording", mimeType: "audio/webm", voiceId: null, referenceAudioId: null, durationMs, trimStartMs: null, trimEndMs: null }
 }
 
 const common = { projectId: "p1", fileId: "f1", cellId: "c1", author: "dir", session }

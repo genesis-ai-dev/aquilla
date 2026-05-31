@@ -630,27 +630,71 @@ export function makeInMemoryD1(tables: Partial<Tables> = {}): InMemoryD1 {
     }
 
     // ── INSERT events (canonical audit row) ────────────────────────────
-    // Bind order from handlers/cell-events.ts and file-create.ts:
-    //   0=id, 1=schema_version, 2=project_id, 3=file_id, 4=cell_id,
-    //   5=parent_id, 6=kind, 7=author, 8=payload, 9=client_ts,
-    //   10=server_ts, 11=server_seq
+    // Production uses `INSERT … SELECT … COALESCE((SELECT MAX(server_seq) …))
+    // + 1` so the per-project monotonic seq is derived atomically inside the
+    // statement (no read-modify-write race across concurrent batches).
+    //
+    // Two callers, two bind shapes:
+    //   - handlers/{cell-events,file-create,comment-events}.ts bind 12 args
+    //     (id, schema_version, project_id, file_id, cell_id, parent_id, kind,
+    //      author, payload, client_ts, server_ts, project_id-for-subquery).
+    //   - events/import-route.ts inlines schema_version=1 as a literal and
+    //     binds 11 args (project_id is the last bind, used by the subquery).
     if (/^INSERT OR IGNORE INTO events\s*\(/.test(normalized)) {
-      const row: EventRow = {
-        id: args[0] as string,
-        schema_version: args[1] as number,
-        project_id: args[2] as string,
-        file_id: args[3] as string | null,
-        cell_id: args[4] as string | null,
-        parent_id: args[5] as string | null,
-        kind: args[6] as string,
-        author: args[7] as string,
-        payload: args[8] as string,
-        client_ts: args[9] as number,
-        server_ts: args[10] as number,
-        server_seq: args[11] as number,
+      const importVariant = /SELECT \?, 1,/.test(normalized)
+      const projectId = importVariant
+        ? (args[1] as string)
+        : (args[2] as string)
+      // Derive the next per-project seq atomically — same as production SQL.
+      let maxSeq = 0
+      for (const e of db.events) {
+        if (e.project_id === projectId && e.server_seq > maxSeq) maxSeq = e.server_seq
       }
+      const row: EventRow = importVariant
+        ? {
+            id: args[0] as string,
+            schema_version: 1,
+            project_id: projectId,
+            file_id: args[2] as string | null,
+            cell_id: args[3] as string | null,
+            parent_id: args[4] as string | null,
+            kind: args[5] as string,
+            author: args[6] as string,
+            payload: args[7] as string,
+            client_ts: args[8] as number,
+            server_ts: args[9] as number,
+            server_seq: maxSeq + 1,
+          }
+        : {
+            id: args[0] as string,
+            schema_version: args[1] as number,
+            project_id: projectId,
+            file_id: args[3] as string | null,
+            cell_id: args[4] as string | null,
+            parent_id: args[5] as string | null,
+            kind: args[6] as string,
+            author: args[7] as string,
+            payload: args[8] as string,
+            client_ts: args[9] as number,
+            server_ts: args[10] as number,
+            server_seq: maxSeq + 1,
+          }
+      // INSERT OR IGNORE skips id-replays (the canonical idempotency path).
       const exists = db.events.some((e) => e.id === row.id)
-      if (!exists) db.events.push(row)
+      if (exists) return []
+      // The unique-on-(project_id, server_seq) index is unreachable with
+      // atomic derivation, but mirror it so any future code path that
+      // bypasses the subquery and produces a duplicate seq trips loudly.
+      const seqClash = db.events.some(
+        (e) => e.project_id === row.project_id && e.server_seq === row.server_seq,
+      )
+      if (seqClash) {
+        throw new Error(
+          `UNIQUE constraint failed: events.project_id, events.server_seq ` +
+            `(project=${row.project_id}, seq=${row.server_seq})`,
+        )
+      }
+      db.events.push(row)
       return []
     }
 

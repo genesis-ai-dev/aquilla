@@ -20,24 +20,22 @@ export type CommentEventKind = Extract<
   'comment.create' | 'comment.edit' | 'comment.delete' | 'comment.resolve'
 >
 
-export interface HandleCommentEventOptions {
-  serverSeq: number
-}
-
 export function handleCommentEvent(
   db: D1Database,
   authed: AuthorizedEvent<CommentEventKind>,
   serverTs: number,
-  opts: HandleCommentEventOptions,
 ): DispatchResult {
   const { event, claims } = authed
 
+  // server_seq is derived atomically inside the INSERT — see import-route.ts.
   const eventInsert = db
     .prepare(
       `INSERT OR IGNORE INTO events (
         id, schema_version, project_id, file_id, cell_id, parent_id, kind,
         author, payload, client_ts, server_ts, server_seq
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+             COALESCE((SELECT MAX(server_seq) FROM events WHERE project_id = ?), 0) + 1`,
     )
     .bind(
       event.id,
@@ -51,7 +49,7 @@ export function handleCommentEvent(
       JSON.stringify(event.payload),
       event.clientTs,
       serverTs,
-      opts.serverSeq,
+      event.projectId,
     )
 
   const persisted: PersistedEvent = {
@@ -66,7 +64,6 @@ export function handleCommentEvent(
     payload: event.payload,
     clientTs: event.clientTs,
     serverTs,
-    serverSeq: opts.serverSeq,
   }
 
   const stmts: D1PreparedStatement[] = [eventInsert]

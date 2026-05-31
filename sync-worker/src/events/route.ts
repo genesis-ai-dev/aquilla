@@ -82,29 +82,6 @@ async function readExistingEvent(
 }
 
 /**
- * Reserve the next per-project monotonic server_seq. D1 doesn't expose a
- * cheap atomic counter primitive, so we read MAX+1 and INSERT inside the
- * same logical request. Two concurrent requests against the same project
- * can race — the UNIQUE INDEX idx_events_project_seq catches the duplicate
- * at INSERT time. Callers should be prepared for an occasional INSERT
- * failure and retry by rereading MAX.
- *
- * For the v1 traffic pattern (single editor per project at a time, modest
- * burst from offline reconnect) this is fine. If contention becomes an
- * issue we'll lift assignment into a project-scoped Durable Object.
- */
-async function nextServerSeq(
-  db: D1Database,
-  projectId: string,
-): Promise<number> {
-  const row = await db
-    .prepare('SELECT COALESCE(MAX(server_seq), 0) + 1 AS next_seq FROM events WHERE project_id = ?')
-    .bind(projectId)
-    .first<{ next_seq: number }>()
-  return row?.next_seq ?? 1
-}
-
-/**
  * POST /events
  *
  * Body: { events: RawEvent[] }
@@ -175,21 +152,11 @@ export async function handleEventsWriteRequest(
   // in the same request can't share a server_ts. Server_seq is the
   // canonical ordering key, but human-readable timestamps still benefit
   // from monotonicity within a batch.
+  //
+  // server_seq itself is no longer assigned in JS: each event INSERT
+  // derives MAX(server_seq)+1 atomically inside its statement (see
+  // EVENT_INSERT_SQL in events/import-route.ts for the race-safety note).
   let nextServerTs = Date.now()
-
-  // Cache per-project next-seq within this request. The route batches all
-  // INSERTs at the end, so reading MAX(server_seq) inside the per-event
-  // loop would always see the pre-batch value and assign duplicate seqs
-  // to every event in the request. We seed from D1 on first use per
-  // project then increment locally.
-  const seqByProject = new Map<string, number>()
-  async function reserveSeq(projectId: string): Promise<number> {
-    const cached = seqByProject.get(projectId)
-    const base = cached ?? (await nextServerSeq(db, projectId))
-    const assigned = cached === undefined ? base : base + 1
-    seqByProject.set(projectId, assigned)
-    return assigned
-  }
 
   const accepted: AcceptedEntry[] = []
   const rejected: RejectedEntry[] = []
@@ -243,9 +210,10 @@ export async function handleEventsWriteRequest(
       continue
     }
 
-    // Assign server_ts (monotone within request) and server_seq (per-project).
+    // Assign server_ts (monotone within request). server_seq is assigned
+    // atomically inside the events INSERT statement (see EVENT_INSERT_SQL
+    // in events/import-route.ts).
     const serverTs = nextServerTs++
-    const serverSeq = await reserveSeq(rawEvent.projectId)
 
     // AD-2 parent-chain decision. The candidate hasn't been INSERTed yet,
     // so `isWinningChild` looks for a prior sibling with the same
@@ -269,7 +237,6 @@ export async function handleEventsWriteRequest(
       payload: rawEvent.payload,
       clientTs: rawEvent.clientTs,
       serverTs,
-      serverSeq,
     }
     const isChainMutating =
       rawEvent.kind !== 'cell.validate' &&
@@ -342,7 +309,6 @@ export async function handleEventsWriteRequest(
     // Dispatch.
     const outcome = dispatchEvent(db, authResult.event, serverTs, {
       updateProjection,
-      serverSeq,
     })
     if (!outcome.ok) {
       rejected.push({

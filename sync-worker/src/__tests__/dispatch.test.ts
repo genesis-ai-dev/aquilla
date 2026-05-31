@@ -84,7 +84,7 @@ function makeNoOpD1(): D1Database {
 describe('dispatchEvent', () => {
   it('target.cell.create routes to the cell handler, returns events INSERT + cells UPSERT', async () => {
     const authed = await makeAuthorized('target.cell.create', 400)
-    const outcome = dispatchEvent(makeNoOpD1(), authed, 9999, { updateProjection: true, serverSeq: 1 })
+    const outcome = dispatchEvent(makeNoOpD1(), authed, 9999, { updateProjection: true })
     expect(outcome.ok).toBe(true)
     if (!outcome.ok) throw new Error('unreachable')
     // 1 events INSERT + 1 FTS delete + 1 cells INSERT + 1 FTS insert
@@ -97,7 +97,7 @@ describe('dispatchEvent', () => {
 
   it('cell.validate routes to the cell handler with validator UPSERT + validated recompute + endorsement_count recompute', async () => {
     const authed = await makeAuthorized('cell.validate', 300)
-    const outcome = dispatchEvent(makeNoOpD1(), authed, 9999, { updateProjection: true, serverSeq: 1 })
+    const outcome = dispatchEvent(makeNoOpD1(), authed, 9999, { updateProjection: true })
     expect(outcome.ok).toBe(true)
     if (!outcome.ok) throw new Error('unreachable')
     // 1 events INSERT + 1 validator UPSERT + 1 validated recompute
@@ -110,7 +110,7 @@ describe('dispatchEvent', () => {
 
   it('updateProjection=false produces only the events INSERT (AD-2 stale sibling)', async () => {
     const authed = await makeAuthorized('target.cell.commit', 400)
-    const outcome = dispatchEvent(makeNoOpD1(), authed, 9999, { updateProjection: false, serverSeq: 1 })
+    const outcome = dispatchEvent(makeNoOpD1(), authed, 9999, { updateProjection: false })
     expect(outcome.ok).toBe(true)
     if (!outcome.ok) throw new Error('unreachable')
     expect(outcome.result.stmts.length).toBe(1)
@@ -119,7 +119,7 @@ describe('dispatchEvent', () => {
 
   it('file.create routes to the file handler', async () => {
     const authed = await makeAuthorized('file.create', 500)
-    const outcome = dispatchEvent(makeNoOpD1(), authed, 9999, { updateProjection: true, serverSeq: 1 })
+    const outcome = dispatchEvent(makeNoOpD1(), authed, 9999, { updateProjection: true })
     expect(outcome.ok).toBe(true)
     if (!outcome.ok) throw new Error('unreachable')
     expect(outcome.result.stmts.length).toBe(2) // events INSERT + files UPSERT
@@ -128,7 +128,7 @@ describe('dispatchEvent', () => {
 
   it('source.* kinds route to the cell handler (with side=source projection)', async () => {
     const authed = await makeAuthorized('source.cell.create', 500)
-    const outcome = dispatchEvent(makeNoOpD1(), authed, 9999, { updateProjection: true, serverSeq: 1 })
+    const outcome = dispatchEvent(makeNoOpD1(), authed, 9999, { updateProjection: true })
     expect(outcome.ok).toBe(true)
   })
 })

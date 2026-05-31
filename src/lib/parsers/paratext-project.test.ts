@@ -37,8 +37,19 @@ describe("detectParatextProject", () => {
     expect(d!.bookNamesEntry).toBeTruthy()
   })
 
-  it("returns null without a Settings.xml/.ssf", () => {
+  it("returns null with neither Settings.xml nor BookNames.xml (just bare SFM)", () => {
     expect(detectParatextProject([entry("41MAT.SFM", MAT)])).toBeNull()
+  })
+
+  it("detects a BookNames-only bundle (no Settings.xml)", () => {
+    const d = detectParatextProject([
+      entry("BookNames.xml", BOOKNAMES_AR),
+      entry("41MATarONAV12.SFM", MAT),
+    ])
+    expect(d).not.toBeNull()
+    expect(d!.settingsEntry).toBeUndefined()
+    expect(d!.bookNamesEntry).toBeTruthy()
+    expect(d!.sfmEntries).toHaveLength(1)
   })
 
   it("returns null without any SFM files", () => {
@@ -129,5 +140,16 @@ describe("assembleParatextProject", () => {
       entry("01GEN.SFM", GEN),
     ]))!
     expect(proj.settings.rightToLeft).toBe(true) // from Arabic content
+  })
+
+  it("assembles a BookNames-only bundle (no Settings): localized names + content-inferred RTL", async () => {
+    const proj = (await assembleParatextProject([
+      entry("BookNames.xml", BOOKNAMES_AR),
+      entry("41MATarONAV12.SFM", MAT),
+    ]))!
+    expect(proj.books).toHaveLength(1)
+    expect(proj.books[0].displayName).toBe("إنجيل متى") // from BookNames short
+    expect(proj.settings.rightToLeft).toBe(true) // inferred from Arabic content
+    expect(proj.settings.languageIsoCode).toBe("") // unknown without Settings
   })
 })

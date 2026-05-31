@@ -719,7 +719,11 @@ export function ProjectSettings() {
             <p className="text-sm text-muted-foreground">
               The TTS engine, Gemini API key, voice library, and voice cloning now live in the Voice Studio.
             </p>
-            <Button variant="outline" onClick={() => requestNavigate(`/project/${id}/voice`)} className="shrink-0">
+            <Button variant="outline" onClick={() => {
+              // Set the Audio lens preference before navigating so the workspace opens in audio mode.
+              try { window.localStorage.setItem(`codex:editorLens:${id}`, "audio") } catch { /* ignore */ }
+              requestNavigate(`/project/${id}`)
+            }} className="shrink-0">
               Open Voice Studio
             </Button>
           </CardContent>

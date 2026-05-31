@@ -85,9 +85,11 @@ describe("cell-audio projection", () => {
     expect(a[7]).toBe("voice-clone-1")
     expect(a[8]).toBe("ref-1.webm")
     expect(a[9]).toBe(5108)
-    expect(a[10]).toBe(JSON.stringify([{ word: "hi", t0: 0, t1: 0.5, start: 0, end: 2 }]))
-    expect(a[11]).toBe("evt-audio-1") // event_id
-    expect(a[12]).toBe(100) // created_ts = serverTs
+    expect(a[10]).toBeNull() // trim_start_ms (unset)
+    expect(a[11]).toBeNull() // trim_end_ms (unset)
+    expect(a[12]).toBe(JSON.stringify([{ word: "hi", t0: 0, t1: 0.5, start: 0, end: 2 }]))
+    expect(a[13]).toBe("evt-audio-1") // event_id
+    expect(a[14]).toBe(100) // created_ts = serverTs
   })
 
   it("attach: nulls optional fields when omitted", () => {

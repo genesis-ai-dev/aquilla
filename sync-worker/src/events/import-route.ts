@@ -87,18 +87,22 @@ function isImportBody(x: unknown): x is ImportBody {
   )
 }
 
-async function nextServerSeq(db: D1Database, projectId: string): Promise<number> {
-  const row = await db
-    .prepare('SELECT COALESCE(MAX(server_seq), 0) + 1 AS next_seq FROM events WHERE project_id = ?')
-    .bind(projectId)
-    .first<{ next_seq: number }>()
-  return row?.next_seq ?? 1
-}
-
+// server_seq is derived atomically inside the INSERT via a correlated
+// subquery against the same `events` row's project_id. SQLite/D1 evaluates
+// the SELECT and the INSERT in one statement, and D1 serialises writes at
+// the primary, so two concurrent batches can no longer both compute the
+// same MAX before either commits — the second batch's subquery sees the
+// first batch's just-inserted rows and picks the next free seq. Within a
+// single batch the same effect holds: D1 batches execute statements
+// sequentially in a transaction, so statement N's subquery sees statement
+// N-1's row. INSERT OR IGNORE still skips id-replays (the subquery is
+// evaluated but the row is dropped, so no seq gap leaks).
 const EVENT_INSERT_SQL = `INSERT OR IGNORE INTO events (
   id, schema_version, project_id, file_id, cell_id, parent_id, kind,
   author, payload, client_ts, server_ts, server_seq
-) VALUES (?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+)
+SELECT ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+       COALESCE((SELECT MAX(server_seq) FROM events WHERE project_id = ?), 0) + 1`
 
 /** Append the canonical events-row INSERT for one persisted event, mirroring
  *  handlers/cell-events.ts so bulk-import rows match dispatcher rows exactly. */
@@ -117,7 +121,7 @@ function pushEventInsert(db: D1Database, e: PersistedEvent, stmts: D1PreparedSta
         JSON.stringify(e.payload),
         e.clientTs,
         e.serverTs,
-        e.serverSeq,
+        e.projectId,
       ),
   )
 }
@@ -181,7 +185,6 @@ export async function handleBulkImportRequest(
       : `user:${auth.claims.userId}`
   const clientTs = typeof body.clientTs === 'number' ? body.clientTs : Date.now()
 
-  let serverSeq = await nextServerSeq(db, body.projectId)
   let serverTs = Date.now()
 
   const stmts: D1PreparedStatement[] = []
@@ -214,7 +217,6 @@ export async function handleBulkImportRequest(
       },
       clientTs,
       serverTs: serverTs++,
-      serverSeq: serverSeq++,
     }
     pushEventInsert(db, fileEvent, stmts)
     buildEventProjectionStmts(db, fileEvent, stmts)
@@ -266,7 +268,6 @@ export async function handleBulkImportRequest(
       },
       clientTs,
       serverTs: serverTs++,
-      serverSeq: serverSeq++,
     }
     pushEventInsert(db, cellEvent, stmts)
     buildEventProjectionStmts(db, cellEvent, stmts)

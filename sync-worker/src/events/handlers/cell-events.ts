@@ -33,8 +33,6 @@ export interface HandleCellEventOptions {
    * child race) and only the `events` row should be persisted.
    */
   updateProjection: boolean
-  /** Per-project monotonic sequence assigned at accept time. */
-  serverSeq: number
 }
 
 /** Cell-level kinds that this handler accepts. */
@@ -56,12 +54,17 @@ export function handleCellEvent(
 ): DispatchResult {
   const { event, claims } = authed
 
+  // server_seq is derived atomically inside the INSERT — see the
+  // EVENT_INSERT_SQL comment in events/import-route.ts for the race-safety
+  // argument.
   const eventInsert = db
     .prepare(
       `INSERT OR IGNORE INTO events (
         id, schema_version, project_id, file_id, cell_id, parent_id, kind,
         author, payload, client_ts, server_ts, server_seq
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+             COALESCE((SELECT MAX(server_seq) FROM events WHERE project_id = ?), 0) + 1`,
     )
     .bind(
       event.id,
@@ -75,7 +78,7 @@ export function handleCellEvent(
       JSON.stringify(event.payload),
       event.clientTs,
       serverTs,
-      opts.serverSeq,
+      event.projectId,
     )
 
   const stmts: D1PreparedStatement[] = [eventInsert]
@@ -94,7 +97,6 @@ export function handleCellEvent(
       payload: event.payload,
       clientTs: event.clientTs,
       serverTs,
-      serverSeq: opts.serverSeq,
     }
     projectionTouches = buildEventProjectionStmts(db, persisted, stmts)
   }

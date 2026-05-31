@@ -35,8 +35,10 @@ export interface PersistedEvent<K extends EventKind = EventKind> {
   payload: unknown      // narrowed via kind in the switch below
   clientTs: number
   serverTs: number
-  /** AD-2: per-project monotonic. */
-  serverSeq: number
+  /** AD-2: per-project monotonic. Set only on rows that have been read back
+   *  from D1 (read-side paths); write paths leave it undefined because the
+   *  value is derived atomically inside the events INSERT, not in JS. */
+  serverSeq?: number
 }
 
 /**

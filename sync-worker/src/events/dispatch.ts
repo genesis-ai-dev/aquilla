@@ -32,8 +32,6 @@ export interface DispatchOptions {
    * parent-chain guard before calling here.
    */
   updateProjection: boolean
-  /** Per-project monotonic sequence assigned at accept time. */
-  serverSeq: number
 }
 
 /**
@@ -82,7 +80,6 @@ export function dispatchEvent(
           db,
           authed as AuthorizedEvent<'file.create'>,
           serverTs,
-          { serverSeq: opts.serverSeq },
         ),
       }
 
@@ -96,7 +93,6 @@ export function dispatchEvent(
           db,
           authed as AuthorizedEvent<CommentEventKind>,
           serverTs,
-          { serverSeq: opts.serverSeq },
         ),
       }
 

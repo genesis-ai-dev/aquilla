@@ -108,6 +108,17 @@ export async function listMyOrgs(jwt: string): Promise<OrgSummary[]> {
   return ((await res.json()) as { orgs: OrgSummary[] }).orgs
 }
 
+export async function createOrg(jwt: string, name: string): Promise<OrgSummary> {
+  const res = await fetchWithTimeout(`${FRONTIER_BASE}/api/v2/orgs`, { method: "POST", headers: authHeaders(jwt), body: JSON.stringify({ name }) })
+  if (!res.ok) throw new Error(`createOrg failed: HTTP ${res.status}`)
+  return (await res.json()) as OrgSummary
+}
+
+export async function renameOrg(jwt: string, orgId: number, name: string): Promise<void> {
+  const res = await fetchWithTimeout(`${FRONTIER_BASE}/api/v2/orgs/${orgId}`, { method: "PATCH", headers: authHeaders(jwt), body: JSON.stringify({ name }) })
+  if (!res.ok) throw new Error(`renameOrg failed: HTTP ${res.status}`)
+}
+
 export async function getOrCreateMyOrg(jwt: string): Promise<MyOrg> {
   const res = await fetchWithTimeout(`${FRONTIER_BASE}/api/v2/orgs/me`, {
     headers: authHeaders(jwt),

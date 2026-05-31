@@ -86,8 +86,12 @@ describe("MembersPage active-org", () => {
         </OrgProvider>
       </MemoryRouter>,
     )
+    // "Come and See" legitimately renders in both the OrgSwitcher and the
+    // "People in {org}" subtitle, so assert ≥1 (not exactly one). The test's
+    // intent is that the ACTIVE org shows and the owned-org "Legacy Org" does not.
     await waitFor(() =>
-      expect(screen.getByText("Come and See")).toBeInTheDocument(),
+      expect(screen.getAllByText("Come and See").length).toBeGreaterThan(0),
     )
+    expect(screen.queryByText("Legacy Org")).not.toBeInTheDocument()
   })
 })

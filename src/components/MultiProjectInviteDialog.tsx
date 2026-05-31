@@ -195,17 +195,25 @@ export function MultiProjectInviteDialog({
                         type="button"
                         role="checkbox"
                         aria-checked={isSelected}
+                        aria-label={`Select ${p.name}`}
                         onClick={() => toggleProject(p.id)}
                         disabled={busy}
-                        className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border ${
+                        className={`flex h-5 w-5 shrink-0 items-center justify-center rounded border-2 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 disabled:opacity-50 ${
                           isSelected
                             ? "bg-primary border-primary text-primary-foreground"
-                            : "border-input"
+                            : "border-muted-foreground/50 bg-background hover:border-primary hover:bg-accent"
                         }`}
                       >
-                        {isSelected && <Check className="h-3 w-3" />}
+                        {isSelected && <Check className="h-3.5 w-3.5" />}
                       </button>
-                      <span className="flex-1 truncate">{p.name}</span>
+                      <button
+                        type="button"
+                        onClick={() => toggleProject(p.id)}
+                        disabled={busy}
+                        className="flex-1 truncate text-left hover:text-foreground disabled:opacity-50"
+                      >
+                        {p.name}
+                      </button>
                       {isDone ? (
                         <span className="text-[10px] text-emerald-600 dark:text-emerald-400 inline-flex items-center gap-1">
                           <Check className="h-3 w-3" /> added

@@ -140,6 +140,8 @@ export interface ProjectInviteRow {
   expires_at: string | null
   used_by: number | null
   used_at: string | null
+  /** Optional recipient the invite was minted for; null for open links. */
+  email: string | null
 }
 
 /** Row shape of `project_members`. */

@@ -48,6 +48,7 @@ import {
   listEffectiveProjectMembers,
 } from "../services/org-permissions"
 import { lookupUserByUsername } from "../services/user-lookup"
+import { sendProjectInviteEmail } from "../services/email"
 
 const projects = new Hono<AuthHonoEnv>()
 
@@ -684,14 +685,39 @@ projects.post(
     try {
       await c.env.AQUILLA_DB.prepare(
         `INSERT INTO project_invites
-           (token, project_id, role_level, created_by, expires_at)
-         VALUES (?, ?, ?, ?, ?)`,
+           (token, project_id, role_level, created_by, expires_at, email)
+         VALUES (?, ?, ?, ?, ?, ?)`,
       )
-        .bind(token, projectId, grantedRole, user.id, expiresAt)
+        .bind(token, projectId, grantedRole, user.id, expiresAt, email ?? null)
         .run()
     } catch (err) {
       console.error("[invites] create failed:", err)
       return c.json({ error: "Failed to create invite" }, 500)
+    }
+
+    // Deliver the invite link by email (best-effort; no-op without RESEND_API_KEY).
+    if (email) {
+      const baseUrl = c.env.BASE_URL || "https://aquilla.app"
+      const joinUrl = `${baseUrl}/join/${token}`
+      const proj = await c.env.AQUILLA_DB.prepare(
+        "SELECT name FROM projects WHERE id = ?",
+      )
+        .bind(projectId)
+        .first<{ name: string }>()
+      const emailPromise = sendProjectInviteEmail(
+        c.env,
+        email,
+        joinUrl,
+        proj?.name ?? "a project",
+      ).catch((err) => console.warn("[invites] invite email failed:", err))
+      // waitUntil only exists with a real ExecutionContext (prod); the test
+      // harness has none and the getter throws, so fall back to letting the
+      // best-effort promise settle on its own.
+      try {
+        c.executionCtx.waitUntil(emailPromise)
+      } catch {
+        void emailPromise
+      }
     }
 
     return c.json({
@@ -713,7 +739,7 @@ projects.get("/invite-preview/:token", async (c) => {
 
   const invite = await c.env.AQUILLA_DB.prepare(
     `SELECT token, project_id, role_level, created_by, created_at,
-            expires_at, used_by, used_at
+            expires_at, used_by, used_at, email
      FROM project_invites WHERE token = ?`,
   )
     .bind(token)
@@ -753,7 +779,7 @@ projects.get("/invite-preview/:token", async (c) => {
       name: roleNameFor(invite.role_level),
     },
     expiresAt: invite.expires_at,
-    email: null,
+    email: invite.email ?? null,
   })
 })
 

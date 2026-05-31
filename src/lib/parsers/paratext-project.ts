@@ -55,14 +55,18 @@ function basename(p: string): string {
 }
 
 export interface DetectedParatext {
-  settingsEntry: ProjectEntry
+  /** Present for a full project; absent for a partial bundle (BookNames + SFM
+   *  only) — common for exported/low-resource projects. */
+  settingsEntry?: ProjectEntry
   bookNamesEntry?: ProjectEntry
   sfmEntries: ProjectEntry[]
 }
 
-/** Identify a Paratext project within a set of entries. A project needs a
- *  Settings.xml (or legacy .ssf) and at least one SFM/USFM file. Returns null
- *  when the set isn't a Paratext project (caller falls back to plain import). */
+/** Identify a Paratext project (or partial bundle) within a set of entries. A
+ *  project is recognized when there's at least one SFM/USFM file AND either a
+ *  Settings.xml (or legacy .ssf) or a BookNames.xml — so exported bundles that
+ *  ship only BookNames + books (no Settings) still get the localized-name,
+ *  ordered-import treatment. Returns null otherwise (plain per-file import). */
 export function detectParatextProject(entries: ProjectEntry[]): DetectedParatext | null {
   let settingsEntry: ProjectEntry | undefined
   let bookNamesEntry: ProjectEntry | undefined
@@ -78,8 +82,24 @@ export function detectParatextProject(entries: ProjectEntry[]): DetectedParatext
       sfmEntries.push(e)
     }
   }
-  if (!settingsEntry || sfmEntries.length === 0) return null
+  if (sfmEntries.length === 0) return null
+  if (!settingsEntry && !bookNamesEntry) return null
   return { settingsEntry, bookNamesEntry, sfmEntries }
+}
+
+/** Settings for a partial bundle with no Settings.xml — language/versification
+ *  unknown; direction is inferred from content downstream. */
+function defaultSettings(): ParatextSettings {
+  return {
+    name: "",
+    fullName: "",
+    language: "",
+    languageIsoCode: "",
+    versification: "",
+    encoding: "",
+    rightToLeft: false,
+    naming: { prePart: "", postPart: "", bookNameForm: "" },
+  }
 }
 
 function corpusOf(order: number): "OT" | "NT" | undefined {
@@ -94,7 +114,9 @@ export async function assembleParatextProject(
   const detected = detectParatextProject(entries)
   if (!detected) return null
 
-  const settings = parseParatextSettings(await detected.settingsEntry.text())
+  const settings = detected.settingsEntry
+    ? parseParatextSettings(await detected.settingsEntry.text())
+    : defaultSettings()
   const bookNames = detected.bookNamesEntry
     ? parseBookNames(await detected.bookNamesEntry.text())
     : new Map<string, ParatextBookName>()

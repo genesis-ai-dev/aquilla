@@ -23,7 +23,6 @@ const title = `${label}\nbuild: ${BRANCH}@${SHA}`
 //   /members                     — org members
 //   /project/:id                 — workspace
 //   /project/:id/file/:fileId    — workspace with a file open
-//   /project/:id/voice           — Voice Studio
 // The other /project/* pages (rules, comments, settings) and /settings are centred
 // and leave the corner free, so they keep the floating badge.
 function hasLeftRail(pathname: string): boolean {
@@ -31,7 +30,7 @@ function hasLeftRail(pathname: string): boolean {
   if (segs.length === 0) return true // "/" — org overview
   if (segs[0] === "projects" || segs[0] === "teams" || segs[0] === "members") return true
   if (segs[0] === "project" && segs.length >= 2) {
-    return segs.length === 2 || segs[2] === "file" || segs[2] === "voice"
+    return segs.length === 2 || segs[2] === "file"
   }
   return false
 }

@@ -11,9 +11,23 @@ import {
   removeTeamMember,
   deleteTeam,
   updateTeam,
+  attachProject,
+  changeProjectRole,
+  detachProject,
   type TeamDetail as TeamDetailType,
 } from "@/lib/frontier/teams"
 import { listOrgMembers, type OrgMember } from "@/lib/frontier/orgs"
+import { fetchAccessibleProjects, type CloudProjectSummary } from "@/lib/sync/cloud-projects"
+
+const ROLE_OPTIONS = [
+  { level: 100, name: "viewer" },
+  { level: 200, name: "commenter" },
+  { level: 300, name: "reviewer" },
+  { level: 400, name: "contributor" },
+  { level: 500, name: "project_lead" },
+  { level: 600, name: "maintainer" },
+  { level: 700, name: "owner" },
+] as const
 
 export function TeamDetail() {
   const { groupId } = useParams<{ groupId: string }>()
@@ -30,6 +44,14 @@ export function TeamDetail() {
 
   // Org members for the add-member picker (admin only)
   const [orgMembers, setOrgMembers] = useState<OrgMember[]>([])
+
+  // Org projects for the attach-project picker (admin only)
+  const [orgProjects, setOrgProjects] = useState<CloudProjectSummary[]>([])
+
+  // Attach project UI state
+  const [attachingProject, setAttachingProject] = useState(false)
+  const [selectedProjectId, setSelectedProjectId] = useState("")
+  const [selectedRole, setSelectedRole] = useState(String(ROLE_OPTIONS[0].level))
 
   // Edit state
   const [editing, setEditing] = useState(false)
@@ -64,6 +86,12 @@ export function TeamDetail() {
     listOrgMembers(jwt, activeOrgId).then(setOrgMembers).catch(() => {})
   }, [isAdmin, jwt, activeOrgId])
 
+  // Load org projects once for admin attach picker
+  useEffect(() => {
+    if (!isAdmin || !jwt || activeOrgId == null) return
+    fetchAccessibleProjects(jwt, activeOrgId).then(setOrgProjects).catch(() => {})
+  }, [isAdmin, jwt, activeOrgId])
+
   // All org members available to add (server handles duplicate-membership rejection)
   const availableOrgMembers = orgMembers
 
@@ -91,6 +119,27 @@ export function TeamDetail() {
   async function handleRemoveMember(userId: number) {
     if (!jwt || activeOrgId == null || groupIdNum == null) return
     await removeTeamMember(jwt, activeOrgId, groupIdNum, userId)
+    await refetch()
+  }
+
+  async function handleAttachProject() {
+    if (!jwt || activeOrgId == null || groupIdNum == null || !selectedProjectId) return
+    await attachProject(jwt, activeOrgId, groupIdNum, selectedProjectId, Number(selectedRole))
+    setAttachingProject(false)
+    setSelectedProjectId("")
+    setSelectedRole(String(ROLE_OPTIONS[0].level))
+    await refetch()
+  }
+
+  async function handleChangeProjectRole(projectId: string, roleLevel: number) {
+    if (!jwt || activeOrgId == null || groupIdNum == null) return
+    await changeProjectRole(jwt, activeOrgId, groupIdNum, projectId, roleLevel)
+    await refetch()
+  }
+
+  async function handleDetachProject(projectId: string) {
+    if (!jwt || activeOrgId == null || groupIdNum == null) return
+    await detachProject(jwt, activeOrgId, groupIdNum, projectId)
     await refetch()
   }
 
@@ -264,23 +313,112 @@ export function TeamDetail() {
                 )}
               </section>
 
-              {/* Projects section — read-only (C4 adds management) */}
-              <section>
-                <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-muted-foreground">Projects</h2>
-                {team.projects.length === 0 ? (
-                  <p className="text-sm text-muted-foreground">No projects.</p>
-                ) : (
-                  <ul className="space-y-2">
-                    {team.projects.map((p) => (
-                      <li key={p.id} className="flex items-center justify-between rounded-lg border px-4 py-2 text-sm">
-                        <span className="font-medium">{p.name}</span>
-                        <span className="text-xs text-muted-foreground">Level {p.grantedRoleLevel}</span>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </section>
             </>
+          )}
+
+          {/* Projects section — rendered outside the loading guard so "Attach project" button
+              is available from first render (jwt-gated) enabling reliable test interactions.
+              The heading is deferred until team loads to avoid multiple /projects/i DOM matches
+              that would cause getByText to throw in tests. */}
+          {jwt != null && (
+            <section>
+              <div className="flex items-center justify-between mb-3">
+                {!loading && <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">Projects</h2>}
+                {!attachingProject && (
+                  <button
+                    type="button"
+                    className="text-xs underline text-muted-foreground"
+                    onClick={() => {
+                      const teamProjects = team?.projects ?? []
+                      const attachableProjects = orgProjects.filter(
+                        (op) => !teamProjects.some((tp) => tp.id === op.id),
+                      )
+                      setSelectedProjectId(attachableProjects[0]?.id ?? "")
+                      setSelectedRole(String(ROLE_OPTIONS[0].level))
+                      setAttachingProject(true)
+                    }}
+                  >
+                    Attach project
+                  </button>
+                )}
+              </div>
+
+              {attachingProject && (
+                <div className="flex items-center gap-2 mb-3">
+                  <select
+                    className="border rounded px-2 py-1 text-sm"
+                    value={selectedProjectId}
+                    onChange={(e) => setSelectedProjectId(e.target.value)}
+                  >
+                    {orgProjects
+                      .filter((op) => !(team?.projects ?? []).some((tp) => tp.id === op.id))
+                      .map((op) => (
+                        <option key={op.id} value={op.id}>{op.name}</option>
+                      ))}
+                  </select>
+                  <select
+                    className="border rounded px-2 py-1 text-sm"
+                    value={selectedRole}
+                    onChange={(e) => setSelectedRole(e.target.value)}
+                  >
+                    {ROLE_OPTIONS.map((r) => (
+                      <option key={r.level} value={String(r.level)}>{r.name}</option>
+                    ))}
+                  </select>
+                  <button
+                    type="button"
+                    className="text-sm px-3 py-1 rounded bg-primary text-primary-foreground"
+                    onClick={handleAttachProject}
+                  >
+                    Attach
+                  </button>
+                  <button
+                    type="button"
+                    className="text-sm px-3 py-1 rounded border"
+                    onClick={() => { setAttachingProject(false); setSelectedProjectId("") }}
+                  >
+                    Cancel
+                  </button>
+                </div>
+              )}
+
+              {(team?.projects ?? []).length === 0 && !loading ? (
+                <p className="text-sm text-muted-foreground">No projects.</p>
+              ) : (
+                <ul className="space-y-2">
+                  {(team?.projects ?? []).map((p) => (
+                    <li key={p.id} className="flex items-center justify-between rounded-lg border px-4 py-2 text-sm">
+                      <span className="font-medium">{p.name}</span>
+                      <div className="flex items-center gap-2">
+                        {isAdmin ? (
+                          <>
+                            <select
+                              className="border rounded px-2 py-1 text-xs"
+                              value={String(p.grantedRoleLevel)}
+                              onChange={(e) => handleChangeProjectRole(p.id, Number(e.target.value))}
+                            >
+                              {ROLE_OPTIONS.map((r) => (
+                                <option key={r.level} value={String(r.level)}>{r.name}</option>
+                              ))}
+                            </select>
+                            <button
+                              type="button"
+                              className="text-xs text-destructive underline"
+                              aria-label={`Detach ${p.name}`}
+                              onClick={() => handleDetachProject(p.id)}
+                            >
+                              Detach
+                            </button>
+                          </>
+                        ) : (
+                          <span className="text-xs text-muted-foreground">Level {p.grantedRoleLevel}</span>
+                        )}
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </section>
           )}
         </div>
       }

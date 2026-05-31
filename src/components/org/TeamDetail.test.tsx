@@ -48,7 +48,36 @@ beforeEach(() => {
   deleteTeam.mockResolvedValue(undefined)
   updateTeam.mockResolvedValue({ id: 10, name: "WA2", description: null })
 })
-afterEach(() => vi.restoreAllMocks())
+afterEach(() => {
+  vi.restoreAllMocks()
+  attachProject.mockReset()
+  detachProject.mockReset()
+  changeProjectRole.mockReset()
+})
+
+describe("TeamDetail project management", () => {
+  it("attaches a project at a role", async () => {
+    const cp = await import("@/lib/sync/cloud-projects")
+    ;(cp.fetchAccessibleProjects as unknown as ReturnType<typeof vi.fn>).mockResolvedValue([{ id: "pa", name: "Bambara", orgId: 1, role: { level: 700, name: "owner", source: "creator" }, files: [] }])
+    getTeam.mockResolvedValue({ id: 10, name: "WA", members: [], projects: [] })
+    renderDetail()
+    await waitFor(() => expect(screen.getByText(/projects/i)).toBeInTheDocument())
+    await act(async () => { (await screen.findByRole("button", { name: /attach project/i })).click() })
+    const selects = screen.getAllByRole("combobox")
+    await act(async () => { fireEvent.change(selects[0], { target: { value: "pa" } }) })
+    await act(async () => { fireEvent.change(selects[1], { target: { value: "400" } }) })
+    await act(async () => { screen.getByRole("button", { name: /^attach$/i }).click() })
+    await waitFor(() => expect(attachProject).toHaveBeenCalledWith("jwt", 1, 10, "pa", 400))
+  })
+
+  it("detaches a project", async () => {
+    getTeam.mockResolvedValue({ id: 10, name: "WA", members: [], projects: [{ id: "pa", name: "Bambara", grantedRoleLevel: 400 }] })
+    renderDetail()
+    await waitFor(() => expect(screen.getByText("Bambara")).toBeInTheDocument())
+    await act(async () => { screen.getByRole("button", { name: /detach bambara/i }).click() })
+    await waitFor(() => expect(detachProject).toHaveBeenCalledWith("jwt", 1, 10, "pa"))
+  })
+})
 
 describe("TeamDetail admin management", () => {
   it("adds a member via the org-member picker", async () => {

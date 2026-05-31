@@ -316,15 +316,14 @@ export function TeamDetail() {
             </>
           )}
 
-          {/* Projects section — rendered outside the loading guard so "Attach project" button
-              is available from first render (jwt-gated) enabling reliable test interactions.
+          {/* Projects section — always rendered when authenticated; management controls admin-only.
               The heading is deferred until team loads to avoid multiple /projects/i DOM matches
-              that would cause getByText to throw in tests. */}
+              (sidebar nav also has "Projects") that would cause getByText to throw in tests. */}
           {jwt != null && (
             <section>
               <div className="flex items-center justify-between mb-3">
                 {!loading && <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">Projects</h2>}
-                {!attachingProject && (
+                {isAdmin && !attachingProject && (
                   <button
                     type="button"
                     className="text-xs underline text-muted-foreground"
@@ -343,7 +342,7 @@ export function TeamDetail() {
                 )}
               </div>
 
-              {attachingProject && (
+              {isAdmin && attachingProject && (
                 <div className="flex items-center gap-2 mb-3">
                   <select
                     className="border rounded px-2 py-1 text-sm"

@@ -105,3 +105,16 @@ describe("TeamDetail admin management", () => {
     await waitFor(() => expect(deleteTeam).toHaveBeenCalledWith("jwt", 1, 10))
   })
 })
+
+describe("TeamDetail non-admin gating", () => {
+  it("hides project + member management for a non-admin", async () => {
+    listMyOrgs.mockResolvedValue([{ id: 1, name: "CAS", role: { level: 100, name: "viewer" } }])
+    getTeam.mockResolvedValue({ id: 10, name: "WA", members: [{ userId: 2, username: "anna", roleLevel: 100 }], projects: [{ id: "pa", name: "Bambara", grantedRoleLevel: 400 }] })
+    renderDetail()
+    await waitFor(() => expect(screen.getByText("Bambara")).toBeInTheDocument())
+    expect(screen.queryByRole("button", { name: /attach project/i })).toBeNull()
+    expect(screen.queryByRole("button", { name: /detach bambara/i })).toBeNull()
+    expect(screen.queryByRole("button", { name: /add member/i })).toBeNull()
+    expect(screen.queryByRole("button", { name: /delete team/i })).toBeNull()
+  })
+})

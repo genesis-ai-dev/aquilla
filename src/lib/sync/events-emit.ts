@@ -276,6 +276,9 @@ export interface CellAudioAttachInput {
   voiceId?: string
   referenceAudioId?: string
   durationMs?: number
+  /** Non-destructive playback trim window into the clip, in ms. */
+  trimStartMs?: number
+  trimEndMs?: number
   timings?: { word: string; t0: number; t1: number; start: number; end: number }[]
   author: string
   clientTs?: number
@@ -298,6 +301,8 @@ export async function emitCellAudioAttach(input: CellAudioAttachInput): Promise<
       ...(input.voiceId !== undefined ? { voiceId: input.voiceId } : {}),
       ...(input.referenceAudioId !== undefined ? { referenceAudioId: input.referenceAudioId } : {}),
       ...(input.durationMs !== undefined ? { durationMs: input.durationMs } : {}),
+      ...(input.trimStartMs !== undefined ? { trimStartMs: input.trimStartMs } : {}),
+      ...(input.trimEndMs !== undefined ? { trimEndMs: input.trimEndMs } : {}),
       ...(input.timings !== undefined ? { timings: input.timings } : {}),
     },
     clientTs: input.clientTs,

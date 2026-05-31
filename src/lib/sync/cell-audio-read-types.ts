@@ -9,6 +9,9 @@ export interface AudioAttachmentOut {
   voiceId: string | null
   referenceAudioId: string | null
   durationMs: number | null
+  /** Non-destructive playback trim window into the clip, in ms (null = clip edge). */
+  trimStartMs: number | null
+  trimEndMs: number | null
 }
 
 export interface CellAudioEntry {

@@ -55,6 +55,10 @@ export interface CodexCellAttachment {
   updatedAt?: number;
   isDeleted?: boolean;
   isMissing?: boolean;
+  /** Voice metadata, carried so a trim re-attach preserves it (doesn't null it). */
+  voiceId?: string;
+  referenceAudioId?: string;
+  durationMs?: number;
 }
 
 // Per-word timing for karaoke / forced-alignment / ASR output. Character

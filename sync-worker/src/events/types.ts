@@ -144,6 +144,9 @@ export interface EventPayloads {
     voiceId?: string
     referenceAudioId?: string
     durationMs?: number
+    /** Non-destructive playback trim window into the clip, in ms. */
+    trimStartMs?: number
+    trimEndMs?: number
     timings?: { word: string; t0: number; t1: number; start: number; end: number }[]
   }
   'cell.audio.select': {

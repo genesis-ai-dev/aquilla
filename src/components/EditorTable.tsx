@@ -409,7 +409,13 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
       if (!entry) return c
       const attachments: Record<string, CodexCellAttachment> = {}
       for (const [audioId, a] of Object.entries(entry.attachments)) {
-        attachments[audioId] = { url: a.url, type: "audio" }
+        attachments[audioId] = {
+          url: a.url,
+          type: "audio",
+          ...(a.voiceId ? { voiceId: a.voiceId } : {}),
+          ...(a.referenceAudioId ? { referenceAudioId: a.referenceAudioId } : {}),
+          ...(a.durationMs != null ? { durationMs: a.durationMs } : {}),
+        }
       }
       return {
         ...c,
@@ -420,6 +426,23 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
       }
     })
   }, [cells, audioByCellId])
+
+  // Hydrate the per-cell trim cache (localStorage, seconds — what the player
+  // reads) from the server attachment's trim (ms). Server is authoritative on
+  // load, so combined/cropped slices set on another device appear here.
+  useEffect(() => {
+    for (const [cellId, entry] of audioByCellId) {
+      const sel = entry.selectedAudioId ?? entry.selectedGeneratedVoiceAudioId
+      if (!sel) continue
+      const att = entry.attachments[sel]
+      if (!att || (att.trimStartMs == null && att.trimEndMs == null)) continue
+      const start = att.trimStartMs != null ? att.trimStartMs / 1000 : undefined
+      const end = att.trimEndMs != null ? att.trimEndMs / 1000 : undefined
+      const cur = getCellPref(project.id, cellId)
+      if (cur?.trimStart === start && cur?.trimEnd === end) continue
+      setCellPref(project.id, cellId, { trimStart: start, trimEnd: end })
+    }
+  }, [audioByCellId, project.id])
 
   const ruleMap = useMemo(() => new Map(rules.map((r) => [r.id, r])), [rules])
 

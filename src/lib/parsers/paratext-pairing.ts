@@ -10,6 +10,7 @@
 // (source text + target text, keyed by a shared cellId). The event emission
 // (source.cell.create + target.cell.commit, same cellId) is layered on top.
 
+import { v7 as uuidv7 } from "uuid"
 import { parseUsfmLossless } from "./usfm-lossless"
 import { getBookName, getBookOrdinal } from "../file-labeling/bible-book-names"
 import { bookDisplayName, type ParatextBookName } from "./paratext"
@@ -124,4 +125,60 @@ export function pairSourceTarget(
 
   out.sort((a, b) => a.order - b.order)
   return out
+}
+
+/** One verse row as a paired cell: source + target share a cellId so the
+ *  editor lines them up (source.cell.create + target.cell.commit, same id). */
+export interface BilingualCell {
+  cellId: string
+  ref: string
+  sourceText: string
+  targetText: string
+}
+
+export interface BilingualBookPlan {
+  bookId: string
+  displayName: string
+  corpusMarker: "OT" | "NT" | undefined
+  order: number
+  /** The TARGET (Paratext) raw bytes — the round-trip side-car for exporting
+   *  the consultant's translation back out. The source side is reference text
+   *  only and needs no side-car. */
+  rawSource: string
+  cells: BilingualCell[]
+  bothCount: number
+  sourceOnlyCount: number
+  targetOnlyCount: number
+}
+
+/**
+ * Turn a target Paratext project + a chosen source into per-book bilingual
+ * import plans: one file per book, each verse a paired cell (shared cellId)
+ * carrying source (eBible reference) and target (the translation) text. This
+ * is exactly what the emission layer consumes — source.cell.create with the
+ * source text, target.cell.commit with the target text, same cellId — so the
+ * consultant lands in a side-by-side editor of their work against a reference.
+ */
+export function buildBilingualPlan(
+  targetBooks: { bookId: string; rawSource: string }[],
+  sourceVerses: SourceVerse[],
+  bookNames?: Map<string, ParatextBookName>,
+): BilingualBookPlan[] {
+  const rawByBook = new Map(targetBooks.map((b) => [b.bookId.toUpperCase(), b.rawSource]))
+  return pairSourceTarget(targetBooks, sourceVerses, bookNames).map((book) => ({
+    bookId: book.bookId,
+    displayName: book.displayName,
+    corpusMarker: book.corpusMarker,
+    order: book.order,
+    rawSource: rawByBook.get(book.bookId) ?? "",
+    cells: book.rows.map((r) => ({
+      cellId: uuidv7(),
+      ref: r.ref,
+      sourceText: r.sourceText,
+      targetText: r.targetText,
+    })),
+    bothCount: book.bothCount,
+    sourceOnlyCount: book.sourceOnlyCount,
+    targetOnlyCount: book.targetOnlyCount,
+  }))
 }

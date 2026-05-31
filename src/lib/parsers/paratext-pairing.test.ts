@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest"
-import { pairSourceTarget, type SourceVerse } from "./paratext-pairing"
+import { pairSourceTarget, buildBilingualPlan, type SourceVerse } from "./paratext-pairing"
 
 const targetMAT = `\\id MAT\n\\c 1\n\\v 1 تارگەت ١\n\\v 2 تارگەت ٢\n\\v 3 تارگەت ٣`
 const targetGEN = `\\id GEN\n\\c 1\n\\v 1 in the beginning (target)`
@@ -72,5 +72,39 @@ describe("pairSourceTarget", () => {
       { ref: "GEN 1:1", sourceText: "", targetText: "in the beginning (target)" },
     ])
     expect(books[0].targetOnlyCount).toBe(1)
+  })
+})
+
+describe("buildBilingualPlan", () => {
+  it("produces one paired cell per verse row, source+target sharing a cellId", () => {
+    const plan = buildBilingualPlan([{ bookId: "MAT", rawSource: targetMAT }], source)
+    expect(plan).toHaveLength(1)
+    const mat = plan[0]
+    expect(mat.cells).toHaveLength(4) // MAT 1:1-4 union
+    const c1 = mat.cells.find((c) => c.ref === "MAT 1:1")!
+    expect(c1.sourceText).toBe("The book of the genealogy")
+    expect(c1.targetText).toBe("تارگەت ١")
+    expect(c1.cellId).toBeTruthy()
+    // cellIds are unique per row
+    expect(new Set(mat.cells.map((c) => c.cellId)).size).toBe(mat.cells.length)
+  })
+
+  it("carries the target raw bytes as the round-trip side-car", () => {
+    const plan = buildBilingualPlan([{ bookId: "MAT", rawSource: targetMAT }], source)
+    expect(plan[0].rawSource).toBe(targetMAT)
+  })
+
+  it("keeps counts + canonical order + corpus from the pairing", () => {
+    const plan = buildBilingualPlan(
+      [
+        { bookId: "MAT", rawSource: targetMAT },
+        { bookId: "GEN", rawSource: targetGEN },
+      ],
+      source,
+    )
+    expect(plan.map((b) => b.bookId)).toEqual(["GEN", "MAT"])
+    const mat = plan.find((b) => b.bookId === "MAT")!
+    expect(mat.bothCount).toBe(2)
+    expect(mat.corpusMarker).toBe("NT")
   })
 })

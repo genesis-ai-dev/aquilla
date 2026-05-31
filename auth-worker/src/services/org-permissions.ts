@@ -462,6 +462,95 @@ export async function getOrgGroupDetail(
   }
 }
 
+/** True if a group with this id exists in this org. */
+export async function groupExistsInOrg(env: Env, orgId: number, groupId: number): Promise<boolean> {
+  const row = await env.AQUILLA_DB.prepare(
+    "SELECT 1 AS ok FROM groups WHERE id = ? AND org_id = ?",
+  ).bind(groupId, orgId).first<{ ok: number }>()
+  return row != null
+}
+
+export interface GroupRow { id: number; name: string; description: string | null }
+
+/** Create a group. Returns null if the name already exists in the org. */
+export async function createGroup(env: Env, orgId: number, name: string, description: string | null, createdBy: number): Promise<GroupRow | null> {
+  const existing = await env.AQUILLA_DB.prepare(
+    "SELECT id FROM groups WHERE org_id = ? AND name = ?",
+  ).bind(orgId, name).first<{ id: number }>()
+  if (existing) return null
+  const row = await env.AQUILLA_DB.prepare(
+    "INSERT INTO groups (org_id, name, description, created_by) VALUES (?, ?, ?, ?) RETURNING id, name, description",
+  ).bind(orgId, name, description, createdBy).first<GroupRow>()
+  return row
+}
+
+/** Update name/description. Returns null on duplicate-name conflict. */
+export async function updateGroup(env: Env, orgId: number, groupId: number, name: string | undefined, description: string | undefined): Promise<GroupRow | null> {
+  if (name != null) {
+    const clash = await env.AQUILLA_DB.prepare(
+      "SELECT id FROM groups WHERE org_id = ? AND name = ? AND id != ?",
+    ).bind(orgId, name, groupId).first<{ id: number }>()
+    if (clash) return null
+  }
+  await env.AQUILLA_DB.prepare(
+    `UPDATE groups SET
+       name = COALESCE(?, name),
+       description = COALESCE(?, description),
+       updated_at = CURRENT_TIMESTAMP
+     WHERE id = ? AND org_id = ?`,
+  ).bind(name ?? null, description ?? null, groupId, orgId).run()
+  return env.AQUILLA_DB.prepare(
+    "SELECT id, name, description FROM groups WHERE id = ?",
+  ).bind(groupId).first<GroupRow>()
+}
+
+/** Delete a group (FK cascades members + grants). */
+export async function deleteGroup(env: Env, orgId: number, groupId: number): Promise<void> {
+  await env.AQUILLA_DB.prepare("DELETE FROM groups WHERE id = ? AND org_id = ?").bind(groupId, orgId).run()
+}
+
+/** Add an org member to a group. Returns "not-org-member" if the target isn't in the org. */
+export async function addGroupMember(env: Env, orgId: number, groupId: number, targetUserId: number, addedBy: number): Promise<"ok" | "not-org-member"> {
+  const orgRole = await getOrgMemberRole(env, orgId, targetUserId)
+  if (orgRole == null) return "not-org-member"
+  await env.AQUILLA_DB.prepare(
+    "INSERT INTO group_members (group_id, user_id, added_by) VALUES (?, ?, ?) ON CONFLICT(group_id, user_id) DO NOTHING",
+  ).bind(groupId, targetUserId, addedBy).run()
+  return "ok"
+}
+
+export async function removeGroupMember(env: Env, groupId: number, userId: number): Promise<void> {
+  await env.AQUILLA_DB.prepare("DELETE FROM group_members WHERE group_id = ? AND user_id = ?").bind(groupId, userId).run()
+}
+
+/** Attach (or re-grant) a project to a group. Returns "cross-org" if the project isn't in this org. */
+export async function attachGroupProject(env: Env, orgId: number, groupId: number, projectId: string, roleLevel: number, grantedBy: number): Promise<"ok" | "cross-org" | "no-project"> {
+  const proj = await env.AQUILLA_DB.prepare("SELECT org_id FROM projects WHERE id = ?").bind(projectId).first<{ org_id: number | null }>()
+  if (!proj) return "no-project"
+  if (proj.org_id !== orgId) return "cross-org"
+  await env.AQUILLA_DB.prepare(
+    `INSERT INTO group_project_grants (group_id, project_id, role_level, granted_by) VALUES (?, ?, ?, ?)
+     ON CONFLICT(group_id, project_id) DO UPDATE SET role_level = excluded.role_level, granted_by = excluded.granted_by`,
+  ).bind(groupId, projectId, roleLevel, grantedBy).run()
+  return "ok"
+}
+
+/** Change the granted role for an existing attachment. Returns false if no attachment. */
+export async function updateGroupProjectRole(env: Env, groupId: number, projectId: string, roleLevel: number): Promise<boolean> {
+  const existing = await env.AQUILLA_DB.prepare(
+    "SELECT role_level FROM group_project_grants WHERE group_id = ? AND project_id = ?",
+  ).bind(groupId, projectId).first()
+  if (!existing) return false
+  await env.AQUILLA_DB.prepare(
+    "UPDATE group_project_grants SET role_level = ? WHERE group_id = ? AND project_id = ?",
+  ).bind(roleLevel, groupId, projectId).run()
+  return true
+}
+
+export async function detachGroupProject(env: Env, groupId: number, projectId: string): Promise<void> {
+  await env.AQUILLA_DB.prepare("DELETE FROM group_project_grants WHERE group_id = ? AND project_id = ?").bind(groupId, projectId).run()
+}
+
 export interface ProjectMembershipInOrg {
   projectId: string
   projectName: string

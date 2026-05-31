@@ -6,16 +6,26 @@ import { Hono } from "hono"
 import { zValidator } from "@hono/zod-validator"
 import { z } from "zod"
 import { authMiddleware, type AuthHonoEnv } from "../middleware/auth"
+import { ROLE } from "../types"
 import {
+  addGroupMember,
+  attachGroupProject,
   bumpOrgActivity,
+  createGroup,
+  deleteGroup,
+  detachGroupProject,
   getOrCreateUserOrg,
   getOrgGroupDetail,
   getOrgMemberRole,
+  groupExistsInOrg,
   listOrgGroups,
   listOrgMembersWithUsers,
   listPendingInvitesInOrg,
   listUserDirectMembershipsInOrg,
   listUserOrgs,
+  removeGroupMember,
+  updateGroup,
+  updateGroupProjectRole,
 } from "../services/org-permissions"
 import {
   ALL_ROLE_LEVELS,
@@ -98,6 +108,85 @@ orgs.get("/:orgId/groups/:groupId", async (c) => {
   return c.json(detail)
 })
 
+const groupBody = z.object({
+  name: z.string().min(1).max(200),
+  description: z.string().max(2000).optional(),
+})
+
+orgs.post("/:orgId/groups", zValidator("json", groupBody), async (c) => {
+  const user = c.get("user")
+  const orgId = parseInt(c.req.param("orgId"), 10)
+  if (!Number.isFinite(orgId)) return c.json({ error: "invalid orgId" }, 400)
+  const callerRole = await getOrgMemberRole(c.env, orgId, user.id)
+  if (callerRole == null || callerRole < ROLE.MAINTAINER) return c.json({ error: "org role >= maintainer required" }, 403)
+  const { name, description } = c.req.valid("json")
+  const group = await createGroup(c.env, orgId, name, description ?? null, user.id)
+  if (!group) return c.json({ error: "a team with that name already exists" }, 409)
+  return c.json(group)
+})
+
+const groupPatchBody = z.object({
+  name: z.string().min(1).max(200).optional(),
+  description: z.string().max(2000).optional(),
+})
+
+orgs.patch("/:orgId/groups/:groupId", zValidator("json", groupPatchBody), async (c) => {
+  const user = c.get("user")
+  const orgId = parseInt(c.req.param("orgId"), 10)
+  const groupId = parseInt(c.req.param("groupId"), 10)
+  if (!Number.isFinite(orgId) || !Number.isFinite(groupId)) return c.json({ error: "invalid id" }, 400)
+  const callerRole = await getOrgMemberRole(c.env, orgId, user.id)
+  if (callerRole == null || callerRole < ROLE.MAINTAINER) return c.json({ error: "org role >= maintainer required" }, 403)
+  if (!(await groupExistsInOrg(c.env, orgId, groupId))) return c.json({ error: "group not found" }, 404)
+  const { name, description } = c.req.valid("json")
+  const updated = await updateGroup(c.env, orgId, groupId, name, description)
+  if (!updated) return c.json({ error: "a team with that name already exists" }, 409)
+  return c.json(updated)
+})
+
+orgs.delete("/:orgId/groups/:groupId", async (c) => {
+  const user = c.get("user")
+  const orgId = parseInt(c.req.param("orgId"), 10)
+  const groupId = parseInt(c.req.param("groupId"), 10)
+  if (!Number.isFinite(orgId) || !Number.isFinite(groupId)) return c.json({ error: "invalid id" }, 400)
+  const callerRole = await getOrgMemberRole(c.env, orgId, user.id)
+  if (callerRole == null || callerRole < ROLE.MAINTAINER) return c.json({ error: "org role >= maintainer required" }, 403)
+  if (!(await groupExistsInOrg(c.env, orgId, groupId))) return c.json({ error: "group not found" }, 404)
+  await deleteGroup(c.env, orgId, groupId)
+  return c.json({ removed: true })
+})
+
+const memberBody = z.object({ username: z.string().min(1) })
+
+orgs.post("/:orgId/groups/:groupId/members", zValidator("json", memberBody), async (c) => {
+  const user = c.get("user")
+  const orgId = parseInt(c.req.param("orgId"), 10)
+  const groupId = parseInt(c.req.param("groupId"), 10)
+  if (!Number.isFinite(orgId) || !Number.isFinite(groupId)) return c.json({ error: "invalid id" }, 400)
+  const callerRole = await getOrgMemberRole(c.env, orgId, user.id)
+  if (callerRole == null || callerRole < ROLE.MAINTAINER) return c.json({ error: "org role >= maintainer required" }, 403)
+  if (!(await groupExistsInOrg(c.env, orgId, groupId))) return c.json({ error: "group not found" }, 404)
+  const { username } = c.req.valid("json")
+  const target = await lookupUserByUsername(c.env, username)
+  if (!target) return c.json({ error: "user not found" }, 404)
+  const result = await addGroupMember(c.env, orgId, groupId, target.id, user.id)
+  if (result === "not-org-member") return c.json({ error: "user is not a member of this org" }, 409)
+  return c.json({ userId: target.id, username: target.username })
+})
+
+orgs.delete("/:orgId/groups/:groupId/members/:userId", async (c) => {
+  const user = c.get("user")
+  const orgId = parseInt(c.req.param("orgId"), 10)
+  const groupId = parseInt(c.req.param("groupId"), 10)
+  const targetUserId = parseInt(c.req.param("userId"), 10)
+  if (!Number.isFinite(orgId) || !Number.isFinite(groupId) || !Number.isFinite(targetUserId)) return c.json({ error: "invalid id" }, 400)
+  const callerRole = await getOrgMemberRole(c.env, orgId, user.id)
+  if (callerRole == null || callerRole < ROLE.MAINTAINER) return c.json({ error: "org role >= maintainer required" }, 403)
+  if (!(await groupExistsInOrg(c.env, orgId, groupId))) return c.json({ error: "group not found" }, 404)
+  await removeGroupMember(c.env, groupId, targetUserId)
+  return c.json({ removed: true })
+})
+
 // Strict role validation — only the seven canonical levels are accepted.
 const orgMemberBody = z.object({
   username: z.string().min(1),
@@ -166,11 +255,12 @@ orgs.delete("/:orgId/members/:userId", async (c) => {
     return c.json({ error: "owner cannot remove self" }, 400)
   }
 
-  await c.env.AQUILLA_DB.prepare(
-    "DELETE FROM org_members WHERE org_id = ? AND user_id = ?",
-  )
-    .bind(orgId, targetUserId)
-    .run()
+  await c.env.AQUILLA_DB.batch([
+    c.env.AQUILLA_DB.prepare("DELETE FROM org_members WHERE org_id = ? AND user_id = ?").bind(orgId, targetUserId),
+    c.env.AQUILLA_DB.prepare(
+      `DELETE FROM group_members WHERE user_id = ? AND group_id IN (SELECT id FROM groups WHERE org_id = ?)`,
+    ).bind(targetUserId, orgId),
+  ])
 
   return c.json({ removed: true })
 })
@@ -235,6 +325,54 @@ orgs.get("/:orgId/invites", async (c) => {
       expiresAt: inv.expiresAt,
     })),
   })
+})
+
+const attachBody = z.object({ projectId: z.string().min(1), roleLevel: z.number().int() })
+const roleBody = z.object({ roleLevel: z.number().int() })
+
+orgs.post("/:orgId/groups/:groupId/projects", zValidator("json", attachBody), async (c) => {
+  const user = c.get("user")
+  const orgId = parseInt(c.req.param("orgId"), 10)
+  const groupId = parseInt(c.req.param("groupId"), 10)
+  if (!Number.isFinite(orgId) || !Number.isFinite(groupId)) return c.json({ error: "invalid id" }, 400)
+  const callerRole = await getOrgMemberRole(c.env, orgId, user.id)
+  if (callerRole == null || callerRole < ROLE.MAINTAINER) return c.json({ error: "org role >= maintainer required" }, 403)
+  if (!(await groupExistsInOrg(c.env, orgId, groupId))) return c.json({ error: "group not found" }, 404)
+  const { projectId, roleLevel } = c.req.valid("json")
+  if (!isCanonicalRoleLevel(roleLevel) || roleLevel > callerRole) return c.json({ error: "invalid or too-high role level" }, 403)
+  const result = await attachGroupProject(c.env, orgId, groupId, projectId, roleLevel, user.id)
+  if (result === "no-project") return c.json({ error: "project not found" }, 404)
+  if (result === "cross-org") return c.json({ error: "project is not in this org" }, 409)
+  return c.json({ projectId, roleLevel })
+})
+
+orgs.patch("/:orgId/groups/:groupId/projects/:projectId", zValidator("json", roleBody), async (c) => {
+  const user = c.get("user")
+  const orgId = parseInt(c.req.param("orgId"), 10)
+  const groupId = parseInt(c.req.param("groupId"), 10)
+  const projectId = c.req.param("projectId")
+  if (!Number.isFinite(orgId) || !Number.isFinite(groupId)) return c.json({ error: "invalid id" }, 400)
+  const callerRole = await getOrgMemberRole(c.env, orgId, user.id)
+  if (callerRole == null || callerRole < ROLE.MAINTAINER) return c.json({ error: "org role >= maintainer required" }, 403)
+  if (!(await groupExistsInOrg(c.env, orgId, groupId))) return c.json({ error: "group not found" }, 404)
+  const { roleLevel } = c.req.valid("json")
+  if (!isCanonicalRoleLevel(roleLevel) || roleLevel > callerRole) return c.json({ error: "invalid or too-high role level" }, 403)
+  const ok = await updateGroupProjectRole(c.env, groupId, projectId, roleLevel)
+  if (!ok) return c.json({ error: "attachment not found" }, 404)
+  return c.json({ projectId, roleLevel })
+})
+
+orgs.delete("/:orgId/groups/:groupId/projects/:projectId", async (c) => {
+  const user = c.get("user")
+  const orgId = parseInt(c.req.param("orgId"), 10)
+  const groupId = parseInt(c.req.param("groupId"), 10)
+  const projectId = c.req.param("projectId")
+  if (!Number.isFinite(orgId) || !Number.isFinite(groupId)) return c.json({ error: "invalid id" }, 400)
+  const callerRole = await getOrgMemberRole(c.env, orgId, user.id)
+  if (callerRole == null || callerRole < ROLE.MAINTAINER) return c.json({ error: "org role >= maintainer required" }, 403)
+  if (!(await groupExistsInOrg(c.env, orgId, groupId))) return c.json({ error: "group not found" }, 404)
+  await detachGroupProject(c.env, groupId, projectId)
+  return c.json({ removed: true })
 })
 
 export default orgs

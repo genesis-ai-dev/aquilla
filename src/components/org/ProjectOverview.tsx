@@ -8,6 +8,7 @@ import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { useActiveOrg } from "@/context/OrgContext"
 import { archiveProjectRemote, unarchiveProjectRemote } from "@/lib/sync/archive"
 import { setProjectDeadline } from "@/lib/sync/cloud-projects"
+import { downloadProjectBundle } from "@/lib/sync/export-bundle"
 import { getPortfolio, audioPct, recordedMinutes, deadlineStatus, type PortfolioProject } from "@/lib/frontier/portfolio"
 
 export function ProjectOverview() {
@@ -51,6 +52,24 @@ export function ProjectOverview() {
       await setProjectDeadline(jwt, id, value)
       await loadRow()
       setEditingDeadline(false)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function handleDownloadBundle() {
+    if (!jwt || !project) return
+    const fileId = project.files[0]?.id
+    if (!fileId) {
+      setError("This project has no files to export yet.")
+      return
+    }
+    setBusy(true)
+    setError(null)
+    try {
+      await downloadProjectBundle({ projectId: id, projectName: project.name, jwt, fileId })
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
     } finally {
@@ -183,6 +202,16 @@ export function ProjectOverview() {
                 >
                   Open project
                 </button>
+                {canManage && !isArchived && (
+                  <button
+                    onClick={handleDownloadBundle}
+                    disabled={busy || (project?.files.length ?? 0) === 0}
+                    className="rounded-md border px-3 py-1.5 text-sm font-medium hover:bg-accent/40 disabled:opacity-50"
+                    title={(project?.files.length ?? 0) === 0 ? "No files to export yet" : "Download the finished translation as a .zip"}
+                  >
+                    Download deliverable
+                  </button>
+                )}
                 {isOwner && !isArchived && (
                   <button
                     onClick={handleArchive}

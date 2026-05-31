@@ -37,6 +37,10 @@ vi.mock("@/lib/frontier/portfolio", () => ({
   deadlineStatus: () => null,
 }))
 vi.mock("@/lib/sync/cloud-projects", () => ({ setProjectDeadline: vi.fn() }))
+const downloadProjectBundle = vi.fn()
+vi.mock("@/lib/sync/export-bundle", () => ({
+  downloadProjectBundle: (...a: unknown[]) => downloadProjectBundle(...a),
+}))
 
 function projectRecord(over: Partial<ProjectRecord> & { level: number; deletedAt?: string }): ProjectRecord {
   const { level, deletedAt, ...rest } = over
@@ -98,5 +102,33 @@ describe("ProjectOverview archive/restore", () => {
     fireEvent.click(btn)
 
     await waitFor(() => expect(unarchiveProjectRemote).toHaveBeenCalledWith("p1", "jwt"))
+  })
+
+  it("maintainer sees Download deliverable; clicking triggers the bundle download", async () => {
+    useProject.mockReturnValue({
+      project: projectRecord({ level: 600, files: [{ id: "f1", name: "GEN", type: "usfm", createdAt: "x", cellCount: 0 }] }),
+      status: "ready",
+      refresh,
+    })
+    downloadProjectBundle.mockResolvedValue(undefined)
+    renderOverview()
+
+    const btn = await screen.findByRole("button", { name: "Download deliverable" })
+    fireEvent.click(btn)
+    await waitFor(() =>
+      expect(downloadProjectBundle).toHaveBeenCalledWith(expect.objectContaining({ projectId: "p1", fileId: "f1" })),
+    )
+  })
+
+  it("non-maintainer does not see Download deliverable", async () => {
+    useProject.mockReturnValue({
+      project: projectRecord({ level: 400, files: [{ id: "f1", name: "GEN", type: "usfm", createdAt: "x", cellCount: 0 }] }),
+      status: "ready",
+      refresh,
+    })
+    renderOverview()
+
+    await screen.findByRole("button", { name: "Open project" })
+    expect(screen.queryByRole("button", { name: "Download deliverable" })).not.toBeInTheDocument()
   })
 })

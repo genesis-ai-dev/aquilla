@@ -20,13 +20,12 @@ export interface DownloadSourceArgs {
 }
 
 export class SourceExportError extends Error {
-  constructor(
-    message: string,
-    /** HTTP status, when available — UI decides whether to nudge a re-import (404) */
-    public readonly status?: number,
-  ) {
+  /** HTTP status, when available — UI decides whether to nudge a re-import (404). */
+  readonly status?: number
+  constructor(message: string, status?: number) {
     super(message)
     this.name = "SourceExportError"
+    this.status = status
   }
 }
 

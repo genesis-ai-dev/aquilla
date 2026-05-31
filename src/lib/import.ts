@@ -22,6 +22,11 @@ import { extractPlaintextStrings } from "./parsers/plaintext"
 import { extractMarkdownStrings } from "./parsers/markdown"
 import { extractVttStrings, extractSrtStrings } from "./parsers/subtitle"
 import { parseUsfmLossless } from "./parsers/usfm-lossless"
+import {
+  assembleParatextProject,
+  type ProjectEntry,
+} from "./parsers/paratext-project"
+import type { ParatextSettings } from "./parsers/paratext"
 import { extractDocxStrings } from "./parsers/docx"
 import { extractPptxStrings } from "./parsers/pptx"
 import { bulkUploadSource, type BulkImportCell } from "./sync/bulk-import"
@@ -49,6 +54,59 @@ interface ImportResult {
    *  translations substituted. */
   rawSource?: string
   rawSourceFormat?: string
+  /** USFM book code (\id), when known. Persisted on the file projection so the
+   *  sidebar can group + order by canonical book. */
+  bookCode?: string
+  /** OT/NT grouping for the sidebar. */
+  corpusMarker?: "OT" | "NT" | undefined
+  /** Original filename (e.g. "01GENarONAV12.SFM") — preserved for export naming
+   *  and hover-to-see-original when we rename the file to a localized book name. */
+  originalName?: string
+}
+
+/** Parse one USFM book section into translatable cells (verse bodies + heading/
+ *  title/intro paratext), in document order. Shared by plain-USFM import and
+ *  Paratext-project import. */
+function usfmSectionToStrings(section: string): {
+  bookId: string
+  strings: TranslatableString[]
+  duplicateRefs: string[]
+} {
+  const doc = parseUsfmLossless(section)
+  const bookId = doc.bookId || "unknown"
+  const seen = new Set<string>()
+  const duplicateRefs: string[] = []
+  for (const v of doc.verses) {
+    if (seen.has(v.ref)) duplicateRefs.push(v.ref)
+    else seen.add(v.ref)
+  }
+  const allSpans = [
+    ...doc.verses.map((v) => ({
+      order: v.textStart,
+      ref: v.ref,
+      text: v.text.trim(),
+      section: `${bookId} ${v.chapter}`,
+      type: "verse" as const,
+    })),
+    ...doc.headings.map((h) => ({
+      order: h.textStart,
+      ref: h.ref,
+      text: h.text.trim(),
+      section: h.chapter > 0 ? `${bookId} ${h.chapter}` : bookId,
+      type: h.kind,
+    })),
+  ].sort((a, b) => a.order - b.order)
+  const strings: TranslatableString[] = allSpans.map((s) => ({
+    id: uuidv7(),
+    original: s.text,
+    translated: "",
+    context: s.ref,
+    group: s.ref,
+    section: s.section,
+    globalReferences: [s.ref],
+    type: s.type,
+  }))
+  return { bookId, strings, duplicateRefs }
 }
 
 export interface ImportContext {
@@ -175,6 +233,7 @@ export async function emitParsedFile(
       parserVersion: "workspace-import-v1",
       sourceLanguage: ctx.sourceLanguage,
       targetLanguage: ctx.targetLanguage,
+      ...(result.bookCode ? { bookCode: result.bookCode } : {}),
     },
     cells,
     rawSource: result.rawSource,
@@ -190,7 +249,86 @@ export async function emitParsedFile(
     type: fileType,
     createdAt: new Date().toISOString(),
     cellCount: cells.length,
+    ...(result.corpusMarker ? { corpusMarker: result.corpusMarker } : {}),
+    ...(result.originalName ? { originalName: result.originalName } : {}),
   }
+}
+
+export interface ParatextImportProgress {
+  phase: "parse" | "save"
+  /** Localized name of the book currently being imported. */
+  book?: string
+  booksDone: number
+  booksTotal: number
+}
+
+export interface ParatextImportResult {
+  refs: FileReference[]
+  settings: ParatextSettings
+  /** Books whose import failed, with the reason — surfaced so a consultant
+   *  knows exactly what didn't come across (rather than a silent drop). */
+  skipped: { book: string; reason: string }[]
+}
+
+/**
+ * Import a whole Paratext project (a set of entries: Settings.xml, BookNames.xml,
+ * and the SFM book files — from a folder selection or an unzipped archive).
+ *
+ * Each book becomes one Aquilla File, named in the project's own language
+ * (BookNames), ordered canonically, tagged OT/NT, with the original bytes kept
+ * as the round-trip side-car and the original filename retained. The project's
+ * language/ISO/direction come back in `settings` so the caller can stamp them
+ * on the Aquilla project.
+ */
+export async function importParatextProject(
+  entries: ProjectEntry[],
+  ctx: ImportContext,
+  onProgress?: (p: ParatextImportProgress) => void,
+): Promise<ParatextImportResult> {
+  const project = await assembleParatextProject(entries)
+  if (!project) {
+    throw new Error(
+      "That doesn't look like a Paratext project — no Settings.xml (or .ssf) with USFM books was found.",
+    )
+  }
+
+  const refs: FileReference[] = []
+  const skipped: { book: string; reason: string }[] = []
+  const total = project.books.length
+  // Source language defaults to the project's ISO code so the Aquilla project
+  // inherits it (caller may override per source/target choice).
+  const bookCtx: ImportContext = {
+    ...ctx,
+    sourceLanguage: project.settings.languageIsoCode || ctx.sourceLanguage,
+  }
+
+  let done = 0
+  for (const book of project.books) {
+    onProgress?.({ phase: "parse", book: book.displayName, booksDone: done, booksTotal: total })
+    try {
+      const { strings } = usfmSectionToStrings(book.rawSource)
+      const ref = await emitParsedFile(
+        {
+          name: book.displayName,
+          strings,
+          rawSource: book.rawSource,
+          rawSourceFormat: "usfm",
+          bookCode: book.bookId,
+          corpusMarker: book.corpusMarker,
+          originalName: book.fileName,
+        },
+        "usfm",
+        bookCtx,
+      )
+      refs.push(ref)
+    } catch (err) {
+      skipped.push({ book: book.displayName, reason: err instanceof Error ? err.message : String(err) })
+    }
+    done++
+    onProgress?.({ phase: "save", booksDone: done, booksTotal: total })
+  }
+
+  return { refs, settings: project.settings, skipped }
 }
 
 async function parseFile(file: File, fileType: FileType): Promise<ImportResult[]> {
@@ -225,52 +363,16 @@ async function parseFile(file: File, fileType: FileType): Promise<ImportResult[]
         ? text.split(/(?=\\id\s)/).filter((s) => s.trim().length > 0)
         : [text]
       return sections.map((section) => {
-        const doc = parseUsfmLossless(section)
-        const bookId = doc.bookId || "unknown"
+        const { bookId, strings, duplicateRefs } = usfmSectionToStrings(section)
         // Surface duplicate \v refs (a real data-quality issue we see in the
         // wild — e.g. two consecutive `\v 34`). Round-trip still works, but
         // consultants should know their source has the bug.
-        const seen = new Set<string>()
-        const dups: string[] = []
-        for (const v of doc.verses) {
-          if (seen.has(v.ref)) dups.push(v.ref)
-          else seen.add(v.ref)
-        }
-        if (dups.length > 0) {
+        if (duplicateRefs.length > 0) {
           console.warn(
-            `[usfm import] ${file.name}: ${dups.length} duplicate verse ref(s) — `
-              + `${dups.slice(0, 5).join(", ")}${dups.length > 5 ? `, +${dups.length - 5} more` : ""}`,
+            `[usfm import] ${file.name}: ${duplicateRefs.length} duplicate verse ref(s) — `
+              + `${duplicateRefs.slice(0, 5).join(", ")}${duplicateRefs.length > 5 ? `, +${duplicateRefs.length - 5} more` : ""}`,
           )
         }
-        // Verse cells + heading/title/intro cells in document order. The export
-        // route looks them up by canonicalRef regardless of cell type, so a
-        // translated heading appears in the exported .SFM at the right marker.
-        const allSpans = [
-          ...doc.verses.map((v) => ({
-            order: v.textStart,
-            ref: v.ref,
-            text: v.text.trim(),
-            section: `${bookId} ${v.chapter}`,
-            type: "verse" as const,
-          })),
-          ...doc.headings.map((h) => ({
-            order: h.textStart,
-            ref: h.ref,
-            text: h.text.trim(),
-            section: h.chapter > 0 ? `${bookId} ${h.chapter}` : bookId,
-            type: h.kind,
-          })),
-        ].sort((a, b) => a.order - b.order)
-        const strings: TranslatableString[] = allSpans.map((s) => ({
-          id: uuidv7(),
-          original: s.text,
-          translated: "",
-          context: s.ref,
-          group: s.ref,
-          section: s.section,
-          globalReferences: [s.ref],
-          type: s.type,
-        }))
         return {
           name: file.name === bookId ? bookId : sections.length > 1 ? bookId : file.name,
           strings,

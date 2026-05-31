@@ -86,9 +86,11 @@ describe("MembersPage active-org", () => {
         </OrgProvider>
       </MemoryRouter>,
     )
-    // "Come and See" legitimately renders in both the OrgSwitcher and the
-    // "People in {org}" subtitle, so assert ≥1 (not exactly one). The test's
-    // intent is that the ACTIVE org shows and the owned-org "Legacy Org" does not.
+    // The active org's name now appears in more than one place (the OrgSidebar
+    // switcher + the "People in <org>" heading) since MembersPage renders inside
+    // the org shell — so assert ≥1 match rather than exactly one. The point of
+    // this test is active-vs-owned: "Come and See" (42, from listMyOrgs) shows
+    // and "Legacy Org" (99, from getOrCreateMyOrg) does NOT.
     await waitFor(() =>
       expect(screen.getAllByText("Come and See").length).toBeGreaterThan(0),
     )

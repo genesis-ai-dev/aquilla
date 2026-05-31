@@ -617,9 +617,9 @@ case 'cell.audio.attach': {
           .prepare(
             `INSERT INTO cell_audio (
               project_id, file_id, cell_id, audio_id, slot, url, mime_type,
-              voice_id, reference_audio_id, duration_ms, timings_json,
-              selected, deleted, event_id, created_ts
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 0, ?, ?)
+              voice_id, reference_audio_id, duration_ms, trim_start_ms, trim_end_ms,
+              timings_json, selected, deleted, event_id, created_ts
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 0, ?, ?)
             ON CONFLICT(project_id, file_id, cell_id, audio_id) DO UPDATE SET
               slot               = excluded.slot,
               url                = excluded.url,
@@ -627,6 +627,8 @@ case 'cell.audio.attach': {
               voice_id           = excluded.voice_id,
               reference_audio_id = excluded.reference_audio_id,
               duration_ms        = excluded.duration_ms,
+              trim_start_ms      = excluded.trim_start_ms,
+              trim_end_ms        = excluded.trim_end_ms,
               timings_json       = excluded.timings_json,
               selected           = 1,
               deleted            = 0,
@@ -643,6 +645,8 @@ case 'cell.audio.attach': {
             p.voiceId ?? null,
             p.referenceAudioId ?? null,
             p.durationMs ?? null,
+            p.trimStartMs ?? null,
+            p.trimEndMs ?? null,
             p.timings ? JSON.stringify(p.timings) : null,
             event.id,
             event.serverTs,

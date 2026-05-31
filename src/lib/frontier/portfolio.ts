@@ -9,6 +9,7 @@ export interface PortfolioProject {
   lastEditAt: number | null
   audioCells: number
   recordedMs: number
+  deadlineAt: string | null
 }
 
 export async function getPortfolio(jwt: string, orgId: number): Promise<PortfolioProject[]> {
@@ -34,9 +35,22 @@ export function recordedMinutes(p: PortfolioProject): number {
   return Math.round(p.recordedMs / 60000)
 }
 
-/** Attention score: higher = more attention needed. Stalled (>14d / never edited) ranks above low completion. */
+export type DeadlineStatus = "overdue" | "soon" | "ok"
+
+/** null when no deadline; "overdue" past due; "soon" within 7 days; else "ok". */
+export function deadlineStatus(p: PortfolioProject, now: number): DeadlineStatus | null {
+  if (!p.deadlineAt) return null
+  const t = Date.parse(p.deadlineAt)
+  if (Number.isNaN(t)) return null
+  if (t < now) return "overdue"
+  if (t - now <= 7 * 24 * 60 * 60 * 1000) return "soon"
+  return "ok"
+}
+
+/** Attention score: higher = more attention needed. Overdue ranks above stalled, which ranks above low completion. */
 export function attentionRank(p: PortfolioProject, now: number): number {
   const ageMs = p.lastEditAt != null ? now - p.lastEditAt : Infinity
   const stale = ageMs > 14 * 24 * 60 * 60 * 1000 ? 1 : 0
-  return stale * 1000 + (1 - validatedPct(p)) * 100
+  const overdue = deadlineStatus(p, now) === "overdue" ? 1 : 0
+  return overdue * 2000 + stale * 1000 + (1 - validatedPct(p)) * 100
 }

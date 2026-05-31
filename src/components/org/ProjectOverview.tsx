@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react"
+import { useState, useEffect, useCallback } from "react"
 import { useParams, useNavigate } from "react-router-dom"
 import { AppShell } from "@/components/AppShell"
 import { OrgSidebar } from "./OrgSidebar"
@@ -7,7 +7,8 @@ import { useProject } from "@/hooks/useProject"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { useActiveOrg } from "@/context/OrgContext"
 import { archiveProjectRemote, unarchiveProjectRemote } from "@/lib/sync/archive"
-import { getPortfolio, audioPct, recordedMinutes, type PortfolioProject } from "@/lib/frontier/portfolio"
+import { setProjectDeadline } from "@/lib/sync/cloud-projects"
+import { getPortfolio, audioPct, recordedMinutes, deadlineStatus, type PortfolioProject } from "@/lib/frontier/portfolio"
 
 export function ProjectOverview() {
   const { id = "" } = useParams()
@@ -20,18 +21,42 @@ export function ProjectOverview() {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [audio, setAudio] = useState<PortfolioProject | null>(null)
+  const [editingDeadline, setEditingDeadline] = useState(false)
+  const [deadlineInput, setDeadlineInput] = useState("")
 
-  useEffect(() => {
+  const loadRow = useCallback(async () => {
     if (!jwt || activeOrgId == null) return
-    let cancelled = false
-    getPortfolio(jwt, activeOrgId)
-      .then((list) => { if (!cancelled) setAudio(list.find((p) => p.id === id) ?? null) })
-      .catch(() => { if (!cancelled) setAudio(null) })
-    return () => { cancelled = true }
+    try {
+      const list = await getPortfolio(jwt, activeOrgId)
+      setAudio(list.find((p) => p.id === id) ?? null)
+    } catch {
+      setAudio(null)
+    }
   }, [jwt, activeOrgId, id])
 
+  useEffect(() => {
+    void loadRow()
+  }, [loadRow])
+
   const isOwner = (project?.syncRole?.level ?? 0) >= 700
+  const canManage = (project?.syncRole?.level ?? 0) >= 600
   const isArchived = Boolean(project?.deletedAt)
+  const dstatus = audio ? deadlineStatus(audio, Date.now()) : null
+
+  async function saveDeadline(value: string | null) {
+    if (!jwt) return
+    setBusy(true)
+    setError(null)
+    try {
+      await setProjectDeadline(jwt, id, value)
+      await loadRow()
+      setEditingDeadline(false)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setBusy(false)
+    }
+  }
 
   async function handleArchive() {
     if (!jwt) return
@@ -86,6 +111,70 @@ export function ProjectOverview() {
                   {Math.round(audioPct(audio) * 100)}% of cells have audio · {recordedMinutes(audio)} min recorded
                 </p>
               )}
+
+              {/* Deadline */}
+              <div className="mt-2 text-sm">
+                {editingDeadline ? (
+                  <div className="flex flex-wrap items-center gap-2">
+                    <input
+                      type="date"
+                      value={deadlineInput}
+                      onChange={(e) => setDeadlineInput(e.target.value)}
+                      disabled={busy}
+                      className="rounded-md border bg-background px-2 py-1 text-sm"
+                      aria-label="Project deadline"
+                    />
+                    <button
+                      onClick={() => saveDeadline(deadlineInput || null)}
+                      disabled={busy || !deadlineInput}
+                      className="rounded-md border px-2 py-1 text-xs font-medium hover:bg-accent/40 disabled:opacity-50"
+                    >
+                      Save
+                    </button>
+                    <button
+                      onClick={() => setEditingDeadline(false)}
+                      disabled={busy}
+                      className="rounded-md border px-2 py-1 text-xs font-medium hover:bg-accent/40 disabled:opacity-50"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                ) : (
+                  <div className="flex flex-wrap items-center gap-2 text-muted-foreground">
+                    <span>
+                      Deadline:{" "}
+                      {audio?.deadlineAt ? (
+                        <span className={dstatus === "overdue" ? "font-medium text-destructive" : "font-medium text-foreground"}>
+                          {audio.deadlineAt}{dstatus === "overdue" ? " (overdue)" : dstatus === "soon" ? " (due soon)" : ""}
+                        </span>
+                      ) : (
+                        "none"
+                      )}
+                    </span>
+                    {canManage && (
+                      <>
+                        <button
+                          onClick={() => { setDeadlineInput(audio?.deadlineAt ?? ""); setEditingDeadline(true) }}
+                          disabled={busy}
+                          className="rounded-md border px-2 py-0.5 text-xs hover:bg-accent/40 disabled:opacity-50"
+                        >
+                          {audio?.deadlineAt ? "Change" : "Set deadline"}
+                        </button>
+                        {audio?.deadlineAt && (
+                          <button
+                            onClick={() => saveDeadline(null)}
+                            disabled={busy}
+                            className="rounded-md border px-2 py-0.5 text-xs hover:bg-accent/40 disabled:opacity-50"
+                          >
+                            Clear
+                          </button>
+                        )}
+                      </>
+                    )}
+                  </div>
+                )}
+              </div>
+
               {error && <p className="mt-2 text-sm text-destructive">{error}</p>}
               <div className="mt-4 flex gap-2">
                 <button

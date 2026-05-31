@@ -113,6 +113,24 @@ export async function fetchArchivedProjects(
 }
 
 /**
+ * PATCH /api/v2/projects/:id/deadline — set (ISO date string) or clear (null)
+ * a project's deadline. Maintainer+ only (server-enforced). Throws on failure.
+ */
+export async function setProjectDeadline(
+  jwt: string,
+  projectId: string,
+  deadline: string | null,
+  apiUrl: string = FRONTIER_API_URL,
+): Promise<void> {
+  const res = await fetch(`${apiUrl}/api/v2/projects/${encodeURIComponent(projectId)}/deadline`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${jwt}` },
+    body: JSON.stringify({ deadline }),
+  })
+  if (!res.ok) throw new Error(`setProjectDeadline failed: HTTP ${res.status}`)
+}
+
+/**
  * Build a minimal `ProjectRecord` from a server summary. Required ProjectRecord
  * fields (sourceLanguage, targetLanguage, files, members) don't exist
  * server-side — they live in Y.Doc state and IDB — so we seed empty defaults.

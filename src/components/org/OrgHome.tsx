@@ -5,7 +5,7 @@ import { OrgSidebar } from "./OrgSidebar"
 import { OrgBreadcrumb } from "./OrgBreadcrumb"
 import { useActiveOrg } from "@/context/OrgContext"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
-import { getPortfolio, validatedPct, attentionRank, audioPct, type PortfolioProject } from "@/lib/frontier/portfolio"
+import { getPortfolio, validatedPct, attentionRank, audioPct, deadlineStatus, type PortfolioProject } from "@/lib/frontier/portfolio"
 
 const STALE_THRESHOLD_MS = 14 * 24 * 60 * 60 * 1000
 
@@ -49,6 +49,7 @@ export function OrgHome() {
       ? projects.reduce((sum, p) => sum + validatedPct(p), 0) / projects.length
       : 0
   const stalledCount = projects.filter((p) => isStalled(p, now)).length
+  const overdueCount = projects.filter((p) => deadlineStatus(p, now) === "overdue").length
   const avgAudioPct =
     projects.length > 0 ? projects.reduce((sum, p) => sum + audioPct(p), 0) / projects.length : 0
 
@@ -74,7 +75,7 @@ export function OrgHome() {
               </div>
 
               {/* Rollup strip */}
-              <div className="grid grid-cols-4 gap-4">
+              <div className="grid grid-cols-5 gap-4">
                 <div className="rounded-lg border p-4 text-center">
                   <p className="text-2xl font-bold">{projects.length}</p>
                   <p className="text-sm text-muted-foreground">Projects</p>
@@ -91,6 +92,10 @@ export function OrgHome() {
                   <p className="text-2xl font-bold">{stalledCount}</p>
                   <p className="text-sm text-muted-foreground">Stalled</p>
                 </div>
+                <div className="rounded-lg border p-4 text-center">
+                  <p className={`text-2xl font-bold ${overdueCount > 0 ? "text-destructive" : ""}`}>{overdueCount}</p>
+                  <p className="text-sm text-muted-foreground">Overdue</p>
+                </div>
               </div>
 
               {/* Attention-ranked list */}
@@ -102,6 +107,7 @@ export function OrgHome() {
                     const pct = Math.round(validatedPct(p) * 100)
                     const apct = Math.round(audioPct(p) * 100)
                     const stalled = isStalled(p, now)
+                    const dstatus = deadlineStatus(p, now)
                     return (
                       <Link
                         key={p.id}
@@ -109,7 +115,19 @@ export function OrgHome() {
                         className="flex items-center gap-4 p-4 hover:bg-muted/50 transition-colors"
                       >
                         <div className="flex-1 min-w-0">
-                          <p className="font-medium truncate">{p.name}</p>
+                          <div className="flex items-center gap-2">
+                            <p className="font-medium truncate">{p.name}</p>
+                            {dstatus === "overdue" && (
+                              <span className="shrink-0 rounded-full bg-destructive/15 px-2 py-0.5 text-[10px] font-medium text-destructive">
+                                Overdue
+                              </span>
+                            )}
+                            {dstatus === "soon" && (
+                              <span className="shrink-0 rounded-full bg-amber-500/15 px-2 py-0.5 text-[10px] font-medium text-amber-700 dark:text-amber-400">
+                                Due soon
+                              </span>
+                            )}
+                          </div>
                           <div className="mt-1 h-1.5 w-full rounded-full bg-muted overflow-hidden">
                             <div
                               className="h-full rounded-full bg-primary"

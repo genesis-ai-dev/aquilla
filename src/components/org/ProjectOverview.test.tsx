@@ -34,7 +34,9 @@ vi.mock("@/lib/frontier/portfolio", () => ({
   getPortfolio: vi.fn(async () => []),
   audioPct: () => 0,
   recordedMinutes: () => 0,
+  deadlineStatus: () => null,
 }))
+vi.mock("@/lib/sync/cloud-projects", () => ({ setProjectDeadline: vi.fn() }))
 
 function projectRecord(over: Partial<ProjectRecord> & { level: number; deletedAt?: string }): ProjectRecord {
   const { level, deletedAt, ...rest } = over

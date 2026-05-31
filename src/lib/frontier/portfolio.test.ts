@@ -1,10 +1,10 @@
 import { describe, it, expect, vi, afterEach } from "vitest"
-import { getPortfolio, validatedPct, attentionRank, audioPct, recordedMinutes, type PortfolioProject } from "./portfolio"
+import { getPortfolio, validatedPct, attentionRank, audioPct, recordedMinutes, deadlineStatus, type PortfolioProject } from "./portfolio"
 
 const ORIG = global.fetch
 
 function project(over: Partial<PortfolioProject>): PortfolioProject {
-  return { id: "p", name: "P", totalCells: 0, validatedCells: 0, lastEditAt: null, audioCells: 0, recordedMs: 0, ...over }
+  return { id: "p", name: "P", totalCells: 0, validatedCells: 0, lastEditAt: null, audioCells: 0, recordedMs: 0, deadlineAt: null, ...over }
 }
 
 afterEach(() => {
@@ -62,7 +62,30 @@ describe("recordedMinutes", () => {
   })
 })
 
+describe("deadlineStatus", () => {
+  const now = Date.parse("2026-06-01T00:00:00Z")
+  it("returns null when there is no deadline", () => {
+    expect(deadlineStatus(project({ deadlineAt: null }), now)).toBeNull()
+  })
+  it("flags a past deadline as overdue", () => {
+    expect(deadlineStatus(project({ deadlineAt: "2026-05-01" }), now)).toBe("overdue")
+  })
+  it("flags a deadline within 7 days as soon", () => {
+    expect(deadlineStatus(project({ deadlineAt: "2026-06-04" }), now)).toBe("soon")
+  })
+  it("flags a far-future deadline as ok", () => {
+    expect(deadlineStatus(project({ deadlineAt: "2026-09-01" }), now)).toBe("ok")
+  })
+})
+
 describe("attentionRank", () => {
+  it("an overdue project out-ranks a merely-stalled one", () => {
+    const now = Date.parse("2026-06-01T00:00:00Z")
+    const overdue = project({ id: "o", totalCells: 100, validatedCells: 90, lastEditAt: now, deadlineAt: "2026-05-01" })
+    const stalledOnly = project({ id: "s", totalCells: 100, validatedCells: 90, lastEditAt: 0 })
+    expect(attentionRank(overdue, now)).toBeGreaterThan(attentionRank(stalledOnly, now))
+  })
+
   it("a stalled fully-validated project ranks higher than a fresh half-validated project", () => {
     const now = Date.now()
     const stalledFullyValidated = project({ id: "s", name: "Stalled", totalCells: 100, validatedCells: 100, lastEditAt: 0 })

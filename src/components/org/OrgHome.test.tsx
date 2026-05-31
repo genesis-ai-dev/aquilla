@@ -24,6 +24,7 @@ vi.mock("@/lib/frontier/portfolio", async (importActual) => {
         lastEditAt: now - 30 * 24 * 60 * 60 * 1000, // 30 days ago (stalled)
         audioCells: 100, // 50% audio
         recordedMs: 120000,
+        deadlineAt: "2020-01-01", // long past → overdue
       },
       // Fresh, high validated — should rank second
       {
@@ -34,6 +35,7 @@ vi.mock("@/lib/frontier/portfolio", async (importActual) => {
         lastEditAt: now, // just edited
         audioCells: 50, // 50% audio
         recordedMs: 60000,
+        deadlineAt: null,
       },
     ]),
   }
@@ -62,6 +64,13 @@ describe("OrgHome", () => {
     await waitFor(() => expect(screen.getByText("Legacy Translation")).toBeInTheDocument())
     // 2 projects total — rendered as the Projects rollup count
     expect(screen.getByText("2")).toBeInTheDocument()
+  })
+
+  it("shows the overdue rollup card and an overdue badge", async () => {
+    render(<MemoryRouter><OrgProvider><OrgHome /></OrgProvider></MemoryRouter>)
+    await waitFor(() => expect(screen.getByText("Legacy Translation")).toBeInTheDocument())
+    // "Overdue" appears twice: the rollup card label + the long-past-deadline row badge
+    expect(screen.getAllByText("Overdue").length).toBeGreaterThan(1)
   })
 
   it("shows the audio rollup card and per-project audio %", async () => {

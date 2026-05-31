@@ -24,7 +24,8 @@ type SearchFn = (
   excludeId?: string,
 ) => Promise<ScoredPair[]>
 import type { CellData } from "./useCells"
-import { buildPrompt, buildBatchPrompt, complete, resolveProvider, DEFAULT_SYSTEM_PROMPT, type PassageExample } from "@/lib/completion/completion-service"
+import { buildPrompt, buildBatchPrompt, complete, resolveProvider, DEFAULT_SYSTEM_PROMPT, collectValidatedPairs, type PassageExample } from "@/lib/completion/completion-service"
+import type { TranslationRule } from "@/lib/parsers/types"
 import type { PassageHit } from "./useSearchIndex"
 import { useFrontierHealth } from "@/lib/completion/frontier-health"
 import posthog from "@/lib/posthog"
@@ -71,6 +72,13 @@ export function useCompletion(
   searchPassages: SearchPassagesFn,
   session: FrontierSession | null = null,
   commitCompletedCell?: CommitCompletedCell,
+  // SWARM-TODO(memory-wiring): ProjectWorkspace.tsx line ~692 — add two more
+  // args to the useCompletion call:
+  //   rules: rules,           (from `const { rules } = useRules(project ?? null, refresh)` at line 553)
+  //   allCells: fileCells,    (from `const fileCells = cells` — the current file's cells snapshot)
+  // e.g.:  useCompletion(...existingArgs, frontierSession, commitCompletedCell, rules, fileCells)
+  rules?: TranslationRule[],
+  allCells?: CellData[],
 ) {
   const [completing, setCompleting] = useState<Map<string, string>>(new Map())
   const [examples, setExamples] = useState<Map<string, ScoredPair[]>>(new Map())
@@ -112,12 +120,21 @@ export function useCompletion(
 
     const llmAuthor = effectiveSettings.model || "frontier-default"
 
+    // Collect validated pairs from the project's cells, ranked by relevance to
+    // the cell being drafted. These represent human corrections — "fix it once,
+    // the system learns." Limit to 5 most-relevant to keep the prompt tight.
+    const validatedPairs = allCells
+      ? collectValidatedPairs(allCells, cell.original, 5)
+      : []
+
     try {
       const messages = buildPrompt({
         sourceLanguage, targetLanguage,
         systemPrompt: effectiveSettings.systemPrompt || DEFAULT_SYSTEM_PROMPT,
         sourceText: cell.original,
         examples: found.map((e) => ({ source: e.source, target: e.target })),
+        rules,
+        validatedPairs,
       })
       const result = await complete({
         settings: effectiveSettings, session,
@@ -135,6 +152,8 @@ export function useCompletion(
         source_language: sourceLanguage,
         target_language: targetLanguage,
         example_count: found.length,
+        validated_pair_count: validatedPairs.length,
+        rule_count: (rules ?? []).filter((r) => r.enabled).length,
       })
       setCompleting((p) => new Map(p).set(cell.id, "done"))
     } catch (err) {
@@ -142,7 +161,7 @@ export function useCompletion(
       setCompleting((p) => new Map(p).set(cell.id, "error"))
       setErrors((p) => new Map(p).set(cell.id, err instanceof Error ? err.message : "Failed"))
     }
-  }, [effectiveSettings, isConfigured, isAvailable, sourceLanguage, targetLanguage, search, session, provider, commitCompletedCell])
+  }, [effectiveSettings, isConfigured, isAvailable, sourceLanguage, targetLanguage, search, session, provider, commitCompletedCell, rules, allCells])
 
   // Segmented batch translation: each sub-batch goes out as one <vN>-framed
   // prompt and the response is demuxed back to cells. LLMs translate a passage
@@ -211,12 +230,19 @@ export function useCompletion(
       const examplesForPrompt: PassageExample[] = passages.map((p) => ({
         cells: p.cells.map((c) => ({ source: c.source, target: c.target })),
       }))
+      // Use the chunk's concatenated text as the relevance query so validated
+      // pairs about the same topic/terms are ranked highest.
+      const batchValidatedPairs = allCells
+        ? collectValidatedPairs(allCells, concatenated, 5)
+        : []
       const messages = buildBatchPrompt({
         sourceLanguage, targetLanguage,
         systemPrompt: effectiveSettings.systemPrompt || DEFAULT_SYSTEM_PROMPT,
         cells: chunk.map((c) => ({ source: c.original })),
         examples: examplesForPrompt,
         priorBatch: priorBatch.length ? priorBatch : undefined,
+        rules,
+        validatedPairs: batchValidatedPairs,
       })
 
       let result = ""
@@ -273,6 +299,8 @@ export function useCompletion(
         filled_count: filledText.size,
         fallback_count: chunk.length - filledText.size,
         example_count: flatExamples.length,
+        validated_pair_count: batchValidatedPairs.length,
+        rule_count: (rules ?? []).filter((r) => r.enabled).length,
       })
     }
 
@@ -280,7 +308,7 @@ export function useCompletion(
     for (const cell of fallbackQueue) {
       await completeSingle(cell)
     }
-  }, [effectiveSettings, isConfigured, isAvailable, sourceLanguage, targetLanguage, searchPassages, session, provider, completeSingle, commitCompletedCell])
+  }, [effectiveSettings, isConfigured, isAvailable, sourceLanguage, targetLanguage, searchPassages, session, provider, completeSingle, commitCompletedCell, rules, allCells])
 
   return { completeSingle, completeBatch, isConfigured, isAvailable, completing, examples, errors, previews }
 }

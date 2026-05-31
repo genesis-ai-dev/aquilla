@@ -1,7 +1,90 @@
-import type { CompletionSettings, CompletionProvider } from "@/lib/parsers/types"
+import type { CompletionSettings, CompletionProvider, TranslationRule } from "@/lib/parsers/types"
 import type { FrontierSession } from "@/lib/frontier/types"
 import { resolveApiKey } from "@/lib/store/user-api-keys"
 import { getUserProviderOverride } from "@/lib/store/user-provider-override"
+
+// ---------------------------------------------------------------------------
+// Memory primitives
+// ---------------------------------------------------------------------------
+
+/**
+ * A validated source→target pair surfaced from the project's cell store.
+ * Used as few-shot examples that capture this team's terminology decisions.
+ */
+export interface ValidatedPair {
+  source: string
+  target: string
+}
+
+/**
+ * Extract validated source→target pairs from a snapshot of the project's
+ * cells. Only cells with `status === "validated"` and non-empty content on
+ * both sides are included.
+ *
+ * Optionally ranked by relevance to a query string: if `query` is provided,
+ * pairs whose source text shares any token with the query are promoted to the
+ * front. Token overlap is a cheap proxy for subject-matter similarity — good
+ * enough to bias the model toward domain-relevant examples without a
+ * vector store.
+ *
+ * @param cells - snapshot from useCells (must have `status`, `original`, `translated`)
+ * @param query - optional source text of the cell being drafted (for relevance ranking)
+ * @param limit - max pairs to return (default 20; callers may want fewer)
+ */
+export function collectValidatedPairs(
+  cells: { status: string; original: string; translated: string }[],
+  query?: string,
+  limit = 20,
+): ValidatedPair[] {
+  const validated = cells.filter(
+    (c) => c.status === "validated" && c.original.trim() && c.translated.trim(),
+  )
+
+  if (query && query.trim()) {
+    // Token overlap: lower-case split on whitespace/punctuation
+    const queryTokens = new Set(
+      query.toLowerCase().split(/[\s\p{P}]+/u).filter(Boolean),
+    )
+    const withScore = validated.map((c) => {
+      const srcTokens = c.original.toLowerCase().split(/[\s\p{P}]+/u).filter(Boolean)
+      const overlap = srcTokens.filter((t) => queryTokens.has(t)).length
+      return { pair: c, overlap }
+    })
+    withScore.sort((a, b) => b.overlap - a.overlap)
+    return withScore.slice(0, limit).map((x) => ({ source: x.pair.original, target: x.pair.translated }))
+  }
+
+  return validated.slice(0, limit).map((c) => ({ source: c.original, target: c.translated }))
+}
+
+/**
+ * Render active project rules as a concise terminology/guidance block that
+ * can be injected into a system prompt. Only `source-requires-target` rules
+ * are rendered as explicit "if you see X → use Y" guidance; other check
+ * types become a simple "avoid: X" instruction. Disabled rules are skipped.
+ *
+ * Returns an empty string when there are no active, injectable rules.
+ */
+export function buildRulesBlock(rules: TranslationRule[]): string {
+  const active = rules.filter((r) => r.enabled)
+  if (!active.length) return ""
+
+  const lines: string[] = []
+  for (const rule of active) {
+    const { check } = rule
+    if (check.type === "source-requires-target") {
+      lines.push(`- When the source contains "${check.sourcePattern}", the translation must include "${check.targetPattern}".`)
+    } else if (check.type === "target-forbids") {
+      lines.push(`- Do NOT use "${check.targetPattern}" in the translation.`)
+    } else if (check.type === "source-target-match") {
+      lines.push(`- The pattern "${check.pattern}" must appear in the translation when present in the source.`)
+    }
+    // builtin checks are algorithmic; no useful prompt injection
+  }
+
+  if (!lines.length) return ""
+  return "Project terminology and style rules (MUST follow):\n" + lines.join("\n")
+}
 
 export const DEFAULT_SYSTEM_PROMPT =
   "You are a translation assistant completing a project that translates from {sourceLanguage} into {targetLanguage}.\n\n" +
@@ -45,13 +128,26 @@ export function resolveProvider(settings: CompletionSettings): CompletionProvide
 export function buildPrompt(options: {
   sourceLanguage: string; targetLanguage: string; systemPrompt: string
   sourceText: string; examples: { source: string; target: string }[]
+  /** Active project rules — injected as a "must follow" block in the system prompt. */
+  rules?: TranslationRule[]
+  /** Pre-filtered validated pairs from the project — prepended to examples. */
+  validatedPairs?: ValidatedPair[]
 }): ChatMessage[] {
-  const sys = options.systemPrompt
+  let sys = options.systemPrompt
     .replace(/\{sourceLanguage\}/g, options.sourceLanguage)
     .replace(/\{targetLanguage\}/g, options.targetLanguage)
 
+  // Inject rules block after the base system prompt so it is always visible.
+  if (options.rules?.length) {
+    const block = buildRulesBlock(options.rules)
+    if (block) sys = sys + "\n\n" + block
+  }
+
+  // Validated pairs lead the few-shot examples; search-retrieved examples follow.
+  const allExamples = [...(options.validatedPairs ?? []), ...options.examples]
+
   let user = ""
-  for (const ex of options.examples) user += `Source: ${ex.source}\nTranslation: ${ex.target}\n\n`
+  for (const ex of allExamples) user += `Source: ${ex.source}\nTranslation: ${ex.target}\n\n`
   user += `Source: ${options.sourceText}\nTranslation:`
 
   return [{ role: "system", content: sys }, { role: "user", content: user.trim() }]
@@ -82,8 +178,19 @@ export function buildBatchPrompt(options: {
   // Rendered as a final example to give the model continuity across a chunk
   // boundary at zero token cost vs. one full extra example.
   priorBatch?: { source: string; target: string }[]
+  /** Active project rules — injected as a "must follow" block in the system prompt. */
+  rules?: TranslationRule[]
+  /** Pre-filtered validated pairs from the project — prepended as a passage example. */
+  validatedPairs?: ValidatedPair[]
 }): ChatMessage[] {
-  const sys = (BATCH_FRAMING_INSTRUCTIONS + "\n\n" + options.systemPrompt)
+  let baseSys = BATCH_FRAMING_INSTRUCTIONS + "\n\n" + options.systemPrompt
+  // Inject rules block after the base system prompt.
+  if (options.rules?.length) {
+    const block = buildRulesBlock(options.rules)
+    if (block) baseSys = baseSys + "\n\n" + block
+  }
+
+  const sys = baseSys
     .replace(/\{sourceLanguage\}/g, options.sourceLanguage)
     .replace(/\{targetLanguage\}/g, options.targetLanguage)
 
@@ -91,6 +198,11 @@ export function buildBatchPrompt(options: {
     rows.map((r, i) => `<v${i + 1}>${side === "source" ? r.source : r.target}</v${i + 1}>`).join("\n")
 
   let user = ""
+  // Validated pairs from the project's living memory come first — they are
+  // the strongest signal of this team's terminology decisions.
+  if (options.validatedPairs?.length) {
+    user += `Source:\n${renderSide(options.validatedPairs, "source")}\n\nTranslation:\n${renderSide(options.validatedPairs, "target")}\n\n`
+  }
   for (const ex of options.examples) {
     if (!ex.cells.length) continue
     user += `Source:\n${renderSide(ex.cells, "source")}\n\nTranslation:\n${renderSide(ex.cells, "target")}\n\n`

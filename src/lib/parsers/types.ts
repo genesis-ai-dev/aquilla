@@ -1,4 +1,4 @@
-export type FileType = "md" | "docx" | "pptx" | "txt" | "vtt" | "srt" | "usfm" | "ebible"
+export type FileType = "md" | "docx" | "pptx" | "txt" | "vtt" | "srt" | "usfm" | "ebible" | "xliff" | "tmx" | "csv" | "tsv"
 
 export type CellType =
   | "text"
@@ -445,6 +445,11 @@ export function detectFileType(fileName: string): FileType | null {
     usfm: "usfm",
     sfm: "usfm",
     usx: "usfm",
+    xlf: "xliff",
+    xliff: "xliff",
+    tmx: "tmx",
+    csv: "csv",
+    tsv: "tsv",
   }
   return map[ext || ""] || null
 }

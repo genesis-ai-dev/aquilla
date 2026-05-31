@@ -90,6 +90,11 @@ export interface CellData {
   startTime?: number
   endTime?: number
   waivers?: import("@/lib/parsers/types").RuleWaiver[]
+  /** Most-recent edit timestamp on the target row (ms epoch). Forwarded from
+   *  the CellRow projection so consumers like useLivingMemory can sort by
+   *  recency without re-fetching. Undefined for source-only cells or cells
+   *  that have never been edited. */
+  lastEditAt?: number
 }
 
 const EMPTY_STATS: ReadonlyMap<string, CellAuditStats> = new Map()
@@ -173,6 +178,7 @@ function buildCellData(
     threads: EMPTY_THREADS,
     globalReferences: source?.canonicalRef ? [source.canonicalRef] : undefined,
     waivers: stats?.waivers ?? EMPTY_WAIVERS,
+    lastEditAt: target?.lastEditAt ?? source?.lastEditAt,
   }
 }
 

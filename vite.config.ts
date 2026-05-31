@@ -48,6 +48,14 @@ export default defineConfig(({ mode }) => ({
     // macOS, which Vite then can't bind, leaving Tauri's HTTP probe
     // hanging.
     host: "127.0.0.1",
+    // Allow Vite's dev server to serve font files that live inside the pnpm
+    // content-addressable store (node_modules/.pnpm/…). Without this entry,
+    // requests for Geist Variable woff2 files return 403s in the browser
+    // console during dev — alarming during screen-share demos. Production
+    // builds inline/copy the files at build time, so this is dev-only.
+    fs: {
+      allow: [".", "node_modules/.pnpm"],
+    },
     // Tauri owns 1420 for its webview shell and needs HMR on a separate
     // socket (1421). For plain web dev (`pnpm dev` / `pnpm dev:vite`) Vite
     // picks the port via --port (dev-stack passes 5173) and HMR rides on
@@ -113,6 +121,11 @@ export default defineConfig(({ mode }) => ({
     ],
   },
   build: {
+    // hls.js (~508kB), dash.js (~961kB), and web-worker AI bundles (whisper,
+    // kokoro, mms) are intentionally large and non-initial (lazy route or
+    // worker). Raise the threshold so vite doesn't warn about things we
+    // can't reasonably split further.
+    chunkSizeWarningLimit: 1000,
     // Split large third-party deps out of the main bundle. Without this the
     // app bundle balloons past 2 MB, which trips Cloudflare Pages' asset
     // upload path (observed as repeated ECONNRESET at 26/27 files).
@@ -131,6 +144,15 @@ export default defineConfig(({ mode }) => ({
           if (id.includes("/isomorphic-git/")) return "git"
           if (id.includes("/@tiptap/")) return "tiptap"
           if (id.includes("/react/") || id.includes("/react-dom/") || id.includes("/react-router")) return "react"
+          // react-player coordination layer — hls.js and dash.js are already
+          // split by rolldown into their own chunks (they're too large to merge).
+          if (id.includes("/react-player/")) return "react-player"
+          // lucide ships hundreds of icons; split it out so the main chunk isn't bloated
+          if (id.includes("/lucide-react/") || id.includes("/lucide/")) return "lucide"
+          // base-ui is a shared UI primitive layer — worth isolating
+          if (id.includes("/@base-ui/")) return "base-ui"
+          // tanstack query/virtual
+          if (id.includes("/@tanstack/")) return "tanstack"
         },
       },
     },

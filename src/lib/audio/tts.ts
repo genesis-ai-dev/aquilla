@@ -60,6 +60,27 @@ export function useTtsStatus(key: string | undefined): TtsStatus {
   )
 }
 
+/** A6: Returns true if any cell has a Gemini-key error in its TTS status.
+ *  Used by VoiceLibraryPanel to show "Key invalid" when a key is present but
+ *  synthesis has failed due to a bad key, vs "Key needed" when no key at all. */
+export function useAnyGeminiKeyError(): boolean {
+  return useSyncExternalStore(
+    subscribe,
+    () => {
+      for (const s of status.values()) {
+        if (s.kind !== "error") continue
+        const m = s.message.toLowerCase()
+        if (
+          m.includes("api key") || m.includes("api_key") || m.includes("apikey") ||
+          (m.includes("gemini") && m.includes("key"))
+        ) return true
+      }
+      return false
+    },
+    () => false,
+  )
+}
+
 let workerPromise: Promise<Worker> | null = null
 let mmsWorkerPromise: Promise<Worker> | null = null
 let workerSeq = 0

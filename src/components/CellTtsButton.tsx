@@ -266,6 +266,8 @@ export function CellTtsButton({
     ? Math.round((dlLoaded / dlTotal) * 100)
     : null
 
+  // A3: when no audio exists the button will GENERATE (not play), so the label
+  // must say so. "Hear translation" falsely implies existing audio is ready.
   const tooltip = isError
     ? `TTS failed — ${status.message}`
     : isLoadingModel
@@ -276,7 +278,7 @@ export function CellTtsButton({
           ? "Pause"
           : playableAttachId
             ? `Play generated voice (${voice.name})`
-            : `Hear translation (${voice.name})`
+            : `Generate & play (${voice.name})`
 
   return (
     <button

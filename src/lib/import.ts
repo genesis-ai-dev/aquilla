@@ -38,6 +38,9 @@ import {
   parseEBibleCorpus,
   type EBibleTranslation,
 } from "./parsers/ebible"
+import { parseXliff } from "./parsers/xliff"
+import { parseTmx } from "./parsers/tmx"
+import { parseCsvBilingual } from "./parsers/csv-bilingual"
 
 export type EBibleImportPhase = "download" | "parse" | "save"
 export interface EBibleProgress {
@@ -499,6 +502,19 @@ async function parseFile(file: File, fileType: FileType): Promise<ImportResult[]
       const buffer = await file.arrayBuffer()
       const strings = await extractPptxStrings(buffer)
       return [{ name: file.name, strings }]
+    }
+    case "xliff": {
+      const text = await file.text()
+      return [{ name: file.name, strings: parseXliff(text) }]
+    }
+    case "tmx": {
+      const text = await file.text()
+      return [{ name: file.name, strings: parseTmx(text) }]
+    }
+    case "csv":
+    case "tsv": {
+      const text = await file.text()
+      return [{ name: file.name, strings: parseCsvBilingual(text) }]
     }
     case "ebible":
       throw new Error("eBible translations import via importEBible(), not importFile()")

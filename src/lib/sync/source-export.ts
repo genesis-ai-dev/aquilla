@@ -19,6 +19,11 @@ export interface DownloadSourceArgs {
   getToken: (fileId: string) => Promise<string | null>
 }
 
+// erasableSyntaxOnly: parameter properties (`public readonly status`) use
+// TypeScript-specific constructor syntax that is banned. We declare the field
+// without an access modifier and assign it in the body — pure JS syntax that
+// TypeScript type-checks but emits identically.
+
 export class SourceExportError extends Error {
   /** HTTP status, when available — UI decides whether to nudge a re-import (404). */
   readonly status?: number

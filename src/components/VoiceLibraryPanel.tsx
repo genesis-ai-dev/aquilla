@@ -21,6 +21,7 @@ import type { ProjectTtsSettings, TtsProvider, Voice } from "@/lib/parsers/types
 import type { CellData } from "@/hooks/useCells"
 import { PRESET_VOICES } from "@/lib/audio/voices"
 import { DEFAULT_TTS_PROVIDER, TTS_PROVIDER_INFOS } from "@/lib/audio/tts-providers"
+import { useAnyGeminiKeyError } from "@/lib/audio/tts"
 import { setUserApiKey, useUserApiKey } from "@/lib/store/user-api-keys"
 import { ApiKeyField } from "@/components/ApiKeyField"
 import { CharacterModal } from "@/components/voice/CharacterModal"
@@ -100,6 +101,15 @@ export function VoiceLibraryPanel({
   // (the default when provider is absent) and no shared key is set yet.
   const anyGeminiVoice = voices.some((v) => (v.provider ?? DEFAULT_TTS_PROVIDER) === "gemini")
   const needsKey = anyGeminiVoice && !apiKey
+  // A6: distinguish "no key at all" from "key entered but invalid/rejected".
+  // When a key IS present but synthesis has failed due to a key error, show
+  // "Key invalid" so the user knows the key value was tried and rejected.
+  const hasKeyError = useAnyGeminiKeyError()
+  const keyBadgeLabel = needsKey
+    ? "Key needed"
+    : (anyGeminiVoice && apiKey && hasKeyError)
+      ? "Key invalid"
+      : null
 
   const select = useCallback((id: string) => {
     setLocalSelectedId(id)
@@ -178,13 +188,13 @@ export function VoiceLibraryPanel({
           >
             <KeyRound className="h-3.5 w-3.5 text-muted-foreground" />
             Gemini API key
-            {needsKey && (
+            {keyBadgeLabel && (
               <span className="ml-auto inline-flex items-center gap-1 rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium text-amber-700 dark:bg-amber-950/40 dark:text-amber-300">
-                <KeyRound className="h-2.5 w-2.5" /> Key needed
+                <KeyRound className="h-2.5 w-2.5" /> {keyBadgeLabel}
               </span>
             )}
           </button>
-          {(keyOpen || needsKey) && (
+          {(keyOpen || needsKey || (anyGeminiVoice && apiKey && hasKeyError)) && (
             <div className="space-y-3 border-t px-3 py-3">
               <ApiKeyField
                 label="Gemini API key"
@@ -195,7 +205,9 @@ export function VoiceLibraryPanel({
                 onUserKeyChange={(v) => setUserApiKey("gemini-tts", v)}
                 help={needsKey
                   ? "Get a key at aistudio.google.com/apikey. Sent directly to Google; never uploaded to Frontier."
-                  : "Sent directly to Google. Never uploaded to Frontier."}
+                  : hasKeyError
+                    ? "This key was rejected by Google. Check it's correct at aistudio.google.com/apikey."
+                    : "Sent directly to Google. Never uploaded to Frontier."}
               />
             </div>
           )}

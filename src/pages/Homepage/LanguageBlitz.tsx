@@ -103,13 +103,13 @@ export function LanguageBlitz() {
 
   return (
     <div className="aq-blitz" data-phase={phase}>
-      <div className="aq-blitz-top">
-        <span className="aq-blitz-live"><i /> Drafting across the world's languages</span>
+      <div className="aq-blitz-top" aria-hidden="true">
+        <span className="aq-blitz-live"><i aria-hidden="true" /> Drafting across the world's languages</span>
         <span className="aq-blitz-counter"><span className="aq-mono">{DATA.length}</span> of 7,000+</span>
       </div>
 
-      <div className="aq-blitz-stage">
-        <div className="aq-blitz-scan" />
+      <div className="aq-blitz-stage" aria-live="polite" aria-atomic="true" aria-label="Language sample">
+        <div className="aq-blitz-scan" aria-hidden="true" />
 
         {/* key=idx remounts so the tick/settle animation replays each change */}
         <div className="aq-blitz-roll" key={idx}>
@@ -123,7 +123,7 @@ export function LanguageBlitz() {
           <p className="aq-blitz-verse" dir={e.dir} lang={e.code}>{e.text}</p>
         </div>
 
-        <div className="aq-blitz-foot">
+        <div className="aq-blitz-foot" aria-hidden="true">
           {phase === "blitz" ? (
             <span className="aq-blitz-status">
               <span className="aq-blitz-dotwave"><i /><i /><i /></span>
@@ -158,7 +158,7 @@ export function LanguageMarquee() {
 
 function IconCheckRing() {
   return (
-    <svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="1.5">
+    <svg aria-hidden="true" viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="1.5">
       <circle cx="8" cy="8" r="6.2" opacity="0.5" />
       <path d="M5 8.2l2 2 4-4.4" strokeLinecap="round" strokeLinejoin="round" />
     </svg>

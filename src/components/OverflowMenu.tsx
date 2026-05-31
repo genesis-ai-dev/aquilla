@@ -25,6 +25,21 @@ const ITEM_CLASS =
  * Shared "..." overflow menu rendered in app chrome. Header-level UI affordances
  * (Members, Settings, Close Project, etc.) collapse here so the top bar stops
  * scaling sideways with every new feature.
+ *
+ * SWARM-TODO(voice-a8): Pressing Escape does NOT close this dropdown. Standard
+ * keyboard behavior (Escape closes a popup) is broken for the global More menu.
+ * Root cause: @base-ui/react/menu's Menu.Root should close on Escape natively,
+ * but something prevents it — possibly a conflicting keydown handler upstream
+ * (e.g. EditorTable's Escape handler, or the outer ProseMirror editor capturing
+ * the event before Base UI sees it).
+ * Fix options:
+ *   1. Check the Base UI version used. Newer versions handle Escape correctly.
+ *      Try upgrading @base-ui/react.
+ *   2. Add an explicit `onKeyDown` on Menu.Root or Menu.Popup that calls
+ *      event.stopPropagation() for Escape so the upstream handler doesn't steal it.
+ *   3. If Base UI exposes an `open` + `onOpenChange` pair, make the menu
+ *      controlled and add a global Escape listener that calls setOpen(false).
+ * See: src/components/OverflowMenu.tsx (this file)
  */
 export function OverflowMenu({ items, includeTheme = true }: Props) {
   return (

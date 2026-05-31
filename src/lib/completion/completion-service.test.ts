@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
-import { buildPrompt, buildBatchPrompt, complete, fetchModels, normalizeOpenAIBaseUrl, resolveProvider, DEFAULT_SYSTEM_PROMPT, FRONTIER_CHAT_URL } from "./completion-service"
-import type { CompletionSettings } from "@/lib/parsers/types"
+import { buildPrompt, buildBatchPrompt, complete, fetchModels, normalizeOpenAIBaseUrl, resolveProvider, DEFAULT_SYSTEM_PROMPT, FRONTIER_CHAT_URL, collectValidatedPairs, buildRulesBlock } from "./completion-service"
+import type { CompletionSettings, TranslationRule } from "@/lib/parsers/types"
 import type { FrontierSession } from "@/lib/frontier/types"
 
 const BASE: CompletionSettings = {
@@ -396,5 +396,206 @@ describe("complete", () => {
     expect(pieces).toEqual([])
     const body = JSON.parse((fetchMock.mock.calls[0][1] as RequestInit).body as string)
     expect(body.stream).toBe(false)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Living Memory: collectValidatedPairs
+// ---------------------------------------------------------------------------
+
+describe("collectValidatedPairs", () => {
+  const cells = [
+    { status: "validated", original: "God created the heavens", translated: "Dieu créa les cieux" },
+    { status: "validated", original: "In the beginning", translated: "Au commencement" },
+    { status: "unvalidated", original: "the earth was formless", translated: "la terre était sans forme" },
+    { status: "empty", original: "void", translated: "" },
+    { status: "validated", original: "", translated: "empty source excluded" },
+  ]
+
+  it("returns only validated cells with non-empty source and target", () => {
+    const pairs = collectValidatedPairs(cells)
+    expect(pairs).toHaveLength(2)
+    expect(pairs.every((p) => p.source && p.target)).toBe(true)
+  })
+
+  it("returns empty array when no validated cells exist", () => {
+    const result = collectValidatedPairs([
+      { status: "unvalidated", original: "hello", translated: "bonjour" },
+    ])
+    expect(result).toEqual([])
+  })
+
+  it("respects the limit parameter", () => {
+    const many = Array.from({ length: 30 }, (_, i) => ({
+      status: "validated",
+      original: `source ${i}`,
+      translated: `target ${i}`,
+    }))
+    const result = collectValidatedPairs(many, undefined, 10)
+    expect(result).toHaveLength(10)
+  })
+
+  it("ranks pairs with overlapping tokens ahead of non-overlapping when query is provided", () => {
+    const queryCells = [
+      { status: "validated", original: "God created light", translated: "Dieu créa la lumière" },
+      { status: "validated", original: "the earth was dark", translated: "la terre était sombre" },
+      { status: "validated", original: "God created animals", translated: "Dieu créa les animaux" },
+    ]
+    // query shares "God created" — expect those two ranked first
+    const pairs = collectValidatedPairs(queryCells, "God created the world", 3)
+    expect(pairs[0].source).toContain("God created")
+    expect(pairs[1].source).toContain("God created")
+    expect(pairs[2].source).toBe("the earth was dark")
+  })
+
+  it("falls back to insertion order when query is absent", () => {
+    const result = collectValidatedPairs(cells)
+    expect(result[0].source).toBe("God created the heavens")
+    expect(result[1].source).toBe("In the beginning")
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Living Memory: buildRulesBlock
+// ---------------------------------------------------------------------------
+
+describe("buildRulesBlock", () => {
+  const makeRule = (id: string, check: TranslationRule["check"], enabled = true): TranslationRule => ({
+    id, name: id, description: "", severity: "minor", source: "user", scope: "project",
+    check, enabled, createdAt: new Date().toISOString(),
+  })
+
+  it("returns empty string when rules array is empty", () => {
+    expect(buildRulesBlock([])).toBe("")
+  })
+
+  it("returns empty string when all rules are disabled", () => {
+    const rule = makeRule("r1", { type: "target-forbids", targetPattern: "bienes" }, false)
+    expect(buildRulesBlock([rule])).toBe("")
+  })
+
+  it("renders source-requires-target as 'if source contains X → target must include Y'", () => {
+    const rule = makeRule("r1", { type: "source-requires-target", sourcePattern: "bienestar", targetPattern: "bienes" })
+    const block = buildRulesBlock([rule])
+    expect(block).toContain("bienestar")
+    expect(block).toContain("bienes")
+    expect(block).toMatch(/must include/i)
+  })
+
+  it("renders target-forbids rule", () => {
+    const rule = makeRule("r1", { type: "target-forbids", targetPattern: "forbidden_word" })
+    const block = buildRulesBlock([rule])
+    expect(block).toContain("forbidden_word")
+    expect(block).toMatch(/do not use/i)
+  })
+
+  it("renders source-target-match rule", () => {
+    const rule = makeRule("r1", { type: "source-target-match", pattern: "Yahweh" })
+    const block = buildRulesBlock([rule])
+    expect(block).toContain("Yahweh")
+  })
+
+  it("skips builtin check type (no useful injection)", () => {
+    const rule = makeRule("builtin:r1", { type: "builtin", checkId: "no-repeated-word" as TranslationRule["check"] extends { type: "builtin"; checkId: infer C } ? C : never })
+    // builtin produces no lines → returns ""
+    expect(buildRulesBlock([rule])).toBe("")
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Living Memory: rules + validatedPairs injected into buildPrompt
+// ---------------------------------------------------------------------------
+
+describe("buildPrompt with rules and validatedPairs", () => {
+  const rule: TranslationRule = {
+    id: "r1", name: "bienestar→bienes", description: "", severity: "minor",
+    source: "user", scope: "project", enabled: true, createdAt: new Date().toISOString(),
+    check: { type: "source-requires-target", sourcePattern: "bienestar", targetPattern: "bienes" },
+  }
+
+  it("injects enabled rules into the system prompt", () => {
+    const messages = buildPrompt({
+      sourceLanguage: "Spanish", targetLanguage: "Tagalog",
+      systemPrompt: DEFAULT_SYSTEM_PROMPT, sourceText: "el bienestar del pueblo",
+      examples: [], rules: [rule],
+    })
+    expect(messages[0].content).toContain("bienestar")
+    expect(messages[0].content).toContain("bienes")
+  })
+
+  it("does NOT inject disabled rules", () => {
+    const disabled = { ...rule, enabled: false }
+    const messages = buildPrompt({
+      sourceLanguage: "Spanish", targetLanguage: "Tagalog",
+      systemPrompt: DEFAULT_SYSTEM_PROMPT, sourceText: "x",
+      examples: [], rules: [disabled],
+    })
+    expect(messages[0].content).not.toContain("bienestar")
+  })
+
+  it("prepends validatedPairs before search-retrieved examples", () => {
+    const messages = buildPrompt({
+      sourceLanguage: "Spanish", targetLanguage: "Tagalog",
+      systemPrompt: DEFAULT_SYSTEM_PROMPT, sourceText: "live source",
+      examples: [{ source: "search result", target: "search target" }],
+      validatedPairs: [{ source: "validated source", target: "validated target" }],
+    })
+    const user = messages[1].content
+    const idxValidated = user.indexOf("validated source")
+    const idxSearch = user.indexOf("search result")
+    expect(idxValidated).toBeGreaterThan(-1)
+    expect(idxSearch).toBeGreaterThan(idxValidated) // validated comes first
+  })
+
+  it("behaves identically to the old signature when no rules/validatedPairs passed", () => {
+    const withoutMemory = buildPrompt({
+      sourceLanguage: "English", targetLanguage: "French",
+      systemPrompt: DEFAULT_SYSTEM_PROMPT, sourceText: "hello",
+      examples: [{ source: "God", target: "Dieu" }],
+    })
+    const withEmptyMemory = buildPrompt({
+      sourceLanguage: "English", targetLanguage: "French",
+      systemPrompt: DEFAULT_SYSTEM_PROMPT, sourceText: "hello",
+      examples: [{ source: "God", target: "Dieu" }],
+      rules: [], validatedPairs: [],
+    })
+    expect(withoutMemory).toEqual(withEmptyMemory)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Living Memory: rules + validatedPairs injected into buildBatchPrompt
+// ---------------------------------------------------------------------------
+
+describe("buildBatchPrompt with rules and validatedPairs", () => {
+  const rule: TranslationRule = {
+    id: "r1", name: "bienestar→bienes", description: "", severity: "minor",
+    source: "user", scope: "project", enabled: true, createdAt: new Date().toISOString(),
+    check: { type: "source-requires-target", sourcePattern: "bienestar", targetPattern: "bienes" },
+  }
+
+  it("injects rules into the system prompt", () => {
+    const messages = buildBatchPrompt({
+      sourceLanguage: "Spanish", targetLanguage: "Tagalog",
+      systemPrompt: DEFAULT_SYSTEM_PROMPT,
+      cells: [{ source: "el bienestar" }],
+      examples: [], rules: [rule],
+    })
+    expect(messages[0].content).toContain("bienestar")
+  })
+
+  it("prepends validatedPairs before passage examples in user message", () => {
+    const messages = buildBatchPrompt({
+      sourceLanguage: "English", targetLanguage: "French",
+      systemPrompt: DEFAULT_SYSTEM_PROMPT,
+      cells: [{ source: "live" }],
+      examples: [{ cells: [{ source: "passage source", target: "passage target" }] }],
+      validatedPairs: [{ source: "mem source", target: "mem target" }],
+    })
+    const user = messages[1].content
+    const idxMem = user.indexOf("mem source")
+    const idxPassage = user.indexOf("passage source")
+    expect(idxMem).toBeGreaterThan(-1)
+    expect(idxPassage).toBeGreaterThan(idxMem)
   })
 })

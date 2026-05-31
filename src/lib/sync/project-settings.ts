@@ -2,6 +2,7 @@ import { FRONTIER_API_URL } from "./sync-token"
 import type {
   TranslationRule,
   RulePenalties,
+  ProjectTtsSettings,
 } from "@/lib/parsers/types"
 
 /** Initial server version for projects with no settings row. */
@@ -22,6 +23,9 @@ export interface ProjectWideSettings {
   rulePenalties?: RulePenalties
   validationCount?: number
   validationCountAudio?: number
+  /** Synced voice profiles (voice library, cast, default voice, engine). The
+   *  Gemini apiKey is deliberately omitted — it stays device-local. */
+  ttsSettings?: Omit<ProjectTtsSettings, "apiKey">
 }
 
 export interface ProjectSettingsResponse {

@@ -72,6 +72,11 @@ function localSettingsFrom(
   if (record.validationCount != null) out.validationCount = record.validationCount
   if (record.validationCountAudio != null)
     out.validationCountAudio = record.validationCountAudio
+  if (record.ttsSettings != null) {
+    const { apiKey, ...ttsRest } = record.ttsSettings
+    void apiKey
+    out.ttsSettings = ttsRest
+  }
   return out
 }
 

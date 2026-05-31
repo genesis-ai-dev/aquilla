@@ -38,6 +38,10 @@ function overlaySettings(record: ProjectRecord, settings: ProjectWideSettings): 
   if (settings.rulePenalties != null) next.rulePenalties = settings.rulePenalties
   if (settings.validationCount != null) next.validationCount = settings.validationCount
   if (settings.validationCountAudio != null) next.validationCountAudio = settings.validationCountAudio
+  if (settings.ttsSettings != null) {
+    // Server carries voice profiles (no apiKey); keep any device-local apiKey.
+    next.ttsSettings = { ...next.ttsSettings, ...settings.ttsSettings }
+  }
   return next
 }
 
@@ -101,7 +105,7 @@ export function useProject(projectId: string) {
   // the hydrated record so existing consumers see merged values without any
   // per-callsite changes.
   const roleLevel = project?.syncRole?.level ?? null
-  const { settings: syncedSettings } = useProjectSettings(projectId, roleLevel)
+  const { settings: syncedSettings, patch: patchSettings } = useProjectSettings(projectId, roleLevel)
   const overlaid = project ? overlaySettings(project, syncedSettings) : null
 
   return {
@@ -110,5 +114,7 @@ export function useProject(projectId: string) {
     loading: status === "loading",
     isError: status === "not-found",
     refresh,
+    /** Persist project-wide settings (incl. synced voice profiles) to the server. */
+    patchSettings,
   }
 }

@@ -36,6 +36,10 @@ export function useProjectTts(
   projectId: string | null | undefined,
   serverSettings: ProjectTtsSettings | undefined,
   cells: CellData[],
+  /** Persist voice profiles (minus apiKey) to the server settings blob so they
+   *  sync across devices. Fire-and-forget; localStorage stays the durable
+   *  client-owned source. */
+  onSyncTts?: (tts: Omit<ProjectTtsSettings, "apiKey">) => void,
 ): ProjectTtsApi {
   // Read durable settings synchronously from localStorage on first render (lazy
   // init), so a reload sees the saved voice library immediately. Falls back to
@@ -63,8 +67,16 @@ export function useProjectTts(
       saveProjectTts(projectId, next)
       // Best-effort mirror for local-only projects that DO have an IDB row.
       await patchProject(projectId, (p) => ({ ...p, ttsSettings: next }))
+      // Also persist voice profiles to the server settings blob (cross-device).
+      // apiKey is stripped — it stays device-local. Fire-and-forget; a blocked
+      // (role/offline) outcome is fine since localStorage remains durable.
+      if (onSyncTts) {
+        const { apiKey, ...profiles } = next
+        void apiKey
+        onSyncTts(profiles)
+      }
     },
-    [projectId, localTts, serverSettings],
+    [projectId, localTts, serverSettings, onSyncTts],
   )
 
   const assignCells = useCallback(

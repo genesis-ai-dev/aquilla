@@ -114,7 +114,7 @@ export function ProjectWorkspace() {
   const goToProjects = useCallback(() => {
     navigate("/")
   }, [navigate])
-  const { project: loadedProject, status, refresh } = useProject(projectId!)
+  const { project: loadedProject, status, refresh, patchSettings } = useProject(projectId!)
 
   const [selectedFileId, setSelectedFileId] = useState<string | null>(routeFileId ?? null)
   const activeFileId = routeFileId ?? selectedFileId
@@ -410,7 +410,12 @@ export function ProjectWorkspace() {
 
   // Audio lens: TTS settings (engine, voice library, cast) hydrated from IDB
   // and overlaid onto the project so generation uses the real engine/key/cast.
-  const tts = useProjectTts(project?.id ?? null, project?.ttsSettings, cells)
+  const tts = useProjectTts(
+    project?.id ?? null,
+    project?.ttsSettings,
+    cells,
+    (profiles) => { void patchSettings({ ttsSettings: profiles }) },
+  )
   const audioProject = useMemo(
     () => (project ? { ...project, ttsSettings: tts.settings } : null),
     [project, tts.settings],

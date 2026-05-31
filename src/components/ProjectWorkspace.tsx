@@ -97,6 +97,7 @@ import {
   buildProjectSettingsHandoffUrl,
   workspaceReturnPath,
 } from "@/lib/ad11/navigation"
+import { downloadSourceFile, SourceExportError } from "@/lib/sync/source-export"
 
 // Import runs inline in the workspace (upload + eBible corpus tabs). The
 // AD-11 plan carves import into a standalone apps/import Worker, but that
@@ -1163,9 +1164,36 @@ export function ProjectWorkspace() {
 
   // Export handoff (/export/) does not exist as a route yet — stub until the
   // standalone export Worker is wired in.
-  const openExportFlow = useCallback(() => {
-    console.warn("[ProjectWorkspace] export flow not yet available")
-  }, [])
+  const openExportFlow = useCallback(async () => {
+    if (!activeFile || !project?.id) return
+    // Only USFM files have a raw-source side-car — other formats (md, docx,
+    // pptx…) don't go through the export endpoint.
+    if (activeFile.type !== "usfm") {
+      console.info("[ProjectWorkspace] export only available for USFM files")
+      return
+    }
+    const name = /\.(sfm|usfm)$/i.test(activeFile.name)
+      ? activeFile.name
+      : `${activeFile.name}.SFM`
+    try {
+      await downloadSourceFile({
+        projectId: project.id,
+        fileId: activeFile.id,
+        downloadName: name,
+        getToken: getTokenForFile,
+      })
+    } catch (err) {
+      const msg =
+        err instanceof SourceExportError && err.status === 404
+          ? "Re-import this file to enable export (side-car not recorded)."
+          : err instanceof Error
+            ? err.message
+            : "Export failed."
+      // surface through the browser's native alert — a dedicated toast is wired
+      // in ExpandableFileList; this path is hit from the keyboard/action button.
+      alert(msg)
+    }
+  }, [activeFile, project?.id, getTokenForFile])
 
   const actionArgs = useMemo(() => ({
     openImport: openImportFlow,

@@ -27,6 +27,7 @@ import {
   type ProjectEntry,
 } from "./parsers/paratext-project"
 import type { ParatextSettings } from "./parsers/paratext"
+import { usxToUsfm, looksLikeUsx } from "./parsers/usx"
 import { extractDocxStrings } from "./parsers/docx"
 import { extractPptxStrings } from "./parsers/pptx"
 import { bulkUploadSource, type BulkImportCell } from "./sync/bulk-import"
@@ -350,7 +351,10 @@ async function parseFile(file: File, fileType: FileType): Promise<ImportResult[]
       return [{ name: file.name, strings: extractSrtStrings(text) }]
     }
     case "usfm": {
-      const text = await file.text()
+      const raw = await file.text()
+      // USX (Paratext's XML export) is isomorphic to USFM — convert it up front
+      // and let the proven USFM pipeline take over (cells + side-car).
+      const text = looksLikeUsx(raw) ? usxToUsfm(raw) : raw
       // Use the lossless parser: clean verse text (no leaked inline footnote
       // markers like the legacy parser produced), stable canonical refs
       // (`MAT 1:1`), and the raw bytes captured as a side-car so export can

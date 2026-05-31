@@ -444,6 +444,7 @@ export function detectFileType(fileName: string): FileType | null {
     srt: "srt",
     usfm: "usfm",
     sfm: "usfm",
+    usx: "usfm",
   }
   return map[ext || ""] || null
 }

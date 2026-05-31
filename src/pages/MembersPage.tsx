@@ -12,6 +12,9 @@ import {
   X,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { AppShell } from "@/components/AppShell"
+import { OrgSidebar } from "@/components/org/OrgSidebar"
+import { OrgBreadcrumb } from "@/components/org/OrgBreadcrumb"
 import { useOrgMembers } from "@/hooks/useOrg"
 import { useAccessibleProjects } from "@/hooks/useAccessibleProjects"
 import { useOrgInvites } from "@/hooks/useOrgInvites"
@@ -92,15 +95,35 @@ export function MembersPage() {
   return <MembersPageContent orgId={activeOrg.id} orgName={activeOrg.name ?? "Organization"} />
 }
 
+/**
+ * Org-level chrome wrapper. Members is one section of the org workspace, so it
+ * renders inside the same AppShell + OrgSidebar as Overview/Projects/Teams —
+ * selecting "Members" from the sidebar swaps the main editor section without
+ * dropping the org navigation. The main slot owns its own scroll because
+ * AppShell's main wrapper is overflow-hidden and the roster can run tall.
+ */
+function MembersShell({ children }: { children: React.ReactNode }) {
+  return (
+    <AppShell
+      sidebar={<OrgSidebar />}
+      header={<OrgBreadcrumb section="Members" />}
+      statusBar={null}
+      main={<div className="h-full overflow-y-auto">{children}</div>}
+    />
+  )
+}
+
 function PageShell({ children }: { children: React.ReactNode }) {
   return (
-    <div className="mx-auto max-w-3xl p-6">
-      <div className="mb-4 flex items-center gap-2">
-        <Users className="h-5 w-5 text-muted-foreground" aria-hidden />
-        <h1 className="text-xl font-semibold">Members</h1>
+    <MembersShell>
+      <div className="mx-auto max-w-3xl p-6">
+        <div className="mb-4 flex items-center gap-2">
+          <Users className="h-5 w-5 text-muted-foreground" aria-hidden />
+          <h1 className="text-xl font-semibold">Members</h1>
+        </div>
+        {children}
       </div>
-      {children}
-    </div>
+    </MembersShell>
   )
 }
 
@@ -130,7 +153,8 @@ function MembersPageContent({ orgId, orgName }: MembersPageContentProps) {
   }))
 
   return (
-    <div className="mx-auto max-w-3xl p-6">
+    <MembersShell>
+      <div className="mx-auto max-w-3xl p-6">
       <div className="mb-1 flex items-center gap-2">
         <Users className="h-5 w-5 text-muted-foreground" aria-hidden />
         <h1 className="text-xl font-semibold">Members</h1>
@@ -243,7 +267,8 @@ function MembersPageContent({ orgId, orgName }: MembersPageContentProps) {
           void refreshProjects()
         }}
       />
-    </div>
+      </div>
+    </MembersShell>
   )
 }
 

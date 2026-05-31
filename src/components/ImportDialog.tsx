@@ -9,8 +9,10 @@ import {
 import { Input } from "@/components/ui/input"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { cn } from "@/lib/utils"
-import { importFile, importEBible, type EBibleProgress } from "@/lib/import"
+import { importFile, importEBible, importParatextProject, type EBibleProgress } from "@/lib/import"
 import type { FileReference } from "@/lib/parsers/types"
+import { filesToProjectEntries } from "@/lib/import/file-entries"
+import { detectParatextProject } from "@/lib/parsers/paratext-project"
 import {
   fetchTranslationsList,
   type EBibleTranslation,
@@ -131,21 +133,48 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, getT
 
       try {
         const list = Array.from(files)
-        for (const file of list) {
-          setPhase(`Parsing ${file.name}…`)
-          setProgress(null)
-          const refs = await importFile(file, {
-            projectId,
-            author: username,
-            sourceLanguage,
-            targetLanguage,
-            getToken,
-            onCellEnqueued: (count, total) => {
-              setPhase(`Uploading ${file.name}`)
-              setProgress({ count, total })
+        // A Paratext project (zipped, or a folder/multi-select containing
+        // Settings.xml) imports as one unit: books named in the project's
+        // language, ordered canonically, OT/NT tagged, originals kept.
+        const entries = await filesToProjectEntries(list)
+        if (detectParatextProject(entries)) {
+          setPhase("Reading Paratext project…")
+          const result = await importParatextProject(
+            entries,
+            { projectId, author: username, sourceLanguage, targetLanguage, getToken },
+            (p) => {
+              setPhase(
+                p.phase === "parse"
+                  ? `Importing ${p.book ?? "book"}…`
+                  : `Imported ${p.booksDone}/${p.booksTotal} books`,
+              )
+              setProgress({ count: p.booksDone, total: p.booksTotal })
             },
-          })
-          allRefs.push(...refs)
+          )
+          allRefs.push(...result.refs)
+          if (result.skipped.length > 0) {
+            setError(
+              `Imported ${result.refs.length} books; ${result.skipped.length} skipped: ` +
+                result.skipped.slice(0, 3).map((s) => s.book).join(", "),
+            )
+          }
+        } else {
+          for (const file of list) {
+            setPhase(`Parsing ${file.name}…`)
+            setProgress(null)
+            const refs = await importFile(file, {
+              projectId,
+              author: username,
+              sourceLanguage,
+              targetLanguage,
+              getToken,
+              onCellEnqueued: (count, total) => {
+                setPhase(`Uploading ${file.name}`)
+                setProgress({ count, total })
+              },
+            })
+            allRefs.push(...refs)
+          }
         }
         setPhase("Finishing up…")
         await onImported(allRefs)
@@ -211,18 +240,32 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, getT
           <p className="mb-2 text-sm text-muted-foreground">
             Drag & drop files here, or
           </p>
-          <Button variant="outline" size="sm" render={<label className="cursor-pointer" />}>
-            Choose Files
-            <input
-              type="file"
-              multiple
-              className="hidden"
-              accept=".md,.markdown,.docx,.pptx,.txt,.vtt,.srt,.usfm,.sfm"
-              onChange={handleFileInput}
-            />
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button variant="outline" size="sm" nativeButton={false} render={<label className="cursor-pointer" />}>
+              Choose Files
+              <input
+                type="file"
+                multiple
+                className="hidden"
+                accept=".md,.markdown,.docx,.pptx,.txt,.vtt,.srt,.usfm,.sfm,.zip"
+                onChange={handleFileInput}
+              />
+            </Button>
+            <Button variant="outline" size="sm" nativeButton={false} render={<label className="cursor-pointer" />}>
+              Choose Folder
+              {/* Folder picker for an unzipped Paratext project. */}
+              <input
+                type="file"
+                className="hidden"
+                // @ts-expect-error — webkitdirectory is a non-standard but widely supported attr
+                webkitdirectory=""
+                directory=""
+                onChange={handleFileInput}
+              />
+            </Button>
+          </div>
           <p className="mt-2 text-xs text-muted-foreground">
-            Supported: MD, DOCX, PPTX, TXT, VTT, SRT, USFM
+            Files: MD, DOCX, PPTX, TXT, VTT, SRT, USFM · or a Paratext project (.zip or folder)
           </p>
         </>
       )}

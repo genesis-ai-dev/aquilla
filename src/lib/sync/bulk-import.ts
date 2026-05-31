@@ -40,6 +40,8 @@ export interface BulkImportFileMeta {
   parserVersion?: string
   sourceLanguage?: string
   targetLanguage?: string
+  /** USFM book code (\id) — lets the server projection group/order by book. */
+  bookCode?: string
 }
 
 export interface BulkUploadArgs {

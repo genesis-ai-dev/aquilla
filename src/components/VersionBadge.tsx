@@ -13,18 +13,27 @@ const isProd = BRANCH === "main" || BRANCH === "production"
 const label = isProd ? `v${VERSION} · ${SHA}` : `v${VERSION} · ${BRANCH} · ${SHA}`
 const title = `${label}\nbuild: ${BRANCH}@${SHA}`
 
-// Routes that render a full-height left rail. There the version lives in-flow at
-// the rail's foot (<VersionTag/>), so the floating badge must stand down or it
-// paints over the rail's bottom controls (Settings, the voice library, …).
-//   /project/:id              — workspace
-//   /project/:id/file/:fileId — workspace with a file open
-//   /project/:id/voice        — Voice Studio
-// The other /project/* pages (rules, comments, settings) are centred and leave
-// the corner free, so they keep the floating badge.
+// Routes that render a full-height left rail (via <AppShell/>). There the version
+// lives in-flow at the rail's foot (<VersionTag/>), so the floating badge must
+// stand down or it duplicates that tag and paints over the rail's bottom controls
+// (the account switcher, Settings, the voice library, …).
+//   /                            — org overview          (OrgHome)
+//   /projects, /projects/:id     — org project list / detail
+//   /teams, /teams/:groupId      — org team list / detail
+//   /members                     — org members
+//   /project/:id                 — workspace
+//   /project/:id/file/:fileId    — workspace with a file open
+//   /project/:id/voice           — Voice Studio
+// The other /project/* pages (rules, comments, settings) and /settings are centred
+// and leave the corner free, so they keep the floating badge.
 function hasLeftRail(pathname: string): boolean {
   const segs = pathname.split("/").filter(Boolean)
-  if (segs[0] !== "project" || segs.length < 2) return false
-  return segs.length === 2 || segs[2] === "file" || segs[2] === "voice"
+  if (segs.length === 0) return true // "/" — org overview
+  if (segs[0] === "projects" || segs[0] === "teams" || segs[0] === "members") return true
+  if (segs[0] === "project" && segs.length >= 2) {
+    return segs.length === 2 || segs[2] === "file" || segs[2] === "voice"
+  }
+  return false
 }
 
 /**

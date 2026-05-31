@@ -144,6 +144,7 @@ export default defineConfig(({ mode }) => ({
       "dist/**",
       ".worktrees/**",
       ".claude/worktrees/**",
+      ".claire/**",
       "e2e/**",
       // Each worker has its own vitest config + local node_modules. Running
       // their tests from root pulls in worker-local deps the root install

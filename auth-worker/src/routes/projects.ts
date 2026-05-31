@@ -426,6 +426,26 @@ projects.delete("/:projectId/archive", authMiddleware, async (c) => {
 })
 
 // ──────────────────────────────────────────────────────────────────────────
+// PATCH /api/v2/projects/:projectId/deadline — set/clear deadline (maintainer+)
+// ──────────────────────────────────────────────────────────────────────────
+
+const deadlineBody = z.object({ deadline: z.string().min(1).max(40).nullable() })
+projects.patch("/:projectId/deadline", authMiddleware, zValidator("json", deadlineBody), async (c) => {
+  const user = c.get("user")
+  const projectId = c.req.param("projectId") as string
+  const role = await resolveProjectRole(c.env, user, projectId)
+  if (!role) return c.json({ error: "not found or no access" }, 403)
+  if (role.level < ROLE.MAINTAINER) return c.json({ error: "maintainer+ required" }, 403)
+  const { deadline } = c.req.valid("json")
+  await c.env.AQUILLA_DB.prepare(
+    "UPDATE projects SET deadline_at = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+  )
+    .bind(deadline, projectId)
+    .run()
+  return c.json({ ok: true, deadlineAt: deadline })
+})
+
+// ──────────────────────────────────────────────────────────────────────────
 // GET /api/v2/projects/:projectId/members — effective member list
 // ──────────────────────────────────────────────────────────────────────────
 

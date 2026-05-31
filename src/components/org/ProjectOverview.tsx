@@ -1,11 +1,13 @@
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { useParams, useNavigate } from "react-router-dom"
 import { AppShell } from "@/components/AppShell"
 import { OrgSidebar } from "./OrgSidebar"
 import { OrgBreadcrumb } from "./OrgBreadcrumb"
 import { useProject } from "@/hooks/useProject"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
+import { useActiveOrg } from "@/context/OrgContext"
 import { archiveProjectRemote, unarchiveProjectRemote } from "@/lib/sync/archive"
+import { getPortfolio, audioPct, recordedMinutes, type PortfolioProject } from "@/lib/frontier/portfolio"
 
 export function ProjectOverview() {
   const { id = "" } = useParams()
@@ -13,9 +15,20 @@ export function ProjectOverview() {
   const { project, status, refresh } = useProject(id)
   const { session } = useFrontierSession()
   const jwt = session?.jwt ?? null
+  const { activeOrgId } = useActiveOrg()
 
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [audio, setAudio] = useState<PortfolioProject | null>(null)
+
+  useEffect(() => {
+    if (!jwt || activeOrgId == null) return
+    let cancelled = false
+    getPortfolio(jwt, activeOrgId)
+      .then((list) => { if (!cancelled) setAudio(list.find((p) => p.id === id) ?? null) })
+      .catch(() => { if (!cancelled) setAudio(null) })
+    return () => { cancelled = true }
+  }, [jwt, activeOrgId, id])
 
   const isOwner = (project?.syncRole?.level ?? 0) >= 700
   const isArchived = Boolean(project?.deletedAt)
@@ -68,6 +81,11 @@ export function ProjectOverview() {
                 )}
               </div>
               <p className="mt-1 text-sm text-muted-foreground">{project?.files.length ?? 0} files</p>
+              {audio && audio.totalCells > 0 && (
+                <p className="mt-1 text-sm text-muted-foreground">
+                  {Math.round(audioPct(audio) * 100)}% of cells have audio · {recordedMinutes(audio)} min recorded
+                </p>
+              )}
               {error && <p className="mt-2 text-sm text-destructive">{error}</p>}
               <div className="mt-4 flex gap-2">
                 <button

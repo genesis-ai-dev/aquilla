@@ -30,6 +30,12 @@ vi.mock("@/lib/sync/archive", () => ({
   unarchiveProjectRemote: (...a: unknown[]) => unarchiveProjectRemote(...a),
 }))
 
+vi.mock("@/lib/frontier/portfolio", () => ({
+  getPortfolio: vi.fn(async () => []),
+  audioPct: () => 0,
+  recordedMinutes: () => 0,
+}))
+
 function projectRecord(over: Partial<ProjectRecord> & { level: number; deletedAt?: string }): ProjectRecord {
   const { level, deletedAt, ...rest } = over
   return {

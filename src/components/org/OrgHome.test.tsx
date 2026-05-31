@@ -22,6 +22,8 @@ vi.mock("@/lib/frontier/portfolio", async (importActual) => {
         totalCells: 200,
         validatedCells: 20, // 10%
         lastEditAt: now - 30 * 24 * 60 * 60 * 1000, // 30 days ago (stalled)
+        audioCells: 100, // 50% audio
+        recordedMs: 120000,
       },
       // Fresh, high validated — should rank second
       {
@@ -30,6 +32,8 @@ vi.mock("@/lib/frontier/portfolio", async (importActual) => {
         totalCells: 100,
         validatedCells: 90, // 90%
         lastEditAt: now, // just edited
+        audioCells: 50, // 50% audio
+        recordedMs: 60000,
       },
     ]),
   }
@@ -58,6 +62,14 @@ describe("OrgHome", () => {
     await waitFor(() => expect(screen.getByText("Legacy Translation")).toBeInTheDocument())
     // 2 projects total — rendered as the Projects rollup count
     expect(screen.getByText("2")).toBeInTheDocument()
+  })
+
+  it("shows the audio rollup card and per-project audio %", async () => {
+    render(<MemoryRouter><OrgProvider><OrgHome /></OrgProvider></MemoryRouter>)
+    await waitFor(() => expect(screen.getByText("Legacy Translation")).toBeInTheDocument())
+    expect(screen.getByText("Avg audio")).toBeInTheDocument()
+    // both projects are 50% audio → at least one "50% audio" per-row label
+    expect(screen.getAllByText("50% audio").length).toBeGreaterThan(0)
   })
 
   it("renders the stalled project before the fresh project (attention rank order)", async () => {

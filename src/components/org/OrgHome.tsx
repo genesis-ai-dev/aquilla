@@ -5,7 +5,7 @@ import { OrgSidebar } from "./OrgSidebar"
 import { OrgBreadcrumb } from "./OrgBreadcrumb"
 import { useActiveOrg } from "@/context/OrgContext"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
-import { getPortfolio, validatedPct, attentionRank, type PortfolioProject } from "@/lib/frontier/portfolio"
+import { getPortfolio, validatedPct, attentionRank, audioPct, type PortfolioProject } from "@/lib/frontier/portfolio"
 
 const STALE_THRESHOLD_MS = 14 * 24 * 60 * 60 * 1000
 
@@ -49,6 +49,8 @@ export function OrgHome() {
       ? projects.reduce((sum, p) => sum + validatedPct(p), 0) / projects.length
       : 0
   const stalledCount = projects.filter((p) => isStalled(p, now)).length
+  const avgAudioPct =
+    projects.length > 0 ? projects.reduce((sum, p) => sum + audioPct(p), 0) / projects.length : 0
 
   // Attention-ranked list
   const ranked = [...projects].sort((a, b) => attentionRank(b, now) - attentionRank(a, now))
@@ -72,7 +74,7 @@ export function OrgHome() {
               </div>
 
               {/* Rollup strip */}
-              <div className="grid grid-cols-3 gap-4">
+              <div className="grid grid-cols-4 gap-4">
                 <div className="rounded-lg border p-4 text-center">
                   <p className="text-2xl font-bold">{projects.length}</p>
                   <p className="text-sm text-muted-foreground">Projects</p>
@@ -80,6 +82,10 @@ export function OrgHome() {
                 <div className="rounded-lg border p-4 text-center">
                   <p className="text-2xl font-bold">{Math.round(avgValidatedPct * 100)}%</p>
                   <p className="text-sm text-muted-foreground">Avg validated</p>
+                </div>
+                <div className="rounded-lg border p-4 text-center">
+                  <p className="text-2xl font-bold">{Math.round(avgAudioPct * 100)}%</p>
+                  <p className="text-sm text-muted-foreground">Avg audio</p>
                 </div>
                 <div className="rounded-lg border p-4 text-center">
                   <p className="text-2xl font-bold">{stalledCount}</p>
@@ -94,6 +100,7 @@ export function OrgHome() {
                 <div className="rounded-lg border divide-y">
                   {ranked.map((p) => {
                     const pct = Math.round(validatedPct(p) * 100)
+                    const apct = Math.round(audioPct(p) * 100)
                     const stalled = isStalled(p, now)
                     return (
                       <Link
@@ -115,6 +122,7 @@ export function OrgHome() {
                           <p className={`text-xs ${stalled ? "text-destructive" : "text-muted-foreground"}`}>
                             {stalled ? "Stalled" : `${pct}% validated`}
                           </p>
+                          <p className="text-xs text-muted-foreground">{apct}% audio</p>
                         </div>
                       </Link>
                     )

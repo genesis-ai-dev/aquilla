@@ -1,7 +1,5 @@
-import { useCallback, useEffect, useState } from "react"
+import { useState } from "react"
 import {
-  ChevronDown,
-  ChevronRight,
   Clock,
   Grid3x3,
   List,
@@ -22,6 +20,7 @@ import { MembersPanel, type MembersPanelMember } from "@/components/MembersPanel
 import { MultiProjectInviteDialog } from "@/components/MultiProjectInviteDialog"
 import { MembersMatrixView } from "@/components/MembersMatrixView"
 import { RemoveOrgMemberDialog } from "@/components/RemoveOrgMemberDialog"
+import { MemberAccessRow } from "@/components/org/MemberAccessPanel"
 import { ROLE, ORG_ROLE_PICKER, roleName } from "@/lib/frontier/roles"
 import { formatRelativeTime } from "@/lib/time/relative"
 import type { OrgMemberProject, PendingOrgInvite } from "@/lib/frontier/orgs"
@@ -290,8 +289,8 @@ interface RosterProps {
 }
 
 function RosterWithProjectChips({
+  orgId,
   panelMembers,
-  listMemberProjects,
   add,
   callerUserId,
   onRequestRemove,
@@ -322,15 +321,15 @@ function RosterWithProjectChips({
 
       <div className="rounded border bg-muted/20 p-3">
         <p className="mb-2 text-xs font-medium text-muted-foreground">
-          Per-member project access
+          Effective access — why each member can reach each project
         </p>
         <ul className="divide-y">
           {panelMembers.map((m) => (
-            <ProjectChipsRow
+            <MemberAccessRow
               key={m.userId}
+              orgId={orgId}
               userId={m.userId}
               username={m.username}
-              loadProjects={() => listMemberProjects(m.userId)}
             />
           ))}
         </ul>
@@ -339,89 +338,6 @@ function RosterWithProjectChips({
   )
 }
 
-interface ProjectChipsRowProps {
-  userId: number
-  username: string
-  loadProjects: () => Promise<OrgMemberProject[]>
-}
-
-function ProjectChipsRow({ username, loadProjects }: ProjectChipsRowProps) {
-  const [open, setOpen] = useState(false)
-  const [projects, setProjects] = useState<OrgMemberProject[] | null>(null)
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-
-  const fetchOnce = useCallback(async () => {
-    if (projects !== null || loading) return
-    setLoading(true)
-    setError(null)
-    try {
-      const next = await loadProjects()
-      setProjects(next)
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e))
-    } finally {
-      setLoading(false)
-    }
-  }, [loadProjects, projects, loading])
-
-  useEffect(() => {
-    if (open) void fetchOnce()
-  }, [open, fetchOnce])
-
-  return (
-    <li className="py-1.5">
-      <button
-        type="button"
-        onClick={() => setOpen((o) => !o)}
-        className="flex w-full items-center gap-1.5 rounded px-1 py-0.5 text-left text-xs hover:bg-muted"
-      >
-        {open ? (
-          <ChevronDown className="h-3 w-3 shrink-0 text-muted-foreground" />
-        ) : (
-          <ChevronRight className="h-3 w-3 shrink-0 text-muted-foreground" />
-        )}
-        <span className="font-medium">{username}</span>
-        {projects && (
-          <span className="text-[10px] text-muted-foreground">
-            {projects.length > 0
-              ? `${projects.length} direct project membership${projects.length === 1 ? "" : "s"}`
-              : "no direct project memberships"}
-          </span>
-        )}
-      </button>
-      {open && (
-        <div className="ml-4 mt-1 flex flex-wrap gap-1">
-          {loading && (
-            <span className="text-[10px] text-muted-foreground inline-flex items-center gap-1">
-              <Loader2 className="h-3 w-3 animate-spin" />
-              Loading…
-            </span>
-          )}
-          {error && <span className="text-[10px] text-destructive">{error}</span>}
-          {!loading && !error && projects && projects.length === 0 && (
-            <span className="text-[10px] text-muted-foreground">
-              Inherits org-level role on every project; no direct overrides.
-            </span>
-          )}
-          {projects?.map((p) => (
-            <span
-              key={p.id}
-              className="inline-flex items-center gap-1 rounded-full border bg-background px-2 py-0.5 text-[10px]"
-              title={`${p.name} • ${p.role.name}`}
-            >
-              <span className="max-w-[12rem] truncate">{p.name}</span>
-              <span className="text-muted-foreground">·</span>
-              <span className="capitalize text-muted-foreground">
-                {p.role.name.replace(/_/g, " ")}
-              </span>
-            </span>
-          ))}
-        </div>
-      )}
-    </li>
-  )
-}
 
 /**
  * Pending share-link invitations across this org. Owner-only (the server

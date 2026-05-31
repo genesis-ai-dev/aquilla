@@ -119,6 +119,27 @@ export async function renameOrg(jwt: string, orgId: number, name: string): Promi
   if (!res.ok) throw new Error(`renameOrg failed: HTTP ${res.status}`)
 }
 
+export interface ProjectAccessBreakdown {
+  projectId: string
+  projectName: string
+  direct: number | null
+  groups: { groupId: number; name: string; roleLevel: number }[]
+  org: number | null
+  creator: boolean
+  resolved: number
+}
+export interface MemberEffectiveAccess {
+  orgRole: number | null
+  projects: ProjectAccessBreakdown[]
+}
+
+/** AD-12 effective-access breakdown for one member: every grant path per project + resolved max. */
+export async function getMemberAccess(jwt: string, orgId: number, userId: number): Promise<MemberEffectiveAccess> {
+  const res = await fetchWithTimeout(`${FRONTIER_BASE}/api/v2/orgs/${orgId}/members/${userId}/access`, { headers: authHeaders(jwt) })
+  if (!res.ok) throw new Error(`getMemberAccess failed: HTTP ${res.status}`)
+  return (await res.json()) as MemberEffectiveAccess
+}
+
 export async function getOrCreateMyOrg(jwt: string): Promise<MyOrg> {
   const res = await fetchWithTimeout(`${FRONTIER_BASE}/api/v2/orgs/me`, {
     headers: authHeaders(jwt),

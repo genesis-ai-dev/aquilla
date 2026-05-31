@@ -551,6 +551,24 @@ export async function detachGroupProject(env: Env, groupId: number, projectId: s
   await env.AQUILLA_DB.prepare("DELETE FROM group_project_grants WHERE group_id = ? AND project_id = ?").bind(groupId, projectId).run()
 }
 
+export interface PortfolioRow { id: string; name: string; totalCells: number; validatedCells: number; lastEditAt: number | null }
+
+/** Per-project rollup over the org's non-archived projects (derive-on-read, one GROUP BY). */
+export async function getOrgPortfolio(env: Env, orgId: number): Promise<PortfolioRow[]> {
+  const rows = await env.AQUILLA_DB.prepare(
+    `SELECT p.id AS id, p.name AS name,
+            COALESCE(SUM(f.cell_count), 0)     AS total_cells,
+            COALESCE(SUM(f.approved_count), 0) AS validated_cells,
+            MAX(f.last_edit_at)                AS last_edit_at
+       FROM projects p
+       LEFT JOIN files f ON f.project_id = p.id
+      WHERE p.org_id = ? AND p.archived_at IS NULL
+      GROUP BY p.id, p.name
+      ORDER BY p.name COLLATE NOCASE`,
+  ).bind(orgId).all<{ id: string; name: string; total_cells: number; validated_cells: number; last_edit_at: number | null }>()
+  return (rows.results ?? []).map((r) => ({ id: r.id, name: r.name, totalCells: r.total_cells, validatedCells: r.validated_cells, lastEditAt: r.last_edit_at }))
+}
+
 export interface ProjectMembershipInOrg {
   projectId: string
   projectName: string

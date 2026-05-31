@@ -17,6 +17,7 @@ import {
   getOrCreateUserOrg,
   getOrgGroupDetail,
   getOrgMemberRole,
+  getOrgPortfolio,
   groupExistsInOrg,
   listOrgGroups,
   listOrgMembersWithUsers,
@@ -61,6 +62,17 @@ orgs.get("/me", async (c) => {
     name: org.name,
     role: { level: org.role, name: ROLE_NAMES[org.role] ?? "owner" },
   })
+})
+
+/** GET /api/v2/orgs/:orgId/portfolio — per-project rollup for org (derive-on-read). */
+orgs.get("/:orgId/portfolio", async (c) => {
+  const user = c.get("user")
+  const orgId = parseInt(c.req.param("orgId"), 10)
+  if (!Number.isFinite(orgId)) return c.json({ error: "invalid orgId" }, 400)
+  const role = await getOrgMemberRole(c.env, orgId, user.id)
+  if (role == null) return c.json({ error: "not an org member" }, 403)
+  const projects = await getOrgPortfolio(c.env, orgId)
+  return c.json({ projects })
 })
 
 /** GET /api/v2/orgs/:orgId/members — caller must be an org member. */

@@ -26,8 +26,10 @@ import {
   assembleParatextProject,
   type ProjectEntry,
 } from "./parsers/paratext-project"
+import { buildBilingualPlan, type SourceVerse } from "./parsers/paratext-pairing"
 import type { ParatextSettings } from "./parsers/paratext"
 import { usxToUsfm, looksLikeUsx } from "./parsers/usx"
+import { bulkUploadTargetCommits, type TargetCommit } from "./sync/bulk-import"
 import { extractDocxStrings } from "./parsers/docx"
 import { extractPptxStrings } from "./parsers/pptx"
 import { bulkUploadSource, type BulkImportCell } from "./sync/bulk-import"
@@ -324,6 +326,109 @@ export async function importParatextProject(
       refs.push(ref)
     } catch (err) {
       skipped.push({ book: book.displayName, reason: err instanceof Error ? err.message : String(err) })
+    }
+    done++
+    onProgress?.({ phase: "save", booksDone: done, booksTotal: total })
+  }
+
+  return { refs, settings: project.settings, skipped }
+}
+
+/**
+ * Import a Paratext project as a TARGET (the consultant's in-progress
+ * translation) paired against a chosen SOURCE Bible (eBible). Each book
+ * becomes one bilingual file: source cells carry the reference text, target
+ * cells carry the translation, paired by verse ref (shared cellId). The
+ * target Paratext bytes are kept as the round-trip export side-car.
+ *
+ * "Close, not precise": verses present on only one side just leave the other
+ * blank, so a low-resource target imports cleanly against an approximate
+ * source.
+ */
+export async function importParatextAsTarget(
+  entries: ProjectEntry[],
+  sourceVerses: SourceVerse[],
+  ctx: ImportContext,
+  onProgress?: (p: ParatextImportProgress) => void,
+): Promise<ParatextImportResult> {
+  const project = await assembleParatextProject(entries)
+  if (!project) {
+    throw new Error(
+      "That doesn't look like a Paratext project — no Settings.xml (or .ssf) with USFM books was found.",
+    )
+  }
+  const plans = buildBilingualPlan(project.books, sourceVerses, project.bookNames)
+  const refs: FileReference[] = []
+  const skipped: { book: string; reason: string }[] = []
+  const total = plans.length
+  let done = 0
+
+  for (const plan of plans) {
+    onProgress?.({ phase: "parse", book: plan.displayName, booksDone: done, booksTotal: total })
+    try {
+      const fileId = uuidv7()
+      // Source cells (reference text), chained; remember each source cell's
+      // event id so the paired target commit can use it as its AD-2 parent.
+      const cells: BulkImportCell[] = []
+      const targets: TargetCommit[] = []
+      let prevCellId: string | null = null
+      for (const c of plan.cells) {
+        const sourceEventId = uuidv7()
+        cells.push({
+          id: sourceEventId,
+          cellId: c.cellId,
+          anchorCellId: prevCellId,
+          value: c.sourceText,
+          type: "verse",
+          canonicalRef: c.ref,
+        })
+        prevCellId = c.cellId
+        if (c.targetText) {
+          targets.push({ id: uuidv7(), cellId: c.cellId, parentId: sourceEventId, value: c.targetText })
+        }
+      }
+
+      await bulkUploadSource({
+        projectId: ctx.projectId,
+        fileId,
+        file: {
+          id: uuidv7(),
+          name: plan.displayName,
+          fileType: "usfm",
+          role: "target",
+          kind: "usfm",
+          importFormat: "usfm",
+          parserVersion: "paratext-target-v1",
+          sourceLanguage: ctx.sourceLanguage,
+          targetLanguage: ctx.targetLanguage,
+          bookCode: plan.bookId,
+        },
+        cells,
+        rawSource: plan.rawSource,
+        rawSourceFormat: "usfm",
+        getToken: ctx.getToken,
+        signal: ctx.signal,
+      })
+
+      await bulkUploadTargetCommits({
+        projectId: ctx.projectId,
+        fileId,
+        author: ctx.author,
+        commits: targets,
+        getToken: ctx.getToken,
+        signal: ctx.signal,
+      })
+
+      refs.push({
+        id: fileId,
+        name: plan.displayName,
+        type: "usfm",
+        createdAt: new Date().toISOString(),
+        cellCount: cells.length,
+        ...(plan.corpusMarker ? { corpusMarker: plan.corpusMarker } : {}),
+      })
+    } catch (err) {
+      skipped.push({ book: plan.displayName, reason: err instanceof Error ? err.message : String(err) })
     }
     done++
     onProgress?.({ phase: "save", booksDone: done, booksTotal: total })

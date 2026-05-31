@@ -128,3 +128,86 @@ export async function bulkUploadSource(args: BulkUploadArgs): Promise<void> {
     offset += CHUNK
   } while (offset < args.cells.length)
 }
+
+/** Commits per chunk for target.cell.commit. Smaller than source CHUNK: the
+ *  /events route does per-event AD-2 guards (heavier than /import's fast path). */
+const TARGET_CHUNK = 200
+
+export interface TargetCommit {
+  /** Client-minted event id (UUIDv7). */
+  id: string
+  /** Cell to commit — must match the paired source cell's cellId. */
+  cellId: string
+  /** The paired source cell's event id — the AD-2 chain parent. A first
+   *  target commit at a source's event id wins the target chain slot. */
+  parentId: string
+  value: string
+}
+
+export interface BulkTargetCommitArgs {
+  projectId: string
+  fileId: string
+  /** Author stamped on the events (server overrides from the token). */
+  author: string
+  commits: TargetCommit[]
+  getToken: (fileId: string) => Promise<string | null>
+  onProgress?: (uploaded: number, total: number) => void
+  signal?: AbortSignal
+  fetchImpl?: typeof fetch
+}
+
+/**
+ * Pre-fill target translations for a bilingual import: emit one
+ * target.cell.commit per cell through the regular /events route, in chunks.
+ * Used after bulkUploadSource has seeded the paired source cells (the source
+ * event ids become these commits' parentId). Throws on the first failure.
+ */
+export async function bulkUploadTargetCommits(args: BulkTargetCommitArgs): Promise<void> {
+  const fetchFn = args.fetchImpl ?? fetch
+  if (args.commits.length === 0) return
+  const token = await args.getToken(args.fileId)
+  if (!token) {
+    throw new Error("Couldn't get an upload token — you may be signed out. Sign in and import again.")
+  }
+  const url = `${syncWorkerHttpOrigin()}/events`
+  const total = args.commits.length
+  let uploaded = 0
+
+  for (let offset = 0; offset < args.commits.length; offset += TARGET_CHUNK) {
+    if (args.signal?.aborted) throw new Error("Import cancelled")
+    const chunk = args.commits.slice(offset, offset + TARGET_CHUNK)
+    const events = chunk.map((c) => ({
+      id: c.id,
+      schemaVersion: 1,
+      kind: "target.cell.commit",
+      projectId: args.projectId,
+      fileId: args.fileId,
+      cellId: c.cellId,
+      parentId: c.parentId,
+      author: args.author,
+      payload: { value: c.value, sourceEventId: c.parentId },
+      clientTs: Date.now(),
+    }))
+
+    let res: Response
+    try {
+      res = await fetchFn(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ events }),
+        signal: args.signal,
+      })
+    } catch (err) {
+      const reason = err instanceof Error ? err.message : "network error"
+      throw new Error(`Target commit failed: ${reason}`)
+    }
+    if (!res.ok) {
+      const detail = await res.text().catch(() => "")
+      throw new Error(
+        `Target commit failed (HTTP ${res.status})${detail ? `: ${detail.slice(0, 200)}` : ""}`,
+      )
+    }
+    uploaded += chunk.length
+    args.onProgress?.(uploaded, total)
+  }
+}

@@ -598,6 +598,78 @@ export async function getOrgPortfolio(env: Env, orgId: number): Promise<Portfoli
   }))
 }
 
+export interface ProjectAccessBreakdown {
+  projectId: string
+  projectName: string
+  direct: number | null
+  groups: { groupId: number; name: string; roleLevel: number }[]
+  org: number | null
+  creator: boolean
+  resolved: number
+}
+export interface MemberEffectiveAccess {
+  orgRole: number | null
+  projects: ProjectAccessBreakdown[]
+}
+
+/**
+ * Per-project grant-path breakdown for one org member (AD-12 effective-access).
+ * Covers the org's non-archived projects where the user has a direct / group /
+ * creator path; the org-wide baseline (orgRole) is reported once and folded
+ * into each project's resolved max. Read-only "why does X have access?" surface.
+ */
+export async function getMemberEffectiveAccess(
+  env: Env,
+  orgId: number,
+  userId: number,
+): Promise<MemberEffectiveAccess> {
+  const orgRow = await env.AQUILLA_DB.prepare(
+    "SELECT role_level FROM org_members WHERE org_id = ? AND user_id = ?",
+  ).bind(orgId, userId).first<{ role_level: number }>()
+  const orgRole = orgRow?.role_level ?? null
+
+  const direct = await env.AQUILLA_DB.prepare(
+    `SELECT pm.project_id AS project_id, p.name AS name, pm.role_level AS role_level
+       FROM project_members pm JOIN projects p ON p.id = pm.project_id
+      WHERE p.org_id = ? AND pm.user_id = ? AND p.archived_at IS NULL`,
+  ).bind(orgId, userId).all<{ project_id: string; name: string; role_level: number }>()
+
+  const groups = await env.AQUILLA_DB.prepare(
+    `SELECT gpg.project_id AS project_id, p.name AS name,
+            g.id AS group_id, g.name AS group_name, gpg.role_level AS role_level
+       FROM group_project_grants gpg
+       JOIN groups g         ON g.id = gpg.group_id
+       JOIN group_members gm ON gm.group_id = gpg.group_id
+       JOIN projects p       ON p.id = gpg.project_id
+      WHERE p.org_id = ? AND gm.user_id = ? AND p.archived_at IS NULL`,
+  ).bind(orgId, userId).all<{ project_id: string; name: string; group_id: number; group_name: string; role_level: number }>()
+
+  const created = await env.AQUILLA_DB.prepare(
+    "SELECT id AS project_id, name FROM projects WHERE org_id = ? AND created_by = ? AND archived_at IS NULL",
+  ).bind(orgId, userId).all<{ project_id: string; name: string }>()
+
+  const map = new Map<string, ProjectAccessBreakdown>()
+  const ensure = (projectId: string, name: string): ProjectAccessBreakdown => {
+    let row = map.get(projectId)
+    if (!row) {
+      row = { projectId, projectName: name, direct: null, groups: [], org: orgRole, creator: false, resolved: 0 }
+      map.set(projectId, row)
+    }
+    return row
+  }
+  for (const r of direct.results ?? []) ensure(r.project_id, r.name).direct = r.role_level
+  for (const r of groups.results ?? []) ensure(r.project_id, r.name).groups.push({ groupId: r.group_id, name: r.group_name, roleLevel: r.role_level })
+  for (const r of created.results ?? []) ensure(r.project_id, r.name).creator = true
+
+  for (const row of map.values()) {
+    const groupMax = row.groups.reduce((m, g) => Math.max(m, g.roleLevel), 0)
+    row.resolved = Math.max(row.direct ?? 0, groupMax, row.org ?? 0, row.creator ? 700 : 0)
+  }
+
+  const projects = Array.from(map.values()).sort((a, b) => a.projectName.localeCompare(b.projectName))
+  return { orgRole, projects }
+}
+
 export interface ProjectMembershipInOrg {
   projectId: string
   projectName: string

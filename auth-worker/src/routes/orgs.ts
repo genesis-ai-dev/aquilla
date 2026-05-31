@@ -15,6 +15,7 @@ import {
   createOrgForUser,
   deleteGroup,
   detachGroupProject,
+  getMemberEffectiveAccess,
   getOrCreateUserOrg,
   getOrgGroupDetail,
   getOrgMemberRole,
@@ -97,6 +98,26 @@ orgs.get("/:orgId/portfolio", async (c) => {
   if (role == null) return c.json({ error: "not an org member" }, 403)
   const projects = await getOrgPortfolio(c.env, orgId)
   return c.json({ projects })
+})
+
+/**
+ * GET /api/v2/orgs/:orgId/members/:userId/access — AD-12 effective-access
+ * breakdown: every grant path (direct/group/org/creator) per project + the
+ * resolved max. Maintainer+ (managers) only.
+ */
+orgs.get("/:orgId/members/:userId/access", async (c) => {
+  const user = c.get("user")
+  const orgId = parseInt(c.req.param("orgId"), 10)
+  const targetUserId = parseInt(c.req.param("userId"), 10)
+  if (!Number.isFinite(orgId) || !Number.isFinite(targetUserId)) {
+    return c.json({ error: "invalid id" }, 400)
+  }
+  const role = await getOrgMemberRole(c.env, orgId, user.id)
+  if (role == null || role < ROLE.MAINTAINER) {
+    return c.json({ error: "org role >= maintainer required" }, 403)
+  }
+  const access = await getMemberEffectiveAccess(c.env, orgId, targetUserId)
+  return c.json(access)
 })
 
 /** GET /api/v2/orgs/:orgId/members — caller must be an org member. */

@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from "react"
-import { ChevronsUpDown, LogIn, LogOut, UserPlus, Check } from "lucide-react"
+import { Link } from "react-router-dom"
+import { ChevronsUpDown, LogIn, LogOut, UserPlus, Check, Settings2 } from "lucide-react"
 import { useAccounts } from "@/hooks/useAccounts"
 import { clearSession } from "@/lib/frontier/session-store"
 import { clearAllLocalData } from "@/lib/store/project-index"
@@ -173,6 +174,14 @@ export function AccountSwitcher({ variant = "sidebar" }: { variant?: "sidebar" |
             </>
           )}
           <div className="my-1.5 h-px bg-foreground/5" />
+          <Link
+            to="/preferences"
+            onClick={() => setOpen(false)}
+            className="flex w-full items-center gap-2 rounded-xl bg-card px-2 py-1.5 text-sm transition-shadow hover:shadow-neu-xs"
+          >
+            <Settings2 className="h-4 w-4" />
+            <span>Preferences</span>
+          </Link>
           <button
             className="flex w-full items-center gap-2 rounded-xl bg-card px-2 py-1.5 text-sm transition-shadow hover:shadow-neu-xs"
             onClick={() => { setOpen(false); setLoginOpen(true) }}

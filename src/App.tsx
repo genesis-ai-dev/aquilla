@@ -15,6 +15,7 @@ import { OnboardingWizard } from "@/components/onboarding/OnboardingWizard"
 import { DevLoginRoute } from "@/components/DevLoginRoute"
 import { MembersPage } from "@/pages/MembersPage"
 import { Settings } from "@/pages/Settings"
+import { Preferences } from "@/pages/Preferences"
 import { SyncingProvider, useSyncing } from "@/context/SyncingContext"
 import { OrgProvider } from "@/context/OrgContext"
 import { AiModelConsentDialog } from "@/components/AiModelConsentDialog"
@@ -82,6 +83,7 @@ function AppRoutes() {
       {/* Dev-only auto-login — see components/DevLoginRoute.tsx */}
       <Route path="/__dev/login" element={<DevLoginRoute />} />
       <Route path="/settings" element={<Settings />} />
+      <Route path="/preferences" element={<Preferences />} />
       <Route path="/members" element={<MembersPage />} />
       <Route path="/teams" element={<TeamsList />} />
       <Route path="/teams/:groupId" element={<TeamDetail />} />

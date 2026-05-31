@@ -86,8 +86,14 @@ describe("MembersPage active-org", () => {
         </OrgProvider>
       </MemoryRouter>,
     )
+    // The active org's name now appears in more than one place (the OrgSidebar
+    // switcher + the "People in <org>" heading) since MembersPage renders inside
+    // the org shell — so assert ≥1 match rather than exactly one. The point of
+    // this test is active-vs-owned: "Come and See" (42, from listMyOrgs) shows
+    // and "Legacy Org" (99, from getOrCreateMyOrg) does NOT.
     await waitFor(() =>
-      expect(screen.getByText("Come and See")).toBeInTheDocument(),
+      expect(screen.getAllByText("Come and See").length).toBeGreaterThan(0),
     )
+    expect(screen.queryByText("Legacy Org")).not.toBeInTheDocument()
   })
 })

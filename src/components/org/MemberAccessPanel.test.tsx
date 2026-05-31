@@ -1,14 +1,14 @@
 import { describe, it, expect, afterEach, vi } from "vitest"
 import { render, screen, waitFor, fireEvent } from "@testing-library/react"
 import { MemberAccessRow } from "./MemberAccessPanel"
+import { getMemberAccess } from "@/lib/frontier/orgs"
+import { removeProjectMember } from "@/lib/frontier/members"
 
 vi.mock("@/hooks/useFrontierSession", () => ({
   useFrontierSession: () => ({ session: { jwt: "jwt", username: "wendi", createdAt: "x" }, loading: false }),
 }))
-const getMemberAccess = vi.fn()
-vi.mock("@/lib/frontier/orgs", () => ({ getMemberAccess: (...a: unknown[]) => getMemberAccess(...a) }))
-const removeProjectMember = vi.fn(async () => {})
-vi.mock("@/lib/frontier/members", () => ({ removeProjectMember: (...a: unknown[]) => removeProjectMember(...a) }))
+vi.mock("@/lib/frontier/orgs", () => ({ getMemberAccess: vi.fn() }))
+vi.mock("@/lib/frontier/members", () => ({ removeProjectMember: vi.fn(async () => {}) }))
 
 afterEach(() => vi.clearAllMocks())
 
@@ -30,7 +30,7 @@ function renderRow() {
 
 describe("MemberAccessRow", () => {
   it("expands to show per-project grant paths with resolved role", async () => {
-    getMemberAccess.mockResolvedValue(ACCESS)
+    vi.mocked(getMemberAccess).mockResolvedValue(ACCESS)
     renderRow()
     fireEvent.click(screen.getByRole("button", { name: /anna/ }))
 
@@ -43,7 +43,7 @@ describe("MemberAccessRow", () => {
   })
 
   it("revokes the direct grant via removeProjectMember, leaving inherited paths", async () => {
-    getMemberAccess.mockResolvedValue(ACCESS)
+    vi.mocked(getMemberAccess).mockResolvedValue(ACCESS)
     renderRow()
     fireEvent.click(screen.getByRole("button", { name: /anna/ }))
     await screen.findByText("John")
@@ -56,7 +56,7 @@ describe("MemberAccessRow", () => {
   })
 
   it("shows a blast-radius note for non-direct paths", async () => {
-    getMemberAccess.mockResolvedValue(ACCESS)
+    vi.mocked(getMemberAccess).mockResolvedValue(ACCESS)
     renderRow()
     fireEvent.click(screen.getByRole("button", { name: /anna/ }))
     await screen.findByText("Mark")

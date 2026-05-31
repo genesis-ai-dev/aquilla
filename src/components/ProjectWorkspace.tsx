@@ -32,7 +32,8 @@ import { EditorTable, type AudioLensContext } from "./EditorTable"
 import { AudioRecordingModal } from "./AudioRecorder/AudioRecordingModal"
 import { VoiceSidebar } from "./voice/VoiceSidebar"
 import { startQueue } from "@/lib/audio/play-queue"
-import { generateCombinedVoice } from "@/lib/audio/combined-voice"
+import { generateCombinedVoice, type CombinedVoiceResult } from "@/lib/audio/combined-voice"
+import { CombinedBoundaryEditor } from "./voice/CombinedBoundaryEditor"
 import { useProjectTts } from "@/hooks/useProjectTts"
 import { RuleDrawer } from "./RuleDrawer"
 import { CommentsDrawer } from "./CommentsDrawer"
@@ -270,6 +271,9 @@ export function ProjectWorkspace() {
   // specific line's take, and the rail's button can open it for a manual pick.
   const [makeCharacterOpen, setMakeCharacterOpen] = useState(false)
   const [makeCharacterSeedCellId, setMakeCharacterSeedCellId] = useState<string | null>(null)
+  // After "Voice together" synthesizes one combined clip, hold its result so
+  // the manual boundary editor can open for the user to mark per-line slices.
+  const [combinedEditor, setCombinedEditor] = useState<CombinedVoiceResult | null>(null)
   // Text vs Audio lens — the same editor over the same cells. Audio mode swaps
   // the left rail's body for the Cast studio (VoiceSidebar: cast roster + the
   // "make a character" dialog) and replaces each cell's SOURCE column with that
@@ -1443,7 +1447,7 @@ export function ProjectWorkspace() {
                   audioMode={lens === "audio"}
                   onVoiceTogether={async (sel) => {
                     if (!activeFileId || !project) return
-                    await generateCombinedVoice({
+                    const result = await generateCombinedVoice({
                       project,
                       fileId: activeFileId,
                       cells: sel,
@@ -1452,6 +1456,8 @@ export function ProjectWorkspace() {
                       username: currentUsername,
                     })
                     revalidateCells()
+                    // Open the manual divider editor to set per-line slices.
+                    setCombinedEditor(result)
                   }}
                 />
               </>

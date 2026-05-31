@@ -11,7 +11,7 @@
 // disabled until the audio-attachment + validate-via-events grammars land.
 
 import { useCallback, useEffect, useMemo, useState } from "react"
-import { Languages, Loader2, X } from "lucide-react"
+import { Languages, Loader2, Sparkles, X } from "lucide-react"
 import type { CellData } from "@/hooks/useCells"
 import type { ProjectRecord } from "@/lib/parsers/types"
 import type { FrontierSession } from "@/lib/frontier/types"
@@ -27,14 +27,19 @@ interface Props {
   username: string
   completeSingle?: (cell: CellData) => Promise<void> | void
   completeBatch?: (cells: CellData[]) => Promise<void> | void
+  /** Audio mode surfaces "Voice together" instead of Translate/Validate. */
+  audioMode?: boolean
+  /** Synthesize the selected cells as one continuous clip + slice per cell. */
+  onVoiceTogether?: (cells: CellData[]) => Promise<void> | void
 }
 
 type Running =
   | { kind: "idle" }
   | { kind: "translate" }
   | { kind: "validate" }
+  | { kind: "voice" }
 
-export function SelectionBar({ project, cells, username, completeBatch }: Props) {
+export function SelectionBar({ project, cells, username, completeBatch, audioMode, onVoiceTogether }: Props) {
   const selected = useSelectedIds()
   const [running, setRunning] = useState<Running>({ kind: "idle" })
 
@@ -71,6 +76,10 @@ export function SelectionBar({ project, cells, username, completeBatch }: Props)
     [selectedCells, username],
   )
   const allHaveTranslation = selectedCells.length > 0 && selectedCells.every((c) => c.translated.trim())
+  const voiceableCount = useMemo(
+    () => selectedCells.filter((c) => c.type !== "paratext" && c.translated.trim()).length,
+    [selectedCells],
+  )
   const isBusy = running.kind !== "idle"
 
   const onTranslate = useCallback(async () => {
@@ -87,6 +96,16 @@ export function SelectionBar({ project, cells, username, completeBatch }: Props)
       setRunning({ kind: "idle" })
     }
   }, [selectedCells, completeBatch, isBusy])
+
+  const onVoice = useCallback(async () => {
+    if (isBusy || !onVoiceTogether) return
+    setRunning({ kind: "voice" })
+    try {
+      await onVoiceTogether(selectedCells.filter((c) => c.type !== "paratext" && c.translated.trim()))
+    } finally {
+      setRunning({ kind: "idle" })
+    }
+  }, [selectedCells, onVoiceTogether, isBusy])
 
   const onValidate = useCallback(() => {
     if (isBusy) return
@@ -130,6 +149,34 @@ export function SelectionBar({ project, cells, username, completeBatch }: Props)
         )}
       </span>
       <div className="mx-1 h-5 w-px rounded-full shadow-neu-inset" />
+      {audioMode && (
+        <Button
+          type="button"
+          size="sm"
+          variant="default"
+          onClick={onVoice}
+          disabled={isBusy || voiceableCount < 2 || !onVoiceTogether}
+          title={
+            !onVoiceTogether ? "Voicing isn't available here" :
+            voiceableCount < 2 ? "Select at least two translated lines" :
+            `Voice ${voiceableCount} lines as one clip`
+          }
+        >
+          {running.kind === "voice" ? (
+            <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />
+          ) : (
+            <Sparkles className="mr-1 h-3.5 w-3.5" />
+          )}
+          Voice together
+          {voiceableCount > 1 && (
+            <span className="ml-1 rounded-full bg-primary-foreground/20 px-1.5 py-0.5 tabular-nums text-primary-foreground">
+              {Math.min(voiceableCount, 12)}
+            </span>
+          )}
+        </Button>
+      )}
+      {!audioMode && (
+        <>
       <Button
         type="button"
         size="sm"
@@ -176,6 +223,8 @@ export function SelectionBar({ project, cells, username, completeBatch }: Props)
           </span>
         )}
       </Button>
+        </>
+      )}
       <Button
         type="button"
         size="icon-sm"

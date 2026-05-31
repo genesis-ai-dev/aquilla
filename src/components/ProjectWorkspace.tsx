@@ -32,6 +32,7 @@ import { EditorTable, type AudioLensContext } from "./EditorTable"
 import { AudioRecordingModal } from "./AudioRecorder/AudioRecordingModal"
 import { VoiceSidebar } from "./voice/VoiceSidebar"
 import { startQueue } from "@/lib/audio/play-queue"
+import { generateCombinedVoice } from "@/lib/audio/combined-voice"
 import { useProjectTts } from "@/hooks/useProjectTts"
 import { RuleDrawer } from "./RuleDrawer"
 import { CommentsDrawer } from "./CommentsDrawer"
@@ -1424,7 +1425,7 @@ export function ProjectWorkspace() {
               onActivate={workspaceTabs.activateTab}
               onClose={workspaceTabs.closeTab}
             />
-            {project && activeFileId && lens === "text" && (
+            {project && activeFileId && (
               <>
                 <SelectionBar
                   project={project}
@@ -1433,6 +1434,19 @@ export function ProjectWorkspace() {
                   username={currentUsername}
                   completeSingle={completeSingle}
                   completeBatch={completeBatch}
+                  audioMode={lens === "audio"}
+                  onVoiceTogether={async (sel) => {
+                    if (!activeFileId || !project) return
+                    await generateCombinedVoice({
+                      project,
+                      fileId: activeFileId,
+                      cells: sel,
+                      settings: tts.settings,
+                      session: frontierSession,
+                      username: currentUsername,
+                    })
+                    revalidateCells()
+                  }}
                 />
               </>
             )}

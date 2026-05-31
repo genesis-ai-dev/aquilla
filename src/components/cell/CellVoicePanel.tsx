@@ -27,7 +27,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { generateCellVoice } from "@/lib/audio/voice-generate-helpers"
 import { ttsStatusKey, useTtsStatus } from "@/lib/audio/tts"
 import { useCellAudio } from "@/hooks/useCellAudio"
-import { getCellPref, setCellPref } from "@/lib/store/audio-cell-prefs"
+import { setCellPref, useCellPref } from "@/lib/store/audio-cell-prefs"
 import type { CellData } from "@/hooks/useCells"
 import type { CodexCell } from "@/lib/codex-editor/types"
 import type { FrontierSession } from "@/lib/frontier/types"
@@ -249,24 +249,20 @@ export function CellVoicePanel({
   const audio = useCellAudio(project, cellForAudio, cell.fileId)
   const { currentTime, duration, isPlaying, seek, play, pause, setVolume, setTrim, state: audioState } = audio
 
-  // Per-cell volume, client-owned (localStorage). Push it into the controller.
-  const [volume, setVolumeState] = useState(() => getCellPref(projectId, cell.id)?.volume ?? 1)
+  // Per-cell volume + non-destructive crop, client-owned (localStorage) and
+  // reactive — a write from here OR from "voice together" (which writes slices
+  // across many cells at once) updates this player live. Pushed into the
+  // controller; null trim bounds = no constraint.
+  const pref = useCellPref(projectId, cell.id)
+  const volume = pref.volume ?? 1
+  const trimStart = pref.trimStart ?? null
+  const trimEnd = pref.trimEnd ?? null
   useEffect(() => { setVolume(volume) }, [volume, setVolume])
+  useEffect(() => { setTrim(trimStart, trimEnd) }, [trimStart, trimEnd, setTrim])
   const changeVolume = useCallback((v: number) => {
-    const clamped = clamp01(v)
-    setVolumeState(clamped)
-    setCellPref(projectId, cell.id, { volume: clamped })
+    setCellPref(projectId, cell.id, { volume: clamp01(v) })
   }, [projectId, cell.id])
-
-  // Per-cell non-destructive crop, client-owned (localStorage). Push the window
-  // into the controller; null bounds = no constraint.
-  const [trim, setTrimState] = useState<{ start: number | null; end: number | null }>(() => {
-    const p = getCellPref(projectId, cell.id)
-    return { start: p?.trimStart ?? null, end: p?.trimEnd ?? null }
-  })
-  useEffect(() => { setTrim(trim.start, trim.end) }, [trim.start, trim.end, setTrim])
   const changeTrim = useCallback((start: number | null, end: number | null) => {
-    setTrimState({ start, end })
     setCellPref(projectId, cell.id, { trimStart: start ?? undefined, trimEnd: end ?? undefined })
   }, [projectId, cell.id])
 
@@ -310,8 +306,8 @@ export function CellVoicePanel({
 
   const loading = isVoicing || audioState === "loading"
   // Scrubber maps over the cropped window (full clip when untrimmed).
-  const effStart = trim.start ?? 0
-  const effEnd = trim.end ?? duration
+  const effStart = trimStart ?? 0
+  const effEnd = trimEnd ?? duration
   const effDur = Math.max(0, effEnd - effStart)
   const effCurrent = Math.max(0, Math.min(currentTime - effStart, effDur))
   const fraction = effDur > 0 ? effCurrent / effDur : 0
@@ -369,7 +365,7 @@ export function CellVoicePanel({
       </div>
 
       {/* Crop + volume — only meaningful with audio to play. */}
-      {hasTake && <CropButton controller={audio} trim={trim} onChange={changeTrim} />}
+      {hasTake && <CropButton controller={audio} trim={{ start: trimStart, end: trimEnd }} onChange={changeTrim} />}
       {hasTake && <VolumeButton volume={volume} onChange={changeVolume} />}
 
       <OverflowMenu

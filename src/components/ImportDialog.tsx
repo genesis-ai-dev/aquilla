@@ -9,12 +9,22 @@ import {
 import { Input } from "@/components/ui/input"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { cn } from "@/lib/utils"
-import { importFile, importEBible, importParatextProject, type EBibleProgress } from "@/lib/import"
+import {
+  importFile,
+  importEBible,
+  importParatextProject,
+  importParatextAsTarget,
+  type EBibleProgress,
+  type ParatextImportProgress,
+} from "@/lib/import"
 import type { FileReference } from "@/lib/parsers/types"
 import { filesToProjectEntries } from "@/lib/import/file-entries"
-import { detectParatextProject } from "@/lib/parsers/paratext-project"
+import { detectParatextProject, type ProjectEntry } from "@/lib/parsers/paratext-project"
+import type { SourceVerse } from "@/lib/parsers/paratext-pairing"
 import {
   fetchTranslationsList,
+  fetchTranslationText,
+  parseEBibleCorpus,
   type EBibleTranslation,
 } from "@/lib/parsers/ebible"
 
@@ -123,58 +133,43 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, getT
   const [error, setError] = useState<string | null>(null)
   const [phase, setPhase] = useState<string>("")
   const [progress, setProgress] = useState<{ count: number; total: number } | null>(null)
+  // Set when a dropped/selected set is a Paratext project — we pause to ask
+  // whether it's a source text or a translation-in-progress (target) before
+  // importing.
+  const [paratextChoice, setParatextChoice] = useState<{ entries: ProjectEntry[]; bookCount: number } | null>(null)
 
   const handleFiles = useCallback(
     async (files: FileList | File[]) => {
-      setImporting(true)
       setError(null)
+      const list = Array.from(files)
+      // A Paratext project (zipped, or a folder/multi-select containing
+      // Settings.xml) is imported as one unit — but first ask source vs target.
+      const entries = await filesToProjectEntries(list)
+      const detected = detectParatextProject(entries)
+      if (detected) {
+        setParatextChoice({ entries, bookCount: detected.sfmEntries.length })
+        return
+      }
+
+      setImporting(true)
       setProgress(null)
       const allRefs: FileReference[] = []
-
       try {
-        const list = Array.from(files)
-        // A Paratext project (zipped, or a folder/multi-select containing
-        // Settings.xml) imports as one unit: books named in the project's
-        // language, ordered canonically, OT/NT tagged, originals kept.
-        const entries = await filesToProjectEntries(list)
-        if (detectParatextProject(entries)) {
-          setPhase("Reading Paratext project…")
-          const result = await importParatextProject(
-            entries,
-            { projectId, author: username, sourceLanguage, targetLanguage, getToken },
-            (p) => {
-              setPhase(
-                p.phase === "parse"
-                  ? `Importing ${p.book ?? "book"}…`
-                  : `Imported ${p.booksDone}/${p.booksTotal} books`,
-              )
-              setProgress({ count: p.booksDone, total: p.booksTotal })
+        for (const file of list) {
+          setPhase(`Parsing ${file.name}…`)
+          setProgress(null)
+          const refs = await importFile(file, {
+            projectId,
+            author: username,
+            sourceLanguage,
+            targetLanguage,
+            getToken,
+            onCellEnqueued: (count, total) => {
+              setPhase(`Uploading ${file.name}`)
+              setProgress({ count, total })
             },
-          )
-          allRefs.push(...result.refs)
-          if (result.skipped.length > 0) {
-            setError(
-              `Imported ${result.refs.length} books; ${result.skipped.length} skipped: ` +
-                result.skipped.slice(0, 3).map((s) => s.book).join(", "),
-            )
-          }
-        } else {
-          for (const file of list) {
-            setPhase(`Parsing ${file.name}…`)
-            setProgress(null)
-            const refs = await importFile(file, {
-              projectId,
-              author: username,
-              sourceLanguage,
-              targetLanguage,
-              getToken,
-              onCellEnqueued: (count, total) => {
-                setPhase(`Uploading ${file.name}`)
-                setProgress({ count, total })
-              },
-            })
-            allRefs.push(...refs)
-          }
+          })
+          allRefs.push(...refs)
         }
         setPhase("Finishing up…")
         await onImported(allRefs)
@@ -201,6 +196,22 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, getT
     if (e.target.files && e.target.files.length > 0) {
       handleFiles(e.target.files)
     }
+  }
+
+  if (paratextChoice) {
+    return (
+      <ParatextChoice
+        entries={paratextChoice.entries}
+        bookCount={paratextChoice.bookCount}
+        projectId={projectId}
+        username={username}
+        sourceLanguage={sourceLanguage}
+        targetLanguage={targetLanguage}
+        getToken={getToken}
+        onImported={onImported}
+        onCancel={() => setParatextChoice(null)}
+      />
+    )
   }
 
   return (
@@ -270,6 +281,167 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, getT
         </>
       )}
       {error && <p className="mt-2 text-sm text-destructive">{error}</p>}
+    </div>
+  )
+}
+
+interface ParatextChoiceProps {
+  entries: ProjectEntry[]
+  bookCount: number
+  projectId: string
+  username: string
+  sourceLanguage: string
+  targetLanguage: string
+  getToken: (fileId: string) => Promise<string | null>
+  onImported: (refs: FileReference[]) => void | Promise<void>
+  onCancel: () => void
+}
+
+/** Source-vs-target choice for a detected Paratext project. Source imports the
+ *  books as a reference text; target pairs the consultant's in-progress
+ *  translation against an eBible source picked here (aligned by verse ref). */
+function ParatextChoice({
+  entries, bookCount, projectId, username, sourceLanguage, targetLanguage, getToken, onImported, onCancel,
+}: ParatextChoiceProps) {
+  const [mode, setMode] = useState<"choose" | "pickSource" | "importing">("choose")
+  const [phase, setPhase] = useState("")
+  const [progress, setProgress] = useState<{ count: number; total: number } | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const [translations, setTranslations] = useState<EBibleTranslation[] | null>(null)
+  const [query, setQuery] = useState("")
+
+  const ctx = { projectId, author: username, sourceLanguage, targetLanguage, getToken }
+
+  function onProgress(p: ParatextImportProgress) {
+    setPhase(p.phase === "parse" ? `Importing ${p.book ?? "book"}…` : `Imported ${p.booksDone}/${p.booksTotal} books`)
+    setProgress({ count: p.booksDone, total: p.booksTotal })
+  }
+
+  async function runSource() {
+    setMode("importing"); setError(null); setPhase("Reading project…"); setProgress(null)
+    try {
+      const { refs, skipped } = await importParatextProject(entries, ctx, onProgress)
+      if (skipped.length) {
+        setError(`Imported ${refs.length}; skipped ${skipped.length}: ${skipped.slice(0, 3).map((s) => s.book).join(", ")}`)
+      }
+      await onImported(refs)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Import failed"); setMode("choose")
+    }
+  }
+
+  async function startTarget() {
+    setMode("pickSource"); setError(null)
+    if (!translations) {
+      try {
+        setTranslations(await fetchTranslationsList())
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Couldn't load the source list")
+      }
+    }
+  }
+
+  async function runTarget(sel: EBibleTranslation) {
+    setMode("importing"); setError(null); setPhase(`Fetching source: ${sel.title}…`); setProgress(null)
+    try {
+      const corpus = await fetchTranslationText(sel.id, () => {})
+      const sourceVerses: SourceVerse[] = parseEBibleCorpus(corpus).map((s) => ({
+        ref: s.globalReferences?.[0] ?? s.context,
+        text: s.original,
+      }))
+      const { refs, skipped } = await importParatextAsTarget(entries, sourceVerses, { ...ctx, sourceLanguage: sel.id }, onProgress)
+      if (skipped.length) setError(`Imported ${refs.length}; skipped ${skipped.length}`)
+      await onImported(refs)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Import failed"); setMode("pickSource")
+    }
+  }
+
+  const filtered = useMemo(() => {
+    if (!translations) return []
+    const q = query.trim().toLowerCase()
+    const base = q
+      ? translations.filter(
+          (t) =>
+            t.id.toLowerCase().includes(q) ||
+            t.title.toLowerCase().includes(q) ||
+            t.languageNameInEnglish.toLowerCase().includes(q),
+        )
+      : translations
+    return base.slice(0, 200)
+  }, [translations, query])
+
+  if (mode === "importing") {
+    return (
+      <div className="mx-auto w-full max-w-sm py-8 text-center">
+        <p className="text-sm font-medium">{phase || "Importing…"}</p>
+        {progress && progress.total > 0 && (
+          <>
+            <div className="mt-3 h-2 w-full overflow-hidden rounded-full bg-muted">
+              <div className="h-full bg-primary transition-all" style={{ width: `${Math.round((progress.count / progress.total) * 100)}%` }} />
+            </div>
+            <p className="mt-1.5 text-xs text-muted-foreground">{progress.count} / {progress.total} books</p>
+          </>
+        )}
+        {error && <p className="mt-2 text-sm text-destructive">{error}</p>}
+      </div>
+    )
+  }
+
+  if (mode === "pickSource") {
+    return (
+      <div className="flex flex-col gap-3 py-2">
+        <div className="flex items-center justify-between">
+          <p className="text-sm font-medium">Pick a source Bible to align against</p>
+          <Button variant="ghost" size="sm" onClick={() => setMode("choose")}>Back</Button>
+        </div>
+        <p className="text-xs text-muted-foreground">
+          It just needs to be close — verses align by reference (e.g. MAT 1:1). Verses missing on either side stay blank.
+        </p>
+        <Input placeholder="Search translations (language, name, code)…" value={query} onChange={(e) => setQuery(e.target.value)} />
+        <ScrollArea className="h-64 rounded border">
+          {!translations ? (
+            <p className="p-3 text-sm text-muted-foreground">Loading source list…</p>
+          ) : filtered.length === 0 ? (
+            <p className="p-3 text-sm text-muted-foreground">No matches.</p>
+          ) : (
+            <ul className="divide-y">
+              {filtered.map((t) => (
+                <li key={t.id}>
+                  <button type="button" onClick={() => runTarget(t)} className="flex w-full flex-col items-start px-3 py-2 text-left hover:bg-accent">
+                    <span className="text-sm">{t.title}</span>
+                    <span className="text-xs text-muted-foreground">{t.languageNameInEnglish} · {t.id}</span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </ScrollArea>
+        {error && <p className="text-sm text-destructive">{error}</p>}
+      </div>
+    )
+  }
+
+  return (
+    <div className="flex flex-col gap-4 py-4">
+      <div>
+        <p className="text-sm font-medium">Paratext project detected — {bookCount} book{bookCount === 1 ? "" : "s"}</p>
+        <p className="text-xs text-muted-foreground">How should we bring it in?</p>
+      </div>
+      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+        <button type="button" onClick={runSource} className="rounded-lg border p-3 text-left transition-colors hover:border-primary hover:bg-primary/5">
+          <p className="text-sm font-medium">Source text</p>
+          <p className="mt-1 text-xs text-muted-foreground">A reference Bible to translate from. Books import as source cells.</p>
+        </button>
+        <button type="button" onClick={startTarget} className="rounded-lg border p-3 text-left transition-colors hover:border-primary hover:bg-primary/5">
+          <p className="text-sm font-medium">Translation in progress</p>
+          <p className="mt-1 text-xs text-muted-foreground">Your team's target text. We'll pair it with a source Bible by verse.</p>
+        </button>
+      </div>
+      <div>
+        <Button variant="ghost" size="sm" onClick={onCancel}>Cancel</Button>
+      </div>
+      {error && <p className="text-sm text-destructive">{error}</p>}
     </div>
   )
 }

@@ -24,6 +24,7 @@ export interface WorkspaceActionContext {
 export interface WorkspaceActionRunArgs {
   openImport: () => void
   runCompletions: () => void
+  runCompleteAll: () => void
   runExport: () => void
   runBatchValidate: () => void
   runAgentInput: () => void

@@ -235,6 +235,9 @@
 }
 .aq-theme-toggle:hover { color: var(--aq-text); background: var(--aq-fill-2); border-color: var(--aq-line-strong); }
 @media (max-width: 860px) { .aq-nav-links { display: none; } }
+/* At narrow mobile, hide the "Open app" ghost button to keep the nav uncluttered;
+   "Start free" (primary CTA) and the theme toggle remain. */
+@media (max-width: 480px) { .aq-nav-cta .aq-btn-ghost { display: none; } }
 
 /* ── Buttons ────────────────────────────────────────────────────────────── */
 .aq-btn {
@@ -557,6 +560,8 @@
 .aq-quote {
   max-width: 30ch; font-size: clamp(20px, 2.6vw, 28px); line-height: 1.4;
 }
+.aq-quote::before { content: "\201C"; }
+.aq-quote::after  { content: "\201D"; }
 .aq-quote-cite { margin-top: 20px; font-size: 14px; color: var(--aq-faint); }
 .aq-quote-cite b { color: var(--aq-dim); font-weight: 560; }
 
@@ -751,6 +756,23 @@
 @keyframes aq-equalize { 0%, 100% { height: 30%; } 50% { height: 100%; } }
 @keyframes aq-float { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-7px); } }
 @keyframes aq-shimmer { to { background-position: 200% 0; } }
+
+/* ── Focus-visible ring (keyboard navigation) ───────────────────────────── */
+.aq-root :focus-visible {
+  outline: 2px solid var(--aq-gold);
+  outline-offset: 3px;
+  border-radius: 4px;
+}
+/* Buttons and links already have their own shape — respect it */
+.aq-root .aq-btn:focus-visible,
+.aq-root .aq-play:focus-visible {
+  outline-offset: 2px;
+  border-radius: 12px;
+}
+.aq-root .aq-btn-sm:focus-visible { border-radius: 10px; }
+.aq-root .aq-btn-lg:focus-visible { border-radius: 14px; }
+.aq-root .aq-theme-toggle:focus-visible { border-radius: 10px; }
+.aq-root .aq-mode:focus-visible { border-radius: 10px; }
 
 /* ── Reduced motion ─────────────────────────────────────────────────────── */
 @media (prefers-reduced-motion: reduce) {

@@ -54,6 +54,28 @@ export const workspaceActions: WorkspaceAction[] = [
     run: (_c, args) => args.runCompletions(),
   },
   {
+    id: "complete-all", label: "Complete all", icon: Sparkles, group: "primary",
+    isAvailable: (c) => {
+      if (!c.activeFileId) return false
+      const p = c.fileProgress.get(c.activeFileId)
+      return !!p && p.total > 0 && p.translated < p.total
+    },
+    requiresConfirmation: {
+      title: "Complete all untranslated cells",
+      description: (c) => {
+        if (!c.activeFileId) return ""
+        const p = c.fileProgress.get(c.activeFileId)
+        const untranslated = p ? p.total - p.translated : 0
+        // SWARM-TODO(complete-all-spend-dollars): replace ~N AI calls with a
+        //   precise dollar estimate once per-model pricing constants are
+        //   available here (needs model name + token-count estimate per cell).
+        return `Draft AI translations for all ${untranslated} untranslated cell${untranslated === 1 ? "" : "s"} in this file (~${untranslated} AI call${untranslated === 1 ? "" : "s"}). This may take a while for large files.`
+      },
+      confirmLabel: "Complete all",
+    },
+    run: (_c, args) => args.runCompleteAll(),
+  },
+  {
     id: "batch-validate", label: "Batch validate…", icon: CheckSquare, group: "primary",
     isAvailable: (c) => c.activeFileId != null,
     isDefault: (c) => {

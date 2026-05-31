@@ -66,8 +66,8 @@ function describeStatus(status: SyncStatus): { dot: string; label: string; toolt
     case "disabled":
       return {
         dot: "bg-muted-foreground/40",
-        label: "Local only",
-        tooltip: "Sync disabled — changes are saved locally only",
+        label: "No file open",
+        tooltip: "Open a file to start editing and syncing",
       }
   }
 }

@@ -59,7 +59,7 @@ import {
 import { emitTargetCellCommit } from "@/lib/sync/events-emit"
 import { flushOutboxBatch } from "@/lib/sync/outbox-flush"
 import { useCellsAuditStatsWithOverlay } from "@/hooks/useCellsAuditStatsWithOverlay"
-import { Film, Scale, MessagesSquare, Share2, Settings as SettingsIcon, Lock, ClipboardList, Trash2, Undo2, Search as SearchIcon, Sparkles, Mic2 } from "lucide-react"
+import { Film, Scale, MessagesSquare, Share2, Settings as SettingsIcon, Lock, ClipboardList, Trash2, Undo2, Search as SearchIcon, Sparkles, Mic2, Download, BookMarked } from "lucide-react"
 import { restoreProject } from "@/lib/store/project-index"
 import { AppShell } from "./AppShell"
 import { WorkspaceHeader } from "./WorkspaceHeader"
@@ -97,7 +97,7 @@ import {
   buildProjectSettingsHandoffUrl,
   workspaceReturnPath,
 } from "@/lib/ad11/navigation"
-import { downloadSourceFile, SourceExportError } from "@/lib/sync/source-export"
+import { generateBacktranslation } from "@/lib/completion/backtranslation-service"
 
 // Import runs inline in the workspace (upload + eBible corpus tabs). The
 // AD-11 plan carves import into a standalone apps/import Worker, but that
@@ -108,6 +108,10 @@ import { downloadSourceFile, SourceExportError } from "@/lib/sync/source-export"
 // because the eBible parser bundles a ~2MB vref table.
 const ImportDialog = lazy(() =>
   import("./ImportDialog").then((mod) => ({ default: mod.ImportDialog })),
+)
+
+const ExportDialog = lazy(() =>
+  import("./ExportDialog").then((mod) => ({ default: mod.ExportDialog })),
 )
 
 export function ProjectWorkspace() {
@@ -253,6 +257,7 @@ export function ProjectWorkspace() {
     redirectTo,
   ])
   const [importOpen, setImportOpen] = useState(false)
+  const [exportOpen, setExportOpen] = useState(false)
   const [drawerRuleId, setDrawerRuleId] = useState<string | null>(null)
   const [searchParams] = useSearchParams()
   useEffect(() => {
@@ -280,9 +285,14 @@ export function ProjectWorkspace() {
   // "make a character" dialog) and replaces each cell's SOURCE column with that
   // line's voice controls (CellVoicePanel); all other audio chrome lives there.
   const [lens, setLens] = useEditorLensPreference(projectId ?? "")
-  const openAudioLens = useCallback(() => {
-    setLens("audio")
-  }, [setLens])
+  // A2: "Open audio setup" CTA from the cell error popover must navigate to a
+  // page where the Gemini API key can be set. The old implementation called
+  // setLens("audio") which is a no-op when already in audio mode. Navigate to
+  // project settings instead so the key field is always reachable.
+  const openAudioSetup = useCallback(() => {
+    if (!projectId) return
+    navigate(`/project/${projectId}/settings`)
+  }, [navigate, projectId])
   const editorRef = useRef<EditorTableHandle>(null)
   // Phase 2c-gamma: the per-file Y.Doc is gone. The editor hydrates from the
   // cells projection and writes via the outbox. `doc`/`docLoading` are
@@ -535,11 +545,12 @@ export function ProjectWorkspace() {
     buildIndex,
     rebuild: rebuildSearchIndex,
     search: runSearch,
+    searchParallelPassages: runSearchPassages,
     clear: clearSearchResults,
     results: searchResults,
     loading: searchLoading,
     ready: searchReady,
-  } = useWorkspaceSearch(project?.files || [])
+  } = useWorkspaceSearch({ projectId: project?.id ?? null, getToken: getTokenForFile, files: project?.files || [] })
 
   // Captures the latest cells in a ref so post-navigation flash can read them
   // without racing React re-renders.
@@ -690,15 +701,61 @@ export function ProjectWorkspace() {
     revalidateCells()
   }, [project?.id, applyOptimisticTargetEdit, getTokenForFile, refreshOutboxPending, revalidateAuditStats, revalidateCells])
   const { completeSingle, completeBatch, isConfigured, isAvailable: isCompletionAvailable, completing, examples, errors, previews } = useCompletion(
-    project?.completionSettings, project?.sourceLanguage || "", project?.targetLanguage || "", branchingSearch, branchingSearchPassages, frontierSession, commitCompletedCell
+    project?.completionSettings, project?.sourceLanguage || "", project?.targetLanguage || "", branchingSearch, branchingSearchPassages, frontierSession, commitCompletedCell, rules, allProjectCells
   )
 
-  // Phase 2c-gamma: backtranslation wrote through Y.Doc; the writeback hookup
-  // is deferred to v1.x. The button still renders disabled.
-  const runBacktranslation: (..._: unknown[]) => Promise<void> = async () => {}
-  const backtranslating: Set<string> = new Set()
-  const backtranslationErrors: Map<string, string> = new Map()
-  const isBacktranslationConfigured = false
+  // Backtranslation: display-only path. The service generates a backtranslation
+  // via LLM and we store it in local React state so the expansion tab can render
+  // it immediately. Writing the result back via sync-worker events is not yet
+  // wired (the event schema is in-flight) — results are ephemeral for this session.
+  //
+  // SWARM-TODO(backtranslation-write): persist the generated text by emitting a
+  // `target.cell.backtranslation.set` event (or equivalent) through the outbox
+  // once the sync-worker projection adds a handler for that event type.
+  const [backtranslationCache, setBacktranslationCache] = useState<Map<string, string>>(new Map())
+  const [backtranslatingState, setBacktranslatingState] = useState<Set<string>>(new Set())
+  const [backtranslationErrorsState, setBacktranslationErrorsState] = useState<Map<string, string>>(new Map())
+
+  const isBacktranslationConfigured = Boolean(project?.completionSettings && isConfigured)
+
+  const runBacktranslation = useCallback(async (cell: CellData) => {
+    if (!project?.completionSettings || !isConfigured) return
+    if (!cell.translated?.trim()) return
+    const cellId = cell.id
+    setBacktranslatingState((prev) => new Set(prev).add(cellId))
+    setBacktranslationErrorsState((prev) => { const n = new Map(prev); n.delete(cellId); return n })
+    try {
+      const result = await generateBacktranslation({
+        settings: project.completionSettings,
+        session: frontierSession,
+        sourceLanguage: project.sourceLanguage || "English",
+        targetLanguage: project.targetLanguage || "Unknown",
+        targetText: cell.translated,
+        examples: [],
+      })
+      setBacktranslationCache((prev) => new Map(prev).set(cellId, result))
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      setBacktranslationErrorsState((prev) => new Map(prev).set(cellId, msg))
+    } finally {
+      setBacktranslatingState((prev) => { const n = new Set(prev); n.delete(cellId); return n })
+    }
+  }, [project?.completionSettings, project?.sourceLanguage, project?.targetLanguage, isConfigured, frontierSession])
+
+  // Merge ephemeral backtranslation results into the cells array for display.
+  // The server projection's `backtranslation` field takes precedence only when
+  // we have no local result (i.e. the user hasn't re-generated this session).
+  const cellsWithBacktranslation = useMemo(() => {
+    if (backtranslationCache.size === 0) return cells
+    return cells.map((c) => {
+      const local = backtranslationCache.get(c.id)
+      if (!local) return c
+      return { ...c, backtranslation: local, backtranslationForText: c.translated }
+    })
+  }, [cells, backtranslationCache])
+
+  const backtranslating = backtranslatingState
+  const backtranslationErrors = backtranslationErrorsState
 
   const requiredValidations = project ? readValidationCount(project) : 1
 
@@ -1114,8 +1171,23 @@ export function ProjectWorkspace() {
       { id: "comments", label: "Comments", icon: MessagesSquare,
         badge: Array.from(openCommentCount.values()).reduce((a, b) => a + b, 0),
         onClick: () => navigate(`/project/${projectId}/comments`) },
+      { id: "living-memory", label: "Memory", icon: BookMarked,
+        onClick: () => navigate(`/project/${projectId}/memory`) },
+      // SWARM-TODO(voice-a7): "Voice" nav button toggles the Audio/Text lens
+      // (current intentional behavior, fixed in a prior wave to avoid the
+      // one-way-trap). QA now reports this is AMBIGUOUS: users expect a nav
+      // button to navigate to a Voice settings page, not to toggle a lens mode.
+      // Product decision needed:
+      //   Option A: Keep as lens toggle but rename/re-icon it (e.g. "Audio lens"
+      //             with a headphones icon) so it's clear it's a VIEW mode switch.
+      //   Option B: Make "Voice" open a dedicated /project/:id/voice settings page
+      //             (requires adding a route + VoiceStudioPage component) and put
+      //             the lens toggle in the header bar only.
+      //   Option C: Two-step: first click = switch to Audio lens, second click
+      //             while in Audio lens = open voice settings modal.
+      // See: src/components/ProjectWorkspace.tsx (this file), src/App.tsx (routes)
       { id: "voice-studio", label: "Voice", icon: Mic2,
-        onClick: openAudioLens },
+        onClick: () => setLens(lens === "audio" ? "text" : "audio") },
       { id: "share", label: "Share", icon: Share2,
         onClick: () => setShareOpen(true) },
       { id: "settings", label: "Settings", icon: SettingsIcon,
@@ -1128,7 +1200,7 @@ export function ProjectWorkspace() {
         } },
     ]
     return items
-  }, [projectId, activeFileId, navigate, openCommentCount, openAudioLens])
+  }, [projectId, activeFileId, navigate, openCommentCount, lens, setLens])
 
   // Phase 2c-gamma: countTranscribeTargets/countSynthTargets lived in bulk-audio
   // (Y.Doc-coupled). They're zeroed until the audio-attachment event grammar
@@ -1162,38 +1234,9 @@ export function ProjectWorkspace() {
     setImportOpen(true)
   }, [project])
 
-  // Export handoff (/export/) does not exist as a route yet — stub until the
-  // standalone export Worker is wired in.
-  const openExportFlow = useCallback(async () => {
-    if (!activeFile || !project?.id) return
-    // Only USFM files have a raw-source side-car — other formats (md, docx,
-    // pptx…) don't go through the export endpoint.
-    if (activeFile.type !== "usfm") {
-      console.info("[ProjectWorkspace] export only available for USFM files")
-      return
-    }
-    const name = /\.(sfm|usfm)$/i.test(activeFile.name)
-      ? activeFile.name
-      : `${activeFile.name}.SFM`
-    try {
-      await downloadSourceFile({
-        projectId: project.id,
-        fileId: activeFile.id,
-        downloadName: name,
-        getToken: getTokenForFile,
-      })
-    } catch (err) {
-      const msg =
-        err instanceof SourceExportError && err.status === 404
-          ? "Re-import this file to enable export (side-car not recorded)."
-          : err instanceof Error
-            ? err.message
-            : "Export failed."
-      // surface through the browser's native alert — a dedicated toast is wired
-      // in ExpandableFileList; this path is hit from the keyboard/action button.
-      alert(msg)
-    }
-  }, [activeFile, project?.id, getTokenForFile])
+  const openExportFlow = useCallback(() => {
+    setExportOpen(true)
+  }, [])
 
   const actionArgs = useMemo(() => ({
     openImport: openImportFlow,
@@ -1202,6 +1245,13 @@ export function ProjectWorkspace() {
       const untranslated = cells.filter((c) => !c.translated.trim())
       if (untranslated.length === 0) return
       completeBatch(untranslated.slice(0, MAX_BATCH_COMPLETIONS))
+    },
+    runCompleteAll: () => {
+      if (!activeFileId) return
+      const untranslated = cells.filter((c) => !c.translated.trim())
+      if (untranslated.length === 0) return
+      // No slice — draft every untranslated cell; useCompletion chunks internally.
+      completeBatch(untranslated)
     },
     runExport: openExportFlow,
     runBatchValidate: () => {
@@ -1314,7 +1364,35 @@ export function ProjectWorkspace() {
             <div className="p-2">
               <AccountSwitcher />
             </div>
-            {lens === "audio" && project ? (
+            {lens !== "audio" && (
+              <>
+                <SuggestionBanner
+                  suggestions={bannerSuggestions}
+                  onApply={handleApplySuggestions}
+                  onDismiss={handleDismissBanner}
+                />
+              </>
+            )}
+            <ExpandableFileList
+              projectId={projectId!}
+              projectName={project.name}
+              files={project.files}
+              activeFileId={activeFileId}
+              fileProgress={fileProgress}
+              suggestionFileIds={suggestionFileIds}
+              validationCount={validationCount}
+              getTokenForFile={getTokenForFile}
+              onSelectFile={workspaceTabs.openFile}
+              onRename={handleRename}
+              onMove={(fileId) => {
+                setMoveTargetId(fileId)
+                setMoveCorpus(project.files.find((f) => f.id === fileId)?.corpusMarker ?? "")
+              }}
+              onDelete={(fileId) => setPendingDeleteId(fileId)}
+              onApplySuggestion={handleApplyOneSuggestion}
+              onRenameCorpus={handleRenameCorpus}
+            />
+            {lens === "audio" && project && (
               <VoiceSidebar
                 cells={cells}
                 project={audioProject ?? project}
@@ -1331,33 +1409,6 @@ export function ProjectWorkspace() {
                 }}
                 cloneSeedCellId={makeCharacterSeedCellId}
               />
-            ) : (
-              <>
-                <SuggestionBanner
-                  suggestions={bannerSuggestions}
-                  onApply={handleApplySuggestions}
-                  onDismiss={handleDismissBanner}
-                />
-                <ExpandableFileList
-                  projectId={projectId!}
-                  projectName={project.name}
-                  files={project.files}
-                  activeFileId={activeFileId}
-                  fileProgress={fileProgress}
-                  suggestionFileIds={suggestionFileIds}
-                  validationCount={validationCount}
-                  getTokenForFile={getTokenForFile}
-                  onSelectFile={workspaceTabs.openFile}
-                  onRename={handleRename}
-                  onMove={(fileId) => {
-                    setMoveTargetId(fileId)
-                    setMoveCorpus(project.files.find((f) => f.id === fileId)?.corpusMarker ?? "")
-                  }}
-                  onDelete={(fileId) => setPendingDeleteId(fileId)}
-                  onApplySuggestion={handleApplyOneSuggestion}
-                  onRenameCorpus={handleRenameCorpus}
-                />
-              </>
             )}
             <SidebarProjectSection items={projectNavItems} />
           </>
@@ -1440,6 +1491,15 @@ export function ProjectWorkspace() {
                 onClick={handleJumpNextUnfinished}
                 disabled={!activeFileId || !hasUnfinished}
               />
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={openExportFlow}
+                title="Export file"
+                aria-label="Export file"
+              >
+                <Download className="h-4 w-4" />
+              </Button>
             </div>
 
             <div className="mx-1 h-5 w-px bg-border" aria-hidden="true" />
@@ -1583,7 +1643,7 @@ export function ProjectWorkspace() {
         }
         main={cellAreaState.kind === "ready" ? (
           <EditorTable
-            ref={editorRef} project={project} cells={cells}
+            ref={editorRef} project={project} cells={cellsWithBacktranslation}
             username={currentUsername}
             isCompletionConfigured={isConfigured} isCompletionAvailable={isCompletionAvailable} completing={completing}
             examples={examples} errors={errors} previews={previews}
@@ -1614,7 +1674,7 @@ export function ProjectWorkspace() {
             onJumpToCell={jumpToCellId}
             onAiSetupNeeded={() => setAiSetupOpen(true)}
             audioLens={audioLens}
-            onOpenAudioSetup={openAudioLens}
+            onOpenAudioSetup={openAudioSetup}
             onOpenRecording={(cellId) => setRecordingCellId(cellId)}
             onProjectChanged={refresh}
             onCellCommitted={handleCellCommitted}
@@ -1757,6 +1817,22 @@ export function ProjectWorkspace() {
           sourceLanguage={project.sourceLanguage} targetLanguage={project.targetLanguage}
           onImported={handleImported} />
       </Suspense>
+      <Suspense fallback={null}>
+        <ExportDialog
+          open={exportOpen}
+          onOpenChange={setExportOpen}
+          cells={cells}
+          projectId={project.id}
+          projectName={project.name ?? project.id}
+          activeFileId={activeFileId ?? null}
+          activeFileName={activeFile?.name ?? null}
+          isUsfmFile={activeFile?.type === "usfm"}
+          projectFiles={project.files.map((f) => ({ id: f.id, name: f.name, type: f.type }))}
+          sourceLanguage={project.sourceLanguage}
+          targetLanguage={project.targetLanguage}
+          getToken={getTokenForFile}
+        />
+      </Suspense>
       <ParallelPassagesPanel
         open={parallelOpen}
         onOpenChange={setParallelOpen}
@@ -1772,6 +1848,7 @@ export function ProjectWorkspace() {
         results={searchResults}
         onReady={buildIndex}
         onSearch={runSearch}
+        onSearchPassages={runSearchPassages}
         onClearResults={clearSearchResults}
         onSelect={handleSearchSelect}
         username={currentUsername}

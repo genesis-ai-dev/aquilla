@@ -5,15 +5,7 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger,
 } from "@/components/ui/dialog"
 import { suggestRulesFromPairs, type RuleSuggestion } from "@/lib/rules/rule-suggester"
-
-// Phase 2c-gamma: collectValidatedPairs read per-file Y.Doc maps to gather
-// (source, target) pairs marked human-validated. Until the cells-projection
-// equivalent lands, return an empty list — the dialog already handles the
-// "no validated pairs" branch with a useful error message.
-async function collectValidatedPairs(_fileIds: string[]): Promise<{ source: string; target: string }[]> {
-  return []
-}
-import { resolveProvider, DEFAULT_SYSTEM_PROMPT } from "@/lib/completion/completion-service"
+import { collectValidatedPairs, resolveProvider, DEFAULT_SYSTEM_PROMPT } from "@/lib/completion/completion-service"
 import { useFrontierHealth } from "@/lib/completion/frontier-health"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { addLlmCall } from "@/lib/usage/record-usage"
@@ -35,9 +27,19 @@ interface RuleSuggestDialogProps {
   completionSettings: CompletionSettings | undefined
   onAdd: (rule: Omit<TranslationRule, "id" | "createdAt">) => void | Promise<void>
   projectId?: string
+  /**
+   * Snapshot of the project's cells (from useCells). When provided, validated
+   * source→target pairs are extracted and sent to the LLM for pattern analysis.
+   *
+   * SWARM-TODO(memory-wiring): ProjectWorkspace.tsx — pass `fileCells` (or the
+   * full `cells` snapshot) as the `cells` prop to RuleSuggestDialog wherever it
+   * is rendered. Without this prop the dialog falls back to an empty list and
+   * shows "No human-validated translations found."
+   */
+  cells?: { status: string; original: string; translated: string }[]
 }
 
-export function RuleSuggestDialog({ files, completionSettings, onAdd, projectId }: RuleSuggestDialogProps) {
+export function RuleSuggestDialog({ files: _files, completionSettings, onAdd, projectId, cells }: RuleSuggestDialogProps) {
   const { session } = useFrontierSession()
   const { available: frontierAvailable } = useFrontierHealth()
   const [open, setOpen] = useState(false)
@@ -58,7 +60,7 @@ export function RuleSuggestDialog({ files, completionSettings, onAdd, projectId 
     setStage("loading")
     setError(null)
     try {
-      const pairs = await collectValidatedPairs(files.map((f) => f.id))
+      const pairs = cells ? collectValidatedPairs(cells) : []
       setPairCount(pairs.length)
 
       if (pairs.length === 0) {

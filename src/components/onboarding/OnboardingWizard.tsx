@@ -39,13 +39,21 @@ export function OnboardingWizard() {
   }, [navigate])
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-background p-4">
+    <main className="flex min-h-screen items-center justify-center bg-background p-4" aria-label="Account setup">
       <div className="w-full max-w-md">
         {/* Step indicator */}
-        <div className="mb-8 flex justify-center gap-2">
+        <div
+          className="mb-8 flex justify-center gap-2"
+          role="progressbar"
+          aria-valuenow={step}
+          aria-valuemin={1}
+          aria-valuemax={TOTAL_STEPS}
+          aria-label={`Step ${step} of ${TOTAL_STEPS}`}
+        >
           {Array.from({ length: TOTAL_STEPS }, (_, i) => (
             <div
               key={i}
+              aria-hidden="true"
               className={
                 "h-2 w-2 rounded-full transition-colors " +
                 (i + 1 <= step ? "bg-primary" : "bg-muted")
@@ -78,6 +86,6 @@ export function OnboardingWizard() {
           <ReadyStep project={createdProject} onFinish={handleFinish} />
         )}
       </div>
-    </div>
+    </main>
   )
 }

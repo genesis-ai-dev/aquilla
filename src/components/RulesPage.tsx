@@ -7,6 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { getProject } from "@/lib/store/project-index"
 import { useRules } from "@/hooks/useRules"
 import { useProjectSettings } from "@/hooks/useProjectSettings"
+import { useLivingMemory } from "@/hooks/useLivingMemory"
 import { RuleCreateDialog } from "./RuleCreateDialog"
 import { RuleSuggestDialog } from "./RuleSuggestDialog"
 import { BuiltinChecksList } from "./BuiltinChecksList"
@@ -46,6 +47,7 @@ export function RulesPage() {
 
   const { patch: patchShared } = useProjectSettings(id ?? null, project?.syncRole?.level ?? null)
   const { userRules, builtinRules, addRule, updateRule, deleteRule, setBuiltinOverride } = useRules(project, refresh, patchShared)
+  const { cells: validatedCells } = useLivingMemory({ projectId: id ?? "" })
 
   const usageSummary = useMemo(() => {
     const u = project?.usage
@@ -72,7 +74,7 @@ export function RulesPage() {
         </Button>
         <h2 className="font-semibold">Translation Rules</h2>
         <div className="flex-1" />
-        <RuleSuggestDialog files={project?.files || []} completionSettings={project?.completionSettings} onAdd={addRule} projectId={id} />
+        <RuleSuggestDialog files={project?.files || []} completionSettings={project?.completionSettings} onAdd={addRule} projectId={id} cells={validatedCells} />
         <RuleCreateDialog onAdd={addRule} />
       </header>
 

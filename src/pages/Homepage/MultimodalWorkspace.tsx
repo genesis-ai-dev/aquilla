@@ -44,9 +44,9 @@ export function MultimodalWorkspace({ theme = "dark" }: { theme?: "light" | "dar
 
   return (
     <div className="aq-window">
-      <div className="aq-window-glow" />
+      <div className="aq-window-glow" aria-hidden="true" />
       <div className="aq-window-bar">
-        <span className="aq-traffic"><i /><i /><i /></span>
+        <span className="aq-traffic" aria-hidden="true"><i /><i /><i /></span>
         <span className="aq-window-title">
           <IconAquila />
           <span className="aq-mono">{VERSE.ref}</span>
@@ -60,6 +60,8 @@ export function MultimodalWorkspace({ theme = "dark" }: { theme?: "light" | "dar
             key={m.id}
             role="tab"
             aria-selected={mode === m.id}
+            aria-controls={`aq-ws-panel-${m.id}`}
+            id={`aq-ws-tab-${m.id}`}
             data-active={mode === m.id}
             className="aq-mode"
             onClick={() => setMode(m.id)}
@@ -70,7 +72,12 @@ export function MultimodalWorkspace({ theme = "dark" }: { theme?: "light" | "dar
         ))}
       </div>
 
-      <div className="aq-ws-body">
+      <div
+        className="aq-ws-body"
+        role="tabpanel"
+        id={`aq-ws-panel-${mode}`}
+        aria-labelledby={`aq-ws-tab-${mode}`}
+      >
         {mode === "text" && <TextPanel theme={theme} />}
         {mode === "audio" && <AudioPanel theme={theme} />}
         {mode === "video" && <VideoPanel />}
@@ -177,7 +184,7 @@ function AudioPanel({ theme }: { theme: "light" | "dark" }) {
             <span className="aq-mono aq-dur">{r.dur}</span>
           )}
           {r.rec ? (
-            <span className="aq-eq-dot" style={{ width: 10, height: 10, borderRadius: 999, background: "#ef4444", boxShadow: "0 0 10px #ef4444" }} />
+            <span aria-hidden="true" className="aq-eq-dot" style={{ width: 10, height: 10, borderRadius: 999, background: "#ef4444", boxShadow: "0 0 10px #ef4444" }} />
           ) : (
             <HealthRing health={r.health} size={18} strokeWidth={2.5}>
               {r.health >= 67 ? <IconCheckTiny /> : null}
@@ -229,6 +236,7 @@ function VideoPanel() {
         </div>
         <div className="aq-video-bar"><i style={{ width: `${prog * 100}%` }} /></div>
       </div>
+      {/* SWARM-TODO(homepage-copy): "JESUS Film" brand name — confirm capitalization/trademark usage is correct */}
       <p style={{ marginTop: 16, fontSize: 13.5, color: "var(--aq-faint)", lineHeight: 1.5 }}>
         Sermons, the <span style={{ color: "var(--aq-dim)" }}>JESUS Film</span>, scripted lessons — caption and dub them against the same source text and the same project memory, with timings that stay in sync.
       </p>
@@ -425,7 +433,7 @@ function Waveform({
   })
 
   return (
-    <div className="aq-wave" style={{ height }}>
+    <div className="aq-wave" style={{ height }} aria-hidden="true">
       <canvas ref={ref} />
     </div>
   )
@@ -515,15 +523,15 @@ function StoryTile({ children }: { children: React.ReactNode }) {
 }
 
 /* ── Icons ──────────────────────────────────────────────────────────────── */
-function IconText() { return <svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M3 4h10M3 8h10M3 12h6" strokeLinecap="round" /></svg> }
-function IconAudio() { return <svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M2 8v0M5 5v6M8 3v10M11 5.5v5M14 8v0" strokeLinecap="round" /></svg> }
-function IconVideo() { return <svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.5"><rect x="2" y="4" width="12" height="8" rx="1.5" /><path d="M7 6.5l3 1.5-3 1.5z" fill="currentColor" stroke="none" /></svg> }
-function IconImage() { return <svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.5"><rect x="2.5" y="3" width="11" height="10" rx="1.5" /><circle cx="6" cy="6.5" r="1.2" /><path d="M3.5 11l3-3 2.5 2 2-2 1.5 1.5" /></svg> }
-function IconStory() { return <svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M8 3.5C6.5 2.5 4 2.5 2.5 3.2v9c1.5-.7 4-.7 5.5.3M8 3.5c1.5-1 4-1 5.5-.3v9c-1.5-.7-4-.7-5.5.3z" /></svg> }
-function IconPlay() { return <svg viewBox="0 0 16 16" width="13" height="13" fill="currentColor"><path d="M5 3.5v9l7-4.5z" /></svg> }
-function IconPause() { return <svg viewBox="0 0 16 16" width="13" height="13" fill="currentColor"><rect x="4" y="3.5" width="3" height="9" rx="1" /><rect x="9" y="3.5" width="3" height="9" rx="1" /></svg> }
-function IconMic() { return <svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="1.5"><rect x="6" y="2" width="4" height="8" rx="2" /><path d="M4 8a4 4 0 0 0 8 0M8 12v2" strokeLinecap="round" /></svg> }
-function IconSpark() { return <svg viewBox="0 0 16 16" width="15" height="15" fill="currentColor" style={{ color: "var(--aq-gold)" }}><path d="M8 1l1.4 4.2L13.5 6 9.4 7.8 8 12l-1.4-4.2L2.5 6l4.1-.8z" /></svg> }
-function IconLock() { return <svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="1.4"><rect x="3.5" y="7" width="9" height="6" rx="1.5" /><path d="M5.5 7V5a2.5 2.5 0 0 1 5 0v2" /></svg> }
-function IconCheckTiny() { return <svg viewBox="0 0 16 16" width="10" height="10" fill="none" stroke="#22c55e" strokeWidth="2.4"><path d="M3.5 8.5l2.5 2.5 6-6.5" strokeLinecap="round" strokeLinejoin="round" /></svg> }
-function IconAquila() { return <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="var(--aq-gold)" strokeWidth="1.4"><path d="M2 9c2.5-3 5-3 6-1 1-2 3.5-2 6 1-2.5-1-4 0-6 2-2-2-3.5-3-6-2z" strokeLinejoin="round" /></svg> }
+function IconText() { return <svg aria-hidden="true" viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M3 4h10M3 8h10M3 12h6" strokeLinecap="round" /></svg> }
+function IconAudio() { return <svg aria-hidden="true" viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M2 8v0M5 5v6M8 3v10M11 5.5v5M14 8v0" strokeLinecap="round" /></svg> }
+function IconVideo() { return <svg aria-hidden="true" viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.5"><rect x="2" y="4" width="12" height="8" rx="1.5" /><path d="M7 6.5l3 1.5-3 1.5z" fill="currentColor" stroke="none" /></svg> }
+function IconImage() { return <svg aria-hidden="true" viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.5"><rect x="2.5" y="3" width="11" height="10" rx="1.5" /><circle cx="6" cy="6.5" r="1.2" /><path d="M3.5 11l3-3 2.5 2 2-2 1.5 1.5" /></svg> }
+function IconStory() { return <svg aria-hidden="true" viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M8 3.5C6.5 2.5 4 2.5 2.5 3.2v9c1.5-.7 4-.7 5.5.3M8 3.5c1.5-1 4-1 5.5-.3v9c-1.5-.7-4-.7-5.5.3z" /></svg> }
+function IconPlay() { return <svg aria-hidden="true" viewBox="0 0 16 16" width="13" height="13" fill="currentColor"><path d="M5 3.5v9l7-4.5z" /></svg> }
+function IconPause() { return <svg aria-hidden="true" viewBox="0 0 16 16" width="13" height="13" fill="currentColor"><rect x="4" y="3.5" width="3" height="9" rx="1" /><rect x="9" y="3.5" width="3" height="9" rx="1" /></svg> }
+function IconMic() { return <svg aria-hidden="true" viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="1.5"><rect x="6" y="2" width="4" height="8" rx="2" /><path d="M4 8a4 4 0 0 0 8 0M8 12v2" strokeLinecap="round" /></svg> }
+function IconSpark() { return <svg aria-hidden="true" viewBox="0 0 16 16" width="15" height="15" fill="currentColor" style={{ color: "var(--aq-gold)" }}><path d="M8 1l1.4 4.2L13.5 6 9.4 7.8 8 12l-1.4-4.2L2.5 6l4.1-.8z" /></svg> }
+function IconLock() { return <svg aria-hidden="true" viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="1.4"><rect x="3.5" y="7" width="9" height="6" rx="1.5" /><path d="M5.5 7V5a2.5 2.5 0 0 1 5 0v2" /></svg> }
+function IconCheckTiny() { return <svg aria-hidden="true" viewBox="0 0 16 16" width="10" height="10" fill="none" stroke="#22c55e" strokeWidth="2.4"><path d="M3.5 8.5l2.5 2.5 6-6.5" strokeLinecap="round" strokeLinejoin="round" /></svg> }
+function IconAquila() { return <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="var(--aq-gold)" strokeWidth="1.4"><path d="M2 9c2.5-3 5-3 6-1 1-2 3.5-2 6 1-2.5-1-4 0-6 2-2-2-3.5-3-6-2z" strokeLinejoin="round" /></svg> }

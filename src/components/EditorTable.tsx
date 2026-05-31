@@ -40,7 +40,7 @@ import {
   toggleSelected,
   useIsSelected,
 } from "@/lib/audio/selection"
-import { setTtsStatus, ttsStatusKey, useTtsStatus } from "@/lib/audio/tts"
+import { ttsStatusKey, useTtsStatus } from "@/lib/audio/tts"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { categorizeAiError } from "@/lib/audio/ai-error"
 import { CellAiStatusPopover } from "./CellAiStatusPopover"
@@ -79,19 +79,40 @@ if (typeof window !== "undefined") {
 /** Tiny gutter badge that surfaces synth lifecycle: translating, generating,
  *  or failed. Lives in the left gutter so the loading state is anchored next
  *  to the cell that's actually working, even if the row scrolls. Errors are
- *  click-to-expand: full message + actions (set Gemini key, dismiss). */
+ *  click-to-expand: full message + actions (set Gemini key, dismiss).
+ *
+ * A1: error popover body is surfaced from the first click on the badge (not
+ *     just via a tooltip) and includes a plain-English recovery hint.
+ * A4: dismissing the popover keeps a muted "Not voiced" badge rather than
+ *     clearing the failed state entirely — cell still looks unvoiced.
+ */
 function SynthStatusBadge({
-  status, cellId, projectId, onOpenAudioSetup,
+  status, cellId: _cellId, projectId, onOpenAudioSetup,
 }: {
   status: ReturnType<typeof useTtsStatus>
+  /** Retained for the call-site; no longer used inside the badge (dismiss
+   *  no longer resets status via setTtsStatus — see A4). */
   cellId: string
   projectId: string
-  /** Switch to the Audio lens + open the cast/voice library to fix setup. */
+  /** Navigate to audio/voice settings so the user can fix the setup. */
   onOpenAudioSetup?: () => void
 }) {
   const navigate = useNavigate()
+  // A2: "Open audio setup" must DO something. When the callback is provided we
+  // call it (host may already be in audio mode); otherwise we navigate directly
+  // to the project settings page which contains the Gemini API key section.
   const openVoiceSetup = () =>
-    onOpenAudioSetup ? onOpenAudioSetup() : navigate(`/project/${projectId}/voice`)
+    onOpenAudioSetup ? onOpenAudioSetup() : navigate(`/project/${projectId}/settings`)
+  // A4: track whether the user dismissed the popover without fixing the error.
+  // Dismissed = popover hidden but cell is still unvoiced — show a muted badge
+  // so the row doesn't look falsely clean.
+  const [dismissed, setDismissed] = useState(false)
+  // When a NEW error arrives (retry), reset dismissed so the popover re-opens.
+  const prevMessageRef = useRef<string | null>(null)
+  if (status.kind === "error" && status.message !== prevMessageRef.current) {
+    prevMessageRef.current = status.message
+    if (dismissed) setDismissed(false)
+  }
   if (status.kind === "loading") {
     const isTranslating = status.file === "Translating…"
     const pct = !isTranslating && status.total > 0
@@ -124,10 +145,12 @@ function SynthStatusBadge({
   }
   if (status.kind === "error") {
     const error = categorizeAiError(status.message)
-    const dismiss = () => setTtsStatus(ttsStatusKey(cellId), { kind: "idle" })
+    // A4: dismiss closes the popover but keeps a muted "Not voiced" badge;
+    // it does NOT reset to idle so the row still looks unvoiced.
+    const handleDismiss = () => setDismissed(true)
     // Voice setup (engine, Gemini key, library) now lives in the Voice Studio,
     // so recovery actions route there rather than opening an inline modal.
-    const actions = []
+    const actions: Array<{ label: string; primary?: boolean; onClick: () => void }> = []
     if (error.category === "missing-gemini-key") {
       actions.push({
         label: "Open audio setup",
@@ -147,17 +170,35 @@ function SynthStatusBadge({
         onClick: openVoiceSetup,
       })
     }
+
+    // A4: dismissed — muted badge, no popover. Still communicates "not voiced".
+    if (dismissed) {
+      return (
+        <span
+          title="Audio generation failed — click Generate to retry"
+          className="inline-flex max-w-[80px] cursor-default items-center gap-1 truncate rounded-full bg-muted/60 px-1.5 py-0.5 text-[9px] font-medium text-muted-foreground"
+        >
+          Not voiced
+        </span>
+      )
+    }
+
+    // A1: full error badge + popover. The trigger label "Audio failed" is more
+    // scannable than just "Failed" and the popover body is shown on first click.
     return (
       <CellAiStatusPopover
         error={error}
         actions={actions}
-        onDismiss={dismiss}
+        onDismiss={handleDismiss}
         trigger={
           <button
             type="button"
             className="inline-flex max-w-[80px] cursor-pointer items-center gap-1 truncate rounded-full bg-destructive/15 px-1.5 py-0.5 text-[9px] font-medium text-destructive hover:bg-destructive/25"
+            title={error.category === "missing-gemini-key"
+              ? "Audio needs an API key — click to open audio settings"
+              : `Audio failed: ${error.title}`}
           >
-            Failed
+            Audio failed
           </button>
         }
       />
@@ -1860,6 +1901,20 @@ function EditorRow({
           )}
           dir={targetTextDirection}
         >
+          {/* SWARM-TODO(voice-a5): "Voice together" multi-cell selection gives
+              no visual feedback and the action bar never appears. Root cause:
+              the drag-selection affordance (onPointerDown) uses setSelection()
+              via handleSelectionPointerDown in ProjectWorkspace but the
+              SelectionBar's useSelectedIds() doesn't react — likely because
+              the pointerdown handler only fires on drag (not click) and a
+              single tap does not call toggleSelected. Investigate:
+                1. Does a pointer-drag across two cells actually call setSelection?
+                2. Does SelectionBar mount when activeFileId is set but the bar
+                   doesn't appear because selected.size stays 0?
+                3. Consider adding a click handler that calls toggleSelected so
+                   single-cell selection gives immediate visual feedback, then
+                   the SelectionBar ("X selected" pill) appears for discoverability.
+              See: src/components/SelectionBar.tsx, src/lib/audio/selection.ts */}
           <button
             type="button"
             role="checkbox"
@@ -2193,9 +2248,11 @@ function EditorRow({
                     </div>
                   ) : (
                     <p className="neu-inset rounded-xl px-3 py-3 text-center text-xs text-muted-foreground">
-                      {cell.translated.trim().length === 0
-                        ? "Add a translation first, then generate a backtranslation."
-                        : "No backtranslation yet. Click Generate to create one."}
+                      {!isBacktranslationConfigured
+                        ? "Configure completion settings to enable back-translation."
+                        : cell.translated.trim().length === 0
+                          ? "Add a translation first, then generate a backtranslation."
+                          : "No backtranslation yet. Click Generate to create one."}
                     </p>
                   )}
                   {backtranslationError && (

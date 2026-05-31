@@ -258,7 +258,7 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, getT
                 type="file"
                 multiple
                 className="hidden"
-                accept=".md,.markdown,.docx,.pptx,.txt,.vtt,.srt,.usfm,.sfm,.usx,.zip"
+                accept=".md,.markdown,.docx,.pptx,.txt,.vtt,.srt,.usfm,.sfm,.usx,.zip,.xlf,.xliff,.tmx,.csv,.tsv"
                 onChange={handleFileInput}
               />
             </Button>
@@ -276,7 +276,7 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, getT
             </Button>
           </div>
           <p className="mt-2 text-xs text-muted-foreground">
-            Files: MD, DOCX, PPTX, TXT, VTT, SRT, USFM · or a Paratext project (.zip or folder)
+            Files: MD, DOCX, PPTX, TXT, VTT, SRT, USFM, XLIFF / XLF, TMX, CSV, TSV · or a Paratext project (.zip or folder)
           </p>
         </>
       )}

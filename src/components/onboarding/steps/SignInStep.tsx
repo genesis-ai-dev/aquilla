@@ -78,6 +78,7 @@ export function SignInStep({ onNext, onBack }: { onNext: () => void; onBack: () 
 
       <div className="text-center">
         <button
+          type="button"
           onClick={onNext}
           className="text-sm text-muted-foreground underline-offset-4 hover:underline"
         >

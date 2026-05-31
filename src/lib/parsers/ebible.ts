@@ -12,6 +12,7 @@ export interface EBibleTranslation {
   description: string
   copyright: string
   redistributable: boolean
+  downloadable: boolean
   homeDomain: string
   otBooks: number
   ntBooks: number
@@ -123,6 +124,7 @@ export async function fetchTranslationsList(): Promise<EBibleTranslation[]> {
     description: col("description"),
     copyright: col("Copyright"),
     redistributable: col("Redistributable"),
+    downloadable: col("downloadable"),
     homeDomain: col("homeDomain"),
     otBooks: col("OTbooks"),
     ntBooks: col("NTbooks"),
@@ -146,6 +148,7 @@ export async function fetchTranslationsList(): Promise<EBibleTranslation[]> {
       description: row[idx.description] ?? "",
       copyright: row[idx.copyright] ?? "",
       redistributable: (row[idx.redistributable] ?? "").toLowerCase() === "true",
+      downloadable: (row[idx.downloadable] ?? "").toLowerCase() === "true",
       homeDomain: row[idx.homeDomain] ?? "",
       otBooks: Number(row[idx.otBooks] ?? 0),
       ntBooks: Number(row[idx.ntBooks] ?? 0),
@@ -154,12 +157,27 @@ export async function fetchTranslationsList(): Promise<EBibleTranslation[]> {
     })
   }
 
-  translationsCache = out
-  return out
+  // Filter to only translations whose corpus .txt file exists in the upstream repo.
+  // The `downloadable` column in translations.csv is "True" for all 1349 translations
+  // that have a corpus file; the 13 "False" entries 404 when fetched.
+  translationsCache = out.filter((t) => t.downloadable)
+  return translationsCache
+}
+
+// For tests that want to stub out the translations cache.
+export function __setTranslationsCacheForTest(
+  cache: EBibleTranslation[] | null
+): void {
+  translationsCache = cache
 }
 
 // Streams a corpus text file, calling onProgress with (bytesReceived, totalBytes)
 // where totalBytes is 0 if the server didn't send a Content-Length.
+//
+// Note: fetchTranslationsList() filters to downloadable=True entries only (see below).
+// The 13 non-downloadable entries in translations.csv correspond to translations whose
+// corpus .txt files are absent from the BibleNLP/ebible GitHub repo — fetching them
+// returns a 404. Filtering on the `downloadable` column eliminates all known 404 cases.
 export async function fetchTranslationText(
   id: string,
   onProgress?: (received: number, total: number) => void,

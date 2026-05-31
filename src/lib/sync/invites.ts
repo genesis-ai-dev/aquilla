@@ -153,3 +153,64 @@ export async function acceptServerInvite(
     return null
   }
 }
+
+// ── Multi-project invite (one token spanning N projects) ───────────────────
+// The org-admin MultiProjectInviteDialog mints these; the endpoints live in
+// auth-worker/routes/invites.ts. The preview/accept query project_invites by
+// token, so they return 1 row for a single-project token too — JoinPage tries
+// the multi endpoint first and falls back to the single-project flow.
+
+export interface MultiInvitePreview {
+  token: string
+  role: { level: number; name: string }
+  expiresAt: string | null
+  projects: { projectId: string; projectName: string; archived: boolean }[]
+}
+
+export interface MultiInviteAccepted {
+  token: string
+  accepted: { projectId: string; role: number }[]
+}
+
+/** GET /api/v2/invites/:token/preview — public; lists every project the token grants. */
+export async function previewMultiInvite(
+  token: string,
+  apiUrl: string = AUTH_API_URL
+): Promise<MultiInvitePreview | null> {
+  try {
+    const res = await fetch(`${apiUrl}/api/v2/invites/${encodeURIComponent(token)}/preview`)
+    if (!res.ok) {
+      console.warn(`[invites] previewMultiInvite → HTTP ${res.status}`)
+      return null
+    }
+    return (await res.json()) as MultiInvitePreview
+  } catch (err) {
+    console.warn("[invites] previewMultiInvite failed:", err)
+    return null
+  }
+}
+
+/** POST /api/v2/invites/:token/accept — joiner side; materializes membership in every project. */
+export async function acceptMultiInvite(
+  jwt: string,
+  token: string,
+  apiUrl: string = AUTH_API_URL
+): Promise<MultiInviteAccepted | null> {
+  try {
+    const res = await fetch(`${apiUrl}/api/v2/invites/${encodeURIComponent(token)}/accept`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${jwt}`,
+      },
+    })
+    if (!res.ok) {
+      console.warn(`[invites] acceptMultiInvite → HTTP ${res.status}`)
+      return null
+    }
+    return (await res.json()) as MultiInviteAccepted
+  } catch (err) {
+    console.warn("[invites] acceptMultiInvite failed:", err)
+    return null
+  }
+}

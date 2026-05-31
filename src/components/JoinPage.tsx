@@ -6,7 +6,10 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import {
   acceptServerInvite,
   previewServerInvite,
+  previewMultiInvite,
+  acceptMultiInvite,
   type ServerInvitePreview,
+  type MultiInvitePreview,
 } from "@/lib/sync/invites"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { FrontierLoginForm } from "@/components/git-import/FrontierLoginForm"
@@ -15,6 +18,10 @@ import { FrontierForgotPasswordForm } from "@/components/git-import/FrontierForg
 
 type Phase = "initial" | "redeeming" | "error"
 type AuthMode = "login" | "signup" | "forgot"
+/** A token may be a single-project invite or a multi-project one (N projects). */
+type InvitePreview =
+  | { kind: "single"; data: ServerInvitePreview }
+  | { kind: "multi"; data: MultiInvitePreview }
 
 /**
  * Share-link landing page. The token in the URL identifies a server-side
@@ -32,17 +39,25 @@ export function JoinPage() {
   const { session, loading: sessionLoading } = useFrontierSession()
   const [phase, setPhase] = useState<Phase>("initial")
   const [error, setError] = useState<string | null>(null)
-  const [preview, setPreview] = useState<ServerInvitePreview | null>(null)
+  const [preview, setPreview] = useState<InvitePreview | null>(null)
   const [authMode, setAuthMode] = useState<AuthMode>("login")
 
-  // Fetch invite preview (public endpoint) so we can show project + role
-  // context before the recipient authenticates.
+  // Fetch invite preview (public). Try the multi-project endpoint first — it
+  // returns 1 project for a single-project token too — and fall back to the
+  // single-project preview if the multi endpoint has nothing.
   useEffect(() => {
     if (!token) return
     let cancelled = false
-    void previewServerInvite(token).then((p) => {
-      if (!cancelled) setPreview(p)
-    })
+    void (async () => {
+      const multi = await previewMultiInvite(token)
+      if (cancelled) return
+      if (multi && multi.projects.length > 0) {
+        setPreview({ kind: "multi", data: multi })
+        return
+      }
+      const single = await previewServerInvite(token)
+      if (!cancelled && single) setPreview({ kind: "single", data: single })
+    })()
     return () => { cancelled = true }
   }, [token])
 
@@ -67,15 +82,22 @@ export function JoinPage() {
     if (!token) return
     setPhase("redeeming")
     setError(null)
-    const result = await acceptServerInvite(jwt, token)
-    if (!result) {
-      setPhase("error")
-      setError(
-        "This invite link is no longer valid. Ask the project owner for a fresh link."
-      )
+    // Prefer the multi-project accept — it also redeems a single-project token
+    // (one row) — then fall back to the legacy single-project accept.
+    const multi = await acceptMultiInvite(jwt, token)
+    if (multi && multi.accepted.length > 0) {
+      navigate(`/project/${multi.accepted[0].projectId}`)
       return
     }
-    navigate(`/project/${result.projectId}`)
+    const single = await acceptServerInvite(jwt, token)
+    if (single) {
+      navigate(`/project/${single.projectId}`)
+      return
+    }
+    setPhase("error")
+    setError(
+      "This invite link is no longer valid. Ask the project owner for a fresh link."
+    )
   }
 
   const isSignedOut = !sessionLoading && !session?.jwt
@@ -93,23 +115,49 @@ export function JoinPage() {
         <CardContent className="space-y-3">
           {showPreviewCard ? (
             <div className="space-y-3">
-              {preview ? (
+              {preview?.kind === "single" ? (
                 <div className="rounded-md border bg-muted/30 p-3 space-y-1.5">
                   <p className="text-sm">
                     Project:{" "}
-                    <strong className="font-medium">{preview.projectName}</strong>
+                    <strong className="font-medium">{preview.data.projectName}</strong>
                   </p>
                   <p className="text-xs text-muted-foreground">
                     You'll join as{" "}
                     <span className="capitalize">
-                      {preview.role.name.replace(/_/g, " ")}
+                      {preview.data.role.name.replace(/_/g, " ")}
                     </span>
-                    {preview.email && (
+                    {preview.data.email && (
                       <>
                         {" "}— invitation sent to{" "}
-                        <span className="font-mono">{preview.email}</span>
+                        <span className="font-mono">{preview.data.email}</span>
                       </>
                     )}
+                    .
+                  </p>
+                </div>
+              ) : preview?.kind === "multi" ? (
+                <div className="rounded-md border bg-muted/30 p-3 space-y-1.5">
+                  <p className="text-sm">
+                    You're invited to{" "}
+                    <strong className="font-medium">
+                      {preview.data.projects.length} project
+                      {preview.data.projects.length === 1 ? "" : "s"}
+                    </strong>
+                    :
+                  </p>
+                  <ul className="list-disc space-y-0.5 pl-4 text-xs text-muted-foreground">
+                    {preview.data.projects.map((p) => (
+                      <li key={p.projectId}>
+                        {p.projectName}
+                        {p.archived ? " (archived)" : ""}
+                      </li>
+                    ))}
+                  </ul>
+                  <p className="text-xs text-muted-foreground">
+                    You'll join each as{" "}
+                    <span className="capitalize">
+                      {preview.data.role.name.replace(/_/g, " ")}
+                    </span>
                     .
                   </p>
                 </div>

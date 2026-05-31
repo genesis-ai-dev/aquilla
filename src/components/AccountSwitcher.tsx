@@ -149,8 +149,8 @@ export function AccountSwitcher({ variant = "sidebar" }: { variant?: "sidebar" |
       {open && (
         <div
           className={cn(
-            "neu-raised absolute top-full mt-2 z-40 w-60 rounded-2xl p-1.5",
-            isHeader ? "right-0" : "left-0",
+            "neu-raised absolute z-40 w-60 rounded-2xl p-1.5",
+            isHeader ? "top-full mt-2 right-0" : "bottom-full mb-2 left-0",
           )}
         >
           <div className="px-2 py-1.5 text-[10px] uppercase tracking-wide text-muted-foreground">

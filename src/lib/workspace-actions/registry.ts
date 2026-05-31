@@ -3,10 +3,12 @@ import type {
   WorkspaceAction, WorkspaceActionContext,
 } from "./types"
 
-// Hard cap on cells generated per "Run completions" click. Bump (or remove,
-// once we have spend controls) when we're confident a stray click can't burn
-// through the LLM budget for a 100k-row file.
-export const MAX_BATCH_COMPLETIONS = 10
+// Cap on cells generated per "Run AI completions" click. Set to 50 so a
+// single scripture chapter (typically 25-50 verses) completes in one pass —
+// consultants re-run for the next chapter. Large enough to be useful for
+// Matthew; small enough that a misclick on a 1000-verse Psalms isn't
+// catastrophic. Revisit when spend controls are in place.
+export const MAX_BATCH_COMPLETIONS = 50
 
 export function getVisibleActions(
   actions: WorkspaceAction[], ctx: WorkspaceActionContext,
@@ -31,7 +33,7 @@ export const workspaceActions: WorkspaceAction[] = [
     run: (_c, args) => args.openImport(),
   },
   {
-    id: "run-completions", label: "Run completions", icon: Sparkles, group: "primary",
+    id: "run-completions", label: "Run AI completions", icon: Sparkles, group: "primary",
     isAvailable: (c) => c.activeFileId != null,
     isDefault: (c) => {
       if (!c.activeFileId) return false
@@ -45,17 +47,11 @@ export const workspaceActions: WorkspaceAction[] = [
         const p = c.fileProgress.get(c.activeFileId)
         const untranslated = p ? p.total - p.translated : 0
         const next = Math.min(MAX_BATCH_COMPLETIONS, untranslated)
-        return `Generate translations for the next ${next} of ${untranslated} untranslated cell${untranslated === 1 ? "" : "s"}. Capped at ${MAX_BATCH_COMPLETIONS} per click while we work on spend controls — re-run to continue.`
+        return `Generate translations for the next ${next} untranslated cell${next === 1 ? "" : "s"}${untranslated > next ? ` (${untranslated - next} more after this)` : ""}. Uses few-shot examples from validated cells — re-run to continue through the file.`
       },
-      confirmLabel: "Run completions",
+      confirmLabel: "Run AI completions",
     },
     run: (_c, args) => args.runCompletions(),
-  },
-  {
-    id: "complete-all", label: "Complete all (coming soon)", icon: Sparkles, group: "primary",
-    isAvailable: (c) => c.activeFileId != null,
-    comingSoon: true,
-    run: () => {},
   },
   {
     id: "batch-validate", label: "Batch validate…", icon: CheckSquare, group: "primary",

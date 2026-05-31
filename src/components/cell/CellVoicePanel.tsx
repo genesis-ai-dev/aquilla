@@ -262,9 +262,38 @@ export function CellVoicePanel({
   const changeVolume = useCallback((v: number) => {
     setCellPref(projectId, cell.id, { volume: clamp01(v) })
   }, [projectId, cell.id])
+  // Persist a manual crop server-side by re-attaching the selected clip with
+  // the new trim (ms). Debounced so dragging the handles doesn't spam events;
+  // localStorage (above) updates live for instant feedback.
+  const trimEmitTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const persistTrimToServer = useCallback((start: number | null, end: number | null) => {
+    if (!playableId) return
+    const att = cell.attachments?.[playableId]
+    if (!att) return
+    const slot = playableId === cell.selectedAudioId ? "recording" : "generatedVoice"
+    void emitCellAudioAttach({
+      projectId,
+      fileId: cell.fileId,
+      cellId: cell.id,
+      audioId: playableId,
+      url: att.url,
+      slot,
+      ...(att.type ? { mimeType: att.type } : {}),
+      ...(att.voiceId ? { voiceId: att.voiceId } : {}),
+      ...(att.referenceAudioId ? { referenceAudioId: att.referenceAudioId } : {}),
+      ...(att.durationMs != null ? { durationMs: att.durationMs } : {}),
+      trimStartMs: start != null ? Math.round(start * 1000) : undefined,
+      trimEndMs: end != null ? Math.round(end * 1000) : undefined,
+      author: username,
+    })
+    notifyAudioAttachmentsChanged(cell.fileId)
+  }, [playableId, cell.attachments, cell.selectedAudioId, cell.id, cell.fileId, projectId, username])
+
   const changeTrim = useCallback((start: number | null, end: number | null) => {
     setCellPref(projectId, cell.id, { trimStart: start ?? undefined, trimEnd: end ?? undefined })
-  }, [projectId, cell.id])
+    if (trimEmitTimer.current) clearTimeout(trimEmitTimer.current)
+    trimEmitTimer.current = setTimeout(() => persistTrimToServer(start, end), 500)
+  }, [projectId, cell.id, persistTrimToServer])
 
   // Generate → autoplay: when the magic button generates a fresh take, start
   // playback as soon as the attachment lands (a re-render flips `hasTake`).

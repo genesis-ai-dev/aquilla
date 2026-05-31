@@ -285,6 +285,7 @@ export async function generateCombinedVoice(args: CombinedVoiceArgs): Promise<Co
         mimeType: "audio/wav",
         voiceId: voice.id,
         ...(voice.referenceAudioId ? { referenceAudioId: voice.referenceAudioId } : {}),
+        ...(windows[i] ? { trimStartMs: Math.round(windows[i]!.start * 1000), trimEndMs: Math.round(windows[i]!.end * 1000) } : {}),
         author: username,
       })
       const w = windows[i]

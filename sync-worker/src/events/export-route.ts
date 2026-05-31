@@ -9,13 +9,14 @@
 // file name. The translator's in-progress state is what gets exported —
 // empty cells fall back to the source verse so the file stays valid USFM.
 //
-// Auth: sync-token JWT scoped to projectId; viewer (100) is enough — anyone
-// who can read the project can download an export of it.
+// Auth: sync-token JWT scoped to projectId; maintainer (600) required per spec
+// Q32 — exporting the deliverable is a privileged action, not a read.
 //
 // Returns null if the URL doesn't match (chainable in the fetch dispatcher).
 
 import { verifyTokenForProject } from "../auth"
 import { withCors } from "../cors"
+import { ROLE } from "./role-policy"
 import {
   parseUsfmLossless,
   serializeUsfmLossless,
@@ -53,6 +54,14 @@ export async function handleExportSourceRequest(
   const auth = await verifyTokenForProject(token, projectId, env.SYNC_SECRET_KEY)
   if (!auth.ok) {
     return withCors(new Response(auth.reason, { status: auth.status }), request)
+  }
+  // Q32: a deliverable export is gated at maintainer (600) — a viewer who can
+  // read the project should not be able to pull a full export of it.
+  if (auth.claims.role < ROLE.MAINTAINER) {
+    return withCors(
+      new Response("maintainer role required to export", { status: 403 }),
+      request,
+    )
   }
 
   const blob = await db

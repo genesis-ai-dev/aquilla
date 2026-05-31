@@ -210,6 +210,43 @@ describe('POST /events — server_seq', () => {
     const seqs = tables.events.map((e: any) => e.server_seq).sort((a: number, b: number) => a - b)
     expect(seqs).toEqual([1, 2, 3])
   })
+
+  it('two concurrent /events requests for the same project produce strictly distinct seqs', async () => {
+    // server_seq is now derived inside each events INSERT via a correlated
+    // subquery, so within a single batch each statement picks the next seq
+    // from the just-inserted prior row, and concurrent batches serialise at
+    // the D1 primary. The pre-fix code read MAX once per request in JS and
+    // pre-computed seqs, which collided on the UNIQUE INDEX
+    // idx_events_project_seq under concurrency.
+    //
+    // The in-memory fake cannot deterministically interleave two route
+    // handlers across microtasks the way real D1 interleaves HTTP requests,
+    // so this test mostly documents the contract; the fake additionally
+    // enforces the UNIQUE constraint, so any code path that produces a
+    // duplicate (project_id, server_seq) trips loudly.
+    const token = await makeToken()
+    const db = makeInMemoryD1()
+
+    const batchA = [
+      targetCreate({ id: 'a1', cellId: 'cell-a1', payload: { cellId: 'cell-a1', value: 'a1' } }),
+      targetCreate({ id: 'a2', cellId: 'cell-a2', payload: { cellId: 'cell-a2', value: 'a2' } }),
+    ]
+    const batchB = [
+      targetCreate({ id: 'b1', cellId: 'cell-b1', payload: { cellId: 'cell-b1', value: 'b1' } }),
+      targetCreate({ id: 'b2', cellId: 'cell-b2', payload: { cellId: 'cell-b2', value: 'b2' } }),
+    ]
+
+    await Promise.all([
+      handleEventsWriteRequest(await makeRequest(batchA, token), makeEnv(db)),
+      handleEventsWriteRequest(await makeRequest(batchB, token), makeEnv(db)),
+    ])
+
+    const tables = (db as any)._tables()
+    expect(tables.events).toHaveLength(4)
+    const seqs = tables.events.map((e: any) => e.server_seq).sort((a: number, b: number) => a - b)
+    expect(new Set(seqs).size).toBe(4)
+    expect(seqs).toEqual([1, 2, 3, 4])
+  })
 })
 
 // ── AD-2 parent-chain rule ─────────────────────────────────────────────

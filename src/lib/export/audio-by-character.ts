@@ -3,9 +3,13 @@
 // The orchestrator (exportAudioByCharacter) takes an injected decode/fetch so
 // tests can supply fakes; production wires real Web Audio + sync-worker fetch.
 
+import JSZip from "jszip"
 import type { CellData } from "@/hooks/useCells"
 import type { ProjectTtsSettings, Voice } from "@/lib/parsers/types"
 import { resolveCastVoice } from "@/lib/audio/voices"
+import { encodeWavPcm16 } from "@/lib/audio/wav-encode"
+import { parseFrontierAudioUrl } from "@/lib/audio/upload"
+import { TARGET_RATE } from "@/lib/audio/decode-mono"
 
 export interface CharacterClip {
   cellId: string
@@ -95,4 +99,59 @@ export function concatPcm(clips: Float32Array[]): Float32Array {
     offset += c.length
   }
   return out
+}
+
+// ─── Orchestrator ────────────────────────────────────────────────────────────
+
+/** Filesystem-safe character key (mirrors codex-editor's sanitization). */
+export function characterKey(name: string): string {
+  return name.replace(/[^\w.-]+/g, "_").replace(/^_+|_+$/g, "") || "unnamed"
+}
+
+export interface ExportAudioArgs {
+  cells: CellData[]
+  settings: ProjectTtsSettings | undefined
+  projectId: string
+  langCode: string
+  /** Fetch raw bytes for one clip. Production passes a closure over
+   *  fetchCellAudio + the file's sync token. */
+  fetchBytes: (args: { projectId: string; fileId: string; audioId: string; ext: string }) => Promise<Uint8Array>
+  /** Decode bytes → mono PCM at TARGET_RATE. Production passes decodeToMono48k;
+   *  tests pass a fake. */
+  decode: (bytes: Uint8Array) => Promise<Float32Array>
+  onProgress?: (done: number, total: number) => void
+}
+
+export async function exportAudioByCharacter(args: ExportAudioArgs): Promise<Blob> {
+  const groups = groupAudioByCharacter(args.cells, args.settings)
+  const zip = new JSZip()
+  const usedNames = new Map<string, number>()
+  const totalClips = groups.reduce((n, g) => n + g.clips.length, 0)
+  let done = 0
+
+  for (const group of groups) {
+    const pcmClips: Float32Array[] = []
+    for (const clip of group.clips) {
+      const cell = args.cells.find((c) => c.id === clip.cellId)!
+      const parsed = parseFrontierAudioUrl(clip.url)
+      if (!parsed) { done++; args.onProgress?.(done, totalClips); continue }
+      const bytes = await args.fetchBytes({
+        projectId: args.projectId, fileId: cell.fileId, audioId: parsed.audioId, ext: parsed.ext,
+      })
+      if (bytes.length > 0) pcmClips.push(await args.decode(bytes))
+      done++
+      args.onProgress?.(done, totalClips)
+    }
+    const pcm = concatPcm(pcmClips)
+    if (pcm.length === 0) continue // character ended up with no decodable audio
+    const wav = encodeWavPcm16(pcm, TARGET_RATE)
+    // Disambiguate same-named cast members.
+    const base = `${characterKey(group.voice.name)}_${args.langCode}`
+    const seen = usedNames.get(base) ?? 0
+    usedNames.set(base, seen + 1)
+    const name = seen === 0 ? `${base}.wav` : `${base}_${seen + 1}.wav`
+    zip.file(name, wav)
+  }
+
+  return zip.generateAsync({ type: "blob", compression: "DEFLATE" })
 }

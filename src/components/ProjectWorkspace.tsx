@@ -731,8 +731,9 @@ export function ProjectWorkspace() {
       try {
         const jwt = await getTokenForFile(activeFileId)
         if (!jwt || cancelled) return
+        const { syncWorkerHttpOrigin } = await import("@/lib/sync/sync-worker-url")
         const res = await fetch(
-          `/api/v1/projects/${encodeURIComponent(project.id)}/files/${encodeURIComponent(activeFileId)}/backtranslations`,
+          `${syncWorkerHttpOrigin()}/api/v1/projects/${encodeURIComponent(project.id)}/files/${encodeURIComponent(activeFileId)}/backtranslations`,
           { headers: { Authorization: `Bearer ${jwt}` } },
         )
         if (!res.ok || cancelled) return

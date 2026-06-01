@@ -1,6 +1,6 @@
 import { useEffect, useState, useMemo } from "react"
 import { useParams, useNavigate, useSearchParams } from "react-router-dom"
-import { ArrowLeft, AlertTriangle, AlertCircle, Trash2, Wand2, ChevronDown, ChevronUp } from "lucide-react"
+import { ArrowLeft, AlertTriangle, AlertCircle, Trash2, Wand2, ChevronDown, ChevronUp, BookOpen } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -74,6 +74,10 @@ export function RulesPage() {
         </Button>
         <h2 className="font-semibold">Translation Rules</h2>
         <div className="flex-1" />
+        <Button variant="outline" size="sm" onClick={() => navigate(`/project/${id}/terminology`)}>
+          <BookOpen className="mr-1 h-3.5 w-3.5" />
+          Terminology
+        </Button>
         <RuleSuggestDialog files={project?.files || []} completionSettings={project?.completionSettings} onAdd={addRule} projectId={id} cells={validatedCells} />
         <RuleCreateDialog onAdd={addRule} />
       </header>

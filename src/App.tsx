@@ -50,6 +50,9 @@ const TeamDetail = lazy(() =>
 const DebugView = lazy(() =>
   import("@/components/DebugView").then((m) => ({ default: m.DebugView })),
 )
+const TerminologyPage = lazy(() =>
+  import("@/components/TerminologyPage").then((m) => ({ default: m.TerminologyPage })),
+)
 
 void hydratePrefetchStatus()
 void probeOpfsAvailability()
@@ -117,6 +120,7 @@ function AppRoutes() {
         <Route path="/project/:id/file/:fileId" element={<ProjectWorkspace />} />
         <Route path="/project/:id/settings" element={<ProjectSettings />} />
         <Route path="/project/:id/rules" element={<RulesPage />} />
+        <Route path="/project/:id/terminology" element={<TerminologyPage />} />
         <Route path="/project/:id/comments" element={<CommentsPage />} />
         <Route path="/project/:id/memory" element={<LivingMemoryPage />} />
 

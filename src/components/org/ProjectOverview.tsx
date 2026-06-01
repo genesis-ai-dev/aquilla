@@ -9,6 +9,7 @@ import { useActiveOrg } from "@/context/OrgContext"
 import { archiveProjectRemote, unarchiveProjectRemote } from "@/lib/sync/archive"
 import { setProjectDeadline } from "@/lib/sync/cloud-projects"
 import { downloadProjectBundle } from "@/lib/sync/export-bundle"
+import { AssignWork } from "./AssignWork"
 import { getPortfolio, audioPct, recordedMinutes, deadlineStatus, type PortfolioProject } from "@/lib/frontier/portfolio"
 
 export function ProjectOverview() {
@@ -41,6 +42,7 @@ export function ProjectOverview() {
 
   const isOwner = (project?.syncRole?.level ?? 0) >= 700
   const canManage = (project?.syncRole?.level ?? 0) >= 600
+  const canAssign = (project?.syncRole?.level ?? 0) >= 500
   const isArchived = Boolean(project?.deletedAt)
   const dstatus = audio ? deadlineStatus(audio, Date.now()) : null
 
@@ -231,6 +233,17 @@ export function ProjectOverview() {
                   </button>
                 )}
               </div>
+
+              {canAssign && !isArchived && activeOrgId != null && (project?.files.length ?? 0) > 0 && (
+                <AssignWork
+                  projectId={id}
+                  files={project?.files ?? []}
+                  orgId={activeOrgId}
+                  jwt={jwt ?? ""}
+                  author={session?.username ?? ""}
+                  onAssigned={loadRow}
+                />
+              )}
             </div>
           )}
         </div>

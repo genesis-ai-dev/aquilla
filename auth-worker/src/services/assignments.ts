@@ -139,3 +139,43 @@ export async function getMyAssignments(
     createdAt: r.created_at,
   }))
 }
+
+/** Split "GEN 10" → { book: "GEN", num: 10 } for natural ordering. */
+function chapterSortKey(chapter: string): { book: string; num: number } {
+  const m = chapter.match(/^(.*?)(\d+)\s*$/)
+  if (!m) return { book: chapter, num: 0 }
+  return { book: m[1].trim(), num: parseInt(m[2], 10) }
+}
+
+/**
+ * Distinct chapters present in a file, derived from the source cells'
+ * canonical_ref (e.g. "GEN 1:1" → "GEN 1"). Populates the assign picker's
+ * chapter dropdown so a manager picks a real chapter instead of typing a
+ * canonical-ref prefix — and the value feeds the resolver's LIKE 'GEN 1:%'
+ * directly. Natural-sorted (book code, then chapter number) so "GEN 2"
+ * precedes "GEN 10".
+ */
+export async function getFileChapters(
+  env: Env,
+  projectId: string,
+  fileId: string,
+): Promise<string[]> {
+  const rows = await env.AQUILLA_DB.prepare(
+    `SELECT DISTINCT substr(canonical_ref, 1, instr(canonical_ref, ':') - 1) AS chapter
+       FROM cells
+      WHERE project_id = ? AND file_id = ? AND side = 'source'
+        AND canonical_ref IS NOT NULL AND instr(canonical_ref, ':') > 0`,
+  )
+    .bind(projectId, fileId)
+    .all<{ chapter: string }>()
+
+  const chapters = (rows.results ?? [])
+    .map((r) => r.chapter)
+    .filter((c): c is string => typeof c === "string" && c.length > 0)
+  chapters.sort((a, b) => {
+    const ka = chapterSortKey(a)
+    const kb = chapterSortKey(b)
+    return ka.book === kb.book ? ka.num - kb.num : ka.book.localeCompare(kb.book)
+  })
+  return chapters
+}

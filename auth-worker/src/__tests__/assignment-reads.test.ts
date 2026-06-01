@@ -118,3 +118,42 @@ describe("GET /api/v2/projects/:projectId/assignments/mine", () => {
     expect(res.status).toBe(403)
   })
 })
+
+describe("GET /api/v2/projects/:projectId/files/:fileId/chapters", () => {
+  it("returns distinct source-cell chapters, natural-sorted; 403s a non-member", async () => {
+    await seedUser(1, "wendi")
+    await seedUser(9, "outsider")
+    await env.AQUILLA_DB.prepare("INSERT INTO organizations (id, name, owner_user_id) VALUES (1, 'CAS', 1)").run()
+    await env.AQUILLA_DB.prepare("INSERT INTO org_members (org_id, user_id, role_level, granted_by) VALUES (1, 1, 600, 1)").run()
+    await env.AQUILLA_DB.prepare("INSERT INTO projects (id, name, org_id, created_by) VALUES ('pa', 'John', 1, 1)").run()
+    await env.AQUILLA_DB.prepare("INSERT INTO project_members (project_id, user_id, role_level, granted_by) VALUES ('pa', 1, 700, 1)").run()
+    await env.AQUILLA_DB.prepare("INSERT INTO events (id, schema_version, project_id, kind, author, payload, client_ts, server_ts, server_seq) VALUES ('e-pa', 1, 'pa', 'file.create', 'wendi', '{}', 1000, 1000, 1)").run()
+    // Source cells across GEN 1, 2, 10 (dup verse in GEN 1) + a target row that
+    // must be excluded by the side filter.
+    await env.AQUILLA_DB.prepare(
+      `INSERT INTO cells (project_id, file_id, cell_id, side, value, event_id, last_edit_at, canonical_ref) VALUES
+        ('pa','f1','c1','source','x','e-pa',1,'GEN 1:1'),
+        ('pa','f1','c2','source','x','e-pa',1,'GEN 1:2'),
+        ('pa','f1','c3','source','x','e-pa',1,'GEN 2:1'),
+        ('pa','f1','c4','source','x','e-pa',1,'GEN 10:1'),
+        ('pa','f1','c5','target','y','e-pa',1,'GEN 1:1')`,
+    ).run()
+
+    const res = await app.request(
+      "/api/v2/projects/pa/files/f1/chapters",
+      { headers: authHeader(await jwtFor("wendi")) },
+      env,
+    )
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as { chapters: string[] }
+    // Distinct + NATURAL sort: GEN 1, GEN 2, GEN 10 (not lexical 1, 10, 2).
+    expect(body.chapters).toEqual(["GEN 1", "GEN 2", "GEN 10"])
+
+    const denied = await app.request(
+      "/api/v2/projects/pa/files/f1/chapters",
+      { headers: authHeader(await jwtFor("outsider")) },
+      env,
+    )
+    expect(denied.status).toBe(403)
+  })
+})

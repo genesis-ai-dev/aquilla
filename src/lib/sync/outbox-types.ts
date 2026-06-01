@@ -38,6 +38,8 @@ export type OutboxEventKind =
   | "cell.audio.attach"
   | "cell.audio.select"
   | "cell.audio.remove"
+  // Back-translation (contributor-level; non-chain-mutating).
+  | "cell.backtranslation.set"
   // File lifecycle.
   | "file.create"
   // Comments (non-chain-mutating; contributor-level).
@@ -134,6 +136,21 @@ export interface OutboxEventPayloads {
   }
   "cell.audio.remove": {
     audioId: string
+  }
+
+  /**
+   * Back-translation event. Non-chain-mutating (parentId omitted).
+   * Emitted by the BT tab when a statistical or polished BT is saved.
+   * The `targetEventId` pins the BT to the specific target commit it
+   * describes — staleness is detected when `cells.event_id` ≠ `targetEventId`.
+   */
+  "cell.backtranslation.set": {
+    btText: string
+    btHtml?: string
+    /** The target.cell.commit event_id this BT was generated from. */
+    targetEventId: string
+    /** True when the LLM polish pass has been applied. */
+    polished: boolean
   }
 
   "file.create": {

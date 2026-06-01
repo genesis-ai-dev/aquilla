@@ -367,6 +367,8 @@ interface EditorTableProps {
   onBacktranslate?: (cell: CellData) => void
   backtranslating?: Set<string>
   backtranslationErrors?: Map<string, string>
+  /** Called when user saves a BT edit. Parent emits `cell.backtranslation.set`. */
+  onSaveBacktranslation?: (cell: CellData, btText: string, polished: boolean) => void
   cellOpenCommentCount?: Map<string, number>
   onOpenComments?: (cellId: string) => void
   onOpenHistory?: (cellId: string) => void
@@ -401,6 +403,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   onCompleteSingle, onCompleteBatch, healthMap,
   infractions = new Map(), rules = [], onInfractionClick,
   isBacktranslationConfigured, onBacktranslate, backtranslating, backtranslationErrors,
+  onSaveBacktranslation,
   cellOpenCommentCount, onOpenComments, onOpenHistory,
   activeCueIndex, onSeekToCue,
   lineNumbersEnabled, cellLabelsEnabled, sourceTextDirection, targetTextDirection,
@@ -821,6 +824,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
                 backtranslating={backtranslating}
                 backtranslationErrors={backtranslationErrors}
                 onBacktranslate={onBacktranslate}
+                onSaveBacktranslation={onSaveBacktranslation}
                 cellOpenCommentCount={cellOpenCommentCount}
                 onOpenComments={onOpenComments}
                 onOpenHistory={onOpenHistory}
@@ -896,6 +900,7 @@ interface MemoizedRowProps {
   backtranslating?: Set<string>
   backtranslationErrors?: Map<string, string>
   onBacktranslate?: (cell: CellData) => void
+  onSaveBacktranslation?: (cell: CellData, btText: string, polished: boolean) => void
   cellOpenCommentCount?: Map<string, number>
   onOpenComments?: (cellId: string) => void
   onOpenHistory?: (cellId: string) => void
@@ -936,7 +941,7 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
     getTokenForFile,
     project, username, editable, isCompletionConfigured, isCompletionAvailable,
     ruleMap, onCompleteSingle, onInfractionClick,
-    isBacktranslationConfigured, onBacktranslate,
+    isBacktranslationConfigured, onBacktranslate, onSaveBacktranslation,
     onOpenComments, onOpenHistory,
     onSeekToCue, lineNumbersEnabled, cellLabelsEnabled,
     sourceTextDirection, targetTextDirection, isAnonymous,
@@ -1023,6 +1028,7 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
         isBacktranslating={isBacktranslating}
         backtranslationError={backtranslationError}
         onBacktranslate={onBacktranslate}
+        onSaveBacktranslation={onSaveBacktranslation}
         openCommentCount={openCommentCount}
         onOpenComments={onOpenComments}
         onOpenHistory={onOpenHistory}
@@ -1097,6 +1103,7 @@ interface EditorRowProps {
   isBacktranslating?: boolean
   backtranslationError?: string
   onBacktranslate?: (cell: CellData) => void
+  onSaveBacktranslation?: (cell: CellData, btText: string, polished: boolean) => void
   openCommentCount: number
   onOpenComments?: (cellId: string) => void
   onOpenHistory?: (cellId: string) => void
@@ -1128,7 +1135,7 @@ function EditorRow({
   cellExamples, highlights, error, health,
   cellInfractions, waivedInfractions, ruleMap,
   onCompleteSingle, onInfractionClick,
-  isBacktranslationConfigured, isBacktranslating, backtranslationError, onBacktranslate,
+  isBacktranslationConfigured: _isBacktranslationConfigured, isBacktranslating, backtranslationError, onBacktranslate, onSaveBacktranslation,
   openCommentCount, onOpenComments, onOpenHistory,
   isActiveCue: _isActiveCue, onSeekToCue,
   onDragStart, onDragEnter, onSelectionPointerDown,
@@ -1693,6 +1700,37 @@ function EditorRow({
 
   const railRevealed = isHovering || hasFocusWithin || isTapSelected || expanded
 
+  // ── BT tab edit state ─────────────────────────────────────────────────────
+  const [btEditing, setBtEditing] = useState(false)
+  const [btEditValue, setBtEditValue] = useState("")
+  const [btPolishOn, setBtPolishOn] = useState(false)
+  const [btSaving, setBtSaving] = useState(false)
+
+  // When editing starts, seed the input with the current BT text.
+  const handleBtEditStart = useCallback(() => {
+    setBtEditValue(cell.backtranslation ?? "")
+    setBtEditing(true)
+  }, [cell.backtranslation])
+
+  const handleBtSave = useCallback(() => {
+    if (!btEditValue.trim()) {
+      setBtEditing(false)
+      return
+    }
+    setBtSaving(true)
+    try {
+      onSaveBacktranslation?.(cell, btEditValue.trim(), btPolishOn)
+    } finally {
+      setBtSaving(false)
+      setBtEditing(false)
+    }
+  }, [btEditValue, btPolishOn, cell, onSaveBacktranslation])
+
+  const handleBtCancel = useCallback(() => {
+    setBtEditing(false)
+    setBtEditValue("")
+  }, [])
+
   // Stable rail handlers
   const handleRowMouseEnter = () => {
     if (hoverLeaveTimerRef.current !== null) {
@@ -2201,58 +2239,151 @@ function EditorRow({
             {
               value: "backtranslation",
               icon: <FileText className="h-3 w-3" />,
-              label: "Backtranslation",
+              label: "BT",
               attentionDot: isBtStale ? "amber" : undefined,
               content: (
                 <div className="flex flex-col gap-2">
-                  <div className="flex items-center justify-between">
-                    <h4 className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
-                      Backtranslation
-                    </h4>
-                    <button
-                      type="button"
-                      onClick={() => onBacktranslate?.(cell)}
-                      disabled={
-                        !isBacktranslationConfigured ||
-                        isBacktranslating ||
-                        !editable ||
-                        cell.translated.trim().length === 0
-                      }
-                      className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
-                      title={
-                        !editable
-                          ? "Read-only (imported from git)"
-                          : !isBacktranslationConfigured
-                            ? "Set up AI for backtranslation"
-                            : cell.backtranslation
-                              ? "Regenerate backtranslation"
-                              : "Generate backtranslation"
-                      }
-                    >
-                      <RefreshCw
-                        className={cn("h-3 w-3", isBacktranslating && "animate-spin")}
-                      />
-                      {cell.backtranslation ? "Regenerate" : "Generate"}
-                    </button>
+                  {/* ── Action row ─────────────────────────────────────────── */}
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">BT</span>
+                      {cell.backtranslation && cell.backtranslationForText === cell.translated && (
+                        <span
+                          className={cn(
+                            "inline-flex items-center gap-0.5 rounded-full px-1.5 py-0.5 text-[9px] font-medium",
+                            btPolishOn
+                              ? "bg-violet-500/10 text-violet-700 dark:text-violet-300"
+                              : "bg-muted text-muted-foreground",
+                          )}
+                          title={btPolishOn ? "LLM-polished back-translation" : "Deterministic statistical back-translation"}
+                        >
+                          {btPolishOn ? "polished" : "statistical"}
+                        </span>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-1">
+                      {/* Polish toggle — only when BT is present and user can edit */}
+                      {editable && cell.backtranslation && (
+                        <button
+                          type="button"
+                          onClick={() => setBtPolishOn((v) => !v)}
+                          className={cn(
+                            "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium transition-colors",
+                            btPolishOn
+                              ? "bg-violet-500/15 text-violet-700 dark:text-violet-300 hover:bg-violet-500/25"
+                              : "text-muted-foreground hover:bg-muted hover:text-foreground",
+                          )}
+                          title={btPolishOn ? "Polish on: LLM step will run on next generate" : "Polish off: statistical-only BT"}
+                        >
+                          <Sparkles className="h-3 w-3" />
+                          Polish
+                        </button>
+                      )}
+                      {/* Stale: one-click regenerate — does NOT auto-trigger */}
+                      {isBtStale && (
+                        <button
+                          type="button"
+                          onClick={() => onBacktranslate?.(cell)}
+                          disabled={isBacktranslating || cell.translated.trim().length === 0}
+                          className="inline-flex items-center gap-1 rounded-full bg-amber-500/10 px-2 py-0.5 text-[10px] font-medium text-amber-700 transition-colors hover:bg-amber-500/20 dark:text-amber-400 disabled:cursor-not-allowed disabled:opacity-40"
+                          title="Translation changed — click to regenerate BT"
+                        >
+                          <RefreshCw className={cn("h-3 w-3", isBacktranslating && "animate-spin")} />
+                          Regenerate
+                        </button>
+                      )}
+                      {/* No BT yet: generate button */}
+                      {!cell.backtranslation && !isBtStale && (
+                        <button
+                          type="button"
+                          onClick={() => onBacktranslate?.(cell)}
+                          disabled={isBacktranslating || cell.translated.trim().length === 0}
+                          className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
+                        >
+                          <RefreshCw className={cn("h-3 w-3", isBacktranslating && "animate-spin")} />
+                          {isBacktranslating ? "Generating…" : "Generate"}
+                        </button>
+                      )}
+                      {/* Edit button — contributor+ only */}
+                      {!btEditing && cell.backtranslation && (
+                        editable ? (
+                          <button
+                            type="button"
+                            onClick={handleBtEditStart}
+                            className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                          >
+                            Edit
+                          </button>
+                        ) : (
+                          <span
+                            className="inline-flex cursor-not-allowed items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium text-muted-foreground opacity-50"
+                            title="Contributor+ required to edit back-translations"
+                          >
+                            Edit
+                          </span>
+                        )
+                      )}
+                    </div>
                   </div>
 
-                  {cell.backtranslation ? (
-                    <div className="neu-inset rounded-lg px-3 py-2 text-sm italic text-muted-foreground">
+                  {/* ── BT body ─────────────────────────────────────────────── */}
+                  {cell.translated.trim().length === 0 ? (
+                    <p className="neu-inset rounded-xl px-3 py-3 text-center text-xs text-muted-foreground">
+                      Translate this cell to see a back-translation.
+                    </p>
+                  ) : cell.backtranslation ? (
+                    <>
+                      {/* Stale indicator pill — above the italic paragraph */}
                       {isBtStale && (
-                        <div className="mb-1 inline-flex items-center gap-1 rounded-full bg-amber-500/10 px-2 py-0.5 text-[10px] font-medium not-italic text-amber-700 dark:text-amber-400">
+                        <div className="inline-flex items-center gap-1 self-start rounded-full bg-amber-500/10 px-2 py-0.5 text-[10px] font-medium text-amber-700 dark:text-amber-400">
                           <AlertTriangle className="h-2.5 w-2.5" />
                           Stale — translation has changed
                         </div>
                       )}
-                      <div className="leading-relaxed">{cell.backtranslation}</div>
-                    </div>
+                      {btEditing ? (
+                        /* Inline editor */
+                        <div className="flex flex-col gap-1.5">
+                          <textarea
+                            autoFocus
+                            value={btEditValue}
+                            onChange={(e) => setBtEditValue(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === "Escape") handleBtCancel()
+                              if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) handleBtSave()
+                            }}
+                            rows={3}
+                            className="w-full resize-none rounded-md border border-border bg-background px-3 py-2 text-sm italic text-foreground outline-none focus:ring-1 focus:ring-ring"
+                          />
+                          <div className="flex items-center justify-end gap-1.5">
+                            <button
+                              type="button"
+                              onClick={handleBtCancel}
+                              className="rounded-full px-2 py-0.5 text-[10px] font-medium text-muted-foreground hover:bg-muted"
+                            >
+                              Cancel
+                            </button>
+                            <button
+                              type="button"
+                              onClick={handleBtSave}
+                              disabled={btSaving || !btEditValue.trim()}
+                              className="rounded-full bg-primary px-2 py-0.5 text-[10px] font-medium text-primary-foreground hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-40"
+                            >
+                              {btSaving ? "Saving…" : "Save"}
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
+                        /* Read-only display — ONE italic paragraph, BT label prefix */
+                        <p className="neu-inset rounded-lg px-3 py-2 text-sm italic leading-relaxed text-muted-foreground">
+                          {cell.backtranslation}
+                        </p>
+                      )}
+                    </>
                   ) : (
                     <p className="neu-inset rounded-xl px-3 py-3 text-center text-xs text-muted-foreground">
-                      {!isBacktranslationConfigured
-                        ? "Configure completion settings to enable back-translation."
-                        : cell.translated.trim().length === 0
-                          ? "Add a translation first, then generate a backtranslation."
-                          : "No backtranslation yet. Click Generate to create one."}
+                      {isBacktranslating
+                        ? "Generating back-translation…"
+                        : "No back-translation yet. Click Generate to create one."}
                     </p>
                   )}
                   {backtranslationError && (

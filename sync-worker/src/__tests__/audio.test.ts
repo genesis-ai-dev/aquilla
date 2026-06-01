@@ -213,31 +213,63 @@ describe("audio R2 endpoints", () => {
     expect(res.status).toBe(403)
   })
 
-  it("DELETE requires SYNC_SECRET_KEY bearer (not the sync-token)", async () => {
+  // F8: DELETE allows either SYNC_SECRET_KEY or a valid sync-token scoped to the file.
+  // An invalid/unsigned token is still rejected (401); a SYNC_SECRET_KEY bearer is
+  // accepted; a valid sync-token scoped to the correct (project, file) is also accepted.
+  it("DELETE allows either SYNC_SECRET_KEY or a valid sync-token scoped to the file (F8)", async () => {
     const env = makeEnv()
-    const token = await makeToken()
-    // sync-token JWT is not enough for DELETE.
-    const wrongAuth = (await handleAudioRequest(
+
+    // An invalid/unsigned token is rejected.
+    const invalidToken = "not.a.valid.jwt"
+    const rejectedInvalid = (await handleAudioRequest(
       new Request("https://w/audio/p1/f1/clip.webm", {
         method: "DELETE",
-        headers: { Authorization: `Bearer ${token}` },
+        headers: { Authorization: `Bearer ${invalidToken}` },
       }),
       env as unknown as Parameters<typeof handleAudioRequest>[1],
     )) as Response
-    expect(wrongAuth.status).toBe(401)
+    expect(rejectedInvalid.status).toBe(401)
 
+    // A valid sync-token scoped to a DIFFERENT file is also rejected.
+    const otherFileToken = await makeToken({ fileId: "other-file" })
+    const rejectedOtherFile = (await handleAudioRequest(
+      new Request("https://w/audio/p1/f1/clip.webm", {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${otherFileToken}` },
+      }),
+      env as unknown as Parameters<typeof handleAudioRequest>[1],
+    )) as Response
+    expect(rejectedOtherFile.status).toBe(401)
+
+    // SYNC_SECRET_KEY bearer is accepted (admin path).
     env.SNAPSHOTS._seed(
       audioObjectKey(env, "p1", "f1", "clip.webm"),
       new Uint8Array([9]),
     )
-    const ok = (await handleAudioRequest(
+    const adminOk = (await handleAudioRequest(
       new Request("https://w/audio/p1/f1/clip.webm", {
         method: "DELETE",
         headers: { Authorization: `Bearer ${SECRET}` },
       }),
       env as unknown as Parameters<typeof handleAudioRequest>[1],
     )) as Response
-    expect(ok.status).toBe(200)
+    expect(adminOk.status).toBe(200)
+    expect(env.SNAPSHOTS._size()).toBe(0)
+
+    // A valid sync-token scoped to the correct (project, file) is also accepted (F8).
+    env.SNAPSHOTS._seed(
+      audioObjectKey(env, "p1", "f1", "clip2.webm"),
+      new Uint8Array([7]),
+    )
+    const ownerToken = await makeToken({ projectId: "p1", fileId: "f1" })
+    const ownerOk = (await handleAudioRequest(
+      new Request("https://w/audio/p1/f1/clip2.webm", {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${ownerToken}` },
+      }),
+      env as unknown as Parameters<typeof handleAudioRequest>[1],
+    )) as Response
+    expect(ownerOk.status).toBe(200)
     expect(env.SNAPSHOTS._size()).toBe(0)
   })
 

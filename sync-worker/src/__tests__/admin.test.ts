@@ -147,12 +147,12 @@ describe("DELETE /admin/files/:projectId/:fileId", () => {
     expect(res.status).toBe(200)
     const body = (await res.json()) as any
     expect(body.ok).toBe(true)
-    expect(body.deleted).toBe(5) // 3 tails + 1 checkpoint × 2 files = 5 in file-a
+    expect(body.deleted).toBe(4) // 3 tails + 1 checkpoint
 
     // file-a fully gone, file-b untouched
     expect(env.SNAPSHOTS._allKeys().every((k: string) => !k.includes("file-a"))).toBe(true)
     expect(env.SNAPSHOTS._allKeys().some((k: string) => k.includes("file-b"))).toBe(true)
-    expect(env.SNAPSHOTS._size()).toBe(before - 5)
+    expect(env.SNAPSHOTS._size()).toBe(before - 4)
   })
 
   it("handles paginated list cursors when there are more than one page of tails", async () => {
@@ -198,7 +198,7 @@ describe("DELETE /admin/files/:projectId/:fileId", () => {
     ) as Response
     expect(res.status).toBe(200)
     const body = (await res.json()) as any
-    expect(body.deleted).toBe(3)
+    expect(body.deleted).toBe(2) // 1 tail + 1 checkpoint
   })
 
   it("honors R2_KEY_PREFIX when listing and deleting", async () => {
@@ -224,7 +224,11 @@ describe("DELETE /admin/files/:projectId/:fileId", () => {
     expect(res.status).toBe(200)
     const body = (await res.json()) as any
     expect(body.deleted).toBe(3)
-    expect(env.SNAPSHOTS._allKeys()).toEqual(["projects/p/files/f/checkpoints/ckp-1.bin", "projects/p/files/f/tail/0.bin"])
+    // _allKeys() returns insertion order: tail/0.bin was seeded before checkpoints/ckp-1.bin
+    expect(env.SNAPSHOTS._allKeys()).toEqual([
+      "projects/p/files/f/tail/0.bin",
+      "projects/p/files/f/checkpoints/ckp-1.bin",
+    ])
   })
 
   it("admin DELETE wipes the audio subdirectory along with tails", async () => {

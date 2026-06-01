@@ -78,7 +78,9 @@ CREATE TABLE assignment_cells (
 
 ### Task AS2: Backend — read routes (workload + inbox)
 
-**Files:** modify `auth-worker/src/services/org-permissions.ts` (or a new `assignments` service) + `auth-worker/src/routes/orgs.ts` (or projects.ts); test.
+> **STATUS: ✅ DONE (commit `295356a`).** NEW `auth-worker/src/services/assignments.ts` (`getOrgAssignmentWorkload` + `getMyAssignments`); `cells_done` derived on read = `JOIN assignment_cells→cells ON (file_id, cell_id) WHERE side='target' AND validated=1`. Routes: `GET /api/v2/orgs/:orgId/assignments/workload` (maintainer+) on orgs.ts; `GET /api/v2/projects/:projectId/assignments/mine` (any member via `resolveProjectRole`) on projects.ts. real-D1 tests `assignment-reads.test.ts`. **auth-worker 84/84 pass.** Worktree gotcha: no `auth-worker/node_modules` → symlinked to main repo's (gitignored, same base commit).
+
+**Files:** new `auth-worker/src/services/assignments.ts`; modify `auth-worker/src/routes/orgs.ts` + `projects.ts`; test `auth-worker/src/__tests__/assignment-reads.test.ts`.
 
 Reads live on auth-worker (org-context, same D1). Progress derived on read.
 

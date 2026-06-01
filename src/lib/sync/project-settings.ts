@@ -4,6 +4,7 @@ import type {
   RulePenalties,
   ProjectTtsSettings,
 } from "@/lib/parsers/types"
+import type { Concept } from "@/lib/terminology/types"
 
 /** Initial server version for projects with no settings row. */
 export const PROJECT_SETTINGS_VERSION_INITIAL = 0
@@ -26,6 +27,9 @@ export interface ProjectWideSettings {
   /** Synced voice profiles (voice library, cast, default voice, engine). The
    *  Gemini apiKey is deliberately omitted — it stays device-local. */
   ttsSettings?: Omit<ProjectTtsSettings, "apiKey">
+  /** Project terminology / glossary concepts. Synced to D1 via the same
+   *  top-level key mechanism as `rules`. Absent → no terminology enforcement. */
+  terminology?: Concept[]
 }
 
 export interface ProjectSettingsResponse {

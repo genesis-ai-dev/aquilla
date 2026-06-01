@@ -19,10 +19,13 @@ import path from "node:path"
 import os from "node:os"
 import { parseCodexNotebook } from "../src/lib/codex-editor/parse-codex"
 import { projectIdFor, fileIdFor } from "../src/lib/migrate/ids"
-import { mapFilePairToEvents, type FilePairInput, type MapOptions } from "../src/lib/migrate/map"
+import { mapFilePairToEvents, collectSpeakers, type FilePairInput, type MapOptions } from "../src/lib/migrate/map"
 import { mapComments } from "../src/lib/migrate/comments"
 import { collectCellAudio, audioAttachEvent } from "../src/lib/migrate/audio"
+import { buildCastAdditions } from "../src/lib/import/cast-from-speakers"
+import type { ProjectTtsSettings } from "../src/lib/parsers/types"
 import type { IngestEvent } from "../src/lib/migrate/types"
+import { randomUUID } from "node:crypto"
 import type { CodexNotebookFile } from "../src/lib/codex-editor/types"
 
 const AUTH = process.env.AUTH_BASE ?? "http://127.0.0.1:8788"
@@ -203,6 +206,40 @@ async function importAudio(
   }
 }
 
+// Character labels → project cast. The legacy per-cell `cellLabel` is the
+// speaker; buildCastAdditions mints one Voice per distinct character (reusing
+// existing ones by name → idempotent) + a cellId→voiceId map, merged into the
+// synced project TTS settings via PATCH /settings (mirrors the live import).
+async function importCast(projectId: string, pairs: FilePairInput[], jwt: string): Promise<void> {
+  const speakers = pairs.flatMap((p) => collectSpeakers(p))
+  if (speakers.length === 0) return
+  const getRes = await fetch(`${AUTH}/api/v2/projects/${projectId}/settings`, {
+    headers: { Authorization: `Bearer ${jwt}` },
+  })
+  const current = getRes.ok
+    ? ((await getRes.json()) as { version?: number; settings?: { ttsSettings?: ProjectTtsSettings } })
+    : { version: 0, settings: undefined }
+  const tts = current.settings?.ttsSettings
+  const additions = buildCastAdditions(speakers, tts, () => randomUUID())
+  const mergedTts: ProjectTtsSettings = {
+    ...(tts ?? {}),
+    voices: additions.voices,
+    castAssignments: { ...(tts?.castAssignments ?? {}), ...additions.castAssignments },
+  }
+  const patchRes = await fetch(`${AUTH}/api/v2/projects/${projectId}/settings`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${jwt}` },
+    body: JSON.stringify({ settings: { ttsSettings: mergedTts }, ifMatchVersion: current.version ?? 0 }),
+  })
+  if (patchRes.ok) {
+    console.log(
+      `  cast: ${additions.voices.length} voices, ${Object.keys(additions.castAssignments).length} line assignments`,
+    )
+  } else {
+    console.warn(`  ! cast PATCH ${patchRes.status}: ${(await patchRes.text()).slice(0, 200)}`)
+  }
+}
+
 function histogram(events: IngestEvent[]): Record<string, number> {
   const h: Record<string, number> = {}
   for (const e of events) h[e.kind] = (h[e.kind] ?? 0) + 1
@@ -302,6 +339,9 @@ async function main() {
     console.log("Uploading audio (heavier pass)…")
     await importAudio(dir, aquillaProjectId, legacyKey, pairs, token, secret, FALLBACK_AUTHOR, opts.fallbackTs)
   }
+
+  // Character labels (cellLabel = speaker) → cast/voices + line assignments.
+  await importCast(aquillaProjectId, pairs, token)
 
   console.log(`\n✓ Done. Open: ${VITE}/project/${aquillaProjectId}`)
   console.log("  (re-run this command to confirm idempotency — it should add 0 new events)")

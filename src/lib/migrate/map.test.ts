@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest"
 import type { CodexNotebookFile } from "../codex-editor/types"
-import { mapFilePairToEvents, type FilePairInput, type MapOptions } from "./map"
+import { mapFilePairToEvents, collectSpeakers, type FilePairInput, type MapOptions } from "./map"
 import { fileIdFor, sourceCellCreateEventId, targetCommitEventId } from "./ids"
 
 const OPTS: MapOptions = {
@@ -106,5 +106,49 @@ describe("mapFilePairToEvents", () => {
     const head = targetCommitEventId(OPTS.projectId, fileId, "cue1", 2)
     expect(validates[0].author).toBe("reviewer1")
     expect(validates[0].payload).toMatchObject({ editEventId: head })
+  })
+
+  it("emits startMs/endMs from legacy timecodes (seconds→ms), keeping cellLabel OUT of canonicalRef", () => {
+    const pair: FilePairInput = {
+      relPath: "F",
+      name: "F",
+      target: {
+        metadata: { id: "f", originalName: "f" },
+        cells: [
+          {
+            kind: 2,
+            languageId: "html",
+            value: "<p>hi</p>",
+            metadata: {
+              id: "cueX",
+              type: "text",
+              cellLabel: "MARY MAGDALENE",
+              data: { startTime: 74.658, endTime: 74.908, globalReferences: [] },
+              edits: [{ author: "a", timestamp: 1, type: "user-edit", editMap: ["value"], value: "<p>hi</p>" }],
+            },
+          },
+        ],
+      },
+    }
+    const create = mapFilePairToEvents(pair, OPTS).find((e) => e.kind === "source.cell.create")!
+    expect(create.payload.startMs).toBe(74658)
+    expect(create.payload.endMs).toBe(74908)
+    // the character name lives in cellLabel → cast, NOT canonical_ref
+    expect(create.payload.canonicalRef).toBeUndefined()
+  })
+
+  it("collectSpeakers maps each cell's cellLabel to a speaker", () => {
+    const pair: FilePairInput = {
+      relPath: "F",
+      name: "F",
+      target: {
+        metadata: { id: "f", originalName: "f" },
+        cells: [
+          { kind: 2, languageId: "html", value: "x", metadata: { id: "c1", type: "text", cellLabel: "MARY MAGDALENE" } },
+          { kind: 2, languageId: "html", value: "y", metadata: { id: "c2", type: "text" } },
+        ],
+      },
+    }
+    expect(collectSpeakers(pair)).toEqual([{ cellId: "c1", speaker: "MARY MAGDALENE" }])
   })
 })

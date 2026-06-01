@@ -28,9 +28,13 @@ function stripHtml(html: string): string {
 }
 
 function canonicalRefOf(cell: CodexCell): string | undefined {
+  // Only a real scripture/global ref belongs in canonical_ref. For subtitle
+  // cues globalReferences is empty and cellLabel is the SPEAKER (a character
+  // name) — that must NOT land in canonical_ref; it becomes cast/voice
+  // (see collectSpeakers) instead.
   const gr = cell.metadata.data?.globalReferences
   if (gr && gr.length > 0) return gr[0]
-  return cell.metadata.cellLabel ?? undefined
+  return undefined
 }
 
 function earliestEditTs(cell: CodexCell | undefined): number | undefined {
@@ -127,7 +131,13 @@ export function mapFilePairToEvents(pair: FilePairInput, opts: MapOptions): Inge
         ...(srcHtml ? { valueHtml: srcHtml } : {}),
         type: anchorCell.metadata.type,
         ...(canonicalRefOf(anchorCell) ? { canonicalRef: canonicalRefOf(anchorCell) } : {}),
-        ...(anchorCell.metadata.data ? { metadata: anchorCell.metadata.data } : {}),
+        // Subtitle cue timing → cells.start_ms/end_ms (legacy seconds → ms).
+        ...(typeof anchorCell.metadata.data?.startTime === "number"
+          ? { startMs: Math.round(anchorCell.metadata.data.startTime * 1000) }
+          : {}),
+        ...(typeof anchorCell.metadata.data?.endTime === "number"
+          ? { endMs: Math.round(anchorCell.metadata.data.endTime * 1000) }
+          : {}),
       },
     })
     prevCellId = cellId
@@ -197,4 +207,20 @@ export function mapFilePairToEvents(pair: FilePairInput, opts: MapOptions): Inge
   }
 
   return events
+}
+
+/** (cellId, speaker) pairs for cast/voice import. In legacy Codex subtitle
+ *  projects the per-cell `cellLabel` is the SPEAKER / character name (e.g.
+ *  "MARY MAGDALENE"). These feed buildCastAdditions → the project's cast
+ *  (one voice per character) + a cellId→voiceId assignment map. */
+export function collectSpeakers(
+  pair: FilePairInput,
+): { cellId: string; speaker: string }[] {
+  const cells = pair.target?.cells ?? pair.source?.cells ?? []
+  const out: { cellId: string; speaker: string }[] = []
+  for (const c of cells) {
+    const speaker = c.metadata.cellLabel?.trim()
+    if (speaker) out.push({ cellId: c.metadata.id, speaker })
+  }
+  return out
 }

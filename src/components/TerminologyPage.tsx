@@ -31,6 +31,7 @@ import { addConcept, updateConcept, deleteConcept } from "@/lib/terminology/stor
 import { importConceptsCsv, exportConceptsCsv } from "@/lib/terminology/csv"
 import { importConceptsTbx, exportConceptsTbx } from "@/lib/terminology/tbx"
 import { cn } from "@/lib/utils"
+import { useProject } from "@/hooks/useProject"
 
 // ────────────────────────────────────────────────────────────────────────────
 // Rendering status chip helpers
@@ -142,7 +143,8 @@ interface ConceptDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   initial?: Concept | null
-  onSave: (concept: Concept) => void
+  /** Called with the concept payload to add or update — caller owns persistence. */
+  onSave: (partial: Omit<Concept, "id" | "createdAt"> & { id?: string }) => Promise<void>
 }
 
 function ConceptDialog({ open, onOpenChange, initial, onSave }: ConceptDialogProps) {
@@ -198,23 +200,13 @@ function ConceptDialog({ open, onOpenChange, initial, onSave }: ConceptDialogPro
     }
     setSaving(true)
     try {
-      let saved: Concept
-      if (initial) {
-        saved = await updateConcept(initial.id, {
-          sourceTerm: sourceTerm.trim(),
-          renderings: validRenderings,
-          notes: notes.trim() || undefined,
-          status,
-        })
-      } else {
-        saved = await addConcept({
-          sourceTerm: sourceTerm.trim(),
-          renderings: validRenderings,
-          notes: notes.trim() || undefined,
-          status,
-        })
-      }
-      onSave(saved)
+      await onSave({
+        ...(initial ? { id: initial.id } : {}),
+        sourceTerm: sourceTerm.trim(),
+        renderings: validRenderings,
+        notes: notes.trim() || undefined,
+        status,
+      })
       handleClose()
     } catch (err) {
       setError(err instanceof Error ? err.message : "Save failed")
@@ -513,12 +505,21 @@ export function TerminologyPage() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
 
-  // Local state — in production the data agent's store/hooks will own this
-  const [concepts, setConcepts] = useState<Concept[]>([])
+  const { project, loading, patchSettings } = useProject(id!)
+
+  // Derive concepts from the project record — single source of truth
+  const concepts = project?.terminology ?? []
+
   const [addOpen, setAddOpen] = useState(false)
   const [editTarget, setEditTarget] = useState<Concept | null>(null)
   const [importOpen, setImportOpen] = useState(false)
   const [error, setError] = useState<string | null>(null)
+
+  // ── Persist helper ─────────────────────────────────────────────────────────
+
+  async function persistConcepts(updatedConcepts: Concept[]) {
+    await patchSettings({ terminology: updatedConcepts })
+  }
 
   // ── Export helpers ─────────────────────────────────────────────────────────
 
@@ -552,34 +553,41 @@ export function TerminologyPage() {
 
   // ── CRUD handlers ─────────────────────────────────────────────────────────
 
-  function handleSaved(saved: Concept) {
-    setConcepts((prev) => {
-      const idx = prev.findIndex((c) => c.id === saved.id)
-      return idx >= 0
-        ? prev.map((c) => (c.id === saved.id ? saved : c))
-        : [...prev, saved]
-    })
+  async function handleSave(
+    partial: Omit<Concept, "id" | "createdAt"> & { id?: string },
+  ) {
+    if (!project) throw new Error("Project not loaded")
+    let updated
+    if (partial.id) {
+      const { id: conceptId, ...patch } = partial
+      updated = updateConcept(project, conceptId, patch)
+    } else {
+      updated = addConcept(project, partial)
+    }
+    await persistConcepts(updated.terminology ?? [])
   }
 
   async function handleDelete(conceptId: string) {
+    if (!project) return
     try {
-      await deleteConcept(conceptId)
-      setConcepts((prev) => prev.filter((c) => c.id !== conceptId))
+      const updated = deleteConcept(project, conceptId)
+      await persistConcepts(updated.terminology ?? [])
     } catch (err) {
       setError(err instanceof Error ? err.message : "Delete failed")
     }
   }
 
-  function handleImported(imported: Concept[]) {
-    // Merge by sourceTerm dedup
-    setConcepts((prev) => {
-      const map = new Map(prev.map((c) => [c.sourceTerm, c]))
-      for (const c of imported) map.set(c.sourceTerm, c)
-      return [...map.values()]
-    })
+  async function handleImported(imported: Concept[]) {
+    if (!project) return
+    // Merge by sourceTerm dedup — imported wins on collision
+    const map = new Map(concepts.map((c) => [c.sourceTerm, c]))
+    for (const c of imported) map.set(c.sourceTerm, c)
+    await persistConcepts([...map.values()])
   }
 
   // ── Render ─────────────────────────────────────────────────────────────────
+
+  if (loading) return <div className="p-8 text-muted-foreground">Loading…</div>
 
   return (
     <div className="min-h-screen bg-background">
@@ -701,7 +709,7 @@ export function TerminologyPage() {
       <ConceptDialog
         open={addOpen}
         onOpenChange={setAddOpen}
-        onSave={handleSaved}
+        onSave={handleSave}
       />
 
       {/* Edit dialog */}
@@ -710,8 +718,8 @@ export function TerminologyPage() {
           open={!!editTarget}
           onOpenChange={(next) => { if (!next) setEditTarget(null) }}
           initial={editTarget}
-          onSave={(saved) => {
-            handleSaved(saved)
+          onSave={async (partial) => {
+            await handleSave(partial)
             setEditTarget(null)
           }}
         />

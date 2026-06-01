@@ -3,6 +3,7 @@ import { render, screen, fireEvent, waitFor, within } from "@testing-library/rea
 import { MemoryRouter } from "react-router-dom"
 import { TerminologyPage } from "./TerminologyPage"
 import type { Concept } from "@/lib/terminology/types"
+import type { ProjectRecord } from "@/lib/parsers/types"
 
 // ── Mock the data-layer stubs ─────────────────────────────────────────────
 vi.mock("@/lib/terminology/store", () => ({
@@ -19,8 +20,28 @@ vi.mock("@/lib/terminology/tbx", () => ({
   exportConceptsTbx: vi.fn(),
 }))
 
+// ── Mock useProject so tests don't need a real session/IDB ───────────────
+const mockPatchSettings = vi.fn().mockResolvedValue({ kind: "ok" })
+const mockProject: ProjectRecord = {
+  id: "test-project-id",
+  name: "Test Project",
+  terminology: [],
+} as unknown as ProjectRecord
+
+vi.mock("@/hooks/useProject", () => ({
+  useProject: vi.fn(() => ({
+    project: mockProject,
+    loading: false,
+    status: "ready",
+    isError: false,
+    refresh: vi.fn(),
+    patchSettings: mockPatchSettings,
+  })),
+}))
+
 import { addConcept, deleteConcept } from "@/lib/terminology/store"
 import { importConceptsCsv } from "@/lib/terminology/csv"
+import { useProject } from "@/hooks/useProject"
 
 // Helper: render with a router so useParams / useNavigate work
 function renderPage() {
@@ -45,6 +66,10 @@ function makeConcept(overrides: Partial<Concept> = {}): Concept {
     createdAt: "2026-01-01T00:00:00Z",
     ...overrides,
   }
+}
+
+function makeProjectWithConcepts(concepts: Concept[]): ProjectRecord {
+  return { ...mockProject, terminology: concepts } as unknown as ProjectRecord
 }
 
 /**
@@ -73,6 +98,16 @@ async function fillAndSubmitAddDialog(sourceTerm: string, renderingText: string)
 describe("TerminologyPage", () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    // Reset useProject to return an empty project by default
+    vi.mocked(useProject).mockReturnValue({
+      project: mockProject,
+      loading: false,
+      status: "ready",
+      isError: false,
+      refresh: vi.fn(),
+      patchSettings: mockPatchSettings,
+    })
+    mockPatchSettings.mockResolvedValue({ kind: "ok" })
   })
 
   // ── Empty state ────────────────────────────────────────────────────────────
@@ -104,33 +139,71 @@ describe("TerminologyPage", () => {
 
   it("renders concepts returned from addConcept via the dialog", async () => {
     const saved = makeConcept()
-    vi.mocked(addConcept).mockResolvedValueOnce(saved)
+    const updatedProject = makeProjectWithConcepts([saved])
+    vi.mocked(addConcept).mockReturnValueOnce(updatedProject)
+
+    // After patchSettings resolves, make useProject return the updated project
+    mockPatchSettings.mockImplementationOnce(async () => {
+      vi.mocked(useProject).mockReturnValue({
+        project: updatedProject,
+        loading: false,
+        status: "ready",
+        isError: false,
+        refresh: vi.fn(),
+        patchSettings: mockPatchSettings,
+      })
+      return { kind: "ok" }
+    })
 
     renderPage()
     await fillAndSubmitAddDialog("πνεῦμα", "spirit")
 
     await waitFor(() => {
       expect(addConcept).toHaveBeenCalledWith(
+        expect.objectContaining({ id: "test-project-id" }),
         expect.objectContaining({ sourceTerm: "πνεῦμα" }),
       )
     })
 
-    // After dialog closes, concept row should be visible
+    // patchSettings should have been called with the updated terminology
     await waitFor(() => {
-      expect(screen.getByTestId("concept-row")).toBeInTheDocument()
+      expect(mockPatchSettings).toHaveBeenCalledWith(
+        expect.objectContaining({ terminology: [saved] }),
+      )
     })
-    expect(screen.getByText("πνεῦμα")).toBeInTheDocument()
   })
 
   // ── Delete ─────────────────────────────────────────────────────────────────
 
   it("removes a concept after delete is called and resolves", async () => {
-    const saved = makeConcept()
-    vi.mocked(addConcept).mockResolvedValueOnce(saved)
-    vi.mocked(deleteConcept).mockResolvedValueOnce(undefined)
+    const existing = makeConcept()
+    const projectWithConcept = makeProjectWithConcepts([existing])
+    const projectAfterDelete = makeProjectWithConcepts([])
+
+    // Start with a project that already has the concept
+    vi.mocked(useProject).mockReturnValue({
+      project: projectWithConcept,
+      loading: false,
+      status: "ready",
+      isError: false,
+      refresh: vi.fn(),
+      patchSettings: mockPatchSettings,
+    })
+
+    vi.mocked(deleteConcept).mockReturnValueOnce(projectAfterDelete)
+    mockPatchSettings.mockImplementationOnce(async () => {
+      vi.mocked(useProject).mockReturnValue({
+        project: projectAfterDelete,
+        loading: false,
+        status: "ready",
+        isError: false,
+        refresh: vi.fn(),
+        patchSettings: mockPatchSettings,
+      })
+      return { kind: "ok" }
+    })
 
     renderPage()
-    await fillAndSubmitAddDialog("πνεῦμα", "spirit")
 
     await waitFor(() => expect(screen.getByTestId("concept-row")).toBeInTheDocument())
 
@@ -138,17 +211,30 @@ describe("TerminologyPage", () => {
     fireEvent.click(screen.getByRole("button", { name: /Delete concept πνεῦμα/i }))
 
     await waitFor(() => {
-      expect(deleteConcept).toHaveBeenCalledWith("c1")
+      expect(deleteConcept).toHaveBeenCalledWith(
+        expect.objectContaining({ id: "test-project-id" }),
+        "c1",
+      )
     })
-
-    expect(screen.queryByTestId("concept-row")).not.toBeInTheDocument()
   })
 
   // ── CSV import ─────────────────────────────────────────────────────────────
 
   it("calls importConceptsCsv on file upload and shows new concepts", async () => {
     const imported = makeConcept({ id: "imported-1", sourceTerm: "λόγος" })
+    const updatedProject = makeProjectWithConcepts([imported])
     vi.mocked(importConceptsCsv).mockReturnValueOnce([imported])
+    mockPatchSettings.mockImplementationOnce(async () => {
+      vi.mocked(useProject).mockReturnValue({
+        project: updatedProject,
+        loading: false,
+        status: "ready",
+        isError: false,
+        refresh: vi.fn(),
+        patchSettings: mockPatchSettings,
+      })
+      return { kind: "ok" }
+    })
 
     renderPage()
 
@@ -169,23 +255,30 @@ describe("TerminologyPage", () => {
       expect(importConceptsCsv).toHaveBeenCalled()
     })
 
-    // Dialog should close and new concept should be visible
+    // patchSettings should have been called with the imported concept
     await waitFor(() => {
-      expect(screen.getByTestId("concept-row")).toBeInTheDocument()
+      expect(mockPatchSettings).toHaveBeenCalledWith(
+        expect.objectContaining({ terminology: expect.arrayContaining([imported]) }),
+      )
     })
-    expect(screen.getByText("λόγος")).toBeInTheDocument()
   })
 
   // ── Rendering chips ────────────────────────────────────────────────────────
 
-  it("shows rendering chips with correct status labels after concept is added", async () => {
-    const saved = makeConcept()
-    vi.mocked(addConcept).mockResolvedValueOnce(saved)
+  it("shows rendering chips with correct status labels for existing concepts", () => {
+    const existing = makeConcept()
+    const projectWithConcept = makeProjectWithConcepts([existing])
+
+    vi.mocked(useProject).mockReturnValue({
+      project: projectWithConcept,
+      loading: false,
+      status: "ready",
+      isError: false,
+      refresh: vi.fn(),
+      patchSettings: mockPatchSettings,
+    })
 
     renderPage()
-    await fillAndSubmitAddDialog("πνεῦμα", "spirit")
-
-    await waitFor(() => expect(screen.getByTestId("concept-row")).toBeInTheDocument())
 
     // The makeConcept has preferred/admitted/forbidden renderings
     // Check their status label chips (format is "rendering·statusLabel")

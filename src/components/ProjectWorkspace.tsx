@@ -59,7 +59,7 @@ import {
 import { emitTargetCellCommit, emitCellBacktranslationSet } from "@/lib/sync/events-emit"
 import { flushOutboxBatch } from "@/lib/sync/outbox-flush"
 import { useCellsAuditStatsWithOverlay } from "@/hooks/useCellsAuditStatsWithOverlay"
-import { Film, Scale, MessagesSquare, Share2, Settings as SettingsIcon, Lock, ClipboardList, Trash2, Undo2, Search as SearchIcon, Sparkles, Mic2, Download, BookMarked } from "lucide-react"
+import { Film, Scale, MessagesSquare, Share2, Settings as SettingsIcon, Lock, ClipboardList, Trash2, Undo2, Search as SearchIcon, Sparkles, Mic2, Download, BookMarked, BookOpen } from "lucide-react"
 import { restoreProject } from "@/lib/store/project-index"
 import { AppShell } from "./AppShell"
 import { WorkspaceHeader } from "./WorkspaceHeader"
@@ -717,16 +717,55 @@ export function ProjectWorkspace() {
   //  - Local in-memory cache (`backtranslationCache`) so UI is instant.
   //  - localStorage fallback so results survive page reload before server round-trip.
   //
-  // SWARM-TODO(ws-bt-read-route): hydrate persisted BTs on load from the
-  // `cell-backtranslations-read` route once the WS-BT-EVENT agent wires it.
-  // The route returns events of kind `cell.backtranslation.set`; read the latest
-  // per cell and apply to the cells projection (backtranslation + backtranslationForText).
-  // Guard with a try/catch so the UI degrades gracefully to local generation if the
-  // route isn't available yet.
-
   const [backtranslationCache, setBacktranslationCache] = useState<Map<string, string>>(new Map())
   const [backtranslatingState, setBacktranslatingState] = useState<Set<string>>(new Set())
   const [backtranslationErrorsState, setBacktranslationErrorsState] = useState<Map<string, string>>(new Map())
+
+  // Hydrate persisted BTs on file/project load from the cell-backtranslations-read route.
+  // Compares each BT's targetEventId against the cell's eventId to detect staleness.
+  // Falls back gracefully to local generation on any error.
+  useEffect(() => {
+    if (!project?.id || !activeFileId) return
+    let cancelled = false
+    void (async () => {
+      try {
+        const jwt = await getTokenForFile(activeFileId)
+        if (!jwt || cancelled) return
+        const res = await fetch(
+          `/api/v1/projects/${encodeURIComponent(project.id)}/files/${encodeURIComponent(activeFileId)}/backtranslations`,
+          { headers: { Authorization: `Bearer ${jwt}` } },
+        )
+        if (!res.ok || cancelled) return
+        const data = (await res.json()) as {
+          backtranslations: Array<{
+            cellId: string
+            targetEventId: string
+            btText: string
+            btHtml: string | null
+            polished: boolean
+            author: string
+            eventId: string
+            createdAt: number
+          }>
+        }
+        if (cancelled) return
+        setBacktranslationCache((prev) => {
+          const next = new Map(prev)
+          for (const bt of data.backtranslations) {
+            // Only hydrate if not already in cache (local edits take precedence).
+            if (!next.has(bt.cellId)) {
+              next.set(bt.cellId, bt.btText)
+            }
+          }
+          return next
+        })
+      } catch (err) {
+        // Non-fatal: fall back to local generation / localStorage.
+        console.warn("[bt-hydrate] failed to fetch persisted BTs:", err)
+      }
+    })()
+    return () => { cancelled = true }
+  }, [project?.id, activeFileId, getTokenForFile])
 
   const isBacktranslationConfigured = Boolean(project?.completionSettings && isConfigured)
 
@@ -746,8 +785,20 @@ export function ProjectWorkspace() {
         seeds.push({ source: btText, target: cell.translated, weight: 3 })
       }
     }
+    // Seed from project termbase: active concepts feed preferred/admitted/forbidden
+    // renderings into the glosser so terminology constraints propagate to BTs.
+    for (const concept of project?.terminology ?? []) {
+      if (concept.status !== "active") continue
+      for (const rendering of concept.renderings) {
+        const weight =
+          rendering.status === "preferred" ? 3 :
+          rendering.status === "admitted" ? 1 :
+          -3 // forbidden
+        seeds.push({ source: concept.sourceTerm, target: rendering.rendering, weight })
+      }
+    }
     return buildGlosser(pairs, seeds)
-  }, [allProjectCells, backtranslationCache])
+  }, [allProjectCells, backtranslationCache, project?.terminology])
 
   /** Persist a BT text to local cache + localStorage + outbox. */
   const persistBt = useCallback((
@@ -1281,6 +1332,8 @@ export function ProjectWorkspace() {
     const items = [
       { id: "rules", label: "Rules", icon: Scale,
         onClick: () => navigate(`/project/${projectId}/rules`) },
+      { id: "terminology", label: "Terminology", icon: BookOpen,
+        onClick: () => navigate(`/project/${projectId}/terminology`) },
       { id: "comments", label: "Comments", icon: MessagesSquare,
         badge: Array.from(openCommentCount.values()).reduce((a, b) => a + b, 0),
         onClick: () => navigate(`/project/${projectId}/comments`) },

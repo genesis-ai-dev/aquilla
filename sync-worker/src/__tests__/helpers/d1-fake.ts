@@ -491,8 +491,9 @@ export function makeInMemoryD1(tables: Partial<Tables> = {}): InMemoryD1 {
     }
 
     // ── GET /api/v1/projects/:projectId/files (list) ──────────────────
+    // v3 schema: columns are role, kind, event_id, meta instead of file_type, source_language, target_language
     if (
-      /^SELECT id, project_id, name, file_type, source_language, target_language, cell_count, approved_count, word_count, last_edit_at FROM files WHERE project_id = \? ORDER BY/.test(
+      /^SELECT id, project_id, name, role, kind, event_id, meta, cell_count, approved_count, word_count, last_edit_at FROM files WHERE project_id = \? ORDER BY/.test(
         normalized,
       )
     ) {
@@ -503,9 +504,13 @@ export function makeInMemoryD1(tables: Partial<Tables> = {}): InMemoryD1 {
           id: f.id,
           project_id: f.project_id,
           name: f.name ?? "",
-          file_type: f.file_type ?? "",
-          source_language: f.source_language ?? null,
-          target_language: f.target_language ?? null,
+          role: null,
+          kind: f.file_type ?? null,
+          event_id: "",
+          meta: JSON.stringify({
+            source_language: f.source_language ?? null,
+            target_language: f.target_language ?? null,
+          }),
           cell_count: f.cell_count ?? 0,
           approved_count: f.approved_count ?? 0,
           word_count: f.word_count ?? 0,
@@ -522,8 +527,9 @@ export function makeInMemoryD1(tables: Partial<Tables> = {}): InMemoryD1 {
     }
 
     // ── GET /api/v1/projects/:projectId/files/:fileId (single) ────────
+    // v3 schema: columns are role, kind, event_id, meta instead of file_type, source_language, target_language
     if (
-      /^SELECT id, project_id, name, file_type, source_language, target_language, cell_count, approved_count, word_count, last_edit_at FROM files WHERE project_id = \? AND id = \?$/.test(
+      /^SELECT id, project_id, name, role, kind, event_id, meta, cell_count, approved_count, word_count, last_edit_at FROM files WHERE project_id = \? AND id = \?$/.test(
         normalized,
       )
     ) {
@@ -536,9 +542,13 @@ export function makeInMemoryD1(tables: Partial<Tables> = {}): InMemoryD1 {
           id: f.id,
           project_id: f.project_id,
           name: f.name ?? "",
-          file_type: f.file_type ?? "",
-          source_language: f.source_language ?? null,
-          target_language: f.target_language ?? null,
+          role: null,
+          kind: f.file_type ?? null,
+          event_id: "",
+          meta: JSON.stringify({
+            source_language: f.source_language ?? null,
+            target_language: f.target_language ?? null,
+          }),
           cell_count: f.cell_count ?? 0,
           approved_count: f.approved_count ?? 0,
           word_count: f.word_count ?? 0,

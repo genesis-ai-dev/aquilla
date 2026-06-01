@@ -49,6 +49,9 @@ export type EventKind =
   | 'comment.edit'
   | 'comment.delete'
   | 'comment.resolve'
+  // Back-translations (non-chain-mutating; contributor-level).
+  // Does NOT move cells.event_id; does NOT affect validations or endorsements.
+  | 'cell.backtranslation.set'
 
 // ── Comment scope ─────────────────────────────────────────────────────────
 
@@ -185,6 +188,21 @@ export interface EventPayloads {
   'comment.resolve': {
     commentId: string // top-level only; server noops on a reply id
     resolved: boolean
+  }
+
+  // ── Back-translations (non-chain-mutating) ─────────────────────────────
+  // `btText` is the plain-text back-translation; `btHtml` is the optional
+  // rich rendering. `targetEventId` pins the BT to the target cell commit it
+  // was generated from — a stale BT is one whose targetEventId no longer
+  // matches cells.event_id. `polished` flags that an LLM polish pass was
+  // applied (shows a "polished" badge in the UI per the ai-copilot spec).
+  'cell.backtranslation.set': {
+    btText: string
+    btHtml?: string
+    /** The target.cell.commit / target.cell.create event_id this BT was generated from. */
+    targetEventId: string
+    /** true = LLM-polished BT; false = statistical-only. */
+    polished: boolean
   }
 }
 

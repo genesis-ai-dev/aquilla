@@ -71,6 +71,11 @@ export const REQUIRED_ROLE: Record<EventKind, number> = {
   'comment.edit': ROLE.COMMENTER,
   'comment.delete': ROLE.COMMENTER,
   'comment.resolve': ROLE.COMMENTER,
+
+  // Back-translations: writing a BT is a translator-level action (contributor+).
+  // Viewing BTs is gated only at the read route (viewer+); the write event
+  // is contributor-level matching target.* for consistency.
+  'cell.backtranslation.set': ROLE.CONTRIBUTOR,
 }
 
 export function requiredRoleFor(kind: EventKind): number {

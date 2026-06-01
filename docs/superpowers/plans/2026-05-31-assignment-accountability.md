@@ -8,6 +8,8 @@
 
 **Tech Stack:** Hono + D1 (real-D1 vitest harness for auth-worker; stub-DB + signed-token for sync-worker, per export-route.test.ts); React + RTL.
 
+> **✅ SLICE-1 COMPLETE — all of AS1–AS4 done + committed on `assignment-accountability`.** Backend: migration 0022 + `assignment.*` event family + projector (AS1 `ef3c81c`) + workload/inbox read routes (AS2 `295356a`). Client: `assignments.ts` lib (AS3-lib `fc555df`), "Assign…" on ProjectOverview (AS3-assign `a9e2464`), per-member WorkloadRollup on OrgHome (AS3-rollup `f6720e0`), "Assigned to me" inbox + `/assigned` route + sidebar (AS4 `3999e4e`). **Verified green: client 1345/1345 + sync-worker 389/389 + auth-worker 84/84, tsc clean across all three.** Deferred to post-merge (per "AFTER merge / don't block"): browser-verify after applying migration 0022 to the dev D1.
+
 ---
 
 ### Task AS1: Backend — migration + event family + projector

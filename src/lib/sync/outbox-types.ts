@@ -47,6 +47,11 @@ export type OutboxEventKind =
   | "comment.edit"
   | "comment.delete"
   | "comment.resolve"
+  // Assignments (project-level, non-chain-mutating; project-lead+). Carry a
+  // fileId on the envelope for auth/routing like comment.*; scope is in the payload.
+  | "assignment.create"
+  | "assignment.reassign"
+  | "assignment.unassign"
 
 // ── Comment scope ─────────────────────────────────────────────────────────
 
@@ -177,6 +182,26 @@ export interface OutboxEventPayloads {
   "comment.resolve": {
     commentId: string // top-level only; server noops on a reply id
     resolved: boolean
+  }
+
+  // ── Assignments (project-level, non-chain-mutating) ──────────────────────
+  "assignment.create": {
+    assignmentId: string // client-generated uuidv7 — the assignment's stable key
+    scopeKind: "books" | "chapters"
+    /** One entry per assigned unit; `chapter` present for 'chapters' (e.g.
+     *  { fileId, chapter: "GEN 1" }), fileId-only for 'books'. */
+    scope: { fileId: string; chapter?: string }[]
+    scopeLabel: string
+    assigneeUserId: number
+    deadline?: string | null
+    note?: string | null
+  }
+  "assignment.reassign": {
+    assignmentId: string
+    assigneeUserId: number
+  }
+  "assignment.unassign": {
+    assignmentId: string
   }
 }
 

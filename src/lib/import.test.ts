@@ -42,7 +42,7 @@ const getToken = async () => "test-token"
 
 describe("import — bulk upload", () => {
   it("uploads file.create + N source.cell.create with anchor-chain order", async () => {
-    const ref = await emitParsedFile(
+    const { ref } = await emitParsedFile(
       {
         name: "GEN",
         strings: [
@@ -75,7 +75,7 @@ describe("import — bulk upload", () => {
 
   it("importFile dispatches on extension and uploads cells", async () => {
     const file = new File([new Blob(["alpha\nbeta\ngamma\n"])], "notes.txt", { type: "text/plain" })
-    const refs = await importFile(file, { projectId: "p-7", author: "carol", getToken })
+    const { refs } = await importFile(file, { projectId: "p-7", author: "carol", getToken })
 
     expect(refs).toHaveLength(1)
     expect(refs[0].cellCount).toBeGreaterThan(0)

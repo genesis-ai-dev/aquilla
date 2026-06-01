@@ -14,13 +14,11 @@ import {
   importEBible,
   importParatextProject,
   importParatextAsTarget,
-  buildBulkCellsWithSpeakers,
   type EBibleProgress,
   type ParatextImportProgress,
 } from "@/lib/import"
 import type { FileReference, ProjectTtsSettings } from "@/lib/parsers/types"
 import { buildCastAdditions } from "@/lib/import/cast-from-speakers"
-import { extractVttStrings, extractSrtStrings } from "@/lib/parsers/subtitle"
 import { v7 as uuidv7 } from "uuid"
 import { filesToProjectEntries } from "@/lib/import/file-entries"
 import { detectParatextProject, type ProjectEntry } from "@/lib/parsers/paratext-project"
@@ -177,16 +175,9 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, getT
         for (const file of list) {
           setPhase(`Parsing ${file.name}…`)
           setProgress(null)
-          // For VTT/SRT files, read text once and extract speaker pairs using
-          // the same id-minting path as the real import (via buildBulkCellsWithSpeakers).
-          const ext = file.name.split(".").pop()?.toLowerCase()
-          if ((ext === "vtt" || ext === "srt") && onCastUpdated) {
-            const text = await file.text()
-            const strings = ext === "vtt" ? extractVttStrings(text) : extractSrtStrings(text)
-            const { speakerPairs } = buildBulkCellsWithSpeakers(strings)
-            allSpeakerPairs.push(...speakerPairs)
-          }
-          const refs = await importFile(file, {
+          // importFile returns speakerPairs from the SAME buildBulkCellsWithSpeakers
+          // call that minted the uploaded cells — cellIds are guaranteed to match.
+          const { refs, speakerPairs } = await importFile(file, {
             projectId,
             author: username,
             sourceLanguage,
@@ -198,6 +189,7 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, getT
             },
           })
           allRefs.push(...refs)
+          allSpeakerPairs.push(...speakerPairs)
         }
         // Apply cast additions if any subtitle speakers were found.
         if (onCastUpdated && allSpeakerPairs.some((p) => p.speaker)) {

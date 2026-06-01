@@ -12,16 +12,16 @@
 import JSZip from "jszip"
 import type { CellData } from "@/hooks/useCells"
 import type { ExportFormat } from "@/components/ExportDialog"
-
-/** Formats handled by the project-zip path (excludes server-side USFM and
- *  audio-by-character which has its own orchestrator). */
-export type TextExportFormat = Exclude<ExportFormat, "usfm" | "audio-by-character">
 import { exportPlainText } from "./exporters/plaintext"
 import { exportMarkdown } from "./exporters/markdown"
 import { exportTsv } from "./exporters/tsv"
 import { exportCsv } from "./exporters/csv"
 import { exportXliff } from "./exporters/xliff"
 import { exportTmx } from "./exporters/tmx"
+
+/** Formats handled by the project-zip path (excludes server-side USFM and
+ *  audio-by-character which has its own orchestrator). */
+export type TextExportFormat = Exclude<ExportFormat, "usfm" | "audio-by-character">
 
 export interface ProjectFileCellsInput {
   fileId: string

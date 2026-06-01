@@ -23,7 +23,7 @@ describe("exportAudioByCharacter", () => {
       cell({ id: "c1", selectedAudioId: "a1", attachments: { a1: { url: "frontier-audio://a1.wav", type: "audio/wav" } } }),
       cell({ id: "c2", selectedAudioId: "a2", attachments: { a2: { url: "frontier-audio://a2.wav", type: "audio/wav" } } }),
     ]
-    const blob = await exportAudioByCharacter({
+    const result = await exportAudioByCharacter({
       cells,
       settings: SETTINGS,
       projectId: "p1",
@@ -31,13 +31,14 @@ describe("exportAudioByCharacter", () => {
       fetchBytes: async () => new Uint8Array([1, 2, 3, 4]),
       decode: async () => new Float32Array([0.1, 0.2, 0.3]),
     })
-    const zip = await JSZip.loadAsync(blob)
+    expect(result.skipped).toBe(0)
+    const zip = await JSZip.loadAsync(result.blob)
     const names = Object.keys(zip.files).sort()
     expect(names).toEqual(["Mary_swh.wav", "John_swh.wav"].sort())
   })
 
   it("skips characters with no audio and reports zero entries cleanly", async () => {
-    const blob = await exportAudioByCharacter({
+    const result = await exportAudioByCharacter({
       cells: [cell({ id: "c1" })],
       settings: SETTINGS,
       projectId: "p1",
@@ -45,7 +46,8 @@ describe("exportAudioByCharacter", () => {
       fetchBytes: async () => new Uint8Array(),
       decode: async () => new Float32Array(),
     })
-    const zip = await JSZip.loadAsync(blob)
+    expect(result.skipped).toBe(0)
+    const zip = await JSZip.loadAsync(result.blob)
     expect(Object.keys(zip.files)).toHaveLength(0)
   })
 })

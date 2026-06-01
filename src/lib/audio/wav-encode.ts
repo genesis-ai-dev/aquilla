@@ -26,8 +26,9 @@ export function encodeWavPcm16(samples: Float32Array, sampleRate: number): Blob 
 
   let offset = 44
   for (let i = 0; i < samples.length; i++) {
-    const clamped = Math.max(-1, Math.min(1, samples[i]))
-    dv.setInt16(offset, Math.round(clamped * (clamped < 0 ? 0x8000 : 0x7fff)), true)
+    // Guard non-finite values (NaN/±Infinity) → treat as silence before clamping.
+    const s = Number.isFinite(samples[i]) ? Math.max(-1, Math.min(1, samples[i])) : 0
+    dv.setInt16(offset, Math.round(s * (s < 0 ? 0x8000 : 0x7fff)), true)
     offset += 2
   }
   return new Blob([buffer], { type: "audio/wav" })

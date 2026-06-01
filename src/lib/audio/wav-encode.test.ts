@@ -13,9 +13,11 @@ describe("encodeWavPcm16", () => {
     expect(String.fromCharCode(dv.getUint8(0), dv.getUint8(1), dv.getUint8(2), dv.getUint8(3))).toBe("RIFF")
     // "WAVE"
     expect(String.fromCharCode(dv.getUint8(8), dv.getUint8(9), dv.getUint8(10), dv.getUint8(11))).toBe("WAVE")
-    expect(dv.getUint16(22, true)).toBe(1)       // channels = mono
-    expect(dv.getUint32(24, true)).toBe(48000)   // sample rate
-    expect(dv.getUint16(34, true)).toBe(16)      // bits per sample
+    expect(dv.getUint16(22, true)).toBe(1)           // channels = mono
+    expect(dv.getUint32(24, true)).toBe(48000)       // sample rate
+    expect(dv.getUint32(28, true)).toBe(48000 * 2)   // byte rate = sampleRate * channels * bytesPerSample
+    expect(dv.getUint16(32, true)).toBe(2)           // block align = channels * bytesPerSample
+    expect(dv.getUint16(34, true)).toBe(16)          // bits per sample
     // data chunk size = samples * 2 bytes
     expect(dv.getUint32(40, true)).toBe(5 * 2)
   })

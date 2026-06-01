@@ -5,7 +5,7 @@
 // For non-USFM formats, project scope uses useProjectCells to fan-out over all
 // project files (up to MAX_FILES=40) and buildProjectZip to produce a zip.
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { Download, AlertTriangle, CheckCircle2, Loader2 } from "lucide-react"
 import {
   Dialog,
@@ -140,6 +140,16 @@ export function ExportDialog({
 }: ExportDialogProps) {
   const [format, setFormat] = useState<ExportFormat>(isUsfmFile ? "usfm" : "tsv")
   const [scope, setScope] = useState<ExportScope>("file")
+
+  // audio-by-character only supports file scope — enforce that invariant.
+  const effectiveScope: ExportScope = format === "audio-by-character" ? "file" : scope
+
+  // Reset scope to "file" when switching to audio-by-character.
+  useEffect(() => {
+    if (format === "audio-by-character" && scope === "project") {
+      setScope("file")
+    }
+  }, [format, scope])
   const [status, setStatus] = useState<
     | { kind: "idle" }
     | { kind: "busy"; msg: string }
@@ -153,7 +163,7 @@ export function ExportDialog({
   // Load cells for all project files when project scope is selected and the
   // format is a client-side one. Disabled until the user actually picks
   // project scope so we don't fan-out N fetches on dialog open.
-  const projectScopeEnabled = scope === "project" && format !== "usfm"
+  const projectScopeEnabled = scope === "project" && format !== "usfm" && format !== "audio-by-character"
 
   const { files: projectFileCells, isLoading: projectCellsLoading, isTruncated } =
     useProjectCells({
@@ -168,7 +178,7 @@ export function ExportDialog({
     setStatus({ kind: "busy", msg: "Exporting…" })
     try {
       if (format === "usfm") {
-        if (scope === "project") {
+        if (effectiveScope === "project") {
           const result = await downloadProjectZip({
             projectId,
             projectName,
@@ -195,7 +205,7 @@ export function ExportDialog({
         // getToken is (fileId) => Promise<string|null>; SyncTokenForFile expects
         // (projectId, fileId) — wrap it to match the fetchCellAudio signature.
         const getSyncToken = (_pid: string, fileId: string) => getToken(fileId)
-        const blob = await exportAudioByCharacter({
+        const result = await exportAudioByCharacter({
           cells,
           settings: ttsSettings,
           projectId,
@@ -206,9 +216,10 @@ export function ExportDialog({
           onProgress: (d, t) => setStatus({ kind: "busy", msg: `Decoding ${d}/${t}…` }),
         })
         const safe = (activeFileName ?? "audio").replace(/\.[^.]+$/, "")
-        downloadBlob(blob, `${safe}_audio-by-character.zip`)
-        setStatus({ kind: "ok", msg: "Exported audio by character" })
-      } else if (scope === "project") {
+        downloadBlob(result.blob, `${safe}_audio-by-character.zip`)
+        const skippedNote = result.skipped > 0 ? ` (${result.skipped} clip${result.skipped === 1 ? "" : "s"} skipped)` : ""
+        setStatus({ kind: "ok", msg: `Exported audio by character${skippedNote}` })
+      } else if (effectiveScope === "project") {
         // Client-side project-scope zip: use already-loaded per-file cells.
         if (projectCellsLoading) {
           setStatus({ kind: "busy", msg: "Still loading file cells, please wait…" })
@@ -331,37 +342,49 @@ export function ExportDialog({
             role="radiogroup"
             aria-label="Export scope"
           >
-            {(["file", "project"] as const).map((s) => (
-              <label
-                key={s}
-                className={
-                  "inline-flex h-6 items-center rounded-full px-3 text-[11px] font-medium tracking-tight cursor-pointer transition-colors " +
-                  (scope === s
-                    ? "bg-background text-foreground shadow-sm ring-1 ring-foreground/5"
-                    : "text-muted-foreground hover:text-foreground")
-                }
-              >
-                <input
-                  type="radio"
-                  name="export-scope"
-                  value={s}
-                  checked={scope === s}
-                  onChange={() => setScope(s)}
-                  className="sr-only"
-                />
-                {s === "file" ? "Current file" : "Whole project"}
-              </label>
-            ))}
+            {(["file", "project"] as const).map((s) => {
+              const isProjectDisabled = s === "project" && format === "audio-by-character"
+              return (
+                <label
+                  key={s}
+                  className={
+                    "inline-flex h-6 items-center rounded-full px-3 text-[11px] font-medium tracking-tight transition-colors " +
+                    (isProjectDisabled
+                      ? "cursor-not-allowed opacity-40 text-muted-foreground"
+                      : "cursor-pointer ") +
+                    (effectiveScope === s && !isProjectDisabled
+                      ? "bg-background text-foreground shadow-sm ring-1 ring-foreground/5"
+                      : (!isProjectDisabled ? "text-muted-foreground hover:text-foreground" : ""))
+                  }
+                >
+                  <input
+                    type="radio"
+                    name="export-scope"
+                    value={s}
+                    checked={effectiveScope === s}
+                    onChange={() => !isProjectDisabled && setScope(s)}
+                    disabled={isProjectDisabled}
+                    className="sr-only"
+                  />
+                  {s === "file" ? "Current file" : "Whole project"}
+                </label>
+              )
+            })}
           </div>
+          {format === "audio-by-character" && (
+            <p className="text-[10px] text-muted-foreground mt-0.5">
+              Project scope not supported for audio export.
+            </p>
+          )}
 
           {/* Project-scope notices */}
-          {scope === "project" && format !== "usfm" && projectCellsLoading && (
+          {effectiveScope === "project" && format !== "usfm" && projectCellsLoading && (
             <div className="flex items-center gap-1.5 mt-1">
               <Skeleton className="h-2 w-2 rounded-full shrink-0" />
               <Skeleton className="h-3 w-40" />
             </div>
           )}
-          {scope === "project" && format !== "usfm" && isTruncated && (
+          {effectiveScope === "project" && format !== "usfm" && isTruncated && (
             <p className="flex items-start gap-1.5 text-xs text-amber-600 dark:text-amber-400 mt-1">
               <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" aria-hidden="true" />
               This project has more than 40 files — zip will include the first 40 only.
@@ -372,13 +395,15 @@ export function ExportDialog({
         </fieldset>
 
         {/* Audio-by-character inline preview */}
-        {format === "audio-by-character" && scope === "file" && (
+        {format === "audio-by-character" && effectiveScope === "file" && (() => {
+          const preview = previewAudioByCharacter(cells, ttsSettings)
+          return (
           <div className="flex flex-col gap-1 text-xs">
             <p className="font-medium text-muted-foreground uppercase tracking-wide text-[10px]">Preview</p>
-            {previewAudioByCharacter(cells, ttsSettings).length === 0 ? (
+            {preview.length === 0 ? (
               <p className="text-muted-foreground">No cells with audio found in this file.</p>
             ) : (
-              previewAudioByCharacter(cells, ttsSettings).map((p) => (
+              preview.map((p) => (
                 <div key={p.voiceId} className="flex items-center gap-2">
                   {p.color && (
                     <span
@@ -398,7 +423,8 @@ export function ExportDialog({
               ))
             )}
           </div>
-        )}
+          )
+        })()}
 
         {/* Lossy warning banner */}
         {isLossy && (

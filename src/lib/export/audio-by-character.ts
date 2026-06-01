@@ -122,12 +122,13 @@ export interface ExportAudioArgs {
   onProgress?: (done: number, total: number) => void
 }
 
-export async function exportAudioByCharacter(args: ExportAudioArgs): Promise<Blob> {
+export async function exportAudioByCharacter(args: ExportAudioArgs): Promise<{ blob: Blob; skipped: number }> {
   const groups = groupAudioByCharacter(args.cells, args.settings)
   const zip = new JSZip()
   const usedNames = new Map<string, number>()
   const totalClips = groups.reduce((n, g) => n + g.clips.length, 0)
   let done = 0
+  let skipped = 0
 
   for (const group of groups) {
     const pcmClips: Float32Array[] = []
@@ -135,10 +136,15 @@ export async function exportAudioByCharacter(args: ExportAudioArgs): Promise<Blo
       const cell = args.cells.find((c) => c.id === clip.cellId)!
       const parsed = parseFrontierAudioUrl(clip.url)
       if (!parsed) { done++; args.onProgress?.(done, totalClips); continue }
-      const bytes = await args.fetchBytes({
-        projectId: args.projectId, fileId: cell.fileId, audioId: parsed.audioId, ext: parsed.ext,
-      })
-      if (bytes.length > 0) pcmClips.push(await args.decode(bytes))
+      try {
+        const bytes = await args.fetchBytes({
+          projectId: args.projectId, fileId: cell.fileId, audioId: parsed.audioId, ext: parsed.ext,
+        })
+        if (bytes.length > 0) pcmClips.push(await args.decode(bytes))
+      } catch (err) {
+        console.warn(`[audio-by-character] skipping clip ${clip.audioId} (${clip.cellId}):`, err)
+        skipped++
+      }
       done++
       args.onProgress?.(done, totalClips)
     }
@@ -153,5 +159,6 @@ export async function exportAudioByCharacter(args: ExportAudioArgs): Promise<Blo
     zip.file(name, wav)
   }
 
-  return zip.generateAsync({ type: "blob", compression: "DEFLATE" })
+  const blob = await zip.generateAsync({ type: "blob", compression: "DEFLATE" })
+  return { blob, skipped }
 }

@@ -48,4 +48,16 @@ describe("previewAudioByCharacter", () => {
     expect(mary.clipCount).toBe(2)
     expect(mary.totalDurationMs).toBe(2500)
   })
+
+  it("returns null totalDurationMs when any clip's attachment lacks durationMs", () => {
+    const cells = [
+      cell({ id: "c1", selectedAudioId: "a1", attachments: { a1: { url: "frontier-audio://a1.webm", type: "audio/webm", durationMs: 1000 } } }),
+      // c3 attachment has no durationMs → total becomes unknown
+      cell({ id: "c3", selectedAudioId: "a3", attachments: { a3: { url: "frontier-audio://a3.webm", type: "audio/webm" } } }),
+    ]
+    const preview = previewAudioByCharacter(cells, SETTINGS)
+    const mary = preview.find((p) => p.voiceId === "v-mary")!
+    expect(mary.clipCount).toBe(2)
+    expect(mary.totalDurationMs).toBeNull()
+  })
 })

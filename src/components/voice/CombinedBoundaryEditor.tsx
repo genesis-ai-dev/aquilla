@@ -75,10 +75,12 @@ export function CombinedBoundaryEditor(props: CombinedBoundaryEditorProps) {
   } as unknown as CodexCell), [cells, audioId, url])
 
   const audio = useCellAudio(project, cellForAudio, fileId)
-  const { duration, isPlaying, currentTime, seek, play, pause, setTrim, requestPeaks } = audio
+  const { duration, isPlaying, currentTime, seek, play, pause, setTrim } = audio
 
-  // Decode peaks up front so we get duration without playing.
-  useEffect(() => { void requestPeaks(480) }, [requestPeaks])
+  // The <CellWaveform> below (strategy="eager") decodes peaks on mount, which
+  // also yields `duration` — so we don't issue a second, differently-binned
+  // requestPeaks here (two concurrent decodes raced and surfaced a spurious
+  // "Retry waveform" even when one succeeded).
 
   // N-1 internal cut times (seconds). Initialized proportional to text length
   // once the clip duration is known; the user drags from there.

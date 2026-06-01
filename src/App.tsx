@@ -4,6 +4,7 @@ import { OrgHome } from "@/components/org/OrgHome"
 import { ProjectsList } from "@/components/org/ProjectsList"
 import { ArchivedProjects } from "@/components/org/ArchivedProjects"
 import { ProjectOverview } from "@/components/org/ProjectOverview"
+import { AssignedToMe } from "@/components/org/AssignedToMe"
 import { JoinPage } from "@/components/JoinPage"
 import { OnboardingWizard } from "@/components/onboarding/OnboardingWizard"
 import { DevLoginRoute } from "@/components/DevLoginRoute"
@@ -106,6 +107,7 @@ function AppRoutes() {
         <Route path="/" element={<OrgHome />} />
         <Route path="/projects" element={<ProjectsList />} />
         <Route path="/projects/:id" element={<ProjectOverview />} />
+        <Route path="/assigned" element={<AssignedToMe />} />
         <Route path="/join/:token" element={<JoinPage />} />
         <Route path="/onboarding" element={<OnboardingWizard />} />
         {/* Dev-only auto-login — see components/DevLoginRoute.tsx */}

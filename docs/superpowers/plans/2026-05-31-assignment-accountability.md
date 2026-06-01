@@ -12,7 +12,9 @@
 
 ### Task AS1: Backend — migration + event family + projector
 
-**Files:** create `auth-worker/migrations/0021_assignments.sql`; modify `sync-worker/src/events/types.ts`, `role-policy.ts`, `dispatch.ts`; create `sync-worker/src/events/handlers/assignment-events.ts`; test `sync-worker/src/__tests__/assignment-events.test.ts`.
+> **STATUS: ✅ DONE (commit `ef3c81c` on `assignment-accountability`).** Deliberate deviations from the draft below: (1) migration is **0022** not 0021 — the user's `0021_cell_backtranslations` landed on main first, so I merged current main (`3385df2`) into the branch before building; (2) **no `deleted_at` filter** in the resolver — the sync-worker `cells` projection hard-deletes (no such column); (3) handler is **self-contained** (does NOT delegate to `buildEventProjectionStmts`) because it needs `claims.userId` for `created_by`, which `PersistedEvent` doesn't carry — a documented throwing case keeps the projector exhaustiveness happy; (4) timestamps are INTEGER unix-ms (like comments), `deadline` is an ISO string (like `projects.deadline_at`). sync-worker tsc clean, **389/389 tests pass**.
+
+**Files:** create `auth-worker/migrations/0022_assignments.sql`; modify `sync-worker/src/events/types.ts`, `role-policy.ts`, `dispatch.ts`, `route.ts`, `realtime.ts`, `event-projection.ts`; create `sync-worker/src/events/handlers/assignment-events.ts`; tests `assignment-events.test.ts` (+ `helpers/d1-fake.ts`, `dispatch.test.ts`, `role-policy.test.ts`, `realtime.test.ts`).
 
 - [ ] **Migration `0021_assignments.sql`:**
 

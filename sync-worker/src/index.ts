@@ -20,6 +20,7 @@ import { handleEventsReadRequest } from "./events/read-route"
 import { handleEventsWriteRequest } from "./events/route"
 import { handleFilesReadRequest } from "./events/files-read-route"
 import { handleBulkImportRequest } from "./events/import-route"
+import { handleMigrateIngestRequest } from "./events/migrate-ingest-route"
 import { handleExportSourceRequest } from "./events/export-route"
 import { handleExportBundleRequest } from "./events/export-bundle-route"
 import { handleRebuildProjectionRequest } from "./events/rebuild"
@@ -164,6 +165,8 @@ export default {
     if (branchingSearchResponse) return withCors(branchingSearchResponse, request)
     const bulkImportResponse = await handleBulkImportRequest(request, env)
     if (bulkImportResponse) return bulkImportResponse
+    const migrateIngestResponse = await handleMigrateIngestRequest(request, env)
+    if (migrateIngestResponse) return migrateIngestResponse
     const exportSourceResponse = await handleExportSourceRequest(request, env)
     if (exportSourceResponse) return exportSourceResponse
     const exportBundleResponse = await handleExportBundleRequest(request, env)

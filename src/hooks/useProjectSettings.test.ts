@@ -22,6 +22,70 @@ beforeEach(() => {
 
 afterEach(() => vi.restoreAllMocks())
 
+describe("useProjectSettings — StrictMode race (BUG-TERM-1)", () => {
+  it("applies server settings (incl. rules/sourceLanguage) after StrictMode mount→cleanup→remount", async () => {
+    // Simulate React StrictMode's double-invoke: effect runs, cleanup fires
+    // (which previously set aliveRef.current=false), then effect runs again.
+    // On the OLD code the second mount's fetch resolved AFTER the cleanup had
+    // set aliveRef.current=false, so refresh() hit `if (!aliveRef.current) return null`
+    // and silently dropped the data — server stayed null, hasFetched stayed false
+    // forever — causing ALL synced settings (rules, sourceLanguage, terminology
+    // concepts, etc.) to never appear in the UI.
+
+    // Use a deferred fetch so we control exactly when resolution happens
+    // relative to simulated cleanup.
+    let resolveServerFetch!: (v: any) => void
+    vi.spyOn(restClient, "fetchProjectSettings").mockImplementation(
+      () => new Promise((res) => { resolveServerFetch = res }),
+    )
+
+    const { unmount } = renderHook(() => useProjectSettings("p1", 700))
+
+    // Simulate StrictMode: unmount immediately (cleanup fires, setting
+    // aliveRef.current=false on the old code) then remount in a new renderHook.
+    unmount()
+    const { result: result2 } = renderHook(() => useProjectSettings("p1", 700))
+
+    // Now resolve the fetch on the NEW (surviving) mount — on the old code this
+    // would be swallowed because aliveRef.current===false from the first cleanup;
+    // on the fixed code the surviving mount resets aliveRef.current=true at the
+    // start of its effect, so the fetch lands correctly.
+    act(() => {
+      resolveServerFetch({
+        version: 17,
+        updatedAt: "2026-05-01T00:00:00Z",
+        updatedBy: { id: 1, username: "alex" },
+        settings: {
+          sourceLanguage: "fr",
+          rules: [
+            {
+              id: "r1",
+              name: "Terminology: God→Dieu",
+              description: "Ensure 'God' is translated as 'Dieu'",
+              severity: "major",
+              source: "user",
+              scope: "project",
+              check: { type: "source-requires-target", sourcePattern: "God", targetPattern: "Dieu" },
+              enabled: true,
+              createdAt: "2026-05-01T00:00:00Z",
+            },
+          ],
+        },
+      })
+    })
+
+    // The surviving mount MUST apply the server data.
+    // On the old code: hasFetched===false, server===null — this assertion fails.
+    await waitFor(() => expect(result2.current.hasFetched).toBe(true))
+    expect(result2.current.version).toBe(17)
+    // sourceLanguage from server must override the IDB "en" value
+    expect(result2.current.settings.sourceLanguage).toBe("fr")
+    // rules (terminology concepts) must be present — this would be [] / undefined on old code
+    expect(result2.current.settings.rules).toHaveLength(1)
+    expect(result2.current.settings.rules![0].name).toBe("Terminology: God→Dieu")
+  })
+})
+
 describe("useProjectSettings — read path", () => {
   it("surfaces local IDB values immediately, then merges server values", async () => {
     // Use a deferred fetch so we can observe the local "en" state before the

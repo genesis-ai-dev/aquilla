@@ -10,7 +10,7 @@ vi.mock("./sync-worker-url", () => ({ syncWorkerHttpOrigin: () => "https://sync.
 
 import { fetchWithTimeout } from "../frontier/orgs"
 import { fetchSyncToken } from "./sync-token"
-import { getWorkload, getMyAssignments, createAssignment, AssignmentEmitError } from "./assignments"
+import { getWorkload, getMyAssignments, getFileChapters, createAssignment, AssignmentEmitError } from "./assignments"
 
 const mockFetchWithTimeout = vi.mocked(fetchWithTimeout)
 const mockFetchSyncToken = vi.mocked(fetchSyncToken)
@@ -123,5 +123,22 @@ describe("createAssignment", () => {
     await expect(
       createAssignment({ jwt: "jwt", projectId: "p1", fileId: "f1", author: "wendi", assigneeUserId: 2, scope: [{ fileId: "f1" }], scopeKind: "books", scopeLabel: "Genesis" }),
     ).rejects.toBeInstanceOf(AssignmentEmitError)
+  })
+})
+
+describe("getFileChapters", () => {
+  it("GETs the chapters endpoint and returns the array", async () => {
+    mockFetchWithTimeout.mockResolvedValue(jsonRes({ chapters: ["GEN 1", "GEN 2", "GEN 10"] }))
+    const out = await getFileChapters("jwt", "p1", "f1")
+    expect(mockFetchWithTimeout).toHaveBeenCalledWith(
+      "https://auth.test/api/v2/projects/p1/files/f1/chapters",
+      { headers: { Authorization: "Bearer jwt" } },
+    )
+    expect(out).toEqual(["GEN 1", "GEN 2", "GEN 10"])
+  })
+
+  it("throws on non-ok", async () => {
+    mockFetchWithTimeout.mockResolvedValue(jsonRes({}, false, 403))
+    await expect(getFileChapters("jwt", "p1", "f1")).rejects.toThrow(/HTTP 403/)
   })
 })

@@ -41,7 +41,7 @@ import {
   resolveProjectRoleIncludingArchived,
   ROLE_NAMES,
 } from "../services/project-permissions"
-import { getMyAssignments } from "../services/assignments"
+import { getFileChapters, getMyAssignments } from "../services/assignments"
 import {
   bumpOrgActivity,
   getOrgMemberRole,
@@ -462,6 +462,20 @@ projects.get("/:projectId/assignments/mine", authMiddleware, async (c) => {
   if (!role) return c.json({ error: "no access to project" }, 403)
   const assignments = await getMyAssignments(c.env, projectId, user.id)
   return c.json({ assignments })
+})
+
+/**
+ * GET /api/v2/projects/:projectId/files/:fileId/chapters — distinct chapters
+ * present in a file (for the assign picker's chapter dropdown). Any member.
+ */
+projects.get("/:projectId/files/:fileId/chapters", authMiddleware, async (c) => {
+  const user = c.get("user")
+  const projectId = c.req.param("projectId") as string
+  const fileId = c.req.param("fileId") as string
+  const role = await resolveProjectRole(c.env, user, projectId)
+  if (!role) return c.json({ error: "no access to project" }, 403)
+  const chapters = await getFileChapters(c.env, projectId, fileId)
+  return c.json({ chapters })
 })
 
 projects.get("/:projectId/members", authMiddleware, async (c) => {

@@ -56,6 +56,20 @@ export async function getMyAssignments(jwt: string, projectId: string): Promise<
   return ((await res.json()) as { assignments: MyAssignment[] }).assignments
 }
 
+/**
+ * Distinct chapters in a file (for the assign picker's chapter dropdown).
+ * Natural-sorted server-side; each value feeds createAssignment's
+ * `scope[].chapter` (→ resolver LIKE 'GEN 1:%') directly. Any project member.
+ */
+export async function getFileChapters(jwt: string, projectId: string, fileId: string): Promise<string[]> {
+  const res = await fetchWithTimeout(
+    `${FRONTIER_BASE}/api/v2/projects/${encodeURIComponent(projectId)}/files/${encodeURIComponent(fileId)}/chapters`,
+    { headers: { Authorization: `Bearer ${jwt}` } },
+  )
+  if (!res.ok) throw new Error(`getFileChapters failed: HTTP ${res.status}`)
+  return ((await res.json()) as { chapters: string[] }).chapters
+}
+
 export class AssignmentEmitError extends Error {
   readonly status?: number
   constructor(message: string, status?: number) {

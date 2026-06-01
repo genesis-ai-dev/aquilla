@@ -3,13 +3,14 @@ import { render, screen, waitFor, fireEvent } from "@testing-library/react"
 import { AssignWork } from "./AssignWork"
 
 vi.mock("@/lib/frontier/orgs", () => ({ listOrgMembers: vi.fn() }))
-vi.mock("@/lib/sync/assignments", () => ({ createAssignment: vi.fn() }))
+vi.mock("@/lib/sync/assignments", () => ({ createAssignment: vi.fn(), getFileChapters: vi.fn() }))
 
 import { listOrgMembers } from "@/lib/frontier/orgs"
-import { createAssignment } from "@/lib/sync/assignments"
+import { createAssignment, getFileChapters } from "@/lib/sync/assignments"
 
 const mockList = vi.mocked(listOrgMembers)
 const mockCreate = vi.mocked(createAssignment)
+const mockChapters = vi.mocked(getFileChapters)
 
 const members = [
   { userId: 2, username: "anna", role: { level: 400, name: "contributor" } },
@@ -26,7 +27,10 @@ function renderAssign(onAssigned = vi.fn()) {
   )
 }
 
-beforeEach(() => vi.clearAllMocks())
+beforeEach(() => {
+  vi.clearAllMocks()
+  mockChapters.mockResolvedValue([]) // default: no chapters unless a test sets them
+})
 afterEach(() => vi.restoreAllMocks())
 
 describe("AssignWork", () => {
@@ -65,15 +69,19 @@ describe("AssignWork", () => {
     expect(await screen.findByText(/Assigned John to anna/)).toBeInTheDocument()
   })
 
-  it("emits a chapter-scope assignment when a chapter is entered", async () => {
+  it("emits a chapter-scope assignment when a chapter is picked from the dropdown", async () => {
     mockList.mockResolvedValue(members)
+    mockChapters.mockResolvedValue(["GEN 1", "GEN 2"])
     mockCreate.mockResolvedValue("as-2")
     renderAssign()
 
     fireEvent.click(screen.getByRole("button", { name: "Assign…" }))
     await waitFor(() => expect(screen.getByRole("option", { name: "anna" })).toBeInTheDocument())
+    // The file's chapters load into the dropdown (alongside "Whole book").
+    await waitFor(() => expect(screen.getByRole("option", { name: "GEN 1" })).toBeInTheDocument())
+    expect(screen.getByRole("option", { name: "Whole book" })).toBeInTheDocument()
     fireEvent.change(screen.getByLabelText("Assignee"), { target: { value: "2" } })
-    fireEvent.change(screen.getByLabelText("Chapter (optional)"), { target: { value: "GEN 1" } })
+    fireEvent.change(screen.getByLabelText("Chapter"), { target: { value: "GEN 1" } })
     fireEvent.click(screen.getByRole("button", { name: "Assign" }))
 
     await waitFor(() =>
@@ -85,6 +93,7 @@ describe("AssignWork", () => {
         }),
       ),
     )
+    expect(mockChapters).toHaveBeenCalledWith("jwt", "p1", "f1")
   })
 
   it("surfaces a server rejection (e.g. role too low)", async () => {

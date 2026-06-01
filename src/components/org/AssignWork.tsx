@@ -1,12 +1,13 @@
 import { useState, useEffect } from "react"
 import { listOrgMembers, type OrgMember } from "@/lib/frontier/orgs"
-import { createAssignment } from "@/lib/sync/assignments"
+import { createAssignment, getFileChapters } from "@/lib/sync/assignments"
 
 /**
  * Manager affordance (project_lead+) on the project overview: assign a book or
  * chapter scope to an org member. Collapsed to an "Assign…" button until
  * opened; emits one assignment.create on submit. Book scope = whole file;
- * chapter scope = a canonical_ref prefix (e.g. "GEN 1") matched server-side.
+ * chapter scope = a real chapter picked from the file's chapter dropdown
+ * (the canonical_ref prefix, e.g. "GEN 1", matched server-side via LIKE).
  */
 export interface AssignWorkProps {
   projectId: string
@@ -26,6 +27,7 @@ export function AssignWork({ projectId, files, orgId, jwt, author, onAssigned }:
   const [assigneeId, setAssigneeId] = useState<number | "">("")
   const [fileId, setFileId] = useState(files[0]?.id ?? "")
   const [chapter, setChapter] = useState("")
+  const [chapters, setChapters] = useState<string[]>([])
   const [deadline, setDeadline] = useState("")
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -39,6 +41,18 @@ export function AssignWork({ projectId, files, orgId, jwt, author, onAssigned }:
       .catch((e) => { if (!cancelled) setError(e instanceof Error ? e.message : String(e)) })
     return () => { cancelled = true }
   }, [open, jwt, orgId])
+
+  // Load the selected file's chapters for the dropdown; reset the picked
+  // chapter when the file changes so a stale chapter can't leak across books.
+  useEffect(() => {
+    if (!open || !fileId) return
+    let cancelled = false
+    setChapter("")
+    getFileChapters(jwt, projectId, fileId)
+      .then((cs) => { if (!cancelled) setChapters(cs) })
+      .catch(() => { if (!cancelled) setChapters([]) })
+    return () => { cancelled = true }
+  }, [open, fileId, jwt, projectId])
 
   async function submit() {
     if (assigneeId === "" || !fileId) return
@@ -111,14 +125,18 @@ export function AssignWork({ projectId, files, orgId, jwt, author, onAssigned }:
             <option key={f.id} value={f.id}>{f.name}</option>
           ))}
         </select>
-        <input
-          aria-label="Chapter (optional)"
-          placeholder="Chapter e.g. GEN 1 (optional)"
+        <select
+          aria-label="Chapter"
           value={chapter}
           onChange={(e) => setChapter(e.target.value)}
           disabled={busy}
           className="rounded-md border bg-background px-2 py-1 text-sm"
-        />
+        >
+          <option value="">Whole book</option>
+          {chapters.map((ch) => (
+            <option key={ch} value={ch}>{ch}</option>
+          ))}
+        </select>
         <input
           type="date"
           aria-label="Deadline (optional)"

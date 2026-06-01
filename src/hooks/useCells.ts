@@ -19,6 +19,7 @@ import { streamFileCells, fetchCellsByIds } from "@/lib/sync/cells-read"
 import type { CellRow } from "@/lib/sync/cells-read-types"
 import { readCellsCache, writeCellsCache } from "@/lib/sync/cells-cache"
 import { peekOutboxBatch, subscribeToOutbox } from "@/lib/sync/outbox"
+import { formatVttTime } from "@/lib/video/vtt-generator"
 
 /**
  * Per-edit summary used by the validation popover timeline. Was previously
@@ -122,13 +123,6 @@ function deriveStatus(
   return validated ? "validated" : "unvalidated"
 }
 
-function fmtVtt(sec: number): string {
-  const h = String(Math.floor(sec / 3600)).padStart(2, "0")
-  const m = String(Math.floor((sec % 3600) / 60)).padStart(2, "0")
-  const s = String(Math.floor(sec % 60)).padStart(2, "0")
-  const ms = String(Math.round((sec - Math.floor(sec)) * 1000)).padStart(3, "0")
-  return `${h}:${m}:${s}.${ms}`
-}
 
 /**
  * Build one CellData from a (source row, target row) pair. Either may be
@@ -169,7 +163,7 @@ export function buildCellData(
   const startTime = startMs != null ? startMs / 1000 : undefined
   const endTime = endMs != null ? endMs / 1000 : undefined
   const cueContext =
-    startMs != null && endMs != null ? `${fmtVtt(startMs / 1000)} --> ${fmtVtt(endMs / 1000)}` : ""
+    startMs != null && endMs != null ? `${formatVttTime(startMs / 1000)} --> ${formatVttTime(endMs / 1000)}` : ""
 
   return {
     id: cellId,

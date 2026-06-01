@@ -560,6 +560,10 @@ export function makeInMemoryD1(tables: Partial<Tables> = {}): InMemoryD1 {
     }
 
     // ── GET /api/v1/projects/:projectId/files/:fileId/cells ────────────
+    // Prefix-match intentional: the production SELECT always appends start_ms, end_ms after
+    // endorsement_count, so matching only through endorsement_count handles both
+    // timecode-aware and older column lists. The hasTimecodes check below conditionally
+    // includes start_ms/end_ms in the returned rows.
     if (
       /^SELECT cell_id, side, value, value_html, type, canonical_ref, anchor_cell_id, event_id, source_event_id, last_editor, last_edit_at, validated, word_count, endorsement_count/.test(
         normalized,
@@ -768,7 +772,9 @@ export function makeInMemoryD1(tables: Partial<Tables> = {}): InMemoryD1 {
     }
 
     // ── INSERT cells (cell create handlers) ─────────────────────────────
-    // Matches both old (without start_ms/end_ms) and new (with start_ms/end_ms) column lists.
+    // Prefix-match intentional: the production query always appends start_ms, end_ms after
+    // content_hash, so matching only through content_hash lets this handler cover both
+    // the timecode-carrying (new) and legacy (old) column lists without forking.
     if (/^INSERT INTO cells \(\s*project_id, file_id, cell_id, side, value, value_html, type, canonical_ref, anchor_cell_id, event_id, source_event_id, last_editor, last_edit_at, validated, word_count, content_hash/.test(
       normalized,
     )) {

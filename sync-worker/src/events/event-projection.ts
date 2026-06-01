@@ -195,8 +195,8 @@ export function buildEventProjectionStmts(
       const anchorCellId = p.anchorCellId ?? null
       const hash = contentHash(value)
       const wordCount = countWords(value)
-      const startMs = (p as { startMs?: number }).startMs ?? null
-      const endMs = (p as { endMs?: number }).endMs ?? null
+      const startMs = p.startMs ?? null
+      const endMs = p.endMs ?? null
 
       // Both create kinds are genesis events on the cell's chain — their
       // event_id IS the new row's chain head. source_event_id is null on
@@ -283,6 +283,9 @@ export function buildEventProjectionStmts(
         const tp = p as EventPayloads['target.cell.commit']
         const sourceEventId = tp.sourceEventId ?? null
 
+        // NOTE: start_ms/end_ms are intentionally NOT written here — they are set once at
+        // *.cell.create time and never overwritten by target commits.
+        //
         // UPSERT, not UPDATE: the client never emits `target.cell.create` —
         // the first translation of a cell arrives straight as a
         // `target.cell.commit`, and import only seeds source-side rows. A

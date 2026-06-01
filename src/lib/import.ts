@@ -212,8 +212,7 @@ export function buildBulkCells(strings: TranslatableString[]): BulkImportCell[] 
       ...(str.originalHtml ? { valueHtml: str.originalHtml } : {}),
       ...(str.type !== undefined ? { type: str.type } : {}),
       ...(str.group ? { canonicalRef: str.group } : {}),
-      ...(str.start !== undefined ? { startMs: Math.round(str.start * 1000) } : {}),
-      ...(str.end !== undefined ? { endMs: Math.round(str.end * 1000) } : {}),
+      ...(str.start !== undefined && str.end !== undefined ? { startMs: Math.round(str.start * 1000), endMs: Math.round(str.end * 1000) } : {}),
     })
     prevCellId = cellId
   }

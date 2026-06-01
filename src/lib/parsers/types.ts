@@ -30,6 +30,11 @@ export interface TranslatableString {
    * Section labels in the sidebar are derived from these when present.
    */
   globalReferences?: string[]
+  /** Cue start/end in seconds, parsed from a subtitle timestamp line. Present
+   *  only for `type: "cue"` strings from VTT/SRT import; drives `start_ms`/
+   *  `end_ms` persistence. */
+  start?: number
+  end?: number
   type: CellType
   sourceLocation?: SourceLocation
 }

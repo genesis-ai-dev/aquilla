@@ -77,6 +77,7 @@ function localSettingsFrom(
     void apiKey
     out.ttsSettings = ttsRest
   }
+  if (record.terminology != null) out.terminology = record.terminology
   return out
 }
 
@@ -173,6 +174,9 @@ export function useProjectSettings(
             : {}),
           ...(got.settings.validationCountAudio != null
             ? { validationCountAudio: got.settings.validationCountAudio }
+            : {}),
+          ...(got.settings.terminology != null
+            ? { terminology: got.settings.terminology }
             : {}),
         }))
       } catch (err) {

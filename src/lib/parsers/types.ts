@@ -294,6 +294,11 @@ export interface ProjectRecord {
     fetchedAt: string
   }
   usage?: ProjectUsage
+  /** Project terminology / glossary concepts. Persisted and synced via
+   *  ProjectWideSettings (same mechanism as `rules`). Active concepts are
+   *  compiled to TranslationRule instances at rule-evaluation time — violations
+   *  are DERIVED on read, no materialized verdicts. */
+  terminology?: import("@/lib/terminology/types").Concept[]
 }
 
 export interface ProjectSyncSettings {

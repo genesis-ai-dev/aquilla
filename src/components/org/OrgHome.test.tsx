@@ -41,6 +41,10 @@ vi.mock("@/lib/frontier/portfolio", async (importActual) => {
   }
 })
 
+// WorkloadRollup fetches this; empty here so it renders nothing and the
+// portfolio-focused assertions below are unaffected.
+vi.mock("@/lib/sync/assignments", () => ({ getWorkload: vi.fn(async () => []) }))
+
 beforeEach(() => localStorage.clear())
 afterEach(() => vi.restoreAllMocks())
 

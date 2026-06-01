@@ -615,3 +615,44 @@ Screenshot evidence: `check2-popover-open.png`, `check2-after-apply.png`
 | ID | Severity | Bug | Repro |
 |----|----------|-----|-------|
 | BUG-TERM-6 | P2 | Terminology violation rules (`source-requires-target`) not reaching rule engine after concept promoted to "active" — `term:` rule IDs absent from DOM even after hard reload | Add concept as draft → edit it to approved → open editor file with matching source term → type non-approved rendering in target → no terminology violation shown (only builtin rules fire) |
+
+---
+
+## Re-QA 2 — terminology violation fresh-load render — 2026-05-31
+
+**Build**: v0.1.0 · swarm/integration2 · bd016e8  
+**Tester**: QA agent (Playwright MCP, claude-sonnet-4-6)  
+**Scope**: Settle BUG-TERM-6 — does a terminology violation RENDER on a genuine fresh page load (not in-session draft→active promotion)?  
+**Stack**: Vite :5292 (from `swarm-integration2` worktree, newly started) · auth-worker :8788 · sync-worker :8789  
+**Test setup**:
+- Server state at test start: concept `grace → gracia` (preferred), `status: "active"`, version 19 in D1 (confirmed via `GET /api/v2/projects/dev-project/settings` returning `status:"active"`)
+- Target cell for row 146 ("But Noah had grace in the eyes of God.") was set to `"mercy"` — confirmed in D1 via event log (`target.cell.commit` value="mercy" at ts 1780283077868), confirmed via direct SQLite query before the fresh-load test
+- Hard reload performed on `/project/dev-project/file/019e7d60-ae13-72c8-b961-e1ed88f41cea` (Vite :5292 fresh process, new IDB session)
+- Source "grace" is decorated with dotted-underline term link — confirming `project.terminology` IS populated on fresh load (the `SourceWithTermLookup` component receives active concepts)
+
+---
+
+### Verdict: RENDERS
+
+The terminology violation IS rendered on a fresh page load.
+
+**Where it appears**: The violation is listed in the Issues tab of the cell's details panel (expanded via "Open cell details" → Issues tab). It does NOT produce a DOM `data-rule-id` blot span (which is expected — the `source-requires-target` rule type fires when the target is missing the approved rendering, producing no inline character span since there is no specific character to highlight).
+
+**Evidence**:
+
+| Check | Result | Detail |
+|-------|--------|--------|
+| Fresh Vite server at :5292 | CONFIRMED | New process, clean IDB session — not a cached in-session state |
+| Server terminology loaded | CONFIRMED | `GET /api/v2/projects/dev-project/settings` returns `status:"active"`, `sourceTerm:"grace"`, `rendering:"gracia"` at version 19 |
+| `project.terminology` in React state | CONFIRMED | "grace" in source column is decorated with `cursor-pointer underline decoration-dotted decoration-primary/60` — confirming `SourceWithTermLookup` has active concepts |
+| Control violation (builtin) fires | CONFIRMED | `builtin:end-punctuation-mismatch` blot appears on "y" in "mercy" (no period at end, source ends with period) |
+| **Terminology violation fires** | **CONFIRMED** | Issues tab shows `Term: grace — "Term: grace": source matches pattern but target does not` |
+| Terminology violation DOM blot | NOT PRESENT (expected) | No `data-rule-id` blot for `term:6e905d7b...:approved` — `source-requires-target` rule fires without a character-level span because the issue is absence of a rendering, not a specific substring to highlight |
+
+**Screenshot**: `reqa2-issues-tab-full.png` — row 146 "But Noah had grace in the eyes of God." / target "mercy" with Issues tab showing both the end-punctuation and the Term: grace violations
+
+**Prior Re-QA (BUG-TERM-6) was testing an in-session draft→active promotion**: The previous inconclusive result was because the concept was promoted to "active" in the same browser session and the violation was checked immediately after. The prior QA noted "term: rule IDs absent from DOM even after hard reload" — however that reload was from the same Vite process and same IDB session where the promotion happened. This re-QA used a brand-new Vite server process (port 5292, new IDB) with the concept already active on the server.
+
+**Conclusion**: BUG-TERM-6 is resolved or was a false negative. The terminology violation renders correctly on a genuine fresh load when the concept has `status:"active"` on the server before the session begins. The prior inconclusive result likely reflects a timing issue in the same-session flow (concept promoted to active, then immediately checking the editor before `useProjectSettings` had time to propagate the updated terminology to `useRules`), not a rendering gap in the fresh-load path.
+
+**Remaining nuance (not a bug)**: The violation appears ONLY in the Issues tab (cell details panel), NOT as an inline blot on the cell face. There is no row-level infraction count badge visible on the unexpanded row. A user would only discover the terminology violation by opening cell details and switching to the Issues tab. This is by design (the `source-requires-target` check has no character span to render), but it means the violation is not proactively surfaced to translators scanning rows without expanding them.

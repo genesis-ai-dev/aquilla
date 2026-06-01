@@ -24,13 +24,14 @@ import { exportTsv } from "@/lib/export/exporters/tsv"
 import { exportCsv } from "@/lib/export/exporters/csv"
 import { exportXliff } from "@/lib/export/exporters/xliff"
 import { exportTmx } from "@/lib/export/exporters/tmx"
+import { exportVtt } from "@/lib/export/exporters/vtt"
 import { buildProjectZip } from "@/lib/export/project-zip-export"
 import { previewAudioByCharacter } from "@/lib/export/audio-by-character"
 import { useProjectCells } from "@/hooks/useProjectCells"
 import type { CellData } from "@/hooks/useCells"
 import type { ProjectTtsSettings } from "@/lib/parsers/types"
 
-export type ExportFormat = "usfm" | "txt" | "md" | "tsv" | "csv" | "xlf" | "tmx" | "audio-by-character"
+export type ExportFormat = "usfm" | "txt" | "md" | "tsv" | "csv" | "xlf" | "tmx" | "vtt" | "audio-by-character"
 export type ExportScope = "file" | "project"
 
 interface FormatOption {
@@ -92,6 +93,13 @@ const FORMAT_OPTIONS: FormatOption[] = [
     lossy: true,
   },
   {
+    id: "vtt",
+    label: "WebVTT (subtitles)",
+    ext: ".vtt",
+    description: "Subtitle file with timed cues. Cast-assigned cells are wrapped in <v Name> voice tags for round-trip speaker identity.",
+    lossy: true,
+  },
+  {
     id: "audio-by-character",
     label: "Audio by character",
     ext: ".zip",
@@ -141,12 +149,12 @@ export function ExportDialog({
   const [format, setFormat] = useState<ExportFormat>(isUsfmFile ? "usfm" : "tsv")
   const [scope, setScope] = useState<ExportScope>("file")
 
-  // audio-by-character only supports file scope — enforce that invariant.
-  const effectiveScope: ExportScope = format === "audio-by-character" ? "file" : scope
+  // audio-by-character and vtt only support file scope — enforce that invariant.
+  const effectiveScope: ExportScope = (format === "audio-by-character" || format === "vtt") ? "file" : scope
 
-  // Reset scope to "file" when switching to audio-by-character.
+  // Reset scope to "file" when switching to a file-only format.
   useEffect(() => {
-    if (format === "audio-by-character" && scope === "project") {
+    if ((format === "audio-by-character" || format === "vtt") && scope === "project") {
       setScope("file")
     }
   }, [format, scope])
@@ -163,7 +171,7 @@ export function ExportDialog({
   // Load cells for all project files when project scope is selected and the
   // format is a client-side one. Disabled until the user actually picks
   // project scope so we don't fan-out N fetches on dialog open.
-  const projectScopeEnabled = scope === "project" && format !== "usfm" && format !== "audio-by-character"
+  const projectScopeEnabled = scope === "project" && format !== "usfm" && format !== "audio-by-character" && format !== "vtt"
 
   const { files: projectFileCells, isLoading: projectCellsLoading, isTruncated } =
     useProjectCells({
@@ -228,7 +236,7 @@ export function ExportDialog({
         setStatus({ kind: "busy", msg: `Building zip for ${projectFileCells.length} files…` })
         const zipBlob = await buildProjectZip({
           files: projectFileCells,
-          format,
+          format: format as import("@/lib/export/project-zip-export").TextExportFormat,
           sourceLanguage,
           targetLanguage,
         })
@@ -260,6 +268,9 @@ export function ExportDialog({
             break
           case "tmx":
             blob = exportTmx(cells, sourceLanguage, targetLanguage)
+            break
+          case "vtt":
+            blob = exportVtt(cells, ttsSettings)
             break
           default:
             throw new Error(`Unknown format: ${format}`)

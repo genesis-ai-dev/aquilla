@@ -19,9 +19,10 @@ import { exportCsv } from "./exporters/csv"
 import { exportXliff } from "./exporters/xliff"
 import { exportTmx } from "./exporters/tmx"
 
-/** Formats handled by the project-zip path (excludes server-side USFM and
- *  audio-by-character which has its own orchestrator). */
-export type TextExportFormat = Exclude<ExportFormat, "usfm" | "audio-by-character">
+/** Formats handled by the project-zip path (excludes server-side USFM,
+ *  audio-by-character which has its own orchestrator, and vtt which needs
+ *  per-project ttsSettings not available in the zip path). */
+export type TextExportFormat = Exclude<ExportFormat, "usfm" | "audio-by-character" | "vtt">
 
 export interface ProjectFileCellsInput {
   fileId: string

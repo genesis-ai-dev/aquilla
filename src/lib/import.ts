@@ -195,6 +195,32 @@ export async function importEBible(
 }
 
 /**
+ * Map parsed `TranslatableString[]` to `BulkImportCell[]`, chaining cells via
+ * `anchorCellId` and threading timecodes when present. Exported so tests can
+ * exercise the mapping in isolation.
+ */
+export function buildBulkCells(strings: TranslatableString[]): BulkImportCell[] {
+  const cells: BulkImportCell[] = []
+  let prevCellId: string | null = null
+  for (const str of strings) {
+    const cellId = str.id || uuidv7()
+    cells.push({
+      id: uuidv7(),
+      cellId,
+      anchorCellId: prevCellId,
+      value: str.original,
+      ...(str.originalHtml ? { valueHtml: str.originalHtml } : {}),
+      ...(str.type !== undefined ? { type: str.type } : {}),
+      ...(str.group ? { canonicalRef: str.group } : {}),
+      ...(str.start !== undefined ? { startMs: Math.round(str.start * 1000) } : {}),
+      ...(str.end !== undefined ? { endMs: Math.round(str.end * 1000) } : {}),
+    })
+    prevCellId = cellId
+  }
+  return cells
+}
+
+/**
  * Build `file.create` + N chained `source.cell.create` and stream them to the
  * server's bulk-import endpoint. Returns a `FileReference` once every cell has
  * landed. Throws (with a human-readable message) if the upload fails.
@@ -208,23 +234,7 @@ export async function emitParsedFile(
 
   // Chain cells via anchorCellId: the first cell's anchor is null (genesis —
   // first in file); each subsequent cell anchors on the prior cell's id.
-  const cells: BulkImportCell[] = []
-  let prevCellId: string | null = null
-  for (const str of result.strings) {
-    // Use the parser-supplied id when present (USFM gives stable verse refs);
-    // otherwise mint a fresh UUIDv7.
-    const cellId = str.id || uuidv7()
-    cells.push({
-      id: uuidv7(),
-      cellId,
-      anchorCellId: prevCellId,
-      value: str.original,
-      ...(str.originalHtml ? { valueHtml: str.originalHtml } : {}),
-      ...(str.type !== undefined ? { type: str.type } : {}),
-      ...(str.group ? { canonicalRef: str.group } : {}),
-    })
-    prevCellId = cellId
-  }
+  const cells = buildBulkCells(result.strings)
 
   await bulkUploadSource({
     projectId: ctx.projectId,

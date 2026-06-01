@@ -27,6 +27,10 @@ export interface BulkImportCell {
   valueHtml?: string
   type?: string
   canonicalRef?: string
+  /** Cue start/end in milliseconds (subtitle import). Persisted to the cells
+   *  projection so VTT/character export survives reload. */
+  startMs?: number
+  endMs?: number
 }
 
 export interface BulkImportFileMeta {

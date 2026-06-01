@@ -212,7 +212,7 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, getT
         setPhase("")
       }
     },
-    [projectId, username, sourceLanguage, targetLanguage, getToken, onImported]
+    [projectId, username, sourceLanguage, targetLanguage, getToken, onImported, ttsSettings, onCastUpdated]
   )
 
   function handleDrop(e: React.DragEvent) {

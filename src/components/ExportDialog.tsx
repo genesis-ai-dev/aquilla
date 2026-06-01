@@ -355,7 +355,7 @@ export function ExportDialog({
             aria-label="Export scope"
           >
             {(["file", "project"] as const).map((s) => {
-              const isProjectDisabled = s === "project" && format === "audio-by-character"
+              const isProjectDisabled = s === "project" && (format === "audio-by-character" || format === "vtt")
               return (
                 <label
                   key={s}
@@ -383,9 +383,9 @@ export function ExportDialog({
               )
             })}
           </div>
-          {format === "audio-by-character" && (
+          {(format === "audio-by-character" || format === "vtt") && (
             <p className="text-[10px] text-muted-foreground mt-0.5">
-              Project scope not supported for audio export.
+              Project scope not supported for this format.
             </p>
           )}
 

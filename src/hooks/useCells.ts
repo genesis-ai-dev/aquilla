@@ -122,12 +122,20 @@ function deriveStatus(
   return validated ? "validated" : "unvalidated"
 }
 
+function fmtVtt(sec: number): string {
+  const h = String(Math.floor(sec / 3600)).padStart(2, "0")
+  const m = String(Math.floor((sec % 3600) / 60)).padStart(2, "0")
+  const s = String(Math.floor(sec % 60)).padStart(2, "0")
+  const ms = String(Math.round((sec - Math.floor(sec)) * 1000)).padStart(3, "0")
+  return `${h}:${m}:${s}.${ms}`
+}
+
 /**
  * Build one CellData from a (source row, target row) pair. Either may be
  * undefined — source-only cells produce a CellData with empty `translated`;
  * target-only cells produce one with empty `original`.
  */
-function buildCellData(
+export function buildCellData(
   cellId: string,
   source: CellRow | undefined,
   target: CellRow | undefined,
@@ -156,6 +164,13 @@ function buildCellData(
   const validatedForStatus =
     target?.validated ?? activeValidators.length >= requiredValidations
 
+  const startMs = source?.startMs ?? target?.startMs ?? null
+  const endMs = source?.endMs ?? target?.endMs ?? null
+  const startTime = startMs != null ? startMs / 1000 : undefined
+  const endTime = endMs != null ? endMs / 1000 : undefined
+  const cueContext =
+    startMs != null && endMs != null ? `${fmtVtt(startMs / 1000)} --> ${fmtVtt(endMs / 1000)}` : ""
+
   return {
     id: cellId,
     fileId,
@@ -166,7 +181,7 @@ function buildCellData(
     sourceEventId: source?.eventId,
     targetEventId: target?.eventId,
     targetSourceEventId: target?.sourceEventId ?? null,
-    context: "",
+    context: cueContext,
     group: target?.canonicalRef ?? source?.canonicalRef ?? "",
     type: target?.type ?? source?.type ?? "text",
     status: deriveStatus(translated, validatedForStatus),
@@ -179,6 +194,8 @@ function buildCellData(
     globalReferences: source?.canonicalRef ? [source.canonicalRef] : undefined,
     waivers: stats?.waivers ?? EMPTY_WAIVERS,
     lastEditAt: target?.lastEditAt ?? source?.lastEditAt,
+    startTime,
+    endTime,
   }
 }
 

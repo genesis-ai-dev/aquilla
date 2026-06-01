@@ -55,6 +55,9 @@ export interface CellRow {
   validated: boolean
   wordCount: number
   endorsementCount?: number
+  /** Cue start/end in milliseconds; null for non-subtitle cells. */
+  startMs?: number | null
+  endMs?: number | null
 }
 
 /** Pagination response shape. */

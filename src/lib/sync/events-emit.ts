@@ -359,6 +359,47 @@ export async function emitCellAudioRemove(input: CellAudioRemoveInput): Promise<
   return eventId
 }
 
+// ── Back-translation helper ───────────────────────────────────────────────
+
+export interface CellBacktranslationSetInput {
+  projectId: string
+  fileId: string
+  cellId: string
+  btText: string
+  btHtml?: string
+  /** The target.cell.commit event_id this BT describes. */
+  targetEventId: string
+  polished: boolean
+  author: string
+  clientTs?: number
+}
+
+/**
+ * Emit a `cell.backtranslation.set` event — non-chain-mutating (parentId
+ * omitted). The payload pins the BT to a specific `targetEventId` so the
+ * client can detect staleness when the target cell is later edited.
+ */
+export async function emitCellBacktranslationSet(
+  input: CellBacktranslationSetInput,
+): Promise<string> {
+  const { eventId } = await enqueueEvent({
+    kind: "cell.backtranslation.set",
+    projectId: input.projectId,
+    fileId: input.fileId,
+    cellId: input.cellId,
+    parentId: null,
+    author: input.author,
+    payload: {
+      btText: input.btText,
+      ...(input.btHtml !== undefined ? { btHtml: input.btHtml } : {}),
+      targetEventId: input.targetEventId,
+      polished: input.polished,
+    },
+    clientTs: input.clientTs,
+  })
+  return eventId
+}
+
 // ── Importer helpers (consumed by Phase 2c-β `import.ts` rewrite) ─────────
 
 export interface SourceCellCreateInput {

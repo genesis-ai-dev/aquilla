@@ -250,7 +250,8 @@ export async function handleEventsWriteRequest(
       rawEvent.kind !== 'comment.create' &&
       rawEvent.kind !== 'comment.edit' &&
       rawEvent.kind !== 'comment.delete' &&
-      rawEvent.kind !== 'comment.resolve'
+      rawEvent.kind !== 'comment.resolve' &&
+      rawEvent.kind !== 'cell.backtranslation.set'
     // Strict AD-2 first-child-of-parent for every chain-mutating event,
     // commits included. Per the spec (03-data-model.md §AD-2): the first
     // commit accepted at a given parent_id wins the chain slot; later

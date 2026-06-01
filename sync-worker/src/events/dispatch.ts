@@ -96,6 +96,17 @@ export function dispatchEvent(
         ),
       }
 
+    case 'cell.backtranslation.set':
+      return {
+        ok: true,
+        result: handleCellEvent(
+          db,
+          authed as AuthorizedEvent<CellEventKind>,
+          serverTs,
+          opts,
+        ),
+      }
+
     default: {
       // Exhaustiveness check.
       const exhaustive: never = kind

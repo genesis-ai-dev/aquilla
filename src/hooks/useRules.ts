@@ -10,6 +10,7 @@ import type {
 import { patchProject } from "@/lib/store/project-index"
 import { resolveBuiltinRules } from "@/lib/lqa/builtin-resolver"
 import type { ProjectWideSettings } from "@/lib/sync/project-settings"
+import { compileConceptsToRules } from "@/lib/terminology/compile"
 
 /**
  * Optional callback that syncs the given partial settings slice to D1.
@@ -25,17 +26,26 @@ export function useRules(
   const userRules = project?.rules || []
   const algorithmicChecks = project?.algorithmicChecks
   const penalties: RulePenalties = project?.rulePenalties || { major: 15, minor: 5 }
+  const terminology = project?.terminology
 
   const builtinRules = useMemo(
     () => resolveBuiltinRules(algorithmicChecks),
     [algorithmicChecks],
   )
 
+  // Terminology concepts compiled to TranslationRule instances (derived on read).
+  const terminologyRules = useMemo(
+    () => compileConceptsToRules(terminology ?? []),
+    [terminology],
+  )
+
   // Built-ins first so they appear at the top of the rule pipeline. Order
   // doesn't affect correctness (each rule is independent) but is stable.
+  // Terminology rules append after user rules so user rules take precedence
+  // in any display ordering.
   const rules = useMemo(
-    () => [...builtinRules, ...userRules],
-    [builtinRules, userRules],
+    () => [...builtinRules, ...userRules, ...terminologyRules],
+    [builtinRules, userRules, terminologyRules],
   )
 
   const addRule = useCallback(async (rule: Omit<TranslationRule, "id" | "createdAt">) => {

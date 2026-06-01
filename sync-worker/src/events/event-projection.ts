@@ -156,7 +156,7 @@ function fileCountersRecomputeStmt(
 }
 
 /** Caller hint: which projection tables this event will touch. */
-export type ProjectionTouches = 'cells' | 'cell_validators' | 'cell_waivers' | 'files' | 'cell_audio' | 'comments'
+export type ProjectionTouches = 'cells' | 'cell_validators' | 'cell_waivers' | 'files' | 'cell_audio' | 'comments' | 'cell_backtranslations'
 
 /**
  * Apply one event to the projection (without the AD-2 sibling guard — the
@@ -820,6 +820,48 @@ case 'cell.audio.attach': {
           .bind(p.resolved ? 1 : 0, event.serverTs, p.commentId),
       )
       return ['comments']
+    }
+
+    case 'cell.backtranslation.set': {
+      // Non-chain-mutating: does NOT move cells.event_id, does NOT touch
+      // cell_validators or endorsement_count. Upserts into cell_backtranslations,
+      // keying the latest BT per (project_id, file_id, cell_id). Historical BTs
+      // are queryable via the target_event_id key.
+      const p = event.payload as EventPayloads['cell.backtranslation.set']
+      if (!event.fileId || !event.cellId) {
+        throw new Error(`${event.kind} event ${event.id} is missing fileId or cellId`)
+      }
+      stmts.push(
+        db
+          .prepare(
+            `INSERT INTO cell_backtranslations (
+              project_id, file_id, cell_id, target_event_id,
+              bt_text, bt_html, polished, author, event_id, server_seq, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(project_id, file_id, cell_id, target_event_id) DO UPDATE SET
+              bt_text     = excluded.bt_text,
+              bt_html     = excluded.bt_html,
+              polished    = excluded.polished,
+              author      = excluded.author,
+              event_id    = excluded.event_id,
+              server_seq  = excluded.server_seq,
+              created_at  = excluded.created_at`,
+          )
+          .bind(
+            event.projectId,
+            event.fileId,
+            event.cellId,
+            p.targetEventId,
+            p.btText,
+            p.btHtml ?? null,
+            p.polished ? 1 : 0,
+            event.author,
+            event.id,
+            event.serverSeq ?? null,
+            event.serverTs,
+          ),
+      )
+      return ['cell_backtranslations']
     }
 
     default: {

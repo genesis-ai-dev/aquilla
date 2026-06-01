@@ -56,7 +56,7 @@ import {
   setCqrsOutboxBridge,
   buildFileScopedTokenFetcher,
 } from "@/lib/sync/cqrs-bridge"
-import { emitTargetCellCommit } from "@/lib/sync/events-emit"
+import { emitTargetCellCommit, emitCellBacktranslationSet } from "@/lib/sync/events-emit"
 import { flushOutboxBatch } from "@/lib/sync/outbox-flush"
 import { useCellsAuditStatsWithOverlay } from "@/hooks/useCellsAuditStatsWithOverlay"
 import { Film, Scale, MessagesSquare, Share2, Settings as SettingsIcon, Lock, ClipboardList, Trash2, Undo2, Search as SearchIcon, Sparkles, Mic2, Download, BookMarked } from "lucide-react"
@@ -98,6 +98,7 @@ import {
   workspaceReturnPath,
 } from "@/lib/ad11/navigation"
 import { generateBacktranslation } from "@/lib/completion/backtranslation-service"
+import { buildGlosser, type BtSeed } from "@/lib/completion/bt-glosser"
 
 // Import runs inline in the workspace (upload + eBible corpus tabs). The
 // AD-11 plan carves import into a standalone apps/import Worker, but that
@@ -704,55 +705,167 @@ export function ProjectWorkspace() {
     project?.completionSettings, project?.sourceLanguage || "", project?.targetLanguage || "", branchingSearch, branchingSearchPassages, frontierSession, commitCompletedCell, rules, allProjectCells
   )
 
-  // Backtranslation: display-only path. The service generates a backtranslation
-  // via LLM and we store it in local React state so the expansion tab can render
-  // it immediately. Writing the result back via sync-worker events is not yet
-  // wired (the event schema is in-flight) — results are ephemeral for this session.
+  // ── Back-translation: statistical primary path + optional LLM polish ────────
   //
-  // SWARM-TODO(backtranslation-write): persist the generated text by emitting a
-  // `target.cell.backtranslation.set` event (or equivalent) through the outbox
-  // once the sync-worker projection adds a handler for that event type.
+  // Generation strategy (per spec):
+  //  1. Statistical Markov glosser over all translated (source↔target) pairs.
+  //     Runs synchronously — no network, always succeeds.
+  //  2. Optional LLM polish step when `polished: true` — calls generateBacktranslation.
+  //
+  // Persistence:
+  //  - On generate: emit `cell.backtranslation.set` via outbox (non-chain-mutating).
+  //  - Local in-memory cache (`backtranslationCache`) so UI is instant.
+  //  - localStorage fallback so results survive page reload before server round-trip.
+  //
+  // SWARM-TODO(ws-bt-read-route): hydrate persisted BTs on load from the
+  // `cell-backtranslations-read` route once the WS-BT-EVENT agent wires it.
+  // The route returns events of kind `cell.backtranslation.set`; read the latest
+  // per cell and apply to the cells projection (backtranslation + backtranslationForText).
+  // Guard with a try/catch so the UI degrades gracefully to local generation if the
+  // route isn't available yet.
+
   const [backtranslationCache, setBacktranslationCache] = useState<Map<string, string>>(new Map())
   const [backtranslatingState, setBacktranslatingState] = useState<Set<string>>(new Set())
   const [backtranslationErrorsState, setBacktranslationErrorsState] = useState<Map<string, string>>(new Map())
 
   const isBacktranslationConfigured = Boolean(project?.completionSettings && isConfigured)
 
+  // Build the glosser from ALL translated pairs in the project. Memoized on
+  // allProjectCells so it only rebuilds when the corpus changes.
+  const glosser = useMemo(() => {
+    const pairs = allProjectCells
+      .filter((c) => c.original?.trim() && c.translated?.trim())
+      .map((c) => ({ source: c.original!, target: c.translated }))
+    // High-weight seeds from previous user-corrected BTs stored in the cache.
+    // Corrected BTs (saved via onSaveBacktranslation) are re-fed as seeds so
+    // future glosses reflect the reviewer's intent.
+    const seeds: BtSeed[] = []
+    for (const [cellId, btText] of backtranslationCache) {
+      const cell = allProjectCells.find((c) => c.id === cellId)
+      if (cell?.translated) {
+        seeds.push({ source: btText, target: cell.translated, weight: 3 })
+      }
+    }
+    return buildGlosser(pairs, seeds)
+  }, [allProjectCells, backtranslationCache])
+
+  /** Persist a BT text to local cache + localStorage + outbox. */
+  const persistBt = useCallback((
+    cell: CellData,
+    btText: string,
+    polished: boolean,
+  ) => {
+    // 1. In-memory cache
+    setBacktranslationCache((prev) => new Map(prev).set(cell.id, btText))
+
+    // 2. localStorage fallback (survives reload before server round-trip)
+    try {
+      const lsKey = `bt:${project?.id ?? ""}:${cell.id}`
+      localStorage.setItem(lsKey, JSON.stringify({
+        btText,
+        polished,
+        targetEventId: cell.targetEventId ?? "",
+        savedAt: Date.now(),
+      }))
+    } catch { /* ignore quota/private-browsing errors */ }
+
+    // 3. Outbox event
+    if (!project?.id || !cell.fileId || !cell.targetEventId) {
+      console.warn("[bt-persist] missing project/file/targetEventId — skipping outbox emit")
+      return
+    }
+    void emitCellBacktranslationSet({
+      projectId: project.id,
+      fileId: cell.fileId,
+      cellId: cell.id,
+      btText,
+      targetEventId: cell.targetEventId,
+      polished,
+      author: currentUsername,
+    }).catch((err) => {
+      console.warn("[bt-persist] outbox emit failed:", err)
+    })
+  }, [project?.id, currentUsername])
+
+  /** Statistical gloss + optional LLM polish. Called by the BT tab's Generate button. */
   const runBacktranslation = useCallback(async (cell: CellData) => {
-    if (!project?.completionSettings || !isConfigured) return
     if (!cell.translated?.trim()) return
     const cellId = cell.id
     setBacktranslatingState((prev) => new Set(prev).add(cellId))
     setBacktranslationErrorsState((prev) => { const n = new Map(prev); n.delete(cellId); return n })
     try {
-      const result = await generateBacktranslation({
-        settings: project.completionSettings,
-        session: frontierSession,
-        sourceLanguage: project.sourceLanguage || "English",
-        targetLanguage: project.targetLanguage || "Unknown",
-        targetText: cell.translated,
-        examples: [],
-      })
-      setBacktranslationCache((prev) => new Map(prev).set(cellId, result))
+      // Step 1: statistical gloss (always runs)
+      let btText = glosser.gloss(cell.translated)
+      if (!btText.trim()) {
+        btText = cell.translated // last-resort literal fallback
+      }
+
+      // Step 2: LLM polish if configured and available
+      // (Polish toggle is per-tab; we use `isBacktranslationConfigured` as a
+      //  proxy for "polish wanted" here — the per-cell polish flag lives in the
+      //  EditorRow's local state and calls onSaveBacktranslation for user edits.)
+      let polished = false
+      if (isBacktranslationConfigured && project?.completionSettings) {
+        try {
+          btText = await generateBacktranslation({
+            settings: project.completionSettings,
+            session: frontierSession,
+            sourceLanguage: project.sourceLanguage || "English",
+            targetLanguage: project.targetLanguage || "Unknown",
+            targetText: cell.translated,
+            examples: [],
+          })
+          polished = true
+        } catch (polishErr) {
+          // Polish failed — keep statistical result, surface a non-fatal warning
+          console.warn("[bt] LLM polish failed, using statistical result:", polishErr)
+        }
+      }
+
+      setBacktranslationCache((prev) => new Map(prev).set(cellId, btText))
+      persistBt(cell, btText, polished)
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
       setBacktranslationErrorsState((prev) => new Map(prev).set(cellId, msg))
     } finally {
       setBacktranslatingState((prev) => { const n = new Set(prev); n.delete(cellId); return n })
     }
-  }, [project?.completionSettings, project?.sourceLanguage, project?.targetLanguage, isConfigured, frontierSession])
+  }, [glosser, isBacktranslationConfigured, project?.completionSettings, project?.sourceLanguage, project?.targetLanguage, frontierSession, persistBt])
 
-  // Merge ephemeral backtranslation results into the cells array for display.
-  // The server projection's `backtranslation` field takes precedence only when
-  // we have no local result (i.e. the user hasn't re-generated this session).
+  /** Called when a user manually saves an edited BT from the BT tab. */
+  const saveBacktranslation = useCallback((cell: CellData, btText: string, polished: boolean) => {
+    setBacktranslationCache((prev) => new Map(prev).set(cell.id, btText))
+    persistBt(cell, btText, polished)
+  }, [persistBt])
+
+  // Merge in-memory BT cache into cells array for display.
+  // Also restore localStorage BTs for cells not yet in the cache (reload recovery).
   const cellsWithBacktranslation = useMemo(() => {
-    if (backtranslationCache.size === 0) return cells
     return cells.map((c) => {
       const local = backtranslationCache.get(c.id)
-      if (!local) return c
-      return { ...c, backtranslation: local, backtranslationForText: c.translated }
+      if (local) {
+        return { ...c, backtranslation: local, backtranslationForText: c.translated }
+      }
+      // Reload recovery: check localStorage
+      if (!c.backtranslation && project?.id) {
+        try {
+          const lsKey = `bt:${project.id}:${c.id}`
+          const raw = localStorage.getItem(lsKey)
+          if (raw) {
+            const { btText, targetEventId } = JSON.parse(raw) as {
+              btText: string; targetEventId: string
+            }
+            return {
+              ...c,
+              backtranslation: btText,
+              backtranslationForText: targetEventId === c.targetEventId ? c.translated : "",
+            }
+          }
+        } catch { /* ignore */ }
+      }
+      return c
     })
-  }, [cells, backtranslationCache])
+  }, [cells, backtranslationCache, project?.id])
 
   const backtranslating = backtranslatingState
   const backtranslationErrors = backtranslationErrorsState
@@ -1654,6 +1767,7 @@ export function ProjectWorkspace() {
             }}
             isBacktranslationConfigured={isBacktranslationConfigured}
             onBacktranslate={runBacktranslation}
+            onSaveBacktranslation={saveBacktranslation}
             backtranslating={backtranslating}
             backtranslationErrors={backtranslationErrors}
             cellOpenCommentCount={cellOpenCommentCount}

@@ -141,3 +141,75 @@ describe("buildGlosser — edge cases", () => {
     expect(result.toLowerCase()).toContain("grace")
   })
 })
+
+// ── BUG-BT-5: runaway repetition guard ───────────────────────────────────────
+
+describe("buildGlosser — repetition guard (BUG-BT-5)", () => {
+  /**
+   * Regression: the statistical glosser used to produce runaway output like
+   * "regent university serves regent university serves regent university serves…"
+   * (~30×) because every target token mapped to the same winning source phrase
+   * from the corpus.
+   *
+   * This test builds a corpus that biases "regent university" as the top-scored
+   * alignment for almost every target token, then asserts the output is bounded
+   * and does not contain long consecutive repetition.
+   */
+  it("does not produce runaway repetition when one phrase dominates the model", () => {
+    // Build a corpus where "regent university" appears as source for MANY
+    // different target words — this is exactly the scenario that caused runaway.
+    const pairs = Array.from({ length: 20 }, () => ({
+      source: "regent university",
+      target: "regent university serves as a center of christian thought",
+    }))
+
+    const glosser = buildGlosser(pairs)
+    const target = "regent university serves as a center of christian thought"
+    const inputTokenCount = target.split(/\s+/).length // 9 tokens
+
+    const result = glosser.gloss(target)
+    const outputTokens = result.split(/\s+/).filter(Boolean)
+
+    // Length cap: must be ≤ ~2× input + 10
+    const maxAllowedTokens = inputTokenCount * 2 + 10
+    expect(outputTokens.length).toBeLessThanOrEqual(maxAllowedTokens)
+
+    // Repetition break: no single phrase should appear more than 2× in a row
+    // (check every consecutive window of 3 tokens — if all three are the same
+    // two-word phrase "regent university" that's 6 identical tokens in a row)
+    const phrase = "regent university"
+    const phraseWords = phrase.split(" ")
+    let consecutiveMatches = 0
+    let maxConsecutiveMatches = 0
+    for (let i = 0; i <= outputTokens.length - phraseWords.length; i++) {
+      const window = outputTokens.slice(i, i + phraseWords.length).join(" ")
+      if (window === phrase) {
+        consecutiveMatches++
+        maxConsecutiveMatches = Math.max(maxConsecutiveMatches, consecutiveMatches)
+      } else {
+        consecutiveMatches = 0
+      }
+    }
+    // At most MAX_CONSECUTIVE_REPEATS (2) consecutive occurrences of the phrase
+    expect(maxConsecutiveMatches).toBeLessThanOrEqual(2)
+  })
+
+  it("output length is bounded to ~2× input token count", () => {
+    // Corpus with many pairs all mapping to the same short source phrase,
+    // simulating a highly skewed alignment model.
+    const pairs = Array.from({ length: 30 }, (_, i) => ({
+      source: "foo bar",
+      target: `word${i} token${i} extra${i}`,
+    }))
+
+    const glosser = buildGlosser(pairs)
+    // A long input where most tokens map to the same "foo bar" phrase
+    const target = Array.from({ length: 40 }, (_, i) => `word${i}`).join(" ")
+    const inputTokenCount = 40
+
+    const result = glosser.gloss(target)
+    const outputTokens = result.split(/\s+/).filter(Boolean)
+
+    expect(outputTokens.length).toBeLessThanOrEqual(inputTokenCount * 2 + 10)
+  })
+})

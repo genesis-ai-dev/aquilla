@@ -139,15 +139,43 @@ function buildAlignmentModel(
 // ── Gloss generation ──────────────────────────────────────────────────────────
 
 /**
+ * Maximum output token count relative to input.
+ * A back-translation should be roughly as long as the source, never 2× longer.
+ */
+const OUTPUT_LENGTH_FACTOR = 2
+const OUTPUT_LENGTH_ABS_CAP = 10 // extra headroom for short inputs
+
+/**
+ * How many consecutive times the same emitted phrase may appear before the
+ * repetition guard fires and falls back to the literal token.
+ */
+const MAX_CONSECUTIVE_REPEATS = 2
+
+/**
  * For each target token, find the best-scoring source phrase.
  * Uses greedy left-to-right decoding: try the longest matching n-gram first,
  * fall back to shorter n-grams, fall back to the literal token.
+ *
+ * Guards against runaway output:
+ *  - Length cap: stops when output tokens exceed ~2× the input token count.
+ *  - Repetition break: if the same emitted phrase appears more than
+ *    MAX_CONSECUTIVE_REPEATS times in a row, falls back to the literal token.
  */
 function glossTokens(tokens: string[], model: AlignmentMap, maxN: number): string[] {
   const output: string[] = []
+  // Length cap: 2× input tokens + small absolute buffer
+  const maxOutputTokens = tokens.length * OUTPUT_LENGTH_FACTOR + OUTPUT_LENGTH_ABS_CAP
+
+  // Repetition tracking: last emitted phrase and its consecutive run count
+  let lastEmittedPhrase = ""
+  let consecutiveCount = 0
+
   let i = 0
 
   while (i < tokens.length) {
+    // ── Length cap guard ─────────────────────────────────────────────────────
+    if (output.length >= maxOutputTokens) break
+
     let matched = false
 
     // Try longest n-gram down to unigram
@@ -167,6 +195,20 @@ function glossTokens(tokens: string[], model: AlignmentMap, maxN: number): strin
       }
 
       if (bestScore > 0 && bestSrc) {
+        // ── Repetition break guard ─────────────────────────────────────────
+        // Track consecutive runs of the same emitted phrase.
+        if (bestSrc === lastEmittedPhrase) {
+          consecutiveCount++
+        } else {
+          consecutiveCount = 1
+          lastEmittedPhrase = bestSrc
+        }
+
+        if (consecutiveCount > MAX_CONSECUTIVE_REPEATS) {
+          // Phrase is cycling — fall through to literal fallback below
+          break
+        }
+
         output.push(bestSrc)
         i += n
         matched = true
@@ -176,7 +218,15 @@ function glossTokens(tokens: string[], model: AlignmentMap, maxN: number): strin
 
     if (!matched) {
       // Literal fallback — keep the target token as-is
-      output.push(tokens[i])
+      const literal = tokens[i]
+      // Reset repetition counter since we're emitting a literal
+      if (literal === lastEmittedPhrase) {
+        consecutiveCount++
+      } else {
+        consecutiveCount = 1
+        lastEmittedPhrase = literal
+      }
+      output.push(literal)
       i++
     }
   }

@@ -53,6 +53,8 @@ import { isPerfLogEnabled } from "@/lib/perf-log"
 import { partitionInfractions } from "@/lib/rules/waivers"
 import { ViolationPopover } from "./ViolationPopover"
 import type { RangeHighlight } from "./HighlightedText"
+import { TermLookupPopover } from "./TermLookupPopover"
+import type { Concept } from "@/lib/terminology/types"
 
 // Per-row render counter. Always accumulated when perf logging is on (cheap)
 // but NOT auto-logged — render logs would flood the console and push the
@@ -1129,6 +1131,117 @@ interface EditorRowProps {
   getTokenForFile?: (fileId: string) => Promise<string | null>
 }
 
+// ────────────────────────────────────────────────────────────────────────────
+// SourceWithTermLookup — renders source plain text with per-word
+// TermLookupPopover triggers for any word that matches an active concept.
+// Words that have no matching concept render as plain text (no popover cost).
+// When no concepts are configured the component falls back to a plain
+// HighlightedText so there's zero overhead on projects that don't use
+// the terminology feature.
+// ────────────────────────────────────────────────────────────────────────────
+
+interface SourceWithTermLookupProps {
+  text: string
+  highlights: ReturnType<typeof buildHighlightsFromExamples>
+  ranges: RangeHighlight[]
+  showEvidence: boolean
+  onRangeClick?: (ruleId: string, anchor: HTMLElement) => void
+  concepts: Concept[]
+  onTermApply: (rendering: string) => void
+}
+
+function SourceWithTermLookup({
+  text,
+  highlights,
+  ranges,
+  showEvidence,
+  onRangeClick,
+  concepts,
+  onTermApply,
+}: SourceWithTermLookupProps) {
+  // All hooks must run unconditionally before any early return.
+  const activeConcepts = useMemo(
+    () => concepts.filter((c) => c.status === "active"),
+    [concepts],
+  )
+
+  // Build a normalized concept index keyed by lowercased sourceTerm for O(1)
+  // per-word lookup. We do exact-word match (normalized, case-insensitive)
+  // per the task spec: "normalized, case-insensitive match against
+  // concept.sourceTerm". Both the raw lowercase and a punctuation-stripped
+  // form are checked so "God," and "God" both resolve.
+  const conceptIndex = useMemo(() => {
+    const idx = new Map<string, Concept[]>()
+    for (const c of activeConcepts) {
+      const key = c.sourceTerm.toLowerCase()
+      const existing = idx.get(key)
+      if (existing) existing.push(c)
+      else idx.set(key, [c])
+    }
+    return idx
+  }, [activeConcepts])
+
+  // Tokenize the source text into words + inter-word whitespace segments.
+  const tokens = useMemo(() => tokenizeWords(text), [text])
+
+  // Fast path: no active concepts → plain HighlightedText, zero popover cost.
+  if (activeConcepts.length === 0) {
+    return (
+      <div className="text-sm">
+        <HighlightedText
+          text={text}
+          highlights={highlights}
+          ranges={ranges}
+          showEvidence={showEvidence}
+          onRangeClick={onRangeClick}
+        />
+      </div>
+    )
+  }
+
+  // Build the inline spans: whitespace gaps between tokens are plain text;
+  // tokens are wrapped with TermLookupPopover when they match a concept.
+  const parts: React.ReactNode[] = []
+  let cursor = 0
+  for (let i = 0; i < tokens.length; i++) {
+    const { word, start, end } = tokens[i]
+    // Whitespace between previous token and this one.
+    if (start > cursor) {
+      parts.push(<React.Fragment key={`ws-${i}`}>{text.slice(cursor, start)}</React.Fragment>)
+    }
+    // Check raw lowercase and punctuation-stripped form so "God," → "god" matches "God".
+    const normalizedWord = word.toLowerCase().replace(/[^\p{L}\p{N}]/gu, "")
+    const matchedConcepts = conceptIndex.get(word.toLowerCase()) ?? conceptIndex.get(normalizedWord)
+    if (matchedConcepts && matchedConcepts.length > 0) {
+      parts.push(
+        <TermLookupPopover
+          key={`term-${i}`}
+          sourceTerm={word}
+          concepts={activeConcepts}
+          onApply={onTermApply}
+        >
+          <span className="cursor-pointer underline decoration-dotted decoration-primary/60 underline-offset-2 hover:decoration-primary">
+            {word}
+          </span>
+        </TermLookupPopover>,
+      )
+    } else {
+      parts.push(<React.Fragment key={`w-${i}`}>{word}</React.Fragment>)
+    }
+    cursor = end
+  }
+  // Trailing whitespace after last token.
+  if (cursor < text.length) {
+    parts.push(<React.Fragment key="ws-tail">{text.slice(cursor)}</React.Fragment>)
+  }
+
+  return (
+    <div className="text-sm">
+      {parts}
+    </div>
+  )
+}
+
 function EditorRow({
   project, cell, username, editable, isCompletionConfigured, isCompletionAvailable, isLoading,
   completionPreview, loadingPhase,
@@ -1267,6 +1380,15 @@ function EditorRow({
       console.warn("[editor-commit] enqueue failed:", err)
     })
   }, [editable, project.id, cell.fileId, cell.id, cell.targetEventId, cell.sourceEventId, username, onCellCommitted, onOptimisticEdit, lockHolderLabel])
+
+  // Terminology apply: insert the chosen rendering into the target cell.
+  // Appends to any existing target text so the translator can click multiple
+  // terms in sequence. Uses the same commit path as keyboard edits.
+  const handleTermApply = useCallback((rendering: string) => {
+    const existing = cell.translated?.trim() ?? ""
+    const next = existing ? `${existing} ${rendering}` : rendering
+    handleEditorCommit({ value: next, valueHtml: next })
+  }, [cell.translated, handleEditorCommit])
 
   const emitValidationChange = useCallback((validated: boolean) => {
     const editEventId = cell.targetEventId ?? pendingTargetEventIdRef.current
@@ -1908,15 +2030,15 @@ function EditorRow({
                 dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(cell.originalHtml) }}
               />
             ) : (
-              <div className="text-sm">
-                <HighlightedText
-                  text={cell.original}
-                  highlights={highlights}
-                  ranges={sourceRanges}
-                  showEvidence={examplesExpanded}
-                  onRangeClick={openInlineRule}
-                />
-              </div>
+              <SourceWithTermLookup
+                text={cell.original}
+                highlights={highlights}
+                ranges={sourceRanges}
+                showEvidence={examplesExpanded}
+                onRangeClick={openInlineRule}
+                concepts={project.terminology ?? []}
+                onTermApply={handleTermApply}
+              />
             )}
             {cellExamples.length > 0 && (
               <ExamplePanel

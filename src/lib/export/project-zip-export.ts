@@ -12,6 +12,10 @@
 import JSZip from "jszip"
 import type { CellData } from "@/hooks/useCells"
 import type { ExportFormat } from "@/components/ExportDialog"
+
+/** Formats handled by the project-zip path (excludes server-side USFM and
+ *  audio-by-character which has its own orchestrator). */
+export type TextExportFormat = Exclude<ExportFormat, "usfm" | "audio-by-character">
 import { exportPlainText } from "./exporters/plaintext"
 import { exportMarkdown } from "./exporters/markdown"
 import { exportTsv } from "./exporters/tsv"
@@ -25,7 +29,7 @@ export interface ProjectFileCellsInput {
   cells: CellData[]
 }
 
-const FORMAT_EXT: Record<Exclude<ExportFormat, "usfm">, string> = {
+const FORMAT_EXT: Record<TextExportFormat, string> = {
   txt: ".txt",
   md: ".md",
   tsv: ".tsv",
@@ -39,7 +43,7 @@ const FORMAT_EXT: Record<Exclude<ExportFormat, "usfm">, string> = {
  */
 export function exportFileCells(
   cells: CellData[],
-  format: Exclude<ExportFormat, "usfm">,
+  format: TextExportFormat,
   sourceLanguage: string,
   targetLanguage: string,
 ): Blob {
@@ -60,7 +64,7 @@ export function exportFileCells(
 
 export interface BuildProjectZipOptions {
   files: ProjectFileCellsInput[]
-  format: Exclude<ExportFormat, "usfm">
+  format: TextExportFormat
   sourceLanguage?: string
   targetLanguage?: string
 }

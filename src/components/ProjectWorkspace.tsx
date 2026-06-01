@@ -1997,6 +1997,7 @@ export function ProjectWorkspace() {
           projectFiles={project.files.map((f) => ({ id: f.id, name: f.name, type: f.type }))}
           sourceLanguage={project.sourceLanguage}
           targetLanguage={project.targetLanguage}
+          ttsSettings={tts.settings}
           getToken={getTokenForFile}
         />
       </Suspense>

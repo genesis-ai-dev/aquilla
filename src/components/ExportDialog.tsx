@@ -25,10 +25,12 @@ import { exportCsv } from "@/lib/export/exporters/csv"
 import { exportXliff } from "@/lib/export/exporters/xliff"
 import { exportTmx } from "@/lib/export/exporters/tmx"
 import { buildProjectZip } from "@/lib/export/project-zip-export"
+import { previewAudioByCharacter } from "@/lib/export/audio-by-character"
 import { useProjectCells } from "@/hooks/useProjectCells"
 import type { CellData } from "@/hooks/useCells"
+import type { ProjectTtsSettings } from "@/lib/parsers/types"
 
-export type ExportFormat = "usfm" | "txt" | "md" | "tsv" | "csv" | "xlf" | "tmx"
+export type ExportFormat = "usfm" | "txt" | "md" | "tsv" | "csv" | "xlf" | "tmx" | "audio-by-character"
 export type ExportScope = "file" | "project"
 
 interface FormatOption {
@@ -89,6 +91,13 @@ const FORMAT_OPTIONS: FormatOption[] = [
     description: "Translation memory exchange — segments with source + target.",
     lossy: true,
   },
+  {
+    id: "audio-by-character",
+    label: "Audio by character",
+    ext: ".zip",
+    description: "One WAV per cast member — each character's clips concatenated, best-available audio (recording → generated). Concatenated order = document order. Trim-honoring deferred; clips export full-length.",
+    lossy: false,
+  },
 ]
 
 interface ExportDialogProps {
@@ -108,6 +117,9 @@ interface ExportDialogProps {
   projectFiles: { id: string; name: string; type: string }[]
   sourceLanguage?: string
   targetLanguage?: string
+  /** Project TTS settings including cast assignments and voice library.
+   *  Required for "audio-by-character" export; safe to omit for other formats. */
+  ttsSettings?: ProjectTtsSettings
   getToken: (fileId: string) => Promise<string | null>
 }
 
@@ -123,6 +135,7 @@ export function ExportDialog({
   projectFiles,
   sourceLanguage = "und",
   targetLanguage = "und",
+  ttsSettings,
   getToken,
 }: ExportDialogProps) {
   const [format, setFormat] = useState<ExportFormat>(isUsfmFile ? "usfm" : "tsv")
@@ -174,6 +187,27 @@ export function ExportDialog({
           await downloadSourceFile({ projectId, fileId: activeFileId, downloadName, getToken })
           setStatus({ kind: "ok", msg: `Exported ${downloadName}` })
         }
+      } else if (format === "audio-by-character") {
+        setStatus({ kind: "busy", msg: "Decoding audio…" })
+        const { exportAudioByCharacter } = await import("@/lib/export/audio-by-character")
+        const { decodeToMono48k } = await import("@/lib/audio/decode-mono")
+        const { fetchCellAudio } = await import("@/lib/audio/upload")
+        // getToken is (fileId) => Promise<string|null>; SyncTokenForFile expects
+        // (projectId, fileId) — wrap it to match the fetchCellAudio signature.
+        const getSyncToken = (_pid: string, fileId: string) => getToken(fileId)
+        const blob = await exportAudioByCharacter({
+          cells,
+          settings: ttsSettings,
+          projectId,
+          langCode: targetLanguage || "und",
+          fetchBytes: ({ projectId: pid, fileId, audioId, ext }) =>
+            fetchCellAudio({ projectId: pid, fileId, audioId, ext, getSyncToken }),
+          decode: decodeToMono48k,
+          onProgress: (d, t) => setStatus({ kind: "busy", msg: `Decoding ${d}/${t}…` }),
+        })
+        const safe = (activeFileName ?? "audio").replace(/\.[^.]+$/, "")
+        downloadBlob(blob, `${safe}_audio-by-character.zip`)
+        setStatus({ kind: "ok", msg: "Exported audio by character" })
       } else if (scope === "project") {
         // Client-side project-scope zip: use already-loaded per-file cells.
         if (projectCellsLoading) {
@@ -336,6 +370,35 @@ export function ExportDialog({
             </p>
           )}
         </fieldset>
+
+        {/* Audio-by-character inline preview */}
+        {format === "audio-by-character" && scope === "file" && (
+          <div className="flex flex-col gap-1 text-xs">
+            <p className="font-medium text-muted-foreground uppercase tracking-wide text-[10px]">Preview</p>
+            {previewAudioByCharacter(cells, ttsSettings).length === 0 ? (
+              <p className="text-muted-foreground">No cells with audio found in this file.</p>
+            ) : (
+              previewAudioByCharacter(cells, ttsSettings).map((p) => (
+                <div key={p.voiceId} className="flex items-center gap-2">
+                  {p.color && (
+                    <span
+                      className="h-2 w-2 rounded-full shrink-0"
+                      style={{ backgroundColor: p.color }}
+                      aria-hidden="true"
+                    />
+                  )}
+                  <span className="font-medium">{p.name}</span>
+                  <span className="text-muted-foreground">
+                    {p.clipCount} {p.clipCount === 1 ? "clip" : "clips"}
+                    {p.totalDurationMs != null && (
+                      <> · {Math.floor(p.totalDurationMs / 60000)}:{String(Math.floor((p.totalDurationMs % 60000) / 1000)).padStart(2, "0")}</>
+                    )}
+                  </span>
+                </div>
+              ))
+            )}
+          </div>
+        )}
 
         {/* Lossy warning banner */}
         {isLossy && (

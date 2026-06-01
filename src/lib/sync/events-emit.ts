@@ -412,6 +412,8 @@ export interface SourceCellCreateInput {
   type?: string
   canonicalRef?: string
   metadata?: Record<string, unknown>
+  startMs?: number
+  endMs?: number
   /** Authorship — the admin/importer-bot user. */
   author: string
   clientTs?: number
@@ -441,6 +443,8 @@ export async function emitSourceCellCreate(
       ...(input.type !== undefined ? { type: input.type } : {}),
       ...(input.canonicalRef !== undefined ? { canonicalRef: input.canonicalRef } : {}),
       ...(input.metadata !== undefined ? { metadata: input.metadata } : {}),
+      ...(input.startMs !== undefined ? { startMs: input.startMs } : {}),
+      ...(input.endMs !== undefined ? { endMs: input.endMs } : {}),
     },
     clientTs: input.clientTs,
   })

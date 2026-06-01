@@ -131,15 +131,26 @@ export interface ImportContext {
   signal?: AbortSignal
 }
 
+export interface ImportFileResult {
+  refs: FileReference[]
+  /** Speaker→cellId pairs from every subtitle cue, sharing the same cellIds as
+   *  the uploaded cells (single parse). Empty for non-subtitle formats. */
+  speakerPairs: { cellId: string; speaker: string | undefined }[]
+}
+
 /**
  * Import a single user-supplied file. Each `ImportResult` (one per book for
  * USFM, one overall for single-blob formats) becomes one Aquilla File with
  * a chain of `source.cell.create` events.
+ *
+ * Returns `refs` (same as before) plus `speakerPairs` — the (cellId, speaker)
+ * pairs produced by the *same* `buildBulkCellsWithSpeakers` call that minted
+ * the uploaded cells, so the cellIds are guaranteed to match.
  */
 export async function importFile(
   file: File,
   ctx: ImportContext,
-): Promise<FileReference[]> {
+): Promise<ImportFileResult> {
   const fileType = detectFileType(file.name)
   if (!fileType) {
     throw new Error(`Unsupported file type: ${file.name}`)
@@ -147,13 +158,15 @@ export async function importFile(
 
   const results = await parseFile(file, fileType)
   const refs: FileReference[] = []
+  const speakerPairs: { cellId: string; speaker: string | undefined }[] = []
 
   for (const result of results) {
-    const ref = await emitParsedFile(result, fileType, ctx)
+    const { ref, speakerPairs: pairs } = await emitParsedFile(result, fileType, ctx)
     refs.push(ref)
+    speakerPairs.push(...pairs)
   }
 
-  return refs
+  return { refs, speakerPairs }
 }
 
 export async function importEBible(
@@ -180,7 +193,8 @@ export async function importEBible(
 
   const fileName = `${translation.title} (${translation.id})`
 
-  return emitParsedFile(
+  // eBible has no speaker tags — ignore speakerPairs.
+  const { ref } = await emitParsedFile(
     { name: fileName, strings },
     "ebible",
     {
@@ -192,27 +206,23 @@ export async function importEBible(
       },
     },
   )
+  return ref
 }
 
 /**
- * Build `file.create` + N chained `source.cell.create` and stream them to the
- * server's bulk-import endpoint. Returns a `FileReference` once every cell has
- * landed. Throws (with a human-readable message) if the upload fails.
+ * Map parsed `TranslatableString[]` to `BulkImportCell[]` + speaker pairs (one
+ * per cell). Chaining cells via `anchorCellId` and threading timecodes when
+ * present. The speaker pairs share the same `cellId` as their cell so callers
+ * can pass them straight to `buildCastAdditions`. Exported for testing.
  */
-export async function emitParsedFile(
-  result: ImportResult,
-  fileType: FileType,
-  ctx: ImportContext,
-): Promise<FileReference> {
-  const fileId = uuidv7()
-
-  // Chain cells via anchorCellId: the first cell's anchor is null (genesis —
-  // first in file); each subsequent cell anchors on the prior cell's id.
+export function buildBulkCellsWithSpeakers(strings: TranslatableString[]): {
+  cells: BulkImportCell[]
+  speakerPairs: { cellId: string; speaker: string | undefined }[]
+} {
   const cells: BulkImportCell[] = []
+  const speakerPairs: { cellId: string; speaker: string | undefined }[] = []
   let prevCellId: string | null = null
-  for (const str of result.strings) {
-    // Use the parser-supplied id when present (USFM gives stable verse refs);
-    // otherwise mint a fresh UUIDv7.
+  for (const str of strings) {
     const cellId = str.id || uuidv7()
     cells.push({
       id: uuidv7(),
@@ -222,9 +232,49 @@ export async function emitParsedFile(
       ...(str.originalHtml ? { valueHtml: str.originalHtml } : {}),
       ...(str.type !== undefined ? { type: str.type } : {}),
       ...(str.group ? { canonicalRef: str.group } : {}),
+      ...(str.start !== undefined && str.end !== undefined ? { startMs: Math.round(str.start * 1000), endMs: Math.round(str.end * 1000) } : {}),
     })
+    speakerPairs.push({ cellId, speaker: str.speaker })
     prevCellId = cellId
   }
+  return { cells, speakerPairs }
+}
+
+/**
+ * Map parsed `TranslatableString[]` to `BulkImportCell[]`, chaining cells via
+ * `anchorCellId` and threading timecodes when present. Exported so tests can
+ * exercise the mapping in isolation.
+ */
+export function buildBulkCells(strings: TranslatableString[]): BulkImportCell[] {
+  return buildBulkCellsWithSpeakers(strings).cells
+}
+
+export interface EmitParsedFileResult {
+  ref: FileReference
+  /** (cellId, speaker) pairs from the same `buildBulkCellsWithSpeakers` call
+   *  that produced the uploaded cells — cellIds are guaranteed to match. */
+  speakerPairs: { cellId: string; speaker: string | undefined }[]
+}
+
+/**
+ * Build `file.create` + N chained `source.cell.create` and stream them to the
+ * server's bulk-import endpoint. Returns a `FileReference` plus the
+ * `speakerPairs` from the single `buildBulkCellsWithSpeakers` call, so callers
+ * can build cast assignments keyed to the real uploaded cellIds. Throws (with a
+ * human-readable message) if the upload fails.
+ */
+export async function emitParsedFile(
+  result: ImportResult,
+  fileType: FileType,
+  ctx: ImportContext,
+): Promise<EmitParsedFileResult> {
+  const fileId = uuidv7()
+
+  // Chain cells via anchorCellId: the first cell's anchor is null (genesis —
+  // first in file); each subsequent cell anchors on the prior cell's id.
+  // Use buildBulkCellsWithSpeakers so we capture speakerPairs from the SAME
+  // call that mints the cellIds — avoids the double-parse cellId mismatch.
+  const { cells, speakerPairs } = buildBulkCellsWithSpeakers(result.strings)
 
   await bulkUploadSource({
     projectId: ctx.projectId,
@@ -250,13 +300,16 @@ export async function emitParsedFile(
   })
 
   return {
-    id: fileId,
-    name: result.name,
-    type: fileType,
-    createdAt: new Date().toISOString(),
-    cellCount: cells.length,
-    ...(result.corpusMarker ? { corpusMarker: result.corpusMarker } : {}),
-    ...(result.originalName ? { originalName: result.originalName } : {}),
+    ref: {
+      id: fileId,
+      name: result.name,
+      type: fileType,
+      createdAt: new Date().toISOString(),
+      cellCount: cells.length,
+      ...(result.corpusMarker ? { corpusMarker: result.corpusMarker } : {}),
+      ...(result.originalName ? { originalName: result.originalName } : {}),
+    },
+    speakerPairs,
   }
 }
 
@@ -313,7 +366,8 @@ export async function importParatextProject(
     onProgress?.({ phase: "parse", book: book.displayName, booksDone: done, booksTotal: total })
     try {
       const { strings } = usfmSectionToStrings(book.rawSource)
-      const ref = await emitParsedFile(
+      // USFM books have no speaker tags — ignore speakerPairs.
+      const { ref } = await emitParsedFile(
         {
           name: book.displayName,
           strings,

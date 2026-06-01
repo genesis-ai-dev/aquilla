@@ -86,6 +86,8 @@ export interface EventPayloads {
     type?: string
     canonicalRef?: string
     metadata?: Record<string, unknown>
+    startMs?: number
+    endMs?: number
   }
   'source.cell.commit': {
     value: string
@@ -103,6 +105,8 @@ export interface EventPayloads {
     value: string
     valueHtml?: string
     type?: string
+    startMs?: number
+    endMs?: number
   }
   'target.cell.commit': {
     value: string

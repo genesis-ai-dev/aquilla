@@ -2044,7 +2044,9 @@ export function ProjectWorkspace() {
           username={currentUsername}
           getToken={getTokenForFile}
           sourceLanguage={project.sourceLanguage} targetLanguage={project.targetLanguage}
-          onImported={handleImported} />
+          onImported={handleImported}
+          ttsSettings={tts.settings}
+          onCastUpdated={(patch) => tts.saveTts(patch)} />
       </Suspense>
       <Suspense fallback={null}>
         <ExportDialog
@@ -2059,6 +2061,7 @@ export function ProjectWorkspace() {
           projectFiles={project.files.map((f) => ({ id: f.id, name: f.name, type: f.type }))}
           sourceLanguage={project.sourceLanguage}
           targetLanguage={project.targetLanguage}
+          ttsSettings={tts.settings}
           getToken={getTokenForFile}
         />
       </Suspense>

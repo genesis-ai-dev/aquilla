@@ -195,6 +195,8 @@ export function buildEventProjectionStmts(
       const anchorCellId = p.anchorCellId ?? null
       const hash = contentHash(value)
       const wordCount = countWords(value)
+      const startMs = p.startMs ?? null
+      const endMs = p.endMs ?? null
 
       // Both create kinds are genesis events on the cell's chain — their
       // event_id IS the new row's chain head. source_event_id is null on
@@ -211,8 +213,9 @@ export function buildEventProjectionStmts(
             `INSERT INTO cells (
               project_id, file_id, cell_id, side, value, value_html, type,
               canonical_ref, anchor_cell_id, event_id, source_event_id,
-              last_editor, last_edit_at, validated, word_count, content_hash
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, 0, ?, ?)
+              last_editor, last_edit_at, validated, word_count, content_hash,
+              start_ms, end_ms
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, 0, ?, ?, ?, ?)
             ON CONFLICT(project_id, file_id, cell_id, side) DO UPDATE SET
               side           = excluded.side,
               value          = excluded.value,
@@ -225,7 +228,9 @@ export function buildEventProjectionStmts(
               last_editor    = excluded.last_editor,
               last_edit_at   = excluded.last_edit_at,
               word_count     = excluded.word_count,
-              content_hash   = excluded.content_hash`,
+              content_hash   = excluded.content_hash,
+              start_ms       = excluded.start_ms,
+              end_ms         = excluded.end_ms`,
           )
           .bind(
             event.projectId,
@@ -242,6 +247,8 @@ export function buildEventProjectionStmts(
             event.serverTs,
             wordCount,
             hash,
+            startMs,
+            endMs,
           ),
       )
 
@@ -276,6 +283,9 @@ export function buildEventProjectionStmts(
         const tp = p as EventPayloads['target.cell.commit']
         const sourceEventId = tp.sourceEventId ?? null
 
+        // NOTE: start_ms/end_ms are intentionally NOT written here — they are set once at
+        // *.cell.create time and never overwritten by target commits.
+        //
         // UPSERT, not UPDATE: the client never emits `target.cell.create` —
         // the first translation of a cell arrives straight as a
         // `target.cell.commit`, and import only seeds source-side rows. A

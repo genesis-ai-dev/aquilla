@@ -58,6 +58,8 @@ interface ImportCell {
   valueHtml?: string
   type?: string
   canonicalRef?: string
+  startMs?: number
+  endMs?: number
 }
 
 interface ImportBody {
@@ -265,6 +267,8 @@ export async function handleBulkImportRequest(
         ...(cell.valueHtml !== undefined ? { valueHtml: cell.valueHtml } : {}),
         ...(cell.type !== undefined ? { type: cell.type } : {}),
         ...(cell.canonicalRef !== undefined ? { canonicalRef: cell.canonicalRef } : {}),
+        ...(cell.startMs !== undefined ? { startMs: cell.startMs } : {}),
+        ...(cell.endMs !== undefined ? { endMs: cell.endMs } : {}),
       },
       clientTs,
       serverTs: serverTs++,

@@ -30,6 +30,14 @@ export interface TranslatableString {
    * Section labels in the sidebar are derived from these when present.
    */
   globalReferences?: string[]
+  /** Cue start/end in seconds, parsed from a subtitle timestamp line. Present
+   *  only for `type: "cue"` strings from VTT/SRT import; drives `start_ms`/
+   *  `end_ms` persistence. */
+  start?: number
+  end?: number
+  /** Speaker extracted from a `<v Name>` VTT voice tag, if present. Maps to a
+   *  Cast member on import. */
+  speaker?: string
   type: CellType
   sourceLocation?: SourceLocation
 }

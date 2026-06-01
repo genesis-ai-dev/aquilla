@@ -78,6 +78,8 @@ export interface OutboxEventPayloads {
     type?: string
     canonicalRef?: string
     metadata?: Record<string, unknown>
+    startMs?: number
+    endMs?: number
   }
   "source.cell.commit": {
     value: string
@@ -94,6 +96,8 @@ export interface OutboxEventPayloads {
     value: string
     valueHtml?: string
     type?: string
+    startMs?: number
+    endMs?: number
   }
   "target.cell.commit": {
     value: string

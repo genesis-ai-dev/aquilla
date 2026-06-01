@@ -46,7 +46,7 @@ import { categorizeAiError } from "@/lib/audio/ai-error"
 import { CellAiStatusPopover } from "./CellAiStatusPopover"
 import { CellNumberPill } from "./cell/CellNumberPill"
 import { CellVoicePanel } from "./cell/CellVoicePanel"
-import { assignedCastVoiceId } from "@/lib/audio/voices"
+import { assignedCastVoiceId, findVoice } from "@/lib/audio/voices"
 import { useNavigate } from "react-router-dom"
 import { cn } from "@/lib/utils"
 import { isPerfLogEnabled } from "@/lib/perf-log"
@@ -1678,7 +1678,12 @@ function EditorRow({
   // the render boundary. Parsers only produce safe inline tags (<b>, <i>, <u>,
   // <s>, <code>). DOMPurify provides defense-in-depth against XSS.
   const showLineNumber = lineNumbersEnabled && cell.type !== "paratext"
-  const showCellLabel = cellLabelsEnabled && cell.cellLabel
+  // Prefer the explicitly-assigned cast member's name; fall back to the cell's
+  // own label (e.g. a chapter/verse marker from USFM), then nothing.
+  const castVoiceId = cellLabelsEnabled ? assignedCastVoiceId(project.ttsSettings, cell.id) : undefined
+  const castName = castVoiceId ? findVoice(project.ttsSettings, castVoiceId)?.name : undefined
+  const labelText = castName ?? cell.cellLabel ?? null
+  const showCellLabel = cellLabelsEnabled && labelText
 
   // The cell number IS the issue surface: a single pill (top-left of the card)
   // that tints by worst severity and reveals the concrete issue list on hover.
@@ -1689,7 +1694,7 @@ function EditorRow({
   const numberPillInner = (
     <CellNumberPill
       number={numberLabel}
-      label={showCellLabel ? cell.cellLabel : null}
+      label={showCellLabel ? labelText : null}
       tint={hasMajorInfraction ? "major" : hasAnyIssue ? "issue" : "none"}
     />
   )

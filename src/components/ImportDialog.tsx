@@ -17,7 +17,9 @@ import {
   type EBibleProgress,
   type ParatextImportProgress,
 } from "@/lib/import"
-import type { FileReference } from "@/lib/parsers/types"
+import type { FileReference, ProjectTtsSettings } from "@/lib/parsers/types"
+import { buildCastAdditions } from "@/lib/import/cast-from-speakers"
+import { v7 as uuidv7 } from "uuid"
 import { filesToProjectEntries } from "@/lib/import/file-entries"
 import { detectParatextProject, type ProjectEntry } from "@/lib/parsers/paratext-project"
 import type { SourceVerse } from "@/lib/parsers/paratext-pairing"
@@ -40,6 +42,13 @@ interface ImportDialogProps {
   /** Mints a sync-token scoped to (projectId, fileId) for the bulk upload. */
   getToken: (fileId: string) => Promise<string | null>
   onImported: (refs: FileReference[]) => void | Promise<void>
+  /** Optional: current project TTS settings. When provided alongside
+   *  `onCastUpdated`, VTT/SRT imports with `<v Name>` tags will create cast
+   *  members and cell assignments in a single batched write. */
+  ttsSettings?: ProjectTtsSettings
+  /** Callback to persist updated TTS settings (voices + castAssignments) after
+   *  a subtitle import that contained speaker tags. */
+  onCastUpdated?: (settings: Partial<ProjectTtsSettings>) => void | Promise<void>
 }
 
 export function ImportDialog({
@@ -51,6 +60,8 @@ export function ImportDialog({
   targetLanguage,
   getToken,
   onImported,
+  ttsSettings,
+  onCastUpdated,
 }: ImportDialogProps) {
   const [tab, setTab] = useState<Tab>("upload")
 
@@ -95,6 +106,8 @@ export function ImportDialog({
             sourceLanguage={sourceLanguage}
             targetLanguage={targetLanguage}
             getToken={getToken}
+            ttsSettings={ttsSettings}
+            onCastUpdated={onCastUpdated}
             onImported={async (refs) => {
               await onImported(refs)
               onOpenChange(false)
@@ -125,9 +138,11 @@ interface UploadPanelProps {
   targetLanguage: string
   getToken: (fileId: string) => Promise<string | null>
   onImported: (refs: FileReference[]) => void | Promise<void>
+  ttsSettings?: ProjectTtsSettings
+  onCastUpdated?: (settings: Partial<ProjectTtsSettings>) => void | Promise<void>
 }
 
-function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, getToken, onImported }: UploadPanelProps) {
+function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, getToken, onImported, ttsSettings, onCastUpdated }: UploadPanelProps) {
   const [importing, setImporting] = useState(false)
   const [dragOver, setDragOver] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -154,11 +169,15 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, getT
       setImporting(true)
       setProgress(null)
       const allRefs: FileReference[] = []
+      // Accumulate speaker pairs across all subtitle files in this batch.
+      const allSpeakerPairs: { cellId: string; speaker: string | undefined }[] = []
       try {
         for (const file of list) {
           setPhase(`Parsing ${file.name}…`)
           setProgress(null)
-          const refs = await importFile(file, {
+          // importFile returns speakerPairs from the SAME buildBulkCellsWithSpeakers
+          // call that minted the uploaded cells — cellIds are guaranteed to match.
+          const { refs, speakerPairs } = await importFile(file, {
             projectId,
             author: username,
             sourceLanguage,
@@ -170,6 +189,18 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, getT
             },
           })
           allRefs.push(...refs)
+          allSpeakerPairs.push(...speakerPairs)
+        }
+        // Apply cast additions if any subtitle speakers were found.
+        if (onCastUpdated && allSpeakerPairs.some((p) => p.speaker)) {
+          const additions = buildCastAdditions(allSpeakerPairs, ttsSettings, uuidv7)
+          await onCastUpdated({
+            voices: additions.voices,
+            castAssignments: {
+              ...(ttsSettings?.castAssignments ?? {}),
+              ...additions.castAssignments,
+            },
+          })
         }
         setPhase("Finishing up…")
         await onImported(allRefs)
@@ -181,7 +212,7 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, getT
         setPhase("")
       }
     },
-    [projectId, username, sourceLanguage, targetLanguage, getToken, onImported]
+    [projectId, username, sourceLanguage, targetLanguage, getToken, onImported, ttsSettings, onCastUpdated]
   )
 
   function handleDrop(e: React.DragEvent) {

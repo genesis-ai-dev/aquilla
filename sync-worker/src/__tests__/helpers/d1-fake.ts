@@ -106,6 +106,8 @@ export interface CellRow {
   word_count: number
   content_hash?: string | null
   endorsement_count?: number
+  start_ms?: number | null
+  end_ms?: number | null
 }
 
 export interface ValidatorRow {
@@ -583,8 +585,12 @@ export function makeInMemoryD1(tables: Partial<Tables> = {}): InMemoryD1 {
     }
 
     // ── GET /api/v1/projects/:projectId/files/:fileId/cells ────────────
+    // Prefix-match intentional: the production SELECT always appends start_ms, end_ms after
+    // endorsement_count, so matching only through endorsement_count handles both
+    // timecode-aware and older column lists. The hasTimecodes check below conditionally
+    // includes start_ms/end_ms in the returned rows.
     if (
-      /^SELECT cell_id, side, value, value_html, type, canonical_ref, anchor_cell_id, event_id, source_event_id, last_editor, last_edit_at, validated, word_count, endorsement_count FROM cells WHERE project_id = \? AND file_id = \?/.test(
+      /^SELECT cell_id, side, value, value_html, type, canonical_ref, anchor_cell_id, event_id, source_event_id, last_editor, last_edit_at, validated, word_count, endorsement_count/.test(
         normalized,
       )
     ) {
@@ -592,6 +598,7 @@ export function makeInMemoryD1(tables: Partial<Tables> = {}): InMemoryD1 {
       const fid = args[1] as string
       const hasSide = normalized.includes("AND side = ?")
       const inMatch = normalized.match(/AND cell_id IN \(([^)]*)\)/)
+      const hasTimecodes = normalized.includes("start_ms") && normalized.includes("end_ms")
       // bind order: [pid, fid, side?, ...cellIds]
       let bindIdx = 2
       const side: string | null = hasSide ? (args[bindIdx++] as string) : null
@@ -626,6 +633,7 @@ export function makeInMemoryD1(tables: Partial<Tables> = {}): InMemoryD1 {
           validated: c.validated,
           word_count: c.word_count,
           endorsement_count: c.endorsement_count ?? 0,
+          ...(hasTimecodes ? { start_ms: c.start_ms ?? null, end_ms: c.end_ms ?? null } : {}),
         }))
     }
 
@@ -789,9 +797,13 @@ export function makeInMemoryD1(tables: Partial<Tables> = {}): InMemoryD1 {
     }
 
     // ── INSERT cells (cell create handlers) ─────────────────────────────
-    if (/^INSERT INTO cells \(\s*project_id, file_id, cell_id, side, value, value_html, type, canonical_ref, anchor_cell_id, event_id, source_event_id, last_editor, last_edit_at, validated, word_count, content_hash\s*\)/.test(
+    // Prefix-match intentional: the production query always appends start_ms, end_ms after
+    // content_hash, so matching only through content_hash lets this handler cover both
+    // the timecode-carrying (new) and legacy (old) column lists without forking.
+    if (/^INSERT INTO cells \(\s*project_id, file_id, cell_id, side, value, value_html, type, canonical_ref, anchor_cell_id, event_id, source_event_id, last_editor, last_edit_at, validated, word_count, content_hash/.test(
       normalized,
     )) {
+      const hasTimecodes = normalized.includes('start_ms') && normalized.includes('end_ms')
       const row: CellRow = {
         project_id: args[0] as string,
         file_id: args[1] as string,
@@ -809,6 +821,8 @@ export function makeInMemoryD1(tables: Partial<Tables> = {}): InMemoryD1 {
         validated: 0,
         word_count: args[12] as number,
         content_hash: args[13] as string | null,
+        start_ms: hasTimecodes ? (args[14] as number | null) : null,
+        end_ms: hasTimecodes ? (args[15] as number | null) : null,
       }
       const existing = findCell(row.project_id, row.file_id, row.cell_id)
       if (!existing) {
@@ -828,6 +842,10 @@ export function makeInMemoryD1(tables: Partial<Tables> = {}): InMemoryD1 {
         existing.last_edit_at = row.last_edit_at
         existing.word_count = row.word_count
         existing.content_hash = row.content_hash
+        if (hasTimecodes) {
+          existing.start_ms = row.start_ms
+          existing.end_ms = row.end_ms
+        }
       }
       return []
     }

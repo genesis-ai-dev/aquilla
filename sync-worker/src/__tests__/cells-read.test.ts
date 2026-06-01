@@ -171,6 +171,23 @@ describe("GET /api/v1/projects/:projectId/files/:fileId/cells", () => {
     expect(res.status).toBe(403)
   })
 
+  it("returns start_ms/end_ms as startMs/endMs", async () => {
+    const db = makeInMemoryD1({
+      cells: [
+        makeCell({ cell_id: "c1", anchor_cell_id: null, event_id: "e1", start_ms: 1500, end_ms: 3250 }),
+      ],
+    })
+    const token = await makeTestToken(SECRET, { projectId: "proj-a", fileId: "file-x" })
+    const req = new Request(
+      "https://w/api/v1/projects/proj-a/files/file-x/cells?side=target",
+      { headers: { Authorization: `Bearer ${token}` } },
+    )
+    const res = (await handleCellsReadRequest(req, envWith(db)))!
+    const body = (await res.json()) as { cells: Array<{ startMs: number | null; endMs: number | null }> }
+    expect(body.cells[0].startMs).toBe(1500)
+    expect(body.cells[0].endMs).toBe(3250)
+  })
+
   it("returns 400 on invalid side parameter", async () => {
     const db = makeInMemoryD1({ cells: [] })
     const token = await makeTestToken(SECRET, { projectId: "proj-a", fileId: "file-x" })

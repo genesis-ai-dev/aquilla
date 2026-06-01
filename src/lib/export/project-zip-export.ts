@@ -19,13 +19,18 @@ import { exportCsv } from "./exporters/csv"
 import { exportXliff } from "./exporters/xliff"
 import { exportTmx } from "./exporters/tmx"
 
+/** Formats handled by the project-zip path (excludes server-side USFM,
+ *  audio-by-character which has its own orchestrator, and vtt which needs
+ *  per-project ttsSettings not available in the zip path). */
+export type TextExportFormat = Exclude<ExportFormat, "usfm" | "audio-by-character" | "vtt">
+
 export interface ProjectFileCellsInput {
   fileId: string
   fileName: string
   cells: CellData[]
 }
 
-const FORMAT_EXT: Record<Exclude<ExportFormat, "usfm">, string> = {
+const FORMAT_EXT: Record<TextExportFormat, string> = {
   txt: ".txt",
   md: ".md",
   tsv: ".tsv",
@@ -39,7 +44,7 @@ const FORMAT_EXT: Record<Exclude<ExportFormat, "usfm">, string> = {
  */
 export function exportFileCells(
   cells: CellData[],
-  format: Exclude<ExportFormat, "usfm">,
+  format: TextExportFormat,
   sourceLanguage: string,
   targetLanguage: string,
 ): Blob {
@@ -60,7 +65,7 @@ export function exportFileCells(
 
 export interface BuildProjectZipOptions {
   files: ProjectFileCellsInput[]
-  format: Exclude<ExportFormat, "usfm">
+  format: TextExportFormat
   sourceLanguage?: string
   targetLanguage?: string
 }

@@ -63,6 +63,11 @@ export const REQUIRED_ROLE: Record<EventKind, number> = {
   // file.create is a structural change.
   'file.create': ROLE.PROJECT_LEAD,
 
+  // file.rename is label cleanup ("apply friendly names"), part of normal
+  // editing flow — contributor-level, like target.* / cell.waive. It mutates
+  // an existing row's display name, not the project's file inventory.
+  'file.rename': ROLE.CONTRIBUTOR,
+
   // Comments: any contributor+ can write, edit, delete, or resolve their own
   // comment. Server-side ownership enforcement (only the author can edit/delete
   // their own comment) is done in the projector; the role gate is just the

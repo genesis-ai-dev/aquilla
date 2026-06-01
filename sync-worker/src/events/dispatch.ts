@@ -15,6 +15,7 @@ import type { AuthorizedEvent } from './authorize'
 import type { EventKind } from './types'
 import { handleCellEvent, type CellEventKind } from './handlers/cell-events'
 import { handleFileCreate } from './handlers/file-create'
+import { handleFileRename } from './handlers/file-rename'
 import { handleCommentEvent, type CommentEventKind } from './handlers/comment-events'
 import { handleAssignmentEvent, type AssignmentEventKind } from './handlers/assignment-events'
 import type { DispatchResult } from './handlers/types'
@@ -80,6 +81,16 @@ export function dispatchEvent(
         result: handleFileCreate(
           db,
           authed as AuthorizedEvent<'file.create'>,
+          serverTs,
+        ),
+      }
+
+    case 'file.rename':
+      return {
+        ok: true,
+        result: handleFileRename(
+          db,
+          authed as AuthorizedEvent<'file.rename'>,
           serverTs,
         ),
       }

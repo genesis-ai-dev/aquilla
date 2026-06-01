@@ -247,6 +247,7 @@ export async function handleEventsWriteRequest(
       rawEvent.kind !== 'cell.audio.select' &&
       rawEvent.kind !== 'cell.audio.remove' &&
       rawEvent.kind !== 'file.create' &&
+      rawEvent.kind !== 'file.rename' &&
       rawEvent.kind !== 'comment.create' &&
       rawEvent.kind !== 'comment.edit' &&
       rawEvent.kind !== 'comment.delete' &&

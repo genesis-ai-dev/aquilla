@@ -30,6 +30,7 @@ async function makeAuthorized<K extends EventKind>(kind: K, role = 500) {
     'cell.audio.select': { audioId: 'audio-1.wav', slot: 'recording' },
     'cell.audio.remove': { audioId: 'audio-1.wav' },
     'file.create': { name: 'Genesis', fileType: 'codex' },
+    'file.rename': { name: 'Genesis (renamed)' },
     'cell.backtranslation.set': { btText: 'hello', targetEventId: 'evt-tgt-1', polished: false },
     'comment.create': { commentId: 'cmt-1', scope: { kind: 'project' }, body: 'hi', parentCommentId: null },
     'comment.edit': { commentId: 'cmt-1', body: 'updated' },
@@ -46,7 +47,7 @@ async function makeAuthorized<K extends EventKind>(kind: K, role = 500) {
     kind,
     projectId: 'proj-a',
     fileId: 'file-x',
-    cellId: kind === 'file.create' ? undefined : 'cell-1',
+    cellId: kind === 'file.create' || kind === 'file.rename' ? undefined : 'cell-1',
     parentId: null,
     author: 'alice',
     payload: payloads[kind],
@@ -127,6 +128,17 @@ describe('dispatchEvent', () => {
     expect(outcome.ok).toBe(true)
     if (!outcome.ok) throw new Error('unreachable')
     expect(outcome.result.stmts.length).toBe(2) // events INSERT + files UPSERT
+    expect(outcome.result.dirtyTables).toContain('files')
+  })
+
+  it('file.rename routes to the file handler, returns events INSERT + files UPDATE', async () => {
+    // CONTRIBUTOR (400) — label cleanup is normal editing flow, not structural.
+    const authed = await makeAuthorized('file.rename', 400)
+    const outcome = dispatchEvent(makeNoOpD1(), authed, 9999, { updateProjection: true })
+    expect(outcome.ok).toBe(true)
+    if (!outcome.ok) throw new Error('unreachable')
+    expect(outcome.result.stmts.length).toBe(2) // events INSERT + files UPDATE
+    expect(outcome.result.dirtyTables).toContain('events')
     expect(outcome.result.dirtyTables).toContain('files')
   })
 

@@ -746,6 +746,26 @@ case 'cell.audio.attach': {
       return ['files']
     }
 
+    case 'file.rename': {
+      const p = event.payload as EventPayloads['file.rename']
+      if (!event.fileId) {
+        throw new Error(`file.rename event ${event.id} is missing fileId`)
+      }
+      // Replay-safe label update: new name + AD-2 chain head. Mirrors
+      // handlers/file-rename.ts (the live dispatch path). Structural columns,
+      // language meta, and counters are intentionally left untouched.
+      stmts.push(
+        db
+          .prepare(
+            `UPDATE files
+                SET name = ?, event_id = ?, updated_at = unixepoch('now') * 1000
+              WHERE id = ? AND project_id = ?`,
+          )
+          .bind(p.name, event.id, event.fileId, event.projectId),
+      )
+      return ['files']
+    }
+
     case 'comment.create': {
       const p = event.payload as EventPayloads['comment.create']
       const scope: CommentScope = p.scope

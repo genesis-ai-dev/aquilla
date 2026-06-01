@@ -23,7 +23,7 @@ import { TakesStrip } from "./TakesStrip"
 import { useFileAudioAttachments } from "@/hooks/useFileAudioAttachments"
 import { buildAudioId, uploadCellAudio, deleteCellAudio } from "@/lib/audio/upload"
 import { emitCellAudioAttach } from "@/lib/sync/events-emit"
-import { notifyAudioAttachmentsChanged } from "@/lib/audio/audio-attachments-bus"
+import { notifyAudioAttachmentsChanged, injectOptimisticAudioAttachment } from "@/lib/audio/audio-attachments-bus"
 import { audioSyncTokenFetcherForSession } from "@/lib/audio/sync-token-fetcher"
 import { markProjectHasAudioDataSoon } from "@/lib/audio/project-audio-state"
 import { setTranscribeStatus } from "@/lib/audio/transcribe-status"
@@ -195,6 +195,21 @@ export function AudioRecordingModal({
         })
         throw emitErr
       }
+      // Optimistically surface the clip so the gutter mic flips to a play
+      // button immediately. The bus poke below refetches the server projection,
+      // but that races the outbox flush + projection and would otherwise leave
+      // the icon stale until a manual reload.
+      injectOptimisticAudioAttachment(activeCell.fileId, activeCell.id, {
+        audioId: `${result.audioId}.${result.ext}`,
+        url: result.url,
+        slot: "recording",
+        mimeType: blob.type || null,
+        voiceId: null,
+        referenceAudioId: null,
+        durationMs: null,
+        trimStartMs: null,
+        trimEndMs: null,
+      })
       notifyAudioAttachmentsChanged(activeCell.fileId)
       setPhase("saved")
       // Auto-advance: settle on the new cell after a brief success indication.

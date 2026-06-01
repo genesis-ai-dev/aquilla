@@ -6,7 +6,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { makeAudioSyncTokenFetcher } from "@/lib/audio/sync-token-fetcher"
-import { subscribeAudioAttachments } from "@/lib/audio/audio-attachments-bus"
+import { subscribeAudioAttachments, subscribeOptimisticAudioAttachment } from "@/lib/audio/audio-attachments-bus"
 import { fetchFileAudioAttachments } from "@/lib/sync/cell-audio-read"
 import type { CellAudioEntry } from "@/lib/sync/cell-audio-read-types"
 
@@ -81,6 +81,33 @@ export function useFileAudioAttachments(
       void doFetch()
     })
   }, [fileId, doFetch])
+
+  // Optimistic injections: a local producer (recording / TTS) just created an
+  // attachment. Merge it into the cell's entry so `hasAudio` flips at once,
+  // preserving the other slot + existing clips. The next doFetch wholesale-
+  // replaces this with server truth.
+  useEffect(() => {
+    if (!fileId) return
+    return subscribeOptimisticAudioAttachment(fileId, (cellId, att) => {
+      setByCellId((prev) => {
+        const base: CellAudioEntry = prev.get(cellId) ?? {
+          attachments: {},
+          selectedAudioId: null,
+          selectedGeneratedVoiceAudioId: null,
+          audioTimings: {},
+        }
+        const next = new Map(prev)
+        next.set(cellId, {
+          ...base,
+          attachments: { ...base.attachments, [att.audioId]: att },
+          ...(att.slot === "recording"
+            ? { selectedAudioId: att.audioId }
+            : { selectedGeneratedVoiceAudioId: att.audioId }),
+        })
+        return next
+      })
+    })
+  }, [fileId])
 
   return { byCellId, isLoading, revalidate: doFetch }
 }

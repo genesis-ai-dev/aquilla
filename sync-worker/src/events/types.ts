@@ -44,6 +44,9 @@ export type EventKind =
   | 'cell.audio.remove'
   // File lifecycle.
   | 'file.create'
+  // File label rename (contributor-level). Non-chain-mutating — updates the
+  // file's display name on the existing row; does not move cells.event_id.
+  | 'file.rename'
   // Comments (non-chain-mutating; contributor-level).
   | 'comment.create'
   | 'comment.edit'
@@ -175,6 +178,12 @@ export interface EventPayloads {
     /** ISO codes; null/undefined when unknown at import time. */
     sourceLanguage?: string
     targetLanguage?: string
+  }
+  // Rename a file's display label. Non-chain-mutating; parentId omitted.
+  // (Corpus/grouping marker is not server-backed yet — name only.)
+  'file.rename': {
+    /** New display name for the file in the project sidebar. */
+    name: string
   }
 
   // ── Comments (non-chain-mutating) ──────────────────────────────────────

@@ -479,3 +479,34 @@ export async function emitFileCreate(input: FileCreateInput): Promise<string> {
   })
   return eventId
 }
+
+export interface FileRenameInput {
+  projectId: string
+  fileId: string
+  /** New display label for the file in the project sidebar. */
+  name: string
+  author: string
+  clientTs?: number
+}
+
+/**
+ * Emit a `file.rename` event — persists a file's new display label to the
+ * server projection so it surfaces for every collaborator, not just the
+ * device that applied it. File-scoped and non-chain-mutating (`parentId =
+ * null`), like `cell.audio.attach`; the server projects it as a `files`
+ * UPDATE keyed on fileId.
+ */
+export async function emitFileRename(input: FileRenameInput): Promise<string> {
+  const { eventId } = await enqueueEvent({
+    kind: "file.rename",
+    projectId: input.projectId,
+    fileId: input.fileId,
+    parentId: null,
+    author: input.author,
+    payload: {
+      name: input.name,
+    },
+    clientTs: input.clientTs,
+  })
+  return eventId
+}

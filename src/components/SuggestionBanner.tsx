@@ -24,7 +24,7 @@ export function SuggestionBanner({ suggestions, onApply, onDismiss }: Props) {
 
   return (
     <>
-      <div className="mx-2 mb-2 rounded-md border border-amber-200 bg-amber-50 p-2 text-xs text-amber-900">
+      <div className="mx-2 mb-2 rounded-md border border-amber-200 bg-amber-50 p-2 text-xs text-amber-900 dark:border-amber-800/40 dark:bg-amber-950/30 dark:text-amber-300">
         <div className="flex items-start gap-1.5">
           <Sparkles className="h-3.5 w-3.5 mt-0.5 shrink-0" />
           <div className="flex-1">
@@ -35,7 +35,7 @@ export function SuggestionBanner({ suggestions, onApply, onDismiss }: Props) {
             </div>
           </div>
           <button
-            className="p-0.5 rounded hover:bg-amber-100"
+            className="p-0.5 rounded hover:bg-amber-100 dark:hover:bg-amber-900/40"
             onClick={onDismiss}
             aria-label="Dismiss"
           >

@@ -56,7 +56,7 @@ import {
   setCqrsOutboxBridge,
   buildFileScopedTokenFetcher,
 } from "@/lib/sync/cqrs-bridge"
-import { emitTargetCellCommit, emitCellBacktranslationSet } from "@/lib/sync/events-emit"
+import { emitTargetCellCommit, emitCellBacktranslationSet, emitFileRename } from "@/lib/sync/events-emit"
 import { flushOutboxBatch } from "@/lib/sync/outbox-flush"
 import { useCellsAuditStatsWithOverlay } from "@/hooks/useCellsAuditStatsWithOverlay"
 import { Film, Scale, MessagesSquare, Share2, Settings as SettingsIcon, Lock, ClipboardList, Trash2, Undo2, Search as SearchIcon, Sparkles, Mic2, Download, BookMarked, BookOpen } from "lucide-react"
@@ -77,7 +77,6 @@ import { PeerPresence } from "./PeerPresence"
 import { ViewSettingsMenu } from "./ViewSettingsMenu"
 import { EditorScrollProvider, useEditorScroll } from "@/context/EditorScrollContext"
 import { detectSuggestions, type RenameSuggestion } from "@/lib/file-labeling/detect"
-import { applySuggestions } from "@/lib/file-labeling/apply"
 import { renameFile, moveFileToCorpus, renameCorpus, deleteFile } from "@/lib/store/file-operations"
 import { deleteFileProjection } from "@/lib/sync/file-projection"
 import { Button } from "@/components/ui/button"
@@ -140,19 +139,37 @@ export function ProjectWorkspace() {
   }, [routeFileId])
   const [optimisticFiles, setOptimisticFiles] = useState<FileReference[]>([])
   const optimisticFileIdsRef = useRef<Set<string>>(new Set())
+  // Optimistic file-label renames (fileId → new name), applied locally before
+  // the file.rename event round-trips so the new label shows instantly.
+  const [optimisticRenames, setOptimisticRenames] = useState<Map<string, string>>(new Map())
+  // Session-local dismissal of the rename-suggestion banner. (Persisting this
+  // across reloads would need server backing; the in-session state is what the
+  // X button and "apply" flows actually need.)
+  const [suggestionsDismissed, setSuggestionsDismissed] = useState(false)
   useEffect(() => {
     optimisticFileIdsRef.current = new Set()
     setOptimisticFiles([])
+    setOptimisticRenames(new Map())
+    setSuggestionsDismissed(false)
   }, [projectId])
 
   const projectFiles = useMemo(() => {
     const serverFiles = loadedProject?.files ?? []
-    if (optimisticFiles.length === 0) return serverFiles
+    // Overlay optimistic renames so the new label shows instantly and
+    // detectSuggestions drops the applied file from the banner. Reconciled away
+    // by the effect below once the server read reflects the new name.
+    const base = optimisticRenames.size === 0
+      ? serverFiles
+      : serverFiles.map((file) => {
+          const renamed = optimisticRenames.get(file.id)
+          return renamed !== undefined && renamed !== file.name ? { ...file, name: renamed } : file
+        })
+    if (optimisticFiles.length === 0) return base
 
-    const seen = new Set(serverFiles.map((file) => file.id))
+    const seen = new Set(base.map((file) => file.id))
     const pending = optimisticFiles.filter((file) => !seen.has(file.id))
-    return pending.length > 0 ? [...serverFiles, ...pending] : serverFiles
-  }, [loadedProject?.files, optimisticFiles])
+    return pending.length > 0 ? [...base, ...pending] : base
+  }, [loadedProject?.files, optimisticFiles, optimisticRenames])
 
   const project = useMemo<ProjectRecord | null>(() => {
     if (!loadedProject) return null
@@ -169,6 +186,22 @@ export function ProjectWorkspace() {
       return next
     })
   }, [loadedProject, optimisticFiles.length])
+
+  // Drop an optimistic rename once the server read carries the new name.
+  useEffect(() => {
+    if (!loadedProject || optimisticRenames.size === 0) return
+    setOptimisticRenames((current) => {
+      let changed = false
+      const next = new Map(current)
+      for (const file of loadedProject.files) {
+        if (next.get(file.id) === file.name) {
+          next.delete(file.id)
+          changed = true
+        }
+      }
+      return changed ? next : current
+    })
+  }, [loadedProject, optimisticRenames.size])
 
   const fileIds = useMemo(() => projectFiles.map((f) => f.id), [projectFiles])
   useEffect(() => {
@@ -1073,6 +1106,14 @@ export function ProjectWorkspace() {
         {
           onMessage(msg) {
             if (msg.t === "event.applied") {
+              // File-scoped events (file.create / file.rename) carry no cell;
+              // they change the project's file inventory or labels. Re-pull the
+              // project so renames + new files surface live and the local
+              // optimistic rename overlay reconciles against server truth.
+              if (!msg.cell && msg.kind?.startsWith("file.") && msg.project === pid) {
+                refresh()
+                return
+              }
               if (!msg.cell || msg.project !== pid) return
               // Targeted single-cell refetch — avoids re-streaming every
               // cell in the file for one remote change. Falls back to a
@@ -1237,9 +1278,9 @@ export function ProjectWorkspace() {
     [project]
   )
   const bannerSuggestions = useMemo(() => {
-    if (!project || project.suggestionsDismissedAt) return []
+    if (!project || suggestionsDismissed) return []
     return suggestions
-  }, [project, suggestions])
+  }, [project, suggestions, suggestionsDismissed])
   const suggestionFileIds = useMemo(
     () => new Set(suggestions.map((s) => s.fileId)),
     [suggestions]
@@ -1256,17 +1297,51 @@ export function ProjectWorkspace() {
     return Array.from(set).sort((a, b) => a.localeCompare(b))
   }, [project?.files])
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null)
-  const [undo, setUndo] = useState<{ project: ProjectRecord } | null>(null)
+  const [undo, setUndo] = useState<{ renames: Array<{ fileId: string; name: string }> } | null>(null)
+
+  const applyRenames = useCallback(async (
+    renames: Array<{ fileId: string; name: string }>,
+  ) => {
+    if (!project || renames.length === 0) return
+    // Optimistic: surface the new labels instantly (and let detectSuggestions
+    // drop applied files from the banner) without waiting for the round-trip.
+    setOptimisticRenames((current) => {
+      const next = new Map(current)
+      for (const r of renames) next.set(r.fileId, r.name)
+      return next
+    })
+    // Durable: one file.rename event per file persists the label to the server
+    // projection (AD-2) so it syncs to every collaborator. The refresh below
+    // and the WS file.* poke reconcile the optimistic overlay against it.
+    try {
+      await Promise.all(
+        renames.map((r) =>
+          emitFileRename({
+            projectId: project.id,
+            fileId: r.fileId,
+            name: r.name,
+            author: currentUsername,
+          }),
+        ),
+      )
+    } catch (e) {
+      console.error("[rename] file.rename emit failed", e)
+    }
+    refresh()
+  }, [project, currentUsername, refresh])
 
   const handleRename = useCallback(async (fileId: string, newName: string) => {
     if (!project) return
     try {
-      await patchProject(project.id, (p) => renameFile(p, fileId, newName))
-      refresh()
+      // Validate (empty / duplicate / not-found) with the pure transform; the
+      // returned record is discarded — persistence flows through file.rename.
+      renameFile(project, fileId, newName)
     } catch (e) {
       alert(e instanceof Error ? e.message : "Rename failed")
+      return
     }
-  }, [project, refresh])
+    await applyRenames([{ fileId, name: newName.trim() }])
+  }, [project, applyRenames])
 
   const handleDeleteFile = useCallback(async (fileId: string) => {
     if (!project) return
@@ -1284,21 +1359,15 @@ export function ProjectWorkspace() {
   }, [project, refresh, activeFileId, setActiveFileId, frontierSession])
 
   const handleApplySuggestions = useCallback(async (chosen: RenameSuggestion[]) => {
-    if (!project) return
-    const before = await getProject(project.id)
-    const dismissedAt = new Date().toISOString()
-    // Apply the user's choices and dismiss the banner in the same write:
-    // once they've engaged, the banner is no longer useful and shouldn't
-    // re-appear for any remaining (unchosen) suggestions until they
-    // explicitly re-run detection from the overflow menu.
-    await patchProject(project.id, (p) => ({
-      ...applySuggestions(p, chosen),
-      suggestionsDismissedAt: dismissedAt,
-    }))
-    refresh()
-    if (before) setUndo({ project: before })
-    setTimeout(() => setUndo((u) => (u?.project === before ? null : u)), 10000)
-  }, [project, refresh])
+    if (!project || chosen.length === 0) return
+    // Capture originals for a 10s undo, then apply the friendly labels. Applied
+    // files drop out of the banner on their own (detectSuggestions no longer
+    // matches once name === suggestion); unchosen suggestions correctly remain.
+    const originals = chosen.map((s) => ({ fileId: s.fileId, name: s.currentName }))
+    await applyRenames(chosen.map((s) => ({ fileId: s.fileId, name: s.suggestedName })))
+    setUndo({ renames: originals })
+    setTimeout(() => setUndo((u) => (u?.renames === originals ? null : u)), 10000)
+  }, [project, applyRenames])
 
   const handleApplyOneSuggestion = useCallback(async (fileId: string) => {
     if (!project) return
@@ -1313,21 +1382,13 @@ export function ProjectWorkspace() {
     refresh()
   }, [project, refresh])
 
-  const handleDismissBanner = useCallback(async () => {
-    if (!project) return
-    await patchProject(project.id, (p) => ({ ...p, suggestionsDismissedAt: new Date().toISOString() }))
-    refresh()
-  }, [project, refresh])
+  const handleDismissBanner = useCallback(() => {
+    setSuggestionsDismissed(true)
+  }, [])
 
-  const handleReinviteSuggestions = useCallback(async () => {
-    if (!project) return
-    await patchProject(project.id, (p) => {
-      const next = { ...p }
-      delete next.suggestionsDismissedAt
-      return next
-    })
-    refresh()
-  }, [project, refresh])
+  const handleReinviteSuggestions = useCallback(() => {
+    setSuggestionsDismissed(false)
+  }, [])
 
   const projectNavItems = useMemo(() => {
     const items = [
@@ -1593,7 +1654,7 @@ export function ProjectWorkspace() {
                     onClick: () => setVideoDialogOpen(true),
                   }]
                 : []),
-              ...(suggestions.length > 0 && project.suggestionsDismissedAt
+              ...(suggestions.length > 0 && suggestionsDismissed
                 ? [{
                     id: "redetect-suggestions",
                     label: `Show ${suggestions.length} file name suggestion${suggestions.length === 1 ? "" : "s"}`,
@@ -2062,10 +2123,9 @@ export function ProjectWorkspace() {
       {undo && (
         <div className="fixed bottom-4 right-4 z-60 flex items-center gap-2 rounded-lg bg-card px-3 py-2 text-sm shadow-neu">
           <span>Applied renames.</span>
-          <Button size="sm" variant="outline" onClick={async () => {
+          <Button size="sm" variant="outline" onClick={() => {
             if (!undo) return
-            await updateProject(undo.project)
-            refresh()
+            void applyRenames(undo.renames)
             setUndo(null)
           }}>Undo</Button>
         </div>

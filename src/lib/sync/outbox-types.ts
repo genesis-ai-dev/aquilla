@@ -42,6 +42,8 @@ export type OutboxEventKind =
   | "cell.backtranslation.set"
   // File lifecycle.
   | "file.create"
+  // File label rename (contributor-level; non-chain-mutating).
+  | "file.rename"
   // Comments (non-chain-mutating; contributor-level).
   | "comment.create"
   | "comment.edit"
@@ -163,6 +165,12 @@ export interface OutboxEventPayloads {
     fileType: string
     sourceLanguage?: string
     targetLanguage?: string
+  }
+  // Rename a file's display label. Non-chain-mutating (parentId omitted).
+  // Mirrors sync-worker/src/events/types.ts. (Corpus/grouping marker is not
+  // server-backed yet — name only.)
+  "file.rename": {
+    name: string
   }
 
   // ── Comments (non-chain-mutating) ────────────────────────────────────────

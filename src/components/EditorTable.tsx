@@ -1680,7 +1680,7 @@ function EditorRow({
   const showLineNumber = lineNumbersEnabled && cell.type !== "paratext"
   // Prefer the explicitly-assigned cast member's name; fall back to the cell's
   // own label (e.g. a chapter/verse marker from USFM), then nothing.
-  const castVoiceId = assignedCastVoiceId(project.ttsSettings, cell.id)
+  const castVoiceId = cellLabelsEnabled ? assignedCastVoiceId(project.ttsSettings, cell.id) : undefined
   const castName = castVoiceId ? findVoice(project.ttsSettings, castVoiceId)?.name : undefined
   const labelText = castName ?? cell.cellLabel ?? null
   const showCellLabel = cellLabelsEnabled && labelText

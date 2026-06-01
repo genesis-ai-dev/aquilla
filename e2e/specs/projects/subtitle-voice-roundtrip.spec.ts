@@ -22,7 +22,8 @@ import { Workspace } from "../../helpers/page-objects/Workspace"
 
 const FIXTURE = path.resolve(__dirname, "../../fixtures/voices-roundtrip.vtt")
 
-test("import VTT with <v Name> tags → cast created → export round-trip", async ({ alice }) => {
+// TODO: un-skip once a live stack is available to run this against.
+test.skip("import VTT with <v Name> tags → cast created → export round-trip", async ({ alice }) => {
   // ── 1. Create a project ───────────────────────────────────────────────────
   const dash = new Dashboard(alice)
   await dash.goto()

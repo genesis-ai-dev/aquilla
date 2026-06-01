@@ -45,6 +45,12 @@ describe("import — speakerPairs cellId consistency (single-parse invariant)", 
   it("emitParsedFile: every speakerPair cellId matches a cell that was uploaded", async () => {
     // Simulate parsed VTT strings with speaker annotations (as extractVttStrings produces).
     // We use fixed IDs matching what buildBulkCellsWithSpeakers will use (str.id).
+    // NOTE: Pre-set ids here ("cue-1" etc.) are used because TranslatableString
+    // requires the id field. This test exercises `emitParsedFile` in isolation —
+    // it is NOT the double-parse regression guard. Test 2 (importFile with a real
+    // VTT blob) is the actual single-parse regression guard: it uses fresh UUIDs
+    // minted by the parser, verifying that speakerPairs and uploaded cells share
+    // the same minted ids throughout the full parse→upload path.
     const { ref, speakerPairs } = await emitParsedFile(
       {
         name: "scene.vtt",

@@ -20,10 +20,14 @@ describe("buildCastAdditions", () => {
     expect(result.castAssignments).toEqual({ c1: "v-mary", c2: "new-id", c3: "new-id" })
   })
 
-  it("returns a no-op (same refs are fine) when there are no speakers", () => {
+  it("returns a no-op when there are no speakers, preserving the Narrator built-in as default", () => {
+    // When the voice library is empty, getVoiceLibrary falls back to PRESET_VOICES (Narrator).
+    // No new voices should be added, and castAssignments must be empty.
     const existing: ProjectTtsSettings = { voices: [] }
     const result = buildCastAdditions([{ cellId: "c1", speaker: undefined }], existing, () => "x")
     expect(result.castAssignments).toEqual({})
-    expect(result.voices).toEqual([])
+    // Narrator preset is preserved as library[0]; no custom voices added.
+    expect(result.voices.every((v) => v.builtIn)).toBe(true)
+    expect(result.voices.length).toBe(1)
   })
 })

@@ -26,6 +26,7 @@ import { exportXliff } from "@/lib/export/exporters/xliff"
 import { exportTmx } from "@/lib/export/exporters/tmx"
 import { exportVtt } from "@/lib/export/exporters/vtt"
 import { buildProjectZip } from "@/lib/export/project-zip-export"
+import type { TextExportFormat } from "@/lib/export/project-zip-export"
 import { previewAudioByCharacter } from "@/lib/export/audio-by-character"
 import { useProjectCells } from "@/hooks/useProjectCells"
 import type { CellData } from "@/hooks/useCells"
@@ -236,7 +237,7 @@ export function ExportDialog({
         setStatus({ kind: "busy", msg: `Building zip for ${projectFileCells.length} files…` })
         const zipBlob = await buildProjectZip({
           files: projectFileCells,
-          format: format as import("@/lib/export/project-zip-export").TextExportFormat,
+          format: format as TextExportFormat,
           sourceLanguage,
           targetLanguage,
         })

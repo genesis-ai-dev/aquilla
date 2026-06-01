@@ -1,5 +1,5 @@
 import type { ProjectTtsSettings, Voice } from "@/lib/parsers/types"
-import { VOICE_PALETTE } from "@/lib/audio/voices"
+import { VOICE_PALETTE, getVoiceLibrary } from "@/lib/audio/voices"
 
 export interface SpeakerAssignment {
   cellId: string
@@ -19,15 +19,16 @@ export interface CastAdditions {
  * cellId→voiceId assignment map. Names already in the cast are reused. `mintId`
  * is injected for testability (production passes uuidv7).
  *
- * Uses `settings.voices` directly (not the preset fallback) so that a project
- * with an empty custom library stays empty — imported speakers append cleanly.
+ * Seeds the voice list from `getVoiceLibrary(settings)` so that a project that
+ * has never opened Voice Studio still starts with the built-in Narrator preset
+ * as library[0] / default. Custom libraries are reused as-is.
  */
 export function buildCastAdditions(
   pairs: SpeakerAssignment[],
   settings: ProjectTtsSettings | undefined,
   mintId: () => string,
 ): CastAdditions {
-  const voices: Voice[] = [...(settings?.voices ?? [])]
+  const voices: Voice[] = [...getVoiceLibrary(settings)]
   const byName = new Map<string, string>() // name → voiceId
   for (const v of voices) byName.set(v.name, v.id)
 

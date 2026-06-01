@@ -27,7 +27,7 @@ export function formatVttTime(seconds: number): string {
   return `${h}:${m}:${s}.${ms}`
 }
 
-function stripHtml(text: string): string {
+export function stripHtml(text: string): string {
   return text.replace(/<[^>]*>/g, "").replace(/\s+/g, " ").trim()
 }
 

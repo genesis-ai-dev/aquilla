@@ -41,6 +41,7 @@ import {
   resolveProjectRoleIncludingArchived,
   ROLE_NAMES,
 } from "../services/project-permissions"
+import { getMyAssignments } from "../services/assignments"
 import {
   bumpOrgActivity,
   getOrgMemberRole,
@@ -449,6 +450,19 @@ projects.patch("/:projectId/deadline", authMiddleware, zValidator("json", deadli
 // ──────────────────────────────────────────────────────────────────────────
 // GET /api/v2/projects/:projectId/members — effective member list
 // ──────────────────────────────────────────────────────────────────────────
+
+/**
+ * GET /api/v2/projects/:projectId/assignments/mine — the caller's open
+ * assignments in this project (the "Assigned to me" inbox). Any project member.
+ */
+projects.get("/:projectId/assignments/mine", authMiddleware, async (c) => {
+  const user = c.get("user")
+  const projectId = c.req.param("projectId") as string
+  const role = await resolveProjectRole(c.env, user, projectId)
+  if (!role) return c.json({ error: "no access to project" }, 403)
+  const assignments = await getMyAssignments(c.env, projectId, user.id)
+  return c.json({ assignments })
+})
 
 projects.get("/:projectId/members", authMiddleware, async (c) => {
   const user = c.get("user")

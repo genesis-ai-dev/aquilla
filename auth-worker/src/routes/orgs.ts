@@ -37,6 +37,7 @@ import {
   ROLE_NAMES,
 } from "../services/project-permissions"
 import { lookupUserByUsername } from "../services/user-lookup"
+import { getOrgAssignmentWorkload } from "../services/assignments"
 
 const orgs = new Hono<AuthHonoEnv>()
 
@@ -118,6 +119,22 @@ orgs.get("/:orgId/members/:userId/access", async (c) => {
   }
   const access = await getMemberEffectiveAccess(c.env, orgId, targetUserId)
   return c.json(access)
+})
+
+/**
+ * GET /api/v2/orgs/:orgId/assignments/workload — per-assignee open workload +
+ * derived progress across the org's active projects. Maintainer+ (managers).
+ */
+orgs.get("/:orgId/assignments/workload", async (c) => {
+  const user = c.get("user")
+  const orgId = parseInt(c.req.param("orgId"), 10)
+  if (!Number.isFinite(orgId)) return c.json({ error: "invalid orgId" }, 400)
+  const role = await getOrgMemberRole(c.env, orgId, user.id)
+  if (role == null || role < ROLE.MAINTAINER) {
+    return c.json({ error: "org role >= maintainer required" }, 403)
+  }
+  const workload = await getOrgAssignmentWorkload(c.env, orgId)
+  return c.json({ workload })
 })
 
 /** GET /api/v2/orgs/:orgId/members — caller must be an org member. */

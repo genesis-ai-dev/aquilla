@@ -52,6 +52,12 @@ export type EventKind =
   // Back-translations (non-chain-mutating; contributor-level).
   // Does NOT move cells.event_id; does NOT affect validations or endorsements.
   | 'cell.backtranslation.set'
+  // Assignments (project-level, non-chain-mutating; project-lead+). Carry a
+  // fileId on the envelope for auth/routing like comments, but their scope is
+  // project-level — resolved into assignment_cells from the payload.
+  | 'assignment.create'
+  | 'assignment.reassign'
+  | 'assignment.unassign'
 
 // ── Comment scope ─────────────────────────────────────────────────────────
 
@@ -203,6 +209,37 @@ export interface EventPayloads {
     targetEventId: string
     /** true = LLM-polished BT; false = statistical-only. */
     polished: boolean
+  }
+
+  // ── Assignments (project-level, non-chain-mutating) ─────────────────────
+  // A manager assigns a book/chapter scope to a member. One assignment.create
+  // regardless of scope size — the handler resolves `scope` into the cell set
+  // from the live `cells` projection.
+  'assignment.create': {
+    /** Client-generated id (ulid/uuid) — the assignment's stable key. */
+    assignmentId: string
+    scopeKind: 'books' | 'chapters'
+    /**
+     * One entry per assigned unit. `chapter` present for 'chapters'
+     * (e.g. { fileId, chapter: "GEN 1" } -> canonical_ref LIKE "GEN 1:%");
+     * fileId-only for 'books' (all source cells in the file).
+     */
+    scope: { fileId: string; chapter?: string }[]
+    /** Human-readable label for the assigned scope, e.g. "Genesis 1-3". */
+    scopeLabel: string
+    /** Frontier user id of the assignee. */
+    assigneeUserId: number
+    /** Optional ISO date string deadline. */
+    deadline?: string | null
+    /** Optional instruction note. */
+    note?: string | null
+  }
+  'assignment.reassign': {
+    assignmentId: string
+    assigneeUserId: number
+  }
+  'assignment.unassign': {
+    assignmentId: string
   }
 }
 

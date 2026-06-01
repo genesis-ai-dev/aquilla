@@ -35,6 +35,9 @@ async function makeAuthorized<K extends EventKind>(kind: K, role = 500) {
     'comment.edit': { commentId: 'cmt-1', body: 'updated' },
     'comment.delete': { commentId: 'cmt-1' },
     'comment.resolve': { commentId: 'cmt-1', resolved: true },
+    'assignment.create': { assignmentId: 'as-1', scopeKind: 'books', scope: [{ fileId: 'file-x' }], scopeLabel: 'Genesis', assigneeUserId: 2 },
+    'assignment.reassign': { assignmentId: 'as-1', assigneeUserId: 3 },
+    'assignment.unassign': { assignmentId: 'as-1' },
   }
 
   const raw = {

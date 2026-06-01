@@ -16,6 +16,7 @@ import type { EventKind } from './types'
 import { handleCellEvent, type CellEventKind } from './handlers/cell-events'
 import { handleFileCreate } from './handlers/file-create'
 import { handleCommentEvent, type CommentEventKind } from './handlers/comment-events'
+import { handleAssignmentEvent, type AssignmentEventKind } from './handlers/assignment-events'
 import type { DispatchResult } from './handlers/types'
 
 export type { DispatchResult } from './handlers/types'
@@ -104,6 +105,18 @@ export function dispatchEvent(
           authed as AuthorizedEvent<CellEventKind>,
           serverTs,
           opts,
+        ),
+      }
+
+    case 'assignment.create':
+    case 'assignment.reassign':
+    case 'assignment.unassign':
+      return {
+        ok: true,
+        result: handleAssignmentEvent(
+          db,
+          authed as AuthorizedEvent<AssignmentEventKind>,
+          serverTs,
         ),
       }
 

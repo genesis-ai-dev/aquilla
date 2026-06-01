@@ -54,6 +54,20 @@ describe("requiredRoleFor — file.create", () => {
   })
 })
 
+describe("requiredRoleFor — assignment.* (manager)", () => {
+  it("returns PROJECT_LEAD for assignment.create", () => {
+    expect(requiredRoleFor('assignment.create')).toBe(ROLE.PROJECT_LEAD)
+  })
+
+  it("returns PROJECT_LEAD for assignment.reassign", () => {
+    expect(requiredRoleFor('assignment.reassign')).toBe(ROLE.PROJECT_LEAD)
+  })
+
+  it("returns PROJECT_LEAD for assignment.unassign", () => {
+    expect(requiredRoleFor('assignment.unassign')).toBe(ROLE.PROJECT_LEAD)
+  })
+})
+
 describe("REQUIRED_ROLE table completeness", () => {
   it("has an entry for every EventKind", () => {
     const keys = Object.keys(REQUIRED_ROLE) as EventKind[]

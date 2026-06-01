@@ -864,6 +864,19 @@ case 'cell.audio.attach': {
       return ['cell_backtranslations']
     }
 
+    case 'assignment.create':
+    case 'assignment.reassign':
+    case 'assignment.unassign': {
+      // Assignment projection is built directly in handlers/assignment-events.ts
+      // because it needs claims.userId for `created_by` (an INTEGER matching
+      // assignee_user_id), which PersistedEvent does not carry — it only has
+      // `author` (username). These kinds route to handleAssignmentEvent and
+      // never reach this projector; this case exists only for exhaustiveness.
+      throw new Error(
+        `buildEventProjectionStmts: ${event.kind} is projected by handleAssignmentEvent, not here (event id: ${event.id})`,
+      )
+    }
+
     default: {
       // Defensive exhaustiveness check. If a new EventKind is added without
       // a case here this triggers a TS compile error.

@@ -76,6 +76,12 @@ export const REQUIRED_ROLE: Record<EventKind, number> = {
   // Viewing BTs is gated only at the read route (viewer+); the write event
   // is contributor-level matching target.* for consistency.
   'cell.backtranslation.set': ROLE.CONTRIBUTOR,
+
+  // Assignments: a manager (project_lead+) assigns work to members. Reassign
+  // and unassign are the same managerial authority.
+  'assignment.create': ROLE.PROJECT_LEAD,
+  'assignment.reassign': ROLE.PROJECT_LEAD,
+  'assignment.unassign': ROLE.PROJECT_LEAD,
 }
 
 export function requiredRoleFor(kind: EventKind): number {

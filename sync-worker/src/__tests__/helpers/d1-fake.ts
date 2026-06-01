@@ -18,6 +18,29 @@ export interface Tables {
   files: FileRow[]
   comments: CommentRow[]
   cells_fts: CellsFtsRow[]
+  assignments: AssignmentRow[]
+  assignment_cells: AssignmentCellRow[]
+}
+
+export interface AssignmentRow {
+  assignment_id: string
+  project_id: string
+  assignee_user_id: number
+  scope_kind: string
+  scope_label: string
+  cells_total: number
+  deadline: string | null
+  note: string | null
+  created_by: number
+  created_at: number
+  unassigned_at: number | null
+  completed_at: number | null
+}
+
+export interface AssignmentCellRow {
+  assignment_id: string
+  file_id: string
+  cell_id: string
 }
 
 export interface WaiverRow {
@@ -127,6 +150,8 @@ export function makeInMemoryD1(tables: Partial<Tables> = {}): InMemoryD1 {
     files: tables.files ?? [],
     comments: tables.comments ?? [],
     cells_fts: tables.cells_fts ?? [],
+    assignments: tables.assignments ?? [],
+    assignment_cells: tables.assignment_cells ?? [],
   }
 
   // Stable rowid map: cell array-index → 1-based rowid. Populated lazily on
@@ -1236,6 +1261,90 @@ export function makeInMemoryD1(tables: Partial<Tables> = {}): InMemoryD1 {
         rows = rows.filter((c) => c.file_id === fileId)
       }
       return rows.sort((a, b) => a.created_at - b.created_at)
+    }
+
+    // ── INSERT OR IGNORE INTO assignments (assignment.create) ──────────────
+    if (/^INSERT OR IGNORE INTO assignments \(/.test(normalized)) {
+      const row: AssignmentRow = {
+        assignment_id: args[0] as string,
+        project_id: args[1] as string,
+        assignee_user_id: args[2] as number,
+        scope_kind: args[3] as string,
+        scope_label: args[4] as string,
+        cells_total: 0,
+        deadline: (args[5] as string | null) ?? null,
+        note: (args[6] as string | null) ?? null,
+        created_by: args[7] as number,
+        created_at: args[8] as number,
+        unassigned_at: null,
+        completed_at: null,
+      }
+      if (!db.assignments.some((a) => a.assignment_id === row.assignment_id)) {
+        db.assignments.push(row)
+      }
+      return []
+    }
+
+    // ── INSERT OR IGNORE INTO assignment_cells ... SELECT ... FROM cells ───
+    // Resolves a book (no chapter) or chapter (canonical_ref LIKE 'BOOK CH:%')
+    // scope into the assignment's source-cell set. INSERT OR IGNORE dedupes on
+    // the (assignment_id, file_id, cell_id) PK.
+    if (
+      /^INSERT OR IGNORE INTO assignment_cells \(assignment_id, file_id, cell_id\) SELECT \?, file_id, cell_id FROM cells WHERE project_id = \? AND file_id = \? AND side = 'source'( AND canonical_ref LIKE \?)?$/.test(
+        normalized,
+      )
+    ) {
+      const assignmentId = args[0] as string
+      const projectId = args[1] as string
+      const fileId = args[2] as string
+      const hasLike = normalized.includes('canonical_ref LIKE ?')
+      // Patterns are always a prefix + '%' (e.g. 'GEN 1:%'); strip the '%'.
+      const likePrefix = hasLike ? (args[3] as string).replace(/%$/, '') : null
+      for (const c of db.cells) {
+        if (c.project_id !== projectId || c.file_id !== fileId || c.side !== 'source') continue
+        if (likePrefix !== null && !(c.canonical_ref ?? '').startsWith(likePrefix)) continue
+        const exists = db.assignment_cells.some(
+          (ac) => ac.assignment_id === assignmentId && ac.file_id === c.file_id && ac.cell_id === c.cell_id,
+        )
+        if (!exists) {
+          db.assignment_cells.push({ assignment_id: assignmentId, file_id: c.file_id, cell_id: c.cell_id })
+        }
+      }
+      return []
+    }
+
+    // ── UPDATE assignments SET cells_total = (SELECT COUNT(*) ...) ─────────
+    if (
+      /^UPDATE assignments SET cells_total = \(SELECT COUNT\(\*\) FROM assignment_cells WHERE assignment_id = \?\) WHERE assignment_id = \?$/.test(
+        normalized,
+      )
+    ) {
+      const countId = args[0] as string
+      const whereId = args[1] as string
+      const n = db.assignment_cells.filter((ac) => ac.assignment_id === countId).length
+      const row = db.assignments.find((a) => a.assignment_id === whereId)
+      if (row) row.cells_total = n
+      return []
+    }
+
+    // ── UPDATE assignments SET assignee_user_id (assignment.reassign) ─────
+    if (/^UPDATE assignments SET assignee_user_id = \? WHERE assignment_id = \? AND project_id = \?$/.test(normalized)) {
+      const assignee = args[0] as number
+      const assignmentId = args[1] as string
+      const projectId = args[2] as string
+      const row = db.assignments.find((a) => a.assignment_id === assignmentId && a.project_id === projectId)
+      if (row) row.assignee_user_id = assignee
+      return []
+    }
+
+    // ── UPDATE assignments SET unassigned_at (assignment.unassign) ────────
+    if (/^UPDATE assignments SET unassigned_at = \? WHERE assignment_id = \? AND project_id = \?$/.test(normalized)) {
+      const ts = args[0] as number
+      const assignmentId = args[1] as string
+      const projectId = args[2] as string
+      const row = db.assignments.find((a) => a.assignment_id === assignmentId && a.project_id === projectId)
+      if (row) row.unassigned_at = ts
+      return []
     }
 
     return []

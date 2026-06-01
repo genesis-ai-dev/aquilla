@@ -35,6 +35,9 @@ export interface TranslatableString {
    *  `end_ms` persistence. */
   start?: number
   end?: number
+  /** Speaker extracted from a `<v Name>` VTT voice tag, if present. Maps to a
+   *  Cast member on import. */
+  speaker?: string
   type: CellType
   sourceLocation?: SourceLocation
 }

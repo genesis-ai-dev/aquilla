@@ -1,5 +1,6 @@
 import { v4 as uuid } from "uuid"
 import type { TranslatableString } from "./types"
+import { extractVoiceLabel } from "@/lib/export/vtt-voice"
 
 const TIMESTAMP_VTT = /^\d{2}:\d{2}:\d{2}\.\d{3}\s+-->\s+\d{2}:\d{2}:\d{2}\.\d{3}/
 const TIMESTAMP_SRT = /^\d{2}:\d{2}:\d{2},\d{3}\s+-->\s+\d{2}:\d{2}:\d{2},\d{3}/
@@ -23,7 +24,8 @@ export function extractVttStrings(content: string): TranslatableString[] {
 
   function flush() {
     if (currentTimestamp && currentText.length > 0) {
-      const text = currentText.join("\n")
+      const joined = currentText.join("\n")
+      const { speaker, text } = extractVoiceLabel(joined)
       const range = parseCueRange(currentTimestamp)
       results.push({
         id: uuid(),
@@ -33,6 +35,7 @@ export function extractVttStrings(content: string): TranslatableString[] {
         group: uuid(),
         type: "cue",
         ...(range ? { start: range.start, end: range.end } : {}),
+        ...(speaker ? { speaker } : {}),
       })
     }
     currentTimestamp = ""

@@ -93,6 +93,11 @@ export function useProjectSettings(
   const [local, setLocal] = useState<ProjectWideSettings>({})
   const [hasFetched, setHasFetched] = useState(false)
 
+  // aliveRef tracks component liveness for long-running callbacks that start
+  // *outside* of an effect (e.g. the write-path patch() and refresh() called
+  // imperatively by callers). It is NOT used to guard the initial-fetch effect
+  // — that effect uses a per-invocation `let alive` local so StrictMode's
+  // mount→cleanup→remount cycle cannot poison the surviving mount.
   const aliveRef = useRef(true)
   useEffect(
     () => () => {
@@ -137,6 +142,9 @@ export function useProjectSettings(
     if (!projectId || !jwt) return null
     if (!isOnlineRef.current) return null
     const got = await fetchProjectSettings(jwt, projectId)
+    // Guard against post-unmount state updates. aliveRef is only set false on
+    // final unmount; explicit refresh() calls from still-mounted consumers
+    // should always land (aliveRef.current will be true for them).
     if (!aliveRef.current) return null
     writeServer(got)
     setHasFetched(true)
@@ -189,24 +197,39 @@ export function useProjectSettings(
   // Hydrate local cache on projectId change, then kick off the server fetch.
   // Sequencing local-before-remote is intentional: local state is shown
   // immediately while the network round-trip is in flight.
+  //
+  // IMPORTANT: we use a per-invocation `alive` local (not `aliveRef`) to guard
+  // state updates. Under React StrictMode the effect runs twice:
+  //   mount → cleanup (sets aliveRef.current=false) → remount
+  // If we used `aliveRef` here, the surviving remount's async callbacks would
+  // see aliveRef.current===false and silently drop the fetched settings, leaving
+  // server===null and hasFetched===false forever (BUG-TERM-1).
+  // The per-invocation local is flipped only in THIS closure's cleanup, so each
+  // effect run has its own independent alive flag. aliveRef is reserved for
+  // post-unmount guards on imperatively-called refresh()/patch().
   useEffect(() => {
     if (!projectId) return
-    let cancelled = false
+    let alive = true
+    // Reset aliveRef so that refresh() (which uses aliveRef for its own
+    // post-unmount guard) works correctly on the surviving mount after StrictMode
+    // runs the cleanup on the first mount.
+    aliveRef.current = true
+
     void getProject(projectId)
       .then((rec) => {
-        if (cancelled || !aliveRef.current) return
+        if (!alive) return
         setLocal(localSettingsFrom(rec))
         // Kick off server fetch after local state is set.
         void refresh()
       })
       .catch((err) => {
-        if (cancelled || !aliveRef.current) return
+        if (!alive) return
         console.warn("[useProjectSettings] failed to read local IDB cache", err)
         // Continue with empty local; refresh still fires so server values appear.
         void refresh()
       })
     return () => {
-      cancelled = true
+      alive = false
     }
   }, [projectId, refresh])
 

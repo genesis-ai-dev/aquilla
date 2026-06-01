@@ -1,5 +1,6 @@
 import { NavLink } from "react-router-dom"
 import { useActiveOrg } from "@/context/OrgContext"
+import { usePlatformAdmin } from "@/hooks/usePlatformAdmin"
 import { OrgSwitcher } from "./OrgSwitcher"
 import { AccountSwitcher } from "@/components/AccountSwitcher"
 
@@ -9,6 +10,8 @@ const link = ({ isActive }: { isActive: boolean }) =>
 export function OrgSidebar() {
   const { activeOrg } = useActiveOrg()
   const isAdmin = (activeOrg?.role.level ?? 0) >= 600
+  // Platform-operator (site-wide admin) — separate axis from the org role.
+  const { isAdmin: isPlatformAdmin } = usePlatformAdmin()
   return (
     <div className="flex h-full flex-col gap-1 p-2">
       <OrgSwitcher />
@@ -22,6 +25,10 @@ export function OrgSidebar() {
           <NavLink to="/members" className={link}>Members</NavLink>
           <NavLink to="/projects/archived" className={link}>Archived</NavLink>
           <NavLink to="/settings" className={link}>Settings</NavLink>
+        </>}
+        {isPlatformAdmin && <>
+          <div className="my-1 border-t" />
+          <NavLink to="/admin" className={link}>Admin</NavLink>
         </>}
       </nav>
       <div className="mt-auto pt-2 border-t">

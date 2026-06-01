@@ -15,6 +15,9 @@ export default defineConfig(async () => {
             TEST_MIGRATIONS: migrations,
             SECRET_KEY: "frontier-test-secret",
             SYNC_SECRET_KEY: "sync-secret",
+            // Overrides wrangler.toml's [vars] for tests: "root" is the sole
+            // platform admin the admin-routes suite asserts against.
+            PLATFORM_ADMINS: "root",
           },
         },
       }),

@@ -42,6 +42,12 @@
 //   POST /api/v2/invites/multi
 //   GET  /api/v2/invites/:token/preview
 //   POST /api/v2/invites/:token/accept
+//   GET  /api/v2/admin/me          (PLATFORM_ADMINS only)
+//   GET  /api/v2/admin/overview    (PLATFORM_ADMINS only)
+//   GET  /api/v2/admin/orgs        (PLATFORM_ADMINS only)
+//   GET  /api/v2/admin/users       (PLATFORM_ADMINS only)
+//   GET  /api/v2/admin/projects    (PLATFORM_ADMINS only)
+//   GET  /api/v2/admin/activity    (PLATFORM_ADMINS only)
 //   GET  /api/v2/health
 //   POST /__test__/reset (WRANGLER_LOCAL only)
 //   POST /__dev__/seed   (WRANGLER_LOCAL only)
@@ -57,6 +63,7 @@ import sourceLinkingRoutes from "./routes/source-linking"
 import invitesRoutes from "./routes/invites"
 import orgsRoutes from "./routes/orgs"
 import usersRoutes from "./routes/users"
+import adminRoutes from "./routes/admin"
 import testResetRoutes from "./routes/test-reset"
 import devSeedRoutes from "./routes/dev-seed"
 import chatRoutes from "./routes/chat"
@@ -115,6 +122,7 @@ app.get("/", (c) =>
       "/api/v2/orgs/*",
       "/api/v2/projects/*",
       "/api/v2/invites/*",
+      "/api/v2/admin/*",
       "/api/v2/health",
       "/api/v1/chat/completions",
     ],
@@ -134,6 +142,10 @@ app.route("/api/v1/auth", authRoutes)
 app.route("/api/v2/sync-token", syncTokenRoutes)
 app.route("/api/v2/users", usersRoutes)
 app.route("/api/v2/orgs", orgsRoutes)
+// Platform-operator (site-wide admin) surface — read-only, cross-tenant.
+// Gated by PLATFORM_ADMINS allowlist via requirePlatformAdmin (see
+// routes/admin.ts); no-op for everyone not on the list.
+app.route("/api/v2/admin", adminRoutes)
 // Project-settings + source-linking surfaces are mounted as siblings to
 // the main projects router so they live in their own files without colliding.
 app.route("/api/v2/projects", projectSettingsRoutes)

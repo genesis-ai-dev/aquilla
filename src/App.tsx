@@ -48,6 +48,9 @@ const TeamsList = lazy(() =>
 const TeamDetail = lazy(() =>
   import("@/components/org/TeamDetail").then((m) => ({ default: m.TeamDetail })),
 )
+const AdminConsole = lazy(() =>
+  import("@/pages/AdminConsole").then((m) => ({ default: m.AdminConsole })),
+)
 const DebugView = lazy(() =>
   import("@/components/DebugView").then((m) => ({ default: m.DebugView })),
 )
@@ -131,6 +134,10 @@ function AppRoutes() {
         <Route path="/members" element={<MembersPage />} />
         <Route path="/teams" element={<TeamsList />} />
         <Route path="/teams/:groupId" element={<TeamDetail />} />
+
+        {/* Lazy — site-wide admin console (platform operators only; gated
+            client-side by usePlatformAdmin and server-side by PLATFORM_ADMINS) */}
+        <Route path="/admin" element={<AdminConsole />} />
 
         {/* Lazy — debug views (dev/staging only) */}
         <Route path="/debug" element={<DebugView />} />

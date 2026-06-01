@@ -30,6 +30,18 @@ export interface Env {
 
   ENVIRONMENT?: string
 
+  /**
+   * Comma-separated allowlist of usernames granted platform-operator
+   * (site-wide admin) access — see middleware/platform-admin.ts and
+   * routes/admin.ts. This is a SEPARATE axis from the org-scoped role
+   * ladder (ROLE below): a platform admin can read across every org/user,
+   * which the 100–700 levels never confer. Kept in deploy config rather
+   * than a DB column so god-mode can't be granted by a stray SQL write;
+   * empty/unset means no platform admins exist. Whitespace around names is
+   * trimmed; matching is exact and case-sensitive.
+   */
+  PLATFORM_ADMINS?: string
+
   // Chat-completion proxy (folded in from the former aquilla-chat-worker
   // on 2026-05-26 — see routes/chat.ts).
   OPENROUTER_API_KEY?: string

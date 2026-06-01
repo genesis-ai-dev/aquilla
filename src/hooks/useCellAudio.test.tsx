@@ -180,6 +180,25 @@ describe("useCellAudio", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1)
   })
 
+  it("dedups concurrent loads: two parallel fetches collapse to a single GET", async () => {
+    // Only ONE response is queued. Before the in-flight dedup, two callers
+    // firing on the same mount (waveform peak decode + play) each triggered a
+    // fetch; the second got `undefined` and a transient failure could flip
+    // shared state to "error" despite the first succeeding.
+    const bytes = new TextEncoder().encode("dedup-audio")
+    fetchMock.mockResolvedValueOnce(new Response(bytes.buffer as ArrayBuffer, { status: 200 }))
+
+    const project = makeProject()
+    const cell = makeCell("a6", buildFrontierAudioUrl("a6", "webm"))
+    const { result } = renderHook(() => useCellAudio(project, cell, "file-1"))
+
+    await act(async () => {
+      await Promise.all([result.current.ensureBytes(), result.current.ensureBytes()])
+    })
+
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
   it("revokes the object URL on unmount", async () => {
     const bytes = new TextEncoder().encode("revoke-test")
     fetchMock.mockResolvedValueOnce(new Response(bytes.buffer as ArrayBuffer, { status: 200 }))

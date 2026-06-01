@@ -75,6 +75,8 @@ export function useCellAudio(
   const bytesRef = useRef<Uint8Array | null>(null)
   const rafRef = useRef<number | null>(null)
   const peaksRequestedRef = useRef<number | null>(null)
+  const bytesPromiseRef = useRef<Promise<Uint8Array> | null>(null)
+  const peaksReadyRef = useRef(false)
   const volumeRef = useRef(1)
   const trimRef = useRef<{ start: number | null; end: number | null }>({ start: null, end: null })
 
@@ -124,7 +126,9 @@ export function useCellAudio(
         urlRef.current = null
       }
       bytesRef.current = null
+      bytesPromiseRef.current = null
       peaksRequestedRef.current = null
+      peaksReadyRef.current = false
       if (coordinatorControllerRef.current) clearActiveAudioIf(coordinatorControllerRef.current)
       setState("idle")
       setIsPlaying(false)
@@ -138,6 +142,12 @@ export function useCellAudio(
 
   const ensureBytes = useCallback(async (): Promise<Uint8Array> => {
     if (bytesRef.current) return bytesRef.current
+    // Coalesce concurrent callers — the waveform's peak decode and the play
+    // button (and, in the combined-clip editor, both at once) fire on the same
+    // mount. Without this, two parallel fetches race and a transient failure on
+    // one can flip shared state to "error" even though the other succeeded.
+    if (bytesPromiseRef.current) return bytesPromiseRef.current
+
     if (!attachmentUrl) {
       throw { kind: "pointer-missing", message: "No audio attachment on this cell" } as AudioError
     }
@@ -156,32 +166,40 @@ export function useCellAudio(
       throw { kind: "no-session", message: "Not signed in" } as AudioError
     }
 
-    try {
-      const bytes = await fetchCellAudio({
-        projectId: project.id,
-        fileId,
-        audioId: frontier.audioId,
-        ext: frontier.ext,
-        getSyncToken,
-      })
-      bytesRef.current = bytes
-      return bytes
-    } catch (e) {
-      // F10: distinguish permanent deletion (404) from transient errors.
-      // 404 → "audio-deleted" so the UI can show "re-record" instead of
-      // a generic error with a retry spinner.
-      const is404 =
-        (e && typeof e === "object" && "status" in e && (e as { status: unknown }).status === 404)
-      if (is404) {
+    const p = (async () => {
+      try {
+        const bytes = await fetchCellAudio({
+          projectId: project.id,
+          fileId,
+          audioId: frontier.audioId,
+          ext: frontier.ext,
+          getSyncToken,
+        })
+        bytesRef.current = bytes
+        return bytes
+      } catch (e) {
+        // F10: distinguish permanent deletion (404) from transient errors.
+        // 404 → "audio-deleted" so the UI can show "re-record" instead of
+        // a generic error with a retry spinner.
+        const is404 =
+          (e && typeof e === "object" && "status" in e && (e as { status: unknown }).status === 404)
+        if (is404) {
+          throw {
+            kind: "audio-deleted",
+            message: "This audio recording has been deleted and cannot be played.",
+          } as AudioError
+        }
         throw {
-          kind: "audio-deleted",
-          message: "This audio recording has been deleted and cannot be played.",
+          kind: "download-failed",
+          message: e instanceof Error ? e.message : String(e),
         } as AudioError
       }
-      throw {
-        kind: "download-failed",
-        message: e instanceof Error ? e.message : String(e),
-      } as AudioError
+    })()
+    bytesPromiseRef.current = p
+    try {
+      return await p
+    } finally {
+      bytesPromiseRef.current = null
     }
   }, [attachmentUrl, project.id, fileId, getSyncToken])
 
@@ -326,11 +344,13 @@ export function useCellAudio(
     if (!attachmentUrl || !selectedAudioId) return
     if (!opts?.force && peaksRequestedRef.current === bins) return
     peaksRequestedRef.current = bins
+    if (opts?.force) peaksReadyRef.current = false
     setPeaksState("loading")
     try {
       const cached = await peaksCacheGet(selectedAudioId, bins)
       if (cached) {
         setPeaks(cached)
+        peaksReadyRef.current = true
         setPeaksState("ready")
         return
       }
@@ -338,6 +358,7 @@ export function useCellAudio(
       const decoded = await decodePeaks(bytes, bins)
       setPeaks(decoded.peaks)
       setDuration((d) => (d > 0 ? d : decoded.duration))
+      peaksReadyRef.current = true
       setPeaksState("ready")
       try { await peaksCachePut(selectedAudioId, decoded.peaks) } catch { /* non-fatal */ }
     } catch (e) {
@@ -349,7 +370,9 @@ export function useCellAudio(
       }
       // Leave peaksRequestedRef pinned to bins so we don't retry in a loop.
       // The user can re-mount (e.g. scroll the row out and back) to retry.
-      setPeaksState("error")
+      // Don't downgrade a waveform that already decoded successfully — a
+      // second, redundant request failing must not blank a good render.
+      if (!peaksReadyRef.current) setPeaksState("error")
     }
   }, [attachmentUrl, selectedAudioId, ensureBytes])
 

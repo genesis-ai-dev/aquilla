@@ -195,12 +195,17 @@ export async function importEBible(
 }
 
 /**
- * Map parsed `TranslatableString[]` to `BulkImportCell[]`, chaining cells via
- * `anchorCellId` and threading timecodes when present. Exported so tests can
- * exercise the mapping in isolation.
+ * Map parsed `TranslatableString[]` to `BulkImportCell[]` + speaker pairs (one
+ * per cell). Chaining cells via `anchorCellId` and threading timecodes when
+ * present. The speaker pairs share the same `cellId` as their cell so callers
+ * can pass them straight to `buildCastAdditions`. Exported for testing.
  */
-export function buildBulkCells(strings: TranslatableString[]): BulkImportCell[] {
+export function buildBulkCellsWithSpeakers(strings: TranslatableString[]): {
+  cells: BulkImportCell[]
+  speakerPairs: { cellId: string; speaker: string | undefined }[]
+} {
   const cells: BulkImportCell[] = []
+  const speakerPairs: { cellId: string; speaker: string | undefined }[] = []
   let prevCellId: string | null = null
   for (const str of strings) {
     const cellId = str.id || uuidv7()
@@ -214,9 +219,19 @@ export function buildBulkCells(strings: TranslatableString[]): BulkImportCell[] 
       ...(str.group ? { canonicalRef: str.group } : {}),
       ...(str.start !== undefined && str.end !== undefined ? { startMs: Math.round(str.start * 1000), endMs: Math.round(str.end * 1000) } : {}),
     })
+    speakerPairs.push({ cellId, speaker: str.speaker })
     prevCellId = cellId
   }
-  return cells
+  return { cells, speakerPairs }
+}
+
+/**
+ * Map parsed `TranslatableString[]` to `BulkImportCell[]`, chaining cells via
+ * `anchorCellId` and threading timecodes when present. Exported so tests can
+ * exercise the mapping in isolation.
+ */
+export function buildBulkCells(strings: TranslatableString[]): BulkImportCell[] {
+  return buildBulkCellsWithSpeakers(strings).cells
 }
 
 /**

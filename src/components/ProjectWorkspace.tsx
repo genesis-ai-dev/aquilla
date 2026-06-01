@@ -1982,7 +1982,9 @@ export function ProjectWorkspace() {
           username={currentUsername}
           getToken={getTokenForFile}
           sourceLanguage={project.sourceLanguage} targetLanguage={project.targetLanguage}
-          onImported={handleImported} />
+          onImported={handleImported}
+          ttsSettings={tts.settings}
+          onCastUpdated={(patch) => tts.saveTts(patch)} />
       </Suspense>
       <Suspense fallback={null}>
         <ExportDialog

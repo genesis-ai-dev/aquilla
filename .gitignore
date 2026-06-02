@@ -58,3 +58,6 @@ e2e/.auth/
 .dev-stack-logs/
 # E2E orchestrator's shared wrangler local D1/R2/DO state
 .wrangler-e2e-state/
+
+# legacy-migration change-detection state
+.migrate-state.json

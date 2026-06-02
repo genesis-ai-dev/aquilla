@@ -90,6 +90,8 @@ function parseArgs(argv: string[]): ParsedArgs {
     } else if (token === "-h" || token === "--help") {
       printUsage()
       process.exit(0)
+    } else if (token === "--no-lfs") {
+      // boolean flag; consumed directly in main() via process.argv
     } else {
       positionals.push(token)
     }
@@ -161,6 +163,7 @@ async function cloneProject(
     url: match.httpUrlToRepo,
     ref: match.defaultBranch,
     singleBranch: true,
+    depth: 1,
     onAuth: () => ({ username: "oauth2", password: creds.gitlabToken }),
   })
   process.stderr.write("Clone complete.\n")
@@ -170,6 +173,7 @@ async function runFetch(
   creds: GitLabCredentials,
   selector: string,
   outOverride?: string,
+  noLfs = false,
 ): Promise<void> {
   const match = await resolveProjectSelector(creds, selector)
   process.stderr.write(
@@ -181,38 +185,23 @@ async function runFetch(
 
   await cloneProject(match, creds, outDir)
 
-  process.stderr.write("Dereferencing git-LFS media...\n")
-  let lastLine = 0
-  const result = await dereferenceLfs(
-    outDir,
-    match.httpUrlToRepo,
-    creds.gitlabToken,
-    {
+  if (noLfs) {
+    process.stderr.write("Skipping LFS deref (--no-lfs; text only)\n")
+  } else {
+    process.stderr.write("Dereferencing git-LFS media...\n")
+    let lastLine = 0
+    const result = await dereferenceLfs(outDir, match.httpUrlToRepo, creds.gitlabToken, {
       onProgress: (done, total) => {
-        // Throttle to whole-percent updates to avoid log spam.
         const pct = total === 0 ? 100 : Math.floor((done / total) * 100)
         if (pct !== lastLine) {
           lastLine = pct
           process.stderr.write(`  LFS ${done}/${total} (${pct}%)\r`)
         }
       },
-    },
-  )
-  process.stderr.write("\n")
-
-  process.stderr.write(
-    `LFS deref: ${result.written} downloaded, ` +
-      `${result.skippedAlreadyPresent} already present, ` +
-      `${result.failures.length} failed (of ${result.total} pointers).\n`,
-  )
-  if (result.failures.length > 0) {
-    process.stderr.write("Failed objects:\n")
-    for (const f of result.failures.slice(0, 20)) {
-      process.stderr.write(`  - ${f.relativePath}: ${f.error}\n`)
-    }
-    if (result.failures.length > 20) {
-      process.stderr.write(`  ...and ${result.failures.length - 20} more\n`)
-    }
+    })
+    process.stderr.write(
+      `\nLFS deref: ${result.written} downloaded, ${result.skippedAlreadyPresent} already present, ${result.failures.length} failed (of ${result.total} pointers).\n`,
+    )
   }
 
   // Final, machine-grep-able line on stdout: the import command.
@@ -244,7 +233,7 @@ async function main(): Promise<void> {
   }
 
   // selector is guaranteed present here (checked above).
-  await runFetch(creds, args.selector as string, args.out)
+  await runFetch(creds, args.selector as string, args.out, process.argv.includes("--no-lfs"))
 }
 
 main().catch((error) => {

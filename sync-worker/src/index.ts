@@ -21,6 +21,8 @@ import { handleEventsWriteRequest } from "./events/route"
 import { handleFilesReadRequest } from "./events/files-read-route"
 import { handleBulkImportRequest } from "./events/import-route"
 import { handleMigrateIngestRequest } from "./events/migrate-ingest-route"
+import { handleMigrateSettingsRequest } from "./events/migrate-settings-route"
+import { handleMigrateAudioRequest } from "./events/migrate-audio-route"
 import { handleExportSourceRequest } from "./events/export-route"
 import { handleExportBundleRequest } from "./events/export-bundle-route"
 import { handleRebuildProjectionRequest } from "./events/rebuild"
@@ -167,6 +169,10 @@ export default {
     if (bulkImportResponse) return bulkImportResponse
     const migrateIngestResponse = await handleMigrateIngestRequest(request, env)
     if (migrateIngestResponse) return migrateIngestResponse
+    const migrateSettingsResponse = await handleMigrateSettingsRequest(request, env)
+    if (migrateSettingsResponse) return migrateSettingsResponse
+    const migrateAudioResponse = await handleMigrateAudioRequest(request, env)
+    if (migrateAudioResponse) return migrateAudioResponse
     const exportSourceResponse = await handleExportSourceRequest(request, env)
     if (exportSourceResponse) return exportSourceResponse
     const exportBundleResponse = await handleExportBundleRequest(request, env)

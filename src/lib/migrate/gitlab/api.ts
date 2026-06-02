@@ -54,26 +54,26 @@ export function parseNextPage(headers: {
 }
 
 /**
- * List projects the authenticated user is a member of, newest-activity first,
- * following `X-Next-Page` until exhausted. Mirrors GitLabService.listProjects
- * with the spec's fixed query (membership=true, per_page=100,
- * order_by=last_activity_at, sort=desc) plus optional `search`.
+ * List GitLab projects, newest-activity first, following `X-Next-Page` until
+ * exhausted. By default lists ALL projects visible to the token — for an admin
+ * / root token that's every project on the instance (the bulk-migration case).
+ * Pass `membershipOnly` to restrict to the token's memberships. Optional `search`.
  */
 export async function listProjects(
   creds: GitLabCredentials,
-  options: { search?: string } = {},
+  options: { search?: string; membershipOnly?: boolean } = {},
 ): Promise<GitLabProject[]> {
   const all: GitLabProject[] = []
   let page: number | null = 1
 
   while (page !== null) {
     const params = new URLSearchParams({
-      membership: "true",
       per_page: "100",
       order_by: "last_activity_at",
       sort: "desc",
       page: String(page),
     })
+    if (options.membershipOnly) params.set("membership", "true")
     if (options.search) params.set("search", options.search)
 
     const url = `${creds.gitlabUrl}/api/v4/projects?${params.toString()}`
@@ -322,6 +322,83 @@ export async function resolveProjectSelector(
     )
   }
   return matches[0]
+}
+
+// ── Groups (for the org/team/member migration) ─────────────────────────────
+//
+// scripts/migrate-groups.ts walks the GitLab group tree:
+//   top-level groups        → orgs
+//   descendant subgroups    → teams (flattened)
+//   direct members per group → org/team membership
+// All three follow the same `X-Next-Page` keyset pagination as listProjects.
+
+/** A GitLab group/subgroup (subset). `parent_id` is null for top-level groups. */
+export interface GitLabGroupRaw {
+  id: number
+  name: string
+  full_path: string
+  parent_id: number | null
+}
+
+/** A GitLab group membership row (subset). `access_level` is 10..50. */
+export interface GitLabMemberRaw {
+  id: number
+  username: string
+  access_level: number
+}
+
+async function listPaged<T>(creds: GitLabCredentials, pathAndQuery: string): Promise<T[]> {
+  const all: T[] = []
+  let page: number | null = 1
+  while (page !== null) {
+    const sep = pathAndQuery.includes("?") ? "&" : "?"
+    const url = `${creds.gitlabUrl}/api/v4/${pathAndQuery}${sep}per_page=100&page=${page}`
+    const response = await fetch(url, { headers: { Authorization: `Bearer ${creds.gitlabToken}` } })
+    if (!response.ok) {
+      throw new Error(`GitLab GET ${pathAndQuery} failed (${response.status} ${response.statusText})`)
+    }
+    all.push(...((await response.json()) as T[]))
+    page = parseNextPage(response.headers)
+  }
+  return all
+}
+
+/** All top-level groups visible to the token (the org candidates). */
+export async function listTopLevelGroups(creds: GitLabCredentials): Promise<GitLabGroupRaw[]> {
+  return listPaged<GitLabGroupRaw>(creds, "groups?top_level_only=true&all_available=true")
+}
+
+/** All descendant subgroups of a group, flattened (any depth). */
+export async function listDescendantGroups(
+  creds: GitLabCredentials,
+  groupId: number,
+): Promise<GitLabGroupRaw[]> {
+  return listPaged<GitLabGroupRaw>(creds, `groups/${groupId}/descendant_groups`)
+}
+
+/** Direct members of a group (NOT inherited — use for both orgs and teams). */
+export async function listGroupMembers(
+  creds: GitLabCredentials,
+  groupId: number,
+): Promise<GitLabMemberRaw[]> {
+  return listPaged<GitLabMemberRaw>(creds, `groups/${groupId}/members`)
+}
+
+/** A GitLab user (subset). `email` is only populated for an admin token. */
+export interface GitLabUserRaw {
+  id: number
+  username: string
+  email: string | null
+}
+
+/**
+ * List ALL GitLab users (admin token only — needed for the email field, which
+ * the members API omits). Email is the reliable join key to aquilla users:
+ * GitLab usernames have drifted from Frontier usernames (e.g. GitLab
+ * "Luke_Bilhorn" ↔ aquilla "Luke"), but emails match.
+ */
+export async function listAllUsers(creds: GitLabCredentials): Promise<GitLabUserRaw[]> {
+  return listPaged<GitLabUserRaw>(creds, "users")
 }
 
 /** Fetch a single project by numeric id. Returns null on 404. */

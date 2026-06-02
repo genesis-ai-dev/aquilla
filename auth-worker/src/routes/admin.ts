@@ -42,8 +42,9 @@ admin.get("/overview", async (c) => {
   const db = c.env.AQUILLA_DB
   // One round-trip per scalar; D1 has no multi-statement query, but these are
   // cheap COUNT(*)s. active7d = users with org activity in the last 7 days.
-  const [orgs, users, projects, archived, active7d] = await Promise.all([
+  const [orgs, teams, users, projects, archived, active7d] = await Promise.all([
     db.prepare("SELECT COUNT(*) AS n FROM organizations").first<{ n: number }>(),
+    db.prepare("SELECT COUNT(*) AS n FROM groups").first<{ n: number }>(),
     db.prepare("SELECT COUNT(*) AS n FROM users").first<{ n: number }>(),
     db.prepare("SELECT COUNT(*) AS n FROM projects WHERE archived_at IS NULL").first<{ n: number }>(),
     db.prepare("SELECT COUNT(*) AS n FROM projects WHERE archived_at IS NOT NULL").first<{ n: number }>(),
@@ -55,6 +56,7 @@ admin.get("/overview", async (c) => {
   ])
   return c.json({
     orgs: orgs?.n ?? 0,
+    teams: teams?.n ?? 0,
     users: users?.n ?? 0,
     activeProjects: projects?.n ?? 0,
     archivedProjects: archived?.n ?? 0,
@@ -86,6 +88,38 @@ admin.get("/orgs", async (c) => {
       name: r.name,
       createdAt: r.created_at,
       ownerUsername: r.owner_username,
+      memberCount: r.member_count,
+      projectCount: r.project_count,
+    })),
+  })
+})
+
+/** GET /api/v2/admin/teams — every group ("team") with org + member/grant counts. */
+admin.get("/teams", async (c) => {
+  const { results } = await c.env.AQUILLA_DB.prepare(
+    `SELECT g.id, g.name, g.created_at, g.org_id,
+            o.name AS org_name,
+            (SELECT COUNT(*) FROM group_members m WHERE m.group_id = g.id) AS member_count,
+            (SELECT COUNT(*) FROM group_project_grants gp WHERE gp.group_id = g.id) AS project_count
+       FROM groups g
+       LEFT JOIN organizations o ON o.id = g.org_id
+      ORDER BY o.name, g.name`,
+  ).all<{
+    id: number
+    name: string
+    created_at: string
+    org_id: number
+    org_name: string | null
+    member_count: number
+    project_count: number
+  }>()
+  return c.json({
+    teams: results.map((r) => ({
+      id: r.id,
+      name: r.name,
+      createdAt: r.created_at,
+      orgId: r.org_id,
+      orgName: r.org_name,
       memberCount: r.member_count,
       projectCount: r.project_count,
     })),

@@ -27,6 +27,19 @@ export type ProjectSource = "gitlab" | "local"
 export const projectIdFor = (key: string, source: ProjectSource): string =>
   u5(`${source === "gitlab" ? "gitlab-project" : "local-project"}:${key}`)
 
+/** aquilla `organizations.legacy_uuid` for a GitLab top-level group. Keyed on
+ *  the STABLE GitLab numeric group id (survives renames/moves), so re-running
+ *  the group importer converges on the same org. NOT the primary key — orgs use
+ *  an INTEGER AUTOINCREMENT id; this is the dedup key (see migration 0024). */
+export const orgLegacyUuidFor = (gitlabTopGroupId: number): string =>
+  u5(`gitlab-group:${gitlabTopGroupId}`)
+
+/** aquilla `groups.legacy_uuid` ("team" in the UI) for a GitLab subgroup, keyed
+ *  on its stable GitLab numeric id. Subgroups nest arbitrarily in GitLab but
+ *  Aquilla groups are flat — every descendant subgroup maps to one team. */
+export const teamLegacyUuidFor = (gitlabSubgroupId: number): string =>
+  u5(`gitlab-subgroup:${gitlabSubgroupId}`)
+
 /** aquilla `file_id` for a source/target pair, from the legacy project key +
  *  the paired relative path (stem). Source and target cells share this id. */
 export const fileIdFor = (projectKey: string, relPath: string): string =>

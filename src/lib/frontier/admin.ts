@@ -13,10 +13,21 @@ const authHeaders = (jwt: string): Record<string, string> => ({
 
 export interface AdminOverview {
   orgs: number
+  teams: number
   users: number
   activeProjects: number
   archivedProjects: number
   activeUsers7d: number
+}
+
+export interface AdminTeam {
+  id: number
+  name: string
+  createdAt: string
+  orgId: number
+  orgName: string | null
+  memberCount: number
+  projectCount: number
 }
 
 export interface AdminOrg {
@@ -85,6 +96,12 @@ export async function getAdminOrgs(jwt: string): Promise<AdminOrg[]> {
   const res = await fetchWithTimeout(`${FRONTIER_BASE}/api/v2/admin/orgs`, { headers: authHeaders(jwt) })
   if (!res.ok) throw new Error(`getAdminOrgs failed: HTTP ${res.status}`)
   return ((await res.json()) as { orgs: AdminOrg[] }).orgs
+}
+
+export async function getAdminTeams(jwt: string): Promise<AdminTeam[]> {
+  const res = await fetchWithTimeout(`${FRONTIER_BASE}/api/v2/admin/teams`, { headers: authHeaders(jwt) })
+  if (!res.ok) throw new Error(`getAdminTeams failed: HTTP ${res.status}`)
+  return ((await res.json()) as { teams: AdminTeam[] }).teams
 }
 
 export async function getAdminUsers(jwt: string): Promise<AdminUser[]> {

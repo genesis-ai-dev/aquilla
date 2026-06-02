@@ -13,7 +13,7 @@ import { getAdminMe } from "@/lib/frontier/admin"
  * setup→cleanup→setup dry-run (see useOrg.ts for the full rationale).
  */
 export function usePlatformAdmin(): { isAdmin: boolean; loading: boolean } {
-  const { session } = useFrontierSession()
+  const { session, loading: sessionLoading } = useFrontierSession()
   const jwt = session?.jwt ?? null
   const [isAdmin, setIsAdmin] = useState(false)
   const [loading, setLoading] = useState(true)
@@ -28,9 +28,13 @@ export function usePlatformAdmin(): { isAdmin: boolean; loading: boolean } {
 
   const refresh = useCallback(async () => {
     if (!jwt) {
+      // No JWT yet. If the session is still hydrating, stay in the loading
+      // state — concluding "not admin" here would let route guards redirect a
+      // real admin before their session loads. Only settle to false once the
+      // session has resolved and there is genuinely no logged-in user.
       if (aliveRef.current) {
         setIsAdmin(false)
-        setLoading(false)
+        setLoading(sessionLoading)
       }
       return
     }
@@ -43,7 +47,7 @@ export function usePlatformAdmin(): { isAdmin: boolean; loading: boolean } {
     } finally {
       if (aliveRef.current) setLoading(false)
     }
-  }, [jwt])
+  }, [jwt, sessionLoading])
 
   useEffect(() => {
     void refresh()

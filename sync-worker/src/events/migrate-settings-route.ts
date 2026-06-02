@@ -34,13 +34,35 @@ export async function handleMigrateSettingsRequest(
   request: Request,
   env: MigrateSettingsEnv,
 ): Promise<Response | null> {
-  if (new URL(request.url).pathname !== PATH) return null
-  if (request.method !== 'POST') return new Response('method not allowed', { status: 405 })
+  const url = new URL(request.url)
+  if (url.pathname !== PATH) return null
+  if (request.method !== 'POST' && request.method !== 'GET') {
+    return new Response('method not allowed', { status: 405 })
+  }
   if (!env.SYNC_SECRET_KEY) return new Response('SYNC_SECRET_KEY not configured', { status: 500 })
   if ((request.headers.get('Authorization') ?? '') !== `Bearer ${env.SYNC_SECRET_KEY}`) {
     return new Response('unauthorized', { status: 401 })
   }
   if (!env.AQUILLA_DB) return new Response('AQUILLA_DB binding not configured', { status: 500 })
+
+  // GET /migrate/settings?projectId=… → { settings } (current row, or {} if none).
+  // Lets the sweep read-merge cast over HTTP instead of a `wrangler d1` subprocess.
+  if (request.method === 'GET') {
+    const projectId = url.searchParams.get('projectId')
+    if (!projectId) return new Response('projectId query param required', { status: 400 })
+    const row = await env.AQUILLA_DB.prepare(
+      `SELECT settings FROM project_settings WHERE project_id = ?`,
+    )
+      .bind(projectId)
+      .first<{ settings: string }>()
+    let settings: Record<string, unknown> = {}
+    try {
+      if (row?.settings) settings = JSON.parse(row.settings)
+    } catch {
+      /* corrupt row → treat as empty */
+    }
+    return Response.json({ settings })
+  }
 
   let body: unknown
   try {

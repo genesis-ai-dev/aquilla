@@ -23,8 +23,8 @@
 
 import fs from "node:fs"
 import path from "node:path"
-import os from "node:os"
-import { execFileSync } from "node:child_process"
+import { execFileSync, execFile } from "node:child_process"
+import { promisify } from "node:util"
 import { randomUUID } from "node:crypto"
 import { resolveCredentialsFromEnv, type GitLabCredentials } from "../src/lib/migrate/gitlab/auth"
 import {
@@ -47,8 +47,9 @@ import type { CodexNotebookFile } from "../src/lib/codex-editor/types"
 const SYNC = process.env.SYNC_BASE ?? "https://api.aquilla.app/sync"
 const AQUILLA_DB = "aquilla-db"
 const PERSIST = ".wrangler-dev-state"
-const INGEST_CHUNK = 1000
+const INGEST_CHUNK = 2500
 const FALLBACK_AUTHOR = "legacy-import"
+const execFileP = promisify(execFile)
 
 // ── change-detection: skip a project whose GitLab HEAD is unchanged since the
 // last successful pass (separate markers for content vs audio). State persists
@@ -88,6 +89,7 @@ interface Args {
   remote: boolean
   audio: boolean
   force: boolean
+  concurrency: number
 }
 function parseArgs(): Args {
   const a = process.argv.slice(2)
@@ -104,6 +106,7 @@ function parseArgs(): Args {
     remote: target !== "local",
     audio: a.includes("--audio"),
     force: a.includes("--force"),
+    concurrency: val("--concurrency") ? Number(val("--concurrency")) : 8,
   }
 }
 
@@ -116,15 +119,67 @@ function d1<T>(sql: string, remote: boolean): T[] {
   if (start < 0) throw new Error(`unexpected wrangler output: ${out.slice(0, 200)}`)
   return (JSON.parse(out.slice(start)) as Array<{ results: T[] }>)[0]?.results ?? []
 }
-function d1File(sqlText: string, remote: boolean): void {
-  const tmp = path.join(os.tmpdir(), `migrate-all-${randomUUID()}.sql`)
-  fs.writeFileSync(tmp, sqlText)
-  const args = ["d1", "execute", AQUILLA_DB, remote ? "--remote" : "--local", "--file", tmp]
-  if (!remote) args.push("--persist-to", PERSIST)
-  execFileSync("wrangler", args, { stdio: ["ignore", "ignore", "inherit"] })
-  fs.unlinkSync(tmp)
+// Bounded worker pool: pulls many projects in parallel but caps in-flight work
+// so we never overwhelm D1 / the GitLab box. Each project's *internal* ingest
+// stays serial (server_seq is per-project); only different projects overlap.
+async function pool<T>(items: T[], n: number, fn: (item: T, idx: number) => Promise<void>): Promise<void> {
+  let i = 0
+  await Promise.all(
+    Array.from({ length: Math.min(n, items.length) }, async () => {
+      while (true) {
+        const idx = i++
+        if (idx >= items.length) break
+        await fn(items[idx], idx)
+      }
+    }),
+  )
 }
-const sql = (s: string | null | undefined) => `'${(s ?? "").replace(/'/g, "''")}'`
+
+// Preload all orgs + teams once (by legacy_uuid) so the hot loop does in-memory
+// lookups instead of a `wrangler d1 execute --remote` subprocess per project.
+type OrgRow = { id: number; owner_user_id: number }
+function loadOrgMap(remote: boolean): Map<string, OrgRow> {
+  const rows = d1<{ legacy_uuid: string; id: number; owner_user_id: number }>(
+    `SELECT legacy_uuid, id, owner_user_id FROM organizations WHERE legacy_uuid IS NOT NULL`,
+    remote,
+  )
+  return new Map(rows.map((r) => [r.legacy_uuid, { id: r.id, owner_user_id: r.owner_user_id }]))
+}
+function loadTeamMap(remote: boolean): Map<string, number> {
+  const rows = d1<{ legacy_uuid: string; id: number }>(
+    `SELECT legacy_uuid, id FROM groups WHERE legacy_uuid IS NOT NULL`,
+    remote,
+  )
+  return new Map(rows.map((r) => [r.legacy_uuid, r.id]))
+}
+
+// Trusted HTTP writes (no wrangler subprocess → safe to fan out under concurrency).
+function authHeaders(): Record<string, string> {
+  const secret = process.env.SYNC_SECRET_KEY
+  if (!secret) throw new Error("SYNC_SECRET_KEY not set (load .env: `set -a; . ./.env; set +a`)")
+  return { "Content-Type": "application/json", Authorization: `Bearer ${secret}` }
+}
+async function upsertProject(body: {
+  projectId: string
+  name: string
+  orgId: number
+  ownerUserId: number
+  teamId: number | null
+}): Promise<void> {
+  const res = await fetch(`${SYNC}/migrate/project`, {
+    method: "POST",
+    headers: authHeaders(),
+    body: JSON.stringify(body),
+  })
+  if (!res.ok) throw new Error(`project HTTP ${res.status}: ${(await res.text()).slice(0, 200)}`)
+}
+async function getSettings(projectId: string): Promise<Record<string, unknown>> {
+  const res = await fetch(`${SYNC}/migrate/settings?projectId=${encodeURIComponent(projectId)}`, {
+    headers: authHeaders(),
+  })
+  if (!res.ok) throw new Error(`settings GET HTTP ${res.status}`)
+  return ((await res.json()) as { settings?: Record<string, unknown> }).settings ?? {}
+}
 
 // ── group tree → namespace placement ───────────────────────────────────────
 interface Placement {
@@ -176,15 +231,17 @@ function buildPairs(dir: string): FilePairInput[] {
 }
 
 // Shell out to migrate-fetch (clone + LFS, reuses existing checkout) → dir.
-function fetchProject(gitlabId: number, noLfs: boolean): string {
+// Async (non-blocking) so concurrent workers' clones overlap. execFileSync
+// would block the single event loop and serialize the whole pool.
+async function fetchProject(gitlabId: number, noLfs: boolean): Promise<string> {
   const fa = ["tsx", "scripts/migrate-fetch.ts", String(gitlabId)]
   if (noLfs) fa.push("--no-lfs")
-  const out = execFileSync("npx", fa, {
+  const { stdout } = await execFileP("npx", fa, {
     encoding: "utf8",
     maxBuffer: 64 * 1024 * 1024,
     env: process.env,
   })
-  const m = out.match(/Ready to import:\s*npx tsx scripts\/migrate\.ts\s+(.+)\s*$/m)
+  const m = stdout.match(/Ready to import:\s*npx tsx scripts\/migrate\.ts\s+(.+)\s*$/m)
   if (!m) throw new Error(`could not parse fetch output dir for project ${gitlabId}`)
   return m[1].trim()
 }
@@ -199,24 +256,13 @@ async function ingest(projectId: string, events: IngestEvent[]): Promise<void> {
       body: JSON.stringify({ projectId, events: events.slice(i, i + INGEST_CHUNK) }),
     })
     if (!res.ok) throw new Error(`ingest HTTP ${res.status}: ${(await res.text()).slice(0, 300)}`)
-    process.stdout.write(`\r    ingested ${Math.min(i + INGEST_CHUNK, events.length)}/${events.length}`)
   }
-  if (events.length) process.stdout.write("\n")
 }
 
-async function applyCast(projectId: string, pairs: FilePairInput[], remote: boolean): Promise<number> {
+async function applyCast(projectId: string, pairs: FilePairInput[]): Promise<number> {
   const speakers = pairs.flatMap((p) => collectSpeakers(p))
   if (speakers.length === 0) return 0
-  const row = d1<{ settings: string }>(
-    `SELECT settings FROM project_settings WHERE project_id = ${sql(projectId)}`,
-    remote,
-  )[0]
-  let settings: { ttsSettings?: ProjectTtsSettings } = {}
-  try {
-    if (row?.settings) settings = JSON.parse(row.settings)
-  } catch {
-    /* start fresh */
-  }
+  const settings = (await getSettings(projectId)) as { ttsSettings?: ProjectTtsSettings }
   const tts = settings.ttsSettings
   const add = buildCastAdditions(speakers, tts, () => randomUUID())
   const merged: ProjectTtsSettings = {
@@ -238,7 +284,13 @@ async function applyCast(projectId: string, pairs: FilePairInput[], remote: bool
   return add.voices.length
 }
 
-async function doProject(p: CodexProjectMatch, placeIdx: Map<string, Placement>, args: Args) {
+async function doProject(
+  p: CodexProjectMatch,
+  placeIdx: Map<string, Placement>,
+  orgMap: Map<string, OrgRow>,
+  teamMap: Map<string, number>,
+  args: Args,
+) {
   const place = placeIdx.get(p.namespace)
   console.log(`\n• ${p.name}  [${p.namespace}]  (gitlab ${p.id})`)
   const sha = await headSha(p.id)
@@ -250,20 +302,16 @@ async function doProject(p: CodexProjectMatch, placeIdx: Map<string, Placement>,
     console.warn(`  ! no org/team match for namespace "${p.namespace}" — skipped`)
     return
   }
-  const org = d1<{ id: number; owner_user_id: number }>(
-    `SELECT id, owner_user_id FROM organizations WHERE legacy_uuid = ${sql(place.orgLegacyUuid)}`,
-    args.remote,
-  )[0]
+  const org = orgMap.get(place.orgLegacyUuid)
   if (!org) {
     console.warn(`  ! org not on target (run migrate-groups --apply first) — skipped`)
     return
   }
-  const team = place.teamLegacyUuid
-    ? d1<{ id: number }>(`SELECT id FROM groups WHERE legacy_uuid = ${sql(place.teamLegacyUuid)}`, args.remote)[0]
-    : undefined
+  const teamId = place.teamLegacyUuid ? teamMap.get(place.teamLegacyUuid) : undefined
+  const team = teamId !== undefined ? { id: teamId } : undefined
 
   const projectId = projectIdFor(String(p.id), "gitlab")
-  const dir = fetchProject(p.id, true) // content sweep: text only (no LFS)
+  const dir = await fetchProject(p.id, true) // content sweep: text only (no LFS)
   const pairs = buildPairs(dir)
   const events: IngestEvent[] = []
   for (const pair of pairs) {
@@ -295,17 +343,17 @@ async function doProject(p: CodexProjectMatch, placeIdx: Map<string, Placement>,
     return
   }
 
-  d1File(
-    `INSERT INTO projects (id, name, org_id, created_by, created_at, updated_at)
-       VALUES (${sql(projectId)}, ${sql(p.name)}, ${org.id}, ${org.owner_user_id}, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-       ON CONFLICT(id) DO NOTHING;
-     ${team ? `INSERT INTO group_project_grants (group_id, project_id, role_level, granted_by, granted_at) VALUES (${team.id}, ${sql(projectId)}, 400, ${org.owner_user_id}, CURRENT_TIMESTAMP) ON CONFLICT(group_id, project_id) DO NOTHING;` : ""}`,
-    args.remote,
-  )
+  await upsertProject({
+    projectId,
+    name: p.name,
+    orgId: org.id,
+    ownerUserId: org.owner_user_id,
+    teamId: team?.id ?? null,
+  })
   await ingest(projectId, events)
   let voices = 0
   try {
-    voices = await applyCast(projectId, pairs, args.remote)
+    voices = await applyCast(projectId, pairs)
   } catch (e) {
     // Large casts exceed D1's 100KB inline-statement limit; cast is a separate
     // parameterized pass. Never let it fail the (already-landed) content.
@@ -332,7 +380,7 @@ async function doProjectAudio(p: CodexProjectMatch, args: Args) {
   }
   const secret = process.env.SYNC_SECRET_KEY
   if (args.apply && !secret) throw new Error("SYNC_SECRET_KEY not set")
-  const dir = fetchProject(p.id, false) // need LFS bytes
+  const dir = await fetchProject(p.id, false) // need LFS bytes
   const pairs = buildPairs(dir)
   const events: IngestEvent[] = []
   let uploaded = 0
@@ -404,10 +452,14 @@ async function main() {
     `GitLab: ${creds.gitlabUrl}   target: ${args.remote ? "REMOTE/prod" : "local"}   ${args.audio ? "AUDIO" : "content"}   ${args.apply ? "APPLY" : "dry-run"}${args.force ? "   FORCE" : ""}`,
   )
   let placeIdx = new Map<string, Placement>()
+  let orgMap = new Map<string, OrgRow>()
+  let teamMap = new Map<string, number>()
   if (!args.audio) {
     console.log("Building org/team placement index from group tree…")
     placeIdx = await buildPlacementIndex(creds)
-    console.log(`  ${placeIdx.size} groups indexed`)
+    orgMap = loadOrgMap(args.remote)
+    teamMap = loadTeamMap(args.remote)
+    console.log(`  ${placeIdx.size} groups indexed; ${orgMap.size} orgs, ${teamMap.size} teams preloaded`)
   }
 
   let projects: CodexProjectMatch[]
@@ -432,15 +484,18 @@ async function main() {
   }
 
   let done = 0
-  for (const p of projects) {
+  const n = Math.max(1, args.concurrency)
+  console.log(`Processing ${projects.length} projects with concurrency ${n}…`)
+  await pool(projects, n, async (p) => {
     try {
       if (args.audio) await doProjectAudio(p, args)
-      else await doProject(p, placeIdx, args)
+      else await doProject(p, placeIdx, orgMap, teamMap, args)
       done++
+      if (done % 10 === 0) console.log(`  …${done}/${projects.length} done`)
     } catch (e) {
       console.error(`  ✗ ${p.name}: ${e instanceof Error ? e.message : String(e)}`)
     }
-  }
+  })
   console.log(`\n${args.apply ? "Applied" : "Planned"} ${done}/${projects.length} projects.`)
 }
 

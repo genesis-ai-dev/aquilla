@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react"
+import { Navigate } from "react-router-dom"
 import { AppShell } from "@/components/AppShell"
 import { OrgSidebar } from "@/components/org/OrgSidebar"
 import { OrgBreadcrumb } from "@/components/org/OrgBreadcrumb"
@@ -7,20 +8,23 @@ import { usePlatformAdmin } from "@/hooks/usePlatformAdmin"
 import {
   getAdminOverview,
   getAdminOrgs,
+  getAdminTeams,
   getAdminUsers,
   getAdminProjects,
   getAdminActivity,
   type AdminOverview,
   type AdminOrg,
+  type AdminTeam,
   type AdminUser,
   type AdminProject,
   type AdminActivity,
 } from "@/lib/frontier/admin"
 
-type Tab = "overview" | "orgs" | "users" | "projects" | "activity"
+type Tab = "overview" | "orgs" | "teams" | "users" | "projects" | "activity"
 const TABS: Array<{ key: Tab; label: string }> = [
   { key: "overview", label: "Overview" },
   { key: "orgs", label: "Orgs" },
+  { key: "teams", label: "Teams" },
   { key: "users", label: "Users" },
   { key: "projects", label: "Projects" },
   { key: "activity", label: "Activity" },
@@ -34,12 +38,36 @@ const fmtDate = (iso: string | null): string => {
 
 const pct = (num: number, den: number): string => (den > 0 ? `${Math.round((num / den) * 100)}%` : "—")
 
+/** Drop the leading top-group path segment so a team reads relative to its org
+ *  (e.g. "bible-project/bp-francais" → "bp-francais"). Names are GitLab
+ *  full_paths; the first segment is always the org's own path. */
+const relativeTeamPath = (name: string): string => {
+  const i = name.indexOf("/")
+  return i === -1 ? name : name.slice(i + 1)
+}
+
+/** Group already-org-sorted teams into per-org sections (preserves order). */
+function groupByOrg(
+  teams: AdminTeam[],
+): Array<{ orgId: number; orgName: string | null; teams: AdminTeam[] }> {
+  const groups: Array<{ orgId: number; orgName: string | null; teams: AdminTeam[] }> = []
+  for (const t of teams) {
+    let g = groups[groups.length - 1]
+    if (!g || g.orgId !== t.orgId) {
+      g = { orgId: t.orgId, orgName: t.orgName, teams: [] }
+      groups.push(g)
+    }
+    g.teams.push(t)
+  }
+  return groups
+}
+
 /**
  * Site-wide admin console (/admin). Cross-tenant, read-only: orgs, users,
  * projects, and the global activity feed. Gated by `usePlatformAdmin` — but
  * that is UX only; every /api/v2/admin/* call is enforced server-side against
- * the PLATFORM_ADMINS allowlist, so a non-admin who forces the route sees the
- * "not authorized" state and gets 403s on any data fetch.
+ * the PLATFORM_ADMINS allowlist. A non-admin who forces the route is redirected
+ * to their org overview ("/"), and any data fetch would 403 regardless.
  */
 export function AdminConsole() {
   const { session } = useFrontierSession()
@@ -49,6 +77,7 @@ export function AdminConsole() {
 
   const [overview, setOverview] = useState<AdminOverview | null>(null)
   const [orgs, setOrgs] = useState<AdminOrg[]>([])
+  const [teams, setTeams] = useState<AdminTeam[]>([])
   const [users, setUsers] = useState<AdminUser[]>([])
   const [projects, setProjects] = useState<AdminProject[]>([])
   const [activity, setActivity] = useState<AdminActivity[]>([])
@@ -71,9 +100,10 @@ export function AdminConsole() {
       setError(null)
     }
     try {
-      const [ov, og, us, pr, ac] = await Promise.all([
+      const [ov, og, tm, us, pr, ac] = await Promise.all([
         getAdminOverview(jwt),
         getAdminOrgs(jwt),
+        getAdminTeams(jwt),
         getAdminUsers(jwt),
         getAdminProjects(jwt),
         getAdminActivity(jwt, 200),
@@ -81,6 +111,7 @@ export function AdminConsole() {
       if (aliveRef.current) {
         setOverview(ov)
         setOrgs(og)
+        setTeams(tm)
         setUsers(us)
         setProjects(pr)
         setActivity(ac)
@@ -96,11 +127,15 @@ export function AdminConsole() {
     void refresh()
   }, [refresh])
 
+  // Non-admins have no business here — send them back to their overview.
+  // (Server still enforces the PLATFORM_ADMINS allowlist on every fetch.)
+  if (!adminLoading && !isAdmin) {
+    return <Navigate to="/" replace />
+  }
+
   let body: React.ReactNode
   if (adminLoading) {
     body = <p className="text-sm text-muted-foreground">Checking access…</p>
-  } else if (!isAdmin) {
-    body = <p className="text-sm text-muted-foreground">You don't have access to the admin console.</p>
   } else if (loading && overview == null) {
     body = <p className="text-sm text-muted-foreground">Loading…</p>
   } else if (error) {
@@ -126,8 +161,9 @@ export function AdminConsole() {
 
         <div className="mt-4">
           {tab === "overview" && overview && (
-            <div className="grid grid-cols-2 gap-4 sm:grid-cols-5">
+            <div className="grid grid-cols-2 gap-4 sm:grid-cols-6">
               <Stat label="Orgs" value={overview.orgs} />
+              <Stat label="Teams" value={overview.teams} />
               <Stat label="Users" value={overview.users} />
               <Stat label="Active projects" value={overview.activeProjects} />
               <Stat label="Archived" value={overview.archivedProjects} />
@@ -148,6 +184,34 @@ export function AdminConsole() {
               ))}
             </Table>
           )}
+
+          {tab === "teams" &&
+            (teams.length === 0 ? (
+              <p className="text-sm text-muted-foreground">No teams yet.</p>
+            ) : (
+              <div className="space-y-6">
+                {groupByOrg(teams).map((g) => (
+                  <section key={g.orgId}>
+                    <h2 className="mb-2 text-sm font-semibold">
+                      {g.orgName ?? `Org #${g.orgId}`}
+                      <span className="ml-2 font-normal text-muted-foreground">
+                        {g.teams.length} {g.teams.length === 1 ? "team" : "teams"}
+                      </span>
+                    </h2>
+                    <Table head={["Team", "Members", "Projects", "Created"]}>
+                      {g.teams.map((t) => (
+                        <tr key={t.id} className="border-t">
+                          <Td>{relativeTeamPath(t.name)}</Td>
+                          <Td>{t.memberCount}</Td>
+                          <Td>{t.projectCount}</Td>
+                          <Td>{fmtDate(t.createdAt)}</Td>
+                        </tr>
+                      ))}
+                    </Table>
+                  </section>
+                ))}
+              </div>
+            ))}
 
           {tab === "users" && (
             <Table head={["Username", "Email", "Orgs", "Last active", "Joined"]}>

@@ -81,7 +81,7 @@ ENVIRONMENT = "production"
 # Comma-separated username allowlist for the site-wide admin surface
 # (/api/v2/admin/*). Separate axis from the org role ladder — see
 # src/middleware/platform-admin.ts.
-PLATFORM_ADMINS = "daniel2,dadukhankevin"
+PLATFORM_ADMINS = "daniel2,dadukhankevin,ryder,ryder-aquilla,ryder-aquilla-2,ryder-aquilla-3"
 
 # ---------------------------------------------------------------------------
 # Production environment — owns routes on api.aquilla.app for the identity
@@ -112,7 +112,7 @@ BASE_URL = "https://aquilla.app"
 SYNC_WORKER_URL = "https://api.aquilla.app/sync"
 DEFAULT_LLM_MODEL = "anthropic/claude-sonnet-4.5"
 ENVIRONMENT = "production"
-PLATFORM_ADMINS = "daniel2,dadukhankevin"
+PLATFORM_ADMINS = "daniel2,dadukhankevin,ryder,ryder-aquilla,ryder-aquilla-2,ryder-aquilla-3"
 
 # ---------------------------------------------------------------------------
 # Staging environment — physically separate D1 (frontier-db-v2-staging) so
@@ -141,4 +141,4 @@ EMAIL_FROM = "noreply@aquilla.app"
 BASE_URL = "https://dev.aquilla.app"
 DEFAULT_LLM_MODEL = "anthropic/claude-sonnet-4.5"
 ENVIRONMENT = "staging"
-PLATFORM_ADMINS = "daniel2,dadukhankevin"
+PLATFORM_ADMINS = "daniel2,dadukhankevin,ryder,ryder-aquilla,ryder-aquilla-2,ryder-aquilla-3"

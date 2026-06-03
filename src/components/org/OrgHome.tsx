@@ -5,7 +5,7 @@ import { OrgSidebar } from "./OrgSidebar"
 import { OrgBreadcrumb } from "./OrgBreadcrumb"
 import { useActiveOrg } from "@/context/OrgContext"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
-import { getPortfolio, validatedPct, attentionRank, audioPct, deadlineStatus, type PortfolioProject } from "@/lib/frontier/portfolio"
+import { getPortfolio, translatedPct, validatedPct, attentionRank, audioPct, deadlineStatus, type PortfolioProject } from "@/lib/frontier/portfolio"
 import { WorkloadRollup } from "./WorkloadRollup"
 
 const STALE_THRESHOLD_MS = 14 * 24 * 60 * 60 * 1000
@@ -45,6 +45,10 @@ export function OrgHome() {
 
   // Rollup stats
   const now = Date.now()
+  const avgTranslatedPct =
+    projects.length > 0
+      ? projects.reduce((sum, p) => sum + translatedPct(p), 0) / projects.length
+      : 0
   const avgValidatedPct =
     projects.length > 0
       ? projects.reduce((sum, p) => sum + validatedPct(p), 0) / projects.length
@@ -63,7 +67,7 @@ export function OrgHome() {
       header={<OrgBreadcrumb section="Overview" />}
       statusBar={null}
       main={
-        <div className="p-6 space-y-6">
+        <div className="h-full overflow-y-auto p-6 space-y-6">
           {isPageLoading ? (
             <p className="text-sm text-muted-foreground">Loading…</p>
           ) : error ? (
@@ -76,10 +80,14 @@ export function OrgHome() {
               </div>
 
               {/* Rollup strip */}
-              <div className="grid grid-cols-5 gap-4">
+              <div className="grid grid-cols-6 gap-4">
                 <div className="rounded-lg border p-4 text-center">
                   <p className="text-2xl font-bold">{projects.length}</p>
                   <p className="text-sm text-muted-foreground">Projects</p>
+                </div>
+                <div className="rounded-lg border p-4 text-center">
+                  <p className="text-2xl font-bold">{Math.round(avgTranslatedPct * 100)}%</p>
+                  <p className="text-sm text-muted-foreground">Avg translated</p>
                 </div>
                 <div className="rounded-lg border p-4 text-center">
                   <p className="text-2xl font-bold">{Math.round(avgValidatedPct * 100)}%</p>
@@ -105,6 +113,7 @@ export function OrgHome() {
               ) : (
                 <div className="rounded-lg border divide-y">
                   {ranked.map((p) => {
+                    const tpct = Math.round(translatedPct(p) * 100)
                     const pct = Math.round(validatedPct(p) * 100)
                     const apct = Math.round(audioPct(p) * 100)
                     const stalled = isStalled(p, now)
@@ -129,18 +138,23 @@ export function OrgHome() {
                               </span>
                             )}
                           </div>
-                          <div className="mt-1 h-1.5 w-full rounded-full bg-muted overflow-hidden">
-                            <div
-                              className="h-full rounded-full bg-primary"
-                              style={{ width: `${pct}%` }}
-                            />
+                          <div
+                            className="mt-1 space-y-0.5"
+                            aria-label={`${tpct}% translated, ${pct}% validated`}
+                          >
+                            <div className="h-1.5 w-full rounded-full bg-muted overflow-hidden">
+                              <div className="h-full rounded-full bg-amber-500" style={{ width: `${tpct}%` }} />
+                            </div>
+                            <div className="h-1.5 w-full rounded-full bg-muted overflow-hidden">
+                              <div className="h-full rounded-full bg-emerald-500" style={{ width: `${pct}%` }} />
+                            </div>
                           </div>
                         </div>
                         <div className="shrink-0 text-right">
-                          <p className="text-sm font-medium">{pct}%</p>
                           <p className={`text-xs ${stalled ? "text-destructive" : "text-muted-foreground"}`}>
-                            {stalled ? "Stalled" : `${pct}% validated`}
+                            {stalled ? "Stalled" : `${tpct}% translated`}
                           </p>
+                          <p className="text-xs text-muted-foreground">{pct}% validated</p>
                           <p className="text-xs text-muted-foreground">{apct}% audio</p>
                         </div>
                       </Link>

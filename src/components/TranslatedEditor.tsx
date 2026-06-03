@@ -69,6 +69,13 @@ interface TranslatedEditorProps {
    */
   remoteChangedDuringEdit?: boolean
   onDiscardLocal?: () => void
+  /**
+   * Keyboard cell navigation. Up/Down move between cells (only when the caret
+   * is at the first/last visual line, so multi-line cells still scroll
+   * internally); Tab/Shift+Tab always move to the next/previous cell. The
+   * parent resolves direction → target cell and focuses it (caret at end).
+   */
+  onNavigateCell?: (direction: "prev" | "next") => void
 }
 
 export function TranslatedEditor({
@@ -91,7 +98,12 @@ export function TranslatedEditor({
   onSeekToTime,
   remoteChangedDuringEdit,
   onDiscardLocal,
+  onNavigateCell,
 }: TranslatedEditorProps) {
+  // Held in a ref so the editor's keydown handler — created once per cellId —
+  // always sees the latest navigation callback without re-creating the editor.
+  const onNavigateCellRef = useRef(onNavigateCell)
+  useEffect(() => { onNavigateCellRef.current = onNavigateCell }, [onNavigateCell])
   const latestViolationStateRef = useRef({
     infractions: infractions ?? [],
     ruleSeverity: ruleSeverity ?? new Map<string, "major" | "minor">(),
@@ -151,6 +163,30 @@ export function TranslatedEditor({
       },
       transformPastedHTML(html: string) {
         return stripToAllowedHtml(html)
+      },
+      // Cell navigation. Tab/Shift+Tab always step cells; Up/Down step cells
+      // only at the first/last visual line so the caret can still move between
+      // wrapped lines within a multi-line cell. Left/Right are untouched.
+      handleKeyDown(view, event) {
+        const navigate = onNavigateCellRef.current
+        if (!navigate) return false
+        if (event.key === "Tab") {
+          event.preventDefault()
+          navigate(event.shiftKey ? "prev" : "next")
+          return true
+        }
+        const plain = !event.shiftKey && !event.metaKey && !event.altKey && !event.ctrlKey
+        if (plain && event.key === "ArrowUp" && view.endOfTextblock("up")) {
+          event.preventDefault()
+          navigate("prev")
+          return true
+        }
+        if (plain && event.key === "ArrowDown" && view.endOfTextblock("down")) {
+          event.preventDefault()
+          navigate("next")
+          return true
+        }
+        return false
       },
     },
     onUpdate({ editor }) {

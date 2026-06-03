@@ -29,6 +29,7 @@ interface FileRowRaw {
   meta: string
   cell_count: number
   approved_count: number
+  filled_count: number
   word_count: number
   last_edit_at: number | null
 }
@@ -49,6 +50,8 @@ interface FileSummary {
   orderedBy: string | null
   cellCount: number
   approvedCount: number
+  /** Target cells with content (TRIM(value) != ''): the "translated" count. */
+  filledCount: number
   wordCount: number
   lastEditAt: number | null
 }
@@ -73,6 +76,7 @@ function mapRow(row: FileRowRaw): FileSummary {
     orderedBy: meta.orderedBy ?? null,
     cellCount: row.cell_count,
     approvedCount: row.approved_count,
+    filledCount: row.filled_count,
     wordCount: row.word_count,
     lastEditAt: row.last_edit_at,
   }
@@ -112,7 +116,7 @@ export async function handleFilesReadRequest(
 
   const columns =
     "id, project_id, name, role, kind, event_id, meta, " +
-    "cell_count, approved_count, word_count, last_edit_at"
+    "cell_count, approved_count, filled_count, word_count, last_edit_at"
 
   if (fileId) {
     const sql = `SELECT ${columns} FROM files WHERE project_id = ? AND id = ?`

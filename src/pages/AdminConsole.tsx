@@ -266,7 +266,7 @@ export function AdminConsole() {
       statusBar={null}
       main={
         <div className="h-full overflow-y-auto">
-          <div className="mx-auto max-w-5xl p-6">
+          <div className="p-6">
             <h1 className="mb-1 text-xl font-semibold">Admin console</h1>
             <p className="mb-6 text-sm text-muted-foreground">
               Site-wide, cross-tenant view. Read-only.

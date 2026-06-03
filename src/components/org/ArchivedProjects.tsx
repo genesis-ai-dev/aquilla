@@ -46,7 +46,7 @@ export function ArchivedProjects() {
       header={<OrgBreadcrumb section="Archived" />}
       statusBar={null}
       main={
-        <div className="p-6 space-y-3">
+        <div className="h-full overflow-y-auto p-6 space-y-3">
           {error && <p className="text-sm text-destructive">{error}</p>}
           {loading ? (
             <p className="text-sm text-muted-foreground">Loading…</p>

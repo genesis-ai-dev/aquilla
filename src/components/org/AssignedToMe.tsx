@@ -51,7 +51,7 @@ export function AssignedToMe() {
       header={<OrgBreadcrumb section="Assigned to me" />}
       statusBar={null}
       main={
-        <div className="space-y-4 p-6">
+        <div className="h-full overflow-y-auto space-y-4 p-6">
           <h1 className="text-lg font-semibold">Assigned to me</h1>
           {loading ? (
             <p className="text-sm text-muted-foreground">Loading…</p>

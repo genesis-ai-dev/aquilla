@@ -42,7 +42,7 @@ export function ProjectsList() {
       }
       statusBar={null}
       main={
-        <div className="p-6">
+        <div className="h-full overflow-y-auto p-6">
           {loading ? <p className="text-sm text-muted-foreground">Loading…</p> : (
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
               {projects.map((p) => (

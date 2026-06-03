@@ -11,6 +11,9 @@
 
 import { syncWorkerHttpOrigin } from "./sync-worker-url"
 import type { CellRow, CellsPage, FileSummary } from "./cells-read-types"
+// Re-export so consumers (e.g. org/ProjectOverview) can import FileSummary from
+// the read-API module rather than reaching into cells-read-types directly.
+export type { FileSummary } from "./cells-read-types"
 
 export class CellsReadError extends Error {
   status: number

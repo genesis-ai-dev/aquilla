@@ -4,7 +4,7 @@ import { getPortfolio, validatedPct, attentionRank, audioPct, recordedMinutes, d
 const ORIG = global.fetch
 
 function project(over: Partial<PortfolioProject>): PortfolioProject {
-  return { id: "p", name: "P", totalCells: 0, validatedCells: 0, lastEditAt: null, audioCells: 0, recordedMs: 0, deadlineAt: null, ...over }
+  return { id: "p", name: "P", totalCells: 0, validatedCells: 0, filledCells: 0, lastEditAt: null, audioCells: 0, recordedMs: 0, deadlineAt: null, ...over }
 }
 
 afterEach(() => {

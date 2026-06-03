@@ -557,6 +557,41 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     return cellsRef.current.findIndex((c) => c.id === cellId)
   }, [])
 
+  // Move keyboard focus into the target editor at `index`, placing the caret
+  // at the end. Scrolls the (virtualized) row into view first, then focuses on
+  // the next frame once the DOM node exists. No-op if the index is out of range.
+  const focusCellEditorByIndex = useCallback((index: number) => {
+    const list = cellsRef.current
+    if (index < 0 || index >= list.length) return
+    const targetId = list[index].id
+    virtualizer.scrollToIndex(index, { align: "center" })
+    requestAnimationFrame(() => {
+      const root = parentRef.current
+      if (!root) return
+      const pm = root.querySelector<HTMLElement>(
+        `[data-cell-id="${CSS.escape(targetId)}"] .ProseMirror`,
+      )
+      if (!pm) return
+      pm.focus()
+      const sel = window.getSelection()
+      if (sel) {
+        const range = document.createRange()
+        range.selectNodeContents(pm)
+        range.collapse(false) // collapse to end
+        sel.removeAllRanges()
+        sel.addRange(range)
+      }
+    })
+  }, [virtualizer])
+
+  // Resolve a navigation request from a cell editor (Up/Down/Tab) to the
+  // adjacent cell and focus it. Out-of-range steps (top/bottom edge) no-op.
+  const handleNavigateCell = useCallback((cellId: string, direction: "prev" | "next") => {
+    const idx = findCellIndex(cellId)
+    if (idx < 0) return
+    focusCellEditorByIndex(direction === "next" ? idx + 1 : idx - 1)
+  }, [findCellIndex, focusCellEditorByIndex])
+
   const selectRangeByIndexes = useCallback((anchorIndex: number, focusIndex: number) => {
     const list = cellsRef.current
     if (list.length === 0) return
@@ -889,6 +924,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
                 onDragStart={handleDragStart}
                 onDragEnter={handleDragEnter}
                 onSelectionPointerDown={handleSelectionPointerDown}
+                onNavigateCell={handleNavigateCell}
                 getVoiceTakeCells={getVoiceTakeCells}
                 getTokenForFile={getTokenForFile}
               />
@@ -976,6 +1012,7 @@ interface MemoizedRowProps {
     rowIndex: number,
     e: React.PointerEvent<HTMLButtonElement>,
   ) => void
+  onNavigateCell: (cellId: string, direction: "prev" | "next") => void
   getVoiceTakeCells: (startIndex: number, count: number) => CellData[]
   getTokenForFile?: (fileId: string) => Promise<string | null>
 }
@@ -987,6 +1024,7 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
     activeCueIndex, rowIndex, gridCols,
     onDragStart: onDragStartParent, onDragEnter: onDragEnterParent,
     onSelectionPointerDown: onSelectionPointerDownParent,
+    onNavigateCell: onNavigateCellParent,
     getVoiceTakeCells,
     getTokenForFile,
     project, username, editable, isCompletionConfigured, isCompletionAvailable,
@@ -1044,6 +1082,10 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
     (e: React.PointerEvent<HTMLButtonElement>) => onSelectionPointerDownParent(cellId, rowIndex, e),
     [onSelectionPointerDownParent, cellId, rowIndex],
   )
+  const handleNavigateCell = useCallback(
+    (direction: "prev" | "next") => onNavigateCellParent(cellId, direction),
+    [onNavigateCellParent, cellId],
+  )
 
   return (
     <div
@@ -1100,6 +1142,7 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
         onDragStart={handleDragStart}
         onDragEnter={handleDragEnter}
         onSelectionPointerDown={handleSelectionPointerDown}
+        onNavigateCell={handleNavigateCell}
         getVoiceTakeCells={getVoiceTakeCells}
         getTokenForFile={getTokenForFile}
         onCellCommitted={onCellCommitted}
@@ -1162,6 +1205,7 @@ interface EditorRowProps {
   onDragStart: () => void
   onDragEnter: () => void
   onSelectionPointerDown: (e: React.PointerEvent<HTMLButtonElement>) => void
+  onNavigateCell: (direction: "prev" | "next") => void
   getVoiceTakeCells: (startIndex: number, count: number) => CellData[]
   rowIndex: number
   lineNumbersEnabled: boolean
@@ -1299,7 +1343,7 @@ function EditorRow({
   isBacktranslationConfigured: _isBacktranslationConfigured, isBacktranslating, backtranslationError, onBacktranslate, onSaveBacktranslation,
   openCommentCount, onOpenComments, onOpenHistory,
   isActiveCue: _isActiveCue, onSeekToCue,
-  onDragStart, onDragEnter, onSelectionPointerDown,
+  onDragStart, onDragEnter, onSelectionPointerDown, onNavigateCell,
   rowIndex, lineNumbersEnabled, cellLabelsEnabled, sourceTextDirection, targetTextDirection, gridCols,
   isAnonymous, onAiSetupNeeded, onOpenRecording,
   audioLens, onOpenAudioSetup,
@@ -2182,6 +2226,7 @@ function EditorRow({
                 onSeekToTime={hasAudio ? audioController.seek : undefined}
                 remoteChangedDuringEdit={remoteChangedWhileFocused}
                 onDiscardLocal={handleDiscardLocalAndReload}
+                onNavigateCell={onNavigateCell}
               />
               {/* Streaming preview overlay — visible while the LLM is
                   running. We show the text as it streams in so the user

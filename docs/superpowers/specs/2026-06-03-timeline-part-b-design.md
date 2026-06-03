@@ -51,16 +51,16 @@ and (ideally) label who is speaking (diarization → cast).
 
 ## Plan
 
-### B1 — Pure silence-split core  (this slice)
-- [ ] `src/lib/timeline/silence-split.ts`: `detectSpeechSegments(channel: Float32Array, sampleRate, opts?)` → `{ startMs, endMs }[]`. RMS over a sliding window; merge gaps < minSilenceMs; drop segments < minSegmentMs; pad edges. Pure, deterministic.
-- [ ] Unit tests with synthetic signals (tone bursts separated by silence; all-silence; all-speech; sub-threshold blips). Lock thresholds + edge behavior.
+### B1 — Pure silence-split core  ✅
+- [x] `src/lib/timeline/silence-split.ts`: `detectSpeechSegments(channel, sampleRate, opts?)` → `{startMs,endMs}[]`. RMS-windowed classification; merge gaps < minSilenceMs; drop < minSegmentMs; pad + clamp disjoint. Pure/deterministic.
+- [x] 7 unit tests (tone bursts, all-silence, all-speech, short gap, sub-min blip, padding-overlap clamp).
 
-### B2 — Wire into audio import
-- [ ] `emitMediaFile`: decode via AudioContext, run `detectSpeechSegments`; emit N media segments (chained, sequenceIndex, timing), each attaching the shared clip with `trimStartMs`/`trimEndMs`. Fall back to single segment on decode failure / ≤1 region. Keep probe-duration path for the fallback.
-- [ ] Verify in the running app with a multi-burst WAV → expect N media segments.
+### B2 — Wire into audio import  ✅ (verified in running app)
+- [x] `emitMediaFile` decodes via AudioContext + `detectSpeechSegments`; ≥2 regions → N chained media cells, each timed + attaching the shared clip with `trimStartMs/trimEndMs` (bytes uploaded once); decode-fail / ≤1 region → single whole-file segment. `decodeAudioFile` returns null when undecodable.
+- [x] Verified: a 2-burst WAV imported as exactly **2** media segments in the Media layer; time-ordered; console clean (benign font 403 only).
 
-### B3 — Diarization seam (interface only, pending user)
-- [ ] Define `SpeakerLabeler` interface + a no-op default. Document the model-backed implementation as future work. No fabricated model calls.
+### B3 — Diarization seam  ⏸ pending user decision
+- Deliberately NOT scaffolded yet (YAGNI — an unused interface is speculative). Real diarization needs an ML model/service (pyannote / hosted speaker-embedding + clustering) that this repo lacks. **Needs user decision on model/service** before building. Until then, split segments are unlabeled (no auto-cast).
 
 ### Deferred (later phases)
 - Waveform snap-and-stretch (the "dream feature").

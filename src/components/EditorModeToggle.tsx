@@ -4,7 +4,7 @@
 // plain translation; Audio mode reveals the cast library, transport, per-line
 // speaker chips and generate controls (the old standalone Voice Studio).
 
-import { Mic2, Pencil } from "lucide-react"
+import { Mic2, Pencil, AudioWaveform } from "lucide-react"
 import { cn } from "@/lib/utils"
 
 export type EditorLens = "text" | "audio"
@@ -12,9 +12,15 @@ export type EditorLens = "text" | "audio"
 interface Props {
   lens: EditorLens
   onChange: (lens: EditorLens) => void
+  /** Timeline-segment-model: when true the active file is time-ordered, so the
+   *  second lens selects the MEDIA layer (separate media segments) rather than
+   *  audio-attachments on the same text cells. Relabels "Audio" → "Media". */
+  timeOrdered?: boolean
 }
 
-export function EditorModeToggle({ lens, onChange }: Props) {
+export function EditorModeToggle({ lens, onChange, timeOrdered = false }: Props) {
+  const secondLabel = timeOrdered ? "Media" : "Audio"
+  const SecondIcon = timeOrdered ? AudioWaveform : Mic2
   return (
     <div className="neu-inset flex items-center gap-0.5 rounded-full p-1 text-xs">
       <button
@@ -41,7 +47,7 @@ export function EditorModeToggle({ lens, onChange }: Props) {
         )}
         aria-pressed={lens === "audio"}
       >
-        <Mic2 className="h-3 w-3" /> Audio
+        <SecondIcon className="h-3 w-3" /> {secondLabel}
       </button>
     </div>
   )

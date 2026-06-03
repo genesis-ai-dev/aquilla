@@ -20,6 +20,7 @@ import { useRules } from "@/hooks/useRules"
 import { updateProject, patchProject, getProject } from "@/lib/store/project-index"
 import { MAX_BATCH_COMPLETIONS } from "@/lib/workspace-actions/registry"
 import type { FileReference } from "@/lib/parsers/types"
+import { fileOrderedBy } from "@/lib/parsers/types"
 import type { CellData } from "@/hooks/useCells"
 import { useWorkspaceSearch } from "@/hooks/useWorkspaceSearch"
 import { ParallelPassagesPanel, type ParallelPanelMode, type ParallelPanelScope } from "./ParallelPassagesPanel"
@@ -1737,6 +1738,7 @@ export function ProjectWorkspace() {
               <EditorModeToggle
                 lens={lens}
                 onChange={(l) => setLens(l)}
+                timeOrdered={activeFile ? fileOrderedBy(activeFile) === "time" : false}
               />
             )}
             <PrimaryActionButton ctx={actionCtx} run={actionArgs} />
@@ -1903,6 +1905,7 @@ export function ProjectWorkspace() {
             onJumpToCell={jumpToCellId}
             onAiSetupNeeded={() => setAiSetupOpen(true)}
             audioLens={audioLens}
+            orderedBy={activeFile ? fileOrderedBy(activeFile) : undefined}
             onOpenAudioSetup={openAudioSetup}
             onOpenRecording={(cellId) => setRecordingCellId(cellId)}
             onProjectChanged={refresh}

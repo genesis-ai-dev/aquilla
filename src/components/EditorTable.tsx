@@ -11,7 +11,8 @@ import type { CodexCellAttachment, WordTiming } from "@/lib/codex-editor/types"
 import { useFileAudioAttachments } from "@/hooks/useFileAudioAttachments"
 import { getCellPref, setCellPref } from "@/lib/store/audio-cell-prefs"
 import type { ScoredPair } from "@/lib/search/dual-index"
-import type { TranslationRule, RuleInfraction, ProjectRecord, Voice, ProjectTtsSettings } from "@/lib/parsers/types"
+import type { TranslationRule, RuleInfraction, ProjectRecord, Voice, ProjectTtsSettings, OrderedBy } from "@/lib/parsers/types"
+import { sortByLens } from "@/lib/timeline/derive"
 import { useProjectPermissions } from "@/hooks/useProjectPermissions"
 import { emitTargetCellCommit, emitCellValidate, emitCellUnvalidate, emitCellWaive, emitCellUnwaive } from "@/lib/sync/events-emit"
 import { ExamplePanel } from "./ExamplePanel"
@@ -327,6 +328,11 @@ interface EditorTableProps {
   username: string
   /** When set, each row shows the Audio-lens strip (speaker chip + generate). */
   audioLens?: AudioLensContext | null
+  /** Timeline-segment-model: the active file's order lens. When `'time'`, the
+   *  Text/Audio toggle becomes a Text-layer / Media-layer switch — the row list
+   *  filters by segment `medium` and sorts by timing. Absent or `'sequence'`
+   *  ⇒ today's behavior (no filtering, no reorder). */
+  orderedBy?: OrderedBy
   /** Switch to the Audio lens and open the cast/voice library (error recovery). */
   onOpenAudioSetup?: () => void
   /** Called after a successful `target.cell.commit` enqueue so the parent
@@ -411,6 +417,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   lineNumbersEnabled, cellLabelsEnabled, sourceTextDirection, targetTextDirection,
   isAnonymous, onJumpToCell, onAiSetupNeeded, onOpenRecording,
   audioLens, onOpenAudioSetup,
+  orderedBy,
   onProjectChanged,
   onCellCommitted,
   onOptimisticEdit,
@@ -473,6 +480,26 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     })
   }, [cells, audioByCellId])
 
+  // Timeline-segment-model (Scope A): the rendered row list. For a `'time'`-
+  // ordered file the Text/Audio toggle is a medium-LAYER switch — Text layer
+  // shows text segments, Audio (Media) layer shows media segments — and rows
+  // sort by timing. For every other file this is byte-identical to today
+  // (no filter, no reorder), so existing projects are untouched.
+  //
+  // NOTE: only the virtual row list is filtered here. Index-based voice paths
+  // (getVoiceTakeCells / cellsRef) intentionally stay on the full cell list;
+  // combined-voice-by-index on a time-ordered media layer is a known Part-B
+  // limitation, not exercised by Scope A's single-clip media import.
+  const isTimeOrdered = orderedBy === "time"
+  const displayCells = useMemo(() => {
+    if (!isTimeOrdered) return cellsWithAudio
+    const wantMedia = !!audioLens
+    const filtered = cellsWithAudio.filter((c) =>
+      wantMedia ? c.medium === "media" : (c.medium ?? "text") !== "media"
+    )
+    return sortByLens(filtered, "time")
+  }, [cellsWithAudio, isTimeOrdered, audioLens])
+
   // Hydrate the per-cell trim cache (localStorage, seconds — what the player
   // reads) from the server attachment's trim (ms). Server is authoritative on
   // load, so combined/cropped slices set on another device appear here.
@@ -493,7 +520,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   const ruleMap = useMemo(() => new Map(rules.map((r) => [r.id, r])), [rules])
 
   const virtualizer = useVirtualizer({
-    count: cells.length,
+    count: displayCells.length,
     getScrollElement: () => parentRef.current,
     estimateSize: () => 90,
   })
@@ -778,7 +805,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
 
       <div style={{ height: `${virtualizer.getTotalSize()}px`, width: "100%", position: "relative" }}>
         {virtualizer.getVirtualItems().map((virtualRow) => {
-          const cell = cellsWithAudio[virtualRow.index]
+          const cell = displayCells[virtualRow.index]
           // The positioning wrapper lives OUTSIDE MemoizedRow. When the typed
           // cell grows in height, every row below it gets a new virtualRow.start
           // — if that value crossed the memo boundary, every shifted row would
@@ -855,6 +882,13 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           )
         })}
       </div>
+      {isTimeOrdered && displayCells.length === 0 && (
+        <div className="px-4 py-10 text-center text-sm text-muted-foreground">
+          {audioLens
+            ? "No media segments yet. Import an audio or video file, or record a take, to populate the media layer."
+            : "No text segments in this file."}
+        </div>
+      )}
     </div>
   )
 })

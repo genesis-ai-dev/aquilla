@@ -59,8 +59,31 @@ and (ideally) label who is speaking (diarization → cast).
 - [x] `emitMediaFile` decodes via AudioContext + `detectSpeechSegments`; ≥2 regions → N chained media cells, each timed + attaching the shared clip with `trimStartMs/trimEndMs` (bytes uploaded once); decode-fail / ≤1 region → single whole-file segment. `decodeAudioFile` returns null when undecodable.
 - [x] Verified: a 2-burst WAV imported as exactly **2** media segments in the Media layer; time-ordered; console clean (benign font 403 only).
 
-### B3 — Diarization seam  ⏸ pending user decision
-- Deliberately NOT scaffolded yet (YAGNI — an unused interface is speculative). Real diarization needs an ML model/service (pyannote / hosted speaker-embedding + clustering) that this repo lacks. **Needs user decision on model/service** before building. Until then, split segments are unlabeled (no auto-cast).
+### B3 — Diarization (DECIDED: sherpa-onnx WASM, quality path)
+
+**Engine:** `sherpa-onnx` WebAssembly (Apache-2.0). Models baked into the wasm
+`.data`: pyannote/segmentation-3.0 (MIT) + a 3D-Speaker/WeSpeaker embedding
+(Apache-2.0 / CC-BY-4.0 — commercial OK; attribution line for CC-BY). Runs
+fully client-side, no server.
+
+**JS API (from the official wasm example):**
+```js
+const sd = createOfflineSpeakerDiarization(Module)   // Module = emscripten wasm module
+sd.setConfig({ clustering: { numClusters: -1, threshold: 0.5 } }) // -1 = auto-detect count
+const segments = sd.process(float32Mono16k)          // → [{ start, end, speaker }] (sec, int)
+```
+Input MUST be **16 kHz mono Float32**. Use the **non-threaded SIMD** build (no
+COOP/COEP headers needed).
+
+**Architecture — opt-in quality path; RMS splitter stays the instant default.**
+- B3a **Pure resampler** — `resampleToMono16k(channel, sampleRate)` → Float32Array. Linear interpolation. Unit-tested.
+- B3b **Pure mapping** — `turnsToSegments(turns)` → media-cell specs (one per turn, `medium:'media'`, timing, trim window) + distinct speaker set for cast. Unit-tested.
+- B3c **WASM worker** — load sherpa-onnx wasm in a Web Worker; `diarize(pcm16k) → turns`. Lazy-loaded.
+- B3d **Asset hosting** (DEFAULT, flag for user): lazy-fetch the wasm bundle (`.js`/`.wasm`/`.data`, tens of MB) on first use and cache via Cache Storage; self-host in R2 later. Never bundle into the main JS.
+- B3e **Import integration** — opt-in setting "Diarize on import". When on + decode succeeds: run diarization → `turnsToSegments` → media cells labeled by speaker; map speakers → cast members (create "Speaker 1..N", assign per cell). Falls back to RMS split if diarization unavailable/fails.
+- B3f **Verify** in running app with a 2-speaker clip → expect N labeled segments + N cast members.
+
+Caveat: diarizing a full episode in-browser is heavy → Worker + (later) chunking. CC-BY embedding model needs a one-line attribution on a licenses page.
 
 ### Deferred (later phases)
 - Waveform snap-and-stretch (the "dream feature").

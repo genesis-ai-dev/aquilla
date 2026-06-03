@@ -18,7 +18,9 @@ export class Dashboard {
   }
 
   async goto(): Promise<void> {
-    await this.page.goto("/")
+    // "/" now renders the org Overview (OrgHome); the projects list + the
+    // "+ New Project" dialog live at /projects (ProjectsList).
+    await this.page.goto("/projects")
     await this.page.waitForLoadState("networkidle")
   }
 
@@ -36,14 +38,23 @@ export class Dashboard {
     await this.page.getByLabel("Target Language", { exact: true }).fill(target)
     await this.page.getByRole("button", { name: "Create Project" }).click()
 
-    await expect(this.page.getByText(name)).toBeVisible({ timeout: 5_000 })
+    // The project name renders in more than one place after creation (card +
+    // heading), so scope to the first match to avoid strict-mode violations.
+    await expect(this.page.getByText(name).first()).toBeVisible({ timeout: 5_000 })
     return name
   }
 
   /** Click a project card by name and wait for the workspace shell to render.
    * Dismisses the per-project Setup Checklist drawer if it auto-opens. */
   async openProject(name: string): Promise<void> {
-    await this.page.getByText(name).click()
+    await this.page.getByText(name).first().click()
+    // A project card now lands on the project Overview (/projects/:id). Enter
+    // the editor workspace (/project/:id) via its "Open project" action when
+    // present (older UIs went straight to the editor).
+    const openInEditor = this.page.getByRole("button", { name: /^Open project$/i })
+    if (await openInEditor.isVisible({ timeout: 8_000 }).catch(() => false)) {
+      await openInEditor.click()
+    }
     await expect(this.page.locator("aside")).toBeVisible({ timeout: 10_000 })
     const setupSheet = this.page.getByRole("dialog", { name: /project setup/i })
     if (await setupSheet.isVisible().catch(() => false)) {

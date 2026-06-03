@@ -11,7 +11,11 @@ export class Workspace {
   async importFile(filePath: string): Promise<void> {
     await this.page.getByRole("button", { name: /^Import$/i }).click()
     await expect(this.page.getByText("Import Files")).toBeVisible({ timeout: 5_000 })
-    await this.page.locator('input[type="file"]').setInputFiles(filePath)
+    // The dialog has two file inputs ("Choose Files" + a webkitdirectory
+    // "Choose Folder"); target the file picker, not the folder one.
+    await this.page
+      .locator('input[type="file"]:not([webkitdirectory])')
+      .setInputFiles(filePath)
     await expect(this.page.getByText("Import Files")).not.toBeVisible({ timeout: 15_000 })
   }
 

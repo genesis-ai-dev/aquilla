@@ -29,9 +29,9 @@ a focused commit, and the checkbox ticked. Keep changes additive and surgical.
 ## Step 4 — Recorder decoupling  ✅
 - [x] Verified structural: recorder `targetSec` = active cell's own `startTime/endTime`. In the media layer the active cell IS a media segment, so its own timing is the target — the subtitle coupling is gone by construction. Documented the invariant in `AudioRecordingModal`. Sequence files unchanged.
 
-## Step 5 — Unified import picker
-- [ ] Ingest entry: "What are you starting from?" → Subtitles / Audio / Video / Text.
-- [ ] Routes set `orderedBy` + initial `medium` per spec table. Audio/Video = single media segment spanning file (Scope A B-option). Subtitles + Text reuse existing paths.
+## Step 5 — Unified import  ◑ (5a done, 5b net-new)
+- [x] **5a Subtitles → time / Text → sequence.** Threaded `orderedBy` + cell `sequenceIndex`/`medium` through the dedicated `/import` path (import.ts, bulk-import.ts, sync-worker import-route.ts). VTT/SRT now open time-ordered → layer switch activates. USFM/text stay sequence. New `orderedByForFileType`; tests green.
+- [ ] **5b Audio/Video file import → time / single media segment.** NET-NEW: add FileType `'audio'|'video'`, reuse `uploadCellAudio` R2 machinery to store the file, create ONE `medium:'media'` cell spanning it (timing = full duration), extend the import picker `accept` list + `detectFileType`. This is the "audio → media" success criterion.
 - [ ] Typecheck. Commit.
 
 ## Step 6 — Verify in real UI

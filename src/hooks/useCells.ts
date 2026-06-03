@@ -90,6 +90,15 @@ export interface CellData {
   ttsSettings?: CellTtsSettings
   startTime?: number
   endTime?: number
+  /** Timeline-segment-model (Scope A). Intrinsic order key; fractional ranks
+   *  allow inserts between neighbors. Falls back to array index on read. */
+  sequenceIndex?: number
+  /** Primary content kind. Defaults to `'text'`. */
+  medium?: import("@/lib/sync/cells-read-types").SegmentMedium
+  /** ASR / corrected source text for a media segment (diverges from target). */
+  transcription?: string
+  /** Lip-sync camera constraint for a media segment. */
+  cameraState?: import("@/lib/sync/cells-read-types").CameraState
   waivers?: import("@/lib/parsers/types").RuleWaiver[]
   /** Most-recent edit timestamp on the target row (ms epoch). Forwarded from
    *  the CellRow projection so consumers like useLivingMemory can sort by
@@ -165,6 +174,12 @@ export function buildCellData(
   const cueContext =
     startMs != null && endMs != null ? `${formatVttTime(startMs / 1000)} --> ${formatVttTime(endMs / 1000)}` : ""
 
+  // Timeline-segment-model (Scope A): prefer target, fall back to source.
+  const sequenceIndex = target?.sequenceIndex ?? source?.sequenceIndex ?? undefined
+  const medium = (target?.medium ?? source?.medium ?? "text") as CellData["medium"]
+  const transcription = target?.transcription ?? source?.transcription ?? undefined
+  const cameraState = (target?.cameraState ?? source?.cameraState ?? undefined) as CellData["cameraState"]
+
   return {
     id: cellId,
     fileId,
@@ -190,6 +205,10 @@ export function buildCellData(
     lastEditAt: target?.lastEditAt ?? source?.lastEditAt,
     startTime,
     endTime,
+    sequenceIndex,
+    medium,
+    transcription,
+    cameraState,
   }
 }
 

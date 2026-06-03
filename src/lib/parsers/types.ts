@@ -321,6 +321,24 @@ export interface FileReference {
   cellCount: number
   corpusMarker?: string  // From notebook metadata.corpusMarker, OT/NT fallback for biblical book stems
   originalName?: string  // Set the first time `name` is auto-rewritten by a suggestion or user rename. Enables hover-to-see-original. Never overwritten after set.
+  /**
+   * Display lens for this file's segments (timeline-segment-model, Scope A).
+   * `'time'`   → rows sort by timing start (sequenceIndex breaks ties / homes
+   *              untimed rows); the timeline is the spine. Subtitle/audio/video.
+   * `'sequence'` → rows sort by intrinsic `sequenceIndex` (e.g. verse order);
+   *              timing is metadata. Text-first translation / audio Bible.
+   * Absent → treated as `'sequence'` (see `fileOrderedBy`). Toggling this NEVER
+   * mutates cell data — it only chooses the sort key. Fully reversible.
+   */
+  orderedBy?: OrderedBy
+}
+
+/** Which key is authoritative for ordering a file's segments. */
+export type OrderedBy = "time" | "sequence"
+
+/** Resolve a file's order lens, defaulting absent → 'sequence'. */
+export function fileOrderedBy(file: Pick<FileReference, "orderedBy">): OrderedBy {
+  return file.orderedBy ?? "sequence"
 }
 
 export interface ProjectMember {

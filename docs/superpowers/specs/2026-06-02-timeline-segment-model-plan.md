@@ -6,12 +6,12 @@ Branch: `feat/timeline-segment-model` · Worktree: `../codex-web-app-timeline`
 Work top-to-bottom. Each step ends with: typecheck/lint/relevant tests green,
 a focused commit, and the checkbox ticked. Keep changes additive and surgical.
 
-## Step 1 — Schema + defaults
-- [ ] Add `orderedBy?: 'time' | 'sequence'` to `FileReference` (`src/lib/parsers/types.ts`). Helper `fileOrderedBy(f): 'time'|'sequence'` defaulting to `'sequence'`.
-- [ ] Add `sequenceIndex?: number`, `medium?: 'text' | 'media'`, `transcription?: string`, `cameraState?: 'on'|'mixed'|'off'` to `CellRow` (`src/lib/sync/cells-read-types.ts`).
-- [ ] Surface the same fields on `CellData` (`src/hooks/useCells.ts`) with defaults (`medium` → `'text'`).
-- [ ] Decide ordering scheme for in-between inserts (fractional ranks). Document the helper.
-- [ ] Typecheck. Commit.
+## Step 1 — Schema + defaults  ✅
+- [x] Add `orderedBy?: 'time' | 'sequence'` to `FileReference` (`src/lib/parsers/types.ts`). Helper `fileOrderedBy(f)` defaulting to `'sequence'`.
+- [x] Add `sequenceIndex?`, `medium?`, `transcription?`, `cameraState?` to `CellRow` (`src/lib/sync/cells-read-types.ts`) + `SegmentMedium`/`CameraState` types.
+- [x] Surface the same fields on `CellData` (`src/hooks/useCells.ts`) + map in `buildCellData` (`medium` defaults `'text'`).
+- [x] Ordering scheme decided: **fractional `sequenceIndex`** (insert = midpoint of neighbors). Implemented in Step 2's `derive.ts`.
+- [x] Typecheck (tsc -b) clean. Commit.
 
 ## Step 2 — Read path + derived helpers
 - [ ] In `useCells.buildCellData`, map new `CellRow` fields onto `CellData`.

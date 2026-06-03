@@ -58,7 +58,25 @@ export interface CellRow {
   /** Cue start/end in milliseconds; null for non-subtitle cells. */
   startMs?: number | null
   endMs?: number | null
+  /**
+   * Timeline-segment-model (Scope A). All additive; absent on legacy rows.
+   * - `sequenceIndex`: intrinsic order key. Fractional values are allowed so a
+   *   segment can be inserted *between* two others without renumbering.
+   * - `medium`: primary content kind. Absent → `'text'`.
+   * - `transcription`: ASR / corrected source text for a media clip.
+   * - `cameraState`: lip-sync constraint tag for media segments.
+   */
+  sequenceIndex?: number | null
+  medium?: SegmentMedium | null
+  transcription?: string | null
+  cameraState?: CameraState | null
 }
+
+/** Primary content kind of a segment. */
+export type SegmentMedium = "text" | "media"
+
+/** Camera state for a media segment (Wendi's lip-sync constraint). */
+export type CameraState = "on" | "mixed" | "off"
 
 /** Pagination response shape. */
 export interface CellsPage {

@@ -12,7 +12,7 @@ import { useFileAudioAttachments } from "@/hooks/useFileAudioAttachments"
 import { getCellPref, setCellPref } from "@/lib/store/audio-cell-prefs"
 import type { ScoredPair } from "@/lib/search/dual-index"
 import type { TranslationRule, RuleInfraction, ProjectRecord, Voice, ProjectTtsSettings, OrderedBy } from "@/lib/parsers/types"
-import { sortByLens } from "@/lib/timeline/derive"
+import { sortByLens, hasTiming } from "@/lib/timeline/derive"
 import { useProjectPermissions } from "@/hooks/useProjectPermissions"
 import { emitTargetCellCommit, emitCellValidate, emitCellUnvalidate, emitCellWaive, emitCellUnwaive } from "@/lib/sync/events-emit"
 import { ExamplePanel } from "./ExamplePanel"
@@ -811,12 +811,21 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           // — if that value crossed the memo boundary, every shifted row would
           // re-render. Here the position-carrying div is a fresh element each
           // parent render (cheap), but MemoizedRow below it sees stable props.
+          //
+          // Timeline-segment-model: in the time lens, a segment with no timing
+          // is kept in its sequence "home" but flagged — never given fake
+          // timecodes ("fail loud"). Marked here on the wrapper so we don't
+          // touch EditorRow internals.
+          const untimedInTimeLens = isTimeOrdered && !hasTiming(cell)
           return (
             <div
               key={cell.id}
               data-cell-id={cell.id}
               data-index={virtualRow.index}
+              data-untimed={untimedInTimeLens ? "true" : undefined}
               ref={virtualizer.measureElement}
+              title={untimedInTimeLens ? "No specific timing — ordered by sequence" : undefined}
+              className={cn(untimedInTimeLens && "border-l-2 border-dashed border-amber-400/70")}
               style={{
                 position: "absolute",
                 top: 0,
@@ -825,6 +834,11 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
                 transform: `translateY(${virtualRow.start}px)`,
               }}
             >
+              {untimedInTimeLens && (
+                <span className="pointer-events-none absolute left-1 top-1 z-10 rounded bg-amber-400/15 px-1 text-[9px] font-medium uppercase tracking-wide text-amber-600 dark:text-amber-400">
+                  no timing
+                </span>
+              )}
               <MemoizedRow
                 project={project}
                 cell={cell}

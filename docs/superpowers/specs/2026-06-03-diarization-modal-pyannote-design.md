@@ -129,9 +129,17 @@ zero between jobs. $5k credits is effectively unlimited for this workload.
   — later; first pass is per-file Speaker 1..N.
 
 ## Implementation plan
-- M1 — `services/diarization/app.py` (Modal service) + a local smoke test once
-  HF token + Modal auth exist.
+- **M1 ✅ DONE + VERIFIED** — `services/diarization/app.py` deployed to Modal
+  (`https://ryderwishart--aquilla-diarization-start.modal.run`). Smoke-tested on
+  Modal GPU: pyannote's real 30s demo sample → **3 speakers / 12 turns with
+  overlap** (correct). Secrets: `aquilla-hf` (HF_TOKEN) + `aquilla-diarization`
+  (shared secret). Dep stack pinned (torch 2.2.2, hf_hub 0.23.4, pyannote 3.3.2).
+  - Finding: synthetic macOS `say` voices merge to 1 speaker (degenerate TTS
+    embeddings) even though segmentation boundaries are exact — a test-data
+    artifact, NOT a pipeline issue. Validate future changes on real human audio.
+  - The optional `num_speakers` hint is worth surfacing in the UI (helps when
+    the user knows the count).
 - M2 — D1 migration `0027` + sync-worker start/callback/status endpoints.
 - M3 — client "Diarize" action + poll + apply (turnsToSegments → cells + cast).
-- M4 — verify end-to-end in the running app with a 2-speaker clip.
-- Cleanup — remove wasm loader + resampler + local bundle.
+- M4 — verify end-to-end in the running app with a REAL multi-speaker clip.
+- Cleanup — remove wasm loader + resampler (dead since the pivot).

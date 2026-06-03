@@ -20,6 +20,7 @@ import type { FileType, FileReference, TranslatableString, OrderedBy } from "./p
 import { detectFileType, isMediaFileType } from "./parsers/types"
 import { buildAudioId, uploadCellAudio, deleteCellAudio } from "./audio/upload"
 import { emitCellAudioAttach } from "./sync/events-emit"
+import { detectSpeechSegments } from "./timeline/silence-split"
 import { extractPlaintextStrings } from "./parsers/plaintext"
 import { extractMarkdownStrings } from "./parsers/markdown"
 import { extractVttStrings, extractSrtStrings } from "./parsers/subtitle"
@@ -359,10 +360,32 @@ export async function emitMediaFile(
   ctx: ImportContext,
 ): Promise<FileReference> {
   const fileId = uuidv7()
-  const cellId = uuidv7()
-  // Never synthesize timing: if the probe fails the segment is left untimed
-  // (the editor flags it "no timing"), it is not given a fake duration.
-  const durationMs = await probeMediaDurationMs(file).catch(() => undefined)
+
+  // Part B: decode the audio and split it into per-line media segments at
+  // silences. Fall back to a single whole-file segment when decode fails
+  // (e.g. a video container we can't decode here) or the split yields ≤1
+  // region. Never synthesize timing — a fallback segment uses the real probed
+  // duration, or is left untimed (editor flags it) if even that fails.
+  const decoded = await decodeAudioFile(file).catch(() => null)
+  const durationMs = decoded?.durationMs ?? (await probeMediaDurationMs(file).catch(() => undefined))
+  const segments = decoded ? detectSpeechSegments(decoded.channel, decoded.sampleRate) : []
+
+  // One spec per segment, else one whole-file spec. `trim*Ms` is each segment's
+  // window into the shared clip (we upload the bytes once, not N times).
+  const specs: { cellId: string; startMs?: number; endMs?: number; trimStartMs?: number; trimEndMs?: number }[] =
+    segments.length >= 2
+      ? segments.map((s) => ({ cellId: uuidv7(), startMs: s.startMs, endMs: s.endMs, trimStartMs: s.startMs, trimEndMs: s.endMs }))
+      : [{ cellId: uuidv7(), ...(durationMs !== undefined ? { startMs: 0, endMs: Math.round(durationMs) } : {}) }]
+
+  const cells: BulkImportCell[] = specs.map((s, i) => ({
+    id: uuidv7(),
+    cellId: s.cellId,
+    anchorCellId: i === 0 ? null : specs[i - 1].cellId,
+    value: file.name,
+    medium: "media",
+    sequenceIndex: i,
+    ...(s.startMs !== undefined && s.endMs !== undefined ? { startMs: s.startMs, endMs: s.endMs } : {}),
+  }))
 
   await bulkUploadSource({
     projectId: ctx.projectId,
@@ -379,27 +402,17 @@ export async function emitMediaFile(
       targetLanguage: ctx.targetLanguage,
       orderedBy: "time",
     },
-    cells: [
-      {
-        id: uuidv7(),
-        cellId,
-        anchorCellId: null,
-        value: file.name,
-        medium: "media",
-        sequenceIndex: 0,
-        ...(durationMs !== undefined ? { startMs: 0, endMs: Math.round(durationMs) } : {}),
-      },
-    ],
+    cells,
     getToken: ctx.getToken,
     onProgress: ctx.onCellEnqueued,
     signal: ctx.signal,
   })
 
-  // Upload the media bytes and attach them to the media cell. Slot 'recording'
-  // is reused for the source clip; a dedicated source-media slot is a Part-B
-  // refinement.
+  // Upload the media bytes ONCE, then attach the shared clip to each segment
+  // cell with its trim window. Slot 'recording' is reused for the source clip;
+  // a dedicated source-media slot is a later refinement.
   const ext = (file.name.split(".").pop() || "bin").toLowerCase()
-  const audioId = buildAudioId(cellId)
+  const audioId = buildAudioId(fileId)
   const upload = await uploadCellAudio({
     projectId: ctx.projectId,
     fileId,
@@ -409,19 +422,24 @@ export async function emitMediaFile(
     getSyncToken: (_p, f) => ctx.getToken(f),
   })
   try {
-    await emitCellAudioAttach({
-      projectId: ctx.projectId,
-      fileId,
-      cellId,
-      audioId: upload.audioId,
-      url: upload.url,
-      slot: "recording",
-      ...(file.type ? { mimeType: file.type } : {}),
-      ...(durationMs !== undefined ? { durationMs: Math.round(durationMs) } : {}),
-      author: ctx.author,
-    })
+    for (const s of specs) {
+      await emitCellAudioAttach({
+        projectId: ctx.projectId,
+        fileId,
+        cellId: s.cellId,
+        audioId: upload.audioId,
+        url: upload.url,
+        slot: "recording",
+        ...(file.type ? { mimeType: file.type } : {}),
+        ...(durationMs !== undefined ? { durationMs: Math.round(durationMs) } : {}),
+        ...(s.trimStartMs !== undefined && s.trimEndMs !== undefined
+          ? { trimStartMs: s.trimStartMs, trimEndMs: s.trimEndMs }
+          : {}),
+        author: ctx.author,
+      })
+    }
   } catch (err) {
-    // The bytes landed but the attach event failed → clean up the orphan.
+    // The bytes landed but an attach event failed → clean up the orphan.
     await deleteCellAudio({ projectId: ctx.projectId, fileId, audioId, ext, getSyncToken: (_p, f) => ctx.getToken(f) })
     throw err
   }
@@ -431,8 +449,35 @@ export async function emitMediaFile(
     name: file.name,
     type: fileType,
     createdAt: new Date().toISOString(),
-    cellCount: 1,
+    cellCount: cells.length,
     orderedBy: "time",
+  }
+}
+
+/**
+ * Decode an audio file to mono PCM for silence-splitting. Returns null when
+ * the platform can't decode it (no AudioContext, or an undecodable container
+ * such as most video) — callers then fall back to a single whole-file segment.
+ */
+async function decodeAudioFile(
+  file: File,
+): Promise<{ channel: Float32Array; sampleRate: number; durationMs: number } | null> {
+  const AC: typeof AudioContext | undefined =
+    typeof window !== "undefined"
+      ? window.AudioContext ?? (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext
+      : undefined
+  if (!AC) return null
+  const buf = await file.arrayBuffer()
+  const audioCtx = new AC()
+  try {
+    const audio = await audioCtx.decodeAudioData(buf)
+    return {
+      channel: audio.getChannelData(0),
+      sampleRate: audio.sampleRate,
+      durationMs: audio.duration * 1000,
+    }
+  } finally {
+    void audioCtx.close?.()
   }
 }
 

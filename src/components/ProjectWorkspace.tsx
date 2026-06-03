@@ -59,8 +59,10 @@ import {
 } from "@/lib/sync/cqrs-bridge"
 import { emitTargetCellCommit, emitCellBacktranslationSet, emitFileRename } from "@/lib/sync/events-emit"
 import { flushOutboxBatch } from "@/lib/sync/outbox-flush"
+import { runDiarization, type DiarizationPhase } from "@/lib/diarization/run-diarization"
 import { useCellsAuditStatsWithOverlay } from "@/hooks/useCellsAuditStatsWithOverlay"
-import { Film, Scale, MessagesSquare, Share2, Settings as SettingsIcon, Lock, ClipboardList, Trash2, Undo2, Search as SearchIcon, Sparkles, Mic2, Download, BookMarked, BookOpen } from "lucide-react"
+import { Film, Scale, MessagesSquare, Share2, Settings as SettingsIcon, Lock, ClipboardList, Trash2, Undo2, Search as SearchIcon, Sparkles, Mic2, Download, BookMarked, BookOpen, Users } from "lucide-react"
+import { cn } from "@/lib/utils"
 import { restoreProject } from "@/lib/store/project-index"
 import { AppShell } from "./AppShell"
 import { WorkspaceHeader } from "./WorkspaceHeader"
@@ -522,6 +524,36 @@ export function ProjectWorkspace() {
 
   const activeFile = activeFileId ? project?.files.find((f) => f.id === activeFileId) : null
   const isSubtitleFile = activeFile?.type === "vtt" || activeFile?.type === "srt"
+
+  // Diarization (M3): "Diarize" a time-ordered media file → replace its media
+  // segments with one per detected speaker turn + create "Speaker N" cast.
+  const [diarizePhase, setDiarizePhase] = useState<DiarizationPhase | null>(null)
+  const [diarizeError, setDiarizeError] = useState<string | null>(null)
+  const diarizeBusy = diarizePhase != null && diarizePhase !== "done" && diarizePhase !== "failed"
+  const canDiarize =
+    !!activeFile && fileOrderedBy(activeFile) === "time" && cells.some((c) => c.medium === "media")
+  const handleDiarize = useCallback(async () => {
+    if (!project?.id || !activeFileId) return
+    setDiarizeError(null)
+    try {
+      await runDiarization({
+        projectId: project.id,
+        fileId: activeFileId,
+        author: currentUsername,
+        cells,
+        getToken: getTokenForFile,
+        ttsSettings: tts.settings,
+        saveTts: tts.saveTts,
+        onPhase: (p) => setDiarizePhase(p),
+      })
+      await flushOutboxBatch({ getTokenForFile })
+      revalidateCells()
+      setDiarizePhase("done")
+    } catch (e) {
+      setDiarizePhase("failed")
+      setDiarizeError(e instanceof Error ? e.message : String(e))
+    }
+  }, [project?.id, activeFileId, currentUsername, cells, getTokenForFile, tts.settings, tts.saveTts, revalidateCells])
 
   const [videoDialogOpen, setVideoDialogOpen] = useState(false)
   const [currentVideoTime, setCurrentVideoTime] = useState(0)
@@ -1740,6 +1772,32 @@ export function ProjectWorkspace() {
                 onChange={(l) => setLens(l)}
                 timeOrdered={activeFile ? fileOrderedBy(activeFile) === "time" : false}
               />
+            )}
+            {lens === "audio" && canDiarize && (
+              <button
+                type="button"
+                onClick={handleDiarize}
+                disabled={diarizeBusy}
+                title={
+                  diarizeError
+                    ? `Diarization failed: ${diarizeError}`
+                    : "Split this clip into per-speaker segments (pyannote)"
+                }
+                className={cn(
+                  "flex items-center gap-1 rounded-full px-2.5 py-1 text-xs transition-shadow",
+                  diarizeBusy ? "text-muted-foreground" : "bg-card shadow-neu-xs hover:shadow-neu-sm",
+                  diarizeError && "text-red-500",
+                )}
+              >
+                <Users className="h-3 w-3" />
+                {diarizePhase === "starting" || diarizePhase === "running"
+                  ? "Diarizing…"
+                  : diarizePhase === "applying"
+                    ? "Applying…"
+                    : diarizeError
+                      ? "Diarize failed"
+                      : "Diarize"}
+              </button>
             )}
             <PrimaryActionButton ctx={actionCtx} run={actionArgs} />
           </WorkspaceHeader>

@@ -460,6 +460,33 @@ export async function emitSourceCellCreate(
   return eventId
 }
 
+export interface SourceCellDeleteInput {
+  projectId: string
+  fileId: string
+  cellId: string
+  author: string
+  clientTs?: number
+}
+
+/**
+ * Emit a `source.cell.delete` — removes the source-side cell row from the
+ * projection (events stay queryable). Used by diarization to replace a media
+ * file's existing segments with freshly diarized ones.
+ */
+export async function emitSourceCellDelete(input: SourceCellDeleteInput): Promise<string> {
+  const { eventId } = await enqueueEvent({
+    kind: "source.cell.delete",
+    projectId: input.projectId,
+    fileId: input.fileId,
+    cellId: input.cellId,
+    parentId: null,
+    author: input.author,
+    payload: {},
+    clientTs: input.clientTs,
+  })
+  return eventId
+}
+
 export interface FileCreateInput {
   projectId: string
   fileId: string

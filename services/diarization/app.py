@@ -13,7 +13,8 @@
 #   2. modal secret create aquilla-hf HF_TOKEN=hf_xxx        (model-access token)
 #   3. modal secret create aquilla-diarization DIARIZATION_SHARED_SECRET=<random>
 #      (the same secret the sync-worker uses to authenticate both directions)
-# Deployed endpoint: https://ryderwishart--aquilla-diarization-start.modal.run
+# Deployed endpoint (genesis-ai-dev workspace):
+#   https://genesis-ai-dev--aquilla-diarization-start.modal.run
 #
 # API note: written against Modal 1.0 (fastapi_endpoint, @app.cls). If the
 # installed modal version differs, the decorator names may need a tweak.
@@ -54,6 +55,7 @@ image = (
         "huggingface_hub==0.23.4",
         "pyannote.audio==3.3.2",
         "httpx",
+        "fastapi[standard]",  # required in-image for @modal.fastapi_endpoint
     )
     .run_function(_bake_model, secrets=[HF_SECRET])
 )

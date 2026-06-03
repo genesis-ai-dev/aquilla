@@ -31,8 +31,8 @@ a focused commit, and the checkbox ticked. Keep changes additive and surgical.
 
 ## Step 5 — Unified import  ◑ (5a done, 5b net-new)
 - [x] **5a Subtitles → time / Text → sequence.** Threaded `orderedBy` + cell `sequenceIndex`/`medium` through the dedicated `/import` path (import.ts, bulk-import.ts, sync-worker import-route.ts). VTT/SRT now open time-ordered → layer switch activates. USFM/text stay sequence. New `orderedByForFileType`; tests green.
-- [ ] **5b Audio/Video file import → time / single media segment.** NET-NEW: add FileType `'audio'|'video'`, reuse `uploadCellAudio` R2 machinery to store the file, create ONE `medium:'media'` cell spanning it (timing = full duration), extend the import picker `accept` list + `detectFileType`. This is the "audio → media" success criterion.
-- [ ] Typecheck. Commit.
+- [x] **5b Audio/Video file import → time / single media segment.** FileType `'audio'|'video'` + `detectFileType` + `isMediaFileType`; `importFile` routes media to `emitMediaFile` (time-ordered file + one `medium:'media'` cell, timing = probed duration or untimed+flagged; R2 upload + attach; orphan cleanup); ImportDialog accept list extended. +6 tests. Client tsc clean.
+- [x] Typecheck + tests. Committed.
 
 ## Step 6 — Verify in real UI
 - [ ] Run the `verify-dev-change` workflow: VTT import → time/text file; audio import → time/single-media file; USFM import → unchanged sequence/text; toggle lens changes only order; record on media segment uses its own timing.

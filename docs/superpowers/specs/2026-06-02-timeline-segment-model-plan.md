@@ -22,8 +22,9 @@ a focused commit, and the checkbox ticked. Keep changes additive and surgical.
 - [x] **3a** File-list icon per `orderedBy` (`FileRow`: waveform=time, list=sequence).
 - [x] **3b** Toggle relabel: `EditorModeToggle` shows "Media" (waveform) for time files, "Audio" otherwise. **Decision:** toggle is NOT hidden for sequence files (would break audio-Bible editing); only its semantics change for time files. Flagged for user review.
 - [x] **3c** Medium-layer switch: `EditorTable.displayCells` filters by `medium` + sorts by time, gated on `orderedBy==='time'` (non-time files byte-identical). Empty-state hint. Index-based voice paths left on full list (known Part-B limit).
-- [ ] **3d** Media-row inline controls: camera-state (`on/mixed/off`) + transcription editing (needs emit-path plumbing for the new payload fields). Untimed "no specific timing" ghost row + lens-disagreement indicator.
-- [x] Typecheck clean. Committed (3a, 3b/3c).
+- [x] **3d-plumbing** Full write→projection→read round-trip for `medium`/`sequenceIndex`/`transcription`/`cameraState` + file `orderedBy` (migration 0025; sync-worker projection + both read routes; auth-worker projects route; client emit/outbox + `CloudFileSummary`→`FileReference`). Create-time only. Client + sync-worker tsc clean.
+- [ ] **3d-ui** Untimed "no specific timing" ghost-row treatment in the time lens + lens-disagreement indicator (display-only, EditorRow). Inline camera/transcription EDITING deferred to Part B (create-time only for now).
+- [x] Typecheck clean. Committed (3a, 3b/3c, 3d-plumbing).
 
 ## Step 4 — Recorder decoupling  ✅
 - [x] Verified structural: recorder `targetSec` = active cell's own `startTime/endTime`. In the media layer the active cell IS a media segment, so its own timing is the target — the subtitle coupling is gone by construction. Documented the invariant in `AudioRecordingModal`. Sequence files unchanged.

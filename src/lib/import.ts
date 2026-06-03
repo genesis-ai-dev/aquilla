@@ -17,7 +17,9 @@
 
 import { v7 as uuidv7 } from "uuid"
 import type { FileType, FileReference, TranslatableString, OrderedBy } from "./parsers/types"
-import { detectFileType } from "./parsers/types"
+import { detectFileType, isMediaFileType } from "./parsers/types"
+import { buildAudioId, uploadCellAudio, deleteCellAudio } from "./audio/upload"
+import { emitCellAudioAttach } from "./sync/events-emit"
 import { extractPlaintextStrings } from "./parsers/plaintext"
 import { extractMarkdownStrings } from "./parsers/markdown"
 import { extractVttStrings, extractSrtStrings } from "./parsers/subtitle"
@@ -154,6 +156,13 @@ export async function importFile(
   const fileType = detectFileType(file.name)
   if (!fileType) {
     throw new Error(`Unsupported file type: ${file.name}`)
+  }
+
+  // Timeline-segment-model (Scope A): audio/video files have no text parser —
+  // they import as a single media segment on a time-ordered file.
+  if (isMediaFileType(fileType)) {
+    const ref = await emitMediaFile(file, fileType, ctx)
+    return { refs: [ref], speakerPairs: [] }
   }
 
   const results = await parseFile(file, fileType)
@@ -329,10 +338,128 @@ export async function emitParsedFile(
   }
 }
 
-/** Subtitle formats are time-ordered; everything else is sequence-ordered.
- *  Centralized so the audio/video media-import path (Part B) can extend it. */
+/** Subtitle + media formats are time-ordered (the timeline is the spine);
+ *  every text/document format is sequence-ordered. */
 export function orderedByForFileType(fileType: FileType): OrderedBy {
-  return fileType === "vtt" || fileType === "srt" ? "time" : "sequence"
+  return fileType === "vtt" || fileType === "srt" || isMediaFileType(fileType)
+    ? "time"
+    : "sequence"
+}
+
+/**
+ * Import an audio/video FILE as a single media segment on a time-ordered file.
+ * Scope A "B-option": one clip spanning the whole file (silence-split into many
+ * segments is Part B). Creates file.create (orderedBy='time') + one
+ * source.cell.create (medium='media', timing = probed duration), uploads the
+ * bytes to R2, and attaches them so the clip is playable in the media layer.
+ */
+export async function emitMediaFile(
+  file: File,
+  fileType: FileType,
+  ctx: ImportContext,
+): Promise<FileReference> {
+  const fileId = uuidv7()
+  const cellId = uuidv7()
+  // Never synthesize timing: if the probe fails the segment is left untimed
+  // (the editor flags it "no timing"), it is not given a fake duration.
+  const durationMs = await probeMediaDurationMs(file).catch(() => undefined)
+
+  await bulkUploadSource({
+    projectId: ctx.projectId,
+    fileId,
+    file: {
+      id: uuidv7(),
+      name: file.name,
+      fileType,
+      role: "source",
+      kind: fileType,
+      importFormat: fileType,
+      parserVersion: "workspace-import-v1",
+      sourceLanguage: ctx.sourceLanguage,
+      targetLanguage: ctx.targetLanguage,
+      orderedBy: "time",
+    },
+    cells: [
+      {
+        id: uuidv7(),
+        cellId,
+        anchorCellId: null,
+        value: file.name,
+        medium: "media",
+        sequenceIndex: 0,
+        ...(durationMs !== undefined ? { startMs: 0, endMs: Math.round(durationMs) } : {}),
+      },
+    ],
+    getToken: ctx.getToken,
+    onProgress: ctx.onCellEnqueued,
+    signal: ctx.signal,
+  })
+
+  // Upload the media bytes and attach them to the media cell. Slot 'recording'
+  // is reused for the source clip; a dedicated source-media slot is a Part-B
+  // refinement.
+  const ext = (file.name.split(".").pop() || "bin").toLowerCase()
+  const audioId = buildAudioId(cellId)
+  const upload = await uploadCellAudio({
+    projectId: ctx.projectId,
+    fileId,
+    audioId,
+    ext,
+    blob: file,
+    getSyncToken: (_p, f) => ctx.getToken(f),
+  })
+  try {
+    await emitCellAudioAttach({
+      projectId: ctx.projectId,
+      fileId,
+      cellId,
+      audioId: upload.audioId,
+      url: upload.url,
+      slot: "recording",
+      ...(file.type ? { mimeType: file.type } : {}),
+      ...(durationMs !== undefined ? { durationMs: Math.round(durationMs) } : {}),
+      author: ctx.author,
+    })
+  } catch (err) {
+    // The bytes landed but the attach event failed → clean up the orphan.
+    await deleteCellAudio({ projectId: ctx.projectId, fileId, audioId, ext, getSyncToken: (_p, f) => ctx.getToken(f) })
+    throw err
+  }
+
+  return {
+    id: fileId,
+    name: file.name,
+    type: fileType,
+    createdAt: new Date().toISOString(),
+    cellCount: 1,
+    orderedBy: "time",
+  }
+}
+
+/**
+ * Probe a media file's duration (ms) by loading it into a media element.
+ * Rejects on failure; callers treat that as "unknown timing" (the segment is
+ * flagged untimed, never given synthetic timecodes).
+ */
+export function probeMediaDurationMs(file: File): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file)
+    const isVideo = file.type.startsWith("video/")
+    const el = document.createElement(isVideo ? "video" : "audio")
+    const cleanup = () => URL.revokeObjectURL(url)
+    el.preload = "metadata"
+    el.onloadedmetadata = () => {
+      const sec = el.duration
+      cleanup()
+      if (Number.isFinite(sec) && sec > 0) resolve(sec * 1000)
+      else reject(new Error("media duration unavailable"))
+    }
+    el.onerror = () => {
+      cleanup()
+      reject(new Error("failed to load media metadata"))
+    }
+    el.src = url
+  })
 }
 
 export interface ParatextImportProgress {
@@ -594,5 +721,10 @@ async function parseFile(file: File, fileType: FileType): Promise<ImportResult[]
     }
     case "ebible":
       throw new Error("eBible translations import via importEBible(), not importFile()")
+    case "audio":
+    case "video":
+      // Media files have no text parser; importFile() routes them to
+      // emitMediaFile() before reaching here. Defensive guard.
+      throw new Error("media files import via emitMediaFile(), not parseFile()")
   }
 }

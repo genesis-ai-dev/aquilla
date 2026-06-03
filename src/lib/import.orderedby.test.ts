@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest"
 import { orderedByForFileType, buildBulkCellsWithSpeakers } from "./import"
+import { detectFileType } from "./parsers/types"
 import type { TranslatableString } from "./parsers/types"
 
 // WHY: subtitle imports must become TIME-ordered (their cues are the timeline
@@ -13,10 +14,27 @@ describe("orderedByForFileType", () => {
     expect(orderedByForFileType("vtt")).toBe("time")
     expect(orderedByForFileType("srt")).toBe("time")
   })
+  it("marks audio/video media as time-ordered", () => {
+    expect(orderedByForFileType("audio")).toBe("time")
+    expect(orderedByForFileType("video")).toBe("time")
+  })
   it("leaves text/document formats sequence-ordered", () => {
     for (const t of ["usfm", "ebible", "docx", "txt", "csv"] as const) {
       expect(orderedByForFileType(t)).toBe("sequence")
     }
+  })
+})
+
+describe("detectFileType — media extensions", () => {
+  it("maps common audio/video extensions", () => {
+    expect(detectFileType("scene.mp3")).toBe("audio")
+    expect(detectFileType("scene.wav")).toBe("audio")
+    expect(detectFileType("episode.mp4")).toBe("video")
+    expect(detectFileType("episode.mov")).toBe("video")
+  })
+  it("still maps subtitle/text extensions", () => {
+    expect(detectFileType("a.vtt")).toBe("vtt")
+    expect(detectFileType("b.usfm")).toBe("usfm")
   })
 })
 

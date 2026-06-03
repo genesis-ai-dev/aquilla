@@ -1,4 +1,4 @@
-export type FileType = "md" | "docx" | "pptx" | "txt" | "vtt" | "srt" | "usfm" | "ebible" | "xliff" | "tmx" | "csv" | "tsv"
+export type FileType = "md" | "docx" | "pptx" | "txt" | "vtt" | "srt" | "usfm" | "ebible" | "xliff" | "tmx" | "csv" | "tsv" | "audio" | "video"
 
 export type CellType =
   | "text"
@@ -484,8 +484,28 @@ export function detectFileType(fileName: string): FileType | null {
     tmx: "tmx",
     csv: "csv",
     tsv: "tsv",
+    // Timeline-segment-model: audio/video files import as a single media
+    // segment on a time-ordered file (no text parser — opaque media blob).
+    mp3: "audio",
+    wav: "audio",
+    m4a: "audio",
+    aac: "audio",
+    flac: "audio",
+    ogg: "audio",
+    oga: "audio",
+    opus: "audio",
+    mp4: "video",
+    m4v: "video",
+    mov: "video",
+    webm: "video",
+    mkv: "video",
   }
   return map[ext || ""] || null
+}
+
+/** True for file types that are opaque media blobs (no text parser). */
+export function isMediaFileType(t: FileType): boolean {
+  return t === "audio" || t === "video"
 }
 
 export interface DecaySettings {

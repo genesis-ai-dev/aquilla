@@ -289,7 +289,7 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, getT
                 type="file"
                 multiple
                 className="hidden"
-                accept=".md,.markdown,.docx,.pptx,.txt,.vtt,.srt,.usfm,.sfm,.usx,.zip,.xlf,.xliff,.tmx,.csv,.tsv"
+                accept=".md,.markdown,.docx,.pptx,.txt,.vtt,.srt,.usfm,.sfm,.usx,.zip,.xlf,.xliff,.tmx,.csv,.tsv,.mp3,.wav,.m4a,.aac,.flac,.ogg,.oga,.opus,.mp4,.m4v,.mov,.webm,.mkv"
                 onChange={handleFileInput}
               />
             </Button>

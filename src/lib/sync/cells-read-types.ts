@@ -24,6 +24,9 @@ export interface FileSummary {
   targetLanguage: string | null
   cellCount: number
   approvedCount: number
+  /** Target cells with content (TRIM(value) != ''): the "translated" count,
+   *  distinct from approvedCount (validated). Matches the chapter-dot signal. */
+  filledCount: number
   wordCount: number
   /** Last cell.commit timestamp on this file. Null on freshly-created files. */
   lastEditAt: number | null

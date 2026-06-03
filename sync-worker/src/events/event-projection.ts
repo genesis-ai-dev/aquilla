@@ -122,6 +122,8 @@ function ftsInsertStmt(
  * Definitions:
  *   cell_count     — distinct cell positions (paired source/target share an id)
  *   approved_count — validated cells (only target rows ever carry validated=1)
+ *   filled_count   — target cells with content (TRIM(value) != ''); the
+ *                    "translated / has a draft" signal the chapter dots encode
  *   word_count     — total target-side words (translation output)
  *   last_edit_at   — most recent cell edit on the file (also drives file sort)
  *
@@ -140,12 +142,14 @@ function fileCountersRecomputeStmt(
       `UPDATE files SET
         cell_count = (SELECT COUNT(DISTINCT cell_id) FROM cells WHERE project_id = ? AND file_id = ?),
         approved_count = (SELECT COUNT(*) FROM cells WHERE project_id = ? AND file_id = ? AND validated = 1),
+        filled_count = (SELECT COUNT(*) FROM cells WHERE project_id = ? AND file_id = ? AND side = 'target' AND TRIM(value) != ''),
         word_count = (SELECT COALESCE(SUM(word_count), 0) FROM cells WHERE project_id = ? AND file_id = ? AND side = 'target'),
         last_edit_at = (SELECT MAX(last_edit_at) FROM cells WHERE project_id = ? AND file_id = ?),
         updated_at = ?
       WHERE id = ? AND project_id = ?`,
     )
     .bind(
+      projectId, fileId,
       projectId, fileId,
       projectId, fileId,
       projectId, fileId,

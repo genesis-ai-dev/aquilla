@@ -36,7 +36,7 @@ export function TeamsList() {
       header={<OrgBreadcrumb section="Teams" />}
       statusBar={null}
       main={
-        <div className="p-6">
+        <div className="h-full overflow-y-auto p-6">
           {isAdmin && (
             <div className="mb-4">
               {!creating ? (

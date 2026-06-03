@@ -115,7 +115,7 @@ function MembersShell({ children }: { children: React.ReactNode }) {
 function PageShell({ children }: { children: React.ReactNode }) {
   return (
     <MembersShell>
-      <div className="mx-auto max-w-3xl p-6">
+      <div className="p-6">
         <div className="mb-4 flex items-center gap-2">
           <Users className="h-5 w-5 text-muted-foreground" aria-hidden />
           <h1 className="text-xl font-semibold">Members</h1>
@@ -153,7 +153,7 @@ function MembersPageContent({ orgId, orgName }: MembersPageContentProps) {
 
   return (
     <MembersShell>
-      <div className="mx-auto max-w-3xl p-6">
+      <div className="p-6">
       <div className="mb-1 flex items-center gap-2">
         <Users className="h-5 w-5 text-muted-foreground" aria-hidden />
         <h1 className="text-xl font-semibold">Members</h1>

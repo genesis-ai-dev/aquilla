@@ -21,7 +21,7 @@ export function Preferences() {
       statusBar={null}
       main={
         <div className="h-full overflow-y-auto">
-          <div className="mx-auto max-w-2xl p-6">
+          <div className="p-6">
             <h1 className="mb-1 text-xl font-semibold">Preferences</h1>
             <p className="mb-6 text-sm text-muted-foreground">
               Personal preferences that apply to you across all projects on this device.

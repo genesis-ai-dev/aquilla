@@ -38,6 +38,9 @@ export interface TranslatableString {
   /** Speaker extracted from a `<v Name>` VTT voice tag, if present. Maps to a
    *  Cast member on import. */
   speaker?: string
+  /** Timeline-segment-model: primary content kind. Absent ⇒ 'text'. Set to
+   *  'media' only by the audio/video media-import path (Part B). */
+  medium?: "text" | "media"
   type: CellType
   sourceLocation?: SourceLocation
 }

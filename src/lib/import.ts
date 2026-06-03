@@ -16,7 +16,7 @@
 // source blobs in R2; the future re-parse path fetches from R2.
 
 import { v7 as uuidv7 } from "uuid"
-import type { FileType, FileReference, TranslatableString } from "./parsers/types"
+import type { FileType, FileReference, TranslatableString, OrderedBy } from "./parsers/types"
 import { detectFileType } from "./parsers/types"
 import { extractPlaintextStrings } from "./parsers/plaintext"
 import { extractMarkdownStrings } from "./parsers/markdown"
@@ -222,6 +222,7 @@ export function buildBulkCellsWithSpeakers(strings: TranslatableString[]): {
   const cells: BulkImportCell[] = []
   const speakerPairs: { cellId: string; speaker: string | undefined }[] = []
   let prevCellId: string | null = null
+  let seq = 0
   for (const str of strings) {
     const cellId = str.id || uuidv7()
     cells.push({
@@ -233,9 +234,16 @@ export function buildBulkCellsWithSpeakers(strings: TranslatableString[]): {
       ...(str.type !== undefined ? { type: str.type } : {}),
       ...(str.group ? { canonicalRef: str.group } : {}),
       ...(str.start !== undefined && str.end !== undefined ? { startMs: Math.round(str.start * 1000), endMs: Math.round(str.end * 1000) } : {}),
+      // Timeline-segment-model: intrinsic order key (import order). For
+      // time-ordered files it is the tiebreak / home for untimed rows; for
+      // sequence-ordered files it IS the order. `medium` defaults to 'text'
+      // (absent), so only an explicit media import needs to set it.
+      sequenceIndex: seq,
+      ...(str.medium ? { medium: str.medium } : {}),
     })
     speakerPairs.push({ cellId, speaker: str.speaker })
     prevCellId = cellId
+    seq += 1
   }
   return { cells, speakerPairs }
 }
@@ -276,6 +284,12 @@ export async function emitParsedFile(
   // call that mints the cellIds — avoids the double-parse cellId mismatch.
   const { cells, speakerPairs } = buildBulkCellsWithSpeakers(result.strings)
 
+  // Timeline-segment-model: subtitle imports are time-true (their cues carry
+  // timecodes and the timeline is the spine); every text/document format is
+  // sequence-true. Absent ⇒ the client treats a file as 'sequence', so we only
+  // need to mark the time-ordered case explicitly.
+  const orderedBy: OrderedBy = orderedByForFileType(fileType)
+
   await bulkUploadSource({
     projectId: ctx.projectId,
     fileId,
@@ -289,6 +303,7 @@ export async function emitParsedFile(
       parserVersion: "workspace-import-v1",
       sourceLanguage: ctx.sourceLanguage,
       targetLanguage: ctx.targetLanguage,
+      orderedBy,
       ...(result.bookCode ? { bookCode: result.bookCode } : {}),
     },
     cells,
@@ -306,11 +321,18 @@ export async function emitParsedFile(
       type: fileType,
       createdAt: new Date().toISOString(),
       cellCount: cells.length,
+      orderedBy,
       ...(result.corpusMarker ? { corpusMarker: result.corpusMarker } : {}),
       ...(result.originalName ? { originalName: result.originalName } : {}),
     },
     speakerPairs,
   }
+}
+
+/** Subtitle formats are time-ordered; everything else is sequence-ordered.
+ *  Centralized so the audio/video media-import path (Part B) can extend it. */
+export function orderedByForFileType(fileType: FileType): OrderedBy {
+  return fileType === "vtt" || fileType === "srt" ? "time" : "sequence"
 }
 
 export interface ParatextImportProgress {

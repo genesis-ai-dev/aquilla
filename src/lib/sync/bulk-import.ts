@@ -31,6 +31,11 @@ export interface BulkImportCell {
    *  projection so VTT/character export survives reload. */
   startMs?: number
   endMs?: number
+  // Timeline-segment-model (Scope A). Set at import; projected create-time.
+  /** Intrinsic order key (fractional ranks allowed). */
+  sequenceIndex?: number
+  /** Primary content kind. Absent ⇒ 'text'. */
+  medium?: "text" | "media"
 }
 
 export interface BulkImportFileMeta {
@@ -46,6 +51,9 @@ export interface BulkImportFileMeta {
   targetLanguage?: string
   /** USFM book code (\id) — lets the server projection group/order by book. */
   bookCode?: string
+  /** Timeline-segment-model order lens ('time' | 'sequence'). Stored in
+   *  files.meta on the server; absent ⇒ client treats as 'sequence'. */
+  orderedBy?: string
 }
 
 export interface BulkUploadArgs {

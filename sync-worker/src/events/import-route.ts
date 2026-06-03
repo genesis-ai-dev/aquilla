@@ -47,6 +47,8 @@ interface ImportFileMeta {
   parserVersion?: string
   sourceLanguage?: string
   targetLanguage?: string
+  /** Timeline-segment-model order lens ('time' | 'sequence') → files.meta. */
+  orderedBy?: string
 }
 
 interface ImportCell {
@@ -60,6 +62,9 @@ interface ImportCell {
   canonicalRef?: string
   startMs?: number
   endMs?: number
+  // Timeline-segment-model (Scope A) — projected create-time onto the cell.
+  sequenceIndex?: number
+  medium?: string
 }
 
 interface ImportBody {
@@ -216,6 +221,7 @@ export async function handleBulkImportRequest(
         parserVersion: f.parserVersion,
         sourceLanguage: f.sourceLanguage,
         targetLanguage: f.targetLanguage,
+        ...(f.orderedBy !== undefined ? { orderedBy: f.orderedBy } : {}),
       },
       clientTs,
       serverTs: serverTs++,
@@ -269,6 +275,8 @@ export async function handleBulkImportRequest(
         ...(cell.canonicalRef !== undefined ? { canonicalRef: cell.canonicalRef } : {}),
         ...(cell.startMs !== undefined ? { startMs: cell.startMs } : {}),
         ...(cell.endMs !== undefined ? { endMs: cell.endMs } : {}),
+        ...(cell.sequenceIndex !== undefined ? { sequenceIndex: cell.sequenceIndex } : {}),
+        ...(cell.medium !== undefined ? { medium: cell.medium } : {}),
       },
       clientTs,
       serverTs: serverTs++,

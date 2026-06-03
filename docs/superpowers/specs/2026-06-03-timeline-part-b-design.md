@@ -79,7 +79,7 @@ COOP/COEP headers needed).
 - B3a **Pure resampler** — `resampleToMono16k(channel, sampleRate)` → Float32Array. Linear interpolation. Unit-tested.
 - B3b **Pure mapping** — `turnsToSegments(turns)` → media-cell specs (one per turn, `medium:'media'`, timing, trim window) + distinct speaker set for cast. Unit-tested.
 - B3c **WASM worker** — load sherpa-onnx wasm in a Web Worker; `diarize(pcm16k) → turns`. Lazy-loaded.
-- B3d **Asset hosting** (DEFAULT, flag for user): lazy-fetch the wasm bundle (`.js`/`.wasm`/`.data`, tens of MB) on first use and cache via Cache Storage; self-host in R2 later. Never bundle into the main JS.
+- B3d **Asset hosting** — DECIDED: **self-host in R2** (Frontier R&D account `6a80496d1e59948a9cbaa3c643ba81d7`; confirm exact bucket before upload). Lazy-fetch the wasm bundle (`.js`/`.wasm`/`.data`, tens of MB) from R2 on first use, cache via Cache Storage. Never bundle into the main JS. Build/prove the loader locally first (bundle in `public/`, gitignored), upload to R2 once it works.
 - B3e **Import integration** — opt-in setting "Diarize on import". When on + decode succeeds: run diarization → `turnsToSegments` → media cells labeled by speaker; map speakers → cast members (create "Speaker 1..N", assign per cell). Falls back to RMS split if diarization unavailable/fails.
 - B3f **Verify** in running app with a 2-speaker clip → expect N labeled segments + N cast members.
 

@@ -66,3 +66,7 @@ e2e/.auth/
 # Local copy of the sherpa-onnx diarization WASM bundle (tens of MB).
 # Served from R2 (aquilla-ai-models) in prod; kept out of git.
 /public/sherpa-diarization/
+
+# Python bytecode (Modal service)
+__pycache__/
+*.pyc

@@ -83,6 +83,35 @@ COOP/COEP headers needed).
 - B3e **Import integration** — opt-in setting "Diarize on import". When on + decode succeeds: run diarization → `turnsToSegments` → media cells labeled by speaker; map speakers → cast members (create "Speaker 1..N", assign per cell). Falls back to RMS split if diarization unavailable/fails.
 - B3f **Verify** in running app with a 2-speaker clip → expect N labeled segments + N cast members.
 
+#### B3c verification findings (2026-06-03, headless Chromium)
+The loader works END-TO-END: 55 MB wasm + baked-in models load, `diarize()`
+runs in ~2.7 s on a 13 s clip and returns `{start,end,speaker}` turns. BUT two
+blockers for the quality path surfaced:
+
+1. **Cross-origin isolation is REQUIRED.** The wasm uses threads /
+   SharedArrayBuffer → the page must send `COOP: same-origin` +
+   `COEP: require-corp` (else: "SharedArrayBuffer transfer requires
+   self.crossOriginIsolated", hang). This is **app-wide invasive** (COEP blocks
+   cross-origin subresources lacking CORP — images, fonts, embeds, the R2 audio
+   itself would each need CORP headers). NOT committed app-wide; needs a
+   decision. Mitigation options: serve diarization in an isolated context
+   (dedicated COI iframe/popup or a COI worker scope) instead of the whole app.
+2. **Stock embedding model is Chinese (`speech_eres2net…zh-cn`) → cannot
+   separate English speakers.** A clean 2-voice English clip (macOS Alex +
+   Samantha) returned **1 speaker** at thresholds 0.5/0.3/0.2; forced
+   `numClusters:2` split at the wrong boundary (9.97 s vs true ~6.5 s). The
+   prebuilt sherpa-onnx diarization wasm bakes this model into `.data`, so
+   usable English quality requires **rebuilding the wasm with an English /
+   multilingual embedding model** (e.g. WeSpeaker VoxCeleb resnet34 — CC-BY-4.0,
+   or 3D-Speaker CAM++ en — Apache-2.0). This is the gating follow-up before
+   B3e import+cast wiring is worth doing.
+
+**Status:** B3a/B3b/B3c code is sound + committed (loader provably loads &
+runs). B3d/B3e/B3f are **paused** pending two decisions: (a) how to scope COI
+(app-wide vs isolated context), (b) rebuild the wasm with an English embedding
+model. Diarization is NOT yet wired into import — the loader is dormant until
+called, so merging the committed code changes no user-facing behavior.
+
 Caveat: diarizing a full episode in-browser is heavy → Worker + (later) chunking. CC-BY embedding model needs a one-line attribution on a licenses page.
 
 ### Deferred (later phases)

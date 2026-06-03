@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react"
-import { ChevronRight, MoreHorizontal, Sparkles } from "lucide-react"
+import { ChevronRight, MoreHorizontal, Sparkles, AudioWaveform, ListOrdered } from "lucide-react"
 import type { FileReference } from "@/lib/parsers/types"
-import { fileTypeHasSections } from "@/lib/parsers/types"
+import { fileTypeHasSections, fileOrderedBy } from "@/lib/parsers/types"
 import { cn } from "@/lib/utils"
 
 interface FileStats { translated: number; validated: number; total: number }
@@ -43,6 +43,9 @@ export function FileRow(props: FileRowProps) {
   const validatedPct = progress && progress.total > 0
     ? Math.round((progress.validated / progress.total) * 100) : 0
   const canExpand = fileTypeHasSections(file.type)
+  // Timeline-segment-model: a file is either time-true (timeline spine) or
+  // sequence-true (intrinsic order). Surface it at a glance.
+  const orderedBy = fileOrderedBy(file)
 
   return (
     <div
@@ -71,6 +74,17 @@ export function FileRow(props: FileRowProps) {
       ) : (
         <span className="w-[18px] shrink-0" aria-hidden="true" />
       )}
+      <span
+        className="shrink-0 text-muted-foreground/70"
+        title={orderedBy === "time" ? "Timeline-ordered (timecodes are the spine)" : "Sequence-ordered (intrinsic order)"}
+        aria-label={orderedBy === "time" ? "Timeline-ordered file" : "Sequence-ordered file"}
+      >
+        {orderedBy === "time" ? (
+          <AudioWaveform className="h-3.5 w-3.5" />
+        ) : (
+          <ListOrdered className="h-3.5 w-3.5" />
+        )}
+      </span>
       <div className="flex-1 min-w-0">
         {editing ? (
           <input

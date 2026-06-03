@@ -59,6 +59,12 @@ export function AudioRecordingModal({
     [cells, activeCellId],
   )
   const activeCell = activeIndex >= 0 ? cells[activeIndex] : null
+  // Timeline-segment-model (Scope A) — recorder decoupling. The record target
+  // is ALWAYS the active cell's own timing. In a time-ordered file the media
+  // layer's rows ARE media segments with their own start/end, so recording
+  // there targets the media segment's window — never a subtitle's. (The old
+  // coupling, where audio rode the subtitle cell and inherited its reading-
+  // speed window, no longer exists: media is a separate segment.)
   const targetSec = activeCell && activeCell.startTime != null && activeCell.endTime != null
     ? Math.max(0, activeCell.endTime - activeCell.startTime)
     : null

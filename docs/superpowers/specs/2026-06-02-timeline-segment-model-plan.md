@@ -18,16 +18,15 @@ a focused commit, and the checkbox ticked. Keep changes additive and surgical.
 - [x] New pure module `src/lib/timeline/derive.ts`: `timelineBounds`, `overlapsOf`, `sortByLens`, `hasTiming`, `rangesOverlap`, `sequenceBetween`. 15 unit tests, all green.
 - [x] Typecheck + tests clean. Commit.
 
-## Step 3 — Lens toggle + media layer + file icons
-- [ ] Gate the editor text/audio toggle on `orderedBy === 'time'`; make it a `medium` layer switch (text segments vs media segments).
-- [ ] Media-layer row: timing, camera-state control (`on/mixed/off`), transcription field, take(s). Reuse existing audio/cell components.
-- [ ] Untimed-in-time-lens treatment (dashed/ghost row); lens-disagreement indicator.
-- [ ] File-list icon per `orderedBy`.
-- [ ] Typecheck. Commit.
+## Step 3 — Lens toggle + media layer + file icons  ◑ (3a–3c done, 3d pending)
+- [x] **3a** File-list icon per `orderedBy` (`FileRow`: waveform=time, list=sequence).
+- [x] **3b** Toggle relabel: `EditorModeToggle` shows "Media" (waveform) for time files, "Audio" otherwise. **Decision:** toggle is NOT hidden for sequence files (would break audio-Bible editing); only its semantics change for time files. Flagged for user review.
+- [x] **3c** Medium-layer switch: `EditorTable.displayCells` filters by `medium` + sorts by time, gated on `orderedBy==='time'` (non-time files byte-identical). Empty-state hint. Index-based voice paths left on full list (known Part-B limit).
+- [ ] **3d** Media-row inline controls: camera-state (`on/mixed/off`) + transcription editing (needs emit-path plumbing for the new payload fields). Untimed "no specific timing" ghost row + lens-disagreement indicator.
+- [x] Typecheck clean. Committed (3a, 3b/3c).
 
-## Step 4 — Recorder decoupling
-- [ ] In a `time` file, recorder `targetSec` comes from the media segment's own `startTime/endTime` (not a subtitle window). Sequence files unchanged (attachment-on-cell).
-- [ ] Typecheck. Commit.
+## Step 4 — Recorder decoupling  ✅
+- [x] Verified structural: recorder `targetSec` = active cell's own `startTime/endTime`. In the media layer the active cell IS a media segment, so its own timing is the target — the subtitle coupling is gone by construction. Documented the invariant in `AudioRecordingModal`. Sequence files unchanged.
 
 ## Step 5 — Unified import picker
 - [ ] Ingest entry: "What are you starting from?" → Subtitles / Audio / Video / Text.

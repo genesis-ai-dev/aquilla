@@ -25,6 +25,12 @@
 import { buildEventProjectionStmts, type PersistedEvent } from './event-projection'
 import type { EventKind } from './types'
 
+// aquilla-db is a single-writer SQLite DB. Larger batches hold that one writer
+// longer per commit, so under concurrent ingest they overflow D1's queue
+// ("D1 DB is overloaded. Requests queued for too long."). 100 is the proven
+// sweet spot — short transactions that release the writer quickly. The real
+// throughput limiter is D1's single-writer commit rate; tune CLIENT concurrency
+// (migrate-all --concurrency) to saturate it without overloading, NOT batch size.
 const D1_BATCH_LIMIT = 100
 
 export interface MigrateIngestEnv {

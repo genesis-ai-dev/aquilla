@@ -6,7 +6,7 @@
 # so a CF Worker never holds a multi-minute connection.
 #
 # Deploy:
-#   modal deploy services/diarization/app.py
+#   modal deploy infra/modal/diarization.py
 # Prerequisites (one-time):
 #   1. Accept conditions on https://huggingface.co/pyannote/speaker-diarization-3.1
 #      and create an HF token.

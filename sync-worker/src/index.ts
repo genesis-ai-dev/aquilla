@@ -8,6 +8,7 @@
 import { handleAdminRequest } from "./admin"
 import { handleAudioRequest } from "./audio"
 import { handleVoiceConvertRequest, handleVoiceReferenceRequest } from "./voice-convert"
+import { handleDiarizationRequest } from "./diarization"
 import { notifyProjectDo } from "./archive-broadcast"
 import { handleCorsPreflight, withCors } from "./cors"
 import { handleProjectArchiveRequest } from "./project-archive"
@@ -69,6 +70,13 @@ declare global {
        *  When absent, the route runs the algorithm fresh on every request.
        *  Provision: `wrangler kv:namespace create BRANCHING_SEARCH_KV`. */
       BRANCHING_SEARCH_KV?: KVNamespace
+      /** Modal-hosted pyannote diarization endpoint (infra/modal/diarization.py). */
+      DIARIZATION_MODAL_URL?: string
+      /** Shared secret authenticating both directions worker↔Modal diarization. */
+      DIARIZATION_SHARED_SECRET?: string
+      /** Public base URL of THIS worker (incl. /sync prefix in prod) so Modal
+       *  can reach the diarization audio + callback routes. */
+      DIARIZATION_PUBLIC_BASE?: string
     }
   }
 }
@@ -133,6 +141,8 @@ export default {
     if (voiceConvertResponse) return withCors(voiceConvertResponse, request)
     const voiceReferenceResponse = await handleVoiceReferenceRequest(request, env)
     if (voiceReferenceResponse) return withCors(voiceReferenceResponse, request)
+    const diarizationResponse = await handleDiarizationRequest(request, env)
+    if (diarizationResponse) return withCors(diarizationResponse, request)
     const eventsReadResponse = await handleEventsReadRequest(request, env)
     if (eventsReadResponse) return withCors(eventsReadResponse, request)
     const validatorsReadResponse = await handleValidatorsReadRequest(request, env)

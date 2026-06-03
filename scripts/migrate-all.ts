@@ -90,6 +90,7 @@ interface Args {
   audio: boolean
   force: boolean
   concurrency: number
+  eventsOnly: boolean
 }
 function parseArgs(): Args {
   const a = process.argv.slice(2)
@@ -107,6 +108,7 @@ function parseArgs(): Args {
     audio: a.includes("--audio"),
     force: a.includes("--force"),
     concurrency: val("--concurrency") ? Number(val("--concurrency")) : 8,
+    eventsOnly: a.includes("--events-only"),
   }
 }
 
@@ -181,6 +183,26 @@ async function getSettings(projectId: string): Promise<Record<string, unknown>> 
   return ((await res.json()) as { settings?: Record<string, unknown> }).settings ?? {}
 }
 
+// Delta-sync: the set of event ids already in D1 for a project (paginated by
+// server_seq). We ingest only the events whose deterministic id is NOT present,
+// so re-syncs / partial completions send just the delta instead of the firehose.
+async function fetchExistingEventIds(projectId: string): Promise<Set<string>> {
+  const existing = new Set<string>()
+  let after = 0
+  for (;;) {
+    const res = await fetch(
+      `${SYNC}/migrate/event-ids?projectId=${encodeURIComponent(projectId)}&after=${after}&limit=50000`,
+      { headers: authHeaders() },
+    )
+    if (!res.ok) throw new Error(`event-ids HTTP ${res.status}: ${(await res.text()).slice(0, 200)}`)
+    const page = (await res.json()) as { ids: string[]; lastSeq: number; more: boolean }
+    for (const id of page.ids) existing.add(id)
+    if (!page.more) break
+    after = page.lastSeq
+  }
+  return existing
+}
+
 // ── group tree → namespace placement ───────────────────────────────────────
 interface Placement {
   orgLegacyUuid: string
@@ -246,14 +268,14 @@ async function fetchProject(gitlabId: number, noLfs: boolean): Promise<string> {
   return m[1].trim()
 }
 
-async function ingest(projectId: string, events: IngestEvent[]): Promise<void> {
+async function ingest(projectId: string, events: IngestEvent[], eventsOnly = false): Promise<void> {
   const secret = process.env.SYNC_SECRET_KEY
   if (!secret) throw new Error("SYNC_SECRET_KEY not set (load .env: `set -a; . ./.env; set +a`)")
   for (let i = 0; i < events.length; i += INGEST_CHUNK) {
     const res = await fetch(`${SYNC}/migrate/ingest`, {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${secret}` },
-      body: JSON.stringify({ projectId, events: events.slice(i, i + INGEST_CHUNK) }),
+      body: JSON.stringify({ projectId, events: events.slice(i, i + INGEST_CHUNK), eventsOnly }),
     })
     if (!res.ok) throw new Error(`ingest HTTP ${res.status}: ${(await res.text()).slice(0, 300)}`)
   }
@@ -350,14 +372,23 @@ async function doProject(
     ownerUserId: org.owner_user_id,
     teamId: team?.id ?? null,
   })
-  await ingest(projectId, events)
+  // Delta-sync: send only events not already in D1 (no-op for a fresh project,
+  // a tiny tail for a partially-imported one, a few edits on a re-sync).
+  const existing = await fetchExistingEventIds(projectId)
+  const newEvents = existing.size ? events.filter((e) => !existing.has(e.id)) : events
+  if (existing.size) {
+    console.log(`  ↳ delta: ${newEvents.length} new / ${events.length} total (${existing.size} already in D1)`)
+  }
+  await ingest(projectId, newEvents, args.eventsOnly)
   let voices = 0
-  try {
-    voices = await applyCast(projectId, pairs)
-  } catch (e) {
-    // Large casts exceed D1's 100KB inline-statement limit; cast is a separate
-    // parameterized pass. Never let it fail the (already-landed) content.
-    console.warn(`  ! cast deferred (${e instanceof Error ? e.message.split("\n")[0] : String(e)})`)
+  if (!args.eventsOnly) {
+    try {
+      voices = await applyCast(projectId, pairs)
+    } catch (e) {
+      // Large casts exceed D1's 100KB inline-statement limit; cast is a separate
+      // parameterized pass. Never let it fail the (already-landed) content.
+      console.warn(`  ! cast deferred (${e instanceof Error ? e.message.split("\n")[0] : String(e)})`)
+    }
   }
   console.log(
     `  ✓ project + ${team ? "team grant + " : ""}content${voices ? ` + cast(${voices})` : " (cast deferred)"}`,

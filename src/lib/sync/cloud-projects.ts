@@ -13,6 +13,8 @@ export interface CloudFileSummary {
   name: string
   type: string
   cellCount: number
+  /** Timeline-segment-model order lens ('time' | 'sequence'); absent ⇒ sequence. */
+  orderedBy?: string
 }
 
 export interface CloudProjectSummary {
@@ -155,6 +157,7 @@ export function minimalProjectRecord(summary: CloudProjectSummary): ProjectRecor
       type: f.type as FileType,
       createdAt: now,
       cellCount: f.cellCount,
+      ...(f.orderedBy === "time" || f.orderedBy === "sequence" ? { orderedBy: f.orderedBy } : {}),
     })),
     members: [],
     syncRole: {

@@ -44,6 +44,9 @@ interface FileSummary {
   eventId: string
   sourceLanguage: string | null
   targetLanguage: string | null
+  /** Timeline-segment-model order lens, read from meta. Null ⇒ client treats
+   *  it as 'sequence'. */
+  orderedBy: string | null
   cellCount: number
   approvedCount: number
   wordCount: number
@@ -51,7 +54,7 @@ interface FileSummary {
 }
 
 function mapRow(row: FileRowRaw): FileSummary {
-  let meta: { source_language?: string; target_language?: string } = {}
+  let meta: { source_language?: string; target_language?: string; orderedBy?: string } = {}
   try {
     meta = row.meta ? JSON.parse(row.meta) : {}
   } catch {
@@ -67,6 +70,7 @@ function mapRow(row: FileRowRaw): FileSummary {
     eventId: row.event_id,
     sourceLanguage: meta.source_language ?? null,
     targetLanguage: meta.target_language ?? null,
+    orderedBy: meta.orderedBy ?? null,
     cellCount: row.cell_count,
     approvedCount: row.approved_count,
     wordCount: row.word_count,

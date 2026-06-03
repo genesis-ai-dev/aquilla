@@ -414,6 +414,11 @@ export interface SourceCellCreateInput {
   metadata?: Record<string, unknown>
   startMs?: number
   endMs?: number
+  // Timeline-segment-model (Scope A) — segment metadata, set at create.
+  medium?: string
+  sequenceIndex?: number
+  transcription?: string
+  cameraState?: string
   /** Authorship — the admin/importer-bot user. */
   author: string
   clientTs?: number
@@ -445,6 +450,10 @@ export async function emitSourceCellCreate(
       ...(input.metadata !== undefined ? { metadata: input.metadata } : {}),
       ...(input.startMs !== undefined ? { startMs: input.startMs } : {}),
       ...(input.endMs !== undefined ? { endMs: input.endMs } : {}),
+      ...(input.medium !== undefined ? { medium: input.medium } : {}),
+      ...(input.sequenceIndex !== undefined ? { sequenceIndex: input.sequenceIndex } : {}),
+      ...(input.transcription !== undefined ? { transcription: input.transcription } : {}),
+      ...(input.cameraState !== undefined ? { cameraState: input.cameraState } : {}),
     },
     clientTs: input.clientTs,
   })
@@ -458,6 +467,8 @@ export interface FileCreateInput {
   fileType: string
   sourceLanguage?: string
   targetLanguage?: string
+  /** Timeline-segment-model order lens: 'time' | 'sequence'. */
+  orderedBy?: string
   author: string
   clientTs?: number
 }
@@ -478,6 +489,7 @@ export async function emitFileCreate(input: FileCreateInput): Promise<string> {
       fileType: input.fileType,
       ...(input.sourceLanguage !== undefined ? { sourceLanguage: input.sourceLanguage } : {}),
       ...(input.targetLanguage !== undefined ? { targetLanguage: input.targetLanguage } : {}),
+      ...(input.orderedBy !== undefined ? { orderedBy: input.orderedBy } : {}),
     },
     clientTs: input.clientTs,
   })

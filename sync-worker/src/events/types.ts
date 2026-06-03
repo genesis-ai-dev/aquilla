@@ -88,6 +88,11 @@ export interface EventPayloads {
     metadata?: Record<string, unknown>
     startMs?: number
     endMs?: number
+    // Timeline-segment-model (Scope A) — set at create, not overwritten later.
+    medium?: string
+    sequenceIndex?: number
+    transcription?: string
+    cameraState?: string
   }
   'source.cell.commit': {
     value: string
@@ -107,6 +112,11 @@ export interface EventPayloads {
     type?: string
     startMs?: number
     endMs?: number
+    // Timeline-segment-model (Scope A) — set at create, not overwritten later.
+    medium?: string
+    sequenceIndex?: number
+    transcription?: string
+    cameraState?: string
   }
   'target.cell.commit': {
     value: string
@@ -182,6 +192,9 @@ export interface EventPayloads {
     /** ISO codes; null/undefined when unknown at import time. */
     sourceLanguage?: string
     targetLanguage?: string
+    /** Timeline-segment-model: order lens — 'time' | 'sequence'. Stored in
+     *  files.meta (JSON). Absent ⇒ client treats as 'sequence'. */
+    orderedBy?: string
   }
   // Rename a file's display label. Non-chain-mutating; parentId omitted.
   // (Corpus/grouping marker is not server-backed yet — name only.)

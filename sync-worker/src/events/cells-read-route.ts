@@ -48,6 +48,10 @@ interface CellRowRaw {
   endorsement_count: number
   start_ms: number | null
   end_ms: number | null
+  medium: string | null
+  sequence_index: number | null
+  transcription: string | null
+  camera_state: string | null
 }
 
 interface CellRowOut {
@@ -67,6 +71,10 @@ interface CellRowOut {
   endorsementCount: number
   startMs: number | null
   endMs: number | null
+  medium: string | null
+  sequenceIndex: number | null
+  transcription: string | null
+  cameraState: string | null
 }
 
 function mapRow(row: CellRowRaw): CellRowOut {
@@ -87,6 +95,10 @@ function mapRow(row: CellRowRaw): CellRowOut {
     endorsementCount: row.endorsement_count ?? 0,
     startMs: row.start_ms,
     endMs: row.end_ms,
+    medium: row.medium,
+    sequenceIndex: row.sequence_index,
+    transcription: row.transcription,
+    cameraState: row.camera_state,
   }
 }
 
@@ -252,7 +264,8 @@ export async function handleCellsReadRequest(
   const columns =
     "cell_id, side, value, value_html, type, canonical_ref, anchor_cell_id, " +
     "event_id, source_event_id, last_editor, last_edit_at, validated, word_count, " +
-    "endorsement_count, start_ms, end_ms"
+    "endorsement_count, start_ms, end_ms, " +
+    "medium, sequence_index, transcription, camera_state"
 
   // Per-cell fast path: when `cellIds=a,b,c` is present we skip chain walking
   // and just return matching rows. Used by the WS-triggered single-cell

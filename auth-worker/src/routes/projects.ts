@@ -66,6 +66,9 @@ interface FileProjection {
   name: string
   type: string
   cellCount: number
+  /** Timeline-segment-model order lens, read from files.meta. Omitted when
+   *  unset → client treats as 'sequence'. */
+  orderedBy?: string
 }
 
 /**
@@ -81,7 +84,7 @@ async function loadFilesByProject(
 
   const placeholders = projectIds.map(() => "?").join(",")
   const rows = await env.AQUILLA_DB.prepare(
-    `SELECT id, project_id, name, kind, role, cell_count
+    `SELECT id, project_id, name, kind, role, cell_count, meta
        FROM files
       WHERE project_id IN (${placeholders})
       ORDER BY name COLLATE NOCASE`,
@@ -94,16 +97,28 @@ async function loadFilesByProject(
       kind: string | null
       role: string | null
       cell_count: number | null
+      meta: string | null
     }>()
 
   for (const f of rows.results ?? []) {
     const list = byProject.get(f.project_id) ?? []
+    // Timeline-segment-model: order lens lives in meta (JSON), same as langs.
+    let orderedBy: string | undefined
+    if (f.meta) {
+      try {
+        const m = JSON.parse(f.meta) as { orderedBy?: string }
+        if (m.orderedBy) orderedBy = m.orderedBy
+      } catch {
+        // malformed meta → leave orderedBy unset (client defaults to sequence)
+      }
+    }
     list.push({
       id: f.id,
       name: f.name,
       // `file_type` collapsed into role + kind (0012); derive a compatible value.
       type: f.kind ?? f.role ?? "codex",
       cellCount: f.cell_count ?? 0,
+      ...(orderedBy ? { orderedBy } : {}),
     })
     byProject.set(f.project_id, list)
   }

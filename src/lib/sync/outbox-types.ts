@@ -80,6 +80,11 @@ export interface OutboxEventPayloads {
     metadata?: Record<string, unknown>
     startMs?: number
     endMs?: number
+    // Timeline-segment-model (Scope A).
+    medium?: string
+    sequenceIndex?: number
+    transcription?: string
+    cameraState?: string
   }
   "source.cell.commit": {
     value: string
@@ -169,6 +174,8 @@ export interface OutboxEventPayloads {
     fileType: string
     sourceLanguage?: string
     targetLanguage?: string
+    /** Timeline-segment-model order lens: 'time' | 'sequence'. */
+    orderedBy?: string
   }
   // Rename a file's display label. Non-chain-mutating (parentId omitted).
   // Mirrors sync-worker/src/events/types.ts. (Corpus/grouping marker is not

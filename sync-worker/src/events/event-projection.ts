@@ -197,6 +197,13 @@ export function buildEventProjectionStmts(
       const wordCount = countWords(value)
       const startMs = p.startMs ?? null
       const endMs = p.endMs ?? null
+      // Timeline-segment-model (Scope A): segment metadata is set at create
+      // time (by import or a media-segment add) and, like start_ms/end_ms, is
+      // not overwritten by later target commits.
+      const medium = p.medium ?? null
+      const sequenceIndex = p.sequenceIndex ?? null
+      const transcription = p.transcription ?? null
+      const cameraState = p.cameraState ?? null
 
       // Both create kinds are genesis events on the cell's chain — their
       // event_id IS the new row's chain head. source_event_id is null on
@@ -214,8 +221,9 @@ export function buildEventProjectionStmts(
               project_id, file_id, cell_id, side, value, value_html, type,
               canonical_ref, anchor_cell_id, event_id, source_event_id,
               last_editor, last_edit_at, validated, word_count, content_hash,
-              start_ms, end_ms
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, 0, ?, ?, ?, ?)
+              start_ms, end_ms,
+              medium, sequence_index, transcription, camera_state
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(project_id, file_id, cell_id, side) DO UPDATE SET
               side           = excluded.side,
               value          = excluded.value,
@@ -230,7 +238,11 @@ export function buildEventProjectionStmts(
               word_count     = excluded.word_count,
               content_hash   = excluded.content_hash,
               start_ms       = excluded.start_ms,
-              end_ms         = excluded.end_ms`,
+              end_ms         = excluded.end_ms,
+              medium         = excluded.medium,
+              sequence_index = excluded.sequence_index,
+              transcription  = excluded.transcription,
+              camera_state   = excluded.camera_state`,
           )
           .bind(
             event.projectId,
@@ -249,6 +261,10 @@ export function buildEventProjectionStmts(
             hash,
             startMs,
             endMs,
+            medium,
+            sequenceIndex,
+            transcription,
+            cameraState,
           ),
       )
 
@@ -718,6 +734,9 @@ case 'cell.audio.attach': {
       const langMeta: Record<string, string> = {}
       if (p.sourceLanguage) langMeta.sourceLanguage = p.sourceLanguage
       if (p.targetLanguage) langMeta.targetLanguage = p.targetLanguage
+      // Timeline-segment-model: the file's order lens lives in meta (JSON),
+      // alongside languages — no files-table column needed.
+      if (p.orderedBy) langMeta.orderedBy = p.orderedBy
       stmts.push(
         db
           .prepare(

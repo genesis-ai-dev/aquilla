@@ -13,10 +13,10 @@ a focused commit, and the checkbox ticked. Keep changes additive and surgical.
 - [x] Ordering scheme decided: **fractional `sequenceIndex`** (insert = midpoint of neighbors). Implemented in Step 2's `derive.ts`.
 - [x] Typecheck (tsc -b) clean. Commit.
 
-## Step 2 — Read path + derived helpers
-- [ ] In `useCells.buildCellData`, map new `CellRow` fields onto `CellData`.
-- [ ] New pure module `src/lib/timeline/derive.ts`: `timelineBounds(cells)`, `overlapsOf(cell, cells)`, `sortByLens(cells, orderedBy)`. Unit tests for each.
-- [ ] Typecheck + tests. Commit.
+## Step 2 — Read path + derived helpers  ✅
+- [x] `useCells.buildCellData` maps the new `CellRow` fields onto `CellData` (done in Step 1).
+- [x] New pure module `src/lib/timeline/derive.ts`: `timelineBounds`, `overlapsOf`, `sortByLens`, `hasTiming`, `rangesOverlap`, `sequenceBetween`. 15 unit tests, all green.
+- [x] Typecheck + tests clean. Commit.
 
 ## Step 3 — Lens toggle + media layer + file icons
 - [ ] Gate the editor text/audio toggle on `orderedBy === 'time'`; make it a `medium` layer switch (text segments vs media segments).

@@ -139,7 +139,7 @@ zero between jobs. $5k credits is effectively unlimited for this workload.
     artifact, NOT a pipeline issue. Validate future changes on real human audio.
   - The optional `num_speakers` hint is worth surfacing in the UI (helps when
     the user knows the count).
-- M2 — D1 migration `0027` + sync-worker start/callback/status endpoints.
-- M3 — client "Diarize" action + poll + apply (turnsToSegments → cells + cast).
-- M4 — verify end-to-end in the running app with a REAL multi-speaker clip.
-- Cleanup — remove wasm loader + resampler (dead since the pivot).
+- **M2 ✅** — migration `0027_diarization_jobs` + sync-worker `/api/v1/diarization/{start,status,audio,callback}` (async, callback, token-gated audio fetch). tsc clean.
+- **M3 ✅** — `emitSourceCellDelete` + `run-diarization.ts` (start→poll→apply: replace media cells with per-turn `medium:'media'` cells + "Speaker N" cast) + ProjectWorkspace "Diarize" button. tsc clean; tests green.
+- **M4 — verify end-to-end** (next). REQUIRES the worker publicly reachable (Modal callback + audio fetch): deploy the sync-worker (secrets now set) or run a `cloudflared` tunnel for local dev, set `DIARIZATION_PUBLIC_BASE` accordingly, then drive a real multi-speaker clip in the app.
+- Cleanup — remove wasm loader + `resampleToMono16k` (dead since the pivot).

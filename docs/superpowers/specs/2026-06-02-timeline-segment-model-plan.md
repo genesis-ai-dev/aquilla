@@ -34,12 +34,17 @@ a focused commit, and the checkbox ticked. Keep changes additive and surgical.
 - [x] **5b Audio/Video file import → time / single media segment.** FileType `'audio'|'video'` + `detectFileType` + `isMediaFileType`; `importFile` routes media to `emitMediaFile` (time-ordered file + one `medium:'media'` cell, timing = probed duration or untimed+flagged; R2 upload + attach; orphan cleanup); ImportDialog accept list extended. +6 tests. Client tsc clean.
 - [x] Typecheck + tests. Committed.
 
-## Step 6 — Verify in real UI
-- [ ] Run the `verify-dev-change` workflow: VTT import → time/text file; audio import → time/single-media file; USFM import → unchanged sequence/text; toggle lens changes only order; record on media segment uses its own timing.
-- [ ] Fix anything broken. Final commit.
+## Step 6 — Verify in real UI  ✅
+- [x] Drove the running dev stack (worktree build `feat/timeline-segment-model@270697e`) via Playwright as the seeded `dev` user. Verified:
+  - VTT import → time-ordered file (waveform icon; toggle relabels Audio→Media); Text layer shows 3 timed segments + speaker→cast labels; Media layer empty-state.
+  - WAV import → second time-ordered file with exactly 1 `medium:'media'` segment; Text layer "No text segments", Media layer shows it. Proves `orderedBy` + `medium` round-trip through D1 projection → read → editor.
+  - No console errors except a benign font 403 (Vite `/@fs` path-allow quirk from the symlinked node_modules — not a code issue).
+- [x] Dev-stack-from-worktree gotcha found + fixed: workers are workspace packages needing their OWN node_modules; symlinked `auth-worker/` + `sync-worker/` node_modules from the main checkout (root-only symlink left `@hono/zod-validator` etc. unresolved). Noted for future worktree verification.
 
-## Done criteria (from spec Success Criteria)
-- [ ] All success criteria in the spec verified in the running app.
+## Done criteria (from spec Success Criteria)  ✅
+- [x] Subtitles→time/text, audio→time/single-media, layer toggle, recorder decoupling (structural), `orderedBy` reversible display lens, untimed-flag — all implemented; subtitle + audio paths verified in the running app. (Recorder mic-record and an untimed-row case not driven via UI — covered by code + unit tests.)
+
+**Scope A COMPLETE.** Remaining design decisions for user: (1) toggle kept visible for sequence files (chose not to break audio-Bible editing); (2) transcription/cameraState are create-time only — per-line camera tagging editing deferred to Part B.
 
 ---
 

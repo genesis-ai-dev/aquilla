@@ -174,6 +174,7 @@ export function buildEventProjectionStmts(
   db: D1Database,
   event: PersistedEvent,
   stmts: D1PreparedStatement[],
+  opts?: { deferFileCounters?: boolean },
 ): ProjectionTouches[] {
   switch (event.kind) {
     case 'source.cell.create':
@@ -276,7 +277,8 @@ export function buildEventProjectionStmts(
       // row reflects the post-create/update state.
       stmts.push(ftsInsertStmt(db, event.projectId, event.fileId, cellId, side))
 
-      stmts.push(fileCountersRecomputeStmt(db, event.projectId, event.fileId, event.serverTs))
+      if (!opts?.deferFileCounters)
+        stmts.push(fileCountersRecomputeStmt(db, event.projectId, event.fileId, event.serverTs))
       return ['cells', 'files']
     }
 
@@ -389,7 +391,8 @@ export function buildEventProjectionStmts(
       // the cells row has been updated/upserted.
       stmts.push(ftsInsertStmt(db, event.projectId, event.fileId, event.cellId, commitSide))
 
-      stmts.push(fileCountersRecomputeStmt(db, event.projectId, event.fileId, event.serverTs))
+      if (!opts?.deferFileCounters)
+        stmts.push(fileCountersRecomputeStmt(db, event.projectId, event.fileId, event.serverTs))
       return ['cells', 'files']
     }
 
@@ -415,7 +418,8 @@ export function buildEventProjectionStmts(
           )
           .bind(event.projectId, event.fileId, event.cellId, side),
       )
-      stmts.push(fileCountersRecomputeStmt(db, event.projectId, event.fileId, event.serverTs))
+      if (!opts?.deferFileCounters)
+        stmts.push(fileCountersRecomputeStmt(db, event.projectId, event.fileId, event.serverTs))
       return ['cells', 'files']
     }
 
@@ -447,7 +451,8 @@ export function buildEventProjectionStmts(
             side,
           ),
       )
-      stmts.push(fileCountersRecomputeStmt(db, event.projectId, event.fileId, event.serverTs))
+      if (!opts?.deferFileCounters)
+        stmts.push(fileCountersRecomputeStmt(db, event.projectId, event.fileId, event.serverTs))
       return ['cells', 'files']
     }
 
@@ -571,7 +576,8 @@ export function buildEventProjectionStmts(
             event.cellId,
           ),
       )
-      stmts.push(fileCountersRecomputeStmt(db, event.projectId, event.fileId, event.serverTs))
+      if (!opts?.deferFileCounters)
+        stmts.push(fileCountersRecomputeStmt(db, event.projectId, event.fileId, event.serverTs))
       return ['cell_validators', 'cells', 'files']
     }
 

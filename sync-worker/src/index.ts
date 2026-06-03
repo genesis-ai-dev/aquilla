@@ -24,6 +24,7 @@ import { handleMigrateIngestRequest } from "./events/migrate-ingest-route"
 import { handleMigrateSettingsRequest } from "./events/migrate-settings-route"
 import { handleMigrateProjectRequest } from "./events/migrate-project-route"
 import { handleMigrateEventIdsRequest } from "./events/migrate-event-ids-route"
+import { handleMigrateFinalizeRequest } from "./events/migrate-finalize-route"
 import { handleMigrateAudioRequest } from "./events/migrate-audio-route"
 import { handleExportSourceRequest } from "./events/export-route"
 import { handleExportBundleRequest } from "./events/export-bundle-route"
@@ -177,6 +178,8 @@ export default {
     if (migrateProjectResponse) return migrateProjectResponse
     const migrateEventIdsResponse = await handleMigrateEventIdsRequest(request, env)
     if (migrateEventIdsResponse) return migrateEventIdsResponse
+    const migrateFinalizeResponse = await handleMigrateFinalizeRequest(request, env)
+    if (migrateFinalizeResponse) return migrateFinalizeResponse
     const migrateAudioResponse = await handleMigrateAudioRequest(request, env)
     if (migrateAudioResponse) return migrateAudioResponse
     const exportSourceResponse = await handleExportSourceRequest(request, env)

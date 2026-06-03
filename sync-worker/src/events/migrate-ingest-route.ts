@@ -60,6 +60,11 @@ interface MigrateIngestBody {
    *  then derive cells/files/validators/etc. in one efficient per-project rebuild.
    *  Safe only while the project has no live readers (migration window). */
   eventsOnly?: boolean
+  /** When true, skip the per-cell file-counter recompute (cell_count, word_count,
+   *  etc.) — an O(N²)-per-file UPDATE that the profiler showed was ~67% of all
+   *  migration query time. The CLI calls POST /migrate/finalize once per project
+   *  afterward to recompute every file's counters set-based (O(total cells)). */
+  deferFileCounters?: boolean
 }
 
 function isMigrateIngestBody(x: unknown): x is MigrateIngestBody {
@@ -124,6 +129,7 @@ export async function handleMigrateIngestRequest(
   // ordering); it is NOT part of any deterministic id.
   let serverTs = Date.now()
   const eventsOnly = body.eventsOnly === true
+  const deferFileCounters = body.deferFileCounters === true
   const stmts: D1PreparedStatement[] = []
 
   for (const e of body.events) {
@@ -163,7 +169,7 @@ export async function handleMigrateIngestRequest(
     )
     if (!eventsOnly) {
       try {
-        buildEventProjectionStmts(db, event, stmts)
+        buildEventProjectionStmts(db, event, stmts, { deferFileCounters })
       } catch (err) {
         // Unknown kind or malformed payload — surface the offending event so the
         // CLI can pinpoint it rather than failing the whole batch opaquely.

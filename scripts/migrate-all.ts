@@ -203,6 +203,18 @@ async function fetchExistingEventIds(projectId: string): Promise<Set<string>> {
   return existing
 }
 
+// Recompute every file's rollup counters once per project (set-based), since the
+// ingest deferred the per-cell recompute. Must run AFTER all of a project's
+// events are ingested.
+async function finalizeCounters(projectId: string): Promise<void> {
+  const res = await fetch(`${SYNC}/migrate/finalize`, {
+    method: "POST",
+    headers: authHeaders(),
+    body: JSON.stringify({ projectId }),
+  })
+  if (!res.ok) throw new Error(`finalize HTTP ${res.status}: ${(await res.text()).slice(0, 200)}`)
+}
+
 // ── group tree → namespace placement ───────────────────────────────────────
 interface Placement {
   orgLegacyUuid: string
@@ -275,7 +287,14 @@ async function ingest(projectId: string, events: IngestEvent[], eventsOnly = fal
     const res = await fetch(`${SYNC}/migrate/ingest`, {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${secret}` },
-      body: JSON.stringify({ projectId, events: events.slice(i, i + INGEST_CHUNK), eventsOnly }),
+      body: JSON.stringify({
+        projectId,
+        events: events.slice(i, i + INGEST_CHUNK),
+        eventsOnly,
+        // Skip the O(N²) per-cell file-counter recompute; finalizeCounters() runs
+        // it once per project after ingest (the single biggest throughput win).
+        deferFileCounters: true,
+      }),
     })
     if (!res.ok) throw new Error(`ingest HTTP ${res.status}: ${(await res.text()).slice(0, 300)}`)
   }
@@ -380,6 +399,8 @@ async function doProject(
     console.log(`  ↳ delta: ${newEvents.length} new / ${events.length} total (${existing.size} already in D1)`)
   }
   await ingest(projectId, newEvents, args.eventsOnly)
+  // Deferred file-counters: recompute them once now that all cells are projected.
+  if (!args.eventsOnly) await finalizeCounters(projectId)
   let voices = 0
   if (!args.eventsOnly) {
     try {

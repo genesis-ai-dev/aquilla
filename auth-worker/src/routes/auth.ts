@@ -290,8 +290,9 @@ auth.post(
       const token = crypto.randomUUID()
       const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000)
       await c.env.AQUILLA_DB.prepare(
-        `INSERT OR REPLACE INTO password_reset_tokens (user_id, token, expires_at)
-         VALUES (?, ?, ?)`,
+        `INSERT INTO password_reset_tokens (user_id, token, expires_at)
+         VALUES (?, ?, ?)
+         ON CONFLICT (token) DO UPDATE SET user_id = excluded.user_id, expires_at = excluded.expires_at`,
       )
         .bind(user.id, token, expiresAt.toISOString())
         .run()

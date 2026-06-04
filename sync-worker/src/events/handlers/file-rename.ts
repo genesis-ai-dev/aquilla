@@ -29,12 +29,13 @@ export function handleFileRename(
   // server_seq is derived atomically inside the INSERT — see file-create.ts.
   const eventInsert = db
     .prepare(
-      `INSERT OR IGNORE INTO events (
+      `INSERT INTO events (
         id, schema_version, project_id, file_id, cell_id, parent_id, kind,
         author, payload, client_ts, server_ts, server_seq
       )
       SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-             COALESCE((SELECT MAX(server_seq) FROM events WHERE project_id = ?), 0) + 1`,
+             COALESCE((SELECT MAX(server_seq) FROM events WHERE project_id = ?), 0) + 1
+        ON CONFLICT DO NOTHING`,
     )
     .bind(
       event.id,
@@ -57,7 +58,7 @@ export function handleFileRename(
   const fileUpdate = db
     .prepare(
       `UPDATE files
-          SET name = ?, event_id = ?, updated_at = unixepoch('now') * 1000
+          SET name = ?, event_id = ?, updated_at = (extract(epoch from now()) * 1000)::bigint
         WHERE id = ? AND project_id = ?`,
     )
     .bind(event.payload.name, event.id, event.fileId, event.projectId)

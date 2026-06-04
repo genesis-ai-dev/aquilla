@@ -77,12 +77,13 @@ function isMigrateIngestBody(x: unknown): x is MigrateIngestBody {
 // subquery picks the next free per-project seq inside the statement, so
 // sequential batches never collide and INSERT OR IGNORE leaves no seq gap on
 // replays (the row is dropped before the seq is consumed).
-const EVENT_INSERT_SQL = `INSERT OR IGNORE INTO events (
+const EVENT_INSERT_SQL = `INSERT INTO events (
   id, schema_version, project_id, file_id, cell_id, parent_id, kind,
   author, payload, client_ts, server_ts, server_seq
 )
 SELECT ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-       COALESCE((SELECT MAX(server_seq) FROM events WHERE project_id = ?), 0) + 1`
+       COALESCE((SELECT MAX(server_seq) FROM events WHERE project_id = ?), 0) + 1
+        ON CONFLICT DO NOTHING`
 
 const INGEST_PATH = '/migrate/ingest'
 

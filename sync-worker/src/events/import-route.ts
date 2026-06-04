@@ -104,12 +104,13 @@ function isImportBody(x: unknown): x is ImportBody {
 // sequentially in a transaction, so statement N's subquery sees statement
 // N-1's row. INSERT OR IGNORE still skips id-replays (the subquery is
 // evaluated but the row is dropped, so no seq gap leaks).
-const EVENT_INSERT_SQL = `INSERT OR IGNORE INTO events (
+const EVENT_INSERT_SQL = `INSERT INTO events (
   id, schema_version, project_id, file_id, cell_id, parent_id, kind,
   author, payload, client_ts, server_ts, server_seq
 )
 SELECT ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-       COALESCE((SELECT MAX(server_seq) FROM events WHERE project_id = ?), 0) + 1`
+       COALESCE((SELECT MAX(server_seq) FROM events WHERE project_id = ?), 0) + 1
+        ON CONFLICT DO NOTHING`
 
 /** Append the canonical events-row INSERT for one persisted event, mirroring
  *  handlers/cell-events.ts so bulk-import rows match dispatcher rows exactly. */

@@ -38,12 +38,13 @@ export function handleAssignmentEvent(
   // same shape as comment-events.ts / cell-events.ts.
   const eventInsert = db
     .prepare(
-      `INSERT OR IGNORE INTO events (
+      `INSERT INTO events (
         id, schema_version, project_id, file_id, cell_id, parent_id, kind,
         author, payload, client_ts, server_ts, server_seq
       )
       SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-             COALESCE((SELECT MAX(server_seq) FROM events WHERE project_id = ?), 0) + 1`,
+             COALESCE((SELECT MAX(server_seq) FROM events WHERE project_id = ?), 0) + 1
+        ON CONFLICT DO NOTHING`,
     )
     .bind(
       event.id,
@@ -71,10 +72,11 @@ export function handleAssignmentEvent(
     stmts.push(
       db
         .prepare(
-          `INSERT OR IGNORE INTO assignments (
+          `INSERT INTO assignments (
             assignment_id, project_id, assignee_user_id, scope_kind, scope_label,
             cells_total, deadline, note, created_by, created_at
-          ) VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?, ?)`,
+          ) VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?, ?)
+          ON CONFLICT DO NOTHING`,
         )
         .bind(
           p.assignmentId,
@@ -100,9 +102,10 @@ export function handleAssignmentEvent(
         stmts.push(
           db
             .prepare(
-              `INSERT OR IGNORE INTO assignment_cells (assignment_id, file_id, cell_id)
+              `INSERT INTO assignment_cells (assignment_id, file_id, cell_id)
                SELECT ?, file_id, cell_id FROM cells
-               WHERE project_id = ? AND file_id = ? AND side = 'source' AND canonical_ref LIKE ?`,
+               WHERE project_id = ? AND file_id = ? AND side = 'source' AND canonical_ref LIKE ?
+               ON CONFLICT DO NOTHING`,
             )
             .bind(p.assignmentId, event.projectId, entry.fileId, `${entry.chapter}:%`),
         )
@@ -110,9 +113,10 @@ export function handleAssignmentEvent(
         stmts.push(
           db
             .prepare(
-              `INSERT OR IGNORE INTO assignment_cells (assignment_id, file_id, cell_id)
+              `INSERT INTO assignment_cells (assignment_id, file_id, cell_id)
                SELECT ?, file_id, cell_id FROM cells
-               WHERE project_id = ? AND file_id = ? AND side = 'source'`,
+               WHERE project_id = ? AND file_id = ? AND side = 'source'
+               ON CONFLICT DO NOTHING`,
             )
             .bind(p.assignmentId, event.projectId, entry.fileId),
         )

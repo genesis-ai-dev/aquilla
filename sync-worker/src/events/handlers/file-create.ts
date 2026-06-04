@@ -25,12 +25,13 @@ export function handleFileCreate(
   // server_seq is derived atomically inside the INSERT — see import-route.ts.
   const eventInsert = db
     .prepare(
-      `INSERT OR IGNORE INTO events (
+      `INSERT INTO events (
         id, schema_version, project_id, file_id, cell_id, parent_id, kind,
         author, payload, client_ts, server_ts, server_seq
       )
       SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-             COALESCE((SELECT MAX(server_seq) FROM events WHERE project_id = ?), 0) + 1`,
+             COALESCE((SELECT MAX(server_seq) FROM events WHERE project_id = ?), 0) + 1
+        ON CONFLICT DO NOTHING`,
     )
     .bind(
       event.id,
@@ -70,7 +71,7 @@ export function handleFileCreate(
         NULL, ?, NULL, NULL, NULL,
         ?,
         0, 0, 0, NULL,
-        ?, unixepoch('now') * 1000, unixepoch('now') * 1000,
+        ?, (extract(epoch from now()) * 1000)::bigint, (extract(epoch from now()) * 1000)::bigint,
         ?
       )
       ON CONFLICT(id) DO UPDATE SET
@@ -78,7 +79,7 @@ export function handleFileCreate(
         kind = excluded.kind,
         event_id = excluded.event_id,
         meta = excluded.meta,
-        updated_at = unixepoch('now') * 1000`,
+        updated_at = (extract(epoch from now()) * 1000)::bigint`,
     )
     .bind(
       event.fileId,

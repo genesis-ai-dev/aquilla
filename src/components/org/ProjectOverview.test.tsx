@@ -42,6 +42,15 @@ vi.mock("@/lib/sync/export-bundle", () => ({
   downloadProjectBundle: (...a: unknown[]) => downloadProjectBundle(...a),
 }))
 
+const fetchSyncToken = vi.fn()
+vi.mock("@/lib/sync/sync-token", () => ({
+  fetchSyncToken: (...a: unknown[]) => fetchSyncToken(...a),
+}))
+const fetchProjectFiles = vi.fn()
+vi.mock("@/lib/sync/cells-read", () => ({
+  fetchProjectFiles: (...a: unknown[]) => fetchProjectFiles(...a),
+}))
+
 function projectRecord(over: Partial<ProjectRecord> & { level: number; deletedAt?: string }): ProjectRecord {
   const { level, deletedAt, ...rest } = over
   return {
@@ -70,6 +79,46 @@ function renderOverview() {
 
 beforeEach(() => localStorage.clear())
 afterEach(() => vi.clearAllMocks())
+
+/** Build a FileSummary stub for testing the file list. */
+function fileSummary(i: number): import("@/lib/sync/cells-read").FileSummary {
+  return { fileId: `f${i}`, projectId: "p1", name: `File${i}.usfm`, fileType: "usfm", sourceLanguage: null, targetLanguage: null, cellCount: 10, filledCount: 5, approvedCount: 2, wordCount: 100, lastEditAt: null }
+}
+
+describe("ProjectOverview file list show-more", () => {
+  it("shows only the first 12 files when there are more than 12, then reveals all after clicking show-all", async () => {
+    // WHY: the file list was silently capped at 12 with no way to reach the rest (FRO-136).
+    // This asserts that all files become reachable via the show-more toggle.
+    const totalFiles = 16
+    const fileList = Array.from({ length: totalFiles }, (_, i) => fileSummary(i + 1))
+
+    fetchSyncToken.mockResolvedValue({ token: "tok" })
+    fetchProjectFiles.mockResolvedValue(fileList)
+
+    useProject.mockReturnValue({
+      project: projectRecord({ level: 400, files: fileList.map((f) => ({ id: f.fileId, name: f.name, type: "usfm", createdAt: "x", cellCount: f.cellCount })) }),
+      status: "ready",
+      refresh,
+    })
+
+    renderOverview()
+
+    // Wait for async file fetch to populate the list
+    await waitFor(() => expect(screen.queryByText(/top 12 of 16/)).toBeInTheDocument())
+
+    // Only 12 files should be visible initially
+    expect(screen.getAllByRole("listitem").length).toBe(12)
+
+    // Clicking show-more reveals all 16 files
+    const showMore = screen.getByRole("button", { name: /show all/i })
+    fireEvent.click(showMore)
+
+    await waitFor(() => expect(screen.getAllByRole("listitem").length).toBe(totalFiles))
+    // Header should now say "(16)" not "top 12 of 16"
+    expect(screen.queryByText(/top 12 of 16/)).not.toBeInTheDocument()
+    expect(screen.getByText(/\(16\)/)).toBeInTheDocument()
+  })
+})
 
 describe("ProjectOverview archive/restore", () => {
   it("owner sees Archive; clicking archives and returns to /projects", async () => {

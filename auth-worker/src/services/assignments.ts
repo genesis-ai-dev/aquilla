@@ -161,10 +161,10 @@ export async function getFileChapters(
   fileId: string,
 ): Promise<string[]> {
   const rows = await env.AQUILLA_DB.prepare(
-    `SELECT DISTINCT substr(canonical_ref, 1, instr(canonical_ref, ':') - 1) AS chapter
+    `SELECT DISTINCT substr(canonical_ref, 1, strpos(canonical_ref, ':') - 1) AS chapter
        FROM cells
       WHERE project_id = ? AND file_id = ? AND side = 'source'
-        AND canonical_ref IS NOT NULL AND instr(canonical_ref, ':') > 0`,
+        AND canonical_ref IS NOT NULL AND strpos(canonical_ref, ':') > 0`,
   )
     .bind(projectId, fileId)
     .all<{ chapter: string }>()

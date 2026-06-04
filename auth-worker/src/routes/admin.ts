@@ -50,7 +50,7 @@ admin.get("/overview", async (c) => {
     db.prepare("SELECT COUNT(*) AS n FROM projects WHERE archived_at IS NOT NULL").first<{ n: number }>(),
     db
       .prepare(
-        "SELECT COUNT(DISTINCT user_id) AS n FROM org_members WHERE last_active_at IS NOT NULL AND last_active_at >= datetime('now', '-7 days')",
+        "SELECT COUNT(DISTINCT user_id) AS n FROM org_members WHERE last_active_at IS NOT NULL AND last_active_at >= now() - interval '7 days'",
       )
       .first<{ n: number }>(),
   ])

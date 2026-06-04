@@ -87,7 +87,7 @@ async function loadFilesByProject(
     `SELECT id, project_id, name, kind, role, cell_count, meta
        FROM files
       WHERE project_id IN (${placeholders})
-      ORDER BY name COLLATE NOCASE`,
+      ORDER BY LOWER(name)`,
   )
     .bind(...projectIds)
     .all<{
@@ -282,7 +282,7 @@ projects.get("/", authMiddleware, async (c) => {
           OR (p.org_id IS NOT NULL AND om.user_id = ?)
         )
         AND (? IS NULL OR p.org_id = ?)
-      ORDER BY p.name COLLATE NOCASE`,
+      ORDER BY LOWER(p.name)`,
   )
     .bind(
       user.id, user.id, user.id, user.id,  // ?1-?4: CASE-when-creator

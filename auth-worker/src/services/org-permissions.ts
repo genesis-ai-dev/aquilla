@@ -175,7 +175,7 @@ export async function bumpOrgActivity(
           SET last_active_at = CURRENT_TIMESTAMP
         WHERE org_id = ? AND user_id = ?
           AND (last_active_at IS NULL
-               OR last_active_at < datetime('now', '-5 minutes'))`,
+               OR last_active_at < now() - interval '5 minutes')`,
     )
       .bind(orgId, userId)
       .run()
@@ -416,7 +416,7 @@ export async function listOrgGroups(
             EXISTS (SELECT 1 FROM group_members gm2 WHERE gm2.group_id = g.id AND gm2.user_id = ?) AS viewer_is_member
        FROM groups g
       WHERE g.org_id = ?
-      ORDER BY g.name COLLATE NOCASE`,
+      ORDER BY LOWER(g.name)`,
   )
     .bind(viewerId, orgId)
     .all<{ id: number; name: string; member_count: number; project_count: number; viewer_is_member: number }>()
@@ -456,7 +456,7 @@ export async function getOrgGroupDetail(
        JOIN users u ON u.id = gm.user_id
        LEFT JOIN org_members om ON om.org_id = ? AND om.user_id = gm.user_id
       WHERE gm.group_id = ?
-      ORDER BY u.username COLLATE NOCASE`,
+      ORDER BY LOWER(u.username)`,
   )
     .bind(orgId, groupId)
     .all<{ user_id: number; username: string; role_level: number | null }>()
@@ -466,7 +466,7 @@ export async function getOrgGroupDetail(
        FROM group_project_grants gpg
        JOIN projects p ON p.id = gpg.project_id
       WHERE gpg.group_id = ? AND p.org_id = ?
-      ORDER BY p.name COLLATE NOCASE`,
+      ORDER BY LOWER(p.name)`,
   )
     .bind(groupId, orgId)
     .all<{ id: string; name: string; granted: number }>()
@@ -586,7 +586,7 @@ export async function getOrgPortfolio(env: Env, orgId: number): Promise<Portfoli
        LEFT JOIN files f ON f.project_id = p.id
       WHERE p.org_id = ? AND p.archived_at IS NULL
       GROUP BY p.id, p.name
-      ORDER BY p.name COLLATE NOCASE`,
+      ORDER BY LOWER(p.name)`,
   ).bind(orgId).all<{ id: string; name: string; deadline_at: string | null; total_cells: number; validated_cells: number; filled_cells: number; last_edit_at: number | null; audio_cells: number; recorded_ms: number }>()
   return (rows.results ?? []).map((r) => ({
     id: r.id,

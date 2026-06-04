@@ -44,8 +44,8 @@ export async function searchUsersByPrefix(
 ): Promise<LookedUpUser[]> {
   const result = await env.AQUILLA_DB.prepare(
     `SELECT id, username FROM users
-      WHERE username LIKE ? || '%' COLLATE NOCASE
-      ORDER BY username COLLATE NOCASE ASC
+      WHERE LOWER(username) LIKE LOWER(?) || '%'
+      ORDER BY LOWER(username) ASC
       LIMIT ?`,
   )
     .bind(prefix, limit)

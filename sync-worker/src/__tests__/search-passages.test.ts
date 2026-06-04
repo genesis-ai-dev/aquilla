@@ -1,11 +1,12 @@
 import { describe, it, expect } from "vitest"
 import { handleSearchPassagesRequest } from "../events/search-route"
-import { makeInMemoryD1, type CellRow, type CellsFtsRow } from "./helpers/d1-fake"
+import { type CellRow, type CellsFtsRow } from "./helpers/d1-fake"
+import { makeTestDb } from "./helpers/pg-test-db"
 import { makeTestToken } from "./helpers/auth"
 
 const SECRET = "passages-secret"
 
-function envWith(db: ReturnType<typeof makeInMemoryD1>) {
+function envWith(db: D1Database) {
   return { AQUILLA_DB: db, SYNC_SECRET_KEY: SECRET }
 }
 
@@ -46,7 +47,7 @@ describe("GET /api/v1/projects/:projectId/search/passages", () => {
       { cell_id: "c1", side: "source", value: "In the beginning God created" },
       { cell_id: "c1", side: "target", value: "En el principio creó Dios" },
     ])
-    const db = makeInMemoryD1({ cells, cells_fts })
+    const { db } = await makeTestDb({ cells, cells_fts })
     const token = await makeTestToken(SECRET, { projectId: "proj-a", fileId: "any" })
     const req = new Request(
       "https://w/api/v1/projects/proj-a/search/passages?q=beginning",
@@ -68,7 +69,7 @@ describe("GET /api/v1/projects/:projectId/search/passages", () => {
     const { cells, cells_fts } = makeSeedData([
       { cell_id: "c2", side: "source", value: "Earth was without form" },
     ])
-    const db = makeInMemoryD1({ cells, cells_fts })
+    const { db } = await makeTestDb({ cells, cells_fts })
     const token = await makeTestToken(SECRET, { projectId: "proj-a", fileId: "any" })
     const req = new Request(
       "https://w/api/v1/projects/proj-a/search/passages?q=without+form",
@@ -85,14 +86,14 @@ describe("GET /api/v1/projects/:projectId/search/passages", () => {
 
   // ── 3. Auth failures ────────────────────────────────────────────────────
   it("returns 401 when Authorization header is missing", async () => {
-    const db = makeInMemoryD1({ cells: [] })
+    const { db } = await makeTestDb({ cells: [] })
     const req = new Request("https://w/api/v1/projects/proj-a/search/passages?q=hi")
     const res = (await handleSearchPassagesRequest(req, envWith(db)))!
     expect(res.status).toBe(401)
   })
 
   it("returns 403 when the token's projectId does not match the URL", async () => {
-    const db = makeInMemoryD1({ cells: [] })
+    const { db } = await makeTestDb({ cells: [] })
     const token = await makeTestToken(SECRET, { projectId: "other-proj", fileId: "any" })
     const req = new Request("https://w/api/v1/projects/proj-a/search/passages?q=hi", {
       headers: { Authorization: `Bearer ${token}` },
@@ -102,7 +103,7 @@ describe("GET /api/v1/projects/:projectId/search/passages", () => {
   })
 
   it("returns 401 when the JWT signature is invalid", async () => {
-    const db = makeInMemoryD1({ cells: [] })
+    const { db } = await makeTestDb({ cells: [] })
     // Sign with a DIFFERENT secret so verification fails.
     const token = await makeTestToken("wrong-secret", { projectId: "proj-a", fileId: "any" })
     const req = new Request("https://w/api/v1/projects/proj-a/search/passages?q=hi", {
@@ -118,7 +119,7 @@ describe("GET /api/v1/projects/:projectId/search/passages", () => {
       { cell_id: "c3", side: "source", value: "hola amigo" },
       { cell_id: "c3", side: "target", value: "hola amigo" },
     ])
-    const db = makeInMemoryD1({ cells, cells_fts })
+    const { db } = await makeTestDb({ cells, cells_fts })
     const token = await makeTestToken(SECRET, { projectId: "proj-a", fileId: "any" })
     const req = new Request(
       "https://w/api/v1/projects/proj-a/search/passages?q=hola&side=source",
@@ -135,7 +136,7 @@ describe("GET /api/v1/projects/:projectId/search/passages", () => {
       { cell_id: "c4", side: "source", value: "hello world" },
       { cell_id: "c4", side: "target", value: "hello world" },
     ])
-    const db = makeInMemoryD1({ cells, cells_fts })
+    const { db } = await makeTestDb({ cells, cells_fts })
     const token = await makeTestToken(SECRET, { projectId: "proj-a", fileId: "any" })
     const req = new Request(
       "https://w/api/v1/projects/proj-a/search/passages?q=hello&side=target",
@@ -148,7 +149,7 @@ describe("GET /api/v1/projects/:projectId/search/passages", () => {
   })
 
   it("returns 400 when side is invalid", async () => {
-    const db = makeInMemoryD1({ cells: [] })
+    const { db } = await makeTestDb({ cells: [] })
     const token = await makeTestToken(SECRET, { projectId: "proj-a", fileId: "any" })
     const req = new Request(
       "https://w/api/v1/projects/proj-a/search/passages?q=hi&side=both",
@@ -163,7 +164,7 @@ describe("GET /api/v1/projects/:projectId/search/passages", () => {
     const { cells, cells_fts } = makeSeedData([
       { cell_id: "c5", side: "source", value: "some text" },
     ])
-    const db = makeInMemoryD1({ cells, cells_fts })
+    const { db } = await makeTestDb({ cells, cells_fts })
     const token = await makeTestToken(SECRET, { projectId: "proj-a", fileId: "any" })
     const req = new Request(
       "https://w/api/v1/projects/proj-a/search/passages?q=AND%20OR",
@@ -176,7 +177,7 @@ describe("GET /api/v1/projects/:projectId/search/passages", () => {
   })
 
   it("returns 400 when q is missing", async () => {
-    const db = makeInMemoryD1({ cells: [] })
+    const { db } = await makeTestDb({ cells: [] })
     const token = await makeTestToken(SECRET, { projectId: "proj-a", fileId: "any" })
     const req = new Request(
       "https://w/api/v1/projects/proj-a/search/passages",
@@ -205,7 +206,7 @@ describe("GET /api/v1/projects/:projectId/search/passages", () => {
       value: c.value,
     }))
 
-    const db = makeInMemoryD1({ cells: allCells, cells_fts })
+    const { db } = await makeTestDb({ cells: allCells, cells_fts })
 
     // Token is scoped to proj-a only.
     const token = await makeTestToken(SECRET, { projectId: "proj-a", fileId: "any" })
@@ -227,7 +228,7 @@ describe("GET /api/v1/projects/:projectId/search/passages", () => {
 
   // ── Routing: null when path doesn't match ───────────────────────────────
   it("returns null when the route does not match", async () => {
-    const db = makeInMemoryD1({ cells: [] })
+    const { db } = await makeTestDb({ cells: [] })
     const req = new Request("https://w/api/v1/something-else")
     const res = await handleSearchPassagesRequest(req, envWith(db))
     expect(res).toBeNull()

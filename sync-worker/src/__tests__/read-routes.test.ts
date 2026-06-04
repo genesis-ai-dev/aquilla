@@ -2,18 +2,18 @@ import { describe, it, expect } from 'vitest'
 import { handleEventsReadRequest } from '../events/read-route'
 import { handleValidatorsReadRequest } from '../events/validators-read-route'
 import { handleCellsAuditReadRequest } from '../events/cells-audit-read-route'
-import { makeInMemoryD1 } from './helpers/d1-fake'
+import { makeTestDb } from './helpers/pg-test-db'
 import { makeTestToken } from './helpers/auth'
 
 const SECRET = 'read-route-secret'
 
-function envWith(db: ReturnType<typeof makeInMemoryD1>) {
+function envWith(db: D1Database) {
   return { AQUILLA_DB: db, SYNC_SECRET_KEY: SECRET }
 }
 
 describe('GET /events', () => {
   it('returns rows newest-first by server_seq with filters', async () => {
-    const db = makeInMemoryD1({
+    const { db } = await makeTestDb({
       events: [
         {
           id: 'e1', schema_version: 1, project_id: 'proj-a', file_id: 'file-x',
@@ -58,7 +58,7 @@ describe('GET /cell-validators', () => {
   it('returns validator rows newest-first', async () => {
     // DELETE-on-unvalidate: each row = one active validator. Two rows from
     // different timestamps; newest-first ordering checked below.
-    const db = makeInMemoryD1({
+    const { db } = await makeTestDb({
       cell_validators: [
         {
           project_id: 'proj-a', file_id: 'file-x', cell_id: 'c1',
@@ -89,7 +89,7 @@ describe('GET /cell-validators', () => {
 
 describe('GET /cells/audit-stats', () => {
   it('returns side, event_id (chain head), source_event_id (AD-9 pin), and active validators', async () => {
-    const db = makeInMemoryD1({
+    const { db } = await makeTestDb({
       cells: [
         {
           project_id: 'proj-x', file_id: 'file-x', cell_id: 'c1',

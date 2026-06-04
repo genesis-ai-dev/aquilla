@@ -1,11 +1,12 @@
 import { describe, it, expect } from "vitest"
 import { handleCellHistoryReadRequest } from "../events/cell-history-read-route"
-import { makeInMemoryD1, type EventRow } from "./helpers/d1-fake"
+import { type EventRow } from "./helpers/d1-fake"
+import { makeTestDb } from "./helpers/pg-test-db"
 import { makeTestToken } from "./helpers/auth"
 
 const SECRET = "cell-history-secret"
 
-function envWith(db: ReturnType<typeof makeInMemoryD1>) {
+function envWith(db: D1Database) {
   return { AQUILLA_DB: db, SYNC_SECRET_KEY: SECRET }
 }
 
@@ -28,7 +29,7 @@ function makeEvent(
 
 describe("GET /api/v1/projects/:projectId/files/:fileId/cells/:cellId/history", () => {
   it("returns the cell's events newest-first", async () => {
-    const db = makeInMemoryD1({
+    const { db } = await makeTestDb({
       events: [
         makeEvent({ id: "e1", kind: "source.cell.create", parent_id: null, server_seq: 1, payload: '{"value":"hello"}' }),
         makeEvent({ id: "e2", kind: "target.cell.commit", parent_id: "e1", server_seq: 2, payload: '{"value":"hola"}' }),
@@ -52,7 +53,7 @@ describe("GET /api/v1/projects/:projectId/files/:fileId/cells/:cellId/history", 
   })
 
   it("respects the limit parameter (clamped to 1..200)", async () => {
-    const db = makeInMemoryD1({
+    const { db } = await makeTestDb({
       events: [
         makeEvent({ id: "e1", kind: "target.cell.commit", parent_id: null, server_seq: 1 }),
         makeEvent({ id: "e2", kind: "target.cell.commit", parent_id: "e1", server_seq: 2 }),
@@ -70,7 +71,7 @@ describe("GET /api/v1/projects/:projectId/files/:fileId/cells/:cellId/history", 
   })
 
   it("returns 401 without an Authorization header", async () => {
-    const db = makeInMemoryD1({ events: [] })
+    const { db } = await makeTestDb({ events: [] })
     const req = new Request(
       "https://w/api/v1/projects/proj-a/files/file-x/cells/cell-1/history",
     )
@@ -79,7 +80,7 @@ describe("GET /api/v1/projects/:projectId/files/:fileId/cells/:cellId/history", 
   })
 
   it("returns 403 when the token's projectId does not match", async () => {
-    const db = makeInMemoryD1({ events: [] })
+    const { db } = await makeTestDb({ events: [] })
     const token = await makeTestToken(SECRET, { projectId: "other-proj", fileId: "file-x" })
     const req = new Request(
       "https://w/api/v1/projects/proj-a/files/file-x/cells/cell-1/history",
@@ -90,7 +91,7 @@ describe("GET /api/v1/projects/:projectId/files/:fileId/cells/:cellId/history", 
   })
 
   it("returns an empty array for a cell with no events", async () => {
-    const db = makeInMemoryD1({ events: [] })
+    const { db } = await makeTestDb({ events: [] })
     const token = await makeTestToken(SECRET, { projectId: "proj-a", fileId: "file-x" })
     const req = new Request(
       "https://w/api/v1/projects/proj-a/files/file-x/cells/cell-empty/history",
@@ -103,7 +104,7 @@ describe("GET /api/v1/projects/:projectId/files/:fileId/cells/:cellId/history", 
   })
 
   it("returns null when the route doesn't match (other handlers can run)", async () => {
-    const db = makeInMemoryD1({ events: [] })
+    const { db } = await makeTestDb({ events: [] })
     const req = new Request("https://w/api/v1/something-else")
     const res = await handleCellHistoryReadRequest(req, envWith(db))
     expect(res).toBeNull()

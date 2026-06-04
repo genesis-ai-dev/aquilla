@@ -1,11 +1,12 @@
 import { describe, it, expect } from "vitest"
 import { handleCellsReadRequest } from "../events/cells-read-route"
-import { makeInMemoryD1, type CellRow } from "./helpers/d1-fake"
+import { type CellRow } from "./helpers/d1-fake"
+import { makeTestDb } from "./helpers/pg-test-db"
 import { makeTestToken } from "./helpers/auth"
 
 const SECRET = "cells-read-secret"
 
-function envWith(db: ReturnType<typeof makeInMemoryD1>) {
+function envWith(db: D1Database) {
   return { AQUILLA_DB: db, SYNC_SECRET_KEY: SECRET }
 }
 
@@ -32,7 +33,7 @@ describe("GET /api/v1/projects/:projectId/files/:fileId/cells", () => {
   it("returns cells in anchor-chain order (head → next → tail)", async () => {
     // Insert in a deliberately scrambled order — we want the chain walk to
     // reassemble them correctly regardless of source DB order.
-    const db = makeInMemoryD1({
+    const { db } = await makeTestDb({
       cells: [
         makeCell({ cell_id: "c3", anchor_cell_id: "c2", event_id: "e3" }),
         makeCell({ cell_id: "c1", anchor_cell_id: null, event_id: "e1" }),
@@ -51,7 +52,7 @@ describe("GET /api/v1/projects/:projectId/files/:fileId/cells", () => {
   })
 
   it("tiebreaks two cells anchored to the same parent by event_id lex order", async () => {
-    const db = makeInMemoryD1({
+    const { db } = await makeTestDb({
       cells: [
         makeCell({ cell_id: "head", anchor_cell_id: null, event_id: "ev0" }),
         makeCell({ cell_id: "second", anchor_cell_id: "head", event_id: "ev2" }),
@@ -70,7 +71,7 @@ describe("GET /api/v1/projects/:projectId/files/:fileId/cells", () => {
   })
 
   it("respects the side filter", async () => {
-    const db = makeInMemoryD1({
+    const { db } = await makeTestDb({
       cells: [
         makeCell({ cell_id: "s1", side: "source", anchor_cell_id: null, event_id: "es1", value: "src-1" }),
         makeCell({ cell_id: "t1", side: "target", anchor_cell_id: null, event_id: "et1", value: "tgt-1" }),
@@ -98,7 +99,7 @@ describe("GET /api/v1/projects/:projectId/files/:fileId/cells", () => {
   })
 
   it("returns both sides when side is omitted, source-rows first then target-rows", async () => {
-    const db = makeInMemoryD1({
+    const { db } = await makeTestDb({
       cells: [
         makeCell({ cell_id: "c1", side: "source", anchor_cell_id: null, event_id: "es1", value: "src" }),
         makeCell({ cell_id: "c1", side: "target", anchor_cell_id: null, event_id: "et1", value: "tgt" }),
@@ -124,7 +125,7 @@ describe("GET /api/v1/projects/:projectId/files/:fileId/cells", () => {
       cells.push(makeCell({ cell_id: id, anchor_cell_id: prev, event_id: `e${id}` }))
       prev = id
     }
-    const db = makeInMemoryD1({ cells })
+    const { db } = await makeTestDb({ cells })
     const token = await makeTestToken(SECRET, { projectId: "proj-a", fileId: "file-x" })
 
     const firstReq = new Request(
@@ -155,14 +156,14 @@ describe("GET /api/v1/projects/:projectId/files/:fileId/cells", () => {
   })
 
   it("returns 401 without an Authorization header", async () => {
-    const db = makeInMemoryD1({ cells: [] })
+    const { db } = await makeTestDb({ cells: [] })
     const req = new Request("https://w/api/v1/projects/proj-a/files/file-x/cells")
     const res = (await handleCellsReadRequest(req, envWith(db)))!
     expect(res.status).toBe(401)
   })
 
   it("returns 403 when the token's projectId does not match", async () => {
-    const db = makeInMemoryD1({ cells: [] })
+    const { db } = await makeTestDb({ cells: [] })
     const token = await makeTestToken(SECRET, { projectId: "other-proj", fileId: "file-x" })
     const req = new Request("https://w/api/v1/projects/proj-a/files/file-x/cells", {
       headers: { Authorization: `Bearer ${token}` },
@@ -172,7 +173,7 @@ describe("GET /api/v1/projects/:projectId/files/:fileId/cells", () => {
   })
 
   it("returns start_ms/end_ms as startMs/endMs", async () => {
-    const db = makeInMemoryD1({
+    const { db } = await makeTestDb({
       cells: [
         makeCell({ cell_id: "c1", anchor_cell_id: null, event_id: "e1", start_ms: 1500, end_ms: 3250 }),
       ],
@@ -189,7 +190,7 @@ describe("GET /api/v1/projects/:projectId/files/:fileId/cells", () => {
   })
 
   it("returns 400 on invalid side parameter", async () => {
-    const db = makeInMemoryD1({ cells: [] })
+    const { db } = await makeTestDb({ cells: [] })
     const token = await makeTestToken(SECRET, { projectId: "proj-a", fileId: "file-x" })
     const req = new Request(
       "https://w/api/v1/projects/proj-a/files/file-x/cells?side=invalid",
@@ -200,7 +201,7 @@ describe("GET /api/v1/projects/:projectId/files/:fileId/cells", () => {
   })
 
   it("exposes word_count and validated as boolean", async () => {
-    const db = makeInMemoryD1({
+    const { db } = await makeTestDb({
       cells: [
         makeCell({
           cell_id: "c1",

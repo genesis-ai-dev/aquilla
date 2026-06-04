@@ -13,7 +13,8 @@ description: Autonomous multi-agent swarm that fans out sonnet subagents with is
 4. **Fan out 4–6 sonnet agents** — each in its own worktree off the integration tip, with a self-contained brief. Always keep one agent driving the real UI. Accept 3-way merges.
 5. **Verify every merge** — `tsc --noEmit` + vitest on integration before promoting to main.
 6. **Promote to main** — only when main's working tree is clean (no uncommitted work from another actor). Use FF if possible; squash-merge if histories diverged deeply.
-7. **STOP when done** — convergence is the success state. Don't manufacture work.
+7. **Verify, then push to staging when the work is deemed complete** — once the backlog is drained, the orchestrator runs its **own** full verification on the integration branch (`tsc -b --noEmit` + `vitest run` + `npm run build` + worker `tsc`/tests, and the e2e smoke/specs where applicable) — do not delegate this final gate to the subagents. Only when that gate is green does the orchestrator push to the **`dev`** branch, which triggers the **staging preview deploy** (`dev.aquilla.app` — see `docs/STAGING.md` / `package.json` `deploy:aquilla:staging`). Validate on staging before advancing issues past `Fixed`/`Ready for Review`.
+8. **STOP when done** — convergence is the success state. Don't manufacture work.
 
 See [REFERENCE.md](REFERENCE.md) for patterns, templates, and lessons learned.
 
@@ -22,6 +23,7 @@ See [REFERENCE.md](REFERENCE.md) for patterns, templates, and lessons learned.
 - **Never clobber uncommitted work** of another actor in main. Check `git status` before any merge into main. If dirty files overlap your changes, hold — don't force.
 - **Never push branches** from subagents — only the orchestrator promotes to main.
 - **Verify before promoting** — tsc + vitest must be green on the integration branch before touching main.
+- **Orchestrator owns the final gate + the staging push** — when the work is deemed complete, the orchestrator (not a subagent) re-verifies the integration branch end-to-end, then pushes to the `dev` branch for the staging preview deploy. Never push to `dev`/staging on an unverified or red integration branch.
 - **Subagent briefs must be self-contained** — assume the agent has no memory of this conversation. Include: owned files, forbidden files, verify commands, SWARM-TODO requirement, no-push instruction.
 - **Plan for failure** — revert a red merge and respawn a fixer agent rather than leaving integration broken.
 

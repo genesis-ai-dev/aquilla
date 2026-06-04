@@ -12,6 +12,7 @@ dist
 dist-ssr
 .env
 .env.signing
+.env.backup
 *.local
 
 # Editor directories and files

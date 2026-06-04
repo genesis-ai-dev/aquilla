@@ -7,19 +7,23 @@
 import fs from "node:fs"
 import { Client } from "pg"
 
-export function neonClient(pooled = false): Client {
+export function neonConfig(pooled = false) {
   const host = pooled ? process.env.NEON_PG_POOLER_HOST : process.env.NEON_PG_HOST
   if (!host || !process.env.NEON_PG_PASSWORD) {
     throw new Error("Neon creds missing — run: set -a; . ./.env; set +a")
   }
-  return new Client({
+  return {
     host,
     database: process.env.NEON_PG_DB,
     user: process.env.NEON_PG_ROLE,
     password: process.env.NEON_PG_PASSWORD,
     port: 5432,
     ssl: { rejectUnauthorized: true }, // Neon uses publicly-trusted certs
-  })
+  }
+}
+
+export function neonClient(pooled = false): Client {
+  return new Client(neonConfig(pooled))
 }
 
 async function main() {

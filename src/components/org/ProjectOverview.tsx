@@ -53,6 +53,7 @@ export function ProjectOverview() {
   const [files, setFiles] = useState<FileSummary[]>([])
   const [editingDeadline, setEditingDeadline] = useState(false)
   const [deadlineInput, setDeadlineInput] = useState("")
+  const [showAllFiles, setShowAllFiles] = useState(false)
 
   const loadRow = useCallback(async () => {
     if (!jwt || activeOrgId == null) return
@@ -209,13 +210,13 @@ export function ProjectOverview() {
                   counted, not hidden. */}
               {files.length > 0 && (() => {
                 const sorted = [...files].sort((a, b) => b.cellCount - a.cellCount)
-                const shown = sorted.slice(0, FILE_ROW_CAP)
+                const shown = showAllFiles ? sorted : sorted.slice(0, FILE_ROW_CAP)
                 const hidden = sorted.length - shown.length
                 return (
                   <div className="mt-4 border-t pt-3">
                     <div className="mb-2 flex items-center justify-between">
                       <h2 className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                        Files {hidden > 0 ? `(top ${FILE_ROW_CAP} of ${sorted.length})` : `(${sorted.length})`}
+                        Files {!showAllFiles && hidden > 0 ? `(top ${FILE_ROW_CAP} of ${sorted.length})` : `(${sorted.length})`}
                       </h2>
                       <span className="flex items-center gap-2 text-[10px] text-muted-foreground">
                         <span className="flex items-center gap-1"><span className="h-1.5 w-3 rounded-full bg-amber-500" />translated</span>
@@ -250,8 +251,21 @@ export function ProjectOverview() {
                         )
                       })}
                     </ul>
-                    {hidden > 0 && (
-                      <p className="mt-2 text-xs text-muted-foreground">+{hidden} more files</p>
+                    {!showAllFiles && hidden > 0 && (
+                      <button
+                        className="mt-2 text-xs text-muted-foreground hover:text-foreground underline"
+                        onClick={() => setShowAllFiles(true)}
+                      >
+                        +{hidden} more files — show all
+                      </button>
+                    )}
+                    {showAllFiles && sorted.length > FILE_ROW_CAP && (
+                      <button
+                        className="mt-2 text-xs text-muted-foreground hover:text-foreground underline"
+                        onClick={() => setShowAllFiles(false)}
+                      >
+                        Show fewer
+                      </button>
                     )}
                   </div>
                 )

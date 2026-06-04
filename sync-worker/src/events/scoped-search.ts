@@ -207,32 +207,33 @@ export async function queryScopedSearch(
   //     start/end → <mark>/</mark> highlight tags
   //     ellipsis → "..." for truncated tails
   //     max_tokens → 16, plenty for "saw the match in context" UX
+  // Postgres FTS over the generated cells.value_tsv. plainto_tsquery ANDs all
+  // terms (implicit-AND, matching the FTS5 sanitizer intent); ts_headline gives
+  // the <mark> snippet; ts_rank is relevance (higher = better → ORDER BY DESC).
   const parts: string[] = [
     "SELECT",
-    "  cells.cell_id   AS cell_id,",
-    "  cells.file_id   AS file_id,",
-    "  cells.side      AS side,",
-    "  cells.value     AS value,",
-    "  snippet(cells_fts, 0, '<mark>', '</mark>', '...', 16) AS snippet,",
-    "  cells_fts.rank  AS rank",
-    "FROM cells_fts",
-    "JOIN cells ON cells.rowid = cells_fts.rowid",
-    "WHERE cells_fts MATCH ?",
+    "  cells.cell_id AS cell_id,",
+    "  cells.file_id AS file_id,",
+    "  cells.side AS side,",
+    "  cells.value AS value,",
+    "  ts_headline('simple', cells.value, plainto_tsquery('simple', ?), 'StartSel=<mark>,StopSel=</mark>,MaxWords=16,MinWords=1,MaxFragments=1') AS snippet,",
+    "  ts_rank(cells.value_tsv, plainto_tsquery('simple', ?)) AS rank",
+    "FROM cells",
+    "WHERE cells.value_tsv @@ plainto_tsquery('simple', ?)",
     "AND cells.project_id = ?",
   ]
-  const binds: unknown[] = [ftsQuery, verifiedProjectId]
+  const binds: unknown[] = [q, q, q, verifiedProjectId]
 
   if (opts.side !== undefined) {
     parts.push("AND cells.side = ?")
     binds.push(opts.side)
   }
-  parts.push("ORDER BY rank ASC")
+  parts.push("ORDER BY rank DESC")
   parts.push("LIMIT ?")
   binds.push(limit)
 
   const sql = parts.join(" ")
 
-  // Let FTS5 syntax errors propagate — the route layer converts them to 400.
   const result = await db.prepare(sql).bind(...binds).all<SearchRowRaw>()
   return result.results.map((row) => ({
     cellId: row.cell_id,
@@ -273,32 +274,33 @@ export async function queryScopedExact(
   // The LEFT JOIN on `paired` fetches the opposite-side cell at the same
   // logical address. CASE flips source↔target so one query covers both
   // directions. `paired.value` is null when no paired row exists.
+  // Postgres FTS: phraseto_tsquery requires the terms adjacent + in order
+  // (matching the FTS5 exact-phrase intent).
   const parts: string[] = [
     "SELECT",
-    "  cells.cell_id   AS cell_id,",
-    "  cells.file_id   AS file_id,",
-    "  cells.side      AS side,",
-    "  cells.value     AS value,",
-    "  snippet(cells_fts, 0, '<mark>', '</mark>', '...', 16) AS snippet,",
-    "  cells_fts.rank  AS rank,",
-    "  paired.value    AS paired_value",
-    "FROM cells_fts",
-    "JOIN cells ON cells.rowid = cells_fts.rowid",
+    "  cells.cell_id AS cell_id,",
+    "  cells.file_id AS file_id,",
+    "  cells.side AS side,",
+    "  cells.value AS value,",
+    "  ts_headline('simple', cells.value, phraseto_tsquery('simple', ?), 'StartSel=<mark>,StopSel=</mark>,MaxWords=16,MinWords=1,MaxFragments=1') AS snippet,",
+    "  ts_rank(cells.value_tsv, phraseto_tsquery('simple', ?)) AS rank,",
+    "  paired.value AS paired_value",
+    "FROM cells",
     "LEFT JOIN cells AS paired",
     "  ON  paired.project_id = cells.project_id",
     "  AND paired.file_id    = cells.file_id",
     "  AND paired.cell_id    = cells.cell_id",
     "  AND paired.side       = CASE cells.side WHEN 'source' THEN 'target' ELSE 'source' END",
-    "WHERE cells_fts MATCH ?",
+    "WHERE cells.value_tsv @@ phraseto_tsquery('simple', ?)",
     "AND cells.project_id = ?",
   ]
-  const binds: unknown[] = [ftsQuery, verifiedProjectId]
+  const binds: unknown[] = [exactText, exactText, exactText, verifiedProjectId]
 
   if (opts.side !== undefined) {
     parts.push("AND cells.side = ?")
     binds.push(opts.side)
   }
-  parts.push("ORDER BY rank ASC")
+  parts.push("ORDER BY rank DESC")
   parts.push("LIMIT ?")
   binds.push(limit)
 
@@ -352,26 +354,28 @@ export async function querySourceNeighbors(
   queryText: string,
   opts: { topK?: number; excludeCellId?: string; validatedOnly?: boolean },
 ): Promise<ValidatedNeighbor[]> {
-  const ftsQuery = sanitizeFtsAnyTerm(queryText)
-  if (!ftsQuery) return []
+  // Any-term OR retrieval over Postgres FTS: build a `t1 | t2 | …` tsquery from
+  // the same Unicode tokenization the confidence scorer uses.
+  const tokens = [...new Set(queryText.toLowerCase().match(/[\p{L}\p{M}\p{N}]+/gu) ?? [])].slice(0, 40)
+  if (tokens.length === 0) return []
+  const tsq = tokens.join(" | ")
 
   const limit = clampLimit(opts.topK)
 
   const parts: string[] = [
-    "SELECT c.cell_id AS cell_id, c.value AS value, t.value AS target_value, cells_fts.rank AS rank",
-    "FROM cells_fts",
-    "JOIN cells c ON c.rowid = cells_fts.rowid",
+    "SELECT c.cell_id AS cell_id, c.value AS value, t.value AS target_value, ts_rank(c.value_tsv, to_tsquery('simple', ?)) AS rank",
+    "FROM cells c",
     "JOIN cells t",
     "  ON  t.project_id = c.project_id",
     "  AND t.file_id    = c.file_id",
     "  AND t.cell_id    = c.cell_id",
     "  AND t.side       = 'target'",
     "  AND t.value     != ''", // translated neighbors only — need a target to compare
-    "WHERE cells_fts MATCH ?",
+    "WHERE c.value_tsv @@ to_tsquery('simple', ?)",
     "AND c.project_id = ?",
     "AND c.side = 'source'",
   ]
-  const binds: unknown[] = [ftsQuery, verifiedProjectId]
+  const binds: unknown[] = [tsq, tsq, verifiedProjectId]
 
   // Health propagation flows from ANY translated neighbor's health (one hop),
   // so by default we don't restrict to validated; the caller anchors at
@@ -383,7 +387,7 @@ export async function querySourceNeighbors(
     parts.push("AND c.cell_id != ?")
     binds.push(opts.excludeCellId)
   }
-  parts.push("ORDER BY rank ASC")
+  parts.push("ORDER BY rank DESC")
   parts.push("LIMIT ?")
   binds.push(limit)
 

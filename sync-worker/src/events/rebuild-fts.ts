@@ -40,63 +40,18 @@ export async function handleRebuildFtsRequest(
     return new Response('AQUILLA_DB binding not configured', { status: 500 })
   }
 
-  const db = env.AQUILLA_DB
   const projectId = decodeURIComponent(match[1])
-  const startedAt = Date.now()
 
-  // Pass 1 — delete any existing FTS rows for this project so the result is
-  // idempotent. FTS5 external-content delete requires passing the OLD value
-  // which we read from the cells table (still intact at this point).
-  let deletedRows = 0
-  let deleteLastRowid = -1
-  while (true) {
-    const { results } = await db
-      .prepare(
-        'SELECT rowid, value FROM cells WHERE project_id = ? AND rowid > ? ORDER BY rowid LIMIT 1000',
-      )
-      .bind(projectId, deleteLastRowid)
-      .all<{ rowid: number; value: string }>()
-    if (!results || results.length === 0) break
-    const stmts = results.map((r) =>
-      db
-        .prepare('INSERT INTO cells_fts(cells_fts, rowid, value) VALUES (?, ?, ?)')
-        .bind('delete', r.rowid, r.value),
-    )
-    await db.batch(stmts)
-    deleteLastRowid = results[results.length - 1].rowid
-    deletedRows += results.length
-  }
-
-  // Pass 2 — insert fresh FTS rows for every cell in the project.
-  let insertedRows = 0
-  let batches = 0
-  let insertLastRowid = -1
-  while (true) {
-    const { results } = await db
-      .prepare(
-        'SELECT rowid, value FROM cells WHERE project_id = ? AND rowid > ? ORDER BY rowid LIMIT 1000',
-      )
-      .bind(projectId, insertLastRowid)
-      .all<{ rowid: number; value: string }>()
-    if (!results || results.length === 0) break
-    const stmts = results.map((r) =>
-      db.prepare('INSERT INTO cells_fts(rowid, value) VALUES (?, ?)').bind(r.rowid, r.value),
-    )
-    await db.batch(stmts)
-    insertLastRowid = results[results.length - 1].rowid
-    insertedRows += results.length
-    batches += 1
-  }
-
-  const durationMs = Date.now() - startedAt
-
+  // Postgres: cells.value_tsv is a GENERATED column with a GIN index, so the
+  // FTS index is always in sync with the data — there is nothing to rebuild.
+  // Kept as a no-op endpoint for API compatibility (was the SQLite FTS5 backfill).
   return Response.json({
     ok: true,
     projectId,
-    deletedRows,
-    insertedRows,
-    batches,
-    durationMs,
-    note: 'FTS rebuild is idempotent; safe to re-run. Delete pass removes stale FTS rows before insert pass.',
+    deletedRows: 0,
+    insertedRows: 0,
+    batches: 0,
+    durationMs: 0,
+    note: 'No-op on Postgres: FTS is auto-maintained by the cells.value_tsv generated column.',
   })
 }

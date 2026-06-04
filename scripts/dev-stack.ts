@@ -72,6 +72,28 @@ const IDENTITY_PORT = 8788
 const SYNC_PORT = 8789
 const DEFAULT_VITE_PORT = 5173
 
+// D1→Neon migration (FRO-146): auth-worker + sync-worker bind HYPERDRIVE and
+// swap AQUILLA_DB for a Postgres shim (see auth-worker/src/index.ts). Under
+// `wrangler dev --local`, Hyperdrive is emulated against a real Postgres given
+// by WRANGLER_HYPERDRIVE_LOCAL_CONNECTION_STRING_<BINDING>. Without it the
+// worker refuses to boot. We back that with a throwaway local Postgres so the
+// dev stack works with no Neon creds and no risk to live data.
+//
+// Resolution: an explicit connection string in the environment wins (point at
+// your own Postgres / a Neon *branch* — never prod). Otherwise we manage a
+// local Docker container with the default below.
+const SCHEMA_FILE = path.join(REPO_ROOT, "db", "postgres", "schema.sql")
+const LOCAL_PG_CONTAINER = "aquilla-dev-pg"
+const DEFAULT_LOCAL_PG_URL =
+  "postgresql://aquilla:aquilla@127.0.0.1:5432/aquilla_dev"
+const EXTERNAL_PG_URL =
+  process.env.WRANGLER_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE ||
+  process.env.LOCAL_PG_URL ||
+  ""
+const PG_URL = EXTERNAL_PG_URL || DEFAULT_LOCAL_PG_URL
+// Only manage a Docker container when falling back to the default URL.
+const MANAGE_PG_CONTAINER = !EXTERNAL_PG_URL
+
 const args = process.argv.slice(2)
 const WITHOUT_SYNC = args.includes("--no-sync")
 const VERBOSE = args.includes("--verbose") || process.env.DEV_STACK_VERBOSE === "1"
@@ -199,6 +221,103 @@ function applyIdentityMigrations(): void {
   }
 }
 
+/**
+ * Make a local Postgres reachable at PG_URL with the schema loaded, so the
+ * HYPERDRIVE-bound workers can boot. When MANAGE_PG_CONTAINER, start (or run) a
+ * throwaway Docker postgres container; otherwise assume the user-supplied URL is
+ * already serving and just ensure the schema. Idempotent on every boot.
+ */
+async function ensureLocalPostgres(): Promise<void> {
+  if (MANAGE_PG_CONTAINER) {
+    if (!hasDocker()) {
+      throw new Error(
+        "[dev-stack] Docker is required to run the local Postgres for Hyperdrive.\n" +
+          "  Either start Docker Desktop, or set a connection string yourself:\n" +
+          "  export LOCAL_PG_URL=postgresql://user:pass@host:5432/db   (a local PG or a Neon *branch* — never prod)",
+      )
+    }
+    startLocalPgContainer()
+  }
+  await waitForPostgres(PG_URL)
+  await applyPgSchemaIfMissing(PG_URL)
+}
+
+function hasDocker(): boolean {
+  return spawnSync("docker", ["info"], { stdio: "ignore" }).status === 0
+}
+
+function startLocalPgContainer(): void {
+  const exists =
+    (
+      spawnSync(
+        "docker",
+        ["ps", "-aq", "--filter", `name=^/${LOCAL_PG_CONTAINER}$`],
+        { encoding: "utf8" },
+      ).stdout || ""
+    ).trim() !== ""
+  if (exists) {
+    console.log(`[dev-stack] starting Postgres container ${LOCAL_PG_CONTAINER}…`)
+    spawnSync("docker", ["start", LOCAL_PG_CONTAINER], { stdio: "ignore" })
+    return
+  }
+  console.log(`[dev-stack] creating Postgres container ${LOCAL_PG_CONTAINER}…`)
+  const res = spawnSync(
+    "docker",
+    [
+      "run", "-d",
+      "--name", LOCAL_PG_CONTAINER,
+      "-e", "POSTGRES_USER=aquilla",
+      "-e", "POSTGRES_PASSWORD=aquilla",
+      "-e", "POSTGRES_DB=aquilla_dev",
+      "-p", "5432:5432",
+      "postgres:16",
+    ],
+    { stdio: ["ignore", "pipe", "pipe"], encoding: "utf8" },
+  )
+  if (res.status !== 0) {
+    throw new Error(
+      `[dev-stack] failed to start Postgres container:\n${res.stderr || res.stdout}`,
+    )
+  }
+}
+
+async function waitForPostgres(url: string): Promise<void> {
+  const { Client } = await import("pg")
+  const start = Date.now()
+  let lastErr: unknown
+  while (Date.now() - start < 30_000) {
+    const client = new Client({ connectionString: url })
+    try {
+      await client.connect()
+      await client.query("select 1")
+      await client.end()
+      return
+    } catch (err) {
+      lastErr = err
+      try { await client.end() } catch { /* ignore */ }
+      await new Promise((r) => setTimeout(r, 500))
+    }
+  }
+  throw new Error(`[dev-stack] Postgres at ${url} never became reachable: ${String(lastErr)}`)
+}
+
+async function applyPgSchemaIfMissing(url: string): Promise<void> {
+  const { Client } = await import("pg")
+  const client = new Client({ connectionString: url })
+  await client.connect()
+  try {
+    const { rows } = await client.query(
+      "select to_regclass('public.users') as t",
+    )
+    if (rows[0]?.t) return // schema already present
+    console.log("[dev-stack] loading Postgres schema (db/postgres/schema.sql)…")
+    const { readFileSync } = await import("node:fs")
+    await client.query(readFileSync(SCHEMA_FILE, "utf8"))
+  } finally {
+    await client.end()
+  }
+}
+
 function writeManagedEnvFile(): void {
   const lines = [
     ENV_FILE_HEADER,
@@ -247,6 +366,7 @@ async function main(): Promise<void> {
   await freePort(VITE_PORT)
 
   applyIdentityMigrations()
+  await ensureLocalPostgres()
 
   console.log(`[dev-stack] starting identity (auth-worker) on :${IDENTITY_PORT}…`)
   const identity: SpawnedWorker = await spawnWranglerDev({
@@ -260,6 +380,8 @@ async function main(): Promise<void> {
       SYNC_WORKER_URL: `http://127.0.0.1:${SYNC_PORT}`,
       // Loud env tag so logs make it obvious this is the local dev stack.
       ENVIRONMENT: "development",
+      // Local Hyperdrive emulation → the local Postgres ensured above.
+      WRANGLER_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE: PG_URL,
     },
     // `--var` is the only reliable way to land a value in `c.env` for
     // wrangler dev — process env alone does NOT propagate through to the
@@ -284,6 +406,8 @@ async function main(): Promise<void> {
       env: {
         // .dev.vars already sets SYNC_SECRET_KEY + ALLOW_UNAUTHENTICATED;
         // pass nothing extra so we don't shadow them via --var.
+        // sync-worker also binds HYPERDRIVE → same local Postgres.
+        WRANGLER_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE: PG_URL,
       },
       extraArgs: ["--persist-to", PERSIST_DIR],
       logFile: openLogFile(path.join(LOG_DIR, "sync.log")),

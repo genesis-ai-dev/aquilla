@@ -5,7 +5,8 @@
 
 import { describe, it, expect } from 'vitest'
 import { handleRebuildFtsRequest } from '../events/rebuild-fts'
-import { makeInMemoryD1, type CellRow } from './helpers/d1-fake'
+import { type CellRow } from './helpers/d1-fake'
+import { makeTestDb } from './helpers/pg-test-db'
 
 function makeRequest(
   path: string,
@@ -89,130 +90,50 @@ describe('handleRebuildFtsRequest — URL/method/auth', () => {
   })
 })
 
-// ── Core backfill behaviour ─────────────────────────────────────────────────
+// ── No-op on Postgres (FTS auto-maintained by the value_tsv generated column) ─
 
-describe('handleRebuildFtsRequest — backfill', () => {
-  it('returns insertedRows=5, batches=1 for 5 cells in a single project', async () => {
-    const db = makeInMemoryD1({
+describe('handleRebuildFtsRequest — no-op on Postgres', () => {
+  it('returns ok with insertedRows=0 (nothing to rebuild)', async () => {
+    const { db } = await makeTestDb({
       cells: [
         cell({ project_id: 'proj-A', cell_id: 'c1', value: 'alpha' }),
         cell({ project_id: 'proj-A', cell_id: 'c2', value: 'beta' }),
-        cell({ project_id: 'proj-A', cell_id: 'c3', value: 'gamma' }),
-        cell({ project_id: 'proj-A', cell_id: 'c4', value: 'delta' }),
-        cell({ project_id: 'proj-A', cell_id: 'c5', value: 'epsilon' }),
       ],
     })
-
-    const res = await handleRebuildFtsRequest(
+    const res = (await handleRebuildFtsRequest(
       makeRequest('/admin/projects/proj-A/rebuild-fts'),
       makeEnv(db),
-    ) as Response
+    )) as Response
     expect(res.status).toBe(200)
     const body = (await res.json()) as any
     expect(body.ok).toBe(true)
-    expect(body.insertedRows).toBe(5)
-    expect(body.batches).toBe(1)
+    expect(body.insertedRows).toBe(0)
+    expect(body.batches).toBe(0)
     expect(body.projectId).toBe('proj-A')
   })
 
-  it('only indexes cells belonging to the requested project', async () => {
-    const db = makeInMemoryD1({
-      cells: [
-        cell({ project_id: 'proj-A', cell_id: 'c1', value: 'aaa' }),
-        cell({ project_id: 'proj-A', cell_id: 'c2', value: 'bbb' }),
-        cell({ project_id: 'proj-B', cell_id: 'c3', value: 'ccc' }),
-        cell({ project_id: 'proj-B', cell_id: 'c4', value: 'ddd' }),
-        cell({ project_id: 'proj-B', cell_id: 'c5', value: 'eee' }),
-      ],
-    })
-
-    const res = await handleRebuildFtsRequest(
-      makeRequest('/admin/projects/proj-A/rebuild-fts'),
-      makeEnv(db),
-    ) as Response
-    expect(res.status).toBe(200)
-    const body = (await res.json()) as any
-    expect(body.insertedRows).toBe(2)
-
-    // FTS table should only contain proj-A's cells.
-    const ftsRows = db._tables().cells_fts
-    expect(ftsRows).toHaveLength(2)
-    expect(ftsRows.map((r) => r.value).sort()).toEqual(['aaa', 'bbb'])
-  })
-
-  it('is idempotent — re-running produces the same final state', async () => {
-    const db = makeInMemoryD1({
-      cells: [
-        cell({ project_id: 'proj-A', cell_id: 'c1', value: 'hello' }),
-        cell({ project_id: 'proj-A', cell_id: 'c2', value: 'world' }),
-      ],
-    })
-
-    const req = () => makeRequest('/admin/projects/proj-A/rebuild-fts')
-    const env = makeEnv(db)
-
-    // First run.
-    const res1 = await handleRebuildFtsRequest(req(), env) as Response
-    expect(res1.status).toBe(200)
-    const body1 = (await res1.json()) as any
-    expect(body1.insertedRows).toBe(2)
-
-    // Second run on the same DB — delete pass clears stale rows, insert pass
-    // re-populates. Final FTS row count must still be 2, not 4.
-    const res2 = await handleRebuildFtsRequest(req(), env) as Response
-    expect(res2.status).toBe(200)
-    const body2 = (await res2.json()) as any
-    expect(body2.insertedRows).toBe(2)
-
-    const ftsRows = db._tables().cells_fts
-    expect(ftsRows).toHaveLength(2)
-  })
-
-  it('returns deletedRows>0 on the second run (prior FTS rows cleared)', async () => {
-    const db = makeInMemoryD1({
-      cells: [
-        cell({ project_id: 'proj-A', cell_id: 'c1', value: 'first' }),
-      ],
-    })
-
-    const req = () => makeRequest('/admin/projects/proj-A/rebuild-fts')
-    const env = makeEnv(db)
-
-    await handleRebuildFtsRequest(req(), env)
-    const res2 = await handleRebuildFtsRequest(req(), env) as Response
-    const body2 = (await res2.json()) as any
-    // The delete pass on the second run found 1 existing FTS row to delete.
-    expect(body2.deletedRows).toBe(1)
-    expect(body2.insertedRows).toBe(1)
-  })
-
-  it('returns ok with insertedRows=0 when the project has no cells', async () => {
-    const db = makeInMemoryD1({ cells: [] })
-
-    const res = await handleRebuildFtsRequest(
-      makeRequest('/admin/projects/ghost/rebuild-fts'),
-      makeEnv(db),
-    ) as Response
-    expect(res.status).toBe(200)
-    const body = (await res.json()) as any
-    expect(body.insertedRows).toBe(0)
-    expect(body.batches).toBe(0)
-  })
-
-  it('URL-decoded projectId is used for DB query', async () => {
-    const db = makeInMemoryD1({
-      cells: [
-        cell({ project_id: 'proj A', cell_id: 'c1', value: 'test' }),
-      ],
-    })
-
-    const res = await handleRebuildFtsRequest(
+  it('URL-decodes the projectId', async () => {
+    const { db } = await makeTestDb()
+    const res = (await handleRebuildFtsRequest(
       makeRequest('/admin/projects/proj%20A/rebuild-fts'),
       makeEnv(db),
-    ) as Response
-    expect(res.status).toBe(200)
+    )) as Response
     const body = (await res.json()) as any
     expect(body.projectId).toBe('proj A')
-    expect(body.insertedRows).toBe(1)
+  })
+
+  it('FTS is searchable without any rebuild — value_tsv indexes on insert', async () => {
+    const { db } = await makeTestDb({
+      cells: [
+        cell({ project_id: 'proj-A', cell_id: 'c1', value: 'the quick brown fox' }),
+        cell({ project_id: 'proj-B', cell_id: 'c2', value: 'unrelated text' }),
+      ],
+    })
+    // No rebuild-fts call — the generated column already indexed the rows.
+    const m = await db
+      .prepare("SELECT cell_id FROM cells WHERE project_id = ? AND value_tsv @@ plainto_tsquery('simple', ?)")
+      .bind('proj-A', 'brown')
+      .all()
+    expect(m.results).toHaveLength(1)
   })
 })

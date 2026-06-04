@@ -4,5 +4,10 @@ export default defineConfig({
   test: {
     environment: "node",
     include: ["src/**/*.test.ts"],
+    // Tests run against real Postgres in-process (PGlite WASM). Init is ~1s and
+    // CPU-heavy, so cap parallelism to avoid contention and give generous timeouts.
+    testTimeout: 30000,
+    hookTimeout: 30000,
+    poolOptions: { forks: { minForks: 1, maxForks: 3 } },
   },
 })

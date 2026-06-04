@@ -2,6 +2,67 @@
 
 ---
 
+# 🆕🆕 CURRENT GOAL (2026-06-04) — Drain the `Prototype Debugging` Linear Todo queue via parallel `/issue` workflows
+
+> **This block is the active goal.** Everything below CONVERGED and is reference-only.
+> Driver: user ran `/swarm-orchestration` to iterate `/issue next`. What-to-do = Linear project **Prototype Debugging** (team FrontierR&D, key FRO), status **Todo**. Per-issue lifecycle = `.claude/commands/issue.md`. Spec source of truth = `~/frontierrnd/aquilla-specs`.
+
+## §0 STOP checklist
+- [ ] Every eligible `Todo` issue at **Fixed** (verified) or honestly **blocked** with a Linear note.
+- [ ] Integration `swarm/issue-integration` green: root `tsc -b --noEmit` + `vitest run`; `npm run build` before each promotion; sync/auth-worker tsc+test if touched.
+- [ ] Promoted to main ONLY with `ProjectCreateDialog.tsx` working change protected (never staged).
+- [ ] Each fix live-verified on the real dev stack before its issue moves to Fixed; spec reconciled.
+- [ ] Remaining gaps traced in `docs/swarm/TRACES.md`.
+
+## §EXCLUDED — FRO-147 (`ProjectCreateDialog.tsx` DIRTY in main — forbidden path), FRO-146 (staging, user), FRO-145 (archived junk).
+
+## §1 Operating model
+- Integration `swarm/issue-integration` (worktree `.worktrees/issue-integration`, off main `bfacb67`, node_modules + auth-worker/node_modules + sync-worker/node_modules symlinked).
+- Each agent → **manual** worktree off the live integration tip (NOT isolation:worktree — stale-base trap). sonnet. Commits its branch referencing FRO-###, does own Linear (assign me + fix comment), spec reconcile, **NEVER pushes/deploys/changes issue status**. Worker-touching worktrees MUST symlink auth-worker + sync-worker node_modules.
+- **Live-UI verification centralized** (one dev stack :5173): agents leave SWARM-TODO; a single UI-QA agent confirms each batch, then orchestrator moves the issue → Fixed.
+- Merge: branch → integration → verify → log §M. Promote integration → main (ff) only when green AND main clean apart from the protected file.
+- ⚠️ Migrations: 0028 CLAIMED (FRO-142). Next free = **0029**.
+- ⚠️ BASELINE RED (pre-existing, NOT swarm): `src/components/org/AssignedToMe.test.tsx` 2 fails (mock-export). Present at `bfacb67`. Don't attribute/block on it.
+
+## §3 Workstream registry
+Status: `in-flight | review | merged-integration | merged-main | blocked`
+| FRO | Title | Pri | Branch@sha | Status |
+|---|---|---|---|---|
+| 135 | Bible import 0% post-Postgres | High | swarm/fro-135 | in-flight (a30689fbfc2bd3f2d) |
+| 140 | Rename Frontier→Aquilla username | Low | swarm/fro-140@a221e43 | merged-integration |
+| 141 | Org dropdown scroll affordance | Low | swarm/fro-141@2718dad | merged-integration |
+| 136 | Overview file list show-all | Med | swarm/fro-136@84a84f2 | merged-integration |
+| 142 | Group internal/public toggle (+migr 0028) | Low | swarm/fro-142@3eb7f9b | merged-integration |
+| 143 | Version pins nav | Med | swarm/fro-143@be04128 | **review — premise false, see §M** |
+| 134 | Login email→canonical username (TRUE BUG) | High | swarm/fro-134@87c7fa9 | merged-integration |
+| 137 | Roster Matrix perf | High | swarm/fro-137@8c81f91 | merged-integration |
+| 138 | Define+test org/team perm semantics | Urgent | swarm/fro-138@12230b0 | merged-integration (34 tests, 4 OPQs) |
+| 139 | Team view edit perm levels + tooltips | Med | swarm/fro-139 | in-flight (a0b94e6cada5c018a) |
+| 144 | E2E org-level business logic tests | High | swarm/fro-144 | in-flight (a4d5758a0357baa03) |
+
+**Queue status: ENTIRE Todo queue dispatched.** Done/merged: 135,140,141,136,142,134,137,138. In-flight: 139,144. Held: 143. Excluded (done by other actor): 147,146; junk: 145.
+**PENDING ORCHESTRATOR STEPS:** (1) ~~merge 139+144~~ DONE; (2) live-UI QA via Postgres dev stack for the batch SWARM-TODOs; (3) promote integration → `main` branch (clean ff off `bfacb67`; other actor's `ryder/fro-146-staging-subdomain`@883ff20 lands separately, no overlap); (4) move live-verified issues → Fixed; (5) surface FRO-143 decision + FRO-138 OPQs to user.
+
+## §FINAL IN-SESSION STATE (2026-06-04 ~17:25)
+- **ALL 10 swarm issues merged green → `swarm/issue-integration`** (135,140,141,136,142,134,137,138,139,144). FRO-143 held (premise false). Final gate: root tsc 0 · vitest 1514/1516 (2 baseline AssignedToMe reds) · auth-worker tsc 0 + 122/122 · sync-worker 400/400 · build PASS (e2e specs tsc-clean + discovered by `--list`, NOT run).
+- **`swarm/issue-integration` is a real branch — it persists after session close.** All work is recoverable from it; NOT stranded in worktrees.
+- Per user `/loop` instruction: **all 11 dispatched issues moved Todo→`Dispatched` in Linear** (134,135,136,137,138,139,140,141,142,143,144) so the recurring loop only picks fresh Todo work. `Todo` queue now empty (FRO-145 = archived junk).
+- **STILL TODO (human/next-run):** (a) live-UI QA the batch on the Postgres dev stack + run `npm run test:e2e -- e2e/specs/orgs/org-access-lifecycle.spec.ts`; (b) promote `swarm/issue-integration` → `main`; (c) move verified issues Dispatched→Fixed; (d) FRO-143 decision; (e) FRO-138's 4 OPQs (org-viewer-sees-all default, etc.).
+- User switched to a **60-min CLOUD schedule** (must clone BOTH `codex-web-app` + `~/frontierrnd/aquilla-specs`) running: "whenever an issue is finished, revisit Linear, work anything still Todo; mark started-but-unfinished as Dispatched."
+
+## §M Merge log
+- 2026-06-04 · integration `swarm/issue-integration` off main `bfacb67`. FRO-147 protected.
+- 2026-06-04 · **MERGED green → integration:** FRO-141 (OrgSwitcher scroll), FRO-140 (Aquilla rename, 5 files), FRO-136 (ProjectOverview show-all +test), FRO-142 (group toggle: migration `0028_groups_is_internal` + schema + auth-worker org-permissions + TeamsList +4 tests; default Internal-only), FRO-134 (auth.ts JWT-sub → canonical username, TRUE BUG +test), FRO-137 (matrix: stable useCallback deps + React.memo rows, +5 tests). Gate after FRO-137: **root tsc 0 · vitest 1510/1512 · auth-worker tsc 0 + 94/94** (the only reds = 2 baseline AssignedToMe).
+- 2026-06-04 · **FRO-143 HELD (review, NOT merged).** No version-pinning portal exists in codex-web-app OR codex-groups-admin; issue premise ("portal reachable via URL") false. Agent added a build-info "Versions" tab to AdminConsole (green) = version-info *discoverability*, not *pinning*. Branch preserved; awaiting user decision.
+- 2026-06-04 · FRO-146 actor wired staging deploy into `issue.md` Step 3 (`dev.aquilla.app`, `pnpm run deploy:aquilla:staging`). `--deploy` available once FRO-146 lands.
+- 2026-06-04 · **FRO-135 merged** → integration (sync-worker only: defer O(N²) per-cell file-counter recompute to once-per-chunk — the REAL cause of import-stuck-0% over Hyperdrive/PG, SQL dialect was already ported). **root tsc 0 · sync-worker npm test 400/400 · `npm run build` PASS.** ⚠️ sync-worker `tsc --noEmit` shows **60 PRE-EXISTING errors in `__tests__/` files** (CellRow not assignable to Record, node: module resolution) — CONFIRMED identical on `main` branch `bfacb67`, NOT swarm-introduced (from the recent D1→PG migration). Real gate = vitest, green. Traced as separate debt.
+- 2026-06-04 · **★ AUTOMATED GATE GREEN for the 7-issue batch** (135,140,141,136,142,134,137): root tsc 0 · vitest 1510/1512 (2 baseline AssignedToMe reds) · auth-worker tsc 0 + 94/94 · sync-worker test 400/400 · build PASS.
+- 2026-06-04 · **TOPOLOGY CLARIFIED:** `main` BRANCH = `bfacb67` (integration is correctly based on it; clean ff). The main *working dir* is checked out on **`ryder/fro-146-staging-subdomain`** @ `883ff20` (other actor's commits: FRO-146 staging-on-Neon, FRO-147 dialog redesign, dev-stack managed-local-Postgres). **Zero file overlap** with integration (`comm -12` empty) → conflict-free whenever that branch lands on main. ⇒ **FRO-147 + FRO-146 are DONE by the other actor.** dev-stack now boots Postgres for `pnpm dev` (unblocks live-UI QA).
+- 2026-06-04 · **FRO-138 committed** `swarm/fro-138`@`12230b0` ("lock permission semantics with 34 integration tests") — awaiting full agent completion before merge.
+- ⚠️ NOTE: this top block was once stripped by a linter/user edit and restored. If it goes missing again, the merge log here is the recovery source.
+
+---
+
 # 🆕 CURRENT GOAL (2026-05-31 PM) — Back-translation + Terminology, built fully
 
 > **This block is the active goal. The historical "production-ready" swarm below CONVERGED and is reference-only.**

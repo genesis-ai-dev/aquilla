@@ -62,6 +62,50 @@ Both routes 404 unless `WRANGLER_LOCAL=1`. Prod `wrangler.toml` never sets it; t
 
 For the E2E suite, prefer the existing `/__test__/reset` + alice/bob/carol helpers (`e2e/helpers/seed.ts`) — those give clean isolation per test. The `/__dev__/login` bypass is for manual browser dev and ad-hoc Playwright probes.
 
+## Issue workflow (Linear — FrontierR&D team)
+
+Bugs and tasks live in Linear (team `FrontierR&D`, key `FRO`). Move issues through the
+status pipeline as work progresses — keep the board honest so anyone (human or agent)
+can see exactly where each issue stands.
+
+**Use the `/issue` slash command to drive this.** Whenever you're debugging, improving,
+validating, or QA-testing in this repo, run it instead of touching the board by hand —
+it resolves the issue's current status and does the next right transition:
+
+- `/issue next` — pick up the top `Todo` and start working it.
+- `/issue FRO-123` — act on a specific issue from wherever it currently sits.
+- `/issue debug "thing is broken"` — file a new bug, then start it.
+- `/issue improve "make X nicer"` — file a new improvement, then start it.
+- add `--deploy` to push to staging and advance to `Ready for Review` after the fix.
+
+The command (`.claude/commands/issue.md`) enforces the verification gate and the status
+rules below.
+
+Status pipeline:
+
+| Status | Meaning | Who/when |
+| --- | --- | --- |
+| **Backlog** | Captured, not yet scoped for work | triage |
+| **Todo** | Ready to be picked up by dev/AI | pull from here to start work |
+| **Fixed** | Dev/AI has fixed it, **not deployed yet** | set the moment the fix is committed/merged |
+| **Ready for Review** | Fix deployed to **staging**, awaiting dev-team validation | set after pushing to the staging subdomain |
+| **Ready for QA** | Dev validated on staging; QA can review | **terminal status for now** — stop here |
+| ~~Done~~ / ~~Deployed~~ | post-QA states | **not used yet** — no QA process running |
+| **Canceled** / **Duplicate** | invalid / superseded | as needed |
+
+Rules:
+
+1. **Pick up work from `Todo`.** Move the issue to your name and start it.
+2. When the fix is done but not yet on staging → **`Fixed`**.
+3. When the fix is deployed to the **staging subdomain** → **`Ready for Review`**.
+4. Once validated on staging → **`Ready for QA`**. This is the **terminal status** until a QA
+   process exists — do **not** move issues to `Done`/`Deployed`.
+5. Reference the `FRO-###` identifier in commits/branches (Linear auto-suggests a branch name).
+
+> **TODO (infra):** stand up a dedicated **staging subdomain** for the prototype so the
+> `Ready for Review` → `Ready for QA` steps have a real deploy target. Until it exists,
+> note in the issue where the fix was verified.
+
 ## Useful slash commands
 
 - `/e2e-add` — scaffold a new E2E spec from template (see `.claude/commands/e2e-add.md`).

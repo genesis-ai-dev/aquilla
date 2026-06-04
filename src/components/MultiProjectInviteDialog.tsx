@@ -96,7 +96,7 @@ export function MultiProjectInviteDialog({
         recipient.resolved ??
         (await lookupUser(session.jwt, recipient.raw.trim()))
       if (!target) {
-        setTopError(`No Frontier user named "${recipient.raw.trim()}".`)
+        setTopError(`No Aquilla user named "${recipient.raw.trim()}".`)
         return
       }
       // Issue grants in parallel — they're independent and we want the
@@ -157,7 +157,7 @@ export function MultiProjectInviteDialog({
         <div className="space-y-4">
           <div className="space-y-1.5">
             <Label htmlFor="invite-username" className="text-xs">
-              Frontier username
+              Aquilla username
             </Label>
             <UsernameTypeahead
               value={recipient}

@@ -60,7 +60,7 @@ export function InviteStep({ projectId, onSharesChanged }: InviteStepProps) {
       if (!member) {
         setInviteResult({
           kind: "error",
-          message: `No Frontier user named "${trimmed}".`,
+          message: `No Aquilla user named "${trimmed}".`,
         })
       } else {
         setInviteResult({ kind: "ok", username: member.username })
@@ -114,7 +114,7 @@ export function InviteStep({ projectId, onSharesChanged }: InviteStepProps) {
       {/* Direct username invite */}
       <form onSubmit={handleAddMember} className="space-y-2">
         <Label htmlFor="invite-user" className="text-xs">
-          Invite by Frontier username
+          Invite by Aquilla username
         </Label>
         <div className="flex gap-1.5">
           <Input

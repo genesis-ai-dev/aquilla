@@ -35,7 +35,7 @@ export function FrontierLoginForm({
   return (
     <form onSubmit={onSubmit} className="space-y-3">
       <div>
-        <Label htmlFor="f-user">Frontier username or email</Label>
+        <Label htmlFor="f-user">Aquilla username or email</Label>
         <Input id="f-user" value={username} onChange={(e) => setUsername(e.target.value)} autoComplete="username" />
       </div>
       <div>

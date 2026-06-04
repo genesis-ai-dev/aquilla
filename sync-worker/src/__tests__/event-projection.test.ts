@@ -10,7 +10,7 @@ import {
   type PersistedEvent,
 } from '../events/event-projection'
 import type { EventKind } from '../events/types'
-import { makeInMemoryD1 } from './helpers/d1-fake'
+import { makeTestDb } from './helpers/pg-test-db'
 
 interface RecordedStmt {
   sql: string
@@ -101,7 +101,7 @@ describe('buildEventProjectionStmts — source.cell.create', () => {
     // FTS maintenance adds 2 statements (delete + insert) around the cells
     // DML, and the files-counter recompute adds 1 more.
     expect(stmts).toHaveLength(4)
-    const cellsStmts = recorded.filter(r => !r.sql.includes('cells_fts'))
+    const cellsStmts = recorded.filter(r => !r.sql.includes('cells_fts') && !r.sql.includes('WHERE false'))
     const { sql, args } = cellsStmts[0]
     expect(sql).toContain('INSERT INTO cells')
     expect(sql).toContain('ON CONFLICT(project_id, file_id, cell_id, side)')
@@ -132,7 +132,7 @@ describe('buildEventProjectionStmts — target.cell.create', () => {
       }),
       stmts,
     )
-    const cellsStmts = recorded.filter(r => !r.sql.includes('cells_fts'))
+    const cellsStmts = recorded.filter(r => !r.sql.includes('cells_fts') && !r.sql.includes('WHERE false'))
     const { args } = cellsStmts[0]
     expect(args[3]).toBe('target')
     expect(args[8]).toBe('cell-0')   // anchor_cell_id
@@ -156,7 +156,7 @@ describe('buildEventProjectionStmts — target.cell.commit', () => {
     // FTS maintenance adds 2 statements (delete + insert) around the cells
     // DML, and the files-counter recompute adds 1 more.
     expect(stmts).toHaveLength(4)
-    const cellsStmts = recorded.filter(r => !r.sql.includes('cells_fts'))
+    const cellsStmts = recorded.filter(r => !r.sql.includes('cells_fts') && !r.sql.includes('WHERE false'))
     const { sql, args } = cellsStmts[0]
     // The client never emits target.cell.create, so the commit is an UPSERT:
     // INSERT the target row on first translation, ON CONFLICT UPDATE after.
@@ -183,7 +183,7 @@ describe('buildEventProjectionStmts — target.cell.commit', () => {
       makeEvent('target.cell.commit', { value: 'x' }),
       stmts,
     )
-    const cellsStmts = recorded.filter(r => !r.sql.includes('cells_fts'))
+    const cellsStmts = recorded.filter(r => !r.sql.includes('cells_fts') && !r.sql.includes('WHERE false'))
     expect(cellsStmts[0].args[6]).toBe(null)
   })
 })
@@ -197,7 +197,7 @@ describe('buildEventProjectionStmts — source.cell.commit', () => {
       makeEvent('source.cell.commit', { value: 'updated source' }),
       stmts,
     )
-    const cellsStmts = recorded.filter(r => !r.sql.includes('cells_fts'))
+    const cellsStmts = recorded.filter(r => !r.sql.includes('cells_fts') && !r.sql.includes('WHERE false'))
     const { sql } = cellsStmts[0]
     expect(sql).toContain('UPDATE cells SET')
     expect(sql).not.toContain('source_event_id =')
@@ -209,7 +209,7 @@ describe('buildEventProjectionStmts — *.cell.delete', () => {
     const { db, recorded } = makeD1Stub()
     const stmts: D1PreparedStatement[] = []
     buildEventProjectionStmts(db, makeEvent('target.cell.delete', {}), stmts)
-    const cellsStmts = recorded.filter(r => !r.sql.includes('cells_fts'))
+    const cellsStmts = recorded.filter(r => !r.sql.includes('cells_fts') && !r.sql.includes('WHERE false'))
     expect(cellsStmts[0].sql).toContain('DELETE FROM cells')
     expect(cellsStmts[0].sql).toContain('side = ?')
     expect(cellsStmts[0].args).toEqual(['proj-1', 'file-a', 'cell-1', 'target'])
@@ -219,7 +219,7 @@ describe('buildEventProjectionStmts — *.cell.delete', () => {
     const { db, recorded } = makeD1Stub()
     const stmts: D1PreparedStatement[] = []
     buildEventProjectionStmts(db, makeEvent('source.cell.delete', {}), stmts)
-    const cellsStmts = recorded.filter(r => !r.sql.includes('cells_fts'))
+    const cellsStmts = recorded.filter(r => !r.sql.includes('cells_fts') && !r.sql.includes('WHERE false'))
     expect(cellsStmts[0].args).toEqual(['proj-1', 'file-a', 'cell-1', 'source'])
   })
 })
@@ -274,7 +274,7 @@ describe('buildEventProjectionStmts — side scoping (regression: target edits m
       buildEventProjectionStmts(db, makeEvent(kind, payload), stmts)
 
       // First non-FTS statement is the cells mutation for these kinds.
-      const cellsStmts = recorded.filter(r => !r.sql.includes('cells_fts'))
+      const cellsStmts = recorded.filter(r => !r.sql.includes('cells_fts') && !r.sql.includes('WHERE false'))
       const sql = cellsStmts[0].sql
       // Three accepted forms, all of which keep the mutation scoped to one side:
       //  1. a literal `side = 'target'` / `side = 'source'` WHERE clause
@@ -452,7 +452,7 @@ describe('buildEventProjectionStmts — error paths', () => {
 
 describe('FTS5 integration via InMemoryD1 — SELECT-form insert/delete', () => {
   it('source.cell.create populates cells_fts via SELECT-form insert', async () => {
-    const db = makeInMemoryD1()
+    const { db, snapshot } = await makeTestDb()
 
     // Step 1: process a source.cell.create event.
     const createStmts: D1PreparedStatement[] = []
@@ -467,17 +467,20 @@ describe('FTS5 integration via InMemoryD1 — SELECT-form insert/delete', () => 
     )
     await db.batch(createStmts)
 
-    const tables = db._tables()
+    const tables = await snapshot()
     // The cells row must exist.
     expect(tables.cells).toHaveLength(1)
     expect(tables.cells[0].value).toBe('In the beginning')
-    // cells_fts must contain an entry for the row.
-    expect(tables.cells_fts).toHaveLength(1)
-    expect(tables.cells_fts[0].value).toBe('In the beginning')
+    // FTS: the generated value_tsv matches a search for an indexed word.
+    const fts = await db
+      .prepare("SELECT cell_id FROM cells WHERE value_tsv @@ plainto_tsquery('simple', ?)")
+      .bind('beginning')
+      .all()
+    expect(fts.results).toHaveLength(1)
   })
 
   it('source.cell.commit updates the cells_fts value', async () => {
-    const db = makeInMemoryD1()
+    const { db, snapshot } = await makeTestDb()
 
     // First create the cell.
     const createStmts: D1PreparedStatement[] = []
@@ -503,16 +506,19 @@ describe('FTS5 integration via InMemoryD1 — SELECT-form insert/delete', () => 
     )
     await db.batch(commitStmts)
 
-    const tables = db._tables()
+    const tables = await snapshot()
     // cells should have the updated value.
     expect(tables.cells[0].value).toBe('In the beginning God created')
-    // cells_fts should reflect the new value (old entry replaced).
-    expect(tables.cells_fts).toHaveLength(1)
-    expect(tables.cells_fts[0].value).toBe('In the beginning God created')
+    // FTS reflects the new value: the added word 'created' now matches.
+    const fts = await db
+      .prepare("SELECT cell_id FROM cells WHERE value_tsv @@ plainto_tsquery('simple', ?)")
+      .bind('created')
+      .all()
+    expect(fts.results).toHaveLength(1)
   })
 
   it('source.cell.delete removes the cells_fts entry', async () => {
-    const db = makeInMemoryD1()
+    const { db, snapshot } = await makeTestDb()
 
     // Create then delete.
     const createStmts: D1PreparedStatement[] = []
@@ -527,7 +533,9 @@ describe('FTS5 integration via InMemoryD1 — SELECT-form insert/delete', () => 
     )
     await db.batch(createStmts)
 
-    expect(db._tables().cells_fts).toHaveLength(1)
+    expect(
+      (await db.prepare("SELECT cell_id FROM cells WHERE value_tsv @@ plainto_tsquery('simple', ?)").bind('Verse').all()).results,
+    ).toHaveLength(1)
 
     const deleteStmts: D1PreparedStatement[] = []
     buildEventProjectionStmts(
@@ -537,11 +545,15 @@ describe('FTS5 integration via InMemoryD1 — SELECT-form insert/delete', () => 
     )
     await db.batch(deleteStmts)
 
-    const tables = db._tables()
+    const tables = await snapshot()
     // cells row is gone.
     expect(tables.cells).toHaveLength(0)
-    // cells_fts entry is also removed.
-    expect(tables.cells_fts).toHaveLength(0)
+    // FTS entry gone too (no matching cells row).
+    const fts = await db
+      .prepare("SELECT cell_id FROM cells WHERE value_tsv @@ plainto_tsquery('simple', ?)")
+      .bind('Verse')
+      .all()
+    expect(fts.results).toHaveLength(0)
   })
 })
 
@@ -549,14 +561,14 @@ describe('files counter projection via InMemoryD1', () => {
   // Seed a files row so the recompute UPDATE has a target. The bug was that
   // this row's cell_count sat at 0 forever because the cell projection never
   // maintained it — these tests pin the maintenance.
-  function seedFile() {
-    return makeInMemoryD1({
+  async function seedFile() {
+    return makeTestDb({
       files: [{ id: 'file-a', project_id: 'proj-1', name: 'Doc', cell_count: 0, approved_count: 0, word_count: 0, last_edit_at: null }],
     })
   }
 
   it('source.cell.create bumps cell_count and last_edit_at on the files row', async () => {
-    const db = seedFile()
+    const { db, snapshot } = await seedFile()
     const stmts: D1PreparedStatement[] = []
     buildEventProjectionStmts(
       db,
@@ -565,13 +577,13 @@ describe('files counter projection via InMemoryD1', () => {
     )
     await db.batch(stmts)
 
-    const file = db._tables().files[0]
+    const file = (await snapshot()).files[0]
     expect(file.cell_count).toBe(1)
     expect(file.last_edit_at).toBe(2000) // serverTs from makeEvent
   })
 
   it('counts distinct cell positions, not source+target rows', async () => {
-    const db = seedFile()
+    const { db, snapshot } = await seedFile()
     // Source cell.
     const s: D1PreparedStatement[] = []
     buildEventProjectionStmts(
@@ -589,7 +601,7 @@ describe('files counter projection via InMemoryD1', () => {
     )
     await db.batch(t)
 
-    const file = db._tables().files[0]
+    const file = (await snapshot()).files[0]
     // One position, two sides → cell_count is 1, not 2.
     expect(file.cell_count).toBe(1)
     // word_count is the target-side words only.
@@ -597,7 +609,7 @@ describe('files counter projection via InMemoryD1', () => {
   })
 
   it('deleting the last cell returns cell_count to 0', async () => {
-    const db = seedFile()
+    const { db, snapshot } = await seedFile()
     const c: D1PreparedStatement[] = []
     buildEventProjectionStmts(
       db,
@@ -605,13 +617,13 @@ describe('files counter projection via InMemoryD1', () => {
       c,
     )
     await db.batch(c)
-    expect(db._tables().files[0].cell_count).toBe(1)
+    expect((await snapshot()).files[0].cell_count).toBe(1)
 
     const d: D1PreparedStatement[] = []
     buildEventProjectionStmts(db, makeEvent('source.cell.delete', {}), d)
     await db.batch(d)
 
-    const file = db._tables().files[0]
+    const file = (await snapshot()).files[0]
     expect(file.cell_count).toBe(0)
     expect(file.last_edit_at).toBeNull()
   })

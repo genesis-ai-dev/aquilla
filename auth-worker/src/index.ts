@@ -114,21 +114,6 @@ app.use("*", async (c, next) => {
   }
 })
 
-// D1→Neon cutover: serve AQUILLA_DB via the Postgres shim when HYPERDRIVE is
-// bound (per-request connection, closed after the response). Gated — prod stays
-// on D1 until the binding is added. After the prefix-strip so the re-entrant
-// app.fetch doesn't open a second connection.
-app.use("*", async (c, next) => {
-  if (!c.env.HYPERDRIVE) return next()
-  const shim = makeD1Postgres(c.env.HYPERDRIVE.connectionString)
-  ;(c.env as { AQUILLA_DB: D1Database }).AQUILLA_DB = shim as unknown as D1Database
-  try {
-    await next()
-  } finally {
-    c.executionCtx.waitUntil(shim.close())
-  }
-})
-
 app.get("/", (c) =>
   c.json({
     name: "aquilla-identity",
@@ -187,5 +172,30 @@ app.onError((err, c) => {
   console.error("Unhandled error in auth-worker:", err)
   return c.json({ error: "Internal server error" }, 500)
 })
+
+// D1→Neon cutover: serve AQUILLA_DB via the Postgres shim when HYPERDRIVE is
+// bound. The shim + its connection are created PER REQUEST and injected via a
+// fresh env COPY ({ ...env, AQUILLA_DB: shim }) — never by mutating the shared
+// isolate-wide `env`. Mutating it (the old middleware) let concurrent requests
+// clobber each other's DB handle, causing "Cannot perform I/O on behalf of a
+// different request" 500s under the assignments fan-out. Mirrors sync-worker.
+//
+// We wrap app.fetch (rather than exporting a separate object) so `export
+// default app` and tests' `app.request(path, init, env)` keep working — Hono's
+// app.request() routes through app.fetch. Tests pass an env with AQUILLA_DB and
+// no HYPERDRIVE, so they skip the shim and use their injected PGlite handle.
+const baseFetch = app.fetch.bind(app)
+app.fetch = (async (request: Request, env: Env, ctx: ExecutionContext): Promise<Response> => {
+  if (!env?.HYPERDRIVE) return baseFetch(request, env, ctx)
+  const shim = makeD1Postgres(env.HYPERDRIVE.connectionString)
+  // Drop HYPERDRIVE so the prefix-strip middleware's re-entrant app.fetch reuses
+  // this shim (via reqEnv.AQUILLA_DB) instead of opening a second connection.
+  const reqEnv = { ...env, AQUILLA_DB: shim as unknown as D1Database, HYPERDRIVE: undefined }
+  try {
+    return await baseFetch(request, reqEnv, ctx)
+  } finally {
+    ctx.waitUntil(shim.close())
+  }
+}) as typeof app.fetch
 
 export default app

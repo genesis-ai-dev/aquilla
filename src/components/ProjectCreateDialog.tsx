@@ -38,6 +38,14 @@ interface ProjectCreateDialogProps {
  */
 type ProjectShape = "self-contained" | "source-only" | "linked-target"
 
+/**
+ * Per-field overrides for this dialog: a touch taller with more horizontal
+ * padding so long example placeholders aren't crowded against the edges, and a
+ * softer focus ring (the global 3px/50% ring read as a halo that obscured the
+ * field text). tailwind-merge lets these win over the base Input classes.
+ */
+const FIELD_CLASS = "h-9 px-3 focus-visible:ring-2 focus-visible:ring-ring/35"
+
 export function ProjectCreateDialog({ onCreated, orgId }: ProjectCreateDialogProps) {
   const { session } = useFrontierSession()
   const [open, setOpen] = useState(false)
@@ -128,101 +136,97 @@ export function ProjectCreateDialog({ onCreated, orgId }: ProjectCreateDialogPro
         <DialogHeader>
           <DialogTitle>Create New Project</DialogTitle>
         </DialogHeader>
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <div>
-            <Label htmlFor="name">Project Name</Label>
+        <form onSubmit={handleSubmit} className="space-y-5">
+          <div className="space-y-2">
+            <Label htmlFor="name">Project name</Label>
             <Input
               id="name"
+              className={FIELD_CLASS}
               value={name}
               onChange={(e) => setName(e.target.value)}
               placeholder="My Translation Project"
             />
           </div>
 
+          <div className="space-y-2">
+            <div className="flex items-center gap-1.5">
+              <Label htmlFor="source">Source language</Label>
+              <LanguageFieldHint />
+            </div>
+            <Input
+              id="source"
+              className={FIELD_CLASS}
+              value={sourceLanguage}
+              onChange={(e) => setSourceLanguage(e.target.value)}
+              placeholder="English, Grade 7 English, es-419…"
+            />
+          </div>
+
+          {shape !== "source-only" && (
+            <div className="space-y-2">
+              <div className="flex items-center gap-1.5">
+                <Label htmlFor="target">Target language</Label>
+                <LanguageFieldHint />
+              </div>
+              <Input
+                id="target"
+                className={FIELD_CLASS}
+                value={targetLanguage}
+                onChange={(e) => setTargetLanguage(e.target.value)}
+                placeholder="French, conversational Swahili, zh-Hant…"
+              />
+            </div>
+          )}
+
           {/* AD-9 project-shape picker, tucked behind an "Advanced" disclosure
-              so the dashboard create flow shows only name + languages by
-              default. Self-contained is the assumed shape and matches the
-              VS-Code-extension muscle memory. */}
-          <details className="rounded-xl border px-3 py-2 [&[open]>summary]:mb-2">
+              and placed after the primary fields so the default create flow is
+              just name + languages. Self-contained is the assumed shape and
+              matches the VS-Code-extension muscle memory. */}
+          <details className="rounded-xl border px-3 py-2.5 [&[open]>summary]:mb-3">
             <summary className="cursor-pointer text-xs font-medium text-muted-foreground select-none">
               Advanced: project shape
             </summary>
-            <fieldset className="space-y-2 pt-1">
-              <label className="flex items-start gap-2 text-sm">
+            <fieldset className="space-y-3 pt-1">
+              <label className="flex items-start gap-2.5 text-sm">
                 <input
                   type="radio"
                   name="shape"
-                  className="mt-1"
+                  className="mt-0.5"
                   checked={shape === "self-contained"}
                   onChange={() => pickShape("self-contained")}
                 />
                 <span>
-                  <strong>Self-contained</strong> (default) — owns its source
-                  and its target. The most common shape.
+                  <strong>Self-contained</strong> — owns its source and target.
                 </span>
               </label>
-              <label className="flex items-start gap-2 text-sm">
+              <label className="flex items-start gap-2.5 text-sm">
                 <input
                   type="radio"
                   name="shape"
-                  className="mt-1"
+                  className="mt-0.5"
                   checked={shape === "source-only"}
                   onChange={() => pickShape("source-only")}
                 />
                 <span>
-                  <strong>Source-only</strong> — a canonical source other
-                  projects link against. No target language is set.
+                  <strong>Source-only</strong> — a canonical source others link
+                  against. No target.
                 </span>
               </label>
-              <label className="flex items-start gap-2 text-sm">
+              <label className="flex items-start gap-2.5 text-sm">
                 <input
                   type="radio"
                   name="shape"
-                  className="mt-1"
+                  className="mt-0.5"
                   checked={shape === "linked-target"}
                   onChange={() => pickShape("linked-target")}
                 />
                 <span>
                   <strong>Linked target</strong> — reads source from another
-                  project; this one only owns its target side.
+                  project; owns only its target.
                 </span>
               </label>
             </fieldset>
           </details>
-
-          <div>
-            <div className="flex items-center gap-1.5">
-              <Label htmlFor="source">Source Language</Label>
-              <LanguageFieldHint />
-            </div>
-            <Input
-              id="source"
-              value={sourceLanguage}
-              onChange={(e) => setSourceLanguage(e.target.value)}
-              placeholder="e.g. English, Grade 7 English, es-419"
-            />
-            <p className="mt-1 text-[11px] text-muted-foreground">
-              The language or variety you're translating <em>from</em>.
-            </p>
-          </div>
-
-          {shape !== "source-only" && (
-            <div>
-              <div className="flex items-center gap-1.5">
-                <Label htmlFor="target">Target Language</Label>
-                <LanguageFieldHint />
-              </div>
-              <Input
-                id="target"
-                value={targetLanguage}
-                onChange={(e) => setTargetLanguage(e.target.value)}
-                placeholder="e.g. French, conversational Swahili, zh-Hant"
-              />
-              <p className="mt-1 text-[11px] text-muted-foreground">
-                The language or variety you're translating <em>into</em>.
-              </p>
-            </div>
-          )}
 
           {error && (
             <p className="text-sm text-destructive" role="alert">
@@ -230,7 +234,11 @@ export function ProjectCreateDialog({ onCreated, orgId }: ProjectCreateDialogPro
             </p>
           )}
 
-          <Button type="submit" className="w-full" disabled={!canSubmit() || submitting}>
+          <Button
+            type="submit"
+            className="h-9 w-full"
+            disabled={!canSubmit() || submitting}
+          >
             {submitting ? "Creating…" : "Create Project"}
           </Button>
         </form>

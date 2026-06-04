@@ -26,6 +26,7 @@ import { foldProjection, type FoldEvent, type Row } from "./lib/fold-projection"
 import { buildEventProjectionStmts, CHAIN_MUTATING_KINDS, type PersistedEvent } from "../sync-worker/src/events/event-projection"
 import type { EventKind } from "../sync-worker/src/events/types"
 import { D1Postgres, type PgExecutor } from "../db/shim/d1-postgres"
+import type { D1Database, D1PreparedStatement } from "@cloudflare/workers-types"
 
 types.setTypeParser(20, (v: string) => Number(v)) // int8 → JS number
 

@@ -41,11 +41,15 @@ function meta(rowCount: number, rowsRead: number) {
 }
 
 class PgStatement {
-  constructor(
-    private exec: PgExecutor,
-    private query: string,
-    private args: unknown[] = [],
-  ) {}
+  private exec: PgExecutor
+  private query: string
+  private args: unknown[]
+
+  constructor(exec: PgExecutor, query: string, args: unknown[] = []) {
+    this.exec = exec
+    this.query = query
+    this.args = args
+  }
 
   bind(...args: unknown[]): PgStatement {
     return new PgStatement(this.exec, this.query, args)
@@ -79,7 +83,11 @@ class PgStatement {
 }
 
 export class D1Postgres {
-  constructor(private executor: PgExecutor) {}
+  private executor: PgExecutor
+
+  constructor(executor: PgExecutor) {
+    this.executor = executor
+  }
 
   prepare(query: string): PgStatement {
     return new PgStatement(this.executor, query)

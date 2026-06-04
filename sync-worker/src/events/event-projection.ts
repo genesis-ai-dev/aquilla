@@ -18,6 +18,7 @@
 // Hash function: djb2 (32-bit), unchanged. Kept as a cheap FTS-skipping
 // fingerprint on `content_hash`.
 
+import type { D1Database, D1PreparedStatement } from '@cloudflare/workers-types'
 import type { EventKind, EventPayloads, CommentScope } from './types'
 
 // A single event row as it lives in D1. JSON.parse on `payload` is the
@@ -244,9 +245,6 @@ export function buildEventProjectionStmts(
       const valueHtml = p.valueHtml ?? null
       const hash = contentHash(value)
       const wordCount = countWords(value)
-
-      const commitSide: 'source' | 'target' =
-        event.kind === 'source.cell.commit' ? 'source' : 'target'
 
       // FTS5 maintenance (pre-DML): remove the OLD indexed value before we
       // overwrite the cells row. Must run first so the old value is still

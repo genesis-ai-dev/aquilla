@@ -113,7 +113,7 @@ export function UsernameTypeahead({
                   ? "bg-background shadow-sm text-foreground"
                   : "text-muted-foreground hover:text-foreground"
               }`}
-              title="Invite an existing Frontier user"
+              title="Invite an existing Aquilla user"
             >
               @user
             </button>
@@ -147,13 +147,13 @@ export function UsernameTypeahead({
               placeholder?.[value.mode] ??
               (value.mode === "email"
                 ? "name@example.com"
-                : "Frontier username")
+                : "Aquilla username")
             }
           />
           {value.mode === "username" && value.resolved && (
             <span
               className="absolute right-2 top-1/2 -translate-y-1/2 inline-flex items-center gap-1 rounded bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 px-1.5 py-0.5 text-[10px]"
-              title="Verified Frontier user"
+              title="Verified Aquilla user"
             >
               <Check className="h-3 w-3" /> verified
             </span>
@@ -184,7 +184,7 @@ export function UsernameTypeahead({
           {!needsMorePrefix && !isLoading && results.length === 0 && value.raw.trim().length >= 2 && lastFetchOk && (
             <div className="px-3 py-2">
               <p className="text-[11px] text-muted-foreground">
-                No Frontier user named "{value.raw.trim()}".
+                No Aquilla user named "{value.raw.trim()}".
               </p>
               {showModeToggle && (
                 <button

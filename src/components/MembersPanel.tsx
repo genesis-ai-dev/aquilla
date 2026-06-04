@@ -137,7 +137,7 @@ export function MembersPanel({
               onChange={setRecipient}
               disabled={adding}
               showModeToggle={false}
-              placeholder={{ username: "Frontier username" }}
+              placeholder={{ username: "Aquilla username" }}
             />
           </div>
           <select

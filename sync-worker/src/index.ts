@@ -42,6 +42,7 @@ export { ProjectSync } from "./project-do"
 // Inert legacy DO class — kept exported so deploys don't trip the
 // "script does not export class 'FileSync'" guard. See file-sync-legacy.ts.
 export { FileSync } from "./file-sync-legacy"
+import { makeD1Postgres } from "../../db/shim/d1-postgres"
 
 declare global {
   namespace Cloudflare {
@@ -55,6 +56,9 @@ declare global {
       SNAPSHOTS: R2Bucket
       /** Identity-owned D1 schema containing events and projections. */
       AQUILLA_DB?: D1Database
+      /** Postgres (Neon) via Hyperdrive. When bound, AQUILLA_DB is served by the
+       *  D1-compatible Postgres shim instead of D1 (the D1→Neon cutover). */
+      HYPERDRIVE?: Hyperdrive
       /** Shared HMAC key with identity that mints /sync-token JWTs. */
       SYNC_SECRET_KEY?: string
       /**
@@ -122,10 +126,20 @@ function stripApexPrefix(request: Request): Request {
 }
 
 export default {
-  async fetch(request: Request, env: Env): Promise<Response> {
+  async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     // Must run before CORS / route matching — those test bare paths.
     request = stripApexPrefix(request)
 
+    // D1→Neon cutover: when HYPERDRIVE is bound, serve AQUILLA_DB via the
+    // D1-compatible Postgres shim (per-request connection, closed after the
+    // response). Gated, so prod stays on D1 until the binding is added.
+    let pgShim: { close(): Promise<void> } | null = null
+    if (env.HYPERDRIVE) {
+      const shim = makeD1Postgres(env.HYPERDRIVE.connectionString)
+      env = { ...env, AQUILLA_DB: shim as unknown as D1Database }
+      pgShim = shim
+    }
+    try {
     const preflight = handleCorsPreflight(request)
     if (preflight) return preflight
 
@@ -203,5 +217,8 @@ export default {
     if (projectSyncResponse) return projectSyncResponse
 
     return new Response("not found", { status: 404 })
+    } finally {
+      if (pgShim) ctx.waitUntil(pgShim.close())
+    }
   },
 }

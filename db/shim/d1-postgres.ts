@@ -26,6 +26,8 @@ import postgres from "postgres"
 export interface PgExecutor {
   run(sql: string, params: unknown[]): Promise<{ rows: Record<string, unknown>[]; rowCount: number }>
   begin<T>(fn: (tx: PgExecutor) => Promise<T>): Promise<T>
+  /** Release the underlying connection (postgres.js per-request); no-op for PGlite tests. */
+  close?(): Promise<void>
 }
 
 /** D1 `?` placeholders → Postgres `$1,$2,…` (positional, in order). */
@@ -97,6 +99,11 @@ export class D1Postgres {
     const { rowCount } = await this.executor.run(query, [])
     return { count: rowCount, duration: 0 }
   }
+
+  /** Release the connection — call via ctx.waitUntil() after the response. */
+  async close() {
+    await this.executor.close?.()
+  }
 }
 
 /** postgres.js → PgExecutor (prod path; over Hyperdrive's connection string). */
@@ -107,6 +114,7 @@ function fromPostgresJs(sql: postgres.Sql): PgExecutor {
       return { rows, rowCount: rows.count ?? rows.length }
     },
     begin: (fn) => s.begin((tx) => fn(wrap(tx as unknown as postgres.Sql))) as Promise<never>,
+    close: () => sql.end({ timeout: 5 }),
   })
   return wrap(sql)
 }

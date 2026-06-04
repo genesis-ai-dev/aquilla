@@ -16,6 +16,15 @@ Arguments: $ARGUMENTS
 - Linear project: `Prototype Debugging` (id `215cff7b-1a95-443d-9343-1f1528754462`)
 - Status pipeline (see AGENTS.md → "Issue workflow"):
   `Backlog → Todo → Fixed → Ready for Review → Ready for QA` *(terminal — no QA yet)*
+- **Spec repo (source of truth):** `~/frontierrnd/aquilla-specs`
+  - Features: `04-features/<feature>.md` (carry a `revisions:` frontmatter log)
+  - User stories: `05-user-stories/<story>.md` (have `Acceptance criteria` + `Error / edge cases`)
+  - Cross-cutting design: `09-design-and-ux.md`; architecture decisions (AD-#) in `02-foundations.md`
+  - The spec is currently **behind** the prototype. A Linear project,
+    *"Bring aquilla-specs into line with prototype divergence"*, tracks the catch-up
+    (known gaps: D1 → Neon Postgres + Hyperdrive; media files ordered by a **timeline**
+    spine vs. cell files ordered by **segments**). If your spec edit lands in one of those
+    diverged areas, note it / link that project rather than silently half-fixing it.
 
 ## Step 0 — Resolve what the user wants
 
@@ -39,6 +48,9 @@ If the issue is in `Backlog` or `Todo`:
 - Assign it to the user (`assignee: "me"`).
 - Move it to `Todo` if it was in `Backlog` (it's now actively being worked).
 - Restate the issue's acceptance/repro in one line so the goal is explicit.
+- **Flag spec impact (note only, don't edit yet).** Skim the relevant spec file(s) in
+  `~/frontierrnd/aquilla-specs` and jot whether this issue likely needs a spec change. Do
+  **not** edit the spec now — your opinion may change while fixing the code (see Step 2.5).
 
 ## Step 2 — Fix / improve, then VERIFY (→ Fixed)
 
@@ -55,8 +67,36 @@ If the issue is in `Backlog` or `Todo`:
 5. Move the issue to **`Fixed`** and post a Linear comment summarizing the fix +
    how it was verified.
 
+## Step 2.5 — Sync the spec (source of truth) — REQUIRED before leaving Fixed
+
+The spec in `~/frontierrnd/aquilla-specs` is the source of truth; Linear only tracks the
+*fix*. **Fix the code first (done above), then reconcile the spec** — by now you know what
+the behavior should actually be, which may differ from your Step 1 hunch.
+
+1. **Decide: does the spec need to change?**
+   - If the fix only restores behavior the spec already describes → **no spec change.**
+     Comment on the issue saying so, with the spec section you checked.
+   - If the fix changes/clarifies/constrains behavior → **update the spec.**
+2. **Update the spec as a regression guard, not a changelog.** Encode the corrected
+   behavior where it will catch the regression next time:
+   - The constraint goes in the **`Acceptance criteria`** or **`Error / edge cases`** of the
+     relevant `05-user-stories/<story>.md`, and/or a **Design notes** constraint.
+   - Example: "project creation form is crowded and unclear" → in `create-new-project.md`
+     add an acceptance criterion like *"the Create dialog shows only the fields required for
+     the selected shape; no more than N controls visible at once"* — describe the **rule**,
+     not the specific CSS fix (the fix lives in code + Linear).
+   - Refactor / consolidate / append as the truth demands — don't just bolt on a line if a
+     section now reads incoherently. The end state matters more than your first draft.
+   - Bump `last-updated` and add a dated `revisions:` entry citing the `FRO-###`.
+   - Touch `04-features/<feature>.md` and `09-design-and-ux.md` too if the behavior spans them.
+3. **Commit in the spec repo** (`~/frontierrnd/aquilla-specs`) referencing `FRO-###`.
+   That repo's `main` may be dirty — stage only your files; never touch unrelated changes.
+4. Comment on the Linear issue: what spec files changed (with paths) or why none did.
+
+Do not advance past `Fixed` until the spec decision is made and recorded.
+
 If `--deploy` was NOT passed, **stop here** and report: "FRO-### is Fixed (verified
-locally), not yet on staging. Re-run with `--deploy` to push and advance."
+locally), spec reconciled, not yet on staging. Re-run with `--deploy` to push and advance."
 
 ## Step 3 — Deploy to staging (→ Ready for Review)  [only with `--deploy`]
 

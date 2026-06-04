@@ -81,6 +81,24 @@ it resolves the issue's current status and does the next right transition:
 The command (`.claude/commands/issue.md`) enforces the verification gate and the status
 rules below.
 
+### The spec is the source of truth
+
+The behavior spec lives in a sibling repo, **`~/frontierrnd/aquilla-specs`**, and is the
+source of truth. Linear only tracks the *fix*; the spec records what the system should do.
+So every issue carries a spec question:
+
+- **Fix the code first, then reconcile the spec.** While fixing, your view of the correct
+  behavior often changes — so the spec edit comes *after* the fix is verified, not before.
+- **Document the corrected behavior as a regression guard** in the relevant
+  `05-user-stories/<story>.md` (`Acceptance criteria` / `Error / edge cases`) and/or
+  `04-features/<feature>.md`. Describe the *rule* ("the create form shows only fields for the
+  selected shape"), not the specific code fix. Refactor/consolidate/append as the truth
+  demands; bump `last-updated` + add a `revisions:` entry citing the `FRO-###`.
+- If no spec change is needed, say so on the issue (cite the section you checked).
+- The spec is currently **behind** the prototype (Neon/Hyperdrive backend; timeline- vs
+  segment-ordered files). The Linear project *"Bring aquilla-specs into line with prototype
+  divergence"* tracks that catch-up — link it if your edit touches a diverged area.
+
 Status pipeline:
 
 | Status | Meaning | Who/when |

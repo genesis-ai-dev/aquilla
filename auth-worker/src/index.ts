@@ -70,6 +70,8 @@ import chatRoutes from "./routes/chat"
 
 type HonoEnv = { Bindings: Env; Variables: Variables }
 
+import { makeD1Postgres } from "../../db/shim/d1-postgres"
+
 const app = new Hono<HonoEnv>()
 
 // CORS for browser callers. The frontend sends Authorization as a Bearer
@@ -109,6 +111,21 @@ app.use("*", async (c, next) => {
   await next()
   for (const [k, v] of Object.entries(CORS_HEADERS)) {
     c.res.headers.set(k, v)
+  }
+})
+
+// D1→Neon cutover: serve AQUILLA_DB via the Postgres shim when HYPERDRIVE is
+// bound (per-request connection, closed after the response). Gated — prod stays
+// on D1 until the binding is added. After the prefix-strip so the re-entrant
+// app.fetch doesn't open a second connection.
+app.use("*", async (c, next) => {
+  if (!c.env.HYPERDRIVE) return next()
+  const shim = makeD1Postgres(c.env.HYPERDRIVE.connectionString)
+  ;(c.env as { AQUILLA_DB: D1Database }).AQUILLA_DB = shim as unknown as D1Database
+  try {
+    await next()
+  } finally {
+    c.executionCtx.waitUntil(shim.close())
   }
 })
 

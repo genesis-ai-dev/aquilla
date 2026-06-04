@@ -10,6 +10,10 @@ export interface Env {
    *  Shared with aquilla-sync-worker (same database_id). */
   AQUILLA_DB: D1Database
 
+  /** Postgres (Neon) via Hyperdrive. When bound, AQUILLA_DB is served by the
+   *  D1-compatible Postgres shim instead of D1 (the D1→Neon cutover). */
+  HYPERDRIVE?: Hyperdrive
+
   // Frontier JWT signing. Rotated for the clean break — tokens minted by
   // the legacy frontier-server no longer verify here.
   SECRET_KEY: string

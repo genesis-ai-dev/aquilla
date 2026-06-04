@@ -170,7 +170,7 @@ admin.get("/projects", async (c) => {
        LEFT JOIN organizations o ON o.id = p.org_id
        LEFT JOIN users u ON u.id = p.created_by
        LEFT JOIN files f ON f.project_id = p.id
-      GROUP BY p.id
+      GROUP BY p.id, o.name, u.username
       ORDER BY p.created_at DESC`,
   ).all<{
     id: string

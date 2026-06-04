@@ -100,10 +100,19 @@ locally), spec reconciled, not yet on staging. Re-run with `--deploy` to push an
 
 ## Step 3 — Deploy to staging (→ Ready for Review)  [only with `--deploy`]
 
-1. Deploy to the **staging subdomain**. (If staging infra doesn't exist yet, say so,
-   leave the issue at `Fixed`, and link/create the staging-subdomain infra issue.)
+Staging lives at **`https://dev.aquilla.app`** (API at `https://api.dev.aquilla.app`),
+backed by the Neon `staging` branch via Hyperdrive. It does **not** have the dev auth
+bypass — sign in with a real staging account.
+
+1. Deploy from repo root:
+   - Everything: `pnpm run deploy:aquilla:staging`
+   - Or piecemeal: `deploy:aquilla:staging:spa` / `:sync` / `:auth` (zone-perm token needed,
+     same as prod — CI's token can't sync routes).
+   - If the staging Hyperdrive id is still `REPLACE_WITH_STAGING_HYPERDRIVE_ID` in the
+     worker `wrangler.toml`s, staging isn't provisioned yet — stop, leave the issue at
+     `Fixed`, and point at **FRO-146** (one-time provisioning) instead of guessing.
 2. Move the issue to **`Ready for Review`**.
-3. Comment the staging URL where the fix can be validated.
+3. Comment the staging URL (`https://dev.aquilla.app`) + what to validate.
 
 ## Step 4 — Validate on staging (→ Ready for QA)
 

@@ -77,15 +77,15 @@ class PgStatement {
 }
 
 export class D1Postgres {
-  constructor(private exec: PgExecutor) {}
+  constructor(private executor: PgExecutor) {}
 
   prepare(query: string): PgStatement {
-    return new PgStatement(this.exec, query)
+    return new PgStatement(this.executor, query)
   }
 
   /** D1 batch = one atomic transaction; returns one result per statement. */
   async batch<T = Record<string, unknown>>(stmts: PgStatement[]) {
-    return this.exec.begin(async (tx) => {
+    return this.executor.begin(async (tx) => {
       const out: Array<{ results: T[]; success: true; meta: ReturnType<typeof meta> }> = []
       for (const s of stmts) out.push(await s._on(tx).all<T>())
       return out
@@ -94,7 +94,7 @@ export class D1Postgres {
 
   /** D1 exec = run statements with no bound params. */
   async exec(query: string) {
-    const { rowCount } = await this.exec.run(query, [])
+    const { rowCount } = await this.executor.run(query, [])
     return { count: rowCount, duration: 0 }
   }
 }

@@ -76,18 +76,13 @@ function ftsDeleteStmt(
   cellId: string,
   side: string,
 ): D1PreparedStatement {
-  // FTS5 external-content delete: first column is the literal command 'delete',
-  // second is the rowid, third is the OLD value. Using SELECT from `cells`
-  // before the cells DML runs means we read the current (pre-change) value.
-  // If the row does not exist yet (first-time create), this SELECT returns
-  // nothing and the INSERT is a no-op.
-  return db
-    .prepare(
-      `INSERT INTO cells_fts(cells_fts, rowid, value)
-       SELECT 'delete', rowid, value FROM cells
-       WHERE project_id = ? AND file_id = ? AND cell_id = ? AND side = ?`,
-    )
-    .bind(projectId, fileId, cellId, side)
+  // Postgres: the cells.value_tsv generated column auto-maintains the FTS index,
+  // so manual upkeep is unnecessary. No-op kept to preserve the stmt sequence.
+  void projectId
+  void fileId
+  void cellId
+  void side
+  return db.prepare(`SELECT 1 WHERE false`)
 }
 
 function ftsInsertStmt(
@@ -97,15 +92,13 @@ function ftsInsertStmt(
   cellId: string,
   side: string,
 ): D1PreparedStatement {
-  // Insert the post-DML value into the FTS index. Must run AFTER the cells
-  // UPSERT/UPDATE so the new value is already in `cells`.
-  return db
-    .prepare(
-      `INSERT INTO cells_fts(rowid, value)
-       SELECT rowid, value FROM cells
-       WHERE project_id = ? AND file_id = ? AND cell_id = ? AND side = ?`,
-    )
-    .bind(projectId, fileId, cellId, side)
+  // Postgres: FTS is auto-maintained by the cells.value_tsv generated column.
+  // No-op kept to preserve the stmt sequence.
+  void projectId
+  void fileId
+  void cellId
+  void side
+  return db.prepare(`SELECT 1 WHERE false`)
 }
 
 /**
@@ -762,7 +755,7 @@ case 'cell.audio.attach': {
               NULL, ?, NULL, NULL, NULL,
               ?,
               0, 0, 0, NULL,
-              ?, unixepoch('now') * 1000, unixepoch('now') * 1000,
+              ?, (extract(epoch from now()) * 1000)::bigint, (extract(epoch from now()) * 1000)::bigint,
               ?
             )
             ON CONFLICT(id) DO UPDATE SET
@@ -770,7 +763,7 @@ case 'cell.audio.attach': {
               kind = excluded.kind,
               event_id = excluded.event_id,
               meta = excluded.meta,
-              updated_at = unixepoch('now') * 1000`,
+              updated_at = (extract(epoch from now()) * 1000)::bigint`,
           )
           .bind(
             event.fileId,
@@ -797,7 +790,7 @@ case 'cell.audio.attach': {
         db
           .prepare(
             `UPDATE files
-                SET name = ?, event_id = ?, updated_at = unixepoch('now') * 1000
+                SET name = ?, event_id = ?, updated_at = (extract(epoch from now()) * 1000)::bigint
               WHERE id = ? AND project_id = ?`,
           )
           .bind(p.name, event.id, event.fileId, event.projectId),

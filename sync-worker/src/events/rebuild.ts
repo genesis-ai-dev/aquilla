@@ -13,7 +13,11 @@
 // As before — DELETE + replay is not wrapped in a transaction. Re-running
 // the endpoint after a partial failure restarts from a clean slate.
 
-import { buildEventProjectionStmts, type PersistedEvent } from './event-projection'
+import {
+  buildEventProjectionStmts,
+  CHAIN_MUTATING_KINDS,
+  type PersistedEvent,
+} from './event-projection'
 import type { EventKind } from './types'
 
 const D1_BATCH_LIMIT = 100
@@ -110,9 +114,11 @@ export async function handleRebuildProjectionRequest(
     // commits included (must match route.ts). We replay in server_seq ASC,
     // so the first event at a given (project, file, cell, parent_id) slot
     // is the winner; siblings stay in `events` (we're not rewriting the log)
-    // but do not contribute to the projection.
+    // but do not contribute to the projection. The guard applies ONLY to
+    // chain-mutating kinds — cell.validate (parent_id NULL) would otherwise
+    // collide with source.cell.create at the same slot and be dropped.
     let isWinner = true
-    if (row.cell_id) {
+    if (row.cell_id && CHAIN_MUTATING_KINDS.has(row.kind)) {
       const key = childKey(row)
       const winner = winningChildAt.get(key)
       if (!winner) {
@@ -150,7 +156,9 @@ export async function handleRebuildProjectionRequest(
     }
 
     try {
-      buildEventProjectionStmts(db, event, stmts)
+      // Defer the O(N²) per-cell file-counter recompute; do it once, set-based,
+      // after the replay (step 4b) — the D1 67%-of-time fix, now in the rebuild.
+      buildEventProjectionStmts(db, event, stmts, { deferFileCounters: true })
       eventsProjected += 1
     } catch (err) {
       return new Response(
@@ -166,6 +174,22 @@ export async function handleRebuildProjectionRequest(
   for (let i = 0; i < stmts.length; i += D1_BATCH_LIMIT) {
     await db.batch(stmts.slice(i, i + D1_BATCH_LIMIT))
   }
+
+  // 4b. Recompute file counters once, set-based (deferred above). Mirrors
+  //     POST /migrate/finalize — O(total cells), not O(N²) per cell.
+  await db
+    .prepare(
+      `UPDATE files SET
+         cell_count = (SELECT COUNT(DISTINCT cell_id) FROM cells WHERE project_id=files.project_id AND file_id=files.id),
+         approved_count = (SELECT COUNT(*) FROM cells WHERE project_id=files.project_id AND file_id=files.id AND validated=1),
+         filled_count = (SELECT COUNT(*) FROM cells WHERE project_id=files.project_id AND file_id=files.id AND side='target' AND TRIM(value)!=''),
+         word_count = (SELECT COALESCE(SUM(word_count),0) FROM cells WHERE project_id=files.project_id AND file_id=files.id AND side='target'),
+         last_edit_at = (SELECT MAX(last_edit_at) FROM cells WHERE project_id=files.project_id AND file_id=files.id),
+         updated_at = ?
+       WHERE project_id = ?`,
+    )
+    .bind(Date.now(), projectId)
+    .run()
 
   // 5. Counts.
   const [cellsResult, validatorsResult] = await Promise.all([

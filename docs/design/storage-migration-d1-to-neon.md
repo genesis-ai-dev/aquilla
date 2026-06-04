@@ -43,7 +43,7 @@ all()/first()`, `batch()`) and D1 SQL dialect. Adapt to Postgres-via-Hyperdrive.
 - Driver: Hyperdrive presents a PG TCP endpoint → use `postgres`/`pg` in the worker
   with the Hyperdrive connection string (not `@neondatabase/serverless`, which is HTTP-direct).
 
-### Stage C — data migration into Neon (IN PROGRESS — re-import from source, defer projections)
+### Stage C — data migration into Neon (✅ DONE — re-import from source, projections built)
 Revised per direction: don't copy the degraded D1; re-import fresh from the real
 sources, raw data only, projections built once at the end.
 - **Step 1 — identity/org layer ✅** copied D1→Neon as-is (small + already correct):
@@ -55,10 +55,29 @@ sources, raw data only, projections built once at the end.
   `group_project_grants` + `events`. Canary (8 heaviest projects): **333,688 events
   in 48.5s = 6,884 events/s (~34× the D1 ~200/s)** — and most of that is GitLab
   clone/parse, not the DB. cells stayed 0 (deferred confirmed).
-  - TODO: run the full sweep (all ~436 projects) — `npx tsx scripts/pg-import-content.ts`.
-- **Step 3 — build projections (TODO):** set-based from events — cells (final state
-  per cell), cell_validators, file counters. Then verify parity vs D1 (counts +
-  health-score outputs) before any cutover.
+  - ✅ Full sweep done: **14,474,011 events across 394 projects** now in Neon.
+- **Step 3 — build projections ✅ DONE:** `scripts/pg-build-projections.ts` folds
+  each project's event log to its FINAL projection rows in memory
+  (`scripts/lib/fold-projection.ts`) and bulk multi-row-INSERTs them — RTT-
+  independent, so the full build ran from a laptop in **~27 min** (vs ~5.7 days
+  for the naive serial one-statement-per-round-trip path over the 63ms WAN link).
+  - **Parity is proven, not assumed.** The fold is byte-identical to the canonical
+    per-event projector (`buildEventProjectionStmts`) — asserted in
+    `sync-worker/src/__tests__/fold-projection.test.ts` (7 cases) and re-checkable
+    on real data via `pg-build-projections.ts --verify <projectId>` (17 projects
+    spanning 278→148k events verified, all byte-identical).
+  - **Result:** 10,659,019 cells · 1,791,500 cell_validators (= the exact
+    cell.validate event count) · 1,733,916 approved cells · 7,436 comments ·
+    394/394 projects covered, 0 missing.
+  - ⚠️ **Latent bug found + worked around:** the parity gate surfaced that
+    `sync-worker/src/events/rebuild.ts` applies the AD-2 winner guard to EVERY
+    event with a cell_id, including `cell.validate` (which has parent_id NULL and
+    so collides with the cell's `source.cell.create` slot). A rebuild therefore
+    drops ALL validators → `approved_count` 0 everywhere. The live route
+    (`route.ts`) correctly guards only CHAIN_MUTATING_KINDS; the fold + parity
+    oracle match the live route. **`rebuild.ts` itself still needs the same
+    one-line fix** (gate on `CHAIN_MUTATING_KINDS`) or the admin rebuild endpoint
+    will destroy validations.
 
 ### Stage D — Hyperdrive + cutover
 - Provision Hyperdrive in front of Neon; bind to both workers; flip reads → writes.

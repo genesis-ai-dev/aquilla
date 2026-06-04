@@ -58,48 +58,9 @@ function countWords(text: string): number {
   return trimmed.split(/\s+/).length
 }
 
-/**
- * FTS5 external-content maintenance helpers.
- *
- * `cells_fts` uses content='cells', content_rowid='rowid'. The application
- * must keep the shadow index in sync manually:
- *   - ftsDeleteStmt: emits an FTS5 'delete' command so the OLD indexed value
- *     is removed. Must be pushed BEFORE any cells DML so the old value is
- *     still readable. No-ops if no matching cells row exists.
- *   - ftsInsertStmt: inserts the current cells row's value into the index.
- *     Must be pushed AFTER the cells DML so the new value is in `cells`.
- */
-function ftsDeleteStmt(
-  db: D1Database,
-  projectId: string,
-  fileId: string,
-  cellId: string,
-  side: string,
-): D1PreparedStatement {
-  // Postgres: the cells.value_tsv generated column auto-maintains the FTS index,
-  // so manual upkeep is unnecessary. No-op kept to preserve the stmt sequence.
-  void projectId
-  void fileId
-  void cellId
-  void side
-  return db.prepare(`SELECT 1 WHERE false`)
-}
-
-function ftsInsertStmt(
-  db: D1Database,
-  projectId: string,
-  fileId: string,
-  cellId: string,
-  side: string,
-): D1PreparedStatement {
-  // Postgres: FTS is auto-maintained by the cells.value_tsv generated column.
-  // No-op kept to preserve the stmt sequence.
-  void projectId
-  void fileId
-  void cellId
-  void side
-  return db.prepare(`SELECT 1 WHERE false`)
-}
+// FTS index maintenance: none. Postgres auto-maintains the cells.value_tsv
+// generated column + GIN index on every cells write, so the projection emits no
+// FTS statements (the old SQLite FTS5 cells_fts shadow-table upkeep is gone).
 
 /**
  * Recompute the denormalized `files` rollup counters from the live `cells`
@@ -210,7 +171,6 @@ export function buildEventProjectionStmts(
       // FTS5 maintenance (pre-DML): delete the old indexed value if a cells
       // row already exists for this key. No-op when this is a genuine first
       // insert.
-      stmts.push(ftsDeleteStmt(db, event.projectId, event.fileId, cellId, side))
 
       stmts.push(
         db
@@ -268,7 +228,6 @@ export function buildEventProjectionStmts(
 
       // FTS5 maintenance (post-DML): insert the new value now that the cells
       // row reflects the post-create/update state.
-      stmts.push(ftsInsertStmt(db, event.projectId, event.fileId, cellId, side))
 
       if (!opts?.deferFileCounters)
         stmts.push(fileCountersRecomputeStmt(db, event.projectId, event.fileId, event.serverTs))
@@ -292,7 +251,6 @@ export function buildEventProjectionStmts(
       // FTS5 maintenance (pre-DML): remove the OLD indexed value before we
       // overwrite the cells row. Must run first so the old value is still
       // readable from `cells`.
-      stmts.push(ftsDeleteStmt(db, event.projectId, event.fileId, event.cellId, commitSide))
 
       if (event.kind === 'target.cell.commit') {
         const tp = p as EventPayloads['target.cell.commit']
@@ -382,7 +340,6 @@ export function buildEventProjectionStmts(
 
       // FTS5 maintenance (post-DML): insert the new indexed value now that
       // the cells row has been updated/upserted.
-      stmts.push(ftsInsertStmt(db, event.projectId, event.fileId, event.cellId, commitSide))
 
       if (!opts?.deferFileCounters)
         stmts.push(fileCountersRecomputeStmt(db, event.projectId, event.fileId, event.serverTs))
@@ -401,7 +358,6 @@ export function buildEventProjectionStmts(
       // FTS5 maintenance (pre-DML): remove the indexed value BEFORE deleting
       // the cells row so the OLD value is still readable for the 'delete'
       // command.
-      stmts.push(ftsDeleteStmt(db, event.projectId, event.fileId, event.cellId, side))
 
       stmts.push(
         db
@@ -945,7 +901,7 @@ case 'cell.audio.attach': {
  * `cells.event_id`). Validation and file-level events don't move the
  * chain pointer, so they're excluded from the AD-2 guard.
  */
-const CHAIN_MUTATING_KINDS = new Set<string>([
+export const CHAIN_MUTATING_KINDS = new Set<string>([
   'source.cell.create',
   'source.cell.commit',
   'source.cell.delete',

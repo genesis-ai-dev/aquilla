@@ -92,9 +92,9 @@ describe('dispatchEvent', () => {
     const outcome = dispatchEvent(makeNoOpD1(), authed, 9999, { updateProjection: true })
     expect(outcome.ok).toBe(true)
     if (!outcome.ok) throw new Error('unreachable')
-    // 1 events INSERT + 1 FTS delete + 1 cells INSERT + 1 FTS insert
-    // + 1 files-counter recompute = 5
-    expect(outcome.result.stmts.length).toBe(5)
+    // 1 events INSERT + 1 cells UPSERT + 1 files-counter recompute = 3
+    // (Postgres auto-maintains FTS via the value_tsv generated column).
+    expect(outcome.result.stmts.length).toBe(3)
     expect(outcome.result.dirtyTables).toContain('events')
     expect(outcome.result.dirtyTables).toContain('cells')
     expect(outcome.result.dirtyTables).toContain('files')

@@ -100,7 +100,7 @@ describe('buildEventProjectionStmts — source.cell.create', () => {
 
     // FTS maintenance adds 2 statements (delete + insert) around the cells
     // DML, and the files-counter recompute adds 1 more.
-    expect(stmts).toHaveLength(4)
+    expect(stmts).toHaveLength(2)
     const cellsStmts = recorded.filter(r => !r.sql.includes('cells_fts') && !r.sql.includes('WHERE false'))
     const { sql, args } = cellsStmts[0]
     expect(sql).toContain('INSERT INTO cells')
@@ -155,7 +155,7 @@ describe('buildEventProjectionStmts — target.cell.commit', () => {
     )
     // FTS maintenance adds 2 statements (delete + insert) around the cells
     // DML, and the files-counter recompute adds 1 more.
-    expect(stmts).toHaveLength(4)
+    expect(stmts).toHaveLength(2)
     const cellsStmts = recorded.filter(r => !r.sql.includes('cells_fts') && !r.sql.includes('WHERE false'))
     const { sql, args } = cellsStmts[0]
     // The client never emits target.cell.create, so the commit is an UPSERT:

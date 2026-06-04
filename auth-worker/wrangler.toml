@@ -59,6 +59,14 @@ database_name = "aquilla-db"
 database_id = "11828e9d-998b-4d3f-a405-91d9f624f94a"
 migrations_dir = "migrations"
 
+# D1→Neon migration: when HYPERDRIVE is bound, index.ts swaps the AQUILLA_DB D1
+# handle for a Postgres shim over Hyperdrive → Neon. D1 binding kept for rollback.
+# NOTE: migrations_dir still targets D1; once fully on Neon, schema changes go
+# through db/postgres/schema.sql + scripts/pg.ts, not D1 migrations.
+[[hyperdrive]]
+binding = "HYPERDRIVE"
+id = "69bcc10e67464f2eaf4fe91a9141e7cd"
+
 # Secrets (provisioned via `wrangler secret put`, never committed):
 #   SECRET_KEY      — frontier JWT signing key. MUST match prod
 #                     frontier-server so access tokens are interchangeable.
@@ -103,6 +111,10 @@ binding = "AQUILLA_DB"
 database_name = "aquilla-db"
 database_id = "11828e9d-998b-4d3f-a405-91d9f624f94a"
 migrations_dir = "migrations"
+
+[[env.production.hyperdrive]]
+binding = "HYPERDRIVE"
+id = "69bcc10e67464f2eaf4fe91a9141e7cd"
 
 [env.production.vars]
 ALGORITHM = "HS256"

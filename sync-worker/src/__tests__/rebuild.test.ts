@@ -221,6 +221,46 @@ describe('handleRebuildProjectionRequest — successful replay', () => {
     expect(tables.cells[0].validated).toBe(1)
   })
 
+  it('a cell.validate with parent_id NULL survives the rebuild (regression: must not collide with the cell.create slot)', async () => {
+    // Regression for the AD-2 winner guard being applied to non-chain-mutating
+    // events. In production cell.validate events carry parent_id = NULL, so
+    // they land at the SAME (project, file, cell, parent_id) slot as the
+    // cell's source/target.cell.create (also NULL parent). If the winner guard
+    // covers every cell_id event, the create wins the slot and every validate
+    // is skipped — wiping all cell_validators rows and zeroing approved_count.
+    // The guard must apply ONLY to CHAIN_MUTATING_KINDS, mirroring route.ts.
+    const { db, snapshot } = await makeTestDb({
+      files: [{ id: 'file-a', project_id: 'proj-1', name: 'File A', approved_count: 0 }],
+      events: [
+        evt({
+          id: 'evt-create',
+          kind: 'target.cell.create',
+          parent_id: null,
+          payload: JSON.stringify({ cellId: 'cell-1', value: 'hi' }),
+          server_seq: 1,
+        }),
+        evt({
+          id: 'evt-validate',
+          kind: 'cell.validate',
+          parent_id: null, // ← production semantics; collides with evt-create's slot
+          author: 'bob',
+          payload: JSON.stringify({ editEventId: 'evt-create' }),
+          server_seq: 2,
+        }),
+      ],
+    })
+    await handleRebuildProjectionRequest(
+      makeRequest('/admin/projects/proj-1/rebuild-projection'),
+      makeEnv(db),
+    )
+    const tables = await snapshot()
+    expect(tables.cell_validators).toHaveLength(1)
+    expect(tables.cell_validators[0].username).toBe('bob')
+    expect(tables.cells[0].validated).toBe(1)
+    const fileA = tables.files.find((f) => f.id === 'file-a')
+    expect(fileA?.approved_count).toBe(1)
+  })
+
   it('returns 500 for an unknown event kind in the log', async () => {
     const { db, snapshot } = await makeTestDb({
       events: [evt({

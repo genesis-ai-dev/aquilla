@@ -56,6 +56,14 @@ binding = "AQUILLA_DB"
 database_name = "aquilla-db"
 database_id = "11828e9d-998b-4d3f-a405-91d9f624f94a"
 
+# D1→Neon migration: when HYPERDRIVE is bound, index.ts replaces the AQUILLA_DB
+# D1 handle with a Postgres-backed shim (db/shim/d1-postgres.ts) over Hyperdrive
+# → Neon. The D1 binding above is kept for rollback (drop this block to revert).
+# Caching is disabled on the Hyperdrive config so live edits aren't served stale.
+[[hyperdrive]]
+binding = "HYPERDRIVE"
+id = "69bcc10e67464f2eaf4fe91a9141e7cd"
+
 # AD-13 branching-search KV result cache (optional — see lib/branching-search/cache.ts).
 # Provision: `wrangler kv:namespace create BRANCHING_SEARCH_KV`
 # Until provisioned, the cache binding is absent and the route runs fresh every request.
@@ -107,6 +115,10 @@ bucket_name = "aquilla-snapshots"
 binding = "AQUILLA_DB"
 database_name = "aquilla-db"
 database_id = "11828e9d-998b-4d3f-a405-91d9f624f94a"
+
+[[env.production.hyperdrive]]
+binding = "HYPERDRIVE"
+id = "69bcc10e67464f2eaf4fe91a9141e7cd"
 
 # ---------------------------------------------------------------------------
 # Staging environment — physically separate D1, R2, DO namespace.

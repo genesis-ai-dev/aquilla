@@ -66,7 +66,8 @@ export function OrgSwitcher() {
         <ChevronsUpDown className="size-4 shrink-0 text-muted-foreground" />
       </button>
       {open && (
-        <ul className="absolute z-20 mt-1 w-full overflow-hidden rounded-md border bg-popover shadow-md">
+        <div className="absolute z-20 mt-1 w-full rounded-md border bg-popover shadow-md">
+          <ul className="max-h-60 overflow-y-auto">
           {orgs.map((o) => (
             <li key={o.id}>
               <button
@@ -79,9 +80,10 @@ export function OrgSwitcher() {
               </button>
             </li>
           ))}
+          </ul>
 
           {canRename && (
-            <li className="border-t px-2 py-1.5">
+            <div className="border-t px-2 py-1.5">
               {showRename ? (
                 <div className="flex gap-1">
                   <input
@@ -110,10 +112,10 @@ export function OrgSwitcher() {
                   Rename
                 </button>
               )}
-            </li>
+            </div>
           )}
 
-          <li className="border-t px-2 py-1.5">
+          <div className="border-t px-2 py-1.5">
             {showCreate ? (
               <div className="flex gap-1">
                 <input
@@ -142,8 +144,8 @@ export function OrgSwitcher() {
                 + Create org
               </button>
             )}
-          </li>
-        </ul>
+          </div>
+        </div>
       )}
     </div>
   )

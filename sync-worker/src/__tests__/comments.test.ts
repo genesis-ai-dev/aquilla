@@ -11,7 +11,7 @@ import {
   buildEventProjectionStmts,
   type PersistedEvent,
 } from '../events/event-projection'
-import { makeInMemoryD1 } from './helpers/d1-fake'
+import { makeTestDb } from './helpers/pg-test-db'
 import type { EventKind } from '../events/types'
 
 // ── Helpers ────────────────────────────────────────────────────────────────
@@ -42,7 +42,7 @@ function makeEvent<K extends EventKind>(
 
 describe('comment.create', () => {
   it('inserts a row into the comments table with correct fields', async () => {
-    const db = makeInMemoryD1()
+    const { db, snapshot } = await makeTestDb()
     const stmts: D1PreparedStatement[] = []
 
     const touches = buildEventProjectionStmts(
@@ -59,7 +59,7 @@ describe('comment.create', () => {
     expect(touches).toContain('comments')
     await db.batch(stmts)
 
-    const tables = db._tables() as any
+    const tables = (await snapshot()) as any
     const row = (tables.comments as any[]).find((r: any) => r.comment_id === 'cmt-1')
     expect(row).toBeDefined()
     expect(row.project_id).toBe('proj-1')
@@ -74,7 +74,7 @@ describe('comment.create', () => {
   })
 
   it('inserts a threaded reply with parent_comment_id set', async () => {
-    const db = makeInMemoryD1()
+    const { db, snapshot } = await makeTestDb()
     const stmts1: D1PreparedStatement[] = []
     const stmts2: D1PreparedStatement[] = []
 
@@ -102,7 +102,7 @@ describe('comment.create', () => {
     )
     await db.batch(stmts2)
 
-    const tables = db._tables() as any
+    const tables = (await snapshot()) as any
     const reply = (tables.comments as any[]).find((r: any) => r.comment_id === 'cmt-reply')
     expect(reply).toBeDefined()
     expect(reply.parent_comment_id).toBe('cmt-root')
@@ -112,7 +112,7 @@ describe('comment.create', () => {
 
 describe('comment.edit', () => {
   it('updates body and updated_at for the same author', async () => {
-    const db = makeInMemoryD1()
+    const { db, snapshot } = await makeTestDb()
 
     // Seed a comment row directly.
     const createStmts: D1PreparedStatement[] = []
@@ -139,7 +139,7 @@ describe('comment.edit', () => {
     )
     await db.batch(editStmts)
 
-    const tables = db._tables() as any
+    const tables = (await snapshot()) as any
     const row = (tables.comments as any[]).find((r: any) => r.comment_id === 'cmt-edit')
     expect(row.body).toBe('Edited body')
     expect(row.updated_at).toBe(2000)
@@ -148,7 +148,7 @@ describe('comment.edit', () => {
 
 describe('comment.delete', () => {
   it('soft-deletes: sets body to empty and deleted_at to serverTs', async () => {
-    const db = makeInMemoryD1()
+    const { db, snapshot } = await makeTestDb()
 
     const createStmts: D1PreparedStatement[] = []
     buildEventProjectionStmts(
@@ -171,7 +171,7 @@ describe('comment.delete', () => {
     )
     await db.batch(delStmts)
 
-    const tables = db._tables() as any
+    const tables = (await snapshot()) as any
     const row = (tables.comments as any[]).find((r: any) => r.comment_id === 'cmt-del')
     expect(row).toBeDefined()           // row still exists (soft-delete)
     expect(row.body).toBe('')           // body cleared
@@ -181,7 +181,7 @@ describe('comment.delete', () => {
 
 describe('comment.resolve', () => {
   it('sets resolved=1 on a top-level comment', async () => {
-    const db = makeInMemoryD1()
+    const { db, snapshot } = await makeTestDb()
 
     const createStmts: D1PreparedStatement[] = []
     buildEventProjectionStmts(
@@ -204,13 +204,13 @@ describe('comment.resolve', () => {
     )
     await db.batch(resolveStmts)
 
-    const tables = db._tables() as any
+    const tables = (await snapshot()) as any
     const row = (tables.comments as any[]).find((r: any) => r.comment_id === 'cmt-res')
     expect(row.resolved).toBe(1)
   })
 
   it('noops when commentId is a reply (parent_comment_id IS NOT NULL)', async () => {
-    const db = makeInMemoryD1()
+    const { db, snapshot } = await makeTestDb()
 
     // Create root + reply
     const stmts1: D1PreparedStatement[] = []
@@ -248,7 +248,7 @@ describe('comment.resolve', () => {
     )
     await db.batch(resolveStmts)
 
-    const tables = db._tables() as any
+    const tables = (await snapshot()) as any
     const reply = (tables.comments as any[]).find((r: any) => r.comment_id === 'cmt-reply2')
     // The UPDATE WHERE ... parent_comment_id IS NULL matched nothing, so resolved stays 0.
     expect(reply.resolved).toBe(0)

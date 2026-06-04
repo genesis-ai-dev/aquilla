@@ -6,7 +6,8 @@
 
 import { describe, it, expect } from 'vitest'
 import { handleRebuildProjectionRequest } from '../events/rebuild'
-import { makeInMemoryD1, type EventRow } from './helpers/d1-fake'
+import { type EventRow } from './helpers/d1-fake'
+import { makeTestDb } from './helpers/pg-test-db'
 
 function makeRequest(
   path: string,
@@ -58,7 +59,7 @@ describe('handleRebuildProjectionRequest — URL/method/auth', () => {
   it('returns 500 when SYNC_SECRET_KEY is not configured', async () => {
     const res = await handleRebuildProjectionRequest(
       makeRequest('/admin/projects/p1/rebuild-projection', 'POST', ''),
-      { AQUILLA_DB: makeInMemoryD1(), SYNC_SECRET_KEY: undefined },
+      { AQUILLA_DB: (await makeTestDb()).db, SYNC_SECRET_KEY: undefined },
     ) as Response
     expect(res.status).toBe(500)
   })
@@ -66,7 +67,7 @@ describe('handleRebuildProjectionRequest — URL/method/auth', () => {
   it('returns 401 when Authorization header has wrong key', async () => {
     const res = await handleRebuildProjectionRequest(
       makeRequest('/admin/projects/p1/rebuild-projection', 'POST', 'wrong-key'),
-      makeEnv(makeInMemoryD1()),
+      makeEnv((await makeTestDb()).db),
     ) as Response
     expect(res.status).toBe(401)
   })
@@ -82,7 +83,7 @@ describe('handleRebuildProjectionRequest — URL/method/auth', () => {
 
 describe('handleRebuildProjectionRequest — empty + decode', () => {
   it('replays 0 events and wipes existing projection rows', async () => {
-    const db = makeInMemoryD1({
+    const { db, snapshot } = await makeTestDb({
       cells: [{
         project_id: 'proj-1', file_id: 'file-a', cell_id: 'cell-1',
         side: 'target', value: 'stale', event_id: 'old', last_editor: 'x',
@@ -97,13 +98,13 @@ describe('handleRebuildProjectionRequest — empty + decode', () => {
     const body = await res.json() as any
     expect(body.eventsRead).toBe(0)
     expect(body.cellsAfter).toBe(0)
-    expect((db as any)._tables().cells).toHaveLength(0)
+    expect((await snapshot()).cells).toHaveLength(0)
   })
 
   it('decodes URL-encoded projectId', async () => {
     const res = await handleRebuildProjectionRequest(
       makeRequest('/admin/projects/proj%20one/rebuild-projection'),
-      makeEnv(makeInMemoryD1()),
+      makeEnv((await makeTestDb()).db),
     ) as Response
     expect(res.status).toBe(200)
   })
@@ -111,7 +112,7 @@ describe('handleRebuildProjectionRequest — empty + decode', () => {
 
 describe('handleRebuildProjectionRequest — successful replay', () => {
   it('projects a target.cell.create → target.cell.commit chain', async () => {
-    const db = makeInMemoryD1({
+    const { db, snapshot } = await makeTestDb({
       events: [
         evt({
           id: 'evt-create',
@@ -140,7 +141,7 @@ describe('handleRebuildProjectionRequest — successful replay', () => {
     expect(body.eventsRead).toBe(2)
     expect(body.eventsProjected).toBe(2)
 
-    const cells = (db as any)._tables().cells
+    const cells = (await snapshot()).cells
     expect(cells).toHaveLength(1)
     expect(cells[0].value).toBe('second')
     expect(cells[0].event_id).toBe('evt-commit')
@@ -153,7 +154,7 @@ describe('handleRebuildProjectionRequest — successful replay', () => {
     // the EARLIER one wins the chain slot (AD-2). The later commit's row
     // stays in `events` (we never rewrite the log) but does not contribute
     // to the projection. Must match the live route's strict-AD-2 behavior.
-    const db = makeInMemoryD1({
+    const { db, snapshot } = await makeTestDb({
       events: [
         evt({
           id: 'evt-create',
@@ -182,14 +183,14 @@ describe('handleRebuildProjectionRequest — successful replay', () => {
       makeRequest('/admin/projects/proj-1/rebuild-projection'),
       makeEnv(db),
     )
-    const cells = (db as any)._tables().cells
+    const cells = (await snapshot()).cells
     expect(cells).toHaveLength(1)
     expect(cells[0].value).toBe('EARLIER')
     expect(cells[0].event_id).toBe('evt-earlier')
   })
 
   it('cell_validators are written and cells.validated reflects the current chain head', async () => {
-    const db = makeInMemoryD1({
+    const { db, snapshot } = await makeTestDb({
       events: [
         evt({
           id: 'evt-create',
@@ -212,7 +213,7 @@ describe('handleRebuildProjectionRequest — successful replay', () => {
       makeRequest('/admin/projects/proj-1/rebuild-projection'),
       makeEnv(db),
     )
-    const tables = (db as any)._tables()
+    const tables = (await snapshot())
     expect(tables.cell_validators).toHaveLength(1)
     expect(tables.cell_validators[0].username).toBe('bob')
     // 0012: DELETE-on-unvalidate — a row's presence = active (no is_active column)
@@ -221,7 +222,7 @@ describe('handleRebuildProjectionRequest — successful replay', () => {
   })
 
   it('returns 500 for an unknown event kind in the log', async () => {
-    const db = makeInMemoryD1({
+    const { db, snapshot } = await makeTestDb({
       events: [evt({
         id: 'evt-bad',
         kind: 'cell.future.unknown',

@@ -13,7 +13,7 @@
 import { describe, it, expect } from 'vitest'
 
 import { handleBulkImportRequest } from '../events/import-route'
-import { makeInMemoryD1 } from './helpers/d1-fake'
+import { makeTestDb } from './helpers/pg-test-db'
 import { makeTestToken } from './helpers/auth'
 
 const SECRET = 'test-secret'
@@ -74,7 +74,7 @@ async function makeImportRequest(
 describe('POST /import — server_seq is race-safe', () => {
   it('two concurrent imports for the same project produce strictly distinct server_seqs', async () => {
     const token = await leadToken()
-    const db = makeInMemoryD1()
+    const { db, snapshot } = await makeTestDb()
 
     const reqA = await makeImportRequest(token, {
       idPrefix: 'A',
@@ -97,7 +97,7 @@ describe('POST /import — server_seq is race-safe', () => {
     expect(resA?.status).toBe(200)
     expect(resB?.status).toBe(200)
 
-    const events = (db as any)._tables().events
+    const events = (await snapshot()).events
     // 6 from A (1 file.create + 5 cells) + 5 from B = 11.
     expect(events).toHaveLength(11)
 
@@ -117,7 +117,7 @@ describe('POST /import — server_seq is race-safe', () => {
 
   it('sequential imports keep server_seq monotonically increasing per project', async () => {
     const token = await leadToken()
-    const db = makeInMemoryD1()
+    const { db, snapshot } = await makeTestDb()
 
     const reqA = await makeImportRequest(token, {
       idPrefix: 'A',
@@ -132,7 +132,7 @@ describe('POST /import — server_seq is race-safe', () => {
     })
     await handleBulkImportRequest(reqB, makeEnv(db))
 
-    const events = (db as any)._tables().events
+    const events = (await snapshot()).events
     const seqsAsc = events
       .map((e: any) => e.server_seq)
       .sort((x: number, y: number) => x - y)
@@ -142,7 +142,7 @@ describe('POST /import — server_seq is race-safe', () => {
 
   it('replaying the same import is idempotent and does not bump server_seq', async () => {
     const token = await leadToken()
-    const db = makeInMemoryD1()
+    const { db, snapshot } = await makeTestDb()
 
     const req1 = await makeImportRequest(token, {
       idPrefix: 'X',
@@ -159,7 +159,7 @@ describe('POST /import — server_seq is race-safe', () => {
     })
     await handleBulkImportRequest(req2, makeEnv(db))
 
-    const events = (db as any)._tables().events
+    const events = (await snapshot()).events
     // First import: 1 file.create + 2 cells = 3 events.
     // Replay is OR IGNOREd (same UUIDs) — still 3 events with seqs 1..3.
     expect(events).toHaveLength(3)

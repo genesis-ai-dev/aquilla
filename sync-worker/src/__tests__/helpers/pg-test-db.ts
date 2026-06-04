@@ -37,6 +37,8 @@ export interface TestDb {
   pg: PGlite
   /** Read every row of a table (async replacement for the old fake's _tables()). */
   rows<T = Record<string, unknown>>(table: string): Promise<T[]>
+  /** All public tables as { tableName: rows[] } — async drop-in for db._tables(). */
+  snapshot(): Promise<Record<string, Array<Record<string, unknown>>>>
   /** Truncate every app table (RESTART IDENTITY) — call between tests. */
   reset(): Promise<void>
   close(): Promise<void>
@@ -120,6 +122,16 @@ export async function makeTestDb(seed: Seed = {}): Promise<TestDb> {
     pg,
     rows: async <T = Record<string, unknown>>(table: string) =>
       (await pg.query<T>(`SELECT * FROM ${table}`)).rows,
+    snapshot: async () => {
+      const tbls = await pg.query<{ tablename: string }>(
+        "SELECT tablename FROM pg_tables WHERE schemaname='public'",
+      )
+      const out: Record<string, Array<Record<string, unknown>>> = {}
+      for (const { tablename } of tbls.rows) {
+        out[tablename] = (await pg.query<Record<string, unknown>>(`SELECT * FROM ${tablename}`)).rows
+      }
+      return out
+    },
     reset: async () => {
       await pg.exec(`DO $$ DECLARE r RECORD; BEGIN
         FOR r IN SELECT tablename FROM pg_tables WHERE schemaname='public' LOOP

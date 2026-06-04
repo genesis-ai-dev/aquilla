@@ -13,7 +13,8 @@ import { describe, it, expect } from 'vitest'
 import { handleAssignmentEvent } from '../events/handlers/assignment-events'
 import { authorize } from '../events/authorize'
 import { makeTestToken } from './helpers/auth'
-import { makeInMemoryD1, type CellRow } from './helpers/d1-fake'
+import { type CellRow } from './helpers/d1-fake'
+import { makeTestDb } from './helpers/pg-test-db'
 import type { EventKind, RawEvent } from '../events/types'
 
 const SECRET = 'test-secret'
@@ -89,7 +90,7 @@ function seededAssignment(over: { assignment_id: string; assignee_user_id?: numb
 
 describe('assignment.create — book scope', () => {
   it('inserts the assignments row and resolves every source cell in the file', async () => {
-    const db = makeInMemoryD1({ cells: seededCells() })
+    const { db, snapshot } = await makeTestDb({ cells: seededCells() })
     const authed = await authorizeAssignment('assignment.create', {
       assignmentId: 'as-1',
       scopeKind: 'books',
@@ -103,7 +104,7 @@ describe('assignment.create — book scope', () => {
     const result = handleAssignmentEvent(db, authed, 2000)
     await db.batch(result.stmts)
 
-    const t = db._tables()
+    const t = await snapshot()
     const row = t.assignments.find((a) => a.assignment_id === 'as-1')
     expect(row).toBeDefined()
     expect(row!.project_id).toBe('proj-1')
@@ -129,7 +130,7 @@ describe('assignment.create — book scope', () => {
 
 describe('assignment.create — chapter scope', () => {
   it('resolves only the cells whose canonical_ref matches the chapter', async () => {
-    const db = makeInMemoryD1({ cells: seededCells() })
+    const { db, snapshot } = await makeTestDb({ cells: seededCells() })
     const authed = await authorizeAssignment('assignment.create', {
       assignmentId: 'as-2',
       scopeKind: 'chapters',
@@ -141,7 +142,7 @@ describe('assignment.create — chapter scope', () => {
     const result = handleAssignmentEvent(db, authed, 3000)
     await db.batch(result.stmts)
 
-    const t = db._tables()
+    const t = await snapshot()
     const cells = t.assignment_cells.filter((c) => c.assignment_id === 'as-2')
     // GEN 1:1 and GEN 1:2 only — NOT GEN 2:1 (the ':' anchors the boundary).
     expect(cells.map((c) => c.cell_id).sort()).toEqual(['g-1-1', 'g-1-2'])
@@ -151,7 +152,7 @@ describe('assignment.create — chapter scope', () => {
 
 describe('assignment.reassign', () => {
   it('updates assignee_user_id', async () => {
-    const db = makeInMemoryD1({ assignments: [seededAssignment({ assignment_id: 'as-3', assignee_user_id: 1 })] })
+    const { db, snapshot } = await makeTestDb({ assignments: [seededAssignment({ assignment_id: 'as-3', assignee_user_id: 1 })] })
     const authed = await authorizeAssignment('assignment.reassign', {
       assignmentId: 'as-3',
       assigneeUserId: 99,
@@ -160,19 +161,19 @@ describe('assignment.reassign', () => {
     const result = handleAssignmentEvent(db, authed, 4000)
     await db.batch(result.stmts)
 
-    expect(db._tables().assignments.find((a) => a.assignment_id === 'as-3')!.assignee_user_id).toBe(99)
+    expect((await snapshot()).assignments.find((a) => a.assignment_id === 'as-3')!.assignee_user_id).toBe(99)
   })
 })
 
 describe('assignment.unassign', () => {
   it('sets unassigned_at (soft close, row kept)', async () => {
-    const db = makeInMemoryD1({ assignments: [seededAssignment({ assignment_id: 'as-4' })] })
+    const { db, snapshot } = await makeTestDb({ assignments: [seededAssignment({ assignment_id: 'as-4' })] })
     const authed = await authorizeAssignment('assignment.unassign', { assignmentId: 'as-4' })
 
     const result = handleAssignmentEvent(db, authed, 5000)
     await db.batch(result.stmts)
 
-    const row = db._tables().assignments.find((a) => a.assignment_id === 'as-4')
+    const row = (await snapshot()).assignments.find((a) => a.assignment_id === 'as-4')
     expect(row).toBeDefined() // row kept
     expect(row!.unassigned_at).toBe(5000)
   })

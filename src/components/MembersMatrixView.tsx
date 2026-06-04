@@ -1,8 +1,9 @@
+import { memo } from "react"
 import { Loader2, AlertTriangle } from "lucide-react"
 import { useProjectsMembersMatrix } from "@/hooks/useProjectsMembersMatrix"
 import { ROLE } from "@/lib/frontier/roles"
 import { MembersMatrixCellEditor } from "./MembersMatrixCellEditor"
-import type { MatrixMember } from "@/hooks/useProjectsMembersMatrix"
+import type { MatrixMember, MatrixCell } from "@/hooks/useProjectsMembersMatrix"
 import type { CloudProjectSummary } from "@/lib/sync/cloud-projects"
 
 /**
@@ -90,7 +91,8 @@ export function MembersMatrixView() {
             <MatrixRow
               key={m.userId}
               member={m}
-              matrix={matrix}
+              projects={matrix.projects}
+              memberCells={matrix.cells.get(m.userId)}
               onMutated={refresh}
             />
           ))}
@@ -137,17 +139,20 @@ function ProjectHeaderCell({
   )
 }
 
-function MatrixRow({
+// memo: re-renders only when this member's own cell map or the project list
+// changes. With N members × M projects, avoiding re-render of all N rows when
+// only one cell mutates is the critical win.
+const MatrixRow = memo(function MatrixRow({
   member,
-  matrix,
+  projects,
+  memberCells,
   onMutated,
 }: {
   member: MatrixMember
-  matrix: ReturnType<typeof useProjectsMembersMatrix>["matrix"]
+  projects: CloudProjectSummary[]
+  memberCells: Map<string, MatrixCell> | undefined
   onMutated: () => Promise<void>
 }) {
-  if (!matrix) return null
-  const memberCells = matrix.cells.get(member.userId)
   return (
     <tr className="border-t hover:bg-muted/20">
       <th
@@ -164,7 +169,7 @@ function MatrixRow({
           </span>
         )}
       </th>
-      {matrix.projects.map((p) => {
+      {projects.map((p) => {
         const cell = memberCells?.get(p.id)
         const palette = cell ? colorForRole(cell.role.level) : ""
         const sourceHint = cell ? sourceLabel(cell.role.source) : ""
@@ -183,7 +188,7 @@ function MatrixRow({
       })}
     </tr>
   )
-}
+})
 
 /** Color tier for the cell. Designed to read at a glance without legend. */
 function colorForRole(level: number): string {

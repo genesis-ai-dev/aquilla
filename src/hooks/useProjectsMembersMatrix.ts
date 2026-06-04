@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useFrontierSession } from "./useFrontierSession";
 import { useAccessibleProjects } from "./useAccessibleProjects";
 import { useOrg, useOrgMembers } from "./useOrg";
@@ -72,6 +72,26 @@ export function useProjectsMembersMatrix(): UseProjectsMembersMatrix {
   const [error, setError] = useState<string | null>(null);
   const aliveRef = useRef(true);
 
+  // Stable identity keys so the callback/effect only re-fires when the actual
+  // set of IDs changes, not on every render (both arrays are new references
+  // every render cycle since they come from useState in their respective hooks).
+  const projectsKey = useMemo(
+    () => projects.map((p) => p.id).join(","),
+    [projects],
+  );
+  const orgMembersKey = useMemo(
+    () => orgMembers.map((m) => m.userId).join(","),
+    [orgMembers],
+  );
+
+  // Keep refs to the latest values so the callback can read them without
+  // them being listed as deps (which would create a new function on every
+  // array mutation — defeating the key-based stability above).
+  const projectsRef = useRef(projects);
+  projectsRef.current = projects;
+  const orgMembersRef = useRef(orgMembers);
+  orgMembersRef.current = orgMembers;
+
   // Reset aliveRef on each effect run — see useOrg for the StrictMode
   // rationale (cleanup-only would permanently flip it false in dev).
   useEffect(() => {
@@ -87,6 +107,10 @@ export function useProjectsMembersMatrix(): UseProjectsMembersMatrix {
       }
       return;
     }
+    // Read latest values via refs — safe because refresh is always called from
+    // an effect that was scheduled after these refs were updated.
+    const projects = projectsRef.current;
+    const orgMembers = orgMembersRef.current;
     setLoading(true);
     setError(null);
     try {
@@ -169,7 +193,8 @@ export function useProjectsMembersMatrix(): UseProjectsMembersMatrix {
     } finally {
       if (aliveRef.current) setLoading(false);
     }
-  }, [jwt, projects, orgMembers]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [jwt, projectsKey, orgMembersKey]);
 
   useEffect(() => {
     void refresh();

@@ -11,7 +11,7 @@ vi.mock('partyserver', () => ({
 }))
 
 import { handleEventsWriteRequest } from '../events/route'
-import { makeInMemoryD1 } from './helpers/d1-fake'
+import { makeTestDb } from './helpers/pg-test-db'
 import { makeTestToken } from './helpers/auth'
 import type { RawEvent } from '../events/types'
 
@@ -116,12 +116,12 @@ async function makeRequest(events: unknown[], token?: string): Promise<Request> 
 describe('POST /events — wiring', () => {
   it('returns null for non-/events URLs', async () => {
     const req = new Request('https://worker/admin/projects/p1/rebuild-projection', { method: 'POST' })
-    expect(await handleEventsWriteRequest(req, makeEnv(makeInMemoryD1()))).toBeNull()
+    expect(await handleEventsWriteRequest(req, makeEnv((await makeTestDb()).db))).toBeNull()
   })
 
   it('returns 405 for non-POST', async () => {
     const req = new Request('https://worker/events', { method: 'GET' })
-    const res = (await handleEventsWriteRequest(req, makeEnv(makeInMemoryD1())))!
+    const res = (await handleEventsWriteRequest(req, makeEnv((await makeTestDb()).db)))!
     expect(res.status).toBe(405)
   })
 
@@ -129,7 +129,7 @@ describe('POST /events — wiring', () => {
     const req = new Request('https://worker/events', {
       method: 'POST', body: '{}', headers: { 'Content-Type': 'application/json' },
     })
-    const res = (await handleEventsWriteRequest(req, { AQUILLA_DB: makeInMemoryD1(), SYNC_SECRET_KEY: undefined }))!
+    const res = (await handleEventsWriteRequest(req, { AQUILLA_DB: (await makeTestDb()).db, SYNC_SECRET_KEY: undefined }))!
     expect(res.status).toBe(500)
   })
 
@@ -137,13 +137,13 @@ describe('POST /events — wiring', () => {
     const req = new Request('https://worker/events', {
       method: 'POST', body: 'not json', headers: { 'Content-Type': 'text/plain' },
     })
-    const res = (await handleEventsWriteRequest(req, makeEnv(makeInMemoryD1())))!
+    const res = (await handleEventsWriteRequest(req, makeEnv((await makeTestDb()).db)))!
     expect(res.status).toBe(400)
   })
 
   it('returns 200 with empty arrays for an empty batch', async () => {
     const token = await makeToken()
-    const res = (await handleEventsWriteRequest(await makeRequest([], token), makeEnv(makeInMemoryD1())))!
+    const res = (await handleEventsWriteRequest(await makeRequest([], token), makeEnv((await makeTestDb()).db)))!
     expect(res.status).toBe(200)
     const body = await res.json() as any
     expect(body.accepted).toEqual([])
@@ -157,16 +157,16 @@ describe('POST /events — authorization', () => {
   it('writes the token username as the events.author (not the client-supplied author)', async () => {
     const token = await makeToken({ username: 'token-alice' })
     const event = targetCreate({ author: 'mallory' })
-    const db = makeInMemoryD1()
+    const { db, snapshot } = await makeTestDb()
     await handleEventsWriteRequest(await makeRequest([event], token), makeEnv(db))
-    const tables = (db as any)._tables()
+    const tables = (await snapshot())
     expect(tables.events[0].author).toBe('token-alice')
   })
 
   it('rejects source.cell.* from a CONTRIBUTOR token with 403', async () => {
     const token = await makeToken({ role: 400 })
     const event = sourceCreate()
-    const db = makeInMemoryD1()
+    const { db, snapshot } = await makeTestDb()
     const res = (await handleEventsWriteRequest(await makeRequest([event], token), makeEnv(db)))!
     const body = await res.json() as any
     expect(body.rejected).toHaveLength(1)
@@ -176,17 +176,17 @@ describe('POST /events — authorization', () => {
   it('accepts source.cell.* from a PROJECT_LEAD token', async () => {
     const token = await makeToken({ role: 500 })
     const event = sourceCreate()
-    const db = makeInMemoryD1()
+    const { db, snapshot } = await makeTestDb()
     const res = (await handleEventsWriteRequest(await makeRequest([event], token), makeEnv(db)))!
     const body = await res.json() as any
     expect(body.accepted).toHaveLength(1)
-    expect((db as any)._tables().events[0].kind).toBe('source.cell.create')
+    expect((await snapshot()).events[0].kind).toBe('source.cell.create')
   })
 
   it('rejects target.cell.commit from a COMMENTER token (< CONTRIBUTOR)', async () => {
     const token = await makeToken({ role: 200 })
     const event = targetCommit()
-    const db = makeInMemoryD1()
+    const { db, snapshot } = await makeTestDb()
     const res = (await handleEventsWriteRequest(await makeRequest([event], token), makeEnv(db)))!
     const body = await res.json() as any
     expect(body.rejected[0].status).toBe(403)
@@ -198,14 +198,14 @@ describe('POST /events — authorization', () => {
 describe('POST /events — server_seq', () => {
   it('assigns a monotonically increasing server_seq per project', async () => {
     const token = await makeToken()
-    const db = makeInMemoryD1()
+    const { db, snapshot } = await makeTestDb()
     const events = [
       targetCreate({ id: 'a', cellId: 'cell-1', payload: { cellId: 'cell-1', value: '1' } }),
       targetCreate({ id: 'b', cellId: 'cell-2', payload: { cellId: 'cell-2', value: '2' } }),
       targetCreate({ id: 'c', cellId: 'cell-3', payload: { cellId: 'cell-3', value: '3' } }),
     ]
     await handleEventsWriteRequest(await makeRequest(events, token), makeEnv(db))
-    const tables = (db as any)._tables()
+    const tables = (await snapshot())
     expect(tables.events).toHaveLength(3)
     const seqs = tables.events.map((e: any) => e.server_seq).sort((a: number, b: number) => a - b)
     expect(seqs).toEqual([1, 2, 3])
@@ -225,7 +225,7 @@ describe('POST /events — server_seq', () => {
     // enforces the UNIQUE constraint, so any code path that produces a
     // duplicate (project_id, server_seq) trips loudly.
     const token = await makeToken()
-    const db = makeInMemoryD1()
+    const { db, snapshot } = await makeTestDb()
 
     const batchA = [
       targetCreate({ id: 'a1', cellId: 'cell-a1', payload: { cellId: 'cell-a1', value: 'a1' } }),
@@ -241,7 +241,7 @@ describe('POST /events — server_seq', () => {
       handleEventsWriteRequest(await makeRequest(batchB, token), makeEnv(db)),
     ])
 
-    const tables = (db as any)._tables()
+    const tables = (await snapshot())
     expect(tables.events).toHaveLength(4)
     const seqs = tables.events.map((e: any) => e.server_seq).sort((a: number, b: number) => a - b)
     expect(new Set(seqs).size).toBe(4)
@@ -254,7 +254,7 @@ describe('POST /events — server_seq', () => {
 describe('POST /events — AD-2 first-child-of-parent', () => {
   it('cell commits follow first-child-of-parent: a later sibling is logged but does NOT overwrite the projection', async () => {
     const token = await makeToken()
-    const db = makeInMemoryD1()
+    const { db, snapshot } = await makeTestDb()
 
     // Genesis create.
     const create = targetCreate({ id: 'evt-create-001' })
@@ -285,7 +285,7 @@ describe('POST /events — AD-2 first-child-of-parent', () => {
     const r1 = await handleEventsWriteRequest(await makeRequest([first], token), makeEnv(db))
     expect((await r1!.json() as any).accepted).toHaveLength(1)
 
-    let cell = (db as any)._tables().cells[0]
+    let cell = (await snapshot()).cells[0]
     expect(cell.value).toBe('FIRST')
     expect(cell.event_id).toBe('evt-first')
 
@@ -298,12 +298,12 @@ describe('POST /events — AD-2 first-child-of-parent', () => {
     expect(body2.stale).toHaveLength(1)
     expect(body2.stale[0].id).toBe('evt-second')
 
-    const events = (db as any)._tables().events
+    const events = (await snapshot()).events
     // Both events durably persisted.
     expect(events.find((e: any) => e.id === 'evt-first')).toBeDefined()
     expect(events.find((e: any) => e.id === 'evt-second')).toBeDefined()
 
-    cell = (db as any)._tables().cells[0]
+    cell = (await snapshot()).cells[0]
     // Projection still pinned to the first-child winner.
     expect(cell.value).toBe('FIRST')
     expect(cell.event_id).toBe('evt-first')
@@ -311,13 +311,13 @@ describe('POST /events — AD-2 first-child-of-parent', () => {
 
   it('idempotent replay: the same event id replayed twice keeps the same chain head', async () => {
     const token = await makeToken()
-    const db = makeInMemoryD1()
+    const { db, snapshot } = await makeTestDb()
 
     const create = targetCreate({ id: 'evt-create-001' })
     await handleEventsWriteRequest(await makeRequest([create], token), makeEnv(db))
     await handleEventsWriteRequest(await makeRequest([create], token), makeEnv(db))
 
-    const tables = (db as any)._tables()
+    const tables = (await snapshot())
     expect(tables.events).toHaveLength(1)
     expect(tables.cells).toHaveLength(1)
     expect(tables.cells[0].event_id).toBe('evt-create-001')
@@ -329,7 +329,7 @@ describe('POST /events — AD-2 first-child-of-parent', () => {
 describe('POST /events — AD-9 source_event_id pin', () => {
   it('target.cell.commit writes payload.sourceEventId into cells.source_event_id', async () => {
     const token = await makeToken()
-    const db = makeInMemoryD1()
+    const { db, snapshot } = await makeTestDb()
 
     await handleEventsWriteRequest(
       await makeRequest([targetCreate({ id: 'evt-create-001' })], token),
@@ -346,13 +346,13 @@ describe('POST /events — AD-9 source_event_id pin', () => {
     })
     await handleEventsWriteRequest(await makeRequest([commit], token), makeEnv(db))
 
-    const cell = (db as any)._tables().cells[0]
+    const cell = (await snapshot()).cells[0]
     expect(cell.source_event_id).toBe('src-pin-99')
   })
 
   it('target.cell.commit without sourceEventId leaves source_event_id NULL', async () => {
     const token = await makeToken()
-    const db = makeInMemoryD1()
+    const { db, snapshot } = await makeTestDb()
     await handleEventsWriteRequest(
       await makeRequest([targetCreate({ id: 'evt-create-001' })], token),
       makeEnv(db),
@@ -361,7 +361,7 @@ describe('POST /events — AD-9 source_event_id pin', () => {
       await makeRequest([targetCommit({ id: 'evt-commit-001' })], token),
       makeEnv(db),
     )
-    const cell = (db as any)._tables().cells[0]
+    const cell = (await snapshot()).cells[0]
     expect(cell.source_event_id).toBeNull()
   })
 })
@@ -372,7 +372,7 @@ describe('POST /events — cell.validate', () => {
   it('marks the cell validated when the validator targets the current chain head', async () => {
     const token = await makeToken({ role: 400 })
     const reviewerToken = await makeToken({ role: 300, username: 'reviewer-bob' })
-    const db = makeInMemoryD1()
+    const { db, snapshot } = await makeTestDb()
     await handleEventsWriteRequest(
       await makeRequest([targetCreate({ id: 'evt-create-001' })], token),
       makeEnv(db),
@@ -381,14 +381,14 @@ describe('POST /events — cell.validate', () => {
       await makeRequest([validate({ payload: { editEventId: 'evt-create-001' } })], reviewerToken),
       makeEnv(db),
     )
-    const cell = (db as any)._tables().cells[0]
+    const cell = (await snapshot()).cells[0]
     expect(cell.validated).toBe(1)
   })
 
   it('validation for a prior edit does NOT mark the cell validated after a new commit', async () => {
     const token = await makeToken({ role: 400 })
     const reviewerToken = await makeToken({ role: 300, username: 'reviewer-bob' })
-    const db = makeInMemoryD1()
+    const { db, snapshot } = await makeTestDb()
 
     await handleEventsWriteRequest(
       await makeRequest([targetCreate({ id: 'evt-create-001' })], token),
@@ -399,13 +399,13 @@ describe('POST /events — cell.validate', () => {
       await makeRequest([validate({ payload: { editEventId: 'evt-create-001' } })], reviewerToken),
       makeEnv(db),
     )
-    expect((db as any)._tables().cells[0].validated).toBe(1)
+    expect((await snapshot()).cells[0].validated).toBe(1)
 
     // A new commit advances the chain head — validated should flip to 0.
     await handleEventsWriteRequest(
       await makeRequest([targetCommit({ id: 'evt-commit-new', parentId: 'evt-create-001' })], token),
       makeEnv(db),
     )
-    expect((db as any)._tables().cells[0].validated).toBe(0)
+    expect((await snapshot()).cells[0].validated).toBe(0)
   })
 })

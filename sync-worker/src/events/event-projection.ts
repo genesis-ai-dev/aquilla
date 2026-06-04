@@ -86,7 +86,7 @@ function countWords(text: string): number {
  * maintained by the cell commit projection path" comment — that maintenance
  * never actually existed before, so every `files` row sat at cell_count=0.
  */
-function fileCountersRecomputeStmt(
+export function fileCountersRecomputeStmt(
   db: D1Database,
   projectId: string,
   fileId: string,

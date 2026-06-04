@@ -9,6 +9,12 @@
 // (cells.event_id REFERENCES events(id), so a silently-IGNOREd events row
 // orphans the cells write). Per repro: scripts/usfm-e2e-batch.ts at
 // CONCURRENCY=4 failed 56/276; at CONCURRENCY=1 it passed 276/276.
+//
+// FRO-135 regression: after the D1→Postgres migration the import path must
+// actually land cells in the `cells` projection table (not just the events
+// table). The DB write-path uses Postgres syntax throughout (ON CONFLICT,
+// extract(epoch from now()), $1 placeholders via the shim) — these tests
+// run on PGlite (real Postgres engine) to guard against SQLite-ism regressions.
 
 import { describe, it, expect } from 'vitest'
 
@@ -167,5 +173,97 @@ describe('POST /import — server_seq is race-safe', () => {
       .map((e: any) => e.server_seq)
       .sort((x: number, y: number) => x - y)
     expect(seqsAsc).toEqual([1, 2, 3])
+  })
+})
+
+// FRO-135: after D1→Postgres migration, cells must actually land in the
+// projection table, not just the events log. Progress advances past 0% only
+// when the server confirms accepted > 0; the response "accepted" count must
+// match the actual rows in `cells`. This verifies the full write path on
+// PGlite (real Postgres engine) — an SQLite-ism in the SQL would fail here.
+describe('POST /import — cells land in Postgres projection (FRO-135)', () => {
+  it('file.create → files row created; source.cell.create → cells rows created', async () => {
+    const token = await leadToken()
+    const { db, rows } = await makeTestDb()
+
+    const CELL_COUNT = 5
+    const req = await makeImportRequest(token, {
+      idPrefix: 'bible',
+      cellCount: CELL_COUNT,
+      includeFile: true,
+    })
+    const res = await handleBulkImportRequest(req, makeEnv(db))
+    expect(res?.status).toBe(200)
+    const body = await res?.json() as { accepted: number; fileId: string }
+    // Server reports accepted = cell count (not counting file.create).
+    expect(body.accepted).toBe(CELL_COUNT)
+
+    // FRO-135 guard: cells must exist in the projection table.
+    // On SQLite-ism bugs (e.g. wrong ON CONFLICT syntax, bad placeholders)
+    // the DB write fails and this assertion would catch it.
+    const cellRows = await rows('cells')
+    expect(cellRows).toHaveLength(CELL_COUNT)
+    // All cells are source-side with the correct file_id.
+    expect(cellRows.every((c: any) => c.side === 'source')).toBe(true)
+    expect(cellRows.every((c: any) => c.file_id === FILE_ID)).toBe(true)
+
+    // files row must exist with accurate cell_count (deferred recompute runs
+    // once at the end of the batch — FRO-135 fix).
+    const fileRows = await rows('files')
+    expect(fileRows).toHaveLength(1)
+    expect(fileRows[0]).toMatchObject({
+      id: FILE_ID,
+      project_id: PROJECT_ID,
+      cell_count: CELL_COUNT,
+    })
+  })
+
+  it('large import (>D1_BATCH_LIMIT cells) fully lands on Postgres', async () => {
+    // D1_BATCH_LIMIT = 100; each cell produces 2 stmts (event + cells INSERT);
+    // file.create adds 2 more; the deferred counter recompute adds 1 trailing stmt.
+    // A batch of 60 cells = 2 + 120 + 1 = 123 stmts, spanning 2 db.batch() calls.
+    // Guards that multi-batch imports don't stall at 0% (FRO-135).
+    const token = await leadToken()
+    const { db, rows } = await makeTestDb()
+
+    const CELL_COUNT = 60
+    const req = await makeImportRequest(token, {
+      idPrefix: 'bulk',
+      cellCount: CELL_COUNT,
+      includeFile: true,
+    })
+    const res = await handleBulkImportRequest(req, makeEnv(db))
+    expect(res?.status).toBe(200)
+    const body = await res?.json() as { accepted: number }
+    expect(body.accepted).toBe(CELL_COUNT)
+
+    const cellRows = await rows('cells')
+    expect(cellRows).toHaveLength(CELL_COUNT)
+  })
+
+  it('rawSource side-car lands in file_source_blobs on Postgres', async () => {
+    const token = await leadToken()
+    const { db, rows } = await makeTestDb()
+
+    const rawSource = '\\id GEN\n\\c 1\n\\v 1 In the beginning...'
+    const body = {
+      projectId: PROJECT_ID,
+      fileId: FILE_ID,
+      file: { id: 'file-evt-1', name: 'GEN.usfm', fileType: 'usfm' },
+      cells: [{ id: 'cell-evt-1', cellId: 'cell-1', value: 'In the beginning...' }],
+      rawSource,
+      rawSourceFormat: 'usfm',
+    }
+    const req = new Request('https://worker/import', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify(body),
+    })
+    const res = await handleBulkImportRequest(req, makeEnv(db))
+    expect(res?.status).toBe(200)
+
+    const blobRows = await rows('file_source_blobs')
+    expect(blobRows).toHaveLength(1)
+    expect(blobRows[0]).toMatchObject({ file_id: FILE_ID, format: 'usfm', raw_source: rawSource })
   })
 })

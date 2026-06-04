@@ -25,7 +25,11 @@
 import { verifyTokenForDoc } from '../auth'
 import { ROLE } from './role-policy'
 import { withCors } from '../cors'
-import { buildEventProjectionStmts, type PersistedEvent } from './event-projection'
+import {
+  buildEventProjectionStmts,
+  fileCountersRecomputeStmt,
+  type PersistedEvent,
+} from './event-projection'
 
 const D1_BATCH_LIMIT = 100
 
@@ -283,11 +287,22 @@ export async function handleBulkImportRequest(
       serverTs: serverTs++,
     }
     pushEventInsert(db, cellEvent, stmts)
-    buildEventProjectionStmts(db, cellEvent, stmts)
+    // Defer per-cell file-counter recomputes (cell_count, word_count, etc.)
+    // to avoid O(cells²) UPDATE overhead on Postgres. A single recompute runs
+    // after all cells have been inserted instead of once per cell. This prevents
+    // the first chunk from taking tens of seconds and appearing "stuck at 0%"
+    // when importing large Bibles (FRO-135).
+    buildEventProjectionStmts(db, cellEvent, stmts, { deferFileCounters: true })
   }
 
-  // Commit in D1-batch-limit chunks. file.create + each cell contribute 2
-  // statements (event insert + projection), so a chunk holds ~50 cells.
+  // One final file-counter recompute per (project, file) pair: counts all cells
+  // in the DB that belong to this file (including those from prior chunks of the
+  // same import if the client retries). Self-healing by design — always correct.
+  stmts.push(fileCountersRecomputeStmt(db, body.projectId, body.fileId, serverTs))
+
+  // Commit in D1-batch-limit chunks. file.create contributes 2 statements
+  // (event + files INSERT); each cell contributes 2 statements (event + cells
+  // INSERT); the single trailing file-counter recompute is 1 statement.
   try {
     for (let i = 0; i < stmts.length; i += D1_BATCH_LIMIT) {
       await db.batch(stmts.slice(i, i + D1_BATCH_LIMIT))

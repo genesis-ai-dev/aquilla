@@ -156,3 +156,16 @@ bucket_name = "aquilla-snapshots-staging"
 binding = "AQUILLA_DB"
 database_name = "aquilla-db-staging"
 database_id = "c995bf9a-97c0-4966-a112-053a2d04d8f9"
+
+# Staging runs on Neon (Postgres) to mirror prod, NOT the legacy D1 above.
+# When HYPERDRIVE is bound, index.ts swaps AQUILLA_DB for the Postgres shim
+# (db/shim/d1-postgres.ts) over Hyperdrive → the Neon `staging` branch
+# (project sweet-paper-88472094, branch br-old-credit-aja5brf7). D1 kept for rollback.
+# Caching disabled so live edits aren't served stale (same as prod).
+#
+# Use the SAME Hyperdrive id as auth-worker's [env.staging] (one staging
+# Hyperdrive → one Neon staging branch). See auth-worker/wrangler.toml for the
+# one-time `wrangler hyperdrive create` command (FRO-146).
+[[env.staging.hyperdrive]]
+binding = "HYPERDRIVE"
+id = "REPLACE_WITH_STAGING_HYPERDRIVE_ID"

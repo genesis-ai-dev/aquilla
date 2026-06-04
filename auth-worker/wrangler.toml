@@ -146,11 +146,27 @@ database_name = "aquilla-db-staging"
 database_id = "c995bf9a-97c0-4966-a112-053a2d04d8f9"
 migrations_dir = "migrations"
 
+# Staging runs on Neon (Postgres) to mirror prod, NOT the legacy D1 above.
+# When HYPERDRIVE is bound, index.ts swaps AQUILLA_DB for a Postgres shim over
+# Hyperdrive → the Neon `staging` branch (project sweet-paper-88472094,
+# branch br-old-credit-aja5brf7). The D1 binding above is kept only for rollback.
+#
+# ONE-TIME PROVISIONING (FRO-146) — create the staging Hyperdrive config, then
+# paste its id below (replace the placeholder):
+#   wrangler hyperdrive create aquilla-staging \
+#     --connection-string="<neon staging branch pooled connection string>" \
+#     --caching-disabled
+# Get the pooled connection string from the Neon `staging` branch; keep it OUT of git.
+[[env.staging.hyperdrive]]
+binding = "HYPERDRIVE"
+id = "REPLACE_WITH_STAGING_HYPERDRIVE_ID"
+
 [env.staging.vars]
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = "43200"
 EMAIL_FROM = "noreply@aquilla.app"
 BASE_URL = "https://dev.aquilla.app"
+SYNC_WORKER_URL = "https://api.dev.aquilla.app/sync"
 DEFAULT_LLM_MODEL = "anthropic/claude-sonnet-4.5"
 ENVIRONMENT = "staging"
 PLATFORM_ADMINS = "daniel2,dadukhankevin,ryder,ryder-aquilla,ryder-aquilla-2,ryder-aquilla-3"

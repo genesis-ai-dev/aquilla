@@ -120,9 +120,10 @@ Rules:
    process exists — do **not** move issues to `Done`/`Deployed`.
 5. Reference the `FRO-###` identifier in commits/branches (Linear auto-suggests a branch name).
 
-> **TODO (infra):** stand up a dedicated **staging subdomain** for the prototype so the
-> `Ready for Review` → `Ready for QA` steps have a real deploy target. Until it exists,
-> note in the issue where the fix was verified.
+> **Staging** lives at `https://dev.aquilla.app` (API `api.dev.aquilla.app`), backed by the
+> Neon `staging` branch via Hyperdrive. Deploy with `pnpm run deploy:aquilla:staging`. Setup
+> + one-time provisioning are in [`docs/STAGING.md`](docs/STAGING.md) (tracked by FRO-146 —
+> not fully provisioned until the staging Hyperdrive id is filled in).
 
 ## Useful slash commands
 

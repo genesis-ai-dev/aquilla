@@ -37,7 +37,7 @@ import {
   ROLE_NAMES,
 } from "../services/project-permissions"
 import { lookupUserByUsername } from "../services/user-lookup"
-import { getOrgAssignmentWorkload } from "../services/assignments"
+import { getOrgAssignmentWorkload, getMyAssignmentsAcrossOrg } from "../services/assignments"
 
 const orgs = new Hono<AuthHonoEnv>()
 
@@ -135,6 +135,21 @@ orgs.get("/:orgId/assignments/workload", async (c) => {
   }
   const workload = await getOrgAssignmentWorkload(c.env, orgId)
   return c.json({ workload })
+})
+
+/**
+ * GET /api/v2/orgs/:orgId/assignments/mine — the caller's open assignments
+ * across ALL the org's active projects, in ONE request (replaces the client's
+ * per-project /:projectId/assignments/mine fan-out). Any org member.
+ */
+orgs.get("/:orgId/assignments/mine", async (c) => {
+  const user = c.get("user")
+  const orgId = parseInt(c.req.param("orgId"), 10)
+  if (!Number.isFinite(orgId)) return c.json({ error: "invalid orgId" }, 400)
+  const role = await getOrgMemberRole(c.env, orgId, user.id)
+  if (role == null) return c.json({ error: "not an org member" }, 403)
+  const assignments = await getMyAssignmentsAcrossOrg(c.env, orgId, user.id)
+  return c.json({ assignments })
 })
 
 /** GET /api/v2/orgs/:orgId/members — caller must be an org member. */

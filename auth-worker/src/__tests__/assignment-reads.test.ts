@@ -157,3 +157,38 @@ describe("GET /api/v2/projects/:projectId/files/:fileId/chapters", () => {
     expect(denied.status).toBe(403)
   })
 })
+
+describe("GET /api/v2/orgs/:orgId/assignments/mine (consolidated, one request for the whole org)", () => {
+  it("returns the caller's open assignments across the org's projects, with project name + progress", async () => {
+    await seedOrgWithAssignments()
+    const res = await app.request(
+      "/api/v2/orgs/1/assignments/mine",
+      { headers: authHeader(await jwtFor("anna")) },
+      env,
+    )
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as {
+      assignments: Array<{ assignmentId: string; projectId: string; projectName: string; cellsTotal: number; cellsDone: number }>
+    }
+    // anna has one OPEN assignment (as-anna); as-anna-old is unassigned → excluded.
+    expect(body.assignments).toHaveLength(1)
+    expect(body.assignments[0]).toMatchObject({
+      assignmentId: "as-anna",
+      projectId: "pa",
+      projectName: "John",
+      cellsTotal: 3,
+      cellsDone: 2,
+    })
+  })
+
+  it("excludes archived projects and 403s a non-member", async () => {
+    await seedOrgWithAssignments()
+    await env.AQUILLA_DB.prepare("UPDATE projects SET archived_at = '2026-01-01' WHERE id='pa'").run()
+    const archived = await app.request("/api/v2/orgs/1/assignments/mine", { headers: authHeader(await jwtFor("anna")) }, env)
+    expect(archived.status).toBe(200)
+    expect(((await archived.json()) as { assignments: unknown[] }).assignments).toHaveLength(0)
+
+    const denied = await app.request("/api/v2/orgs/1/assignments/mine", { headers: authHeader(await jwtFor("outsider")) }, env)
+    expect(denied.status).toBe(403)
+  })
+})

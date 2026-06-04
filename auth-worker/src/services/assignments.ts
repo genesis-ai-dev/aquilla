@@ -140,6 +140,65 @@ export async function getMyAssignments(
   }))
 }
 
+/** One of the caller's open assignments, with its project name (org-wide inbox). */
+export interface MyOrgAssignment extends MyAssignment {
+  projectName: string
+}
+
+/**
+ * The caller's open assignments across ALL of an org's active projects, in ONE
+ * query. Replaces the per-project fan-out (the client used to call
+ * /:projectId/assignments/mine once per project — N requests, N connections).
+ * Authorization is the route's org-membership check; rows are inherently the
+ * caller's own (assignee_user_id = userId). Newest first.
+ */
+export async function getMyAssignmentsAcrossOrg(
+  env: Env,
+  orgId: number,
+  userId: number,
+): Promise<MyOrgAssignment[]> {
+  const rows = await env.AQUILLA_DB.prepare(
+    `SELECT a.assignment_id AS assignment_id, a.project_id AS project_id,
+            p.name AS project_name,
+            a.scope_kind AS scope_kind, a.scope_label AS scope_label,
+            a.deadline AS deadline, a.note AS note,
+            a.cells_total AS cells_total, a.created_at AS created_at,
+            ${CELLS_DONE_SUBQUERY} AS cells_done
+       FROM assignments a
+       JOIN projects p ON p.id = a.project_id
+      WHERE p.org_id = ? AND p.archived_at IS NULL
+        AND a.assignee_user_id = ?
+        AND a.unassigned_at IS NULL AND a.completed_at IS NULL
+      ORDER BY a.created_at DESC`,
+  )
+    .bind(orgId, userId)
+    .all<{
+      assignment_id: string
+      project_id: string
+      project_name: string
+      scope_kind: string
+      scope_label: string
+      deadline: string | null
+      note: string | null
+      cells_total: number
+      created_at: number
+      cells_done: number
+    }>()
+
+  return (rows.results ?? []).map((r) => ({
+    assignmentId: r.assignment_id,
+    projectId: r.project_id,
+    projectName: r.project_name,
+    scopeKind: r.scope_kind,
+    scopeLabel: r.scope_label,
+    deadline: r.deadline,
+    note: r.note,
+    cellsTotal: r.cells_total,
+    cellsDone: r.cells_done,
+    createdAt: r.created_at,
+  }))
+}
+
 /** Split "GEN 10" → { book: "GEN", num: 10 } for natural ordering. */
 function chapterSortKey(chapter: string): { book: string; num: number } {
   const m = chapter.match(/^(.*?)(\d+)\s*$/)

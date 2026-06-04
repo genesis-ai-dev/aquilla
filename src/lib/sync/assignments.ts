@@ -56,6 +56,25 @@ export async function getMyAssignments(jwt: string, projectId: string): Promise<
   return ((await res.json()) as { assignments: MyAssignment[] }).assignments
 }
 
+/** An inbox assignment with its project name, from the org-wide read. */
+export interface MyOrgAssignment extends MyAssignment {
+  projectName: string
+}
+
+/**
+ * Assignee inbox across a whole org in ONE request — the caller's open
+ * assignments over all the org's active projects. Replaces the per-project
+ * fan-out (one request per project). Any org member.
+ */
+export async function getMyAssignmentsForOrg(jwt: string, orgId: number): Promise<MyOrgAssignment[]> {
+  const res = await fetchWithTimeout(
+    `${FRONTIER_BASE}/api/v2/orgs/${orgId}/assignments/mine`,
+    { headers: { Authorization: `Bearer ${jwt}` } },
+  )
+  if (!res.ok) throw new Error(`getMyAssignmentsForOrg failed: HTTP ${res.status}`)
+  return ((await res.json()) as { assignments: MyOrgAssignment[] }).assignments
+}
+
 /**
  * Distinct chapters in a file (for the assign picker's chapter dropdown).
  * Natural-sorted server-side; each value feeds createAssignment's

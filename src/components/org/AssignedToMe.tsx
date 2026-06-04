@@ -5,22 +5,20 @@ import { OrgSidebar } from "./OrgSidebar"
 import { OrgBreadcrumb } from "./OrgBreadcrumb"
 import { useActiveOrg } from "@/context/OrgContext"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
-import { getPortfolio } from "@/lib/frontier/portfolio"
-import { getMyAssignments, type MyAssignment } from "@/lib/sync/assignments"
+import { getMyAssignmentsForOrg, type MyOrgAssignment } from "@/lib/sync/assignments"
 
 /**
  * The assignee's "Assigned to me" inbox — the caller's open assignments across
- * the active org. The inbox read is project-scoped server-side, so we fan out:
- * list the org's projects, then fetch /assignments/mine for each (allSettled so
- * a project the caller can't read — 403 — is simply skipped), and flatten.
- * Newest first.
+ * the active org, fetched in ONE request (GET /orgs/:orgId/assignments/mine).
+ * Previously this fanned out one request per project (N requests, N DB
+ * connections); the server now returns all of them in a single query.
  */
 export function AssignedToMe() {
   const { activeOrgId } = useActiveOrg()
   const { session } = useFrontierSession()
   const jwt = session?.jwt ?? null
 
-  const [rows, setRows] = useState<MyAssignment[]>([])
+  const [rows, setRows] = useState<MyOrgAssignment[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -31,10 +29,7 @@ export function AssignedToMe() {
     setError(null)
     void (async () => {
       try {
-        const projects = await getPortfolio(jwt, activeOrgId)
-        const settled = await Promise.allSettled(projects.map((p) => getMyAssignments(jwt, p.id)))
-        const all = settled.flatMap((r) => (r.status === "fulfilled" ? r.value : []))
-        all.sort((a, b) => b.createdAt - a.createdAt)
+        const all = await getMyAssignmentsForOrg(jwt, activeOrgId)
         if (!cancelled) setRows(all)
       } catch (e) {
         if (!cancelled) setError(e instanceof Error ? e.message : String(e))
@@ -71,6 +66,7 @@ export function AssignedToMe() {
                   >
                     <div className="flex items-center gap-2">
                       <p className="font-medium">{a.scopeLabel}</p>
+                      <span className="shrink-0 text-xs text-muted-foreground">{a.projectName}</span>
                       {a.deadline && (
                         <span className="shrink-0 rounded-full bg-muted px-2 py-0.5 text-[10px] font-medium text-muted-foreground">
                           Due {a.deadline}

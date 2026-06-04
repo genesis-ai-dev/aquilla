@@ -64,6 +64,7 @@ CREATE TABLE groups (
     created_at  TIMESTAMPTZ DEFAULT now(),
     updated_at  TIMESTAMPTZ DEFAULT now(),
     legacy_uuid TEXT,
+    is_internal BOOLEAN NOT NULL DEFAULT TRUE,
     UNIQUE (org_id, name)
 );
 

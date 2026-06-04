@@ -413,7 +413,7 @@ export async function listOrgGroups(
     `SELECT g.id AS id, g.name AS name,
             (SELECT COUNT(*) FROM group_members gm WHERE gm.group_id = g.id) AS member_count,
             (SELECT COUNT(*) FROM group_project_grants gpg WHERE gpg.group_id = g.id) AS project_count,
-            EXISTS (SELECT 1 FROM group_members gm2 WHERE gm2.group_id = g.id AND gm2.user_id = ?) AS viewer_is_member
+            (EXISTS (SELECT 1 FROM group_members gm2 WHERE gm2.group_id = g.id AND gm2.user_id = ?))::int AS viewer_is_member
        FROM groups g
       WHERE g.org_id = ?
       ORDER BY LOWER(g.name)`,
@@ -523,7 +523,13 @@ export async function updateGroup(env: Env, orgId: number, groupId: number, name
 
 /** Delete a group (FK cascades members + grants). */
 export async function deleteGroup(env: Env, orgId: number, groupId: number): Promise<void> {
-  await env.AQUILLA_DB.prepare("DELETE FROM groups WHERE id = ? AND org_id = ?").bind(groupId, orgId).run()
+  // The Postgres schema omits FK constraints (migration choice), so cascade the
+  // child rows explicitly — SQLite's ON DELETE CASCADE did this for us before.
+  await env.AQUILLA_DB.batch([
+    env.AQUILLA_DB.prepare("DELETE FROM group_members WHERE group_id = ?").bind(groupId),
+    env.AQUILLA_DB.prepare("DELETE FROM group_project_grants WHERE group_id = ?").bind(groupId),
+    env.AQUILLA_DB.prepare("DELETE FROM groups WHERE id = ? AND org_id = ?").bind(groupId, orgId),
+  ])
 }
 
 /** Add an org member to a group. Returns "not-org-member" if the target isn't in the org. */

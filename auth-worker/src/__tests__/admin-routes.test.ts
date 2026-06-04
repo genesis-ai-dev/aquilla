@@ -31,7 +31,7 @@ describe("/api/v2/admin/* platform-admin gate", () => {
       "INSERT INTO organizations (id, name, owner_user_id) VALUES (1, 'CAS', 1), (2, 'NWT', 2)",
     ).run()
     await env.AQUILLA_DB.prepare(
-      "INSERT INTO org_members (org_id, user_id, role_level, granted_by, last_active_at) VALUES (1, 1, 700, 1, datetime('now')), (2, 2, 700, 2, datetime('now','-30 days'))",
+      "INSERT INTO org_members (org_id, user_id, role_level, granted_by, last_active_at) VALUES (1, 1, 700, 1, now()), (2, 2, 700, 2, now() - interval '30 days')",
     ).run()
     await env.AQUILLA_DB.prepare(
       "INSERT INTO projects (id, name, org_id, created_by, archived_at) VALUES ('pa', 'John', 1, 1, NULL), ('pb', 'Mark', 2, 2, NULL), ('pz', 'Old', 1, 1, '2026-01-01')",

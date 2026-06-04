@@ -134,6 +134,10 @@ export function makeD1Postgres(connectionString: string, max = 5): D1Postgres {
     fetch_types: false, // recommended through Hyperdrive's pooling
     types: {
       bigint: { to: 20, from: [20], parse: (x: string) => Number(x), serialize: (x: number | bigint) => String(x) },
+      // SUM() over a bigint column (e.g. cell_audio.duration_ms) returns numeric
+      // (oid 1700), not bigint — coerce it to a JS number too, else aggregates
+      // come back as strings. Values are counts/ms/word-totals, all < 2^53.
+      numeric: { to: 1700, from: [1700], parse: (x: string) => Number(x), serialize: (x: number) => String(x) },
       timestamp: { to: 1114, from: [1114, 1184], parse: (x: string) => x, serialize: (x: string) => x },
     },
   })

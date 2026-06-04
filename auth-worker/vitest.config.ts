@@ -1,30 +1,22 @@
 import path from "node:path"
-import { cloudflareTest, readD1Migrations } from "@cloudflare/vitest-pool-workers"
 import { defineConfig } from "vitest/config"
 
-export default defineConfig(async () => {
-  const migrations = await readD1Migrations(path.join(__dirname, "migrations"))
-  return {
-    plugins: [
-      cloudflareTest({
-        wrangler: {
-          configPath: "./wrangler.toml",
-        },
-        miniflare: {
-          bindings: {
-            TEST_MIGRATIONS: migrations,
-            SECRET_KEY: "frontier-test-secret",
-            SYNC_SECRET_KEY: "sync-secret",
-            // Overrides wrangler.toml's [vars] for tests: "root" is the sole
-            // platform admin the admin-routes suite asserts against.
-            PLATFORM_ADMINS: "root",
-          },
-        },
-      }),
-    ],
-    test: {
-      include: ["src/**/*.test.ts"],
-      setupFiles: ["./src/__tests__/setup-migrations.ts"],
+// auth-worker tests run against real Postgres (PGlite) through the production
+// D1→Postgres shim, NOT miniflare's SQLite D1. "cloudflare:test" is aliased to
+// a PGlite-backed shim (src/__tests__/helpers/pg-test-env.ts) so the existing
+// `import { env } from "cloudflare:test"` test imports keep working unchanged.
+export default defineConfig({
+  resolve: {
+    alias: {
+      "cloudflare:test": path.resolve(__dirname, "./src/__tests__/helpers/pg-test-env.ts"),
     },
-  }
+  },
+  test: {
+    environment: "node",
+    include: ["src/**/*.test.ts"],
+    setupFiles: ["./src/__tests__/setup-migrations.ts"],
+    testTimeout: 30000,
+    hookTimeout: 30000,
+    poolOptions: { forks: { minForks: 1, maxForks: 3 } },
+  },
 })

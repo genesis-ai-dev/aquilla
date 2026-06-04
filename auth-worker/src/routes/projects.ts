@@ -239,7 +239,7 @@ projects.get("/", authMiddleware, async (c) => {
   //   ?12    : orgFilter (NULL or number) — equality check (filter case)
   const rows = await c.env.AQUILLA_DB.prepare(
     `SELECT p.id, p.name, p.org_id, p.archived_at,
-            MAX(
+            GREATEST(
               COALESCE(pm.role_level, 0),
               COALESCE(gg.max_grant,  0),
               COALESCE(om.role_level, 0),
@@ -281,7 +281,7 @@ projects.get("/", authMiddleware, async (c) => {
           OR gg.max_grant IS NOT NULL
           OR (p.org_id IS NOT NULL AND om.user_id = ?)
         )
-        AND (? IS NULL OR p.org_id = ?)
+        AND (?::bigint IS NULL OR p.org_id = ?::bigint)
       ORDER BY LOWER(p.name)`,
   )
     .bind(

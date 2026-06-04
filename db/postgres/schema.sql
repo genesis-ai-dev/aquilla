@@ -104,7 +104,7 @@ CREATE TABLE projects (
     archived_at       TIMESTAMPTZ,
     archived_by       BIGINT,
     source_project_id TEXT,
-    deadline_at       TIMESTAMPTZ
+    deadline_at       TEXT          -- calendar date string 'YYYY-MM-DD' (not an instant; TIMESTAMPTZ would TZ-shift it)
 );
 
 CREATE TABLE project_members (

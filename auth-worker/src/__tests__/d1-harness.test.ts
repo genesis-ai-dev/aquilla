@@ -2,13 +2,18 @@ import { env } from "cloudflare:test"
 import { describe, it, expect } from "vitest"
 import { seedUser } from "./helpers/d1"
 
-describe("real-D1 harness", () => {
-  it("applies migrations (org/group tables exist)", async () => {
+// Sanity checks for the test DB harness. Post-Neon-cutover this runs against
+// real Postgres (PGlite) via the production D1→Postgres shim, so schema presence
+// is checked through information_schema rather than SQLite's sqlite_master.
+describe("Postgres test harness", () => {
+  it("loads the schema (org/group tables exist)", async () => {
     const tables = await env.AQUILLA_DB.prepare(
-      "SELECT name FROM sqlite_master WHERE type='table' AND name IN ('organizations','org_members','groups','group_members','group_project_grants')",
+      `SELECT table_name AS name FROM information_schema.tables
+        WHERE table_schema='public'
+          AND table_name IN ('organizations','org_members','groups','group_members','group_project_grants')`,
     ).all<{ name: string }>()
     const names = (tables.results ?? []).map((r) => r.name).sort()
-    expect(names).toEqual(["group_members","group_project_grants","groups","org_members","organizations"])
+    expect(names).toEqual(["group_members", "group_project_grants", "groups", "org_members", "organizations"])
   })
 
   it("isolates storage between tests", async () => {

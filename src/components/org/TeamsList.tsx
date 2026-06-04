@@ -7,6 +7,14 @@ import { useActiveOrg } from "@/context/OrgContext"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { listTeams, createTeam, type TeamSummary } from "@/lib/frontier/teams"
 
+/** Three-position filter for the teams portal: all / internal only / public only. */
+type GroupFilter = "all" | "internal" | "public"
+const GROUP_FILTER_OPTIONS: Array<{ key: GroupFilter; label: string }> = [
+  { key: "all", label: "All" },
+  { key: "internal", label: "Internal only" },
+  { key: "public", label: "Public only" },
+]
+
 export function TeamsList() {
   const { activeOrgId, activeOrg } = useActiveOrg()
   const { session } = useFrontierSession()
@@ -17,6 +25,9 @@ export function TeamsList() {
   const [creating, setCreating] = useState(false)
   const [name, setName] = useState("")
   const [description, setDescription] = useState("")
+  // Default: "internal" — preserves the prior UX where only internal groups
+  // were shown (all existing groups default to isInternal=true via migration).
+  const [groupFilter, setGroupFilter] = useState<GroupFilter>("internal")
 
   const isAdmin = (activeOrg?.role.level ?? 0) >= 600
 
@@ -29,6 +40,12 @@ export function TeamsList() {
       .finally(() => { if (!cancelled) setLoading(false) })
     return () => { cancelled = true }
   }, [jwt, activeOrgId])
+
+  const filteredTeams = teams.filter((t) => {
+    if (groupFilter === "internal") return t.isInternal
+    if (groupFilter === "public") return !t.isInternal
+    return true // "all"
+  })
 
   return (
     <AppShell
@@ -59,9 +76,28 @@ export function TeamsList() {
               )}
             </div>
           )}
+
+          {/* Three-position toggle: all / internal only / public only */}
+          <div className="mb-4 inline-flex rounded-md border bg-muted/20 p-0.5">
+            {GROUP_FILTER_OPTIONS.map((opt) => (
+              <button
+                key={opt.key}
+                type="button"
+                onClick={() => setGroupFilter(opt.key)}
+                className={`inline-flex items-center rounded px-2.5 py-1 text-xs ${
+                  groupFilter === opt.key
+                    ? "bg-background shadow-sm text-foreground"
+                    : "text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
+
           {loading ? <p className="text-sm text-muted-foreground">Loading…</p> : (
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-              {teams.map((t) => (
+              {filteredTeams.map((t) => (
                 <button
                   key={t.id}
                   onClick={() => navigate(`/teams/${t.id}`)}
@@ -74,9 +110,18 @@ export function TeamsList() {
                   {t.viewerIsMember && (
                     <span className="mt-1 block text-xs text-muted-foreground/70">Member</span>
                   )}
+                  {!t.isInternal && (
+                    <span className="mt-1 block text-xs text-muted-foreground/70">Public</span>
+                  )}
                 </button>
               ))}
-              {teams.length === 0 && <p className="text-sm text-muted-foreground">No teams in this org yet.</p>}
+              {filteredTeams.length === 0 && (
+                <p className="text-sm text-muted-foreground">
+                  {teams.length === 0
+                    ? "No teams in this org yet."
+                    : `No ${groupFilter === "all" ? "" : groupFilter + " "}groups match the current filter.`}
+                </p>
+              )}
             </div>
           )}
         </div>

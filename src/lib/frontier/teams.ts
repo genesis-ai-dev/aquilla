@@ -1,7 +1,7 @@
 import { FRONTIER_BASE } from "./auth"
 import { fetchWithTimeout } from "./orgs"
 
-export interface TeamSummary { id: number; name: string; memberCount: number; projectCount: number; viewerIsMember: boolean }
+export interface TeamSummary { id: number; name: string; memberCount: number; projectCount: number; viewerIsMember: boolean; isInternal: boolean }
 export interface TeamDetail {
   id: number; name: string
   members: Array<{ userId: number; username: string; roleLevel: number | null }>

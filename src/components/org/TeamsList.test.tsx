@@ -16,6 +16,16 @@ vi.mock("@/lib/frontier/teams", () => ({
   createTeam: (...a: unknown[]) => createTeam(...a),
 }))
 
+const makeTeam = (overrides: Partial<{ id: number; name: string; memberCount: number; projectCount: number; viewerIsMember: boolean; isInternal: boolean }> = {}) => ({
+  id: 10,
+  name: "West Africa",
+  memberCount: 2,
+  projectCount: 1,
+  viewerIsMember: true,
+  isInternal: true,
+  ...overrides,
+})
+
 beforeEach(() => {
   localStorage.clear()
   listTeams.mockReset()
@@ -26,7 +36,7 @@ afterEach(() => vi.restoreAllMocks())
 
 describe("TeamsList", () => {
   it("lists the active org's teams", async () => {
-    listTeams.mockResolvedValue([{ id: 10, name: "West Africa", memberCount: 2, projectCount: 1, viewerIsMember: true }])
+    listTeams.mockResolvedValue([makeTeam()])
     render(<MemoryRouter><OrgProvider><TeamsList /></OrgProvider></MemoryRouter>)
     await waitFor(() => expect(screen.getByText("West Africa")).toBeInTheDocument())
     expect(listTeams).toHaveBeenCalledWith("jwt", 7)
@@ -57,5 +67,53 @@ describe("TeamsList admin create", () => {
     render(<MemoryRouter><OrgProvider><TeamsList /></OrgProvider></MemoryRouter>)
     await waitFor(() => expect(screen.getByText(/no teams/i)).toBeInTheDocument())
     expect(screen.queryByRole("button", { name: /new team/i })).toBeNull()
+  })
+})
+
+describe("TeamsList group filter toggle — regression guards", () => {
+  /**
+   * WHY: The toggle exists so managers can see org-private (internal) groups
+   * separately from publicly-visible groups. Mixing them in one list makes it
+   * hard to audit who has access to what. Each position must correctly restrict
+   * the list — a bug that lets a public group appear in "internal only" (or
+   * vice versa) would break the access audit flow.
+   */
+  const internalTeam = makeTeam({ id: 1, name: "Internal Team", isInternal: true })
+  const publicTeam = makeTeam({ id: 2, name: "Public Team", isInternal: false })
+
+  it("defaults to 'Internal only' — shows internal groups, hides public groups", async () => {
+    listTeams.mockResolvedValue([internalTeam, publicTeam])
+    render(<MemoryRouter><OrgProvider><TeamsList /></OrgProvider></MemoryRouter>)
+    await waitFor(() => expect(screen.getByText("Internal Team")).toBeInTheDocument())
+    expect(screen.queryByText("Public Team")).toBeNull()
+  })
+
+  it("'All' position shows both internal and public groups", async () => {
+    listTeams.mockResolvedValue([internalTeam, publicTeam])
+    render(<MemoryRouter><OrgProvider><TeamsList /></OrgProvider></MemoryRouter>)
+    await waitFor(() => screen.getByRole("button", { name: /^all$/i }))
+    await act(async () => { screen.getByRole("button", { name: /^all$/i }).click() })
+    expect(screen.getByText("Internal Team")).toBeInTheDocument()
+    expect(screen.getByText("Public Team")).toBeInTheDocument()
+  })
+
+  it("'Public only' position shows public groups, hides internal groups", async () => {
+    listTeams.mockResolvedValue([internalTeam, publicTeam])
+    render(<MemoryRouter><OrgProvider><TeamsList /></OrgProvider></MemoryRouter>)
+    await waitFor(() => screen.getByRole("button", { name: /^public only$/i }))
+    await act(async () => { screen.getByRole("button", { name: /^public only$/i }).click() })
+    expect(screen.getByText("Public Team")).toBeInTheDocument()
+    expect(screen.queryByText("Internal Team")).toBeNull()
+  })
+
+  it("'Internal only' position (explicit click) shows internal, hides public", async () => {
+    listTeams.mockResolvedValue([internalTeam, publicTeam])
+    render(<MemoryRouter><OrgProvider><TeamsList /></OrgProvider></MemoryRouter>)
+    await waitFor(() => screen.getByRole("button", { name: /^all$/i }))
+    // Navigate to "All" first, then back to "Internal only" to confirm the toggle works bidirectionally
+    await act(async () => { screen.getByRole("button", { name: /^all$/i }).click() })
+    await act(async () => { screen.getByRole("button", { name: /^internal only$/i }).click() })
+    expect(screen.getByText("Internal Team")).toBeInTheDocument()
+    expect(screen.queryByText("Public Team")).toBeNull()
   })
 })

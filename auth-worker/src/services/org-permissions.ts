@@ -401,6 +401,7 @@ export interface OrgGroupSummary {
   memberCount: number
   projectCount: number
   viewerIsMember: boolean
+  isInternal: boolean
 }
 
 /** Groups in an org, with counts and whether the viewer is a member. */
@@ -410,7 +411,7 @@ export async function listOrgGroups(
   viewerId: number,
 ): Promise<OrgGroupSummary[]> {
   const rows = await env.AQUILLA_DB.prepare(
-    `SELECT g.id AS id, g.name AS name,
+    `SELECT g.id AS id, g.name AS name, g.is_internal AS is_internal,
             (SELECT COUNT(*) FROM group_members gm WHERE gm.group_id = g.id) AS member_count,
             (SELECT COUNT(*) FROM group_project_grants gpg WHERE gpg.group_id = g.id) AS project_count,
             (EXISTS (SELECT 1 FROM group_members gm2 WHERE gm2.group_id = g.id AND gm2.user_id = ?))::int AS viewer_is_member
@@ -419,7 +420,7 @@ export async function listOrgGroups(
       ORDER BY LOWER(g.name)`,
   )
     .bind(viewerId, orgId)
-    .all<{ id: number; name: string; member_count: number; project_count: number; viewer_is_member: number }>()
+    .all<{ id: number; name: string; is_internal: number | boolean; member_count: number; project_count: number; viewer_is_member: number }>()
 
   return (rows.results ?? []).map((r) => ({
     id: r.id,
@@ -427,6 +428,7 @@ export async function listOrgGroups(
     memberCount: r.member_count,
     projectCount: r.project_count,
     viewerIsMember: r.viewer_is_member === 1,
+    isInternal: r.is_internal === 1 || r.is_internal === true,
   }))
 }
 

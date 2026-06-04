@@ -7,7 +7,12 @@ import { TeamDetail } from "./TeamDetail"
 vi.mock("@/hooks/useFrontierSession", () => ({ useFrontierSession: () => ({ session: { jwt: "jwt", username: "wendi", createdAt: "x" }, loading: false }) }))
 const listMyOrgs = vi.fn()
 const listOrgMembers = vi.fn()
-vi.mock("@/lib/frontier/orgs", () => ({ listMyOrgs: (...a: unknown[]) => listMyOrgs(...a), listOrgMembers: (...a: unknown[]) => listOrgMembers(...a) }))
+const addOrgMember = vi.fn()
+vi.mock("@/lib/frontier/orgs", () => ({
+  listMyOrgs: (...a: unknown[]) => listMyOrgs(...a),
+  listOrgMembers: (...a: unknown[]) => listOrgMembers(...a),
+  addOrgMember: (...a: unknown[]) => addOrgMember(...a),
+}))
 const getTeam = vi.fn()
 const addTeamMember = vi.fn()
 const removeTeamMember = vi.fn()
@@ -84,8 +89,12 @@ describe("TeamDetail admin management", () => {
     renderDetail()
     await waitFor(() => expect(screen.getByText("anna")).toBeInTheDocument())
     await act(async () => { (await screen.findByRole("button", { name: /add member/i })).click() })
-    const select = screen.getByRole("combobox")
-    await act(async () => { fireEvent.change(select, { target: { value: "anna" } }) })
+    // After clicking "Add member", a username picker appears alongside any existing role selectors.
+    // Target by the first combobox that does NOT have a role-for-* aria-label.
+    const selects = screen.getAllByRole("combobox")
+    const usernameSelect = selects.find((s) => !s.getAttribute("aria-label")?.toLowerCase().startsWith("role for"))
+    if (!usernameSelect) throw new Error("username picker not found")
+    await act(async () => { fireEvent.change(usernameSelect, { target: { value: "anna" } }) })
     await act(async () => { screen.getByRole("button", { name: /^add$/i }).click() })
     await waitFor(() => expect(addTeamMember).toHaveBeenCalledWith("jwt", 1, 10, "anna"))
   })
@@ -120,5 +129,51 @@ describe("TeamDetail non-admin gating", () => {
     expect(screen.queryByRole("button", { name: /detach bambara/i })).toBeNull()
     expect(screen.queryByRole("button", { name: /add member/i })).toBeNull()
     expect(screen.queryByRole("button", { name: /delete team/i })).toBeNull()
+  })
+})
+
+describe("TeamDetail member role editing (FRO-139)", () => {
+  beforeEach(() => {
+    addOrgMember.mockResolvedValue({ userId: 2, username: "anna", role: { level: 400, name: "contributor" } })
+  })
+
+  it("owner sees a role selector for each member", async () => {
+    // Owner (700) must see a combobox to change org-level role — this is what makes permission editing possible.
+    listMyOrgs.mockResolvedValue([{ id: 1, name: "CAS", role: { level: 700, name: "owner" } }])
+    getTeam.mockResolvedValue({ id: 10, name: "WA", members: [{ userId: 2, username: "anna", roleLevel: 100 }], projects: [] })
+    renderDetail()
+    await waitFor(() => expect(screen.getByText("anna")).toBeInTheDocument())
+    // The role selector for "anna" must be rendered (owner can change roles)
+    expect(screen.getByRole("combobox", { name: /role for anna/i })).toBeInTheDocument()
+  })
+
+  it("owner changing a member role calls addOrgMember (upsert) with correct args", async () => {
+    // Calling addOrgMember on an existing user updates their org role — this is the only role-change API.
+    listMyOrgs.mockResolvedValue([{ id: 1, name: "CAS", role: { level: 700, name: "owner" } }])
+    getTeam.mockResolvedValue({ id: 10, name: "WA", members: [{ userId: 2, username: "anna", roleLevel: 100 }], projects: [] })
+    renderDetail()
+    await waitFor(() => expect(screen.getByText("anna")).toBeInTheDocument())
+    const roleSelect = screen.getByRole("combobox", { name: /role for anna/i })
+    await act(async () => { fireEvent.change(roleSelect, { target: { value: "400" } }) })
+    await waitFor(() => expect(addOrgMember).toHaveBeenCalledWith("jwt", 1, "anna", 400))
+  })
+
+  it("maintainer (600) cannot see the role selector — only read-only label with tooltip", async () => {
+    // Maintainers can manage teams but only owners can change org-level roles (POST /orgs/:id/members requires 700).
+    listMyOrgs.mockResolvedValue([{ id: 1, name: "CAS", role: { level: 600, name: "maintainer" } }])
+    getTeam.mockResolvedValue({ id: 10, name: "WA", members: [{ userId: 2, username: "anna", roleLevel: 100 }], projects: [] })
+    renderDetail()
+    await waitFor(() => expect(screen.getByText("anna")).toBeInTheDocument())
+    // No role-change combobox for maintainer
+    expect(screen.queryByRole("combobox", { name: /role for anna/i })).toBeNull()
+    // Read-only role label with tooltip (title attr) is present
+    expect(screen.getByLabelText(/role: viewer/i)).toBeInTheDocument()
+  })
+
+  it("access level definitions tooltip is present on the Members heading", async () => {
+    // The "?" help affordance next to Members heading explains what each level grants — regression guard.
+    renderDetail()
+    await waitFor(() => expect(screen.getByRole("heading", { name: "WA" })).toBeInTheDocument())
+    expect(screen.getByLabelText(/access level definitions/i)).toBeInTheDocument()
   })
 })

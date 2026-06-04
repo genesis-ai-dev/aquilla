@@ -16,7 +16,7 @@ import {
   detachProject,
   type TeamDetail as TeamDetailType,
 } from "@/lib/frontier/teams"
-import { listOrgMembers, type OrgMember } from "@/lib/frontier/orgs"
+import { listOrgMembers, addOrgMember, type OrgMember } from "@/lib/frontier/orgs"
 import { fetchAccessibleProjects, type CloudProjectSummary } from "@/lib/sync/cloud-projects"
 
 const ROLE_OPTIONS = [
@@ -29,6 +29,20 @@ const ROLE_OPTIONS = [
   { level: 700, name: "owner" },
 ] as const
 
+/**
+ * Canonical descriptions for each access level (from AD-6 / permission-semantics.md, FRO-138).
+ * Shown as tooltips next to the member's role display.
+ */
+const ROLE_DESCRIPTIONS: Record<number, string> = {
+  100: "Viewer (100) — can read all org projects. No edit or management actions.",
+  200: "Commenter (200) — can read and leave comments. Cannot edit content.",
+  300: "Reviewer (300) — can read, comment, and review. Cannot make direct edits.",
+  400: "Contributor (400) — can edit project content. Maximum level grantable via share link.",
+  500: "Project Lead (500) — can add members to projects, mint share-link invites, and lead project work.",
+  600: "Maintainer (600) — can create/manage teams, rename the org, set project deadlines, and remove project members.",
+  700: "Owner (700) — full control: add/remove org members, archive/restore projects, and all maintainer actions.",
+}
+
 export function TeamDetail() {
   const { groupId } = useParams<{ groupId: string }>()
   const groupIdNum = groupId != null ? Number(groupId) : null
@@ -38,6 +52,8 @@ export function TeamDetail() {
   const navigate = useNavigate()
 
   const isAdmin = (activeOrg?.role.level ?? 0) >= 600
+  // Only org owners (700+) can change org-level member roles (POST /orgs/:id/members upsert).
+  const isOwner = (activeOrg?.role.level ?? 0) >= 700
 
   const [team, setTeam] = useState<TeamDetailType | null>(null)
   const [loading, setLoading] = useState(true)
@@ -134,6 +150,12 @@ export function TeamDetail() {
   async function handleChangeProjectRole(projectId: string, roleLevel: number) {
     if (!jwt || activeOrgId == null || groupIdNum == null) return
     await changeProjectRole(jwt, activeOrgId, groupIdNum, projectId, roleLevel)
+    await refetch()
+  }
+
+  async function handleChangeMemberRole(username: string, roleLevel: number) {
+    if (!jwt || activeOrgId == null) return
+    await addOrgMember(jwt, activeOrgId, username, roleLevel)
     await refetch()
   }
 
@@ -245,7 +267,18 @@ export function TeamDetail() {
               {/* Members section */}
               <section>
                 <div className="flex items-center justify-between mb-3">
-                  <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">Members</h2>
+                  <div className="flex items-center gap-1.5">
+                    <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">Members</h2>
+                    {/* "?" tooltip summarising all access levels — hover or focus to read */}
+                    <span
+                      className="inline-flex items-center justify-center rounded-full border w-4 h-4 text-[10px] leading-none text-muted-foreground cursor-help"
+                      title={Object.values(ROLE_DESCRIPTIONS).join("\n")}
+                      aria-label="Access level definitions"
+                      tabIndex={0}
+                    >
+                      ?
+                    </span>
+                  </div>
                   {isAdmin && !addingMember && (
                     <button
                       type="button"
@@ -293,9 +326,35 @@ export function TeamDetail() {
                       <li key={m.userId} className="flex items-center justify-between rounded-lg border px-4 py-2 text-sm">
                         <span className="font-medium">{m.username}</span>
                         <div className="flex items-center gap-2">
-                          <span className="text-xs text-muted-foreground">
-                            {m.roleLevel != null ? `Level ${m.roleLevel}` : "—"}
-                          </span>
+                          {isOwner ? (
+                            /* Owners can change the member's org-level role via the upsert endpoint */
+                            <select
+                              className="border rounded px-2 py-1 text-xs"
+                              value={m.roleLevel != null ? String(m.roleLevel) : ""}
+                              aria-label={`Role for ${m.username}`}
+                              title={m.roleLevel != null ? ROLE_DESCRIPTIONS[m.roleLevel] : "Unknown role"}
+                              onChange={(e) => handleChangeMemberRole(m.username, Number(e.target.value))}
+                            >
+                              {ROLE_OPTIONS.map((r) => (
+                                <option key={r.level} value={String(r.level)} title={ROLE_DESCRIPTIONS[r.level]}>
+                                  {r.name}
+                                </option>
+                              ))}
+                            </select>
+                          ) : (
+                            /* Non-owners see a read-only label with a tooltip explaining the role */
+                            <span
+                              className="text-xs text-muted-foreground cursor-help"
+                              title={m.roleLevel != null ? ROLE_DESCRIPTIONS[m.roleLevel] : "Unknown role"}
+                              aria-label={m.roleLevel != null ? `Role: ${ROLE_OPTIONS.find((r) => r.level === m.roleLevel)?.name ?? `level ${m.roleLevel}`}` : "Role unknown"}
+                            >
+                              {m.roleLevel != null
+                                ? (ROLE_OPTIONS.find((r) => r.level === m.roleLevel)?.name ?? `Level ${m.roleLevel}`)
+                                : "—"}
+                              {" "}
+                              <span className="inline-flex items-center justify-center rounded-full border w-3.5 h-3.5 text-[10px] leading-none text-muted-foreground" aria-hidden="true">?</span>
+                            </span>
+                          )}
                           {isAdmin && (
                             <button
                               type="button"

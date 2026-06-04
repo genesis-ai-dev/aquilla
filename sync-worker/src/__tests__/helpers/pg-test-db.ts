@@ -26,25 +26,106 @@ function pgliteExecutor(db: PGlite): PgExecutor {
   return wrap(db)
 }
 
+/** Seed data: { tableName: rowObjects[] } — column names must match the schema.
+ *  `cells_fts` is ignored (Postgres maintains FTS via the generated column). */
+export type Seed = Partial<Record<string, Array<Record<string, unknown>>>>
+
 export interface TestDb {
   /** Cast to D1Database — the shim is structurally compatible for the methods used. */
   db: D1Database
   /** Raw PGlite handle for assertions / seeding outside the D1 surface. */
   pg: PGlite
+  /** Read every row of a table (async replacement for the old fake's _tables()). */
+  rows<T = Record<string, unknown>>(table: string): Promise<T[]>
   /** Truncate every app table (RESTART IDENTITY) — call between tests. */
   reset(): Promise<void>
   close(): Promise<void>
 }
 
-export async function makeTestDb(): Promise<TestDb> {
+interface ColMeta {
+  name: string
+  type: string
+  notNull: boolean
+  hasDefault: boolean
+  generated: boolean
+}
+
+async function tableMeta(pg: PGlite, table: string): Promise<ColMeta[]> {
+  const r = await pg.query<{
+    column_name: string
+    data_type: string
+    is_nullable: string
+    column_default: string | null
+    is_identity: string
+    is_generated: string
+  }>(
+    `SELECT column_name, data_type, is_nullable, column_default, is_identity, is_generated
+     FROM information_schema.columns WHERE table_schema='public' AND table_name=$1`,
+    [table],
+  )
+  return r.rows.map((x) => ({
+    name: x.column_name,
+    type: x.data_type,
+    notNull: x.is_nullable === "NO",
+    hasDefault: x.column_default != null || x.is_identity === "YES",
+    generated: x.is_generated === "ALWAYS",
+  }))
+}
+
+function typeDefault(type: string): unknown {
+  if (/int|numeric|double|real|decimal/.test(type)) return 0
+  if (type.includes("timestamp") || type.includes("date")) return new Date(0).toISOString()
+  if (type === "boolean") return false
+  return "" // text / varchar / etc.
+}
+
+// Seed rows tolerantly (the legacy fake had no constraints): drop unknown +
+// generated columns, and auto-fill required (NOT NULL, no default) columns the
+// seed omits with a type-appropriate placeholder so real-PG constraints pass.
+async function seedRows(pg: PGlite, table: string, rows: Array<Record<string, unknown>>) {
+  if (rows.length === 0) return
+  const meta = await tableMeta(pg, table)
+  for (const row of rows) {
+    const cols: string[] = []
+    const vals: unknown[] = []
+    for (const m of meta) {
+      if (m.generated) continue
+      const has = m.name in row
+      let v = has ? row[m.name] : undefined
+      if (v === undefined || v === null) {
+        if (m.hasDefault) continue // let PG fill (identity / DEFAULT)
+        if (m.notNull) v = typeDefault(m.type) // required but omitted → placeholder
+        else if (!has) continue // nullable + not provided → omit
+        else v = null // explicit null on a nullable column
+      }
+      cols.push(m.name)
+      vals.push(v)
+    }
+    if (cols.length === 0) continue
+    const ph = cols.map((_, i) => `$${i + 1}`).join(",")
+    await pg.query(`INSERT INTO ${table} (${cols.join(",")}) VALUES (${ph})`, vals)
+  }
+}
+
+export async function makeTestDb(seed: Seed = {}): Promise<TestDb> {
   const pg = new PGlite()
   await pg.exec(SCHEMA)
-  const db = new D1Postgres(pgliteExecutor(pg)) as unknown as D1Database
-  const reset = async () => {
-    await pg.exec(`DO $$ DECLARE r RECORD; BEGIN
-      FOR r IN SELECT tablename FROM pg_tables WHERE schemaname='public' LOOP
-        EXECUTE 'TRUNCATE TABLE ' || quote_ident(r.tablename) || ' RESTART IDENTITY CASCADE';
-      END LOOP; END $$;`)
+  for (const [table, rows] of Object.entries(seed)) {
+    if (!rows || table === "cells_fts") continue // FTS is a generated column in PG
+    await seedRows(pg, table, rows)
   }
-  return { db, pg, reset, close: () => pg.close() }
+  const db = new D1Postgres(pgliteExecutor(pg)) as unknown as D1Database
+  return {
+    db,
+    pg,
+    rows: async <T = Record<string, unknown>>(table: string) =>
+      (await pg.query<T>(`SELECT * FROM ${table}`)).rows,
+    reset: async () => {
+      await pg.exec(`DO $$ DECLARE r RECORD; BEGIN
+        FOR r IN SELECT tablename FROM pg_tables WHERE schemaname='public' LOOP
+          EXECUTE 'TRUNCATE TABLE ' || quote_ident(r.tablename) || ' RESTART IDENTITY CASCADE';
+        END LOOP; END $$;`)
+    },
+    close: () => pg.close(),
+  }
 }

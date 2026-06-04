@@ -1,17 +1,17 @@
 import { describe, it, expect } from "vitest"
 import { handleFilesReadRequest } from "../events/files-read-route"
-import { makeInMemoryD1 } from "./helpers/d1-fake"
+import { makeTestDb } from "./helpers/pg-test-db"
 import { makeTestToken } from "./helpers/auth"
 
 const SECRET = "files-read-secret"
 
-function envWith(db: ReturnType<typeof makeInMemoryD1>) {
+function envWith(db: D1Database) {
   return { AQUILLA_DB: db, SYNC_SECRET_KEY: SECRET }
 }
 
 describe("GET /api/v1/projects/:projectId/files", () => {
   it("returns populated file rollup rows for a member", async () => {
-    const db = makeInMemoryD1({
+    const { db } = await makeTestDb({
       files: [
         {
           id: "file-gen",
@@ -64,14 +64,14 @@ describe("GET /api/v1/projects/:projectId/files", () => {
   })
 
   it("returns 401 without an Authorization header", async () => {
-    const db = makeInMemoryD1({ files: [] })
+    const { db } = await makeTestDb({ files: [] })
     const req = new Request("https://w/api/v1/projects/proj-a/files")
     const res = (await handleFilesReadRequest(req, envWith(db)))!
     expect(res.status).toBe(401)
   })
 
   it("returns 403 when the token's projectId does not match the path", async () => {
-    const db = makeInMemoryD1({ files: [] })
+    const { db } = await makeTestDb({ files: [] })
     const token = await makeTestToken(SECRET, { projectId: "different-proj", fileId: "any" })
     const req = new Request("https://w/api/v1/projects/proj-a/files", {
       headers: { Authorization: `Bearer ${token}` },
@@ -81,7 +81,7 @@ describe("GET /api/v1/projects/:projectId/files", () => {
   })
 
   it("returns the single file for the by-id variant", async () => {
-    const db = makeInMemoryD1({
+    const { db } = await makeTestDb({
       files: [
         {
           id: "file-x",
@@ -109,7 +109,7 @@ describe("GET /api/v1/projects/:projectId/files", () => {
   })
 
   it("returns 404 for an unknown file id", async () => {
-    const db = makeInMemoryD1({ files: [] })
+    const { db } = await makeTestDb({ files: [] })
     const token = await makeTestToken(SECRET, { projectId: "proj-a", fileId: "missing" })
     const req = new Request("https://w/api/v1/projects/proj-a/files/missing", {
       headers: { Authorization: `Bearer ${token}` },

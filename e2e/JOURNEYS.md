@@ -13,6 +13,11 @@
 | Projects    | Open / delete / restore from trash                   | _gap — Plan 2_                                                |        |
 | Orgs        | Create org                                           | _gap — Plan 2_                                                |        |
 | Orgs        | Add member to org, member sees it                    | `e2e/specs/orgs/members.smoke.spec.ts` (API setup + UI verify) |   ✅   |
+| Orgs        | Invite member → member sees all org projects         | `e2e/specs/orgs/org-access-lifecycle.spec.ts` (test 1)        |        |
+| Orgs        | Create team → attach project/user → group path fires | `e2e/specs/orgs/org-access-lifecycle.spec.ts` (test 2)        |        |
+| Orgs        | Revoke org membership → project disappears           | `e2e/specs/orgs/org-access-lifecycle.spec.ts` (test 3)        |        |
+| Orgs        | Full revoke (all paths) → 403 on project endpoint    | `e2e/specs/orgs/org-access-lifecycle.spec.ts` (test 4)        |        |
+| Orgs        | Detach group project → role falls back to org baseline | `e2e/specs/orgs/org-access-lifecycle.spec.ts` (test 5)      |        |
 | Orgs        | Remove member, change role                           | _gap — Plan 2_                                                |        |
 | Orgs        | Send & accept invite                                 | _gap — Plan 2_                                                |        |
 | Editor      | Import markdown, edit cell, persists across reload   | `e2e/specs/editor/import-and-edit.smoke.spec.ts`              |   ✅   |
@@ -45,3 +50,11 @@
 4. Reuse page objects under `e2e/helpers/page-objects/`. Add a new one if no existing class fits.
 5. Add a row to this table.
 6. Run `npm run test:e2e:smoke` (or full `npm run test:e2e`) to verify.
+
+## Manual checklists
+
+Human-clickable walkthroughs for journeys where automation misses visual or UX edge cases:
+
+| Area | Checklist |
+|------|-----------|
+| Orgs — access lifecycle (FRO-144) | `e2e/manual-checklists/org-access-walkthrough.md` |

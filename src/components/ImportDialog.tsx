@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { Loader2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import {
   Dialog,
@@ -203,13 +204,21 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, getT
               </p>
             </>
           ) : (
-            <p className="mt-2 text-xs text-muted-foreground">Working…</p>
+            <>
+              <div className="mt-3 h-2 w-full overflow-hidden rounded-full bg-muted">
+                <div className="h-full w-1/3 animate-pulse rounded-full bg-primary/60" />
+              </div>
+              <div className="mt-2 flex items-center justify-center gap-1.5 text-xs text-muted-foreground">
+                <Loader2 className="h-3 w-3 animate-spin" />
+                <span>Working…</span>
+              </div>
+            </>
           )}
         </div>
       ) : (
         <>
           <p className="mb-2 text-sm text-muted-foreground">
-            Drag & drop files here, or
+            Drag &amp; drop files here, or
           </p>
           <Button variant="outline" size="sm" render={<label className="cursor-pointer" />}>
             Choose Files
@@ -368,7 +377,7 @@ function EBiblePanel({ projectId, username, sourceLanguage, targetLanguage, getT
                     <span className="text-xs text-muted-foreground">
                       {t.languageNameInEnglish || t.languageName}
                       {t.otBooks + t.ntBooks > 0 && (
-                        <> · {t.otBooks} OT · {t.ntBooks} NT</>
+                        <> &middot; {t.otBooks} OT &middot; {t.ntBooks} NT</>
                       )}
                     </span>
                   </button>

@@ -100,7 +100,12 @@ export async function loadCorpus(
   const binds: unknown[] = [args.projectId, upstreamProjectId, args.projectId]
 
   if (args.validatedOnly) {
+    // validated = 1 already implies a non-empty target; no extra check needed.
     parts.push("AND t.validated = 1")
+  } else {
+    // Always require a non-empty target translation. Source-only cells have
+    // no target text and cannot serve as useful few-shot examples (FRO-153).
+    parts.push("AND COALESCE(t.value, '') != ''")
   }
   if (args.excludeCellId) {
     parts.push("AND s.cell_id != ?")

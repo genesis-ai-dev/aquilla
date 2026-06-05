@@ -351,7 +351,7 @@ export function CellVoicePanel({
         : "Play this line"
 
   return (
-    <div className="flex items-center gap-2 rounded-lg border border-border/60 bg-muted/20 px-2 py-1.5" dir="ltr">
+    <div className="flex items-center gap-2 rounded-lg border border-border/20 bg-muted/20 px-2 py-1.5" dir="ltr">
       {/* Primary: magic-generate when empty, play/pause once there's a take. */}
       <button
         type="button"

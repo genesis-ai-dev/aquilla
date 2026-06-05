@@ -17,7 +17,7 @@ import { fetchSyncToken } from "@/lib/sync/sync-token"
 /** Max per-file rows shown on the overview; the rest are counted as "+N more". */
 const FILE_ROW_CAP = 12
 
-/** A labeled progress bar matching the FileRow neumorphic bar style. */
+/** A labeled progress bar for a single metric. */
 function StatBar({ label, value, total, fillClass, suffix }: {
   label: string
   value: number
@@ -27,15 +27,34 @@ function StatBar({ label, value, total, fillClass, suffix }: {
 }) {
   const pct = total > 0 ? Math.round((value / total) * 100) : 0
   return (
-    <div className="flex items-center gap-2">
-      <span className="w-24 shrink-0 text-xs text-muted-foreground">{label}</span>
-      <span className="h-2 flex-1 rounded-full bg-muted overflow-hidden shadow-neu-inset">
-        <span className={`block h-full rounded-full ${fillClass}`} style={{ width: `${pct}%` }} />
-      </span>
-      <span className="w-24 shrink-0 text-right text-xs tabular-nums text-muted-foreground">
-        {pct}% · {value}/{total}{suffix ?? ""}
+    <div className="flex items-center gap-3">
+      <span className="w-20 shrink-0 text-xs font-medium text-muted-foreground">{label}</span>
+      <div className="flex flex-1 items-center gap-2">
+        <span className="h-2 flex-1 rounded-full bg-muted overflow-hidden shadow-neu-inset">
+          <span className={`block h-full rounded-full transition-all ${fillClass}`} style={{ width: `${pct}%` }} />
+        </span>
+        <span className="w-20 shrink-0 text-right text-xs tabular-nums text-muted-foreground">
+          {pct}%
+        </span>
+      </div>
+      <span className="w-28 shrink-0 text-right text-[11px] tabular-nums text-muted-foreground/70">
+        {value}/{total}{suffix ?? ""}
       </span>
     </div>
+  )
+}
+
+/** Compact two-bar strip (translated + validated) for per-file rows. */
+function FileProgressBars({ tPct, vPct }: { tPct: number; vPct: number }) {
+  return (
+    <span className="flex flex-1 flex-col gap-[3px]">
+      <span className="block h-1.5 rounded-full bg-muted overflow-hidden shadow-neu-inset">
+        <span className="block h-full rounded-full bg-amber-500 transition-all" style={{ width: `${tPct}%` }} />
+      </span>
+      <span className="block h-1.5 rounded-full bg-muted overflow-hidden shadow-neu-inset">
+        <span className="block h-full rounded-full bg-emerald-500 transition-all" style={{ width: `${vPct}%` }} />
+      </span>
+    </span>
   )
 }
 
@@ -162,88 +181,142 @@ export function ProjectOverview() {
           {status !== "ready" ? (
             <p className="text-sm text-muted-foreground">Loading…</p>
           ) : (
-            <div className="max-w-xl rounded-lg border p-6">
-              <div className="flex items-center gap-2">
-                <h1 className="text-lg font-semibold">{project?.name}</h1>
-                {isArchived && (
-                  <span className="rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground">Archived</span>
-                )}
-              </div>
-              <p className="mt-1 text-sm text-muted-foreground">{project?.files.length ?? 0} files</p>
+            <div className="max-w-2xl space-y-4">
+              {/* ── Header card ── */}
+              <div className="rounded-xl border bg-card shadow-sm p-6">
+                <div className="flex items-start justify-between gap-4">
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2">
+                      <h1 className="text-xl font-semibold leading-tight truncate">{project?.name}</h1>
+                      {isArchived && (
+                        <span className="rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground shrink-0">Archived</span>
+                      )}
+                    </div>
+                    <p className="mt-0.5 text-sm text-muted-foreground">{project?.files.length ?? 0} files</p>
+                  </div>
+                  <div className="flex shrink-0 gap-2">
+                    <button
+                      onClick={() => navigate(`/project/${id}`)}
+                      className="rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground"
+                    >
+                      Open project
+                    </button>
+                    {canManage && !isArchived && (
+                      <button
+                        onClick={handleDownloadBundle}
+                        disabled={busy || (project?.files.length ?? 0) === 0}
+                        className="rounded-md border px-3 py-1.5 text-sm font-medium hover:bg-accent/40 disabled:opacity-50"
+                        title={(project?.files.length ?? 0) === 0 ? "No files to export yet" : "Download the finished translation as a .zip"}
+                      >
+                        Download deliverable
+                      </button>
+                    )}
+                    {isOwner && !isArchived && (
+                      <button
+                        onClick={handleArchive}
+                        disabled={busy}
+                        className="rounded-md border px-3 py-1.5 text-sm font-medium text-muted-foreground hover:text-destructive hover:border-destructive/50 hover:bg-destructive/5 disabled:opacity-50"
+                      >
+                        Archive
+                      </button>
+                    )}
+                    {isOwner && isArchived && (
+                      <button
+                        onClick={handleRestore}
+                        disabled={busy}
+                        className="rounded-md border px-3 py-1.5 text-sm font-medium hover:bg-accent/40 disabled:opacity-50"
+                      >
+                        Restore
+                      </button>
+                    )}
+                  </div>
+                </div>
 
-              {/* Project-level progress: translated (has a draft), validated,
-                  and audio — the three signals a manager scans at a glance. */}
+                {error && <p className="mt-3 text-sm text-destructive">{error}</p>}
+              </div>
+
+              {/* ── Progress card ── */}
               {audio && audio.totalCells > 0 && (
-                <div className="mt-3 space-y-1.5">
-                  <StatBar
-                    label="Translated"
-                    value={audio.filledCells}
-                    total={audio.totalCells}
-                    fillClass="bg-amber-500"
-                    suffix=" cells"
-                  />
-                  <StatBar
-                    label="Validated"
-                    value={audio.validatedCells}
-                    total={audio.totalCells}
-                    fillClass="bg-emerald-500"
-                    suffix=" cells"
-                  />
-                  <StatBar
-                    label="Audio"
-                    value={audio.audioCells}
-                    total={audio.totalCells}
-                    fillClass="bg-sky-500"
-                    suffix=" cells"
-                  />
-                  <p className="text-xs text-muted-foreground">
-                    {Math.round(translatedPct(audio) * 100)}% translated ·{" "}
-                    {Math.round(validatedPct(audio) * 100)}% validated ·{" "}
-                    {Math.round(audioPct(audio) * 100)}% with audio · {recordedMinutes(audio)} min recorded
-                  </p>
+                <div className="rounded-xl border bg-card shadow-sm p-5">
+                  <h2 className="mb-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Progress</h2>
+                  <div className="space-y-2.5">
+                    <StatBar
+                      label="Translated"
+                      value={audio.filledCells}
+                      total={audio.totalCells}
+                      fillClass="bg-amber-500"
+                      suffix=" cells"
+                    />
+                    <StatBar
+                      label="Validated"
+                      value={audio.validatedCells}
+                      total={audio.totalCells}
+                      fillClass="bg-emerald-500"
+                      suffix=" cells"
+                    />
+                    <StatBar
+                      label="Audio"
+                      value={audio.audioCells}
+                      total={audio.totalCells}
+                      fillClass="bg-sky-500"
+                      suffix=" cells"
+                    />
+                  </div>
+                  {audio.recordedMs > 0 && (
+                    <p className="mt-3 text-xs text-muted-foreground">
+                      {recordedMinutes(audio)} min recorded ·{" "}
+                      {Math.round(audioPct(audio) * 100)}% of cells have audio
+                    </p>
+                  )}
+                  {/* Summary row for quick scanning */}
+                  <div className="mt-3 flex gap-4 border-t pt-3">
+                    <div className="text-center">
+                      <p className="text-lg font-semibold tabular-nums">{Math.round(translatedPct(audio) * 100)}%</p>
+                      <p className="text-[11px] text-muted-foreground">Translated</p>
+                    </div>
+                    <div className="text-center">
+                      <p className="text-lg font-semibold tabular-nums">{Math.round(validatedPct(audio) * 100)}%</p>
+                      <p className="text-[11px] text-muted-foreground">Validated</p>
+                    </div>
+                    <div className="text-center">
+                      <p className="text-lg font-semibold tabular-nums">{Math.round(audioPct(audio) * 100)}%</p>
+                      <p className="text-[11px] text-muted-foreground">Audio</p>
+                    </div>
+                  </div>
                 </div>
               )}
 
-              {/* Per-file rows. Each file's validation bar comes from the
-                  files projection (approvedCount / cellCount). Capped to the
-                  largest files so the overview stays scannable; the rest are
-                  counted, not hidden. */}
+              {/* ── Per-file rows ── */}
               {files.length > 0 && (() => {
                 const sorted = [...files].sort((a, b) => b.cellCount - a.cellCount)
                 const shown = showAllFiles ? sorted : sorted.slice(0, FILE_ROW_CAP)
                 const hidden = sorted.length - shown.length
                 return (
-                  <div className="mt-4 border-t pt-3">
-                    <div className="mb-2 flex items-center justify-between">
-                      <h2 className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                  <div className="rounded-xl border bg-card shadow-sm p-5">
+                    <div className="mb-3 flex items-center justify-between">
+                      <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
                         Files {!showAllFiles && hidden > 0 ? `(top ${FILE_ROW_CAP} of ${sorted.length})` : `(${sorted.length})`}
                       </h2>
-                      <span className="flex items-center gap-2 text-[10px] text-muted-foreground">
-                        <span className="flex items-center gap-1"><span className="h-1.5 w-3 rounded-full bg-amber-500" />translated</span>
-                        <span className="flex items-center gap-1"><span className="h-1.5 w-3 rounded-full bg-emerald-500" />validated</span>
+                      <span className="flex items-center gap-3 text-[10px] text-muted-foreground">
+                        <span className="flex items-center gap-1">
+                          <span className="h-1.5 w-3 rounded-full bg-amber-500" />translated
+                        </span>
+                        <span className="flex items-center gap-1">
+                          <span className="h-1.5 w-3 rounded-full bg-emerald-500" />validated
+                        </span>
                       </span>
                     </div>
-                    <ul className="space-y-1.5">
+                    <ul className="space-y-2">
                       {shown.map((f) => {
                         const tPct = f.cellCount > 0 ? Math.round((f.filledCount / f.cellCount) * 100) : 0
                         const vPct = f.cellCount > 0 ? Math.round((f.approvedCount / f.cellCount) * 100) : 0
                         return (
-                          <li key={f.fileId} className="flex items-center gap-2 text-sm">
-                            <span className="w-40 shrink-0 truncate" title={f.name}>{f.name}</span>
+                          <li key={f.fileId} className="flex items-center gap-3 text-sm">
+                            <span className="w-36 shrink-0 truncate text-sm font-medium" title={f.name}>{f.name}</span>
+                            <FileProgressBars tPct={tPct} vPct={vPct} />
                             <span
-                              className="flex-1 space-y-0.5"
-                              aria-label={`${tPct}% translated, ${vPct}% validated`}
-                            >
-                              <span className="block h-1.5 rounded-full bg-muted overflow-hidden shadow-neu-inset">
-                                <span className="block h-full rounded-full bg-amber-500" style={{ width: `${tPct}%` }} />
-                              </span>
-                              <span className="block h-1.5 rounded-full bg-muted overflow-hidden shadow-neu-inset">
-                                <span className="block h-full rounded-full bg-emerald-500" style={{ width: `${vPct}%` }} />
-                              </span>
-                            </span>
-                            <span
-                              className="w-32 shrink-0 text-right text-xs tabular-nums text-muted-foreground"
-                              title="translated / validated / total cells"
+                              className="w-36 shrink-0 text-right text-xs tabular-nums text-muted-foreground"
+                              title="filled / approved / total cells · word count"
                             >
                               {f.filledCount}/{f.approvedCount}/{f.cellCount} · {f.wordCount}w
                             </span>
@@ -253,7 +326,7 @@ export function ProjectOverview() {
                     </ul>
                     {!showAllFiles && hidden > 0 && (
                       <button
-                        className="mt-2 text-xs text-muted-foreground hover:text-foreground underline"
+                        className="mt-3 text-xs text-muted-foreground hover:text-foreground underline"
                         onClick={() => setShowAllFiles(true)}
                       >
                         +{hidden} more files — show all
@@ -261,7 +334,7 @@ export function ProjectOverview() {
                     )}
                     {showAllFiles && sorted.length > FILE_ROW_CAP && (
                       <button
-                        className="mt-2 text-xs text-muted-foreground hover:text-foreground underline"
+                        className="mt-3 text-xs text-muted-foreground hover:text-foreground underline"
                         onClick={() => setShowAllFiles(false)}
                       >
                         Show fewer
@@ -271,8 +344,9 @@ export function ProjectOverview() {
                 )
               })()}
 
-              {/* Deadline */}
-              <div className="mt-2 text-sm">
+              {/* ── Deadline card ── */}
+              <div className="rounded-xl border bg-card shadow-sm p-5">
+                <h2 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Deadline</h2>
                 {editingDeadline ? (
                   <div className="flex flex-wrap items-center gap-2">
                     <input
@@ -299,17 +373,16 @@ export function ProjectOverview() {
                     </button>
                   </div>
                 ) : (
-                  <div className="flex flex-wrap items-center gap-2 text-muted-foreground">
-                    <span>
-                      Deadline:{" "}
-                      {audio?.deadlineAt ? (
-                        <span className={dstatus === "overdue" ? "font-medium text-destructive" : "font-medium text-foreground"}>
-                          {audio.deadlineAt}{dstatus === "overdue" ? " (overdue)" : dstatus === "soon" ? " (due soon)" : ""}
-                        </span>
-                      ) : (
-                        "none"
-                      )}
-                    </span>
+                  <div className="flex flex-wrap items-center gap-2 text-sm">
+                    {audio?.deadlineAt ? (
+                      <span className={dstatus === "overdue" ? "font-medium text-destructive" : "font-medium"}>
+                        {audio.deadlineAt}
+                        {dstatus === "overdue" && <span className="ml-1 text-destructive text-xs">(overdue)</span>}
+                        {dstatus === "soon" && <span className="ml-1 text-amber-500 text-xs">(due soon)</span>}
+                      </span>
+                    ) : (
+                      <span className="text-muted-foreground">No deadline set</span>
+                    )}
                     {canManage && (
                       <>
                         <button
@@ -331,44 +404,6 @@ export function ProjectOverview() {
                       </>
                     )}
                   </div>
-                )}
-              </div>
-
-              {error && <p className="mt-2 text-sm text-destructive">{error}</p>}
-              <div className="mt-4 flex gap-2">
-                <button
-                  onClick={() => navigate(`/project/${id}`)}
-                  className="rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground"
-                >
-                  Open project
-                </button>
-                {canManage && !isArchived && (
-                  <button
-                    onClick={handleDownloadBundle}
-                    disabled={busy || (project?.files.length ?? 0) === 0}
-                    className="rounded-md border px-3 py-1.5 text-sm font-medium hover:bg-accent/40 disabled:opacity-50"
-                    title={(project?.files.length ?? 0) === 0 ? "No files to export yet" : "Download the finished translation as a .zip"}
-                  >
-                    Download deliverable
-                  </button>
-                )}
-                {isOwner && !isArchived && (
-                  <button
-                    onClick={handleArchive}
-                    disabled={busy}
-                    className="rounded-md border px-3 py-1.5 text-sm font-medium hover:bg-accent/40 disabled:opacity-50"
-                  >
-                    Archive
-                  </button>
-                )}
-                {isOwner && isArchived && (
-                  <button
-                    onClick={handleRestore}
-                    disabled={busy}
-                    className="rounded-md border px-3 py-1.5 text-sm font-medium hover:bg-accent/40 disabled:opacity-50"
-                  >
-                    Restore
-                  </button>
                 )}
               </div>
 

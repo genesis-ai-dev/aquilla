@@ -19,7 +19,7 @@ export function parseTimestampRange(context: string): TimestampRange | null {
   }
 }
 
-export function formatVttTime(seconds: number): string {
+function formatVttTime(seconds: number): string {
   const h = Math.floor(seconds / 3600).toString().padStart(2, "0")
   const m = Math.floor((seconds % 3600) / 60).toString().padStart(2, "0")
   const s = Math.floor(seconds % 60).toString().padStart(2, "0")
@@ -27,7 +27,7 @@ export function formatVttTime(seconds: number): string {
   return `${h}:${m}:${s}.${ms}`
 }
 
-export function stripHtml(text: string): string {
+function stripHtml(text: string): string {
   return text.replace(/<[^>]*>/g, "").replace(/\s+/g, " ").trim()
 }
 
@@ -52,6 +52,36 @@ export function generateVttFromCells(cells: CellData[]): string {
 // Build a Blob URL for a VTT string. Caller owns the URL and must revoke it.
 export function createVttBlobUrl(vtt: string): string {
   const blob = new Blob([vtt], { type: "text/vtt" })
+  return URL.createObjectURL(blob)
+}
+
+function formatSrtTime(seconds: number): string {
+  const h = Math.floor(seconds / 3600).toString().padStart(2, "0")
+  const m = Math.floor((seconds % 3600) / 60).toString().padStart(2, "0")
+  const s = Math.floor(seconds % 60).toString().padStart(2, "0")
+  const ms = Math.round((seconds - Math.floor(seconds)) * 1000).toString().padStart(3, "0")
+  return `${h}:${m}:${s},${ms}`
+}
+
+export function generateSrtFromCells(cells: CellData[]): string {
+  const cues: string[] = []
+  let index = 1
+  for (const cell of cells) {
+    const range = parseTimestampRange(cell.context)
+    if (!range) continue
+    const text = (cell.translated || cell.original || "").trim()
+    if (!text) continue
+    const cleanText = stripHtml(text)
+    cues.push(
+      `${index}\n${formatSrtTime(range.start)} --> ${formatSrtTime(range.end)}\n${cleanText}`
+    )
+    index++
+  }
+  return cues.length > 0 ? cues.join("\n\n") + "\n" : ""
+}
+
+export function createSrtBlobUrl(srt: string): string {
+  const blob = new Blob([srt], { type: "text/srt" })
   return URL.createObjectURL(blob)
 }
 

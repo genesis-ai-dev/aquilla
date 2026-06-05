@@ -1,7 +1,6 @@
 import { useMemo, useState } from "react"
 import { Check, ChevronRight, AlertTriangle, LogIn, RotateCw, Clock } from "lucide-react"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
-import { ScrollArea } from "@/components/ui/scroll-area"
 import { Badge } from "@/components/ui/badge"
 import {
   Collapsible,
@@ -296,7 +295,7 @@ export function OutboxInspectorPopover({ trigger, records }: Props) {
             </p>
           </div>
         ) : (
-          <ScrollArea className="min-h-0 flex-1">
+          <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
             <ul className="divide-y divide-border" role="list">
               {rows.map(({ rec, status, preview, fullText }) => {
                 const isOpen = !!expanded[rec.id]
@@ -408,7 +407,7 @@ export function OutboxInspectorPopover({ trigger, records }: Props) {
                 )
               })}
             </ul>
-          </ScrollArea>
+          </div>
         )}
 
         <footer className="shrink-0 border-t border-border bg-muted/30 px-3 py-1.5 text-[11px] text-muted-foreground">

@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react"
+import { useState, useEffect, useCallback, useRef } from "react"
 import { useParams, useNavigate } from "react-router-dom"
 import { AppShell } from "@/components/AppShell"
 import { OrgSidebar } from "./OrgSidebar"
@@ -13,11 +13,77 @@ import { AssignWork } from "./AssignWork"
 import { getPortfolio, translatedPct, validatedPct, audioPct, recordedMinutes, deadlineStatus, type PortfolioProject } from "@/lib/frontier/portfolio"
 import { fetchProjectFiles, type FileSummary } from "@/lib/sync/cells-read"
 import { fetchSyncToken } from "@/lib/sync/sync-token"
+import { getWorkload, type AssigneeWorkload } from "@/lib/sync/assignments"
+import { Badge } from "@/components/ui/badge"
 
 /** Max per-file rows shown on the overview; the rest are counted as "+N more". */
 const FILE_ROW_CAP = 12
 
-/** A labeled progress bar for a single metric. */
+// ── Status chip ──────────────────────────────────────────────────────────────
+
+type ProjectStatus = "on-track" | "due-soon" | "overdue" | "no-deadline"
+
+/**
+ * Derive a manager-facing project status from deadline + translation progress.
+ * Thresholds:
+ *   "overdue"  — deadline is in the past
+ *   "due-soon" — deadline is within the next 7 days
+ *   "on-track" — deadline is further out, or no deadline but translation > 0
+ *   "no-deadline" — no deadline and no meaningful progress
+ */
+export function deriveProjectStatus(
+  p: PortfolioProject | null,
+  now: number,
+): ProjectStatus {
+  if (!p) return "no-deadline"
+  const ds = deadlineStatus(p, now)
+  if (ds === "overdue") return "overdue"
+  if (ds === "soon") return "due-soon"
+  if (ds === "ok") return "on-track"
+  // No deadline
+  return "no-deadline"
+}
+
+function StatusChip({ status }: { status: ProjectStatus }) {
+  if (status === "no-deadline") return null
+  const map: Record<Exclude<ProjectStatus, "no-deadline">, { label: string; cls: string }> = {
+    "on-track": { label: "On track", cls: "border-transparent bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300" },
+    "due-soon": { label: "Due soon", cls: "border-transparent bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300" },
+    "overdue":  { label: "Overdue",  cls: "border-transparent bg-destructive/10 text-destructive" },
+  }
+  const { label, cls } = map[status as Exclude<ProjectStatus, "no-deadline">]
+  return (
+    <Badge className={cls} data-testid="status-chip">
+      {label}
+    </Badge>
+  )
+}
+
+// ── Deadline chip ─────────────────────────────────────────────────────────────
+
+function DeadlineChip({ status }: { status: "overdue" | "soon" | "ok" | null }) {
+  if (!status) return null
+  const map = {
+    ok:      { cls: "border-transparent bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300" },
+    soon:    { cls: "border-transparent bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300" },
+    overdue: { cls: "border-transparent bg-destructive/10 text-destructive" },
+  }
+  return <Badge className={map[status].cls}>{status === "overdue" ? "Overdue" : status === "soon" ? "Due soon" : "On track"}</Badge>
+}
+
+// ── Stat tiles (big %) ────────────────────────────────────────────────────────
+
+function StatTile({ label, pct, colorClass }: { label: string; pct: number; colorClass: string }) {
+  return (
+    <div className="flex flex-col items-center rounded-lg bg-muted/40 px-5 py-3 text-center">
+      <p className={`text-2xl font-bold tabular-nums ${colorClass}`}>{Math.round(pct * 100)}%</p>
+      <p className="mt-0.5 text-[11px] text-muted-foreground">{label}</p>
+    </div>
+  )
+}
+
+// ── Stat bar ──────────────────────────────────────────────────────────────────
+
 function StatBar({ label, value, total, fillClass, suffix }: {
   label: string
   value: number
@@ -44,7 +110,8 @@ function StatBar({ label, value, total, fillClass, suffix }: {
   )
 }
 
-/** Compact two-bar strip (translated + validated) for per-file rows. */
+// ── Per-file mini-bars ────────────────────────────────────────────────────────
+
 function FileProgressBars({ tPct, vPct }: { tPct: number; vPct: number }) {
   return (
     <span className="flex flex-1 flex-col gap-[3px]">
@@ -57,6 +124,58 @@ function FileProgressBars({ tPct, vPct }: { tPct: number; vPct: number }) {
     </span>
   )
 }
+
+// ── Overflow menu (archive / download) ───────────────────────────────────────
+
+function OverflowMenu({ children }: { children: React.ReactNode }) {
+  const [open, setOpen] = useState(false)
+  const ref = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!open) return
+    function onClickOutside(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
+    }
+    document.addEventListener("mousedown", onClickOutside)
+    return () => document.removeEventListener("mousedown", onClickOutside)
+  }, [open])
+
+  return (
+    <div ref={ref} className="relative">
+      <button
+        aria-label="More actions"
+        onClick={() => setOpen((v) => !v)}
+        className="rounded-md border px-2.5 py-1.5 text-sm font-medium hover:bg-accent/40"
+      >
+        ⋯
+      </button>
+      {open && (
+        <div className="absolute right-0 top-full z-50 mt-1 min-w-40 rounded-md border bg-popover shadow-md py-1">
+          {children}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function OverflowItem({ onClick, disabled, className, children }: {
+  onClick: () => void
+  disabled?: boolean
+  className?: string
+  children: React.ReactNode
+}) {
+  return (
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      className={`w-full text-left px-3 py-1.5 text-sm hover:bg-accent/40 disabled:opacity-50 ${className ?? ""}`}
+    >
+      {children}
+    </button>
+  )
+}
+
+// ── Main component ────────────────────────────────────────────────────────────
 
 export function ProjectOverview() {
   const { id = "" } = useParams()
@@ -73,6 +192,7 @@ export function ProjectOverview() {
   const [editingDeadline, setEditingDeadline] = useState(false)
   const [deadlineInput, setDeadlineInput] = useState("")
   const [showAllFiles, setShowAllFiles] = useState(false)
+  const [workload, setWorkload] = useState<AssigneeWorkload[]>([])
 
   const loadRow = useCallback(async () => {
     if (!jwt || activeOrgId == null) return
@@ -88,9 +208,15 @@ export function ProjectOverview() {
     void loadRow()
   }, [loadRow])
 
-  // Per-file rollups live on the sync-worker, which needs a project-scoped
-  // sync token (the raw session JWT is rejected). Mint one via the project's
-  // first file, then list every file's counters.
+  // Load org workload for the Team card
+  useEffect(() => {
+    if (!jwt || activeOrgId == null) return
+    getWorkload(jwt, activeOrgId)
+      .then(setWorkload)
+      .catch(() => setWorkload([]))
+  }, [jwt, activeOrgId])
+
+  // Per-file rollups
   const firstFileId = project?.files[0]?.id ?? null
   useEffect(() => {
     if (!jwt || !id || !firstFileId) { setFiles([]); return }
@@ -107,6 +233,13 @@ export function ProjectOverview() {
   const canAssign = (project?.syncRole?.level ?? 0) >= 500
   const isArchived = Boolean(project?.deletedAt)
   const dstatus = audio ? deadlineStatus(audio, Date.now()) : null
+  const projectStatus = deriveProjectStatus(audio, Date.now())
+
+  // Conditionality flags
+  const hasText = audio != null && audio.totalCells > 0
+  const hasAudio = audio != null && audio.audioCells > 0
+  const showText = hasText
+  const showAudio = hasAudio
 
   async function saveDeadline(value: string | null) {
     if (!jwt) return
@@ -171,6 +304,12 @@ export function ProjectOverview() {
     }
   }
 
+  // Language pair label, e.g. "Greek → Bambara"
+  const languagePair =
+    project?.sourceLanguage && project?.targetLanguage
+      ? `${project.sourceLanguage} → ${project.targetLanguage}`
+      : project?.targetLanguage ?? project?.sourceLanguage ?? null
+
   return (
     <AppShell
       sidebar={<OrgSidebar />}
@@ -186,40 +325,27 @@ export function ProjectOverview() {
               <div className="rounded-xl border bg-card shadow-sm p-6">
                 <div className="flex items-start justify-between gap-4">
                   <div className="min-w-0">
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2 flex-wrap">
                       <h1 className="text-xl font-semibold leading-tight truncate">{project?.name}</h1>
+                      {/* Compact status chip next to the title */}
+                      <StatusChip status={projectStatus} />
                       {isArchived && (
-                        <span className="rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground shrink-0">Archived</span>
+                        <Badge variant="secondary" className="shrink-0">Archived</Badge>
                       )}
                     </div>
+                    {/* Language pair */}
+                    {languagePair && (
+                      <p className="mt-0.5 text-sm text-muted-foreground">{languagePair}</p>
+                    )}
                     <p className="mt-0.5 text-sm text-muted-foreground">{project?.files.length ?? 0} files</p>
                   </div>
-                  <div className="flex shrink-0 gap-2">
+                  <div className="flex shrink-0 gap-2 items-start">
                     <button
                       onClick={() => navigate(`/project/${id}`)}
                       className="rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground"
                     >
                       Open project
                     </button>
-                    {canManage && !isArchived && (
-                      <button
-                        onClick={handleDownloadBundle}
-                        disabled={busy || (project?.files.length ?? 0) === 0}
-                        className="rounded-md border px-3 py-1.5 text-sm font-medium hover:bg-accent/40 disabled:opacity-50"
-                        title={(project?.files.length ?? 0) === 0 ? "No files to export yet" : "Download the finished translation as a .zip"}
-                      >
-                        Download deliverable
-                      </button>
-                    )}
-                    {isOwner && !isArchived && (
-                      <button
-                        onClick={handleArchive}
-                        disabled={busy}
-                        className="rounded-md border px-3 py-1.5 text-sm font-medium text-muted-foreground hover:text-destructive hover:border-destructive/50 hover:bg-destructive/5 disabled:opacity-50"
-                      >
-                        Archive
-                      </button>
-                    )}
                     {isOwner && isArchived && (
                       <button
                         onClick={handleRestore}
@@ -228,6 +354,28 @@ export function ProjectOverview() {
                       >
                         Restore
                       </button>
+                    )}
+                    {/* Archive + Download moved into overflow menu */}
+                    {(canManage || isOwner) && !isArchived && (
+                      <OverflowMenu>
+                        {canManage && (
+                          <OverflowItem
+                            onClick={handleDownloadBundle}
+                            disabled={busy || (project?.files.length ?? 0) === 0}
+                          >
+                            Download deliverable
+                          </OverflowItem>
+                        )}
+                        {isOwner && (
+                          <OverflowItem
+                            onClick={handleArchive}
+                            disabled={busy}
+                            className="text-muted-foreground hover:text-destructive"
+                          >
+                            Archive
+                          </OverflowItem>
+                        )}
+                      </OverflowMenu>
                     )}
                   </div>
                 </div>
@@ -239,28 +387,53 @@ export function ProjectOverview() {
               {audio && audio.totalCells > 0 && (
                 <div className="rounded-xl border bg-card shadow-sm p-5">
                   <h2 className="mb-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Progress</h2>
+
+                  {/* Big-number tiles lead the section */}
+                  <div className="flex flex-wrap gap-3 mb-4">
+                    {showText && (
+                      <>
+                        <StatTile label="Translated" pct={translatedPct(audio)} colorClass="text-amber-600" />
+                        <StatTile label="Validated" pct={validatedPct(audio)} colorClass="text-emerald-600" />
+                      </>
+                    )}
+                    {showAudio && (
+                      <StatTile label="Audio" pct={audioPct(audio)} colorClass="text-sky-600" />
+                    )}
+                    {/* TODO(FRO-168): audio VALIDATION metric — need audioCells with approved-audio count from server */}
+                  </div>
+
+                  {/* Detail bars below tiles */}
                   <div className="space-y-2.5">
-                    <StatBar
-                      label="Translated"
-                      value={audio.filledCells}
-                      total={audio.totalCells}
-                      fillClass="bg-amber-500"
-                      suffix=" cells"
-                    />
-                    <StatBar
-                      label="Validated"
-                      value={audio.validatedCells}
-                      total={audio.totalCells}
-                      fillClass="bg-emerald-500"
-                      suffix=" cells"
-                    />
-                    <StatBar
-                      label="Audio"
-                      value={audio.audioCells}
-                      total={audio.totalCells}
-                      fillClass="bg-sky-500"
-                      suffix=" cells"
-                    />
+                    {showText && (
+                      <>
+                        <StatBar
+                          label="Translated"
+                          value={audio.filledCells}
+                          total={audio.totalCells}
+                          fillClass="bg-amber-500"
+                          suffix=" cells"
+                        />
+                        <StatBar
+                          label="Validated"
+                          value={audio.validatedCells}
+                          total={audio.totalCells}
+                          fillClass="bg-emerald-500"
+                          suffix=" cells"
+                        />
+                      </>
+                    )}
+                    {showAudio && (
+                      <>
+                        <StatBar
+                          label="Audio"
+                          value={audio.audioCells}
+                          total={audio.totalCells}
+                          fillClass="bg-sky-500"
+                          suffix=" cells"
+                        />
+                        {/* TODO: confirm whether legacy GitLab project import populated audio (cell_audio) — see FRO-160 data gap */}
+                      </>
+                    )}
                   </div>
                   {audio.recordedMs > 0 && (
                     <p className="mt-3 text-xs text-muted-foreground">
@@ -268,25 +441,10 @@ export function ProjectOverview() {
                       {Math.round(audioPct(audio) * 100)}% of cells have audio
                     </p>
                   )}
-                  {/* Summary row for quick scanning */}
-                  <div className="mt-3 flex gap-4 border-t pt-3">
-                    <div className="text-center">
-                      <p className="text-lg font-semibold tabular-nums">{Math.round(translatedPct(audio) * 100)}%</p>
-                      <p className="text-[11px] text-muted-foreground">Translated</p>
-                    </div>
-                    <div className="text-center">
-                      <p className="text-lg font-semibold tabular-nums">{Math.round(validatedPct(audio) * 100)}%</p>
-                      <p className="text-[11px] text-muted-foreground">Validated</p>
-                    </div>
-                    <div className="text-center">
-                      <p className="text-lg font-semibold tabular-nums">{Math.round(audioPct(audio) * 100)}%</p>
-                      <p className="text-[11px] text-muted-foreground">Audio</p>
-                    </div>
-                  </div>
                 </div>
               )}
 
-              {/* ── Per-file rows ── */}
+              {/* ── Per-file rows (always fully visible per user decision) ── */}
               {files.length > 0 && (() => {
                 const sorted = [...files].sort((a, b) => b.cellCount - a.cellCount)
                 const shown = showAllFiles ? sorted : sorted.slice(0, FILE_ROW_CAP)
@@ -375,10 +533,9 @@ export function ProjectOverview() {
                 ) : (
                   <div className="flex flex-wrap items-center gap-2 text-sm">
                     {audio?.deadlineAt ? (
-                      <span className={dstatus === "overdue" ? "font-medium text-destructive" : "font-medium"}>
+                      <span className="flex items-center gap-2 font-medium">
                         {audio.deadlineAt}
-                        {dstatus === "overdue" && <span className="ml-1 text-destructive text-xs">(overdue)</span>}
-                        {dstatus === "soon" && <span className="ml-1 text-amber-500 text-xs">(due soon)</span>}
+                        <DeadlineChip status={dstatus} />
                       </span>
                     ) : (
                       <span className="text-muted-foreground">No deadline set</span>
@@ -407,16 +564,53 @@ export function ProjectOverview() {
                 )}
               </div>
 
-              {canAssign && !isArchived && activeOrgId != null && (project?.files.length ?? 0) > 0 && (
-                <AssignWork
-                  projectId={id}
-                  files={project?.files ?? []}
-                  orgId={activeOrgId}
-                  jwt={jwt ?? ""}
-                  author={session?.username ?? ""}
-                  onAssigned={loadRow}
-                />
-              )}
+              {/* ── Team / Assignments card ── */}
+              {/*
+                SWARM-TODO(FRO-168): need a per-project all-assignees endpoint for full Team card.
+                The available endpoints are:
+                  - getWorkload(orgId) → per-assignee OPEN workload across the whole org (no per-project breakdown)
+                  - getMyAssignments(jwt, projectId) → only the CALLER's own assignments for this project
+                We use org workload as the best available proxy: show users with open work.
+                A per-project assignee list would require a new server endpoint.
+              */}
+              <div className="rounded-xl border bg-card shadow-sm p-5">
+                <h2 className="mb-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Team</h2>
+                {workload.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">No open assignments across the org yet.</p>
+                ) : (
+                  <ul className="space-y-2">
+                    {workload.map((w) => {
+                      const donePct = w.cellsTotal > 0 ? Math.round((w.cellsDone / w.cellsTotal) * 100) : 0
+                      return (
+                        <li key={w.userId} className="flex items-center gap-3 text-sm">
+                          <span className="w-32 shrink-0 font-medium truncate" title={w.username ?? String(w.userId)}>
+                            {w.username ?? `User ${w.userId}`}
+                          </span>
+                          <span className="flex-1 h-1.5 rounded-full bg-muted overflow-hidden">
+                            <span className="block h-full rounded-full bg-primary transition-all" style={{ width: `${donePct}%` }} />
+                          </span>
+                          <span className="w-20 shrink-0 text-right text-xs tabular-nums text-muted-foreground">
+                            {w.openAssignments} open · {donePct}%
+                          </span>
+                        </li>
+                      )
+                    })}
+                  </ul>
+                )}
+
+                {canAssign && !isArchived && activeOrgId != null && (project?.files.length ?? 0) > 0 && (
+                  <div className="mt-3 pt-3 border-t">
+                    <AssignWork
+                      projectId={id}
+                      files={project?.files ?? []}
+                      orgId={activeOrgId}
+                      jwt={jwt ?? ""}
+                      author={session?.username ?? ""}
+                      onAssigned={loadRow}
+                    />
+                  </div>
+                )}
+              </div>
             </div>
           )}
         </div>

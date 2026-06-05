@@ -2,6 +2,15 @@
 
 import type { Env, AuthUser } from "../types"
 
+/** Map numeric role level to a human-readable name. Used for secondarySources. */
+function roleNameForLevel(level: number): string {
+  if (level >= 700) return "owner"
+  if (level >= 500) return "project_lead"
+  if (level >= 300) return "maintainer"
+  if (level >= 200) return "contributor"
+  return "viewer"
+}
+
 export interface UserOrg {
   id: number
   name: string | null
@@ -241,12 +250,24 @@ export async function listPendingInvitesInOrg(
   }))
 }
 
+export interface SecondarySrc {
+  source: "override" | "group" | "org" | "creator"
+  level: number
+  name: string
+}
+
 export interface EffectiveMember {
   userId: number
   username: string
   roleLevel: number
   /** Path that produced the user's max-wins role (AD-12). */
   source: "override" | "group" | "org" | "creator"
+  /**
+   * Every contributing path whose level > 0 EXCEPT the winning one.
+   * Populated by listEffectiveProjectMembers; empty array when the user has
+   * access through only one path.
+   */
+  secondarySources: SecondarySrc[]
 }
 
 /**
@@ -278,40 +299,23 @@ export async function listEffectiveProjectMembers(
     .bind(projectId)
     .all<{ user_id: number; username: string; role_level: number }>()
 
-  const merged = new Map<number, EffectiveMember>()
+  // Collect ALL per-path contributions keyed by userId, then derive the
+  // winner and secondarySources in a second pass.
+  type PathEntry = { source: EffectiveMember["source"]; level: number; priority: number }
+  const allPaths = new Map<number, { username: string; paths: PathEntry[] }>()
 
-  const consider = (
-    candidate: EffectiveMember,
-    priority: number,
+  const record = (
+    userId: number,
+    username: string,
+    source: EffectiveMember["source"],
+    level: number,
   ): void => {
-    const existing = merged.get(candidate.userId)
-    if (!existing) {
-      merged.set(candidate.userId, candidate)
-      return
-    }
-    if (candidate.roleLevel > existing.roleLevel) {
-      merged.set(candidate.userId, candidate)
-      return
-    }
-    // Tie on roleLevel — prefer the higher-priority source.
-    if (candidate.roleLevel === existing.roleLevel) {
-      const existingPriority = SOURCE_PRIORITY[existing.source]
-      if (priority > existingPriority) {
-        merged.set(candidate.userId, candidate)
-      }
-    }
+    if (!allPaths.has(userId)) allPaths.set(userId, { username, paths: [] })
+    allPaths.get(userId)!.paths.push({ source, level, priority: SOURCE_PRIORITY[source] })
   }
 
   for (const r of direct.results ?? []) {
-    consider(
-      {
-        userId: r.user_id,
-        username: r.username,
-        roleLevel: r.role_level,
-        source: "override",
-      },
-      SOURCE_PRIORITY.override,
-    )
+    record(r.user_id, r.username, "override", r.role_level)
   }
 
   // AD-12: surface every user who reaches the project via a group attached
@@ -332,15 +336,7 @@ export async function listEffectiveProjectMembers(
 
   for (const r of groupRows.results ?? []) {
     if (r.role_level == null) continue
-    consider(
-      {
-        userId: r.user_id,
-        username: r.username,
-        roleLevel: r.role_level,
-        source: "group",
-      },
-      SOURCE_PRIORITY.group,
-    )
+    record(r.user_id, r.username, "group", r.role_level)
   }
 
   if (orgId != null) {
@@ -354,15 +350,7 @@ export async function listEffectiveProjectMembers(
       .all<{ user_id: number; username: string; role_level: number }>()
 
     for (const r of orgMembers.results ?? []) {
-      consider(
-        {
-          userId: r.user_id,
-          username: r.username,
-          roleLevel: r.role_level,
-          source: "org",
-        },
-        SOURCE_PRIORITY.org,
-      )
+      record(r.user_id, r.username, "org", r.role_level)
     }
   }
 
@@ -372,18 +360,29 @@ export async function listEffectiveProjectMembers(
     .bind(createdBy)
     .first<{ id: number; username: string }>()
   if (creatorRow) {
-    consider(
-      {
-        userId: creatorRow.id,
-        username: creatorRow.username,
-        roleLevel: 700,
-        source: "creator",
-      },
-      SOURCE_PRIORITY.creator,
-    )
+    record(creatorRow.id, creatorRow.username, "creator", 700)
   }
 
-  return Array.from(merged.values()).sort(
+  // Derive winner + secondarySources for each user.
+  const results: EffectiveMember[] = []
+  for (const [userId, { username, paths }] of allPaths) {
+    // Sort paths: highest level first, ties broken by priority (higher wins).
+    paths.sort((a, b) => b.level - a.level || b.priority - a.priority)
+    const winner = paths[0]
+    const secondary: SecondarySrc[] = paths
+      .slice(1)
+      .filter((p) => p.level > 0)
+      .map((p) => ({ source: p.source, level: p.level, name: roleNameForLevel(p.level) }))
+    results.push({
+      userId,
+      username,
+      roleLevel: winner.level,
+      source: winner.source,
+      secondarySources: secondary,
+    })
+  }
+
+  return results.sort(
     (a, b) => b.roleLevel - a.roleLevel || a.username.localeCompare(b.username),
   )
 }

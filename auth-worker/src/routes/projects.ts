@@ -540,6 +540,7 @@ projects.get("/:projectId/members", authMiddleware, async (c) => {
         name: roleNameFor(m.roleLevel),
         source: m.source,
       },
+      secondarySources: m.secondarySources,
     })),
   })
 })

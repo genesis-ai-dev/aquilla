@@ -20,6 +20,13 @@ export interface MatrixCell {
    * override, an org-inherited grant, or the project creator's implicit
    * ownership. */
   role: ProjectMember["role"];
+  /**
+   * Every contributing path whose level > 0 except the winning one.
+   * Non-empty when the user reaches the project via multiple paths (e.g. an
+   * org-wide viewer who also has a direct contributor override). Used to
+   * render the secondary-path icon + tooltip in MembersMatrixCellEditor.
+   */
+  secondarySources: ProjectMember["secondarySources"];
 }
 
 export interface MembersMatrix {
@@ -152,7 +159,7 @@ export function useProjectsMembersMatrix(): UseProjectsMembersMatrix {
 
           // Cell.
           if (!cells.has(m.userId)) cells.set(m.userId, new Map());
-          cells.get(m.userId)!.set(project.id, { role: m.role });
+          cells.get(m.userId)!.set(project.id, { role: m.role, secondarySources: m.secondarySources ?? [] });
 
           if (m.role.level >= 700) ownerCount++;
         }

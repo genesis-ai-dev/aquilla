@@ -3,11 +3,11 @@ import { render, screen } from "@testing-library/react";
 import { MembershipAvatars } from "./MembershipAvatars";
 
 const members = [
-  { userId: 1, username: "wendy", role: { level: 700, name: "owner", source: "creator" as const } },
-  { userId: 2, username: "anna", role: { level: 600, name: "maintainer", source: "org" as const } },
-  { userId: 3, username: "clayton", role: { level: 400, name: "contributor", source: "override" as const } },
-  { userId: 4, username: "valerie", role: { level: 400, name: "contributor", source: "override" as const } },
-  { userId: 5, username: "amir", role: { level: 400, name: "contributor", source: "override" as const } },
+  { userId: 1, username: "wendy", role: { level: 700, name: "owner", source: "creator" as const }, secondarySources: [] },
+  { userId: 2, username: "anna", role: { level: 600, name: "maintainer", source: "org" as const }, secondarySources: [] },
+  { userId: 3, username: "clayton", role: { level: 400, name: "contributor", source: "override" as const }, secondarySources: [] },
+  { userId: 4, username: "valerie", role: { level: 400, name: "contributor", source: "override" as const }, secondarySources: [] },
+  { userId: 5, username: "amir", role: { level: 400, name: "contributor", source: "override" as const }, secondarySources: [] },
 ];
 
 describe("MembershipAvatars", () => {

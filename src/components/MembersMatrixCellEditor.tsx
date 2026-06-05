@@ -1,5 +1,6 @@
 import { useState } from "react"
-import { Loader2, Trash2 } from "lucide-react"
+import { Loader2, Trash2, GitMerge } from "lucide-react"
+import type { SecondarySrc } from "@/lib/frontier/members"
 import { Button } from "@/components/ui/button"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import {
@@ -32,6 +33,8 @@ interface CellEditorProps {
   sourceHint: string
   /** 1-char badge code: D (direct), O (org-wide), G (via group), C (creator). */
   sourceBadge: string
+  /** Non-winning contributing paths from the server. Empty = single path. */
+  secondarySources?: SecondarySrc[]
 }
 
 type Status = "idle" | "submitting" | "error"
@@ -53,6 +56,14 @@ type Status = "idle" | "submitting" | "error"
  * override is exactly the "system did something behind your back" failure.
  * The popover names the source so the operator knows where to go to edit.
  */
+/** FRO-170 vocabulary labels for each grant-path source. */
+const SOURCE_LABEL: Record<string, string> = {
+  override: "direct",
+  group: "via group",
+  org: "org-wide",
+  creator: "creator",
+}
+
 /** Badge color classes keyed by badge letter. */
 const BADGE_CLASSES: Record<string, string> = {
   D: "bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300",
@@ -70,6 +81,7 @@ export function MembersMatrixCellEditor({
   cellClassName,
   sourceHint,
   sourceBadge,
+  secondarySources = [],
 }: CellEditorProps) {
   const { session } = useFrontierSession()
   const [open, setOpen] = useState(false)
@@ -166,27 +178,55 @@ export function MembersMatrixCellEditor({
             <span className="capitalize truncate">
               {cell.role.name.replace(/_/g, " ")}
             </span>
-            {sourceBadge && (
-              <TooltipProvider>
-                <Tooltip>
-                  <TooltipTrigger
-                    render={
-                      <span
-                        className={`inline-flex h-4 w-4 shrink-0 items-center justify-center rounded text-[9px] font-bold cursor-default ${
-                          BADGE_CLASSES[sourceBadge] ?? "bg-muted text-muted-foreground"
-                        }`}
-                        aria-label={sourceHint}
-                      />
-                    }
-                  >
-                    {sourceBadge}
-                  </TooltipTrigger>
-                  <TooltipContent side="top">
-                    {sourceHint}
-                  </TooltipContent>
-                </Tooltip>
-              </TooltipProvider>
-            )}
+            <div className="flex items-center gap-0.5 shrink-0">
+              {sourceBadge && (
+                <TooltipProvider>
+                  <Tooltip>
+                    <TooltipTrigger
+                      render={
+                        <span
+                          className={`inline-flex h-4 w-4 shrink-0 items-center justify-center rounded text-[9px] font-bold cursor-default ${
+                            BADGE_CLASSES[sourceBadge] ?? "bg-muted text-muted-foreground"
+                          }`}
+                          aria-label={sourceHint}
+                        />
+                      }
+                    >
+                      {sourceBadge}
+                    </TooltipTrigger>
+                    <TooltipContent side="top">
+                      {sourceHint}
+                    </TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
+              )}
+              {secondarySources.length > 0 && (
+                <TooltipProvider>
+                  <Tooltip>
+                    <TooltipTrigger
+                      render={
+                        <span
+                          className="inline-flex h-4 w-4 shrink-0 items-center justify-center rounded cursor-default text-muted-foreground hover:text-foreground"
+                          aria-label="Also has access via other paths"
+                        />
+                      }
+                    >
+                      <GitMerge className="h-2.5 w-2.5" />
+                    </TooltipTrigger>
+                    <TooltipContent side="top" className="max-w-[200px]">
+                      <p className="font-medium mb-1 text-[10px]">Also has access via:</p>
+                      <ul className="space-y-0.5">
+                        {secondarySources.map((s) => (
+                          <li key={s.source} className="text-[10px] capitalize">
+                            {SOURCE_LABEL[s.source]} · {s.name.replace(/_/g, " ")}
+                          </li>
+                        ))}
+                      </ul>
+                    </TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
+              )}
+            </div>
           </div>
         </PopoverTrigger>
         <PopoverContent className="w-64 p-2" side="bottom">

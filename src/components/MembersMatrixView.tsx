@@ -264,6 +264,7 @@ const MatrixRow = memo(function MatrixRow({
             cellClassName={palette}
             sourceHint={sourceHint}
             sourceBadge={sourceBadge}
+            secondarySources={cell?.secondarySources}
           />
         )
       })}

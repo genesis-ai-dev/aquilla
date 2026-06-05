@@ -733,6 +733,46 @@ export function makeInMemoryD1(tables: Partial<Tables> = {}): InMemoryD1 {
       return []
     }
 
+    // ── AD-13 branching-search corpus loader (loadCorpus) ──────────────
+    // Matches the LEFT JOIN query in lib/branching-search/corpus.ts.
+    // Binds: [targetProjectId, upstreamProjectIdOrNull, selfProjectId, ...excludeCellId?]
+    if (/^SELECT s\.cell_id AS cell_id, s\.file_id AS file_id, s\.anchor_cell_id AS anchor_cell_id, s\.value AS source_text/.test(normalized)) {
+      const targetProjectId = args[0] as string
+      const upstreamOrNull = args[1] as string | null
+      const selfProjectId = args[2] as string
+      const sourceProjectId = upstreamOrNull ?? selfProjectId
+
+      const validatedOnly = normalized.includes("AND t.validated = 1")
+      const requireTarget = normalized.includes("AND COALESCE(t.value, '') != ''")
+      const excludeCellId = normalized.includes("AND s.cell_id != ?")
+        ? (args[3] as string)
+        : null
+
+      const sourceCells = db.cells
+        .filter((c) => c.project_id === sourceProjectId && c.side === 'source')
+        .sort((a, b) => a.cell_id.localeCompare(b.cell_id))
+
+      const results = []
+      for (const s of sourceCells) {
+        if (excludeCellId && s.cell_id === excludeCellId) continue
+        const t = db.cells.find(
+          (c) => c.project_id === targetProjectId && c.cell_id === s.cell_id && c.side === 'target',
+        ) ?? null
+        if (validatedOnly && t?.validated !== 1) continue
+        if (requireTarget && !t?.value?.trim()) continue
+        results.push({
+          cell_id: s.cell_id,
+          file_id: s.file_id,
+          anchor_cell_id: s.anchor_cell_id ?? null,
+          source_text: s.value,
+          source_event_id: s.event_id,
+          target_text: t?.value ?? '',
+          target_validated: t?.validated ?? 0,
+        })
+      }
+      return results
+    }
+
     return []
   }
 

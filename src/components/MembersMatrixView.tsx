@@ -1,10 +1,17 @@
 import { memo, useState } from "react"
-import { Loader2, AlertTriangle } from "lucide-react"
+import { Loader2, AlertTriangle, HelpCircle } from "lucide-react"
 import { useProjectsMembersMatrix } from "@/hooks/useProjectsMembersMatrix"
 import { useOrg } from "@/hooks/useOrg"
 import { ROLE } from "@/lib/frontier/roles"
 import { MembersMatrixCellEditor } from "./MembersMatrixCellEditor"
 import { MemberAccessDrillDown } from "./MemberAccessDrillDown"
+import { AccessModelLegend } from "./AccessModelLegend"
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip"
 import type { MatrixMember, MatrixCell } from "@/hooks/useProjectsMembersMatrix"
 import type { CloudProjectSummary } from "@/lib/sync/cloud-projects"
 
@@ -45,6 +52,7 @@ export function MembersMatrixView() {
   const { state: orgState } = useOrg()
   const orgId = orgState.kind === "success" ? orgState.org.id : null
   const [selectedMember, setSelectedMember] = useState<SelectedMember | null>(null)
+  const [legendOpen, setLegendOpen] = useState(false)
 
   if (isLoading && !matrix) {
     return (
@@ -76,6 +84,8 @@ export function MembersMatrixView() {
   return (
     <div className="flex gap-0 rounded-md border bg-background overflow-hidden">
       <div className="flex-1 overflow-x-auto">
+        {/* Access model legend — collapsible, rendered above the table */}
+        <AccessModelLegend open={legendOpen} onToggle={() => setLegendOpen((v) => !v)} />
         <table className="min-w-full text-sm">
           <thead className="bg-muted/40">
             <tr>
@@ -83,7 +93,35 @@ export function MembersMatrixView() {
                 scope="col"
                 className="sticky left-0 z-10 bg-muted/40 border-r px-3 py-2 text-left text-xs font-medium text-muted-foreground"
               >
-                Member
+                <div className="flex items-center gap-1">
+                  <span>Member</span>
+                  {/* On-demand model explainer — opens a tooltip with the full explanation */}
+                  <TooltipProvider>
+                    <Tooltip>
+                      <TooltipTrigger
+                        render={
+                          <button
+                            type="button"
+                            className="inline-flex items-center text-muted-foreground hover:text-foreground focus-visible:outline-none"
+                            aria-label="How access is resolved"
+                          />
+                        }
+                      >
+                        <HelpCircle className="h-3 w-3" aria-hidden />
+                      </TooltipTrigger>
+                      <TooltipContent
+                        side="bottom"
+                        className="max-w-xs leading-snug"
+                      >
+                        Every member's access is the highest role they hold across
+                        up to four paths: a direct project grant, any group attached
+                        to this project, their org-wide role, or creator status.
+                        Adding a lower grant never reduces access — to fully remove
+                        someone, all contributing paths must be cleared.
+                      </TooltipContent>
+                    </Tooltip>
+                  </TooltipProvider>
+                </div>
               </th>
               {matrix.projects.map((p) => (
                 <ProjectHeaderCell
@@ -203,16 +241,18 @@ const MatrixRow = memo(function MatrixRow({
         {member.isOrgInherited && (
           <span
             className="ml-1.5 rounded bg-muted px-1 py-0.5 text-[9px] text-muted-foreground align-middle"
-            title="Access on every project comes from org-level role; no per-project overrides."
+            title="Access on every project comes from org-wide role; no per-project overrides."
           >
-            via org
+            org-wide
           </span>
         )}
       </th>
       {projects.map((p) => {
         const cell = memberCells?.get(p.id)
         const palette = cell ? colorForRole(cell.role.level) : ""
-        const sourceHint = cell ? sourceLabel(cell.role.source) : ""
+        const { label: sourceHint, badge: sourceBadge } = cell
+          ? sourceInfo(cell.role.source)
+          : { label: "", badge: "" }
         return (
           <MembersMatrixCellEditor
             key={p.id}
@@ -223,6 +263,7 @@ const MatrixRow = memo(function MatrixRow({
             onMutated={onMutated}
             cellClassName={palette}
             sourceHint={sourceHint}
+            sourceBadge={sourceBadge}
           />
         )
       })}
@@ -241,12 +282,18 @@ function colorForRole(level: number): string {
   return "bg-muted/40 text-muted-foreground"
 }
 
-function sourceLabel(source: string): string {
+/**
+ * Maps a raw source string to the canonical grant-path vocabulary.
+ * Returns { label, badge } where label is the display name and badge
+ * is the 1-char code used in the source-badge (D/G/O/C).
+ */
+export function sourceInfo(source: string): { label: string; badge: string } {
   switch (source) {
-    case "override": return "direct"
-    case "group": return "via group"
-    case "creator": return "creator"
-    case "org": return "via org"
-    default: return ""
+    case "override": return { label: "direct", badge: "D" }
+    case "group":    return { label: "via group", badge: "G" }
+    case "org":      return { label: "org-wide", badge: "O" }
+    case "creator":  return { label: "creator", badge: "C" }
+    default:         return { label: "", badge: "" }
   }
 }
+

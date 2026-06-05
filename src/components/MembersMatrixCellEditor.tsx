@@ -3,6 +3,12 @@ import { Loader2, Trash2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip"
+import {
   ROLE,
   PROJECT_ROLE_OPTIONS,
   roleName,
@@ -22,8 +28,10 @@ interface CellEditorProps {
   onMutated: () => Promise<void> | void
   /** Visual styling derived by parent (color tier). */
   cellClassName: string
-  /** Source-label hint used in tooltips. */
+  /** Source-label hint used in tooltips (e.g. "org-wide", "direct"). */
   sourceHint: string
+  /** 1-char badge code: D (direct), O (org-wide), G (via group), C (creator). */
+  sourceBadge: string
 }
 
 type Status = "idle" | "submitting" | "error"
@@ -45,6 +53,14 @@ type Status = "idle" | "submitting" | "error"
  * override is exactly the "system did something behind your back" failure.
  * The popover names the source so the operator knows where to go to edit.
  */
+/** Badge color classes keyed by badge letter. */
+const BADGE_CLASSES: Record<string, string> = {
+  D: "bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300",
+  G: "bg-purple-100 text-purple-700 dark:bg-purple-900/40 dark:text-purple-300",
+  O: "bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300",
+  C: "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300",
+}
+
 export function MembersMatrixCellEditor({
   cell,
   userId,
@@ -53,6 +69,7 @@ export function MembersMatrixCellEditor({
   onMutated,
   cellClassName,
   sourceHint,
+  sourceBadge,
 }: CellEditorProps) {
   const { session } = useFrontierSession()
   const [open, setOpen] = useState(false)
@@ -149,10 +166,26 @@ export function MembersMatrixCellEditor({
             <span className="capitalize truncate">
               {cell.role.name.replace(/_/g, " ")}
             </span>
-            {sourceHint && (
-              <span className="text-[9px] opacity-75 shrink-0" aria-hidden>
-                {sourceHint[0]}
-              </span>
+            {sourceBadge && (
+              <TooltipProvider>
+                <Tooltip>
+                  <TooltipTrigger
+                    render={
+                      <span
+                        className={`inline-flex h-4 w-4 shrink-0 items-center justify-center rounded text-[9px] font-bold cursor-default ${
+                          BADGE_CLASSES[sourceBadge] ?? "bg-muted text-muted-foreground"
+                        }`}
+                        aria-label={sourceHint}
+                      />
+                    }
+                  >
+                    {sourceBadge}
+                  </TooltipTrigger>
+                  <TooltipContent side="top">
+                    {sourceHint}
+                  </TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
             )}
           </div>
         </PopoverTrigger>
@@ -270,7 +303,13 @@ function EditableBody({
   )
 }
 
-/** Read-only explanation for inherited / creator / gitlab cells. */
+/**
+ * Read-only explanation for immutable cells (creator / via group / org-wide).
+ *
+ * Uses spec vocabulary: grant paths = direct, via group, org-wide, creator;
+ * effective role = max-wins. The "Make exception" CTA creates a direct project
+ * grant that supersedes the inherited path for this project only.
+ */
 function ImmutableBody({
   source,
   onMakeException,
@@ -285,10 +324,11 @@ function ImmutableBody({
   if (source === "creator") {
     return (
       <div className="space-y-1 text-xs">
-        <p className="font-medium">Project creator</p>
+        <p className="font-medium">Creator grant</p>
         <p className="text-muted-foreground">
-          Owner role is permanent until ownership is transferred. Manage in the
-          project's Settings → Share.
+          This person created the project. Their Owner role is permanent until
+          project ownership is transferred. The effective role here is Owner
+          (max-wins). Manage in the project's Settings → Share.
         </p>
       </div>
     )
@@ -296,10 +336,11 @@ function ImmutableBody({
   if (source === "group") {
     return (
       <div className="space-y-1 text-xs">
-        <p className="font-medium">Granted via group membership</p>
+        <p className="font-medium">Effective role: via group (max-wins)</p>
         <p className="text-muted-foreground">
-          This role comes from a group that has access to this project. Edit
-          the group's membership to change or remove this grant.
+          This role comes from a group attached to this project. Edit the
+          group's membership to change or remove this grant. To override for
+          this project only, add a direct grant below.
         </p>
       </div>
     )
@@ -308,15 +349,17 @@ function ImmutableBody({
   return (
     <div className="space-y-2">
       <div className="text-xs">
-        <p className="font-medium">Inherited from org role</p>
+        <p className="font-medium">Effective role: org-wide (max-wins)</p>
         <p className="text-muted-foreground">
-          Adding a per-project override here will supersede the org-level grant
-          for this project only.
+          This role is granted org-wide and applies to every project. A direct
+          project grant added here will supersede the org-wide grant for this
+          project only (max-wins still applies — only a higher direct role
+          changes the effective role).
         </p>
       </div>
       <div className="border-t pt-1">
         <p className="px-1 pb-1 text-[10px] font-medium text-muted-foreground">
-          Make exception with role…
+          Set a project-level exception (direct grant)…
         </p>
         <div className="space-y-0.5">
           {PROJECT_ROLE_OPTIONS.filter((o) => o.level <= ROLE.MAINTAINER).map((opt) => (

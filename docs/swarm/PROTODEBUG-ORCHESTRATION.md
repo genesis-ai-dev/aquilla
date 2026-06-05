@@ -5,7 +5,7 @@ Base: clean `cc7b5ed`. (Wave 1 = FRO-158..162, all Fixed + on `dev`/staging.)
 
 ## §0 STOP checklist
 - [x] FRO-165, 167, 169, 171, 172 implemented + verified green + merged to main.
-- [ ] FRO-168, 170 (HITL): proposals surfaced to user; implement only after approval.
+- [x] FRO-168, 170 (HITL): user approved decisions inline; IMPLEMENTED Wave 3 (status chip, per-metric conditionality, team card, language pair / access vocabulary, legend, max-wins copy, source badges). Merged.
 - [ ] FRO-166 (blocked by 165 + HITL): deferred until revert lands on staging + design approved.
 - [x] Integration green: root tsc 0 · vitest 1540 pass (2 pre-existing baseline fails) · auth-worker 123/123 · build exit 0.
 
@@ -43,3 +43,14 @@ Base: clean `cc7b5ed`. (Wave 1 = FRO-158..162, all Fixed + on `dev`/staging.)
 ## §HITL proposals (surfaced to user — DO NOT implement until approved)
 - FRO-168 IA redesign: recommend status-banner-first ("On track · 68% · due in 14d"), promote %tiles, add Team/Assignments card, demote per-file table. 5 open Qs (banner tone, assignments API exists?, language-pair field?, audio always-on?, file-table audience).
 - FRO-170 legibility: recommend vocabulary org-wide/group/direct/creator + max-wins legend + rewritten cell popovers. 5 open Qs (org-wide naming, banner vs on-demand, multi-path badge depth, "make exception" rename, link to 171 drill-down).
+
+## §M Wave 3 (HITL — approved + implemented)
+- 2026-06-05 · ia(168) · ProjectOverview.tsx — compact StatusChip (on-track/due-soon/overdue), %tiles promoted, per-metric conditionality (text/audio shown only when present; audio-only hides text), DeadlineChip, language pair in header, Archive/Download → ⋯ overflow, Team card from org workload (per-project endpoint gap → SWARM-TODO), per-file table kept fully visible. +2 tests. TODOs: audio-validation metric; legacy-import audio question (FRO-160).
+- 2026-06-05 · legibility(170) · MembersMatrixView/CellEditor/MembersPanel + new AccessModelLegend.tsx — vocabulary org-wide/via group/direct/creator + max-wins; on-demand [?] + collapsible legend; 2-char source badges D/O/G/C w/ tooltips; ImmutableBody rewrite + "Set a project-level exception (direct grant)". Multi-path secondary icon = SWARM-TODO (matrix exposes one source/cell). +9 legend tests.
+- 2026-06-05 · GATE green (tsc 0 · vitest 1554 pass / 2 baseline · build exit 0) · promoted → main + dev (local).
+
+## §SWARM-TODO (carry-forward)
+- FRO-168: per-project all-assignees endpoint (`GET /projects/:id/assignments/all`) for a full Team card — currently org-workload proxy.
+- FRO-168: audio VALIDATION metric not wired; confirm legacy GitLab import populated cell_audio (ties to FRO-160 data gap).
+- FRO-170: secondary grant-path icon needs MatrixCell.secondarySources (backend exposes one source/cell today).
+- STAGING PUSH PENDING: local main/dev at wave-3 tip; origin still cc7b5ed. Push blocked on pre-push e2e smoke (local Postgres/Hyperdrive not configured) — needs --no-verify (user authorize) or local PG.

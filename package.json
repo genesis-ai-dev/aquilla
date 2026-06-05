@@ -34,6 +34,8 @@
     "tauri:build": "tauri build",
     "tauri:build:mac": "bash -c 'set -a; [ -f .env.signing ] && . ./.env.signing; set +a; tauri build'",
     "deploy": "npm run build && wrangler pages deploy dist --project-name=codex-web --branch=manual --commit-dirty=true",
+    "build:staging": "tsc -b && VITE_AUTH_BASE=https://codex-auth-worker-staging.blue-darkness-7674.workers.dev VITE_SYNC_WORKER_HOST=codex-sync-worker-staging.blue-darkness-7674.workers.dev VITE_CHAT_BASE=https://codex-chat-worker-staging.blue-darkness-7674.workers.dev vite build",
+    "deploy:staging": "npm run build:staging && wrangler pages deploy dist --project-name=codex-web --branch=staging --commit-dirty=true",
     "deploy:codex": "npm run build:codex && wrangler pages deploy dist --project-name=codex-web --branch=manual --commit-dirty=true",
     "deploy:honeycomb": "npm run build:honeycomb && wrangler pages deploy dist --project-name=honeycomb-studio --commit-dirty=true",
     "deploy:context": "npm run build:context && wrangler pages deploy dist --project-name=context-studio --commit-dirty=true",

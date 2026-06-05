@@ -1,45 +1,45 @@
-# SWARM ORCHESTRATION — Prototype Debugging (2026-06-05)
+# SWARM ORCHESTRATION — Prototype Debugging (Wave 2, 2026-06-05)
 
-Driver: user ran `/swarm-orchestration` on Linear project **Prototype Debugging** (FrontierR&D / FRO).
-Goal: drain the 5 new **Todo** issues, verified, before handoff to Matthew for QA.
+Driver: `/swarm-orchestration` on Linear project **Prototype Debugging** (FRO). Wave 2 = FRO-165..172.
+Base: clean `cc7b5ed`. (Wave 1 = FRO-158..162, all Fixed + on `dev`/staging.)
 
 ## §0 STOP checklist
-- [ ] FRO-158, 159, 160, 161, 162 each Fixed (verified) or honestly blocked with a Linear note.
-- [ ] Integration `swarm/protodebug-integration` green: root `tsc -b --noEmit` + `vitest run`; `npm run build`; auth/sync-worker tsc+test if touched.
-- [ ] Promoted to main ONLY with forbidden files untouched (see §FORBIDDEN).
-- [ ] Backend bugs (158/159) live-verified on staging (`dev` branch deploy) — isolated worktrees can't repro Postgres.
-- [ ] Remaining gaps traced in docs/swarm/TRACES.md.
-
-## §FORBIDDEN (user's uncommitted work in main — NEVER touch/stage)
-- src/App.tsx (modified)
-- src/components/OutboxInspectorPopover.tsx (modified)
-- src/components/__DevOutboxHarness.tsx (untracked)
+- [x] FRO-165, 167, 169, 171, 172 implemented + verified green + merged to main.
+- [ ] FRO-168, 170 (HITL): proposals surfaced to user; implement only after approval.
+- [ ] FRO-166 (blocked by 165 + HITL): deferred until revert lands on staging + design approved.
+- [x] Integration green: root tsc 0 · vitest 1540 pass (2 pre-existing baseline fails) · auth-worker 123/123 · build exit 0.
 
 ## §1 Operating model
-- Integration `swarm/protodebug-integration` (worktree `.worktrees/protodebug-integration`, off main `1ef5b9b`, node_modules + auth/sync-worker node_modules symlinked).
-- Each agent → manual worktree off integration tip (sonnet). Commits its branch referencing FRO-###. NEVER pushes/deploys/changes Linear status.
-- Merge: branch → integration → verify → log §M. Promote integration → main (ff) only when green AND main clean apart from forbidden files.
-- Orchestrator owns final gate + staging push to `dev`.
+- Integration `swarm/pd2-integration` off `cc7b5ed`. Each agent → own worktree, sonnet, commit-only, no push.
+- HITL rule (per user): orchestrator updates the ticket noting human review needed + prompts user, while other agents proceed.
 
 ## §2 Workstream registry
-Status: in-flight | review | merged-integration | merged-main | blocked
-| WS | FRO | Title | Pri | Branch | Owns | Status |
-|---|---|---|---|---|---|---|
-| A | 160+161 | Audio progress 0% + overview layout pass | Med | swarm/pd-overview | src/components/org/ProjectOverview.tsx, ProjectCard.tsx, audio-progress data path | in-flight |
-| B | 162 | Voice studio tap-to-voice border | Low | swarm/pd-voice | voice-studio / tap-to-voice component | in-flight |
-| C | 158 | Org groups 500 post-Postgres | High | swarm/pd-groups | auth-worker/src/routes/orgs.ts, auth-worker/migrations/* | in-flight |
-| D | 159 | Stale auth token post-Postgres | High | swarm/pd-token | client token-refresh/session path | in-flight |
+| WS | FRO | Title | Pri | Branch | Status |
+|---|---|---|---|---|---|
+| revert | 165 | Revert internal/all/public teams categorization | Urgent | swarm/pd2-revert | merged-main |
+| maxwidth | 167 | /projects/{id} widen max-width (2xl→5xl) | Med | swarm/pd2-maxwidth | merged-main |
+| invitemodal | 169 | Invite-to-projects modal overflow (min-w-0) | High | swarm/pd2-invitemodal | merged-main |
+| memberdrill | 171 | Per-member project-visibility drill-down | High | swarm/pd2-memberdrill | merged-main |
+| homeredirect | 172 | Root → /homepage redirect for no-cookie users | High | swarm/pd2-homeredirect | merged-main |
+| — | 168 | /projects/{id} IA redesign | Med | — | HITL: proposal ready, awaiting user |
+| — | 170 | Org-vs-project access legibility | High | — | HITL: proposal ready, awaiting user |
+| — | 166 | /teams redesign | Med | — | BLOCKED by 165 + HITL: deferred |
 
 ## §M Merge log
-- 2026-06-05 · A(160+161) · swarm/pd-overview · merged → integration · tsc 0 · vitest green
-- 2026-06-05 · B(162) · swarm/pd-voice · merged → integration · tsc 0 · vitest green
-- 2026-06-05 · C(158) · swarm/pd-groups · merged → integration · auth-worker tsc 0, 123/123
-- 2026-06-05 · D(159) · swarm/pd-token · merged → integration · tsc 0 · vitest green
-- 2026-06-05 · absorbed main FRO-163 (b881c14, OutboxInspectorPopover) into integration · tsc 0
-- 2026-06-05 · PROMOTED integration → main (ff) @ 715106c · full gate green (root tsc 0, vitest 1534 pass / 2 pre-existing baseline fails, auth-worker 123/123, build exit 0). User's uncommitted ExpandableFileList/LivingMemoryPage/ParallelPassagesPanel preserved.
+- 2026-06-05 · revert(165) · TeamsList.tsx — removed all/internal/public GroupFilter; real cause = default "internal" filter hid teams; is_internal column KEPT (required by FRO-158 query). +2 regression tests.
+- 2026-06-05 · maxwidth(167) · ProjectOverview.tsx:184 max-w-2xl→max-w-5xl.
+- 2026-06-05 · invitemodal(169) · MultiProjectInviteDialog.tsx:213 added min-w-0 so truncate fires on long slugs.
+- 2026-06-05 · memberdrill(171) · reused existing GET /orgs/:orgId/members/:userId/access; new MemberAccessDrillDown.tsx + useMemberAccess.ts + member-access.test.ts (4); MembersMatrixView member→button opens panel.
+- 2026-06-05 · homeredirect(172) · App.tsx RootRedirect via window.location.replace("/homepage") when aq_hint cookie absent; hasAuthHintCookie() in session-store.ts; worker/index.ts already did edge redirect (defence-in-depth). +4 tests.
+- 2026-06-05 · GATE green, PROMOTED integration → main + dev (ff).
 
-## §LIVE-VERIFY (needs staging/Neon — orchestrator/user)
-- FRO-158: apply `db/postgres/migrations/0028_groups_is_internal.sql` to prod/staging Neon (the actual 500 fix). Code returns the column; column must exist in live schema.
-- FRO-160: audio 0% is a DATA gap, not code — code path already correct. Verify `SELECT COUNT(*) FROM cell_audio` on live; if recordings exist but table empty, the `cell.audio.attach` projection didn't run.
-- FRO-159: confirm auth-worker returns 401 (not 500) for pre-migration tokens so the new client refresh path triggers; confirm `/` re-auth prompt doesn't loop.
-- FRO-162: live screenshot of reduced tap-to-voice border in audio mode.
+## §LIVE-VERIFY (staging — needs incognito/real Neon)
+- FRO-165: /teams loads with the list (not empty) after revert.
+- FRO-167: screenshot /projects/{id} wide (≥1280) + narrow (~768) — no h-scroll, no awkward gaps.
+- FRO-169: open Invite-to-projects with an 80+char slug — name truncates, modal in-viewport.
+- FRO-171: spot-check a mixed-grant member (direct + group) — paths + max-wins role reconcile with project-side panel.
+- FRO-172: incognito (no cookie) → /homepage; with aq_hint=1 → app, no loop.
+
+## §HITL proposals (surfaced to user — DO NOT implement until approved)
+- FRO-168 IA redesign: recommend status-banner-first ("On track · 68% · due in 14d"), promote %tiles, add Team/Assignments card, demote per-file table. 5 open Qs (banner tone, assignments API exists?, language-pair field?, audio always-on?, file-table audience).
+- FRO-170 legibility: recommend vocabulary org-wide/group/direct/creator + max-wins legend + rewritten cell popovers. 5 open Qs (org-wide naming, banner vs on-demand, multi-path badge depth, "make exception" rename, link to 171 drill-down).

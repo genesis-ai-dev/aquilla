@@ -3,26 +3,43 @@
 // has no cells yet. Mirrors the EditorTable's grid columns so there's no
 // layout shift when real rows arrive.
 
-import { FileText, FolderOpen, Sparkles } from "lucide-react"
+import type { ReactNode } from "react"
+import { FileText, FolderOpen, Languages, Sparkles } from "lucide-react"
 import { Skeleton } from "@/components/ui/skeleton"
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import type { CellAreaState } from "@/lib/editor/cell-area-state"
 
 /** Matches EditorTable's gridCols — keep in sync if the table's columns change. */
 const GRID_COLS = "grid-cols-[56px_1fr_1fr_56px]"
 
+interface ProjectSummary {
+  name: string
+  sourceLanguage?: string
+  targetLanguage?: string
+  files: unknown[]
+}
+
 interface CellAreaPlaceholderProps {
   state: CellAreaState
   fileName?: string
   onImportClick?: () => void
+  project?: ProjectSummary | null
 }
 
 export function CellAreaPlaceholder({
   state,
   fileName,
   onImportClick,
+  project,
 }: CellAreaPlaceholderProps) {
   if (state.kind === "ready") return null
-  if (state.kind === "no-file") return <NoFileEmpty />
+  if (state.kind === "no-file") {
+    return project ? (
+      <ProjectOverviewCard project={project} onImportClick={onImportClick} />
+    ) : (
+      <NoFileEmpty />
+    )
+  }
   if (state.kind === "ready-empty") {
     return <ReadyEmpty fileName={fileName} onImportClick={onImportClick} />
   }
@@ -104,10 +121,10 @@ function EmptyState({
   description,
   action,
 }: {
-  icon: React.ReactNode
+  icon: ReactNode
   title: string
   description: string
-  action?: React.ReactNode
+  action?: ReactNode
 }) {
   return (
     <div className="flex h-full items-center justify-center p-8">
@@ -116,6 +133,67 @@ function EmptyState({
         <h3 className="text-base font-medium">{title}</h3>
         <p className="text-sm text-muted-foreground">{description}</p>
         {action && <div className="mt-2">{action}</div>}
+      </div>
+    </div>
+  )
+}
+
+function ProjectOverviewCard({
+  project,
+  onImportClick,
+}: {
+  project: ProjectSummary
+  onImportClick?: () => void
+}) {
+  const fileCount = project.files.length
+  const hasLanguages = project.sourceLanguage || project.targetLanguage
+
+  return (
+    <div className="flex h-full overflow-y-auto">
+      <div className="w-full px-8 py-8">
+        <Card className="w-full">
+          <CardHeader className="pb-3 pt-2">
+            <div className="flex min-w-0 flex-wrap items-start justify-between gap-3">
+              <div className="min-w-0">
+                <CardTitle className="text-xl font-semibold leading-snug">
+                  {project.name}
+                </CardTitle>
+                {hasLanguages && (
+                  <CardDescription className="mt-1 flex items-center gap-1.5">
+                    <Languages className="h-3.5 w-3.5 shrink-0" aria-hidden />
+                    {project.sourceLanguage || "?"} → {project.targetLanguage || "?"}
+                  </CardDescription>
+                )}
+              </div>
+              <div className="shrink-0 text-sm text-muted-foreground">
+                {fileCount} file{fileCount !== 1 ? "s" : ""}
+              </div>
+            </div>
+          </CardHeader>
+          <CardContent className="pb-2">
+            {fileCount === 0 ? (
+              <p className="mb-4 text-sm text-muted-foreground">
+                No files yet. Import a file to get started.
+              </p>
+            ) : (
+              <p className="mb-4 text-sm text-muted-foreground">
+                Select a file from the sidebar to start translating.
+              </p>
+            )}
+            {onImportClick && (
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={onImportClick}
+                  className="inline-flex items-center gap-1.5 rounded-md border border-input bg-background px-3 py-1.5 text-sm shadow-xs transition hover:bg-accent"
+                >
+                  <Sparkles className="h-4 w-4" aria-hidden />
+                  Import a file
+                </button>
+              </div>
+            )}
+          </CardContent>
+        </Card>
       </div>
     </div>
   )

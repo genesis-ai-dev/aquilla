@@ -36,7 +36,7 @@ export function WorkspaceHeader({ project, onBack, children, extraMenuItems }: P
         )}
       </nav>
       <div className="flex-1" />
-      <div className="flex items-center gap-1 shrink-0">
+      <div className="flex flex-wrap items-center gap-1 shrink-0">
         {children}
         <OverflowMenu items={items} />
       </div>

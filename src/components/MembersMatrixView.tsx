@@ -1,8 +1,10 @@
-import { memo } from "react"
+import { memo, useState } from "react"
 import { Loader2, AlertTriangle } from "lucide-react"
 import { useProjectsMembersMatrix } from "@/hooks/useProjectsMembersMatrix"
+import { useOrg } from "@/hooks/useOrg"
 import { ROLE } from "@/lib/frontier/roles"
 import { MembersMatrixCellEditor } from "./MembersMatrixCellEditor"
+import { MemberAccessDrillDown } from "./MemberAccessDrillDown"
 import type { MatrixMember, MatrixCell } from "@/hooks/useProjectsMembersMatrix"
 import type { CloudProjectSummary } from "@/lib/sync/cloud-projects"
 
@@ -36,8 +38,13 @@ import type { CloudProjectSummary } from "@/lib/sync/cloud-projects"
  * gets a warning indicator. Tooltip surfaces the rationale ("sole Owner —
  * losing this person locks the project").
  */
+interface SelectedMember { userId: number; username: string }
+
 export function MembersMatrixView() {
   const { matrix, isLoading, error, refresh } = useProjectsMembersMatrix()
+  const { state: orgState } = useOrg()
+  const orgId = orgState.kind === "success" ? orgState.org.id : null
+  const [selectedMember, setSelectedMember] = useState<SelectedMember | null>(null)
 
   if (isLoading && !matrix) {
     return (
@@ -67,37 +74,53 @@ export function MembersMatrixView() {
   }
 
   return (
-    <div className="rounded-md border bg-background overflow-x-auto">
-      <table className="min-w-full text-sm">
-        <thead className="bg-muted/40">
-          <tr>
-            <th
-              scope="col"
-              className="sticky left-0 z-10 bg-muted/40 border-r px-3 py-2 text-left text-xs font-medium text-muted-foreground"
-            >
-              Member
-            </th>
-            {matrix.projects.map((p) => (
-              <ProjectHeaderCell
-                key={p.id}
-                project={p}
-                ownerCount={matrix.ownerCountByProject.get(p.id) ?? 0}
+    <div className="flex gap-0 rounded-md border bg-background overflow-hidden">
+      <div className="flex-1 overflow-x-auto">
+        <table className="min-w-full text-sm">
+          <thead className="bg-muted/40">
+            <tr>
+              <th
+                scope="col"
+                className="sticky left-0 z-10 bg-muted/40 border-r px-3 py-2 text-left text-xs font-medium text-muted-foreground"
+              >
+                Member
+              </th>
+              {matrix.projects.map((p) => (
+                <ProjectHeaderCell
+                  key={p.id}
+                  project={p}
+                  ownerCount={matrix.ownerCountByProject.get(p.id) ?? 0}
+                />
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {matrix.members.map((m) => (
+              <MatrixRow
+                key={m.userId}
+                member={m}
+                projects={matrix.projects}
+                memberCells={matrix.cells.get(m.userId)}
+                onMutated={refresh}
+                isSelected={selectedMember?.userId === m.userId}
+                onSelectMember={setSelectedMember}
               />
             ))}
-          </tr>
-        </thead>
-        <tbody>
-          {matrix.members.map((m) => (
-            <MatrixRow
-              key={m.userId}
-              member={m}
-              projects={matrix.projects}
-              memberCells={matrix.cells.get(m.userId)}
-              onMutated={refresh}
-            />
-          ))}
-        </tbody>
-      </table>
+          </tbody>
+        </table>
+      </div>
+
+      {/* Per-member drill-down panel — shown when a member row is selected */}
+      {selectedMember && orgId != null && (
+        <div className="w-72 shrink-0 border-l">
+          <MemberAccessDrillDown
+            orgId={orgId}
+            userId={selectedMember.userId}
+            username={selectedMember.username}
+            onClose={() => setSelectedMember(null)}
+          />
+        </div>
+      )}
     </div>
   )
 }
@@ -147,19 +170,36 @@ const MatrixRow = memo(function MatrixRow({
   projects,
   memberCells,
   onMutated,
+  isSelected,
+  onSelectMember,
 }: {
   member: MatrixMember
   projects: CloudProjectSummary[]
   memberCells: Map<string, MatrixCell> | undefined
   onMutated: () => Promise<void>
+  isSelected: boolean
+  onSelectMember: (m: { userId: number; username: string } | null) => void
 }) {
+  function handleMemberClick() {
+    onSelectMember(isSelected ? null : { userId: member.userId, username: member.username })
+  }
+
   return (
     <tr className="border-t hover:bg-muted/20">
       <th
         scope="row"
         className="sticky left-0 z-10 bg-background border-r px-3 py-1.5 text-left font-normal whitespace-nowrap"
       >
-        <span className="text-sm">{member.username}</span>
+        <button
+          onClick={handleMemberClick}
+          className={[
+            "text-sm rounded px-1 -mx-1 hover:underline focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
+            isSelected ? "font-semibold text-primary" : "",
+          ].join(" ")}
+          title="Click to see project access breakdown"
+        >
+          {member.username}
+        </button>
         {member.isOrgInherited && (
           <span
             className="ml-1.5 rounded bg-muted px-1 py-0.5 text-[9px] text-muted-foreground align-middle"

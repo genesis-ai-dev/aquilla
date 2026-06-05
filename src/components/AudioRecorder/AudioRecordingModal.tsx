@@ -27,6 +27,7 @@ import { notifyAudioAttachmentsChanged, injectOptimisticAudioAttachment } from "
 import { audioSyncTokenFetcherForSession } from "@/lib/audio/sync-token-fetcher"
 import { markProjectHasAudioDataSoon } from "@/lib/audio/project-audio-state"
 import { setTranscribeStatus } from "@/lib/audio/transcribe-status"
+import { probeMicPermission } from "./probeMicPermission"
 
 interface Props {
   open: boolean
@@ -129,14 +130,29 @@ export function AudioRecordingModal({
       setPhase("error")
       return
     }
+    // Probe mic permission BEFORE starting the countdown so we never count
+    // down into a failed recording. If permission is denied, surface a clear
+    // message instead of starting the 3-2-1 sequence. (FRO-155)
     setErrorMessage(null)
-    setPhase("counting")
-    countdown.start({
-      beep: beepEnabled,
-      from: 3,
-      onDone: () => {
-        void recorder.start()
-      },
+    void probeMicPermission().then((permState) => {
+      if (permState === "denied") {
+        // Abort — permission is blocked. Show actionable guidance.
+        setPhase("error")
+        setErrorMessage(
+          "Microphone access is blocked. To record audio, allow microphone access in your browser's site settings and reload the page.",
+        )
+        return
+      }
+      // "granted" or "prompt" (system will ask, or already asked successfully).
+      // Safe to run the countdown and hand off to the recorder.
+      setPhase("counting")
+      countdown.start({
+        beep: beepEnabled,
+        from: 3,
+        onDone: () => {
+          void recorder.start()
+        },
+      })
     })
   }, [beepEnabled, countdown, recorder, session?.jwt])
 

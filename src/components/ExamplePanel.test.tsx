@@ -11,16 +11,20 @@ import type { ScoredPair } from "@/lib/search/dual-index"
 const examples: ScoredPair[] = [
   {
     cellId: "cell-1",
+    fileId: "file-1",
     source: "In the beginning God created",
     target: "Al inicio Dios creó",
     score: 0.9,
+    coverageWeight: 1,
     matchedTokens: ["god", "created"],
   },
   {
     cellId: "cell-2",
+    fileId: "file-1",
     source: "God said let there be light",
     target: "Dios dijo que haya luz",
     score: 0.7,
+    coverageWeight: 1,
     matchedTokens: ["god"],
   },
 ]

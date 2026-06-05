@@ -338,6 +338,7 @@ export function ProjectWorkspace() {
     refreshPending: refreshOutboxPending,
   } = useOutboxFlusher({
     enabled: outboxFlushEnabled,
+    projectId: project?.id,
     getTokenForFile,
   })
   const outboxRecords = usePendingOutboxRecords({

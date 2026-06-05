@@ -327,6 +327,52 @@ describe("flushOutboxBatch", () => {
     expect(await outboxPendingCount()).toBe(0)
   })
 
+  // -- Project-scoped flush (FRO-150 regression) -----------------------------
+
+  it("only flushes events for the given projectId; cross-project events are skipped and stay in the outbox", async () => {
+    await enqueueOutboxEvent(makeEvent("proj-a-e1", "fa1", { projectId: "proj-a" }))
+    await enqueueOutboxEvent(makeEvent("proj-b-e1", "fb1", { projectId: "proj-b" }))
+    await enqueueOutboxEvent(makeEvent("proj-b-e2", "fb1", { projectId: "proj-b" }))
+
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse({ accepted: [{ id: "proj-b-e1" }, { id: "proj-b-e2" }], rejected: [] }),
+    )
+    const result = await flushOutboxBatch({
+      projectId: "proj-b",
+      getTokenForFile: TOKEN_FN,
+      fetchImpl: fetchMock as unknown as typeof fetch,
+    })
+
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    const bodyEvents = JSON.parse(
+      (fetchMock.mock.calls[0] as [string, RequestInit])[1].body as string,
+    ).events as CqrsRawEvent[]
+    // Only proj-b events should have been sent
+    expect(bodyEvents.every((e) => e.projectId === "proj-b")).toBe(true)
+    expect(bodyEvents).toHaveLength(2)
+
+    expect(result).toEqual({ posted: 2, accepted: 2, networkError: false })
+    // proj-a event must still be waiting
+    expect(await outboxPendingCount()).toBe(1)
+  })
+
+  it("flushes all events when projectId is not provided (backward-compatible behaviour)", async () => {
+    await enqueueOutboxEvent(makeEvent("multi-a", "f1", { projectId: "proj-a" }))
+    await enqueueOutboxEvent(makeEvent("multi-b", "f1", { projectId: "proj-b" }))
+
+    // No projectId → oldest-file grouping applies; both events share fileId "f1"
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse({ accepted: [{ id: "multi-a" }, { id: "multi-b" }], rejected: [] }),
+    )
+    await flushOutboxBatch({
+      getTokenForFile: TOKEN_FN,
+      fetchImpl: fetchMock as unknown as typeof fetch,
+    })
+
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(await outboxPendingCount()).toBe(0)
+  })
+
   // -- Body parse failure ----------------------------------------------------
 
   it("returns networkError:true and leaves outbox unchanged when server returns 200 with non-JSON body", async () => {

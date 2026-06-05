@@ -7,6 +7,7 @@ const MAX_BACKOFF_MS = 60_000
 
 export interface UseOutboxFlusherOptions {
   enabled: boolean
+  projectId?: string
   getTokenForFile: (fileId: string) => Promise<string | null>
 }
 
@@ -25,6 +26,8 @@ export function useOutboxFlusher(options: UseOutboxFlusherOptions): {
   const backoffExp = useRef(0)
   const tokenRef = useRef(options.getTokenForFile)
   tokenRef.current = options.getTokenForFile
+  const projectIdRef = useRef(options.projectId)
+  projectIdRef.current = options.projectId
 
   const refreshPending = useCallback(async () => {
     setPending(await outboxPendingCount())
@@ -51,6 +54,7 @@ export function useOutboxFlusher(options: UseOutboxFlusherOptions): {
 
     const runFlushCycle = async () => {
       const result = await flushOutboxBatch({
+        projectId: projectIdRef.current,
         getTokenForFile: (fid) => tokenRef.current(fid),
       })
       await refreshPending()

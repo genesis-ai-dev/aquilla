@@ -21,6 +21,10 @@ interface PostBody {
 
 export interface FlushDeps {
   getTokenForFile: (fileId: string) => Promise<string | null>
+  /** When set, only events whose envelope projectId matches are flushed.
+   *  Without this guard a tab viewing project B tries to flush leftover
+   *  events from project A using a token scoped to B, producing 403s. */
+  projectId?: string
   fetchImpl?: typeof fetch
 }
 
@@ -48,10 +52,13 @@ export async function flushOutboxBatch(deps: FlushDeps): Promise<{
 }> {
   const fetchFn = deps.fetchImpl ?? fetch
   const records = await peekOutboxBatch(MAX_BATCH * 2)
-  if (records.length === 0) {
+  const scoped = deps.projectId
+    ? records.filter((r) => r.event.projectId === deps.projectId)
+    : records
+  if (scoped.length === 0) {
     return { posted: 0, accepted: 0, networkError: false }
   }
-  const batch = groupOldestFileFirst(records)
+  const batch = groupOldestFileFirst(scoped)
   const fileId = batch[0].event.fileId
   if (!fileId) {
     await removeOutboxEvents([batch[0].id])

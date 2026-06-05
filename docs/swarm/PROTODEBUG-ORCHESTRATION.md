@@ -54,3 +54,12 @@ Base: clean `cc7b5ed`. (Wave 1 = FRO-158..162, all Fixed + on `dev`/staging.)
 - FRO-168: audio VALIDATION metric not wired; confirm legacy GitLab import populated cell_audio (ties to FRO-160 data gap).
 - FRO-170: secondary grant-path icon needs MatrixCell.secondarySources (backend exposes one source/cell today).
 - STAGING PUSH PENDING: local main/dev at wave-3 tip; origin still cc7b5ed. Push blocked on pre-push e2e smoke (local Postgres/Hyperdrive not configured) — needs --no-verify (user authorize) or local PG.
+
+## §M Wave 4 (carry-forward TODOs — backend enablement)
+- 2026-06-05 · assignments · auth-worker GET /projects/:id/assignments/all (maintainer+) + getProjectAssignmentRoster service; client getProjectAssignments; FRO-168 Team card now uses per-project roster (org-workload proxy removed). +2 auth tests.
+- 2026-06-05 · secondary · GET /projects/:id/members now returns secondarySources[] (all non-winning contributing paths); listEffectiveProjectMembers accumulates paths; MatrixCell.secondarySources wired; MembersMatrixCellEditor renders GitMerge icon + tooltip (FRO-170 secondary-path, read-only). +1 auth test.
+- 2026-06-05 · GATE green (tsc 0 · auth-worker 127/127 · root vitest 1554 pass / 2 baseline · build 0) · promoted → main + dev (local).
+- RESOLVED carry-forward: FRO-168 assignments endpoint ✅, FRO-170 secondarySources ✅.
+
+## §AUDIO DATA FINDING (investigated on staging Neon)
+- `cell_audio` is EMPTY: 0 rows across all 411 projects on staging. FRO-160's universal 0% audio is a true data gap — legacy GitLab import did NOT populate audio, none recorded post-cutover. Audio-validation metric (FRO-168 TODO) is moot until audio data exists. → product/data decision for user (new issue suggested).

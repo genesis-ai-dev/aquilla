@@ -210,7 +210,7 @@ export function MultiProjectInviteDialog({
                         type="button"
                         onClick={() => toggleProject(p.id)}
                         disabled={busy}
-                        className="flex-1 truncate text-left hover:text-foreground disabled:opacity-50"
+                        className="flex-1 min-w-0 truncate text-left hover:text-foreground disabled:opacity-50"
                       >
                         {p.name}
                       </button>

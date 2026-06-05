@@ -181,7 +181,7 @@ export function ProjectOverview() {
           {status !== "ready" ? (
             <p className="text-sm text-muted-foreground">Loading…</p>
           ) : (
-            <div className="max-w-2xl space-y-4">
+            <div className="max-w-5xl space-y-4">
               {/* ── Header card ── */}
               <div className="rounded-xl border bg-card shadow-sm p-6">
                 <div className="flex items-start justify-between gap-4">

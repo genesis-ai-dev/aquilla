@@ -1408,6 +1408,7 @@ export function ProjectWorkspace() {
             state={cellAreaState}
             fileName={activeFile?.name}
             onImportClick={openImportFlow}
+            project={project}
           />
         )}
         aside={
@@ -1644,7 +1645,7 @@ function MoveToCorpusDialog({
   )
 }
 
-// ── ScrollToGroupHandler ───────────────────────────────────────────────────
+// ── ScrollToGroupHandler ─────────────────────────────────────────────────────────────
 // Must render inside <EditorScrollProvider> so useEditorScroll() has context.
 // Watches pendingGroup and scrolls the first matching cell into view via the
 // forwarded editorRef.

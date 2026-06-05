@@ -30,10 +30,15 @@ vi.mock("@/lib/sync/archive", () => ({
   unarchiveProjectRemote: (...a: unknown[]) => unarchiveProjectRemote(...a),
 }))
 
+type PortfolioProject = import("@/lib/frontier/portfolio").PortfolioProject
+const getPortfolio = vi.fn((_jwt: string, _orgId: number): Promise<PortfolioProject[]> => Promise.resolve([]))
 vi.mock("@/lib/frontier/portfolio", () => ({
-  getPortfolio: vi.fn(async () => []),
-  audioPct: () => 0,
-  recordedMinutes: () => 0,
+  getPortfolio: (jwt: string, orgId: number) => getPortfolio(jwt, orgId),
+  // Real implementations — tests must not override these with wrong stubs
+  audioPct: (p: { audioCells: number; totalCells: number }) => (p.totalCells > 0 ? p.audioCells / p.totalCells : 0),
+  translatedPct: (p: { filledCells: number; totalCells: number }) => (p.totalCells > 0 ? p.filledCells / p.totalCells : 0),
+  validatedPct: (p: { validatedCells: number; totalCells: number }) => (p.totalCells > 0 ? p.validatedCells / p.totalCells : 0),
+  recordedMinutes: (p: { recordedMs: number }) => Math.round(p.recordedMs / 60000),
   deadlineStatus: () => null,
 }))
 vi.mock("@/lib/sync/cloud-projects", () => ({ setProjectDeadline: vi.fn() }))
@@ -179,5 +184,73 @@ describe("ProjectOverview archive/restore", () => {
 
     await screen.findByRole("button", { name: "Open project" })
     expect(screen.queryByRole("button", { name: "Download deliverable" })).not.toBeInTheDocument()
+  })
+})
+
+describe("ProjectOverview audio progress (FRO-160)", () => {
+  // WHY: audio progress was showing 0% on all projects even when recordings
+  // existed. The portfolio endpoint computes audioCells from the cell_audio
+  // table; if it returns non-zero, the overview MUST display a non-zero
+  // percentage — not a hardcoded 0. These tests verify the rendering path
+  // end-to-end so a stale stub can never mask a regression.
+  it("shows non-zero audio % when the portfolio returns audioCells > 0", async () => {
+    useProject.mockReturnValue({
+      project: projectRecord({ level: 400, files: [{ id: "f1", name: "GEN", type: "usfm", createdAt: "x", cellCount: 10 }] }),
+      status: "ready",
+      refresh,
+    })
+    getPortfolio.mockResolvedValue([
+      {
+        id: "p1",
+        name: "John",
+        totalCells: 100,
+        filledCells: 80,
+        validatedCells: 50,
+        audioCells: 30,   // 30 cells have recordings → 30%
+        recordedMs: 90000,
+        lastEditAt: Date.now(),
+        deadlineAt: null,
+      },
+    ])
+
+    renderOverview()
+
+    // The progress section should be present (totalCells > 0).
+    // The "Audio" label must appear in the StatBar list.
+    await waitFor(() => expect(screen.getAllByText("Audio").length).toBeGreaterThan(0))
+    // The audio StatBar displays "30%" in its percentage column.
+    // getAllByText because translated (80%) and validated (50%) also render %.
+    const pctLabels = screen.getAllByText(/^\d+%$/)
+    // At least one label should show 30% (the audio bar).
+    expect(pctLabels.map((el) => el.textContent)).toContain("30%")
+  })
+
+  it("shows 0% audio on a project that genuinely has no recordings", async () => {
+    useProject.mockReturnValue({
+      project: projectRecord({ level: 400, files: [{ id: "f1", name: "GEN", type: "usfm", createdAt: "x", cellCount: 10 }] }),
+      status: "ready",
+      refresh,
+    })
+    getPortfolio.mockResolvedValue([
+      {
+        id: "p1",
+        name: "John",
+        totalCells: 100,
+        filledCells: 80,
+        validatedCells: 50,
+        audioCells: 0,    // no recordings at all → correct 0%
+        recordedMs: 0,
+        lastEditAt: Date.now(),
+        deadlineAt: null,
+      },
+    ])
+
+    renderOverview()
+
+    // Progress section renders when totalCells > 0 — including the Audio bar.
+    await waitFor(() => expect(screen.getAllByText("Audio").length).toBeGreaterThan(0))
+    // All percentage labels are present; 0% appears for the audio bar.
+    const pctLabels = screen.getAllByText(/^\d+%$/)
+    expect(pctLabels.map((el) => el.textContent)).toContain("0%")
   })
 })

@@ -1,0 +1,20 @@
+-- Postgres migration 0028: add is_internal flag to groups
+--
+-- Mirrors D1 migration auth-worker/migrations/0028_groups_is_internal.sql.
+-- The D1 migration ran against SQLite; this one applies the equivalent change
+-- to the Neon Postgres database.
+--
+-- Root cause of FRO-158 (500 on GET /orgs/:id/groups after Postgres cutover):
+-- The auth-worker query selects g.is_internal but this column didn't exist in
+-- the live Neon DB, causing a column-not-found error → 500.
+--
+-- The column is already present in db/postgres/schema.sql (added in FRO-142),
+-- so fresh databases are unaffected. This migration patches the live DB that was
+-- provisioned before the column was added.
+--
+-- Apply once against the Neon prod DB:
+--   psql "$NEON_DATABASE_URL" -f db/postgres/migrations/0028_groups_is_internal.sql
+-- or via the Neon dashboard SQL editor.
+--
+-- Idempotent: IF NOT EXISTS guard prevents errors on re-runs.
+ALTER TABLE groups ADD COLUMN IF NOT EXISTS is_internal BOOLEAN NOT NULL DEFAULT TRUE;

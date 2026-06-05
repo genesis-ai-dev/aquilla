@@ -30,6 +30,33 @@ describe("GET /api/v2/orgs/:orgId/groups", () => {
     const res = await app.request("/api/v2/orgs/1/groups", { headers: authHeader(await jwtFor("outsider")) }, env)
     expect(res.status).toBe(403)
   })
+
+  // Regression: FRO-158 — GET /orgs/:id/groups returned 500 after the Postgres
+  // cutover because the is_internal column was missing from the live Neon DB.
+  // This test verifies: (a) the endpoint returns 200 (not 500), (b) is_internal /
+  // isInternal is present and has the correct default value (true), and (c) an
+  // org with subgroups (teams) populates the list correctly.
+  it("FRO-158 regression: returns 200 with isInternal field for orgs with subgroups", async () => {
+    await seedGroups()
+    // Seed a second group explicitly marked as non-internal (public team)
+    await env.AQUILLA_DB.prepare(
+      "INSERT INTO groups (id, org_id, name, created_by, is_internal) VALUES (11, 1, 'East Africa', 1, false)",
+    ).run()
+    const res = await app.request("/api/v2/orgs/1/groups", { headers: authHeader(await jwtFor("wendi")) }, env)
+    // Must be 200 — was 500 before FRO-158 fix (missing is_internal column on Neon)
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as { groups: Array<{ id: number; name: string; isInternal: boolean; viewerIsMember: boolean }> }
+    // Org has two subgroups — both must appear
+    expect(body.groups).toHaveLength(2)
+    const byName = Object.fromEntries(body.groups.map((g) => [g.name, g]))
+    // Default is_internal = true (existing groups after migration)
+    expect(byName["West Africa"].isInternal).toBe(true)
+    // Explicitly set to false
+    expect(byName["East Africa"].isInternal).toBe(false)
+    // Viewer (wendi) is a member of West Africa, not East Africa
+    expect(byName["West Africa"].viewerIsMember).toBe(true)
+    expect(byName["East Africa"].viewerIsMember).toBe(false)
+  })
 })
 
 describe("GET /api/v2/orgs/:orgId/groups/:groupId", () => {

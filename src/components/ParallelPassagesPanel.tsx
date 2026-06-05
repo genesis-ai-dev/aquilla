@@ -12,7 +12,6 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
-import { ScrollArea } from "@/components/ui/scroll-area"
 import { Skeleton } from "@/components/ui/skeleton"
 import { cn } from "@/lib/utils"
 import type { WorkspaceSearchResult, SearchOptions } from "@/lib/search/workspace-index"
@@ -360,7 +359,7 @@ export function ParallelPassagesPanel(props: ParallelPassagesPanelProps) {
         </div>
 
         {/* Results */}
-        <ScrollArea className="flex-1 min-h-0 border-t border-border">
+        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain border-t border-border">
           <div className="px-2 py-2 space-y-0.5">
             {loading && <ResultsLoadingSkeleton />}
 
@@ -389,7 +388,7 @@ export function ParallelPassagesPanel(props: ParallelPassagesPanelProps) {
                 />
               ))}
           </div>
-        </ScrollArea>
+        </div>
 
         {/* Footer — only when there are results */}
         {!loading && results.length > 0 && (

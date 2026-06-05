@@ -2,7 +2,6 @@ import { useEffect, useMemo, useState } from "react"
 import { Search as SearchIcon, X, ChevronDown, Pencil } from "lucide-react"
 import type { FileReference } from "@/lib/parsers/types"
 import { fileTypeHasSections } from "@/lib/parsers/types"
-import { ScrollArea } from "@/components/ui/scroll-area"
 import { useSidebarExpansion, usePersistedToggleSet } from "@/hooks/useSidebarExpansion"
 import { FileRow } from "./FileRow"
 import { FileActionMenu } from "./FileActionMenu"
@@ -122,7 +121,7 @@ export function ExpandableFileList({
           )}
         </div>
       </div>
-      <ScrollArea className="min-h-0 flex-1">
+      <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
         <div className="p-2 space-y-2">
           {groups.length === 0 && (
             <p className="px-2 text-sm text-muted-foreground">
@@ -234,7 +233,7 @@ export function ExpandableFileList({
             )
           })}
         </div>
-      </ScrollArea>
+      </div>
       {menu && (() => {
         const menuFile = files.find((f) => f.id === menu.fileId)
         const canExport = !!menuFile && EXPORTABLE_FILE_TYPES.has(menuFile.type)

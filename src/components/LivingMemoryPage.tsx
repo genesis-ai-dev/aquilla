@@ -12,7 +12,6 @@ import { ArrowLeft, BookOpen, Users, AlertTriangle } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
-import { ScrollArea } from "@/components/ui/scroll-area"
 import { Skeleton } from "@/components/ui/skeleton"
 import { useLivingMemory } from "@/hooks/useLivingMemory"
 import type { LivingMemoryCell } from "@/hooks/useLivingMemory"
@@ -167,7 +166,7 @@ export function LivingMemoryPage() {
   })
 
   return (
-    <div className="flex flex-col h-full min-h-0">
+    <div className="flex flex-col min-h-screen">
       {/* Header */}
       <header className="flex items-center gap-2 px-4 py-3 border-b shrink-0 bg-background/95 backdrop-blur-xs sticky top-0 z-10">
         <Button
@@ -210,8 +209,10 @@ export function LivingMemoryPage() {
         </div>
       )}
 
-      {/* Body */}
-      <ScrollArea className="flex-1 min-h-0">
+      {/* Body — primary content scrolls with the window, not a nested
+          container (see aquilla-specs 09-design-and-ux.md, "one primary
+          scroll"). The sticky header stays pinned to the viewport top. */}
+      <div className="flex-1">
         <div className="px-4 py-4 max-w-2xl mx-auto">
           {isLoading ? (
             <LivingMemorySkeleton />
@@ -221,7 +222,7 @@ export function LivingMemoryPage() {
             <CellList cells={cells} />
           )}
         </div>
-      </ScrollArea>
+      </div>
     </div>
   )
 }

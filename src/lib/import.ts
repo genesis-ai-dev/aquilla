@@ -55,6 +55,22 @@ export interface EBibleProgress {
   cellsTotal?: number
 }
 
+/**
+ * Encode an ArrayBuffer to a base64 string. Used to capture binary source
+ * blobs (DOCX, PPTX) as the round-trip side-car — the same mechanism USFM
+ * uses for text. The server stores this in `file_source_blobs.raw_source`
+ * (a TEXT column); the export route decodes it to reconstruct the original
+ * file with translations substituted.
+ */
+function arrayBufferToBase64(buffer: ArrayBuffer): string {
+  const bytes = new Uint8Array(buffer)
+  let binary = ""
+  for (let i = 0; i < bytes.byteLength; i++) {
+    binary += String.fromCharCode(bytes[i])
+  }
+  return btoa(binary)
+}
+
 interface ImportResult {
   name: string
   strings: TranslatableString[]
@@ -744,12 +760,23 @@ async function parseFile(file: File, fileType: FileType): Promise<ImportResult[]
     case "docx": {
       const buffer = await file.arrayBuffer()
       const strings = await extractDocxStrings(buffer)
-      return [{ name: file.name, strings }]
+      // Preserve raw bytes as the round-trip side-car so a future server-side
+      // DOCX serializer can inject translations back into the original markup.
+      // Guard: D1 TEXT rows are capped at ~1 MB; skip side-car for files above
+      // 512 KB (base64 overhead ~1.37×) to avoid exceeding that limit.
+      const rawSource = buffer.byteLength <= 512 * 1024
+        ? arrayBufferToBase64(buffer)
+        : undefined
+      return [{ name: file.name, strings, rawSource, rawSourceFormat: rawSource ? "docx" : undefined }]
     }
     case "pptx": {
       const buffer = await file.arrayBuffer()
       const strings = await extractPptxStrings(buffer)
-      return [{ name: file.name, strings }]
+      // Same side-car strategy as DOCX above.
+      const rawSource = buffer.byteLength <= 512 * 1024
+        ? arrayBufferToBase64(buffer)
+        : undefined
+      return [{ name: file.name, strings, rawSource, rawSourceFormat: rawSource ? "pptx" : undefined }]
     }
     case "xliff": {
       const text = await file.text()

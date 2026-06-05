@@ -339,7 +339,7 @@ export function ProjectWorkspace() {
   // Prefer the Frontier session username (authenticated identity) over the
   // project-level username setting. Validation entries and edit history
   // should attribute to the actual signed-in user.
-  const { session: frontierSession } = useFrontierSession()
+  const { session: frontierSession, logout: doLogout } = useFrontierSession()
   const currentUsername = frontierSession?.username || project?.username || "local"
   const jwtRef = useRef<string | null>(null)
   useEffect(() => {
@@ -373,6 +373,14 @@ export function ProjectWorkspace() {
             },
           }))
         },
+        onUnauthorized: () => {
+          // FRO-159: The stored session JWT was rejected by the auth server (401).
+          // This happens after a backend migration (e.g. Postgres switch) that
+          // invalidates existing tokens. Clear the session so the user is
+          // redirected to login rather than silently failing on every file open.
+          console.warn("[ProjectWorkspace] session JWT rejected (401) — clearing session for re-auth")
+          void doLogout().then(() => navigate("/"))
+        },
       },
     )
   }, [
@@ -380,6 +388,8 @@ export function ProjectWorkspace() {
     project?.name,
     project?.origin?.kind,
     project?.origin?.kind === "git" ? project?.origin.gitlabProjectId : undefined,
+    doLogout,
+    navigate,
   ])
 
   useEffect(() => {

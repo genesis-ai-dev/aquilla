@@ -13,7 +13,7 @@ import { AssignWork } from "./AssignWork"
 import { getPortfolio, translatedPct, validatedPct, audioPct, recordedMinutes, deadlineStatus, type PortfolioProject } from "@/lib/frontier/portfolio"
 import { fetchProjectFiles, type FileSummary } from "@/lib/sync/cells-read"
 import { fetchSyncToken } from "@/lib/sync/sync-token"
-import { getWorkload, type AssigneeWorkload } from "@/lib/sync/assignments"
+import { getProjectAssignments, type AssigneeWorkload } from "@/lib/sync/assignments"
 import { Badge } from "@/components/ui/badge"
 
 /** Max per-file rows shown on the overview; the rest are counted as "+N more". */
@@ -208,13 +208,13 @@ export function ProjectOverview() {
     void loadRow()
   }, [loadRow])
 
-  // Load org workload for the Team card
+  // Load per-project assignment roster for the Team card (maintainer+)
   useEffect(() => {
-    if (!jwt || activeOrgId == null) return
-    getWorkload(jwt, activeOrgId)
+    if (!jwt || !id) return
+    getProjectAssignments(jwt, id)
       .then(setWorkload)
       .catch(() => setWorkload([]))
-  }, [jwt, activeOrgId])
+  }, [jwt, id])
 
   // Per-file rollups
   const firstFileId = project?.files[0]?.id ?? null
@@ -565,18 +565,10 @@ export function ProjectOverview() {
               </div>
 
               {/* ── Team / Assignments card ── */}
-              {/*
-                SWARM-TODO(FRO-168): need a per-project all-assignees endpoint for full Team card.
-                The available endpoints are:
-                  - getWorkload(orgId) → per-assignee OPEN workload across the whole org (no per-project breakdown)
-                  - getMyAssignments(jwt, projectId) → only the CALLER's own assignments for this project
-                We use org workload as the best available proxy: show users with open work.
-                A per-project assignee list would require a new server endpoint.
-              */}
               <div className="rounded-xl border bg-card shadow-sm p-5">
                 <h2 className="mb-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Team</h2>
                 {workload.length === 0 ? (
-                  <p className="text-sm text-muted-foreground">No open assignments across the org yet.</p>
+                  <p className="text-sm text-muted-foreground">No open assignments in this project yet.</p>
                 ) : (
                   <ul className="space-y-2">
                     {workload.map((w) => {

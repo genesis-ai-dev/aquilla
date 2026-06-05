@@ -62,6 +62,7 @@ vi.mock("@/lib/sync/cells-read", () => ({
 // Mock assignments workload so Team card doesn't break tests
 vi.mock("@/lib/sync/assignments", () => ({
   getWorkload: vi.fn(async () => []),
+  getProjectAssignments: vi.fn(async () => []),
   getMyAssignments: vi.fn(async () => []),
 }))
 

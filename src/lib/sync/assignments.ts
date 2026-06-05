@@ -76,6 +76,23 @@ export async function getMyAssignmentsForOrg(jwt: string, orgId: number): Promis
 }
 
 /**
+ * Manager view: per-assignee open workload + derived progress for ONE project
+ * (maintainer+). Returns the same AssigneeWorkload shape as getWorkload() so
+ * the Team card can reuse the same rendering.
+ */
+export async function getProjectAssignments(
+  jwt: string,
+  projectId: string,
+): Promise<AssigneeWorkload[]> {
+  const res = await fetchWithTimeout(
+    `${FRONTIER_BASE}/api/v2/projects/${encodeURIComponent(projectId)}/assignments/all`,
+    { headers: { Authorization: `Bearer ${jwt}` } },
+  )
+  if (!res.ok) throw new Error(`getProjectAssignments failed: HTTP ${res.status}`)
+  return ((await res.json()) as { roster: AssigneeWorkload[] }).roster
+}
+
+/**
  * Distinct chapters in a file (for the assign picker's chapter dropdown).
  * Natural-sorted server-side; each value feeds createAssignment's
  * `scope[].chapter` (→ resolver LIKE 'GEN 1:%') directly. Any project member.

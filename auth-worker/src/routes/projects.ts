@@ -41,7 +41,7 @@ import {
   resolveProjectRoleIncludingArchived,
   ROLE_NAMES,
 } from "../services/project-permissions"
-import { getFileChapters, getMyAssignments } from "../services/assignments"
+import { getFileChapters, getMyAssignments, getProjectAssignmentRoster } from "../services/assignments"
 import {
   bumpOrgActivity,
   getOrgMemberRole,
@@ -477,6 +477,22 @@ projects.get("/:projectId/assignments/mine", authMiddleware, async (c) => {
   if (!role) return c.json({ error: "no access to project" }, 403)
   const assignments = await getMyAssignments(c.env, projectId, user.id)
   return c.json({ assignments })
+})
+
+/**
+ * GET /api/v2/projects/:projectId/assignments/all — per-assignee open workload
+ * + derived progress for THIS project. Maintainer+ on the project required.
+ * Returns the same AssigneeWorkload shape as the org workload endpoint so
+ * the client can reuse the same rendering logic.
+ */
+projects.get("/:projectId/assignments/all", authMiddleware, async (c) => {
+  const user = c.get("user")
+  const projectId = c.req.param("projectId") as string
+  const role = await resolveProjectRole(c.env, user, projectId)
+  if (!role) return c.json({ error: "no access to project" }, 403)
+  if (role.level < ROLE.MAINTAINER) return c.json({ error: "maintainer+ required" }, 403)
+  const roster = await getProjectAssignmentRoster(c.env, projectId)
+  return c.json({ roster })
 })
 
 /**

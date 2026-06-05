@@ -81,6 +81,56 @@ export async function getOrgAssignmentWorkload(
   )
 }
 
+/**
+ * Per-assignee open workload + derived progress scoped to ONE project.
+ * Returns every assignee who has at least one open assignment in the project,
+ * sorted by remaining work descending (same order as the org workload view).
+ * Requires the caller to be maintainer+ on the project (enforced in the route).
+ */
+export async function getProjectAssignmentRoster(
+  env: Env,
+  projectId: string,
+): Promise<AssigneeWorkload[]> {
+  const rows = await env.AQUILLA_DB.prepare(
+    `SELECT a.assignee_user_id AS assignee_user_id,
+            u.username         AS assignee_username,
+            a.cells_total      AS cells_total,
+            ${CELLS_DONE_SUBQUERY} AS cells_done
+       FROM assignments a
+       LEFT JOIN users u ON u.id = a.assignee_user_id
+      WHERE a.project_id = ?
+        AND a.unassigned_at IS NULL AND a.completed_at IS NULL`,
+  )
+    .bind(projectId)
+    .all<{
+      assignee_user_id: number
+      assignee_username: string | null
+      cells_total: number
+      cells_done: number
+    }>()
+
+  const byUser = new Map<number, AssigneeWorkload>()
+  for (const r of rows.results ?? []) {
+    let w = byUser.get(r.assignee_user_id)
+    if (!w) {
+      w = {
+        userId: r.assignee_user_id,
+        username: r.assignee_username,
+        openAssignments: 0,
+        cellsTotal: 0,
+        cellsDone: 0,
+      }
+      byUser.set(r.assignee_user_id, w)
+    }
+    w.openAssignments += 1
+    w.cellsTotal += r.cells_total
+    w.cellsDone += r.cells_done
+  }
+  return [...byUser.values()].sort(
+    (a, b) => b.cellsTotal - b.cellsDone - (a.cellsTotal - a.cellsDone),
+  )
+}
+
 /** A single open assignment in the caller's inbox. */
 export interface MyAssignment {
   assignmentId: string

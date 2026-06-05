@@ -122,6 +122,34 @@ describe("migration from single-session to envelope", () => {
   })
 })
 
+import { hasAuthHintCookie } from "./session-store"
+
+describe("hasAuthHintCookie", () => {
+  beforeEach(() => {
+    document.cookie = "aq_hint=; Path=/; Max-Age=0"
+  })
+
+  it("returns false when aq_hint cookie is absent", () => {
+    expect(hasAuthHintCookie()).toBe(false)
+  })
+
+  it("returns true when aq_hint=1 is present", () => {
+    document.cookie = "aq_hint=1; Path=/"
+    expect(hasAuthHintCookie()).toBe(true)
+  })
+
+  it("returns false when aq_hint has a value other than 1", () => {
+    document.cookie = "aq_hint=0; Path=/"
+    expect(hasAuthHintCookie()).toBe(false)
+  })
+
+  it("returns true when aq_hint=1 is among multiple cookies", () => {
+    document.cookie = "other=abc; Path=/"
+    document.cookie = "aq_hint=1; Path=/"
+    expect(hasAuthHintCookie()).toBe(true)
+  })
+})
+
 describe("aq_hint cookie", () => {
   beforeEach(async () => {
     const { _resetDbForTesting } = await import("./session-store")

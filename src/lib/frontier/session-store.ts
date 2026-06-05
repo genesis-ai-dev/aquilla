@@ -61,6 +61,11 @@ function setAuthHint(): void {
 export function clearAuthHint(): void {
   document.cookie = `${HINT_COOKIE}=; Path=/; Max-Age=0; SameSite=Lax`
 }
+
+/** Returns true when the auth-hint cookie (aq_hint=1) is present. */
+export function hasAuthHintCookie(): boolean {
+  return /(?:^|;\s*)aq_hint=1(?:;|$)/.test(document.cookie)
+}
 // --------------------------
 
 async function writeEnvelope(env: Envelope): Promise<void> {

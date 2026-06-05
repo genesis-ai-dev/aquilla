@@ -1,5 +1,6 @@
 import { Suspense, lazy } from "react"
 import { Routes, Route } from "react-router-dom"
+import { hasAuthHintCookie } from "@/lib/frontier/session-store"
 import { OrgHome } from "@/components/org/OrgHome"
 import { ProjectsList } from "@/components/org/ProjectsList"
 import { ArchivedProjects } from "@/components/org/ArchivedProjects"
@@ -76,6 +77,30 @@ function SyncFreezeOverlay() {
   )
 }
 
+/**
+ * Root-path guard: visitors without the aq_hint=1 cookie are sent to
+ * /homepage (the marketing page). Returning/authenticated users who have
+ * the cookie proceed to OrgHome as before.
+ *
+ * This is a client-side defence-in-depth layer. The aquilla-web Worker
+ * already does the same check at the edge (worker/index.ts) — this guard
+ * only fires if the SPA is somehow reached without the Worker (e.g. local
+ * dev without `wrangler dev`, or a Worker not yet deployed).
+ *
+ * Loop-safety: /homepage is served as homepage.html (a separate entry point
+ * that never mounts this component), so this redirect can never loop back.
+ */
+function RootRedirect() {
+  if (!hasAuthHintCookie()) {
+    // Hard redirect so the Worker (or server) can serve homepage.html.
+    // A client-side <Navigate> would stay inside the SPA bundle and find
+    // no React Router match for /homepage.
+    window.location.replace("/homepage")
+    return null
+  }
+  return <OrgHome />
+}
+
 /** Minimal fallback used while lazy route chunks are loading. */
 function RouteLoadingFallback() {
   return (
@@ -107,7 +132,7 @@ function AppRoutes() {
     <Suspense fallback={<RouteLoadingFallback />}>
       <Routes>
         {/* Eager — needed for first paint / sign-in flow */}
-        <Route path="/" element={<OrgHome />} />
+        <Route path="/" element={<RootRedirect />} />
         <Route path="/projects" element={<ProjectsList />} />
         <Route path="/projects/:id" element={<ProjectOverview />} />
         <Route path="/assigned" element={<AssignedToMe />} />

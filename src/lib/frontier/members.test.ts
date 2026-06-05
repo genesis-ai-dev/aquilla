@@ -35,7 +35,7 @@ describe("lookupUser", () => {
 describe("listProjectMembers", () => {
   it("returns members array on 200", async () => {
     const members: ProjectMember[] = [
-      { userId: 1, username: "wendy", role: { level: 700, name: "owner", source: "creator" } },
+      { userId: 1, username: "wendy", role: { level: 700, name: "owner", source: "creator" }, secondarySources: [] },
     ];
     (global.fetch as any).mockResolvedValueOnce(
       new Response(JSON.stringify({ members }), { status: 200 })

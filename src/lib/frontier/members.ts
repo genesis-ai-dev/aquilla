@@ -22,10 +22,22 @@ export interface ProjectMemberRole {
   source: "override" | "group" | "creator" | "org";
 }
 
+/** A non-winning contributing path returned by the members endpoint. */
+export interface SecondarySrc {
+  source: "override" | "group" | "org" | "creator";
+  level: number;
+  name: string;
+}
+
 export interface ProjectMember {
   userId: number;
   username: string;
   role: ProjectMemberRole;
+  /**
+   * Every contributing path whose level > 0 except the winning one.
+   * Empty when the user has access through only one path.
+   */
+  secondarySources: SecondarySrc[];
 }
 
 function authHeaders(jwt: string): HeadersInit {

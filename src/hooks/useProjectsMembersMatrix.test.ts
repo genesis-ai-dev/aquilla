@@ -58,7 +58,7 @@ function buildMatrix(
       }
 
       if (!cells.has(m.userId)) cells.set(m.userId, new Map())
-      cells.get(m.userId)!.set(projectId, { role: m.role as MatrixCell["role"] })
+      cells.get(m.userId)!.set(projectId, { role: m.role as MatrixCell["role"], secondarySources: (m as any).secondarySources ?? [] })
 
       if (m.role.level >= 700) ownerCount++
     }

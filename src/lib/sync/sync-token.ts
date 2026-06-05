@@ -92,6 +92,14 @@ export interface SyncTokenCallbacks {
   /** Fires when the server rejects with 403, typically because the project was
    * archived. Callers use this to drive local tombstone reconciliation. */
   onForbidden?: () => void
+  /**
+   * Fires when the session JWT is rejected with 401 — i.e. the stored token is
+   * stale or was invalidated by a backend migration (e.g. Postgres switch).
+   * The caller should clear the cached session so the user is directed to
+   * re-authenticate rather than silently failing on every file open.
+   * FRO-159: without this hook the 401 was swallowed, leaving the user stuck.
+   */
+  onUnauthorized?: () => void
 }
 
 export function makeSyncTokenFetcher(
@@ -119,8 +127,17 @@ export function makeSyncTokenFetcher(
       callbacks.onRole?.(resp.role)
       return resp.token
     } catch (err) {
-      if (err instanceof SyncTokenError && err.status === 403) {
-        callbacks.onForbidden?.()
+      if (err instanceof SyncTokenError) {
+        if (err.status === 403) {
+          callbacks.onForbidden?.()
+        } else if (err.status === 401) {
+          // Session JWT is stale or was invalidated (e.g. after Postgres migration).
+          // Evict the in-memory sync token cache so the next call re-fetches,
+          // and notify the caller so it can clear the persisted session and
+          // redirect to login — FRO-159.
+          cached = null
+          callbacks.onUnauthorized?.()
+        }
       }
       // Most common paths: 401 (stale jwt), 403 (no project access), 5xx (transient).
       // Log and surface null — useFileSync treats null as "no sync for now".

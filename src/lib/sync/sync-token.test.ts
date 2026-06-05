@@ -175,4 +175,62 @@ describe("makeSyncTokenFetcher", () => {
     expect(warn).toHaveBeenCalled()
     warn.mockRestore()
   })
+
+  // FRO-159 regression: a stale session JWT (401 from /sync-token) must fire
+  // `onUnauthorized` exactly once and return null so the caller can redirect
+  // to login — the user should never have to manually log out/in after a
+  // backend migration (e.g. Postgres switch) invalidates stored tokens.
+  it("FRO-159: fires onUnauthorized exactly once on 401 and returns null (no manual re-auth needed)", async () => {
+    global.fetch = mockFetch({ status: 401, body: "Unauthorized" }) as unknown as typeof fetch
+    vi.spyOn(console, "warn").mockImplementation(() => undefined)
+
+    const onUnauthorized = vi.fn()
+    const getToken = makeSyncTokenFetcher(
+      () => "expired-session-jwt",
+      "proj-1",
+      "file-a",
+      {},
+      API,
+      { onUnauthorized },
+    )
+
+    // WHY: the user opened a project file after a backend migration. The stored
+    // session JWT is invalid. The client must detect this (401) and call
+    // `onUnauthorized` so the app can clear the session and redirect to login,
+    // rather than silently failing and leaving the user stuck.
+    const result = await getToken()
+    expect(result).toBeNull()
+    expect(onUnauthorized).toHaveBeenCalledTimes(1)
+
+    // A second call (e.g. from a retry) fires the callback again — each call
+    // that gets a 401 notifies the caller so it can act. The cache is cleared
+    // on 401, so no stale cached token is returned.
+    const result2 = await getToken()
+    expect(result2).toBeNull()
+    expect(onUnauthorized).toHaveBeenCalledTimes(2)
+    ;(console.warn as ReturnType<typeof vi.spyOn>).mockRestore()
+  })
+
+  it("FRO-159: does NOT fire onUnauthorized on 403 (forbidden != stale token)", async () => {
+    global.fetch = mockFetch({ status: 403, body: "Forbidden" }) as unknown as typeof fetch
+    vi.spyOn(console, "warn").mockImplementation(() => undefined)
+
+    const onUnauthorized = vi.fn()
+    const onForbidden = vi.fn()
+    const getToken = makeSyncTokenFetcher(
+      () => "valid-but-no-access-jwt",
+      "proj-archived",
+      "file-a",
+      {},
+      API,
+      { onUnauthorized, onForbidden },
+    )
+
+    await getToken()
+    // WHY: 403 means the project is archived or the user has no access — that's
+    // a different code path from a stale token. onForbidden fires, not onUnauthorized.
+    expect(onForbidden).toHaveBeenCalledTimes(1)
+    expect(onUnauthorized).not.toHaveBeenCalled()
+    ;(console.warn as ReturnType<typeof vi.spyOn>).mockRestore()
+  })
 })

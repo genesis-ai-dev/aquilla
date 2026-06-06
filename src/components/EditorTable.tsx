@@ -1651,9 +1651,15 @@ function EditorRow({
   // "others" now uses a filled Circle (lucide has no dedicated filled-circle
   // icon; we render Circle with fill="currentColor"). Matches codex-editor
   // desktop AudioValidationStatusIcon's circle-filled codicon.
-  const ValidationIcon = vs === "full" ? CheckCheck : vs === "self" ? Check : Circle
+  // full-self = fully validated and current user is one of the validators (double-check, green)
+  // full-others = fully validated but current user has NOT validated (double-check, teal/muted)
+  const ValidationIcon =
+    vs === "full-self" || vs === "full-others" ? CheckCheck :
+    vs === "self" ? Check :
+    Circle
   const validationColorClass =
-    vs === "full" ? "text-emerald-500" :
+    vs === "full-self" ? "text-emerald-500" :
+    vs === "full-others" ? "text-teal-400" :
     vs === "self" ? "text-emerald-500" :
     vs === "others" ? "text-muted-foreground/60" :
     "text-muted-foreground/30"
@@ -1693,6 +1699,7 @@ function EditorRow({
               validationColorClass,
               vs === "none" && "hover:text-emerald-500",
               vs === "others" && "hover:text-emerald-500",
+              vs === "full-others" && "hover:text-emerald-500",
             )}
             title={healthTooltip}
             disabled={!editable}

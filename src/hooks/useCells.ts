@@ -38,7 +38,7 @@ export interface EditValidationSummary {
   validatorsAll: ValidationEntry[]
 }
 
-export type ValidationStatus = "empty" | "none" | "others" | "self" | "full"
+export type ValidationStatus = "empty" | "none" | "others" | "self" | "full" | "full-self" | "full-others"
 
 export interface CellData {
   id: string
@@ -119,7 +119,9 @@ function classifyValidators(
   requiredValidations: number,
 ): ValidationStatus {
   if (active.length === 0) return "none"
-  if (active.length >= requiredValidations) return "full"
+  if (active.length >= requiredValidations) {
+    return active.includes(currentUsername) ? "full-self" : "full-others"
+  }
   if (active.includes(currentUsername)) return "self"
   return "others"
 }
@@ -157,7 +159,7 @@ export function buildCellData(
       : activeValidators.length > 0
         ? classifyValidators(activeValidators, username, requiredValidations)
         : target?.validated
-          ? "full"
+          ? "full-others"
           : "none"
 
   // Prefer the target row's `validated` flag as the source of truth for the

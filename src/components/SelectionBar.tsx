@@ -18,7 +18,7 @@ import type { FrontierSession } from "@/lib/frontier/types"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 import { clearSelection, MAX_SELECTED, useSelectedIds } from "@/lib/audio/selection"
-import { emitCellValidate } from "@/lib/sync/events-emit"
+import { emitCellValidate, emitCellUnvalidate } from "@/lib/sync/events-emit"
 
 interface Props {
   project: ProjectRecord
@@ -42,6 +42,7 @@ type Running =
 export function SelectionBar({ project, cells, username, completeBatch, audioMode, onVoiceTogether }: Props) {
   const selected = useSelectedIds()
   const [running, setRunning] = useState<Running>({ kind: "idle" })
+  const [toastMsg, setToastMsg] = useState<string | null>(null)
 
   useEffect(() => {
     if (selected.size === 0) return
@@ -60,6 +61,11 @@ export function SelectionBar({ project, cells, username, completeBatch, audioMod
     return () => window.removeEventListener("keydown", onKey)
   }, [selected.size])
 
+  const showToast = useCallback((msg: string) => {
+    setToastMsg(msg)
+    setTimeout(() => setToastMsg(null), 3000)
+  }, [])
+
   const selectedCells = useMemo(() => {
     const wanted = selected
     return cells.filter((c) => wanted.has(c.id)).slice(0, MAX_SELECTED)
@@ -72,6 +78,12 @@ export function SelectionBar({ project, cells, username, completeBatch, audioMod
   const validatableCount = useMemo(
     () => selectedCells.filter(
       (c) => c.translated.trim() && !c.activeValidators.includes(username),
+    ).length,
+    [selectedCells, username],
+  )
+  const unvalidatableCount = useMemo(
+    () => selectedCells.filter(
+      (c) => c.translated.trim() && c.activeValidators.includes(username),
     ).length,
     [selectedCells, username],
   )
@@ -112,9 +124,11 @@ export function SelectionBar({ project, cells, username, completeBatch, audioMod
     if (validatableCount === 0) return
     setRunning({ kind: "validate" })
     try {
+      let validated = 0
+      let alreadyValidated = 0
       for (const cell of selectedCells) {
         if (!cell.translated.trim()) continue
-        if (cell.activeValidators.includes(username)) continue
+        if (cell.activeValidators.includes(username)) { alreadyValidated++; continue }
         if (!cell.targetEventId || !project.id) continue
         void emitCellValidate({
           projectId: project.id,
@@ -123,15 +137,55 @@ export function SelectionBar({ project, cells, username, completeBatch, audioMod
           author: username,
           editEventId: cell.targetEventId,
         })
+        validated++
       }
+      const msg = alreadyValidated > 0
+        ? `Validated ${validated} cell${validated === 1 ? "" : "s"} (${alreadyValidated} already validated)`
+        : `Validated ${validated} cell${validated === 1 ? "" : "s"}`
+      showToast(msg)
     } finally {
       setRunning({ kind: "idle" })
     }
   }, [selectedCells, username, validatableCount, isBusy, project.id])
 
+  const onUnvalidate = useCallback(() => {
+    if (isBusy) return
+    if (unvalidatableCount === 0) return
+    setRunning({ kind: "validate" })
+    try {
+      let removed = 0
+      for (const cell of selectedCells) {
+        if (!cell.translated.trim()) continue
+        if (!cell.activeValidators.includes(username)) continue
+        if (!cell.targetEventId || !project.id) continue
+        void emitCellUnvalidate({
+          projectId: project.id,
+          fileId: cell.fileId,
+          cellId: cell.id,
+          author: username,
+          editEventId: cell.targetEventId,
+        })
+        removed++
+      }
+      showToast(`Removed validations from ${removed} cell${removed === 1 ? "" : "s"}`)
+    } finally {
+      setRunning({ kind: "idle" })
+    }
+  }, [selectedCells, username, unvalidatableCount, isBusy, project.id])
+
   if (selectedCells.length === 0) return null
 
   return (
+    <>
+    {toastMsg && (
+      <div
+        role="status"
+        aria-live="polite"
+        className="pointer-events-none fixed bottom-16 left-1/2 z-40 -translate-x-1/2 rounded-lg bg-card px-4 py-2 text-xs font-medium shadow-neu-lg"
+      >
+        {toastMsg}
+      </div>
+    )}
     <div
       className={cn(
         "pointer-events-auto fixed left-1/2 z-30 flex -translate-x-1/2 items-center gap-2",
@@ -223,6 +277,25 @@ export function SelectionBar({ project, cells, username, completeBatch, audioMod
           </span>
         )}
       </Button>
+      <Button
+        type="button"
+        size="sm"
+        variant="outline"
+        onClick={onUnvalidate}
+        disabled={isBusy || unvalidatableCount === 0}
+        title={
+          unvalidatableCount === 0
+            ? "No cells have your validation"
+            : `Remove your validation from ${unvalidatableCount} cell${unvalidatableCount === 1 ? "" : "s"}`
+        }
+      >
+        Remove my validations
+        {unvalidatableCount > 0 && (
+          <span className="ml-1 rounded-full bg-muted px-1.5 py-0.5 tabular-nums text-muted-foreground">
+            {unvalidatableCount}
+          </span>
+        )}
+      </Button>
         </>
       )}
       <Button
@@ -237,5 +310,6 @@ export function SelectionBar({ project, cells, username, completeBatch, audioMod
         <X className="h-3.5 w-3.5" />
       </Button>
     </div>
+    </>
   )
 }

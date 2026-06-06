@@ -104,6 +104,7 @@ import {
 } from "@/lib/ad11/navigation"
 import { generateBacktranslation } from "@/lib/completion/backtranslation-service"
 import { buildGlosser, type BtSeed } from "@/lib/completion/bt-glosser"
+import { buildAlignmentModel } from "@/lib/completion/interlinear"
 import { buildStatisticalBt } from "@/lib/completion/bt-auto"
 
 // Import runs inline in the workspace (upload + eBible corpus tabs). The
@@ -972,6 +973,31 @@ export function ProjectWorkspace() {
     }
     return buildGlosser(pairs, seeds)
   }, [allProjectCells, backtranslationCache, project?.terminology])
+
+  // Build the interlinear alignment model from the same corpus, seeded with the
+  // user's confirmed/invalidated alignments (FRO-207). Memoized on the corpus +
+  // persisted alignmentSeeds so it only rebuilds when either changes.
+  const alignmentModel = useMemo(() => {
+    const pairs = allProjectCells
+      .filter((c) => c.original?.trim() && c.translated?.trim())
+      .map((c) => ({ source: c.original!, target: c.translated }))
+    return buildAlignmentModel(pairs, project?.alignmentSeeds ?? [])
+  }, [allProjectCells, project?.alignmentSeeds])
+
+  // Persist a confirmed/invalidated alignment as an additive seed via the same
+  // project-settings sync path used for terminology.
+  const handleAlignmentSeedChange = useCallback(
+    (seed: import("@/lib/completion/interlinear").AlignmentSeed) => {
+      const existing = project?.alignmentSeeds ?? []
+      // De-dupe by (srcToken,tgtToken): the latest weight wins.
+      const next = existing.filter(
+        (s) => !(s.srcToken === seed.srcToken && s.tgtToken === seed.tgtToken),
+      )
+      next.push(seed)
+      void patchSettings({ alignmentSeeds: next })
+    },
+    [project?.alignmentSeeds, patchSettings],
+  )
 
   /** Persist a BT text to local cache + localStorage + outbox. */
   const persistBt = useCallback((
@@ -2139,6 +2165,8 @@ export function ProjectWorkspace() {
               setDrawerRuleId(null); setCommentsCellId(null); setHistoryCellId(cellId)
             }}
             getTokenForFile={getTokenForFile}
+            alignmentModel={alignmentModel}
+            onAlignmentSeedChange={handleAlignmentSeedChange}
             activeCueIndex={activeCueIndex >= 0 ? activeCueIndex : undefined}
             onSeekToCue={isSubtitleFile ? handleCueSeek : undefined}
             lineNumbersEnabled={fileMeta.lineNumbersEnabled}

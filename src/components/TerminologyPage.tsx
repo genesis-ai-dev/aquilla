@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback } from "react"
+import { useState, useMemo, useCallback, useRef, useEffect } from "react"
 import { useParams, useNavigate } from "react-router-dom"
 import {
   ArrowLeft,
@@ -39,6 +39,9 @@ import { computeTerminologyStats } from "@/lib/terminology/stats"
 import type { CellPair } from "@/lib/terminology/stats"
 import { cn } from "@/lib/utils"
 import { useProject } from "@/hooks/useProject"
+import { useFrontierSession } from "@/hooks/useFrontierSession"
+import { useProjectCells } from "@/hooks/useProjectCells"
+import { buildFileScopedTokenFetcher } from "@/lib/sync/cqrs-bridge"
 import { TerminologyTermDetail } from "@/components/TerminologyTermDetail"
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -687,6 +690,52 @@ export function TerminologyPage() {
   const canManageTermbase = canEditTermbase(project?.syncRole, hasOrigin)
   const termbaseGateTip = "Requires Project Lead role or higher to manage termbase definitions."
 
+  // Cell editing in the drill-down is allowed for contributor+ (level >= 400),
+  // or always for local (no-origin) projects.
+  const canEditCells = !hasOrigin || (project?.syncRole?.level ?? 0) >= 400
+
+  // ── Project-wide cells (derived-on-read source for stats + drill-down) ──────
+  const { session: frontierSession } = useFrontierSession()
+  const username = frontierSession?.username || project?.username || "local"
+  const jwtRef = useRef<string | null>(null)
+  useEffect(() => {
+    jwtRef.current = frontierSession?.jwt ?? null
+  }, [frontierSession?.jwt])
+
+  const projectFiles = useMemo(
+    () =>
+      (project?.files ?? []).map((f) => ({ id: f.id, name: f.name, type: f.type })),
+    [project?.files],
+  )
+
+  const getToken = useMemo(() => {
+    if (!project?.id) return async (_fileId: string) => null as string | null
+    return buildFileScopedTokenFetcher(() => jwtRef.current, project.id, {
+      projectName: project.name ?? undefined,
+      gitlabProjectId:
+        project.origin?.kind === "git" ? project.origin.gitlabProjectId : undefined,
+    })
+  }, [project?.id, project?.name, project?.origin])
+
+  const cellsEnabled = Boolean(project?.id && projectFiles.length > 0)
+  const { files: projectFileCells } = useProjectCells({
+    projectId: id ?? null,
+    projectFiles,
+    getToken,
+    enabled: cellsEnabled,
+  })
+
+  // Flatten all files' CellData; used directly by the drill-down and mapped to
+  // CellPair for the stats header.
+  const allCells = useMemo(
+    () => projectFileCells.flatMap((f) => f.cells),
+    [projectFileCells],
+  )
+  const cellPairs: CellPair[] = useMemo(
+    () => allCells.map((c) => ({ original: c.original, translated: c.translated })),
+    [allCells],
+  )
+
   const [addOpen, setAddOpen] = useState(false)
   const [editTarget, setEditTarget] = useState<Concept | null>(null)
   const [importOpen, setImportOpen] = useState(false)
@@ -772,18 +821,16 @@ export function TerminologyPage() {
   if (loading) return <div className="p-8 text-muted-foreground">Loading…</div>
 
   // Drill-down view: overlay the detail panel when a concept is selected.
-  // SWARM-TODO(FRO-206): cells are empty here — TerminologyPage does not yet
-  // wire useCells. A follow-up should pass the active-file CellData[] (or all
-  // cross-file cells) so occurrences populate. The component renders a
-  // zero-occurrence placeholder in the interim.
+  // Cells are the project-wide CellData flattened across all files (derived on
+  // read); occurrences + verdicts populate from them.
   if (drillDownConcept) {
     return (
       <TerminologyTermDetail
         concept={drillDownConcept}
-        cells={[]}
-        canEdit={true}
+        cells={allCells}
+        canEdit={canEditCells}
         projectId={id!}
-        username="local"
+        username={username}
         onClose={() => setDrillDownConcept(null)}
         onCellCommitted={() => {}}
         onOptimisticEdit={() => {}}
@@ -868,7 +915,7 @@ export function TerminologyPage() {
         )}
 
         {/* Stats header — derived on read, no persistence */}
-        <LibraryStatsHeader concepts={concepts} cells={[]} />
+        <LibraryStatsHeader concepts={concepts} cells={cellPairs} />
 
         <Card>
           <CardHeader>

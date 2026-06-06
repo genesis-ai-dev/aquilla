@@ -446,6 +446,23 @@ html.dark[data-color-theme="rose"] {
   opacity: 0.6;
 }
 
+/* Terminology-origin infractions: small "T" glyph superscript after the span. */
+.violation-blot-term {
+  position: relative;
+}
+.violation-blot-term::after {
+  content: "T";
+  position: absolute;
+  top: -0.55em;
+  right: -0.45em;
+  font-size: 0.55em;
+  font-weight: 700;
+  line-height: 1;
+  color: var(--color-violet-500, oklch(0.627 0.265 303.9));
+  pointer-events: none;
+  user-select: none;
+}
+
 /* Terminology chip decorations — term-chip-host is position:relative so the
    absolutely-positioned chip does NOT push lines apart (no line-height change). */
 .term-chip-host {

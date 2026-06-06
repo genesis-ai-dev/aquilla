@@ -104,6 +104,7 @@ import {
 } from "@/lib/ad11/navigation"
 import { generateBacktranslation } from "@/lib/completion/backtranslation-service"
 import { buildGlosser, type BtSeed } from "@/lib/completion/bt-glosser"
+import { buildStatisticalBt } from "@/lib/completion/bt-auto"
 
 // Import runs inline in the workspace (upload + eBible corpus tabs). The
 // AD-11 plan carves import into a standalone apps/import Worker, but that
@@ -483,6 +484,35 @@ export function ProjectWorkspace() {
     getToken: getTokenForFile,
     enabled: Boolean(project?.id && activeFileId && frontierSession?.jwt),
   })
+
+  // ── Auto-BT on target commit ─────────────────────────────────────────────
+  // Track the last cell that received an optimistic target edit so we can
+  // recompute its statistical BT when `handleCellCommitted` fires (after the
+  // outbox flush). EditorTable calls applyOptimisticTargetEdit immediately
+  // before emitting the commit event, so this ref is always up-to-date by
+  // the time onCellCommitted fires.
+  const lastOptimisticEditRef = useRef<{ cellId: string; translatedText: string } | null>(null)
+
+  // Stable refs so that callbacks declared BEFORE glosser/persistBt (in React
+  // hook order) can still call the latest version without stale-closure issues.
+  // Updated unconditionally each render — refs never cause re-renders.
+  const glosserRef = useRef<import("@/lib/completion/bt-glosser").Glosser | null>(null)
+  const persistBtRef = useRef<((cell: CellData, btText: string, polished: boolean) => void) | null>(null)
+  // cellsRef is already declared later in the file (line ~689) — we reuse it.
+  const setBacktranslationCacheRef = useRef<React.Dispatch<React.SetStateAction<Map<string, string>>> | null>(null)
+
+  // Wrap applyOptimisticTargetEdit to capture which cell was last edited.
+  // We pass this wrapped version to EditorTable so we intercept without
+  // touching EditorTable.tsx.
+  const applyOptimisticTargetEditWithCapture = useCallback(
+    (cellId: string, patch: { value: string; valueHtml?: string }) => {
+      if (patch.value) {
+        lastOptimisticEditRef.current = { cellId, translatedText: patch.value }
+      }
+      applyOptimisticTargetEdit(cellId, patch)
+    },
+    [applyOptimisticTargetEdit],
+  )
   // Phase 5 / AD-9 — Phase 3a-final wiring. Fetch the set of cell ids
   // whose source has advanced since the translator's last commit, so the
   // editor table can decorate stale rows with the AlertTriangle badge.
@@ -801,6 +831,19 @@ export function ProjectWorkspace() {
     await refreshOutboxPending()
     revalidateAuditStats()
     revalidateCells()
+
+    // ── Auto statistical BT after AI completion commit (FRO-203) ───────────
+    // Runs synchronously — no network, no extra loading state. LLM polish
+    // remains opt-in via runBacktranslation (the Generate button path).
+    // Uses stable refs so this callback doesn't need glosser/persistBt in
+    // its dep array (they are declared later in hook order).
+    if (text.trim() && glosserRef.current && persistBtRef.current && setBacktranslationCacheRef.current) {
+      const btText = buildStatisticalBt(glosserRef.current, text)
+      if (btText) {
+        setBacktranslationCacheRef.current((prev) => new Map(prev).set(cell.id, btText))
+        persistBtRef.current(cell, btText, false)
+      }
+    }
   }, [project?.id, applyOptimisticTargetEdit, getTokenForFile, refreshOutboxPending, revalidateAuditStats, revalidateCells])
 
   /**
@@ -968,7 +1011,24 @@ export function ProjectWorkspace() {
     })
   }, [project?.id, currentUsername])
 
-  /** Statistical gloss + optional LLM polish. Called by the BT tab's Generate button. */
+  // ── Keep stable refs in sync every render (FRO-203) ────────────────────
+  // These allow commitCompletedCell / handleCellCommitted (declared earlier or
+  // later in hook order) to always call the latest glosser + persistBt without
+  // circular dependency issues in useCallback deps arrays.
+  glosserRef.current = glosser
+  persistBtRef.current = persistBt
+  // cellsRef.current is kept in sync by the useEffect at ~line 690 — no update needed here.
+  setBacktranslationCacheRef.current = setBacktranslationCache
+
+  /**
+   * Re-runs statistical BT on demand + optional LLM polish. Called by the BT
+   * tab's Generate/Polish button. Statistical BT is always computed first;
+   * LLM polish is only triggered when `isBacktranslationConfigured` is true.
+   *
+   * Auto-BT (on every target commit) uses `buildStatisticalBt` directly and
+   * does NOT call this function — that path lives in handleCellCommitted and
+   * commitCompletedCell (FRO-203).
+   */
   const runBacktranslation = useCallback(async (cell: CellData) => {
     if (!cell.translated?.trim()) return
     const cellId = cell.id
@@ -1639,10 +1699,31 @@ export function ProjectWorkspace() {
   }), [activeFileId, completeBatch, cells, project, frontierSession, currentUsername, navigate, openImportFlow, openExportFlow])
 
   const handleCellCommitted = useCallback(async () => {
+    // Capture before async work — another edit could arrive during the flush.
+    const pendingBt = lastOptimisticEditRef.current
+    lastOptimisticEditRef.current = null
+
     await flushOutboxBatch({ getTokenForFile })
     await refreshOutboxPending()
     revalidateAuditStats()
     revalidateCells()
+
+    // ── Auto statistical BT on target commit (FRO-203) ─────────────────────
+    // Run synchronously after the flush so the BT reflects the committed text.
+    // LLM polish is NOT triggered here — it remains opt-in via runBacktranslation.
+    // Uses stable refs so this callback doesn't need glosser/cells/persistBt
+    // in its dep array (they are declared earlier or later in hook order).
+    if (pendingBt?.translatedText && glosserRef.current && setBacktranslationCacheRef.current) {
+      const { cellId, translatedText } = pendingBt
+      const btText = buildStatisticalBt(glosserRef.current, translatedText)
+      if (btText) {
+        const cell = cellsRef.current.find((c) => c.id === cellId)
+        setBacktranslationCacheRef.current((prev) => new Map(prev).set(cellId, btText))
+        if (cell && persistBtRef.current) {
+          persistBtRef.current(cell, btText, false)
+        }
+      }
+    }
   }, [getTokenForFile, refreshOutboxPending, revalidateAuditStats, revalidateCells])
 
   if (status === "loading") return <WorkspaceSkeleton />
@@ -2089,7 +2170,7 @@ export function ProjectWorkspace() {
             }}
             onProjectChanged={refresh}
             onCellCommitted={handleCellCommitted}
-            onOptimisticEdit={applyOptimisticTargetEdit}
+            onOptimisticEdit={applyOptimisticTargetEditWithCapture}
             cellLockHolders={cellLockHolders}
             cellsWithRemoteChange={cellsWithRemoteChange}
             onClaimCell={handleClaimCell}

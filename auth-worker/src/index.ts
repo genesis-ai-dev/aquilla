@@ -67,6 +67,7 @@ import adminRoutes from "./routes/admin"
 import testResetRoutes from "./routes/test-reset"
 import devSeedRoutes from "./routes/dev-seed"
 import chatRoutes from "./routes/chat"
+import parseDocumentRoutes from "./routes/parse-document"
 
 type HonoEnv = { Bindings: Env; Variables: Variables }
 
@@ -160,6 +161,7 @@ app.route("/api/v2/invites", invitesRoutes)
 // path is kept at /api/v1/chat/completions so the codex-web client doesn't
 // need to change — it just points VITE_CHAT_BASE at api.aquilla.app/chat.
 app.route("/api/v1/chat", chatRoutes)
+app.route("/api/v2/parse-document", parseDocumentRoutes)
 
 // Test-only reset endpoint (WRANGLER_LOCAL only — see routes/test-reset.ts).
 app.route("/__test__", testResetRoutes)

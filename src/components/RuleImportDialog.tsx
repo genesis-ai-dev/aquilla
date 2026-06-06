@@ -29,10 +29,17 @@ import { useFrontierHealth } from "@/lib/completion/frontier-health"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import type { CompletionSettings, TranslationRule } from "@/lib/parsers/types"
 import type { RuleSuggestion } from "@/lib/rules/rule-suggester"
+import { parseDocumentFile, MAX_PARSE_FILE_BYTES } from "@/lib/frontier/parse-document"
 
-// SWARM-TODO(FRO-197): accept pdf/docx via worker parse (see FRO-197)
 const ACCEPTED_TEXT_TYPES = [".txt", ".md"]
 const ACCEPTED_MIME = ["text/plain", "text/markdown"]
+const ACCEPTED_BINARY_TYPES = [".pdf", ".docx"]
+const ACCEPTED_BINARY_MIME = [
+  "application/pdf",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+]
+
+const MAX_TEXT_BYTES = 200 * 1024 // 200 KB (existing limit for text)
 
 const FALLBACK_SETTINGS: CompletionSettings = {
   provider: "frontier",
@@ -126,13 +133,53 @@ export function RuleImportDialog({ completionSettings, onAdd, projectId }: Props
   )
 
   function handleFileAccepted(file: File) {
-    // SWARM-TODO(FRO-197): accept pdf/docx via worker parse
     const ext = file.name.toLowerCase()
-    const ok =
+    const isText =
       ACCEPTED_MIME.includes(file.type) ||
       ACCEPTED_TEXT_TYPES.some((e) => ext.endsWith(e))
-    if (!ok) {
-      setError(`Unsupported file type. Drop a .txt or .md file. (PDF/DOCX: FRO-197)`)
+    const isBinary =
+      ACCEPTED_BINARY_MIME.includes(file.type) ||
+      ACCEPTED_BINARY_TYPES.some((e) => ext.endsWith(e))
+
+    if (!isText && !isBinary) {
+      setError(`Unsupported file type. Drop a .txt, .md, .pdf, or .docx file.`)
+      return
+    }
+
+    if (isBinary) {
+      // Client-side size cap before upload
+      if (file.size > MAX_PARSE_FILE_BYTES) {
+        setError(
+          `File too large (${(file.size / 1024 / 1024).toFixed(1)} MB). Maximum is 2 MB for PDF/DOCX.`,
+        )
+        return
+      }
+      const jwt = session?.jwt
+      if (!jwt) {
+        setError("You must be signed in to import PDF or DOCX files.")
+        return
+      }
+      setStage("extracting")
+      setError(null)
+      setProgress({ phase: "extracting", candidateCount: 0, structuredCount: 0 })
+      parseDocumentFile(file, jwt)
+        .then((text) => {
+          // Reset stage so runExtraction can set it again
+          setStage("idle")
+          return runExtraction(text)
+        })
+        .catch((err) => {
+          setError(err instanceof Error ? err.message : "Could not parse file.")
+          setStage("idle")
+        })
+      return
+    }
+
+    // Plain text / markdown: existing path
+    if (file.size > MAX_TEXT_BYTES) {
+      setError(
+        `File too large (${(file.size / 1024).toFixed(0)} KB). Maximum is 200 KB for text files.`,
+      )
       return
     }
     const reader = new FileReader()
@@ -230,7 +277,7 @@ export function RuleImportDialog({ completionSettings, onAdd, projectId }: Props
             <p className="text-sm text-muted-foreground">
               Drop a style guide, glossary, or translation guidelines document and the
               LLM will extract structured rules you can review and accept.
-              Supports plain text and Markdown (max 200 KB).
+              Supports plain text and Markdown (max 200 KB) or PDF/DOCX (max 2 MB).
             </p>
 
             {/* Drop zone */}
@@ -246,7 +293,7 @@ export function RuleImportDialog({ completionSettings, onAdd, projectId }: Props
             >
               <Upload className="h-8 w-8 text-muted-foreground" />
               <p className="text-sm text-muted-foreground text-center">
-                Drop a <strong>.txt</strong> or <strong>.md</strong> file here
+                Drop a <strong>.txt</strong>, <strong>.md</strong>, <strong>.pdf</strong>, or <strong>.docx</strong> file here
               </p>
               <Button
                 variant="outline"
@@ -258,7 +305,7 @@ export function RuleImportDialog({ completionSettings, onAdd, projectId }: Props
               <input
                 ref={fileInputRef}
                 type="file"
-                accept=".txt,.md,text/plain,text/markdown"
+                accept=".txt,.md,.pdf,.docx,text/plain,text/markdown,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
                 className="hidden"
                 onChange={(e) => {
                   const file = e.target.files?.[0]

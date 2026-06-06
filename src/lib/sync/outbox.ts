@@ -20,6 +20,9 @@ export interface OutboxAttemptError {
   reason: string
 }
 
+/** Records that exceed this many failed attempts are moved to `failed` status. */
+export const OUTBOX_MAX_ATTEMPTS = 5
+
 export interface OutboxRecord {
   id: string
   enqueuedAt: number
@@ -32,6 +35,12 @@ export interface OutboxRecord {
    *  or 5xx/network on a non-final outcome). null when last attempt landed
    *  the record (which by then would've been deleted) or when never tried. */
   lastError: OutboxAttemptError | null
+  /**
+   * `pending` (default) → actively retried by the flusher.
+   * `failed` → exceeded OUTBOX_MAX_ATTEMPTS; flusher skips it; shown as
+   *             permanent error in the indicator.
+   */
+  status: "pending" | "failed"
 }
 
 let dbPromise: Promise<IDBDatabase> | null = null
@@ -108,6 +117,7 @@ async function openDb(): Promise<IDBDatabase> {
               attempts: rec.attempts ?? 0,
               lastAttemptAt: rec.lastAttemptAt ?? null,
               lastError: rec.lastError ?? null,
+              status: (rec as Partial<OutboxRecord>).status ?? "pending",
             }
             cursor.update(next)
             cursor.continue()
@@ -128,6 +138,7 @@ export async function enqueueOutboxEvent(event: CqrsRawEvent): Promise<void> {
     attempts: 0,
     lastAttemptAt: null,
     lastError: null,
+    status: "pending",
   }
   await new Promise<void>((resolve, reject) => {
     const tx = db.transaction(STORE, "readwrite")
@@ -169,15 +180,17 @@ export async function markOutboxAttempt(
       getReq.onsuccess = () => {
         const rec = getReq.result as Partial<OutboxRecord> | undefined
         if (!rec || !rec.id || !rec.event) return
+        const newAttempts = (rec.attempts ?? 0) + 1
         const next: OutboxRecord = {
           id: rec.id,
           enqueuedAt: rec.enqueuedAt ?? Date.now(),
           event: rec.event,
           // Coalesce in case the v1 → v2 upgrade hasn't reached this row yet
           // (defense-in-depth; the upgrade-on-open should have backfilled).
-          attempts: (rec.attempts ?? 0) + 1,
+          attempts: newAttempts,
           lastAttemptAt: at,
           lastError: outcome.error,
+          status: newAttempts >= OUTBOX_MAX_ATTEMPTS ? "failed" : ((rec.status as OutboxRecord["status"]) ?? "pending"),
         }
         store.put(next)
       }
@@ -186,7 +199,7 @@ export async function markOutboxAttempt(
   notifyOutboxChanged()
 }
 
-/** Oldest-first pending rows, at most `limit`. */
+/** Oldest-first rows (all statuses), at most `limit`. */
 export async function peekOutboxBatch(limit: number): Promise<OutboxRecord[]> {
   try {
     const db = await openDb()
@@ -209,6 +222,34 @@ export async function peekOutboxBatch(limit: number): Promise<OutboxRecord[]> {
     })
   } catch {
     return []
+  }
+}
+
+/** Oldest-first rows with status `pending` only, at most `limit`. Used by the flusher. */
+export async function peekPendingOutboxBatch(limit: number): Promise<OutboxRecord[]> {
+  const all = await peekOutboxBatch(limit + 50) // fetch extra to filter
+  return all.filter((r) => (r.status ?? "pending") === "pending").slice(0, limit)
+}
+
+/** Count of records that have permanently failed (exceeded retry cap). */
+export async function outboxFailedCount(): Promise<number> {
+  try {
+    const db = await openDb()
+    return await new Promise((resolve, reject) => {
+      let count = 0
+      const tx = db.transaction(STORE, "readonly")
+      tx.onerror = () => reject(tx.error ?? new Error("count tx failed"))
+      const store = tx.objectStore(STORE)
+      const req = store.openCursor()
+      req.onsuccess = () => {
+        const cursor = req.result
+        if (!cursor) { resolve(count); return }
+        if ((cursor.value as OutboxRecord).status === "failed") count++
+        cursor.continue()
+      }
+    })
+  } catch {
+    return 0
   }
 }
 

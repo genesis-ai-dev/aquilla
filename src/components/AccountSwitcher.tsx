@@ -1,12 +1,14 @@
 import { useState, useEffect, useRef } from "react"
-import { Link } from "react-router-dom"
+import { Link, useLocation } from "react-router-dom"
 import { ChevronsUpDown, LogIn, LogOut, UserPlus, Check, Settings2 } from "lucide-react"
 import { useAccounts } from "@/hooks/useAccounts"
 import { clearSession, listSessions, removeSession } from "@/lib/frontier/session-store"
 import { clearAllLocalData } from "@/lib/store/project-index"
+import { outboxPendingCount } from "@/lib/sync/outbox"
 import {
-  Dialog, DialogContent, DialogHeader, DialogTitle,
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription,
 } from "@/components/ui/dialog"
+import { Button } from "@/components/ui/button"
 import { FrontierLoginForm } from "./git-import/FrontierLoginForm"
 import { FrontierSignupForm } from "./git-import/FrontierSignupForm"
 import { FrontierForgotPasswordForm } from "./git-import/FrontierForgotPasswordForm"
@@ -17,9 +19,11 @@ type AuthMode = "login" | "signup" | "forgot"
 function AuthDialogBody({
   isAdditional,
   onDone,
+  returnTo,
 }: {
   isAdditional: boolean
   onDone: () => void
+  returnTo?: string
 }) {
   const [mode, setMode] = useState<AuthMode>("login")
   const titles: Record<AuthMode, string> = {
@@ -35,6 +39,7 @@ function AuthDialogBody({
           <FrontierLoginForm
             onSuccess={onDone}
             onForgotPassword={() => setMode("forgot")}
+            returnTo={returnTo}
           />
           <p className="text-center text-sm text-muted-foreground">
             New to Frontier?{" "}
@@ -64,7 +69,10 @@ function AuthDialogBody({
         </div>
       )}
       {mode === "forgot" && (
-        <FrontierForgotPasswordForm onBack={() => setMode("login")} />
+        <FrontierForgotPasswordForm
+          onBack={(rt) => { setMode("login"); if (rt) { /* returnTo stays in the login form via prop */ } }}
+          returnTo={returnTo}
+        />
       )}
     </>
   )
@@ -85,11 +93,18 @@ function colorFor(name: string): string {
   return `hsl(${hue}, 55%, 45%)`
 }
 
+type LogoutScope = "single" | "all"
+
 export function AccountSwitcher({ variant = "sidebar" }: { variant?: "sidebar" | "header" } = {}) {
   const { active, sessions, activate, remove } = useAccounts()
+  const location = useLocation()
   const [open, setOpen] = useState(false)
   const [loginOpen, setLoginOpen] = useState(false)
+  const [pendingLogout, setPendingLogout] = useState<{ count: number; scope: LogoutScope } | null>(null)
   const rootRef = useRef<HTMLDivElement>(null)
+  // Capture the destination before showing the login dialog so the user
+  // returns to the same page after reset → login.
+  const returnTo = location.pathname !== "/" ? location.pathname + location.search : undefined
 
   useEffect(() => {
     if (!open) return
@@ -101,6 +116,26 @@ export function AccountSwitcher({ variant = "sidebar" }: { variant?: "sidebar" |
   }, [open])
 
   const isHeader = variant === "header"
+
+  async function handleLogout(scope: LogoutScope) {
+    setOpen(false)
+    const count = await outboxPendingCount()
+    if (count > 0) {
+      setPendingLogout({ count, scope })
+      return
+    }
+    await doLogout(scope)
+  }
+
+  async function doLogout(scope: LogoutScope) {
+    if (scope === "all") {
+      const all = await listSessions()
+      for (const s of all) await removeSession(s.key)
+    } else {
+      await clearSession()
+    }
+    await clearAllLocalData()
+  }
 
   if (!active) {
     return (
@@ -118,7 +153,7 @@ export function AccountSwitcher({ variant = "sidebar" }: { variant?: "sidebar" |
         </button>
         <Dialog open={loginOpen} onOpenChange={setLoginOpen}>
           <DialogContent className="max-w-sm">
-            <AuthDialogBody isAdditional={false} onDone={() => setLoginOpen(false)} />
+            <AuthDialogBody isAdditional={false} onDone={() => setLoginOpen(false)} returnTo={returnTo} />
           </DialogContent>
         </Dialog>
       </>
@@ -191,7 +226,7 @@ export function AccountSwitcher({ variant = "sidebar" }: { variant?: "sidebar" |
           </button>
           <button
             className="flex w-full items-center gap-2 rounded-xl bg-card px-2 py-1.5 text-sm transition-shadow hover:shadow-neu-xs"
-            onClick={async () => { setOpen(false); await clearSession(); await clearAllLocalData() }}
+            onClick={() => handleLogout("single")}
           >
             <LogOut className="h-4 w-4" />
             <span>Log out</span>
@@ -199,12 +234,7 @@ export function AccountSwitcher({ variant = "sidebar" }: { variant?: "sidebar" |
           {sessions.length > 1 && (
             <button
               className="flex w-full items-center gap-2 rounded-xl bg-card px-2 py-1.5 text-sm text-destructive transition-shadow hover:shadow-neu-xs"
-              onClick={async () => {
-                setOpen(false)
-                const all = await listSessions()
-                for (const s of all) await removeSession(s.key)
-                await clearAllLocalData()
-              }}
+              onClick={() => handleLogout("all")}
             >
               <LogOut className="h-4 w-4" />
               <span>Sign out of all accounts</span>
@@ -214,16 +244,48 @@ export function AccountSwitcher({ variant = "sidebar" }: { variant?: "sidebar" |
       )}
       <Dialog open={loginOpen} onOpenChange={setLoginOpen}>
         <DialogContent className="max-w-sm">
-          <AuthDialogBody isAdditional onDone={() => setLoginOpen(false)} />
+          <AuthDialogBody isAdditional onDone={() => setLoginOpen(false)} returnTo={returnTo} />
+        </DialogContent>
+      </Dialog>
+      <Dialog open={!!pendingLogout} onOpenChange={(v) => { if (!v) setPendingLogout(null) }}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Unsaved edits</DialogTitle>
+            <DialogDescription>
+              You have {pendingLogout?.count ?? 0} unsaved edit{(pendingLogout?.count ?? 0) !== 1 ? "s" : ""} that haven't synced to the server. Logging out will discard them. Continue?
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="gap-2">
+            <Button variant="outline" onClick={() => setPendingLogout(null)}>Cancel</Button>
+            <Button
+              variant="destructive"
+              onClick={async () => {
+                const scope = pendingLogout!.scope
+                setPendingLogout(null)
+                await doLogout(scope)
+              }}
+            >
+              Log out anyway
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </div>
   )
 }
 
+/** Non-prod environment label derived from the Vite mode at build time. */
+const ENV_HINT: string | null = (() => {
+  const mode = import.meta.env.MODE as string | undefined
+  if (!mode || mode === "production") return null
+  if (mode === "development") return "dev"
+  return mode
+})()
+
 interface EntrySummary {
   key: string
   username: string
+  email?: string
   active: boolean
 }
 
@@ -244,13 +306,19 @@ function Entry({
       onClick={onClick}
     >
       <div
-        className="flex h-5 w-5 items-center justify-center rounded-full text-[9px] font-semibold text-white"
+        className="flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full text-[9px] font-semibold text-white"
         style={{ backgroundColor: colorFor(summary.username) }}
       >
         {initials(summary.username)}
       </div>
       <div className="flex flex-col min-w-0 flex-1">
         <span className="truncate">{summary.username}</span>
+        {summary.email && (
+          <span className="truncate text-[10px] text-muted-foreground">{summary.email}</span>
+        )}
+        {ENV_HINT && (
+          <span className="truncate text-[10px] text-amber-600 dark:text-amber-500">{ENV_HINT}</span>
+        )}
       </div>
       {summary.active && <Check className="h-3.5 w-3.5 text-muted-foreground" />}
       {onRemove && !summary.active && (

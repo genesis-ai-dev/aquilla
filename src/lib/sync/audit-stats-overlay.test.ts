@@ -114,6 +114,7 @@ function rec(event: CqrsRawEvent, enqueuedAt: number): OutboxRecord {
     attempts: 0,
     lastAttemptAt: null,
     lastError: null,
+    status: "pending",
   }
 }
 

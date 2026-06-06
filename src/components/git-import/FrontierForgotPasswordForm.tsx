@@ -4,7 +4,14 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { requestPasswordReset, FrontierAuthError } from "@/lib/frontier/auth"
 
-export function FrontierForgotPasswordForm({ onBack }: { onBack: () => void }) {
+export function FrontierForgotPasswordForm({
+  onBack,
+  returnTo,
+}: {
+  onBack: (returnTo?: string) => void
+  /** Forwarded back to the login form after returning from the reset flow. */
+  returnTo?: string
+}) {
   const [email, setEmail] = useState("")
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
@@ -32,7 +39,7 @@ export function FrontierForgotPasswordForm({ onBack }: { onBack: () => void }) {
         <p className="text-sm">
           If an account exists for <span className="font-medium">{email.trim()}</span>, a password reset link has been sent. Check your email and follow the link to choose a new password.
         </p>
-        <Button variant="outline" onClick={onBack} className="w-full">
+        <Button variant="outline" onClick={() => onBack(returnTo)} className="w-full">
           Back to login
         </Button>
       </div>
@@ -58,7 +65,7 @@ export function FrontierForgotPasswordForm({ onBack }: { onBack: () => void }) {
       <Button type="submit" disabled={busy || !emailOk} className="w-full">
         {busy ? "Sending…" : "Send reset link"}
       </Button>
-      <Button type="button" variant="ghost" onClick={onBack} className="w-full">
+      <Button type="button" variant="ghost" onClick={() => onBack(returnTo)} className="w-full">
         Back to login
       </Button>
     </form>

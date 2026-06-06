@@ -6,7 +6,10 @@ import {
   peekOutboxBatch,
   removeOutboxEvents,
   outboxPendingCount,
+  outboxFailedCount,
+  peekPendingOutboxBatch,
   resetOutboxConnectionForTests,
+  OUTBOX_MAX_ATTEMPTS,
 } from "./outbox"
 import type { CqrsRawEvent } from "./outbox-types"
 import { CQRS_SCHEMA_VERSION } from "./outbox-types"
@@ -119,5 +122,44 @@ describe("cqrs outbox", () => {
     expect(String(url)).toContain("/events")
     expect(init.method).toBe("POST")
     expect(await outboxPendingCount()).toBe(0)
+  })
+
+  it("failure cap: record transitions to `failed` after OUTBOX_MAX_ATTEMPTS", async () => {
+    await enqueueOutboxEvent(sample)
+    const initialPeek = await peekOutboxBatch(10)
+    expect(initialPeek[0].status).toBe("pending")
+
+    // Mark attempts up to (but not reaching) the cap — status stays pending.
+    for (let i = 0; i < OUTBOX_MAX_ATTEMPTS - 1; i++) {
+      await markOutboxAttempt(["e1"], { error: { status: 500, reason: "server error" } })
+    }
+    const beforeCap = await peekOutboxBatch(10)
+    expect(beforeCap[0].status).toBe("pending")
+    expect(beforeCap[0].attempts).toBe(OUTBOX_MAX_ATTEMPTS - 1)
+
+    // One more attempt hits the cap.
+    await markOutboxAttempt(["e1"], { error: { status: 500, reason: "server error" } })
+    const afterCap = await peekOutboxBatch(10)
+    expect(afterCap[0].status).toBe("failed")
+    expect(afterCap[0].attempts).toBe(OUTBOX_MAX_ATTEMPTS)
+
+    // outboxFailedCount reflects the transition.
+    expect(await outboxFailedCount()).toBe(1)
+    // The total count still includes the failed record.
+    expect(await outboxPendingCount()).toBe(1)
+  })
+
+  it("peekPendingOutboxBatch excludes failed records", async () => {
+    await enqueueOutboxEvent(sample)
+    const sample2: CqrsRawEvent<"target.cell.commit"> = { ...sample, id: "e2" }
+    await enqueueOutboxEvent(sample2)
+
+    // Cap e1 to failed.
+    for (let i = 0; i < OUTBOX_MAX_ATTEMPTS; i++) {
+      await markOutboxAttempt(["e1"], { error: { status: 500, reason: "err" } })
+    }
+
+    const pending = await peekPendingOutboxBatch(10)
+    expect(pending.map((r) => r.id)).toEqual(["e2"])
   })
 })

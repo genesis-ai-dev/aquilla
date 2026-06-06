@@ -1,4 +1,5 @@
 import { useState, useEffect, type FormEvent } from "react"
+import { useNavigate } from "react-router-dom"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -9,11 +10,15 @@ import { FrontierAuthError } from "@/lib/frontier/auth"
 export function FrontierLoginForm({
   onSuccess,
   onForgotPassword,
+  returnTo,
 }: {
   onSuccess: () => void
   onForgotPassword?: () => void
+  /** If provided, navigate here after a successful login. */
+  returnTo?: string
 }) {
   const { login } = useFrontierSession()
+  const navigate = useNavigate()
   const [username, setUsername] = useState("")
   const [password, setPassword] = useState("")
   const [showPassword, setShowPassword] = useState(false)
@@ -39,6 +44,7 @@ export function FrontierLoginForm({
     try {
       await login(username, password)
       onSuccess()
+      if (returnTo) navigate(returnTo)
     } catch (err) {
       setError(err instanceof FrontierAuthError ? err.message : "Login failed")
     } finally {

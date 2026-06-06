@@ -82,6 +82,8 @@ async function writeEnvelope(env: Envelope): Promise<void> {
 export interface SessionSummary {
   key: string
   username: string
+  /** Email decoded from JWT at login time, if available. */
+  email?: string
   createdAt: string
   active: boolean
 }
@@ -90,6 +92,7 @@ export async function listSessions(): Promise<SessionSummary[]> {
   const env = await readEnvelope()
   return Object.entries(env.sessions).map(([key, s]) => ({
     key, username: s.username,
+    email: s.email,
     createdAt: s.createdAt, active: env.active === key,
   }))
 }

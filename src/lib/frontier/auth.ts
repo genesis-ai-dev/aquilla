@@ -119,17 +119,20 @@ export async function requestPasswordReset(email: string): Promise<void> {
  * verification needed here — the server already verified the password before
  * issuing it). Returns null if the token is malformed.
  */
-function jwtSubject(token: string): string | null {
+function jwtClaims(token: string): { sub?: string; email?: string } {
   try {
     const parts = token.split(".");
-    if (parts.length !== 3) return null;
+    if (parts.length !== 3) return {};
     // atob requires standard base64; JWT uses base64url — swap - and _
     const padded = parts[1].replace(/-/g, "+").replace(/_/g, "/");
     const json = atob(padded);
-    const payload = JSON.parse(json) as { sub?: unknown };
-    return typeof payload.sub === "string" ? payload.sub : null;
+    const payload = JSON.parse(json) as { sub?: unknown; email?: unknown };
+    return {
+      sub: typeof payload.sub === "string" ? payload.sub : undefined,
+      email: typeof payload.email === "string" ? payload.email : undefined,
+    };
   } catch {
-    return null;
+    return {};
   }
 }
 
@@ -138,11 +141,13 @@ async function finalizeSession(loginIdentifier: string, data: AuthResponse): Pro
   // The server always mints the token with the user record's username (not
   // the email the caller may have typed). Falling back to loginIdentifier
   // preserves backward-compat for any edge case where decoding fails.
-  const resolvedUsername = jwtSubject(data.access_token) ?? loginIdentifier;
+  const claims = jwtClaims(data.access_token);
+  const resolvedUsername = claims.sub ?? loginIdentifier;
   const session: FrontierSession = {
     jwt: data.access_token,
     username: resolvedUsername,
     createdAt: new Date().toISOString(),
+    ...(claims.email ? { email: claims.email } : {}),
   };
   await saveSession(session);
   return session;

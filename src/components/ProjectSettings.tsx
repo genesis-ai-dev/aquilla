@@ -130,6 +130,8 @@ export function ProjectSettings() {
     version: sharedVersion,
     updatedAt: sharedUpdatedAt,
     updatedBy: sharedUpdatedBy,
+    conflict: sharedConflict,
+    dismissConflict,
   } = useProjectSettings(id ?? null, project?.syncRole?.level ?? null)
 
   const sharedDisabledTooltip =
@@ -492,6 +494,22 @@ export function ProjectSettings() {
         </div>
       </header>
       <main className="mx-auto max-w-2xl space-y-6 p-6">
+        {sharedConflict && (
+          <div
+            role="alert"
+            className="flex items-start justify-between gap-3 rounded border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-700 dark:bg-amber-950 dark:text-amber-100"
+          >
+            <span>Settings changed elsewhere — refresh to reapply.</span>
+            <button
+              type="button"
+              aria-label="Dismiss conflict notice"
+              onClick={dismissConflict}
+              className="shrink-0 text-amber-700 hover:text-amber-900 dark:text-amber-400 dark:hover:text-amber-200"
+            >
+              ✕
+            </button>
+          </div>
+        )}
         <Card>
           <CardHeader><CardTitle>Project Info</CardTitle></CardHeader>
           <CardContent className="space-y-4">

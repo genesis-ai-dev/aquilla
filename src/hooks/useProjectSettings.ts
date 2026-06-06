@@ -35,6 +35,14 @@ export interface UseProjectSettings {
   isOnline: boolean
   canEdit: boolean
   reasonCannotEdit: CannotEditReason
+  /** True when the last save returned a 409 conflict. The user's pending edits
+   *  were snapped to the server winner; the UI should show a visible notice.
+   *  SWARM-TODO: preserve pending form values across a conflict instead of
+   *  discarding them (requires lifting draft state into the hook or passing
+   *  pending values back via the conflict payload). */
+  conflict: boolean
+  /** Call to dismiss the conflict notice after the user has acknowledged it. */
+  dismissConflict: () => void
   /** Force a re-GET. */
   refresh: () => Promise<ProjectSettingsResponse | null>
   /** Apply a partial settings update. Optimistic local update, server PATCH,
@@ -92,6 +100,8 @@ export function useProjectSettings(
   const [server, setServer] = useState<ProjectSettingsResponse | null>(null)
   const [local, setLocal] = useState<ProjectWideSettings>({})
   const [hasFetched, setHasFetched] = useState(false)
+  const [conflict, setConflict] = useState(false)
+  const dismissConflict = useCallback(() => setConflict(false), [])
 
   // aliveRef tracks component liveness for long-running callbacks that start
   // *outside* of an effect (e.g. the write-path patch() and refresh() called
@@ -370,6 +380,7 @@ export function useProjectSettings(
       void patchProject(projectId, (existing) => ({ ...existing, ...result.latest.settings })).catch((err) => {
         console.warn("[useProjectSettings] local IDB conflict-snap failed", err)
       })
+      setConflict(true)
       posthog.capture("project settings sync conflict", {
         project_id: projectId,
         conflicting_user: result.latest.updatedBy?.username ?? null,
@@ -393,6 +404,8 @@ export function useProjectSettings(
     isOnline,
     canEdit,
     reasonCannotEdit,
+    conflict,
+    dismissConflict,
     refresh,
     patch,
   }

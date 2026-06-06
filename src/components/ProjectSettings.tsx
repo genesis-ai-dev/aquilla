@@ -31,6 +31,7 @@ import { ValidationSettingsSection } from "./ProjectSettings/ValidationSettingsS
 import { DecaySettingsSection } from "./ProjectSettings/DecaySettingsSection"
 import { AudioMediaStrategySection } from "./ProjectSettings/AudioMediaStrategySection"
 import { ApiKeyField } from "./ApiKeyField"
+import { SettingsNav, useScrollSpy, type SettingsSection } from "./ProjectSettings/SettingsNav"
 import { readValidationCount, readValidationCountAudio } from "@/lib/progress/read-validation-count"
 import { setUserApiKey, useUserApiKey } from "@/lib/store/user-api-keys"
 import type { ProjectWideSettings } from "@/lib/sync/project-settings"
@@ -436,6 +437,36 @@ export function ProjectSettings() {
     setPendingNav(null)
   }, [])
 
+  // ── Settings sections definition ──────────────────────────────────────────
+  const hasGitOrigin = project?.origin?.kind === "git"
+
+  const ALL_SECTIONS: SettingsSection[] = [
+    { id: "section-project-info", label: "Project Info", keywords: ["name", "source language", "target language"] },
+    { id: "section-user", label: "User", keywords: ["username", "author"] },
+    { id: "section-ai-instructions", label: "AI Instructions", keywords: ["system prompt", "ai", "llm", "instructions"] },
+    { id: "section-advanced-llm", label: "Advanced LLM", keywords: ["provider", "endpoint", "api key", "model", "temperature", "max tokens", "health penalty", "frontier", "openai", "custom"] },
+    { id: "section-voice", label: "Voice", keywords: ["tts", "voice studio", "audio", "gemini"] },
+    { id: "section-decay", label: "Decay", keywords: ["decay", "decay threshold", "half life"] },
+    { id: "section-validation", label: "Validation", keywords: ["validation count", "approvals", "audio validation"] },
+    { id: "section-audio-media", label: "Audio Media", keywords: ["audio media strategy", "lazy", "eager"] },
+    { id: "section-git-sync", label: "Git Sync", keywords: ["git", "sync", "auto sync", "interval", "branch", "clone"], visible: hasGitOrigin },
+  ]
+
+  // ── Search filter ──────────────────────────────────────────────────────────
+  const [searchQuery, setSearchQuery] = useState("")
+  const lowerQuery = searchQuery.trim().toLowerCase()
+  const visibleSections = lowerQuery
+    ? ALL_SECTIONS.filter(
+        (s) =>
+          s.visible !== false &&
+          (s.label.toLowerCase().includes(lowerQuery) ||
+            s.keywords?.some((k) => k.toLowerCase().includes(lowerQuery))),
+      )
+    : ALL_SECTIONS.filter((s) => s.visible !== false)
+
+  const visibleIds = visibleSections.map((s) => s.id)
+  const activeId = useScrollSpy(visibleIds)
+
   if (loading) return <div className="p-8 text-muted-foreground">Loading...</div>
 
   const preset = CUSTOM_PRESETS.find((p) => p.id === presetId) ?? CUSTOM_PRESETS[0]
@@ -493,7 +524,31 @@ export function ProjectSettings() {
           {saveError && <span className="text-destructive">{saveError}</span>}
         </div>
       </header>
-      <main className="mx-auto max-w-2xl space-y-6 p-6">
+      <div className="mx-auto flex max-w-5xl gap-6 px-4 py-6">
+        {/* Left rail nav */}
+        <aside className="hidden w-44 shrink-0 lg:block">
+          <div className="sticky top-[60px]">
+            <SettingsNav
+              sections={visibleSections}
+              activeId={activeId}
+              onSearch={setSearchQuery}
+              searchQuery={searchQuery}
+            />
+          </div>
+        </aside>
+
+        {/* Main content */}
+        <main className="min-w-0 flex-1 space-y-6">
+          {/* Mobile search — only shows on narrow widths where rail is hidden */}
+          <div className="lg:hidden">
+            <SettingsNav
+              sections={visibleSections}
+              activeId={activeId}
+              onSearch={setSearchQuery}
+              searchQuery={searchQuery}
+            />
+          </div>
+
         {sharedConflict && (
           <div
             role="alert"
@@ -510,268 +565,290 @@ export function ProjectSettings() {
             </button>
           </div>
         )}
-        <Card>
-          <CardHeader><CardTitle>Project Info</CardTitle></CardHeader>
-          <CardContent className="space-y-4">
-            <div>
-              <Label htmlFor="pname">Project Name</Label>
-              <Input id="pname" value={name} onChange={(e) => setName(e.target.value)} />
-            </div>
-            {sharedUpdatedBy && sharedUpdatedAt && sharedVersion != null && sharedVersion > 0 && (
-              <p className="text-xs text-muted-foreground">
-                Last edited by {sharedUpdatedBy.username} ·{" "}
-                {new Date(sharedUpdatedAt).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })}
-              </p>
-            )}
-            <div className="grid grid-cols-2 gap-4">
+        {visibleSections.some((s) => s.id === "section-project-info") && (
+          <Card id="section-project-info">
+            <CardHeader><CardTitle>Project Info</CardTitle></CardHeader>
+            <CardContent className="space-y-4">
               <div>
-                <Label htmlFor="sl">Source Language</Label>
-                <DisabledFieldTooltip disabled={!canEditShared} tooltip={sharedDisabledTooltip}>
-                  <Input id="sl" value={sourceLanguage} onChange={(e) => setSourceLanguage(e.target.value)} disabled={!canEditShared} />
-                </DisabledFieldTooltip>
+                <Label htmlFor="pname">Project Name</Label>
+                <Input id="pname" value={name} onChange={(e) => setName(e.target.value)} />
               </div>
-              <div>
-                <Label htmlFor="tl">Target Language</Label>
-                <DisabledFieldTooltip disabled={!canEditShared} tooltip={sharedDisabledTooltip}>
-                  <Input id="tl" value={targetLanguage} onChange={(e) => setTargetLanguage(e.target.value)} disabled={!canEditShared} />
-                </DisabledFieldTooltip>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader><CardTitle>User</CardTitle></CardHeader>
-          <CardContent>
-            <Label htmlFor="un">Username</Label>
-            <Input id="un" value={username} onChange={(e) => setUsername(e.target.value)} placeholder="local" />
-            <p className="mt-1 text-xs text-muted-foreground">Used as author name in translation history.</p>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Sparkles className="h-4 w-4 text-primary" />
-              AI Instructions
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            <DisabledFieldTooltip disabled={!canEditShared} tooltip={sharedDisabledTooltip}>
-              <textarea
-                id="sp"
-                value={systemPrompt}
-                onChange={(e) => setSystemPrompt(e.target.value)}
-                rows={6}
-                disabled={!canEditShared}
-                className="w-full rounded border bg-background px-3 py-2 font-mono text-sm disabled:cursor-not-allowed disabled:opacity-50"
-                placeholder={DEFAULT_SYSTEM_PROMPT}
-              />
-            </DisabledFieldTooltip>
-            <p className="text-xs text-muted-foreground">
-              Describe what this project is producing and how translations should read — the AI uses this on every
-              completion. Use <code className="rounded bg-muted px-1">{"{sourceLanguage}"}</code> and{" "}
-              <code className="rounded bg-muted px-1">{"{targetLanguage}"}</code> as placeholders.
-            </p>
-          </CardContent>
-        </Card>
-
-        <details className="group rounded-lg border bg-card">
-          <summary className="cursor-pointer select-none list-none px-6 py-4 text-sm font-medium marker:hidden">
-            <span className="flex items-center justify-between">
-              <span>Advanced LLM settings</span>
-              <span className="text-xs text-muted-foreground">
-                {provider === "frontier" ? "Frontier (default)" : `Custom: ${endpoint || "not set"}`}
-              </span>
-            </span>
-          </summary>
-          <div className="space-y-4 border-t px-6 py-4">
-            <div className="space-y-2">
-              <Label>Provider</Label>
-              <div className="flex flex-col gap-2">
-                <label className="flex items-start gap-2 text-sm">
-                  <input
-                    type="radio"
-                    name="provider"
-                    className="mt-1"
-                    checked={provider === "frontier"}
-                    onChange={() => setProvider("frontier")}
-                  />
-                  <span>
-                    <strong>Frontier</strong> (recommended) — calls <code className="rounded bg-muted px-1">api.frontierrnd.com</code>{" "}
-                    using your Frontier login. Works out of the box.
-                  </span>
-                </label>
-                <label className="flex items-start gap-2 text-sm">
-                  <input
-                    type="radio"
-                    name="provider"
-                    className="mt-1"
-                    checked={provider === "custom"}
-                    onChange={() => setProvider("custom")}
-                  />
-                  <span>
-                    <strong>Custom endpoint</strong> — localhost, self-hosted, or a third-party OpenAI-compatible
-                    API (OpenRouter, OpenAI, Groq, Together, ...). Bring your own key.
-                  </span>
-                </label>
-              </div>
-            </div>
-
-            {provider === "custom" && (
-              <>
-                <div>
-                  <Label htmlFor="preset">Provider preset</Label>
-                  <select
-                    id="preset"
-                    value={presetId}
-                    onChange={(e) => handlePresetChange(e.target.value)}
-                    className="w-full rounded border bg-background px-3 py-2 text-sm"
-                  >
-                    {CUSTOM_PRESETS.map((p) => (
-                      <option key={p.id} value={p.id}>{p.label}</option>
-                    ))}
-                  </select>
-                </div>
-                <div>
-                  <Label htmlFor="ep">Endpoint URL</Label>
-                  <div className="flex gap-2">
-                    <Input
-                      id="ep"
-                      value={endpoint}
-                      onChange={(e) => { setEndpoint(e.target.value); setPresetId(presetIdForEndpoint(e.target.value)) }}
-                      placeholder="http://localhost:8000"
-                      className="flex-1"
-                    />
-                    <Button size="sm" onClick={handleConnect} disabled={connecting || !endpoint.trim()}>
-                      {connecting ? <Loader2 className="h-4 w-4 animate-spin" /> : "Connect"}
-                    </Button>
-                  </div>
-                  <p className="mt-1 text-xs text-muted-foreground">
-                    Base URL. Trailing <code className="rounded bg-muted px-1">/v1</code> or
-                    {" "}<code className="rounded bg-muted px-1">/chat/completions</code> is accepted.
-                  </p>
-                  {connected && <p className="mt-1 flex items-center gap-1 text-xs text-green-600"><CheckCircle className="h-3 w-3" /> Connected — {models.length} model(s)</p>}
-                  {connectionError && <p className="mt-1 flex items-center gap-1 text-xs text-destructive"><XCircle className="h-3 w-3" /> {connectionError}</p>}
-                </div>
-                <ApiKeyField
-                  label={`API key${preset.requiresKey ? " *" : " (optional)"}`}
-                  placeholder={preset.keyHint ?? (preset.requiresKey ? "Paste your API key" : "Leave blank for no auth")}
-                  projectKey={apiKey}
-                  userKey={completionUserKey}
-                  onProjectKeyChange={setApiKey}
-                  onUserKeyChange={(v) => setUserApiKey("completion", v)}
-                  help="Sent as Authorization: Bearer <key>. Stored locally in your browser; never uploaded to Frontier."
-                />
+              {sharedUpdatedBy && sharedUpdatedAt && sharedVersion != null && sharedVersion > 0 && (
                 <p className="text-xs text-muted-foreground">
-                  Stays on this device — not shared with collaborators.
+                  Last edited by {sharedUpdatedBy.username} ·{" "}
+                  {new Date(sharedUpdatedAt).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })}
                 </p>
-                {models.length > 0 && (
+              )}
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <Label htmlFor="sl">Source Language</Label>
+                  <DisabledFieldTooltip disabled={!canEditShared} tooltip={sharedDisabledTooltip}>
+                    <Input id="sl" value={sourceLanguage} onChange={(e) => setSourceLanguage(e.target.value)} disabled={!canEditShared} />
+                  </DisabledFieldTooltip>
+                </div>
+                <div>
+                  <Label htmlFor="tl">Target Language</Label>
+                  <DisabledFieldTooltip disabled={!canEditShared} tooltip={sharedDisabledTooltip}>
+                    <Input id="tl" value={targetLanguage} onChange={(e) => setTargetLanguage(e.target.value)} disabled={!canEditShared} />
+                  </DisabledFieldTooltip>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
+        {visibleSections.some((s) => s.id === "section-user") && (
+          <Card id="section-user">
+            <CardHeader><CardTitle>User</CardTitle></CardHeader>
+            <CardContent>
+              <Label htmlFor="un">Username</Label>
+              <Input id="un" value={username} onChange={(e) => setUsername(e.target.value)} placeholder="local" />
+              <p className="mt-1 text-xs text-muted-foreground">Used as author name in translation history.</p>
+            </CardContent>
+          </Card>
+        )}
+
+        {visibleSections.some((s) => s.id === "section-ai-instructions") && (
+          <Card id="section-ai-instructions">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Sparkles className="h-4 w-4 text-primary" />
+                AI Instructions
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <DisabledFieldTooltip disabled={!canEditShared} tooltip={sharedDisabledTooltip}>
+                <textarea
+                  id="sp"
+                  value={systemPrompt}
+                  onChange={(e) => setSystemPrompt(e.target.value)}
+                  rows={6}
+                  disabled={!canEditShared}
+                  className="w-full rounded border bg-background px-3 py-2 font-mono text-sm disabled:cursor-not-allowed disabled:opacity-50"
+                  placeholder={DEFAULT_SYSTEM_PROMPT}
+                />
+              </DisabledFieldTooltip>
+              <p className="text-xs text-muted-foreground">
+                Describe what this project is producing and how translations should read — the AI uses this on every
+                completion. Use <code className="rounded bg-muted px-1">{"{sourceLanguage}"}</code> and{" "}
+                <code className="rounded bg-muted px-1">{"{targetLanguage}"}</code> as placeholders.
+              </p>
+            </CardContent>
+          </Card>
+        )}
+
+        {visibleSections.some((s) => s.id === "section-advanced-llm") && (
+          <details id="section-advanced-llm" className="group rounded-lg border bg-card">
+            <summary className="cursor-pointer select-none list-none px-6 py-4 text-sm font-medium marker:hidden">
+              <span className="flex items-center justify-between">
+                <span>Advanced LLM settings</span>
+                <span className="text-xs text-muted-foreground">
+                  {provider === "frontier" ? "Frontier (default)" : `Custom: ${endpoint || "not set"}`}
+                </span>
+              </span>
+            </summary>
+            <div className="space-y-4 border-t px-6 py-4">
+              <div className="space-y-2">
+                <Label>Provider</Label>
+                <div className="flex flex-col gap-2">
+                  <label className="flex items-start gap-2 text-sm">
+                    <input
+                      type="radio"
+                      name="provider"
+                      className="mt-1"
+                      checked={provider === "frontier"}
+                      onChange={() => setProvider("frontier")}
+                    />
+                    <span>
+                      <strong>Frontier</strong> (recommended) — calls <code className="rounded bg-muted px-1">api.frontierrnd.com</code>{" "}
+                      using your Frontier login. Works out of the box.
+                    </span>
+                  </label>
+                  <label className="flex items-start gap-2 text-sm">
+                    <input
+                      type="radio"
+                      name="provider"
+                      className="mt-1"
+                      checked={provider === "custom"}
+                      onChange={() => setProvider("custom")}
+                    />
+                    <span>
+                      <strong>Custom endpoint</strong> — localhost, self-hosted, or a third-party OpenAI-compatible
+                      API (OpenRouter, OpenAI, Groq, Together, ...). Bring your own key.
+                    </span>
+                  </label>
+                </div>
+              </div>
+
+              {provider === "custom" && (
+                <>
                   <div>
-                    <Label htmlFor="mdl">Model</Label>
-                    <select id="mdl" value={model} onChange={(e) => setModel(e.target.value)} className="w-full rounded border bg-background px-3 py-2 text-sm">
-                      {models.map((m) => <option key={m} value={m}>{m}</option>)}
+                    <Label htmlFor="preset">Provider preset</Label>
+                    <select
+                      id="preset"
+                      value={presetId}
+                      onChange={(e) => handlePresetChange(e.target.value)}
+                      className="w-full rounded border bg-background px-3 py-2 text-sm"
+                    >
+                      {CUSTOM_PRESETS.map((p) => (
+                        <option key={p.id} value={p.id}>{p.label}</option>
+                      ))}
                     </select>
                   </div>
-                )}
-                {models.length === 0 && (
                   <div>
-                    <Label htmlFor="mdl-manual">Model (if not listed)</Label>
-                    <Input
-                      id="mdl-manual"
-                      value={model}
-                      onChange={(e) => setModel(e.target.value)}
-                      placeholder={presetId === "openrouter" ? "anthropic/claude-3.5-sonnet" : "Type a model id"}
-                    />
+                    <Label htmlFor="ep">Endpoint URL</Label>
+                    <div className="flex gap-2">
+                      <Input
+                        id="ep"
+                        value={endpoint}
+                        onChange={(e) => { setEndpoint(e.target.value); setPresetId(presetIdForEndpoint(e.target.value)) }}
+                        placeholder="http://localhost:8000"
+                        className="flex-1"
+                      />
+                      <Button size="sm" onClick={handleConnect} disabled={connecting || !endpoint.trim()}>
+                        {connecting ? <Loader2 className="h-4 w-4 animate-spin" /> : "Connect"}
+                      </Button>
+                    </div>
                     <p className="mt-1 text-xs text-muted-foreground">
-                      Click Connect to discover models, or type one manually (required for providers that don't expose <code className="rounded bg-muted px-1">/models</code>).
+                      Base URL. Trailing <code className="rounded bg-muted px-1">/v1</code> or
+                      {" "}<code className="rounded bg-muted px-1">/chat/completions</code> is accepted.
                     </p>
+                    {connected && <p className="mt-1 flex items-center gap-1 text-xs text-green-600"><CheckCircle className="h-3 w-3" /> Connected — {models.length} model(s)</p>}
+                    {connectionError && <p className="mt-1 flex items-center gap-1 text-xs text-destructive"><XCircle className="h-3 w-3" /> {connectionError}</p>}
                   </div>
-                )}
-              </>
-            )}
+                  <ApiKeyField
+                    label={`API key${preset.requiresKey ? " *" : " (optional)"}`}
+                    placeholder={preset.keyHint ?? (preset.requiresKey ? "Paste your API key" : "Leave blank for no auth")}
+                    projectKey={apiKey}
+                    userKey={completionUserKey}
+                    onProjectKeyChange={setApiKey}
+                    onUserKeyChange={(v) => setUserApiKey("completion", v)}
+                    help="Sent as Authorization: Bearer <key>. Stored locally in your browser; never uploaded to Frontier."
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Stays on this device — not shared with collaborators.
+                  </p>
+                  {models.length > 0 && (
+                    <div>
+                      <Label htmlFor="mdl">Model</Label>
+                      <select id="mdl" value={model} onChange={(e) => setModel(e.target.value)} className="w-full rounded border bg-background px-3 py-2 text-sm">
+                        {models.map((m) => <option key={m} value={m}>{m}</option>)}
+                      </select>
+                    </div>
+                  )}
+                  {models.length === 0 && (
+                    <div>
+                      <Label htmlFor="mdl-manual">Model (if not listed)</Label>
+                      <Input
+                        id="mdl-manual"
+                        value={model}
+                        onChange={(e) => setModel(e.target.value)}
+                        placeholder={presetId === "openrouter" ? "anthropic/claude-3.5-sonnet" : "Type a model id"}
+                      />
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        Click Connect to discover models, or type one manually (required for providers that don't expose <code className="rounded bg-muted px-1">/models</code>).
+                      </p>
+                    </div>
+                  )}
+                </>
+              )}
 
-            {provider === "frontier" && (
+              {provider === "frontier" && (
+                <div>
+                  <Label htmlFor="mdl-frontier">Model override (optional)</Label>
+                  <Input
+                    id="mdl-frontier"
+                    value={model}
+                    onChange={(e) => setModel(e.target.value)}
+                    placeholder="Leave blank for Frontier's default"
+                  />
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    Optionally specify an OpenRouter model (e.g. <code className="rounded bg-muted px-1">anthropic/claude-3.5-sonnet</code>).
+                  </p>
+                </div>
+              )}
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <Label htmlFor="mt">Max Tokens</Label>
+                  <Input id="mt" type="number" value={maxTokens} onChange={(e) => setMaxTokens(Number(e.target.value))} />
+                </div>
+                <div>
+                  <Label>Temperature ({temperature})</Label>
+                  <input type="range" min="0" max="1" step="0.05" value={temperature} onChange={(e) => setTemperature(Number(e.target.value))} className="mt-2 w-full" />
+                </div>
+              </div>
+
               <div>
-                <Label htmlFor="mdl-frontier">Model override (optional)</Label>
-                <Input
-                  id="mdl-frontier"
-                  value={model}
-                  onChange={(e) => setModel(e.target.value)}
-                  placeholder="Leave blank for Frontier's default"
-                />
+                <Label>LLM Health Penalty ({Math.round(llmHealthPenalty * 100)}%)</Label>
+                <input type="range" min="0" max="0.5" step="0.05" value={llmHealthPenalty} onChange={(e) => setLlmHealthPenalty(Number(e.target.value))} className="mt-2 w-full" />
                 <p className="mt-1 text-xs text-muted-foreground">
-                  Optionally specify an OpenRouter model (e.g. <code className="rounded bg-muted px-1">anthropic/claude-3.5-sonnet</code>).
+                  LLM translations are penalized by this amount in health calculations. 0% = full trust, 50% = heavy penalty. Default: 10%.
                 </p>
               </div>
-            )}
-
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <Label htmlFor="mt">Max Tokens</Label>
-                <Input id="mt" type="number" value={maxTokens} onChange={(e) => setMaxTokens(Number(e.target.value))} />
-              </div>
-              <div>
-                <Label>Temperature ({temperature})</Label>
-                <input type="range" min="0" max="1" step="0.05" value={temperature} onChange={(e) => setTemperature(Number(e.target.value))} className="mt-2 w-full" />
-              </div>
             </div>
+          </details>
+        )}
 
-            <div>
-              <Label>LLM Health Penalty ({Math.round(llmHealthPenalty * 100)}%)</Label>
-              <input type="range" min="0" max="0.5" step="0.05" value={llmHealthPenalty} onChange={(e) => setLlmHealthPenalty(Number(e.target.value))} className="mt-2 w-full" />
-              <p className="mt-1 text-xs text-muted-foreground">
-                LLM translations are penalized by this amount in health calculations. 0% = full trust, 50% = heavy penalty. Default: 10%.
+        {visibleSections.some((s) => s.id === "section-voice") && (
+          <Card id="section-voice">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Sparkles className="h-4 w-4 text-primary" /> Voice
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="flex items-center justify-between gap-4">
+              <p className="text-sm text-muted-foreground">
+                The TTS engine, Gemini API key, voice library, and voice cloning now live in the Voice Studio.
               </p>
-            </div>
+              <Button variant="outline" onClick={() => {
+                // Set the Audio lens preference before navigating so the workspace opens in audio mode.
+                try { window.localStorage.setItem(`codex:editorLens:${id}`, "audio") } catch { /* ignore */ }
+                requestNavigate(`/project/${id}`)
+              }} className="shrink-0">
+                Open Voice Studio
+              </Button>
+            </CardContent>
+          </Card>
+        )}
+
+        {visibleSections.some((s) => s.id === "section-decay") && (
+          <div id="section-decay">
+            <DecaySettingsSection
+              settings={decaySettings}
+              requiredValidations={validationCount}
+              onChange={setDecaySettings}
+            />
           </div>
-        </details>
+        )}
 
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Sparkles className="h-4 w-4 text-primary" /> Voice
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="flex items-center justify-between gap-4">
-            <p className="text-sm text-muted-foreground">
-              The TTS engine, Gemini API key, voice library, and voice cloning now live in the Voice Studio.
-            </p>
-            <Button variant="outline" onClick={() => {
-              // Set the Audio lens preference before navigating so the workspace opens in audio mode.
-              try { window.localStorage.setItem(`codex:editorLens:${id}`, "audio") } catch { /* ignore */ }
-              requestNavigate(`/project/${id}`)
-            }} className="shrink-0">
-              Open Voice Studio
-            </Button>
-          </CardContent>
-        </Card>
+        {visibleSections.some((s) => s.id === "section-validation") && (
+          <div id="section-validation">
+            <ValidationSettingsSection
+              validationCount={validationCount}
+              validationCountAudio={validationCountAudio}
+              hasAnyAudioData={Boolean(project?.hasAnyAudioData)}
+              disabled={!canEditShared}
+              disabledTooltip={sharedDisabledTooltip ?? undefined}
+              onChange={(u) => {
+                if (u.validationCount !== undefined) setValidationCount(u.validationCount)
+                if (u.validationCountAudio !== undefined) setValidationCountAudio(u.validationCountAudio)
+              }}
+            />
+          </div>
+        )}
 
-        <DecaySettingsSection
-          settings={decaySettings}
-          requiredValidations={validationCount}
-          onChange={setDecaySettings}
-        />
+        {visibleSections.some((s) => s.id === "section-audio-media") && (
+          <div id="section-audio-media">
+            <AudioMediaStrategySection
+              value={audioMediaStrategy}
+              onChange={setAudioMediaStrategy}
+            />
+          </div>
+        )}
 
-        <ValidationSettingsSection
-          validationCount={validationCount}
-          validationCountAudio={validationCountAudio}
-          hasAnyAudioData={Boolean(project?.hasAnyAudioData)}
-          disabled={!canEditShared}
-          disabledTooltip={sharedDisabledTooltip ?? undefined}
-          onChange={(u) => {
-            if (u.validationCount !== undefined) setValidationCount(u.validationCount)
-            if (u.validationCountAudio !== undefined) setValidationCountAudio(u.validationCountAudio)
-          }}
-        />
-
-        <AudioMediaStrategySection
-          value={audioMediaStrategy}
-          onChange={setAudioMediaStrategy}
-        />
-
-        {project?.origin?.kind === "git" && (
-          <Card>
+        {project?.origin?.kind === "git" && visibleSections.some((s) => s.id === "section-git-sync") && (
+          <Card id="section-git-sync">
             <CardHeader><CardTitle>Git Sync</CardTitle></CardHeader>
             <CardContent className="space-y-3">
               <p className="text-xs text-muted-foreground">
@@ -801,7 +878,8 @@ export function ProjectSettings() {
             </CardContent>
           </Card>
         )}
-      </main>
+        </main>
+      </div>
 
       <Dialog open={discardOpen} onOpenChange={(open) => (open ? setDiscardOpen(true) : handleDiscardCancel())}>
         <DialogContent>

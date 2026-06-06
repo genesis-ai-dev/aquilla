@@ -1,4 +1,4 @@
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { Check, Undo2, Send, AlertTriangle } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import type { CommentThread as ThreadData } from "@/lib/parsers/types"
@@ -14,11 +14,33 @@ interface CommentThreadProps {
   onReply: (text: string) => void
   onResolve: (closingMessage?: string) => void
   onReopen: () => void
+  projectId?: string
+  cellId?: string
 }
 
-export function CommentThread({ thread, currentTranslated, canReply = true, canResolve = true, onReply, onResolve, onReopen }: CommentThreadProps) {
-  const [replyText, setReplyText] = useState("")
+function draftKey(projectId: string | undefined, cellId: string | undefined, threadId: string): string {
+  return `comment-draft:${projectId ?? "unknown"}:${cellId ?? "unknown"}:${threadId}`
+}
+
+export function CommentThread({ thread, currentTranslated, canReply = true, canResolve = true, onReply, onResolve, onReopen, projectId, cellId }: CommentThreadProps) {
+  const storageKey = draftKey(projectId, cellId, thread.id)
+  const [replyText, setReplyText] = useState(() => {
+    if (typeof window === "undefined") return ""
+    try { return localStorage.getItem(storageKey) ?? "" } catch { return "" }
+  })
   const isStale = thread.createdForTranslated !== currentTranslated
+
+  // Persist draft to localStorage whenever it changes
+  useEffect(() => {
+    if (typeof window === "undefined") return
+    try {
+      if (replyText) {
+        localStorage.setItem(storageKey, replyText)
+      } else {
+        localStorage.removeItem(storageKey)
+      }
+    } catch { /* ignore quota errors */ }
+  }, [replyText, storageKey])
 
   function formatTimestamp(iso: string): string {
     try {
@@ -38,6 +60,13 @@ export function CommentThread({ thread, currentTranslated, canReply = true, canR
     if (!replyText.trim()) return
     onResolve(replyText)
     setReplyText("")
+  }
+
+  function handleReplyKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
+    if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+      e.preventDefault()
+      handleReply()
+    }
   }
 
   // SECURITY: comment text is rendered through renderCommentHtml which escapes
@@ -99,6 +128,7 @@ export function CommentThread({ thread, currentTranslated, canReply = true, canR
               <textarea
                 value={replyText}
                 onChange={(e) => setReplyText(e.target.value)}
+                onKeyDown={handleReplyKeyDown}
                 placeholder="Reply..."
                 rows={2}
                 className="neu-inset w-full resize-none rounded px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-ring"

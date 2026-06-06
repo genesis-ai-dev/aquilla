@@ -16,6 +16,8 @@ import type { CommentRecord } from "@/lib/sync/comments-read-types"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { buildFileScopedTokenFetcher } from "@/lib/sync/cqrs-bridge"
 import { useProject } from "@/hooks/useProject"
+import { renderCommentHtml } from "@/lib/comments/comment-helpers"
+import DOMPurify from "dompurify"
 
 // ── Helpers ───────────────────────────────────────────────────────────────
 
@@ -59,7 +61,16 @@ function CommentBubble({ comment }: { comment: CommentRecord }) {
       {isDeleted ? (
         <p className="italic text-xs text-muted-foreground">[deleted]</p>
       ) : (
-        <p className="text-sm whitespace-pre-wrap">{comment.body}</p>
+        // eslint-disable-next-line react/no-danger
+        <div
+          className="text-sm"
+          dangerouslySetInnerHTML={{
+            __html: DOMPurify.sanitize(renderCommentHtml(comment.body), {
+              ALLOWED_TAGS: ["b", "i", "code", "br", "span"],
+              ALLOWED_ATTR: ["class"],
+            }),
+          }}
+        />
       )}
     </div>
   )

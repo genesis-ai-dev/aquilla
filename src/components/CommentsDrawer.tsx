@@ -26,6 +26,13 @@ export function CommentsDrawer({ project, cell, onClose, onNewThread, onReply, o
     setNewThreadText("")
   }
 
+  function handleNewThreadKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
+    if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+      e.preventDefault()
+      handleCreate()
+    }
+  }
+
   return (
     <div className="neu-flat relative z-10 flex h-full w-96 flex-col">
       <div className="flex items-center justify-between border-b px-3 py-2">
@@ -73,6 +80,7 @@ export function CommentsDrawer({ project, cell, onClose, onNewThread, onReply, o
           <textarea
             value={newThreadText}
             onChange={(e) => setNewThreadText(e.target.value)}
+            onKeyDown={handleNewThreadKeyDown}
             placeholder="Start a new comment thread..."
             rows={2}
             className="neu-inset w-full resize-none rounded px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-ring"

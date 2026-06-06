@@ -7,6 +7,16 @@ import { useActiveOrg } from "@/context/OrgContext"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { listTeams, createTeam, type TeamSummary } from "@/lib/frontier/teams"
 
+type SortOption = "name" | "members" | "projects"
+
+function sortTeams(teams: TeamSummary[], sort: SortOption): TeamSummary[] {
+  return [...teams].sort((a, b) => {
+    if (sort === "members") return b.memberCount - a.memberCount
+    if (sort === "projects") return b.projectCount - a.projectCount
+    return a.name.localeCompare(b.name, undefined, { sensitivity: "base" })
+  })
+}
+
 export function TeamsList() {
   const { activeOrgId, activeOrg } = useActiveOrg()
   const { session } = useFrontierSession()
@@ -17,6 +27,8 @@ export function TeamsList() {
   const [creating, setCreating] = useState(false)
   const [name, setName] = useState("")
   const [description, setDescription] = useState("")
+  const [query, setQuery] = useState("")
+  const [sort, setSort] = useState<SortOption>("name")
 
   const isAdmin = (activeOrg?.role.level ?? 0) >= 600
 
@@ -29,6 +41,13 @@ export function TeamsList() {
       .finally(() => { if (!cancelled) setLoading(false) })
     return () => { cancelled = true }
   }, [jwt, activeOrgId])
+
+  const filtered = sortTeams(
+    query.trim()
+      ? teams.filter((t) => t.name.toLowerCase().includes(query.trim().toLowerCase()))
+      : teams,
+    sort,
+  )
 
   return (
     <AppShell
@@ -60,9 +79,46 @@ export function TeamsList() {
             </div>
           )}
 
-          {loading ? <p className="text-sm text-muted-foreground">Loading…</p> : (
+          {/* Search + sort bar */}
+          {!loading && teams.length > 0 && (
+            <div className="mb-4 flex flex-wrap items-center gap-2">
+              <input
+                type="search"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder="Search teams…"
+                className="min-w-0 flex-1 rounded-md border px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
+              />
+              <select
+                value={sort}
+                onChange={(e) => setSort(e.target.value as SortOption)}
+                className="rounded-md border px-2 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
+                aria-label="Sort teams by"
+              >
+                <option value="name">Name (A–Z)</option>
+                <option value="members">Members (most first)</option>
+                <option value="projects">Projects (most first)</option>
+              </select>
+            </div>
+          )}
+
+          {loading ? (
+            <p className="text-sm text-muted-foreground">Loading…</p>
+          ) : teams.length === 0 ? (
+            <p className="text-sm text-muted-foreground">No teams in this org yet.</p>
+          ) : filtered.length === 0 ? (
+            <div className="flex items-center gap-3">
+              <p className="text-sm text-muted-foreground">No teams match &ldquo;{query}&rdquo;</p>
+              <button
+                onClick={() => setQuery("")}
+                className="text-sm text-primary underline-offset-2 hover:underline"
+              >
+                Clear
+              </button>
+            </div>
+          ) : (
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-              {teams.map((t) => (
+              {filtered.map((t) => (
                 <button
                   key={t.id}
                   onClick={() => navigate(`/teams/${t.id}`)}
@@ -77,9 +133,6 @@ export function TeamsList() {
                   )}
                 </button>
               ))}
-              {teams.length === 0 && (
-                <p className="text-sm text-muted-foreground">No teams in this org yet.</p>
-              )}
             </div>
           )}
         </div>

@@ -97,3 +97,71 @@ describe("TeamsList — FRO-165 regression: all teams shown without filtering", 
     expect(screen.queryByRole("button", { name: /public only/i })).toBeNull()
   })
 })
+
+describe("TeamsList — FRO-166: search + sort", () => {
+  const teams = [
+    makeTeam({ id: 1, name: "Alpha", memberCount: 5, projectCount: 2 }),
+    makeTeam({ id: 2, name: "beta", memberCount: 10, projectCount: 1 }),
+    makeTeam({ id: 3, name: "Gamma", memberCount: 3, projectCount: 8 }),
+  ]
+
+  it("default sort is Name A–Z (case-insensitive)", async () => {
+    listTeams.mockResolvedValue(teams)
+    render(<MemoryRouter><OrgProvider><TeamsList /></OrgProvider></MemoryRouter>)
+    await waitFor(() => expect(screen.getByText("Alpha")).toBeInTheDocument())
+    const names = screen.getAllByText(/alpha|beta|gamma/i).map((el) => el.textContent)
+    expect(names).toEqual(["Alpha", "beta", "Gamma"])
+  })
+
+  it("search narrows list by name (case-insensitive substring)", async () => {
+    listTeams.mockResolvedValue(teams)
+    render(<MemoryRouter><OrgProvider><TeamsList /></OrgProvider></MemoryRouter>)
+    await waitFor(() => expect(screen.getByPlaceholderText("Search teams…")).toBeInTheDocument())
+    // "lph" matches "Alpha" only
+    fireEvent.change(screen.getByPlaceholderText("Search teams…"), { target: { value: "lph" } })
+    await waitFor(() => expect(screen.getByText("Alpha")).toBeInTheDocument())
+    expect(screen.queryByText("beta")).toBeNull()
+    expect(screen.queryByText("Gamma")).toBeNull()
+  })
+
+  it("sort by Members (most first) reorders correctly", async () => {
+    listTeams.mockResolvedValue(teams)
+    render(<MemoryRouter><OrgProvider><TeamsList /></OrgProvider></MemoryRouter>)
+    await waitFor(() => expect(screen.getByRole("combobox", { name: /sort teams by/i })).toBeInTheDocument())
+    fireEvent.change(screen.getByRole("combobox", { name: /sort teams by/i }), { target: { value: "members" } })
+    const cards = screen.getAllByRole("button").filter((b) => ["Alpha", "beta", "Gamma"].includes(b.querySelector("span")?.textContent ?? ""))
+    expect(cards[0].querySelector("span")?.textContent).toBe("beta")   // 10
+    expect(cards[1].querySelector("span")?.textContent).toBe("Alpha")  // 5
+    expect(cards[2].querySelector("span")?.textContent).toBe("Gamma")  // 3
+  })
+
+  it("sort by Projects (most first) reorders correctly", async () => {
+    listTeams.mockResolvedValue(teams)
+    render(<MemoryRouter><OrgProvider><TeamsList /></OrgProvider></MemoryRouter>)
+    await waitFor(() => expect(screen.getByRole("combobox", { name: /sort teams by/i })).toBeInTheDocument())
+    fireEvent.change(screen.getByRole("combobox", { name: /sort teams by/i }), { target: { value: "projects" } })
+    const cards = screen.getAllByRole("button").filter((b) => ["Alpha", "beta", "Gamma"].includes(b.querySelector("span")?.textContent ?? ""))
+    expect(cards[0].querySelector("span")?.textContent).toBe("Gamma")  // 8
+    expect(cards[1].querySelector("span")?.textContent).toBe("Alpha")  // 2
+    expect(cards[2].querySelector("span")?.textContent).toBe("beta")   // 1
+  })
+
+  it("no-results state shows message and Clear resets search", async () => {
+    listTeams.mockResolvedValue(teams)
+    render(<MemoryRouter><OrgProvider><TeamsList /></OrgProvider></MemoryRouter>)
+    await waitFor(() => expect(screen.getByPlaceholderText("Search teams…")).toBeInTheDocument())
+    fireEvent.change(screen.getByPlaceholderText("Search teams…"), { target: { value: "zzz" } })
+    await waitFor(() => expect(screen.getByText(/no teams match/i)).toBeInTheDocument())
+    expect(screen.getByRole("button", { name: /clear/i })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button", { name: /clear/i }))
+    await waitFor(() => expect(screen.getByText("Alpha")).toBeInTheDocument())
+    expect(screen.queryByText(/no teams match/i)).toBeNull()
+  })
+
+  it("empty-org state shows 'No teams in this org yet.' (no search bar)", async () => {
+    listTeams.mockResolvedValue([])
+    render(<MemoryRouter><OrgProvider><TeamsList /></OrgProvider></MemoryRouter>)
+    await waitFor(() => expect(screen.getByText(/no teams in this org yet/i)).toBeInTheDocument())
+    expect(screen.queryByPlaceholderText("Search teams…")).toBeNull()
+  })
+})

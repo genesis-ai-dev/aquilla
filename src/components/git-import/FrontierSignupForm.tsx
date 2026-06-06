@@ -2,9 +2,79 @@ import { useState, useEffect, type FormEvent } from "react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { Eye, EyeOff } from "lucide-react"
+import { Eye, EyeOff, Check, X } from "lucide-react"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { FrontierAuthError } from "@/lib/frontier/auth"
+
+/** Pure function — exported for unit testing. */
+export function checkPasswordRequirements(password: string, email: string) {
+  const emailLocal = email.trim().toLowerCase().split("@")[0]
+  return {
+    minLength: password.length >= 8,
+    notContainsEmail:
+      emailLocal.length < 3
+        ? true
+        : !password.toLowerCase().includes(emailLocal),
+  }
+}
+
+/** Weak/medium/strong heuristic — length + digit + symbol. */
+export function passwordStrength(password: string): "weak" | "medium" | "strong" {
+  if (password.length === 0) return "weak"
+  let score = 0
+  if (password.length >= 8) score++
+  if (password.length >= 12) score++
+  if (/[0-9]/.test(password)) score++
+  if (/[^A-Za-z0-9]/.test(password)) score++
+  if (score <= 1) return "weak"
+  if (score === 2) return "medium"
+  return "strong"
+}
+
+function PasswordChecklist({ password, email }: { password: string; email: string }) {
+  const checks = checkPasswordRequirements(password, email)
+  const strength = passwordStrength(password)
+  const hasTyped = password.length > 0
+
+  const strengthColor = {
+    weak: "bg-destructive",
+    medium: "bg-yellow-400",
+    strong: "bg-green-500",
+  }[strength]
+
+  const strengthWidth = { weak: "w-1/3", medium: "w-2/3", strong: "w-full" }[strength]
+
+  const items: { key: keyof typeof checks; label: string }[] = [
+    { key: "minLength", label: "At least 8 characters" },
+    { key: "notContainsEmail", label: "Does not contain your email" },
+  ]
+
+  return (
+    <div className="mt-1.5 space-y-1">
+      {items.map(({ key, label }) => {
+        const ok = checks[key]
+        return (
+          <div key={key} className="flex items-center gap-1.5 text-xs">
+            {ok ? (
+              <Check className="h-3 w-3 text-green-500 shrink-0" />
+            ) : (
+              <X className="h-3 w-3 text-muted-foreground shrink-0" />
+            )}
+            <span className={ok ? "text-green-600" : "text-muted-foreground"}>{label}</span>
+          </div>
+        )
+      })}
+      {hasTyped && (
+        <div className="mt-1 space-y-0.5">
+          <div className="h-1 w-full rounded bg-muted overflow-hidden">
+            <div className={`h-full rounded transition-all ${strengthColor} ${strengthWidth}`} />
+          </div>
+          <p className="text-[10px] text-muted-foreground capitalize">Strength: {strength}</p>
+        </div>
+      )}
+    </div>
+  )
+}
 
 export function FrontierSignupForm({ onSuccess }: { onSuccess: () => void }) {
   const { register } = useFrontierSession()
@@ -30,7 +100,8 @@ export function FrontierSignupForm({ onSuccess }: { onSuccess: () => void }) {
   // Server enforces: username 3-50 chars, email format, password >= 8 chars.
   const usernameOk = username.trim().length >= 3 && username.trim().length <= 50
   const emailOk = /.+@.+\..+/.test(email.trim())
-  const passwordOk = password.length >= 8
+  const pwChecks = checkPasswordRequirements(password, email)
+  const passwordOk = pwChecks.minLength && pwChecks.notContainsEmail
   const canSubmit = usernameOk && emailOk && passwordOk && !busy && isOnline
 
   async function onSubmit(e: FormEvent) {
@@ -96,9 +167,7 @@ export function FrontierSignupForm({ onSuccess }: { onSuccess: () => void }) {
             {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
           </button>
         </div>
-        <p className="mt-1 text-xs text-muted-foreground">
-          At least 8 characters. Choose something strong and unique.
-        </p>
+        <PasswordChecklist password={password} email={email} />
       </div>
       {error && <p className="text-sm text-destructive">{error}</p>}
       <Button type="submit" disabled={!canSubmit} className="w-full">

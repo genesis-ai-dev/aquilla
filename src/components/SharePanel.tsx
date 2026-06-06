@@ -141,11 +141,21 @@ interface InviteLinkTabProps {
  * inviter can demote/remove). Anyone with the link can redeem until it
  * expires or a member with sufficient role revokes it server-side.
  */
+/** Expiry options: days (number) or null = no expiry. */
+const EXPIRY_OPTIONS: { label: string; value: number | null }[] = [
+  { label: "1 day", value: 1 },
+  { label: "7 days (default)", value: 7 },
+  { label: "30 days", value: 30 },
+  { label: "No expiry", value: null },
+]
+const DEFAULT_EXPIRY_DAYS = 7
+
 function InviteLinkTab({ projectId, onSharesChanged }: InviteLinkTabProps) {
   const { session } = useFrontierSession()
   const [inviteRole, setInviteRole] = useState<number>(DEFAULT_INVITE_ROLE)
   const [inviteEmail, setInviteEmail] = useState<string>("")
   const [emailError, setEmailError] = useState<string | null>(null)
+  const [expiresInDays, setExpiresInDays] = useState<number | null>(DEFAULT_EXPIRY_DAYS)
   const [busy, setBusy] = useState(false)
   const [issuedUrl, setIssuedUrl] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
@@ -171,7 +181,8 @@ function InviteLinkTab({ projectId, onSharesChanged }: InviteLinkTabProps) {
         projectId,
         inviteRole,
         undefined,
-        trimmedEmail || undefined
+        trimmedEmail || undefined,
+        expiresInDays
       )
       if (!serverInvite) {
         setServerError("Couldn't create invite. You may not have permission, or the server is unreachable.")
@@ -196,6 +207,7 @@ function InviteLinkTab({ projectId, onSharesChanged }: InviteLinkTabProps) {
     setCopied(false)
     setInviteEmail("")
     setInviteRole(DEFAULT_INVITE_ROLE)
+    setExpiresInDays(DEFAULT_EXPIRY_DAYS)
   }
 
   if (issuedUrl) {
@@ -269,6 +281,23 @@ function InviteLinkTab({ projectId, onSharesChanged }: InviteLinkTabProps) {
               : "Leave blank for an open link anyone signed in can redeem."}
           </p>
         )}
+      </div>
+      <div className="space-y-1">
+        <Label className="text-xs">Link expires</Label>
+        <select
+          className="w-full rounded border bg-background px-2 py-1 text-sm"
+          value={expiresInDays === null ? "null" : String(expiresInDays)}
+          onChange={(e) =>
+            setExpiresInDays(e.target.value === "null" ? null : Number(e.target.value))
+          }
+          disabled={!session?.jwt}
+        >
+          {EXPIRY_OPTIONS.map((opt) => (
+            <option key={String(opt.value)} value={String(opt.value)}>
+              {opt.label}
+            </option>
+          ))}
+        </select>
       </div>
       {serverError && (
         <p className="flex items-start gap-1 text-xs text-destructive">

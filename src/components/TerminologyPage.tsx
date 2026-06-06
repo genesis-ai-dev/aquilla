@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react"
+import { useState, useMemo, useCallback } from "react"
 import { useParams, useNavigate } from "react-router-dom"
 import {
   ArrowLeft,
@@ -34,6 +34,7 @@ import { computeTerminologyStats } from "@/lib/terminology/stats"
 import type { CellPair } from "@/lib/terminology/stats"
 import { cn } from "@/lib/utils"
 import { useProject } from "@/hooks/useProject"
+import { TerminologyTermDetail } from "@/components/TerminologyTermDetail"
 
 // ────────────────────────────────────────────────────────────────────────────
 // Rendering status chip helpers
@@ -446,17 +447,24 @@ interface ConceptRowProps {
   concept: Concept
   onEdit: (concept: Concept) => void
   onDelete: (id: string) => void
+  onDrillDown: (concept: Concept) => void
 }
 
-function ConceptRow({ concept, onEdit, onDelete }: ConceptRowProps) {
+function ConceptRow({ concept, onEdit, onDelete, onDrillDown }: ConceptRowProps) {
   return (
     <li
       data-testid="concept-row"
       className="flex items-start gap-3 border-b py-3 last:border-0"
     >
-      {/* Source term */}
+      {/* Source term — click to drill down */}
       <div className="min-w-0 w-36 shrink-0">
-        <span className="text-sm font-medium">{concept.sourceTerm}</span>
+        <button
+          type="button"
+          className="text-sm font-medium hover:underline text-left cursor-pointer"
+          onClick={() => onDrillDown(concept)}
+        >
+          {concept.sourceTerm}
+        </button>
       </div>
 
       {/* Renderings */}
@@ -631,6 +639,11 @@ export function TerminologyPage() {
   const [editTarget, setEditTarget] = useState<Concept | null>(null)
   const [importOpen, setImportOpen] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [drillDownConcept, setDrillDownConcept] = useState<Concept | null>(null)
+
+  const handleDrillDown = useCallback((concept: Concept) => {
+    setDrillDownConcept(concept)
+  }, [])
 
   // ── Persist helper ─────────────────────────────────────────────────────────
 
@@ -705,6 +718,26 @@ export function TerminologyPage() {
   // ── Render ─────────────────────────────────────────────────────────────────
 
   if (loading) return <div className="p-8 text-muted-foreground">Loading…</div>
+
+  // Drill-down view: overlay the detail panel when a concept is selected.
+  // SWARM-TODO(FRO-206): cells are empty here — TerminologyPage does not yet
+  // wire useCells. A follow-up should pass the active-file CellData[] (or all
+  // cross-file cells) so occurrences populate. The component renders a
+  // zero-occurrence placeholder in the interim.
+  if (drillDownConcept) {
+    return (
+      <TerminologyTermDetail
+        concept={drillDownConcept}
+        cells={[]}
+        canEdit={true}
+        projectId={id!}
+        username="local"
+        onClose={() => setDrillDownConcept(null)}
+        onCellCommitted={() => {}}
+        onOptimisticEdit={() => {}}
+      />
+    )
+  }
 
   return (
     <div className="min-h-screen bg-background">
@@ -815,6 +848,7 @@ export function TerminologyPage() {
                         concept={concept}
                         onEdit={setEditTarget}
                         onDelete={handleDelete}
+                        onDrillDown={handleDrillDown}
                       />
                     ))}
                   </ul>

@@ -284,6 +284,6 @@ describe("TerminologyPage", () => {
     // Check their status label chips (format is "rendering·statusLabel")
     expect(screen.getByText(/·required/i)).toBeInTheDocument()
     expect(screen.getByText(/·alternate/i)).toBeInTheDocument()
-    expect(screen.getByText(/·avoid/i)).toBeInTheDocument()
+    expect(screen.getByText(/·forbidden/i)).toBeInTheDocument()
   })
 })

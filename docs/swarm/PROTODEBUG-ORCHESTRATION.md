@@ -95,3 +95,10 @@ Protocol: push dev + main with --no-verify (prototyping). Prod Neon migration al
 - settingsnav: ProjectSettings left-rail section nav + scrollspy + type-ahead field search.
 GATE: tsc 0 · vitest 1588 pass / 2 baseline · build 0.
 AUDIT (new, this wave): billing/tiers + BYOK + private-mode + publish = DEFERRED (correctly skipped). New gaps → issues: harmonization sweep (v1-behind), AI retrieval-tuning settings keys (top_k/contextSize/useOnlyValidatedExamples/main_chat_language), logout pending-outbox warning, outbox permanent-failure cap, password-reset ?next= threading.
+
+## §M Wave 7 (loop, 2026-06-06)
+- voice drag-and-drop chip→cell row (EditorTable drop + ProjectWorkspace onAssignVoice→generateCellVoice).
+- FRO-187: top_k/contextSize/useOnlyValidatedExamples/main_chat_language AI settings + retrieval wiring in useCompletion.
+- FRO-188: logout pending-edit confirm; outbox failure cap (OUTBOX_MAX_ATTEMPTS=5)+escalation; password-reset ?next= threading; account-switcher email+env hint.
+- ImportDialog card-landing (Upload/eBible active; Macula/TMX/TN disabled placeholders → FRO-178/179).
+GATE: tsc 0 · vitest 1593 pass / 2 baseline · build 0.

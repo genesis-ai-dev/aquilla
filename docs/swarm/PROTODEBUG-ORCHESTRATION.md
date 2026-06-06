@@ -117,3 +117,8 @@ GATE: tsc 0 · vitest 1610 pass / 2 baseline · build 0.
 - mic-denied wiring: useMicPermission probe (audio-lens-gated) → micDenied into CellAudioRecordButton help affordance.
 GATE: tsc 0 · sync-worker 428/428 · root vitest 1629 pass / 2 baseline · build 0.
 ## §CONVERGENCE (Wave 9 audit): surgical backlog ~drained. Remaining NEW gaps → small: HealthRing on ProjectCard/Dashboard (next). Large/HITL → file: download-target-bible, assignment work-pickup UI, detach-from-source. (search-replace already FRO-177.)
+
+## §CONVERGED (2026-06-06, after Wave 9)
+Production-readiness loop STOPPED — surgical/obvious spec-behind backlog drained. Cron 3db58d64 deleted.
+Shipped Waves 5–9: ~23 surgical/medium spec-conformance fixes, all on main+dev (@ 2ebf398), staging auto-deploying.
+Remaining backlog = large/architectural/HITL (need product input, not autonomous build): FRO-173 (audio legacy backfill — data decision), 175 (chat panel), 176 (snapshots), 177 (search-replace), 178 (macula), 179 (TN import), 180 (per-project members), 181 (AD-14 confidence — in-flight design), 183 (terminology data model), 186 (harmonization), 190 (HealthRing-on-card — gated on AD-14), 191 (download-target-bible), 192 (assignment UI), 193 (detach-from-source).

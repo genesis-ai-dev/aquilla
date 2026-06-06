@@ -86,3 +86,12 @@ Protocol: push dev + main with --no-verify (prototyping). Prod Neon migration al
 - Stale-source per-cell marker; resume-last-location (cell-level); ProjectSettings section nav + search; ImportDialog 6-card landing.
 - Validation config dimensions (role floor/named-user/allowSelfValidation) + server policy; CommentsPage @mention/navigate/show-resolved (FRO-185).
 - Continue auditing remaining user stories (onboarding, billing/tiers, private-mode, publish-workspace, harmonization).
+
+## §M Wave 6 (loop — more spec-behind fixes, 2026-06-06)
+- FRO-174: AI completion Tab/Esc accept-reject wired end-to-end (useCompletion accept/rejectCompletion + EditorTable keydown/overlay + events-emit ai_suggestion variant + ProjectWorkspace props). +tests.
+- history: HistoryDrawer promote-to-current (AD-2) — two-step confirm → emitTargetCellCommit parented on current head. 
+- authtrio: signup live password checklist+strength, "Sign out of all accounts", invite-expiry selector (server param = SWARM-TODO).
+- audiopolish: mic-denied help popover, 25/30min recording warn/hard-stop, cloud-pending audio state + hover prefetch.
+- settingsnav: ProjectSettings left-rail section nav + scrollspy + type-ahead field search.
+GATE: tsc 0 · vitest 1588 pass / 2 baseline · build 0.
+AUDIT (new, this wave): billing/tiers + BYOK + private-mode + publish = DEFERRED (correctly skipped). New gaps → issues: harmonization sweep (v1-behind), AI retrieval-tuning settings keys (top_k/contextSize/useOnlyValidatedExamples/main_chat_language), logout pending-outbox warning, outbox permanent-failure cap, password-reset ?next= threading.

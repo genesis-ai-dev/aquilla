@@ -66,11 +66,15 @@ export async function createServerInvite(
   projectId: string,
   role: number = ROLE.CONTRIBUTOR,
   apiUrl: string = AUTH_API_URL,
-  email?: string
+  email?: string,
+  /** Expiry in days. Pass null for no expiry. If undefined, server default applies. */
+  expiresInDays?: number | null
 ): Promise<ServerInviteCreated | null> {
   try {
     const body: Record<string, unknown> = { role }
     if (email && email.trim().length > 0) body.email = email.trim()
+    // SWARM-TODO: confirm server accepts expires_in_days or equivalent TTL field.
+    if (expiresInDays !== undefined) body.expires_in_days = expiresInDays
     const res = await fetch(
       `${apiUrl}/api/v2/projects/${encodeURIComponent(projectId)}/invites`,
       {

@@ -65,6 +65,7 @@ export function handleCommentEvent(
     payload: event.payload,
     clientTs: event.clientTs,
     serverTs,
+    callerRole: claims.roleLevel,
   }
 
   const stmts: D1PreparedStatement[] = [eventInsert]

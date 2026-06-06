@@ -142,6 +142,14 @@ export interface EventPayloads {
   'cell.unvalidate': {
     /** The target commit event whose validation is being withdrawn. */
     editEventId: string
+    /**
+     * When a maintainer is removing another user's validation, set this to
+     * the username of the validator whose row should be deleted. If omitted
+     * or equal to the caller's own username, the caller removes their own
+     * validation (reviewer+ allowed). If set to a different username, the
+     * caller must have maintainer (600) or above.
+     */
+    targetUsername?: string
   }
 
   // ── QA rule waivers ────────────────────────────────────────────────────

@@ -56,7 +56,7 @@ describe("useCompletion accept/reject (FRO-174)", () => {
 
   it("acceptCompletion calls commitCompletedCell and clears state", async () => {
     const { result } = renderHook(() =>
-      useCompletion(SETTINGS, "en", "fr", search, searchPassages, session, commitCompletedCell),
+      useCompletion(SETTINGS, "en", "fr", search, searchPassages, session, commitCompletedCell as never),
     )
 
     // Manually prime the previews + completing maps via internal state.
@@ -77,7 +77,7 @@ describe("useCompletion accept/reject (FRO-174)", () => {
 
   it("rejectCompletion on unknown cellId is a no-op (no throw)", () => {
     const { result } = renderHook(() =>
-      useCompletion(SETTINGS, "en", "fr", search, searchPassages, session, commitCompletedCell),
+      useCompletion(SETTINGS, "en", "fr", search, searchPassages, session, commitCompletedCell as never),
     )
     expect(() => {
       act(() => result.current.rejectCompletion("does-not-exist"))
@@ -87,7 +87,7 @@ describe("useCompletion accept/reject (FRO-174)", () => {
 
   it("acceptCompletion is a no-op when cell is not in done state", async () => {
     const { result } = renderHook(() =>
-      useCompletion(SETTINGS, "en", "fr", search, searchPassages, session, commitCompletedCell),
+      useCompletion(SETTINGS, "en", "fr", search, searchPassages, session, commitCompletedCell as never),
     )
     // completing map is empty — cell is not in done state
     await act(async () => {

@@ -1,21 +1,67 @@
 /**
- * LivingMemoryPage — read-only surface showing the project's validated
- * source→target pairs as a living reference.
+ * LivingMemoryPage — shows three sections:
+ *   1. Instructions  — authored guidance entries (kind="instruction")
+ *   2. Standards     — authored standards entries  (kind="standard")
+ *   3. Recent Examples — validated source→target pairs (read-only)
  *
  * SWARM-TODO(living-memory): add nav entry in ProjectWorkspace nav items
  *   (e.g. next to Rules / Comments) pointing to /project/:id/memory.
  */
 
-import { useMemo } from "react"
+import React, { useMemo, useState } from "react"
 import { useParams, useNavigate } from "react-router-dom"
-import { ArrowLeft, BookOpen, Users, AlertTriangle } from "lucide-react"
+import { ArrowLeft, BookOpen, Users, AlertTriangle, Plus, Pencil, Trash2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Skeleton } from "@/components/ui/skeleton"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
 import { useLivingMemory } from "@/hooks/useLivingMemory"
 import type { LivingMemoryCell } from "@/hooks/useLivingMemory"
 import { useLiveness } from "@/hooks/useLiveness"
+import { useProject } from "@/hooks/useProject"
+import { useFrontierSession } from "@/hooks/useFrontierSession"
+import type { LivingMemoryEntry } from "@/lib/parsers/types"
+
+// ── Pure helpers (add/update/delete for living memory entries) ─────────────
+
+export function addEntry(
+  entries: LivingMemoryEntry[],
+  kind: LivingMemoryEntry["kind"],
+  text: string,
+  author: string,
+): LivingMemoryEntry[] {
+  const entry: LivingMemoryEntry = {
+    id: crypto.randomUUID(),
+    kind,
+    text: text.trim(),
+    createdAt: new Date().toISOString(),
+    author,
+  }
+  return [...entries, entry]
+}
+
+export function updateEntry(
+  entries: LivingMemoryEntry[],
+  id: string,
+  text: string,
+): LivingMemoryEntry[] {
+  return entries.map((e) => (e.id === id ? { ...e, text: text.trim() } : e))
+}
+
+export function deleteEntry(
+  entries: LivingMemoryEntry[],
+  id: string,
+): LivingMemoryEntry[] {
+  return entries.filter((e) => e.id !== id)
+}
 
 // ── Skeleton placeholder while loading ────────────────────────────────────
 
@@ -156,6 +202,176 @@ function CellList({ cells }: { cells: LivingMemoryCell[] }) {
   )
 }
 
+// ── Entry form (inline add / edit) ─────────────────────────────────────────
+
+interface EntryFormProps {
+  initialText?: string
+  onSave: (text: string) => void
+  onCancel: () => void
+}
+
+function EntryForm({ initialText = "", onSave, onCancel }: EntryFormProps) {
+  const [text, setText] = useState(initialText)
+  return (
+    <div className="flex flex-col gap-2">
+      <textarea
+        value={text}
+        onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setText(e.target.value)}
+        placeholder="Enter text…"
+        className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm min-h-[72px] resize-none focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+        autoFocus
+      />
+      <div className="flex gap-2 justify-end">
+        <Button size="sm" variant="ghost" onClick={onCancel}>
+          Cancel
+        </Button>
+        <Button
+          size="sm"
+          onClick={() => { if (text.trim()) onSave(text) }}
+          disabled={!text.trim()}
+        >
+          Save
+        </Button>
+      </div>
+    </div>
+  )
+}
+
+// ── Authored entries section ───────────────────────────────────────────────
+
+interface AuthoredEntriesSectionProps {
+  title: string
+  kind: LivingMemoryEntry["kind"]
+  entries: LivingMemoryEntry[]
+  canEdit: boolean
+  onAdd: (text: string) => void
+  onUpdate: (id: string, text: string) => void
+  onDelete: (id: string) => void
+}
+
+function AuthoredEntriesSection({
+  title,
+  kind,
+  entries,
+  canEdit,
+  onAdd,
+  onUpdate,
+  onDelete,
+}: AuthoredEntriesSectionProps) {
+  const [adding, setAdding] = useState(false)
+  const [editingId, setEditingId] = useState<string | null>(null)
+  const [deleteTarget, setDeleteTarget] = useState<LivingMemoryEntry | null>(null)
+
+  const filtered = entries.filter((e) => e.kind === kind)
+
+  return (
+    <section aria-label={title} className="mb-8">
+      <div className="flex items-center gap-2 mb-3">
+        <h2 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider flex-1">
+          {title}
+        </h2>
+        {canEdit && !adding && (
+          <Button
+            size="sm"
+            variant="ghost"
+            className="h-6 px-2 text-xs gap-1"
+            onClick={() => setAdding(true)}
+            aria-label={`Add ${title.toLowerCase()} entry`}
+          >
+            <Plus className="h-3 w-3" aria-hidden="true" />
+            Add
+          </Button>
+        )}
+      </div>
+
+      {adding && (
+        <div className="mb-3">
+          <EntryForm
+            onSave={(text) => { onAdd(text); setAdding(false) }}
+            onCancel={() => setAdding(false)}
+          />
+        </div>
+      )}
+
+      {filtered.length === 0 && !adding ? (
+        <p className="text-xs text-muted-foreground/60 italic py-2">
+          No {title.toLowerCase()} yet.{canEdit ? " Click Add to create one." : ""}
+        </p>
+      ) : (
+        <div className="flex flex-col gap-2">
+          {filtered.map((entry) => (
+            <Card key={entry.id} className="overflow-hidden">
+              <CardContent className="p-3">
+                {editingId === entry.id ? (
+                  <EntryForm
+                    initialText={entry.text}
+                    onSave={(text) => { onUpdate(entry.id, text); setEditingId(null) }}
+                    onCancel={() => setEditingId(null)}
+                  />
+                ) : (
+                  <div className="flex items-start gap-2">
+                    <p className="text-sm leading-relaxed flex-1">{entry.text}</p>
+                    {canEdit && (
+                      <div className="flex gap-1 shrink-0">
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          className="h-6 w-6"
+                          onClick={() => setEditingId(entry.id)}
+                          aria-label="Edit entry"
+                        >
+                          <Pencil className="h-3 w-3" aria-hidden="true" />
+                        </Button>
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          className="h-6 w-6 text-destructive hover:text-destructive"
+                          onClick={() => setDeleteTarget(entry)}
+                          aria-label="Delete entry"
+                        >
+                          <Trash2 className="h-3 w-3" aria-hidden="true" />
+                        </Button>
+                      </div>
+                    )}
+                  </div>
+                )}
+                <p className="text-[10px] text-muted-foreground/60 mt-1.5">
+                  {entry.author} · {new Date(entry.createdAt).toLocaleDateString()}
+                </p>
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+      )}
+
+      <Dialog
+        open={deleteTarget !== null}
+        onOpenChange={(open: boolean) => { if (!open) setDeleteTarget(null) }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Delete entry?</DialogTitle>
+            <DialogDescription>
+              This will permanently remove the entry. This action cannot be undone.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setDeleteTarget(null)}>Cancel</Button>
+            <Button
+              variant="destructive"
+              onClick={() => {
+                if (deleteTarget) { onDelete(deleteTarget.id); setDeleteTarget(null) }
+              }}
+            >
+              Delete
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </section>
+  )
+}
+
 // ── Page ──────────────────────────────────────────────────────────────────
 
 export function LivingMemoryPage() {
@@ -167,6 +383,32 @@ export function LivingMemoryPage() {
   })
 
   const { state: livenessState, label: livenessLabel } = useLiveness(cells.length)
+
+  const { project, loading: projectLoading, patchSettings } = useProject(projectId ?? "")
+  const { session } = useFrontierSession()
+
+  const entries = project?.livingMemoryEntries ?? []
+  // canEdit mirrors TerminologyPage — patchSettings is blocked internally when
+  // offline or below PROJECT_LEAD, so we allow the UI and let the patch report
+  // the block. We only hide edit controls while project hasn't loaded.
+  const canEdit = !projectLoading && project != null
+
+  const author = session?.username ?? "unknown"
+
+  async function handleAdd(kind: LivingMemoryEntry["kind"], text: string) {
+    const next = addEntry(entries, kind, text, author)
+    await patchSettings({ livingMemoryEntries: next })
+  }
+
+  async function handleUpdate(id: string, text: string) {
+    const next = updateEntry(entries, id, text)
+    await patchSettings({ livingMemoryEntries: next })
+  }
+
+  async function handleDelete(id: string) {
+    const next = deleteEntry(entries, id)
+    await patchSettings({ livingMemoryEntries: next })
+  }
 
   return (
     <div className="flex flex-col min-h-screen">
@@ -227,13 +469,41 @@ export function LivingMemoryPage() {
           scroll"). The sticky header stays pinned to the viewport top. */}
       <div className="flex-1">
         <div className="px-4 py-4 max-w-2xl mx-auto">
-          {isLoading ? (
-            <LivingMemorySkeleton />
-          ) : isEmpty ? (
-            <LivingMemoryEmpty />
-          ) : (
-            <CellList cells={cells} />
-          )}
+          {/* Instructions section */}
+          <AuthoredEntriesSection
+            title="Instructions"
+            kind="instruction"
+            entries={entries}
+            canEdit={canEdit}
+            onAdd={(text) => handleAdd("instruction", text)}
+            onUpdate={handleUpdate}
+            onDelete={handleDelete}
+          />
+
+          {/* Standards section */}
+          <AuthoredEntriesSection
+            title="Standards"
+            kind="standard"
+            entries={entries}
+            canEdit={canEdit}
+            onAdd={(text) => handleAdd("standard", text)}
+            onUpdate={handleUpdate}
+            onDelete={handleDelete}
+          />
+
+          {/* Recent Examples (validated cells) */}
+          <section aria-label="Recent Examples">
+            <h2 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3">
+              Recent Examples
+            </h2>
+            {isLoading ? (
+              <LivingMemorySkeleton />
+            ) : isEmpty ? (
+              <LivingMemoryEmpty />
+            ) : (
+              <CellList cells={cells} />
+            )}
+          </section>
         </div>
       </div>
     </div>

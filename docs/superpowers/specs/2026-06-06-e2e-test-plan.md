@@ -8,8 +8,16 @@ This doc is the living progress tracker — the loop reads it on each resume.
 
 ## Environment
 
-- Stack: `pnpm dev` (scripts/dev-stack.ts). Ports: **SPA 5173**, **identity/auth 8788**,
-  **sync 8789**. `8787` (frontier-server) is RETIRED — ignore.
+- Stack: `pnpm dev` (scripts/dev-stack.ts). Default ports: SPA 5173, identity 8788, sync 8789.
+- **Port coexistence (IMPORTANT):** the user runs their OWN dev-stack from the
+  `.worktrees/term-integration` worktree, which owns **8788**. `dev-stack.ts`
+  calls `freePort()` on its identity port, so launching on the default 8788 would
+  KILL their auth-worker (and theirs kills ours back — mutual eviction, observed
+  as vite `code=143`). Resolution: ports are now env-overridable. **This loop's
+  stack runs on alternate ports — launch with:**
+  `DEV_STACK_IDENTITY_PORT=8790 DEV_STACK_SYNC_PORT=8791 pnpm dev` (SPA still 5173,
+  which talks to 8790 via the VITE_AUTH_BASE the stack writes). Never use the
+  default 8788 while their worktree stack is up.
 - Login: navigate `http://127.0.0.1:5173/__dev/login` → user `dev` / `dev`, "Dev Org".
 - Rich data: `npm run seed:load -- --local --grant-to dev` grants `dev` OWNER on the
   8 seeded prod projects (BCS/Chosen). They are NOT in "Dev Org", so they don't show
@@ -118,6 +126,13 @@ create path isn't idempotent on `email` — same non-idempotent insert could mak
 production signup 500 on a duplicate email instead of a clean 409. File:
 `auth-worker/src/routes/dev-seed.ts` (and the shared user-create service).
 Status: open, to confirm whether prod signup shares the path.
+
+### ISSUE-3 — `/project/:id/voice` route does not match the router
+Vite logs `No routes matched location "/project/<id>/voice"` and the page renders
+an empty heading (no crash). The verify-dev-change skill lists `/voice` as a
+route and the workspace toolbar has a "Voice" button — so either the route was
+removed/renamed or the toolbar button points elsewhere (modal?). Voice/audio
+dubbing is a real workflow; confirm where it lives. Status: open, to investigate.
 
 ### ISSUE-2 — projects you're a member of in another org don't appear in `/projects`
 `/projects` is org-scoped to the active org. A user granted direct

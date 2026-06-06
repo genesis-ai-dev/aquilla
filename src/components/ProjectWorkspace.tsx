@@ -805,7 +805,7 @@ export function ProjectWorkspace() {
     revalidateCells()
   }, [project?.id, historyCellId, cells, applyOptimisticTargetEdit, getTokenForFile, currentUsername, refreshOutboxPending, revalidateAuditStats, revalidateCells])
 
-  const { completeSingle, completeBatch, isConfigured, isAvailable: isCompletionAvailable, completing, examples, errors, previews } = useCompletion(
+  const { completeSingle, completeBatch, acceptCompletion, rejectCompletion, isConfigured, isAvailable: isCompletionAvailable, completing, examples, errors, previews } = useCompletion(
     project?.completionSettings, project?.sourceLanguage || "", project?.targetLanguage || "", branchingSearch, branchingSearchPassages, frontierSession, commitCompletedCell, rules, allProjectCells
   )
 
@@ -1974,6 +1974,7 @@ export function ProjectWorkspace() {
             isCompletionConfigured={isConfigured} isCompletionAvailable={isCompletionAvailable} completing={completing}
             examples={examples} errors={errors} previews={previews}
             onCompleteSingle={completeSingle} onCompleteBatch={completeBatch}
+            onAcceptCompletion={acceptCompletion} onRejectCompletion={rejectCompletion}
             healthMap={effectiveHealthMap} infractions={infractions} rules={rules}
             onInfractionClick={(ruleId) => {
               setCommentsCellId(null); setHistoryCellId(null); setDrawerRuleId(ruleId)

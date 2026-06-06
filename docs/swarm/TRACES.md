@@ -34,7 +34,7 @@ STATUS: OPEN | CLAIMED | DONE
 ## FRO-206 drill-down gaps
 - [OPEN] (drilldown-cells) TerminologyPage passes `cells=[]` to TerminologyTermDetail; occurrences list is empty until a follow-up wires useCells for the active file (or all project files). To pick up: import useCells + useProject in TerminologyPage, fetch cells for each file, map CellData[] into the detail prop. — `src/components/TerminologyPage.tsx` (drill-down guard, ~L650), `src/components/TerminologyTermDetail.tsx`
 - [OPEN] (drilldown-username) TerminologyPage passes `username="local"` to TerminologyTermDetail. Wire the real auth username (useIdentity / useProjectSettings) before shipping. — `src/components/TerminologyPage.tsx`
-- [OPEN] (drilldown-canEdit) TerminologyPage passes `canEdit={true}` unconditionally. FRO-208 is adding role-gating to TerminologyPage; once that lands, pass `permissions.canEditContent` here too. — `src/components/TerminologyPage.tsx`
+- [RESOLVED] (drilldown-canEdit) now passes canEdit={canEditCells} (syncRole>=400 or local). TerminologyPage passes `canEdit={true}` unconditionally. FRO-208 is adding role-gating to TerminologyPage; once that lands, pass `permissions.canEditContent` here too. — `src/components/TerminologyPage.tsx`
 
 ## Quality / hardening (pick up opportunistically)
 - [OPEN] (lastEditAt) `buildCellData` drops `lastEditAt` from CellRow → CellData; forward it (one-line client change) so recency-sorted views (Living Memory) work without server changes. — `src/hooks/useCells.ts`

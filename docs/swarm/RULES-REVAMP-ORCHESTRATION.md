@@ -39,4 +39,18 @@
 | FRO-198 | Suggest from edits | blocked(194,196) | edit-mining service, rule-suggester | |
 
 ## §4 Merge log
-<!-- append: date · WS · branch · sha · tsc · vitest · notes -->
+- Wave 1 · FRO-194 · swarm/ws-194-surface · merged · tsc 0 · vitest green (2 pre-existing AssignedToMe failures) · in-shell Rules surface
+- Wave 2 · FRO-195 · swarm/ws-195-authoring · merged · RuleEditor inline authoring + live preview
+- Wave 2 · FRO-196 · swarm/ws-196-import · merged (1 union conflict on RulesSurface imports, resolved) · two-pass extractor + import dialog + reusable review
+- Wave 3 · FRO-197 · swarm/ws-197-pdfdocx · merged · auth-worker POST /api/v2/parse-document (fflate DOCX full; minimal PDF extractor) · auth-worker tsc 0, 135 tests pass
+- Wave 3 · FRO-198 · swarm/ws-198-edits · merged · edit-miner + suggestRulesFromCandidates + suggest-from-edits dialog
+
+**Final gate on integration (all green):** root `tsc -b --noEmit` = 0 · root `vitest` = 1663 pass / 2 pre-existing fail · auth-worker tsc = 0 · auth-worker vitest = 135 pass · `npm run build` = ✓ built.
+
+## §5 Known limitations / fast-follows (honest gaps, documented as SWARM-TODOs)
+- **FRO-198 true prior-value diffs:** per-cell prior values live in the D1 event log and need a batch endpoint (`GET /projects/:pid/events?kinds=target.cell.commit`) to mine real corrections without N round-trips. Current miner detects repeated *source→target duplicates* + `hasPendingEdit` recent edits + validated pairs. (SWARM-TODO(event-layer) in edit-miner.ts)
+- **FRO-198 cell scope:** RulesSurface receives only `validatedCells`; ProjectWorkspace should also pass ALL cells for richer recent-edit detection. (SWARM-TODO(FRO-198-cells))
+- **FRO-197 PDF fidelity:** minimal BT/ET text extractor; complex embedded-font PDFs garble. Swap for a build-verified Workers PDF lib. (SWARM-TODO(FRO-197-pdf)) DOCX is full-fidelity.
+
+## §6 Integration / promotion note
+swarm/integration is based off **75657a2** (tip of `feat/dev-db-seed`), NOT main — because the working tree was dirty with the user's seed work at swarm start. Promoting to `main` would carry feat/dev-db-seed commits along. **Promotion path is a user decision** (PR from integration, merge into feat/dev-db-seed, or rebase onto main). Live UI walkthrough + staging push pending user go-ahead.

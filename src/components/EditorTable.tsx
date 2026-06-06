@@ -1391,6 +1391,10 @@ function EditorRow({
   const [openRuleId, setOpenRuleId] = useState<string | null>(null)
   const [openRuleAnchor, setOpenRuleAnchor] = useState<HTMLElement | null>(null)
   const [examplesExpanded, setExamplesExpanded] = useState(false)
+  // FRO-204: chip click state for TermLookupPopover on target editor chips.
+  const [termChipState, setTermChipState] = useState<{ term: string; anchor: HTMLElement } | null>(null)
+  // Track whether the target editor has a non-empty text selection when a chip is clicked.
+  const targetHasSelectionRef = useRef(false)
   const pendingTargetEventIdRef = useRef<string | null>(cell.targetEventId ?? null)
   /** voice-chip drag-over state: the voiceId being dragged over this cell's audio area */
   const [dragOverVoiceId, setDragOverVoiceId] = useState<string | null>(null)
@@ -1519,6 +1523,15 @@ function EditorRow({
     const next = existing ? `${existing} ${rendering}` : rendering
     handleEditorCommit({ value: next, valueHtml: next })
   }, [cell.translated, handleEditorCommit])
+
+  // FRO-204: Chip click handler for terminology chips in the target (TranslatedEditor).
+  // Records whether the target editor had a non-empty text selection at click time
+  // so we can conditionally surface the Apply affordance in the popover.
+  const handleTermChipClick = useCallback((term: string, anchor: HTMLElement) => {
+    const sel = window.getSelection()
+    targetHasSelectionRef.current = Boolean(sel && !sel.isCollapsed && sel.toString().trim().length > 0)
+    setTermChipState({ term, anchor })
+  }, [])
 
   const emitValidationChange = useCallback((validated: boolean) => {
     const editEventId = cell.targetEventId ?? pendingTargetEventIdRef.current
@@ -2284,7 +2297,34 @@ function EditorRow({
                 remoteChangedDuringEdit={remoteChangedWhileFocused}
                 onDiscardLocal={handleDiscardLocalAndReload}
                 onNavigateCell={onNavigateCell}
+                terminologyConcepts={project.terminology ?? []}
+                onTermChipClick={handleTermChipClick}
               />
+              {/* FRO-204: Terminology chip popover — controlled via termChipState.
+                  Anchored to the chip DOM element that was clicked. Apply is
+                  offered only when the target had a non-empty text selection
+                  at click time (per spec).
+                  We pass a dummy <span/> trigger so TermLookupPopover renders
+                  the popover body; the BaseUI Popover controlled-open + external
+                  anchor positions it on the clicked chip. */}
+              {termChipState && (() => {
+                const concepts = project.terminology ?? []
+                const onApply = targetHasSelectionRef.current
+                  ? (rendering: string) => { handleTermApply(rendering); setTermChipState(null) }
+                  : undefined
+                return (
+                  <TermLookupPopover
+                    sourceTerm={termChipState.term}
+                    concepts={concepts}
+                    onApply={onApply}
+                    open
+                    onOpenChange={(isOpen: boolean) => { if (!isOpen) setTermChipState(null) }}
+                    anchor={termChipState.anchor}
+                  >
+                    <span />
+                  </TermLookupPopover>
+                )
+              })()}
               {/* Streaming preview overlay — visible while the LLM is
                   running. We show the text as it streams in so the user
                   sees progress instead of waiting for the commit + outbox

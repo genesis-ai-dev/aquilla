@@ -24,6 +24,9 @@ export interface ProjectWideSettings {
   rulePenalties?: RulePenalties
   validationCount?: number
   validationCountAudio?: number
+  validationRoleFloor?: "reviewer" | "project_lead" | "maintainer"
+  validationNamedUsers?: string[]
+  allowSelfValidation?: boolean
   /** Synced voice profiles (voice library, cast, default voice, engine). The
    *  Gemini apiKey is deliberately omitted — it stays device-local. */
   ttsSettings?: Omit<ProjectTtsSettings, "apiKey">

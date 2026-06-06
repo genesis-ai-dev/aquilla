@@ -102,3 +102,10 @@ AUDIT (new, this wave): billing/tiers + BYOK + private-mode + publish = DEFERRED
 - FRO-188: logout pending-edit confirm; outbox failure cap (OUTBOX_MAX_ATTEMPTS=5)+escalation; password-reset ?next= threading; account-switcher email+env hint.
 - ImportDialog card-landing (Upload/eBible active; Macula/TMX/TN disabled placeholders → FRO-178/179).
 GATE: tsc 0 · vitest 1593 pass / 2 baseline · build 0.
+
+## §M Wave 8 (loop, 2026-06-06)
+- stale-source per-cell marker: ALREADY IMPLEMENTED (StaleSourceIndicator + useStaleSourceCells + server route) — audit false-positive, no change.
+- resume-last-location: new last-location-store.ts (LRU localStorage, per user+project, file+cell); ProjectWorkspace restores file (nav) + cell (scrollToCellIndex), writes on file change + debounced cell focus.
+- FRO-185 CommentsPage: filter (file/author/participant/resolved) + sort picker + show-resolved toggle (hidden default) + go-to-cell nav + @mention typeahead (MentionTextarea). FTS5 + exact cell-scroll = SWARM-TODOs.
+- validation config: validationRoleFloor + validationNamedUsers + allowSelfValidation UI + persistence. SERVER enforcement = SWARM-TODO (sync.ts cell.validate branch) → new issue.
+GATE: tsc 0 · vitest 1610 pass / 2 baseline · build 0.

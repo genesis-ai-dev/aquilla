@@ -1,4 +1,4 @@
-import { useState } from "react"
+import { useState, useMemo } from "react"
 import { useParams, useNavigate } from "react-router-dom"
 import {
   ArrowLeft,
@@ -30,6 +30,8 @@ import type { Concept, TermRendering, RenderingStatus } from "@/lib/terminology/
 import { addConcept, updateConcept, deleteConcept } from "@/lib/terminology/store"
 import { importConceptsCsv, exportConceptsCsv } from "@/lib/terminology/csv"
 import { importConceptsTbx, exportConceptsTbx } from "@/lib/terminology/tbx"
+import { computeTerminologyStats } from "@/lib/terminology/stats"
+import type { CellPair } from "@/lib/terminology/stats"
 import { cn } from "@/lib/utils"
 import { useProject } from "@/hooks/useProject"
 
@@ -498,6 +500,121 @@ function ConceptRow({ concept, onEdit, onDelete }: ConceptRowProps) {
 }
 
 // ────────────────────────────────────────────────────────────────────────────
+// Stats header — derived on read from concepts + cells
+// ────────────────────────────────────────────────────────────────────────────
+
+interface LibraryStatsHeaderProps {
+  concepts: Concept[]
+  /** Cell pairs from the active file (or all files if aggregated). Pass [] when
+   *  no cell data is available yet — the header renders a placeholder state. */
+  cells: CellPair[]
+}
+
+function LibraryStatsHeader({ concepts, cells }: LibraryStatsHeaderProps) {
+  const stats = useMemo(
+    () => computeTerminologyStats(concepts, cells),
+    [concepts, cells],
+  )
+
+  const activeConcepts = stats.totalConcepts
+  const hasData = activeConcepts > 0
+
+  return (
+    <div className="rounded-lg border bg-card p-4 shadow-sm">
+      <div className="mb-3 flex items-center gap-2">
+        <BookOpen className="h-4 w-4 text-muted-foreground" />
+        <span className="text-sm font-semibold">Library Overview</span>
+        {!hasData && (
+          <span className="text-xs text-muted-foreground">(no active concepts)</span>
+        )}
+      </div>
+
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+        {/* Total active concepts */}
+        <div className="rounded-md bg-muted/40 px-3 py-2">
+          <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+            Active concepts
+          </p>
+          <p className="mt-0.5 text-xl font-bold tabular-nums">{activeConcepts}</p>
+        </div>
+
+        {/* % Enforced */}
+        <div className="rounded-md bg-muted/40 px-3 py-2">
+          <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+            Enforced
+          </p>
+          <p className={cn(
+            "mt-0.5 text-xl font-bold tabular-nums",
+            hasData && stats.totalCells > 0
+              ? stats.enforcedPct === 100
+                ? "text-emerald-600 dark:text-emerald-400"
+                : "text-foreground"
+              : "text-muted-foreground",
+          )}>
+            {hasData && stats.totalCells > 0
+              ? `${Math.round(stats.enforcedPct)}%`
+              : "—"}
+          </p>
+        </div>
+
+        {/* % Infringed */}
+        <div className="rounded-md bg-muted/40 px-3 py-2">
+          <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+            Infringed
+          </p>
+          <p className={cn(
+            "mt-0.5 text-xl font-bold tabular-nums",
+            hasData && stats.totalCells > 0
+              ? stats.infringedPct === 0
+                ? "text-emerald-600 dark:text-emerald-400"
+                : stats.infringedPct > 20
+                  ? "text-destructive"
+                  : "text-amber-600 dark:text-amber-400"
+              : "text-muted-foreground",
+          )}>
+            {hasData && stats.totalCells > 0
+              ? `${Math.round(stats.infringedPct)}%`
+              : "—"}
+          </p>
+        </div>
+
+        {/* Cells analyzed */}
+        <div className="rounded-md bg-muted/40 px-3 py-2">
+          <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+            Cells analyzed
+          </p>
+          <p className="mt-0.5 text-xl font-bold tabular-nums text-muted-foreground">
+            {stats.totalCells}
+          </p>
+        </div>
+      </div>
+
+      {/* Top-5 most infringed */}
+      {stats.top5Infringed.length > 0 && (
+        <div className="mt-3 border-t pt-3">
+          <p className="mb-2 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+            Most infringed
+          </p>
+          <div className="flex flex-wrap gap-2">
+            {stats.top5Infringed.map((s) => (
+              <div
+                key={s.conceptId}
+                className="flex items-center gap-1.5 rounded bg-destructive/10 px-2 py-0.5 text-xs"
+              >
+                <span className="font-medium text-foreground">{s.sourceTerm}</span>
+                <span className="text-destructive font-semibold">
+                  {s.infringed}×
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ────────────────────────────────────────────────────────────────────────────
 // Main TerminologyPage
 // ────────────────────────────────────────────────────────────────────────────
 
@@ -653,6 +770,9 @@ export function TerminologyPage() {
             {error}
           </p>
         )}
+
+        {/* Stats header — derived on read, no persistence */}
+        <LibraryStatsHeader concepts={concepts} cells={[]} />
 
         <Card>
           <CardHeader>

@@ -9,6 +9,11 @@ import {
   Download,
   BookOpen,
 } from "lucide-react"
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip"
 import { Button } from "@/components/ui/button"
 import {
   Card,
@@ -448,9 +453,10 @@ interface ConceptRowProps {
   onEdit: (concept: Concept) => void
   onDelete: (id: string) => void
   onDrillDown: (concept: Concept) => void
+  canManage: boolean
 }
 
-function ConceptRow({ concept, onEdit, onDelete, onDrillDown }: ConceptRowProps) {
+function ConceptRow({ concept, onEdit, onDelete, onDrillDown, canManage }: ConceptRowProps) {
   return (
     <li
       data-testid="concept-row"
@@ -485,24 +491,26 @@ function ConceptRow({ concept, onEdit, onDelete, onDrillDown }: ConceptRowProps)
       </div>
 
       {/* Actions */}
-      <div className="flex shrink-0 items-center gap-1">
-        <Button
-          variant="ghost"
-          size="icon-sm"
-          aria-label={`Edit concept ${concept.sourceTerm}`}
-          onClick={() => onEdit(concept)}
-        >
-          <Pencil className="h-3.5 w-3.5 text-muted-foreground" />
-        </Button>
-        <Button
-          variant="ghost"
-          size="icon-sm"
-          aria-label={`Delete concept ${concept.sourceTerm}`}
-          onClick={() => onDelete(concept.id)}
-        >
-          <Trash2 className="h-3.5 w-3.5 text-muted-foreground" />
-        </Button>
-      </div>
+      {canManage && (
+        <div className="flex shrink-0 items-center gap-1">
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            aria-label={`Edit concept ${concept.sourceTerm}`}
+            onClick={() => onEdit(concept)}
+          >
+            <Pencil className="h-3.5 w-3.5 text-muted-foreground" />
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            aria-label={`Delete concept ${concept.sourceTerm}`}
+            onClick={() => onDelete(concept.id)}
+          >
+            <Trash2 className="h-3.5 w-3.5 text-muted-foreground" />
+          </Button>
+        </div>
+      )}
     </li>
   )
 }
@@ -626,6 +634,45 @@ function LibraryStatsHeader({ concepts, cells }: LibraryStatsHeaderProps) {
 // Main TerminologyPage
 // ────────────────────────────────────────────────────────────────────────────
 
+// ────────────────────────────────────────────────────────────────────────────
+// Role-gating helpers
+// project_lead = 500, maintainer = 600, owner = 700
+// contributor = 400 — may edit cells but NOT termbase definitions
+// viewer/commenter/reviewer = <400 — read-only throughout
+// ────────────────────────────────────────────────────────────────────────────
+
+/** Level at which a user may manage termbase definitions (add/edit/delete concepts, import). */
+const TERMBASE_EDIT_LEVEL = 500
+
+/** For local projects with no syncRole, default to full access (owner-equivalent). */
+function canEditTermbase(syncRole?: { level: number } | null, hasOrigin?: boolean): boolean {
+  if (!hasOrigin) return true // local-only project — no cloud role hierarchy
+  if (!syncRole) return true  // no role cached yet — optimistic allow; server will enforce
+  return syncRole.level >= TERMBASE_EDIT_LEVEL
+}
+
+interface GatedButtonProps extends React.ComponentPropsWithoutRef<typeof Button> {
+  allowed: boolean
+  tip: string
+}
+
+/** Wrapper that disables a Button with a tooltip when `allowed` is false. */
+function GatedButton({ allowed, tip, children, ...props }: GatedButtonProps) {
+  if (allowed) {
+    return <Button {...props}>{children}</Button>
+  }
+  return (
+    <Tooltip>
+      <TooltipTrigger render={<span className="inline-flex" />}>
+        <Button {...props} disabled aria-disabled="true">
+          {children}
+        </Button>
+      </TooltipTrigger>
+      <TooltipContent side="bottom">{tip}</TooltipContent>
+    </Tooltip>
+  )
+}
+
 export function TerminologyPage() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
@@ -634,6 +681,11 @@ export function TerminologyPage() {
 
   // Derive concepts from the project record — single source of truth
   const concepts = project?.terminology ?? []
+
+  // Role-gating: project_lead+ (level >= 500) may manage termbase definitions.
+  const hasOrigin = Boolean(project?.origin)
+  const canManageTermbase = canEditTermbase(project?.syncRole, hasOrigin)
+  const termbaseGateTip = "Requires Project Lead role or higher to manage termbase definitions."
 
   const [addOpen, setAddOpen] = useState(false)
   const [editTarget, setEditTarget] = useState<Concept | null>(null)
@@ -757,7 +809,9 @@ export function TerminologyPage() {
 
         {/* Export controls */}
         <div className="flex items-center gap-1">
-          <Button
+          <GatedButton
+            allowed={canManageTermbase}
+            tip={termbaseGateTip}
             variant="outline"
             size="sm"
             onClick={handleExportCsv}
@@ -766,8 +820,10 @@ export function TerminologyPage() {
           >
             <Download className="mr-1 h-3.5 w-3.5" />
             CSV
-          </Button>
-          <Button
+          </GatedButton>
+          <GatedButton
+            allowed={canManageTermbase}
+            tip={termbaseGateTip}
             variant="outline"
             size="sm"
             onClick={handleExportTbx}
@@ -776,24 +832,31 @@ export function TerminologyPage() {
           >
             <Download className="mr-1 h-3.5 w-3.5" />
             TBX
-          </Button>
+          </GatedButton>
         </div>
 
         {/* Import */}
-        <Button
+        <GatedButton
+          allowed={canManageTermbase}
+          tip={termbaseGateTip}
           variant="outline"
           size="sm"
           onClick={() => setImportOpen(true)}
         >
           <Upload className="mr-1 h-3.5 w-3.5" />
           Import
-        </Button>
+        </GatedButton>
 
         {/* Add concept */}
-        <Button size="sm" onClick={() => setAddOpen(true)}>
+        <GatedButton
+          allowed={canManageTermbase}
+          tip={termbaseGateTip}
+          size="sm"
+          onClick={() => setAddOpen(true)}
+        >
           <Plus className="mr-1 h-3.5 w-3.5" />
           Add concept
-        </Button>
+        </GatedButton>
       </header>
 
       {/* Main content */}
@@ -821,14 +884,16 @@ export function TerminologyPage() {
                 <p className="text-xs">
                   Add a concept manually or import a CSV / TBX file.
                 </p>
-                <Button
+                <GatedButton
+                  allowed={canManageTermbase}
+                  tip={termbaseGateTip}
                   variant="outline"
                   size="sm"
                   onClick={() => setAddOpen(true)}
                 >
                   <Plus className="mr-1 h-3.5 w-3.5" />
                   Add first concept
-                </Button>
+                </GatedButton>
               </div>
             ) : (
               <>
@@ -849,6 +914,7 @@ export function TerminologyPage() {
                         onEdit={setEditTarget}
                         onDelete={handleDelete}
                         onDrillDown={handleDrillDown}
+                        canManage={canManageTermbase}
                       />
                     ))}
                   </ul>

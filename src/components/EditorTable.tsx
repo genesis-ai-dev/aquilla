@@ -53,6 +53,7 @@ import { cn } from "@/lib/utils"
 import { isPerfLogEnabled } from "@/lib/perf-log"
 import { partitionInfractions } from "@/lib/rules/waivers"
 import { ViolationPopover } from "./ViolationPopover"
+import { VOICE_ASSIGN_MIME } from "./VoiceLibraryPanel"
 import type { RangeHighlight } from "./HighlightedText"
 import { TermLookupPopover } from "./TermLookupPopover"
 import type { Concept } from "@/lib/terminology/types"
@@ -399,6 +400,9 @@ interface EditorTableProps {
   onOpenRecording?: (cellId: string) => void
   /** Re-read the project record from IDB after a settings change (e.g. voice library edits). */
   onProjectChanged?: () => void
+  /** Called when the user drops a voice chip onto a cell's audio area.
+   *  Parent should assign the voice then trigger TTS generation. */
+  onAssignVoice?: (cellId: string, voiceId: string) => void
   /** Phase 5 / AD-9 — set of cell ids whose source has advanced since the
    *  translator's last commit. When provided, each row renders the small
    *  StaleSourceIndicator badge next to its validation status. Parent fetches
@@ -422,7 +426,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   isAnonymous, onJumpToCell, onAiSetupNeeded, onOpenRecording,
   audioLens, onOpenAudioSetup,
   orderedBy,
-  onProjectChanged,
+  onProjectChanged, onAssignVoice,
   onCellCommitted,
   onOptimisticEdit,
   cellLockHolders,
@@ -927,6 +931,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
                 audioLens={audioLens ?? null}
                 onOpenAudioSetup={onOpenAudioSetup}
                 onProjectChanged={onProjectChanged}
+                onAssignVoice={onAssignVoice}
                 onDragStart={handleDragStart}
                 onDragEnter={handleDragEnter}
                 onSelectionPointerDown={handleSelectionPointerDown}
@@ -1014,6 +1019,7 @@ interface MemoizedRowProps {
   audioLens: AudioLensContext | null
   onOpenAudioSetup?: () => void
   onProjectChanged?: () => void
+  onAssignVoice?: (cellId: string, voiceId: string) => void
   onDragStart: (cellId: string) => void
   onDragEnter: (cellId: string) => void
   onSelectionPointerDown: (
@@ -1042,7 +1048,7 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
     onOpenComments, onOpenHistory,
     onSeekToCue, lineNumbersEnabled, cellLabelsEnabled,
     sourceTextDirection, targetTextDirection, isAnonymous,
-    onJumpToCell, onAiSetupNeeded, onOpenRecording, onProjectChanged,
+    onJumpToCell, onAiSetupNeeded, onOpenRecording, onProjectChanged, onAssignVoice,
     audioLens, onOpenAudioSetup,
     onCellCommitted, onOptimisticEdit, lockHolderLabel, remoteChangedWhileFocused,
     onClaimCell, onReleaseCell, onAckRemoteChange,
@@ -1152,6 +1158,7 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
         audioLens={audioLens}
         onOpenAudioSetup={onOpenAudioSetup}
         onProjectChanged={onProjectChanged}
+        onAssignVoice={onAssignVoice}
         onDragStart={handleDragStart}
         onDragEnter={handleDragEnter}
         onSelectionPointerDown={handleSelectionPointerDown}
@@ -1239,6 +1246,7 @@ interface EditorRowProps {
   audioLens: AudioLensContext | null
   onOpenAudioSetup?: () => void
   onProjectChanged?: () => void
+  onAssignVoice?: (cellId: string, voiceId: string) => void
   getTokenForFile?: (fileId: string) => Promise<string | null>
 }
 
@@ -1365,7 +1373,7 @@ function EditorRow({
   onDragStart, onDragEnter, onSelectionPointerDown, onNavigateCell,
   rowIndex, lineNumbersEnabled, cellLabelsEnabled, sourceTextDirection, targetTextDirection, gridCols,
   isAnonymous, onAiSetupNeeded, onOpenRecording,
-  audioLens, onOpenAudioSetup,
+  audioLens, onOpenAudioSetup, onAssignVoice,
   onCellCommitted, onOptimisticEdit, lockHolderLabel, remoteChangedWhileFocused,
   onClaimCell, onReleaseCell, onAckRemoteChange,
   isStaleSource,
@@ -1375,6 +1383,8 @@ function EditorRow({
   const [openRuleAnchor, setOpenRuleAnchor] = useState<HTMLElement | null>(null)
   const [examplesExpanded, setExamplesExpanded] = useState(false)
   const pendingTargetEventIdRef = useRef<string | null>(cell.targetEventId ?? null)
+  /** voice-chip drag-over state: the voiceId being dragged over this cell's audio area */
+  const [dragOverVoiceId, setDragOverVoiceId] = useState<string | null>(null)
 
   useEffect(() => {
     if (cell.targetEventId) pendingTargetEventIdRef.current = cell.targetEventId
@@ -2683,7 +2693,37 @@ function EditorRow({
                   ? "emerald"
                   : undefined,
               content: (
-                <div className="flex flex-col gap-3">
+                <div
+                  className={cn(
+                    "flex flex-col gap-3 rounded-xl transition-colors",
+                    dragOverVoiceId && "bg-primary/10 ring-2 ring-primary/40",
+                  )}
+                  onDragOver={(e) => {
+                    if (e.dataTransfer.types.includes(VOICE_ASSIGN_MIME)) {
+                      e.preventDefault()
+                      e.dataTransfer.dropEffect = "copy"
+                      const voiceId = e.dataTransfer.getData(VOICE_ASSIGN_MIME)
+                      if (voiceId && voiceId !== dragOverVoiceId) setDragOverVoiceId(voiceId)
+                    }
+                  }}
+                  onDragLeave={() => setDragOverVoiceId(null)}
+                  onDrop={(e) => {
+                    const voiceId = e.dataTransfer.getData(VOICE_ASSIGN_MIME)
+                    setDragOverVoiceId(null)
+                    if (voiceId && onAssignVoice) {
+                      e.preventDefault()
+                      onAssignVoice(cell.id, voiceId)
+                    }
+                  }}
+                >
+                  {dragOverVoiceId && (
+                    <div className="flex items-center justify-center rounded-lg border-2 border-dashed border-primary/50 bg-primary/5 py-2 text-xs font-medium text-primary">
+                      {(() => {
+                        const v = audioLens?.voices.find(vv => vv.id === dragOverVoiceId)
+                        return v ? `Synthesize with ${v.name}` : "Drop to synthesize"
+                      })()}
+                    </div>
+                  )}
                   {hasAudio ? (
                     <>
                       <div className="flex items-center gap-2">

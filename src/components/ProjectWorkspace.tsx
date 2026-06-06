@@ -34,6 +34,7 @@ import { AudioRecordingModal } from "./AudioRecorder/AudioRecordingModal"
 import { VoiceSidebar } from "./voice/VoiceSidebar"
 import { startQueue } from "@/lib/audio/play-queue"
 import { generateCombinedVoice, type CombinedVoiceResult } from "@/lib/audio/combined-voice"
+import { generateCellVoice } from "@/lib/audio/voice-generate-helpers"
 import { CombinedBoundaryEditor } from "./voice/CombinedBoundaryEditor"
 import { useProjectTts } from "@/hooks/useProjectTts"
 import { RuleDrawer } from "./RuleDrawer"
@@ -2005,6 +2006,22 @@ export function ProjectWorkspace() {
             orderedBy={activeFile ? fileOrderedBy(activeFile) : undefined}
             onOpenAudioSetup={openAudioSetup}
             onOpenRecording={(cellId) => setRecordingCellId(cellId)}
+            onAssignVoice={async (cellId, voiceId) => {
+              if (!audioProject || !frontierSession) return
+              // First assign the voice to this cell in the cast
+              tts.assignCells([cellId], voiceId)
+              // Then synthesise with the newly assigned voice
+              const targetCell = cells.find((c) => c.id === cellId)
+              if (!targetCell) return
+              const ok = await generateCellVoice({
+                project: audioProject,
+                cell: targetCell,
+                session: frontierSession,
+                username: currentUsername,
+                voiceId,
+              })
+              if (ok) refresh()
+            }}
             onProjectChanged={refresh}
             onCellCommitted={handleCellCommitted}
             onOptimisticEdit={applyOptimisticTargetEdit}

@@ -4,7 +4,7 @@ import DOMPurify from "dompurify"
 import {
   Check, CheckCheck, Circle, Trash2, AlertTriangle, AlertCircle, RefreshCw,
   MessageCircle, Play, Pause, Mic, Sparkles, FileText, History as HistoryIcon,
-  ArrowRight, Activity, Loader2,
+  ArrowRight, Activity, Loader2, MoreHorizontal,
 } from "lucide-react"
 import type { CellData } from "@/hooks/useCells"
 import type { CodexCellAttachment, WordTiming } from "@/lib/codex-editor/types"
@@ -1733,96 +1733,6 @@ function EditorRow({
   )
   const infractionCount = cellInfractions.length
 
-  const validationButton = hasContent ? (
-    <div className="relative inline-flex items-center gap-0.5">
-    <Popover open={validationPopoverOpen} onOpenChange={handleOpenChange}>
-      <PopoverTrigger
-        openOnHover
-        delay={400}
-        closeDelay={100}
-        render={
-          <button
-            type="button"
-            className={cn(
-              "relative flex h-[22px] w-[22px] items-center justify-center rounded-full transition-[transform,color] duration-150 ease-out",
-              "active:scale-[0.92] disabled:cursor-not-allowed disabled:opacity-40",
-              "hover:bg-muted/60",
-              validationColorClass,
-              vs === "none" && "hover:text-emerald-500",
-              vs === "others" && "hover:text-emerald-500",
-              vs === "full-others" && "hover:text-emerald-500",
-            )}
-            title={healthTooltip}
-            disabled={!editable}
-          >
-            <HealthRing
-              health={healthValue}
-              size={22}
-              strokeWidth={2}
-              className="pointer-events-none"
-              style={{ position: "absolute", inset: 0 }}
-            />
-            <ValidationIcon
-              className="relative h-3.5 w-3.5"
-              strokeWidth={2.5}
-              {...(vs === "others" ? { fill: "currentColor" } : {})}
-            />
-          </button>
-        }
-      />
-      {vs !== "empty" && (
-        <PopoverContent
-          side="right"
-          align="start"
-          className="w-72 rounded-xl p-2 shadow-neu-lg"
-        >
-          <ul className="space-y-0.5">
-            <li className="mb-1 px-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
-              Validated by
-            </li>
-            {cell.activeValidators.length === 0 ? (
-              <li className="px-1 py-1 text-xs text-muted-foreground">No active validators</li>
-            ) : (
-              cell.activeValidators.map((v) => (
-                <li key={v} className="flex items-center justify-between gap-2 rounded px-1 py-1 text-xs hover:bg-muted/50">
-                  <span className="truncate">{v}{v === username ? " (you)" : ""}</span>
-                  {v === username && editable && (
-                    <button
-                      type="button"
-                      className="flex-shrink-0 rounded p-0.5 text-muted-foreground/70 transition-colors hover:bg-destructive/10 hover:text-destructive"
-                      title="Remove your validation"
-                      onClick={() => {
-                        emitValidationChange(false)
-                        setValidationPopoverOpen(false)
-                      }}
-                    >
-                      <Trash2 className="h-3 w-3" />
-                    </button>
-                  )}
-                </li>
-              ))
-            )}
-          </ul>
-          {cell.validationHistory.length > 0 && (
-            <ValidationHistoryTimeline entries={cell.validationHistory} currentUsername={username} />
-          )}
-        </PopoverContent>
-      )}
-    </Popover>
-    {/* Phase 5 / AD-9: source-changed indicator. Parent-managed mode —
-        membership lookup happens once per file at ProjectWorkspace and is
-        flattened to a per-row boolean here, so we pass a one-element set
-        the indicator resolves trivially. Skipping the component entirely
-        when !isStaleSource keeps the common (non-stale) case zero-cost
-        and avoids the per-row allocation. */}
-    {isStaleSource && (
-      <StaleSourceIndicator
-        cellId={cell.id}
-        staleCellIds={new Set([cell.id])}
-      />
-    )}
-    </div>
-  ) : null
 
   // SECURITY: originalHtml below is sanitized through DOMPurify.sanitize() at
   // the render boundary. Parsers only produce safe inline tags (<b>, <i>, <u>,
@@ -2116,14 +2026,11 @@ function EditorRow({
             the single issue surface (tint + hover list); no stripe/dot/warning.
             Selection lives on the source/target divider so range selection
             follows the text. */}
-        <div className="flex h-full flex-col items-center justify-between gap-1 py-0.5">
+        <div className="flex h-full flex-col items-center gap-1 py-0.5">
           {numberPill}
-          <div className="flex flex-col items-center gap-1">
-            {(isSynthBusy || isSynthError) && (
-              <SynthStatusBadge status={synthStatus} cellId={cell.id} projectId={project.id} onOpenAudioSetup={onOpenAudioSetup} />
-            )}
-            {validationButton}
-          </div>
+          {(isSynthBusy || isSynthError) && (
+            <SynthStatusBadge status={synthStatus} cellId={cell.id} projectId={project.id} onOpenAudioSetup={onOpenAudioSetup} />
+          )}
         </div>
 
         {/* Source column. In Audio mode there's no need for source text to
@@ -2409,6 +2316,7 @@ function EditorRow({
               alwaysShowChevron
               expansionAttentionDot={chevronAttentionDot}
             >
+              {/* Always-visible #1: AI Generate */}
               <RailButton
                 icon={<Sparkles className="h-3.5 w-3.5" />}
                 tooltip={
@@ -2451,80 +2359,212 @@ function EditorRow({
                 onMouseEnter={onDragEnter}
               />
 
-              {hasAudio ? (
-                <RailButton
-                  icon={
-                    audioController.isPlaying ? (
-                      <Pause className="h-3.5 w-3.5" />
-                    ) : (
-                      <Play className="h-3.5 w-3.5" />
-                    )
-                  }
-                  tooltip={audioController.isPlaying ? "Pause" : "Play audio"}
-                  onClick={() => {
-                    if (audioController.state === "loading") return
-                    if (audioController.isPlaying) audioController.pause()
-                    else void audioController.play()
-                  }}
-                  disabled={audioController.state === "loading"}
-                  toneClass={
-                    audioController.isPlaying
-                      ? "text-primary hover:text-primary"
-                      : undefined
-                  }
-                />
-              ) : (
-                <CellAudioRecordButton
-                  onOpenRecording={() => onOpenRecording?.(cell.id)}
-                  disabled={!editable || !onOpenRecording}
-                  micDenied={micDenied}
-                />
+              {/* Always-visible #2: Validate (mirrors gutter button inline in the rail) */}
+              {hasContent && (
+                <Popover open={validationPopoverOpen} onOpenChange={handleOpenChange}>
+                  <PopoverTrigger
+                    openOnHover
+                    delay={400}
+                    closeDelay={100}
+                    render={
+                      <button
+                        type="button"
+                        className={cn(
+                          "relative flex h-6 w-6 items-center justify-center rounded-full transition-[transform,color,background-color] duration-150 ease-out",
+                          "active:scale-[0.88] disabled:cursor-not-allowed disabled:opacity-30",
+                          "hover:bg-muted/80",
+                          validationColorClass,
+                          vs === "none" && "hover:text-emerald-500",
+                          vs === "others" && "hover:text-emerald-500",
+                          vs === "full-others" && "hover:text-emerald-500",
+                        )}
+                        title={healthTooltip}
+                        disabled={!editable}
+                      >
+                        <HealthRing
+                          health={healthValue}
+                          size={22}
+                          strokeWidth={2}
+                          className="pointer-events-none"
+                          style={{ position: "absolute", inset: 0 }}
+                        />
+                        <ValidationIcon
+                          className="relative h-3.5 w-3.5"
+                          strokeWidth={2.5}
+                          {...(vs === "others" ? { fill: "currentColor" } : {})}
+                        />
+                      </button>
+                    }
+                  />
+                  {vs !== "empty" && (
+                    <PopoverContent
+                      side="right"
+                      align="start"
+                      className="w-72 rounded-xl p-2 shadow-neu-lg"
+                    >
+                      <ul className="space-y-0.5">
+                        <li className="mb-1 px-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+                          Validated by
+                        </li>
+                        {cell.activeValidators.length === 0 ? (
+                          <li className="px-1 py-1 text-xs text-muted-foreground">No active validators</li>
+                        ) : (
+                          cell.activeValidators.map((v) => (
+                            <li key={v} className="flex items-center justify-between gap-2 rounded px-1 py-1 text-xs hover:bg-muted/50">
+                              <span className="truncate">{v}{v === username ? " (you)" : ""}</span>
+                              {v === username && editable && (
+                                <button
+                                  type="button"
+                                  className="flex-shrink-0 rounded p-0.5 text-muted-foreground/70 transition-colors hover:bg-destructive/10 hover:text-destructive"
+                                  title="Remove your validation"
+                                  onClick={() => {
+                                    emitValidationChange(false)
+                                    setValidationPopoverOpen(false)
+                                  }}
+                                >
+                                  <Trash2 className="h-3 w-3" />
+                                </button>
+                              )}
+                            </li>
+                          ))
+                        )}
+                      </ul>
+                      {cell.validationHistory.length > 0 && (
+                        <ValidationHistoryTimeline entries={cell.validationHistory} currentUsername={username} />
+                      )}
+                    </PopoverContent>
+                  )}
+                </Popover>
               )}
-
-              {cell.translated.trim().length > 0 && (
-                <CellTtsButton
+              {/* Stale-source indicator alongside validate button */}
+              {isStaleSource && hasContent && (
+                <StaleSourceIndicator
                   cellId={cell.id}
-                  text={cell.translated}
-                  original={cell.original}
-                  context={cell.context}
-                  cellLabel={cell.cellLabel}
-                  sourceLanguage={project.sourceLanguage}
-                  targetLanguage={project.targetLanguage}
-                  projectTtsSettings={project.ttsSettings}
-                  cellTtsSettings={cell.ttsSettings}
-                  generatedVoiceAudioId={cell.selectedGeneratedVoiceAudioId}
-                  attachments={cell.attachments}
-                  projectId={project.id}
-                  fileId={cell.fileId}
-                  disabled={!editable}
-                  playOnly
+                  staleCellIds={new Set([cell.id])}
                 />
               )}
 
-              {onOpenComments && (
-                <RailButton
-                  icon={<MessageCircle className="h-3.5 w-3.5" />}
-                  tooltip={
-                    openCommentCount > 0
-                      ? `${openCommentCount} open comment${openCommentCount !== 1 ? "s" : ""}`
-                      : "Add comment"
-                  }
-                  onClick={() => onOpenComments(cell.id)}
-                  toneClass={
-                    openCommentCount > 0
-                      ? "text-primary hover:text-primary"
-                      : undefined
-                  }
-                  dot={openCommentCount > 0 ? "primary" : undefined}
-                />
-              )}
+              {/* ⋯ overflow — play/record, TTS, comments, seek-to-cue */}
+              {(hasAudio || onOpenRecording || (cell.translated.trim().length > 0) || onOpenComments || onSeekToCue) && (
+                <Popover>
+                  <PopoverTrigger
+                    render={
+                      <button
+                        type="button"
+                        aria-label="More cell actions"
+                        title="More actions"
+                        className={cn(
+                          "flex h-6 w-6 items-center justify-center rounded-full",
+                          "transition-[transform,color,background-color] duration-150 ease-out",
+                          "active:scale-[0.88] hover:bg-muted/80",
+                          "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40",
+                          openCommentCount > 0
+                            ? "text-primary"
+                            : "text-muted-foreground/70 hover:text-foreground",
+                        )}
+                      >
+                        <MoreHorizontal className="h-3.5 w-3.5" />
+                        {openCommentCount > 0 && (
+                          <span
+                            aria-hidden
+                            className="pointer-events-none absolute right-0.5 top-0.5 h-1.5 w-1.5 rounded-full bg-primary ring-2 ring-background"
+                          />
+                        )}
+                      </button>
+                    }
+                  />
+                  <PopoverContent side="bottom" align="end" className="w-48 rounded-xl p-1.5">
+                    <div className="flex flex-col gap-0.5">
+                      {/* Play / Record */}
+                      {hasAudio ? (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (audioController.state === "loading") return
+                            if (audioController.isPlaying) audioController.pause()
+                            else void audioController.play()
+                          }}
+                          disabled={audioController.state === "loading"}
+                          className={cn(
+                            "flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-xs",
+                            "hover:bg-muted/60 disabled:cursor-not-allowed disabled:opacity-40",
+                            audioController.isPlaying ? "text-primary" : "text-foreground",
+                          )}
+                        >
+                          {audioController.isPlaying ? (
+                            <Pause className="h-3.5 w-3.5 shrink-0" />
+                          ) : (
+                            <Play className="h-3.5 w-3.5 shrink-0" />
+                          )}
+                          {audioController.isPlaying ? "Pause" : "Play audio"}
+                        </button>
+                      ) : onOpenRecording ? (
+                        <div className="flex items-center gap-2 rounded-lg px-2 py-0.5">
+                          <CellAudioRecordButton
+                            onOpenRecording={() => onOpenRecording(cell.id)}
+                            disabled={!editable || !onOpenRecording}
+                            micDenied={micDenied}
+                          />
+                          <span className="text-xs text-foreground">Record audio</span>
+                        </div>
+                      ) : null}
 
-              {onSeekToCue && (
-                <RailButton
-                  icon={<Play className="h-3.5 w-3.5" />}
-                  tooltip="Play from this cue"
-                  onClick={() => onSeekToCue(cell.id)}
-                />
+                      {/* TTS */}
+                      {cell.translated.trim().length > 0 && (
+                        <div className="flex items-center gap-2 rounded-lg px-2 py-0.5">
+                          <FileText className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                          <CellTtsButton
+                            cellId={cell.id}
+                            text={cell.translated}
+                            original={cell.original}
+                            context={cell.context}
+                            cellLabel={cell.cellLabel}
+                            sourceLanguage={project.sourceLanguage}
+                            targetLanguage={project.targetLanguage}
+                            projectTtsSettings={project.ttsSettings}
+                            cellTtsSettings={cell.ttsSettings}
+                            generatedVoiceAudioId={cell.selectedGeneratedVoiceAudioId}
+                            attachments={cell.attachments}
+                            projectId={project.id}
+                            fileId={cell.fileId}
+                            disabled={!editable}
+                            playOnly
+                          />
+                        </div>
+                      )}
+
+                      {/* Comments */}
+                      {onOpenComments && (
+                        <button
+                          type="button"
+                          onClick={() => onOpenComments(cell.id)}
+                          className={cn(
+                            "flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-xs",
+                            "hover:bg-muted/60",
+                            openCommentCount > 0 ? "text-primary" : "text-foreground",
+                          )}
+                        >
+                          <MessageCircle className="h-3.5 w-3.5 shrink-0" />
+                          {openCommentCount > 0
+                            ? `${openCommentCount} open comment${openCommentCount !== 1 ? "s" : ""}`
+                            : "Add comment"}
+                        </button>
+                      )}
+
+                      {/* Seek to cue */}
+                      {onSeekToCue && (
+                        <button
+                          type="button"
+                          onClick={() => onSeekToCue(cell.id)}
+                          className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-xs text-foreground hover:bg-muted/60"
+                        >
+                          <Play className="h-3.5 w-3.5 shrink-0" />
+                          Play from this cue
+                        </button>
+                      )}
+                    </div>
+                  </PopoverContent>
+                </Popover>
               )}
             </CellActionRail>
           </div>

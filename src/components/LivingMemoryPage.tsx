@@ -15,6 +15,7 @@ import { Badge } from "@/components/ui/badge"
 import { Skeleton } from "@/components/ui/skeleton"
 import { useLivingMemory } from "@/hooks/useLivingMemory"
 import type { LivingMemoryCell } from "@/hooks/useLivingMemory"
+import { useLiveness } from "@/hooks/useLiveness"
 
 // ── Skeleton placeholder while loading ────────────────────────────────────
 
@@ -165,6 +166,8 @@ export function LivingMemoryPage() {
     projectId: projectId ?? "",
   })
 
+  const { state: livenessState, label: livenessLabel } = useLiveness(cells.length)
+
   return (
     <div className="flex flex-col min-h-screen">
       {/* Header */}
@@ -191,6 +194,16 @@ export function LivingMemoryPage() {
             {cells.length.toLocaleString()} validated
           </Badge>
         )}
+        <span
+          aria-label={livenessLabel}
+          title={livenessLabel}
+          className={[
+            "h-2 w-2 shrink-0 rounded-full transition-colors",
+            livenessState === "offline" ? "bg-red-500" :
+            livenessState === "updating" ? "bg-amber-400 animate-pulse" :
+            "bg-emerald-500",
+          ].join(" ")}
+        />
       </header>
 
       {/* Truncation warning */}

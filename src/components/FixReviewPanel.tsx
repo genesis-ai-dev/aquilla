@@ -52,10 +52,12 @@ export function FixReviewPanel({ open, rule, proposal, onClose, onApply, onAmend
           <>
             <div className="mt-2 flex items-center justify-between">
               <p className="text-sm text-muted-foreground">{previews.length} previews ready</p>
-              <div className="flex gap-2 text-xs">
-                <button className="underline" onClick={selectAll}>Select all</button>
-                <button className="underline" onClick={selectNone}>Select none</button>
-              </div>
+              {previews.length > 1 && (
+                <div className="flex gap-2 text-xs">
+                  <button className="underline" onClick={selectAll}>Select all</button>
+                  <button className="underline" onClick={selectNone}>Select none</button>
+                </div>
+              )}
             </div>
 
             <ul className="mt-2 max-h-[60vh] space-y-2 overflow-auto">

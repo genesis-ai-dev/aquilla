@@ -343,6 +343,13 @@ export interface ProjectRecord {
   /** Authored living-memory entries (instructions + standards). Persisted and
    *  synced via ProjectWideSettings the same way as `rules` / `terminology`. */
   livingMemoryEntries?: LivingMemoryEntry[]
+  /**
+   * Persisted interlinear alignment seeds (FRO-207). Synced via
+   * ProjectWideSettings the same way as `terminology`. Positive weight =
+   * confirmed, negative = invalidated. Feeds back into buildAlignmentModel as
+   * pseudo-count seeds so subsequent statistical BT/alignment reflects them.
+   */
+  alignmentSeeds?: import("@/lib/completion/interlinear").AlignmentSeed[]
 }
 
 /** A single authored guidance entry in the Living Memory page. */

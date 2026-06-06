@@ -7,13 +7,13 @@
  */
 import { useState, useMemo, useEffect } from "react"
 import { useNavigate, useSearchParams } from "react-router-dom"
-import { AlertTriangle, AlertCircle, Trash2, Wand2, ChevronDown, ChevronUp, BookOpen } from "lucide-react"
+import { AlertTriangle, AlertCircle, Trash2, Wand2, ChevronDown, ChevronUp, BookOpen, Pencil } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { BuiltinChecksList } from "./BuiltinChecksList"
-import { RuleCreateDialog } from "./RuleCreateDialog"
 import { RuleSuggestDialog } from "./RuleSuggestDialog"
+import { RuleEditor } from "./RuleEditor"
 import type { ProjectRecord, RuleAutofix, TranslationRule } from "@/lib/parsers/types"
 import type { useRules } from "@/hooks/useRules"
 import type { CellData } from "@/hooks/useCells"
@@ -51,6 +51,8 @@ export function RulesSurface({
   const navigate = useNavigate()
   const [searchParams, setSearchParams] = useSearchParams()
   const [expandedRuleId, setExpandedRuleId] = useState<string | null>(null)
+  // FRO-195: inline create/edit state — null = closed, "new" = create, ruleId = edit
+  const [editingRuleId, setEditingRuleId] = useState<string | "new" | null>(null)
 
   // Focus a rule row when arriving via deep-link with ?ruleId=&focus=autofix
   useEffect(() => {
@@ -97,9 +99,27 @@ export function RulesSurface({
             projectId={projectId}
             cells={validatedCells}
           />
-          {/* SWARM-TODO(FRO-195): replace with inline create surface */}
-          <RuleCreateDialog onAdd={addRule} />
+          {/* FRO-195: inline create surface replaces the dialog */}
+          <Button
+            size="sm"
+            onClick={() => setEditingRuleId("new")}
+            disabled={editingRuleId !== null}
+          >
+            + Add Rule
+          </Button>
         </div>
+
+        {/* FRO-195: inline rule editor (create mode) */}
+        {editingRuleId === "new" && (
+          <RuleEditor
+            cells={validatedCells}
+            onSave={async (rule) => {
+              await addRule(rule)
+              setEditingRuleId(null)
+            }}
+            onCancel={() => setEditingRuleId(null)}
+          />
+        )}
 
         {usageSummary && (
           <p className="text-xs text-muted-foreground" title="LLM usage on this project">{usageSummary}</p>
@@ -149,6 +169,16 @@ export function RulesSurface({
                           <Wand2 className="mr-1 h-3.5 w-3.5" />
                           Try to fix all
                         </Button>
+                        {/* FRO-195: inline edit entry */}
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => setEditingRuleId(editingRuleId === rule.id ? null : rule.id)}
+                          title="Edit rule"
+                          disabled={editingRuleId !== null && editingRuleId !== rule.id}
+                        >
+                          <Pencil className="h-3.5 w-3.5" />
+                        </Button>
                         <Button variant="ghost" size="sm" onClick={() => toggleExpanded(rule.id)}>
                           {expanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
                         </Button>
@@ -167,6 +197,20 @@ export function RulesSurface({
 
                       {expanded && (
                         <AutofixEditor rule={rule} onUpdate={(af) => updateRule(rule.id, { autofix: af })} />
+                      )}
+                      {/* FRO-195: inline edit form */}
+                      {editingRuleId === rule.id && (
+                        <div className="mt-3 border-t pt-3">
+                          <RuleEditor
+                            initialRule={rule}
+                            cells={validatedCells}
+                            onSave={async (updates) => {
+                              await updateRule(rule.id, updates)
+                              setEditingRuleId(null)
+                            }}
+                            onCancel={() => setEditingRuleId(null)}
+                          />
+                        </div>
                       )}
                     </li>
                   )

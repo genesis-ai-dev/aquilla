@@ -26,6 +26,8 @@ import { useEffect, useRef } from "react"
 import type { RuleInfraction } from "@/lib/parsers/types"
 import { createViolationDecorationExtension, violationPluginKey } from "@/lib/richtext/violation-decoration-plugin"
 import { createKaraokeExtension, karaokePluginKey, type KaraokePluginState } from "@/lib/richtext/karaoke-plugin"
+import { createTerminologyChipExtension, terminologyChipPluginKey } from "@/lib/richtext/terminology-chip-plugin"
+import type { Concept } from "@/lib/terminology/types"
 import { findActiveTimingIndex } from "@/lib/audio/timings"
 import type { WordTiming } from "@/lib/codex-editor/types"
 
@@ -76,6 +78,13 @@ interface TranslatedEditorProps {
    * parent resolves direction → target cell and focuses it (caret at end).
    */
   onNavigateCell?: (direction: "prev" | "next") => void
+  /**
+   * Optional managed terminology concepts. When provided, active concepts are
+   * highlighted with a tiny status-tinted chip at the top-right of each match.
+   * Defaults to undefined (feature off) so other call sites are unaffected.
+   * Chip click exposes `data-source-term` for FRO-204 (TermLookupPopover).
+   */
+  terminologyConcepts?: Concept[]
 }
 
 export function TranslatedEditor({
@@ -99,6 +108,7 @@ export function TranslatedEditor({
   remoteChangedDuringEdit,
   onDiscardLocal,
   onNavigateCell,
+  terminologyConcepts,
 }: TranslatedEditorProps) {
   // Held in a ref so the editor's keydown handler — created once per cellId —
   // always sees the latest navigation callback without re-creating the editor.
@@ -115,6 +125,8 @@ export function TranslatedEditor({
     activeIdx: -1,
     onSeekToWord: undefined,
   })
+
+  const latestTerminologyConceptsRef = useRef<Concept[]>(terminologyConcepts ?? [])
 
   // Resolve initial content once per cellId — prefer rich HTML, fall back to plain text.
   const initialContent = initialHtml && initialHtml.length > 0
@@ -149,6 +161,9 @@ export function TranslatedEditor({
       // the lint rule is overly conservative here.
       createViolationDecorationExtension(() => latestViolationStateRef.current),
       createKaraokeExtension(() => latestKaraokeStateRef.current),
+      ...(terminologyConcepts !== undefined
+        ? [createTerminologyChipExtension(() => latestTerminologyConceptsRef.current)]
+        : []),
     ],
     editorProps: {
       attributes: {
@@ -260,6 +275,13 @@ export function TranslatedEditor({
       editor.view.dispatch(editor.state.tr.setMeta(karaokePluginKey, "rebuild"))
     }
   }, [editor, audioTimings, onSeekToTime])
+
+  useEffect(() => {
+    latestTerminologyConceptsRef.current = terminologyConcepts ?? []
+    if (editor && terminologyConcepts !== undefined) {
+      editor.view.dispatch(editor.state.tr.setMeta(terminologyChipPluginKey, "rebuild"))
+    }
+  }, [editor, terminologyConcepts])
 
   const lastActiveIdxRef = useRef(-1)
   useEffect(() => {

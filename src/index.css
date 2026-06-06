@@ -446,6 +446,44 @@ html.dark[data-color-theme="rose"] {
   opacity: 0.6;
 }
 
+/* Terminology chip decorations — term-chip-host is position:relative so the
+   absolutely-positioned chip does NOT push lines apart (no line-height change). */
+.term-chip-host {
+  position: relative;
+  /* Do not collapse inline context — ensure chip has an anchor */
+  display: inline;
+}
+
+.term-chip {
+  position: absolute;
+  top: -0.45em;
+  right: -0.35em;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  pointer-events: auto;
+  cursor: pointer;
+  /* Prevent chip from affecting flow */
+  display: inline-block;
+  vertical-align: baseline;
+  line-height: 0;
+  z-index: 10;
+}
+
+/* Status tints */
+.term-chip-preferred {
+  background-color: var(--color-emerald-500, oklch(0.696 0.17 162));
+  box-shadow: 0 0 0 1px color-mix(in oklch, var(--color-emerald-500, oklch(0.696 0.17 162)) 40%, transparent);
+}
+.term-chip-admitted {
+  background-color: var(--color-muted-foreground, oklch(0.55 0 0));
+  opacity: 0.6;
+}
+.term-chip-forbidden {
+  background-color: var(--color-red-500, oklch(0.637 0.237 25.331));
+  box-shadow: 0 0 0 1px color-mix(in oklch, var(--color-red-500, oklch(0.637 0.237 25.331)) 40%, transparent);
+}
+
 .karaoke-active {
   background-color: color-mix(in oklch, var(--color-primary, oklch(0.65 0.2 250)) 22%, transparent);
   border-radius: 2px;

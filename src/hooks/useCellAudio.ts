@@ -33,7 +33,8 @@ export interface AudioError {
 export type PeaksState = "idle" | "loading" | "ready" | "error"
 
 export interface UseCellAudioResult {
-  state: "idle" | "loading" | "ready" | "error"
+  /** "cloud" = server pointer exists but bytes not yet fetched. */
+  state: "idle" | "cloud" | "loading" | "ready" | "error"
   error: AudioError | null
   isPlaying: boolean
   currentTime: number
@@ -139,6 +140,20 @@ export function useCellAudio(
       setPeaksState("idle")
     }
   }, [selectedAudioId])
+
+  // Derive "cloud" state: a frontier-audio:// pointer exists but bytes are not
+  // yet in memory. Only set when in "idle" state so we don't clobber an active
+  // loading/ready/error state.
+  useEffect(() => {
+    if (
+      attachmentUrl &&
+      attachmentUrl.startsWith("frontier-audio://") &&
+      !bytesRef.current &&
+      !bytesPromiseRef.current
+    ) {
+      setState((s) => (s === "idle" ? "cloud" : s))
+    }
+  }, [attachmentUrl])
 
   const ensureBytes = useCallback(async (): Promise<Uint8Array> => {
     if (bytesRef.current) return bytesRef.current

@@ -2,12 +2,16 @@
 // the workspace level — the modal owns the full capture flow (countdown,
 // waveform, duration bar, preview/retake/save, rapid next/prev navigation).
 
+import { useState } from "react"
 import { Mic, MicOff } from "lucide-react"
 import { cn } from "@/lib/utils"
 
 interface Props {
   onOpenRecording: () => void
   disabled?: boolean
+  /** Pass true when mic permission is known to be denied — renders a help
+   *  popover explaining how to re-enable access instead of just a tooltip. */
+  micDenied?: boolean
 }
 
 function getUnsupportedReason(): string | null {
@@ -22,30 +26,63 @@ function getUnsupportedReason(): string | null {
   return null
 }
 
-export function CellAudioRecordButton({ onOpenRecording, disabled }: Props) {
+export function CellAudioRecordButton({ onOpenRecording, disabled, micDenied }: Props) {
+  const [showDeniedHelp, setShowDeniedHelp] = useState(false)
   const unsupportedReason = getUnsupportedReason()
-  const blocked = disabled || unsupportedReason !== null
-  const tooltip = unsupportedReason
-    ? `Recording unavailable — ${unsupportedReason}`
-    : disabled
-      ? "Recording disabled"
-      : "Record audio"
+  const blocked = disabled || unsupportedReason !== null || micDenied
+  const tooltip = micDenied
+    ? "Microphone access blocked — click for help"
+    : unsupportedReason
+      ? `Recording unavailable — ${unsupportedReason}`
+      : disabled
+        ? "Recording disabled"
+        : "Record audio"
+
+  const handleClick = () => {
+    if (micDenied) { setShowDeniedHelp((v) => !v); return }
+    if (!blocked) onOpenRecording()
+  }
 
   return (
-    <button
-      type="button"
-      onClick={() => { if (!blocked) onOpenRecording() }}
-      disabled={blocked}
-      title={tooltip}
-      aria-label={tooltip}
-      className={cn(
-        "flex h-5 w-5 items-center justify-center rounded-full transition-[transform,color] duration-150 ease-out active:scale-[0.92] hover:bg-muted/60",
-        blocked
-          ? "cursor-not-allowed text-muted-foreground/20"
-          : "text-muted-foreground/50 hover:text-foreground",
+    <span className="relative inline-flex">
+      <button
+        type="button"
+        onClick={handleClick}
+        disabled={Boolean(disabled || unsupportedReason)}
+        title={tooltip}
+        aria-label={tooltip}
+        className={cn(
+          "flex h-5 w-5 items-center justify-center rounded-full transition-[transform,color] duration-150 ease-out active:scale-[0.92] hover:bg-muted/60",
+          blocked
+            ? micDenied
+              ? "cursor-pointer text-amber-500/70 hover:text-amber-500"
+              : "cursor-not-allowed text-muted-foreground/20"
+            : "text-muted-foreground/50 hover:text-foreground",
+        )}
+      >
+        {blocked ? <MicOff className="h-3 w-3" /> : <Mic className="h-3 w-3" />}
+      </button>
+
+      {/* Mic-denied help popover — shown when micDenied and user clicked */}
+      {micDenied && showDeniedHelp && (
+        <span
+          role="tooltip"
+          className="absolute bottom-full left-1/2 z-50 mb-1 w-52 -translate-x-1/2 rounded-md border bg-popover px-3 py-2 text-[11px] leading-snug text-popover-foreground shadow-md"
+        >
+          <strong className="block font-semibold">Microphone blocked</strong>
+          <span className="mt-0.5 block text-muted-foreground">
+            Open your browser&apos;s site settings (🔒 in the address bar) and
+            allow microphone access, then reload the page.
+          </span>
+          <button
+            type="button"
+            onClick={() => setShowDeniedHelp(false)}
+            className="mt-1.5 text-[10px] underline text-muted-foreground hover:text-foreground"
+          >
+            Dismiss
+          </button>
+        </span>
       )}
-    >
-      {blocked ? <MicOff className="h-3 w-3" /> : <Mic className="h-3 w-3" />}
-    </button>
+    </span>
   )
 }

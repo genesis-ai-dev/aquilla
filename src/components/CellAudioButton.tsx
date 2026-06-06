@@ -2,7 +2,7 @@
 // Compact ▶/⏸ button. The audio controller is owned by the parent EditorRow
 // so the button and the waveform stay in lock-step on play / pause / seek.
 
-import { AlertCircle, CloudOff, FileQuestion, Loader2, Pause, Play, Trash2 } from "lucide-react"
+import { AlertCircle, CloudDownload, CloudOff, FileQuestion, Loader2, Pause, Play, Trash2 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import type { UseCellAudioResult } from "@/hooks/useCellAudio"
 
@@ -24,28 +24,34 @@ export function CellAudioButton({ controller, hidden }: Props) {
   const tooltip =
     state === "error" && error
       ? errorTooltip(error.kind)
-      : isPlaying
-        ? "Pause audio"
-        : "Play audio"
+      : state === "cloud"
+        ? "Audio on server — click to download and play"
+        : isPlaying
+          ? "Pause audio"
+          : "Play audio"
 
   return (
     <button
       type="button"
       onClick={onClick}
+      onPointerEnter={state === "cloud" ? () => { void play() } : undefined}
       disabled={state === "loading"}
       title={tooltip}
       className={cn(
         "flex h-5 w-5 items-center justify-center rounded-full transition-[transform,color] duration-150 ease-out active:scale-[0.92] hover:bg-muted/60",
         state === "error"
           ? "text-destructive hover:text-destructive/80"
-          : isPlaying
-            ? "text-primary"
-            : "text-muted-foreground/50 hover:text-foreground",
+          : state === "cloud"
+            ? "text-sky-500/70 hover:text-sky-500"
+            : isPlaying
+              ? "text-primary"
+              : "text-muted-foreground/50 hover:text-foreground",
       )}
     >
       {state === "loading" && <Loader2 className="h-3 w-3 animate-spin" />}
       {state === "error" && errorIcon(error?.kind)}
-      {state !== "loading" && state !== "error" && (isPlaying
+      {state === "cloud" && <CloudDownload className="h-3 w-3" />}
+      {state !== "loading" && state !== "error" && state !== "cloud" && (isPlaying
         ? <Pause className="h-3 w-3" />
         : <Play className="h-3 w-3" />
       )}

@@ -46,6 +46,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { categorizeAiError } from "@/lib/audio/ai-error"
 import { CellAiStatusPopover } from "./CellAiStatusPopover"
 import { CellNumberPill } from "./cell/CellNumberPill"
+import { InterlinearAlignmentPanel } from "./InterlinearAlignmentPanel"
 import { CellVoicePanel } from "./cell/CellVoicePanel"
 import { CellAudioRecordButton } from "./CellAudioRecordButton"
 import { useMicPermission } from "@/hooks/useMicPermission"
@@ -413,6 +414,13 @@ interface EditorTableProps {
   /** Token fetcher for project-scoped sync reads. Required for the inline
    *  History tab to query the D1 event log on demand. */
   getTokenForFile?: (fileId: string) => Promise<string | null>
+  /** FRO-207: Pre-built interlinear alignment model for source↔target token
+   *  alignment in the BT expansion tab. Built by ProjectWorkspace from all
+   *  project cell pairs + persisted seeds. Optional — panel hides when absent. */
+  alignmentModel?: import("@/lib/completion/interlinear").AlignmentModel | null
+  /** FRO-207: Called when the user confirms or invalidates an alignment seed.
+   *  Parent persists via project-settings and rebuilds the model. */
+  onAlignmentSeedChange?: (seed: import("@/lib/completion/interlinear").AlignmentSeed) => void
 }
 
 export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(function EditorTable({
@@ -436,6 +444,8 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   onClaimCell, onReleaseCell, onAckRemoteChange,
   staleCellIds,
   getTokenForFile,
+  alignmentModel,
+  onAlignmentSeedChange,
 }, ref) {
   const permissions = useProjectPermissions(project)
   const canEdit = permissions.canEditContent
@@ -944,6 +954,8 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
                 onNavigateCell={handleNavigateCell}
                 getVoiceTakeCells={getVoiceTakeCells}
                 getTokenForFile={getTokenForFile}
+                alignmentModel={alignmentModel}
+                onAlignmentSeedChange={onAlignmentSeedChange}
               />
             </div>
           )
@@ -1037,6 +1049,10 @@ interface MemoizedRowProps {
   onNavigateCell: (cellId: string, direction: "prev" | "next") => void
   getVoiceTakeCells: (startIndex: number, count: number) => CellData[]
   getTokenForFile?: (fileId: string) => Promise<string | null>
+  /** FRO-207: Pre-built interlinear alignment model. */
+  alignmentModel?: import("@/lib/completion/interlinear").AlignmentModel | null
+  /** FRO-207: Called when user confirms/invalidates an alignment. */
+  onAlignmentSeedChange?: (seed: import("@/lib/completion/interlinear").AlignmentSeed) => void
 }
 
 const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
@@ -1049,6 +1065,8 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
     onNavigateCell: onNavigateCellParent,
     getVoiceTakeCells,
     getTokenForFile,
+    alignmentModel,
+    onAlignmentSeedChange,
     project, username, editable, isCompletionConfigured, isCompletionAvailable,
     ruleMap, onCompleteSingle, onAcceptCompletion, onRejectCompletion, onInfractionClick,
     isBacktranslationConfigured, onBacktranslate, onSaveBacktranslation,
@@ -1173,6 +1191,8 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
         onNavigateCell={handleNavigateCell}
         getVoiceTakeCells={getVoiceTakeCells}
         getTokenForFile={getTokenForFile}
+        alignmentModel={alignmentModel}
+        onAlignmentSeedChange={onAlignmentSeedChange}
         onCellCommitted={onCellCommitted}
         onOptimisticEdit={onOptimisticEdit}
         lockHolderLabel={lockHolderLabel}
@@ -1231,6 +1251,10 @@ interface EditorRowProps {
   backtranslationError?: string
   onBacktranslate?: (cell: CellData) => void
   onSaveBacktranslation?: (cell: CellData, btText: string, polished: boolean) => void
+  /** FRO-207: Pre-built interlinear alignment model. */
+  alignmentModel?: import("@/lib/completion/interlinear").AlignmentModel | null
+  /** FRO-207: Called when user confirms/invalidates an alignment. */
+  onAlignmentSeedChange?: (seed: import("@/lib/completion/interlinear").AlignmentSeed) => void
   openCommentCount: number
   onOpenComments?: (cellId: string) => void
   onOpenHistory?: (cellId: string) => void
@@ -1387,6 +1411,8 @@ function EditorRow({
   onClaimCell, onReleaseCell, onAckRemoteChange,
   isStaleSource,
   getTokenForFile,
+  alignmentModel,
+  onAlignmentSeedChange,
 }: EditorRowProps) {
   const [openRuleId, setOpenRuleId] = useState<string | null>(null)
   const [openRuleAnchor, setOpenRuleAnchor] = useState<HTMLElement | null>(null)
@@ -2752,6 +2778,16 @@ function EditorRow({
                         ? "Generating back-translation…"
                         : "No back-translation yet. Click Generate to create one."}
                     </p>
+                  )}
+                  {/* ── FRO-207: Interlinear alignment panel ──────────────── */}
+                  {alignmentModel && cell.original.trim() && cell.translated.trim() && (
+                    <InterlinearAlignmentPanel
+                      sourceText={cell.original}
+                      targetText={cell.translated}
+                      alignmentModel={alignmentModel}
+                      confirmedSeeds={project.alignmentSeeds ?? []}
+                      onSeedChange={onAlignmentSeedChange ?? (() => undefined)}
+                    />
                   )}
                   {backtranslationError && (
                     <p className="text-xs text-destructive">{backtranslationError}</p>

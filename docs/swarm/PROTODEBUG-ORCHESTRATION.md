@@ -109,3 +109,11 @@ GATE: tsc 0 · vitest 1593 pass / 2 baseline · build 0.
 - FRO-185 CommentsPage: filter (file/author/participant/resolved) + sort picker + show-resolved toggle (hidden default) + go-to-cell nav + @mention typeahead (MentionTextarea). FTS5 + exact cell-scroll = SWARM-TODOs.
 - validation config: validationRoleFloor + validationNamedUsers + allowSelfValidation UI + persistence. SERVER enforcement = SWARM-TODO (sync.ts cell.validate branch) → new issue.
 GATE: tsc 0 · vitest 1610 pass / 2 baseline · build 0.
+
+## §M Wave 9 (loop, 2026-06-06)
+- FRO-182: re-enabled batch transcribe-all + synth-all (restored transcribe.ts; new batch-audio.ts driver, concurrency 2, cancellable; AudioBulkProgressBanner populated; removed Phase-2c-gamma console.warn guards).
+- FRO-184: Living Memory Instructions + Standards sections (CRUD via project_settings, mirrors terminology).
+- FRO-189: validation server enforcement (sync-worker route.ts cell.validate — role floor + named-users + allowSelfValidation; reads project_settings; +14 tests).
+- mic-denied wiring: useMicPermission probe (audio-lens-gated) → micDenied into CellAudioRecordButton help affordance.
+GATE: tsc 0 · sync-worker 428/428 · root vitest 1629 pass / 2 baseline · build 0.
+## §CONVERGENCE (Wave 9 audit): surgical backlog ~drained. Remaining NEW gaps → small: HealthRing on ProjectCard/Dashboard (next). Large/HITL → file: download-target-bible, assignment work-pickup UI, detach-from-source. (search-replace already FRO-177.)

@@ -3,7 +3,7 @@ import { useVirtualizer } from "@tanstack/react-virtual"
 import DOMPurify from "dompurify"
 import {
   Check, CheckCheck, Circle, Trash2, AlertTriangle, AlertCircle, RefreshCw,
-  MessageCircle, Play, Pause, Mic, MicOff, Sparkles, FileText, History as HistoryIcon,
+  MessageCircle, Play, Pause, Mic, Sparkles, FileText, History as HistoryIcon,
   ArrowRight, Activity, Loader2,
 } from "lucide-react"
 import type { CellData } from "@/hooks/useCells"
@@ -47,6 +47,8 @@ import { categorizeAiError } from "@/lib/audio/ai-error"
 import { CellAiStatusPopover } from "./CellAiStatusPopover"
 import { CellNumberPill } from "./cell/CellNumberPill"
 import { CellVoicePanel } from "./cell/CellVoicePanel"
+import { CellAudioRecordButton } from "./CellAudioRecordButton"
+import { useMicPermission } from "@/hooks/useMicPermission"
 import { assignedCastVoiceId, findVoice } from "@/lib/audio/voices"
 import { useNavigate } from "react-router-dom"
 import { cn } from "@/lib/utils"
@@ -437,6 +439,9 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
 }, ref) {
   const permissions = useProjectPermissions(project)
   const canEdit = permissions.canEditContent
+  // Probe mic permission once (shared across all rows) so the help affordance
+  // on CellAudioRecordButton activates when the user has blocked the mic.
+  const { micDenied } = useMicPermission(audioLens !== null)
   const parentRef = useRef<HTMLDivElement>(null)
   const isDragging = useRef(false)
   const dragCells = useRef<Set<string>>(new Set())
@@ -928,6 +933,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
                 onJumpToCell={onJumpToCell}
                 onAiSetupNeeded={onAiSetupNeeded}
                 onOpenRecording={onOpenRecording}
+                micDenied={micDenied}
                 audioLens={audioLens ?? null}
                 onOpenAudioSetup={onOpenAudioSetup}
                 onProjectChanged={onProjectChanged}
@@ -1016,6 +1022,7 @@ interface MemoizedRowProps {
   onJumpToCell?: (cellId: string) => void
   onAiSetupNeeded?: () => void
   onOpenRecording?: (cellId: string) => void
+  micDenied?: boolean
   audioLens: AudioLensContext | null
   onOpenAudioSetup?: () => void
   onProjectChanged?: () => void
@@ -1048,7 +1055,7 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
     onOpenComments, onOpenHistory,
     onSeekToCue, lineNumbersEnabled, cellLabelsEnabled,
     sourceTextDirection, targetTextDirection, isAnonymous,
-    onJumpToCell, onAiSetupNeeded, onOpenRecording, onProjectChanged, onAssignVoice,
+    onJumpToCell, onAiSetupNeeded, onOpenRecording, micDenied, onProjectChanged, onAssignVoice,
     audioLens, onOpenAudioSetup,
     onCellCommitted, onOptimisticEdit, lockHolderLabel, remoteChangedWhileFocused,
     onClaimCell, onReleaseCell, onAckRemoteChange,
@@ -1155,6 +1162,7 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
         onJumpToCell={onJumpToCell}
         onAiSetupNeeded={onAiSetupNeeded}
         onOpenRecording={onOpenRecording}
+        micDenied={micDenied}
         audioLens={audioLens}
         onOpenAudioSetup={onOpenAudioSetup}
         onProjectChanged={onProjectChanged}
@@ -1243,6 +1251,7 @@ interface EditorRowProps {
   onJumpToCell?: (cellId: string) => void
   onAiSetupNeeded?: () => void
   onOpenRecording?: (cellId: string) => void
+  micDenied?: boolean
   audioLens: AudioLensContext | null
   onOpenAudioSetup?: () => void
   onProjectChanged?: () => void
@@ -1372,7 +1381,7 @@ function EditorRow({
   isActiveCue: _isActiveCue, onSeekToCue,
   onDragStart, onDragEnter, onSelectionPointerDown, onNavigateCell,
   rowIndex, lineNumbersEnabled, cellLabelsEnabled, sourceTextDirection, targetTextDirection, gridCols,
-  isAnonymous, onAiSetupNeeded, onOpenRecording,
+  isAnonymous, onAiSetupNeeded, onOpenRecording, micDenied,
   audioLens, onOpenAudioSetup, onAssignVoice,
   onCellCommitted, onOptimisticEdit, lockHolderLabel, remoteChangedWhileFocused,
   onClaimCell, onReleaseCell, onAckRemoteChange,
@@ -2425,23 +2434,10 @@ function EditorRow({
                   }
                 />
               ) : (
-                <RailButton
-                  icon={
-                    !editable ? (
-                      <MicOff className="h-3.5 w-3.5" />
-                    ) : (
-                      <Mic className="h-3.5 w-3.5" />
-                    )
-                  }
-                  tooltip={
-                    !editable
-                      ? "Read-only"
-                      : !onOpenRecording
-                        ? "Recording disabled"
-                        : "Record audio"
-                  }
-                  onClick={() => onOpenRecording?.(cell.id)}
+                <CellAudioRecordButton
+                  onOpenRecording={() => onOpenRecording?.(cell.id)}
                   disabled={!editable || !onOpenRecording}
+                  micDenied={micDenied}
                 />
               )}
 

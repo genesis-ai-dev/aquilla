@@ -18,6 +18,10 @@ interface HistoryDrawerProps {
   fileId?: string | null
   /** Fetches a file-scoped sync token (same as Phase 2 outbox flusher). */
   getTokenForFile?: (fileId: string) => Promise<string | null>
+  /** Called when the user confirms promoting a stale-branch entry to current.
+   *  AD-2: the caller should emit a new target-cell commit whose parentId is
+   *  the current chain head, making the promoted text the new current value. */
+  onPromote?: (entry: CellHistoryEntry) => void
 }
 
 interface EntryGroup {
@@ -106,7 +110,7 @@ function commonSuffixLength(a: string, b: string, prefixLen: number): number {
   return i
 }
 
-export function HistoryDrawer({ cell, onClose, projectId, fileId, getTokenForFile }: HistoryDrawerProps) {
+export function HistoryDrawer({ cell, onClose, projectId, fileId, getTokenForFile, onPromote }: HistoryDrawerProps) {
   const enabled = !!projectId && !!fileId && !!getTokenForFile
   // Target side is the typical edit surface in this translation app, so we
   // use `targetEventId` as the AD-2 chain head when computing stale-branch
@@ -203,6 +207,7 @@ export function HistoryDrawer({ cell, onClose, projectId, fileId, getTokenForFil
                     isCurrent={i === currentGroupIndex}
                     formatTimestamp={formatTimestamp}
                     refForFirstStale={isFirstStale ? firstStaleGroupRef : null}
+                    onPromote={onPromote}
                   />
                 )
               })}
@@ -219,6 +224,7 @@ function GroupItem({
   isCurrent,
   formatTimestamp,
   refForFirstStale,
+  onPromote,
 }: {
   group: EntryGroup
   isCurrent: boolean
@@ -227,8 +233,10 @@ function GroupItem({
    *  HistoryDrawer to scroll the user's attention to it when the drawer
    *  opens via the F6 banner. */
   refForFirstStale: React.RefObject<HTMLLIElement | null> | null
+  onPromote?: (entry: CellHistoryEntry) => void
 }) {
   const [expanded, setExpanded] = useState(false)
+  const [pendingPromote, setPendingPromote] = useState(false)
   const terminal = group.terminal
   const isStale = terminal.isStale ?? false
   const Icon = terminal.source === "llm" ? Bot : User
@@ -298,6 +306,31 @@ function GroupItem({
         <div className="mt-1 flex items-center gap-1 text-[10px] text-muted-foreground">
           <BookOpen className="h-3 w-3" />
           {terminal.examples.length} example{terminal.examples.length !== 1 ? "s" : ""} used
+        </div>
+      )}
+      {isStale && onPromote && !pendingPromote && (
+        <button
+          onClick={() => setPendingPromote(true)}
+          className="mt-2 text-[11px] font-medium text-amber-700 hover:text-amber-900 dark:text-amber-300 dark:hover:text-amber-100 underline underline-offset-2"
+        >
+          Promote to current
+        </button>
+      )}
+      {isStale && onPromote && pendingPromote && (
+        <div className="mt-2 flex items-center gap-2 text-[11px]">
+          <span className="text-muted-foreground">Make this the current value?</span>
+          <button
+            onClick={() => { onPromote(terminal); setPendingPromote(false) }}
+            className="font-medium text-primary hover:text-primary/80"
+          >
+            Confirm
+          </button>
+          <button
+            onClick={() => setPendingPromote(false)}
+            className="text-muted-foreground hover:text-foreground"
+          >
+            Cancel
+          </button>
         </div>
       )}
       {hasSubEntries && (

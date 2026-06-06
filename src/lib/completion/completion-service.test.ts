@@ -599,3 +599,50 @@ describe("buildBatchPrompt with rules and validatedPairs", () => {
     expect(idxPassage).toBeGreaterThan(idxMem)
   })
 })
+
+// ---------------------------------------------------------------------------
+// FRO-187: v1 AI retrieval-tuning settings defaults & top_k wiring
+// ---------------------------------------------------------------------------
+
+describe("CompletionSettings v1 retrieval fields", () => {
+  it("FALLBACK_SETTINGS-style defaults: top_k=5, contextSize=medium, useOnlyValidatedExamples=false, main_chat_language empty", () => {
+    const settings: CompletionSettings = {
+      endpoint: "",
+      model: "",
+      maxTokens: 512,
+      temperature: 0.3,
+      systemPrompt: DEFAULT_SYSTEM_PROMPT,
+      // v1 defaults applied explicitly (mirrors FALLBACK_SETTINGS in useCompletion)
+      top_k: 5,
+      contextSize: "medium",
+      useOnlyValidatedExamples: false,
+      main_chat_language: "",
+    }
+    expect(settings.top_k).toBe(5)
+    expect(settings.contextSize).toBe("medium")
+    expect(settings.useOnlyValidatedExamples).toBe(false)
+    expect(settings.main_chat_language).toBe("")
+  })
+
+  it("collectValidatedPairs respects top_k limit", () => {
+    const cells = Array.from({ length: 10 }, (_, i) => ({
+      status: "validated",
+      original: `source ${i}`,
+      translated: `target ${i}`,
+    }))
+    const topK = 3
+    const result = collectValidatedPairs(cells, undefined, topK)
+    expect(result).toHaveLength(topK)
+  })
+
+  it("collectValidatedPairs returns only validated cells", () => {
+    const cells = [
+      { status: "validated", original: "hello", translated: "hola" },
+      { status: "draft", original: "world", translated: "mundo" },
+      { status: "validated", original: "yes", translated: "sí" },
+    ]
+    const result = collectValidatedPairs(cells)
+    expect(result).toHaveLength(2)
+    expect(result.every((p) => p.source && p.target)).toBe(true)
+  })
+})

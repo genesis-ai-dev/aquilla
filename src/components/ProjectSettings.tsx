@@ -24,6 +24,7 @@ import type {
   AudioMediaStrategy,
   CompletionProvider,
   CompletionSettings,
+  ContextSize,
   DecaySettings,
   ProjectRecord,
 } from "@/lib/parsers/types"
@@ -72,6 +73,10 @@ interface Baseline {
   temperature: number
   systemPrompt: string
   llmHealthPenalty: number
+  top_k: number
+  contextSize: ContextSize
+  useOnlyValidatedExamples: boolean
+  main_chat_language: string
   autoSyncEnabled: boolean
   autoSyncInterval: number
   validationCount: number
@@ -94,6 +99,10 @@ function buildBaseline(project: ProjectRecord): Baseline {
     temperature: project.completionSettings?.temperature ?? 0.3,
     systemPrompt: project.completionSettings?.systemPrompt || DEFAULT_SYSTEM_PROMPT,
     llmHealthPenalty: project.completionSettings?.llmHealthPenalty ?? 0.1,
+    top_k: project.completionSettings?.top_k ?? 5,
+    contextSize: project.completionSettings?.contextSize ?? "medium",
+    useOnlyValidatedExamples: project.completionSettings?.useOnlyValidatedExamples ?? false,
+    main_chat_language: project.completionSettings?.main_chat_language ?? "",
     autoSyncEnabled: project.syncSettings?.autoSync.enabled ?? false,
     autoSyncInterval: project.syncSettings?.autoSync.intervalMinutes ?? 5,
     validationCount: readValidationCount(project),
@@ -161,6 +170,10 @@ export function ProjectSettings() {
   const [temperature, setTemperature] = useState(0.3)
   const [systemPrompt, setSystemPrompt] = useState(DEFAULT_SYSTEM_PROMPT)
   const [llmHealthPenalty, setLlmHealthPenalty] = useState(0.1)
+  const [topK, setTopK] = useState(5)
+  const [contextSize, setContextSize] = useState<ContextSize>("medium")
+  const [useOnlyValidatedExamples, setUseOnlyValidatedExamples] = useState(false)
+  const [mainChatLanguage, setMainChatLanguage] = useState("")
   const [autoSyncEnabled, setAutoSyncEnabled] = useState(false)
   const [autoSyncInterval, setAutoSyncInterval] = useState(5)
   const [validationCount, setValidationCount] = useState(1)
@@ -194,6 +207,10 @@ export function ProjectSettings() {
     setTemperature(b.temperature)
     setSystemPrompt(b.systemPrompt)
     setLlmHealthPenalty(b.llmHealthPenalty)
+    setTopK(b.top_k)
+    setContextSize(b.contextSize)
+    setUseOnlyValidatedExamples(b.useOnlyValidatedExamples)
+    setMainChatLanguage(b.main_chat_language)
     setAutoSyncEnabled(b.autoSyncEnabled)
     setAutoSyncInterval(b.autoSyncInterval)
     setValidationCount(b.validationCount)
@@ -228,6 +245,10 @@ export function ProjectSettings() {
       temperature !== baseline.temperature ||
       systemPrompt !== baseline.systemPrompt ||
       llmHealthPenalty !== baseline.llmHealthPenalty ||
+      topK !== baseline.top_k ||
+      contextSize !== baseline.contextSize ||
+      useOnlyValidatedExamples !== baseline.useOnlyValidatedExamples ||
+      mainChatLanguage !== baseline.main_chat_language ||
       autoSyncEnabled !== baseline.autoSyncEnabled ||
       autoSyncInterval !== baseline.autoSyncInterval ||
       validationCount !== baseline.validationCount ||
@@ -237,8 +258,10 @@ export function ProjectSettings() {
     )
   }, [
     baseline, name, sourceLanguage, targetLanguage, username, provider, endpoint, apiKey,
-    model, maxTokens, temperature, systemPrompt, llmHealthPenalty, autoSyncEnabled,
-    autoSyncInterval, validationCount, validationCountAudio, audioMediaStrategy, decaySettings,
+    model, maxTokens, temperature, systemPrompt, llmHealthPenalty,
+    topK, contextSize, useOnlyValidatedExamples, mainChatLanguage,
+    autoSyncEnabled, autoSyncInterval, validationCount, validationCountAudio,
+    audioMediaStrategy, decaySettings,
   ])
 
   // Warn before browser-level navigation (back button, tab close, reload).
@@ -317,6 +340,10 @@ export function ProjectSettings() {
       if (maxTokens !== baseline.maxTokens) completionUpdates.maxTokens = maxTokens
       if (temperature !== baseline.temperature) completionUpdates.temperature = temperature
       if (llmHealthPenalty !== baseline.llmHealthPenalty) completionUpdates.llmHealthPenalty = llmHealthPenalty
+      if (topK !== baseline.top_k) completionUpdates.top_k = topK
+      if (contextSize !== baseline.contextSize) completionUpdates.contextSize = contextSize
+      if (useOnlyValidatedExamples !== baseline.useOnlyValidatedExamples) completionUpdates.useOnlyValidatedExamples = useOnlyValidatedExamples
+      if (mainChatLanguage !== baseline.main_chat_language) completionUpdates.main_chat_language = mainChatLanguage || undefined
 
       const localUpdates: Partial<ProjectRecord> = {}
       if (name !== baseline.name) localUpdates.name = name
@@ -391,6 +418,10 @@ export function ProjectSettings() {
         temperature,
         systemPrompt,
         llmHealthPenalty,
+        top_k: topK,
+        contextSize,
+        useOnlyValidatedExamples,
+        main_chat_language: mainChatLanguage,
         autoSyncEnabled,
         autoSyncInterval: Math.max(1, autoSyncInterval),
         validationCount,
@@ -411,9 +442,10 @@ export function ProjectSettings() {
     }
   }, [
     id, baseline, name, sourceLanguage, targetLanguage, username, provider, endpoint, apiKey,
-    model, maxTokens, temperature, systemPrompt, llmHealthPenalty, autoSyncEnabled,
-    autoSyncInterval, validationCount, validationCountAudio, audioMediaStrategy, decaySettings,
-    patchShared, refresh, applyBaseline,
+    model, maxTokens, temperature, systemPrompt, llmHealthPenalty,
+    topK, contextSize, useOnlyValidatedExamples, mainChatLanguage,
+    autoSyncEnabled, autoSyncInterval, validationCount, validationCountAudio,
+    audioMediaStrategy, decaySettings, patchShared, refresh, applyBaseline,
   ])
 
   const handleSaveAndClose = useCallback(async () => {
@@ -633,6 +665,69 @@ export function ProjectSettings() {
                 completion. Use <code className="rounded bg-muted px-1">{"{sourceLanguage}"}</code> and{" "}
                 <code className="rounded bg-muted px-1">{"{targetLanguage}"}</code> as placeholders.
               </p>
+
+              <div className="grid grid-cols-1 gap-4 pt-2 sm:grid-cols-2">
+                <div className="space-y-1">
+                  <Label htmlFor="top-k">Examples retrieved (top_k)</Label>
+                  <Input
+                    id="top-k"
+                    type="number"
+                    min={1}
+                    max={20}
+                    value={topK}
+                    onChange={(e) => setTopK(Math.max(1, Math.min(20, Number(e.target.value))))}
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    How many few-shot examples the AI retrieves per completion (1–20). Default: 5.
+                  </p>
+                </div>
+
+                <div className="space-y-1">
+                  <Label htmlFor="context-size">Context window</Label>
+                  <select
+                    id="context-size"
+                    value={contextSize}
+                    onChange={(e) => setContextSize(e.target.value as ContextSize)}
+                    className="w-full rounded border bg-background px-3 py-2 text-sm"
+                  >
+                    <option value="small">Small — tight window</option>
+                    <option value="medium">Medium — paragraph (default)</option>
+                    <option value="large">Large — chapter</option>
+                  </select>
+                  <p className="text-xs text-muted-foreground">
+                    Controls how much surrounding passage context is included.
+                  </p>
+                </div>
+
+                <div className="space-y-1">
+                  <Label htmlFor="main-chat-language">Assistant language</Label>
+                  <Input
+                    id="main-chat-language"
+                    value={mainChatLanguage}
+                    onChange={(e) => setMainChatLanguage(e.target.value)}
+                    placeholder="e.g. English, Français, Español…"
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Language the AI assistant uses in chat responses. Independent of the UI locale.
+                  </p>
+                </div>
+
+                <div className="flex items-start gap-3 pt-1">
+                  <input
+                    id="validated-only"
+                    type="checkbox"
+                    className="mt-1"
+                    checked={useOnlyValidatedExamples}
+                    onChange={(e) => setUseOnlyValidatedExamples(e.target.checked)}
+                  />
+                  <div>
+                    <Label htmlFor="validated-only">Validated examples only</Label>
+                    <p className="mt-0.5 text-xs text-muted-foreground">
+                      When on, only human-validated cells are used as few-shot examples — unvalidated search results are excluded.
+                    </p>
+                  </div>
+                </div>
+              </div>
             </CardContent>
           </Card>
         )}

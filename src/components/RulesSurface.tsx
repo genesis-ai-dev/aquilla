@@ -14,6 +14,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { BuiltinChecksList } from "./BuiltinChecksList"
 import { RuleSuggestDialog } from "./RuleSuggestDialog"
 import { RuleEditor } from "./RuleEditor"
+import { RuleImportDialog } from "./RuleImportDialog"
 import type { ProjectRecord, RuleAutofix, TranslationRule } from "@/lib/parsers/types"
 import type { useRules } from "@/hooks/useRules"
 import type { CellData } from "@/hooks/useCells"
@@ -91,6 +92,12 @@ export function RulesSurface({
             Terminology
           </Button>
           <div className="flex-1" />
+          {/* SWARM-TODO(FRO-196): RuleImportDialog — bulk import via document drop/paste */}
+          <RuleImportDialog
+            completionSettings={project?.completionSettings}
+            onAdd={addRule}
+            projectId={projectId}
+          />
           {/* SWARM-TODO(FRO-198): replace with inline suggest surface */}
           <RuleSuggestDialog
             files={project?.files || []}

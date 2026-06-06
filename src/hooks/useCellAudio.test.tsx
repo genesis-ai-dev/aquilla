@@ -98,7 +98,8 @@ describe("useCellAudio", () => {
     const cell = makeCell("a1", buildFrontierAudioUrl("a1", "webm"))
     const { result } = renderHook(() => useCellAudio(project, cell, "file-1"))
 
-    expect(result.current.state).toBe("idle")
+    // Cell has a frontier-audio:// pointer → starts in "cloud" state (bytes not fetched yet).
+    expect(result.current.state).toBe("cloud")
 
     await act(async () => { await result.current.play() })
 
@@ -211,5 +212,23 @@ describe("useCellAudio", () => {
 
     unmount()
     expect(revokedUrls).toContain(createdUrls[0])
+  })
+
+  it("cloud state: starts as 'cloud' when frontier-audio:// pointer exists but bytes not fetched", () => {
+    const project = makeProject()
+    const cell = makeCell("a-cloud", buildFrontierAudioUrl("a-cloud", "webm"))
+    const { result } = renderHook(() => useCellAudio(project, cell, "file-1"))
+    // Before any play(), bytes are unfetched — state should be "cloud".
+    expect(result.current.state).toBe("cloud")
+  })
+
+  it("cloud state: stays 'idle' when no attachment url is present", () => {
+    const project = makeProject()
+    const cell = {
+      kind: 2, languageId: "html", value: "",
+      metadata: { id: "c-no-att", type: "text" },
+    } as unknown as CodexCell
+    const { result } = renderHook(() => useCellAudio(project, cell, "file-1"))
+    expect(result.current.state).toBe("idle")
   })
 })

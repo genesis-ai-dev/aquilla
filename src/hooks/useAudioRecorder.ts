@@ -5,6 +5,9 @@
 
 import { useCallback, useEffect, useRef, useState } from "react"
 
+export const RECORDING_WARN_MS = 25 * 60 * 1000  // 25 minutes
+export const RECORDING_HARD_STOP_MS = 30 * 60 * 1000  // 30 minutes
+
 export type RecorderState =
   | { kind: "idle" }
   | { kind: "requesting" }
@@ -15,6 +18,8 @@ export type RecorderState =
 export interface UseAudioRecorder {
   state: RecorderState
   elapsedMs: number
+  /** True once the elapsed time exceeds the 25-minute warning threshold. */
+  isNearLimit: boolean
   /** Live MediaStream, populated while state.kind === 'recording'. Consumers
    *  (like a live AnalyserNode waveform) can observe state and read this. */
   stream: MediaStream | null
@@ -44,6 +49,7 @@ export function useAudioRecorder(): UseAudioRecorder {
   const [state, setState] = useState<RecorderState>({ kind: "idle" })
   const [elapsedMs, setElapsedMs] = useState(0)
   const [stream, setStream] = useState<MediaStream | null>(null)
+  const isNearLimit = elapsedMs >= RECORDING_WARN_MS
   const streamRef = useRef<MediaStream | null>(null)
   const recorderRef = useRef<MediaRecorder | null>(null)
   const chunksRef = useRef<Blob[]>([])
@@ -111,7 +117,14 @@ export function useAudioRecorder(): UseAudioRecorder {
       const startedAt = Date.now()
       rec.start(250)
       setState({ kind: "recording", startedAt })
-      tickRef.current = setInterval(() => setElapsedMs(Date.now() - startedAt), 100)
+      tickRef.current = setInterval(() => {
+        const elapsed = Date.now() - startedAt
+        setElapsedMs(elapsed)
+        // Hard stop at 30 minutes (spec).
+        if (elapsed >= RECORDING_HARD_STOP_MS) {
+          try { recorderRef.current?.stop() } catch {}
+        }
+      }, 100)
     } catch (e) {
       cleanup()
       const message = e instanceof Error ? e.message : String(e)
@@ -131,5 +144,5 @@ export function useAudioRecorder(): UseAudioRecorder {
     setState({ kind: "idle" })
   }, [cleanup])
 
-  return { state, elapsedMs, stream, start, stop, reset }
+  return { state, elapsedMs, isNearLimit, stream, start, stop, reset }
 }

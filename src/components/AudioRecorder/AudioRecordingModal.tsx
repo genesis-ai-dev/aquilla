@@ -299,6 +299,7 @@ export function AudioRecordingModal({
   const displayPhase: Phase = phase
   const elapsedMs = recorder.elapsedMs
   const targetOverrun = targetSec != null && elapsedMs / 1000 > targetSec
+  const isNearLimit = recorder.isNearLimit
 
   return (
     <Dialog open={open} onOpenChange={(next) => { if (!next) onClose() }}>
@@ -383,6 +384,11 @@ export function AudioRecordingModal({
               {targetOverrun && (
                 <p className="text-center text-xs font-medium text-red-500">
                   Past target duration — this will overrun the cue.
+                </p>
+              )}
+              {isNearLimit && (
+                <p className="text-center text-xs font-medium text-amber-500">
+                  Recording is 25 minutes — it will stop automatically at 30 minutes.
                 </p>
               )}
             </div>

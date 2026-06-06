@@ -29,4 +29,6 @@ export interface SearchOptions {
   fileId?: string
   caseSensitive?: boolean
   matchWord?: boolean
+  /** Content-side filter. "source" | "target"; omit (or "both") to return both sides. */
+  side?: "both" | "source" | "target"
 }

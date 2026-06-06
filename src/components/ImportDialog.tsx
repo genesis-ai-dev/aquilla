@@ -30,7 +30,7 @@ import {
   type EBibleTranslation,
 } from "@/lib/parsers/ebible"
 
-type Tab = "upload" | "ebible"
+type Screen = "landing" | "upload" | "ebible"
 
 interface ImportDialogProps {
   open: boolean
@@ -63,43 +63,41 @@ export function ImportDialog({
   ttsSettings,
   onCastUpdated,
 }: ImportDialogProps) {
-  const [tab, setTab] = useState<Tab>("upload")
+  const [screen, setScreen] = useState<Screen>("landing")
+
+  // Reset to landing each time the dialog opens.
+  useEffect(() => {
+    if (open) setScreen("landing")
+  }, [open])
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-2xl">
         <DialogHeader>
-          <DialogTitle>Import Files</DialogTitle>
+          <DialogTitle>
+            {screen === "landing" ? (
+              "Import"
+            ) : (
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setScreen("landing")}
+                  className="rounded p-0.5 text-muted-foreground hover:text-foreground transition-colors"
+                  aria-label="Back to import types"
+                >
+                  ←
+                </button>
+                {screen === "upload" ? "Upload Files" : "eBible Corpus"}
+              </div>
+            )}
+          </DialogTitle>
         </DialogHeader>
 
-        <div className="mb-4 inline-flex rounded-md border p-0.5 text-sm">
-          <button
-            type="button"
-            onClick={() => setTab("upload")}
-            className={cn(
-              "rounded px-3 py-1 transition-colors",
-              tab === "upload"
-                ? "bg-primary text-primary-foreground"
-                : "text-muted-foreground hover:text-foreground"
-            )}
-          >
-            Upload files
-          </button>
-          <button
-            type="button"
-            onClick={() => setTab("ebible")}
-            className={cn(
-              "rounded px-3 py-1 transition-colors",
-              tab === "ebible"
-                ? "bg-primary text-primary-foreground"
-                : "text-muted-foreground hover:text-foreground"
-            )}
-          >
-            eBible Corpus
-          </button>
-        </div>
+        {screen === "landing" && (
+          <ImportLanding onSelect={setScreen} />
+        )}
 
-        {tab === "upload" ? (
+        {screen === "upload" && (
           <UploadPanel
             projectId={projectId}
             username={username}
@@ -113,7 +111,9 @@ export function ImportDialog({
               onOpenChange(false)
             }}
           />
-        ) : (
+        )}
+
+        {screen === "ebible" && (
           <EBiblePanel
             projectId={projectId}
             username={username}
@@ -128,6 +128,77 @@ export function ImportDialog({
         )}
       </DialogContent>
     </Dialog>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Import landing — card grid
+// ---------------------------------------------------------------------------
+
+interface ImportLandingProps {
+  onSelect: (screen: Screen) => void
+}
+
+function ImportLanding({ onSelect }: ImportLandingProps) {
+  return (
+    <div className="grid grid-cols-1 gap-3 py-2 sm:grid-cols-2">
+      {/* Upload files — active */}
+      <button
+        type="button"
+        onClick={() => onSelect("upload")}
+        className="rounded-lg border p-4 text-left transition-colors hover:border-primary hover:bg-primary/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      >
+        <p className="text-sm font-medium">Upload Files</p>
+        <p className="mt-1 text-xs text-muted-foreground">
+          USFM, DOCX, TXT, VTT/SRT, XLIFF, TMX, CSV, audio/video — or a Paratext project folder/zip.
+        </p>
+      </button>
+
+      {/* eBible Corpus — active */}
+      <button
+        type="button"
+        onClick={() => onSelect("ebible")}
+        className="rounded-lg border p-4 text-left transition-colors hover:border-primary hover:bg-primary/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      >
+        <p className="text-sm font-medium">eBible Corpus</p>
+        <p className="mt-1 text-xs text-muted-foreground">
+          Import a redistributable Bible translation directly from the BibleNLP/ebible corpus.
+        </p>
+      </button>
+
+      {/* Macula — coming soon (FRO-178) */}
+      <div
+        title="Coming soon — Macula import is tracked in FRO-178"
+        className="cursor-not-allowed rounded-lg border border-dashed p-4 text-left opacity-50"
+      >
+        <p className="text-sm font-medium">Macula</p>
+        <p className="mt-1 text-xs text-muted-foreground">
+          Greek / Hebrew Macula data. Coming soon.
+        </p>
+      </div>
+
+      {/* Translation Memory (TMX) — coming soon (FRO-179) */}
+      <div
+        title="Coming soon — Translation Memory import is tracked in FRO-179"
+        className="cursor-not-allowed rounded-lg border border-dashed p-4 text-left opacity-50"
+      >
+        <p className="text-sm font-medium">Translation Memory</p>
+        <p className="mt-1 text-xs text-muted-foreground">
+          TMX translation memory files. Coming soon.
+        </p>
+      </div>
+
+      {/* Translation Notes — coming soon (FRO-179) */}
+      <div
+        title="Coming soon — Translation Notes import is tracked in FRO-179"
+        className="cursor-not-allowed rounded-lg border border-dashed p-4 text-left opacity-50"
+      >
+        <p className="text-sm font-medium">Translation Notes</p>
+        <p className="mt-1 text-xs text-muted-foreground">
+          TSV / MD Translation Notes. Coming soon.
+        </p>
+      </div>
+    </div>
   )
 }
 

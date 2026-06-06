@@ -190,3 +190,39 @@ Excluded: `password_reset_tokens`, `project_invites`, `activity_logs`.
 - **Sequence collisions:** mitigated by `setval` after load.
 - **Cross-table username remap completeness:** the extract must enumerate every
   author/editor column; the unmapped-token log is the safety net.
+
+## Implementation notes (as-built, 2026-06-06)
+
+Built on `feat/dev-db-seed` and verified end-to-end (extract → R2 → fetch → load
+into local Postgres, counts + PII checks pass).
+
+- **Audio is effectively absent in prod.** A DB-wide scan found exactly **1**
+  `cell_audio` row (post D1→Neon migration). The "include audio for 1–2 projects"
+  intent can't be satisfied from prod data. `audio-dubbing-playground` is kept for
+  its dubbing-project *structure*; `cell_audio` stays in the table set (0 rows).
+  Audio-by-pointer remains correct for when audio data does land.
+- **Bundle size:** 449.9 MB raw JSONL → **67 MB zstd** for the 8 projects
+  (≈131k events, 126k cells, 1.6k validators, 203 scrubbed users).
+- **R2 keys are content-addressed:** `seed/dev-seed-<sha12>.jsonl.zst`. Every
+  extract writes a *fresh* key — overwriting an existing key was observed to read
+  back empty (R2 read-after-write lag on overwrite). The extract uploads then
+  reads back and verifies the sha with retry/backoff, failing loud otherwise.
+  `seed.meta.json` carries the exact key. Old objects are cleaned up by hand.
+- **Keyset pagination, not OFFSET.** Extract pages each table by a unique key via
+  row-value comparison so the PK/index serves filter+order together (O(rows), no
+  per-page sort). `events` PK is `id` (not project-led), so it pages by the unique
+  `(project_id, server_seq)` index (`pageKey` override) — confirmed via EXPLAIN to
+  be a pure Index Scan. This cut a multi-hour run to ~3 minutes.
+- **Loader schema-staleness guard.** Beyond the repo `schema.sql`-hash check, the
+  loader queries `information_schema.columns` for the target and fails loud with
+  the missing columns if the *target's actual* schema is behind (this caught a
+  local Postgres missing `groups.is_internal`). The local dev Postgres is a
+  throwaway container — recreate its schema from `schema.sql` before seeding.
+- **`--grant-to <username>`.** Seeded projects belong to scrubbed users / BCS
+  groups, so the local `dev` login can't see them by default. Pass
+  `--grant-to dev` (after booting the app once so the dev user exists) to upsert
+  OWNER `project_members` for all seeded projects. The grant is wiped + must be
+  re-passed on each idempotent re-load.
+- **Loader flags:** `--local` (default `LOCAL_PG_URL` or the dev container URL),
+  `--target <conn>`, `--ignore-schema-hash`, `--grant-to <username>`. Refuses any
+  host equal to `NEON_PG_HOST` (never load into prod).

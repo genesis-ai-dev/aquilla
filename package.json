@@ -46,7 +46,11 @@
     "deploy:codex": "npm run build:codex && wrangler pages deploy dist --project-name=codex-web --commit-dirty=true",
     "deploy:honeycomb": "npm run build:honeycomb && wrangler pages deploy dist --project-name=honeycomb-studio --commit-dirty=true",
     "deploy:context": "npm run build:context && wrangler pages deploy dist --project-name=context-studio --commit-dirty=true",
-    "prepare": "husky"
+    "prepare": "husky",
+    "seed:extract": "tsx scripts/seed-extract.ts",
+    "seed:fetch": "tsx scripts/seed-fetch.ts",
+    "seed:load": "tsx scripts/seed-load.ts",
+    "seed:dev": "tsx scripts/seed-load.ts --local"
   },
   "dependencies": {
     "@base-ui/react": "^1.4.0",

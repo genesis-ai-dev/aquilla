@@ -2,14 +2,20 @@
 // grouped by file/cell. Resolved threads are collapsed by default.
 //
 // Uses the v3 event-log backed useComments hook (comment.* event grammar).
+//
+// FRO-185: filter/sort/show-resolved/navigate/@mention/FTS
 
-import { useMemo, useState } from "react"
+import { useMemo, useState, useRef, useEffect } from "react"
 import { useNavigate, useParams } from "react-router-dom"
-import { ArrowLeft, MessageCircle, CheckCircle, ChevronDown, ChevronRight, Loader2, AlertCircle } from "lucide-react"
+import {
+  ArrowLeft, MessageCircle, CheckCircle, ChevronDown, ChevronRight,
+  Loader2, AlertCircle, Search, SlidersHorizontal, ArrowUpRight,
+} from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
+import { Input } from "@/components/ui/input"
 import { cn } from "@/lib/utils"
 import { useComments } from "@/hooks/useComments"
 import type { CommentRecord } from "@/lib/sync/comments-read-types"
@@ -18,6 +24,85 @@ import { buildFileScopedTokenFetcher } from "@/lib/sync/cqrs-bridge"
 import { useProject } from "@/hooks/useProject"
 import { renderCommentHtml } from "@/lib/comments/comment-helpers"
 import DOMPurify from "dompurify"
+import { useUserSearch, type UserSearchResult } from "@/hooks/useUserSearch"
+
+// ── Types ─────────────────────────────────────────────────────────────────
+
+export type SortOrder = "recent-activity" | "creation" | "unresolved-first"
+
+export interface FilterState {
+  fileId: string    // "" = all
+  authorId: string  // "" = all
+  participant: string // "" = all
+  showResolved: boolean
+  search: string    // client-side substring search over body
+  sort: SortOrder
+}
+
+export const DEFAULT_FILTER: FilterState = {
+  fileId: "",
+  authorId: "",
+  participant: "",
+  showResolved: false,
+  search: "",
+  sort: "unresolved-first",
+}
+
+// ── Pure filter/sort helpers (testable) ───────────────────────────────────
+
+export function applyFilters(
+  roots: CommentRecord[],
+  repliesByParent: Map<string, CommentRecord[]>,
+  filter: FilterState,
+): CommentRecord[] {
+  return roots.filter((root) => {
+    // show-resolved toggle
+    if (!filter.showResolved && root.resolved) return false
+
+    // file filter
+    if (filter.fileId && root.fileId !== filter.fileId) return false
+
+    // author filter — matches root author
+    if (filter.authorId && root.authorId !== filter.authorId) return false
+
+    // participant filter — root author OR any reply author
+    if (filter.participant) {
+      const replies = repliesByParent.get(root.commentId) ?? []
+      const allAuthors = [root.authorId, ...replies.map((r) => r.authorId)]
+      if (!allAuthors.includes(filter.participant)) return false
+    }
+
+    // body search — substring over root body + replies
+    if (filter.search.trim()) {
+      const needle = filter.search.trim().toLowerCase()
+      const haystack = [
+        root.body,
+        ...(repliesByParent.get(root.commentId) ?? []).map((r) => r.body),
+      ]
+        .join(" ")
+        .toLowerCase()
+      // SWARM-TODO: wire true FTS5 endpoint when available (pass ?q= to sync-worker)
+      if (!haystack.includes(needle)) return false
+    }
+
+    return true
+  })
+}
+
+export function applySorting(roots: CommentRecord[], sort: SortOrder): CommentRecord[] {
+  const copy = [...roots]
+  if (sort === "unresolved-first") {
+    copy.sort((a, b) => {
+      if (a.resolved !== b.resolved) return a.resolved ? 1 : -1
+      return b.createdAt - a.createdAt
+    })
+  } else if (sort === "creation") {
+    copy.sort((a, b) => b.createdAt - a.createdAt)
+  } else if (sort === "recent-activity") {
+    copy.sort((a, b) => b.updatedAt - a.updatedAt)
+  }
+  return copy
+}
 
 // ── Helpers ───────────────────────────────────────────────────────────────
 
@@ -42,6 +127,126 @@ function scopeLabel(comment: CommentRecord): string {
     return `File ${comment.fileId ?? "?"}`
   }
   return "Project"
+}
+
+// ── @mention typeahead in comment composer ────────────────────────────────
+
+interface MentionTypeaheadProps {
+  value: string
+  onChange: (val: string) => void
+  placeholder?: string
+  rows?: number
+  className?: string
+  onKeyDown?: (e: React.KeyboardEvent<HTMLTextAreaElement>) => void
+}
+
+function MentionTextarea({
+  value,
+  onChange,
+  placeholder,
+  rows = 2,
+  className,
+  onKeyDown,
+}: MentionTypeaheadProps) {
+  const [mentionQuery, setMentionQuery] = useState("")
+  const [mentionOpen, setMentionOpen] = useState(false)
+  const [mentionStart, setMentionStart] = useState(0)
+  const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const containerRef = useRef<HTMLDivElement>(null)
+
+  const { results, isLoading, needsMorePrefix } = useUserSearch(
+    mentionOpen ? mentionQuery : ""
+  )
+
+  // Close on outside click
+  useEffect(() => {
+    if (!mentionOpen) return
+    function onDocClick(e: MouseEvent) {
+      if (!containerRef.current?.contains(e.target as Node)) setMentionOpen(false)
+    }
+    document.addEventListener("mousedown", onDocClick)
+    return () => document.removeEventListener("mousedown", onDocClick)
+  }, [mentionOpen])
+
+  function handleChange(e: React.ChangeEvent<HTMLTextAreaElement>) {
+    const raw = e.target.value
+    onChange(raw)
+
+    const cursor = e.target.selectionStart ?? raw.length
+    // Find the @ that opens the current mention token
+    const textUpToCursor = raw.slice(0, cursor)
+    const atIdx = textUpToCursor.lastIndexOf("@")
+    if (atIdx !== -1) {
+      const afterAt = textUpToCursor.slice(atIdx + 1)
+      // Only trigger if there's no space after @
+      if (!/\s/.test(afterAt)) {
+        setMentionQuery(afterAt)
+        setMentionStart(atIdx)
+        setMentionOpen(true)
+        return
+      }
+    }
+    setMentionOpen(false)
+  }
+
+  function insertMention(result: UserSearchResult) {
+    const before = value.slice(0, mentionStart)
+    const after = value.slice(mentionStart + 1 + mentionQuery.length)
+    const newVal = `${before}@${result.username} ${after}`
+    onChange(newVal)
+    setMentionOpen(false)
+    // Re-focus
+    setTimeout(() => {
+      textareaRef.current?.focus()
+    }, 0)
+  }
+
+  return (
+    <div ref={containerRef} className="relative">
+      <textarea
+        ref={textareaRef}
+        value={value}
+        onChange={handleChange}
+        onKeyDown={onKeyDown}
+        placeholder={placeholder}
+        rows={rows}
+        className={cn(
+          "neu-inset w-full resize-none rounded px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-ring",
+          className
+        )}
+      />
+      {mentionOpen && (
+        <div className="absolute left-0 right-0 top-full mt-0.5 z-50 max-h-48 overflow-y-auto rounded-md border bg-popover shadow-md">
+          {needsMorePrefix && (
+            <p className="px-3 py-2 text-[11px] text-muted-foreground">Type more to search…</p>
+          )}
+          {!needsMorePrefix && isLoading && (
+            <p className="flex items-center gap-1.5 px-3 py-2 text-[11px] text-muted-foreground">
+              <Loader2 className="h-3 w-3 animate-spin" /> Searching…
+            </p>
+          )}
+          {!needsMorePrefix && !isLoading && results.length === 0 && mentionQuery.length >= 2 && (
+            <p className="px-3 py-2 text-[11px] text-muted-foreground">No users found.</p>
+          )}
+          {results.length > 0 && (
+            <ul className="py-0.5">
+              {results.map((u) => (
+                <li key={u.id}>
+                  <button
+                    type="button"
+                    onClick={() => insertMention(u)}
+                    className="flex w-full items-center px-3 py-1.5 text-left text-sm hover:bg-muted"
+                  >
+                    @{u.username}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
+    </div>
+  )
 }
 
 // ── Single comment bubble ─────────────────────────────────────────────────
@@ -82,10 +287,20 @@ interface ThreadProps {
   root: CommentRecord
   replies: CommentRecord[]
   onResolve: (commentId: string, resolved: boolean) => void
+  onNavigate?: (root: CommentRecord) => void
 }
 
-function CommentThreadCard({ root, replies, onResolve }: ThreadProps) {
+function CommentThreadCard({ root, replies, onResolve, onNavigate }: ThreadProps) {
   const [open, setOpen] = useState(!root.resolved)
+  const [replyText, setReplyText] = useState("")
+
+  function handleReplyKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
+    if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+      e.preventDefault()
+      // Reply submit is a no-op here (CommentsPage is read-only for new replies)
+      // The cell-scoped CommentThread.tsx handles replies in-editor.
+    }
+  }
 
   return (
     <Collapsible open={open} onOpenChange={setOpen}>
@@ -103,6 +318,18 @@ function CommentThreadCard({ root, replies, onResolve }: ThreadProps) {
             </div>
           </div>
           <div className="flex items-center gap-1 shrink-0">
+            {onNavigate && root.scopeKind === "cell" && root.fileId && root.cellId && (
+              <Button
+                size="sm"
+                variant="ghost"
+                className="h-6 px-2 text-xs"
+                title="Go to cell in editor"
+                onClick={() => onNavigate(root)}
+              >
+                <ArrowUpRight className="mr-0.5 h-3 w-3" />
+                Go to cell
+              </Button>
+            )}
             <Button
               size="sm"
               variant="ghost"
@@ -128,10 +355,153 @@ function CommentThreadCard({ root, replies, onResolve }: ThreadProps) {
             {replies.map((r) => (
               <CommentBubble key={r.commentId} comment={r} />
             ))}
+            {/* Reply composer with @mention typeahead */}
+            <div className="mt-1 space-y-1.5">
+              <MentionTextarea
+                value={replyText}
+                onChange={setReplyText}
+                placeholder="Reply… (type @ to mention)"
+                rows={2}
+                onKeyDown={handleReplyKeyDown}
+              />
+              <p className="text-[10px] text-muted-foreground">
+                Replies from this view are not yet wired — open the cell in the editor to reply.
+                {/* SWARM-TODO: wire reply submission from CommentsPage when a cell-reply endpoint is available */}
+              </p>
+            </div>
           </CardContent>
         </CollapsibleContent>
       </Card>
     </Collapsible>
+  )
+}
+
+// ── Filter/sort controls ──────────────────────────────────────────────────
+
+interface FilterControlsProps {
+  filter: FilterState
+  onChange: (next: FilterState) => void
+  fileOptions: string[]
+  authorOptions: { id: string; label: string }[]
+}
+
+function FilterControls({ filter, onChange, fileOptions, authorOptions }: FilterControlsProps) {
+  const [expanded, setExpanded] = useState(false)
+
+  return (
+    <div className="space-y-2">
+      {/* Search bar + expand toggle */}
+      <div className="flex items-center gap-2">
+        <div className="relative flex-1">
+          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none" />
+          <Input
+            className="pl-8 h-8 text-sm"
+            placeholder="Search comments…"
+            value={filter.search}
+            onChange={(e) => onChange({ ...filter, search: e.target.value })}
+          />
+        </div>
+        <Button
+          size="sm"
+          variant={expanded ? "secondary" : "outline"}
+          className="h-8 gap-1.5 text-xs"
+          onClick={() => setExpanded((v) => !v)}
+        >
+          <SlidersHorizontal className="h-3.5 w-3.5" />
+          Filters
+        </Button>
+      </div>
+
+      {expanded && (
+        <div className="flex flex-wrap items-center gap-3 rounded-md border px-3 py-2 text-xs bg-muted/20">
+          {/* Sort picker */}
+          <label className="flex items-center gap-1.5">
+            <span className="text-muted-foreground whitespace-nowrap">Sort</span>
+            <select
+              className="rounded border bg-background px-1.5 py-0.5 text-xs"
+              value={filter.sort}
+              onChange={(e) => onChange({ ...filter, sort: e.target.value as SortOrder })}
+            >
+              <option value="unresolved-first">Unresolved first</option>
+              <option value="recent-activity">Most recent activity</option>
+              <option value="creation">Newest first</option>
+            </select>
+          </label>
+
+          {/* Show resolved toggle */}
+          <label className="flex items-center gap-1.5 cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={filter.showResolved}
+              onChange={(e) => onChange({ ...filter, showResolved: e.target.checked })}
+              className="h-3.5 w-3.5"
+            />
+            <span>Show resolved</span>
+          </label>
+
+          {/* File filter */}
+          {fileOptions.length > 0 && (
+            <label className="flex items-center gap-1.5">
+              <span className="text-muted-foreground whitespace-nowrap">File</span>
+              <select
+                className="max-w-[180px] truncate rounded border bg-background px-1.5 py-0.5 text-xs"
+                value={filter.fileId}
+                onChange={(e) => onChange({ ...filter, fileId: e.target.value })}
+              >
+                <option value="">All files</option>
+                {fileOptions.map((f) => (
+                  <option key={f} value={f}>{f}</option>
+                ))}
+              </select>
+            </label>
+          )}
+
+          {/* Author filter */}
+          {authorOptions.length > 0 && (
+            <label className="flex items-center gap-1.5">
+              <span className="text-muted-foreground whitespace-nowrap">Author</span>
+              <select
+                className="rounded border bg-background px-1.5 py-0.5 text-xs"
+                value={filter.authorId}
+                onChange={(e) => onChange({ ...filter, authorId: e.target.value })}
+              >
+                <option value="">Anyone</option>
+                {authorOptions.map((a) => (
+                  <option key={a.id} value={a.id}>{a.label}</option>
+                ))}
+              </select>
+            </label>
+          )}
+
+          {/* Participant filter */}
+          {authorOptions.length > 0 && (
+            <label className="flex items-center gap-1.5">
+              <span className="text-muted-foreground whitespace-nowrap">Participant</span>
+              <select
+                className="rounded border bg-background px-1.5 py-0.5 text-xs"
+                value={filter.participant}
+                onChange={(e) => onChange({ ...filter, participant: e.target.value })}
+              >
+                <option value="">Anyone</option>
+                {authorOptions.map((a) => (
+                  <option key={a.id} value={a.id}>{a.label}</option>
+                ))}
+              </select>
+            </label>
+          )}
+
+          {/* Reset */}
+          <Button
+            size="sm"
+            variant="ghost"
+            className="h-6 px-2 text-xs text-muted-foreground"
+            onClick={() => onChange(DEFAULT_FILTER)}
+          >
+            Reset
+          </Button>
+        </div>
+      )}
+    </div>
   )
 }
 
@@ -142,6 +512,7 @@ export function CommentsPage() {
   const navigate = useNavigate()
   const { session } = useFrontierSession()
   const { project } = useProject(projectId ?? "")
+  const [filter, setFilter] = useState<FilterState>(DEFAULT_FILTER)
 
   const getToken = useMemo(() => {
     if (!projectId || !session?.jwt) {
@@ -172,13 +543,47 @@ export function CommentsPage() {
         repliesByParent.set(c.parentCommentId, arr)
       }
     }
-    // Sort roots: unresolved first, then by createdAt DESC (newest open thread first).
-    roots.sort((a, b) => {
-      if (a.resolved !== b.resolved) return a.resolved ? 1 : -1
-      return b.createdAt - a.createdAt
-    })
     return { roots, repliesByParent }
   }, [comments])
+
+  // Derive unique file/author options for filter controls
+  const { fileOptions, authorOptions } = useMemo(() => {
+    const files = new Set<string>()
+    const authors = new Map<string, string>()
+    for (const c of comments) {
+      if (c.fileId) files.add(c.fileId)
+      authors.set(c.authorId, c.authorLabel ?? c.authorId)
+    }
+    return {
+      fileOptions: Array.from(files).sort(),
+      authorOptions: Array.from(authors.entries())
+        .map(([id, label]) => ({ id, label }))
+        .sort((a, b) => a.label.localeCompare(b.label)),
+    }
+  }, [comments])
+
+  // Apply filter + sort
+  const displayedRoots = useMemo(() => {
+    const filtered = applyFilters(roots, repliesByParent, filter)
+    return applySorting(filtered, filter.sort)
+  }, [roots, repliesByParent, filter])
+
+  function handleNavigate(root: CommentRecord) {
+    if (!projectId || !root.fileId) return
+    // Navigate to the file in the editor. Exact cell scroll requires editor
+    // handle integration — leaving a focused TODO for that.
+    // SWARM-TODO: append ?cellId=<root.cellId> once ProjectWorkspace supports
+    // a scrollToCell mechanism via URL hash or search param.
+    navigate(`/project/${projectId}/file/${encodeURIComponent(root.fileId)}`)
+  }
+
+  const activeFilterCount = [
+    filter.fileId,
+    filter.authorId,
+    filter.participant,
+    filter.showResolved ? "1" : "",
+    filter.search,
+  ].filter(Boolean).length
 
   return (
     <div className="mx-auto max-w-3xl space-y-6 p-8">
@@ -199,7 +604,19 @@ export function CommentsPage() {
         {comments.length > 0 && (
           <Badge variant="secondary">{comments.length}</Badge>
         )}
+        {activeFilterCount > 0 && (
+          <Badge variant="outline" className="text-[10px]">
+            {activeFilterCount} filter{activeFilterCount > 1 ? "s" : ""}
+          </Badge>
+        )}
       </div>
+
+      <FilterControls
+        filter={filter}
+        onChange={setFilter}
+        fileOptions={fileOptions}
+        authorOptions={authorOptions}
+      />
 
       {isError && (
         <Card className="border-destructive">
@@ -228,14 +645,27 @@ export function CommentsPage() {
         </Card>
       )}
 
-      {roots.length > 0 && (
+      {roots.length > 0 && displayedRoots.length === 0 && (
+        <Card>
+          <CardContent className="flex flex-col items-center gap-3 py-8 text-center">
+            <Search className="h-8 w-8 text-muted-foreground" />
+            <div className="text-base font-medium">No threads match your filters</div>
+            <Button size="sm" variant="outline" onClick={() => setFilter(DEFAULT_FILTER)}>
+              Clear filters
+            </Button>
+          </CardContent>
+        </Card>
+      )}
+
+      {displayedRoots.length > 0 && (
         <div>
-          {roots.map((root) => (
+          {displayedRoots.map((root) => (
             <CommentThreadCard
               key={root.commentId}
               root={root}
               replies={repliesByParent.get(root.commentId) ?? []}
               onResolve={resolveThread}
+              onNavigate={handleNavigate}
             />
           ))}
         </div>

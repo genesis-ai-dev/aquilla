@@ -28,9 +28,9 @@ const ProjectWorkspace = lazy(() =>
 const ProjectSettings = lazy(() =>
   import("@/components/ProjectSettings").then((m) => ({ default: m.ProjectSettings })),
 )
-const RulesPage = lazy(() =>
-  import("@/components/RulesPage").then((m) => ({ default: m.RulesPage })),
-)
+// FRO-194: RulesPage is now rendered inside ProjectWorkspace shell.
+// The lazy import is kept for any lingering direct imports; the route
+// below now points to ProjectWorkspace which handles the /rules path.
 const CommentsPage = lazy(() =>
   import("@/components/CommentsPage").then((m) => ({ default: m.CommentsPage })),
 )
@@ -149,7 +149,8 @@ function AppRoutes() {
         <Route path="/project/:id" element={<ProjectWorkspace />} />
         <Route path="/project/:id/file/:fileId" element={<ProjectWorkspace />} />
         <Route path="/project/:id/settings" element={<ProjectSettings />} />
-        <Route path="/project/:id/rules" element={<RulesPage />} />
+        {/* FRO-194: /rules deep-link renders inside ProjectWorkspace shell — shell stays mounted. */}
+        <Route path="/project/:id/rules" element={<ProjectWorkspace />} />
         <Route path="/project/:id/terminology" element={<TerminologyPage />} />
         <Route path="/project/:id/comments" element={<CommentsPage />} />
         <Route path="/project/:id/memory" element={<LivingMemoryPage />} />

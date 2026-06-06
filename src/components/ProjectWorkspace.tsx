@@ -39,6 +39,7 @@ import { generateCellVoice } from "@/lib/audio/voice-generate-helpers"
 import { CombinedBoundaryEditor } from "./voice/CombinedBoundaryEditor"
 import { useProjectTts } from "@/hooks/useProjectTts"
 import { RuleDrawer } from "./RuleDrawer"
+import { RulesSurface } from "./RulesSurface"
 import { CommentsDrawer } from "./CommentsDrawer"
 import { HistoryDrawer } from "./HistoryDrawer"
 import { SharePanel } from "./SharePanel"
@@ -312,6 +313,26 @@ export function ProjectWorkspace() {
   const [exportOpen, setExportOpen] = useState(false)
   const [drawerRuleId, setDrawerRuleId] = useState<string | null>(null)
   const [searchParams] = useSearchParams()
+
+  // FRO-194: center surface toggle — "editor" or "rules".
+  // Derived from the URL path so /project/:id/rules deep-links work.
+  // The segmented control navigates to/from the /rules sub-path; this
+  // state stays in sync so the shell never unmounts when toggling.
+  const centerSurface: "editor" | "rules" = location.pathname.endsWith("/rules") ? "rules" : "editor"
+
+  function switchSurface(next: "editor" | "rules") {
+    if (!projectId) return
+    if (next === "rules") {
+      navigate(`/project/${projectId}/rules`, { replace: false })
+    } else {
+      // Return to the last active file if available, otherwise project root
+      if (activeFileId) {
+        navigate(`/project/${projectId}/file/${activeFileId}`, { replace: false })
+      } else {
+        navigate(`/project/${projectId}`, { replace: false })
+      }
+    }
+  }
   useEffect(() => {
     const open = searchParams.get("openRule")
     if (open) setDrawerRuleId(open)
@@ -659,11 +680,17 @@ export function ProjectWorkspace() {
   const cellsRef = useRef(cells)
   useEffect(() => { cellsRef.current = cells }, [cells])
 
-  // Merge: AD-14 (this branch) retired the composite-health `penalties` path,
-  // so destructure only `rules`. Comments handlers take main's Phase 2c-gamma
-  // rip — threads/messages lived on Y.Doc maps and the v1.x event grammar isn't
-  // in this build, so these are no-ops and the drawer renders empty.
-  const { rules } = useRules(project ?? null, refresh)
+  // Merge: AD-14 (this branch) retired the composite-health `penalties` path.
+  // Comments handlers take main's Phase 2c-gamma rip — threads/messages lived
+  // on Y.Doc maps and the v1.x event grammar isn't in this build, so these are
+  // no-ops and the drawer renders empty.
+  // FRO-194: also destructure rule CRUD for RulesSurface (patchSettings is the
+  // sync function; it matches the PatchSharedFn signature from useProjectSettings).
+  const { rules, userRules, builtinRules, addRule, updateRule, deleteRule, setBuiltinOverride } = useRules(
+    project ?? null,
+    refresh,
+    patchSettings as Parameters<typeof useRules>[2],
+  )
   const addThread: (..._: unknown[]) => void = () => {}
   const addMessage: (..._: unknown[]) => void = () => {}
   const resolveThread: (..._: unknown[]) => void = () => {}
@@ -1869,8 +1896,38 @@ export function ProjectWorkspace() {
 
             <div className="mx-1 h-5 w-px bg-border" aria-hidden="true" />
 
+            {/* FRO-194: Editor / Rules segmented control. */}
+            <div className="flex items-center rounded-full border bg-muted p-0.5 text-xs shrink-0">
+              <button
+                type="button"
+                onClick={() => switchSurface("editor")}
+                className={cn(
+                  "rounded-full px-2.5 py-0.5 transition-all",
+                  centerSurface === "editor"
+                    ? "bg-background shadow-neu-xs font-medium"
+                    : "text-muted-foreground hover:text-foreground",
+                )}
+              >
+                Editor
+              </button>
+              <button
+                type="button"
+                onClick={() => switchSurface("rules")}
+                className={cn(
+                  "rounded-full px-2.5 py-0.5 transition-all",
+                  centerSurface === "rules"
+                    ? "bg-background shadow-neu-xs font-medium"
+                    : "text-muted-foreground hover:text-foreground",
+                )}
+              >
+                Rules
+              </button>
+            </div>
+
+            <div className="mx-1 h-5 w-px bg-border" aria-hidden="true" />
+
             {/* Primary zone — mode toggle + the one prominent action. */}
-            {project && (
+            {project && centerSurface === "editor" && (
               <EditorModeToggle
                 lens={lens}
                 onChange={(l) => setLens(l)}
@@ -2033,7 +2090,21 @@ export function ProjectWorkspace() {
             )}
           </>
         }
-        main={cellAreaState.kind === "ready" ? (
+        main={centerSurface === "rules" ? (
+          // FRO-194: Rules surface renders inside the shell; shell stays mounted.
+          <RulesSurface
+            project={project}
+            projectId={projectId!}
+            userRules={userRules}
+            builtinRules={builtinRules}
+            addRule={addRule}
+            updateRule={updateRule}
+            deleteRule={deleteRule}
+            setBuiltinOverride={setBuiltinOverride}
+            infractions={infractions}
+            validatedCells={cells}
+          />
+        ) : cellAreaState.kind === "ready" ? (
           <EditorTable
             ref={editorRef} project={project} cells={cellsWithBacktranslation}
             username={currentUsername}

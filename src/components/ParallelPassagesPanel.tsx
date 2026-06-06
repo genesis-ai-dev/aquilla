@@ -18,6 +18,7 @@ import type { WorkspaceSearchResult, SearchOptions } from "@/lib/search/workspac
 
 export type ParallelPanelMode = "search" | "passages" | "replace"
 export type ParallelPanelScope = "file" | "project"
+export type ParallelPanelSide = "both" | "source" | "target"
 
 interface ParallelPassagesPanelProps {
   open: boolean
@@ -211,6 +212,7 @@ export function ParallelPassagesPanel(props: ParallelPassagesPanelProps) {
   const clearResults = onClearResults ?? onClear
 
   const [query, setQuery] = useState("")
+  const [side, setSide] = useState<ParallelPanelSide>("both")
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const inputRef = useRef<HTMLInputElement | null>(null)
 
@@ -226,7 +228,7 @@ export function ParallelPassagesPanel(props: ParallelPassagesPanelProps) {
   }, [open]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const triggerSearch = useCallback(
-    (q: string, currentScope: ParallelPanelScope, currentMode: ParallelPanelMode) => {
+    (q: string, currentScope: ParallelPanelScope, currentMode: ParallelPanelMode, currentSide: ParallelPanelSide) => {
       if (!q.trim()) {
         clearResults?.()
         return
@@ -238,6 +240,7 @@ export function ParallelPassagesPanel(props: ParallelPassagesPanelProps) {
       const opts: SearchOptions = {
         scope: currentScope === "file" ? "file" : "project",
         fileId: currentScope === "file" ? (activeFileId ?? undefined) : undefined,
+        side: currentSide === "both" ? undefined : currentSide,
       }
       onSearch?.(q, opts)
     },
@@ -249,14 +252,14 @@ export function ParallelPassagesPanel(props: ParallelPassagesPanelProps) {
     setQuery(v)
     if (debounceRef.current) clearTimeout(debounceRef.current)
     debounceRef.current = setTimeout(() => {
-      triggerSearch(v, scope, mode)
+      triggerSearch(v, scope, mode, side)
     }, DEBOUNCE_MS)
   }
 
   const handleScopeChange = (s: ParallelPanelScope) => {
     onScopeChange?.(s)
     if (debounceRef.current) clearTimeout(debounceRef.current)
-    triggerSearch(query, s, mode)
+    triggerSearch(query, s, mode, side)
   }
 
   const handleModeChange = (m: ParallelPanelMode) => {
@@ -264,14 +267,22 @@ export function ParallelPassagesPanel(props: ParallelPassagesPanelProps) {
     // Re-run the current query under the new mode immediately.
     if (query.trim()) {
       if (debounceRef.current) clearTimeout(debounceRef.current)
-      triggerSearch(query, scope, m)
+      triggerSearch(query, scope, m, side)
+    }
+  }
+
+  const handleSideChange = (s: ParallelPanelSide) => {
+    setSide(s)
+    if (query.trim()) {
+      if (debounceRef.current) clearTimeout(debounceRef.current)
+      triggerSearch(query, scope, mode, s)
     }
   }
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === "Enter") {
       if (debounceRef.current) clearTimeout(debounceRef.current)
-      triggerSearch(query, scope, mode)
+      triggerSearch(query, scope, mode, side)
     }
   }
 
@@ -328,6 +339,16 @@ export function ParallelPassagesPanel(props: ParallelPassagesPanelProps) {
               { label: "Replace", value: "replace", disabled: true },
             ]}
             onChange={handleModeChange}
+          />
+          <PillToggle<ParallelPanelSide>
+            value={side}
+            label="Content side"
+            options={[
+              { label: "Both", value: "both" },
+              { label: "Source", value: "source" },
+              { label: "Target", value: "target" },
+            ]}
+            onChange={handleSideChange}
           />
         </div>
 

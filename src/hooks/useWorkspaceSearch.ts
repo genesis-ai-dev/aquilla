@@ -35,8 +35,8 @@ interface SearchOptionsApi {
   fileId?: string
   /** Server clamps to 500; default 50. */
   limit?: number
-  /** "source" | "target". When omitted, both sides are returned. */
-  side?: "source" | "target"
+  /** "source" | "target" | "both". When omitted or "both", both sides are returned. */
+  side?: "both" | "source" | "target"
 }
 
 function makeResult(row: SearchResult, files: FileReference[] | undefined): WorkspaceSearchResult {
@@ -159,10 +159,11 @@ export function useWorkspaceSearch(
         setLoading(false)
         return
       }
+      const sideParam = opts.side === "both" ? undefined : opts.side
       const rows = await fetchProjectSearch(
         pid,
         cleaned,
-        { side: opts.side, limit: opts.limit },
+        { side: sideParam, limit: opts.limit },
         token,
       )
       if (generationRef.current !== gen) return

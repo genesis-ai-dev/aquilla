@@ -282,6 +282,36 @@ export interface ProjectRecord {
   validationCount?: number
   /** Required distinct validators for audio. Clamped [1, 15]. Default 1. */
   validationCountAudio?: number
+  /**
+   * Minimum role level required to cast a validation vote.
+   * "reviewer" (default) | "project_lead" | "maintainer"
+   * Server enforcement: sync-worker cell.validate branch must check the
+   * validator's syncRole.level against the floor before accepting the event.
+   * SWARM-TODO(server-enforcement): apply validationRoleFloor in
+   *   sync-worker/src/routes/sync.ts — the cell.validate event-projection
+   *   branch. Fetch the validator's role from the project member list (or
+   *   the sync-token claim) and reject if role.level < floor.
+   */
+  validationRoleFloor?: "reviewer" | "project_lead" | "maintainer"
+  /**
+   * Optional allowlist of usernames that may cast validation votes.
+   * When present AND non-empty, only listed users' votes count toward the
+   * threshold (AND'd with validationRoleFloor).
+   * SWARM-TODO(server-enforcement): apply validationNamedUsers in
+   *   sync-worker/src/routes/sync.ts — cell.validate branch. If list is
+   *   non-empty, reject votes from users not in the list.
+   */
+  validationNamedUsers?: string[]
+  /**
+   * When true (default), a contributor may validate their own commit and
+   * the vote counts toward the threshold.
+   * When false, self-votes are silently ignored in threshold counting.
+   * SWARM-TODO(server-enforcement): apply allowSelfValidation in
+   *   sync-worker/src/routes/sync.ts — cell.validate branch. Compare
+   *   validator identity to the last-editor identity; skip if equal and
+   *   allowSelfValidation is false.
+   */
+  allowSelfValidation?: boolean
   /** Cached flag — set true when any cell first writes audio. Avoids scanning every file's Y.Doc on load. */
   hasAnyAudioData?: boolean
   /** When and how to fetch audio bytes from the storage backend. Default: "lazy". */

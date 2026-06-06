@@ -80,6 +80,9 @@ function localSettingsFrom(
   if (record.validationCount != null) out.validationCount = record.validationCount
   if (record.validationCountAudio != null)
     out.validationCountAudio = record.validationCountAudio
+  if (record.validationRoleFloor != null) out.validationRoleFloor = record.validationRoleFloor
+  if (record.validationNamedUsers != null) out.validationNamedUsers = record.validationNamedUsers
+  if (record.allowSelfValidation != null) out.allowSelfValidation = record.allowSelfValidation
   if (record.ttsSettings != null) {
     const { apiKey, ...ttsRest } = record.ttsSettings
     void apiKey

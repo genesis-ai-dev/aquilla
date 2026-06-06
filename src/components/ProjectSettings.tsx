@@ -81,6 +81,9 @@ interface Baseline {
   autoSyncInterval: number
   validationCount: number
   validationCountAudio: number
+  validationRoleFloor: "reviewer" | "project_lead" | "maintainer"
+  validationNamedUsers: string[]
+  allowSelfValidation: boolean
   decaySettings: DecaySettings | undefined
   audioMediaStrategy: AudioMediaStrategy
 }
@@ -107,6 +110,9 @@ function buildBaseline(project: ProjectRecord): Baseline {
     autoSyncInterval: project.syncSettings?.autoSync.intervalMinutes ?? 5,
     validationCount: readValidationCount(project),
     validationCountAudio: readValidationCountAudio(project),
+    validationRoleFloor: project.validationRoleFloor ?? "reviewer",
+    validationNamedUsers: project.validationNamedUsers ?? [],
+    allowSelfValidation: project.allowSelfValidation ?? true,
     decaySettings: project.decaySettings,
     audioMediaStrategy: project.audioMediaStrategy ?? "lazy",
   }
@@ -178,6 +184,9 @@ export function ProjectSettings() {
   const [autoSyncInterval, setAutoSyncInterval] = useState(5)
   const [validationCount, setValidationCount] = useState(1)
   const [validationCountAudio, setValidationCountAudio] = useState(1)
+  const [validationRoleFloor, setValidationRoleFloor] = useState<"reviewer" | "project_lead" | "maintainer">("reviewer")
+  const [validationNamedUsers, setValidationNamedUsers] = useState<string[]>([])
+  const [allowSelfValidation, setAllowSelfValidation] = useState(true)
   const [decaySettings, setDecaySettings] = useState<DecaySettings | undefined>(undefined)
   const [audioMediaStrategy, setAudioMediaStrategy] = useState<AudioMediaStrategy>("lazy")
 
@@ -215,6 +224,9 @@ export function ProjectSettings() {
     setAutoSyncInterval(b.autoSyncInterval)
     setValidationCount(b.validationCount)
     setValidationCountAudio(b.validationCountAudio)
+    setValidationRoleFloor(b.validationRoleFloor)
+    setValidationNamedUsers(b.validationNamedUsers)
+    setAllowSelfValidation(b.allowSelfValidation)
     setDecaySettings(b.decaySettings)
     setAudioMediaStrategy(b.audioMediaStrategy)
   }, [])
@@ -253,6 +265,9 @@ export function ProjectSettings() {
       autoSyncInterval !== baseline.autoSyncInterval ||
       validationCount !== baseline.validationCount ||
       validationCountAudio !== baseline.validationCountAudio ||
+      validationRoleFloor !== baseline.validationRoleFloor ||
+      JSON.stringify(validationNamedUsers) !== JSON.stringify(baseline.validationNamedUsers) ||
+      allowSelfValidation !== baseline.allowSelfValidation ||
       audioMediaStrategy !== baseline.audioMediaStrategy ||
       !decayEqual(decaySettings, baseline.decaySettings)
     )
@@ -261,6 +276,7 @@ export function ProjectSettings() {
     model, maxTokens, temperature, systemPrompt, llmHealthPenalty,
     topK, contextSize, useOnlyValidatedExamples, mainChatLanguage,
     autoSyncEnabled, autoSyncInterval, validationCount, validationCountAudio,
+    validationRoleFloor, validationNamedUsers, allowSelfValidation,
     audioMediaStrategy, decaySettings,
   ])
 
@@ -378,6 +394,11 @@ export function ProjectSettings() {
       if (validationCountAudio !== baseline.validationCountAudio) {
         sharedUpdates.validationCountAudio = validationCountAudio
       }
+      if (validationRoleFloor !== baseline.validationRoleFloor) sharedUpdates.validationRoleFloor = validationRoleFloor
+      if (JSON.stringify(validationNamedUsers) !== JSON.stringify(baseline.validationNamedUsers)) {
+        sharedUpdates.validationNamedUsers = validationNamedUsers
+      }
+      if (allowSelfValidation !== baseline.allowSelfValidation) sharedUpdates.allowSelfValidation = allowSelfValidation
 
       if (Object.keys(sharedUpdates).length > 0) {
         const out = await patchShared(sharedUpdates)
@@ -426,6 +447,9 @@ export function ProjectSettings() {
         autoSyncInterval: Math.max(1, autoSyncInterval),
         validationCount,
         validationCountAudio,
+        validationRoleFloor,
+        validationNamedUsers,
+        allowSelfValidation,
         decaySettings,
         audioMediaStrategy,
       }
@@ -445,6 +469,7 @@ export function ProjectSettings() {
     model, maxTokens, temperature, systemPrompt, llmHealthPenalty,
     topK, contextSize, useOnlyValidatedExamples, mainChatLanguage,
     autoSyncEnabled, autoSyncInterval, validationCount, validationCountAudio,
+    validationRoleFloor, validationNamedUsers, allowSelfValidation,
     audioMediaStrategy, decaySettings, patchShared, refresh, applyBaseline,
   ])
 
@@ -923,11 +948,17 @@ export function ProjectSettings() {
               validationCount={validationCount}
               validationCountAudio={validationCountAudio}
               hasAnyAudioData={Boolean(project?.hasAnyAudioData)}
+              validationRoleFloor={validationRoleFloor}
+              validationNamedUsers={validationNamedUsers}
+              allowSelfValidation={allowSelfValidation}
               disabled={!canEditShared}
               disabledTooltip={sharedDisabledTooltip ?? undefined}
               onChange={(u) => {
                 if (u.validationCount !== undefined) setValidationCount(u.validationCount)
                 if (u.validationCountAudio !== undefined) setValidationCountAudio(u.validationCountAudio)
+                if (u.validationRoleFloor !== undefined) setValidationRoleFloor(u.validationRoleFloor)
+                if (u.validationNamedUsers !== undefined) setValidationNamedUsers(u.validationNamedUsers)
+                if (u.allowSelfValidation !== undefined) setAllowSelfValidation(u.allowSelfValidation)
               }}
             />
           </div>

@@ -507,6 +507,7 @@ export function ProjectSettings() {
     { id: "section-validation", label: "Validation", keywords: ["validation count", "approvals", "audio validation"] },
     { id: "section-audio-media", label: "Audio Media", keywords: ["audio media strategy", "lazy", "eager"] },
     { id: "section-git-sync", label: "Git Sync", keywords: ["git", "sync", "auto sync", "interval", "branch", "clone"], visible: hasGitOrigin },
+    { id: "section-terminology", label: "Terminology", keywords: ["terminology", "termbase", "glossary", "concepts"] },
   ]
 
   // ── Search filter ──────────────────────────────────────────────────────────
@@ -1004,6 +1005,24 @@ export function ProjectSettings() {
             </CardContent>
           </Card>
         )}
+        {visibleSections.some((s) => s.id === "section-terminology") && (
+          <Card id="section-terminology">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                Terminology Library
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="flex items-center justify-between gap-4">
+              <p className="text-sm text-muted-foreground">
+                Manage approved terms, renderings, and the project glossary (termbase).
+              </p>
+              <Button variant="outline" onClick={() => requestNavigate(`/project/${id}/terminology`)} className="shrink-0">
+                Open Terminology Library
+              </Button>
+            </CardContent>
+          </Card>
+        )}
+
         </main>
       </div>
 

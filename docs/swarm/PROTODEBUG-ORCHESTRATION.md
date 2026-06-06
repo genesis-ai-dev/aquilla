@@ -63,3 +63,14 @@ Base: clean `cc7b5ed`. (Wave 1 = FRO-158..162, all Fixed + on `dev`/staging.)
 
 ## §AUDIO DATA FINDING (investigated on staging Neon)
 - `cell_audio` is EMPTY: 0 rows across all 411 projects on staging. FRO-160's universal 0% audio is a true data gap — legacy GitLab import did NOT populate audio, none recorded post-cutover. Audio-validation metric (FRO-168 TODO) is moot until audio data exists. → product/data decision for user (new issue suggested).
+
+## §M Wave 5 (production-readiness loop — spec audit fixes, 2026-06-06)
+6-domain spec-vs-impl audit → implemented 7 surgical "prototype-behind-spec" fixes:
+- auth: password reveal toggle + offline banner on login/signup forms (spec regression guardrails).
+- comments: CommentsPage renders markdown (was plaintext); Cmd/Ctrl+Enter submit; per-cell draft persistence.
+- validation: bulk "remove my validations" + completion toasts; 5th validation state (full-self vs full-others) in useCells+EditorTable.
+- terminology/LM/fixreview: corrected "forbidden" label (was "avoid"); wired useLiveness into LivingMemoryPage; suppress select-all at single-cell in FixReviewPanel.
+- search: Both/Source/Target content-side scope toggle (API already supported `side`).
+- settings: surface 409 conflict notice (was silent snap; edit-preservation = SWARM-TODO).
+- sync-worker: enforce maintainer(600) for FOREIGN unvalidate + comment edit/delete/resolve (was reviewer-min / silent no-op) — security fix, +14 tests.
+GATE: root tsc 0 · vitest 1567 pass / 2 baseline · sync-worker 414/414 · build 0. (Pre-existing: sync-worker test-file CellRow tsc error + AssignedToMe 2 fails — both present at base 74e853b.)

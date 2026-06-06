@@ -74,3 +74,15 @@ Base: clean `cc7b5ed`. (Wave 1 = FRO-158..162, all Fixed + on `dev`/staging.)
 - settings: surface 409 conflict notice (was silent snap; edit-preservation = SWARM-TODO).
 - sync-worker: enforce maintainer(600) for FOREIGN unvalidate + comment edit/delete/resolve (was reviewer-min / silent no-op) — security fix, +14 tests.
 GATE: root tsc 0 · vitest 1567 pass / 2 baseline · sync-worker 414/414 · build 0. (Pre-existing: sync-worker test-file CellRow tsc error + AssignedToMe 2 fails — both present at base 74e853b.)
+
+## §PRODUCTION-READINESS LOOP — campaign state (2026-06-06)
+Protocol: push dev + main with --no-verify (prototyping). Prod Neon migration allowed (no users yet).
+- Wave 5 DONE (e00e0f1): 7 audit fixes shipped (auth guardrails, comments markdown/draft, validation 5-state+bulk-unvalidate, terminology label, liveness, fixreview, search side-scope, settings 409, server foreign-role enforcement).
+- Issues filed for big gaps: FRO-174 (AI accept/reject), 175 (chat panel), 176 (snapshots), 177 (search-replace), 178 (macula), 179 (TN import), 180 (per-project members), 181 (AD-14 confidence), 182 (batch transcribe/synth), 183 (terminology data model), 184 (LM sections), 185 (CommentsPage filter/search).
+### NEXT WAVES (implementable medium fixes identified by audit, not yet built):
+- FRO-174 AI completion Tab/Esc accept-reject + cell.commit.llm-accept (High, central).
+- Voice drag-and-drop chip→cell (audio); HistoryDrawer promote-to-current (AD-2); mic-denied help link + long-recording warn + cloud-pending audio state.
+- Live password-requirements checklist on signup; "Sign out of all accounts"; invite expiry selector on SharePanel.
+- Stale-source per-cell marker; resume-last-location (cell-level); ProjectSettings section nav + search; ImportDialog 6-card landing.
+- Validation config dimensions (role floor/named-user/allowSelfValidation) + server policy; CommentsPage @mention/navigate/show-resolved (FRO-185).
+- Continue auditing remaining user stories (onboarding, billing/tiers, private-mode, publish-workspace, harmonization).

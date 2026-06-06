@@ -365,6 +365,89 @@ export async function handleEventsWriteRequest(
       }
     }
 
+    // ── Validation config enforcement (FRO-189) ───────────────────────────
+    // Enforce project-level validation settings for cell.validate events:
+    //   1. validationRoleFloor — reject if caller's role < configured floor
+    //   2. validationNamedUsers — reject if caller is not in the allowlist
+    //   3. allowSelfValidation=false — reject if caller is the cell's last editor
+    if (rawEvent.kind === 'cell.validate') {
+      // Load project settings from project_settings table.
+      let validationRoleFloor: string | undefined
+      let validationNamedUsers: string[] | undefined
+      let allowSelfValidation: boolean | undefined
+      try {
+        const settingsRow = await db
+          .prepare(`SELECT settings FROM project_settings WHERE project_id = ?`)
+          .bind(rawEvent.projectId)
+          .first<{ settings: string | null }>()
+        if (settingsRow?.settings) {
+          const parsed = JSON.parse(settingsRow.settings) as Record<string, unknown>
+          if (typeof parsed.validationRoleFloor === 'string') {
+            validationRoleFloor = parsed.validationRoleFloor as string
+          }
+          if (Array.isArray(parsed.validationNamedUsers)) {
+            validationNamedUsers = parsed.validationNamedUsers as string[]
+          }
+          if (typeof parsed.allowSelfValidation === 'boolean') {
+            allowSelfValidation = parsed.allowSelfValidation
+          }
+        }
+      } catch {
+        // settings load failure is non-fatal — skip enforcement rather than
+        // blocking all validates when settings are unavailable.
+      }
+
+      // 1. Role floor check.
+      if (validationRoleFloor != null) {
+        const FLOOR_MAP: Record<string, number> = {
+          reviewer: ROLE.REVIEWER,
+          project_lead: ROLE.PROJECT_LEAD,
+          maintainer: ROLE.MAINTAINER,
+        }
+        const floorLevel = FLOOR_MAP[validationRoleFloor]
+        if (floorLevel != null && callerRole < floorLevel) {
+          rejected.push({
+            id: rawEvent.id ?? '(unknown)',
+            status: 403,
+            reason: `role too low to validate (project requires ${validationRoleFloor} or above)`,
+          })
+          continue
+        }
+      }
+
+      // 2. Named-user allowlist check.
+      if (validationNamedUsers != null && validationNamedUsers.length > 0) {
+        if (!validationNamedUsers.includes(callerUsername)) {
+          rejected.push({
+            id: rawEvent.id ?? '(unknown)',
+            status: 403,
+            reason: `user '${callerUsername}' is not in the project's validator allowlist`,
+          })
+          continue
+        }
+      }
+
+      // 3. Self-validation check.
+      if (allowSelfValidation === false && rawEvent.fileId && rawEvent.cellId) {
+        const cellRow = await db
+          .prepare(
+            `SELECT last_editor FROM cells
+             WHERE project_id = ? AND file_id = ? AND cell_id = ? AND side = 'target'
+             LIMIT 1`,
+          )
+          .bind(rawEvent.projectId, rawEvent.fileId, rawEvent.cellId)
+          .first<{ last_editor: string | null }>()
+        if (cellRow && cellRow.last_editor === callerUsername) {
+          rejected.push({
+            id: rawEvent.id ?? '(unknown)',
+            status: 403,
+            reason: `self-validation is not allowed on this project`,
+          })
+          continue
+        }
+      }
+    }
+
     // Dispatch.
     const outcome = dispatchEvent(db, authResult.event, serverTs, {
       updateProjection,

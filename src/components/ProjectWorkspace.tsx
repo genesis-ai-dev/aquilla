@@ -52,6 +52,7 @@ import { useCellLabelsPreference } from "@/hooks/useCellLabelsPreference"
 import { useProjectPermissions } from "@/hooks/useProjectPermissions"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { eagerlyPrefetchPeaks } from "@/lib/audio/eager-peaks"
+import { runTranscribeAll as runBatchTranscribeAll, runSynthAll as runBatchSynthAll } from "@/lib/audio/batch-audio"
 import { notifyAudioAttachmentsChanged } from "@/lib/audio/audio-attachments-bus"
 import { useOutboxFlusher } from "@/hooks/useOutboxFlusher"
 import { usePendingOutboxRecords } from "@/hooks/usePendingOutboxRecords"
@@ -1616,17 +1617,26 @@ export function ProjectWorkspace() {
       console.info("agent-input triggered (placeholder runner)")
     },
     runImportWip: openImportFlow,
-    // Phase 2c-gamma: bulk transcribe/synth wrote attachments to Y.Doc; the
-    // writeback grammar lands in v1.x. Stubbed so the workspace actions menu
-    // still renders without crashing.
     runTranscribeAll: () => {
-      console.warn("[ProjectWorkspace] transcribe-all disabled in Phase 2c-gamma")
+      if (!activeFileId || !project) return
+      void runBatchTranscribeAll({
+        cells,
+        projectId: project.id,
+        session: frontierSession ?? null,
+        language: project.sourceLanguage,
+      })
     },
     runSynthAll: () => {
-      console.warn("[ProjectWorkspace] synth-all disabled in Phase 2c-gamma")
+      if (!activeFileId || !project) return
+      void runBatchSynthAll({
+        cells,
+        project,
+        session: frontierSession ?? null,
+        username: currentUsername,
+      })
     },
     navigate,
-  }), [activeFileId, completeBatch, cells, project, frontierSession, navigate, openImportFlow, openExportFlow])
+  }), [activeFileId, completeBatch, cells, project, frontierSession, currentUsername, navigate, openImportFlow, openExportFlow])
 
   const handleCellCommitted = useCallback(async () => {
     await flushOutboxBatch({ getTokenForFile })

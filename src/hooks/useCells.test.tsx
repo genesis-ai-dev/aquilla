@@ -282,7 +282,8 @@ describe("useCells (Phase 2a, D1-backed)", () => {
     )
     await waitFor(() => expect(result.current.cells).toHaveLength(1))
     expect(result.current.cells[0].activeValidators).toEqual(["alice", "bob"])
-    expect(result.current.cells[0].validationStatus).toBe("full")
+    // "full-self": threshold met (2/2) and current user "alice" is a validator
+    expect(result.current.cells[0].validationStatus).toBe("full-self")
   })
 
   it("renders the first page of cells before later pages arrive (streaming)", async () => {

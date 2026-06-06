@@ -85,6 +85,12 @@ interface TranslatedEditorProps {
    * Chip click exposes `data-source-term` for FRO-204 (TermLookupPopover).
    */
   terminologyConcepts?: Concept[]
+  /**
+   * FRO-204: Called when the user clicks a term chip in the editor.
+   * Receives the sourceTerm string and the chip DOM element as an anchor.
+   * The caller is responsible for opening TermLookupPopover.
+   */
+  onTermChipClick?: (term: string, anchor: HTMLElement) => void
 }
 
 export function TranslatedEditor({
@@ -109,6 +115,7 @@ export function TranslatedEditor({
   onDiscardLocal,
   onNavigateCell,
   terminologyConcepts,
+  onTermChipClick,
 }: TranslatedEditorProps) {
   // Held in a ref so the editor's keydown handler — created once per cellId —
   // always sees the latest navigation callback without re-creating the editor.
@@ -409,8 +416,19 @@ export function TranslatedEditor({
       <div
         className="h-full"
         onClick={(e) => {
-          if (!onRuleClick) return
           const target = e.target as HTMLElement
+          // FRO-204: term chip click → open TermLookupPopover via caller
+          if (onTermChipClick) {
+            const chip = target.closest(".term-chip[data-source-term]")
+            if (chip) {
+              const term = chip.getAttribute("data-source-term")
+              if (term) {
+                onTermChipClick(term, chip as HTMLElement)
+                return
+              }
+            }
+          }
+          if (!onRuleClick) return
           const blot = target.closest("[data-rule-id]")
           if (blot) {
             onRuleClick(blot.getAttribute("data-rule-id")!, blot as HTMLElement)

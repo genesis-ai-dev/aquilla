@@ -27,6 +27,7 @@ import { dispatchEvent } from './dispatch'
 import { isWinningChild, type PersistedEvent } from './event-projection'
 import { broadcastRealtime } from './broadcast'
 import type { BroadcastEnv } from './broadcast'
+import { ROLE } from './role-policy'
 
 // Cloudflare D1 max statements per db.batch() call.
 const D1_BATCH_LIMIT = 100
@@ -307,6 +308,59 @@ export async function handleEventsWriteRequest(
             id: rawEvent.id,
             currentSourceEventId: sourceRow.event_id,
           })
+        }
+      }
+    }
+
+    // ── Foreign ownership check ────────────────────────────────────────────
+    // For mutations that may target another user's row (comment.edit,
+    // comment.delete, comment.resolve, cell.unvalidate with targetUsername),
+    // verify the caller is the row's owner OR has maintainer(600)+ role.
+    // This runs after the base role gate (authorize) and before dispatch.
+    const callerRole = authResult.event.claims.roleLevel
+    const callerUsername = authResult.event.claims.username
+
+    if (
+      rawEvent.kind === 'comment.edit' ||
+      rawEvent.kind === 'comment.delete' ||
+      rawEvent.kind === 'comment.resolve'
+    ) {
+      const p = rawEvent.payload as { commentId?: string }
+      if (p.commentId) {
+        const commentRow = await db
+          .prepare(
+            `SELECT author_id FROM comments WHERE comment_id = ? LIMIT 1`,
+          )
+          .bind(p.commentId)
+          .first<{ author_id: string }>()
+
+        if (commentRow && commentRow.author_id !== callerUsername) {
+          // Foreign comment mutation — requires maintainer+.
+          if (callerRole < ROLE.MAINTAINER) {
+            rejected.push({
+              id: rawEvent.id ?? '(unknown)',
+              status: 403,
+              reason: `role too low to mutate another user's comment (requires maintainer)`,
+            })
+            continue
+          }
+        }
+        // If commentRow is null the comment doesn't exist; projection will no-op,
+        // which is the correct behaviour (idempotent delete of a missing row).
+      }
+    }
+
+    if (rawEvent.kind === 'cell.unvalidate') {
+      const p = rawEvent.payload as { targetUsername?: string }
+      if (p.targetUsername && p.targetUsername !== callerUsername) {
+        // Foreign unvalidate — requires maintainer+.
+        if (callerRole < ROLE.MAINTAINER) {
+          rejected.push({
+            id: rawEvent.id ?? '(unknown)',
+            status: 403,
+            reason: `role too low to remove another user's validation (requires maintainer)`,
+          })
+          continue
         }
       }
     }

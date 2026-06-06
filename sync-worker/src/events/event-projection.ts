@@ -20,6 +20,7 @@
 
 import type { D1Database, D1PreparedStatement } from '@cloudflare/workers-types'
 import type { EventKind, EventPayloads, CommentScope } from './types'
+import { ROLE } from './role-policy'
 
 // A single event row as it lives in D1. JSON.parse on `payload` is the
 // caller's responsibility — `payload` here is already an object.
@@ -40,6 +41,12 @@ export interface PersistedEvent<K extends EventKind = EventKind> {
    *  from D1 (read-side paths); write paths leave it undefined because the
    *  value is derived atomically inside the events INSERT, not in JS. */
   serverSeq?: number
+  /**
+   * Caller's resolved project role level (numeric). Populated by the route
+   * from EventClaims.roleLevel so the projection can apply foreign-vs-self
+   * enforcement without a separate DB read.
+   */
+  callerRole?: number
 }
 
 /**
@@ -438,13 +445,27 @@ export function buildEventProjectionStmts(
             ),
         )
       } else {
+        // cell.unvalidate: delete the validator row.
+        //
+        // Self path: caller removes their own validation — reviewer(300)+ is
+        //   sufficient (already gated by REQUIRED_ROLE in role-policy.ts).
+        // Foreign path: payload.targetUsername is set to a different user —
+        //   caller MUST be maintainer(600)+.  The route layer rejects the
+        //   event before it reaches here if the role is insufficient, so by
+        //   the time we land in the projection we can trust the role check
+        //   has passed and just use targetUsername as the deletion key.
+        const up = event.payload as EventPayloads['cell.unvalidate']
+        const targetUsername =
+          up.targetUsername && up.targetUsername !== event.author
+            ? up.targetUsername
+            : event.author
         stmts.push(
           db
             .prepare(
               `DELETE FROM cell_validators
                 WHERE project_id = ? AND file_id = ? AND cell_id = ? AND username = ?`,
             )
-            .bind(event.projectId, event.fileId, event.cellId, event.author),
+            .bind(event.projectId, event.fileId, event.cellId, targetUsername),
         )
       }
 
@@ -787,14 +808,30 @@ case 'cell.audio.attach': {
 
     case 'comment.edit': {
       const p = event.payload as EventPayloads['comment.edit']
-      stmts.push(
-        db
-          .prepare(
-            `UPDATE comments SET body = ?, updated_at = ?
-             WHERE comment_id = ? AND author_id = ? AND deleted_at IS NULL`,
-          )
-          .bind(p.body, event.serverTs, p.commentId, event.author),
-      )
+      // Self path: author_id check restricts edit to own comment.
+      // Maintainer+ foreign path: author_id check dropped so they can edit
+      //   any comment. The route layer has already rejected the event if the
+      //   caller is not the author AND does not have maintainer(600)+ role.
+      const isMaintainer = (event.callerRole ?? 0) >= ROLE.MAINTAINER
+      if (isMaintainer) {
+        stmts.push(
+          db
+            .prepare(
+              `UPDATE comments SET body = ?, updated_at = ?
+               WHERE comment_id = ? AND deleted_at IS NULL`,
+            )
+            .bind(p.body, event.serverTs, p.commentId),
+        )
+      } else {
+        stmts.push(
+          db
+            .prepare(
+              `UPDATE comments SET body = ?, updated_at = ?
+               WHERE comment_id = ? AND author_id = ? AND deleted_at IS NULL`,
+            )
+            .bind(p.body, event.serverTs, p.commentId, event.author),
+        )
+      }
       return ['comments']
     }
 
@@ -802,14 +839,27 @@ case 'cell.audio.attach': {
       const p = event.payload as EventPayloads['comment.delete']
       // Soft-delete: preserve the row so threads remain navigable.
       // Body cleared; deleted_at set. UI renders "[deleted]".
-      stmts.push(
-        db
-          .prepare(
-            `UPDATE comments SET body = '', deleted_at = ?, updated_at = ?
-             WHERE comment_id = ? AND author_id = ? AND deleted_at IS NULL`,
-          )
-          .bind(event.serverTs, event.serverTs, p.commentId, event.author),
-      )
+      // Maintainer+ foreign path: author_id check dropped (same logic as edit).
+      const isMaintainer = (event.callerRole ?? 0) >= ROLE.MAINTAINER
+      if (isMaintainer) {
+        stmts.push(
+          db
+            .prepare(
+              `UPDATE comments SET body = '', deleted_at = ?, updated_at = ?
+               WHERE comment_id = ? AND deleted_at IS NULL`,
+            )
+            .bind(event.serverTs, event.serverTs, p.commentId),
+        )
+      } else {
+        stmts.push(
+          db
+            .prepare(
+              `UPDATE comments SET body = '', deleted_at = ?, updated_at = ?
+               WHERE comment_id = ? AND author_id = ? AND deleted_at IS NULL`,
+            )
+            .bind(event.serverTs, event.serverTs, p.commentId, event.author),
+        )
+      }
       return ['comments']
     }
 
@@ -817,6 +867,13 @@ case 'cell.audio.attach': {
       const p = event.payload as EventPayloads['comment.resolve']
       // Only resolve top-level comments (parent_comment_id IS NULL).
       // Server noops on a reply id per spec.
+      //
+      // Self path: comment author resolves their own thread — commenter(200)+.
+      // Foreign path: resolving someone else's thread — maintainer(600)+ only.
+      //   The route layer rejects the event before it reaches here when the
+      //   caller is not the comment author and lacks maintainer role. The
+      //   projection logic is the same either way (no author filter on resolve
+      //   — ownership was already enforced upstream).
       stmts.push(
         db
           .prepare(

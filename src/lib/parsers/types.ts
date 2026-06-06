@@ -351,6 +351,8 @@ export interface ProjectMember {
 
 export type CompletionProvider = "frontier" | "custom"
 
+export type ContextSize = "small" | "medium" | "large"
+
 export interface CompletionSettings {
   provider?: CompletionProvider // "frontier" (default, uses api.frontierrnd.com) or "custom" (self-hosted, local, or third-party OpenAI-compatible endpoint like OpenRouter, OpenAI, Groq, etc.)
   endpoint: string              // only used when provider === "custom". Base URL (e.g. "http://localhost:8000" or "https://openrouter.ai/api/v1"). Trailing "/v1" or "/chat/completions" is tolerated and normalized.
@@ -358,9 +360,42 @@ export interface CompletionSettings {
   model: string                 // blank = provider's default (e.g. Frontier picks DEFAULT_LLM_MODEL server-side)
   maxTokens: number
   temperature: number
+  /**
+   * Alias: spec calls this `chatSystemMessage`. Renamed `systemPrompt` here for
+   * internal clarity; the two names refer to the same concept.
+   */
   systemPrompt: string
   /** 0-1, default 0.1. Only consumed by the legacy health engine (flag-off path). Will be removed once the composite-health flag is default-on. */
   llmHealthPenalty?: number
+
+  // ── v1 AI retrieval-tuning settings (spec: ai-copilot.md config table) ────
+
+  /**
+   * How many few-shot examples to retrieve per completion call.
+   * Spec key: `top_k`. Default 5.
+   */
+  top_k?: number
+
+  /**
+   * Controls how much surrounding passage context is included.
+   * "small" = tight window, "medium" = paragraph (default), "large" = chapter.
+   * Spec key: `contextSize`.
+   */
+  contextSize?: ContextSize
+
+  /**
+   * When true, only cells with `status === "validated"` are eligible as
+   * few-shot examples (no search-retrieved unvalidated examples).
+   * Spec key: `useOnlyValidatedExamples`. Default false.
+   */
+  useOnlyValidatedExamples?: boolean
+
+  /**
+   * Language the AI assistant uses in chat responses, independent of the
+   * project's UI locale. Spec key: `main_chat_language`.
+   * Label in UI: "Assistant language".
+   */
+  main_chat_language?: string
 }
 
 export interface WeightedExample {

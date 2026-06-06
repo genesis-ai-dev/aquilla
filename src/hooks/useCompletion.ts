@@ -45,6 +45,10 @@ const FALLBACK_SETTINGS: CompletionSettings = {
   temperature: 0.3,
   systemPrompt: DEFAULT_SYSTEM_PROMPT,
   llmHealthPenalty: 0.1,
+  top_k: 5,
+  contextSize: "medium",
+  useOnlyValidatedExamples: false,
+  main_chat_language: "",
 }
 
 type CommitCompletedCell = (cell: CellData, text: string, author: string) => Promise<void>
@@ -109,9 +113,15 @@ export function useCompletion(
     if (!isConfigured || !isAvailable) return
 
     setCompleting((p) => new Map(p).set(cell.id, "searching"))
+    // top_k controls how many search-retrieved examples are requested.
+    // When useOnlyValidatedExamples is true, skip search-retrieved examples
+    // and rely solely on collectValidatedPairs (validated-only examples).
+    const topK = effectiveSettings.top_k ?? 5
     let found: ScoredPair[] = []
     try {
-      found = await search(cell.original, 5, cell.id)
+      if (!effectiveSettings.useOnlyValidatedExamples) {
+        found = await search(cell.original, topK, cell.id)
+      }
     } catch (err) {
       console.warn("[useCompletion] few-shot retrieval failed:", err)
     }
@@ -120,9 +130,9 @@ export function useCompletion(
 
     // Collect validated pairs from the project's cells, ranked by relevance to
     // the cell being drafted. These represent human corrections — "fix it once,
-    // the system learns." Limit to 5 most-relevant to keep the prompt tight.
+    // the system learns." Limit to top_k most-relevant to keep the prompt tight.
     const validatedPairs = allCells
-      ? collectValidatedPairs(allCells, cell.original, 5)
+      ? collectValidatedPairs(allCells, cell.original, topK)
       : []
 
     try {
@@ -233,8 +243,9 @@ export function useCompletion(
       }))
       // Use the chunk's concatenated text as the relevance query so validated
       // pairs about the same topic/terms are ranked highest.
+      const batchTopK = effectiveSettings.top_k ?? 5
       const batchValidatedPairs = allCells
-        ? collectValidatedPairs(allCells, concatenated, 5)
+        ? collectValidatedPairs(allCells, concatenated, batchTopK)
         : []
       const messages = buildBatchPrompt({
         sourceLanguage, targetLanguage,

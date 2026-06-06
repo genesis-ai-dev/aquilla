@@ -89,6 +89,7 @@ function localSettingsFrom(
     out.ttsSettings = ttsRest
   }
   if (record.terminology != null) out.terminology = record.terminology
+  if (record.livingMemoryEntries != null) out.livingMemoryEntries = record.livingMemoryEntries
   return out
 }
 
@@ -198,6 +199,9 @@ export function useProjectSettings(
             : {}),
           ...(got.settings.terminology != null
             ? { terminology: got.settings.terminology }
+            : {}),
+          ...(got.settings.livingMemoryEntries != null
+            ? { livingMemoryEntries: got.settings.livingMemoryEntries }
             : {}),
         }))
       } catch (err) {

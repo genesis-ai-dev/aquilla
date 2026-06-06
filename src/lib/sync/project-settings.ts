@@ -5,6 +5,7 @@ import type {
   ProjectTtsSettings,
 } from "@/lib/parsers/types"
 import type { Concept } from "@/lib/terminology/types"
+import type { LivingMemoryEntry } from "@/lib/parsers/types"
 
 /** Initial server version for projects with no settings row. */
 export const PROJECT_SETTINGS_VERSION_INITIAL = 0
@@ -33,6 +34,8 @@ export interface ProjectWideSettings {
   /** Project terminology / glossary concepts. Synced to D1 via the same
    *  top-level key mechanism as `rules`. Absent → no terminology enforcement. */
   terminology?: Concept[]
+  /** Authored living-memory guidance entries (instructions + standards). */
+  livingMemoryEntries?: LivingMemoryEntry[]
 }
 
 export interface ProjectSettingsResponse {

@@ -340,6 +340,18 @@ export interface ProjectRecord {
    *  compiled to TranslationRule instances at rule-evaluation time — violations
    *  are DERIVED on read, no materialized verdicts. */
   terminology?: import("@/lib/terminology/types").Concept[]
+  /** Authored living-memory entries (instructions + standards). Persisted and
+   *  synced via ProjectWideSettings the same way as `rules` / `terminology`. */
+  livingMemoryEntries?: LivingMemoryEntry[]
+}
+
+/** A single authored guidance entry in the Living Memory page. */
+export interface LivingMemoryEntry {
+  id: string
+  kind: "instruction" | "standard"
+  text: string
+  createdAt: string
+  author: string
 }
 
 export interface ProjectSyncSettings {

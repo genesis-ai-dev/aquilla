@@ -777,6 +777,34 @@ export function ProjectWorkspace() {
     revalidateAuditStats()
     revalidateCells()
   }, [project?.id, applyOptimisticTargetEdit, getTokenForFile, refreshOutboxPending, revalidateAuditStats, revalidateCells])
+
+  /**
+   * AD-2 sibling promotion: emit a new target-cell commit whose parentId is
+   * the current chain head (historyCell.targetEventId). This makes the
+   * promoted text the new current value while the prior head becomes a stale
+   * sibling — exactly the first-child-of-parent win rule applied in reverse.
+   */
+  const handlePromoteToCurrentCell = useCallback(async (entry: import("@/lib/parsers/types").CellHistoryEntry) => {
+    if (!project?.id || !historyCellId) return
+    const cell = cells.find((c) => c.id === historyCellId)
+    if (!cell) return
+    applyOptimisticTargetEdit(cell.id, { value: entry.value })
+    await emitTargetCellCommit({
+      projectId: project.id,
+      fileId: cell.fileId,
+      cellId: cell.id,
+      // parentId must be the current chain head so AD-2 makes this the winner.
+      parentId: cell.targetEventId ?? cell.sourceEventId ?? null,
+      sourceEventId: cell.sourceEventId ?? null,
+      value: entry.value,
+      author: currentUsername,
+    })
+    await flushOutboxBatch({ getTokenForFile })
+    await refreshOutboxPending()
+    revalidateAuditStats()
+    revalidateCells()
+  }, [project?.id, historyCellId, cells, applyOptimisticTargetEdit, getTokenForFile, currentUsername, refreshOutboxPending, revalidateAuditStats, revalidateCells])
+
   const { completeSingle, completeBatch, isConfigured, isAvailable: isCompletionAvailable, completing, examples, errors, previews } = useCompletion(
     project?.completionSettings, project?.sourceLanguage || "", project?.targetLanguage || "", branchingSearch, branchingSearchPassages, frontierSession, commitCompletedCell, rules, allProjectCells
   )
@@ -2025,6 +2053,7 @@ export function ProjectWorkspace() {
                 projectId={project?.id ?? null}
                 fileId={activeFileId}
                 getTokenForFile={getTokenForFile}
+                onPromote={handlePromoteToCurrentCell}
               />
             )}
           </>

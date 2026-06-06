@@ -6,6 +6,7 @@ import { CellAreaPlaceholder } from "./CellAreaPlaceholder"
 import { WorkspaceSkeleton } from "./WorkspaceSkeleton"
 import { TabStrip } from "./TabStrip"
 import { useWorkspaceTabs, readLastActiveFileId } from "@/hooks/useWorkspaceTabs"
+import { readLastLocation, writeLastLocation } from "@/lib/frontier/last-location-store"
 import { useCells } from "@/hooks/useCells"
 import { useStaleSourceCells } from "@/hooks/useStaleSourceCells"
 import { useSearchIndex } from "@/hooks/useSearchIndex"
@@ -273,7 +274,14 @@ export function ProjectWorkspace() {
     }
 
     // No file in the URL: restore the last/only file if there is a valid one.
-    const last = readLastActiveFileId(projectId)
+    // Prefer the richer per-user last-location store; fall back to the
+    // legacy readLastActiveFileId (tabs-only) for backward compat.
+    // NOTE: currentUsernameRef.current is read here (not the derived const)
+    // because this effect is declared before currentUsername is computed.
+    const uid = currentUsernameRef.current
+    const savedLoc = readLastLocation(uid, projectId)
+    const last = (savedLoc?.fileId && fileIds.includes(savedLoc.fileId) ? savedLoc.fileId : null)
+      ?? readLastActiveFileId(projectId)
     const firstOpenTab = workspaceTabs.tabs[0]?.fileId ?? null
     const onlyFile = projectFiles.length === 1 ? projectFiles[0]?.id : null
     const nextFileId =
@@ -283,6 +291,11 @@ export function ProjectWorkspace() {
           ? firstOpenTab
           : onlyFile
     if (!nextFileId) return
+    // If there is a remembered cell, park it in the ref so the scroll-restore
+    // effect can consume it once cells are loaded.
+    if (savedLoc?.cellId && savedLoc.fileId === nextFileId) {
+      pendingCellScrollRef.current = savedLoc.cellId
+    }
     const target = `/project/${projectId}/file/${nextFileId}`
     if (redirectTo(target)) setSelectedFileId(nextFileId)
   }, [
@@ -332,6 +345,13 @@ export function ProjectWorkspace() {
     navigate(`/project/${projectId}/settings`)
   }, [navigate, projectId])
   const editorRef = useRef<EditorTableHandle>(null)
+  // Holds a cellId to scroll to once cells are loaded after a restore-location
+  // navigation. Set during the restore effect, consumed (and cleared) by a
+  // separate effect that fires when `cells` are available.
+  const pendingCellScrollRef = useRef<string | null>(null)
+  // Mirrors currentUsername (computed later in the function) so effects that
+  // are declared before currentUsername can access it via ref.
+  const currentUsernameRef = useRef<string>("local")
   // Phase 2c-gamma: the per-file Y.Doc is gone. The editor hydrates from the
   // cells projection and writes via the outbox. `doc`/`docLoading` are
   // retained as no-op constants so downstream cellAreaState + props don't
@@ -342,6 +362,9 @@ export function ProjectWorkspace() {
   // should attribute to the actual signed-in user.
   const { session: frontierSession, logout: doLogout } = useFrontierSession()
   const currentUsername = frontierSession?.username || project?.username || "local"
+  // Keep the ref in sync so effects declared earlier in the component can
+  // access the resolved username without a hoisting issue.
+  currentUsernameRef.current = currentUsername
   const jwtRef = useRef<string | null>(null)
   useEffect(() => {
     jwtRef.current = frontierSession?.jwt ?? null
@@ -1079,6 +1102,28 @@ export function ProjectWorkspace() {
     if (idx >= 0) editorRef.current?.scrollToCellIndex(idx)
   }, [cells])
 
+  // ── last-location: write on file change ──────────────────────────────────
+  // Persist the active file whenever it changes so a fresh open resumes here.
+  // Cell-level granularity is written by handleClaimCell below (debounced).
+  useEffect(() => {
+    if (!projectId || !activeFileId) return
+    writeLastLocation(currentUsername, projectId, { fileId: activeFileId })
+  }, [projectId, activeFileId, currentUsername])
+
+  // ── last-location: scroll to remembered cell once cells are loaded ────────
+  // After a restore-navigation the editor isn't rendered yet; we park the
+  // target cellId in pendingCellScrollRef and consume it here once `cells`
+  // is non-empty and the ref is set.
+  useEffect(() => {
+    const cellId = pendingCellScrollRef.current
+    if (!cellId || cells.length === 0) return
+    const idx = cells.findIndex((c) => c.id === cellId)
+    if (idx >= 0) {
+      pendingCellScrollRef.current = null
+      editorRef.current?.scrollToCellIndex(idx)
+    }
+  }, [cells])
+
   const drawerRule = rules.find((r) => r.id === drawerRuleId) || null
   const drawerInfractions = drawerRuleId
     ? Array.from(infractions.values()).flat().filter((i) => i.ruleId === drawerRuleId)
@@ -1262,10 +1307,20 @@ export function ProjectWorkspace() {
     }
   }, [project?.id, frontierSession?.jwt, getTokenForFile, revalidateCells, revalidateCell, currentUsername, refresh])
 
+  const writeLocTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const handleClaimCell = useCallback((cellId: string) => {
     focusedCellIdRef.current = cellId
     reconcilerRef.current?.send({ t: "focus.claim", cellId })
-  }, [])
+    // Debounce last-location cell write (500 ms) so rapid focus events
+    // don't hammer localStorage.
+    if (writeLocTimerRef.current !== null) clearTimeout(writeLocTimerRef.current)
+    writeLocTimerRef.current = setTimeout(() => {
+      writeLocTimerRef.current = null
+      if (!projectId || !activeFileId) return
+      writeLastLocation(currentUsername, projectId, { fileId: activeFileId, cellId })
+    }, 500)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [projectId, activeFileId, currentUsername])
   const handleReleaseCell = useCallback((cellId: string) => {
     if (focusedCellIdRef.current === cellId) focusedCellIdRef.current = null
     reconcilerRef.current?.send({ t: "focus.release", cellId })

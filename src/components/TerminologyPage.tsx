@@ -40,7 +40,7 @@ import { useProject } from "@/hooks/useProject"
 const statusLabel: Record<RenderingStatus, string> = {
   preferred: "required",
   admitted: "alternate",
-  forbidden: "avoid",
+  forbidden: "forbidden",
 }
 
 function RenderingChip({ rendering }: { rendering: TermRendering }) {
@@ -121,7 +121,7 @@ function RenderingRow({ rendering, index, onChange, onRemove }: RenderingRowProp
       >
         <option value="preferred">required</option>
         <option value="admitted">alternate</option>
-        <option value="forbidden">avoid</option>
+        <option value="forbidden">forbidden</option>
       </select>
       <Button
         variant="ghost"

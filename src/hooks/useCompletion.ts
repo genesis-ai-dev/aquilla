@@ -1,8 +1,8 @@
-// Phase 2c-gamma: useCompletion still drives the LLM stream and reports
-// per-cell completion status, but writebacks into the cell text are gone.
-// Streaming output is collected in-memory; the UI surfaces it via
-// previews + completing. Persisting the result requires a target.cell.commit
-// writeback from completion - that hookup is deferred to v1.x.
+// Phase 2c-gamma → FRO-174: useCompletion drives the LLM stream and reports
+// per-cell completion status. Writebacks for single-cell completions are now
+// user-gated: the UI shows a preview in "done" state, then Tab/Esc
+// accept/reject via acceptCompletion / rejectCompletion. Batch completions
+// auto-commit as before (no per-cell review UX for bulk runs).
 
 import { useState, useCallback } from "react"
 import type { CompletionSettings } from "@/lib/parsers/types"
@@ -118,8 +118,6 @@ export function useCompletion(
     setExamples((p) => new Map(p).set(cell.id, found))
     setCompleting((p) => new Map(p).set(cell.id, "generating"))
 
-    const llmAuthor = effectiveSettings.model || "frontier-default"
-
     // Collect validated pairs from the project's cells, ranked by relevance to
     // the cell being drafted. These represent human corrections — "fix it once,
     // the system learns." Limit to 5 most-relevant to keep the prompt tight.
@@ -144,7 +142,10 @@ export function useCompletion(
           setPreviews((p) => new Map(p).set(cell.id, text))
         },
       })
-      await commitCompletedCell?.(cell, result, llmAuthor)
+      // FRO-174: single-cell completions stay in "done" preview state so the
+      // user can Tab-accept or Esc-reject. acceptCompletion() below handles
+      // the actual commitCompletedCell writeback with ai_suggestion provenance.
+      // (Batch completions continue to auto-commit via the completeBatch path.)
       setPreviews((p) => new Map(p).set(cell.id, result))
       posthog.capture("ai translation completed", {
         provider,
@@ -310,5 +311,42 @@ export function useCompletion(
     }
   }, [effectiveSettings, isConfigured, isAvailable, sourceLanguage, targetLanguage, searchPassages, session, provider, completeSingle, commitCompletedCell, rules, allCells])
 
-  return { completeSingle, completeBatch, isConfigured, isAvailable, completing, examples, errors, previews }
+  /**
+   * FRO-174: Accept the queued completion preview for a cell.
+   * Calls `commitCompletedCell` with `ai_suggestion` provenance, then clears
+   * the preview + completing state so the overlay disappears.
+   * No-op if the cell is not in "done" state or has no preview.
+   */
+  const acceptCompletion = useCallback(async (cell: CellData) => {
+    const text = previews.get(cell.id)
+    if (!text || completing.get(cell.id) !== "done") return
+    const llmAuthor = effectiveSettings.model || "frontier-default"
+    // Clear preview immediately for snappy UX; writeback is fire-and-forget.
+    setPreviews((p) => { const m = new Map(p); m.delete(cell.id); return m })
+    setCompleting((p) => { const m = new Map(p); m.delete(cell.id); return m })
+    await commitCompletedCell?.(cell, text, llmAuthor)
+    posthog.capture("ai translation accepted", {
+      provider,
+      model: effectiveSettings.model || "frontier-default",
+      source_language: sourceLanguage,
+      target_language: targetLanguage,
+    })
+  }, [previews, completing, effectiveSettings, commitCompletedCell, provider, sourceLanguage, targetLanguage])
+
+  /**
+   * FRO-174: Reject the queued completion preview for a cell.
+   * Clears preview + completing state without writing anything.
+   */
+  const rejectCompletion = useCallback((cellId: string) => {
+    setPreviews((p) => { const m = new Map(p); m.delete(cellId); return m })
+    setCompleting((p) => { const m = new Map(p); m.delete(cellId); return m })
+    posthog.capture("ai translation rejected", {
+      provider,
+      model: effectiveSettings.model || "frontier-default",
+      source_language: sourceLanguage,
+      target_language: targetLanguage,
+    })
+  }, [effectiveSettings, provider, sourceLanguage, targetLanguage])
+
+  return { completeSingle, completeBatch, acceptCompletion, rejectCompletion, isConfigured, isAvailable, completing, examples, errors, previews }
 }

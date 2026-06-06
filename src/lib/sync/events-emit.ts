@@ -118,6 +118,10 @@ export interface CellCommitInput {
   valueHtml?: string
   author: string
   clientTs?: number
+  /** When true, tags the payload with `ai_suggestion: true` to record
+   *  `cell.commit.llm-accept` provenance. Normal (human-typed) commits
+   *  omit this field entirely — the generic commit path is unaffected. */
+  aiSuggestion?: boolean
 }
 
 /**
@@ -152,6 +156,7 @@ export async function emitTargetCellCommit(
       ...(input.sourceEventId !== undefined
         ? { sourceEventId: input.sourceEventId }
         : {}),
+      ...(input.aiSuggestion ? { ai_suggestion: true } : {}),
     },
     clientTs: input.clientTs,
   })

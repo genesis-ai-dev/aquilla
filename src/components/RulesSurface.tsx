@@ -13,6 +13,7 @@ import { Input } from "@/components/ui/input"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { BuiltinChecksList } from "./BuiltinChecksList"
 import { RuleSuggestDialog } from "./RuleSuggestDialog"
+import { RuleSuggestFromEditsDialog } from "./RuleSuggestFromEditsDialog"
 import { RuleEditor } from "./RuleEditor"
 import { RuleImportDialog } from "./RuleImportDialog"
 import type { ProjectRecord, RuleAutofix, TranslationRule } from "@/lib/parsers/types"
@@ -98,7 +99,18 @@ export function RulesSurface({
             onAdd={addRule}
             projectId={projectId}
           />
-          {/* SWARM-TODO(FRO-198): replace with inline suggest surface */}
+          {/* FRO-198: suggest rules from mined edits — repeated corrections + recent edits + validated pairs */}
+          {/* SWARM-TODO(FRO-198-cells): RulesSurface only receives `validatedCells`; for richer
+              repeated-edit detection, ProjectWorkspace should also pass ALL cells (including
+              unvalidated) so hasPendingEdit recent-edits and cross-status patterns are visible.
+              Until then, mining runs on validatedCells only. */}
+          <RuleSuggestFromEditsDialog
+            completionSettings={project?.completionSettings}
+            onAdd={addRule}
+            projectId={projectId}
+            cells={validatedCells}
+          />
+          {/* Legacy suggest from pairs (kept for backward compat; may be removed in FRO-199) */}
           <RuleSuggestDialog
             files={project?.files || []}
             completionSettings={project?.completionSettings}

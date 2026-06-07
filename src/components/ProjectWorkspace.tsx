@@ -690,7 +690,10 @@ export function ProjectWorkspace() {
   const { activeOrg } = useActiveOrg()
   const {
     orgRules,
+    promotionRequests,
     canEdit: canEditOrgSettings,
+    canRequestPromotion,
+    requestPromotion,
     patch: patchOrgSettings,
     version: orgSettingsVersion,
   } = useOrgSettings(activeOrg?.id, activeOrg?.role?.level)
@@ -2119,6 +2122,9 @@ export function ProjectWorkspace() {
             canEditOrgRules={canEditOrgSettings}
             patchOrgSettings={patchOrgSettings}
             orgSettingsVersion={orgSettingsVersion}
+            promotionRequests={promotionRequests}
+            canRequestPromotion={canRequestPromotion}
+            requestPromotion={requestPromotion}
           />
         ) : cellAreaState.kind === "ready" ? (
           <EditorTable

@@ -194,4 +194,118 @@ orgSettings.on(
   },
 )
 
+// ──────────────────────────────────────────────────────────────────────────
+// POST /api/v2/orgs/:orgId/rule-promotion-requests
+// Appends a promotion request to the org settings blob.
+// Requires org role >= PROJECT_LEAD (500). Returns 409 on duplicate.
+// ──────────────────────────────────────────────────────────────────────────
+
+const PROMOTION_REQUEST_MIN_ROLE = ROLE.PROJECT_LEAD
+
+const promotionRequestSchema = z.object({
+  rule: z.object({
+    id: z.string(),
+    name: z.string(),
+    description: z.string(),
+    severity: z.enum(["major", "minor"]),
+    source: z.enum(["algorithmic", "llm", "user"]),
+    scope: z.enum(["project", "org"]),
+    check: z.record(z.string(), z.unknown()),
+    enabled: z.boolean(),
+    createdAt: z.string(),
+    autofix: z.unknown().optional(),
+    sourceProjectId: z.string().optional(),
+  }),
+  sourceProjectId: z.string(),
+})
+
+interface PromotionRequestBlob {
+  id: string
+  rule: { id: string; [k: string]: unknown }
+  sourceProjectId: string
+  requestedBy: number
+  requestedByName?: string
+  requestedAt: string
+}
+
+orgSettings.post(
+  "/:orgId/rule-promotion-requests",
+  authMiddleware,
+  zValidator("json", promotionRequestSchema),
+  async (c) => {
+    const user = c.get("user")
+    const orgId = parseInt(c.req.param("orgId") ?? "", 10)
+    if (!Number.isFinite(orgId)) return c.json({ error: "invalid orgId" }, 400)
+
+    const role = await getOrgMemberRole(c.env, orgId, user.id)
+    if (role == null) return c.json({ error: "no access to org" }, 403)
+    if (role < PROMOTION_REQUEST_MIN_ROLE) {
+      return c.json(
+        { error: `org role >= project_lead (${PROMOTION_REQUEST_MIN_ROLE}) required` },
+        403,
+      )
+    }
+
+    const { rule, sourceProjectId } = c.req.valid("json")
+
+    const current = await loadSettings(c.env, orgId)
+    const existingRequests: PromotionRequestBlob[] =
+      (current.settings.promotionRequests as PromotionRequestBlob[] | undefined) ?? []
+
+    // Deduplicate: same rule id + same project = already requested.
+    const duplicate = existingRequests.some(
+      (r) => r.rule.id === rule.id && r.sourceProjectId === sourceProjectId,
+    )
+    if (duplicate) {
+      return c.json({ error: "promotion request already pending for this rule" }, 409)
+    }
+
+    const newRequest: PromotionRequestBlob = {
+      id: crypto.randomUUID(),
+      rule: rule as PromotionRequestBlob["rule"],
+      sourceProjectId,
+      requestedBy: user.id,
+      requestedByName: user.username,
+      requestedAt: new Date().toISOString(),
+    }
+
+    const newSettings = {
+      ...current.settings,
+      promotionRequests: [...existingRequests, newRequest],
+    }
+    const newSettingsJson = JSON.stringify(newSettings)
+    const newVersion = current.version + 1
+
+    if (current.updatedAt == null) {
+      try {
+        await c.env.AQUILLA_DB.prepare(
+          `INSERT INTO org_settings (org_id, settings, version, updated_by) VALUES (?, ?, ?, ?)`,
+        )
+          .bind(orgId, newSettingsJson, newVersion, user.id)
+          .run()
+      } catch {
+        return c.json({ error: "concurrent write — please retry" }, 409)
+      }
+    } else {
+      const result = await c.env.AQUILLA_DB.prepare(
+        `UPDATE org_settings
+            SET settings   = ?,
+                version    = version + 1,
+                updated_at = CURRENT_TIMESTAMP,
+                updated_by = ?
+          WHERE org_id = ? AND version = ?`,
+      )
+        .bind(newSettingsJson, user.id, orgId, current.version)
+        .run()
+
+      const changes = result.meta?.changes
+      if (typeof changes === "number" && changes === 0) {
+        return c.json({ error: "concurrent write — please retry" }, 409)
+      }
+    }
+
+    return c.json({ ok: true, request: newRequest }, 200)
+  },
+)
+
 export default orgSettings

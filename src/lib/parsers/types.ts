@@ -104,6 +104,16 @@ export interface InfractionSpan {
   matchedText: string
 }
 
+/** A request from a project_lead to promote a project rule to org scope. */
+export interface PromotionRequest {
+  id: string
+  rule: TranslationRule
+  sourceProjectId: string
+  requestedBy: number
+  requestedByName?: string
+  requestedAt: string
+}
+
 export interface RuleWaiver {
   ruleId: string
   /** Optional human-entered reason. */

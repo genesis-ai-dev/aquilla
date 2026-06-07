@@ -107,3 +107,116 @@ describe("PUT /api/v2/orgs/:orgId/settings", () => {
     expect(body2.version).toBe(2)
   })
 })
+
+// ──────────────────────────────────────────────────────────────────────────
+// POST /api/v2/orgs/:orgId/rule-promotion-requests
+// ──────────────────────────────────────────────────────────────────────────
+
+/** Seed org with wendi=owner(700), anna=maintainer(600), lead=project_lead(500), tom=contributor(400), stranger=no membership. */
+async function seedOrgWithLead() {
+  await seedUser(1, "wendi")
+  await seedUser(2, "anna")
+  await seedUser(3, "lead")
+  await seedUser(4, "tom")
+  await seedUser(5, "stranger")
+  await env.AQUILLA_DB.prepare(
+    "INSERT INTO organizations (id, name, owner_user_id) VALUES (1, 'Come and See', 1)",
+  ).run()
+  await env.AQUILLA_DB.prepare(
+    `INSERT INTO org_members (org_id, user_id, role_level, granted_by) VALUES
+      (1, 1, 700, 1),
+      (1, 2, 600, 1),
+      (1, 3, 500, 1),
+      (1, 4, 400, 1)`,
+  ).run()
+}
+
+const sampleRule = {
+  id: "rule-1",
+  name: "No slang",
+  description: "Avoid slang",
+  severity: "minor",
+  source: "user",
+  scope: "project",
+  check: { type: "target-forbids", targetPattern: "slang" },
+  enabled: true,
+  createdAt: new Date().toISOString(),
+}
+
+const POST_PR = async (username: string, body: Record<string, unknown>) =>
+  app.request("/api/v2/orgs/1/rule-promotion-requests", {
+    method: "POST",
+    headers: authHeader(await jwtFor(username)),
+    body: JSON.stringify(body),
+  }, env)
+
+describe("POST /api/v2/orgs/:orgId/rule-promotion-requests", () => {
+  it("project_lead (500) can submit a promotion request — appears in settings blob", async () => {
+    await seedOrgWithLead()
+    const res = await POST_PR("lead", { rule: sampleRule, sourceProjectId: "proj-abc" })
+    expect(res.status).toBe(200)
+    const body = await res.json() as { ok: boolean; request: { id: string; rule: { id: string } } }
+    expect(body.ok).toBe(true)
+    expect(body.request.rule.id).toBe("rule-1")
+
+    // Verify the request is stored in the org settings blob.
+    const settingsRes = await app.request("/api/v2/orgs/1/settings", {
+      headers: authHeader(await jwtFor("wendi")),
+    }, env)
+    const settings = await settingsRes.json() as { settings: { promotionRequests?: Array<{ rule: { id: string } }> } }
+    expect(settings.settings.promotionRequests).toHaveLength(1)
+    expect(settings.settings.promotionRequests![0].rule.id).toBe("rule-1")
+  })
+
+  it("contributor (400) gets 403", async () => {
+    await seedOrgWithLead()
+    const res = await POST_PR("tom", { rule: sampleRule, sourceProjectId: "proj-abc" })
+    expect(res.status).toBe(403)
+  })
+
+  it("non-member gets 403", async () => {
+    await seedOrgWithLead()
+    const res = await POST_PR("stranger", { rule: sampleRule, sourceProjectId: "proj-abc" })
+    expect(res.status).toBe(403)
+  })
+
+  it("duplicate request (same rule id + project) returns 409", async () => {
+    await seedOrgWithLead()
+    const first = await POST_PR("lead", { rule: sampleRule, sourceProjectId: "proj-abc" })
+    expect(first.status).toBe(200)
+    const second = await POST_PR("lead", { rule: sampleRule, sourceProjectId: "proj-abc" })
+    expect(second.status).toBe(409)
+  })
+
+  it("maintainer PUT can approve (promotes rule, clears request); version increments", async () => {
+    await seedOrgWithLead()
+    // Submit a promotion request as project_lead.
+    await POST_PR("lead", { rule: sampleRule, sourceProjectId: "proj-abc" })
+
+    // Read current settings to get version.
+    const readRes = await app.request("/api/v2/orgs/1/settings", {
+      headers: authHeader(await jwtFor("anna")),
+    }, env)
+    const { settings: currentSettings, version } = await readRes.json() as {
+      settings: { promotionRequests?: Array<{ id: string; rule: typeof sampleRule }> }
+      version: number
+    }
+    const req = currentSettings.promotionRequests![0]
+
+    // Maintainer approves: promotes rule to org scope, removes request.
+    const promotedRule = { ...req.rule, id: "promoted-" + req.rule.id, scope: "org", createdAt: new Date().toISOString() }
+    const approveRes = await app.request("/api/v2/orgs/1/settings", {
+      method: "PUT",
+      headers: authHeader(await jwtFor("anna")),
+      body: JSON.stringify({
+        settings: { rules: [promotedRule], promotionRequests: [] },
+        ifMatchVersion: version,
+      }),
+    }, env)
+    expect(approveRes.status).toBe(200)
+    const approveBody = await approveRes.json() as { version: number; settings: { rules: unknown[]; promotionRequests?: unknown[] } }
+    expect(approveBody.version).toBe(version + 1)
+    expect(approveBody.settings.rules).toHaveLength(1)
+    expect(approveBody.settings.promotionRequests).toHaveLength(0)
+  })
+})

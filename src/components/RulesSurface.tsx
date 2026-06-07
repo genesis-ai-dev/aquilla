@@ -7,9 +7,10 @@
  */
 import { useState, useMemo, useEffect } from "react"
 import { useNavigate, useSearchParams } from "react-router-dom"
-import { AlertTriangle, AlertCircle, Trash2, Wand2, ChevronDown, ChevronUp, BookOpen, Pencil, ArrowUpCircle, Building2, Lock } from "lucide-react"
+import { AlertTriangle, AlertCircle, Trash2, Wand2, ChevronDown, ChevronUp, BookOpen, Pencil, ArrowUpCircle, Building2, Lock, Clock } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { Switch } from "@/components/ui/switch"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
@@ -18,10 +19,10 @@ import { BuiltinChecksList } from "./BuiltinChecksList"
 import { RuleSuggestFromEditsDialog } from "./RuleSuggestFromEditsDialog"
 import { RuleEditor } from "./RuleEditor"
 import { RuleImportDialog } from "./RuleImportDialog"
-import type { ProjectRecord, RuleAutofix, TranslationRule } from "@/lib/parsers/types"
+import type { ProjectRecord, RuleAutofix, TranslationRule, PromotionRequest } from "@/lib/parsers/types"
 import type { useRules } from "@/hooks/useRules"
 import type { CellData } from "@/hooks/useCells"
-import type { OrgWideSettings, OrgPatchResult } from "@/lib/sync/org-settings"
+import type { OrgWideSettings, OrgPatchResult, PromotionRequestResult } from "@/lib/sync/org-settings"
 import { v4 as uuid } from "uuid"
 
 type UseRulesReturn = ReturnType<typeof useRules>
@@ -45,6 +46,12 @@ interface Props {
   patchOrgSettings?: (partial: OrgWideSettings) => Promise<OrgPatchResult | { kind: "blocked" }>
   /** Current org settings version (needed for conflict-free patching). */
   orgSettingsVersion?: number | null
+  /** Pending promotion requests (from useOrgSettings). */
+  promotionRequests?: PromotionRequest[]
+  /** True when the caller has org PROJECT_LEAD+ role and can submit promotion requests. */
+  canRequestPromotion?: boolean
+  /** Submit a promotion request for a project rule. */
+  requestPromotion?: (rule: TranslationRule, sourceProjectId: string) => Promise<PromotionRequestResult | { kind: "blocked" }>
 }
 
 export function RulesSurface({
@@ -61,6 +68,9 @@ export function RulesSurface({
   orgRules = [],
   canEditOrgRules = false,
   patchOrgSettings,
+  promotionRequests = [],
+  canRequestPromotion = false,
+  requestPromotion,
 }: Props) {
   const navigate = useNavigate()
   const [searchParams, setSearchParams] = useSearchParams()
@@ -72,6 +82,11 @@ export function RulesSurface({
   const [promoting, setPromoting] = useState(false)
   // Inline edit state for org rules (maintainer only).
   const [editingOrgRuleId, setEditingOrgRuleId] = useState<string | "new" | null>(null)
+  // Promotion request state: set of rule ids the user has requested in this session.
+  const [requestedRuleIds, setRequestedRuleIds] = useState<Set<string>>(new Set())
+  const [requestingRuleId, setRequestingRuleId] = useState<string | null>(null)
+  // Inline notice for promotion request result (ruleId → message).
+  const [requestNotice, setRequestNotice] = useState<Map<string, string>>(new Map())
 
   // Focus a rule row when arriving via deep-link with ?ruleId=&focus=autofix
   useEffect(() => {
@@ -109,6 +124,23 @@ export function RulesSurface({
     setPromoteRule(null)
   }
 
+  /** Submit a promotion request (project_lead). */
+  async function handleRequestPromotion(rule: TranslationRule) {
+    if (!requestPromotion) return
+    setRequestingRuleId(rule.id)
+    const result = await requestPromotion(rule, projectId)
+    setRequestingRuleId(null)
+    if (result.kind === "ok") {
+      setRequestedRuleIds((prev) => new Set([...prev, rule.id]))
+      setRequestNotice((prev) => new Map(prev).set(rule.id, "Requested ✓"))
+    } else if (result.kind === "duplicate") {
+      setRequestedRuleIds((prev) => new Set([...prev, rule.id]))
+      setRequestNotice((prev) => new Map(prev).set(rule.id, "Already requested"))
+    } else {
+      setRequestNotice((prev) => new Map(prev).set(rule.id, "Failed — try again"))
+    }
+  }
+
   /** Update a single org rule (maintainer only). */
   async function updateOrgRule(ruleId: string, updates: Partial<TranslationRule>) {
     if (!patchOrgSettings) return
@@ -128,6 +160,28 @@ export function RulesSurface({
     if (!patchOrgSettings) return
     const newRule: TranslationRule = { ...rule, id: uuid(), scope: "org", createdAt: new Date().toISOString() }
     await patchOrgSettings({ rules: [...orgRules, newRule] })
+  }
+
+  /** Approve a promotion request: promote rule to org + clear request (maintainer). */
+  async function handleApproveRequest(req: PromotionRequest) {
+    if (!patchOrgSettings) return
+    const promoted: TranslationRule = {
+      ...req.rule,
+      id: uuid(),
+      scope: "org",
+      sourceProjectId: req.sourceProjectId,
+      createdAt: new Date().toISOString(),
+    }
+    const newOrgRules = [...orgRules, promoted]
+    const newPendingRequests = promotionRequests.filter((r) => r.id !== req.id)
+    await patchOrgSettings({ rules: newOrgRules, promotionRequests: newPendingRequests })
+  }
+
+  /** Dismiss a promotion request (maintainer). */
+  async function handleDismissRequest(reqId: string) {
+    if (!patchOrgSettings) return
+    const newPendingRequests = promotionRequests.filter((r) => r.id !== reqId)
+    await patchOrgSettings({ promotionRequests: newPendingRequests })
   }
 
   function toggleExpanded(ruleId: string) {
@@ -269,13 +323,14 @@ export function RulesSurface({
                               >
                                 <Pencil className="h-3.5 w-3.5" />
                               </Button>
-                              <label className="flex items-center gap-1 text-xs">
-                                <input
-                                  type="checkbox"
+                              <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                                <Switch
+                                  size="sm"
                                   checked={rule.enabled}
-                                  onChange={(e) => updateOrgRule(rule.id, { enabled: e.target.checked })}
+                                  onCheckedChange={(checked) => updateOrgRule(rule.id, { enabled: checked })}
+                                  aria-label={`${rule.enabled ? "Disable" : "Enable"} org rule: ${rule.name}`}
                                 />
-                                <span className="text-muted-foreground">Enabled</span>
+                                Enabled
                               </label>
                               <Button variant="ghost" size="sm" onClick={() => deleteOrgRule(rule.id)}>
                                 <Trash2 className="h-3.5 w-3.5 text-muted-foreground" />
@@ -300,6 +355,50 @@ export function RulesSurface({
                     )
                   })}
                 </ul>
+              )}
+
+              {/* Pending promotion requests — visible to maintainers */}
+              {canEditOrgRules && promotionRequests.length > 0 && (
+                <div className="mt-4 border-t pt-4">
+                  <p className="mb-2 text-xs font-medium text-muted-foreground flex items-center gap-1.5">
+                    <Clock className="h-3.5 w-3.5" />
+                    Pending requests ({promotionRequests.length})
+                  </p>
+                  <ul className="space-y-2">
+                    {promotionRequests.map((req) => (
+                      <li key={req.id} className="rounded border bg-muted/30 p-3">
+                        <div className="flex items-start gap-3">
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-medium">{req.rule.name}</p>
+                            {req.rule.description && (
+                              <p className="mt-0.5 text-xs text-muted-foreground truncate">{req.rule.description}</p>
+                            )}
+                            <p className="mt-1 text-xs text-muted-foreground">
+                              Requested by {req.requestedByName ?? `user ${req.requestedBy}`}
+                            </p>
+                          </div>
+                          <div className="flex items-center gap-2 shrink-0">
+                            <Button
+                              size="sm"
+                              onClick={() => handleApproveRequest(req)}
+                              title="Promote this rule to org scope"
+                            >
+                              Approve
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              onClick={() => handleDismissRequest(req.id)}
+                              title="Dismiss this request"
+                            >
+                              Dismiss
+                            </Button>
+                          </div>
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
               )}
             </CardContent>
           </Card>
@@ -378,17 +477,30 @@ export function RulesSurface({
                             Promote to org
                           </Button>
                         )}
-                        {!canEditOrgRules && orgRules !== undefined && (
-                          // SWARM-TODO: implement full promotion request workflow (FRO-org-promote-request)
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            disabled
-                            title="Ask an org manager to promote this rule to org scope"
-                          >
-                            <ArrowUpCircle className="mr-1 h-3.5 w-3.5" />
-                            Request promotion
-                          </Button>
+                        {!canEditOrgRules && canRequestPromotion && requestPromotion && (
+                          (() => {
+                            const alreadyRequested = requestedRuleIds.has(rule.id) ||
+                              promotionRequests.some((r) => r.rule.id === rule.id && r.sourceProjectId === projectId)
+                            const notice = requestNotice.get(rule.id)
+                            const isRequesting = requestingRuleId === rule.id
+                            return alreadyRequested || notice ? (
+                              <span className="text-xs text-muted-foreground flex items-center gap-1">
+                                <Clock className="h-3 w-3" />
+                                {notice ?? "Requested"}
+                              </span>
+                            ) : (
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() => handleRequestPromotion(rule)}
+                                disabled={isRequesting}
+                                title="Ask an org maintainer to promote this rule to org scope"
+                              >
+                                <ArrowUpCircle className="mr-1 h-3.5 w-3.5" />
+                                {isRequesting ? "Requesting…" : "Request promotion"}
+                              </Button>
+                            )
+                          })()
                         )}
                         {/* FRO-195: inline edit entry */}
                         <Button
@@ -403,13 +515,14 @@ export function RulesSurface({
                         <Button variant="ghost" size="sm" onClick={() => toggleExpanded(rule.id)}>
                           {expanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
                         </Button>
-                        <label className="flex items-center gap-1 text-xs">
-                          <input
-                            type="checkbox"
+                        <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                          <Switch
+                            size="sm"
                             checked={rule.enabled}
-                            onChange={(e) => updateRule(rule.id, { enabled: e.target.checked })}
+                            onCheckedChange={(checked) => updateRule(rule.id, { enabled: checked })}
+                            aria-label={`${rule.enabled ? "Disable" : "Enable"} rule: ${rule.name}`}
                           />
-                          <span className="text-muted-foreground">Enabled</span>
+                          Enabled
                         </label>
                         <Button variant="ghost" size="sm" onClick={() => deleteRule(rule.id)}>
                           <Trash2 className="h-3.5 w-3.5 text-muted-foreground" />

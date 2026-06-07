@@ -4,11 +4,13 @@ import { ROLE } from "@/lib/frontier/roles"
 import {
   fetchOrgSettings,
   patchOrgSettings,
+  postPromotionRequest,
   type OrgSettingsResponse,
   type OrgWideSettings,
   type OrgPatchResult,
+  type PromotionRequestResult,
 } from "@/lib/sync/org-settings"
-import type { TranslationRule } from "@/lib/parsers/types"
+import type { TranslationRule, PromotionRequest } from "@/lib/parsers/types"
 
 const ORG_SETTINGS_WRITE_MIN_ROLE = ROLE.MAINTAINER
 
@@ -17,6 +19,10 @@ export interface UseOrgSettings {
   settings: OrgWideSettings
   /** Org rules shortcut. */
   orgRules: TranslationRule[]
+  /** Pending promotion requests (visible to all members, acted on by maintainers). */
+  promotionRequests: PromotionRequest[]
+  /** True when caller's org role >= PROJECT_LEAD. Can submit promotion requests. */
+  canRequestPromotion: boolean
   /** Server version, null if never fetched. */
   version: number | null
   hasFetched: boolean
@@ -26,6 +32,8 @@ export interface UseOrgSettings {
   refresh: () => Promise<OrgSettingsResponse | null>
   /** Patch org settings (adds/replaces top-level keys). Blocked if !canEdit. */
   patch: (partial: OrgWideSettings) => Promise<OrgPatchResult | { kind: "blocked" }>
+  /** Submit a promotion request for a project rule. Returns "duplicate" if already pending. */
+  requestPromotion: (rule: TranslationRule, sourceProjectId: string) => Promise<PromotionRequestResult | { kind: "blocked" }>
 }
 
 /**
@@ -115,16 +123,35 @@ export function useOrgSettings(
     [orgId, jwt, canEdit, runSerialized, writeServer],
   )
 
+  const canRequestPromotion =
+    orgRoleLevel != null && orgRoleLevel >= ROLE.PROJECT_LEAD
+
+  const requestPromotion = useCallback(
+    async (rule: TranslationRule, sourceProjectId: string): Promise<PromotionRequestResult | { kind: "blocked" }> => {
+      if (!orgId || !jwt) return { kind: "error" as const, status: 0, message: "no session or org" }
+      if (!canRequestPromotion) return { kind: "blocked" }
+      const result = await postPromotionRequest(jwt, orgId, rule, sourceProjectId)
+      // On success, refresh so pending requests panel updates immediately.
+      if (result.kind === "ok") void refresh()
+      return result
+    },
+    [orgId, jwt, canRequestPromotion, refresh],
+  )
+
   const settings = server?.settings ?? {}
   const orgRules: TranslationRule[] = settings.rules ?? []
+  const promotionRequests: PromotionRequest[] = (settings.promotionRequests as PromotionRequest[] | undefined) ?? []
 
   return {
     settings,
     orgRules,
+    promotionRequests,
+    canRequestPromotion,
     version: server ? server.version : null,
     hasFetched,
     canEdit,
     refresh,
     patch,
+    requestPromotion,
   }
 }

@@ -1,5 +1,5 @@
 import { FRONTIER_API_URL } from "./sync-token"
-import type { TranslationRule } from "@/lib/parsers/types"
+import type { TranslationRule, PromotionRequest } from "@/lib/parsers/types"
 
 /**
  * The synced subset of org-wide settings. Shape is intentionally open (server
@@ -7,6 +7,7 @@ import type { TranslationRule } from "@/lib/parsers/types"
  */
 export interface OrgWideSettings {
   rules?: TranslationRule[]
+  promotionRequests?: PromotionRequest[]
 }
 
 export interface OrgSettingsResponse {
@@ -84,6 +85,41 @@ export async function patchOrgSettings(
   if (res.status === 403) {
     return { kind: "forbidden" }
   }
+  const text = await res.text().catch(() => "")
+  return { kind: "error", status: res.status, message: text }
+}
+
+export type PromotionRequestResult =
+  | { kind: "ok" }
+  | { kind: "duplicate" }
+  | { kind: "forbidden" }
+  | { kind: "error"; status: number; message: string }
+
+/**
+ * POST /api/v2/orgs/:orgId/rule-promotion-requests.
+ * Requires org role >= PROJECT_LEAD (500). Returns "duplicate" if an identical
+ * request (same rule id + project) is already pending.
+ */
+export async function postPromotionRequest(
+  jwt: string,
+  orgId: number,
+  rule: TranslationRule,
+  sourceProjectId: string,
+  apiUrl: string = FRONTIER_API_URL,
+): Promise<PromotionRequestResult> {
+  let res: Response
+  try {
+    res = await fetch(`${apiUrl}/api/v2/orgs/${orgId}/rule-promotion-requests`, {
+      method: "POST",
+      headers: authHeaders(jwt),
+      body: JSON.stringify({ rule, sourceProjectId }),
+    })
+  } catch (e) {
+    return { kind: "error", status: 0, message: e instanceof Error ? e.message : String(e) }
+  }
+  if (res.ok) return { kind: "ok" }
+  if (res.status === 409) return { kind: "duplicate" }
+  if (res.status === 403) return { kind: "forbidden" }
   const text = await res.text().catch(() => "")
   return { kind: "error", status: res.status, message: text }
 }

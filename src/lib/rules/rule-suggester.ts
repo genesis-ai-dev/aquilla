@@ -44,6 +44,73 @@ Output ONLY valid JSON. No markdown, no code fences, no explanation.`
 
 export type UsageCallback = (meta: { kind: string; model?: string; provider: string }) => void
 
+// ---------------------------------------------------------------------------
+// FRO-198: suggest rules from mined edit candidates
+// ---------------------------------------------------------------------------
+
+/**
+ * Produce a prompt body from a list of (source, target) candidate pairs,
+ * annotated with their evidence strings. Passed to the same LLM system
+ * prompt as `suggestRulesFromPairs`.
+ */
+function buildCandidatePrompt(
+  candidates: { sourceSample: string; targetSample: string; evidence: string }[],
+): string {
+  const lines = candidates
+    .slice(0, 20)
+    .map(
+      (c, i) =>
+        `${i + 1}. Source: "${c.sourceSample}"\n   Target: "${c.targetSample}"\n   Evidence: ${c.evidence}`,
+    )
+    .join("\n\n")
+  return `Analyze these ${Math.min(candidates.length, 20)} translation patterns (some repeated across cells, some recent edits, some from validated pairs) and propose rules:\n\n${lines}\n\nReturn a JSON array of rule suggestions.`
+}
+
+/**
+ * FRO-198 entry point: given mined candidates (from edit-miner.ts), run the
+ * LLM and return RuleSuggestion drafts with an aligned evidence[] string array.
+ *
+ * Returns `{ suggestions, evidence }` where both arrays are index-aligned.
+ * On empty candidates returns empty arrays immediately without an LLM call.
+ */
+export async function suggestRulesFromCandidates(
+  candidates: import("@/lib/rules/edit-miner").EditCandidate[],
+  settings: CompletionSettings,
+  session: FrontierSession | null = null,
+  onLlmCall?: UsageCallback,
+): Promise<{ suggestions: RuleSuggestion[]; evidence: string[] }> {
+  if (candidates.length === 0) return { suggestions: [], evidence: [] }
+
+  const prompt = buildCandidatePrompt(candidates)
+  const response = await complete({
+    settings: { ...settings, maxTokens: Math.min(settings.maxTokens, 2048), temperature: 0.2 },
+    session,
+    messages: [
+      { role: "system", content: RULE_SUGGESTION_SYSTEM_PROMPT },
+      { role: "user", content: prompt },
+    ],
+  })
+
+  onLlmCall?.({ kind: "rule-suggestion-edits", model: settings.model, provider: settings.provider || "frontier" })
+
+  const suggestions = parseRuleSuggestions(response)
+
+  // Build evidence strings: try to match each suggestion back to its source
+  // candidate by name-overlap; fall back to the top candidate's evidence.
+  const evidence = suggestions.map((s) => {
+    // Simple heuristic: pick the candidate whose sourceSample appears in the
+    // suggestion name/description, else use the first candidate's evidence.
+    const match = candidates.find(
+      (c) =>
+        s.name.toLowerCase().includes(c.sourceSample.toLowerCase().slice(0, 10)) ||
+        s.description.toLowerCase().includes(c.evidence.toLowerCase()),
+    )
+    return match?.evidence ?? candidates[0]?.evidence ?? ""
+  })
+
+  return { suggestions, evidence }
+}
+
 export async function suggestRulesFromPairs(
   pairs: { source: string; target: string }[],
   settings: CompletionSettings,

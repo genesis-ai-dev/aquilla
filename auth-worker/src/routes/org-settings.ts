@@ -88,7 +88,7 @@ async function loadSettings(
 
 orgSettings.get("/:orgId/settings", authMiddleware, async (c) => {
   const user = c.get("user")
-  const orgId = parseInt(c.req.param("orgId"), 10)
+  const orgId = parseInt(c.req.param("orgId") ?? "", 10)
   if (!Number.isFinite(orgId)) return c.json({ error: "invalid orgId" }, 400)
 
   const role = await getOrgMemberRole(c.env, orgId, user.id)
@@ -120,7 +120,7 @@ orgSettings.on(
   zValidator("json", updateSettingsSchema),
   async (c) => {
     const user = c.get("user")
-    const orgId = parseInt(c.req.param("orgId"), 10)
+    const orgId = parseInt(c.req.param("orgId") ?? "", 10)
     if (!Number.isFinite(orgId)) return c.json({ error: "invalid orgId" }, 400)
     const body = c.req.valid("json")
 

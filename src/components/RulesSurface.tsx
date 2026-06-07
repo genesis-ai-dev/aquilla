@@ -15,7 +15,6 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog"
 import { BuiltinChecksList } from "./BuiltinChecksList"
-import { RuleSuggestDialog } from "./RuleSuggestDialog"
 import { RuleSuggestFromEditsDialog } from "./RuleSuggestFromEditsDialog"
 import { RuleEditor } from "./RuleEditor"
 import { RuleImportDialog } from "./RuleImportDialog"
@@ -24,9 +23,6 @@ import type { useRules } from "@/hooks/useRules"
 import type { CellData } from "@/hooks/useCells"
 import type { OrgWideSettings, OrgPatchResult } from "@/lib/sync/org-settings"
 import { v4 as uuid } from "uuid"
-
-// SWARM-TODO(FRO-195/196/198): replace RuleCreateDialog + RuleSuggestDialog
-// with inline inline surface editors when those tickets land.
 
 type UseRulesReturn = ReturnType<typeof useRules>
 
@@ -164,14 +160,6 @@ export function RulesSurface({
               unvalidated) so hasPendingEdit recent-edits and cross-status patterns are visible.
               Until then, mining runs on validatedCells only. */}
           <RuleSuggestFromEditsDialog
-            completionSettings={project?.completionSettings}
-            onAdd={addRule}
-            projectId={projectId}
-            cells={validatedCells}
-          />
-          {/* Legacy suggest from pairs (kept for backward compat; may be removed in FRO-199) */}
-          <RuleSuggestDialog
-            files={project?.files || []}
             completionSettings={project?.completionSettings}
             onAdd={addRule}
             projectId={projectId}
@@ -341,8 +329,12 @@ export function RulesSurface({
           <CardHeader><CardTitle>Project Rules ({userRules.length})</CardTitle></CardHeader>
           <CardContent>
             {userRules.length === 0 ? (
-              <div className="space-y-2 text-sm text-muted-foreground">
-                <p>No rules defined yet.</p>
+              <div className="space-y-1 text-sm text-muted-foreground">
+                <p>No project rules yet.</p>
+                <p className="text-xs">
+                  Add a rule, import a style guide, or suggest rules from your edits using the buttons above.
+                  {canEditOrgRules && orgRules.length > 0 && " Org rules above also apply to this project."}
+                </p>
               </div>
             ) : (
               <ul className="space-y-2">

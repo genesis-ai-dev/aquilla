@@ -147,6 +147,14 @@ CREATE TABLE project_settings (
     updated_by BIGINT
 );
 
+CREATE TABLE org_settings (
+    org_id     BIGINT PRIMARY KEY REFERENCES organizations(id) ON DELETE CASCADE,
+    settings   TEXT NOT NULL DEFAULT '{}',
+    version    INTEGER NOT NULL DEFAULT 0,
+    updated_at TIMESTAMPTZ DEFAULT now(),
+    updated_by BIGINT REFERENCES users(id)
+);
+
 -- ───────────────────────── event log + projections ──────────────────────
 
 CREATE TABLE events (

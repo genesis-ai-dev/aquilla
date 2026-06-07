@@ -80,6 +80,8 @@ export interface TranslationRule {
   createdAt: string
   autofix?: RuleAutofix
   autofixAttemptedAt?: string  // ISO; absent means never tried
+  /** For org-scoped rules promoted from a project: the originating project id. */
+  sourceProjectId?: string
 }
 
 export type RuleCheck =

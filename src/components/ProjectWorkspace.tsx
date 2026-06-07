@@ -18,6 +18,8 @@ import type { PassageHit } from "@/hooks/useSearchIndex"
 import { useHealth } from "@/hooks/useHealth"
 import { useCellConfidence } from "@/hooks/useCellConfidence"
 import { useRules } from "@/hooks/useRules"
+import { useOrgSettings } from "@/hooks/useOrgSettings"
+import { useActiveOrg } from "@/context/OrgContext"
 import { updateProject, patchProject, getProject } from "@/lib/store/project-index"
 import { MAX_BATCH_COMPLETIONS } from "@/lib/workspace-actions/registry"
 import type { FileReference } from "@/lib/parsers/types"
@@ -684,12 +686,22 @@ export function ProjectWorkspace() {
   // Comments handlers take main's Phase 2c-gamma rip — threads/messages lived
   // on Y.Doc maps and the v1.x event grammar isn't in this build, so these are
   // no-ops and the drawer renders empty.
+  // Org-level rules: fetch from org settings and merge with project rules.
+  const { activeOrg } = useActiveOrg()
+  const {
+    orgRules,
+    canEdit: canEditOrgSettings,
+    patch: patchOrgSettings,
+    version: orgSettingsVersion,
+  } = useOrgSettings(activeOrg?.id, activeOrg?.role?.level)
+
   // FRO-194: also destructure rule CRUD for RulesSurface (patchSettings is the
   // sync function; it matches the PatchSharedFn signature from useProjectSettings).
   const { rules, userRules, builtinRules, addRule, updateRule, deleteRule, setBuiltinOverride } = useRules(
     project ?? null,
     refresh,
     patchSettings as Parameters<typeof useRules>[2],
+    orgRules,
   )
   const addThread: (..._: unknown[]) => void = () => {}
   const addMessage: (..._: unknown[]) => void = () => {}
@@ -2103,6 +2115,10 @@ export function ProjectWorkspace() {
             setBuiltinOverride={setBuiltinOverride}
             infractions={infractions}
             validatedCells={cells}
+            orgRules={orgRules}
+            canEditOrgRules={canEditOrgSettings}
+            patchOrgSettings={patchOrgSettings}
+            orgSettingsVersion={orgSettingsVersion}
           />
         ) : cellAreaState.kind === "ready" ? (
           <EditorTable

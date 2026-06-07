@@ -59,6 +59,7 @@ import authRoutes from "./routes/auth"
 import syncTokenRoutes from "./routes/sync-token"
 import projectsRoutes from "./routes/projects"
 import projectSettingsRoutes from "./routes/project-settings"
+import orgSettingsRoutes from "./routes/org-settings"
 import sourceLinkingRoutes from "./routes/source-linking"
 import invitesRoutes from "./routes/invites"
 import orgsRoutes from "./routes/orgs"
@@ -144,6 +145,7 @@ app.route("/api/v2/auth", authRoutes)
 app.route("/api/v1/auth", authRoutes)
 app.route("/api/v2/sync-token", syncTokenRoutes)
 app.route("/api/v2/users", usersRoutes)
+app.route("/api/v2/orgs", orgSettingsRoutes)
 app.route("/api/v2/orgs", orgsRoutes)
 // Platform-operator (site-wide admin) surface — read-only, cross-tenant.
 // Gated by PLATFORM_ADMINS allowlist via requirePlatformAdmin (see

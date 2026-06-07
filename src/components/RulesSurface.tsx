@@ -37,7 +37,7 @@ interface Props {
   deleteRule: UseRulesReturn["deleteRule"]
   setBuiltinOverride: UseRulesReturn["setBuiltinOverride"]
   infractions: Map<string, import("@/lib/parsers/types").RuleInfraction[]>
-  validatedCells: CellData[]
+  cells: CellData[]
   /** Org-level rules (read from org settings). Empty when not in an org. */
   orgRules?: TranslationRule[]
   /** True when the caller has org MAINTAINER+ role and can edit org settings. */
@@ -64,7 +64,7 @@ export function RulesSurface({
   deleteRule,
   setBuiltinOverride,
   infractions,
-  validatedCells,
+  cells,
   orgRules = [],
   canEditOrgRules = false,
   patchOrgSettings,
@@ -208,16 +208,13 @@ export function RulesSurface({
             onAdd={addRule}
             projectId={projectId}
           />
-          {/* FRO-198: suggest rules from mined edits — repeated corrections + recent edits + validated pairs */}
-          {/* SWARM-TODO(FRO-198-cells): RulesSurface only receives `validatedCells`; for richer
-              repeated-edit detection, ProjectWorkspace should also pass ALL cells (including
-              unvalidated) so hasPendingEdit recent-edits and cross-status patterns are visible.
-              Until then, mining runs on validatedCells only. */}
+          {/* FRO-198: suggest rules from mined edits — repeated corrections + recent edits + validated pairs.
+              Receives the full cell list; the validated-pair path filters by status internally. */}
           <RuleSuggestFromEditsDialog
             completionSettings={project?.completionSettings}
             onAdd={addRule}
             projectId={projectId}
-            cells={validatedCells}
+            cells={cells}
           />
           {/* FRO-195: inline create surface replaces the dialog */}
           <Button
@@ -232,7 +229,7 @@ export function RulesSurface({
         {/* FRO-195: inline rule editor (create mode) */}
         {editingRuleId === "new" && (
           <RuleEditor
-            cells={validatedCells}
+            cells={cells}
             onSave={async (rule) => {
               await addRule(rule)
               setEditingRuleId(null)
@@ -282,7 +279,7 @@ export function RulesSurface({
               {editingOrgRuleId === "new" && canEditOrgRules && (
                 <div className="mb-4">
                   <RuleEditor
-                    cells={validatedCells}
+                    cells={cells}
                     onSave={async (rule) => {
                       await addOrgRule(rule)
                       setEditingOrgRuleId(null)
@@ -342,7 +339,7 @@ export function RulesSurface({
                           <div className="mt-3 border-t pt-3">
                             <RuleEditor
                               initialRule={rule}
-                              cells={validatedCells}
+                              cells={cells}
                               onSave={async (updates) => {
                                 await updateOrgRule(rule.id, updates)
                                 setEditingOrgRuleId(null)
@@ -537,7 +534,7 @@ export function RulesSurface({
                         <div className="mt-3 border-t pt-3">
                           <RuleEditor
                             initialRule={rule}
-                            cells={validatedCells}
+                            cells={cells}
                             onSave={async (updates) => {
                               await updateRule(rule.id, updates)
                               setEditingRuleId(null)

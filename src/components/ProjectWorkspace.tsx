@@ -2117,7 +2117,7 @@ export function ProjectWorkspace() {
             deleteRule={deleteRule}
             setBuiltinOverride={setBuiltinOverride}
             infractions={infractions}
-            validatedCells={cells}
+            cells={cells}
             orgRules={orgRules}
             canEditOrgRules={canEditOrgSettings}
             patchOrgSettings={patchOrgSettings}

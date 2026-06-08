@@ -34,6 +34,7 @@ vi.mock("@/lib/sync/outbox", async (importOriginal) => {
   return {
     ...orig,
     outboxPendingCount: vi.fn().mockResolvedValue(0),
+    outboxFailedCount: vi.fn().mockResolvedValue(0),
   }
 })
 
@@ -50,7 +51,7 @@ const SUCCESS = { posted: 1, accepted: 1, networkError: false }
 const FAIL = { posted: 1, accepted: 0, networkError: true }
 const NOTHING = { posted: 0, accepted: 0, networkError: false }
 
-const TOKEN_FN = async (_fid: string): Promise<string | null> => "tok"
+const TOKEN_FN = async (): Promise<import("@/lib/sync/outbox-flush").TokenMintResult> => ({ token: "tok", status: 200 })
 
 // ---------------------------------------------------------------------------
 // Setup / teardown

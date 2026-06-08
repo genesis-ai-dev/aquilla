@@ -199,6 +199,55 @@ export async function markOutboxAttempt(
   notifyOutboxChanged()
 }
 
+/**
+ * Stamp a `lastError` (and `lastAttemptAt`) on records WITHOUT incrementing
+ * `attempts` or flipping them to `failed`. Used for token-mint failures that
+ * are recoverable without user action — a 401 (stale JWT, self-heals on
+ * re-auth) or a transient 5xx/offline mint. We must surface *why* the record
+ * is sitting around (so the inspector shows "Sign in to retry" / "Retrying"
+ * instead of a bland "Pending"), but we must NOT burn the retry budget: a
+ * recoverable auth blip should never push a record over OUTBOX_MAX_ATTEMPTS
+ * into `failed`, because `failed` records are skipped by the flusher and would
+ * then NOT auto-drain after re-auth. Best-effort; write failures are swallowed.
+ */
+export async function stampOutboxError(
+  ids: string[],
+  error: OutboxAttemptError,
+): Promise<void> {
+  if (ids.length === 0) return
+  let db: IDBDatabase
+  try {
+    db = await openDb()
+  } catch {
+    return
+  }
+  const at = Date.now()
+  await new Promise<void>((resolve) => {
+    const tx = db.transaction(STORE, "readwrite")
+    tx.onerror = () => resolve()
+    tx.oncomplete = () => resolve()
+    const store = tx.objectStore(STORE)
+    for (const id of ids) {
+      const getReq = store.get(id)
+      getReq.onsuccess = () => {
+        const rec = getReq.result as Partial<OutboxRecord> | undefined
+        if (!rec || !rec.id || !rec.event) return
+        const next: OutboxRecord = {
+          id: rec.id,
+          enqueuedAt: rec.enqueuedAt ?? Date.now(),
+          event: rec.event,
+          attempts: rec.attempts ?? 0,
+          lastAttemptAt: at,
+          lastError: error,
+          status: (rec.status as OutboxRecord["status"]) ?? "pending",
+        }
+        store.put(next)
+      }
+    }
+  })
+  notifyOutboxChanged()
+}
+
 /** Oldest-first rows (all statuses), at most `limit`. */
 export async function peekOutboxBatch(limit: number): Promise<OutboxRecord[]> {
   try {
@@ -294,6 +343,48 @@ export async function quarantineOutboxEvents(
           lastAttemptAt: at,
           lastError: error,
           status: "failed",
+        }
+        store.put(next)
+      }
+    }
+  })
+  notifyOutboxChanged()
+}
+
+/**
+ * Revive records back to `pending` so the flusher will retry them: clears
+ * `status` to pending, resets `attempts` to 0, and drops `lastError`. Used by
+ * the inspector's explicit "Retry" affordance for quarantined/`failed` records
+ * (403 no-permission / stuck). The caller should also nudge the flusher
+ * (reset backoff + force a flush) so the retry happens immediately rather than
+ * after the next backoff window.
+ */
+export async function requeueOutboxEvents(ids: string[]): Promise<void> {
+  if (ids.length === 0) return
+  let db: IDBDatabase
+  try {
+    db = await openDb()
+  } catch {
+    return
+  }
+  await new Promise<void>((resolve) => {
+    const tx = db.transaction(STORE, "readwrite")
+    tx.onerror = () => resolve()
+    tx.oncomplete = () => resolve()
+    const store = tx.objectStore(STORE)
+    for (const id of ids) {
+      const getReq = store.get(id)
+      getReq.onsuccess = () => {
+        const rec = getReq.result as Partial<OutboxRecord> | undefined
+        if (!rec || !rec.id || !rec.event) return
+        const next: OutboxRecord = {
+          id: rec.id,
+          enqueuedAt: rec.enqueuedAt ?? Date.now(),
+          event: rec.event,
+          attempts: 0,
+          lastAttemptAt: null,
+          lastError: null,
+          status: "pending",
         }
         store.put(next)
       }

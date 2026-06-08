@@ -59,8 +59,12 @@ function jsonResponse(body: object, status = 200): Response {
   })
 }
 
-const TOKEN_FN = async (_fid: string): Promise<string | null> => "tok"
-const NULL_TOKEN_FN = async (_fid: string): Promise<string | null> => null
+import type { TokenMintResult } from "./outbox-flush"
+
+const TOKEN_FN = async (): Promise<TokenMintResult> => ({ token: "tok", status: 200 })
+const NULL_TOKEN_FN = async (): Promise<TokenMintResult> => ({ token: null, status: null })
+const MINT_403_FN = async (): Promise<TokenMintResult> => ({ token: null, status: 403 })
+const MINT_401_FN = async (): Promise<TokenMintResult> => ({ token: null, status: 401 })
 
 async function resetIdb(): Promise<void> {
   await resetOutboxConnectionForTests()
@@ -186,6 +190,66 @@ describe("flushOutboxBatch", () => {
     // burn its retry budget or wedge the queue.
     const pending = await peekPendingOutboxBatch(10)
     expect(pending.map((r) => r.id).sort()).toEqual(["e2"])
+  })
+
+  // -- Token-mint failures (head-of-line wedge regression) -------------------
+
+  it("quarantines the batch and does NOT call fetch when the token mint returns 403", async () => {
+    await enqueueOutboxEvent(makeEvent("e1", "f1"))
+    await enqueueOutboxEvent(makeEvent("e2", "f1"))
+    const fetchMock = vi.fn()
+    const result = await flushOutboxBatch({
+      getTokenForFile: MINT_403_FN,
+      fetchImpl: fetchMock as unknown as typeof fetch,
+    })
+    expect(fetchMock).not.toHaveBeenCalled()
+    expect(result).toMatchObject({ quarantined: 2, authError: false })
+    // Records preserved (no data loss) but no longer pending → flusher advances.
+    expect(await peekPendingOutboxBatch(10)).toHaveLength(0)
+    expect(await outboxPendingCount()).toBe(2)
+  })
+
+  it("keeps records retryable (no attempt burn, still pending) when the token mint returns 401", async () => {
+    await enqueueOutboxEvent(makeEvent("e1", "f1"))
+    const fetchMock = vi.fn()
+    const result = await flushOutboxBatch({
+      getTokenForFile: MINT_401_FN,
+      fetchImpl: fetchMock as unknown as typeof fetch,
+    })
+    expect(fetchMock).not.toHaveBeenCalled()
+    expect(result).toMatchObject({ authError: true, quarantined: 0 })
+    const pending = await peekPendingOutboxBatch(10)
+    expect(pending.map((r) => r.id)).toEqual(["e1"])
+    // Error surfaced for the inspector, but attempts NOT bumped (so a recoverable
+    // 401 never hits the failed cap and stops auto-draining after re-auth).
+    expect(pending[0].attempts).toBe(0)
+    expect(pending[0].lastError).toMatchObject({ status: 401 })
+  })
+
+  it("a 403-mint file does not block events for a different file/project (no head-of-line wedge)", async () => {
+    // e1 belongs to a project we can't mint for; e2 to one we can.
+    await enqueueOutboxEvent(makeEvent("e1", "fA", { projectId: "projA" }))
+    await enqueueOutboxEvent(makeEvent("e2", "fB", { projectId: "projB" }))
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse({ accepted: [{ id: "e2" }], rejected: [] }),
+    )
+    // Mint succeeds only for projB; projA mint is a hard 403.
+    const getTokenForFile = async (projectId: string): Promise<TokenMintResult> =>
+      projectId === "projB" ? { token: "tok", status: 200 } : { token: null, status: 403 }
+
+    // Cycle 1: oldest is e1/projA → quarantined, queue advances (no fetch).
+    const r1 = await flushOutboxBatch({ getTokenForFile, fetchImpl: fetchMock as unknown as typeof fetch })
+    expect(r1).toMatchObject({ quarantined: 1 })
+    expect(fetchMock).not.toHaveBeenCalled()
+
+    // Cycle 2: e2/projB is now the oldest pending → mints and posts successfully.
+    const r2 = await flushOutboxBatch({ getTokenForFile, fetchImpl: fetchMock as unknown as typeof fetch })
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(r2).toMatchObject({ accepted: 1 })
+    // e2 drained; only the quarantined e1 remains (preserved, not pending).
+    expect(await peekPendingOutboxBatch(10)).toHaveLength(0)
+    const all = await peekOutboxBatch(10)
+    expect(all.map((r) => r.id)).toEqual(["e1"])
   })
 
   // -- Network throw ---------------------------------------------------------
@@ -385,7 +449,7 @@ describe("flushOutboxBatch", () => {
   it("mints the sync-token with the EVENT's projectId, not a fixed workspace project", async () => {
     await enqueueOutboxEvent(makeEvent("e1", "f1", { projectId: "project-A" }))
 
-    const tokenFn = vi.fn(async (_pid: string, _fid: string) => "tok")
+    const tokenFn = vi.fn(async (_pid: string, _fid: string): Promise<TokenMintResult> => ({ token: "tok", status: 200 }))
     const fetchMock = vi.fn().mockResolvedValue(
       jsonResponse({ accepted: [{ id: "e1" }], rejected: [] }),
     )
@@ -412,7 +476,7 @@ describe("flushOutboxBatch", () => {
       }),
     )
     const result = await flushOutboxBatch({
-      getTokenForFile: async () => "tok",
+      getTokenForFile: async () => ({ token: "tok", status: 200 }),
       fetchImpl: fetchMock as unknown as typeof fetch,
     })
 
@@ -443,10 +507,10 @@ describe("flushOutboxBatch", () => {
       // 2nd flush: fileB should now be reached and accepted
       .mockResolvedValueOnce(jsonResponse({ accepted: [{ id: "new-edit" }], rejected: [] }))
 
-    const r1 = await flushOutboxBatch({ getTokenForFile: async () => "tok", fetchImpl: fetchMock as unknown as typeof fetch })
+    const r1 = await flushOutboxBatch({ getTokenForFile: async () => ({ token: "tok", status: 200 }), fetchImpl: fetchMock as unknown as typeof fetch })
     expect(r1.quarantined).toBe(1)
 
-    const r2 = await flushOutboxBatch({ getTokenForFile: async () => "tok", fetchImpl: fetchMock as unknown as typeof fetch })
+    const r2 = await flushOutboxBatch({ getTokenForFile: async () => ({ token: "tok", status: 200 }), fetchImpl: fetchMock as unknown as typeof fetch })
     // The second flush reached fileB and accepted it — proof the queue advanced.
     expect(r2.accepted).toBe(1)
     const bodyEvents = JSON.parse(
@@ -460,7 +524,7 @@ describe("flushOutboxBatch", () => {
 
     const fetchMock = vi.fn().mockResolvedValue(new Response("Forbidden", { status: 403 }))
     const result = await flushOutboxBatch({
-      getTokenForFile: async () => "tok",
+      getTokenForFile: async () => ({ token: "tok", status: 200 }),
       fetchImpl: fetchMock as unknown as typeof fetch,
     })
 

@@ -10,6 +10,9 @@ interface OutboxSyncIndicatorProps {
   failedCount?: number
   /** Pending records for the inspector popover. Inspector hidden when omitted. */
   records?: OutboxRecord[]
+  /** Reset backoff + force an immediate flush. Wired to the inspector's
+   *  "Retry now" button. */
+  onRetryNow?: () => void
   className?: string
 }
 
@@ -25,6 +28,7 @@ export function OutboxSyncIndicator({
   failureStreak,
   failedCount = 0,
   records,
+  onRetryNow,
   className,
 }: OutboxSyncIndicatorProps) {
   const stuck = failureStreak >= 3
@@ -52,7 +56,7 @@ export function OutboxSyncIndicator({
 
   if (!records) return trigger
 
-  return <OutboxInspectorPopover trigger={trigger} records={records} />
+  return <OutboxInspectorPopover trigger={trigger} records={records} onRetryNow={onRetryNow} />
 }
 
 interface ChipProps {

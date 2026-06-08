@@ -8,8 +8,10 @@
 
 import {
   makeSyncTokenFetcher,
+  makeSyncTokenMinter,
   type ProjectBootstrap,
   type SyncTokenCallbacks,
+  type SyncTokenMintResult,
 } from "./sync-token"
 
 export interface CqrsOutboxBridge {
@@ -84,6 +86,37 @@ export function buildProjectAwareTokenFetcher(
     let forProject = perProject.get(projectId)
     if (!forProject) {
       forProject = buildFileScopedTokenFetcher(getJwt, projectId, {}, apiUrl, callbacks)
+      perProject.set(projectId, forProject)
+    }
+    return forProject(fileId)
+  }
+}
+
+/**
+ * Status-preserving variant of buildProjectAwareTokenFetcher for the outbox
+ * flusher. Returns `{ token, status }` so the flusher can quarantine-and-advance
+ * on a permanent mint-403 instead of treating it as a transient blip and
+ * head-of-line blocking the queue. Caches a per-(project,file) minter, same as
+ * the string fetcher.
+ */
+export function buildProjectAwareMinter(
+  getJwt: () => string | null,
+  apiUrl?: string,
+  callbacks: SyncTokenCallbacks = {},
+): (projectId: string, fileId: string) => Promise<SyncTokenMintResult> {
+  const perProject = new Map<string, (fileId: string) => Promise<SyncTokenMintResult>>()
+  return (projectId: string, fileId: string) => {
+    let forProject = perProject.get(projectId)
+    if (!forProject) {
+      const cache = new Map<string, () => Promise<SyncTokenMintResult>>()
+      forProject = (fid: string) => {
+        let minter = cache.get(fid)
+        if (!minter) {
+          minter = makeSyncTokenMinter(getJwt, projectId, fid, {}, apiUrl, callbacks)
+          cache.set(fid, minter)
+        }
+        return minter()
+      }
       perProject.set(projectId, forProject)
     }
     return forProject(fileId)

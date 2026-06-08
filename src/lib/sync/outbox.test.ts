@@ -96,7 +96,7 @@ describe("cqrs outbox", () => {
       ),
     )
     await flushOutboxBatch({
-      getTokenForFile: async () => "tok",
+      getTokenForFile: async () => ({ token: "tok", status: 200 }),
       fetchImpl: fetchMock as unknown as typeof fetch,
     })
     // The 401-rejected event stays in the outbox (auth quarantine).
@@ -114,7 +114,7 @@ describe("cqrs outbox", () => {
       }),
     )
     await flushOutboxBatch({
-      getTokenForFile: async () => "tok",
+      getTokenForFile: async () => ({ token: "tok", status: 200 }),
       fetchImpl: fetchMock as unknown as typeof fetch,
     })
     expect(fetchMock).toHaveBeenCalledTimes(1)

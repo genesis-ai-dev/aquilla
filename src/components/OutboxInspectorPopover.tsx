@@ -8,12 +8,15 @@ import {
   CollapsibleTrigger,
 } from "@/components/ui/collapsible"
 import { cn } from "@/lib/utils"
-import { removeOutboxEvents, type OutboxRecord } from "@/lib/sync/outbox"
+import { removeOutboxEvents, requeueOutboxEvents, type OutboxRecord } from "@/lib/sync/outbox"
 import type { CqrsEventKind } from "@/lib/sync/outbox-types"
 
 interface Props {
   trigger: React.ReactNode
   records: OutboxRecord[]
+  /** Reset backoff + force an immediate flush. When provided, the inspector
+   *  shows a "Retry now" control and revives quarantined records on retry. */
+  onRetryNow?: () => void
 }
 
 /**
@@ -40,7 +43,10 @@ interface Row {
 }
 
 function classify(rec: OutboxRecord): Status {
-  if (rec.attempts === 0 || !rec.lastError) return "pending"
+  // A token-mint failure stamps `lastError` without bumping `attempts` (so a
+  // recoverable 401 never hits the failed cap), so classify on lastError alone
+  // — not on attempts > 0, which would mislabel a stamped 401/403 as "Pending".
+  if (!rec.lastError) return "pending"
   const s = rec.lastError.status
   // 403 is checked before the generic `failed` rollup so a permission failure
   // reads as "not allowed", never as the misleading "session expired".
@@ -208,7 +214,7 @@ function formatRelativeTime(ts: number, now: number): string {
   return `${d}d ago`
 }
 
-export function OutboxInspectorPopover({ trigger, records }: Props) {
+export function OutboxInspectorPopover({ trigger, records, onRetryNow }: Props) {
   // Capture "now" once per mount. The popover is short-lived, so we don't
   // tick it forward — "5s ago" briefly drifting to "10s ago" while the user
   // reads is fine and avoids a per-second re-render.
@@ -256,6 +262,16 @@ export function OutboxInspectorPopover({ trigger, records }: Props) {
     // re-reads and this popover re-renders without the discarded rows.
     void removeOutboxEvents(ids)
   }
+
+  // Revive quarantined/stuck records to `pending`, then nudge the flusher to
+  // run immediately (reset backoff). For records still pending (e.g. a 401
+  // that self-heals after re-auth), requeue is a no-op and the flush is the
+  // operative part.
+  const retry = (ids: string[]) => {
+    if (ids.length > 0) void requeueOutboxEvents(ids)
+    onRetryNow?.()
+  }
+  const retryAll = () => retry(rows.map((r) => r.rec.id))
 
   return (
     <Popover>
@@ -307,6 +323,18 @@ export function OutboxInspectorPopover({ trigger, records }: Props) {
                 </span>
               )}
             </p>
+          )}
+          {rows.length > 0 && onRetryNow && (
+            <div className="mt-2 flex justify-end">
+              <button
+                type="button"
+                onClick={retryAll}
+                className="flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-foreground transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              >
+                <RotateCw className="size-3" aria-hidden />
+                Retry now
+              </button>
+            </div>
           )}
           {hasNeedsSignin && (
             <p
@@ -463,7 +491,17 @@ export function OutboxInspectorPopover({ trigger, records }: Props) {
                               </div>
                             )}
                             {isDiscardable(status) && (
-                              <div className="flex justify-end pt-0.5">
+                              <div className="flex justify-end gap-1 pt-0.5">
+                                {onRetryNow && (
+                                  <button
+                                    type="button"
+                                    onClick={() => retry([rec.id])}
+                                    className="flex items-center gap-1 rounded px-1.5 py-0.5 font-medium text-foreground hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                                  >
+                                    <RotateCw className="size-3" aria-hidden />
+                                    Retry
+                                  </button>
+                                )}
                                 <button
                                   type="button"
                                   onClick={() => discard([rec.id])}

@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef, useCallback } from "react"
-import { flushOutboxBatch, type StaleSiblingEntry } from "@/lib/sync/outbox-flush"
-import { outboxPendingCount, subscribeToOutbox } from "@/lib/sync/outbox"
+import { flushOutboxBatch, type StaleSiblingEntry, type TokenMintResult } from "@/lib/sync/outbox-flush"
+import { outboxPendingCount, outboxFailedCount, subscribeToOutbox } from "@/lib/sync/outbox"
 
 const BASE_INTERVAL_MS = 5000
 const MAX_BACKOFF_MS = 60_000
@@ -9,8 +9,15 @@ export interface UseOutboxFlusherOptions {
   enabled: boolean
   /** Project-scoped token mint: takes the EVENT's projectId (not the active
    *  workspace's) so events queued in any project drain regardless of which
-   *  project is currently open. See buildProjectAwareTokenFetcher. */
-  getTokenForFile: (projectId: string, fileId: string) => Promise<string | null>
+   *  project is currently open. Returns `{ token, status }` so a permanent
+   *  mint-403 quarantines-and-advances instead of wedging. See
+   *  buildProjectAwareMinter. */
+  getTokenForFile: (projectId: string, fileId: string) => Promise<TokenMintResult>
+  /** Opaque marker of the current auth identity (e.g. the active JWT). When it
+   *  changes — i.e. the user signed in / re-authed / switched account — the
+   *  flusher resets its backoff and forces an immediate flush so a recovered
+   *  session drains the queue promptly instead of waiting out the backoff. */
+  authEpoch?: string | number | null
 }
 
 /**
@@ -38,8 +45,16 @@ export function useOutboxFlusher(options: UseOutboxFlusherOptions): {
   /** F5: increments whenever a flush returns stale-source pins.
    *  Caller should surface "Source changed — please re-confirm." */
   staleSourceCount: number
+  /** Count of records that permanently failed / were quarantined (excluded from
+   *  the auto-retry queue). Surfaced separately from `pendingCount` so the
+   *  indicator can distinguish "still syncing" from "needs your attention". */
+  failedCount: number
+  /** Reset backoff and force an immediate flush. Wired to the inspector's
+   *  "Retry now" button and to network-reconnect / re-auth. */
+  flushNow: () => void
 } {
   const [pending, setPending] = useState(0)
+  const [failed, setFailed] = useState(0)
   const [failureStreak, setFailureStreak] = useState(0)
   const [staleSiblingCount, setStaleSiblingCount] = useState(0)
   const [staleSiblingEntries, setStaleSiblingEntries] = useState<StaleSiblingEntry[]>([])
@@ -51,9 +66,24 @@ export function useOutboxFlusher(options: UseOutboxFlusherOptions): {
   const backoffExp = useRef(0)
   const tokenRef = useRef(options.getTokenForFile)
   tokenRef.current = options.getTokenForFile
+  // Resolver for the lock loop's current sleep, so flushNow() can cut a long
+  // backoff short and run immediately. The interval-fallback path uses tickRef.
+  const wakeRef = useRef<(() => void) | null>(null)
+  const tickRef = useRef<(() => void) | null>(null)
 
   const refreshPending = useCallback(async () => {
-    setPending(await outboxPendingCount())
+    const [total, failedN] = await Promise.all([outboxPendingCount(), outboxFailedCount()])
+    setPending(total)
+    setFailed(failedN)
+  }, [])
+
+  const flushNow = useCallback(() => {
+    backoffExp.current = 0
+    setFailureStreak(0)
+    // Wake an in-progress backoff sleep (locks path) or trigger a tick
+    // (interval fallback). Whichever is active fires; the other is a no-op.
+    wakeRef.current?.()
+    tickRef.current?.()
   }, [])
 
   useEffect(() => {
@@ -113,10 +143,12 @@ export function useOutboxFlusher(options: UseOutboxFlusherOptions): {
     }
 
     if (typeof navigator === "undefined" || !navigator.locks) {
+      tickRef.current = () => void tick()
       const iv = setInterval(() => void tick(), BASE_INTERVAL_MS)
       void tick()
       return () => {
         cancelled = true
+        tickRef.current = null
         clearInterval(iv)
       }
     }
@@ -131,7 +163,18 @@ export function useOutboxFlusher(options: UseOutboxFlusherOptions): {
           while (!ac.signal.aborted) {
             const mult = Math.min(MAX_BACKOFF_MS / BASE_INTERVAL_MS, 2 ** backoffExp.current)
             const delay = Math.min(MAX_BACKOFF_MS, BASE_INTERVAL_MS * Math.max(1, mult))
-            await new Promise((r) => setTimeout(r, delay))
+            // Interruptible sleep: flushNow() (Retry / reconnect / re-auth)
+            // resolves this early so a recovered session doesn't wait out a
+            // 60s backoff before draining.
+            await new Promise<void>((resolve) => {
+              const t = setTimeout(resolve, delay)
+              wakeRef.current = () => {
+                clearTimeout(t)
+                wakeRef.current = null
+                resolve()
+              }
+            })
+            wakeRef.current = null
             if (ac.signal.aborted) break
             if (typeof navigator !== "undefined" && !navigator.onLine) continue
             await runFlushCycle()
@@ -146,10 +189,33 @@ export function useOutboxFlusher(options: UseOutboxFlusherOptions): {
     }
   }, [options.enabled, refreshPending])
 
+  // Network reconnect → drain immediately rather than waiting out the backoff.
+  useEffect(() => {
+    if (!options.enabled) return
+    if (typeof window === "undefined") return
+    const onOnline = () => flushNow()
+    window.addEventListener("online", onOnline)
+    return () => window.removeEventListener("online", onOnline)
+  }, [options.enabled, flushNow])
+
+  // Auth identity changed (sign-in / re-auth / account switch) → a previously
+  // un-mintable queue may now succeed; reset backoff and flush now. Skip the
+  // initial mount (no prior epoch) so we don't double-flush on first load.
+  const prevEpoch = useRef<UseOutboxFlusherOptions["authEpoch"]>(options.authEpoch)
+  useEffect(() => {
+    if (!options.enabled) return
+    if (prevEpoch.current !== options.authEpoch) {
+      prevEpoch.current = options.authEpoch
+      flushNow()
+    }
+  }, [options.enabled, options.authEpoch, flushNow])
+
   return {
     pendingCount: pending,
+    failedCount: failed,
     failureStreak,
     refreshPending,
+    flushNow,
     staleSiblingCount,
     staleSiblingEntries,
     clearStaleSiblings,

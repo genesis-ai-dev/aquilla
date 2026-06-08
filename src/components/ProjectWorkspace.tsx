@@ -62,7 +62,7 @@ import { usePendingOutboxRecords } from "@/hooks/usePendingOutboxRecords"
 import {
   setCqrsOutboxBridge,
   buildFileScopedTokenFetcher,
-  buildProjectAwareTokenFetcher,
+  buildProjectAwareMinter,
 } from "@/lib/sync/cqrs-bridge"
 import { emitTargetCellCommit, emitCellBacktranslationSet, emitFileRename } from "@/lib/sync/events-emit"
 import { flushOutboxBatch } from "@/lib/sync/outbox-flush"
@@ -451,7 +451,7 @@ export function ProjectWorkspace() {
   // across project switches (keyed on nothing project-specific) so a single
   // background drain serves all projects.
   const getTokenForProjectFile = useMemo(() => {
-    return buildProjectAwareTokenFetcher(() => jwtRef.current, undefined, {
+    return buildProjectAwareMinter(() => jwtRef.current, undefined, {
       onUnauthorized: () => {
         // Only a /sync-token mint 401 (the session JWT itself is dead) reaches
         // here — that genuinely means re-auth. A per-event 403 does NOT, so the
@@ -480,8 +480,10 @@ export function ProjectWorkspace() {
   const outboxFlushEnabled = Boolean(project?.id && frontierSession?.jwt)
   const {
     pendingCount: outboxPending,
+    failedCount: outboxFailed,
     failureStreak: outboxFailures,
     refreshPending: refreshOutboxPending,
+    flushNow: outboxFlushNow,
     staleSiblingCount: outboxStaleSiblingCount,
     staleSiblingEntries: outboxStaleSiblingEntries,
     clearStaleSiblings: clearStaleSiblings,
@@ -489,6 +491,7 @@ export function ProjectWorkspace() {
   } = useOutboxFlusher({
     enabled: outboxFlushEnabled,
     getTokenForFile: getTokenForProjectFile,
+    authEpoch: frontierSession?.jwt ?? null,
   })
   // F5/F6: dismiss the notification banners after the user has seen them.
   // For stale siblings the banner is also dismissed implicitly when the
@@ -2372,9 +2375,11 @@ export function ProjectWorkspace() {
                   <PeerPresence peers={peers} />
                   <SyncStatusIndicator status={fileSyncStatus} />
                   <OutboxSyncIndicator
-                    pendingCount={outboxPending}
+                    pendingCount={Math.max(0, outboxPending - outboxFailed)}
                     failureStreak={outboxFailures}
+                    failedCount={outboxFailed}
                     records={outboxRecords}
+                    onRetryNow={outboxFlushNow}
                   />
                 </div>
               }

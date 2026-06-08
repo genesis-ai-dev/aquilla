@@ -102,22 +102,37 @@ export interface SyncTokenCallbacks {
   onUnauthorized?: () => void
 }
 
-export function makeSyncTokenFetcher(
+/** Result of a token mint that preserves the failure HTTP status. The outbox
+ *  flusher needs this to tell a permanent 403 (no project access — re-auth
+ *  won't help) from a transient 401/5xx; collapsing both to a bare `null` is
+ *  what let one un-mintable event head-of-line block the whole queue. */
+export interface SyncTokenMintResult {
+  token: string | null
+  /** HTTP status of the failed mint; 200 on success; null when there was no
+   *  JWT to even attempt, or a non-HTTP failure. */
+  status: number | null
+}
+
+/**
+ * Like makeSyncTokenFetcher but surfaces the HTTP status of a failed mint
+ * instead of swallowing it to null. Same in-memory caching / refresh window.
+ */
+export function makeSyncTokenMinter(
   getJwt: () => string | null,
   projectId: string,
   fileId: string,
   bootstrap: ProjectBootstrap = {},
   apiUrl?: string,
   callbacks: SyncTokenCallbacks = {}
-): () => Promise<string | null> {
+): () => Promise<SyncTokenMintResult> {
   let cached: CachedToken | null = null
   return async () => {
     const now = Date.now()
     if (cached && cached.expiresAtMs > now + REFRESH_SAFETY_MS) {
-      return cached.value
+      return { token: cached.value, status: 200 }
     }
     const jwt = getJwt()
-    if (!jwt) return null
+    if (!jwt) return { token: null, status: null }
     try {
       const resp = await fetchSyncToken(jwt, projectId, fileId, bootstrap, apiUrl)
       cached = {
@@ -125,9 +140,11 @@ export function makeSyncTokenFetcher(
         expiresAtMs: now + resp.expiresIn * 1000,
       }
       callbacks.onRole?.(resp.role)
-      return resp.token
+      return { token: resp.token, status: 200 }
     } catch (err) {
+      let status: number | null = null
       if (err instanceof SyncTokenError) {
+        status = err.status
         if (err.status === 403) {
           callbacks.onForbidden?.()
         } else if (err.status === 401) {
@@ -140,9 +157,22 @@ export function makeSyncTokenFetcher(
         }
       }
       // Most common paths: 401 (stale jwt), 403 (no project access), 5xx (transient).
-      // Log and surface null — useFileSync treats null as "no sync for now".
       console.warn("[sync-token] fetch failed:", err)
-      return null
+      return { token: null, status }
     }
   }
+}
+
+export function makeSyncTokenFetcher(
+  getJwt: () => string | null,
+  projectId: string,
+  fileId: string,
+  bootstrap: ProjectBootstrap = {},
+  apiUrl?: string,
+  callbacks: SyncTokenCallbacks = {}
+): () => Promise<string | null> {
+  // Thin adapter over the minter so the many `string | null` callers
+  // (useFileSync, etc.) are unaffected. useFileSync treats null as "no sync".
+  const mint = makeSyncTokenMinter(getJwt, projectId, fileId, bootstrap, apiUrl, callbacks)
+  return async () => (await mint()).token
 }

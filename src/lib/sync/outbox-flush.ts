@@ -8,12 +8,31 @@ import {
   peekPendingOutboxBatch,
   quarantineOutboxEvents,
   removeOutboxEvents,
+  stampOutboxError,
   type OutboxAttemptError,
   type OutboxRecord,
 } from "./outbox"
 import { syncWorkerHttpOrigin } from "./sync-worker-url"
 
 const MAX_BATCH = 100
+
+/**
+ * Result of minting a sync token for the flusher. Unlike the `string | null`
+ * fetcher used elsewhere, the flusher needs the HTTP `status` of a failed mint
+ * so it can tell a *permanent* failure (403 — no access to this event's
+ * project; re-auth won't help) from a *transient* one (401 stale JWT / 5xx /
+ * offline). Collapsing both to a bare `null` is what let a single un-mintable
+ * event head-of-line block the entire queue.
+ *
+ *   token != null            → mint succeeded
+ *   token == null, status=403 → permanent: quarantine the batch and advance
+ *   token == null, status=401 → stale JWT: keep retryable, self-heals on re-auth
+ *   token == null, status=other/null → transient: keep retryable, back off
+ */
+export interface TokenMintResult {
+  token: string | null
+  status: number | null
+}
 
 interface PostBody {
   accepted: Array<{ id: string }>
@@ -42,7 +61,7 @@ export interface FlushDeps {
    *  across every project the user has open; minting against the active
    *  workspace's projectId is what produced "403 token scoped to different
    *  project" on edits queued in another project, wedging the whole queue. */
-  getTokenForFile: (projectId: string, fileId: string) => Promise<string | null>
+  getTokenForFile: (projectId: string, fileId: string) => Promise<TokenMintResult>
   fetchImpl?: typeof fetch
   /** F5: called when one or more target.cell.commit events had a stale
    *  sourceEventId. The caller should surface a "source changed" hint. */
@@ -98,10 +117,35 @@ export async function flushOutboxBatch(deps: FlushDeps): Promise<{
     return { posted: 0, accepted: 0, networkError: false, authError: false, quarantined: 0, staleSiblingCount: 0, staleSourceCount: 0 }
   }
   const projectId = batch[0].event.projectId
-  const token = await deps.getTokenForFile(projectId, fileId)
-  if (!token) {
+  const mint = await deps.getTokenForFile(projectId, fileId)
+  if (!mint.token) {
+    // Token mint failed. Distinguish permanent from transient so a single
+    // un-mintable file can't head-of-line block the rest of the queue (the
+    // original wedge: any null token was treated as a transient auth blip,
+    // retried forever, and the queue never advanced past the oldest event).
+    if (mint.status === 403) {
+      // No access to THIS event's project — e.g. it was queued under a
+      // different account/role. Re-auth won't fix it. Quarantine the batch and
+      // let the flusher advance to the next file, exactly like a 403 on POST.
+      await quarantineOutboxEvents(
+        batch.map((r) => r.id),
+        { status: 403, reason: "no access to this change's project" },
+      )
+      return { posted: 0, accepted: 0, networkError: false, authError: false, quarantined: batch.length, staleSiblingCount: 0, staleSourceCount: 0 }
+    }
+    // 401 (stale JWT — self-heals on re-auth) or transient (5xx / offline /
+    // no session). Stamp the reason so the inspector surfaces it instead of a
+    // bland "Pending", but DON'T burn the retry budget — these recover on their
+    // own. Still report authError so the flusher backs off rather than spinning.
+    await stampOutboxError(
+      batch.map((r) => r.id),
+      mint.status
+        ? { status: mint.status, reason: `couldn't get a sync token (HTTP ${mint.status})` }
+        : { status: 0, reason: "no active session" },
+    )
     return { posted: 0, accepted: 0, networkError: false, authError: true, quarantined: 0, staleSiblingCount: 0, staleSourceCount: 0 }
   }
+  const token = mint.token
   const events: CqrsRawEvent[] = batch.map((r) => r.event)
   const url = `${syncWorkerHttpOrigin()}/events`
   let res: Response

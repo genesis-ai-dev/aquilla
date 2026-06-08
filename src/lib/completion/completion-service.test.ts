@@ -702,3 +702,83 @@ describe("CompletionSettings v1 retrieval fields", () => {
     expect(result.every((p) => p.source && p.target)).toBe(true)
   })
 })
+
+describe("buildPrompt — target-only format", () => {
+  it("omits 'Source:' lines for examples and renders only 'Target:'", () => {
+    const messages = buildPrompt({
+      sourceLanguage: "English", targetLanguage: "French",
+      systemPrompt: DEFAULT_SYSTEM_PROMPT, sourceText: "In the beginning",
+      examples: [{ source: "God created", target: "Dieu crea" }, { source: "the heavens", target: "les cieux" }],
+      exampleFormat: "target-only",
+    })
+    expect(messages[1].content).not.toContain("Source: God created")
+    expect(messages[1].content).not.toContain("Source: the heavens")
+    expect(messages[1].content).toContain("Target: Dieu crea")
+    expect(messages[1].content).toContain("Target: les cieux")
+    // The live source is still present for the model to translate
+    expect(messages[1].content).toContain("Source: In the beginning")
+  })
+
+  it("appends the reference-translation note to the system prompt", () => {
+    const messages = buildPrompt({
+      sourceLanguage: "English", targetLanguage: "French",
+      systemPrompt: DEFAULT_SYSTEM_PROMPT, sourceText: "test",
+      examples: [],
+      exampleFormat: "target-only",
+    })
+    expect(messages[0].content).toContain("reference translations")
+  })
+
+  it("default (source-and-target) behavior is unchanged", () => {
+    const messages = buildPrompt({
+      sourceLanguage: "English", targetLanguage: "French",
+      systemPrompt: DEFAULT_SYSTEM_PROMPT, sourceText: "test",
+      examples: [{ source: "God created", target: "Dieu crea" }],
+    })
+    expect(messages[1].content).toContain("Source: God created")
+    expect(messages[1].content).toContain("Translation: Dieu crea")
+    expect(messages[0].content).not.toContain("reference translations")
+  })
+})
+
+describe("buildBatchPrompt — target-only format", () => {
+  it("omits 'Source:' blocks for examples and renders only 'Translation:' target list", () => {
+    const messages = buildBatchPrompt({
+      sourceLanguage: "English", targetLanguage: "French",
+      systemPrompt: DEFAULT_SYSTEM_PROMPT,
+      cells: [{ source: "live cell" }],
+      examples: [{ cells: [{ source: "Hello", target: "Bonjour" }, { source: "world", target: "monde" }] }],
+      exampleFormat: "target-only",
+    })
+    // Example source block must be absent
+    expect(messages[1].content).not.toContain("<v1>Hello</v1>")
+    expect(messages[1].content).not.toContain("<v2>world</v2>")
+    // Example target block must be present
+    expect(messages[1].content).toContain("<v1>Bonjour</v1>")
+    expect(messages[1].content).toContain("<v2>monde</v2>")
+    // Live source must still appear
+    expect(messages[1].content).toContain("<v1>live cell</v1>")
+  })
+
+  it("appends the reference-translation note to the system prompt", () => {
+    const messages = buildBatchPrompt({
+      sourceLanguage: "English", targetLanguage: "French",
+      systemPrompt: DEFAULT_SYSTEM_PROMPT,
+      cells: [{ source: "x" }], examples: [],
+      exampleFormat: "target-only",
+    })
+    expect(messages[0].content).toContain("reference translations")
+  })
+
+  it("default (source-and-target) batch behavior is unchanged", () => {
+    const messages = buildBatchPrompt({
+      sourceLanguage: "English", targetLanguage: "French",
+      systemPrompt: DEFAULT_SYSTEM_PROMPT,
+      cells: [{ source: "live cell" }],
+      examples: [{ cells: [{ source: "Hello", target: "Bonjour" }] }],
+    })
+    expect(messages[1].content).toContain("<v1>Hello</v1>")
+    expect(messages[1].content).toContain("<v1>Bonjour</v1>")
+    expect(messages[0].content).not.toContain("reference translations")
+  })
+})

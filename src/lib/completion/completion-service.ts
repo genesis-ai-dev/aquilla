@@ -132,6 +132,8 @@ export function buildPrompt(options: {
   rules?: TranslationRule[]
   /** Pre-filtered validated pairs from the project — prepended to examples. */
   validatedPairs?: ValidatedPair[]
+  /** How to render few-shot examples. Default "source-and-target". */
+  exampleFormat?: "source-and-target" | "target-only"
 }): ChatMessage[] {
   let sys = options.systemPrompt
     .replace(/\{sourceLanguage\}/g, options.sourceLanguage)
@@ -143,17 +145,30 @@ export function buildPrompt(options: {
     if (block) sys = sys + "\n\n" + block
   }
 
+  const targetOnly = options.exampleFormat === "target-only"
+
+  // In target-only mode, append a note so the model understands what the
+  // examples represent (reference translations, not source→target alignments).
+  if (targetOnly) {
+    sys = sys + "\n\nThe examples provided are reference translations in the target language. Use them to imitate the style, terminology, and patterns of this project."
+  }
+
   // Validated pairs lead the few-shot examples; search-retrieved examples follow.
   // Drop incomplete pairs (empty source or target): the branching-search corpus
   // keeps source-only cells (COALESCE(t.value,'') in loadCorpus) so in-progress
   // projects still retrieve neighbors, but an example with an empty target
   // teaches the model nothing and leaks a blank "Translation:" into the prompt.
   // Mirrors the reference impl (codex-editor shared.ts fetchFewShotExamples).
+  // In target-only mode we still require a non-empty target; source is omitted.
   const allExamples = [...(options.validatedPairs ?? []), ...options.examples]
-    .filter((ex) => ex.source.trim() && ex.target.trim())
+    .filter((ex) => (targetOnly ? ex.target.trim() : ex.source.trim() && ex.target.trim()))
 
   let user = ""
-  for (const ex of allExamples) user += `Source: ${ex.source}\nTranslation: ${ex.target}\n\n`
+  if (targetOnly) {
+    for (const ex of allExamples) user += `Target: ${ex.target}\n\n`
+  } else {
+    for (const ex of allExamples) user += `Source: ${ex.source}\nTranslation: ${ex.target}\n\n`
+  }
   user += `Source: ${options.sourceText}\nTranslation:`
 
   return [{ role: "system", content: sys }, { role: "user", content: user.trim() }]
@@ -188,12 +203,19 @@ export function buildBatchPrompt(options: {
   rules?: TranslationRule[]
   /** Pre-filtered validated pairs from the project — prepended as a passage example. */
   validatedPairs?: ValidatedPair[]
+  /** How to render few-shot examples. Default "source-and-target". */
+  exampleFormat?: "source-and-target" | "target-only"
 }): ChatMessage[] {
+  const targetOnly = options.exampleFormat === "target-only"
+
   let baseSys = BATCH_FRAMING_INSTRUCTIONS + "\n\n" + options.systemPrompt
   // Inject rules block after the base system prompt.
   if (options.rules?.length) {
     const block = buildRulesBlock(options.rules)
     if (block) baseSys = baseSys + "\n\n" + block
+  }
+  if (targetOnly) {
+    baseSys = baseSys + "\n\nThe examples provided are reference translations in the target language. Use them to imitate the style, terminology, and patterns of this project."
   }
 
   const sys = baseSys
@@ -207,7 +229,14 @@ export function buildBatchPrompt(options: {
   // Validated pairs from the project's living memory come first — they are
   // the strongest signal of this team's terminology decisions.
   if (options.validatedPairs?.length) {
-    user += `Source:\n${renderSide(options.validatedPairs, "source")}\n\nTranslation:\n${renderSide(options.validatedPairs, "target")}\n\n`
+    if (targetOnly) {
+      const pairs = options.validatedPairs.filter((p) => p.target.trim())
+      if (pairs.length) {
+        user += `Translation:\n${renderSide(pairs, "target")}\n\n`
+      }
+    } else {
+      user += `Source:\n${renderSide(options.validatedPairs, "source")}\n\nTranslation:\n${renderSide(options.validatedPairs, "target")}\n\n`
+    }
   }
   for (const ex of options.examples) {
     // Passage neighbors include source-only cells (untranslated context within
@@ -215,10 +244,18 @@ export function buildBatchPrompt(options: {
     // aligned and no blank target leaks into the demonstrated passage.
     const cells = ex.cells.filter((c) => c.source.trim() && c.target.trim())
     if (!cells.length) continue
-    user += `Source:\n${renderSide(cells, "source")}\n\nTranslation:\n${renderSide(cells, "target")}\n\n`
+    if (targetOnly) {
+      user += `Translation:\n${renderSide(cells, "target")}\n\n`
+    } else {
+      user += `Source:\n${renderSide(cells, "source")}\n\nTranslation:\n${renderSide(cells, "target")}\n\n`
+    }
   }
   if (options.priorBatch?.length) {
-    user += `Source:\n${renderSide(options.priorBatch, "source")}\n\nTranslation:\n${renderSide(options.priorBatch, "target")}\n\n`
+    if (targetOnly) {
+      user += `Translation:\n${renderSide(options.priorBatch, "target")}\n\n`
+    } else {
+      user += `Source:\n${renderSide(options.priorBatch, "source")}\n\nTranslation:\n${renderSide(options.priorBatch, "target")}\n\n`
+    }
   }
   const liveSource = options.cells.map((c, i) => `<v${i + 1}>${c.source}</v${i + 1}>`).join("\n")
   user += `Source:\n${liveSource}\n\nTranslation:\n`

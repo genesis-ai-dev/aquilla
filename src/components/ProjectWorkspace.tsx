@@ -62,6 +62,7 @@ import { usePendingOutboxRecords } from "@/hooks/usePendingOutboxRecords"
 import {
   setCqrsOutboxBridge,
   buildFileScopedTokenFetcher,
+  buildProjectAwareTokenFetcher,
 } from "@/lib/sync/cqrs-bridge"
 import { emitTargetCellCommit, emitCellBacktranslationSet, emitFileRename } from "@/lib/sync/events-emit"
 import { flushOutboxBatch } from "@/lib/sync/outbox-flush"
@@ -442,6 +443,26 @@ export function ProjectWorkspace() {
     navigate,
   ])
 
+  // Project-AWARE fetcher for the outbox flusher. The outbox is global across
+  // every project the user touches, so the flusher must mint a token for each
+  // event's OWN projectId — not the workspace's active project. Minting against
+  // the active project is what produced "403 token scoped to different project"
+  // on events queued elsewhere, head-of-line blocking the whole queue. Stable
+  // across project switches (keyed on nothing project-specific) so a single
+  // background drain serves all projects.
+  const getTokenForProjectFile = useMemo(() => {
+    return buildProjectAwareTokenFetcher(() => jwtRef.current, undefined, {
+      onUnauthorized: () => {
+        // Only a /sync-token mint 401 (the session JWT itself is dead) reaches
+        // here — that genuinely means re-auth. A per-event 403 does NOT, so the
+        // outbox banner no longer mislabels permission failures as "session
+        // expired" (FRO-xxx).
+        console.warn("[ProjectWorkspace] session JWT rejected (401) during outbox drain — clearing session")
+        void doLogout().then(() => navigate("/"))
+      },
+    })
+  }, [doLogout, navigate])
+
   useEffect(() => {
     if (!project?.id || !activeFileId) {
       setCqrsOutboxBridge(null)
@@ -451,9 +472,10 @@ export function ProjectWorkspace() {
       projectId: project.id,
       activeFileId,
       username: currentUsername,
+      roleLevel: project.syncRole?.level ?? null,
     })
     return () => setCqrsOutboxBridge(null)
-  }, [project?.id, activeFileId, currentUsername])
+  }, [project?.id, activeFileId, currentUsername, project?.syncRole?.level])
 
   const outboxFlushEnabled = Boolean(project?.id && frontierSession?.jwt)
   const {
@@ -466,7 +488,7 @@ export function ProjectWorkspace() {
     staleSourceCount: outboxStaleSourceCount,
   } = useOutboxFlusher({
     enabled: outboxFlushEnabled,
-    getTokenForFile,
+    getTokenForFile: getTokenForProjectFile,
   })
   // F5/F6: dismiss the notification banners after the user has seen them.
   // For stale siblings the banner is also dismissed implicitly when the
@@ -635,14 +657,14 @@ export function ProjectWorkspace() {
         saveTts: tts.saveTts,
         onPhase: (p) => setDiarizePhase(p),
       })
-      await flushOutboxBatch({ getTokenForFile })
+      await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
       revalidateCells()
       setDiarizePhase("done")
     } catch (e) {
       setDiarizePhase("failed")
       setDiarizeError(e instanceof Error ? e.message : String(e))
     }
-  }, [project?.id, activeFileId, currentUsername, cells, getTokenForFile, tts.settings, tts.saveTts, revalidateCells])
+  }, [project?.id, activeFileId, currentUsername, cells, getTokenForFile, getTokenForProjectFile, tts.settings, tts.saveTts, revalidateCells])
 
   const [videoDialogOpen, setVideoDialogOpen] = useState(false)
   const [currentVideoTime, setCurrentVideoTime] = useState(0)
@@ -870,7 +892,7 @@ export function ProjectWorkspace() {
       value: text,
       author,
     })
-    await flushOutboxBatch({ getTokenForFile })
+    await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
     await refreshOutboxPending()
     revalidateAuditStats()
     revalidateCells()
@@ -887,7 +909,7 @@ export function ProjectWorkspace() {
         persistBtRef.current(cell, btText, false)
       }
     }
-  }, [project?.id, applyOptimisticTargetEdit, getTokenForFile, refreshOutboxPending, revalidateAuditStats, revalidateCells])
+  }, [project?.id, applyOptimisticTargetEdit, getTokenForProjectFile, refreshOutboxPending, revalidateAuditStats, revalidateCells])
 
   /**
    * AD-2 sibling promotion: emit a new target-cell commit whose parentId is
@@ -910,11 +932,11 @@ export function ProjectWorkspace() {
       value: entry.value,
       author: currentUsername,
     })
-    await flushOutboxBatch({ getTokenForFile })
+    await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
     await refreshOutboxPending()
     revalidateAuditStats()
     revalidateCells()
-  }, [project?.id, historyCellId, cells, applyOptimisticTargetEdit, getTokenForFile, currentUsername, refreshOutboxPending, revalidateAuditStats, revalidateCells])
+  }, [project?.id, historyCellId, cells, applyOptimisticTargetEdit, getTokenForProjectFile, currentUsername, refreshOutboxPending, revalidateAuditStats, revalidateCells])
 
   const { completeSingle, completeBatch, acceptCompletion, rejectCompletion, isConfigured, isAvailable: isCompletionAvailable, completing, examples, errors, previews } = useCompletion(
     project?.completionSettings, project?.sourceLanguage || "", project?.targetLanguage || "", branchingSearch, branchingSearchPassages, frontierSession, commitCompletedCell, rules, allProjectCells
@@ -1771,7 +1793,7 @@ export function ProjectWorkspace() {
     const pendingBt = lastOptimisticEditRef.current
     lastOptimisticEditRef.current = null
 
-    await flushOutboxBatch({ getTokenForFile })
+    await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
     await refreshOutboxPending()
     revalidateAuditStats()
     revalidateCells()
@@ -1792,7 +1814,7 @@ export function ProjectWorkspace() {
         }
       }
     }
-  }, [getTokenForFile, refreshOutboxPending, revalidateAuditStats, revalidateCells])
+  }, [getTokenForProjectFile, refreshOutboxPending, revalidateAuditStats, revalidateCells])
 
   if (status === "loading") return <WorkspaceSkeleton />
   if (status === "no-session") {

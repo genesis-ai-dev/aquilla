@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react"
-import { Check, ChevronRight, AlertTriangle, LogIn, RotateCw, Clock } from "lucide-react"
+import { Check, ChevronRight, AlertTriangle, LogIn, RotateCw, Clock, Ban, Trash2 } from "lucide-react"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Badge } from "@/components/ui/badge"
 import {
@@ -8,7 +8,7 @@ import {
   CollapsibleTrigger,
 } from "@/components/ui/collapsible"
 import { cn } from "@/lib/utils"
-import type { OutboxRecord } from "@/lib/sync/outbox"
+import { removeOutboxEvents, type OutboxRecord } from "@/lib/sync/outbox"
 import type { CqrsEventKind } from "@/lib/sync/outbox-types"
 
 interface Props {
@@ -16,7 +16,21 @@ interface Props {
   records: OutboxRecord[]
 }
 
-type Status = "pending" | "retrying" | "quarantined-auth" | "quarantined-other"
+/**
+ * needs-signin  → 401: the session JWT is dead; signing in again fixes it.
+ * no-permission → 403: not allowed (role too low, or the change belongs to a
+ *                 different project than the open one). Re-auth will NOT fix
+ *                 it — the only resolutions are gaining access or discarding.
+ * stuck         → exhausted the retry budget on transient errors.
+ * retrying      → transient (network / 5xx), still within retry budget.
+ */
+type Status = "pending" | "retrying" | "needs-signin" | "no-permission" | "stuck"
+
+/** Quarantined states the user can clear by discarding (no automatic recovery
+ *  path). needs-signin is excluded: it self-heals on re-auth. */
+function isDiscardable(status: Status): boolean {
+  return status === "no-permission" || status === "stuck"
+}
 
 interface Row {
   rec: OutboxRecord
@@ -28,15 +42,20 @@ interface Row {
 function classify(rec: OutboxRecord): Status {
   if (rec.attempts === 0 || !rec.lastError) return "pending"
   const s = rec.lastError.status
-  if (s === 401 || s === 403) return "quarantined-auth"
+  // 403 is checked before the generic `failed` rollup so a permission failure
+  // reads as "not allowed", never as the misleading "session expired".
+  if (s === 403) return "no-permission"
+  if (s === 401) return "needs-signin"
+  if (rec.status === "failed") return "stuck"
   if (s === 0 || s >= 500) return "retrying"
-  return "quarantined-other"
+  return "stuck"
 }
 
 // Higher value = more attention-grabbing. Sorted to top.
 const STATUS_PRIORITY: Record<Status, number> = {
-  "quarantined-auth": 3,
-  "quarantined-other": 2,
+  "no-permission": 4,
+  "needs-signin": 3,
+  stuck: 2,
   retrying: 1,
   pending: 0,
 }
@@ -49,8 +68,9 @@ function statusBadgeVariant(
       return "outline"
     case "retrying":
       return "secondary"
-    case "quarantined-auth":
-    case "quarantined-other":
+    case "needs-signin":
+    case "no-permission":
+    case "stuck":
       return "destructive"
   }
 }
@@ -61,9 +81,11 @@ function statusLabel(status: Status): string {
       return "Pending"
     case "retrying":
       return "Retrying"
-    case "quarantined-auth":
+    case "needs-signin":
       return "Sign in to retry"
-    case "quarantined-other":
+    case "no-permission":
+      return "Not allowed"
+    case "stuck":
       return "Stuck"
   }
 }
@@ -75,9 +97,11 @@ function StatusIcon({ status }: { status: Status }) {
       return <Clock className={cls} aria-hidden />
     case "retrying":
       return <RotateCw className={cls} aria-hidden />
-    case "quarantined-auth":
+    case "needs-signin":
       return <LogIn className={cls} aria-hidden />
-    case "quarantined-other":
+    case "no-permission":
+      return <Ban className={cls} aria-hidden />
+    case "stuck":
       return <AlertTriangle className={cls} aria-hidden />
   }
 }
@@ -218,7 +242,20 @@ export function OutboxInspectorPopover({ trigger, records }: Props) {
     return counts
   }, [rows])
 
-  const hasAuthBlock = rows.some((r) => r.status === "quarantined-auth")
+  const hasNeedsSignin = rows.some((r) => r.status === "needs-signin")
+  const hasNoPermission = rows.some((r) => r.status === "no-permission")
+  const hasStuck = rows.some((r) => r.status === "stuck")
+  const discardableIds = useMemo(
+    () => rows.filter((r) => isDiscardable(r.status)).map((r) => r.rec.id),
+    [rows],
+  )
+
+  const discard = (ids: string[]) => {
+    if (ids.length === 0) return
+    // removeOutboxEvents notifies outbox subscribers, so usePendingOutboxRecords
+    // re-reads and this popover re-renders without the discarded rows.
+    void removeOutboxEvents(ids)
+  }
 
   return (
     <Popover>
@@ -271,7 +308,7 @@ export function OutboxInspectorPopover({ trigger, records }: Props) {
               )}
             </p>
           )}
-          {hasAuthBlock && (
+          {hasNeedsSignin && (
             <p
               role="alert"
               className="mt-2 flex items-start gap-1.5 rounded-md bg-destructive/10 px-2 py-1.5 text-xs text-destructive"
@@ -281,6 +318,32 @@ export function OutboxInspectorPopover({ trigger, records }: Props) {
                 Your session expired. Edits are saved locally — sign in again to retry.
               </span>
             </p>
+          )}
+          {(hasNoPermission || hasStuck) && (
+            <div
+              role="alert"
+              className="mt-2 flex items-start gap-1.5 rounded-md bg-destructive/10 px-2 py-1.5 text-xs text-destructive"
+            >
+              <Ban className="mt-0.5 size-3.5 shrink-0" aria-hidden />
+              <div className="min-w-0 flex-1">
+                <span>
+                  {hasNoPermission
+                    ? "Some changes weren’t allowed — you may not have permission, or they belong to a different project. Re-signing in won’t help."
+                    : "Some changes couldn’t be synced after several tries."}{" "}
+                  They stay saved locally until you discard them.
+                </span>
+                {discardableIds.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => discard(discardableIds)}
+                    className="mt-1.5 flex items-center gap-1 rounded font-medium underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  >
+                    <Trash2 className="size-3" aria-hidden />
+                    Discard {discardableIds.length} stuck change{discardableIds.length === 1 ? "" : "s"}
+                  </button>
+                )}
+              </div>
+            </div>
           )}
         </header>
 
@@ -397,6 +460,18 @@ export function OutboxInspectorPopover({ trigger, records }: Props) {
                                     ? `${rec.lastError.status} · ${rec.lastError.reason}`
                                     : rec.lastError.reason}
                                 </span>
+                              </div>
+                            )}
+                            {isDiscardable(status) && (
+                              <div className="flex justify-end pt-0.5">
+                                <button
+                                  type="button"
+                                  onClick={() => discard([rec.id])}
+                                  className="flex items-center gap-1 rounded px-1.5 py-0.5 font-medium text-destructive hover:bg-destructive/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                                >
+                                  <Trash2 className="size-3" aria-hidden />
+                                  Discard this change
+                                </button>
                               </div>
                             )}
                           </div>

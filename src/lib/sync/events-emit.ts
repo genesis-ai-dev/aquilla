@@ -16,6 +16,8 @@
 
 import { v7 as uuidv7 } from "uuid"
 import { enqueueOutboxEvent } from "./outbox"
+import { getCqrsOutboxBridge } from "./cqrs-bridge"
+import { canPerform, requiredRoleFor } from "./role-policy"
 import {
   OUTBOX_SCHEMA_VERSION,
   type OutboxEventKind,
@@ -91,9 +93,28 @@ export function buildRawEvent<K extends OutboxEventKind>(
  * server acks") are the responsibility of the caller — they need to know
  * which row to update and how. See the editor's commit handler.
  */
+/** Thrown by enqueueEvent when the signed-in user's known role is below the
+ *  server's requirement for this event kind. Caught by the emit helpers'
+ *  existing `.catch` handlers, which surface it to the user. Failing here (at
+ *  the source) prevents a guaranteed-403 from entering the durable outbox and
+ *  head-of-line blocking the queue. */
+export class InsufficientRoleError extends Error {
+  constructor(public kind: string, public roleLevel: number, public required: number) {
+    super(`role ${roleLevel} below required ${required} for ${kind}`)
+    this.name = "InsufficientRoleError"
+  }
+}
+
 export async function enqueueEvent<K extends OutboxEventKind>(
   input: BuildEventInput<K>,
 ): Promise<{ event: OutboxRawEvent<K>; eventId: string }> {
+  // Pre-enqueue role gate (client mirror of the server's authorize() check).
+  // Only blocks when the role is KNOWN and provably insufficient — otherwise
+  // fail open and let the server stay authoritative.
+  const roleLevel = getCqrsOutboxBridge()?.roleLevel ?? null
+  if (!canPerform(input.kind, roleLevel) && roleLevel != null) {
+    throw new InsufficientRoleError(input.kind, roleLevel, requiredRoleFor(input.kind) ?? 0)
+  }
   const event = buildRawEvent(input)
   // The legacy outbox accepts CqrsRawEvent; our OutboxRawEvent is a superset
   // (added parentId, prefixed kinds). The IDB serialization keeps unknown

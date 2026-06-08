@@ -253,6 +253,55 @@ export async function outboxFailedCount(): Promise<number> {
   }
 }
 
+/**
+ * Force records into `failed` status immediately, without waiting for the
+ * attempt cap. Used for *non-retryable* server rejections (e.g. 403 — the
+ * caller lacks permission, or the event is scoped to a project the current
+ * session can't mint a token for). Retrying these forever is what wedged the
+ * queue and produced the misleading "session expired, sign in to retry" loop:
+ * a quarantined record is skipped by `peekPendingOutboxBatch`, so the flusher
+ * advances past it to other files instead of head-of-line blocking. The record
+ * is preserved (not deleted) so the inspector can show it and the user can
+ * discard or resolve it — no silent data loss.
+ */
+export async function quarantineOutboxEvents(
+  ids: string[],
+  error: OutboxAttemptError,
+): Promise<void> {
+  if (ids.length === 0) return
+  let db: IDBDatabase
+  try {
+    db = await openDb()
+  } catch {
+    return
+  }
+  const at = Date.now()
+  await new Promise<void>((resolve) => {
+    const tx = db.transaction(STORE, "readwrite")
+    tx.onerror = () => resolve()
+    tx.oncomplete = () => resolve()
+    const store = tx.objectStore(STORE)
+    for (const id of ids) {
+      const getReq = store.get(id)
+      getReq.onsuccess = () => {
+        const rec = getReq.result as Partial<OutboxRecord> | undefined
+        if (!rec || !rec.id || !rec.event) return
+        const next: OutboxRecord = {
+          id: rec.id,
+          enqueuedAt: rec.enqueuedAt ?? Date.now(),
+          event: rec.event,
+          attempts: (rec.attempts ?? 0) + 1,
+          lastAttemptAt: at,
+          lastError: error,
+          status: "failed",
+        }
+        store.put(next)
+      }
+    }
+  })
+  notifyOutboxChanged()
+}
+
 export async function removeOutboxEvents(ids: string[]): Promise<void> {
   if (ids.length === 0) return
   const db = await openDb()

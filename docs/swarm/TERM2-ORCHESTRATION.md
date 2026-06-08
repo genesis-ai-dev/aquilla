@@ -1,0 +1,55 @@
+# SWARM ORCHESTRATION — Terminology: Harden + Candidate Discovery (2026-06-08)
+
+**Goal:** Implement wave 1 of `docs/superpowers/specs/2026-06-08-terminology-harden-and-discover-design.md` — candidate-term discovery (c-value/nc-value/G²), interlinear-equivalent prediction (χ² + EM cross-check, managed-vs-AI-assumed), pre-acceptance warning band, LLM-BT terminology seeding — as standalone libs + components that a later glue wave mounts. Wave 2 (org publish/subscribe + add-from-selection) holds until wave 1 is green.
+
+## §0 STOP checklist
+- [ ] `npx tsc -b --noEmit` clean on integration
+- [ ] `npx vitest run` green incl. new candidate/equivalent/χ²/G² tests
+- [ ] `npm run build` passes
+- [ ] Candidate discovery: c-value/nc-value ranks multi-word terms; G² keyness flags specialized terms; managed terms excluded; promote-to-Concept works
+- [ ] Equivalents: χ² + EM cross-check; managed vs AI-assumed visually distinct; few-shot examples + confidence band shown
+- [ ] Pre-acceptance warning band: advisory string-match, never blocks commit (standalone, SWARM-TODO for mount)
+- [ ] LLM-BT seeded with preferred renderings
+- [ ] every gap has a SWARM-TODO in TRACES.md
+
+## §1 Operating model
+- main = sacred; dirty with another actor's in-flight work. NEVER touch it.
+- Integration branch: `swarm/integration-term` off clean `31f63f5` (node_modules symlinked).
+- Each agent → its own worktree off integration tip. NEW files preferred.
+- **FORBIDDEN paths (actor's uncommitted files — agents must NOT create/edit):**
+  `src/components/EditorTable.tsx`, `src/components/ProjectWorkspace.tsx`,
+  `src/components/onboarding/OnboardingWizard.tsx`, `src/components/onboarding/steps/PrivacyStep.tsx`,
+  `src/components/HealthRing.tsx`, `src/pages/Homepage/Homepage.tsx`,
+  `src/hooks/useProjectsMembersMatrix.ts`, `src/lib/frontier/members.ts`, `src/lib/frontier/members.test.ts`,
+  `src/lib/analytics-consent.ts`, `auth-worker/src/routes/dev-seed.ts`, `auth-worker/src/routes/orgs.ts`,
+  `auth-worker/src/services/org-permissions.ts`
+- Anything needing a FORBIDDEN file → build standalone + leave a SWARM-TODO for the glue wave.
+
+## §2 Wave history
+- Wave 1 dispatched 2026-06-08: WS-CANDIDATES, WS-EQUIV, WS-WARN, WS-BTSEED, WS-QA.
+
+## §3 Workstream registry
+| ID | Title | Status | Owns (files) | Notes |
+|---|---|---|---|---|
+| WS-CANDIDATES | Candidate-term discovery (c-value/nc-value/G²) | dispatched | `src/lib/terminology/candidates.ts` (+test), `src/components/CandidateTermsPanel.tsx` | standalone |
+| WS-EQUIV | Interlinear-equivalent prediction (χ²+EM) | dispatched | `src/lib/completion/chi-square-align.ts` (+test), `src/lib/terminology/equivalents.ts` (+test), `src/components/EquivalentsPanel.tsx` | reads interlinear.ts read-only |
+| WS-WARN | Pre-acceptance terminology warning band | dispatched | `src/lib/terminology/preacceptance.ts` (+test), `src/components/PreAcceptanceWarningBand.tsx` | SWARM-TODO to mount |
+| WS-BTSEED | LLM-BT terminology seeding | dispatched | `src/lib/completion/backtranslation-service.ts` | not forbidden |
+| WS-QA | Verification gate + regression tests | dispatched | `docs/swarm/TERM2-QA.md`, new *.test.ts only | drives existing :5173 |
+
+## §4 Merge log
+<!-- date · WS · branch · sha · tsc · vitest · notes -->
+- 2026-06-08 · WS-WARN · swarm/ws-warn · e0ca7c0 · tsc OK · vitest 8/8 · standalone preacceptance lib+band; SWARM-TODO to mount
+- 2026-06-08 · WS-BTSEED · swarm/ws-btseed · 8daf08e · tsc OK · vitest 14/14 · LLM-BT terminology seeding (additive, regression-guarded); SWARM-TODO btseed-glue
+- 2026-06-08 · WS-EQUIV · swarm/ws-equiv · a37a81c · tsc OK · vitest 13/13 · χ²+EM equivalents + EquivalentsPanel (managed vs AI-assumed); SWARM-TODO equiv-glue
+- 2026-06-08 · WS-CANDIDATES · swarm/ws-candidates · 4cf307c · tsc OK · vitest 9/9 · c-value/nc-value/G² miner + CandidateTermsPanel; SWARM-TODO glue
+- 2026-06-08 · WS-QA · swarm/integration-term · 44b9837 · live :5173 · TERM2-QA Pass 1 — shipped surface WORKS (chips/popover/BT/interlinear/persistence); 2 real Slice-1 fixes isolated
+
+## §5 Wave-1 outcome (CONVERGED)
+Build gate GREEN: tsc clean · 44/44 new tests · npm run build OK · 20 pre-existing failures confirmed identical on clean base (not ours).
+Standalone libs+panels merged; all carry SWARM-TODOs for the glue wave (mount into FORBIDDEN EditorTable/ProjectWorkspace/TerminologyPage).
+
+### Remaining Slice-1 fixes (both touch FORBIDDEN files → glue wave + need actor to free files)
+- [OPEN] (apply-replace) `handleTermApply` APPENDS rather than REPLACES the target selection — spec 2c says replace. File: `src/components/EditorTable.tsx` (FORBIDDEN).
+- [OPEN] (demo-seed) dev seed declares English source but cells are Adzera, so managed source terms never match the source corpus → terminology violation can't be driven demo-true. Add an Adzera-source concept (e.g. seed). File: `auth-worker/src/routes/dev-seed.ts` (FORBIDDEN).
+- [OPEN] (inbox-by-concept) no by-concept violations inbox grouping (spec 5b) — verdicts ride generic rule infra. Net-new, Slice 5.

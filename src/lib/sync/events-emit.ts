@@ -99,9 +99,15 @@ export function buildRawEvent<K extends OutboxEventKind>(
  *  the source) prevents a guaranteed-403 from entering the durable outbox and
  *  head-of-line blocking the queue. */
 export class InsufficientRoleError extends Error {
-  constructor(public kind: string, public roleLevel: number, public required: number) {
+  kind: string
+  roleLevel: number
+  required: number
+  constructor(kind: string, roleLevel: number, required: number) {
     super(`role ${roleLevel} below required ${required} for ${kind}`)
     this.name = "InsufficientRoleError"
+    this.kind = kind
+    this.roleLevel = roleLevel
+    this.required = required
   }
 }
 

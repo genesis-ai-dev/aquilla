@@ -141,6 +141,15 @@ export interface TermLookupPopoverProps {
   onApply?: (rendering: string) => void
   /** The trigger element — whatever the caller wraps. */
   children: React.ReactNode
+  /**
+   * FRO-204 — controlled mode. When `open` is provided the popover is
+   * controlled by the caller (chip-click flow). `onOpenChange` is fired
+   * when the user dismisses the popover. `anchor` pins it to a specific
+   * DOM element (the clicked chip) instead of the trigger child.
+   */
+  open?: boolean
+  onOpenChange?: (isOpen: boolean) => void
+  anchor?: HTMLElement | null
 }
 
 export function TermLookupPopover({
@@ -148,7 +157,12 @@ export function TermLookupPopover({
   concepts,
   onApply,
   children,
+  open,
+  onOpenChange,
+  anchor,
 }: TermLookupPopoverProps) {
+  const isControlled = open !== undefined
+
   // Find matching active concepts (case-insensitive substring match on sourceTerm)
   const matches = concepts.filter(
     (c) =>
@@ -161,23 +175,37 @@ export function TermLookupPopover({
     return <>{children}</>
   }
 
+  const content = (
+    <PopoverContent
+      className="w-80 p-3 text-sm"
+      sideOffset={6}
+      anchor={anchor ?? undefined}
+    >
+      <div
+        className="space-y-4"
+        role="tooltip"
+        aria-label={`Terminology lookup for "${sourceTerm}"`}
+      >
+        {matches.map((concept) => (
+          <ConceptPanel key={concept.id} concept={concept} onApply={onApply} />
+        ))}
+      </div>
+    </PopoverContent>
+  )
+
+  if (isControlled) {
+    // Controlled mode: caller owns open state; anchor is the chip element.
+    return (
+      <Popover open={open} onOpenChange={onOpenChange}>
+        {content}
+      </Popover>
+    )
+  }
+
   return (
     <Popover>
       <PopoverTrigger render={<span />}>{children}</PopoverTrigger>
-      <PopoverContent
-        className="w-80 p-3 text-sm"
-        sideOffset={6}
-      >
-        <div
-          className="space-y-4"
-          role="tooltip"
-          aria-label={`Terminology lookup for "${sourceTerm}"`}
-        >
-          {matches.map((concept) => (
-            <ConceptPanel key={concept.id} concept={concept} onApply={onApply} />
-          ))}
-        </div>
-      </PopoverContent>
+      {content}
     </Popover>
   )
 }

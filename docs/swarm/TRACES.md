@@ -31,6 +31,11 @@ STATUS: OPEN | CLAIMED | DONE
 - [DONE] (tsv-corruption) FIXED by W12 @ `25f4302`: `exporters/tsv.ts` now RFC-4180-quotes fields with `"`/tab/newline (import was already quote-aware). Round-trip TSV assertions flipped to clean. TSV now round-trips losslessly like CSV.
 - [NOTE] (tmx-untranslated) TMX drops untranslated (empty-target) cells — inherent to TMX (TM-exchange format). Not a bug; document only.
 
+## FRO-206 drill-down gaps
+- [OPEN] (drilldown-cells) TerminologyPage passes `cells=[]` to TerminologyTermDetail; occurrences list is empty until a follow-up wires useCells for the active file (or all project files). To pick up: import useCells + useProject in TerminologyPage, fetch cells for each file, map CellData[] into the detail prop. — `src/components/TerminologyPage.tsx` (drill-down guard, ~L650), `src/components/TerminologyTermDetail.tsx`
+- [OPEN] (drilldown-username) TerminologyPage passes `username="local"` to TerminologyTermDetail. Wire the real auth username (useIdentity / useProjectSettings) before shipping. — `src/components/TerminologyPage.tsx`
+- [RESOLVED] (drilldown-canEdit) now passes canEdit={canEditCells} (syncRole>=400 or local). TerminologyPage passes `canEdit={true}` unconditionally. FRO-208 is adding role-gating to TerminologyPage; once that lands, pass `permissions.canEditContent` here too. — `src/components/TerminologyPage.tsx`
+
 ## Quality / hardening (pick up opportunistically)
 - [OPEN] (lastEditAt) `buildCellData` drops `lastEditAt` from CellRow → CellData; forward it (one-line client change) so recency-sorted views (Living Memory) work without server changes. — `src/hooks/useCells.ts`
 - [OPEN] (export-all-warn) `openExportFlow` is a console.warn stub. — `src/components/ProjectWorkspace.tsx:1162` (owned by WS-EXPORT)
@@ -38,6 +43,10 @@ STATUS: OPEN | CLAIMED | DONE
 
 ## License caution (judgment call baked in)
 - Aquilla is a COMMERCIAL product. Do NOT copy GPL/copyleft code (e.g. MateCat filters are LGPL). Implement CAT formats from the OPEN SPECS (OASIS XLIFF 1.2/2.0, LISA TMX 1.4b, TBX, SRX) or from Apache-2.0/MIT sources (e.g. Okapi is Apache-2.0). When in doubt, reimplement from spec.
+
+## FRO-203 auto-BT (statistical BT on every target commit)
+- [DONE] (fro203-stat-bt-core) Statistical BT now fires automatically on every target commit. `src/lib/completion/bt-auto.ts` adds `buildStatisticalBt` + `shouldAutoRecomputeBt`. `ProjectWorkspace.tsx` wires auto-BT in `handleCellCommitted` (hand-typed EditorTable commits) and `commitCompletedCell` (AI completion commits). LLM polish remains opt-in via `runBacktranslation`. Seed wiring: preferred→+3, admitted→+1, forbidden→-3 (pre-existing code confirmed). `applyOptimisticTargetEditWithCapture` intercepts EditorTable's optimistic edit to capture which cell was last committed.
+- [DEFERRED-OK] (fro203-editortable-wiring) SWARM-TODO(FRO-203): EditorTable's `onCellCommitted` prop currently has signature `() => void` — it does NOT pass the committed cell or translated text. The current workaround captures the cell via `applyOptimisticTargetEditWithCapture` (intercepted at the `onOptimisticEdit` prop). If a more reliable signal is needed (e.g. for concurrent multi-cell edits), change `onCellCommitted` to `(cellId: string, translatedText: string) => void` in EditorTable.tsx (line ~343, ~1197, ~1386, all call sites). ProjectWorkspace.tsx would then receive the cell data directly in `handleCellCommitted`. NOT done now — EditorTable.tsx is forbidden for this agent. — `src/components/EditorTable.tsx:343`
 
 ## Deferred — BT + Terminology v1-core (built 2026-05-31, main `e16759a`; scoped-out tails)
 Both features shipped to spec for v1-core. These tails were deliberately deferred (design: `docs/superpowers/specs/2026-05-31-bt-terminology-design.md`). None block the demo.

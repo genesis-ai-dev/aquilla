@@ -243,17 +243,32 @@ export function TranslatedEditor({
     },
   }, [cellId])
 
-  // When initial content changes for the same cell (e.g. a remote
-  // event.applied landed while we weren't editing), reconcile. We never
-  // overwrite if the editor is focused — that's what the banner is for.
+  // The committed baseline is the editor's OWN canonical text, never the raw
+  // stored value. Stored values can be HTML-escaped or otherwise differ from
+  // what TipTap parses + serializes — legacy-import wrote `--&gt;`, which
+  // hydrates as `-->`. Comparing editor.getText() against the raw `initialPlain`
+  // would misread that load-time normalization as a user edit and emit a
+  // phantom revision on the next blur, corrupting files just by opening them.
+  // Seed once per editor instance (one editor per cellId). (FRO-216)
+  const lastHydratedPlainRef = useRef(initialPlain)
+  useEffect(() => {
+    if (!editor) return
+    lastCommittedRef.current = editor.getText()
+    lastHydratedPlainRef.current = initialPlain
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editor])
+
+  // Re-hydrate only when the stored value genuinely changes (a remote
+  // event.applied landed while we weren't editing) — keyed on the raw
+  // `initialPlain` so an escaping-only difference never forces a reload. We
+  // never overwrite if the editor is focused — that's what the banner is for.
   useEffect(() => {
     if (!editor) return
     if (editor.isFocused) return
-    const current = editor.getText()
-    if (current === initialPlain) return
+    if (initialPlain === lastHydratedPlainRef.current) return
+    lastHydratedPlainRef.current = initialPlain
     editor.commands.setContent(initialContent)
-    lastCommittedRef.current = initialPlain
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    lastCommittedRef.current = editor.getText()
   }, [editor, initialContent, initialPlain])
 
   useEffect(() => {

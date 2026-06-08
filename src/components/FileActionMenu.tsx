@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "react"
+import { createPortal } from "react-dom"
 import { Pencil, FolderInput, Trash2, Download } from "lucide-react"
 
 interface FileActionMenuProps {
@@ -31,7 +32,7 @@ export function FileActionMenu({
     }
   }, [onClose])
 
-  return (
+  return createPortal(
     <div
       ref={ref}
       className="fixed z-40 w-44 rounded-md border bg-popover p-1 shadow-md text-sm"
@@ -64,6 +65,7 @@ export function FileActionMenu({
       >
         <Trash2 className="h-3.5 w-3.5" /> Delete
       </button>
-    </div>
+    </div>,
+    document.body,
   )
 }

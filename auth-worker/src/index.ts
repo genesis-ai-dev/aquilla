@@ -69,6 +69,7 @@ import testResetRoutes from "./routes/test-reset"
 import devSeedRoutes from "./routes/dev-seed"
 import chatRoutes from "./routes/chat"
 import parseDocumentRoutes from "./routes/parse-document"
+import termbaseSubscriptionRoutes from "./routes/termbase-subscriptions"
 
 type HonoEnv = { Bindings: Env; Variables: Variables }
 
@@ -146,6 +147,10 @@ app.route("/api/v1/auth", authRoutes)
 app.route("/api/v2/sync-token", syncTokenRoutes)
 app.route("/api/v2/users", usersRoutes)
 app.route("/api/v2/orgs", orgSettingsRoutes)
+// Org termbase publish/subscribe (migration 0030). Mounted under BOTH prefixes
+// — /orgs/:orgId/published-termbases lives here, the rest under /projects/:id/
+// termbase/*. The two path-spaces are disjoint so one router serves both.
+app.route("/api/v2/orgs", termbaseSubscriptionRoutes)
 app.route("/api/v2/orgs", orgsRoutes)
 // Platform-operator (site-wide admin) surface — read-only, cross-tenant.
 // Gated by PLATFORM_ADMINS allowlist via requirePlatformAdmin (see
@@ -155,6 +160,7 @@ app.route("/api/v2/admin", adminRoutes)
 // the main projects router so they live in their own files without colliding.
 app.route("/api/v2/projects", projectSettingsRoutes)
 app.route("/api/v2/projects", sourceLinkingRoutes)
+app.route("/api/v2/projects", termbaseSubscriptionRoutes)
 app.route("/api/v2/projects", projectsRoutes)
 // Multi-project invite surface.
 app.route("/api/v2/invites", invitesRoutes)

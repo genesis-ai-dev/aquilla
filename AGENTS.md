@@ -76,7 +76,7 @@ it resolves the issue's current status and does the next right transition:
 - `/issue FRO-123` — act on a specific issue from wherever it currently sits.
 - `/issue debug "thing is broken"` — file a new bug, then start it.
 - `/issue improve "make X nicer"` — file a new improvement, then start it.
-- add `--deploy` to push to staging and advance to `Ready for Review` after the fix.
+- add `--deploy` to deploy for dev validation and advance to `Dev Verification Needed` after the fix.
 
 The command (`.claude/commands/issue.md`) enforces the verification gate and the status
 rules below.
@@ -105,20 +105,52 @@ Status pipeline:
 | --- | --- | --- |
 | **Backlog** | Captured, not yet scoped for work | triage |
 | **Todo** | Ready to be picked up by dev/AI | pull from here to start work |
-| **Fixed** | Dev/AI has fixed it, **not deployed yet** | set the moment the fix is committed/merged |
-| **Ready for Review** | Fix deployed to **staging**, awaiting dev-team validation | set after pushing to the staging subdomain |
-| **Ready for QA** | Dev validated on staging; QA can review | **terminal status for now** — stop here |
-| ~~Done~~ / ~~Deployed~~ | post-QA states | **not used yet** — no QA process running |
+| **Dispatched** | Dev/AI has **begun work** on the task | set when you pick the issue up |
+| **Fixed** | Dev/AI has fixed it, **not deployed yet** | set the moment the fix is committed |
+| **Dev Verification Needed** | Fix deployed to the **dev branch**, awaiting dev-team validation | set after deploying to dev |
+| **Ready for QA** | Functionality is on **staging**; QA can test against it and merge to main | dev→QA hand-off |
+| **Deployed** / **Done** | QA validated and **merged the ticket into `main`** | set by QA as part of the merge |
 | **Canceled** / **Duplicate** | invalid / superseded | as needed |
 
 Rules:
 
-1. **Pick up work from `Todo`.** Move the issue to your name and start it.
-2. When the fix is done but not yet on staging → **`Fixed`**.
-3. When the fix is deployed to the **staging subdomain** → **`Ready for Review`**.
-4. Once validated on staging → **`Ready for QA`**. This is the **terminal status** until a QA
-   process exists — do **not** move issues to `Done`/`Deployed`.
-5. Reference the `FRO-###` identifier in commits/branches (Linear auto-suggests a branch name).
+1. **Pick up work from `Todo`** → assign it to your name and set **`Dispatched`** (work begun).
+2. When the fix is committed but not yet deployed → **`Fixed`**.
+3. When the fix is deployed to the **dev branch** for dev-team validation → **`Dev Verification Needed`**.
+4. Once the functionality is on **staging** and testable → **`Ready for QA`**. This is the
+   dev→QA hand-off. **QA owns the merge to `main`** and advances the ticket to
+   `Deployed`/`Done` as part of that merge. Don't set `Deployed`/`Done` yourself unless you
+   are the one doing the QA merge.
+5. **Every commit must carry its `FRO-###`.** Linear auto-suggests a branch name, and the
+   `prepare-commit-msg` hook auto-injects the ticket from a `…/fro-###-…` branch (and warns
+   when it can't derive one). QA reviews a PR-to-main by scanning which tickets its commits
+   reference — a ticketless `fix`/`feat` commit is invisible to that process.
+   `chore`/`docs`/`polish` commits may go ticketless.
+6. **Prototyping fast-path:** while prototyping we sometimes merge straight to `main` with
+   `--no-verify`, skipping the staging/QA gates. Allowed — but the commit **still needs its
+   `FRO-###`** so the ticket stays traceable to the merge.
+
+### One ticket = one branch = one worktree
+
+The failure mode to avoid: agents pile unrelated work onto whatever branch is checked
+out, so a branch named for FRO-A ends up holding FRO-B commits **and** a junk drawer of
+uncommitted changes spanning five concerns. That destroys the QA PR→ticket mapping and
+makes the work impossible to review or revert cleanly.
+
+- **Each ticket gets its own git worktree off live `origin/main`**, on the Linear-suggested
+  branch (`ryder/fro-###-…`). Never share the main checkout between tickets. Use
+  `git worktree add` (see `using-git-worktrees`); the main checkout is frequently dirty.
+- **Start clean.** Before picking up a ticket, the working tree should be clean (or your
+  changes stashed). Don't start FRO-B on top of FRO-A's uncommitted spillover.
+- **Don't cross-commit.** A commit's `FRO-###` must match the branch's ticket. The
+  `pre-commit` hook **warns** (never blocks) when the branch already holds commits for a
+  different ticket — heed it and move the stray work to its own worktree.
+- **Untangling after the fact is expensive and lossy** — prevention (isolation at pickup)
+  is the whole game.
+
+> **Reconcile drift:** run **`/issue-audit`** to cross-check the board against `main` — it
+> flags issues whose code shipped but whose status lagged, `Deployed`/`Done` issues with no
+> traceable merge, and commits that landed without a ticket. Read-only; never moves the board.
 
 > **Staging** lives at `https://dev.aquilla.app` (API `api.dev.aquilla.app`), backed by the
 > Neon `staging` branch via Hyperdrive. Deploy with `pnpm run deploy:aquilla:staging`. Setup

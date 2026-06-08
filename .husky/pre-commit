@@ -1,0 +1,28 @@
+#!/usr/bin/env sh
+# Warn-only scope guard: a branch should carry commits for ONE ticket.
+#
+# When QA reviews a PR-to-main they map it by the FRO-### its commits carry
+# (AGENTS.md → "Issue workflow"). A branch named for FRO-A that also holds
+# FRO-B commits makes that mapping a lie and is the usual symptom of agents
+# piling unrelated work onto whatever branch happens to be checked out.
+#
+# This never blocks (prototyping fast-path stays smooth) — it just surfaces the
+# drift so you can move the unrelated work to its own branch/worktree.
+
+branch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null)
+bt=$(printf '%s' "$branch" | grep -oiE 'fro-[0-9]+' | head -1 | tr '[:lower:]' '[:upper:]')
+
+# No ticket in the branch name → nothing to compare against.
+[ -z "$bt" ] && exit 0
+
+# Tickets referenced by commits already on this branch (vs origin/main).
+others=$(git log --pretty=%s origin/main..HEAD 2>/dev/null \
+  | grep -oiE 'FRO-[0-9]+' | tr '[:lower:]' '[:upper:]' | sort -u | grep -v "^${bt}$")
+
+if [ -n "$others" ]; then
+  echo "[pre-commit] ⚠ branch '$branch' (ticket $bt) already has commits for OTHER tickets:"
+  printf '   - %s\n' $others
+  echo "   One ticket per branch keeps QA's PR→ticket mapping honest."
+  echo "   Move the unrelated work to its own branch/worktree (see AGENTS.md → Issue workflow)."
+fi
+exit 0

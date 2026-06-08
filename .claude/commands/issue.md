@@ -15,7 +15,12 @@ Arguments: $ARGUMENTS
 - Linear team: `FrontierR&D` (id `de0f5d29-418f-4f62-ade7-02f77974c598`)
 - Linear project: `Prototype Debugging` (id `215cff7b-1a95-443d-9343-1f1528754462`)
 - Status pipeline (see AGENTS.md → "Issue workflow"):
-  `Backlog → Todo → Fixed → Ready for Review → Ready for QA` *(terminal — no QA yet)*
+  `Backlog → Todo → Dispatched → Fixed → Dev Verification Needed → Ready for QA → Deployed/Done`
+  - `Ready for QA` is the **dev→QA hand-off**; **QA owns the merge to `main`** and sets
+    `Deployed`/`Done`. Don't set those yourself unless you're doing the QA merge.
+  - **Every commit must carry its `FRO-###`** so QA can scan a PR-to-main and see which
+    tickets it covers. The `prepare-commit-msg` hook auto-injects it from a `…/fro-###-…`
+    branch. Prototyping may merge straight to `main` with `--no-verify` — the ref is still required.
 - **Spec repo (source of truth):** `~/frontierrnd/aquilla-specs`
   - Features: `04-features/<feature>.md` (carry a `revisions:` frontmatter log)
   - User stories: `05-user-stories/<story>.md` (have `Acceptance criteria` + `Error / edge cases`)
@@ -36,8 +41,8 @@ Parse `$ARGUMENTS`:
 - **`debug "<desc>"`** or **`improve "<desc>"`** → this is *new* work not yet tracked.
   Create the issue first (`save_issue` into the project, team, status `Todo`, priority
   from your judgment), then proceed as if the user passed that `FRO-###`.
-- **`--deploy`** → after marking `Fixed`, actually deploy to staging and advance to
-  `Ready for Review` (see Step 3). Without it, stop at `Fixed` and tell the user.
+- **`--deploy`** → after marking `Fixed`, deploy for dev validation and advance to
+  `Dev Verification Needed` (see Step 3). Without it, stop at `Fixed` and tell the user.
 - **`--no-verify`** → skip the dev-stack verification gate (only if the user insists).
 
 Announce which issue + current status you're acting on before doing anything.
@@ -45,8 +50,13 @@ Announce which issue + current status you're acting on before doing anything.
 ## Step 1 — Pick up (→ in progress)
 
 If the issue is in `Backlog` or `Todo`:
+- **Isolate first (one ticket = one worktree).** If the current working tree is dirty or
+  you're on another ticket's branch, do NOT start here — create a worktree off live
+  `origin/main` on this issue's suggested branch (`get_issue` → `gitBranchName`) and work
+  there. Never pile this ticket onto another ticket's branch/working copy (see AGENTS.md →
+  "One ticket = one branch = one worktree").
 - Assign it to the user (`assignee: "me"`).
-- Move it to `Todo` if it was in `Backlog` (it's now actively being worked).
+- Move it to **`Dispatched`** (work has begun).
 - Restate the issue's acceptance/repro in one line so the goal is explicit.
 - **Flag spec impact (note only, don't edit yet).** Skim the relevant spec file(s) in
   `~/frontierrnd/aquilla-specs` and jot whether this issue likely needs a spec change. Do
@@ -62,8 +72,10 @@ If the issue is in `Backlog` or `Todo`:
    screenshot. For multi-user/permission issues, use the e2e harness.
 3. If the change touches a journey in `e2e/JOURNEYS.md`, extend/add the spec and run
    `npm run test:e2e:smoke`.
-4. Commit referencing the issue (`FRO-###` in the message; Linear links it). Use the
-   suggested branch name from `get_issue` (`gitBranchName`) if branching.
+4. Commit referencing the issue — **`FRO-###` MUST be in the message** so QA can map the
+   commit to a ticket at PR-to-main time. Branch with the suggested name from `get_issue`
+   (`gitBranchName`) and the `prepare-commit-msg` hook injects the ref automatically; on a
+   non-`fro-` branch, add it by hand (the hook will warn).
 5. Move the issue to **`Fixed`** and post a Linear comment summarizing the fix +
    how it was verified.
 
@@ -98,7 +110,7 @@ Do not advance past `Fixed` until the spec decision is made and recorded.
 If `--deploy` was NOT passed, **stop here** and report: "FRO-### is Fixed (verified
 locally), spec reconciled, not yet on staging. Re-run with `--deploy` to push and advance."
 
-## Step 3 — Deploy to staging (→ Ready for Review)  [only with `--deploy`]
+## Step 3 — Deploy for dev validation (→ Dev Verification Needed)  [only with `--deploy`]
 
 Staging lives at **`https://dev.aquilla.app`** (API at `https://api.dev.aquilla.app`),
 backed by the Neon `staging` branch via Hyperdrive. It does **not** have the dev auth
@@ -111,17 +123,20 @@ bypass — sign in with a real staging account.
    - If the staging Hyperdrive id is still `REPLACE_WITH_STAGING_HYPERDRIVE_ID` in the
      worker `wrangler.toml`s, staging isn't provisioned yet — stop, leave the issue at
      `Fixed`, and point at **FRO-146** (one-time provisioning) instead of guessing.
-2. Move the issue to **`Ready for Review`**.
-3. Comment the staging URL (`https://dev.aquilla.app`) + what to validate.
+2. Move the issue to **`Dev Verification Needed`** (deployed to the dev branch, awaiting
+   dev-team validation).
+3. Comment the dev URL (`https://dev.aquilla.app`) + what to validate.
 
-## Step 4 — Validate on staging (→ Ready for QA)
+## Step 4 — Promote to staging for QA (→ Ready for QA)
 
-When the user (or you, if asked) has validated the fix on staging:
-- Move the issue to **`Ready for QA`** — the **terminal status** for now.
-- Comment what was validated.
+When the fix is validated by the dev team and the functionality is on **staging**:
+- Move the issue to **`Ready for QA`** — the dev→QA hand-off.
+- Comment what was validated and what's on staging for QA to test against.
 
-**Never** move an issue to `Done` or `Deployed`. There is no QA process running yet;
-`Ready for QA` is where issues rest until one exists.
+**Stop at `Ready for QA`.** **QA owns the merge to `main`** and sets `Deployed`/`Done` as
+part of that merge — they test against the staging tickets and scan each PR-to-main for the
+`FRO-###` refs its commits carry. Don't set `Deployed`/`Done` yourself unless you're doing
+the QA merge.
 
 ## Step 5 — Report
 

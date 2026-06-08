@@ -1,16 +1,16 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1254 1254" role="img" aria-labelledby="title">
-  <title id="title">Aquilla logo - gold gradient</title>
+  <title id="title">Aquilla logo - blue gradient</title>
   <defs>
     <linearGradient id="aquilla-purple-gradient" x1="0" y1="1254" x2="1254" y2="0" gradientUnits="userSpaceOnUse">
-      <stop offset="0%" stop-color="#ffd24d"/>
-      <stop offset="45%" stop-color="#e0a21c"/>
-      <stop offset="100%" stop-color="#6e4a12"/>
+      <stop offset="0%" stop-color="#5aa9ff"/>
+      <stop offset="45%" stop-color="#2563eb"/>
+      <stop offset="100%" stop-color="#14306b"/>
     </linearGradient>
     <radialGradient id="aquilla-purple-glow" cx="180" cy="930" r="760" gradientUnits="userSpaceOnUse">
-      <stop offset="0%" stop-color="#ffde7a" stop-opacity="0.42"/>
-      <stop offset="58%" stop-color="#e8b23c" stop-opacity="0.18"/>
-      <stop offset="100%" stop-color="#3a2a0e" stop-opacity="0"/>
+      <stop offset="0%" stop-color="#7abaff" stop-opacity="0.42"/>
+      <stop offset="58%" stop-color="#3c82e8" stop-opacity="0.18"/>
+      <stop offset="100%" stop-color="#0e2a3a" stop-opacity="0"/>
     </radialGradient>
     <mask id="aquilla-mark-mask" maskUnits="userSpaceOnUse">
       <rect width="1254" height="1254" fill="#000000"/>

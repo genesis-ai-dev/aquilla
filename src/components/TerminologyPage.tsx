@@ -43,6 +43,9 @@ import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { useProjectCells } from "@/hooks/useProjectCells"
 import { buildFileScopedTokenFetcher } from "@/lib/sync/cqrs-bridge"
 import { TerminologyTermDetail } from "@/components/TerminologyTermDetail"
+import { CandidateTermsPanel } from "@/components/CandidateTermsPanel"
+import { extractCandidates } from "@/lib/terminology/candidates"
+import type { CandidateTerm } from "@/lib/terminology/candidates"
 
 // ────────────────────────────────────────────────────────────────────────────
 // Rendering status chip helpers
@@ -736,6 +739,26 @@ export function TerminologyPage() {
     [allCells],
   )
 
+  // ── Candidate-term discovery corpus ─────────────────────────────────────────
+  // Mined over the loaded source + WIP cell texts (the same cells the stats and
+  // drill-down read). This is a coverage cap: candidates are ranked over LOADED
+  // cells only, not the entire project history. The G² keyness baseline is the
+  // derived rest-of-corpus baseline (no external reference corpus is supplied).
+  const candidateCorpus = useMemo(() => {
+    const texts: string[] = []
+    for (const c of allCells) {
+      if (c.original?.trim()) texts.push(c.original)
+      if (c.translated?.trim()) texts.push(c.translated)
+    }
+    return texts
+  }, [allCells])
+
+  const candidates = useMemo(
+    () => extractCandidates(candidateCorpus, { managed: concepts }),
+    [candidateCorpus, concepts],
+  )
+
+  const [tab, setTab] = useState<"concepts" | "candidates">("concepts")
   const [addOpen, setAddOpen] = useState(false)
   const [editTarget, setEditTarget] = useState<Concept | null>(null)
   const [importOpen, setImportOpen] = useState(false)
@@ -808,6 +831,80 @@ export function TerminologyPage() {
     }
   }
 
+  // Promote a mined candidate into the managed vocabulary as a draft Concept.
+  // It crosses into the controlled list with status "draft" (suggested) and no
+  // renderings decided yet — the user fills those in via the edit dialog. Opens
+  // the edit dialog immediately so the rendering decision is the next step.
+  const handlePromoteCandidate = useCallback(
+    async (candidate: CandidateTerm) => {
+      if (!project) return
+      if (!canManageTermbase) {
+        setError("Requires Project Lead role or higher to manage termbase definitions.")
+        return
+      }
+      // Skip if a concept with this source term already exists.
+      const exists = concepts.some(
+        (c) => c.sourceTerm.trim().toLowerCase() === candidate.term.trim().toLowerCase(),
+      )
+      if (exists) return
+      try {
+        const updated = addConcept(project, {
+          sourceTerm: candidate.term,
+          renderings: [],
+          status: "draft",
+        })
+        await persistConcepts(updated.terminology ?? [])
+        const created = (updated.terminology ?? []).find(
+          (c) => c.sourceTerm === candidate.term && c.status === "draft",
+        )
+        if (created) setEditTarget(created)
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Promote failed")
+      }
+    },
+    [project, canManageTermbase, concepts],
+  )
+
+  // Promote a predicted equivalent to an admitted (alternate) rendering on the
+  // concept. Crosses the deterministic line; persisted exactly like edits.
+  const handlePromoteRendering = useCallback(
+    async (conceptId: string, target: string) => {
+      if (!project) return
+      const concept = (project.terminology ?? []).find((c) => c.id === conceptId)
+      if (!concept) return
+      const trimmed = target.trim()
+      if (!trimmed) return
+      // Don't duplicate an existing rendering.
+      if (
+        concept.renderings.some(
+          (r) => r.rendering.trim().toLowerCase() === trimmed.toLowerCase(),
+        )
+      ) {
+        return
+      }
+      const nextRenderings: TermRendering[] = [
+        ...concept.renderings,
+        { rendering: trimmed, status: "admitted" },
+      ]
+      try {
+        const updated = updateConcept(project, conceptId, {
+          renderings: nextRenderings,
+        })
+        await persistConcepts(updated.terminology ?? [])
+        // Reflect the new rendering in the open drill-down view.
+        setDrillDownConcept(
+          (prev) =>
+            prev && prev.id === conceptId
+              ? { ...prev, renderings: nextRenderings }
+              : prev,
+        )
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Promote failed")
+      }
+    },
+    [project],
+  )
+
   async function handleImported(imported: Concept[]) {
     if (!project) return
     // Merge by sourceTerm dedup — imported wins on collision
@@ -834,6 +931,8 @@ export function TerminologyPage() {
         onClose={() => setDrillDownConcept(null)}
         onCellCommitted={() => {}}
         onOptimisticEdit={() => {}}
+        canManageTermbase={canManageTermbase}
+        onPromoteRendering={handlePromoteRendering}
       />
     )
   }
@@ -917,6 +1016,48 @@ export function TerminologyPage() {
         {/* Stats header — derived on read, no persistence */}
         <LibraryStatsHeader concepts={concepts} cells={cellPairs} />
 
+        {/* Tab strip: managed Concepts vs mined Candidate terms */}
+        <div className="inline-flex rounded-md border p-0.5 text-sm">
+          {([
+            { key: "concepts", label: `Concepts (${concepts.length})` },
+            { key: "candidates", label: `Candidate terms (${candidates.length})` },
+          ] as const).map((t) => (
+            <button
+              key={t.key}
+              type="button"
+              onClick={() => setTab(t.key)}
+              className={cn(
+                "rounded px-3 py-1 transition-colors",
+                tab === t.key
+                  ? "bg-primary text-primary-foreground"
+                  : "text-muted-foreground hover:text-foreground",
+              )}
+            >
+              {t.label}
+            </button>
+          ))}
+        </div>
+
+        {tab === "candidates" ? (
+          <Card>
+            <CardHeader>
+              <CardTitle>Candidate terms</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <p className="text-xs text-muted-foreground">
+                Mined from {candidateCorpus.length} loaded source/WIP cell text
+                {candidateCorpus.length === 1 ? "" : "s"} — ranked over loaded cells
+                only, not the full project. Keyness (G²) uses a derived
+                rest-of-corpus baseline. Promoting adds a suggested concept you can
+                then give renderings.
+              </p>
+              <CandidateTermsPanel
+                candidates={candidates}
+                onPromote={handlePromoteCandidate}
+              />
+            </CardContent>
+          </Card>
+        ) : (
         <Card>
           <CardHeader>
             <CardTitle>
@@ -970,6 +1111,7 @@ export function TerminologyPage() {
             )}
           </CardContent>
         </Card>
+        )}
       </main>
 
       {/* Add dialog */}

@@ -71,3 +71,6 @@ e2e/.auth/
 # Python bytecode (Modal service)
 __pycache__/
 *.pyc
+
+# dev DB seed bundle cache (fetched from R2; not committed)
+db/seed/.cache/

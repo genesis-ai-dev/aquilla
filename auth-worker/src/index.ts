@@ -59,6 +59,7 @@ import authRoutes from "./routes/auth"
 import syncTokenRoutes from "./routes/sync-token"
 import projectsRoutes from "./routes/projects"
 import projectSettingsRoutes from "./routes/project-settings"
+import orgSettingsRoutes from "./routes/org-settings"
 import sourceLinkingRoutes from "./routes/source-linking"
 import invitesRoutes from "./routes/invites"
 import orgsRoutes from "./routes/orgs"
@@ -67,6 +68,7 @@ import adminRoutes from "./routes/admin"
 import testResetRoutes from "./routes/test-reset"
 import devSeedRoutes from "./routes/dev-seed"
 import chatRoutes from "./routes/chat"
+import parseDocumentRoutes from "./routes/parse-document"
 
 type HonoEnv = { Bindings: Env; Variables: Variables }
 
@@ -143,6 +145,7 @@ app.route("/api/v2/auth", authRoutes)
 app.route("/api/v1/auth", authRoutes)
 app.route("/api/v2/sync-token", syncTokenRoutes)
 app.route("/api/v2/users", usersRoutes)
+app.route("/api/v2/orgs", orgSettingsRoutes)
 app.route("/api/v2/orgs", orgsRoutes)
 // Platform-operator (site-wide admin) surface — read-only, cross-tenant.
 // Gated by PLATFORM_ADMINS allowlist via requirePlatformAdmin (see
@@ -160,6 +163,7 @@ app.route("/api/v2/invites", invitesRoutes)
 // path is kept at /api/v1/chat/completions so the codex-web client doesn't
 // need to change — it just points VITE_CHAT_BASE at api.aquilla.app/chat.
 app.route("/api/v1/chat", chatRoutes)
+app.route("/api/v2/parse-document", parseDocumentRoutes)
 
 // Test-only reset endpoint (WRANGLER_LOCAL only — see routes/test-reset.ts).
 app.route("/__test__", testResetRoutes)

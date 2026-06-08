@@ -68,8 +68,10 @@ const SYNC_DIR = path.join(REPO_ROOT, "sync-worker")
 const PERSIST_DIR = path.join(REPO_ROOT, ".wrangler-dev-state")
 const LOG_DIR = path.join(REPO_ROOT, ".dev-stack-logs")
 
-const IDENTITY_PORT = 8788
-const SYNC_PORT = 8789
+// Ports are env-overridable so a second stack can coexist with another dev-stack
+// (e.g. a parallel worktree) without freePort() evicting the other's workers.
+const IDENTITY_PORT = Number(process.env.DEV_STACK_IDENTITY_PORT) || 8788
+const SYNC_PORT = Number(process.env.DEV_STACK_SYNC_PORT) || 8789
 const DEFAULT_VITE_PORT = 5173
 
 // D1→Neon migration (FRO-146): auth-worker + sync-worker bind HYPERDRIVE and

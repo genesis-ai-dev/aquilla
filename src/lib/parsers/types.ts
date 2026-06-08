@@ -80,6 +80,8 @@ export interface TranslationRule {
   createdAt: string
   autofix?: RuleAutofix
   autofixAttemptedAt?: string  // ISO; absent means never tried
+  /** For org-scoped rules promoted from a project: the originating project id. */
+  sourceProjectId?: string
 }
 
 export type RuleCheck =
@@ -100,6 +102,16 @@ export interface InfractionSpan {
   end: number
   /** The matched substring — retained for popover context and debugging. */
   matchedText: string
+}
+
+/** A request from a project_lead to promote a project rule to org scope. */
+export interface PromotionRequest {
+  id: string
+  rule: TranslationRule
+  sourceProjectId: string
+  requestedBy: number
+  requestedByName?: string
+  requestedAt: string
 }
 
 export interface RuleWaiver {

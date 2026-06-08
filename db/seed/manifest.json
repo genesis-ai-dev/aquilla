@@ -1,0 +1,34 @@
+{
+  "version": 1,
+  "description": "Curated allowlist of internal/test prod projects seeded into dev. Edit projectIds to add/remove; re-run `npm run seed:extract` to regenerate the bundle.",
+  "projectIds": [
+    "41ee4729-6862-51b1-b89c-47401d1a7850",
+    "5a75dd78-f4a6-5454-81c6-8a7dc7efd9aa",
+    "9f9c4294-e23c-5391-b2da-f790c69aa6a9",
+    "f7818397-91e8-53de-abb5-6126c566e9e2",
+    "6ecec038-70e8-5e62-8087-8afbe1bc3548",
+    "d51f82a7-a50c-5897-9c38-b4a2272c370a",
+    "d04c4f29-a7cb-55e3-9c2b-5fe5eedcfbd2",
+    "40be0415-2364-5ec8-8c5d-e2ad6d99e760"
+  ],
+  "projectNotes": {
+    "41ee4729-6862-51b1-b89c-47401d1a7850": "bestalu-bible (BCS) — flagship large",
+    "5a75dd78-f4a6-5454-81c6-8a7dc7efd9aa": "suvvali-bible (BCS) — large",
+    "9f9c4294-e23c-5391-b2da-f790c69aa6a9": "tamil-alignment (BCS) — alignment kind",
+    "f7818397-91e8-53de-abb5-6126c566e9e2": "nagamese-pilgrims-progress (BCS) — multi-file non-Bible",
+    "6ecec038-70e8-5e62-8087-8afbe1bc3548": "hindi-pilgrims-progress (BCS) — tiny single-file",
+    "d51f82a7-a50c-5897-9c38-b4a2272c370a": "commentaries-test (BCS) — smallest, commentary kind",
+    "d04c4f29-a7cb-55e3-9c2b-5fe5eedcfbd2": "audio-dubbing-playground (Come and See) — audio surface",
+    "40be0415-2364-5ec8-8c5d-e2ad6d99e760": "Copy-of-test-matthew-audio-dubbing (Chosen-test-playground) — small audio"
+  },
+  "scrub": {
+    "emailDomain": "example.test",
+    "keepDisplayNames": false
+  },
+  "r2": {
+    "accountId": "6a80496d1e59948a9cbaa3c643ba81d7",
+    "bucket": "aquilla-snapshots",
+    "prefix": "seed/",
+    "bundleName": "dev-seed-v1.jsonl.zst"
+  }
+}

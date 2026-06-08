@@ -22,6 +22,7 @@ export function useRules(
   project: ProjectRecord | null,
   refresh: () => void,
   patchShared?: PatchSharedFn,
+  orgRules?: TranslationRule[],
 ) {
   const userRules = project?.rules || []
   const algorithmicChecks = project?.algorithmicChecks
@@ -39,13 +40,11 @@ export function useRules(
     [terminology],
   )
 
-  // Built-ins first so they appear at the top of the rule pipeline. Order
-  // doesn't affect correctness (each rule is independent) but is stable.
-  // Terminology rules append after user rules so user rules take precedence
-  // in any display ordering.
+  // Order: builtins → org rules → project rules → terminology.
+  // Project rules can shadow org rules (same id wins in evaluation order).
   const rules = useMemo(
-    () => [...builtinRules, ...userRules, ...terminologyRules],
-    [builtinRules, userRules, terminologyRules],
+    () => [...builtinRules, ...(orgRules ?? []), ...userRules, ...terminologyRules],
+    [builtinRules, orgRules, userRules, terminologyRules],
   )
 
   const addRule = useCallback(async (rule: Omit<TranslationRule, "id" | "createdAt">) => {

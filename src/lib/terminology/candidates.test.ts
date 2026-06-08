@@ -168,4 +168,50 @@ describe("extractCandidates — basic contracts", () => {
   it("returns empty for an empty corpus", () => {
     expect(extractCandidates([], {})).toEqual([])
   })
+
+  it("caps the mined corpus to maxCorpusStrings (only the first N strings count)", () => {
+    // The first 4 strings establish "alpha beta" (freq 4); the tail introduces
+    // "gamma delta" (freq 4) which must NOT appear when capped to the head.
+    const corpus = [
+      "alpha beta",
+      "alpha beta",
+      "alpha beta",
+      "alpha beta",
+      "gamma delta",
+      "gamma delta",
+      "gamma delta",
+      "gamma delta",
+    ]
+    const out = extractCandidates(corpus, {
+      minTermFreq: 2,
+      maxResults: 50,
+      maxCorpusStrings: 4,
+    })
+    expect(out.some((c) => c.term === "alpha beta")).toBe(true)
+    // The capped-off tail is invisible to mining.
+    expect(out.some((c) => c.term.includes("gamma"))).toBe(false)
+    // Without the cap, the tail's terms are mined.
+    const uncapped = extractCandidates(corpus, { minTermFreq: 2, maxResults: 50 })
+    expect(uncapped.some((c) => c.term === "gamma delta")).toBe(true)
+  })
+
+  it("containment optimization preserves nestedness scoring (regression)", () => {
+    // Exercises the sub-n-gram containment indexing: a maximal phrase whose
+    // every sub-fragment is nested must still drive the fragments' C-value to 0,
+    // exactly as the prior pairwise O(n^2) check did.
+    const corpus = [
+      "the new covenant of grace",
+      "the new covenant of grace",
+      "the new covenant of grace",
+    ]
+    const out = extractCandidates(corpus, { minTermFreq: 2, maxResults: 50 })
+    const maximal = out.find((c) => c.term === "the new covenant of grace")
+    const fragment = out.find((c) => c.term === "new covenant")
+    expect(maximal).toBeDefined()
+    expect(fragment).toBeDefined()
+    // Every proper sub-phrase shares the maximal phrase's frequency, so the
+    // nestedness adjustment zeroes them out.
+    expect(fragment!.cValue).toBe(0)
+    expect(maximal!.cValue).toBeGreaterThan(0)
+  })
 })

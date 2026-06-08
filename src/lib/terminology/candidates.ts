@@ -51,6 +51,13 @@ export interface ExtractCandidatesOptions {
   minTermFreq?: number
   /** Cap on returned candidates (by ncValue desc). Default 100. */
   maxResults?: number
+  /**
+   * Optional cap on the number of corpus strings actually mined. When the
+   * corpus exceeds this, only the first `maxCorpusStrings` are used and the
+   * caller is expected to surface the cap in the UI. Bounds the otherwise
+   * super-linear n-gram + containment work. Default: no cap.
+   */
+  maxCorpusStrings?: number
 }
 
 const MAX_NGRAM = 5
@@ -117,6 +124,13 @@ function buildNgrams(corpus: string[]): Map<string, NgramStats> {
 /**
  * For each candidate, find the candidates that strictly contain it as a
  * contiguous sub-sequence (its "supersequences"). Used for the nestedness term.
+ *
+ * Instead of the naive O(|keys|²) pairwise containment check, we walk each
+ * (longer) candidate and enumerate its contiguous sub-n-grams, looking each up
+ * in the candidate set. Because MAX_NGRAM is a small constant (5), each long
+ * candidate yields at most ~MAX_NGRAM² sub-n-grams, so this is O(|keys| ·
+ * MAX_NGRAM²) — linear in the candidate count rather than quadratic. This is
+ * the hot path that previously wedged the UI on large corpora.
  */
 function buildContainment(
   keys: string[],
@@ -125,44 +139,28 @@ function buildContainment(
   const supersOf = new Map<string, string[]>()
   for (const k of keys) supersOf.set(k, [])
 
-  // Group keys by length for an O(shorter × longer-of-greater-length) check.
-  const byLen = new Map<number, string[]>()
-  for (const k of keys) {
-    const len = byKey.get(k)!.tokens.length
-    if (!byLen.has(len)) byLen.set(len, [])
-    byLen.get(len)!.push(k)
-  }
+  const candidateSet = new Set(keys)
 
-  for (const shortKey of keys) {
-    const shortTokens = byKey.get(shortKey)!.tokens
-    const shortLen = shortTokens.length
-    for (let longLen = shortLen + 1; longLen <= MAX_NGRAM; longLen++) {
-      const longers = byLen.get(longLen)
-      if (!longers) continue
-      for (const longKey of longers) {
-        if (containsSubsequence(byKey.get(longKey)!.tokens, shortTokens)) {
-          supersOf.get(shortKey)!.push(longKey)
+  for (const longKey of keys) {
+    const longTokens = byKey.get(longKey)!.tokens
+    const longLen = longTokens.length
+    if (longLen < 2) continue
+    // De-dup the sub-n-grams contributed by THIS long candidate so a repeated
+    // sub-sequence (e.g. "the the") only registers one containment edge —
+    // matching the old pairwise behaviour where each shorter key was added once.
+    const seen = new Set<string>()
+    for (let subLen = 1; subLen < longLen; subLen++) {
+      for (let i = 0; i + subLen <= longLen; i++) {
+        const subKey = longTokens.slice(i, i + subLen).join(" ")
+        if (seen.has(subKey)) continue
+        seen.add(subKey)
+        if (candidateSet.has(subKey)) {
+          supersOf.get(subKey)!.push(longKey)
         }
       }
     }
   }
   return supersOf
-}
-
-/** True if `needle` appears as a contiguous run inside `haystack`. */
-function containsSubsequence(haystack: string[], needle: string[]): boolean {
-  if (needle.length > haystack.length) return false
-  for (let i = 0; i + needle.length <= haystack.length; i++) {
-    let match = true
-    for (let j = 0; j < needle.length; j++) {
-      if (haystack[i + j] !== needle[j]) {
-        match = false
-        break
-      }
-    }
-    if (match) return true
-  }
-  return false
 }
 
 /**
@@ -270,7 +268,12 @@ export function extractCandidates(
     (opts.managed ?? []).map((c) => normalizeTerm(c.sourceTerm)),
   )
 
-  const ngrams = buildNgrams(corpus)
+  const boundedCorpus =
+    opts.maxCorpusStrings != null && corpus.length > opts.maxCorpusStrings
+      ? corpus.slice(0, opts.maxCorpusStrings)
+      : corpus
+
+  const ngrams = buildNgrams(boundedCorpus)
 
   // Candidate pool: meet the frequency floor.
   const keys = [...ngrams.keys()].filter(

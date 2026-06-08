@@ -753,12 +753,86 @@ export function TerminologyPage() {
     return texts
   }, [allCells])
 
-  const candidates = useMemo(
-    () => extractCandidates(candidateCorpus, { managed: concepts }),
-    [candidateCorpus, concepts],
-  )
-
   const [tab, setTab] = useState<"concepts" | "candidates">("concepts")
+
+  // ── Candidate mining (lazy, off-thread) ─────────────────────────────────────
+  // The C-value/NC-value/G² stack is super-linear in corpus size and used to
+  // wedge the main thread for 30s+ on load. We only mine once the user is on the
+  // "Candidate terms" tab, run it in a Web Worker so the UI stays responsive,
+  // and cap the corpus to a bounded size (surfaced in the UI).
+  const CANDIDATE_CORPUS_CAP = 1500
+  const [candidates, setCandidates] = useState<CandidateTerm[]>([])
+  const [candidatesLoading, setCandidatesLoading] = useState(false)
+  const [candidatesReady, setCandidatesReady] = useState(false)
+  const [minedCount, setMinedCount] = useState(0)
+  const candidateWorkerRef = useRef<Worker | null>(null)
+  const candidateReqRef = useRef(0)
+
+  useEffect(() => {
+    return () => {
+      candidateWorkerRef.current?.terminate()
+      candidateWorkerRef.current = null
+    }
+  }, [])
+
+  // Recompute when the corpus or managed concepts change *while the tab is
+  // active*; otherwise just mark stale so the next activation recomputes.
+  useEffect(() => {
+    if (tab !== "candidates") {
+      setCandidatesReady(false)
+      return
+    }
+    let cancelled = false
+    setCandidatesLoading(true)
+    const reqId = ++candidateReqRef.current
+
+    void (async () => {
+      try {
+        const mod = await import("@/lib/terminology/candidates-worker?worker")
+        if (cancelled) return
+        if (!candidateWorkerRef.current) {
+          candidateWorkerRef.current = new mod.default()
+        }
+        const worker = candidateWorkerRef.current
+        worker.onmessage = (e: MessageEvent) => {
+          const data = e.data
+          if (!data || data.requestId !== String(reqId)) return
+          if (data.type === "result") {
+            setCandidates(data.candidates)
+            setMinedCount(data.minedCount)
+            setCandidatesReady(true)
+            setCandidatesLoading(false)
+          } else if (data.type === "error") {
+            setCandidates([])
+            setCandidatesReady(true)
+            setCandidatesLoading(false)
+          }
+        }
+        worker.postMessage({
+          type: "mine",
+          requestId: String(reqId),
+          corpus: candidateCorpus,
+          managed: concepts,
+          maxCorpusStrings: CANDIDATE_CORPUS_CAP,
+        })
+      } catch {
+        // Worker failed to load (e.g. unsupported env): fall back to inline.
+        if (cancelled) return
+        const out = extractCandidates(candidateCorpus, {
+          managed: concepts,
+          maxCorpusStrings: CANDIDATE_CORPUS_CAP,
+        })
+        setCandidates(out)
+        setMinedCount(Math.min(candidateCorpus.length, CANDIDATE_CORPUS_CAP))
+        setCandidatesReady(true)
+        setCandidatesLoading(false)
+      }
+    })()
+
+    return () => {
+      cancelled = true
+    }
+  }, [tab, candidateCorpus, concepts])
   const [addOpen, setAddOpen] = useState(false)
   const [editTarget, setEditTarget] = useState<Concept | null>(null)
   const [importOpen, setImportOpen] = useState(false)
@@ -1020,7 +1094,12 @@ export function TerminologyPage() {
         <div className="inline-flex rounded-md border p-0.5 text-sm">
           {([
             { key: "concepts", label: `Concepts (${concepts.length})` },
-            { key: "candidates", label: `Candidate terms (${candidates.length})` },
+            {
+              key: "candidates",
+              label: candidatesReady
+                ? `Candidate terms (${candidates.length})`
+                : "Candidate terms",
+            },
           ] as const).map((t) => (
             <button
               key={t.key}
@@ -1045,16 +1124,28 @@ export function TerminologyPage() {
             </CardHeader>
             <CardContent className="space-y-3">
               <p className="text-xs text-muted-foreground">
-                Mined from {candidateCorpus.length} loaded source/WIP cell text
-                {candidateCorpus.length === 1 ? "" : "s"} — ranked over loaded cells
-                only, not the full project. Keyness (G²) uses a derived
-                rest-of-corpus baseline. Promoting adds a suggested concept you can
-                then give renderings.
+                Mined from{" "}
+                {candidatesReady ? minedCount : Math.min(candidateCorpus.length, CANDIDATE_CORPUS_CAP)}{" "}
+                source/WIP cell text
+                {(candidatesReady ? minedCount : candidateCorpus.length) === 1 ? "" : "s"}
+                {candidateCorpus.length > CANDIDATE_CORPUS_CAP
+                  ? ` (capped at the first ${CANDIDATE_CORPUS_CAP} of ${candidateCorpus.length} loaded cells for responsiveness)`
+                  : ""}{" "}
+                — ranked over loaded cells only, not the full project. Keyness (G²)
+                uses a derived rest-of-corpus baseline. Promoting adds a suggested
+                concept you can then give renderings.
               </p>
-              <CandidateTermsPanel
-                candidates={candidates}
-                onPromote={handlePromoteCandidate}
-              />
+              {candidatesLoading && !candidatesReady ? (
+                <div className="flex items-center gap-2 py-8 text-sm text-muted-foreground">
+                  <span className="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
+                  Mining candidate terms…
+                </div>
+              ) : (
+                <CandidateTermsPanel
+                  candidates={candidates}
+                  onPromote={handlePromoteCandidate}
+                />
+              )}
             </CardContent>
           </Card>
         ) : (

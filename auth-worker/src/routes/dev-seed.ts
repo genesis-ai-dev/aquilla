@@ -132,6 +132,27 @@ async function upsertProjectMember(
     .run()
 }
 
+// SWARM-TODO (FRO terminology demo-truth): the Wave-1 QA bug ("seeded concept
+// grace→gracia doesn't match Adzera source cells") cannot be fixed here. This
+// route seeds ONLY users / orgs / projects / members in D1 (aquilla-db). It
+// seeds NO files, NO cells, and NO concepts:
+//   - There is no `concepts` table in any auth-worker migration. Concepts are
+//     a client-side (IndexedDB) model per AD-3 thin-client; see
+//     src/lib/terminology/types.ts (Concept) — they are derived/compiled on the
+//     client, not persisted in D1.
+//   - The only `grace→gracia` concept in the repo lives in unit-test fixtures
+//     (src/lib/terminology/terminology.test.ts, stats.test.ts), not in any seed.
+//   - The dev project's source/target cells are not inserted by any route here;
+//     the `cells` table belongs to the codex DB and is populated via sync
+//     events, not by dev-seed.
+// To make terminology demo-true on the dev project, the fix must land where the
+// dev project's CELLS and CONCEPTS are actually materialized for a fresh dev
+// login (client-side IDB seed / sync-event seed), NOT in this D1 seed route.
+// NEEDED to proceed: (1) confirmation of where dev-project source/target cells
+// are seeded for the browser (IDB bootstrap vs sync-worker fixture), and (2) the
+// real source language + sample source/target cell text so a managed Concept
+// whose sourceTerm actually occurs in the source corpus can be added there.
+
 const devSeed = new Hono<AuthHonoEnv>()
 
 async function seedDev(db: D1Database): Promise<{

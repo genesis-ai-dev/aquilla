@@ -31,6 +31,8 @@ import type {
 import { ValidationSettingsSection } from "./ProjectSettings/ValidationSettingsSection"
 import { DecaySettingsSection } from "./ProjectSettings/DecaySettingsSection"
 import { AudioMediaStrategySection } from "./ProjectSettings/AudioMediaStrategySection"
+import { TermbaseSharingSection } from "./ProjectSettings/TermbaseSharingSection"
+import { useOrg } from "@/hooks/useOrg"
 import { ApiKeyField } from "./ApiKeyField"
 import { SettingsNav, useScrollSpy, type SettingsSection } from "./ProjectSettings/SettingsNav"
 import { readValidationCount, readValidationCountAudio } from "@/lib/progress/read-validation-count"
@@ -149,6 +151,11 @@ export function ProjectSettings() {
     conflict: sharedConflict,
     dismissConflict,
   } = useProjectSettings(id ?? null, project?.syncRole?.level ?? null)
+
+  // Org context for the termbase-sharing section. The user's org; the section's
+  // server calls re-validate org-membership / org-ownership, so a mismatch just
+  // yields graceful empty/403 states.
+  const { org } = useOrg()
 
   const sharedDisabledTooltip =
     reasonCannotEdit === "offline" ? "Reconnect to edit shared settings."
@@ -508,6 +515,7 @@ export function ProjectSettings() {
     { id: "section-audio-media", label: "Audio Media", keywords: ["audio media strategy", "lazy", "eager"] },
     { id: "section-git-sync", label: "Git Sync", keywords: ["git", "sync", "auto sync", "interval", "branch", "clone"], visible: hasGitOrigin },
     { id: "section-terminology", label: "Terminology", keywords: ["terminology", "termbase", "glossary", "concepts"] },
+    { id: "section-termbase-sharing", label: "Termbase Sharing", keywords: ["termbase", "publish", "subscribe", "org", "shared", "glossary"] },
   ]
 
   // ── Search filter ──────────────────────────────────────────────────────────
@@ -1021,6 +1029,13 @@ export function ProjectSettings() {
               </Button>
             </CardContent>
           </Card>
+        )}
+        {id && visibleSections.some((s) => s.id === "section-termbase-sharing") && (
+          <TermbaseSharingSection
+            projectId={id}
+            orgId={org?.id ?? null}
+            roleLevel={project?.syncRole?.level ?? null}
+          />
         )}
 
         </main>

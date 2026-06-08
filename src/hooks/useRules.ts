@@ -11,6 +11,7 @@ import { patchProject } from "@/lib/store/project-index"
 import { resolveBuiltinRules } from "@/lib/lqa/builtin-resolver"
 import type { ProjectWideSettings } from "@/lib/sync/project-settings"
 import { compileConceptsToRules } from "@/lib/terminology/compile"
+import type { Concept } from "@/lib/terminology/types"
 
 /**
  * Optional callback that syncs the given partial settings slice to D1.
@@ -23,6 +24,16 @@ export function useRules(
   refresh: () => void,
   patchShared?: PatchSharedFn,
   orgRules?: TranslationRule[],
+  /**
+   * Active concepts from this project's termbase subscriptions, already
+   * flattened in subscription-priority order (see useSubscribedConcepts).
+   * These are org-MANAGED, DETERMINISTIC terms: they are compiled through the
+   * exact same compileConceptsToRules path as local terminology, so the
+   * deterministic/probabilistic contract is identical for subscribed and local
+   * concepts. Subscribed concepts take precedence over local terminology and
+   * so are unioned ahead of it.
+   */
+  subscribedConcepts?: Concept[],
 ) {
   const userRules = project?.rules || []
   const algorithmicChecks = project?.algorithmicChecks
@@ -34,14 +45,22 @@ export function useRules(
     [algorithmicChecks],
   )
 
-  // Terminology concepts compiled to TranslationRule instances (derived on read).
+  // Subscribed (org-managed) concepts union local terminology, subscribed
+  // first (higher precedence), then compiled together so they share the
+  // identical derive-on-read path. Subscribed concepts are already in
+  // subscription-priority order from useSubscribedConcepts.
   const terminologyRules = useMemo(
-    () => compileConceptsToRules(terminology ?? []),
-    [terminology],
+    () =>
+      compileConceptsToRules([
+        ...(subscribedConcepts ?? []),
+        ...(terminology ?? []),
+      ]),
+    [subscribedConcepts, terminology],
   )
 
-  // Order: builtins → org rules → project rules → terminology.
-  // Project rules can shadow org rules (same id wins in evaluation order).
+  // Order: builtins → org rules → project rules → terminology
+  // (subscribed + local). Project rules can shadow org rules (same id wins in
+  // evaluation order).
   const rules = useMemo(
     () => [...builtinRules, ...(orgRules ?? []), ...userRules, ...terminologyRules],
     [builtinRules, orgRules, userRules, terminologyRules],

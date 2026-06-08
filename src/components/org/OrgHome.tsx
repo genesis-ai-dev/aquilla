@@ -10,8 +10,26 @@ import { WorkloadRollup } from "./WorkloadRollup"
 
 const STALE_THRESHOLD_MS = 14 * 24 * 60 * 60 * 1000
 
-function isStalled(p: PortfolioProject, now: number): boolean {
-  return p.lastEditAt == null || now - p.lastEditAt > STALE_THRESHOLD_MS
+type ActivityStatus = "not-started" | "stalled" | "active"
+
+type StatusFilter = "all" | "active" | "stalled" | "overdue"
+
+const STATUS_FILTERS: { value: StatusFilter; label: string }[] = [
+  { value: "all", label: "All" },
+  { value: "active", label: "Active" },
+  { value: "stalled", label: "Stalled" },
+  { value: "overdue", label: "Overdue" },
+]
+
+/**
+ * A project that has never been edited and has no translated cells hasn't
+ * stalled — it just hasn't started yet. "Stalled" is reserved for projects
+ * that had activity and then went quiet for 14+ days.
+ */
+export function activityStatus(p: PortfolioProject, now: number): ActivityStatus {
+  if (p.lastEditAt == null && p.filledCells === 0) return "not-started"
+  if (p.lastEditAt == null || now - p.lastEditAt > STALE_THRESHOLD_MS) return "stalled"
+  return "active"
 }
 
 export function OrgHome() {
@@ -22,6 +40,8 @@ export function OrgHome() {
   const [projects, setProjects] = useState<PortfolioProject[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [query, setQuery] = useState("")
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>("all")
 
   useEffect(() => {
     if (!jwt || activeOrgId == null) return
@@ -53,13 +73,29 @@ export function OrgHome() {
     projects.length > 0
       ? projects.reduce((sum, p) => sum + validatedPct(p), 0) / projects.length
       : 0
-  const stalledCount = projects.filter((p) => isStalled(p, now)).length
+  const stalledCount = projects.filter((p) => activityStatus(p, now) === "stalled").length
   const overdueCount = projects.filter((p) => deadlineStatus(p, now) === "overdue").length
   const avgAudioPct =
     projects.length > 0 ? projects.reduce((sum, p) => sum + audioPct(p), 0) / projects.length : 0
 
   // Attention-ranked list
   const ranked = [...projects].sort((a, b) => attentionRank(b, now) - attentionRank(a, now))
+
+  // Filter bar — narrows the listed projects only; the rollup strip above
+  // continues to reflect the full portfolio.
+  const visible = ranked.filter((p) => {
+    if (query && !p.name.toLowerCase().includes(query.toLowerCase())) return false
+    switch (statusFilter) {
+      case "active":
+        return activityStatus(p, now) === "active"
+      case "stalled":
+        return activityStatus(p, now) === "stalled"
+      case "overdue":
+        return deadlineStatus(p, now) === "overdue"
+      default:
+        return true
+    }
+  })
 
   return (
     <AppShell
@@ -107,16 +143,49 @@ export function OrgHome() {
                 </div>
               </div>
 
+              {/* Filter bar */}
+              {projects.length > 0 && (
+                <div className="flex flex-wrap items-center gap-3">
+                  <input
+                    type="text"
+                    value={query}
+                    onChange={(e) => setQuery(e.target.value)}
+                    placeholder="Filter projects…"
+                    aria-label="Filter projects by name"
+                    className="h-9 w-56 rounded-md border bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  />
+                  <div className="flex items-center gap-1">
+                    {STATUS_FILTERS.map((f) => (
+                      <button
+                        key={f.value}
+                        type="button"
+                        onClick={() => setStatusFilter(f.value)}
+                        aria-pressed={statusFilter === f.value}
+                        className={`rounded-full px-3 py-1 text-xs font-medium transition-colors ${
+                          statusFilter === f.value
+                            ? "bg-primary text-primary-foreground"
+                            : "bg-muted text-muted-foreground hover:bg-muted/70"
+                        }`}
+                      >
+                        {f.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
               {/* Attention-ranked list */}
               {projects.length === 0 ? (
                 <p className="text-sm text-muted-foreground">No projects in this org yet.</p>
+              ) : visible.length === 0 ? (
+                <p className="text-sm text-muted-foreground">No matching projects.</p>
               ) : (
                 <div className="rounded-lg border divide-y">
-                  {ranked.map((p) => {
+                  {visible.map((p) => {
                     const tpct = Math.round(translatedPct(p) * 100)
                     const pct = Math.round(validatedPct(p) * 100)
                     const apct = Math.round(audioPct(p) * 100)
-                    const stalled = isStalled(p, now)
+                    const status = activityStatus(p, now)
                     const dstatus = deadlineStatus(p, now)
                     return (
                       <Link
@@ -151,8 +220,12 @@ export function OrgHome() {
                           </div>
                         </div>
                         <div className="shrink-0 text-right">
-                          <p className={`text-xs ${stalled ? "text-destructive" : "text-muted-foreground"}`}>
-                            {stalled ? "Stalled" : `${tpct}% translated`}
+                          <p className={`text-xs ${status === "stalled" ? "text-destructive" : "text-muted-foreground"}`}>
+                            {status === "stalled"
+                              ? "Stalled"
+                              : status === "not-started"
+                                ? "Not started"
+                                : `${tpct}% translated`}
                           </p>
                           <p className="text-xs text-muted-foreground">{pct}% validated</p>
                           <p className="text-xs text-muted-foreground">{apct}% audio</p>

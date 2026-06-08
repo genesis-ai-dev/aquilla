@@ -1,8 +1,9 @@
 import { describe, it, expect, afterEach, beforeEach, vi } from "vitest"
-import { render, screen, waitFor } from "@testing-library/react"
+import { render, screen, waitFor, fireEvent } from "@testing-library/react"
 import { MemoryRouter } from "react-router-dom"
 import { OrgProvider } from "@/context/OrgContext"
-import { OrgHome } from "./OrgHome"
+import { OrgHome, activityStatus } from "./OrgHome"
+import type { PortfolioProject } from "@/lib/frontier/portfolio"
 
 vi.mock("@/hooks/useFrontierSession", () => ({ useFrontierSession: () => ({ session: { jwt: "jwt", username: "anna", createdAt: "x" }, loading: false }) }))
 vi.mock("@/lib/frontier/orgs", () => ({ listMyOrgs: vi.fn(async () => [{ id: 1, name: "Come and See", role: { level: 700, name: "owner" } }]) }))
@@ -96,5 +97,72 @@ describe("OrgHome", () => {
     // freshEl.compareDocumentPosition(stalledEl) has the PRECEDING bit set (0x2)
     const position = freshEl.compareDocumentPosition(stalledEl)
     expect(position & Node.DOCUMENT_POSITION_PRECEDING).toBeTruthy()
+  })
+
+  it("filters the project list by name without touching the rollup count", async () => {
+    // Why: managers narrowing to one project must not see the portfolio
+    // headline counts (e.g. total Projects = 2) silently change underneath them.
+    render(<MemoryRouter><OrgProvider><OrgHome /></OrgProvider></MemoryRouter>)
+    await waitFor(() => expect(screen.getByText("Legacy Translation")).toBeInTheDocument())
+
+    fireEvent.change(screen.getByLabelText("Filter projects by name"), {
+      target: { value: "testament" },
+    })
+
+    expect(screen.queryByText("Legacy Translation")).not.toBeInTheDocument()
+    expect(screen.getByText("New Testament")).toBeInTheDocument()
+    // rollup count still reads the full portfolio of 2, not the filtered 1
+    expect(screen.getByText("2")).toBeInTheDocument()
+  })
+
+  it("filters to stalled projects via the status chip", async () => {
+    render(<MemoryRouter><OrgProvider><OrgHome /></OrgProvider></MemoryRouter>)
+    await waitFor(() => expect(screen.getByText("New Testament")).toBeInTheDocument())
+
+    fireEvent.click(screen.getByRole("button", { name: "Stalled" }))
+
+    // Legacy Translation is 30 days stale; New Testament was just edited.
+    expect(screen.getByText("Legacy Translation")).toBeInTheDocument()
+    expect(screen.queryByText("New Testament")).not.toBeInTheDocument()
+  })
+
+  it("shows a no-match message when the filter excludes every project", async () => {
+    render(<MemoryRouter><OrgProvider><OrgHome /></OrgProvider></MemoryRouter>)
+    await waitFor(() => expect(screen.getByText("Legacy Translation")).toBeInTheDocument())
+
+    fireEvent.change(screen.getByLabelText("Filter projects by name"), {
+      target: { value: "nonexistent-zzz" },
+    })
+
+    expect(screen.getByText("No matching projects.")).toBeInTheDocument()
+  })
+})
+
+describe("activityStatus", () => {
+  const now = Date.now()
+  const base: PortfolioProject = {
+    id: "p", name: "P", totalCells: 100, validatedCells: 0, filledCells: 0,
+    lastEditAt: null, audioCells: 0, recordedMs: 0, deadlineAt: null,
+  }
+
+  it("treats a never-edited, never-translated project as not-started, not stalled", () => {
+    // Why: a freshly seeded project hasn't lost momentum — flagging it red as
+    // "Stalled" misleads the owner-oversight dashboard.
+    expect(activityStatus({ ...base, lastEditAt: null, filledCells: 0 }, now)).toBe("not-started")
+  })
+
+  it("treats a project that had activity then went quiet 14+ days as stalled", () => {
+    expect(
+      activityStatus({ ...base, lastEditAt: now - 30 * 24 * 60 * 60 * 1000, filledCells: 50 }, now),
+    ).toBe("stalled")
+  })
+
+  it("treats translated-but-never-timestamped work as stalled, not not-started", () => {
+    // filledCells > 0 means real work exists even if lastEditAt is missing.
+    expect(activityStatus({ ...base, lastEditAt: null, filledCells: 10 }, now)).toBe("stalled")
+  })
+
+  it("treats a recently edited project as active", () => {
+    expect(activityStatus({ ...base, lastEditAt: now, filledCells: 5 }, now)).toBe("active")
   })
 })

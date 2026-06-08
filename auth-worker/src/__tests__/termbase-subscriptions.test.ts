@@ -189,3 +189,139 @@ describe("termbase subscriptions", () => {
     expect(((await res.json()) as { subscriptions: unknown[] }).subscriptions).toHaveLength(0)
   })
 })
+
+// ──────────────────────────────────────────────────────────────────────────
+// GET /api/v2/projects/:termbaseProjectId/termbase/concepts (Q19 implicit grant)
+// ──────────────────────────────────────────────────────────────────────────
+
+// Seed the upstream termbase project's terminology into project_settings so the
+// concept-read endpoint has real data to return. One active + one draft concept
+// proves the active-only filter.
+async function seedUpstreamConcepts(projectId: string) {
+  const settings = JSON.stringify({
+    terminology: [
+      {
+        id: "c-active",
+        sourceTerm: "grace",
+        renderings: [{ rendering: "gracia", status: "preferred" }],
+        status: "active",
+        createdAt: "2026-01-01T00:00:00Z",
+      },
+      {
+        id: "c-draft",
+        sourceTerm: "mercy",
+        renderings: [{ rendering: "misericordia", status: "preferred" }],
+        status: "draft",
+        createdAt: "2026-01-01T00:00:00Z",
+      },
+    ],
+  })
+  await env.AQUILLA_DB.prepare(
+    "INSERT INTO project_settings (project_id, settings, version, updated_by) VALUES (?, ?, 1, 1)",
+  )
+    .bind(projectId, settings)
+    .run()
+}
+
+describe("GET /projects/:termbaseProjectId/termbase/concepts", () => {
+  it("returns the upstream's ACTIVE concepts for a valid subscriber member", async () => {
+    await seed()
+    await seedUpstreamConcepts("tb")
+    await req("POST", "/api/v2/projects/tb/termbase/publish", "anna")
+    await req("POST", "/api/v2/projects/consumer/termbase/subscriptions", "anna", { termbaseProjectId: "tb" })
+
+    // tom is a contributor on the subscriber project (via org membership) —
+    // any subscriber-project role suffices for the implicit grant.
+    const res = await req(
+      "GET",
+      "/api/v2/projects/tb/termbase/concepts?subscriberProjectId=consumer",
+      "tom",
+    )
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as { concepts: Array<{ id: string }> }
+    // Only the active concept is returned; the draft is filtered out.
+    expect(body.concepts.map((c) => c.id)).toEqual(["c-active"])
+  })
+
+  it("400 when subscriberProjectId is missing", async () => {
+    await seed()
+    await req("POST", "/api/v2/projects/tb/termbase/publish", "anna")
+    const res = await req("GET", "/api/v2/projects/tb/termbase/concepts", "anna")
+    expect(res.status).toBe(400)
+  })
+
+  it("403 when there is no subscription row (subscribe never happened)", async () => {
+    await seed()
+    await seedUpstreamConcepts("tb")
+    await req("POST", "/api/v2/projects/tb/termbase/publish", "anna")
+    // No subscription created.
+    const res = await req(
+      "GET",
+      "/api/v2/projects/tb/termbase/concepts?subscriberProjectId=consumer",
+      "anna",
+    )
+    expect(res.status).toBe(403)
+  })
+
+  it("403 when the upstream is unpublished even with an existing subscription", async () => {
+    await seed()
+    await seedUpstreamConcepts("tb")
+    await req("POST", "/api/v2/projects/tb/termbase/publish", "anna")
+    await req("POST", "/api/v2/projects/consumer/termbase/subscriptions", "anna", { termbaseProjectId: "tb" })
+    // Unpublish — the dangling subscription must become inert.
+    await req("DELETE", "/api/v2/projects/tb/termbase/publish", "anna")
+    const res = await req(
+      "GET",
+      "/api/v2/projects/tb/termbase/concepts?subscriberProjectId=consumer",
+      "anna",
+    )
+    expect(res.status).toBe(403)
+  })
+
+  it("403 when the requester is not a member of the subscriber project", async () => {
+    await seed()
+    await seedUpstreamConcepts("tb")
+    await req("POST", "/api/v2/projects/tb/termbase/publish", "anna")
+    await req("POST", "/api/v2/projects/consumer/termbase/subscriptions", "anna", { termbaseProjectId: "tb" })
+    // stranger has no membership anywhere.
+    const res = await req(
+      "GET",
+      "/api/v2/projects/tb/termbase/concepts?subscriberProjectId=consumer",
+      "stranger",
+    )
+    expect(res.status).toBe(403)
+  })
+
+  it("403 for a cross-org subscription pointing at a published upstream", async () => {
+    await seed()
+    await seedUpstreamConcepts("other")
+    // 'other' lives in org 2; publish it directly and forge a cross-org
+    // subscription row so we exercise the same-org gate in canReadTermbase.
+    await env.AQUILLA_DB.prepare(
+      "UPDATE projects SET org_published_termbase = TRUE WHERE id = 'other'",
+    ).run()
+    await env.AQUILLA_DB.prepare(
+      "INSERT INTO project_termbase_subscriptions (project_id, termbase_project_id, priority) VALUES ('consumer', 'other', 0)",
+    ).run()
+    const res = await req(
+      "GET",
+      "/api/v2/projects/other/termbase/concepts?subscriberProjectId=consumer",
+      "anna",
+    )
+    expect(res.status).toBe(403)
+  })
+
+  it("returns empty concepts when upstream has no terminology settings", async () => {
+    await seed()
+    // No seedUpstreamConcepts — upstream has no project_settings row.
+    await req("POST", "/api/v2/projects/tb/termbase/publish", "anna")
+    await req("POST", "/api/v2/projects/consumer/termbase/subscriptions", "anna", { termbaseProjectId: "tb" })
+    const res = await req(
+      "GET",
+      "/api/v2/projects/tb/termbase/concepts?subscriberProjectId=consumer",
+      "anna",
+    )
+    expect(res.status).toBe(200)
+    expect(((await res.json()) as { concepts: unknown[] }).concepts).toHaveLength(0)
+  })
+})

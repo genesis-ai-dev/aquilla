@@ -49,15 +49,24 @@
 //    rows that exist as subscriptions are updated; unknown ids are ignored.
 //    → 200 { subscriptions: [...] }  (same shape as GET)
 //
+// 8. GET /api/v2/projects/:termbaseProjectId/termbase/concepts?subscriberProjectId=...
+//    The upstream published termbase's ACTIVE concepts, for a subscriber's
+//    enforcement merge (consumed by src/hooks/useSubscribedConcepts.ts).
+//    Access is the Q19 implicit grant — canReadTermbase, NOT a role check on
+//    the upstream. Concepts are read from project_settings.settings.terminology
+//    (AD-3 thin-client: project terminology is synced as a top-level settings
+//    key, see src/lib/sync/project-settings.ts).
+//    → 200 { concepts: Concept[] }   // status === "active" only
+//    → 400 { error: "subscriberProjectId required" }
+//    → 403 { error: "no termbase read access" }  (non-member / no subscription /
+//          unpublished / cross-org)
+//
 // Implicit grant (Q19): a subscription row confers an implicit *viewer* read on
 // the upstream termbase project, scoped to termbase data only. This mirrors the
 // source-project link pattern (canReadSourceCells). The read is DERIVED from
 // the subscription row at resolve time — no project_members write is performed.
-// SWARM-TODO(client/terminology): the upstream termbase READ resolver
-// (analogous to canReadSourceCells, e.g. canReadTermbase(viewerProjectId,
-// termbaseProjectId)) is consumed by the termbase-data read endpoints, which
-// live outside this server slice. This module owns the subscription rows that
-// such a resolver reads; wire the resolver in the termbase-data read path.
+// The resolver is `canReadTermbase` in services/org-permissions.ts; route #8
+// above is the termbase-data read endpoint that consumes it.
 
 import { Hono } from "hono"
 import { zValidator } from "@hono/zod-validator"
@@ -65,7 +74,7 @@ import { z } from "zod"
 import { authMiddleware, type AuthHonoEnv } from "../middleware/auth"
 import { ROLE } from "../types"
 import { resolveProjectRole } from "../services/project-permissions"
-import { getOrgMemberRole } from "../services/org-permissions"
+import { getOrgMemberRole, canReadTermbase } from "../services/org-permissions"
 
 const termbase = new Hono<AuthHonoEnv>()
 
@@ -347,5 +356,62 @@ termbase.patch(
     return c.json({ subscriptions })
   },
 )
+
+// ──────────────────────────────────────────────────────────────────────────
+// GET /api/v2/projects/:termbaseProjectId/termbase/concepts — upstream concept
+// read via the Q19 implicit subscription grant (canReadTermbase).
+// ──────────────────────────────────────────────────────────────────────────
+
+interface Concept {
+  id: string
+  sourceTerm: string
+  renderings: Array<{ rendering: string; status: string }>
+  notes?: string
+  status: "active" | "draft" | "deprecated"
+  createdAt: string
+  createdBy?: string
+  updatedAt?: string
+}
+
+termbase.get("/:termbaseProjectId/termbase/concepts", authMiddleware, async (c) => {
+  const user = c.get("user")
+  const termbaseProjectId = c.req.param("termbaseProjectId") as string
+  const subscriberProjectId = c.req.query("subscriberProjectId")
+
+  if (!subscriberProjectId) {
+    return c.json({ error: "subscriberProjectId required" }, 400)
+  }
+
+  const allowed = await canReadTermbase(c.env, user, {
+    subscriberProjectId,
+    termbaseProjectId,
+  })
+  if (!allowed) return c.json({ error: "no termbase read access" }, 403)
+
+  // Project terminology is persisted as a top-level key in the upstream's
+  // project_settings JSON (AD-3 thin-client; src/lib/sync/project-settings.ts).
+  // Read it directly here rather than round-tripping the settings route, which
+  // would require a role on the upstream we deliberately don't grant.
+  const row = await c.env.AQUILLA_DB.prepare(
+    "SELECT settings FROM project_settings WHERE project_id = ?",
+  )
+    .bind(termbaseProjectId)
+    .first<{ settings: string }>()
+
+  let concepts: Concept[] = []
+  if (row?.settings) {
+    try {
+      const parsed = JSON.parse(row.settings) as { terminology?: Concept[] }
+      const all = Array.isArray(parsed.terminology) ? parsed.terminology : []
+      concepts = all.filter((c) => c.status === "active")
+    } catch {
+      // Corrupt settings JSON — return no concepts rather than 500ing the
+      // subscriber's enforcement merge.
+      concepts = []
+    }
+  }
+
+  return c.json({ concepts })
+})
 
 export default termbase

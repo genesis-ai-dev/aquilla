@@ -1,6 +1,7 @@
 // Organization-permission helpers for the codex-web identity/project backend.
 
 import type { Env, AuthUser } from "../types"
+import { resolveProjectRole } from "./project-permissions"
 
 /** Map numeric role level to a human-readable name. Used for secondarySources. */
 function roleNameForLevel(level: number): string {
@@ -886,4 +887,75 @@ export async function listUserDirectMembershipsInOrg(
     projectName: r.project_name,
     roleLevel: r.role_level,
   }))
+}
+
+/**
+ * Q19 implicit-grant read resolver for org termbase publish/subscribe
+ * (terminology Slices 6-7; aquilla-specs 04-features/terminology.md §"Termbase
+ * — sharing across projects"). Mirrors canReadSourceCells in
+ * services/project-permissions.ts: a subscription row confers an implicit,
+ * read-only, termbase-data-only grant on the upstream published project — no
+ * project_members write is performed.
+ *
+ * Returns true iff ALL of:
+ *   1. The user is a member of `subscriberProjectId` (any role) — i.e. they
+ *      can read the subscriber project in whose context they operate.
+ *   2. An active subscription row exists in project_termbase_subscriptions
+ *      from `subscriberProjectId` to `termbaseProjectId`.
+ *   3. The upstream `termbaseProjectId` is org_published_termbase=true, not
+ *      archived, and lives in the SAME org as the subscriber.
+ *
+ * Direct membership in the upstream is NOT a path here: this resolver is
+ * exclusively the derived termbase-data read. A direct upstream member reads
+ * the upstream's terminology through the normal project-settings path; the
+ * termbase-concepts endpoint is the cross-project implicit grant only.
+ *
+ * Note: reading concepts from upstream does NOT grant any other rights on
+ * upstream — callers must NOT use this resolver as a substitute for
+ * resolveProjectRole when operating on upstream's settings, members, etc.
+ */
+export async function canReadTermbase(
+  env: Env,
+  user: AuthUser,
+  args: { subscriberProjectId: string; termbaseProjectId: string },
+): Promise<boolean> {
+  if (args.subscriberProjectId === args.termbaseProjectId) return false
+
+  // 1. User must be a member of the subscriber project.
+  const subscriberRole = await resolveProjectRole(env, user, args.subscriberProjectId)
+  if (!subscriberRole) return false
+
+  // 2. An active subscription row must link subscriber → termbase.
+  const sub = await env.AQUILLA_DB.prepare(
+    `SELECT 1 AS ok
+       FROM project_termbase_subscriptions
+      WHERE project_id = ? AND termbase_project_id = ?`,
+  )
+    .bind(args.subscriberProjectId, args.termbaseProjectId)
+    .first<{ ok: number }>()
+  if (!sub) return false
+
+  // 3. The upstream must still be published, unarchived, and same-org as the
+  //    subscriber. A subscription left dangling after an unpublish (TERM3 #2)
+  //    is inert — the grant evaporates the moment publishing stops.
+  const subscriber = await env.AQUILLA_DB.prepare(
+    "SELECT org_id FROM projects WHERE id = ?",
+  )
+    .bind(args.subscriberProjectId)
+    .first<{ org_id: number | null }>()
+  if (!subscriber) return false
+
+  const upstream = await env.AQUILLA_DB.prepare(
+    "SELECT org_id, org_published_termbase FROM projects WHERE id = ? AND archived_at IS NULL",
+  )
+    .bind(args.termbaseProjectId)
+    .first<{ org_id: number | null; org_published_termbase: number | boolean | null }>()
+  if (!upstream) return false
+
+  const isPublished =
+    upstream.org_published_termbase === 1 || upstream.org_published_termbase === true
+  if (!isPublished) return false
+  if (upstream.org_id == null || upstream.org_id !== subscriber.org_id) return false
+
+  return true
 }

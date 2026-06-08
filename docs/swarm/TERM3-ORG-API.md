@@ -68,7 +68,35 @@ Body `{ order: string[] }` — `termbaseProjectId`s in desired precedence;
 index 0 = priority 0 = highest precedence. Unknown ids are ignored.
 - 200 `{ subscriptions: [...] }` (same shape as GET)
 
-## Implicit grant (Q19)
+### 8. GET `/api/v2/projects/:termbaseProjectId/termbase/concepts` — Q19 implicit grant
+
+Query: `?subscriberProjectId=<the subscriber project's id>` (required). Returns
+the upstream published termbase's **active** concepts for the subscriber's
+enforcement merge. Consumed by `src/hooks/useSubscribedConcepts.ts`
+(`fetchTermbaseConcepts`).
+
+Access is the implicit grant, NOT a role check on the upstream — see
+`canReadTermbase` below. The requester needs only to be a member of
+`subscriberProjectId`.
+
+- 200 `{ concepts: Concept[] }` — `status === "active"` only. `Concept` matches
+  `src/lib/terminology/types.ts`.
+- 400 `{ error: "subscriberProjectId required" }`
+- 403 `{ error: "no termbase read access" }` — not a subscriber-project member,
+  no subscription row, upstream unpublished, or cross-org.
+
+**Concept source (resolved):** project terminology is NOT a dedicated table. Per
+AD-3 thin-client it is synced as the top-level `terminology` key inside
+`project_settings.settings` (a JSON-in-TEXT blob; see
+`src/lib/sync/project-settings.ts` `ProjectWideSettings.terminology` and the
+write path in `auth-worker/src/routes/project-settings.ts`). Route #8 reads that
+blob directly (`SELECT settings FROM project_settings WHERE project_id = ?`),
+parses `terminology`, and filters to `status === "active"`. It deliberately does
+NOT round-trip the settings route, which would require an upstream role the
+implicit grant intentionally withholds. Missing/corrupt settings → `[]` (never
+500s the subscriber's merge).
+
+## Implicit grant (Q19) — RESOLVED
 
 A subscription row confers an implicit **viewer** read on the upstream termbase
 project, scoped to termbase data only — mirroring the source-project link
@@ -77,13 +105,21 @@ pattern (`canReadSourceCells` in `services/project-permissions.ts`). The read is
 write is performed (so unsubscribing instantly revokes it, and it never leaks
 into the members UI).
 
-**SWARM-TODO (client/terminology agent):** the upstream termbase READ resolver
-— analogous to `canReadSourceCells`, e.g.
-`canReadTermbase(viewerProjectId, termbaseProjectId)` returning true when a
-`project_termbase_subscriptions(viewerProjectId, termbaseProjectId)` row exists
-— must be wired into the termbase-DATA read endpoints (which live outside this
-server slice). This module owns only the subscription rows such a resolver
-reads.
+The resolver `canReadTermbase(env, user, { subscriberProjectId,
+termbaseProjectId })` lives in `auth-worker/src/services/org-permissions.ts` and
+returns true iff ALL hold:
+
+1. The user is a member of `subscriberProjectId` (any role, via
+   `resolveProjectRole`).
+2. A `project_termbase_subscriptions(subscriberProjectId, termbaseProjectId)`
+   row exists.
+3. The upstream is `org_published_termbase = true`, not archived, and in the
+   SAME org as the subscriber.
+
+Direct upstream membership is intentionally NOT a path — a direct upstream
+member reads its terminology through the normal project-settings route; route #8
+is the cross-project implicit grant only. Unpublishing the upstream (TERM3 #2)
+makes the dangling subscription inert: gate #3 fails and the grant evaporates.
 
 ## SWARM-TODO (orchestrator) — apply migration to live Neon
 

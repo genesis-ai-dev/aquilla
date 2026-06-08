@@ -57,8 +57,7 @@ import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { eagerlyPrefetchPeaks } from "@/lib/audio/eager-peaks"
 import { runTranscribeAll as runBatchTranscribeAll, runSynthAll as runBatchSynthAll } from "@/lib/audio/batch-audio"
 import { notifyAudioAttachmentsChanged } from "@/lib/audio/audio-attachments-bus"
-import { useOutboxFlusher } from "@/hooks/useOutboxFlusher"
-import { usePendingOutboxRecords } from "@/hooks/usePendingOutboxRecords"
+import { useOutbox } from "@/context/OutboxContext"
 import {
   setCqrsOutboxBridge,
   buildFileScopedTokenFetcher,
@@ -266,6 +265,13 @@ export function ProjectWorkspace() {
   useEffect(() => {
     if (!project || !projectId) return
 
+    // The /rules surface deliberately has no file in the URL — don't treat it
+    // as "no file selected" and bounce back to the editor, or the Rules surface
+    // becomes unreachable. (The header Editor/Rules toggle was removed; the
+    // bottom-left Rules nav is the only entry point, so this redirect must not
+    // fight it.)
+    if (location.pathname.endsWith("/rules")) return
+
     // A file is already in the URL: leave it unless the project genuinely
     // doesn't have it (and it isn't a still-pending optimistic import).
     if (routeFileId) {
@@ -313,31 +319,19 @@ export function ProjectWorkspace() {
     projectFiles,
     workspaceTabs.tabs,
     redirectTo,
+    location.pathname,
   ])
   const [importOpen, setImportOpen] = useState(false)
   const [exportOpen, setExportOpen] = useState(false)
   const [drawerRuleId, setDrawerRuleId] = useState<string | null>(null)
   const [searchParams] = useSearchParams()
 
-  // FRO-194: center surface toggle — "editor" or "rules".
-  // Derived from the URL path so /project/:id/rules deep-links work.
-  // The segmented control navigates to/from the /rules sub-path; this
-  // state stays in sync so the shell never unmounts when toggling.
+  // Center surface — "editor" or "rules". Derived from the URL path so
+  // /project/:id/rules deep-links work and the shell never unmounts. The
+  // bottom-left sidebar Rules nav item drives navigation here (the header
+  // toggle was removed — see FRO-194 follow-up).
   const centerSurface: "editor" | "rules" = location.pathname.endsWith("/rules") ? "rules" : "editor"
 
-  function switchSurface(next: "editor" | "rules") {
-    if (!projectId) return
-    if (next === "rules") {
-      navigate(`/project/${projectId}/rules`, { replace: false })
-    } else {
-      // Return to the last active file if available, otherwise project root
-      if (activeFileId) {
-        navigate(`/project/${projectId}/file/${activeFileId}`, { replace: false })
-      } else {
-        navigate(`/project/${projectId}`, { replace: false })
-      }
-    }
-  }
   useEffect(() => {
     const open = searchParams.get("openRule")
     if (open) setDrawerRuleId(open)
@@ -477,22 +471,23 @@ export function ProjectWorkspace() {
     return () => setCqrsOutboxBridge(null)
   }, [project?.id, activeFileId, currentUsername, project?.syncRole?.level])
 
-  const outboxFlushEnabled = Boolean(project?.id && frontierSession?.jwt)
+  // The outbox drain loop is owned by the app-shell OutboxProvider (FRO-221)
+  // so the queue drains on every route, not just inside a project. We consume
+  // its state here for the status-bar indicator and the stale-edit banners.
+  // `getTokenForProjectFile` (local minter) is still used below for the
+  // best-effort "flush immediately after this action" nudges.
   const {
     pendingCount: outboxPending,
     failedCount: outboxFailed,
     failureStreak: outboxFailures,
     refreshPending: refreshOutboxPending,
     flushNow: outboxFlushNow,
+    records: outboxRecords,
     staleSiblingCount: outboxStaleSiblingCount,
     staleSiblingEntries: outboxStaleSiblingEntries,
     clearStaleSiblings: clearStaleSiblings,
     staleSourceCount: outboxStaleSourceCount,
-  } = useOutboxFlusher({
-    enabled: outboxFlushEnabled,
-    getTokenForFile: getTokenForProjectFile,
-    authEpoch: frontierSession?.jwt ?? null,
-  })
+  } = useOutbox()
   // F5/F6: dismiss the notification banners after the user has seen them.
   // For stale siblings the banner is also dismissed implicitly when the
   // user clicks "View in history" (we navigate them to the conflict — they
@@ -501,10 +496,6 @@ export function ProjectWorkspace() {
   const showStaleSiblingBanner =
     outboxStaleSiblingCount > 0 && outboxStaleSiblingEntries.length > 0
   const showStaleSourceBanner = outboxStaleSourceCount > staleSourceBannerDismissed
-  const outboxRecords = usePendingOutboxRecords({
-    enabled: Boolean(project?.id),
-    fileId: null,
-  })
 
   // D1-backed audit stats for the active file with the client outbox applied
   // on top — pending commits/validates show up immediately, before the next
@@ -2039,36 +2030,6 @@ export function ProjectWorkspace() {
               >
                 <Download className="h-4 w-4" />
               </Button>
-            </div>
-
-            <div className="mx-1 h-5 w-px bg-border" aria-hidden="true" />
-
-            {/* FRO-194: Editor / Rules segmented control. */}
-            <div className="flex items-center rounded-full border bg-muted p-0.5 text-xs shrink-0">
-              <button
-                type="button"
-                onClick={() => switchSurface("editor")}
-                className={cn(
-                  "rounded-full px-2.5 py-0.5 transition-all",
-                  centerSurface === "editor"
-                    ? "bg-background shadow-neu-xs font-medium"
-                    : "text-muted-foreground hover:text-foreground",
-                )}
-              >
-                Editor
-              </button>
-              <button
-                type="button"
-                onClick={() => switchSurface("rules")}
-                className={cn(
-                  "rounded-full px-2.5 py-0.5 transition-all",
-                  centerSurface === "rules"
-                    ? "bg-background shadow-neu-xs font-medium"
-                    : "text-muted-foreground hover:text-foreground",
-                )}
-              >
-                Rules
-              </button>
             </div>
 
             <div className="mx-1 h-5 w-px bg-border" aria-hidden="true" />

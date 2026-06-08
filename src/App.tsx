@@ -12,6 +12,7 @@ import { DevLoginRoute } from "@/components/DevLoginRoute"
 import { Preferences } from "@/pages/Preferences"
 import { SyncingProvider, useSyncing } from "@/context/SyncingContext"
 import { OrgProvider } from "@/context/OrgContext"
+import { OutboxProvider } from "@/context/OutboxContext"
 import { AiModelConsentDialog } from "@/components/AiModelConsentDialog"
 import { AiModelDownloadChip } from "@/components/AiModelDownloadChip"
 import { AudioBulkProgressBanner } from "@/components/AudioBulkProgressBanner"
@@ -91,7 +92,12 @@ function SyncFreezeOverlay() {
  * that never mounts this component), so this redirect can never loop back.
  */
 function RootRedirect() {
-  if (!hasAuthHintCookie()) {
+  // A user who has completed onboarding is a real user of the app (they may be
+  // working with local-only projects without a Frontier account), so don't
+  // bounce them to the marketing homepage — only un-onboarded, signed-out
+  // visitors get sent there.
+  const onboarded = localStorage.getItem("codex:onboardingComplete") === "true"
+  if (!hasAuthHintCookie() && !onboarded) {
     // Hard redirect so the Worker (or server) can serve homepage.html.
     // A client-side <Navigate> would stay inside the SPA bundle and find
     // no React Router match for /homepage.
@@ -116,7 +122,9 @@ export default function App() {
       <PrivateModeBanner />
       <SyncFreezeOverlay />
       <OrgProvider>
-        <AppRoutes />
+        <OutboxProvider>
+          <AppRoutes />
+        </OutboxProvider>
       </OrgProvider>
       <AiModelConsentDialog />
       <AiModelDownloadChip />

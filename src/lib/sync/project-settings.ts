@@ -36,6 +36,12 @@ export interface ProjectWideSettings {
   terminology?: Concept[]
   /** Authored living-memory guidance entries (instructions + standards). */
   livingMemoryEntries?: LivingMemoryEntry[]
+  /**
+   * Persisted interlinear alignment seeds (FRO-207). Each entry is a
+   * (srcToken, tgtToken, weight) triple; positive weight = confirmed,
+   * negative = invalidated. Synced additively the same way as `terminology`.
+   */
+  alignmentSeeds?: import("@/lib/completion/interlinear").AlignmentSeed[]
 }
 
 export interface ProjectSettingsResponse {

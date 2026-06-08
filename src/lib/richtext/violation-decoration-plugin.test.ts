@@ -25,6 +25,39 @@ describe("buildViolationDecorationSet", () => {
     expect(decorations[0].to).toBe(12)
   })
 
+  it("adds violation-blot-term class for terminology-origin rule ids", () => {
+    const doc = makeDoc("some forbidden word here")
+    const state = EditorState.create({ schema: basicSchema, doc })
+    const infractions: RuleInfraction[] = [{
+      ruleId: "term:concept-42:forbidden:forbidden", cellId: "c1", fileId: "f1", message: "",
+      spans: [{ side: "target", start: 5, end: 13, matchedText: "forbidden" }],
+    }]
+    const ruleSeverity = new Map([["term:concept-42:forbidden:forbidden", "major" as const]])
+    const set = buildViolationDecorationSet(state.doc, infractions, ruleSeverity, new Set())
+    const decorations = set.find()
+    expect(decorations).toHaveLength(1)
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const cls: string = (decorations[0] as any).type.attrs.class
+    expect(cls).toContain("violation-blot-term")
+    expect(cls).toContain("violation-blot-major")
+  })
+
+  it("does NOT add violation-blot-term class for generic rule ids", () => {
+    const doc = makeDoc("some generic error here")
+    const state = EditorState.create({ schema: basicSchema, doc })
+    const infractions: RuleInfraction[] = [{
+      ruleId: "rule-abc", cellId: "c1", fileId: "f1", message: "",
+      spans: [{ side: "target", start: 5, end: 12, matchedText: "generic" }],
+    }]
+    const ruleSeverity = new Map([["rule-abc", "minor" as const]])
+    const set = buildViolationDecorationSet(state.doc, infractions, ruleSeverity, new Set())
+    const decorations = set.find()
+    expect(decorations).toHaveLength(1)
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const cls: string = (decorations[0] as any).type.attrs.class
+    expect(cls).not.toContain("violation-blot-term")
+  })
+
   it("ignores source-side spans", () => {
     const doc = makeDoc("anything")
     const state = EditorState.create({ schema: basicSchema, doc })

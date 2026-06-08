@@ -38,11 +38,16 @@ export function buildViolationDecorationSet(
       if (from === undefined || to === undefined) continue
       const severity = ruleSeverity.get(inf.ruleId) ?? "major"
       const waived = waivedRuleIds.has(inf.ruleId)
-      const cls = waived
-        ? "violation-blot violation-blot-waived"
-        : severity === "major"
-          ? "violation-blot violation-blot-major"
-          : "violation-blot violation-blot-minor"
+      const isTerminologyRule = inf.ruleId.startsWith("term:")
+      const cls = [
+        "violation-blot",
+        waived
+          ? "violation-blot-waived"
+          : severity === "major"
+            ? "violation-blot-major"
+            : "violation-blot-minor",
+        isTerminologyRule ? "violation-blot-term" : "",
+      ].filter(Boolean).join(" ")
       decorations.push(Decoration.inline(from, to, {
         class: cls,
         "data-rule-id": inf.ruleId,

@@ -26,6 +26,8 @@ import { useEffect, useRef } from "react"
 import type { RuleInfraction } from "@/lib/parsers/types"
 import { createViolationDecorationExtension, violationPluginKey } from "@/lib/richtext/violation-decoration-plugin"
 import { createKaraokeExtension, karaokePluginKey, type KaraokePluginState } from "@/lib/richtext/karaoke-plugin"
+import { createTerminologyChipExtension, terminologyChipPluginKey } from "@/lib/richtext/terminology-chip-plugin"
+import type { Concept } from "@/lib/terminology/types"
 import { findActiveTimingIndex } from "@/lib/audio/timings"
 import type { WordTiming } from "@/lib/codex-editor/types"
 
@@ -76,6 +78,19 @@ interface TranslatedEditorProps {
    * parent resolves direction → target cell and focuses it (caret at end).
    */
   onNavigateCell?: (direction: "prev" | "next") => void
+  /**
+   * Optional managed terminology concepts. When provided, active concepts are
+   * highlighted with a tiny status-tinted chip at the top-right of each match.
+   * Defaults to undefined (feature off) so other call sites are unaffected.
+   * Chip click exposes `data-source-term` for FRO-204 (TermLookupPopover).
+   */
+  terminologyConcepts?: Concept[]
+  /**
+   * FRO-204: Called when the user clicks a term chip in the editor.
+   * Receives the sourceTerm string and the chip DOM element as an anchor.
+   * The caller is responsible for opening TermLookupPopover.
+   */
+  onTermChipClick?: (term: string, anchor: HTMLElement) => void
 }
 
 export function TranslatedEditor({
@@ -99,6 +114,8 @@ export function TranslatedEditor({
   remoteChangedDuringEdit,
   onDiscardLocal,
   onNavigateCell,
+  terminologyConcepts,
+  onTermChipClick,
 }: TranslatedEditorProps) {
   // Held in a ref so the editor's keydown handler — created once per cellId —
   // always sees the latest navigation callback without re-creating the editor.
@@ -115,6 +132,8 @@ export function TranslatedEditor({
     activeIdx: -1,
     onSeekToWord: undefined,
   })
+
+  const latestTerminologyConceptsRef = useRef<Concept[]>(terminologyConcepts ?? [])
 
   // Resolve initial content once per cellId — prefer rich HTML, fall back to plain text.
   const initialContent = initialHtml && initialHtml.length > 0
@@ -149,6 +168,9 @@ export function TranslatedEditor({
       // the lint rule is overly conservative here.
       createViolationDecorationExtension(() => latestViolationStateRef.current),
       createKaraokeExtension(() => latestKaraokeStateRef.current),
+      ...(terminologyConcepts !== undefined
+        ? [createTerminologyChipExtension(() => latestTerminologyConceptsRef.current)]
+        : []),
     ],
     editorProps: {
       attributes: {
@@ -260,6 +282,13 @@ export function TranslatedEditor({
       editor.view.dispatch(editor.state.tr.setMeta(karaokePluginKey, "rebuild"))
     }
   }, [editor, audioTimings, onSeekToTime])
+
+  useEffect(() => {
+    latestTerminologyConceptsRef.current = terminologyConcepts ?? []
+    if (editor && terminologyConcepts !== undefined) {
+      editor.view.dispatch(editor.state.tr.setMeta(terminologyChipPluginKey, "rebuild"))
+    }
+  }, [editor, terminologyConcepts])
 
   const lastActiveIdxRef = useRef(-1)
   useEffect(() => {
@@ -387,8 +416,19 @@ export function TranslatedEditor({
       <div
         className="h-full"
         onClick={(e) => {
-          if (!onRuleClick) return
           const target = e.target as HTMLElement
+          // FRO-204: term chip click → open TermLookupPopover via caller
+          if (onTermChipClick) {
+            const chip = target.closest(".term-chip[data-source-term]")
+            if (chip) {
+              const term = chip.getAttribute("data-source-term")
+              if (term) {
+                onTermChipClick(term, chip as HTMLElement)
+                return
+              }
+            }
+          }
+          if (!onRuleClick) return
           const blot = target.closest("[data-rule-id]")
           if (blot) {
             onRuleClick(blot.getAttribute("data-rule-id")!, blot as HTMLElement)

@@ -1,4 +1,4 @@
-import { useState } from "react"
+import { useState, useMemo, useCallback, useRef, useEffect } from "react"
 import { useParams, useNavigate } from "react-router-dom"
 import {
   ArrowLeft,
@@ -9,6 +9,11 @@ import {
   Download,
   BookOpen,
 } from "lucide-react"
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip"
 import { Button } from "@/components/ui/button"
 import {
   Card,
@@ -30,8 +35,14 @@ import type { Concept, TermRendering, RenderingStatus } from "@/lib/terminology/
 import { addConcept, updateConcept, deleteConcept } from "@/lib/terminology/store"
 import { importConceptsCsv, exportConceptsCsv } from "@/lib/terminology/csv"
 import { importConceptsTbx, exportConceptsTbx } from "@/lib/terminology/tbx"
+import { computeTerminologyStats } from "@/lib/terminology/stats"
+import type { CellPair } from "@/lib/terminology/stats"
 import { cn } from "@/lib/utils"
 import { useProject } from "@/hooks/useProject"
+import { useFrontierSession } from "@/hooks/useFrontierSession"
+import { useProjectCells } from "@/hooks/useProjectCells"
+import { buildFileScopedTokenFetcher } from "@/lib/sync/cqrs-bridge"
+import { TerminologyTermDetail } from "@/components/TerminologyTermDetail"
 
 // ────────────────────────────────────────────────────────────────────────────
 // Rendering status chip helpers
@@ -444,17 +455,25 @@ interface ConceptRowProps {
   concept: Concept
   onEdit: (concept: Concept) => void
   onDelete: (id: string) => void
+  onDrillDown: (concept: Concept) => void
+  canManage: boolean
 }
 
-function ConceptRow({ concept, onEdit, onDelete }: ConceptRowProps) {
+function ConceptRow({ concept, onEdit, onDelete, onDrillDown, canManage }: ConceptRowProps) {
   return (
     <li
       data-testid="concept-row"
       className="flex items-start gap-3 border-b py-3 last:border-0"
     >
-      {/* Source term */}
+      {/* Source term — click to drill down */}
       <div className="min-w-0 w-36 shrink-0">
-        <span className="text-sm font-medium">{concept.sourceTerm}</span>
+        <button
+          type="button"
+          className="text-sm font-medium hover:underline text-left cursor-pointer"
+          onClick={() => onDrillDown(concept)}
+        >
+          {concept.sourceTerm}
+        </button>
       </div>
 
       {/* Renderings */}
@@ -475,31 +494,187 @@ function ConceptRow({ concept, onEdit, onDelete }: ConceptRowProps) {
       </div>
 
       {/* Actions */}
-      <div className="flex shrink-0 items-center gap-1">
-        <Button
-          variant="ghost"
-          size="icon-sm"
-          aria-label={`Edit concept ${concept.sourceTerm}`}
-          onClick={() => onEdit(concept)}
-        >
-          <Pencil className="h-3.5 w-3.5 text-muted-foreground" />
-        </Button>
-        <Button
-          variant="ghost"
-          size="icon-sm"
-          aria-label={`Delete concept ${concept.sourceTerm}`}
-          onClick={() => onDelete(concept.id)}
-        >
-          <Trash2 className="h-3.5 w-3.5 text-muted-foreground" />
-        </Button>
-      </div>
+      {canManage && (
+        <div className="flex shrink-0 items-center gap-1">
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            aria-label={`Edit concept ${concept.sourceTerm}`}
+            onClick={() => onEdit(concept)}
+          >
+            <Pencil className="h-3.5 w-3.5 text-muted-foreground" />
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            aria-label={`Delete concept ${concept.sourceTerm}`}
+            onClick={() => onDelete(concept.id)}
+          >
+            <Trash2 className="h-3.5 w-3.5 text-muted-foreground" />
+          </Button>
+        </div>
+      )}
     </li>
+  )
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Stats header — derived on read from concepts + cells
+// ────────────────────────────────────────────────────────────────────────────
+
+interface LibraryStatsHeaderProps {
+  concepts: Concept[]
+  /** Cell pairs from the active file (or all files if aggregated). Pass [] when
+   *  no cell data is available yet — the header renders a placeholder state. */
+  cells: CellPair[]
+}
+
+function LibraryStatsHeader({ concepts, cells }: LibraryStatsHeaderProps) {
+  const stats = useMemo(
+    () => computeTerminologyStats(concepts, cells),
+    [concepts, cells],
+  )
+
+  const activeConcepts = stats.totalConcepts
+  const hasData = activeConcepts > 0
+
+  return (
+    <div className="rounded-lg border bg-card p-4 shadow-sm">
+      <div className="mb-3 flex items-center gap-2">
+        <BookOpen className="h-4 w-4 text-muted-foreground" />
+        <span className="text-sm font-semibold">Library Overview</span>
+        {!hasData && (
+          <span className="text-xs text-muted-foreground">(no active concepts)</span>
+        )}
+      </div>
+
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+        {/* Total active concepts */}
+        <div className="rounded-md bg-muted/40 px-3 py-2">
+          <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+            Active concepts
+          </p>
+          <p className="mt-0.5 text-xl font-bold tabular-nums">{activeConcepts}</p>
+        </div>
+
+        {/* % Enforced */}
+        <div className="rounded-md bg-muted/40 px-3 py-2">
+          <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+            Enforced
+          </p>
+          <p className={cn(
+            "mt-0.5 text-xl font-bold tabular-nums",
+            hasData && stats.totalCells > 0
+              ? stats.enforcedPct === 100
+                ? "text-emerald-600 dark:text-emerald-400"
+                : "text-foreground"
+              : "text-muted-foreground",
+          )}>
+            {hasData && stats.totalCells > 0
+              ? `${Math.round(stats.enforcedPct)}%`
+              : "—"}
+          </p>
+        </div>
+
+        {/* % Infringed */}
+        <div className="rounded-md bg-muted/40 px-3 py-2">
+          <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+            Infringed
+          </p>
+          <p className={cn(
+            "mt-0.5 text-xl font-bold tabular-nums",
+            hasData && stats.totalCells > 0
+              ? stats.infringedPct === 0
+                ? "text-emerald-600 dark:text-emerald-400"
+                : stats.infringedPct > 20
+                  ? "text-destructive"
+                  : "text-amber-600 dark:text-amber-400"
+              : "text-muted-foreground",
+          )}>
+            {hasData && stats.totalCells > 0
+              ? `${Math.round(stats.infringedPct)}%`
+              : "—"}
+          </p>
+        </div>
+
+        {/* Cells analyzed */}
+        <div className="rounded-md bg-muted/40 px-3 py-2">
+          <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+            Cells analyzed
+          </p>
+          <p className="mt-0.5 text-xl font-bold tabular-nums text-muted-foreground">
+            {stats.totalCells}
+          </p>
+        </div>
+      </div>
+
+      {/* Top-5 most infringed */}
+      {stats.top5Infringed.length > 0 && (
+        <div className="mt-3 border-t pt-3">
+          <p className="mb-2 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+            Most infringed
+          </p>
+          <div className="flex flex-wrap gap-2">
+            {stats.top5Infringed.map((s) => (
+              <div
+                key={s.conceptId}
+                className="flex items-center gap-1.5 rounded bg-destructive/10 px-2 py-0.5 text-xs"
+              >
+                <span className="font-medium text-foreground">{s.sourceTerm}</span>
+                <span className="text-destructive font-semibold">
+                  {s.infringed}×
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
   )
 }
 
 // ────────────────────────────────────────────────────────────────────────────
 // Main TerminologyPage
 // ────────────────────────────────────────────────────────────────────────────
+
+// ────────────────────────────────────────────────────────────────────────────
+// Role-gating helpers
+// project_lead = 500, maintainer = 600, owner = 700
+// contributor = 400 — may edit cells but NOT termbase definitions
+// viewer/commenter/reviewer = <400 — read-only throughout
+// ────────────────────────────────────────────────────────────────────────────
+
+/** Level at which a user may manage termbase definitions (add/edit/delete concepts, import). */
+const TERMBASE_EDIT_LEVEL = 500
+
+/** For local projects with no syncRole, default to full access (owner-equivalent). */
+function canEditTermbase(syncRole?: { level: number } | null, hasOrigin?: boolean): boolean {
+  if (!hasOrigin) return true // local-only project — no cloud role hierarchy
+  if (!syncRole) return true  // no role cached yet — optimistic allow; server will enforce
+  return syncRole.level >= TERMBASE_EDIT_LEVEL
+}
+
+interface GatedButtonProps extends React.ComponentPropsWithoutRef<typeof Button> {
+  allowed: boolean
+  tip: string
+}
+
+/** Wrapper that disables a Button with a tooltip when `allowed` is false. */
+function GatedButton({ allowed, tip, children, ...props }: GatedButtonProps) {
+  if (allowed) {
+    return <Button {...props}>{children}</Button>
+  }
+  return (
+    <Tooltip>
+      <TooltipTrigger render={<span className="inline-flex" />}>
+        <Button {...props} disabled aria-disabled="true">
+          {children}
+        </Button>
+      </TooltipTrigger>
+      <TooltipContent side="bottom">{tip}</TooltipContent>
+    </Tooltip>
+  )
+}
 
 export function TerminologyPage() {
   const { id } = useParams<{ id: string }>()
@@ -510,10 +685,66 @@ export function TerminologyPage() {
   // Derive concepts from the project record — single source of truth
   const concepts = project?.terminology ?? []
 
+  // Role-gating: project_lead+ (level >= 500) may manage termbase definitions.
+  const hasOrigin = Boolean(project?.origin)
+  const canManageTermbase = canEditTermbase(project?.syncRole, hasOrigin)
+  const termbaseGateTip = "Requires Project Lead role or higher to manage termbase definitions."
+
+  // Cell editing in the drill-down is allowed for contributor+ (level >= 400),
+  // or always for local (no-origin) projects.
+  const canEditCells = !hasOrigin || (project?.syncRole?.level ?? 0) >= 400
+
+  // ── Project-wide cells (derived-on-read source for stats + drill-down) ──────
+  const { session: frontierSession } = useFrontierSession()
+  const username = frontierSession?.username || project?.username || "local"
+  const jwtRef = useRef<string | null>(null)
+  useEffect(() => {
+    jwtRef.current = frontierSession?.jwt ?? null
+  }, [frontierSession?.jwt])
+
+  const projectFiles = useMemo(
+    () =>
+      (project?.files ?? []).map((f) => ({ id: f.id, name: f.name, type: f.type })),
+    [project?.files],
+  )
+
+  const getToken = useMemo(() => {
+    if (!project?.id) return async (_fileId: string) => null as string | null
+    return buildFileScopedTokenFetcher(() => jwtRef.current, project.id, {
+      projectName: project.name ?? undefined,
+      gitlabProjectId:
+        project.origin?.kind === "git" ? project.origin.gitlabProjectId : undefined,
+    })
+  }, [project?.id, project?.name, project?.origin])
+
+  const cellsEnabled = Boolean(project?.id && projectFiles.length > 0)
+  const { files: projectFileCells } = useProjectCells({
+    projectId: id ?? null,
+    projectFiles,
+    getToken,
+    enabled: cellsEnabled,
+  })
+
+  // Flatten all files' CellData; used directly by the drill-down and mapped to
+  // CellPair for the stats header.
+  const allCells = useMemo(
+    () => projectFileCells.flatMap((f) => f.cells),
+    [projectFileCells],
+  )
+  const cellPairs: CellPair[] = useMemo(
+    () => allCells.map((c) => ({ original: c.original, translated: c.translated })),
+    [allCells],
+  )
+
   const [addOpen, setAddOpen] = useState(false)
   const [editTarget, setEditTarget] = useState<Concept | null>(null)
   const [importOpen, setImportOpen] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [drillDownConcept, setDrillDownConcept] = useState<Concept | null>(null)
+
+  const handleDrillDown = useCallback((concept: Concept) => {
+    setDrillDownConcept(concept)
+  }, [])
 
   // ── Persist helper ─────────────────────────────────────────────────────────
 
@@ -589,6 +820,24 @@ export function TerminologyPage() {
 
   if (loading) return <div className="p-8 text-muted-foreground">Loading…</div>
 
+  // Drill-down view: overlay the detail panel when a concept is selected.
+  // Cells are the project-wide CellData flattened across all files (derived on
+  // read); occurrences + verdicts populate from them.
+  if (drillDownConcept) {
+    return (
+      <TerminologyTermDetail
+        concept={drillDownConcept}
+        cells={allCells}
+        canEdit={canEditCells}
+        projectId={id!}
+        username={username}
+        onClose={() => setDrillDownConcept(null)}
+        onCellCommitted={() => {}}
+        onOptimisticEdit={() => {}}
+      />
+    )
+  }
+
   return (
     <div className="min-h-screen bg-background">
       {/* Header */}
@@ -607,7 +856,9 @@ export function TerminologyPage() {
 
         {/* Export controls */}
         <div className="flex items-center gap-1">
-          <Button
+          <GatedButton
+            allowed={canManageTermbase}
+            tip={termbaseGateTip}
             variant="outline"
             size="sm"
             onClick={handleExportCsv}
@@ -616,8 +867,10 @@ export function TerminologyPage() {
           >
             <Download className="mr-1 h-3.5 w-3.5" />
             CSV
-          </Button>
-          <Button
+          </GatedButton>
+          <GatedButton
+            allowed={canManageTermbase}
+            tip={termbaseGateTip}
             variant="outline"
             size="sm"
             onClick={handleExportTbx}
@@ -626,24 +879,31 @@ export function TerminologyPage() {
           >
             <Download className="mr-1 h-3.5 w-3.5" />
             TBX
-          </Button>
+          </GatedButton>
         </div>
 
         {/* Import */}
-        <Button
+        <GatedButton
+          allowed={canManageTermbase}
+          tip={termbaseGateTip}
           variant="outline"
           size="sm"
           onClick={() => setImportOpen(true)}
         >
           <Upload className="mr-1 h-3.5 w-3.5" />
           Import
-        </Button>
+        </GatedButton>
 
         {/* Add concept */}
-        <Button size="sm" onClick={() => setAddOpen(true)}>
+        <GatedButton
+          allowed={canManageTermbase}
+          tip={termbaseGateTip}
+          size="sm"
+          onClick={() => setAddOpen(true)}
+        >
           <Plus className="mr-1 h-3.5 w-3.5" />
           Add concept
-        </Button>
+        </GatedButton>
       </header>
 
       {/* Main content */}
@@ -653,6 +913,9 @@ export function TerminologyPage() {
             {error}
           </p>
         )}
+
+        {/* Stats header — derived on read, no persistence */}
+        <LibraryStatsHeader concepts={concepts} cells={cellPairs} />
 
         <Card>
           <CardHeader>
@@ -668,14 +931,16 @@ export function TerminologyPage() {
                 <p className="text-xs">
                   Add a concept manually or import a CSV / TBX file.
                 </p>
-                <Button
+                <GatedButton
+                  allowed={canManageTermbase}
+                  tip={termbaseGateTip}
                   variant="outline"
                   size="sm"
                   onClick={() => setAddOpen(true)}
                 >
                   <Plus className="mr-1 h-3.5 w-3.5" />
                   Add first concept
-                </Button>
+                </GatedButton>
               </div>
             ) : (
               <>
@@ -695,6 +960,8 @@ export function TerminologyPage() {
                         concept={concept}
                         onEdit={setEditTarget}
                         onDelete={handleDelete}
+                        onDrillDown={handleDrillDown}
+                        canManage={canManageTermbase}
                       />
                     ))}
                   </ul>

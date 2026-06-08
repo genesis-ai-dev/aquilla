@@ -702,3 +702,26 @@ describe("CompletionSettings v1 retrieval fields", () => {
     expect(result.every((p) => p.source && p.target)).toBe(true)
   })
 })
+
+describe("DEFAULT_SYSTEM_PROMPT instruction steps", () => {
+  it("contains the 7-step analysis→complete→consistency instruction sequence", () => {
+    expect(DEFAULT_SYSTEM_PROMPT).toContain("1. Analyze the provided reference data")
+    expect(DEFAULT_SYSTEM_PROMPT).toContain("2. Complete the translation")
+    expect(DEFAULT_SYSTEM_PROMPT).toContain("3. Ensure your translation is consistent")
+    expect(DEFAULT_SYSTEM_PROMPT).toContain("4. Pay careful attention to the provided reference data")
+    expect(DEFAULT_SYSTEM_PROMPT).toContain("5. Translate only into {targetLanguage}")
+    expect(DEFAULT_SYSTEM_PROMPT).toContain("6. When unsure, err on the side of literalness")
+    expect(DEFAULT_SYSTEM_PROMPT).toContain("7. Preserve the line breaks")
+  })
+
+  it("retains language placeholders and output-only strictness", () => {
+    expect(DEFAULT_SYSTEM_PROMPT).toContain("{sourceLanguage}")
+    expect(DEFAULT_SYSTEM_PROMPT).toContain("{targetLanguage}")
+    expect(DEFAULT_SYSTEM_PROMPT).toContain("Output ONLY the {targetLanguage} translation")
+    expect(DEFAULT_SYSTEM_PROMPT).toContain("No commentary")
+  })
+
+  it("emphasises ultra-low-resource language", () => {
+    expect(DEFAULT_SYSTEM_PROMPT).toMatch(/ultra-low.resource language/i)
+  })
+})

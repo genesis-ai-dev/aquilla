@@ -42,3 +42,14 @@
 - 2026-06-08 · WS-WARN · swarm/ws-warn · e0ca7c0 · tsc OK · vitest 8/8 · standalone preacceptance lib+band; SWARM-TODO to mount
 - 2026-06-08 · WS-BTSEED · swarm/ws-btseed · 8daf08e · tsc OK · vitest 14/14 · LLM-BT terminology seeding (additive, regression-guarded); SWARM-TODO btseed-glue
 - 2026-06-08 · WS-EQUIV · swarm/ws-equiv · a37a81c · tsc OK · vitest 13/13 · χ²+EM equivalents + EquivalentsPanel (managed vs AI-assumed); SWARM-TODO equiv-glue
+- 2026-06-08 · WS-CANDIDATES · swarm/ws-candidates · 4cf307c · tsc OK · vitest 9/9 · c-value/nc-value/G² miner + CandidateTermsPanel; SWARM-TODO glue
+- 2026-06-08 · WS-QA · swarm/integration-term · 44b9837 · live :5173 · TERM2-QA Pass 1 — shipped surface WORKS (chips/popover/BT/interlinear/persistence); 2 real Slice-1 fixes isolated
+
+## §5 Wave-1 outcome (CONVERGED)
+Build gate GREEN: tsc clean · 44/44 new tests · npm run build OK · 20 pre-existing failures confirmed identical on clean base (not ours).
+Standalone libs+panels merged; all carry SWARM-TODOs for the glue wave (mount into FORBIDDEN EditorTable/ProjectWorkspace/TerminologyPage).
+
+### Remaining Slice-1 fixes (both touch FORBIDDEN files → glue wave + need actor to free files)
+- [OPEN] (apply-replace) `handleTermApply` APPENDS rather than REPLACES the target selection — spec 2c says replace. File: `src/components/EditorTable.tsx` (FORBIDDEN).
+- [OPEN] (demo-seed) dev seed declares English source but cells are Adzera, so managed source terms never match the source corpus → terminology violation can't be driven demo-true. Add an Adzera-source concept (e.g. seed). File: `auth-worker/src/routes/dev-seed.ts` (FORBIDDEN).
+- [OPEN] (inbox-by-concept) no by-concept violations inbox grouping (spec 5b) — verdicts ride generic rule infra. Net-new, Slice 5.

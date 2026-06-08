@@ -40,3 +40,5 @@
 ## §4 Merge log
 <!-- date · WS · branch · sha · tsc · vitest · notes -->
 - 2026-06-08 · WS-WARN · swarm/ws-warn · e0ca7c0 · tsc OK · vitest 8/8 · standalone preacceptance lib+band; SWARM-TODO to mount
+- 2026-06-08 · WS-BTSEED · swarm/ws-btseed · 8daf08e · tsc OK · vitest 14/14 · LLM-BT terminology seeding (additive, regression-guarded); SWARM-TODO btseed-glue
+- 2026-06-08 · WS-EQUIV · swarm/ws-equiv · a37a81c · tsc OK · vitest 13/13 · χ²+EM equivalents + EquivalentsPanel (managed vs AI-assumed); SWARM-TODO equiv-glue

@@ -106,6 +106,8 @@ import {
   workspaceReturnPath,
 } from "@/lib/ad11/navigation"
 import { generateBacktranslation } from "@/lib/completion/backtranslation-service"
+import { addConcept } from "@/lib/terminology/store"
+import type { Concept } from "@/lib/terminology/types"
 import { buildGlosser, type BtSeed } from "@/lib/completion/bt-glosser"
 import { buildAlignmentModel } from "@/lib/completion/interlinear"
 import { buildStatisticalBt } from "@/lib/completion/bt-auto"
@@ -1138,6 +1140,12 @@ export function ProjectWorkspace() {
             targetLanguage: project.targetLanguage || "Unknown",
             targetText: cell.translated,
             examples: [],
+            // btseed-glue: seed terminology so the literal BT surfaces the
+            // controlled-vocabulary source headwords for the renderings the
+            // translator chose. The service derives the relevant hints from
+            // the cell's source text; behavior is unchanged when nothing matches.
+            concepts: project.terminology ?? [],
+            sourceText: cell.original,
           })
           polished = true
         } catch (polishErr) {
@@ -1154,7 +1162,25 @@ export function ProjectWorkspace() {
     } finally {
       setBacktranslatingState((prev) => { const n = new Set(prev); n.delete(cellId); return n })
     }
-  }, [glosser, isBacktranslationConfigured, project?.completionSettings, project?.sourceLanguage, project?.targetLanguage, frontierSession, persistBt])
+  }, [glosser, isBacktranslationConfigured, project?.completionSettings, project?.sourceLanguage, project?.targetLanguage, project?.terminology, frontierSession, persistBt])
+
+  // Add-from-selection: create a DRAFT concept from a source-side selection in
+  // the editor and persist it via the same project-settings sync path the
+  // terminology page uses. Renderings start empty — the translator fills them
+  // in later from the Terminology page.
+  const handleAddConceptFromSelection = useCallback(async (sourceTerm: string) => {
+    if (!project) return
+    const trimmed = sourceTerm.trim()
+    if (!trimmed) return
+    const draft: Omit<Concept, "id" | "createdAt"> = {
+      sourceTerm: trimmed,
+      renderings: [],
+      status: "draft",
+      createdBy: currentUsername,
+    }
+    const updated = addConcept(project, draft)
+    await patchSettings({ terminology: updated.terminology ?? [] })
+  }, [project, currentUsername, patchSettings])
 
   /** Called when a user manually saves an edited BT from the BT tab. */
   const saveBacktranslation = useCallback((cell: CellData, btText: string, polished: boolean) => {
@@ -2274,6 +2300,7 @@ export function ProjectWorkspace() {
               if (ok) refresh()
             }}
             onProjectChanged={refresh}
+            onAddConceptFromSelection={handleAddConceptFromSelection}
             onCellCommitted={handleCellCommitted}
             onOptimisticEdit={applyOptimisticTargetEditWithCapture}
             cellLockHolders={cellLockHolders}

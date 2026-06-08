@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useCallback, useMemo, useState, forwardRef, u
 import { useVirtualizer } from "@tanstack/react-virtual"
 import DOMPurify from "dompurify"
 import {
-  Check, CheckCheck, Circle, Trash2, AlertTriangle, AlertCircle, RefreshCw,
+  Check, CheckCheck, Circle, Trash2, AlertTriangle, AlertCircle, RefreshCw, BookOpen,
   MessageCircle, Play, Pause, Mic, Sparkles, FileText, History as HistoryIcon,
   ArrowRight, Activity, Loader2, MoreHorizontal,
 } from "lucide-react"
@@ -60,6 +60,8 @@ import { VOICE_ASSIGN_MIME } from "./VoiceLibraryPanel"
 import type { RangeHighlight } from "./HighlightedText"
 import { TermLookupPopover } from "./TermLookupPopover"
 import type { Concept } from "@/lib/terminology/types"
+import { PreAcceptanceWarningBand } from "./PreAcceptanceWarningBand"
+import { detectPreAcceptanceWarnings } from "@/lib/terminology/preacceptance"
 
 // Per-row render counter. Always accumulated when perf logging is on (cheap)
 // but NOT auto-logged — render logs would flood the console and push the
@@ -399,6 +401,8 @@ interface EditorTableProps {
   onOpenRecording?: (cellId: string) => void
   /** Re-read the project record from IDB after a settings change (e.g. voice library edits). */
   onProjectChanged?: () => void
+  /** Add-from-selection: create a DRAFT concept from a selected source token. */
+  onAddConceptFromSelection?: (sourceTerm: string) => void | Promise<void>
   /** Called when the user drops a voice chip onto a cell's audio area.
    *  Parent should assign the voice then trigger TTS generation. */
   onAssignVoice?: (cellId: string, voiceId: string) => void
@@ -432,7 +436,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   isAnonymous, onJumpToCell, onAiSetupNeeded, onOpenRecording,
   audioLens, onOpenAudioSetup,
   orderedBy,
-  onProjectChanged, onAssignVoice,
+  onProjectChanged, onAddConceptFromSelection, onAssignVoice,
   onCellCommitted,
   onOptimisticEdit,
   cellLockHolders,
@@ -941,6 +945,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
                 audioLens={audioLens ?? null}
                 onOpenAudioSetup={onOpenAudioSetup}
                 onProjectChanged={onProjectChanged}
+                onAddConceptFromSelection={onAddConceptFromSelection}
                 onAssignVoice={onAssignVoice}
                 onDragStart={handleDragStart}
                 onDragEnter={handleDragEnter}
@@ -1029,6 +1034,8 @@ interface MemoizedRowProps {
   audioLens: AudioLensContext | null
   onOpenAudioSetup?: () => void
   onProjectChanged?: () => void
+  /** Add-from-selection: create a DRAFT concept from a selected source token. */
+  onAddConceptFromSelection?: (sourceTerm: string) => void | Promise<void>
   onAssignVoice?: (cellId: string, voiceId: string) => void
   onDragStart: (cellId: string) => void
   onDragEnter: (cellId: string) => void
@@ -1064,7 +1071,7 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
     onOpenComments, onOpenHistory,
     onSeekToCue, lineNumbersEnabled, cellLabelsEnabled,
     sourceTextDirection, targetTextDirection, isAnonymous,
-    onJumpToCell, onAiSetupNeeded, onOpenRecording, micDenied, onProjectChanged, onAssignVoice,
+    onJumpToCell, onAiSetupNeeded, onOpenRecording, micDenied, onProjectChanged, onAddConceptFromSelection, onAssignVoice,
     audioLens, onOpenAudioSetup,
     onCellCommitted, onOptimisticEdit, lockHolderLabel, remoteChangedWhileFocused,
     onClaimCell, onReleaseCell, onAckRemoteChange,
@@ -1171,6 +1178,7 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
         audioLens={audioLens}
         onOpenAudioSetup={onOpenAudioSetup}
         onProjectChanged={onProjectChanged}
+        onAddConceptFromSelection={onAddConceptFromSelection}
         onAssignVoice={onAssignVoice}
         onDragStart={handleDragStart}
         onDragEnter={handleDragEnter}
@@ -1260,6 +1268,8 @@ interface EditorRowProps {
   audioLens: AudioLensContext | null
   onOpenAudioSetup?: () => void
   onProjectChanged?: () => void
+  /** Add-from-selection: create a DRAFT concept from a selected source token. */
+  onAddConceptFromSelection?: (sourceTerm: string) => void | Promise<void>
   onAssignVoice?: (cellId: string, voiceId: string) => void
   getTokenForFile?: (fileId: string) => Promise<string | null>
 }
@@ -1387,7 +1397,7 @@ function EditorRow({
   onDragStart, onDragEnter, onSelectionPointerDown, onNavigateCell,
   rowIndex, lineNumbersEnabled, cellLabelsEnabled, sourceTextDirection, targetTextDirection, gridCols,
   isAnonymous, onAiSetupNeeded, onOpenRecording, micDenied,
-  audioLens, onOpenAudioSetup, onAssignVoice,
+  audioLens, onOpenAudioSetup, onAssignVoice, onAddConceptFromSelection,
   onCellCommitted, onOptimisticEdit, lockHolderLabel, remoteChangedWhileFocused,
   onClaimCell, onReleaseCell, onAckRemoteChange,
   isStaleSource,
@@ -1402,6 +1412,12 @@ function EditorRow({
   const [termChipState, setTermChipState] = useState<{ term: string; anchor: HTMLElement } | null>(null)
   // Track whether the target editor has a non-empty text selection when a chip is clicked.
   const targetHasSelectionRef = useRef(false)
+  // The exact selected target text captured at chip-click time, so Apply can
+  // REPLACE that selection (spec 2c) rather than append. Cleared when no selection.
+  const targetSelectionTextRef = useRef("")
+  // Add-from-selection (Slice 5): the source-side text the user has selected,
+  // surfaced as an "Add to termbase" affordance. Null when nothing selected.
+  const [sourceSelection, setSourceSelection] = useState<string | null>(null)
   const pendingTargetEventIdRef = useRef<string | null>(cell.targetEventId ?? null)
   /** voice-chip drag-over state: the voiceId being dragged over this cell's audio area */
   const [dragOverVoiceId, setDragOverVoiceId] = useState<string | null>(null)
@@ -1522,21 +1538,66 @@ function EditorRow({
     })
   }, [editable, project.id, cell.fileId, cell.id, cell.targetEventId, cell.sourceEventId, username, onCellCommitted, onOptimisticEdit, lockHolderLabel])
 
-  // Terminology apply: insert the chosen rendering into the target cell.
-  // Appends to any existing target text so the translator can click multiple
-  // terms in sequence. Uses the same commit path as keyboard edits.
+  // Terminology apply (spec 2c): REPLACE the active target selection with the
+  // chosen rendering. The Apply affordance is only surfaced when there was a
+  // non-empty selection at chip-click time (see handleTermChipClick), and the
+  // selected text is captured in targetSelectionTextRef. We replace the first
+  // occurrence of that selected text in the current target plain text. When
+  // there is no selection (defensive fallback), we append so the translator
+  // can still chain multiple terms. Uses the same commit path as keyboard edits.
   const handleTermApply = useCallback((rendering: string) => {
-    const existing = cell.translated?.trim() ?? ""
-    const next = existing ? `${existing} ${rendering}` : rendering
+    const existing = cell.translated ?? ""
+    const selected = targetSelectionTextRef.current
+    let next: string
+    if (selected && existing.includes(selected)) {
+      next = existing.replace(selected, rendering)
+    } else {
+      const trimmed = existing.trim()
+      next = trimmed ? `${trimmed} ${rendering}` : rendering
+    }
     handleEditorCommit({ value: next, valueHtml: next })
   }, [cell.translated, handleEditorCommit])
+
+  // Add-from-selection (Slice 5): capture a source-side text selection so the
+  // translator can promote it to a DRAFT concept without leaving the editor.
+  const handleSourceMouseUp = useCallback(() => {
+    if (!onAddConceptFromSelection) return
+    const sel = window.getSelection()
+    const text = sel && !sel.isCollapsed ? sel.toString().trim() : ""
+    setSourceSelection(text.length > 0 ? text : null)
+  }, [onAddConceptFromSelection])
+
+  const handleAddSelectionToTermbase = useCallback(() => {
+    if (!sourceSelection) return
+    void onAddConceptFromSelection?.(sourceSelection)
+    setSourceSelection(null)
+    window.getSelection()?.removeAllRanges()
+  }, [sourceSelection, onAddConceptFromSelection])
+
+  // Slice 4: advisory pre-acceptance terminology warnings for the AI copilot.
+  // Computed against the completion text (the streaming preview while loading,
+  // otherwise the committed target text) versus the cell's source and the
+  // project's active concepts. ADVISORY ONLY — never gates accept/commit.
+  // Recomputes naturally as the preview streams in and as the committed text /
+  // BT verdict changes on later renders.
+  const preAcceptanceWarnings = useMemo(() => {
+    const completionText = isLoading ? (completionPreview ?? "") : (cell.translated ?? "")
+    if (!completionText.trim()) return []
+    return detectPreAcceptanceWarnings(
+      completionText,
+      cell.original ?? "",
+      project.terminology ?? [],
+    )
+  }, [isLoading, completionPreview, cell.translated, cell.original, project.terminology])
 
   // FRO-204: Chip click handler for terminology chips in the target (TranslatedEditor).
   // Records whether the target editor had a non-empty text selection at click time
   // so we can conditionally surface the Apply affordance in the popover.
   const handleTermChipClick = useCallback((term: string, anchor: HTMLElement) => {
     const sel = window.getSelection()
-    targetHasSelectionRef.current = Boolean(sel && !sel.isCollapsed && sel.toString().trim().length > 0)
+    const selText = sel && !sel.isCollapsed ? sel.toString() : ""
+    targetHasSelectionRef.current = selText.trim().length > 0
+    targetSelectionTextRef.current = selText
     setTermChipState({ term, anchor })
   }, [])
 
@@ -2160,11 +2221,27 @@ function EditorRow({
         ) : (
           <div
             className={cn(
-              "flex flex-col transition-opacity",
+              "relative flex flex-col transition-opacity",
               isSynthBusy && "opacity-70",
             )}
             dir={sourceTextDirection}
+            onMouseUp={onAddConceptFromSelection ? handleSourceMouseUp : undefined}
           >
+            {/* Slice 5: add-from-selection affordance. Appears when a source
+                token is selected; promotes the selection to a DRAFT concept. */}
+            {sourceSelection && onAddConceptFromSelection && (
+              <button
+                type="button"
+                dir="ltr"
+                className="absolute right-1 top-0 z-10 inline-flex items-center gap-1 rounded-md bg-primary px-2 py-1 text-[11px] font-medium text-primary-foreground shadow-neu-sm hover:bg-primary/90"
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={handleAddSelectionToTermbase}
+                title={`Add "${sourceSelection}" to the termbase as a draft concept`}
+              >
+                <BookOpen className="h-3 w-3" aria-hidden />
+                Add to termbase
+              </button>
+            )}
             <div className="mb-1 flex items-center gap-1 text-xs text-muted-foreground" dir="ltr">
               <span>{cell.context}</span>
               {showFormattingLossWarning && (
@@ -2354,6 +2431,10 @@ function EditorRow({
                 </div>
               )}
             </div>
+            {/* Slice 4: advisory terminology warning band for the copilot
+                completion. Renders nothing when there are no warnings; never
+                blocks accept/commit. */}
+            <PreAcceptanceWarningBand warnings={preAcceptanceWarnings} className="mt-1" />
             {error && <p className="mt-0.5 text-xs text-destructive">{error}</p>}
           </div>
         </div>

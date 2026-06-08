@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import {
   lookupUser,
   listProjectMembers,
+  fetchOrgMembersMatrix,
   addProjectMember,
   removeProjectMember,
   type ProjectMember,
@@ -63,6 +64,45 @@ describe("listProjectMembers", () => {
       new Response("server down", { status: 503 })
     );
     await expect(listProjectMembers("jwt", "p1")).rejects.toThrow(/HTTP 503/);
+  });
+});
+
+describe("fetchOrgMembersMatrix (FRO-218)", () => {
+  // The whole point of this endpoint is ONE request for the matrix instead of
+  // one-per-project. Guard that the client issues a single org-scoped call and
+  // keys the result by projectId for cell lookup.
+  it("issues one org-scoped request and maps projectId → members", async () => {
+    const alice: ProjectMember = { userId: 1, username: "alice", role: { level: 700, name: "owner", source: "creator" }, secondarySources: [] };
+    const bob: ProjectMember = { userId: 2, username: "bob", role: { level: 400, name: "contributor", source: "org" }, secondarySources: [] };
+    (global.fetch as any).mockResolvedValueOnce(
+      new Response(JSON.stringify({ projects: [
+        { projectId: "p1", members: [alice, bob] },
+        { projectId: "p2", members: [alice] },
+      ] }), { status: 200 })
+    );
+
+    const map = await fetchOrgMembersMatrix("jwt", 21);
+
+    expect((global.fetch as any).mock.calls).toHaveLength(1);
+    expect((global.fetch as any).mock.calls[0][0]).toContain("/orgs/21/members-matrix");
+    expect(map.get("p1")).toEqual([alice, bob]);
+    expect(map.get("p2")).toEqual([alice]);
+    expect(map.get("p3")).toBeUndefined();
+  });
+
+  // An org with no accessible projects must yield an empty matrix, not an error
+  // (AC: genuinely-empty still renders, no false 500).
+  it("returns an empty map when the org has no projects", async () => {
+    (global.fetch as any).mockResolvedValueOnce(
+      new Response(JSON.stringify({ projects: [] }), { status: 200 })
+    );
+    const map = await fetchOrgMembersMatrix("jwt", 21);
+    expect(map.size).toBe(0);
+  });
+
+  it("throws on non-ok (the failure that used to surface as a page 500)", async () => {
+    (global.fetch as any).mockResolvedValueOnce(new Response("boom", { status: 500 }));
+    await expect(fetchOrgMembersMatrix("jwt", 21)).rejects.toThrow(/HTTP 500/);
   });
 });
 

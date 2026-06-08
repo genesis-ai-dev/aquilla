@@ -80,6 +80,34 @@ export async function listProjectMembers(
   return body.members;
 }
 
+/**
+ * GET /api/v2/orgs/:orgId/members-matrix.
+ *
+ * One request that returns effective members for every project the caller can
+ * access in the org — replaces the per-project listProjectMembers fan-out that
+ * flooded the backend (FRO-218). Returns a map of projectId → members. Projects
+ * the caller can't access are simply absent from the map (cells render empty),
+ * matching the old fan-out's per-project 403→[] collapse.
+ */
+export async function fetchOrgMembersMatrix(
+  jwt: string,
+  orgId: number
+): Promise<Map<string, ProjectMember[]>> {
+  const res = await fetch(
+    `${FRONTIER_BASE}/api/v2/orgs/${orgId}/members-matrix`,
+    { headers: authHeaders(jwt) }
+  );
+  if (!res.ok) {
+    throw new Error(`fetchOrgMembersMatrix failed: HTTP ${res.status}`);
+  }
+  const body = (await res.json()) as {
+    projects: { projectId: string; members: ProjectMember[] }[];
+  };
+  const map = new Map<string, ProjectMember[]>();
+  for (const p of body.projects) map.set(p.projectId, p.members);
+  return map;
+}
+
 export async function addProjectMember(
   jwt: string,
   projectId: string,

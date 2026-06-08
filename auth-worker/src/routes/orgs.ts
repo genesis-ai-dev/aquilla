@@ -21,6 +21,7 @@ import {
   getOrgMemberRole,
   getOrgPortfolio,
   groupExistsInOrg,
+  listEffectiveMembersForOrg,
   listOrgGroups,
   listOrgMembersWithUsers,
   listPendingInvitesInOrg,
@@ -150,6 +151,35 @@ orgs.get("/:orgId/assignments/mine", async (c) => {
   if (role == null) return c.json({ error: "not an org member" }, 403)
   const assignments = await getMyAssignmentsAcrossOrg(c.env, orgId, user.id)
   return c.json({ assignments })
+})
+
+/**
+ * GET /api/v2/orgs/:orgId/members-matrix — effective members for every project
+ * the caller can access in the org, in ONE request (FRO-218). Replaces the
+ * client's per-project /:projectId/members fan-out that flooded the connection
+ * pool and 500'd the page. Any org member.
+ */
+orgs.get("/:orgId/members-matrix", async (c) => {
+  const user = c.get("user")
+  const orgId = parseInt(c.req.param("orgId"), 10)
+  if (!Number.isFinite(orgId)) return c.json({ error: "invalid orgId" }, 400)
+
+  const role = await getOrgMemberRole(c.env, orgId, user.id)
+  if (role == null) return c.json({ error: "not an org member" }, 403)
+
+  const projects = await listEffectiveMembersForOrg(c.env, orgId, user.id)
+  await bumpOrgActivity(c.env, user.id, orgId)
+  return c.json({
+    projects: projects.map((p) => ({
+      projectId: p.projectId,
+      members: p.members.map((m) => ({
+        userId: m.userId,
+        username: m.username,
+        role: { level: m.roleLevel, name: ROLE_NAMES[m.roleLevel] ?? `level_${m.roleLevel}`, source: m.source },
+        secondarySources: m.secondarySources,
+      })),
+    })),
+  })
 })
 
 /** GET /api/v2/orgs/:orgId/members — caller must be an org member. */

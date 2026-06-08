@@ -394,6 +394,182 @@ const SOURCE_PRIORITY: Record<EffectiveMember["source"], number> = {
   creator: 1,
 }
 
+type PathEntry = { source: EffectiveMember["source"]; level: number; priority: number }
+
+/**
+ * Given every per-path contribution for the users on one project, derive each
+ * user's max-wins row (winner + secondarySources), sorted for display. Shared
+ * by listEffectiveProjectMembers and listEffectiveMembersForOrg so both agree
+ * on attribution semantics.
+ */
+function deriveEffectiveMembers(
+  allPaths: Map<number, { username: string; paths: PathEntry[] }>,
+): EffectiveMember[] {
+  const results: EffectiveMember[] = []
+  for (const [userId, { username, paths }] of allPaths) {
+    paths.sort((a, b) => b.level - a.level || b.priority - a.priority)
+    const winner = paths[0]
+    const secondary: SecondarySrc[] = paths
+      .slice(1)
+      .filter((p) => p.level > 0)
+      .map((p) => ({ source: p.source, level: p.level, name: roleNameForLevel(p.level) }))
+    results.push({
+      userId,
+      username,
+      roleLevel: winner.level,
+      source: winner.source,
+      secondarySources: secondary,
+    })
+  }
+  return results.sort(
+    (a, b) => b.roleLevel - a.roleLevel || a.username.localeCompare(b.username),
+  )
+}
+
+export interface ProjectEffectiveMembers {
+  projectId: string
+  members: EffectiveMember[]
+}
+
+/**
+ * Batched membership-matrix resolver (FRO-218). Computes effective members for
+ * EVERY non-archived project the viewer can access in `orgId`, in a small
+ * constant number of queries regardless of project count — replacing the
+ * client's per-project /:projectId/members fan-out that flooded the connection
+ * pool (~4 queries × N projects). org_members is fetched ONCE here, not once
+ * per project; direct/group/creator paths are resolved set-based with IN().
+ *
+ * Result is per-project max-wins rows identical to listEffectiveProjectMembers
+ * for each project, so the matrix renders unchanged.
+ */
+export async function listEffectiveMembersForOrg(
+  env: Env,
+  orgId: number,
+  viewerId: number,
+): Promise<ProjectEffectiveMembers[]> {
+  // 1. The viewer's accessible non-archived projects in this org. Mirrors the
+  //    access predicate of GET /api/v2/projects so the matrix columns match.
+  const accessible = await env.AQUILLA_DB.prepare(
+    `SELECT p.id AS id, p.created_by AS created_by
+       FROM projects p
+       LEFT JOIN project_members pm ON pm.project_id = p.id AND pm.user_id = ?
+       LEFT JOIN org_members om     ON om.org_id = p.org_id AND om.user_id = ?
+       LEFT JOIN (
+         SELECT gpg.project_id, MAX(gpg.role_level) AS max_grant
+           FROM group_project_grants gpg
+           JOIN group_members gm ON gm.group_id = gpg.group_id
+          WHERE gm.user_id = ?
+          GROUP BY gpg.project_id
+       ) gg ON gg.project_id = p.id
+      WHERE p.org_id = ? AND p.archived_at IS NULL
+        AND (
+          p.created_by = ?
+          OR pm.user_id = ?
+          OR gg.max_grant IS NOT NULL
+          OR om.user_id = ?
+        )`,
+  )
+    .bind(viewerId, viewerId, viewerId, orgId, viewerId, viewerId, viewerId)
+    .all<{ id: string; created_by: number }>()
+
+  const projects = accessible.results ?? []
+  if (projects.length === 0) return []
+
+  const projectIds = projects.map((p) => p.id)
+  const placeholders = projectIds.map(() => "?").join(", ")
+
+  // 2. org_members — fetched ONCE for the whole matrix (the old hot path that
+  //    re-ran this per project). Applies as the "org" path to every project,
+  //    since all accessible projects here belong to orgId.
+  const orgMembers = await env.AQUILLA_DB.prepare(
+    `SELECT om.user_id AS user_id, u.username AS username, om.role_level AS role_level
+       FROM org_members om
+       INNER JOIN users u ON u.id = om.user_id
+      WHERE om.org_id = ?`,
+  )
+    .bind(orgId)
+    .all<{ user_id: number; username: string; role_level: number }>()
+
+  // 3. Direct project_members across all accessible projects, in one query.
+  const direct = await env.AQUILLA_DB.prepare(
+    `SELECT pm.project_id AS project_id, pm.user_id AS user_id,
+            u.username AS username, pm.role_level AS role_level
+       FROM project_members pm
+       INNER JOIN users u ON u.id = pm.user_id
+      WHERE pm.project_id IN (${placeholders})`,
+  )
+    .bind(...projectIds)
+    .all<{ project_id: string; user_id: number; username: string; role_level: number }>()
+
+  // 4. Group grants across all accessible projects, MAX-aggregated per
+  //    (project, user) just like the per-project resolver.
+  const groups = await env.AQUILLA_DB.prepare(
+    `SELECT gpg.project_id AS project_id, gm.user_id AS user_id,
+            u.username AS username, MAX(gpg.role_level) AS role_level
+       FROM group_project_grants gpg
+       JOIN group_members gm ON gm.group_id = gpg.group_id
+       JOIN users u          ON u.id = gm.user_id
+      WHERE gpg.project_id IN (${placeholders})
+      GROUP BY gpg.project_id, gm.user_id, u.username`,
+  )
+    .bind(...projectIds)
+    .all<{ project_id: string; user_id: number; username: string; role_level: number | null }>()
+
+  // 5. Creator usernames, one query for the whole set.
+  const creatorIds = [...new Set(projects.map((p) => p.created_by))]
+  const creatorPlaceholders = creatorIds.map(() => "?").join(", ")
+  const creatorRows = await env.AQUILLA_DB.prepare(
+    `SELECT id, username FROM users WHERE id IN (${creatorPlaceholders})`,
+  )
+    .bind(...creatorIds)
+    .all<{ id: number; username: string }>()
+  const creatorUsername = new Map<number, string>()
+  for (const r of creatorRows.results ?? []) creatorUsername.set(r.id, r.username)
+
+  // Bucket the flat result rows by project, then derive per-project winners.
+  const pathsByProject = new Map<string, Map<number, { username: string; paths: PathEntry[] }>>()
+  const ensure = (projectId: string): Map<number, { username: string; paths: PathEntry[] }> => {
+    let m = pathsByProject.get(projectId)
+    if (!m) {
+      m = new Map()
+      pathsByProject.set(projectId, m)
+    }
+    return m
+  }
+  const record = (
+    projectId: string,
+    userId: number,
+    username: string,
+    source: EffectiveMember["source"],
+    level: number,
+  ): void => {
+    const m = ensure(projectId)
+    if (!m.has(userId)) m.set(userId, { username, paths: [] })
+    m.get(userId)!.paths.push({ source, level, priority: SOURCE_PRIORITY[source] })
+  }
+
+  for (const r of direct.results ?? []) {
+    record(r.project_id, r.user_id, r.username, "override", r.role_level)
+  }
+  for (const r of groups.results ?? []) {
+    if (r.role_level == null) continue
+    record(r.project_id, r.user_id, r.username, "group", r.role_level)
+  }
+  // org + creator paths apply to every accessible project.
+  for (const p of projects) {
+    for (const om of orgMembers.results ?? []) {
+      record(p.id, om.user_id, om.username, "org", om.role_level)
+    }
+    const cu = creatorUsername.get(p.created_by)
+    if (cu) record(p.id, p.created_by, cu, "creator", 700)
+  }
+
+  return projects.map((p) => ({
+    projectId: p.id,
+    members: deriveEffectiveMembers(ensure(p.id)),
+  }))
+}
+
 export interface OrgGroupSummary {
   id: number
   name: string

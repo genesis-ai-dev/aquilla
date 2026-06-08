@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useFrontierSession } from "./useFrontierSession";
 import { useAccessibleProjects } from "./useAccessibleProjects";
 import { useOrg, useOrgMembers } from "./useOrg";
-import { listProjectMembers, type ProjectMember } from "@/lib/frontier/members";
+import { fetchOrgMembersMatrix, type ProjectMember } from "@/lib/frontier/members";
 import type { CloudProjectSummary } from "@/lib/sync/cloud-projects";
 
 export interface MatrixMember {
@@ -49,11 +49,14 @@ export interface UseProjectsMembersMatrix {
 }
 
 /**
- * Pulls members for every accessible project in parallel, then aggregates
- * into a sparse {userId → projectId → role} map for the Matrix view.
+ * Pulls effective members for every accessible project in the org via ONE
+ * batched request (FRO-218 — fetchOrgMembersMatrix), then aggregates into a
+ * sparse {userId → projectId → role} map for the Matrix view. This replaced a
+ * per-project /members fan-out that flooded the backend connection pool and
+ * 500'd the page on large orgs.
  *
  * Two row sources, unioned:
- *   1. Members returned by listProjectMembers per accessible project —
+ *   1. Members returned by the batched matrix endpoint per accessible project —
  *      includes anyone with a project_members row, the project creator,
  *      AND org-tier members (when the project has org_id set).
  *   2. The caller's full org membership list (useOrgMembers) — covers
@@ -98,6 +101,8 @@ export function useProjectsMembersMatrix(): UseProjectsMembersMatrix {
   projectsRef.current = projects;
   const orgMembersRef = useRef(orgMembers);
   orgMembersRef.current = orgMembers;
+  const orgIdRef = useRef(orgId);
+  orgIdRef.current = orgId;
 
   // Reset aliveRef on each effect run — see useOrg for the StrictMode
   // rationale (cleanup-only would permanently flip it false in dev).
@@ -118,25 +123,27 @@ export function useProjectsMembersMatrix(): UseProjectsMembersMatrix {
     // an effect that was scheduled after these refs were updated.
     const projects = projectsRef.current;
     const orgMembers = orgMembersRef.current;
+    const orgId = orgIdRef.current;
     setLoading(true);
     setError(null);
     try {
-      // Fan out one /members fetch per accessible project. listProjectMembers
-      // returns null on 403/404, which we collapse to an empty list — those
-      // shouldn't block the rest of the matrix.
-      const perProjectMembers = await Promise.all(
-        projects.map(async (p) => ({
-          project: p,
-          members: (await listProjectMembers(jwt, p.id)) ?? [],
-        }))
-      );
+      // One batched request returns effective members for every project the
+      // caller can access in the org (FRO-218) — replaces the per-project
+      // /members fan-out that flooded the backend. Projects absent from the
+      // map (e.g. local-only IndexedDB rows with no org binding) get empty
+      // cells, matching the old per-project 403→[] collapse. No org context
+      // means no server-side matrix to fetch.
+      const membersByProject = orgId
+        ? await fetchOrgMembersMatrix(jwt, orgId)
+        : new Map<string, ProjectMember[]>();
 
       // Build the sparse cell map and the deduped member list in one pass.
       const cells = new Map<number, Map<string, MatrixCell>>();
       const memberByUserId = new Map<number, MatrixMember>();
       const ownerCountByProject = new Map<string, number>();
 
-      for (const { project, members } of perProjectMembers) {
+      for (const project of projects) {
+        const members = membersByProject.get(project.id) ?? [];
         let ownerCount = 0;
         for (const m of members) {
           // Track the user as a row.
@@ -201,7 +208,7 @@ export function useProjectsMembersMatrix(): UseProjectsMembersMatrix {
       if (aliveRef.current) setLoading(false);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [jwt, projectsKey, orgMembersKey]);
+  }, [jwt, orgId, projectsKey, orgMembersKey]);
 
   useEffect(() => {
     void refresh();

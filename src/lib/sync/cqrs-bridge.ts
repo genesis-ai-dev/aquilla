@@ -17,6 +17,12 @@ export interface CqrsOutboxBridge {
   /** Active editor file — event payloads are scoped to this file. */
   activeFileId: string | null
   username: string
+  /** The signed-in user's role level on this project (from the sync-token
+   *  `onRole` callback, persisted as project.syncRole). Used by the emit layer
+   *  to refuse events the user provably can't perform (mirrors the server's
+   *  role gate) so a guaranteed-403 never enters the outbox. Null = unknown →
+   *  fail open and let the server decide. */
+  roleLevel?: number | null
 }
 
 let bridge: CqrsOutboxBridge | null = null
@@ -51,5 +57,35 @@ export function buildFileScopedTokenFetcher(
       cache.set(fileId, fetcher)
     }
     return fetcher()
+  }
+}
+
+/**
+ * Project-AGNOSTIC token fetcher for the outbox flusher. The outbox is a
+ * single global IndexedDB store that accumulates events from every project the
+ * user touches; the flusher must mint a token scoped to each EVENT's own
+ * project, not the workspace's currently-open project. Minting against the
+ * active workspace projectId is what produced "403 token scoped to different
+ * project" on events queued in another project — which then head-of-line
+ * blocked the entire queue.
+ *
+ * Internally lazily builds (and caches) a per-project file-scoped fetcher.
+ * `bootstrap` is intentionally omitted: re-registration only matters for the
+ * project the user is actively in (handled by the workspace fetcher); every
+ * other project already exists server-side by the time its events flush.
+ */
+export function buildProjectAwareTokenFetcher(
+  getJwt: () => string | null,
+  apiUrl?: string,
+  callbacks: SyncTokenCallbacks = {},
+): (projectId: string, fileId: string) => Promise<string | null> {
+  const perProject = new Map<string, (fileId: string) => Promise<string | null>>()
+  return (projectId: string, fileId: string) => {
+    let forProject = perProject.get(projectId)
+    if (!forProject) {
+      forProject = buildFileScopedTokenFetcher(getJwt, projectId, {}, apiUrl, callbacks)
+      perProject.set(projectId, forProject)
+    }
+    return forProject(fileId)
   }
 }

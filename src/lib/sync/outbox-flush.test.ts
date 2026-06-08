@@ -20,6 +20,8 @@ import { flushOutboxBatch } from "./outbox-flush"
 import {
   enqueueOutboxEvent,
   outboxPendingCount,
+  peekOutboxBatch,
+  peekPendingOutboxBatch,
   resetOutboxConnectionForTests,
 } from "./outbox"
 import type { CqrsRawEvent } from "./outbox-types"
@@ -158,7 +160,7 @@ describe("flushOutboxBatch", () => {
     expect(await outboxPendingCount()).toBe(0)
   })
 
-  it("keeps per-event 401 and 403 rejects in the outbox for auth retry", async () => {
+  it("keeps a 401 for retry but quarantines a 403 (403 is not fixable by re-auth)", async () => {
     await enqueueOutboxEvent(makeEvent("e1", "f1"))
     await enqueueOutboxEvent(makeEvent("e2", "f1"))
     await enqueueOutboxEvent(makeEvent("e3", "f1"))
@@ -177,8 +179,13 @@ describe("flushOutboxBatch", () => {
       fetchImpl: fetchMock as unknown as typeof fetch,
     })
 
-    expect(result).toMatchObject({ posted: 3, accepted: 1, networkError: false })
+    expect(result).toMatchObject({ posted: 3, accepted: 1, quarantined: 1, networkError: false })
+    // Both rejected records are preserved (no data loss) ...
     expect(await outboxPendingCount()).toBe(2)
+    // ... but only the 401 stays retryable; the 403 is quarantined so it can't
+    // burn its retry budget or wedge the queue.
+    const pending = await peekPendingOutboxBatch(10)
+    expect(pending.map((r) => r.id).sort()).toEqual(["e2"])
   })
 
   // -- Network throw ---------------------------------------------------------
@@ -371,6 +378,95 @@ describe("flushOutboxBatch", () => {
     expect(onStaleSiblings).toHaveBeenCalledWith([
       { id: "e2", fileId: "f1", cellId: "c2" },
     ])
+  })
+
+  // ── Cross-project scope: mint by the EVENT's projectId ────────────────────
+
+  it("mints the sync-token with the EVENT's projectId, not a fixed workspace project", async () => {
+    await enqueueOutboxEvent(makeEvent("e1", "f1", { projectId: "project-A" }))
+
+    const tokenFn = vi.fn(async (_pid: string, _fid: string) => "tok")
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse({ accepted: [{ id: "e1" }], rejected: [] }),
+    )
+    await flushOutboxBatch({
+      getTokenForFile: tokenFn,
+      fetchImpl: fetchMock as unknown as typeof fetch,
+    })
+
+    // The flusher must pass the queued event's own projectId so the server's
+    // token-scope check (projectId in token claims === event.projectId) passes
+    // even when a different project is open in the workspace.
+    expect(tokenFn).toHaveBeenCalledWith("project-A", "f1")
+  })
+
+  // ── 403 quarantine + head-of-line advance ─────────────────────────────────
+
+  it("quarantines a per-event 403 as `failed` so it stops retrying and the queue advances", async () => {
+    await enqueueOutboxEvent(makeEvent("waive", "f1", { projectId: "old-project" }))
+
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse({
+        accepted: [],
+        rejected: [{ id: "waive", status: 403, reason: "token scoped to different project" }],
+      }),
+    )
+    const result = await flushOutboxBatch({
+      getTokenForFile: async () => "tok",
+      fetchImpl: fetchMock as unknown as typeof fetch,
+    })
+
+    expect(result).toMatchObject({ quarantined: 1, networkError: false, authError: false })
+    // Record is preserved (no silent data loss) ...
+    const all = await peekOutboxBatch(10)
+    expect(all).toHaveLength(1)
+    expect(all[0].status).toBe("failed")
+    expect(all[0].lastError).toMatchObject({ status: 403 })
+    // ... but excluded from the retry queue, so it can never wedge again.
+    const pending = await peekPendingOutboxBatch(10)
+    expect(pending).toHaveLength(0)
+  })
+
+  it("a poison 403 record no longer head-of-line blocks newer events in other files", async () => {
+    // Reproduces the prod wedge: an old cross-project waive is the OLDEST record;
+    // a fresh edit sits behind it. Pre-fix, the flusher retried the waive forever
+    // and never reached the edit.
+    await enqueueOutboxEvent(makeEvent("old-waive", "fileA", { projectId: "project-A" }))
+    await enqueueOutboxEvent(makeEvent("new-edit", "fileB", { projectId: "project-B" }))
+
+    const fetchMock = vi
+      .fn()
+      // 1st flush: oldest file (fileA) → server rejects 403
+      .mockResolvedValueOnce(
+        jsonResponse({ accepted: [], rejected: [{ id: "old-waive", status: 403, reason: "token scoped to different project" }] }),
+      )
+      // 2nd flush: fileB should now be reached and accepted
+      .mockResolvedValueOnce(jsonResponse({ accepted: [{ id: "new-edit" }], rejected: [] }))
+
+    const r1 = await flushOutboxBatch({ getTokenForFile: async () => "tok", fetchImpl: fetchMock as unknown as typeof fetch })
+    expect(r1.quarantined).toBe(1)
+
+    const r2 = await flushOutboxBatch({ getTokenForFile: async () => "tok", fetchImpl: fetchMock as unknown as typeof fetch })
+    // The second flush reached fileB and accepted it — proof the queue advanced.
+    expect(r2.accepted).toBe(1)
+    const bodyEvents = JSON.parse(
+      (fetchMock.mock.calls[1] as [string, RequestInit])[1].body as string,
+    ).events as CqrsRawEvent[]
+    expect(bodyEvents.map((e) => e.id)).toEqual(["new-edit"])
+  })
+
+  it("quarantines a whole-batch HTTP 403 instead of retrying it as a network error", async () => {
+    await enqueueOutboxEvent(makeEvent("e1", "f1", { projectId: "p" }))
+
+    const fetchMock = vi.fn().mockResolvedValue(new Response("Forbidden", { status: 403 }))
+    const result = await flushOutboxBatch({
+      getTokenForFile: async () => "tok",
+      fetchImpl: fetchMock as unknown as typeof fetch,
+    })
+
+    expect(result).toMatchObject({ quarantined: 1, networkError: false })
+    const pending = await peekPendingOutboxBatch(10)
+    expect(pending).toHaveLength(0)
   })
 
   // ── F5 regression: stale-source callback ──────────────────────────────────

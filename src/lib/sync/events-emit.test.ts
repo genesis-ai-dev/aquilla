@@ -7,12 +7,16 @@ import {
   emitCellUnvalidate,
   emitSourceCellCreate,
   emitFileCreate,
+  enqueueEvent,
+  InsufficientRoleError,
 } from "./events-emit"
 import {
   outboxPendingCount,
   peekOutboxBatch,
   resetOutboxConnectionForTests,
 } from "./outbox"
+import { setCqrsOutboxBridge } from "./cqrs-bridge"
+import { ROLE } from "./role-policy"
 import type { OutboxRawEvent } from "./outbox-types"
 import { OUTBOX_SCHEMA_VERSION } from "./outbox-types"
 
@@ -24,6 +28,31 @@ describe("events-emit", () => {
       d.onblocked = () => resolve()
       d.onsuccess = () => resolve()
       d.onerror = () => reject(d.error)
+    })
+  })
+
+  describe("pre-enqueue role gate", () => {
+    beforeEach(() => setCqrsOutboxBridge(null))
+
+    it("refuses to enqueue an event the user's known role can't perform (would be a guaranteed 403)", async () => {
+      setCqrsOutboxBridge({ projectId: "p", activeFileId: "f", username: "u", roleLevel: ROLE.COMMENTER })
+      await expect(
+        enqueueEvent({ kind: "cell.validate", projectId: "p", fileId: "f", cellId: "c", parentId: null, author: "u", payload: { editEventId: "e" } }),
+      ).rejects.toBeInstanceOf(InsufficientRoleError)
+      // Nothing was written — the poison event never reaches the durable queue.
+      expect(await outboxPendingCount()).toBe(0)
+    })
+
+    it("allows the event when the role is sufficient", async () => {
+      setCqrsOutboxBridge({ projectId: "p", activeFileId: "f", username: "u", roleLevel: ROLE.REVIEWER })
+      await enqueueEvent({ kind: "cell.validate", projectId: "p", fileId: "f", cellId: "c", parentId: null, author: "u", payload: { editEventId: "e" } })
+      expect(await outboxPendingCount()).toBe(1)
+    })
+
+    it("fails open when the role is unknown (bridge unset) — server stays authoritative", async () => {
+      setCqrsOutboxBridge(null)
+      await enqueueEvent({ kind: "cell.validate", projectId: "p", fileId: "f", cellId: "c", parentId: null, author: "u", payload: { editEventId: "e" } })
+      expect(await outboxPendingCount()).toBe(1)
     })
   })
 

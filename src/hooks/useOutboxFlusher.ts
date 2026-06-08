@@ -7,7 +7,10 @@ const MAX_BACKOFF_MS = 60_000
 
 export interface UseOutboxFlusherOptions {
   enabled: boolean
-  getTokenForFile: (fileId: string) => Promise<string | null>
+  /** Project-scoped token mint: takes the EVENT's projectId (not the active
+   *  workspace's) so events queued in any project drain regardless of which
+   *  project is currently open. See buildProjectAwareTokenFetcher. */
+  getTokenForFile: (projectId: string, fileId: string) => Promise<string | null>
 }
 
 /**
@@ -74,7 +77,7 @@ export function useOutboxFlusher(options: UseOutboxFlusherOptions): {
 
     const runFlushCycle = async () => {
       const result = await flushOutboxBatch({
-        getTokenForFile: (fid) => tokenRef.current(fid),
+        getTokenForFile: (pid, fid) => tokenRef.current(pid, fid),
         onStaleSiblings: (entries) => {
           if (entries.length === 0) return
           setStaleSiblingCount((n) => n + entries.length)

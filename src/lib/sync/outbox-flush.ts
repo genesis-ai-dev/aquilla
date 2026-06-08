@@ -5,7 +5,8 @@
 import type { CqrsRawEvent } from "./outbox-types"
 import {
   markOutboxAttempt,
-  peekOutboxBatch,
+  peekPendingOutboxBatch,
+  quarantineOutboxEvents,
   removeOutboxEvents,
   type OutboxAttemptError,
   type OutboxRecord,
@@ -36,7 +37,12 @@ export interface StaleSiblingEntry {
 }
 
 export interface FlushDeps {
-  getTokenForFile: (fileId: string) => Promise<string | null>
+  /** Mint a sync-token scoped to the EVENT's own project + file — not the
+   *  workspace's current project. The outbox is a single global store shared
+   *  across every project the user has open; minting against the active
+   *  workspace's projectId is what produced "403 token scoped to different
+   *  project" on edits queued in another project, wedging the whole queue. */
+  getTokenForFile: (projectId: string, fileId: string) => Promise<string | null>
   fetchImpl?: typeof fetch
   /** F5: called when one or more target.cell.commit events had a stale
    *  sourceEventId. The caller should surface a "source changed" hint. */
@@ -73,23 +79,28 @@ export async function flushOutboxBatch(deps: FlushDeps): Promise<{
    *  unavailable. Distinct from `networkError` so the caller can back off
    *  on persistent auth failure without conflating "queue is empty". */
   authError: boolean
+  /** Records moved to permanent `failed` status this flush because the server
+   *  rejected them non-retryably (403). Surfaced so the caller can show an
+   *  accurate "couldn't save — review" banner instead of "session expired". */
+  quarantined: number
   staleSiblingCount: number
   staleSourceCount: number
 }> {
   const fetchFn = deps.fetchImpl ?? fetch
-  const records = await peekOutboxBatch(MAX_BATCH * 2)
+  const records = await peekPendingOutboxBatch(MAX_BATCH * 2)
   if (records.length === 0) {
-    return { posted: 0, accepted: 0, networkError: false, authError: false, staleSiblingCount: 0, staleSourceCount: 0 }
+    return { posted: 0, accepted: 0, networkError: false, authError: false, quarantined: 0, staleSiblingCount: 0, staleSourceCount: 0 }
   }
   const batch = groupOldestFileFirst(records)
   const fileId = batch[0].event.fileId
   if (!fileId) {
     await removeOutboxEvents([batch[0].id])
-    return { posted: 0, accepted: 0, networkError: false, authError: false, staleSiblingCount: 0, staleSourceCount: 0 }
+    return { posted: 0, accepted: 0, networkError: false, authError: false, quarantined: 0, staleSiblingCount: 0, staleSourceCount: 0 }
   }
-  const token = await deps.getTokenForFile(fileId)
+  const projectId = batch[0].event.projectId
+  const token = await deps.getTokenForFile(projectId, fileId)
   if (!token) {
-    return { posted: 0, accepted: 0, networkError: false, authError: true, staleSiblingCount: 0, staleSourceCount: 0 }
+    return { posted: 0, accepted: 0, networkError: false, authError: true, quarantined: 0, staleSiblingCount: 0, staleSourceCount: 0 }
   }
   const events: CqrsRawEvent[] = batch.map((r) => r.event)
   const url = `${syncWorkerHttpOrigin()}/events`
@@ -109,15 +120,26 @@ export async function flushOutboxBatch(deps: FlushDeps): Promise<{
       batch.map((r) => r.id),
       { error: { status: 0, reason } },
     )
-    return { posted: events.length, accepted: 0, networkError: true, authError: false, staleSiblingCount: 0, staleSourceCount: 0 }
+    return { posted: events.length, accepted: 0, networkError: true, authError: false, quarantined: 0, staleSiblingCount: 0, staleSourceCount: 0 }
   }
 
   if (!res.ok) {
+    // A whole-batch 403 is non-retryable (wrong project scope / role too low):
+    // quarantine so the flusher advances to the next file instead of looping
+    // on this one forever. 401 and 5xx remain transient (token re-mint / server
+    // hiccup), so they keep their retry budget.
+    if (res.status === 403) {
+      await quarantineOutboxEvents(
+        batch.map((r) => r.id),
+        { status: 403, reason: `HTTP 403` },
+      )
+      return { posted: events.length, accepted: 0, networkError: false, authError: false, quarantined: batch.length, staleSiblingCount: 0, staleSourceCount: 0 }
+    }
     await markOutboxAttempt(
       batch.map((r) => r.id),
       { error: { status: res.status, reason: `HTTP ${res.status}` } },
     )
-    return { posted: events.length, accepted: 0, networkError: true, authError: false, staleSiblingCount: 0, staleSourceCount: 0 }
+    return { posted: events.length, accepted: 0, networkError: true, authError: false, quarantined: 0, staleSiblingCount: 0, staleSourceCount: 0 }
   }
 
   let body: PostBody
@@ -128,7 +150,7 @@ export async function flushOutboxBatch(deps: FlushDeps): Promise<{
       batch.map((r) => r.id),
       { error: { status: 0, reason: "malformed server response" } },
     )
-    return { posted: events.length, accepted: 0, networkError: true, authError: false, staleSiblingCount: 0, staleSourceCount: 0 }
+    return { posted: events.length, accepted: 0, networkError: true, authError: false, quarantined: 0, staleSiblingCount: 0, staleSourceCount: 0 }
   }
 
   // Surface failures loudly instead of swallowing them. A rejected event
@@ -169,18 +191,33 @@ export async function flushOutboxBatch(deps: FlushDeps): Promise<{
     await removeOutboxEvents(removableIds)
   }
 
-  // Records the server kept-back (401/403 auth quarantine, or any record we
-  // can't tell from `body` because the server didn't ack it explicitly) get
-  // their attempt recorded so the inspector shows why they're sitting around.
+  // 403 = non-retryable (wrong project scope, or role too low). Quarantine
+  // immediately rather than burning the retry budget and head-of-line blocking
+  // the rest of the queue. The record is preserved for the inspector so the
+  // user can see "couldn't save — permission" and discard it. 401 stays in the
+  // normal retry path: it can be a transient token-mint/expiry blip that a
+  // fresh token resolves.
   const rejectionByid = new Map<string, OutboxAttemptError>()
   for (const r of body.rejected ?? []) {
     rejectionByid.set(r.id, { status: r.status, reason: r.reason })
   }
+  const forbiddenIds = (body.rejected ?? [])
+    .filter((r) => r.status === 403 && !acceptedIds.has(r.id))
+    .map((r) => r.id)
+  for (const id of forbiddenIds) {
+    await quarantineOutboxEvents([id], rejectionByid.get(id) ?? { status: 403, reason: "forbidden" })
+  }
+  const forbiddenSet = new Set(forbiddenIds)
+
+  // Records the server kept-back (401 auth retry, or any record we can't tell
+  // from `body` because the server didn't ack it explicitly) get their attempt
+  // recorded so the inspector shows why they're sitting around.
   const keptBackIds: string[] = []
   const keptBackUpdates: Array<[string, OutboxAttemptError | null]> = []
   for (const r of batch) {
     if (acceptedIds.has(r.id)) continue
     if (permanentlyRejectedIds.has(r.id)) continue
+    if (forbiddenSet.has(r.id)) continue
     keptBackIds.push(r.id)
     keptBackUpdates.push([r.id, rejectionByid.get(r.id) ?? null])
   }
@@ -206,6 +243,7 @@ export async function flushOutboxBatch(deps: FlushDeps): Promise<{
     accepted: acceptedIds.size,
     networkError: false,
     authError: false,
+    quarantined: forbiddenIds.length,
     staleSiblingCount: body.stale?.length ?? 0,
     staleSourceCount: body.staleSource?.length ?? 0,
   }

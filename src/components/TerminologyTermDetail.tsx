@@ -19,6 +19,8 @@ import type { CellData } from "@/hooks/useCells"
 import { TranslatedEditor } from "@/components/TranslatedEditor"
 import type { TranslatedEditorCommit } from "@/components/TranslatedEditor"
 import { emitTargetCellCommit } from "@/lib/sync/events-emit"
+import { EquivalentsPanel } from "@/components/EquivalentsPanel"
+import { predictEquivalents } from "@/lib/terminology/equivalents"
 
 // ─── Status label helpers (mirror TerminologyPage) ───────────────────────────
 
@@ -227,6 +229,13 @@ export interface TerminologyTermDetailProps {
   onCellCommitted: () => void
   /** Optimistic patch forwarded from the parent's useCells instance. */
   onOptimisticEdit: (cellId: string, patch: { value: string; valueHtml?: string }) => void
+  /** Whether the user may promote a predicted equivalent to a managed rendering. */
+  canManageTermbase?: boolean
+  /**
+   * Promote a predicted target equivalent to an admitted rendering on this
+   * concept. Persistence is owned by the parent (patchSettings).
+   */
+  onPromoteRendering?: (conceptId: string, target: string) => void | Promise<void>
 }
 
 // ─── Main component ───────────────────────────────────────────────────────────
@@ -240,6 +249,8 @@ export function TerminologyTermDetail({
   onClose,
   onCellCommitted,
   onOptimisticEdit,
+  canManageTermbase = false,
+  onPromoteRendering,
 }: TerminologyTermDetailProps) {
   // Per-cell translated values — optimistic updates are already reflected via
   // the parent's useCells applyOptimisticTargetEdit before this renders.
@@ -258,6 +269,24 @@ export function TerminologyTermDetail({
     }
     return { enforced, infringed }
   }, [occurrences, concept])
+
+  // Predicted target equivalents over the loaded bilingual cell pairs. χ² + EM
+  // cross-check; results stay "AI-assumed" until explicitly promoted.
+  const predicted = useMemo(
+    () =>
+      predictEquivalents(
+        cells.map((c) => ({ source: c.original, target: c.translated })),
+        concept.sourceTerm,
+      ),
+    [cells, concept.sourceTerm],
+  )
+
+  const handlePromoteEquivalent = useCallback(
+    (target: string) => {
+      void onPromoteRendering?.(concept.id, target)
+    },
+    [onPromoteRendering, concept.id],
+  )
 
   return (
     <div className="flex flex-col min-h-screen bg-background">
@@ -318,6 +347,17 @@ export function TerminologyTermDetail({
             </>
           )}
         </div>
+      </div>
+
+      {/* Target equivalents — managed (deterministic) vs AI-assumed (predicted) */}
+      <div className="border-b px-4 py-3">
+        <EquivalentsPanel
+          sourceTerm={concept.sourceTerm}
+          managed={concept.renderings}
+          predicted={predicted}
+          canPromote={canManageTermbase && Boolean(onPromoteRendering)}
+          onPromote={handlePromoteEquivalent}
+        />
       </div>
 
       {/* Occurrence list */}

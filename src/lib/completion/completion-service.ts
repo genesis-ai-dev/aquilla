@@ -144,7 +144,13 @@ export function buildPrompt(options: {
   }
 
   // Validated pairs lead the few-shot examples; search-retrieved examples follow.
+  // Drop incomplete pairs (empty source or target): the branching-search corpus
+  // keeps source-only cells (COALESCE(t.value,'') in loadCorpus) so in-progress
+  // projects still retrieve neighbors, but an example with an empty target
+  // teaches the model nothing and leaks a blank "Translation:" into the prompt.
+  // Mirrors the reference impl (codex-editor shared.ts fetchFewShotExamples).
   const allExamples = [...(options.validatedPairs ?? []), ...options.examples]
+    .filter((ex) => ex.source.trim() && ex.target.trim())
 
   let user = ""
   for (const ex of allExamples) user += `Source: ${ex.source}\nTranslation: ${ex.target}\n\n`
@@ -204,8 +210,12 @@ export function buildBatchPrompt(options: {
     user += `Source:\n${renderSide(options.validatedPairs, "source")}\n\nTranslation:\n${renderSide(options.validatedPairs, "target")}\n\n`
   }
   for (const ex of options.examples) {
-    if (!ex.cells.length) continue
-    user += `Source:\n${renderSide(ex.cells, "source")}\n\nTranslation:\n${renderSide(ex.cells, "target")}\n\n`
+    // Passage neighbors include source-only cells (untranslated context within
+    // the retrieved span). Filter pairwise so source/target <vN> lists stay
+    // aligned and no blank target leaks into the demonstrated passage.
+    const cells = ex.cells.filter((c) => c.source.trim() && c.target.trim())
+    if (!cells.length) continue
+    user += `Source:\n${renderSide(cells, "source")}\n\nTranslation:\n${renderSide(cells, "target")}\n\n`
   }
   if (options.priorBatch?.length) {
     user += `Source:\n${renderSide(options.priorBatch, "source")}\n\nTranslation:\n${renderSide(options.priorBatch, "target")}\n\n`

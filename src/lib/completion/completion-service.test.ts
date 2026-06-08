@@ -49,6 +49,26 @@ describe("buildPrompt", () => {
     })
     expect(messages[0].content).toBe("Translate English to Spanish.")
   })
+
+  it("drops examples with an empty target so no blank 'Translation:' leaks into the prompt", () => {
+    // The branching-search corpus keeps source-only cells (untranslated), so
+    // retrieval can hand us pairs with an empty target. A blank target teaches
+    // the model nothing and corrupts the few-shot pattern — it must be filtered.
+    const messages = buildPrompt({
+      sourceLanguage: "English", targetLanguage: "French",
+      systemPrompt: DEFAULT_SYSTEM_PROMPT, sourceText: "live source",
+      examples: [
+        { source: "God created", target: "Dieu crea" },
+        { source: "untranslated source", target: "" },
+        { source: "  ", target: "orphan target" },
+      ],
+    })
+    expect(messages[1].content).toContain("God created")
+    expect(messages[1].content).not.toContain("untranslated source")
+    expect(messages[1].content).not.toContain("orphan target")
+    // One complete example + the live source line.
+    expect((messages[1].content.match(/Source: /g) || []).length).toBe(2)
+  })
 })
 
 describe("buildBatchPrompt", () => {
@@ -119,6 +139,42 @@ describe("buildBatchPrompt", () => {
     })
     // Only the non-empty example is rendered.
     expect((messages[1].content.match(/Source:/g) || []).length).toBe(2) // 1 example + 1 live
+  })
+
+  it("drops passage cells with an empty target, keeping source/target <vN> aligned", () => {
+    // Passage neighbors include untranslated context cells. Rendering them would
+    // emit a blank <vN> on the translation side and misalign the demonstrated
+    // source/target columns. Filter pairwise before rendering.
+    const messages = buildBatchPrompt({
+      sourceLanguage: "English", targetLanguage: "French",
+      systemPrompt: DEFAULT_SYSTEM_PROMPT,
+      cells: [{ source: "live cell" }],
+      examples: [
+        { cells: [
+          { source: "Hello", target: "Bonjour" },
+          { source: "untranslated", target: "" },
+          { source: "world", target: "monde" },
+        ] },
+      ],
+    })
+    // Surviving pairs are re-numbered contiguously — no gap from the dropped cell.
+    expect(messages[1].content).toContain("<v1>Hello</v1>\n<v2>world</v2>")
+    expect(messages[1].content).toContain("<v1>Bonjour</v1>\n<v2>monde</v2>")
+    expect(messages[1].content).not.toContain("untranslated")
+  })
+
+  it("skips an example whose cells all have empty targets", () => {
+    const messages = buildBatchPrompt({
+      sourceLanguage: "English", targetLanguage: "French",
+      systemPrompt: DEFAULT_SYSTEM_PROMPT,
+      cells: [{ source: "x" }],
+      examples: [
+        { cells: [{ source: "a", target: "" }, { source: "b", target: "  " }] },
+        { cells: [{ source: "good", target: "bon" }] },
+      ],
+    })
+    expect(messages[1].content).not.toContain("<v1>a</v1>")
+    expect((messages[1].content.match(/Source:/g) || []).length).toBe(2) // 1 surviving example + 1 live
   })
 })
 

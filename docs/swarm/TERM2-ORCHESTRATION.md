@@ -39,3 +39,4 @@
 
 ## §4 Merge log
 <!-- date · WS · branch · sha · tsc · vitest · notes -->
+- 2026-06-08 · WS-WARN · swarm/ws-warn · e0ca7c0 · tsc OK · vitest 8/8 · standalone preacceptance lib+band; SWARM-TODO to mount

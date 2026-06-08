@@ -7,6 +7,13 @@ import { ShieldCheck } from "lucide-react"
 export function PrivacyStep({ onNext, onBack }: { onNext: () => void; onBack: () => void }) {
   const { enabled, setEnabled } = useAnalyticsConsent()
 
+  // Persist the current choice (default included) so it counts as an explicit
+  // decision and this step is skipped on future onboarding runs.
+  const handleContinue = () => {
+    setEnabled(enabled)
+    onNext()
+  }
+
   return (
     <div className="space-y-6">
       <div className="text-center space-y-2">
@@ -44,7 +51,7 @@ export function PrivacyStep({ onNext, onBack }: { onNext: () => void; onBack: ()
       </div>
 
       <div className="space-y-2">
-        <Button size="lg" onClick={onNext} className="w-full">
+        <Button size="lg" onClick={handleContinue} className="w-full">
           Continue
         </Button>
         <Button variant="ghost" size="sm" onClick={onBack} className="w-full">

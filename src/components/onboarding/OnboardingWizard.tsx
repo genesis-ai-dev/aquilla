@@ -1,6 +1,7 @@
 import { useState, useCallback } from "react"
 import { useNavigate } from "react-router-dom"
 import type { ProjectRecord } from "@/lib/parsers/types"
+import { hasAnalyticsConsentBeenSet } from "@/lib/analytics-consent"
 import { WelcomeStep } from "./steps/WelcomeStep"
 import { PrivacyStep } from "./steps/PrivacyStep"
 import { SignInStep } from "./steps/SignInStep"
@@ -16,8 +17,18 @@ export function OnboardingWizard() {
   const [displayName, setDisplayName] = useState("")
   const [createdProject, setCreatedProject] = useState<ProjectRecord | null>(null)
 
-  const next = useCallback(() => setStep((s) => Math.min(s + 1, TOTAL_STEPS)), [])
-  const back = useCallback(() => setStep((s) => Math.max(s - 1, 1)), [])
+  // The privacy step (2) is skipped in both directions once the user has made
+  // an analytics choice on a previous run.
+  const [skipPrivacy] = useState(() => hasAnalyticsConsentBeenSet())
+
+  const next = useCallback(() => setStep((s) => {
+    const n = Math.min(s + 1, TOTAL_STEPS)
+    return n === 2 && skipPrivacy ? 3 : n
+  }), [skipPrivacy])
+  const back = useCallback(() => setStep((s) => {
+    const p = Math.max(s - 1, 1)
+    return p === 2 && skipPrivacy ? 1 : p
+  }), [skipPrivacy])
 
   const handleProjectCreated = useCallback((project: ProjectRecord) => {
     setCreatedProject(project)

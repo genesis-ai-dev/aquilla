@@ -105,7 +105,10 @@ CREATE TABLE projects (
     archived_at       TIMESTAMPTZ,
     archived_by       BIGINT,
     source_project_id TEXT,
-    deadline_at       TEXT          -- calendar date string 'YYYY-MM-DD' (not an instant; TIMESTAMPTZ would TZ-shift it)
+    deadline_at       TEXT,         -- calendar date string 'YYYY-MM-DD' (not an instant; TIMESTAMPTZ would TZ-shift it)
+    -- Org termbase publish flag (migration 0030). TRUE = this project's termbase
+    -- is discoverable by other projects in its org.
+    org_published_termbase BOOLEAN NOT NULL DEFAULT FALSE
 );
 
 CREATE TABLE project_members (
@@ -154,6 +157,20 @@ CREATE TABLE org_settings (
     updated_at TIMESTAMPTZ DEFAULT now(),
     updated_by BIGINT REFERENCES users(id)
 );
+
+-- Org termbase publish/subscribe (migration 0030; terminology Slices 6-7).
+-- A subscription row makes `project_id` consume `termbase_project_id`'s
+-- published termbase, ordered by `priority` (lower = higher precedence) and
+-- confers an implicit viewer read on the upstream termbase project.
+CREATE TABLE project_termbase_subscriptions (
+    project_id          TEXT    NOT NULL,
+    termbase_project_id TEXT    NOT NULL,
+    priority            INTEGER NOT NULL DEFAULT 0,
+    created_at          TIMESTAMPTZ DEFAULT now(),
+    PRIMARY KEY (project_id, termbase_project_id)
+);
+CREATE INDEX idx_termbase_subs_termbase ON project_termbase_subscriptions (termbase_project_id);
+CREATE INDEX idx_projects_org_published_termbase ON projects (org_id) WHERE org_published_termbase = TRUE;
 
 -- ───────────────────────── event log + projections ──────────────────────
 

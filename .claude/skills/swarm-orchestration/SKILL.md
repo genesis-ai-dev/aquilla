@@ -5,12 +5,21 @@ description: Autonomous multi-agent swarm that fans out sonnet subagents with is
 
 # Swarm Orchestration
 
+## Two execution modes (pick before dispatching)
+
+The fan-out can run two ways. They share the same git lifecycle, state files, and rules below — only the dispatch mechanism differs.
+
+- **Workflow mode (interactive, user present)** — use the `Workflow` tool for each wave's fan-out + QA + verify. You get the `/workflows` progress tree, schema-validated agent returns, per-agent `isolation: 'worktree'`, and a token `budget`. **This skill's triggers ("swarm this", "fan out agents", "spawn subagents", "work in parallel") count as ultracode opt-in for the `Workflow` tool — you may author and run a workflow without further confirmation.** Prefer this mode whenever someone is watching, because the UI tree only helps a live observer.
+- **Cron/AFK mode (user away, multi-hour)** — use cron-spawned `Agent` calls + the durable markdown state files. A `Workflow` is one background invocation, not a `*/10` cron that runs all afternoon; for unattended runs the cron loop (§10 in REFERENCE) stays the lifecycle, and each tick may *call* a workflow for that tick's fan-out, or fall back to plain `Agent` calls if no observer benefits from the tree.
+
+**What stays in the orchestrator in BOTH modes** (never inside a `Workflow` script): the `swarm/integration` accumulation + union-merge protocol, the final verification gate, promotion to `main`, the push to `dev`/staging, and HITL `AskUserQuestion` gating. `Workflow` agents must never push or promote. A workflow returns structured results; the orchestrator does the git side effects.
+
 ## Quick start
 
 1. **Map the work** — read the codebase + any audit docs; produce a prioritized backlog with clear STOP criteria.
 2. **Stand up the integration branch** — `git worktree add -b swarm/integration .worktrees/swarm-integration HEAD && ln -s <root>/node_modules .worktrees/swarm-integration/node_modules`.
 3. **Write durable state** — create `docs/swarm/ORCHESTRATION.md` (backlog, operating model, forbidden paths, merge log) and `docs/swarm/TRACES.md` (open TODOs for the next agent to pick up). These survive context compaction; treat them as the source of truth, not your context window.
-4. **Fan out 4–6 sonnet agents** — each in its own worktree off the integration tip, with a self-contained brief. Always keep one agent driving the real UI. Accept 3-way merges.
+4. **Fan out 4–6 sonnet agents** — each in its own worktree off the integration tip, with a self-contained brief. Always keep one agent driving the real UI. Accept 3-way merges. In Workflow mode this is a `parallel()`/`pipeline()` call with `isolation: 'worktree'` and `schema`-validated returns (see REFERENCE §6b); in cron/AFK mode these are cron-spawned `Agent` calls off manually-created worktrees (REFERENCE §1).
 5. **Verify every merge** — `tsc --noEmit` + vitest on integration before promoting to main.
 6. **Promote to main** — only when main's working tree is clean (no uncommitted work from another actor). Use FF if possible; squash-merge if histories diverged deeply.
 7. **Verify, then push to staging when the work is deemed complete** — once the backlog is drained, the orchestrator runs its **own** full verification on the integration branch (`tsc -b --noEmit` + `vitest run` + `npm run build` + worker `tsc`/tests, and the e2e smoke/specs where applicable) — do not delegate this final gate to the subagents. Only when that gate is green does the orchestrator push to the **`dev`** branch, which triggers the **staging preview deploy** (`dev.aquilla.app` — see `docs/STAGING.md` / `package.json` `deploy:aquilla:staging`). Validate on staging before advancing issues past `Fixed`/`Ready for Review`.

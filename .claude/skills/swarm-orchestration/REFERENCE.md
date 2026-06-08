@@ -1,6 +1,10 @@
 # Swarm Orchestration — Reference
 
-## 1. Worktree setup (per agent)
+> **Modes:** §1 (manual worktrees) and the cron templates (§10) are the **cron/AFK** path. §6b is the **Workflow** path for interactive waves. Everything else (§2–§5, §7–§9) is shared — the git lifecycle, state files, and rules are identical regardless of how you dispatch. The orchestrator owns all merges, promotion, and HITL in both modes.
+
+## 1. Worktree setup (per agent — cron/AFK mode)
+
+> In **Workflow mode** you don't do this by hand: `agent(prompt, { isolation: 'worktree' })` creates and auto-cleans a worktree per agent (auto-removed if unchanged). The manual setup below is for cron-spawned `Agent` calls, where you control the worktree lifecycle and base commit yourself.
 
 ```bash
 ROOT=/path/to/repo
@@ -173,6 +177,47 @@ nohup npx vite --port 5273 --strictPort >/tmp/swarm-qa-vite.log 2>&1 &
 
 ---
 
+## 6b. Workflow mode — one wave as a `Workflow` script
+
+For interactive waves, express the fan-out + QA + verify as a single `Workflow` call. The orchestrator scouts the backlog inline (it already does this for ORCHESTRATION.md), passes the scoped slices as `args`, reads the structured result, then does the git side effects itself. One workflow = one wave; you stay in the loop between waves.
+
+**What goes in the script:** implement (parallel, worktree-isolated), QA (pipeline: walk surface → fix surface as each finding returns), and the *agents'* own tsc/vitest self-checks.
+**What stays out of the script** (orchestrator, after the workflow returns): merge into `swarm/integration`, the final gate, promotion to `main`, push to `dev`, and any `AskUserQuestion` HITL.
+
+```js
+export const meta = {
+  name: 'swarm-wave',
+  description: 'One swarm wave: implement workstreams in isolated worktrees, QA surfaces, self-verify',
+  phases: [{ title: 'Implement' }, { title: 'QA' }],
+}
+// args = { workstreams: [...], surfaces: [...] } — scoped inline by the orchestrator this tick
+const built = await parallel(args.workstreams.map(ws => () =>
+  agent(briefFor(ws), { label: `ws:${ws.id}`, phase: 'Implement',
+                        isolation: 'worktree', schema: WS_RESULT })))      // {branch, todos[], tscOk, vitestOk, stubbed[]}
+
+// QA: fix each surface as soon as its walkthrough returns (pipeline, no barrier)
+const punch = await pipeline(args.surfaces,
+  s => agent(qaBrief(s), { phase: 'QA', schema: FINDINGS }),               // {surface, findings[]}
+  (f, s) => f.findings.length
+      ? agent(fixBrief(s, f), { phase: 'QA', isolation: 'worktree', schema: WS_RESULT })
+      : null)
+
+return { built: built.filter(Boolean), fixes: punch.filter(Boolean) }      // orchestrator merges + promotes
+```
+
+**Mapping the field-tested rules onto Workflow primitives:**
+- *"Always keep one UI agent"* → include a QA `pipeline` stage every wave; never a pure-`parallel` implement-only wave.
+- *"One worker per surface, not one for everything"* (§6, §9) → the QA `pipeline` is per-surface by construction; don't collapse surfaces into one agent.
+- *"Run tsc/vitest before filing a bug"* (the back-translation scare, §9) → the QA agent's `FINDINGS` schema should carry a `verifiedNotStaleTest: boolean`; treat unverified findings as suspect, or add a perspective-diverse verify stage before a finding counts.
+- *"Self-contained briefs"* (absolute rule) → `briefFor(ws)` must still embed owned/forbidden files, verify commands, SWARM-TODO requirement, and **no-push** — worktree isolation does not relax the no-push rule.
+- *Token budget (CLAUDE.md Rule 6)* → guard loop-until-dry QA waves on `budget.total && budget.remaining() > 50_000`.
+- *Convergence (§8)* → a wave that returns zero fresh findings across the QA pipeline is the dry signal; stop calling workflows, drop to the watcher cron.
+- *Resume* → if a wave is interrupted, relaunch with `{ scriptPath, resumeFromRunId }`; completed `agent()` calls return cached results. This complements (does not replace) the durable markdown state.
+
+**The orchestrator's post-workflow git step is unchanged** — merge each returned branch into `swarm/integration` per §5 (keep both sides), then run the §0 gate yourself before promotion. The workflow never touches `swarm/integration`, `main`, or `dev`.
+
+---
+
 ## 7. Failure recovery patterns
 
 **Cut-off agent** (partial work, uncommitted):
@@ -202,6 +247,19 @@ The loop should STOP (or drop to a watcher cadence) when:
 
 ---
 
+## 8b. HITL (human-in-the-loop) issues — never block the swarm on them
+
+Some issues are design-heavy or decision-gated (information architecture, copy/vocabulary, model semantics, anything tagged HITL in its body). **Do NOT auto-implement these and do NOT let them stall the wave.** Instead:
+
+1. **Run a read-only proposal agent** in parallel with the implementation agents — it reads the code + spec and returns a concrete, opinionated proposal (recommended option + 3-5 crisp open questions). No worktree, no commits. (In Workflow mode this is just another `agent()` in the wave — *no* `isolation: 'worktree'`, with a `PROPOSAL` schema. The `AskUserQuestion` still happens in the orchestrator after the workflow returns — a running workflow can't pause for the user.)
+2. **Post the proposal as a comment on the ticket** and note that human review is required. Leave status as-is (Todo / unstarted) — don't mark it Fixed.
+3. **Prompt the user** with the open questions (e.g. via AskUserQuestion) — but only *after* the other agents are dispatched, so the buildable work proceeds concurrently.
+4. **Implement only after the user approves** the model/copy. Then it becomes a normal implementation workstream in the next wave.
+
+A HITL item gated on a user decision is a legitimate convergence endpoint for that issue — the swarm is "done" with it once the proposal is surfaced and the question is asked. Blocked-by chains (e.g. a redesign blocked by a revert) compound with this: defer until both the dependency lands *and* the design is approved.
+
+---
+
 ## 9. Lessons from the field
 
 | Situation | What happened | Lesson |
@@ -214,10 +272,14 @@ The loop should STOP (or drop to a watcher cadence) when:
 | Round-trip fidelity verification | Found TSV corruption + TMX selection bug unit tests missed | Always add round-trip tests for import/export |
 | "Sync disabled" in footer | Harmless (no file open) but reads as broken in a demo | The demo golden path needs a human walkthrough, not just tests |
 | ProjectSettings.tsx overlap | Swarm's W17 + actor's uncommitted edits | Carve out the overlapping file from promotion; re-apply later |
+| Design-heavy issue in the queue (IA/copy/model) | Auto-implementing would guess at decisions only the user can make | Run a read-only proposal agent in parallel, post it to the ticket, ask the user — never block the wave (see §8b) |
+| Two issues touching the same file (e.g. ProjectOverview max-width + IA redesign) | Splitting → guaranteed merge conflict | Combine into one agent, OR defer one (if HITL) and keep the other's change minimal so it merges cleanly later |
 
 ---
 
-## 10. Cron loop prompt templates
+## 10. Cron loop prompt templates (cron/AFK mode)
+
+> These drive the unattended lifecycle. A tick may either spawn plain `Agent` calls (default when no one is watching) or, if a live observer would benefit, call the §6b `Workflow` for that tick's fan-out. Either way the cron tick — not the workflow — owns merge, the gate, promotion, and STOP.
 
 ### Active build loop (10-min)
 Key instructions to include in the cron prompt:

@@ -1897,9 +1897,6 @@ export function ProjectWorkspace() {
       <AppShell
         sidebar={
           <>
-            <div className="p-2">
-              <AccountSwitcher />
-            </div>
             {lens !== "audio" && (
               <>
                 <SuggestionBanner
@@ -1947,6 +1944,9 @@ export function ProjectWorkspace() {
               />
             )}
             <SidebarProjectSection items={projectNavItems} />
+            <div className="mt-auto border-t px-2 pb-2 pt-2">
+              <AccountSwitcher variant="sidebar" />
+            </div>
           </>
         }
         header={

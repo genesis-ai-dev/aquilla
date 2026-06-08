@@ -1,4 +1,5 @@
 import { useCallback, useEffect } from "react"
+import { useQueryClient } from "@tanstack/react-query"
 import { login as doLogin, register as doRegister } from "@/lib/frontier/auth"
 import { clearSession, clearAuthHint } from "@/lib/frontier/session-store"
 import { clearAllLocalData } from "@/lib/store/project-index"
@@ -8,6 +9,7 @@ import posthog from "@/lib/posthog"
 
 export function useFrontierSession() {
   const { active, loading } = useAccounts()
+  const qc = useQueryClient()
 
   const login = useCallback(async (username: string, password: string) => {
     const session = await doLogin({ username, password })
@@ -29,7 +31,8 @@ export function useFrontierSession() {
     await clearSession()
     await clearAllLocalData()
     await purgeAudioCachesOnSignOut()
-  }, [])
+    qc.clear()
+  }, [qc])
 
   // Edge-case mitigation: if IDB is empty but aq_hint cookie was somehow
   // set (storage cleared, old cookie, first deploy), clear the hint so the

@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from "react"
+import { useQueryClient } from "@tanstack/react-query"
 import { Link, useLocation } from "react-router-dom"
 import { ChevronsUpDown, LogIn, LogOut, UserPlus, Check, Settings2 } from "lucide-react"
 import { useAccounts } from "@/hooks/useAccounts"
@@ -97,6 +98,7 @@ type LogoutScope = "single" | "all"
 
 export function AccountSwitcher({ variant = "sidebar" }: { variant?: "sidebar" | "header" } = {}) {
   const { active, sessions, activate, remove } = useAccounts()
+  const qc = useQueryClient()
   const location = useLocation()
   const [open, setOpen] = useState(false)
   const [loginOpen, setLoginOpen] = useState(false)
@@ -135,6 +137,10 @@ export function AccountSwitcher({ variant = "sidebar" }: { variant?: "sidebar" |
       await clearSession()
     }
     await clearAllLocalData()
+    // Wipe in-memory query cache so the UI reflects the new auth state —
+    // a still-signed-in account that was just promoted, or none at all —
+    // rather than rendering the logged-out account's cached data.
+    qc.clear()
   }
 
   if (!active) {

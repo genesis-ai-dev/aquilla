@@ -371,10 +371,6 @@ interface EditorTableProps {
   previews: Map<string, string>
   onCompleteSingle: (cell: CellData) => void
   onCompleteBatch: (cells: CellData[]) => void
-  /** FRO-174: Accept the queued completion preview (Tab). Writes the cell. */
-  onAcceptCompletion?: (cell: CellData) => Promise<void>
-  /** FRO-174: Reject the queued completion preview (Esc). No write. */
-  onRejectCompletion?: (cellId: string) => void
   healthMap: Map<string, number>
   infractions?: Map<string, RuleInfraction[]>
   rules?: TranslationRule[]
@@ -426,7 +422,7 @@ interface EditorTableProps {
 export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(function EditorTable({
   project, cells, username, isCompletionConfigured, isCompletionAvailable,
   completing, examples, errors, previews,
-  onCompleteSingle, onCompleteBatch, onAcceptCompletion, onRejectCompletion, healthMap,
+  onCompleteSingle, onCompleteBatch, healthMap,
   infractions = new Map(), rules = [], onInfractionClick,
   isBacktranslationConfigured, onBacktranslate, backtranslating, backtranslationErrors,
   onSaveBacktranslation,
@@ -920,8 +916,6 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
                 infractions={infractions}
                 ruleMap={ruleMap}
                 onCompleteSingle={onCompleteSingle}
-                onAcceptCompletion={onAcceptCompletion}
-                onRejectCompletion={onRejectCompletion}
                 onInfractionClick={onInfractionClick}
                 isBacktranslationConfigured={isBacktranslationConfigured}
                 backtranslating={backtranslating}
@@ -1010,9 +1004,6 @@ interface MemoizedRowProps {
   infractions: Map<string, RuleInfraction[]>
   ruleMap: Map<string, TranslationRule>
   onCompleteSingle: (cell: CellData) => void
-  /** FRO-174: Accept/reject callbacks for completion previews. */
-  onAcceptCompletion?: (cell: CellData) => Promise<void>
-  onRejectCompletion?: (cellId: string) => void
   onInfractionClick?: (ruleId: string) => void
   isBacktranslationConfigured?: boolean
   backtranslating?: Set<string>
@@ -1068,7 +1059,7 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
     alignmentModel,
     onAlignmentSeedChange,
     project, username, editable, isCompletionConfigured, isCompletionAvailable,
-    ruleMap, onCompleteSingle, onAcceptCompletion, onRejectCompletion, onInfractionClick,
+    ruleMap, onCompleteSingle, onInfractionClick,
     isBacktranslationConfigured, onBacktranslate, onSaveBacktranslation,
     onOpenComments, onOpenHistory,
     onSeekToCue, lineNumbersEnabled, cellLabelsEnabled,
@@ -1096,7 +1087,6 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
 
   const completingState = completing.get(cellId)
   const isLoading = completingState === "searching" || completingState === "generating"
-  const completionDone = completingState === "done"
   // Streaming preview text — populated chunk-by-chunk by useCompletion's
   // onChunk handler. We surface it in the target column so the user sees
   // tokens arrive in real time instead of waiting for the LLM to finish
@@ -1156,9 +1146,6 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
         waivedInfractions={waivedInfractions}
         ruleMap={ruleMap}
         onCompleteSingle={onCompleteSingle}
-        completionDone={completionDone}
-        onAcceptCompletion={onAcceptCompletion}
-        onRejectCompletion={onRejectCompletion}
         onInfractionClick={onInfractionClick}
         isBacktranslationConfigured={isBacktranslationConfigured}
         isBacktranslating={isBacktranslating}
@@ -1239,12 +1226,6 @@ interface EditorRowProps {
   waivedInfractions: RuleInfraction[]
   ruleMap: Map<string, TranslationRule>
   onCompleteSingle: (cell: CellData) => void
-  /** FRO-174: Whether the cell is in "done" state waiting for user accept/reject. */
-  completionDone: boolean
-  /** FRO-174: Accept the queued preview (Tab). */
-  onAcceptCompletion?: (cell: CellData) => Promise<void>
-  /** FRO-174: Reject the queued preview (Esc). */
-  onRejectCompletion?: (cellId: string) => void
   onInfractionClick?: (ruleId: string) => void
   isBacktranslationConfigured?: boolean
   isBacktranslating?: boolean
@@ -1396,7 +1377,7 @@ function SourceWithTermLookup({
 
 function EditorRow({
   project, cell, username, editable, isCompletionConfigured, isCompletionAvailable, isLoading,
-  completionPreview, loadingPhase, completionDone, onAcceptCompletion, onRejectCompletion,
+  completionPreview, loadingPhase,
   cellExamples, highlights, error, health,
   cellInfractions, waivedInfractions, ruleMap,
   onCompleteSingle, onInfractionClick,
@@ -2197,18 +2178,6 @@ function EditorRow({
                 "hover:bg-muted/60 focus-within:bg-muted focus-within:ring-1 focus-within:ring-ring/40 focus-within:ring-inset",
                 !cell.translated?.trim() && "bg-muted/40",
               )}
-              onKeyDown={(e) => {
-                // FRO-174: Tab accepts the completion preview; Esc rejects it.
-                // Only intercept when a "done" preview is waiting for the user.
-                if (!completionDone || !completionPreview) return
-                if (e.key === "Tab") {
-                  e.preventDefault()
-                  void onAcceptCompletion?.(cell)
-                } else if (e.key === "Escape") {
-                  e.preventDefault()
-                  onRejectCompletion?.(cell.id)
-                }
-              }}
             >
               <TranslatedEditor
                 cellId={cell.id}
@@ -2217,8 +2186,8 @@ function EditorRow({
                 onCommit={handleEditorCommit}
                 onFocus={handleEditorFocus}
                 onBlur={handleEditorBlurOuter}
-                className={cn("w-full", (isLoading || completionDone) && "opacity-30 transition-opacity")}
-                editable={editable && !isLoading && !completionDone}
+                className={cn("w-full", isLoading && "opacity-30 transition-opacity")}
+                editable={editable && !isLoading}
                 heldByLabel={lockHolderLabel}
                 infractions={[...cellInfractions, ...waivedInfractions]}
                 ruleSeverity={ruleSeverity}
@@ -2297,29 +2266,6 @@ function EditorRow({
                       </span>
                     </div>
                   )}
-                </div>
-              )}
-              {/* FRO-174: Completion-done overlay — shown when the LLM has
-                  finished and the preview is waiting for user accept/reject.
-                  Tab accepts (writes the cell); Esc rejects (discards).
-                  The keydown is on the parent wrapper div below — this
-                  overlay is pointer-events-none so focus stays on TipTap. */}
-              {completionDone && completionPreview && (
-                <div
-                  aria-live="polite"
-                  aria-label="AI suggestion ready — Tab to accept, Esc to dismiss"
-                  className="pointer-events-none absolute inset-0 flex flex-col text-sm"
-                >
-                  <p className="whitespace-pre-wrap px-2 py-1 leading-relaxed text-foreground/90">
-                    {completionPreview}
-                  </p>
-                  <div className="mt-auto flex items-center gap-1 px-2 pb-1 text-[10px] text-muted-foreground">
-                    <kbd className="rounded border border-border bg-muted px-1 font-mono">Tab</kbd>
-                    <span>accept</span>
-                    <span className="mx-1 opacity-40">·</span>
-                    <kbd className="rounded border border-border bg-muted px-1 font-mono">Esc</kbd>
-                    <span>dismiss</span>
-                  </div>
                 </div>
               )}
             </div>

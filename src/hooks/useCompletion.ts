@@ -1,8 +1,9 @@
-// Phase 2c-gamma → FRO-174: useCompletion drives the LLM stream and reports
-// per-cell completion status. Writebacks for single-cell completions are now
-// user-gated: the UI shows a preview in "done" state, then Tab/Esc
-// accept/reject via acceptCompletion / rejectCompletion. Batch completions
-// auto-commit as before (no per-cell review UX for bulk runs).
+// Phase 2c-gamma → FRO-174 → FRO-211: useCompletion drives the LLM stream and
+// reports per-cell completion status. Both single-cell and batch completions
+// auto-commit the generated text as an *unvalidated* cell; review happens
+// through the validation workflow (the gutter validation circle), not an inline
+// Tab/Esc accept/reject step. The streaming preview is shown only while
+// generating.
 
 import { useState, useCallback } from "react"
 import type { CompletionSettings } from "@/lib/parsers/types"
@@ -152,11 +153,6 @@ export function useCompletion(
           setPreviews((p) => new Map(p).set(cell.id, text))
         },
       })
-      // FRO-174: single-cell completions stay in "done" preview state so the
-      // user can Tab-accept or Esc-reject. acceptCompletion() below handles
-      // the actual commitCompletedCell writeback with ai_suggestion provenance.
-      // (Batch completions continue to auto-commit via the completeBatch path.)
-      setPreviews((p) => new Map(p).set(cell.id, result))
       posthog.capture("ai translation completed", {
         provider,
         model: effectiveSettings.model || "frontier-default",
@@ -166,7 +162,12 @@ export function useCompletion(
         validated_pair_count: validatedPairs.length,
         rule_count: (rules ?? []).filter((r) => r.enabled).length,
       })
-      setCompleting((p) => new Map(p).set(cell.id, "done"))
+      // FRO-211: auto-commit like the batch path. The cell lands unvalidated
+      // and flows through the validation workflow — no inline accept/reject.
+      const llmAuthor = effectiveSettings.model || "frontier-default"
+      await commitCompletedCell?.(cell, result, llmAuthor)
+      setPreviews((p) => { const m = new Map(p); m.delete(cell.id); return m })
+      setCompleting((p) => { const m = new Map(p); m.delete(cell.id); return m })
     } catch (err) {
       posthog.captureException(err instanceof Error ? err : new Error(String(err)))
       setCompleting((p) => new Map(p).set(cell.id, "error"))
@@ -289,7 +290,9 @@ export function useCompletion(
           if (commitCompletedCell) {
             await commitCompletedCell(cell, text, llmAuthor)
           }
-          setCompleting((p) => new Map(p).set(cell.id, "done"))
+          // FRO-211: clear state once committed — no inline review step.
+          setPreviews((p) => { const m = new Map(p); m.delete(cell.id); return m })
+          setCompleting((p) => { const m = new Map(p); m.delete(cell.id); return m })
         } else {
           fallbackQueue.push(cell)
         }
@@ -322,42 +325,5 @@ export function useCompletion(
     }
   }, [effectiveSettings, isConfigured, isAvailable, sourceLanguage, targetLanguage, searchPassages, session, provider, completeSingle, commitCompletedCell, rules, allCells])
 
-  /**
-   * FRO-174: Accept the queued completion preview for a cell.
-   * Calls `commitCompletedCell` with `ai_suggestion` provenance, then clears
-   * the preview + completing state so the overlay disappears.
-   * No-op if the cell is not in "done" state or has no preview.
-   */
-  const acceptCompletion = useCallback(async (cell: CellData) => {
-    const text = previews.get(cell.id)
-    if (!text || completing.get(cell.id) !== "done") return
-    const llmAuthor = effectiveSettings.model || "frontier-default"
-    // Clear preview immediately for snappy UX; writeback is fire-and-forget.
-    setPreviews((p) => { const m = new Map(p); m.delete(cell.id); return m })
-    setCompleting((p) => { const m = new Map(p); m.delete(cell.id); return m })
-    await commitCompletedCell?.(cell, text, llmAuthor)
-    posthog.capture("ai translation accepted", {
-      provider,
-      model: effectiveSettings.model || "frontier-default",
-      source_language: sourceLanguage,
-      target_language: targetLanguage,
-    })
-  }, [previews, completing, effectiveSettings, commitCompletedCell, provider, sourceLanguage, targetLanguage])
-
-  /**
-   * FRO-174: Reject the queued completion preview for a cell.
-   * Clears preview + completing state without writing anything.
-   */
-  const rejectCompletion = useCallback((cellId: string) => {
-    setPreviews((p) => { const m = new Map(p); m.delete(cellId); return m })
-    setCompleting((p) => { const m = new Map(p); m.delete(cellId); return m })
-    posthog.capture("ai translation rejected", {
-      provider,
-      model: effectiveSettings.model || "frontier-default",
-      source_language: sourceLanguage,
-      target_language: targetLanguage,
-    })
-  }, [effectiveSettings, provider, sourceLanguage, targetLanguage])
-
-  return { completeSingle, completeBatch, acceptCompletion, rejectCompletion, isConfigured, isAvailable, completing, examples, errors, previews }
+  return { completeSingle, completeBatch, isConfigured, isAvailable, completing, examples, errors, previews }
 }

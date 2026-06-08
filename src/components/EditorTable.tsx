@@ -2035,6 +2035,91 @@ function EditorRow({
             follows the text. */}
         <div className="flex h-full flex-col items-center gap-1 py-0.5">
           {numberPill}
+          {/* Validation circle — single bare icon until validated, with a
+              health ring appearing around it once there's a substantive score. */}
+          {hasContent && (
+            <Popover open={validationPopoverOpen} onOpenChange={handleOpenChange}>
+              <PopoverTrigger
+                openOnHover
+                delay={400}
+                closeDelay={100}
+                render={
+                  <button
+                    type="button"
+                    className={cn(
+                      "relative flex h-6 w-6 items-center justify-center rounded-full transition-[transform,color,background-color] duration-150 ease-out",
+                      "active:scale-[0.88] disabled:cursor-not-allowed disabled:opacity-30",
+                      "hover:bg-muted/80",
+                      validationColorClass,
+                      vs === "none" && "hover:text-emerald-500",
+                      vs === "others" && "hover:text-emerald-500",
+                      vs === "full-others" && "hover:text-emerald-500",
+                    )}
+                    title={healthTooltip}
+                    disabled={!editable}
+                  >
+                    <HealthRing
+                      health={healthValue}
+                      size={22}
+                      strokeWidth={2}
+                      className="pointer-events-none"
+                      style={{ position: "absolute", inset: 0 }}
+                    />
+                    <ValidationIcon
+                      className="relative h-3.5 w-3.5"
+                      strokeWidth={2.5}
+                      {...(vs === "others" ? { fill: "currentColor" } : {})}
+                    />
+                  </button>
+                }
+              />
+              {vs !== "empty" && (
+                <PopoverContent
+                  side="right"
+                  align="start"
+                  className="w-72 rounded-xl p-2 shadow-neu-lg"
+                >
+                  <ul className="space-y-0.5">
+                    <li className="mb-1 px-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+                      Validated by
+                    </li>
+                    {cell.activeValidators.length === 0 ? (
+                      <li className="px-1 py-1 text-xs text-muted-foreground">No active validators</li>
+                    ) : (
+                      cell.activeValidators.map((v) => (
+                        <li key={v} className="flex items-center justify-between gap-2 rounded px-1 py-1 text-xs hover:bg-muted/50">
+                          <span className="truncate">{v}{v === username ? " (you)" : ""}</span>
+                          {v === username && editable && (
+                            <button
+                              type="button"
+                              className="flex-shrink-0 rounded p-0.5 text-muted-foreground/70 transition-colors hover:bg-destructive/10 hover:text-destructive"
+                              title="Remove your validation"
+                              onClick={() => {
+                                emitValidationChange(false)
+                                setValidationPopoverOpen(false)
+                              }}
+                            >
+                              <Trash2 className="h-3 w-3" />
+                            </button>
+                          )}
+                        </li>
+                      ))
+                    )}
+                  </ul>
+                  {cell.validationHistory.length > 0 && (
+                    <ValidationHistoryTimeline entries={cell.validationHistory} currentUsername={username} />
+                  )}
+                </PopoverContent>
+              )}
+            </Popover>
+          )}
+          {/* Stale-source indicator alongside validate button */}
+          {isStaleSource && hasContent && (
+            <StaleSourceIndicator
+              cellId={cell.id}
+              staleCellIds={new Set([cell.id])}
+            />
+          )}
           {(isSynthBusy || isSynthError) && (
             <SynthStatusBadge status={synthStatus} cellId={cell.id} projectId={project.id} onOpenAudioSetup={onOpenAudioSetup} />
           )}
@@ -2330,91 +2415,6 @@ function EditorRow({
                 onMouseDown={onDragStart}
                 onMouseEnter={onDragEnter}
               />
-
-              {/* Always-visible #2: Validate (mirrors gutter button inline in the rail) */}
-              {hasContent && (
-                <Popover open={validationPopoverOpen} onOpenChange={handleOpenChange}>
-                  <PopoverTrigger
-                    openOnHover
-                    delay={400}
-                    closeDelay={100}
-                    render={
-                      <button
-                        type="button"
-                        className={cn(
-                          "relative flex h-6 w-6 items-center justify-center rounded-full transition-[transform,color,background-color] duration-150 ease-out",
-                          "active:scale-[0.88] disabled:cursor-not-allowed disabled:opacity-30",
-                          "hover:bg-muted/80",
-                          validationColorClass,
-                          vs === "none" && "hover:text-emerald-500",
-                          vs === "others" && "hover:text-emerald-500",
-                          vs === "full-others" && "hover:text-emerald-500",
-                        )}
-                        title={healthTooltip}
-                        disabled={!editable}
-                      >
-                        <HealthRing
-                          health={healthValue}
-                          size={22}
-                          strokeWidth={2}
-                          className="pointer-events-none"
-                          style={{ position: "absolute", inset: 0 }}
-                        />
-                        <ValidationIcon
-                          className="relative h-3.5 w-3.5"
-                          strokeWidth={2.5}
-                          {...(vs === "others" ? { fill: "currentColor" } : {})}
-                        />
-                      </button>
-                    }
-                  />
-                  {vs !== "empty" && (
-                    <PopoverContent
-                      side="right"
-                      align="start"
-                      className="w-72 rounded-xl p-2 shadow-neu-lg"
-                    >
-                      <ul className="space-y-0.5">
-                        <li className="mb-1 px-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
-                          Validated by
-                        </li>
-                        {cell.activeValidators.length === 0 ? (
-                          <li className="px-1 py-1 text-xs text-muted-foreground">No active validators</li>
-                        ) : (
-                          cell.activeValidators.map((v) => (
-                            <li key={v} className="flex items-center justify-between gap-2 rounded px-1 py-1 text-xs hover:bg-muted/50">
-                              <span className="truncate">{v}{v === username ? " (you)" : ""}</span>
-                              {v === username && editable && (
-                                <button
-                                  type="button"
-                                  className="flex-shrink-0 rounded p-0.5 text-muted-foreground/70 transition-colors hover:bg-destructive/10 hover:text-destructive"
-                                  title="Remove your validation"
-                                  onClick={() => {
-                                    emitValidationChange(false)
-                                    setValidationPopoverOpen(false)
-                                  }}
-                                >
-                                  <Trash2 className="h-3 w-3" />
-                                </button>
-                              )}
-                            </li>
-                          ))
-                        )}
-                      </ul>
-                      {cell.validationHistory.length > 0 && (
-                        <ValidationHistoryTimeline entries={cell.validationHistory} currentUsername={username} />
-                      )}
-                    </PopoverContent>
-                  )}
-                </Popover>
-              )}
-              {/* Stale-source indicator alongside validate button */}
-              {isStaleSource && hasContent && (
-                <StaleSourceIndicator
-                  cellId={cell.id}
-                  staleCellIds={new Set([cell.id])}
-                />
-              )}
 
               {/* ⋯ overflow — play/record, TTS, comments, seek-to-cue */}
               {(hasAudio || onOpenRecording || (cell.translated.trim().length > 0) || onOpenComments || onSeekToCue) && (

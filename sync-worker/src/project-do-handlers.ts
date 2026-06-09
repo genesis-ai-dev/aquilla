@@ -33,6 +33,9 @@ export interface ServerEventApplied {
   project: string
   file?: string
   cell?: string
+  /** Verified author username (JWT claims) — clients suppress the
+   * "changed elsewhere" banner when this matches their own identity. */
+  by?: string
 }
 export interface ServerEventStale {
   t: "event.stale"

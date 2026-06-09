@@ -182,6 +182,9 @@ export async function handleEventsWriteRequest(
     stmtCount: number
     eventFrame: Extract<RealtimeMessage, { t: 'event' }>
     dirtyEntry?: { project: string; file: string; tables: Set<ProjectionTable> }
+    /** Verified author (JWT claims, not the client-supplied event field) —
+     * broadcast as `by` so clients can suppress own-write banners. */
+    author: string
   }
 
   const pendingStmts: AquillaStatement[] = []
@@ -485,6 +488,7 @@ export async function handleEventsWriteRequest(
       stmtCount: pendingStmts.length - stmtsBefore,
       eventFrame: outcome.result.eventFrame,
       dirtyEntry,
+      author: authResult.event.claims.username,
     })
   }
 
@@ -630,6 +634,9 @@ export async function handleEventsWriteRequest(
             project: frame.project,
             ...(frame.file ? { file: frame.file } : {}),
             ...(frame.cell ? { cell: frame.cell } : {}),
+            // Verified author — lets the author's own client skip the
+            // "changed elsewhere" banner when its write bounces back.
+            by: entry.author,
           })
           doFanOut.push(
             stub.fetch('http://do.internal/__broadcast', {

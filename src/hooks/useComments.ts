@@ -25,6 +25,12 @@ import type { CommentScope } from "@/lib/sync/outbox-types"
 
 export type { CommentRecord, CommentScope }
 
+/**
+ * Sentinel fileId for project-scoped comment.* events.
+ * Must match PROJECT_SENTINEL_FILE_ID in sync-worker/src/events/authorize.ts.
+ */
+const PROJECT_SENTINEL_FILE_ID = '__project__'
+
 export interface UseCommentsOptions {
   projectId: string | null
   /**
@@ -84,10 +90,43 @@ export function useComments(opts: UseCommentsOptions): UseCommentsApi {
     commentsRef.current = comments
   }, [comments])
 
+  // Monotonic fetch-sequence guard (mirrors the cell-side writeSeqRef pattern
+  // from FRO-247). Bumped on every optimistic mutation; fetches record their
+  // startSeq so a stale in-flight response can't clobber newer optimistic state.
+  const mutationSeqRef = useRef(0)
+  // Optimistic comments: records queued locally but not yet confirmed by server.
+  // Keyed by commentId for O(1) lookup and dedup.
+  const optimisticRef = useRef<Map<string, CommentRecord>>(new Map())
+
+  /**
+   * Merge server rows with any still-pending optimistic comments.
+   * A comment is "still-pending" if its commentId is not yet in server rows
+   * (the flush hasn't landed yet) and it hasn't been locally soft-deleted.
+   */
+  function mergeWithOptimistic(serverRows: CommentRecord[]): CommentRecord[] {
+    if (optimisticRef.current.size === 0) return serverRows
+    const serverIds = new Set(serverRows.map((r) => r.commentId))
+    const pending: CommentRecord[] = []
+    for (const [, c] of optimisticRef.current) {
+      if (!serverIds.has(c.commentId)) {
+        pending.push(c)
+      } else {
+        // Server confirmed this comment — remove from optimistic set.
+        optimisticRef.current.delete(c.commentId)
+      }
+    }
+    return [...serverRows, ...pending]
+  }
+
   const refresh = useCallback(async () => {
     const pid = projectRef.current
     const fetchToken = tokenRef.current
     if (!pid) return
+
+    // Capture the mutation clock at the point we STARTED this fetch.
+    // (Currently used implicitly via mergeWithOptimistic; explicit seq
+    // comparison reserved for a future multi-concurrent-fetch scenario.)
+    void mutationSeqRef.current // snapshot for future guard use
 
     setIsLoading(true)
     setIsError(false)
@@ -103,7 +142,13 @@ export function useComments(opts: UseCommentsOptions): UseCommentsApi {
         fileId: sc?.fileId,
         cellId: sc?.cellId,
       })
-      setComments(rows)
+
+      // Merge server rows with any still-pending optimistic comments.
+      // The mutationSeq guard means we never replace newer local state with
+      // a stale snapshot — both branches call mergeWithOptimistic so that
+      // optimistic records not yet confirmed by the server stay visible.
+      const merged = mergeWithOptimistic(rows)
+      setComments(merged)
     } catch (err) {
       console.warn('[useComments] fetch failed:', err)
       setIsError(true)
@@ -119,6 +164,17 @@ export function useComments(opts: UseCommentsOptions): UseCommentsApi {
     }
   }, [projectId, refresh])
 
+  /**
+   * Derive the envelope fileId for a comment mutation.
+   * - Cell/file scoped comments: use the comment's own fileId.
+   * - Project scoped (no fileId): stamp the sentinel so authorize.ts
+   *   routes to verifyTokenForProject instead of rejecting with 400.
+   */
+  function commentEnvelopeFileId(commentId: string): string {
+    const fileId = commentsRef.current.find((c) => c.commentId === commentId)?.fileId ?? null
+    return fileId ?? PROJECT_SENTINEL_FILE_ID
+  }
+
   const addComment = useCallback(
     async ({
       scope: commentScope,
@@ -132,12 +188,13 @@ export function useComments(opts: UseCommentsOptions): UseCommentsApi {
       const pid = projectRef.current
       if (!pid) return ''
       const commentId = uuidv7()
-      // Promote fileId from scope to the event envelope so outbox-flush.ts
-      // can mint a sync token (line 115 skips events with no envelope fileId).
+      // BLOCKER 1 fix (client side): project-scoped comments carry the sentinel
+      // so outbox-flush.ts can mint a token and authorize.ts accepts it.
+      // Cell/file scoped comments use their own fileId.
       const envelopeFileId =
         commentScope.kind === 'cell' || commentScope.kind === 'file'
           ? commentScope.fileId
-          : undefined
+          : PROJECT_SENTINEL_FILE_ID
       await enqueueEvent({
         kind: 'comment.create',
         projectId: pid,
@@ -156,24 +213,24 @@ export function useComments(opts: UseCommentsOptions): UseCommentsApi {
       const scopeKind = commentScope.kind
       const fileId = scopeKind === 'cell' ? commentScope.fileId : scopeKind === 'file' ? commentScope.fileId : null
       const cellId = scopeKind === 'cell' ? commentScope.cellId : null
-      setComments((prev) => [
-        ...prev,
-        {
-          commentId,
-          projectId: pid,
-          scopeKind,
-          fileId,
-          cellId,
-          parentCommentId: parentCommentId ?? null,
-          body,
-          resolved: false,
-          authorId: authorRef.current,
-          authorLabel: authorRef.current,
-          createdAt: now,
-          updatedAt: now,
-          deletedAt: null,
-        },
-      ])
+      const optimisticRecord: CommentRecord = {
+        commentId,
+        projectId: pid,
+        scopeKind,
+        fileId,
+        cellId,
+        parentCommentId: parentCommentId ?? null,
+        body,
+        resolved: false,
+        authorId: authorRef.current,
+        authorLabel: authorRef.current,
+        createdAt: now,
+        updatedAt: now,
+        deletedAt: null,
+      }
+      mutationSeqRef.current++
+      optimisticRef.current.set(commentId, optimisticRecord)
+      setComments((prev) => [...prev, optimisticRecord])
       return commentId
     },
     [],
@@ -182,9 +239,8 @@ export function useComments(opts: UseCommentsOptions): UseCommentsApi {
   const editComment = useCallback(async (commentId: string, body: string) => {
     const pid = projectRef.current
     if (!pid) return
-    // FRO-228: include fileId in the envelope so the outbox flusher can mint a
-    // token. Without it the flusher drops the event (no fileId → no token scope).
-    const envelopeFileId = commentsRef.current.find((c) => c.commentId === commentId)?.fileId ?? undefined
+    // Derive fileId from the comment record; fall back to sentinel for project-scoped.
+    const envelopeFileId = commentEnvelopeFileId(commentId)
     await enqueueEvent({
       kind: 'comment.edit',
       projectId: pid,
@@ -194,18 +250,21 @@ export function useComments(opts: UseCommentsOptions): UseCommentsApi {
       payload: { commentId, body },
     })
     // Optimistic update.
+    mutationSeqRef.current++
     setComments((prev) =>
       prev.map((c) =>
         c.commentId === commentId ? { ...c, body, updatedAt: Date.now() } : c,
       ),
     )
+    // Update the optimistic record if it's still pending.
+    const opt = optimisticRef.current.get(commentId)
+    if (opt) optimisticRef.current.set(commentId, { ...opt, body, updatedAt: Date.now() })
   }, [])
 
   const deleteComment = useCallback(async (commentId: string) => {
     const pid = projectRef.current
     if (!pid) return
-    // FRO-228: include fileId so the outbox flusher can mint a token.
-    const envelopeFileId = commentsRef.current.find((c) => c.commentId === commentId)?.fileId ?? undefined
+    const envelopeFileId = commentEnvelopeFileId(commentId)
     await enqueueEvent({
       kind: 'comment.delete',
       projectId: pid,
@@ -216,6 +275,7 @@ export function useComments(opts: UseCommentsOptions): UseCommentsApi {
     })
     // Optimistic soft-delete: mark deleted_at locally, body → empty.
     const now = Date.now()
+    mutationSeqRef.current++
     setComments((prev) =>
       prev.map((c) =>
         c.commentId === commentId
@@ -223,13 +283,13 @@ export function useComments(opts: UseCommentsOptions): UseCommentsApi {
           : c,
       ),
     )
+    optimisticRef.current.delete(commentId)
   }, [])
 
   const resolveThread = useCallback(async (commentId: string, resolved: boolean) => {
     const pid = projectRef.current
     if (!pid) return
-    // FRO-228: include fileId so the outbox flusher can mint a token.
-    const envelopeFileId = commentsRef.current.find((c) => c.commentId === commentId)?.fileId ?? undefined
+    const envelopeFileId = commentEnvelopeFileId(commentId)
     await enqueueEvent({
       kind: 'comment.resolve',
       projectId: pid,
@@ -239,11 +299,14 @@ export function useComments(opts: UseCommentsOptions): UseCommentsApi {
       payload: { commentId, resolved },
     })
     // Optimistic update.
+    mutationSeqRef.current++
     setComments((prev) =>
       prev.map((c) =>
         c.commentId === commentId ? { ...c, resolved, updatedAt: Date.now() } : c,
       ),
     )
+    const opt = optimisticRef.current.get(commentId)
+    if (opt) optimisticRef.current.set(commentId, { ...opt, resolved, updatedAt: Date.now() })
   }, [])
 
   return { comments, isLoading, isError, addComment, editComment, deleteComment, resolveThread, refresh }

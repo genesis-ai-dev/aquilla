@@ -75,12 +75,24 @@ export interface FlushDeps {
 function groupOldestFileFirst(records: OutboxRecord[]): OutboxRecord[] {
   if (records.length === 0) return []
   const fid = records[0].event.fileId
-  if (!fid) return records.slice(0, MAX_BATCH)
+  // BLOCKER 2 fix: when the head record has no fileId (project-scoped comment.* event),
+  // only include other no-fileId comment.* records from the same project in the batch.
+  // This prevents mixing sentinel-token events with file-scoped events, which caused
+  // the file-scoped siblings to 403 ("token scoped to different file") and get
+  // permanently quarantined even though they were perfectly valid events.
+  if (!fid) {
+    const headProjectId = records[0].event.projectId
+    const batch: OutboxRecord[] = []
+    for (const r of records) {
+      if (!r.event.fileId && r.event.projectId === headProjectId && batch.length < MAX_BATCH) {
+        batch.push(r)
+      }
+    }
+    return batch
+  }
   const same: OutboxRecord[] = []
-  const rest: OutboxRecord[] = []
   for (const r of records) {
     if (r.event.fileId === fid && same.length < MAX_BATCH) same.push(r)
-    else rest.push(r)
   }
   return same
 }

@@ -608,4 +608,70 @@ describe("flushOutboxBatch", () => {
     expect(result).toMatchObject({ posted: 0, accepted: 0 })
     expect(await outboxPendingCount()).toBe(0)
   })
+
+  // ── BLOCKER 2: mixed-batch quarantine regression ──────────────────────────
+  // When the oldest record is a project-scoped comment (no fileId), the batch
+  // MUST contain ONLY other no-fileId comment records — NOT file-scoped events.
+  // Pre-fix, groupOldestFileFirst did records.slice(0, MAX_BATCH) for no-fileId
+  // head, mixing file-scoped events into the batch which 403'd under the
+  // sentinel token and got permanently quarantined.
+
+  it("FRO-228 BLOCKER 2: when the oldest record is a no-fileId comment, file-scoped events are NOT included in the same batch", async () => {
+    // Force the comment to be the IDB head by giving it a provably earlier enqueuedAt.
+    const commentEvent: CqrsRawEvent = {
+      id: "proj-comment-head",
+      schemaVersion: CQRS_SCHEMA_VERSION,
+      kind: "comment.resolve" as any,
+      projectId: "proj",
+      fileId: undefined,
+      author: "alice",
+      payload: { commentId: "cmt-1", resolved: true },
+      clientTs: 1,
+    }
+    await enqueueOutboxEvent(commentEvent)
+
+    // Spin-wait until Date.now() advances so cell-commit gets a strictly later enqueuedAt.
+    const t0 = Date.now()
+    while (Date.now() <= t0) { /* spin */ }
+
+    await enqueueOutboxEvent(makeEvent("cell-after-comment", "file-x"))
+
+    // Capture which events appear in each POST body.
+    const capturedBodies: Array<CqrsRawEvent[]> = []
+    const capturingFetch = vi.fn().mockImplementation((_url: string, init: RequestInit) => {
+      const body = JSON.parse(init.body as string) as { events: CqrsRawEvent[] }
+      capturedBodies.push(body.events)
+      return Promise.resolve(
+        jsonResponse({
+          accepted: body.events.map((e) => ({ id: e.id })),
+          rejected: [],
+        }),
+      )
+    })
+
+    // Flush 1: comment is the oldest record → batch must contain ONLY the comment.
+    await flushOutboxBatch({
+      getTokenForFile: async (_pid: string, fid: string): Promise<TokenMintResult> => {
+        return { token: `tok-${fid}`, status: 200 }
+      },
+      fetchImpl: capturingFetch as unknown as typeof fetch,
+    })
+
+    // The first batch must contain ONLY the project-comment, not the cell event.
+    expect(capturedBodies[0]).toHaveLength(1)
+    expect(capturedBodies[0][0].id).toBe("proj-comment-head")
+    expect(capturedBodies[0].some((e) => e.id === "cell-after-comment")).toBe(false)
+
+    // Flush 2: now the cell-commit is the oldest pending → posted with its own file token.
+    await flushOutboxBatch({
+      getTokenForFile: async (_pid: string, fid: string): Promise<TokenMintResult> => {
+        return { token: `tok-${fid}`, status: 200 }
+      },
+      fetchImpl: capturingFetch as unknown as typeof fetch,
+    })
+
+    expect(capturedBodies[1]).toHaveLength(1)
+    expect(capturedBodies[1][0].id).toBe("cell-after-comment")
+    expect(await outboxPendingCount()).toBe(0)
+  })
 })

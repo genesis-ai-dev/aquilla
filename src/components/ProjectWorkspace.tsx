@@ -813,17 +813,41 @@ export function ProjectWorkspace() {
   }, [project?.id, activeFileId, addCommentEvent])
 
   const resolveThread = useCallback(async (cellId: string, threadId: string, msg?: string) => {
-    // FRO-252: if the user typed a closing reply, persist it before resolving
-    // so the reply is visible on the resolved thread and survives reload.
-    if (msg?.trim() && project?.id && activeFileId) {
-      await addCommentEvent({
-        scope: { kind: "cell", fileId: activeFileId, cellId },
-        body: msg.trim(),
-        parentCommentId: threadId,
-      })
+    if (!project?.id) return
+    // FRO-252 fix: derive the fileId from the thread's own record, not from
+    // activeFileId. Using activeFileId caused two bugs:
+    //   (a) Resolving with a reply from the /comments shell (no file open) dropped
+    //       the reply silently because activeFileId was null.
+    //   (b) The reply was scoped to the CURRENTLY OPEN file even when the thread
+    //       belonged to a different file.
+    // allProjectComments is from the same useComments instance, so the lookup
+    // is always consistent with the resolve event's target.
+    const threadRecord = allProjectComments.find((c) => c.commentId === threadId)
+    const threadFileId = threadRecord?.fileId ?? null
+
+    if (msg?.trim()) {
+      // Prefer the thread's own fileId; fall back to activeFileId as a last
+      // resort (e.g. the comment was created against the current file before
+      // the server confirmed its fileId into allProjectComments).
+      const replyFileId = threadFileId ?? activeFileId
+      if (replyFileId) {
+        await addCommentEvent({
+          scope: { kind: "cell", fileId: replyFileId, cellId },
+          body: msg.trim(),
+          parentCommentId: threadId,
+        })
+      } else {
+        // No fileId available — add as a project-scoped reply so the message
+        // is not silently lost.
+        await addCommentEvent({
+          scope: { kind: "project" },
+          body: msg.trim(),
+          parentCommentId: threadId,
+        })
+      }
     }
     await resolveCommentThread(threadId, true)
-  }, [project?.id, activeFileId, addCommentEvent, resolveCommentThread])
+  }, [project?.id, activeFileId, allProjectComments, addCommentEvent, resolveCommentThread])
 
   const reopenThread = useCallback(async (_cellId: string, threadId: string) => {
     await resolveCommentThread(threadId, false)

@@ -80,17 +80,22 @@ export class Workspace {
     return (await this.cellRow(index).textContent()) ?? ""
   }
 
-  /** Open the validation popover on a cell, click Validate, expect emerald
-   * indicator (the visible signal a cell is self-validated). */
+  /** Validate a cell and assert the emerald indicator appears.
+   *
+   * The health button uses Base UI's Popover with openOnHover — hover events
+   * fire before the click's trigger-press, which can open the popover instead
+   * of firing emitValidationChange(). We work around this by:
+   *   1. Focusing the button (no hover side-effects)
+   *   2. Pressing Space (fires trigger-press without a preceding hover)
+   * This reliably routes through the `details.reason === "trigger-press"` path
+   * that calls emitValidationChange(true) directly. */
   async validateCell(index: number): Promise<void> {
     const row = this.cellRow(index)
     const validationButton = row.locator("button[title*='Health']").first()
     await expect(validationButton).toBeVisible({ timeout: 10_000 })
-    await validationButton.click()
-    const validateAction = this.page.getByRole("button", { name: /validate/i })
-    if (await validateAction.isVisible({ timeout: 2_000 }).catch(() => false)) {
-      await validateAction.click()
-    }
+    // Focus then Space to avoid hover-triggered popover competing with the press.
+    await validationButton.focus()
+    await this.page.keyboard.press("Space")
     await expect(row.locator(".text-emerald-500").first()).toBeVisible({ timeout: 10_000 })
   }
 }

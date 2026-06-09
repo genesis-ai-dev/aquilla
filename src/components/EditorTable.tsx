@@ -1832,7 +1832,19 @@ function EditorRow({
         openOnHover
         delay={250}
         closeDelay={100}
-        render={<button type="button" className="cursor-help">{numberPillInner}</button>}
+        render={
+          <button
+            type="button"
+            className="cursor-help"
+            aria-label={
+              infractionCount > 0
+                ? `${infractionCount} issue${infractionCount !== 1 ? "s" : ""}`
+                : "needs attention"
+            }
+          >
+            {numberPillInner}
+          </button>
+        }
       />
       <PopoverContent side="right" align="start" className="w-64 rounded-xl p-2 shadow-neu-lg">
         <p className="mb-1 px-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">

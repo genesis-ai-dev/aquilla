@@ -1,0 +1,57 @@
+import { test, expect } from "../../helpers/multi-user"
+import { Dashboard } from "../../helpers/page-objects/Dashboard"
+import { Workspace } from "../../helpers/page-objects/Workspace"
+import path from "node:path"
+import { fileURLToPath } from "node:url"
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url))
+const SAMPLE_MD = path.resolve(__dirname, "../../fixtures/sample.md")
+
+/**
+ * FileRow.tsx — "r" key triggers inline rename.
+ *
+ * When a FileRow element has keyboard focus (tabIndex=0) and the user
+ * presses "r" (without Cmd/Ctrl), onStartRename() is called, opening
+ * the same inline rename input as the right-click context menu's Rename
+ * option.
+ *
+ * Guard: `if (editing) return` — only fires when NOT already in rename mode.
+ *
+ * This is distinct from the right-click rename path tested in
+ * file-rename.smoke.spec.ts and file-rename-escape-cancel.smoke.spec.ts.
+ */
+test('"r" key on focused file row opens inline rename input', async ({ alice }) => {
+  const dash = new Dashboard(alice)
+  await dash.goto()
+  const name = `RHotkey ${Date.now()}`
+  await dash.createProject({ name, source: "en", target: "fr" })
+  await dash.openProject(name)
+
+  const ws = new Workspace(alice)
+  await ws.importFile(SAMPLE_MD)
+
+  // Focus the file row via click (gives keyboard focus).
+  const sidebar = alice.locator("aside")
+  const fileRow = sidebar.getByText("sample").first()
+  await expect(fileRow).toBeVisible({ timeout: 10_000 })
+
+  // Click to select the file (which also focuses the row element).
+  await fileRow.click()
+
+  // The FileRow li has tabIndex=0 — press "r" while it's focused.
+  // We focus via keyboard tab from the row if needed.
+  const rowLi = sidebar.locator("li").filter({ has: alice.getByText("sample") }).first()
+  await rowLi.focus()
+  await rowLi.press("r")
+
+  // Inline rename input should appear.
+  const inlineInput = sidebar.locator('input[type="text"]').first()
+  await expect(inlineInput).toBeVisible({ timeout: 3_000 })
+
+  // The input should have the current filename pre-filled.
+  await expect(inlineInput).toHaveValue(/sample/i)
+
+  // Press Escape to cancel (clean up).
+  await inlineInput.press("Escape")
+  await expect(inlineInput).not.toBeVisible({ timeout: 2_000 })
+})

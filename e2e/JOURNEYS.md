@@ -134,6 +134,8 @@
 | Orgs        | Theme toggle (dark/light)                             | `e2e/specs/orgs/theme-toggle.smoke.spec.ts`                   |   ✅   |
 | Editor      | Cell action popover shows Record audio + Add comment  | `e2e/specs/editor/cell-action-popover.smoke.spec.ts`          |   ✅   |
 | Editor      | Cell details expansion panel tabs (Decay/BT/Issues/History) | `e2e/specs/editor/cell-details.smoke.spec.ts` + `cell-expansion-bt-tab.smoke.spec.ts` + `cell-expansion-decay-tab.smoke.spec.ts` + `cell-expansion-issues-tab.smoke.spec.ts` | ✅ |
+| Editor      | Cell expansion panel closes on Escape key             | `e2e/specs/editor/cell-expansion-escape-close.smoke.spec.ts`  |   ✅   |
+| Editor      | Tab / Shift+Tab moves focus between target cells      | `e2e/specs/editor/cell-tab-navigation.smoke.spec.ts`          |   ✅   |
 | Editor      | Issue pill hover popover shows rule infraction details | `e2e/specs/editor/issue-pill-hover-popover.smoke.spec.ts`    |   ✅   |
 | Editor      | Select source text → Add to termbase creates draft concept | `e2e/specs/editor/add-to-termbase-from-selection.smoke.spec.ts` | ✅ |
 | Editor      | /project/:id/voice deep-link activates audio lens     | `e2e/specs/editor/voice-deep-link.smoke.spec.ts`              |   ✅   |
@@ -149,6 +151,7 @@
 | Editor      | File move to corpus dialog                            | `e2e/specs/editor/file-move-corpus.smoke.spec.ts`             |   ✅   |
 | Editor      | File delete via right-click menu                      | `e2e/specs/editor/file-delete.smoke.spec.ts`                  |   ✅   |
 | Editor      | File rename via right-click menu                      | `e2e/specs/editor/file-rename.smoke.spec.ts`                  |   ✅   |
+| Editor      | File rename Escape key cancels without saving         | `e2e/specs/editor/file-rename-escape-cancel.smoke.spec.ts`    |   ✅   |
 | Editor      | No-file placeholder renders when no file open         | `e2e/specs/editor/editor-no-file-placeholder.smoke.spec.ts`   |   ✅   |
 | Editor      | Confirm action dialog requires checkbox               | `e2e/specs/editor/confirm-action-dialog-checkbox.smoke.spec.ts` |   ✅   |
 | Editor      | Sidebar corpus collapse toggle                        | `e2e/specs/editor/sidebar-corpus-collapse.smoke.spec.ts`      |   ✅   |

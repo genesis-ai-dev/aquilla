@@ -72,6 +72,7 @@
 | Rules       | Amend rule button navigates to rules?focus=autofix    | `e2e/specs/rules/rule-drawer.smoke.spec.ts` (extended)             |   ✅   |
 | Editor      | Import dialog back-to-types button returns to landing | `e2e/specs/editor/import-back-to-types.smoke.spec.ts`              |   ✅   |
 | Projects    | Terminology candidate term "Promote to managed" opens Edit concept dialog | `e2e/specs/projects/terminology-promote-candidate.smoke.spec.ts` | ✅ |
+| Editor      | File rename suggestion banner (numbered family) appears and can be dismissed | `e2e/specs/editor/suggestion-banner-dismiss.smoke.spec.ts` | ✅ |
 | Tauri       | Native dialogs / deeplink / updater / fs / keychain  | _gap — Plan 3_                                                |        |
 
 ## How to add a journey

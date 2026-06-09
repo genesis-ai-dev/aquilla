@@ -27,7 +27,7 @@
 | Rules       | Define custom rule                                   | _gap — Plan 2_                                                |        |
 | Rules       | Auto-correct a violation                             | _gap — Plan 2_                                                |        |
 | Validation  | Validate a cell, indicator turns emerald             | `e2e/specs/validation/validate.smoke.spec.ts`                 |   ✅   |
-| Validation  | History persists across navigation                   | _gap — Plan 2_                                                |        |
+| Validation  | History persists across navigation                   | `e2e/specs/validation/validation-persists-navigation.smoke.spec.ts` | ✅ |
 | AI          | Sparkle button fills cell from mock LLM              | `e2e/specs/ai/completion.smoke.spec.ts` (IDB-injected settings)            | ✅ |
 | Collab      | File propagates from alice to bob                    | `e2e/specs/collab/file-propagation.smoke.spec.ts` (API project bootstrap)  | ✅ |
 | Collab      | Concurrent cell edit propagates alice → bob          | `e2e/specs/collab/concurrent-edit.smoke.spec.ts` (API project bootstrap)   | ✅ |
@@ -38,7 +38,7 @@
 | Audio/Video | Import audio file                                    | _gap — Plan 2_                                                |        |
 | Audio/Video | Subtitles flow                                       | _gap — Plan 2_                                                |        |
 | Settings    | Settings sync between two browsers                   | _gap — Plan 2_                                                |        |
-| Settings    | Settings persist across reload                       | _gap — Plan 2_                                                |        |
+| Settings    | Settings persist across reload                       | `e2e/specs/orgs/preferences-persist-reload.smoke.spec.ts`    |   ✅   |
 | Export      | Export to each supported format                      | _gap — Plan 2_                                                |        |
 | Tauri       | Native dialogs / deeplink / updater / fs / keychain  | _gap — Plan 3_                                                |        |
 

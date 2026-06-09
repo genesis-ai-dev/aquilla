@@ -1,0 +1,68 @@
+import { test, expect } from "../../helpers/multi-user"
+import { Dashboard } from "../../helpers/page-objects/Dashboard"
+import { Workspace } from "../../helpers/page-objects/Workspace"
+import path from "node:path"
+import { fileURLToPath } from "node:url"
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url))
+const SAMPLE_MD = path.resolve(__dirname, "../../fixtures/sample.md")
+
+/**
+ * Validation state persists across navigation.
+ *
+ * The JOURNEYS.md "Validation: History persists across navigation" gap.
+ *
+ * Validating a cell writes to D1 via the sync-worker. If the user navigates
+ * away (e.g. to /projects) and then returns to the same file, the validation
+ * indicator should still show the cell as validated.
+ *
+ * Workflow:
+ *   1. Create project → import file → edit cell 0 → validate cell 0.
+ *   2. Navigate away to /projects.
+ *   3. Navigate back to the project workspace and open the same file.
+ *   4. Verify cell 0's health button still shows "— validated".
+ */
+test("validated cell stays validated after navigating away and back", async ({ alice }) => {
+  const dash = new Dashboard(alice)
+  await dash.goto()
+  const name = `ValidPersist ${Date.now()}`
+  await dash.createProject({ name, source: "en", target: "fr" })
+
+  await alice.waitForURL(/\/projects\/[^/]+$/, { timeout: 5_000 })
+  const projectId = alice.url().match(/\/projects\/([^/]+)$/)?.[1]
+  expect(projectId).toBeTruthy()
+
+  await alice.goto(`/project/${projectId}`)
+  await alice.waitForLoadState("networkidle")
+
+  const ws = new Workspace(alice)
+  await ws.importFile(SAMPLE_MD)
+  await ws.openFileBySubstring("sample")
+  await ws.waitForEditor()
+  await ws.editCell(0, "Persisted translation")
+
+  // Validate cell 0 — waits for "— validated" title attribute.
+  await ws.validateCell(0)
+
+  // Navigate away.
+  await alice.goto("/projects")
+  await alice.waitForLoadState("networkidle")
+  await expect(alice.getByRole("heading", { name: /projects/i }).first()).toBeVisible({
+    timeout: 5_000,
+  })
+
+  // Navigate back to the project workspace.
+  await alice.goto(`/project/${projectId}`)
+  await alice.waitForLoadState("networkidle")
+
+  const ws2 = new Workspace(alice)
+  await ws2.openFileBySubstring("sample")
+  await ws2.waitForEditor()
+
+  // Cell 0 health button should still say "— validated".
+  const row = ws2.cellRow(0)
+  await row.hover()
+  const validationButton = row.locator("button[title*='Health']").first()
+  await expect(validationButton).toBeVisible({ timeout: 10_000 })
+  await expect(validationButton).toHaveAttribute("title", /validated/, { timeout: 15_000 })
+})

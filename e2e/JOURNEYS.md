@@ -153,6 +153,7 @@
 | Editor      | File delete via right-click menu                      | `e2e/specs/editor/file-delete.smoke.spec.ts`                  |   ✅   |
 | Editor      | File rename via right-click menu                      | `e2e/specs/editor/file-rename.smoke.spec.ts`                  |   ✅   |
 | Editor      | File rename Escape key cancels without saving         | `e2e/specs/editor/file-rename-escape-cancel.smoke.spec.ts`    |   ✅   |
+| Editor      | "r" key on focused file row opens inline rename       | `e2e/specs/editor/file-rename-r-hotkey.smoke.spec.ts`         |   ✅   |
 | Editor      | No-file placeholder renders when no file open         | `e2e/specs/editor/editor-no-file-placeholder.smoke.spec.ts`   |   ✅   |
 | Editor      | Confirm action dialog requires checkbox               | `e2e/specs/editor/confirm-action-dialog-checkbox.smoke.spec.ts` |   ✅   |
 | Editor      | Sidebar corpus collapse toggle                        | `e2e/specs/editor/sidebar-corpus-collapse.smoke.spec.ts`      |   ✅   |

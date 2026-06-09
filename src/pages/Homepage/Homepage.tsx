@@ -141,11 +141,9 @@ export function Homepage() {
             <a href="/onboarding" className="aq-btn aq-btn-gold aq-btn-lg">Start translating free</a>
             <a href="#workspace" className="aq-btn aq-btn-ghost aq-btn-lg">See how it works <IconArrow /></a>
           </div>
-          {/* SWARM-TODO(homepage-copy): "Open source" trust badge — confirm repo is public before launch */}
           <div className="aq-hero-trust aq-load aq-d5">
             <span><b>Free for everyone</b></span><span style={{ opacity: 0.4 }}>·</span>
-            <span><b>Enterprise support</b>, just reach out</span><span style={{ opacity: 0.4 }}>·</span>
-            <span>Open source</span>
+            <span><b>Enterprise support</b>, just reach out</span>
           </div>
         </section>
 
@@ -411,7 +409,7 @@ export function Homepage() {
           <div className="aq-price-grid aq-reveal">
             <div className="aq-price">
               <h4 className="aq-display">Everyone</h4>
-              <div className="aq-price-tag">Free, forever · open source</div>
+              <div className="aq-price-tag">Free, forever</div>
               <p>The whole workspace — no credit card, no trial clock. For every translator, church, and team.</p>
               <ul>
                 <li><IconCheck /> Full multimodal workspace — text, audio, video</li>

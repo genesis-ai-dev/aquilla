@@ -79,6 +79,12 @@ export function ImportDialog({
   const [directionTarget, setDirectionTarget] = useState("")
   // Guard against double-clicks on "Set direction".
   const [confirming, setConfirming] = useState(false)
+  // FRO-249 fix: inline error shown when onImported throws from the direction screen.
+  const [confirmError, setConfirmError] = useState<string | null>(null)
+  // FRO-249 fix (Fix 3): guard against Radix delivering onOpenChange(false) twice
+  // in the same macrotask (closure-captured pendingImport stays non-null until
+  // the re-render). Consumed synchronously so the second call is a no-op.
+  const flushingRef = useRef(false)
 
   // Reset to landing each time the dialog opens.
   useEffect(() => {
@@ -86,6 +92,8 @@ export function ImportDialog({
       setScreen("landing")
       setPendingImport(null)
       setConfirming(false)
+      setConfirmError(null)
+      flushingRef.current = false
     }
   }, [open])
 
@@ -95,6 +103,12 @@ export function ImportDialog({
   const handleOpenChange = useCallback(
     (nextOpen: boolean) => {
       if (!nextOpen && pendingImport !== null) {
+        // Fix 3: bail if we already started a flush this macrotask.
+        if (flushingRef.current) {
+          onOpenChange(nextOpen)
+          return
+        }
+        flushingRef.current = true
         // Flush the pending import without language overrides (skip semantics).
         void Promise.resolve(onImported(pendingImport.refs, pendingImport.inferredLanguages)).catch((err: unknown) => {
           console.warn("[ImportDialog] flush-on-close failed:", err)
@@ -145,9 +159,11 @@ export function ImportDialog({
   // replace current values, not merely fill empty slots.
   async function handleDirectionConfirm() {
     if (!pendingImport || confirming) return
-    // Double-click guard: clear pending synchronously before the await.
+    // FRO-249 fix: clear inline error from any previous attempt.
+    setConfirmError(null)
     setConfirming(true)
     const captured = pendingImport
+    // Null out synchronously as a double-click guard.
     setPendingImport(null)
     try {
       const mergedLanguages = {
@@ -160,6 +176,12 @@ export function ImportDialog({
       }
       await onImported(captured.refs, mergedLanguages)
       onOpenChange(false)
+    } catch (err: unknown) {
+      // FRO-249 fix: on failure restore the direction screen so the user can
+      // retry or skip. The rejection MUST NOT escape as an unhandled rejection.
+      setPendingImport(captured)
+      const message = err instanceof Error ? err.message : String(err)
+      setConfirmError(`Couldn't save your import — please try again. (${message})`)
     } finally {
       setConfirming(false)
     }
@@ -245,6 +267,7 @@ export function ImportDialog({
             onConfirm={handleDirectionConfirm}
             onSkip={handleDirectionSkip}
             confirming={confirming}
+            error={confirmError}
           />
         )}
       </DialogContent>
@@ -890,6 +913,8 @@ interface DirectionPanelProps {
   onConfirm: () => void
   onSkip: () => void
   confirming?: boolean
+  /** FRO-249: shown inline when onImported throws so the user can retry. */
+  error?: string | null
 }
 
 /** One-time prompt shown after import when source==target or target is unset.
@@ -906,6 +931,7 @@ function DirectionPanel({
   onConfirm,
   onSkip,
   confirming = false,
+  error = null,
 }: DirectionPanelProps) {
   // WARN e: use normalizer so "French"=="fra" registers as same and blocks confirm.
   const targetTrimmed = targetLanguage.trim()
@@ -949,6 +975,8 @@ function DirectionPanel({
       <p className="text-xs text-muted-foreground">
         You can change these later in <strong>Project Settings → Project Info</strong>.
       </p>
+      {/* FRO-249: restore direction screen on failure so the user can retry */}
+      {error && <p className="text-sm text-destructive" role="alert">{error}</p>}
       <div className="flex justify-end gap-2">
         <Button variant="ghost" size="sm" onClick={onSkip} disabled={confirming}>
           Skip for now

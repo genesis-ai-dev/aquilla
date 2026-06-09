@@ -318,6 +318,17 @@ export function useCells(opts: UseCellsOptions): UseCellsResult {
   // initial loads) reflect locally-queued edits before sync lands. Cleared
   // entries roll off automatically as the flusher removes them from IDB.
   const pendingOverlayRef = useRef<Map<string, { value: string; valueHtml?: string }>>(new Map())
+  // Optimistic-edit shadow: a local commit (AI predict, hand edit, promote) that
+  // must stay visible even after its outbox event flushes — until a server read
+  // actually shows the new value. The outbox overlay above clears the instant
+  // the event leaves IDB (flush success), but the server projection is only
+  // *visible* once a refetch that POSTDATES the commit lands. On a Bible a full
+  // refetch is often already in flight when the commit happens; it snapshotted
+  // the target side before the commit, so its atomic buffer swap (doFetch) would
+  // otherwise clobber the value with stale-empty data — the disappearing
+  // prediction. This shadow bridges that window and self-clears in
+  // rebuildFromCache once the projection catches up (value matches).
+  const optimisticEditsRef = useRef<Map<string, { value: string; valueHtml?: string }>>(new Map())
   const statsRef = useRef<ReadonlyMap<string, CellAuditStats>>(auditStats)
   const usernameRef = useRef(username)
   const requiredRef = useRef(requiredValidations)
@@ -387,7 +398,39 @@ export function useCells(opts: UseCellsOptions): UseCellsResult {
         cell.hasPendingEdit = true
       }
     }
+    // Optimistic-edit shadow (see optimisticEditsRef). Applied last so it wins
+    // over a stale server row. It is NOT pruned here — `rowsRef` is the local
+    // cache and is itself mutated to the optimistic value, so it can't tell us
+    // the projection caught up. Entries are cleared only by an actual server
+    // fetch confirming the value (see clearConfirmedShadows, called from the
+    // soft buffer swap and revalidateCell).
+    const optimistic = optimisticEditsRef.current
+    if (optimistic.size > 0) {
+      for (const cell of out) {
+        const o = optimistic.get(cell.id)
+        if (!o) continue
+        cell.translated = o.value
+        if (o.valueHtml !== undefined) cell.translatedHtml = o.valueHtml
+        cell.status = deriveStatus(o.value, false)
+        cell.hasPendingEdit = true
+      }
+    }
     setCells(out)
+  }, [])
+
+  // Drop optimistic-edit shadows that a server fetch has confirmed: if the
+  // freshly-fetched target row for a shadowed cell already carries the shadow's
+  // value, the projection has caught up and the authoritative row should drive
+  // the cell. Only real server rows are passed here (never the optimistically
+  // mutated rowsRef), so a confirm means the value genuinely round-tripped.
+  const clearConfirmedShadows = useCallback((serverRows: CellRow[]) => {
+    const shadows = optimisticEditsRef.current
+    if (shadows.size === 0) return
+    for (const r of serverRows) {
+      if (r.side !== "target") continue
+      const o = shadows.get(r.cellId)
+      if (o && (r.value ?? "") === o.value) shadows.delete(r.cellId)
+    }
   }, [])
 
   // `soft`: a same-file refetch (revalidate after a commit, focus/visibility
@@ -508,6 +551,10 @@ export function useCells(opts: UseCellsOptions): UseCellsResult {
       await streamFileCells(projectId, fileId, token, (rows) => pushRows(rows, true), "source")
       if (generationRef.current !== gen) return
       if (effectiveSoft) {
+        // Confirm shadows against the SERVER buffer before it becomes rowsRef,
+        // so a stale buffer (target snapshotted pre-commit) does NOT confirm
+        // (and thus does not clear) an optimistic edit it predates.
+        clearConfirmedShadows(buffer)
         rowsRef.current = buffer
       }
       // Final rebuild: the source pass paints per page, but a target-only or
@@ -533,10 +580,13 @@ export function useCells(opts: UseCellsOptions): UseCellsResult {
       // superseded fetch must not clear it out from under its successor.
       if (generationRef.current === gen) inFlightRef.current = false
     }
-  }, [rebuildFromCache])
+  }, [rebuildFromCache, clearConfirmedShadows])
 
-  // Reload on (projectId, fileId, enabled) change.
+  // Reload on (projectId, fileId, enabled) change. The optimistic-edit shadow
+  // is per-file local state — drop it so edits from the previous file can't
+  // bleed onto a same-id cell in the next one.
   useEffect(() => {
+    optimisticEditsRef.current.clear()
     void doFetch()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId, fileId, enabled])
@@ -653,6 +703,8 @@ export function useCells(opts: UseCellsOptions): UseCellsResult {
         const rows = await fetchCellsByIds(projectId, fileId, [cellId], token)
         if (generationRef.current !== gen) return
         if (projectRef.current !== projectId || fileRef.current !== fileId) return
+        // A targeted server read — clear the shadow if it confirms the value.
+        clearConfirmedShadows(rows)
         const cache = rowsRef.current
         // Replace any existing rows for this cellId; rows arrive as one
         // source + one target (either may be absent).
@@ -668,7 +720,7 @@ export function useCells(opts: UseCellsOptions): UseCellsResult {
         cellFetchInFlightRef.current.delete(cellId)
       }
     })()
-  }, [doFetch, rebuildFromCache])
+  }, [doFetch, rebuildFromCache, clearConfirmedShadows])
 
   // Optimistic local patch for the target row of a single cell. We mutate
   // the cached `rowsRef` entry in place (creating one if no target row yet
@@ -682,6 +734,9 @@ export function useCells(opts: UseCellsOptions): UseCellsResult {
   // overwrite this with the authoritative server projection.
   const applyOptimisticTargetEdit = useCallback(
     (cellId: string, patch: { value: string; valueHtml?: string }) => {
+      // Record the shadow so a stale in-flight refetch's buffer swap can't wipe
+      // this value before the projection catches up (see optimisticEditsRef).
+      optimisticEditsRef.current.set(cellId, { value: patch.value, valueHtml: patch.valueHtml })
       const rows = rowsRef.current
       let touched = false
       for (let i = 0; i < rows.length; i++) {

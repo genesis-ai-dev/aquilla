@@ -379,6 +379,69 @@ describe("useCells (Phase 2a, D1-backed)", () => {
     expect(fetchAllMock).toHaveBeenCalledTimes(1)
   })
 
+  it("keeps an optimistic edit when an in-flight refetch lands with stale (pre-commit) data", async () => {
+    // The Bible-specific disappearing-prediction bug. A full refetch was
+    // already in flight (it snapshotted the target side BEFORE the AI commit);
+    // when it completes ~8s later it must NOT clobber the optimistic value with
+    // its stale empty target. The optimistic edit survives until a refetch that
+    // POSTDATES it confirms the value.
+    fetchAllMock.mockResolvedValueOnce([
+      makeRow({ cellId: "c1", side: "source", value: "src" }),
+      makeRow({ cellId: "c1", side: "target", value: "" }),
+    ])
+    const { result } = renderHook(() =>
+      useCells({ projectId: "p", fileId: "f", getToken, enabled: true }),
+    )
+    await waitFor(() => expect(result.current.cells).toHaveLength(1))
+    expect(result.current.cells[0].translated).toBe("")
+
+    // A soft refetch is in flight, gated open — it will resolve with STALE data
+    // (target still empty), modelling a fetch whose target page predates the commit.
+    let release!: () => void
+    const gate = new Promise<void>((r) => { release = r })
+    fetchAllMock.mockImplementationOnce(async () => {
+      await gate
+      return [
+        makeRow({ cellId: "c1", side: "source", value: "src" }),
+        makeRow({ cellId: "c1", side: "target", value: "" }),
+      ]
+    })
+    act(() => { result.current.revalidate() })
+
+    // While it's in flight, the AI prediction commits optimistically.
+    act(() => { result.current.applyOptimisticTargetEdit("c1", { value: "predicted" }) })
+    expect(result.current.cells[0].translated).toBe("predicted")
+
+    // The stale in-flight refetch lands. It must not wipe the prediction.
+    await act(async () => { release(); await gate })
+    await waitFor(() => expect(result.current.isLoading).toBe(false))
+    expect(result.current.cells[0].translated).toBe("predicted")
+  })
+
+  it("lets a refetch that confirms the optimistic value take over (no permanent shadow)", async () => {
+    fetchAllMock.mockResolvedValueOnce([
+      makeRow({ cellId: "c1", side: "source", value: "src" }),
+      makeRow({ cellId: "c1", side: "target", value: "" }),
+    ])
+    const { result } = renderHook(() =>
+      useCells({ projectId: "p", fileId: "f", getToken, enabled: true }),
+    )
+    await waitFor(() => expect(result.current.cells).toHaveLength(1))
+
+    act(() => { result.current.applyOptimisticTargetEdit("c1", { value: "predicted" }) })
+    expect(result.current.cells[0].translated).toBe("predicted")
+
+    // A refetch returns the now-projected value → the optimistic shadow clears
+    // and the authoritative row drives the cell (validated flag included).
+    fetchAllMock.mockResolvedValueOnce([
+      makeRow({ cellId: "c1", side: "source", value: "src" }),
+      makeRow({ cellId: "c1", side: "target", value: "predicted", validated: true }),
+    ])
+    act(() => { result.current.revalidate() })
+    await waitFor(() => expect(result.current.cells[0].status).toBe("validated"))
+    expect(result.current.cells[0].translated).toBe("predicted")
+  })
+
   it("applyOptimisticTargetEdit synthesizes a target row when only source exists", async () => {
     // Source-only pair — the very first commit on this cell.
     fetchAllMock.mockResolvedValueOnce([

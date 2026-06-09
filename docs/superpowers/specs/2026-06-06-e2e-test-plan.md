@@ -55,8 +55,8 @@ Legend: ⬜ untested · 🔄 in progress · ✅ browser-verified + spec · 🐞 
 
 ### Auth & onboarding
 - ✅ Dev auto-login lands logged-in session (browser-verified) — see BUG-1 (500 on first call)
-- ⬜ Onboarding wizard first-run → dashboard
-- ⬜ Real signup / login UI flow
+- ✅ Onboarding wizard first-run → dashboard (steps: Welcome → Privacy → Display name → Create project [skippable] → dashboard, 0 errors)
+- ⬜ Real signup / login UI flow — see ISSUE-4: `/__dev/logout` route unregistered; session persists via `aq_hint` cookie, can't easily test sign-in page in dev mode
 - ⬜ Account switcher (multi-account)
 - ✅ Join via invite link `/join/:token` (route renders, invalid token → "no longer valid" error state + Back button, 0 JS errors)
 
@@ -119,7 +119,7 @@ Legend: ⬜ untested · 🔄 in progress · ✅ browser-verified + spec · 🐞 
 - ✅ Invite a new member end-to-end (username autocomplete → Add → persists in roster after reload)
 - ✅ Role change persistence (combobox → viewer → reload → viewer confirmed; 0 errors)
 - ✅ Member removal (Remove button works, member disappears from roster)
-- ⬜ Access revocation cascade
+- ✅ Access revocation cascade (Remove bob → confirmation dialog warns "bob will lose org-wide access" + shows per-project memberships; Remove from org → DELETE 200 → bob absent from roster+matrix after reload, 0 errors)
 
 ### Settings & prefs
 - ✅ Project settings (name, languages, AI Instructions, validation, audio loading modes)
@@ -191,6 +191,13 @@ component (VoiceLibraryPanel)". The double-fire of `onSettingsChange` also cause
 PATCH to race and 409. Fix: compute next voices/defaultVoiceId outside the updater and call
 all three setters sequentially. Commit: 38d6866.
 
+### ISSUE-4 — `/__dev/logout` route unregistered (dev-mode only)
+`App.tsx` only registers `/__dev/login`. Navigating to `/__dev/logout` renders a
+blank page but does NOT clear IDB or the `aq_hint` cookie — the session persists.
+This means it's impossible to reach the sign-in UI in dev mode without a browser-
+level cookie/IDB clear. Fix: add a `/__dev/logout` route that calls `logout()` from
+`useFrontierSession` and redirects to `/onboarding`. Low priority (dev-mode only).
+
 ### ISSUE-2 — projects you're a member of in another org don't appear in `/projects`
 `/projects` is org-scoped to the active org. A user granted direct
 `project_members` on a project in a different org sees nothing in the list and
@@ -231,8 +238,10 @@ the cell (title → "100% — validated"); no separate Validate button in that p
 2. ✅ Repair FIXME specs: members.smoke (aq_hint cookie fix) + violation.smoke (insertText fix) — committed 064a4d6.
 3. ✅ collab FIXME comments updated to reflect new arch rewrite plan — committed 281c884.
 4. ✅ Added comments.smoke + route-health.smoke specs — committed 23965d2.
-5. Rewrite collab/file-propagation + collab/concurrent-edit for ProjectSync DO + D1 arch.
-6. Collab (2-user): file propagation, concurrent edit, presence indicators (blocked on spec rewrite).
-7. Audio export by character (requires AI key; UI path to export confirmed).
-8. Remaining untested: onboarding wizard, real signup/login, access revocation cascade.
-9. Run full `npm run test:e2e` (stop dev-stack first) and get it green.
+5. ✅ Onboarding wizard browser-verified (steps 1→3→4→5→dashboard, 0 errors).
+6. ✅ Access revocation cascade browser-verified (confirmation dialog + DELETE 200 + roster/matrix persistence).
+7. ISSUE-4: add `/__dev/logout` route (dev-tooling; low priority).
+8. Rewrite collab/file-propagation + collab/concurrent-edit for ProjectSync DO + D1 arch.
+9. Audio export by character (requires AI key; UI path to export confirmed).
+10. Real signup/login UI: blocked on ISSUE-4 (`/__dev/logout` missing) — skip for now.
+11. Run full `npm run test:e2e` (stop dev-stack first) and get it green.

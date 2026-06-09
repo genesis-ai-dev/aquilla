@@ -9,6 +9,7 @@ import { AssignedToMe } from "@/components/org/AssignedToMe"
 import { JoinPage } from "@/components/JoinPage"
 import { OnboardingWizard } from "@/components/onboarding/OnboardingWizard"
 import { DevLoginRoute } from "@/components/DevLoginRoute"
+import { DevLogoutRoute } from "@/components/DevLogoutRoute"
 import { Preferences } from "@/pages/Preferences"
 import { SyncingProvider, useSyncing } from "@/context/SyncingContext"
 import { OrgProvider } from "@/context/OrgContext"
@@ -146,8 +147,9 @@ function AppRoutes() {
         <Route path="/assigned" element={<AssignedToMe />} />
         <Route path="/join/:token" element={<JoinPage />} />
         <Route path="/onboarding" element={<OnboardingWizard />} />
-        {/* Dev-only auto-login — see components/DevLoginRoute.tsx */}
+        {/* Dev-only auto-login/logout — see components/DevLoginRoute.tsx */}
         <Route path="/__dev/login" element={<DevLoginRoute />} />
+        <Route path="/__dev/logout" element={<DevLogoutRoute />} />
 
         {/* Lazy — org-level pages */}
         <Route path="/projects/archived" element={<ArchivedProjects />} />

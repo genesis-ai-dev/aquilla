@@ -1,0 +1,87 @@
+import { test, expect } from "../../helpers/multi-user"
+import { Dashboard } from "../../helpers/page-objects/Dashboard"
+import { Workspace } from "../../helpers/page-objects/Workspace"
+import path from "node:path"
+import { fileURLToPath } from "node:url"
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url))
+const SAMPLE_MD = path.resolve(__dirname, "../../fixtures/sample.md")
+
+/**
+ * CommentsPage — "Search comments…" search box filters threads.
+ *
+ * FilterControls (inside CommentsPage) has a search Input with
+ * placeholder="Search comments…". Typing narrows the displayed comment
+ * threads. When the search is non-empty, an "active filter count" badge
+ * (e.g. "1 filter") appears in the header.
+ *
+ * When no threads match the search, a "No threads match your filters"
+ * message and a "Clear filters" button appear.
+ *
+ * This spec: post a comment → navigate to /comments → type a unique
+ * matching search string → verify the comment is still visible →
+ * type a non-matching string → verify "No threads match" message +
+ * "Clear filters" button → click Clear filters → search input clears.
+ */
+test("comments page search box filters threads and clear filters resets", async ({ alice }) => {
+  const dash = new Dashboard(alice)
+  await dash.goto()
+  const name = `CommentsSearch ${Date.now()}`
+  await dash.createProject({ name, source: "en", target: "fr" })
+  await dash.openProject(name)
+
+  const ws = new Workspace(alice)
+  await ws.importFile(SAMPLE_MD)
+  await ws.openFileBySubstring("sample")
+  await ws.waitForEditor()
+
+  // Post a comment on the first cell.
+  const row = ws.cellRow(0)
+  await row.hover()
+  const commentBtn = row.locator('[aria-label="Add comment"]').or(
+    row.locator('[title="Add comment"]')
+  )
+  await expect(commentBtn.first()).toBeVisible({ timeout: 5_000 })
+  await commentBtn.first().click()
+
+  const uniqueText = `unique-search-token-${Date.now()}`
+  const commentInput = alice.locator('textarea[placeholder*="comment"]').or(
+    alice.locator('textarea[placeholder*="Add a comment"]')
+  )
+  await expect(commentInput.first()).toBeVisible({ timeout: 5_000 })
+  await commentInput.first().fill(uniqueText)
+  await alice.keyboard.press("Control+Enter")
+
+  // Navigate to /comments page.
+  await alice.waitForURL(/\/project\/[^/]+$/, { timeout: 5_000 })
+  const projectId = alice.url().match(/\/project\/([^/]+)$/)?.[1]
+  expect(projectId).toBeTruthy()
+
+  await alice.goto(`/project/${projectId}/comments`)
+  await alice.waitForLoadState("networkidle")
+
+  // The posted comment should be visible.
+  await expect(alice.getByText(uniqueText)).toBeVisible({ timeout: 10_000 })
+
+  // Search for matching text.
+  const searchInput = alice.locator('input[placeholder="Search comments…"]')
+  await expect(searchInput).toBeVisible({ timeout: 5_000 })
+  await searchInput.fill(uniqueText)
+
+  // Comment is still visible, and filter badge appears.
+  await expect(alice.getByText(uniqueText)).toBeVisible({ timeout: 3_000 })
+  await expect(alice.getByText(/1 filter/i)).toBeVisible({ timeout: 3_000 })
+
+  // Type a non-matching query.
+  await searchInput.fill("zzz-no-match-zzz")
+
+  // "No threads match your filters" and "Clear filters" button appear.
+  await expect(alice.getByText(/No threads match your filters/i)).toBeVisible({ timeout: 5_000 })
+  const clearBtn = alice.getByRole("button", { name: /Clear filters/i })
+  await expect(clearBtn).toBeVisible({ timeout: 2_000 })
+
+  // Click Clear filters — search input is emptied.
+  await clearBtn.click()
+  await expect(searchInput).toHaveValue("", { timeout: 3_000 })
+  await expect(alice.getByText(uniqueText)).toBeVisible({ timeout: 3_000 })
+})

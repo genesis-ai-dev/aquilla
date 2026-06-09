@@ -157,7 +157,9 @@ Scope per user: highest-priority eligible issues only — NOT a full queue drain
 Cross-cut rules: only members-page may touch App.tsx (one route line); only search-popover may touch EditorTable.tsx; only share-modal may touch SharePanel/MembersPanel; only export-fmt may touch ExportDialog/exporters; only settings-floor may touch useProjectSettings.
 
 ## §M PD4 merge log
-- (pending)
+- 2026-06-09 · search-popover(231) · 8f897b7→merge 92c2b78 · ParallelPassagesPanel.tsx:316 pl-4 pr-10 + flex-wrap (controls clear DialogClose X) · tsc 0 · agent vitest: 27 pre-existing fails, 0 new.
+- 2026-06-09 · share-modal(258) · 39d7ce7→merge bb19db5 · SharePanel.tsx DialogContent flex-col max-h-[85vh] + scrollable tab body; MembersPanel.tsx ul max-h-[50vh] overflow-y-auto, min-w-0+truncate rows · tsc 0 · 27 pre-existing, 0 new.
+- 2026-06-09 · export-fmt(233) · af3b5d6→merge 47d47d7 · docx.ts extractDominantRpr + clone rPr onto injected run (bold/italic/sz/rFonts survive); +6 tests (13/13 on integration) · tsc 0 · 27 pre-existing, 0 new · SWARM-TODO: mixed-format paragraphs collapse to dominant rPr (needs import-time run map) · agent moved FRO-233 → Fixed; spec AC-2a amendment drafted in Linear comment, ORCHESTRATOR to apply in ~/frontierrnd/aquilla-specs/04-features/export-and-legacy-import.md.
 
 ## §CLAIMS (PD4)
 - FRO-233: was already Dispatched+assigned (pd3 agent handoff comment 2026-06-09 21:39Z explicitly ended its slice → stale claim, reclaimed by PD4 finisher).

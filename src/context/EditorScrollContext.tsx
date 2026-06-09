@@ -1,10 +1,25 @@
 import { createContext, useContext, useState, useCallback, type ReactNode } from "react"
 
+interface PendingScroll {
+  /** The section label (e.g. "GEN 1") or null for group-based scroll. */
+  section: string | null
+  /** The group id or null for section-based scroll. */
+  group: string | null
+  /** FRO-250/254: the fileId this scroll was requested against. The handler
+   *  must only consume() when cells belong to this same file — prevents the
+   *  globalReferences-prefix fallback from matching the OLD file during a
+   *  file-switch and burning the request before the new file's cells arrive. */
+  fileId: string | null
+}
+
 interface EditorScroll {
-  pendingGroup: string | null
-  requestScrollToGroup: (groupId: string) => void
+  pending: PendingScroll | null
+  requestScrollToGroup: (groupId: string, fileId: string) => void
   /** Request scroll to a section label (e.g. "GEN 1"). Falls back to group match. */
-  requestScrollToSection: (sectionLabel: string) => void
+  requestScrollToSection: (sectionLabel: string, fileId: string) => void
+  /** @deprecated Use pending instead. */
+  pendingGroup: string | null
+  /** @deprecated Use pending instead. */
   pendingSection: string | null
   consume: () => { group: string | null; section: string | null }
 }
@@ -12,25 +27,28 @@ interface EditorScroll {
 const Ctx = createContext<EditorScroll | null>(null)
 
 export function EditorScrollProvider({ children }: { children: ReactNode }) {
-  const [pendingGroup, setPendingGroup] = useState<string | null>(null)
-  const [pendingSection, setPendingSection] = useState<string | null>(null)
-  const requestScrollToGroup = useCallback((g: string) => {
-    setPendingGroup(g)
-    setPendingSection(null)
+  const [pending, setPending] = useState<PendingScroll | null>(null)
+  const requestScrollToGroup = useCallback((g: string, fileId: string) => {
+    setPending({ group: g, section: null, fileId })
   }, [])
-  const requestScrollToSection = useCallback((s: string) => {
-    setPendingSection(s)
-    setPendingGroup(null)
+  const requestScrollToSection = useCallback((s: string, fileId: string) => {
+    setPending({ section: s, group: null, fileId })
   }, [])
   const consume = useCallback(() => {
-    const g = pendingGroup
-    const s = pendingSection
-    if (g !== null) setPendingGroup(null)
-    if (s !== null) setPendingSection(null)
-    return { group: g, section: s }
-  }, [pendingGroup, pendingSection])
+    const p = pending
+    if (p !== null) setPending(null)
+    return { group: p?.group ?? null, section: p?.section ?? null }
+  }, [pending])
   return (
-    <Ctx.Provider value={{ pendingGroup, requestScrollToGroup, requestScrollToSection, pendingSection, consume }}>
+    <Ctx.Provider value={{
+      pending,
+      requestScrollToGroup,
+      requestScrollToSection,
+      // backward-compat accessors
+      pendingGroup: pending?.group ?? null,
+      pendingSection: pending?.section ?? null,
+      consume,
+    }}>
       {children}
     </Ctx.Provider>
   )

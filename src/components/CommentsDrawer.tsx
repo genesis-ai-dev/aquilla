@@ -2,13 +2,16 @@ import { useState } from "react"
 import { X } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import type { CellData } from "@/hooks/useCells"
-import type { ProjectRecord } from "@/lib/parsers/types"
+import type { ProjectRecord, CommentThread as CommentThreadType } from "@/lib/parsers/types"
+import type { CommentRecord } from "@/lib/sync/comments-read-types"
 import { useProjectPermissions } from "@/hooks/useProjectPermissions"
 import { CommentThread } from "./CommentThread"
 
 interface CommentsDrawerProps {
   project: ProjectRecord
   cell: CellData
+  /** When provided, overrides cell.threads (which useCells leaves empty) */
+  liveComments?: CommentRecord[]
   onClose: () => void
   onNewThread: (firstMessage: string) => void
   onReply: (threadId: string, text: string) => void
@@ -16,9 +19,37 @@ interface CommentsDrawerProps {
   onReopen: (threadId: string) => void
 }
 
-export function CommentsDrawer({ project, cell, onClose, onNewThread, onReply, onResolve, onReopen }: CommentsDrawerProps) {
+/** Convert flat CommentRecord[] (event-log model) → CommentThread[] (legacy cell model) */
+function recordsToThreads(records: CommentRecord[]): CommentThreadType[] {
+  // Group: root comments become threads, replies nest inside
+  const byId = new Map<string, CommentRecord>()
+  for (const r of records) byId.set(r.commentId, r)
+
+  const roots = records.filter((r) => !r.parentCommentId)
+  return roots.map((root) => {
+    const replies = records.filter((r) => r.parentCommentId === root.commentId)
+    return {
+      id: root.commentId,
+      status: root.resolved ? "resolved" : "open",
+      createdAt: new Date(root.createdAt).toISOString(),
+      resolvedAt: root.resolved ? new Date(root.updatedAt).toISOString() : undefined,
+      createdForTranslated: "",
+      messages: [root, ...replies].map((r) => ({
+        id: r.commentId,
+        author: r.authorLabel ?? r.authorId,
+        authorType: "user" as const,
+        text: r.deletedAt ? "[deleted]" : r.body,
+        timestamp: new Date(r.createdAt).toISOString(),
+      })),
+    } satisfies CommentThreadType
+  })
+}
+
+export function CommentsDrawer({ project, cell, liveComments, onClose, onNewThread, onReply, onResolve, onReopen }: CommentsDrawerProps) {
   const [newThreadText, setNewThreadText] = useState("")
   const permissions = useProjectPermissions(project)
+  // Use liveComments (from useComments hook) when available; fall back to cell.threads
+  const threads = liveComments !== undefined ? recordsToThreads(liveComments) : cell.threads
 
   function handleCreate() {
     if (!newThreadText.trim()) return
@@ -56,10 +87,10 @@ export function CommentsDrawer({ project, cell, onClose, onNewThread, onReply, o
       </div>
 
       <div className="flex-1 overflow-auto p-3 space-y-2">
-        {cell.threads.length === 0 ? (
+        {threads.length === 0 ? (
           <p className="text-xs text-muted-foreground">No comments yet.</p>
         ) : (
-          cell.threads.map((thread) => (
+          threads.map((thread) => (
             <CommentThread
               key={thread.id}
               thread={thread}

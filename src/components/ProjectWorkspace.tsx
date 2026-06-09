@@ -67,6 +67,7 @@ import { emitTargetCellCommit, emitCellBacktranslationSet, emitFileRename } from
 import { flushOutboxBatch } from "@/lib/sync/outbox-flush"
 import { runDiarization, type DiarizationPhase } from "@/lib/diarization/run-diarization"
 import { useCellsAuditStatsWithOverlay } from "@/hooks/useCellsAuditStatsWithOverlay"
+import { useComments } from "@/hooks/useComments"
 import { Film, Scale, MessagesSquare, Share2, Settings as SettingsIcon, Lock, ClipboardList, Trash2, Undo2, Search as SearchIcon, Sparkles, Mic2, Download, BookMarked, BookOpen, Users } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { restoreProject } from "@/lib/store/project-index"
@@ -754,10 +755,40 @@ export function ProjectWorkspace() {
     patchSettings as Parameters<typeof useRules>[2],
     orgRules,
   )
-  const addThread: (..._: unknown[]) => void = () => {}
-  const addMessage: (..._: unknown[]) => void = () => {}
-  const resolveThread: (..._: unknown[]) => void = () => {}
-  const reopenThread: (..._: unknown[]) => void = () => {}
+  const {
+    comments: allProjectComments,
+    addComment: addCommentEvent,
+    resolveThread: resolveCommentThread,
+  } = useComments({
+    projectId: project?.id ?? null,
+    getToken: getTokenForFile,
+    author: currentUsername,
+  })
+
+  const addThread = useCallback(async (cellId: string, text: string) => {
+    if (!project?.id || !activeFileId) return
+    await addCommentEvent({
+      scope: { kind: "cell", fileId: activeFileId, cellId },
+      body: text,
+    })
+  }, [project?.id, activeFileId, addCommentEvent])
+
+  const addMessage = useCallback(async (cellId: string, threadId: string, text: string) => {
+    if (!project?.id || !activeFileId) return
+    await addCommentEvent({
+      scope: { kind: "cell", fileId: activeFileId, cellId },
+      body: text,
+      parentCommentId: threadId,
+    })
+  }, [project?.id, activeFileId, addCommentEvent])
+
+  const resolveThread = useCallback(async (_cellId: string, threadId: string, _msg?: string) => {
+    await resolveCommentThread(threadId, true)
+  }, [resolveCommentThread])
+
+  const reopenThread = useCallback(async (_cellId: string, threadId: string) => {
+    await resolveCommentThread(threadId, false)
+  }, [resolveCommentThread])
   const commentsCell = commentsCellId ? cells.find((c) => c.id === commentsCellId) : null
   const historyCell = historyCellId ? cells.find((c) => c.id === historyCellId) : null
 
@@ -2335,6 +2366,9 @@ export function ProjectWorkspace() {
             {commentsCell && (
               <CommentsDrawer
                 project={project} cell={commentsCell}
+                liveComments={allProjectComments.filter(
+                  (c) => c.cellId === commentsCell.id && c.deletedAt === null
+                )}
                 onClose={() => setCommentsCellId(null)}
                 onNewThread={(text) => addThread(commentsCell.id, text)}
                 onReply={(threadId, text) => addMessage(commentsCell.id, threadId, text)}

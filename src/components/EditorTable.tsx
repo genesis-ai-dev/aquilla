@@ -1751,7 +1751,9 @@ function EditorRow({
       setValidationPopoverOpen(false)
       return
     }
-    if (details.reason === "trigger-press") {
+    // "keyboard" fires when activated via Space/Enter; "trigger-press" fires
+    // on pointer press. Both should validate on first touch (not open popover).
+    if (details.reason === "trigger-press" || details.reason === "keyboard") {
       if (editable && !isSelfValidated) {
         emitValidationChange(true)
         details.cancel()

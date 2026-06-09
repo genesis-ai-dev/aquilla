@@ -2598,6 +2598,7 @@ export function ProjectWorkspace() {
           activeFileId={activeFileId ?? null}
           activeFileName={activeFile?.name ?? null}
           isUsfmFile={activeFile?.type === "usfm"}
+          isDocxFile={activeFile?.type === "docx"}
           projectFiles={project.files.map((f) => ({ id: f.id, name: f.name, type: f.type }))}
           sourceLanguage={project.sourceLanguage}
           targetLanguage={project.targetLanguage}

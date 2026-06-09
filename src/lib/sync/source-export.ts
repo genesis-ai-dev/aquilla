@@ -56,6 +56,32 @@ export async function downloadSourceFile(args: DownloadSourceArgs): Promise<void
   triggerDownload(blob, args.downloadName)
 }
 
+/**
+ * FRO-233: Fetch the raw source side-car bytes for a non-USFM file (e.g. DOCX).
+ * The server returns the raw binary bytes with X-Export-Mode: raw-sidecar.
+ * Returns an ArrayBuffer so the caller can do client-side XML injection.
+ */
+export async function fetchSourceSidecar(args: Omit<DownloadSourceArgs, "downloadName">): Promise<ArrayBuffer> {
+  const token = await args.getToken(args.fileId)
+  if (!token) throw new SourceExportError("Couldn't get an export token — sign in and try again.")
+  const url =
+    `${syncWorkerHttpOrigin()}/api/v1/projects/${encodeURIComponent(args.projectId)}` +
+    `/files/${encodeURIComponent(args.fileId)}/source`
+
+  const res = await fetch(url, {
+    method: "GET",
+    headers: { Authorization: `Bearer ${token}` },
+  })
+  if (!res.ok) {
+    const detail = await res.text().catch(() => "")
+    throw new SourceExportError(
+      detail || `Export failed (HTTP ${res.status})`,
+      res.status,
+    )
+  }
+  return res.arrayBuffer()
+}
+
 function triggerDownload(blob: Blob, filename: string): void {
   const objectUrl = URL.createObjectURL(blob)
   const a = document.createElement("a")

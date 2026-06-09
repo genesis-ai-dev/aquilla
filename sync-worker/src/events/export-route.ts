@@ -93,6 +93,53 @@ export async function handleExportSourceRequest(
     .first<{ name: string }>()
   const fileName = fileMeta?.name || `${fileId}.sfm`
 
+  if (blob.format === "docx" || blob.format === "pptx") {
+    // FRO-233: For binary Office formats (DOCX/PPTX) the server serves the
+    // raw side-car bytes as-is (base64-decoded back to binary). The client is
+    // responsible for XML-injection of translations using JSZip + DOMParser —
+    // the worker lacks a ZIP reader library and adding jszip would be a new
+    // heavy dependency (flagged per HARD LIMITS). The raw bytes are sufficient
+    // for a client-side "open in Word with structure intact" export.
+    //
+    // SWARM-TODO(FRO-233-server-inject): if a future wave adds jszip to the
+    // sync-worker (or implements a DecompressionStream-based ZIP reader), the
+    // client-side injection path can be replaced by a lossless server-side
+    // serializer that mirrors serializeUsfmLossless.
+    const mimeType = blob.format === "docx"
+      ? "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+      : "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+    const ext = blob.format === "docx" ? ".docx" : ".pptx"
+    const downloadName = fileName.endsWith(ext) ? fileName : `${fileName}${ext}`
+
+    // Decode base64 side-car back to binary.
+    let binary: Uint8Array
+    try {
+      const cleaned = blob.raw_source.replace(/\s/g, "")
+      const b64 = atob(cleaned)
+      binary = new Uint8Array(b64.length)
+      for (let i = 0; i < b64.length; i++) binary[i] = b64.charCodeAt(i)
+    } catch {
+      return withCors(
+        new Response("side-car bytes corrupted — re-import to restore", { status: 500 }),
+        request,
+      )
+    }
+
+    return withCors(
+      new Response(binary, {
+        status: 200,
+        headers: {
+          "Content-Type": mimeType,
+          "Content-Disposition": `attachment; filename="${downloadName.replace(/"/g, "")}"`,
+          // Signal to client: this is a raw side-car, not injection-substituted.
+          // The client should perform its own XML injection using the cells it holds.
+          "X-Export-Mode": "raw-sidecar",
+        },
+      }),
+      request,
+    )
+  }
+
   if (blob.format !== "usfm") {
     return withCors(
       new Response(`export not yet supported for format "${blob.format}"`, { status: 501 }),

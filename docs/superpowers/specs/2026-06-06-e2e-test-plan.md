@@ -75,8 +75,9 @@ Legend: ⬜ untested · 🔄 in progress · ✅ browser-verified + spec · 🐞 
 - ✅ Validate a cell → indicator (Health button click: "0% — no examples" → "100% — validated", emerald, "Validated by dev (you)")
 - ✅ Filter files (sidebar searchbox filters 66→1 file, clear button appears)
 - ✅ Search & replace (dialog opens, scopes/modes work, returns "No results" correctly)
-- ⬜ Next-unfinished navigation
+- ✅ Next-unfinished navigation (button activates, focuses first unfinished cell in open file)
 - ✅ Import via eBible Corpus (ULB: 30,952 verses → 27,000 cells, dialog auto-closes, navigates to file) — see BUG-5 (KJV empty corpus)
+- ✅ Import via USFM file upload (Matthew 1:1–3 + 2:1–2, 6 cells imported, source text correct, sync Live, 0 console errors)
 - ✅ Export a file (dialog opens with 8 formats, TSV export triggers download)
 - ✅ Text ↔ Audio mode toggle (switches Source/Target ↔ Controls/Target columns)
 - ✅ Cell details panel (in-row expansion: Decay/BT/Recording/Issues/History tabs + alignment data)
@@ -106,14 +107,17 @@ Legend: ⬜ untested · 🔄 in progress · ✅ browser-verified + spec · 🐞 
 
 ### Audio / voice
 - ✅ ISSUE-3 FIXED: `/project/:id/voice` route registered; deep-link activates audio lens (Cast sidebar visible, 1 character shown, no errors) — commit 10c5d39
-- ⬜ Cast/voice tag assignment
+- ✅ Cast/voice tag assignment — Edit character dialog: engine (Gemini/MMS/Kokoro), 30 voice options, guidance, clone section; Save works (BUG-6 fixed, commit 38d6866)
+- ✅ New voice creation — "Craft character" dialog opens from "+ New voice", fresh form, all fields present
 - ⬜ Audio export by character
 
 ### Org / team / sharing
 - ✅ Members page: roster shows dev+alice, role combobox, Add member form
 - ✅ Teams page: "Reviewers" team renders, New team button
 - ✅ Project Share dialog: Members tab (dev/alice) + Invite link tab
-- ⬜ Invite a new member end-to-end; role change persistence
+- ✅ Invite a new member end-to-end (username autocomplete → Add → persists in roster after reload)
+- ✅ Role change persistence (combobox → viewer → reload → viewer confirmed; 0 errors)
+- ✅ Member removal (Remove button works, member disappears from roster)
 - ⬜ Access revocation cascade
 
 ### Settings & prefs
@@ -125,7 +129,7 @@ Legend: ⬜ untested · 🔄 in progress · ✅ browser-verified + spec · 🐞 
 
 ### Manager / org-context views (north-star personas)
 - ✅ Org overview: stats (3 projects, avg translated/validated/audio, stalled/overdue)
-- ⬜ Per-project status/progress drill-down (Wendi/Randall/Anna persona views)
+- ✅ Per-project status/progress drill-down (`/projects/:id` overview: top-12 files with filled/approved/total counts, deadline, team assign)
 
 ## Findings log
 
@@ -178,6 +182,14 @@ The error reaches the user as a red alert in the import dialog. Fix options:
 copyright restrictions." separately from other errors.
 URL bug that surfaced this was fixed in commit 844bc4f.
 
+### BUG-6 — VoiceLibraryPanel setState-in-render (FIXED 2026-06-09)
+`saveVoice` called `setDefaultVoiceId` and `onSettingsChange` (a parent ProjectWorkspace
+setState) inside a `setVoices` functional updater. React detected this as a render-phase
+state update: "Cannot update a component (ProjectWorkspace) while rendering a different
+component (VoiceLibraryPanel)". The double-fire of `onSettingsChange` also caused a second
+PATCH to race and 409. Fix: compute next voices/defaultVoiceId outside the updater and call
+all three setters sequentially. Commit: 38d6866.
+
 ### ISSUE-2 — projects you're a member of in another org don't appear in `/projects`
 `/projects` is org-scoped to the active org. A user granted direct
 `project_members` on a project in a different org sees nothing in the list and
@@ -214,9 +226,11 @@ the cell (title → "100% — validated"); no separate Validate button in that p
   Terminology, Living Memory, Organization settings, etc.).
 
 ## Next up (loop continues here)
-1. Fix BUG-5: eBible "downloadable=true" translations with empty corpus (KJV placeholder) → show user-friendly message or pre-filter; currently crashes with "produced no verses".
-2. Apply Neon migration 0030 to fix BUG-4 (operator task; needs prod DB access).
-3. Test Upload Files import path (USFM/VTT file — create test file and upload via file picker).
-4. Repair FIXME specs against e2e-up harness; add specs for edit/validate/route-health/comments.
+1. Apply Neon migration 0030 to fix BUG-4 (operator task; needs prod DB access).
+2. Repair FIXME specs against e2e-up harness; add specs for edit/validate/import/route-health/comments.
+3. Collab (2-user): file propagation, concurrent edit, presence indicators.
+4. Audio export by character (requires AI key; UI path to export confirmed).
+5. Remaining untested: onboarding wizard, real signup/login, join-by-invite `/join/:token`, access revocation cascade.
+6. Run full `npm run test:e2e` (stop dev-stack first) and get it green.
 5. Collab (2-user) on current sync; presence indicators.
 6. Run full `npm run test:e2e` (stop dev-stack first) and get it green.

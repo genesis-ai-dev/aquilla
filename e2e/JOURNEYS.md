@@ -208,6 +208,32 @@
 | Voice       | Audio mode lens toggle in workspace                   | `e2e/specs/orgs/audio-mode.smoke.spec.ts`                     |   ✅   |
 | Voice       | Audio by character view                               | `e2e/specs/orgs/audio-by-character.smoke.spec.ts`             |   ✅   |
 | Voice       | Audio recording modal opens                           | `e2e/specs/orgs/audio-recording-modal.smoke.spec.ts`          |   ✅   |
+| Projects    | Org overview page renders rollup + filter             | `e2e/specs/projects/org-overview.smoke.spec.ts`               |   ✅   |
+| Projects    | Project create form validation (name + source required) | `e2e/specs/projects/project-create-form-validation.smoke.spec.ts` |   ✅   |
+| Projects    | Project create language tooltip                       | `e2e/specs/projects/project-create-language-tooltip.smoke.spec.ts` |   ✅   |
+| Projects    | Project create advanced shape section (radio buttons) | `e2e/specs/projects/project-create-advanced-shape.smoke.spec.ts` |   ✅   |
+| Projects    | Project settings advanced LLM section expands         | `e2e/specs/projects/project-settings-advanced-llm.smoke.spec.ts` |   ✅   |
+| Projects    | Project settings audio media strategy buttons         | `e2e/specs/projects/project-settings-audio-strategy.smoke.spec.ts` |   ✅   |
+| Projects    | Project settings decay section expands                | `e2e/specs/projects/project-settings-decay.smoke.spec.ts`     |   ✅   |
+| Projects    | Project settings more save options → Close without saving | `e2e/specs/projects/project-settings-more-save-options.smoke.spec.ts` |   ✅   |
+| Projects    | Project settings named validators input               | `e2e/specs/projects/project-settings-named-validators.smoke.spec.ts` |   ✅   |
+| Projects    | Project settings nav search filter                    | `e2e/specs/projects/project-settings-nav-search.smoke.spec.ts` |   ✅   |
+| Projects    | Project settings termbase publish toggle              | `e2e/specs/projects/project-settings-termbase-publish-toggle.smoke.spec.ts` |   ✅   |
+| Projects    | Project settings validation section                   | `e2e/specs/projects/project-settings-validation.smoke.spec.ts` + `project-settings-validation-count.smoke.spec.ts` | ✅ |
+| Projects    | Assign work panel in project overview                 | `e2e/specs/projects/assign-work-panel.smoke.spec.ts`          |   ✅   |
+| Projects    | All routes return 200 / don't crash                   | `e2e/specs/projects/route-health.smoke.spec.ts`               |   ✅   |
+| Sharing     | Share dialog opens with correct default state         | `e2e/specs/projects/share-dialog.smoke.spec.ts`               |   ✅   |
+| Sharing     | Invite email validation (invalid email stays disabled) | `e2e/specs/projects/share-invite-email-validation.smoke.spec.ts` |   ✅   |
+| Sharing     | Invite expiry select changes expiry                   | `e2e/specs/projects/share-invite-expiry-select.smoke.spec.ts` |   ✅   |
+| Sharing     | Invite role select changes role                       | `e2e/specs/projects/share-invite-role-select.smoke.spec.ts`   |   ✅   |
+| Sharing     | Invite @username verified chip appears                | `e2e/specs/projects/share-invite-username-verified.smoke.spec.ts` |   ✅   |
+| Rules       | Rule promote to org dialog                            | `e2e/specs/rules/rule-promote-to-org.smoke.spec.ts`           |   ✅   |
+| Rules       | Rules page terminology link navigates                 | `e2e/specs/rules/rules-page-terminology-link.smoke.spec.ts`   |   ✅   |
+| Rules       | Waive and unwaive a violation                         | `e2e/specs/rules/waive-violation.smoke.spec.ts`               |   ✅   |
+| Terminology | Violations tab shows inbox content                    | `e2e/specs/projects/terminology-violations-tab.smoke.spec.ts` |   ✅   |
+| Editor      | Setup checklist AI instructions edit + reset          | `e2e/specs/editor/setup-checklist-ai-instructions-edit.smoke.spec.ts` |   ✅   |
+| Editor      | Workspace actions dropdown lists available actions    | `e2e/specs/editor/workspace-actions-dropdown.smoke.spec.ts`   |   ✅   |
+| Editor      | Workspace actions cell scroll to target cell          | `e2e/specs/editor/workspace-actions-cell-scroll.smoke.spec.ts` |   ✅   |
 | Debug       | Debug view accessible at /debug                       | `e2e/specs/editor/debug-view.smoke.spec.ts`                   |   ✅   |
 | Debug       | Admin console tabs (users/orgs/projects/teams/activity) | `e2e/specs/orgs/admin-console.smoke.spec.ts` + `admin-console-users-tab.smoke.spec.ts` + `admin-console-orgs-tab.smoke.spec.ts` + `admin-console-projects-tab.smoke.spec.ts` + `admin-console-teams-tab.smoke.spec.ts` + `admin-console-activity-tab.smoke.spec.ts` | ✅ |
 | Tauri       | Native dialogs / deeplink / updater / fs / keychain  | _gap — Plan 3_                                                |        |

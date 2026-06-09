@@ -105,6 +105,10 @@ export async function injectSession(page: Page, session: PersistedSession): Prom
 
     // Mark onboarding complete so the app routes straight to dashboard.
     localStorage.setItem("codex:onboardingComplete", "true")
+    // Set the auth-hint cookie (aq_hint=1) that App.tsx checks via
+    // hasAuthHintCookie() — without it the IDB envelope write bypasses
+    // writeEnvelope() which is where setAuthHint() is normally called.
+    document.cookie = "aq_hint=1; Path=/; Max-Age=31536000; SameSite=Lax"
   }, session)
 
   // Reload so the app picks up the seeded session.

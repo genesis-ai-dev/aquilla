@@ -16,15 +16,11 @@ const SAMPLE_MD = path.resolve(__dirname, "../../fixtures/sample.md")
  * renders an indicator dot with `aria-label` matching `/\d+ issue/`
  * (per EditorTable.tsx).
  */
-// TODO(e2e): regressed between 5a808b4 and now. The cell ends up with text
-// "this has double spaces" (single spaces) instead of the typed "this  has
-// double  spaces" — keyboard.type() into the cell editor (textarea or
-// ProseMirror) collapses consecutive spaces somewhere, so the "Extra
-// whitespace" rule has nothing to flag and no issue indicator appears.
-// Likely fix: use editor.fill() / setInputFiles-style writes, or type via a
-// fixture that bypasses ProseMirror normalization. Re-enable once the
-// edit path preserves whitespace.
-test.fixme("alice enables 'Extra whitespace' rule and sees a violation surfaced in editor", async ({ alice }) => {
+// Fixed: use keyboard.insertText() instead of keyboard.type() for the
+// double-space cell text — insertText dispatches a single input event
+// rather than individual keydown/keypress/keyup events, so ProseMirror
+// does not normalize consecutive spaces away.
+test("alice enables 'Extra whitespace' rule and sees a violation surfaced in editor", async ({ alice }) => {
   const dash = new Dashboard(alice)
   await dash.goto()
   const name = `Rules ${Date.now()}`
@@ -48,7 +44,15 @@ test.fixme("alice enables 'Extra whitespace' rule and sees a violation surfaced 
   await ws.importFile(SAMPLE_MD)
   await ws.openFileBySubstring("sample")
   await ws.waitForEditor()
-  await ws.editCell(0, "this  has  double  spaces") // intentional doubles
+  // Use insertText (not keyboard.type) to preserve consecutive spaces through
+  // ProseMirror — type() fires individual key events that get normalized.
+  const row = ws.cellRow(0)
+  await row.scrollIntoViewIfNeeded()
+  const editable = row.locator('textarea, .ProseMirror[contenteditable="true"], [contenteditable="true"]').first()
+  await editable.waitFor({ state: "visible", timeout: 10_000 })
+  await editable.click()
+  await alice.keyboard.insertText("this  has  double  spaces") // intentional doubles
+  await alice.locator("aside").click() // blur
 
   // The cell should surface an issue indicator (the small colored dot
   // with aria-label "N issue(s) (severity)").

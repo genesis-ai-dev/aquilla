@@ -86,6 +86,8 @@
 | Editor      | "Next unfinished" button enabled after import; navigates without error | `e2e/specs/editor/next-unfinished-button.smoke.spec.ts` | ✅ |
 | Editor      | EditorModeToggle Text↔Audio lens switch (aria-pressed) | `e2e/specs/editor/editor-mode-toggle.smoke.spec.ts`     |   ✅   |
 | Editor      | Bold keyboard shortcut (Ctrl+B) toggles bold mark     | `e2e/specs/editor/formatting-bold-keyboard-shortcut.smoke.spec.ts` | ✅ |
+| Editor      | Escape key clears cell selection (no editable focused) | `e2e/specs/editor/selection-clear-escape.smoke.spec.ts`           |   ✅   |
+| Terminology | Violations inbox: expand concept row → see cell violations | `e2e/specs/projects/terminology-violations-expand.smoke.spec.ts` | ✅ |
 | Comments    | CommentsPage Refresh button reloads data              | `e2e/specs/editor/comments-page-refresh.smoke.spec.ts`        |   ✅   |
 | Comments    | CommentsPage "Back to project" returns to workspace   | `e2e/specs/editor/comments-page-back-nav.smoke.spec.ts`       |   ✅   |
 | Tauri       | Native dialogs / deeplink / updater / fs / keychain  | _gap — Plan 3_                                                |        |

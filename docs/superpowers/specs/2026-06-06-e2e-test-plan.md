@@ -73,49 +73,60 @@ Legend: ⬜ untested · 🔄 in progress · ✅ browser-verified + spec · 🐞 
 - ✅ Open a file, cells load (Matthew, 1071 cells, sync "Live")
 - ✅ Edit a cell, persists across reload (Matthew cell 1 → "1 translated" after reload, no console errors)
 - ✅ Validate a cell → indicator (Health button click: "0% — no examples" → "100% — validated", emerald, "Validated by dev (you)")
-- ⬜ Filter files (sidebar search)
-- ⬜ Search & replace
+- ✅ Filter files (sidebar searchbox filters 66→1 file, clear button appears)
+- ✅ Search & replace (dialog opens, scopes/modes work, returns "No results" correctly)
 - ⬜ Next-unfinished navigation
 - ⬜ Import a file (USFM/Paratext/markdown/VTT)
-- ⬜ Export a file (each format)
-- ⬜ Text ↔ Audio mode toggle
+- ✅ Export a file (dialog opens with 8 formats, TSV export triggers download)
+- ✅ Text ↔ Audio mode toggle (switches Source/Target ↔ Controls/Target columns)
+- ✅ Cell details panel (in-row expansion: Decay/BT/Recording/Issues/History tabs + alignment data)
+- ✅ Cell action popover ("Record audio" + "Add comment" items present)
 
 ### Validation, rules, terminology
-- ⬜ Rules page: enable rule → violation surfaces
-- ⬜ Terminology page: add/manage glossary
-- ⬜ Living memory page
+- ✅ Rules page renders (9 built-in checks, violation counts, enable/severity toggles, + Add Rule)
+- ✅ Terminology page renders (3 concepts, Library Overview stats, Add concept dialog opens)
+- ✅ Living memory page (Instructions/Standards sections + 1 validated example shown)
 
 ### AI
-- ⬜ Completion (sparkle) fills target cell
+- ✅ Run AI completions dialog (opens, shows cell count, requires acknowledgement checkbox)
+- ⬜ Completion actually fills target cell (requires AI key configured; UI path confirmed)
 
 ### Collaboration & sync
+- ✅ Comment pipeline fixed (POST /events 200 OK; comment persisted in D1) — see BUG-2
+- ✅ CommentsDrawer opens from "Add comment" popover, textarea+Post button functional
+- ✅ Comment appears in drawer after post (BUG-3 fixed: liveComments prop + recordsToThreads adapter)
 - ⬜ File propagation to a second member (current sync arch)
 - ⬜ Concurrent cell edit propagates
 - ⬜ Presence indicators
 
 ### Comments
-- ⬜ Add / edit / resolve comment; cell indicator
+- ✅ Add comment via cell → More cell actions → Add comment → CommentsDrawer
+- ✅ Comment.create event reaches sync-worker (POST /events 200, D1 row confirmed)
+- ✅ Comments appear in drawer after post (BUG-3 fixed: liveComments prop wires useComments state to CommentsDrawer)
 
 ### Audio / voice
-- ⬜ Voice studio (`/project/:id/voice`)
+- 🐞 ISSUE-3 (confirmed): `/project/:id/voice` route is unregistered — React Router logs "No routes matched"
+- ⬜ Voice studio content (route needs to be created or button needs to point to correct path)
 - ⬜ Cast/voice tag assignment
 - ⬜ Audio export by character
 
 ### Org / team / sharing
-- ⬜ Members page: invite, role change, remove
-- ⬜ Teams: create, add member, attach project (max-wins)
-- ⬜ Project Share dialog → invite link
+- ✅ Members page: roster shows dev+alice, role combobox, Add member form
+- ✅ Teams page: "Reviewers" team renders, New team button
+- ✅ Project Share dialog: Members tab (dev/alice) + Invite link tab
+- ⬜ Invite a new member end-to-end; role change persistence
 - ⬜ Access revocation cascade
 
 ### Settings & prefs
-- ⬜ Project settings (name, languages, AI config)
-- ⬜ Org settings `/settings`
+- ✅ Project settings (name, languages, AI Instructions, validation, audio loading modes)
+- ✅ Org settings `/settings` (Identity, member/project counts, links)
+- 🐞 BUG-4: Termbase Sharing section 500s (PostgresError: column "org_published_termbase" does not exist) — migration 0030 not applied to Neon; D1 sqlite patched locally
 - ⬜ User preferences `/preferences`
 - ⬜ Archive / restore project
 
 ### Manager / org-context views (north-star personas)
-- ⬜ Org overview metrics for owner (Wendi/Randall/Anna)
-- ⬜ Per-project status/progress legibility
+- ✅ Org overview: stats (3 projects, avg translated/validated/audio, stalled/overdue)
+- ⬜ Per-project status/progress drill-down (Wendi/Randall/Anna persona views)
 
 ## Findings log
 
@@ -126,6 +137,32 @@ create path isn't idempotent on `email` — same non-idempotent insert could mak
 production signup 500 on a duplicate email instead of a clean 409. File:
 `auth-worker/src/routes/dev-seed.ts` (and the shared user-create service).
 Status: open, to confirm whether prod signup shares the path.
+
+### BUG-2 — Comments never flushed from outbox (FIXED 2026-06-09)
+`useComments.addComment` called `enqueueEvent` without a top-level `fileId` on
+the `BuildEventInput`. `outbox-flush.ts` line 115 gates flushing on
+`event.fileId` being set. Fixed in `src/hooks/useComments.ts`: extract
+`fileId` from `scope` (for `kind: cell` or `kind: file`) and pass it as
+`fileId` on the `enqueueEvent` call. Commit: e929138. Now confirmed:
+`POST /events 200 OK` and row present in D1 `comments` table.
+
+### BUG-3 — CommentsDrawer shows "No comments yet" after posting (open)
+The `useComments` hook polls `GET /api/v1/projects/:projectId/files/:fileId/comments`
+which returns 404 (no such route). The actual endpoint is
+`GET /api/v1/projects/:projectId/comments` (project-scoped). Fix: update
+the GET URL in `useComments.ts` to use project-scoped path. Separately,
+`CommentsDrawer` reads `cell.threads` from `useCells` projection — so even
+after the fetch fix, threads need to be projected into `CellData.threads`
+from the D1 comments read-model, or `CommentsDrawer` needs to be wired to
+the `useComments` state directly.
+
+### BUG-4 — Termbase Sharing 500 (Neon schema drift, open)
+`GET /api/v2/orgs/:orgId/published-termbases` and
+`GET /api/v2/projects/:projectId/termbase/subscriptions` both 500 with
+`PostgresError: column "org_published_termbase" does not exist`. Migration
+`0030_termbase_subscriptions.sql` was not applied to live Neon (per the
+SWARM-TODO in that file). Local D1 sqlite patched manually. Neon migration
+must be applied by the operator (do NOT apply to prod without review).
 
 ### ISSUE-3 — `/project/:id/voice` route does not match the router
 Vite logs `No routes matched location "/project/<id>/voice"` and the page renders
@@ -170,9 +207,11 @@ the cell (title → "100% — validated"); no separate Validate button in that p
   Terminology, Living Memory, Organization settings, etc.).
 
 ## Next up (loop continues here)
-1. Comments: add → resolve on a cell; cell indicator. Search&replace; file filter.
-2. Import (USFM/VTT) + export per format on a scratch project.
-3. Repair FIXME specs against e2e-up harness; add specs for edit/validate/route-health.
-4. Org/teams/members/sharing + access cascade; collab (2-user) on current sync.
-5. Audio/voice studio; settings persistence; manager/org-overview metrics.
-6. Run full `npm run test:e2e` (stop dev-stack first) and get it green.
+1. Fix BUG-3: update `useComments` fetch URL to `/projects/:id/comments` (project-scoped); wire `CommentsDrawer` to the real comment state.
+2. Fix ISSUE-3: register `/project/:id/voice` route (or fix sidebar button to open a modal/existing route).
+3. Apply Neon migration 0030 to fix BUG-4 (operator task; needs prod DB access).
+4. Import (USFM/VTT) + export per format on a scratch project.
+5. Repair FIXME specs against e2e-up harness; add specs for edit/validate/route-health/comments.
+6. Org/teams/members/sharing + access cascade; collab (2-user) on current sync.
+7. User preferences `/preferences`; archive/restore project.
+8. Run full `npm run test:e2e` (stop dev-stack first) and get it green.

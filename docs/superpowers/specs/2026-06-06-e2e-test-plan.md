@@ -58,15 +58,15 @@ Legend: ⬜ untested · 🔄 in progress · ✅ browser-verified + spec · 🐞 
 - ⬜ Onboarding wizard first-run → dashboard
 - ⬜ Real signup / login UI flow
 - ⬜ Account switcher (multi-account)
-- ⬜ Join via invite link `/join/:token`
+- ✅ Join via invite link `/join/:token` (route renders, invalid token → "no longer valid" error state + Back button, 0 JS errors)
 
 ### Project dashboard & nav
 - ✅ Projects list renders (Dev Project) — see ISSUE-2 (cross-org membership not listed)
-- ⬜ Overview/Org home `/`
+- ✅ Overview/Org home `/` (4 projects, stats: avg translated/validated/audio, stalled/overdue, filter tabs All/Active/Stalled/Overdue)
 - ✅ Create project (+ New Project dialog: fill name/source/target, Create → redirects to overview)
 - ✅ Open project detail `/projects/:id` (verified via archive/create flow)
 - ✅ Archived projects `/projects/archived` (archive → disappears from list; Restore → back; no errors)
-- ⬜ Assigned to me `/assigned`
+- ✅ Assigned to me `/assigned` (renders "You have no open assignments", 0 errors)
 
 ### Editor workspace (core)
 - ✅ Open project workspace, file tree renders (bestalu-bible, 66 files)
@@ -113,6 +113,7 @@ Legend: ⬜ untested · 🔄 in progress · ✅ browser-verified + spec · 🐞 
 
 ### Org / team / sharing
 - ✅ Members page: roster shows dev+alice, role combobox, Add member form
+- ✅ Members Matrix view (member × project table, O/D/G access badges, Sole Owner warnings, Add-to-project cells)
 - ✅ Teams page: "Reviewers" team renders, New team button
 - ✅ Project Share dialog: Members tab (dev/alice) + Invite link tab
 - ✅ Invite a new member end-to-end (username autocomplete → Add → persists in roster after reload)
@@ -230,7 +231,7 @@ the cell (title → "100% — validated"); no separate Validate button in that p
 2. Repair FIXME specs against e2e-up harness; add specs for edit/validate/import/route-health/comments.
 3. Collab (2-user): file propagation, concurrent edit, presence indicators.
 4. Audio export by character (requires AI key; UI path to export confirmed).
-5. Remaining untested: onboarding wizard, real signup/login, join-by-invite `/join/:token`, access revocation cascade.
+5. Remaining untested: onboarding wizard, real signup/login, access revocation cascade.
 6. Run full `npm run test:e2e` (stop dev-stack first) and get it green.
 5. Collab (2-user) on current sync; presence indicators.
 6. Run full `npm run test:e2e` (stop dev-stack first) and get it green.

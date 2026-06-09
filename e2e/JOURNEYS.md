@@ -206,7 +206,7 @@
 | Rules       | Org rule create                                       | `e2e/specs/rules/org-rule-create.smoke.spec.ts`               |   ✅   |
 | Rules       | Rule row expand/collapse                              | `e2e/specs/rules/rule-row-expand.smoke.spec.ts`               |   ✅   |
 | Rules       | Rule editor mode/severity/regex/autofix toggles       | `e2e/specs/rules/rule-editor-mode-selector.smoke.spec.ts` + `rule-editor-severity-toggle.smoke.spec.ts` + `rule-editor-regex-toggle.smoke.spec.ts` + `rule-editor-autofix-toggle.smoke.spec.ts` | ✅ |
-| Rules       | Rule dialogs (import/suggest disabled states)         | `e2e/specs/rules/rule-dialogs.smoke.spec.ts` + `rule-import-dialog-disabled.smoke.spec.ts` + `rule-suggest-dialog-disabled.smoke.spec.ts` | ✅ |
+| Rules       | Rule dialogs (import/suggest/suggest-from-edits disabled states) | `e2e/specs/rules/rule-dialogs.smoke.spec.ts` + `rule-import-dialog-disabled.smoke.spec.ts` + `rule-suggest-dialog-disabled.smoke.spec.ts` (covers RuleSuggestFromEditsDialog on /rules route) | ✅ |
 | Rules       | Rules page add rule dialog opens                      | `e2e/specs/rules/rules-page-add-rule-dialog.smoke.spec.ts`    |   ✅   |
 | Rules       | Rules page back to editor navigation                  | `e2e/specs/rules/rules-page-back-to-editor.smoke.spec.ts`     |   ✅   |
 | Rules       | Rule create dialog test button                        | `e2e/specs/rules/rule-create-dialog-test-button.smoke.spec.ts` |   ✅   |

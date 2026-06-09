@@ -255,5 +255,10 @@ the cell (title → "100% — validated"); no separate Validate button in that p
 8. Rewrite collab/file-propagation + collab/concurrent-edit for ProjectSync DO + D1 arch.
 9. Audio export by character (requires AI key; UI path to export confirmed).
 10. ✅ Real signup/login + account switcher — all verified this loop.
-11. Run full `npm run test:e2e` (stop dev-stack first) and get it green.
-12. Remaining truly-blocked: AI completions (needs key), collab propagation (needs arch rewrite), audio export (needs key).
+11. ✅ Full suite green: `npm run test:e2e` → 16 passed, 2 skipped (collab FIXME) — commits 9c8dbbd + 04700ff.
+    Bugs fixed this pass:
+    - removeOrgMember in frontier-api-groups.ts used wrong /users/:username; fixed to /users/lookup?username=X
+    - getEffectiveAccess unpacking: API returns {orgRole, projects[resolved]} not AccessEntry[]; fixed cast
+    - validateCell: added row hover before asserting button visible; changed assertion from .text-emerald-500
+      (opacity:0 when rail not hovered) to button title containing 'validated' (always present in DOM)
+12. Remaining truly-blocked: collab propagation (needs arch rewrite for ProjectSync DO + D1).

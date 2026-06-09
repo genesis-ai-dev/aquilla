@@ -16,24 +16,30 @@ import { Decoration, DecorationSet } from "@tiptap/pm/view"
 import type { Node as PMNode } from "@tiptap/pm/model"
 import { Extension } from "@tiptap/core"
 import type { Concept } from "@/lib/terminology/types"
+import { buildTermRegex } from "@/lib/terminology/match"
 
 export const terminologyChipPluginKey = new PluginKey<DecorationSet>("terminologyChipDecorations")
 
 /**
- * Find all case-insensitive, word-boundary matches of `term` within `text`.
+ * Find all case-insensitive, word-boundary matches of `term` within `text`,
+ * with inflectional wildcard support (`grac*` chips grace/graced/gracia). Uses
+ * the shared matcher (lib/terminology/match) so chips agree with enforcement.
  * Returns plain-text [start, end) pairs.
  *
  * Exported so the match logic can be unit-tested independently of ProseMirror.
  */
 export function findTermMatches(text: string, term: string): Array<{ start: number; end: number }> {
   if (!term || !text) return []
-  // Escape regex special chars in the term
-  const escaped = term.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
-  // \b works for ASCII; for non-ASCII terms we use lookahead/lookbehind on \s or string boundaries
-  const pattern = new RegExp(`(?<![\\w])${escaped}(?![\\w])`, "gi")
+  const pattern = buildTermRegex(term, "giu")
+  if (!pattern) return []
   const results: Array<{ start: number; end: number }> = []
   let m: RegExpExecArray | null
   while ((m = pattern.exec(text)) !== null) {
+    // Zero-width matches (defensive: a term that is only `*`) would loop forever.
+    if (m[0].length === 0) {
+      pattern.lastIndex += 1
+      continue
+    }
     results.push({ start: m.index, end: m.index + m[0].length })
   }
   return results

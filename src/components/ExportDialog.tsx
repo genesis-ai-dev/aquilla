@@ -17,7 +17,7 @@ import {
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { downloadBlob } from "@/lib/export/export-service"
-import { downloadSourceFile, downloadProjectZip } from "@/lib/sync/source-export"
+import { downloadSourceFile, downloadProjectZip, fetchSourceSidecar } from "@/lib/sync/source-export"
 import { exportPlainText } from "@/lib/export/exporters/plaintext"
 import { exportMarkdown } from "@/lib/export/exporters/markdown"
 import { exportTsv } from "@/lib/export/exporters/tsv"
@@ -32,7 +32,7 @@ import { useProjectCells } from "@/hooks/useProjectCells"
 import type { CellData } from "@/hooks/useCells"
 import type { ProjectTtsSettings } from "@/lib/parsers/types"
 
-export type ExportFormat = "usfm" | "txt" | "md" | "tsv" | "csv" | "xlf" | "tmx" | "vtt" | "audio-by-character"
+export type ExportFormat = "usfm" | "txt" | "md" | "tsv" | "csv" | "xlf" | "tmx" | "vtt" | "audio-by-character" | "docx"
 export type ExportScope = "file" | "project"
 
 interface FormatOption {
@@ -49,6 +49,15 @@ const FORMAT_OPTIONS: FormatOption[] = [
     label: "USFM",
     ext: ".SFM",
     description: "Round-trip USFM with translations injected back into the original markup. Requires server side-car bytes (re-import to enable for older files).",
+    lossy: false,
+  },
+  {
+    // FRO-233: DOCX export with paragraph/heading structure preserved.
+    // Only shown for files imported as .docx (isDocxFile prop).
+    id: "docx",
+    label: "Word (.docx)",
+    ext: ".docx",
+    description: "Translations injected back into the original Word document. Paragraph/heading structure is preserved; per-run bold/italic inside translated paragraphs is not preserved. Requires the original file to have been imported after round-trip side-car support (files > 512 KB at import may not have a side-car).",
     lossy: false,
   },
   {
@@ -122,6 +131,11 @@ interface ExportDialogProps {
   activeFileName: string | null
   /** Whether the active file is a USFM file — enables USFM option. */
   isUsfmFile: boolean
+  /**
+   * FRO-233: Whether the active file was imported as a .docx — enables the
+   * Word (.docx) round-trip export option when a side-car blob exists.
+   */
+  isDocxFile?: boolean
   /** All project files — used only for project-scope USFM zip. */
   projectFiles: { id: string; name: string; type: string }[]
   sourceLanguage?: string
@@ -141,24 +155,27 @@ export function ExportDialog({
   activeFileId,
   activeFileName,
   isUsfmFile,
+  isDocxFile = false,
   projectFiles,
   sourceLanguage = "und",
   targetLanguage = "und",
   ttsSettings,
   getToken,
 }: ExportDialogProps) {
-  const [format, setFormat] = useState<ExportFormat>(isUsfmFile ? "usfm" : "tsv")
+  const [format, setFormat] = useState<ExportFormat>(isUsfmFile ? "usfm" : isDocxFile ? "docx" : "tsv")
   const [scope, setScope] = useState<ExportScope>("file")
 
-  // audio-by-character and vtt only support file scope — enforce that invariant.
-  const effectiveScope: ExportScope = (format === "audio-by-character" || format === "vtt") ? "file" : scope
+  // audio-by-character, vtt, and docx only support file scope — enforce that invariant.
+  const fileOnlyFormats = ["audio-by-character", "vtt", "docx"] as const
+  const isFileOnlyFormat = fileOnlyFormats.includes(format as typeof fileOnlyFormats[number])
+  const effectiveScope: ExportScope = isFileOnlyFormat ? "file" : scope
 
   // Reset scope to "file" when switching to a file-only format.
   useEffect(() => {
-    if ((format === "audio-by-character" || format === "vtt") && scope === "project") {
+    if (isFileOnlyFormat && scope === "project") {
       setScope("file")
     }
-  }, [format, scope])
+  }, [isFileOnlyFormat, scope])
   const [status, setStatus] = useState<
     | { kind: "idle" }
     | { kind: "busy"; msg: string }
@@ -172,7 +189,7 @@ export function ExportDialog({
   // Load cells for all project files when project scope is selected and the
   // format is a client-side one. Disabled until the user actually picks
   // project scope so we don't fan-out N fetches on dialog open.
-  const projectScopeEnabled = scope === "project" && format !== "usfm" && format !== "audio-by-character" && format !== "vtt"
+  const projectScopeEnabled = scope === "project" && format !== "usfm" && format !== "audio-by-character" && format !== "vtt" && format !== "docx"
 
   const { files: projectFileCells, isLoading: projectCellsLoading, isTruncated } =
     useProjectCells({
@@ -206,6 +223,20 @@ export function ExportDialog({
           await downloadSourceFile({ projectId, fileId: activeFileId, downloadName, getToken })
           setStatus({ kind: "ok", msg: `Exported ${downloadName}` })
         }
+      } else if (format === "docx") {
+        // FRO-233: DOCX round-trip export. Fetch the raw DOCX side-car from the
+        // server, then inject translations client-side using JSZip + DOMParser.
+        setStatus({ kind: "busy", msg: "Fetching original document…" })
+        const rawBytes = await fetchSourceSidecar({ projectId, fileId: activeFileId, getToken })
+        setStatus({ kind: "busy", msg: "Injecting translations…" })
+        const { exportDocx } = await import("@/lib/export/exporters/docx")
+        const result = await exportDocx(rawBytes, cells)
+        const baseName = (activeFileName ?? "export").replace(/\.[^.]+$/, "")
+        downloadBlob(result.blob, `${baseName}.docx`)
+        const note = result.injected === 0
+          ? " (no translations to inject — download original structure)"
+          : ` (${result.injected} paragraph${result.injected === 1 ? "" : "s"} translated)`
+        setStatus({ kind: "ok", msg: `Downloaded ${baseName}.docx${note}` })
       } else if (format === "audio-by-character") {
         setStatus({ kind: "busy", msg: "Decoding audio…" })
         const { exportAudioByCharacter } = await import("@/lib/export/audio-by-character")
@@ -308,7 +339,11 @@ export function ExportDialog({
             role="radiogroup"
             aria-label="Export format"
           >
-            {FORMAT_OPTIONS.filter((f) => f.id !== "usfm" || isUsfmFile).map((f) => (
+            {FORMAT_OPTIONS.filter((f) => {
+              if (f.id === "usfm") return isUsfmFile
+              if (f.id === "docx") return isDocxFile // FRO-233: only for docx imports
+              return true
+            }).map((f) => (
               <label
                 key={f.id}
                 className={
@@ -355,7 +390,7 @@ export function ExportDialog({
             aria-label="Export scope"
           >
             {(["file", "project"] as const).map((s) => {
-              const isProjectDisabled = s === "project" && (format === "audio-by-character" || format === "vtt")
+              const isProjectDisabled = s === "project" && isFileOnlyFormat
               return (
                 <label
                   key={s}
@@ -383,7 +418,7 @@ export function ExportDialog({
               )
             })}
           </div>
-          {(format === "audio-by-character" || format === "vtt") && (
+          {isFileOnlyFormat && (
             <p className="text-[10px] text-muted-foreground mt-0.5">
               Project scope not supported for this format.
             </p>

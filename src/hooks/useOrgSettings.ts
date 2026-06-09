@@ -14,6 +14,9 @@ import type { TranslationRule, PromotionRequest } from "@/lib/parsers/types"
 
 const ORG_SETTINGS_WRITE_MIN_ROLE = ROLE.MAINTAINER
 
+/** FRO-253: default export floor when org hasn't set one. Mirrors the server default. */
+const EXPORT_DEFAULT_MIN_ROLE = ROLE.MAINTAINER
+
 export interface UseOrgSettings {
   /** Current org settings (rules, etc). Always defined (empty when unloaded). */
   settings: OrgWideSettings
@@ -28,6 +31,14 @@ export interface UseOrgSettings {
   hasFetched: boolean
   /** True when the caller's org role is >= MAINTAINER. */
   canEdit: boolean
+  /**
+   * FRO-253: True when the caller's role meets the org's exportMinRole floor.
+   * When no exportMinRole is set, defaults to MAINTAINER (600) — same as the
+   * server default. Callers should hide/disable export affordances when false.
+   */
+  canExport: boolean
+  /** The effective export floor (resolved, defaults to MAINTAINER). */
+  exportMinRole: number
   /** Force a re-GET. */
   refresh: () => Promise<OrgSettingsResponse | null>
   /** Patch org settings (adds/replaces top-level keys). Blocked if !canEdit. */
@@ -93,6 +104,13 @@ export function useOrgSettings(
   const canEdit =
     orgRoleLevel != null && orgRoleLevel >= ORG_SETTINGS_WRITE_MIN_ROLE
 
+  // FRO-253: derive canExport from the org's exportMinRole floor.
+  const exportMinRole = (() => {
+    const raw = server?.settings?.exportMinRole
+    if (typeof raw === "number" && Number.isFinite(raw) && raw >= 100 && raw <= 700) return raw
+    return EXPORT_DEFAULT_MIN_ROLE
+  })()
+
   const patch = useCallback(
     async (partial: OrgWideSettings): Promise<OrgPatchResult | { kind: "blocked" }> => {
       if (!orgId || !jwt) return { kind: "error" as const, status: 0, message: "no session or org" }
@@ -142,6 +160,12 @@ export function useOrgSettings(
   const orgRules: TranslationRule[] = settings.rules ?? []
   const promotionRequests: PromotionRequest[] = (settings.promotionRequests as PromotionRequest[] | undefined) ?? []
 
+  // FRO-253: canExport is true when the user's role meets the org floor.
+  // Before settings load (hasFetched=false), we optimistically allow export so
+  // the button isn't hidden during the initial load; the server will 403 if the
+  // user doesn't actually have access.
+  const canExport = !hasFetched || orgRoleLevel == null || orgRoleLevel >= exportMinRole
+
   return {
     settings,
     orgRules,
@@ -150,6 +174,8 @@ export function useOrgSettings(
     version: server ? server.version : null,
     hasFetched,
     canEdit,
+    canExport,
+    exportMinRole,
     refresh,
     patch,
     requestPromotion,

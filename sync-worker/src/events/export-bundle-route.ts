@@ -5,8 +5,9 @@
 // target translations overlaid (same per-file logic as handleExportSourceRequest,
 // applied across all files and packaged into one .zip).
 //
-// Auth: sync-token JWT scoped to projectId; maintainer (600) required per spec
-// Q32 — pulling the whole deliverable is a privileged action, not a read.
+// Auth: sync-token JWT scoped to projectId; role floor = org's exportMinRole
+// setting (default MAINTAINER / 600 per spec Q32 — see FRO-253). Org owners
+// can raise or lower the floor via org settings.
 //
 // Returns null if the URL doesn't match (chainable in the fetch dispatcher).
 // PURE-ADDITIVE: a new file that reuses usfm-lossless + a dependency-free zip
@@ -55,9 +56,12 @@ export async function handleExportBundleRequest(
   if (!auth.ok) {
     return withCors(new Response(auth.reason, { status: auth.status }), request)
   }
-  if (auth.claims.role < ROLE.MAINTAINER) {
+  // FRO-253: org-level export floor (defaults to MAINTAINER if unset).
+  const exportFloor = await resolveExportFloor(db, projectId)
+  if (auth.claims.role < exportFloor) {
+    const floorName = exportFloor === ROLE.MAINTAINER ? "maintainer" : `role level ${exportFloor}`
     return withCors(
-      new Response("maintainer role required to export", { status: 403 }),
+      new Response(`${floorName} role required to export`, { status: 403 }),
       request,
     )
   }
@@ -121,4 +125,38 @@ export async function handleExportBundleRequest(
     }),
     request,
   )
+}
+
+// ──────────────────────────────────────────────────────────────────────────
+// Org export-floor resolver (FRO-253) — shared logic mirrors export-route.ts
+// ──────────────────────────────────────────────────────────────────────────
+
+async function resolveExportFloor(
+  db: AquillaDb,
+  projectId: string,
+): Promise<number> {
+  const MAINTAINER = 600
+  const project = await db
+    .prepare(`SELECT org_id FROM projects WHERE id = ?`)
+    .bind(projectId)
+    .first<{ org_id: number | null }>()
+
+  if (!project?.org_id) return MAINTAINER
+
+  const settings = await db
+    .prepare(`SELECT settings FROM org_settings WHERE org_id = ?`)
+    .bind(project.org_id)
+    .first<{ settings: string }>()
+
+  if (!settings) return MAINTAINER
+
+  try {
+    const parsed = JSON.parse(settings.settings)
+    const raw = parsed?.exportMinRole
+    if (typeof raw !== "number" || !Number.isFinite(raw)) return MAINTAINER
+    if (raw < 100 || raw > 700) return MAINTAINER
+    return raw
+  } catch {
+    return MAINTAINER
+  }
 }

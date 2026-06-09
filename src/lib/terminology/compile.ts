@@ -16,8 +16,14 @@
 
 import type { TranslationRule } from "@/lib/parsers/types"
 import type { Concept } from "./types"
+import { termToRegexSource } from "./match"
 
-/** Escape a string for safe use inside a RegExp literal. */
+/**
+ * Escape a string for safe use inside a RegExp literal. Only used to build the
+ * STABLE rule `id` discriminator for forbidden renderings (other code groups by
+ * id, so the scheme must not change) — NOT for match patterns, which go through
+ * the shared wildcard-aware matcher in ./match.
+ */
 function escapeRegex(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
 }
@@ -40,17 +46,25 @@ export function compileConceptsToRules(concepts: Concept[]): TranslationRule[] {
     )
     const forbidden = concept.renderings.filter((r) => r.status === "forbidden")
 
-    const sourcePattern = `\\b${escapeRegex(concept.sourceTerm)}\\b`
+    // Wildcard-aware source pattern (grac* matches grace/graced/gracia, etc.).
+    // termToRegexSource returns null for empty/whitespace terms → skip concept.
+    const sourcePattern = termToRegexSource(concept.sourceTerm)
+    if (sourcePattern === null) continue
 
     // source-requires-target: source contains the term ⇒ target must have an approved rendering.
     if (approved.length > 0) {
-      // Build an alternation of all approved renderings (case-insensitive match).
+      // Alternation of all approved renderings, each wildcard-aware. Drop any
+      // empty rendering pattern. rule-engine compiles this with /i (+/u for
+      // term: rules) so \p{L} wildcards resolve.
       const targetAlts = approved
-        .map((r) => escapeRegex(r.rendering))
+        .map((r) => termToRegexSource(r.rendering))
+        .filter((p): p is string => p !== null)
         .join("|")
-      const targetPattern = targetAlts // rule-engine uses /i flag on the targetPattern
+      const targetPattern = targetAlts
 
-      rules.push({
+      // Guard: if every approved rendering was empty/whitespace the alternation
+      // is "" (which would match anything). Emit no rule in that degenerate case.
+      if (targetPattern) rules.push({
         id: `term:${concept.id}:approved`,
         name: `Term: ${concept.sourceTerm}`,
         description: `"${concept.sourceTerm}" must be rendered with an approved rendering (${approved.map((r) => r.rendering).join(", ")})`,
@@ -76,7 +90,10 @@ export function compileConceptsToRules(concepts: Concept[]): TranslationRule[] {
       // We model it as target-forbids unconditionally (matching spec intent for
       // string-match path). When a source guard is needed it can be upgraded to
       // source-requires-target with an inverted target pattern; deferred.
+      const forbiddenPattern = termToRegexSource(f.rendering)
+      if (forbiddenPattern === null) continue
       rules.push({
+        // id discriminator keeps the EXACT escapeRegex scheme — other code groups by it.
         id: `term:${concept.id}:forbidden:${escapeRegex(f.rendering)}`,
         name: `Term: ${concept.sourceTerm} — forbidden rendering`,
         description: `"${f.rendering}" is a forbidden rendering for "${concept.sourceTerm}"`,
@@ -87,7 +104,7 @@ export function compileConceptsToRules(concepts: Concept[]): TranslationRule[] {
         createdAt: now,
         check: {
           type: "target-forbids",
-          targetPattern: `\\b${escapeRegex(f.rendering)}\\b`,
+          targetPattern: forbiddenPattern,
         },
       })
     }

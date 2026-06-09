@@ -1,0 +1,64 @@
+import { test, expect } from "../../helpers/multi-user"
+import { Dashboard } from "../../helpers/page-objects/Dashboard"
+
+/**
+ * Project archive / restore lifecycle.
+ *
+ * Flow (matching ProjectOverview.tsx handleArchive / ArchivedProjects.tsx handleRestore):
+ *
+ *  1. Create a project → router lands on /projects/:id (overview).
+ *  2. Open the ⋯ overflow menu (aria-label "More actions") → click "Archive".
+ *     handleArchive() calls archiveProjectRemote, then navigate("/projects")
+ *     — the app redirects to the active projects list automatically.
+ *  3. The project is NOT in the active list at /projects.
+ *  4. Navigate to /projects/archived — the project IS listed there with a
+ *     "Restore" button rendered by ArchivedProjects.tsx.
+ *  5. Click Restore → handleRestore() calls unarchiveProjectRemote + load().
+ *     The project disappears from the archived list.
+ *  6. Navigate to /projects — the project is back in the active list.
+ */
+test("archive a project and restore it", async ({ alice }) => {
+  const dash = new Dashboard(alice)
+  await dash.goto()
+  const name = `Archive ${Date.now()}`
+  await dash.createProject({ name, source: "en", target: "fr" })
+
+  // After createProject the router navigates to /projects/:id (overview).
+  await alice.waitForURL(/\/projects\/[^/]+$/, { timeout: 5_000 })
+
+  // 1. Open the overflow menu and click "Archive".
+  const moreBtn = alice.locator('button[aria-label="More actions"]')
+  await expect(moreBtn).toBeVisible({ timeout: 5_000 })
+  await moreBtn.click()
+
+  const archiveItem = alice.getByRole("button", { name: "Archive" })
+  await expect(archiveItem).toBeVisible({ timeout: 3_000 })
+  await archiveItem.click()
+
+  // handleArchive() calls navigate("/projects") on success — wait for that redirect.
+  await alice.waitForURL(/\/projects$/, { timeout: 10_000 })
+  await alice.waitForLoadState("networkidle")
+
+  // 2. The project should NOT appear in the active projects list.
+  await expect(alice.getByText(name).first()).not.toBeVisible({ timeout: 5_000 })
+
+  // 3. Navigate to /projects/archived and confirm it's listed there.
+  await alice.goto("/projects/archived")
+  await alice.waitForLoadState("networkidle")
+  await expect(alice.getByText(name).first()).toBeVisible({ timeout: 5_000 })
+
+  // 4. Click Restore — ArchivedProjects calls load() after success, which removes
+  //    the project from the archived list in place (no navigation).
+  const restoreBtn = alice.getByRole("button", { name: "Restore" }).first()
+  await expect(restoreBtn).toBeVisible({ timeout: 3_000 })
+  await restoreBtn.click()
+  await alice.waitForLoadState("networkidle")
+
+  // The project should now be gone from the archived list.
+  await expect(alice.getByText(name).first()).not.toBeVisible({ timeout: 5_000 })
+
+  // 5. Navigate to /projects — the project is back in the active list.
+  await alice.goto("/projects")
+  await alice.waitForLoadState("networkidle")
+  await expect(alice.getByText(name).first()).toBeVisible({ timeout: 5_000 })
+})

@@ -79,6 +79,7 @@ interface Baseline {
   contextSize: ContextSize
   useOnlyValidatedExamples: boolean
   main_chat_language: string
+  fewShotExampleFormat: "source-and-target" | "target-only"
   autoSyncEnabled: boolean
   autoSyncInterval: number
   validationCount: number
@@ -108,6 +109,7 @@ function buildBaseline(project: ProjectRecord): Baseline {
     contextSize: project.completionSettings?.contextSize ?? "medium",
     useOnlyValidatedExamples: project.completionSettings?.useOnlyValidatedExamples ?? false,
     main_chat_language: project.completionSettings?.main_chat_language ?? "",
+    fewShotExampleFormat: project.completionSettings?.fewShotExampleFormat ?? "source-and-target",
     autoSyncEnabled: project.syncSettings?.autoSync.enabled ?? false,
     autoSyncInterval: project.syncSettings?.autoSync.intervalMinutes ?? 5,
     validationCount: readValidationCount(project),
@@ -186,6 +188,7 @@ export function ProjectSettings() {
   const [topK, setTopK] = useState(5)
   const [contextSize, setContextSize] = useState<ContextSize>("medium")
   const [useOnlyValidatedExamples, setUseOnlyValidatedExamples] = useState(false)
+  const [fewShotExampleFormat, setFewShotExampleFormat] = useState<"source-and-target" | "target-only">("source-and-target")
   const [mainChatLanguage, setMainChatLanguage] = useState("")
   const [autoSyncEnabled, setAutoSyncEnabled] = useState(false)
   const [autoSyncInterval, setAutoSyncInterval] = useState(5)
@@ -226,6 +229,7 @@ export function ProjectSettings() {
     setTopK(b.top_k)
     setContextSize(b.contextSize)
     setUseOnlyValidatedExamples(b.useOnlyValidatedExamples)
+    setFewShotExampleFormat(b.fewShotExampleFormat)
     setMainChatLanguage(b.main_chat_language)
     setAutoSyncEnabled(b.autoSyncEnabled)
     setAutoSyncInterval(b.autoSyncInterval)
@@ -267,6 +271,7 @@ export function ProjectSettings() {
       topK !== baseline.top_k ||
       contextSize !== baseline.contextSize ||
       useOnlyValidatedExamples !== baseline.useOnlyValidatedExamples ||
+      fewShotExampleFormat !== baseline.fewShotExampleFormat ||
       mainChatLanguage !== baseline.main_chat_language ||
       autoSyncEnabled !== baseline.autoSyncEnabled ||
       autoSyncInterval !== baseline.autoSyncInterval ||
@@ -281,7 +286,7 @@ export function ProjectSettings() {
   }, [
     baseline, name, sourceLanguage, targetLanguage, username, provider, endpoint, apiKey,
     model, maxTokens, temperature, systemPrompt, llmHealthPenalty,
-    topK, contextSize, useOnlyValidatedExamples, mainChatLanguage,
+    topK, contextSize, useOnlyValidatedExamples, fewShotExampleFormat, mainChatLanguage,
     autoSyncEnabled, autoSyncInterval, validationCount, validationCountAudio,
     validationRoleFloor, validationNamedUsers, allowSelfValidation,
     audioMediaStrategy, decaySettings,
@@ -366,6 +371,7 @@ export function ProjectSettings() {
       if (topK !== baseline.top_k) completionUpdates.top_k = topK
       if (contextSize !== baseline.contextSize) completionUpdates.contextSize = contextSize
       if (useOnlyValidatedExamples !== baseline.useOnlyValidatedExamples) completionUpdates.useOnlyValidatedExamples = useOnlyValidatedExamples
+      if (fewShotExampleFormat !== baseline.fewShotExampleFormat) completionUpdates.fewShotExampleFormat = fewShotExampleFormat
       if (mainChatLanguage !== baseline.main_chat_language) completionUpdates.main_chat_language = mainChatLanguage || undefined
 
       const localUpdates: Partial<ProjectRecord> = {}
@@ -449,6 +455,7 @@ export function ProjectSettings() {
         top_k: topK,
         contextSize,
         useOnlyValidatedExamples,
+        fewShotExampleFormat,
         main_chat_language: mainChatLanguage,
         autoSyncEnabled,
         autoSyncInterval: Math.max(1, autoSyncInterval),
@@ -474,7 +481,7 @@ export function ProjectSettings() {
   }, [
     id, baseline, name, sourceLanguage, targetLanguage, username, provider, endpoint, apiKey,
     model, maxTokens, temperature, systemPrompt, llmHealthPenalty,
-    topK, contextSize, useOnlyValidatedExamples, mainChatLanguage,
+    topK, contextSize, useOnlyValidatedExamples, fewShotExampleFormat, mainChatLanguage,
     autoSyncEnabled, autoSyncInterval, validationCount, validationCountAudio,
     validationRoleFloor, validationNamedUsers, allowSelfValidation,
     audioMediaStrategy, decaySettings, patchShared, refresh, applyBaseline,
@@ -760,6 +767,22 @@ export function ProjectSettings() {
                       When on, only human-validated cells are used as few-shot examples — unvalidated search results are excluded.
                     </p>
                   </div>
+                </div>
+
+                <div className="space-y-1">
+                  <Label htmlFor="few-shot-example-format">Example format</Label>
+                  <select
+                    id="few-shot-example-format"
+                    value={fewShotExampleFormat}
+                    onChange={(e) => setFewShotExampleFormat(e.target.value as "source-and-target" | "target-only")}
+                    className="w-full rounded border bg-background px-3 py-2 text-sm"
+                  >
+                    <option value="source-and-target">Source + target (default)</option>
+                    <option value="target-only">Target only</option>
+                  </select>
+                  <p className="text-xs text-muted-foreground">
+                    "Target only" shows only the target text of each example, useful when source alignment is unavailable or undesirable. The model is told these are reference translations to imitate.
+                  </p>
                 </div>
               </div>
             </CardContent>

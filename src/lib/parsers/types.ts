@@ -457,6 +457,16 @@ export interface CompletionSettings {
    * Label in UI: "Assistant language".
    */
   main_chat_language?: string
+
+  /**
+   * Controls how few-shot examples are rendered in the prompt.
+   * "source-and-target" (default): each example shows both the source and
+   * target text, aligned as source→translation pairs.
+   * "target-only": only the target text of each example is shown; the system
+   * prompt is augmented with a note that the examples are reference
+   * translations to imitate for style/patterns.
+   */
+  fewShotExampleFormat?: "source-and-target" | "target-only"
 }
 
 export interface WeightedExample {

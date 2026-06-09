@@ -50,6 +50,7 @@ const FALLBACK_SETTINGS: CompletionSettings = {
   contextSize: "medium",
   useOnlyValidatedExamples: false,
   main_chat_language: "",
+  fewShotExampleFormat: "source-and-target",
 }
 
 type CommitCompletedCell = (cell: CellData, text: string, author: string) => Promise<void>
@@ -144,6 +145,7 @@ export function useCompletion(
         examples: found.map((e) => ({ source: e.source, target: e.target })),
         rules,
         validatedPairs,
+        exampleFormat: effectiveSettings.fewShotExampleFormat,
       })
       const result = await complete({
         settings: effectiveSettings, session,
@@ -256,6 +258,7 @@ export function useCompletion(
         priorBatch: priorBatch.length ? priorBatch : undefined,
         rules,
         validatedPairs: batchValidatedPairs,
+        exampleFormat: effectiveSettings.fewShotExampleFormat,
       })
 
       let result = ""

@@ -153,3 +153,136 @@ describe("abort mid-stream does not commit partial text", () => {
     expect(isAbort).toBe(false)
   })
 })
+
+// ---------------------------------------------------------------------------
+// FRO-235: Run-identity / interleaving tests (adversarial-panel demands)
+// ---------------------------------------------------------------------------
+
+describe("run ID — cancel→restart: old run cannot resurrect after Stop", () => {
+  beforeEach(() => {
+    clearBatchCompletionProgress()
+  })
+
+  it("resetBatchCompletionState returns a monotonically increasing run ID", () => {
+    const id1 = resetBatchCompletionState(3)
+    const id2 = resetBatchCompletionState(3)
+    expect(id2).toBeGreaterThan(id1)
+  })
+
+  it("old run ID sees isBatchCompletionCancelled as true after supersession", () => {
+    const oldId = resetBatchCompletionState(5)
+    // Simulate run A executing normally…
+    expect(isBatchCompletionCancelled(oldId)).toBe(false)
+
+    // User clicks Stop on run A, then immediately starts run B.
+    cancelBatchCompletion()
+    const newId = resetBatchCompletionState(5)
+
+    // Run A's old ID now sees cancelled=true — cannot resurrect.
+    expect(isBatchCompletionCancelled(oldId)).toBe(true)
+    // Run B's new ID starts fresh — not cancelled.
+    expect(isBatchCompletionCancelled(newId)).toBe(false)
+  })
+
+  it("getBatchCompletionSignal(oldId) returns an already-aborted signal after supersession", () => {
+    const oldId = resetBatchCompletionState(5)
+    const oldSignal = getBatchCompletionSignal(oldId)
+    expect(oldSignal.aborted).toBe(false)
+
+    // Supersede with a new run (return value intentionally unused — side-effect only).
+    resetBatchCompletionState(5)
+
+    // Old signal captured BEFORE supersession is aborted (reset aborts the old controller).
+    expect(oldSignal.aborted).toBe(true)
+
+    // getBatchCompletionSignal(oldId) after supersession returns a new already-aborted signal.
+    const staleSignal = getBatchCompletionSignal(oldId)
+    expect(staleSignal.aborted).toBe(true)
+  })
+
+  it("flag and controller both belong to the new run after restart", () => {
+    resetBatchCompletionState(3)
+    cancelBatchCompletion()
+    const newId = resetBatchCompletionState(3)
+    const signal = getBatchCompletionSignal(newId)
+
+    // Cancel flag is clear for the new run.
+    expect(isBatchCompletionCancelled(newId)).toBe(false)
+    // New signal is not yet aborted.
+    expect(signal.aborted).toBe(false)
+
+    // Cancelling the new run aborts its signal.
+    cancelBatchCompletion()
+    expect(signal.aborted).toBe(true)
+    expect(isBatchCompletionCancelled(newId)).toBe(true)
+  })
+})
+
+describe("run ID — run-A finally cannot clear run-B's progress", () => {
+  beforeEach(() => {
+    clearBatchCompletionProgress()
+  })
+
+  it("clearBatchCompletionProgress(oldId) is a no-op when a newer run is active", () => {
+    const oldId = resetBatchCompletionState(5)
+    // Supersede with run B.
+    const newId = resetBatchCompletionState(10)
+    expect(getCompletionBatchProgress()?.total).toBe(10)
+
+    // Run A's finally block fires — must NOT clear run B's banner.
+    clearBatchCompletionProgress(oldId)
+    expect(getCompletionBatchProgress()).not.toBeNull()
+    expect(getCompletionBatchProgress()?.total).toBe(10)
+
+    // Run B's finally block fires — SHOULD clear.
+    clearBatchCompletionProgress(newId)
+    expect(getCompletionBatchProgress()).toBeNull()
+  })
+
+  it("incrementBatchCompletionDone(oldId) is a no-op when a newer run is active", () => {
+    const oldId = resetBatchCompletionState(5)
+    // Supersede with run B (total=10, done=0).
+    const newId = resetBatchCompletionState(10)
+
+    // Run A's loop tries to increment — must NOT affect run B's counter.
+    incrementBatchCompletionDone(oldId)
+    incrementBatchCompletionDone(oldId)
+    expect(getCompletionBatchProgress()?.done).toBe(0)
+
+    // Run B legitimately increments.
+    incrementBatchCompletionDone(newId)
+    expect(getCompletionBatchProgress()?.done).toBe(1)
+  })
+})
+
+describe("run ID — done-counter accuracy on abort", () => {
+  beforeEach(() => {
+    clearBatchCompletionProgress()
+  })
+
+  it("aborted cells (no text committed) do not increment done", () => {
+    const runId = resetBatchCompletionState(3)
+
+    // Simulate: cell 0 committed → increment.
+    incrementBatchCompletionDone(runId)
+    // Simulate: cancel fires — cells 1 and 2 are aborted, not committed.
+    cancelBatchCompletion()
+    // Driver checks isBatchCompletionCancelled(runId) → true → skips cells 1 & 2.
+
+    expect(getCompletionBatchProgress()?.done).toBe(1)
+    expect(getCompletionBatchProgress()?.cancelled).toBe(true)
+  })
+
+  it("calling cancelBatchCompletion then resetBatchCompletionState gives a clean counter", () => {
+    const oldId = resetBatchCompletionState(5)
+    incrementBatchCompletionDone(oldId)
+    incrementBatchCompletionDone(oldId)
+    cancelBatchCompletion()
+
+    // Restart — new run counter starts at 0.
+    const newId = resetBatchCompletionState(3)
+    expect(getCompletionBatchProgress()?.done).toBe(0)
+    expect(getCompletionBatchProgress()?.total).toBe(3)
+    expect(isBatchCompletionCancelled(newId)).toBe(false)
+  })
+})

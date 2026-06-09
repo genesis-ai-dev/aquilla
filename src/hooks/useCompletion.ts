@@ -232,8 +232,10 @@ export function useCompletion(
       max_cells_per_call: MAX_CELLS_PER_CALL,
     })
 
-    // Reset cancel state and initialise the progress banner.
-    resetBatchCompletionState(cells.length)
+    // FRO-235 fix: resetBatchCompletionState supersedes any live run (cancels it)
+    // and returns a fresh run ID. Every flag check, increment, and the
+    // finally-clear pass this ID so a stale run cannot affect us.
+    const runId = resetBatchCompletionState(cells.length)
 
     let priorBatch: { source: string; target: string }[] = []
     const fallbackQueue: CellData[] = []
@@ -241,7 +243,7 @@ export function useCompletion(
     try {
       for (const chunk of chunks) {
         // Stop starting new sub-batches if cancelled between chunks.
-        if (isBatchCompletionCancelled()) break
+        if (isBatchCompletionCancelled(runId)) break
 
         for (const c of chunk) setCompleting((p) => new Map(p).set(c.id, "searching"))
         const concatenated = chunk.map((c) => c.original).join(" ")
@@ -251,6 +253,16 @@ export function useCompletion(
         } catch (err) {
           console.warn("[useCompletion] passage retrieval failed:", err)
         }
+
+        // If we were superseded while awaiting searchPassages, bail out cleanly.
+        if (isBatchCompletionCancelled(runId)) {
+          for (const c of chunk) {
+            setPreviews((p) => { const m = new Map(p); m.delete(c.id); return m })
+            setCompleting((p) => { const m = new Map(p); m.delete(c.id); return m })
+          }
+          break
+        }
+
         const flatExamples: ScoredPair[] = passages.flatMap((p) =>
           p.cells.filter((c) => c.hit).map((c) => ({
             cellId: c.cellId, fileId: p.fileId, source: c.source, target: c.target,
@@ -305,10 +317,13 @@ export function useCompletion(
             settings: effectiveSettings, session, messages,
             stream: true,
             onChunk: (full) => consumeFull(full),
-            signal: getBatchCompletionSignal(),
+            // FRO-235 fix: getBatchCompletionSignal(runId) returns an
+            // already-aborted signal when this run has been superseded.
+            signal: getBatchCompletionSignal(runId),
           })
         } catch (err) {
-          // AbortError: user cancelled — clear all still-pending cells cleanly.
+          // AbortError: user cancelled (or run superseded) — clear all
+          // still-pending cells cleanly.
           if (err instanceof DOMException && err.name === "AbortError") {
             for (let i = 0; i < chunk.length; i++) {
               const c = chunk[i]
@@ -334,6 +349,18 @@ export function useCompletion(
 
         consumeFull(result)
 
+        // FRO-235 fix: only commit and increment done when this run is still
+        // live. If superseded between the await and here, skip commits so the
+        // cancelled run does not persist AI text or inflate run B's counter.
+        if (isBatchCompletionCancelled(runId)) {
+          for (let i = 0; i < chunk.length; i++) {
+            const c = chunk[i]
+            setPreviews((p) => { const m = new Map(p); m.delete(c.id); return m })
+            setCompleting((p) => { const m = new Map(p); m.delete(c.id); return m })
+          }
+          break
+        }
+
         for (let i = 0; i < chunk.length; i++) {
           const cell = chunk[i]
           const text = filledText.get(i + 1)
@@ -341,14 +368,30 @@ export function useCompletion(
             if (commitCompletedCell) {
               await commitCompletedCell(cell, text, llmAuthor)
             }
+            // FRO-235 fix: after await, re-check — another Start could have
+            // superseded us during the commit. If so, do not increment or clear.
+            if (isBatchCompletionCancelled(runId)) {
+              setPreviews((p) => { const m = new Map(p); m.delete(cell.id); return m })
+              setCompleting((p) => { const m = new Map(p); m.delete(cell.id); return m })
+              // Clear remaining cells in this chunk then bail from the outer loop.
+              for (let j = i + 1; j < chunk.length; j++) {
+                const c = chunk[j]
+                setPreviews((p) => { const m = new Map(p); m.delete(c.id); return m })
+                setCompleting((p) => { const m = new Map(p); m.delete(c.id); return m })
+              }
+              break
+            }
             // FRO-211: clear state once committed — no inline review step.
             setPreviews((p) => { const m = new Map(p); m.delete(cell.id); return m })
             setCompleting((p) => { const m = new Map(p); m.delete(cell.id); return m })
-            incrementBatchCompletionDone()
+            incrementBatchCompletionDone(runId)
           } else {
             fallbackQueue.push(cell)
           }
         }
+
+        // If we broke out of the inner loop due to supersession, stop chunks.
+        if (isBatchCompletionCancelled(runId)) break
 
         // Carry the just-translated cells into the next sub-batch as continuity
         // few-shot.
@@ -372,11 +415,17 @@ export function useCompletion(
       }
 
       // Per-cell fallback for any cells whose <vN> never closed — only if not cancelled.
-      if (!isBatchCompletionCancelled()) {
+      if (!isBatchCompletionCancelled(runId)) {
         for (const cell of fallbackQueue) {
-          if (isBatchCompletionCancelled()) break
-          await completeSingle(cell, getBatchCompletionSignal())
-          incrementBatchCompletionDone()
+          if (isBatchCompletionCancelled(runId)) break
+          // FRO-235 fix: thread the batch signal into completeSingle so it is
+          // visible to Stop during a batch. getBatchCompletionSignal(runId)
+          // returns an already-aborted signal if this run has been superseded.
+          await completeSingle(cell, getBatchCompletionSignal(runId))
+          // Only increment if the run is still live after the await.
+          if (!isBatchCompletionCancelled(runId)) {
+            incrementBatchCompletionDone(runId)
+          }
         }
       } else {
         // Clear pending fallback cells without erroring them.
@@ -386,8 +435,9 @@ export function useCompletion(
         }
       }
     } finally {
-      // Always clear the progress banner when the run ends (success, cancel, or error).
-      clearBatchCompletionProgress()
+      // FRO-235 fix: clearBatchCompletionProgress(runId) is a no-op when runId
+      // !== _currentRunId — a finishing run A cannot null run B's banner.
+      clearBatchCompletionProgress(runId)
     }
   }, [effectiveSettings, isConfigured, isAvailable, sourceLanguage, targetLanguage, searchPassages, session, provider, completeSingle, commitCompletedCell, rules, allCells])
 

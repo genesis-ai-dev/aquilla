@@ -1,0 +1,59 @@
+import { test, expect } from "../../helpers/multi-user"
+import { Dashboard } from "../../helpers/page-objects/Dashboard"
+import { Workspace } from "../../helpers/page-objects/Workspace"
+import path from "node:path"
+import { fileURLToPath } from "node:url"
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url))
+const SAMPLE_MD = path.resolve(__dirname, "../../fixtures/sample.md")
+
+/**
+ * Individual cell unvalidation via Health button popover.
+ *
+ * EditorTable.tsx: when a cell is validated by the current user, opening
+ * the validation popover shows a trash button with title="Remove your
+ * validation". Clicking it calls emitValidationChange(false) which removes
+ * the validation, and the health button title reverts to the unvalidated state.
+ *
+ * This spec:
+ *   1. Create a project → import → edit + validate cell 0.
+ *   2. Hover the health button again (now shows "— validated").
+ *   3. Open the validation popover (click the health button, don't Space-press —
+ *      clicking with mouse opens the popover without toggling state).
+ *   4. Click "Remove your validation" trash button.
+ *   5. Verify the health button title no longer contains "validated".
+ */
+test("cell Remove your validation button removes the validation", async ({ alice }) => {
+  const dash = new Dashboard(alice)
+  await dash.goto()
+  const name = `Unvalidate ${Date.now()}`
+  await dash.createProject({ name, source: "en", target: "fr" })
+  await dash.openProject(name)
+
+  const ws = new Workspace(alice)
+  await ws.importFile(SAMPLE_MD)
+  await ws.openFileBySubstring("sample")
+  await ws.waitForEditor()
+  await ws.editCell(0, "Translation to validate then remove")
+  await ws.validateCell(0)
+
+  // Health button now says "— validated".
+  const row = ws.cellRow(0)
+  await row.hover()
+  const healthBtn = row.locator("button[title*='Health']").first()
+  await expect(healthBtn).toHaveAttribute("title", /validated/, { timeout: 5_000 })
+
+  // Open the validation popover by hovering (openOnHover mode).
+  // Hover triggers the popover to open; we then click inside it.
+  await healthBtn.hover()
+
+  // "Remove your validation" trash button should appear inside the popover.
+  const removeBtn = alice.locator('button[title="Remove your validation"]')
+  await expect(removeBtn).toBeVisible({ timeout: 8_000 })
+
+  // Click to remove the validation.
+  await removeBtn.click()
+
+  // Health button title should no longer contain "validated".
+  await expect(healthBtn).not.toHaveAttribute("title", /validated/, { timeout: 10_000 })
+})

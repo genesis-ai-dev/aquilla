@@ -541,3 +541,15 @@ export const CONFIDENCE_MIN = 0.1
 export const CONFIDENCE_AMBER = 0.3
 /** Upper bound of the medium-confidence band (start of bulk-approvable). */
 export const CONFIDENCE_HIGH = 0.6
+
+/**
+ * Minimum number of validated translation pairs before the alignment model
+ * has enough signal to produce non-random alignments. Below this count the
+ * statistical model is essentially guessing — the UI shows a "need more
+ * translations" state instead of spurious suggestions.
+ *
+ * Rationale: Dice cold-start needs at least a handful of co-occurrences to
+ * distinguish signal from noise. 5 pairs ≈ the minimum where we see any
+ * meaningful token-level associations in practice; 10 is a comfortable floor.
+ */
+export const MIN_PAIRS_FOR_MEANINGFUL_ALIGNMENT = 10

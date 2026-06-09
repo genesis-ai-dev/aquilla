@@ -251,6 +251,7 @@
 | Sharing     | Invite @username verified chip appears                | `e2e/specs/projects/share-invite-username-verified.smoke.spec.ts` |   ✅   |
 | Rules       | Rule promote to org dialog                            | `e2e/specs/rules/rule-promote-to-org.smoke.spec.ts`           |   ✅   |
 | Rules       | Rules page terminology link navigates                 | `e2e/specs/rules/rules-page-terminology-link.smoke.spec.ts`   |   ✅   |
+| Rules       | "Try to fix all" button navigates to editor with ?openRule= | `e2e/specs/rules/rules-try-to-fix-all.smoke.spec.ts`    |   ✅   |
 | Rules       | Waive and unwaive a violation                         | `e2e/specs/rules/waive-violation.smoke.spec.ts`               |   ✅   |
 | Terminology | Violations tab shows inbox content                    | `e2e/specs/projects/terminology-violations-tab.smoke.spec.ts` |   ✅   |
 | Terminology | Wildcard source term 'samp*' creates chip for 'sample' | `e2e/specs/terminology/wildcard-term-chip.smoke.spec.ts`     |   ✅   |

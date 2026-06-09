@@ -33,9 +33,9 @@ export class Dashboard {
     // Exact match: the AD-9 "Advanced: project shape" radios carry long
     // descriptions (e.g. the "Source-only" option mentions "target language"),
     // so a substring getByLabel would resolve to multiple elements.
-    await this.page.getByLabel("Project Name", { exact: true }).fill(name)
-    await this.page.getByLabel("Source Language", { exact: true }).fill(source)
-    await this.page.getByLabel("Target Language", { exact: true }).fill(target)
+    await this.page.getByLabel("Project name", { exact: true }).fill(name)
+    await this.page.getByLabel("Source language", { exact: true }).fill(source)
+    await this.page.getByLabel("Target language", { exact: true }).fill(target)
     await this.page.getByRole("button", { name: "Create Project" }).click()
 
     // The project name renders in more than one place after creation (card +

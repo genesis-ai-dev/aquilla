@@ -89,6 +89,39 @@ testReset.post("/reset", async (c) => {
     }
   }
 
+  // Seed alice's "Acme" org so org-membership tests have a stable org name.
+  // alice is the owner (role_level 50 = owner); carol is a contributor (10).
+  try {
+    const aliceRow = await db.prepare(`SELECT id FROM users WHERE username = 'alice'`).first<{ id: number }>()
+    if (aliceRow) {
+      await db
+        .prepare(
+          `INSERT INTO organizations (name, owner_user_id, created_at, updated_at)
+           VALUES ('Acme', ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+           ON CONFLICT DO NOTHING`,
+        )
+        .bind(aliceRow.id)
+        .run()
+      const acmeRow = await db
+        .prepare(`SELECT id FROM organizations WHERE name = 'Acme' AND owner_user_id = ?`)
+        .bind(aliceRow.id)
+        .first<{ id: number }>()
+      if (acmeRow) {
+        await db
+          .prepare(
+            `INSERT INTO org_members (org_id, user_id, role_level, granted_at)
+             VALUES (?, ?, 700, CURRENT_TIMESTAMP)
+             ON CONFLICT DO NOTHING`,
+          )
+          // role_level 700 = owner (matches ROLE_NAMES in org-permissions.ts)
+          .bind(acmeRow.id, aliceRow.id)
+          .run()
+      }
+    }
+  } catch (err) {
+    console.warn("[test-reset] Acme org seed failed (non-fatal):", err)
+  }
+
   return c.json({ ok: true, seeded: SEED_USERS.map((u) => u.username) })
 })
 

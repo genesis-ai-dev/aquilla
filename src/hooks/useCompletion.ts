@@ -9,6 +9,7 @@ import { useState, useCallback } from "react"
 import type { CompletionSettings } from "@/lib/parsers/types"
 import type { FrontierSession } from "@/lib/frontier/types"
 import type { ScoredPair } from "@/lib/search/dual-index"
+import { getUserProviderOverride } from "@/lib/store/user-provider-override"
 
 /**
  * Few-shot retrieval for the AI copilot. As of AD-13 (branching search) the
@@ -95,7 +96,14 @@ export function useCompletion(
   // Missing settings means "Frontier default with in-memory fallback" — we
   // don't persist anything until the user customizes.
   const effectiveSettings = settings ?? FALLBACK_SETTINGS
-  const provider = resolveProvider(effectiveSettings)
+  // A per-device override (user Settings) always beats the project settings.
+  // Mirror the same precedence that complete() applies so isConfigured is
+  // consistent with what the request will actually use.
+  const deviceOverride = getUserProviderOverride()
+  const resolvedSettings: CompletionSettings = deviceOverride
+    ? { ...effectiveSettings, provider: "custom", endpoint: deviceOverride.endpoint, model: deviceOverride.model || effectiveSettings.model, apiKey: deviceOverride.apiKey }
+    : effectiveSettings
+  const provider = resolveProvider(resolvedSettings)
   const { available: frontierAvailable } = useFrontierHealth()
 
   // "Configured" = the user has done the setup. Frontier: signed in.
@@ -105,7 +113,7 @@ export function useCompletion(
   // user already configured a provider.
   const isConfigured = provider === "frontier"
     ? Boolean(session?.jwt)
-    : Boolean(effectiveSettings.endpoint && effectiveSettings.model)
+    : Boolean(resolvedSettings.endpoint && resolvedSettings.model)
 
   // "Available" = service is reachable right now. Used to disable Generate
   // with a clear "service unavailable" message — never to gate setup.

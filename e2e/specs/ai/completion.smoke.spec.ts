@@ -26,50 +26,19 @@ test("sparkle button fills target cell from mock LLM (config injected via IDB)",
   const name = `AI ${Date.now()}`
   await dash.createProject({ name, source: "en", target: "es" })
   await dash.openProject(name)
-  const projectId = alice.url().split("/project/")[1]?.split("/")[0]
-  expect(projectId).toBeTruthy()
 
-  // Inject completionSettings pointing at the orchestrator's mock LLM.
+  // Point the per-device LLM override at the mock server. getUserProviderOverride()
+  // is checked first in complete() AND now in useCompletion (so isConfigured is
+  // correct). useProject reads from the server, not IDB, so IDB writes are ignored.
   const llmBase = process.env.VITE_LLM_BASE_URL ?? ""
   expect(llmBase).toMatch(/^http:\/\/127\.0\.0\.1:\d+$/)
-
-  await alice.evaluate(async ({ id, endpoint }) => {
-    const open = indexedDB.open("codex", 4)
-    await new Promise<void>((resolve, reject) => {
-      open.onsuccess = () => resolve()
-      open.onerror = () => reject(open.error)
-      open.onblocked = () => reject(new Error("IDB upgrade blocked"))
-    })
-    const db = open.result
-    const tx = db.transaction("projects", "readwrite")
-    const store = tx.objectStore("projects")
-    const existing = await new Promise<unknown>((resolve, reject) => {
-      const req = store.get(id)
-      req.onsuccess = () => resolve(req.result)
-      req.onerror = () => reject(req.error)
-    })
-    if (!existing) throw new Error(`project ${id} not in IDB`)
-    const project = existing as Record<string, unknown>
-    project.completionSettings = {
-      provider: "custom",
-      endpoint,
-      apiKey: "",
+  await alice.evaluate(({ endpoint }) => {
+    localStorage.setItem("codex:userProviderOverride", JSON.stringify({
+      endpoint,   // e.g. http://127.0.0.1:<port>/v1
       model: "mock-model",
-      maxTokens: 256,
-      temperature: 0.2,
-      systemPrompt: "Translate.",
-    }
-    await new Promise<void>((resolve, reject) => {
-      const req = store.put(project)
-      req.onsuccess = () => resolve()
-      req.onerror = () => reject(req.error)
-    })
-    await new Promise<void>((resolve, reject) => {
-      tx.oncomplete = () => resolve()
-      tx.onerror = () => reject(tx.error)
-    })
-    db.close()
-  }, { id: projectId!, endpoint: llmBase })
+      apiKey: "",
+    }))
+  }, { endpoint: `${llmBase}/v1` })
 
   // Reload so React reads the patched project state.
   await alice.reload()

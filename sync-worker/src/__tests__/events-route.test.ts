@@ -409,3 +409,44 @@ describe('POST /events — cell.validate', () => {
     expect((await snapshot()).cells[0].validated).toBe(0)
   })
 })
+
+// ── ProjectSync fan-out ────────────────────────────────────────────────
+
+describe('POST /events — ProjectSync event.applied fan-out', () => {
+  function makeProjectSyncEnv(db: AquillaDb) {
+    const bodies: Array<Record<string, unknown>> = []
+    const stubFetch = vi.fn().mockImplementation(async (_url: unknown, init?: RequestInit) => {
+      bodies.push(JSON.parse(String(init?.body)))
+      return new Response(JSON.stringify({ ok: true }), { status: 200 })
+    })
+    const env = {
+      ...makeEnv(db),
+      ProjectSync: {
+        idFromName: vi.fn().mockReturnValue({ id: 'do-id' }),
+        get: vi.fn().mockReturnValue({ fetch: stubFetch }),
+      } as unknown as DurableObjectNamespace,
+    }
+    return { env, bodies }
+  }
+
+  it('stamps the authenticated username into event.applied as `by` (not the client-supplied author)', async () => {
+    // The client suppresses the "changed elsewhere" banner when
+    // `by === currentUsername`. `by` must come from the verified JWT claims —
+    // trusting the raw event's author field would let a buggy/malicious
+    // client spoof someone else's identity to suppress (or trigger) banners.
+    const token = await makeToken({ username: 'alice' })
+    const { db } = await makeTestDb()
+    const { env, bodies } = makeProjectSyncEnv(db)
+
+    const res = await handleEventsWriteRequest(
+      await makeRequest([targetCreate({ author: 'mallory' })], token),
+      env,
+    )
+    expect(res?.status).toBe(200)
+
+    const applied = bodies.filter((b) => b.t === 'event.applied')
+    expect(applied.length).toBe(1)
+    expect(applied[0].cell).toBe('cell-1')
+    expect(applied[0].by).toBe('alice')
+  })
+})

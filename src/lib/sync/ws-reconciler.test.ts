@@ -112,6 +112,24 @@ describe("parseProjectWsMessage", () => {
     })
   })
 
+  it("passes `by` through on event.applied so own-write banner suppression can fire", () => {
+    // ProjectWorkspace guards `msg.by === currentUsername` to avoid popping
+    // the "changed elsewhere" banner when our own commit bounces back over
+    // WS. Dropping `by` here turns every own edit into a phantom remote
+    // change while the cell is still focused.
+    const msg = parseProjectWsMessage(
+      JSON.stringify({
+        t: "event.applied",
+        id: "evt-1",
+        kind: "target.cell.commit",
+        project: "p",
+        cell: "c",
+        by: "alice",
+      }),
+    )
+    expect(msg).toMatchObject({ t: "event.applied", by: "alice" })
+  })
+
   it("parses event.stale", () => {
     expect(
       parseProjectWsMessage(

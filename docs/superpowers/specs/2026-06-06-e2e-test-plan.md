@@ -58,7 +58,7 @@ Legend: ⬜ untested · 🔄 in progress · ✅ browser-verified + spec · 🐞 
 - ✅ Onboarding wizard first-run → dashboard (steps: Welcome → Privacy → Display name → Create project [skippable] → dashboard, 0 errors)
 - ✅ Real signup UI flow (ISSUE-4 fixed: `/__dev/logout` now clears session → onboarding step 3 "Create account" form: username+email+password+strength, POST /api/v2/auth/register → 200 → step 4 → dashboard as "e2etester's workspace", Admin nav correctly hidden, 0 crash errors) — see BUG-7 (403 on admin/me logs as console error)
 - ✅ Real login UI flow (onboarding step 3 → Log in tab → dev/dev → POST /api/v2/auth/token → 200 → step 4, 0 errors)
-- ⬜ Account switcher (multi-account)
+- ✅ Account switcher (multi-account) — click user button → popover shows current user + "Switch to" other accounts; switch dev→e2etester renders e2etester's workspace + access-denied on dev's project (correct); switch back to dev restores Dev Org + Admin link; 0 crash errors
 - ✅ Join via invite link `/join/:token` (route renders, invalid token → "no longer valid" error state + Back button, 0 JS errors)
 
 ### Project dashboard & nav
@@ -254,5 +254,6 @@ the cell (title → "100% — validated"); no separate Validate button in that p
 7. ISSUE-4: add `/__dev/logout` route (dev-tooling; low priority).
 8. Rewrite collab/file-propagation + collab/concurrent-edit for ProjectSync DO + D1 arch.
 9. Audio export by character (requires AI key; UI path to export confirmed).
-10. Real signup/login UI: blocked on ISSUE-4 (`/__dev/logout` missing) — skip for now.
+10. ✅ Real signup/login + account switcher — all verified this loop.
 11. Run full `npm run test:e2e` (stop dev-stack first) and get it green.
+12. Remaining truly-blocked: AI completions (needs key), collab propagation (needs arch rewrite), audio export (needs key).

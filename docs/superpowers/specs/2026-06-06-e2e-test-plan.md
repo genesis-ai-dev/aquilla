@@ -56,7 +56,8 @@ Legend: ⬜ untested · 🔄 in progress · ✅ browser-verified + spec · 🐞 
 ### Auth & onboarding
 - ✅ Dev auto-login lands logged-in session (browser-verified) — see BUG-1 (500 on first call)
 - ✅ Onboarding wizard first-run → dashboard (steps: Welcome → Privacy → Display name → Create project [skippable] → dashboard, 0 errors)
-- ⬜ Real signup / login UI flow — see ISSUE-4: `/__dev/logout` route unregistered; session persists via `aq_hint` cookie, can't easily test sign-in page in dev mode
+- ✅ Real signup UI flow (ISSUE-4 fixed: `/__dev/logout` now clears session → onboarding step 3 "Create account" form: username+email+password+strength, POST /api/v2/auth/register → 200 → step 4 → dashboard as "e2etester's workspace", Admin nav correctly hidden, 0 crash errors) — see BUG-7 (403 on admin/me logs as console error)
+- ✅ Real login UI flow (onboarding step 3 → Log in tab → dev/dev → POST /api/v2/auth/token → 200 → step 4, 0 errors)
 - ⬜ Account switcher (multi-account)
 - ✅ Join via invite link `/join/:token` (route renders, invalid token → "no longer valid" error state + Back button, 0 JS errors)
 
@@ -190,6 +191,16 @@ state update: "Cannot update a component (ProjectWorkspace) while rendering a di
 component (VoiceLibraryPanel)". The double-fire of `onSettingsChange` also caused a second
 PATCH to race and 409. Fix: compute next voices/defaultVoiceId outside the updater and call
 all three setters sequentially. Commit: 38d6866.
+
+### BUG-7 — `GET /api/v2/admin/me` 403 produces browser console error for non-admin users (open)
+On dashboard mount the app probes `/api/v2/admin/me` to gate the Admin nav link.
+`getAdminMe()` already handles 403 silently (returns `false`), but the browser
+DevTools itself logs `Failed to load resource: 403` as a console error — this is
+browser-native behavior that JS can't suppress. Any E2E spec asserting 0 console
+errors on the overview page will fail for non-admin users.
+Fix (server-side): return HTTP 200 `{ isPlatformAdmin: false }` for authenticated
+non-admins instead of 403. The worker-side enforcement stays unchanged; only the
+status code for the "no access" case changes.
 
 ### ISSUE-4 — `/__dev/logout` route unregistered (dev-mode only)
 `App.tsx` only registers `/__dev/login`. Navigating to `/__dev/logout` renders a

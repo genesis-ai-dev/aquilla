@@ -144,6 +144,8 @@
 | Editor      | Select source text → Add to termbase creates draft concept | `e2e/specs/editor/add-to-termbase-from-selection.smoke.spec.ts` | ✅ |
 | Editor      | /project/:id/voice deep-link activates audio lens     | `e2e/specs/editor/voice-deep-link.smoke.spec.ts`              |   ✅   |
 | Editor      | Cell history drawer shows edit history                | `e2e/specs/editor/cell-history-drawer.smoke.spec.ts`          |   ✅   |
+| Editor      | HistoryDrawer show/hide intermediate edits toggle     | `e2e/specs/editor/history-drawer-intermediate-edits.smoke.spec.ts` | ✅ |
+| Editor      | EditorTable 'More cell actions' popover Add comment   | `e2e/specs/editor/cell-more-actions-popover.smoke.spec.ts`    |   ✅   |
 | Editor      | CellActionsMenu "More actions" → History opens drawer | `e2e/specs/editor/cell-actions-menu-history.smoke.spec.ts`   |   ✅   |
 | Editor      | CellActionsMenu "More actions" → Add comment opens drawer | `e2e/specs/editor/cell-actions-menu-add-comment.smoke.spec.ts` | ✅ |
 | Editor      | Sidebar file filter narrows list; Clear restores it   | `e2e/specs/editor/sidebar-file-filter.smoke.spec.ts`          |   ✅   |
@@ -210,6 +212,8 @@
 | Terminology | Rendering status select (preferred/alternate/forbidden)| `e2e/specs/projects/terminology-rendering-status-select.smoke.spec.ts` |   ✅   |
 | Terminology | Term detail popover from concept row                  | `e2e/specs/projects/terminology-term-detail.smoke.spec.ts`    |   ✅   |
 | Terminology | Term detail occurrence row inline cell editor         | `e2e/specs/projects/terminology-term-detail-inline-edit.smoke.spec.ts` | ✅ |
+| Terminology | Remove rendering button deletes rendering from concept | `e2e/specs/terminology/terminology-remove-rendering.smoke.spec.ts` | ✅ |
+| Terminology | TerminologyTermDetail Close detail button dismisses panel | `e2e/specs/terminology/terminology-term-detail-close.smoke.spec.ts` | ✅ |
 | Terminology | Candidate terms tab renders mined terms               | `e2e/specs/projects/terminology-candidates-tab.smoke.spec.ts` |   ✅   |
 | Terminology | Export CSV and TBX buttons                           | `e2e/specs/projects/terminology-export.smoke.spec.ts`         |   ✅   |
 | Terminology | Import termbase dialog opens                          | `e2e/specs/projects/terminology-import-dialog.smoke.spec.ts`  |   ✅   |

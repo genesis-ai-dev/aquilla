@@ -1,5 +1,5 @@
-import { describe, it, expect } from "vitest"
-import { deriveChecklistState } from "./useSetupChecklist"
+import { describe, it, expect, beforeEach } from "vitest"
+import { deriveChecklistState, wasSetupAutoShown, markSetupAutoShown } from "./useSetupChecklist"
 
 describe("deriveChecklistState", () => {
   it("returns all incomplete when project has no settings", () => {
@@ -38,5 +38,33 @@ describe("deriveChecklistState", () => {
     )
     expect(state.completedCount).toBe(3)
     expect(state.totalCount).toBe(3)
+  })
+
+  // FRO-234: saving instructions must mark the step complete. The systemPrompt
+  // must be non-empty for aiInstructions to flip — empty string means unsaved.
+  it("FRO-234: aiInstructions requires a non-empty, non-whitespace systemPrompt", () => {
+    expect(deriveChecklistState({ systemPrompt: "" }, 0, false).aiInstructions).toBe(false)
+    expect(deriveChecklistState({ systemPrompt: "   " }, 0, false).aiInstructions).toBe(false)
+    expect(deriveChecklistState({ systemPrompt: "Translate carefully." }, 0, false).aiInstructions).toBe(true)
+  })
+})
+
+describe("wasSetupAutoShown / markSetupAutoShown", () => {
+  // FRO-244: localStorage helpers for auto-surface shown-once tracking.
+  beforeEach(() => {
+    // Clear only the keys this test group uses so other tests are unaffected.
+    localStorage.removeItem("codex.setupAutoShown.p-unit-1")
+    localStorage.removeItem("codex.setupAutoShown.p-unit-2")
+  })
+
+  it("FRO-244: returns false before first mark, true after", () => {
+    expect(wasSetupAutoShown("p-unit-1")).toBe(false)
+    markSetupAutoShown("p-unit-1")
+    expect(wasSetupAutoShown("p-unit-1")).toBe(true)
+  })
+
+  it("FRO-244: different projects have independent shown flags", () => {
+    markSetupAutoShown("p-unit-1")
+    expect(wasSetupAutoShown("p-unit-2")).toBe(false)
   })
 })

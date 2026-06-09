@@ -46,6 +46,7 @@ import { TerminologyTermDetail } from "@/components/TerminologyTermDetail"
 import { CandidateTermsPanel } from "@/components/CandidateTermsPanel"
 import { extractCandidates } from "@/lib/terminology/candidates"
 import type { CandidateTerm } from "@/lib/terminology/candidates"
+import { TerminologyViolationsInbox } from "@/components/TerminologyViolationsInbox"
 
 // ────────────────────────────────────────────────────────────────────────────
 // Rendering status chip helpers
@@ -753,14 +754,15 @@ export function TerminologyPage() {
     return texts
   }, [allCells])
 
-  const [tab, setTab] = useState<"concepts" | "candidates">("concepts")
+  const [tab, setTab] = useState<"concepts" | "candidates" | "violations">("concepts")
 
   // ── Candidate mining (lazy, off-thread) ─────────────────────────────────────
-  // The C-value/NC-value/G² stack is super-linear in corpus size and used to
-  // wedge the main thread for 30s+ on load. We only mine once the user is on the
-  // "Candidate terms" tab, run it in a Web Worker so the UI stays responsive,
-  // and cap the corpus to a bounded size (surfaced in the UI).
-  const CANDIDATE_CORPUS_CAP = 1500
+  // The C-value/NC-value/G² stack is super-linear in corpus size, but mining
+  // now runs in a Web Worker off the main thread, so we mine the FULL loaded
+  // corpus by default. A high safety ceiling only kicks in for pathologically
+  // large corpora (the worker would still finish, but we cap to keep memory and
+  // latency bounded); the cap is surfaced in the UI only when actually hit.
+  const CANDIDATE_CORPUS_CEILING = 50_000
   const [candidates, setCandidates] = useState<CandidateTerm[]>([])
   const [candidatesLoading, setCandidatesLoading] = useState(false)
   const [candidatesReady, setCandidatesReady] = useState(false)
@@ -813,17 +815,17 @@ export function TerminologyPage() {
           requestId: String(reqId),
           corpus: candidateCorpus,
           managed: concepts,
-          maxCorpusStrings: CANDIDATE_CORPUS_CAP,
+          maxCorpusStrings: CANDIDATE_CORPUS_CEILING,
         })
       } catch {
         // Worker failed to load (e.g. unsupported env): fall back to inline.
         if (cancelled) return
         const out = extractCandidates(candidateCorpus, {
           managed: concepts,
-          maxCorpusStrings: CANDIDATE_CORPUS_CAP,
+          maxCorpusStrings: CANDIDATE_CORPUS_CEILING,
         })
         setCandidates(out)
-        setMinedCount(Math.min(candidateCorpus.length, CANDIDATE_CORPUS_CAP))
+        setMinedCount(Math.min(candidateCorpus.length, CANDIDATE_CORPUS_CEILING))
         setCandidatesReady(true)
         setCandidatesLoading(false)
       }
@@ -1100,6 +1102,7 @@ export function TerminologyPage() {
                 ? `Candidate terms (${candidates.length})`
                 : "Candidate terms",
             },
+            { key: "violations", label: "Violations" },
           ] as const).map((t) => (
             <button
               key={t.key}
@@ -1117,7 +1120,15 @@ export function TerminologyPage() {
           ))}
         </div>
 
-        {tab === "candidates" ? (
+        {tab === "violations" ? (
+          // Lazy: the rule-engine scan only runs while this is mounted, i.e.
+          // while the Violations tab is active (mirrors the candidate tab).
+          <TerminologyViolationsInbox
+            concepts={concepts}
+            cells={allCells}
+            onJumpToCell={() => navigate(`/project/${id}`)}
+          />
+        ) : tab === "candidates" ? (
           <Card>
             <CardHeader>
               <CardTitle>Candidate terms</CardTitle>
@@ -1125,15 +1136,15 @@ export function TerminologyPage() {
             <CardContent className="space-y-3">
               <p className="text-xs text-muted-foreground">
                 Mined from{" "}
-                {candidatesReady ? minedCount : Math.min(candidateCorpus.length, CANDIDATE_CORPUS_CAP)}{" "}
+                {candidatesReady ? minedCount : Math.min(candidateCorpus.length, CANDIDATE_CORPUS_CEILING)}{" "}
                 source/WIP cell text
                 {(candidatesReady ? minedCount : candidateCorpus.length) === 1 ? "" : "s"}
-                {candidateCorpus.length > CANDIDATE_CORPUS_CAP
-                  ? ` (capped at the first ${CANDIDATE_CORPUS_CAP} of ${candidateCorpus.length} loaded cells for responsiveness)`
-                  : ""}{" "}
-                — ranked over loaded cells only, not the full project. Keyness (G²)
-                uses a derived rest-of-corpus baseline. Promoting adds a suggested
-                concept you can then give renderings.
+                {candidateCorpus.length > CANDIDATE_CORPUS_CEILING
+                  ? ` (capped at the first ${CANDIDATE_CORPUS_CEILING} of ${candidateCorpus.length} loaded cells — corpus exceeds the safety ceiling)`
+                  : " — the full loaded project"}
+                . Mining runs off the main thread. Keyness (G²) uses a derived
+                rest-of-corpus baseline. Promoting adds a suggested concept you
+                can then give renderings.
               </p>
               {candidatesLoading && !candidatesReady ? (
                 <div className="flex items-center gap-2 py-8 text-sm text-muted-foreground">

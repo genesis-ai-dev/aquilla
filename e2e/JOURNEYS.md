@@ -60,6 +60,8 @@
 | Orgs        | Team detail access-level help indicator               | `e2e/specs/orgs/team-detail-access-level-help.smoke.spec.ts`  |   ✅   |
 | Collab      | BT edit locked for reviewer role                      | `e2e/specs/collab/bt-edit-locked-for-reviewer.smoke.spec.ts`  |   ✅   |
 | Orgs        | Pending invite targeted-email chip vs open-link badge | `e2e/specs/orgs/pending-invite-targeted-chip.smoke.spec.ts`   |   ✅   |
+| Comments    | Stale indicator when translation changes after thread  | `e2e/specs/editor/comment-translation-stale-indicator.smoke.spec.ts` | ✅ |
+| Projects    | Project overview per-file stats row after import      | `e2e/specs/projects/project-overview-file-stats.smoke.spec.ts` |   ✅   |
 | Projects    | Cross-project termbase subscribe and unsubscribe      | `e2e/specs/projects/termbase-subscribe-unsubscribe.smoke.spec.ts` | ✅ |
 | Tauri       | Native dialogs / deeplink / updater / fs / keychain  | _gap — Plan 3_                                                |        |
 

@@ -39,6 +39,11 @@ test("import dialog shows Coming soon items as disabled", async ({ alice }) => {
   await expect(tmDiv).toBeVisible({ timeout: 3_000 })
   await expect(tmDiv).toHaveClass(/cursor-not-allowed|opacity/)
 
+  // Translation Notes coming-soon div (FRO-179).
+  const notesDiv = dialog.locator('[title*="Translation Notes import"]')
+  await expect(notesDiv).toBeVisible({ timeout: 3_000 })
+  await expect(notesDiv).toHaveClass(/cursor-not-allowed|opacity/)
+
   // Dismiss.
   await alice.keyboard.press("Escape")
 })

@@ -236,6 +236,7 @@
 | Voice       | Audio mode lens toggle in workspace                   | `e2e/specs/orgs/audio-mode.smoke.spec.ts`                     |   ✅   |
 | Voice       | Audio by character view                               | `e2e/specs/orgs/audio-by-character.smoke.spec.ts`             |   ✅   |
 | Voice       | Audio recording modal opens                           | `e2e/specs/orgs/audio-recording-modal.smoke.spec.ts`          |   ✅   |
+| Voice       | Subtitle VTT round-trip: import with voice tags + export preserves them | `e2e/specs/projects/subtitle-voice-roundtrip.spec.ts` | ✅ |
 | Projects    | Org overview page renders rollup + filter             | `e2e/specs/projects/org-overview.smoke.spec.ts`               |   ✅   |
 | Projects    | Project create form validation (name + source required) | `e2e/specs/projects/project-create-form-validation.smoke.spec.ts` |   ✅   |
 | Projects    | Project create language tooltip                       | `e2e/specs/projects/project-create-language-tooltip.smoke.spec.ts` |   ✅   |

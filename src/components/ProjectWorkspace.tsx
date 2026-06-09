@@ -7,6 +7,8 @@ import { WorkspaceSkeleton } from "./WorkspaceSkeleton"
 import { TabStrip } from "./TabStrip"
 import { useWorkspaceTabs, readLastActiveFileId } from "@/hooks/useWorkspaceTabs"
 import { readLastLocation, writeLastLocation } from "@/lib/frontier/last-location-store"
+import { ROLE } from "@/lib/frontier/roles"
+import { languagesEqual } from "@/lib/language-normalize"
 import { useCells } from "@/hooks/useCells"
 import { useStaleSourceCells } from "@/hooks/useStaleSourceCells"
 import { useSearchIndex } from "@/hooks/useSearchIndex"
@@ -1954,9 +1956,11 @@ export function ProjectWorkspace() {
 
   async function handleImported(
     refs: FileReference[],
-    inferredLanguages?: { sourceLanguage?: string; targetLanguage?: string },
+    inferredLanguages?: { sourceLanguage?: string; targetLanguage?: string; explicit?: boolean },
   ) {
     if (!project) return
+    // WARN a fix: read fresh project state rather than the render-closure value —
+    // imports can take minutes; a language set mid-import must not be clobbered.
     const localProject = await getProject(project.id).catch(() => undefined)
     const baseProject = localProject ?? project
     const nextFiles = [...baseProject.files]
@@ -1974,25 +1978,78 @@ export function ProjectWorkspace() {
       syncRole: project.syncRole ?? baseProject.syncRole,
       files: nextFiles,
     })
-    // FRO-249: seed source/target language from import metadata when the
-    // project's direction was unset. Only fills in EMPTY slots so it never
-    // overwrites a language the user already configured intentionally.
-    // Distinct source/target is the key invariant — skip if both would end
-    // up as the same value (that's the broken state we're fixing).
+    // FRO-249: seed source/target language from import metadata.
+    //
+    // Two modes (determined by `inferredLanguages.explicit`):
+    //   - EXPLICIT (user confirmed via DirectionPanel): values REPLACE current
+    //     ones when the current target is empty OR equals the current source
+    //     (the broken source==target state). This is BLOCKER 1's fix.
+    //   - INFERRED (metadata-only, no explicit confirmation): only fills EMPTY
+    //     slots, never overwrites an intentionally configured language.
+    //
+    // WARN a: use `baseProject` (freshly read above) for the emptiness test,
+    //   not the stale render-closure `project`.
+    //
+    // WARN b: only attempt the settings PATCH when the caller's role meets the
+    //   SERVER floor (MAINTAINER=600). Below that, patchSettings applies the
+    //   change locally to IDB then 403s server-side, causing per-device language
+    //   divergence. We skip the call entirely to avoid that split-brain.
+    //   NOTE: EDIT_ROLE_FLOOR in useProjectSettings.ts is PROJECT_LEAD (500) —
+    //   that mismatch vs the server's MAINTAINER (600) is a separate issue
+    //   flagged for follow-up (see Linear comment on FRO-249).
     if (inferredLanguages) {
-      const currentSource = project.sourceLanguage?.trim() || ""
-      const currentTarget = project.targetLanguage?.trim() || ""
-      const newSource = currentSource || inferredLanguages.sourceLanguage?.trim() || ""
-      const newTarget = currentTarget || inferredLanguages.targetLanguage?.trim() || ""
-      // Only patch when at least one field changes AND result is distinct.
-      if ((newSource !== currentSource || newTarget !== currentTarget) && newSource !== newTarget) {
+      const { explicit, sourceLanguage: inSrc, targetLanguage: inTgt } = inferredLanguages
+      // Read from baseProject (fresh) for the emptiness decision (WARN a).
+      const currentSource = baseProject.sourceLanguage?.trim() || ""
+      const currentTarget = baseProject.targetLanguage?.trim() || ""
+
+      let newSource: string
+      let newTarget: string
+
+      if (explicit) {
+        // BLOCKER 1: explicit answer from DirectionPanel wins.
+        // Replace when current target is empty OR equals current source (broken state).
+        const targetBroken = currentTarget === "" || languagesEqual(currentTarget, currentSource)
+        newSource = (inSrc?.trim() || currentSource)
+        newTarget = targetBroken
+          ? (inTgt?.trim() || currentTarget)
+          : currentTarget
+      } else {
+        // Inferred-only: fill empty slots only.
+        newSource = currentSource || inSrc?.trim() || ""
+        newTarget = currentTarget || inTgt?.trim() || ""
+      }
+
+      // Distinct source/target is the key invariant — skip if both would end
+      // up as the same value (WARN e: use normalizer for comparison).
+      const sourceDiffers = newSource !== currentSource
+      const targetDiffers = newTarget !== currentTarget
+      const resultDistinct = !languagesEqual(newSource, newTarget)
+
+      if ((sourceDiffers || targetDiffers) && resultDistinct && (newSource || newTarget)) {
         const patch: Record<string, string> = {}
-        if (newSource !== currentSource && newSource) patch.sourceLanguage = newSource
-        if (newTarget !== currentTarget && newTarget) patch.targetLanguage = newTarget
+        if (sourceDiffers && newSource) patch.sourceLanguage = newSource
+        if (targetDiffers && newTarget) patch.targetLanguage = newTarget
+
         if (Object.keys(patch).length > 0) {
-          void patchSettings(patch).catch((err) => {
-            console.warn("[FRO-249] failed to seed language settings after import:", err)
-          })
+          // WARN b fix: gate on the SERVER role floor (MAINTAINER=600) to prevent
+          // the local-only half-apply when the server will 403 us anyway.
+          const roleLevel = baseProject.syncRole?.level ?? 0
+          const serverFloor = ROLE.MAINTAINER // 600
+          if (roleLevel >= serverFloor) {
+            void patchSettings(patch).then((outcome) => {
+              if (outcome.kind !== "ok") {
+                console.warn("[FRO-249] language seed returned non-ok:", outcome)
+              }
+            }).catch((err) => {
+              console.warn("[FRO-249] failed to seed language settings after import:", err)
+            })
+          } else {
+            console.warn(
+              `[FRO-249] skipping language seed — role ${roleLevel} is below server floor ${serverFloor}. ` +
+              "Mismatch note: EDIT_ROLE_FLOOR in useProjectSettings is PROJECT_LEAD(500) but server requires MAINTAINER(600); tracked for follow-up.",
+            )
+          }
         }
       }
     }

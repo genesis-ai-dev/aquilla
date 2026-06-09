@@ -202,4 +202,58 @@ describe("GET /api/v2/orgs/:orgId/members-matrix (FRO-218 batched endpoint)", ()
     const res = await app.request("/api/v2/orgs/not-a-number/members-matrix", { headers: authHeader(await jwtFor("wendi")) }, env)
     expect(res.status).toBe(400)
   })
+
+  it("low-role caller (anna, org viewer=100) sees only the projects the per-project endpoint also exposes to her", async () => {
+    // Anna is org viewer (100) on org 1. She has a direct reviewer (300) on "pa"
+    // and is creator (700) of "pb". The batched matrix called as anna should
+    // return only the projects she has any effective access to, and the per-project
+    // reference (called as anna) must agree on role/source for each project.
+    await seedFixture()
+    const annaJwt = await jwtFor("anna")
+
+    // --- per-project reference (anna calling) --------------------------------
+    const paPpAnna = await app.request("/api/v2/projects/pa/members", { headers: authHeader(annaJwt) }, env)
+    // Anna has access to pa (contributor via group > reviewer direct > org viewer)
+    expect(paPpAnna.status).toBe(200)
+    const paRefAnna = ((await paPpAnna.json()) as PerProjectBody).members
+
+    const pbPpAnna = await app.request("/api/v2/projects/pb/members", { headers: authHeader(annaJwt) }, env)
+    // Anna created pb — she has owner access
+    expect(pbPpAnna.status).toBe(200)
+    const pbRefAnna = ((await pbPpAnna.json()) as PerProjectBody).members
+
+    // --- batched matrix (anna calling) --------------------------------------
+    const matrixRes = await app.request("/api/v2/orgs/1/members-matrix", { headers: authHeader(annaJwt) }, env)
+    expect(matrixRes.status).toBe(200)
+
+    const matrixBody = (await matrixRes.json()) as MatrixBody
+    const byProject = new Map(matrixBody.projects.map((p) => [p.projectId, p.members]))
+
+    const sort = (ms: ApiMember[]) => [...ms].sort((a, b) => a.userId - b.userId)
+    const simplify = (ms: ApiMember[]) =>
+      sort(ms).map((m) => ({
+        userId: m.userId,
+        username: m.username,
+        roleLevel: m.role.level,
+        source: m.role.source,
+        secondarySources: [...m.secondarySources].sort((a, b) => b.level - a.level),
+      }))
+
+    // The batched response must match per-project for each project anna can see.
+    const paBatched = byProject.get("pa") ?? []
+    const pbBatched = byProject.get("pb") ?? []
+    expect(simplify(paBatched)).toEqual(simplify(paRefAnna))
+    expect(simplify(pbBatched)).toEqual(simplify(pbRefAnna))
+
+    // Sanity: anna herself must appear in both project member lists.
+    const annaInPa = paBatched.find((m) => m.username === "anna")
+    expect(annaInPa).toBeDefined()
+    // Anna's winning role on pa via group is contributor (400)
+    expect(annaInPa!.role.level).toBe(400)
+
+    const annaInPb = pbBatched.find((m) => m.username === "anna")
+    expect(annaInPb).toBeDefined()
+    // Anna created pb — creator wins (700)
+    expect(annaInPb!.role.level).toBe(700)
+  })
 })

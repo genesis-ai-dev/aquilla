@@ -10,8 +10,8 @@
 | Auth        | Switch between two signed-in accounts                | _gap — Plan 2_                                                |        |
 | Onboarding  | First-run flow to dashboard                          | _gap — Plan 2_                                                |        |
 | Projects    | Create project, appears on dashboard                 | `e2e/specs/projects/create.smoke.spec.ts`                     |   ✅   |
-| Projects    | Open / delete / restore from trash                   | _gap — Plan 2_                                                |        |
-| Orgs        | Create org                                           | _gap — Plan 2_                                                |        |
+| Projects    | Open / delete / restore from trash                   | `e2e/specs/projects/project-trash.smoke.spec.ts` + `dashboard-trash-expand-restore.smoke.spec.ts` | ✅ |
+| Orgs        | Create org                                           | `e2e/specs/orgs/org-switcher-create.smoke.spec.ts`            |   ✅   |
 | Orgs        | Add member to org, member sees it                    | `e2e/specs/orgs/members.smoke.spec.ts` (API setup + UI verify) |   ✅   |
 | Orgs        | Invite member → member sees all org projects         | `e2e/specs/orgs/org-access-lifecycle.spec.ts` (test 1)        |        |
 | Orgs        | Create team → attach project/user → group path fires | `e2e/specs/orgs/org-access-lifecycle.spec.ts` (test 2)        |        |

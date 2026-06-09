@@ -37,6 +37,9 @@ export interface EventsRouteEnv {
   SYNC_SECRET_KEY?: string
   /** Optional — when present, successful D1 commits broadcast Realtime frames. */
   FileSync?: DurableObjectNamespace
+  /** Optional — when present, successful D1 commits fan-out event.applied frames
+   * to connected WebSocket clients via the per-project ProjectSync DO. */
+  ProjectSync?: DurableObjectNamespace
 }
 
 interface AcceptedEntry {
@@ -600,6 +603,51 @@ export async function handleEventsWriteRequest(
       }
 
       await Promise.all(broadcasts)
+    }
+
+    // Fan-out event.applied frames to ProjectSync DO so UI clients receive
+    // real-time updates via the per-project WebSocket. Non-fatal — a missed
+    // broadcast means the client will reconcile on its next poll/revalidate.
+    if (env.ProjectSync && env.SYNC_SECRET_KEY) {
+      // Group by project — one DO stub per project.
+      const byProject = new Map<string, typeof committedEntries>()
+      for (const entry of committedEntries) {
+        const project = entry.eventFrame.project
+        const list = byProject.get(project)
+        if (list) list.push(entry)
+        else byProject.set(project, [entry])
+      }
+      const doFanOut: Promise<void>[] = []
+      for (const [project, entries] of byProject) {
+        const id = env.ProjectSync.idFromName(project)
+        const stub = env.ProjectSync.get(id)
+        for (const entry of entries) {
+          const frame = entry.eventFrame
+          const body = JSON.stringify({
+            t: 'event.applied',
+            id: frame.id,
+            kind: frame.kind,
+            project: frame.project,
+            ...(frame.file ? { file: frame.file } : {}),
+            ...(frame.cell ? { cell: frame.cell } : {}),
+          })
+          doFanOut.push(
+            stub.fetch('http://do.internal/__broadcast', {
+              method: 'POST',
+              headers: {
+                Authorization: `Bearer ${env.SYNC_SECRET_KEY}`,
+                'Content-Type': 'application/json',
+              },
+              body,
+            }).then(async (res) => {
+              if (!res.ok) console.warn(`[events/route] ProjectSync broadcast failed for ${project}: HTTP ${res.status}`)
+            }).catch((err) => {
+              console.warn('[events/route] ProjectSync broadcast error:', err)
+            }),
+          )
+        }
+      }
+      await Promise.all(doFanOut)
     }
   }
 

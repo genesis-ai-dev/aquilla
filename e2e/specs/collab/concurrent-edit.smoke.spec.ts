@@ -1,8 +1,11 @@
 import { test, expect } from "../../helpers/multi-user"
-import { Dashboard } from "../../helpers/page-objects/Dashboard"
 import { Workspace } from "../../helpers/page-objects/Workspace"
 import { ensureAuthState } from "../../helpers/auth"
-import { createProjectServerSide, addProjectMember, ROLE } from "../../helpers/frontier-api"
+import {
+  createProjectServerSide,
+  addProjectMember,
+  ROLE,
+} from "../../helpers/frontier-api"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
 
@@ -10,55 +13,64 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const SAMPLE_MD = path.resolve(__dirname, "../../fixtures/sample.md")
 
 /**
- * Cell-level concurrent edit: alice types into cell 0, bob (with that
- * file open) sees the edit propagate via Yjs through the partyserver DO.
+ * Cell-level concurrent edit via the ProjectSync DO WebSocket.
  *
- * Setup mirrors file-propagation.smoke: alice creates locally, then we
- * bridge local→synced via API.
+ * Architecture (v3 / AD-1):
+ *   - Alice's edit is committed to IDB and emitted via `POST /events` to the
+ *     sync-worker, which writes the cell.update event to D1 and broadcasts it
+ *     through the project-scoped ProjectSync Durable Object WebSocket.
+ *   - Both alice and bob connect to `/parties/project-sync/<projectId>` when
+ *     they open the project workspace. The DO fan-out delivers the event to
+ *     bob's open connection, which triggers a D1 re-read and cell re-render.
+ *   - The 15s timeout covers the full round-trip: IDB flush → outbox → D1
+ *     write → DO broadcast → bob's WS receive → React re-render.
+ *
+ * Setup: create project + add bob via API (skips UI share flow).
  */
-// TODO(e2e): Architecture changed — y-partyserver/Yjs retired. Cell-level
-// propagation now goes through the ProjectSync DO (CRDT log in D1). The test
-// needs to be rewritten to:
-//   1. Create+share project via current auth-worker API.
-//   2. Confirm sync-worker ProjectSync DO accepts connections from both contexts.
-//   3. Assert alice's cell edit appears as a cell.update event in D1 within 10s.
-//   4. Assert bob's editor renders the new text (via polling GET /events or WS).
-// Keep test.fixme until that rewrite lands; the Yjs/partyserver approach in this
-// file is no longer correct for the current architecture.
-test.fixme("alice's edit on cell 0 is visible in bob's open editor within 10s", async ({ alice, bob }) => {
-  // 1. Alice creates project locally
-  const aliceDash = new Dashboard(alice)
-  await aliceDash.goto()
-  const name = `Concurrent ${Date.now()}`
-  await aliceDash.createProject({ name })
-  await aliceDash.openProject(name)
-  const projectId = alice.url().split("/project/")[1]?.split("/")[0]
-  expect(projectId).toBeTruthy()
-
-  // 2. Bridge local→synced
+test("alice edits cell 0; bob sees the new text in his open editor within 15s", async ({ alice, bob }) => {
   const aliceSession = await ensureAuthState("alice")
-  await createProjectServerSide(aliceSession.jwt, { id: projectId!, name })
-  await addProjectMember(aliceSession.jwt, projectId!, "bob", ROLE.CONTRIBUTOR)
 
-  // 3. Alice imports + opens
+  // 1. Create project server-side + add bob as contributor.
+  const projectId = `collab-ce-${Date.now()}`
+  const projectName = `Concurrent ${Date.now()}`
+  await createProjectServerSide(aliceSession.jwt, { id: projectId, name: projectName })
+  await addProjectMember(aliceSession.jwt, projectId, "bob", ROLE.CONTRIBUTOR)
+
+  // 2. Alice navigates to the project, imports the sample file, opens it.
+  await alice.goto(`/project/${projectId}`)
+  await alice.waitForLoadState("networkidle")
+
   const aliceWs = new Workspace(alice)
   await aliceWs.importFile(SAMPLE_MD)
   await aliceWs.openFileBySubstring("sample")
   await aliceWs.waitForEditor()
 
-  // 4. Bob opens the same project + file
-  const bobDash = new Dashboard(bob)
-  await bobDash.goto()
-  await expect(bob.getByText(name)).toBeVisible({ timeout: 15_000 })
-  await bobDash.openProject(name)
+  // Read the file id from the URL so bob can navigate to the exact same file.
+  const fileId = alice.url().match(/\/file\/([^/?#]+)/)?.[1] ?? null
+  expect(fileId, "file id should be in the URL after opening file").toBeTruthy()
+
+  // 3. Bob opens the same project and file BEFORE alice edits — both need to
+  //    be connected to the ProjectSync DO to receive the broadcast.
+  await bob.goto(`/project/${projectId}/file/${fileId}`)
+  await bob.waitForLoadState("networkidle")
   const bobWs = new Workspace(bob)
-  await bobWs.openFileBySubstring("sample")
   await bobWs.waitForEditor()
 
-  // 5. Alice types
-  const text = `from-alice-${Date.now()}`
-  await aliceWs.editCell(0, text)
+  // Brief pause to let both WS connections establish to the ProjectSync DO.
+  await alice.waitForTimeout(1_000)
 
-  // 6. Bob sees it. 10s budget covers DO round-trip + DOM update under load.
-  await expect(bobWs.cellRow(0)).toContainText(text, { timeout: 10_000 })
+  // 4. Alice edits cell 0 and blurs. The edit is committed to IDB and flushed
+  //    to the sync-worker outbox, which writes to D1 + broadcasts via DO.
+  const editText = `concurrent-${Date.now()}`
+  await aliceWs.editCell(0, editText)
+
+  // 5. Bob's editor should show the updated text somewhere in the cell list.
+  //    The ProjectSync DO delivers the event.applied frame to bob's WS
+  //    connection → useCells calls revalidateCell() → D1 refetch → re-render.
+  //    We filter to the specific cell that contains the edit text rather than
+  //    checking a fixed row index — the virtualizer can render cells in varying
+  //    DOM order depending on scroll position.
+  await expect(
+    bob.locator("[data-cell-id]").filter({ hasText: editText }).first(),
+  ).toBeVisible({ timeout: 15_000 })
 })

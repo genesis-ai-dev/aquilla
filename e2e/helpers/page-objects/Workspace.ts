@@ -9,14 +9,25 @@ export class Workspace {
   }
 
   async importFile(filePath: string): Promise<void> {
+    // Open the ImportDialog — lands on the "landing" screen (card grid).
     await this.page.getByRole("button", { name: /^Import$/i }).click()
-    await expect(this.page.getByText("Import Files")).toBeVisible({ timeout: 5_000 })
-    // The dialog has two file inputs ("Choose Files" + a webkitdirectory
-    // "Choose Folder"); target the file picker, not the folder one.
+    // Navigate to the Upload Files panel by clicking its card.
+    await this.page.getByText("Upload Files").click()
+    // UploadPanel is now visible with a "Choose Files" button.
+    await expect(this.page.getByRole("button", { name: /Choose Files/i })).toBeVisible({
+      timeout: 5_000,
+    })
+    // The panel has two file inputs: file picker + folder picker (webkitdirectory).
+    // Target the plain file picker.
     await this.page
       .locator('input[type="file"]:not([webkitdirectory])')
       .setInputFiles(filePath)
-    await expect(this.page.getByText("Import Files")).not.toBeVisible({ timeout: 15_000 })
+    // Selecting a non-Paratext file starts the import immediately (no confirm step).
+    // Wait for the dialog to finish: "Choose Files" disappears when the import panel
+    // transitions to the "importing" state or the dialog closes on success.
+    await expect(
+      this.page.getByRole("button", { name: /Choose Files/i }),
+    ).not.toBeVisible({ timeout: 15_000 })
   }
 
   /** Click a file row in the sidebar, identified by a substring of its name. */

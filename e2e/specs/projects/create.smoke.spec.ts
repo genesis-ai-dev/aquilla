@@ -6,5 +6,5 @@ test("alice creates a project and it appears on her dashboard", async ({ alice }
   await dash.goto()
   const name = `Smoke ${Date.now()}`
   await dash.createProject({ name, source: "en", target: "fr" })
-  await expect(alice.getByText(name)).toBeVisible({ timeout: 5_000 })
+  await expect(alice.getByText(name).first()).toBeVisible({ timeout: 5_000 })
 })

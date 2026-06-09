@@ -100,6 +100,7 @@ import { readValidationCount } from "@/lib/progress/read-validation-count"
 import { useSetupChecklist } from "@/hooks/useSetupChecklist"
 import { SetupChecklistDrawer } from "./onboarding/SetupChecklistDrawer"
 import { SystemPromptNudge } from "./onboarding/SystemPromptNudge"
+import { CompletionBulkProgressBanner } from "./CompletionBulkProgressBanner"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { NextUnfinishedButton } from "./NextUnfinishedButton"
 import { useNextUnfinished } from "@/hooks/useNextUnfinished"
@@ -2312,6 +2313,10 @@ export function ProjectWorkspace() {
                 onCustomize={() => setChecklistOpen(true)}
               />
             )}
+            {/* FRO-235: AI completion progress + stop control */}
+            <div className="px-3 py-1 empty:hidden">
+              <CompletionBulkProgressBanner />
+            </div>
             {isSubtitleFile && videoSrc && (
               <ResizableVideoPanel>
                 {(height) => (

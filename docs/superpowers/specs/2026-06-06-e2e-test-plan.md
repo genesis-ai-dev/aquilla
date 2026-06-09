@@ -97,8 +97,8 @@ Legend: ⬜ untested · 🔄 in progress · ✅ browser-verified + spec · 🐞 
 - ✅ Comment pipeline fixed (POST /events 200 OK; comment persisted in D1) — see BUG-2
 - ✅ CommentsDrawer opens from "Add comment" popover, textarea+Post button functional
 - ✅ Comment appears in drawer after post (BUG-3 fixed: liveComments prop + recordsToThreads adapter)
-- ⬜ File propagation to a second member (current sync arch)
-- ⬜ Concurrent cell edit propagates
+- ✅ File propagation to a second member (current sync arch) — collab/file-propagation.smoke.spec.ts
+- ✅ Concurrent cell edit propagates — collab/concurrent-edit.smoke.spec.ts (also fixed: events/route.ts was broadcasting to FileSync/partyserver but UI WS connects to ProjectSync DO; added fan-out to ProjectSync /__broadcast)
 - ⬜ Presence indicators
 
 ### Comments

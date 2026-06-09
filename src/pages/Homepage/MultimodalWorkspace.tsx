@@ -34,9 +34,9 @@ const MODES: { id: Mode; label: string; icon: React.ReactNode }[] = [
 const MODE_NOTE: Record<Mode, React.ReactNode> = {
   text: <>One verse, written. <span className="aq-mono">live rules + back-translation as you type.</span></>,
   audio: <>The same verse, spoken. <span className="aq-mono">record oral renderings, verse by verse.</span></>,
-  video: <>The same verse, on screen. <span className="aq-mono">translated captions, synced to playback.</span></>,
-  image: <>The same verse, on an image. <span className="aq-mono">captions + embedded text, any language.</span></>,
-  story: <>The same verse, retold. <span className="aq-mono">oral-first stories for listening communities.</span></>,
+  video: <>The same verse, captioned. <span className="aq-mono">subtitles and dubs synced to video playback.</span></>,
+  image: <>The same verse, on an image. <span className="aq-mono">coming soon — caption overlays for scripture art and slides.</span></>,
+  story: <>The same verse, retold. <span className="aq-mono">coming soon — oral-first story panels for listening communities.</span></>,
 }
 
 export function MultimodalWorkspace({ theme = "dark" }: { theme?: "light" | "dark" }) {
@@ -260,9 +260,9 @@ function ImagePanel() {
           <div className="aq-scene-caption">{langs[i].text}</div>
         </div>
         <div>
-          <h4 className="aq-display" style={{ fontSize: 22 }}>Captions &amp; embedded text</h4>
+          <h4 className="aq-display" style={{ fontSize: 22 }}>Captions &amp; embedded text <span style={{ fontSize: 13, fontWeight: 400, color: "var(--aq-faint)" }}>(coming soon)</span></h4>
           <p style={{ marginTop: 12, fontSize: 14.5, color: "var(--aq-dim)", lineHeight: 1.55 }}>
-            Memory verses, scripture art, lesson slides. Translate the words on an image — then ship it in every language your community speaks.
+            Translate caption overlays for memory verses, scripture art, and lesson slides. This mode is exploratory — shape it early by sharing your use case.
           </p>
           <div style={{ display: "flex", gap: 8, marginTop: 18 }}>
             {langs.map((l, idx) => (
@@ -294,7 +294,7 @@ function StoryPanel() {
     <div className="aq-panel">
       <div className="aq-cell-head" style={{ marginBottom: 16 }}>
         <span className="aq-cell-lang"><IconStory /> Oral story · Spanish</span>
-        <span>3 panels</span>
+        <span style={{ color: "var(--aq-faint)", fontSize: 12 }}>coming soon</span>
       </div>
       <div className="aq-story-strip">
         {panels.map((p) => (
@@ -306,7 +306,7 @@ function StoryPanel() {
         ))}
       </div>
       <p style={{ marginTop: 18, fontSize: 13.5, color: "var(--aq-faint)", lineHeight: 1.5 }}>
-        Turn a passage into a short, retellable story with art and audio — the way most of the world first meets Scripture.
+        Oral-first story panels for listening communities — exploratory. Share your use case to help shape this mode.
       </p>
     </div>
   )

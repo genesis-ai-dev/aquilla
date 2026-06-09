@@ -143,6 +143,15 @@ const TerminologyPageContent = lazy(() =>
   import("./TerminologyPage").then((mod) => ({ default: mod.TerminologyPage })),
 )
 
+// FRO-249 fix (Fix 2): module-level promise chain that serializes
+// handleImported's getProject→updateProject read-modify-write so that
+// concurrent imports don't race and the last write doesn't silently drop
+// earlier refs. This is module-scoped (not component-scoped) deliberately —
+// a single ProjectWorkspace is mounted at a time and the chain must survive
+// between React re-renders.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+let _lastImportWrite: Promise<any> = Promise.resolve(undefined)
+
 export function ProjectWorkspace() {
   const { id: projectId, fileId: routeFileId } = useParams<{ id: string; fileId?: string }>()
   const navigate = useNavigate()
@@ -175,6 +184,15 @@ export function ProjectWorkspace() {
   // across reloads would need server backing; the in-session state is what the
   // X button and "apply" flows actually need.)
   const [suggestionsDismissed, setSuggestionsDismissed] = useState(false)
+  // FRO-249/FRO-255 fix (Fix 4): transient notice shown when the user explicitly
+  // confirmed a direction but their role is below MAINTAINER (600) so the change
+  // could not be saved project-wide. Auto-dismissed after 6 s.
+  const [directionRoleNotice, setDirectionRoleNotice] = useState<string | null>(null)
+  useEffect(() => {
+    if (!directionRoleNotice) return
+    const t = setTimeout(() => setDirectionRoleNotice(null), 6000)
+    return () => clearTimeout(t)
+  }, [directionRoleNotice])
   useEffect(() => {
     optimisticFileIdsRef.current = new Set()
     setOptimisticFiles([])
@@ -1982,25 +2000,39 @@ export function ProjectWorkspace() {
     inferredLanguages?: { sourceLanguage?: string; targetLanguage?: string; explicit?: boolean },
   ) {
     if (!project) return
-    // WARN a fix: read fresh project state rather than the render-closure value —
-    // imports can take minutes; a language set mid-import must not be clobbered.
-    const localProject = await getProject(project.id).catch(() => undefined)
-    const baseProject = localProject ?? project
-    const nextFiles = [...baseProject.files]
-    const seenFileIds = new Set(nextFiles.map((file) => file.id))
-    for (const ref of refs) {
-      if (seenFileIds.has(ref.id)) continue
-      nextFiles.push(ref)
-      seenFileIds.add(ref.id)
-    }
-    await updateProject({
-      ...project,
-      ...baseProject,
-      sourceLanguage: project.sourceLanguage || baseProject.sourceLanguage,
-      targetLanguage: project.targetLanguage || baseProject.targetLanguage,
-      syncRole: project.syncRole ?? baseProject.syncRole,
-      files: nextFiles,
-    })
+    // FRO-249 fix (Fix 2): serialize the read-modify-write through a module-level
+    // promise chain so concurrent imports don't race on the project.files array.
+    // Each call appends to _lastImportWrite; if the previous call fails the chain
+    // still proceeds (catch → undefined) so one bad import can't wedge all future ones.
+    // The chain resolves with the fresh baseProject so the language-seed block
+    // below (which also needs a fresh read) can reuse it without a second IDB call.
+    const projectSnapshot = project // capture before the await boundary
+    _lastImportWrite = _lastImportWrite
+      .catch(() => undefined) // absorb prior failures so the chain is never stuck
+      .then(async () => {
+        // WARN a fix: read fresh project state rather than the render-closure value —
+        // imports can take minutes; a language set mid-import must not be clobbered.
+        const localProject = await getProject(projectSnapshot.id).catch(() => undefined)
+        const baseProject = localProject ?? projectSnapshot
+        const nextFiles = [...baseProject.files]
+        const seenFileIds = new Set(nextFiles.map((file) => file.id))
+        for (const ref of refs) {
+          if (seenFileIds.has(ref.id)) continue
+          nextFiles.push(ref)
+          seenFileIds.add(ref.id)
+        }
+        await updateProject({
+          ...projectSnapshot,
+          ...baseProject,
+          sourceLanguage: projectSnapshot.sourceLanguage || baseProject.sourceLanguage,
+          targetLanguage: projectSnapshot.targetLanguage || baseProject.targetLanguage,
+          syncRole: projectSnapshot.syncRole ?? baseProject.syncRole,
+          files: nextFiles,
+        })
+        return baseProject
+      })
+    // Await and capture baseProject for the language-seed block below.
+    const baseProject = await _lastImportWrite
     // FRO-249: seed source/target language from import metadata.
     //
     // Two modes (determined by `inferredLanguages.explicit`):
@@ -2020,7 +2052,7 @@ export function ProjectWorkspace() {
     //   NOTE: EDIT_ROLE_FLOOR in useProjectSettings.ts is PROJECT_LEAD (500) —
     //   that mismatch vs the server's MAINTAINER (600) is a separate issue
     //   flagged for follow-up (see Linear comment on FRO-249).
-    if (inferredLanguages) {
+    if (inferredLanguages && baseProject) {
       const { explicit, sourceLanguage: inSrc, targetLanguage: inTgt } = inferredLanguages
       // Read from baseProject (fresh) for the emptiness decision (WARN a).
       const currentSource = baseProject.sourceLanguage?.trim() || ""
@@ -2068,9 +2100,15 @@ export function ProjectWorkspace() {
               console.warn("[FRO-249] failed to seed language settings after import:", err)
             })
           } else {
+            // FRO-249/FRO-255 fix (Fix 4): surface this to the user — a silent
+            // console.warn left the dialog implying success. The import itself
+            // succeeded; only the project-wide language setting was skipped.
             console.warn(
               `[FRO-249] skipping language seed — role ${roleLevel} is below server floor ${serverFloor}. ` +
               "Mismatch note: EDIT_ROLE_FLOOR in useProjectSettings is PROJECT_LEAD(500) but server requires MAINTAINER(600); tracked for follow-up.",
+            )
+            setDirectionRoleNotice(
+              "Your direction choice couldn't be saved project-wide — it needs a maintainer. It will apply locally.",
             )
           }
         }
@@ -2670,6 +2708,16 @@ export function ProjectWorkspace() {
           ttsSettings={tts.settings}
           onCastUpdated={(patch) => tts.saveTts(patch)} />
       </Suspense>
+      {/* FRO-249/FRO-255 fix (Fix 4): transient notice when direction couldn't be saved project-wide */}
+      {directionRoleNotice && (
+        <div
+          role="status"
+          aria-live="polite"
+          className="fixed bottom-4 right-4 z-60 max-w-sm rounded border bg-background px-3 py-2 text-sm text-foreground shadow-md"
+        >
+          {directionRoleNotice}
+        </div>
+      )}
       <Suspense fallback={null}>
         <ExportDialog
           open={exportOpen}

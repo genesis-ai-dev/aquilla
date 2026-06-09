@@ -180,6 +180,7 @@
 | Comments    | Comments page search box filters threads              | `e2e/specs/editor/comments-search-filter.smoke.spec.ts`       |   ✅   |
 | Comments    | Comment close with reply button                       | `e2e/specs/editor/comment-close-with-reply.smoke.spec.ts`     |   ✅   |
 | Comments    | Cross-user comment visibility                         | `e2e/specs/collab/cross-user-comment.smoke.spec.ts`           |   ✅   |
+| Comments    | Bob replies to alice's comment (cross-user)           | `e2e/specs/collab/cross-user-comment-reply.smoke.spec.ts`     |   ✅   |
 | Comments    | Cross-user validation visibility                      | `e2e/specs/collab/cross-user-validate.smoke.spec.ts`          |   ✅   |
 | Rules       | Edit rule inline                                      | `e2e/specs/rules/edit-rule.smoke.spec.ts`                     |   ✅   |
 | Rules       | Rule toggle enabled/disabled                          | `e2e/specs/rules/rule-toggle-enabled.smoke.spec.ts` + `rule-editor-enabled-checkbox.smoke.spec.ts` | ✅ |

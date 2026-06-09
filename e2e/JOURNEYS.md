@@ -59,6 +59,8 @@
 | Orgs        | Members matrix access-help tooltip                    | `e2e/specs/orgs/members-matrix-access-help.smoke.spec.ts`     |   ✅   |
 | Orgs        | Team detail access-level help indicator               | `e2e/specs/orgs/team-detail-access-level-help.smoke.spec.ts`  |   ✅   |
 | Collab      | BT edit locked for reviewer role                      | `e2e/specs/collab/bt-edit-locked-for-reviewer.smoke.spec.ts`  |   ✅   |
+| Orgs        | Pending invite targeted-email chip vs open-link badge | `e2e/specs/orgs/pending-invite-targeted-chip.smoke.spec.ts`   |   ✅   |
+| Projects    | Cross-project termbase subscribe and unsubscribe      | `e2e/specs/projects/termbase-subscribe-unsubscribe.smoke.spec.ts` | ✅ |
 | Tauri       | Native dialogs / deeplink / updater / fs / keychain  | _gap — Plan 3_                                                |        |
 
 ## How to add a journey

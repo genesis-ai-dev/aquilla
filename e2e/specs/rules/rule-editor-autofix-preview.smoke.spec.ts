@@ -1,0 +1,68 @@
+import { test, expect } from "../../helpers/multi-user"
+import { Dashboard } from "../../helpers/page-objects/Dashboard"
+
+/**
+ * RuleEditor — autofix "Preview on sample text" input shows before/after.
+ *
+ * When the autofix section is expanded in RuleEditor.tsx:
+ *   - A "Find pattern" input (data-autofix-field="pattern")
+ *   - A "Replace with" input (data-autofix-field="replacement")
+ *   - A "Preview on sample text" input (placeholder="Type sample text to see before/after…")
+ *
+ * Typing in the sample input shows:
+ *   <original text (line-through)> → <replaced text (green)>
+ *
+ * This spec: create a rule → open autofix section → fill find/replace →
+ * type sample text → verify the transformed "after" text appears.
+ */
+test("rule editor autofix preview shows before/after transform", async ({ alice }) => {
+  const dash = new Dashboard(alice)
+  await dash.goto()
+  const projName = `AFPreview ${Date.now()}`
+  await dash.createProject({ name: projName })
+  await dash.openProject(projName)
+
+  await alice.waitForURL(/\/project\/[^/]+$/, { timeout: 5_000 })
+  const projectId = alice.url().match(/\/project\/([^/]+)$/)?.[1]
+  expect(projectId).toBeTruthy()
+
+  await alice.goto(`/project/${projectId}/rules`)
+  await alice.waitForLoadState("networkidle")
+
+  // Open the inline RuleEditor via "+ Add Rule".
+  const addRuleBtn = alice.getByRole("button", { name: /\+ Add Rule/i })
+  await expect(addRuleBtn).toBeVisible({ timeout: 10_000 })
+  await addRuleBtn.click()
+
+  // Fill rule name + pattern.
+  const nameInput = alice.locator('input[placeholder="e.g. Preserve numbers"]')
+  await expect(nameInput).toBeVisible({ timeout: 3_000 })
+  await nameInput.fill(`Preview Rule ${Date.now()}`)
+
+  const patInput = alice.locator('#re-pat').or(alice.locator('input[placeholder*="pattern" i]').first())
+  await expect(patInput).toBeVisible({ timeout: 3_000 })
+  await patInput.fill("hello")
+
+  // Expand the autofix section.
+  const toggleAutofix = alice.getByRole("button", { name: /Add autofix/i })
+  await expect(toggleAutofix).toBeVisible({ timeout: 3_000 })
+  await toggleAutofix.click()
+
+  // Fill the autofix find pattern and replacement.
+  const afPatInput = alice.locator('[data-autofix-field="pattern"]')
+  await expect(afPatInput).toBeVisible({ timeout: 5_000 })
+  await afPatInput.fill("hello")
+
+  const afReplInput = alice.locator('[data-autofix-field="replacement"]')
+  await expect(afReplInput).toBeVisible({ timeout: 3_000 })
+  await afReplInput.fill("world")
+
+  // Type in the sample text preview input.
+  const sampleInput = alice.locator('input[placeholder="Type sample text to see before/after…"]')
+  await expect(sampleInput).toBeVisible({ timeout: 3_000 })
+  await sampleInput.fill("say hello there")
+
+  // The "after" text should show "say world there" (green text).
+  // The "before" has the original text with line-through.
+  await expect(alice.getByText("say world there")).toBeVisible({ timeout: 5_000 })
+})

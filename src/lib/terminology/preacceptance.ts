@@ -11,15 +11,17 @@
  *       in the source text) but NONE of that concept's preferred/admitted
  *       renderings appear in the completion.
  *
- * Matching is normalized (case-insensitive, whitespace-collapsed) substring
- * match. No lemmatizer, no network, no back-translation. Inflected forms are a
- * known v2 gap (see TRACES `term-lemmatizer`). Only `active` concepts with a
+ * Matching uses the shared wildcard-aware matcher (./match): case-insensitive,
+ * Unicode-aware, word-boundary, with `*` standing for an inflectional
+ * letter-run. So a managed term `grac*` warns on grace/graced/gracia. No
+ * lemmatizer, no network, no back-translation. Only `active` concepts with a
  * non-empty source term are considered — draft/deprecated concepts and
  * concepts whose source term does not appear in the source are irrelevant and
  * never warn.
  */
 
 import type { Concept } from "./types"
+import { matchesTerm } from "./match"
 
 export interface PreAcceptanceWarning {
   conceptId: string
@@ -29,37 +31,28 @@ export interface PreAcceptanceWarning {
   offendingText?: string
 }
 
-/** Lower-case + collapse internal whitespace so substring matching is stable. */
-function normalize(s: string): string {
-  return s.toLowerCase().replace(/\s+/g, " ").trim()
-}
-
 export function detectPreAcceptanceWarnings(
   completionText: string,
   sourceText: string,
   concepts: Concept[],
 ): PreAcceptanceWarning[] {
-  const normCompletion = normalize(completionText)
-  const normSource = normalize(sourceText)
   const warnings: PreAcceptanceWarning[] = []
 
   for (const concept of concepts) {
     if (concept.status !== "active") continue
 
-    const normTerm = normalize(concept.sourceTerm)
-    if (!normTerm) continue
+    if (!concept.sourceTerm.trim()) continue
 
     // Only concepts whose source term actually appears in this source are
-    // relevant. Irrelevant concepts never warn.
-    if (!normSource.includes(normTerm)) continue
+    // relevant. Irrelevant concepts never warn. Wildcard-aware match.
+    if (!matchesTerm(sourceText, concept.sourceTerm)) continue
 
     // (a) Any forbidden rendering present in the completion → louder warning.
     let forbiddenFired = false
     for (const r of concept.renderings) {
       if (r.status !== "forbidden") continue
-      const normRendering = normalize(r.rendering)
-      if (!normRendering) continue
-      if (normCompletion.includes(normRendering)) {
+      if (!r.rendering.trim()) continue
+      if (matchesTerm(completionText, r.rendering)) {
         warnings.push({
           conceptId: concept.id,
           sourceTerm: concept.sourceTerm,
@@ -77,10 +70,9 @@ export function detectPreAcceptanceWarnings(
       (r) => r.status === "preferred" || r.status === "admitted",
     )
     if (approved.length > 0) {
-      const anyApprovedPresent = approved.some((r) => {
-        const n = normalize(r.rendering)
-        return n.length > 0 && normCompletion.includes(n)
-      })
+      const anyApprovedPresent = approved.some(
+        (r) => r.rendering.trim().length > 0 && matchesTerm(completionText, r.rendering),
+      )
       if (!anyApprovedPresent) {
         warnings.push({
           conceptId: concept.id,

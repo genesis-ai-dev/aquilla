@@ -21,6 +21,7 @@ import type { TranslatedEditorCommit } from "@/components/TranslatedEditor"
 import { emitTargetCellCommit } from "@/lib/sync/events-emit"
 import { EquivalentsPanel } from "@/components/EquivalentsPanel"
 import { predictEquivalents } from "@/lib/terminology/equivalents"
+import { matchesTerm } from "@/lib/terminology/match"
 
 // ─── Status label helpers (mirror TerminologyPage) ───────────────────────────
 
@@ -51,25 +52,18 @@ function RenderingChip({ rendering }: { rendering: TermRendering }) {
 
 type Verdict = "enforced" | "infringed" | "na"
 
-function escapeRegex(s: string): string {
-  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
-}
-
-function termRegex(term: string): RegExp {
-  return new RegExp(`\\b${escapeRegex(term)}\\b`, "i")
-}
-
 function deriveVerdict(concept: Concept, original: string, translated: string): Verdict {
-  if (!termRegex(concept.sourceTerm).test(original)) return "na"
+  // Wildcard-aware match (grac* matches grace/graced/gracia) via shared matcher.
+  if (!matchesTerm(original, concept.sourceTerm)) return "na"
 
   const approved = concept.renderings.filter(
     (r) => r.status === "preferred" || r.status === "admitted",
   )
   const forbidden = concept.renderings.filter((r) => r.status === "forbidden")
 
-  if (forbidden.some((f) => termRegex(f.rendering).test(translated))) return "infringed"
+  if (forbidden.some((f) => matchesTerm(translated, f.rendering))) return "infringed"
   if (approved.length > 0) {
-    return approved.some((a) => termRegex(a.rendering).test(translated))
+    return approved.some((a) => matchesTerm(translated, a.rendering))
       ? "enforced"
       : "infringed"
   }
@@ -255,7 +249,7 @@ export function TerminologyTermDetail({
   // Per-cell translated values — optimistic updates are already reflected via
   // the parent's useCells applyOptimisticTargetEdit before this renders.
   const occurrences = useMemo(
-    () => cells.filter((c) => termRegex(concept.sourceTerm).test(c.original)),
+    () => cells.filter((c) => matchesTerm(c.original, concept.sourceTerm)),
     [cells, concept.sourceTerm],
   )
 

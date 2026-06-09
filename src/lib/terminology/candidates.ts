@@ -21,6 +21,7 @@
  */
 
 import type { Concept } from "./types"
+import { matchesTerm } from "./match"
 
 export interface CandidateTerm {
   /** The surface term (normalized, space-joined tokens). */
@@ -63,11 +64,6 @@ export interface ExtractCandidatesOptions {
 const MAX_NGRAM = 5
 const DEFAULT_MIN_FREQ = 2
 const DEFAULT_MAX_RESULTS = 100
-
-/** Normalize a term for comparison / matching: trim + lowercase. */
-function normalizeTerm(s: string): string {
-  return s.trim().toLowerCase()
-}
 
 /**
  * Tokenize a string into lowercase word tokens. Unicode-aware: keeps letters
@@ -264,9 +260,17 @@ export function extractCandidates(
   const minTermFreq = opts.minTermFreq ?? DEFAULT_MIN_FREQ
   const maxResults = opts.maxResults ?? DEFAULT_MAX_RESULTS
 
-  const managedSet = new Set<string>(
-    (opts.managed ?? []).map((c) => normalizeTerm(c.sourceTerm)),
-  )
+  // Managed source terms used to flag candidates as already-managed. We keep
+  // the raw term strings (not normalized) so wildcard markers (`grac*`) survive
+  // into the matcher. A candidate is managed if ANY managed term matches it via
+  // the shared wildcard-aware matcher — so `grac*` flags the candidate `grace`.
+  // For non-wildcard terms the matcher is exact whole-word, so this is
+  // backward-compatible with the prior exact-equality behaviour.
+  const managedTerms = (opts.managed ?? [])
+    .map((c) => c.sourceTerm)
+    .filter((t) => t.trim().length > 0)
+  const isManagedTerm = (candidate: string): boolean =>
+    managedTerms.some((m) => matchesTerm(candidate, m))
 
   const boundedCorpus =
     opts.maxCorpusStrings != null && corpus.length > opts.maxCorpusStrings
@@ -369,7 +373,7 @@ export function extractCandidates(
       cValue: round(cValues.get(k)!),
       ncValue: round(ncValues.get(k)!),
       g2: round(g2ByKey.get(k)!),
-      isManaged: managedSet.has(k),
+      isManaged: isManagedTerm(k),
     }
   })
 

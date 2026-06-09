@@ -281,9 +281,12 @@ function ImportLanding({ onSelect }: ImportLandingProps) {
         onClick={() => onSelect("ebible")}
         className="rounded-lg border p-4 text-left transition-colors hover:border-primary hover:bg-primary/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
       >
-        <p className="text-sm font-medium">eBible Corpus</p>
+        <p className="text-sm font-medium">
+          eBible Corpus
+          <span className="ml-1.5 text-xs font-normal text-muted-foreground">(public Bible library)</span>
+        </p>
         <p className="mt-1 text-xs text-muted-foreground">
-          Import a redistributable Bible translation directly from the BibleNLP/ebible corpus.
+          A public library of openly-licensed Bible translations from around the world. Pick any redistributable version and import it directly — no file download needed.
         </p>
       </button>
 
@@ -498,9 +501,13 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, getT
               />
             </Button>
           </div>
-          <p className="mt-2 text-xs text-muted-foreground">
-            Files: MD, DOCX, PPTX, TXT, VTT, SRT, USFM, XLIFF / XLF, TMX, CSV, TSV · or a Paratext project (.zip or folder)
-          </p>
+          <div className="mt-3 space-y-1 text-xs text-muted-foreground">
+            <p><span className="font-medium text-foreground/70">Scripture</span> — USFM, USX, SFM</p>
+            <p><span className="font-medium text-foreground/70">Translation</span> — XLIFF/XLF, TMX, CSV/TSV</p>
+            <p><span className="font-medium text-foreground/70">Documents</span> — DOCX, TXT, MD, PPTX</p>
+            <p><span className="font-medium text-foreground/70">Subtitles</span> — VTT, SRT</p>
+            <p><span className="font-medium text-foreground/70">Paratext project</span> — .zip or folder</p>
+          </div>
         </>
       )}
       {error && <p className="mt-2 text-sm text-destructive">{error}</p>}

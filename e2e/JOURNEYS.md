@@ -13,11 +13,11 @@
 | Projects    | Open / delete / restore from trash                   | `e2e/specs/projects/project-trash.smoke.spec.ts` + `dashboard-trash-expand-restore.smoke.spec.ts` | ✅ |
 | Orgs        | Create org                                           | `e2e/specs/orgs/org-switcher-create.smoke.spec.ts`            |   ✅   |
 | Orgs        | Add member to org, member sees it                    | `e2e/specs/orgs/members.smoke.spec.ts` (API setup + UI verify) |   ✅   |
-| Orgs        | Invite member → member sees all org projects         | `e2e/specs/orgs/org-access-lifecycle.spec.ts` (test 1)        |        |
-| Orgs        | Create team → attach project/user → group path fires | `e2e/specs/orgs/org-access-lifecycle.spec.ts` (test 2)        |        |
-| Orgs        | Revoke org membership → project disappears           | `e2e/specs/orgs/org-access-lifecycle.spec.ts` (test 3)        |        |
-| Orgs        | Full revoke (all paths) → 403 on project endpoint    | `e2e/specs/orgs/org-access-lifecycle.spec.ts` (test 4)        |        |
-| Orgs        | Detach group project → role falls back to org baseline | `e2e/specs/orgs/org-access-lifecycle.spec.ts` (test 5)      |        |
+| Orgs        | Invite member → member sees all org projects         | `e2e/specs/orgs/org-access-lifecycle.spec.ts` (test 1)        |   ✅   |
+| Orgs        | Create team → attach project/user → group path fires | `e2e/specs/orgs/org-access-lifecycle.spec.ts` (test 2)        |   ✅   |
+| Orgs        | Revoke org membership → project disappears           | `e2e/specs/orgs/org-access-lifecycle.spec.ts` (test 3)        |   ✅   |
+| Orgs        | Full revoke (all paths) → 403 on project endpoint    | `e2e/specs/orgs/org-access-lifecycle.spec.ts` (test 4)        |   ✅   |
+| Orgs        | Detach group project → role falls back to org baseline | `e2e/specs/orgs/org-access-lifecycle.spec.ts` (test 5)      |   ✅   |
 | Orgs        | Remove member, change role                           | `e2e/specs/orgs/remove-member-dialog.smoke.spec.ts` + `projects/share-panel-role-change.smoke.spec.ts` | ✅ |
 | Orgs        | Send & accept invite                                 | `e2e/specs/orgs/invite-to-projects.smoke.spec.ts` + `pending-invite-revoke.smoke.spec.ts` | ✅ |
 | Editor      | Import markdown, edit cell, persists across reload   | `e2e/specs/editor/import-and-edit.smoke.spec.ts`              |   ✅   |
@@ -42,6 +42,7 @@
 | Audio/Video | Subtitles flow                                       | _gap — Plan 2_                                                |        |
 | Settings    | Settings sync between two browsers                   | _gap — Plan 2_                                                |        |
 | Settings    | Settings persist across reload                       | `e2e/specs/orgs/preferences-persist-reload.smoke.spec.ts`    |   ✅   |
+| Settings    | Preferences page Privacy section renders             | `e2e/specs/orgs/preferences.smoke.spec.ts`                    |   ✅   |
 | Export      | Export to each supported format                      | `e2e/specs/editor/export.smoke.spec.ts` + `export-format-switch.smoke.spec.ts` (partial — all format radio buttons covered) | ✅ |
 | Editor      | Formatting bubble menu (bold/italic/underline/strikethrough/code) | `e2e/specs/editor/formatting-bubble-menu.smoke.spec.ts` + `formatting-inline-code-toggle.smoke.spec.ts` + `formatting-underline-strikethrough.smoke.spec.ts` | ✅ |
 | Editor      | Formatting loss warning when source has bold/italic   | `e2e/specs/editor/formatting-loss-warning.smoke.spec.ts`      |   ✅   |
@@ -56,7 +57,7 @@
 | Projects    | Status chip shows Overdue/Due-soon by deadline        | `e2e/specs/projects/project-status-chip.smoke.spec.ts`        |   ✅   |
 | Projects    | Living memory back navigation                         | `e2e/specs/projects/living-memory-back-nav.smoke.spec.ts`     |   ✅   |
 | Orgs        | Members matrix sole-owner concentration risk          | `e2e/specs/orgs/members-matrix-sole-owner.smoke.spec.ts`      |   ✅   |
-| Orgs        | MembersPage Roster/Matrix view toggle switches views  | `e2e/specs/orgs/members-page-roster-matrix-toggle.smoke.spec.ts` | ✅ |
+| Orgs        | MembersPage Roster/Matrix view toggle switches views  | `e2e/specs/projects/members-matrix.smoke.spec.ts`             |   ✅   |
 | Orgs        | Members matrix access-help tooltip                    | `e2e/specs/orgs/members-matrix-access-help.smoke.spec.ts`     |   ✅   |
 | Orgs        | Team detail access-level help indicator               | `e2e/specs/orgs/team-detail-access-level-help.smoke.spec.ts`  |   ✅   |
 | Collab      | BT edit locked for reviewer role                      | `e2e/specs/collab/bt-edit-locked-for-reviewer.smoke.spec.ts`  |   ✅   |
@@ -85,6 +86,7 @@
 | Editor      | RTL hint "Adjust" button opens view settings menu and dismisses hint | `e2e/specs/editor/rtl-hint-adjust-opens-settings.smoke.spec.ts` | ✅ |
 | Editor      | Workspace "Settings" dropdown item navigates to project settings     | `e2e/specs/editor/workspace-settings-navigate.smoke.spec.ts`   |   ✅   |
 | Projects    | Settings nav section link click scrolls to anchor      | `e2e/specs/projects/project-settings-nav-link-click.smoke.spec.ts` | ✅ |
+| Editor      | Next unfinished navigation basic flow                 | `e2e/specs/editor/next-unfinished.smoke.spec.ts`              |   ✅   |
 | Editor      | "Next unfinished" button enabled after import; navigates without error | `e2e/specs/editor/next-unfinished-button.smoke.spec.ts` | ✅ |
 | Editor      | Cmd+. keyboard shortcut jumps to next unfinished cell | `e2e/specs/editor/next-unfinished-keyboard-shortcut.smoke.spec.ts` | ✅ |
 | Editor      | EditorModeToggle Text↔Audio lens switch (aria-pressed) | `e2e/specs/editor/editor-mode-toggle.smoke.spec.ts`     |   ✅   |
@@ -92,6 +94,7 @@
 | Editor      | Escape key clears cell selection (no editable focused) | `e2e/specs/editor/selection-clear-escape.smoke.spec.ts`           |   ✅   |
 | Comments    | Submit comment via Ctrl+Enter keyboard shortcut        | `e2e/specs/editor/comment-submit-keyboard.smoke.spec.ts`          |   ✅   |
 | Terminology | Violations inbox: expand concept row → see cell violations | `e2e/specs/projects/terminology-violations-expand.smoke.spec.ts` | ✅ |
+| Comments    | CommentsPage route renders empty state                | `e2e/specs/editor/comments-page.smoke.spec.ts`                |   ✅   |
 | Comments    | CommentsPage Refresh button reloads data              | `e2e/specs/editor/comments-page-refresh.smoke.spec.ts`        |   ✅   |
 | Comments    | CommentsPage "Back to project" returns to workspace   | `e2e/specs/editor/comments-page-back-nav.smoke.spec.ts`       |   ✅   |
 | Auth        | Account switcher renders signed-in accounts           | `e2e/specs/orgs/account-switcher.smoke.spec.ts`               |   ✅   |
@@ -107,6 +110,8 @@
 | Projects    | Project overview assign work form                     | `e2e/specs/projects/project-overview-assign-work.smoke.spec.ts` + `project-overview-assign-work-submit.smoke.spec.ts` | ✅ |
 | Projects    | Project overview overflow menu (archive/share/etc.)   | `e2e/specs/projects/project-overview-overflow-menu.smoke.spec.ts` |   ✅   |
 | Projects    | Projects list page renders project cards              | `e2e/specs/projects/projects-list-page.smoke.spec.ts`         |   ✅   |
+| Projects    | Project overview route renders name + Open project    | `e2e/specs/projects/project-overview.smoke.spec.ts`           |   ✅   |
+| Projects    | Project settings save flow persists name change       | `e2e/specs/projects/project-settings.smoke.spec.ts`           |   ✅   |
 | Projects    | Project card role badge shows user's role             | `e2e/specs/projects/project-card-role-badge.smoke.spec.ts`    |   ✅   |
 | Projects    | Org home project name filter narrows list             | `e2e/specs/projects/org-home-project-filter.smoke.spec.ts`    |   ✅   |
 | Projects    | Org home status filter (All/Active/Stalled/Overdue)   | `e2e/specs/projects/org-home-status-filter.smoke.spec.ts`     |   ✅   |

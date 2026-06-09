@@ -48,7 +48,10 @@ import { CellAiStatusPopover } from "./CellAiStatusPopover"
 import { CellNumberPill } from "./cell/CellNumberPill"
 import { InterlinearAlignmentPanel } from "./InterlinearAlignmentPanel"
 import { CellVoicePanel } from "./cell/CellVoicePanel"
-import { CellAudioRecordButton } from "./CellAudioRecordButton"
+// CellAudioRecordButton removed from overflow popover (FRO-237): record is now
+// a direct RailButton so no popover detour is needed. Import retained only if
+// another usage exists; remove when confirmed clean.
+// import { CellAudioRecordButton } from "./CellAudioRecordButton"
 import { useMicPermission } from "@/hooks/useMicPermission"
 import { assignedCastVoiceId, findVoice } from "@/lib/audio/voices"
 import { useNavigate } from "react-router-dom"
@@ -2607,11 +2610,25 @@ function EditorRow({
                 onMouseEnter={onDragEnter}
               />
 
-              {/* ⋯ overflow — play/record, TTS, comments, seek-to-cue.
+              {/* FRO-237: Direct mic button on the rail when no audio — one-click
+                  action without needing to open a popover ("just hit the record
+                  mic — quick action"). Replaces the redundant Record item inside
+                  the ⋯ popover. When audio IS present, FRO-236's Play icon on
+                  the overflow button already gives a direct play affordance. */}
+              {!hasAudio && onOpenRecording && editable && (
+                <RailButton
+                  icon={<Mic className="h-3.5 w-3.5" />}
+                  tooltip={micDenied ? "Microphone access blocked — click cell for help" : "Record audio"}
+                  onClick={() => !micDenied && onOpenRecording(cell.id)}
+                  disabled={micDenied || !editable}
+                />
+              )}
+
+              {/* ⋯ overflow — play/record (when audio), TTS, comments, seek-to-cue.
                   FRO-236: when there's recorded audio, show a Play icon with
                   an emerald dot so the audio affordance is visible at-a-glance
                   without opening the popover. */}
-              {(hasAudio || onOpenRecording || (cell.translated.trim().length > 0) || onOpenComments || onSeekToCue) && (
+              {(hasAudio || (cell.translated.trim().length > 0) || onOpenComments || onSeekToCue) && (
                 <Popover>
                   <PopoverTrigger
                     render={
@@ -2653,8 +2670,10 @@ function EditorRow({
                   />
                   <PopoverContent side="bottom" align="end" className="w-48 rounded-xl p-1.5">
                     <div className="flex flex-col gap-0.5">
-                      {/* Play / Record */}
-                      {hasAudio ? (
+                      {/* Play — only shown when audio exists (FRO-237: record
+                          moved to a direct rail button so the popover stays
+                          uncluttered). */}
+                      {hasAudio && (
                         <button
                           type="button"
                           onClick={() => {
@@ -2663,6 +2682,7 @@ function EditorRow({
                             else void audioController.play()
                           }}
                           disabled={audioController.state === "loading"}
+                          aria-label={audioController.isPlaying ? "Pause audio" : "Play audio"}
                           className={cn(
                             "flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-xs",
                             "hover:bg-muted/60 disabled:cursor-not-allowed disabled:opacity-40",
@@ -2676,16 +2696,7 @@ function EditorRow({
                           )}
                           {audioController.isPlaying ? "Pause" : "Play audio"}
                         </button>
-                      ) : onOpenRecording ? (
-                        <div className="flex items-center gap-2 rounded-lg px-2 py-0.5">
-                          <CellAudioRecordButton
-                            onOpenRecording={() => onOpenRecording(cell.id)}
-                            disabled={!editable || !onOpenRecording}
-                            micDenied={micDenied}
-                          />
-                          <span className="text-xs text-foreground">Record audio</span>
-                        </div>
-                      ) : null}
+                      )}
 
                       {/* TTS */}
                       {cell.translated.trim().length > 0 && (

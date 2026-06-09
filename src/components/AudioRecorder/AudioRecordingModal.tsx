@@ -303,12 +303,20 @@ export function AudioRecordingModal({
 
   return (
     <Dialog open={open} onOpenChange={(next) => { if (!next) onClose() }}>
-      <DialogContent className="max-w-3xl gap-0 p-0" showCloseButton={false}>
+      {/* FRO-230: max-h constrains the dialog to the viewport (with 4vh margin)
+          so it never clips at 100% zoom on 1280×800 or smaller viewports.
+          The dialog is split into a fixed header, a scrollable stage+takes
+          middle, and a fixed footer so navigation buttons stay reachable. */}
+      <DialogContent
+        className="flex max-w-3xl flex-col gap-0 p-0"
+        style={{ maxHeight: "min(92vh, 800px)" }}
+        showCloseButton={false}
+      >
         <DialogTitle className="sr-only">
           Record audio — {activeCell.cellLabel ?? `Cell ${activeIndex + 1}`}
         </DialogTitle>
-        {/* Header: cell context */}
-        <div className="flex items-start justify-between gap-4 border-b px-6 pt-5 pb-4">
+        {/* Header: cell context — fixed, never scrolls */}
+        <div className="flex shrink-0 items-start justify-between gap-4 border-b px-6 pt-5 pb-4">
           <div className="min-w-0 flex-1 space-y-1">
             <div className="flex items-center gap-2 text-xs text-muted-foreground">
               <span className="font-medium text-foreground/80">
@@ -356,8 +364,12 @@ export function AudioRecordingModal({
           </div>
         </div>
 
+        {/* Scrollable middle — stage + takes. Overflows internally so header
+            and footer stay anchored at 100% zoom on compact viewports. */}
+        <div className="min-h-0 flex-1 overflow-y-auto">
+
         {/* Stage — changes with phase */}
-        <div className="relative flex min-h-[240px] flex-col items-center justify-center gap-4 p-6">
+        <div className="relative flex min-h-[200px] flex-col items-center justify-center gap-4 p-6">
           {displayPhase === "counting" && countdown.count !== null && (
             <div className="flex flex-col items-center gap-3">
               <div
@@ -459,8 +471,10 @@ export function AudioRecordingModal({
           />
         )}
 
-        {/* Footer: nav + primary action */}
-        <div className="flex items-center gap-2 border-t bg-muted/30 px-5 py-3">
+        </div>{/* end scrollable middle */}
+
+        {/* Footer: nav + primary action — fixed, never scrolls */}
+        <div className="flex shrink-0 items-center gap-2 border-t bg-muted/30 px-5 py-3">
           <Button
             variant="ghost"
             size="sm"

@@ -1,13 +1,13 @@
 import { describe, it, expect } from "vitest"
 import { handleSearchPassagesRequest } from "../events/search-route"
-import { type CellRow, type CellsFtsRow } from "./helpers/d1-fake"
+import { type CellRow, type CellsFtsRow } from "./helpers/in-memory-db"
 import { makeTestDb } from "./helpers/pg-test-db"
 import { makeTestToken } from "./helpers/auth"
 
 const SECRET = "passages-secret"
 
-function envWith(db: D1Database) {
-  return { AQUILLA_DB: db, SYNC_SECRET_KEY: SECRET }
+function envWith(db: AquillaDb) {
+  return { AQUILLA_PG: db, SYNC_SECRET_KEY: SECRET }
 }
 
 function makeCell(over: Partial<CellRow> & Pick<CellRow, "cell_id" | "side" | "value">): CellRow {

@@ -88,7 +88,7 @@ sourceLinking.post(
     }
 
     try {
-      await c.env.AQUILLA_DB.prepare(
+      await c.env.AQUILLA_PG.prepare(
         `UPDATE projects
             SET source_project_id = ?,
                 updated_at        = CURRENT_TIMESTAMP
@@ -149,7 +149,7 @@ sourceLinking.post("/:projectId/detach-source", authMiddleware, async (c) => {
   const upstreamId = project.source_project_id
 
   try {
-    await c.env.AQUILLA_DB.prepare(
+    await c.env.AQUILLA_PG.prepare(
       `UPDATE projects
           SET source_project_id = NULL,
               updated_at        = CURRENT_TIMESTAMP
@@ -234,7 +234,7 @@ sourceLinking.delete("/:projectId", authMiddleware, async (c) => {
   }
 
   try {
-    await c.env.AQUILLA_DB.prepare("DELETE FROM projects WHERE id = ?")
+    await c.env.AQUILLA_PG.prepare("DELETE FROM projects WHERE id = ?")
       .bind(projectId)
       .run()
   } catch (err) {

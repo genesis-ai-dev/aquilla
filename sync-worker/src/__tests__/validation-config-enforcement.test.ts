@@ -44,11 +44,11 @@ async function makeRequest(events: unknown[], token: string): Promise<Request> {
   })
 }
 
-function makeEnv(db: D1Database) {
-  return { AQUILLA_DB: db, SYNC_SECRET_KEY: SECRET }
+function makeEnv(db: AquillaDb) {
+  return { AQUILLA_PG: db, SYNC_SECRET_KEY: SECRET }
 }
 
-async function postEvent(db: D1Database, event: RawEvent, token: string): Promise<void> {
+async function postEvent(db: AquillaDb, event: RawEvent, token: string): Promise<void> {
   const res = await handleEventsWriteRequest(await makeRequest([event], token), makeEnv(db))
   const body = (await res!.json()) as any
   expect(
@@ -59,7 +59,7 @@ async function postEvent(db: D1Database, event: RawEvent, token: string): Promis
 }
 
 /** Seed a file and a target cell authored by `author` (default 'alice'). */
-async function seedFileAndCell(db: D1Database, author = 'alice'): Promise<void> {
+async function seedFileAndCell(db: AquillaDb, author = 'alice'): Promise<void> {
   const ownerToken = await makeToken(700, 'owner')
   const fileEvt: RawEvent<'file.create'> = {
     id: 'evt-file-v-seed',
@@ -93,7 +93,7 @@ async function seedFileAndCell(db: D1Database, author = 'alice'): Promise<void> 
 
 /** Write project settings JSON directly to the project_settings table. */
 async function setProjectSettings(
-  db: D1Database,
+  db: AquillaDb,
   settings: Record<string, unknown>,
 ): Promise<void> {
   await db

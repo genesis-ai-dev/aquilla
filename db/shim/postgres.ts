@@ -1,28 +1,62 @@
-// D1-compatible shim over Postgres, for the D1→Neon migration.
+// The Aquilla database handle: Postgres (Neon), presented through a small
+// statement/batch API that the workers' ~80 routes use as `env.AQUILLA_PG`.
 //
-// Both workers speak the D1 binding API (`prepare().bind().run()/all()/first()`,
-// `batch()`, `exec()`). This shim presents the same surface backed by Postgres,
-// so the ~83 files that use `env.AQUILLA_DB` keep working unchanged. Inject it
-// where the D1 binding is read and cast to `D1Database`.
+// Routes speak a compact SQL surface (`prepare().bind().run()/all()/first()`,
+// `batch()`, `exec()`); this module implements that surface (`AquillaDb`)
+// directly over Postgres, so a route never touches a raw driver.
 //
-// The shim is executor-agnostic: prod uses postgres.js over Hyperdrive
-// (`makeD1Postgres`), tests use PGlite (real Postgres in WASM) via a PGlite
-// `PgExecutor` adapter — so tests exercise the exact same code + real dialect.
+// Executor-agnostic: prod uses postgres.js over Hyperdrive (`makePostgres`),
+// tests use PGlite (real Postgres in WASM) via a `PgExecutor` adapter — so
+// tests exercise the exact same code + real dialect.
 //
-// Two things differ between D1 and a generic PG driver and MUST be handled:
-//   1. placeholders — D1 `?` → Postgres `$1,$2,…`  (translated below)
-//   2. return types — D1 returned BIGINT as JS number and DATETIME as a string;
-//      the postgres.js executor overrides parsers so int8 → Number and
-//      timestamp/timestamptz → string, matching D1.
+// Two dialect details handled here:
+//   1. placeholders — `?` → Postgres `$1,$2,…`  (translated below)
+//   2. return types — BIGINT/NUMERIC come back as JS numbers and
+//      TIMESTAMP/TIMESTAMPTZ as strings (the postgres.js executor overrides
+//      parsers), so callers get numbers and ISO-ish strings, not bigints.
 //
-// NOT handled here (fixed in the SQL itself — Stage B dialect sweep):
-//   INSERT OR IGNORE → ON CONFLICT DO NOTHING, FTS `MATCH` → `@@ tsquery`, etc.
+// NOT handled here (fixed in the SQL itself): `INSERT OR IGNORE` →
+// `ON CONFLICT DO NOTHING`, FTS `MATCH` → `@@ tsquery`, etc.
 //
 // Caveat: `?`→`$n` is textual; it assumes `?` appears only as a placeholder
 // (true for this codebase — string literals use single quotes).
 import postgres from "postgres"
 
-/** Minimal neutral executor the shim runs against (postgres.js or PGlite). */
+/** Result metadata returned alongside every statement's rows. */
+export interface AquillaMeta {
+  changes: number
+  rows_written: number
+  rows_read: number
+  last_row_id: number
+  duration: number
+  served_by: string
+}
+
+/** Shape returned by `.all()` / `.run()` / each `batch()` entry. */
+export interface AquillaResult<T = Record<string, unknown>> {
+  results: T[]
+  success: true
+  meta: AquillaMeta
+}
+
+/** A bound (or bindable) SQL statement. */
+export interface AquillaStatement {
+  bind(...args: unknown[]): AquillaStatement
+  all<T = Record<string, unknown>>(): Promise<AquillaResult<T>>
+  run<T = Record<string, unknown>>(): Promise<AquillaResult<T>>
+  first<T = unknown>(colName?: string): Promise<T | null>
+  raw<T = unknown[]>(): Promise<T[]>
+}
+
+/** The database handle the workers inject as `env.AQUILLA_PG`. */
+export interface AquillaDb {
+  prepare(query: string): AquillaStatement
+  batch<T = Record<string, unknown>>(stmts: AquillaStatement[]): Promise<AquillaResult<T>[]>
+  exec(query: string): Promise<{ count: number; duration: number }>
+  close(): Promise<void>
+}
+
+/** Minimal neutral executor the handle runs against (postgres.js or PGlite). */
 export interface PgExecutor {
   run(sql: string, params: unknown[]): Promise<{ rows: Record<string, unknown>[]; rowCount: number }>
   begin<T>(fn: (tx: PgExecutor) => Promise<T>): Promise<T>
@@ -30,17 +64,17 @@ export interface PgExecutor {
   close?(): Promise<void>
 }
 
-/** D1 `?` placeholders → Postgres `$1,$2,…` (positional, in order). */
+/** `?` placeholders → Postgres `$1,$2,…` (positional, in order). */
 function toPg(query: string): string {
   let i = 0
   return query.replace(/\?/g, () => `$${++i}`)
 }
 
-function meta(rowCount: number, rowsRead: number) {
+function meta(rowCount: number, rowsRead: number): AquillaMeta {
   return { changes: rowCount, rows_written: rowCount, rows_read: rowsRead, last_row_id: 0, duration: 0, served_by: "shim" }
 }
 
-class PgStatement {
+class PgStatement implements AquillaStatement {
   private exec: PgExecutor
   private query: string
   private args: unknown[]
@@ -55,13 +89,13 @@ class PgStatement {
     return new PgStatement(this.exec, this.query, args)
   }
 
-  async all<T = Record<string, unknown>>() {
+  async all<T = Record<string, unknown>>(): Promise<AquillaResult<T>> {
     const { rows, rowCount } = await this.exec.run(toPg(this.query), this.args)
     return { results: rows as unknown as T[], success: true as const, meta: meta(rowCount, rows.length) }
   }
 
-  // D1 `.run()` mirrors `.all()` shape (results may be empty for writes).
-  async run<T = Record<string, unknown>>() {
+  // `.run()` mirrors `.all()` shape (results may be empty for writes).
+  async run<T = Record<string, unknown>>(): Promise<AquillaResult<T>> {
     return this.all<T>()
   }
 
@@ -82,7 +116,7 @@ class PgStatement {
   }
 }
 
-export class D1Postgres {
+export class PostgresDb implements AquillaDb {
   private executor: PgExecutor
 
   constructor(executor: PgExecutor) {
@@ -93,16 +127,16 @@ export class D1Postgres {
     return new PgStatement(this.executor, query)
   }
 
-  /** D1 batch = one atomic transaction; returns one result per statement. */
-  async batch<T = Record<string, unknown>>(stmts: PgStatement[]) {
+  /** One batch = one atomic transaction; returns one result per statement. */
+  async batch<T = Record<string, unknown>>(stmts: AquillaStatement[]): Promise<AquillaResult<T>[]> {
     return this.executor.begin(async (tx) => {
-      const out: Array<{ results: T[]; success: true; meta: ReturnType<typeof meta> }> = []
-      for (const s of stmts) out.push(await s._on(tx).all<T>())
+      const out: AquillaResult<T>[] = []
+      for (const s of stmts) out.push(await (s as PgStatement)._on(tx).all<T>())
       return out
     })
   }
 
-  /** D1 exec = run statements with no bound params. */
+  /** Run statements with no bound params. */
   async exec(query: string) {
     const { rowCount } = await this.executor.run(query, [])
     return { count: rowCount, duration: 0 }
@@ -127,8 +161,8 @@ function fromPostgresJs(sql: postgres.Sql): PgExecutor {
   return wrap(sql)
 }
 
-/** Build a D1-compatible handle from a Postgres connection string (prod). */
-export function makeD1Postgres(connectionString: string, max = 5): D1Postgres {
+/** Build an Aquilla database handle from a Postgres connection string (prod). */
+export function makePostgres(connectionString: string, max = 5): PostgresDb {
   const sql = postgres(connectionString, {
     max,
     fetch_types: false, // recommended through Hyperdrive's pooling
@@ -141,5 +175,5 @@ export function makeD1Postgres(connectionString: string, max = 5): D1Postgres {
       timestamp: { to: 1114, from: [1114, 1184], parse: (x: string) => x, serialize: (x: string) => x },
     },
   })
-  return new D1Postgres(fromPostgresJs(sql))
+  return new PostgresDb(fromPostgresJs(sql))
 }

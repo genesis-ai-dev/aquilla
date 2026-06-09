@@ -1,12 +1,12 @@
 import { env } from "cloudflare:test"
 import { describe, it, expect } from "vitest"
 import app from "../index"
-import { seedUser, jwtFor, authHeader } from "./helpers/d1"
+import { seedUser, jwtFor, authHeader } from "./helpers/db"
 
 describe("POST /api/v2/projects/:id/invites", () => {
   it("creates an invite for the project creator and caps role at contributor", async () => {
     await seedUser(1, "alice")
-    await env.AQUILLA_DB.prepare(
+    await env.AQUILLA_PG.prepare(
       "INSERT INTO projects (id, name, org_id, created_by) VALUES (?, ?, NULL, ?)",
     )
       .bind("proj-1", "Test", 1)
@@ -30,7 +30,7 @@ describe("POST /api/v2/projects/:id/invites", () => {
     expect(body.projectId).toBe("proj-1")
     expect(body.role).toBe(400)
     expect(body.token.length).toBeGreaterThan(8)
-    const invites = await env.AQUILLA_DB.prepare(
+    const invites = await env.AQUILLA_PG.prepare(
       "SELECT token FROM project_invites WHERE project_id = 'proj-1'",
     ).all()
     expect(invites.results).toHaveLength(1)
@@ -39,12 +39,12 @@ describe("POST /api/v2/projects/:id/invites", () => {
   it("rejects users without project_lead+ role with 403", async () => {
     await seedUser(2, "bob")
     await seedUser(99, "creator")
-    await env.AQUILLA_DB.prepare(
+    await env.AQUILLA_PG.prepare(
       "INSERT INTO projects (id, name, org_id, created_by) VALUES (?, ?, NULL, 99)",
     )
       .bind("proj-1", "Test")
       .run()
-    await env.AQUILLA_DB.prepare(
+    await env.AQUILLA_PG.prepare(
       "INSERT INTO project_members (project_id, user_id, role_level, granted_by) VALUES (?, ?, ?, 99)",
     )
       .bind("proj-1", 2, 400)
@@ -80,12 +80,12 @@ describe("POST /api/v2/projects/accept-invite", () => {
   it("adds the caller to project_members and stamps the invite", async () => {
     await seedUser(1, "alice")
     await seedUser(2, "bob")
-    await env.AQUILLA_DB.prepare(
+    await env.AQUILLA_PG.prepare(
       "INSERT INTO projects (id, name, org_id, created_by) VALUES (?, ?, NULL, 1)",
     )
       .bind("proj-1", "Test")
       .run()
-    await env.AQUILLA_DB.prepare(
+    await env.AQUILLA_PG.prepare(
       "INSERT INTO project_invites (token, project_id, role_level, created_by, expires_at) VALUES (?, ?, ?, ?, ?)",
     )
       .bind(
@@ -109,7 +109,7 @@ describe("POST /api/v2/projects/accept-invite", () => {
     const body = (await res.json()) as { projectId: string; role: number }
     expect(body).toEqual({ projectId: "proj-1", role: 400 })
 
-    const members = await env.AQUILLA_DB.prepare(
+    const members = await env.AQUILLA_PG.prepare(
       "SELECT project_id, user_id, role_level FROM project_members WHERE project_id = 'proj-1'",
     ).all<{ project_id: string; user_id: number; role_level: number }>()
     expect(members.results).toHaveLength(1)
@@ -118,7 +118,7 @@ describe("POST /api/v2/projects/accept-invite", () => {
       user_id: 2,
       role_level: 400,
     })
-    const invite = await env.AQUILLA_DB.prepare(
+    const invite = await env.AQUILLA_PG.prepare(
       "SELECT used_by, used_at FROM project_invites WHERE token = 'share-token-abc'",
     ).first<{ used_by: number | null; used_at: string | null }>()
     expect(invite?.used_by).toBe(2)
@@ -128,12 +128,12 @@ describe("POST /api/v2/projects/accept-invite", () => {
   it("rejects expired invites with 410", async () => {
     await seedUser(1, "alice")
     await seedUser(2, "bob")
-    await env.AQUILLA_DB.prepare(
+    await env.AQUILLA_PG.prepare(
       "INSERT INTO projects (id, name, org_id, created_by) VALUES (?, ?, NULL, 1)",
     )
       .bind("proj-1", "Test")
       .run()
-    await env.AQUILLA_DB.prepare(
+    await env.AQUILLA_PG.prepare(
       "INSERT INTO project_invites (token, project_id, role_level, created_by, expires_at) VALUES (?, ?, ?, ?, ?)",
     )
       .bind(
@@ -173,17 +173,17 @@ describe("POST /api/v2/projects/accept-invite", () => {
   it("doesn't demote a maintainer who redeems a contributor invite", async () => {
     await seedUser(1, "alice")
     await seedUser(2, "bob")
-    await env.AQUILLA_DB.prepare(
+    await env.AQUILLA_PG.prepare(
       "INSERT INTO projects (id, name, org_id, created_by) VALUES (?, ?, NULL, 1)",
     )
       .bind("proj-1", "Test")
       .run()
-    await env.AQUILLA_DB.prepare(
+    await env.AQUILLA_PG.prepare(
       "INSERT INTO project_members (project_id, user_id, role_level, granted_by) VALUES (?, ?, ?, 1)",
     )
       .bind("proj-1", 2, 600)
       .run()
-    await env.AQUILLA_DB.prepare(
+    await env.AQUILLA_PG.prepare(
       "INSERT INTO project_invites (token, project_id, role_level, created_by, expires_at) VALUES (?, ?, ?, ?, ?)",
     )
       .bind(
@@ -212,12 +212,12 @@ describe("POST /api/v2/projects/accept-invite", () => {
 describe("GET /api/v2/projects/invite-preview/:token", () => {
   it("returns project + role metadata for a valid token (no auth)", async () => {
     await seedUser(1, "creator")
-    await env.AQUILLA_DB.prepare(
+    await env.AQUILLA_PG.prepare(
       "INSERT INTO projects (id, name, org_id, created_by) VALUES (?, ?, NULL, 1)",
     )
       .bind("proj-1", "Genesis MVP")
       .run()
-    await env.AQUILLA_DB.prepare(
+    await env.AQUILLA_PG.prepare(
       "INSERT INTO project_invites (token, project_id, role_level, created_by, expires_at) VALUES (?, ?, ?, ?, ?)",
     )
       .bind(

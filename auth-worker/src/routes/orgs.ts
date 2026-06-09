@@ -338,7 +338,7 @@ orgs.post(
       return c.json({ error: "cannot grant role to self" }, 400)
     }
 
-    await c.env.AQUILLA_DB.prepare(
+    await c.env.AQUILLA_PG.prepare(
       `INSERT INTO org_members (org_id, user_id, role_level, granted_by)
        VALUES (?, ?, ?, ?)
        ON CONFLICT(org_id, user_id) DO UPDATE SET
@@ -374,9 +374,9 @@ orgs.delete("/:orgId/members/:userId", async (c) => {
     return c.json({ error: "owner cannot remove self" }, 400)
   }
 
-  await c.env.AQUILLA_DB.batch([
-    c.env.AQUILLA_DB.prepare("DELETE FROM org_members WHERE org_id = ? AND user_id = ?").bind(orgId, targetUserId),
-    c.env.AQUILLA_DB.prepare(
+  await c.env.AQUILLA_PG.batch([
+    c.env.AQUILLA_PG.prepare("DELETE FROM org_members WHERE org_id = ? AND user_id = ?").bind(orgId, targetUserId),
+    c.env.AQUILLA_PG.prepare(
       `DELETE FROM group_members WHERE user_id = ? AND group_id IN (SELECT id FROM groups WHERE org_id = ?)`,
     ).bind(targetUserId, orgId),
   ])

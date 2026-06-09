@@ -13,7 +13,7 @@ import { describe, it, expect } from 'vitest'
 import { handleAssignmentEvent } from '../events/handlers/assignment-events'
 import { authorize } from '../events/authorize'
 import { makeTestToken } from './helpers/auth'
-import { type CellRow } from './helpers/d1-fake'
+import { type CellRow } from './helpers/in-memory-db'
 import { makeTestDb } from './helpers/pg-test-db'
 import type { EventKind, RawEvent } from '../events/types'
 

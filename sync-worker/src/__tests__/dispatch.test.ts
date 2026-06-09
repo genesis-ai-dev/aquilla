@@ -62,7 +62,7 @@ async function makeAuthorized<K extends EventKind>(kind: K, role = 500) {
   return authResult.event
 }
 
-function makeNoOpD1(): D1Database {
+function makeNoOpD1(): AquillaDb {
   function makePrepared(sql: string) {
     let boundArgs: unknown[] = []
     const stmt = {
@@ -71,19 +71,19 @@ function makeNoOpD1(): D1Database {
       async all() { return { results: [], success: true, meta: {} } },
       async run() { return { success: true, meta: {} } },
       raw: async () => [],
-    } as unknown as D1PreparedStatement
+    } as unknown as AquillaStatement
     ;(stmt as any).__sql = sql
     ;(stmt as any).__getArgs = () => boundArgs
     return stmt
   }
   return {
     prepare: makePrepared,
-    async batch(ss: D1PreparedStatement[]) {
+    async batch(ss: AquillaStatement[]) {
       return ss.map(() => ({ success: true, results: [], meta: {} }))
     },
     dump: async () => new ArrayBuffer(0),
     exec: async () => ({ count: 0, duration: 0 }),
-  } as unknown as D1Database
+  } as unknown as AquillaDb
 }
 
 describe('dispatchEvent', () => {

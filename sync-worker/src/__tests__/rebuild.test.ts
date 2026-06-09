@@ -1,12 +1,12 @@
 // Tests for handleRebuildProjectionRequest.
 //
-// Uses the in-memory D1 fake. The rebuild path wipes the projection then
+// Uses the in-memory DB fake. The rebuild path wipes the projection then
 // replays events in server_seq order, applying the AD-2 first-child-of-
 // parent rule for each (project, file, cell, parent_id) slot.
 
 import { describe, it, expect } from 'vitest'
 import { handleRebuildProjectionRequest } from '../events/rebuild'
-import { type EventRow } from './helpers/d1-fake'
+import { type EventRow } from './helpers/in-memory-db'
 import { makeTestDb } from './helpers/pg-test-db'
 
 function makeRequest(
@@ -20,8 +20,8 @@ function makeRequest(
   })
 }
 
-function makeEnv(db?: D1Database, secret: string | undefined = 'shared-secret') {
-  return { AQUILLA_DB: db, SYNC_SECRET_KEY: secret }
+function makeEnv(db?: AquillaDb, secret: string | undefined = 'shared-secret') {
+  return { AQUILLA_PG: db, SYNC_SECRET_KEY: secret }
 }
 
 function evt(overrides: Partial<EventRow> & Pick<EventRow, 'id' | 'kind' | 'payload'>): EventRow {
@@ -59,7 +59,7 @@ describe('handleRebuildProjectionRequest — URL/method/auth', () => {
   it('returns 500 when SYNC_SECRET_KEY is not configured', async () => {
     const res = await handleRebuildProjectionRequest(
       makeRequest('/admin/projects/p1/rebuild-projection', 'POST', ''),
-      { AQUILLA_DB: (await makeTestDb()).db, SYNC_SECRET_KEY: undefined },
+      { AQUILLA_PG: (await makeTestDb()).db, SYNC_SECRET_KEY: undefined },
     ) as Response
     expect(res.status).toBe(500)
   })
@@ -72,7 +72,7 @@ describe('handleRebuildProjectionRequest — URL/method/auth', () => {
     expect(res.status).toBe(401)
   })
 
-  it('returns 500 when AQUILLA_DB binding is not configured', async () => {
+  it('returns 500 when AQUILLA_PG binding is not configured', async () => {
     const res = await handleRebuildProjectionRequest(
       makeRequest('/admin/projects/p1/rebuild-projection'),
       makeEnv(undefined),

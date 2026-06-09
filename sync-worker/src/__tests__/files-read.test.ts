@@ -5,8 +5,8 @@ import { makeTestToken } from "./helpers/auth"
 
 const SECRET = "files-read-secret"
 
-function envWith(db: D1Database) {
-  return { AQUILLA_DB: db, SYNC_SECRET_KEY: SECRET }
+function envWith(db: AquillaDb) {
+  return { AQUILLA_PG: db, SYNC_SECRET_KEY: SECRET }
 }
 
 describe("GET /api/v1/projects/:projectId/files", () => {

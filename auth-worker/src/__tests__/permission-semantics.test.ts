@@ -37,7 +37,7 @@
 import { env } from "cloudflare:test"
 import { describe, it, expect, beforeEach } from "vitest"
 import app from "../index"
-import { seedUser, jwtFor, authHeader } from "./helpers/d1"
+import { seedUser, jwtFor, authHeader } from "./helpers/db"
 
 // ─── Shared seed helpers ───────────────────────────────────────────────────
 
@@ -46,15 +46,15 @@ async function seedBaseOrg() {
   await seedUser(1, "owner")
   await seedUser(2, "viewer_member")
   await seedUser(3, "outsider")
-  await env.AQUILLA_DB.prepare(
+  await env.AQUILLA_PG.prepare(
     "INSERT INTO organizations (id, name, owner_user_id) VALUES (1, 'TestOrg', 1)",
   ).run()
   // owner is org member at 700
-  await env.AQUILLA_DB.prepare(
+  await env.AQUILLA_PG.prepare(
     "INSERT INTO org_members (org_id, user_id, role_level, granted_by) VALUES (1, 1, 700, 1)",
   ).run()
   // project owned by owner in the org
-  await env.AQUILLA_DB.prepare(
+  await env.AQUILLA_PG.prepare(
     "INSERT INTO projects (id, name, org_id, created_by) VALUES ('proj1', 'Alpha', 1, 1)",
   ).run()
 }
@@ -65,7 +65,7 @@ describe("Membership → project visibility (the 'sees all vs. none' question)",
   it("org-viewer (100) sees all org projects via the org path — no team required", async () => {
     await seedBaseOrg()
     // Add viewer_member at org level role=100
-    await env.AQUILLA_DB.prepare(
+    await env.AQUILLA_PG.prepare(
       "INSERT INTO org_members (org_id, user_id, role_level, granted_by) VALUES (1, 2, 100, 1)",
     ).run()
 
@@ -96,7 +96,7 @@ describe("Membership → project visibility (the 'sees all vs. none' question)",
 
   it("org-contributor (400) sees projects and resolves contributor role via org path", async () => {
     await seedBaseOrg()
-    await env.AQUILLA_DB.prepare(
+    await env.AQUILLA_PG.prepare(
       "INSERT INTO org_members (org_id, user_id, role_level, granted_by) VALUES (1, 2, 400, 1)",
     ).run()
 
@@ -115,16 +115,16 @@ describe("Membership → project visibility (the 'sees all vs. none' question)",
 describe("AD-12 max-wins: higher grant wins across all paths", () => {
   it("group path (contributor 400) beats org path (viewer 100)", async () => {
     await seedBaseOrg()
-    await env.AQUILLA_DB.prepare(
+    await env.AQUILLA_PG.prepare(
       "INSERT INTO org_members (org_id, user_id, role_level, granted_by) VALUES (1, 2, 100, 1)",
     ).run()
-    await env.AQUILLA_DB.prepare(
+    await env.AQUILLA_PG.prepare(
       "INSERT INTO groups (id, org_id, name, created_by) VALUES (10, 1, 'Translators', 1)",
     ).run()
-    await env.AQUILLA_DB.prepare(
+    await env.AQUILLA_PG.prepare(
       "INSERT INTO group_members (group_id, user_id) VALUES (10, 2)",
     ).run()
-    await env.AQUILLA_DB.prepare(
+    await env.AQUILLA_PG.prepare(
       "INSERT INTO group_project_grants (group_id, project_id, role_level, granted_by) VALUES (10, 'proj1', 400, 1)",
     ).run()
 
@@ -140,10 +140,10 @@ describe("AD-12 max-wins: higher grant wins across all paths", () => {
 
   it("direct override (reviewer 300) beats org path (viewer 100)", async () => {
     await seedBaseOrg()
-    await env.AQUILLA_DB.prepare(
+    await env.AQUILLA_PG.prepare(
       "INSERT INTO org_members (org_id, user_id, role_level, granted_by) VALUES (1, 2, 100, 1)",
     ).run()
-    await env.AQUILLA_DB.prepare(
+    await env.AQUILLA_PG.prepare(
       "INSERT INTO project_members (project_id, user_id, role_level, granted_by) VALUES ('proj1', 2, 300, 1)",
     ).run()
 
@@ -160,11 +160,11 @@ describe("AD-12 max-wins: higher grant wins across all paths", () => {
   it("adding a lower direct override does NOT demote an existing higher org grant", async () => {
     await seedBaseOrg()
     // Org grant at 400
-    await env.AQUILLA_DB.prepare(
+    await env.AQUILLA_PG.prepare(
       "INSERT INTO org_members (org_id, user_id, role_level, granted_by) VALUES (1, 2, 400, 1)",
     ).run()
     // Direct override at 100 (lower — must not demote)
-    await env.AQUILLA_DB.prepare(
+    await env.AQUILLA_PG.prepare(
       "INSERT INTO project_members (project_id, user_id, role_level, granted_by) VALUES ('proj1', 2, 100, 1)",
     ).run()
 
@@ -184,7 +184,7 @@ describe("AD-12 max-wins: higher grant wins across all paths", () => {
 describe("Revocation: access stops after all grant paths removed", () => {
   it("removing org_members row stops the org path — project 403s if no other path", async () => {
     await seedBaseOrg()
-    await env.AQUILLA_DB.prepare(
+    await env.AQUILLA_PG.prepare(
       "INSERT INTO org_members (org_id, user_id, role_level, granted_by) VALUES (1, 2, 400, 1)",
     ).run()
 
@@ -197,7 +197,7 @@ describe("Revocation: access stops after all grant paths removed", () => {
     expect(before.status).toBe(200)
 
     // Revoke: remove org membership
-    await env.AQUILLA_DB.prepare(
+    await env.AQUILLA_PG.prepare(
       "DELETE FROM org_members WHERE org_id = 1 AND user_id = 2",
     ).run()
 
@@ -212,11 +212,11 @@ describe("Revocation: access stops after all grant paths removed", () => {
 
   it("project list returns empty after org removal (no direct/group grants)", async () => {
     await seedBaseOrg()
-    await env.AQUILLA_DB.prepare(
+    await env.AQUILLA_PG.prepare(
       "INSERT INTO org_members (org_id, user_id, role_level, granted_by) VALUES (1, 2, 100, 1)",
     ).run()
 
-    await env.AQUILLA_DB.prepare(
+    await env.AQUILLA_PG.prepare(
       "DELETE FROM org_members WHERE org_id = 1 AND user_id = 2",
     ).run()
 
@@ -232,16 +232,16 @@ describe("Revocation: access stops after all grant paths removed", () => {
   it("detaching group project stops the group path — project 403s if no other path", async () => {
     await seedBaseOrg()
     // Only path: group grant, no org_members, no direct
-    await env.AQUILLA_DB.prepare(
+    await env.AQUILLA_PG.prepare(
       "INSERT INTO org_members (org_id, user_id, role_level, granted_by) VALUES (1, 2, 100, 1)",
     ).run()
-    await env.AQUILLA_DB.prepare(
+    await env.AQUILLA_PG.prepare(
       "INSERT INTO groups (id, org_id, name, created_by) VALUES (10, 1, 'Translators', 1)",
     ).run()
-    await env.AQUILLA_DB.prepare(
+    await env.AQUILLA_PG.prepare(
       "INSERT INTO group_members (group_id, user_id) VALUES (10, 2)",
     ).run()
-    await env.AQUILLA_DB.prepare(
+    await env.AQUILLA_PG.prepare(
       "INSERT INTO group_project_grants (group_id, project_id, role_level, granted_by) VALUES (10, 'proj1', 500, 1)",
     ).run()
 
@@ -256,7 +256,7 @@ describe("Revocation: access stops after all grant paths removed", () => {
     expect(beforeBody.role.level).toBe(500)
 
     // Detach project from group
-    await env.AQUILLA_DB.prepare(
+    await env.AQUILLA_PG.prepare(
       "DELETE FROM group_project_grants WHERE group_id = 10 AND project_id = 'proj1'",
     ).run()
 
@@ -274,10 +274,10 @@ describe("Revocation: access stops after all grant paths removed", () => {
 
   it("removing direct project_members row stops the override path — falls back to surviving org path", async () => {
     await seedBaseOrg()
-    await env.AQUILLA_DB.prepare(
+    await env.AQUILLA_PG.prepare(
       "INSERT INTO org_members (org_id, user_id, role_level, granted_by) VALUES (1, 2, 200, 1)",
     ).run()
-    await env.AQUILLA_DB.prepare(
+    await env.AQUILLA_PG.prepare(
       "INSERT INTO project_members (project_id, user_id, role_level, granted_by) VALUES ('proj1', 2, 600, 1)",
     ).run()
 
@@ -292,7 +292,7 @@ describe("Revocation: access stops after all grant paths removed", () => {
     expect(beforeBody.role.source).toBe("override")
 
     // Use the DELETE members API (requires caller to be maintainer+)
-    await env.AQUILLA_DB.prepare(
+    await env.AQUILLA_PG.prepare(
       "DELETE FROM project_members WHERE project_id = 'proj1' AND user_id = 2",
     ).run()
 
@@ -309,16 +309,16 @@ describe("Revocation: access stops after all grant paths removed", () => {
 
   it("org DELETE /members/:userId API removes org path and cascades group_members", async () => {
     await seedBaseOrg()
-    await env.AQUILLA_DB.prepare(
+    await env.AQUILLA_PG.prepare(
       "INSERT INTO org_members (org_id, user_id, role_level, granted_by) VALUES (1, 2, 200, 1)",
     ).run()
-    await env.AQUILLA_DB.prepare(
+    await env.AQUILLA_PG.prepare(
       "INSERT INTO groups (id, org_id, name, created_by) VALUES (10, 1, 'T', 1)",
     ).run()
-    await env.AQUILLA_DB.prepare(
+    await env.AQUILLA_PG.prepare(
       "INSERT INTO group_members (group_id, user_id) VALUES (10, 2)",
     ).run()
-    await env.AQUILLA_DB.prepare(
+    await env.AQUILLA_PG.prepare(
       "INSERT INTO group_project_grants (group_id, project_id, role_level, granted_by) VALUES (10, 'proj1', 400, 1)",
     ).run()
 
@@ -342,13 +342,13 @@ describe("Revocation: access stops after all grant paths removed", () => {
     expect(removeRes.status).toBe(200)
 
     // Org membership removed
-    const orgMember = await env.AQUILLA_DB.prepare(
+    const orgMember = await env.AQUILLA_PG.prepare(
       "SELECT 1 FROM org_members WHERE org_id = 1 AND user_id = 2",
     ).first()
     expect(orgMember).toBeNull()
 
     // Group membership also removed (cascade)
-    const groupMember = await env.AQUILLA_DB.prepare(
+    const groupMember = await env.AQUILLA_PG.prepare(
       "SELECT 1 FROM group_members WHERE group_id = 10 AND user_id = 2",
     ).first()
     expect(groupMember).toBeNull()
@@ -370,10 +370,10 @@ describe("Role × Scope edit gates", () => {
     it("reviewer (300) cannot add a project member", async () => {
       await seedBaseOrg()
       await seedUser(4, "reviewer_user")
-      await env.AQUILLA_DB.prepare(
+      await env.AQUILLA_PG.prepare(
         "INSERT INTO org_members (org_id, user_id, role_level, granted_by) VALUES (1, 4, 300, 1)",
       ).run()
-      await env.AQUILLA_DB.prepare(
+      await env.AQUILLA_PG.prepare(
         "INSERT INTO project_members (project_id, user_id, role_level, granted_by) VALUES ('proj1', 4, 300, 1)",
       ).run()
       await seedUser(5, "new_collab")
@@ -393,10 +393,10 @@ describe("Role × Scope edit gates", () => {
     it("project_lead (500) can add a member at or below their own role", async () => {
       await seedBaseOrg()
       await seedUser(4, "lead_user")
-      await env.AQUILLA_DB.prepare(
+      await env.AQUILLA_PG.prepare(
         "INSERT INTO org_members (org_id, user_id, role_level, granted_by) VALUES (1, 4, 500, 1)",
       ).run()
-      await env.AQUILLA_DB.prepare(
+      await env.AQUILLA_PG.prepare(
         "INSERT INTO project_members (project_id, user_id, role_level, granted_by) VALUES ('proj1', 4, 500, 1)",
       ).run()
       await seedUser(5, "new_collab")
@@ -416,10 +416,10 @@ describe("Role × Scope edit gates", () => {
     it("project_lead (500) cannot grant a role higher than their own", async () => {
       await seedBaseOrg()
       await seedUser(4, "lead_user")
-      await env.AQUILLA_DB.prepare(
+      await env.AQUILLA_PG.prepare(
         "INSERT INTO org_members (org_id, user_id, role_level, granted_by) VALUES (1, 4, 500, 1)",
       ).run()
-      await env.AQUILLA_DB.prepare(
+      await env.AQUILLA_PG.prepare(
         "INSERT INTO project_members (project_id, user_id, role_level, granted_by) VALUES ('proj1', 4, 500, 1)",
       ).run()
       await seedUser(5, "new_collab")
@@ -442,7 +442,7 @@ describe("Role × Scope edit gates", () => {
       await seedBaseOrg()
       await seedUser(4, "lead_user")
       await seedUser(5, "collab")
-      await env.AQUILLA_DB.prepare(
+      await env.AQUILLA_PG.prepare(
         "INSERT INTO project_members (project_id, user_id, role_level, granted_by) VALUES ('proj1', 4, 500, 1), ('proj1', 5, 100, 1)",
       ).run()
 
@@ -458,7 +458,7 @@ describe("Role × Scope edit gates", () => {
       await seedBaseOrg()
       await seedUser(4, "maint_user")
       await seedUser(5, "collab")
-      await env.AQUILLA_DB.prepare(
+      await env.AQUILLA_PG.prepare(
         "INSERT INTO project_members (project_id, user_id, role_level, granted_by) VALUES ('proj1', 4, 600, 1), ('proj1', 5, 100, 1)",
       ).run()
 
@@ -475,7 +475,7 @@ describe("Role × Scope edit gates", () => {
     it("maintainer (600) cannot add a new org member", async () => {
       await seedBaseOrg()
       await seedUser(4, "maint_user")
-      await env.AQUILLA_DB.prepare(
+      await env.AQUILLA_PG.prepare(
         "INSERT INTO org_members (org_id, user_id, role_level, granted_by) VALUES (1, 4, 600, 1)",
       ).run()
       await seedUser(5, "new_user")
@@ -513,7 +513,7 @@ describe("Role × Scope edit gates", () => {
     it("contributor (400) cannot create a group", async () => {
       await seedBaseOrg()
       await seedUser(4, "contrib_user")
-      await env.AQUILLA_DB.prepare(
+      await env.AQUILLA_PG.prepare(
         "INSERT INTO org_members (org_id, user_id, role_level, granted_by) VALUES (1, 4, 400, 1)",
       ).run()
 
@@ -532,7 +532,7 @@ describe("Role × Scope edit gates", () => {
     it("maintainer (600) can create a group", async () => {
       await seedBaseOrg()
       await seedUser(4, "maint_user")
-      await env.AQUILLA_DB.prepare(
+      await env.AQUILLA_PG.prepare(
         "INSERT INTO org_members (org_id, user_id, role_level, granted_by) VALUES (1, 4, 600, 1)",
       ).run()
 
@@ -562,7 +562,7 @@ describe("Role × Scope edit gates", () => {
 
     it("org viewer (100) can list org members", async () => {
       await seedBaseOrg()
-      await env.AQUILLA_DB.prepare(
+      await env.AQUILLA_PG.prepare(
         "INSERT INTO org_members (org_id, user_id, role_level, granted_by) VALUES (1, 2, 100, 1)",
       ).run()
       const res = await app.request(
@@ -585,7 +585,7 @@ describe("Role × Scope edit gates", () => {
 
     it("GET /orgs/:orgId/members/:userId/access requires maintainer (600)+", async () => {
       await seedBaseOrg()
-      await env.AQUILLA_DB.prepare(
+      await env.AQUILLA_PG.prepare(
         "INSERT INTO org_members (org_id, user_id, role_level, granted_by) VALUES (1, 2, 400, 1)",
       ).run()
       // contributor trying to see access breakdown
@@ -604,21 +604,21 @@ describe("Role × Scope edit gates", () => {
 describe("Team (group) membership grants project access", () => {
   it("user in a group gains project access at the group's granted role", async () => {
     await seedBaseOrg()
-    await env.AQUILLA_DB.prepare(
+    await env.AQUILLA_PG.prepare(
       "INSERT INTO org_members (org_id, user_id, role_level, granted_by) VALUES (1, 2, 100, 1)",
     ).run()
     // Add a second project that viewer_member has no org-level claim beyond 100
-    await env.AQUILLA_DB.prepare(
+    await env.AQUILLA_PG.prepare(
       "INSERT INTO projects (id, name, org_id, created_by) VALUES ('proj2', 'Beta', 1, 1)",
     ).run()
-    await env.AQUILLA_DB.prepare(
+    await env.AQUILLA_PG.prepare(
       "INSERT INTO groups (id, org_id, name, created_by) VALUES (10, 1, 'Team B', 1)",
     ).run()
-    await env.AQUILLA_DB.prepare(
+    await env.AQUILLA_PG.prepare(
       "INSERT INTO group_members (group_id, user_id) VALUES (10, 2)",
     ).run()
     // Team attached to proj2 at contributor (400)
-    await env.AQUILLA_DB.prepare(
+    await env.AQUILLA_PG.prepare(
       "INSERT INTO group_project_grants (group_id, project_id, role_level, granted_by) VALUES (10, 'proj2', 400, 1)",
     ).run()
 
@@ -642,7 +642,7 @@ describe("Invite flow: link grant → project access", () => {
     // Create invite token
     const token = "test-invite-token-abc123"
     const expires = new Date(Date.now() + 86400_000).toISOString()
-    await env.AQUILLA_DB.prepare(
+    await env.AQUILLA_PG.prepare(
       "INSERT INTO project_invites (token, project_id, role_level, created_by, expires_at) VALUES (?, 'proj1', 300, 1, ?)",
     )
       .bind(token, expires)
@@ -674,10 +674,10 @@ describe("Invite flow: link grant → project access", () => {
   it("invite caps role at contributor (400) max via link share", async () => {
     await seedBaseOrg()
     // project_lead mints an invite — the API caps it at 400
-    await env.AQUILLA_DB.prepare(
+    await env.AQUILLA_PG.prepare(
       "INSERT INTO project_members (project_id, user_id, role_level, granted_by) VALUES ('proj1', 2, 500, 1)",
     ).run()
-    await env.AQUILLA_DB.prepare(
+    await env.AQUILLA_PG.prepare(
       "INSERT INTO org_members (org_id, user_id, role_level, granted_by) VALUES (1, 2, 500, 1)",
     ).run()
 
@@ -703,7 +703,7 @@ describe("Creator fallback: project creator always gets owner (700)", () => {
   it("project creator (not in org) resolves as owner 700 via creator path", async () => {
     await seedBaseOrg()
     // outsider creates a standalone project (no org)
-    await env.AQUILLA_DB.prepare(
+    await env.AQUILLA_PG.prepare(
       "INSERT INTO projects (id, name, org_id, created_by) VALUES ('proj_personal', 'Personal', NULL, 3)",
     ).run()
 

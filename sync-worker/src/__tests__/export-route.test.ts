@@ -6,8 +6,8 @@ import { handleExportSourceRequest, type ExportRouteEnv } from "../events/export
 
 const SECRET = "export-tests-secret"
 
-/** Minimal D1 stub: every query resolves to `first → blob`, `all → []`. */
-function makeStubDb(blob: unknown = null): ExportRouteEnv["AQUILLA_DB"] {
+/** Minimal DB stub: every query resolves to `first → blob`, `all → []`. */
+function makeStubDb(blob: unknown = null): ExportRouteEnv["AQUILLA_PG"] {
   return {
     prepare: () => ({
       bind: () => ({
@@ -15,7 +15,7 @@ function makeStubDb(blob: unknown = null): ExportRouteEnv["AQUILLA_DB"] {
         all: async () => ({ results: [] }),
       }),
     }),
-  } as unknown as ExportRouteEnv["AQUILLA_DB"]
+  } as unknown as ExportRouteEnv["AQUILLA_PG"]
 }
 
 async function makeToken(role: number): Promise<string> {
@@ -31,7 +31,7 @@ function exportReq(token: string): Request {
 }
 
 describe("export role gate (Q32 — maintainer 600)", () => {
-  const env: ExportRouteEnv = { SYNC_SECRET_KEY: SECRET, AQUILLA_DB: makeStubDb() }
+  const env: ExportRouteEnv = { SYNC_SECRET_KEY: SECRET, AQUILLA_PG: makeStubDb() }
 
   it("403s a viewer (100) and a contributor (400)", async () => {
     const viewer = await handleExportSourceRequest(exportReq(await makeToken(100)), env)

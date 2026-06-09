@@ -97,8 +97,8 @@ function validate(
   }
 }
 
-function makeEnv(db?: D1Database, secret: string | undefined = SECRET) {
-  return { AQUILLA_DB: db, SYNC_SECRET_KEY: secret }
+function makeEnv(db?: AquillaDb, secret: string | undefined = SECRET) {
+  return { AQUILLA_PG: db, SYNC_SECRET_KEY: secret }
 }
 
 async function makeRequest(events: unknown[], token?: string): Promise<Request> {
@@ -129,7 +129,7 @@ describe('POST /events — wiring', () => {
     const req = new Request('https://worker/events', {
       method: 'POST', body: '{}', headers: { 'Content-Type': 'application/json' },
     })
-    const res = (await handleEventsWriteRequest(req, { AQUILLA_DB: (await makeTestDb()).db, SYNC_SECRET_KEY: undefined }))!
+    const res = (await handleEventsWriteRequest(req, { AQUILLA_PG: (await makeTestDb()).db, SYNC_SECRET_KEY: undefined }))!
     expect(res.status).toBe(500)
   })
 
@@ -215,12 +215,12 @@ describe('POST /events — server_seq', () => {
     // server_seq is now derived inside each events INSERT via a correlated
     // subquery, so within a single batch each statement picks the next seq
     // from the just-inserted prior row, and concurrent batches serialise at
-    // the D1 primary. The pre-fix code read MAX once per request in JS and
+    // the database primary. The pre-fix code read MAX once per request in JS and
     // pre-computed seqs, which collided on the UNIQUE INDEX
     // idx_events_project_seq under concurrency.
     //
     // The in-memory fake cannot deterministically interleave two route
-    // handlers across microtasks the way real D1 interleaves HTTP requests,
+    // handlers across microtasks the way real Postgres interleaves HTTP requests,
     // so this test mostly documents the contract; the fake additionally
     // enforces the UNIQUE constraint, so any code path that produces a
     // duplicate (project_id, server_seq) trips loudly.

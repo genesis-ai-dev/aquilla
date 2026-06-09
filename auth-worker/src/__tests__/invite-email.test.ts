@@ -1,10 +1,10 @@
 import { env } from "cloudflare:test"
 import { describe, it, expect } from "vitest"
 import app from "../index"
-import { seedUser, jwtFor, authHeader } from "./helpers/d1"
+import { seedUser, jwtFor, authHeader } from "./helpers/db"
 
 async function seedProject(id: string, name: string) {
-  await env.AQUILLA_DB.prepare("INSERT INTO projects (id, name, created_by) VALUES (?, ?, 1)").bind(id, name).run()
+  await env.AQUILLA_PG.prepare("INSERT INTO projects (id, name, created_by) VALUES (?, ?, 1)").bind(id, name).run()
 }
 
 describe("invite email persistence", () => {
@@ -19,7 +19,7 @@ describe("invite email persistence", () => {
     expect(created.status).toBe(200)
     const { token } = (await created.json()) as { token: string }
 
-    const row = await env.AQUILLA_DB.prepare("SELECT email FROM project_invites WHERE token = ?").bind(token).first<{ email: string | null }>()
+    const row = await env.AQUILLA_PG.prepare("SELECT email FROM project_invites WHERE token = ?").bind(token).first<{ email: string | null }>()
     expect(row?.email).toBe("joiner@example.com")
 
     const preview = await app.request(`/api/v2/projects/invite-preview/${token}`, {}, env)

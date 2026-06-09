@@ -1,6 +1,6 @@
 // POST /import — bulk source-import fast path.
 //
-// The generic POST /events route does, per event, two D1 reads (idempotency
+// The generic POST /events route does, per event, two DB reads (idempotency
 // lookup + AD-2 first-child-of-parent guard) before the projection write. For
 // a 31k-verse eBible that's ~62k subrequests, so the client is forced to drip
 // 100 events per request — hundreds of round trips, minutes of latency.
@@ -16,7 +16,7 @@
 // the dispatcher would (it reuses `buildEventProjectionStmts` verbatim, so the
 // rows are byte-identical). One read remains: MAX(server_seq) once per request.
 // The client streams cells in large chunks; each request does real work
-// (dozens of D1 batches) instead of a single 100-event hop.
+// (dozens of DB batches) instead of a single 100-event hop.
 //
 // Auth mirrors authorize(): a valid `aud=sync` token scoped to (projectId,
 // fileId), role >= PROJECT_LEAD (source.* is importer/lead-only per
@@ -31,10 +31,10 @@ import {
   type PersistedEvent,
 } from './event-projection'
 
-const D1_BATCH_LIMIT = 100
+const BATCH_LIMIT = 100
 
 export interface ImportRouteEnv {
-  AQUILLA_DB?: D1Database
+  AQUILLA_PG?: AquillaDb
   SYNC_SECRET_KEY?: string
 }
 
@@ -99,12 +99,12 @@ function isImportBody(x: unknown): x is ImportBody {
 }
 
 // server_seq is derived atomically inside the INSERT via a correlated
-// subquery against the same `events` row's project_id. SQLite/D1 evaluates
-// the SELECT and the INSERT in one statement, and D1 serialises writes at
+// subquery against the same `events` row's project_id. Postgres evaluates
+// the SELECT and the INSERT in one statement, and Postgres serialises writes within the transaction at
 // the primary, so two concurrent batches can no longer both compute the
 // same MAX before either commits — the second batch's subquery sees the
 // first batch's just-inserted rows and picks the next free seq. Within a
-// single batch the same effect holds: D1 batches execute statements
+// single batch the same effect holds: batches execute statements
 // sequentially in a transaction, so statement N's subquery sees statement
 // N-1's row. INSERT OR IGNORE still skips id-replays (the subquery is
 // evaluated but the row is dropped, so no seq gap leaks).
@@ -118,7 +118,7 @@ SELECT ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?,
 
 /** Append the canonical events-row INSERT for one persisted event, mirroring
  *  handlers/cell-events.ts so bulk-import rows match dispatcher rows exactly. */
-function pushEventInsert(db: D1Database, e: PersistedEvent, stmts: D1PreparedStatement[]): void {
+function pushEventInsert(db: AquillaDb, e: PersistedEvent, stmts: AquillaStatement[]): void {
   stmts.push(
     db
       .prepare(EVENT_INSERT_SQL)
@@ -157,10 +157,10 @@ export async function handleBulkImportRequest(
   if (!env.SYNC_SECRET_KEY) {
     return withCors(new Response('SYNC_SECRET_KEY not configured', { status: 500 }), request)
   }
-  if (!env.AQUILLA_DB) {
-    return withCors(new Response('AQUILLA_DB binding not configured', { status: 500 }), request)
+  if (!env.AQUILLA_PG) {
+    return withCors(new Response('AQUILLA_PG binding not configured', { status: 500 }), request)
   }
-  const db = env.AQUILLA_DB
+  const db = env.AQUILLA_PG
 
   let body: unknown
   try {
@@ -199,7 +199,7 @@ export async function handleBulkImportRequest(
 
   let serverTs = Date.now()
 
-  const stmts: D1PreparedStatement[] = []
+  const stmts: AquillaStatement[] = []
 
   // file.create (first chunk only).
   if (body.file) {
@@ -300,16 +300,16 @@ export async function handleBulkImportRequest(
   // same import if the client retries). Self-healing by design — always correct.
   stmts.push(fileCountersRecomputeStmt(db, body.projectId, body.fileId, serverTs))
 
-  // Commit in D1-batch-limit chunks. file.create contributes 2 statements
+  // Commit in batch-limit chunks. file.create contributes 2 statements
   // (event + files INSERT); each cell contributes 2 statements (event + cells
   // INSERT); the single trailing file-counter recompute is 1 statement.
   try {
-    for (let i = 0; i < stmts.length; i += D1_BATCH_LIMIT) {
-      await db.batch(stmts.slice(i, i + D1_BATCH_LIMIT))
+    for (let i = 0; i < stmts.length; i += BATCH_LIMIT) {
+      await db.batch(stmts.slice(i, i + BATCH_LIMIT))
     }
   } catch (err) {
     return withCors(
-      Response.json({ error: `D1 batch failed: ${String(err)}` }, { status: 500 }),
+      Response.json({ error: `DB batch failed: ${String(err)}` }, { status: 500 }),
       request,
     )
   }

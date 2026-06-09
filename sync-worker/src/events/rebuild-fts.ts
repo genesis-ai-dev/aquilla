@@ -12,7 +12,7 @@
 const REBUILD_FTS_PATH = /^\/admin\/projects\/([^/]+)\/rebuild-fts$/
 
 export interface RebuildFtsEnv {
-  AQUILLA_DB?: D1Database
+  AQUILLA_PG?: AquillaDb
   SYNC_SECRET_KEY?: string
 }
 
@@ -36,8 +36,8 @@ export async function handleRebuildFtsRequest(
     return new Response('unauthorized', { status: 401 })
   }
 
-  if (!env.AQUILLA_DB) {
-    return new Response('AQUILLA_DB binding not configured', { status: 500 })
+  if (!env.AQUILLA_PG) {
+    return new Response('AQUILLA_PG binding not configured', { status: 500 })
   }
 
   const projectId = decodeURIComponent(match[1])

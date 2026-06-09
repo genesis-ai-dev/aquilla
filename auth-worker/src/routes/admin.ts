@@ -39,8 +39,8 @@ admin.get("/me", (c) => {
 
 /** GET /api/v2/admin/overview — top-line platform rollup. */
 admin.get("/overview", async (c) => {
-  const db = c.env.AQUILLA_DB
-  // One round-trip per scalar; D1 has no multi-statement query, but these are
+  const db = c.env.AQUILLA_PG
+  // One round-trip per scalar; we issue one statement per round-trip, but these are
   // cheap COUNT(*)s. active7d = users with org activity in the last 7 days.
   const [orgs, teams, users, projects, archived, active7d] = await Promise.all([
     db.prepare("SELECT COUNT(*) AS n FROM organizations").first<{ n: number }>(),
@@ -66,7 +66,7 @@ admin.get("/overview", async (c) => {
 
 /** GET /api/v2/admin/orgs — every org with owner + member/project counts. */
 admin.get("/orgs", async (c) => {
-  const { results } = await c.env.AQUILLA_DB.prepare(
+  const { results } = await c.env.AQUILLA_PG.prepare(
     `SELECT o.id, o.name, o.created_at,
             u.username AS owner_username,
             (SELECT COUNT(*) FROM org_members m WHERE m.org_id = o.id) AS member_count,
@@ -96,7 +96,7 @@ admin.get("/orgs", async (c) => {
 
 /** GET /api/v2/admin/teams — every group ("team") with org + member/grant counts. */
 admin.get("/teams", async (c) => {
-  const { results } = await c.env.AQUILLA_DB.prepare(
+  const { results } = await c.env.AQUILLA_PG.prepare(
     `SELECT g.id, g.name, g.created_at, g.org_id,
             o.name AS org_name,
             (SELECT COUNT(*) FROM group_members m WHERE m.group_id = g.id) AS member_count,
@@ -128,7 +128,7 @@ admin.get("/teams", async (c) => {
 
 /** GET /api/v2/admin/users — every user (no password hashes). */
 admin.get("/users", async (c) => {
-  const { results } = await c.env.AQUILLA_DB.prepare(
+  const { results } = await c.env.AQUILLA_PG.prepare(
     `SELECT u.id, u.username, u.email, u.display_name, u.created_at,
             (SELECT COUNT(*) FROM org_members m WHERE m.user_id = u.id) AS org_count,
             (SELECT MAX(last_active_at) FROM org_members m WHERE m.user_id = u.id) AS last_active_at
@@ -158,7 +158,7 @@ admin.get("/users", async (c) => {
 
 /** GET /api/v2/admin/projects — every project with org/creator + rollup. */
 admin.get("/projects", async (c) => {
-  const { results } = await c.env.AQUILLA_DB.prepare(
+  const { results } = await c.env.AQUILLA_PG.prepare(
     `SELECT p.id, p.name, p.org_id, p.archived_at, p.created_at, p.deadline_at,
             o.name AS org_name,
             u.username AS creator_username,
@@ -215,7 +215,7 @@ admin.get("/activity", async (c) => {
   const since = c.req.query("since")
 
   const where = since ? "WHERE a.timestamp >= ?" : ""
-  const stmt = c.env.AQUILLA_DB.prepare(
+  const stmt = c.env.AQUILLA_PG.prepare(
     `SELECT a.id, a.user_id, a.activity_type, a.description, a.timestamp,
             u.username
        FROM activity_logs a

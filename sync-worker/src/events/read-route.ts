@@ -1,12 +1,12 @@
 // HTTP fetch handler for GET /events — the CQRS event read endpoint.
 //
-// Reads the audit log from D1 with optional filters. Auth via sync-token JWT
+// Reads the audit log from Postgres with optional filters. Auth via sync-token JWT
 // (viewer level is sufficient for reading history).
 
 import { verifyTokenForFile } from "../auth"
 
 export interface EventsReadEnv {
-  AQUILLA_DB?: D1Database
+  AQUILLA_PG?: AquillaDb
   SYNC_SECRET_KEY?: string
 }
 
@@ -45,8 +45,8 @@ export async function handleEventsReadRequest(
   if (!env.SYNC_SECRET_KEY) {
     return new Response("SYNC_SECRET_KEY not configured", { status: 500 })
   }
-  if (!env.AQUILLA_DB) {
-    return new Response("AQUILLA_DB binding not configured", { status: 500 })
+  if (!env.AQUILLA_PG) {
+    return new Response("AQUILLA_PG binding not configured", { status: 500 })
   }
 
   // Extract bearer token.
@@ -136,7 +136,7 @@ export async function handleEventsReadRequest(
     server_seq: number
   }
 
-  const result = await env.AQUILLA_DB.prepare(sql)
+  const result = await env.AQUILLA_PG.prepare(sql)
     .bind(...binds)
     .all<EventRowRaw>()
 

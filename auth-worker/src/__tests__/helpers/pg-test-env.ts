@@ -4,7 +4,7 @@
 // SQLite dialect — not Postgres, the production engine after the Neon cutover.
 // vitest.config.ts aliases "cloudflare:test" to this module so every test now
 // runs the worker's SQL against real Postgres (PGlite, in-process WASM) through
-// the exact production D1→Postgres shim (db/shim/d1-postgres.ts). Same engine
+// the exact production Postgres shim (db/shim/postgres.ts). Same engine
 // family as Neon, so dialect + FTS (generated tsvector) are validated for real.
 //
 // `env` is a module singleton; vitest isolates test files into separate workers,
@@ -14,14 +14,14 @@ import { PGlite } from "@electric-sql/pglite"
 import { readFileSync } from "node:fs"
 import { fileURLToPath } from "node:url"
 import path from "node:path"
-import { D1Postgres, type PgExecutor } from "../../../../db/shim/d1-postgres"
+import { PostgresDb, type PgExecutor } from "../../../../db/shim/postgres"
 
 const SCHEMA = readFileSync(
   path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../../db/postgres/schema.sql"),
   "utf8",
 )
 
-// Mirror the production shim's type coercion (makeD1Postgres): int8 (COUNT/SUM,
+// Mirror the production shim's type coercion (makePostgres): int8 (COUNT/SUM,
 // server_seq, *_ms) → JS number, so test assertions see the same types prod does
 // instead of PGlite's default bigint-as-string.
 export const pg = new PGlite({ parsers: { 20: (v: string) => Number(v), 1700: (v: string) => Number(v) } })
@@ -40,7 +40,7 @@ function pgliteExecutor(db: PGlite): PgExecutor {
 // The worker reads these off c.env. Mirrors auth-worker/wrangler.toml [vars] +
 // the test overrides from the old vitest.config (PLATFORM_ADMINS pinned to root).
 export const env = {
-  AQUILLA_DB: new D1Postgres(pgliteExecutor(pg)) as unknown as D1Database,
+  AQUILLA_PG: new PostgresDb(pgliteExecutor(pg)) as unknown as AquillaDb,
   SECRET_KEY: "frontier-test-secret",
   SYNC_SECRET_KEY: "sync-secret",
   ALGORITHM: "HS256",

@@ -28,7 +28,7 @@ export async function getOrCreateUserOrg(
   env: Env,
   user: AuthUser,
 ): Promise<UserOrg> {
-  const existing = await env.AQUILLA_DB.prepare(
+  const existing = await env.AQUILLA_PG.prepare(
     "SELECT id, name FROM organizations WHERE owner_user_id = ? ORDER BY id ASC LIMIT 1",
   )
     .bind(user.id)
@@ -39,7 +39,7 @@ export async function getOrCreateUserOrg(
   }
 
   const name = `${user.username}'s workspace`
-  const inserted = await env.AQUILLA_DB.prepare(
+  const inserted = await env.AQUILLA_PG.prepare(
     `INSERT INTO organizations (name, owner_user_id)
      VALUES (?, ?) RETURNING id`,
   )
@@ -47,7 +47,7 @@ export async function getOrCreateUserOrg(
     .first<{ id: number }>()
   if (!inserted) throw new Error("failed to insert organization row")
 
-  await env.AQUILLA_DB.prepare(
+  await env.AQUILLA_PG.prepare(
     `INSERT INTO org_members (org_id, user_id, role_level, granted_by)
      VALUES (?, ?, 700, ?)
      ON CONFLICT(org_id, user_id) DO NOTHING`,
@@ -59,18 +59,18 @@ export async function getOrCreateUserOrg(
 }
 
 export async function createOrgForUser(env: Env, user: AuthUser, name: string): Promise<{ id: number; name: string }> {
-  const inserted = await env.AQUILLA_DB.prepare(
+  const inserted = await env.AQUILLA_PG.prepare(
     "INSERT INTO organizations (name, owner_user_id) VALUES (?, ?) RETURNING id",
   ).bind(name, user.id).first<{ id: number }>()
   if (!inserted) throw new Error("failed to insert organization")
-  await env.AQUILLA_DB.prepare(
+  await env.AQUILLA_PG.prepare(
     "INSERT INTO org_members (org_id, user_id, role_level, granted_by) VALUES (?, ?, 700, ?) ON CONFLICT(org_id, user_id) DO NOTHING",
   ).bind(inserted.id, user.id, user.id).run()
   return { id: inserted.id, name }
 }
 
 export async function renameOrg(env: Env, orgId: number, name: string): Promise<void> {
-  await env.AQUILLA_DB.prepare(
+  await env.AQUILLA_PG.prepare(
     "UPDATE organizations SET name = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
   ).bind(name, orgId).run()
 }
@@ -89,14 +89,14 @@ export interface UserOrgSummary {
 export async function listUserOrgs(env: Env, user: AuthUser): Promise<UserOrgSummary[]> {
   const byId = new Map<number, UserOrgSummary>()
 
-  const owned = await env.AQUILLA_DB.prepare(
+  const owned = await env.AQUILLA_PG.prepare(
     "SELECT id, name FROM organizations WHERE owner_user_id = ?",
   ).bind(user.id).all<{ id: number; name: string | null }>()
   for (const o of owned.results ?? []) {
     byId.set(o.id, { id: o.id, name: o.name, role: 700 })
   }
 
-  const memberships = await env.AQUILLA_DB.prepare(
+  const memberships = await env.AQUILLA_PG.prepare(
     `SELECT o.id AS id, o.name AS name, om.role_level AS role_level
        FROM org_members om
        JOIN organizations o ON o.id = om.org_id
@@ -123,7 +123,7 @@ export async function getOrgMemberRole(
   orgId: number,
   userId: number,
 ): Promise<number | null> {
-  const row = await env.AQUILLA_DB.prepare(
+  const row = await env.AQUILLA_PG.prepare(
     "SELECT role_level FROM org_members WHERE org_id = ? AND user_id = ?",
   )
     .bind(orgId, userId)
@@ -144,7 +144,7 @@ export async function listOrgMembersWithUsers(
   env: Env,
   orgId: number,
 ): Promise<OrgMemberWithUser[]> {
-  const result = await env.AQUILLA_DB.prepare(
+  const result = await env.AQUILLA_PG.prepare(
     `SELECT om.user_id AS user_id, u.username AS username,
             om.role_level AS role_level, om.last_active_at AS last_active_at
      FROM org_members om
@@ -180,7 +180,7 @@ export async function bumpOrgActivity(
 ): Promise<void> {
   if (orgId == null) return
   try {
-    await env.AQUILLA_DB.prepare(
+    await env.AQUILLA_PG.prepare(
       `UPDATE org_members
           SET last_active_at = CURRENT_TIMESTAMP
         WHERE org_id = ? AND user_id = ?
@@ -210,7 +210,7 @@ export async function listPendingInvitesInOrg(
   env: Env,
   orgId: number,
 ): Promise<PendingOrgInvite[]> {
-  const result = await env.AQUILLA_DB.prepare(
+  const result = await env.AQUILLA_PG.prepare(
     `SELECT pi.token AS token,
             pi.project_id AS project_id,
             p.name AS project_name,
@@ -291,7 +291,7 @@ export async function listEffectiveProjectMembers(
 ): Promise<EffectiveMember[]> {
   // Each path is fetched separately and merged via max-wins so attribution
   // is exact (a JOIN-based approach would lose per-user attribution).
-  const direct = await env.AQUILLA_DB.prepare(
+  const direct = await env.AQUILLA_PG.prepare(
     `SELECT pm.user_id AS user_id, u.username AS username, pm.role_level AS role_level
      FROM project_members pm
      INNER JOIN users u ON u.id = pm.user_id
@@ -322,7 +322,7 @@ export async function listEffectiveProjectMembers(
   // AD-12: surface every user who reaches the project via a group attached
   // to it. MAX-aggregate across group memberships gives the user's best
   // group-level grant; the per-group breakdown is a Pass C concern.
-  const groupRows = await env.AQUILLA_DB.prepare(
+  const groupRows = await env.AQUILLA_PG.prepare(
     `SELECT gm.user_id AS user_id,
             u.username AS username,
             MAX(gpg.role_level) AS role_level
@@ -341,7 +341,7 @@ export async function listEffectiveProjectMembers(
   }
 
   if (orgId != null) {
-    const orgMembers = await env.AQUILLA_DB.prepare(
+    const orgMembers = await env.AQUILLA_PG.prepare(
       `SELECT om.user_id AS user_id, u.username AS username, om.role_level AS role_level
        FROM org_members om
        INNER JOIN users u ON u.id = om.user_id
@@ -355,7 +355,7 @@ export async function listEffectiveProjectMembers(
     }
   }
 
-  const creatorRow = await env.AQUILLA_DB.prepare(
+  const creatorRow = await env.AQUILLA_PG.prepare(
     "SELECT id, username FROM users WHERE id = ?",
   )
     .bind(createdBy)
@@ -450,7 +450,7 @@ export async function listEffectiveMembersForOrg(
 ): Promise<ProjectEffectiveMembers[]> {
   // 1. The viewer's accessible non-archived projects in this org. Mirrors the
   //    access predicate of GET /api/v2/projects so the matrix columns match.
-  const accessible = await env.AQUILLA_DB.prepare(
+  const accessible = await env.AQUILLA_PG.prepare(
     `SELECT p.id AS id, p.created_by AS created_by
        FROM projects p
        LEFT JOIN project_members pm ON pm.project_id = p.id AND pm.user_id = ?
@@ -482,7 +482,7 @@ export async function listEffectiveMembersForOrg(
   // 2. org_members — fetched ONCE for the whole matrix (the old hot path that
   //    re-ran this per project). Applies as the "org" path to every project,
   //    since all accessible projects here belong to orgId.
-  const orgMembers = await env.AQUILLA_DB.prepare(
+  const orgMembers = await env.AQUILLA_PG.prepare(
     `SELECT om.user_id AS user_id, u.username AS username, om.role_level AS role_level
        FROM org_members om
        INNER JOIN users u ON u.id = om.user_id
@@ -492,7 +492,7 @@ export async function listEffectiveMembersForOrg(
     .all<{ user_id: number; username: string; role_level: number }>()
 
   // 3. Direct project_members across all accessible projects, in one query.
-  const direct = await env.AQUILLA_DB.prepare(
+  const direct = await env.AQUILLA_PG.prepare(
     `SELECT pm.project_id AS project_id, pm.user_id AS user_id,
             u.username AS username, pm.role_level AS role_level
        FROM project_members pm
@@ -504,7 +504,7 @@ export async function listEffectiveMembersForOrg(
 
   // 4. Group grants across all accessible projects, MAX-aggregated per
   //    (project, user) just like the per-project resolver.
-  const groups = await env.AQUILLA_DB.prepare(
+  const groups = await env.AQUILLA_PG.prepare(
     `SELECT gpg.project_id AS project_id, gm.user_id AS user_id,
             u.username AS username, MAX(gpg.role_level) AS role_level
        FROM group_project_grants gpg
@@ -519,7 +519,7 @@ export async function listEffectiveMembersForOrg(
   // 5. Creator usernames, one query for the whole set.
   const creatorIds = [...new Set(projects.map((p) => p.created_by))]
   const creatorPlaceholders = creatorIds.map(() => "?").join(", ")
-  const creatorRows = await env.AQUILLA_DB.prepare(
+  const creatorRows = await env.AQUILLA_PG.prepare(
     `SELECT id, username FROM users WHERE id IN (${creatorPlaceholders})`,
   )
     .bind(...creatorIds)
@@ -586,7 +586,7 @@ export async function listOrgGroups(
   orgId: number,
   viewerId: number,
 ): Promise<OrgGroupSummary[]> {
-  const rows = await env.AQUILLA_DB.prepare(
+  const rows = await env.AQUILLA_PG.prepare(
     `SELECT g.id AS id, g.name AS name, g.is_internal AS is_internal,
             (SELECT COUNT(*) FROM group_members gm WHERE gm.group_id = g.id) AS member_count,
             (SELECT COUNT(*) FROM group_project_grants gpg WHERE gpg.group_id = g.id) AS project_count,
@@ -621,14 +621,14 @@ export async function getOrgGroupDetail(
   orgId: number,
   groupId: number,
 ): Promise<OrgGroupDetail | null> {
-  const group = await env.AQUILLA_DB.prepare(
+  const group = await env.AQUILLA_PG.prepare(
     "SELECT id, name FROM groups WHERE id = ? AND org_id = ?",
   )
     .bind(groupId, orgId)
     .first<{ id: number; name: string }>()
   if (!group) return null
 
-  const members = await env.AQUILLA_DB.prepare(
+  const members = await env.AQUILLA_PG.prepare(
     `SELECT gm.user_id AS user_id, u.username AS username, om.role_level AS role_level
        FROM group_members gm
        JOIN users u ON u.id = gm.user_id
@@ -639,7 +639,7 @@ export async function getOrgGroupDetail(
     .bind(orgId, groupId)
     .all<{ user_id: number; username: string; role_level: number | null }>()
 
-  const projects = await env.AQUILLA_DB.prepare(
+  const projects = await env.AQUILLA_PG.prepare(
     `SELECT gpg.project_id AS id, p.name AS name, gpg.role_level AS granted
        FROM group_project_grants gpg
        JOIN projects p ON p.id = gpg.project_id
@@ -659,7 +659,7 @@ export async function getOrgGroupDetail(
 
 /** True if a group with this id exists in this org. */
 export async function groupExistsInOrg(env: Env, orgId: number, groupId: number): Promise<boolean> {
-  const row = await env.AQUILLA_DB.prepare(
+  const row = await env.AQUILLA_PG.prepare(
     "SELECT 1 AS ok FROM groups WHERE id = ? AND org_id = ?",
   ).bind(groupId, orgId).first<{ ok: number }>()
   return row != null
@@ -669,11 +669,11 @@ export interface GroupRow { id: number; name: string; description: string | null
 
 /** Create a group. Returns null if the name already exists in the org. */
 export async function createGroup(env: Env, orgId: number, name: string, description: string | null, createdBy: number): Promise<GroupRow | null> {
-  const existing = await env.AQUILLA_DB.prepare(
+  const existing = await env.AQUILLA_PG.prepare(
     "SELECT id FROM groups WHERE org_id = ? AND name = ?",
   ).bind(orgId, name).first<{ id: number }>()
   if (existing) return null
-  const row = await env.AQUILLA_DB.prepare(
+  const row = await env.AQUILLA_PG.prepare(
     "INSERT INTO groups (org_id, name, description, created_by) VALUES (?, ?, ?, ?) RETURNING id, name, description",
   ).bind(orgId, name, description, createdBy).first<GroupRow>()
   return row
@@ -682,19 +682,19 @@ export async function createGroup(env: Env, orgId: number, name: string, descrip
 /** Update name/description. Returns null on duplicate-name conflict. */
 export async function updateGroup(env: Env, orgId: number, groupId: number, name: string | undefined, description: string | undefined): Promise<GroupRow | null> {
   if (name != null) {
-    const clash = await env.AQUILLA_DB.prepare(
+    const clash = await env.AQUILLA_PG.prepare(
       "SELECT id FROM groups WHERE org_id = ? AND name = ? AND id != ?",
     ).bind(orgId, name, groupId).first<{ id: number }>()
     if (clash) return null
   }
-  await env.AQUILLA_DB.prepare(
+  await env.AQUILLA_PG.prepare(
     `UPDATE groups SET
        name = COALESCE(?, name),
        description = COALESCE(?, description),
        updated_at = CURRENT_TIMESTAMP
      WHERE id = ? AND org_id = ?`,
   ).bind(name ?? null, description ?? null, groupId, orgId).run()
-  return env.AQUILLA_DB.prepare(
+  return env.AQUILLA_PG.prepare(
     "SELECT id, name, description FROM groups WHERE id = ?",
   ).bind(groupId).first<GroupRow>()
 }
@@ -703,10 +703,10 @@ export async function updateGroup(env: Env, orgId: number, groupId: number, name
 export async function deleteGroup(env: Env, orgId: number, groupId: number): Promise<void> {
   // The Postgres schema omits FK constraints (migration choice), so cascade the
   // child rows explicitly — SQLite's ON DELETE CASCADE did this for us before.
-  await env.AQUILLA_DB.batch([
-    env.AQUILLA_DB.prepare("DELETE FROM group_members WHERE group_id = ?").bind(groupId),
-    env.AQUILLA_DB.prepare("DELETE FROM group_project_grants WHERE group_id = ?").bind(groupId),
-    env.AQUILLA_DB.prepare("DELETE FROM groups WHERE id = ? AND org_id = ?").bind(groupId, orgId),
+  await env.AQUILLA_PG.batch([
+    env.AQUILLA_PG.prepare("DELETE FROM group_members WHERE group_id = ?").bind(groupId),
+    env.AQUILLA_PG.prepare("DELETE FROM group_project_grants WHERE group_id = ?").bind(groupId),
+    env.AQUILLA_PG.prepare("DELETE FROM groups WHERE id = ? AND org_id = ?").bind(groupId, orgId),
   ])
 }
 
@@ -714,22 +714,22 @@ export async function deleteGroup(env: Env, orgId: number, groupId: number): Pro
 export async function addGroupMember(env: Env, orgId: number, groupId: number, targetUserId: number, addedBy: number): Promise<"ok" | "not-org-member"> {
   const orgRole = await getOrgMemberRole(env, orgId, targetUserId)
   if (orgRole == null) return "not-org-member"
-  await env.AQUILLA_DB.prepare(
+  await env.AQUILLA_PG.prepare(
     "INSERT INTO group_members (group_id, user_id, added_by) VALUES (?, ?, ?) ON CONFLICT(group_id, user_id) DO NOTHING",
   ).bind(groupId, targetUserId, addedBy).run()
   return "ok"
 }
 
 export async function removeGroupMember(env: Env, groupId: number, userId: number): Promise<void> {
-  await env.AQUILLA_DB.prepare("DELETE FROM group_members WHERE group_id = ? AND user_id = ?").bind(groupId, userId).run()
+  await env.AQUILLA_PG.prepare("DELETE FROM group_members WHERE group_id = ? AND user_id = ?").bind(groupId, userId).run()
 }
 
 /** Attach (or re-grant) a project to a group. Returns "cross-org" if the project isn't in this org. */
 export async function attachGroupProject(env: Env, orgId: number, groupId: number, projectId: string, roleLevel: number, grantedBy: number): Promise<"ok" | "cross-org" | "no-project"> {
-  const proj = await env.AQUILLA_DB.prepare("SELECT org_id FROM projects WHERE id = ?").bind(projectId).first<{ org_id: number | null }>()
+  const proj = await env.AQUILLA_PG.prepare("SELECT org_id FROM projects WHERE id = ?").bind(projectId).first<{ org_id: number | null }>()
   if (!proj) return "no-project"
   if (proj.org_id !== orgId) return "cross-org"
-  await env.AQUILLA_DB.prepare(
+  await env.AQUILLA_PG.prepare(
     `INSERT INTO group_project_grants (group_id, project_id, role_level, granted_by) VALUES (?, ?, ?, ?)
      ON CONFLICT(group_id, project_id) DO UPDATE SET role_level = excluded.role_level, granted_by = excluded.granted_by`,
   ).bind(groupId, projectId, roleLevel, grantedBy).run()
@@ -738,25 +738,25 @@ export async function attachGroupProject(env: Env, orgId: number, groupId: numbe
 
 /** Change the granted role for an existing attachment. Returns false if no attachment. */
 export async function updateGroupProjectRole(env: Env, groupId: number, projectId: string, roleLevel: number): Promise<boolean> {
-  const existing = await env.AQUILLA_DB.prepare(
+  const existing = await env.AQUILLA_PG.prepare(
     "SELECT role_level FROM group_project_grants WHERE group_id = ? AND project_id = ?",
   ).bind(groupId, projectId).first()
   if (!existing) return false
-  await env.AQUILLA_DB.prepare(
+  await env.AQUILLA_PG.prepare(
     "UPDATE group_project_grants SET role_level = ? WHERE group_id = ? AND project_id = ?",
   ).bind(roleLevel, groupId, projectId).run()
   return true
 }
 
 export async function detachGroupProject(env: Env, groupId: number, projectId: string): Promise<void> {
-  await env.AQUILLA_DB.prepare("DELETE FROM group_project_grants WHERE group_id = ? AND project_id = ?").bind(groupId, projectId).run()
+  await env.AQUILLA_PG.prepare("DELETE FROM group_project_grants WHERE group_id = ? AND project_id = ?").bind(groupId, projectId).run()
 }
 
 export interface PortfolioRow { id: string; name: string; totalCells: number; validatedCells: number; filledCells: number; lastEditAt: number | null; audioCells: number; recordedMs: number; deadlineAt: string | null }
 
 /** Per-project rollup over the org's non-archived projects (derive-on-read, one GROUP BY). */
 export async function getOrgPortfolio(env: Env, orgId: number): Promise<PortfolioRow[]> {
-  const rows = await env.AQUILLA_DB.prepare(
+  const rows = await env.AQUILLA_PG.prepare(
     `SELECT p.id AS id, p.name AS name, p.deadline_at AS deadline_at,
             COALESCE(SUM(f.cell_count), 0)     AS total_cells,
             COALESCE(SUM(f.approved_count), 0) AS validated_cells,
@@ -810,18 +810,18 @@ export async function getMemberEffectiveAccess(
   orgId: number,
   userId: number,
 ): Promise<MemberEffectiveAccess> {
-  const orgRow = await env.AQUILLA_DB.prepare(
+  const orgRow = await env.AQUILLA_PG.prepare(
     "SELECT role_level FROM org_members WHERE org_id = ? AND user_id = ?",
   ).bind(orgId, userId).first<{ role_level: number }>()
   const orgRole = orgRow?.role_level ?? null
 
-  const direct = await env.AQUILLA_DB.prepare(
+  const direct = await env.AQUILLA_PG.prepare(
     `SELECT pm.project_id AS project_id, p.name AS name, pm.role_level AS role_level
        FROM project_members pm JOIN projects p ON p.id = pm.project_id
       WHERE p.org_id = ? AND pm.user_id = ? AND p.archived_at IS NULL`,
   ).bind(orgId, userId).all<{ project_id: string; name: string; role_level: number }>()
 
-  const groups = await env.AQUILLA_DB.prepare(
+  const groups = await env.AQUILLA_PG.prepare(
     `SELECT gpg.project_id AS project_id, p.name AS name,
             g.id AS group_id, g.name AS group_name, gpg.role_level AS role_level
        FROM group_project_grants gpg
@@ -831,7 +831,7 @@ export async function getMemberEffectiveAccess(
       WHERE p.org_id = ? AND gm.user_id = ? AND p.archived_at IS NULL`,
   ).bind(orgId, userId).all<{ project_id: string; name: string; group_id: number; group_name: string; role_level: number }>()
 
-  const created = await env.AQUILLA_DB.prepare(
+  const created = await env.AQUILLA_PG.prepare(
     "SELECT id AS project_id, name FROM projects WHERE org_id = ? AND created_by = ? AND archived_at IS NULL",
   ).bind(orgId, userId).all<{ project_id: string; name: string }>()
 
@@ -872,7 +872,7 @@ export async function listUserDirectMembershipsInOrg(
   orgId: number,
   userId: number,
 ): Promise<ProjectMembershipInOrg[]> {
-  const result = await env.AQUILLA_DB.prepare(
+  const result = await env.AQUILLA_PG.prepare(
     `SELECT pm.project_id AS project_id, p.name AS project_name, pm.role_level AS role_level
      FROM project_members pm
      INNER JOIN projects p ON p.id = pm.project_id
@@ -926,7 +926,7 @@ export async function canReadTermbase(
   if (!subscriberRole) return false
 
   // 2. An active subscription row must link subscriber → termbase.
-  const sub = await env.AQUILLA_DB.prepare(
+  const sub = await env.AQUILLA_PG.prepare(
     `SELECT 1 AS ok
        FROM project_termbase_subscriptions
       WHERE project_id = ? AND termbase_project_id = ?`,
@@ -938,14 +938,14 @@ export async function canReadTermbase(
   // 3. The upstream must still be published, unarchived, and same-org as the
   //    subscriber. A subscription left dangling after an unpublish (TERM3 #2)
   //    is inert — the grant evaporates the moment publishing stops.
-  const subscriber = await env.AQUILLA_DB.prepare(
+  const subscriber = await env.AQUILLA_PG.prepare(
     "SELECT org_id FROM projects WHERE id = ?",
   )
     .bind(args.subscriberProjectId)
     .first<{ org_id: number | null }>()
   if (!subscriber) return false
 
-  const upstream = await env.AQUILLA_DB.prepare(
+  const upstream = await env.AQUILLA_PG.prepare(
     "SELECT org_id, org_published_termbase FROM projects WHERE id = ? AND archived_at IS NULL",
   )
     .bind(args.termbaseProjectId)

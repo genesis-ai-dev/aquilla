@@ -9,7 +9,7 @@
 // invisible in prod even if the worker is reachable. The bypass also never
 // takes a user identifier from the request — it always resolves to the
 // hardcoded `dev` username — so even if the gate ever failed open, an
-// attacker could only log in as a user that does not exist in prod D1.
+// attacker could only log in as a user that does not exist in prod Postgres.
 
 import { Hono } from "hono"
 import type { AuthHonoEnv } from "../middleware/auth"
@@ -53,7 +53,7 @@ interface GroupIdRow {
 
 /** Upsert a user by username (password "dev"), returning its id. */
 async function upsertUser(
-  db: D1Database,
+  db: AquillaDb,
   username: string,
   email: string,
   passwordHash: string,
@@ -79,7 +79,7 @@ async function upsertUser(
 
 /** Upsert a project under an org, created_by the given user. */
 async function upsertProject(
-  db: D1Database,
+  db: AquillaDb,
   projectId: string,
   name: string,
   orgId: number,
@@ -99,7 +99,7 @@ async function upsertProject(
 }
 
 async function upsertOrgMember(
-  db: D1Database,
+  db: AquillaDb,
   orgId: number,
   userId: number,
   roleLevel: number,
@@ -116,7 +116,7 @@ async function upsertOrgMember(
 }
 
 async function upsertProjectMember(
-  db: D1Database,
+  db: AquillaDb,
   projectId: string,
   userId: number,
   roleLevel: number,
@@ -134,12 +134,12 @@ async function upsertProjectMember(
 
 // SWARM-TODO (FRO terminology demo-truth): the Wave-1 QA bug ("seeded concept
 // grace→gracia doesn't match Adzera source cells") cannot be fixed here. This
-// route seeds ONLY users / orgs / projects / members in D1 (aquilla-db). It
+// route seeds ONLY users / orgs / projects / members in Postgres (aquilla-db). It
 // seeds NO files, NO cells, and NO concepts:
 //   - There is no `concepts` table in any auth-worker migration. Concepts are
 //     a client-side (IndexedDB) model per AD-3 thin-client; see
 //     src/lib/terminology/types.ts (Concept) — they are derived/compiled on the
-//     client, not persisted in D1.
+//     client, not persisted in Postgres.
 //   - The only `grace→gracia` concept in the repo lives in unit-test fixtures
 //     (src/lib/terminology/terminology.test.ts, stats.test.ts), not in any seed.
 //   - The dev project's source/target cells are not inserted by any route here;
@@ -147,7 +147,7 @@ async function upsertProjectMember(
 //     events, not by dev-seed.
 // To make terminology demo-true on the dev project, the fix must land where the
 // dev project's CELLS and CONCEPTS are actually materialized for a fresh dev
-// login (client-side IDB seed / sync-event seed), NOT in this D1 seed route.
+// login (client-side IDB seed / sync-event seed), NOT in this Postgres seed route.
 // NEEDED to proceed: (1) confirmation of where dev-project source/target cells
 // are seeded for the browser (IDB bootstrap vs sync-worker fixture), and (2) the
 // real source language + sample source/target cell text so a managed Concept
@@ -155,7 +155,7 @@ async function upsertProjectMember(
 
 const devSeed = new Hono<AuthHonoEnv>()
 
-async function seedDev(db: D1Database): Promise<{
+async function seedDev(db: AquillaDb): Promise<{
   userId: number
   orgId: number
   projectId: string
@@ -269,7 +269,7 @@ devSeed.post("/seed", async (c) => {
     return c.json({ error: "Not found" }, 404)
   }
   try {
-    const ids = await seedDev(c.env.AQUILLA_DB)
+    const ids = await seedDev(c.env.AQUILLA_PG)
     return c.json({
       ok: true,
       user: { id: ids.userId, username: DEV_USERNAME, email: DEV_EMAIL },
@@ -294,7 +294,7 @@ devSeed.post("/login", async (c) => {
     )
   }
   try {
-    const ids = await seedDev(c.env.AQUILLA_DB)
+    const ids = await seedDev(c.env.AQUILLA_PG)
     const jwt = new JWTService(c.env)
     const accessToken = await jwt.createAccessToken(DEV_USERNAME)
     return c.json({

@@ -31,7 +31,7 @@
 import { verifyTokenForProject } from "../auth"
 
 export interface StaleSourceEnv {
-  AQUILLA_DB?: D1Database
+  AQUILLA_PG?: AquillaDb
   SYNC_SECRET_KEY?: string
 }
 
@@ -49,8 +49,8 @@ export async function handleStaleSourceRequest(
   if (!env.SYNC_SECRET_KEY) {
     return new Response("SYNC_SECRET_KEY not configured", { status: 500 })
   }
-  if (!env.AQUILLA_DB) {
-    return new Response("AQUILLA_DB binding not configured", { status: 500 })
+  if (!env.AQUILLA_PG) {
+    return new Response("AQUILLA_PG binding not configured", { status: 500 })
   }
 
   const projectId = decodeURIComponent(match[1])
@@ -66,14 +66,14 @@ export async function handleStaleSourceRequest(
 
   // 1. Resolve upstream project id (may be null).
   //
-  // `projects.source_project_id` lives in the same AQUILLA_DB shared with
+  // `projects.source_project_id` lives in the same AQUILLA_PG shared with
   // auth-worker. Phase 1A's 0004_projects_source_link.sql added the
   // column; if a deployment hasn't applied that migration, the query
   // throws and we surface the staleness query as no-op (treat as
   // self-contained — `upstream = projectId`).
   let upstreamProjectId: string | null = null
   try {
-    const row = await env.AQUILLA_DB.prepare(
+    const row = await env.AQUILLA_PG.prepare(
       "SELECT source_project_id FROM projects WHERE id = ?",
     )
       .bind(projectId)
@@ -106,7 +106,7 @@ export async function handleStaleSourceRequest(
 
   let staleCellIds: string[] = []
   try {
-    const res = await env.AQUILLA_DB.prepare(sql)
+    const res = await env.AQUILLA_PG.prepare(sql)
       .bind(upstreamProjectId, projectId, fileId)
       .all<{ cell_id: string }>()
     staleCellIds = (res.results ?? []).map((r) => r.cell_id)

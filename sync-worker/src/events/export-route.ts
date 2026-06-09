@@ -23,7 +23,7 @@ import {
 } from "../lib/usfm-lossless"
 
 export interface ExportRouteEnv {
-  AQUILLA_DB?: D1Database
+  AQUILLA_PG?: AquillaDb
   SYNC_SECRET_KEY?: string
 }
 
@@ -42,12 +42,12 @@ export async function handleExportSourceRequest(
   if (!env.SYNC_SECRET_KEY) {
     return withCors(new Response("SYNC_SECRET_KEY not configured", { status: 500 }), request)
   }
-  if (!env.AQUILLA_DB) {
-    return withCors(new Response("AQUILLA_DB binding not configured", { status: 500 }), request)
+  if (!env.AQUILLA_PG) {
+    return withCors(new Response("AQUILLA_PG binding not configured", { status: 500 }), request)
   }
   const projectId = decodeURIComponent(match[1])
   const fileId = decodeURIComponent(match[2])
-  const db = env.AQUILLA_DB
+  const db = env.AQUILLA_PG
 
   const authHeader = request.headers.get("Authorization") ?? ""
   const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : null

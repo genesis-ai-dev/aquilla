@@ -16,7 +16,7 @@ const SAMPLE_MD = path.resolve(__dirname, "../../fixtures/sample.md")
  * Verify the D1-event-log sync layer: alice imports a file → bob sees it.
  *
  * Architecture (v3 / AD-1):
- *   - Projects + file projections live in D1 (auth-worker's AQUILLA_DB).
+ *   - Projects + file projections live in D1 (auth-worker's AQUILLA_PG).
  *   - The sync-worker's import-route writes `file.create` + `cell.genesis`
  *     events and projects them into the `files`/`cells` D1 tables on the
  *     same request. There is no async lag for file visibility.

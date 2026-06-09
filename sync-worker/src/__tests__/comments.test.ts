@@ -43,7 +43,7 @@ function makeEvent<K extends EventKind>(
 describe('comment.create', () => {
   it('inserts a row into the comments table with correct fields', async () => {
     const { db, snapshot } = await makeTestDb()
-    const stmts: D1PreparedStatement[] = []
+    const stmts: AquillaStatement[] = []
 
     const touches = buildEventProjectionStmts(
       db,
@@ -75,8 +75,8 @@ describe('comment.create', () => {
 
   it('inserts a threaded reply with parent_comment_id set', async () => {
     const { db, snapshot } = await makeTestDb()
-    const stmts1: D1PreparedStatement[] = []
-    const stmts2: D1PreparedStatement[] = []
+    const stmts1: AquillaStatement[] = []
+    const stmts2: AquillaStatement[] = []
 
     buildEventProjectionStmts(
       db,
@@ -115,7 +115,7 @@ describe('comment.edit', () => {
     const { db, snapshot } = await makeTestDb()
 
     // Seed a comment row directly.
-    const createStmts: D1PreparedStatement[] = []
+    const createStmts: AquillaStatement[] = []
     buildEventProjectionStmts(
       db,
       makeEvent('comment.create', {
@@ -128,7 +128,7 @@ describe('comment.edit', () => {
     )
     await db.batch(createStmts)
 
-    const editStmts: D1PreparedStatement[] = []
+    const editStmts: AquillaStatement[] = []
     buildEventProjectionStmts(
       db,
       makeEvent('comment.edit', {
@@ -150,7 +150,7 @@ describe('comment.delete', () => {
   it('soft-deletes: sets body to empty and deleted_at to serverTs', async () => {
     const { db, snapshot } = await makeTestDb()
 
-    const createStmts: D1PreparedStatement[] = []
+    const createStmts: AquillaStatement[] = []
     buildEventProjectionStmts(
       db,
       makeEvent('comment.create', {
@@ -163,7 +163,7 @@ describe('comment.delete', () => {
     )
     await db.batch(createStmts)
 
-    const delStmts: D1PreparedStatement[] = []
+    const delStmts: AquillaStatement[] = []
     buildEventProjectionStmts(
       db,
       makeEvent('comment.delete', { commentId: 'cmt-del' }, { id: 'evt-d1', serverTs: 3000 }),
@@ -183,7 +183,7 @@ describe('comment.resolve', () => {
   it('sets resolved=1 on a top-level comment', async () => {
     const { db, snapshot } = await makeTestDb()
 
-    const createStmts: D1PreparedStatement[] = []
+    const createStmts: AquillaStatement[] = []
     buildEventProjectionStmts(
       db,
       makeEvent('comment.create', {
@@ -196,7 +196,7 @@ describe('comment.resolve', () => {
     )
     await db.batch(createStmts)
 
-    const resolveStmts: D1PreparedStatement[] = []
+    const resolveStmts: AquillaStatement[] = []
     buildEventProjectionStmts(
       db,
       makeEvent('comment.resolve', { commentId: 'cmt-res', resolved: true }, { id: 'evt-rv1', serverTs: 4000 }),
@@ -213,7 +213,7 @@ describe('comment.resolve', () => {
     const { db, snapshot } = await makeTestDb()
 
     // Create root + reply
-    const stmts1: D1PreparedStatement[] = []
+    const stmts1: AquillaStatement[] = []
     buildEventProjectionStmts(
       db,
       makeEvent('comment.create', {
@@ -224,7 +224,7 @@ describe('comment.resolve', () => {
       }, { id: 'evt-cr2', serverTs: 1000 }),
       stmts1,
     )
-    const stmts2: D1PreparedStatement[] = []
+    const stmts2: AquillaStatement[] = []
     buildEventProjectionStmts(
       db,
       makeEvent('comment.create', {
@@ -240,7 +240,7 @@ describe('comment.resolve', () => {
 
     // Try to resolve the reply — should be a noop because
     // the WHERE clause requires parent_comment_id IS NULL.
-    const resolveStmts: D1PreparedStatement[] = []
+    const resolveStmts: AquillaStatement[] = []
     buildEventProjectionStmts(
       db,
       makeEvent('comment.resolve', { commentId: 'cmt-reply2', resolved: true }, { id: 'evt-rv2', serverTs: 5000 }),

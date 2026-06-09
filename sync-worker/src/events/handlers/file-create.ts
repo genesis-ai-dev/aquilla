@@ -12,7 +12,7 @@ import type { RealtimeMessage, ProjectionTable } from '../realtime'
 import type { DispatchResult } from './types'
 
 export function handleFileCreate(
-  db: D1Database,
+  db: AquillaDb,
   authed: AuthorizedEvent<'file.create'>,
   serverTs: number,
 ): DispatchResult {

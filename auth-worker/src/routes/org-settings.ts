@@ -63,7 +63,7 @@ async function loadSettings(
   env: AuthHonoEnv["Bindings"],
   orgId: number,
 ): Promise<OrgSettingsResponse> {
-  const row = await env.AQUILLA_DB.prepare(
+  const row = await env.AQUILLA_PG.prepare(
     `SELECT org_id, settings, version, updated_at, updated_by
        FROM org_settings
       WHERE org_id = ?`,
@@ -155,7 +155,7 @@ orgSettings.on(
 
     if (current.updatedAt == null) {
       try {
-        await c.env.AQUILLA_DB.prepare(
+        await c.env.AQUILLA_PG.prepare(
           `INSERT INTO org_settings (org_id, settings, version, updated_by)
            VALUES (?, ?, ?, ?)`,
         )
@@ -171,7 +171,7 @@ orgSettings.on(
         return c.json({ error: `write failed: ${message}` }, 500)
       }
     } else {
-      const result = await c.env.AQUILLA_DB.prepare(
+      const result = await c.env.AQUILLA_PG.prepare(
         `UPDATE org_settings
             SET settings   = ?,
                 version    = version + 1,
@@ -278,7 +278,7 @@ orgSettings.post(
 
     if (current.updatedAt == null) {
       try {
-        await c.env.AQUILLA_DB.prepare(
+        await c.env.AQUILLA_PG.prepare(
           `INSERT INTO org_settings (org_id, settings, version, updated_by) VALUES (?, ?, ?, ?)`,
         )
           .bind(orgId, newSettingsJson, newVersion, user.id)
@@ -287,7 +287,7 @@ orgSettings.post(
         return c.json({ error: "concurrent write — please retry" }, 409)
       }
     } else {
-      const result = await c.env.AQUILLA_DB.prepare(
+      const result = await c.env.AQUILLA_PG.prepare(
         `UPDATE org_settings
             SET settings   = ?,
                 version    = version + 1,

@@ -1,7 +1,7 @@
 import { env } from "cloudflare:test"
 import { describe, it, expect } from "vitest"
 import app from "../index"
-import { seedUser, jwtFor, authHeader } from "./helpers/d1"
+import { seedUser, jwtFor, authHeader } from "./helpers/db"
 
 /** Seed one org with wendi=owner (700), anna=maintainer (600), tom=contributor (400). */
 async function seedOrg() {
@@ -9,10 +9,10 @@ async function seedOrg() {
   await seedUser(2, "anna")
   await seedUser(3, "tom")
   await seedUser(4, "stranger")
-  await env.AQUILLA_DB.prepare(
+  await env.AQUILLA_PG.prepare(
     "INSERT INTO organizations (id, name, owner_user_id) VALUES (1, 'Come and See', 1)",
   ).run()
-  await env.AQUILLA_DB.prepare(
+  await env.AQUILLA_PG.prepare(
     `INSERT INTO org_members (org_id, user_id, role_level, granted_by) VALUES
       (1, 1, 700, 1),
       (1, 2, 600, 1),
@@ -119,10 +119,10 @@ async function seedOrgWithLead() {
   await seedUser(3, "lead")
   await seedUser(4, "tom")
   await seedUser(5, "stranger")
-  await env.AQUILLA_DB.prepare(
+  await env.AQUILLA_PG.prepare(
     "INSERT INTO organizations (id, name, owner_user_id) VALUES (1, 'Come and See', 1)",
   ).run()
-  await env.AQUILLA_DB.prepare(
+  await env.AQUILLA_PG.prepare(
     `INSERT INTO org_members (org_id, user_id, role_level, granted_by) VALUES
       (1, 1, 700, 1),
       (1, 2, 600, 1),

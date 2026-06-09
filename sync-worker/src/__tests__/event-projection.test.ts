@@ -1,7 +1,7 @@
 // Tests for buildEventProjectionStmts.
 //
 // Validates the SQL + bindings emitted for each event kind. Uses a tiny
-// recording D1 stub that captures (sql, args) pairs from prepare().bind().
+// recording DB stub that captures (sql, args) pairs from prepare().bind().
 
 import { describe, it, expect } from 'vitest'
 import {
@@ -20,17 +20,17 @@ interface RecordedStmt {
 function makeD1Stub() {
   const recorded: RecordedStmt[] = []
 
-  function makePrepared(sql: string): D1PreparedStatement {
+  function makePrepared(sql: string): AquillaStatement {
     const stmt = {
-      bind(...args: unknown[]): D1PreparedStatement {
+      bind(...args: unknown[]): AquillaStatement {
         recorded.push({ sql: sql.replace(/\s+/g, ' ').trim(), args })
-        return this as unknown as D1PreparedStatement
+        return this as unknown as AquillaStatement
       },
       first: () => Promise.reject(new Error('stub: first() not implemented')),
       run: () => Promise.reject(new Error('stub: run() not implemented')),
       all: () => Promise.reject(new Error('stub: all() not implemented')),
       raw: () => Promise.reject(new Error('stub: raw() not implemented')),
-    } as unknown as D1PreparedStatement
+    } as unknown as AquillaStatement
     return stmt
   }
 
@@ -39,7 +39,7 @@ function makeD1Stub() {
     batch: () => Promise.resolve([]),
     dump: () => Promise.resolve(new ArrayBuffer(0)),
     exec: () => Promise.resolve({ count: 0, duration: 0 }),
-  } as unknown as D1Database
+  } as unknown as AquillaDb
 
   return { db, recorded }
 }
@@ -83,7 +83,7 @@ describe('contentHash', () => {
 describe('buildEventProjectionStmts — source.cell.create', () => {
   it('emits an INSERT INTO cells with side=source and event_id=this event', () => {
     const { db, recorded } = makeD1Stub()
-    const stmts: D1PreparedStatement[] = []
+    const stmts: AquillaStatement[] = []
 
     buildEventProjectionStmts(
       db,
@@ -122,7 +122,7 @@ describe('buildEventProjectionStmts — source.cell.create', () => {
 describe('buildEventProjectionStmts — target.cell.create', () => {
   it('emits an INSERT INTO cells with side=target', () => {
     const { db, recorded } = makeD1Stub()
-    const stmts: D1PreparedStatement[] = []
+    const stmts: AquillaStatement[] = []
     buildEventProjectionStmts(
       db,
       makeEvent('target.cell.create', {
@@ -143,7 +143,7 @@ describe('buildEventProjectionStmts — target.cell.create', () => {
 describe('buildEventProjectionStmts — target.cell.commit', () => {
   it('UPSERTs value, event_id, and source_event_id (first commit creates the target row)', () => {
     const { db, recorded } = makeD1Stub()
-    const stmts: D1PreparedStatement[] = []
+    const stmts: AquillaStatement[] = []
     buildEventProjectionStmts(
       db,
       makeEvent('target.cell.commit', {
@@ -177,7 +177,7 @@ describe('buildEventProjectionStmts — target.cell.commit', () => {
 
   it('writes NULL source_event_id when omitted', () => {
     const { db, recorded } = makeD1Stub()
-    const stmts: D1PreparedStatement[] = []
+    const stmts: AquillaStatement[] = []
     buildEventProjectionStmts(
       db,
       makeEvent('target.cell.commit', { value: 'x' }),
@@ -191,7 +191,7 @@ describe('buildEventProjectionStmts — target.cell.commit', () => {
 describe('buildEventProjectionStmts — source.cell.commit', () => {
   it('UPDATEs value + event_id without touching source_event_id', () => {
     const { db, recorded } = makeD1Stub()
-    const stmts: D1PreparedStatement[] = []
+    const stmts: AquillaStatement[] = []
     buildEventProjectionStmts(
       db,
       makeEvent('source.cell.commit', { value: 'updated source' }),
@@ -207,7 +207,7 @@ describe('buildEventProjectionStmts — source.cell.commit', () => {
 describe('buildEventProjectionStmts — *.cell.delete', () => {
   it('emits a DELETE FROM cells scoped to the event side', () => {
     const { db, recorded } = makeD1Stub()
-    const stmts: D1PreparedStatement[] = []
+    const stmts: AquillaStatement[] = []
     buildEventProjectionStmts(db, makeEvent('target.cell.delete', {}), stmts)
     const cellsStmts = recorded.filter(r => !r.sql.includes('cells_fts') && !r.sql.includes('WHERE false'))
     expect(cellsStmts[0].sql).toContain('DELETE FROM cells')
@@ -217,7 +217,7 @@ describe('buildEventProjectionStmts — *.cell.delete', () => {
 
   it('source.cell.delete binds side=source', () => {
     const { db, recorded } = makeD1Stub()
-    const stmts: D1PreparedStatement[] = []
+    const stmts: AquillaStatement[] = []
     buildEventProjectionStmts(db, makeEvent('source.cell.delete', {}), stmts)
     const cellsStmts = recorded.filter(r => !r.sql.includes('cells_fts') && !r.sql.includes('WHERE false'))
     expect(cellsStmts[0].args).toEqual(['proj-1', 'file-a', 'cell-1', 'source'])
@@ -227,7 +227,7 @@ describe('buildEventProjectionStmts — *.cell.delete', () => {
 describe('buildEventProjectionStmts — *.cell.reorder', () => {
   it('UPDATEs anchor_cell_id and event_id, scoped to side', () => {
     const { db, recorded } = makeD1Stub()
-    const stmts: D1PreparedStatement[] = []
+    const stmts: AquillaStatement[] = []
     buildEventProjectionStmts(
       db,
       makeEvent('target.cell.reorder', { anchorCellId: 'cell-7' }),
@@ -243,7 +243,7 @@ describe('buildEventProjectionStmts — *.cell.reorder', () => {
 
   it('source.cell.reorder binds side=source', () => {
     const { db, recorded } = makeD1Stub()
-    const stmts: D1PreparedStatement[] = []
+    const stmts: AquillaStatement[] = []
     buildEventProjectionStmts(
       db,
       makeEvent('source.cell.reorder', { anchorCellId: 'cell-9' }),
@@ -270,7 +270,7 @@ describe('buildEventProjectionStmts — side scoping (regression: target edits m
   for (const { kind, payload, expectedSide } of sideAffectingKinds) {
     it(`${kind} scopes its WHERE clause to side='${expectedSide}'`, () => {
       const { db, recorded } = makeD1Stub()
-      const stmts: D1PreparedStatement[] = []
+      const stmts: AquillaStatement[] = []
       buildEventProjectionStmts(db, makeEvent(kind, payload), stmts)
 
       // First non-FTS statement is the cells mutation for these kinds.
@@ -304,7 +304,7 @@ describe('buildEventProjectionStmts — side scoping (regression: target edits m
 describe('buildEventProjectionStmts — cell.validate / cell.unvalidate', () => {
   it('cell.validate emits validator UPSERT (INSERT) + cells.validated recompute', () => {
     const { db, recorded } = makeD1Stub()
-    const stmts: D1PreparedStatement[] = []
+    const stmts: AquillaStatement[] = []
     buildEventProjectionStmts(
       db,
       makeEvent('cell.validate', { editEventId: 'evt-commit-id' }),
@@ -331,7 +331,7 @@ describe('buildEventProjectionStmts — cell.validate / cell.unvalidate', () => 
 
   it('cell.unvalidate emits DELETE (not UPSERT) + cells.validated recompute + endorsement_count recompute', () => {
     const { db, recorded } = makeD1Stub()
-    const stmts: D1PreparedStatement[] = []
+    const stmts: AquillaStatement[] = []
     buildEventProjectionStmts(
       db,
       makeEvent('cell.unvalidate', { editEventId: 'evt-commit-id' }),
@@ -351,7 +351,7 @@ describe('buildEventProjectionStmts — cell.validate / cell.unvalidate', () => 
 describe('buildEventProjectionStmts — cell.waive / cell.unwaive', () => {
   it('cell.waive emits a single cell_waivers UPSERT (no cells/files recompute)', () => {
     const { db, recorded } = makeD1Stub()
-    const stmts: D1PreparedStatement[] = []
+    const stmts: AquillaStatement[] = []
     const touches = buildEventProjectionStmts(
       db,
       makeEvent('cell.waive', { ruleId: 'no-double-space', reason: 'intentional' }),
@@ -371,14 +371,14 @@ describe('buildEventProjectionStmts — cell.waive / cell.unwaive', () => {
 
   it('cell.waive binds null reason when omitted', () => {
     const { db, recorded } = makeD1Stub()
-    const stmts: D1PreparedStatement[] = []
+    const stmts: AquillaStatement[] = []
     buildEventProjectionStmts(db, makeEvent('cell.waive', { ruleId: 'rule-x' }), stmts)
     expect(recorded[0].args[4]).toBeNull()
   })
 
   it('cell.unwaive emits a DELETE keyed by rule_id', () => {
     const { db, recorded } = makeD1Stub()
-    const stmts: D1PreparedStatement[] = []
+    const stmts: AquillaStatement[] = []
     const touches = buildEventProjectionStmts(
       db,
       makeEvent('cell.unwaive', { ruleId: 'no-double-space' }),
@@ -406,7 +406,7 @@ describe('buildEventProjectionStmts — cell.waive / cell.unwaive', () => {
 describe('buildEventProjectionStmts — file.create', () => {
   it('emits an INSERT INTO files row', () => {
     const { db, recorded } = makeD1Stub()
-    const stmts: D1PreparedStatement[] = []
+    const stmts: AquillaStatement[] = []
     buildEventProjectionStmts(
       db,
       makeEvent('file.create', { name: 'Genesis', fileType: 'codex', sourceLanguage: 'en' }, { cellId: null }),
@@ -443,19 +443,19 @@ describe('buildEventProjectionStmts — error paths', () => {
   })
 })
 
-// ── Integration: FTS5 SELECT-form handlers in d1-fake ───────────────────────
+// ── Integration: FTS5 SELECT-form handlers in in-memory-db ───────────────────────
 //
-// These tests run real D1PreparedStatements through the InMemoryD1 (via
+// These tests run real D1PreparedStatements through the InMemoryDb (via
 // db.batch) to verify the SELECT-form ftsInsertStmt / ftsDeleteStmt SQL
 // patterns are correctly handled by the fake.  This is the integration test
 // that justifies Part A of the test infrastructure work.
 
-describe('FTS5 integration via InMemoryD1 — SELECT-form insert/delete', () => {
+describe('FTS5 integration via InMemoryDb — SELECT-form insert/delete', () => {
   it('source.cell.create populates cells_fts via SELECT-form insert', async () => {
     const { db, snapshot } = await makeTestDb()
 
     // Step 1: process a source.cell.create event.
-    const createStmts: D1PreparedStatement[] = []
+    const createStmts: AquillaStatement[] = []
     buildEventProjectionStmts(
       db,
       makeEvent('source.cell.create', {
@@ -483,7 +483,7 @@ describe('FTS5 integration via InMemoryD1 — SELECT-form insert/delete', () => 
     const { db, snapshot } = await makeTestDb()
 
     // First create the cell.
-    const createStmts: D1PreparedStatement[] = []
+    const createStmts: AquillaStatement[] = []
     buildEventProjectionStmts(
       db,
       makeEvent('source.cell.create', {
@@ -496,7 +496,7 @@ describe('FTS5 integration via InMemoryD1 — SELECT-form insert/delete', () => 
     await db.batch(createStmts)
 
     // Then commit a new value.
-    const commitStmts: D1PreparedStatement[] = []
+    const commitStmts: AquillaStatement[] = []
     buildEventProjectionStmts(
       db,
       makeEvent('source.cell.commit', {
@@ -521,7 +521,7 @@ describe('FTS5 integration via InMemoryD1 — SELECT-form insert/delete', () => 
     const { db, snapshot } = await makeTestDb()
 
     // Create then delete.
-    const createStmts: D1PreparedStatement[] = []
+    const createStmts: AquillaStatement[] = []
     buildEventProjectionStmts(
       db,
       makeEvent('source.cell.create', {
@@ -537,7 +537,7 @@ describe('FTS5 integration via InMemoryD1 — SELECT-form insert/delete', () => 
       (await db.prepare("SELECT cell_id FROM cells WHERE value_tsv @@ plainto_tsquery('simple', ?)").bind('Verse').all()).results,
     ).toHaveLength(1)
 
-    const deleteStmts: D1PreparedStatement[] = []
+    const deleteStmts: AquillaStatement[] = []
     buildEventProjectionStmts(
       db,
       makeEvent('source.cell.delete', {}),
@@ -557,7 +557,7 @@ describe('FTS5 integration via InMemoryD1 — SELECT-form insert/delete', () => 
   })
 })
 
-describe('files counter projection via InMemoryD1', () => {
+describe('files counter projection via InMemoryDb', () => {
   // Seed a files row so the recompute UPDATE has a target. The bug was that
   // this row's cell_count sat at 0 forever because the cell projection never
   // maintained it — these tests pin the maintenance.
@@ -569,7 +569,7 @@ describe('files counter projection via InMemoryD1', () => {
 
   it('source.cell.create bumps cell_count and last_edit_at on the files row', async () => {
     const { db, snapshot } = await seedFile()
-    const stmts: D1PreparedStatement[] = []
+    const stmts: AquillaStatement[] = []
     buildEventProjectionStmts(
       db,
       makeEvent('source.cell.create', { cellId: 'cell-1', value: 'In the beginning', anchorCellId: null }),
@@ -585,7 +585,7 @@ describe('files counter projection via InMemoryD1', () => {
   it('counts distinct cell positions, not source+target rows', async () => {
     const { db, snapshot } = await seedFile()
     // Source cell.
-    const s: D1PreparedStatement[] = []
+    const s: AquillaStatement[] = []
     buildEventProjectionStmts(
       db,
       makeEvent('source.cell.create', { cellId: 'cell-1', value: 'logos', anchorCellId: null }),
@@ -593,7 +593,7 @@ describe('files counter projection via InMemoryD1', () => {
     )
     await db.batch(s)
     // Target translation of the SAME cell position (shares cell_id).
-    const t: D1PreparedStatement[] = []
+    const t: AquillaStatement[] = []
     buildEventProjectionStmts(
       db,
       makeEvent('target.cell.commit', { value: 'word' }, { id: 'evt-t', cellId: 'cell-1' }),
@@ -610,7 +610,7 @@ describe('files counter projection via InMemoryD1', () => {
 
   it('deleting the last cell returns cell_count to 0', async () => {
     const { db, snapshot } = await seedFile()
-    const c: D1PreparedStatement[] = []
+    const c: AquillaStatement[] = []
     buildEventProjectionStmts(
       db,
       makeEvent('source.cell.create', { cellId: 'cell-1', value: 'x', anchorCellId: null }),
@@ -619,7 +619,7 @@ describe('files counter projection via InMemoryD1', () => {
     await db.batch(c)
     expect((await snapshot()).files[0].cell_count).toBe(1)
 
-    const d: D1PreparedStatement[] = []
+    const d: AquillaStatement[] = []
     buildEventProjectionStmts(db, makeEvent('source.cell.delete', {}), d)
     await db.batch(d)
 

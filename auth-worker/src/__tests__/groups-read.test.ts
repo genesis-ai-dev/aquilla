@@ -1,18 +1,18 @@
 import { env } from "cloudflare:test"
 import { describe, it, expect } from "vitest"
 import app from "../index"
-import { seedUser, jwtFor, authHeader } from "./helpers/d1"
+import { seedUser, jwtFor, authHeader } from "./helpers/db"
 
 async function seedGroups() {
   await seedUser(1, "wendi")
   await seedUser(2, "anna")
   await seedUser(9, "outsider")
-  await env.AQUILLA_DB.prepare("INSERT INTO organizations (id, name, owner_user_id) VALUES (1, 'Come and See', 1)").run()
-  await env.AQUILLA_DB.prepare("INSERT INTO org_members (org_id, user_id, role_level, granted_by) VALUES (1, 1, 700, 1), (1, 2, 100, 1)").run()
-  await env.AQUILLA_DB.prepare("INSERT INTO groups (id, org_id, name, created_by) VALUES (10, 1, 'West Africa', 1)").run()
-  await env.AQUILLA_DB.prepare("INSERT INTO group_members (group_id, user_id) VALUES (10, 1), (10, 2)").run()
-  await env.AQUILLA_DB.prepare("INSERT INTO projects (id, name, org_id, created_by) VALUES ('pa', 'Bambara', 1, 1)").run()
-  await env.AQUILLA_DB.prepare("INSERT INTO group_project_grants (group_id, project_id, role_level) VALUES (10, 'pa', 400)").run()
+  await env.AQUILLA_PG.prepare("INSERT INTO organizations (id, name, owner_user_id) VALUES (1, 'Come and See', 1)").run()
+  await env.AQUILLA_PG.prepare("INSERT INTO org_members (org_id, user_id, role_level, granted_by) VALUES (1, 1, 700, 1), (1, 2, 100, 1)").run()
+  await env.AQUILLA_PG.prepare("INSERT INTO groups (id, org_id, name, created_by) VALUES (10, 1, 'West Africa', 1)").run()
+  await env.AQUILLA_PG.prepare("INSERT INTO group_members (group_id, user_id) VALUES (10, 1), (10, 2)").run()
+  await env.AQUILLA_PG.prepare("INSERT INTO projects (id, name, org_id, created_by) VALUES ('pa', 'Bambara', 1, 1)").run()
+  await env.AQUILLA_PG.prepare("INSERT INTO group_project_grants (group_id, project_id, role_level) VALUES (10, 'pa', 400)").run()
 }
 
 describe("GET /api/v2/orgs/:orgId/groups", () => {
@@ -39,7 +39,7 @@ describe("GET /api/v2/orgs/:orgId/groups", () => {
   it("FRO-158 regression: returns 200 with isInternal field for orgs with subgroups", async () => {
     await seedGroups()
     // Seed a second group explicitly marked as non-internal (public team)
-    await env.AQUILLA_DB.prepare(
+    await env.AQUILLA_PG.prepare(
       "INSERT INTO groups (id, org_id, name, created_by, is_internal) VALUES (11, 1, 'East Africa', 1, false)",
     ).run()
     const res = await app.request("/api/v2/orgs/1/groups", { headers: authHeader(await jwtFor("wendi")) }, env)
@@ -72,9 +72,9 @@ describe("GET /api/v2/orgs/:orgId/groups/:groupId", () => {
   it("excludes cross-org project grants from group detail", async () => {
     await seedGroups()
     await seedUser(8, "other")
-    await env.AQUILLA_DB.prepare("INSERT INTO organizations (id, name, owner_user_id) VALUES (2, 'Other Org', 8)").run()
-    await env.AQUILLA_DB.prepare("INSERT INTO projects (id, name, org_id, created_by) VALUES ('pb', 'Foreign', 2, 8)").run()
-    await env.AQUILLA_DB.prepare("INSERT INTO group_project_grants (group_id, project_id, role_level) VALUES (10, 'pb', 400)").run()
+    await env.AQUILLA_PG.prepare("INSERT INTO organizations (id, name, owner_user_id) VALUES (2, 'Other Org', 8)").run()
+    await env.AQUILLA_PG.prepare("INSERT INTO projects (id, name, org_id, created_by) VALUES ('pb', 'Foreign', 2, 8)").run()
+    await env.AQUILLA_PG.prepare("INSERT INTO group_project_grants (group_id, project_id, role_level) VALUES (10, 'pb', 400)").run()
     const res = await app.request("/api/v2/orgs/1/groups/10", { headers: authHeader(await jwtFor("wendi")) }, env)
     const body = (await res.json()) as { projects: Array<{ id: string }> }
     expect(body.projects.map((p) => p.id)).toEqual(["pa"]) // pb (org 2) excluded

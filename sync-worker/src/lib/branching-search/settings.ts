@@ -1,5 +1,5 @@
 // AD-13 branching-search tunables — spec defaults, partial-merge helper,
-// and D1-backed loader for the `project_settings.branchingSearch` JSON
+// and Postgres-backed loader for the `project_settings.branchingSearch` JSON
 // subkey.
 //
 // The defaults match the spec verbatim and are applied:
@@ -58,11 +58,11 @@ export function applyBranchingSearchDefaults(
 }
 
 export interface SettingsLoaderEnv {
-  AQUILLA_DB?: D1Database
+  AQUILLA_PG?: AquillaDb
 }
 
 /**
- * Load branching-search tunables for `projectId` from D1's `project_settings`
+ * Load branching-search tunables for `projectId` from Postgres's `project_settings`
  * row. Soft-fails to spec defaults on any error (missing binding, missing
  * row, missing key, malformed JSON, malformed values). Never throws — the
  * caller's retrieval should never break because of a settings parse problem.
@@ -75,9 +75,9 @@ export async function loadBranchingSearchSettings(
   env: SettingsLoaderEnv,
   projectId: string,
 ): Promise<BranchingSearchSettings> {
-  if (!env.AQUILLA_DB) return BRANCHING_SEARCH_DEFAULTS
+  if (!env.AQUILLA_PG) return BRANCHING_SEARCH_DEFAULTS
   try {
-    const row = await env.AQUILLA_DB.prepare(
+    const row = await env.AQUILLA_PG.prepare(
       "SELECT settings FROM project_settings WHERE project_id = ?",
     )
       .bind(projectId)

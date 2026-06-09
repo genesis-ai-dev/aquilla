@@ -1,13 +1,13 @@
 import { describe, it, expect } from "vitest"
 import { handleCellsReadRequest } from "../events/cells-read-route"
-import { type CellRow } from "./helpers/d1-fake"
+import { type CellRow } from "./helpers/in-memory-db"
 import { makeTestDb } from "./helpers/pg-test-db"
 import { makeTestToken } from "./helpers/auth"
 
 const SECRET = "cells-read-secret"
 
-function envWith(db: D1Database) {
-  return { AQUILLA_DB: db, SYNC_SECRET_KEY: SECRET }
+function envWith(db: AquillaDb) {
+  return { AQUILLA_PG: db, SYNC_SECRET_KEY: SECRET }
 }
 
 function makeCell(over: Partial<CellRow> & Pick<CellRow, "cell_id" | "anchor_cell_id" | "event_id">): CellRow {

@@ -25,16 +25,14 @@
 import { buildEventProjectionStmts, type PersistedEvent } from './event-projection'
 import type { EventKind } from './types'
 
-// aquilla-db is a single-writer SQLite DB. Larger batches hold that one writer
-// longer per commit, so under concurrent ingest they overflow D1's queue
-// ("D1 DB is overloaded. Requests queued for too long."). 100 is the proven
-// sweet spot — short transactions that release the writer quickly. The real
-// throughput limiter is D1's single-writer commit rate; tune CLIENT concurrency
-// (migrate-all --concurrency) to saturate it without overloading, NOT batch size.
-const D1_BATCH_LIMIT = 100
+// Keep each ingest transaction short so it commits and releases its locks
+// quickly — large batches hold a write transaction open longer and serialise
+// concurrent ingesters behind it. 100 is the proven sweet spot. Tune CLIENT
+// concurrency (migrate-all --concurrency) to saturate throughput, NOT batch size.
+const BATCH_LIMIT = 100
 
 export interface MigrateIngestEnv {
-  AQUILLA_DB?: D1Database
+  AQUILLA_PG?: AquillaDb
   SYNC_SECRET_KEY?: string
 }
 
@@ -110,10 +108,10 @@ export async function handleMigrateIngestRequest(
   if (authHeader !== `Bearer ${env.SYNC_SECRET_KEY}`) {
     return new Response('unauthorized', { status: 401 })
   }
-  if (!env.AQUILLA_DB) {
-    return new Response('AQUILLA_DB binding not configured', { status: 500 })
+  if (!env.AQUILLA_PG) {
+    return new Response('AQUILLA_PG binding not configured', { status: 500 })
   }
-  const db = env.AQUILLA_DB
+  const db = env.AQUILLA_PG
 
   let body: unknown
   try {
@@ -131,7 +129,7 @@ export async function handleMigrateIngestRequest(
   let serverTs = Date.now()
   const eventsOnly = body.eventsOnly === true
   const deferFileCounters = body.deferFileCounters === true
-  const stmts: D1PreparedStatement[] = []
+  const stmts: AquillaStatement[] = []
 
   for (const e of body.events) {
     if (typeof e.id !== 'string' || typeof e.kind !== 'string' || typeof e.author !== 'string') {
@@ -183,11 +181,11 @@ export async function handleMigrateIngestRequest(
   }
 
   try {
-    for (let i = 0; i < stmts.length; i += D1_BATCH_LIMIT) {
-      await db.batch(stmts.slice(i, i + D1_BATCH_LIMIT))
+    for (let i = 0; i < stmts.length; i += BATCH_LIMIT) {
+      await db.batch(stmts.slice(i, i + BATCH_LIMIT))
     }
   } catch (err) {
-    return Response.json({ error: `D1 batch failed: ${String(err)}` }, { status: 500 })
+    return Response.json({ error: `DB batch failed: ${String(err)}` }, { status: 500 })
   }
 
   return Response.json({ accepted: body.events.length })

@@ -19,7 +19,7 @@
 //   DELETE /:projectId/invites/:token     revoke an unused invite
 //
 // All non-public routes apply `authMiddleware`. Routes that touch
-// `c.env.AQUILLA_DB` no-op gracefully if the binding is absent (test envs).
+// `c.env.AQUILLA_PG` no-op gracefully if the binding is absent (test envs).
 
 import { Hono } from "hono"
 import { zValidator } from "@hono/zod-validator"
@@ -80,10 +80,10 @@ async function loadFilesByProject(
   projectIds: string[],
 ): Promise<Map<string, FileProjection[]>> {
   const byProject = new Map<string, FileProjection[]>()
-  if (!env.AQUILLA_DB || projectIds.length === 0) return byProject
+  if (!env.AQUILLA_PG || projectIds.length === 0) return byProject
 
   const placeholders = projectIds.map(() => "?").join(",")
-  const rows = await env.AQUILLA_DB.prepare(
+  const rows = await env.AQUILLA_PG.prepare(
     `SELECT id, project_id, name, kind, role, cell_count, meta
        FROM files
       WHERE project_id IN (${placeholders})
@@ -186,7 +186,7 @@ projects.post(
     }
 
     try {
-      await c.env.AQUILLA_DB.prepare(
+      await c.env.AQUILLA_PG.prepare(
         `INSERT INTO projects (id, name, org_id, created_by)
          VALUES (?, ?, ?, ?)
          ON CONFLICT(id) DO NOTHING`,
@@ -237,7 +237,7 @@ projects.get("/", authMiddleware, async (c) => {
   //   ?8-?10 : user.id for WHERE access check (created_by, pm, om)
   //   ?11    : orgFilter (NULL or number) — IS NULL check (no-filter case)
   //   ?12    : orgFilter (NULL or number) — equality check (filter case)
-  const rows = await c.env.AQUILLA_DB.prepare(
+  const rows = await c.env.AQUILLA_PG.prepare(
     `SELECT p.id, p.name, p.org_id, p.archived_at,
             GREATEST(
               COALESCE(pm.role_level, 0),
@@ -329,7 +329,7 @@ projects.get("/:projectId", authMiddleware, async (c) => {
   const role = await resolveProjectRoleIncludingArchived(c.env, user, projectId)
   if (!role) return c.json({ error: "not found or no access" }, 403)
 
-  const row = await c.env.AQUILLA_DB.prepare(
+  const row = await c.env.AQUILLA_PG.prepare(
     `SELECT p.id, p.name, p.archived_at, p.archived_by,
             u.username AS archived_by_username
        FROM projects p
@@ -377,7 +377,7 @@ projects.post("/:projectId/archive", authMiddleware, async (c) => {
   }
 
   try {
-    await c.env.AQUILLA_DB.prepare(
+    await c.env.AQUILLA_PG.prepare(
       `UPDATE projects
           SET archived_at = CURRENT_TIMESTAMP,
               archived_by = ?
@@ -391,7 +391,7 @@ projects.post("/:projectId/archive", authMiddleware, async (c) => {
     return c.json({ error: `archive failed: ${message}` }, 500)
   }
 
-  const row = await c.env.AQUILLA_DB.prepare(
+  const row = await c.env.AQUILLA_PG.prepare(
     "SELECT archived_at, archived_by FROM projects WHERE id = ?",
   )
     .bind(projectId)
@@ -423,7 +423,7 @@ projects.delete("/:projectId/archive", authMiddleware, async (c) => {
   }
 
   try {
-    await c.env.AQUILLA_DB.prepare(
+    await c.env.AQUILLA_PG.prepare(
       `UPDATE projects
           SET archived_at = NULL,
               archived_by = NULL
@@ -454,7 +454,7 @@ projects.patch("/:projectId/deadline", authMiddleware, zValidator("json", deadli
   if (!role) return c.json({ error: "not found or no access" }, 403)
   if (role.level < ROLE.MAINTAINER) return c.json({ error: "maintainer+ required" }, 403)
   const { deadline } = c.req.valid("json")
-  await c.env.AQUILLA_DB.prepare(
+  await c.env.AQUILLA_PG.prepare(
     "UPDATE projects SET deadline_at = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
   )
     .bind(deadline, projectId)
@@ -515,7 +515,7 @@ projects.get("/:projectId/members", authMiddleware, async (c) => {
   const role = await resolveProjectRole(c.env, user, projectId)
   if (!role) return c.json({ error: "no access to project" }, 403)
 
-  const project = await c.env.AQUILLA_DB.prepare(
+  const project = await c.env.AQUILLA_PG.prepare(
     "SELECT created_by, org_id FROM projects WHERE id = ?",
   )
     .bind(projectId)
@@ -586,7 +586,7 @@ projects.post(
       return c.json({ error: "cannot grant role to self" }, 400)
     }
 
-    await c.env.AQUILLA_DB.prepare(
+    await c.env.AQUILLA_PG.prepare(
       `INSERT INTO project_members (project_id, user_id, role_level, granted_by)
        VALUES (?, ?, ?, ?)
        ON CONFLICT(project_id, user_id) DO UPDATE SET
@@ -623,7 +623,7 @@ projects.delete("/:projectId/members/:userId", authMiddleware, async (c) => {
     return c.json({ error: "role >= maintainer required" }, 403)
   }
 
-  const existing = await c.env.AQUILLA_DB.prepare(
+  const existing = await c.env.AQUILLA_PG.prepare(
     "SELECT role_level FROM project_members WHERE project_id = ? AND user_id = ?",
   )
     .bind(projectId, targetUserId)
@@ -635,7 +635,7 @@ projects.delete("/:projectId/members/:userId", authMiddleware, async (c) => {
     )
   }
 
-  await c.env.AQUILLA_DB.prepare(
+  await c.env.AQUILLA_PG.prepare(
     "DELETE FROM project_members WHERE project_id = ? AND user_id = ?",
   )
     .bind(projectId, targetUserId)
@@ -658,9 +658,9 @@ projects.delete("/:projectId/files/:fileId", authMiddleware, async (c) => {
     return c.json({ error: "not allowed" }, 403)
   }
 
-  if (c.env.AQUILLA_DB) {
+  if (c.env.AQUILLA_PG) {
     try {
-      await c.env.AQUILLA_DB.prepare(
+      await c.env.AQUILLA_PG.prepare(
         "DELETE FROM files WHERE id = ? AND project_id = ?",
       )
         .bind(fileId, projectId)
@@ -743,7 +743,7 @@ projects.post(
     const expiresAt = new Date(Date.now() + DEFAULT_INVITE_TTL_MS).toISOString()
 
     try {
-      await c.env.AQUILLA_DB.prepare(
+      await c.env.AQUILLA_PG.prepare(
         `INSERT INTO project_invites
            (token, project_id, role_level, created_by, expires_at, email)
          VALUES (?, ?, ?, ?, ?, ?)`,
@@ -759,7 +759,7 @@ projects.post(
     if (email) {
       const baseUrl = c.env.BASE_URL || "https://aquilla.app"
       const joinUrl = `${baseUrl}/join/${token}`
-      const proj = await c.env.AQUILLA_DB.prepare(
+      const proj = await c.env.AQUILLA_PG.prepare(
         "SELECT name FROM projects WHERE id = ?",
       )
         .bind(projectId)
@@ -797,7 +797,7 @@ projects.get("/invite-preview/:token", async (c) => {
     return c.json({ error: "Invalid token" }, 404)
   }
 
-  const invite = await c.env.AQUILLA_DB.prepare(
+  const invite = await c.env.AQUILLA_PG.prepare(
     `SELECT token, project_id, role_level, created_by, created_at,
             expires_at, used_by, used_at, email
      FROM project_invites WHERE token = ?`,
@@ -818,7 +818,7 @@ projects.get("/invite-preview/:token", async (c) => {
     return c.json({ error: "Invite already used" }, 410)
   }
 
-  const project = await c.env.AQUILLA_DB.prepare(
+  const project = await c.env.AQUILLA_PG.prepare(
     `SELECT id, name, org_id, created_by, archived_at
      FROM projects WHERE id = ?`,
   )
@@ -852,7 +852,7 @@ projects.post(
     const user = c.get("user")
     const { token } = c.req.valid("json")
 
-    const invite = await c.env.AQUILLA_DB.prepare(
+    const invite = await c.env.AQUILLA_PG.prepare(
       `SELECT token, project_id, role_level, created_by, created_at,
               expires_at, used_by, used_at
        FROM project_invites WHERE token = ?`,
@@ -872,7 +872,7 @@ projects.post(
       return c.json({ error: "Invite already used" }, 410)
     }
 
-    const existing = await c.env.AQUILLA_DB.prepare(
+    const existing = await c.env.AQUILLA_PG.prepare(
       `SELECT role_level FROM project_members
        WHERE project_id = ? AND user_id = ?`,
     )
@@ -885,7 +885,7 @@ projects.post(
 
     try {
       if (existing) {
-        await c.env.AQUILLA_DB.prepare(
+        await c.env.AQUILLA_PG.prepare(
           `UPDATE project_members
            SET role_level = ?, granted_by = ?, granted_at = CURRENT_TIMESTAMP
            WHERE project_id = ? AND user_id = ?`,
@@ -893,7 +893,7 @@ projects.post(
           .bind(finalRole, invite.created_by, invite.project_id, user.id)
           .run()
       } else {
-        await c.env.AQUILLA_DB.prepare(
+        await c.env.AQUILLA_PG.prepare(
           `INSERT INTO project_members
              (project_id, user_id, role_level, granted_by)
            VALUES (?, ?, ?, ?)`,
@@ -902,7 +902,7 @@ projects.post(
           .run()
       }
       if (!invite.used_at) {
-        await c.env.AQUILLA_DB.prepare(
+        await c.env.AQUILLA_PG.prepare(
           `UPDATE project_invites
            SET used_by = ?, used_at = CURRENT_TIMESTAMP
            WHERE token = ?`,
@@ -930,7 +930,7 @@ projects.delete("/:projectId/invites/:token", authMiddleware, async (c) => {
     return c.json({ error: "role >= project_lead required" }, 403)
   }
 
-  const result = await c.env.AQUILLA_DB.prepare(
+  const result = await c.env.AQUILLA_PG.prepare(
     `DELETE FROM project_invites
       WHERE token = ? AND project_id = ? AND used_by IS NULL`,
   )

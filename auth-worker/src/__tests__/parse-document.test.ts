@@ -1,6 +1,6 @@
 // parse-document — unit tests (FRO-197)
 //
-// Tests the text-extraction helpers directly (no HTTP, no D1) and the
+// Tests the text-extraction helpers directly (no HTTP, no DB) and the
 // size-cap rejection via the Hono app. The authMiddleware is exercised
 // incidentally: unauthenticated requests → 401.
 

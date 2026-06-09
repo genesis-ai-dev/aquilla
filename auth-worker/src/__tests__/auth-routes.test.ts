@@ -3,13 +3,13 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest"
 import app from "../index"
 import { hashPasswordWerkzeugScrypt } from "../utils/password"
 import { verify } from "hono/jwt"
-import { authHeader, jwtFor } from "./helpers/d1"
+import { authHeader, jwtFor } from "./helpers/db"
 
 const SECRET = "frontier-test-secret"
 
 async function seedAliceWithPassword(password: string): Promise<void> {
   const hash = await hashPasswordWerkzeugScrypt(password)
-  await env.AQUILLA_DB.prepare(
+  await env.AQUILLA_PG.prepare(
     "INSERT INTO users (id, username, email, password_hash, preferences) VALUES (1, 'alice', 'alice@example.com', ?, '{\"theme\":\"dark\"}')",
   )
     .bind(hash)

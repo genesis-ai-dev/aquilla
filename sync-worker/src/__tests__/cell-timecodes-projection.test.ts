@@ -15,7 +15,7 @@ function makeRecordingDb() {
         },
       }
     },
-  } as unknown as D1Database
+  } as unknown as AquillaDb
   return { db, recorded }
 }
 
@@ -31,7 +31,7 @@ function sourceCreate(): PersistedEvent {
 describe("timecode projection", () => {
   it("writes start_ms/end_ms in the cells INSERT for source.cell.create", () => {
     const { db, recorded } = makeRecordingDb()
-    const stmts: D1PreparedStatement[] = []
+    const stmts: AquillaStatement[] = []
     buildEventProjectionStmts(db, sourceCreate(), stmts)
     const cellsInsert = recorded.find((r) => r.sql.includes("INSERT INTO cells ("))
     expect(cellsInsert).toBeTruthy()

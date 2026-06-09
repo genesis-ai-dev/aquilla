@@ -28,7 +28,7 @@ export function makeEventId(): string {
 }
 
 async function nextServerSeq(env: Env, projectId: string): Promise<number> {
-  const row = await env.AQUILLA_DB.prepare(
+  const row = await env.AQUILLA_PG.prepare(
     "SELECT COALESCE(MAX(server_seq), 0) + 1 AS next_seq FROM events WHERE project_id = ?",
   )
     .bind(projectId)
@@ -65,7 +65,7 @@ export async function loadProjectWithSource(
   env: Env,
   projectId: string,
 ): Promise<SourceLinkProject | null> {
-  return env.AQUILLA_DB.prepare(
+  return env.AQUILLA_PG.prepare(
     `SELECT id, name, source_project_id, archived_at
        FROM projects WHERE id = ?`,
   )
@@ -101,7 +101,7 @@ export async function chainContains(
     }
     seen.add(cursor)
     const row: { source_project_id: string | null } | null =
-      await env.AQUILLA_DB.prepare(
+      await env.AQUILLA_PG.prepare(
         "SELECT source_project_id FROM projects WHERE id = ?",
       )
         .bind(cursor)
@@ -122,7 +122,7 @@ export async function listDownstreamProjects(
   env: Env,
   projectId: string,
 ): Promise<string[]> {
-  const rows = await env.AQUILLA_DB.prepare(
+  const rows = await env.AQUILLA_PG.prepare(
     "SELECT id FROM projects WHERE source_project_id = ?",
   )
     .bind(projectId)
@@ -149,14 +149,14 @@ export async function emitLinkSourceEvent(
     sourceProjectId: string | null
   },
 ): Promise<void> {
-  if (!env.AQUILLA_DB) return
+  if (!env.AQUILLA_PG) return
   const now = Date.now()
   const id = makeEventId()
   const payload = JSON.stringify({ sourceProjectId: args.sourceProjectId })
 
   try {
     const serverSeq = await nextServerSeq(env, args.projectId)
-    await env.AQUILLA_DB.prepare(
+    await env.AQUILLA_PG.prepare(
       `INSERT INTO events
          (id, schema_version, project_id, file_id, cell_id, parent_id, kind,
           author, payload, client_ts, server_ts, server_seq)
@@ -195,7 +195,7 @@ export async function snapshotSourceCells(
     authorUsername: string
   },
 ): Promise<number> {
-  if (!env.AQUILLA_DB) return 0
+  if (!env.AQUILLA_PG) return 0
   const now = Date.now()
 
   // Phase 1A's `cells` table has schema columns:
@@ -216,7 +216,7 @@ export async function snapshotSourceCells(
     anchor_cell_id: string | null
   }> = []
   try {
-    const rows = await env.AQUILLA_DB.prepare(
+    const rows = await env.AQUILLA_PG.prepare(
       `SELECT file_id, cell_id, value, value_html, type, canonical_ref, anchor_cell_id
          FROM cells
         WHERE project_id = ? AND side = 'source'`,
@@ -245,7 +245,7 @@ export async function snapshotSourceCells(
   for (const cell of cells) {
     const id = makeEventId()
     try {
-      const existing = await env.AQUILLA_DB.prepare(
+      const existing = await env.AQUILLA_PG.prepare(
         `SELECT event_id
            FROM cells
           WHERE project_id = ? AND file_id = ? AND cell_id = ? AND side = 'source'`,
@@ -269,7 +269,7 @@ export async function snapshotSourceCells(
           })
       const serverSeq = await nextServerSeq(env, args.targetProjectId)
 
-      await env.AQUILLA_DB.prepare(
+      await env.AQUILLA_PG.prepare(
         `INSERT INTO events
            (id, schema_version, project_id, file_id, cell_id, parent_id, kind,
             author, payload, client_ts, server_ts, server_seq)
@@ -294,7 +294,7 @@ export async function snapshotSourceCells(
       const hash = contentHash(cell.value)
       const wordCount = countWords(cell.value)
       if (existing) {
-        await env.AQUILLA_DB.prepare(
+        await env.AQUILLA_PG.prepare(
           `UPDATE cells
               SET value = ?,
                   value_html = ?,
@@ -319,7 +319,7 @@ export async function snapshotSourceCells(
           )
           .run()
       } else {
-        await env.AQUILLA_DB.prepare(
+        await env.AQUILLA_PG.prepare(
           `INSERT INTO cells (
             project_id, file_id, cell_id, side, value, value_html, type,
             canonical_ref, anchor_cell_id, event_id, source_event_id,

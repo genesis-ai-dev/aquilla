@@ -69,7 +69,7 @@ syncToken.post(
 
     // Cheap existence + archived check first so we can short-circuit on
     // archived and branch to auto-register when the project is unknown.
-    const project = await c.env.AQUILLA_DB.prepare(
+    const project = await c.env.AQUILLA_PG.prepare(
       `SELECT id, archived_at FROM projects WHERE id = ?`,
     )
       .bind(projectId)
@@ -88,7 +88,7 @@ syncToken.post(
       //    name) is supplied by the client; the caller becomes the owner.
       //    Matches the auto-registration behaviour described in docs/SYNC.md.
       try {
-        await c.env.AQUILLA_DB.prepare(
+        await c.env.AQUILLA_PG.prepare(
           `INSERT INTO projects (id, name, created_by)
            VALUES (?, ?, ?)`,
         )

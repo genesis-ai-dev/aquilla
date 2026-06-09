@@ -15,7 +15,7 @@
 import { verifyTokenForProject } from "../auth"
 
 export interface FilesReadEnv {
-  AQUILLA_DB?: D1Database
+  AQUILLA_PG?: AquillaDb
   SYNC_SECRET_KEY?: string
 }
 
@@ -96,8 +96,8 @@ export async function handleFilesReadRequest(
   if (!env.SYNC_SECRET_KEY) {
     return new Response("SYNC_SECRET_KEY not configured", { status: 500 })
   }
-  if (!env.AQUILLA_DB) {
-    return new Response("AQUILLA_DB binding not configured", { status: 500 })
+  if (!env.AQUILLA_PG) {
+    return new Response("AQUILLA_PG binding not configured", { status: 500 })
   }
 
   const projectId = decodeURIComponent(match[1])
@@ -120,7 +120,7 @@ export async function handleFilesReadRequest(
 
   if (fileId) {
     const sql = `SELECT ${columns} FROM files WHERE project_id = ? AND id = ?`
-    const row = await env.AQUILLA_DB.prepare(sql)
+    const row = await env.AQUILLA_PG.prepare(sql)
       .bind(projectId, fileId)
       .first<FileRowRaw>()
     if (!row) return new Response("file not found", { status: 404 })
@@ -130,7 +130,7 @@ export async function handleFilesReadRequest(
   const sql =
     `SELECT ${columns} FROM files WHERE project_id = ? ` +
     `ORDER BY last_edit_at DESC NULLS LAST, name ASC`
-  const result = await env.AQUILLA_DB.prepare(sql)
+  const result = await env.AQUILLA_PG.prepare(sql)
     .bind(projectId)
     .all<FileRowRaw>()
   return Response.json({ files: result.results.map(mapRow) })

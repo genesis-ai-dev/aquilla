@@ -14,7 +14,7 @@ import type { EventKind } from '../events/types'
 
 const SECRET = 'bt-test-secret'
 
-// ── Recording D1 stub (captures sql + args without hitting a real DB) ────────
+// ── recording DB stub (captures sql + args without hitting a real DB) ────────
 
 interface RecordedStmt {
   sql: string
@@ -30,13 +30,13 @@ function makeRecordingDb() {
           recorded.push({ sql: sql.replace(/\s+/g, ' ').trim(), args })
           return this
         },
-      } as unknown as D1PreparedStatement
+      } as unknown as AquillaStatement
     },
-  } as unknown as D1Database
+  } as unknown as AquillaDb
   return { db, recorded }
 }
 
-function makeNoOpDb(): D1Database {
+function makeNoOpDb(): AquillaDb {
   function makePrepared(sql: string) {
     let boundArgs: unknown[] = []
     const stmt = {
@@ -45,19 +45,19 @@ function makeNoOpDb(): D1Database {
       async all() { return { results: [], success: true, meta: {} } },
       async run() { return { success: true, meta: {} } },
       raw: async () => [],
-    } as unknown as D1PreparedStatement
+    } as unknown as AquillaStatement
     ;(stmt as any).__sql = sql
     ;(stmt as any).__getArgs = () => boundArgs
     return stmt
   }
   return {
     prepare: makePrepared,
-    async batch(ss: D1PreparedStatement[]) {
+    async batch(ss: AquillaStatement[]) {
       return ss.map(() => ({ success: true, results: [], meta: {} }))
     },
     dump: async () => new ArrayBuffer(0),
     exec: async () => ({ count: 0, duration: 0 }),
-  } as unknown as D1Database
+  } as unknown as AquillaDb
 }
 
 function makeBtEvent(overrides: Partial<PersistedEvent> = {}): PersistedEvent {
@@ -88,7 +88,7 @@ function makeBtEvent(overrides: Partial<PersistedEvent> = {}): PersistedEvent {
 describe('cell.backtranslation.set projection', () => {
   it('upserts into cell_backtranslations only — does NOT touch cells or cell_validators', () => {
     const { db, recorded } = makeRecordingDb()
-    const stmts: D1PreparedStatement[] = []
+    const stmts: AquillaStatement[] = []
     const touches = buildEventProjectionStmts(db, makeBtEvent(), stmts)
 
     // Only cell_backtranslations is touched — cells.event_id is NOT moved.
@@ -107,7 +107,7 @@ describe('cell.backtranslation.set projection', () => {
 
   it('binds the correct column values', () => {
     const { db, recorded } = makeRecordingDb()
-    const stmts: D1PreparedStatement[] = []
+    const stmts: AquillaStatement[] = []
     buildEventProjectionStmts(
       db,
       makeBtEvent({
@@ -137,14 +137,14 @@ describe('cell.backtranslation.set projection', () => {
 
   it('serializes polished=false as 0', () => {
     const { db, recorded } = makeRecordingDb()
-    const stmts: D1PreparedStatement[] = []
+    const stmts: AquillaStatement[] = []
     buildEventProjectionStmts(db, makeBtEvent(), stmts)
     expect(recorded[0].args[6]).toBe(0)
   })
 
   it('passes btHtml=null when omitted from payload', () => {
     const { db, recorded } = makeRecordingDb()
-    const stmts: D1PreparedStatement[] = []
+    const stmts: AquillaStatement[] = []
     buildEventProjectionStmts(
       db,
       makeBtEvent({
@@ -161,7 +161,7 @@ describe('cell.backtranslation.set projection', () => {
 
   it('throws when fileId or cellId is missing', () => {
     const { db } = makeRecordingDb()
-    const stmts: D1PreparedStatement[] = []
+    const stmts: AquillaStatement[] = []
     expect(() =>
       buildEventProjectionStmts(db, makeBtEvent({ fileId: null }), stmts),
     ).toThrow('missing fileId or cellId')
@@ -276,11 +276,11 @@ function makeReadDb(rows: BtRow[]) {
         },
       }
     },
-  } as unknown as D1Database
+  } as unknown as AquillaDb
 }
 
 async function readReq(
-  env: { AQUILLA_DB?: D1Database; SYNC_SECRET_KEY?: string },
+  env: { AQUILLA_PG?: AquillaDb; SYNC_SECRET_KEY?: string },
   token?: string,
   extra = '',
 ) {
@@ -296,13 +296,13 @@ describe('GET /api/v1/projects/:p/files/:f/backtranslations', () => {
   it('returns null for unrelated paths', async () => {
     const res = await handleCellBacktranslationsReadRequest(
       new Request('https://w/api/v1/projects/p1/files/f1/cells'),
-      { AQUILLA_DB: makeReadDb([]), SYNC_SECRET_KEY: SECRET },
+      { AQUILLA_PG: makeReadDb([]), SYNC_SECRET_KEY: SECRET },
     )
     expect(res).toBeNull()
   })
 
   it('401 without a token', async () => {
-    const res = (await readReq({ AQUILLA_DB: makeReadDb([]), SYNC_SECRET_KEY: SECRET }))!
+    const res = (await readReq({ AQUILLA_PG: makeReadDb([]), SYNC_SECRET_KEY: SECRET }))!
     expect(res).not.toBeNull()
     expect(res.status).toBe(401)
   })
@@ -315,7 +315,7 @@ describe('GET /api/v1/projects/:p/files/:f/backtranslations', () => {
         polished: 0, author: 'alice', event_id: 'evt-bt-x', created_at: 100,
       },
     ]
-    const res = (await readReq({ AQUILLA_DB: makeReadDb(rows), SYNC_SECRET_KEY: SECRET }, token))!
+    const res = (await readReq({ AQUILLA_PG: makeReadDb(rows), SYNC_SECRET_KEY: SECRET }, token))!
     expect(res.status).toBe(200)
   })
 
@@ -332,7 +332,7 @@ describe('GET /api/v1/projects/:p/files/:f/backtranslations', () => {
         bt_html: null, polished: 0, author: 'bob', event_id: 'evt-bt-2', created_at: 600,
       },
     ]
-    const res = (await readReq({ AQUILLA_DB: makeReadDb(rows), SYNC_SECRET_KEY: SECRET }, token))!
+    const res = (await readReq({ AQUILLA_PG: makeReadDb(rows), SYNC_SECRET_KEY: SECRET }, token))!
     expect(res.status).toBe(200)
     const body = (await res.json()) as { backtranslations: unknown[] }
     expect(body.backtranslations).toHaveLength(2)
@@ -354,14 +354,14 @@ describe('GET /api/v1/projects/:p/files/:f/backtranslations', () => {
 
   it('returns empty array when no BTs exist for the file', async () => {
     const token = await makeTestToken(SECRET, { projectId: 'p1', fileId: 'f1', role: 100 })
-    const res = (await readReq({ AQUILLA_DB: makeReadDb([]), SYNC_SECRET_KEY: SECRET }, token))!
+    const res = (await readReq({ AQUILLA_PG: makeReadDb([]), SYNC_SECRET_KEY: SECRET }, token))!
     expect(res.status).toBe(200)
     const body = (await res.json()) as { backtranslations: unknown[] }
     expect(body.backtranslations).toHaveLength(0)
   })
 
   it('500 without SYNC_SECRET_KEY configured', async () => {
-    const res = (await readReq({ AQUILLA_DB: makeReadDb([]) }))!
+    const res = (await readReq({ AQUILLA_PG: makeReadDb([]) }))!
     expect(res).not.toBeNull()
     expect(res.status).toBe(500)
   })
@@ -372,7 +372,7 @@ describe('GET /api/v1/projects/:p/files/:f/backtranslations', () => {
 describe('cell.backtranslation.set does not move cells.event_id', () => {
   it('projection SQL does not contain UPDATE cells SET event_id', () => {
     const { db, recorded } = makeRecordingDb()
-    const stmts: D1PreparedStatement[] = []
+    const stmts: AquillaStatement[] = []
     buildEventProjectionStmts(db, makeBtEvent(), stmts)
     for (const r of recorded) {
       // No statement should advance the cells chain head.
@@ -383,7 +383,7 @@ describe('cell.backtranslation.set does not move cells.event_id', () => {
 
   it('projection SQL does not touch cell_validators (validations unaffected)', () => {
     const { db, recorded } = makeRecordingDb()
-    const stmts: D1PreparedStatement[] = []
+    const stmts: AquillaStatement[] = []
     buildEventProjectionStmts(db, makeBtEvent(), stmts)
     for (const r of recorded) {
       expect(r.sql).not.toContain('cell_validators')

@@ -10,28 +10,28 @@
 import { env } from "cloudflare:test"
 import { describe, it, expect } from "vitest"
 import app from "../index"
-import { seedUser, jwtFor, authHeader } from "./helpers/d1"
+import { seedUser, jwtFor, authHeader } from "./helpers/db"
 
 async function seed() {
   await seedUser(1, "wendi") // org owner / caller
   await seedUser(2, "anna")  // subject with multi-path access
 
-  await env.AQUILLA_DB.prepare(
+  await env.AQUILLA_PG.prepare(
     "INSERT INTO organizations (id, name, owner_user_id) VALUES (1, 'CAS', 1)"
   ).run()
 
   // wendi = org owner (700), anna = org viewer (100)
-  await env.AQUILLA_DB.prepare(
+  await env.AQUILLA_PG.prepare(
     "INSERT INTO org_members (org_id, user_id, role_level, granted_by) VALUES (1, 1, 700, 1), (1, 2, 100, 1)"
   ).run()
 
   // project pa: created by wendi, belongs to org 1
-  await env.AQUILLA_DB.prepare(
+  await env.AQUILLA_PG.prepare(
     "INSERT INTO projects (id, name, org_id, created_by) VALUES ('pa', 'John', 1, 1)"
   ).run()
 
   // anna has a direct contributor (300) override on pa → wins over org viewer (100)
-  await env.AQUILLA_DB.prepare(
+  await env.AQUILLA_PG.prepare(
     "INSERT INTO project_members (project_id, user_id, role_level, granted_by) VALUES ('pa', 2, 300, 1)"
   ).run()
 }
@@ -77,7 +77,7 @@ describe("GET /api/v2/projects/:projectId/members — secondarySources", () => {
     await seed()
     await seedUser(3, "bob")
     // bob gets a direct contributor grant but is NOT in the org
-    await env.AQUILLA_DB.prepare(
+    await env.AQUILLA_PG.prepare(
       "INSERT INTO project_members (project_id, user_id, role_level, granted_by) VALUES ('pa', 3, 200, 1)"
     ).run()
 

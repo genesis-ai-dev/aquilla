@@ -13,9 +13,9 @@ export interface DispatchResult {
    * The events INSERT statement plus any projection statements
    * (cells/files/cell_validators UPSERT, UPDATE, DELETE). Caller
    * accumulates these across all events in the batch and issues them in
-   * D1_BATCH_LIMIT-sized chunks via db.batch().
+   * BATCH_LIMIT-sized chunks via db.batch().
    */
-  stmts: D1PreparedStatement[]
+  stmts: AquillaStatement[]
   /**
    * Per-event Realtime frame. Caller may coalesce many of these for
    * broadcast.

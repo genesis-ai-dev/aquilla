@@ -1,7 +1,7 @@
 // AD-13 branching-search algorithm — deterministic BM25 + iterative
 // coverage/branch loop. Spec: aquilla-specs/02-foundations.md §AD-13.
 //
-// Pure functions only — no D1, no env, no Workers types. The route handler
+// Pure functions only — no DB, no env, no Workers types. The route handler
 // is responsible for loading the corpus + tunables and calling
 // `branchingSearch`. Everything here is unit-testable in isolation.
 //
@@ -13,7 +13,7 @@ import type { BranchingSearchSettings } from "./settings"
 
 // ─── Public types ───────────────────────────────────────────────────────
 
-/** Input row for the corpus. The route handler fills these from D1. */
+/** Input row for the corpus. The route handler fills these from Postgres. */
 export interface CorpusCell {
   cellId: string
   sourceText: string

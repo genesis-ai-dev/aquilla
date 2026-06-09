@@ -14,7 +14,7 @@
 import type { CorpusCell } from "./algorithm"
 
 export interface CorpusLoaderEnv {
-  AQUILLA_DB?: D1Database
+  AQUILLA_PG?: AquillaDb
 }
 
 /**
@@ -27,9 +27,9 @@ export async function resolveUpstreamProjectId(
   env: CorpusLoaderEnv,
   projectId: string,
 ): Promise<string | null> {
-  if (!env.AQUILLA_DB) return null
+  if (!env.AQUILLA_PG) return null
   try {
-    const row = await env.AQUILLA_DB.prepare(
+    const row = await env.AQUILLA_PG.prepare(
       "SELECT source_project_id FROM projects WHERE id = ?",
     )
       .bind(projectId)
@@ -62,7 +62,7 @@ export interface LoadCorpusResult {
 
 /**
  * Loads the AD-13 branching-search corpus. See file-level comment for the
- * three project-shape behaviors. Throws on D1 errors; the route handler
+ * three project-shape behaviors. Throws on Postgres errors; the route handler
  * surfaces them as 500. (Unlike `stale-source-route` which soft-fails to
  * empty, the corpus is fundamental to this endpoint — a missing one is
  * an error, not "no neighbors.")
@@ -71,7 +71,7 @@ export async function loadCorpus(
   env: CorpusLoaderEnv,
   args: LoadCorpusArgs,
 ): Promise<LoadCorpusResult> {
-  if (!env.AQUILLA_DB) {
+  if (!env.AQUILLA_PG) {
     return { cells: [], upstreamProjectId: null, corpusEventMax: null }
   }
 
@@ -113,7 +113,7 @@ export async function loadCorpus(
 
   const sql = parts.join(" ")
 
-  const res = await env.AQUILLA_DB.prepare(sql)
+  const res = await env.AQUILLA_PG.prepare(sql)
     .bind(...binds)
     .all<{
       cell_id: string

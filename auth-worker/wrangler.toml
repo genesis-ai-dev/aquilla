@@ -47,22 +47,20 @@ account_id = "6a80496d1e59948a9cbaa3c643ba81d7"
 # this worker's `api.aquilla.app/chat/*` is verified the legacy route can
 # be detached.
 
-# Phase D: auth-worker is the full identity surface. AQUILLA_DB owns the
-# complete schema (identity + orgs + projects + members + invites + file/cell
-# projections). Migrations under `migrations/` are applied automatically on
-# deploy — see the CI step that runs `wrangler d1 migrations apply aquilla-db`.
-# Schema ownership lives here; sync-worker binds the same D1 but does NOT
-# declare migrations_dir.
-[[d1_databases]]
-binding = "AQUILLA_DB"
-database_name = "aquilla-db"
-database_id = "11828e9d-998b-4d3f-a405-91d9f624f94a"
-migrations_dir = "migrations"
-
-# D1→Neon migration: when HYPERDRIVE is bound, index.ts swaps the AQUILLA_DB D1
-# handle for a Postgres shim over Hyperdrive → Neon. D1 binding kept for rollback.
-# NOTE: migrations_dir still targets D1; once fully on Neon, schema changes go
-# through db/postgres/schema.sql + scripts/pg.ts, not D1 migrations.
+# auth-worker is the full identity surface and owns the complete schema
+# (identity + orgs + projects + members + invites + file/cell projections).
+# The datastore is Postgres (Neon), reached through the D1-compatible shim
+# (db/shim/postgres.ts) over Hyperdrive — index.ts builds AQUILLA_PG from it.
+# D1 has been removed as a datastore (the D1→Neon cutover is complete); the
+# worker fails fast if HYPERDRIVE is absent rather than falling back to D1.
+#
+# Schema management is by hand against Neon, NOT D1 migrations:
+#   set -a; . ./.env; set +a            # load Neon creds
+#   npx tsx scripts/pg.ts db/postgres/schema.sql
+# The legacy D1 files under `migrations/` are retained only as the historical
+# record the Postgres schema was derived from. For local `wrangler dev`,
+# WRANGLER_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE points Hyperdrive at a
+# local/branch Postgres (see scripts/dev-stack.ts, scripts/e2e-up.ts).
 [[hyperdrive]]
 binding = "HYPERDRIVE"
 id = "69bcc10e67464f2eaf4fe91a9141e7cd"
@@ -106,12 +104,6 @@ routes = [
   "api.aquilla.app/chat/*",
 ]
 
-[[env.production.d1_databases]]
-binding = "AQUILLA_DB"
-database_name = "aquilla-db"
-database_id = "11828e9d-998b-4d3f-a405-91d9f624f94a"
-migrations_dir = "migrations"
-
 [[env.production.hyperdrive]]
 binding = "HYPERDRIVE"
 id = "69bcc10e67464f2eaf4fe91a9141e7cd"
@@ -140,16 +132,9 @@ routes = [
   "api.dev.aquilla.app/chat/*",
 ]
 
-[[env.staging.d1_databases]]
-binding = "AQUILLA_DB"
-database_name = "aquilla-db-staging"
-database_id = "c995bf9a-97c0-4966-a112-053a2d04d8f9"
-migrations_dir = "migrations"
-
-# Staging runs on Neon (Postgres) to mirror prod, NOT the legacy D1 above.
-# When HYPERDRIVE is bound, index.ts swaps AQUILLA_DB for a Postgres shim over
-# Hyperdrive → the Neon `staging` branch (project sweet-paper-88472094,
-# branch br-old-credit-aja5brf7). The D1 binding above is kept only for rollback.
+# Staging runs on Neon (Postgres) to mirror prod. index.ts builds AQUILLA_PG
+# from the Postgres shim over Hyperdrive → the Neon `staging` branch (project
+# sweet-paper-88472094, branch br-old-credit-aja5brf7).
 #
 # ONE-TIME PROVISIONING (FRO-146) — create the staging Hyperdrive config, then
 # paste its id below (replace the placeholder):
@@ -172,20 +157,19 @@ ENVIRONMENT = "staging"
 PLATFORM_ADMINS = "daniel2,dadukhankevin,ryder,ryder-aquilla,ryder-aquilla-2,ryder-aquilla-3"
 
 # ---------------------------------------------------------------------------
-# e2e test environment — identical to the default dev profile except the
-# Hyperdrive binding is intentionally absent. Without HYPERDRIVE, index.ts
-# falls straight through to the D1 (local SQLite) path, letting e2e-up
-# boot the worker against --persist-to local state without requiring a
-# running Postgres instance.
+# e2e test environment. Local e2e (scripts/e2e-up.ts) runs `wrangler dev` on
+# the DEFAULT profile and points Hyperdrive at a local Postgres via
+# WRANGLER_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE — so it boots on
+# Postgres, not D1. This [env.e2e] block only matters for a deployed
+# `wrangler deploy --env e2e`; it needs its own Hyperdrive binding (Postgres is
+# the only datastore now).
 # ---------------------------------------------------------------------------
 [env.e2e]
 name = "aquilla-identity-e2e"
 
-[[env.e2e.d1_databases]]
-binding = "AQUILLA_DB"
-database_name = "aquilla-db"
-database_id = "11828e9d-998b-4d3f-a405-91d9f624f94a"
-migrations_dir = "migrations"
+[[env.e2e.hyperdrive]]
+binding = "HYPERDRIVE"
+id = "REPLACE_WITH_E2E_HYPERDRIVE_ID"
 
 [env.e2e.vars]
 ALGORITHM = "HS256"

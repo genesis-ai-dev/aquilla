@@ -21,7 +21,7 @@ export type CommentEventKind = Extract<
 >
 
 export function handleCommentEvent(
-  db: D1Database,
+  db: AquillaDb,
   authed: AuthorizedEvent<CommentEventKind>,
   serverTs: number,
 ): DispatchResult {
@@ -68,7 +68,7 @@ export function handleCommentEvent(
     callerRole: claims.roleLevel,
   }
 
-  const stmts: D1PreparedStatement[] = [eventInsert]
+  const stmts: AquillaStatement[] = [eventInsert]
   const projectionTouches = buildEventProjectionStmts(db, persisted, stmts)
 
   const dirtyTables: ProjectionTable[] = ['events', ...projectionTouches]

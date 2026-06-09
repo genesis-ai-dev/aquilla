@@ -2,7 +2,7 @@ import { env } from "cloudflare:test"
 import { sign } from "hono/jwt"
 
 export async function seedUser(id: number, username: string): Promise<void> {
-  await env.AQUILLA_DB.prepare(
+  await env.AQUILLA_PG.prepare(
     "INSERT INTO users (id, username, email, password_hash, preferences) VALUES (?, ?, ?, ?, '{}')",
   )
     .bind(id, username, `${username}@example.com`, "scrypt:fake$salt$hash")

@@ -29,7 +29,7 @@ import {
 } from "../lib/confidence/propagate-health"
 
 export interface CellConfidenceEnv {
-  AQUILLA_DB?: D1Database
+  AQUILLA_PG?: AquillaDb
   SYNC_SECRET_KEY?: string
 }
 
@@ -58,7 +58,7 @@ interface CellConfidenceDetail {
 
 /** Load every source cell of a file with its target text + validated flag. */
 async function loadFileCells(
-  db: D1Database,
+  db: AquillaDb,
   projectId: string,
   fileId: string,
 ): Promise<FileCell[]> {
@@ -95,8 +95,8 @@ export async function handleCellConfidenceRequest(
   if (!env.SYNC_SECRET_KEY) {
     return new Response("SYNC_SECRET_KEY not configured", { status: 500 })
   }
-  if (!env.AQUILLA_DB) {
-    return new Response("AQUILLA_DB binding not configured", { status: 500 })
+  if (!env.AQUILLA_PG) {
+    return new Response("AQUILLA_PG binding not configured", { status: 500 })
   }
 
   const projectId = decodeURIComponent(match[1])
@@ -145,7 +145,7 @@ export async function handleCellConfidenceRequest(
   const startedAt = Date.now()
 
   // Nodes = translated cells (skip untranslated — not started, not unhealthy).
-  const fileCells = await loadFileCells(env.AQUILLA_DB, projectId, fileId)
+  const fileCells = await loadFileCells(env.AQUILLA_PG, projectId, fileId)
   const nodes: PropNode[] = []
   const nodeIds = new Set<string>()
   const byId = new Map<string, FileCell>()
@@ -165,7 +165,7 @@ export async function handleCellConfidenceRequest(
       if (node.validated) return // validated cells are anchors; no inbound need
       const cell = byId.get(node.id)!
       const neighbors = await querySourceNeighbors(
-        env.AQUILLA_DB!,
+        env.AQUILLA_PG!,
         verifiedProjectId,
         cell.sourceText,
         { topK, excludeCellId: cell.cellId, validatedOnly: false },

@@ -13,7 +13,7 @@
 import { verifyTokenForProject } from "../auth"
 
 export interface CellAudioReadEnv {
-  AQUILLA_DB?: D1Database
+  AQUILLA_PG?: AquillaDb
   SYNC_SECRET_KEY?: string
 }
 
@@ -69,8 +69,8 @@ export async function handleCellAudioReadRequest(
   if (!env.SYNC_SECRET_KEY) {
     return new Response("SYNC_SECRET_KEY not configured", { status: 500 })
   }
-  if (!env.AQUILLA_DB) {
-    return new Response("AQUILLA_DB binding not configured", { status: 500 })
+  if (!env.AQUILLA_PG) {
+    return new Response("AQUILLA_PG binding not configured", { status: 500 })
   }
 
   const projectId = decodeURIComponent(match[1])
@@ -83,7 +83,7 @@ export async function handleCellAudioReadRequest(
   const auth = await verifyTokenForProject(token, projectId, env.SYNC_SECRET_KEY)
   if (!auth.ok) return new Response(auth.reason, { status: auth.status })
 
-  const res = await env.AQUILLA_DB.prepare(
+  const res = await env.AQUILLA_PG.prepare(
     `SELECT cell_id, audio_id, slot, url, mime_type, voice_id, reference_audio_id,
             duration_ms, trim_start_ms, trim_end_ms, timings_json, selected, created_ts
        FROM cell_audio

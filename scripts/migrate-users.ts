@@ -25,7 +25,7 @@ import path from "node:path"
 import { planUserImport, type SourceUser, type ExistingUser } from "../src/lib/migrate/users"
 
 const FRONTIER_DB = "frontier-db-v2"
-const AQUILLA_DB = "aquilla-db"
+const AQUILLA_PG = "aquilla-db"
 const PERSIST = ".wrangler-dev-state"
 const INSERT_CHUNK = 100
 
@@ -90,8 +90,8 @@ function main() {
     return
   }
 
-  console.log(`Reading existing users from ${AQUILLA_DB} (${remoteTarget ? "remote / PROD" : "local dev"})…`)
-  const existing = d1Query<ExistingUser>(AQUILLA_DB, "SELECT username, email FROM users", remoteTarget)
+  console.log(`Reading existing users from ${AQUILLA_PG} (${remoteTarget ? "remote / PROD" : "local dev"})…`)
+  const existing = d1Query<ExistingUser>(AQUILLA_PG, "SELECT username, email FROM users", remoteTarget)
   console.log(`  ${existing.length} existing`)
 
   const plan = planUserImport(src, existing)
@@ -114,7 +114,7 @@ function main() {
   console.log(
     `\n${remoteTarget ? "⚠️  WRITING TO PROD aquilla-db" : "Writing to local dev aquilla-db"} — ${plan.toInsert.length} users…`,
   )
-  applyInserts(AQUILLA_DB, plan.toInsert, remoteTarget)
+  applyInserts(AQUILLA_PG, plan.toInsert, remoteTarget)
   console.log("✓ Done. Re-run without --apply to confirm 0 remain.")
 }
 

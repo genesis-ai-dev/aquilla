@@ -14,7 +14,7 @@
 import { verifyTokenForProject } from '../auth'
 
 export interface CommentsReadEnv {
-  AQUILLA_DB?: D1Database
+  AQUILLA_PG?: AquillaDb
   SYNC_SECRET_KEY?: string
 }
 
@@ -82,8 +82,8 @@ export async function handleCommentsReadRequest(
   if (!env.SYNC_SECRET_KEY) {
     return new Response('SYNC_SECRET_KEY not configured', { status: 500 })
   }
-  if (!env.AQUILLA_DB) {
-    return new Response('AQUILLA_DB binding not configured', { status: 500 })
+  if (!env.AQUILLA_PG) {
+    return new Response('AQUILLA_PG binding not configured', { status: 500 })
   }
 
   const projectId = decodeURIComponent(match[1])
@@ -126,7 +126,7 @@ export async function handleCommentsReadRequest(
   const sql = parts.join(' ')
 
   try {
-    const result = await env.AQUILLA_DB.prepare(sql)
+    const result = await env.AQUILLA_PG.prepare(sql)
       .bind(...binds)
       .all<CommentRowRaw>()
     const comments: CommentRowOut[] = result.results.map(toOut)

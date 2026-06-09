@@ -1,17 +1,17 @@
 // Shared types for the aquilla-identity worker.
 //
-// Single D1 (`aquilla-db` prod, `aquilla-db-staging` staging) owns
-// everything codex-web touches — identity, orgs, projects, members,
-// invites, plus the file/cell projections the sync worker writes. Schema
-// is defined in `apps/identity/migrations/0001_initial.sql`.
+// A single Postgres database (Neon) owns everything codex-web touches —
+// identity, orgs, projects, members, invites, plus the file/cell projections
+// the sync worker writes. Schema lives in `db/postgres/schema.sql`.
 
 export interface Env {
-  /** Bound to `aquilla-db` (prod) or `aquilla-db-staging` (staging).
-   *  Shared with aquilla-sync-worker (same database_id). */
-  AQUILLA_DB: D1Database
+  /** The Postgres (Neon) handle, served by the shim in db/shim/postgres.ts.
+   *  Injected per-request in index.ts from HYPERDRIVE; the sync worker uses the
+   *  same database. NOT a binding itself. */
+  AQUILLA_PG: AquillaDb
 
-  /** Postgres (Neon) via Hyperdrive. When bound, AQUILLA_DB is served by the
-   *  D1-compatible Postgres shim instead of D1 (the D1→Neon cutover). */
+  /** Postgres (Neon) via Hyperdrive — the sole datastore. index.ts builds
+   *  AQUILLA_PG from this; required (the worker fails fast when absent). */
   HYPERDRIVE?: Hyperdrive
 
   // Frontier JWT signing. Rotated for the clean break — tokens minted by

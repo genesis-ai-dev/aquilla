@@ -51,7 +51,7 @@ function roleNameFor(level: number): string {
 }
 
 async function resolveProjectRole(
-  authDb: D1Database,
+  authDb: AquillaDb,
   projectId: string,
   userId: number,
 ): Promise<{ project: ProjectRow; level: number } | null> {
@@ -89,7 +89,7 @@ projectsInvites.post(
     const { role, email } = c.req.valid("json")
 
     const resolved = await resolveProjectRole(
-      c.env.AQUILLA_DB,
+      c.env.AQUILLA_PG,
       projectId,
       user.id,
     )
@@ -121,7 +121,7 @@ projectsInvites.post(
       // Instead: store the email-bound metadata in a future column or simply
       // ignore it for now (the token is still the sole credential). We keep
       // the email in the response so the client can echo it in the UI.
-      await c.env.AQUILLA_DB.prepare(
+      await c.env.AQUILLA_PG.prepare(
         `INSERT INTO project_invites
            (token, project_id, role_level, created_by, expires_at)
          VALUES (?, ?, ?, ?, ?)`,
@@ -151,7 +151,7 @@ projectsInvites.get("/invite-preview/:token", async (c) => {
     return c.json({ error: "Invalid token" }, 404)
   }
 
-  const invite = await c.env.AQUILLA_DB.prepare(
+  const invite = await c.env.AQUILLA_PG.prepare(
     `SELECT token, project_id, role_level, created_by, created_at,
             expires_at, used_by, used_at
      FROM project_invites WHERE token = ?`,
@@ -172,7 +172,7 @@ projectsInvites.get("/invite-preview/:token", async (c) => {
     return c.json({ error: "Invite already used" }, 410)
   }
 
-  const project = await c.env.AQUILLA_DB.prepare(
+  const project = await c.env.AQUILLA_PG.prepare(
     `SELECT id, name, gitlab_project_id, org_id, created_by, archived_at
      FROM projects WHERE id = ?`,
   )
@@ -208,7 +208,7 @@ projectsInvites.post(
     const user = c.get("user")
     const { token } = c.req.valid("json")
 
-    const invite = await c.env.AQUILLA_DB.prepare(
+    const invite = await c.env.AQUILLA_PG.prepare(
       `SELECT token, project_id, role_level, created_by, created_at,
               expires_at, used_by, used_at
        FROM project_invites WHERE token = ?`,
@@ -233,7 +233,7 @@ projectsInvites.post(
     // Idempotent membership upsert: if the caller already has a row, keep
     // the higher of the two role levels so accepting a lower-rung invite
     // doesn't demote a maintainer.
-    const existing = await c.env.AQUILLA_DB.prepare(
+    const existing = await c.env.AQUILLA_PG.prepare(
       `SELECT role_level FROM project_members
        WHERE project_id = ? AND user_id = ?`,
     )
@@ -246,7 +246,7 @@ projectsInvites.post(
 
     try {
       if (existing) {
-        await c.env.AQUILLA_DB.prepare(
+        await c.env.AQUILLA_PG.prepare(
           `UPDATE project_members
            SET role_level = ?, granted_by = ?, granted_at = CURRENT_TIMESTAMP
            WHERE project_id = ? AND user_id = ?`,
@@ -254,7 +254,7 @@ projectsInvites.post(
           .bind(finalRole, invite.created_by, invite.project_id, user.id)
           .run()
       } else {
-        await c.env.AQUILLA_DB.prepare(
+        await c.env.AQUILLA_PG.prepare(
           `INSERT INTO project_members
              (project_id, user_id, role_level, granted_by)
            VALUES (?, ?, ?, ?)`,
@@ -266,7 +266,7 @@ projectsInvites.post(
       // user is still allowed because the WHERE/Math.max guards above run
       // before this UPDATE — `used_by` records the first redeemer only.
       if (!invite.used_at) {
-        await c.env.AQUILLA_DB.prepare(
+        await c.env.AQUILLA_PG.prepare(
           `UPDATE project_invites
            SET used_by = ?, used_at = CURRENT_TIMESTAMP
            WHERE token = ?`,

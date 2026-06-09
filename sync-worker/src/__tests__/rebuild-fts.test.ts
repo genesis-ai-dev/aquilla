@@ -1,11 +1,11 @@
 // Tests for handleRebuildFtsRequest.
 //
-// Uses the in-memory D1 fake. The endpoint deletes stale FTS rows for the
+// Uses the in-memory DB fake. The endpoint deletes stale FTS rows for the
 // project then re-inserts from cells — idempotent and project-scoped.
 
 import { describe, it, expect } from 'vitest'
 import { handleRebuildFtsRequest } from '../events/rebuild-fts'
-import { type CellRow } from './helpers/d1-fake'
+import { type CellRow } from './helpers/in-memory-db'
 import { makeTestDb } from './helpers/pg-test-db'
 
 function makeRequest(
@@ -19,8 +19,8 @@ function makeRequest(
   })
 }
 
-function makeEnv(db?: D1Database, secret: string | undefined = 'shared-secret') {
-  return { AQUILLA_DB: db, SYNC_SECRET_KEY: secret }
+function makeEnv(db?: AquillaDb, secret: string | undefined = 'shared-secret') {
+  return { AQUILLA_PG: db, SYNC_SECRET_KEY: secret }
 }
 
 function cell(overrides: Partial<CellRow> & Pick<CellRow, 'project_id' | 'cell_id'>): CellRow {
@@ -68,7 +68,7 @@ describe('handleRebuildFtsRequest — URL/method/auth', () => {
     const res = await handleRebuildFtsRequest(
       makeRequest('/admin/projects/p1/rebuild-fts'),
       // Bypass makeEnv default to get a truly unconfigured env.
-      { AQUILLA_DB: undefined, SYNC_SECRET_KEY: undefined },
+      { AQUILLA_PG: undefined, SYNC_SECRET_KEY: undefined },
     ) as Response
     expect(res.status).toBe(500)
   })
@@ -81,7 +81,7 @@ describe('handleRebuildFtsRequest — URL/method/auth', () => {
     expect(res.status).toBe(401)
   })
 
-  it('returns 500 when AQUILLA_DB is not bound', async () => {
+  it('returns 500 when AQUILLA_PG is not bound', async () => {
     const res = await handleRebuildFtsRequest(
       makeRequest('/admin/projects/p1/rebuild-fts'),
       { SYNC_SECRET_KEY: 'shared-secret' },

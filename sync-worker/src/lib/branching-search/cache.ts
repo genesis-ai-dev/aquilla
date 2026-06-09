@@ -17,7 +17,7 @@
 // behaves identically to the uncached path.
 
 export interface CacheEnv {
-  AQUILLA_DB?: D1Database
+  AQUILLA_PG?: AquillaDb
   BRANCHING_SEARCH_KV?: KVNamespace
 }
 
@@ -31,12 +31,12 @@ export interface CacheEnv {
  * cache (no key can be built without it).
  */
 export async function resolveCorpusEventMax(
-  env: Pick<CacheEnv, "AQUILLA_DB">,
+  env: Pick<CacheEnv, "AQUILLA_PG">,
   sourceProjectId: string,
 ): Promise<string | null> {
-  if (!env.AQUILLA_DB) return null
+  if (!env.AQUILLA_PG) return null
   try {
-    const row = await env.AQUILLA_DB.prepare(
+    const row = await env.AQUILLA_PG.prepare(
       "SELECT MAX(event_id) AS max_id FROM cells WHERE project_id = ? AND side = 'source'",
     )
       .bind(sourceProjectId)

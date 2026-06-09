@@ -10,7 +10,7 @@ import { makeTestToken } from "./helpers/auth"
 
 const SECRET = "cell-audio-secret"
 
-// ── Projection: a recording D1 stub that captures (sql, args) ─────────────
+// ── Projection: a recording DB stub that captures (sql, args) ─────────────
 interface RecordedStmt {
   sql: string
   args: unknown[]
@@ -24,9 +24,9 @@ function makeRecordingDb() {
           recorded.push({ sql: sql.replace(/\s+/g, " ").trim(), args })
           return this
         },
-      } as unknown as D1PreparedStatement
+      } as unknown as AquillaStatement
     },
-  } as unknown as D1Database
+  } as unknown as AquillaDb
   return { db, recorded }
 }
 
@@ -50,7 +50,7 @@ function makeEvent<K extends EventKind>(kind: K, payload: unknown): PersistedEve
 describe("cell-audio projection", () => {
   it("attach: deselects siblings in the slot, then upserts selected+live", () => {
     const { db, recorded } = makeRecordingDb()
-    const stmts: D1PreparedStatement[] = []
+    const stmts: AquillaStatement[] = []
     const touches = buildEventProjectionStmts(
       db,
       makeEvent("cell.audio.attach", {
@@ -94,7 +94,7 @@ describe("cell-audio projection", () => {
 
   it("attach: nulls optional fields when omitted", () => {
     const { db, recorded } = makeRecordingDb()
-    const stmts: D1PreparedStatement[] = []
+    const stmts: AquillaStatement[] = []
     buildEventProjectionStmts(
       db,
       makeEvent("cell.audio.attach", {
@@ -114,7 +114,7 @@ describe("cell-audio projection", () => {
 
   it("select: deselects siblings then selects the target", () => {
     const { db, recorded } = makeRecordingDb()
-    const stmts: D1PreparedStatement[] = []
+    const stmts: AquillaStatement[] = []
     const touches = buildEventProjectionStmts(
       db,
       makeEvent("cell.audio.select", { audioId: "audio-y.wav", slot: "recording" }),
@@ -130,7 +130,7 @@ describe("cell-audio projection", () => {
 
   it("remove: soft-deletes and deselects", () => {
     const { db, recorded } = makeRecordingDb()
-    const stmts: D1PreparedStatement[] = []
+    const stmts: AquillaStatement[] = []
     const touches = buildEventProjectionStmts(
       db,
       makeEvent("cell.audio.remove", { audioId: "audio-z.wav" }),
@@ -143,7 +143,7 @@ describe("cell-audio projection", () => {
   })
 })
 
-// ── Read route: canned-rows D1 stub ───────────────────────────────────────
+// ── Read route: canned-rows DB stub ───────────────────────────────────────
 interface AudioRow {
   cell_id: string
   audio_id: string
@@ -168,10 +168,10 @@ function makeReadDb(rows: AudioRow[]) {
         },
       }
     },
-  } as unknown as D1Database
+  } as unknown as AquillaDb
 }
 
-async function readReq(env: { AQUILLA_DB?: D1Database; SYNC_SECRET_KEY?: string }, token?: string) {
+async function readReq(env: { AQUILLA_PG?: AquillaDb; SYNC_SECRET_KEY?: string }, token?: string) {
   return handleCellAudioReadRequest(
     new Request("https://w/api/v1/projects/p1/files/f1/audio-attachments", {
       headers: token ? { Authorization: `Bearer ${token}` } : {},
@@ -184,13 +184,13 @@ describe("GET /api/v1/projects/:p/files/:f/audio-attachments", () => {
   it("returns null for unrelated paths", async () => {
     const res = await handleCellAudioReadRequest(
       new Request("https://w/audio/p1/f1/x.wav"),
-      { AQUILLA_DB: makeReadDb([]), SYNC_SECRET_KEY: SECRET },
+      { AQUILLA_PG: makeReadDb([]), SYNC_SECRET_KEY: SECRET },
     )
     expect(res).toBeNull()
   })
 
   it("401 without a token", async () => {
-    const res = (await readReq({ AQUILLA_DB: makeReadDb([]), SYNC_SECRET_KEY: SECRET }))!
+    const res = (await readReq({ AQUILLA_PG: makeReadDb([]), SYNC_SECRET_KEY: SECRET }))!
     expect(res.status).toBe(401)
   })
 
@@ -213,7 +213,7 @@ describe("GET /api/v1/projects/:p/files/:f/audio-attachments", () => {
       },
     ]
     const token = await makeTestToken(SECRET, { projectId: "p1", fileId: "f1" })
-    const res = (await readReq({ AQUILLA_DB: makeReadDb(rows), SYNC_SECRET_KEY: SECRET }, token))!
+    const res = (await readReq({ AQUILLA_PG: makeReadDb(rows), SYNC_SECRET_KEY: SECRET }, token))!
     expect(res.status).toBe(200)
     const body = (await res.json()) as {
       cells: Record<string, {

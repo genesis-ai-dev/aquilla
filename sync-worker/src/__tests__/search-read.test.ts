@@ -3,14 +3,14 @@ import {
   handleSearchReadRequest,
   sanitizeFtsQuery,
 } from "../events/search-route"
-import { type CellRow } from "./helpers/d1-fake"
+import { type CellRow } from "./helpers/in-memory-db"
 import { makeTestDb } from "./helpers/pg-test-db"
 import { makeTestToken } from "./helpers/auth"
 
 const SECRET = "search-secret"
 
-function envWith(db: D1Database) {
-  return { AQUILLA_DB: db, SYNC_SECRET_KEY: SECRET }
+function envWith(db: AquillaDb) {
+  return { AQUILLA_PG: db, SYNC_SECRET_KEY: SECRET }
 }
 
 function makeCell(

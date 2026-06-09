@@ -7,8 +7,8 @@
 //   4. Evaluate the AD-2 first-child-of-parent guard. The event always
 //      lands in `events` (so history can surface it); only the projection
 //      writes are skipped for stale siblings.
-//   5. Dispatch to the kind-specific handler to build D1 statements.
-//   6. Batch-commit in D1_BATCH_LIMIT chunks.
+//   5. Dispatch to the kind-specific handler to build SQL statements.
+//   6. Batch-commit in BATCH_LIMIT chunks.
 //   7. Broadcast realtime frames + projection.dirty messages.
 //
 // Auth: Authorization: Bearer <sync-token JWT> (same token used for WS upgrades).
@@ -29,15 +29,15 @@ import { broadcastRealtime } from './broadcast'
 import type { BroadcastEnv } from './broadcast'
 import { ROLE } from './role-policy'
 
-// Cloudflare D1 max statements per db.batch() call.
-const D1_BATCH_LIMIT = 100
+// Max statements per batch() transaction — a conservative self-imposed cap (Postgres has no hard limit; keeps any single transaction bounded).
+const BATCH_LIMIT = 100
 
 export interface EventsRouteEnv {
-  AQUILLA_DB?: D1Database
+  AQUILLA_PG?: AquillaDb
   SYNC_SECRET_KEY?: string
-  /** Optional — when present, successful D1 commits broadcast Realtime frames. */
+  /** Optional — when present, successful DB commits broadcast Realtime frames. */
   FileSync?: DurableObjectNamespace
-  /** Optional — when present, successful D1 commits fan-out event.applied frames
+  /** Optional — when present, successful DB commits fan-out event.applied frames
    * to connected WebSocket clients via the per-project ProjectSync DO. */
   ProjectSync?: DurableObjectNamespace
 }
@@ -75,7 +75,7 @@ interface ExistingEventRow {
 }
 
 async function readExistingEvent(
-  db: D1Database,
+  db: AquillaDb,
   eventId: string,
 ): Promise<ExistingEventRow | null> {
   const row = await db
@@ -115,11 +115,11 @@ export async function handleEventsWriteRequest(
   if (!env.SYNC_SECRET_KEY) {
     return new Response('SYNC_SECRET_KEY not configured', { status: 500 })
   }
-  if (!env.AQUILLA_DB) {
-    return new Response('AQUILLA_DB binding not configured', { status: 500 })
+  if (!env.AQUILLA_PG) {
+    return new Response('AQUILLA_PG binding not configured', { status: 500 })
   }
 
-  const db = env.AQUILLA_DB
+  const db = env.AQUILLA_PG
 
   // 4. Parse body.
   let body: unknown
@@ -184,7 +184,7 @@ export async function handleEventsWriteRequest(
     dirtyEntry?: { project: string; file: string; tables: Set<ProjectionTable> }
   }
 
-  const pendingStmts: D1PreparedStatement[] = []
+  const pendingStmts: AquillaStatement[] = []
   const pendingEntries: PendingEntry[] = []
   const seenEventIds = new Set<string>()
 
@@ -492,7 +492,7 @@ export async function handleEventsWriteRequest(
   if (pendingStmts.length > 0) {
     interface PendingChunk {
       entries: PendingEntry[]
-      stmts: D1PreparedStatement[]
+      stmts: AquillaStatement[]
     }
 
     const chunks: PendingChunk[] = []
@@ -504,18 +504,18 @@ export async function handleEventsWriteRequest(
         entry.stmtStart + entry.stmtCount,
       )
 
-      if (eventStmts.length > D1_BATCH_LIMIT) {
+      if (eventStmts.length > BATCH_LIMIT) {
         rejected.push({
           id: entry.id,
           status: 500,
-          reason: `event produced ${eventStmts.length} D1 statements, exceeding batch limit ${D1_BATCH_LIMIT}`,
+          reason: `event produced ${eventStmts.length} SQL statements, exceeding batch limit ${BATCH_LIMIT}`,
         })
         continue
       }
 
       if (
         currentChunk.stmts.length > 0 &&
-        currentChunk.stmts.length + eventStmts.length > D1_BATCH_LIMIT
+        currentChunk.stmts.length + eventStmts.length > BATCH_LIMIT
       ) {
         chunks.push(currentChunk)
         currentChunk = { entries: [], stmts: [] }
@@ -545,7 +545,7 @@ export async function handleEventsWriteRequest(
           rejected.push({
             id: entry.id,
             status: 500,
-            reason: `D1 batch failed: ${String(err)}`,
+            reason: `DB batch failed: ${String(err)}`,
           })
         }
       }

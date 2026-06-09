@@ -50,14 +50,14 @@ async function makeRequest(events: unknown[], token: string): Promise<Request> {
   })
 }
 
-function makeEnv(db: D1Database) {
-  return { AQUILLA_DB: db, SYNC_SECRET_KEY: SECRET }
+function makeEnv(db: AquillaDb) {
+  return { AQUILLA_PG: db, SYNC_SECRET_KEY: SECRET }
 }
 
 // ── Seed helpers ────────────────────────────────────────────────────────────
 
 /** Post one event through the route and assert it was accepted. */
-async function postEvent(db: D1Database, event: RawEvent, token: string): Promise<void> {
+async function postEvent(db: AquillaDb, event: RawEvent, token: string): Promise<void> {
   const res = await handleEventsWriteRequest(await makeRequest([event], token), makeEnv(db))
   const body = await res!.json() as any
   expect(body.rejected, `event ${event.id} should be accepted but was rejected: ${JSON.stringify(body.rejected)}`).toHaveLength(0)
@@ -65,7 +65,7 @@ async function postEvent(db: D1Database, event: RawEvent, token: string): Promis
 }
 
 // Seed a file and a target cell so validation events have something to attach to.
-async function seedFileAndCell(db: D1Database): Promise<void> {
+async function seedFileAndCell(db: AquillaDb): Promise<void> {
   const ownerToken = await makeToken(700, 'owner')
   const fileEvt: RawEvent<'file.create'> = {
     id: 'evt-file-seed',
@@ -233,7 +233,7 @@ describe('cell.unvalidate — foreign-vs-self role enforcement', () => {
 // ── comment.edit / comment.delete / comment.resolve tests ─────────────────
 
 /** Seed a comment authored by `author` and return the commentId. */
-async function seedComment(db: D1Database, commentId: string, authorUsername: string): Promise<void> {
+async function seedComment(db: AquillaDb, commentId: string, authorUsername: string): Promise<void> {
   const authorToken = await makeToken(200, authorUsername)
   const createEvt: RawEvent<'comment.create'> = {
     id: `evt-comment-create-${commentId}`,

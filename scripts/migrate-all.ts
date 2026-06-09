@@ -45,7 +45,7 @@ import type { IngestEvent } from "../src/lib/migrate/types"
 import type { CodexNotebookFile } from "../src/lib/codex-editor/types"
 
 const SYNC = process.env.SYNC_BASE ?? "https://api.aquilla.app/sync"
-const AQUILLA_DB = "aquilla-db"
+const AQUILLA_PG = "aquilla-db"
 const PERSIST = ".wrangler-dev-state"
 const INGEST_CHUNK = 2500
 const FALLBACK_AUTHOR = "legacy-import"
@@ -113,7 +113,7 @@ function parseArgs(): Args {
 }
 
 function d1<T>(sql: string, remote: boolean): T[] {
-  const args = ["d1", "execute", AQUILLA_DB, remote ? "--remote" : "--local", "--json"]
+  const args = ["d1", "execute", AQUILLA_PG, remote ? "--remote" : "--local", "--json"]
   if (!remote) args.push("--persist-to", PERSIST)
   args.push("--command", sql)
   const out = execFileSync("wrangler", args, { encoding: "utf8", maxBuffer: 256 * 1024 * 1024 })

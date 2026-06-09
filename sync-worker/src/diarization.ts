@@ -23,7 +23,7 @@ import { audioObjectKey } from "./audio"
 
 export interface DiarizationEnv {
   SNAPSHOTS: R2Bucket
-  AQUILLA_DB?: D1Database
+  AQUILLA_PG?: AquillaDb
   SYNC_SECRET_KEY?: string
   R2_KEY_PREFIX?: string
   /** Modal diarization endpoint (infra/modal/diarization.py `start`). */
@@ -60,7 +60,7 @@ export async function handleDiarizationRequest(
   const url = new URL(request.url)
   const p = url.pathname
   if (!p.startsWith("/api/v1/diarization/")) return null
-  if (!env.AQUILLA_DB) return new Response("diarization not configured", { status: 503 })
+  if (!env.AQUILLA_PG) return new Response("diarization not configured", { status: 503 })
 
   if (p === "/api/v1/diarization/start" && request.method === "POST") return start(request, env)
   if (p === "/api/v1/diarization/status" && request.method === "GET") return status(request, env, url)
@@ -94,7 +94,7 @@ async function start(request: Request, env: DiarizationEnv): Promise<Response> {
   const now = Date.now()
   const numSpeakers = Number.isInteger(body.numSpeakers) && body.numSpeakers! > 0 ? body.numSpeakers! : null
 
-  await env.AQUILLA_DB!.prepare(
+  await env.AQUILLA_PG!.prepare(
     `INSERT INTO diarization_jobs
        (id, project_id, file_id, audio_object, fetch_token, status, num_speakers, created_at, updated_at)
      VALUES (?, ?, ?, ?, ?, 'queued', ?, ?, ?)`,
@@ -203,7 +203,7 @@ async function callback(request: Request, env: DiarizationEnv): Promise<Response
 // ── helpers ──────────────────────────────────────────────────────────────────
 async function getJob(env: DiarizationEnv, jobId: string): Promise<JobRow | null> {
   return env
-    .AQUILLA_DB!.prepare(`SELECT * FROM diarization_jobs WHERE id = ?`)
+    .AQUILLA_PG!.prepare(`SELECT * FROM diarization_jobs WHERE id = ?`)
     .bind(jobId)
     .first<JobRow>()
 }
@@ -215,7 +215,7 @@ async function setStatus(
   opts: { turns?: unknown; error?: string },
 ): Promise<void> {
   await env
-    .AQUILLA_DB!.prepare(
+    .AQUILLA_PG!.prepare(
       `UPDATE diarization_jobs
          SET status = ?, turns_json = ?, error = ?, updated_at = ?
        WHERE id = ?`,

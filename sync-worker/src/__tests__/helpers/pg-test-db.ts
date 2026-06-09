@@ -1,14 +1,14 @@
-// Real-Postgres test DB (PGlite, in-process WASM) behind the D1 shim.
+// Real-Postgres test DB (PGlite, in-process WASM) behind the Postgres shim.
 //
-// Replaces the hand-rolled SQL-pattern d1-fake: tests now run the exact prod
-// code path (the D1→Postgres shim) against a real Postgres engine, so dialect +
+// Replaces the hand-rolled SQL-pattern in-memory-db: tests now run the exact prod
+// code path (the Postgres shim) against a real Postgres engine, so dialect +
 // FTS (tsvector) are validated for real. Schema is the canonical db/postgres/
 // schema.sql. Use makeTestDb() per suite; call reset() between tests.
 import { PGlite } from "@electric-sql/pglite"
 import { readFileSync } from "node:fs"
 import { fileURLToPath } from "node:url"
 import path from "node:path"
-import { D1Postgres, type PgExecutor } from "../../../../db/shim/d1-postgres"
+import { PostgresDb, type PgExecutor } from "../../../../db/shim/postgres"
 
 const SCHEMA = readFileSync(
   path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../../db/postgres/schema.sql"),
@@ -31,9 +31,9 @@ function pgliteExecutor(db: PGlite): PgExecutor {
 export type Seed = Partial<Record<string, Array<Record<string, unknown>>>>
 
 export interface TestDb {
-  /** Cast to D1Database — the shim is structurally compatible for the methods used. */
-  db: D1Database
-  /** Raw PGlite handle for assertions / seeding outside the D1 surface. */
+  /** Cast to AquillaDb — the shim is structurally compatible for the methods used. */
+  db: AquillaDb
+  /** Raw PGlite handle for assertions / seeding outside the SQL surface. */
   pg: PGlite
   /** Read every row of a table (async replacement for the old fake's _tables()). */
   rows<T = Record<string, unknown>>(table: string): Promise<T[]>
@@ -116,7 +116,7 @@ export async function makeTestDb(seed: Seed = {}): Promise<TestDb> {
     if (!rows || table === "cells_fts") continue // FTS is a generated column in PG
     await seedRows(pg, table, rows)
   }
-  const db = new D1Postgres(pgliteExecutor(pg)) as unknown as D1Database
+  const db = new PostgresDb(pgliteExecutor(pg)) as unknown as AquillaDb
   return {
     db,
     pg,

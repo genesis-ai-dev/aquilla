@@ -39,11 +39,11 @@ export interface DispatchOptions {
 /**
  * Dispatch one authorized event to its kind-specific handler.
  *
- * Does NOT write to D1 or broadcast — the caller (route.ts) batches and
+ * Does NOT write to Postgres or broadcast — the caller (route.ts) batches and
  * commits statements after all events in the request are dispatched.
  */
 export function dispatchEvent(
-  db: D1Database,
+  db: AquillaDb,
   authed: AuthorizedEvent,
   serverTs: number,
   opts: DispatchOptions,

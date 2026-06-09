@@ -34,8 +34,8 @@ async function leadToken(): Promise<string> {
   })
 }
 
-function makeEnv(db: D1Database) {
-  return { AQUILLA_DB: db, SYNC_SECRET_KEY: SECRET }
+function makeEnv(db: AquillaDb) {
+  return { AQUILLA_PG: db, SYNC_SECRET_KEY: SECRET }
 }
 
 interface ImportRequestOptions {
@@ -218,8 +218,8 @@ describe('POST /import — cells land in Postgres projection (FRO-135)', () => {
     })
   })
 
-  it('large import (>D1_BATCH_LIMIT cells) fully lands on Postgres', async () => {
-    // D1_BATCH_LIMIT = 100; each cell produces 2 stmts (event + cells INSERT);
+  it('large import (>BATCH_LIMIT cells) fully lands on Postgres', async () => {
+    // BATCH_LIMIT = 100; each cell produces 2 stmts (event + cells INSERT);
     // file.create adds 2 more; the deferred counter recompute adds 1 trailing stmt.
     // A batch of 60 cells = 2 + 120 + 1 = 123 stmts, spanning 2 db.batch() calls.
     // Guards that multi-batch imports don't stall at 0% (FRO-135).

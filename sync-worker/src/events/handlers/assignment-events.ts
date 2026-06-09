@@ -28,7 +28,7 @@ export type AssignmentEventKind = Extract<
 >
 
 export function handleAssignmentEvent(
-  db: D1Database,
+  db: AquillaDb,
   authed: AuthorizedEvent<AssignmentEventKind>,
   serverTs: number,
 ): DispatchResult {
@@ -61,7 +61,7 @@ export function handleAssignmentEvent(
       event.projectId,
     )
 
-  const stmts: D1PreparedStatement[] = [eventInsert]
+  const stmts: AquillaStatement[] = [eventInsert]
   const dirtyTables: ProjectionTable[] = ['events']
 
   if (event.kind === 'assignment.create') {

@@ -91,24 +91,14 @@ jobs:
       - name: Test auth-worker
         run: npm test
         working-directory: auth-worker
-      - name: Apply D1 migrations (auth-worker owns aquilla-db schema)
-        # auth-worker owns the aquilla-db schema. Migrations don't run as a
-        # side effect of `wrangler deploy`; they require an explicit
-        # `wrangler d1 migrations apply`. Run BEFORE the worker deploys so
-        # the new code never serves traffic against an older schema.
-        # Idempotent — wrangler only applies pending files. Auto-confirms.
-        uses: cloudflare/wrangler-action@v3
-        with:
-          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          accountId: 6a80496d1e59948a9cbaa3c643ba81d7
-          workingDirectory: auth-worker
-          # NOTE: the "main" branch value must be a space, not '' — an empty
-          # string is falsy in GHA expressions, so `main && '' || '--env=staging'`
-          # would always fall through to staging (the deploy commands below
-          # already use ' ' for this reason).
-          command: >-
-            d1 migrations apply aquilla-db --remote
-            ${{ github.ref == 'refs/heads/main' && ' ' || '--env=staging' }}
+      # NOTE: Postgres (Neon) is the only datastore — the D1→Neon cutover is
+      # complete. Schema changes are applied by hand against Neon, NOT in CI:
+      #   set -a; . ./.env; set +a
+      #   npx tsx scripts/pg.ts db/postgres/schema.sql
+      # The old `wrangler d1 migrations apply aquilla-db` step was removed: it
+      # targeted a D1 nothing reads anymore. TODO(FRO): if automated Neon schema
+      # application is wanted, add a step that runs scripts/pg.ts against the
+      # prod/staging Neon branch here (before the deploy below).
       - name: Deploy auth-worker
         uses: cloudflare/wrangler-action@v3
         with:

@@ -38,7 +38,7 @@ export async function getOrgAssignmentWorkload(
   env: Env,
   orgId: number,
 ): Promise<AssigneeWorkload[]> {
-  const rows = await env.AQUILLA_DB.prepare(
+  const rows = await env.AQUILLA_PG.prepare(
     `SELECT a.assignee_user_id AS assignee_user_id,
             u.username         AS assignee_username,
             a.cells_total      AS cells_total,
@@ -91,7 +91,7 @@ export async function getProjectAssignmentRoster(
   env: Env,
   projectId: string,
 ): Promise<AssigneeWorkload[]> {
-  const rows = await env.AQUILLA_DB.prepare(
+  const rows = await env.AQUILLA_PG.prepare(
     `SELECT a.assignee_user_id AS assignee_user_id,
             u.username         AS assignee_username,
             a.cells_total      AS cells_total,
@@ -153,7 +153,7 @@ export async function getMyAssignments(
   projectId: string,
   userId: number,
 ): Promise<MyAssignment[]> {
-  const rows = await env.AQUILLA_DB.prepare(
+  const rows = await env.AQUILLA_PG.prepare(
     `SELECT a.assignment_id AS assignment_id, a.project_id AS project_id,
             a.scope_kind AS scope_kind, a.scope_label AS scope_label,
             a.deadline AS deadline, a.note AS note,
@@ -207,7 +207,7 @@ export async function getMyAssignmentsAcrossOrg(
   orgId: number,
   userId: number,
 ): Promise<MyOrgAssignment[]> {
-  const rows = await env.AQUILLA_DB.prepare(
+  const rows = await env.AQUILLA_PG.prepare(
     `SELECT a.assignment_id AS assignment_id, a.project_id AS project_id,
             p.name AS project_name,
             a.scope_kind AS scope_kind, a.scope_label AS scope_label,
@@ -269,7 +269,7 @@ export async function getFileChapters(
   projectId: string,
   fileId: string,
 ): Promise<string[]> {
-  const rows = await env.AQUILLA_DB.prepare(
+  const rows = await env.AQUILLA_PG.prepare(
     `SELECT DISTINCT substr(canonical_ref, 1, strpos(canonical_ref, ':') - 1) AS chapter
        FROM cells
       WHERE project_id = ? AND file_id = ? AND side = 'source'

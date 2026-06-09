@@ -13,7 +13,7 @@
 import { verifyTokenForProject } from "../auth"
 
 export interface CellHistoryReadEnv {
-  AQUILLA_DB?: D1Database
+  AQUILLA_PG?: AquillaDb
   SYNC_SECRET_KEY?: string
 }
 
@@ -57,8 +57,8 @@ export async function handleCellHistoryReadRequest(
   if (!env.SYNC_SECRET_KEY) {
     return new Response("SYNC_SECRET_KEY not configured", { status: 500 })
   }
-  if (!env.AQUILLA_DB) {
-    return new Response("AQUILLA_DB binding not configured", { status: 500 })
+  if (!env.AQUILLA_PG) {
+    return new Response("AQUILLA_PG binding not configured", { status: 500 })
   }
 
   const projectId = decodeURIComponent(match[1])
@@ -96,7 +96,7 @@ export async function handleCellHistoryReadRequest(
     "WHERE project_id = ? AND file_id = ? AND cell_id = ? " +
     "ORDER BY server_seq DESC, id DESC " +
     "LIMIT ?"
-  const result = await env.AQUILLA_DB.prepare(sql)
+  const result = await env.AQUILLA_PG.prepare(sql)
     .bind(projectId, fileId, cellId, limit)
     .all<EventRowRaw>()
 

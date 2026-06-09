@@ -1,4 +1,4 @@
-// Shared in-memory D1 fake for sync-worker tests.
+// Shared in-memory DB fake for sync-worker tests.
 //
 // Recognizes the SQL patterns the events / cells code actually issues. SQL
 // strings are normalized (collapse whitespace) before matching so a code
@@ -135,7 +135,7 @@ export interface FileRow {
   projected_from?: string | null
 }
 
-export type InMemoryD1 = D1Database & {
+export type InMemoryDb = AquillaDb & {
   _tables(): Tables
   _issuedStmts(): Array<{ sql: string; args: unknown[] }>
   /** Assign stable rowids to cells (1-based index order) so FTS tests can
@@ -143,7 +143,7 @@ export type InMemoryD1 = D1Database & {
   _assignRowids(): void
 }
 
-export function makeInMemoryD1(tables: Partial<Tables> = {}): InMemoryD1 {
+export function makeInMemoryDb(tables: Partial<Tables> = {}): InMemoryDb {
   const db: Tables = {
     events: tables.events ?? [],
     cells: tables.cells ?? [],
@@ -895,7 +895,7 @@ export function makeInMemoryD1(tables: Partial<Tables> = {}): InMemoryD1 {
       const fileId = args[8] as string
       const cellId = args[9] as string
       // Find the source-side cell (the literal `AND side = 'source'` in SQL
-      // ensures only the source row is updated in real D1; replicate that here).
+      // ensures only the source row is updated in real Postgres; replicate that here).
       const cell = db.cells.find(
         (c) => c.project_id === projectId && c.file_id === fileId && c.cell_id === cellId && c.side === 'source',
       )
@@ -1389,7 +1389,7 @@ export function makeInMemoryD1(tables: Partial<Tables> = {}): InMemoryD1 {
         return { success: true, meta: {} }
       },
       raw: async () => [],
-    } as unknown as D1PreparedStatement
+    } as unknown as AquillaStatement
 
     ;(stmt as any).__sql = sql
     ;(stmt as any).__getArgs = () => boundArgs
@@ -1401,7 +1401,7 @@ export function makeInMemoryD1(tables: Partial<Tables> = {}): InMemoryD1 {
     prepare(sql: string) {
       return makePrepared(sql)
     },
-    async batch(stmts: D1PreparedStatement[]) {
+    async batch(stmts: AquillaStatement[]) {
       for (const s of stmts) {
         const sql: string = (s as any).__sql ?? ''
         const args: unknown[] = (s as any).__getArgs?.() ?? []
@@ -1421,7 +1421,7 @@ export function makeInMemoryD1(tables: Partial<Tables> = {}): InMemoryD1 {
     _assignRowids() {
       for (const c of db.cells) getRowid(c)
     },
-  } as unknown as InMemoryD1
+  } as unknown as InMemoryDb
 
   return d1
 }

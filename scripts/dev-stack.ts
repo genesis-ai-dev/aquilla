@@ -75,7 +75,7 @@ const SYNC_PORT = Number(process.env.DEV_STACK_SYNC_PORT) || 8789
 const DEFAULT_VITE_PORT = 5173
 
 // D1→Neon migration (FRO-146): auth-worker + sync-worker bind HYPERDRIVE and
-// swap AQUILLA_DB for a Postgres shim (see auth-worker/src/index.ts). Under
+// swap AQUILLA_PG for a Postgres shim (see auth-worker/src/index.ts). Under
 // `wrangler dev --local`, Hyperdrive is emulated against a real Postgres given
 // by WRANGLER_HYPERDRIVE_LOCAL_CONNECTION_STRING_<BINDING>. Without it the
 // worker refuses to boot. We back that with a throwaway local Postgres so the

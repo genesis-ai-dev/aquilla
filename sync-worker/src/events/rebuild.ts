@@ -20,10 +20,10 @@ import {
 } from './event-projection'
 import type { EventKind } from './types'
 
-const D1_BATCH_LIMIT = 100
+const BATCH_LIMIT = 100
 
 export interface RebuildEnv {
-  AQUILLA_DB?: D1Database
+  AQUILLA_PG?: AquillaDb
   SYNC_SECRET_KEY?: string
 }
 
@@ -64,16 +64,16 @@ export async function handleRebuildProjectionRequest(
     return new Response('unauthorized', { status: 401 })
   }
 
-  if (!env.AQUILLA_DB) {
-    return new Response('AQUILLA_DB binding not configured', { status: 500 })
+  if (!env.AQUILLA_PG) {
+    return new Response('AQUILLA_PG binding not configured', { status: 500 })
   }
 
-  const db = env.AQUILLA_DB
+  const db = env.AQUILLA_PG
   const projectId = decodeURIComponent(match[1])
   const startedAt = Date.now()
 
   // 1. Wipe the projection for this project.
-  const deleteStmts: D1PreparedStatement[] = [
+  const deleteStmts: AquillaStatement[] = [
     db.prepare('DELETE FROM cell_validators WHERE project_id = ?').bind(projectId),
     db.prepare('DELETE FROM cells WHERE project_id = ?').bind(projectId),
   ]
@@ -103,7 +103,7 @@ export async function handleRebuildProjectionRequest(
   const childKey = (row: EventRow): string =>
     `${row.project_id}\0${row.file_id ?? ''}\0${row.cell_id ?? ''}\0${row.parent_id ?? '<null>'}`
 
-  const stmts: D1PreparedStatement[] = []
+  const stmts: AquillaStatement[] = []
   let eventsRead = 0
   let eventsProjected = 0
 
@@ -157,7 +157,7 @@ export async function handleRebuildProjectionRequest(
 
     try {
       // Defer the O(N²) per-cell file-counter recompute; do it once, set-based,
-      // after the replay (step 4b) — the D1 67%-of-time fix, now in the rebuild.
+      // after the replay (step 4b) — the 67%-of-time fix, now in the rebuild.
       buildEventProjectionStmts(db, event, stmts, { deferFileCounters: true })
       eventsProjected += 1
     } catch (err) {
@@ -171,8 +171,8 @@ export async function handleRebuildProjectionRequest(
   const statementsApplied = stmts.length
 
   // 4. Apply in batch chunks.
-  for (let i = 0; i < stmts.length; i += D1_BATCH_LIMIT) {
-    await db.batch(stmts.slice(i, i + D1_BATCH_LIMIT))
+  for (let i = 0; i < stmts.length; i += BATCH_LIMIT) {
+    await db.batch(stmts.slice(i, i + BATCH_LIMIT))
   }
 
   // 4b. Recompute file counters once, set-based (deferred above). Mirrors

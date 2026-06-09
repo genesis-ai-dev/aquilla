@@ -16,7 +16,7 @@ import type { RealtimeMessage, ProjectionTable } from '../realtime'
 import type { DispatchResult } from './types'
 
 export function handleFileRename(
-  db: D1Database,
+  db: AquillaDb,
   authed: AuthorizedEvent<'file.rename'>,
   serverTs: number,
 ): DispatchResult {

@@ -1,15 +1,15 @@
 import { env } from "cloudflare:test"
 import { describe, it, expect } from "vitest"
 import app from "../index"
-import { seedUser, jwtFor, authHeader } from "./helpers/d1"
+import { seedUser, jwtFor, authHeader } from "./helpers/db"
 
 describe("GET /api/v2/projects?archived", () => {
   async function seed() {
     await seedUser(1, "wendi")
-    await env.AQUILLA_DB.prepare("INSERT INTO organizations (id, name, owner_user_id) VALUES (1, 'CAS', 1)").run()
-    await env.AQUILLA_DB.prepare("INSERT INTO org_members (org_id, user_id, role_level, granted_by) VALUES (1, 1, 700, 1)").run()
-    await env.AQUILLA_DB.prepare("INSERT INTO projects (id, name, org_id, created_by) VALUES ('live', 'Live', 1, 1)").run()
-    await env.AQUILLA_DB.prepare(
+    await env.AQUILLA_PG.prepare("INSERT INTO organizations (id, name, owner_user_id) VALUES (1, 'CAS', 1)").run()
+    await env.AQUILLA_PG.prepare("INSERT INTO org_members (org_id, user_id, role_level, granted_by) VALUES (1, 1, 700, 1)").run()
+    await env.AQUILLA_PG.prepare("INSERT INTO projects (id, name, org_id, created_by) VALUES ('live', 'Live', 1, 1)").run()
+    await env.AQUILLA_PG.prepare(
       "INSERT INTO projects (id, name, org_id, created_by, archived_at, archived_by) VALUES ('old', 'Old', 1, 1, CURRENT_TIMESTAMP, 1)",
     ).run()
   }

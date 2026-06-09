@@ -83,26 +83,9 @@ jobs:
       - run: npm test
         if: steps.decide.outputs.deploy == 'true'
 
-      # When a PR adds SQL migrations, pr-db-fork.yml spins up
-      # codex-sync-worker-pr-<N> against a forked D1 + namespaced R2
-      # prefix so the migration doesn't pollute shared staging. The build
-      # then needs to target that worker. Detect here so the build env
-      # block below can switch.
-      - name: Detect PR migrations
-        id: migrations
-        if: steps.decide.outputs.deploy == 'true' && github.event_name == 'pull_request'
-        run: |
-          if git diff --name-only --diff-filter=AM origin/${{ github.event.pull_request.base.ref }}...HEAD \
-               | grep -qE '^sync-worker/migrations/.*\.sql$'; then
-            echo "has=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "has=false" >> "$GITHUB_OUTPUT"
-          fi
-
       # Branch → worker host mapping:
-      #   main                        → prod          (aquilla-sync-worker)
-      #   PR with migrations          → per-PR fork   (aquilla-sync-worker-pr-<N>)
-      #   anything else (dev, PR)     → staging       (aquilla-sync-worker-staging)
+      #   main                        → prod     (aquilla-sync-worker)
+      #   anything else (dev, PR)     → staging  (aquilla-sync-worker-staging)
       # VITE_AUTH_BASE targets aquilla-identity for auth / sync-token /
       # invite routes. VITE_CHAT_BASE targets aquilla-identity's
       # /chat mount for the LLM completion proxy (folded in from the

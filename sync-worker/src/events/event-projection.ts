@@ -1,4 +1,4 @@
-// Builds D1 statements that advance the `cells` / `cell_validators`
+// Builds SQL statements that advance the `cells` / `cell_validators`
 // projections in response to one persisted event.
 //
 // AD-2 first-child-of-parent rule:
@@ -18,11 +18,11 @@
 // Hash function: djb2 (32-bit), unchanged. Kept as a cheap FTS-skipping
 // fingerprint on `content_hash`.
 
-import type { D1Database, D1PreparedStatement } from '@cloudflare/workers-types'
+import type { AquillaDb, AquillaStatement } from '../../../db/shim/postgres'
 import type { EventKind, EventPayloads, CommentScope } from './types'
 import { ROLE } from './role-policy'
 
-// A single event row as it lives in D1. JSON.parse on `payload` is the
+// A single event row as it lives in Postgres. JSON.parse on `payload` is the
 // caller's responsibility — `payload` here is already an object.
 export interface PersistedEvent<K extends EventKind = EventKind> {
   id: string
@@ -38,7 +38,7 @@ export interface PersistedEvent<K extends EventKind = EventKind> {
   clientTs: number
   serverTs: number
   /** AD-2: per-project monotonic. Set only on rows that have been read back
-   *  from D1 (read-side paths); write paths leave it undefined because the
+   *  from Postgres (read-side paths); write paths leave it undefined because the
    *  value is derived atomically inside the events INSERT, not in JS. */
   serverSeq?: number
   /**
@@ -94,11 +94,11 @@ function countWords(text: string): number {
  * never actually existed before, so every `files` row sat at cell_count=0.
  */
 export function fileCountersRecomputeStmt(
-  db: D1Database,
+  db: AquillaDb,
   projectId: string,
   fileId: string,
   serverTs: number,
-): D1PreparedStatement {
+): AquillaStatement {
   return db
     .prepare(
       `UPDATE files SET
@@ -133,9 +133,9 @@ export type ProjectionTouches = 'cells' | 'cell_validators' | 'cell_waivers' | '
  * `projection.dirty` broadcast payload.
  */
 export function buildEventProjectionStmts(
-  db: D1Database,
+  db: AquillaDb,
   event: PersistedEvent,
-  stmts: D1PreparedStatement[],
+  stmts: AquillaStatement[],
   opts?: { deferFileCounters?: boolean },
 ): ProjectionTouches[] {
   switch (event.kind) {
@@ -986,7 +986,7 @@ export const CHAIN_MUTATING_KINDS = new Set<string>([
  * events bypass the guard entirely (they're caller-skipped).
  */
 export async function isWinningChild(
-  db: D1Database,
+  db: AquillaDb,
   candidate: PersistedEvent,
 ): Promise<boolean> {
   if (!candidate.fileId || !candidate.cellId) {

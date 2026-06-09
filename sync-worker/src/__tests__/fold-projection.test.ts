@@ -41,12 +41,12 @@ const childKey = (e: PersistedEvent) =>
 // applies only to chain-mutating kinds; validates/comments always project.
 // (NOT rebuild.ts, which applies the guard to every cell event and so wrongly
 // drops cell.validate — the bug this parity suite exists to avoid inheriting.)
-async function replayCanonical(db: D1Database, events: PersistedEvent[]): Promise<void> {
+async function replayCanonical(db: AquillaDb, events: PersistedEvent[]): Promise<void> {
   const sorted = [...events].sort(
     (a, b) => a.serverSeq! - b.serverSeq! || a.serverTs - b.serverTs || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0),
   )
   const winning = new Map<string, string>()
-  const stmts: D1PreparedStatement[] = []
+  const stmts: AquillaStatement[] = []
   for (const e of sorted) {
     if (e.cellId && CHAIN_MUTATING_KINDS.has(e.kind)) {
       const k = childKey(e)
@@ -60,7 +60,7 @@ async function replayCanonical(db: D1Database, events: PersistedEvent[]): Promis
   await applyCounters(db)
 }
 
-async function applyCounters(db: D1Database): Promise<void> {
+async function applyCounters(db: AquillaDb): Promise<void> {
   await db
     .prepare(
       `UPDATE files SET

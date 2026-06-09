@@ -1,13 +1,13 @@
 import { describe, it, expect } from "vitest"
 import { handleCellHistoryReadRequest } from "../events/cell-history-read-route"
-import { type EventRow } from "./helpers/d1-fake"
+import { type EventRow } from "./helpers/in-memory-db"
 import { makeTestDb } from "./helpers/pg-test-db"
 import { makeTestToken } from "./helpers/auth"
 
 const SECRET = "cell-history-secret"
 
-function envWith(db: D1Database) {
-  return { AQUILLA_DB: db, SYNC_SECRET_KEY: SECRET }
+function envWith(db: AquillaDb) {
+  return { AQUILLA_PG: db, SYNC_SECRET_KEY: SECRET }
 }
 
 function makeEvent(

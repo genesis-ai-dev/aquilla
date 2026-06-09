@@ -1,7 +1,7 @@
 import { env } from "cloudflare:test"
 import { describe, it, expect } from "vitest"
 import app from "../index"
-import { seedUser, jwtFor, authHeader } from "./helpers/d1"
+import { seedUser, jwtFor, authHeader } from "./helpers/db"
 
 // Org 1: wendi=owner(700), anna=maintainer(600), tom=contributor(400).
 // Projects in org 1: "tb" (the termbase source) and "consumer" (subscriber).
@@ -12,14 +12,14 @@ async function seed() {
   await seedUser(2, "anna")
   await seedUser(3, "tom")
   await seedUser(4, "stranger")
-  await env.AQUILLA_DB.prepare(
+  await env.AQUILLA_PG.prepare(
     "INSERT INTO organizations (id, name, owner_user_id) VALUES (1, 'Come and See', 1), (2, 'Other', 1)",
   ).run()
-  await env.AQUILLA_DB.prepare(
+  await env.AQUILLA_PG.prepare(
     `INSERT INTO org_members (org_id, user_id, role_level, granted_by) VALUES
       (1, 1, 700, 1), (1, 2, 600, 1), (1, 3, 400, 1)`,
   ).run()
-  await env.AQUILLA_DB.prepare(
+  await env.AQUILLA_PG.prepare(
     `INSERT INTO projects (id, name, org_id, created_by) VALUES
       ('tb', 'Termbase', 1, 1),
       ('consumer', 'Consumer', 1, 1),
@@ -116,7 +116,7 @@ describe("termbase subscriptions", () => {
   it("subscribing to a cross-org termbase returns 409 even if published", async () => {
     await seed()
     // Publish 'other' in org 2 directly (wendi owns it).
-    await env.AQUILLA_DB.prepare(
+    await env.AQUILLA_PG.prepare(
       "UPDATE projects SET org_published_termbase = TRUE WHERE id = 'other'",
     ).run()
     const res = await req("POST", "/api/v2/projects/consumer/termbase/subscriptions", "anna", {
@@ -146,7 +146,7 @@ describe("termbase subscriptions", () => {
   it("list returns subscriptions ordered by priority; viewer can read", async () => {
     await seed()
     // Publish two termbases and subscribe to both.
-    await env.AQUILLA_DB.prepare(
+    await env.AQUILLA_PG.prepare(
       "INSERT INTO projects (id, name, org_id, created_by) VALUES ('tb2', 'Termbase2', 1, 1)",
     ).run()
     await req("POST", "/api/v2/projects/tb/termbase/publish", "anna")
@@ -163,7 +163,7 @@ describe("termbase subscriptions", () => {
 
   it("PATCH reorders priority by the given order array", async () => {
     await seed()
-    await env.AQUILLA_DB.prepare(
+    await env.AQUILLA_PG.prepare(
       "INSERT INTO projects (id, name, org_id, created_by) VALUES ('tb2', 'Termbase2', 1, 1)",
     ).run()
     await req("POST", "/api/v2/projects/tb/termbase/publish", "anna")
@@ -216,7 +216,7 @@ async function seedUpstreamConcepts(projectId: string) {
       },
     ],
   })
-  await env.AQUILLA_DB.prepare(
+  await env.AQUILLA_PG.prepare(
     "INSERT INTO project_settings (project_id, settings, version, updated_by) VALUES (?, ?, 1, 1)",
   )
     .bind(projectId, settings)
@@ -297,10 +297,10 @@ describe("GET /projects/:termbaseProjectId/termbase/concepts", () => {
     await seedUpstreamConcepts("other")
     // 'other' lives in org 2; publish it directly and forge a cross-org
     // subscription row so we exercise the same-org gate in canReadTermbase.
-    await env.AQUILLA_DB.prepare(
+    await env.AQUILLA_PG.prepare(
       "UPDATE projects SET org_published_termbase = TRUE WHERE id = 'other'",
     ).run()
-    await env.AQUILLA_DB.prepare(
+    await env.AQUILLA_PG.prepare(
       "INSERT INTO project_termbase_subscriptions (project_id, termbase_project_id, priority) VALUES ('consumer', 'other', 0)",
     ).run()
     const res = await req(

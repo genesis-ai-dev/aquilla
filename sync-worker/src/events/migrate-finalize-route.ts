@@ -14,7 +14,7 @@
 const PATH = '/migrate/finalize'
 
 export interface MigrateFinalizeEnv {
-  AQUILLA_DB?: D1Database
+  AQUILLA_PG?: AquillaDb
   SYNC_SECRET_KEY?: string
 }
 
@@ -28,7 +28,7 @@ export async function handleMigrateFinalizeRequest(
   if ((request.headers.get('Authorization') ?? '') !== `Bearer ${env.SYNC_SECRET_KEY}`) {
     return new Response('unauthorized', { status: 401 })
   }
-  if (!env.AQUILLA_DB) return new Response('AQUILLA_DB binding not configured', { status: 500 })
+  if (!env.AQUILLA_PG) return new Response('AQUILLA_PG binding not configured', { status: 500 })
 
   let body: unknown
   try {
@@ -40,7 +40,7 @@ export async function handleMigrateFinalizeRequest(
   if (typeof projectId !== 'string') return new Response('body must be { projectId }', { status: 400 })
 
   try {
-    const res = await env.AQUILLA_DB.prepare(
+    const res = await env.AQUILLA_PG.prepare(
       `UPDATE files SET
         cell_count = (SELECT COUNT(DISTINCT cell_id) FROM cells WHERE project_id = files.project_id AND file_id = files.id),
         approved_count = (SELECT COUNT(*) FROM cells WHERE project_id = files.project_id AND file_id = files.id AND validated = 1),

@@ -37,7 +37,7 @@ export type { SearchResultOut, ParallelPassageRow } from "./scoped-search"
 export { sanitizeFtsQuery }
 
 export interface SearchReadEnv {
-  AQUILLA_DB?: D1Database
+  AQUILLA_PG?: AquillaDb
   SYNC_SECRET_KEY?: string
 }
 
@@ -88,7 +88,7 @@ function parseCommonParams(
  */
 function mapSearchError(err: unknown): Response {
   // FTS5 syntax errors (e.g. the user wrote `"` un-balanced before our
-  // sanitizer rolled out) surface as D1 prepare/exec failures. Surface
+  // sanitizer rolled out) surface as Postgres prepare/exec failures. Surface
   // them as a 400 rather than 500 so the client can fall back to a
   // "no results" UI instead of an error banner.
   const message = err instanceof Error ? err.message : String(err)
@@ -114,8 +114,8 @@ export async function handleSearchReadRequest(
   if (!env.SYNC_SECRET_KEY) {
     return new Response("SYNC_SECRET_KEY not configured", { status: 500 })
   }
-  if (!env.AQUILLA_DB) {
-    return new Response("AQUILLA_DB binding not configured", { status: 500 })
+  if (!env.AQUILLA_PG) {
+    return new Response("AQUILLA_PG binding not configured", { status: 500 })
   }
 
   const projectId = decodeURIComponent(match[1])
@@ -145,7 +145,7 @@ export async function handleSearchReadRequest(
   const { sideFilter, limit } = parsed
 
   try {
-    const results = await queryScopedSearch(env.AQUILLA_DB, verifiedProjectId, q, {
+    const results = await queryScopedSearch(env.AQUILLA_PG, verifiedProjectId, q, {
       side: sideFilter,
       limit,
     })
@@ -171,8 +171,8 @@ export async function handleSearchPassagesRequest(
   if (!env.SYNC_SECRET_KEY) {
     return new Response("SYNC_SECRET_KEY not configured", { status: 500 })
   }
-  if (!env.AQUILLA_DB) {
-    return new Response("AQUILLA_DB binding not configured", { status: 500 })
+  if (!env.AQUILLA_PG) {
+    return new Response("AQUILLA_PG binding not configured", { status: 500 })
   }
 
   const projectId = decodeURIComponent(match[1])
@@ -201,7 +201,7 @@ export async function handleSearchPassagesRequest(
   const { sideFilter, limit } = parsed
 
   try {
-    const results = await queryScopedExact(env.AQUILLA_DB, verifiedProjectId, q, {
+    const results = await queryScopedExact(env.AQUILLA_PG, verifiedProjectId, q, {
       side: sideFilter,
       limit,
     })

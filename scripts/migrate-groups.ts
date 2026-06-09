@@ -37,11 +37,11 @@ import {
   type GroupImportPlan,
 } from "../src/lib/migrate/groups"
 
-const AQUILLA_DB = "aquilla-db"
+const AQUILLA_PG = "aquilla-db"
 const PERSIST = ".wrangler-dev-state"
 
 function d1<T>(sql: string, remote: boolean): T[] {
-  const args = ["d1", "execute", AQUILLA_DB, remote ? "--remote" : "--local", "--json"]
+  const args = ["d1", "execute", AQUILLA_PG, remote ? "--remote" : "--local", "--json"]
   if (!remote) args.push("--persist-to", PERSIST)
   args.push("--command", sql)
   const out = execFileSync("wrangler", args, { encoding: "utf8", maxBuffer: 128 * 1024 * 1024 })
@@ -53,7 +53,7 @@ function d1<T>(sql: string, remote: boolean): T[] {
 function runSqlFile(sql: string, remote: boolean): void {
   const tmp = path.join(os.tmpdir(), `migrate-groups-${process.pid}.sql`)
   fs.writeFileSync(tmp, sql)
-  const args = ["d1", "execute", AQUILLA_DB, remote ? "--remote" : "--local", "--file", tmp]
+  const args = ["d1", "execute", AQUILLA_PG, remote ? "--remote" : "--local", "--file", tmp]
   if (!remote) args.push("--persist-to", PERSIST)
   execFileSync("wrangler", args, { stdio: "inherit" })
   fs.unlinkSync(tmp)

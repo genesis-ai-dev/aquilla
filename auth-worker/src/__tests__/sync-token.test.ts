@@ -2,14 +2,14 @@ import { env } from "cloudflare:test"
 import { describe, it, expect } from "vitest"
 import { verify } from "hono/jwt"
 import app from "../index"
-import { seedUser, jwtFor, authHeader } from "./helpers/d1"
+import { seedUser, jwtFor, authHeader } from "./helpers/db"
 
 const SYNC_SECRET = "sync-secret"
 
 describe("POST /api/v2/sync-token", () => {
   it("mints a sync token for the project creator", async () => {
     await seedUser(42, "alice")
-    await env.AQUILLA_DB.prepare(
+    await env.AQUILLA_PG.prepare(
       "INSERT INTO projects (id, name, org_id, created_by) VALUES (?, ?, NULL, 42)",
     )
       .bind("proj-1", "Test")
@@ -53,12 +53,12 @@ describe("POST /api/v2/sync-token", () => {
   it("honors a project_members override over the creator default", async () => {
     await seedUser(42, "alice")
     await seedUser(99, "creator")
-    await env.AQUILLA_DB.prepare(
+    await env.AQUILLA_PG.prepare(
       "INSERT INTO projects (id, name, org_id, created_by) VALUES (?, ?, NULL, 99)",
     )
       .bind("proj-1", "Test")
       .run()
-    await env.AQUILLA_DB.prepare(
+    await env.AQUILLA_PG.prepare(
       "INSERT INTO project_members (project_id, user_id, role_level, granted_by) VALUES (?, ?, ?, 99)",
     )
       .bind("proj-1", 42, 400)
@@ -97,7 +97,7 @@ describe("POST /api/v2/sync-token", () => {
       env,
     )
     expect(res.status).toBe(200)
-    const project = await env.AQUILLA_DB.prepare(
+    const project = await env.AQUILLA_PG.prepare(
       "SELECT id, name, created_by FROM projects WHERE id = 'proj-new'",
     ).first<{ id: string; name: string; created_by: number }>()
     expect(project).not.toBeNull()

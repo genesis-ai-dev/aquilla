@@ -88,7 +88,7 @@ async function loadSettings(
   env: AuthHonoEnv["Bindings"],
   projectId: string,
 ): Promise<ProjectSettingsResponse> {
-  const row = await env.AQUILLA_DB.prepare(
+  const row = await env.AQUILLA_PG.prepare(
     `SELECT project_id, settings, version, updated_at, updated_by
        FROM project_settings
       WHERE project_id = ?`,
@@ -203,7 +203,7 @@ projectSettings.on(
     // so a racing writer can't sneak past us.
     if (current.updatedAt == null) {
       try {
-        await c.env.AQUILLA_DB.prepare(
+        await c.env.AQUILLA_PG.prepare(
           `INSERT INTO project_settings
              (project_id, settings, version, updated_by)
            VALUES (?, ?, ?, ?)`,
@@ -222,7 +222,7 @@ projectSettings.on(
         return c.json({ error: `write failed: ${message}` }, 500)
       }
     } else {
-      const result = await c.env.AQUILLA_DB.prepare(
+      const result = await c.env.AQUILLA_PG.prepare(
         `UPDATE project_settings
             SET settings   = ?,
                 version    = version + 1,

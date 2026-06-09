@@ -3,7 +3,7 @@
 // The sweep used to create the project row and its group_project_grants via
 // `wrangler d1 execute --remote` (a multi-second subprocess spawn per project).
 // Under cross-project concurrency that meant N simultaneous wrangler procs all
-// hammering the D1 HTTP API. This endpoint does the same two writes as a single
+// hammering the database over HTTP per write. This endpoint does the same two writes as a single
 // parameterized d1.batch (no inline-SQL size concern, no subprocess), gated on
 // SYNC_SECRET_KEY — same trust tier as /migrate/ingest.
 //
@@ -13,7 +13,7 @@
 const PATH = '/migrate/project'
 
 export interface MigrateProjectEnv {
-  AQUILLA_DB?: D1Database
+  AQUILLA_PG?: AquillaDb
   SYNC_SECRET_KEY?: string
 }
 
@@ -47,7 +47,7 @@ export async function handleMigrateProjectRequest(
   if ((request.headers.get('Authorization') ?? '') !== `Bearer ${env.SYNC_SECRET_KEY}`) {
     return new Response('unauthorized', { status: 401 })
   }
-  if (!env.AQUILLA_DB) return new Response('AQUILLA_DB binding not configured', { status: 500 })
+  if (!env.AQUILLA_PG) return new Response('AQUILLA_PG binding not configured', { status: 500 })
 
   let body: unknown
   try {
@@ -59,8 +59,8 @@ export async function handleMigrateProjectRequest(
     return new Response('body must be { projectId, name, orgId, ownerUserId, teamId? }', { status: 400 })
   }
 
-  const db = env.AQUILLA_DB
-  const stmts: D1PreparedStatement[] = [
+  const db = env.AQUILLA_PG
+  const stmts: AquillaStatement[] = [
     db
       .prepare(
         `INSERT INTO projects (id, name, org_id, created_by, created_at, updated_at)

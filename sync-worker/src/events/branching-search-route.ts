@@ -42,7 +42,7 @@ import {
 } from "../lib/branching-search/cache"
 
 export interface BranchingSearchEnv {
-  AQUILLA_DB?: D1Database
+  AQUILLA_PG?: AquillaDb
   SYNC_SECRET_KEY?: string
   /** Optional. When bound, GET responses are cached by
    *  `(projectId, corpusEventMax, queryHash)` with a 60s TTL. Absence
@@ -87,8 +87,8 @@ export async function handleBranchingSearchRequest(
   if (!env.SYNC_SECRET_KEY) {
     return new Response("SYNC_SECRET_KEY not configured", { status: 500 })
   }
-  if (!env.AQUILLA_DB) {
-    return new Response("AQUILLA_DB binding not configured", { status: 500 })
+  if (!env.AQUILLA_PG) {
+    return new Response("AQUILLA_PG binding not configured", { status: 500 })
   }
 
   const projectId = decodeURIComponent(match[1])

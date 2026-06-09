@@ -82,14 +82,14 @@ interface PathContribution {
 }
 
 /**
- * Run a D1 `.first()` and swallow the error to null. Used for the four
+ * Run a `.first()` and swallow the error to null. Used for the four
  * role-resolution paths so a missing / pending-migration table on one path
  * doesn't 500 a request the other paths could have answered. Errors are
  * logged so the underlying ops issue stays visible — silently swallowed
  * here, surfaced in worker logs.
  */
 async function safeFirst<T>(
-  stmt: D1PreparedStatement,
+  stmt: AquillaStatement,
   label: string,
 ): Promise<T | null> {
   try {
@@ -106,7 +106,7 @@ async function resolveProjectRoleInternal(
   projectId: string,
   opts: { includeArchived: boolean },
 ): Promise<ResolvedRole | null> {
-  const project = await env.AQUILLA_DB.prepare(
+  const project = await env.AQUILLA_PG.prepare(
     `SELECT id, org_id, created_by, archived_at FROM projects WHERE id = ?`,
   )
     .bind(projectId)
@@ -128,14 +128,14 @@ async function resolveProjectRoleInternal(
   // on this project" — accurate when the table truly is empty/absent.
   const [override, group, org] = await Promise.all([
     safeFirst<{ role_level: number }>(
-      env.AQUILLA_DB.prepare(
+      env.AQUILLA_PG.prepare(
         `SELECT role_level FROM project_members
          WHERE project_id = ? AND user_id = ?`,
       ).bind(projectId, user.id),
       "project_members",
     ),
     safeFirst<{ role_level: number | null }>(
-      env.AQUILLA_DB.prepare(
+      env.AQUILLA_PG.prepare(
         `SELECT MAX(gpg.role_level) AS role_level
          FROM group_project_grants gpg
          JOIN group_members gm
@@ -146,7 +146,7 @@ async function resolveProjectRoleInternal(
     ),
     project.org_id != null
       ? safeFirst<{ role_level: number }>(
-          env.AQUILLA_DB.prepare(
+          env.AQUILLA_PG.prepare(
             `SELECT role_level FROM org_members
              WHERE org_id = ? AND user_id = ?`,
           ).bind(project.org_id, user.id),
@@ -224,7 +224,7 @@ export async function canReadSourceCells(
     return false
   }
 
-  const viewer = await env.AQUILLA_DB.prepare(
+  const viewer = await env.AQUILLA_PG.prepare(
     "SELECT source_project_id FROM projects WHERE id = ?",
   )
     .bind(args.viewerProjectId)

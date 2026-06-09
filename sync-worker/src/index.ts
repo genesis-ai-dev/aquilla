@@ -2,8 +2,10 @@
 //
 // AD-1 keeps realtime state transient and project-scoped: ProjectSync owns
 // focus locks, presence, and live event fan-out. Durable content state is
-// D1 events/projections plus R2 media blobs; this worker no longer exposes
-// a CRDT document runtime.
+// Postgres (Neon) events/projections plus R2 media blobs; this worker no
+// longer exposes a CRDT document runtime. Postgres is reached through the
+// D1-compatible shim (db/shim/postgres.ts) over Hyperdrive — the D1→Neon
+// cutover is complete and D1 is no longer a datastore here.
 
 import { handleAdminRequest } from "./admin"
 import { handleAudioRequest } from "./audio"
@@ -42,7 +44,7 @@ export { ProjectSync } from "./project-do"
 // Inert legacy DO class — kept exported so deploys don't trip the
 // "script does not export class 'FileSync'" guard. See file-sync-legacy.ts.
 export { FileSync } from "./file-sync-legacy"
-import { makeD1Postgres } from "../../db/shim/d1-postgres"
+import { makePostgres } from "../../db/shim/postgres"
 
 declare global {
   namespace Cloudflare {
@@ -54,10 +56,14 @@ declare global {
       ProjectSync?: DurableObjectNamespace
       /** R2 media/original-import blob bucket. Not used for Y.Doc state. */
       SNAPSHOTS: R2Bucket
-      /** Identity-owned D1 schema containing events and projections. */
-      AQUILLA_DB?: D1Database
-      /** Postgres (Neon) via Hyperdrive. When bound, AQUILLA_DB is served by the
-       *  D1-compatible Postgres shim instead of D1 (the D1→Neon cutover). */
+      /** The events + projections store. NOT a D1 binding — it is the
+       *  D1-compatible Postgres (Neon) shim, injected per-request at the top of
+       *  `fetch` from HYPERDRIVE. Typed as `AquillaDb` only because the ~80
+       *  routes speak the D1 `.prepare()/.batch()` API against the shim. */
+      AQUILLA_PG?: AquillaDb
+      /** Postgres (Neon) via Hyperdrive — the sole datastore. Required: when
+       *  absent the worker fails fast (see `fetch`) rather than silently
+       *  serving an empty local D1. */
       HYPERDRIVE?: Hyperdrive
       /** Shared HMAC key with identity that mints /sync-token JWTs. */
       SYNC_SECRET_KEY?: string
@@ -130,15 +136,19 @@ export default {
     // Must run before CORS / route matching — those test bare paths.
     request = stripApexPrefix(request)
 
-    // D1→Neon cutover: when HYPERDRIVE is bound, serve AQUILLA_DB via the
+    // Postgres (Neon) is the only datastore. Serve AQUILLA_PG via the
     // D1-compatible Postgres shim (per-request connection, closed after the
-    // response). Gated, so prod stays on D1 until the binding is added.
-    let pgShim: { close(): Promise<void> } | null = null
-    if (env.HYPERDRIVE) {
-      const shim = makeD1Postgres(env.HYPERDRIVE.connectionString)
-      env = { ...env, AQUILLA_DB: shim as unknown as D1Database }
-      pgShim = shim
+    // response). HYPERDRIVE is required — without it we fail fast instead of
+    // falling through to an empty local D1 (the D1→Neon cutover removed D1 as a
+    // store; a missing binding is a deploy/config error, not a fallback).
+    if (!env.HYPERDRIVE) {
+      return new Response(
+        "HYPERDRIVE not bound — Postgres is required (D1 has been removed as a datastore)",
+        { status: 500 },
+      )
     }
+    const pgShim: { close(): Promise<void> } = makePostgres(env.HYPERDRIVE.connectionString)
+    env = { ...env, AQUILLA_PG: pgShim as unknown as AquillaDb }
     try {
     const preflight = handleCorsPreflight(request)
     if (preflight) return preflight
@@ -218,7 +228,7 @@ export default {
 
     return new Response("not found", { status: 404 })
     } finally {
-      if (pgShim) ctx.waitUntil(pgShim.close())
+      ctx.waitUntil(pgShim.close())
     }
   },
 }

@@ -1,7 +1,7 @@
 import { env } from "cloudflare:test"
 import { describe, it, expect } from "vitest"
 import app from "../index"
-import { seedUser, jwtFor, authHeader } from "./helpers/d1"
+import { seedUser, jwtFor, authHeader } from "./helpers/db"
 
 async function getOrgs(username: string) {
   const res = await app.request("/api/v2/orgs", { headers: authHeader(await jwtFor(username)) }, env)
@@ -12,9 +12,9 @@ describe("GET /api/v2/orgs", () => {
   it("returns owned + member orgs with resolved roles", async () => {
     await seedUser(1, "wendi")
     await seedUser(2, "anna")
-    await env.AQUILLA_DB.prepare("INSERT INTO organizations (id, name, owner_user_id) VALUES (1, 'Come and See', 1)").run()
-    await env.AQUILLA_DB.prepare("INSERT INTO organizations (id, name, owner_user_id) VALUES (2, 'annas workspace', 2)").run()
-    await env.AQUILLA_DB.prepare(
+    await env.AQUILLA_PG.prepare("INSERT INTO organizations (id, name, owner_user_id) VALUES (1, 'Come and See', 1)").run()
+    await env.AQUILLA_PG.prepare("INSERT INTO organizations (id, name, owner_user_id) VALUES (2, 'annas workspace', 2)").run()
+    await env.AQUILLA_PG.prepare(
       "INSERT INTO org_members (org_id, user_id, role_level, granted_by) VALUES (1, 1, 700, 1), (1, 2, 600, 1), (2, 2, 700, 2)",
     ).run()
 
@@ -38,8 +38,8 @@ describe("GET /api/v2/orgs", () => {
   it("does not list an org the caller has no membership in", async () => {
     await seedUser(1, "alice")
     await seedUser(2, "bob")
-    await env.AQUILLA_DB.prepare("INSERT INTO organizations (id, name, owner_user_id) VALUES (1, 'Alice Org', 1), (2, 'Bob Org', 2)").run()
-    await env.AQUILLA_DB.prepare("INSERT INTO org_members (org_id, user_id, role_level, granted_by) VALUES (1, 1, 700, 1), (2, 2, 700, 2)").run()
+    await env.AQUILLA_PG.prepare("INSERT INTO organizations (id, name, owner_user_id) VALUES (1, 'Alice Org', 1), (2, 'Bob Org', 2)").run()
+    await env.AQUILLA_PG.prepare("INSERT INTO org_members (org_id, user_id, role_level, granted_by) VALUES (1, 1, 700, 1), (2, 2, 700, 2)").run()
     const { body } = await getOrgs("alice")
     expect(body.orgs.map((o) => o.id)).toEqual([1])
   })

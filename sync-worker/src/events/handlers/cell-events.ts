@@ -47,7 +47,7 @@ function projectionTablesFor(touches: readonly ProjectionTable[]): ProjectionTab
 }
 
 export function handleCellEvent(
-  db: D1Database,
+  db: AquillaDb,
   authed: AuthorizedEvent<CellEventKind>,
   serverTs: number,
   opts: HandleCellEventOptions,
@@ -82,7 +82,7 @@ export function handleCellEvent(
       event.projectId,
     )
 
-  const stmts: D1PreparedStatement[] = [eventInsert]
+  const stmts: AquillaStatement[] = [eventInsert]
   let projectionTouches: readonly ProjectionTable[] = []
 
   if (opts.updateProjection) {

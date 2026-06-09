@@ -35,14 +35,14 @@ testReset.post("/reset", async (c) => {
     return c.json({ error: "Not found" }, 404)
   }
 
-  const db = c.env.AQUILLA_DB
-  const codexDb = c.env.AQUILLA_DB
+  const db = c.env.AQUILLA_PG
+  const codexDb = c.env.AQUILLA_PG
 
   // Order matters: drop dependent rows before parents. The hand-rolled
   // delete-everything is safer than a real TRUNCATE because some tables
   // may not exist in older migration states and we want this to no-op
   // gracefully there.
-  const tables: Array<{ db: D1Database; name: string }> = [
+  const tables: Array<{ db: AquillaDb; name: string }> = [
     { db, name: "project_invites" },
     { db, name: "project_members" },
     { db, name: "org_members" },

@@ -190,7 +190,7 @@ function clampLimit(n: number | undefined): number {
  * Returns [] when the sanitizer reduces `q` to nothing.
  */
 export async function queryScopedSearch(
-  db: D1Database,
+  db: AquillaDb,
   verifiedProjectId: VerifiedProjectId,
   q: string,
   opts: { side?: "source" | "target"; limit?: number },
@@ -261,7 +261,7 @@ export async function queryScopedSearch(
  * Throws on FTS5 syntax errors. Returns [] when `exactText` sanitizes away.
  */
 export async function queryScopedExact(
-  db: D1Database,
+  db: AquillaDb,
   verifiedProjectId: VerifiedProjectId,
   exactText: string,
   opts: { side?: "source" | "target"; limit?: number },
@@ -349,7 +349,7 @@ export interface ValidatedNeighbor {
  * query sanitizes away.
  */
 export async function querySourceNeighbors(
-  db: D1Database,
+  db: AquillaDb,
   verifiedProjectId: VerifiedProjectId,
   queryText: string,
   opts: { topK?: number; excludeCellId?: string; validatedOnly?: boolean },

@@ -106,7 +106,7 @@ invites.post(
 
     for (const pid of projectIds) {
       try {
-        await c.env.AQUILLA_DB.prepare(
+        await c.env.AQUILLA_PG.prepare(
           `INSERT INTO project_invites
              (token, project_id, role_level, created_by, expires_at)
            VALUES (?, ?, ?, ?, ?)`,
@@ -140,7 +140,7 @@ invites.get("/:token/preview", async (c) => {
     return c.json({ error: "Invalid token" }, 404)
   }
 
-  const rows = await c.env.AQUILLA_DB.prepare(
+  const rows = await c.env.AQUILLA_PG.prepare(
     `SELECT token, project_id, role_level, created_by, created_at,
             expires_at, used_by, used_at
        FROM project_invites WHERE token = ?`,
@@ -170,7 +170,7 @@ invites.get("/:token/preview", async (c) => {
 
   // Pull project rows in one shot.
   const placeholders = invitesForToken.map(() => "?").join(",")
-  const projectRows = await c.env.AQUILLA_DB.prepare(
+  const projectRows = await c.env.AQUILLA_PG.prepare(
     `SELECT id, name, org_id, created_by, archived_at
        FROM projects WHERE id IN (${placeholders})`,
   )
@@ -214,7 +214,7 @@ invites.post("/:token/accept", authMiddleware, async (c) => {
   const user = c.get("user")
   const token = c.req.param("token") as string
 
-  const rows = await c.env.AQUILLA_DB.prepare(
+  const rows = await c.env.AQUILLA_PG.prepare(
     `SELECT token, project_id, role_level, created_by, created_at,
             expires_at, used_by, used_at
        FROM project_invites WHERE token = ?`,
@@ -248,7 +248,7 @@ invites.post("/:token/accept", authMiddleware, async (c) => {
       continue
     }
 
-    const existing = await c.env.AQUILLA_DB.prepare(
+    const existing = await c.env.AQUILLA_PG.prepare(
       `SELECT role_level FROM project_members
         WHERE project_id = ? AND user_id = ?`,
     )
@@ -261,7 +261,7 @@ invites.post("/:token/accept", authMiddleware, async (c) => {
 
     try {
       if (existing) {
-        await c.env.AQUILLA_DB.prepare(
+        await c.env.AQUILLA_PG.prepare(
           `UPDATE project_members
               SET role_level = ?, granted_by = ?, granted_at = CURRENT_TIMESTAMP
             WHERE project_id = ? AND user_id = ?`,
@@ -269,7 +269,7 @@ invites.post("/:token/accept", authMiddleware, async (c) => {
           .bind(finalRole, invite.created_by, invite.project_id, user.id)
           .run()
       } else {
-        await c.env.AQUILLA_DB.prepare(
+        await c.env.AQUILLA_PG.prepare(
           `INSERT INTO project_members
              (project_id, user_id, role_level, granted_by)
            VALUES (?, ?, ?, ?)`,
@@ -278,7 +278,7 @@ invites.post("/:token/accept", authMiddleware, async (c) => {
           .run()
       }
       if (!invite.used_at) {
-        await c.env.AQUILLA_DB.prepare(
+        await c.env.AQUILLA_PG.prepare(
           `UPDATE project_invites
               SET used_by = ?, used_at = CURRENT_TIMESTAMP
             WHERE token = ? AND project_id = ?`,

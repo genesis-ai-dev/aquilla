@@ -4,7 +4,7 @@ import { handleExportBundleRequest, type ExportBundleEnv } from "../events/expor
 
 const SECRET = "bundle-tests-secret"
 
-/** SQL-matching D1 stub: blob-list, file-name, and cells queries each get the right shape. */
+/** SQL-matching DB stub: blob-list, file-name, and cells queries each get the right shape. */
 function makeStubDb(blobs: { file_id: string; raw_source: string }[], names: Record<string, string> = {}) {
   return {
     prepare(sql: string) {
@@ -26,7 +26,7 @@ function makeStubDb(blobs: { file_id: string; raw_source: string }[], names: Rec
         },
       }
     },
-  } as unknown as ExportBundleEnv["AQUILLA_DB"]
+  } as unknown as ExportBundleEnv["AQUILLA_PG"]
 }
 
 async function makeToken(role: number): Promise<string> {
@@ -43,13 +43,13 @@ function bundleReq(token: string): Request {
 
 describe("GET /export/bundle", () => {
   it("403s a non-maintainer", async () => {
-    const env: ExportBundleEnv = { SYNC_SECRET_KEY: SECRET, AQUILLA_DB: makeStubDb([]) }
+    const env: ExportBundleEnv = { SYNC_SECRET_KEY: SECRET, AQUILLA_PG: makeStubDb([]) }
     const res = await handleExportBundleRequest(bundleReq(await makeToken(400)), env)
     expect(res?.status).toBe(403)
   })
 
   it("404s a maintainer when there are no exportable files", async () => {
-    const env: ExportBundleEnv = { SYNC_SECRET_KEY: SECRET, AQUILLA_DB: makeStubDb([]) }
+    const env: ExportBundleEnv = { SYNC_SECRET_KEY: SECRET, AQUILLA_PG: makeStubDb([]) }
     const res = await handleExportBundleRequest(bundleReq(await makeToken(600)), env)
     expect(res?.status).toBe(404)
   })
@@ -57,7 +57,7 @@ describe("GET /export/bundle", () => {
   it("zips the USFM files for a maintainer", async () => {
     const env: ExportBundleEnv = {
       SYNC_SECRET_KEY: SECRET,
-      AQUILLA_DB: makeStubDb(
+      AQUILLA_PG: makeStubDb(
         [
           { file_id: "f1", raw_source: "\\id GEN\n\\c 1\n\\v 1 In the beginning\n" },
           { file_id: "f2", raw_source: "\\id EXO\n\\c 1\n\\v 1 These are the names\n" },

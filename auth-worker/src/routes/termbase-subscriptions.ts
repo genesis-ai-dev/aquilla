@@ -92,7 +92,7 @@ termbase.post("/:id/termbase/publish", authMiddleware, async (c) => {
     return c.json({ error: "role >= maintainer (600) required" }, 403)
   }
 
-  const project = await c.env.AQUILLA_DB.prepare(
+  const project = await c.env.AQUILLA_PG.prepare(
     "SELECT org_id FROM projects WHERE id = ?",
   )
     .bind(projectId)
@@ -102,7 +102,7 @@ termbase.post("/:id/termbase/publish", authMiddleware, async (c) => {
     return c.json({ error: "project is not org-owned; cannot publish to an org" }, 409)
   }
 
-  await c.env.AQUILLA_DB.prepare(
+  await c.env.AQUILLA_PG.prepare(
     "UPDATE projects SET org_published_termbase = TRUE, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
   )
     .bind(projectId)
@@ -125,7 +125,7 @@ termbase.delete("/:id/termbase/publish", authMiddleware, async (c) => {
     return c.json({ error: "role >= maintainer (600) required" }, 403)
   }
 
-  await c.env.AQUILLA_DB.prepare(
+  await c.env.AQUILLA_PG.prepare(
     "UPDATE projects SET org_published_termbase = FALSE, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
   )
     .bind(projectId)
@@ -146,7 +146,7 @@ termbase.get("/:orgId/published-termbases", authMiddleware, async (c) => {
   const orgRole = await getOrgMemberRole(c.env, orgId, user.id)
   if (orgRole == null) return c.json({ error: "no access to org" }, 403)
 
-  const rows = await c.env.AQUILLA_DB.prepare(
+  const rows = await c.env.AQUILLA_PG.prepare(
     `SELECT id, name, created_by
        FROM projects
       WHERE org_id = ?
@@ -182,7 +182,7 @@ async function listSubscriptions(
   env: AuthHonoEnv["Bindings"],
   projectId: string,
 ): Promise<Array<{ termbaseProjectId: string; termbaseName: string | null; priority: number; createdAt: string | null; published: boolean }>> {
-  const rows = await env.AQUILLA_DB.prepare(
+  const rows = await env.AQUILLA_PG.prepare(
     `SELECT s.termbase_project_id AS termbase_project_id,
             p.name                AS termbase_name,
             s.priority            AS priority,
@@ -243,14 +243,14 @@ termbase.post(
     }
 
     // The subscriber's own org — the termbase must be published to the SAME org.
-    const subscriber = await c.env.AQUILLA_DB.prepare(
+    const subscriber = await c.env.AQUILLA_PG.prepare(
       "SELECT org_id FROM projects WHERE id = ?",
     )
       .bind(projectId)
       .first<{ org_id: number | null }>()
     if (!subscriber) return c.json({ error: "project not found" }, 404)
 
-    const termbaseProject = await c.env.AQUILLA_DB.prepare(
+    const termbaseProject = await c.env.AQUILLA_PG.prepare(
       "SELECT org_id, org_published_termbase FROM projects WHERE id = ? AND archived_at IS NULL",
     )
       .bind(termbaseProjectId)
@@ -271,7 +271,7 @@ termbase.post(
     // Default priority: append at the end (max existing + 1).
     let resolvedPriority = priority
     if (resolvedPriority == null) {
-      const maxRow = await c.env.AQUILLA_DB.prepare(
+      const maxRow = await c.env.AQUILLA_PG.prepare(
         "SELECT COALESCE(MAX(priority), -1) AS max_priority FROM project_termbase_subscriptions WHERE project_id = ?",
       )
         .bind(projectId)
@@ -279,7 +279,7 @@ termbase.post(
       resolvedPriority = (maxRow?.max_priority ?? -1) + 1
     }
 
-    await c.env.AQUILLA_DB.prepare(
+    await c.env.AQUILLA_PG.prepare(
       `INSERT INTO project_termbase_subscriptions (project_id, termbase_project_id, priority)
        VALUES (?, ?, ?)
        ON CONFLICT(project_id, termbase_project_id)
@@ -288,7 +288,7 @@ termbase.post(
       .bind(projectId, termbaseProjectId, resolvedPriority)
       .run()
 
-    const row = await c.env.AQUILLA_DB.prepare(
+    const row = await c.env.AQUILLA_PG.prepare(
       "SELECT priority, created_at FROM project_termbase_subscriptions WHERE project_id = ? AND termbase_project_id = ?",
     )
       .bind(projectId, termbaseProjectId)
@@ -316,7 +316,7 @@ termbase.delete("/:id/termbase/subscriptions/:termbaseProjectId", authMiddleware
     return c.json({ error: "role >= maintainer (600) required" }, 403)
   }
 
-  await c.env.AQUILLA_DB.prepare(
+  await c.env.AQUILLA_PG.prepare(
     "DELETE FROM project_termbase_subscriptions WHERE project_id = ? AND termbase_project_id = ?",
   )
     .bind(projectId, termbaseProjectId)
@@ -346,11 +346,11 @@ termbase.patch(
     // Index in the order array = priority. Only existing rows are updated;
     // unknown ids are silently ignored (DELETE/UPDATE no-ops on no match).
     const stmts = order.map((termbaseProjectId, index) =>
-      c.env.AQUILLA_DB.prepare(
+      c.env.AQUILLA_PG.prepare(
         "UPDATE project_termbase_subscriptions SET priority = ? WHERE project_id = ? AND termbase_project_id = ?",
       ).bind(index, projectId, termbaseProjectId),
     )
-    if (stmts.length > 0) await c.env.AQUILLA_DB.batch(stmts)
+    if (stmts.length > 0) await c.env.AQUILLA_PG.batch(stmts)
 
     const subscriptions = await listSubscriptions(c.env, projectId)
     return c.json({ subscriptions })
@@ -392,7 +392,7 @@ termbase.get("/:termbaseProjectId/termbase/concepts", authMiddleware, async (c) 
   // project_settings JSON (AD-3 thin-client; src/lib/sync/project-settings.ts).
   // Read it directly here rather than round-tripping the settings route, which
   // would require a role on the upstream we deliberately don't grant.
-  const row = await c.env.AQUILLA_DB.prepare(
+  const row = await c.env.AQUILLA_PG.prepare(
     "SELECT settings FROM project_settings WHERE project_id = ?",
   )
     .bind(termbaseProjectId)

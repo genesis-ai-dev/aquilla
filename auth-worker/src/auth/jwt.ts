@@ -2,7 +2,7 @@
 // frontier-server (HS256, claim `sub` = username, configurable expiry) so
 // tokens minted here verify against the old server and vice versa.
 //
-// Ported from frontier-server/cloudflare/src/auth/jwt.ts, narrowed to AQUILLA_DB
+// Ported from frontier-server/cloudflare/src/auth/jwt.ts, narrowed to AQUILLA_PG
 // and the strict UserRow shape (no `any`).
 
 import { sign, verify } from "hono/jwt"
@@ -82,7 +82,7 @@ export class JWTService {
 
   async getUserByUsername(username: string): Promise<AuthUser | null> {
     try {
-      const result = await this.env.AQUILLA_DB.prepare(
+      const result = await this.env.AQUILLA_PG.prepare(
         "SELECT * FROM users WHERE username = ?",
       )
         .bind(username)
@@ -97,7 +97,7 @@ export class JWTService {
 
   async getUserByEmail(email: string): Promise<AuthUser | null> {
     try {
-      const result = await this.env.AQUILLA_DB.prepare(
+      const result = await this.env.AQUILLA_PG.prepare(
         "SELECT * FROM users WHERE email = ?",
       )
         .bind(email)

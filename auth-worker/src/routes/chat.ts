@@ -8,7 +8,7 @@
 // SECRET_KEY that drifted. One worker, one secret.
 //
 // Behaviour kept identical to the old chat-worker:
-//   1. Verify the Bearer JWT via authMiddleware (against AQUILLA_DB).
+//   1. Verify the Bearer JWT via authMiddleware (against AQUILLA_PG).
 //   2. Map "default" / "free-tier" / "" to DEFAULT_LLM_MODEL.
 //   3. Forward to OpenRouter with OPENROUTER_API_KEY.
 //   4. Pass the response through unchanged (streaming or JSON).

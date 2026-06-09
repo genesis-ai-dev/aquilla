@@ -26,6 +26,7 @@ import {
   confirmAlignment,
   invalidateAlignment,
   CONFIDENCE_HIGH,
+  CONFIDENCE_AMBER,
   MIN_PAIRS_FOR_MEANINGFUL_ALIGNMENT,
   type AlignmentModel,
   type AlignmentLink,
@@ -184,6 +185,20 @@ export function InterlinearAlignmentPanel({
     return alignCell(sourceText, targetText, alignmentModel, { threshold: CONFIDENCE_HIGH })
   }, [hasSufficientData, alignmentModel, sourceText, targetText])
 
+  // FRO-241 training loop fix: the amber band (0.3–0.6) was the primary path
+  // for small corpora to feed AlignmentSeeds back — raising the display floor
+  // to 0.6 severed it. Keep those links accessible via a collapsed disclosure
+  // so confirm/invalidate stays reachable without adding noise to the main view.
+  const amberLinks: AlignmentLink[] = useMemo(() => {
+    if (!hasSufficientData) return []
+    if (!alignmentModel || !sourceText.trim() || !targetText.trim()) return []
+    // Compute ALL links at the amber floor, then exclude the high-confidence ones
+    // already shown in the main section to avoid duplicates.
+    const allAmber = alignCell(sourceText, targetText, alignmentModel, { threshold: CONFIDENCE_AMBER })
+    const highKeys = new Set(links.map((l) => `${l.srcToken}|${l.tgtToken}`))
+    return allAmber.filter((l) => !highKeys.has(`${l.srcToken}|${l.tgtToken}`))
+  }, [hasSufficientData, alignmentModel, sourceText, targetText, links])
+
   const confirmedSet = useMemo(() => {
     const s = new Set<string>()
     for (const seed of confirmedSeeds) {
@@ -236,9 +251,8 @@ export function InterlinearAlignmentPanel({
     )
   }
 
-  // With sufficient data but no high-confidence links: hide the section entirely
-  // rather than showing amber noise.
-  if (links.length === 0) return null
+  // With sufficient data but no links in either band: hide the section entirely.
+  if (links.length === 0 && amberLinks.length === 0) return null
 
   return (
     <div className="flex flex-col gap-1.5">
@@ -255,21 +269,54 @@ export function InterlinearAlignmentPanel({
         </span>
       </div>
 
-      <div className="flex flex-col gap-0.5">
-        {links.map((link) => {
-          const key = `${link.srcToken}|${link.tgtToken}`
-          return (
-            <AlignmentRow
-              key={key}
-              link={link}
-              confirmed={confirmedSet.has(key)}
-              invalidated={invalidatedSet.has(key)}
-              onConfirm={() => handleConfirm(link)}
-              onInvalidate={() => handleInvalidate(link)}
-            />
-          )
-        })}
-      </div>
+      {links.length > 0 && (
+        <div className="flex flex-col gap-0.5">
+          {links.map((link) => {
+            const key = `${link.srcToken}|${link.tgtToken}`
+            return (
+              <AlignmentRow
+                key={key}
+                link={link}
+                confirmed={confirmedSet.has(key)}
+                invalidated={invalidatedSet.has(key)}
+                onConfirm={() => handleConfirm(link)}
+                onInvalidate={() => handleInvalidate(link)}
+              />
+            )
+          })}
+        </div>
+      )}
+
+      {/* FRO-241 training loop fix: collapsed opt-in disclosure for the
+          amber band (0.3–0.6). Small corpora plateau below 0.6 and can
+          never train past it if confirm/invalidate is unreachable. The
+          disclosure is closed by default so it adds no visual noise for
+          projects with sufficient data — users who need to confirm weak
+          links can expand it. Count in the summary keeps them aware it
+          exists without forcing it on them. */}
+      {amberLinks.length > 0 && (
+        <details className="rounded-md border border-amber-500/20 bg-amber-500/5">
+          <summary className="cursor-pointer select-none px-2 py-1 text-[10px] font-medium text-amber-700 dark:text-amber-400 hover:text-amber-800 dark:hover:text-amber-300 list-none flex items-center gap-1">
+            <span className="flex-1">Needs confirmation ({amberLinks.length})</span>
+            <span className="text-[9px] text-muted-foreground/60">30–59%</span>
+          </summary>
+          <div className="flex flex-col gap-0.5 px-1 pb-1.5 pt-0.5">
+            {amberLinks.map((link) => {
+              const key = `${link.srcToken}|${link.tgtToken}`
+              return (
+                <AlignmentRow
+                  key={key}
+                  link={link}
+                  confirmed={confirmedSet.has(key)}
+                  invalidated={invalidatedSet.has(key)}
+                  onConfirm={() => handleConfirm(link)}
+                  onInvalidate={() => handleInvalidate(link)}
+                />
+              )
+            })}
+          </div>
+        </details>
+      )}
     </div>
   )
 }

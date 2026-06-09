@@ -225,9 +225,11 @@ export function ExpandableFileList({
                               onSectionClick={(label) => {
                                 if (file.id !== activeFileId) {
                                   onSelectFile(file.id)
-                                  setTimeout(() => requestScrollToSection(label), 100)
+                                  // FRO-250/254: stamp the fileId so ScrollToGroupHandler
+                                  // skips this request if cells still belong to the OLD file.
+                                  setTimeout(() => requestScrollToSection(label, file.id), 100)
                                 } else {
-                                  requestScrollToSection(label)
+                                  requestScrollToSection(label, file.id)
                                 }
                               }}
                             />

@@ -8,22 +8,25 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const SAMPLE_MD = path.resolve(__dirname, "../../fixtures/sample.md")
 
 /**
- * Cell action popover ("More cell actions").
+ * Cell action rail and overflow popover ("More cell actions").
  *
- * Each cell row has a MoreHorizontal (⋯) button with aria-label
- * "More cell actions". Clicking it opens a Base UI Popover that contains:
- *  - "Record audio" row (CellAudioRecordButton + label)
- *  - "Add comment" button (when onOpenComments is wired — always true in workspace)
+ * FRO-237: "Record audio" was moved from the ⋯ overflow popover to a direct
+ * mic button on the CellActionRail (aria-label="Record audio"). The ⋯ popover
+ * now contains "Add comment" (and other items) but NOT "Record audio".
  *
- * The button renders only when:
- *   hasAudio || onOpenRecording || cell.translated.length > 0 || onOpenComments
- * Both onOpenRecording and onOpenComments are always wired in ProjectWorkspace,
- * so the button is present regardless of cell content.
+ * The rail mic button:
+ *   - aria-label="Record audio" when mic is allowed
+ *   - aria-label="Microphone access blocked — click for help" when denied
+ *   - Always enabled (never disabled) — even when mic is denied, it routes
+ *     click to the help popover instead of being dead.
  *
- * The button lives inside the CellActionRail (opacity: 0 when not hovered).
- * We hover the row first to reveal the rail before clicking.
+ * The ⋯ overflow button:
+ *   - Visible when the cell has translated text, comments, audio, or a cue.
+ *   - aria-label="More cell actions"
+ *   - "Add comment" is always present when comments hook is wired.
+ *   - "Record audio" text is NOT in the ⋯ popover anymore (FRO-237).
  */
-test("cell action popover opens and shows Record audio + Add comment items", async ({ alice }) => {
+test("cell action rail shows direct mic button by aria-label; overflow popover shows Add comment", async ({ alice }) => {
   const dash = new Dashboard(alice)
   await dash.goto()
   const name = `CellPopover ${Date.now()}`
@@ -39,14 +42,15 @@ test("cell action popover opens and shows Record audio + Add comment items", asy
   const row = ws.cellRow(0)
   await row.hover()
 
-  // Click the "More cell actions" button.
+  // FRO-237: mic is now a direct rail button on the action rail (not inside the ⋯ popover).
+  // The aria-label is "Record audio" (normal) or "Microphone access blocked — click for help" (denied).
+  const micRailBtn = row.locator('button[aria-label="Record audio"]')
+  await expect(micRailBtn).toBeVisible({ timeout: 5_000 })
+
+  // Click the "More cell actions" overflow button.
   const moreBtn = row.locator('button[aria-label="More cell actions"]')
   await expect(moreBtn).toBeVisible({ timeout: 5_000 })
   await moreBtn.click()
-
-  // The popover should appear somewhere on the page (Base UI portals it to body).
-  // "Record audio" text appears as a label next to the record button.
-  await expect(alice.getByText("Record audio").first()).toBeVisible({ timeout: 5_000 })
 
   // "Add comment" button is always present when no comments exist yet.
   await expect(alice.getByText("Add comment").first()).toBeVisible({ timeout: 3_000 })

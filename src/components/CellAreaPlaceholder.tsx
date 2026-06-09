@@ -15,6 +15,12 @@ interface CellAreaPlaceholderProps {
   fileName?: string
   /** True when the project has no files at all (not just none selected). */
   hasFiles?: boolean
+  /** FRO-149: true once the file list has been fetched from the server.
+   *  Until this is true, we must NOT show the "No files yet — Import a file"
+   *  CTA because projectFiles is transiently empty even on populated projects
+   *  (the server fetch hasn't resolved yet). Showing the CTA too early risks a
+   *  spurious "Import" click on a project that already has files. */
+  filesLoaded?: boolean
   onImportClick?: () => void
 }
 
@@ -22,10 +28,17 @@ export function CellAreaPlaceholder({
   state,
   fileName,
   hasFiles,
+  filesLoaded,
   onImportClick,
 }: CellAreaPlaceholderProps) {
   if (state.kind === "ready") return null
-  if (state.kind === "no-file") return <NoFileEmpty hasFiles={hasFiles} onImportClick={onImportClick} />
+  if (state.kind === "no-file") return (
+    <NoFileEmpty
+      hasFiles={hasFiles}
+      filesLoaded={filesLoaded}
+      onImportClick={onImportClick}
+    />
+  )
   if (state.kind === "ready-empty") {
     return <ReadyEmpty fileName={fileName} onImportClick={onImportClick} />
   }
@@ -65,11 +78,29 @@ function SkeletonRows({ caption }: { caption: string }) {
 
 function NoFileEmpty({
   hasFiles,
+  filesLoaded,
   onImportClick,
 }: {
   hasFiles?: boolean
+  filesLoaded?: boolean
   onImportClick?: () => void
 }) {
+  // FRO-149: while the file list hasn't loaded yet, show the neutral "No file
+  // selected" copy. We must NOT show "No files yet — Import a file" here because
+  // projectFiles is transiently empty (server fetch still in flight) even on
+  // projects that already have files — showing the CTA would risk a spurious
+  // duplicate-import click. Only show the zero-files CTA once we KNOW the
+  // project has actually been loaded and has no files.
+  if (!filesLoaded) {
+    return (
+      <EmptyState
+        icon={<FolderOpen className="h-10 w-10" aria-hidden />}
+        title="No file selected"
+        description="Pick a file from the sidebar to start translating."
+      />
+    )
+  }
+
   // When the project has no files at all the sidebar is empty, so "pick a
   // file from the sidebar" is wrong. Instead offer a direct import CTA.
   if (!hasFiles) {

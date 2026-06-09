@@ -67,4 +67,23 @@ describe("wasSetupAutoShown / markSetupAutoShown", () => {
     markSetupAutoShown("p-unit-1")
     expect(wasSetupAutoShown("p-unit-2")).toBe(false)
   })
+
+  // FRO-244: the shouldAutoOpen guard reads wasSetupAutoShown() directly at
+  // render time — NOT via mirrored state — so project A→B switches don't
+  // inherit A's stale flag. Verify the raw helpers compose correctly for the
+  // scenario the panel described:
+  //   - Switch to already-shown project → wasSetupAutoShown returns true →
+  //     shouldAutoOpen would be false → no pop, flag NOT burned.
+  it("FRO-244: already-shown project returns true immediately (no state lag)", () => {
+    markSetupAutoShown("p-unit-1")
+    // Simulates switching back to the same project: reading at render time
+    // returns true immediately, no React state update cycle needed.
+    expect(wasSetupAutoShown("p-unit-1")).toBe(true)
+  })
+
+  it("FRO-244: unshown project returns false even after another project is marked", () => {
+    markSetupAutoShown("p-unit-1")
+    // B was never shown — switching A→B should NOT inherit A's flag.
+    expect(wasSetupAutoShown("p-unit-2")).toBe(false)
+  })
 })

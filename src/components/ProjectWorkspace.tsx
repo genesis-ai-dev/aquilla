@@ -770,6 +770,7 @@ export function ProjectWorkspace() {
     requestPromotion,
     patch: patchOrgSettings,
     version: orgSettingsVersion,
+    canExport: canExportByOrgPolicy,
   } = useOrgSettings(activeOrg?.id, activeOrg?.role?.level)
 
   // FRO-194: also destructure rule CRUD for RulesSurface (patchSettings is the
@@ -1840,8 +1841,10 @@ export function ProjectWorkspace() {
   }, [project])
 
   const openExportFlow = useCallback(() => {
+    // FRO-253: if org policy disallows export, this is a no-op (button is hidden anyway).
+    if (!canExportByOrgPolicy) return
     setExportOpen(true)
-  }, [])
+  }, [canExportByOrgPolicy])
 
   const actionArgs = useMemo(() => ({
     openImport: openImportFlow,
@@ -2156,15 +2159,18 @@ export function ProjectWorkspace() {
                 onClick={handleJumpNextUnfinished}
                 disabled={!activeFileId || !hasUnfinished}
               />
-              <Button
-                variant="ghost"
-                size="icon"
-                onClick={openExportFlow}
-                title="Export file"
-                aria-label="Export file"
-              >
-                <Download className="h-4 w-4" />
-              </Button>
+              {/* FRO-253: hide export button when org policy disallows it */}
+              {canExportByOrgPolicy && (
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={openExportFlow}
+                  title="Export file"
+                  aria-label="Export file"
+                >
+                  <Download className="h-4 w-4" />
+                </Button>
+              )}
             </div>
 
             <div className="mx-1 h-5 w-px bg-border" aria-hidden="true" />

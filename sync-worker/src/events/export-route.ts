@@ -9,8 +9,11 @@
 // file name. The translator's in-progress state is what gets exported —
 // empty cells fall back to the source verse so the file stays valid USFM.
 //
-// Auth: sync-token JWT scoped to projectId; maintainer (600) required per spec
-// Q32 — exporting the deliverable is a privileged action, not a read.
+// Auth: sync-token JWT scoped to projectId; role floor = max(MAINTAINER, org
+// exportMinRole setting). Default org floor = MAINTAINER (600) per spec Q32.
+// Org owners can RAISE the floor (e.g., OWNER only) or LOWER it (e.g.,
+// CONTRIBUTOR) via org settings — see FRO-253. Current behavior (maintainer)
+// is preserved when no exportMinRole is set.
 //
 // Returns null if the URL doesn't match (chainable in the fetch dispatcher).
 
@@ -55,11 +58,13 @@ export async function handleExportSourceRequest(
   if (!auth.ok) {
     return withCors(new Response(auth.reason, { status: auth.status }), request)
   }
-  // Q32: a deliverable export is gated at maintainer (600) — a viewer who can
-  // read the project should not be able to pull a full export of it.
-  if (auth.claims.role < ROLE.MAINTAINER) {
+  // FRO-253: resolve the org-level export floor. Default = MAINTAINER (600).
+  // The org may raise it (e.g., OWNER) or lower it (e.g., CONTRIBUTOR).
+  const exportFloor = await resolveExportFloor(db, projectId)
+  if (auth.claims.role < exportFloor) {
+    const floorName = exportFloor === ROLE.MAINTAINER ? "maintainer" : `role level ${exportFloor}`
     return withCors(
-      new Response("maintainer role required to export", { status: 403 }),
+      new Response(`${floorName} role required to export`, { status: 403 }),
       request,
     )
   }
@@ -141,4 +146,48 @@ export async function handleExportSourceRequest(
     }),
     request,
   )
+}
+
+// ──────────────────────────────────────────────────────────────────────────
+// Org export-floor resolver (FRO-253)
+// ──────────────────────────────────────────────────────────────────────────
+
+/**
+ * Look up the org's exportMinRole setting for the project's org.
+ * Returns ROLE.MAINTAINER (600) as the safe default when no org row exists or
+ * no exportMinRole is set. Valid values are the numeric role ladder levels
+ * (100–700); values outside the ladder are clamped to MAINTAINER.
+ *
+ * The lookup is a single row read from org_settings joined via projects, so
+ * the cost is negligible compared to the subsequent file + cells queries.
+ */
+async function resolveExportFloor(
+  db: AquillaDb,
+  projectId: string,
+): Promise<number> {
+  // Find the project's org.
+  const project = await db
+    .prepare(`SELECT org_id FROM projects WHERE id = ?`)
+    .bind(projectId)
+    .first<{ org_id: number | null }>()
+
+  if (!project?.org_id) return ROLE.MAINTAINER
+
+  const settings = await db
+    .prepare(`SELECT settings FROM org_settings WHERE org_id = ?`)
+    .bind(project.org_id)
+    .first<{ settings: string }>()
+
+  if (!settings) return ROLE.MAINTAINER
+
+  try {
+    const parsed = JSON.parse(settings.settings)
+    const raw = parsed?.exportMinRole
+    if (typeof raw !== "number" || !Number.isFinite(raw)) return ROLE.MAINTAINER
+    // Clamp to valid ladder range; reject nonsense values.
+    if (raw < 100 || raw > 700) return ROLE.MAINTAINER
+    return raw
+  } catch {
+    return ROLE.MAINTAINER
+  }
 }

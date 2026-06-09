@@ -16,6 +16,7 @@
 import { verifyTokenForProject } from "../auth"
 import { withCors } from "../cors"
 import { ROLE } from "./role-policy"
+import { resolveExportFloor } from "./export-floor"
 import { parseUsfmLossless, serializeUsfmLossless } from "../lib/usfm-lossless"
 import { makeZip, type ZipEntry } from "../lib/zip"
 
@@ -127,36 +128,5 @@ export async function handleExportBundleRequest(
   )
 }
 
-// ──────────────────────────────────────────────────────────────────────────
-// Org export-floor resolver (FRO-253) — shared logic mirrors export-route.ts
-// ──────────────────────────────────────────────────────────────────────────
-
-async function resolveExportFloor(
-  db: AquillaDb,
-  projectId: string,
-): Promise<number> {
-  const MAINTAINER = 600
-  const project = await db
-    .prepare(`SELECT org_id FROM projects WHERE id = ?`)
-    .bind(projectId)
-    .first<{ org_id: number | null }>()
-
-  if (!project?.org_id) return MAINTAINER
-
-  const settings = await db
-    .prepare(`SELECT settings FROM org_settings WHERE org_id = ?`)
-    .bind(project.org_id)
-    .first<{ settings: string }>()
-
-  if (!settings) return MAINTAINER
-
-  try {
-    const parsed = JSON.parse(settings.settings)
-    const raw = parsed?.exportMinRole
-    if (typeof raw !== "number" || !Number.isFinite(raw)) return MAINTAINER
-    if (raw < 100 || raw > 700) return MAINTAINER
-    return raw
-  } catch {
-    return MAINTAINER
-  }
-}
+// resolveExportFloor is now in ./export-floor.ts (shared with export-route.ts).
+// Imported above — see FRO-253 note in that module for behavior and caveats.

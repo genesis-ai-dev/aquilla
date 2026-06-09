@@ -20,6 +20,7 @@
 import { verifyTokenForProject } from "../auth"
 import { withCors } from "../cors"
 import { ROLE } from "./role-policy"
+import { resolveExportFloor } from "./export-floor"
 import {
   parseUsfmLossless,
   serializeUsfmLossless,
@@ -195,46 +196,5 @@ export async function handleExportSourceRequest(
   )
 }
 
-// ──────────────────────────────────────────────────────────────────────────
-// Org export-floor resolver (FRO-253)
-// ──────────────────────────────────────────────────────────────────────────
-
-/**
- * Look up the org's exportMinRole setting for the project's org.
- * Returns ROLE.MAINTAINER (600) as the safe default when no org row exists or
- * no exportMinRole is set. Valid values are the numeric role ladder levels
- * (100–700); values outside the ladder are clamped to MAINTAINER.
- *
- * The lookup is a single row read from org_settings joined via projects, so
- * the cost is negligible compared to the subsequent file + cells queries.
- */
-async function resolveExportFloor(
-  db: AquillaDb,
-  projectId: string,
-): Promise<number> {
-  // Find the project's org.
-  const project = await db
-    .prepare(`SELECT org_id FROM projects WHERE id = ?`)
-    .bind(projectId)
-    .first<{ org_id: number | null }>()
-
-  if (!project?.org_id) return ROLE.MAINTAINER
-
-  const settings = await db
-    .prepare(`SELECT settings FROM org_settings WHERE org_id = ?`)
-    .bind(project.org_id)
-    .first<{ settings: string }>()
-
-  if (!settings) return ROLE.MAINTAINER
-
-  try {
-    const parsed = JSON.parse(settings.settings)
-    const raw = parsed?.exportMinRole
-    if (typeof raw !== "number" || !Number.isFinite(raw)) return ROLE.MAINTAINER
-    // Clamp to valid ladder range; reject nonsense values.
-    if (raw < 100 || raw > 700) return ROLE.MAINTAINER
-    return raw
-  } catch {
-    return ROLE.MAINTAINER
-  }
-}
+// resolveExportFloor is now in ./export-floor.ts (shared with export-bundle-route.ts).
+// Imported above — see FRO-253 note in that module for behavior and caveats.

@@ -774,7 +774,16 @@ export function ProjectWorkspace() {
     patch: patchOrgSettings,
     version: orgSettingsVersion,
     canExport: canExportByOrgPolicy,
-  } = useOrgSettings(activeOrg?.id, activeOrg?.role?.level)
+    hasFetched: orgSettingsFetched,
+  } = useOrgSettings(
+    activeOrg?.id,
+    activeOrg?.role?.level,
+    // FRO-253 WARN fix: compare the project-resolved role (AD-12 max-wins), not
+    // the raw org role. A user with org VIEWER + direct project MAINTAINER grant
+    // must pass a floor of MAINTAINER. syncRole.level is the max-wins result
+    // written by the sync-token onRole callback above.
+    project?.syncRole?.level ?? null,
+  )
 
   // FRO-194: also destructure rule CRUD for RulesSurface (patchSettings is the
   // sync function; it matches the PatchSharedFn signature from useProjectSettings).
@@ -1863,10 +1872,14 @@ export function ProjectWorkspace() {
   }, [project])
 
   const openExportFlow = useCallback(() => {
-    // FRO-253: if org policy disallows export, this is a no-op (button is hidden anyway).
+    // FRO-253 (b fix): do NOT fire the action on an optimistic pre-fetch canExport value.
+    // The button may render optimistically (canExport=true before settings load) but the
+    // ACTION must wait until org settings have been fetched so we gate on the real floor.
+    if (!orgSettingsFetched) return
+    // If org policy disallows export (explicit floor set and user below it), no-op.
     if (!canExportByOrgPolicy) return
     setExportOpen(true)
-  }, [canExportByOrgPolicy])
+  }, [orgSettingsFetched, canExportByOrgPolicy])
 
   const actionArgs = useMemo(() => ({
     openImport: openImportFlow,
@@ -2133,6 +2146,7 @@ export function ProjectWorkspace() {
               onDelete={(fileId) => setPendingDeleteId(fileId)}
               onApplySuggestion={handleApplyOneSuggestion}
               onRenameCorpus={handleRenameCorpus}
+              canExportByOrgPolicy={canExportByOrgPolicy}
             />
             {lens === "audio" && project && (
               <VoiceSidebar
@@ -2674,6 +2688,7 @@ export function ProjectWorkspace() {
         <ExportDialog
           open={exportOpen}
           onOpenChange={setExportOpen}
+          canExport={canExportByOrgPolicy}
           cells={cells}
           projectId={project.id}
           projectName={project.name ?? project.id}

@@ -10,8 +10,15 @@
 // server-side WHERE version-guard ensures concurrent writers get a 409
 // rather than silently overwriting each other.
 //
-// Settings keys (all optional): rules (TranslationRule[]). Shape is open;
-// server is a dumb store.
+// Settings keys (all optional): rules (TranslationRule[]). Shape is open
+// EXCEPT for exportMinRole — see EXPORT_FLOOR_WRITE_MIN_ROLE below.
+//
+// exportMinRole write gate: OWNER (700), not MAINTAINER.
+// Rationale: exportMinRole is a permission-policy key that determines who can
+// pull project deliverables. Letting maintainers change it would let a
+// project-level maintainer lower the org's export security posture without
+// owner approval. Only org owners (700) should be able to raise or lower this
+// floor. All other settings keys retain the MAINTAINER (600) write gate.
 
 import { Hono } from "hono"
 import { zValidator } from "@hono/zod-validator"
@@ -23,6 +30,16 @@ import { getOrgMemberRole } from "../services/org-permissions"
 const orgSettings = new Hono<AuthHonoEnv>()
 
 const SETTINGS_WRITE_MIN_ROLE = ROLE.MAINTAINER
+
+/**
+ * The exportMinRole key is a permission-policy key — only org owners (700)
+ * may set it. This is stricter than the general settings write gate (600).
+ * Aligned with the Settings UI copy: "Only owners can change this setting."
+ */
+const EXPORT_FLOOR_WRITE_MIN_ROLE = ROLE.OWNER
+
+/** Valid role ladder levels that can be set as an exportMinRole floor. */
+const VALID_ROLE_LEVELS = new Set(Object.values(ROLE))
 
 interface OrgSettingsRow {
   org_id: number
@@ -131,6 +148,31 @@ orgSettings.on(
         { error: `org role >= maintainer (${SETTINGS_WRITE_MIN_ROLE}) required` },
         403,
       )
+    }
+
+    // FRO-253: validate exportMinRole if present in the patch.
+    // Must be a known role-ladder value (100–700). Garbage values (e.g. "owner",
+    // -1, 9999) are rejected with 400 so misconfiguration is immediately visible
+    // to the admin rather than silently coerced to the default.
+    const rawExportFloor = body.settings.exportMinRole
+    if (rawExportFloor !== undefined) {
+      // exportMinRole writes require OWNER (700) — stricter than the general gate.
+      if (role < EXPORT_FLOOR_WRITE_MIN_ROLE) {
+        return c.json(
+          {
+            error: `exportMinRole requires org role >= owner (${EXPORT_FLOOR_WRITE_MIN_ROLE}); only org owners can change the export permission policy`,
+          },
+          403,
+        )
+      }
+      if (typeof rawExportFloor !== "number" || !Number.isFinite(rawExportFloor) || !VALID_ROLE_LEVELS.has(rawExportFloor as typeof ROLE[keyof typeof ROLE])) {
+        return c.json(
+          {
+            error: `exportMinRole must be one of the role ladder values: ${[...VALID_ROLE_LEVELS].sort((a, b) => a - b).join(", ")} (viewer=100, contributor=400, project_lead=500, maintainer=600, owner=700)`,
+          },
+          400,
+        )
+      }
     }
 
     const queryVersion = parseIntOrNull(c.req.query("ifMatchVersion"))

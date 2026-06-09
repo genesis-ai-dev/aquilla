@@ -4,8 +4,12 @@
 //
 // For non-USFM formats, project scope uses useProjectCells to fan-out over all
 // project files (up to MAX_FILES=40) and buildProjectZip to produce a zip.
+//
+// FRO-253 (b fix): auto-closes when canExport flips false after settings load,
+// so a settings change mid-session doesn't leave the dialog open for a user who
+// lost access.
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useRef } from "react"
 import { Download, AlertTriangle, CheckCircle2, Loader2 } from "lucide-react"
 import {
   Dialog,
@@ -121,6 +125,13 @@ const FORMAT_OPTIONS: FormatOption[] = [
 interface ExportDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
+  /**
+   * FRO-253 (b fix): whether org policy allows export. When this flips false
+   * while the dialog is open (e.g. an owner raises the floor mid-session), the
+   * dialog auto-closes so the user isn't left in an inconsistent state.
+   * Defaults to true for non-org contexts.
+   */
+  canExport?: boolean
   /** Cells for the currently active file. */
   cells: CellData[]
   projectId: string
@@ -149,6 +160,7 @@ interface ExportDialogProps {
 export function ExportDialog({
   open,
   onOpenChange,
+  canExport = true,
   cells,
   projectId,
   projectName,
@@ -162,6 +174,17 @@ export function ExportDialog({
   ttsSettings,
   getToken,
 }: ExportDialogProps) {
+  // FRO-253 (b fix): close the dialog if canExport flips to false after it opened.
+  // Track the previous open state to detect the transition.
+  const prevCanExportRef = useRef(canExport)
+  useEffect(() => {
+    if (open && prevCanExportRef.current && !canExport) {
+      // canExport just flipped false while the dialog was open — close it.
+      onOpenChange(false)
+    }
+    prevCanExportRef.current = canExport
+  }, [open, canExport, onOpenChange])
+
   const [format, setFormat] = useState<ExportFormat>(isUsfmFile ? "usfm" : isDocxFile ? "docx" : "tsv")
   const [scope, setScope] = useState<ExportScope>("file")
 

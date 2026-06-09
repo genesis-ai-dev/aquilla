@@ -44,21 +44,27 @@ export function Settings() {
 
   // FRO-253: org export floor setting
   const {
-    canEdit: canEditOrgSettings,
     exportMinRole,
     patch: patchOrgSettings,
   } = useOrgSettings(activeOrgId, activeOrg?.role?.level)
   const [exportRoleBusy, setExportRoleBusy] = useState(false)
   const [exportRoleError, setExportRoleError] = useState<string | null>(null)
 
+  // exportMinRole is an owner-only permission-policy key (FRO-253).
+  // Maintainers can edit org rules and other settings, but only owners
+  // should change the export floor (see EXPORT_FLOOR_WRITE_MIN_ROLE in auth-worker).
+  const canEditExportFloor = (activeOrg?.role.level ?? 0) >= ROLE.OWNER
+
   async function handleExportRoleChange(newLevel: number) {
     setExportRoleBusy(true)
     setExportRoleError(null)
     const result = await patchOrgSettings({ exportMinRole: newLevel })
     if (result.kind === "error") {
+      // Surface server validation errors (including the new 400 for invalid floor values)
+      // and 403 for insufficient role.
       setExportRoleError(result.message ?? "Save failed")
     } else if (result.kind === "blocked") {
-      setExportRoleError("You need maintainer or higher to change this setting.")
+      setExportRoleError("Only org owners can change the export permission policy.")
     }
     setExportRoleBusy(false)
   }
@@ -72,6 +78,8 @@ export function Settings() {
     { level: ROLE.MAINTAINER, label: "Maintainer (600) — default" },
     { level: ROLE.OWNER, label: "Owner (700) — most restrictive" },
   ]
+  // Show the effective floor: null means "not set → server default (Maintainer)".
+  const displayedExportMinRole = exportMinRole ?? ROLE.MAINTAINER
 
   async function handleSave() {
     if (!jwt || activeOrgId == null) return
@@ -166,14 +174,16 @@ export function Settings() {
                     Minimum role required to download project deliverables (USFM export, project zip).
                     Default is <strong>Maintainer</strong>. Lower the floor to let translators export their
                     own work; raise it to restrict deliverable access to leads only.
+                    Client-side formats (TSV, CSV, etc.) operate on already-fetched cells and cannot
+                    be fully enforced here; this gate applies to server-rendered deliverables only.
                   </p>
                   <div className="mt-3 space-y-2">
                     <Label htmlFor="export-min-role" className="text-xs">Who can export</Label>
                     <select
                       id="export-min-role"
-                      value={exportMinRole}
+                      value={displayedExportMinRole}
                       onChange={(e) => { void handleExportRoleChange(Number(e.target.value)) }}
-                      disabled={!canEditOrgSettings || exportRoleBusy}
+                      disabled={!canEditExportFloor || exportRoleBusy}
                       className="block w-full max-w-xs rounded-md border border-input bg-background px-3 py-1.5 text-sm disabled:opacity-50"
                     >
                       {exportRoleOptions.map((opt) => (
@@ -182,8 +192,8 @@ export function Settings() {
                         </option>
                       ))}
                     </select>
-                    {!canEditOrgSettings && (
-                      <p className="text-xs text-muted-foreground">Maintainer or higher can change this setting.</p>
+                    {!canEditExportFloor && (
+                      <p className="text-xs text-muted-foreground">Only org owners can change the export permission policy.</p>
                     )}
                     {exportRoleError && (
                       <p className="text-xs text-destructive">{exportRoleError}</p>

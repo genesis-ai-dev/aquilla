@@ -14,8 +14,10 @@ import type { TranslationRule, PromotionRequest } from "@/lib/parsers/types"
 
 const ORG_SETTINGS_WRITE_MIN_ROLE = ROLE.MAINTAINER
 
-/** FRO-253: default export floor when org hasn't set one. Mirrors the server default. */
-const EXPORT_DEFAULT_MIN_ROLE = ROLE.MAINTAINER
+// FRO-253: The WRITE gate for the exportMinRole setting itself is OWNER (700).
+// This is enforced server-side (auth-worker org-settings PATCH handler).
+// The client-side Settings UI enforces it via canEditExportFloor=(role>=OWNER)
+// so the select is disabled for non-owners. The server remains the source of truth.
 
 export interface UseOrgSettings {
   /** Current org settings (rules, etc). Always defined (empty when unloaded). */
@@ -32,13 +34,30 @@ export interface UseOrgSettings {
   /** True when the caller's org role is >= MAINTAINER. */
   canEdit: boolean
   /**
-   * FRO-253: True when the caller's role meets the org's exportMinRole floor.
-   * When no exportMinRole is set, defaults to MAINTAINER (600) — same as the
-   * server default. Callers should hide/disable export affordances when false.
+   * FRO-253: True when the caller's project-resolved role meets the org's exportMinRole floor.
+   *
+   * NON-BREAKING DEFAULT: when the org has NOT explicitly set exportMinRole, canExport is
+   * always true client-side (gate nothing — pre-FRO-253 behavior; server routes keep their
+   * own pre-existing MAINTAINER default). Only when exportMinRole is explicitly set in org
+   * settings does this gate apply. Callers should hide/disable export affordances when false.
+   *
+   * ROLE COMPARED: the project-resolved role (AD-12 max-wins — org role, group grants,
+   * direct project grant, creator path) passed as `projectRoleLevel`, NOT the raw org role.
+   * This means a user with org VIEWER + direct project MAINTAINER grant correctly sees
+   * canExport=true under a floor of MAINTAINER.
+   *
+   * NOTE: client-side formats (txt/md/tsv/csv/xlf/tmx/vtt) operate on already-fetched cells
+   * and cannot be truly enforced client-side. The floor here gates the UI affordance and the
+   * server-side USFM/bundle routes; read-API gating is explicitly out of scope (FRO-253).
    */
   canExport: boolean
-  /** The effective export floor (resolved, defaults to MAINTAINER). */
-  exportMinRole: number
+  /**
+   * The explicit export floor from org settings, or null when the org has NOT set one.
+   * Null means "no client-side gate" (non-breaking default).
+   * The effective server default (MAINTAINER=600) is preserved in the server routes
+   * independently of this field.
+   */
+  exportMinRole: number | null
   /** Force a re-GET. */
   refresh: () => Promise<OrgSettingsResponse | null>
   /** Patch org settings (adds/replaces top-level keys). Blocked if !canEdit. */
@@ -51,11 +70,14 @@ export interface UseOrgSettings {
  * Fetches and manages org-level settings (rules, etc.) for the given org.
  *
  * @param orgId  Active org ID. Null/undefined = no-op, returns empty state.
- * @param orgRoleLevel  Caller's role level in this org (from useActiveOrg). Null = no membership.
+ * @param orgRoleLevel  Caller's org-level role (from useActiveOrg). Used for edit gating. Null = no membership.
+ * @param projectRoleLevel  Caller's project-resolved role (AD-12 max-wins). Used for canExport.
+ *   Falls back to orgRoleLevel when not provided (personal projects / no-org contexts).
  */
 export function useOrgSettings(
   orgId: number | null | undefined,
   orgRoleLevel: number | null | undefined,
+  projectRoleLevel?: number | null,
 ): UseOrgSettings {
   const { session } = useFrontierSession()
   const jwt = session?.jwt ?? null
@@ -104,12 +126,19 @@ export function useOrgSettings(
   const canEdit =
     orgRoleLevel != null && orgRoleLevel >= ORG_SETTINGS_WRITE_MIN_ROLE
 
-  // FRO-253: derive canExport from the org's exportMinRole floor.
+  // FRO-253: derive the explicit export floor from org settings.
+  // null = org has NOT set it (non-breaking default: no client-side gate).
+  // The server routes independently default to MAINTAINER (600) for USFM/bundle.
   const exportMinRole = (() => {
+    if (!hasFetched) return null
     const raw = server?.settings?.exportMinRole
     if (typeof raw === "number" && Number.isFinite(raw) && raw >= 100 && raw <= 700) return raw
-    return EXPORT_DEFAULT_MIN_ROLE
+    return null // not set — no client-side gate
   })()
+
+  // The effective role to check: project-resolved (AD-12 max-wins) when
+  // available, falling back to org role for non-project contexts.
+  const effectiveRoleLevel = projectRoleLevel ?? orgRoleLevel
 
   const patch = useCallback(
     async (partial: OrgWideSettings): Promise<OrgPatchResult | { kind: "blocked" }> => {
@@ -160,11 +189,19 @@ export function useOrgSettings(
   const orgRules: TranslationRule[] = settings.rules ?? []
   const promotionRequests: PromotionRequest[] = (settings.promotionRequests as PromotionRequest[] | undefined) ?? []
 
-  // FRO-253: canExport is true when the user's role meets the org floor.
-  // Before settings load (hasFetched=false), we optimistically allow export so
-  // the button isn't hidden during the initial load; the server will 403 if the
-  // user doesn't actually have access.
-  const canExport = !hasFetched || orgRoleLevel == null || orgRoleLevel >= exportMinRole
+  // FRO-253 (corrected): canExport logic:
+  //   • Before settings are fetched (hasFetched=false): optimistically allow so the
+  //     button renders; the ACTION (openExportFlow) must wait for hasFetched.
+  //   • After fetch, if exportMinRole is null (not set): ALLOW — non-breaking default.
+  //     Pre-FRO-253 the button had no role gate; we preserve that for orgs that
+  //     haven't configured anything. Server routes gate USFM/bundle independently.
+  //   • After fetch, if exportMinRole is set: compare against the project-resolved
+  //     role (effectiveRoleLevel), not the raw org role.
+  const canExport =
+    !hasFetched ||              // optimistic pre-fetch allow
+    exportMinRole === null ||   // org hasn't set a floor — no client gate
+    effectiveRoleLevel == null || // no role info yet — allow (server will 403 if needed)
+    effectiveRoleLevel >= exportMinRole
 
   return {
     settings,

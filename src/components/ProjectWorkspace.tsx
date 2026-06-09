@@ -2504,6 +2504,7 @@ export function ProjectWorkspace() {
           <CellAreaPlaceholder
             state={cellAreaState}
             fileName={activeFile?.name}
+            hasFiles={projectFiles.length > 0}
             onImportClick={openImportFlow}
           />
         )}

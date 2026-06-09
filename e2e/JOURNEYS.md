@@ -95,6 +95,7 @@
 | Auth        | Signup form show/hide password + checklist            | `e2e/specs/orgs/account-signup-form.smoke.spec.ts` + `account-signup-password-checklist.smoke.spec.ts` | ✅ |
 | Auth        | Login form show/hide password toggle                  | `e2e/specs/orgs/login-form-show-hide-password.smoke.spec.ts`  |   ✅   |
 | Auth        | Forgot password flow opens reset form                 | `e2e/specs/orgs/account-add-forgot-password.smoke.spec.ts` + `account-reset-password-form.smoke.spec.ts` | ✅ |
+| Auth        | Dev-only logout route clears session → /onboarding    | `e2e/specs/auth/dev-logout-route.smoke.spec.ts`               |   ✅   |
 | Onboarding  | Wizard renders name step and advances                 | `e2e/specs/projects/onboarding-wizard.smoke.spec.ts` + `onboarding-name-step.smoke.spec.ts` + `onboarding-privacy-continue.smoke.spec.ts` + `onboarding-project-step.smoke.spec.ts` | ✅ |
 | Projects    | Archive and restore project                           | `e2e/specs/projects/archive.smoke.spec.ts`                    |   ✅   |
 | Projects    | Archived projects page lists archived items           | `e2e/specs/projects/archived-projects-page.smoke.spec.ts`     |   ✅   |
@@ -133,6 +134,8 @@
 | Orgs        | Theme toggle (dark/light)                             | `e2e/specs/orgs/theme-toggle.smoke.spec.ts`                   |   ✅   |
 | Editor      | Cell action popover shows Record audio + Add comment  | `e2e/specs/editor/cell-action-popover.smoke.spec.ts`          |   ✅   |
 | Editor      | Cell details expansion panel tabs (Decay/BT/Issues/History) | `e2e/specs/editor/cell-details.smoke.spec.ts` + `cell-expansion-bt-tab.smoke.spec.ts` + `cell-expansion-decay-tab.smoke.spec.ts` + `cell-expansion-issues-tab.smoke.spec.ts` | ✅ |
+| Editor      | Issue pill hover popover shows rule infraction details | `e2e/specs/editor/issue-pill-hover-popover.smoke.spec.ts`    |   ✅   |
+| Editor      | /project/:id/voice deep-link activates audio lens     | `e2e/specs/editor/voice-deep-link.smoke.spec.ts`              |   ✅   |
 | Editor      | Cell history drawer shows edit history                | `e2e/specs/editor/cell-history-drawer.smoke.spec.ts`          |   ✅   |
 | Editor      | Decay breakdown popover opens from cell indicator     | `e2e/specs/editor/decay-breakdown-popover.smoke.spec.ts`      |   ✅   |
 | Editor      | Sync status indicator in workspace status bar         | `e2e/specs/editor/sync-status-indicator.smoke.spec.ts`        |   ✅   |

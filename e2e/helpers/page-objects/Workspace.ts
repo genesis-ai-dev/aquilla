@@ -74,6 +74,10 @@ export class Workspace {
     await target.click()
     await this.page.keyboard.type(text)
     await this.page.locator("aside").click() // blur outside editor
+    // Wait for the async IDB commit pipeline to complete (emitTargetCellCommit
+    // sets pendingTargetEventIdRef.current in a .then(), so validateCell can
+    // immediately follow without a race on the editEventId being null).
+    await this.page.waitForTimeout(800)
   }
 
   async readCell(index: number): Promise<string> {
@@ -87,8 +91,8 @@ export class Workspace {
    * of firing emitValidationChange(). We work around this by:
    *   1. Focusing the button (no hover side-effects)
    *   2. Pressing Space (fires trigger-press without a preceding hover)
-   * This reliably routes through the `details.reason === "trigger-press"` path
-   * that calls emitValidationChange(true) directly. */
+   * This routes through the `details.reason === "keyboard"` branch (same
+   * effect as trigger-press for EditorTable's handleOpenChange). */
   async validateCell(index: number): Promise<void> {
     const row = this.cellRow(index)
     const validationButton = row.locator("button[title*='Health']").first()

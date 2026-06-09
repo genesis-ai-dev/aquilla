@@ -48,8 +48,9 @@ test("alice posts a comment on a cell and it appears in the drawer", async ({ al
   await expect(addCommentBtn.first()).toBeVisible({ timeout: 5_000 })
   await addCommentBtn.first().click()
 
-  // CommentsDrawer should now be open.
-  const drawer = alice.locator("[aria-label*='Comments'], [data-testid*='comments'], aside").filter({ hasText: /comment/i }).first()
+  // CommentsDrawer should now be open. The drawer renders as a div with
+  // data-testid="comments-drawer" (no aria-label or semantic landmark).
+  const drawer = alice.locator("[data-testid='comments-drawer']").first()
   await expect(drawer).toBeVisible({ timeout: 5_000 })
 
   // Type and post the comment.

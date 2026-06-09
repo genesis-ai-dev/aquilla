@@ -29,6 +29,7 @@ import {
   parseEBibleCorpus,
   type EBibleTranslation,
 } from "@/lib/parsers/ebible"
+import { languagesEqual } from "@/lib/language-normalize"
 
 type Screen = "landing" | "upload" | "ebible" | "direction"
 
@@ -41,7 +42,7 @@ interface ImportDialogProps {
   targetLanguage: string
   /** Mints a sync-token scoped to (projectId, fileId) for the bulk upload. */
   getToken: (fileId: string) => Promise<string | null>
-  onImported: (refs: FileReference[], inferredLanguages?: { sourceLanguage?: string; targetLanguage?: string }) => void | Promise<void>
+  onImported: (refs: FileReference[], inferredLanguages?: { sourceLanguage?: string; targetLanguage?: string; explicit?: boolean }) => void | Promise<void>
   /** Optional: current project TTS settings. When provided alongside
    *  `onCastUpdated`, VTT/SRT imports with `<v Name>` tags will create cast
    *  members and cell assignments in a single batched write. */
@@ -49,6 +50,11 @@ interface ImportDialogProps {
   /** Callback to persist updated TTS settings (voices + castAssignments) after
    *  a subtitle import that contained speaker tags. */
   onCastUpdated?: (settings: Partial<ProjectTtsSettings>) => void | Promise<void>
+}
+
+/** localStorage key used to persist the per-project "skip direction prompt" choice. */
+function skipStorageKey(projectId: string) {
+  return `codex.importDirectionSkipped.${projectId}`
 }
 
 export function ImportDialog({
@@ -71,14 +77,34 @@ export function ImportDialog({
   } | null>(null)
   const [directionSource, setDirectionSource] = useState("")
   const [directionTarget, setDirectionTarget] = useState("")
+  // Guard against double-clicks on "Set direction".
+  const [confirming, setConfirming] = useState(false)
 
   // Reset to landing each time the dialog opens.
   useEffect(() => {
     if (open) {
       setScreen("landing")
       setPendingImport(null)
+      setConfirming(false)
     }
   }, [open])
+
+  // BLOCKER 2: intercept dialog close — if we're on the direction screen with a
+  // pending import, flush it via the skip path before propagating the close so
+  // the imported files are never silently dropped.
+  const handleOpenChange = useCallback(
+    (nextOpen: boolean) => {
+      if (!nextOpen && pendingImport !== null) {
+        // Flush the pending import without language overrides (skip semantics).
+        void Promise.resolve(onImported(pendingImport.refs, pendingImport.inferredLanguages)).catch((err: unknown) => {
+          console.warn("[ImportDialog] flush-on-close failed:", err)
+        })
+        setPendingImport(null)
+      }
+      onOpenChange(nextOpen)
+    },
+    [pendingImport, onImported, onOpenChange],
+  )
 
   // Called by child panels when they finish importing. If the language
   // direction is ambiguous (source==target or target is empty after source is
@@ -88,15 +114,23 @@ export function ImportDialog({
       const effectiveSource = (inferredLanguages?.sourceLanguage || sourceLanguage).trim()
       const effectiveTarget = (inferredLanguages?.targetLanguage || targetLanguage).trim()
 
-      // Direction is ambiguous when: target is unset, or source==target.
+      // Direction is ambiguous when: both empty, target is unset, or source==target
+      // (using the normalizer so "French"=="fra" doesn't spuriously trigger this).
+      // Small fix: also fire when both are empty (""=="" would otherwise pass the
+      // effectiveSource!=="" gate and silently leave source==target=="").
+      const bothEmpty = effectiveSource === "" && effectiveTarget === ""
       const needsDirection =
-        effectiveSource !== "" &&
-        (effectiveTarget === "" || effectiveSource === effectiveTarget)
+        bothEmpty ||
+        (effectiveSource !== "" && (effectiveTarget === "" || languagesEqual(effectiveSource, effectiveTarget)))
 
-      if (needsDirection) {
+      // Respect the persisted per-project skip choice so we don't re-prompt on
+      // every import once the user has deliberately deferred direction setup.
+      const skipped = localStorage.getItem(skipStorageKey(projectId)) === "true"
+
+      if (needsDirection && !skipped) {
         setPendingImport({ refs, inferredLanguages })
         setDirectionSource(effectiveSource)
-        setDirectionTarget(effectiveTarget === effectiveSource ? "" : effectiveTarget)
+        setDirectionTarget(languagesEqual(effectiveSource, effectiveTarget) ? "" : effectiveTarget)
         setScreen("direction")
         return
       }
@@ -104,30 +138,51 @@ export function ImportDialog({
       await onImported(refs, inferredLanguages)
       onOpenChange(false)
     },
-    [sourceLanguage, targetLanguage, onImported, onOpenChange],
+    [sourceLanguage, targetLanguage, projectId, onImported, onOpenChange],
   )
 
+  // BLOCKER 1 fix: values confirmed via DirectionPanel are EXPLICIT — they
+  // replace current values, not merely fill empty slots.
   async function handleDirectionConfirm() {
-    if (!pendingImport) return
-    const mergedLanguages = {
-      ...(pendingImport.inferredLanguages ?? {}),
-      sourceLanguage: directionSource.trim() || pendingImport.inferredLanguages?.sourceLanguage,
-      targetLanguage: directionTarget.trim() || undefined,
-    }
-    await onImported(pendingImport.refs, mergedLanguages)
+    if (!pendingImport || confirming) return
+    // Double-click guard: clear pending synchronously before the await.
+    setConfirming(true)
+    const captured = pendingImport
     setPendingImport(null)
-    onOpenChange(false)
+    try {
+      const mergedLanguages = {
+        ...(captured.inferredLanguages ?? {}),
+        sourceLanguage: directionSource.trim() || captured.inferredLanguages?.sourceLanguage,
+        targetLanguage: directionTarget.trim() || undefined,
+        // BLOCKER 1: mark as explicit so handleImported in ProjectWorkspace
+        // REPLACES current values instead of only filling empty slots.
+        explicit: true,
+      }
+      await onImported(captured.refs, mergedLanguages)
+      onOpenChange(false)
+    } finally {
+      setConfirming(false)
+    }
   }
 
   function handleDirectionSkip() {
     if (!pendingImport) return
-    void onImported(pendingImport.refs, pendingImport.inferredLanguages)
+    // Persist the skip so re-imports don't re-prompt this project.
+    try {
+      localStorage.setItem(skipStorageKey(projectId), "true")
+    } catch {
+      // localStorage may be unavailable in some environments — ignore silently.
+    }
+    const captured = pendingImport
     setPendingImport(null)
+    void Promise.resolve(onImported(captured.refs, captured.inferredLanguages)).catch((err: unknown) => {
+      console.warn("[ImportDialog] skip flush failed:", err)
+    })
     onOpenChange(false)
   }
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent className="max-w-2xl">
         <DialogHeader>
           <DialogTitle>
@@ -189,6 +244,7 @@ export function ImportDialog({
             onTargetChange={setDirectionTarget}
             onConfirm={handleDirectionConfirm}
             onSkip={handleDirectionSkip}
+            confirming={confirming}
           />
         )}
       </DialogContent>
@@ -519,14 +575,16 @@ function ParatextChoice({
         ref: s.globalReferences?.[0] ?? s.context,
         text: s.original,
       }))
-      const { refs, settings, skipped } = await importParatextAsTarget(entries, sourceVerses, { ...ctx, sourceLanguage: sel.id }, onProgress)
+      // WARN d fix: use languageCode (e.g. "eng") not sel.id ("eng-engKJV") as the source language.
+      const selSourceLang = sel.languageCode || sel.id
+      const { refs, settings, skipped } = await importParatextAsTarget(entries, sourceVerses, { ...ctx, sourceLanguage: selSourceLang }, onProgress)
       if (skipped.length) setError(`Imported ${refs.length}; skipped ${skipped.length}`)
-      // The Paratext project IS the target; sel.id is the eBible source language.
+      // The Paratext project IS the target; selSourceLang is the eBible source language.
       // Propagate both so the project's source/target direction is set (FRO-249).
       const inferredTargetLang = settings.languageIsoCode || settings.language
       await onImported(
         refs,
-        { sourceLanguage: sel.id, targetLanguage: inferredTargetLang || undefined },
+        { sourceLanguage: selSourceLang, targetLanguage: inferredTargetLang || undefined },
       )
     } catch (err) {
       setError(err instanceof Error ? err.message : "Import failed"); setMode("pickSource")
@@ -824,11 +882,15 @@ interface DirectionPanelProps {
   onTargetChange: (v: string) => void
   onConfirm: () => void
   onSkip: () => void
+  confirming?: boolean
 }
 
 /** One-time prompt shown after import when source==target or target is unset.
- *  The user enters the target language name so back-translation and QA rules
- *  operate against the correct language pair. */
+ *  The user enters source and target language so back-translation and QA rules
+ *  operate against the correct language pair.
+ *
+ *  WARN c: both fields are editable — explicit user input always wins over the
+ *  project's existing values (consistent with BLOCKER 1 explicit-wins fix). */
 function DirectionPanel({
   sourceLanguage,
   targetLanguage,
@@ -836,12 +898,21 @@ function DirectionPanel({
   onTargetChange,
   onConfirm,
   onSkip,
+  confirming = false,
 }: DirectionPanelProps) {
+  // WARN e: use normalizer so "French"=="fra" registers as same and blocks confirm.
+  const targetTrimmed = targetLanguage.trim()
+  const sourceTrimmed = sourceLanguage.trim()
+  const confirmDisabled =
+    confirming ||
+    !targetTrimmed ||
+    languagesEqual(targetTrimmed, sourceTrimmed)
+
   return (
     <div className="flex flex-col gap-4 py-2">
       <p className="text-sm text-muted-foreground">
-        We detected the source language from the imported project. Please set the
-        target language so back-translation and QA rules work correctly.
+        We detected the source language from the imported project. Please confirm the
+        source and set the target language so back-translation and QA rules work correctly.
       </p>
       <div className="grid grid-cols-2 gap-4">
         <div>
@@ -872,15 +943,15 @@ function DirectionPanel({
         You can change these later in <strong>Project Settings → Project Info</strong>.
       </p>
       <div className="flex justify-end gap-2">
-        <Button variant="ghost" size="sm" onClick={onSkip}>
+        <Button variant="ghost" size="sm" onClick={onSkip} disabled={confirming}>
           Skip for now
         </Button>
         <Button
           size="sm"
           onClick={onConfirm}
-          disabled={!targetLanguage.trim() || targetLanguage.trim() === sourceLanguage.trim()}
+          disabled={confirmDisabled}
         >
-          Set direction
+          {confirming ? "Setting…" : "Set direction"}
         </Button>
       </div>
     </div>

@@ -270,6 +270,10 @@
 | Debug       | Debug view accessible at /debug                       | `e2e/specs/editor/debug-view.smoke.spec.ts`                   |   ✅   |
 | Debug       | Admin console tabs (users/orgs/projects/teams/activity) | `e2e/specs/orgs/admin-console.smoke.spec.ts` + `admin-console-users-tab.smoke.spec.ts` + `admin-console-orgs-tab.smoke.spec.ts` + `admin-console-projects-tab.smoke.spec.ts` + `admin-console-teams-tab.smoke.spec.ts` + `admin-console-activity-tab.smoke.spec.ts` | ✅ |
 | Tauri       | Native dialogs / deeplink / updater / fs / keychain  | _gap — Plan 3_                                                |        |
+| Editor      | StaleSourceIndicator badge (source changed since last revision) | _gap — not yet wired into CellRow/EditorTable (Phase 5 TODO in source)_ | |
+| Auth        | DevLoginRoute error state (auth-worker unavailable)  | _gap — test infrastructure component; not a user workflow_    |        |
+| Audio/Video | Takes strip (audition, circle, delete takes)         | _gap — requires real audio attachments; audio infra-blocked_  |        |
+| Editor      | Settings conflict-notice dismiss (concurrent edit)   | _gap — requires two writers on same settings page simultaneously_ | |
 
 ## How to add a journey
 

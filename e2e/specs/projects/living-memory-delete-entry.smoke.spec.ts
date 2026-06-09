@@ -1,0 +1,56 @@
+import { test, expect } from "../../helpers/multi-user"
+import { Dashboard } from "../../helpers/page-objects/Dashboard"
+
+/**
+ * Living Memory — delete an entry via the confirmation dialog.
+ *
+ * After saving an entry, hovering it reveals "Delete entry" (aria-label).
+ * Clicking opens a Dialog with DialogTitle "Delete entry?".
+ * Cancel keeps the entry; Confirm removes it.
+ *
+ * This spec adds an entry, opens the delete dialog, and confirms deletion.
+ */
+test("living memory delete entry dialog confirms and removes the entry", async ({ alice }) => {
+  const dash = new Dashboard(alice)
+  await dash.goto()
+  const name = `MemDel ${Date.now()}`
+  await dash.createProject({ name, source: "en", target: "fr" })
+
+  await alice.waitForURL(/\/projects\/[^/]+$/, { timeout: 5_000 })
+  const projectId = alice.url().match(/\/projects\/([^/]+)$/)?.[1]
+  expect(projectId).toBeTruthy()
+
+  await alice.goto(`/project/${projectId}/memory`)
+  await alice.waitForLoadState("networkidle")
+
+  // Add an entry first.
+  const instructionsSection = alice.locator('section[aria-label="Instructions"]')
+  await alice.locator('section[aria-label="Instructions"]').getByRole("button", { name: /Add/i }).click()
+  const textarea = instructionsSection.locator("textarea").first()
+  await expect(textarea).toBeVisible({ timeout: 3_000 })
+  const entryText = `Delete-me ${Date.now()}`
+  await textarea.fill(entryText)
+  await instructionsSection.getByRole("button", { name: /Save/i }).click()
+
+  // Entry renders in the section.
+  const entryCard = instructionsSection.getByText(entryText).first()
+  await expect(entryCard).toBeVisible({ timeout: 5_000 })
+
+  // Hover the card to reveal delete button.
+  await entryCard.hover()
+  const deleteBtn = instructionsSection.getByRole("button", { name: /Delete entry/i }).first()
+  await expect(deleteBtn).toBeVisible({ timeout: 3_000 })
+  await deleteBtn.click()
+
+  // Confirmation dialog.
+  const dialog = alice.getByRole("dialog")
+  await expect(dialog).toBeVisible({ timeout: 5_000 })
+  await expect(dialog.getByRole("heading", { name: /Delete entry/i })).toBeVisible()
+
+  // Confirm deletion.
+  await dialog.getByRole("button", { name: /Delete/i }).click()
+  await expect(dialog).not.toBeVisible({ timeout: 3_000 })
+
+  // Entry is gone from the section.
+  await expect(instructionsSection.getByText(entryText)).not.toBeVisible({ timeout: 5_000 })
+})

@@ -212,7 +212,13 @@ export async function importEBible(
   onProgress?.({ phase: "parse" })
   const strings = parseEBibleCorpus(corpusText)
   if (strings.length === 0) {
-    throw new Error(`Translation '${translation.id}' produced no verses`)
+    // Many eBible translations marked "downloadable" have empty corpus files —
+    // the text is omitted for copyright reasons (only newlines are present).
+    throw new Error(
+      `"${translation.title}" is not available for download. ` +
+      `The eBible corpus file exists but contains no text — ` +
+      `this translation may be restricted due to copyright.`
+    )
   }
 
   onProgress?.({ phase: "save", cellsEnqueued: 0, cellsTotal: strings.length })

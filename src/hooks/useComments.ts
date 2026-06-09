@@ -125,9 +125,16 @@ export function useComments(opts: UseCommentsOptions): UseCommentsApi {
       const pid = projectRef.current
       if (!pid) return ''
       const commentId = uuidv7()
+      // Promote fileId from scope to the event envelope so outbox-flush.ts
+      // can mint a sync token (line 115 skips events with no envelope fileId).
+      const envelopeFileId =
+        commentScope.kind === 'cell' || commentScope.kind === 'file'
+          ? commentScope.fileId
+          : undefined
       await enqueueEvent({
         kind: 'comment.create',
         projectId: pid,
+        fileId: envelopeFileId,
         parentId: null,
         author: authorRef.current,
         payload: {

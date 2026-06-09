@@ -808,9 +808,18 @@ export function ProjectWorkspace() {
     })
   }, [project?.id, activeFileId, addCommentEvent])
 
-  const resolveThread = useCallback(async (_cellId: string, threadId: string, _msg?: string) => {
+  const resolveThread = useCallback(async (cellId: string, threadId: string, msg?: string) => {
+    // FRO-252: if the user typed a closing reply, persist it before resolving
+    // so the reply is visible on the resolved thread and survives reload.
+    if (msg?.trim() && project?.id && activeFileId) {
+      await addCommentEvent({
+        scope: { kind: "cell", fileId: activeFileId, cellId },
+        body: msg.trim(),
+        parentCommentId: threadId,
+      })
+    }
     await resolveCommentThread(threadId, true)
-  }, [resolveCommentThread])
+  }, [project?.id, activeFileId, addCommentEvent, resolveCommentThread])
 
   const reopenThread = useCallback(async (_cellId: string, threadId: string) => {
     await resolveCommentThread(threadId, false)

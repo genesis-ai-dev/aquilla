@@ -50,4 +50,9 @@ test("RuleDrawer opens from rules page button showing rule name", async ({ alice
   await alice.waitForURL(/\/project\/[^/]+\?openRule=/, { timeout: 5_000 })
   const drawer = alice.locator("h3").filter({ hasText: ruleName })
   await expect(drawer).toBeVisible({ timeout: 8_000 })
+
+  // The "Try to fix all" button is disabled with title="Autofix is unavailable in this build".
+  const autofixBtn = alice.locator('[title="Autofix is unavailable in this build"]').first()
+  await expect(autofixBtn).toBeVisible({ timeout: 3_000 })
+  await expect(autofixBtn).toBeDisabled()
 })

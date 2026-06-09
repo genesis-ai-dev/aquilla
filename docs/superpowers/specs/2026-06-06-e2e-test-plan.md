@@ -63,9 +63,9 @@ Legend: ⬜ untested · 🔄 in progress · ✅ browser-verified + spec · 🐞 
 ### Project dashboard & nav
 - ✅ Projects list renders (Dev Project) — see ISSUE-2 (cross-org membership not listed)
 - ⬜ Overview/Org home `/`
-- ⬜ Create project (+ New Project)
-- ⬜ Open project detail `/projects/:id`
-- ⬜ Archived projects `/projects/archived` (view, restore)
+- ✅ Create project (+ New Project dialog: fill name/source/target, Create → redirects to overview)
+- ✅ Open project detail `/projects/:id` (verified via archive/create flow)
+- ✅ Archived projects `/projects/archived` (archive → disappears from list; Restore → back; no errors)
 - ⬜ Assigned to me `/assigned`
 
 ### Editor workspace (core)
@@ -76,7 +76,7 @@ Legend: ⬜ untested · 🔄 in progress · ✅ browser-verified + spec · 🐞 
 - ✅ Filter files (sidebar searchbox filters 66→1 file, clear button appears)
 - ✅ Search & replace (dialog opens, scopes/modes work, returns "No results" correctly)
 - ⬜ Next-unfinished navigation
-- ⬜ Import a file (USFM/Paratext/markdown/VTT)
+- ✅ Import via eBible Corpus (ULB: 30,952 verses → 27,000 cells, dialog auto-closes, navigates to file) — see BUG-5 (KJV empty corpus)
 - ✅ Export a file (dialog opens with 8 formats, TSV export triggers download)
 - ✅ Text ↔ Audio mode toggle (switches Source/Target ↔ Controls/Target columns)
 - ✅ Cell details panel (in-row expansion: Decay/BT/Recording/Issues/History tabs + alignment data)
@@ -105,8 +105,7 @@ Legend: ⬜ untested · 🔄 in progress · ✅ browser-verified + spec · 🐞 
 - ✅ Comments appear in drawer after post (BUG-3 fixed: liveComments prop wires useComments state to CommentsDrawer)
 
 ### Audio / voice
-- 🐞 ISSUE-3 (confirmed): `/project/:id/voice` route is unregistered — React Router logs "No routes matched"
-- ⬜ Voice studio content (route needs to be created or button needs to point to correct path)
+- ✅ ISSUE-3 FIXED: `/project/:id/voice` route registered; deep-link activates audio lens (Cast sidebar visible, 1 character shown, no errors) — commit 10c5d39
 - ⬜ Cast/voice tag assignment
 - ⬜ Audio export by character
 
@@ -121,8 +120,8 @@ Legend: ⬜ untested · 🔄 in progress · ✅ browser-verified + spec · 🐞 
 - ✅ Project settings (name, languages, AI Instructions, validation, audio loading modes)
 - ✅ Org settings `/settings` (Identity, member/project counts, links)
 - 🐞 BUG-4: Termbase Sharing section 500s (PostgresError: column "org_published_termbase" does not exist) — migration 0030 not applied to Neon; D1 sqlite patched locally
-- ⬜ User preferences `/preferences`
-- ⬜ Archive / restore project
+- ✅ User preferences `/preferences` (Privacy toggle + AI provider collapsible, no errors)
+- ✅ Archive / restore project (archive removes from list; Archived page shows it; Restore returns it)
 
 ### Manager / org-context views (north-star personas)
 - ✅ Org overview: stats (3 projects, avg translated/validated/audio, stalled/overdue)
@@ -164,12 +163,20 @@ the `useComments` state directly.
 SWARM-TODO in that file). Local D1 sqlite patched manually. Neon migration
 must be applied by the operator (do NOT apply to prod without review).
 
-### ISSUE-3 — `/project/:id/voice` route does not match the router
-Vite logs `No routes matched location "/project/<id>/voice"` and the page renders
-an empty heading (no crash). The verify-dev-change skill lists `/voice` as a
-route and the workspace toolbar has a "Voice" button — so either the route was
-removed/renamed or the toolbar button points elsewhere (modal?). Voice/audio
-dubbing is a real workflow; confirm where it lives. Status: open, to investigate.
+### ISSUE-3 — `/project/:id/voice` route (FIXED 2026-06-09)
+Route was missing from App.tsx. Added `<Route path="/project/:id/voice" element={<ProjectWorkspace />} />`
+and a `useEffect` in ProjectWorkspace that calls `setLens("audio")` when `location.pathname` ends in `/voice`.
+Deep-link now works: Cast sidebar shown, no errors. Commits: 10c5d39.
+
+### BUG-5 — eBible KJV (and other copyright placeholders) return empty corpus (open)
+Several eBible translations marked `downloadable=true` (e.g. `eng-eng-kjv`) have corpus files
+that are only newline characters — the text is omitted for copyright reasons. `parseEBibleCorpus`
+correctly skips empty lines, producing 0 verses, then throws "Translation '...' produced no verses".
+The error reaches the user as a red alert in the import dialog. Fix options:
+(a) pre-fetch and check line density before showing in picker;
+(b) catch the "0 verses" error and show "This translation is not available for download due to
+copyright restrictions." separately from other errors.
+URL bug that surfaced this was fixed in commit 844bc4f.
 
 ### ISSUE-2 — projects you're a member of in another org don't appear in `/projects`
 `/projects` is org-scoped to the active org. A user granted direct
@@ -207,11 +214,9 @@ the cell (title → "100% — validated"); no separate Validate button in that p
   Terminology, Living Memory, Organization settings, etc.).
 
 ## Next up (loop continues here)
-1. Fix BUG-3: update `useComments` fetch URL to `/projects/:id/comments` (project-scoped); wire `CommentsDrawer` to the real comment state.
-2. Fix ISSUE-3: register `/project/:id/voice` route (or fix sidebar button to open a modal/existing route).
-3. Apply Neon migration 0030 to fix BUG-4 (operator task; needs prod DB access).
-4. Import (USFM/VTT) + export per format on a scratch project.
-5. Repair FIXME specs against e2e-up harness; add specs for edit/validate/route-health/comments.
-6. Org/teams/members/sharing + access cascade; collab (2-user) on current sync.
-7. User preferences `/preferences`; archive/restore project.
-8. Run full `npm run test:e2e` (stop dev-stack first) and get it green.
+1. Fix BUG-5: eBible "downloadable=true" translations with empty corpus (KJV placeholder) → show user-friendly message or pre-filter; currently crashes with "produced no verses".
+2. Apply Neon migration 0030 to fix BUG-4 (operator task; needs prod DB access).
+3. Test Upload Files import path (USFM/VTT file — create test file and upload via file picker).
+4. Repair FIXME specs against e2e-up harness; add specs for edit/validate/route-health/comments.
+5. Collab (2-user) on current sync; presence indicators.
+6. Run full `npm run test:e2e` (stop dev-stack first) and get it green.

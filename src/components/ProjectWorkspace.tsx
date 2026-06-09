@@ -143,6 +143,23 @@ const TerminologyPageContent = lazy(() =>
   import("./TerminologyPage").then((mod) => ({ default: mod.TerminologyPage })),
 )
 
+// ── FRO-234: pure guard — exported for unit testing ───────────────────────────
+/**
+ * Returns true iff the completion-settings save should actually patch
+ * systemPrompt on the server. Guards against two failure modes:
+ *   1. Empty-prompt clobber: buildCompletionSettings() materialises "" by
+ *      default, so provider-only saves would erase the server prompt.
+ *   2. Under-MAINTAINER write: sub-600 callers 403 server-side; skipping
+ *      avoids IDB/server divergence (same floor as handleImported).
+ */
+export function shouldPatchSystemPrompt(
+  systemPrompt: string | null | undefined,
+  roleLevel: number,
+): boolean {
+  if (!systemPrompt || systemPrompt.trim().length === 0) return false
+  return roleLevel >= ROLE.MAINTAINER
+}
+
 export function ProjectWorkspace() {
   const { id: projectId, fileId: routeFileId } = useParams<{ id: string; fileId?: string }>()
   const navigate = useNavigate()
@@ -1663,12 +1680,30 @@ export function ProjectWorkspace() {
     // deriveChecklistState reads to compute aiInstructions. Without this call,
     // the checklist step never flips to complete because useProject.refresh()
     // fetches from the server (not IDB) and the server-overlay wins.
-    if (updated?.completionSettings?.systemPrompt != null) {
-      void patchSettings({ systemPrompt: updated.completionSettings.systemPrompt })
+    //
+    // WARN: only patch when the updated record carries a NON-EMPTY systemPrompt.
+    // buildCompletionSettings() materialises systemPrompt as "" by default, so a
+    // provider-only save (Device B changing the AI provider with no local prompt)
+    // would otherwise WIPE the server-side prompt project-wide.
+    //
+    // Also gate on MAINTAINER (600) — same floor as handleImported — so viewers
+    // and editors can't inadvertently overwrite project-wide settings they have
+    // no server authority to change.
+    const systemPrompt = updated?.completionSettings?.systemPrompt
+    const roleLevel = project?.syncRole?.level ?? 0
+    if (shouldPatchSystemPrompt(systemPrompt, roleLevel)) {
+      void patchSettings({ systemPrompt: systemPrompt! })
+    } else if (systemPrompt !== undefined && systemPrompt !== null && systemPrompt.trim().length === 0) {
+      // Empty prompt from a provider-only save — silently skip to avoid clobbering the server.
+    } else if (systemPrompt && roleLevel < ROLE.MAINTAINER) {
+      console.warn(
+        `[FRO-234] skipping systemPrompt patch — role ${roleLevel} is below server floor ${ROLE.MAINTAINER}. ` +
+        "A sub-MAINTAINER device cannot write project-wide AI instructions.",
+      )
     }
     // Also refresh the server-fetched base record so other fields stay in sync.
     refresh()
-  }, [refresh, patchSettings])
+  }, [refresh, patchSettings, project?.syncRole?.level])
 
   // All hooks below must live above the early return so hook count is stable
   // across renders (React throws "Rendered more hooks" otherwise).
@@ -2535,6 +2570,7 @@ export function ProjectWorkspace() {
             state={cellAreaState}
             fileName={activeFile?.name}
             hasFiles={projectFiles.length > 0}
+            filesLoaded={status === "ready"}
             onImportClick={openImportFlow}
           />
         )}
@@ -2828,7 +2864,22 @@ function ScrollToGroupHandler({ cells, editorRef }: ScrollToGroupHandlerProps) {
   const editorScroll = useEditorScroll()
 
   useEffect(() => {
-    const { group: groupId, section: sectionLabel } = editorScroll.consume()
+    const pending = editorScroll.pending
+    if (!pending) return
+    const { group: groupId, section: sectionLabel, fileId: targetFileId } = pending
+
+    // FRO-250/254: only consume() when the current cells belong to the requested
+    // file. During a file-switch the cells array may still reflect the OLD file
+    // while the pending request already carries the NEW file's id — consuming
+    // early would match against stale cells and either scroll nowhere or jump to
+    // the wrong verse, then burn the request before the new file's cells arrive.
+    const currentFileId = cells[0]?.fileId ?? null
+    if (targetFileId !== null && currentFileId !== targetFileId) {
+      // Leave the request pending until cells have been replaced.
+      return
+    }
+
+    editorScroll.consume()
     if (!groupId && !sectionLabel) return
 
     let idx = -1

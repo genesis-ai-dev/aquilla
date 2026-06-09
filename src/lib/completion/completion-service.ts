@@ -305,6 +305,8 @@ export interface CompleteOptions {
   messages: ChatMessage[]
   stream?: boolean
   onChunk?: (text: string) => void
+  /** If provided, the in-flight fetch and stream are aborted when signalled. */
+  signal?: AbortSignal
 }
 
 export async function complete(options: CompleteOptions): Promise<string> {
@@ -341,6 +343,7 @@ export async function complete(options: CompleteOptions): Promise<string> {
       temperature: effectiveSettings.temperature,
       stream: useStream,
     }),
+    signal: options.signal,
   })
   if (!res.ok) {
     const text = await res.text().catch(() => "")
@@ -352,7 +355,7 @@ export async function complete(options: CompleteOptions): Promise<string> {
   }
 
   if (useStream && options.onChunk && res.body) {
-    return consumeStream(res.body, options.onChunk)
+    return consumeStream(res.body, options.onChunk, options.signal)
   }
 
   const data = await res.json()
@@ -374,6 +377,7 @@ export async function complete(options: CompleteOptions): Promise<string> {
 async function consumeStream(
   body: ReadableStream<Uint8Array>,
   onChunk: (text: string) => void,
+  signal?: AbortSignal,
 ): Promise<string> {
   const reader = body.getReader()
   const decoder = new TextDecoder()
@@ -410,6 +414,10 @@ async function consumeStream(
   }
 
   while (true) {
+    if (signal?.aborted) {
+      reader.cancel().catch(() => { /* ignore */ })
+      throw new DOMException("Completion aborted", "AbortError")
+    }
     const { done, value } = await reader.read()
     if (done) {
       // Flush any trailing line left in the buffer.

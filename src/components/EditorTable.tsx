@@ -48,10 +48,9 @@ import { CellAiStatusPopover } from "./CellAiStatusPopover"
 import { CellNumberPill } from "./cell/CellNumberPill"
 import { InterlinearAlignmentPanel } from "./InterlinearAlignmentPanel"
 import { CellVoicePanel } from "./cell/CellVoicePanel"
-// CellAudioRecordButton removed from overflow popover (FRO-237): record is now
-// a direct RailButton so no popover detour is needed. Import retained only if
-// another usage exists; remove when confirmed clean.
-// import { CellAudioRecordButton } from "./CellAudioRecordButton"
+// CellAudioRecordButton: getUnsupportedReason used by the rail mic denied-help
+// popover (FRO-237). The component itself is no longer in the overflow popover.
+import { getUnsupportedReason } from "./CellAudioRecordButton"
 import { useMicPermission } from "@/hooks/useMicPermission"
 import { assignedCastVoiceId, findVoice } from "@/lib/audio/voices"
 import { useNavigate } from "react-router-dom"
@@ -864,8 +863,16 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     return cellsRef.current.slice(startIndex, startIndex + count)
   }, [])
 
-  // FRO-250: derive the current section label from the first visible row.
-  const firstVisibleIndex = virtualizer.getVirtualItems()[0]?.index ?? 0
+  // FRO-250: derive the current section label from the first row whose top
+  // edge is at or past the current scroll position. Using getVirtualItems()[0]
+  // is wrong because the virtualizer pre-renders overscan rows ABOVE the
+  // viewport — that item can be a full chapter above the visible area, making
+  // the sticky label lag by ~one chapter at section boundaries.
+  // getVirtualItemForOffset(scrollOffset) returns the item that spans that
+  // pixel, giving us the true first-visible row without overscan noise.
+  const scrollOffset = virtualizer.scrollOffset ?? 0
+  const firstVisibleItem = virtualizer.getVirtualItemForOffset(scrollOffset)
+  const firstVisibleIndex = firstVisibleItem?.index ?? 0
   const currentSectionLabel = sectionByIndex[firstVisibleIndex] ?? ""
 
   return (
@@ -1500,6 +1507,9 @@ function EditorRow({
   const pendingTargetEventIdRef = useRef<string | null>(cell.targetEventId ?? null)
   /** voice-chip drag-over state: the voiceId being dragged over this cell's audio area */
   const [dragOverVoiceId, setDragOverVoiceId] = useState<string | null>(null)
+  // FRO-237: mic-denied help popover state — rendered as an inline popover so
+  // the rail button stays ENABLED when mic is blocked and routes click here.
+  const [showMicDeniedHelp, setShowMicDeniedHelp] = useState(false)
 
   useEffect(() => {
     if (cell.targetEventId) pendingTargetEventIdRef.current = cell.targetEventId
@@ -2614,15 +2624,62 @@ function EditorRow({
                   action without needing to open a popover ("just hit the record
                   mic — quick action"). Replaces the redundant Record item inside
                   the ⋯ popover. When audio IS present, FRO-236's Play icon on
-                  the overflow button already gives a direct play affordance. */}
-              {!hasAudio && onOpenRecording && editable && (
-                <RailButton
-                  icon={<Mic className="h-3.5 w-3.5" />}
-                  tooltip={micDenied ? "Microphone access blocked — click cell for help" : "Record audio"}
-                  onClick={() => !micDenied && onOpenRecording(cell.id)}
-                  disabled={micDenied || !editable}
-                />
-              )}
+                  the overflow button already gives a direct play affordance.
+                  WARN fix: the button must NOT be disabled when micDenied —
+                  disabled elements receive no mouse events, so the "click for
+                  help" affordance is unreachable. Instead keep it enabled and
+                  route clicks to the denied-help popover. */}
+              {!hasAudio && onOpenRecording && editable && (() => {
+                const unsupportedReason = getUnsupportedReason()
+                const isUnsupported = unsupportedReason !== null
+                const micTooltip = micDenied
+                  ? "Microphone access blocked — click for help"
+                  : isUnsupported
+                    ? `Recording unavailable — ${unsupportedReason}`
+                    : "Record audio"
+                return (
+                  <div className="relative">
+                    <RailButton
+                      icon={<Mic className="h-3.5 w-3.5" />}
+                      tooltip={micTooltip}
+                      onClick={() => {
+                        if (micDenied) { setShowMicDeniedHelp((v) => !v); return }
+                        if (!isUnsupported) onOpenRecording(cell.id)
+                      }}
+                      toneClass={
+                        micDenied
+                          ? "text-amber-500/70 hover:text-amber-500"
+                          : isUnsupported
+                            ? "cursor-not-allowed text-muted-foreground/30"
+                            : undefined
+                      }
+                      // NEVER disable when micDenied — that kills mouse events
+                      // and makes the help popover unreachable.
+                      disabled={isUnsupported && !micDenied}
+                    />
+                    {/* Mic-denied help popover — replicates CellAudioRecordButton's
+                        pattern so behaviour is consistent across the two surfaces. */}
+                    {micDenied && showMicDeniedHelp && (
+                      <span
+                        role="tooltip"
+                        className="absolute bottom-full right-0 z-50 mb-1 w-52 rounded-md border bg-popover px-3 py-2 text-[11px] leading-snug text-popover-foreground shadow-md"
+                      >
+                        <strong className="block font-semibold">Microphone blocked</strong>
+                        <span className="mt-0.5 block text-muted-foreground">
+                          Open your browser&apos;s site settings (🔒 in the address bar) and allow microphone access, then reload the page.
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => setShowMicDeniedHelp(false)}
+                          className="mt-1.5 text-[10px] underline text-muted-foreground hover:text-foreground"
+                        >
+                          Dismiss
+                        </button>
+                      </span>
+                    )}
+                  </div>
+                )
+              })()}
 
               {/* ⋯ overflow — play/record (when audio), TTS, comments, seek-to-cue.
                   FRO-236: when there's recorded audio, show a Play icon with

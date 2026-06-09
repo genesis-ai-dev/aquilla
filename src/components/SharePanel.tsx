@@ -38,7 +38,7 @@ export function SharePanel({ open, onOpenChange, projectId, onSharesChanged }: S
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-lg">
+      <DialogContent className="flex max-h-[85vh] max-w-lg flex-col overflow-hidden">
         <DialogHeader>
           <DialogTitle>Share Project</DialogTitle>
         </DialogHeader>
@@ -68,14 +68,16 @@ export function SharePanel({ open, onOpenChange, projectId, onSharesChanged }: S
           </button>
         </div>
 
-        {tab === "members" ? (
-          <MembersTab projectId={projectId} />
-        ) : (
-          <InviteLinkTab
-            projectId={projectId}
-            onSharesChanged={onSharesChanged}
-          />
-        )}
+        <div className="min-h-0 flex-1 overflow-y-auto">
+          {tab === "members" ? (
+            <MembersTab projectId={projectId} />
+          ) : (
+            <InviteLinkTab
+              projectId={projectId}
+              onSharesChanged={onSharesChanged}
+            />
+          )}
+        </div>
       </DialogContent>
     </Dialog>
   )

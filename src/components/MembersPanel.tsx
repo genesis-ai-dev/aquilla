@@ -79,13 +79,13 @@ export function MembersPanel({
   const grantableRoles = roleOptions.filter((r) => r.level <= callerMaxRole);
 
   return (
-    <div className="space-y-4">
-      <ul className="divide-y rounded border">
+    <div className="flex flex-col gap-4">
+      <ul className="max-h-[50vh] divide-y overflow-y-auto overscroll-contain rounded border">
         {members.map((m) => {
           const isSelf = callerUserId !== null && m.userId === callerUserId;
           return (
-            <li key={m.userId} className="flex items-center gap-3 px-3 py-2">
-              <span className="font-medium">{m.username}</span>
+            <li key={m.userId} className="flex min-w-0 items-center gap-3 px-3 py-2">
+              <span className="min-w-0 truncate font-medium">{m.username}</span>
               <span className="text-xs text-muted-foreground">{m.roleName}</span>
               {m.source === "org" && (
                 <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">via org</span>

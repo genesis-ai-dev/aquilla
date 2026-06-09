@@ -11,7 +11,7 @@
  *   4. HelpCircle tooltip text is present on the section header.
  */
 
-import { describe, it, expect, vi } from "vitest"
+import { describe, it, expect } from "vitest"
 import { render, screen } from "@testing-library/react"
 import { InterlinearAlignmentPanel } from "./InterlinearAlignmentPanel"
 import {
@@ -28,15 +28,6 @@ function stubModelWithPairCount(pairCount: number): AlignmentModel {
   const base = buildAlignmentModel([])
   // Cast to mutable to override readonly pairCount for testing purposes.
   return { ...base, pairCount } as AlignmentModel
-}
-
-/** Build a real model trained on `n` identical pairs — enough for pairCount = n. */
-function modelFromNPairs(n: number): AlignmentModel {
-  const pairs = Array.from({ length: n }, (_, i) => ({
-    source: `source${i} word`,
-    target: `target${i} wort`,
-  }))
-  return buildAlignmentModel(pairs, [])
 }
 
 const noop = () => undefined

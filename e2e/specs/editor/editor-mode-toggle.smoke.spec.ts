@@ -8,46 +8,45 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const SAMPLE_MD = path.resolve(__dirname, "../../fixtures/sample.md")
 
 /**
- * EditorModeToggle — Text / Audio lens switch in the workspace header.
+ * EditorModeToggle — Text | Audio lens switcher.
  *
- * EditorModeToggle.tsx renders two aria-pressed buttons:
- *   - "Text" (aria-pressed="true" by default)
- *   - "Audio" (aria-pressed="false" by default)
+ * ProjectWorkspace renders a segmented toggle with two buttons:
+ *   <button aria-pressed="true/false">Text</button>
+ *   <button aria-pressed="true/false">Audio</button>
  *
- * Clicking "Audio" switches the lens; "Text" switches back.
+ * Switching lenses is pure local state — no backend call is made.
  *
- * This spec: open the workspace → verify Text is pressed / Audio is not →
- * click Audio → Audio becomes pressed / Text is not → click Text → back.
+ * This spec:
+ *   1. Imports sample.md so the workspace is open with cells.
+ *   2. Verifies "Text" button has aria-pressed=true (default lens).
+ *   3. Clicks "Audio" — verifies Audio is now pressed, Text is not.
+ *   4. Clicks "Text" again — verifies Text is pressed again.
  */
-test("EditorModeToggle switches between Text and Audio lens", async ({ alice }) => {
+test("EditorModeToggle switches between Text and Audio lenses", async ({ alice }) => {
   const dash = new Dashboard(alice)
   await dash.goto()
-  const name = `ModeToggle ${Date.now()}`
+  const name = `LensToggle ${Date.now()}`
   await dash.createProject({ name, source: "en", target: "fr" })
   await dash.openProject(name)
 
   const ws = new Workspace(alice)
   await ws.importFile(SAMPLE_MD)
-  await ws.openFileBySubstring("sample")
   await ws.waitForEditor()
 
-  // Locate the Text and Audio buttons.
+  // Default lens is Text.
   const textBtn = alice.getByRole("button", { name: /^Text$/i })
   const audioBtn = alice.getByRole("button", { name: /^Audio$/i })
 
-  await expect(textBtn).toBeVisible({ timeout: 10_000 })
-  await expect(audioBtn).toBeVisible({ timeout: 5_000 })
-
-  // Default: Text is pressed, Audio is not.
+  await expect(textBtn).toBeVisible({ timeout: 5_000 })
   await expect(textBtn).toHaveAttribute("aria-pressed", "true")
   await expect(audioBtn).toHaveAttribute("aria-pressed", "false")
 
-  // Switch to Audio.
+  // Switch to Audio lens.
   await audioBtn.click()
   await expect(audioBtn).toHaveAttribute("aria-pressed", "true", { timeout: 3_000 })
   await expect(textBtn).toHaveAttribute("aria-pressed", "false")
 
-  // Switch back to Text.
+  // Switch back to Text lens.
   await textBtn.click()
   await expect(textBtn).toHaveAttribute("aria-pressed", "true", { timeout: 3_000 })
   await expect(audioBtn).toHaveAttribute("aria-pressed", "false")

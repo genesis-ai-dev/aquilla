@@ -142,7 +142,7 @@ routes = [
 #     --caching-disabled
 [[env.development.hyperdrive]]
 binding = "HYPERDRIVE"
-id = "REPLACE_WITH_DEV_HYPERDRIVE_ID"
+id = "53581197ff7a4202a5ed0ef08537d4a6"
 
 [env.development.vars]
 ALGORITHM = "HS256"
@@ -180,7 +180,7 @@ routes = [
 # Get the pooled connection string from the Neon `staging` branch; keep it OUT of git.
 [[env.staging.hyperdrive]]
 binding = "HYPERDRIVE"
-id = "REPLACE_WITH_STAGING_HYPERDRIVE_ID"
+id = "822231ade4da4db5b1955702e13d1ac3"
 
 [env.staging.vars]
 ALGORITHM = "HS256"

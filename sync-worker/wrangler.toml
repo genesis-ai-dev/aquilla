@@ -153,7 +153,7 @@ bucket_name = "aquilla-snapshots-dev"
 #     --caching-disabled
 [[env.development.hyperdrive]]
 binding = "HYPERDRIVE"
-id = "REPLACE_WITH_DEV_HYPERDRIVE_ID"
+id = "53581197ff7a4202a5ed0ef08537d4a6"
 
 # ---------------------------------------------------------------------------
 # Staging environment — for the staging branch, deployed to api.staging.aquilla.app
@@ -189,15 +189,10 @@ bucket_name = "aquilla-snapshots-staging"
 
 # Staging runs on Neon (Postgres) to mirror prod. index.ts builds AQUILLA_PG
 # from the Postgres shim (db/shim/postgres.ts) over Hyperdrive → the Neon
-# `staging` branch (project sweet-paper-88472094, branch br-old-credit-aja5brf7).
-# Caching disabled so live edits aren't served stale (same as prod).
-#
-# Use the SAME Hyperdrive id as auth-worker's [env.staging] (one staging
-# Hyperdrive → one Neon staging branch). See auth-worker/wrangler.toml for the
-# one-time `wrangler hyperdrive create` command (FRO-146).
+# `staging` branch. Caching disabled so live edits aren't served stale (same as prod).
 [[env.staging.hyperdrive]]
 binding = "HYPERDRIVE"
-id = "REPLACE_WITH_STAGING_HYPERDRIVE_ID"
+id = "822231ade4da4db5b1955702e13d1ac3"
 
 # ---------------------------------------------------------------------------
 # e2e test environment. Local e2e (scripts/e2e-up.ts) runs `wrangler dev` on

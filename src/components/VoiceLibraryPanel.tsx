@@ -123,17 +123,18 @@ export function VoiceLibraryPanel({
   }, [onSettingsChange])
 
   // Append-or-replace the saved character into the library.
+  // NOTE: compute outside the setVoices updater — calling setDefaultVoiceId or
+  // onSettingsChange (a parent setState) inside a functional updater triggers
+  // React's "setState during render" warning (BUG-6 fix).
   const saveVoice = useCallback((voice: Voice) => {
-    setVoices((cur) => {
-      const exists = cur.some((v) => v.id === voice.id)
-      const next = exists ? cur.map((v) => (v.id === voice.id ? voice : v)) : [...cur, voice]
-      const nextDefault = defaultVoiceId ?? next[0]?.id
-      setDefaultVoiceId(nextDefault)
-      void onSettingsChange({ voices: next, defaultVoiceId: nextDefault })
-      return next
-    })
+    const exists = voices.some((v) => v.id === voice.id)
+    const next = exists ? voices.map((v) => (v.id === voice.id ? voice : v)) : [...voices, voice]
+    const nextDefault = defaultVoiceId ?? next[0]?.id
+    setVoices(next)
+    setDefaultVoiceId(nextDefault)
+    void onSettingsChange({ voices: next, defaultVoiceId: nextDefault })
     select(voice.id)
-  }, [defaultVoiceId, onSettingsChange, select])
+  }, [voices, defaultVoiceId, onSettingsChange, select])
 
   const deleteVoice = useCallback((voice: Voice) => {
     const next = voices.filter((v) => v.id !== voice.id)

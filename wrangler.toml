@@ -70,15 +70,30 @@ directory = "./dist"
 not_found_handling = "single-page-application"
 
 # ---------------------------------------------------------------------------
-# Staging environment — serves SPA at dev.aquilla.app/* with same hint-check
-# logic as production. Uses same Worker code; assets deploy is separate.
+# Development staging — served from dev branch, deploys to dev.aquilla.app
+# Uses same Worker code; assets deploy is separate.
+# Deploy: wrangler deploy --env=development
+# ---------------------------------------------------------------------------
+[env.development]
+name = "aquilla-web-development"
+account_id = "6a80496d1e59948a9cbaa3c643ba81d7"
+workers_dev = true
+routes = ["dev.aquilla.app/*"]
+
+[env.development.assets]
+directory = "./dist"
+not_found_handling = "single-page-application"
+
+# ---------------------------------------------------------------------------
+# Pre-production staging — served from staging branch, deploys to staging.aquilla.app
+# Uses same Worker code; assets deploy is separate.
 # Deploy: wrangler deploy --env=staging
 # ---------------------------------------------------------------------------
 [env.staging]
 name = "aquilla-web-staging"
 account_id = "6a80496d1e59948a9cbaa3c643ba81d7"
 workers_dev = true
-routes = ["dev.aquilla.app/*"]
+routes = ["staging.aquilla.app/*"]
 
 [env.staging.assets]
 directory = "./dist"

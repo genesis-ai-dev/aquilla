@@ -119,17 +119,53 @@ ENVIRONMENT = "production"
 PLATFORM_ADMINS = "daniel2,dadukhankevin,ryder,ryder-aquilla,ryder-aquilla-2,ryder-aquilla-3"
 
 # ---------------------------------------------------------------------------
-# Staging environment — physically separate D1 (frontier-db-v2-staging) so
-# experiments don't pollute prod identities. Same SECRET_KEY + SYNC_SECRET_KEY
-# as prod so tokens minted against staging still verify against prod workers
-# during cross-env testing (set via `wrangler secret put --env staging`).
+# Development environment — for the dev branch, deployed to api.dev.aquilla.app
+# Physically separate Neon branch so experiments don't pollute prod identities.
+# Same SECRET_KEY + SYNC_SECRET_KEY as prod so tokens minted against dev still
+# verify against prod workers during cross-env testing.
 # ---------------------------------------------------------------------------
-[env.staging]
+[env.development]
 name = "aquilla-dev-identity"
 account_id = "6a80496d1e59948a9cbaa3c643ba81d7"
 routes = [
   "api.dev.aquilla.app/identity/*",
   "api.dev.aquilla.app/chat/*",
+]
+
+# Dev runs on Neon (Postgres) to mirror prod. index.ts builds AQUILLA_PG
+# from the Postgres shim over Hyperdrive → the Neon `dev` branch.
+#
+# ONE-TIME PROVISIONING — create the dev Hyperdrive config, then paste its id
+# below (replace the placeholder):
+#   wrangler hyperdrive create aquilla-dev \
+#     --connection-string="<neon dev branch pooled connection string>" \
+#     --caching-disabled
+[[env.development.hyperdrive]]
+binding = "HYPERDRIVE"
+id = "REPLACE_WITH_DEV_HYPERDRIVE_ID"
+
+[env.development.vars]
+ALGORITHM = "HS256"
+ACCESS_TOKEN_EXPIRE_MINUTES = "43200"
+EMAIL_FROM = "noreply@aquilla.app"
+BASE_URL = "https://dev.aquilla.app"
+SYNC_WORKER_URL = "https://api.dev.aquilla.app/sync"
+DEFAULT_LLM_MODEL = "anthropic/claude-sonnet-4.5"
+ENVIRONMENT = "development"
+PLATFORM_ADMINS = "daniel2,dadukhankevin,ryder,ryder-aquilla,ryder-aquilla-2,ryder-aquilla-3"
+
+# ---------------------------------------------------------------------------
+# Staging environment — for the staging branch, deployed to api.staging.aquilla.app
+# Pre-production QA environment. Physically separate Neon branch so experiments
+# don't pollute prod identities. Same SECRET_KEY + SYNC_SECRET_KEY as prod so
+# tokens minted against staging still verify against prod workers.
+# ---------------------------------------------------------------------------
+[env.staging]
+name = "aquilla-staging-identity"
+account_id = "6a80496d1e59948a9cbaa3c643ba81d7"
+routes = [
+  "api.staging.aquilla.app/identity/*",
+  "api.staging.aquilla.app/chat/*",
 ]
 
 # Staging runs on Neon (Postgres) to mirror prod. index.ts builds AQUILLA_PG

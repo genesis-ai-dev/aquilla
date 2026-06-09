@@ -112,20 +112,64 @@ binding = "HYPERDRIVE"
 id = "69bcc10e67464f2eaf4fe91a9141e7cd"
 
 # ---------------------------------------------------------------------------
-# Staging environment — physically separate D1, R2, DO namespace.
-# Auth model unchanged: same SYNC_SECRET_KEY as prod, same frontier-server
-# issues sync-tokens. A logged-in user can use the staging frontend and
-# their writes land in aquilla-db-staging / aquilla-snapshots-staging, leaving
-# prod data untouched.
+# Development environment — for the dev branch, deployed to api.dev.aquilla.app
+# Physically separate R2, DO namespace. Auth model unchanged: same SYNC_SECRET_KEY
+# as prod. A logged-in user can use the dev frontend and their writes land in
+# aquilla-snapshots-dev, leaving prod data untouched.
 #
-# Deploy: `wrangler deploy --env staging` (CI does this on push to dev).
+# Deploy: `wrangler deploy --env development` (CI does this on push to dev).
+# Secrets: after first deploy, copy SYNC_SECRET_KEY from prod with
+#   `wrangler secret put SYNC_SECRET_KEY --env development`
+# ---------------------------------------------------------------------------
+[env.development]
+name = "aquilla-sync-worker-dev"
+account_id = "6a80496d1e59948a9cbaa3c643ba81d7"
+routes = ["api.dev.aquilla.app/sync/*"]
+
+[[env.development.durable_objects.bindings]]
+name = "ProjectSync"
+class_name = "ProjectSync"
+
+[[env.development.migrations]]
+tag = "v1"
+new_sqlite_classes = ["FileSync"]
+
+[[env.development.migrations]]
+tag = "v2"
+new_sqlite_classes = ["ProjectSync"]
+
+[[env.development.r2_buckets]]
+binding = "SNAPSHOTS"
+bucket_name = "aquilla-snapshots-dev"
+
+# Dev runs on Neon (Postgres) to mirror prod. index.ts builds AQUILLA_PG
+# from the Postgres shim (db/shim/postgres.ts) over Hyperdrive → the Neon
+# `dev` branch (project sweet-paper-88472094, branch dev).
+# Caching disabled so live edits aren't served stale (same as prod).
+#
+# Create the dev Hyperdrive config, then paste its id below:
+#   wrangler hyperdrive create aquilla-dev \
+#     --connection-string="<neon dev branch pooled connection string>" \
+#     --caching-disabled
+[[env.development.hyperdrive]]
+binding = "HYPERDRIVE"
+id = "REPLACE_WITH_DEV_HYPERDRIVE_ID"
+
+# ---------------------------------------------------------------------------
+# Staging environment — for the staging branch, deployed to api.staging.aquilla.app
+# Pre-production QA environment. Physically separate R2, DO namespace. Auth model
+# unchanged: same SYNC_SECRET_KEY as prod. A logged-in user can use the staging
+# frontend and their writes land in aquilla-snapshots-staging, leaving prod
+# data untouched.
+#
+# Deploy: `wrangler deploy --env staging` (CI does this on push to staging).
 # Secrets: after first deploy, copy SYNC_SECRET_KEY from prod with
 #   `wrangler secret put SYNC_SECRET_KEY --env staging`
 # ---------------------------------------------------------------------------
 [env.staging]
 name = "aquilla-sync-worker-staging"
 account_id = "6a80496d1e59948a9cbaa3c643ba81d7"
-routes = ["api.dev.aquilla.app/sync/*"]
+routes = ["api.staging.aquilla.app/sync/*"]
 
 [[env.staging.durable_objects.bindings]]
 name = "ProjectSync"

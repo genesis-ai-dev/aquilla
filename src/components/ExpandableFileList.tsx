@@ -36,12 +36,19 @@ interface Props {
   onDelete: (fileId: string) => void
   onApplySuggestion?: (fileId: string) => void
   onRenameCorpus?: (oldMarker: string, newMarker: string) => void
+  /**
+   * FRO-253 (a fix): whether org policy allows export. When false, the
+   * "Export all books (.zip)" button and per-file export menu items are hidden
+   * so dashboard affordances match the workspace. Defaults to true (no gate)
+   * for callers that haven't wired up org settings.
+   */
+  canExportByOrgPolicy?: boolean
 }
 
 export function ExpandableFileList({
   projectId, projectName, files, activeFileId, fileProgress,
   suggestionFileIds, validationCount, getTokenForFile, onSelectFile, onRename, onMove, onDelete,
-  onApplySuggestion, onRenameCorpus,
+  onApplySuggestion, onRenameCorpus, canExportByOrgPolicy = true,
 }: Props) {
   const { expanded, toggle } = useSidebarExpansion(projectId)
   const { members: collapsed, toggle: toggleCollapsed } = usePersistedToggleSet(
@@ -76,7 +83,8 @@ export function ExpandableFileList({
 
   return (
     <>
-      {exportableCount > 1 && (
+      {/* FRO-253 (a fix): hide export affordances when org policy disallows it */}
+      {exportableCount > 1 && canExportByOrgPolicy && (
         <div className="px-2 pt-2">
           <button
             onClick={exportAllUsfm}
@@ -236,7 +244,8 @@ export function ExpandableFileList({
       </div>
       {menu && (() => {
         const menuFile = files.find((f) => f.id === menu.fileId)
-        const canExport = !!menuFile && EXPORTABLE_FILE_TYPES.has(menuFile.type)
+        // FRO-253 (a fix): also gate on org policy, not just file type.
+        const canExportFile = !!menuFile && EXPORTABLE_FILE_TYPES.has(menuFile.type) && canExportByOrgPolicy
         return (
           <FileActionMenu
             x={menu.x} y={menu.y}
@@ -244,7 +253,7 @@ export function ExpandableFileList({
             onRename={() => setEditingFileId(menu.fileId)}
             onMove={() => onMove(menu.fileId)}
             onDelete={() => onDelete(menu.fileId)}
-            onExportSource={canExport ? () => exportFile(menuFile!) : undefined}
+            onExportSource={canExportFile ? () => exportFile(menuFile!) : undefined}
           />
         )
       })()}

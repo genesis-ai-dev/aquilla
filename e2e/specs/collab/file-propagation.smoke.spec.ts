@@ -19,12 +19,17 @@ const SAMPLE_MD = path.resolve(__dirname, "../../fixtures/sample.md")
  * connections from both alice and bob, sync establishes, and the file
  * propagates.
  */
-// TODO(e2e): regressed between 5a808b4 and now, almost certainly tied to
-// c6d0753 ("improve sync memory usage") which touched sync-worker and
-// useFileSync. Bob's workspace shows "Local only / Sync disabled" — the
-// partyserver DO connection isn't activating after server-side membership
-// is added, so the imported file never propagates. Re-enable once the
-// local→synced bridge wakes up sync on bob's side.
+// TODO(e2e): Architecture changed — y-partyserver/Yjs retired in favour of
+// ProjectSync DO + D1 event log (sync-worker). The test's helpers
+// createProjectServerSide/addProjectMember target the retired frontier-server
+// API and the "local→synced bridge" concept no longer applies.
+// Rewrite plan:
+//   1. Create project via auth-worker POST /api/v2/projects (alice).
+//   2. Add bob via POST /api/v2/projects/:id/members.
+//   3. Alice imports file → sync-worker receives file.create event.
+//   4. Assert: bob's GET /api/v2/projects/:id/files includes the new file.
+//   5. UI: bob reloads workspace, sidebar shows the file.
+// Keep test.fixme until the helpers and assertions are ported.
 test.fixme("alice imports a file; bob (added via API) sees it via partyserver sync", async ({ alice, bob }) => {
   // 1. Alice creates the project via normal UI flow (populates her IDB).
   const aliceDash = new Dashboard(alice)

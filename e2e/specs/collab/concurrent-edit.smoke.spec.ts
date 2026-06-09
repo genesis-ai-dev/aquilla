@@ -16,12 +16,15 @@ const SAMPLE_MD = path.resolve(__dirname, "../../fixtures/sample.md")
  * Setup mirrors file-propagation.smoke: alice creates locally, then we
  * bridge local→synced via API.
  */
-// TODO(e2e): regressed between 5a808b4 and now, almost certainly tied to
-// c6d0753 ("improve sync memory usage") which touched sync-worker and
-// useFileSync. After server-side membership is added, bob's project still
-// renders "Local only / Sync disabled" in the footer — the partyserver DO
-// connection isn't establishing, so cell edits never propagate. Re-enable
-// once the local→synced bridge updates client-side project flags.
+// TODO(e2e): Architecture changed — y-partyserver/Yjs retired. Cell-level
+// propagation now goes through the ProjectSync DO (CRDT log in D1). The test
+// needs to be rewritten to:
+//   1. Create+share project via current auth-worker API.
+//   2. Confirm sync-worker ProjectSync DO accepts connections from both contexts.
+//   3. Assert alice's cell edit appears as a cell.update event in D1 within 10s.
+//   4. Assert bob's editor renders the new text (via polling GET /events or WS).
+// Keep test.fixme until that rewrite lands; the Yjs/partyserver approach in this
+// file is no longer correct for the current architecture.
 test.fixme("alice's edit on cell 0 is visible in bob's open editor within 10s", async ({ alice, bob }) => {
   // 1. Alice creates project locally
   const aliceDash = new Dashboard(alice)

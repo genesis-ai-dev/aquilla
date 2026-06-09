@@ -359,6 +359,11 @@ export function ProjectWorkspace() {
   // "make a character" dialog) and replaces each cell's SOURCE column with that
   // line's voice controls (CellVoicePanel); all other audio chrome lives there.
   const [lens, setLens] = useEditorLensPreference(projectId ?? "")
+  // ISSUE-3 fix: /project/:id/voice deep-link activates audio lens on mount.
+  useEffect(() => {
+    if (location.pathname.endsWith("/voice")) setLens("audio")
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location.pathname])
   // A2: "Open audio setup" CTA from the cell error popover must navigate to a
   // page where the Gemini API key can be set. The old implementation called
   // setLens("audio") which is a no-op when already in audio mode. Navigate to

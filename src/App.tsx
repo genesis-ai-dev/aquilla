@@ -159,6 +159,8 @@ function AppRoutes() {
         <Route path="/project/:id/settings" element={<ProjectSettings />} />
         {/* FRO-194: /rules deep-link renders inside ProjectWorkspace shell — shell stays mounted. */}
         <Route path="/project/:id/rules" element={<ProjectWorkspace />} />
+        {/* ISSUE-3 fix: /voice deep-link — workspace detects suffix and activates audio lens. */}
+        <Route path="/project/:id/voice" element={<ProjectWorkspace />} />
         <Route path="/project/:id/terminology" element={<TerminologyPage />} />
         <Route path="/project/:id/comments" element={<CommentsPage />} />
         <Route path="/project/:id/memory" element={<LivingMemoryPage />} />

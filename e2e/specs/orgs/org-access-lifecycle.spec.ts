@@ -58,6 +58,20 @@ interface AccessEntry {
   effectiveLevel: number
 }
 
+// Actual shape returned by GET /api/v2/orgs/:orgId/members/:userId/access
+interface EffectiveAccessResponse {
+  orgRole: number | null
+  projects: Array<{
+    projectId: string
+    projectName: string
+    direct: number | null
+    groups: Array<{ groupId: number; name: string; roleLevel: number }>
+    org: number | null
+    creator: boolean
+    resolved: number
+  }>
+}
+
 interface ProjectDetail {
   role?: {
     level: number
@@ -299,7 +313,12 @@ async function getEffectiveAccess(
     { headers: authHeaders(callerJwt) },
   )
   if (!r.ok) throw new Error(`getEffectiveAccess failed: ${r.status} — ${await r.text()}`)
-  return (await r.json()) as AccessEntry[]
+  // API returns { orgRole, projects: [{projectId, resolved, ...}] }
+  const data = (await r.json()) as EffectiveAccessResponse
+  return (data.projects ?? []).map((p) => ({
+    projectId: p.projectId,
+    effectiveLevel: p.resolved,
+  }))
 }
 
 async function resolveProjectRole(

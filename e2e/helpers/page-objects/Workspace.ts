@@ -95,11 +95,21 @@ export class Workspace {
    * effect as trigger-press for EditorTable's handleOpenChange). */
   async validateCell(index: number): Promise<void> {
     const row = this.cellRow(index)
+    // Hover the row first to reveal the CellActionRail (its children have
+    // opacity: 0 when not hovered/focused, which makes them invisible to
+    // Playwright's toBeVisible() check).
+    await row.hover()
     const validationButton = row.locator("button[title*='Health']").first()
     await expect(validationButton).toBeVisible({ timeout: 10_000 })
     // Focus then Space to avoid hover-triggered popover competing with the press.
     await validationButton.focus()
     await this.page.keyboard.press("Space")
-    await expect(row.locator(".text-emerald-500").first()).toBeVisible({ timeout: 10_000 })
+    // After validation, the button title changes to "— validated". This is a
+    // server-round-trip (IDB → sync-worker → D1 → push back). Check the title
+    // instead of the CSS class because: (a) the CellActionRail might have
+    // opacity:0 if focus moved away, and (b) title is visible even when the
+    // rail is collapsed (it still passes toBeVisible since the button is in DOM).
+    // Wait longer to accommodate the sync round-trip under load.
+    await expect(validationButton).toHaveAttribute("title", /validated/, { timeout: 15_000 })
   }
 }

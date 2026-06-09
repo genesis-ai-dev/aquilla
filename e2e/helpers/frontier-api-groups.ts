@@ -108,9 +108,9 @@ export async function removeOrgMember(
   orgId: number,
   username: string,
 ): Promise<void> {
-  // Resolve the user id via GET /api/v2/users/:username
+  // Resolve the user id via GET /api/v2/users/lookup?username=X
   const userRes = await fetch(
-    `${FRONTIER_BASE}/api/v2/users/${encodeURIComponent(username)}`,
+    `${FRONTIER_BASE}/api/v2/users/lookup?username=${encodeURIComponent(username)}`,
     { headers: authHeaders(jwt) },
   )
   if (!userRes.ok)

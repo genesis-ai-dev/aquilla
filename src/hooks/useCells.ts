@@ -328,7 +328,23 @@ export function useCells(opts: UseCellsOptions): UseCellsResult {
   // otherwise clobber the value with stale-empty data — the disappearing
   // prediction. This shadow bridges that window and self-clears in
   // rebuildFromCache once the projection catches up (value matches).
-  const optimisticEditsRef = useRef<Map<string, { value: string; valueHtml?: string }>>(new Map())
+  //
+  // `seq` is the local-mutation clock value at which the shadow was recorded
+  // (FRO-247): a fetch may only confirm-and-clear a shadow it provably
+  // postdates (fetch startSeq >= shadow seq), so a stale snapshot that
+  // coincidentally carries the same value can never clear it.
+  const optimisticEditsRef = useRef<Map<string, { value: string; valueHtml?: string; seq: number }>>(new Map())
+  // Local-mutation clock (FRO-247). Bumped on every local rowsRef mutation:
+  // an optimistic edit, or a targeted revalidateCell write-back. Fetches
+  // record the clock when their server snapshot begins; any cell mutated
+  // AFTER that point (cellFreshnessRef floor > fetch startSeq) is fresher
+  // than the fetch's data, and the fetch must not clobber it. This closes
+  // the hole left by the shadow alone: a targeted refetch could confirm and
+  // clear the shadow, after which an OLDER still-in-flight full refetch's
+  // buffer swap wiped the value/row with pre-commit data (the demo-day
+  // "edited cell vanishes until refresh").
+  const writeSeqRef = useRef(0)
+  const cellFreshnessRef = useRef<Map<string, number>>(new Map())
   const statsRef = useRef<ReadonlyMap<string, CellAuditStats>>(auditStats)
   const usernameRef = useRef(username)
   const requiredRef = useRef(requiredValidations)
@@ -423,14 +439,61 @@ export function useCells(opts: UseCellsOptions): UseCellsResult {
   // value, the projection has caught up and the authoritative row should drive
   // the cell. Only real server rows are passed here (never the optimistically
   // mutated rowsRef), so a confirm means the value genuinely round-tripped.
-  const clearConfirmedShadows = useCallback((serverRows: CellRow[]) => {
+  // `fetchStartSeq` gates confirmation to fetches that postdate the shadow's
+  // write — a snapshot taken before the write can't confirm it (FRO-247).
+  const clearConfirmedShadows = useCallback((serverRows: CellRow[], fetchStartSeq: number) => {
     const shadows = optimisticEditsRef.current
     if (shadows.size === 0) return
     for (const r of serverRows) {
       if (r.side !== "target") continue
       const o = shadows.get(r.cellId)
-      if (o && (r.value ?? "") === o.value) shadows.delete(r.cellId)
+      if (o && o.seq <= fetchStartSeq && (r.value ?? "") === o.value) shadows.delete(r.cellId)
     }
+  }, [])
+
+  // FRO-247: merge a completed soft-fetch buffer with the rows of any cell
+  // mutated locally AFTER the fetch's snapshot began. The buffer predates
+  // those mutations, so for each protected cell the current rowsRef rows
+  // (optimistic edit or fresher targeted write-back) replace the buffer's —
+  // in place, to preserve the anchor-chain order — and sides the stale
+  // buffer lacks entirely (first-commit target rows, just-created cells)
+  // are appended so the row can't vanish from the table. Cells with a live
+  // (unconfirmed) shadow are protected too: an unconfirmed buffer is by
+  // definition not fresher than the shadowed write.
+  const mergeProtectedRows = useCallback((buffer: CellRow[], fetchStartSeq: number): CellRow[] => {
+    const floors = cellFreshnessRef.current
+    const shadows = optimisticEditsRef.current
+    if (floors.size === 0 && shadows.size === 0) return buffer
+    const protectedIds = new Set<string>()
+    for (const [id, seq] of floors) if (seq > fetchStartSeq) protectedIds.add(id)
+    for (const id of shadows.keys()) protectedIds.add(id)
+    if (protectedIds.size === 0) return buffer
+    // Current (fresher) rows for protected cells, keyed by cellId|side.
+    const keep = new Map<string, CellRow>()
+    for (const r of rowsRef.current) {
+      if (protectedIds.has(r.cellId)) keep.set(`${r.cellId}|${r.side}`, r)
+    }
+    const out: CellRow[] = []
+    for (const r of buffer) {
+      if (!protectedIds.has(r.cellId)) {
+        out.push(r)
+        continue
+      }
+      const k = `${r.cellId}|${r.side}`
+      const cur = keep.get(k)
+      // No current row for this side means a fresher read said it doesn't
+      // exist — drop the stale buffer row rather than resurrecting it.
+      if (cur) {
+        out.push(cur)
+        keep.delete(k)
+      }
+    }
+    // Protected rows the stale snapshot never had. Target rows don't drive
+    // cell ordering (joinSourceAndTarget orders by source chain), and a
+    // missing source row means the cell postdates the snapshot — tail is
+    // the best position available until the next fresh fetch.
+    for (const r of keep.values()) out.push(r)
+    return out
   }, [])
 
   // `soft`: a same-file refetch (revalidate after a commit, focus/visibility
@@ -538,6 +601,11 @@ export function useCells(opts: UseCellsOptions): UseCellsResult {
           : rowsRef.current.concat(rows)
         if (rebuild) rebuildFromCache()
       }
+      // FRO-247: the local-mutation clock at the moment the server snapshot
+      // begins. Any cell mutated after this point is fresher than this
+      // fetch's data — it can neither confirm that cell's shadow nor replace
+      // its rows at the swap below.
+      const startSeq = writeSeqRef.current
       // Stream the TARGET side first. The combined read returns every source
       // row before any target row, so on a Bible-sized file (~30k source cells
       // vs. a handful of translated target cells) fetching both sides at once
@@ -554,8 +622,10 @@ export function useCells(opts: UseCellsOptions): UseCellsResult {
         // Confirm shadows against the SERVER buffer before it becomes rowsRef,
         // so a stale buffer (target snapshotted pre-commit) does NOT confirm
         // (and thus does not clear) an optimistic edit it predates.
-        clearConfirmedShadows(buffer)
-        rowsRef.current = buffer
+        clearConfirmedShadows(buffer, startSeq)
+        // Swap in the buffer, retaining rows for any cell mutated locally
+        // after this fetch's snapshot began (FRO-247).
+        rowsRef.current = mergeProtectedRows(buffer, startSeq)
       }
       // Final rebuild: the source pass paints per page, but a target-only or
       // empty-source file yields no source page to trigger one — and the
@@ -580,13 +650,14 @@ export function useCells(opts: UseCellsOptions): UseCellsResult {
       // superseded fetch must not clear it out from under its successor.
       if (generationRef.current === gen) inFlightRef.current = false
     }
-  }, [rebuildFromCache, clearConfirmedShadows])
+  }, [rebuildFromCache, clearConfirmedShadows, mergeProtectedRows])
 
   // Reload on (projectId, fileId, enabled) change. The optimistic-edit shadow
-  // is per-file local state — drop it so edits from the previous file can't
-  // bleed onto a same-id cell in the next one.
+  // and freshness floors are per-file local state — drop them so edits from
+  // the previous file can't bleed onto a same-id cell in the next one.
   useEffect(() => {
     optimisticEditsRef.current.clear()
+    cellFreshnessRef.current.clear()
     void doFetch()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId, fileId, enabled])
@@ -686,6 +757,11 @@ export function useCells(opts: UseCellsOptions): UseCellsResult {
   // event — fanning out N targeted GETs would be worse than today's full
   // refetch. See TODO in sync-worker/src/events/event-projection.ts.
   const cellFetchInFlightRef = useRef<Set<string>>(new Set())
+  // Self-reference so the discard-exhaustion path below can re-kick a fresh
+  // targeted fetch after the in-flight marker clears (a useCallback can't
+  // name itself). Assigned right after the declaration, render-time, same as
+  // the other refs above.
+  const revalidateCellRef = useRef<(cellId: string) => void>(() => {})
   const revalidateCell = useCallback((cellId: string) => {
     const projectId = projectRef.current
     const fileId = fileRef.current
@@ -695,32 +771,81 @@ export function useCells(opts: UseCellsOptions): UseCellsResult {
     if (cellFetchInFlightRef.current.has(cellId)) return
     cellFetchInFlightRef.current.add(cellId)
     const gen = generationRef.current
+    // True when the loop's final attempt was discarded because a local
+    // mutation outpaced it — the finally block then re-kicks a fresh call
+    // (new startSeq) so the cell can't sit unconfirmed until the next WS
+    // poke. Each re-kick needs yet another mid-flight mutation to be
+    // discarded again, so this converges as soon as edits pause.
+    let exhaustedByDiscard = false
     void (async () => {
       try {
         const token = await getToken(fileId)
         if (!token) return
-        if (generationRef.current !== gen) return
-        const rows = await fetchCellsByIds(projectId, fileId, [cellId], token)
-        if (generationRef.current !== gen) return
-        if (projectRef.current !== projectId || fileRef.current !== fileId) return
-        // A targeted server read — clear the shadow if it confirms the value.
-        clearConfirmedShadows(rows)
-        const cache = rowsRef.current
-        // Replace any existing rows for this cellId; rows arrive as one
-        // source + one target (either may be absent).
-        const next = cache.filter((r) => r.cellId !== cellId)
-        next.push(...rows)
-        rowsRef.current = next
-        rebuildFromCache()
+        // Bounded retry (FRO-247): if a local mutation lands while the fetch
+        // is in flight, the response predates it and is discarded — try once
+        // more against the newer state rather than stranding the cell until
+        // the next WS poke / focus refetch.
+        for (let attempt = 0; attempt < 2; attempt++) {
+          if (generationRef.current !== gen) return
+          const startSeq = writeSeqRef.current
+          const rows = await fetchCellsByIds(projectId, fileId, [cellId], token)
+          if (generationRef.current !== gen) return
+          if (projectRef.current !== projectId || fileRef.current !== fileId) return
+          const floor = cellFreshnessRef.current.get(cellId)
+          if (floor !== undefined && floor > startSeq) {
+            exhaustedByDiscard = true
+            continue
+          }
+          exhaustedByDiscard = false
+          // A targeted server read — clear the shadow if it confirms the value.
+          clearConfirmedShadows(rows, startSeq)
+          // The write-back is itself a local mutation: any full fetch whose
+          // snapshot began before now must not overwrite it at its swap.
+          cellFreshnessRef.current.set(cellId, ++writeSeqRef.current)
+          // Replace this cellId's rows IN PLACE — rows arrive as one source +
+          // one target (either may be absent). The cell list renders in row
+          // order, so filter-and-append would teleport the edited row to the
+          // bottom of the file (FRO-247's "row disappears"). A side the
+          // server no longer returns is dropped; a side the cache never had
+          // (first commit's target row) appends at the tail, which doesn't
+          // affect ordering (cells order by their source rows).
+          const bySide = new Map(rows.map((r) => [r.side, r]))
+          const next: CellRow[] = []
+          for (const r of rowsRef.current) {
+            if (r.cellId !== cellId) {
+              next.push(r)
+              continue
+            }
+            const repl = bySide.get(r.side)
+            if (repl) {
+              next.push(repl)
+              bySide.delete(r.side)
+            }
+          }
+          for (const r of bySide.values()) next.push(r)
+          rowsRef.current = next
+          rebuildFromCache()
+          return
+        }
       } catch {
         // Targeted fetch failed — fall back to the full file refetch so
         // we never strand stale local state on a transient network blip.
+        exhaustedByDiscard = false
         if (generationRef.current === gen) void doFetch(true)
       } finally {
         cellFetchInFlightRef.current.delete(cellId)
+        if (
+          exhaustedByDiscard &&
+          generationRef.current === gen &&
+          projectRef.current === projectId &&
+          fileRef.current === fileId
+        ) {
+          revalidateCellRef.current(cellId)
+        }
       }
     })()
   }, [doFetch, rebuildFromCache, clearConfirmedShadows])
+  revalidateCellRef.current = revalidateCell
 
   // Optimistic local patch for the target row of a single cell. We mutate
   // the cached `rowsRef` entry in place (creating one if no target row yet
@@ -736,7 +861,12 @@ export function useCells(opts: UseCellsOptions): UseCellsResult {
     (cellId: string, patch: { value: string; valueHtml?: string }) => {
       // Record the shadow so a stale in-flight refetch's buffer swap can't wipe
       // this value before the projection catches up (see optimisticEditsRef).
-      optimisticEditsRef.current.set(cellId, { value: patch.value, valueHtml: patch.valueHtml })
+      // The seq stamps this write on the local-mutation clock: only a fetch
+      // whose snapshot began at-or-after it may confirm the shadow, and any
+      // fetch that began before it must keep this cell's rows at its swap.
+      const seq = ++writeSeqRef.current
+      optimisticEditsRef.current.set(cellId, { value: patch.value, valueHtml: patch.valueHtml, seq })
+      cellFreshnessRef.current.set(cellId, seq)
       const rows = rowsRef.current
       let touched = false
       for (let i = 0; i < rows.length; i++) {

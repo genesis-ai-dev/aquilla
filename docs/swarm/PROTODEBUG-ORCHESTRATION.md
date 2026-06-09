@@ -122,3 +122,43 @@ GATE: tsc 0 · sync-worker 428/428 · root vitest 1629 pass / 2 baseline · buil
 Production-readiness loop STOPPED — surgical/obvious spec-behind backlog drained. Cron 3db58d64 deleted.
 Shipped Waves 5–9: ~23 surgical/medium spec-conformance fixes, all on main+dev (@ 2ebf398), staging auto-deploying.
 Remaining backlog = large/architectural/HITL (need product input, not autonomous build): FRO-173 (audio legacy backfill — data decision), 175 (chat panel), 176 (snapshots), 177 (search-replace), 178 (macula), 179 (TN import), 180 (per-project members), 181 (AD-14 confidence — in-flight design), 183 (terminology data model), 186 (harmonization), 190 (HealthRing-on-card — gated on AD-14), 191 (download-target-bible), 192 (assignment UI), 193 (detach-from-source).
+
+---
+
+# PD4 — "highest priority issues" wave (2026-06-09, orchestrator session 6a7f0938)
+
+Base: main `ca8b068` (pd3 converged + promoted minutes earlier). Integration `swarm/pd4-integration`.
+Scope per user: highest-priority eligible issues only — NOT a full queue drain.
+
+## §0 STOP checklist (PD4)
+- [ ] FRO-233, 180, 173, 255, 258, 231 each at Fixed (verified) or honestly blocked w/ Linear note.
+- [ ] Integration green: `npx tsc -b --noEmit` + `npx vitest run`; `npm run build` before promotion.
+- [ ] auth-worker / sync-worker tsc+tests green if touched.
+- [ ] Each fix live-UI verified on the seeded dev stack (central QA slot) before Fixed.
+- [ ] Promote to main only with main checkout (codex-web-app-fro247 worktree) clean.
+- [ ] Gaps traced in docs/swarm/TRACES.md.
+
+## §EXCLUDED (PD4)
+- FRO-227, FRO-224, FRO-215 — Dispatched today by pd3 (homepage-claims verification); claims recent, below priority bar. NOT reclaimed.
+- All other Medium/Low Todos (FRO-243/214/192/191/190/181/186/183/179/178/177/176/175/221/223/246/209/193) — below the "highest priority" bar this run.
+- FRO-257, FRO-145 — archived junk.
+- PROTECTED (dirty in user's staging checkout — forbidden to all agents): auth-worker/src/routes/projects.ts, auth-worker/src/services/email.ts, auth-worker/src/types.ts, auth-worker/wrangler.toml, auth-worker/.dev.vars.example, docs/STAGING.md.
+
+## §3 PD4 registry + wave plan (single wave, file-disjoint)
+| WS | FRO | Pri | Branch | Owns (primary) | Status |
+|---|---|---|---|---|---|
+| export-fmt | 233 | High | swarm/fro-233 | src/lib/export/exporters/docx.ts(+test), ExportDialog.tsx | dispatched (reclaimed stale pd3 handoff) |
+| members-page | 180 | High | swarm/fro-180 | NEW ProjectMembersPage + App.tsx route line; NEW auth-worker route file if needed | dispatched |
+| audio-gap | 173 | High | swarm/fro-173 | investigation report docs/swarm/AUDIO-GAP-FRO173.md; importer fix only if evidence demands | dispatched |
+| settings-floor | 255 | Med | swarm/fro-255 | src/hooks/useProjectSettings.ts(+test), settings read-only affordances | dispatched |
+| share-modal | 258 | Med | swarm/fro-258 | SharePanel.tsx / MembersPanel.tsx (modal layout only) | dispatched |
+| search-popover | 231 | Med | swarm/fro-231 | editor search popover (likely EditorTable.tsx search section) | dispatched |
+
+Cross-cut rules: only members-page may touch App.tsx (one route line); only search-popover may touch EditorTable.tsx; only share-modal may touch SharePanel/MembersPanel; only export-fmt may touch ExportDialog/exporters; only settings-floor may touch useProjectSettings.
+
+## §M PD4 merge log
+- (pending)
+
+## §CLAIMS (PD4)
+- FRO-233: was already Dispatched+assigned (pd3 agent handoff comment 2026-06-09 21:39Z explicitly ended its slice → stale claim, reclaimed by PD4 finisher).
+- FRO-180/173/255/258/231: claimed Todo→Dispatched by PD4 orchestrator before spawn.

@@ -24,7 +24,7 @@
 | Editor      | Cmd+K search                                         | _gap — Plan 2_                                                |        |
 | Editor      | Virtualization scroll integrity                      | _gap — Plan 2_                                                |        |
 | Rules       | Enable built-in rule, see violation in editor        | `e2e/specs/rules/violation.smoke.spec.ts`                     |   ✅   |
-| Rules       | Define custom rule                                   | _gap — Plan 2_                                                |        |
+| Rules       | Define custom rule                                   | `e2e/specs/rules/create-rule.smoke.spec.ts`                   |   ✅   |
 | Rules       | Auto-correct a violation                             | _gap — Plan 2_                                                |        |
 | Validation  | Validate a cell, indicator turns emerald             | `e2e/specs/validation/validate.smoke.spec.ts`                 |   ✅   |
 | Validation  | History persists across navigation                   | `e2e/specs/validation/validation-persists-navigation.smoke.spec.ts` | ✅ |
@@ -33,8 +33,8 @@
 | Collab      | Concurrent cell edit propagates alice → bob          | `e2e/specs/collab/concurrent-edit.smoke.spec.ts` (API project bootstrap)   | ✅ |
 | Collab      | Conflict resolution on same cell                     | _gap — Plan 2_                                                |        |
 | Collab      | Member presence indicators                           | _gap — Plan 2_                                                |        |
-| Comments    | Add / edit / resolve comment                         | _gap — Plan 2_                                                |        |
-| Sharing     | Generate invite link / join project via link         | _gap — Plan 2_                                                |        |
+| Comments    | Add / edit / resolve comment                         | `e2e/specs/editor/comments.smoke.spec.ts` + `comment-resolve.smoke.spec.ts` + `comment-reply.smoke.spec.ts` | ✅ |
+| Sharing     | Generate invite link / join project via link         | `e2e/specs/projects/share-invite-link.smoke.spec.ts` + `join-page.smoke.spec.ts` | ✅ |
 | Audio/Video | Import audio file                                    | _gap — Plan 2_                                                |        |
 | Audio/Video | Subtitles flow                                       | _gap — Plan 2_                                                |        |
 | Settings    | Settings sync between two browsers                   | _gap — Plan 2_                                                |        |

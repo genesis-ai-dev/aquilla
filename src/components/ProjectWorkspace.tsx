@@ -784,6 +784,7 @@ export function ProjectWorkspace() {
     comments: allProjectComments,
     addComment: addCommentEvent,
     resolveThread: resolveCommentThread,
+    refresh: refreshComments,
   } = useComments({
     projectId: project?.id ?? null,
     getToken: getTokenForFile,
@@ -1461,6 +1462,15 @@ export function ProjectWorkspace() {
               // optimistic rename overlay reconciles against server truth.
               if (!msg.cell && msg.kind?.startsWith("file.") && msg.project === pid) {
                 refresh()
+                return
+              }
+              // FRO-228: comment.* events are non-chain-mutating and carry no
+              // cell in the WS frame. Refresh the comments projection so the
+              // server-persisted comment surfaces after the outbox flushes —
+              // especially important for remote collaborators who never had the
+              // optimistic state.
+              if (msg.kind?.startsWith("comment.") && msg.project === pid) {
+                void refreshComments()
                 return
               }
               if (!msg.cell || msg.project !== pid) return

@@ -554,4 +554,58 @@ describe("flushOutboxBatch", () => {
 
     expect(onStaleSource).toHaveBeenCalledWith([{ id: "e1", currentSourceEventId: "src-evt-999" }])
   })
+
+  // ── FRO-228: comment.* events without fileId must not be dropped ─────────
+
+  it("FRO-228: comment.* events with no fileId are POSTed (not dropped) using project sentinel", async () => {
+    // Simulates a comment.resolve on a project-scoped comment that has no fileId.
+    const commentEvent: CqrsRawEvent = {
+      id: "cmt-resolve-1",
+      schemaVersion: CQRS_SCHEMA_VERSION,
+      kind: "comment.resolve" as any,
+      projectId: "proj",
+      fileId: undefined,
+      author: "alice",
+      payload: { commentId: "cmt-123", resolved: true },
+      clientTs: 1,
+    }
+    await enqueueOutboxEvent(commentEvent)
+
+    let capturedFileId: string | undefined
+    const getToken = async (_projectId: string, fileId: string): Promise<TokenMintResult> => {
+      capturedFileId = fileId
+      return { token: "tok", status: 200 }
+    }
+
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse({ accepted: [{ id: "cmt-resolve-1" }], rejected: [] }),
+    )
+    const result = await flushOutboxBatch({
+      getTokenForFile: getToken,
+      fetchImpl: fetchMock as unknown as typeof fetch,
+    })
+
+    // Event must be POSTed, not dropped.
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(result).toMatchObject({ posted: 1, accepted: 1, networkError: false })
+    // Token was minted with the sentinel fileId, not dropped.
+    expect(capturedFileId).toBe("__project__")
+    expect(await outboxPendingCount()).toBe(0)
+  })
+
+  it("FRO-228: non-comment events without fileId are still dropped (existing behaviour)", async () => {
+    // target.cell.commit with no fileId — this is a programmer error and should still be dropped.
+    const badCellEvent = makeEvent("bad-cell", undefined)
+    await enqueueOutboxEvent(badCellEvent)
+
+    const fetchMock = vi.fn()
+    const result = await flushOutboxBatch({
+      getTokenForFile: TOKEN_FN,
+      fetchImpl: fetchMock as unknown as typeof fetch,
+    })
+
+    expect(fetchMock).not.toHaveBeenCalled()
+    expect(result).toMatchObject({ posted: 0, accepted: 0 })
+    expect(await outboxPendingCount()).toBe(0)
+  })
 })

@@ -312,9 +312,9 @@ export function ParallelPassagesPanel(props: ParallelPassagesPanelProps) {
           </DialogTitle>
         </DialogHeader>
 
-        {/* Controls row */}
+        {/* Controls row — pr-10 reserves clearance for the absolute-positioned X close button (size-7 at right-2) */}
         <div
-          className="flex items-center justify-between gap-3 px-4 pt-4 pb-3 shrink-0"
+          className="flex flex-wrap items-center gap-3 pl-4 pr-10 pt-4 pb-3 shrink-0"
           aria-label="Panel controls"
         >
           <PillToggle<ParallelPanelScope>

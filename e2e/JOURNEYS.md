@@ -21,7 +21,7 @@
 | Orgs        | Remove member, change role                           | `e2e/specs/orgs/remove-member-dialog.smoke.spec.ts` + `projects/share-panel-role-change.smoke.spec.ts` | ✅ |
 | Orgs        | Send & accept invite                                 | `e2e/specs/orgs/invite-to-projects.smoke.spec.ts` + `pending-invite-revoke.smoke.spec.ts` | ✅ |
 | Editor      | Import markdown, edit cell, persists across reload   | `e2e/specs/editor/import-and-edit.smoke.spec.ts`              |   ✅   |
-| Editor      | Cmd+K search                                         | _gap — Plan 2_                                                |        |
+| Editor      | Cmd+K search                                         | `e2e/specs/editor/search.smoke.spec.ts` (toolbar) + `search-keyboard-shortcut.smoke.spec.ts` (Ctrl+K) | ✅ |
 | Editor      | Virtualization scroll integrity                      | _gap — Plan 2_                                                |        |
 | Rules       | Enable built-in rule, see violation in editor        | `e2e/specs/rules/violation.smoke.spec.ts`                     |   ✅   |
 | Rules       | Define custom rule                                   | `e2e/specs/rules/create-rule.smoke.spec.ts`                   |   ✅   |

@@ -248,7 +248,17 @@ export function VoiceLibraryPanel({
                 <span className="min-w-0 flex-1">
                   <span className="flex items-center gap-1">
                     <span className="truncate">{voice.name}</span>
-                    {isNarrator && <Star className="h-3 w-3 shrink-0 text-primary" aria-label="Narrator (default)" />}
+                    {isNarrator && (
+                      // FRO-239: wrap in a span so the tooltip and aria-label
+                      // are exposed without needing to pass title to the SVG.
+                      <span
+                        title="Narrator (default) — lines without an explicit speaker assignment use this voice. Tagging lines by character lets you export each speaker's audio separately, e.g. all of one character's lines for voice-over work."
+                        aria-label="Narrator (default voice)"
+                        className="inline-flex shrink-0 items-center"
+                      >
+                        <Star className="h-3 w-3 text-primary" aria-hidden />
+                      </span>
+                    )}
                     {isClone && (
                       <span className="inline-flex items-center gap-0.5 rounded-full bg-muted px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-wide text-muted-foreground dark:bg-muted dark:text-muted-foreground">
                         <Sparkles className="h-2 w-2" /> Cloned

@@ -128,6 +128,18 @@ const ExportDialog = lazy(() =>
   import("./ExportDialog").then((mod) => ({ default: mod.ExportDialog })),
 )
 
+// FRO-254: In-project views rendered inside the editor shell. Lazy-loaded so
+// the heavy workspace chunk doesn't pull them in for every route.
+const CommentsPageContent = lazy(() =>
+  import("./CommentsPage").then((mod) => ({ default: mod.CommentsPage })),
+)
+const LivingMemoryPageContent = lazy(() =>
+  import("./LivingMemoryPage").then((mod) => ({ default: mod.LivingMemoryPage })),
+)
+const TerminologyPageContent = lazy(() =>
+  import("./TerminologyPage").then((mod) => ({ default: mod.TerminologyPage })),
+)
+
 export function ProjectWorkspace() {
   const { id: projectId, fileId: routeFileId } = useParams<{ id: string; fileId?: string }>()
   const navigate = useNavigate()
@@ -268,12 +280,16 @@ export function ProjectWorkspace() {
   useEffect(() => {
     if (!project || !projectId) return
 
-    // The /rules surface deliberately has no file in the URL — don't treat it
-    // as "no file selected" and bounce back to the editor, or the Rules surface
-    // becomes unreachable. (The header Editor/Rules toggle was removed; the
-    // bottom-left Rules nav is the only entry point, so this redirect must not
-    // fight it.)
-    if (location.pathname.endsWith("/rules")) return
+    // The in-project overlay surfaces (/rules, /comments, /memory, /terminology)
+    // deliberately carry no file in the URL — don't treat that as "no file
+    // selected" and bounce back to the editor, or these surfaces become
+    // unreachable. (FRO-194 added /rules; FRO-254 adds the others.)
+    if (
+      location.pathname.endsWith("/rules") ||
+      location.pathname.endsWith("/comments") ||
+      location.pathname.endsWith("/memory") ||
+      location.pathname.endsWith("/terminology")
+    ) return
 
     // A file is already in the URL: leave it unless the project genuinely
     // doesn't have it (and it isn't a still-pending optimistic import).
@@ -328,11 +344,15 @@ export function ProjectWorkspace() {
   const [drawerRuleId, setDrawerRuleId] = useState<string | null>(null)
   const [searchParams] = useSearchParams()
 
-  // Center surface — "editor" or "rules". Derived from the URL path so
-  // /project/:id/rules deep-links work and the shell never unmounts. The
-  // bottom-left sidebar Rules nav item drives navigation here (the header
-  // toggle was removed — see FRO-194 follow-up).
-  const centerSurface: "editor" | "rules" = location.pathname.endsWith("/rules") ? "rules" : "editor"
+  // Center surface — derived from the URL path so deep-links work and the
+  // shell (sidebar + top bar + bottom status bar) never unmounts.
+  // FRO-194 added "rules"; FRO-254 adds "comments", "memory", "terminology".
+  const centerSurface: "editor" | "rules" | "comments" | "memory" | "terminology" =
+    location.pathname.endsWith("/rules") ? "rules" :
+    location.pathname.endsWith("/comments") ? "comments" :
+    location.pathname.endsWith("/memory") ? "memory" :
+    location.pathname.endsWith("/terminology") ? "terminology" :
+    "editor"
 
   useEffect(() => {
     const open = searchParams.get("openRule")
@@ -2291,6 +2311,29 @@ export function ProjectWorkspace() {
             canRequestPromotion={canRequestPromotion}
             requestPromotion={requestPromotion}
           />
+        ) : centerSurface === "comments" ? (
+          // FRO-254: Comments page inside the shell — back button in the page
+          // navigates to /project/:id, which the restore-location effect turns
+          // into the user's last open file (including scroll position).
+          <div className="h-full overflow-y-auto">
+            <Suspense fallback={<div className="flex h-full items-center justify-center text-sm text-muted-foreground">Loading comments…</div>}>
+              <CommentsPageContent />
+            </Suspense>
+          </div>
+        ) : centerSurface === "memory" ? (
+          // FRO-254: Living Memory page inside the shell.
+          <div className="h-full overflow-y-auto">
+            <Suspense fallback={<div className="flex h-full items-center justify-center text-sm text-muted-foreground">Loading living memory…</div>}>
+              <LivingMemoryPageContent />
+            </Suspense>
+          </div>
+        ) : centerSurface === "terminology" ? (
+          // FRO-254: Terminology page inside the shell.
+          <div className="h-full overflow-y-auto">
+            <Suspense fallback={<div className="flex h-full items-center justify-center text-sm text-muted-foreground">Loading terminology…</div>}>
+              <TerminologyPageContent />
+            </Suspense>
+          </div>
         ) : cellAreaState.kind === "ready" ? (
           <EditorTable
             ref={editorRef} project={project} cells={cellsWithBacktranslation}
@@ -2662,6 +2705,20 @@ function ScrollToGroupHandler({ cells, editorRef }: ScrollToGroupHandlerProps) {
       idx = cells.findIndex((c) => c.section === sectionLabel)
       // Fallback: match by group
       if (idx < 0) idx = cells.findIndex((c) => (c.group ?? "Ungrouped") === sectionLabel)
+      // FRO-250: match by globalReferences prefix — the sidebar's chapter labels
+      // are derived as "BOOK CH" from the first globalReference (e.g. "GEN 1"
+      // from "GEN 1:1"), so we match the first cell whose first ref starts with
+      // "LABEL:" or equals LABEL exactly. This lets sidebar chapter clicks scroll
+      // to the right verse even when cells have no explicit `section` field.
+      if (idx < 0) {
+        idx = cells.findIndex((c) => {
+          const ref = c.globalReferences?.find((r) => r && r.trim().length > 0)
+          if (!ref) return false
+          const colonIdx = ref.indexOf(":")
+          const prefix = (colonIdx >= 0 ? ref.slice(0, colonIdx) : ref).trim()
+          return prefix === sectionLabel
+        })
+      }
     } else if (groupId) {
       idx = cells.findIndex((c) => (c.group ?? "Ungrouped") === groupId)
     }

@@ -156,8 +156,15 @@ orgSettings.on(
     // to the admin rather than silently coerced to the default.
     const rawExportFloor = body.settings.exportMinRole
     if (rawExportFloor !== undefined) {
-      // exportMinRole writes require OWNER (700) — stricter than the general gate.
-      if (role < EXPORT_FLOOR_WRITE_MIN_ROLE) {
+      // Gate on CHANGE, not presence: the client patch() is a whole-object
+      // read-modify-write, so every maintainer settings write echoes the
+      // existing exportMinRole back. An unchanged echo must pass, or setting
+      // a floor locks maintainers out of ALL org-settings writes.
+      const existing = await loadSettings(c.env, orgId)
+      const currentFloor = (existing.settings as Record<string, unknown>).exportMinRole
+      const floorChanged = rawExportFloor !== currentFloor
+      // exportMinRole CHANGES require OWNER (700) — stricter than the general gate.
+      if (floorChanged && role < EXPORT_FLOOR_WRITE_MIN_ROLE) {
         return c.json(
           {
             error: `exportMinRole requires org role >= owner (${EXPORT_FLOOR_WRITE_MIN_ROLE}); only org owners can change the export permission policy`,
@@ -165,7 +172,7 @@ orgSettings.on(
           403,
         )
       }
-      if (typeof rawExportFloor !== "number" || !Number.isFinite(rawExportFloor) || !VALID_ROLE_LEVELS.has(rawExportFloor as typeof ROLE[keyof typeof ROLE])) {
+      if (floorChanged && (typeof rawExportFloor !== "number" || !Number.isFinite(rawExportFloor) || !VALID_ROLE_LEVELS.has(rawExportFloor as typeof ROLE[keyof typeof ROLE]))) {
         return c.json(
           {
             error: `exportMinRole must be one of the role ladder values: ${[...VALID_ROLE_LEVELS].sort((a, b) => a - b).join(", ")} (viewer=100, contributor=400, project_lead=500, maintainer=600, owner=700)`,
@@ -314,6 +321,10 @@ orgSettings.post(
     const newSettings = {
       ...current.settings,
       promotionRequests: [...existingRequests, newRequest],
+    }
+    // FRO-253 invariant: this blob write must never alter the export floor.
+    if ((newSettings as Record<string, unknown>).exportMinRole !== (current.settings as Record<string, unknown>).exportMinRole) {
+      return c.json({ error: "internal: exportMinRole must not change via promotion requests" }, 500)
     }
     const newSettingsJson = JSON.stringify(newSettings)
     const newVersion = current.version + 1

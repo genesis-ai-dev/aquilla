@@ -172,6 +172,7 @@
 | Editor      | Search scope toggle (file / project / passages)       | `e2e/specs/editor/search-scope-toggle.smoke.spec.ts`          |   ✅   |
 | Editor      | Search mode passages toggle                           | `e2e/specs/editor/search-mode-passages-toggle.smoke.spec.ts`  |   ✅   |
 | Editor      | Ctrl+Shift+R opens search+replace panel               | `e2e/specs/editor/search-replace-keyboard-shortcut.smoke.spec.ts` |   ✅   |
+| Editor      | Search & replace toolbar button opens parallel panel  | `e2e/specs/editor/search-replace-toolbar-button.smoke.spec.ts` |   ✅   |
 | Editor      | Ctrl+Shift+F opens search in project scope            | `e2e/specs/editor/search-shift-f-project-scope.smoke.spec.ts` |   ✅   |
 | Editor      | Outbox inspector popover shows pending ops            | `e2e/specs/editor/outbox-inspector-popover.smoke.spec.ts`     |   ✅   |
 | Editor      | Selection bar bulk validate + unvalidate              | `e2e/specs/editor/selection-bar.smoke.spec.ts` + `selection-bar-bulk-validate.smoke.spec.ts` + `selection-bar-unvalidate.smoke.spec.ts` + `selection-bar-clear.smoke.spec.ts` | ✅ |

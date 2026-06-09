@@ -28,6 +28,7 @@
 //   GET  /api/v2/projects/:projectId/members
 //   POST /api/v2/projects/:projectId/members
 //   DELETE /api/v2/projects/:projectId/members/:userId
+//   POST /api/v2/projects/:projectId/members/:userId/revoke-all
 //   DELETE /api/v2/projects/:projectId/files/:fileId
 //   POST /api/v2/projects/:projectId/invites
 //   GET  /api/v2/projects/invite-preview/:token
@@ -58,6 +59,7 @@ import type { Env, Variables } from "./types"
 import authRoutes from "./routes/auth"
 import syncTokenRoutes from "./routes/sync-token"
 import projectsRoutes from "./routes/projects"
+import projectMembersRoutes from "./routes/project-members"
 import projectSettingsRoutes from "./routes/project-settings"
 import orgSettingsRoutes from "./routes/org-settings"
 import sourceLinkingRoutes from "./routes/source-linking"
@@ -158,6 +160,8 @@ app.route("/api/v2/orgs", orgsRoutes)
 app.route("/api/v2/admin", adminRoutes)
 // Project-settings + source-linking surfaces are mounted as siblings to
 // the main projects router so they live in their own files without colliding.
+// FRO-180: project-members revoke-all endpoint (new file, doesn't touch projects.ts).
+app.route("/api/v2/projects", projectMembersRoutes)
 app.route("/api/v2/projects", projectSettingsRoutes)
 app.route("/api/v2/projects", sourceLinkingRoutes)
 app.route("/api/v2/projects", termbaseSubscriptionRoutes)

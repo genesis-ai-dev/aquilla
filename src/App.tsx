@@ -160,6 +160,8 @@ function AppRoutes() {
         <Route path="/project/:id/terminology" element={<ProjectWorkspace />} />
         <Route path="/project/:id/comments" element={<ProjectWorkspace />} />
         <Route path="/project/:id/memory" element={<ProjectWorkspace />} />
+        {/* FRO-180: per-project members management inside the ProjectWorkspace shell. */}
+        <Route path="/project/:id/members" element={<ProjectWorkspace />} />
 
         {/* Lazy — org admin pages */}
         <Route path="/settings" element={<Settings />} />

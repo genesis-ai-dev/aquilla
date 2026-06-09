@@ -13,6 +13,8 @@ import { renderHook, waitFor, act } from "@testing-library/react"
 import type { CellRow } from "@/lib/sync/cells-read-types"
 
 const fetchAllMock = vi.fn<(projectId: string, fileId: string, jwt: string, side?: "source" | "target") => Promise<CellRow[]>>()
+// Seam for the targeted single-cell refetch (revalidateCell → fetchCellsByIds).
+const fetchByIdsMock = vi.fn<(projectId: string, fileId: string, cellIds: string[], jwt: string) => Promise<CellRow[]>>()
 // Optional override: a queue of pages to deliver one-at-a-time. When non-empty,
 // the streamFileCells mock pulls from here instead of calling fetchAllMock.
 const pagesMock: { queue: CellRow[][]; pendingResolvers: Array<() => void> } = {
@@ -63,7 +65,8 @@ vi.mock("@/lib/sync/cells-read", () => ({
   },
   fetchAllFileCells: (...args: unknown[]) =>
     fetchAllMock(...(args as Parameters<typeof fetchAllMock>)),
-  fetchCellsByIds: async () => [],
+  fetchCellsByIds: (...args: unknown[]) =>
+    fetchByIdsMock(...(args as Parameters<typeof fetchByIdsMock>)),
 }))
 
 // Stub the IDB cells-cache. The hook reads/writes it on hard fetches; the
@@ -101,6 +104,8 @@ const getToken = async () => "fake-jwt"
 
 beforeEach(() => {
   fetchAllMock.mockReset()
+  fetchByIdsMock.mockReset()
+  fetchByIdsMock.mockResolvedValue([])
   pagesMock.queue = []
   pagesMock.pendingResolvers = []
   sideCache = null
@@ -416,6 +421,278 @@ describe("useCells (Phase 2a, D1-backed)", () => {
     await act(async () => { release(); await gate })
     await waitFor(() => expect(result.current.isLoading).toBe(false))
     expect(result.current.cells[0].translated).toBe("predicted")
+  })
+
+  it("keeps a committed value when a targeted refetch confirms it while a stale full refetch is still in flight (FRO-247)", async () => {
+    // The client-demo vanish. Timeline:
+    //   1. A full soft refetch is in flight — its target side snapshotted
+    //      BEFORE the commit (stale-empty).
+    //   2. The user commits → optimistic shadow set, value visible.
+    //   3. The post-flush targeted revalidateCell returns the FRESH row →
+    //      the shadow is confirmed and cleared (it did its job).
+    //   4. The stale full refetch lands and swaps its buffer in. With the
+    //      shadow gone and the outbox overlay flushed, nothing re-applies the
+    //      value → the cell blanks until a manual page refresh.
+    // The committed value must survive step 4.
+    fetchAllMock.mockResolvedValueOnce([
+      makeRow({ cellId: "c1", side: "source", value: "src" }),
+      makeRow({ cellId: "c1", side: "target", value: "" }),
+    ])
+    const { result } = renderHook(() =>
+      useCells({ projectId: "p", fileId: "f", getToken, enabled: true }),
+    )
+    await waitFor(() => expect(result.current.cells).toHaveLength(1))
+
+    // 1. Stale full refetch in flight, gated open.
+    let release!: () => void
+    const gate = new Promise<void>((r) => { release = r })
+    fetchAllMock.mockImplementationOnce(async () => {
+      await gate
+      return [
+        makeRow({ cellId: "c1", side: "source", value: "src" }),
+        makeRow({ cellId: "c1", side: "target", value: "" }),
+      ]
+    })
+    act(() => { result.current.revalidate() })
+    // Let the fetch reach its snapshot point (token resolves) pre-commit.
+    await act(async () => {})
+
+    // 2. Commit.
+    act(() => { result.current.applyOptimisticTargetEdit("c1", { value: "committed" }) })
+    expect(result.current.cells[0].translated).toBe("committed")
+
+    // 3. Targeted refetch (post-flush) returns the fresh, authoritative row.
+    fetchByIdsMock.mockResolvedValueOnce([
+      makeRow({ cellId: "c1", side: "source", value: "src" }),
+      makeRow({ cellId: "c1", side: "target", value: "committed", validated: true }),
+    ])
+    act(() => { result.current.revalidateCell("c1") })
+    await waitFor(() => expect(result.current.cells[0].status).toBe("validated"))
+
+    // 4. The stale full refetch lands. It must not clobber the committed row.
+    await act(async () => { release(); await gate })
+    await waitFor(() => expect(result.current.isLoading).toBe(false))
+    expect(result.current.cells[0].translated).toBe("committed")
+    expect(result.current.cells[0].status).toBe("validated")
+  })
+
+  it("keeps a targeted write-back (validated flag) when a stale full refetch lands after it (FRO-247)", async () => {
+    // Validate flow: no value change → no optimistic shadow exists at all.
+    // The targeted refetch brings back validated=true; a full refetch whose
+    // snapshot predates the validation must not revert it.
+    fetchAllMock.mockResolvedValueOnce([
+      makeRow({ cellId: "c1", side: "source", value: "src" }),
+      makeRow({ cellId: "c1", side: "target", value: "v", validated: false }),
+    ])
+    const { result } = renderHook(() =>
+      useCells({ projectId: "p", fileId: "f", getToken, enabled: true }),
+    )
+    await waitFor(() => expect(result.current.cells).toHaveLength(1))
+    expect(result.current.cells[0].status).toBe("unvalidated")
+
+    let release!: () => void
+    const gate = new Promise<void>((r) => { release = r })
+    fetchAllMock.mockImplementationOnce(async () => {
+      await gate
+      return [
+        makeRow({ cellId: "c1", side: "source", value: "src" }),
+        makeRow({ cellId: "c1", side: "target", value: "v", validated: false }),
+      ]
+    })
+    act(() => { result.current.revalidate() })
+    await act(async () => {})
+
+    fetchByIdsMock.mockResolvedValueOnce([
+      makeRow({ cellId: "c1", side: "source", value: "src" }),
+      makeRow({ cellId: "c1", side: "target", value: "v", validated: true }),
+    ])
+    act(() => { result.current.revalidateCell("c1") })
+    await waitFor(() => expect(result.current.cells[0].status).toBe("validated"))
+
+    await act(async () => { release(); await gate })
+    await waitFor(() => expect(result.current.isLoading).toBe(false))
+    expect(result.current.cells[0].status).toBe("validated")
+  })
+
+  it("keeps a cell edited mid-flight even when the stale refetch's snapshot lacks its rows entirely (FRO-247)", async () => {
+    // 'Whole row disappears': the stale snapshot predates the cell (or its
+    // rows fail to come back), so the buffer swap doesn't just blank the
+    // value — it removes the row, and the shadow can't resurrect a cell that
+    // has no rows. Rows written after the fetch started must be retained.
+    fetchAllMock.mockResolvedValueOnce([
+      makeRow({ cellId: "c1", side: "source", value: "S1" }),
+      makeRow({ cellId: "c2", side: "source", value: "S2" }),
+    ])
+    const { result } = renderHook(() =>
+      useCells({ projectId: "p", fileId: "f", getToken, enabled: true }),
+    )
+    await waitFor(() => expect(result.current.cells).toHaveLength(2))
+
+    let release!: () => void
+    const gate = new Promise<void>((r) => { release = r })
+    fetchAllMock.mockImplementationOnce(async () => {
+      await gate
+      // Stale snapshot is missing c2 altogether.
+      return [makeRow({ cellId: "c1", side: "source", value: "S1" })]
+    })
+    act(() => { result.current.revalidate() })
+    await act(async () => {})
+
+    act(() => { result.current.applyOptimisticTargetEdit("c2", { value: "nuevo" }) })
+    expect(result.current.cells.find((c) => c.id === "c2")?.translated).toBe("nuevo")
+
+    await act(async () => { release(); await gate })
+    await waitFor(() => expect(result.current.isLoading).toBe(false))
+    const c2 = result.current.cells.find((c) => c.id === "c2")
+    expect(c2).toBeDefined()
+    expect(c2?.translated).toBe("nuevo")
+  })
+
+  it("revalidateCell replaces the cell's rows in place — the row must not move to the bottom of the file (FRO-247)", async () => {
+    // The targeted refetch used to filter-out + append the cell's rows, which
+    // re-ordered the cell to the file's tail (cells render in source-row
+    // order). Routing every local commit through revalidateCell (ba019e8)
+    // made the just-edited row teleport out of the viewport on every commit.
+    fetchAllMock.mockResolvedValueOnce([
+      makeRow({ cellId: "a", side: "source", value: "A" }),
+      makeRow({ cellId: "b", side: "source", value: "B" }),
+      makeRow({ cellId: "b", side: "target", value: "B-old" }),
+      makeRow({ cellId: "c", side: "source", value: "C" }),
+    ])
+    const { result } = renderHook(() =>
+      useCells({ projectId: "p", fileId: "f", getToken, enabled: true }),
+    )
+    await waitFor(() => expect(result.current.cells).toHaveLength(3))
+    expect(result.current.cells.map((c) => c.id)).toEqual(["a", "b", "c"])
+
+    fetchByIdsMock.mockResolvedValueOnce([
+      makeRow({ cellId: "b", side: "source", value: "B" }),
+      makeRow({ cellId: "b", side: "target", value: "B-new" }),
+    ])
+    act(() => { result.current.revalidateCell("b") })
+    await waitFor(() => expect(result.current.cells.find((c) => c.id === "b")?.translated).toBe("B-new"))
+    expect(result.current.cells.map((c) => c.id)).toEqual(["a", "b", "c"])
+  })
+
+  it("discards a targeted response that predates a mid-flight local edit, then applies the retry (FRO-247)", async () => {
+    // A targeted fetch is in flight when a local edit lands. Its response
+    // predates the edit (freshness floor > fetch startSeq) and must be
+    // discarded — then the bounded retry refetches against the newer state
+    // and the fresh row takes over.
+    fetchAllMock.mockResolvedValueOnce([
+      makeRow({ cellId: "c1", side: "source", value: "src" }),
+      makeRow({ cellId: "c1", side: "target", value: "old" }),
+    ])
+    const { result } = renderHook(() =>
+      useCells({ projectId: "p", fileId: "f", getToken, enabled: true }),
+    )
+    await waitFor(() => expect(result.current.cells).toHaveLength(1))
+
+    let release!: () => void
+    const gate = new Promise<void>((r) => { release = r })
+    // First targeted response: stale (snapshotted before the edit).
+    fetchByIdsMock.mockImplementationOnce(async () => {
+      await gate
+      return [
+        makeRow({ cellId: "c1", side: "source", value: "src" }),
+        makeRow({ cellId: "c1", side: "target", value: "old" }),
+      ]
+    })
+    // Retry response: the projection has caught up.
+    fetchByIdsMock.mockResolvedValueOnce([
+      makeRow({ cellId: "c1", side: "source", value: "src" }),
+      makeRow({ cellId: "c1", side: "target", value: "v2", validated: true }),
+    ])
+    act(() => { result.current.revalidateCell("c1") })
+    // Let the first fetch start (captures its startSeq) before the edit.
+    await act(async () => {})
+    act(() => { result.current.applyOptimisticTargetEdit("c1", { value: "v2" }) })
+    expect(result.current.cells[0].translated).toBe("v2")
+
+    await act(async () => { release(); await gate })
+    // The stale response is discarded; the retry applies the fresh row.
+    await waitFor(() => expect(result.current.cells[0].status).toBe("validated"))
+    expect(result.current.cells[0].translated).toBe("v2")
+    expect(fetchByIdsMock).toHaveBeenCalledTimes(2)
+  })
+
+  it("keeps genuinely empty cells empty and lets an optimistic clear confirm — no stuck shadows (FRO-247)", async () => {
+    fetchAllMock.mockResolvedValueOnce([
+      makeRow({ cellId: "c1", side: "source", value: "S1" }),
+      makeRow({ cellId: "c1", side: "target", value: "x" }),
+      makeRow({ cellId: "c2", side: "source", value: "S2" }),
+    ])
+    const { result } = renderHook(() =>
+      useCells({ projectId: "p", fileId: "f", getToken, enabled: true }),
+    )
+    await waitFor(() => expect(result.current.cells).toHaveLength(2))
+    expect(result.current.cells[1].translated).toBe("")
+
+    // User clears c1's text — an optimistic edit to the empty string.
+    act(() => { result.current.applyOptimisticTargetEdit("c1", { value: "" }) })
+    expect(result.current.cells[0].translated).toBe("")
+    expect(result.current.cells[0].status).toBe("empty")
+
+    // The projection catches up: c1's target is now genuinely empty. The
+    // shadow must confirm-and-clear (no stuck value), and untouched c2
+    // stays empty.
+    fetchAllMock.mockResolvedValueOnce([
+      makeRow({ cellId: "c1", side: "source", value: "S1" }),
+      makeRow({ cellId: "c1", side: "target", value: "" }),
+      makeRow({ cellId: "c2", side: "source", value: "S2" }),
+    ])
+    act(() => { result.current.revalidate() })
+    await waitFor(() => expect(result.current.isLoading).toBe(false))
+    expect(result.current.cells[0].translated).toBe("")
+    expect(result.current.cells[1].translated).toBe("")
+
+    // Prove the shadow is gone (not stuck at ""): a later server value for
+    // c1 must drive the cell again.
+    fetchAllMock.mockResolvedValueOnce([
+      makeRow({ cellId: "c1", side: "source", value: "S1" }),
+      makeRow({ cellId: "c1", side: "target", value: "remote" }),
+      makeRow({ cellId: "c2", side: "source", value: "S2" }),
+    ])
+    act(() => { result.current.revalidate() })
+    await waitFor(() => expect(result.current.cells[0].translated).toBe("remote"))
+  })
+
+  it("rapid successive commits: a refetch reflecting only the first commit neither clobbers nor confirms the second (FRO-247)", async () => {
+    fetchAllMock.mockResolvedValueOnce([
+      makeRow({ cellId: "c1", side: "source", value: "src" }),
+      makeRow({ cellId: "c1", side: "target", value: "" }),
+    ])
+    const { result } = renderHook(() =>
+      useCells({ projectId: "p", fileId: "f", getToken, enabled: true }),
+    )
+    await waitFor(() => expect(result.current.cells).toHaveLength(1))
+
+    // Two commits back-to-back; the shadow tracks the latest (v2).
+    act(() => { result.current.applyOptimisticTargetEdit("c1", { value: "v1" }) })
+    act(() => { result.current.applyOptimisticTargetEdit("c1", { value: "v2" }) })
+    expect(result.current.cells[0].translated).toBe("v2")
+
+    // Server has only applied commit 1: the row write-back lands (eventId
+    // advances) but the displayed value must stay v2 — a v1 row can't
+    // confirm a v2 shadow.
+    fetchByIdsMock.mockResolvedValueOnce([
+      makeRow({ cellId: "c1", side: "source", value: "src" }),
+      makeRow({ cellId: "c1", side: "target", value: "v1", eventId: "ev-1" }),
+    ])
+    act(() => { result.current.revalidateCell("c1") })
+    await waitFor(() => expect(result.current.cells[0].targetEventId).toBe("ev-1"))
+    expect(result.current.cells[0].translated).toBe("v2")
+
+    // Commit 2 projects: the shadow confirms and the authoritative row
+    // (validated) drives the cell.
+    fetchByIdsMock.mockResolvedValueOnce([
+      makeRow({ cellId: "c1", side: "source", value: "src" }),
+      makeRow({ cellId: "c1", side: "target", value: "v2", eventId: "ev-2", validated: true }),
+    ])
+    act(() => { result.current.revalidateCell("c1") })
+    await waitFor(() => expect(result.current.cells[0].status).toBe("validated"))
+    expect(result.current.cells[0].translated).toBe("v2")
+    expect(result.current.cells[0].targetEventId).toBe("ev-2")
   })
 
   it("lets a refetch that confirms the optimistic value take over (no permanent shadow)", async () => {

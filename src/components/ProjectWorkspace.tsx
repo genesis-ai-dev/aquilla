@@ -1914,7 +1914,10 @@ export function ProjectWorkspace() {
     )
   }
 
-  async function handleImported(refs: FileReference[]) {
+  async function handleImported(
+    refs: FileReference[],
+    inferredLanguages?: { sourceLanguage?: string; targetLanguage?: string },
+  ) {
     if (!project) return
     const localProject = await getProject(project.id).catch(() => undefined)
     const baseProject = localProject ?? project
@@ -1933,6 +1936,28 @@ export function ProjectWorkspace() {
       syncRole: project.syncRole ?? baseProject.syncRole,
       files: nextFiles,
     })
+    // FRO-249: seed source/target language from import metadata when the
+    // project's direction was unset. Only fills in EMPTY slots so it never
+    // overwrites a language the user already configured intentionally.
+    // Distinct source/target is the key invariant — skip if both would end
+    // up as the same value (that's the broken state we're fixing).
+    if (inferredLanguages) {
+      const currentSource = project.sourceLanguage?.trim() || ""
+      const currentTarget = project.targetLanguage?.trim() || ""
+      const newSource = currentSource || inferredLanguages.sourceLanguage?.trim() || ""
+      const newTarget = currentTarget || inferredLanguages.targetLanguage?.trim() || ""
+      // Only patch when at least one field changes AND result is distinct.
+      if ((newSource !== currentSource || newTarget !== currentTarget) && newSource !== newTarget) {
+        const patch: Record<string, string> = {}
+        if (newSource !== currentSource && newSource) patch.sourceLanguage = newSource
+        if (newTarget !== currentTarget && newTarget) patch.targetLanguage = newTarget
+        if (Object.keys(patch).length > 0) {
+          void patchSettings(patch).catch((err) => {
+            console.warn("[FRO-249] failed to seed language settings after import:", err)
+          })
+        }
+      }
+    }
     optimisticFileIdsRef.current = new Set([
       ...optimisticFileIdsRef.current,
       ...refs.map((ref) => ref.id),

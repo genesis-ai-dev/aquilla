@@ -2748,6 +2748,20 @@ function ScrollToGroupHandler({ cells, editorRef }: ScrollToGroupHandlerProps) {
       idx = cells.findIndex((c) => c.section === sectionLabel)
       // Fallback: match by group
       if (idx < 0) idx = cells.findIndex((c) => (c.group ?? "Ungrouped") === sectionLabel)
+      // FRO-250: match by globalReferences prefix — the sidebar's chapter labels
+      // are derived as "BOOK CH" from the first globalReference (e.g. "GEN 1"
+      // from "GEN 1:1"), so we match the first cell whose first ref starts with
+      // "LABEL:" or equals LABEL exactly. This lets sidebar chapter clicks scroll
+      // to the right verse even when cells have no explicit `section` field.
+      if (idx < 0) {
+        idx = cells.findIndex((c) => {
+          const ref = c.globalReferences?.find((r) => r && r.trim().length > 0)
+          if (!ref) return false
+          const colonIdx = ref.indexOf(":")
+          const prefix = (colonIdx >= 0 ? ref.slice(0, colonIdx) : ref).trim()
+          return prefix === sectionLabel
+        })
+      }
     } else if (groupId) {
       idx = cells.findIndex((c) => (c.group ?? "Ungrouped") === groupId)
     }

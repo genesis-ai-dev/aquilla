@@ -258,6 +258,8 @@
 | Sharing     | Invite role select changes role                       | `e2e/specs/projects/share-invite-role-select.smoke.spec.ts`   |   ✅   |
 | Sharing     | Invite @username verified chip appears                | `e2e/specs/projects/share-invite-username-verified.smoke.spec.ts` |   ✅   |
 | Rules       | Rule promote to org dialog                            | `e2e/specs/rules/rule-promote-to-org.smoke.spec.ts`           |   ✅   |
+| Rules       | project_lead requests rule promotion to org scope     | `e2e/specs/rules/rule-request-promotion.smoke.spec.ts`        |   ✅   |
+| Rules       | Org owner approves / dismisses a promotion request    | `e2e/specs/rules/rule-promotion-request-approve-dismiss.smoke.spec.ts` | ✅ |
 | Rules       | Rules page terminology link navigates                 | `e2e/specs/rules/rules-page-terminology-link.smoke.spec.ts`   |   ✅   |
 | Rules       | "Try to fix all" button navigates to editor with ?openRule= | `e2e/specs/rules/rules-try-to-fix-all.smoke.spec.ts`    |   ✅   |
 | Rules       | Waive and unwaive a violation                         | `e2e/specs/rules/waive-violation.smoke.spec.ts`               |   ✅   |

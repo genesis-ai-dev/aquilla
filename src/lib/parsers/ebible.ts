@@ -183,7 +183,13 @@ export async function fetchTranslationText(
   onProgress?: (received: number, total: number) => void,
   signal?: AbortSignal
 ): Promise<string> {
-  const res = await fetch(`${CORPUS_BASE}/corpus/${id}.txt`, { signal })
+  // eBible corpus filenames use the pattern "{languageCode}-{translationId}.txt"
+  // where hyphens *within* the translationId are replaced by underscores.
+  // e.g. id "eng-eng-kjv" → file "eng-eng_kjv.txt"
+  //      id "abt-abt-maprik" → file "abt-abt_maprik.txt"
+  const [langCode, ...rest] = id.split('-')
+  const fileSlug = `${langCode}-${rest.join('_')}`
+  const res = await fetch(`${CORPUS_BASE}/corpus/${fileSlug}.txt`, { signal })
   if (!res.ok) {
     throw new Error(`Failed to download translation '${id}' (${res.status})`)
   }

@@ -142,6 +142,10 @@ const LivingMemoryPageContent = lazy(() =>
 const TerminologyPageContent = lazy(() =>
   import("./TerminologyPage").then((mod) => ({ default: mod.TerminologyPage })),
 )
+// FRO-180: per-project members management surface.
+const ProjectMembersPageContent = lazy(() =>
+  import("./ProjectMembersPage").then((mod) => ({ default: mod.ProjectMembersPage })),
+)
 
 // FRO-249 fix (Fix 2): module-level promise chain that serializes
 // handleImported's getProject→updateProject read-modify-write so that
@@ -318,15 +322,16 @@ export function ProjectWorkspace() {
   useEffect(() => {
     if (!project || !projectId) return
 
-    // The in-project overlay surfaces (/rules, /comments, /memory, /terminology)
-    // deliberately carry no file in the URL — don't treat that as "no file
-    // selected" and bounce back to the editor, or these surfaces become
-    // unreachable. (FRO-194 added /rules; FRO-254 adds the others.)
+    // The in-project overlay surfaces (/rules, /comments, /memory, /terminology,
+    // /members) deliberately carry no file in the URL — don't treat that as
+    // "no file selected" and bounce back to the editor, or these surfaces become
+    // unreachable. (FRO-194 added /rules; FRO-254 adds the others; FRO-180 adds /members.)
     if (
       location.pathname.endsWith("/rules") ||
       location.pathname.endsWith("/comments") ||
       location.pathname.endsWith("/memory") ||
-      location.pathname.endsWith("/terminology")
+      location.pathname.endsWith("/terminology") ||
+      location.pathname.endsWith("/members")
     ) return
 
     // A file is already in the URL: leave it unless the project genuinely
@@ -384,12 +389,14 @@ export function ProjectWorkspace() {
 
   // Center surface — derived from the URL path so deep-links work and the
   // shell (sidebar + top bar + bottom status bar) never unmounts.
-  // FRO-194 added "rules"; FRO-254 adds "comments", "memory", "terminology".
-  const centerSurface: "editor" | "rules" | "comments" | "memory" | "terminology" =
+  // FRO-194 added "rules"; FRO-254 adds "comments", "memory", "terminology";
+  // FRO-180 adds "members".
+  const centerSurface: "editor" | "rules" | "comments" | "memory" | "terminology" | "members" =
     location.pathname.endsWith("/rules") ? "rules" :
     location.pathname.endsWith("/comments") ? "comments" :
     location.pathname.endsWith("/memory") ? "memory" :
     location.pathname.endsWith("/terminology") ? "terminology" :
+    location.pathname.endsWith("/members") ? "members" :
     "editor"
 
   useEffect(() => {
@@ -2573,6 +2580,13 @@ export function ProjectWorkspace() {
           <div className="h-full overflow-y-auto">
             <Suspense fallback={<div className="flex h-full items-center justify-center text-sm text-muted-foreground">Loading terminology…</div>}>
               <TerminologyPageContent />
+            </Suspense>
+          </div>
+        ) : centerSurface === "members" ? (
+          // FRO-180: Per-project members management inside the shell.
+          <div className="h-full overflow-y-auto">
+            <Suspense fallback={<div className="flex h-full items-center justify-center text-sm text-muted-foreground">Loading members…</div>}>
+              <ProjectMembersPageContent />
             </Suspense>
           </div>
         ) : cellAreaState.kind === "ready" ? (

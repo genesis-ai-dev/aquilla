@@ -228,10 +228,11 @@ the cell (title → "100% — validated"); no separate Validate button in that p
 
 ## Next up (loop continues here)
 1. Apply Neon migration 0030 to fix BUG-4 (operator task; needs prod DB access).
-2. Repair FIXME specs against e2e-up harness; add specs for edit/validate/import/route-health/comments.
-3. Collab (2-user): file propagation, concurrent edit, presence indicators.
-4. Audio export by character (requires AI key; UI path to export confirmed).
-5. Remaining untested: onboarding wizard, real signup/login, access revocation cascade.
-6. Run full `npm run test:e2e` (stop dev-stack first) and get it green.
-5. Collab (2-user) on current sync; presence indicators.
-6. Run full `npm run test:e2e` (stop dev-stack first) and get it green.
+2. ✅ Repair FIXME specs: members.smoke (aq_hint cookie fix) + violation.smoke (insertText fix) — committed 064a4d6.
+3. ✅ collab FIXME comments updated to reflect new arch rewrite plan — committed 281c884.
+4. ✅ Added comments.smoke + route-health.smoke specs — committed 23965d2.
+5. Rewrite collab/file-propagation + collab/concurrent-edit for ProjectSync DO + D1 arch.
+6. Collab (2-user): file propagation, concurrent edit, presence indicators (blocked on spec rewrite).
+7. Audio export by character (requires AI key; UI path to export confirmed).
+8. Remaining untested: onboarding wizard, real signup/login, access revocation cascade.
+9. Run full `npm run test:e2e` (stop dev-stack first) and get it green.

@@ -70,12 +70,19 @@ export function useComments(opts: UseCommentsOptions): UseCommentsApi {
   const tokenRef = useRef(getToken)
   const authorRef = useRef(author)
   const scopeRef = useRef(scope)
+  // Keep a ref to the latest comments array so mutation callbacks (edit/delete/
+  // resolve) can look up a comment's fileId without closing over stale state.
+  const commentsRef = useRef<CommentRecord[]>(comments)
   useEffect(() => {
     projectRef.current = projectId
     tokenRef.current = getToken
     authorRef.current = author
     scopeRef.current = scope
   }, [projectId, getToken, author, scope])
+  // Sync commentsRef whenever the comments array changes.
+  useEffect(() => {
+    commentsRef.current = comments
+  }, [comments])
 
   const refresh = useCallback(async () => {
     const pid = projectRef.current
@@ -175,9 +182,13 @@ export function useComments(opts: UseCommentsOptions): UseCommentsApi {
   const editComment = useCallback(async (commentId: string, body: string) => {
     const pid = projectRef.current
     if (!pid) return
+    // FRO-228: include fileId in the envelope so the outbox flusher can mint a
+    // token. Without it the flusher drops the event (no fileId → no token scope).
+    const envelopeFileId = commentsRef.current.find((c) => c.commentId === commentId)?.fileId ?? undefined
     await enqueueEvent({
       kind: 'comment.edit',
       projectId: pid,
+      fileId: envelopeFileId,
       parentId: null,
       author: authorRef.current,
       payload: { commentId, body },
@@ -193,9 +204,12 @@ export function useComments(opts: UseCommentsOptions): UseCommentsApi {
   const deleteComment = useCallback(async (commentId: string) => {
     const pid = projectRef.current
     if (!pid) return
+    // FRO-228: include fileId so the outbox flusher can mint a token.
+    const envelopeFileId = commentsRef.current.find((c) => c.commentId === commentId)?.fileId ?? undefined
     await enqueueEvent({
       kind: 'comment.delete',
       projectId: pid,
+      fileId: envelopeFileId,
       parentId: null,
       author: authorRef.current,
       payload: { commentId },
@@ -214,9 +228,12 @@ export function useComments(opts: UseCommentsOptions): UseCommentsApi {
   const resolveThread = useCallback(async (commentId: string, resolved: boolean) => {
     const pid = projectRef.current
     if (!pid) return
+    // FRO-228: include fileId so the outbox flusher can mint a token.
+    const envelopeFileId = commentsRef.current.find((c) => c.commentId === commentId)?.fileId ?? undefined
     await enqueueEvent({
       kind: 'comment.resolve',
       projectId: pid,
+      fileId: envelopeFileId,
       parentId: null,
       author: authorRef.current,
       payload: { commentId, resolved },

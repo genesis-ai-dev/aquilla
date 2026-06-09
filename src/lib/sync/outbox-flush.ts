@@ -113,11 +113,28 @@ export async function flushOutboxBatch(deps: FlushDeps): Promise<{
   const batch = groupOldestFileFirst(records)
   const fileId = batch[0].event.fileId
   if (!fileId) {
-    await removeOutboxEvents([batch[0].id])
-    return { posted: 0, accepted: 0, networkError: false, authError: false, quarantined: 0, staleSiblingCount: 0, staleSourceCount: 0 }
+    // FRO-228: comment.* events with project scope carry no fileId in the
+    // envelope (the scope lives in the payload). Historically these were
+    // dropped here, silently discarding resolves/edits/deletes. For comment.*
+    // kinds without a fileId we use a project-sentinel so the token fetcher
+    // can mint a project-scoped sync-token — the server only checks projectId
+    // for comment auth, not fileId. All other no-fileId events (legacy cell
+    // events without an envelope fileId) are still dropped as before to prevent
+    // them from wedging the queue.
+    const isCommentKind = batch[0].event.kind.startsWith('comment.')
+    if (!isCommentKind) {
+      await removeOutboxEvents([batch[0].id])
+      return { posted: 0, accepted: 0, networkError: false, authError: false, quarantined: 0, staleSiblingCount: 0, staleSourceCount: 0 }
+    }
+    // Fall through with a sentinel fileId so the flusher can mint a token.
+    // The sentinel is never sent to the server — it's only for /sync-token.
   }
   const projectId = batch[0].event.projectId
-  const mint = await deps.getTokenForFile(projectId, fileId)
+  // For comment.* events without a fileId, use a sentinel that the identity
+  // server accepts (any non-empty string; the sync-worker ignores fileId on
+  // comment auth). Events WITH a fileId always use their own for correct scope.
+  const tokenFileId = fileId ?? '__project__'
+  const mint = await deps.getTokenForFile(projectId, tokenFileId)
   if (!mint.token) {
     // Token mint failed. Distinguish permanent from transient so a single
     // un-mintable file can't head-of-line block the rest of the queue (the

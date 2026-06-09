@@ -135,6 +135,7 @@
 | Editor      | Cell action popover shows Record audio + Add comment  | `e2e/specs/editor/cell-action-popover.smoke.spec.ts`          |   ✅   |
 | Editor      | Cell details expansion panel tabs (Decay/BT/Issues/History) | `e2e/specs/editor/cell-details.smoke.spec.ts` + `cell-expansion-bt-tab.smoke.spec.ts` + `cell-expansion-decay-tab.smoke.spec.ts` + `cell-expansion-issues-tab.smoke.spec.ts` | ✅ |
 | Editor      | Issue pill hover popover shows rule infraction details | `e2e/specs/editor/issue-pill-hover-popover.smoke.spec.ts`    |   ✅   |
+| Editor      | Select source text → Add to termbase creates draft concept | `e2e/specs/editor/add-to-termbase-from-selection.smoke.spec.ts` | ✅ |
 | Editor      | /project/:id/voice deep-link activates audio lens     | `e2e/specs/editor/voice-deep-link.smoke.spec.ts`              |   ✅   |
 | Editor      | Cell history drawer shows edit history                | `e2e/specs/editor/cell-history-drawer.smoke.spec.ts`          |   ✅   |
 | Editor      | Decay breakdown popover opens from cell indicator     | `e2e/specs/editor/decay-breakdown-popover.smoke.spec.ts`      |   ✅   |

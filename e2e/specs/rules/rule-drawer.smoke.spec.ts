@@ -55,4 +55,11 @@ test("RuleDrawer opens from rules page button showing rule name", async ({ alice
   const autofixBtn = alice.locator('[title="Autofix is unavailable in this build"]').first()
   await expect(autofixBtn).toBeVisible({ timeout: 3_000 })
   await expect(autofixBtn).toBeDisabled()
+
+  // The "Amend rule" button navigates to /rules?ruleId=...&focus=autofix.
+  const amendBtn = alice.getByRole("button", { name: /Amend rule/i })
+  await expect(amendBtn).toBeVisible({ timeout: 3_000 })
+  await amendBtn.click()
+  await alice.waitForURL(/\/rules\?.*focus=autofix/, { timeout: 5_000 })
+  expect(alice.url()).toContain("focus=autofix")
 })

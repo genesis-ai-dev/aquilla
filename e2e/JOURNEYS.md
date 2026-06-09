@@ -68,6 +68,9 @@
 | Orgs        | Members matrix org-wide badge for inherited access    | `e2e/specs/orgs/members-matrix-org-wide-badge.smoke.spec.ts`      |   ✅   |
 | Editor      | Delete file confirm dialog requires checkbox          | `e2e/specs/editor/delete-file-confirm-dialog.smoke.spec.ts`       |   ✅   |
 | Editor      | RTL detection hint shows and can be dismissed         | `e2e/specs/editor/rtl-hint-dismiss.smoke.spec.ts`                 |   ✅   |
+| Projects    | Project settings discard-changes dialog (Keep editing / Discard) | `e2e/specs/projects/project-settings-discard-unsaved.smoke.spec.ts` | ✅ |
+| Editor      | Next unfinished cell button enabled when cells empty  | `e2e/specs/editor/next-unfinished-button.smoke.spec.ts`            |   ✅   |
+| Rules       | Amend rule button navigates to rules?focus=autofix    | `e2e/specs/rules/rule-drawer.smoke.spec.ts` (extended)             |   ✅   |
 | Tauri       | Native dialogs / deeplink / updater / fs / keychain  | _gap — Plan 3_                                                |        |
 
 ## How to add a journey

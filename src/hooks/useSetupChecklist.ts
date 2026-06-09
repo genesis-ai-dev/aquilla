@@ -65,13 +65,13 @@ export function deriveChecklistState(
 
 export function useSetupChecklist(project: ProjectRecord | null) {
   const [memberCount, setMemberCount] = useState(0)
+  // FRO-244: tracks whether the async member fetch has completed for the
+  // current project. We must NOT declare the checklist incomplete until this
+  // resolves — otherwise a project-switch sees memberCount=0 (stale from A)
+  // while the flag check reads B's id, burning B's auto-open flag on a
+  // transiently-incomplete snapshot.
+  const [membersFetched, setMembersFetched] = useState(false)
   const [dismissed, setDismissed] = useState(false)
-  // FRO-244: tracks whether the auto-open has already fired this session.
-  // Initialized from localStorage so page reloads don't re-nag.
-  const [autoShown, setAutoShown] = useState<boolean>(() => {
-    if (!project?.id) return false
-    return wasSetupAutoShown(project.id)
-  })
   const { session } = useFrontierSession()
 
   // Session-sticky lock keyed by project id. Once the user clicks Dismiss in
@@ -86,10 +86,11 @@ export function useSetupChecklist(project: ProjectRecord | null) {
     setDismissed(persisted || sessionLocked)
   }, [project])
 
-  // FRO-244: Reset autoShown flag when switching to a different project.
+  // FRO-244: Reset member state when switching to a different project so we
+  // don't evaluate shouldAutoOpen against the previous project's member count.
   useEffect(() => {
-    if (!project?.id) return
-    setAutoShown(wasSetupAutoShown(project.id))
+    setMemberCount(0)
+    setMembersFetched(false)
   }, [project?.id])
 
   // Project members live server-side. We exclude self from the count so a
@@ -98,6 +99,7 @@ export function useSetupChecklist(project: ProjectRecord | null) {
   useEffect(() => {
     if (!project || !session?.jwt) {
       setMemberCount(0)
+      setMembersFetched(true) // no session → can't have members, treat as resolved
       return
     }
     let cancelled = false
@@ -106,12 +108,16 @@ export function useSetupChecklist(project: ProjectRecord | null) {
         if (cancelled) return
         const others = (members ?? []).filter((m) => m.username !== session.username)
         setMemberCount(others.length)
+        setMembersFetched(true)
       })
       .catch(() => {
-        if (!cancelled) setMemberCount(0)
+        if (!cancelled) {
+          setMemberCount(0)
+          setMembersFetched(true) // network error — treat as resolved with 0
+        }
       })
     return () => { cancelled = true }
-  }, [project, session?.jwt, session?.username])
+  }, [project?.id, session?.jwt, session?.username])
 
   const whisper = useModelStatus("whisper")
   const kokoro = useModelStatus("kokoro")
@@ -124,6 +130,17 @@ export function useSetupChecklist(project: ProjectRecord | null) {
       : ttsProvider === "mms"
         ? mms.kind === "ready"
         : kokoro.kind === "ready")
+
+  // FRO-244: model status is "resolved" once whisper + tts provider are no
+  // longer in the "downloading" state. We must not declare models-complete
+  // (or incomplete) before the status is known — otherwise a project with
+  // pre-installed models would show as incomplete during the brief
+  // "downloading 0/0" phase and trigger a spurious auto-open.
+  const modelsResolved =
+    whisper.kind !== "downloading" &&
+    (ttsProvider === "gemini" || ttsProvider === "mms"
+      ? mms.kind !== "downloading"
+      : kokoro.kind !== "downloading")
 
   const state = deriveChecklistState(
     project?.completionSettings,
@@ -156,15 +173,20 @@ export function useSetupChecklist(project: ProjectRecord | null) {
   const markAutoShownFn = useCallback(() => {
     if (!project?.id) return
     markSetupAutoShown(project.id)
-    setAutoShown(true)
   }, [project?.id])
 
   // FRO-244: true when the setup checklist should auto-open (once, on first visit
-  // to an incomplete project). The consumer is responsible for calling
-  // markAutoShownFn() after opening so we don't nag again.
+  // to an incomplete project). We read wasSetupAutoShown() directly at render
+  // (not via mirrored state) so project-A→B switches don't inherit A's flag.
+  // We also require membersFetched + modelsResolved before declaring incomplete —
+  // a transiently-incomplete snapshot (member fetch still in flight on switch)
+  // must NOT burn the shown-once flag or pop the drawer.
+  const alreadyShown = project?.id ? wasSetupAutoShown(project.id) : true
   const shouldAutoOpen =
     !dismissed &&
-    !autoShown &&
+    !alreadyShown &&
+    membersFetched &&
+    modelsResolved &&
     state.completedCount < state.totalCount &&
     !!project?.id
 

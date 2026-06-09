@@ -56,6 +56,7 @@
 | Projects    | Status chip shows Overdue/Due-soon by deadline        | `e2e/specs/projects/project-status-chip.smoke.spec.ts`        |   ✅   |
 | Projects    | Living memory back navigation                         | `e2e/specs/projects/living-memory-back-nav.smoke.spec.ts`     |   ✅   |
 | Orgs        | Members matrix sole-owner concentration risk          | `e2e/specs/orgs/members-matrix-sole-owner.smoke.spec.ts`      |   ✅   |
+| Orgs        | MembersPage Roster/Matrix view toggle switches views  | `e2e/specs/orgs/members-page-roster-matrix-toggle.smoke.spec.ts` | ✅ |
 | Orgs        | Members matrix access-help tooltip                    | `e2e/specs/orgs/members-matrix-access-help.smoke.spec.ts`     |   ✅   |
 | Orgs        | Team detail access-level help indicator               | `e2e/specs/orgs/team-detail-access-level-help.smoke.spec.ts`  |   ✅   |
 | Collab      | BT edit locked for reviewer role                      | `e2e/specs/collab/bt-edit-locked-for-reviewer.smoke.spec.ts`  |   ✅   |

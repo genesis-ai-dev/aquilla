@@ -133,9 +133,9 @@ export function Homepage() {
             Translation, <span className="aq-gold-text aq-display-italic">lifted.</span>
           </h1>
           <p className="aq-hero-sub aq-load aq-d3">
-            The first workspace where <b style={{ color: "var(--aq-text)" }}>text, audio, and video</b> translation
-            live under one roof. Real-time guidance and a memory that learns — so Scripture reaches every
-            language, in every medium it's heard, read, and watched.
+            The first workspace where <b style={{ color: "var(--aq-text)" }}>text and audio</b> translation
+            live under one roof — with caption and subtitle translation for video too. Real-time guidance and a memory
+            that learns — so Scripture reaches every language, in every medium it's heard, read, and watched.
           </p>
           <div className="aq-hero-actions aq-load aq-d4">
             <a href="/onboarding" className="aq-btn aq-btn-gold aq-btn-lg">Start translating free</a>
@@ -175,7 +175,7 @@ export function Homepage() {
             <h2 className="aq-display">Most of the world meets Scripture by listening, not reading.</h2>
             <p>
               For too long, tools forced a choice between the written word and the spoken one. Aquilla refuses it.
-              Translate the same passage as text, audio, video, image, or oral story — drafted against one source,
+              Translate text and audio, add captions and subtitles to video — all drafted against one source,
               held to one project's voice, kept in sync as it grows.
             </p>
           </div>
@@ -404,7 +404,7 @@ export function Homepage() {
           <div className="aq-head aq-center aq-reveal" style={{ marginBottom: 44 }}>
             <span className="aq-eyebrow">Access</span>
             <h2 className="aq-display">Free — because the mission comes first.</h2>
-            <p>Aquilla is free for everyone. Our mission is to accelerate Bible translation, not to bill you for it. Running at scale or need dedicated support? That's free too — just talk to us.</p>
+            <p>Aquilla is free for everyone. Our mission is to accelerate Bible translation, not to bill you for it.</p>
           </div>
           <div className="aq-price-grid aq-reveal">
             <div className="aq-price">
@@ -412,27 +412,26 @@ export function Homepage() {
               <div className="aq-price-tag">Free, forever</div>
               <p>The whole workspace — no credit card, no trial clock. For every translator, church, and team.</p>
               <ul>
-                <li><IconCheck /> Full multimodal workspace — text, audio, video</li>
+                <li><IconCheck /> Full workspace — text and audio translation</li>
                 <li><IconCheck /> Real-time guidance &amp; back-translation</li>
                 <li><IconCheck /> Cloud sync &amp; team collaboration</li>
-                <li><IconCheck /> On-device speech &amp; private mode</li>
+                <li><IconCheck /> On-device speech</li>
               </ul>
               <a href="/onboarding" className="aq-btn aq-btn-gold">Start free</a>
             </div>
             <div className="aq-price" data-feature="true">
               <span className="aq-chip aq-chip-gold" style={{ position: "absolute", top: 20, right: 20 }}><IconSparkS /> Mission, not margin</span>
-              <h4 className="aq-display">Enterprise</h4>
-              <div className="aq-price-tag">Also free — let's talk</div>
-              <p>Running translation across a large program, or need dedicated help? It's still free. Reach out and we'll support you directly.</p>
+              <h4 className="aq-display">Enterprise support</h4>
+              <div className="aq-price-tag">We want to see your mission succeed</div>
+              <p>Running translation at scale or need dedicated help? We're happy to support you directly — your mission matters. Just talk to us.</p>
               <ul>
-                <li><IconCheck /> Everything in Everyone, at scale</li>
-                <li><IconCheck /> Dedicated onboarding &amp; priority support</li>
-                <li><IconCheck /> Higher, managed AI usage limits</li>
+                <li><IconCheck /> Dedicated onboarding &amp; direct support</li>
+                <li><IconCheck /> Coordination across large programs</li>
+                <li><IconCheck /> We want to see you succeed</li>
               </ul>
-              <a href="/onboarding" className="aq-btn aq-btn-ghost">Talk to us</a>
+              <a href="mailto:hello@aquilla.app" className="aq-btn aq-btn-ghost">Talk to us</a>
             </div>
           </div>
-          <p className="aq-price-note aq-reveal">AI usage runs on fair caps that keep Aquilla free and sustainable for everyone. Need more headroom? That's exactly what "talk to us" is for.</p>
         </section>
 
         {/* ── Final CTA ───────────────────────────────────────────────── */}

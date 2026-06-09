@@ -243,6 +243,8 @@
 | Rules       | Rules page terminology link navigates                 | `e2e/specs/rules/rules-page-terminology-link.smoke.spec.ts`   |   ✅   |
 | Rules       | Waive and unwaive a violation                         | `e2e/specs/rules/waive-violation.smoke.spec.ts`               |   ✅   |
 | Terminology | Violations tab shows inbox content                    | `e2e/specs/projects/terminology-violations-tab.smoke.spec.ts` |   ✅   |
+| Terminology | Wildcard source term 'samp*' creates chip for 'sample' | `e2e/specs/terminology/wildcard-term-chip.smoke.spec.ts`     |   ✅   |
+| Terminology | Violations inbox concept group expand/collapse        | `e2e/specs/terminology/violations-inbox-expand-group.smoke.spec.ts` | ✅ |
 | Editor      | Setup checklist AI instructions edit + reset          | `e2e/specs/editor/setup-checklist-ai-instructions-edit.smoke.spec.ts` |   ✅   |
 | Editor      | Workspace actions dropdown lists available actions    | `e2e/specs/editor/workspace-actions-dropdown.smoke.spec.ts`   |   ✅   |
 | Editor      | Workspace actions cell scroll to target cell          | `e2e/specs/editor/workspace-actions-cell-scroll.smoke.spec.ts` |   ✅   |

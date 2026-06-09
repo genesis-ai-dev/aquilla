@@ -25,9 +25,11 @@
 -- additive DDL for the test PGlite; the orchestrator must apply this to live
 -- Neon after review (per the documented D1->Neon schema-drift caution).
 
--- 1. Publish flag on projects (additive; default false). Idempotent.
+-- 1. Publish flag on projects (additive; default false).
+-- Note: SQLite < 3.37 does not support ADD COLUMN IF NOT EXISTS on ALTER TABLE;
+-- idempotency is provided by wrangler's migration tracking (each migration runs once).
 ALTER TABLE projects
-  ADD COLUMN IF NOT EXISTS org_published_termbase BOOLEAN NOT NULL DEFAULT FALSE;
+  ADD COLUMN org_published_termbase BOOLEAN NOT NULL DEFAULT FALSE;
 
 -- Discoverability index: only published rows matter for the org listing.
 CREATE INDEX IF NOT EXISTS idx_projects_org_published_termbase
@@ -40,7 +42,7 @@ CREATE TABLE IF NOT EXISTS project_termbase_subscriptions (
     project_id          TEXT    NOT NULL,
     termbase_project_id TEXT    NOT NULL,
     priority            INTEGER NOT NULL DEFAULT 0,
-    created_at          TIMESTAMPTZ DEFAULT now(),
+    created_at          TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
     PRIMARY KEY (project_id, termbase_project_id)
 );
 

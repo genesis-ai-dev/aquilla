@@ -17,7 +17,7 @@ import { useProjectPermissions } from "@/hooks/useProjectPermissions"
 import { emitTargetCellCommit, emitCellValidate, emitCellUnvalidate, emitCellWaive, emitCellUnwaive } from "@/lib/sync/events-emit"
 import { ExamplePanel } from "./ExamplePanel"
 import { HighlightedText, buildHighlightsFromExamples } from "./HighlightedText"
-import { needsAttention, resolveDecayConfig } from "@/lib/health/decay-engine"
+import { needsAttention, resolveDecayConfig, CELL_NEEDS_ATTENTION_STATUS } from "@/lib/health/decay-engine"
 import { readValidationCount } from "@/lib/progress/read-validation-count"
 import { StaleSourceIndicator } from "./StaleSourceIndicator"
 import { HealthRing } from "./HealthRing"
@@ -1879,7 +1879,7 @@ function EditorRow({
             <li className="flex items-start gap-1.5 px-1 py-1 text-xs">
               <span aria-hidden className="mt-1 h-1.5 w-1.5 shrink-0 rounded-full bg-amber-500" />
               <span className="flex-1 text-muted-foreground">
-                Neighborhood not yet validated — needs attention.
+                {CELL_NEEDS_ATTENTION_STATUS}
               </span>
             </li>
           )}

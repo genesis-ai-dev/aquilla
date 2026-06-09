@@ -17,7 +17,7 @@ import { addOrgMember, addProjectMember, getMyOrg, ROLE } from "../../helpers/fr
  * project → clicks it → clicks "Remove from project" → verifies the
  * "Add bob to project" affordance reappears.
  */
-test("matrix view remove member from project via cell editor", async ({ alice, bob }) => {
+test("matrix view remove member from project via cell editor", async ({ alice }) => {
   // Seed bob in alice's org.
   const aliceSession = await ensureAuthState("alice")
   const acme = await getMyOrg(aliceSession.jwt)

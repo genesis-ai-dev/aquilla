@@ -44,7 +44,6 @@ test("members matrix shows Sole Owner indicator for single-owner project", async
   await aliceRow.click()
 
   // The drill-down panel should be visible.
-  const drillDown = alice.locator('[role="region"], [class*="drill"]').last()
   await alice.waitForTimeout(1000)
 
   // The "Sole Owner" warning indicator should appear for the project.

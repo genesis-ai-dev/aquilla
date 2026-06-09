@@ -16,7 +16,7 @@ import { addOrgMember, getMyOrg, ROLE } from "../../helpers/frontier-api"
  * clicks "+ Add bob to project" → picks "Contributor" → verifies the cell
  * no longer shows the empty "Add" affordance.
  */
-test("matrix view add member to project via role picker", async ({ alice, bob }) => {
+test("matrix view add member to project via role picker", async ({ alice }) => {
   // Seed bob in alice's org.
   const aliceSession = await ensureAuthState("alice")
   const acme = await getMyOrg(aliceSession.jwt)

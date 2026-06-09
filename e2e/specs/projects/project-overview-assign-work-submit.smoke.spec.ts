@@ -60,7 +60,11 @@ test("assign work form with seeded member enables Assign button", async ({ alice
   // Select bob as assignee.
   const assigneeSelect = form.locator('[aria-label="Assignee"]')
   await expect(assigneeSelect).toBeVisible({ timeout: 3_000 })
-  await assigneeSelect.selectOption({ label: /bob/i })
+  const bobValue = await assigneeSelect
+    .locator("option", { hasText: /bob/i })
+    .first()
+    .getAttribute("value")
+  await assigneeSelect.selectOption(bobValue)
 
   // Select a book (first option that is not the placeholder).
   const bookSelect = form.locator('[aria-label="Book"]')

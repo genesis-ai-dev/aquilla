@@ -49,7 +49,6 @@ test("selecting source text reveals Add to termbase button and creates draft con
 
   // Select text in the first source cell by triple-clicking it.
   // The source cell displays the original text from sample.md.
-  const firstRow = alice.locator('[data-row-index="0"], tbody tr, [role="row"]').first()
 
   // Find the source text area — look for the original text area in the first cell.
   // EditorTable renders source text in a div with the original content.

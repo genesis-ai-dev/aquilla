@@ -16,7 +16,7 @@ import { addOrgMember, getMyOrg, ROLE } from "../../helpers/frontier-api"
  * This spec: seeds bob → switches to Matrix view → clicks bob's row →
  * verifies the drill-down panel appears.
  */
-test("clicking member row in matrix opens access drill-down panel", async ({ alice, bob }) => {
+test("clicking member row in matrix opens access drill-down panel", async ({ alice }) => {
   // Seed bob in alice's org.
   const aliceSession = await ensureAuthState("alice")
   const acme = await getMyOrg(aliceSession.jwt)

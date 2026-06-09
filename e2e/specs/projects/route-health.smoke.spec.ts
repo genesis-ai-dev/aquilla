@@ -42,7 +42,7 @@ test("all org-level routes render without errors", async ({ alice }) => {
     await expect(alice.locator("vite-error-overlay")).not.toBeAttached()
 
     const errors = await alice.evaluate(() =>
-      window.__e2e_errors ?? []
+      (window as unknown as { __e2e_errors?: string[] }).__e2e_errors ?? []
     ).catch(() => [])
     expect(errors, `console errors on ${route}`).toHaveLength(0)
   }

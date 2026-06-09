@@ -68,7 +68,6 @@ test("targeted invite chip appears on /members when invite has a recipient email
   await expect(targetedChip).toContainText("targeted@example.com")
 
   // Verify the open-link badge is NOT present for this invite (it has an email).
-  const openLinkBadge = alice.locator('[title="Open link — anyone holding the URL can redeem"]')
   // There should be none associated with this targeted invite row.
   // (Could be 0 or present if other invites exist, so just check the targeted chip is right.)
   await expect(targetedChip).toBeVisible()

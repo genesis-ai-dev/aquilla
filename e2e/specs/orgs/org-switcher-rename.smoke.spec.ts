@@ -20,7 +20,6 @@ test("OrgSwitcher inline rename updates org name", async ({ alice }) => {
   // It renders a button with the org name + ChevronsUpDown icon.
   const trigger = alice.locator("button").filter({ has: alice.locator(".lucide-chevrons-up-down") }).first()
   await expect(trigger).toBeVisible({ timeout: 10_000 })
-  const currentOrgName = await trigger.locator("span.truncate, span.font-medium").first().textContent()
   await trigger.click()
 
   // The dropdown opens. Click "Rename".

@@ -24,8 +24,6 @@ test("RulesPage Add Rule dialog creates and displays new rule", async ({ alice }
   await dash.createProject({ name, source: "en", target: "fr" })
 
   // Navigate to the rules page.
-  const url = alice.url()
-  const idMatch = url.match(/\/project\/([^/]+)/)
   // Open the project first to get the id from URL.
   await dash.openProject(name)
   await alice.waitForURL(/\/project\/[^/]+/)

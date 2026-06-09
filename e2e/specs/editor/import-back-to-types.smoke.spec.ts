@@ -1,11 +1,6 @@
 import { test, expect } from "../../helpers/multi-user"
 import { Dashboard } from "../../helpers/page-objects/Dashboard"
-import { Workspace } from "../../helpers/page-objects/Workspace"
-import path from "node:path"
-import { fileURLToPath } from "node:url"
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url))
-const SAMPLE_MD = path.resolve(__dirname, "../../fixtures/sample.md")
 
 /**
  * ImportDialog — "Back to import types" button.
@@ -28,7 +23,6 @@ test("import dialog back button returns to landing screen", async ({ alice }) =>
   await dash.createProject({ name, source: "en", target: "fr" })
   await dash.openProject(name)
 
-  const ws = new Workspace(alice)
   // Open the import dialog via the + Import Files button.
   const importBtn = alice.getByRole("button", { name: /Import/i })
     .or(alice.locator('[aria-label="Import files"]'))

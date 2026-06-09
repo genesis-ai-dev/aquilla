@@ -1,6 +1,5 @@
 import { test, expect } from "../../helpers/multi-user"
 import { Dashboard } from "../../helpers/page-objects/Dashboard"
-import { Workspace } from "../../helpers/page-objects/Workspace"
 
 /**
  * RuleEditor — "Enabled" checkbox toggles the rule's enabled state.
@@ -44,7 +43,6 @@ test("rule editor Enabled checkbox toggles", async ({ alice }) => {
   }
 
   // The "Enabled" checkbox is present and checked by default.
-  const enabledCheckbox = alice.locator('input[type="checkbox"]').filter({ hasText: "" }).first()
   // Find checkbox near the "Enabled" label specifically.
   const enabledLabel = alice.getByText("Enabled", { exact: true })
   await expect(enabledLabel).toBeVisible({ timeout: 5_000 })

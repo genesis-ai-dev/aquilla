@@ -35,7 +35,6 @@ test("Cmd+. jumps to the next unfinished cell", async ({ alice }) => {
   // Ensure no cell is expanded yet (no TranslatedEditor open).
   const editors = alice.locator('[contenteditable="true"]')
   // There may be some editor already — count initial focused editors.
-  const initialEditorCount = await editors.count()
 
   // Press Cmd+. to jump to next unfinished.
   // On macOS Cmd+period; on Linux/Windows Ctrl+period.

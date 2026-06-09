@@ -61,14 +61,12 @@ test("CellExpansion tabs respond to ArrowRight / Home / End keyboard nav", async
   await firstTab.focus()
 
   // Verify the first tab has focus and is selected.
-  const firstTabLabel = await firstTab.textContent()
 
   // Press ArrowRight → second tab should get focus (and be selected).
   await alice.keyboard.press("ArrowRight")
   await alice.waitForTimeout(200)
 
   const secondTab = tabs.nth(1)
-  const secondTabLabel = await secondTab.textContent()
   // The second tab should now be selected (aria-selected=true).
   await expect(secondTab).toHaveAttribute("aria-selected", "true", { timeout: 2_000 })
   // The first tab should no longer be selected.

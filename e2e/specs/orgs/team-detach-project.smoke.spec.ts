@@ -50,7 +50,7 @@ test("team detach project removes project from team", async ({ alice }) => {
   // Select the project from the dropdown.
   const projectSelect = alice.locator("select").first()
   await expect(projectSelect).toBeVisible({ timeout: 3_000 })
-  await projectSelect.selectOption({ label: new RegExp(projName) })
+  await projectSelect.selectOption({ label: projName })
 
   // Click "Attach".
   const attachBtn = alice.getByRole("button", { name: /^Attach$/i })

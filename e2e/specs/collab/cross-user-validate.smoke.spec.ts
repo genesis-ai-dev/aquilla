@@ -1,4 +1,4 @@
-import { test, expect } from "../../helpers/multi-user"
+import { test } from "../../helpers/multi-user"
 import { Workspace } from "../../helpers/page-objects/Workspace"
 import { ensureAuthState } from "../../helpers/auth"
 import { bootstrapSharedProject, ROLE } from "../../helpers/frontier-api"

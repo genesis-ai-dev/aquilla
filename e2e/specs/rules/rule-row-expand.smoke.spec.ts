@@ -43,9 +43,7 @@ test("rule row chevron expands and collapses autofix editor", async ({ alice }) 
 
   // Click the ChevronDown to expand the rule row.
   // The chevron is the first ghost button after the rule row appears (not the Edit button).
-  const chevronBtn = alice.locator('button:has(svg[class*="h-4 w-4"])').last()
   // Try a more specific approach — look for a button that has ChevronDown
-  const chevrons = alice.locator('[class*="ChevronDown"], button:has(.lucide-chevron-down), button:has(.lucide-chevron-up)')
 
   // Use the row's expand button (last ghost "sm" button before enabled/delete)
   // Actually the chevron has no aria-label, so let's get it differently

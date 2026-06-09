@@ -59,8 +59,9 @@ test("setup checklist invite step Create link shows join URL and copy button", a
   await createLinkBtn.click()
 
   // A join URL appears in a read-only input.
-  const linkInput = alice.locator('input[readonly]').filter({ hasValue: /\/join\// })
+  const linkInput = alice.locator('input[readonly]').first()
   await expect(linkInput).toBeVisible({ timeout: 8_000 })
+  await expect(linkInput).toHaveValue(/\/join\//, { timeout: 8_000 })
 
   // Copy button is present.
   const copyBtn = alice.locator('button[title="Copy"]')

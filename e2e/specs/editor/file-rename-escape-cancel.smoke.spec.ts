@@ -48,7 +48,7 @@ test("Escape in file rename input cancels without changing the filename", async 
   // Inline input appears — type a draft name.
   const inlineInput = sidebar.locator('input[type="text"]').first()
   await expect(inlineInput).toBeVisible({ timeout: 3_000 })
-  await inlineInput.selectAll()
+  await inlineInput.selectText()
   await inlineInput.fill("should-not-be-saved")
 
   // Press Escape — cancels the rename.

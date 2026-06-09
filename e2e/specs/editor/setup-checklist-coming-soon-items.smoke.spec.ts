@@ -26,7 +26,6 @@ test("setup checklist shows Coming soon items for standards and glossary", async
   await openChecklistBtn.click()
 
   // The drawer should be open.
-  const drawer = alice.locator('[role="dialog"], [data-state="open"]').filter({ hasText: /Upload project standards|Import glossary/i }).first()
 
   // "Upload project standards" item with "Coming soon" badge.
   const uploadStandardsItem = alice.getByText("Upload project standards").first()

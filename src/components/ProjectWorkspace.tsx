@@ -1604,9 +1604,18 @@ export function ProjectWorkspace() {
   const perms = useProjectPermissions(project)
   const isReadOnly = !perms.canEditContent
 
-  const { state: checklistState, dismissed: checklistDismissed, dismiss: dismissChecklist, refreshShares: refreshChecklistShares } = useSetupChecklist(project ?? null)
+  const { state: checklistState, dismissed: checklistDismissed, dismiss: dismissChecklist, refreshShares: refreshChecklistShares, shouldAutoOpen: checklistShouldAutoOpen, markAutoShown: markChecklistAutoShown } = useSetupChecklist(project ?? null)
   const [checklistOpen, setChecklistOpen] = useState(false)
   const [showChipTooltip, setShowChipTooltip] = useState(false)
+
+  // FRO-244: Auto-open the setup checklist once per project when the checklist
+  // is incomplete and has never been shown. markChecklistAutoShown() records the
+  // shown-once flag so subsequent visits / project switches don't re-nag.
+  useEffect(() => {
+    if (!checklistShouldAutoOpen) return
+    setChecklistOpen(true)
+    markChecklistAutoShown()
+  }, [checklistShouldAutoOpen, markChecklistAutoShown])
 
   const handleChecklistOpenChange = useCallback((next: boolean) => {
     setChecklistOpen(next)
@@ -1623,11 +1632,20 @@ export function ProjectWorkspace() {
     }
   }, [checklistDismissed, dismissChecklist])
 
-  const handleProjectUpdated = useCallback(async (_updated: ProjectRecord | undefined) => {
-    // The caller (useSaveCompletionSettings, etc.) already persisted to IDB.
-    // We just need to refresh the in-memory project state.
+  const handleProjectUpdated = useCallback(async (updated: ProjectRecord | undefined) => {
+    // FRO-234: When a step component saves (e.g. AiInstructionsStep via
+    // useSaveCompletionSettings), it writes to IDB and hands us the updated
+    // record. We must also push the change through patchSettings so that
+    // useProjectSettings.local reflects it — that overlay is what
+    // deriveChecklistState reads to compute aiInstructions. Without this call,
+    // the checklist step never flips to complete because useProject.refresh()
+    // fetches from the server (not IDB) and the server-overlay wins.
+    if (updated?.completionSettings?.systemPrompt != null) {
+      void patchSettings({ systemPrompt: updated.completionSettings.systemPrompt })
+    }
+    // Also refresh the server-fetched base record so other fields stay in sync.
     refresh()
-  }, [refresh])
+  }, [refresh, patchSettings])
 
   // All hooks below must live above the early return so hook count is stable
   // across renders (React throws "Rendered more hooks" otherwise).

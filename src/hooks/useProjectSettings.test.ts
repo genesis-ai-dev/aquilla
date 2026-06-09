@@ -140,9 +140,19 @@ describe("useProjectSettings — read path", () => {
     expect(result.current.reasonCannotEdit).toBe("role")
   })
 
-  it("canEdit is true at PROJECT_LEAD (500) while online", async () => {
+  // FRO-255: floor raised to MAINTAINER (600) — PROJECT_LEAD (500) is now read-only.
+  // Spec: 01-personas-and-roles.md §Role ladder row 600 — "change project settings
+  // (languages, system prompt, validation rules, health) — maintainer".
+  it("canEdit is false at PROJECT_LEAD (500) while online — below MAINTAINER floor", async () => {
     vi.spyOn(restClient, "fetchProjectSettings").mockResolvedValue(null)
     const { result } = renderHook(() => useProjectSettings("p1", 500))
+    await waitFor(() => expect(result.current.canEdit).toBe(false))
+    expect(result.current.reasonCannotEdit).toBe("role")
+  })
+
+  it("canEdit is true at MAINTAINER (600) while online", async () => {
+    vi.spyOn(restClient, "fetchProjectSettings").mockResolvedValue(null)
+    const { result } = renderHook(() => useProjectSettings("p1", 600))
     await waitFor(() => expect(result.current.canEdit).toBe(true))
     expect(result.current.reasonCannotEdit).toBeNull()
   })
@@ -194,11 +204,14 @@ describe("useProjectSettings — write path", () => {
     expect(idbMod.patchProject).toHaveBeenCalled()
   })
 
-  it("returns blocked-role for sub-PROJECT_LEAD callers, but still applies the edit locally", async () => {
+  // FRO-255: synced below-floor writes must NOT apply locally — local apply
+  // before role-check was the root cause of silent per-device divergence.
+  it("returns blocked-role for below-MAINTAINER callers on synced projects and does NOT apply locally", async () => {
     const idbMod = await import("@/lib/store/project-index")
     vi.mocked(idbMod.patchProject).mockClear()
     vi.spyOn(restClient, "fetchProjectSettings").mockResolvedValue(null)
-    const { result } = renderHook(() => useProjectSettings("p1", 400))
+    // PROJECT_LEAD (500) is below the MAINTAINER (600) floor
+    const { result } = renderHook(() => useProjectSettings("p1", 500))
     await waitFor(() => expect(result.current.settings.sourceLanguage).toBe("en"))
     let got!: PatchOutcome
     await act(async () => {
@@ -206,8 +219,9 @@ describe("useProjectSettings — write path", () => {
     })
     expect(got.kind).toBe("blocked")
     if (got.kind === "blocked") expect(got.reason).toBe("role")
-    expect(result.current.settings.sourceLanguage).toBe("fr")
-    expect(idbMod.patchProject).toHaveBeenCalled()
+    // CRITICAL: local state must NOT be mutated — FRO-255 acceptance criteria
+    expect(result.current.settings.sourceLanguage).toBe("en")
+    expect(idbMod.patchProject).not.toHaveBeenCalled()
   })
 
   it("unsynced project (roleLevel === null) writes locally with no server call", async () => {
@@ -221,9 +235,10 @@ describe("useProjectSettings — write path", () => {
     await act(async () => {
       got = await result.current.patch({ sourceLanguage: "fr" })
     })
-    // Same return shape as "role-blocked" — caller can flash on local-only too.
+    // Unsynced (null roleLevel) — local write is appropriate since no server exists.
     expect(got.kind).toBe("blocked")
     if (got.kind === "blocked") expect(got.reason).toBe("role")
+    // Unsynced projects DO write locally (no server to conflict with).
     expect(result.current.settings.sourceLanguage).toBe("fr")
     expect(idbMod.patchProject).toHaveBeenCalled()
     expect(patchSpy).not.toHaveBeenCalled()
@@ -313,12 +328,14 @@ describe("useProjectSettings — migration", () => {
     })
   })
 
-  it("does NOT migrate when sub-PROJECT_LEAD", async () => {
+  // FRO-255: migration guard now blocks at MAINTAINER (600), not PROJECT_LEAD (500).
+  it("does NOT migrate when below MAINTAINER (600)", async () => {
     vi.spyOn(restClient, "fetchProjectSettings").mockResolvedValue({
       version: 0, updatedAt: "x", updatedBy: null, settings: {},
     })
     const patchSpy = vi.spyOn(restClient, "patchProjectSettings")
-    renderHook(() => useProjectSettings("p1", 400))
+    // PROJECT_LEAD (500) — below the new floor
+    renderHook(() => useProjectSettings("p1", 500))
     // Wait long enough that an erroneous migration would have fired.
     await new Promise((r) => setTimeout(r, 50))
     expect(patchSpy).not.toHaveBeenCalled()
@@ -338,5 +355,65 @@ describe("useProjectSettings — migration", () => {
     renderHook(() => useProjectSettings("p1", 700))
     await new Promise((r) => setTimeout(r, 50))
     expect(patchSpy).not.toHaveBeenCalled()
+  })
+})
+
+// ─────────────────────────────────────────────────────────────────────────────
+// FRO-255 acceptance criteria tests
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("FRO-255 — role-floor alignment (client = server = MAINTAINER 600)", () => {
+  it("(a) below-MAINTAINER user (PROJECT_LEAD 500) gets canEdit=false and read-only state", async () => {
+    vi.spyOn(restClient, "fetchProjectSettings").mockResolvedValue({
+      version: 2, updatedAt: "x", updatedBy: { id: 1, username: "ryder" },
+      settings: { sourceLanguage: "en", targetLanguage: "swh" },
+    })
+    const { result } = renderHook(() => useProjectSettings("p1", 500))
+    await waitFor(() => expect(result.current.hasFetched).toBe(true))
+    // canEdit must be false — the UI should show read-only controls
+    expect(result.current.canEdit).toBe(false)
+    expect(result.current.reasonCannotEdit).toBe("role")
+    // Settings are still readable — just not editable
+    expect(result.current.settings.sourceLanguage).toBe("en")
+  })
+
+  it("(a) MAINTAINER (600) gets canEdit=true", async () => {
+    vi.spyOn(restClient, "fetchProjectSettings").mockResolvedValue({
+      version: 1, updatedAt: "x", updatedBy: null, settings: {},
+    })
+    const { result } = renderHook(() => useProjectSettings("p1", 600))
+    await waitFor(() => expect(result.current.canEdit).toBe(true))
+    expect(result.current.reasonCannotEdit).toBeNull()
+  })
+
+  it("(b) server-forbidden write surfaces as blocked and rolls back local state", async () => {
+    // Setup: server has sourceLanguage="en"; PATCH returns forbidden.
+    vi.spyOn(restClient, "fetchProjectSettings").mockResolvedValue({
+      version: 1, updatedAt: "x", updatedBy: { id: 1, username: "ryder" },
+      settings: { sourceLanguage: "en" },
+    })
+    vi.spyOn(restClient, "patchProjectSettings").mockResolvedValue({
+      kind: "forbidden",
+    } as any)
+    const idbMod = await import("@/lib/store/project-index")
+    vi.mocked(idbMod.patchProject).mockClear()
+
+    // Use OWNER (700) so the hook's local role check passes — the rejection
+    // comes from the server (forbidden response), not the client gate.
+    const { result } = renderHook(() => useProjectSettings("p1", 700))
+    await waitFor(() => expect(result.current.version).toBe(1))
+
+    let res!: PatchOutcome
+    await act(async () => {
+      res = await result.current.patch({ sourceLanguage: "fr" })
+    })
+
+    // The hook surfaces the rejection as blocked (role).
+    expect(res.kind).toBe("blocked")
+    if (res.kind === "blocked") expect(res.reason).toBe("role")
+
+    // After rollback via refresh(), local state must not retain "fr".
+    // The refresh re-sets server to the authoritative value.
+    await waitFor(() => expect(result.current.settings.sourceLanguage).toBe("en"))
   })
 })

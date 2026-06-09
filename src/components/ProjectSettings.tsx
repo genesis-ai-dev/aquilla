@@ -159,9 +159,11 @@ export function ProjectSettings() {
   // yields graceful empty/403 states.
   const { org } = useOrg()
 
+  // Server enforces MAINTAINER (600) for settings writes — show the correct
+  // floor in the read-only tooltip so users know what role they need.
   const sharedDisabledTooltip =
     reasonCannotEdit === "offline" ? "Reconnect to edit shared settings."
-    : reasonCannotEdit === "role" ? "Project Lead or higher can edit shared settings."
+    : reasonCannotEdit === "role" ? "Maintainer or higher can edit shared settings."
     : null
 
   // Baseline is the last-saved snapshot of every field on the page. The diff

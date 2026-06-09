@@ -62,7 +62,7 @@ interface ProjectDetail {
   role?: {
     level: number
     name: string
-    path: string
+    source: string  // "org" | "group" | "override" | "creator"
   }
 }
 
@@ -239,6 +239,7 @@ test("detach group project → carol loses group bonus but keeps org baseline", 
   // After detach: effective = viewer (org-viewer path still active).
   const afterDetach = await resolveProjectRole(carolSession.jwt, projectId)
   expect(afterDetach.level).toBe(ROLE.VIEWER)
+  // source="org" confirms the org-member path is active, not a group path.
   expect(afterDetach.path).toBe("org")
 })
 
@@ -311,14 +312,16 @@ async function resolveProjectRole(
   )
   if (!r.ok) throw new Error(`resolveProjectRole failed: ${r.status} — ${await r.text()}`)
   const data = (await r.json()) as ProjectDetail
-  return { level: data.role?.level ?? 0, path: data.role?.path ?? "unknown" }
+  // API returns `role.source` ("org" | "group" | "override" | "creator"), not "path".
+  return { level: data.role?.level ?? 0, path: data.role?.source ?? "unknown" }
 }
 
 async function resolveUserId(jwt: string, username: string): Promise<UserRow> {
+  // The lookup endpoint is GET /api/v2/users/lookup?username=X, not /:username.
   const r = await fetch(
-    `${FRONTIER_BASE}/api/v2/users/${encodeURIComponent(username)}`,
+    `${FRONTIER_BASE}/api/v2/users/lookup?username=${encodeURIComponent(username)}`,
     { headers: authHeaders(jwt) },
   )
-  if (!r.ok) throw new Error(`resolveUserId failed: ${r.status} — ${await r.text()}`)
+  if (!r.ok) throw new Error(`resolveUser(${username}) failed: HTTP ${r.status} — ${await r.text()}`)
   return (await r.json()) as UserRow
 }

@@ -1,0 +1,53 @@
+import { test, expect } from "../../helpers/multi-user"
+import { Dashboard } from "../../helpers/page-objects/Dashboard"
+
+/**
+ * Create a custom translation rule (inline RuleEditor).
+ *
+ * RulesSurface.tsx has a "+ Add Rule" button that opens an inline RuleEditor.
+ * The editor has:
+ *   - Name input (placeholder "e.g. Preserve numbers")
+ *   - Description input (placeholder "Numbers in source must appear in target")
+ *   - Pattern/replacement inputs
+ *   - Save and Cancel buttons
+ *
+ * This spec verifies the inline editor appears and Cancel dismisses it.
+ * Creating a complete rule is covered by the violation spec.
+ */
+test("add rule inline editor appears and Cancel dismisses", async ({ alice }) => {
+  const dash = new Dashboard(alice)
+  await dash.goto()
+  const name = `AddRule ${Date.now()}`
+  await dash.createProject({ name })
+  await dash.openProject(name)
+
+  // Extract project id and navigate to rules page.
+  await alice.waitForURL(/\/project\/[^/]+$/, { timeout: 5_000 })
+  const projectId = alice.url().match(/\/project\/([^/]+)$/)?.[1]
+  expect(projectId).toBeTruthy()
+
+  await alice.goto(`/project/${projectId}/rules`)
+  await alice.waitForLoadState("networkidle")
+
+  // "+ Add Rule" button opens the inline editor.
+  const addRuleBtn = alice.getByRole("button", { name: /\+ Add Rule/i })
+  await expect(addRuleBtn).toBeVisible({ timeout: 10_000 })
+  await addRuleBtn.click()
+
+  // Inline RuleEditor appears with name placeholder.
+  const nameInput = alice.locator('input[placeholder="e.g. Preserve numbers"]')
+  await expect(nameInput).toBeVisible({ timeout: 3_000 })
+
+  // Description input.
+  await expect(
+    alice.locator('input[placeholder="Numbers in source must appear in target"]')
+  ).toBeVisible({ timeout: 3_000 })
+
+  // Cancel closes the editor.
+  const cancelBtn = alice.getByRole("button", { name: /Cancel/i }).first()
+  await cancelBtn.click()
+  await expect(nameInput).not.toBeVisible({ timeout: 3_000 })
+
+  // "+ Add Rule" button is back to enabled.
+  await expect(addRuleBtn).toBeEnabled({ timeout: 3_000 })
+})

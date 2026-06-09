@@ -926,7 +926,12 @@ export function ProjectWorkspace() {
     await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
     await refreshOutboxPending()
     revalidateAuditStats()
-    revalidateCells()
+    // Targeted: we just changed exactly one cell. Pull only that row back
+    // (its authoritative event_id becomes the next commit's parent) instead of
+    // re-streaming all ~30k source cells. The optimistic shadow keeps the value
+    // visible until this confirms; the WS event.applied also pokes the same
+    // cell (coalesced).
+    revalidateCell(cell.id)
 
     // ── Auto statistical BT after AI completion commit (FRO-203) ───────────
     // Runs synchronously — no network, no extra loading state. LLM polish
@@ -940,7 +945,7 @@ export function ProjectWorkspace() {
         persistBtRef.current(cell, btText, false)
       }
     }
-  }, [project?.id, applyOptimisticTargetEdit, getTokenForProjectFile, refreshOutboxPending, revalidateAuditStats, revalidateCells])
+  }, [project?.id, applyOptimisticTargetEdit, getTokenForProjectFile, refreshOutboxPending, revalidateAuditStats, revalidateCell])
 
   /**
    * AD-2 sibling promotion: emit a new target-cell commit whose parentId is
@@ -966,8 +971,9 @@ export function ProjectWorkspace() {
     await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
     await refreshOutboxPending()
     revalidateAuditStats()
-    revalidateCells()
-  }, [project?.id, historyCellId, cells, applyOptimisticTargetEdit, getTokenForProjectFile, currentUsername, refreshOutboxPending, revalidateAuditStats, revalidateCells])
+    // Single-cell promotion — targeted refetch (see commitCompletedCell).
+    revalidateCell(cell.id)
+  }, [project?.id, historyCellId, cells, applyOptimisticTargetEdit, getTokenForProjectFile, currentUsername, refreshOutboxPending, revalidateAuditStats, revalidateCell])
 
   const { completeSingle, completeBatch, isConfigured, isAvailable: isCompletionAvailable, completing, examples, errors, previews } = useCompletion(
     project?.completionSettings, project?.sourceLanguage || "", project?.targetLanguage || "", branchingSearch, branchingSearchPassages, frontierSession, commitCompletedCell, rules, allProjectCells
@@ -1843,7 +1849,7 @@ export function ProjectWorkspace() {
     navigate,
   }), [activeFileId, completeBatch, cells, project, frontierSession, currentUsername, navigate, openImportFlow, openExportFlow])
 
-  const handleCellCommitted = useCallback(async () => {
+  const handleCellCommitted = useCallback(async (cellId?: string) => {
     // Capture before async work — another edit could arrive during the flush.
     const pendingBt = lastOptimisticEditRef.current
     lastOptimisticEditRef.current = null
@@ -1851,7 +1857,12 @@ export function ProjectWorkspace() {
     await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
     await refreshOutboxPending()
     revalidateAuditStats()
-    revalidateCells()
+    // Targeted: a hand edit / validate / waive touches exactly one cell. Pull
+    // only that row instead of re-streaming the whole file. Fall back to a full
+    // revalidate if the caller didn't pass a cellId (older call sites).
+    const changed = cellId ?? pendingBt?.cellId
+    if (changed) revalidateCell(changed)
+    else revalidateCells()
 
     // ── Auto statistical BT on target commit (FRO-203) ─────────────────────
     // Run synchronously after the flush so the BT reflects the committed text.
@@ -1869,7 +1880,7 @@ export function ProjectWorkspace() {
         }
       }
     }
-  }, [getTokenForProjectFile, refreshOutboxPending, revalidateAuditStats, revalidateCells])
+  }, [getTokenForProjectFile, refreshOutboxPending, revalidateAuditStats, revalidateCell, revalidateCells])
 
   if (status === "loading") return <WorkspaceSkeleton />
   if (status === "no-session") {

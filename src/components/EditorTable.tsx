@@ -343,7 +343,7 @@ interface EditorTableProps {
   onOpenAudioSetup?: () => void
   /** Called after a successful `target.cell.commit` enqueue so the parent
    *  refetches the cells projection. */
-  onCellCommitted?: () => void | Promise<void>
+  onCellCommitted?: (cellId: string) => void | Promise<void>
   /** Optimistic local patch fired BEFORE the outbox enqueue so the editor's
    *  rule infractions + per-cell UI re-derive instantly without waiting for
    *  the projection round-trip. The follow-up `onCellCommitted` -> revalidate
@@ -992,7 +992,7 @@ interface MemoizedRowProps {
    *  Resolved once per file by the parent (membership look-up) so this prop
    *  is just a stable boolean — preserves the row's React.memo invariant. */
   isStaleSource: boolean
-  onCellCommitted?: () => void | Promise<void>
+  onCellCommitted?: (cellId: string) => void | Promise<void>
   onOptimisticEdit?: (cellId: string, patch: { value: string; valueHtml?: string }) => void
   lockHolderLabel: string | null
   remoteChangedWhileFocused: boolean
@@ -1209,7 +1209,7 @@ interface EditorRowProps {
    *  target commit. Renders a small warning badge next to the validation
    *  status. Computed once-per-file by the parent. */
   isStaleSource: boolean
-  onCellCommitted?: () => void
+  onCellCommitted?: (cellId: string) => void
   onOptimisticEdit?: (cellId: string, patch: { value: string; valueHtml?: string }) => void
   lockHolderLabel: string | null
   remoteChangedWhileFocused: boolean
@@ -1452,7 +1452,7 @@ function EditorRow({
       ...(input.reason ? { reason: input.reason } : {}),
       author: username,
     }).then(() => {
-      void onCellCommitted?.()
+      void onCellCommitted?.(cell.id)
     }).catch((err) => {
       console.warn("[waive] emit failed:", err)
     })
@@ -1468,7 +1468,7 @@ function EditorRow({
       ruleId,
       author: username,
     }).then(() => {
-      void onCellCommitted?.()
+      void onCellCommitted?.(cell.id)
     }).catch((err) => {
       console.warn("[unwaive] emit failed:", err)
     })
@@ -1512,7 +1512,7 @@ function EditorRow({
     // trigger a soft revalidate so the user sees the latest projection.
     if (lockHolderLabel) {
       console.warn("[editor-commit] aborting: lock held by", lockHolderLabel)
-      void onCellCommitted?.()
+      void onCellCommitted?.(cell.id)
       return
     }
     // Optimistic local patch: applies BEFORE the outbox enqueue so this row's
@@ -1532,7 +1532,7 @@ function EditorRow({
       author: username,
     }).then((eventId) => {
       pendingTargetEventIdRef.current = eventId
-      void onCellCommitted?.()
+      void onCellCommitted?.(cell.id)
     }).catch((err) => {
       console.warn("[editor-commit] enqueue failed:", err)
     })
@@ -1612,7 +1612,7 @@ function EditorRow({
       editEventId,
       author: username,
     }).then(() => {
-      void onCellCommitted?.()
+      void onCellCommitted?.(cell.id)
     }).catch((err) => {
       console.warn(`[${validated ? "validate" : "unvalidate"}] emit failed:`, err)
     })
@@ -1629,7 +1629,7 @@ function EditorRow({
 
   const handleDiscardLocalAndReload = useCallback(() => {
     onAckRemoteChange?.(cell.id)
-    onCellCommitted?.()
+    onCellCommitted?.(cell.id)
   }, [cell.id, onAckRemoteChange, onCellCommitted])
 
   // Detect formatting loss: source has inline style marks that the target doesn't.

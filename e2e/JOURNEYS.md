@@ -197,6 +197,7 @@
 | Terminology | Add rendering to concept                              | `e2e/specs/projects/terminology-add-rendering.smoke.spec.ts`  |   ✅   |
 | Terminology | Rendering status select (preferred/alternate/forbidden)| `e2e/specs/projects/terminology-rendering-status-select.smoke.spec.ts` |   ✅   |
 | Terminology | Term detail popover from concept row                  | `e2e/specs/projects/terminology-term-detail.smoke.spec.ts`    |   ✅   |
+| Terminology | Term detail occurrence row inline cell editor         | `e2e/specs/projects/terminology-term-detail-inline-edit.smoke.spec.ts` | ✅ |
 | Terminology | Candidate terms tab renders mined terms               | `e2e/specs/projects/terminology-candidates-tab.smoke.spec.ts` |   ✅   |
 | Terminology | Export CSV and TBX buttons                           | `e2e/specs/projects/terminology-export.smoke.spec.ts`         |   ✅   |
 | Terminology | Import termbase dialog opens                          | `e2e/specs/projects/terminology-import-dialog.smoke.spec.ts`  |   ✅   |

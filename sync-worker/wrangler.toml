@@ -169,3 +169,32 @@ database_id = "c995bf9a-97c0-4966-a112-053a2d04d8f9"
 [[env.staging.hyperdrive]]
 binding = "HYPERDRIVE"
 id = "REPLACE_WITH_STAGING_HYPERDRIVE_ID"
+
+# ---------------------------------------------------------------------------
+# e2e test environment — identical to the default dev profile except the
+# Hyperdrive binding is absent so e2e-up can boot without Postgres.
+# When HYPERDRIVE is unbound, index.ts falls through to D1 (local SQLite).
+# ---------------------------------------------------------------------------
+[env.e2e]
+name = "aquilla-sync-worker-e2e"
+
+[[env.e2e.durable_objects.bindings]]
+name = "ProjectSync"
+class_name = "ProjectSync"
+
+[[env.e2e.migrations]]
+tag = "v1"
+new_sqlite_classes = ["FileSync"]
+
+[[env.e2e.migrations]]
+tag = "v2"
+new_sqlite_classes = ["ProjectSync"]
+
+[[env.e2e.r2_buckets]]
+binding = "SNAPSHOTS"
+bucket_name = "aquilla-snapshots"
+
+[[env.e2e.d1_databases]]
+binding = "AQUILLA_DB"
+database_name = "aquilla-db"
+database_id = "11828e9d-998b-4d3f-a405-91d9f624f94a"

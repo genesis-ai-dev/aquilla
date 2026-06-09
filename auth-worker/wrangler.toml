@@ -170,3 +170,28 @@ SYNC_WORKER_URL = "https://api.dev.aquilla.app/sync"
 DEFAULT_LLM_MODEL = "anthropic/claude-sonnet-4.5"
 ENVIRONMENT = "staging"
 PLATFORM_ADMINS = "daniel2,dadukhankevin,ryder,ryder-aquilla,ryder-aquilla-2,ryder-aquilla-3"
+
+# ---------------------------------------------------------------------------
+# e2e test environment — identical to the default dev profile except the
+# Hyperdrive binding is intentionally absent. Without HYPERDRIVE, index.ts
+# falls straight through to the D1 (local SQLite) path, letting e2e-up
+# boot the worker against --persist-to local state without requiring a
+# running Postgres instance.
+# ---------------------------------------------------------------------------
+[env.e2e]
+name = "aquilla-identity-e2e"
+
+[[env.e2e.d1_databases]]
+binding = "AQUILLA_DB"
+database_name = "aquilla-db"
+database_id = "11828e9d-998b-4d3f-a405-91d9f624f94a"
+migrations_dir = "migrations"
+
+[env.e2e.vars]
+ALGORITHM = "HS256"
+ACCESS_TOKEN_EXPIRE_MINUTES = "43200"
+EMAIL_FROM = "noreply@local.test"
+BASE_URL = "http://127.0.0.1:5173"
+SYNC_WORKER_URL = "http://127.0.0.1:8788"
+ENVIRONMENT = "development"
+PLATFORM_ADMINS = "dev"

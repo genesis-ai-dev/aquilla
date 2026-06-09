@@ -23,6 +23,12 @@ const SYNC_WORKER_DIR = path.join(REPO_ROOT, "sync-worker")
 // sync-worker (writes files/cells/events) see the same aquilla-db rows. Without
 // --persist-to each cwd gets its own isolated sqlite and the two drift apart.
 const PERSIST_DIR = path.join(REPO_ROOT, ".wrangler-e2e-state")
+// Local Postgres (Docker aquilla-dev-pg) used as the Hyperdrive target for e2e.
+// Wrangler reads WRANGLER_HYPERDRIVE_LOCAL_CONNECTION_STRING_<BINDING> to
+// override the Hyperdrive connection without needing a deployed Hyperdrive ID.
+// The aquilla_e2e database is recreated from db/postgres/schema.sql on each run.
+const E2E_PG_URL = "postgresql://aquilla:aquilla@localhost:5432/aquilla_e2e"
+const HYPERDRIVE_ENV = { WRANGLER_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE: E2E_PG_URL }
 const IDENTITY_PORT = 8787
 const SYNC_WORKER_PORT = 8788
 const VITE_PORT = 5173
@@ -164,32 +170,46 @@ async function main(): Promise<void> {
   ensureDevVars(AUTH_WORKER_DIR, "identity")
   ensureDevVars(SYNC_WORKER_DIR, "sync")
 
-  // Reset the shared local D1 so every run starts from an empty schema (the
-  // /__test__/reset endpoint truncates data, but a fresh sqlite also picks up
-  // any migration changes since the last run).
+  // Reset wrangler local D1 state (Durable Object storage, KV caches, etc.)
   console.log(`[boot 1/8] resetting wrangler local state… (logs: ${LOG_DIR}/)`)
   rmSync(PERSIST_DIR, { recursive: true, force: true })
   mkdirSync(PERSIST_DIR, { recursive: true })
 
-  // 2. Apply aquilla-db migrations. auth-worker owns the full schema (identity
-  // + orgs + projects + members + file/cell projections) under migrations/;
-  // sync-worker binds the same D1 and reads it via the shared --persist-to dir.
-  console.log("[boot 2/8] applying aquilla-db migrations…")
-  await runOnce(
-    "npx",
-    ["wrangler", "d1", "migrations", "apply", "aquilla-db", "--local", "--persist-to", PERSIST_DIR],
-    AUTH_WORKER_DIR,
-    "migrations",
+  // 2. Drop + recreate the e2e Postgres DB so every run starts from a clean
+  //    schema. Workers use Hyperdrive → Postgres (not D1 SQLite) for all auth
+  //    and sync queries, so we apply db/postgres/schema.sql here instead of
+  //    wrangler d1 migrations apply.
+  console.log("[boot 2/8] resetting aquilla_e2e postgres schema…")
+  spawnSync(
+    "docker",
+    ["exec", "aquilla-dev-pg", "psql", "-U", "aquilla", "-d", "postgres",
+      "-c", "DROP DATABASE IF EXISTS aquilla_e2e WITH (FORCE); CREATE DATABASE aquilla_e2e;"],
+    { stdio: "inherit" },
   )
+  // Pipe schema.sql into psql via stdin — no shell interpolation needed.
+  const schemaSql = readFileSync(path.join(REPO_ROOT, "db/postgres/schema.sql"))
+  const psqlResult = spawnSync(
+    "docker",
+    ["exec", "-i", "aquilla-dev-pg", "psql", "-U", "aquilla", "-d", "aquilla_e2e"],
+    { input: schemaSql, stdio: ["pipe", "pipe", "pipe"] },
+  )
+  if (psqlResult.status !== 0) {
+    console.error("[e2e-up] schema apply failed:", psqlResult.stderr?.toString())
+    process.exit(1)
+  }
 
-  // 3. Boot identity (auth-worker). --var WRANGLER_LOCAL:1 unlocks
-  // /__test__/reset (process env alone doesn't reach c.env bindings).
+  // 3. Boot identity (auth-worker). WRANGLER_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE
+  // redirects Hyperdrive to the local Docker Postgres (aquilla_e2e) so all auth
+  // SQL (Postgres syntax) executes correctly without a deployed Hyperdrive.
+  // --var WRANGLER_LOCAL:1 unlocks /__test__/reset (process env alone doesn't
+  // reach c.env bindings).
   console.log(`[boot 3/8] starting identity (auth-worker) on :${IDENTITY_PORT}…`)
   const identity: SpawnedWorker = await spawnWranglerDev({
     cwd: AUTH_WORKER_DIR,
     port: IDENTITY_PORT,
     label: "identity",
     env: {
+      ...HYPERDRIVE_ENV,
       SYNC_WORKER_URL: `http://127.0.0.1:${SYNC_WORKER_PORT}`,
       ENVIRONMENT: "development",
     },
@@ -199,12 +219,13 @@ async function main(): Promise<void> {
   })
   cleanup.push(() => identity.kill())
 
-  // 4. Boot sync-worker — same shared local D1 via --persist-to.
+  // 4. Boot sync-worker. Same Hyperdrive override so sync SQL also hits Postgres.
   console.log(`[boot 4/8] starting sync-worker on :${SYNC_WORKER_PORT}…`)
   const sync: SpawnedWorker = await spawnWranglerDev({
     cwd: SYNC_WORKER_DIR,
     port: SYNC_WORKER_PORT,
     label: "sync",
+    env: { ...HYPERDRIVE_ENV },
     extraArgs: ["--persist-to", PERSIST_DIR],
     logFile: openLogFile(logFiles.sync),
     streamToParent: VERBOSE,

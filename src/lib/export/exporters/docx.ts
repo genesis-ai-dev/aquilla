@@ -6,24 +6,33 @@
 // then uses JSZip to open the DOCX, substitutes translations paragraph-by-
 // paragraph, and produces a new .docx file.
 //
-// Fidelity: paragraph/heading STRUCTURE is preserved (w:p elements, styles).
-// Per-run bold/italic/underline formatting inside translated paragraphs is
-// DROPPED — the translation is injected as a single <w:r> replacing all runs.
-// This is an intentional trade-off: formatting the source had may not apply to
-// the translated text, and re-distributing translation text back across the
-// original run structure is not tractable without knowing how the translated
-// text maps to the original runs. Untranslated paragraphs keep their original
-// runs untouched.
+// Fidelity levels:
+//   1. Paragraph/heading STRUCTURE is preserved (w:p elements, w:pStyle).
+//   2. DOMINANT RUN character formatting (w:rPr) is preserved on the injected
+//      run — bold, italic, underline, font-size, font family etc. survive at
+//      the level of the paragraph's first/dominant run.
+//   3. MIXED-FORMAT paragraphs (multiple differently-formatted runs) are
+//      collapsed to a single run carrying the dominant run's formatting.
+//
+// SWARM-TODO (FRO-233): Mixed-format paragraphs — a paragraph with e.g.
+//   "Hello <bold>world</bold> today" contains two differently-formatted runs.
+//   After injection the entire translated paragraph gets the first run's rPr,
+//   so the bold mid-paragraph emphasis is lost. Fixing this requires tracking a
+//   per-run text→format map at import time and storing it alongside the cells
+//   so the exporter can reconstruct a multi-run paragraph. That work is
+//   deferred. Untranslated paragraphs keep ALL their original runs untouched.
 //
 // What is NOT achievable in this slice:
-// - Per-run formatting preservation for translated paragraphs (only one run per para)
+// - Mixed-format per-run preservation within a single translated paragraph
+//   (see SWARM-TODO above)
 // - PPTX (separate issue FRO-152a)
 // - Files > 512 KB at import time (no side-car stored; falls back to 501)
 //
-// HONESTY: this does not fully meet "export preserves formatting" for inline
-// bold/italic on translated paragraphs. It meets the structural claim
-// (headings, paragraph order) and is a meaningful improvement over the plain
-// text lossy formats.
+// HONESTY: this does not fully meet "export preserves formatting" for mixed
+// inline bold/italic on translated paragraphs. It DOES meet the structural
+// claim (headings, paragraph order) and preserves dominant run character
+// formatting (bold, italic, font) — a meaningful improvement over the previous
+// complete-drop behaviour.
 
 import JSZip from "jszip"
 import type { CellData } from "@/hooks/useCells"
@@ -145,12 +154,60 @@ export async function exportDocx(
 }
 
 /**
+ * Extract the dominant run's w:rPr element from a paragraph.
+ *
+ * "Dominant" = the first <w:r> that contains visible text. If no such run
+ * exists (paragraph was empty or bookmarks only), returns null and the caller
+ * will create a run with no character formatting.
+ *
+ * We use the *first text-bearing run* as the heuristic because:
+ *  - Heading paragraphs in Word typically have uniform formatting on all runs.
+ *  - Body paragraphs where the first word is formatted differently are unusual.
+ *  - For mixed-format paragraphs this loses later runs' per-run formatting;
+ *    see SWARM-TODO at the top of this file.
+ */
+function extractDominantRpr(p: Element): Element | null {
+  const runs = p.getElementsByTagName("w:r")
+  for (let i = 0; i < runs.length; i++) {
+    const run = runs[i]
+    // Only count runs that carry text content.
+    const textEls = run.getElementsByTagName("w:t")
+    let hasText = false
+    for (let j = 0; j < textEls.length; j++) {
+      if (textEls[j].textContent?.trim()) {
+        hasText = true
+        break
+      }
+    }
+    if (!hasText) continue
+
+    // Return the rPr child of this run if present.
+    const rPrEls = run.getElementsByTagName("w:rPr")
+    if (rPrEls.length > 0) {
+      return rPrEls[0]
+    }
+    // First text run found but has no rPr — no character formatting to clone.
+    return null
+  }
+  return null
+}
+
+/**
  * Replace all <w:r> runs in a paragraph with a single run containing the
- * translated text. Preserves <w:pPr> (style) but does not attempt to restore
- * per-run formatting — this is the documented fidelity limitation.
+ * translated text. Preserves:
+ *   - <w:pPr> (paragraph/heading style, spacing, etc.)
+ *   - The dominant run's <w:rPr> (bold, italic, font-size, font family, …)
+ *
+ * SWARM-TODO (FRO-233): For mixed-format paragraphs (multiple differently-
+ * formatted runs) the entire translated paragraph receives only the dominant
+ * (first text-bearing) run's rPr. Per-run inline formatting for non-dominant
+ * runs is not preserved. See file header for details.
  */
 function injectTranslationIntoParagraph(p: Element, text: string): void {
   const doc = p.ownerDocument!
+
+  // Capture the dominant run's rPr BEFORE removing any runs.
+  const dominantRpr = extractDominantRpr(p)
 
   // Collect all child nodes that are NOT w:pPr.
   const toRemove: Element[] = []
@@ -166,8 +223,14 @@ function injectTranslationIntoParagraph(p: Element, text: string): void {
   }
   for (const el of toRemove) el.remove()
 
-  // Create a new run: <w:r><w:t xml:space="preserve">...</w:t></w:r>
+  // Create a new run: <w:r>[<w:rPr>…</w:rPr>]<w:t xml:space="preserve">…</w:t></w:r>
   const run = doc.createElementNS(W_NS, "w:r")
+
+  // Clone and attach the dominant run's character formatting if present.
+  if (dominantRpr) {
+    run.appendChild(dominantRpr.cloneNode(true))
+  }
+
   const t = doc.createElementNS(W_NS, "w:t")
   t.setAttribute("xml:space", "preserve")
   t.textContent = text

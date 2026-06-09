@@ -2,6 +2,10 @@
 
 Rules for any AI coding assistant working in this repo (Claude Code, Cursor, Copilot, Aider, etc.).
 
+## CI — deploy build is the gating check
+
+**`npm run build` (i.e. `tsc -b && vite build`) is the CI gate, not `tsc --noEmit`.** Do not revert the CI workflow to `--noEmit` — it misses project-reference / `erasableSyntaxOnly` errors that only `tsc -b` catches (see FRO-213 / FRO-219).
+
 ## Testing — non-negotiable
 
 Before claiming any feature is complete:

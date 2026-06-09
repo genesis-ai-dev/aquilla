@@ -656,3 +656,35 @@ The terminology violation IS rendered on a fresh page load.
 **Conclusion**: BUG-TERM-6 is resolved or was a false negative. The terminology violation renders correctly on a genuine fresh load when the concept has `status:"active"` on the server before the session begins. The prior inconclusive result likely reflects a timing issue in the same-session flow (concept promoted to active, then immediately checking the editor before `useProjectSettings` had time to propagate the updated terminology to `useRules`), not a rendering gap in the fresh-load path.
 
 **Remaining nuance (not a bug)**: The violation appears ONLY in the Issues tab (cell details panel), NOT as an inline blot on the cell face. There is no row-level infraction count badge visible on the unexpanded row. A user would only discover the terminology violation by opening cell details and switching to the Issues tab. This is by design (the `source-requires-target` check has no character span to render), but it means the violation is not proactively surfaced to translators scanning rows without expanding them.
+
+---
+
+## PD4 Re-QA (2026-06-09)
+
+**Build**: v0.1.0 · swarm/pd4-integration · 61224e7
+**Tested**: 2026-06-09
+**Environment**: http://127.0.0.1:5173/ (worktree Vite) · auth :8788 · sync :8789
+**Login**: `/__dev/login` → auto-logged in as `dev` (OWNER of Dev Org + dev-project)
+**Viewport**: 1280×800 (desktop), 480×800 (narrow), 1280×600 (short) for scroll checks
+**Tool**: Claude Preview tools navigated to worktree Vite on port 5173
+
+### Summary
+
+| Issue | Status | Evidence |
+|-------|--------|----------|
+| FRO-231 | **PASS** | Controls row has `flex flex-wrap items-center gap-3 pl-4 pr-10`; Target pill right=869, Close button left=940 (gap=71px, no overlap). At 480px width, pills wrap to second row. Clicking "Target" activates it (aria-pressed=true) without closing dialog. |
+| FRO-258 | **PASS** | DialogContent class contains `flex max-h-[85vh] flex-col overflow-hidden`; member list `ul` has `max-h-[50vh] overflow-y-auto`; list items have `min-w-0 truncate`. No horizontal scrollbar at 1280×600. |
+| FRO-180 | **PASS** | `/project/dev-project/members` renders inside editor shell (sidebar+topbar persist). Grant-source badges visible (`org:owner, creator:owner` for dev; `via org` for alice). Added bob → appeared with contributor role. Revoke-all dialog showed grant paths, confirm button disabled until "bob" typed, then enabled → success toast "Direct grant for bob has been removed." Invite link tab created `/join/<token>` URL. "Back to project" returned to editor without full remount. NOTE: native-select role change (contributor→reviewer) not visually confirmed — native select change event doesn't trigger React state; role change via API not directly tested in this run. |
+| FRO-255 | **PARTIAL** | As OWNER (900): all settings fields are editable (disabled=false, readOnly=false). Source confirmed: `EDIT_ROLE_FLOOR = ROLE.MAINTAINER (600)`, tooltip text "Maintainer or higher can edit shared settings." at `src/components/ProjectSettings.tsx:166`. Sub-600 live check skipped — impractical to log in as bob via preview tools after reset; covered by 20 unit tests in `src/hooks/useProjectSettings.test.ts`. |
+| FRO-233 | **PARTIAL** | DOCX import succeeded (bold and italic cells rendered with correct formatting in editor). Export dialog correctly offers "Word (.docx)" for docx-sourced files. Export round-trip returned "Failed to fetch" — sync-worker unreachable from preview iframe context (cross-origin fetch blocked; confirmed by direct fetch test). This is a tooling limitation, not a code bug. Source fix confirmed: `dominantRpr.cloneNode(true)` at `src/lib/export/exporters/docx.ts:231`. 13 unit tests in `src/lib/export/exporters/docx.test.ts` cover bold/italic/sz/no-rPr cases. |
+| FRO-173 | **PARTIAL** | Browser tooling (Claude Preview) does not support fake media streams. Audio recording → cell_audio code path verified by 7/7 unit tests in `sync-worker/src/__tests__/cell-audio.test.ts` (attach/select/remove/API) + 5/5 in `src/lib/migrate/audio.test.ts`. Live test steps documented in `docs/swarm/AUDIO-GAP-FRO173.md`. |
+
+### New bugs found
+
+None.
+
+### Notes
+
+- The Claude Preview tool's browser context runs in a Claude app iframe; direct fetch to `localhost:8789` (sync-worker) is blocked cross-origin. This blocked the FRO-233 export round-trip and the FRO-173 recording test.
+- Backend was reset via `POST /__test__/reset` mid-session (alice/bob/carol seeded). Dev session JWT refreshed via `/__dev__/login` after reset.
+- The worktree Vite (port 5173, process owned by `scripts/dev-stack.ts`) was the actual server under test; the preview tool's managed server (port 5180, from main repo root) was navigated away from to 127.0.0.1:5173.

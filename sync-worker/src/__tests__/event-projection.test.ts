@@ -280,11 +280,12 @@ describe('buildEventProjectionStmts — side scoping (regression: target edits m
       // Three accepted forms, all of which keep the mutation scoped to one side:
       //  1. a literal `side = 'target'` / `side = 'source'` WHERE clause
       //     (source.cell.commit UPDATE),
-      //  2. the side literal in an UPSERT's VALUES list (target.cell.commit),
+      //  2. the side literal in an UPSERT's row source — `VALUES (...)` or the
+      //     `SELECT ...` form used for chain-claim gating (target.cell.commit),
       //  3. a parametrised `side = ?` with the matching value in args
       //     (deletes, reorders).
       const litMatch = sql.match(/side\s*=\s*'(source|target)'/)
-      const valuesMatch = sql.match(/VALUES\s*\([^)]*'(source|target)'/)
+      const valuesMatch = sql.match(/(?:VALUES\s*\(|\)\s*SELECT\s)[^)]*'(source|target)'/)
       if (litMatch) {
         expect(litMatch[1]).toBe(expectedSide)
       } else if (valuesMatch) {

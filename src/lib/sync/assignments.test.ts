@@ -40,9 +40,12 @@ describe("getWorkload", () => {
     expect(out).toEqual([{ userId: 2, username: "anna", openAssignments: 1, cellsTotal: 3, cellsDone: 2 }])
   })
 
-  it("throws on non-ok", async () => {
+  it("throws on non-ok with a human message, not 'HTTP 403'", async () => {
     mockFetchWithTimeout.mockResolvedValue(jsonRes({}, false, 403))
-    await expect(getWorkload("jwt", 1)).rejects.toThrow(/HTTP 403/)
+    const err = await getWorkload("jwt", 1).catch((e: unknown) => e)
+    expect(err).toBeInstanceOf(Error)
+    expect((err as Error).message).not.toMatch(/HTTP\s*403/)
+    expect((err as Error).name).toBe("UserError")
   })
 })
 
@@ -137,8 +140,11 @@ describe("getFileChapters", () => {
     expect(out).toEqual(["GEN 1", "GEN 2", "GEN 10"])
   })
 
-  it("throws on non-ok", async () => {
+  it("throws on non-ok with a human message, not 'HTTP 403'", async () => {
     mockFetchWithTimeout.mockResolvedValue(jsonRes({}, false, 403))
-    await expect(getFileChapters("jwt", "p1", "f1")).rejects.toThrow(/HTTP 403/)
+    const err = await getFileChapters("jwt", "p1", "f1").catch((e: unknown) => e)
+    expect(err).toBeInstanceOf(Error)
+    expect((err as Error).message).not.toMatch(/HTTP\s*403/)
+    expect((err as Error).name).toBe("UserError")
   })
 })

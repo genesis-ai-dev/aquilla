@@ -25,9 +25,12 @@ describe("getPortfolio", () => {
     expect(result).toEqual(projects)
   })
 
-  it("throws on non-OK status", async () => {
+  it("throws on non-OK status with a human message, not 'HTTP 403'", async () => {
     global.fetch = vi.fn(async () => new Response("nope", { status: 403 })) as unknown as typeof fetch
-    await expect(getPortfolio("jwt", 1)).rejects.toThrow(/HTTP 403/)
+    const err = await getPortfolio("jwt", 1).catch((e: unknown) => e)
+    expect(err).toBeInstanceOf(Error)
+    expect((err as Error).message).not.toMatch(/HTTP\s*403/)
+    expect((err as Error).name).toBe("UserError")
   })
 })
 

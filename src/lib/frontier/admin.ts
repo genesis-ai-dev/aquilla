@@ -6,6 +6,7 @@
 
 import { FRONTIER_BASE } from "./auth"
 import { fetchWithTimeout } from "./orgs"
+import { UserError } from "@/lib/errors/user-error"
 
 const authHeaders = (jwt: string): Record<string, string> => ({
   Authorization: `Bearer ${jwt}`,
@@ -96,50 +97,50 @@ export interface AdminAdmin {
 export async function getAdminMe(jwt: string): Promise<boolean> {
   const res = await fetchWithTimeout(`${FRONTIER_BASE}/api/v2/admin/me`, { headers: authHeaders(jwt) })
   if (res.status === 403 || res.status === 401) return false
-  if (!res.ok) throw new Error(`getAdminMe failed: HTTP ${res.status}`)
+  if (!res.ok) throw new UserError(res.status, "")
   const body = (await res.json()) as { isPlatformAdmin?: boolean }
   return body.isPlatformAdmin === true
 }
 
 export async function getAdminAdmins(jwt: string): Promise<AdminAdmin[]> {
   const res = await fetchWithTimeout(`${FRONTIER_BASE}/api/v2/admin/admins`, { headers: authHeaders(jwt) })
-  if (!res.ok) throw new Error(`getAdminAdmins failed: HTTP ${res.status}`)
+  if (!res.ok) throw new UserError(res.status, "")
   return ((await res.json()) as { admins: AdminAdmin[] }).admins
 }
 
 export async function getAdminOverview(jwt: string): Promise<AdminOverview> {
   const res = await fetchWithTimeout(`${FRONTIER_BASE}/api/v2/admin/overview`, { headers: authHeaders(jwt) })
-  if (!res.ok) throw new Error(`getAdminOverview failed: HTTP ${res.status}`)
+  if (!res.ok) throw new UserError(res.status, "")
   return (await res.json()) as AdminOverview
 }
 
 export async function getAdminOrgs(jwt: string): Promise<AdminOrg[]> {
   const res = await fetchWithTimeout(`${FRONTIER_BASE}/api/v2/admin/orgs`, { headers: authHeaders(jwt) })
-  if (!res.ok) throw new Error(`getAdminOrgs failed: HTTP ${res.status}`)
+  if (!res.ok) throw new UserError(res.status, "")
   return ((await res.json()) as { orgs: AdminOrg[] }).orgs
 }
 
 export async function getAdminTeams(jwt: string): Promise<AdminTeam[]> {
   const res = await fetchWithTimeout(`${FRONTIER_BASE}/api/v2/admin/teams`, { headers: authHeaders(jwt) })
-  if (!res.ok) throw new Error(`getAdminTeams failed: HTTP ${res.status}`)
+  if (!res.ok) throw new UserError(res.status, "")
   return ((await res.json()) as { teams: AdminTeam[] }).teams
 }
 
 export async function getAdminUsers(jwt: string): Promise<AdminUser[]> {
   const res = await fetchWithTimeout(`${FRONTIER_BASE}/api/v2/admin/users`, { headers: authHeaders(jwt) })
-  if (!res.ok) throw new Error(`getAdminUsers failed: HTTP ${res.status}`)
+  if (!res.ok) throw new UserError(res.status, "")
   return ((await res.json()) as { users: AdminUser[] }).users
 }
 
 export async function getAdminProjects(jwt: string): Promise<AdminProject[]> {
   const res = await fetchWithTimeout(`${FRONTIER_BASE}/api/v2/admin/projects`, { headers: authHeaders(jwt) })
-  if (!res.ok) throw new Error(`getAdminProjects failed: HTTP ${res.status}`)
+  if (!res.ok) throw new UserError(res.status, "")
   return ((await res.json()) as { projects: AdminProject[] }).projects
 }
 
 export async function getAdminActivity(jwt: string, limit = 100): Promise<AdminActivity[]> {
   const url = `${FRONTIER_BASE}/api/v2/admin/activity?limit=${encodeURIComponent(String(limit))}`
   const res = await fetchWithTimeout(url, { headers: authHeaders(jwt) })
-  if (!res.ok) throw new Error(`getAdminActivity failed: HTTP ${res.status}`)
+  if (!res.ok) throw new UserError(res.status, "")
   return ((await res.json()) as { activity: AdminActivity[] }).activity
 }

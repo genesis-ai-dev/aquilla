@@ -5,6 +5,7 @@ import {
   type ProjectMember,
 } from "@/lib/frontier/members";
 import { useFrontierSession } from "./useFrontierSession";
+import { toUserFacingError } from "@/lib/errors/user-error";
 
 export interface UseProjectMembers {
   members: ProjectMember[];
@@ -46,7 +47,7 @@ export function useProjectMembers(projectId: string | null): UseProjectMembers {
       const next = await listProjectMembers(jwt, projectId);
       if (aliveRef.current) setMembers(next ?? []);
     } catch (e) {
-      if (aliveRef.current) setError(e instanceof Error ? e.message : String(e));
+      if (aliveRef.current) setError(toUserFacingError(e, "project").message);
     } finally {
       if (aliveRef.current) setLoading(false);
     }

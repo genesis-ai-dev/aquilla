@@ -1,5 +1,6 @@
 import { FRONTIER_BASE } from "./auth"
 import { fetchWithTimeout } from "./orgs"
+import { UserError } from "@/lib/errors/user-error"
 
 export interface PortfolioProject {
   id: string
@@ -18,7 +19,7 @@ export async function getPortfolio(jwt: string, orgId: number): Promise<Portfoli
   const res = await fetchWithTimeout(`${FRONTIER_BASE}/api/v2/orgs/${orgId}/portfolio`, {
     headers: { Authorization: `Bearer ${jwt}` },
   })
-  if (!res.ok) throw new Error(`getPortfolio failed: HTTP ${res.status}`)
+  if (!res.ok) throw new UserError(res.status, "", "org")
   return ((await res.json()) as { projects: PortfolioProject[] }).projects
 }
 

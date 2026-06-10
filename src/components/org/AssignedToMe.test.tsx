@@ -65,11 +65,20 @@ describe("AssignedToMe", () => {
   it("surfaces a failed org-level read as an error (no silent empty state)", async () => {
     // The single org read has no per-project fallback — a failure must be
     // visible, not rendered as "no assignments".
-    mockGetMy.mockRejectedValue(new Error("getMyAssignmentsForOrg failed: HTTP 403"))
+    // Simulate what our updated helpers now throw: a UserError with a human message.
+    // (Previously helpers threw raw "HTTP 403" strings; now they throw mapped messages.)
+    mockGetMy.mockRejectedValue(
+      Object.assign(new Error("You don't have permission to do that for this org."), {
+        name: "UserError",
+        category: "forbidden",
+        status: 403,
+        raw: "",
+      })
+    )
     renderInbox()
 
     await waitFor(() =>
-      expect(screen.getByText(/getMyAssignmentsForOrg failed: HTTP 403/)).toBeInTheDocument(),
+      expect(screen.getByText(/don't have permission/)).toBeInTheDocument(),
     )
     expect(screen.queryByText("You have no open assignments.")).not.toBeInTheDocument()
   })

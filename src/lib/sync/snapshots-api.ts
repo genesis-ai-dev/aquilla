@@ -1,4 +1,5 @@
-// Typed fetch wrappers for the snapshot API routes (FRO-176).
+// Typed fetch wrappers for the snapshot API routes (FRO-176). See also
+// src/lib/errors/user-error.ts for the general network error taxonomy.
 //
 // Endpoints consumed:
 //   POST   /api/v1/projects/:id/snapshots           — create
@@ -8,6 +9,7 @@
 //   POST   /api/v1/projects/:id/snapshots/:sid/restore — restore
 
 import { syncWorkerHttpOrigin } from "./sync-worker-url"
+import { messageForStatus } from "@/lib/errors/user-error"
 
 export interface Snapshot {
   id: string
@@ -30,10 +32,13 @@ export class SnapshotApiError extends Error {
   status: number
   body: string
   constructor(status: number, body: string) {
-    super(`snapshot-api: HTTP ${status} — ${body.slice(0, 200)}`)
+    // Human-readable message as the primary string; raw preserved in `body`.
+    const mapped = messageForStatus(status, body, "snapshot")
+    super(mapped.message)
     this.status = status
     this.body = body
     this.name = "SnapshotApiError"
+    this.cause = `HTTP ${status}${body.trim() ? ` — ${body.trim().slice(0, 400)}` : ""}`
   }
 }
 

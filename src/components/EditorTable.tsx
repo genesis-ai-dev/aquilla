@@ -2077,15 +2077,15 @@ function EditorRow({
   // icon; we render Circle with fill="currentColor"). Matches codex-editor
   // desktop AudioValidationStatusIcon's circle-filled codicon.
   // full-self = fully validated and current user is one of the validators (double-check, green)
-  // full-others = fully validated but current user has NOT validated (double-check, teal/muted)
+  // full-others = fully validated but current user has NOT validated (double-check, green)
   const ValidationIcon =
     vs === "full-self" || vs === "full-others" ? CheckCheck :
     vs === "self" ? Check :
     Circle
   const validationColorClass =
-    vs === "full-self" ? "text-emerald-500" :
-    vs === "full-others" ? "text-teal-400" :
-    vs === "self" ? "text-emerald-500" :
+    vs === "full-self" ? "text-green-500" :
+    vs === "full-others" ? "text-green-500" :
+    vs === "self" ? "text-green-500" :
     vs === "others" ? "text-muted-foreground/60" :
     "text-muted-foreground/30"
 
@@ -2438,9 +2438,9 @@ function EditorRow({
                       "active:scale-[0.88] disabled:cursor-not-allowed disabled:opacity-30",
                       "hover:bg-muted/80",
                       validationColorClass,
-                      vs === "none" && "hover:text-emerald-500",
-                      vs === "others" && "hover:text-emerald-500",
-                      vs === "full-others" && "hover:text-emerald-500",
+                      vs === "none" && "hover:text-green-500",
+                      vs === "others" && "hover:text-green-500",
+                      vs === "full-others" && "hover:text-green-500",
                     )}
                     title={healthTooltip}
                     disabled={!canValidate}

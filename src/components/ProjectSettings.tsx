@@ -970,7 +970,6 @@ export function ProjectSettings() {
           <div id="section-decay">
             <DecaySettingsSection
               settings={decaySettings}
-              requiredValidations={validationCount}
               onChange={setDecaySettings}
             />
           </div>

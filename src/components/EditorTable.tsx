@@ -17,7 +17,7 @@ import { useProjectPermissions } from "@/hooks/useProjectPermissions"
 import { emitTargetCellCommit, emitCellValidate, emitCellUnvalidate, emitCellWaive, emitCellUnwaive } from "@/lib/sync/events-emit"
 import { ExamplePanel } from "./ExamplePanel"
 import { HighlightedText, buildHighlightsFromExamples } from "./HighlightedText"
-import { needsAttention, resolveDecayConfig, CELL_NEEDS_ATTENTION_STATUS } from "@/lib/health/decay-engine"
+import { needsAttention, needsAttentionFromConfidence, resolveDecayConfig, CELL_NEEDS_ATTENTION_STATUS } from "@/lib/health/decay-engine"
 import { readValidationCount } from "@/lib/progress/read-validation-count"
 import { StaleSourceIndicator } from "./StaleSourceIndicator"
 import { HealthRing } from "./HealthRing"
@@ -1891,16 +1891,20 @@ function EditorRow({
 
   const hasContent = Boolean(cell.translated && cell.translated.trim())
 
-  // AD-14: a translated cell shows an inline "needs attention" marker when its
-  // decay is above the warn threshold (endorsement_count too low). Absence is
-  // silence, not endorsement — there is no green "done" ring at cell scope. The
-  // target defaults to the project's required-validations gate so a validated
-  // cell clears the marker (resolveDecayConfig).
+  // AD-14 amendment 2026-06-04: use server-derived confidence score from
+  // healthMap when available (set by the confidence overlay in ProjectWorkspace
+  // via useCellConfidence). Falls back to endorsement_count decay for
+  // local-only projects or while the server confidence loads.
+  // Absence of the marker is silence, not endorsement — no green "done" ring.
   const decayConfig = useMemo(
     () => resolveDecayConfig(project.decaySettings, readValidationCount(project)),
     [project.decaySettings, project.validationCount],
   )
-  const cellNeedsAttention = hasContent && needsAttention(cell.endorsementCount ?? 0, decayConfig)
+  const cellNeedsAttention = hasContent && (
+    health !== undefined
+      ? needsAttentionFromConfidence(health, decayConfig.decayWarnThreshold)
+      : needsAttention(cell.endorsementCount ?? 0, decayConfig)
+  )
 
   const hasMajorInfraction = cellInfractions.some(
     (i) => ruleMap.get(i.ruleId)?.severity === "major",

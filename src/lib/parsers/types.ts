@@ -615,7 +615,12 @@ export function isMediaFileType(t: FileType): boolean {
 }
 
 export interface DecaySettings {
-  /** Endorsement count at which a cell reaches decay = 0. Default 5. */
+  /**
+   * @deprecated AD-14 amendment 2026-06-04 retired endorsement_count. Use
+   * `maxHops` to tune the graph-confidence radius instead.
+   * Still read for backwards-compat on existing saved settings; ignored when
+   * a server confidence rollup is available.
+   */
   endorsementTarget?: number
   /** Decay above which the cell editor shows "needs attention". Default 0.66. */
   decayWarnThreshold?: number
@@ -625,4 +630,9 @@ export interface DecaySettings {
    * faster with distance from a human. Default 0.8.
    */
   perHopDecay?: number
+  /**
+   * AD-14 amendment 2026-06-04: max propagation radius (hops from a validated
+   * anchor). Bounds the recursive graph traversal. Default 4.
+   */
+  maxHops?: number
 }

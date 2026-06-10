@@ -108,12 +108,29 @@ export function cellHealth(
  * AD-14: a cell shows the inline "needs attention" marker iff its decay is
  * strictly above the warn threshold. Absence of the marker is silence, NOT
  * endorsement — there is no green "done" affordance at cell scope.
+ *
+ * @deprecated Prefer `needsAttentionFromConfidence` when a server-derived
+ * confidence score (0-100) is available. This overload is kept for
+ * local-only projects and as a fallback while the server rollup loads.
  */
 export function needsAttention(
   endorsementCount: number,
   settings: DecayConfig = DECAY_DEFAULTS,
 ): boolean {
   return cellDecay(endorsementCount, settings.endorsementTarget) > settings.decayWarnThreshold
+}
+
+/**
+ * AD-14 amendment 2026-06-04: confidence-based "needs attention".
+ * Uses a server-derived confidence score (0-100) instead of endorsement_count.
+ * `decay = 1 - confidence/100`; marker shows when decay > decayWarnThreshold.
+ */
+export function needsAttentionFromConfidence(
+  confidenceScore: number,
+  decayWarnThreshold: number = DEFAULT_DECAY_WARN_THRESHOLD,
+): boolean {
+  const decay = 1 - confidenceScore / 100
+  return decay > decayWarnThreshold
 }
 
 export interface DecayHealth {

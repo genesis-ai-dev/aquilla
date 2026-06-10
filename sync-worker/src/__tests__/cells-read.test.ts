@@ -1,7 +1,8 @@
 import { describe, it, expect } from "vitest"
 import { handleCellsReadRequest } from "../events/cells-read-route"
+import { handleRebuildProjectionRequest } from "../events/rebuild"
 import { type CellRow } from "./helpers/in-memory-db"
-import { makeTestDb } from "./helpers/pg-test-db"
+import { makeTestDb, type Seed } from "./helpers/pg-test-db"
 import { makeTestToken } from "./helpers/auth"
 
 const SECRET = "cells-read-secret"
@@ -258,7 +259,9 @@ function makeEvent(
 }
 
 describe("conditional reads + ?since= delta", () => {
-  it("sets ETag \"<fileId>:<maxServerSeq>\" on full reads and includes maxServerSeq in the body", async () => {
+  // ETag shape is "<fileId>:<rebuiltSeq>:<maxSeq>" (audit B5); these seeds
+  // never rebuilt, so rebuiltSeq is 0.
+  it("sets ETag \"<fileId>:<rebuiltSeq>:<maxSeq>\" on full reads and includes maxServerSeq in the body", async () => {
     const { db } = await makeTestDb({
       cells: [makeCell({ cell_id: "c1", anchor_cell_id: null, event_id: "e1" })],
       // Gaps are deliberate: server_seq is an ordering key, never a count.
@@ -274,7 +277,7 @@ describe("conditional reads + ?since= delta", () => {
     )
     const res = (await handleCellsReadRequest(req, envWith(db)))!
     expect(res.status).toBe(200)
-    expect(res.headers.get("ETag")).toBe('"file-x:7"')
+    expect(res.headers.get("ETag")).toBe('"file-x:0:7"')
     expect(res.headers.get("Cache-Control")).toBe("private, no-cache")
     const body = (await res.json()) as { maxServerSeq: number }
     expect(body.maxServerSeq).toBe(7)
@@ -287,11 +290,11 @@ describe("conditional reads + ?since= delta", () => {
     })
     const token = await makeTestToken(SECRET, { projectId: "proj-a", fileId: "file-x" })
     const req = new Request("https://w/api/v1/projects/proj-a/files/file-x/cells", {
-      headers: { Authorization: `Bearer ${token}`, "If-None-Match": '"file-x:5"' },
+      headers: { Authorization: `Bearer ${token}`, "If-None-Match": '"file-x:0:5"' },
     })
     const res = (await handleCellsReadRequest(req, envWith(db)))!
     expect(res.status).toBe(304)
-    expect(res.headers.get("ETag")).toBe('"file-x:5"')
+    expect(res.headers.get("ETag")).toBe('"file-x:0:5"')
     expect(await res.text()).toBe("")
   })
 
@@ -308,11 +311,11 @@ describe("conditional reads + ?since= delta", () => {
       .run()
     const token = await makeTestToken(SECRET, { projectId: "proj-a", fileId: "file-x" })
     const req = new Request("https://w/api/v1/projects/proj-a/files/file-x/cells", {
-      headers: { Authorization: `Bearer ${token}`, "If-None-Match": '"file-x:5"' },
+      headers: { Authorization: `Bearer ${token}`, "If-None-Match": '"file-x:0:5"' },
     })
     const res = (await handleCellsReadRequest(req, envWith(db)))!
     expect(res.status).toBe(200)
-    expect(res.headers.get("ETag")).toBe('"file-x:6"')
+    expect(res.headers.get("ETag")).toBe('"file-x:0:6"')
   })
 
   it("?since= returns only changed rows; a changed cellId with no row signals deletion", async () => {
@@ -429,5 +432,144 @@ describe("conditional reads + ?since= delta", () => {
     )
     const res = (await handleCellsReadRequest(req, envWith(db)))!
     expect(res.status).toBe(400)
+  })
+})
+
+// ── Rebuild visibility (audit B5) ───────────────────────────────────────────
+//
+// A projection rebuild replays existing events and mints none, so
+// MAX(server_seq) — the delta/ETag watermark — does not move even though
+// cells rows changed. Without a rebuild marker every warm client's `?since=`
+// returns an empty delta (and If-None-Match 304s) forever, pinning
+// pre-rebuild values in the client's persistent IDB cache. The fix records a
+// `rebuilt_seq` marker on the project's seq counter; any cursor predating it
+// gets the existing `{resync:true}` response, and the marker is folded into
+// the ETag.
+
+describe("rebuild visibility (audit B5)", () => {
+  /** Projection holds "corrupt" but the log says "correct" — the exact state
+   *  a rebuild repairs (legacy RACE-1 damage). */
+  function corruptedProjectSeed(): Seed {
+    return {
+      cells: [makeCell({ cell_id: "c1", anchor_cell_id: null, event_id: "e1", value: "corrupt" })],
+      events: [
+        makeEvent({
+          id: "e1",
+          server_seq: 1,
+          cell_id: "c1",
+          kind: "target.cell.create",
+          payload: JSON.stringify({ cellId: "c1", value: "correct" }),
+        }),
+      ],
+    } as unknown as Seed
+  }
+
+  async function rebuild(db: AquillaDb) {
+    const res = await handleRebuildProjectionRequest(
+      new Request("https://w/admin/projects/proj-a/rebuild-projection", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${SECRET}` },
+      }),
+      envWith(db),
+    )
+    expect(res!.status).toBe(200)
+  }
+
+  it("a warm client whose since predates a rebuild is told to resync, not handed an empty delta", async () => {
+    const { db } = await makeTestDb(corruptedProjectSeed())
+    const token = await makeTestToken(SECRET, { projectId: "proj-a", fileId: "file-x" })
+    const deltaReq = () =>
+      new Request("https://w/api/v1/projects/proj-a/files/file-x/cells?since=1", {
+        headers: { Authorization: `Bearer ${token}` },
+      })
+
+    // Warm + caught up: empty delta before the rebuild.
+    const before = (await handleCellsReadRequest(deltaReq(), envWith(db)))!
+    const beforeBody = (await before.json()) as { delta?: boolean; changedCellIds?: string[] }
+    expect(beforeBody.delta).toBe(true)
+    expect(beforeBody.changedCellIds).toEqual([])
+
+    await rebuild(db)
+
+    // The rebuild changed c1 ("corrupt" → "correct") without minting events.
+    // The same cursor must now force a resync — an empty delta would pin the
+    // pre-rebuild value in the client's IDB cache indefinitely.
+    const after = (await handleCellsReadRequest(deltaReq(), envWith(db)))!
+    expect(after.status).toBe(200)
+    const afterBody = (await after.json()) as { resync?: boolean; delta?: boolean; maxServerSeq: number }
+    expect(afterBody.resync).toBe(true)
+    expect(afterBody.delta).toBeUndefined()
+
+    // The resync's full refetch hands the client a cursor PAST the marker —
+    // its next delta must be a normal empty delta, not a resync loop.
+    const full = (await handleCellsReadRequest(
+      new Request("https://w/api/v1/projects/proj-a/files/file-x/cells?side=target", {
+        headers: { Authorization: `Bearer ${token}` },
+      }),
+      envWith(db),
+    ))!
+    const fullBody = (await full.json()) as { cells: Array<{ value: string }>; maxServerSeq: number }
+    expect(fullBody.cells[0].value).toBe("correct")
+    expect(fullBody.maxServerSeq).toBeGreaterThanOrEqual(afterBody.maxServerSeq)
+
+    const next = (await handleCellsReadRequest(
+      new Request(
+        `https://w/api/v1/projects/proj-a/files/file-x/cells?since=${fullBody.maxServerSeq}`,
+        { headers: { Authorization: `Bearer ${token}` } },
+      ),
+      envWith(db),
+    ))!
+    const nextBody = (await next.json()) as { delta?: boolean; resync?: boolean; changedCellIds?: string[] }
+    expect(nextBody.resync).toBeUndefined()
+    expect(nextBody.delta).toBe(true)
+    expect(nextBody.changedCellIds).toEqual([])
+  })
+
+  it("the ETag misses across a rebuild even though MAX(server_seq) did not move", async () => {
+    const { db } = await makeTestDb(corruptedProjectSeed())
+    const token = await makeTestToken(SECRET, { projectId: "proj-a", fileId: "file-x" })
+    const fullReq = (etag?: string) =>
+      new Request("https://w/api/v1/projects/proj-a/files/file-x/cells", {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          ...(etag ? { "If-None-Match": etag } : {}),
+        },
+      })
+
+    const first = (await handleCellsReadRequest(fullReq(), envWith(db)))!
+    const preRebuildEtag = first.headers.get("ETag")!
+
+    // Sanity: the tag round-trips to a 304 before the rebuild.
+    const cached = (await handleCellsReadRequest(fullReq(preRebuildEtag), envWith(db)))!
+    expect(cached.status).toBe(304)
+
+    await rebuild(db)
+
+    // Post-rebuild the same tag must MISS (200 + fresh tag), or conditional
+    // readers keep their pre-rebuild rows.
+    const after = (await handleCellsReadRequest(fullReq(preRebuildEtag), envWith(db)))!
+    expect(after.status).toBe(200)
+    expect(after.headers.get("ETag")).not.toBe(preRebuildEtag)
+  })
+
+  it("a project that was never rebuilt (no counter row) behaves as before", async () => {
+    // No project_seq_counters row exists for proj-a (raw seeds bypass the
+    // allocator) — the rebuilt_seq lookup must coalesce to 0 and leave the
+    // delta path untouched.
+    const { db } = await makeTestDb({
+      cells: [makeCell({ cell_id: "c1", anchor_cell_id: null, event_id: "e1" })],
+      events: [makeEvent({ id: "e1", server_seq: 1, cell_id: "c1" })],
+    } as unknown as Seed)
+    const token = await makeTestToken(SECRET, { projectId: "proj-a", fileId: "file-x" })
+    const res = (await handleCellsReadRequest(
+      new Request("https://w/api/v1/projects/proj-a/files/file-x/cells?since=1", {
+        headers: { Authorization: `Bearer ${token}` },
+      }),
+      envWith(db),
+    ))!
+    const body = (await res.json()) as { delta?: boolean; resync?: boolean; maxServerSeq: number }
+    expect(body.resync).toBeUndefined()
+    expect(body.delta).toBe(true)
+    expect(body.maxServerSeq).toBe(1)
   })
 })

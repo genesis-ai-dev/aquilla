@@ -201,9 +201,16 @@ CREATE TABLE events (
 -- self-heals if the counter ever falls behind the log (GREATEST against MAX).
 -- Gaps in server_seq are possible (idempotent replays still bump) and harmless
 -- — server_seq is an ordering key, not a count.
+--
+-- rebuilt_seq (0036, audit B5): the seq a projection rebuild allocated when
+-- it finished. Rebuilds change cells without minting events, so
+-- MAX(events.server_seq) — the GET /cells delta/ETag watermark — does not
+-- move; any `?since=` cursor below rebuilt_seq is told to resync and the
+-- value is folded into the ETag. 0 = never rebuilt.
 CREATE TABLE IF NOT EXISTS project_seq_counters (
-    project_id TEXT PRIMARY KEY,
-    last_seq   BIGINT NOT NULL
+    project_id  TEXT PRIMARY KEY,
+    last_seq    BIGINT NOT NULL,
+    rebuilt_seq BIGINT NOT NULL DEFAULT 0
 );
 
 -- AD-2 first-child arbitration (audit RACE-2 / M1-1). One row per chain slot

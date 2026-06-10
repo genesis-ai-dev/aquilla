@@ -17,18 +17,22 @@
 //                         cells, maxServerSeq }`. A changed cellId with no
 //                         returned row means the cell was deleted (the client
 //                         drops it). When the changed set exceeds
-//                         DELTA_RESYNC_LIMIT the response is
-//                         `{ resync: true, maxServerSeq }` and the client
-//                         falls back to a full stream.
+//                         DELTA_RESYNC_LIMIT — or when `since` predates the
+//                         project's last projection rebuild (audit B5; the
+//                         rebuild changed cells without minting events) —
+//                         the response is `{ resync: true, maxServerSeq }`
+//                         and the client falls back to a full stream.
 //
 // Conditional reads: every non-cellIds response carries
-// `ETag: "<fileId>:<maxServerSeq>"` where maxServerSeq = MAX(server_seq)
-// over the file's events — strictly an ordering key, NEVER a count
-// (server_seq has harmless gaps from idempotent replays). A request with a
-// matching `If-None-Match` returns 304 before any cells row is read. Full
-// (non-delta) responses additionally carry `maxServerSeq` in the JSON body
-// so cross-origin clients can build their next `?since=` cursor without
-// reading response headers.
+// `ETag: "<fileId>:<rebuiltSeq>:<maxSeq>"` where maxSeq = MAX(server_seq)
+// over the file's events and rebuiltSeq is the project's rebuild marker
+// (project_seq_counters.rebuilt_seq, 0 if never rebuilt) — both strictly
+// ordering keys, NEVER counts (server_seq has harmless gaps from idempotent
+// replays). A request with a matching `If-None-Match` returns 304 before any
+// cells row is read. Full (non-delta) responses additionally carry
+// `maxServerSeq` (= GREATEST of the pair) in the JSON body so cross-origin
+// clients can build their next `?since=` cursor without reading response
+// headers.
 //
 // Ordering: cells are returned in **anchor-chain order**. The chain head is
 // the cell with `anchor_cell_id IS NULL`; the next cell is the one whose
@@ -228,25 +232,53 @@ const MAX_LIMIT = 2000
 // resync. Bulk imports / bulk completions are the realistic way past it.
 const DELTA_RESYNC_LIMIT = 500
 
-/** MAX(server_seq) over the file's events — the ETag / `?since=` watermark.
- *  Coalesced to 0 for files with no events yet. `Number()` normalizes the
- *  BIGINT, which different executors surface as number | string | bigint. */
-async function fetchMaxServerSeq(
+interface Watermarks {
+  /** MAX(server_seq) over the file's events; 0 for files with no events. */
+  maxSeq: number
+  /** The project's rebuild marker (audit B5): the seq the last projection
+   *  rebuild allocated when it finished, 0 if never rebuilt. A rebuild
+   *  changes cells without minting events, so maxSeq alone cannot see it. */
+  rebuiltSeq: number
+}
+
+/** The ETag / `?since=` watermark pair, in one round-trip (both subqueries
+ *  are indexed point/range reads). `Number()` normalizes the BIGINTs, which
+ *  different executors surface as number | string | bigint. */
+async function fetchWatermarks(
   db: AquillaDb,
   projectId: string,
   fileId: string,
-): Promise<number> {
-  const raw = await db
+): Promise<Watermarks> {
+  const row = await db
     .prepare(
-      "SELECT COALESCE(MAX(server_seq), 0) AS max_seq FROM events WHERE project_id = ? AND file_id = ?",
+      `SELECT
+         (SELECT COALESCE(MAX(server_seq), 0) FROM events WHERE project_id = ? AND file_id = ?) AS max_seq,
+         (SELECT rebuilt_seq FROM project_seq_counters WHERE project_id = ?) AS rebuilt_seq`,
     )
-    .bind(projectId, fileId)
-    .first<number | string | bigint>("max_seq")
-  return Number(raw ?? 0)
+    .bind(projectId, fileId, projectId)
+    .first<{ max_seq: number | string | bigint; rebuilt_seq: number | string | bigint | null }>()
+  return {
+    maxSeq: Number(row?.max_seq ?? 0),
+    // NULL when the project has no counter row yet (never wrote post-allocator,
+    // never rebuilt) — behaves exactly as before the rebuild marker existed.
+    rebuiltSeq: Number(row?.rebuilt_seq ?? 0),
+  }
 }
 
-function makeEtag(fileId: string, maxServerSeq: number): string {
-  return `"${fileId}:${maxServerSeq}"`
+/** rebuiltSeq is folded in so conditional reads MISS after a rebuild even
+ *  though MAX(server_seq) did not move. */
+function makeEtag(fileId: string, w: Watermarks): string {
+  return `"${fileId}:${w.rebuiltSeq}:${w.maxSeq}"`
+}
+
+/** The watermark advertised to clients as `maxServerSeq` (their next `?since=`
+ *  cursor). Including rebuiltSeq is what terminates the resync: the full
+ *  refetch hands back a cursor at/above the marker, so the client's next
+ *  delta passes the `since < rebuiltSeq` gate instead of looping. Safe: no
+ *  event at or below rebuiltSeq can ever be minted later (the rebuild bumped
+ *  the allocator to it), so no delta is skipped. */
+function advertisedSeq(w: Watermarks): number {
+  return Math.max(w.maxSeq, w.rebuiltSeq)
 }
 
 /** Loose If-None-Match comparison: any listed value (optionally W/-prefixed)
@@ -356,13 +388,23 @@ export async function handleCellsReadRequest(
   // maxServerSeq — the client's next `?since=` re-fetches those rows. Stale
   // in the safe direction, never the lossy one.
   let maxServerSeq: number | null = null
+  let etag: string | null = null
   if (!cellIdsFilter || cellIdsFilter.length === 0) {
-    maxServerSeq = await fetchMaxServerSeq(env.AQUILLA_PG, projectId, fileId)
-    const etag = makeEtag(fileId, maxServerSeq)
+    const watermarks = await fetchWatermarks(env.AQUILLA_PG, projectId, fileId)
+    maxServerSeq = advertisedSeq(watermarks)
+    etag = makeEtag(fileId, watermarks)
     if (ifNoneMatchMatches(request.headers.get("If-None-Match"), etag)) {
       return new Response(null, { status: 304, headers: cacheHeaders(etag) })
     }
     if (since !== null) {
+      // Rebuild gate (audit B5): a projection rebuild changed cells without
+      // minting events, so the seq-range delta below cannot see it. Any
+      // cursor minted before the rebuild finished predates rebuiltSeq —
+      // hand back the same resync marker the >limit branch uses and let the
+      // client fall back to a full stream.
+      if (since < watermarks.rebuiltSeq) {
+        return Response.json({ resync: true, maxServerSeq }, { headers: cacheHeaders(etag) })
+      }
       // Cells touched by any event past the cursor. cell_id IS NULL events
       // (file.rename, project-scoped) bump the watermark but change no rows.
       // idx_events_project_seq makes the seq-range scan cheap when `since`
@@ -474,6 +516,6 @@ export async function handleCellsReadRequest(
       // Null only on the cellIds fast path, which skips the watermark query.
       maxServerSeq,
     },
-    maxServerSeq !== null ? { headers: cacheHeaders(makeEtag(fileId, maxServerSeq)) } : undefined,
+    etag !== null ? { headers: cacheHeaders(etag) } : undefined,
   )
 }

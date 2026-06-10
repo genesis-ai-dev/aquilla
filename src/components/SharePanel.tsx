@@ -92,9 +92,19 @@ function MembersTab({ projectId }: { projectId: string }) {
   // FrontierSession has no userId — server enforces self-grant rejection so we
   // pass null and skip the local self-block.
   const callerUserId = null
-  const callerMaxRole = ROLE.MAINTAINER // Server caps grants; we permit the full grantable range.
+  const { session } = useFrontierSession()
+  const callerUsername = session?.username ?? null
 
   const { members, isLoading, error, add, remove } = useProjectMembers(projectId)
+
+  // FRO-285 (F-A4): derive callerMaxRole from the caller's own effective role
+  // in the members list so the role picker never offers what the server 403s.
+  // Fall back to MAINTAINER (600) if the caller's entry isn't in the list yet
+  // (e.g. still loading) — the server is the security boundary regardless.
+  const callerMember = callerUsername
+    ? members.find((m) => m.username === callerUsername)
+    : undefined
+  const callerMaxRole = callerMember?.role.level ?? ROLE.MAINTAINER
 
   const panelMembers: MembersPanelMember[] = members.map((m) => ({
     userId: m.userId,

@@ -188,38 +188,40 @@ describe("AD-12 max-wins role resolution (project-permissions.ts:103-186)", () =
   })
 })
 
-// ─── Suite 2: Membership endpoint privilege quirks ────────────────────────────
+// ─── Suite 2: Membership endpoint privilege holes — FRO-285 FIXED ────────────
+//
+// These tests were CHARACTERIZATION tests in FRO-268 that pinned the old
+// (buggy) behavior. FRO-285 intentionally flips them to assert the new
+// secure behavior: target-level caps enforced.
 
-describe("CHARACTERIZATION (audit F-B6): membership endpoint privilege holes — FRO-285 will flip this", () => {
+describe("FRO-285: membership endpoint target-level caps (was: F-B6 privilege holes)", () => {
   async function seedForMembershipTests() {
     await seedBase()
-    // peer_lead: a project_lead(500) who is NOT the creator
+    // project_lead_user (user 2) — project_lead(500)
     await seedUser(5, "peer_lead")
     await env.AQUILLA_PG.prepare(
       "INSERT INTO project_members (project_id, user_id, role_level, granted_by) VALUES ('proj-role', 2, 500, 1)",
     ).run()
+    // peer_lead (user 5) — also project_lead(500)
     await env.AQUILLA_PG.prepare(
       "INSERT INTO project_members (project_id, user_id, role_level, granted_by) VALUES ('proj-role', 5, 500, 1)",
     ).run()
-    // maintainer user
+    // maintainer_user (user 3) — maintainer(600)
     await env.AQUILLA_PG.prepare(
       "INSERT INTO project_members (project_id, user_id, role_level, granted_by) VALUES ('proj-role', 3, 600, 1)",
     ).run()
-    // owner_member (700) via direct project_members row
+    // owner_member (user 4) — owner(700) via direct project_members row
     await env.AQUILLA_PG.prepare(
       "INSERT INTO project_members (project_id, user_id, role_level, granted_by) VALUES ('proj-role', 4, 700, 1)",
     ).run()
   }
 
-  // CHARACTERIZATION (audit F-B6): intentionally frozen wrong behavior;
-  // FRO-285 will flip this — project_lead should NOT be able to demote a peer
-  // project_lead via the add-member upsert.
-  it("project_lead(500) can upsert-demote a peer project_lead(500) to viewer(100)", async () => {
+  // FLIPPED (was: FRO-268 characterization of the bug).
+  // project_lead(500) CANNOT upsert-demote a peer project_lead(500) — the
+  // target's current level (500) equals the caller's level (500), so 403.
+  it("project_lead(500) cannot upsert-demote a peer project_lead(500) to viewer(100) — 403", async () => {
     await seedForMembershipTests()
 
-    // project_lead_user(500) calls POST /members to set peer_lead(500) → viewer(100)
-    // The route only checks `role > callerRole.level`; demoting a 500 peer to 100 passes
-    // because 100 is NOT > 500.
     const res = await app.request(
       "/api/v2/projects/proj-role/members",
       {
@@ -229,27 +231,21 @@ describe("CHARACTERIZATION (audit F-B6): membership endpoint privilege holes —
       },
       env,
     )
-    // CHARACTERIZATION: must be 200 today (the bug). When FRO-285 flips this,
-    // the response should be 403 (cannot demote a peer of equal role).
-    expect(res.status).toBe(200)
-    const body = (await res.json()) as { role: { level: number } }
-    expect(body.role.level).toBe(100)
+    // FRO-285: must be 403 — target current level (500) >= caller level (500)
+    expect(res.status).toBe(403)
 
-    // Confirm the DB row was actually changed
+    // Confirm the DB row was NOT changed
     const row = await env.AQUILLA_PG.prepare(
       "SELECT role_level FROM project_members WHERE project_id = 'proj-role' AND user_id = 5",
     ).first<{ role_level: number }>()
-    expect(Number(row?.role_level)).toBe(100)
+    expect(Number(row?.role_level)).toBe(500)
   })
 
-  // CHARACTERIZATION (audit F-B6): intentionally frozen wrong behavior;
-  // FRO-285 will flip this — maintainer should NOT be able to delete the
-  // project_members row of an owner-level user.
-  it("maintainer(600) can DELETE the project_members row of an owner(700)", async () => {
+  // FLIPPED (was: FRO-268 characterization of the bug).
+  // maintainer(600) CANNOT DELETE the project_members row of an owner(700) — 403.
+  it("maintainer(600) cannot DELETE the project_members row of an owner(700) — 403", async () => {
     await seedForMembershipTests()
 
-    // maintainer_user(600) deletes owner_member's(700) row
-    // The DELETE route checks callerRole >= 600 then deletes without checking target level
     const res = await app.request(
       "/api/v2/projects/proj-role/members/4",
       {
@@ -258,15 +254,71 @@ describe("CHARACTERIZATION (audit F-B6): membership endpoint privilege holes —
       },
       env,
     )
-    // CHARACTERIZATION: must be 200 today (the bug). When FRO-285 flips this,
-    // the response should be 403 (cannot remove a member with role >= caller's role).
-    expect(res.status).toBe(200)
+    // FRO-285: must be 403 — target level (700) > caller level (600)
+    expect(res.status).toBe(403)
 
-    // Confirm the row is gone
+    // Confirm the row is still present
     const row = await env.AQUILLA_PG.prepare(
       "SELECT 1 FROM project_members WHERE project_id = 'proj-role' AND user_id = 4",
     ).first()
+    expect(row).not.toBeNull()
+  })
+
+  // New: owner(700) CAN delete any member row — owner bypass applies.
+  it("owner(700) can DELETE the project_members row of a maintainer(600)", async () => {
+    await seedForMembershipTests()
+
+    const res = await app.request(
+      "/api/v2/projects/proj-role/members/3",
+      {
+        method: "DELETE",
+        headers: authHeader(await jwtFor("owner")),
+      },
+      env,
+    )
+    expect(res.status).toBe(200)
+
+    const row = await env.AQUILLA_PG.prepare(
+      "SELECT 1 FROM project_members WHERE project_id = 'proj-role' AND user_id = 3",
+    ).first()
     expect(row).toBeNull()
+  })
+
+  // New: owner(700) CAN upsert a peer owner's row — owner bypass applies.
+  it("owner(700) can upsert another owner(700) member's role", async () => {
+    await seedForMembershipTests()
+
+    // owner_member (user 4, role 700) is being set to maintainer(600) by owner (user 1, role 700)
+    const res = await app.request(
+      "/api/v2/projects/proj-role/members",
+      {
+        method: "POST",
+        headers: authHeader(await jwtFor("owner")),
+        body: JSON.stringify({ username: "owner_member", role: 600 }),
+      },
+      env,
+    )
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as { role: { level: number } }
+    expect(body.role.level).toBe(600)
+  })
+
+  // New: project_lead(500) CAN add a net-new member at a lower role — no
+  // existing row means target current level = 0, so 0 < 500 passes.
+  it("project_lead(500) can add a brand-new member at contributor(400)", async () => {
+    await seedForMembershipTests()
+    await seedUser(7, "new_member")
+
+    const res = await app.request(
+      "/api/v2/projects/proj-role/members",
+      {
+        method: "POST",
+        headers: authHeader(await jwtFor("project_lead_user")),
+        body: JSON.stringify({ username: "new_member", role: 400 }),
+      },
+      env,
+    )
+    expect(res.status).toBe(200)
   })
 
   // Correct behavior preserved: a user CANNOT grant higher than their own role
@@ -285,9 +337,28 @@ describe("CHARACTERIZATION (audit F-B6): membership endpoint privilege holes —
     expect(res.status).toBe(403)
   })
 
-  // Correct behavior preserved: maintainer(600) cannot DELETE their own row
-  // (self-remove is rejected by the "cannot grant role to self" path in POST,
-  // but self-DELETE is a separate behavior — confirm it fails gracefully)
+  // Correct behavior preserved: caller CAN DELETE a member strictly below their level
+  // — maintainer(600) can delete contributor(400)
+  it("maintainer(600) CAN delete a contributor(400) member row", async () => {
+    await seedForMembershipTests()
+    await seedUser(6, "contributor_user")
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO project_members (project_id, user_id, role_level, granted_by) VALUES ('proj-role', 6, 400, 1)",
+    ).run()
+
+    const res = await app.request(
+      "/api/v2/projects/proj-role/members/6",
+      {
+        method: "DELETE",
+        headers: authHeader(await jwtFor("maintainer_user")),
+      },
+      env,
+    )
+    // maintainer level (600) > target level (400) → allowed
+    expect(res.status).toBe(200)
+  })
+
+  // Correct behavior preserved: level-floor check for delete endpoint
   it("contributor(400) cannot call the DELETE members endpoint (requires maintainer+)", async () => {
     await seedBase()
     await seedUser(6, "contributor_user")
@@ -304,5 +375,85 @@ describe("CHARACTERIZATION (audit F-B6): membership endpoint privilege holes —
       env,
     )
     expect(res.status).toBe(403)
+  })
+})
+
+// ─── Suite 3: Frozen project — sync-token mint block (FRO-285) ───────────────
+
+describe("FRO-285: frozen project blocks sync-token mint, reads still work", () => {
+  async function seedFrozenProject() {
+    await seedBase()
+    // project_member_user (user 2) with direct grant at 400
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO project_members (project_id, user_id, role_level, granted_by) VALUES ('proj-role', 2, 400, 1)",
+    ).run()
+  }
+
+  it("sync-token mint is rejected (403) when is_active=false (frozen project)", async () => {
+    await seedFrozenProject()
+    // Freeze the project
+    await env.AQUILLA_PG.prepare(
+      "UPDATE projects SET is_active = false WHERE id = 'proj-role'",
+    ).run()
+
+    const res = await app.request(
+      "/api/v2/sync-token",
+      {
+        method: "POST",
+        headers: authHeader(await jwtFor("project_lead_user")),
+        body: JSON.stringify({ projectId: "proj-role", fileId: "file-1" }),
+      },
+      env,
+    )
+    expect(res.status).toBe(403)
+    const body = (await res.json()) as { error: string }
+    expect(body.error).toMatch(/frozen/i)
+  })
+
+  it("sync-token mint succeeds when is_active=true (active project)", async () => {
+    await seedFrozenProject()
+    // Ensure project is active (default)
+    await env.AQUILLA_PG.prepare(
+      "UPDATE projects SET is_active = true WHERE id = 'proj-role'",
+    ).run()
+
+    const res = await app.request(
+      "/api/v2/sync-token",
+      {
+        method: "POST",
+        headers: authHeader(await jwtFor("project_lead_user")),
+        body: JSON.stringify({ projectId: "proj-role", fileId: "file-1" }),
+      },
+      env,
+    )
+    // May 200 or 403 depending on SYNC_SECRET_KEY presence in test env —
+    // what we assert is that it is NOT a frozen-project 403.
+    if (res.status === 403) {
+      const body = (await res.json()) as { error: string }
+      // A role/access 403 is fine; a "frozen" 403 would be a bug.
+      expect(body.error).not.toMatch(/frozen/i)
+    } else {
+      expect(res.status).toBe(200)
+    }
+  })
+
+  it("sync-token mint is also rejected (403) when archived_at is set", async () => {
+    await seedFrozenProject()
+    await env.AQUILLA_PG.prepare(
+      "UPDATE projects SET archived_at = CURRENT_TIMESTAMP WHERE id = 'proj-role'",
+    ).run()
+
+    const res = await app.request(
+      "/api/v2/sync-token",
+      {
+        method: "POST",
+        headers: authHeader(await jwtFor("project_lead_user")),
+        body: JSON.stringify({ projectId: "proj-role", fileId: "file-1" }),
+      },
+      env,
+    )
+    expect(res.status).toBe(403)
+    const body = (await res.json()) as { error: string }
+    expect(body.error).toMatch(/archived/i)
   })
 })

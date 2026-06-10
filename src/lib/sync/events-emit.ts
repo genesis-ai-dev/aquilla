@@ -17,7 +17,7 @@
 import { v7 as uuidv7 } from "uuid"
 import { enqueueOutboxEvent } from "./outbox"
 import { getCqrsOutboxBridge } from "./cqrs-bridge"
-import { canPerform, requiredRoleFor } from "./role-policy"
+import { canPerform, requiredRoleFor, ROLE } from "./role-policy"
 import {
   OUTBOX_SCHEMA_VERSION,
   type OutboxEventKind,
@@ -443,6 +443,100 @@ export async function emitCellBacktranslationSet(
       ...(input.btHtml !== undefined ? { btHtml: input.btHtml } : {}),
       targetEventId: input.targetEventId,
       polished: input.polished,
+    },
+    clientTs: input.clientTs,
+  })
+  return eventId
+}
+
+// ── Harmonize helper (FRO-186) ────────────────────────────────────────────
+// Emits a `target.cell.commit` with a `harmonize_origin` payload field —
+// the `cell.commit.harmonize` variant per AD-2. Using a payload field (not
+// a new event kind) mirrors how `ai_suggestion` tags the llm-accept variant
+// and how `retain_validations` / `search_query` tag the replace-all variant
+// (FRO-177). The server reads `harmonize_origin` to trigger the AD-14
+// endorsement-revocation cascade; the projector otherwise treats the commit
+// identically to a human commit (chain-mutating, advances cells.event_id).
+
+export interface CellHarmonizeInput {
+  projectId: string
+  fileId: string
+  cellId: string
+  /** Current chain-head event_id for this cell row. */
+  parentId: string | null
+  /** AD-9 staleness pin. */
+  sourceEventId?: string | null
+  value: string
+  valueHtml?: string
+  author: string
+  /** Stable id of the check or rule that drove the sweep. */
+  ruleOrCheckId: string
+  /** How the replacement was computed. */
+  proposalKind: "cached-regex" | "batch-regex" | "per-cell"
+  /** Optional sweep-session linkage. */
+  parentProposalId?: string
+  clientTs?: number
+}
+
+/**
+ * Client-side harmonize role gate. Returns true iff the current user's known
+ * role meets the effective harmonize floor (PROJECT_LEAD 500 by default,
+ * configurable up via harmonize_min_role project setting).
+ *
+ * Fails open when role is unknown (bridge unset) — server is authoritative.
+ */
+export function canHarmonize(
+  harmonizeMinRole?: "project_lead" | "maintainer",
+): boolean {
+  const roleLevel = getCqrsOutboxBridge()?.roleLevel ?? null
+  if (roleLevel == null) return true
+  const floorMap: Record<string, number> = {
+    project_lead: ROLE.PROJECT_LEAD,
+    maintainer: ROLE.MAINTAINER,
+  }
+  const floor = floorMap[harmonizeMinRole ?? "project_lead"] ?? ROLE.PROJECT_LEAD
+  return roleLevel >= floor
+}
+
+/**
+ * Emit a `target.cell.commit` tagged as a harmonize sweep (`harmonize_origin`
+ * payload field = the `cell.commit.harmonize` variant per AD-2).
+ * The server enforces `harmonize_min_role` (project_lead 500 floor) before
+ * accepting. Client-side gate: PROJECT_LEAD minimum (configurable up).
+ */
+export async function emitCellHarmonize(
+  input: CellHarmonizeInput,
+  harmonizeMinRole?: "project_lead" | "maintainer",
+): Promise<string> {
+  // Client-side harmonize role gate (mirrors server enforcement).
+  const roleLevel = getCqrsOutboxBridge()?.roleLevel ?? null
+  if (roleLevel != null) {
+    const floorMap: Record<string, number> = {
+      project_lead: ROLE.PROJECT_LEAD,
+      maintainer: ROLE.MAINTAINER,
+    }
+    const floor = floorMap[harmonizeMinRole ?? "project_lead"] ?? ROLE.PROJECT_LEAD
+    if (roleLevel < floor) {
+      throw new InsufficientRoleError("target.cell.commit[harmonize]", roleLevel, floor)
+    }
+  }
+
+  const { eventId } = await enqueueEvent({
+    kind: "target.cell.commit",
+    projectId: input.projectId,
+    fileId: input.fileId,
+    cellId: input.cellId,
+    parentId: input.parentId ?? null,
+    author: input.author,
+    payload: {
+      value: input.value,
+      ...(input.valueHtml !== undefined ? { valueHtml: input.valueHtml } : {}),
+      ...(input.sourceEventId !== undefined ? { sourceEventId: input.sourceEventId } : {}),
+      harmonize_origin: {
+        rule_or_check_id: input.ruleOrCheckId,
+        proposal_kind: input.proposalKind,
+        ...(input.parentProposalId !== undefined ? { parent_proposal_id: input.parentProposalId } : {}),
+      },
     },
     clientTs: input.clientTs,
   })

@@ -324,6 +324,12 @@ export interface ProjectRecord {
    *   allowSelfValidation is false.
    */
   allowSelfValidation?: boolean
+  /**
+   * FRO-186: minimum role to trigger a harmonization sweep on this project.
+   * Default (absent) = project_lead (500). Configurable up to maintainer (600).
+   * Lowering below project_lead is not allowed (hard floor per spec).
+   */
+  harmonize_min_role?: "project_lead" | "maintainer"
   /** Cached flag — set true when any cell first writes audio. Avoids scanning every file's Y.Doc on load. */
   hasAnyAudioData?: boolean
   /** When and how to fetch audio bytes from the storage backend. Default: "lazy". */

@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react"
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet"
 import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
 import type { FixProposal } from "@/lib/rules/autofix"
 import type { TranslationRule } from "@/lib/parsers/types"
 
@@ -11,12 +12,21 @@ interface Props {
   onClose: () => void
   onApply: (selectedCellIds: Set<string>) => void
   onAmendRule: () => void
+  /**
+   * FRO-186: when present, a typed-confirmation gate is shown before Apply.
+   * The user must type this exact string (case-sensitive) to enable the
+   * Apply button. Per spec: harmonization is irreversible-by-default, so
+   * bulk Apply requires typed confirmation of the rule/check name.
+   */
+  confirmPhrase?: string
 }
 
-export function FixReviewPanel({ open, rule, proposal, onClose, onApply, onAmendRule }: Props) {
+export function FixReviewPanel({ open, rule, proposal, onClose, onApply, onAmendRule, confirmPhrase }: Props) {
   const previews = proposal.kind === "none" ? [] : proposal.previews
   const initialSelected = useMemo(() => new Set(previews.map((p) => p.cellId)), [previews])
   const [selected, setSelected] = useState<Set<string>>(initialSelected)
+  // Typed-confirmation state (FRO-186).
+  const [confirmInput, setConfirmInput] = useState("")
 
   function toggle(id: string) {
     const next = new Set(selected)
@@ -32,8 +42,17 @@ export function FixReviewPanel({ open, rule, proposal, onClose, onApply, onAmend
       ? previews.some((p) => p.source === "cached-regex") ? "Cached regex" : "Batch regex"
       : proposal.kind === "per-cell" ? "Per-cell rewrite" : ""
 
+  // FRO-186: Apply is gated on typed confirmation when confirmPhrase is set.
+  const confirmOk = confirmPhrase == null || confirmInput === confirmPhrase
+  const applyDisabled = selected.size === 0 || !confirmOk
+
+  function handleClose() {
+    setConfirmInput("")
+    onClose()
+  }
+
   return (
-    <Sheet open={open} onOpenChange={(v) => { if (!v) onClose() }}>
+    <Sheet open={open} onOpenChange={(v) => { if (!v) handleClose() }}>
       <SheetContent side="right" className="w-[520px] max-w-[90vw] sm:max-w-[520px]">
         <SheetHeader>
           <SheetTitle className="flex items-center gap-2">
@@ -76,9 +95,33 @@ export function FixReviewPanel({ open, rule, proposal, onClose, onApply, onAmend
               ))}
             </ul>
 
+            {/* FRO-186: Typed confirmation gate for bulk harmonize Apply. */}
+            {confirmPhrase != null && (
+              <div className="mt-3 space-y-1">
+                <p className="text-xs text-muted-foreground">
+                  This action is irreversible. Type{" "}
+                  <strong className="font-semibold text-foreground">{confirmPhrase}</strong>{" "}
+                  to confirm.
+                </p>
+                <Input
+                  aria-label="Type the rule name to confirm"
+                  placeholder={confirmPhrase}
+                  value={confirmInput}
+                  onChange={(e) => setConfirmInput(e.target.value)}
+                  className="h-8 text-xs"
+                />
+              </div>
+            )}
+
             <div className="mt-4 flex items-center justify-end gap-2">
-              <Button variant="ghost" onClick={onClose}>Cancel</Button>
-              <Button onClick={() => onApply(selected)} disabled={selected.size === 0}>
+              <Button variant="ghost" onClick={handleClose}>Cancel</Button>
+              <Button
+                onClick={() => {
+                  setConfirmInput("")
+                  onApply(selected)
+                }}
+                disabled={applyDisabled}
+              >
                 Apply {selected.size} selected
               </Button>
             </div>

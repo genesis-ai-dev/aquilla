@@ -13,6 +13,19 @@ Pick these up in a later wave or session. Source: docs/AUDIT-2026-06-10.md.
 - **PERF-9 retention/GC, CACHE-6 audio Range, CACHE-7 eBible mirror, RACE-10 token single-flight**: audit non-goals for now.
 - **onnxruntime-web nightly pin** (DEPS-4): needs a deliberate upgrade+test pass, not a swarm side-effect.
 
-## Agent-reported TODOs
+## Agent-reported TODOs (wave 1)
 
-(appended by orchestrator from agent returns)
+**DEPLOY BLOCKER — `db/postgres/migrations/0034_server_seq_allocator.sql`** (project_seq_counters + chain_claims, idempotent) must be applied to LIVE NEON and the staging DB **before** deploying sync-worker, or every event write 500s (D1→Neon drift failure mode). Long-lived dev Postgres containers need it too (`applyPgSchemaIfMissing` only runs schema.sql on empty DBs). Rolling-deploy window: old workers still allocate MAX+1; collisions during the window surface as loud 500 + retry (self-heals).
+
+- LINT: 390 pre-existing errors (207 no-explicit-any mostly in worker tests, 59 no-unused-vars, react-hooks/rules-of-hooks in e2e/helpers/multi-user.ts). CI lint job red until fixed → wave-2 aud-lint-green.
+- Worker vitest PGlite hookTimeout flakiness under machine load — consider hookTimeout 60s in worker vitest configs; final gate must run on a quiet machine.
+- Wrangler version skew: workers pin ^3.78.12, root ^4.99.0 — align later, verify wrangler.toml compat.
+- Staging BASE_URL (auth-worker/wrangler.toml [env.staging]): dev.aquilla.app vs staging.aquilla.app — **needs human decision**; staging emails currently link to dev SPA.
+- M0-4 e2e half: no true two-browser concurrent-write spec yet (PGlite unit half done); blocked on free ports (user's dev stack live).
+- Wave-2 delta-read: server_seq now has harmless gaps (id-replays burn seqs) — ETag/?since= must treat seq as ordering key (MAX), never a count. Preserve EditorRow's pendingTargetEventIdRef confirm/clear effect (~EditorTable:1621) when touching useCells.
+- ProjectWorkspace unreachable-state UI not rendered yet (hook-level isUnreachable exists) → wave-2 aud-lock-client (owns ProjectWorkspace).
+- TeamDetail.tsx still uses deprecated fetchAccessibleProjects().
+- Coverage gaps confirmed: cqrs-bridge.ts, CellTranscriptPreview.tsx (lost-only-coverage in 51c2985).
+- useProject 'unreachable' has no auto-retry on 'online' event (manual Retry only).
+- do-locks: claimed pre-existing tsc errors in some sync-worker test files (CellRow/EventRow index signatures) — root tsc -b is clean; verify at final gate.
+- server-seq risks for review panel: claim-gating chosen over cells-CAS (deliberate, preserves RACE-8 semantics + rebuild parity); in-flight claim losers still broadcast (harmless no-op refetch); stale read-back best-effort; id-replays consume seqs (gaps).

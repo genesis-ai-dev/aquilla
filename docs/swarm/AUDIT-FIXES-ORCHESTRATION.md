@@ -48,4 +48,13 @@ Adversarial review panel → fixers → orchestrator final gate → promote main
 
 ## Merge log
 
-(append: branch · commit · verify result · notes)
+Wave 1 — all 6 branches merged clean into integration (no conflicts), tip `bbf7087`:
+
+- `swarm/aud-ci` `0baa132` — pnpm canonical (`packageManager: pnpm@10.19.0`), npm locks deleted, worker deps self-contained, all 4 workflows on pnpm frozen-lockfile with test gates. Agent-verified: 3× frozen-lockfile installs exit 0, auth 192/192, sync 485/485.
+- `swarm/aud-hygiene` `c393f1d..c634cd9` — strict tsconfig, 17 zero-byte files removed, passWithNoTests:false, AGENTS.md/e2e-README/SYNC.md corrected, root README + .env.example, observability blocks. cors-proxy/packages were already absent (no-op). Staging BASE_URL left unchanged (ambiguous — human call).
+- `swarm/aud-server-seq` `014d175..6c48ea4` — **RACE-1/RACE-2 fix**: per-project `project_seq_counters` allocator (CTE bump, same tx), `ON CONFLICT (id)` everywhere (8 insert sites incl. snapshots), `chain_claims` atomic AD-2 arbitration + `stale` read-back, deferFileCounters per (file,chunk) (QW-10), single `isChainMutatingKind()` predicate (ARCH-4). TDD: 7 reds against pre-fix code → 10/10 green. **DEPLOY BLOCKER: migration 0034 to live Neon/staging first.**
+- `swarm/aud-do-locks` `1eed74b` — RACE-6 multi-tab disconnect (locks survive while user has live connections), RACE-7 invite stamp-before-grant with rowcount check, RACE-5 ack contract documented (already existed via emitTo deny).
+- `swarm/aud-client-write` `34499c7` — RACE-3 parentId via pending refs (both call sites), RES-4 enqueue failure reverts optimistic patch + inline error, RES-2 transient 0/5xx don't burn budget + auto-requeue on online/authEpoch, RACE-4 reentrancy guard, 15s timeout on /events POST.
+- `swarm/aud-error-vis` `afa3801` — ErrorBoundary + captureException + global error/unhandledrejection hooks + chunk-reload guard (RES-3), unreachable-vs-empty distinction in cloud-projects/useProject/Dashboard/ProjectsList (RES-5).
+
+Wave-1 gate (orchestrator-run, integration tip): see below / final report.

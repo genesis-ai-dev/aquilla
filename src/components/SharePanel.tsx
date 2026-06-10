@@ -1,12 +1,17 @@
-import { useState } from "react"
-import { Copy, AlertCircle } from "lucide-react"
+import { useState, useEffect, useCallback } from "react"
+import { Copy, AlertCircle, Trash2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog"
-import { createServerInvite } from "@/lib/sync/invites"
+import {
+  createServerInvite,
+  listProjectInvites,
+  revokeProjectInvite,
+  type ActiveProjectInvite,
+} from "@/lib/sync/invites"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { useProjectMembers } from "@/hooks/useProjectMembers"
 import { MembersPanel, type MembersPanelMember } from "./MembersPanel"
@@ -137,20 +142,16 @@ interface InviteLinkTabProps {
 
 /**
  * Mints a server-side project_invites row and shows the joinable URL once.
- * We deliberately don't list "your active invites" — that would need a
- * dedicated per-project listing endpoint, and revocation already lives in
- * the Members tab (each redemption becomes a project_members row the
- * inviter can demote/remove). Anyone with the link can redeem until it
- * expires or a member with sufficient role revokes it server-side.
+ * Active (unused + unexpired) invites are listed below with a revoke button.
  */
-/** Expiry options: days (number) or null = no expiry. */
+/** Expiry options: days (number) or null = no expiry. Server default is 30 days. */
 const EXPIRY_OPTIONS: { label: string; value: number | null }[] = [
   { label: "1 day", value: 1 },
-  { label: "7 days (default)", value: 7 },
-  { label: "30 days", value: 30 },
+  { label: "7 days", value: 7 },
+  { label: "30 days (default)", value: 30 },
   { label: "No expiry", value: null },
 ]
-const DEFAULT_EXPIRY_DAYS = 7
+const DEFAULT_EXPIRY_DAYS = 30
 
 function InviteLinkTab({ projectId, onSharesChanged }: InviteLinkTabProps) {
   const { session } = useFrontierSession()
@@ -162,6 +163,8 @@ function InviteLinkTab({ projectId, onSharesChanged }: InviteLinkTabProps) {
   const [issuedUrl, setIssuedUrl] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
   const [serverError, setServerError] = useState<string | null>(null)
+  // Bump this to trigger the active-invites list to re-fetch after a new invite is created.
+  const [inviteListVersion, setInviteListVersion] = useState(0)
 
   async function handleCreate() {
     setEmailError(null)
@@ -192,6 +195,7 @@ function InviteLinkTab({ projectId, onSharesChanged }: InviteLinkTabProps) {
       }
       const url = `${window.location.origin}/join/${serverInvite.token}`
       setIssuedUrl(url)
+      setInviteListVersion((v) => v + 1)
       onSharesChanged?.()
     } finally {
       setBusy(false)
@@ -212,109 +216,238 @@ function InviteLinkTab({ projectId, onSharesChanged }: InviteLinkTabProps) {
     setExpiresInDays(DEFAULT_EXPIRY_DAYS)
   }
 
-  if (issuedUrl) {
-    return (
-      <div className="space-y-3">
-        <p className="text-sm">Invite link ready. Send it to the recipient.</p>
-        <div className="flex items-center gap-1">
-          <Input value={issuedUrl} readOnly className="text-xs font-mono" />
-          <Button size="sm" variant="ghost" onClick={() => copyUrl(issuedUrl)} title="Copy URL">
-            <Copy className="h-3.5 w-3.5" />
+  return (
+    <div className="space-y-4">
+      {issuedUrl ? (
+        <div className="space-y-3">
+          <p className="text-sm">Invite link ready. Send it to the recipient.</p>
+          <div className="flex items-center gap-1">
+            <Input value={issuedUrl} readOnly className="text-xs font-mono" />
+            <Button size="sm" variant="ghost" onClick={() => copyUrl(issuedUrl)} title="Copy URL">
+              <Copy className="h-3.5 w-3.5" />
+            </Button>
+          </div>
+          {copied && <p className="text-xs text-green-600">Copied!</p>}
+          <p className="text-[10px] text-muted-foreground">
+            The recipient signs in (or signs up) and is added as{" "}
+            {LINK_ROLE_OPTIONS.find((o) => o.level === inviteRole)?.name ?? "a member"}.
+            To revoke before it is redeemed, use the Active links list below.
+          </p>
+          <Button size="sm" variant="outline" onClick={reset} className="w-full">
+            Create another link
           </Button>
         </div>
-        {copied && <p className="text-xs text-green-600">Copied!</p>}
-        <p className="text-[10px] text-muted-foreground">
-          The recipient signs in (or signs up) and is added as{" "}
-          {LINK_ROLE_OPTIONS.find((o) => o.level === inviteRole)?.name ?? "a member"}.
-          To revoke later, demote or remove them from the Members tab.
-        </p>
-        <Button size="sm" variant="outline" onClick={reset} className="w-full">
-          Create another link
-        </Button>
-      </div>
-    )
+      ) : (
+        <div className="space-y-3">
+          <div className="space-y-1">
+            <Label className="text-xs">Role</Label>
+            <select
+              className="w-full rounded border bg-background px-2 py-1 text-sm"
+              value={inviteRole}
+              onChange={(e) => setInviteRole(Number(e.target.value))}
+              disabled={!session?.jwt}
+            >
+              {LINK_ROLE_OPTIONS.map((opt) => (
+                <option key={opt.level} value={opt.level}>
+                  {opt.name}
+                </option>
+              ))}
+            </select>
+            <p className="text-[10px] text-muted-foreground">
+              {session?.jwt
+                ? LINK_ROLE_OPTIONS.find((o) => o.level === inviteRole)?.description
+                : "Sign in to create an invite link"}
+            </p>
+          </div>
+          <div className="space-y-1">
+            <Label htmlFor="invite-email" className="text-xs">
+              Recipient email <span className="text-muted-foreground font-normal">(optional)</span>
+            </Label>
+            <Input
+              id="invite-email"
+              type="email"
+              inputMode="email"
+              autoComplete="off"
+              value={inviteEmail}
+              onChange={(e) => {
+                setInviteEmail(e.target.value)
+                setEmailError(null)
+              }}
+              placeholder="name@example.com"
+              disabled={!session?.jwt}
+            />
+            {emailError ? (
+              <p className="text-[10px] text-destructive">{emailError}</p>
+            ) : (
+              <p className="text-[10px] text-muted-foreground">
+                {inviteEmail.trim()
+                  ? "Only an account with this email can redeem this link."
+                  : "Leave blank for an open link anyone signed in can redeem."}
+              </p>
+            )}
+          </div>
+          <div className="space-y-1">
+            <Label className="text-xs">Link expires</Label>
+            <select
+              className="w-full rounded border bg-background px-2 py-1 text-sm"
+              value={expiresInDays === null ? "null" : String(expiresInDays)}
+              onChange={(e) =>
+                setExpiresInDays(e.target.value === "null" ? null : Number(e.target.value))
+              }
+              disabled={!session?.jwt}
+            >
+              {EXPIRY_OPTIONS.map((opt) => (
+                <option key={String(opt.value)} value={String(opt.value)}>
+                  {opt.label}
+                </option>
+              ))}
+            </select>
+          </div>
+          {serverError && (
+            <p className="flex items-start gap-1 text-xs text-destructive">
+              <AlertCircle className="mt-0.5 h-3 w-3 shrink-0" />
+              <span>{serverError}</span>
+            </p>
+          )}
+          <Button
+            size="sm"
+            onClick={handleCreate}
+            disabled={busy || !session?.jwt}
+            className="w-full"
+          >
+            {busy ? "Creating…" : "Create invite link"}
+          </Button>
+        </div>
+      )}
+
+      {session?.jwt && (
+        <ActiveInvitesList
+          projectId={projectId}
+          jwt={session.jwt}
+          version={inviteListVersion}
+          onRevoked={() => setInviteListVersion((v) => v + 1)}
+        />
+      )}
+    </div>
+  )
+}
+
+// ── Active invites list ───────────────────────────────────────────────────
+
+interface ActiveInvitesListProps {
+  projectId: string
+  jwt: string
+  /** Incrementing this value triggers a re-fetch. */
+  version: number
+  onRevoked: () => void
+}
+
+function ActiveInvitesList({ projectId, jwt, version, onRevoked }: ActiveInvitesListProps) {
+  const [invites, setInvites] = useState<ActiveProjectInvite[] | null>(null)
+  const [loading, setLoading] = useState(false)
+  const [revokeTarget, setRevokeTarget] = useState<string | null>(null)
+  const [revokeConfirm, setRevokeConfirm] = useState(false)
+  const [revoking, setRevoking] = useState(false)
+
+  const load = useCallback(async () => {
+    setLoading(true)
+    try {
+      const list = await listProjectInvites(jwt, projectId)
+      setInvites(list)
+    } finally {
+      setLoading(false)
+    }
+  }, [jwt, projectId])
+
+  useEffect(() => {
+    void load()
+  }, [load, version])
+
+  async function handleRevoke(token: string) {
+    setRevoking(true)
+    try {
+      await revokeProjectInvite(jwt, projectId, token)
+      setRevokeTarget(null)
+      setRevokeConfirm(false)
+      onRevoked()
+    } finally {
+      setRevoking(false)
+    }
+  }
+
+  function formatExpiry(expiresAt: string | null): string {
+    if (!expiresAt) return "No expiry"
+    const d = new Date(expiresAt)
+    return `Expires ${d.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })}`
+  }
+
+  if (loading && !invites) {
+    return <p className="text-[10px] text-muted-foreground">Loading active links…</p>
+  }
+  if (!invites || invites.length === 0) {
+    return null
   }
 
   return (
-    <div className="space-y-3">
-      <div className="space-y-1">
-        <Label className="text-xs">Role</Label>
-        <select
-          className="w-full rounded border bg-background px-2 py-1 text-sm"
-          value={inviteRole}
-          onChange={(e) => setInviteRole(Number(e.target.value))}
-          disabled={!session?.jwt}
-        >
-          {LINK_ROLE_OPTIONS.map((opt) => (
-            <option key={opt.level} value={opt.level}>
-              {opt.name}
-            </option>
-          ))}
-        </select>
-        <p className="text-[10px] text-muted-foreground">
-          {session?.jwt
-            ? LINK_ROLE_OPTIONS.find((o) => o.level === inviteRole)?.description
-            : "Sign in to create an invite link"}
-        </p>
-      </div>
-      <div className="space-y-1">
-        <Label htmlFor="invite-email" className="text-xs">
-          Recipient email <span className="text-muted-foreground font-normal">(optional)</span>
-        </Label>
-        <Input
-          id="invite-email"
-          type="email"
-          inputMode="email"
-          autoComplete="off"
-          value={inviteEmail}
-          onChange={(e) => {
-            setInviteEmail(e.target.value)
-            setEmailError(null)
-          }}
-          placeholder="name@example.com"
-          disabled={!session?.jwt}
-        />
-        {emailError ? (
-          <p className="text-[10px] text-destructive">{emailError}</p>
-        ) : (
-          <p className="text-[10px] text-muted-foreground">
-            {inviteEmail.trim()
-              ? "If they don't have a Frontier account, the join page prefills sign-up with this email."
-              : "Leave blank for an open link anyone signed in can redeem."}
-          </p>
-        )}
-      </div>
-      <div className="space-y-1">
-        <Label className="text-xs">Link expires</Label>
-        <select
-          className="w-full rounded border bg-background px-2 py-1 text-sm"
-          value={expiresInDays === null ? "null" : String(expiresInDays)}
-          onChange={(e) =>
-            setExpiresInDays(e.target.value === "null" ? null : Number(e.target.value))
-          }
-          disabled={!session?.jwt}
-        >
-          {EXPIRY_OPTIONS.map((opt) => (
-            <option key={String(opt.value)} value={String(opt.value)}>
-              {opt.label}
-            </option>
-          ))}
-        </select>
-      </div>
-      {serverError && (
-        <p className="flex items-start gap-1 text-xs text-destructive">
-          <AlertCircle className="mt-0.5 h-3 w-3 shrink-0" />
-          <span>{serverError}</span>
-        </p>
-      )}
-      <Button
-        size="sm"
-        onClick={handleCreate}
-        disabled={busy || !session?.jwt}
-        className="w-full"
-      >
-        {busy ? "Creating…" : "Create invite link"}
-      </Button>
+    <div className="space-y-2 border-t pt-3">
+      <p className="text-xs font-medium">Active links</p>
+      <ul className="space-y-1.5">
+        {invites.map((inv) => (
+          <li key={inv.token} className="flex items-start justify-between gap-2 rounded border px-2 py-1.5">
+            <div className="min-w-0">
+              <p className="truncate text-[11px] font-mono text-muted-foreground">
+                …{inv.token.slice(-8)}
+              </p>
+              <p className="text-[10px] text-muted-foreground">
+                {inv.role.name}
+                {inv.email ? ` · ${inv.email}` : " · open link"}
+                {" · "}
+                {formatExpiry(inv.expiresAt)}
+              </p>
+            </div>
+            {revokeTarget === inv.token ? (
+              <div className="flex shrink-0 items-center gap-1">
+                <label className="flex items-center gap-1 text-[10px] text-destructive cursor-pointer">
+                  <input
+                    type="checkbox"
+                    className="h-3 w-3"
+                    checked={revokeConfirm}
+                    onChange={(e) => setRevokeConfirm(e.target.checked)}
+                  />
+                  Confirm
+                </label>
+                <Button
+                  size="sm"
+                  variant="destructive"
+                  className="h-6 px-2 text-[10px]"
+                  disabled={!revokeConfirm || revoking}
+                  onClick={() => void handleRevoke(inv.token)}
+                >
+                  {revoking ? "…" : "Revoke"}
+                </Button>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="h-6 px-1 text-[10px]"
+                  onClick={() => { setRevokeTarget(null); setRevokeConfirm(false) }}
+                >
+                  Cancel
+                </Button>
+              </div>
+            ) : (
+              <Button
+                size="sm"
+                variant="ghost"
+                className="h-6 shrink-0 px-1 text-muted-foreground hover:text-destructive"
+                title="Revoke this invite link"
+                onClick={() => { setRevokeTarget(inv.token); setRevokeConfirm(false) }}
+              >
+                <Trash2 className="h-3 w-3" />
+              </Button>
+            )}
+          </li>
+        ))}
+      </ul>
     </div>
   )
 }

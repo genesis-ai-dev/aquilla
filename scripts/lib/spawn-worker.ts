@@ -49,10 +49,12 @@ export async function spawnWranglerDev(opts: {
 
   attachOutput(child, opts.label, opts.logFile, opts.streamToParent ?? false)
 
-  // Wait for the worker to be reachable. Throw if it never comes up.
+  // Wait for the worker to be reachable. Throw if it never comes up. The
+  // window is generous because a cold wrangler boot competes with parallel
+  // dev stacks (worktree QA sessions) for CPU and can take ~1 min.
   const start = Date.now()
   let ready = false
-  while (Date.now() - start < 30_000) {
+  while (Date.now() - start < 120_000) {
     try {
       const r = await fetch(`http://127.0.0.1:${opts.port}/`)
       if (r.status < 500) { ready = true; break }

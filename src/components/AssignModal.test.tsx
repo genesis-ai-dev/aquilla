@@ -1,7 +1,6 @@
 // FRO-192: AssignModal tests — scope→event payload wiring, role gate.
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
 import { render, screen, fireEvent, waitFor } from "@testing-library/react"
-import React from "react"
 import { AssignModal } from "./AssignModal"
 
 // ── Mocks ───────────────────────────────────────────────────────────────────
@@ -29,8 +28,8 @@ const BASE_PROPS = {
   projectId: "proj-1",
   activeFileId: "file-1",
   projectFiles: [
-    { id: "file-1", name: "Genesis", corpusMarker: "OT" },
-    { id: "file-2", name: "Exodus", corpusMarker: "OT" },
+    { id: "file-1", name: "Genesis", type: "usfm" as const, createdAt: "2026-01-01T00:00:00Z", cellCount: 10, corpusMarker: "OT" },
+    { id: "file-2", name: "Exodus", type: "usfm" as const, createdAt: "2026-01-01T00:00:00Z", cellCount: 10, corpusMarker: "OT" },
   ],
   members: [
     { userId: 42, username: "anna", role: { level: 400, name: "contributor", source: "override" as const }, secondarySources: [] },

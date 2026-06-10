@@ -1,7 +1,6 @@
 // FRO-192: ProjectAssignedToMe tests — pickup list rendering + jump.
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { render, screen, fireEvent, waitFor } from "@testing-library/react"
-import React from "react"
 import { ProjectAssignedToMe } from "./ProjectAssignedToMe"
 import type { MyAssignment } from "@/lib/sync/assignments"
 

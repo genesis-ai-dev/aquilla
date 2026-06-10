@@ -425,6 +425,10 @@ interface EditorTableProps {
   /** FRO-207: Called when the user confirms or invalidates an alignment seed.
    *  Parent persists via project-settings and rebuilds the model. */
   onAlignmentSeedChange?: (seed: import("@/lib/completion/interlinear").AlignmentSeed) => void
+  /** FRO-192: Map of cellId → {username, scopeLabel} for cells that have an
+   *  active assignment. The map is built in ProjectWorkspace from getMyAssignments
+   *  (member's own inbox) and getProjectAssignments (manager workload). */
+  assignmentsByCellId?: ReadonlyMap<string, { username: string; scopeLabel: string }>
 }
 
 export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(function EditorTable({
@@ -450,6 +454,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   getTokenForFile,
   alignmentModel,
   onAlignmentSeedChange,
+  assignmentsByCellId,
 }, ref) {
   const permissions = useProjectPermissions(project)
   const canEdit = permissions.canEditContent
@@ -1035,6 +1040,8 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
                 alignmentModel={alignmentModel}
                 onAlignmentSeedChange={onAlignmentSeedChange}
                 fontSize={fontSize}
+                assigneeLabel={assignmentsByCellId?.get(cell.id)?.username ?? null}
+                assigneeNote={assignmentsByCellId?.get(cell.id)?.scopeLabel ?? null}
               />
             </div>
           )
@@ -1133,6 +1140,10 @@ interface MemoizedRowProps {
   onAlignmentSeedChange?: (seed: import("@/lib/completion/interlinear").AlignmentSeed) => void
   /** FRO-251: per-file font size in px. Defaults to 14 when absent. */
   fontSize?: number
+  /** FRO-192: username of the assignee for this cell. Null = no assignment. */
+  assigneeLabel?: string | null
+  /** FRO-192: scope label for the assignment tooltip. */
+  assigneeNote?: string | null
 }
 
 const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
@@ -1159,6 +1170,8 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
     onCellCommitted, onOptimisticEdit, lockHolderLabel, remoteChangedWhileFocused,
     onClaimCell, onReleaseCell, onAckRemoteChange,
     isStaleSource,
+    assigneeLabel,
+    assigneeNote,
   } = props
 
   const cellId = cell.id
@@ -1279,6 +1292,8 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
         onReleaseCell={onReleaseCell}
         onAckRemoteChange={onAckRemoteChange}
         fontSize={fontSize}
+        assigneeLabel={assigneeLabel}
+        assigneeNote={assigneeNote}
       />
     </div>
   )
@@ -1358,6 +1373,10 @@ interface EditorRowProps {
   getTokenForFile?: (fileId: string) => Promise<string | null>
   /** FRO-251: per-file font size in px. Defaults to 14 when absent. */
   fontSize?: number
+  /** FRO-192: username of the assignee for this cell. Null = no assignment. */
+  assigneeLabel?: string | null
+  /** FRO-192: scope label for the assignment tooltip. */
+  assigneeNote?: string | null
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -1564,6 +1583,8 @@ function EditorRow({
   alignmentModel,
   onAlignmentSeedChange,
   fontSize = 14,
+  assigneeLabel,
+  assigneeNote,
 }: EditorRowProps) {
   const [openRuleId, setOpenRuleId] = useState<string | null>(null)
   const [openRuleAnchor, setOpenRuleAnchor] = useState<HTMLElement | null>(null)
@@ -2394,6 +2415,16 @@ function EditorRow({
           )}
           {(isSynthBusy || isSynthError) && (
             <SynthStatusBadge status={synthStatus} cellId={cell.id} projectId={project.id} onOpenAudioSetup={onOpenAudioSetup} />
+          )}
+          {/* FRO-192: assignee avatar chip — shows initials of the member
+              this cell is assigned to. Tooltip = username + scope label. */}
+          {assigneeLabel && (
+            <span
+              title={assigneeNote ? `Assigned to ${assigneeLabel} (${assigneeNote})` : `Assigned to ${assigneeLabel}`}
+              className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-indigo-100 text-[8px] font-semibold uppercase text-indigo-700 ring-1 ring-indigo-300 dark:bg-indigo-900 dark:text-indigo-300 dark:ring-indigo-700"
+            >
+              {assigneeLabel.slice(0, 2)}
+            </span>
           )}
         </div>
 

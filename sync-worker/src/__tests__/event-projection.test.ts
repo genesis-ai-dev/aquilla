@@ -302,7 +302,7 @@ describe('buildEventProjectionStmts — side scoping (regression: target edits m
 })
 
 describe('buildEventProjectionStmts — cell.validate / cell.unvalidate', () => {
-  it('cell.validate emits validator UPSERT (INSERT) + cells.validated recompute', () => {
+  it('cell.validate emits validator UPSERT (INSERT) + ai_drafted clear + cells.validated recompute', () => {
     const { db, recorded } = makeD1Stub()
     const stmts: AquillaStatement[] = []
     buildEventProjectionStmts(
@@ -310,23 +310,26 @@ describe('buildEventProjectionStmts — cell.validate / cell.unvalidate', () => 
       makeEvent('cell.validate', { editEventId: 'evt-commit-id' }),
       stmts,
     )
-    // validator UPSERT + cells.validated recompute + endorsement_count
-    // recompute + files counters recompute.
-    expect(stmts).toHaveLength(4)
+    // FRO-292: validator UPSERT + ai_drafted clear + cells.validated recompute
+    // + endorsement_count recompute + files counters recompute.
+    expect(stmts).toHaveLength(5)
     expect(recorded[0].sql).toContain('INSERT INTO cell_validators')
     // 0012: columns are (project_id, file_id, cell_id, event_id, username, decided_ts) — no is_active
     expect(recorded[0].sql).toContain('event_id')
     expect(recorded[0].sql).not.toContain('is_active')
-    expect(recorded[1].sql).toContain('UPDATE cells')
-    expect(recorded[1].sql).toContain('SET validated')
+    // FRO-292: ai_drafted cleared before the validated recompute so the
+    // file counter reflects the final state correctly.
+    expect(recorded[1].sql).toContain('SET ai_drafted = 0')
+    expect(recorded[2].sql).toContain('UPDATE cells')
+    expect(recorded[2].sql).toContain('SET validated')
     // Recompute references event_id (not edit_event_id) per 0012 schema
-    expect(recorded[1].sql).toContain('event_id = cells.event_id')
+    expect(recorded[2].sql).toContain('event_id = cells.event_id')
     // AD-14 pass 1: endorsement_count recompute against current chain head
-    expect(recorded[2].sql).toContain('SET endorsement_count')
-    expect(recorded[2].sql).toContain('cells.event_id')
+    expect(recorded[3].sql).toContain('SET endorsement_count')
+    expect(recorded[3].sql).toContain('cells.event_id')
     // approved_count moves on validate, so files counters are recomputed.
-    expect(recorded[3].sql).toContain('UPDATE files SET cell_count')
-    expect(recorded[3].sql).toContain('approved_count')
+    expect(recorded[4].sql).toContain('UPDATE files SET cell_count')
+    expect(recorded[4].sql).toContain('approved_count')
   })
 
   it('cell.unvalidate emits DELETE (not UPSERT) + cells.validated recompute + endorsement_count recompute', () => {

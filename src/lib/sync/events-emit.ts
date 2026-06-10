@@ -659,6 +659,57 @@ export async function emitFileCreate(input: FileCreateInput): Promise<string> {
   return eventId
 }
 
+export interface FileDeleteInput {
+  projectId: string
+  fileId: string
+  author: string
+  clientTs?: number
+}
+
+/**
+ * Emit a `file.delete` event — soft-deletes the file by stamping `files.deleted_at`.
+ * Cells and audio are retained; the R2 wipe is deferred to an explicit
+ * "Delete forever" action (which calls the hard-delete REST endpoint).
+ * File-scoped and non-chain-mutating (`parentId = null`).
+ */
+export async function emitFileDelete(input: FileDeleteInput): Promise<string> {
+  const { eventId } = await enqueueEvent({
+    kind: "file.delete",
+    projectId: input.projectId,
+    fileId: input.fileId,
+    parentId: null,
+    author: input.author,
+    payload: {},
+    clientTs: input.clientTs,
+  })
+  return eventId
+}
+
+export interface FileRestoreInput {
+  projectId: string
+  fileId: string
+  author: string
+  clientTs?: number
+}
+
+/**
+ * Emit a `file.restore` event — clears the soft-delete tombstone so the file
+ * reappears in normal listings. All cells and audio remain intact.
+ * File-scoped and non-chain-mutating (`parentId = null`).
+ */
+export async function emitFileRestore(input: FileRestoreInput): Promise<string> {
+  const { eventId } = await enqueueEvent({
+    kind: "file.restore",
+    projectId: input.projectId,
+    fileId: input.fileId,
+    parentId: null,
+    author: input.author,
+    payload: {},
+    clientTs: input.clientTs,
+  })
+  return eventId
+}
+
 export interface FileRenameInput {
   projectId: string
   fileId: string

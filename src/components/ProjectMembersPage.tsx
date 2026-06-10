@@ -34,6 +34,7 @@ import {
   PROJECT_ROLE_OPTIONS,
 } from "@/lib/frontier/roles"
 import type { ProjectMember } from "@/lib/frontier/members"
+import { toUserFacingError } from "@/lib/errors/user-error"
 
 // ──────────────────────────────────────────────────────────────────────────
 // Constants
@@ -152,7 +153,7 @@ function MembersTab({ projectId }: { projectId: string }) {
       }
       setNewUsername("")
     } catch (e) {
-      setAddError(e instanceof Error ? e.message : "Could not add member")
+      setAddError(toUserFacingError(e, "project").message)
     } finally {
       setAdding(false)
     }
@@ -382,7 +383,7 @@ function RevokeAllDialog({
       const r = await revokeAllProjectAccess(session.jwt, projectId, member.userId)
       setResult(r)
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Revoke failed")
+      setError(toUserFacingError(e, "project").message)
     } finally {
       setBusy(false)
     }

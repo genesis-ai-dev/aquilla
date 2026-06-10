@@ -68,6 +68,11 @@ export const REQUIRED_ROLE: Record<EventKind, number> = {
   // an existing row's display name, not the project's file inventory.
   'file.rename': ROLE.CONTRIBUTOR,
 
+  // file.delete/file.restore are structural changes (soft-delete tombstone).
+  // Require PROJECT_LEAD (500) — same as file.create and source.* imports.
+  'file.delete': ROLE.PROJECT_LEAD,
+  'file.restore': ROLE.PROJECT_LEAD,
+
   // Comments: any contributor+ can write, edit, delete, or resolve their own
   // comment. Server-side ownership enforcement (only the author can edit/delete
   // their own comment) is done in the projector; the role gate is just the

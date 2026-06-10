@@ -47,6 +47,12 @@ export type EventKind =
   // File label rename (contributor-level). Non-chain-mutating — updates the
   // file's display name on the existing row; does not move cells.event_id.
   | 'file.rename'
+  // Soft-delete a file (project_lead+). Non-chain-mutating — stamps
+  // `files.deleted_at`; cells and audio are retained. R2 wipe is deferred.
+  | 'file.delete'
+  // Restore a soft-deleted file (project_lead+). Non-chain-mutating — clears
+  // `files.deleted_at`. Cells and audio remain intact throughout.
+  | 'file.restore'
   // Comments (non-chain-mutating; contributor-level).
   | 'comment.create'
   | 'comment.edit'
@@ -128,6 +134,15 @@ export interface EventPayloads {
      * Null for target-owned cells with no source counterpart.
      */
     sourceEventId?: string | null
+    /**
+     * FRO-292 / AI provenance: when true, tags this commit as machine-drafted
+     * (the `cell.commit.llm-accept` variant per AD-2). Set by the AI completion
+     * path (useCompletion → commitCompletedCell). Human edits omit this field
+     * entirely — the projection tracks `cells.ai_drafted` until a human edit
+     * or validation clears it. Forward-only: historical commits without this
+     * field are treated as human-authored (ai_drafted = 0).
+     */
+    ai_suggestion?: true
     /**
      * FRO-186 / harmonization: when present, tags this commit as a harmonize
      * sweep event (cell.commit.harmonize variant per AD-2). The route layer
@@ -224,6 +239,12 @@ export interface EventPayloads {
     /** New display name for the file in the project sidebar. */
     name: string
   }
+  // Soft-delete a file. Non-chain-mutating; parentId omitted.
+  // Stamps `files.deleted_at`; cells and audio are retained (R2 wipe deferred).
+  'file.delete': Record<string, never>
+  // Restore a soft-deleted file. Non-chain-mutating; parentId omitted.
+  // Clears `files.deleted_at`. All cells and audio remain intact.
+  'file.restore': Record<string, never>
 
   // ── Comments (non-chain-mutating) ──────────────────────────────────────
   'comment.create': {

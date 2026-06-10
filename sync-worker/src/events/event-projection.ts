@@ -107,10 +107,12 @@ export function fileCountersRecomputeStmt(
         filled_count = (SELECT COUNT(*) FROM cells WHERE project_id = ? AND file_id = ? AND side = 'target' AND TRIM(value) != ''),
         word_count = (SELECT COALESCE(SUM(word_count), 0) FROM cells WHERE project_id = ? AND file_id = ? AND side = 'target'),
         last_edit_at = (SELECT MAX(last_edit_at) FROM cells WHERE project_id = ? AND file_id = ?),
+        ai_drafted_count = (SELECT COUNT(*) FROM cells WHERE project_id = ? AND file_id = ? AND side = 'target' AND ai_drafted = 1),
         updated_at = ?
       WHERE id = ? AND project_id = ?`,
     )
     .bind(
+      projectId, fileId,
       projectId, fileId,
       projectId, fileId,
       projectId, fileId,
@@ -268,6 +270,9 @@ export function buildEventProjectionStmts(
       if (event.kind === 'target.cell.commit') {
         const tp = p as EventPayloads['target.cell.commit']
         const sourceEventId = tp.sourceEventId ?? null
+        // FRO-292: set ai_drafted=1 when the commit carries ai_suggestion, clear to 0
+        // on any human commit (ai_suggestion absent). Human edit reclassifies the cell.
+        const aiDrafted = tp.ai_suggestion ? 1 : 0
 
         // NOTE: start_ms/end_ms are intentionally NOT written here — they are set once at
         // *.cell.create time and never overwritten by target commits.
@@ -290,8 +295,9 @@ export function buildEventProjectionStmts(
               `INSERT INTO cells (
                 project_id, file_id, cell_id, side, value, value_html, type,
                 canonical_ref, anchor_cell_id, event_id, source_event_id,
-                last_editor, last_edit_at, validated, word_count, content_hash
-              ) VALUES (?, ?, ?, 'target', ?, ?, NULL, NULL, NULL, ?, ?, ?, ?, 0, ?, ?)
+                last_editor, last_edit_at, validated, word_count, content_hash,
+                ai_drafted
+              ) VALUES (?, ?, ?, 'target', ?, ?, NULL, NULL, NULL, ?, ?, ?, ?, 0, ?, ?, ?)
               ON CONFLICT(project_id, file_id, cell_id, side) DO UPDATE SET
                 value             = excluded.value,
                 value_html        = excluded.value_html,
@@ -302,7 +308,8 @@ export function buildEventProjectionStmts(
                 word_count        = excluded.word_count,
                 content_hash      = excluded.content_hash,
                 validated         = 0,
-                endorsement_count = 0`,
+                endorsement_count = 0,
+                ai_drafted        = excluded.ai_drafted`,
             )
             .bind(
               event.projectId,
@@ -316,6 +323,7 @@ export function buildEventProjectionStmts(
               event.serverTs,
               wordCount,
               hash,
+              aiDrafted,
             ),
         )
       } else {
@@ -474,6 +482,22 @@ export function buildEventProjectionStmts(
                 WHERE project_id = ? AND file_id = ? AND cell_id = ? AND username = ?`,
             )
             .bind(event.projectId, event.fileId, event.cellId, targetUsername),
+        )
+      }
+
+      // FRO-292: validation supersedes AI-drafted status. Once a reviewer
+      // validates a cell, it moves to "Validated" — the "AI-drafted awaiting
+      // review" label no longer applies regardless of the commit provenance.
+      // Clear ai_drafted = 0 on cell.validate so the file counter reflects
+      // that the cell is no longer in the "awaiting review" bucket.
+      if (event.kind === 'cell.validate') {
+        stmts.push(
+          db
+            .prepare(
+              `UPDATE cells SET ai_drafted = 0
+               WHERE project_id = ? AND file_id = ? AND cell_id = ? AND side = 'target'`,
+            )
+            .bind(event.projectId, event.fileId, event.cellId),
         )
       }
 
@@ -782,6 +806,42 @@ case 'cell.audio.attach': {
               WHERE id = ? AND project_id = ?`,
           )
           .bind(p.name, event.id, event.fileId, event.projectId),
+      )
+      return ['files']
+    }
+
+    case 'file.delete': {
+      // FRO-272: replay-safe soft-delete tombstone. Mirrors handlers/file-delete-restore.ts.
+      // Idempotent on double-delete (WHERE deleted_at IS NULL).
+      if (!event.fileId) {
+        throw new Error(`file.delete event ${event.id} is missing fileId`)
+      }
+      stmts.push(
+        db
+          .prepare(
+            `UPDATE files
+                SET deleted_at = ?, updated_at = (extract(epoch from now()) * 1000)::bigint
+              WHERE id = ? AND project_id = ? AND deleted_at IS NULL`,
+          )
+          .bind(event.serverTs, event.fileId, event.projectId),
+      )
+      return ['files']
+    }
+
+    case 'file.restore': {
+      // FRO-272: replay-safe restore. Mirrors handlers/file-delete-restore.ts.
+      // Idempotent on double-restore (WHERE deleted_at IS NOT NULL).
+      if (!event.fileId) {
+        throw new Error(`file.restore event ${event.id} is missing fileId`)
+      }
+      stmts.push(
+        db
+          .prepare(
+            `UPDATE files
+                SET deleted_at = NULL, updated_at = (extract(epoch from now()) * 1000)::bigint
+              WHERE id = ? AND project_id = ? AND deleted_at IS NOT NULL`,
+          )
+          .bind(event.fileId, event.projectId),
       )
       return ['files']
     }

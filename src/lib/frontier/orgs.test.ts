@@ -78,8 +78,11 @@ describe("listMyOrgs", () => {
     expect(calledUrl).toMatch(/\/api\/v2\/orgs$/)
     expect(orgs).toEqual([{ id: 1, name: "Come and See", role: { level: 600, name: "maintainer" } }])
   })
-  it("throws on non-OK", async () => {
+  it("throws on non-OK with a human message, not 'HTTP 500'", async () => {
     global.fetch = vi.fn(async () => new Response("nope", { status: 500 })) as unknown as typeof fetch
-    await expect(listMyOrgs("jwt")).rejects.toThrow(/HTTP 500/)
+    const err = await listMyOrgs("jwt").catch((e: unknown) => e)
+    expect(err).toBeInstanceOf(Error)
+    expect((err as Error).message).not.toMatch(/HTTP\s*500/)
+    expect((err as Error).name).toBe("UserError")
   })
 });

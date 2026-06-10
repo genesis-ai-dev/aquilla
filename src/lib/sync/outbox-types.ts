@@ -44,6 +44,10 @@ export type OutboxEventKind =
   | "file.create"
   // File label rename (contributor-level; non-chain-mutating).
   | "file.rename"
+  // Soft-delete a file (project_lead+; non-chain-mutating).
+  | "file.delete"
+  // Restore a soft-deleted file (project_lead+; non-chain-mutating).
+  | "file.restore"
   // Comments (non-chain-mutating; contributor-level).
   | "comment.create"
   | "comment.edit"
@@ -124,6 +128,14 @@ export interface OutboxEventPayloads {
      */
     search_query?: string
     replace_string?: string
+    /**
+     * FRO-292 / AI provenance: when true, tags this commit as machine-drafted
+     * (the `cell.commit.llm-accept` variant per AD-2). Set by the AI completion
+     * path (useCompletion → commitCompletedCell). Human edits omit this field
+     * entirely — the server projection uses its presence to track `ai_drafted`
+     * on the cell row until a human edit or validation clears it.
+     */
+    ai_suggestion?: true
     /**
      * FRO-186 / harmonization: when present, tags this commit as a harmonize
      * sweep event (`cell.commit.harmonize` variant per AD-2). The server uses
@@ -209,6 +221,12 @@ export interface OutboxEventPayloads {
   "file.rename": {
     name: string
   }
+  // Soft-delete a file (project_lead+). Stamps `files.deleted_at`; cells and
+  // audio are retained (R2 wipe deferred). Non-chain-mutating (parentId omitted).
+  "file.delete": Record<string, never>
+  // Restore a soft-deleted file (project_lead+). Clears `files.deleted_at`.
+  // All cells and audio remain intact. Non-chain-mutating (parentId omitted).
+  "file.restore": Record<string, never>
 
   // ── Comments (non-chain-mutating) ────────────────────────────────────────
   "comment.create": {

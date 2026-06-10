@@ -59,11 +59,14 @@ describe("listProjectMembers", () => {
     expect(await listProjectMembers("jwt", "p1")).toBeNull();
   });
 
-  it("throws on 5xx (real failure)", async () => {
+  it("throws on 5xx (real failure) with a human message, not 'HTTP 503'", async () => {
     (global.fetch as any).mockResolvedValueOnce(
       new Response("server down", { status: 503 })
     );
-    await expect(listProjectMembers("jwt", "p1")).rejects.toThrow(/HTTP 503/);
+    const err = await listProjectMembers("jwt", "p1").catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(Error);
+    expect((err as Error).message).not.toMatch(/HTTP\s*503/);
+    expect((err as Error).name).toBe("UserError");
   });
 });
 
@@ -100,9 +103,12 @@ describe("fetchOrgMembersMatrix (FRO-218)", () => {
     expect(map.size).toBe(0);
   });
 
-  it("throws on non-ok (the failure that used to surface as a page 500)", async () => {
+  it("throws on non-ok (the failure that used to surface as a page 500) — human message", async () => {
     (global.fetch as any).mockResolvedValueOnce(new Response("boom", { status: 500 }));
-    await expect(fetchOrgMembersMatrix("jwt", 21)).rejects.toThrow(/HTTP 500/);
+    const err = await fetchOrgMembersMatrix("jwt", 21).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(Error);
+    expect((err as Error).message).not.toMatch(/HTTP\s*500/);
+    expect((err as Error).name).toBe("UserError");
   });
 });
 

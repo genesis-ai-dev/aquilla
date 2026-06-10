@@ -7,6 +7,8 @@ import { useActiveOrg } from "@/context/OrgContext"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { getPortfolio, translatedPct, validatedPct, attentionRank, audioPct, deadlineStatus, type PortfolioProject } from "@/lib/frontier/portfolio"
 import { WorkloadRollup } from "./WorkloadRollup"
+import { UserError } from "@/lib/errors/user-error"
+import { notifySessionExpired } from "@/lib/errors/session-expired-signal"
 
 const STALE_THRESHOLD_MS = 14 * 24 * 60 * 60 * 1000
 
@@ -34,7 +36,7 @@ export function activityStatus(p: PortfolioProject, now: number): ActivityStatus
 
 export function OrgHome() {
   const { activeOrg, activeOrgId, isLoading: orgLoading } = useActiveOrg()
-  const { session } = useFrontierSession()
+  const { session, loading: sessionLoading } = useFrontierSession()
   const jwt = session?.jwt ?? null
 
   const [projects, setProjects] = useState<PortfolioProject[]>([])
@@ -53,7 +55,12 @@ export function OrgHome() {
         if (!cancelled) setProjects(list)
       })
       .catch((err) => {
-        if (!cancelled) setError(err instanceof Error ? err.message : String(err))
+        if (!cancelled) {
+          if (err instanceof UserError && err.category === "session-expired") {
+            notifySessionExpired()
+          }
+          setError(err instanceof Error ? err.message : String(err))
+        }
       })
       .finally(() => {
         if (!cancelled) setLoading(false)
@@ -61,7 +68,33 @@ export function OrgHome() {
     return () => { cancelled = true }
   }, [jwt, activeOrgId])
 
-  const isPageLoading = orgLoading || loading
+  // Signed-out state: session finished loading but no JWT.
+  // Never show zero-stat fake-empty cards for unauthenticated visitors.
+  if (!sessionLoading && !jwt) {
+    return (
+      <AppShell
+        sidebar={<OrgSidebar />}
+        header={<OrgBreadcrumb section="Overview" />}
+        statusBar={null}
+        main={
+          <div className="flex h-full flex-col items-center justify-center gap-4 p-6 text-center">
+            <p className="text-lg font-medium">Sign in to see your workspace</p>
+            <p className="text-sm text-muted-foreground max-w-xs">
+              Your session has ended or you are not signed in. Sign in to access your projects and translation data.
+            </p>
+            <Link
+              to={`/login?next=${encodeURIComponent("/")}`}
+              className="inline-flex items-center justify-center rounded-xl bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90"
+            >
+              Sign in
+            </Link>
+          </div>
+        }
+      />
+    )
+  }
+
+  const isPageLoading = sessionLoading || orgLoading || loading
 
   // Rollup stats
   const now = Date.now()

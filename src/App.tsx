@@ -1,5 +1,6 @@
 import { Suspense, lazy } from "react"
 import { Routes, Route } from "react-router-dom"
+import { ErrorBoundary } from "@/components/ErrorBoundary"
 import { hasAuthHintCookie } from "@/lib/frontier/session-store"
 import { OrgHome } from "@/components/org/OrgHome"
 import { ProductTourProvider } from "@/context/ProductTourContext"
@@ -111,25 +112,27 @@ function RouteLoadingFallback() {
 
 export default function App() {
   return (
-    <SyncingProvider>
-      <PrivateModeBanner />
-      <SyncFreezeOverlay />
-      <OrgProvider>
-        <OutboxProvider>
-          {/* FRO-243: ProductTourProvider mounts once here; the tour portal
-              renders into document.body so it is route-agnostic. The context
-              value (openTour) is consumed by OrgSidebar's "Take the tour" button. */}
-          <ProductTourProvider>
-            <AppRoutes />
-          </ProductTourProvider>
-        </OutboxProvider>
-      </OrgProvider>
-      <AiModelConsentDialog />
-      <AiModelDownloadChip />
-      <AudioBulkProgressBanner />
-      <GlobalAudioShortcuts />
-      <VersionBadge />
-    </SyncingProvider>
+    <ErrorBoundary>
+      <SyncingProvider>
+        <PrivateModeBanner />
+        <SyncFreezeOverlay />
+        <OrgProvider>
+          <OutboxProvider>
+            {/* FRO-243: ProductTourProvider mounts once here; the tour portal
+                renders into document.body so it is route-agnostic. The context
+                value (openTour) is consumed by OrgSidebar's "Take the tour" button. */}
+            <ProductTourProvider>
+              <AppRoutes />
+            </ProductTourProvider>
+          </OutboxProvider>
+        </OrgProvider>
+        <AiModelConsentDialog />
+        <AiModelDownloadChip />
+        <AudioBulkProgressBanner />
+        <GlobalAudioShortcuts />
+        <VersionBadge />
+      </SyncingProvider>
+    </ErrorBoundary>
   )
 }
 

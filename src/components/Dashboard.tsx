@@ -20,7 +20,7 @@ import { OverflowMenu } from "@/components/OverflowMenu"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { useBrand } from "@/branding/use-brand"
 import {
-  fetchAccessibleProjects,
+  fetchAccessibleProjectsResult,
   minimalProjectRecord,
   toggleProjectLifecycle,
   type CloudProjectSummary,
@@ -35,6 +35,7 @@ export function Dashboard() {
   const [trashed, setTrashed] = useState<ProjectRecord[]>([])
   const [cloudProjects, setCloudProjects] = useState<CloudProjectSummary[]>([])
   const [cloudProjectsLoaded, setCloudProjectsLoaded] = useState(false)
+  const [cloudUnreachable, setCloudUnreachable] = useState(false)
   const [loading, setLoading] = useState(true)
   const [pendingTrashId, setPendingTrashId] = useState<string | null>(null)
   const [trashExpanded, setTrashExpanded] = useState(false)
@@ -70,13 +71,24 @@ export function Dashboard() {
     if (!session?.jwt) {
       setCloudProjects([])
       setCloudProjectsLoaded(true)
+      setCloudUnreachable(false)
       return
     }
     let cancelled = false
     setCloudProjectsLoaded(false)
-    fetchAccessibleProjects(session.jwt)
-      .then((list) => {
-        if (!cancelled) setCloudProjects(list)
+    setCloudUnreachable(false)
+    fetchAccessibleProjectsResult(session.jwt)
+      .then((result) => {
+        if (cancelled) return
+        if (result.ok) {
+          setCloudProjects(result.projects)
+          setCloudUnreachable(false)
+        } else {
+          setCloudProjects([])
+          // Only show "unreachable" when the server is actually down — not
+          // for 401/403 which are auth issues the user can resolve by re-signing in.
+          setCloudUnreachable(result.reason === "unreachable")
+        }
       })
       .finally(() => {
         if (!cancelled) setCloudProjectsLoaded(true)
@@ -180,6 +192,25 @@ export function Dashboard() {
     } finally {
       setPendingLifecycleId(null)
     }
+  }
+
+  // Retry the cloud fetch — resets the error state and re-runs the effect.
+  function retryCloudFetch() {
+    if (!session?.jwt) return
+    let cancelled = false
+    setCloudProjectsLoaded(false)
+    setCloudUnreachable(false)
+    fetchAccessibleProjectsResult(session.jwt).then((result) => {
+      if (cancelled) return
+      if (result.ok) {
+        setCloudProjects(result.projects)
+        setCloudUnreachable(false)
+      } else {
+        setCloudProjects([])
+        setCloudUnreachable(result.reason === "unreachable")
+      }
+    }).finally(() => { if (!cancelled) setCloudProjectsLoaded(true) })
+    return () => { cancelled = true }
   }
 
   // Apply the three-position lifecycle filter to local + cloud projects.
@@ -291,6 +322,25 @@ export function Dashboard() {
             </div>
           )}
         </section>
+
+        {/* RES-5: Show a "can't reach server" banner instead of silently
+            showing no cloud projects when the backend is unreachable. */}
+        {cloudUnreachable && session?.jwt && (
+          <section className="mt-10">
+            <div className="flex items-center justify-between gap-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm dark:border-amber-800 dark:bg-amber-950">
+              <span className="text-amber-800 dark:text-amber-200">
+                Can't reach the server — your cloud projects may not be listed.
+              </span>
+              <button
+                type="button"
+                onClick={retryCloudFetch}
+                className="shrink-0 rounded-md bg-amber-800 px-3 py-1.5 text-xs font-medium text-white hover:bg-amber-700 dark:bg-amber-700 dark:hover:bg-amber-600"
+              >
+                Retry
+              </button>
+            </div>
+          </section>
+        )}
 
         {cloudOnly.length > 0 && (
           <section className="mt-10">

@@ -278,4 +278,71 @@ describe("useFocusLock", () => {
     // No fake reconciler to inspect, but isHeld must stay false (we never sent).
     expect(result.current[0].isHeld).toBe(false)
   })
+
+  // FRO-288: renewal keeps the lock alive past the 30s DO lease boundary.
+  // Without renewal the DO expires the lease and a second claimant can steal
+  // the lock silently. With the half-period timer, focus.renew fires every 15s
+  // and the server resets the clock; isHeld stays true on our side.
+  it("FRO-288: renewal fires past the 30s lease boundary, keeping the lock", () => {
+    const ws = makeFakeReconciler()
+    const { result } = renderHook(() =>
+      useFocusLock({
+        reconciler: ws,
+        cellId: "c",
+        currentUserId: "alice",
+        leaseMs: 30_000,
+      }),
+    )
+    act(() => {
+      result.current[0].claim()
+    })
+    expect(result.current[0].isHeld).toBe(true)
+
+    // Advance well past the 30s boundary — renewal should have fired twice.
+    act(() => {
+      vi.advanceTimersByTime(35_000)
+    })
+    // Still held locally — the server's clock was reset by the renewals.
+    expect(result.current[0].isHeld).toBe(true)
+    const renewals = ws.sent.filter((m) => m.t === "focus.renew")
+    expect(renewals.length).toBeGreaterThanOrEqual(2)
+  })
+
+  // FRO-288: takeover (another user grabs the cell) must surface heldBy
+  // and stop our renewal timer so we don't keep sending stale renewals.
+  it("FRO-288: takeover sets heldBy and stops the renewal timer", () => {
+    const ws = makeFakeReconciler()
+    const { result } = renderHook(() =>
+      useFocusLock({
+        reconciler: ws,
+        cellId: "c",
+        currentUserId: "alice",
+        leaseMs: 30_000,
+      }),
+    )
+    act(() => {
+      result.current[0].claim()
+    })
+    expect(result.current[0].isHeld).toBe(true)
+
+    // Server broadcasts another user's claim (takeover).
+    act(() => {
+      result.current[1]({
+        t: "lock.claimed",
+        cellId: "c",
+        by: { userId: "bob", ts: 1_000 },
+      })
+    })
+
+    // isHeld must be false; heldBy must identify the takeover user.
+    expect(result.current[0].isHeld).toBe(false)
+    expect(result.current[0].heldBy).toEqual({ userId: "bob", ts: 1_000 })
+
+    // Renewal timer must be stopped — no further renewals after the takeover.
+    const renewalsBefore = ws.sent.filter((m) => m.t === "focus.renew").length
+    act(() => {
+      vi.advanceTimersByTime(60_000)
+    })
+    expect(ws.sent.filter((m) => m.t === "focus.renew").length).toBe(renewalsBefore)
+  })
 })

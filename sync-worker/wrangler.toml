@@ -76,6 +76,9 @@ id = "69bcc10e67464f2eaf4fe91a9141e7cd"
 #   — the intended prod default. If you need to disable auth in prod for
 #   some reason, set ALLOW_UNAUTHENTICATED="true" via `wrangler secret put`.
 
+[observability]
+enabled = true
+
 # ---------------------------------------------------------------------------
 # Production environment — routes traffic via api.aquilla.app/sync/* so
 # Safari (which blocks *.workers.dev WebSockets) hits the real zone, and so

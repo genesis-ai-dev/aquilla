@@ -74,6 +74,9 @@ id = "69bcc10e67464f2eaf4fe91a9141e7cd"
 #                        to OpenRouter (folded in from aquilla-chat-worker).
 # Plain vars: see types.ts for the full list.
 
+[observability]
+enabled = true
+
 [vars]
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = "43200"

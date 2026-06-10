@@ -272,6 +272,7 @@ describe("useCells (Phase 2a, D1-backed)", () => {
         lastEditAt: 100,
         lastEditEventId: "ev1",
         activeValidators: ["alice", "bob"],
+        waivers: [],
       }],
     ])
     const { result } = renderHook(() =>
@@ -325,7 +326,7 @@ describe("useCells (Phase 2a, D1-backed)", () => {
       makeRow({ cellId: "c1", side: "target", value: "hello", validated: false }),
     ])
     const stats1 = new Map<string, CellAuditStats>([
-      ["c1", { cellId: "c1", editCount: 1, contentHash: "", lastEditAt: 0, lastEditEventId: "ev1", activeValidators: [] }],
+      ["c1", { cellId: "c1", editCount: 1, contentHash: "", lastEditAt: 0, lastEditEventId: "ev1", activeValidators: [], waivers: [] }],
     ])
     const { result, rerender } = renderHook(
       (props: { stats: ReadonlyMap<string, CellAuditStats> }) =>
@@ -344,7 +345,7 @@ describe("useCells (Phase 2a, D1-backed)", () => {
     expect(result.current.cells[0].validationStatus).toBe("none")
 
     const stats2 = new Map<string, CellAuditStats>([
-      ["c1", { cellId: "c1", editCount: 1, contentHash: "", lastEditAt: 0, lastEditEventId: "ev1", activeValidators: ["alice"] }],
+      ["c1", { cellId: "c1", editCount: 1, contentHash: "", lastEditAt: 0, lastEditEventId: "ev1", activeValidators: ["alice"], waivers: [] }],
     ])
     rerender({ stats: stats2 })
     await waitFor(() => expect(result.current.cells[0].validationStatus).toBe("self"))

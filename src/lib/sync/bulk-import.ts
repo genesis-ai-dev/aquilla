@@ -141,6 +141,81 @@ export async function bulkUploadSource(args: BulkUploadArgs): Promise<void> {
   } while (offset < args.cells.length)
 }
 
+// ---------------------------------------------------------------------------
+// Macula morph-row upload (FRO-178)
+// ---------------------------------------------------------------------------
+
+export interface MorphRow {
+  cell_id: string
+  word_seq: number
+  surface: string
+  lemma?: string
+  morph_code?: string
+  strongs_h?: string
+  strongs_g?: string
+}
+
+export interface BulkMorphUploadArgs {
+  projectId: string
+  fileId: string
+  rows: MorphRow[]
+  getToken: (fileId: string) => Promise<string | null>
+  onProgress?: (uploaded: number, total: number) => void
+  signal?: AbortSignal
+  fetchImpl?: typeof fetch
+}
+
+/** Rows per morph-upload chunk. Each row = 1 DB upsert, kept small for DB safety. */
+const MORPH_CHUNK = 500
+
+/**
+ * Upload per-word morphology rows to the server's /import-morph endpoint.
+ * Additive: re-importing the same file upserts rows (idempotent on the PK
+ * `(project_id, file_id, cell_id, word_seq)`). Throws on the first failure.
+ */
+export async function bulkUploadMorphRows(args: BulkMorphUploadArgs): Promise<void> {
+  if (args.rows.length === 0) return
+  const fetchFn = args.fetchImpl ?? fetch
+  const token = await args.getToken(args.fileId)
+  if (!token) {
+    throw new Error(
+      "Couldn't get an upload token — you may be signed out. Sign in and import again.",
+    )
+  }
+
+  const url = `${syncWorkerHttpOrigin()}/import-morph`
+  const total = args.rows.length
+  let uploaded = 0
+
+  for (let offset = 0; offset < args.rows.length; offset += MORPH_CHUNK) {
+    if (args.signal?.aborted) throw new Error("Import cancelled")
+    const chunk = args.rows.slice(offset, offset + MORPH_CHUNK)
+    const payload = { projectId: args.projectId, fileId: args.fileId, rows: chunk }
+
+    let res: Response
+    try {
+      res = await fetchFn(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify(payload),
+        signal: args.signal,
+      })
+    } catch (err) {
+      const reason = err instanceof Error ? err.message : "network error"
+      throw new Error(`Morph upload failed: ${reason}`)
+    }
+    if (!res.ok) {
+      const detail = await res.text().catch(() => "")
+      throw new Error(
+        `Morph upload failed (HTTP ${res.status})${detail ? `: ${detail.slice(0, 200)}` : ""}`,
+      )
+    }
+
+    uploaded += chunk.length
+    args.onProgress?.(uploaded, total)
+  }
+}
+
 /** Commits per chunk for target.cell.commit. Smaller than source CHUNK: the
  *  /events route does per-event AD-2 guards (heavier than /import's fast path). */
 const TARGET_CHUNK = 200

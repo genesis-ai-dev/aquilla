@@ -50,7 +50,13 @@ export const env = {
   BASE_URL: "https://aquilla.app",
   SYNC_WORKER_URL: "https://api.aquilla.app/sync",
   DEFAULT_LLM_MODEL: "anthropic/claude-sonnet-4.5",
+  OPENROUTER_API_KEY: undefined as string | undefined,
   ENVIRONMENT: "test",
+  // AI budget controls (FRO-265). Tests override these per-suite as needed.
+  AI_BUDGET_ENFORCE: undefined as string | undefined,
+  AI_ALLOWED_MODELS: undefined as string | undefined,
+  AI_USER_DAILY_REQUEST_LIMIT: undefined as string | undefined,
+  AI_GLOBAL_DAILY_REQUEST_LIMIT: undefined as string | undefined,
 }
 
 /** Load the canonical Postgres schema into the test PGlite (call once, beforeAll). */

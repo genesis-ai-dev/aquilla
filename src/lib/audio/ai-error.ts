@@ -15,6 +15,8 @@ export type ErrorCategory =
   | "network"
   | "model-load-failed"
   | "audio-format-unsupported"
+  | "daily-quota-exceeded"
+  | "model-not-allowed"
   | "unknown"
 
 export interface ActionableError {
@@ -30,6 +32,31 @@ export interface ActionableError {
 export function categorizeAiError(rawMessage: string): ActionableError {
   const raw = rawMessage.trim()
   const m = raw.toLowerCase()
+
+  // Platform daily quota (FRO-265): 429 responses from the Frontier/Aquilla proxy.
+  if (
+    m.includes("daily ai limit") ||
+    m.includes("daily_budget_exceeded") ||
+    m.includes("resets at midnight") ||
+    m.includes("global_budget_exceeded") ||
+    m.includes("platform ai capacity")
+  ) {
+    return {
+      category: "daily-quota-exceeded",
+      title: "Daily AI limit reached",
+      body: "Daily AI limit reached — resets at midnight UTC. Try again tomorrow, or switch this project to a custom AI provider.",
+      raw,
+    }
+  }
+  // Model not on the platform allowlist.
+  if (m.includes("model_not_allowed") || m.includes("not available on this platform")) {
+    return {
+      category: "model-not-allowed",
+      title: "Model not available",
+      body: raw,
+      raw,
+    }
+  }
 
   if (m.includes("api key") || m.includes("api_key") || m.includes("apikey") ||
       m.includes("gemini") && m.includes("key")) {

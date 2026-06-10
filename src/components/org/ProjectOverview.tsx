@@ -8,6 +8,8 @@ import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { useActiveOrg } from "@/context/OrgContext"
 import { archiveProjectRemote, unarchiveProjectRemote } from "@/lib/sync/archive"
 import { setProjectDeadline } from "@/lib/sync/cloud-projects"
+import { useProjectLifecycle } from "@/hooks/useProjectLifecycle"
+import { InactiveProjectBanner } from "@/components/InactiveProjectBanner"
 import { downloadProjectBundle } from "@/lib/sync/export-bundle"
 import { AssignWork } from "./AssignWork"
 import { getPortfolio, translatedPct, validatedPct, audioPct, recordedMinutes, deadlineStatus, type PortfolioProject } from "@/lib/frontier/portfolio"
@@ -231,7 +233,22 @@ export function ProjectOverview() {
   const isOwner = (project?.syncRole?.level ?? 0) >= 700
   const canManage = (project?.syncRole?.level ?? 0) >= 600
   const canAssign = (project?.syncRole?.level ?? 0) >= 500
+  const canToggleLifecycle = (project?.syncRole?.level ?? 0) >= 500
   const isArchived = Boolean(project?.deletedAt)
+
+  const { isFrozen, toggle: toggleLifecycle, busy: lifecycleBusy } = useProjectLifecycle(
+    id,
+    project,
+    () => refresh(),
+  )
+
+  async function handleToggleLifecycle() {
+    if (!jwt) return
+    setError(null)
+    const result = await toggleLifecycle(jwt)
+    if (!result.ok) setError(result.message)
+    else await refresh()
+  }
   const dstatus = audio ? deadlineStatus(audio, Date.now()) : null
   const projectStatus = deriveProjectStatus(audio, Date.now())
 
@@ -316,7 +333,16 @@ export function ProjectOverview() {
       header={<OrgBreadcrumb section={project?.name ?? "Project"} />}
       statusBar={null}
       main={
-        <div className="h-full overflow-y-auto p-6">
+        <div className="h-full overflow-y-auto">
+          {isFrozen && status === "ready" && project && (
+            <InactiveProjectBanner
+              projectName={project.name}
+              canReactivate={canToggleLifecycle}
+              onReactivate={handleToggleLifecycle}
+              busy={lifecycleBusy}
+            />
+          )}
+          <div className="p-6">
           {status !== "ready" ? (
             <p className="text-sm text-muted-foreground">Loading…</p>
           ) : (
@@ -331,6 +357,14 @@ export function ProjectOverview() {
                       <StatusChip status={projectStatus} />
                       {isArchived && (
                         <Badge variant="secondary" className="shrink-0">Archived</Badge>
+                      )}
+                      {!isArchived && isFrozen && (
+                        <Badge
+                          className="shrink-0 border-transparent bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300"
+                          data-testid="overview-inactive-badge"
+                        >
+                          Inactive
+                        </Badge>
                       )}
                     </div>
                     {/* Language pair */}
@@ -355,8 +389,8 @@ export function ProjectOverview() {
                         Restore
                       </button>
                     )}
-                    {/* Archive + Download moved into overflow menu */}
-                    {(canManage || isOwner) && !isArchived && (
+                    {/* Archive + Download + Lifecycle moved into overflow menu */}
+                    {(canManage || isOwner || canToggleLifecycle) && !isArchived && (
                       <OverflowMenu>
                         {canManage && (
                           <OverflowItem
@@ -364,6 +398,14 @@ export function ProjectOverview() {
                             disabled={busy || (project?.files.length ?? 0) === 0}
                           >
                             Download deliverable
+                          </OverflowItem>
+                        )}
+                        {canToggleLifecycle && (
+                          <OverflowItem
+                            onClick={handleToggleLifecycle}
+                            disabled={lifecycleBusy}
+                          >
+                            {isFrozen ? "Mark as Active" : "Mark as Inactive"}
                           </OverflowItem>
                         )}
                         {isOwner && (
@@ -605,6 +647,7 @@ export function ProjectOverview() {
               </div>
             </div>
           )}
+          </div>
         </div>
       }
     />

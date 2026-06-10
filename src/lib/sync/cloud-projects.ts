@@ -27,6 +27,9 @@ export interface CloudProjectSummary {
   archivedAt?: string | null
   /** Present on the single-project endpoint; used to show "archived by X" in Trash. */
   archivedBy?: { id: number; username: string } | null
+  /** Active/inactive lifecycle state (migration 0033). Absent = assume active
+   *  (older API versions that don't return the field). */
+  isActive?: boolean
   role: {
     level: number
     name: string
@@ -171,7 +174,32 @@ export function minimalProjectRecord(summary: CloudProjectSummary): ProjectRecor
     record.deletedAt = summary.archivedAt
     if (summary.archivedBy?.username) record.deletedBy = summary.archivedBy.username
   }
+  // isActive absent → treat as active (backward compat with older API)
+  if (summary.isActive === false) {
+    record.isActive = false
+  }
   return record
+}
+
+/**
+ * PATCH /api/v2/projects/:id/lifecycle — set a project active or inactive.
+ * project_lead+ only (server-enforced). Throws on non-2xx.
+ */
+export async function toggleProjectLifecycle(
+  jwt: string,
+  projectId: string,
+  isActive: boolean,
+  apiUrl: string = FRONTIER_API_URL,
+): Promise<void> {
+  const res = await fetch(
+    `${apiUrl}/api/v2/projects/${encodeURIComponent(projectId)}/lifecycle`,
+    {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${jwt}` },
+      body: JSON.stringify({ isActive }),
+    },
+  )
+  if (!res.ok) throw new Error(`toggleProjectLifecycle failed: HTTP ${res.status}`)
 }
 
 /**

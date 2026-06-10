@@ -108,7 +108,11 @@ CREATE TABLE projects (
     deadline_at       TEXT,         -- calendar date string 'YYYY-MM-DD' (not an instant; TIMESTAMPTZ would TZ-shift it)
     -- Org termbase publish flag (migration 0030). TRUE = this project's termbase
     -- is discoverable by other projects in its org.
-    org_published_termbase BOOLEAN NOT NULL DEFAULT FALSE
+    org_published_termbase BOOLEAN NOT NULL DEFAULT FALSE,
+    -- Active/inactive lifecycle flag (migration 0033). FALSE = frozen/dormant;
+    -- deliberate reactivation required to edit. DISTINCT from archived_at
+    -- (Trash): inactive projects remain visible in the list but block edits.
+    is_active BOOLEAN NOT NULL DEFAULT TRUE
 );
 
 CREATE TABLE project_members (

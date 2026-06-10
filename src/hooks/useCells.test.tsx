@@ -15,6 +15,12 @@ import type { CellRow } from "@/lib/sync/cells-read-types"
 const fetchAllMock = vi.fn<(projectId: string, fileId: string, jwt: string, side?: "source" | "target") => Promise<CellRow[]>>()
 // Seam for the targeted single-cell refetch (revalidateCell → fetchCellsByIds).
 const fetchByIdsMock = vi.fn<(projectId: string, fileId: string, cellIds: string[], jwt: string) => Promise<CellRow[]>>()
+// Seam for the M2-1 conditional refetch (?since= delta). Only consulted when
+// the hook holds a watermark (cache hit with maxServerSeq, or streamMeta).
+const fetchDeltaMock = vi.fn<(projectId: string, fileId: string, since: number, jwt: string) => Promise<unknown>>()
+// Watermark the streamFileCells mock reports via onMeta (first target page).
+// undefined = pre-M2-1 server → the hook keeps full-streaming.
+const streamMeta: { maxServerSeq?: number } = {}
 // Optional override: a queue of pages to deliver one-at-a-time. When non-empty,
 // the streamFileCells mock pulls from here instead of calling fetchAllMock.
 const pagesMock: { queue: CellRow[][]; pendingResolvers: Array<() => void> } = {
@@ -38,7 +44,9 @@ vi.mock("@/lib/sync/cells-read", () => ({
     jwt: string,
     onPage: OnPage,
     side?: "source" | "target",
+    onMeta?: (meta: { maxServerSeq?: number | null }) => void,
   ) => {
+    if (onMeta) onMeta({ maxServerSeq: streamMeta.maxServerSeq })
     if (pagesMock.queue.length > 0) {
       // Streaming/pagination fixtures are source pages; the target pass yields
       // nothing so the source pass drains the queue.
@@ -67,18 +75,29 @@ vi.mock("@/lib/sync/cells-read", () => ({
     fetchAllMock(...(args as Parameters<typeof fetchAllMock>)),
   fetchCellsByIds: (...args: unknown[]) =>
     fetchByIdsMock(...(args as Parameters<typeof fetchByIdsMock>)),
+  fetchCellsDelta: (...args: unknown[]) =>
+    fetchDeltaMock(...(args as Parameters<typeof fetchDeltaMock>)),
 }))
 
-// Stub the IDB cells-cache. The hook reads/writes it on hard fetches; the
+// Stub the IDB cells-cache I/O. The hook reads/writes it on hard fetches; the
 // real impl is keyed by `${projectId}:${fileId}` and persists across tests
 // in fake-indexeddb, which bleeds rows between tests that share the same
-// (projectId, fileId) fixture. Tests assert against `fetchAllMock` output,
-// not cache contents, so a no-op stub is the right shape.
-vi.mock("@/lib/sync/cells-cache", () => ({
-  readCellsCache: async () => null,
-  writeCellsCache: async () => {},
-  resetCellsCacheConnectionForTests: async () => {},
-}))
+// (projectId, fileId) fixture. `cacheEntry` lets the M2-1 tests stage a warm
+// cache hit. mergeCellsDelta stays REAL (importOriginal) so the conditional
+// refetch tests exercise the actual lib merge, not a stand-in.
+const cacheEntry: { value: { rows: CellRow[]; maxServerSeq?: number } | null } = { value: null }
+vi.mock("@/lib/sync/cells-cache", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/sync/cells-cache")>()
+  return {
+    ...actual,
+    readCellsCache: async () =>
+      cacheEntry.value
+        ? { key: "k", maxLastEditAt: 0, cachedAt: 0, ...cacheEntry.value }
+        : null,
+    writeCellsCache: async () => {},
+    resetCellsCacheConnectionForTests: async () => {},
+  }
+})
 
 import { useCells } from "./useCells"
 import type { CellAuditStats } from "./useCellsAuditStats"
@@ -106,9 +125,12 @@ beforeEach(() => {
   fetchAllMock.mockReset()
   fetchByIdsMock.mockReset()
   fetchByIdsMock.mockResolvedValue([])
+  fetchDeltaMock.mockReset()
   pagesMock.queue = []
   pagesMock.pendingResolvers = []
   sideCache = null
+  cacheEntry.value = null
+  delete streamMeta.maxServerSeq
 })
 
 describe("useCells (Phase 2a, D1-backed)", () => {
@@ -737,5 +759,193 @@ describe("useCells (Phase 2a, D1-backed)", () => {
 
     expect(result.current.cells[0].translated).toBe("Hola")
     expect(result.current.cells[0].original).toBe("Hello")
+  })
+})
+
+// ── M2-1 conditional refetch (?since= delta) ────────────────────────────────
+//
+// Why this matters: a Bible-sized book is ~60 pages per full stream, and the
+// hook used to re-stream ALL of them on every window focus / post-commit
+// revalidate (PERF-4). With a watermark, those triggers must collapse to one
+// delta request — and the merge must preserve row order and still deliver
+// post-commit rows (targetEventId updates) that confirm pending writes.
+describe("useCells conditional refetch (M2-1)", () => {
+  it("warm reopen with a cached watermark sends ONE ?since= request and no full stream", async () => {
+    cacheEntry.value = {
+      rows: [
+        makeRow({ cellId: "c1", side: "source", value: "cached-src" }),
+        makeRow({ cellId: "c1", side: "target", value: "cached-tgt" }),
+      ],
+      maxServerSeq: 10,
+    }
+    // Nothing changed since the snapshot.
+    fetchDeltaMock.mockResolvedValueOnce({
+      kind: "delta", changedCellIds: [], cells: [], maxServerSeq: 10,
+    })
+    const { result } = renderHook(() =>
+      useCells({ projectId: "proj-a", fileId: "file-x", getToken, enabled: true }),
+    )
+    await waitFor(() => expect(fetchDeltaMock).toHaveBeenCalledTimes(1))
+    expect(fetchDeltaMock).toHaveBeenCalledWith("proj-a", "file-x", 10, "fake-jwt")
+    await waitFor(() => expect(result.current.isLoading).toBe(false))
+    expect(result.current.cells).toHaveLength(1)
+    expect(result.current.cells[0].original).toBe("cached-src")
+    expect(result.current.cells[0].translated).toBe("cached-tgt")
+    // The full stream never ran.
+    expect(fetchAllMock).not.toHaveBeenCalled()
+  })
+
+  it("merges a delta through the real lib merge: changed rows update in place, deletions drop", async () => {
+    cacheEntry.value = {
+      rows: [
+        makeRow({ cellId: "a", side: "source", value: "A", anchorCellId: null }),
+        makeRow({ cellId: "b", side: "source", value: "B", anchorCellId: "a" }),
+        makeRow({ cellId: "c", side: "source", value: "C", anchorCellId: "b" }),
+        makeRow({ cellId: "b", side: "target", value: "B-tgt", anchorCellId: "a" }),
+      ],
+      maxServerSeq: 5,
+    }
+    // b's target was edited; c was deleted outright.
+    fetchDeltaMock.mockResolvedValueOnce({
+      kind: "delta",
+      changedCellIds: ["b", "c"],
+      cells: [
+        makeRow({ cellId: "b", side: "source", value: "B", anchorCellId: "a" }),
+        makeRow({ cellId: "b", side: "target", value: "B-new", anchorCellId: "a", eventId: "ev-new" }),
+      ],
+      maxServerSeq: 8,
+    })
+    const { result } = renderHook(() =>
+      useCells({ projectId: "proj-a", fileId: "file-x", getToken, enabled: true }),
+    )
+    await waitFor(() => expect(result.current.cells).toHaveLength(2))
+    expect(result.current.cells.map((c) => c.id)).toEqual(["a", "b"])
+    expect(result.current.cells[1].translated).toBe("B-new")
+    // Post-commit read-back confirmation keys off targetEventId updates.
+    expect(result.current.cells[1].targetEventId).toBe("ev-new")
+    expect(fetchAllMock).not.toHaveBeenCalled()
+  })
+
+  it("window focus revalidates via the delta path instead of re-streaming the file (PERF-4)", async () => {
+    // Cold load: full stream hands the hook a watermark via stream meta.
+    streamMeta.maxServerSeq = 3
+    fetchAllMock.mockResolvedValueOnce([
+      makeRow({ cellId: "c1", side: "source", value: "src" }),
+      makeRow({ cellId: "c1", side: "target", value: "old" }),
+    ])
+    const { result } = renderHook(() =>
+      useCells({ projectId: "proj-a", fileId: "file-x", getToken, enabled: true }),
+    )
+    await waitFor(() => expect(result.current.cells).toHaveLength(1))
+    const fullStreamCalls = fetchAllMock.mock.calls.length
+
+    fetchDeltaMock.mockResolvedValueOnce({
+      kind: "delta",
+      changedCellIds: ["c1"],
+      cells: [
+        makeRow({ cellId: "c1", side: "source", value: "src" }),
+        makeRow({ cellId: "c1", side: "target", value: "peer-edit" }),
+      ],
+      maxServerSeq: 4,
+    })
+    act(() => { window.dispatchEvent(new Event("focus")) })
+    await waitFor(() => expect(result.current.cells[0].translated).toBe("peer-edit"))
+    expect(fetchDeltaMock).toHaveBeenCalledWith("proj-a", "file-x", 3, "fake-jwt")
+    // No additional full stream ran for the focus revalidate.
+    expect(fetchAllMock.mock.calls.length).toBe(fullStreamCalls)
+
+    // The cursor advanced: the next revalidate asks from seq 4.
+    fetchDeltaMock.mockResolvedValueOnce({
+      kind: "delta", changedCellIds: [], cells: [], maxServerSeq: 4,
+    })
+    act(() => { result.current.revalidate() })
+    await waitFor(() => expect(fetchDeltaMock).toHaveBeenCalledTimes(2))
+    expect(fetchDeltaMock).toHaveBeenLastCalledWith("proj-a", "file-x", 4, "fake-jwt")
+  })
+
+  it("falls back to the full stream when the server answers resync", async () => {
+    cacheEntry.value = {
+      rows: [makeRow({ cellId: "c1", side: "source", value: "stale" })],
+      maxServerSeq: 2,
+    }
+    fetchDeltaMock.mockResolvedValueOnce({ kind: "resync" })
+    fetchAllMock.mockResolvedValueOnce([
+      makeRow({ cellId: "c1", side: "source", value: "fresh" }),
+      makeRow({ cellId: "c2", side: "source", value: "bulk-imported" }),
+    ])
+    const { result } = renderHook(() =>
+      useCells({ projectId: "proj-a", fileId: "file-x", getToken, enabled: true }),
+    )
+    await waitFor(() => expect(result.current.cells).toHaveLength(2))
+    expect(result.current.cells[0].original).toBe("fresh")
+    expect(fetchDeltaMock).toHaveBeenCalledTimes(1)
+    expect(fetchAllMock).toHaveBeenCalled()
+  })
+
+  it("a failed delta (e.g. RES-6 timeout) leaves the cached view intact and surfaces isError", async () => {
+    cacheEntry.value = {
+      rows: [
+        makeRow({ cellId: "c1", side: "source", value: "cached-src" }),
+        makeRow({ cellId: "c1", side: "target", value: "cached-tgt" }),
+      ],
+      maxServerSeq: 7,
+    }
+    fetchDeltaMock.mockRejectedValueOnce(new DOMException("timed out", "TimeoutError"))
+    const { result } = renderHook(() =>
+      useCells({ projectId: "proj-a", fileId: "file-x", getToken, enabled: true }),
+    )
+    await waitFor(() => expect(result.current.isError).toBe(true))
+    // Cached rows survive — no blanking, no fallback stream mid-error.
+    expect(result.current.cells).toHaveLength(1)
+    expect(result.current.cells[0].original).toBe("cached-src")
+    expect(fetchAllMock).not.toHaveBeenCalled()
+
+    // The next trigger retries and recovers.
+    fetchDeltaMock.mockResolvedValueOnce({
+      kind: "delta", changedCellIds: [], cells: [], maxServerSeq: 7,
+    })
+    act(() => { result.current.revalidate() })
+    await waitFor(() => expect(result.current.isError).toBe(false))
+    expect(result.current.cells[0].original).toBe("cached-src")
+  })
+
+  it("a delta cannot clobber a cell mutated locally after the snapshot began (FRO-247)", async () => {
+    cacheEntry.value = {
+      rows: [
+        makeRow({ cellId: "c1", side: "source", value: "src" }),
+        makeRow({ cellId: "c1", side: "target", value: "old" }),
+      ],
+      maxServerSeq: 1,
+    }
+    // Stall the delta until the local edit lands.
+    let resolveDelta: (v: unknown) => void = () => {}
+    fetchDeltaMock.mockImplementationOnce(
+      () => new Promise((resolve) => { resolveDelta = resolve }),
+    )
+    const { result } = renderHook(() =>
+      useCells({ projectId: "proj-a", fileId: "file-x", getToken, enabled: true }),
+    )
+    await waitFor(() => expect(result.current.cells).toHaveLength(1))
+    await waitFor(() => expect(fetchDeltaMock).toHaveBeenCalledTimes(1))
+
+    // Local optimistic edit AFTER the delta snapshot began.
+    act(() => { result.current.applyOptimisticTargetEdit("c1", { value: "mine" }) })
+    expect(result.current.cells[0].translated).toBe("mine")
+
+    // The delta resolves carrying a PRE-edit server row for the same cell.
+    act(() => {
+      resolveDelta({
+        kind: "delta",
+        changedCellIds: ["c1"],
+        cells: [
+          makeRow({ cellId: "c1", side: "source", value: "src" }),
+          makeRow({ cellId: "c1", side: "target", value: "stale-server" }),
+        ],
+        maxServerSeq: 2,
+      })
+    })
+    await waitFor(() => expect(result.current.isLoading).toBe(false))
+    // The local write survives the merge.
+    expect(result.current.cells[0].translated).toBe("mine")
   })
 })

@@ -15,9 +15,9 @@ import { useCallback, useEffect, useRef, useState } from "react"
 import type { CellHistoryEntry, SourceLocation, CommentThread, CellTtsSettings } from "@/lib/parsers/types"
 import type { CodexCellAttachment, EditTypeValue, ValidationEntry, WordTiming } from "@/lib/codex-editor/types"
 import type { CellAuditStats } from "./useCellsAuditStats"
-import { streamFileCells, fetchCellsByIds } from "@/lib/sync/cells-read"
+import { streamFileCells, fetchCellsByIds, fetchCellsDelta } from "@/lib/sync/cells-read"
 import type { CellRow } from "@/lib/sync/cells-read-types"
-import { readCellsCache, writeCellsCache } from "@/lib/sync/cells-cache"
+import { readCellsCache, writeCellsCache, mergeCellsDelta } from "@/lib/sync/cells-cache"
 import { peekOutboxBatch, subscribeToOutbox } from "@/lib/sync/outbox"
 import { formatVttTime } from "@/lib/video/vtt-generator"
 
@@ -345,6 +345,12 @@ export function useCells(opts: UseCellsOptions): UseCellsResult {
   // "edited cell vanishes until refresh").
   const writeSeqRef = useRef(0)
   const cellFreshnessRef = useRef<Map<string, number>>(new Map())
+  // M2-1 delta cursor: MAX(server_seq) over the file's events as of the last
+  // confirmed server snapshot (full stream or delta). Non-null ⇒ refetches go
+  // through ONE `?since=` request and merge the answer instead of re-streaming
+  // the whole file. Null ⇒ full stream (cache miss, pre-M2-1 server/cache
+  // entry, or explicit resync). Keyed to the current file — reset on switch.
+  const maxServerSeqRef = useRef<number | null>(null)
   const statsRef = useRef<ReadonlyMap<string, CellAuditStats>>(auditStats)
   const usernameRef = useRef(username)
   const requiredRef = useRef(requiredValidations)
@@ -543,13 +549,15 @@ export function useCells(opts: UseCellsOptions): UseCellsResult {
       if (generationRef.current !== gen) return
       if (cached && cached.rows.length > 0) {
         rowsRef.current = cached.rows
+        maxServerSeqRef.current = cached.maxServerSeq ?? null
         rebuildFromCache()
         setIsLoading(false)
         usedCache = true
       } else {
         // CellAreaState drops to `syncing-empty` (skeleton) until the first
-        // page lands.
+        // page lands. No cache ⇒ no delta base — force the full stream.
         rowsRef.current = []
+        maxServerSeqRef.current = null
         setCells([])
         setIsLoading(true)
       }
@@ -582,6 +590,43 @@ export function useCells(opts: UseCellsOptions): UseCellsResult {
         return
       }
       tokenAttemptsRef.current = 0
+      // M2-1 delta path: with a confirmed watermark, ONE `?since=` request
+      // replaces the ~60-page full re-stream for every soft revalidate
+      // (window focus, visibilitychange, post-commit) and for warm reopens.
+      // The merge is in-place via the lib chain-walk, so row order matches a
+      // full read — and post-commit rows still flow through rebuildFromCache
+      // with their new targetEventId, which is what confirms pending writes
+      // in EditorTable. Errors fall to the outer catch: the cached view
+      // stays up and the next trigger retries (RES-6).
+      const since = maxServerSeqRef.current
+      if (since !== null) {
+        // Local-mutation clock at snapshot start (FRO-247): rows for any cell
+        // mutated after this point outrank the delta's and must survive it.
+        const deltaStartSeq = writeSeqRef.current
+        const result = await fetchCellsDelta(projectId, fileId, since, token)
+        if (generationRef.current !== gen) return
+        if (result.kind === "delta") {
+          if (result.changedCellIds.length > 0) {
+            // Confirm shadows against the raw server rows BEFORE the merge,
+            // mirroring the full-stream path: only a fetch that postdates a
+            // shadow's write may clear it.
+            clearConfirmedShadows(result.cells, deltaStartSeq)
+            const merged = mergeCellsDelta(rowsRef.current, result.changedCellIds, result.cells)
+            rowsRef.current = mergeProtectedRows(merged, deltaStartSeq)
+            rebuildFromCache()
+            void writeCellsCache(projectId, fileId, rowsRef.current, result.maxServerSeq)
+          } else if (result.maxServerSeq !== since) {
+            // Watermark moved on row-less events (file.rename etc.) — advance
+            // the cursor so those events aren't re-scanned forever.
+            void writeCellsCache(projectId, fileId, rowsRef.current, result.maxServerSeq)
+          }
+          maxServerSeqRef.current = result.maxServerSeq
+          setIsLoading(false)
+          return
+        }
+        // kind === "resync": the changed set outgrew the delta budget, or the
+        // server predates ?since=. Fall through to the full stream below.
+      }
       // Stream pages in: on a hard fetch, append each page to the cache and
       // rebuild so the first 500 rows paint immediately on Bible-sized files
       // (~30k cells × ~60 round-trips). On a soft refetch, accumulate into a
@@ -614,7 +659,21 @@ export function useCells(opts: UseCellsOptions): UseCellsResult {
       // target side is tiny (one page), so loading it up front means a
       // translated cell shows its value the moment its source row paints.
       // Seed it silently (no rebuild) so we don't flash target-only orphan rows.
-      await streamFileCells(projectId, fileId, token, (rows) => pushRows(rows, false), "target")
+      //
+      // The TARGET stream's first page carries the earliest watermark of the
+      // whole two-stream snapshot — the safe `?since=` cursor: anything that
+      // lands mid-stream has a higher seq, so the next delta re-fetches it.
+      let streamMaxSeq: number | null = null
+      await streamFileCells(
+        projectId,
+        fileId,
+        token,
+        (rows) => pushRows(rows, false),
+        "target",
+        (meta) => {
+          streamMaxSeq = typeof meta.maxServerSeq === "number" ? meta.maxServerSeq : null
+        },
+      )
       if (generationRef.current !== gen) return
       await streamFileCells(projectId, fileId, token, (rows) => pushRows(rows, true), "source")
       if (generationRef.current !== gen) return
@@ -632,10 +691,11 @@ export function useCells(opts: UseCellsOptions): UseCellsResult {
       // target seed pass is intentionally silent. This also swaps in the soft
       // buffer. Cheap and idempotent on the hard path.
       rebuildFromCache()
-      // Persist the freshly-loaded snapshot. Best-effort; failures are
-      // swallowed inside writeCellsCache so a hostile IDB never breaks the
-      // load path.
-      void writeCellsCache(projectId, fileId, rowsRef.current)
+      // Persist the freshly-loaded snapshot (+ its delta cursor). Best-effort;
+      // failures are swallowed inside writeCellsCache so a hostile IDB never
+      // breaks the load path.
+      maxServerSeqRef.current = streamMaxSeq
+      void writeCellsCache(projectId, fileId, rowsRef.current, streamMaxSeq ?? undefined)
       // Always clear loading on completion — including when a soft refetch
       // finishes after a hard load that got superseded — so the skeleton can
       // never get stuck on.
@@ -658,6 +718,8 @@ export function useCells(opts: UseCellsOptions): UseCellsResult {
   useEffect(() => {
     optimisticEditsRef.current.clear()
     cellFreshnessRef.current.clear()
+    // The delta cursor belongs to the previous file's event log.
+    maxServerSeqRef.current = null
     void doFetch()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId, fileId, enabled])
@@ -713,9 +775,11 @@ export function useCells(opts: UseCellsOptions): UseCellsResult {
     }
   }, [])
 
-  // Refetch on focus / visibility return. Insurance against drift while
-  // writes still flow through Y.Doc — a peer's commit becomes visible
-  // without a manual reload.
+  // Revalidate on focus / visibility return so a peer's commit becomes
+  // visible without a manual reload. Since M2-1 this is NOT a full re-stream:
+  // doFetch(true) goes through the `?since=` delta path whenever a watermark
+  // exists, so alt-tabbing back to a Bible-sized book costs one tiny request
+  // instead of ~60 full pages (PERF-4).
   useEffect(() => {
     if (typeof window === "undefined") return
     function onFocus() { void doFetch(true) }

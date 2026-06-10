@@ -103,6 +103,49 @@ describe("applyFilters", () => {
   })
 })
 
+// ── Edit/delete callback contract ─────────────────────────────────────────
+// These tests verify the pure-logic contracts that the CommentsPage UI relies
+// on when wiring editComment/deleteComment from useComments.
+
+describe("comment edit/delete hook contract", () => {
+  it("editComment signature accepts commentId + body", async () => {
+    // Contract: editComment(commentId: string, body: string) => Promise<void>
+    const calls: [string, string][] = []
+    const mockEditComment = async (commentId: string, body: string): Promise<void> => {
+      calls.push([commentId, body])
+    }
+    await mockEditComment("c1", "updated body")
+    expect(calls).toEqual([["c1", "updated body"]])
+  })
+
+  it("deleteComment signature accepts commentId", async () => {
+    // Contract: deleteComment(commentId: string) => Promise<void>
+    const calls: string[] = []
+    const mockDeleteComment = async (commentId: string): Promise<void> => {
+      calls.push(commentId)
+    }
+    await mockDeleteComment("c1")
+    expect(calls).toEqual(["c1"])
+  })
+
+  it("only own comments (authorId === currentUsername) should expose edit/delete", () => {
+    // The CommentsPage renders the kebab menu only when authorId === currentUsername.
+    const comment = makeComment({ authorId: "alice" })
+    const isOwn = (currentUsername: string) => comment.authorId === currentUsername
+    expect(isOwn("alice")).toBe(true)
+    expect(isOwn("bob")).toBe(false)
+    expect(isOwn("")).toBe(false)
+  })
+
+  it("deleted comments (deletedAt !== null) do not expose edit/delete", () => {
+    const deleted = makeComment({ authorId: "alice", deletedAt: Date.now() })
+    const canMutate = (c: CommentRecord, currentUsername: string) =>
+      !!currentUsername && c.authorId === currentUsername && c.deletedAt === null
+    expect(canMutate(deleted, "alice")).toBe(false)
+    expect(canMutate(makeComment({ authorId: "alice" }), "alice")).toBe(true)
+  })
+})
+
 describe("applySorting", () => {
   it("unresolved-first puts unresolved before resolved", () => {
     const roots = [

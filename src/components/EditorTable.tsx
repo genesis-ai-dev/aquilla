@@ -1629,6 +1629,10 @@ function EditorRow({
   // FRO-237: mic-denied help popover state — rendered as an inline popover so
   // the rail button stays ENABLED when mic is blocked and routes click here.
   const [showMicDeniedHelp, setShowMicDeniedHelp] = useState(false)
+  // FRO-274: write-failure banner state. Set when any outbox enqueue fails
+  // (cell commit, validate, waive). The message persists until dismissed so
+  // the user has time to copy their text before reloading.
+  const [writeError, setWriteError] = useState<string | null>(null)
 
   useEffect(() => {
     if (cell.targetEventId) pendingTargetEventIdRef.current = cell.targetEventId
@@ -1663,6 +1667,9 @@ function EditorRow({
       void onCellCommitted?.(cell.id)
     }).catch((err) => {
       console.warn("[waive] emit failed:", err)
+      // FRO-274: surface enqueue failure to the user so they know the waive
+      // didn't persist locally — silent failure is the worst failure mode.
+      setWriteError("Couldn't save this change locally — copy your text and reload.")
     })
   }, [project.id, cell.fileId, cell.id, username, onCellCommitted])
 
@@ -1679,6 +1686,8 @@ function EditorRow({
       void onCellCommitted?.(cell.id)
     }).catch((err) => {
       console.warn("[unwaive] emit failed:", err)
+      // FRO-274: surface enqueue failure inline.
+      setWriteError("Couldn't save this change locally — copy your text and reload.")
     })
   }, [project.id, cell.fileId, cell.id, username, onCellCommitted])
 
@@ -1751,6 +1760,9 @@ function EditorRow({
       void onCellCommitted?.(cell.id)
     }).catch((err) => {
       console.warn("[editor-commit] enqueue failed:", err)
+      // FRO-274: surface enqueue failure inline so the user knows to copy
+      // their text before refreshing — silent loss is the worst outcome.
+      setWriteError("Couldn't save this change locally — copy your text and reload.")
     })
   }, [editable, project.id, project.syncRole?.level, cell.fileId, cell.id, cell.targetEventId, cell.sourceEventId, username, onCellCommitted, onOptimisticEdit, lockHolderLabel])
 
@@ -1891,6 +1903,8 @@ function EditorRow({
       void onCellCommitted?.(cell.id)
     }).catch((err) => {
       console.warn(`[${validated ? "validate" : "unvalidate"}] emit failed:`, err)
+      // FRO-274: surface enqueue failure inline.
+      setWriteError("Couldn't save this change locally — copy your text and reload.")
     })
   }, [cell.fileId, cell.id, cell.targetEventId, project.id, project.syncRole?.level, username, onCellCommitted])
 
@@ -2746,6 +2760,27 @@ function EditorRow({
                 blocks accept/commit. */}
             <PreAcceptanceWarningBand warnings={preAcceptanceWarnings} className="mt-1" />
             {error && <p className="mt-0.5 text-xs text-destructive">{error}</p>}
+            {/* FRO-274: write-failure banner — shown when an outbox enqueue
+                fails (IndexedDB unavailable, quota exceeded, etc.). The user
+                must be told immediately so they can copy their text before
+                reloading rather than silently losing it. */}
+            {writeError && (
+              <div
+                role="alert"
+                aria-live="assertive"
+                className="mt-1 flex items-start justify-between gap-2 rounded-xl bg-destructive/10 px-2.5 py-1.5 text-[11px] text-destructive shadow-neu-sm dark:bg-destructive/20"
+              >
+                <span>{writeError}</span>
+                <button
+                  type="button"
+                  aria-label="Dismiss"
+                  onClick={() => setWriteError(null)}
+                  className="shrink-0 rounded-full px-1.5 py-0.5 text-destructive hover:bg-destructive/20"
+                >
+                  ✕
+                </button>
+              </div>
+            )}
           </div>
         </div>
 

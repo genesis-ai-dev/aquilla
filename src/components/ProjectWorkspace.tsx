@@ -593,6 +593,9 @@ export function ProjectWorkspace() {
   // user clicks "View in history" (we navigate them to the conflict — they
   // shouldn't have to dismiss separately).
   const [staleSourceBannerDismissed, setStaleSourceBannerDismissed] = useState(0)
+  // FRO-274: write-failure banner for BT persist failures (outbox enqueue
+  // fails — IndexedDB unavailable, quota exceeded, etc.).
+  const [btWriteError, setBtWriteError] = useState<string | null>(null)
   const showStaleSiblingBanner =
     outboxStaleSiblingCount > 0 && outboxStaleSiblingEntries.length > 0
   const showStaleSourceBanner = outboxStaleSourceCount > staleSourceBannerDismissed
@@ -1295,8 +1298,12 @@ export function ProjectWorkspace() {
       author: currentUsername,
     }).catch((err) => {
       console.warn("[bt-persist] outbox emit failed:", err)
+      // FRO-274: surface enqueue failure so the user knows the BT didn't
+      // persist to the server queue. The in-memory + localStorage copies
+      // still exist, but they need to reload to re-queue.
+      setBtWriteError("Couldn't save the back-translation locally — copy your text and reload.")
     })
-  }, [project?.id, currentUsername])
+  }, [project?.id, currentUsername, setBtWriteError])
 
   // ── Keep stable refs in sync every render (FRO-203) ────────────────────
   // These allow commitCompletedCell / handleCellCommitted (declared earlier or
@@ -2782,6 +2789,26 @@ export function ProjectWorkspace() {
                   type="button"
                   onClick={() => setStaleSourceBannerDismissed(outboxStaleSourceCount)}
                   className="ml-2 rounded bg-blue-200/60 px-2 py-0.5 hover:bg-blue-200 dark:bg-blue-800/50 dark:hover:bg-blue-800"
+                >
+                  Dismiss
+                </button>
+              </div>
+            )}
+            {/* FRO-274: BT write-failure banner — shown when the BT persist
+                outbox enqueue fails. The user must copy their work before
+                reloading since the in-memory cache won't survive a reload
+                once localStorage quota is hit. */}
+            {btWriteError && (
+              <div
+                role="alert"
+                aria-live="assertive"
+                className="flex items-center justify-between gap-2 bg-destructive/10 px-4 py-2 text-xs text-destructive dark:bg-destructive/20"
+              >
+                <span>{btWriteError}</span>
+                <button
+                  type="button"
+                  onClick={() => setBtWriteError(null)}
+                  className="ml-2 rounded bg-destructive/20 px-2 py-0.5 hover:bg-destructive/30"
                 >
                   Dismiss
                 </button>

@@ -12,9 +12,14 @@ interface Options {
 }
 
 /**
- * Reactive view of pending outbox records for the inspector UI. Refreshes via
- * the outbox in-process subscription so the list updates the moment a user
- * action enqueues an event, and the moment the flusher removes one.
+ * Reactive view of PENDING (non-quarantined) outbox records for overlay
+ * consumers (audit-stats overlay). Refreshes via the outbox in-process
+ * subscription so the list updates the moment a user action enqueues an
+ * event, and the moment the flusher removes one.
+ *
+ * FRO-274: `failed` (quarantined) records are excluded so the overlay does
+ * not replay a rejected commit/validate as live cell state. The outbox
+ * inspector should call `peekOutboxBatch` directly to get all statuses.
  */
 export function usePendingOutboxRecords(opts: Options): OutboxRecord[] {
   const { enabled, fileId, maxResults = 500 } = opts
@@ -30,7 +35,11 @@ export function usePendingOutboxRecords(opts: Options): OutboxRecord[] {
     async function refresh() {
       const all = await peekOutboxBatch(maxResults * 2)
       if (cancelled) return
-      const scoped = fileId ? all.filter((r) => r.event.fileId === fileId) : all
+      // FRO-274: exclude quarantined records from the overlay so failed events
+      // don't show as pending validation/commit state. Inspector views should
+      // use peekOutboxBatch directly to preserve visibility of failed records.
+      const active = all.filter((r) => (r.status ?? "pending") !== "failed")
+      const scoped = fileId ? active.filter((r) => r.event.fileId === fileId) : active
       setRecords(scoped.slice(0, maxResults))
     }
 

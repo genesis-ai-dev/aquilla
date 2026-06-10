@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react"
-import { Navigate } from "react-router-dom"
+import { Link, Navigate, useNavigate } from "react-router-dom"
 import { AppShell } from "@/components/AppShell"
 import { OrgSidebar } from "@/components/org/OrgSidebar"
 import { OrgBreadcrumb } from "@/components/org/OrgBreadcrumb"
+import { useActiveOrg } from "@/context/OrgContext"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { usePlatformAdmin } from "@/hooks/usePlatformAdmin"
 import {
@@ -12,15 +13,17 @@ import {
   getAdminUsers,
   getAdminProjects,
   getAdminActivity,
+  getAdminAdmins,
   type AdminOverview,
   type AdminOrg,
   type AdminTeam,
   type AdminUser,
   type AdminProject,
   type AdminActivity,
+  type AdminAdmin,
 } from "@/lib/frontier/admin"
 
-type Tab = "overview" | "orgs" | "teams" | "users" | "projects" | "activity"
+type Tab = "overview" | "orgs" | "teams" | "users" | "projects" | "activity" | "admins"
 const TABS: Array<{ key: Tab; label: string }> = [
   { key: "overview", label: "Overview" },
   { key: "orgs", label: "Orgs" },
@@ -28,6 +31,7 @@ const TABS: Array<{ key: Tab; label: string }> = [
   { key: "users", label: "Users" },
   { key: "projects", label: "Projects" },
   { key: "activity", label: "Activity" },
+  { key: "admins", label: "Admins" },
 ]
 
 const fmtDate = (iso: string | null): string => {
@@ -73,6 +77,8 @@ export function AdminConsole() {
   const { session } = useFrontierSession()
   const jwt = session?.jwt ?? null
   const { isAdmin, loading: adminLoading } = usePlatformAdmin()
+  const { setActiveOrg } = useActiveOrg()
+  const navigate = useNavigate()
   const [tab, setTab] = useState<Tab>("overview")
 
   const [overview, setOverview] = useState<AdminOverview | null>(null)
@@ -81,9 +87,22 @@ export function AdminConsole() {
   const [users, setUsers] = useState<AdminUser[]>([])
   const [projects, setProjects] = useState<AdminProject[]>([])
   const [activity, setActivity] = useState<AdminActivity[]>([])
+  const [admins, setAdmins] = useState<AdminAdmin[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const aliveRef = useRef(true)
+
+  // Platform admins resolve owner-level on every org/project server-side
+  // (the "platform" path in resolveProjectRole / getEffectiveOrgRole), and
+  // GET /orgs returns every org for them — so switching into a foreign org
+  // here lands on a fully navigable org overview.
+  const openOrg = useCallback(
+    (orgId: number) => {
+      setActiveOrg(orgId)
+      navigate("/")
+    },
+    [setActiveOrg, navigate],
+  )
 
   // See useOrg.ts for the StrictMode aliveRef rationale.
   useEffect(() => {
@@ -100,13 +119,14 @@ export function AdminConsole() {
       setError(null)
     }
     try {
-      const [ov, og, tm, us, pr, ac] = await Promise.all([
+      const [ov, og, tm, us, pr, ac, ad] = await Promise.all([
         getAdminOverview(jwt),
         getAdminOrgs(jwt),
         getAdminTeams(jwt),
         getAdminUsers(jwt),
         getAdminProjects(jwt),
         getAdminActivity(jwt, 200),
+        getAdminAdmins(jwt),
       ])
       if (aliveRef.current) {
         setOverview(ov)
@@ -115,6 +135,7 @@ export function AdminConsole() {
         setUsers(us)
         setProjects(pr)
         setActivity(ac)
+        setAdmins(ad)
       }
     } catch (err) {
       if (aliveRef.current) setError(err instanceof Error ? err.message : String(err))
@@ -172,7 +193,7 @@ export function AdminConsole() {
           )}
 
           {tab === "orgs" && (
-            <Table head={["Org", "Owner", "Members", "Projects", "Created"]}>
+            <Table head={["Org", "Owner", "Members", "Projects", "Created", ""]}>
               {orgs.map((o) => (
                 <tr key={o.id} className="border-t">
                   <Td>{o.name ?? `#${o.id}`}</Td>
@@ -180,6 +201,15 @@ export function AdminConsole() {
                   <Td>{o.memberCount}</Td>
                   <Td>{o.projectCount}</Td>
                   <Td>{fmtDate(o.createdAt)}</Td>
+                  <Td>
+                    <button
+                      type="button"
+                      onClick={() => openOrg(o.id)}
+                      className="text-xs text-primary hover:underline"
+                    >
+                      Open
+                    </button>
+                  </Td>
                 </tr>
               ))}
             </Table>
@@ -231,7 +261,15 @@ export function AdminConsole() {
             <Table head={["Project", "Org", "Creator", "Validated", "Words", "Status"]}>
               {projects.map((p) => (
                 <tr key={p.id} className="border-t">
-                  <Td>{p.name}</Td>
+                  <Td>
+                    {p.archived ? (
+                      p.name
+                    ) : (
+                      <Link to={`/projects/${p.id}`} className="text-primary hover:underline">
+                        {p.name}
+                      </Link>
+                    )}
+                  </Td>
                   <Td>{p.orgName ?? "—"}</Td>
                   <Td>{p.creatorUsername ?? "—"}</Td>
                   <Td>{pct(p.validatedCells, p.totalCells)}</Td>
@@ -253,6 +291,34 @@ export function AdminConsole() {
                 </tr>
               ))}
             </Table>
+          )}
+
+          {tab === "admins" && (
+            <div className="space-y-3">
+              <p className="text-sm text-muted-foreground">
+                Platform admins are allowlisted in the auth worker's deploy config
+                (<code className="text-xs">PLATFORM_ADMINS</code> in wrangler.toml) and have
+                owner-level access to every org and project. Changing the list requires a
+                redeploy of the auth worker.
+              </p>
+              <Table head={["Username", "Account", "Email", "Last active", "Joined"]}>
+                {admins.map((a) => (
+                  <tr key={a.username} className="border-t">
+                    <Td>{a.displayName ? `${a.displayName} (${a.username})` : a.username}</Td>
+                    <Td>
+                      {a.hasAccount ? (
+                        "Registered"
+                      ) : (
+                        <span className="text-destructive">No account</span>
+                      )}
+                    </Td>
+                    <Td>{a.email ?? "—"}</Td>
+                    <Td>{fmtDate(a.lastActiveAt ?? null)}</Td>
+                    <Td>{fmtDate(a.createdAt ?? null)}</Td>
+                  </tr>
+                ))}
+              </Table>
+            </div>
           )}
         </div>
       </>

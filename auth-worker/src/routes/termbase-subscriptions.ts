@@ -74,7 +74,7 @@ import { z } from "zod"
 import { authMiddleware, type AuthHonoEnv } from "../middleware/auth"
 import { ROLE } from "../types"
 import { resolveProjectRole } from "../services/project-permissions"
-import { getOrgMemberRole, canReadTermbase } from "../services/org-permissions"
+import { getEffectiveOrgRole, canReadTermbase } from "../services/org-permissions"
 
 const termbase = new Hono<AuthHonoEnv>()
 
@@ -143,7 +143,7 @@ termbase.get("/:orgId/published-termbases", authMiddleware, async (c) => {
   const orgId = Number.parseInt(c.req.param("orgId") ?? "", 10)
   if (!Number.isFinite(orgId)) return c.json({ error: "invalid orgId" }, 400)
 
-  const orgRole = await getOrgMemberRole(c.env, orgId, user.id)
+  const orgRole = await getEffectiveOrgRole(c.env, orgId, user)
   if (orgRole == null) return c.json({ error: "no access to org" }, 403)
 
   const rows = await c.env.AQUILLA_PG.prepare(

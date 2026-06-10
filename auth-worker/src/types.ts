@@ -133,11 +133,15 @@ export interface SyncTokenClaims {
  * attribution credit when it ties with an inherited one. UIs that need to
  * show every contributing path should call the resolver's `breakdown`
  * helper instead of reading `source` alone.
+ *
+ * `"platform"` is the PLATFORM_ADMINS allowlist path (owner-level on every
+ * project, see middleware/platform-admin.ts). Lowest tie priority, so a
+ * genuine grant keeps attribution when the admin is also a real member.
  */
 export interface RoleResolution {
   level: number
   name: string
-  source: "override" | "group" | "org" | "creator"
+  source: "override" | "group" | "org" | "creator" | "platform"
 }
 
 export interface SyncTokenResponse {

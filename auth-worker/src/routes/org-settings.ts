@@ -25,7 +25,7 @@ import { zValidator } from "@hono/zod-validator"
 import { z } from "zod"
 import { authMiddleware, type AuthHonoEnv } from "../middleware/auth"
 import { ROLE } from "../types"
-import { getOrgMemberRole } from "../services/org-permissions"
+import { getEffectiveOrgRole } from "../services/org-permissions"
 
 const orgSettings = new Hono<AuthHonoEnv>()
 
@@ -108,7 +108,7 @@ orgSettings.get("/:orgId/settings", authMiddleware, async (c) => {
   const orgId = parseInt(c.req.param("orgId") ?? "", 10)
   if (!Number.isFinite(orgId)) return c.json({ error: "invalid orgId" }, 400)
 
-  const role = await getOrgMemberRole(c.env, orgId, user.id)
+  const role = await getEffectiveOrgRole(c.env, orgId, user)
   if (role == null) return c.json({ error: "no access to org" }, 403)
 
   const response = await loadSettings(c.env, orgId)
@@ -141,7 +141,7 @@ orgSettings.on(
     if (!Number.isFinite(orgId)) return c.json({ error: "invalid orgId" }, 400)
     const body = c.req.valid("json")
 
-    const role = await getOrgMemberRole(c.env, orgId, user.id)
+    const role = await getEffectiveOrgRole(c.env, orgId, user)
     if (role == null) return c.json({ error: "no access to org" }, 403)
     if (role < SETTINGS_WRITE_MIN_ROLE) {
       return c.json(
@@ -286,7 +286,7 @@ orgSettings.post(
     const orgId = parseInt(c.req.param("orgId") ?? "", 10)
     if (!Number.isFinite(orgId)) return c.json({ error: "invalid orgId" }, 400)
 
-    const role = await getOrgMemberRole(c.env, orgId, user.id)
+    const role = await getEffectiveOrgRole(c.env, orgId, user)
     if (role == null) return c.json({ error: "no access to org" }, 403)
     if (role < PROMOTION_REQUEST_MIN_ROLE) {
       return c.json(

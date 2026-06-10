@@ -44,10 +44,11 @@ import {
 import { getFileChapters, getMyAssignments, getProjectAssignmentRoster } from "../services/assignments"
 import {
   bumpOrgActivity,
-  getOrgMemberRole,
+  getEffectiveOrgRole,
   getOrCreateUserOrg,
   listEffectiveProjectMembers,
 } from "../services/org-permissions"
+import { isPlatformAdminUsername } from "../middleware/platform-admin"
 import { lookupUserByUsername } from "../services/user-lookup"
 import { sendProjectInviteEmail } from "../services/email"
 
@@ -172,7 +173,7 @@ projects.post(
     if (body.orgId != null) {
       // Creating into a specific org is an org-level function: require the
       // caller's org role >= maintainer (see spec Risk 3).
-      const orgRole = await getOrgMemberRole(c.env, body.orgId, user.id)
+      const orgRole = await getEffectiveOrgRole(c.env, body.orgId, user)
       if (orgRole == null || orgRole < ROLE.MAINTAINER) {
         return c.json({ error: "org role >= maintainer required to create a project here" }, 403)
       }
@@ -226,17 +227,23 @@ projects.get("/", authMiddleware, async (c) => {
   const wantArchived = archivedParam === "true" || archivedParam === "1"
   const archivedClause = wantArchived ? "p.archived_at IS NOT NULL" : "p.archived_at IS NULL"
 
+  // Platform operators see every project (the WHERE access predicate is
+  // bypassed below); their effective role is forced to 700/"platform" in the
+  // JS mapping, mirroring the resolver in project-permissions.ts.
+  const isAdmin = isPlatformAdminUsername(c.env, user.username)
+
   // AD-12 max-wins across direct + group + org + creator. Each path is
   // computed in the same query; role_level = MAX(coalesced levels). On a
   // tie, attribution credit goes in declaration order (override > group >
   // org > creator) to match the resolver in project-permissions.ts.
   //
-  // Params (positional ?): 10 user.id binds + 2 orgFilter binds at the end.
+  // Params (positional ?): 10 user.id binds + isAdmin + 2 orgFilter binds.
   //   ?1-?4  : user.id for creator CASE expressions
   //   ?5-?7  : user.id for LEFT JOIN conditions (pm, om, gm)
-  //   ?8-?10 : user.id for WHERE access check (created_by, pm, om)
-  //   ?11    : orgFilter (NULL or number) — IS NULL check (no-filter case)
-  //   ?12    : orgFilter (NULL or number) — equality check (filter case)
+  //   ?8     : isAdmin (1/0) — platform operators bypass the access check
+  //   ?9-?11 : user.id for WHERE access check (created_by, pm, om)
+  //   ?12    : orgFilter (NULL or number) — IS NULL check (no-filter case)
+  //   ?13    : orgFilter (NULL or number) — equality check (filter case)
   const rows = await c.env.AQUILLA_PG.prepare(
     `SELECT p.id, p.name, p.org_id, p.archived_at, p.is_active,
             GREATEST(
@@ -276,7 +283,8 @@ projects.get("/", authMiddleware, async (c) => {
          ON gg.project_id = p.id
       WHERE ${archivedClause}
         AND (
-          p.created_by = ?
+          ?::int = 1
+          OR p.created_by = ?
           OR pm.user_id = ?
           OR gg.max_grant IS NOT NULL
           OR (p.org_id IS NOT NULL AND om.user_id = ?)
@@ -287,8 +295,9 @@ projects.get("/", authMiddleware, async (c) => {
     .bind(
       user.id, user.id, user.id, user.id,  // ?1-?4: CASE-when-creator
       user.id, user.id, user.id,           // ?5-?7: pm.user_id, om.user_id, gm.user_id
-      user.id, user.id, user.id,           // ?8-?10: WHERE: created_by, pm, om
-      orgFilter, orgFilter,                // ?11-?12: org filter (IS NULL bypass + equality)
+      isAdmin ? 1 : 0,                     // ?8: platform-operator bypass
+      user.id, user.id, user.id,           // ?9-?11: WHERE: created_by, pm, om
+      orgFilter, orgFilter,                // ?12-?13: org filter (IS NULL bypass + equality)
     )
     .all<{
       id: string
@@ -304,19 +313,27 @@ projects.get("/", authMiddleware, async (c) => {
   const filesByProject = await loadFilesByProject(c.env, projectIds)
 
   return c.json({
-    projects: (rows.results ?? []).map((row) => ({
-      id: row.id,
-      name: row.name,
-      orgId: row.org_id,
-      archivedAt: row.archived_at,
-      isActive: row.is_active,
-      role: {
-        level: row.role_level,
-        name: roleNameFor(row.role_level),
-        source: row.role_source,
-      },
-      files: filesByProject.get(row.id) ?? [],
-    })),
+    projects: (rows.results ?? []).map((row) => {
+      // Platform operators resolve as owner everywhere (resolveProjectRole's
+      // "platform" path); a genuine 700-level grant keeps its attribution.
+      const role =
+        isAdmin && row.role_level < 700
+          ? { level: 700, name: roleNameFor(700), source: "platform" as const }
+          : {
+              level: row.role_level,
+              name: roleNameFor(row.role_level),
+              source: row.role_source,
+            }
+      return {
+        id: row.id,
+        name: row.name,
+        orgId: row.org_id,
+        archivedAt: row.archived_at,
+        isActive: row.is_active,
+        role,
+        files: filesByProject.get(row.id) ?? [],
+      }
+    }),
   })
 })
 

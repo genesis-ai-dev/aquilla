@@ -14,10 +14,13 @@ import { Hono } from "hono"
 import { zValidator } from "@hono/zod-validator"
 import { z } from "zod"
 import { authMiddleware, type AuthHonoEnv } from "../middleware/auth"
+import { isPlatformAdminUsername } from "../middleware/platform-admin"
 import {
   INVITE_MIN_ROLE,
   LINK_ROLE_CAP,
   ROLE,
+  type AuthUser,
+  type Env,
   type ProjectInviteRow,
   type ProjectRow,
 } from "../types"
@@ -51,28 +54,30 @@ function roleNameFor(level: number): string {
 }
 
 async function resolveProjectRole(
-  authDb: AquillaDb,
+  env: Env,
   projectId: string,
-  userId: number,
+  user: AuthUser,
 ): Promise<{ project: ProjectRow; level: number } | null> {
-  const project = await authDb
-    .prepare(
-      `SELECT id, name, gitlab_project_id, org_id, created_by, archived_at
+  const project = await env.AQUILLA_PG.prepare(
+    `SELECT id, name, gitlab_project_id, org_id, created_by, archived_at
        FROM projects WHERE id = ?`,
-    )
+  )
     .bind(projectId)
     .first<ProjectRow>()
   if (!project) return null
 
-  const member = await authDb
-    .prepare(
-      `SELECT role_level FROM project_members
+  const member = await env.AQUILLA_PG.prepare(
+    `SELECT role_level FROM project_members
        WHERE project_id = ? AND user_id = ?`,
-    )
-    .bind(projectId, userId)
+  )
+    .bind(projectId, user.id)
     .first<{ role_level: number }>()
   if (member) return { project, level: member.role_level }
-  if (project.created_by === userId) {
+  if (project.created_by === user.id) {
+    return { project, level: ROLE.OWNER }
+  }
+  // Platform operators can mint invites on any project (support path).
+  if (isPlatformAdminUsername(env, user.username)) {
     return { project, level: ROLE.OWNER }
   }
   return null
@@ -88,11 +93,7 @@ projectsInvites.post(
     const projectId = c.req.param("projectId")
     const { role, email } = c.req.valid("json")
 
-    const resolved = await resolveProjectRole(
-      c.env.AQUILLA_PG,
-      projectId,
-      user.id,
-    )
+    const resolved = await resolveProjectRole(c.env, projectId, user)
     if (!resolved) {
       return c.json({ error: "Project not found" }, 404)
     }

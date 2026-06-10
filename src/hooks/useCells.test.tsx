@@ -272,6 +272,7 @@ describe("useCells (Phase 2a, D1-backed)", () => {
         lastEditAt: 100,
         lastEditEventId: "ev1",
         activeValidators: ["alice", "bob"],
+        waivers: [],
       }],
     ])
     const { result } = renderHook(() =>
@@ -325,7 +326,7 @@ describe("useCells (Phase 2a, D1-backed)", () => {
       makeRow({ cellId: "c1", side: "target", value: "hello", validated: false }),
     ])
     const stats1 = new Map<string, CellAuditStats>([
-      ["c1", { cellId: "c1", editCount: 1, contentHash: "", lastEditAt: 0, lastEditEventId: "ev1", activeValidators: [] }],
+      ["c1", { cellId: "c1", editCount: 1, contentHash: "", lastEditAt: 0, lastEditEventId: "ev1", activeValidators: [], waivers: [] }],
     ])
     const { result, rerender } = renderHook(
       (props: { stats: ReadonlyMap<string, CellAuditStats> }) =>

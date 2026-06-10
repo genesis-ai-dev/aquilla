@@ -160,7 +160,7 @@ export default defineConfig(({ mode }) => ({
   test: {
     environment: "happy-dom",
     setupFiles: ["./src/test-setup.ts"],
-    passWithNoTests: true,
+    passWithNoTests: false,
     exclude: [
       "**/node_modules/**",
       "dist/**",

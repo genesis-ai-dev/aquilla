@@ -79,6 +79,7 @@ import { ChatPanel } from "./ChatPanel"
 import { useChat } from "@/hooks/useChat"
 import { TranslationNotesSidebar, readTnSidebarVisible, writeTnSidebarVisible } from "./TranslationNotesSidebar"
 import { InactiveProjectBanner } from "./InactiveProjectBanner"
+import { OfflineBanner } from "./OfflineBanner"
 import { useProjectLifecycle } from "@/hooks/useProjectLifecycle"
 import { cn } from "@/lib/utils"
 import { restoreProject } from "@/lib/store/project-index"
@@ -2918,6 +2919,8 @@ export function ProjectWorkspace() {
                 onReactivate={() => { const j = jwtRef.current; if (j) void toggleLifecycle(j) }}
               />
             )}
+            {/* FRO-296: offline banner — shown when browser reports no connectivity. */}
+            <OfflineBanner />
             {/* FRO-235: AI completion progress + stop control */}
             <div className="px-3 py-1 empty:hidden">
               <CompletionBulkProgressBanner />

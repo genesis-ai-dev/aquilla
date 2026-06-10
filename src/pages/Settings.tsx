@@ -49,15 +49,24 @@ export function Settings() {
   } = useOrgSettings(activeOrgId, activeOrg?.role?.level)
   const [exportRoleBusy, setExportRoleBusy] = useState(false)
   const [exportRoleError, setExportRoleError] = useState<string | null>(null)
+  const [exportRoleSaved, setExportRoleSaved] = useState(false)
 
   // exportMinRole is an owner-only permission-policy key (FRO-253).
   // Maintainers can edit org rules and other settings, but only owners
   // should change the export floor (see EXPORT_FLOOR_WRITE_MIN_ROLE in auth-worker).
   const canEditExportFloor = (activeOrg?.role.level ?? 0) >= ROLE.OWNER
 
+  // Auto-clear the "Saved" acknowledgment after a short delay.
+  useEffect(() => {
+    if (!exportRoleSaved) return
+    const t = setTimeout(() => setExportRoleSaved(false), 2500)
+    return () => clearTimeout(t)
+  }, [exportRoleSaved])
+
   async function handleExportRoleChange(newLevel: number) {
     setExportRoleBusy(true)
     setExportRoleError(null)
+    setExportRoleSaved(false)
     const result = await patchOrgSettings({ exportMinRole: newLevel })
     if (result.kind === "error") {
       // Surface server validation errors (including the new 400 for invalid floor values)
@@ -65,6 +74,8 @@ export function Settings() {
       setExportRoleError(result.message ?? "Save failed")
     } else if (result.kind === "blocked") {
       setExportRoleError("Only org owners can change the export permission policy.")
+    } else {
+      setExportRoleSaved(true)
     }
     setExportRoleBusy(false)
   }
@@ -197,6 +208,11 @@ export function Settings() {
                     )}
                     {exportRoleError && (
                       <p className="text-xs text-destructive">{exportRoleError}</p>
+                    )}
+                    {exportRoleSaved && (
+                      <p className="text-xs text-green-600 dark:text-green-400" role="status" data-testid="export-role-saved">
+                        Saved
+                      </p>
                     )}
                   </div>
                 </section>

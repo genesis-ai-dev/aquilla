@@ -239,27 +239,48 @@ invites.post("/:token/accept", authMiddleware, async (c) => {
   const accepted: Array<{ projectId: string; role: number }> = []
 
   for (const invite of invitesForToken) {
-    // Allow re-acceptance only when used_by is the same caller — matches
-    // the single-project semantics in routes/projects.ts.
+    // Row already stamped by a *different* user — a second person with the
+    // same single-use link. Skip rather than 410-ing the whole multi-accept
+    // so any remaining unused rows still flow.
     if (invite.used_at && invite.used_by !== user.id) {
-      // Some rows may have been used by another user already; skip
-      // those silently rather than 410-ing the whole multi-accept. The
-      // remaining unused rows still flow.
       continue
     }
 
-    const existing = await c.env.AQUILLA_PG.prepare(
-      `SELECT role_level FROM project_members
-        WHERE project_id = ? AND user_id = ?`,
-    )
-      .bind(invite.project_id, user.id)
-      .first<{ role_level: number }>()
-
-    const finalRole = existing
-      ? Math.max(existing.role_level, invite.role_level)
-      : invite.role_level
-
     try {
+      // For a fresh (unused) row: atomically claim it with AND used_at IS NULL
+      // BEFORE granting membership. This is the compare-and-swap that prevents
+      // two concurrent users both getting admitted on a single-use link (RACE-7):
+      // exactly one concurrent UPDATE will touch a row; the other sees 0 changes
+      // and is rejected here, before the project_members write.
+      //
+      // For a same-user re-accept (invite.used_at already set, used_by === user.id):
+      // skip the stamp block and fall through to the idempotent membership upsert.
+      if (!invite.used_at) {
+        const stampResult = await c.env.AQUILLA_PG.prepare(
+          `UPDATE project_invites
+              SET used_by = ?, used_at = CURRENT_TIMESTAMP
+            WHERE token = ? AND project_id = ? AND used_at IS NULL`,
+        )
+          .bind(user.id, token, invite.project_id)
+          .run()
+        // Another concurrent request won the race on this row — skip it.
+        if (stampResult.meta.changes === 0) {
+          continue
+        }
+      }
+
+      // Stamp succeeded (or same-user re-accept). Now grant/refresh membership.
+      const existing = await c.env.AQUILLA_PG.prepare(
+        `SELECT role_level FROM project_members
+          WHERE project_id = ? AND user_id = ?`,
+      )
+        .bind(invite.project_id, user.id)
+        .first<{ role_level: number }>()
+
+      const finalRole = existing
+        ? Math.max(existing.role_level, invite.role_level)
+        : invite.role_level
+
       if (existing) {
         await c.env.AQUILLA_PG.prepare(
           `UPDATE project_members
@@ -277,15 +298,8 @@ invites.post("/:token/accept", authMiddleware, async (c) => {
           .bind(invite.project_id, user.id, finalRole, invite.created_by)
           .run()
       }
-      if (!invite.used_at) {
-        await c.env.AQUILLA_PG.prepare(
-          `UPDATE project_invites
-              SET used_by = ?, used_at = CURRENT_TIMESTAMP
-            WHERE token = ? AND project_id = ?`,
-        )
-          .bind(user.id, token, invite.project_id)
-          .run()
-      }
+
+      accepted.push({ projectId: invite.project_id, role: finalRole })
     } catch (err) {
       console.error(
         `[invites/multi] accept failed for ${invite.project_id}:`,
@@ -293,8 +307,6 @@ invites.post("/:token/accept", authMiddleware, async (c) => {
       )
       return c.json({ error: "Failed to accept invite" }, 500)
     }
-
-    accepted.push({ projectId: invite.project_id, role: finalRole })
   }
 
   if (accepted.length === 0) {

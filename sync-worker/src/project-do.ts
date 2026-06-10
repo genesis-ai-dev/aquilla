@@ -212,8 +212,15 @@ export class ProjectSync extends DurableObject<DOEnv> {
 
   private handleConnectionClose(conn: ConnectionState): void {
     this.connections.delete(conn.ws)
+    // Count remaining connections for this user AFTER removing the closing one.
+    // applyDisconnect uses this to decide whether to release per-user locks/presence:
+    // if other tabs are still connected, leave them intact (RACE-6).
+    let remaining = 0
+    for (const state of this.connections.values()) {
+      if (state.userId === conn.userId) remaining++
+    }
     const now = Date.now()
-    const result = applyDisconnect(this.locks, this.presence, conn.userId, now)
+    const result = applyDisconnect(this.locks, this.presence, conn.userId, now, remaining)
     this.locks = result.locks
     this.presence = result.presence
     for (const m of result.emit) this.broadcastToAll(m)

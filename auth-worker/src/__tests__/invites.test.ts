@@ -253,3 +253,121 @@ describe("GET /api/v2/projects/invite-preview/:token", () => {
     expect(res.status).toBe(404)
   })
 })
+
+// ── Multi-project invite acceptance (RACE-7 fixes) ───────────────────────────
+
+describe("POST /api/v2/invites/:token/accept — idempotency and race guard", () => {
+  async function seedMultiInvite(token: string, projectId: string, creatorId: number) {
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO project_invites (token, project_id, role_level, created_by, expires_at) VALUES (?, ?, ?, ?, ?)",
+    )
+      .bind(token, projectId, 400, creatorId, new Date(Date.now() + 86_400_000).toISOString())
+      .run()
+  }
+
+  it("accepts and stamps the invite for a fresh token", async () => {
+    await seedUser(10, "alice")
+    await seedUser(11, "bob")
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO projects (id, name, org_id, created_by) VALUES (?, ?, NULL, 10)",
+    )
+      .bind("proj-multi-1", "Multi Test")
+      .run()
+    await seedMultiInvite("tok-multi-1", "proj-multi-1", 10)
+
+    const res = await app.request(
+      "/api/v2/invites/tok-multi-1/accept",
+      { method: "POST", headers: authHeader(await jwtFor("bob")) },
+      env,
+    )
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as { token: string; accepted: Array<{ projectId: string; role: number }> }
+    expect(body.accepted).toHaveLength(1)
+    expect(body.accepted[0]).toMatchObject({ projectId: "proj-multi-1", role: 400 })
+
+    // Membership row created
+    const member = await env.AQUILLA_PG.prepare(
+      "SELECT role_level FROM project_members WHERE project_id = ? AND user_id = 11",
+    )
+      .bind("proj-multi-1")
+      .first<{ role_level: number }>()
+    expect(member?.role_level).toBe(400)
+
+    // Invite stamped
+    const invite = await env.AQUILLA_PG.prepare(
+      "SELECT used_by, used_at FROM project_invites WHERE token = ? AND project_id = ?",
+    )
+      .bind("tok-multi-1", "proj-multi-1")
+      .first<{ used_by: number | null; used_at: string | null }>()
+    expect(invite?.used_by).toBe(11)
+    expect(invite?.used_at).not.toBeNull()
+  })
+
+  it("same user double-click is idempotent — returns 200, not 500", async () => {
+    await seedUser(20, "carol")
+    await seedUser(21, "dave")
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO projects (id, name, org_id, created_by) VALUES (?, ?, NULL, 20)",
+    )
+      .bind("proj-multi-2", "Double Click Test")
+      .run()
+    await seedMultiInvite("tok-dc", "proj-multi-2", 20)
+
+    // First accept
+    const r1 = await app.request(
+      "/api/v2/invites/tok-dc/accept",
+      { method: "POST", headers: authHeader(await jwtFor("dave")) },
+      env,
+    )
+    expect(r1.status).toBe(200)
+
+    // Second accept by same user — should be idempotent (200, not 500 or 410)
+    const r2 = await app.request(
+      "/api/v2/invites/tok-dc/accept",
+      { method: "POST", headers: authHeader(await jwtFor("dave")) },
+      env,
+    )
+    expect(r2.status).toBe(200)
+    const body2 = (await r2.json()) as { accepted: Array<{ projectId: string }> }
+    // dave is still in the accepted list (re-accept by same user is idempotent)
+    expect(body2.accepted.some((a) => a.projectId === "proj-multi-2")).toBe(true)
+  })
+
+  it("second user with a forwarded single-use link is rejected after the first user claims it", async () => {
+    await seedUser(30, "eve")
+    await seedUser(31, "frank")
+    await seedUser(32, "grace")
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO projects (id, name, org_id, created_by) VALUES (?, ?, NULL, 30)",
+    )
+      .bind("proj-multi-3", "Single Use Test")
+      .run()
+    await seedMultiInvite("tok-single-use", "proj-multi-3", 30)
+
+    // Frank accepts first
+    const r1 = await app.request(
+      "/api/v2/invites/tok-single-use/accept",
+      { method: "POST", headers: authHeader(await jwtFor("frank")) },
+      env,
+    )
+    expect(r1.status).toBe(200)
+
+    // Grace (different user) tries to use the same link afterward — row is
+    // already stamped with used_at IS NOT NULL and used_by != grace's id, so
+    // the invite row is skipped; accepted list is empty → 410.
+    const r2 = await app.request(
+      "/api/v2/invites/tok-single-use/accept",
+      { method: "POST", headers: authHeader(await jwtFor("grace")) },
+      env,
+    )
+    expect(r2.status).toBe(410)
+
+    // Grace must NOT be in project_members
+    const member = await env.AQUILLA_PG.prepare(
+      "SELECT user_id FROM project_members WHERE project_id = ? AND user_id = 32",
+    )
+      .bind("proj-multi-3")
+      .first<{ user_id: number }>()
+    expect(member).toBeNull()
+  })
+})

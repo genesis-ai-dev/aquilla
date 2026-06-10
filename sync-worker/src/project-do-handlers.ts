@@ -150,6 +150,23 @@ function clone<K, V>(m: ReadonlyMap<K, V>): Map<K, V> {
   return new Map(m)
 }
 
+/**
+ * Handle a focus.claim request from a client.
+ *
+ * RACE-5 ack contract (verified, no changes needed):
+ *   - On DENY  → result.emitTo carries a `lock.claimed` frame naming the current
+ *     holder; the DO sends it synchronously to the requesting connection only.
+ *     The claimer's optimistic UI can roll back immediately without waiting for
+ *     a broadcast round-trip.
+ *   - On GRANT → result.emit carries `lock.claimed` + `presence` broadcast to
+ *     ALL connections (including the claimer). Because the DO is single-threaded
+ *     per-instance and processes messages sequentially, the grant is serialised —
+ *     no two concurrent claims for the same cell can both succeed.
+ *
+ * Wave-2 client contract: EditorTable should listen for the `emitTo` deny path
+ * (a `lock.claimed` message where `by.userId !== currentUser`) to roll back an
+ * optimistic UI lock claim instantly, rather than waiting for the broadcast echo.
+ */
 export function applyFocusClaim(
   locks: ReadonlyMap<string, LockState>,
   presence: ReadonlyMap<string, PresenceState>,
@@ -238,13 +255,32 @@ export function applyFocusRelease(
   }
 }
 
-/** On WS close: drop the user's presence + release all locks they held. */
+/**
+ * On WS close: drop the user's presence + release all locks they held.
+ *
+ * Multi-tab safety: focus-locks are per-user (not per-connection) — a lock
+ * claimed from tab A must survive tab B closing. Pass `remainingConnectionsForUser`
+ * (number of OTHER connections the DO still has open for this userId after
+ * removing the closing one). When > 0, we leave locks and presence intact
+ * so the other tabs can keep editing without losing their claimed cells.
+ */
 export function applyDisconnect(
   locks: ReadonlyMap<string, LockState>,
   presence: ReadonlyMap<string, PresenceState>,
   userId: string,
   now: number,
+  remainingConnectionsForUser = 0,
 ): LockTransitionResult {
+  // If other tabs still hold a connection for this user, do not release locks
+  // or presence — they are per-user, not per-connection.
+  if (remainingConnectionsForUser > 0) {
+    return {
+      locks: clone(locks),
+      presence: clone(presence),
+      emit: [],
+      emitTo: [],
+    }
+  }
   const nextLocks = clone(locks)
   const nextPresence = clone(presence)
   nextPresence.delete(userId)

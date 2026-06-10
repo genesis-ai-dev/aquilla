@@ -177,7 +177,7 @@ describe("applyFocusRelease", () => {
 })
 
 describe("applyDisconnect", () => {
-  it("drops presence + releases all locks the user held", () => {
+  it("drops presence + releases all locks the user held (single connection)", () => {
     const locks = new Map<string, LockState>([
       ["a", { cellId: "a", userId: "alice", expiresAt: 5_000 }],
       ["b", { cellId: "b", userId: "alice", expiresAt: 5_000 }],
@@ -187,6 +187,7 @@ describe("applyDisconnect", () => {
       ["alice", { userId: "alice", ts: 1 }],
       ["bob", { userId: "bob", ts: 1 }],
     ])
+    // remainingConnectionsForUser=0 (default) — last connection, release everything
     const r = applyDisconnect(locks, presence, "alice", 9_000)
     expect(r.locks.has("a")).toBe(false)
     expect(r.locks.has("b")).toBe(false)
@@ -195,6 +196,80 @@ describe("applyDisconnect", () => {
     expect(r.presence.has("bob")).toBe(true)
     const released = r.emit.filter((m) => m.t === "lock.released")
     expect(released).toHaveLength(2)
+  })
+
+  // RACE-6: closing one tab must NOT release locks/presence when another tab
+  // for the same user is still connected.
+  it("multi-tab: closing tab B preserves tab A's locks and presence", () => {
+    const locks = new Map<string, LockState>([
+      ["cell-1", { cellId: "cell-1", userId: "alice", expiresAt: 5_000 }],
+    ])
+    const presence = new Map<string, PresenceState>([
+      ["alice", { userId: "alice", focusedCell: "cell-1", ts: 1 }],
+    ])
+    // remainingConnectionsForUser=1 — tab A still connected
+    const r = applyDisconnect(locks, presence, "alice", 9_000, 1)
+    // Lock must survive
+    expect(r.locks.has("cell-1")).toBe(true)
+    expect(r.locks.get("cell-1")?.userId).toBe("alice")
+    // Presence must survive
+    expect(r.presence.has("alice")).toBe(true)
+    // No broadcasts
+    expect(r.emit.filter((m) => m.t === "lock.released")).toHaveLength(0)
+  })
+
+  it("multi-tab: closing the last tab releases all locks and presence", () => {
+    const locks = new Map<string, LockState>([
+      ["cell-1", { cellId: "cell-1", userId: "alice", expiresAt: 5_000 }],
+      ["cell-2", { cellId: "cell-2", userId: "alice", expiresAt: 5_000 }],
+    ])
+    const presence = new Map<string, PresenceState>([
+      ["alice", { userId: "alice", focusedCell: "cell-1", ts: 1 }],
+    ])
+    // remainingConnectionsForUser=0 — this was the last tab
+    const r = applyDisconnect(locks, presence, "alice", 9_000, 0)
+    expect(r.locks.has("cell-1")).toBe(false)
+    expect(r.locks.has("cell-2")).toBe(false)
+    expect(r.presence.has("alice")).toBe(false)
+    const released = r.emit.filter((m) => m.t === "lock.released")
+    expect(released).toHaveLength(2)
+  })
+
+  it("multi-tab: claim from tab A survives tab B closing", () => {
+    // Simulate: alice claims cell from tab A, then tab B disconnects.
+    const now = 1_000
+    // 1. Tab A claims cell
+    const claimResult = applyFocusClaim(
+      emptyLocks(),
+      emptyPresence(),
+      "alice",
+      { t: "focus.claim", cellId: "cell-x" },
+      now,
+    )
+    expect(claimResult.locks.get("cell-x")?.userId).toBe("alice")
+
+    // 2. Tab B disconnects with remaining=1 (tab A still open)
+    const disconnectResult = applyDisconnect(
+      claimResult.locks,
+      claimResult.presence,
+      "alice",
+      now + 500,
+      1,
+    )
+    // Lock survives
+    expect(disconnectResult.locks.get("cell-x")?.userId).toBe("alice")
+    expect(disconnectResult.presence.has("alice")).toBe(true)
+
+    // 3. Tab A finally closes (remaining=0)
+    const finalDisconnect = applyDisconnect(
+      disconnectResult.locks,
+      disconnectResult.presence,
+      "alice",
+      now + 1_000,
+      0,
+    )
+    expect(finalDisconnect.locks.has("cell-x")).toBe(false)
+    expect(finalDisconnect.presence.has("alice")).toBe(false)
   })
 })
 

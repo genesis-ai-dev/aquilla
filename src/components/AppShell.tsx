@@ -1,4 +1,5 @@
 import type { ReactNode } from "react"
+import { useBrand } from "@/branding/use-brand"
 import { VersionTag } from "./VersionBadge"
 
 // Project-wide z-index scale (Tailwind v4 dynamic):
@@ -26,6 +27,7 @@ interface Props {
 }
 
 export function AppShell({ sidebar, header, statusBar, beforeMain, main, aside }: Props) {
+  const brand = useBrand()
   return (
     // Linear "frame + floating card" model: the sidebar, header, and status
     // bar all share the chrome base (bg-sidebar) as one continuous, lower/darker
@@ -34,6 +36,15 @@ export function AppShell({ sidebar, header, statusBar, beforeMain, main, aside }
     // chrome reads as a frame wrapping the whole editor.
     <div className="flex h-screen min-w-0 bg-sidebar">
       <aside className="relative z-10 flex w-64 shrink-0 flex-col overflow-hidden">
+        {/* Hard <a> (not a router Link): /homepage is the separate marketing
+            entry point (homepage.html) with no React Router match. */}
+        <a
+          href="/homepage"
+          aria-label={`${brand.app.name} — homepage`}
+          className="mx-2 mt-2 flex w-fit items-center rounded-md p-1.5 hover:bg-accent/60"
+        >
+          <brand.logo.Mark className="h-6 w-6 shrink-0" aria-hidden />
+        </a>
         {sidebar}
         <VersionTag />
       </aside>

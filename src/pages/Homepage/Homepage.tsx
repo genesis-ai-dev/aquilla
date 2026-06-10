@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react"
 import { useBrand } from "@/branding/use-brand"
+import { hasAuthHintCookie } from "@/lib/frontier/session-store"
 import { HealthRing } from "@/components/HealthRing"
 import { MultimodalWorkspace } from "./MultimodalWorkspace"
 import { LanguageBlitz, LanguageMarquee } from "./LanguageBlitz"
@@ -85,6 +86,10 @@ export function Homepage() {
 
   const Mark = brand.logo.Mark
 
+  // Signed-in visitors (aq_hint=1 cookie — same bit the Worker reads at the
+  // edge) go straight into the app at `/`; everyone else starts onboarding.
+  const appHref = hasAuthHintCookie() ? "/" : "/onboarding"
+
   return (
     <div className="aq-root" ref={rootRef} data-theme={theme}>
       <div className="aq-atmosphere" aria-hidden="true">
@@ -117,7 +122,7 @@ export function Homepage() {
             >
               {theme === "dark" ? <IconSun /> : <IconMoon />}
             </button>
-            <a href="/onboarding" className="aq-btn aq-btn-ghost aq-btn-sm">Open app</a>
+            <a href={appHref} className="aq-btn aq-btn-ghost aq-btn-sm">Open app</a>
             <a href="/onboarding" className="aq-btn aq-btn-gold aq-btn-sm">Start free</a>
           </div>
         </div>
@@ -467,7 +472,7 @@ export function Homepage() {
               </div>
               <div className="aq-footer-col">
                 <h5>Get started</h5>
-                <a href="/onboarding">Open app</a>
+                <a href={appHref}>Open app</a>
                 <a href="/onboarding">Start free</a>
                 <a href="#pricing">Enterprise</a>
               </div>

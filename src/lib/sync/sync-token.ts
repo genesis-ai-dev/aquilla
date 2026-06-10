@@ -24,7 +24,7 @@ export const FRONTIER_API_URL = AUTH_API_URL
 export interface SyncTokenResponse {
   token: string
   expiresIn: number
-  role: { level: number; name: string; source: "override" | "group" | "creator" | "org" }
+  role: { level: number; name: string; source: "override" | "group" | "creator" | "org" | "platform" }
 }
 
 export class SyncTokenError extends Error {

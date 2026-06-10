@@ -9,6 +9,7 @@
 //
 // Routes (mounted at /api/v2/admin):
 //   GET /me        — { isPlatformAdmin: true } (only reachable past the gate)
+//   GET /admins    — the PLATFORM_ADMINS allowlist joined to user accounts
 //   GET /overview  — top-line counts (orgs, users, projects, active-7d)
 //   GET /orgs      — every org + owner + member/project counts
 //   GET /users     — every user
@@ -17,7 +18,7 @@
 
 import { Hono } from "hono"
 import { authMiddleware, type AuthHonoEnv } from "../middleware/auth"
-import { requirePlatformAdmin } from "../middleware/platform-admin"
+import { parsePlatformAdmins, requirePlatformAdmin } from "../middleware/platform-admin"
 
 const admin = new Hono<AuthHonoEnv>()
 
@@ -35,6 +36,54 @@ admin.use("*", requirePlatformAdmin)
 admin.get("/me", (c) => {
   const user = c.get("user")
   return c.json({ isPlatformAdmin: true, username: user.username })
+})
+
+/**
+ * GET /api/v2/admin/admins — the PLATFORM_ADMINS allowlist, joined to user
+ * accounts. Allowlist entries without a matching users row are still
+ * returned (hasAccount: false) so a typo'd or not-yet-registered name in
+ * wrangler.toml is visible from the dashboard instead of silently inert.
+ */
+admin.get("/admins", async (c) => {
+  const allowlist = Array.from(parsePlatformAdmins(c.env)).sort((a, b) =>
+    a.localeCompare(b),
+  )
+  if (allowlist.length === 0) return c.json({ admins: [] })
+
+  const placeholders = allowlist.map(() => "?").join(", ")
+  const { results } = await c.env.AQUILLA_PG.prepare(
+    `SELECT u.id, u.username, u.email, u.display_name, u.created_at,
+            (SELECT MAX(last_active_at) FROM org_members m WHERE m.user_id = u.id) AS last_active_at
+       FROM users u
+      WHERE u.username IN (${placeholders})`,
+  )
+    .bind(...allowlist)
+    .all<{
+      id: number
+      username: string
+      email: string
+      display_name: string | null
+      created_at: string
+      last_active_at: string | null
+    }>()
+
+  const byUsername = new Map(results.map((r) => [r.username, r]))
+  return c.json({
+    admins: allowlist.map((username) => {
+      const u = byUsername.get(username)
+      return u
+        ? {
+            username,
+            hasAccount: true,
+            userId: u.id,
+            email: u.email,
+            displayName: u.display_name,
+            createdAt: u.created_at,
+            lastActiveAt: u.last_active_at,
+          }
+        : { username, hasAccount: false }
+    }),
+  })
 })
 
 /** GET /api/v2/admin/overview — top-line platform rollup. */

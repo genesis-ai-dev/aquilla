@@ -6,6 +6,7 @@ import { Hono } from "hono"
 import { zValidator } from "@hono/zod-validator"
 import { z } from "zod"
 import { authMiddleware, type AuthHonoEnv } from "../middleware/auth"
+import { isPlatformAdminUsername } from "../middleware/platform-admin"
 import { ROLE } from "../types"
 import {
   addGroupMember,
@@ -15,10 +16,10 @@ import {
   createOrgForUser,
   deleteGroup,
   detachGroupProject,
+  getEffectiveOrgRole,
   getMemberEffectiveAccess,
   getOrCreateUserOrg,
   getOrgGroupDetail,
-  getOrgMemberRole,
   getOrgPortfolio,
   groupExistsInOrg,
   listEffectiveMembersForOrg,
@@ -44,17 +45,44 @@ const orgs = new Hono<AuthHonoEnv>()
 
 orgs.use("*", authMiddleware)
 
-/** GET /api/v2/orgs — every org the caller belongs to (owned + member). */
+/**
+ * GET /api/v2/orgs — every org the caller belongs to (owned + member).
+ * Platform operators additionally get every other org in the tenancy,
+ * flagged `viaPlatformAdmin` and appended AFTER genuine memberships — the
+ * SPA's default active org is the first entry, which must stay a real
+ * membership so an admin's fresh session doesn't land in someone else's org.
+ */
 orgs.get("/", async (c) => {
   const user = c.get("user")
   const list = await listUserOrgs(c.env, user)
-  return c.json({
-    orgs: list.map((o) => ({
-      id: o.id,
-      name: o.name,
-      role: { level: o.role, name: ROLE_NAMES[o.role] ?? "unknown" },
-    })),
-  })
+  const result: Array<{
+    id: number
+    name: string | null
+    role: { level: number; name: string }
+    viaPlatformAdmin?: boolean
+  }> = list.map((o) => ({
+    id: o.id,
+    name: o.name,
+    role: { level: o.role, name: ROLE_NAMES[o.role] ?? "unknown" },
+  }))
+
+  if (isPlatformAdminUsername(c.env, user.username)) {
+    const memberIds = new Set(list.map((o) => o.id))
+    const all = await c.env.AQUILLA_PG.prepare(
+      "SELECT id, name FROM organizations ORDER BY LOWER(COALESCE(name, ''))",
+    ).all<{ id: number; name: string | null }>()
+    for (const o of all.results ?? []) {
+      if (memberIds.has(o.id)) continue
+      result.push({
+        id: o.id,
+        name: o.name,
+        role: { level: 700, name: "admin" },
+        viaPlatformAdmin: true,
+      })
+    }
+  }
+
+  return c.json({ orgs: result })
 })
 
 /** POST /api/v2/orgs — create a new named org; caller becomes owner. */
@@ -72,7 +100,7 @@ orgs.patch("/:orgId", zValidator("json", renameOrgBody), async (c) => {
   const user = c.get("user")
   const orgId = parseInt(c.req.param("orgId"), 10)
   if (!Number.isFinite(orgId)) return c.json({ error: "invalid orgId" }, 400)
-  const role = await getOrgMemberRole(c.env, orgId, user.id)
+  const role = await getEffectiveOrgRole(c.env, orgId, user)
   if (role == null || role < ROLE.MAINTAINER) return c.json({ error: "org role >= maintainer required" }, 403)
   const { name } = c.req.valid("json")
   await renameOrg(c.env, orgId, name)
@@ -96,7 +124,7 @@ orgs.get("/:orgId/portfolio", async (c) => {
   const user = c.get("user")
   const orgId = parseInt(c.req.param("orgId"), 10)
   if (!Number.isFinite(orgId)) return c.json({ error: "invalid orgId" }, 400)
-  const role = await getOrgMemberRole(c.env, orgId, user.id)
+  const role = await getEffectiveOrgRole(c.env, orgId, user)
   if (role == null) return c.json({ error: "not an org member" }, 403)
   const projects = await getOrgPortfolio(c.env, orgId)
   return c.json({ projects })
@@ -114,7 +142,7 @@ orgs.get("/:orgId/members/:userId/access", async (c) => {
   if (!Number.isFinite(orgId) || !Number.isFinite(targetUserId)) {
     return c.json({ error: "invalid id" }, 400)
   }
-  const role = await getOrgMemberRole(c.env, orgId, user.id)
+  const role = await getEffectiveOrgRole(c.env, orgId, user)
   if (role == null || role < ROLE.MAINTAINER) {
     return c.json({ error: "org role >= maintainer required" }, 403)
   }
@@ -130,7 +158,7 @@ orgs.get("/:orgId/assignments/workload", async (c) => {
   const user = c.get("user")
   const orgId = parseInt(c.req.param("orgId"), 10)
   if (!Number.isFinite(orgId)) return c.json({ error: "invalid orgId" }, 400)
-  const role = await getOrgMemberRole(c.env, orgId, user.id)
+  const role = await getEffectiveOrgRole(c.env, orgId, user)
   if (role == null || role < ROLE.MAINTAINER) {
     return c.json({ error: "org role >= maintainer required" }, 403)
   }
@@ -147,7 +175,7 @@ orgs.get("/:orgId/assignments/mine", async (c) => {
   const user = c.get("user")
   const orgId = parseInt(c.req.param("orgId"), 10)
   if (!Number.isFinite(orgId)) return c.json({ error: "invalid orgId" }, 400)
-  const role = await getOrgMemberRole(c.env, orgId, user.id)
+  const role = await getEffectiveOrgRole(c.env, orgId, user)
   if (role == null) return c.json({ error: "not an org member" }, 403)
   const assignments = await getMyAssignmentsAcrossOrg(c.env, orgId, user.id)
   return c.json({ assignments })
@@ -164,7 +192,7 @@ orgs.get("/:orgId/members-matrix", async (c) => {
   const orgId = parseInt(c.req.param("orgId"), 10)
   if (!Number.isFinite(orgId)) return c.json({ error: "invalid orgId" }, 400)
 
-  const role = await getOrgMemberRole(c.env, orgId, user.id)
+  const role = await getEffectiveOrgRole(c.env, orgId, user)
   if (role == null) return c.json({ error: "not an org member" }, 403)
 
   const projects = await listEffectiveMembersForOrg(c.env, orgId, user.id)
@@ -188,7 +216,7 @@ orgs.get("/:orgId/members", async (c) => {
   const orgId = parseInt(c.req.param("orgId"), 10)
   if (!Number.isFinite(orgId)) return c.json({ error: "invalid orgId" }, 400)
 
-  const role = await getOrgMemberRole(c.env, orgId, user.id)
+  const role = await getEffectiveOrgRole(c.env, orgId, user)
   if (role == null) return c.json({ error: "not an org member" }, 403)
 
   const members = await listOrgMembersWithUsers(c.env, orgId)
@@ -208,7 +236,7 @@ orgs.get("/:orgId/groups", async (c) => {
   const user = c.get("user")
   const orgId = parseInt(c.req.param("orgId"), 10)
   if (!Number.isFinite(orgId)) return c.json({ error: "invalid orgId" }, 400)
-  const role = await getOrgMemberRole(c.env, orgId, user.id)
+  const role = await getEffectiveOrgRole(c.env, orgId, user)
   if (role == null) return c.json({ error: "not an org member" }, 403)
   const groups = await listOrgGroups(c.env, orgId, user.id)
   return c.json({ groups })
@@ -220,7 +248,7 @@ orgs.get("/:orgId/groups/:groupId", async (c) => {
   const orgId = parseInt(c.req.param("orgId"), 10)
   const groupId = parseInt(c.req.param("groupId"), 10)
   if (!Number.isFinite(orgId) || !Number.isFinite(groupId)) return c.json({ error: "invalid id" }, 400)
-  const role = await getOrgMemberRole(c.env, orgId, user.id)
+  const role = await getEffectiveOrgRole(c.env, orgId, user)
   if (role == null) return c.json({ error: "not an org member" }, 403)
   const detail = await getOrgGroupDetail(c.env, orgId, groupId)
   if (!detail) return c.json({ error: "group not found" }, 404)
@@ -236,7 +264,7 @@ orgs.post("/:orgId/groups", zValidator("json", groupBody), async (c) => {
   const user = c.get("user")
   const orgId = parseInt(c.req.param("orgId"), 10)
   if (!Number.isFinite(orgId)) return c.json({ error: "invalid orgId" }, 400)
-  const callerRole = await getOrgMemberRole(c.env, orgId, user.id)
+  const callerRole = await getEffectiveOrgRole(c.env, orgId, user)
   if (callerRole == null || callerRole < ROLE.MAINTAINER) return c.json({ error: "org role >= maintainer required" }, 403)
   const { name, description } = c.req.valid("json")
   const group = await createGroup(c.env, orgId, name, description ?? null, user.id)
@@ -254,7 +282,7 @@ orgs.patch("/:orgId/groups/:groupId", zValidator("json", groupPatchBody), async 
   const orgId = parseInt(c.req.param("orgId"), 10)
   const groupId = parseInt(c.req.param("groupId"), 10)
   if (!Number.isFinite(orgId) || !Number.isFinite(groupId)) return c.json({ error: "invalid id" }, 400)
-  const callerRole = await getOrgMemberRole(c.env, orgId, user.id)
+  const callerRole = await getEffectiveOrgRole(c.env, orgId, user)
   if (callerRole == null || callerRole < ROLE.MAINTAINER) return c.json({ error: "org role >= maintainer required" }, 403)
   if (!(await groupExistsInOrg(c.env, orgId, groupId))) return c.json({ error: "group not found" }, 404)
   const { name, description } = c.req.valid("json")
@@ -268,7 +296,7 @@ orgs.delete("/:orgId/groups/:groupId", async (c) => {
   const orgId = parseInt(c.req.param("orgId"), 10)
   const groupId = parseInt(c.req.param("groupId"), 10)
   if (!Number.isFinite(orgId) || !Number.isFinite(groupId)) return c.json({ error: "invalid id" }, 400)
-  const callerRole = await getOrgMemberRole(c.env, orgId, user.id)
+  const callerRole = await getEffectiveOrgRole(c.env, orgId, user)
   if (callerRole == null || callerRole < ROLE.MAINTAINER) return c.json({ error: "org role >= maintainer required" }, 403)
   if (!(await groupExistsInOrg(c.env, orgId, groupId))) return c.json({ error: "group not found" }, 404)
   await deleteGroup(c.env, orgId, groupId)
@@ -282,7 +310,7 @@ orgs.post("/:orgId/groups/:groupId/members", zValidator("json", memberBody), asy
   const orgId = parseInt(c.req.param("orgId"), 10)
   const groupId = parseInt(c.req.param("groupId"), 10)
   if (!Number.isFinite(orgId) || !Number.isFinite(groupId)) return c.json({ error: "invalid id" }, 400)
-  const callerRole = await getOrgMemberRole(c.env, orgId, user.id)
+  const callerRole = await getEffectiveOrgRole(c.env, orgId, user)
   if (callerRole == null || callerRole < ROLE.MAINTAINER) return c.json({ error: "org role >= maintainer required" }, 403)
   if (!(await groupExistsInOrg(c.env, orgId, groupId))) return c.json({ error: "group not found" }, 404)
   const { username } = c.req.valid("json")
@@ -299,7 +327,7 @@ orgs.delete("/:orgId/groups/:groupId/members/:userId", async (c) => {
   const groupId = parseInt(c.req.param("groupId"), 10)
   const targetUserId = parseInt(c.req.param("userId"), 10)
   if (!Number.isFinite(orgId) || !Number.isFinite(groupId) || !Number.isFinite(targetUserId)) return c.json({ error: "invalid id" }, 400)
-  const callerRole = await getOrgMemberRole(c.env, orgId, user.id)
+  const callerRole = await getEffectiveOrgRole(c.env, orgId, user)
   if (callerRole == null || callerRole < ROLE.MAINTAINER) return c.json({ error: "org role >= maintainer required" }, 403)
   if (!(await groupExistsInOrg(c.env, orgId, groupId))) return c.json({ error: "group not found" }, 404)
   await removeGroupMember(c.env, groupId, targetUserId)
@@ -326,7 +354,7 @@ orgs.post(
     const orgId = parseInt(c.req.param("orgId"), 10)
     if (!Number.isFinite(orgId)) return c.json({ error: "invalid orgId" }, 400)
 
-    const callerRole = await getOrgMemberRole(c.env, orgId, user.id)
+    const callerRole = await getEffectiveOrgRole(c.env, orgId, user)
     if (callerRole == null || callerRole < 700) {
       return c.json({ error: "only org owners can add members" }, 403)
     }
@@ -366,7 +394,7 @@ orgs.delete("/:orgId/members/:userId", async (c) => {
     return c.json({ error: "invalid id" }, 400)
   }
 
-  const callerRole = await getOrgMemberRole(c.env, orgId, user.id)
+  const callerRole = await getEffectiveOrgRole(c.env, orgId, user)
   if (callerRole == null || callerRole < 700) {
     return c.json({ error: "only org owners can remove members" }, 403)
   }
@@ -397,7 +425,7 @@ orgs.get("/:orgId/members/:userId/projects", async (c) => {
   if (!Number.isFinite(orgId) || !Number.isFinite(targetUserId)) {
     return c.json({ error: "invalid id" }, 400)
   }
-  const callerRole = await getOrgMemberRole(c.env, orgId, user.id)
+  const callerRole = await getEffectiveOrgRole(c.env, orgId, user)
   if (callerRole == null || callerRole < 700) {
     return c.json({ error: "only org owners can list memberships" }, 403)
   }
@@ -424,7 +452,7 @@ orgs.get("/:orgId/invites", async (c) => {
   const orgId = parseInt(c.req.param("orgId"), 10)
   if (!Number.isFinite(orgId)) return c.json({ error: "invalid orgId" }, 400)
 
-  const callerRole = await getOrgMemberRole(c.env, orgId, user.id)
+  const callerRole = await getEffectiveOrgRole(c.env, orgId, user)
   if (callerRole == null || callerRole < 700) {
     return c.json({ error: "only org owners can list pending invites" }, 403)
   }
@@ -454,7 +482,7 @@ orgs.post("/:orgId/groups/:groupId/projects", zValidator("json", attachBody), as
   const orgId = parseInt(c.req.param("orgId"), 10)
   const groupId = parseInt(c.req.param("groupId"), 10)
   if (!Number.isFinite(orgId) || !Number.isFinite(groupId)) return c.json({ error: "invalid id" }, 400)
-  const callerRole = await getOrgMemberRole(c.env, orgId, user.id)
+  const callerRole = await getEffectiveOrgRole(c.env, orgId, user)
   if (callerRole == null || callerRole < ROLE.MAINTAINER) return c.json({ error: "org role >= maintainer required" }, 403)
   if (!(await groupExistsInOrg(c.env, orgId, groupId))) return c.json({ error: "group not found" }, 404)
   const { projectId, roleLevel } = c.req.valid("json")
@@ -471,7 +499,7 @@ orgs.patch("/:orgId/groups/:groupId/projects/:projectId", zValidator("json", rol
   const groupId = parseInt(c.req.param("groupId"), 10)
   const projectId = c.req.param("projectId")
   if (!Number.isFinite(orgId) || !Number.isFinite(groupId)) return c.json({ error: "invalid id" }, 400)
-  const callerRole = await getOrgMemberRole(c.env, orgId, user.id)
+  const callerRole = await getEffectiveOrgRole(c.env, orgId, user)
   if (callerRole == null || callerRole < ROLE.MAINTAINER) return c.json({ error: "org role >= maintainer required" }, 403)
   if (!(await groupExistsInOrg(c.env, orgId, groupId))) return c.json({ error: "group not found" }, 404)
   const { roleLevel } = c.req.valid("json")
@@ -487,7 +515,7 @@ orgs.delete("/:orgId/groups/:groupId/projects/:projectId", async (c) => {
   const groupId = parseInt(c.req.param("groupId"), 10)
   const projectId = c.req.param("projectId")
   if (!Number.isFinite(orgId) || !Number.isFinite(groupId)) return c.json({ error: "invalid id" }, 400)
-  const callerRole = await getOrgMemberRole(c.env, orgId, user.id)
+  const callerRole = await getEffectiveOrgRole(c.env, orgId, user)
   if (callerRole == null || callerRole < ROLE.MAINTAINER) return c.json({ error: "org role >= maintainer required" }, 403)
   if (!(await groupExistsInOrg(c.env, orgId, groupId))) return c.json({ error: "group not found" }, 404)
   await detachGroupProject(c.env, groupId, projectId)

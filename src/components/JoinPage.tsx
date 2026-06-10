@@ -8,6 +8,7 @@ import {
   previewServerInvite,
   previewMultiInvite,
   acceptMultiInvite,
+  type InvitePreviewFailReason,
   type ServerInvitePreview,
   type MultiInvitePreview,
 } from "@/lib/sync/invites"
@@ -22,6 +23,8 @@ type AuthMode = "login" | "signup" | "forgot"
 type InvitePreview =
   | { kind: "single"; data: ServerInvitePreview }
   | { kind: "multi"; data: MultiInvitePreview }
+/** null = still loading; InvitePreviewFailReason = failed */
+type PreviewLoadState = null | InvitePreviewFailReason
 
 /**
  * Share-link landing page. The token in the URL identifies a server-side
@@ -40,6 +43,8 @@ export function JoinPage() {
   const [phase, setPhase] = useState<Phase>("initial")
   const [error, setError] = useState<string | null>(null)
   const [preview, setPreview] = useState<InvitePreview | null>(null)
+  // null = still loading; string = failed with that reason
+  const [previewLoadState, setPreviewLoadState] = useState<PreviewLoadState>(null)
   const [authMode, setAuthMode] = useState<AuthMode>("login")
 
   // Fetch invite preview (public). Try the multi-project endpoint first — it
@@ -49,14 +54,30 @@ export function JoinPage() {
     if (!token) return
     let cancelled = false
     void (async () => {
-      const multi = await previewMultiInvite(token)
+      const multiResult = await previewMultiInvite(token)
       if (cancelled) return
-      if (multi && multi.projects.length > 0) {
-        setPreview({ kind: "multi", data: multi })
+      if (multiResult.ok && multiResult.data.projects.length > 0) {
+        setPreview({ kind: "multi", data: multiResult.data })
+        setPreviewLoadState(null) // loaded ok — clear any prior error
         return
       }
-      const single = await previewServerInvite(token)
-      if (!cancelled && single) setPreview({ kind: "single", data: single })
+      // Multi endpoint failed or returned empty — try single-project endpoint.
+      // Propagate the multi failure reason only if it's definitive (expired/invalid),
+      // otherwise try single and use its result.
+      const singleResult = await previewServerInvite(token)
+      if (cancelled) return
+      if (singleResult.ok) {
+        setPreview({ kind: "single", data: singleResult.data })
+        setPreviewLoadState(null)
+      } else {
+        // Both endpoints failed. Prefer the multi failure reason if it's
+        // expired/invalid (definitive); fall back to single's reason.
+        const reason =
+          !multiResult.ok && multiResult.reason !== "network"
+            ? multiResult.reason
+            : singleResult.reason
+        setPreviewLoadState(reason)
+      }
     })()
     return () => { cancelled = true }
   }, [token])
@@ -102,6 +123,10 @@ export function JoinPage() {
 
   const isSignedOut = !sessionLoading && !session?.jwt
   const showPreviewCard = isSignedOut && phase === "initial"
+  // Preview failed while signed-out — show error instead of auth form.
+  const previewFailed = showPreviewCard && previewLoadState !== null
+  // Preview is still in flight (null state and no data yet).
+  const previewLoading = showPreviewCard && preview === null && previewLoadState === null
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-background p-4">
@@ -109,11 +134,51 @@ export function JoinPage() {
         <CardHeader>
           <CardTitle className="flex items-center gap-2 text-lg">
             <Users className="h-5 w-5" />
-            {showPreviewCard ? "You're invited" : "Joining Project"}
+            {showPreviewCard && !previewFailed ? "You're invited" : "Joining Project"}
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-3">
-          {showPreviewCard ? (
+          {/* Signed-out + preview failed: show recovery UI, no signup form */}
+          {previewFailed ? (
+            <div className="space-y-3">
+              <div className="flex items-start gap-2 text-destructive">
+                <AlertCircle className="h-5 w-5 mt-0.5 shrink-0" />
+                <div className="space-y-1">
+                  {previewLoadState === "network" ? (
+                    <>
+                      <p className="text-sm font-medium">Couldn't load invitation</p>
+                      <p className="text-xs text-muted-foreground">
+                        Check your connection and try again.
+                      </p>
+                    </>
+                  ) : (
+                    <>
+                      <p className="text-sm font-medium">This invite link is no longer valid</p>
+                      <p className="text-xs text-muted-foreground">
+                        Ask the project owner for a new invite link.
+                      </p>
+                    </>
+                  )}
+                </div>
+              </div>
+              {previewLoadState === "network" ? (
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    // Reset load state so the effect can re-run on token change,
+                    // but since the token won't change we reload the page.
+                    window.location.reload()
+                  }}
+                  className="w-full"
+                >
+                  Try again
+                </Button>
+              ) : null}
+              <Button variant="outline" onClick={() => navigate("/")} className="w-full">
+                Back to projects
+              </Button>
+            </div>
+          ) : showPreviewCard ? (
             <div className="space-y-3">
               {preview?.kind === "single" ? (
                 <div className="rounded-md border bg-muted/30 p-3 space-y-1.5">
@@ -161,11 +226,14 @@ export function JoinPage() {
                     .
                   </p>
                 </div>
-              ) : (
-                <p className="text-xs text-muted-foreground">
-                  Loading invitation details…
-                </p>
-              )}
+              ) : previewLoading ? (
+                <div className="flex items-center gap-2 py-1">
+                  <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+                  <p className="text-xs text-muted-foreground">
+                    Loading invitation details…
+                  </p>
+                </div>
+              ) : null}
               {/* Inline auth — on success the session updates and the redeem
                   effect above fires automatically, so the user never leaves. */}
               <div className="rounded-md border p-3">

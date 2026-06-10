@@ -1,5 +1,10 @@
 # Sync Layer (v3)
 
+> **HISTORICAL DOCUMENT — describes the pre-cutover D1/frontier-server architecture.**
+> The live system uses Neon Postgres (via Hyperdrive) as the datastore and the
+> in-repo `auth-worker/` for identity (frontier-server is retired). See
+> [AGENTS.md](../AGENTS.md) for the current architecture.
+
 How codex-web-app's event-sourced sync works, what lives where, and how to run it.
 
 ## Architecture overview

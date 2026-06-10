@@ -14,9 +14,10 @@
 //
 // So this route skips both reads and just builds + batches the same statements
 // the dispatcher would (it reuses `buildEventProjectionStmts` verbatim, so the
-// rows are byte-identical). One read remains: MAX(server_seq) once per request.
-// The client streams cells in large chunks; each request does real work
-// (dozens of DB batches) instead of a single 100-event hop.
+// rows are byte-identical). server_seq comes from the shared per-project
+// allocator (event-insert.ts). The client streams cells in large chunks; each
+// request does real work (dozens of DB batches) instead of a single
+// 100-event hop.
 //
 // Auth mirrors authorize(): a valid `aud=sync` token scoped to (projectId,
 // fileId), role >= PROJECT_LEAD (source.* is importer/lead-only per
@@ -30,6 +31,7 @@ import {
   fileCountersRecomputeStmt,
   type PersistedEvent,
 } from './event-projection'
+import { buildEventInsertStmt } from './event-insert'
 
 const BATCH_LIMIT = 100
 
@@ -98,43 +100,25 @@ function isImportBody(x: unknown): x is ImportBody {
   )
 }
 
-// server_seq is derived atomically inside the INSERT via a correlated
-// subquery against the same `events` row's project_id. Postgres evaluates
-// the SELECT and the INSERT in one statement, and Postgres serialises writes within the transaction at
-// the primary, so two concurrent batches can no longer both compute the
-// same MAX before either commits — the second batch's subquery sees the
-// first batch's just-inserted rows and picks the next free seq. Within a
-// single batch the same effect holds: batches execute statements
-// sequentially in a transaction, so statement N's subquery sees statement
-// N-1's row. INSERT OR IGNORE still skips id-replays (the subquery is
-// evaluated but the row is dropped, so no seq gap leaks).
-const EVENT_INSERT_SQL = `INSERT INTO events (
-  id, schema_version, project_id, file_id, cell_id, parent_id, kind,
-  author, payload, client_ts, server_ts, server_seq
-)
-SELECT ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-       COALESCE((SELECT MAX(server_seq) FROM events WHERE project_id = ?), 0) + 1
-        ON CONFLICT DO NOTHING`
-
 /** Append the canonical events-row INSERT for one persisted event, mirroring
- *  handlers/cell-events.ts so bulk-import rows match dispatcher rows exactly. */
+ *  handlers/cell-events.ts so bulk-import rows match dispatcher rows exactly.
+ *  server_seq comes from the shared per-project allocator (event-insert.ts);
+ *  id-replays are skipped via ON CONFLICT (id) DO NOTHING. */
 function pushEventInsert(db: AquillaDb, e: PersistedEvent, stmts: AquillaStatement[]): void {
   stmts.push(
-    db
-      .prepare(EVENT_INSERT_SQL)
-      .bind(
-        e.id,
-        e.projectId,
-        e.fileId ?? null,
-        e.cellId ?? null,
-        e.parentId ?? null,
-        e.kind,
-        e.author,
-        JSON.stringify(e.payload),
-        e.clientTs,
-        e.serverTs,
-        e.projectId,
-      ),
+    buildEventInsertStmt(db, {
+      id: e.id,
+      schemaVersion: e.schemaVersion,
+      projectId: e.projectId,
+      fileId: e.fileId ?? null,
+      cellId: e.cellId ?? null,
+      parentId: e.parentId ?? null,
+      kind: e.kind,
+      author: e.author,
+      payloadJson: JSON.stringify(e.payload),
+      clientTs: e.clientTs,
+      serverTs: e.serverTs,
+    }),
   )
 }
 

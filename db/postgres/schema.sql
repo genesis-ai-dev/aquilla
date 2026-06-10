@@ -193,6 +193,35 @@ CREATE TABLE events (
     server_seq     BIGINT NOT NULL DEFAULT 0
 );
 
+-- Per-project server_seq allocator (audit RACE-1 / M1-1). One row per project,
+-- bumped inside the SAME transaction as every events INSERT (see
+-- sync-worker/src/events/event-insert.ts): the row lock serializes concurrent
+-- same-project writers so two transactions can never compute the same
+-- server_seq. Seeded from MAX(events.server_seq) on first use; the bump
+-- self-heals if the counter ever falls behind the log (GREATEST against MAX).
+-- Gaps in server_seq are possible (idempotent replays still bump) and harmless
+-- — server_seq is an ordering key, not a count.
+CREATE TABLE IF NOT EXISTS project_seq_counters (
+    project_id TEXT PRIMARY KEY,
+    last_seq   BIGINT NOT NULL
+);
+
+-- AD-2 first-child arbitration (audit RACE-2 / M1-1). One row per chain slot
+-- (project, file, cell, parent); the first transaction to commit a claim owns
+-- the slot, atomically — replacing the check-then-act isWinningChild SELECT
+-- for in-flight races. parent_key = parent_id, with '<null>' standing in for
+-- genesis events (matches rebuild.ts's in-memory childKey sentinel). The
+-- losing sibling's event still lands in `events` (history) but its cells
+-- projection write is gated on holding the claim.
+CREATE TABLE IF NOT EXISTS chain_claims (
+    project_id TEXT NOT NULL,
+    file_id    TEXT NOT NULL,
+    cell_id    TEXT NOT NULL,
+    parent_key TEXT NOT NULL,
+    event_id   TEXT NOT NULL,
+    PRIMARY KEY (project_id, file_id, cell_id, parent_key)
+);
+
 CREATE TABLE files (
     id             TEXT PRIMARY KEY,
     project_id     TEXT NOT NULL,

@@ -20,6 +20,7 @@
 
 import type { AquillaDb, AquillaStatement } from '../../../db/shim/postgres'
 import type { EventKind, EventPayloads, CommentScope } from './types'
+import type { ChainSlot } from './chain-claims'
 import { ROLE } from './role-policy'
 
 // A single event row as it lives in Postgres. JSON.parse on `payload` is the
@@ -136,8 +137,29 @@ export function buildEventProjectionStmts(
   db: AquillaDb,
   event: PersistedEvent,
   stmts: AquillaStatement[],
-  opts?: { deferFileCounters?: boolean },
+  opts?: {
+    deferFileCounters?: boolean
+    /**
+     * AD-2 atomic arbitration (RACE-2): when set, every chain-advancing
+     * `cells` write is gated on this event holding the chain_claims row for
+     * `chainGate` (see chain-claims.ts). The live route passes the slot it
+     * claimed; rebuild/import arbitrate winners themselves and leave this
+     * unset (ungated writes, identical to the previous behavior).
+     */
+    chainGate?: ChainSlot
+  },
 ): ProjectionTouches[] {
+  // Gate fragments for chain-advancing cells writes. `gateWhere` suffixes an
+  // INSERT…SELECT row source; `gateAnd` extends an UPDATE/DELETE WHERE.
+  const gate = opts?.chainGate
+  const GATE_EXISTS =
+    'EXISTS (SELECT 1 FROM chain_claims WHERE project_id = ? AND file_id = ? AND cell_id = ? AND parent_key = ? AND event_id = ?)'
+  const gateWhere = gate ? ` WHERE ${GATE_EXISTS}` : ''
+  const gateAnd = gate ? ` AND ${GATE_EXISTS}` : ''
+  const gateBinds: unknown[] = gate
+    ? [gate.projectId, gate.fileId, gate.cellId, gate.parentKey, event.id]
+    : []
+
   switch (event.kind) {
     case 'source.cell.create':
     case 'target.cell.create': {
@@ -189,7 +211,7 @@ export function buildEventProjectionStmts(
               last_editor, last_edit_at, validated, word_count, content_hash,
               start_ms, end_ms,
               medium, sequence_index, transcription, camera_state
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?${gateWhere}
             ON CONFLICT(project_id, file_id, cell_id, side) DO UPDATE SET
               side           = excluded.side,
               value          = excluded.value,
@@ -231,6 +253,7 @@ export function buildEventProjectionStmts(
             sequenceIndex,
             transcription,
             cameraState,
+            ...gateBinds,
           ),
       )
 
@@ -283,7 +306,7 @@ export function buildEventProjectionStmts(
                 project_id, file_id, cell_id, side, value, value_html, type,
                 canonical_ref, anchor_cell_id, event_id, source_event_id,
                 last_editor, last_edit_at, validated, word_count, content_hash
-              ) VALUES (?, ?, ?, 'target', ?, ?, NULL, NULL, NULL, ?, ?, ?, ?, 0, ?, ?)
+              ) SELECT ?, ?, ?, 'target', ?, ?, NULL, NULL, NULL, ?, ?, ?, ?, 0, ?, ?${gateWhere}
               ON CONFLICT(project_id, file_id, cell_id, side) DO UPDATE SET
                 value             = excluded.value,
                 value_html        = excluded.value_html,
@@ -308,6 +331,7 @@ export function buildEventProjectionStmts(
               event.serverTs,
               wordCount,
               hash,
+              ...gateBinds,
             ),
         )
       } else {
@@ -326,7 +350,7 @@ export function buildEventProjectionStmts(
                 last_edit_at  = ?,
                 word_count    = ?,
                 content_hash  = ?
-              WHERE project_id = ? AND file_id = ? AND cell_id = ? AND side = 'source'`,
+              WHERE project_id = ? AND file_id = ? AND cell_id = ? AND side = 'source'${gateAnd}`,
             )
             .bind(
               value,
@@ -339,6 +363,7 @@ export function buildEventProjectionStmts(
               event.projectId,
               event.fileId,
               event.cellId,
+              ...gateBinds,
             ),
         )
       }
@@ -368,9 +393,9 @@ export function buildEventProjectionStmts(
         db
           .prepare(
             `DELETE FROM cells
-             WHERE project_id = ? AND file_id = ? AND cell_id = ? AND side = ?`,
+             WHERE project_id = ? AND file_id = ? AND cell_id = ? AND side = ?${gateAnd}`,
           )
-          .bind(event.projectId, event.fileId, event.cellId, side),
+          .bind(event.projectId, event.fileId, event.cellId, side, ...gateBinds),
       )
       if (!opts?.deferFileCounters)
         stmts.push(fileCountersRecomputeStmt(db, event.projectId, event.fileId, event.serverTs))
@@ -392,7 +417,7 @@ export function buildEventProjectionStmts(
               event_id       = ?,
               last_editor    = ?,
               last_edit_at   = ?
-            WHERE project_id = ? AND file_id = ? AND cell_id = ? AND side = ?`,
+            WHERE project_id = ? AND file_id = ? AND cell_id = ? AND side = ?${gateAnd}`,
           )
           .bind(
             p.anchorCellId ?? null,
@@ -403,6 +428,7 @@ export function buildEventProjectionStmts(
             event.fileId,
             event.cellId,
             side,
+            ...gateBinds,
           ),
       )
       if (!opts?.deferFileCounters)
@@ -966,6 +992,19 @@ export const CHAIN_MUTATING_KINDS = new Set<string>([
   'target.cell.delete',
   'target.cell.reorder',
 ])
+
+/**
+ * THE single chain-mutating predicate (audit ARCH-4). route.ts previously
+ * kept a parallel 17-kind deny-list; for every kind in the EventKind union
+ * the two classifications were verified identical (8 chain-mutating kinds +
+ * 17 excluded = the full 25-kind union), so collapsing to this allow-list
+ * preserves current behavior exactly. A future kind is non-chain-mutating
+ * unless added here — it projects unconditionally instead of being silently
+ * dropped as a "stale sibling" (the deny-list's default-unsafe failure mode).
+ */
+export function isChainMutatingKind(kind: string): boolean {
+  return CHAIN_MUTATING_KINDS.has(kind)
+}
 
 /**
  * AD-2 first-child-of-parent guard. Returns true if this event is the

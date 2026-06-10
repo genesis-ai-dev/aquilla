@@ -23,6 +23,7 @@
 // reachable by browser clients — only holders of SYNC_SECRET_KEY may call it.
 
 import { buildEventProjectionStmts, type PersistedEvent } from './event-projection'
+import { buildEventInsertStmt } from './event-insert'
 import type { EventKind } from './types'
 
 // Keep each ingest transaction short so it commits and releases its locks
@@ -70,18 +71,6 @@ function isMigrateIngestBody(x: unknown): x is MigrateIngestBody {
   const b = x as Record<string, unknown>
   return typeof b.projectId === 'string' && Array.isArray(b.events)
 }
-
-// Same atomic server_seq-assigning INSERT as import-route.ts: the correlated
-// subquery picks the next free per-project seq inside the statement, so
-// sequential batches never collide and INSERT OR IGNORE leaves no seq gap on
-// replays (the row is dropped before the seq is consumed).
-const EVENT_INSERT_SQL = `INSERT INTO events (
-  id, schema_version, project_id, file_id, cell_id, parent_id, kind,
-  author, payload, client_ts, server_ts, server_seq
-)
-SELECT ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-       COALESCE((SELECT MAX(server_seq) FROM events WHERE project_id = ?), 0) + 1
-        ON CONFLICT DO NOTHING`
 
 const INGEST_PATH = '/migrate/ingest'
 
@@ -149,22 +138,23 @@ export async function handleMigrateIngestRequest(
       serverTs: serverTs++,
     }
 
+    // server_seq comes from the shared per-project allocator (event-insert.ts);
+    // id-replays are skipped via ON CONFLICT (id) DO NOTHING (a replay still
+    // consumes a seq — gaps are harmless, server_seq is an ordering key).
     stmts.push(
-      db
-        .prepare(EVENT_INSERT_SQL)
-        .bind(
-          event.id,
-          event.projectId,
-          event.fileId,
-          event.cellId,
-          event.parentId,
-          event.kind,
-          event.author,
-          JSON.stringify(event.payload),
-          event.clientTs,
-          event.serverTs,
-          event.projectId,
-        ),
+      buildEventInsertStmt(db, {
+        id: event.id,
+        schemaVersion: 1,
+        projectId: event.projectId,
+        fileId: event.fileId,
+        cellId: event.cellId,
+        parentId: event.parentId,
+        kind: event.kind,
+        author: event.author,
+        payloadJson: JSON.stringify(event.payload),
+        clientTs: event.clientTs,
+        serverTs: event.serverTs,
+      }),
     )
     if (!eventsOnly) {
       try {

@@ -24,7 +24,13 @@ import type { RawEvent } from './types'
 import type { RealtimeMessage, ProjectionTable } from './realtime'
 import { authorize } from './authorize'
 import { dispatchEvent } from './dispatch'
-import { isWinningChild, type PersistedEvent } from './event-projection'
+import {
+  fileCountersRecomputeStmt,
+  isChainMutatingKind,
+  isWinningChild,
+  type PersistedEvent,
+} from './event-projection'
+import { readClaimWinners, slotKey, type ChainSlot } from './chain-claims'
 import { broadcastRealtime } from './broadcast'
 import type { BroadcastEnv } from './broadcast'
 import { ROLE } from './role-policy'
@@ -157,9 +163,9 @@ export async function handleEventsWriteRequest(
   // canonical ordering key, but human-readable timestamps still benefit
   // from monotonicity within a batch.
   //
-  // server_seq itself is no longer assigned in JS: each event INSERT
-  // derives MAX(server_seq)+1 atomically inside its statement (see
-  // EVENT_INSERT_SQL in events/import-route.ts for the race-safety note).
+  // server_seq itself is no longer assigned in JS: each event INSERT bumps
+  // the per-project counter row atomically inside its statement (see
+  // events/event-insert.ts for the race-safety note).
   let nextServerTs = Date.now()
 
   const accepted: AcceptedEntry[] = []
@@ -185,6 +191,12 @@ export async function handleEventsWriteRequest(
     /** Verified author (JWT claims, not the client-supplied event field) —
      * broadcast as `by` so clients can suppress own-write banners. */
     author: string
+    /** AD-2 chain slot claimed by this event (chain-mutating winners of the
+     * pre-check only) — read back after commit to flag in-flight losers. */
+    chainSlot?: ChainSlot
+    /** File whose counter recompute was deferred (QW-10) — coalesced to one
+     * recompute per (file, chunk). */
+    counterFile?: { projectId: string; fileId: string }
   }
 
   const pendingStmts: AquillaStatement[] = []
@@ -218,8 +230,8 @@ export async function handleEventsWriteRequest(
     }
 
     // Assign server_ts (monotone within request). server_seq is assigned
-    // atomically inside the events INSERT statement (see EVENT_INSERT_SQL
-    // in events/import-route.ts).
+    // atomically inside the events INSERT statement (see
+    // events/event-insert.ts).
     const serverTs = nextServerTs++
 
     // AD-2 parent-chain decision. The candidate hasn't been INSERTed yet,
@@ -245,24 +257,11 @@ export async function handleEventsWriteRequest(
       clientTs: rawEvent.clientTs,
       serverTs,
     }
-    const isChainMutating =
-      rawEvent.kind !== 'cell.validate' &&
-      rawEvent.kind !== 'cell.unvalidate' &&
-      rawEvent.kind !== 'cell.waive' &&
-      rawEvent.kind !== 'cell.unwaive' &&
-      rawEvent.kind !== 'cell.audio.attach' &&
-      rawEvent.kind !== 'cell.audio.select' &&
-      rawEvent.kind !== 'cell.audio.remove' &&
-      rawEvent.kind !== 'file.create' &&
-      rawEvent.kind !== 'file.rename' &&
-      rawEvent.kind !== 'comment.create' &&
-      rawEvent.kind !== 'comment.edit' &&
-      rawEvent.kind !== 'comment.delete' &&
-      rawEvent.kind !== 'comment.resolve' &&
-      rawEvent.kind !== 'cell.backtranslation.set' &&
-      rawEvent.kind !== 'assignment.create' &&
-      rawEvent.kind !== 'assignment.reassign' &&
-      rawEvent.kind !== 'assignment.unassign'
+    // ARCH-4: single source of truth for chain-mutating classification —
+    // shared with the projection guard and rebuild (event-projection.ts).
+    // (The previous 17-kind deny-list here was verified equivalent for every
+    // existing EventKind before collapsing.)
+    const isChainMutating = isChainMutatingKind(rawEvent.kind)
     // Strict AD-2 first-child-of-parent for every chain-mutating event,
     // commits included. Per the spec (03-data-model.md §AD-2): the first
     // commit accepted at a given parent_id wins the chain slot; later
@@ -278,6 +277,12 @@ export async function handleEventsWriteRequest(
     // clobbering a newer online edit — contradicted the AD-2 invariant.
     // The recovery path is the same as the multi-user case: the stale
     // signal flows to the client, which prompts the user to rebase.
+    //
+    // NOTE (RACE-2): this SELECT is only the PRE-check — it catches siblings
+    // that already committed. Two IN-FLIGHT requests can both pass it; the
+    // atomic chain_claims row taken inside the handler's transaction is the
+    // real arbiter (see chain-claims.ts), and the post-commit read-back below
+    // flags the claim loser as stale.
     const updateProjection = isChainMutating
       ? await isWinningChild(db, candidate)
       : true
@@ -503,9 +508,11 @@ export async function handleEventsWriteRequest(
       }
     }
 
-    // Dispatch.
+    // Dispatch. deferFileCounters: the O(file) counter recompute is appended
+    // once per (file, chunk) at commit time instead of once per event (QW-10).
     const outcome = dispatchEvent(db, authResult.event, serverTs, {
       updateProjection,
+      deferFileCounters: true,
     })
     if (!outcome.ok) {
       rejected.push({
@@ -538,6 +545,8 @@ export async function handleEventsWriteRequest(
       eventFrame: outcome.result.eventFrame,
       dirtyEntry,
       author: authResult.event.claims.username,
+      chainSlot: outcome.result.chainSlot,
+      counterFile: outcome.result.counterFile,
     })
   }
 
@@ -550,6 +559,29 @@ export async function handleEventsWriteRequest(
 
     const chunks: PendingChunk[] = []
     let currentChunk: PendingChunk = { entries: [], stmts: [] }
+
+    // QW-10: the deferred file-counter recompute runs once per (file, chunk),
+    // appended when the chunk is sealed so it commits in the SAME transaction
+    // as the chunk's events — committed chunks always leave correct counters,
+    // exactly like the old per-event recompute, at 1/N the aggregate scans.
+    // (A sealed chunk may exceed BATCH_LIMIT by the handful of per-file
+    // recomputes; the limit is a self-imposed soft cap, not a Postgres one.)
+    const sealChunk = (chunk: PendingChunk): void => {
+      const counterFiles = new Map<string, { projectId: string; fileId: string }>()
+      for (const entry of chunk.entries) {
+        if (entry.counterFile) {
+          counterFiles.set(
+            `${entry.counterFile.projectId}|${entry.counterFile.fileId}`,
+            entry.counterFile,
+          )
+        }
+      }
+      const recomputeTs = Date.now()
+      for (const f of counterFiles.values()) {
+        chunk.stmts.push(fileCountersRecomputeStmt(db, f.projectId, f.fileId, recomputeTs))
+      }
+      chunks.push(chunk)
+    }
 
     for (const entry of pendingEntries) {
       const eventStmts = pendingStmts.slice(
@@ -570,7 +602,7 @@ export async function handleEventsWriteRequest(
         currentChunk.stmts.length > 0 &&
         currentChunk.stmts.length + eventStmts.length > BATCH_LIMIT
       ) {
-        chunks.push(currentChunk)
+        sealChunk(currentChunk)
         currentChunk = { entries: [], stmts: [] }
       }
 
@@ -579,10 +611,41 @@ export async function handleEventsWriteRequest(
     }
 
     if (currentChunk.stmts.length > 0) {
-      chunks.push(currentChunk)
+      sealChunk(currentChunk)
     }
 
     const committedEntries: PendingEntry[] = []
+
+    // M1-2: after commit, read the chain claims back and flag any event that
+    // lost an IN-FLIGHT sibling race (both passed the pre-check; the claim
+    // arbitrated inside the transaction). The loser's event is committed to
+    // the log but its projection writes were gated no-ops — without this the
+    // client would treat "accepted" as "saved" (the old silent-loss bug).
+    const flagClaimLosers = async (entries: PendingEntry[]): Promise<void> => {
+      const contenders = entries.filter((e) => e.chainSlot && !staleEntries.has(e.id))
+      if (contenders.length === 0) return
+      try {
+        const winners = await readClaimWinners(
+          db,
+          contenders.map((e) => e.chainSlot!),
+        )
+        for (const e of contenders) {
+          const winner = winners.get(slotKey(e.chainSlot!))
+          if (winner !== undefined && winner !== e.id) {
+            staleEntries.set(e.id, {
+              id: e.id,
+              fileId: e.eventFrame.file ?? null,
+              cellId: e.eventFrame.cell ?? null,
+            })
+          }
+        }
+      } catch (err) {
+        // Best-effort: a read-back failure only suppresses the stale banner;
+        // the gated projection already arbitrated the data correctly. Don't
+        // fail an otherwise-committed request.
+        console.warn('[events/route] chain-claims read-back failed:', err)
+      }
+    }
 
     try {
       for (const chunk of chunks) {
@@ -590,6 +653,7 @@ export async function handleEventsWriteRequest(
         committedEntries.push(...chunk.entries)
       }
     } catch (err) {
+      await flagClaimLosers(committedEntries)
       const committed = new Set(committedEntries.map((entry) => entry.id))
       for (const entry of pendingEntries) {
         if (committed.has(entry.id)) {
@@ -619,6 +683,8 @@ export async function handleEventsWriteRequest(
     for (const entry of committedEntries) {
       accepted.push({ id: entry.id })
     }
+
+    await flagClaimLosers(committedEntries)
 
     // Broadcast — non-fatal.
     if (env.FileSync && env.SYNC_SECRET_KEY) {

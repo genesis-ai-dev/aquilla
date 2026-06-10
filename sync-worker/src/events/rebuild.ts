@@ -9,6 +9,16 @@
 // parent_id)` slot, and we visit in seq order, so a sibling that arrived
 // LATER (higher seq) and lost the race never gets to update the projection.
 //
+// Replay == live (RACE-2 / M1-2): the live path's chain_claims arbitration
+// always awards a contested slot to the LOWEST-server_seq sibling (the
+// per-project seq counter's row lock makes commit order == seq order, and
+// the claim is taken inside that critical section — see chain-claims.ts).
+// That is exactly the first-in-seq-order rule applied here, so a rebuild
+// reproduces the live projection byte-for-byte. chain_claims itself is NOT
+// rewritten by rebuild: it was populated under the same rule, and historical
+// slots without claim rows are still guarded by the isWinningChild pre-check
+// against `events`.
+//
 // ── Non-atomic failure mode ────────────────────────────────────────────
 // As before — DELETE + replay is not wrapped in a transaction. Re-running
 // the endpoint after a partial failure restarts from a clean slate.

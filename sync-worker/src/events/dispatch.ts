@@ -34,6 +34,12 @@ export interface DispatchOptions {
    * parent-chain guard before calling here.
    */
   updateProjection: boolean
+  /**
+   * QW-10: skip the per-event file-counter recompute. The route coalesces
+   * one recompute per (file, chunk) instead; the affected file is reported
+   * back via DispatchResult.counterFile.
+   */
+  deferFileCounters?: boolean
 }
 
 /**

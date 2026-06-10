@@ -4,7 +4,6 @@ import { createOpfsFs } from "@/lib/fs/opfs-fs"
 import { MemoryDirectoryHandle } from "@/lib/fs/__test__/mem-fs-handles"
 import {
   __setRootForTests,
-  AUDIO_BYTES_DIR,
   audioCacheGet,
   audioCacheEvict,
   audioCachePut,

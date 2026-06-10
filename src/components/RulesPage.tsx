@@ -12,6 +12,7 @@ import { RuleCreateDialog } from "./RuleCreateDialog"
 import { RuleSuggestDialog } from "./RuleSuggestDialog"
 import { BuiltinChecksList } from "./BuiltinChecksList"
 import { FixReviewPanel } from "./FixReviewPanel"
+import { ConfirmActionDialog } from "./ConfirmActionDialog"
 import type { FixProposal } from "@/lib/rules/autofix"
 import { ROLE } from "@/lib/sync/role-policy"
 import type { ProjectRecord, RuleAutofix, TranslationRule } from "@/lib/parsers/types"
@@ -52,6 +53,10 @@ export function RulesPage() {
   const { patch: patchShared, settings: projectWideSettings } = useProjectSettings(id ?? null, project?.syncRole?.level ?? null)
   const { userRules, builtinRules, addRule, updateRule, deleteRule, setBuiltinOverride } = useRules(project, refresh, patchShared)
   const { cells: validatedCells } = useLivingMemory({ projectId: id ?? "" })
+
+  // FRO-291: pending delete confirmation state.
+  const [pendingDeleteRuleId, setPendingDeleteRuleId] = useState<string | null>(null)
+  const pendingDeleteRule = pendingDeleteRuleId ? userRules.find((r) => r.id === pendingDeleteRuleId) ?? null : null
 
   // FRO-186: harmonize sweep panel state.
   const [harmonizeRule, setHarmonizeRule] = useState<TranslationRule | null>(null)
@@ -232,7 +237,7 @@ export function RulesPage() {
                             onChange={(e) => updateRule(rule.id, { enabled: e.target.checked })} />
                           <span className="text-muted-foreground">Enabled</span>
                         </label>
-                        <Button variant="ghost" size="sm" onClick={() => deleteRule(rule.id)}>
+                        <Button variant="ghost" size="sm" aria-label={`Delete rule ${rule.name}`} onClick={() => setPendingDeleteRuleId(rule.id)}>
                           <Trash2 className="h-3.5 w-3.5 text-muted-foreground" />
                         </Button>
                       </div>
@@ -248,6 +253,22 @@ export function RulesPage() {
           </CardContent>
         </Card>
       </main>
+
+      {/* FRO-291: checkbox-confirm before deleting a rule */}
+      <ConfirmActionDialog
+        open={pendingDeleteRuleId !== null}
+        onOpenChange={(v) => { if (!v) setPendingDeleteRuleId(null) }}
+        title="Delete rule"
+        description={
+          pendingDeleteRule
+            ? `Delete "${pendingDeleteRule.name}"? This removes the rule for everyone in the project and cannot be undone.`
+            : "Delete this rule? This removes it for everyone in the project and cannot be undone."
+        }
+        confirmLabel="Delete rule"
+        checkboxLabel="I understand this deletes the rule for everyone in the project."
+        variant="destructive"
+        onConfirm={() => { if (pendingDeleteRuleId) deleteRule(pendingDeleteRuleId) }}
+      />
     </div>
   )
 }

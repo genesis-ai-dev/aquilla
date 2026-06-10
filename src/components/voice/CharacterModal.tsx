@@ -21,6 +21,7 @@ import {
   Check, Loader2, Pause, Play, Sparkles, Star, Trash2,
 } from "lucide-react"
 import { Dialog, DialogContent } from "@/components/ui/dialog"
+import { ConfirmActionDialog } from "@/components/ConfirmActionDialog"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -147,6 +148,9 @@ function CharacterModalBody({
     setDraft((cur) => ({ ...cur, ...patch }))
   }, [])
 
+  // FRO-291: confirm-before-delete state.
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false)
+
   // ── Preview ───────────────────────────────────────────────────────────────
   const [preview, setPreview] = useState<PreviewState>({ kind: "idle" })
   const audioRef = useRef<HTMLAudioElement | null>(null)
@@ -266,6 +270,7 @@ function CharacterModalBody({
   const isCloned = Boolean(draft.referenceAudioId)
 
   return (
+    <>
     <Dialog open onOpenChange={(o) => { if (!o) onClose() }}>
       <DialogContent className="sm:max-w-md">
         <h2 className="font-heading text-base font-medium">
@@ -478,7 +483,7 @@ function CharacterModalBody({
               size="sm"
               variant="ghost"
               className="text-destructive hover:bg-destructive/10 hover:text-destructive"
-              onClick={() => { onDelete(); onClose() }}
+              onClick={() => setDeleteConfirmOpen(true)}
             >
               <Trash2 className="mr-1 h-3.5 w-3.5" /> Delete
             </Button>
@@ -494,6 +499,21 @@ function CharacterModalBody({
         </div>
       </DialogContent>
     </Dialog>
+
+    {/* FRO-291: checkbox-confirm before deleting a character */}
+    {onDelete && (
+      <ConfirmActionDialog
+        open={deleteConfirmOpen}
+        onOpenChange={setDeleteConfirmOpen}
+        title="Delete character"
+        description={`Delete "${draft.name}"? This removes the voice character for everyone in the project and cannot be undone.`}
+        confirmLabel="Delete character"
+        checkboxLabel="I understand this deletes the voice character for everyone in the project."
+        variant="destructive"
+        onConfirm={() => { onDelete(); onClose() }}
+      />
+    )}
+    </>
   )
 }
 

@@ -455,6 +455,7 @@ CREATE INDEX comments_thread ON comments(project_id, parent_comment_id);
 CREATE INDEX idx_diarization_jobs_file ON diarization_jobs(project_id, file_id);
 CREATE INDEX idx_events_author ON events(author, server_ts);
 CREATE INDEX idx_events_cell ON events(project_id, file_id, cell_id, server_ts);
+CREATE INDEX idx_events_file_seq ON events(project_id, file_id, server_seq);
 CREATE INDEX idx_events_parent_lookup ON events(project_id, file_id, cell_id, parent_id);
 CREATE INDEX idx_events_project ON events(project_id, server_ts);
 CREATE UNIQUE INDEX idx_events_project_seq ON events(project_id, server_seq);

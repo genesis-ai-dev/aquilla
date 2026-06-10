@@ -3,6 +3,7 @@ import {
   cellDecay,
   cellHealth,
   needsAttention,
+  needsAttentionFromConfidence,
   computeDecayHealth,
   resolveDecayConfig,
   DECAY_DEFAULTS,
@@ -107,6 +108,37 @@ describe("resolveDecayConfig", () => {
     const cfg = resolveDecayConfig(undefined, 1)
     expect(cellHealth(1, cfg.endorsementTarget)).toBe(100)
     expect(needsAttention(1, cfg)).toBe(false)
+  })
+})
+
+// FRO-181: needsAttentionFromConfidence — AD-14 amendment 2026-06-04.
+// Uses a server-derived confidence score (0-100) instead of endorsement_count.
+describe("needsAttentionFromConfidence (FRO-181)", () => {
+  const WARN = DEFAULT_DECAY_WARN_THRESHOLD // 0.66
+
+  it("marks a cell with confidence 0 (decay 1 > 0.66)", () => {
+    expect(needsAttentionFromConfidence(0, WARN)).toBe(true)
+  })
+
+  it("marks a cell with confidence 33 (decay 0.67 > 0.66)", () => {
+    expect(needsAttentionFromConfidence(33, WARN)).toBe(true)
+  })
+
+  it("clears a cell with confidence 100 (validated anchor; decay 0)", () => {
+    expect(needsAttentionFromConfidence(100, WARN)).toBe(false)
+  })
+
+  it("clears a cell with confidence 34 (decay 0.66 = threshold, not above)", () => {
+    // decay = 1 - 34/100 = 0.66; threshold is STRICT: decay > 0.66 → false
+    expect(needsAttentionFromConfidence(34, WARN)).toBe(false)
+  })
+
+  it("marks a cell with confidence 33 against a custom warn of 0.5", () => {
+    expect(needsAttentionFromConfidence(33, 0.5)).toBe(true)
+  })
+
+  it("clears a cell with confidence 60 against a custom warn of 0.5 (decay 0.4 <= 0.5)", () => {
+    expect(needsAttentionFromConfidence(60, 0.5)).toBe(false)
   })
 })
 

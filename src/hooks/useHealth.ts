@@ -6,9 +6,27 @@ import type { TranslationRule, RuleInfraction, DecaySettings } from "@/lib/parse
 import { perfMark } from "@/lib/perf-log"
 
 interface HealthDispatchOptions {
-  /** AD-14 decay tunables (endorsementTarget, decayWarnThreshold). */
+  /**
+   * AD-14 decay tunables. endorsementTarget is deprecated (superseded by
+   * server confidence rollup); decayWarnThreshold and maxHops remain active.
+   */
   decaySettings?: DecaySettings
   requiredValidations?: number
+  /**
+   * AD-14 amendment 2026-06-04: server-derived confidence rollup. When
+   * supplied, overrides the endorsement-count decay path for health numbers.
+   * Per-cell health is still derived locally (confidence per cell from the
+   * server-side route via useCellConfidence); this override applies to file
+   * and project-level aggregates only, making those numbers authoritative and
+   * consistent with the rollup the server computed.
+   *
+   * Falls back to null → uses endorsement_count path (local-only projects or
+   * when the server rollup hasn't loaded yet).
+   */
+  serverRollup?: {
+    projectHealth: number | null
+    fileHealth: Map<string, number>
+  } | null
 }
 
 // ---------------------------------------------------------------------------
@@ -184,19 +202,30 @@ export function useHealth(
   // File progress + open-comment counts.
   const aux = useMemo(() => deriveAuxStats(fileCells), [fileCells])
 
+  // AD-14 amendment: prefer server-derived confidence rollup for file/project
+  // aggregates when available. Per-cell healthMap stays from the local decay
+  // path (endorsed or confidence-overlay via useCellConfidence — the server
+  // rollup route returns aggregates, not per-cell values).
+  const serverRollup = options.serverRollup ?? null
+  const effectiveProjectHealth =
+    serverRollup?.projectHealth != null ? serverRollup.projectHealth : decay.projectHealth
+  const effectiveFileHealth =
+    serverRollup && serverRollup.fileHealth.size > 0 ? serverRollup.fileHealth : decay.fileHealth
+
   // Assemble the raw result that will be returned to callers.
   const raw: HealthStats = useMemo(
     () => ({
       healthMap: decay.healthMap,
-      fileHealth: decay.fileHealth,
-      projectHealth: decay.projectHealth,
+      fileHealth: effectiveFileHealth,
+      projectHealth: effectiveProjectHealth,
       fileProgress: aux.fileProgress,
       infractions,
       openCommentCount: aux.openCommentCount,
       projectOpenCommentCount: aux.projectOpenCommentCount,
       cellOpenCommentCount: aux.cellOpenCommentCount,
     }),
-    [decay, infractions, aux],
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [decay, infractions, aux, effectiveProjectHealth, effectiveFileHealth],
   )
 
   // Structural stability: if the raw result is semantically unchanged from

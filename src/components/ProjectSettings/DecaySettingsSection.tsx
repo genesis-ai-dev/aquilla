@@ -3,31 +3,29 @@ import { Input } from "@/components/ui/input"
 import type { DecaySettings } from "@/lib/parsers/types"
 import { DECAY_DEFAULTS } from "@/lib/health/decay-engine"
 
+// AD-14 amendment 2026-06-04: default maxHops for the confidence propagation.
+const DEFAULT_MAX_HOPS = 4
+
 interface DecaySettingsSectionProps {
   settings?: DecaySettings
-  /**
-   * The project's required-validations gate. When no explicit endorsement
-   * target is set, the target defaults to this so a validated cell reaches full
-   * health (matches resolveDecayConfig at runtime).
-   */
-  requiredValidations: number
   onChange: (next: DecaySettings) => void
   disabled?: boolean
   disabledTooltip?: string
 }
 
 /**
- * AD-14 decay tunables. Replaces the retired four-sub-score "health settings"
- * section. Health = 1 - mean(decay); decay = max(0, 1 - endorsements/target).
+ * AD-14 decay tunables. Exposes `maxHops` (confidence propagation radius) and
+ * `decayWarnThreshold`. The retired `endorsementTarget` field is no longer
+ * shown — confidence is now derived on read via the example-retrieval graph,
+ * not counted from write-time endorsement events (AD-14 amendment 2026-06-04).
  */
 export function DecaySettingsSection({
   settings,
-  requiredValidations,
   onChange,
   disabled,
   disabledTooltip,
 }: DecaySettingsSectionProps) {
-  const endorsementTarget = settings?.endorsementTarget ?? requiredValidations
+  const maxHops = settings?.maxHops ?? DEFAULT_MAX_HOPS
   const decayWarnThreshold = settings?.decayWarnThreshold ?? DECAY_DEFAULTS.decayWarnThreshold
 
   return (
@@ -35,28 +33,28 @@ export function DecaySettingsSection({
       <summary className="cursor-pointer text-sm font-medium">Decay &amp; health</summary>
       <div className="mt-3 space-y-4">
         <p className="text-xs text-muted-foreground">
-          A cell&apos;s decay drops as it accrues endorsements (a validated cell endorses
-          itself and its retrieval neighborhood, AD-14). Health is <code>1 − mean(decay)</code>.
+          Cell health is confidence derived from validated neighbors in the example-retrieval
+          graph (AD-14). Health is <code>1 − mean(decay)</code> over translated cells.
         </p>
 
         <div>
-          <Label htmlFor="decay-target">Endorsement target</Label>
+          <Label htmlFor="decay-max-hops">Max hops</Label>
           <Input
-            id="decay-target"
+            id="decay-max-hops"
             type="number"
             min={1}
-            max={50}
+            max={20}
             step={1}
-            value={endorsementTarget}
+            value={maxHops}
             disabled={disabled}
             onChange={(e) => {
-              const v = Math.max(1, Math.round(Number(e.target.value) || 0))
-              onChange({ ...settings, endorsementTarget: v })
+              const v = Math.min(20, Math.max(1, Math.round(Number(e.target.value) || 0)))
+              onChange({ ...settings, maxHops: v })
             }}
           />
           <p className="mt-1 text-xs text-muted-foreground">
-            Endorsements at which a cell reaches decay 0 (full health). Defaults to the
-            project&apos;s required validations ({requiredValidations}).
+            Propagation radius from validated cells. Larger values let confidence
+            ripple further through the retrieval graph. Default {DEFAULT_MAX_HOPS}.
           </p>
         </div>
 

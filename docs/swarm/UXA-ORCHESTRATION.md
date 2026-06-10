@@ -103,6 +103,12 @@ fetch-helpers chain FRO-281 → 293; EditorTable strings last: FRO-290 after 297
 - 2026-06-10 · FRO-276 USFM honesty · 6d11a37 (merge of c2966bd) · same gate green. sync-worker `tsc --noEmit` has PRE-EXISTING errors in old test files (CellRow/EventRow index sigs) — baseline; npm test green.
 - 2026-06-10 · FRO-268 characterization · 0de0699 (merge of 62612bf) · gate pending (auth-worker tests included next run)
 
+- 2026-06-10 · prior gate (268) green: tsc 0 · auth-worker 193 pass/18 skip · sync-worker + root vitest green (exit 0)
+- 2026-06-10 · FRO-294 deadline AoE · dd5091e (merge of f2fc334) · NOTE: real logic was client-side src/lib/frontier/portfolio.ts (audit's auth-worker pointer was stale)
+- 2026-06-10 · FRO-291 delete confirms · 8ca16c8 (merge of 059d97b)
+- 2026-06-10 · FRO-265 AI caps · 34db5e0 (merge of a8feacc) · log-only default; AI_BUDGET_ENFORCE=true to enforce; migration 0034_ai_usage_daily
+- 2026-06-10 · FRO-270 reset-password + 404 · f83c607 (merge of d5bd243) · gate pending
+
 ### Incidents
 - FRO-275: first agent died after ~15 lines; finisher respawned into same worktree — Fixed.
 - FRO-291: agent died mid-test-work AND its worktree contained FOREIGN media-timeline WIP

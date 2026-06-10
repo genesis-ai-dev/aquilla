@@ -1,4 +1,5 @@
 import { FRONTIER_BASE, AUTH_BASE } from "./auth";
+import { UserError } from "@/lib/errors/user-error";
 
 export interface LookedUpUser {
   id: number;
@@ -53,7 +54,7 @@ export async function lookupUser(jwt: string, username: string): Promise<LookedU
     { headers: authHeaders(jwt) }
   );
   if (res.status === 404) return null;
-  if (!res.ok) throw new Error(`lookupUser failed: HTTP ${res.status}`);
+  if (!res.ok) throw new UserError(res.status, "", "user");
   return (await res.json()) as LookedUpUser;
 }
 
@@ -75,7 +76,7 @@ export async function listProjectMembers(
     { headers: authHeaders(jwt) }
   );
   if (res.status === 403 || res.status === 404) return null;
-  if (!res.ok) throw new Error(`listProjectMembers failed: HTTP ${res.status}`);
+  if (!res.ok) throw new UserError(res.status, "", "project");
   const body = (await res.json()) as { members: ProjectMember[] };
   return body.members;
 }
@@ -98,7 +99,7 @@ export async function fetchOrgMembersMatrix(
     { headers: authHeaders(jwt) }
   );
   if (!res.ok) {
-    throw new Error(`fetchOrgMembersMatrix failed: HTTP ${res.status}`);
+    throw new UserError(res.status, "", "org");
   }
   const body = (await res.json()) as {
     projects: { projectId: string; members: ProjectMember[] }[];
@@ -123,8 +124,8 @@ export async function addProjectMember(
     }
   );
   if (!res.ok) {
-    const text = await res.text();
-    throw new Error(`addProjectMember failed: HTTP ${res.status} — ${text}`);
+    const text = await res.text().catch(() => "");
+    throw new UserError(res.status, text, "project");
   }
   return (await res.json()) as ProjectMember;
 }
@@ -139,8 +140,8 @@ export async function removeProjectMember(
     { method: "DELETE", headers: authHeaders(jwt) }
   );
   if (!res.ok) {
-    const text = await res.text();
-    throw new Error(`removeProjectMember failed: HTTP ${res.status} — ${text}`);
+    const text = await res.text().catch(() => "");
+    throw new UserError(res.status, text, "project");
   }
 }
 
@@ -183,8 +184,8 @@ export async function revokeAllProjectAccess(
     },
   )
   if (!res.ok) {
-    const text = await res.text()
-    throw new Error(`revokeAllProjectAccess failed: HTTP ${res.status} — ${text}`)
+    const text = await res.text().catch(() => "")
+    throw new UserError(res.status, text, "project")
   }
   return (await res.json()) as RevokeAllResult
 }
@@ -215,7 +216,7 @@ export async function createRemoteProject(
   });
   if (!res.ok) {
     const text = await res.text().catch(() => "");
-    throw new Error(`createRemoteProject failed: HTTP ${res.status}${text ? ` — ${text}` : ""}`);
+    throw new UserError(res.status, text, "project");
   }
   return (await res.json()) as RemoteProjectCreateResult;
 }

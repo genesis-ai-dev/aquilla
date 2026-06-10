@@ -7,6 +7,7 @@
 import type { FileType, ProjectRecord } from "@/lib/parsers/types"
 import { FRONTIER_API_URL } from "./sync-token"
 import { fetchProjectState, type ProjectStateResponse } from "./archive"
+import { UserError } from "@/lib/errors/user-error"
 
 export interface CloudFileSummary {
   id: string
@@ -66,7 +67,7 @@ export async function createCloudProject(
   })
   if (!res.ok) {
     const body = await res.text().catch(() => "")
-    throw new Error(`create project failed: HTTP ${res.status} — ${body.slice(0, 200)}`)
+    throw new UserError(res.status, body, "project")
   }
 }
 
@@ -132,7 +133,7 @@ export async function setProjectDeadline(
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${jwt}` },
     body: JSON.stringify({ deadline }),
   })
-  if (!res.ok) throw new Error(`setProjectDeadline failed: HTTP ${res.status}`)
+  if (!res.ok) throw new UserError(res.status, "", "project")
 }
 
 /**
@@ -199,7 +200,7 @@ export async function toggleProjectLifecycle(
       body: JSON.stringify({ isActive }),
     },
   )
-  if (!res.ok) throw new Error(`toggleProjectLifecycle failed: HTTP ${res.status}`)
+  if (!res.ok) throw new UserError(res.status, "", "project")
 }
 
 /**

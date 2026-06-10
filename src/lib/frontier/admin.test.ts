@@ -36,9 +36,12 @@ describe("getAdminMe", () => {
     expect(await getAdminMe("jwt")).toBe(false)
   })
 
-  it("throws on unexpected server error", async () => {
+  it("throws on unexpected server error (human message, not 'HTTP 500')", async () => {
     global.fetch = vi.fn(async () => new Response("boom", { status: 500 })) as unknown as typeof fetch
-    await expect(getAdminMe("jwt")).rejects.toThrow(/HTTP 500/)
+    const err = await getAdminMe("jwt").catch((e: unknown) => e)
+    expect(err).toBeInstanceOf(Error)
+    expect((err as Error).message).not.toMatch(/HTTP\s*500/)
+    expect((err as Error).name).toBe("UserError")
   })
 })
 
@@ -74,8 +77,11 @@ describe("admin list endpoints unwrap their envelope", () => {
     expect(url).toMatch(/\/api\/v2\/admin\/activity\?limit=50$/)
   })
 
-  it("throws on non-OK status", async () => {
+  it("throws on non-OK status (human message, not 'HTTP 403')", async () => {
     global.fetch = vi.fn(async () => new Response("x", { status: 403 })) as unknown as typeof fetch
-    await expect(getAdminOrgs("jwt")).rejects.toThrow(/HTTP 403/)
+    const err = await getAdminOrgs("jwt").catch((e: unknown) => e)
+    expect(err).toBeInstanceOf(Error)
+    expect((err as Error).message).not.toMatch(/HTTP\s*403/)
+    expect((err as Error).name).toBe("UserError")
   })
 })

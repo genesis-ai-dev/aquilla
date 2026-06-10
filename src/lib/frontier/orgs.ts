@@ -1,4 +1,5 @@
 import { FRONTIER_BASE } from "./auth";
+import { UserError } from "@/lib/errors/user-error";
 
 /**
  * Default timeout for org/members fetches. Errors out as
@@ -107,19 +108,19 @@ export interface OrgSummary {
 
 export async function listMyOrgs(jwt: string): Promise<OrgSummary[]> {
   const res = await fetchWithTimeout(`${FRONTIER_BASE}/api/v2/orgs`, { headers: authHeaders(jwt) })
-  if (!res.ok) throw new Error(`listMyOrgs failed: HTTP ${res.status}`)
+  if (!res.ok) throw new UserError(res.status, "", "org")
   return ((await res.json()) as { orgs: OrgSummary[] }).orgs
 }
 
 export async function createOrg(jwt: string, name: string): Promise<OrgSummary> {
   const res = await fetchWithTimeout(`${FRONTIER_BASE}/api/v2/orgs`, { method: "POST", headers: authHeaders(jwt), body: JSON.stringify({ name }) })
-  if (!res.ok) throw new Error(`createOrg failed: HTTP ${res.status}`)
+  if (!res.ok) throw new UserError(res.status, "", "org")
   return (await res.json()) as OrgSummary
 }
 
 export async function renameOrg(jwt: string, orgId: number, name: string): Promise<void> {
   const res = await fetchWithTimeout(`${FRONTIER_BASE}/api/v2/orgs/${orgId}`, { method: "PATCH", headers: authHeaders(jwt), body: JSON.stringify({ name }) })
-  if (!res.ok) throw new Error(`renameOrg failed: HTTP ${res.status}`)
+  if (!res.ok) throw new UserError(res.status, "", "org")
 }
 
 export interface ProjectAccessBreakdown {
@@ -139,7 +140,7 @@ export interface MemberEffectiveAccess {
 /** AD-12 effective-access breakdown for one member: every grant path per project + resolved max. */
 export async function getMemberAccess(jwt: string, orgId: number, userId: number): Promise<MemberEffectiveAccess> {
   const res = await fetchWithTimeout(`${FRONTIER_BASE}/api/v2/orgs/${orgId}/members/${userId}/access`, { headers: authHeaders(jwt) })
-  if (!res.ok) throw new Error(`getMemberAccess failed: HTTP ${res.status}`)
+  if (!res.ok) throw new UserError(res.status, "", "org")
   return (await res.json()) as MemberEffectiveAccess
 }
 
@@ -147,7 +148,7 @@ export async function getOrCreateMyOrg(jwt: string): Promise<MyOrg> {
   const res = await fetchWithTimeout(`${FRONTIER_BASE}/api/v2/orgs/me`, {
     headers: authHeaders(jwt),
   });
-  if (!res.ok) throw new Error(`getOrCreateMyOrg failed: HTTP ${res.status}`);
+  if (!res.ok) throw new UserError(res.status, "", "org");
   return (await res.json()) as MyOrg;
 }
 
@@ -155,7 +156,7 @@ export async function listOrgMembers(jwt: string, orgId: number): Promise<OrgMem
   const res = await fetchWithTimeout(`${FRONTIER_BASE}/api/v2/orgs/${orgId}/members`, {
     headers: authHeaders(jwt),
   });
-  if (!res.ok) throw new Error(`listOrgMembers failed: HTTP ${res.status}`);
+  if (!res.ok) throw new UserError(res.status, "", "org");
   return ((await res.json()) as { members: OrgMember[] }).members;
 }
 
@@ -168,8 +169,8 @@ export async function addOrgMember(
     body: JSON.stringify({ username, role }),
   });
   if (!res.ok) {
-    const text = await res.text();
-    throw new Error(`addOrgMember failed: HTTP ${res.status} — ${text}`);
+    const text = await res.text().catch(() => "");
+    throw new UserError(res.status, text, "org");
   }
   return (await res.json()) as OrgMember;
 }
@@ -182,8 +183,8 @@ export async function removeOrgMember(
     headers: authHeaders(jwt),
   });
   if (!res.ok) {
-    const text = await res.text();
-    throw new Error(`removeOrgMember failed: HTTP ${res.status} — ${text}`);
+    const text = await res.text().catch(() => "");
+    throw new UserError(res.status, text, "org");
   }
 }
 
@@ -194,7 +195,7 @@ export async function listOrgMemberProjects(
     `${FRONTIER_BASE}/api/v2/orgs/${orgId}/members/${userId}/projects`,
     { headers: authHeaders(jwt) }
   );
-  if (!res.ok) throw new Error(`listOrgMemberProjects failed: HTTP ${res.status}`);
+  if (!res.ok) throw new UserError(res.status, "", "org");
   return ((await res.json()) as { projects: OrgMemberProject[] }).projects;
 }
 
@@ -212,7 +213,7 @@ export async function listPendingOrgInvites(
     headers: authHeaders(jwt),
   });
   if (res.status === 403) return null;
-  if (!res.ok) throw new Error(`listPendingOrgInvites failed: HTTP ${res.status}`);
+  if (!res.ok) throw new UserError(res.status, "", "org");
   return ((await res.json()) as { invites: PendingOrgInvite[] }).invites;
 }
 
@@ -234,7 +235,7 @@ export async function revokeProjectInvite(
     { method: "DELETE", headers: authHeaders(jwt) }
   );
   if (!res.ok) {
-    throw new Error(`revokeProjectInvite failed: HTTP ${res.status}`);
+    throw new UserError(res.status, "", "invite");
   }
   return ((await res.json()) as { removed: boolean }).removed;
 }

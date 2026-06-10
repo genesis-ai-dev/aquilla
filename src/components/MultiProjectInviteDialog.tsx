@@ -13,6 +13,7 @@ import {
 } from "@/lib/frontier/roles"
 import { addProjectMember, lookupUser } from "@/lib/frontier/members"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
+import { toUserFacingError } from "@/lib/errors/user-error"
 import { UsernameTypeahead, type RecipientValue } from "@/components/UsernameTypeahead"
 import type { CloudProjectSummary } from "@/lib/sync/cloud-projects"
 
@@ -113,14 +114,14 @@ export function MultiProjectInviteDialog({
         if (r.status === "fulfilled") {
           successes[id] = "ok"
         } else {
-          errors[id] = r.reason instanceof Error ? r.reason.message : String(r.reason)
+          errors[id] = toUserFacingError(r.reason, "project").message
         }
       })
       setPerProjectError(errors)
       setDone(successes)
       if (Object.keys(successes).length > 0) onSuccess?.()
     } catch (err) {
-      setTopError(err instanceof Error ? err.message : "Invite failed.")
+      setTopError(toUserFacingError(err, "project").message)
     } finally {
       setBusy(false)
     }

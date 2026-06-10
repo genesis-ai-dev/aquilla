@@ -204,6 +204,7 @@ export function ExportDialog({
     | { kind: "busy"; msg: string }
     | { kind: "error"; msg: string }
     | { kind: "ok"; msg: string }
+    | { kind: "ok-lossy"; msg: string; lossyVerseCount: number }
   >({ kind: "idle" })
 
   const selectedFormat = FORMAT_OPTIONS.find((f) => f.id === format)!
@@ -243,8 +244,18 @@ export function ExportDialog({
         } else {
           const name = activeFileName ?? "export"
           const downloadName = /\.(sfm|usfm)$/i.test(name) ? name : `${name}.SFM`
-          await downloadSourceFile({ projectId, fileId: activeFileId, downloadName, getToken })
-          setStatus({ kind: "ok", msg: `Exported ${downloadName}` })
+          // FRO-276: read lossy-verse count from response header.
+          const result = await downloadSourceFile({ projectId, fileId: activeFileId, downloadName, getToken })
+          const lossyCount = result.lossyVerseCount
+          if (lossyCount !== null && lossyCount > 0) {
+            setStatus({
+              kind: "ok-lossy",
+              msg: `Exported ${downloadName}`,
+              lossyVerseCount: lossyCount,
+            })
+          } else {
+            setStatus({ kind: "ok", msg: `Exported ${downloadName}` })
+          }
         }
       } else if (format === "docx") {
         // FRO-233: DOCX round-trip export. Fetch the raw DOCX side-car from the
@@ -520,7 +531,7 @@ export function ExportDialog({
               "flex items-start gap-2 rounded-xl px-3 py-2.5 text-sm " +
               (status.kind === "error"
                 ? "bg-destructive/10 text-destructive"
-                : status.kind === "ok"
+                : status.kind === "ok" || status.kind === "ok-lossy"
                   ? "bg-green-50 dark:bg-green-950/30 text-green-700 dark:text-green-400"
                   : "bg-muted/60 text-muted-foreground")
             }
@@ -528,13 +539,23 @@ export function ExportDialog({
             {status.kind === "busy" && (
               <Loader2 className="mt-0.5 h-3.5 w-3.5 shrink-0 animate-spin" aria-hidden="true" />
             )}
-            {status.kind === "ok" && (
+            {(status.kind === "ok" || status.kind === "ok-lossy") && (
               <CheckCircle2 className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
             )}
             {status.kind === "error" && (
               <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
             )}
-            <span>{status.msg}</span>
+            <span className="flex flex-col gap-1">
+              <span>{status.msg}</span>
+              {status.kind === "ok-lossy" && (
+                <span className="flex items-start gap-1 text-amber-600 dark:text-amber-400 text-xs font-medium">
+                  <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" aria-hidden="true" />
+                  {status.lossyVerseCount === 1
+                    ? "1 verse contained footnotes, poetry, or character markers in the source USFM — its structure is replaced by plain translated text."
+                    : `${status.lossyVerseCount} verses contained footnotes, poetry, or character markers in the source USFM — their structure is replaced by plain translated text.`}
+                </span>
+              )}
+            </span>
           </div>
         )}
 

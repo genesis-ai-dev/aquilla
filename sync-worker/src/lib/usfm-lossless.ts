@@ -229,6 +229,44 @@ export function serializeUsfmLossless(
   return parts.join("")
 }
 
+/** Return true when the verse text span contains intra-verse USFM markers
+ *  that plain-text cell replacement will silently drop.
+ *
+ *  Mirrors src/lib/parsers/usfm-lossless.ts — keep in sync.
+ *
+ *  Detects:
+ *  1. Line-start markers inside the span (\q, \q1-4, \p, \m, \b, \pi, \li, etc.)
+ *  2. Inline / mid-line markers (\f…\f*, \x…\x*, \wj, \nd, \add, \w, \rb, etc.)
+ *
+ *  Both tests fire on the raw verse text string (the `text` field of UsfmVerse),
+ *  which the parser captures as everything between the verse number and the next
+ *  verse-terminating marker. */
+export function hasIntraVerseMarkers(verseText: string): boolean {
+  // Line-start markers inside the verse span
+  if (/(?:^|\n)\\[a-z]+\d*/.test(verseText)) return true
+  // Inline / mid-line markers
+  if (/\\./.test(verseText)) return true
+  return false
+}
+
+/** Count the number of translated verses in `overrides` whose original span
+ *  (from `doc.verses`) contains intra-verse markers that the plain-text
+ *  substitution will drop.  Returns 0 when no overrides are given. */
+export function countLossyVerses(
+  doc: UsfmDocument,
+  overrides: Map<string, string> | undefined,
+): number {
+  if (!overrides || overrides.size === 0) return 0
+  let count = 0
+  for (const verse of doc.verses) {
+    const override = overrides.get(verse.ref)
+    if (override !== undefined && override !== "" && hasIntraVerseMarkers(verse.text)) {
+      count++
+    }
+  }
+  return count
+}
+
 export function stripBom(s: string): string {
   return s.startsWith(BOM) ? s.slice(1) : s
 }

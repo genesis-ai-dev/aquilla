@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest"
 import {
   parseUsfmLossless,
   serializeUsfmLossless,
+  hasIntraVerseMarkers,
   stripBom,
 } from "./usfm-lossless"
 
@@ -205,6 +206,43 @@ describe("serializeUsfmLossless", () => {
     expect(out).toContain("\\mt1 El Génesis")
     expect(out).toContain("\\s La Creación")
     expect(out).toContain("\\v 1 In the beginning.")
+  })
+})
+
+describe("hasIntraVerseMarkers (FRO-276)", () => {
+  it("returns false for plain prose verse text", () => {
+    expect(hasIntraVerseMarkers("In the beginning God created the heavens and the earth.")).toBe(false)
+    expect(hasIntraVerseMarkers("The earth was without form.\n")).toBe(false)
+  })
+
+  it("detects inline footnotes (\\f...\\f*)", () => {
+    expect(hasIntraVerseMarkers("...\\f + \\fr 1:4 \\ft (Ruth 4:19,20)\\f*\n")).toBe(true)
+  })
+
+  it("detects inline cross-references (\\x...\\x*)", () => {
+    expect(hasIntraVerseMarkers("some text \\x - \\xo 1:1 \\xt Gen 1:1\\x*")).toBe(true)
+  })
+
+  it("detects poetry continuation markers on their own lines", () => {
+    // verse text captured by parser includes the \q1/\q2 lines
+    const poeticVerse = "Blessed is the man\n\\q1 who walks not in the counsel of the wicked\n\\q2 nor stands in the way of sinners"
+    expect(hasIntraVerseMarkers(poeticVerse)).toBe(true)
+  })
+
+  it("detects paragraph breaks inside a verse (\\p, \\m, \\b)", () => {
+    expect(hasIntraVerseMarkers("first line\n\\p second paragraph\n")).toBe(true)
+    expect(hasIntraVerseMarkers("line one\n\\b\n")).toBe(true)
+  })
+
+  it("detects character-level markers (\\wj, \\nd, \\add)", () => {
+    expect(hasIntraVerseMarkers("He said, \\wj Come to me.\\wj*")).toBe(true)
+    expect(hasIntraVerseMarkers("The \\nd Lord\\nd* your God.")).toBe(true)
+    expect(hasIntraVerseMarkers("\\add (added text)\\add*")).toBe(true)
+  })
+
+  it("returns false for a verse that is only whitespace / newlines", () => {
+    expect(hasIntraVerseMarkers("\n")).toBe(false)
+    expect(hasIntraVerseMarkers("")).toBe(false)
   })
 })
 

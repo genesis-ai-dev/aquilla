@@ -22,6 +22,7 @@ import { AiModelConsentDialog } from "@/components/AiModelConsentDialog"
 import { AiModelDownloadChip } from "@/components/AiModelDownloadChip"
 import { AudioBulkProgressBanner } from "@/components/AudioBulkProgressBanner"
 import { PrivateModeBanner } from "@/components/PrivateModeBanner"
+import { SessionExpiredBanner } from "@/components/SessionExpiredBanner"
 import { VersionBadge } from "@/components/VersionBadge"
 import { hydratePrefetchStatus } from "@/lib/audio/prefetch"
 import { probeOpfsAvailability } from "@/lib/storage/opfs-availability"
@@ -116,6 +117,8 @@ export default function App() {
   return (
     <SyncingProvider>
       <PrivateModeBanner />
+      {/* FRO-293: session-expiry banner — must be inside Router (uses useLocation) */}
+      <SessionExpiredBanner />
       <SyncFreezeOverlay />
       <OrgProvider>
         <OutboxProvider>

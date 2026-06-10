@@ -1,6 +1,8 @@
 import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from "react"
 import { listMyOrgs, type OrgSummary } from "@/lib/frontier/orgs"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
+import { UserError } from "@/lib/errors/user-error"
+import { notifySessionExpired } from "@/lib/errors/session-expired-signal"
 
 const STORAGE_KEY = "org:active"
 
@@ -38,6 +40,9 @@ export function OrgProvider({ children }: { children: ReactNode }) {
       setActiveOrgId((cur) => (cur != null && list.some((o) => o.id === cur) ? cur : list[0]?.id ?? null))
       return list
     } catch (e) {
+      if (e instanceof UserError && e.category === "session-expired") {
+        notifySessionExpired()
+      }
       setError(e instanceof Error ? e.message : String(e))
       return []
     } finally {

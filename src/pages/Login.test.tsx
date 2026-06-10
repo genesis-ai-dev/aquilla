@@ -152,3 +152,70 @@ describe("Login page — forgot password flow", () => {
     expect(screen.getByLabelText(/aquilla username or email/i)).toBeInTheDocument()
   })
 })
+
+// FRO-293: ?next= param — post-login navigation returns to the originating route
+describe("Login page — next param", () => {
+  it("navigates to ?next= path after successful login", async () => {
+    mockLogin.mockResolvedValue({ username: "alice", jwt: "tok" })
+
+    render(
+      <MemoryRouter initialEntries={["/login?next=%2Fprojects"]}>
+        <Routes>
+          <Route path="/login" element={<Login />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    fireEvent.change(screen.getByLabelText(/aquilla username or email/i), {
+      target: { value: "alice" },
+    })
+    fireEvent.change(screen.getByLabelText("Password"), {
+      target: { value: "secret" },
+    })
+    fireEvent.click(screen.getByRole("button", { name: /^sign in$/i }))
+
+    await waitFor(() => expect(mockLogin).toHaveBeenCalledWith("alice", "secret"))
+    // Should navigate to /projects (the decoded ?next= value)
+    expect(navigate).toHaveBeenCalledWith("/projects", { replace: true })
+  })
+
+  it("falls back to / when no ?next= is present", async () => {
+    mockLogin.mockResolvedValue({ username: "alice", jwt: "tok" })
+    renderLogin() // uses /login with no search params
+
+    fireEvent.change(screen.getByLabelText(/aquilla username or email/i), {
+      target: { value: "alice" },
+    })
+    fireEvent.change(screen.getByLabelText("Password"), {
+      target: { value: "secret" },
+    })
+    fireEvent.click(screen.getByRole("button", { name: /^sign in$/i }))
+
+    await waitFor(() => expect(mockLogin).toHaveBeenCalledWith("alice", "secret"))
+    expect(navigate).toHaveBeenCalledWith("/", { replace: true })
+  })
+
+  it("ignores external ?next= values to prevent open-redirect", async () => {
+    mockLogin.mockResolvedValue({ username: "alice", jwt: "tok" })
+
+    render(
+      <MemoryRouter initialEntries={["/login?next=https%3A%2F%2Fevil.example.com"]}>
+        <Routes>
+          <Route path="/login" element={<Login />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    fireEvent.change(screen.getByLabelText(/aquilla username or email/i), {
+      target: { value: "alice" },
+    })
+    fireEvent.change(screen.getByLabelText("Password"), {
+      target: { value: "secret" },
+    })
+    fireEvent.click(screen.getByRole("button", { name: /^sign in$/i }))
+
+    await waitFor(() => expect(mockLogin).toHaveBeenCalledWith("alice", "secret"))
+    // Must NOT navigate to the external URL — falls back to /
+    expect(navigate).toHaveBeenCalledWith("/", { replace: true })
+  })
+})

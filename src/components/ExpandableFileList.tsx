@@ -33,7 +33,8 @@ interface Props {
   onSelectFile: (fileId: string) => void
   onRename: (fileId: string, newName: string) => void
   onMove: (fileId: string) => void
-  onDelete: (fileId: string) => void
+  /** FRO-271: Optional — pass undefined to hide delete for roles below project_lead (500). */
+  onDelete?: (fileId: string) => void
   onApplySuggestion?: (fileId: string) => void
   onRenameCorpus?: (oldMarker: string, newMarker: string) => void
   /**
@@ -254,7 +255,7 @@ export function ExpandableFileList({
             onClose={() => setMenu(null)}
             onRename={() => setEditingFileId(menu.fileId)}
             onMove={() => onMove(menu.fileId)}
-            onDelete={() => onDelete(menu.fileId)}
+            onDelete={onDelete ? () => onDelete(menu.fileId) : undefined}
             onExportSource={canExportFile ? () => exportFile(menuFile!) : undefined}
           />
         )

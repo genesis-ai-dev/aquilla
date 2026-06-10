@@ -691,6 +691,9 @@ projects.delete("/:projectId/members/:userId", authMiddleware, async (c) => {
 
 // ──────────────────────────────────────────────────────────────────────────
 // DELETE /api/v2/projects/:projectId/files/:fileId — drop projection
+// FRO-271: raised from contributor(400) to project_lead(500) — this hard-
+// deletes all cells and R2 audio objects; contributors must not be able to
+// wipe data they cannot recover.
 // ──────────────────────────────────────────────────────────────────────────
 
 projects.delete("/:projectId/files/:fileId", authMiddleware, async (c) => {
@@ -699,8 +702,8 @@ projects.delete("/:projectId/files/:fileId", authMiddleware, async (c) => {
   const fileId = c.req.param("fileId") as string
 
   const role = await resolveProjectRole(c.env, user, projectId)
-  if (!role || role.level < 400) {
-    return c.json({ error: "not allowed" }, 403)
+  if (!role || role.level < 500) {
+    return c.json({ error: "project_lead+ required to delete a file" }, 403)
   }
 
   if (c.env.AQUILLA_PG) {

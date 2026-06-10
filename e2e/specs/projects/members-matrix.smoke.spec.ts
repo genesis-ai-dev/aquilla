@@ -1,16 +1,16 @@
 import { test, expect } from "../../helpers/multi-user"
 
 /**
- * Members page (/members) — Roster and Matrix view toggle.
+ * Members page (/members) — roster with expandable per-member project access.
  *
  * MembersPage.tsx renders:
  *   - h1 "Members"
- *   - View toggle: "Roster" (default) and "Matrix" buttons
- *   - Switching to Matrix renders MembersMatrixView
+ *   - MembersPanel for org role management
+ *   - MemberAccessRow list for per-project access drill-down
  *
- * This spec verifies the route loads and the view toggle works.
+ * The Matrix tab was removed (FRO-218); project access is via expandable rows.
  */
-test("members page renders and Matrix view toggle works", async ({ alice }) => {
+test("members page renders roster with expandable project access", async ({ alice }) => {
   await alice.goto("/members")
   await alice.waitForLoadState("networkidle")
 
@@ -18,17 +18,11 @@ test("members page renders and Matrix view toggle works", async ({ alice }) => {
     timeout: 10_000,
   })
 
-  // View toggle buttons are present.
-  const matrixBtn = alice.getByRole("button", { name: /Matrix/i })
-  await expect(alice.getByRole("button", { name: /Roster/i })).toBeVisible({ timeout: 5_000 })
-  await expect(matrixBtn).toBeVisible({ timeout: 5_000 })
+  // Matrix toggle is gone.
+  await expect(alice.getByRole("button", { name: /Matrix/i })).not.toBeVisible()
 
-  // Switch to Matrix view.
-  await matrixBtn.click()
-  await alice.waitForLoadState("networkidle")
-
-  // Heading still visible (no navigation occurred).
-  await expect(alice.locator("h1").filter({ hasText: /Members/i }).first()).toBeVisible({
-    timeout: 3_000,
+  // Expandable project-access section is present.
+  await expect(alice.getByText(/expand a member to see per-project roles/i)).toBeVisible({
+    timeout: 5_000,
   })
 })

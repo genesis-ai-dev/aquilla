@@ -29,12 +29,18 @@ export interface TourStep {
   placement?: "top" | "bottom" | "left" | "right"
 }
 
-const TOUR_STEPS: TourStep[] = [
+export const TOUR_STEPS: TourStep[] = [
   {
     anchor: null,
     title: "Welcome to your workspace",
     body: "This quick tour shows you where everything lives. You can skip at any time.",
     placement: undefined,
+  },
+  {
+    anchor: "org-switcher",
+    title: "Switch organizations",
+    body: "Click here to switch between organizations or create a new one.",
+    placement: "right",
   },
   {
     anchor: "nav-overview",
@@ -63,7 +69,7 @@ const TOUR_STEPS: TourStep[] = [
   {
     anchor: "account-switcher",
     title: "Your account",
-    body: "Switch organizations, sign out, or manage your profile from here.",
+    body: "Access your preferences, add another account, or sign out from here.",
     placement: "top",
   },
 ]

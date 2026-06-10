@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react"
-import { useNavigate } from "react-router-dom"
+import { Link, useNavigate } from "react-router-dom"
 import { AppShell } from "@/components/AppShell"
 import { OrgSidebar } from "./OrgSidebar"
 import { OrgBreadcrumb } from "./OrgBreadcrumb"
@@ -8,14 +8,15 @@ import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { fetchAccessibleProjectsResult, type CloudProjectSummary } from "@/lib/sync/cloud-projects"
 import { ProjectCreateDialog } from "@/components/ProjectCreateDialog"
 import type { ProjectRecord } from "@/lib/parsers/types"
+import { notifySessionExpired } from "@/lib/errors/session-expired-signal"
 
 export function ProjectsList() {
-  const { activeOrgId } = useActiveOrg()
-  const { session } = useFrontierSession()
+  const { activeOrgId, isLoading: orgLoading } = useActiveOrg()
+  const { session, loading: sessionLoading } = useFrontierSession()
   const jwt = session?.jwt ?? null
   const navigate = useNavigate()
   const [projects, setProjects] = useState<CloudProjectSummary[]>([])
-  const [loading, setLoading] = useState(true)
+  const [loading, setLoading] = useState(false)
   const [unreachable, setUnreachable] = useState(false)
 
   function loadProjects() {
@@ -32,6 +33,9 @@ export function ProjectsList() {
         } else {
           setProjects([])
           setUnreachable(result.reason === "unreachable")
+          // FRO-293: 401/403 from the projects fetch means the session is no
+          // longer valid — raise the global session-expired banner.
+          if (result.reason === "unauthorized") notifySessionExpired()
         }
       })
       .finally(() => { if (!cancelled) setLoading(false) })
@@ -48,6 +52,38 @@ export function ProjectsList() {
     navigate(`/projects/${project.id}`)
   }
 
+  // Signed-out or org-less: session finished loading but no JWT.
+  // Resolve to a clear signed-out state — never spin forever.
+  if (!sessionLoading && !orgLoading && !jwt) {
+    return (
+      <AppShell
+        sidebar={<OrgSidebar />}
+        header={
+          <div className="flex items-center justify-between pr-4">
+            <OrgBreadcrumb section="Projects" />
+          </div>
+        }
+        statusBar={null}
+        main={
+          <div className="flex h-full flex-col items-center justify-center gap-4 p-6 text-center">
+            <p className="text-lg font-medium">Sign in to see your projects</p>
+            <p className="text-sm text-muted-foreground max-w-xs">
+              Your session has ended or you are not signed in. Sign in to access your projects.
+            </p>
+            <Link
+              to={`/login?next=${encodeURIComponent("/projects")}`}
+              className="inline-flex items-center justify-center rounded-xl bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90"
+            >
+              Sign in
+            </Link>
+          </div>
+        }
+      />
+    )
+  }
+
+  const isPageLoading = sessionLoading || orgLoading || loading
+
   return (
     <AppShell
       sidebar={<OrgSidebar />}
@@ -60,7 +96,7 @@ export function ProjectsList() {
       statusBar={null}
       main={
         <div className="h-full overflow-y-auto p-6">
-          {loading ? <p className="text-sm text-muted-foreground">Loading…</p> : unreachable ? (
+          {isPageLoading ? <p className="text-sm text-muted-foreground">Loading…</p> : unreachable ? (
             <div className="flex items-center justify-between gap-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm dark:border-amber-800 dark:bg-amber-950">
               <span className="text-amber-800 dark:text-amber-200">
                 Can't reach the server — project list unavailable.

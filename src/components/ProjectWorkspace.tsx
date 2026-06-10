@@ -65,7 +65,7 @@ import {
   buildFileScopedTokenFetcher,
   buildProjectAwareMinter,
 } from "@/lib/sync/cqrs-bridge"
-import { emitTargetCellCommit, emitCellBacktranslationSet, emitFileRename } from "@/lib/sync/events-emit"
+import { emitTargetCellCommit, emitCellBacktranslationSet, emitFileRename, emitFileDelete, emitFileRestore } from "@/lib/sync/events-emit"
 import { applyPresenceFrame, applyLockClaimed, applyLockReleased } from "@/lib/sync/cell-lock-state"
 import { flushOutboxBatch } from "@/lib/sync/outbox-flush"
 import { runDiarization, type DiarizationPhase } from "@/lib/diarization/run-diarization"
@@ -99,6 +99,8 @@ import { EditorScrollProvider, useEditorScroll } from "@/context/EditorScrollCon
 import { detectSuggestions, type RenameSuggestion } from "@/lib/file-labeling/detect"
 import { renameFile, moveFileToCorpus, renameCorpus, deleteFile } from "@/lib/store/file-operations"
 import { deleteFileProjection } from "@/lib/sync/file-projection"
+import { fetchDeletedFiles } from "@/lib/sync/cells-read"
+import type { FileSummary } from "@/lib/sync/cells-read-types"
 import { Button } from "@/components/ui/button"
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
@@ -1123,6 +1125,10 @@ export function ProjectWorkspace() {
       sourceEventId: cell.sourceEventId ?? null,
       value: text,
       author,
+      // FRO-292: tag AI-generated commits so the server projection can
+      // track ai_drafted on the cell row. A human edit (no aiSuggestion)
+      // will clear it on the next commit.
+      aiSuggestion: true,
     })
     pendingCompletionEventIdRef.current.set(cell.id, eventId)
     await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
@@ -2022,6 +2028,22 @@ export function ProjectWorkspace() {
   }, [project?.files])
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null)
   const [undo, setUndo] = useState<{ renames: Array<{ fileId: string; name: string }> } | null>(null)
+  // FRO-272: soft-deleted ("Recently deleted") files fetched from the server.
+  const [deletedFiles, setDeletedFiles] = useState<FileSummary[]>([])
+  const [trashOpen, setTrashOpen] = useState(false)
+  // Fetch trash list whenever the section opens or after a delete/restore/purge.
+  const refreshDeletedFiles = useCallback(async () => {
+    if (!project?.id || !frontierSession?.jwt) return
+    try {
+      const files = await fetchDeletedFiles(project.id, frontierSession.jwt)
+      setDeletedFiles(files)
+    } catch {
+      // Non-fatal — trash section shows empty on error.
+    }
+  }, [project?.id, frontierSession?.jwt])
+  useEffect(() => {
+    if (trashOpen) void refreshDeletedFiles()
+  }, [trashOpen, refreshDeletedFiles])
 
   const applyRenames = useCallback(async (
     renames: Array<{ fileId: string; name: string }>,
@@ -2067,20 +2089,57 @@ export function ProjectWorkspace() {
     await applyRenames([{ fileId, name: newName.trim() }])
   }, [project, applyRenames])
 
+  // FRO-272: soft-delete via file.delete event. IDB removal is contingent on
+  // server ack (fixes F-E6 fire-and-forget fork). The file moves to "Recently
+  // deleted" in the trash UI; cells and audio are retained. R2 wipe deferred.
   const handleDeleteFile = useCallback(async (fileId: string) => {
     if (!project) return
-    await patchProject(project.id, (p) => deleteFile(p, fileId))
+    try {
+      await emitFileDelete({
+        projectId: project.id,
+        fileId,
+        author: currentUsername,
+      })
+      // Remove from local IDB only after the event is enqueued (server ack path).
+      await patchProject(project.id, (p) => deleteFile(p, fileId))
+    } catch (e) {
+      console.error("[delete] file.delete emit failed", e)
+      // Do not remove from local IDB if the event failed to enqueue.
+      return
+    }
     refresh()
     if (activeFileId === fileId) setActiveFileId(null)
-    // Tell identity to drop the projection rows for this file too.
-    // Best-effort: a failure here doesn't roll back the local delete — the
-    // D1 row just becomes an orphan until a future sweep.
+    if (trashOpen) void refreshDeletedFiles()
+  }, [project, currentUsername, refresh, activeFileId, setActiveFileId, trashOpen, refreshDeletedFiles])
+
+  // Restore a soft-deleted file: emit file.restore, then refresh listings.
+  const handleRestoreFile = useCallback(async (fileId: string) => {
+    if (!project) return
+    try {
+      await emitFileRestore({
+        projectId: project.id,
+        fileId,
+        author: currentUsername,
+      })
+    } catch (e) {
+      console.error("[restore] file.restore emit failed", e)
+      return
+    }
+    refresh()
+    void refreshDeletedFiles()
+  }, [project, currentUsername, refresh, refreshDeletedFiles])
+
+  // "Delete forever" — hard-delete via the existing REST endpoint (R2 wipe).
+  // Only available from the trash UI (after the file is already soft-deleted).
+  const handlePurgeFile = useCallback(async (fileId: string) => {
+    if (!project) return
     void deleteFileProjection({
       jwt: frontierSession?.jwt ?? null,
       projectId: project.id,
       fileId,
     })
-  }, [project, refresh, activeFileId, setActiveFileId, frontierSession])
+    void refreshDeletedFiles()
+  }, [project, frontierSession, refreshDeletedFiles])
 
   const handleApplySuggestions = useCallback(async (chosen: RenameSuggestion[]) => {
     if (!project || chosen.length === 0) return
@@ -2540,6 +2599,54 @@ export function ProjectWorkspace() {
               onRenameCorpus={handleRenameCorpus}
               canExportByOrgPolicy={canExportByOrgPolicy}
             />
+            {/* FRO-272: "Recently deleted" trash section (project_lead+). */}
+            {currentRoleLevel >= ROLE.PROJECT_LEAD && (
+              <div className="px-2 pb-1">
+                <button
+                  type="button"
+                  className="flex w-full items-center gap-1 rounded px-1 py-1 text-xs text-muted-foreground hover:bg-accent hover:text-foreground"
+                  onClick={() => setTrashOpen((v) => !v)}
+                  aria-expanded={trashOpen}
+                >
+                  <Trash2 className="size-3 shrink-0" />
+                  <span className="flex-1 truncate text-left">Recently deleted</span>
+                  {deletedFiles.length > 0 && (
+                    <span className="tabular-nums">{deletedFiles.length}</span>
+                  )}
+                </button>
+                {trashOpen && (
+                  <div className="mt-1 space-y-0.5">
+                    {deletedFiles.length === 0 && (
+                      <p className="px-2 py-1 text-xs text-muted-foreground">No recently deleted files.</p>
+                    )}
+                    {deletedFiles.map((f) => (
+                      <div key={f.fileId} className="flex items-center gap-1 rounded px-1 py-0.5 text-xs hover:bg-accent">
+                        <span className="flex-1 truncate text-muted-foreground">{f.name}</span>
+                        <button
+                          type="button"
+                          className="shrink-0 rounded px-1 py-0.5 text-xs hover:bg-muted"
+                          title="Restore file — cells and audio come back intact"
+                          onClick={() => void handleRestoreFile(f.fileId)}
+                        >
+                          Restore
+                        </button>
+                        <button
+                          type="button"
+                          className="shrink-0 rounded px-1 py-0.5 text-xs text-destructive hover:bg-destructive/10"
+                          title="Delete forever — permanently wipes R2 media"
+                          onClick={() => void handlePurgeFile(f.fileId)}
+                        >
+                          Delete forever
+                        </button>
+                      </div>
+                    ))}
+                    <p className="px-1 pt-1 text-[10px] leading-snug text-muted-foreground">
+                      Files are kept for 30 days. "Delete forever" permanently wipes media.
+                    </p>
+                  </div>
+                )}
+              </div>
+            )}
             {lens === "audio" && project && (
               <VoiceSidebar
                 cells={cells}
@@ -3190,6 +3297,7 @@ export function ProjectWorkspace() {
         />
       )}
       <Suspense fallback={null}>
+        {/* FRO-287 glue: existingFiles activates the re-import collision guard. */}
         <ImportDialog open={importOpen} onOpenChange={setImportOpen}
           projectId={project.id}
           username={currentUsername}
@@ -3198,7 +3306,8 @@ export function ProjectWorkspace() {
           onImported={handleImported}
           sourceCells={importSourceCells}
           ttsSettings={tts.settings}
-          onCastUpdated={(patch) => tts.saveTts(patch)} />
+          onCastUpdated={(patch) => tts.saveTts(patch)}
+          existingFiles={project.files} />
       </Suspense>
       {/* FRO-249/FRO-255 fix (Fix 4): transient notice when direction couldn't be saved project-wide */}
       {directionRoleNotice && (
@@ -3277,18 +3386,18 @@ export function ProjectWorkspace() {
         open={videoDialogOpen} onOpenChange={setVideoDialogOpen}
         current={videoAttachment} onSave={saveVideo}
       />
+      {/* FRO-272: soft-delete confirmation — file moves to "Recently deleted" (30-day retention). */}
       <ConfirmActionDialog
         open={pendingDeleteId !== null}
         onOpenChange={(v) => { if (!v) setPendingDeleteId(null) }}
-        title="Delete file"
+        title="Move file to Recently deleted"
         description={(() => {
           const f = pendingDeleteId ? project.files.find((x) => x.id === pendingDeleteId) : null
-          return f ? `Delete "${f.name}"? This permanently deletes the file's cells and all recorded audio for it. This cannot be undone.` : ""
+          return f ? `Move "${f.name}" to Recently deleted? Cells and audio are kept for 30 days. You can restore the file or permanently delete it from the Recently deleted section in the sidebar.` : ""
         })()}
-        confirmLabel="Delete"
-        checkboxLabel="I understand this permanently deletes all cells and audio for this file."
+        confirmLabel="Move to Recently deleted"
         variant="destructive"
-        onConfirm={() => { if (pendingDeleteId) handleDeleteFile(pendingDeleteId); setPendingDeleteId(null) }}
+        onConfirm={() => { if (pendingDeleteId) { void handleDeleteFile(pendingDeleteId) } setPendingDeleteId(null) }}
       />
       {moveTargetId !== null && (
         <MoveToCorpusDialog

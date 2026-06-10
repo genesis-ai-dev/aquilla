@@ -64,9 +64,21 @@ describe("GET /api/v2/orgs/:orgId/groups/:groupId", () => {
     await seedGroups()
     const res = await app.request("/api/v2/orgs/1/groups/10", { headers: authHeader(await jwtFor("wendi")) }, env)
     expect(res.status).toBe(200)
-    const body = (await res.json()) as { id: number; name: string; members: Array<{ username: string }>; projects: Array<{ id: string; name: string; grantedRoleLevel: number }> }
+    const body = (await res.json()) as { id: number; name: string; description: string | null; members: Array<{ username: string }>; projects: Array<{ id: string; name: string; grantedRoleLevel: number }> }
     expect(body.members.map((m) => m.username).sort()).toEqual(["anna", "wendi"])
     expect(body.projects).toEqual([{ id: "pa", name: "Bambara", grantedRoleLevel: 400 }])
+    // FRO-264: description must be present in the detail response (null when not set)
+    expect(Object.keys(body)).toContain("description")
+    expect(body.description).toBeNull()
+  })
+
+  it("FRO-264: returns description from group detail when set", async () => {
+    await seedGroups()
+    await env.AQUILLA_PG.prepare("UPDATE groups SET description = 'West Africa translation team' WHERE id = 10").run()
+    const res = await app.request("/api/v2/orgs/1/groups/10", { headers: authHeader(await jwtFor("wendi")) }, env)
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as { description: string | null }
+    expect(body.description).toBe("West Africa translation team")
   })
 
   it("excludes cross-org project grants from group detail", async () => {

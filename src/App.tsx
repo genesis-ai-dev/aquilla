@@ -1,6 +1,5 @@
 import { Suspense, lazy } from "react"
 import { Routes, Route } from "react-router-dom"
-import { ErrorBoundary } from "@/components/ErrorBoundary"
 import { hasAuthHintCookie } from "@/lib/frontier/session-store"
 import { OrgHome } from "@/components/org/OrgHome"
 import { ProductTourProvider } from "@/context/ProductTourContext"
@@ -23,6 +22,7 @@ import { AiModelConsentDialog } from "@/components/AiModelConsentDialog"
 import { AiModelDownloadChip } from "@/components/AiModelDownloadChip"
 import { AudioBulkProgressBanner } from "@/components/AudioBulkProgressBanner"
 import { PrivateModeBanner } from "@/components/PrivateModeBanner"
+import { SessionExpiredBanner } from "@/components/SessionExpiredBanner"
 import { VersionBadge } from "@/components/VersionBadge"
 import { hydratePrefetchStatus } from "@/lib/audio/prefetch"
 import { probeOpfsAvailability } from "@/lib/storage/opfs-availability"
@@ -115,27 +115,27 @@ function RouteLoadingFallback() {
 
 export default function App() {
   return (
-    <ErrorBoundary>
-      <SyncingProvider>
-        <PrivateModeBanner />
-        <SyncFreezeOverlay />
-        <OrgProvider>
-          <OutboxProvider>
-            {/* FRO-243: ProductTourProvider mounts once here; the tour portal
-                renders into document.body so it is route-agnostic. The context
-                value (openTour) is consumed by OrgSidebar's "Take the tour" button. */}
-            <ProductTourProvider>
-              <AppRoutes />
-            </ProductTourProvider>
-          </OutboxProvider>
-        </OrgProvider>
-        <AiModelConsentDialog />
-        <AiModelDownloadChip />
-        <AudioBulkProgressBanner />
-        <GlobalAudioShortcuts />
-        <VersionBadge />
-      </SyncingProvider>
-    </ErrorBoundary>
+    <SyncingProvider>
+      <PrivateModeBanner />
+      {/* FRO-293: session-expiry banner — must be inside Router (uses useLocation) */}
+      <SessionExpiredBanner />
+      <SyncFreezeOverlay />
+      <OrgProvider>
+        <OutboxProvider>
+          {/* FRO-243: ProductTourProvider mounts once here; the tour portal
+              renders into document.body so it is route-agnostic. The context
+              value (openTour) is consumed by OrgSidebar's "Take the tour" button. */}
+          <ProductTourProvider>
+            <AppRoutes />
+          </ProductTourProvider>
+        </OutboxProvider>
+      </OrgProvider>
+      <AiModelConsentDialog />
+      <AiModelDownloadChip />
+      <AudioBulkProgressBanner />
+      <GlobalAudioShortcuts />
+      <VersionBadge />
+    </SyncingProvider>
   )
 }
 

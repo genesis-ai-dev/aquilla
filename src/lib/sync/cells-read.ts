@@ -69,6 +69,22 @@ export async function fetchProjectFiles(
 }
 
 /**
+ * GET /api/v1/projects/:projectId/files?trash=1
+ *
+ * Returns soft-deleted (tombstoned) files for the "Recently deleted" trash UI.
+ * Requires PROJECT_LEAD+ role (same as file.delete/file.restore events).
+ */
+export async function fetchDeletedFiles(
+  projectId: string,
+  jwt: string,
+): Promise<FileSummary[]> {
+  const url = `${syncWorkerHttpOrigin()}/api/v1/projects/${encodeURIComponent(projectId)}/files?trash=1`
+  const res = await fetch(url, { headers: authHeaders(jwt) })
+  const body = await readJson<{ files: FileSummary[] }>(res)
+  return body.files
+}
+
+/**
  * GET /api/v1/projects/:projectId/files/:fileId
  *
  * One file's rollup row. 404 surfaces as `CellsReadError` with status 404.

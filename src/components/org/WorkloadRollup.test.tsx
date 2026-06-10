@@ -27,8 +27,17 @@ describe("WorkloadRollup", () => {
     expect(mockGetWorkload).toHaveBeenCalledWith("jwt", 1)
   })
 
-  it("renders nothing when the caller is not a manager (403 → caught)", async () => {
-    mockGetWorkload.mockRejectedValue(new Error("getWorkload failed: HTTP 403"))
+  it("renders nothing when the caller is not a manager (forbidden → caught silently)", async () => {
+    // Simulate what our helpers now throw: a UserError with a human message.
+    // WorkloadRollup swallows any rejection so non-manager callers see nothing.
+    mockGetWorkload.mockRejectedValue(
+      Object.assign(new Error("You don't have permission to do that for this org."), {
+        name: "UserError",
+        category: "forbidden",
+        status: 403,
+        raw: "",
+      })
+    )
     const { container } = render(<WorkloadRollup jwt="jwt" orgId={1} />)
     await waitFor(() => expect(mockGetWorkload).toHaveBeenCalled())
     expect(container).toBeEmptyDOMElement()

@@ -247,7 +247,15 @@ CREATE TABLE files (
     created_at     BIGINT,
     updated_at     BIGINT,
     meta           TEXT NOT NULL DEFAULT '{}',
-    filled_count   INTEGER NOT NULL DEFAULT 0
+    filled_count   INTEGER NOT NULL DEFAULT 0,
+    -- FRO-272: soft-delete tombstone. NULL = active; epoch-ms = tombstoned.
+    -- Cells + audio retained; R2 wipe deferred (see migration 0036).
+    deleted_at     BIGINT DEFAULT NULL,
+    -- FRO-292: target cells currently marked ai_drafted=1 (machine-drafted, not yet
+    -- human-edited or validated). Recomputed by fileCountersRecomputeStmt on every
+    -- target.cell.commit or cell.validate projection. Forward-only: 0 for all cells
+    -- predating migration 0037.
+    ai_drafted_count INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE cells (
@@ -268,6 +276,11 @@ CREATE TABLE cells (
     word_count        INTEGER NOT NULL DEFAULT 0,
     content_hash      TEXT,
     endorsement_count INTEGER NOT NULL DEFAULT 0,
+    -- FRO-292: 1 when this target cell was machine-drafted (ai_suggestion=true on the
+    -- committing event) and has not yet been human-edited or validated. Cleared to 0
+    -- by any subsequent human target.cell.commit or cell.validate. Forward-only:
+    -- historical commits without the ai_suggestion field default to 0.
+    ai_drafted        INTEGER NOT NULL DEFAULT 0,
     start_ms          BIGINT,
     end_ms            BIGINT,
     medium            TEXT,
@@ -472,6 +485,7 @@ CREATE INDEX idx_files_last_edit ON files(project_id, last_edit_at);
 CREATE INDEX idx_files_project ON files(project_id);
 CREATE INDEX idx_files_project_role ON files(project_id, role) WHERE role IS NOT NULL;
 CREATE INDEX idx_files_source_file ON files(source_file_id) WHERE source_file_id IS NOT NULL;
+CREATE INDEX idx_files_project_active ON files(project_id, deleted_at NULLS FIRST);
 CREATE INDEX idx_group_members_user ON group_members(user_id);
 CREATE INDEX idx_gpg_project ON group_project_grants(project_id);
 CREATE UNIQUE INDEX idx_groups_legacy_uuid ON groups(legacy_uuid);

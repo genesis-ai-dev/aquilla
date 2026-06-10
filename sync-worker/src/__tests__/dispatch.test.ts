@@ -31,6 +31,8 @@ async function makeAuthorized<K extends EventKind>(kind: K, role = 500) {
     'cell.audio.remove': { audioId: 'audio-1.wav' },
     'file.create': { name: 'Genesis', fileType: 'codex' },
     'file.rename': { name: 'Genesis (renamed)' },
+    'file.delete': {},
+    'file.restore': {},
     'cell.backtranslation.set': { btText: 'hello', targetEventId: 'evt-tgt-1', polished: false },
     'comment.create': { commentId: 'cmt-1', scope: { kind: 'project' }, body: 'hi', parentCommentId: null },
     'comment.edit': { commentId: 'cmt-1', body: 'updated' },
@@ -47,7 +49,7 @@ async function makeAuthorized<K extends EventKind>(kind: K, role = 500) {
     kind,
     projectId: 'proj-a',
     fileId: 'file-x',
-    cellId: kind === 'file.create' || kind === 'file.rename' ? undefined : 'cell-1',
+    cellId: kind === 'file.create' || kind === 'file.rename' || kind === 'file.delete' || kind === 'file.restore' ? undefined : 'cell-1',
     parentId: null,
     author: 'alice',
     payload: payloads[kind],
@@ -106,10 +108,10 @@ describe('dispatchEvent', () => {
     const outcome = dispatchEvent(makeNoOpD1(), authed, 9999, { updateProjection: true })
     expect(outcome.ok).toBe(true)
     if (!outcome.ok) throw new Error('unreachable')
-    // 1 events INSERT + 1 validator UPSERT + 1 validated recompute
-    // + 1 endorsement_count recompute (AD-14 pass 1) + 1 files-counter
-    // recompute (approved_count moves) = 5
-    expect(outcome.result.stmts.length).toBe(5)
+    // 1 events INSERT + 1 validator UPSERT + 1 ai_drafted clear (FRO-292)
+    // + 1 validated recompute + 1 endorsement_count recompute (AD-14 pass 1)
+    // + 1 files-counter recompute (approved_count moves) = 6
+    expect(outcome.result.stmts.length).toBe(6)
     expect(outcome.result.dirtyTables).toContain('cell_validators')
     expect(outcome.result.dirtyTables).toContain('files')
   })

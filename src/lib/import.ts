@@ -385,6 +385,15 @@ export interface ImportContext {
   onCellEnqueued?: (uploaded: number, total: number) => void
   /** Aborts the in-flight upload (dialog close / cancel). */
   signal?: AbortSignal
+  /**
+   * FRO-287: Books (or files) the user chose to skip on collision.
+   * Keys are USFM bookCodes (uppercase, e.g. "GEN") for Paratext imports, or
+   * normalised file names (lowercase trimmed) for single-file imports.
+   * `importParatextProject`, `importParatextAsTarget`, and `importFile` all
+   * honour this set — matching items are added to `skipped` with reason
+   * "skipped by user" rather than being uploaded.
+   */
+  skipKeys?: ReadonlySet<string>
 }
 
 export interface ImportFileResult {
@@ -419,11 +428,27 @@ export async function importFile(
     return { refs: [ref], speakerPairs: [] }
   }
 
+  // FRO-287: single-file skip — key is normalized file name (lowercase trimmed).
+  const fileNameKey = file.name.trim().toLowerCase()
+  if (ctx.skipKeys?.has(fileNameKey)) {
+    return { refs: [], speakerPairs: [] }
+  }
+
   const results = await parseFile(file, fileType)
   const refs: FileReference[] = []
   const speakerPairs: { cellId: string; speaker: string | undefined }[] = []
 
   for (const result of results) {
+    // FRO-287: per-result skip — key is normalized display name (for USFM parsed
+    // results the name is the book display name; fall back to bookCode key too).
+    const resultNameKey = result.name.trim().toLowerCase()
+    const resultCodeKey = result.bookCode?.toUpperCase()
+    if (
+      ctx.skipKeys?.has(resultNameKey) ||
+      (resultCodeKey && ctx.skipKeys?.has(resultCodeKey))
+    ) {
+      continue
+    }
     const { ref, speakerPairs: pairs } = await emitParsedFile(result, fileType, ctx)
     refs.push(ref)
     speakerPairs.push(...pairs)
@@ -1010,6 +1035,13 @@ export async function importParatextProject(
   let done = 0
   for (const book of project.books) {
     onProgress?.({ phase: "parse", book: book.displayName, booksDone: done, booksTotal: total })
+    // FRO-287: honour skip decisions from the collision prompt.
+    if (ctx.skipKeys?.has(book.bookId.toUpperCase())) {
+      skipped.push({ book: book.displayName, reason: "skipped by user" })
+      done++
+      onProgress?.({ phase: "save", booksDone: done, booksTotal: total })
+      continue
+    }
     try {
       const { strings } = usfmSectionToStrings(book.rawSource)
       // USFM books have no speaker tags — ignore speakerPairs.
@@ -1068,6 +1100,13 @@ export async function importParatextAsTarget(
 
   for (const plan of plans) {
     onProgress?.({ phase: "parse", book: plan.displayName, booksDone: done, booksTotal: total })
+    // FRO-287: honour skip decisions from the collision prompt.
+    if (ctx.skipKeys?.has(plan.bookId.toUpperCase())) {
+      skipped.push({ book: plan.displayName, reason: "skipped by user" })
+      done++
+      onProgress?.({ phase: "save", booksDone: done, booksTotal: total })
+      continue
+    }
     try {
       const fileId = uuidv7()
       // Source cells (reference text), chained; remember each source cell's

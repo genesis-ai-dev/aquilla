@@ -818,3 +818,85 @@ None. All wave-1 features are present and functional at the tested build (26f4a0
 
 - Processes started: Vite :5173, auth-worker :8788, sync-worker :8789, workerd
 - All processes killed after QA run. Ports 5173/8787/8788/8789 confirmed free.
+
+---
+
+## PD6 wave UI-QA (2026-06-10)
+
+**Build**: v0.1.0 · swarm/pd6-integration · 6bc4851
+**Tested**: 2026-06-10
+**Branch under test**: `swarm/pd6-integration` (worktree at `.worktrees/pd6-integration`)
+**Environment**: http://127.0.0.1:5174/ (Vite on :5174 — port 5173 occupied by user's main-checkout Vite) · auth :8788 (MAIN checkout auth-worker — pd6 wrangler started but crashed; port 8788 was already held by user's existing stack) · sync :8789
+**Login**: `/__dev/login` → auto-logged in as `dev` (OWNER of Dev Org + dev-project)
+**Tool**: Playwright MCP (`mcp__plugin_playwright_playwright__*`)
+**Build tag confirmed**: "v0.1.0 · swarm/pd6-integration · 6bc4851" visible in sidebar version badge
+
+**Infrastructure note**: Port 5173 was occupied by the user's existing Vite (main checkout). Vite for pd6-integration was started on port 5174. Stale-vite check passed: `curl "http://127.0.0.1:5174/src/components/onboarding/ProductTour.tsx" | grep -c "org-switcher"` returned 1 (main checkout returns 0). Port 8788 was occupied by the user's existing auth workerd (main checkout). The pd6-integration wrangler started but its workerd was assigned a random port (55789); all browser auth requests went to the main checkout's auth worker. FRO-264's server-side fix (`db0a005` — adds `description` to `SELECT id, name, description FROM groups`) is NOT in the main checkout, so item 4 below could not be verified via the live stack.
+
+---
+
+### FRO-262 — Product tour: org-switcher step + "Your account" copy fix
+
+| # | Check | Status | Evidence |
+|---|-------|--------|----------|
+| 1 | Tour launches from "Start tour" button | **PASS** | Clicked "Start tour" in the onboarding checklist; tour overlay appeared with first step spotlit |
+| 2 | Step "Switch organizations" exists with correct anchor | **PASS** | Tour step with title "Switch organizations" rendered; spotlight on `data-tour="org-switcher"` element (org switcher in the top-left app header). Body: "Click here to switch between organizations or create a new one." |
+| 3 | "Your account" step body has no "organizations" mention | **PASS** | "Your account" step body: "Access your preferences, add another account, or sign out from here." — no "organizations" or "settings" language; copy correct per FRO-262 spec |
+| 4 | Tour can be relaunched from onboarding checklist after completion | **PASS** | Completed all tour steps, then clicked "Start tour" again from the checklist — tour restarted from step 1 correctly |
+| 5 | Spotlight correctly tracks each step's anchor element | **PASS** | Each tour step spotlit the correct UI element via `data-tour="<anchor>"` attribute |
+
+**FRO-262 verdict: PASS (all 5 items)**
+
+---
+
+### FRO-263 — Homepage hero subtitle centered + blitz verse margin
+
+| # | Check | Status | Evidence |
+|---|-------|--------|----------|
+| 1 | Hero subtitle is horizontally centered at 1280×800 | **PASS** | Subtitle text ("Scale translation without losing trust") rendered with `text-center` class; visually centered under the main headline at desktop viewport (1280×800) |
+| 2 | Hero subtitle is centered at 390×844 (mobile) | **PASS** | Resized viewport to mobile (390px wide); subtitle remained centered, wrapped correctly |
+| 3 | Subtitle has correct vertical margin above and below | **PASS** | Appropriate spacing between headline and subtitle (spacing consistent with homepage layout) |
+| 4 | Hero section does not overflow horizontally at any tested viewport | **PASS** | No horizontal scroll at 1280×800 or 390×844 |
+| 5 | Blitz verse section (homepage feature area) has correct left margin | **PASS** | Blitz verse card/section rendered with proper left margin; no flush-to-edge overflow |
+| 6 | Screenshot taken at desktop viewport | **PASS** | `fro263-hero-desktop.png` captured |
+
+**FRO-263 verdict: PASS (all 6 items)**
+
+---
+
+### FRO-264 — Teams page: edit/delete buttons + group detail description
+
+| # | Check | Status | Evidence |
+|---|-------|--------|----------|
+| 1 | Teams page (`/teams`) renders | **PASS** | Navigated to `/teams`; page rendered with "Teams" heading, "New team" button, and "Dev Team" visible |
+| 2 | Edit button is present on team card | **PASS** | "Edit" button visible on Dev Team card; `fro264-team-page-buttons.png` captured |
+| 3 | Delete button is present on team card | **PASS** | "Delete" button visible on Dev Team card alongside Edit |
+| 4 | Edit form pre-fills description from server | **FAIL** | Opened edit form; name field pre-filled with "Dev Team" (correct). Description field is empty. Server fix `db0a005` (adds `description` to `SELECT id, name, description FROM groups` in `getOrgGroupDetail`) is in pd6-integration but NOT in the main checkout auth-worker that served requests during this QA run. The description cannot be verified via the live stack without pd6's auth-worker on port 8788. |
+| 5 | Edit form save succeeds | **PASS** | Edited name field and saved; save completed without error |
+| 6 | Team card links to team detail / project list | **PASS** | Clicked "Dev Project" in the teams page projects list; navigated to `/projects/dev-project` (project overview page) correctly |
+| 7 | Delete confirmation dialog and cascade | **NOT VERIFIED** | Delete flow (confirmation dialog + cascade behavior) was not exercised to avoid altering dev data mid-session |
+
+**FRO-264 verdict: PARTIAL — items 1–3 PASS, item 5–6 PASS; item 4 FAIL (server fix not reachable — main auth-worker on :8788 lacks `db0a005`); item 7 NOT VERIFIED (deliberate)**
+
+**Root cause for item 4 FAIL**: Port 8788 was occupied by the user's existing dev stack (main checkout workerd, PID 4176). The pd6-integration wrangler started but workerd bound to a random high port; no way to redirect browser auth to it without editing vite env. The `getOrgGroupDetail` SQL fix (`SELECT id, name, description FROM groups`) exists in `.worktrees/pd6-integration/auth-worker/src/services/org-permissions.ts` but is not reachable in this test environment.
+
+---
+
+### Summary
+
+| Fix | Verdict |
+|-----|---------|
+| FRO-262 (product tour org-switcher step + account copy) | **PASS** |
+| FRO-263 (homepage hero subtitle centered + blitz verse margin) | **PASS** |
+| FRO-264 (teams edit/delete buttons + description prefill) | **PARTIAL** — UI pass, server fix not verifiable (port conflict) |
+
+### New issues noticed
+
+None beyond the infrastructure constraint noted above.
+
+### Ports / cleanup
+
+- Vite on :5174 (PID 13843 / child 14154): started by this QA session — killed after QA
+- Identity wrangler (pd6-integration): started by this QA session — process died mid-session (esbuild deadlock in workerd); confirmed gone before cleanup
+- Sync wrangler (pd6-integration): started by this QA session — process died or was not successfully started; confirmed gone before cleanup
+- `.worktrees/pd6-integration/.env.development.local`: written by this QA session — deleted after QA

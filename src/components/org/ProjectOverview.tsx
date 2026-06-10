@@ -12,7 +12,7 @@ import { useProjectLifecycle } from "@/hooks/useProjectLifecycle"
 import { InactiveProjectBanner } from "@/components/InactiveProjectBanner"
 import { downloadProjectBundle } from "@/lib/sync/export-bundle"
 import { AssignWork } from "./AssignWork"
-import { getPortfolio, translatedPct, validatedPct, audioPct, recordedMinutes, deadlineStatus, type PortfolioProject } from "@/lib/frontier/portfolio"
+import { getPortfolio, translatedPct, validatedPct, aiDraftedPct, audioPct, recordedMinutes, deadlineStatus, type PortfolioProject } from "@/lib/frontier/portfolio"
 import { fetchProjectFiles, type FileSummary } from "@/lib/sync/cells-read"
 import { fetchSyncToken } from "@/lib/sync/sync-token"
 import { getProjectAssignments, type AssigneeWorkload } from "@/lib/sync/assignments"
@@ -75,9 +75,9 @@ function DeadlineChip({ status }: { status: "overdue" | "soon" | "ok" | null }) 
 
 // ── Stat tiles (big %) ────────────────────────────────────────────────────────
 
-function StatTile({ label, pct, colorClass }: { label: string; pct: number; colorClass: string }) {
+function StatTile({ label, pct, colorClass, tooltip }: { label: string; pct: number; colorClass: string; tooltip?: string }) {
   return (
-    <div className="flex flex-col items-center rounded-lg bg-muted/40 px-5 py-3 text-center">
+    <div className="flex flex-col items-center rounded-lg bg-muted/40 px-5 py-3 text-center" title={tooltip}>
       <p className={`text-2xl font-bold tabular-nums ${colorClass}`}>{Math.round(pct * 100)}%</p>
       <p className="mt-0.5 text-[11px] text-muted-foreground">{label}</p>
     </div>
@@ -435,6 +435,14 @@ export function ProjectOverview() {
                     {showText && (
                       <>
                         <StatTile label="Translated" pct={translatedPct(audio)} colorClass="text-amber-600" />
+                        {audio.aiDraftedCells > 0 && (
+                          <StatTile
+                            label="AI Drafted"
+                            pct={aiDraftedPct(audio)}
+                            colorClass="text-violet-600"
+                            tooltip="Cells drafted by AI (via 'Complete all') that have not yet been human-edited or validated. A human edit or validation will move them into the Translated or Validated counts. Only cells committed after this marker was introduced are tracked — earlier AI commits are indistinguishable from human edits."
+                          />
+                        )}
                         <StatTile label="Validated" pct={validatedPct(audio)} colorClass="text-emerald-600" />
                       </>
                     )}
@@ -455,6 +463,15 @@ export function ProjectOverview() {
                           fillClass="bg-amber-500"
                           suffix=" cells"
                         />
+                        {audio.aiDraftedCells > 0 && (
+                          <StatBar
+                            label="AI Drafted"
+                            value={audio.aiDraftedCells}
+                            total={audio.totalCells}
+                            fillClass="bg-violet-500"
+                            suffix=" cells"
+                          />
+                        )}
                         <StatBar
                           label="Validated"
                           value={audio.validatedCells}

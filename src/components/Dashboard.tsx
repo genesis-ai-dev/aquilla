@@ -26,6 +26,7 @@ import {
   type CloudProjectSummary,
 } from "@/lib/sync/cloud-projects"
 import { filterCloudOnly } from "@/lib/projects/dedupe-cloud"
+import { toUserFacingError } from "@/lib/errors/user-error"
 import posthog from "@/lib/posthog"
 
 type LifecycleFilter = "active" | "inactive" | "all"
@@ -186,9 +187,7 @@ export function Dashboard() {
         prev.map((p) => p.id === projectId ? { ...p, isActive: nextActive } : p),
       )
     } catch (err) {
-      setErrorToast(
-        `Couldn't update lifecycle: ${err instanceof Error ? err.message : String(err)}`,
-      )
+      setErrorToast(`Couldn't update project status: ${toUserFacingError(err, "project").message}`)
     } finally {
       setPendingLifecycleId(null)
     }

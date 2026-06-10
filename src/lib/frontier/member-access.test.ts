@@ -77,11 +77,14 @@ describe("getMemberAccess", () => {
     expect(result.projects).toHaveLength(0)
   })
 
-  it("throws on non-OK HTTP response", async () => {
+  it("throws on non-OK HTTP response (human message, not 'HTTP 403')", async () => {
     (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce(
       new Response("Forbidden", { status: 403 }),
     )
-    await expect(getMemberAccess("jwt", 1, 2)).rejects.toThrow("HTTP 403")
+    const err = await getMemberAccess("jwt", 1, 2).catch((e: unknown) => e)
+    expect(err).toBeInstanceOf(Error)
+    expect((err as Error).message).not.toMatch(/HTTP\s*403/)
+    expect((err as Error).name).toBe("UserError")
   })
 
   it("calls the correct endpoint", async () => {

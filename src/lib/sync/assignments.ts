@@ -9,6 +9,7 @@
 
 import { FRONTIER_BASE } from "../frontier/auth"
 import { fetchWithTimeout } from "../frontier/orgs"
+import { UserError } from "@/lib/errors/user-error"
 import { v7 as uuidv7 } from "uuid"
 import { buildRawEvent } from "./events-emit"
 import { fetchSyncToken } from "./sync-token"
@@ -42,7 +43,7 @@ export async function getWorkload(jwt: string, orgId: number): Promise<AssigneeW
     `${FRONTIER_BASE}/api/v2/orgs/${orgId}/assignments/workload`,
     { headers: { Authorization: `Bearer ${jwt}` } },
   )
-  if (!res.ok) throw new Error(`getWorkload failed: HTTP ${res.status}`)
+  if (!res.ok) throw new UserError(res.status, "", "org")
   return ((await res.json()) as { workload: AssigneeWorkload[] }).workload
 }
 
@@ -52,7 +53,7 @@ export async function getMyAssignments(jwt: string, projectId: string): Promise<
     `${FRONTIER_BASE}/api/v2/projects/${encodeURIComponent(projectId)}/assignments/mine`,
     { headers: { Authorization: `Bearer ${jwt}` } },
   )
-  if (!res.ok) throw new Error(`getMyAssignments failed: HTTP ${res.status}`)
+  if (!res.ok) throw new UserError(res.status, "", "project")
   return ((await res.json()) as { assignments: MyAssignment[] }).assignments
 }
 
@@ -71,7 +72,7 @@ export async function getMyAssignmentsForOrg(jwt: string, orgId: number): Promis
     `${FRONTIER_BASE}/api/v2/orgs/${orgId}/assignments/mine`,
     { headers: { Authorization: `Bearer ${jwt}` } },
   )
-  if (!res.ok) throw new Error(`getMyAssignmentsForOrg failed: HTTP ${res.status}`)
+  if (!res.ok) throw new UserError(res.status, "", "org")
   return ((await res.json()) as { assignments: MyOrgAssignment[] }).assignments
 }
 
@@ -88,7 +89,7 @@ export async function getProjectAssignments(
     `${FRONTIER_BASE}/api/v2/projects/${encodeURIComponent(projectId)}/assignments/all`,
     { headers: { Authorization: `Bearer ${jwt}` } },
   )
-  if (!res.ok) throw new Error(`getProjectAssignments failed: HTTP ${res.status}`)
+  if (!res.ok) throw new UserError(res.status, "", "project")
   return ((await res.json()) as { roster: AssigneeWorkload[] }).roster
 }
 
@@ -102,7 +103,7 @@ export async function getFileChapters(jwt: string, projectId: string, fileId: st
     `${FRONTIER_BASE}/api/v2/projects/${encodeURIComponent(projectId)}/files/${encodeURIComponent(fileId)}/chapters`,
     { headers: { Authorization: `Bearer ${jwt}` } },
   )
-  if (!res.ok) throw new Error(`getFileChapters failed: HTTP ${res.status}`)
+  if (!res.ok) throw new UserError(res.status, "", "project")
   return ((await res.json()) as { chapters: string[] }).chapters
 }
 

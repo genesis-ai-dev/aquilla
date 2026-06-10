@@ -7,6 +7,9 @@ name: Deploy Workers
 #
 # Each worker only runs if its directory changed in the push (path filter) or
 # if invoked explicitly via workflow_dispatch.
+#
+# DEVEX-1: deploy steps are ordered after their test steps in the same job,
+# so tests must pass before wrangler deploy runs.
 
 on:
   push:
@@ -58,13 +61,28 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-          cache: npm
-          cache-dependency-path: sync-worker/package-lock.json
-      - run: npm ci
+          cache: pnpm
+          cache-dependency-path: sync-worker/pnpm-lock.yaml
+
+      # M0-2: install only the worker's own dir
+      - run: pnpm install --frozen-lockfile
         working-directory: sync-worker
+
+      - name: Type-check sync-worker
+        run: pnpm run type-check
+        working-directory: sync-worker
+
+      # TEST-1/QW-5: sync-worker tests gate the deploy (DEVEX-1: tests before deploy)
+      - name: Test sync-worker
+        run: pnpm test
+        working-directory: sync-worker
+
       - name: Deploy sync-worker
         uses: cloudflare/wrangler-action@v3
         with:
@@ -79,19 +97,28 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-          cache: npm
-          cache-dependency-path: auth-worker/package-lock.json
-      - run: npm ci
+          cache: pnpm
+          cache-dependency-path: auth-worker/pnpm-lock.yaml
+
+      # M0-2: install only the worker's own dir
+      - run: pnpm install --frozen-lockfile
         working-directory: auth-worker
+
       - name: Type-check auth-worker
-        run: npm run type-check
+        run: pnpm run type-check
         working-directory: auth-worker
+
+      # DEVEX-1: tests run before deploy, gating it
       - name: Test auth-worker
-        run: npm test
+        run: pnpm test
         working-directory: auth-worker
+
       # NOTE: Postgres (Neon) is the only datastore — the D1→Neon cutover is
       # complete. Schema changes are applied by hand against Neon, NOT in CI:
       #   set -a; . ./.env; set +a
@@ -107,4 +134,3 @@ jobs:
           accountId: 6a80496d1e59948a9cbaa3c643ba81d7
           workingDirectory: auth-worker
           command: deploy ${{ github.ref == 'refs/heads/main' && ' ' || github.ref == 'refs/heads/staging' && '--env=staging' || '--env=development' }}
-

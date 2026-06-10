@@ -45,6 +45,7 @@ import { parseXliff } from "./parsers/xliff"
 import { parseTmx } from "./parsers/tmx"
 import { parseCsvBilingual } from "./parsers/csv-bilingual"
 import { parseMaculaTsv } from "./parsers/macula"
+import { parseTnTsv } from "./parsers/translation-notes"
 
 export type EBibleImportPhase = "download" | "parse" | "save"
 export interface EBibleProgress {
@@ -65,6 +66,15 @@ export interface MaculaProgress {
   /** During the "morph" phase: morph rows uploaded so far / total. */
   morphEnqueued?: number
   morphTotal?: number
+}
+
+export type TnImportPhase = "parse" | "save"
+export interface TnProgress {
+  phase: TnImportPhase
+  cellsEnqueued?: number
+  cellsTotal?: number
+  /** Number of rows skipped due to missing canonical_ref */
+  skippedCount?: number
 }
 
 /**
@@ -365,6 +375,69 @@ export async function importMacula(
       corpusMarker: sourceLanguage === "hbo" ? "OT" : "NT",
     },
   ]
+}
+
+/**
+ * Import a Translation Notes TSV file as a `translation-notes` file.
+ *
+ * Each TSV row (with a valid book/chapter/verse) becomes one cell whose
+ * `canonicalRef` is set to "<book> <chapter>:<verse>". The TN sidebar in the
+ * cell editor looks up cells by canonicalRef across all TN files in the project.
+ *
+ * Persistence choice: client-side parse + standard bulkUploadSource (same path
+ * as every other text import). No server-side migration is needed because the
+ * `canonical_ref` column is already present on the cells projection. The TN
+ * sidebar reads cells from the server's existing cells-read route, filtered
+ * client-side by `canonicalRef`. This avoids a new DB table or migration number.
+ */
+export async function importTranslationNotes(
+  file: File,
+  ctx: Pick<ImportContext, "projectId" | "author" | "getToken">,
+  onProgress?: (p: TnProgress) => void,
+): Promise<FileReference> {
+  onProgress?.({ phase: "parse" })
+
+  const text = await file.text()
+  const { strings, skippedCount } = parseTnTsv(text)
+
+  if (strings.length === 0) {
+    throw new Error(
+      "TN file parsed but no valid note rows were found — check that the first three columns are book, chapter, and verse."
+        + (skippedCount > 0 ? ` (${skippedCount} rows skipped due to missing canonical reference)` : ""),
+    )
+  }
+
+  const { cells } = buildBulkCellsWithSpeakers(strings)
+  const fileId = uuidv7()
+
+  onProgress?.({ phase: "save", cellsEnqueued: 0, cellsTotal: cells.length, skippedCount })
+
+  await bulkUploadSource({
+    projectId: ctx.projectId,
+    fileId,
+    file: {
+      id: uuidv7(),
+      name: file.name,
+      fileType: "tsv",
+      role: "source",
+      kind: "translation-notes",
+      importFormat: "tn-tsv",
+      parserVersion: "tn-tsv-v1",
+    },
+    cells,
+    getToken: ctx.getToken,
+    onProgress: (count, total) => {
+      onProgress?.({ phase: "save", cellsEnqueued: count, cellsTotal: total, skippedCount })
+    },
+  })
+
+  return {
+    id: fileId,
+    name: file.name,
+    type: "tsv",
+    createdAt: new Date().toISOString(),
+    cellCount: cells.length,
+  }
 }
 
 /**

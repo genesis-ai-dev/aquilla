@@ -11,7 +11,6 @@ import {
   quarantineOutboxEvents,
   resetOutboxConnectionForTests,
   OUTBOX_MAX_ATTEMPTS,
-  quarantineOutboxEvents,
   requeueTransientlyFailedOutboxEvents,
   stampOutboxError,
 } from "./outbox"
@@ -228,6 +227,7 @@ describe("cqrs outbox", () => {
     expect(rows[0].attempts).toBe(0) // never bumped
     expect(rows[0].lastError).toMatchObject({ status: 0, reason: "network error" })
     expect(rows[0].status).toBe("pending") // still pending
+  })
 
   // FRO-274: quarantineOutboxEvents immediately sets status=failed without
   // burning the full retry budget. peekOutboxBatch still returns the quarantined

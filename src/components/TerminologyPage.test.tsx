@@ -202,6 +202,7 @@ describe("TerminologyPage", () => {
       loading: false,
       status: "ready",
       isError: false,
+      isUnreachable: false,
       refresh: vi.fn(),
       patchSettings: mockPatchSettings,
     })
@@ -224,6 +225,7 @@ describe("TerminologyPage", () => {
       loading: false,
       status: "ready",
       isError: false,
+      isUnreachable: false,
       refresh: vi.fn(),
       patchSettings: mockPatchSettings,
     })

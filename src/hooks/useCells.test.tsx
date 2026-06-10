@@ -859,41 +859,6 @@ describe("useCells conditional refetch (M2-1)", () => {
     fetchAllMock.mockResolvedValueOnce([
       makeRow({ cellId: "c1", side: "source", value: "src" }),
       makeRow({ cellId: "c1", side: "target", value: "old" }),
-
-// ---------------------------------------------------------------------------
-// FRO-274: quarantined outbox records excluded from overlay; shadow cleared
-// ---------------------------------------------------------------------------
-describe("FRO-274: quarantined outbox filtering and shadow clear", () => {
-  // Import outbox helpers — they use fake-indexeddb from the global setup.
-  // We need to reset IDB state between tests to avoid bleed.
-  let enqueue: typeof import("@/lib/sync/outbox").enqueueOutboxEvent
-  let quarantine: typeof import("@/lib/sync/outbox").quarantineOutboxEvents
-  let resetConn: typeof import("@/lib/sync/outbox").resetOutboxConnectionForTests
-
-  beforeEach(async () => {
-    // Dynamically import so the module is fresh; reset + delete the DB.
-    const outboxMod = await import("@/lib/sync/outbox")
-    enqueue = outboxMod.enqueueOutboxEvent
-    quarantine = outboxMod.quarantineOutboxEvents
-    resetConn = outboxMod.resetOutboxConnectionForTests
-    await resetConn()
-    await new Promise<void>((resolve) => {
-      const d = indexedDB.deleteDatabase("aquilla-cqrs-outbox")
-      d.onsuccess = () => resolve()
-      d.onerror = () => resolve()
-      d.onblocked = () => resolve()
-    })
-    fetchAllMock.mockReset()
-    fetchByIdsMock.mockReset()
-    fetchByIdsMock.mockResolvedValue([])
-    sideCache = null
-  })
-
-  it("quarantined (failed) outbox record is excluded from the pending overlay", async () => {
-    // Stage rows: c1 already has a server target value.
-    fetchAllMock.mockResolvedValueOnce([
-      makeRow({ cellId: "c1", side: "source", value: "src" }),
-      makeRow({ cellId: "c1", side: "target", value: "server-value" }),
     ])
     const { result } = renderHook(() =>
       useCells({ projectId: "proj-a", fileId: "file-x", getToken, enabled: true }),
@@ -1184,7 +1149,49 @@ describe("FRO-274: quarantined outbox filtering and shadow clear", () => {
     act(() => { result.current.revalidate() })
     await waitFor(() => expect(fetchDeltaMock).toHaveBeenCalledTimes(1))
     expect(fetchDeltaMock).toHaveBeenCalledWith("p", "f", 7, "fake-jwt")
+  })
+})
 
+
+// ---------------------------------------------------------------------------
+// FRO-274: quarantined outbox records excluded from overlay; shadow cleared
+// ---------------------------------------------------------------------------
+describe("FRO-274: quarantined outbox filtering and shadow clear", () => {
+  // Import outbox helpers — they use fake-indexeddb from the global setup.
+  // We need to reset IDB state between tests to avoid bleed.
+  let enqueue: typeof import("@/lib/sync/outbox").enqueueOutboxEvent
+  let quarantine: typeof import("@/lib/sync/outbox").quarantineOutboxEvents
+  let resetConn: typeof import("@/lib/sync/outbox").resetOutboxConnectionForTests
+
+  beforeEach(async () => {
+    // Dynamically import so the module is fresh; reset + delete the DB.
+    const outboxMod = await import("@/lib/sync/outbox")
+    enqueue = outboxMod.enqueueOutboxEvent
+    quarantine = outboxMod.quarantineOutboxEvents
+    resetConn = outboxMod.resetOutboxConnectionForTests
+    await resetConn()
+    await new Promise<void>((resolve) => {
+      const d = indexedDB.deleteDatabase("aquilla-cqrs-outbox")
+      d.onsuccess = () => resolve()
+      d.onerror = () => resolve()
+      d.onblocked = () => resolve()
+    })
+    fetchAllMock.mockReset()
+    fetchByIdsMock.mockReset()
+    fetchByIdsMock.mockResolvedValue([])
+    sideCache = null
+  })
+
+  it("quarantined (failed) outbox record is excluded from the pending overlay", async () => {
+    // Stage rows: c1 already has a server target value.
+    fetchAllMock.mockResolvedValueOnce([
+      makeRow({ cellId: "c1", side: "source", value: "src" }),
+      makeRow({ cellId: "c1", side: "target", value: "server-value" }),
+    ])
+    const { result } = renderHook(() =>
+      useCells({ projectId: "proj-a", fileId: "file-x", getToken, enabled: true }),
+    )
+    await waitFor(() => expect(result.current.cells).toHaveLength(1))
     expect(result.current.cells[0].translated).toBe("server-value")
 
     // Enqueue a commit event for c1 → overlay shows the pending value.

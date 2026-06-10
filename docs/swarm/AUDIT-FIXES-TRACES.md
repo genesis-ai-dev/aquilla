@@ -13,6 +13,40 @@ Pick these up in a later wave or session. Source: docs/AUDIT-2026-06-10.md.
 - **PERF-9 retention/GC, CACHE-6 audio Range, CACHE-7 eBible mirror, RACE-10 token single-flight**: audit non-goals for now.
 - **onnxruntime-web nightly pin** (DEPS-4): needs a deliberate upgrade+test pass, not a swarm side-effect.
 
+## Agent-reported TODOs (wave 3 — aud-fix-locks)
+
+**B4 fix landed** (`swarm/aud-fix-locks` commit `1faa871`): `cell-lock-state.ts` helper module
+extracted; all three WS handlers in `ProjectWorkspace.tsx` (presence / lock.claimed /
+lock.released) now build ONE new Map per frame — no in-place mutation, no bail-out.
+RACE-5 synchrony preserved (ref assigned before setCellLockHolders). 22 tests green, tsc clean.
+
+**B4 ALSO note — reconnect wipes lock from client map (CONFIRMED, NOT fixed here):**
+
+Verified in `sync-worker/src/project-do.ts:129`: on every new WebSocket connection the DO
+unconditionally sets `this.presence.set(userId, { userId, ts: Date.now() })` — this overwrites
+any existing presence entry (including its `focusedCell`) for that userId.
+
+Consequence for lock reliability (RACE-5/M1-6):
+1. User A holds a lock on cell X. Their presence entry has `focusedCell: "cell-X"` (set by
+   `applyFocusClaim` at `project-do-handlers.ts:232`).
+2. User A's tab drops and reconnects (network blip, tab hide/show, etc.).
+3. DO line 129 overwrites A's presence entry — `focusedCell` wiped from the presence map.
+4. `broadcastPresence()` (line 136) fans out the updated roster to all other clients.
+5. Other clients receive a `presence` frame without A's `focusedCell`; their
+   `applyPresenceFrame` handler REPLACES the entire `cellLockHolders` map — A's lock entry
+   is removed from the client-side map.
+6. The lock in `this.locks` on the server is still valid (lease not expired), but no
+   `lock.claimed` re-broadcast fires. Other clients no longer see the lock. Since
+   server-side enforcement is advisory (RACE-5 accepted design), another user can now
+   commit to cell X through the gap.
+
+Recommended fix (wave-2 `aud-lock-client` scope or standalone):
+- In `project-do.ts` connect handler: preserve existing presence entry fields when setting
+  the new connection's entry — `this.presence.set(userId, { ...existing, userId, ts: now })`
+  — OR, after upsetting the presence entry, immediately re-broadcast any active locks for
+  that user via `lock.claimed` frames to all connections (including the new one) so client
+  maps are correct again. The latter also fixes the reconnecting client's own lock-map gap.
+
 ## Agent-reported TODOs (wave 1)
 
 **DEPLOY BLOCKER — `db/postgres/migrations/0034_server_seq_allocator.sql`** (project_seq_counters + chain_claims, idempotent) must be applied to LIVE NEON and the staging DB **before** deploying sync-worker, or every event write 500s (D1→Neon drift failure mode). Long-lived dev Postgres containers need it too (`applyPgSchemaIfMissing` only runs schema.sql on empty DBs). Rolling-deploy window: old workers still allocate MAX+1; collisions during the window surface as loud 500 + retry (self-heals).

@@ -2484,7 +2484,7 @@ export function ProjectWorkspace() {
                 setMoveTargetId(fileId)
                 setMoveCorpus(project.files.find((f) => f.id === fileId)?.corpusMarker ?? "")
               }}
-              onDelete={(fileId) => setPendingDeleteId(fileId)}
+              onDelete={currentRoleLevel >= ROLE.PROJECT_LEAD ? (fileId) => setPendingDeleteId(fileId) : undefined}
               onApplySuggestion={handleApplyOneSuggestion}
               onRenameCorpus={handleRenameCorpus}
               canExportByOrgPolicy={canExportByOrgPolicy}
@@ -3231,10 +3231,11 @@ export function ProjectWorkspace() {
         title="Delete file"
         description={(() => {
           const f = pendingDeleteId ? project.files.find((x) => x.id === pendingDeleteId) : null
-          return f ? `Remove "${f.name}" from this project? The underlying data is not deleted from disk.` : ""
+          return f ? `Delete "${f.name}"? This permanently deletes the file's cells and all recorded audio for it. This cannot be undone.` : ""
         })()}
         confirmLabel="Delete"
-        checkboxLabel="I understand this removes the file from the project."
+        checkboxLabel="I understand this permanently deletes all cells and audio for this file."
+        variant="destructive"
         onConfirm={() => { if (pendingDeleteId) handleDeleteFile(pendingDeleteId); setPendingDeleteId(null) }}
       />
       {moveTargetId !== null && (

@@ -8,7 +8,8 @@ interface FileActionMenuProps {
   onClose: () => void
   onRename: () => void
   onMove: () => void
-  onDelete: () => void
+  /** FRO-271: Optional — only shown for project_lead+ (level >= 500). */
+  onDelete?: () => void
   /** Optional. Present only for file types we can export back to source
    *  format with round-trip fidelity (USFM today). */
   onExportSource?: () => void
@@ -58,13 +59,17 @@ export function FileActionMenu({
           <Download className="h-3.5 w-3.5" /> Export source (.SFM)
         </button>
       )}
-      <div className="my-1 h-px bg-border" />
-      <button
-        className="flex w-full items-center gap-2 rounded px-2 py-1.5 hover:bg-destructive/10 text-destructive"
-        onClick={() => { onDelete(); onClose() }}
-      >
-        <Trash2 className="h-3.5 w-3.5" /> Delete
-      </button>
+      {onDelete && (
+        <>
+          <div className="my-1 h-px bg-border" />
+          <button
+            className="flex w-full items-center gap-2 rounded px-2 py-1.5 hover:bg-destructive/10 text-destructive"
+            onClick={() => { onDelete(); onClose() }}
+          >
+            <Trash2 className="h-3.5 w-3.5" /> Delete
+          </button>
+        </>
+      )}
     </div>,
     document.body,
   )

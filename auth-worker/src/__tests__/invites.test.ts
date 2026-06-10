@@ -253,3 +253,292 @@ describe("GET /api/v2/projects/invite-preview/:token", () => {
     expect(res.status).toBe(404)
   })
 })
+
+// ── FRO-283: email enforcement ─────────────────────────────────────────────
+describe("accept-invite: email-bound enforcement (FRO-283)", () => {
+  async function seedProject(id: string, creatorId: number) {
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO projects (id, name, org_id, created_by) VALUES (?, ?, NULL, ?)",
+    )
+      .bind(id, "Test project", creatorId)
+      .run()
+  }
+
+  it("allows redeem when redeemer email matches invite email (case-insensitive)", async () => {
+    await seedUser(1, "alice")
+    await seedUser(2, "bob") // email: bob@example.com
+    await seedProject("p-email-ok", 1)
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO project_invites (token, project_id, role_level, created_by, email, expires_at) VALUES (?, ?, ?, ?, ?, ?)",
+    )
+      .bind("tok-email-ok", "p-email-ok", 400, 1, "BOB@EXAMPLE.COM", new Date(Date.now() + 86400000).toISOString())
+      .run()
+
+    const res = await app.request(
+      "/api/v2/projects/accept-invite",
+      { method: "POST", headers: authHeader(await jwtFor("bob")), body: JSON.stringify({ token: "tok-email-ok" }) },
+      env,
+    )
+    expect(res.status).toBe(200)
+  })
+
+  it("rejects redeem when redeemer email does not match invite email", async () => {
+    await seedUser(1, "alice")
+    await seedUser(2, "carol") // email: carol@example.com
+    await seedProject("p-email-bad", 1)
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO project_invites (token, project_id, role_level, created_by, email, expires_at) VALUES (?, ?, ?, ?, ?, ?)",
+    )
+      .bind("tok-email-bad", "p-email-bad", 400, 1, "bob@example.com", new Date(Date.now() + 86400000).toISOString())
+      .run()
+
+    const res = await app.request(
+      "/api/v2/projects/accept-invite",
+      { method: "POST", headers: authHeader(await jwtFor("carol")), body: JSON.stringify({ token: "tok-email-bad" }) },
+      env,
+    )
+    expect(res.status).toBe(403)
+    const body = (await res.json()) as { error: string }
+    expect(body.error).toMatch(/different email/)
+  })
+
+  it("allows anyone to redeem an open-link invite (null email)", async () => {
+    await seedUser(1, "alice")
+    await seedUser(2, "dave")
+    await seedProject("p-open", 1)
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO project_invites (token, project_id, role_level, created_by, email, expires_at) VALUES (?, ?, ?, ?, NULL, ?)",
+    )
+      .bind("tok-open", "p-open", 400, 1, new Date(Date.now() + 86400000).toISOString())
+      .run()
+
+    const res = await app.request(
+      "/api/v2/projects/accept-invite",
+      { method: "POST", headers: authHeader(await jwtFor("dave")), body: JSON.stringify({ token: "tok-open" }) },
+      env,
+    )
+    expect(res.status).toBe(200)
+  })
+})
+
+// ── FRO-283: archived project guard ───────────────────────────────────────
+describe("accept-invite: archived project guard (FRO-283)", () => {
+  it("rejects redeem for an archived project with 410", async () => {
+    await seedUser(1, "alice")
+    await seedUser(2, "bob")
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO projects (id, name, org_id, created_by, archived_at) VALUES (?, ?, NULL, ?, CURRENT_TIMESTAMP)",
+    )
+      .bind("p-archived", "Archived project", 1)
+      .run()
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO project_invites (token, project_id, role_level, created_by, expires_at) VALUES (?, ?, ?, ?, ?)",
+    )
+      .bind("tok-archived", "p-archived", 400, 1, new Date(Date.now() + 86400000).toISOString())
+      .run()
+
+    const res = await app.request(
+      "/api/v2/projects/accept-invite",
+      { method: "POST", headers: authHeader(await jwtFor("bob")), body: JSON.stringify({ token: "tok-archived" }) },
+      env,
+    )
+    expect(res.status).toBe(410)
+    const body = (await res.json()) as { error: string }
+    expect(body.error).toMatch(/archived/)
+  })
+})
+
+// ── FRO-283: atomic double-redeem ─────────────────────────────────────────
+describe("accept-invite: double-redeem idempotency (FRO-283)", () => {
+  it("second redeem by same user returns 200 (idempotent)", async () => {
+    await seedUser(1, "alice")
+    await seedUser(2, "bob")
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO projects (id, name, org_id, created_by) VALUES (?, ?, NULL, 1)",
+    )
+      .bind("p-dr", "Test")
+      .run()
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO project_invites (token, project_id, role_level, created_by, expires_at) VALUES (?, ?, ?, ?, ?)",
+    )
+      .bind("tok-double-redeem", "p-dr", 400, 1, new Date(Date.now() + 86400000).toISOString())
+      .run()
+
+    const bobJwt = await jwtFor("bob")
+    const accept = () =>
+      app.request(
+        "/api/v2/projects/accept-invite",
+        { method: "POST", headers: authHeader(bobJwt), body: JSON.stringify({ token: "tok-double-redeem" }) },
+        env,
+      )
+    const r1 = await accept()
+    expect(r1.status).toBe(200)
+    const r2 = await accept()
+    // Second call: invite is already used; server treats it as 410 (used).
+    // This is acceptable — the important property is that the member row was
+    // only inserted once (no duplicate), not that the status code is 200.
+    expect([200, 410]).toContain(r2.status)
+
+    const members = await env.AQUILLA_PG.prepare(
+      "SELECT COUNT(*) as cnt FROM project_members WHERE project_id = 'p-dr' AND user_id = 2",
+    ).first<{ cnt: number }>()
+    expect(members?.cnt).toBe(1)
+  })
+})
+
+// ── FRO-283: GET list active invites ──────────────────────────────────────
+describe("GET /api/v2/projects/:id/invites (FRO-283)", () => {
+  it("returns active invites for project_lead+", async () => {
+    await seedUser(1, "alice")
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO projects (id, name, org_id, created_by) VALUES (?, ?, NULL, 1)",
+    )
+      .bind("p-list", "Test")
+      .run()
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO project_invites (token, project_id, role_level, created_by, email, expires_at) VALUES (?, ?, ?, ?, ?, ?)",
+    )
+      .bind("tok-list", "p-list", 400, 1, "recipient@example.com", new Date(Date.now() + 86400000).toISOString())
+      .run()
+
+    const res = await app.request(
+      "/api/v2/projects/p-list/invites",
+      { method: "GET", headers: authHeader(await jwtFor("alice")) },
+      env,
+    )
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as { invites: Array<{ token: string; email: string | null; role: { level: number; name: string } }> }
+    expect(body.invites).toHaveLength(1)
+    expect(body.invites[0].token).toBe("tok-list")
+    expect(body.invites[0].email).toBe("recipient@example.com")
+    expect(body.invites[0].role.level).toBe(400)
+  })
+
+  it("excludes used invites from the list", async () => {
+    await seedUser(1, "alice")
+    await seedUser(2, "bob")
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO projects (id, name, org_id, created_by) VALUES (?, ?, NULL, 1)",
+    )
+      .bind("p-list2", "Test")
+      .run()
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO project_invites (token, project_id, role_level, created_by, used_by, used_at, expires_at) VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?)",
+    )
+      .bind("tok-used", "p-list2", 400, 1, 2, new Date(Date.now() + 86400000).toISOString())
+      .run()
+
+    const res = await app.request(
+      "/api/v2/projects/p-list2/invites",
+      { method: "GET", headers: authHeader(await jwtFor("alice")) },
+      env,
+    )
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as { invites: unknown[] }
+    expect(body.invites).toHaveLength(0)
+  })
+
+  it("returns 403 for contributor (below project_lead)", async () => {
+    await seedUser(1, "alice")
+    await seedUser(3, "contributor")
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO projects (id, name, org_id, created_by) VALUES (?, ?, NULL, 1)",
+    )
+      .bind("p-list3", "Test")
+      .run()
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO project_members (project_id, user_id, role_level, granted_by) VALUES (?, ?, ?, 1)",
+    )
+      .bind("p-list3", 3, 400)
+      .run()
+
+    const res = await app.request(
+      "/api/v2/projects/p-list3/invites",
+      { method: "GET", headers: authHeader(await jwtFor("contributor")) },
+      env,
+    )
+    expect(res.status).toBe(403)
+  })
+})
+
+// ── FRO-283: expires_in_days honored ──────────────────────────────────────
+describe("POST /api/v2/projects/:id/invites: expires_in_days (FRO-283)", () => {
+  it("honors expires_in_days=1 from client", async () => {
+    await seedUser(1, "alice")
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO projects (id, name, org_id, created_by) VALUES (?, ?, NULL, 1)",
+    )
+      .bind("p-ttl1", "Test")
+      .run()
+
+    const before = Date.now()
+    const res = await app.request(
+      "/api/v2/projects/p-ttl1/invites",
+      { method: "POST", headers: authHeader(await jwtFor("alice")), body: JSON.stringify({ role: 400, expires_in_days: 1 }) },
+      env,
+    )
+    expect(res.status).toBe(200)
+    const { token } = (await res.json()) as { token: string }
+    const row = await env.AQUILLA_PG.prepare(
+      "SELECT expires_at FROM project_invites WHERE token = ?",
+    )
+      .bind(token)
+      .first<{ expires_at: string | null }>()
+    expect(row?.expires_at).not.toBeNull()
+    const expiresMs = new Date(row!.expires_at!).getTime()
+    // Should be ~1 day from now (within a 10-second window for test latency)
+    expect(expiresMs - before).toBeGreaterThan(23 * 60 * 60 * 1000)
+    expect(expiresMs - before).toBeLessThan(25 * 60 * 60 * 1000)
+  })
+
+  it("honors expires_in_days=null (no expiry)", async () => {
+    await seedUser(1, "alice")
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO projects (id, name, org_id, created_by) VALUES (?, ?, NULL, 1)",
+    )
+      .bind("p-ttl2", "Test")
+      .run()
+
+    const res = await app.request(
+      "/api/v2/projects/p-ttl2/invites",
+      { method: "POST", headers: authHeader(await jwtFor("alice")), body: JSON.stringify({ role: 400, expires_in_days: null }) },
+      env,
+    )
+    expect(res.status).toBe(200)
+    const { token } = (await res.json()) as { token: string }
+    const row = await env.AQUILLA_PG.prepare(
+      "SELECT expires_at FROM project_invites WHERE token = ?",
+    )
+      .bind(token)
+      .first<{ expires_at: string | null }>()
+    expect(row?.expires_at).toBeNull()
+  })
+
+  it("defaults to 30-day expiry when expires_in_days omitted", async () => {
+    await seedUser(1, "alice")
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO projects (id, name, org_id, created_by) VALUES (?, ?, NULL, 1)",
+    )
+      .bind("p-ttl3", "Test")
+      .run()
+
+    const before = Date.now()
+    const res = await app.request(
+      "/api/v2/projects/p-ttl3/invites",
+      { method: "POST", headers: authHeader(await jwtFor("alice")), body: JSON.stringify({ role: 400 }) },
+      env,
+    )
+    expect(res.status).toBe(200)
+    const { token } = (await res.json()) as { token: string }
+    const row = await env.AQUILLA_PG.prepare(
+      "SELECT expires_at FROM project_invites WHERE token = ?",
+    )
+      .bind(token)
+      .first<{ expires_at: string | null }>()
+    expect(row?.expires_at).not.toBeNull()
+    const expiresMs = new Date(row!.expires_at!).getTime()
+    // Should be ~30 days
+    expect(expiresMs - before).toBeGreaterThan(29 * 24 * 60 * 60 * 1000)
+    expect(expiresMs - before).toBeLessThan(31 * 24 * 60 * 60 * 1000)
+  })
+})

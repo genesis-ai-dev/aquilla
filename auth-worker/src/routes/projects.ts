@@ -14,6 +14,7 @@
 //   DELETE /:projectId/members/:userId    remove direct member
 //   DELETE /:projectId/files/:fileId      drop file projection (contributor+)
 //   POST   /:projectId/invites            mint share-link invite
+//   GET    /:projectId/invites            list active (unused+unexpired) invites
 //   GET    /invite-preview/:token         JoinPage prefill (public)
 //   POST   /accept-invite                 joiner redeems
 //   DELETE /:projectId/invites/:token     revoke an unused invite
@@ -746,6 +747,8 @@ projects.delete("/:projectId/files/:fileId", authMiddleware, async (c) => {
 const createInviteSchema = z.object({
   role: z.number().int().min(100).max(700).optional(),
   email: z.string().email().optional(),
+  /** Client-requested TTL in days. Null = no expiry. Omit = server default (30 days). */
+  expires_in_days: z.number().int().min(1).max(365).nullable().optional(),
 })
 
 const acceptInviteSchema = z.object({
@@ -760,7 +763,7 @@ projects.post(
   async (c) => {
     const user = c.get("user")
     const projectId = c.req.param("projectId") as string
-    const { role, email } = c.req.valid("json")
+    const { role, email, expires_in_days } = c.req.valid("json")
 
     const resolved = await resolveProjectRole(c.env, user, projectId)
     if (!resolved) {
@@ -784,7 +787,13 @@ projects.post(
     }
 
     const token = crypto.randomUUID().replace(/-/g, "")
-    const expiresAt = new Date(Date.now() + DEFAULT_INVITE_TTL_MS).toISOString()
+    // Honor client-requested TTL. null = no expiry; undefined = server default (30 days).
+    const expiresAt =
+      expires_in_days === null
+        ? null
+        : new Date(
+            Date.now() + (expires_in_days !== undefined ? expires_in_days : 30) * 24 * 60 * 60 * 1000
+          ).toISOString()
 
     try {
       await c.env.AQUILLA_PG.prepare(
@@ -833,6 +842,45 @@ projects.post(
     })
   },
 )
+
+// GET /api/v2/projects/:projectId/invites — list active (unused + unexpired) invites.
+// Requires project_lead+ role.
+projects.get("/:projectId/invites", authMiddleware, async (c) => {
+  const user = c.get("user")
+  const projectId = c.req.param("projectId") as string
+
+  const role = await resolveProjectRole(c.env, user, projectId)
+  if (!role || role.level < INVITE_MIN_ROLE) {
+    return c.json({ error: "role >= project_lead required" }, 403)
+  }
+
+  const rows = await c.env.AQUILLA_PG.prepare(
+    `SELECT token, role_level, created_at, expires_at, email
+     FROM project_invites
+     WHERE project_id = ?
+       AND used_at IS NULL
+       AND (expires_at IS NULL OR expires_at > CURRENT_TIMESTAMP)
+     ORDER BY created_at DESC`,
+  )
+    .bind(projectId)
+    .all<{
+      token: string
+      role_level: number
+      created_at: string
+      expires_at: string | null
+      email: string | null
+    }>()
+
+  return c.json({
+    invites: (rows.results ?? []).map((r) => ({
+      token: r.token,
+      role: { level: r.role_level, name: roleNameFor(r.role_level) },
+      createdAt: r.created_at,
+      expiresAt: r.expires_at,
+      email: r.email ?? null,
+    })),
+  })
+})
 
 // GET /api/v2/projects/invite-preview/:token — public, no JWT required.
 projects.get("/invite-preview/:token", async (c) => {
@@ -898,7 +946,7 @@ projects.post(
 
     const invite = await c.env.AQUILLA_PG.prepare(
       `SELECT token, project_id, role_level, created_by, created_at,
-              expires_at, used_by, used_at
+              expires_at, used_by, used_at, email
        FROM project_invites WHERE token = ?`,
     )
       .bind(token)
@@ -914,6 +962,31 @@ projects.post(
     }
     if (invite.used_at && invite.used_by !== user.id) {
       return c.json({ error: "Invite already used" }, 410)
+    }
+
+    // Email-bound invites: require the redeemer's account email to match
+    // (case-insensitive). Open-link invites (null email) are unrestricted.
+    if (
+      invite.email &&
+      invite.email.toLowerCase() !== user.email.toLowerCase()
+    ) {
+      return c.json(
+        { error: "This invite was sent to a different email address." },
+        403,
+      )
+    }
+
+    // Guard: can't join an archived project via invite.
+    const project = await c.env.AQUILLA_PG.prepare(
+      `SELECT id, archived_at FROM projects WHERE id = ?`,
+    )
+      .bind(invite.project_id)
+      .first<{ id: string; archived_at: string | null }>()
+    if (!project) {
+      return c.json({ error: "Project not found" }, 404)
+    }
+    if (project.archived_at) {
+      return c.json({ error: "Project is archived" }, 410)
     }
 
     const existing = await c.env.AQUILLA_PG.prepare(
@@ -945,15 +1018,15 @@ projects.post(
           .bind(invite.project_id, user.id, finalRole, invite.created_by)
           .run()
       }
-      if (!invite.used_at) {
-        await c.env.AQUILLA_PG.prepare(
-          `UPDATE project_invites
-           SET used_by = ?, used_at = CURRENT_TIMESTAMP
-           WHERE token = ?`,
-        )
-          .bind(user.id, token)
-          .run()
-      }
+      // Atomic stamp: only the first concurrent redeemer wins; subsequent
+      // concurrent calls lose the WHERE race and are treated as same-user re-redeem.
+      await c.env.AQUILLA_PG.prepare(
+        `UPDATE project_invites
+         SET used_by = ?, used_at = CURRENT_TIMESTAMP
+         WHERE token = ? AND used_at IS NULL`,
+      )
+        .bind(user.id, token)
+        .run()
     } catch (err) {
       console.error("[invites] accept failed:", err)
       return c.json({ error: "Failed to accept invite" }, 500)

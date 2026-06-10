@@ -88,7 +88,7 @@ export async function createServerInvite(
   try {
     const body: Record<string, unknown> = { role }
     if (email && email.trim().length > 0) body.email = email.trim()
-    // SWARM-TODO: confirm server accepts expires_in_days or equivalent TTL field.
+    // Pass expires_in_days to server (null = no expiry; omit = server default 30 days).
     if (expiresInDays !== undefined) body.expires_in_days = expiresInDays
     const res = await fetch(
       `${apiUrl}/api/v2/projects/${encodeURIComponent(projectId)}/invites`,
@@ -174,6 +174,75 @@ export async function acceptServerInvite(
   } catch (err) {
     console.warn("[invites] acceptServerInvite failed:", err)
     return null
+  }
+}
+
+// ── Active invite list + revoke ────────────────────────────────────────────
+
+export interface ActiveProjectInvite {
+  token: string
+  role: { level: number; name: string }
+  createdAt: string
+  expiresAt: string | null
+  /** Non-null when the invite was minted for a specific email. */
+  email: string | null
+}
+
+/**
+ * GET /api/v2/projects/:projectId/invites — list active (unused + unexpired) invites.
+ * Requires project_lead+ role on the project. Returns null on auth/permission error.
+ */
+export async function listProjectInvites(
+  jwt: string,
+  projectId: string,
+  apiUrl: string = AUTH_API_URL
+): Promise<ActiveProjectInvite[] | null> {
+  try {
+    const res = await fetch(
+      `${apiUrl}/api/v2/projects/${encodeURIComponent(projectId)}/invites`,
+      {
+        headers: { Authorization: `Bearer ${jwt}` },
+      }
+    )
+    if (!res.ok) {
+      console.warn(`[invites] listProjectInvites ${projectId} → HTTP ${res.status}`)
+      return null
+    }
+    const body = (await res.json()) as { invites: ActiveProjectInvite[] }
+    return body.invites
+  } catch (err) {
+    console.warn("[invites] listProjectInvites failed:", err)
+    return null
+  }
+}
+
+/**
+ * DELETE /api/v2/projects/:projectId/invites/:token — revoke an unused invite.
+ * Returns true when the invite was deleted, false on 403/404 or network error.
+ */
+export async function revokeProjectInvite(
+  jwt: string,
+  projectId: string,
+  token: string,
+  apiUrl: string = AUTH_API_URL
+): Promise<boolean> {
+  try {
+    const res = await fetch(
+      `${apiUrl}/api/v2/projects/${encodeURIComponent(projectId)}/invites/${encodeURIComponent(token)}`,
+      {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${jwt}` },
+      }
+    )
+    if (!res.ok) {
+      console.warn(`[invites] revokeProjectInvite ${token} → HTTP ${res.status}`)
+      return false
+    }
+    const body = (await res.json()) as { removed: boolean }
+    return body.removed
+  } catch (err) {
+    console.warn("[invites] revokeProjectInvite failed:", err)
+    return false
   }
 }
 

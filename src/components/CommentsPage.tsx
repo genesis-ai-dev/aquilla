@@ -10,6 +10,7 @@ import { useNavigate, useParams } from "react-router-dom"
 import {
   ArrowLeft, MessageCircle, CheckCircle, ChevronDown, ChevronRight,
   Loader2, AlertCircle, Search, SlidersHorizontal, ArrowUpRight,
+  MoreHorizontal, Pencil, Trash2,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader } from "@/components/ui/card"
@@ -25,6 +26,19 @@ import { useProject } from "@/hooks/useProject"
 import { renderCommentHtml } from "@/lib/comments/comment-helpers"
 import DOMPurify from "dompurify"
 import { useUserSearch, type UserSearchResult } from "@/hooks/useUserSearch"
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
 
 // ── Types ─────────────────────────────────────────────────────────────────
 
@@ -251,16 +265,58 @@ function MentionTextarea({
 
 // ── Single comment bubble ─────────────────────────────────────────────────
 
-function CommentBubble({ comment }: { comment: CommentRecord }) {
+interface CommentBubbleProps {
+  comment: CommentRecord
+  currentUsername?: string
+  onEdit?: (commentId: string, currentBody: string) => void
+  onDelete?: (commentId: string) => void
+}
+
+function CommentBubble({ comment, currentUsername, onEdit, onDelete }: CommentBubbleProps) {
   const isDeleted = comment.deletedAt !== null
+  const isOwn = !!currentUsername && comment.authorId === currentUsername
+  const canMutate = isOwn && !isDeleted
 
   return (
     <div className={cn("flex flex-col gap-0.5", comment.parentCommentId ? "pl-6" : "")}>
-      <div className="flex items-baseline gap-2 text-xs text-muted-foreground">
+      <div className="flex items-center gap-2 text-xs text-muted-foreground">
         <span className="font-medium text-foreground">{comment.authorLabel ?? comment.authorId}</span>
         <span>{formatTs(comment.createdAt)}</span>
         {comment.updatedAt !== comment.createdAt && (
           <span className="italic">(edited)</span>
+        )}
+        {canMutate && onEdit && onDelete && (
+          <Popover>
+            <PopoverTrigger
+              render={
+                <button
+                  type="button"
+                  className="ml-auto flex h-5 w-5 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground"
+                  aria-label="Comment actions"
+                >
+                  <MoreHorizontal className="h-3 w-3" />
+                </button>
+              }
+            />
+            <PopoverContent side="bottom" align="end" className="w-28 p-1">
+              <button
+                type="button"
+                onClick={() => onEdit(comment.commentId, comment.body)}
+                className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-xs hover:bg-muted"
+              >
+                <Pencil className="h-3 w-3" />
+                Edit
+              </button>
+              <button
+                type="button"
+                onClick={() => onDelete(comment.commentId)}
+                className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-xs text-destructive hover:bg-muted"
+              >
+                <Trash2 className="h-3 w-3" />
+                Delete
+              </button>
+            </PopoverContent>
+          </Popover>
         )}
       </div>
       {isDeleted ? (
@@ -286,13 +342,27 @@ function CommentBubble({ comment }: { comment: CommentRecord }) {
 interface ThreadProps {
   root: CommentRecord
   replies: CommentRecord[]
+  currentUsername?: string
   onResolve: (commentId: string, resolved: boolean) => void
+  onEdit: (commentId: string, body: string) => Promise<void>
+  onDelete: (commentId: string) => Promise<void>
   onNavigate?: (root: CommentRecord) => void
 }
 
-function CommentThreadCard({ root, replies, onResolve, onNavigate }: ThreadProps) {
+function CommentThreadCard({
+  root, replies, currentUsername, onResolve, onEdit, onDelete, onNavigate,
+}: ThreadProps) {
   const [open, setOpen] = useState(!root.resolved)
   const [replyText, setReplyText] = useState("")
+
+  // Inline edit state
+  const [editingId, setEditingId] = useState<string | null>(null)
+  const [editBody, setEditBody] = useState("")
+  const [isSavingEdit, setIsSavingEdit] = useState(false)
+
+  // Delete confirm state
+  const [deletingId, setDeletingId] = useState<string | null>(null)
+  const [isDeletingConfirm, setIsDeletingConfirm] = useState(false)
 
   function handleReplyKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
     if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
@@ -302,77 +372,186 @@ function CommentThreadCard({ root, replies, onResolve, onNavigate }: ThreadProps
     }
   }
 
+  function startEdit(commentId: string, currentBody: string) {
+    setEditingId(commentId)
+    setEditBody(currentBody)
+  }
+
+  async function saveEdit() {
+    if (!editingId || !editBody.trim()) return
+    setIsSavingEdit(true)
+    try {
+      await onEdit(editingId, editBody.trim())
+    } finally {
+      setIsSavingEdit(false)
+      setEditingId(null)
+      setEditBody("")
+    }
+  }
+
+  function cancelEdit() {
+    setEditingId(null)
+    setEditBody("")
+  }
+
+  function requestDelete(commentId: string) {
+    setDeletingId(commentId)
+    setIsDeletingConfirm(true)
+  }
+
+  async function confirmDelete() {
+    if (!deletingId) return
+    await onDelete(deletingId)
+    setDeletingId(null)
+    setIsDeletingConfirm(false)
+  }
+
+  function cancelDelete() {
+    setDeletingId(null)
+    setIsDeletingConfirm(false)
+  }
+
+  const allComments = [root, ...replies]
+
   return (
-    <Collapsible open={open} onOpenChange={setOpen}>
-      <Card className={cn("mb-3 overflow-hidden", root.resolved && "opacity-70")}>
-        <CardHeader className="flex flex-row items-start gap-2 space-y-0 py-2 px-3">
-          <div className="flex-1 min-w-0">
-            <div className="flex items-center gap-1.5 text-xs text-muted-foreground mb-0.5">
-              <span className="truncate">{scopeLabel(root)}</span>
-              {root.resolved && (
-                <Badge variant="secondary" className="h-4 px-1 text-[10px]">
-                  <CheckCircle className="mr-0.5 h-2.5 w-2.5" />
-                  resolved
-                </Badge>
-              )}
+    <>
+      <Dialog open={isDeletingConfirm} onOpenChange={(v) => { if (!v) cancelDelete() }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Delete comment?</DialogTitle>
+            <DialogDescription>
+              This comment will be permanently removed. This action cannot be undone.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="ghost" size="sm" onClick={cancelDelete}>Cancel</Button>
+            <Button
+              variant="destructive"
+              size="sm"
+              onClick={confirmDelete}
+            >
+              Delete
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Collapsible open={open} onOpenChange={setOpen}>
+        <Card className={cn("mb-3 overflow-hidden", root.resolved && "opacity-70")}>
+          <CardHeader className="flex flex-row items-start gap-2 space-y-0 py-2 px-3">
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-1.5 text-xs text-muted-foreground mb-0.5">
+                <span className="truncate">{scopeLabel(root)}</span>
+                {root.resolved && (
+                  <Badge variant="secondary" className="h-4 px-1 text-[10px]">
+                    <CheckCircle className="mr-0.5 h-2.5 w-2.5" />
+                    resolved
+                  </Badge>
+                )}
+              </div>
             </div>
-          </div>
-          <div className="flex items-center gap-1 shrink-0">
-            {onNavigate && root.scopeKind === "cell" && root.fileId && root.cellId && (
+            <div className="flex items-center gap-1 shrink-0">
+              {onNavigate && root.scopeKind === "cell" && root.fileId && root.cellId && (
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="h-6 px-2 text-xs"
+                  title="Go to cell in editor"
+                  onClick={() => onNavigate(root)}
+                >
+                  <ArrowUpRight className="mr-0.5 h-3 w-3" />
+                  Go to cell
+                </Button>
+              )}
               <Button
                 size="sm"
                 variant="ghost"
                 className="h-6 px-2 text-xs"
-                title="Go to cell in editor"
-                onClick={() => onNavigate(root)}
+                onClick={() => onResolve(root.commentId, !root.resolved)}
               >
-                <ArrowUpRight className="mr-0.5 h-3 w-3" />
-                Go to cell
+                {root.resolved ? "Reopen" : "Resolve"}
               </Button>
-            )}
-            <Button
-              size="sm"
-              variant="ghost"
-              className="h-6 px-2 text-xs"
-              onClick={() => onResolve(root.commentId, !root.resolved)}
-            >
-              {root.resolved ? "Reopen" : "Resolve"}
-            </Button>
-            <CollapsibleTrigger asChild>
-              <Button size="icon" variant="ghost" className="h-6 w-6">
-                {open ? (
-                  <ChevronDown className="h-3 w-3" />
-                ) : (
-                  <ChevronRight className="h-3 w-3" />
-                )}
-              </Button>
-            </CollapsibleTrigger>
-          </div>
-        </CardHeader>
-        <CollapsibleContent>
-          <CardContent className="pt-0 px-3 pb-3 flex flex-col gap-3">
-            <CommentBubble comment={root} />
-            {replies.map((r) => (
-              <CommentBubble key={r.commentId} comment={r} />
-            ))}
-            {/* Reply composer with @mention typeahead */}
-            <div className="mt-1 space-y-1.5">
-              <MentionTextarea
-                value={replyText}
-                onChange={setReplyText}
-                placeholder="Reply… (type @ to mention)"
-                rows={2}
-                onKeyDown={handleReplyKeyDown}
-              />
-              <p className="text-[10px] text-muted-foreground">
-                Replies from this view are not yet wired — open the cell in the editor to reply.
-                {/* SWARM-TODO: wire reply submission from CommentsPage when a cell-reply endpoint is available */}
-              </p>
+              <CollapsibleTrigger asChild>
+                <Button size="icon" variant="ghost" className="h-6 w-6">
+                  {open ? (
+                    <ChevronDown className="h-3 w-3" />
+                  ) : (
+                    <ChevronRight className="h-3 w-3" />
+                  )}
+                </Button>
+              </CollapsibleTrigger>
             </div>
-          </CardContent>
-        </CollapsibleContent>
-      </Card>
-    </Collapsible>
+          </CardHeader>
+          <CollapsibleContent>
+            <CardContent className="pt-0 px-3 pb-3 flex flex-col gap-3">
+              {allComments.map((c) => (
+                <div key={c.commentId}>
+                  {editingId === c.commentId ? (
+                    <div className="flex flex-col gap-1.5">
+                      <MentionTextarea
+                        value={editBody}
+                        onChange={setEditBody}
+                        placeholder="Edit comment…"
+                        rows={3}
+                        onKeyDown={(e) => {
+                          if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+                            e.preventDefault()
+                            void saveEdit()
+                          }
+                          if (e.key === "Escape") {
+                            cancelEdit()
+                          }
+                        }}
+                      />
+                      <div className="flex gap-1.5">
+                        <Button
+                          size="sm"
+                          className="h-6 px-2 text-xs"
+                          onClick={saveEdit}
+                          disabled={isSavingEdit || !editBody.trim()}
+                        >
+                          {isSavingEdit ? <Loader2 className="h-3 w-3 animate-spin" /> : "Save"}
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="h-6 px-2 text-xs"
+                          onClick={cancelEdit}
+                          disabled={isSavingEdit}
+                        >
+                          Cancel
+                        </Button>
+                      </div>
+                    </div>
+                  ) : (
+                    <CommentBubble
+                      comment={c}
+                      currentUsername={currentUsername}
+                      onEdit={startEdit}
+                      onDelete={requestDelete}
+                    />
+                  )}
+                </div>
+              ))}
+              {/* Reply composer with @mention typeahead */}
+              <div className="mt-1 space-y-1.5">
+                <MentionTextarea
+                  value={replyText}
+                  onChange={setReplyText}
+                  placeholder="Reply… (type @ to mention)"
+                  rows={2}
+                  onKeyDown={handleReplyKeyDown}
+                />
+                <p className="text-[10px] text-muted-foreground">
+                  Replies from this view are not yet wired — open the cell in the editor to reply.
+                  {/* SWARM-TODO: wire reply submission from CommentsPage when a cell-reply endpoint is available */}
+                </p>
+              </div>
+            </CardContent>
+          </CollapsibleContent>
+        </Card>
+      </Collapsible>
+    </>
   )
 }
 
@@ -524,7 +703,7 @@ export function CommentsPage() {
     )
   }, [projectId, session?.jwt])
 
-  const { comments, isLoading, isError, resolveThread, refresh } = useComments({
+  const { comments, isLoading, isError, resolveThread, editComment, deleteComment, refresh } = useComments({
     projectId: projectId ?? null,
     getToken,
     author: session?.username ?? 'unknown',
@@ -664,7 +843,10 @@ export function CommentsPage() {
               key={root.commentId}
               root={root}
               replies={repliesByParent.get(root.commentId) ?? []}
+              currentUsername={session?.username}
               onResolve={resolveThread}
+              onEdit={editComment}
+              onDelete={deleteComment}
               onNavigate={handleNavigate}
             />
           ))}

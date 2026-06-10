@@ -16,6 +16,8 @@ import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { FrontierLoginForm } from "@/components/git-import/FrontierLoginForm"
 import { FrontierSignupForm } from "@/components/git-import/FrontierSignupForm"
 import { FrontierForgotPasswordForm } from "@/components/git-import/FrontierForgotPasswordForm"
+import posthog from "@/lib/posthog"
+import { INVITE_REDEEMED } from "@/lib/analytics-events"
 
 type Phase = "initial" | "redeeming" | "error"
 type AuthMode = "login" | "signup" | "forgot"
@@ -107,11 +109,21 @@ export function JoinPage() {
     // (one row) — then fall back to the legacy single-project accept.
     const multi = await acceptMultiInvite(jwt, token)
     if (multi && multi.accepted.length > 0) {
+      posthog.capture(INVITE_REDEEMED, {
+        invite_kind: "multi",
+        project_count: multi.accepted.length,
+        project_id: multi.accepted[0].projectId,
+      })
       navigate(`/project/${multi.accepted[0].projectId}`)
       return
     }
     const single = await acceptServerInvite(jwt, token)
     if (single) {
+      posthog.capture(INVITE_REDEEMED, {
+        invite_kind: "single",
+        project_count: 1,
+        project_id: single.projectId,
+      })
       navigate(`/project/${single.projectId}`)
       return
     }

@@ -12,7 +12,7 @@
  */
 
 import { useState, type FormEvent } from "react"
-import { useNavigate } from "react-router-dom"
+import { useNavigate, useSearchParams } from "react-router-dom"
 import { Eye, EyeOff } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -25,7 +25,14 @@ type Mode = "login" | "forgot"
 
 export function Login() {
   const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
   const { login } = useFrontierSession()
+
+  // ?next= preserves the originating route so users return to where they were
+  // after signing in (e.g. /projects, /project/:id).
+  // Only honour same-origin paths (starts with "/") to prevent open-redirect.
+  const rawNext = searchParams.get("next") ?? ""
+  const next = rawNext.startsWith("/") ? rawNext : "/"
 
   const [mode, setMode] = useState<Mode>("login")
   const [username, setUsername] = useState("")
@@ -40,7 +47,7 @@ export function Login() {
     setBusy(true)
     try {
       await login(username, password)
-      navigate("/", { replace: true })
+      navigate(next, { replace: true })
     } catch (err) {
       setError(err instanceof FrontierAuthError ? err.message : "Login failed")
     } finally {

@@ -5,7 +5,10 @@ import { OrgProvider } from "@/context/OrgContext"
 import { OrgHome, activityStatus } from "./OrgHome"
 import type { PortfolioProject } from "@/lib/frontier/portfolio"
 
-vi.mock("@/hooks/useFrontierSession", () => ({ useFrontierSession: () => ({ session: { jwt: "jwt", username: "anna", createdAt: "x" }, loading: false }) }))
+// Default: signed-in. Type-cast to allow null session in signed-out tests.
+type FakeSession = { jwt: string; username: string; createdAt: string } | null
+const mockUseFrontierSession = vi.fn<[], { session: FakeSession; loading: boolean }>(() => ({ session: { jwt: "jwt", username: "anna", createdAt: "x" }, loading: false }))
+vi.mock("@/hooks/useFrontierSession", () => ({ useFrontierSession: () => mockUseFrontierSession() }))
 vi.mock("@/lib/frontier/orgs", () => ({ listMyOrgs: vi.fn(async () => [{ id: 1, name: "Come and See", role: { level: 700, name: "owner" } }]) }))
 vi.mock("@/components/AccountSwitcher", () => ({ AccountSwitcher: () => null }))
 
@@ -46,7 +49,10 @@ vi.mock("@/lib/frontier/portfolio", async (importActual) => {
 // portfolio-focused assertions below are unaffected.
 vi.mock("@/lib/sync/assignments", () => ({ getWorkload: vi.fn(async () => []) }))
 
-beforeEach(() => localStorage.clear())
+beforeEach(() => {
+  localStorage.clear()
+  mockUseFrontierSession.mockReturnValue({ session: { jwt: "jwt", username: "anna", createdAt: "x" }, loading: false })
+})
 afterEach(() => vi.restoreAllMocks())
 
 describe("OrgHome", () => {
@@ -135,6 +141,35 @@ describe("OrgHome", () => {
     })
 
     expect(screen.getByText("No matching projects.")).toBeInTheDocument()
+  })
+})
+
+// FRO-293: signed-out state — no fake-empty dashboard
+describe("OrgHome signed-out state", () => {
+  it("shows a sign-in prompt instead of zero-stat cards when there is no session", async () => {
+    // Why: a signed-out user at / must never see '0 Projects / 0% translated' cards
+    // which falsely imply the workspace is empty.
+    mockUseFrontierSession.mockReturnValue({ session: null, loading: false })
+
+    render(<MemoryRouter><OrgProvider><OrgHome /></OrgProvider></MemoryRouter>)
+
+    await waitFor(() => {
+      expect(screen.getByRole("link", { name: /sign in/i })).toBeInTheDocument()
+    })
+
+    // The stat rollup cards must not be present — they'd show meaningless zeros.
+    expect(screen.queryByText("0%")).not.toBeInTheDocument()
+    expect(screen.queryByText("Avg translated")).not.toBeInTheDocument()
+    expect(screen.queryByText("No projects in this org yet.")).not.toBeInTheDocument()
+  })
+
+  it("sign-in link on the signed-out state points to /login with next=/", async () => {
+    mockUseFrontierSession.mockReturnValue({ session: null, loading: false })
+
+    render(<MemoryRouter><OrgProvider><OrgHome /></OrgProvider></MemoryRouter>)
+
+    const link = await screen.findByRole("link", { name: /sign in/i })
+    expect(link.getAttribute("href")).toMatch(/\/login\?next=/)
   })
 })
 

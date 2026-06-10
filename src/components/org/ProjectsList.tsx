@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react"
-import { useNavigate } from "react-router-dom"
+import { Link, useNavigate } from "react-router-dom"
 import { AppShell } from "@/components/AppShell"
 import { OrgSidebar } from "./OrgSidebar"
 import { OrgBreadcrumb } from "./OrgBreadcrumb"
@@ -8,14 +8,16 @@ import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { fetchAccessibleProjects, type CloudProjectSummary } from "@/lib/sync/cloud-projects"
 import { ProjectCreateDialog } from "@/components/ProjectCreateDialog"
 import type { ProjectRecord } from "@/lib/parsers/types"
+import { UserError } from "@/lib/errors/user-error"
+import { notifySessionExpired } from "@/lib/errors/session-expired-signal"
 
 export function ProjectsList() {
-  const { activeOrgId } = useActiveOrg()
-  const { session } = useFrontierSession()
+  const { activeOrgId, isLoading: orgLoading } = useActiveOrg()
+  const { session, loading: sessionLoading } = useFrontierSession()
   const jwt = session?.jwt ?? null
   const navigate = useNavigate()
   const [projects, setProjects] = useState<CloudProjectSummary[]>([])
-  const [loading, setLoading] = useState(true)
+  const [loading, setLoading] = useState(false)
 
   useEffect(() => {
     if (!jwt || activeOrgId == null) return
@@ -23,6 +25,11 @@ export function ProjectsList() {
     setLoading(true)
     fetchAccessibleProjects(jwt, activeOrgId)
       .then((list) => { if (!cancelled) setProjects(list) })
+      .catch((err) => {
+        if (!cancelled && err instanceof UserError && err.category === "session-expired") {
+          notifySessionExpired()
+        }
+      })
       .finally(() => { if (!cancelled) setLoading(false) })
     return () => { cancelled = true }
   }, [jwt, activeOrgId])
@@ -30,6 +37,38 @@ export function ProjectsList() {
   function handleCreated(project: ProjectRecord) {
     navigate(`/projects/${project.id}`)
   }
+
+  // Signed-out or org-less: session finished loading but no JWT.
+  // Resolve to a clear signed-out state — never spin forever.
+  if (!sessionLoading && !orgLoading && !jwt) {
+    return (
+      <AppShell
+        sidebar={<OrgSidebar />}
+        header={
+          <div className="flex items-center justify-between pr-4">
+            <OrgBreadcrumb section="Projects" />
+          </div>
+        }
+        statusBar={null}
+        main={
+          <div className="flex h-full flex-col items-center justify-center gap-4 p-6 text-center">
+            <p className="text-lg font-medium">Sign in to see your projects</p>
+            <p className="text-sm text-muted-foreground max-w-xs">
+              Your session has ended or you are not signed in. Sign in to access your projects.
+            </p>
+            <Link
+              to={`/login?next=${encodeURIComponent("/projects")}`}
+              className="inline-flex items-center justify-center rounded-xl bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90"
+            >
+              Sign in
+            </Link>
+          </div>
+        }
+      />
+    )
+  }
+
+  const isPageLoading = sessionLoading || orgLoading || loading
 
   return (
     <AppShell
@@ -43,7 +82,7 @@ export function ProjectsList() {
       statusBar={null}
       main={
         <div className="h-full overflow-y-auto p-6">
-          {loading ? <p className="text-sm text-muted-foreground">Loading…</p> : (
+          {isPageLoading ? <p className="text-sm text-muted-foreground">Loading…</p> : (
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
               {projects.map((p) => (
                 <button key={p.id} onClick={() => navigate(`/projects/${p.id}`)} className="rounded-lg border p-4 text-left hover:bg-accent/40">

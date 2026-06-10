@@ -129,6 +129,10 @@ export function ImportDialog({
         }
         flushingRef.current = true
         // Flush the pending import without language overrides (skip semantics).
+        // SWARM-TODO(FRO-274): surface this as a user-visible banner ("Import
+        // couldn't be saved — copy your files and try again") once the
+        // ImportDialog report-flow agent lands (wave collisions risk). For now
+        // the error stays console-only to avoid conflicting with that refactor.
         void Promise.resolve(onImported(pendingImport.refs, pendingImport.inferredLanguages)).catch((err: unknown) => {
           console.warn("[ImportDialog] flush-on-close failed:", err)
         })
@@ -216,6 +220,8 @@ export function ImportDialog({
     }
     const captured = pendingImport
     setPendingImport(null)
+    // SWARM-TODO(FRO-274): surface this as a user-visible banner once the
+    // ImportDialog report-flow agent lands — same wave-collision concern as above.
     void Promise.resolve(onImported(captured.refs, captured.inferredLanguages)).catch((err: unknown) => {
       console.warn("[ImportDialog] skip flush failed:", err)
     })

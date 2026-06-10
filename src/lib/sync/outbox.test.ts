@@ -8,6 +8,7 @@ import {
   outboxPendingCount,
   outboxFailedCount,
   peekPendingOutboxBatch,
+  quarantineOutboxEvents,
   resetOutboxConnectionForTests,
   OUTBOX_MAX_ATTEMPTS,
 } from "./outbox"
@@ -161,5 +162,30 @@ describe("cqrs outbox", () => {
 
     const pending = await peekPendingOutboxBatch(10)
     expect(pending.map((r) => r.id)).toEqual(["e2"])
+  })
+
+  // FRO-274: quarantineOutboxEvents immediately sets status=failed without
+  // burning the full retry budget. peekOutboxBatch still returns the quarantined
+  // record (inspector visibility); peekPendingOutboxBatch excludes it so the
+  // flusher skips it.
+  it("quarantineOutboxEvents immediately moves records to failed status", async () => {
+    await enqueueOutboxEvent(sample)
+    const initial = await peekOutboxBatch(10)
+    expect(initial[0].status).toBe("pending")
+
+    await quarantineOutboxEvents(["e1"], { status: 403, reason: "forbidden" })
+
+    // peekOutboxBatch includes the failed record (inspector visibility).
+    const all = await peekOutboxBatch(10)
+    expect(all).toHaveLength(1)
+    expect(all[0].status).toBe("failed")
+    expect(all[0].lastError).toEqual({ status: 403, reason: "forbidden" })
+
+    // peekPendingOutboxBatch excludes it so the flusher advances past it.
+    const pending = await peekPendingOutboxBatch(10)
+    expect(pending).toHaveLength(0)
+
+    // outboxFailedCount reflects the quarantine.
+    expect(await outboxFailedCount()).toBe(1)
   })
 })

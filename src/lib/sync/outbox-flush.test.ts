@@ -746,6 +746,65 @@ describe("flushOutboxBatch", () => {
     expect(rows[0].status).toBe("pending") // never flipped to failed
   })
 
+  // ── AUDIT N1: deterministic whole-request 4xx must burn the retry budget ──
+
+  it("N1: a whole-request 400 burns the retry budget and quarantines at the cap (no invisible forever-loop)", async () => {
+    // RES-2 made every non-403 !res.ok status no-burn. Right for 0/5xx/timeout
+    // (transient), wrong for a deterministic 400/404/422: the same batch fails
+    // the same way forever, retried invisibly with no budget pressure. Restore
+    // the pre-RES-2 policy for 4xx so the record surfaces as `failed`.
+    await enqueueOutboxEvent(makeEvent("e1", "f1"))
+
+    const fetchMock = vi.fn().mockResolvedValue(new Response("Bad Request", { status: 400 }))
+    await flushOutboxBatch({
+      getTokenForFile: TOKEN_FN,
+      fetchImpl: fetchMock as unknown as typeof fetch,
+    })
+
+    let rows = await peekOutboxBatch(10)
+    expect(rows[0].attempts).toBe(1) // budget burned
+    expect(rows[0].lastError).toMatchObject({ status: 400 })
+
+    // Repeated deterministic 400s exhaust the budget → failed (visible in the
+    // inspector), excluded from the retry queue.
+    for (let i = 0; i < 10; i++) {
+      await flushOutboxBatch({
+        getTokenForFile: TOKEN_FN,
+        fetchImpl: fetchMock as unknown as typeof fetch,
+      })
+    }
+    rows = await peekOutboxBatch(10)
+    expect(rows[0].status).toBe("failed")
+    expect(await peekPendingOutboxBatch(10)).toHaveLength(0)
+  })
+
+  // ── AUDIT B3: AbortSignal.timeout must be feature-detected on writes ──────
+
+  it("B3: flush still POSTs on engines without AbortSignal.timeout (older WebKit)", async () => {
+    // The read path (cells-read.ts) feature-detects AbortSignal.timeout; the
+    // write path called it unconditionally, so on engines without it every
+    // flush threw BEFORE the fetch — permanently bricking all writes on
+    // browsers the read path explicitly supports.
+    await enqueueOutboxEvent(makeEvent("e1", "f1"))
+    const original = AbortSignal.timeout
+    // @ts-expect-error — deliberately simulate an engine lacking the API
+    AbortSignal.timeout = undefined
+    try {
+      const fetchMock = vi.fn().mockResolvedValue(
+        jsonResponse({ accepted: [{ id: "e1" }], rejected: [] }),
+      )
+      const result = await flushOutboxBatch({
+        getTokenForFile: TOKEN_FN,
+        fetchImpl: fetchMock as unknown as typeof fetch,
+      })
+      expect(fetchMock).toHaveBeenCalledTimes(1)
+      expect(result).toMatchObject({ posted: 1, accepted: 1, networkError: false })
+      expect(await outboxPendingCount()).toBe(0)
+    } finally {
+      AbortSignal.timeout = original
+    }
+  })
+
   // ── RES-6/M2-5: AbortSignal.timeout propagation ──────────────────────────
 
   it("RES-6: AbortError (timeout) is treated as transient — stamps error, does NOT burn budget", async () => {

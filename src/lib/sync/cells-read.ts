@@ -10,6 +10,7 @@
 // retry-able transient error (5xx) or as an auth problem (401/403).
 
 import { syncWorkerHttpOrigin } from "./sync-worker-url"
+import { timeoutSignal } from "./fetch-timeout"
 import type { CellRow, CellsPage, FileSummary } from "./cells-read-types"
 // Re-export so consumers (e.g. org/ProjectOverview) can import FileSummary from
 // the read-API module rather than reaching into cells-read-types directly.
@@ -42,14 +43,12 @@ function authHeaders(jwt: string): Record<string, string> {
 // browser's multi-minute socket timeout — soft refetches are dropped while a
 // fetch is in flight, so one wedged request blocks every later trigger. A
 // timeout rejects like a network error: callers keep the cached view and the
-// next trigger (focus, WS poke) retries. Guarded for older WebKit.
+// next trigger (focus, WS poke) retries. `timeoutSignal` is the shared
+// older-WebKit guard (see fetch-timeout.ts) used by reads and writes alike.
 const READ_TIMEOUT_MS = 15_000
-function readTimeoutSignal(): AbortSignal | undefined {
-  return typeof AbortSignal.timeout === "function" ? AbortSignal.timeout(READ_TIMEOUT_MS) : undefined
-}
 
 function fetchInit(jwt: string): RequestInit {
-  return { headers: authHeaders(jwt), signal: readTimeoutSignal() }
+  return { headers: authHeaders(jwt), signal: timeoutSignal(READ_TIMEOUT_MS) }
 }
 
 /**
@@ -210,10 +209,13 @@ export async function fetchCellsByIds(
  * pagination — typically because the caller switched files mid-stream and
  * the in-flight result is no longer wanted.
  *
- * `onMeta` (optional) fires once with the FIRST page's `maxServerSeq`. The
- * first page's watermark is the safe `?since=` cursor for the whole stream:
- * anything that lands mid-stream has a higher seq, so the next delta
- * re-fetches it (at worst re-delivering rows a later page already carried).
+ * `onMeta` (optional) fires once per page, BEFORE that page's `onPage`, with
+ * the page's `maxServerSeq`. The FIRST page's watermark is the safe `?since=`
+ * cursor for the stream: anything that lands mid-stream has a higher seq, so
+ * the next delta re-fetches it. A page-to-page difference means events landed
+ * mid-stream — and because the server paginates by offset, a row that shifted
+ * across a page boundary may have been skipped entirely (a torn snapshot), so
+ * callers must NOT mint a `?since=` cursor from such a stream (audit B2).
  */
 export async function streamFileCells(
   projectId: string,
@@ -229,7 +231,7 @@ export async function streamFileCells(
   const MAX_PAGES = 100
   for (let i = 0; i < MAX_PAGES; i++) {
     const page = await fetchFileCells(projectId, fileId, { side, cursor }, jwt)
-    if (i === 0 && onMeta) onMeta({ maxServerSeq: page.maxServerSeq })
+    if (onMeta) onMeta({ maxServerSeq: page.maxServerSeq })
     const nextCursor = page.nextCursor ?? undefined
     const isLast = nextCursor === undefined
     const cont = await onPage(page.cells, isLast)

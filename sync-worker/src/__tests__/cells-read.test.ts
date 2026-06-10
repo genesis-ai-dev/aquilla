@@ -223,3 +223,211 @@ describe("GET /api/v1/projects/:projectId/files/:fileId/cells", () => {
     expect(body.cells[0].validated).toBe(true)
   })
 })
+
+// ── Conditional reads + ?since= delta (audit M2-1 / PERF-1 / RES-1) ────────
+
+interface EventSeed {
+  id: string
+  schema_version: number
+  project_id: string
+  file_id: string | null
+  cell_id: string | null
+  kind: string
+  author: string
+  payload: string
+  client_ts: number
+  server_ts: number
+  server_seq: number
+}
+
+function makeEvent(
+  over: Partial<EventSeed> & Pick<EventSeed, "id" | "server_seq">,
+): EventSeed {
+  return {
+    schema_version: 1,
+    project_id: "proj-a",
+    file_id: "file-x",
+    cell_id: null,
+    kind: "target.cell.commit",
+    author: "alice",
+    payload: "{}",
+    client_ts: 1700000000000,
+    server_ts: 1700000000000,
+    ...over,
+  }
+}
+
+describe("conditional reads + ?since= delta", () => {
+  it("sets ETag \"<fileId>:<maxServerSeq>\" on full reads and includes maxServerSeq in the body", async () => {
+    const { db } = await makeTestDb({
+      cells: [makeCell({ cell_id: "c1", anchor_cell_id: null, event_id: "e1" })],
+      // Gaps are deliberate: server_seq is an ordering key, never a count.
+      events: [
+        makeEvent({ id: "e1", server_seq: 3, cell_id: "c1" }),
+        makeEvent({ id: "e2", server_seq: 7, cell_id: "c1" }),
+      ],
+    })
+    const token = await makeTestToken(SECRET, { projectId: "proj-a", fileId: "file-x" })
+    const req = new Request(
+      "https://w/api/v1/projects/proj-a/files/file-x/cells?side=target",
+      { headers: { Authorization: `Bearer ${token}` } },
+    )
+    const res = (await handleCellsReadRequest(req, envWith(db)))!
+    expect(res.status).toBe(200)
+    expect(res.headers.get("ETag")).toBe('"file-x:7"')
+    expect(res.headers.get("Cache-Control")).toBe("private, no-cache")
+    const body = (await res.json()) as { maxServerSeq: number }
+    expect(body.maxServerSeq).toBe(7)
+  })
+
+  it("returns 304 with no body when If-None-Match carries the current watermark", async () => {
+    const { db } = await makeTestDb({
+      cells: [makeCell({ cell_id: "c1", anchor_cell_id: null, event_id: "e1" })],
+      events: [makeEvent({ id: "e1", server_seq: 5, cell_id: "c1" })],
+    })
+    const token = await makeTestToken(SECRET, { projectId: "proj-a", fileId: "file-x" })
+    const req = new Request("https://w/api/v1/projects/proj-a/files/file-x/cells", {
+      headers: { Authorization: `Bearer ${token}`, "If-None-Match": '"file-x:5"' },
+    })
+    const res = (await handleCellsReadRequest(req, envWith(db)))!
+    expect(res.status).toBe(304)
+    expect(res.headers.get("ETag")).toBe('"file-x:5"')
+    expect(await res.text()).toBe("")
+  })
+
+  it("does not 304 a stale tag — the ETag moves when a new event lands", async () => {
+    const { db } = await makeTestDb({
+      cells: [makeCell({ cell_id: "c1", anchor_cell_id: null, event_id: "e1" })],
+      events: [makeEvent({ id: "e1", server_seq: 5, cell_id: "c1" })],
+    })
+    await db
+      .prepare(
+        "INSERT INTO events (id, schema_version, project_id, file_id, cell_id, kind, author, payload, client_ts, server_ts, server_seq) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+      )
+      .bind("e2", 1, "proj-a", "file-x", "c1", "target.cell.commit", "bob", "{}", 1, 1, 6)
+      .run()
+    const token = await makeTestToken(SECRET, { projectId: "proj-a", fileId: "file-x" })
+    const req = new Request("https://w/api/v1/projects/proj-a/files/file-x/cells", {
+      headers: { Authorization: `Bearer ${token}`, "If-None-Match": '"file-x:5"' },
+    })
+    const res = (await handleCellsReadRequest(req, envWith(db)))!
+    expect(res.status).toBe(200)
+    expect(res.headers.get("ETag")).toBe('"file-x:6"')
+  })
+
+  it("?since= returns only changed rows; a changed cellId with no row signals deletion", async () => {
+    // c3 was deleted: its delete event is in the log but its row left the
+    // projection. c2 changed after the cursor; c1 did not.
+    const { db } = await makeTestDb({
+      cells: [
+        makeCell({ cell_id: "c1", anchor_cell_id: null, event_id: "e1" }),
+        makeCell({ cell_id: "c2", anchor_cell_id: "c1", event_id: "e4", value: "v2-new" }),
+      ],
+      events: [
+        makeEvent({ id: "e1", server_seq: 1, cell_id: "c1", kind: "target.cell.create" }),
+        makeEvent({ id: "e2", server_seq: 2, cell_id: "c2", kind: "target.cell.create" }),
+        makeEvent({ id: "e3", server_seq: 3, cell_id: "c3", kind: "target.cell.create" }),
+        makeEvent({ id: "e4", server_seq: 4, cell_id: "c2" }),
+        makeEvent({ id: "e5", server_seq: 5, cell_id: "c3", kind: "target.cell.delete" }),
+      ],
+    })
+    const token = await makeTestToken(SECRET, { projectId: "proj-a", fileId: "file-x" })
+    const req = new Request(
+      "https://w/api/v1/projects/proj-a/files/file-x/cells?since=3",
+      { headers: { Authorization: `Bearer ${token}` } },
+    )
+    const res = (await handleCellsReadRequest(req, envWith(db)))!
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as {
+      delta: boolean
+      changedCellIds: string[]
+      cells: Array<{ cellId: string; value: string }>
+      maxServerSeq: number
+    }
+    expect(body.delta).toBe(true)
+    expect([...body.changedCellIds].sort()).toEqual(["c2", "c3"])
+    expect(body.cells.map((c) => c.cellId)).toEqual(["c2"])
+    expect(body.cells[0].value).toBe("v2-new")
+    expect(body.maxServerSeq).toBe(5)
+  })
+
+  it("?since= at the watermark returns an empty delta; NULL-cell_id events only move the watermark", async () => {
+    const { db } = await makeTestDb({
+      cells: [makeCell({ cell_id: "c1", anchor_cell_id: null, event_id: "e1" })],
+      events: [
+        makeEvent({ id: "e1", server_seq: 1, cell_id: "c1" }),
+        // file.rename bumps the file's max seq but touches no cells row.
+        makeEvent({ id: "e2", server_seq: 2, cell_id: null, kind: "file.rename" }),
+      ],
+    })
+    const token = await makeTestToken(SECRET, { projectId: "proj-a", fileId: "file-x" })
+    const req = new Request(
+      "https://w/api/v1/projects/proj-a/files/file-x/cells?since=1",
+      { headers: { Authorization: `Bearer ${token}` } },
+    )
+    const res = (await handleCellsReadRequest(req, envWith(db)))!
+    const body = (await res.json()) as {
+      delta: boolean
+      changedCellIds: string[]
+      cells: unknown[]
+      maxServerSeq: number
+    }
+    expect(body.delta).toBe(true)
+    expect(body.changedCellIds).toEqual([])
+    expect(body.cells).toEqual([])
+    expect(body.maxServerSeq).toBe(2)
+  })
+
+  it("delta honors the side filter but still reports the changed cellId once", async () => {
+    const { db } = await makeTestDb({
+      cells: [
+        makeCell({ cell_id: "c1", side: "source", anchor_cell_id: null, event_id: "es1", value: "src" }),
+        makeCell({ cell_id: "c1", side: "target", anchor_cell_id: null, event_id: "et1", value: "tgt" }),
+      ],
+      events: [makeEvent({ id: "et1", server_seq: 9, cell_id: "c1" })],
+    })
+    const token = await makeTestToken(SECRET, { projectId: "proj-a", fileId: "file-x" })
+    const req = new Request(
+      "https://w/api/v1/projects/proj-a/files/file-x/cells?since=0&side=target",
+      { headers: { Authorization: `Bearer ${token}` } },
+    )
+    const res = (await handleCellsReadRequest(req, envWith(db)))!
+    const body = (await res.json()) as {
+      changedCellIds: string[]
+      cells: Array<{ side: string; value: string }>
+    }
+    expect(body.changedCellIds).toEqual(["c1"])
+    expect(body.cells).toHaveLength(1)
+    expect(body.cells[0].side).toBe("target")
+  })
+
+  it("tells the client to resync when the changed set exceeds the delta limit", async () => {
+    const events: EventSeed[] = []
+    for (let i = 0; i < 501; i++) {
+      events.push(makeEvent({ id: `e${i}`, server_seq: i + 1, cell_id: `c${i}` }))
+    }
+    const { db } = await makeTestDb({ cells: [], events })
+    const token = await makeTestToken(SECRET, { projectId: "proj-a", fileId: "file-x" })
+    const req = new Request(
+      "https://w/api/v1/projects/proj-a/files/file-x/cells?since=0",
+      { headers: { Authorization: `Bearer ${token}` } },
+    )
+    const res = (await handleCellsReadRequest(req, envWith(db)))!
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as { resync?: boolean; delta?: boolean; maxServerSeq: number }
+    expect(body.resync).toBe(true)
+    expect(body.delta).toBeUndefined()
+    expect(body.maxServerSeq).toBe(501)
+  })
+
+  it("rejects a malformed since with 400", async () => {
+    const { db } = await makeTestDb({ cells: [] })
+    const token = await makeTestToken(SECRET, { projectId: "proj-a", fileId: "file-x" })
+    const req = new Request(
+      "https://w/api/v1/projects/proj-a/files/file-x/cells?since=abc",
+      { headers: { Authorization: `Bearer ${token}` } },
+    )
+    const res = (await handleCellsReadRequest(req, envWith(db)))!
+    expect(res.status).toBe(400)
+  })
+})

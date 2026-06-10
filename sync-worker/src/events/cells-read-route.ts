@@ -11,6 +11,24 @@
 //   limit=N             — page size. Default 500, max 2000.
 //   cursor=...          — opaque pagination cursor; the previous response's
 //                         `nextCursor`.
+//   since=<serverSeq>   — delta read (audit M2-1). Returns only the cells
+//                         touched by events with `server_seq > since`,
+//                         unpaginated, as `{ delta: true, changedCellIds,
+//                         cells, maxServerSeq }`. A changed cellId with no
+//                         returned row means the cell was deleted (the client
+//                         drops it). When the changed set exceeds
+//                         DELTA_RESYNC_LIMIT the response is
+//                         `{ resync: true, maxServerSeq }` and the client
+//                         falls back to a full stream.
+//
+// Conditional reads: every non-cellIds response carries
+// `ETag: "<fileId>:<maxServerSeq>"` where maxServerSeq = MAX(server_seq)
+// over the file's events — strictly an ordering key, NEVER a count
+// (server_seq has harmless gaps from idempotent replays). A request with a
+// matching `If-None-Match` returns 304 before any cells row is read. Full
+// (non-delta) responses additionally carry `maxServerSeq` in the JSON body
+// so cross-origin clients can build their next `?since=` cursor without
+// reading response headers.
 //
 // Ordering: cells are returned in **anchor-chain order**. The chain head is
 // the cell with `anchor_cell_id IS NULL`; the next cell is the one whose
@@ -205,6 +223,48 @@ const PATH_RE = /^\/api\/v1\/projects\/([^/]+)\/files\/([^/]+)\/cells$/
 const DEFAULT_LIMIT = 500
 const MAX_LIMIT = 2000
 
+// Above this many changed cells a delta is no longer cheaper than a full
+// stream (and the unpaginated response would balloon) — tell the client to
+// resync. Bulk imports / bulk completions are the realistic way past it.
+const DELTA_RESYNC_LIMIT = 500
+
+/** MAX(server_seq) over the file's events — the ETag / `?since=` watermark.
+ *  Coalesced to 0 for files with no events yet. `Number()` normalizes the
+ *  BIGINT, which different executors surface as number | string | bigint. */
+async function fetchMaxServerSeq(
+  db: AquillaDb,
+  projectId: string,
+  fileId: string,
+): Promise<number> {
+  const raw = await db
+    .prepare(
+      "SELECT COALESCE(MAX(server_seq), 0) AS max_seq FROM events WHERE project_id = ? AND file_id = ?",
+    )
+    .bind(projectId, fileId)
+    .first<number | string | bigint>("max_seq")
+  return Number(raw ?? 0)
+}
+
+function makeEtag(fileId: string, maxServerSeq: number): string {
+  return `"${fileId}:${maxServerSeq}"`
+}
+
+/** Loose If-None-Match comparison: any listed value (optionally W/-prefixed)
+ *  equal to our strong ETag counts as a match. */
+function ifNoneMatchMatches(headerValue: string | null, etag: string): boolean {
+  if (!headerValue) return false
+  return headerValue
+    .split(",")
+    .map((v) => v.trim().replace(/^W\//, ""))
+    .some((v) => v === etag)
+}
+
+/** `private` — responses are authed and per-user-visible; `no-cache` — the
+ *  browser may store but must revalidate (the ETag makes that a 304). */
+function cacheHeaders(etag: string): HeadersInit {
+  return { ETag: etag, "Cache-Control": "private, no-cache" }
+}
+
 export async function handleCellsReadRequest(
   request: Request,
   env: CellsReadEnv,
@@ -255,6 +315,15 @@ export async function handleCellsReadRequest(
 
   const cursor = decodeCursor(url.searchParams.get("cursor"))
 
+  const qSince = url.searchParams.get("since")
+  let since: number | null = null
+  if (qSince !== null) {
+    if (!/^\d+$/.test(qSince)) {
+      return new Response("invalid since: must be a non-negative integer", { status: 400 })
+    }
+    since = Number(qSince)
+  }
+
   // Pull every row for the file in one query — anchor-chain ordering is
   // computed in memory. A Bible file is ~30k cells per side ≈ a few MB of
   // text; pulling once and ordering is faster than emitting one query per
@@ -276,6 +345,69 @@ export async function handleCellsReadRequest(
   const cellIdsFilter = qCellIds
     ? qCellIds.split(",").map((s) => s.trim()).filter((s) => s.length > 0).slice(0, 100)
     : null
+
+  // Conditional / delta machinery (audit M2-1). Skipped for the targeted
+  // cellIds fast path, which stays exactly as it was. Both branches are
+  // answered from the events log BEFORE the unbounded cells SELECT runs —
+  // a 304 costs one MAX() query, a delta costs MAX() + a seq-range scan.
+  //
+  // Ordering note: the watermark is computed before the rows are read, so a
+  // write landing in between yields rows NEWER than the advertised
+  // maxServerSeq — the client's next `?since=` re-fetches those rows. Stale
+  // in the safe direction, never the lossy one.
+  let maxServerSeq: number | null = null
+  if (!cellIdsFilter || cellIdsFilter.length === 0) {
+    maxServerSeq = await fetchMaxServerSeq(env.AQUILLA_PG, projectId, fileId)
+    const etag = makeEtag(fileId, maxServerSeq)
+    if (ifNoneMatchMatches(request.headers.get("If-None-Match"), etag)) {
+      return new Response(null, { status: 304, headers: cacheHeaders(etag) })
+    }
+    if (since !== null) {
+      // Cells touched by any event past the cursor. cell_id IS NULL events
+      // (file.rename, project-scoped) bump the watermark but change no rows.
+      // idx_events_project_seq makes the seq-range scan cheap when `since`
+      // is recent — the overwhelmingly common case (focus / post-commit).
+      const changedRes = await env.AQUILLA_PG.prepare(
+        "SELECT DISTINCT cell_id FROM events WHERE project_id = ? AND file_id = ? AND server_seq > ? AND cell_id IS NOT NULL",
+      )
+        .bind(projectId, fileId, since)
+        .all<{ cell_id: string }>()
+      const changedCellIds = changedRes.results.map((r) => r.cell_id)
+      if (changedCellIds.length > DELTA_RESYNC_LIMIT) {
+        return Response.json({ resync: true, maxServerSeq }, { headers: cacheHeaders(etag) })
+      }
+      let deltaRows: CellRowRaw[] = []
+      if (changedCellIds.length > 0) {
+        const placeholders = changedCellIds.map(() => "?").join(", ")
+        const deltaParts = [
+          `SELECT ${columns}`,
+          "FROM cells",
+          `WHERE project_id = ? AND file_id = ? AND cell_id IN (${placeholders})`,
+        ]
+        const deltaBinds: unknown[] = [projectId, fileId, ...changedCellIds]
+        if (sideFilter !== null) {
+          deltaParts.push("AND side = ?")
+          deltaBinds.push(sideFilter)
+        }
+        const deltaRes = await env.AQUILLA_PG.prepare(deltaParts.join(" "))
+          .bind(...deltaBinds)
+          .all<CellRowRaw>()
+        deltaRows = deltaRes.results
+      }
+      // No chain-walk: delta rows carry their anchor pointers and the client
+      // re-walks the merged set, so order here is irrelevant. A changed
+      // cellId with no row below was deleted (or is side-filtered out).
+      return Response.json(
+        {
+          delta: true,
+          changedCellIds,
+          cells: deltaRows.map(mapRow),
+          maxServerSeq,
+        },
+        { headers: cacheHeaders(etag) },
+      )
+    }
+  }
 
   const parts: string[] = [
     `SELECT ${columns}`,
@@ -334,9 +466,14 @@ export async function handleCellsReadRequest(
   const nextOffset = offset + slice.length
   const hasMore = nextOffset < ordered.length
 
-  return Response.json({
-    cells: slice.map(mapRow),
-    nextCursor: hasMore ? encodeCursor({ offset: nextOffset }) : null,
-    total: ordered.length,
-  })
+  return Response.json(
+    {
+      cells: slice.map(mapRow),
+      nextCursor: hasMore ? encodeCursor({ offset: nextOffset }) : null,
+      total: ordered.length,
+      // Null only on the cellIds fast path, which skips the watermark query.
+      maxServerSeq,
+    },
+    maxServerSeq !== null ? { headers: cacheHeaders(makeEtag(fileId, maxServerSeq)) } : undefined,
+  )
 }

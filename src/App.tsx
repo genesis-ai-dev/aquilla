@@ -49,6 +49,9 @@ const TeamDetail = lazy(() =>
 const AdminConsole = lazy(() =>
   import("@/pages/AdminConsole").then((m) => ({ default: m.AdminConsole })),
 )
+const SnapshotsPage = lazy(() =>
+  import("@/pages/SnapshotsPage").then((m) => ({ default: m.SnapshotsPage })),
+)
 const DebugView = lazy(() =>
   import("@/components/DebugView").then((m) => ({ default: m.DebugView })),
 )
@@ -162,6 +165,9 @@ function AppRoutes() {
         <Route path="/project/:id/memory" element={<ProjectWorkspace />} />
         {/* FRO-180: per-project members management inside the ProjectWorkspace shell. */}
         <Route path="/project/:id/members" element={<ProjectWorkspace />} />
+        {/* FRO-176: named snapshots — standalone page (outside ProjectWorkspace shell
+            because it is an infrequent admin action per AD-11 / Q24 pattern). */}
+        <Route path="/project/:id/snapshots" element={<SnapshotsPage />} />
 
         {/* Lazy — org admin pages */}
         <Route path="/settings" element={<Settings />} />

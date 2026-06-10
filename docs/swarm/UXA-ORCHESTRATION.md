@@ -119,6 +119,15 @@ fetch-helpers chain FRO-281 → 293; EditorTable strings last: FRO-290 after 297
 - 2026-06-10 · merged batch: FRO-274 e527f68 (595dd4f) · FRO-277 0360c45 (0c40dc2) · FRO-286 8f4d194 (6681e27, REMOVE path per spec Q25) · FRO-284 0d11eb4 (bd72317; sync-worker route.ts ctx wiring auto-merged with 279) · gate pending
 - NOTE: FRO-284 needs RESEND_API_KEY/EMAIL_FROM/BASE_URL in sync-worker env before staging deploy; extractMentions inlined copy must stay in sync with comment-helpers.
 
+### Resume state (2026-06-10 late)
+- Merged on integration (gate-verified unless noted): 269,275,266,276,268,294,291,265,270,273,289,283,279,274,277,286,284,285,282,295,280,271,278 + main@7b1ed43 absorbed (media-lens + neon-migrate guard). Gate on this tip: RUNNING (then promote to main via merge commit).
+- Fixed-not-yet-merged: FRO-287 e6ba354 (⚠ needs 1-line glue: pass existingFiles into ImportDialog from ProjectWorkspace — apply after 272 lands).
+- In flight: FRO-281 (error mapping), FRO-272 (file trash), FRO-292 (AI-drafted).
+- Not yet dispatched: 288 (PW lock), 293 (after 281), 296 (PW lock), 267 (after 287/282), tail 297→290→298, then singleton UI-QA over all SWARM-TODOs, then final promote + report.
+- Deploy-time TODOs accumulating: apply migrations 0034_rls_backstop/0035_backfill(+272/292's) via scripts/neon-migrate.ts (CI ledger check will flag until applied); FRO-279 backfill; FRO-284 sync-worker env vars; FRO-289 staging RLS verification.
+- fro-291 rescue stash: media-lens WIP turned out to be the other actor's work, since committed to main as 5750005 — stash is REDUNDANT; safe to drop after user confirms.
+- Mid-stream agent deaths: 9 (275,291,289,279,283,286,282,287 + partial); finishers recovered all.
+
 ### Incidents
 - FRO-275: first agent died after ~15 lines; finisher respawned into same worktree — Fixed.
 - FRO-291: agent died mid-test-work AND its worktree contained FOREIGN media-timeline WIP

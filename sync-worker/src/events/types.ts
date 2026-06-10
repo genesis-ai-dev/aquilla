@@ -129,6 +129,15 @@ export interface EventPayloads {
      */
     sourceEventId?: string | null
     /**
+     * FRO-292 / AI provenance: when true, tags this commit as machine-drafted
+     * (the `cell.commit.llm-accept` variant per AD-2). Set by the AI completion
+     * path (useCompletion → commitCompletedCell). Human edits omit this field
+     * entirely — the projection tracks `cells.ai_drafted` until a human edit
+     * or validation clears it. Forward-only: historical commits without this
+     * field are treated as human-authored (ai_drafted = 0).
+     */
+    ai_suggestion?: true
+    /**
      * FRO-186 / harmonization: when present, tags this commit as a harmonize
      * sweep event (cell.commit.harmonize variant per AD-2). The route layer
      * uses this field to enforce harmonize_min_role and to trigger the AD-14

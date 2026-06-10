@@ -125,6 +125,14 @@ export interface OutboxEventPayloads {
     search_query?: string
     replace_string?: string
     /**
+     * FRO-292 / AI provenance: when true, tags this commit as machine-drafted
+     * (the `cell.commit.llm-accept` variant per AD-2). Set by the AI completion
+     * path (useCompletion → commitCompletedCell). Human edits omit this field
+     * entirely — the server projection uses its presence to track `ai_drafted`
+     * on the cell row until a human edit or validation clears it.
+     */
+    ai_suggestion?: true
+    /**
      * FRO-186 / harmonization: when present, tags this commit as a harmonize
      * sweep event (`cell.commit.harmonize` variant per AD-2). The server uses
      * this to trigger the AD-14 endorsement-revocation cascade and the

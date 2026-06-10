@@ -4,6 +4,10 @@
 // (the pure function) and the route's integration with a mock DB/auth.
 // We keep these DB-free where possible (propagate-health is pure), and test
 // the route at the HTTP boundary with a mock DB for integration coverage.
+//
+// FRO-190 addition: token auth tests — a properly minted sync-token (aud=sync,
+// correct projectId) MUST pass; a raw auth-worker JWT (no aud=sync) MUST be
+// rejected with 401. These tests are the sync-worker half of the FRO-190 fix.
 
 import { describe, it, expect } from 'vitest'
 import { propagateHealth, type PropNode, type PropEdges } from '../lib/confidence/propagate-health'
@@ -185,5 +189,108 @@ describe('handleHealthRollupRequest (FRO-181)', () => {
     const res = await handleHealthRollupRequest(req, env as unknown as Parameters<typeof handleHealthRollupRequest>[1])
     expect(res).not.toBeNull()
     expect(res!.status).toBe(500)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// FRO-190: Token auth — sync-token passes, raw auth JWT rejected
+// ---------------------------------------------------------------------------
+//
+// The health-rollup route uses verifyTokenForProject which requires aud=sync
+// and the correct projectId. This is the server-side half of the FRO-190 fix:
+// a properly minted sync-token must succeed while a raw auth-worker JWT (which
+// has no aud=sync claim) is rejected with 401 "wrong audience".
+
+import { makeTestToken } from './helpers/auth'
+import { sign } from 'hono/jwt'
+
+describe('handleHealthRollupRequest — token auth (FRO-190)', () => {
+  it('accepts a valid minted sync-token with aud=sync and correct projectId', async () => {
+    const token = await makeTestToken(FAKE_SECRET, {
+      projectId: FAKE_PROJECT_ID,
+      // fileId is embedded in the token but verifyTokenForProject does NOT check it —
+      // any fileId (including the "__project__" sentinel) must pass.
+      fileId: '__project__',
+      role: 100,
+    })
+    const req = new Request(
+      `https://example.com/api/v1/projects/${FAKE_PROJECT_ID}/health-rollup`,
+      { headers: { Authorization: `Bearer ${token}` } },
+    )
+    const env = { AQUILLA_PG: makeMockDb({}), SYNC_SECRET_KEY: FAKE_SECRET }
+    const res = await handleHealthRollupRequest(req, env as unknown as Parameters<typeof handleHealthRollupRequest>[1])
+    // 200 (empty project, health=0) — importantly NOT 401 or 403.
+    expect(res).not.toBeNull()
+    expect(res!.status).toBe(200)
+  })
+
+  it('accepts a sync-token with the __project__ sentinel fileId (as useProjectHealth mints)', async () => {
+    // This is the exact scenario the FRO-190 fix enables: mint with __project__
+    // sentinel fileId, pass to /health-rollup. verifyTokenForProject must accept it.
+    const token = await makeTestToken(FAKE_SECRET, {
+      projectId: FAKE_PROJECT_ID,
+      fileId: '__project__',
+      role: 400,
+    })
+    const req = new Request(
+      `https://example.com/api/v1/projects/${FAKE_PROJECT_ID}/health-rollup`,
+      { headers: { Authorization: `Bearer ${token}` } },
+    )
+    const env = { AQUILLA_PG: makeMockDb({}), SYNC_SECRET_KEY: FAKE_SECRET }
+    const res = await handleHealthRollupRequest(req, env as unknown as Parameters<typeof handleHealthRollupRequest>[1])
+    expect(res!.status).toBe(200)
+  })
+
+  it('rejects a raw auth-worker JWT (no aud=sync) with 401', async () => {
+    // Simulate a raw auth-worker JWT: signed with a different key (wrong sig) OR
+    // lacking aud=sync. We test the aud=sync check by building a token without it.
+    const rawAuthClaims = {
+      userId: 1,
+      username: 'alice',
+      sub: 'alice',
+      // No aud: 'sync' — this is what the auth-worker issues.
+      iat: Math.floor(Date.now() / 1000),
+      exp: Math.floor(Date.now() / 1000) + 3600,
+    }
+    const rawAuthJwt = await sign(rawAuthClaims as Record<string, unknown>, FAKE_SECRET, 'HS256')
+
+    const req = new Request(
+      `https://example.com/api/v1/projects/${FAKE_PROJECT_ID}/health-rollup`,
+      { headers: { Authorization: `Bearer ${rawAuthJwt}` } },
+    )
+    const env = { AQUILLA_PG: makeMockDb({}), SYNC_SECRET_KEY: FAKE_SECRET }
+    const res = await handleHealthRollupRequest(req, env as unknown as Parameters<typeof handleHealthRollupRequest>[1])
+    // The route must reject the raw auth JWT — wrong audience.
+    expect(res!.status).toBe(401)
+  })
+
+  it('rejects a sync-token scoped to the wrong projectId with 403', async () => {
+    const token = await makeTestToken(FAKE_SECRET, {
+      projectId: 'different-project',
+      fileId: 'f1',
+      role: 400,
+    })
+    const req = new Request(
+      `https://example.com/api/v1/projects/${FAKE_PROJECT_ID}/health-rollup`,
+      { headers: { Authorization: `Bearer ${token}` } },
+    )
+    const env = { AQUILLA_PG: makeMockDb({}), SYNC_SECRET_KEY: FAKE_SECRET }
+    const res = await handleHealthRollupRequest(req, env as unknown as Parameters<typeof handleHealthRollupRequest>[1])
+    expect(res!.status).toBe(403)
+  })
+
+  it('rejects a token with insufficient role (role < 100) with 403', async () => {
+    const token = await makeTestToken(FAKE_SECRET, {
+      projectId: FAKE_PROJECT_ID,
+      fileId: 'f1',
+      role: 50, // below viewer threshold
+    })
+    const req = new Request(
+      `https://example.com/api/v1/projects/${FAKE_PROJECT_ID}/health-rollup`,
+      { headers: { Authorization: `Bearer ${token}` } },
+    )
+    const env = { AQUILLA_PG: makeMockDb({}), SYNC_SECRET_KEY: FAKE_SECRET }
+    const res = await handleHealthRollupRequest(req, env as unknown as Parameters<typeof handleHealthRollupRequest>[1])
+    expect(res!.status).toBe(403)
   })
 })

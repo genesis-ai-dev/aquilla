@@ -2,9 +2,11 @@
  * ParallelPassagesPanel — FRO-177 replace mode tests.
  *
  * WHY: The replace flow must show an inline diff preview before committing,
- * respect the scope toggle (file vs project), thread retainValidations through
- * to the onReplaceAll payload, and surface the HTML-spanning skip count to the
- * user. These tests verify intent, not just wiring.
+ * respect the scope toggle (file vs project), surface the HTML-spanning skip
+ * count to the user, and always emit retainValidations=false (FRO-286:
+ * "Retain my validations" checkbox was a server no-op and has been removed;
+ * the honest copy "Replacing text clears validation" is shown instead).
+ * These tests verify intent, not just wiring.
  */
 
 import { describe, it, expect, vi } from "vitest"
@@ -181,7 +183,7 @@ describe("ParallelPassagesPanel — HTML-spanning skip count", () => {
       target: { value: "XX" },
     })
 
-    expect(screen.getByRole("note")).toHaveTextContent(/1 match.*skipped.*html tag boundary/i)
+    expect(screen.getByText(/1 match.*skipped.*html tag boundary/i)).toBeInTheDocument()
   })
 
   it("does not show skip note when no HTML-spanning matches exist", () => {
@@ -195,7 +197,7 @@ describe("ParallelPassagesPanel — HTML-spanning skip count", () => {
       target: { value: "hi" },
     })
 
-    expect(screen.queryByRole("note")).not.toBeInTheDocument()
+    expect(screen.queryByText(/html tag boundary/i)).not.toBeInTheDocument()
   })
 })
 
@@ -231,48 +233,22 @@ describe("ParallelPassagesPanel — scope toggle", () => {
   })
 })
 
-// ── Retain-validations toggle ─────────────────────────────────────────────────
+// ── FRO-286: "Retain my validations" removed — honest copy + always-false ────
 
-describe("ParallelPassagesPanel — retain validations", () => {
-  it("defaults to retain=false", () => {
+describe("ParallelPassagesPanel — validation copy (FRO-286)", () => {
+  it("does NOT render a 'Retain my validations' checkbox", () => {
     render(<ParallelPassagesPanel {...baseProps()} />)
-    const toggle = screen.getByRole("checkbox", { name: /retain my validations/i })
-    expect(toggle).not.toBeChecked()
+    expect(screen.queryByRole("checkbox", { name: /retain my validations/i })).toBeNull()
   })
 
-  it("threads retainValidations=true through onReplaceAll payload when toggled on", async () => {
-    const onReplaceAll = vi.fn()
-    const results = [makeResult({ cellId: "c1", translated: "hello world" })]
-
-    render(
-      <ParallelPassagesPanel {...baseProps({ results, onReplaceAll })} />,
-    )
-
-    fireEvent.change(screen.getByRole("textbox", { name: /find in project/i }), {
-      target: { value: "hello" },
-    })
-    fireEvent.change(screen.getByRole("textbox", { name: /replacement text/i }), {
-      target: { value: "hi" },
-    })
-
-    // Toggle retain validations ON.
-    const retainToggle = screen.getByRole("checkbox", { name: /retain my validations/i })
-    fireEvent.click(retainToggle)
-    expect(retainToggle).toBeChecked()
-
-    // Click the apply button.
-    fireEvent.click(getApplyButton())
-
-    await waitFor(() => {
-      expect(onReplaceAll).toHaveBeenCalledTimes(1)
-    })
-    const payload = onReplaceAll.mock.calls[0][0] as ReplaceAllPayload
-    expect(payload.retainValidations).toBe(true)
-    expect(payload.findQuery).toBe("hello")
-    expect(payload.replaceQuery).toBe("hi")
+  it("renders the honest 'clears validation' copy in replace mode", () => {
+    render(<ParallelPassagesPanel {...baseProps()} />)
+    expect(
+      screen.getByText(/replacing text clears validation/i),
+    ).toBeTruthy()
   })
 
-  it("threads retainValidations=false through onReplaceAll payload when not toggled", async () => {
+  it("always emits retainValidations=false in the onReplaceAll payload", async () => {
     const onReplaceAll = vi.fn()
     const results = [makeResult({ cellId: "c1", translated: "hello world" })]
 
@@ -291,7 +267,13 @@ describe("ParallelPassagesPanel — retain validations", () => {
 
     await waitFor(() => expect(onReplaceAll).toHaveBeenCalledTimes(1))
     const payload = onReplaceAll.mock.calls[0][0] as ReplaceAllPayload
+    // retainValidations is pinned to false — the field exists for backward
+    // compat with the ProjectWorkspace call site but must never be true
+    // (the server never implemented re-anchoring; spec Q25 drops validations
+    // on head advance by design).
     expect(payload.retainValidations).toBe(false)
+    expect(payload.findQuery).toBe("hello")
+    expect(payload.replaceQuery).toBe("hi")
   })
 })
 

@@ -152,12 +152,6 @@ export interface CellCommitInput {
    *  omit this field entirely — the generic commit path is unaffected. */
   aiSuggestion?: boolean
   /**
-   * FRO-177: when true, the cell-service projector re-anchors prior
-   * validations to the new head (Q25 override). Only set by the
-   * search-and-replace path when the user has toggled "Retain my validations".
-   */
-  retainValidations?: boolean
-  /**
    * FRO-177: audit metadata for replace-all operations. Records the find and
    * replace strings so the per-cell history drawer can show the replace context.
    */
@@ -198,7 +192,6 @@ export async function emitTargetCellCommit(
         ? { sourceEventId: input.sourceEventId }
         : {}),
       ...(input.aiSuggestion ? { ai_suggestion: true } : {}),
-      ...(input.retainValidations ? { retain_validations: true } : {}),
       ...(input.searchQuery !== undefined ? { search_query: input.searchQuery } : {}),
       ...(input.replaceString !== undefined ? { replace_string: input.replaceString } : {}),
     },
@@ -453,7 +446,7 @@ export async function emitCellBacktranslationSet(
 // Emits a `target.cell.commit` with a `harmonize_origin` payload field —
 // the `cell.commit.harmonize` variant per AD-2. Using a payload field (not
 // a new event kind) mirrors how `ai_suggestion` tags the llm-accept variant
-// and how `retain_validations` / `search_query` tag the replace-all variant
+// and how `search_query` tags the replace-all variant
 // (FRO-177). The server reads `harmonize_origin` to trigger the AD-14
 // endorsement-revocation cascade; the projector otherwise treats the commit
 // identically to a human commit (chain-mutating, advances cells.event_id).

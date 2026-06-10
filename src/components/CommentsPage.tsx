@@ -133,12 +133,25 @@ function formatTs(ms: number): string {
   }
 }
 
-function scopeLabel(comment: CommentRecord): string {
+/** Resolve a fileId to a display name, or return a tombstone if not found. */
+export function resolveFileName(
+  fileId: string | null | undefined,
+  fileMap: Map<string, string>,
+): { name: string; exists: boolean } {
+  if (!fileId) return { name: "Unknown file", exists: false }
+  const name = fileMap.get(fileId)
+  if (name !== undefined) return { name, exists: true }
+  return { name: "Deleted file", exists: false }
+}
+
+function scopeLabel(comment: CommentRecord, fileMap: Map<string, string>): string {
   if (comment.scopeKind === "cell") {
-    return `Cell ${comment.cellId ?? "?"} in ${comment.fileId ?? "?"}`
+    const { name } = resolveFileName(comment.fileId, fileMap)
+    return `Cell ${comment.cellId ?? "?"} in ${name}`
   }
   if (comment.scopeKind === "file") {
-    return `File ${comment.fileId ?? "?"}`
+    const { name } = resolveFileName(comment.fileId, fileMap)
+    return `File ${name}`
   }
   return "Project"
 }
@@ -343,6 +356,7 @@ interface ThreadProps {
   root: CommentRecord
   replies: CommentRecord[]
   currentUsername?: string
+  fileMap: Map<string, string>
   onResolve: (commentId: string, resolved: boolean) => void
   onEdit: (commentId: string, body: string) => Promise<void>
   onDelete: (commentId: string) => Promise<void>
@@ -350,7 +364,7 @@ interface ThreadProps {
 }
 
 function CommentThreadCard({
-  root, replies, currentUsername, onResolve, onEdit, onDelete, onNavigate,
+  root, replies, currentUsername, fileMap, onResolve, onEdit, onDelete, onNavigate,
 }: ThreadProps) {
   const [open, setOpen] = useState(!root.resolved)
   const [replyText, setReplyText] = useState("")
@@ -441,7 +455,12 @@ function CommentThreadCard({
           <CardHeader className="flex flex-row items-start gap-2 space-y-0 py-2 px-3">
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-1.5 text-xs text-muted-foreground mb-0.5">
-                <span className="truncate">{scopeLabel(root)}</span>
+                <span className="truncate">{scopeLabel(root, fileMap)}</span>
+                {root.fileId && !resolveFileName(root.fileId, fileMap).exists && (
+                  <Badge variant="outline" className="h-4 px-1 text-[10px] text-muted-foreground">
+                    deleted
+                  </Badge>
+                )}
                 {root.resolved && (
                   <Badge variant="secondary" className="h-4 px-1 text-[10px]">
                     <CheckCircle className="mr-0.5 h-2.5 w-2.5" />
@@ -451,18 +470,32 @@ function CommentThreadCard({
               </div>
             </div>
             <div className="flex items-center gap-1 shrink-0">
-              {onNavigate && root.scopeKind === "cell" && root.fileId && root.cellId && (
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  className="h-6 px-2 text-xs"
-                  title="Go to cell in editor"
-                  onClick={() => onNavigate(root)}
-                >
-                  <ArrowUpRight className="mr-0.5 h-3 w-3" />
-                  Go to cell
-                </Button>
-              )}
+              {onNavigate && root.scopeKind === "cell" && root.fileId && root.cellId && (() => {
+                const { exists } = resolveFileName(root.fileId, fileMap)
+                return exists ? (
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="h-6 px-2 text-xs"
+                    title="Go to cell in editor"
+                    onClick={() => onNavigate(root)}
+                  >
+                    <ArrowUpRight className="mr-0.5 h-3 w-3" />
+                    Open file
+                  </Button>
+                ) : (
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="h-6 px-2 text-xs cursor-not-allowed opacity-50"
+                    title="File has been deleted"
+                    disabled
+                  >
+                    <ArrowUpRight className="mr-0.5 h-3 w-3" />
+                    Open file
+                  </Button>
+                )
+              })()}
               <Button
                 size="sm"
                 variant="ghost"
@@ -560,7 +593,7 @@ function CommentThreadCard({
 interface FilterControlsProps {
   filter: FilterState
   onChange: (next: FilterState) => void
-  fileOptions: string[]
+  fileOptions: { id: string; name: string }[]
   authorOptions: { id: string; label: string }[]
 }
 
@@ -629,7 +662,7 @@ function FilterControls({ filter, onChange, fileOptions, authorOptions }: Filter
               >
                 <option value="">All files</option>
                 {fileOptions.map((f) => (
-                  <option key={f} value={f}>{f}</option>
+                  <option key={f.id} value={f.id}>{f.name}</option>
                 ))}
               </select>
             </label>
@@ -725,21 +758,38 @@ export function CommentsPage() {
     return { roots, repliesByParent }
   }, [comments])
 
+  // Build a stable fileId → display name map from the project's file list.
+  // This is the single source of truth for names and existence checks.
+  const fileMap = useMemo<Map<string, string>>(() => {
+    const map = new Map<string, string>()
+    for (const f of project?.files ?? []) {
+      map.set(f.id, f.name)
+    }
+    return map
+  }, [project?.files])
+
   // Derive unique file/author options for filter controls
   const { fileOptions, authorOptions } = useMemo(() => {
-    const files = new Set<string>()
+    const fileIds = new Set<string>()
     const authors = new Map<string, string>()
     for (const c of comments) {
-      if (c.fileId) files.add(c.fileId)
+      if (c.fileId) fileIds.add(c.fileId)
       authors.set(c.authorId, c.authorLabel ?? c.authorId)
     }
+    // Resolve each fileId to its display name; tombstone deleted files
+    const fileOptions = Array.from(fileIds)
+      .map((id) => {
+        const { name } = resolveFileName(id, fileMap)
+        return { id, name }
+      })
+      .sort((a, b) => a.name.localeCompare(b.name))
     return {
-      fileOptions: Array.from(files).sort(),
+      fileOptions,
       authorOptions: Array.from(authors.entries())
         .map(([id, label]) => ({ id, label }))
         .sort((a, b) => a.label.localeCompare(b.label)),
     }
-  }, [comments])
+  }, [comments, fileMap])
 
   // Apply filter + sort
   const displayedRoots = useMemo(() => {
@@ -749,11 +799,14 @@ export function CommentsPage() {
 
   function handleNavigate(root: CommentRecord) {
     if (!projectId || !root.fileId) return
-    // Navigate to the file in the editor. Exact cell scroll requires editor
-    // handle integration — leaving a focused TODO for that.
-    // SWARM-TODO: append ?cellId=<root.cellId> once ProjectWorkspace supports
-    // a scrollToCell mechanism via URL hash or search param.
-    navigate(`/project/${projectId}/file/${encodeURIComponent(root.fileId)}`)
+    // Only navigate to live files (tombstoned files have no route to open)
+    const { exists } = resolveFileName(root.fileId, fileMap)
+    if (!exists) return
+    // Append ?cellId= so ProjectWorkspace can scroll to the right cell on load.
+    const params = root.cellId
+      ? `?cellId=${encodeURIComponent(root.cellId)}`
+      : ""
+    navigate(`/project/${projectId}/file/${encodeURIComponent(root.fileId)}${params}`)
   }
 
   const activeFilterCount = [
@@ -844,6 +897,7 @@ export function CommentsPage() {
               root={root}
               replies={repliesByParent.get(root.commentId) ?? []}
               currentUsername={session?.username}
+              fileMap={fileMap}
               onResolve={resolveThread}
               onEdit={editComment}
               onDelete={deleteComment}

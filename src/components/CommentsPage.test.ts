@@ -2,7 +2,7 @@
 // These test business logic only — no React rendering needed.
 
 import { describe, it, expect } from "vitest"
-import { applyFilters, applySorting, DEFAULT_FILTER } from "./CommentsPage"
+import { applyFilters, applySorting, DEFAULT_FILTER, resolveFileName } from "./CommentsPage"
 import type { CommentRecord } from "@/lib/sync/comments-read-types"
 
 function makeComment(overrides: Partial<CommentRecord> = {}): CommentRecord {
@@ -173,5 +173,46 @@ describe("applySorting", () => {
     ]
     const result = applySorting(roots, "recent-activity")
     expect(result[0].commentId).toBe("active")
+  })
+})
+
+// ── resolveFileName: UUID→name mapping and tombstone ─────────────────────
+
+describe("resolveFileName", () => {
+  const fileMap = new Map([
+    ["uuid-gen", "GEN.sfm"],
+    ["uuid-rev", "Revelation.sfm"],
+  ])
+
+  it("returns name and exists=true for a live file", () => {
+    const result = resolveFileName("uuid-gen", fileMap)
+    expect(result).toEqual({ name: "GEN.sfm", exists: true })
+  })
+
+  it("returns tombstone label and exists=false for an unknown UUID", () => {
+    const result = resolveFileName("uuid-deleted-abc", fileMap)
+    expect(result).toEqual({ name: "Deleted file", exists: false })
+  })
+
+  it("returns tombstone for null fileId", () => {
+    const result = resolveFileName(null, fileMap)
+    expect(result.exists).toBe(false)
+  })
+
+  it("returns tombstone for undefined fileId", () => {
+    const result = resolveFileName(undefined, fileMap)
+    expect(result.exists).toBe(false)
+  })
+
+  it("resolves a second live file correctly", () => {
+    const result = resolveFileName("uuid-rev", fileMap)
+    expect(result).toEqual({ name: "Revelation.sfm", exists: true })
+  })
+
+  it("returns tombstone when fileMap is empty", () => {
+    const emptyMap = new Map<string, string>()
+    const result = resolveFileName("uuid-gen", emptyMap)
+    expect(result.exists).toBe(false)
+    expect(result.name).toBe("Deleted file")
   })
 })

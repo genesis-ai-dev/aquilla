@@ -13,6 +13,16 @@ export interface SectionProgress extends SectionInfo {
 
 type ProgressCell = Pick<CellData, "id" | "group" | "section" | "translated" | "activeValidators"> & {
   audioUrl?: string // present once audio support lands
+  /**
+   * Server-projected threshold gate (FRO-280 / audit F-P2).
+   * Consumed in preference to re-deriving `activeValidators.length >= validationCount`
+   * on the client. The sync-worker projection (FRO-279) makes this flag
+   * threshold-aware, so `validated=true` already means "meets the project's
+   * validationCount requirement." When absent (legacy or test fixtures that
+   * haven't adopted the flag), falls back to the validator-count comparison so
+   * callers that only supply `activeValidators` continue working.
+   */
+  validated?: boolean
 }
 
 const MAX_VALIDATION_LEVELS = 15
@@ -46,7 +56,12 @@ export function computeSectionProgress(
       if (translatedText.length > 0) completed++
 
       const vCount = cell.activeValidators?.length ?? 0
-      if (vCount >= validationCount) validated++
+      // FRO-280 (audit F-P2): consume the server-projected `validated` flag
+      // rather than re-deriving the threshold on the client. The server
+      // projection (FRO-279) already encodes `validationCount` so this flag
+      // is authoritative. Falls back to the validator-count comparison only
+      // when the field is absent (legacy/test fixtures that predate FRO-279).
+      if (cell.validated !== undefined ? cell.validated : vCount >= validationCount) validated++
 
       // levelCounts[i] = cells with > i distinct validators (i.e. ≥ i+1)
       for (let i = 0; i < levelCap; i++) {

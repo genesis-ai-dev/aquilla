@@ -164,8 +164,11 @@ export function buildCellData(
 
   // Prefer the target row's `validated` flag as the source of truth for the
   // simple "is it green?" UI. When no stats are present, this is the only
-  // available signal — D1 already encodes the "validators-meet-threshold"
-  // gate at the projection layer.
+  // available signal — D1 encodes the "validators-meet-threshold" gate at the
+  // projection layer (FRO-279 made this threshold-aware; FRO-280 aligns all
+  // client progress surfaces to consume this flag). Falls back to the
+  // activeValidators count only when the server flag is absent (local projects
+  // or mid-migration states).
   const validatedForStatus =
     target?.validated ?? activeValidators.length >= requiredValidations
 

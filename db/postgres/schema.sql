@@ -371,10 +371,10 @@ CREATE TABLE checkpoints (
 CREATE TABLE snapshots (
     id          TEXT PRIMARY KEY,
     project_id  TEXT NOT NULL,
-    file_id     TEXT NOT NULL,
     name        TEXT NOT NULL,
+    description TEXT,
+    created_by  TEXT NOT NULL,
     snapshot_ts BIGINT NOT NULL,
-    created_by  BIGINT NOT NULL,
     created_at  TIMESTAMPTZ DEFAULT now(),
     deleted_at  TIMESTAMPTZ
 );
@@ -449,8 +449,7 @@ CREATE INDEX idx_projects_archived ON projects(archived_at) WHERE archived_at IS
 CREATE INDEX idx_projects_created_by ON projects(created_by);
 CREATE INDEX idx_projects_org ON projects(org_id);
 CREATE INDEX idx_projects_source_project ON projects(source_project_id) WHERE source_project_id IS NOT NULL;
-CREATE INDEX idx_snapshots_file ON snapshots(file_id, snapshot_ts);
-CREATE INDEX idx_snapshots_project_active ON snapshots(project_id, snapshot_ts) WHERE deleted_at IS NULL;
+CREATE INDEX idx_snapshots_project_active ON snapshots(project_id, snapshot_ts DESC) WHERE deleted_at IS NULL;
 CREATE INDEX idx_users_email ON users(email);
 CREATE INDEX idx_users_username ON users(username);
 

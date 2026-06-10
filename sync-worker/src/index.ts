@@ -42,6 +42,7 @@ import { handleBranchingSearchRequest } from "./events/branching-search-route"
 import { handleBranchingSearchPassagesRequest } from "./events/branching-search-passages-route"
 import { handleCommentsReadRequest } from "./events/comments-read-route"
 import { handleCellBacktranslationsReadRequest } from "./events/cell-backtranslations-read-route"
+import { handleSnapshotsRequest } from "./events/snapshots-route"
 export { ProjectSync } from "./project-do"
 // Inert legacy DO class — kept exported so deploys don't trip the
 // "script does not export class 'FileSync'" guard. See file-sync-legacy.ts.
@@ -195,6 +196,8 @@ export default {
     if (commentsReadResponse) return withCors(commentsReadResponse, request)
     const btReadResponse = await handleCellBacktranslationsReadRequest(request, env)
     if (btReadResponse) return withCors(btReadResponse, request)
+    const snapshotsResponse = await handleSnapshotsRequest(request, env)
+    if (snapshotsResponse) return withCors(snapshotsResponse, request)
     // /search/passages must be checked BEFORE /search — PATH_RE for /search is
     // anchored with $ so it won't match /search/passages, but ordering here
     // makes the intent explicit and guards against future regex changes.

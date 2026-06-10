@@ -15,15 +15,24 @@
 //   2. Emit the projection statements via buildEventProjectionStmts.
 //   3. Build the realtime frame for broadcast.
 //
-// The AD-2 first-child-of-parent guard runs in route.ts BEFORE this
-// handler — by the time we get here, the caller has decided the event
-// is a winning chain head (or a sibling that should still land in
-// `events` without advancing the projection).
+// The AD-2 first-child-of-parent PRE-check runs in route.ts BEFORE this
+// handler — it catches temporally separated siblings (a committed sibling
+// already exists) and sets updateProjection=false. For IN-FLIGHT races the
+// pre-check is a TOCTOU (audit RACE-2), so chain-mutating events also take
+// an atomic chain_claims row here and their cells writes are gated on
+// holding it (see chain-claims.ts). The route reads the claims back after
+// commit to flag losers as stale in the response.
 
 import type { AuthorizedEvent } from '../authorize'
 import type { RealtimeMessage, ProjectionTable } from '../realtime'
 import type { EventKind } from '../types'
-import { buildEventProjectionStmts, type PersistedEvent } from '../event-projection'
+import {
+  buildEventProjectionStmts,
+  isChainMutatingKind,
+  type PersistedEvent,
+} from '../event-projection'
+import { buildChainClaimStmt, parentKeyOf, type ChainSlot } from '../chain-claims'
+import { buildEventInsertStmt } from '../event-insert'
 import type { DispatchResult } from './types'
 
 export interface HandleCellEventOptions {
@@ -33,6 +42,12 @@ export interface HandleCellEventOptions {
    * child race) and only the `events` row should be persisted.
    */
   updateProjection: boolean
+  /**
+   * QW-10: skip the per-event file-counter recompute; the caller coalesces
+   * one recompute per (file, batch) instead (route.ts appends it per chunk).
+   * The affected file is reported back via DispatchResult.counterFile.
+   */
+  deferFileCounters?: boolean
 }
 
 /** Cell-level kinds that this handler accepts. */
@@ -54,36 +69,44 @@ export function handleCellEvent(
 ): DispatchResult {
   const { event, claims } = authed
 
-  // server_seq is derived atomically inside the INSERT — see the
-  // EVENT_INSERT_SQL comment in events/import-route.ts for the race-safety
-  // argument.
-  const eventInsert = db
-    .prepare(
-      `INSERT INTO events (
-        id, schema_version, project_id, file_id, cell_id, parent_id, kind,
-        author, payload, client_ts, server_ts, server_seq
-      )
-      SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-             COALESCE((SELECT MAX(server_seq) FROM events WHERE project_id = ?), 0) + 1
-        ON CONFLICT DO NOTHING`,
-    )
-    .bind(
-      event.id,
-      event.schemaVersion,
-      event.projectId,
-      event.fileId ?? null,
-      event.cellId ?? null,
-      event.parentId ?? null,
-      event.kind,
-      claims.username,
-      JSON.stringify(event.payload),
-      event.clientTs,
-      serverTs,
-      event.projectId,
-    )
+  // server_seq is allocated by the per-project counter inside the INSERT —
+  // see events/event-insert.ts for the race-safety argument.
+  const eventInsert = buildEventInsertStmt(db, {
+    id: event.id,
+    schemaVersion: event.schemaVersion,
+    projectId: event.projectId,
+    fileId: event.fileId ?? null,
+    cellId: event.cellId ?? null,
+    parentId: event.parentId ?? null,
+    kind: event.kind,
+    author: claims.username,
+    payloadJson: JSON.stringify(event.payload),
+    clientTs: event.clientTs,
+    serverTs,
+  })
 
   const stmts: AquillaStatement[] = [eventInsert]
   let projectionTouches: readonly ProjectionTable[] = []
+  let counterFile: DispatchResult['counterFile']
+
+  // Atomic AD-2 arbitration: chain-mutating events claim their chain slot in
+  // the same transaction, and the projection's cells write is gated on the
+  // claim — so an in-flight sibling race resolves to exactly one winner.
+  let chainGate: ChainSlot | undefined
+  if (
+    opts.updateProjection &&
+    isChainMutatingKind(event.kind) &&
+    event.fileId &&
+    event.cellId
+  ) {
+    chainGate = {
+      projectId: event.projectId,
+      fileId: event.fileId,
+      cellId: event.cellId,
+      parentKey: parentKeyOf(event.parentId),
+    }
+    stmts.push(buildChainClaimStmt(db, chainGate, event.id))
+  }
 
   if (opts.updateProjection) {
     const persisted: PersistedEvent = {
@@ -99,7 +122,13 @@ export function handleCellEvent(
       clientTs: event.clientTs,
       serverTs,
     }
-    projectionTouches = buildEventProjectionStmts(db, persisted, stmts)
+    projectionTouches = buildEventProjectionStmts(db, persisted, stmts, {
+      deferFileCounters: opts.deferFileCounters,
+      chainGate,
+    })
+    if (opts.deferFileCounters && event.fileId && projectionTouches.includes('files')) {
+      counterFile = { projectId: event.projectId, fileId: event.fileId }
+    }
   }
 
   const eventFrame: Extract<RealtimeMessage, { t: 'event' }> = {
@@ -117,5 +146,7 @@ export function handleCellEvent(
     stmts,
     eventFrame,
     dirtyTables: projectionTablesFor(projectionTouches),
+    chainSlot: chainGate,
+    counterFile,
   }
 }

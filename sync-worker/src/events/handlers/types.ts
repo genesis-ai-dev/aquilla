@@ -7,6 +7,7 @@
 // (so handlers don't have to think about chain semantics).
 
 import type { RealtimeMessage, ProjectionTable } from '../realtime'
+import type { ChainSlot } from '../chain-claims'
 
 export interface DispatchResult {
   /**
@@ -26,4 +27,17 @@ export interface DispatchResult {
    * projection.dirty broadcast payload.
    */
   dirtyTables: ProjectionTable[]
+  /**
+   * AD-2 chain slot this event tried to claim (chain-mutating events that
+   * passed the route's pre-check only). After commit, the route reads the
+   * claim back; if another event holds it, this one lost an in-flight race
+   * and is reported stale (RACE-2 / M1-2).
+   */
+  chainSlot?: ChainSlot
+  /**
+   * Set when the per-event file-counter recompute was deferred
+   * (opts.deferFileCounters) — the route appends one recompute per
+   * (file, chunk) instead (QW-10).
+   */
+  counterFile?: { projectId: string; fileId: string }
 }

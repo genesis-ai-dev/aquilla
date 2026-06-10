@@ -13,6 +13,7 @@ import type { AuthorizedEvent } from '../authorize'
 import type { RealtimeMessage, ProjectionTable } from '../realtime'
 import type { EventKind } from '../types'
 import { buildEventProjectionStmts, type PersistedEvent } from '../event-projection'
+import { buildEventInsertStmt } from '../event-insert'
 import type { DispatchResult } from './types'
 
 export type CommentEventKind = Extract<
@@ -27,31 +28,21 @@ export function handleCommentEvent(
 ): DispatchResult {
   const { event, claims } = authed
 
-  // server_seq is derived atomically inside the INSERT — see import-route.ts.
-  const eventInsert = db
-    .prepare(
-      `INSERT INTO events (
-        id, schema_version, project_id, file_id, cell_id, parent_id, kind,
-        author, payload, client_ts, server_ts, server_seq
-      )
-      SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-             COALESCE((SELECT MAX(server_seq) FROM events WHERE project_id = ?), 0) + 1
-        ON CONFLICT DO NOTHING`,
-    )
-    .bind(
-      event.id,
-      event.schemaVersion,
-      event.projectId,
-      event.fileId === "__project__" ? null : (event.fileId ?? null),
-      event.cellId ?? null,
-      event.parentId ?? null,
-      event.kind,
-      claims.username,
-      JSON.stringify(event.payload),
-      event.clientTs,
-      serverTs,
-      event.projectId,
-    )
+  // server_seq is allocated by the per-project counter inside the INSERT —
+  // see events/event-insert.ts.
+  const eventInsert = buildEventInsertStmt(db, {
+    id: event.id,
+    schemaVersion: event.schemaVersion,
+    projectId: event.projectId,
+    fileId: event.fileId === "__project__" ? null : (event.fileId ?? null),
+    cellId: event.cellId ?? null,
+    parentId: event.parentId ?? null,
+    kind: event.kind,
+    author: claims.username,
+    payloadJson: JSON.stringify(event.payload),
+    clientTs: event.clientTs,
+    serverTs,
+  })
 
   const persisted: PersistedEvent = {
     id: event.id,

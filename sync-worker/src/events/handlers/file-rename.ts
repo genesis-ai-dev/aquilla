@@ -13,6 +13,7 @@
 
 import type { AuthorizedEvent } from '../authorize'
 import type { RealtimeMessage, ProjectionTable } from '../realtime'
+import { buildEventInsertStmt } from '../event-insert'
 import type { DispatchResult } from './types'
 
 export function handleFileRename(
@@ -26,31 +27,21 @@ export function handleFileRename(
     throw new Error(`file.rename event ${event.id} is missing fileId`)
   }
 
-  // server_seq is derived atomically inside the INSERT — see file-create.ts.
-  const eventInsert = db
-    .prepare(
-      `INSERT INTO events (
-        id, schema_version, project_id, file_id, cell_id, parent_id, kind,
-        author, payload, client_ts, server_ts, server_seq
-      )
-      SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-             COALESCE((SELECT MAX(server_seq) FROM events WHERE project_id = ?), 0) + 1
-        ON CONFLICT DO NOTHING`,
-    )
-    .bind(
-      event.id,
-      event.schemaVersion,
-      event.projectId,
-      event.fileId,
-      null,
-      event.parentId ?? null,
-      event.kind,
-      claims.username,
-      JSON.stringify(event.payload),
-      event.clientTs,
-      serverTs,
-      event.projectId,
-    )
+  // server_seq is allocated by the per-project counter inside the INSERT —
+  // see events/event-insert.ts.
+  const eventInsert = buildEventInsertStmt(db, {
+    id: event.id,
+    schemaVersion: event.schemaVersion,
+    projectId: event.projectId,
+    fileId: event.fileId,
+    cellId: null,
+    parentId: event.parentId ?? null,
+    kind: event.kind,
+    author: claims.username,
+    payloadJson: JSON.stringify(event.payload),
+    clientTs: event.clientTs,
+    serverTs,
+  })
 
   // Advance the file row: new label + chain head. A WHERE-miss (file never
   // imported) changes zero rows — the event still lands for history, matching

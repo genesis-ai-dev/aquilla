@@ -20,6 +20,7 @@
 import type { AuthorizedEvent } from '../authorize'
 import type { RealtimeMessage, ProjectionTable } from '../realtime'
 import type { EventKind, EventPayloads } from '../types'
+import { buildEventInsertStmt } from '../event-insert'
 import type { DispatchResult } from './types'
 
 export type AssignmentEventKind = Extract<
@@ -34,32 +35,21 @@ export function handleAssignmentEvent(
 ): DispatchResult {
   const { event, claims } = authed
 
-  // Canonical events row. server_seq is derived atomically inside the INSERT —
-  // same shape as comment-events.ts / cell-events.ts.
-  const eventInsert = db
-    .prepare(
-      `INSERT INTO events (
-        id, schema_version, project_id, file_id, cell_id, parent_id, kind,
-        author, payload, client_ts, server_ts, server_seq
-      )
-      SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-             COALESCE((SELECT MAX(server_seq) FROM events WHERE project_id = ?), 0) + 1
-        ON CONFLICT DO NOTHING`,
-    )
-    .bind(
-      event.id,
-      event.schemaVersion,
-      event.projectId,
-      event.fileId ?? null,
-      event.cellId ?? null,
-      event.parentId ?? null,
-      event.kind,
-      claims.username,
-      JSON.stringify(event.payload),
-      event.clientTs,
-      serverTs,
-      event.projectId,
-    )
+  // Canonical events row. server_seq is allocated by the per-project counter
+  // inside the INSERT — see events/event-insert.ts.
+  const eventInsert = buildEventInsertStmt(db, {
+    id: event.id,
+    schemaVersion: event.schemaVersion,
+    projectId: event.projectId,
+    fileId: event.fileId ?? null,
+    cellId: event.cellId ?? null,
+    parentId: event.parentId ?? null,
+    kind: event.kind,
+    author: claims.username,
+    payloadJson: JSON.stringify(event.payload),
+    clientTs: event.clientTs,
+    serverTs,
+  })
 
   const stmts: AquillaStatement[] = [eventInsert]
   const dirtyTables: ProjectionTable[] = ['events']

@@ -7,6 +7,7 @@ import { describe, it, expect } from 'vitest'
 import {
   buildEventProjectionStmts,
   contentHash,
+  isChainMutatingKind,
   type PersistedEvent,
 } from '../events/event-projection'
 import type { EventKind } from '../events/types'
@@ -636,5 +637,49 @@ describe('files counter projection via InMemoryDb', () => {
       [],
     )
     expect(touches).toContain('files')
+  })
+})
+
+// ── ARCH-4: the single chain-mutating predicate ───────────────────────────
+
+describe('isChainMutatingKind', () => {
+  // WHY: route.ts used to keep a parallel 17-kind deny-list; a new kind
+  // missing from it was treated as chain-mutating by default and silently
+  // dropped as a "stale sibling". This table pins the classification of
+  // every existing kind so the collapsed predicate can never drift from the
+  // behavior the deny-list encoded. Adding an EventKind without extending
+  // this map fails the test — forcing an explicit classification decision.
+  const EXPECTED: Record<EventKind, boolean> = {
+    'source.cell.create': true,
+    'source.cell.commit': true,
+    'source.cell.delete': true,
+    'source.cell.reorder': true,
+    'target.cell.create': true,
+    'target.cell.commit': true,
+    'target.cell.delete': true,
+    'target.cell.reorder': true,
+    'cell.validate': false,
+    'cell.unvalidate': false,
+    'cell.waive': false,
+    'cell.unwaive': false,
+    'cell.audio.attach': false,
+    'cell.audio.select': false,
+    'cell.audio.remove': false,
+    'file.create': false,
+    'file.rename': false,
+    'comment.create': false,
+    'comment.edit': false,
+    'comment.delete': false,
+    'comment.resolve': false,
+    'cell.backtranslation.set': false,
+    'assignment.create': false,
+    'assignment.reassign': false,
+    'assignment.unassign': false,
+  }
+
+  it('classifies every EventKind exactly as the old route deny-list did', () => {
+    for (const [kind, chainMutating] of Object.entries(EXPECTED)) {
+      expect(isChainMutatingKind(kind), kind).toBe(chainMutating)
+    }
   })
 })

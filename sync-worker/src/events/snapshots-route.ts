@@ -20,6 +20,7 @@
 
 import { verifyTokenForProject } from "../auth"
 import { ROLE } from "./role-policy"
+import { buildEventInsertStmt } from "./event-insert"
 
 export interface SnapshotsRouteEnv {
   AQUILLA_PG?: AquillaDb
@@ -230,31 +231,23 @@ export async function handleSnapshotsRequest(
 
       // The parent_id for the new event is the cell's current event_id.
       // If the cell's current event_id changed since we loaded it (concurrent
-      // edit), we skip this cell.
+      // edit), we skip this cell. server_seq comes from the shared per-project
+      // allocator (event-insert.ts) — conflict-safe against concurrent
+      // commits, unlike the old naked MAX(server_seq)+1 INSERT (RACE-1).
       stmts.push(
-        db.prepare(`
-          INSERT INTO events
-            (id, schema_version, project_id, file_id, cell_id, parent_id,
-             kind, author, payload, client_ts, server_ts, server_seq)
-          SELECT
-            ?, 1, ?, ?, ?, ?,
-            ?, ?, ?, ?, ?,
-            COALESCE(MAX(server_seq), 0) + 1
-          FROM events
-          WHERE project_id = ?
-        `).bind(
-          newEventId,
-          cell.project_id,
-          cell.file_id,
-          cell.cell_id,
-          cell.current_event_id,
-          restoreKind,
-          callerUsername,
-          newPayload,
-          now,
-          now,
-          cell.project_id,
-        ),
+        buildEventInsertStmt(db, {
+          id: newEventId,
+          schemaVersion: 1,
+          projectId: cell.project_id,
+          fileId: cell.file_id,
+          cellId: cell.cell_id,
+          parentId: cell.current_event_id,
+          kind: restoreKind,
+          author: callerUsername,
+          payloadJson: newPayload,
+          clientTs: now,
+          serverTs: now,
+        }),
       )
 
       // Update cells projection only if event_id still matches current head

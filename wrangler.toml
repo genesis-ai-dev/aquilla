@@ -39,6 +39,9 @@ account_id = "6a80496d1e59948a9cbaa3c643ba81d7"
 compatibility_date = "2025-05-01"
 workers_dev = true
 
+[observability]
+enabled = true
+
 # Assets-only deploy: no `main` entry, Cloudflare serves dist/ directly.
 # `single-page-application` rewrites unknown paths to /index.html (replaces
 # the public/_redirects rule used under Pages).

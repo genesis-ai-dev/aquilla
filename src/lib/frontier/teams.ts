@@ -3,7 +3,7 @@ import { fetchWithTimeout } from "./orgs"
 
 export interface TeamSummary { id: number; name: string; memberCount: number; projectCount: number; viewerIsMember: boolean; isInternal: boolean }
 export interface TeamDetail {
-  id: number; name: string
+  id: number; name: string; description?: string | null
   members: Array<{ userId: number; username: string; roleLevel: number | null }>
   projects: Array<{ id: string; name: string; grantedRoleLevel: number }>
 }

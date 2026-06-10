@@ -151,6 +151,18 @@ export interface CellCommitInput {
    *  `cell.commit.llm-accept` provenance. Normal (human-typed) commits
    *  omit this field entirely — the generic commit path is unaffected. */
   aiSuggestion?: boolean
+  /**
+   * FRO-177: when true, the cell-service projector re-anchors prior
+   * validations to the new head (Q25 override). Only set by the
+   * search-and-replace path when the user has toggled "Retain my validations".
+   */
+  retainValidations?: boolean
+  /**
+   * FRO-177: audit metadata for replace-all operations. Records the find and
+   * replace strings so the per-cell history drawer can show the replace context.
+   */
+  searchQuery?: string
+  replaceString?: string
 }
 
 /**
@@ -186,6 +198,9 @@ export async function emitTargetCellCommit(
         ? { sourceEventId: input.sourceEventId }
         : {}),
       ...(input.aiSuggestion ? { ai_suggestion: true } : {}),
+      ...(input.retainValidations ? { retain_validations: true } : {}),
+      ...(input.searchQuery !== undefined ? { search_query: input.searchQuery } : {}),
+      ...(input.replaceString !== undefined ? { replace_string: input.replaceString } : {}),
     },
     clientTs: input.clientTs,
   })

@@ -1,6 +1,6 @@
 // Phase v1.x: ParallelPassagesPanel — project-wide FTS5-backed search dialog.
 //
-// Replace mode is OUT OF SCOPE (bulk-write path is a separate feature).
+// Replace mode (FRO-177): inline diff preview before applying.
 // Scope toggle works: "file" filters client-side on the activeFileId after
 // the project-wide fetch; "project" returns all hits.
 
@@ -15,10 +15,37 @@ import { Input } from "@/components/ui/input"
 import { Skeleton } from "@/components/ui/skeleton"
 import { cn } from "@/lib/utils"
 import type { WorkspaceSearchResult, SearchOptions } from "@/lib/search/workspace-index"
+import { computeReplaceDiffs, type CellReplaceDiff } from "@/lib/search/replace-action"
 
 export type ParallelPanelMode = "search" | "passages" | "replace"
 export type ParallelPanelScope = "file" | "project"
 export type ParallelPanelSide = "both" | "source" | "target"
+
+/**
+ * Called when the user confirms Replace All.
+ * Carries the computed diffs so the caller (ProjectWorkspace) can look up
+ * parentId/sourceEventId from its `cells` state and emit target.cell.commit
+ * events. The panel does not own the commit path — it owns the preview only.
+ *
+ * SWARM-TODO (ProjectWorkspace.tsx): Add `onReplaceAll` prop to the
+ * <ParallelPassagesPanel> call site (around line 2828) and wire it to a
+ * `handleReplaceAll` function that:
+ *   1. Maps each diff.cellId → cells.find(c => c.id === diff.cellId) to get
+ *      the current parentId (c.currentEventId) and sourceEventId (c.sourceEventId).
+ *   2. Calls emitTargetCellCommit for each diff with retainValidations=retainValidations,
+ *      searchQuery=findQuery, replaceString=replaceQuery.
+ *   3. Calls revalidateCells() after all commits are enqueued, then onAfterReplace?.().
+ * Also add `retainValidations` as a boolean prop (default false) if you want
+ * ProjectWorkspace to control the default toggle state.
+ */
+export interface ReplaceAllPayload {
+  diffs: CellReplaceDiff[]
+  totalReplaced: number
+  totalSkipped: number
+  findQuery: string
+  replaceQuery: string
+  retainValidations: boolean
+}
 
 interface ParallelPassagesPanelProps {
   open: boolean
@@ -43,6 +70,19 @@ interface ParallelPassagesPanelProps {
   /** Called by ProjectWorkspace to clear results (synonym for onClear). */
   onClearResults?: () => void
   onSelect?: (result: WorkspaceSearchResult, query: string) => void | Promise<void>
+
+  /**
+   * FRO-177: Replace mode commit handler. Called when the user clicks
+   * "Replace All" or "Replace this cell". The panel has computed the diffs;
+   * the caller owns the actual event-emit path.
+   *
+   * SWARM-TODO: wire this in ProjectWorkspace.tsx ~line 2828.
+   */
+  onReplaceAll?: (payload: ReplaceAllPayload) => Promise<void> | void
+
+  /** Passed from ProjectWorkspace for role-gating the Replace button. */
+  isReadOnly?: boolean
+
   [extraProp: string]: unknown
 }
 
@@ -120,7 +160,54 @@ function PillToggle<T extends string>({
 }
 
 // ---------------------------------------------------------------------------
-// Result row
+// Inline diff preview row: shows before (strikethrough red) and after (green).
+// ---------------------------------------------------------------------------
+function DiffPreviewRow({
+  diff,
+  selected,
+  onToggle,
+}: {
+  diff: CellReplaceDiff
+  selected: boolean
+  onToggle: (cellId: string) => void
+}) {
+  return (
+    <label
+      className={cn(
+        "flex items-start gap-2 rounded-xl px-3 py-2.5 text-sm transition-colors cursor-pointer",
+        "hover:bg-accent/60",
+        selected ? "bg-accent/30" : "",
+      )}
+    >
+      <input
+        type="checkbox"
+        checked={selected}
+        onChange={() => onToggle(diff.cellId)}
+        className="mt-0.5 shrink-0"
+        aria-label={`Include cell ${diff.cellId} in replace`}
+      />
+      <div className="min-w-0 flex-1">
+        <div className="text-[10px] text-muted-foreground mb-1 truncate">
+          {diff.fileId} · cell {diff.cellId}
+        </div>
+        <div className="text-xs line-through text-red-600 dark:text-red-400 leading-snug">
+          {diff.before}
+        </div>
+        <div className="text-xs text-green-700 dark:text-green-400 leading-snug">
+          {diff.after}
+        </div>
+        {diff.matchCount > 1 && (
+          <div className="mt-0.5 text-[10px] text-muted-foreground">
+            {diff.matchCount} replacements in this cell
+          </div>
+        )}
+      </div>
+    </label>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Result row (search mode)
 // ---------------------------------------------------------------------------
 function ResultRow({
   result,
@@ -186,6 +273,179 @@ function ResultsLoadingSkeleton() {
 }
 
 // ---------------------------------------------------------------------------
+// Replace mode section
+// ---------------------------------------------------------------------------
+interface ReplaceSectionProps {
+  query: string
+  results: WorkspaceSearchResult[]
+  isReadOnly: boolean
+  onAfterReplace?: (payload: ReplaceAllPayload) => Promise<void> | void
+}
+
+function ReplaceSection({ query, results, isReadOnly, onAfterReplace }: ReplaceSectionProps) {
+  const [replaceValue, setReplaceValue] = useState("")
+  const [retainValidations, setRetainValidations] = useState(false)
+  const [applying, setApplying] = useState(false)
+  const [lastResult, setLastResult] = useState<{ replaced: number; skipped: number } | null>(null)
+
+  // Compute diffs from results on every keystroke (pure, cheap).
+  const candidates = results
+    .filter((r) => !r.original) // target-side only for replace
+    .map((r) => ({
+      cellId: r.cellId,
+      fileId: r.fileId,
+      rawValue: r.translated,
+      parentId: null, // ProjectWorkspace fills in the real parentId via onReplaceAll
+      sourceEventId: null,
+    }))
+
+  const { diffs, totalReplaced, totalSkipped } =
+    query.trim() && replaceValue !== undefined
+      ? computeReplaceDiffs(candidates, query, replaceValue)
+      : { diffs: [], totalReplaced: 0, totalSkipped: 0 }
+
+  const [selected, setSelected] = useState<Set<string>>(new Set(diffs.map((d) => d.cellId)))
+
+  // Sync selection when diffs change (new query / replace value).
+  useEffect(() => {
+    setSelected(new Set(diffs.map((d) => d.cellId)))
+  }, [diffs.length, query, replaceValue]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  function toggleCell(cellId: string) {
+    setSelected((prev) => {
+      const next = new Set(prev)
+      if (next.has(cellId)) next.delete(cellId); else next.add(cellId)
+      return next
+    })
+  }
+
+  const selectedDiffs = diffs.filter((d) => selected.has(d.cellId))
+
+  async function handleApply() {
+    if (!selectedDiffs.length || applying || isReadOnly) return
+    setApplying(true)
+    const payload: ReplaceAllPayload = {
+      diffs: selectedDiffs,
+      totalReplaced,
+      totalSkipped,
+      findQuery: query,
+      replaceQuery: replaceValue,
+      retainValidations,
+    }
+    try {
+      await onAfterReplace?.(payload)
+      setLastResult({ replaced: selectedDiffs.reduce((n, d) => n + d.matchCount, 0), skipped: totalSkipped })
+    } finally {
+      setApplying(false)
+    }
+  }
+
+  return (
+    <div className="flex flex-col gap-2">
+      {/* Replace input */}
+      <Input
+        placeholder="Replacement text…"
+        value={replaceValue}
+        onChange={(e) => setReplaceValue(e.target.value)}
+        className="h-9 text-sm"
+        aria-label="Replacement text"
+        disabled={isReadOnly || applying}
+      />
+
+      {/* Retain validations toggle */}
+      <label className="flex items-center gap-2 text-xs text-muted-foreground select-none cursor-pointer">
+        <input
+          type="checkbox"
+          checked={retainValidations}
+          onChange={(e) => setRetainValidations(e.target.checked)}
+          className="rounded"
+          disabled={isReadOnly || applying}
+        />
+        <span>Retain my validations</span>
+        <span
+          className="text-[10px] text-muted-foreground/60"
+          title="When on, prior reviewer validations carry forward to the new cell version instead of being dropped."
+        >
+          (?)
+        </span>
+      </label>
+
+      {/* Skipped count notice */}
+      {totalSkipped > 0 && (
+        <p className="text-xs text-amber-600 dark:text-amber-400" role="note">
+          {totalSkipped} match{totalSkipped !== 1 ? "es" : ""} skipped — spans HTML tag boundary.
+        </p>
+      )}
+
+      {/* Last apply result toast-like message */}
+      {lastResult && (
+        <p className="text-xs text-green-700 dark:text-green-400" role="status" aria-live="polite">
+          Replaced {lastResult.replaced} cell{lastResult.replaced !== 1 ? "s" : ""}
+          {lastResult.skipped > 0 ? ` (${lastResult.skipped} skipped — HTML boundary)` : ""}.
+        </p>
+      )}
+
+      {/* Diff preview list */}
+      {diffs.length > 0 && (
+        <>
+          <div className="flex items-center justify-between text-xs text-muted-foreground px-1">
+            <span>{diffs.length} cell{diffs.length !== 1 ? "s" : ""} affected</span>
+            <div className="flex gap-2">
+              <button
+                type="button"
+                className="underline"
+                onClick={() => setSelected(new Set(diffs.map((d) => d.cellId)))}
+              >
+                Select all
+              </button>
+              <button
+                type="button"
+                className="underline"
+                onClick={() => setSelected(new Set())}
+              >
+                Select none
+              </button>
+            </div>
+          </div>
+          <div className="flex flex-col gap-0.5 max-h-48 overflow-y-auto rounded-lg border border-border bg-background" role="list" aria-label="Cells to replace">
+            {diffs.map((diff) => (
+              <DiffPreviewRow
+                key={diff.cellId}
+                diff={diff}
+                selected={selected.has(diff.cellId)}
+                onToggle={toggleCell}
+              />
+            ))}
+          </div>
+        </>
+      )}
+
+      {/* Apply button */}
+      <button
+        type="button"
+        disabled={!selectedDiffs.length || applying || isReadOnly || !onAfterReplace}
+        onClick={handleApply}
+        title={
+          isReadOnly
+            ? "Replace requires contributor access on these files"
+            : !onAfterReplace
+            ? "Replace is not yet wired — see SWARM-TODO in ParallelPassagesPanel.tsx"
+            : undefined
+        }
+        className={cn(
+          "inline-flex h-8 items-center justify-center rounded-lg px-4 text-xs font-medium transition-colors",
+          "bg-primary text-primary-foreground hover:bg-primary/90",
+          "disabled:pointer-events-none disabled:opacity-50",
+        )}
+        aria-busy={applying}
+      >
+        {applying ? "Applying…" : `Replace ${selectedDiffs.length > 0 ? selectedDiffs.length : "All"}`}
+      </button>
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
 // Panel
 // ---------------------------------------------------------------------------
 const DEBOUNCE_MS = 250
@@ -207,7 +467,15 @@ export function ParallelPassagesPanel(props: ParallelPassagesPanelProps) {
     onClear,
     onClearResults,
     onSelect,
+    onReplaceAll,
+    isReadOnly = false,
+    onAfterReplace,
   } = props
+
+  // onAfterReplace is the old name passed by ProjectWorkspace (already in the
+  // call site as an extra prop); onReplaceAll is the new typed prop. Prefer
+  // the typed one; fall back to the extra-prop version.
+  const replaceHandler = (onReplaceAll as ((p: ReplaceAllPayload) => Promise<void> | void) | undefined) ?? (onAfterReplace as ((p: ReplaceAllPayload) => Promise<void> | void) | undefined)
 
   const clearResults = onClearResults ?? onClear
 
@@ -215,6 +483,13 @@ export function ParallelPassagesPanel(props: ParallelPassagesPanelProps) {
   const [side, setSide] = useState<ParallelPanelSide>("both")
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const inputRef = useRef<HTMLInputElement | null>(null)
+
+  // When replace mode is opened, auto-switch side to "target".
+  useEffect(() => {
+    if (mode === "replace") {
+      setSide("target")
+    }
+  }, [mode])
 
   // Focus the input when the dialog opens.
   useEffect(() => {
@@ -237,10 +512,11 @@ export function ParallelPassagesPanel(props: ParallelPassagesPanelProps) {
         onSearchPassages?.(q)
         return
       }
+      const effectiveSide: ParallelPanelSide = currentMode === "replace" ? "target" : currentSide
       const opts: SearchOptions = {
         scope: currentScope === "file" ? "file" : "project",
         fileId: currentScope === "file" ? (activeFileId ?? undefined) : undefined,
-        side: currentSide === "both" ? undefined : currentSide,
+        side: effectiveSide === "both" ? undefined : effectiveSide,
       }
       onSearch?.(q, opts)
     },
@@ -272,6 +548,8 @@ export function ParallelPassagesPanel(props: ParallelPassagesPanelProps) {
   }
 
   const handleSideChange = (s: ParallelPanelSide) => {
+    // In replace mode, side is always "target" — ignore attempts to change.
+    if (mode === "replace") return
     setSide(s)
     if (query.trim()) {
       if (debounceRef.current) clearTimeout(debounceRef.current)
@@ -299,6 +577,8 @@ export function ParallelPassagesPanel(props: ParallelPassagesPanelProps) {
   const inputPlaceholder =
     mode === "passages"
       ? "Search parallel passages across all projects…"
+      : mode === "replace"
+      ? `Find in ${scope === "file" ? scopeLabel.toLowerCase() : "project"}…`
       : `Search ${scope === "file" ? scopeLabel.toLowerCase() : "project"}…`
 
   return (
@@ -307,7 +587,7 @@ export function ParallelPassagesPanel(props: ParallelPassagesPanelProps) {
         {/* Visually-hidden title for screen readers */}
         <DialogHeader className="sr-only">
           <DialogTitle>
-            {mode === "passages" ? "Parallel passages" : "Search"} —{" "}
+            {mode === "passages" ? "Parallel passages" : mode === "replace" ? "Search and Replace" : "Search"} —{" "}
             {scope === "file" ? scopeLabel : "entire project"}
           </DialogTitle>
         </DialogHeader>
@@ -336,24 +616,26 @@ export function ParallelPassagesPanel(props: ParallelPassagesPanelProps) {
             options={[
               { label: "Search", value: "search" },
               { label: "Passages", value: "passages" },
-              { label: "Replace", value: "replace", disabled: true },
+              { label: "Replace", value: "replace" },
             ]}
             onChange={handleModeChange}
           />
-          <PillToggle<ParallelPanelSide>
-            value={side}
-            label="Content side"
-            options={[
-              { label: "Both", value: "both" },
-              { label: "Source", value: "source" },
-              { label: "Target", value: "target" },
-            ]}
-            onChange={handleSideChange}
-          />
+          {mode !== "replace" && (
+            <PillToggle<ParallelPanelSide>
+              value={side}
+              label="Content side"
+              options={[
+                { label: "Both", value: "both" },
+                { label: "Source", value: "source" },
+                { label: "Target", value: "target" },
+              ]}
+              onChange={handleSideChange}
+            />
+          )}
         </div>
 
-        {/* Search input */}
-        <div className="px-4 pb-3 shrink-0">
+        {/* Search input (find) */}
+        <div className="px-4 pb-3 shrink-0 flex flex-col gap-2">
           <Input
             ref={inputRef}
             placeholder={inputPlaceholder}
@@ -365,16 +647,23 @@ export function ParallelPassagesPanel(props: ParallelPassagesPanelProps) {
             aria-busy={loading}
           />
           {scope === "file" && !activeFileId && (
-            <p className="mt-1.5 text-xs text-muted-foreground" role="note">
+            <p className="text-xs text-muted-foreground" role="note">
               Open a file to enable file-scoped search.
             </p>
           )}
+
+          {/* Replace section — shown when mode === "replace" */}
           {mode === "replace" && (
-            <div
-              className="mt-2 rounded-xl border border-dashed border-muted-foreground/25 bg-muted/30 px-3 py-2.5 text-xs text-muted-foreground"
-              role="note"
-            >
-              Bulk replace is coming soon — search works now.
+            <div className="rounded-xl border border-border bg-muted/20 px-3 py-3 flex flex-col gap-3">
+              <div className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+                Replace (target cells only)
+              </div>
+              <ReplaceSection
+                query={query}
+                results={results}
+                isReadOnly={isReadOnly as boolean}
+                onAfterReplace={replaceHandler}
+              />
             </div>
           )}
         </div>
@@ -388,6 +677,8 @@ export function ParallelPassagesPanel(props: ParallelPassagesPanelProps) {
               <p className="px-3 py-8 text-center text-sm text-muted-foreground select-none" aria-live="polite">
                 {mode === "passages"
                   ? "Type to find parallel passages — results show source and target side by side."
+                  : mode === "replace"
+                  ? "Type a search term above to find target cells for replacement."
                   : `Type to search across ${scope === "file" ? "the open file" : "the project"}.`}
               </p>
             )}

@@ -112,6 +112,18 @@ export interface OutboxEventPayloads {
      * time. Null when no source counterpart exists (target-owned cell).
      */
     sourceEventId?: string | null
+    /**
+     * FRO-177 / search-and-replace: when true, the cell-service projector
+     * re-anchors prior validations to the new head rather than dropping them
+     * (Q25 event-anchoring override). Only set by the replace-all path.
+     */
+    retain_validations?: boolean
+    /**
+     * FRO-177: audit metadata for replace operations. Records the find/replace
+     * query strings for per-cell history display and audit log.
+     */
+    search_query?: string
+    replace_string?: string
   }
   "target.cell.delete": Record<string, never>
   "target.cell.reorder": {

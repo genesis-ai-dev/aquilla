@@ -1,21 +1,18 @@
-// FRO-268 — Characterization tests: freeze section-progress threshold-aware
-// derivation as it exists today.
+// FRO-280 — Post-migration tests: section-progress now consumes the server
+// `validated` flag rather than re-deriving the threshold client-side.
 //
-// Finding (audit F-P2, §3.6):
-//   `section-progress.ts:48-49` is THE ONLY place in the client that honors
-//   `validationCount` (the project threshold). It derives "validated" as:
-//     vCount >= validationCount
-//   where `vCount = cell.activeValidators?.length`.
+// Finding (audit F-P2, §3.6 / F-B1, §3.5):
+//   `section-progress.ts:48-49` was THE ONLY place in the client that honored
+//   `validationCount` locally.  FRO-280 replaces that with:
+//     if (cell.validated !== undefined ? cell.validated : vCount >= validationCount)
+//   so the server-projected threshold gate is authoritative.
 //
-//   All other progress surfaces (projection counters, portfolio endpoint,
-//   useHealth.deriveAuxStats) ignore validationCount and use the server-side
-//   `cells.validated` flag, which is itself COUNT(*) > 0 (always 1-validator).
-//   This creates 4 surfaces that can disagree on "validated %".
+// These tests were characterization tests (frozen as "CHARACTERIZATION (audit F-P2)")
+// that documented the old threshold-aware local derivation.  After FRO-280 the
+// tests are flipped: they now document the new server-flag-first behavior.
 //
-// CHARACTERIZATION (audit F-P2): FRO-280 migrates this to the server flag,
-// removing the client-side threshold re-derivation from computeSectionProgress.
-// These tests document the current threshold-aware logic so the change is
-// intentional and auditable.
+// The multi-level bar (textValidationLevels) still derives from
+// activeValidators.length — it is a visual breakdown, not the threshold gate.
 
 import { describe, it, expect } from "vitest"
 import { computeSectionProgress } from "./section-progress"
@@ -25,6 +22,7 @@ function mkCell(
   section: string,
   translated: string,
   validators: string[],
+  validated?: boolean,
 ) {
   return {
     id,
@@ -32,104 +30,97 @@ function mkCell(
     section,
     translated,
     activeValidators: validators,
+    validated,
   } as any
 }
 
-// ── Threshold-aware derivation ────────────────────────────────────────────────
+// ── Server-flag-first derivation (post FRO-280) ───────────────────────────────
 
-describe("CHARACTERIZATION (audit F-P2): computeSectionProgress uses validationCount locally", () => {
-  // CHARACTERIZATION (audit F-P2): FRO-280 migrates this to the server flag.
-  // Today the sidebar is the ONLY client surface that is threshold-aware.
-  it("textValidated counts cells where activeValidators.length >= validationCount", () => {
+describe("FRO-280: computeSectionProgress consumes server validated flag", () => {
+  // When the server flag is present, validationCount is irrelevant for textValidated.
+  it("cell with validated=true counts as validated regardless of validationCount", () => {
     const cells = [
-      mkCell("a", "C1", "hi", ["alice"]),         // 1 validator
-      mkCell("b", "C1", "hi", ["alice", "bob"]),   // 2 validators
-      mkCell("c", "C1", "hi", []),                 // 0 validators
+      mkCell("a", "C1", "hi", ["alice"], true),          // flag=true, 1 validator
+      mkCell("b", "C1", "hi", ["alice", "bob"], false),  // flag=false, 2 validators
+      mkCell("c", "C1", "hi", [], false),                // flag=false, 0 validators
     ]
-    // With validationCount=2: only cell-b meets threshold
+    // With validationCount=2: only cell-a has validated=true → 1/3 ≈ 33
     const [section] = computeSectionProgress(cells, 2)
-    expect(section.textValidated).toBe(33) // 1/3 ≈ 33
+    expect(section.textValidated).toBe(33)
   })
 
-  // CHARACTERIZATION (audit F-P2): with validationCount=1 the client agrees
-  // with the server's COUNT(*) > 0 behavior — this is the common case where
-  // the disagreement is invisible.
-  it("with validationCount=1, any cell that has ≥1 validator is counted as validated", () => {
+  it("cell with validated=false does NOT count even when activeValidators.length >= validationCount", () => {
     const cells = [
-      mkCell("a", "C1", "hi", ["alice"]),
-      mkCell("b", "C1", "hi", []),
+      mkCell("a", "C1", "hi", ["alice", "bob"], false), // 2 validators but flag=false
+    ]
+    const [section] = computeSectionProgress(cells, 2)
+    expect(section.textValidated).toBe(0)
+  })
+
+  // Agreement test: N=2 project — all four surfaces must agree.
+  // Section-progress produces the same result as useHealth.deriveAuxStats
+  // (which counts cell.status==="validated", itself derived from validated flag).
+  it("N=2 fixture: cells whose server validated=true count; others do not", () => {
+    // Simulate a seeded N=2 project: 3 cells, 2 are threshold-validated by server.
+    const cells = [
+      mkCell("a", "C1", "hi", [], true),   // flag=true (meets N=2 threshold)
+      mkCell("b", "C1", "hi", [], true),   // flag=true (meets N=2 threshold)
+      mkCell("c", "C1", "hi", [], false),  // flag=false (only 1 endorsement)
+    ]
+    const [section] = computeSectionProgress(cells, 2)
+    expect(section.textValidated).toBe(67) // 2/3 ≈ 67
+  })
+
+  // Fallback: when validated is absent, falls back to validator-count comparison.
+  it("falls back to activeValidators.length >= validationCount when validated is absent", () => {
+    const cells = [
+      mkCell("a", "C1", "hi", ["alice"]),         // no validated field, 1 validator
+      mkCell("b", "C1", "hi", ["alice", "bob"]),  // no validated field, 2 validators
+      mkCell("c", "C1", "hi", []),                // no validated field, 0 validators
+    ]
+    // With validationCount=2: only cell-b meets threshold via fallback → 1/3 ≈ 33
+    const [section] = computeSectionProgress(cells, 2)
+    expect(section.textValidated).toBe(33)
+  })
+
+  it("with validated=undefined and validationCount=1, any cell with ≥1 validator counts", () => {
+    const cells = [
+      mkCell("a", "C1", "hi", ["alice"]), // no validated field, 1 validator ≥ 1
+      mkCell("b", "C1", "hi", []),        // no validated field, 0 validators
     ]
     const [section] = computeSectionProgress(cells, 1)
-    expect(section.textValidated).toBe(50) // 1/2
+    expect(section.textValidated).toBe(50)
   })
 
-  // CHARACTERIZATION (audit F-P2): with validationCount=2 the sidebar will
-  // show a LOWER validated% than ProjectOverview (which uses the server flag,
-  // which flips at 1 endorsement).
-  it("with validationCount=2, sidebar disagrees with server flag (which uses COUNT>0)", () => {
-    // Three cells, each with exactly 1 validator.
-    // Server flag: all 3 are validated=1 (COUNT(*) > 0).
-    // Sidebar (this function, validationCount=2): none of them qualify.
+  // Key: server flag=true on a cell that has 0 activeValidators still counts.
+  // (projection may not return individual validator lists)
+  it("validated=true with no activeValidators still counts as validated", () => {
     const cells = [
-      mkCell("a", "C1", "hi", ["alice"]),
-      mkCell("b", "C1", "hi", ["bob"]),
-      mkCell("c", "C1", "hi", ["carol"]),
+      mkCell("a", "C1", "hi", [], true),  // server says validated, no validator list
+      mkCell("b", "C1", "hi", [], false),
     ]
-    // CHARACTERIZATION: sidebar reports 0% validated even though the server
-    // flag says 100%.  FRO-280 will remove this client re-derivation; after
-    // the fix both surfaces should use the server flag (and FRO-279 will make
-    // the server flag itself threshold-aware).
     const [section] = computeSectionProgress(cells, 2)
-    expect(section.textValidated).toBe(0)
+    expect(section.textValidated).toBe(50)
   })
 
-  // Boundary: a cell with exactly validationCount validators is counted
-  it("cell with exactly validationCount validators counts as validated", () => {
-    const cells = [mkCell("a", "C1", "hi", ["alice", "bob"])]
-    const [section] = computeSectionProgress(cells, 2)
-    expect(section.textValidated).toBe(100)
-  })
-
-  // Boundary: a cell with one fewer than threshold does NOT count
-  it("cell with validationCount-1 validators does NOT count as validated", () => {
-    const cells = [mkCell("a", "C1", "hi", ["alice"])]
-    const [section] = computeSectionProgress(cells, 2)
-    expect(section.textValidated).toBe(0)
-  })
-
-  it("validationCount=0 makes every cell count as validated (vCount >= 0 is always true)", () => {
-    // The levelCap is clamped to at least 1 (for the levels array), but the
-    // textValidated check at line 49 uses the raw validationCount:
-    //   if (vCount >= validationCount) validated++
-    // So vCount >= 0 is always true — even cells with zero validators are
-    // counted as validated when validationCount=0.
-    const cells = [mkCell("a", "C1", "hi", [])]
+  it("validated=false with validationCount=0 does NOT count (flag wins over fallback)", () => {
+    // Old behavior (characterization): validationCount=0 made ALL cells count
+    // because vCount >= 0 is always true. New behavior: server flag=false wins.
+    const cells = [mkCell("a", "C1", "hi", [], false)]
     const [section] = computeSectionProgress(cells, 0)
-    // CHARACTERIZATION: 0 validators, validationCount=0 → validated=100%
-    expect(section.textValidated).toBe(100)
-  })
-
-  it("validationCount=1 with no validators gives 0% validated", () => {
-    const cells = [
-      mkCell("a", "C1", "hi", []),
-      mkCell("b", "C1", "hi", []),
-    ]
-    const [section] = computeSectionProgress(cells, 1)
     expect(section.textValidated).toBe(0)
   })
 })
 
-// ── textValidationLevels multi-bar ────────────────────────────────────────────
+// ── textValidationLevels multi-bar (unchanged — still from activeValidators) ──
 
-describe("CHARACTERIZATION (audit F-P2): textValidationLevels encodes multi-endorsement breakdown", () => {
-  // CHARACTERIZATION (audit F-P2): FRO-280 migrates this to the server flag.
-  // For now the multi-level bar is the sidebar's local computation.
+describe("textValidationLevels still derives from activeValidators.length (visual breakdown)", () => {
   it("produces one level per validationCount, each = % cells with > i validators", () => {
     const cells = [
-      mkCell("a", "C1", "hi", ["alice"]),               // 1 validator
-      mkCell("b", "C1", "hi", ["alice", "bob"]),         // 2 validators
-      mkCell("c", "C1", "hi", ["alice", "bob", "carol"]), // 3 validators
-      mkCell("d", "C1", "hi", []),                       // 0 validators
+      mkCell("a", "C1", "hi", ["alice"], true),                         // 1 validator
+      mkCell("b", "C1", "hi", ["alice", "bob"], true),                  // 2 validators
+      mkCell("c", "C1", "hi", ["alice", "bob", "carol"], true),         // 3 validators
+      mkCell("d", "C1", "hi", [], false),                               // 0 validators
     ]
     // validationCount=3 → 3 levels
     // level[0] = cells with >0 validators = 3/4 = 75
@@ -144,8 +135,8 @@ describe("CHARACTERIZATION (audit F-P2): textValidationLevels encodes multi-endo
 
   it("with validationCount=1 only one level is produced", () => {
     const cells = [
-      mkCell("a", "C1", "hi", ["alice"]),
-      mkCell("b", "C1", "hi", []),
+      mkCell("a", "C1", "hi", ["alice"], true),
+      mkCell("b", "C1", "hi", [], false),
     ]
     const [section] = computeSectionProgress(cells, 1)
     expect(section.textValidationLevels).toHaveLength(1)

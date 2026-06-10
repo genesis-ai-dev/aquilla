@@ -10,6 +10,9 @@ vi.mock("@/lib/terminology/store", () => ({
   addConcept: vi.fn(),
   updateConcept: vi.fn(),
   deleteConcept: vi.fn(),
+  mergeConcepts: vi.fn(),
+  approveConcept: vi.fn(),
+  rejectConcept: vi.fn(),
 }))
 vi.mock("@/lib/terminology/csv", () => ({
   importConceptsCsv: vi.fn(),
@@ -18,6 +21,19 @@ vi.mock("@/lib/terminology/csv", () => ({
 vi.mock("@/lib/terminology/tbx", () => ({
   importConceptsTbx: vi.fn(),
   exportConceptsTbx: vi.fn(),
+}))
+
+// ── Mock hooks that need external providers ───────────────────────────────
+vi.mock("@/hooks/useFrontierSession", () => ({
+  useFrontierSession: () => ({ session: null, loading: false }),
+}))
+
+vi.mock("@/lib/sync/cqrs-bridge", () => ({
+  buildFileScopedTokenFetcher: () => async (_fileId: string) => null,
+}))
+
+vi.mock("@/hooks/useProjectCells", () => ({
+  useProjectCells: () => ({ files: [], isTruncated: false }),
 }))
 
 // ── Mock useProject so tests don't need a real session/IDB ───────────────
@@ -39,7 +55,7 @@ vi.mock("@/hooks/useProject", () => ({
   })),
 }))
 
-import { addConcept, deleteConcept } from "@/lib/terminology/store"
+import { addConcept, deleteConcept, approveConcept, rejectConcept, mergeConcepts } from "@/lib/terminology/store"
 import { importConceptsCsv } from "@/lib/terminology/csv"
 import { useProject } from "@/hooks/useProject"
 
@@ -259,6 +275,233 @@ describe("TerminologyPage", () => {
     await waitFor(() => {
       expect(mockPatchSettings).toHaveBeenCalledWith(
         expect.objectContaining({ terminology: expect.arrayContaining([imported]) }),
+      )
+    })
+  })
+
+  // ── Review queue ───────────────────────────────────────────────────────────
+
+  it("Review queue tab shows draft concepts", async () => {
+    const draft = makeConcept({ id: "d1", sourceTerm: "ψυχή", status: "draft" })
+    const projectWithDraft = makeProjectWithConcepts([draft])
+
+    vi.mocked(useProject).mockReturnValue({
+      project: projectWithDraft,
+      loading: false,
+      status: "ready",
+      isError: false,
+      refresh: vi.fn(),
+      patchSettings: mockPatchSettings,
+    })
+
+    renderPage()
+
+    // Switch to Queue tab
+    fireEvent.click(screen.getByRole("button", { name: /Review queue/i }))
+
+    // The queue row should be visible
+    await waitFor(() => {
+      expect(screen.getByTestId("queue-row")).toBeInTheDocument()
+    })
+    expect(screen.getByText("ψυχή")).toBeInTheDocument()
+  })
+
+  it("Approve action calls approveConcept and persists", async () => {
+    const draft = makeConcept({ id: "d1", sourceTerm: "ψυχή", status: "draft" })
+    const projectWithDraft = makeProjectWithConcepts([draft])
+    const projectAfterApprove = makeProjectWithConcepts([
+      { ...draft, status: "active" },
+    ])
+
+    vi.mocked(useProject).mockReturnValue({
+      project: projectWithDraft,
+      loading: false,
+      status: "ready",
+      isError: false,
+      refresh: vi.fn(),
+      patchSettings: mockPatchSettings,
+    })
+
+    vi.mocked(approveConcept).mockReturnValueOnce(projectAfterApprove)
+    mockPatchSettings.mockImplementationOnce(async () => {
+      vi.mocked(useProject).mockReturnValue({
+        project: projectAfterApprove,
+        loading: false,
+        status: "ready",
+        isError: false,
+        refresh: vi.fn(),
+        patchSettings: mockPatchSettings,
+      })
+      return { kind: "ok" }
+    })
+
+    renderPage()
+    fireEvent.click(screen.getByRole("button", { name: /Review queue/i }))
+
+    await waitFor(() => expect(screen.getByTestId("queue-row")).toBeInTheDocument())
+
+    fireEvent.click(screen.getByRole("button", { name: /Approve concept ψυχή/i }))
+
+    await waitFor(() => {
+      expect(approveConcept).toHaveBeenCalledWith(
+        expect.objectContaining({ id: "test-project-id" }),
+        "d1",
+      )
+    })
+
+    await waitFor(() => {
+      expect(mockPatchSettings).toHaveBeenCalledWith(
+        expect.objectContaining({
+          terminology: expect.arrayContaining([
+            expect.objectContaining({ status: "active" }),
+          ]),
+        }),
+      )
+    })
+  })
+
+  it("Reject action calls rejectConcept and persists", async () => {
+    const draft = makeConcept({ id: "d1", sourceTerm: "ψυχή", status: "draft" })
+    const projectWithDraft = makeProjectWithConcepts([draft])
+    const projectAfterReject = makeProjectWithConcepts([])
+
+    vi.mocked(useProject).mockReturnValue({
+      project: projectWithDraft,
+      loading: false,
+      status: "ready",
+      isError: false,
+      refresh: vi.fn(),
+      patchSettings: mockPatchSettings,
+    })
+
+    vi.mocked(rejectConcept).mockReturnValueOnce(projectAfterReject)
+    mockPatchSettings.mockImplementationOnce(async () => {
+      vi.mocked(useProject).mockReturnValue({
+        project: projectAfterReject,
+        loading: false,
+        status: "ready",
+        isError: false,
+        refresh: vi.fn(),
+        patchSettings: mockPatchSettings,
+      })
+      return { kind: "ok" }
+    })
+
+    renderPage()
+    fireEvent.click(screen.getByRole("button", { name: /Review queue/i }))
+
+    await waitFor(() => expect(screen.getByTestId("queue-row")).toBeInTheDocument())
+
+    fireEvent.click(screen.getByRole("button", { name: /Reject concept ψυχή/i }))
+
+    await waitFor(() => {
+      expect(rejectConcept).toHaveBeenCalledWith(
+        expect.objectContaining({ id: "test-project-id" }),
+        "d1",
+        "delete",
+      )
+    })
+  })
+
+  it("Review queue shows empty state when no drafts exist", async () => {
+    renderPage()
+    fireEvent.click(screen.getByRole("button", { name: /Review queue/i }))
+    await waitFor(() => {
+      expect(screen.getByTestId("review-queue-empty")).toBeInTheDocument()
+    })
+  })
+
+  // ── Merge duplicates ────────────────────────────────────────────────────────
+
+  it("Merge duplicates dialog opens when 2+ concepts exist and user can manage", async () => {
+    const c1 = makeConcept({ id: "c1", sourceTerm: "spirit" })
+    const c2 = makeConcept({ id: "c2", sourceTerm: "breath" })
+    const projectWith2 = makeProjectWithConcepts([c1, c2])
+
+    vi.mocked(useProject).mockReturnValue({
+      project: projectWith2,
+      loading: false,
+      status: "ready",
+      isError: false,
+      refresh: vi.fn(),
+      patchSettings: mockPatchSettings,
+    })
+
+    renderPage()
+
+    // Merge duplicates button should be visible
+    const mergeBtn = screen.getByTestId("merge-duplicates-btn")
+    expect(mergeBtn).toBeInTheDocument()
+
+    fireEvent.click(mergeBtn)
+
+    const dialog = await screen.findByRole("dialog", { hidden: true })
+    expect(within(dialog).getByText(/Merge duplicate concepts/i)).toBeInTheDocument()
+  })
+
+  it("Merge flow: select 2, preview, confirm calls mergeConcepts and persists", async () => {
+    const c1 = makeConcept({ id: "c1", sourceTerm: "spirit" })
+    const c2 = makeConcept({ id: "c2", sourceTerm: "breath" })
+    const projectWith2 = makeProjectWithConcepts([c1, c2])
+    const projectAfterMerge = makeProjectWithConcepts([c1]) // c2 removed
+
+    vi.mocked(useProject).mockReturnValue({
+      project: projectWith2,
+      loading: false,
+      status: "ready",
+      isError: false,
+      refresh: vi.fn(),
+      patchSettings: mockPatchSettings,
+    })
+
+    vi.mocked(mergeConcepts).mockReturnValueOnce(projectAfterMerge)
+    mockPatchSettings.mockImplementationOnce(async () => {
+      vi.mocked(useProject).mockReturnValue({
+        project: projectAfterMerge,
+        loading: false,
+        status: "ready",
+        isError: false,
+        refresh: vi.fn(),
+        patchSettings: mockPatchSettings,
+      })
+      return { kind: "ok" }
+    })
+
+    renderPage()
+
+    // Open merge dialog
+    fireEvent.click(screen.getByTestId("merge-duplicates-btn"))
+    const dialog = await screen.findByRole("dialog", { hidden: true })
+    const q = within(dialog)
+
+    // Select both concepts (rows are buttons)
+    const rows = q.getAllByTestId("merge-concept-row")
+    expect(rows).toHaveLength(2)
+    fireEvent.click(rows[0]) // select c1 (spirit)
+    fireEvent.click(rows[1]) // select c2 (breath)
+
+    // Advance to preview
+    fireEvent.click(q.getByRole("button", { name: /Preview merge/i }))
+
+    // Preview should be shown
+    await waitFor(() => {
+      expect(q.getByTestId("merge-preview")).toBeInTheDocument()
+    })
+
+    // Confirm merge
+    fireEvent.click(q.getByRole("button", { name: /Confirm merge/i }))
+
+    await waitFor(() => {
+      expect(mergeConcepts).toHaveBeenCalledWith(
+        expect.objectContaining({ id: "test-project-id" }),
+        ["c1", "c2"],
+        "c1",
+      )
+    })
+
+    await waitFor(() => {
+      expect(mockPatchSettings).toHaveBeenCalledWith(
+        expect.objectContaining({ terminology: [c1] }),
       )
     })
   })

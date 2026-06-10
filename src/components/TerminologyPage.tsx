@@ -32,7 +32,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Badge } from "@/components/ui/badge"
 import type { Concept, TermRendering, RenderingStatus } from "@/lib/terminology/types"
-import { addConcept, updateConcept, deleteConcept } from "@/lib/terminology/store"
+import { addConcept, updateConcept, deleteConcept, mergeConcepts, approveConcept, rejectConcept } from "@/lib/terminology/store"
 import { importConceptsCsv, exportConceptsCsv } from "@/lib/terminology/csv"
 import { importConceptsTbx, exportConceptsTbx } from "@/lib/terminology/tbx"
 import { computeTerminologyStats } from "@/lib/terminology/stats"
@@ -47,6 +47,8 @@ import { CandidateTermsPanel } from "@/components/CandidateTermsPanel"
 import { extractCandidates } from "@/lib/terminology/candidates"
 import type { CandidateTerm } from "@/lib/terminology/candidates"
 import { TerminologyViolationsInbox } from "@/components/TerminologyViolationsInbox"
+import { TerminologyReviewQueue } from "@/components/TerminologyReviewQueue"
+import { TerminologyMergeDialog } from "@/components/TerminologyMergeDialog"
 
 // ────────────────────────────────────────────────────────────────────────────
 // Rendering status chip helpers
@@ -754,7 +756,13 @@ export function TerminologyPage() {
     return texts
   }, [allCells])
 
-  const [tab, setTab] = useState<"concepts" | "candidates" | "violations">("concepts")
+  const [tab, setTab] = useState<"concepts" | "queue" | "candidates" | "violations">("concepts")
+
+  // ── Draft concepts (review queue) ─────────────────────────────────────────
+  const draftConcepts = useMemo(() => concepts.filter((c) => c.status === "draft"), [concepts])
+
+  // ── Merge dialog state ────────────────────────────────────────────────────
+  const [mergeOpen, setMergeOpen] = useState(false)
 
   // ── Candidate mining (lazy, off-thread) ─────────────────────────────────────
   // The C-value/NC-value/G² stack is super-linear in corpus size, but mining
@@ -981,6 +989,37 @@ export function TerminologyPage() {
     [project],
   )
 
+  // ── Review queue handlers ─────────────────────────────────────────────────
+
+  async function handleApprove(conceptId: string) {
+    if (!project) return
+    try {
+      const updated = approveConcept(project, conceptId)
+      await persistConcepts(updated.terminology ?? [])
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Approve failed")
+    }
+  }
+
+  async function handleReject(conceptId: string) {
+    if (!project) return
+    try {
+      // Reject = delete (removes draft from list entirely)
+      const updated = rejectConcept(project, conceptId, "delete")
+      await persistConcepts(updated.terminology ?? [])
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Reject failed")
+    }
+  }
+
+  // ── Merge handler ─────────────────────────────────────────────────────────
+
+  async function handleMerge(mergeIds: string[], survivorId: string) {
+    if (!project) return
+    const updated = mergeConcepts(project, mergeIds, survivorId)
+    await persistConcepts(updated.terminology ?? [])
+  }
+
   async function handleImported(imported: Concept[]) {
     if (!project) return
     // Merge by sourceTerm dedup — imported wins on collision
@@ -1092,32 +1131,54 @@ export function TerminologyPage() {
         {/* Stats header — derived on read, no persistence */}
         <LibraryStatsHeader concepts={concepts} cells={cellPairs} />
 
-        {/* Tab strip: managed Concepts vs mined Candidate terms */}
-        <div className="inline-flex rounded-md border p-0.5 text-sm">
-          {([
-            { key: "concepts", label: `Concepts (${concepts.length})` },
-            {
-              key: "candidates",
-              label: candidatesReady
-                ? `Candidate terms (${candidates.length})`
-                : "Candidate terms",
-            },
-            { key: "violations", label: "Violations" },
-          ] as const).map((t) => (
-            <button
-              key={t.key}
-              type="button"
-              onClick={() => setTab(t.key)}
-              className={cn(
-                "rounded px-3 py-1 transition-colors",
-                tab === t.key
-                  ? "bg-primary text-primary-foreground"
-                  : "text-muted-foreground hover:text-foreground",
-              )}
+        {/* Tab strip: managed Concepts vs review queue vs candidates vs violations */}
+        <div className="flex items-center gap-2">
+          <div className="inline-flex rounded-md border p-0.5 text-sm">
+            {([
+              { key: "concepts", label: `Concepts (${concepts.length})` },
+              {
+                key: "queue",
+                label:
+                  draftConcepts.length > 0
+                    ? `Review queue (${draftConcepts.length})`
+                    : "Review queue",
+              },
+              {
+                key: "candidates",
+                label: candidatesReady
+                  ? `Candidate terms (${candidates.length})`
+                  : "Candidate terms",
+              },
+              { key: "violations", label: "Violations" },
+            ] as const).map((t) => (
+              <button
+                key={t.key}
+                type="button"
+                onClick={() => setTab(t.key)}
+                className={cn(
+                  "rounded px-3 py-1 transition-colors",
+                  tab === t.key
+                    ? "bg-primary text-primary-foreground"
+                    : "text-muted-foreground hover:text-foreground",
+                )}
+              >
+                {t.label}
+              </button>
+            ))}
+          </div>
+
+          {/* Merge button — only show when there are 2+ concepts and user can manage */}
+          {concepts.length >= 2 && canManageTermbase && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setMergeOpen(true)}
+              aria-label="Merge duplicate concepts"
+              data-testid="merge-duplicates-btn"
             >
-              {t.label}
-            </button>
-          ))}
+              Merge duplicates
+            </Button>
+          )}
         </div>
 
         {tab === "violations" ? (
@@ -1128,6 +1189,20 @@ export function TerminologyPage() {
             cells={allCells}
             onJumpToCell={() => navigate(`/project/${id}`)}
           />
+        ) : tab === "queue" ? (
+          <Card>
+            <CardHeader>
+              <CardTitle>Review queue</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <TerminologyReviewQueue
+                draftConcepts={draftConcepts}
+                canManage={canManageTermbase}
+                onApprove={handleApprove}
+                onReject={handleReject}
+              />
+            </CardContent>
+          </Card>
         ) : tab === "candidates" ? (
           <Card>
             <CardHeader>
@@ -1241,6 +1316,14 @@ export function TerminologyPage() {
         open={importOpen}
         onOpenChange={setImportOpen}
         onImported={handleImported}
+      />
+
+      {/* Merge duplicates dialog */}
+      <TerminologyMergeDialog
+        open={mergeOpen}
+        onOpenChange={setMergeOpen}
+        concepts={concepts}
+        onMerge={handleMerge}
       />
     </div>
   )

@@ -13,6 +13,8 @@ import {
   resetProductTour,
   shouldAutoStartTour,
 } from "@/hooks/useProductTour"
+// Import step list directly for data-level assertions (no render harness needed).
+import { TOUR_STEPS } from "./ProductTour"
 
 const TOUR_DONE_KEY = "codex:productTourDone"
 const ONBOARDING_DONE_KEY = "codex:onboardingComplete"
@@ -76,5 +78,41 @@ describe("shouldAutoStartTour", () => {
     // That key must NOT affect the product tour flag.
     localStorage.setItem(ONBOARDING_DONE_KEY, "true")
     expect(shouldAutoStartTour()).toBe(true)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// FRO-262: TOUR_STEPS content correctness
+// ---------------------------------------------------------------------------
+
+describe("TOUR_STEPS — FRO-262 copy and anchor correctness", () => {
+  it("FRO-262: account-switcher step does not mention switching organizations", () => {
+    const step = TOUR_STEPS.find((s) => s.anchor === "account-switcher")
+    expect(step).toBeDefined()
+    expect(step!.body.toLowerCase()).not.toMatch(/switch.*org|org.*switch/i)
+    expect(step!.body.toLowerCase()).not.toContain("organization")
+  })
+
+  it("FRO-262: a step anchored to org-switcher exists", () => {
+    const step = TOUR_STEPS.find((s) => s.anchor === "org-switcher")
+    expect(step).toBeDefined()
+  })
+
+  it("FRO-262: org-switcher step body mentions organizations", () => {
+    const step = TOUR_STEPS.find((s) => s.anchor === "org-switcher")
+    expect(step).toBeDefined()
+    expect(step!.body.toLowerCase()).toMatch(/org/)
+  })
+
+  it("FRO-262: org-switcher step appears before nav steps (near start of tour)", () => {
+    const orgSwitcherIdx = TOUR_STEPS.findIndex((s) => s.anchor === "org-switcher")
+    const navOverviewIdx = TOUR_STEPS.findIndex((s) => s.anchor === "nav-overview")
+    // org-switcher should come before the nav items
+    expect(orgSwitcherIdx).toBeGreaterThan(-1)
+    expect(orgSwitcherIdx).toBeLessThan(navOverviewIdx)
+  })
+
+  it("FRO-262: splash step (anchor=null) still comes first", () => {
+    expect(TOUR_STEPS[0].anchor).toBeNull()
   })
 })

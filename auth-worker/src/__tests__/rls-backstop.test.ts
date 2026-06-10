@@ -28,7 +28,7 @@
 
 import { describe, it, expect, beforeAll } from "vitest"
 import { pg, env } from "./helpers/pg-test-env"
-import { PostgresDb } from "../../../db/shim/postgres"
+import { PostgresDb, type PgExecutor } from "../../../db/shim/postgres"
 import { readFileSync } from "node:fs"
 import { fileURLToPath } from "node:url"
 import path from "node:path"
@@ -62,12 +62,12 @@ beforeAll(async () => {
 // Helper: build a PgExecutor-backed PostgresDb from the shared PGlite.
 function makeShim(): PostgresDb {
   // Re-use the same pgliteExecutor pattern from pg-test-env.ts.
-  const pgliteExec = {
+  const pgliteExec: PgExecutor = {
     async run(sql: string, params: unknown[]) {
       const r = await pg.query<Record<string, unknown>>(sql, params as unknown[])
       return { rows: r.rows, rowCount: (r as { affectedRows?: number }).affectedRows ?? r.rows.length }
     },
-    begin: <T>(fn: (tx: typeof pgliteExec) => Promise<T>): Promise<T> =>
+    begin: <T>(fn: (tx: PgExecutor) => Promise<T>): Promise<T> =>
       pg.transaction((tx) =>
         fn({
           async run(sql: string, params: unknown[]) {

@@ -25,6 +25,12 @@ import {
   type OutboxRawEvent,
   isGenesisKind,
 } from "./outbox-types"
+import posthog from "@/lib/posthog"
+import { FIRST_CELL_COMMIT, FIRST_CELL_VALIDATE } from "@/lib/analytics-events"
+
+// Session-scoped flags — reset on page reload (true "first in session" semantics).
+let _firstCommitFired = false
+let _firstValidateFired = false
 
 // ── Envelope construction ─────────────────────────────────────────────────
 
@@ -167,6 +173,15 @@ export interface CellCommitInput {
 export async function emitTargetCellCommit(
   input: CellCommitInput,
 ): Promise<string> {
+  // FRO-267: once-per-session first-commit funnel event.
+  if (!_firstCommitFired) {
+    _firstCommitFired = true
+    posthog.capture(FIRST_CELL_COMMIT, {
+      project_id: input.projectId,
+      file_id: input.fileId,
+      ai_suggestion: input.aiSuggestion ?? false,
+    })
+  }
   const parentId = input.parentId
   // A first-time commit on a cell that has never been written before is a
   // genesis target write — but in our model, the cell came from the source
@@ -216,6 +231,14 @@ export interface CellValidateInput {
  * `cell_validators`), so parentId is omitted.
  */
 export async function emitCellValidate(input: CellValidateInput): Promise<string> {
+  // FRO-267: once-per-session first-validate funnel event.
+  if (!_firstValidateFired) {
+    _firstValidateFired = true
+    posthog.capture(FIRST_CELL_VALIDATE, {
+      project_id: input.projectId,
+      file_id: input.fileId,
+    })
+  }
   const { eventId } = await enqueueEvent({
     kind: "cell.validate",
     projectId: input.projectId,

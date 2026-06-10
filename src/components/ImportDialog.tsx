@@ -41,6 +41,15 @@ import {
 import { languagesEqual } from "@/lib/language-normalize"
 import { EBibleTargetReviewPanel } from "@/components/EBibleTargetReviewPanel"
 import { detectCollisions, type CollisionResult } from "@/lib/import-collision"
+import posthog from "@/lib/posthog"
+import {
+  IMPORT_STARTED,
+  IMPORT_SUCCEEDED,
+  IMPORT_PARTIAL,
+  IMPORT_COLLISION_DETECTED,
+  IMPORT_COLLISION_SKIPPED,
+  IMPORT_COLLISION_DUPLICATED,
+} from "@/lib/analytics-events"
 
 type Screen = "landing" | "upload" | "ebible" | "macula" | "tn" | "direction" | "result" | "collision"
 
@@ -181,6 +190,11 @@ export function ImportDialog({
     ) => {
       // FRO-277: partial import — show result screen first, hold the close.
       if (skippedBooks && skippedBooks.length > 0) {
+        posthog.capture(IMPORT_PARTIAL, {
+          imported_count: refs.length,
+          skipped_count: skippedBooks.length,
+          project_id: projectId,
+        })
         setImportResult({ refs, inferredLanguages, skipped: skippedBooks })
         setScreen("result")
         // Persist per-project so a re-show is possible (bonus scope).
@@ -220,6 +234,10 @@ export function ImportDialog({
         return
       }
 
+      posthog.capture(IMPORT_SUCCEEDED, {
+        file_count: refs.length,
+        project_id: projectId,
+      })
       await onImported(refs, inferredLanguages)
       onOpenChange(false)
     },
@@ -318,7 +336,12 @@ export function ImportDialog({
         </DialogHeader>
 
         {screen === "landing" && (
-          <ImportLanding onSelect={setScreen} />
+          <ImportLanding
+            onSelect={(s) => {
+              posthog.capture(IMPORT_STARTED, { import_type: s, project_id: projectId })
+              setScreen(s)
+            }}
+          />
         )}
 
         {screen === "upload" && (
@@ -332,6 +355,10 @@ export function ImportDialog({
             onCastUpdated={onCastUpdated}
             existingFiles={existingFiles}
             onCollision={(collisions, proceed) => {
+              posthog.capture(IMPORT_COLLISION_DETECTED, {
+                collision_count: collisions.length,
+                project_id: projectId,
+              })
               setCollisionState({ collisions, proceed })
               setScreen("collision")
             }}
@@ -408,6 +435,21 @@ export function ImportDialog({
           <CollisionPanel
             collisions={collisionState.collisions}
             onResolve={async (skipKeys) => {
+              const totalCount = collisionState.collisions.length
+              const skippedCount = skipKeys.size
+              const duplicatedCount = totalCount - skippedCount
+              if (skippedCount > 0) {
+                posthog.capture(IMPORT_COLLISION_SKIPPED, {
+                  skipped_count: skippedCount,
+                  duplicated_count: duplicatedCount,
+                  project_id: projectId,
+                })
+              } else {
+                posthog.capture(IMPORT_COLLISION_DUPLICATED, {
+                  duplicated_count: duplicatedCount,
+                  project_id: projectId,
+                })
+              }
               setCollisionState(null)
               setScreen("upload")
               await collisionState.proceed(skipKeys)

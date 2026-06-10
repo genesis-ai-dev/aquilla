@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react"
+import { useState, useCallback, useEffect, useRef } from "react"
 import { useNavigate } from "react-router-dom"
 import type { ProjectRecord } from "@/lib/parsers/types"
 import { hasAnalyticsConsentBeenSet } from "@/lib/analytics-consent"
@@ -9,6 +9,21 @@ import { SignInStep } from "./steps/SignInStep"
 import { NameStep } from "./steps/NameStep"
 import { ProjectStep } from "./steps/ProjectStep"
 import { ReadyStep } from "./steps/ReadyStep"
+import posthog from "@/lib/posthog"
+import {
+  ONBOARDING_STEP_VIEWED,
+  ONBOARDING_RETURNING_USER_SKIP,
+} from "@/lib/analytics-events"
+
+// Human-readable label for each wizard step number.
+const STEP_LABELS: Record<number, string> = {
+  1: "welcome",
+  2: "privacy",
+  3: "sign-in",
+  4: "name",
+  5: "project",
+  6: "ready",
+}
 
 const TOTAL_STEPS = 6
 
@@ -22,6 +37,22 @@ export function OnboardingWizard() {
   // The privacy step (2) is skipped in both directions once the user has made
   // an analytics choice on a previous run.
   const [skipPrivacy] = useState(() => hasAnalyticsConsentBeenSet())
+
+  // Track the previous step so we can detect direction for the analytics event.
+  const prevStepRef = useRef(step)
+
+  // Emit a step-viewed event whenever the wizard advances to a new step.
+  useEffect(() => {
+    const prev = prevStepRef.current
+    prevStepRef.current = step
+    if (step === prev) return // initial mount — skip (step was just set to 1)
+    posthog.capture(ONBOARDING_STEP_VIEWED, {
+      step,
+      step_label: STEP_LABELS[step] ?? `step-${step}`,
+      direction: step > prev ? "forward" : "back",
+      privacy_skipped: skipPrivacy,
+    })
+  }, [step, skipPrivacy])
 
   const next = useCallback(() => setStep((s) => {
     const n = Math.min(s + 1, TOTAL_STEPS)
@@ -45,6 +76,9 @@ export function OnboardingWizard() {
     const alreadyOnboarded = localStorage.getItem("codex:onboardingComplete") === "true"
     if (alreadyOnboarded || freshOrgs.length > 0) {
       localStorage.setItem("codex:onboardingComplete", "true")
+      posthog.capture(ONBOARDING_RETURNING_USER_SKIP, {
+        reason: alreadyOnboarded ? "flag" : "has-orgs",
+      })
       navigate("/")
     } else {
       // Brand-new account with no orgs yet — continue the signup wizard.

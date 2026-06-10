@@ -13,7 +13,8 @@ import { getCellPref, setCellPref } from "@/lib/store/audio-cell-prefs"
 import type { ScoredPair } from "@/lib/search/dual-index"
 import type { TranslationRule, RuleInfraction, ProjectRecord, Voice, ProjectTtsSettings, OrderedBy } from "@/lib/parsers/types"
 import { sortByLens, hasTiming } from "@/lib/timeline/derive"
-import { useProjectPermissions } from "@/hooks/useProjectPermissions"
+import { useEditorCapabilities } from "@/hooks/useProjectPermissions"
+import { canPerform } from "@/lib/sync/role-policy"
 import { emitTargetCellCommit, emitCellValidate, emitCellUnvalidate, emitCellWaive, emitCellUnwaive } from "@/lib/sync/events-emit"
 import { ExamplePanel } from "./ExamplePanel"
 import { HighlightedText, buildHighlightsFromExamples } from "./HighlightedText"
@@ -456,8 +457,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   onAlignmentSeedChange,
   assignmentsByCellId,
 }, ref) {
-  const permissions = useProjectPermissions(project)
-  const canEdit = permissions.canEditContent
+  const { canEdit, canValidate, readOnlyLabel } = useEditorCapabilities(project)
   // Probe mic permission once (shared across all rows) so the help affordance
   // on CellAudioRecordButton activates when the user has blocked the mic.
   const { micDenied } = useMicPermission(audioLens !== null)
@@ -895,6 +895,13 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
             </span>
           </div>
         )}
+        {/* FRO-273: role badge — shown for read-only roles (viewer/commenter/reviewer) */}
+        {readOnlyLabel && (
+          <div className="flex items-center gap-2 border-b bg-amber-50 px-4 py-2 text-xs text-amber-900 dark:bg-amber-950/40 dark:text-amber-300">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-3.5 w-3.5 flex-shrink-0"><rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+            {readOnlyLabel}
+          </div>
+        )}
         <div className={cn("grid gap-2 border-b border-border px-4 py-2 text-xs font-medium uppercase tracking-wide text-muted-foreground", gridCols)}>
           <div />
           {/* In Audio mode the left column carries per-line voice controls, not
@@ -960,6 +967,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
                 isStaleSource={staleCellIds?.has(cell.id) ?? false}
                 username={username}
                 editable={canEdit}
+                canValidate={canValidate}
                 onCellCommitted={onCellCommitted}
                 onOptimisticEdit={onOptimisticEdit}
                 lockHolderLabel={cellLockHolders?.get(cell.id) ?? null}
@@ -1049,6 +1057,8 @@ interface MemoizedRowProps {
   cell: CellData
   username: string
   editable: boolean
+  /** FRO-273: reviewer (300) can validate but not edit. True whenever role ≥ REVIEWER. */
+  canValidate: boolean
   /** Phase 5 / AD-9: source has advanced since this target was last committed.
    *  Resolved once per file by the parent (membership look-up) so this prop
    *  is just a stable boolean — preserves the row's React.memo invariant. */
@@ -1136,7 +1146,7 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
     onAlignmentSeedChange,
     sourceFontSize,
     targetFontSize,
-    project, username, editable, isCompletionConfigured, isCompletionAvailable,
+    project, username, editable, canValidate, isCompletionConfigured, isCompletionAvailable,
     ruleMap, onCompleteSingle, onInfractionClick,
     isBacktranslationConfigured, onBacktranslate, onSaveBacktranslation,
     onOpenComments, onOpenHistory,
@@ -1212,6 +1222,7 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
         cell={cell}
         username={username}
         editable={editable}
+        canValidate={canValidate}
         isStaleSource={isStaleSource}
         isCompletionConfigured={isCompletionConfigured}
         isCompletionAvailable={isCompletionAvailable}
@@ -1282,6 +1293,8 @@ interface EditorRowProps {
   cell: CellData
   username: string
   editable: boolean
+  /** FRO-273: reviewer (300) can validate but not edit. True whenever role ≥ REVIEWER. */
+  canValidate: boolean
   /** Phase 5 / AD-9 — true when the source has advanced since the last
    *  target commit. Renders a small warning badge next to the validation
    *  status. Computed once-per-file by the parent. */
@@ -1563,7 +1576,7 @@ function SourceWithTermLookup({
 }
 
 function EditorRow({
-  project, cell, username, editable, isCompletionConfigured, isCompletionAvailable, isLoading,
+  project, cell, username, editable, canValidate, isCompletionConfigured, isCompletionAvailable, isLoading,
   completionPreview, loadingPhase,
   cellExamples, highlights, error, health,
   cellInfractions, waivedInfractions, ruleMap,
@@ -1700,6 +1713,14 @@ function EditorRow({
   const handleEditorCommit = useCallback(({ value, valueHtml }: { value: string; valueHtml: string }) => {
     if (!editable) return
     if (!project.id) return
+    // FRO-273: belt-and-suspenders role-mirror check. `editable` is already
+    // false for roles < CONTRIBUTOR, so this guard only fires in the unlikely
+    // race where `editable` hasn't updated yet after a role downgrade — it
+    // prevents a guaranteed-403 event from entering the durable outbox.
+    if (!canPerform("target.cell.commit", project.syncRole?.level ?? null)) {
+      console.warn("[editor-commit] aborting: role too low for target.cell.commit")
+      return
+    }
     // F4 — Lock re-check at commit time. If another user now holds the lock
     // (lockHolderLabel is set at call time), the editor should already be
     // read-only, but the idle timer or an in-flight blur event may have
@@ -1731,7 +1752,7 @@ function EditorRow({
     }).catch((err) => {
       console.warn("[editor-commit] enqueue failed:", err)
     })
-  }, [editable, project.id, cell.fileId, cell.id, cell.targetEventId, cell.sourceEventId, username, onCellCommitted, onOptimisticEdit, lockHolderLabel])
+  }, [editable, project.id, project.syncRole?.level, cell.fileId, cell.id, cell.targetEventId, cell.sourceEventId, username, onCellCommitted, onOptimisticEdit, lockHolderLabel])
 
   // Terminology apply (spec 2c): REPLACE the active target selection with the
   // chosen rendering. The Apply affordance is only surfaced when there was a
@@ -1850,6 +1871,13 @@ function EditorRow({
   }, [])
 
   const emitValidationChange = useCallback((validated: boolean) => {
+    // FRO-273: role-mirror guard — viewer/commenter should never reach here
+    // (canValidate=false disables the button) but guard defensively so a
+    // guaranteed-403 never enters the outbox.
+    if (!canPerform(validated ? "cell.validate" : "cell.unvalidate", project.syncRole?.level ?? null)) {
+      console.warn("[validate] aborting: role too low for", validated ? "cell.validate" : "cell.unvalidate")
+      return
+    }
     const editEventId = cell.targetEventId ?? pendingTargetEventIdRef.current
     if (!project.id || !editEventId) return
     const emit = validated ? emitCellValidate : emitCellUnvalidate
@@ -1864,7 +1892,7 @@ function EditorRow({
     }).catch((err) => {
       console.warn(`[${validated ? "validate" : "unvalidate"}] emit failed:`, err)
     })
-  }, [cell.fileId, cell.id, cell.targetEventId, project.id, username, onCellCommitted])
+  }, [cell.fileId, cell.id, cell.targetEventId, project.id, project.syncRole?.level, username, onCellCommitted])
 
   const handleEditorFocus = useCallback(() => {
     onClaimCell?.(cell.id)
@@ -2002,7 +2030,7 @@ function EditorRow({
     // "keyboard" fires when activated via Space/Enter; "trigger-press" fires
     // on pointer press. Both should validate on first touch (not open popover).
     if (details.reason === "trigger-press" || details.reason === "keyboard") {
-      if (editable && !isSelfValidated) {
+      if (canValidate && !isSelfValidated) {
         emitValidationChange(true)
         details.cancel()
         return
@@ -2387,7 +2415,7 @@ function EditorRow({
                       vs === "full-others" && "hover:text-emerald-500",
                     )}
                     title={healthTooltip}
-                    disabled={!editable}
+                    disabled={!canValidate}
                   >
                     <HealthRing
                       health={healthValue}
@@ -2420,7 +2448,7 @@ function EditorRow({
                       cell.activeValidators.map((v) => (
                         <li key={v} className="flex items-center justify-between gap-2 rounded px-1 py-1 text-xs hover:bg-muted/50">
                           <span className="truncate">{v}{v === username ? " (you)" : ""}</span>
-                          {v === username && editable && (
+                          {v === username && canValidate && (
                             <button
                               type="button"
                               className="flex-shrink-0 rounded p-0.5 text-muted-foreground/70 transition-colors hover:bg-destructive/10 hover:text-destructive"

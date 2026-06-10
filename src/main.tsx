@@ -26,6 +26,21 @@ const CHUNK_PATTERNS = [
   "ChunkLoadError",
 ]
 
+// N2: the reload-once flag exists to break reload LOOPS (a chunk that fails
+// again immediately after the reload). It must clear after a SUCCESSFUL boot,
+// or the second chunk failure in a session (e.g. a new deploy hours later) is
+// silently swallowed instead of getting its own one-shot reload. Lazy chunks
+// load on navigation — after `load` — so clearing here cannot re-arm a loop:
+// each reload only re-arms once the page has fully booted again.
+function clearChunkReloadFlag() {
+  sessionStorage.removeItem(CHUNK_RELOAD_KEY)
+}
+if (document.readyState === "complete") {
+  clearChunkReloadFlag()
+} else {
+  window.addEventListener("load", clearChunkReloadFlag, { once: true })
+}
+
 function isChunkMsg(msg: string): boolean {
   return CHUNK_PATTERNS.some((p) => msg.includes(p))
 }

@@ -58,9 +58,14 @@ user and redirects to `/project/dev-project`.
 
 ```bash
 pnpm test                # unit tests (vitest)
-pnpm test:e2e:smoke      # smoke suite — ~2 min, also runs on git push
+pnpm test:e2e:smoke      # smoke suite — runs serially, ~40-60 min; also runs on git push
 pnpm test:e2e            # full Playwright suite (requires Docker)
 ```
+
+> **Note:** the smoke suite has outgrown its original "<2 min" design — nearly
+> every spec is tagged `.smoke.spec.ts` and they run with `workers: 1`, so a
+> full smoke pass takes ~40-60 minutes (audit TEST-3). Budget accordingly
+> before pushing; see [e2e/README.md](e2e/README.md) for details.
 
 > **Warning:** `pnpm test:e2e` (via `scripts/e2e-up.ts`) force-kills whatever is on
 > ports 5173, 8787, and 8788. Do not run it while your live dev stack is active.

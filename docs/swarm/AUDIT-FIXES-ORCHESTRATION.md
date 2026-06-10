@@ -57,4 +57,10 @@ Wave 1 — all 6 branches merged clean into integration (no conflicts), tip `bbf
 - `swarm/aud-client-write` `34499c7` — RACE-3 parentId via pending refs (both call sites), RES-4 enqueue failure reverts optimistic patch + inline error, RES-2 transient 0/5xx don't burn budget + auto-requeue on online/authEpoch, RACE-4 reentrancy guard, 15s timeout on /events POST.
 - `swarm/aud-error-vis` `afa3801` — ErrorBoundary + captureException + global error/unhandledrejection hooks + chunk-reload guard (RES-3), unreachable-vs-empty distinction in cloud-projects/useProject/Dashboard/ProjectsList (RES-5).
 
-Wave-1 gate (orchestrator-run, integration tip): see below / final report.
+Wave-1 gate (orchestrator-run): root vitest 2343/2343 · auth-worker 195/195 · sync-worker 499/499 · tsc clean after post-merge stabilization `d72f3d7` (explicit shim type imports in chain-claims/event-insert — ambient sync-worker globals aren't visible to the e2e tsconfig project; isUnreachable added to useProject mocks in LivingMemoryPage/TerminologyPage tests; ReactNode return on ThrowingChild under strict; schema-guard job moved to pnpm).
+
+**Main moved mid-run** (user/PD6 session): merged `main@7b1ed43` into integration at `e765537` — brings platform-admin work (formerly the dirty files), media-lens, and the **Neon schema-migration guard** (`scripts/neon-migrate.ts` ledger + CI schema-guard job). Our migration 0034 fits its convention; `pnpm neon:apply` is the deploy-blocker remedy. Post-merge: root vitest 2347/2347, concurrent-writes 10/10, tsc clean.
+
+**Concurrent session (PD6)** active on FRO-262/263/264 (ProductTour/OrgSidebar/OrgSwitcher/Homepage/TeamDetail/teams.ts/org-permissions.ts) — those files are off-limits to aud-* agents; expect another main merge before promotion. Chrome-profile/dev-port contention: schedule aud UI-QA after PD6's.
+
+Wave 2 dispatched off `d72f3d7`: aud-delta-read (M2-1+PERF-4+RES-6) · aud-batch-perf (M2-2+PERF-8) · aud-lock-client (RACE-5 client, workspace unreachable UI) · aud-audio-cache (M2-6) · aud-lint-green (CI lint gate green).

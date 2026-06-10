@@ -73,6 +73,7 @@ import { useComments } from "@/hooks/useComments"
 import { Film, Scale, MessagesSquare, Share2, Settings as SettingsIcon, Lock, ClipboardList, Trash2, Undo2, Search as SearchIcon, Sparkles, Mic2, Download, BookMarked, BookOpen, Users, MessageSquare, Camera } from "lucide-react"
 import { ChatPanel } from "./ChatPanel"
 import { useChat } from "@/hooks/useChat"
+import { TranslationNotesSidebar, readTnSidebarVisible, writeTnSidebarVisible } from "./TranslationNotesSidebar"
 import { cn } from "@/lib/utils"
 import { restoreProject } from "@/lib/store/project-index"
 import { AppShell } from "./AppShell"
@@ -1527,6 +1528,11 @@ export function ProjectWorkspace() {
   const focusedCellIdRef = useRef<string | null>(null)
   // FRO-175: reactive version of focusedCellIdRef for the chat panel's context wiring.
   const [focusedCellId, setFocusedCellId] = useState<string | null>(null)
+  // FRO-179: TN sidebar visibility + canonicalRef of the focused cell.
+  const [tnSidebarVisible, setTnSidebarVisible] = useState<boolean>(() =>
+    projectId ? readTnSidebarVisible(projectId) : true,
+  )
+  const [focusedCellCanonicalRef, setFocusedCellCanonicalRef] = useState<string | null>(null)
   const reconcilerRef = useRef<import("@/lib/sync/ws-reconciler").WsReconciler | null>(null)
   // Read the current file list inside the WS connect path without making it a
   // reconnect trigger — otherwise every file-list change (e.g. each batch of a
@@ -1660,6 +1666,9 @@ export function ProjectWorkspace() {
   const handleClaimCell = useCallback((cellId: string) => {
     focusedCellIdRef.current = cellId
     setFocusedCellId(cellId) // FRO-175: reactive for chat panel context
+    // FRO-179: update TN sidebar with the focused cell's canonicalRef.
+    const focusedCell = cells.find((c) => c.id === cellId)
+    setFocusedCellCanonicalRef(focusedCell?.group ?? null)
     reconcilerRef.current?.send({ t: "focus.claim", cellId })
     // Debounce last-location cell write (500 ms) so rapid focus events
     // don't hammer localStorage.
@@ -1674,6 +1683,7 @@ export function ProjectWorkspace() {
   const handleReleaseCell = useCallback((cellId: string) => {
     if (focusedCellIdRef.current === cellId) focusedCellIdRef.current = null
     setFocusedCellId(null) // FRO-175: clear reactive focused cell
+    setFocusedCellCanonicalRef(null) // FRO-179: clear TN sidebar ref
     reconcilerRef.current?.send({ t: "focus.release", cellId })
   }, [])
   const handleAckRemoteChange = useCallback((cellId: string) => {
@@ -2742,6 +2752,19 @@ export function ProjectWorkspace() {
         )}
         aside={
           <>
+            {/* FRO-179: Translation Notes sidebar — shown when a TN file exists
+                and a translation cell with a matching canonicalRef is focused. */}
+            <TranslationNotesSidebar
+              projectId={projectId!}
+              canonicalRef={focusedCellCanonicalRef}
+              getToken={getTokenForFile}
+              visible={tnSidebarVisible}
+              onToggle={() => {
+                const next = !tnSidebarVisible
+                setTnSidebarVisible(next)
+                if (projectId) writeTnSidebarVisible(projectId, next)
+              }}
+            />
             {drawerRuleId && (
               <RuleDrawer
                 rule={drawerRule}

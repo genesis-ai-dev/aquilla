@@ -13,10 +13,12 @@ import {
   importFile,
   importEBible,
   importMacula,
+  importTranslationNotes,
   importParatextProject,
   importParatextAsTarget,
   type EBibleProgress,
   type MaculaProgress,
+  type TnProgress,
   type ParatextImportProgress,
 } from "@/lib/import"
 import type { FileReference, ProjectTtsSettings } from "@/lib/parsers/types"
@@ -33,7 +35,7 @@ import {
 } from "@/lib/parsers/ebible"
 import { languagesEqual } from "@/lib/language-normalize"
 
-type Screen = "landing" | "upload" | "ebible" | "macula" | "direction"
+type Screen = "landing" | "upload" | "ebible" | "macula" | "tn" | "direction"
 
 interface ImportDialogProps {
   open: boolean
@@ -224,7 +226,7 @@ export function ImportDialog({
                 >
                   ←
                 </button>
-                {screen === "upload" ? "Upload Files" : screen === "macula" ? "Macula Hebrew + Greek" : "eBible Corpus"}
+                {screen === "upload" ? "Upload Files" : screen === "macula" ? "Macula Hebrew + Greek" : screen === "tn" ? "Translation Notes (TSV)" : "eBible Corpus"}
               </div>
             )}
           </DialogTitle>
@@ -270,6 +272,17 @@ export function ImportDialog({
               // Pass the first detected language as the project's inferred source
               // only when the project's current source language is unset.
               await handleChildImported(refs)
+            }}
+          />
+        )}
+
+        {screen === "tn" && (
+          <TnPanel
+            projectId={projectId}
+            username={username}
+            getToken={getToken}
+            onImported={async (ref) => {
+              await handleChildImported([ref])
             }}
           />
         )}
@@ -353,16 +366,17 @@ function ImportLanding({ onSelect }: ImportLandingProps) {
         </p>
       </div>
 
-      {/* Translation Notes — coming soon (FRO-179) */}
-      <div
-        title="Coming soon — Translation Notes import is tracked in FRO-179"
-        className="cursor-not-allowed rounded-lg border border-dashed p-4 text-left opacity-50"
+      {/* Translation Notes — active (FRO-179) */}
+      <button
+        type="button"
+        onClick={() => onSelect("tn")}
+        className="rounded-lg border p-4 text-left transition-colors hover:border-primary hover:bg-primary/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
       >
-        <p className="text-sm font-medium">Translation Notes</p>
+        <p className="text-sm font-medium">Translation Notes (TSV)</p>
         <p className="mt-1 text-xs text-muted-foreground">
-          TSV / MD Translation Notes. Coming soon.
+          Upload unfoldingWord-style TN files. Notes appear in a sidebar when you focus a translation cell at the matching verse.
         </p>
-      </div>
+      </button>
     </div>
   )
 }
@@ -1090,6 +1104,106 @@ function MaculaPanel({ projectId, username, getToken, onImported }: MaculaPanelP
                   style={{ width: `${Math.round(((progress.cellsEnqueued ?? 0) / progress.cellsTotal) * 100)}%` }}
                 />
               </div>
+            </>
+          )}
+        </div>
+      )}
+      {error && <p className="text-sm text-destructive">{error}</p>}
+      <div className="flex justify-end">
+        <Button onClick={handleImport} disabled={!file || importing}>
+          {importing ? "Importing…" : "Import"}
+        </Button>
+      </div>
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Translation Notes (TSV) panel (FRO-179)
+// ---------------------------------------------------------------------------
+
+interface TnPanelProps {
+  projectId: string
+  username: string
+  getToken: (fileId: string) => Promise<string | null>
+  onImported: (ref: FileReference) => void | Promise<void>
+}
+
+function TnPanel({ projectId, username, getToken, onImported }: TnPanelProps) {
+  const [importing, setImporting] = useState(false)
+  const [progress, setProgress] = useState<TnProgress | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const [file, setFile] = useState<File | null>(null)
+
+  async function handleImport() {
+    if (!file || importing) return
+    setImporting(true)
+    setError(null)
+    setProgress({ phase: "parse" })
+    try {
+      const ref = await importTranslationNotes(
+        file,
+        { projectId, author: username, getToken },
+        setProgress,
+      )
+      await onImported(ref)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Import failed")
+    } finally {
+      setImporting(false)
+      setProgress(null)
+    }
+  }
+
+  return (
+    <div className="flex flex-col gap-4 py-2">
+      <p className="text-xs text-muted-foreground">
+        Upload an{" "}
+        <a
+          href="https://door43.org/u/Door43-Catalog/en_tn/"
+          target="_blank"
+          rel="noreferrer"
+          className="underline"
+        >
+          unfoldingWord-style Translation Notes
+        </a>{" "}
+        TSV file. Each row becomes a note cell; notes appear in a sidebar when you focus a
+        translation cell at the matching verse reference.
+      </p>
+      <div className="flex flex-col gap-2">
+        <Button variant="outline" size="sm" nativeButton={false} render={<label className="cursor-pointer" />}>
+          {file ? file.name : "Choose Translation Notes TSV"}
+          <input
+            type="file"
+            className="hidden"
+            accept=".tsv,.txt,.csv"
+            onChange={(e) => {
+              const f = e.target.files?.[0] ?? null
+              setFile(f)
+              setError(null)
+            }}
+            disabled={importing}
+          />
+        </Button>
+        {file && !importing && (
+          <p className="text-xs text-muted-foreground">{file.name} — {(file.size / 1024).toFixed(0)} KB</p>
+        )}
+      </div>
+      {progress && (
+        <div className="text-xs text-muted-foreground">
+          {progress.phase === "parse" && "Parsing translation notes…"}
+          {progress.phase === "save" && progress.cellsTotal && (
+            <>
+              <p>Uploading: {(progress.cellsEnqueued ?? 0).toLocaleString()} / {progress.cellsTotal.toLocaleString()} notes</p>
+              <div className="mt-1.5 h-2 w-full overflow-hidden rounded-full bg-muted">
+                <div
+                  className="h-full bg-primary transition-all"
+                  style={{ width: `${Math.round(((progress.cellsEnqueued ?? 0) / progress.cellsTotal) * 100)}%` }}
+                />
+              </div>
+              {progress.skippedCount ? (
+                <p className="mt-1 text-yellow-600">{progress.skippedCount} rows skipped (missing canonical reference)</p>
+              ) : null}
             </>
           )}
         </div>

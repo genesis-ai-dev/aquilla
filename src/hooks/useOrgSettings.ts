@@ -12,6 +12,10 @@ import {
 } from "@/lib/sync/org-settings"
 import type { TranslationRule, PromotionRequest } from "@/lib/parsers/types"
 
+// Floor aligned with the server's SETTINGS_WRITE_MIN_ROLE = ROLE.MAINTAINER (600)
+// in auth-worker/src/routes/org-settings.ts. Lowering this to PROJECT_LEAD (500)
+// would re-open the FRO-255 silent-divergence window (editable controls + a 403
+// the user never sees) — do not change without a matching auth-worker update.
 const ORG_SETTINGS_WRITE_MIN_ROLE = ROLE.MAINTAINER
 
 export interface UseOrgSettings {
@@ -30,7 +34,9 @@ export interface UseOrgSettings {
   canEdit: boolean
   /** Force a re-GET. */
   refresh: () => Promise<OrgSettingsResponse | null>
-  /** Patch org settings (adds/replaces top-level keys). Blocked if !canEdit. */
+  /** Patch org settings (adds/replaces top-level keys). Blocked if !canEdit —
+   *  below-floor callers never apply an optimistic write. Server-forbidden and
+   *  error responses roll back the optimistic write and re-fetch truth. */
   patch: (partial: OrgWideSettings) => Promise<OrgPatchResult | { kind: "blocked" }>
   /** Submit a promotion request for a project rule. Returns "duplicate" if already pending. */
   requestPromotion: (rule: TranslationRule, sourceProjectId: string) => Promise<PromotionRequestResult | { kind: "blocked" }>
@@ -116,11 +122,18 @@ export function useOrgSettings(
 
         if (result.kind === "ok") writeServer(result.value)
         else if (result.kind === "conflict") writeServer(result.latest)
-        // On error/forbidden, a refresh will revert the optimistic write.
+        else {
+          // Forbidden (role check failed at the API layer) or error: roll back
+          // the optimistic write to the pre-write snapshot, then re-fetch truth.
+          // Without this the rejected value lingered until an unrelated refresh
+          // (FRO-255: no silent local divergence).
+          writeServer(fresh)
+          void refresh()
+        }
         return result
       })
     },
-    [orgId, jwt, canEdit, runSerialized, writeServer],
+    [orgId, jwt, canEdit, runSerialized, writeServer, refresh],
   )
 
   const canRequestPromotion =

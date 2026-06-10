@@ -24,6 +24,7 @@ import { resolveExportFloor } from "./export-floor"
 import {
   parseUsfmLossless,
   serializeUsfmLossless,
+  countLossyVerses,
 } from "../lib/usfm-lossless"
 
 export interface ExportRouteEnv {
@@ -176,6 +177,7 @@ export async function handleExportSourceRequest(
   }
 
   const doc = parseUsfmLossless(blob.raw_source)
+  const lossyVerseCount = countLossyVerses(doc, overrides)
   const out = serializeUsfmLossless(doc, overrides)
 
   const downloadName = fileName.toLowerCase().endsWith(".sfm")
@@ -190,6 +192,11 @@ export async function handleExportSourceRequest(
       headers: {
         "Content-Type": "text/plain; charset=utf-8",
         "Content-Disposition": `attachment; filename="${downloadName.replace(/"/g, "")}"`,
+        // FRO-276: number of translated verses whose original span contained
+        // intra-verse markers (footnotes, poetry, character markers) that the
+        // plain-text substitution dropped. 0 = clean round-trip. The client
+        // reads this to surface a per-export warning in ExportDialog.
+        "X-Usfm-Lossy-Verse-Count": String(lossyVerseCount),
       },
     }),
     request,

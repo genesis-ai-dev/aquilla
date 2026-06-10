@@ -32,6 +32,13 @@ export interface AudioError {
 
 export type PeaksState = "idle" | "loading" | "ready" | "error"
 
+/** External http(s) clip attached by URL (timeline media layer) — streamed
+ *  straight from its source, never copied into R2. Playback uses the media
+ *  element directly (no CORS needed); byte-level features (peaks,
+ *  transcription) fetch the bytes and need the host to allow CORS. */
+const isRemoteMediaUrl = (url: string): boolean =>
+  url.startsWith("https://") || url.startsWith("http://")
+
 export interface UseCellAudioResult {
   /** "cloud" = server pointer exists but bytes not yet fetched. */
   state: "idle" | "cloud" | "loading" | "ready" | "error"
@@ -141,13 +148,13 @@ export function useCellAudio(
     }
   }, [selectedAudioId])
 
-  // Derive "cloud" state: a frontier-audio:// pointer exists but bytes are not
-  // yet in memory. Only set when in "idle" state so we don't clobber an active
-  // loading/ready/error state.
+  // Derive "cloud" state: a frontier-audio:// pointer (or a remote http(s)
+  // clip) exists but bytes are not yet in memory. Only set when in "idle"
+  // state so we don't clobber an active loading/ready/error state.
   useEffect(() => {
     if (
       attachmentUrl &&
-      attachmentUrl.startsWith("frontier-audio://") &&
+      (attachmentUrl.startsWith("frontier-audio://") || isRemoteMediaUrl(attachmentUrl)) &&
       !bytesRef.current &&
       !bytesPromiseRef.current
     ) {
@@ -165,6 +172,31 @@ export function useCellAudio(
 
     if (!attachmentUrl) {
       throw { kind: "pointer-missing", message: "No audio attachment on this cell" } as AudioError
+    }
+
+    if (isRemoteMediaUrl(attachmentUrl)) {
+      // URL-attached clip: fetch the bytes straight from the source (peaks /
+      // transcription). Requires the host to allow CORS — playback doesn't.
+      const p = (async () => {
+        try {
+          const res = await fetch(attachmentUrl)
+          if (!res.ok) throw new Error(`media fetch failed (${res.status})`)
+          const bytes = new Uint8Array(await res.arrayBuffer())
+          bytesRef.current = bytes
+          return bytes
+        } catch (e) {
+          throw {
+            kind: "download-failed",
+            message: e instanceof Error ? e.message : String(e),
+          } as AudioError
+        }
+      })()
+      bytesPromiseRef.current = p
+      try {
+        return await p
+      } finally {
+        bytesPromiseRef.current = null
+      }
     }
 
     const frontier = parseFrontierAudioUrl(attachmentUrl)
@@ -261,12 +293,24 @@ export function useCellAudio(
     setState("loading")
     setError(null)
     try {
-      const bytes = await ensureBytes()
-      const blob = new Blob([bytes as BlobPart])
-      const url = URL.createObjectURL(blob)
-      urlRef.current = url
-      const audio = new Audio(url)
+      let src: string
+      if (attachmentUrl && isRemoteMediaUrl(attachmentUrl)) {
+        // Stream straight from the source URL — no byte copy, no object URL.
+        src = attachmentUrl
+      } else {
+        const bytes = await ensureBytes()
+        const blob = new Blob([bytes as BlobPart])
+        src = URL.createObjectURL(blob)
+        urlRef.current = src
+      }
+      const audio = new Audio(src)
       audio.volume = volumeRef.current
+      audio.onerror = () => {
+        setIsPlaying(false)
+        stopTicking()
+        setError({ kind: "download-failed", message: "Playback failed — the media source could not be streamed." })
+        setState("error")
+      }
       audio.onplay = () => { setIsPlaying(true); startTicking() }
       audio.onpause = () => { setIsPlaying(false); stopTicking() }
       audio.onended = () => { setIsPlaying(false); stopTicking() }
@@ -300,7 +344,7 @@ export function useCellAudio(
       setError(err)
       setState("error")
     }
-  }, [ensureBytes, startTicking, stopTicking])
+  }, [attachmentUrl, ensureBytes, startTicking, stopTicking])
 
   const pause = useCallback(() => {
     audioRef.current?.pause()

@@ -34,8 +34,8 @@
     "tauri:build": "tauri build",
     "tauri:build:mac": "bash -c 'set -a; [ -f .env.signing ] && . ./.env.signing; set +a; tauri build'",
     "deploy:aquilla:spa": "npm run build && rm -f dist/_redirects && wrangler deploy --env=production",
-    "deploy:aquilla:sync": "cd sync-worker && wrangler deploy --env=production",
-    "deploy:aquilla:auth": "cd auth-worker && wrangler deploy --env=production",
+    "deploy:aquilla:sync": "npm run neon:status && cd sync-worker && wrangler deploy --env=production",
+    "deploy:aquilla:auth": "npm run neon:status && cd auth-worker && wrangler deploy --env=production",
     "deploy:aquilla:api": "npm run deploy:aquilla:sync && npm run deploy:aquilla:auth",
     "deploy:aquilla": "npm run deploy:aquilla:spa && npm run deploy:aquilla:api",
     "deploy:aquilla:staging:spa": "VITE_AUTH_BASE=https://api.dev.aquilla.app/identity VITE_SYNC_WORKER_HOST=api.dev.aquilla.app/sync VITE_CHAT_BASE=https://api.dev.aquilla.app/chat npm run build && rm -f dist/_redirects && wrangler deploy --env=staging",
@@ -50,7 +50,10 @@
     "seed:extract": "tsx scripts/seed-extract.ts",
     "seed:fetch": "tsx scripts/seed-fetch.ts",
     "seed:load": "tsx scripts/seed-load.ts",
-    "seed:dev": "tsx scripts/seed-load.ts --local"
+    "seed:dev": "tsx scripts/seed-load.ts --local",
+    "neon:status": "tsx scripts/neon-migrate.ts status",
+    "neon:apply": "tsx scripts/neon-migrate.ts apply",
+    "neon:baseline": "tsx scripts/neon-migrate.ts baseline"
   },
   "dependencies": {
     "@base-ui/react": "^1.4.0",

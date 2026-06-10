@@ -783,6 +783,37 @@ export function orderedByForFileType(fileType: FileType): OrderedBy {
     : "sequence"
 }
 
+export interface MediaSegmentSpec {
+  cellId: string
+  startMs?: number
+  endMs?: number
+  /** Playback window into the shared clip — the bytes are uploaded once, not N times. */
+  trimStartMs?: number
+  trimEndMs?: number
+}
+
+/**
+ * Decode a media file and split it into per-line segment specs at detected
+ * silences (Part B). Falls back to a single whole-file spec when decode fails
+ * (e.g. a video container we can't decode here) or the split yields ≤1 region.
+ * Never synthesizes timing — a fallback spec uses the real probed duration, or
+ * is left untimed (editor flags it) if even that fails. Shared by the importer
+ * (new file) and the media-lens attach flow (existing file).
+ */
+export async function computeMediaSegmentSpecs(
+  file: File,
+): Promise<{ durationMs: number | undefined; specs: MediaSegmentSpec[] }> {
+  const decoded = await decodeAudioFile(file).catch(() => null)
+  const durationMs = decoded?.durationMs ?? (await probeMediaDurationMs(file).catch(() => undefined))
+  const segments = decoded ? detectSpeechSegments(decoded.channel, decoded.sampleRate) : []
+
+  const specs: MediaSegmentSpec[] =
+    segments.length >= 2
+      ? segments.map((s) => ({ cellId: uuidv7(), startMs: s.startMs, endMs: s.endMs, trimStartMs: s.startMs, trimEndMs: s.endMs }))
+      : [{ cellId: uuidv7(), ...(durationMs !== undefined ? { startMs: 0, endMs: Math.round(durationMs) } : {}) }]
+  return { durationMs, specs }
+}
+
 /**
  * Import an audio/video FILE as a single media segment on a time-ordered file.
  * Scope A "B-option": one clip spanning the whole file (silence-split into many
@@ -796,22 +827,7 @@ export async function emitMediaFile(
   ctx: ImportContext,
 ): Promise<FileReference> {
   const fileId = uuidv7()
-
-  // Part B: decode the audio and split it into per-line media segments at
-  // silences. Fall back to a single whole-file segment when decode fails
-  // (e.g. a video container we can't decode here) or the split yields ≤1
-  // region. Never synthesize timing — a fallback segment uses the real probed
-  // duration, or is left untimed (editor flags it) if even that fails.
-  const decoded = await decodeAudioFile(file).catch(() => null)
-  const durationMs = decoded?.durationMs ?? (await probeMediaDurationMs(file).catch(() => undefined))
-  const segments = decoded ? detectSpeechSegments(decoded.channel, decoded.sampleRate) : []
-
-  // One spec per segment, else one whole-file spec. `trim*Ms` is each segment's
-  // window into the shared clip (we upload the bytes once, not N times).
-  const specs: { cellId: string; startMs?: number; endMs?: number; trimStartMs?: number; trimEndMs?: number }[] =
-    segments.length >= 2
-      ? segments.map((s) => ({ cellId: uuidv7(), startMs: s.startMs, endMs: s.endMs, trimStartMs: s.startMs, trimEndMs: s.endMs }))
-      : [{ cellId: uuidv7(), ...(durationMs !== undefined ? { startMs: 0, endMs: Math.round(durationMs) } : {}) }]
+  const { durationMs, specs } = await computeMediaSegmentSpecs(file)
 
   const cells: BulkImportCell[] = specs.map((s, i) => ({
     id: uuidv7(),

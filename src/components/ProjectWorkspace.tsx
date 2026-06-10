@@ -68,6 +68,7 @@ import {
 import { emitTargetCellCommit, emitCellBacktranslationSet, emitFileRename } from "@/lib/sync/events-emit"
 import { flushOutboxBatch } from "@/lib/sync/outbox-flush"
 import { runDiarization, type DiarizationPhase } from "@/lib/diarization/run-diarization"
+import { attachMediaFileToTimeline, attachMediaUrlToTimeline } from "@/lib/timeline/attach-media"
 import { useCellsAuditStatsWithOverlay } from "@/hooks/useCellsAuditStatsWithOverlay"
 import { useComments } from "@/hooks/useComments"
 import { Film, Scale, MessagesSquare, Share2, Settings as SettingsIcon, Lock, ClipboardList, Trash2, Undo2, Search as SearchIcon, Sparkles, Mic2, Download, BookMarked, BookOpen, Users, MessageSquare, Camera, UserCheck } from "lucide-react"
@@ -772,6 +773,33 @@ export function ProjectWorkspace() {
       setDiarizeError(e instanceof Error ? e.message : String(e))
     }
   }, [project?.id, activeFileId, currentUsername, cells, getTokenForFile, getTokenForProjectFile, tts.settings, tts.saveTts, revalidateCells])
+
+  // Media-lens empty state: attach a clip to the ACTIVE file by upload or
+  // direct URL. The Import dialog can't do this — it always creates a new
+  // time-ordered file. Errors propagate to TimelineAddMedia, which renders them.
+  const handleAttachMediaFile = useCallback(async (file: File) => {
+    if (!project?.id || !activeFileId) return
+    await attachMediaFileToTimeline(file, {
+      projectId: project.id,
+      fileId: activeFileId,
+      author: currentUsername,
+      getToken: getTokenForFile,
+    })
+    await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
+    revalidateCells()
+  }, [project?.id, activeFileId, currentUsername, getTokenForFile, getTokenForProjectFile, revalidateCells])
+
+  const handleAttachMediaUrl = useCallback(async (url: string) => {
+    if (!project?.id || !activeFileId) return
+    await attachMediaUrlToTimeline(url, {
+      projectId: project.id,
+      fileId: activeFileId,
+      author: currentUsername,
+      getToken: getTokenForFile,
+    })
+    await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
+    revalidateCells()
+  }, [project?.id, activeFileId, currentUsername, getTokenForFile, getTokenForProjectFile, revalidateCells])
 
   const [videoDialogOpen, setVideoDialogOpen] = useState(false)
   const [currentVideoTime, setCurrentVideoTime] = useState(0)
@@ -2937,6 +2965,8 @@ export function ProjectWorkspace() {
             }}
             onProjectChanged={refresh}
             onAddConceptFromSelection={handleAddConceptFromSelection}
+            onAttachMediaFile={handleAttachMediaFile}
+            onAttachMediaUrl={handleAttachMediaUrl}
             onCellCommitted={handleCellCommitted}
             onOptimisticEdit={applyOptimisticTargetEditWithCapture}
             cellLockHolders={cellLockHolders}

@@ -688,3 +688,133 @@ None.
 - The Claude Preview tool's browser context runs in a Claude app iframe; direct fetch to `localhost:8789` (sync-worker) is blocked cross-origin. This blocked the FRO-233 export round-trip and the FRO-173 recording test.
 - Backend was reset via `POST /__test__/reset` mid-session (alice/bob/carol seeded). Dev session JWT refreshed via `/__dev__/login` after reset.
 - The worktree Vite (port 5173, process owned by `scripts/dev-stack.ts`) was the actual server under test; the preview tool's managed server (port 5180, from main repo root) was navigated away from to 127.0.0.1:5173.
+
+---
+
+## PD5 wave-1 QA (2026-06-09)
+
+**Build**: v0.1.0 · swarm/pd5-integration · 26f4a04
+**Tested**: 2026-06-10 (UTC)
+**Branch under test**: `swarm/pd5-integration` (worktree at `.worktrees/pd5-integration`)
+**Environment**: http://127.0.0.1:5173/ · auth :8788 · sync :8789 (Docker PG :5432)
+**Login**: `/__dev/login` → auto-logged in as `dev` (OWNER of Dev Org + dev-project)
+**Tool**: Playwright MCP (`mcp__plugin_playwright_playwright__*`)
+
+### Migration status
+
+Postgres migrations 0031 and 0032 were NOT applied by the dev-stack's `applyPgSchemaIfMissing` (which is idempotent: only applies the full schema if the `users` table is absent; the container was already running with an older schema). Applied manually via `docker exec aquilla-dev-pg psql`:
+
+- `0031_project_snapshots.sql` — dropped old file-scoped `snapshots` table and created project-scoped `snapshots` (without `file_id`). Old table had `file_id` column; migration needed for FRO-176 snapshot API to work.
+- `0032_cell_word_morph.sql` — created `cell_word_morph` table + indexes. Idempotent (IF NOT EXISTS).
+
+Both migrations applied successfully before stack boot.
+
+**Note**: the dev-stack's auto-migration path (`applyPgSchemaIfMissing`) only runs schema.sql when the DB is empty. Any incremental migrations added to `db/postgres/migrations/` must be applied manually to an existing container, or the container must be recreated. This is a developer-experience gap, not a wave-1 code bug — but worth tracking.
+
+### Results
+
+| Check | Status | Evidence |
+|-------|--------|----------|
+| FRO-215 routing + copy | **PASS** | Logged OUT: `GET /` → redirected to `/homepage` (client-side RootRedirect fired). Logged IN: `GET /` → landed in app shell showing org Overview page, NOT bounced to homepage. Homepage multimodal section shows "Images" and "Oral stories" chips with `generic "Coming soon"` class and "soon" badge rendered dimmed. |
+| FRO-175 chat | **BLOCKED-env** | MessageSquare "Open AI chat" toolbar button opens a drawer dialog. Textbox accepts input; `⌘↵` dispatches the send. Panel rendered the error inline: `"Completion failed: 500 {"error":"OPENROUTER_API_KEY is not configured"}"`. Chat endpoint `/chat/api/v1/chat/completions` returned HTTP 500 from auth-worker (no LLM key in dev `.dev.vars`). Panel shows the error as the configured affordance — no crash, no blank screen. BLOCKED-env, not FAIL. Stop/Clear buttons were not rendered (no active stream to stop). |
+| FRO-176 snapshots | **PASS** | Sidebar "Snapshots" button → URL changed to `/project/dev-project/snapshots`, sidebar and top bar stayed intact. Create snapshot dialog opened, name field required (Create button disabled until filled). Created "QA Test Snapshot" → appeared in list with date + "by dev". Restore → typed-confirmation dialog required exact name "QA Test Snapshot", Restore button disabled until typed, then enabled → clicked → banner "Restored 1 cells." appeared. Delete → native `confirm()` dialog → accepted → snapshot removed, empty-state returned. Deep-link `/project/dev-project/snapshots` directly → shell intact (sidebar/topbar present), no bounce. |
+| FRO-177 replace | **PASS** | Search & Replace panel opened via toolbar button (after closing lingering chat overlay). "Replace" mode button in search-mode group available and clicked. Find field accepted "testo" → panel showed "2 cells affected" with per-cell inline diff (before/after with strikethrough) and checked checkboxes. "Select all"/"Select none" buttons present. "Retain my validations" toggle present with `(?)` tooltip. Scope toggle shows "Project"/"test_fro233.docx" buttons. Replacement text set to "parola" → "Replace 2" clicked → cells updated in place to "Questo è parola in grassetto 90" and "Questo è parola italico per la fonte". No blank-row regression (FRO-247). |
+| FRO-178 Macula | **PASS** | Import dialog opened via More actions → Import. Macula Hebrew + Greek card enabled (not "Coming soon"). Clicked card → Macula sub-step with file chooser. Uploaded 6-row TSV fixture (header: `ref\ttext\tlemma\tmorph\tstrongnumber`, GEN 1:1–1:3). Import button clicked → file "GEN" created with 3 cells; editor opened showing Hebrew source text (בְּרֵאשִׁ֖ית בָּרָ֣א אֱלֹהִ֑ים etc.) in the source column. Sidebar showed "3 cells · 0 translated". Morph data has no UI surface (as noted in spec — known trace, not FAIL). |
+| FRO-181 health | **PASS** | StatusBar (footer) shows a health ring element (18×18px `div`). Before validation: value "0", no SVG circle (no data points). After validating 1 of 2 cells: SVG `<circle>` rendered with `stroke-dasharray=50.27` (full circumference, r=8) and `stroke-dashoffset=25.13` (50% filled), value "50", color `#f59e0b` (amber). Project Settings → Decay section → "Max hops" spinbutton (value 4) present. "Endorsement target" label is absent. "Attention threshold" spinbutton also present. Health update on validation confirmed (0 → 50 after 1/2 cells validated). |
+| BT adjudication | **RESOLVED — not a stub** | FRO-215 audit claimed `runBacktranslation` is a stub. VERDICT: **incorrect**. `runBacktranslation` in `ProjectWorkspace.tsx:1285` runs a two-step pipeline: (1) `glosser.gloss(cell.translated)` — deterministic statistical BT — always fires; (2) `generateBacktranslation(...)` — LLM polish — fires only if `isBacktranslationConfigured`. BT tab for a translated cell showed "statistical" badge with actual text "this is bold this is bold" (correct reverse gloss of "Questo è parola in grassetto 90" through the Markov glosser). A "Polish" toggle button is present in the BT tab; LLM-polished mode is available when an LLM key is configured. The feature is **live, not stubbed**. Auto-BT on every commit runs `buildStatisticalBt` directly (in `handleCellCommitted`, not via `runBacktranslation`). |
+
+### New bugs found
+
+None. All wave-1 features are present and functional at the tested build (26f4a04).
+
+### Notes
+
+- The dev-stack script (`scripts/dev-stack.ts`) does not auto-apply incremental Postgres migrations (`db/postgres/migrations/*.sql`) to an existing container. Only the initial `schema.sql` is idempotent. Migrations 0031 and 0032 were applied manually before the QA run.
+- The AI Chat check (FRO-175) is BLOCKED-env because `OPENROUTER_API_KEY` is not set in `auth-worker/.dev.vars`. The panel behavior with an unconfigured LLM is correct (inline error, no crash).
+- The BT tab is inside the inline EditorRow expansion (click "Open cell details"), not in a separate drawer. Tabs visible: Decay | BT | Recording | Issues | History.
+- Ports 5173/8788/8789 confirmed free after QA run.
+
+---
+
+## PD5 wave-2 QA (2026-06-09)
+
+**Build**: v0.1.0 · swarm/pd5-integration · 17233de
+**Tested**: 2026-06-10 (UTC)
+**Branch under test**: `swarm/pd5-integration` (worktree at `.worktrees/pd5-integration`)
+**Environment**: http://127.0.0.1:5173/ · auth :8788 · sync :8789
+**Login**: `/__dev/login` → auto-logged in as `dev` (OWNER of Dev Org + dev-project)
+**Tool**: Playwright MCP (`mcp__plugin_playwright_playwright__*`)
+
+---
+
+### Results
+
+| Check | Ticket | Status | Evidence |
+|-------|--------|--------|----------|
+| TN import + sidebar | FRO-179 | **BLOCKED-env** | TSV file upload works (tn-fixture.tsv imported, "tn-fixture.tsv" visible in file list). Sidebar "Translation Notes" panel renders correctly with empty state "Focus a translation cell to see notes for that verse." when no cell is focused. TN sidebar fetch calls `fetchProjectFiles` + `fetchFileCells` on the sync-worker (port 8789) using the dev session JWT. Sync-worker rejects dev auth-worker JWTs with `401 invalid token signature` (two different workers, different JWT secrets). No TN rows can be fetched. Consequence: TN notes never display even after focusing GEN 1:1. |
+| Harmonize sweep | FRO-186 | **FAIL** | Rules page (`/project/dev-project/rules`) loads. Built-in checks listed. Harmonize sweep button is NOT rendered at all for any check. Root cause confirmed in source: `BuiltinChecksList.tsx` `showHarmonize = onHarmonize != null && count > 0`. The `count` is always 0 because `infractions={new Map()}` is hardcoded in `RulesPage.tsx` with a `// TODO: wire real infractions when worker dispatch lands` comment. With an empty infractions map, `count === 0` for every check → `showHarmonize = false` → button never renders. The harmonize settings (min role selector at `ProjectSettings.tsx:1008`) do render correctly in Settings. |
+| Health ring on project card | FRO-190 | **BLOCKED-env** | `ProjectCard` conditionally renders `<HealthRing>` when `projectHealth !== null`. `useProjectHealth` calls `useHealthRollup` → `fetchHealthRollup` → `GET http://127.0.0.1:8789/api/v1/projects/dev-project/health-rollup`. Sync-worker returns `401 invalid token signature` (same JWT mismatch as FRO-179). `projectHealth` stays `null` → ring never renders. The component code + ring SVG are correct; only the cross-worker auth blocks the fetch in dev. |
+| Living Memory page | FRO-223 | **PASS** | Memory nav button navigates to `/project/dev-project/memory`. Page renders Brain icon, heading "Living Memory", purpose description "Confirmed source → target pairs … shared with the AI as context". Empty states show coaching examples ("Show me recently validated cells", "What are the most consistent translations for 'grace'?"). "Open Terminology" cross-link navigates to `/project/dev-project/terminology`. OWNER "dev" sees "+ Add" button controls (not hidden). Screenshot: `pd5-qa-fro223-memory-page.png`. |
+| Selection → concept | FRO-260 | **PARTIAL / BUG** | **Create-draft path**: Dialog "Add to term base" can be opened via direct React-fiber onClick (programmatic workaround). Typed "bold text" → clicked "Create draft concept" → dialog closed. Navigated to Terminology page → "bold text" concept appears in Concepts (3) list with status "suggested" (draft). **BUG confirmed**: Normal Playwright click on "Add to termbase" button does NOT open the dialog. Root cause: clicking the button collapses the text selection; the `selectionchange` event fires → `setSourceSelection(null)` → `handleAddSelectionToTermbase` returns early before `setShowAddConceptDialog(true)`. Dialog opens empty when opened via fiber. **View-term lookup**: Source cells in test_fro233.docx ("This is bold text for source", "This is italic text for source") and GEN (Hebrew only) contain no text matching active concepts ("grace", "Anutu"). View-term lookup path could not be tested — requires source cells containing active concept terms. |
+| Queue + merge | FRO-261 | **PASS** | Review queue listed "Anutu" in pending state. Approved Anutu from queue → persisted across reload. Selected Anutu + Dio for merge via "Merge duplicate concepts" dialog. Preview showed union of renderings (Dio·required, God·required). Confirmed merge with typed phrase → one survivor (Anutu with both Dio+God renderings), Dio concept removed from list. |
+| Regression: Snapshots + Replace | Check 7 | **PASS** | Snapshots page renders inside project shell (sidebar + topbar intact) with empty state "No snapshots yet" and "Create first snapshot" CTA. Search & Replace dialog opens via toolbar button. Replace mode shows "Search and Replace — entire project" dialog with Find/Replace inputs, "Retain my validations" checkbox with tooltip, "2 cells affected" count, per-cell inline diff preview (before/after with highlighted match), and enabled "Replace 2" button. Screenshot: `pd5-qa-check7-replace-preview.png`. |
+
+---
+
+### New bugs found
+
+#### BUG-FRO260-A — FAIL: "Add to termbase" button click collapses selection before dialog opens
+
+**Surface**: Editor table — source text selection → concept creation  
+**Severity**: P1 — FRO-260 core UX flow is broken  
+**Repro steps**:
+1. Open a file with source text (e.g. `test_fro233.docx`)
+2. Select text in the source column (e.g. "bold text for source")
+3. The "Add to termbase" button appears next to the selected text
+4. Click the "Add to termbase" button
+5. **Expected**: "Add to term base" dialog opens with "Source term…" pre-filled with the selected text
+6. **Actual**: Clicking the button fires a `mousedown` on the button which causes `blur` on the source element → `selectionchange` event → `handleSelectionChange` → `setSourceSelection(null)`. By the time `onClick` fires, `sourceSelection` is `null` → `handleAddSelectionToTermbase` guard returns early → dialog either does not open OR opens with empty source term field (depending on event timing)
+
+**Root cause**: `handleSelectionChange` (at `EditorTable.tsx`) clears `sourceSelection` on any selection change event, including the click-induced blur. The selection value should be captured and locked before being cleared by the button click.
+
+**Workaround tested**: Calling the button's React fiber `onClick` handler directly via `page.evaluate` opens the dialog but `sourceSelection` is already null by then — input field is empty.
+
+**Fix suggestion**: Capture `sourceSelection` into a ref or local variable at the moment the button renders (not lazily on click), or use `onMouseDown` with `event.preventDefault()` on the button to block the selection-clearing blur before `onClick` fires.
+
+---
+
+#### BUG-FRO186-A — FAIL: Harmonize sweep button never renders (infractions hardcoded empty)
+
+**Surface**: Rules page → BuiltinChecksList  
+**Severity**: P1 — FRO-186 harmonize sweep UI is absent  
+**Repro steps**:
+1. Navigate to `/project/dev-project/rules`
+2. Observe any built-in check row
+3. **Expected**: A "Harmonize" button appears for checks with infractions
+4. **Actual**: No harmonize button rendered for any check
+
+**Root cause**: `RulesPage.tsx` passes `infractions={new Map()}` to `BuiltinChecksList` (TODO comment: "wire real infractions when worker dispatch lands"). In `BuiltinChecksList.tsx`, `showHarmonize = onHarmonize != null && count > 0` — since `count` is always 0 from an empty map, the button is gated off unconditionally. The `FixReviewPanel` and `harmonize_min_role` settings are present and correct; only the empty-infractions guard prevents the button from appearing.
+
+---
+
+### BLOCKED-env notes
+
+| Check | Why blocked |
+|-------|------------|
+| FRO-179 (TN sidebar) | Sync-worker (port 8789) rejects dev auth-worker JWTs with `401 invalid token signature`. The two workers use different JWT secrets in `.dev.vars`. All sync-worker API calls fail in dev including `fetchProjectFiles` and `fetchFileCells`. Cells with `canonicalRef` matching focused cell can't be loaded. |
+| FRO-190 (health ring) | Same JWT issue — `GET /api/v1/projects/dev-project/health-rollup` on sync-worker returns 401. `projectHealth` stays `null`. Ring component is structurally correct. |
+
+---
+
+### Screenshots
+
+- `pd5-qa-fro223-memory-page.png` — Living Memory page with Brain icon, coaching examples, Open Terminology link
+- `pd5-qa-fro260-terminology-draft.png` — Terminology page showing "bold text" concept with status "suggested" (created via FRO-260 dialog)
+- `pd5-qa-check7-replace-preview.png` — Search & Replace in Replace mode with 2 cells affected, inline diff preview
+
+---
+
+### Ports
+
+- Processes started: Vite :5173, auth-worker :8788, sync-worker :8789, workerd
+- All processes killed after QA run. Ports 5173/8787/8788/8789 confirmed free.

@@ -167,3 +167,87 @@ Cross-cut rules: only members-page may touch App.tsx (one route line); only sear
 ## §CLAIMS (PD4)
 - FRO-233: was already Dispatched+assigned (pd3 agent handoff comment 2026-06-09 21:39Z explicitly ended its slice → stale claim, reclaimed by PD4 finisher).
 - FRO-180/173/255/258/231: claimed Todo→Dispatched by PD4 orchestrator before spawn.
+
+---
+
+# PD5 — Medium-tier queue drain (2026-06-09 overnight, autonomous; user AFK until morning)
+
+Driver: user ran `/issue-audit` then `/swarm` with explicit targets: the Medium-tier Todo/Dispatched
+issues NOT yet in main, in priority order: **215, 175, 176, 177, 178, 179, 181, 183, 186, 190, 191,
+192, 214, 223, 243**. FRO-173 explicitly skipped (needs real mic + product decision, per user).
+Base: main **`dd5c156`** (clean). Integration: `swarm/pd5-integration` (worktree `.worktrees/pd5-integration`,
+node_modules + auth-worker/node_modules + sync-worker/node_modules symlinked).
+
+## §0 STOP checklist (PD5)
+- [ ] Every targeted issue at **Fixed** (verified) or honestly **blocked** with a Linear note.
+- [ ] Integration green: root `npx tsc -b --noEmit` 0 + `npx vitest run` (no NEW fails vs baseline); `npm run build` before each promotion.
+- [ ] sync-worker / auth-worker tsc+test green if touched.
+- [ ] Each fix live-UI verified (central QA slot) before Fixed; spec reconciled per /issue Step 2.5 (orchestrator applies spec edits — see §1).
+- [ ] Promoted to main only with main tree clean; never clobber other actors.
+- [ ] Gaps traced in docs/swarm/TRACES.md §PD5.
+
+## §EXCLUDED (PD5)
+- FRO-173 — user said skip (real-mic verification + product decision A/B/C, see AUDIO-GAP-FRO173.md).
+- FRO-224 / FRO-227 — pd3 Dispatched claims (homepage proof-stats/hero verification), No-priority, not in user's target list. NOT reclaimed.
+- FRO-221 — fix already merged to main (31f63f5 + bf8edd8f...bf8efa8); board status drift only, flagged in /issue-audit. No work.
+- FRO-209/246/259/193/257 — Low/No-priority, below this run's bar per user directive.
+- PD4's protected staging files: /tmp checkout now CLEAN → protections released; no forbidden dirty paths this run.
+
+## §1 Operating model (PD5)
+- Manual worktrees off the **live integration tip** (never isolation:worktree — stale-base trap). sonnet agents, commit-only, no push/deploy/dev-stack.
+- **Spec repo rule:** agents do NOT commit to ~/frontierrnd/aquilla-specs (shared checkout = index collisions). They DRAFT the spec amendment in their Linear comment + report; ORCHESTRATOR applies + commits at merge time. (PD4 precedent: FRO-233.)
+- **Migration reservations** (avoid numbering collisions; mirror BOTH auth-worker/migrations/ AND db/postgres/ per 0028 pattern — D1→Neon drift is a known trap; db/postgres lags at 0028, auth-worker at 0030. Next free = 0031):
+  `0031` = FRO-176 (snapshots) · `0032` = FRO-178 (cell_word_morph) · `0033` = FRO-214 (project lifecycle).
+- Verification: agents run full `npx tsc -b --noEmit` + at minimum targeted `npx vitest run <paths>`; the FULL vitest gate runs at each integration merge (orchestrator). Baseline being captured on integration at dispatch time (PD4 baseline: 1966 pass / 27 pre-existing fails in 6 files).
+- Live-UI QA: centralized single slot (playwright vs seeded dev stack per AGENTS.md). Agents leave SWARM-TODO click-paths.
+
+## §3 PD5 registry + wave plan
+Status: queued | dispatched | review | merged-integration | merged-main | blocked
+| Wave | FRO | Pri | Branch | Owns (primary; SOLE owner of hot files marked ★) | Status |
+|---|---|---|---|---|---|
+| 1 | 215 | Med | swarm/fro-215 | src/pages/Homepage/** ★, new docs/swarm/HOMEPAGE-AUDIT-215.md | merged-integration |
+| 1 | 175 | Med | swarm/fro-175 | NEW ChatPanel + useChat; ProjectWorkspace.tsx ★ (mount) | merged-integration |
+| 1 | 176 | Med | swarm/fro-176 | SnapshotCreateDialog.tsx, NEW snapshot lib/hooks/route, sync-worker snapshot routes (additive), App.tsx ★ (route line), migration 0031 | merged-integration |
+| 1 | 177 | Med | swarm/fro-177 | src/lib/search/replace-action.ts, ParallelPassagesPanel.tsx ★ | merged-integration |
+| 1 | 178 | Med | swarm/fro-178 | NEW parsers/macula*, ImportDialog.tsx ★, src/lib/import.ts ★, migration 0032 | merged-integration |
+| 1 | 181 | Med | swarm/fro-181 | health/decay (useHealth, decay-engine, DecaySettingsSection, EditorTable.tsx ★ needsAttention ONLY, sync-worker rollup additive) | merged-integration |
+| 2 | 179 | Med | swarm/fro-179 | ImportDialog.tsx ★, import.ts ★, NEW TN sidebar component, ProjectWorkspace.tsx ★ (mount) | merged-integration → QA 401 → fixer pd5-fix179 (a6ccf05cd1b24a56d) |
+| 2 | 190 | Med | swarm/fro-190 | ProjectCard / dashboard health wiring (after 181) | merged-integration → QA token bug → fixer pd5-fix190 (a558570e22641de47) |
+| 2 | 186 | Med | swarm/fro-186 | FixReviewPanel.tsx, RulesPage/BuiltinChecksList ★, harmonize event (additive) | merged-integration → QA FAIL inert trigger → fixer pd5-fix186 (ab8cccc6362cf2e2b) |
+| 2 | 183-A | Med | swarm/fro-183a | EditorTable.tsx ★ (add-concept-from-selection wiring) | merged-integration → QA selection bug → fixer pd5-fix260 (a6c21bcff4e6decea) |
+| 2 | 183-B | Med | swarm/fro-183b | TerminologyPage.tsx ★ (merge-duplicates + review queue) | merged-integration (QA PASS) |
+| 2 | 223 | Med | swarm/fro-223 | LivingMemoryPage.tsx ★ | merged-integration (QA PASS) |
+| 3 | 191 | Med | swarm/fro-191 | import.ts ★ /eBible target flow, conflict UX | merged-integration |
+| 3 | 192 | Med | swarm/fro-192 | EditorTable.tsx ★ gutter, AssignedToMe inbox, assign rail | merged-integration (+orchestrator tsc repair 4fee133) |
+| 3 | 214 | Med | swarm/fro-214 | project lifecycle: migration 0033, auth-worker project route (additive), ProjectCard/dashboard ★ | merged-integration |
+| 4 | 243 | Med | swarm/fro-243 | first-run tour overlay, dashboard/App mount ★ | dispatched (ac35596c3a7d8dc42) |
+
+Cross-cut rules: per wave, each ★ file has exactly ONE owner; everyone else FORBIDDEN. FRO-183
+decomposed into sub-issues A/B (parent stays umbrella; data-model decision recorded on parent —
+v1 keeps settings-blob + derive-on-read verdicts per TRACES deferred-tails + derived-over-materialized
+preference; kind='termbase' file model / dictionary kind / verdict events stay v2).
+
+## §QA (PD5)
+- 2026-06-09 · wave-1 UI-QA agent dispatched (a777b357ba555e88f) vs integration `26f4a04` — walks 215/175/176/177/178/181 click-paths + BT adjudication; appends UI-QA-PUNCHLIST.md §PD5 (main checkout).
+
+## §M PD5 merge log
+- 2026-06-10 · **MERGED fix179** `d3d316c` (orchestrator finished the cut-off fixer: TN list-token now mints with the `__project__` sentinel + convention-locking tests; the live-401 root cause stays AMBIGUOUS — auth-worker signs any fileId, so the sentinel alone may not explain it → final QA carries an explicit cross-worker-auth CONTROL check) + `9180e76` unused-React-import repair in fix260's race test. **★ FINAL GATE GREEN @ `9180e76`:** tsc 0 · vitest 2282/20 (baseline 5 files) · sw 485/485 · aw 192/192 · build 0. Final UI-QA dispatched.
+- 2026-06-09 · ⚠️ **ORCHESTRATOR INCIDENT + REPAIR:** a `git merge` for fix260 ran in the MAIN checkout (shell cwd had drifted there after a docs update) → main accidentally fast-forwarded to unverified wave-2/3 work. Caught within minutes by a tree-integrity check (fix186's change missing from what was assumed to be integration). Repaired: `git -C main reset --keep 5a67054` (verified wave-1 tip; uncommitted swarm docs preserved), merges redone in the integration worktree. **Lesson recorded: every orchestrator git command MUST use explicit `git -C <path>` — never rely on persistent cwd.**
+- 2026-06-09 · **MERGED fix wave + 243** → integration `25e518f`: fix186 `9ec481e` (RulesPage derives real infractions via checkRulesForCell over useLivingMemory cells; 3 tests through the REAL path) · fix260 `7b96ec8` (capturedSelectionRef + toolbarMouseDownRef two-layer fix; FRO-248 dismissal regression-tested) · fix190 `7ed887d` (useProjectHealth mints aud=sync token via makeSyncTokenFetcher + `__project__` sentinel, module-level per-project fetcher cache; +5 sync-worker auth tests, sw 485) · 243 `479a2d2` (6-step portal tour, auto-once keyed on codex:productTourDone after onboardingComplete, OrgSidebar re-launch; workspace-interior steps = follow-up). Awaiting fix179, then FINAL gate + QA.
+- 2026-06-09 · **WAVE-2 QA verdicts** (punch-list §PD5 wave-2): PASS 223 + 261 + regression smoke · **FAIL 186** (BUG-FRO186-A: RulesPage `infractions={new Map()}` hardcoded → trigger structurally inert) · **PARTIAL 260** (BUG-FRO260-A: click collapses selection before onClick → dialog empty) · 179 + 190 401s — QA's "dev-only JWT mismatch" theory REFUTED by orchestrator (snapshots passed with minted tokens in the same stack): **190 = real prod bug** (useProjectHealth passes raw session JWT where a minted sync token is required); 179 = token-acquisition suspect (single-arg `getToken("list")` against a (projectId,fileId) mint fn). All four knocked back Fixed→Dispatched w/ Linear comments; fix wave dispatched (pd5-fix186/260/190/179). **Wave-2 promotion HELD until fixes verified.**
+- 2026-06-09 · **MERGED wave 3** (191 ff `0d6e33e` · 192 `3649368` · 214 `98920aa`) + **GLUE `1ab1e53`** (ImportDialog sourceCells ← allProjectCells map [191's target mode was unreachable without it]; InactiveProjectBanner + useProjectLifecycle mounted in PW per 214's SWARM-TODO) + **`4fee133`** orchestrator repair: 192's two new test files had 11 tsc errors on integration (FileReference fixture fields + unused React imports) despite agent-reported tsc 0. **★ WAVE-3 GATE GREEN @ `4fee133`:** tsc 0 · vitest **2260/20 = baseline 5 files** · sw 480/480 · aw 192/192 · build 0.
+- 2026-06-09 · **★ WAVE-1 PROMOTED TO MAIN (ff)** `dd5c156` → **`5a67054`** after UI-QA: 5 PASS · 1 BLOCKED-env (chat: no LLM key in dev — correct error affordance verified) · 0 FAIL · 0 new bugs. BT adjudication: statistical BT LIVE at ProjectWorkspace.tsx:1285 → FRO-215 audit false-negative corrected in HOMEPAGE-AUDIT-215.md (HITL flags 5→4). QA applied migrations 0031/0032 manually to the dev Postgres container (dev stack doesn't auto-apply incremental migrations — DX gap, traced).
+- 2026-06-09 · **MERGED wave 2** (179 `3320486` · 186 `4d3b531` · 190 `27e38d1` · 223 `c7b60f4` · 260 `156fcea` · 261 `17233de`) — all auto-merged, zero conflicts. **★ WAVE-2 GATE GREEN @ `17233de`:** tsc 0 · vitest **2199 pass / 20 fails = 5 baseline files** (TerminologyPage ×7 REPAIRED by 261 — new baseline 20/5: TeamDetail ×10, useSetupChecklist ×4, useAccounts ×3, AssignedToMe ×2, MembersPage ×1) · sw 480/480 · aw 184/184 · build 0. Wave-2 UI-QA dispatching; wave 3 (191/192/214) in flight off this tip.
+- 2026-06-09 · integration `swarm/pd5-integration` created off main `dd5c156`.
+- 2026-06-09 · **BASELINE @ dd5c156:** root tsc 0 · vitest **1972 pass / 27 pre-existing fails in 6 files** (TeamDetail.test.tsx ×10, TerminologyPage.test.tsx ×7, useSetupChecklist.hook.test.tsx ×4, useAccounts.test.ts ×3, AssignedToMe.test.tsx ×2, MembersPage.test.tsx ×1). Merge gate = zero NEW failures vs this list. ⚠️ TerminologyPage.test.tsx is pre-broken — FRO-261 agent (wave 2) must not be blamed for these 7, but SHOULD repair them if its work touches the same surfaces.
+- 2026-06-09 · **MERGED 175** (merge `f13bd91`): ChatPanel (Sheet drawer, composer, streaming, history, pin-cell context) + useChat + chat-service (delegates to existing completion-service `complete()`) + ProjectWorkspace toolbar mount. GATE: tsc 0 · vitest 1998/27 (+26 new, fails = baseline 6 files). Issue → Fixed (agent). Deferred-by-design: cross-session persistence, markdown bubbles.
+- 2026-06-09 · **★ WAVE-1 GATE GREEN @ `26f4a04`** (all 6 issues + glue): root tsc 0 · vitest **2095 pass / 27 fails = exactly the baseline 6 files** (+123 net new tests) · sync-worker **473/473** · auth-worker **184/184** · `npm run build` exit 0. Wave 2 dispatching; UI-QA agent launching against the integration stack.
+- 2026-06-09 · **MERGED 181** (merge `4a2b6b8`): health off retired endorsement primitives — sync-worker `GET /health-rollup` pull route (confidence ripples from validated anchors via FTS top-k neighbors, `maxHops` bound, default 4), `useHealthRollup` + `health-rollup-read.ts`, DecaySettings shows Max hops, EditorTable `needsAttentionFromConfidence()` surgical. Agent-verified tsc 0 · 40 new client tests · sw 461. DEFERRED honestly: materialized cell_edges graph (FTS is the mechanism), DO `health.rollup` push (pull route only), endorsement_count write-removal. **FRO-190 API: `useHealthRollup({projectId,getToken,cells,decaySettings,enabled})` → `{projectHealth,fileHealth,loading,error}`.** Issue → Fixed (agent).
+- 2026-06-09 · **MERGED 177** (merge `05840ff`): replace-action.ts (29 logic tests: multi-cell, HTML-span skip+count, diffs) + Replace mode in ParallelPassagesPanel (18 panel tests; diff preview w/ checkboxes, scope, retain-validations toggle) + optional payload fields on EXISTING `target.cell.commit` (no new event kinds — verified). Two-agent slice (original cut off mid-task; finisher completed in same worktree). ⚠️ retain-validations is client-threaded only — projector ignores `retain_validations` (Q25) → TRACE. Issue → Fixed; honest only after orchestrator glue (below).
+- 2026-06-09 · **MERGED 176** (merge `f1dbb1f`): named snapshots end-to-end — migration `0031_project_snapshots` (both dirs + schema.sql fix: dropped wrong file_id col), 5 sync-worker routes (create/list/view/delete/restore; 600+ writes, 100+ reads), restore = MAX(server_seq)≤snapshot_ts per cell re-emitted as commits chained on current heads (idempotent, `{restored,skippedIdentical,skippedConcurrent}`), SnapshotCreate/RestoreDialog (typed confirm) + SnapshotsPage + hook. Agent-verified sw 462 · 12 client tests. Issue → Fixed (agent).
+- 2026-06-09 · **GLUE `26f4a04` (orchestrator):** (1) snapshots moved INSIDE the FRO-254 shell — App.tsx route → ProjectWorkspace, `centerSurface="snapshots"` + restore-exclusion + lazy import + Camera nav item (CONFLICT CALL: agent's standalone-route rationale "AD-11/Q24 infrequent admin action" overridden by FRO-254's explicit "every in-project view in the shell" — user-filed requirement wins); (2) `handleReplaceAll` wired at the ParallelPassagesPanel call site through the standard commit path (optimistic patch for visible rows → emitTargetCellCommit w/ targetEventId??sourceEventId parent → one flushOutboxBatch → targeted revalidateCell → rebuildSearchIndex). Finisher's suggested snippet used nonexistent `currentEventId` — corrected. Comprehensive gate running (tsc+vitest+sw+aw+build).
+- 2026-06-09 · **MERGED 178** (merge `0efaaf5`): Macula Hebrew+Greek import — migration `0032_cell_word_morph` (both dirs), column-order-robust TSV parser (22 tests), `importMacula()` + ImportDialog card enabled, sync-worker `/import-morph` route. GATE: tsc 0 · vitest 2020/27 (fails = baseline 6 files) · sync-worker 450/450. Issue → Fixed (agent).
+- 2026-06-09 · **MERGED 215** (ff `6aff43e`): routing verified (worker/index.ts:33 edge + App.tsx:86 RootRedirect + session-store cookie lifecycle), HOMEPAGE-AUDIT-215.md (22 claims: ~10 delivered / 4 partial / 2 not / **5 HITL flags for user**), manifesto chips dimmed "soon". GATE: tsc 0 · vitest 1972/27 = baseline-identical. Issue → Fixed (agent). ⚠️ audit claims BT "not delivered" (runBacktranslation stub) — CONTRADICTS TRACES (BT shipped 2026-05-31); UI-QA must check the BT tab live before trusting it.
+
+## §CLAIMS (PD5)
+- FRO-215: RECLAIMED from stale pd3 Dispatched (pd3 converged + promoted earlier today; no live agent owns it; user explicitly targeted it). Re-dispatched under PD5.

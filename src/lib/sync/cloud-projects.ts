@@ -71,28 +71,63 @@ export async function createCloudProject(
 }
 
 /**
- * GET /api/v2/projects — every non-archived project the caller can access.
- * Pass `orgId` to scope the list to a specific org (appends `?orgId=N`).
- * Returns [] on any non-2xx or network error (no throw) so Dashboard can
- * render local state even when offline or when the server is unreachable.
+ * Discriminated-union result for {@link fetchAccessibleProjectsResult}.
+ * Callers that need to distinguish "server unreachable" from "genuinely empty
+ * org" should use this variant. Callers that tolerate silent failure (e.g.
+ * `useAccessibleProjects` for the invite picker) can keep using
+ * {@link fetchAccessibleProjects} unchanged.
  */
-export async function fetchAccessibleProjects(
+export type ProjectsResult =
+  | { ok: true; projects: CloudProjectSummary[] }
+  | { ok: false; reason: "unreachable" | "unauthorized" | "error"; status?: number }
+
+/**
+ * GET /api/v2/projects — returns a discriminated result so callers can
+ * distinguish a successful-but-empty list from a backend failure.
+ * Pass `orgId` to scope the list to a specific org (appends `?orgId=N`).
+ */
+export async function fetchAccessibleProjectsResult(
   jwt: string,
   orgId?: number,
   apiUrl: string = FRONTIER_API_URL,
-): Promise<CloudProjectSummary[]> {
+): Promise<ProjectsResult> {
   try {
     const url = orgId != null ? `${apiUrl}/api/v2/projects?orgId=${orgId}` : `${apiUrl}/api/v2/projects`
     const res = await fetch(url, {
       method: "GET",
       headers: { Authorization: `Bearer ${jwt}` },
     })
-    if (!res.ok) return []
+    if (!res.ok) {
+      const reason = res.status === 401 || res.status === 403 ? "unauthorized" : "error"
+      return { ok: false, reason, status: res.status }
+    }
     const body = (await res.json()) as { projects?: CloudProjectSummary[] }
-    return body.projects ?? []
+    return { ok: true, projects: body.projects ?? [] }
   } catch {
-    return []
+    // Network error — server unreachable.
+    return { ok: false, reason: "unreachable" }
   }
+}
+
+/**
+ * GET /api/v2/projects — every non-archived project the caller can access.
+ * Pass `orgId` to scope the list to a specific org (appends `?orgId=N`).
+ * Returns [] on any non-2xx or network error (no throw) so callers that
+ * tolerate silent failure (e.g. invite picker) continue to work.
+ *
+ * @deprecated Prefer {@link fetchAccessibleProjectsResult} when the call site
+ * needs to distinguish server failure from an empty list (e.g. Dashboard,
+ * ProjectsList). The old comment claiming this was safe because Dashboard has
+ * a "local IDB fallback" is stale — the thin-client refactor (AD-3) removed
+ * that fallback.
+ */
+export async function fetchAccessibleProjects(
+  jwt: string,
+  orgId?: number,
+  apiUrl: string = FRONTIER_API_URL,
+): Promise<CloudProjectSummary[]> {
+  const result = await fetchAccessibleProjectsResult(jwt, orgId, apiUrl)
+  return result.ok ? result.projects : []
 }
 
 /**
@@ -218,4 +253,52 @@ export async function resolveCloudProject(
   if (direct) return direct
   const list = await fetchAccessibleProjects(jwt, undefined, apiUrl)
   return list.find((p) => p.id === projectId) ?? null
+}
+
+/**
+ * Result type for {@link resolveCloudProjectResult} — separates access
+ * failures (project doesn't exist / no permission) from server failures
+ * (network error / 5xx) so callers can show "not found" vs "unreachable".
+ */
+export type ResolveProjectResult =
+  | { ok: true; project: ProjectStateResponse | CloudProjectSummary }
+  | { ok: false; reason: "not-found" | "unreachable" }
+
+/**
+ * Like {@link resolveCloudProject} but returns a discriminated result
+ * instead of null, so callers can distinguish "no access / 404" from
+ * "server unreachable / 5xx". Used by useProject to show the right state.
+ */
+export async function resolveCloudProjectResult(
+  projectId: string,
+  jwt: string,
+  apiUrl: string = FRONTIER_API_URL
+): Promise<ResolveProjectResult> {
+  try {
+    // Try the single-project endpoint first.
+    const directRes = await fetch(
+      `${apiUrl}/api/v2/projects/${encodeURIComponent(projectId)}`,
+      { method: "GET", headers: { Authorization: `Bearer ${jwt}` } }
+    )
+    if (directRes.ok) {
+      const project = (await directRes.json()) as ProjectStateResponse
+      return { ok: true, project }
+    }
+    if (directRes.status === 404 || directRes.status === 403) {
+      // Might be an older deployment that hasn't landed GET /:id — fall back
+      // to the list endpoint before concluding "not found".
+      const listResult = await fetchAccessibleProjectsResult(jwt, undefined, apiUrl)
+      if (!listResult.ok) {
+        // List endpoint also failed → server is down.
+        return { ok: false, reason: "unreachable" }
+      }
+      const found = listResult.projects.find((p) => p.id === projectId)
+      return found ? { ok: true, project: found } : { ok: false, reason: "not-found" }
+    }
+    // 5xx or other server error.
+    return { ok: false, reason: "unreachable" }
+  } catch {
+    // Network error.
+    return { ok: false, reason: "unreachable" }
+  }
 }

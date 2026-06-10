@@ -15,7 +15,7 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import type { ProjectRecord } from "@/lib/parsers/types"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
-import { minimalProjectRecord, resolveCloudProject } from "@/lib/sync/cloud-projects"
+import { minimalProjectRecord, resolveCloudProjectResult } from "@/lib/sync/cloud-projects"
 import { useProjectSettings } from "@/hooks/useProjectSettings"
 import { buildCompletionSettings } from "@/hooks/useCompletionSettings"
 import type { ProjectWideSettings } from "@/lib/sync/project-settings"
@@ -53,8 +53,9 @@ function overlaySettings(record: ProjectRecord, settings: ProjectWideSettings): 
 export type ProjectLoadStatus =
   | "loading"
   | "ready"
-  | "not-found"   // server returned 403/404
-  | "no-session"  // no jwt available; can't fetch
+  | "not-found"    // server returned 403/404 — project doesn't exist or no access
+  | "unreachable"  // network error or 5xx — server is down, not a missing project
+  | "no-session"   // no jwt available; can't fetch
 
 export function useProject(projectId: string) {
   const [project, setProject] = useState<ProjectRecord | null>(null)
@@ -84,15 +85,15 @@ export function useProject(projectId: string) {
         hasLoaded.current = true
         return
       }
-      const state = await resolveCloudProject(projectId, session.jwt)
+      const result = await resolveCloudProjectResult(projectId, session.jwt)
       if (cancelled) return
-      if (!state) {
+      if (!result.ok) {
         setProject(null)
-        setStatus("not-found")
+        setStatus(result.reason === "unreachable" ? "unreachable" : "not-found")
         hasLoaded.current = true
         return
       }
-      const hydrated = minimalProjectRecord(state)
+      const hydrated = minimalProjectRecord(result.project)
       setProject(hydrated)
       setStatus("ready")
       hasLoaded.current = true
@@ -117,7 +118,12 @@ export function useProject(projectId: string) {
     project: overlaid,
     status,
     loading: status === "loading",
+    /** True when the project is not accessible (403/404). Use `status === "unreachable"`
+     *  to distinguish server-down from a genuinely missing/forbidden project. */
     isError: status === "not-found",
+    /** True when the server could not be reached (network error / 5xx). Shows
+     *  "Can't reach the server" rather than "project not found". */
+    isUnreachable: status === "unreachable",
     refresh,
     /** Persist project-wide settings (incl. synced voice profiles) to the server. */
     patchSettings,

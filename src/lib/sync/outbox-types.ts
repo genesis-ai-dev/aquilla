@@ -44,6 +44,10 @@ export type OutboxEventKind =
   | "file.create"
   // File label rename (contributor-level; non-chain-mutating).
   | "file.rename"
+  // Soft-delete a file (project_lead+; non-chain-mutating).
+  | "file.delete"
+  // Restore a soft-deleted file (project_lead+; non-chain-mutating).
+  | "file.restore"
   // Comments (non-chain-mutating; contributor-level).
   | "comment.create"
   | "comment.edit"
@@ -209,6 +213,12 @@ export interface OutboxEventPayloads {
   "file.rename": {
     name: string
   }
+  // Soft-delete a file (project_lead+). Stamps `files.deleted_at`; cells and
+  // audio are retained (R2 wipe deferred). Non-chain-mutating (parentId omitted).
+  "file.delete": Record<string, never>
+  // Restore a soft-deleted file (project_lead+). Clears `files.deleted_at`.
+  // All cells and audio remain intact. Non-chain-mutating (parentId omitted).
+  "file.restore": Record<string, never>
 
   // ── Comments (non-chain-mutating) ────────────────────────────────────────
   "comment.create": {

@@ -211,7 +211,10 @@ CREATE TABLE files (
     created_at     BIGINT,
     updated_at     BIGINT,
     meta           TEXT NOT NULL DEFAULT '{}',
-    filled_count   INTEGER NOT NULL DEFAULT 0
+    filled_count   INTEGER NOT NULL DEFAULT 0,
+    -- FRO-272: soft-delete tombstone. NULL = active; epoch-ms = tombstoned.
+    -- Cells + audio retained; R2 wipe deferred (see migration 0036).
+    deleted_at     BIGINT DEFAULT NULL
 );
 
 CREATE TABLE cells (
@@ -435,6 +438,7 @@ CREATE INDEX idx_files_last_edit ON files(project_id, last_edit_at);
 CREATE INDEX idx_files_project ON files(project_id);
 CREATE INDEX idx_files_project_role ON files(project_id, role) WHERE role IS NOT NULL;
 CREATE INDEX idx_files_source_file ON files(source_file_id) WHERE source_file_id IS NOT NULL;
+CREATE INDEX idx_files_project_active ON files(project_id, deleted_at NULLS FIRST);
 CREATE INDEX idx_group_members_user ON group_members(user_id);
 CREATE INDEX idx_gpg_project ON group_project_grants(project_id);
 CREATE UNIQUE INDEX idx_groups_legacy_uuid ON groups(legacy_uuid);

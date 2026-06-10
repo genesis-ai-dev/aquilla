@@ -68,6 +68,13 @@ interface ImportDialogProps {
    * the AD-2 parentId fields (targetEventId / sourceEventId).
    */
   sourceCells?: SourceCellRef[]
+  /**
+   * FRO-287 (glue): existing project files, used to activate the re-import
+   * collision guard. When provided, the importer can warn before overwriting
+   * an existing file. Wired from ProjectWorkspace; the full guard lives in
+   * FRO-287.
+   */
+  existingFiles?: FileReference[]
 }
 
 /** localStorage key used to persist the per-project "skip direction prompt" choice. */

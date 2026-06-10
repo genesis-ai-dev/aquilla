@@ -786,6 +786,42 @@ case 'cell.audio.attach': {
       return ['files']
     }
 
+    case 'file.delete': {
+      // FRO-272: replay-safe soft-delete tombstone. Mirrors handlers/file-delete-restore.ts.
+      // Idempotent on double-delete (WHERE deleted_at IS NULL).
+      if (!event.fileId) {
+        throw new Error(`file.delete event ${event.id} is missing fileId`)
+      }
+      stmts.push(
+        db
+          .prepare(
+            `UPDATE files
+                SET deleted_at = ?, updated_at = (extract(epoch from now()) * 1000)::bigint
+              WHERE id = ? AND project_id = ? AND deleted_at IS NULL`,
+          )
+          .bind(event.serverTs, event.fileId, event.projectId),
+      )
+      return ['files']
+    }
+
+    case 'file.restore': {
+      // FRO-272: replay-safe restore. Mirrors handlers/file-delete-restore.ts.
+      // Idempotent on double-restore (WHERE deleted_at IS NOT NULL).
+      if (!event.fileId) {
+        throw new Error(`file.restore event ${event.id} is missing fileId`)
+      }
+      stmts.push(
+        db
+          .prepare(
+            `UPDATE files
+                SET deleted_at = NULL, updated_at = (extract(epoch from now()) * 1000)::bigint
+              WHERE id = ? AND project_id = ? AND deleted_at IS NOT NULL`,
+          )
+          .bind(event.fileId, event.projectId),
+      )
+      return ['files']
+    }
+
     case 'comment.create': {
       const p = event.payload as EventPayloads['comment.create']
       const scope: CommentScope = p.scope

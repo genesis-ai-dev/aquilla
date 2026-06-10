@@ -178,7 +178,9 @@ export function TranslatedEditor({
           // The surrounding neu-inset well in EditorTable already reads as an
           // input, so the editor surface itself stays transparent — no flat
           // background tints competing with the soft recess.
-          "prose prose-sm max-w-none h-full min-h-[40px] px-1 py-0.5 text-sm leading-relaxed focus:outline-none",
+          // No fixed text-* class: font size inherits from the target column
+          // wrapper, which carries the per-file font-size pref inline.
+          "prose prose-sm max-w-none h-full min-h-[40px] px-1 py-0.5 leading-relaxed focus:outline-none",
           "rounded-lg transition-colors",
           className
         ),
@@ -336,7 +338,7 @@ export function TranslatedEditor({
 
   if (!editor) {
     return (
-      <div className={cn("min-h-[40px] px-2 py-1 text-sm text-muted-foreground", className)}>
+      <div className={cn("min-h-[40px] px-2 py-1 text-muted-foreground", className)}>
         {placeholder}
       </div>
     )

@@ -15,8 +15,13 @@ import { useSyncExternalStore } from "react"
 const STORAGE_KEY = "aq.file-view-prefs.v1"
 
 export interface FileViewPrefs {
-  /** Editor font size in px (default: 14). */
+  /** Legacy single editor font size in px. Superseded by the per-side sizes
+   *  below; kept as a read fallback so pre-split prefs keep working. */
   fontSize?: number
+  /** Source column font size in px (default: 14). */
+  sourceFontSize?: number
+  /** Target column font size in px (default: 14). */
+  targetFontSize?: number
 }
 
 type PrefMap = Record<string, FileViewPrefs>
@@ -99,8 +104,25 @@ export function useFileViewPref(fileId: string | null | undefined): FileViewPref
   )
 }
 
-/** Resolved font size for a file (falls back to DEFAULT_FONT_SIZE when unset). */
-export function useFileFontSize(fileId: string | null | undefined): number {
+export interface ResolvedFontSizes {
+  source: number
+  target: number
+}
+
+/**
+ * Resolve per-side font sizes from raw prefs. Each side falls back to the
+ * legacy single `fontSize` (pre-split prefs), then to DEFAULT_FONT_SIZE —
+ * so a file sized before the source/target split keeps its size on both sides.
+ */
+export function resolveFontSizes(prefs: FileViewPrefs): ResolvedFontSizes {
+  return {
+    source: prefs.sourceFontSize ?? prefs.fontSize ?? DEFAULT_FONT_SIZE,
+    target: prefs.targetFontSize ?? prefs.fontSize ?? DEFAULT_FONT_SIZE,
+  }
+}
+
+/** Resolved source/target font sizes for a file (DEFAULT_FONT_SIZE when unset). */
+export function useFileFontSizes(fileId: string | null | undefined): ResolvedFontSizes {
   const prefs = useFileViewPref(fileId)
-  return prefs.fontSize ?? DEFAULT_FONT_SIZE
+  return resolveFontSizes(prefs)
 }

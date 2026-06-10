@@ -3,6 +3,7 @@ import { Menu } from "@base-ui/react/menu"
 import { Eye, X, Languages } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
+import { MIN_FONT_SIZE, MAX_FONT_SIZE, FONT_SIZE_STEP } from "@/lib/store/file-view-prefs"
 
 interface ViewSettingsMenuProps {
   fileOpen: boolean
@@ -11,10 +12,16 @@ interface ViewSettingsMenuProps {
   targetTextDirection: "ltr" | "rtl"
   cellLabelsEnabled: boolean
   rtlHintDismissed?: boolean
+  /** Per-file source-column font size in px. */
+  sourceFontSize: number
+  /** Per-file target-column font size in px. */
+  targetFontSize: number
   onLineNumbersChange: (v: boolean) => void
   onSourceTextDirectionChange: (v: "ltr" | "rtl") => void
   onTargetTextDirectionChange: (v: "ltr" | "rtl") => void
   onCellLabelsChange: (v: boolean) => void
+  onSourceFontSizeChange: (v: number) => void
+  onTargetFontSizeChange: (v: number) => void
   onDismissRtlHint?: () => void
 }
 
@@ -25,10 +32,14 @@ export function ViewSettingsMenu({
   targetTextDirection,
   cellLabelsEnabled,
   rtlHintDismissed = true,
+  sourceFontSize,
+  targetFontSize,
   onLineNumbersChange,
   onSourceTextDirectionChange,
   onTargetTextDirectionChange,
   onCellLabelsChange,
+  onSourceFontSizeChange,
+  onTargetFontSizeChange,
   onDismissRtlHint,
 }: ViewSettingsMenuProps) {
   const rtlDetected = sourceTextDirection === "rtl" || targetTextDirection === "rtl"
@@ -150,6 +161,24 @@ export function ViewSettingsMenu({
                 <span>Target</span>
                 <DirPill dir={targetTextDirection} />
               </Menu.Item>
+              <div className="-mx-1 my-1.5 h-px rounded-full shadow-neu-inset" role="separator" />
+              <div className="px-2 py-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+                Font Size
+              </div>
+              {/* Plain rows (not Menu.Item) so stepping the size doesn't close
+                  the menu — sizes are usually nudged a few clicks in a row. */}
+              <FontSizeRow
+                label="Source"
+                value={sourceFontSize}
+                disabled={!fileOpen}
+                onChange={onSourceFontSizeChange}
+              />
+              <FontSizeRow
+                label="Target"
+                value={targetFontSize}
+                disabled={!fileOpen}
+                onChange={onTargetFontSizeChange}
+              />
             </Menu.Popup>
           </Menu.Positioner>
         </Menu.Portal>
@@ -168,6 +197,52 @@ function Pill({ on }: { on: boolean }) {
     >
       {on ? "On" : "Off"}
     </span>
+  )
+}
+
+function FontSizeRow({
+  label,
+  value,
+  disabled,
+  onChange,
+}: {
+  label: string
+  value: number
+  disabled: boolean
+  onChange: (v: number) => void
+}) {
+  return (
+    <div
+      className={cn(
+        "flex select-none items-center justify-between gap-2 rounded-lg px-2 py-1.5 text-sm",
+        disabled && "opacity-50",
+      )}
+    >
+      <span>{label}</span>
+      <span className="flex items-center gap-1">
+        <button
+          type="button"
+          aria-label={`Decrease ${label.toLowerCase()} font size`}
+          title={`Decrease ${label.toLowerCase()} font size`}
+          disabled={disabled || value <= MIN_FONT_SIZE}
+          onClick={() => onChange(Math.max(MIN_FONT_SIZE, value - FONT_SIZE_STEP))}
+          className="flex h-5 w-5 items-center justify-center rounded hover:bg-muted/80 disabled:cursor-not-allowed disabled:opacity-30 transition-colors"
+        >
+          <span className="text-[11px] leading-none select-none">A−</span>
+        </button>
+        <span className="w-9 text-center text-[10px] tabular-nums text-muted-foreground">{value}px</span>
+        <button
+          type="button"
+          aria-label={`Increase ${label.toLowerCase()} font size`}
+          title={`Increase ${label.toLowerCase()} font size`}
+          disabled={disabled || value >= MAX_FONT_SIZE}
+          onClick={() => onChange(Math.min(MAX_FONT_SIZE, value + FONT_SIZE_STEP))}
+          className="flex h-5 w-5 items-center justify-center rounded hover:bg-muted/80 disabled:cursor-not-allowed disabled:opacity-30 transition-colors"
+        >
+          <span className="text-[11px] leading-none select-none">A+</span>
+        </button>
+      </span>
+    </div>
   )
 }
 

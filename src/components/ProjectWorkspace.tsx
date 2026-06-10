@@ -89,6 +89,7 @@ import { SuggestionBanner } from "./SuggestionBanner"
 import { ConfirmActionDialog } from "./ConfirmActionDialog"
 import { PeerPresence } from "./PeerPresence"
 import { ViewSettingsMenu } from "./ViewSettingsMenu"
+import { useFileFontSizes, setFileViewPref } from "@/lib/store/file-view-prefs"
 import { EditorScrollProvider, useEditorScroll } from "@/context/EditorScrollContext"
 import { detectSuggestions, type RenameSuggestion } from "@/lib/file-labeling/detect"
 import { renameFile, moveFileToCorpus, renameCorpus, deleteFile } from "@/lib/store/file-operations"
@@ -707,6 +708,9 @@ export function ProjectWorkspace() {
   }, [findNextUnfinished])
   const fileMeta = useFileMeta(activeFileId, project?.sourceLanguage, project?.targetLanguage)
   const [cellLabelsEnabled, setCellLabelsEnabled] = useCellLabelsPreference(projectId!)
+  // FRO-251: per-file, per-side font sizes — adjusted from the View settings
+  // (eye) menu, rendered by EditorTable.
+  const fontSizes = useFileFontSizes(activeFileId)
 
   const activeFile = activeFileId ? project?.files.find((f) => f.id === activeFileId) : null
   const isSubtitleFile = activeFile?.type === "vtt" || activeFile?.type === "srt"
@@ -2389,10 +2393,14 @@ export function ProjectWorkspace() {
                 targetTextDirection={fileMeta.targetTextDirection}
                 cellLabelsEnabled={cellLabelsEnabled}
                 rtlHintDismissed={fileMeta.rtlHintDismissed}
+                sourceFontSize={fontSizes.source}
+                targetFontSize={fontSizes.target}
                 onLineNumbersChange={fileMeta.setLineNumbersEnabled}
                 onSourceTextDirectionChange={fileMeta.setSourceTextDirection}
                 onTargetTextDirectionChange={fileMeta.setTargetTextDirection}
                 onCellLabelsChange={setCellLabelsEnabled}
+                onSourceFontSizeChange={(v) => { if (activeFileId) setFileViewPref(activeFileId, { sourceFontSize: v }) }}
+                onTargetFontSizeChange={(v) => { if (activeFileId) setFileViewPref(activeFileId, { targetFontSize: v }) }}
                 onDismissRtlHint={fileMeta.dismissRtlHint}
               />
               <Button

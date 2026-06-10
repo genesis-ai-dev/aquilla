@@ -64,7 +64,7 @@ import { TermLookupPopover } from "./TermLookupPopover"
 import type { Concept } from "@/lib/terminology/types"
 import { PreAcceptanceWarningBand } from "./PreAcceptanceWarningBand"
 import { detectPreAcceptanceWarnings } from "@/lib/terminology/preacceptance"
-import { useFileFontSize, setFileViewPref, MIN_FONT_SIZE, MAX_FONT_SIZE, FONT_SIZE_STEP } from "@/lib/store/file-view-prefs"
+import { useFileFontSizes } from "@/lib/store/file-view-prefs"
 
 // Per-row render counter. Always accumulated when perf logging is on (cheap)
 // but NOT auto-logged — render logs would flood the console and push the
@@ -545,9 +545,10 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
 
   const ruleMap = useMemo(() => new Map(rules.map((r) => [r.id, r])), [rules])
 
-  // FRO-251: per-file font size. Persisted in localStorage keyed by fileId.
+  // FRO-251: per-file, per-side font size. Persisted in localStorage keyed by
+  // fileId; adjusted from the View settings (eye) menu in the header.
   const editorFileId = cells[0]?.fileId ?? null
-  const fontSize = useFileFontSize(editorFileId)
+  const { source: sourceFontSize, target: targetFontSize } = useFileFontSizes(editorFileId)
 
   // FRO-250: sticky chapter indicator. Derives the "current section" label from
   // the first visible virtual item so the reader always knows which chapter/
@@ -907,34 +908,6 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
                 {project.targetLanguage}
               </span>
             )}
-            {/* FRO-251: per-file font size control — pinned to right end of
-                Target label row so it stays accessible without crowding column
-                headers. */}
-            {editorFileId && (
-              <span className="ml-auto flex items-center gap-1 normal-case tracking-normal font-normal">
-                <button
-                  type="button"
-                  aria-label="Decrease font size"
-                  title="Decrease font size"
-                  disabled={fontSize <= MIN_FONT_SIZE}
-                  onClick={() => setFileViewPref(editorFileId, { fontSize: Math.max(MIN_FONT_SIZE, fontSize - FONT_SIZE_STEP) })}
-                  className="flex h-5 w-5 items-center justify-center rounded hover:bg-muted/80 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
-                >
-                  <span className="text-[11px] leading-none select-none">A−</span>
-                </button>
-                <span className="tabular-nums text-[10px] text-muted-foreground w-7 text-center">{fontSize}px</span>
-                <button
-                  type="button"
-                  aria-label="Increase font size"
-                  title="Increase font size"
-                  disabled={fontSize >= MAX_FONT_SIZE}
-                  onClick={() => setFileViewPref(editorFileId, { fontSize: Math.min(MAX_FONT_SIZE, fontSize + FONT_SIZE_STEP) })}
-                  className="flex h-5 w-5 items-center justify-center rounded hover:bg-muted/80 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
-                >
-                  <span className="text-[11px] leading-none select-none">A+</span>
-                </button>
-              </span>
-            )}
           </div>
         </div>
       </div>
@@ -1033,7 +1006,8 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
                 getTokenForFile={getTokenForFile}
                 alignmentModel={alignmentModel}
                 onAlignmentSeedChange={onAlignmentSeedChange}
-                fontSize={fontSize}
+                sourceFontSize={sourceFontSize}
+                targetFontSize={targetFontSize}
               />
             </div>
           )
@@ -1130,8 +1104,10 @@ interface MemoizedRowProps {
   alignmentModel?: import("@/lib/completion/interlinear").AlignmentModel | null
   /** FRO-207: Called when user confirms/invalidates an alignment. */
   onAlignmentSeedChange?: (seed: import("@/lib/completion/interlinear").AlignmentSeed) => void
-  /** FRO-251: per-file font size in px. Defaults to 14 when absent. */
-  fontSize?: number
+  /** FRO-251: per-file source-column font size in px. Defaults to 14 when absent. */
+  sourceFontSize?: number
+  /** FRO-251: per-file target-column font size in px. Defaults to 14 when absent. */
+  targetFontSize?: number
 }
 
 const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
@@ -1146,7 +1122,8 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
     getTokenForFile,
     alignmentModel,
     onAlignmentSeedChange,
-    fontSize,
+    sourceFontSize,
+    targetFontSize,
     project, username, editable, isCompletionConfigured, isCompletionAvailable,
     ruleMap, onCompleteSingle, onInfractionClick,
     isBacktranslationConfigured, onBacktranslate, onSaveBacktranslation,
@@ -1277,7 +1254,8 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
         onClaimCell={onClaimCell}
         onReleaseCell={onReleaseCell}
         onAckRemoteChange={onAckRemoteChange}
-        fontSize={fontSize}
+        sourceFontSize={sourceFontSize}
+        targetFontSize={targetFontSize}
       />
     </div>
   )
@@ -1355,8 +1333,10 @@ interface EditorRowProps {
   onAddConceptFromSelection?: (sourceTerm: string) => void | Promise<void>
   onAssignVoice?: (cellId: string, voiceId: string) => void
   getTokenForFile?: (fileId: string) => Promise<string | null>
-  /** FRO-251: per-file font size in px. Defaults to 14 when absent. */
-  fontSize?: number
+  /** FRO-251: per-file source-column font size in px. Defaults to 14 when absent. */
+  sourceFontSize?: number
+  /** FRO-251: per-file target-column font size in px. Defaults to 14 when absent. */
+  targetFontSize?: number
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -1413,9 +1393,11 @@ function SourceWithTermLookup({
   const tokens = useMemo(() => tokenizeWords(text), [text])
 
   // Fast path: no active concepts → plain HighlightedText, zero popover cost.
+  // Font size inherits from the source column wrapper (per-file pref) — no
+  // fixed text-* class here.
   if (activeConcepts.length === 0) {
     return (
-      <div className="text-sm">
+      <div>
         <HighlightedText
           text={text}
           highlights={highlights}
@@ -1464,7 +1446,7 @@ function SourceWithTermLookup({
   }
 
   return (
-    <div className="text-sm">
+    <div>
       {parts}
     </div>
   )
@@ -1489,7 +1471,8 @@ function EditorRow({
   getTokenForFile,
   alignmentModel,
   onAlignmentSeedChange,
-  fontSize = 14,
+  sourceFontSize = 14,
+  targetFontSize = 14,
 }: EditorRowProps) {
   const [openRuleId, setOpenRuleId] = useState<string | null>(null)
   const [openRuleAnchor, setOpenRuleAnchor] = useState<HTMLElement | null>(null)
@@ -2350,7 +2333,7 @@ function EditorRow({
               isSynthBusy && "opacity-70",
             )}
             dir={sourceTextDirection}
-            style={{ fontSize: `${fontSize}px`, lineHeight: "1.6" }}
+            style={{ fontSize: `${sourceFontSize}px`, lineHeight: "1.6" }}
             onMouseUp={onAddConceptFromSelection ? handleSourceMouseUp : undefined}
           >
             {/* Slice 5: add-from-selection affordance. Appears when a source
@@ -2382,7 +2365,8 @@ function EditorRow({
             </div>
             {cell.originalHtml ? (
               <div
-                className="text-sm"
+                // Font size inherits from the column wrapper's inline style —
+                // a fixed text-* class here would override the per-file size.
                 // eslint-disable-next-line react/no-danger
                 dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(cell.originalHtml) }}
               />
@@ -2417,7 +2401,7 @@ function EditorRow({
             isSynthBusy && "opacity-70",
           )}
           dir={targetTextDirection}
-          style={{ fontSize: `${fontSize}px`, lineHeight: "1.6" }}
+          style={{ fontSize: `${targetFontSize}px`, lineHeight: "1.6" }}
         >
           {/* SWARM-TODO(voice-a5): "Voice together" multi-cell selection gives
               no visual feedback and the action bar never appears. Root cause:
@@ -2529,7 +2513,7 @@ function EditorRow({
                 <div
                   aria-live="polite"
                   aria-busy="true"
-                  className="pointer-events-none absolute inset-0 flex text-sm"
+                  className="pointer-events-none absolute inset-0 flex"
                 >
                   {completionPreview ? (
                     /* Streaming preview flows top-down like normal cell

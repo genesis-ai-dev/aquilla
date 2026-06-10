@@ -14,6 +14,7 @@ import { describe, it, expect, beforeEach } from "vitest"
 import {
   getFileViewPref,
   setFileViewPref,
+  resolveFontSizes,
   MIN_FONT_SIZE,
   MAX_FONT_SIZE,
 } from "./file-view-prefs"
@@ -53,5 +54,30 @@ describe("file-view-prefs store (FRO-251)", () => {
     expect(MIN_FONT_SIZE).toBeLessThan(14)     // smaller than default
     expect(MAX_FONT_SIZE).toBeGreaterThan(14)  // larger than default
     expect(MIN_FONT_SIZE).toBeGreaterThan(0)
+  })
+})
+
+describe("per-side font size resolution", () => {
+  it("defaults both sides to 14 when nothing is stored", () => {
+    expect(resolveFontSizes({})).toEqual({ source: 14, target: 14 })
+  })
+
+  it("resolves source and target independently — Hebrew source can be larger than Latin target", () => {
+    setFileViewPref("file-heb", { sourceFontSize: 20, targetFontSize: 13 })
+    const sizes = resolveFontSizes(getFileViewPref("file-heb"))
+    expect(sizes.source).toBe(20)
+    expect(sizes.target).toBe(13)
+  })
+
+  it("falls back to the legacy single fontSize for both sides (pre-split prefs)", () => {
+    setFileViewPref("file-legacy", { fontSize: 18 })
+    expect(resolveFontSizes(getFileViewPref("file-legacy"))).toEqual({ source: 18, target: 18 })
+  })
+
+  it("a per-side value overrides the legacy fontSize only for its own side", () => {
+    setFileViewPref("file-mixed", { fontSize: 18, sourceFontSize: 22 })
+    const sizes = resolveFontSizes(getFileViewPref("file-mixed"))
+    expect(sizes.source).toBe(22) // explicit per-side wins
+    expect(sizes.target).toBe(18) // legacy value still honored where unset
   })
 })

@@ -113,10 +113,10 @@ All six prior edits are confirmed live.
 | C2 | Authed user lands on OrgHome (not bounced) | App.tsx:91-99 | **DELIVERED** | `aq_hint=1` OR `onboarded` skips redirect |
 | C3 | "Text and audio translation live under one roof" | Homepage.tsx:137, EditorTable.tsx (entire file) | **DELIVERED** | Full cell editor pipeline; audio recording + TTS exist |
 | C4 | "Caption and subtitle translation for video" | Homepage.tsx:137,178; ExportDialog.tsx:110-112; lib/export/exporters/vtt; ImportDialog.tsx:531 | **DELIVERED** (scoped) | VTT export (`exportVtt`) + VTT/SRT import both exist and work. Claim is truthful as written — it says captions, not "translate video in-app". |
-| C5 | "Real-time guidance and a memory that learns" | Homepage.tsx:137 | **PARTIALLY DELIVERED** | Terminology violation checks fire pre-acceptance (PreAcceptanceWarningBand.tsx, preacceptance.ts). Back-translation is wired to `async()=>{}` stub in ProjectWorkspace (CLAIMS-AUDIT.md C6). Rules do not inject into the completion prompt. "Memory that learns" is aspirational. |
+| C5 | "Real-time guidance and a memory that learns" | Homepage.tsx:137 | **PARTIALLY DELIVERED** | Terminology violation checks fire pre-acceptance (PreAcceptanceWarningBand.tsx, preacceptance.ts). Back-translation IS live (see C8 correction). Rules do not inject into the completion prompt. "Memory that learns" is aspirational. |
 | C6 | "A first draft in seconds — even in low-resource languages" | Homepage.tsx:198-204 | **DELIVERED** | completion-service.ts + MMS worker (1000+ languages) + Whisper; batch up to 30 cells |
 | C7 | "Fix it once. The system learns." / Living Memory / bienestar demo | Homepage.tsx:228-259 | **PARTIALLY DELIVERED** | Terminology violations + rule suggestions exist (TerminologyViolationsInbox, RuleSuggestDialog). BUT: rule suggestion returns [] (stub — `collectValidatedPairs` is Phase 2c-gamma). Rules don't feed back into the next draft prompt. The demo loop (correction → rule → next draft) is aspirational. |
-| C8 | "Back-translation as you work" (Living Memory feature list bullet) | Homepage.tsx:236 | **NOT DELIVERED** | `runBacktranslation=async()=>{}` stub in ProjectWorkspace.tsx; button renders but does nothing. Service library is complete but not wired. |
+| C8 | "Back-translation as you work" (Living Memory feature list bullet) | Homepage.tsx:236 | **DELIVERED** (corrected by live QA 2026-06-09) | Original audit verdict was a FALSE NEGATIVE based on stale CLAIMS-AUDIT.md (2026-05-30). Live QA on build 26f4a04: `runBacktranslation` (ProjectWorkspace.tsx:1285) is a two-step pipeline — statistical gloss always runs, LLM polish when configured; BT tab rendered an actual reverse-gloss with "statistical" label. |
 | C9 | "Real-time checks" (Living Memory feature list bullet) | Homepage.tsx:236 | **DELIVERED** | PreAcceptanceWarningBand fires on cell accept; terminology violation blots shown inline |
 | C10 | "Many translators, one consistent project" | Homepage.tsx:238 | **DELIVERED** | WS sync with presence+focus-locks (PeerPresence.tsx, SyncStatusIndicator); Teams + invite links |
 | C11 | "Confidence derived on read — text and audio" | Homepage.tsx:274 | **PARTIALLY DELIVERED** | Per-cell HealthRing delivered (decay-engine.ts). "Audio" qualifier: no audio-specific confidence path exists. FTS5 confidence overlay is prototype/opt-in only. |
@@ -126,7 +126,7 @@ All six prior edits are confirmed live.
 | C15 | "Proven in… Come and See Foundation, ETEN Innovation Lab, All-Access Goals 2033" | Homepage.tsx:159-168 | **HITL-FLAGGED** (see below) | External partnership claims; cannot verify from codebase. |
 | C16 | "Free — because the mission comes first. Aquilla is free for everyone." | Homepage.tsx:406-408 | **DELIVERED** | Onboarding wizard is skippable; no paywall route in App.tsx; no Stripe import anywhere |
 | C17 | Pricing: "Full workspace — text and audio translation" | Homepage.tsx:415 | **DELIVERED** | Cell editor + audio recording/TTS exist |
-| C18 | Pricing: "Real-time guidance & back-translation" | Homepage.tsx:416 | **NOT DELIVERED** (back-translation) | Back-translation stub (same as C8). Real-time guidance (terminology checks) does work. Bundling them is misleading. |
+| C18 | Pricing: "Real-time guidance & back-translation" | Homepage.tsx:416 | **DELIVERED** (corrected by live QA 2026-06-09) | Both halves verified live: terminology checks + working statistical BT with optional LLM polish (see C8 correction). |
 | C19 | Pricing: "Cloud sync & team collaboration" | Homepage.tsx:417 | **DELIVERED** | D1 sync + WS presence + Teams |
 | C20 | Pricing: "On-device speech" | Homepage.tsx:418 | **DELIVERED** | Whisper (transcription) + MMS + Kokoro all run in-browser; model download chip tracks progress |
 | C21 | Manifesto modal chips: Text, Audio, Video, Images, Oral stories | Homepage.tsx:183-192 | **PARTIALLY DELIVERED** — safe copy fix applied in this PR | Text + Audio: delivered. Video (captions): delivered as scoped. Images + Oral stories: not delivered. **Safe fix applied:** Images and Oral stories chips now visually dimmed (opacity 0.55) with "soon" superscript. |
@@ -187,13 +187,10 @@ Confirm the name is capitalized correctly and that no endorsement is implied by 
 Current wording: "Sermons, the JESUS Film, scripted lessons — caption and dub them against
 the same source text…"
 
-**HITL-4 (C8/C18) — "Back-translation as you work" / "Real-time guidance & back-translation"**
-Back-translation is listed in two places (Living Memory feature bullet, pricing list) as a
-delivered feature. It is a complete stub in this build. Options:
-(a) Remove the back-translation mention from both locations until the ProjectWorkspace
-    hookup lands (recommended — the service is a 1-sprint fix per CLAIMS-AUDIT.md).
-(b) Reword to "back-translation coming soon" or similar.
-Do not silently delete — this is a product-roadmap decision about what to promise.
+**HITL-4 (C8/C18) — RESOLVED, NO ACTION NEEDED (2026-06-09 live QA)**
+The original flag was based on a stale claims audit. Back-translation is live and verified
+in the running app (statistical gloss always; LLM polish opt-in). The homepage claims in
+both locations are truthful as written. Flag withdrawn — 4 HITL flags remain, not 5.
 
 **HITL-5 (C7) — "Fix it once. The system learns." / bienestar demo**
 The Living Memory narrative is the emotional core of the homepage. Current state: the

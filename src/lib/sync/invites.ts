@@ -17,9 +17,24 @@
 // Graceful degradation: helpers return null on failure (no jwt, HTTP error,
 // network error). Callers surface null as "couldn't create / preview / accept"
 // and log — the UI shows a retry path.
+//
+// Preview functions (previewServerInvite, previewMultiInvite) return a
+// discriminated result so callers can distinguish:
+//   {ok: true, data} — preview loaded successfully
+//   {ok: false, reason: 'expired'}  — HTTP 410 (token used or expired)
+//   {ok: false, reason: 'invalid'}  — HTTP 404 (unknown token)
+//   {ok: false, reason: 'network'}  — fetch threw (offline, DNS failure, etc.)
 
 import { AUTH_API_URL } from "./sync-token"
 import { ROLE } from "@/lib/frontier/roles"
+
+/** Reason codes for a failed invite preview. */
+export type InvitePreviewFailReason = "expired" | "invalid" | "network"
+
+/** Discriminated result returned by preview functions. */
+export type InvitePreviewResult<T> =
+  | { ok: true; data: T }
+  | { ok: false; reason: InvitePreviewFailReason }
 
 export interface ServerInviteCreated {
   token: string
@@ -102,27 +117,31 @@ export async function createServerInvite(
 /**
  * GET /api/v2/projects/invite-preview/:token — public, no JWT required.
  *
- * Returns project + role metadata so the JoinPage can render context
- * before the recipient signs in. 404 (unknown token) and 410 (used /
- * expired) both surface as null with a console warning; the page renders
- * an "invite no longer valid" empty state.
+ * Returns a discriminated result so callers can distinguish "still loading"
+ * from specific failure modes:
+ *   {ok:true, data}               — preview loaded
+ *   {ok:false, reason:'expired'}  — HTTP 410 (token used or expired)
+ *   {ok:false, reason:'invalid'}  — HTTP 404 (unknown token)
+ *   {ok:false, reason:'network'}  — fetch threw (offline, DNS failure)
  */
 export async function previewServerInvite(
   token: string,
   apiUrl: string = AUTH_API_URL
-): Promise<ServerInvitePreview | null> {
+): Promise<InvitePreviewResult<ServerInvitePreview>> {
   try {
     const res = await fetch(
       `${apiUrl}/api/v2/projects/invite-preview/${encodeURIComponent(token)}`
     )
     if (!res.ok) {
-      console.warn(`[invites] previewServerInvite → HTTP ${res.status}`)
-      return null
+      const reason: InvitePreviewFailReason =
+        res.status === 410 ? "expired" : "invalid"
+      console.warn(`[invites] previewServerInvite → HTTP ${res.status} (${reason})`)
+      return { ok: false, reason }
     }
-    return (await res.json()) as ServerInvitePreview
+    return { ok: true, data: (await res.json()) as ServerInvitePreview }
   } catch (err) {
     console.warn("[invites] previewServerInvite failed:", err)
-    return null
+    return { ok: false, reason: "network" }
   }
 }
 
@@ -176,21 +195,31 @@ export interface MultiInviteAccepted {
   accepted: { projectId: string; role: number }[]
 }
 
-/** GET /api/v2/invites/:token/preview — public; lists every project the token grants. */
+/**
+ * GET /api/v2/invites/:token/preview — public; lists every project the token grants.
+ *
+ * Returns a discriminated result (same shape as previewServerInvite):
+ *   {ok:true, data}               — preview loaded
+ *   {ok:false, reason:'expired'}  — HTTP 410
+ *   {ok:false, reason:'invalid'}  — HTTP 404 (or other non-2xx)
+ *   {ok:false, reason:'network'}  — fetch threw
+ */
 export async function previewMultiInvite(
   token: string,
   apiUrl: string = AUTH_API_URL
-): Promise<MultiInvitePreview | null> {
+): Promise<InvitePreviewResult<MultiInvitePreview>> {
   try {
     const res = await fetch(`${apiUrl}/api/v2/invites/${encodeURIComponent(token)}/preview`)
     if (!res.ok) {
-      console.warn(`[invites] previewMultiInvite → HTTP ${res.status}`)
-      return null
+      const reason: InvitePreviewFailReason =
+        res.status === 410 ? "expired" : "invalid"
+      console.warn(`[invites] previewMultiInvite → HTTP ${res.status} (${reason})`)
+      return { ok: false, reason }
     }
-    return (await res.json()) as MultiInvitePreview
+    return { ok: true, data: (await res.json()) as MultiInvitePreview }
   } catch (err) {
     console.warn("[invites] previewMultiInvite failed:", err)
-    return null
+    return { ok: false, reason: "network" }
   }
 }
 

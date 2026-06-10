@@ -87,8 +87,11 @@ export function Homepage() {
   const Mark = brand.logo.Mark
 
   // Signed-in visitors (aq_hint=1 cookie — same bit the Worker reads at the
-  // edge) go straight into the app at `/`; everyone else starts onboarding.
-  const appHref = hasAuthHintCookie() ? "/" : "/onboarding"
+  // edge) go straight into the app at `/`; returning (unsigned-in) users go to
+  // /login; brand-new visitors use the "Start free" button → /onboarding.
+  // FRO-282: "Open app" is the sign-in entry for returning users — it must
+  // NOT send them through the signup wizard.
+  const appHref = hasAuthHintCookie() ? "/" : "/login"
 
   return (
     <div className="aq-root" ref={rootRef} data-theme={theme}>

@@ -421,6 +421,13 @@ export function ProjectWorkspace() {
     const open = searchParams.get("openRule")
     if (open) setDrawerRuleId(open)
   }, [searchParams])
+
+  // FRO-295: CommentsPage deep-links here with ?cellId=<id>. Park the value so
+  // the scroll-restore effect (below) can consume it once cells are loaded.
+  useEffect(() => {
+    const cellId = searchParams.get("cellId")
+    if (cellId) pendingCellScrollRef.current = cellId
+  }, [searchParams])
   const [commentsCellId, setCommentsCellId] = useState<string | null>(null)
   const [historyCellId, setHistoryCellId] = useState<string | null>(null)
   const [parallelOpen, setParallelOpen] = useState(false)

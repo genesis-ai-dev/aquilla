@@ -63,18 +63,50 @@ describe("recordedMinutes", () => {
 })
 
 describe("deadlineStatus", () => {
-  const now = Date.parse("2026-06-01T00:00:00Z")
+  // "now" = 2026-06-01 noon UTC — a point in the middle of a calendar day
+  const now = Date.parse("2026-06-01T12:00:00Z")
+
   it("returns null when there is no deadline", () => {
     expect(deadlineStatus(project({ deadlineAt: null }), now)).toBeNull()
   })
-  it("flags a past deadline as overdue", () => {
+
+  it("flags a clearly past deadline as overdue", () => {
     expect(deadlineStatus(project({ deadlineAt: "2026-05-01" }), now)).toBe("overdue")
   })
+
   it("flags a deadline within 7 days as soon", () => {
     expect(deadlineStatus(project({ deadlineAt: "2026-06-04" }), now)).toBe("soon")
   })
+
   it("flags a far-future deadline as ok", () => {
     expect(deadlineStatus(project({ deadlineAt: "2026-09-01" }), now)).toBe("ok")
+  })
+
+  // AoE boundary tests (FRO-294): deadline is inclusive through end-of-day everywhere on earth.
+  // UTC midnight of deadline + 36 h = end-of-day at UTC-12 (Baker/Howland Island).
+
+  it("due TODAY is never overdue — even at UTC midnight of that day", () => {
+    // now = 2026-06-01T00:00:00Z (UTC midnight of the deadline day itself)
+    const atMidnight = Date.parse("2026-06-01T00:00:00Z")
+    expect(deadlineStatus(project({ deadlineAt: "2026-06-01" }), atMidnight)).not.toBe("overdue")
+  })
+
+  it("due TODAY is never overdue — even late evening UTC on that day", () => {
+    // now = 2026-06-01T23:59:59Z (one second before UTC midnight end of day)
+    const lateEvening = Date.parse("2026-06-01T23:59:59Z")
+    expect(deadlineStatus(project({ deadlineAt: "2026-06-01" }), lateEvening)).not.toBe("overdue")
+  })
+
+  it("due TODAY is never overdue — 35h59m after UTC midnight (still within AoE grace)", () => {
+    // 35h59m after 2026-06-01T00:00:00Z = 2026-06-02T11:59:00Z — still within the 36h AoE grace
+    const justBeforeGraceEnds = Date.parse("2026-06-01T00:00:00Z") + (36 * 60 * 60 * 1000 - 60 * 1000)
+    expect(deadlineStatus(project({ deadlineAt: "2026-06-01" }), justBeforeGraceEnds)).not.toBe("overdue")
+  })
+
+  it("due YESTERDAY + AoE grace expired is overdue (exactly 36h after deadline UTC midnight)", () => {
+    // Exactly 36h after 2026-06-01T00:00:00Z = 2026-06-02T12:00:00Z
+    const graceExpired = Date.parse("2026-06-01T00:00:00Z") + 36 * 60 * 60 * 1000
+    expect(deadlineStatus(project({ deadlineAt: "2026-06-01" }), graceExpired)).toBe("overdue")
   })
 })
 

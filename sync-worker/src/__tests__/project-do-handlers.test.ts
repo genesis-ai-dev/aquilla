@@ -7,8 +7,10 @@ import {
   parseProjectDoClientMessage,
   PROJECT_DO_DEFAULT_LEASE_MS,
   sweepExpiredLeases,
+  unpackBroadcastBody,
   type LockState,
   type PresenceState,
+  type ProjectDoServerMessage,
 } from "../project-do-handlers"
 import type { OutboxRawEvent } from "../project-do-types"
 
@@ -285,5 +287,41 @@ describe("sweepExpiredLeases", () => {
     expect(r.locks.has("b")).toBe(false)
     expect(r.locks.has("c")).toBe(true)
     expect(r.emit).toHaveLength(2)
+  })
+})
+
+describe("unpackBroadcastBody", () => {
+  // PERF-8: POST /events batches all of a project's frames into one
+  // __broadcast subrequest. The DO must unpack BOTH shapes — old workers
+  // (rolling deploy) and archive-broadcast still send single-message bodies.
+  const applied = (id: string): ProjectDoServerMessage => ({
+    t: "event.applied",
+    id,
+    kind: "target.cell.commit",
+    project: "p1",
+    file: "f1",
+    cell: "c1",
+    by: "alice",
+  })
+
+  it("treats a legacy single-message body as one frame", () => {
+    expect(unpackBroadcastBody(applied("e1"))).toEqual([applied("e1")])
+  })
+
+  it("unpacks a broadcast.batch envelope into per-message frames", () => {
+    const body = { t: "broadcast.batch", messages: [applied("e1"), applied("e2")] }
+    expect(unpackBroadcastBody(body)).toEqual([applied("e1"), applied("e2")])
+  })
+
+  it("yields no frames for a malformed envelope instead of leaking it to clients", () => {
+    expect(unpackBroadcastBody({ t: "broadcast.batch", messages: "nope" })).toEqual([])
+    expect(unpackBroadcastBody({ t: "broadcast.batch" })).toEqual([])
+  })
+
+  it("preserves the old handler's leniency for non-envelope bodies", () => {
+    // The old handler cast-and-broadcast any JSON value; callers are trusted
+    // internal workers, so unknown shapes pass through unchanged.
+    const archived = { t: "project.archived", project: "p1", archivedAt: null, deletedBy: null }
+    expect(unpackBroadcastBody(archived)).toEqual([archived])
   })
 })

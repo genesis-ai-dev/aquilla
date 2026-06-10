@@ -25,12 +25,18 @@ import type { RealtimeMessage, ProjectionTable } from './realtime'
 import { authorize } from './authorize'
 import { dispatchEvent } from './dispatch'
 import {
+  CHAIN_MUTATING_KINDS,
   fileCountersRecomputeStmt,
   isChainMutatingKind,
-  isWinningChild,
   type PersistedEvent,
 } from './event-projection'
-import { readClaimWinners, slotKey, type ChainSlot } from './chain-claims'
+import {
+  GENESIS_PARENT_KEY,
+  parentKeyOf,
+  readClaimWinners,
+  slotKey,
+  type ChainSlot,
+} from './chain-claims'
 import { broadcastRealtime } from './broadcast'
 import type { BroadcastEnv } from './broadcast'
 import { ROLE } from './role-policy'
@@ -75,20 +81,133 @@ interface StaleEntry {
   cellId: string | null
 }
 
-interface ExistingEventRow {
-  server_ts: number
-  server_seq: number
+// ── Request-scoped prefetches (PERF-2) ─────────────────────────────────────
+// The per-event loop used to issue 1–3 serial SELECTs per event (idempotency,
+// AD-2 chain pre-check, F5 source pin) — ~2N+ Hyperdrive round-trips per
+// flush. All of these reads see only state committed BEFORE this request
+// (pending statements commit after the loop), so hoisting them into one
+// batched SELECT per concern is semantics-preserving. The only window that
+// moves is against concurrent EXTERNAL writers, which the pre-checks never
+// arbitrated anyway — the in-transaction chain claim (chain-claims.ts) does.
+
+/** Which of `ids` already exist in `events` — one SELECT per request. */
+async function readExistingEventIds(
+  db: AquillaDb,
+  ids: ReadonlySet<string>,
+): Promise<Set<string>> {
+  const found = new Set<string>()
+  if (ids.size === 0) return found
+  const list = [...ids]
+  const placeholders = list.map(() => '?').join(', ')
+  const { results } = await db
+    .prepare(`SELECT id FROM events WHERE id IN (${placeholders})`)
+    .bind(...list)
+    .all<{ id: string }>()
+  for (const r of results) found.add(r.id)
+  return found
 }
 
-async function readExistingEvent(
+/** A (project, file, cell) triple for the batched prefetches. */
+interface CellKey {
+  projectId: string
+  fileId: string
+  cellId: string
+}
+
+function cellKeyOf(projectId: string, fileId: string, cellId: string): string {
+  return `${projectId}\0${fileId}\0${cellId}`
+}
+
+/**
+ * Batched equivalent of `isWinningChild` (event-projection.ts): the earliest
+ * committed chain-mutating sibling per AD-2 slot, for every cell touched by
+ * this request, in ONE SELECT. Keyed by `slotKey()`; a candidate wins its
+ * slot iff the slot is absent or maps to the candidate's own id (idempotent
+ * replay). The WHERE narrows by (project, file, cell) — the prefix of
+ * idx_events_parent_lookup — and the window ranks within each parent slot
+ * with the same (server_seq, id) tie-break the per-event query used.
+ */
+async function prefetchChainWinners(
   db: AquillaDb,
-  eventId: string,
-): Promise<ExistingEventRow | null> {
-  const row = await db
-    .prepare('SELECT server_ts, server_seq FROM events WHERE id = ?')
-    .bind(eventId)
-    .first<ExistingEventRow>()
-  return row ?? null
+  cells: readonly CellKey[],
+): Promise<Map<string, string>> {
+  const winners = new Map<string, string>()
+  if (cells.length === 0) return winners
+
+  const kindList = [...CHAIN_MUTATING_KINDS].map((k) => `'${k}'`).join(', ')
+  const placeholders = cells.map(() => '(?, ?, ?)').join(', ')
+  const binds: unknown[] = []
+  for (const c of cells) binds.push(c.projectId, c.fileId, c.cellId)
+
+  const { results } = await db
+    .prepare(
+      `SELECT id, project_id, file_id, cell_id, parent_key FROM (
+         SELECT id, project_id, file_id, cell_id,
+                COALESCE(parent_id, '${GENESIS_PARENT_KEY}') AS parent_key,
+                ROW_NUMBER() OVER (
+                  PARTITION BY project_id, file_id, cell_id,
+                               COALESCE(parent_id, '${GENESIS_PARENT_KEY}')
+                  ORDER BY server_seq ASC, id ASC
+                ) AS rn
+         FROM events
+         WHERE kind IN (${kindList})
+           AND (project_id, file_id, cell_id) IN (${placeholders})
+       ) ranked
+       WHERE rn = 1`,
+    )
+    .bind(...binds)
+    .all<{
+      id: string
+      project_id: string
+      file_id: string
+      cell_id: string
+      parent_key: string
+    }>()
+
+  for (const r of results) {
+    winners.set(
+      slotKey({
+        projectId: r.project_id,
+        fileId: r.file_id,
+        cellId: r.cell_id,
+        parentKey: r.parent_key,
+      }),
+      r.id,
+    )
+  }
+  return winners
+}
+
+/**
+ * Current source-side `cells.event_id` per (project, file, cell) — the
+ * batched F5 stale-source pre-check (advisory UX only: pinned commits are
+ * accepted + projected regardless; the flag just drives the client's
+ * "source changed" banner).
+ */
+async function prefetchSourceEventIds(
+  db: AquillaDb,
+  cells: readonly CellKey[],
+): Promise<Map<string, string>> {
+  const sources = new Map<string, string>()
+  if (cells.length === 0) return sources
+
+  const placeholders = cells.map(() => '(?, ?, ?)').join(', ')
+  const binds: unknown[] = []
+  for (const c of cells) binds.push(c.projectId, c.fileId, c.cellId)
+
+  const { results } = await db
+    .prepare(
+      `SELECT project_id, file_id, cell_id, event_id FROM cells
+       WHERE side = 'source'
+         AND (project_id, file_id, cell_id) IN (${placeholders})`,
+    )
+    .bind(...binds)
+    .all<{ project_id: string; file_id: string; cell_id: string; event_id: string }>()
+
+  for (const r of results) {
+    sources.set(cellKeyOf(r.project_id, r.file_id, r.cell_id), r.event_id)
+  }
+  return sources
 }
 
 /**
@@ -203,6 +322,68 @@ export async function handleEventsWriteRequest(
   const pendingEntries: PendingEntry[] = []
   const seenEventIds = new Set<string>()
 
+  // PERF-2: collect the ids/cells the per-event pre-checks need and fetch
+  // each concern in one batched SELECT up front (see the helpers above for
+  // why this is semantics-preserving). Collection runs over raw, not-yet-
+  // authorized events — a superset; prefetching for an event that authorize()
+  // later rejects is a harmless read.
+  const candidateIds = new Set<string>()
+  const chainCells = new Map<string, CellKey>()
+  const sourcePinCells = new Map<string, CellKey>()
+  for (const e of rawEvents) {
+    if (typeof e.id === 'string') candidateIds.add(e.id)
+    if (
+      typeof e.projectId !== 'string' ||
+      typeof e.fileId !== 'string' ||
+      typeof e.cellId !== 'string'
+    ) {
+      continue
+    }
+    const key = cellKeyOf(e.projectId, e.fileId, e.cellId)
+    if (isChainMutatingKind(e.kind)) {
+      chainCells.set(key, { projectId: e.projectId, fileId: e.fileId, cellId: e.cellId })
+    }
+    if (e.kind === 'target.cell.commit') {
+      const p = e.payload as { sourceEventId?: string | null } | null | undefined
+      if (p?.sourceEventId) {
+        sourcePinCells.set(key, { projectId: e.projectId, fileId: e.fileId, cellId: e.cellId })
+      }
+    }
+  }
+  const [existingIds, chainWinners, sourceEventIds] = await Promise.all([
+    readExistingEventIds(db, candidateIds),
+    prefetchChainWinners(db, [...chainCells.values()]),
+    prefetchSourceEventIds(db, [...sourcePinCells.values()]),
+  ])
+
+  // PERF-2: project_settings is read at most once per (request, project).
+  // No event kind mutates project_settings (its only writers are the
+  // migrate-settings route and auth-worker), so the memo cannot serve a
+  // stale read to any event in this batch. Read/parse failures memoize as
+  // null — the same per-event fallback as before (validate: skip
+  // enforcement; harmonize: hard floor).
+  const settingsCache = new Map<string, Record<string, unknown> | null>()
+  const readProjectSettings = async (
+    projectId: string,
+  ): Promise<Record<string, unknown> | null> => {
+    if (settingsCache.has(projectId)) return settingsCache.get(projectId) ?? null
+    let parsed: Record<string, unknown> | null = null
+    try {
+      const row = await db
+        .prepare(`SELECT settings FROM project_settings WHERE project_id = ?`)
+        .bind(projectId)
+        .first<{ settings: string | null }>()
+      if (row?.settings) {
+        parsed = JSON.parse(row.settings) as Record<string, unknown>
+      }
+    } catch {
+      // Settings load failure is non-fatal — callers fall back to their
+      // defaults rather than blocking the batch.
+    }
+    settingsCache.set(projectId, parsed)
+    return parsed
+  }
+
   for (const rawEvent of rawEvents) {
     // Authorize.
     const authResult = await authorize(token, rawEvent, env.SYNC_SECRET_KEY)
@@ -222,9 +403,9 @@ export async function handleEventsWriteRequest(
     }
     seenEventIds.add(rawEvent.id)
 
-    // Idempotency: same id across requests → accept silently.
-    const existing = await readExistingEvent(db, rawEvent.id)
-    if (existing !== null) {
+    // Idempotency: same id across requests → accept silently (batched
+    // pre-fetch; one SELECT per request, not per event).
+    if (existingIds.has(rawEvent.id)) {
       accepted.push({ id: rawEvent.id })
       continue
     }
@@ -278,14 +459,27 @@ export async function handleEventsWriteRequest(
     // The recovery path is the same as the multi-user case: the stale
     // signal flows to the client, which prompts the user to rebase.
     //
-    // NOTE (RACE-2): this SELECT is only the PRE-check — it catches siblings
-    // that already committed. Two IN-FLIGHT requests can both pass it; the
-    // atomic chain_claims row taken inside the handler's transaction is the
-    // real arbiter (see chain-claims.ts), and the post-commit read-back below
-    // flags the claim loser as stale.
-    const updateProjection = isChainMutating
-      ? await isWinningChild(db, candidate)
-      : true
+    // NOTE (RACE-2): this lookup is only the PRE-check — it catches siblings
+    // that already committed (including pre-chain_claims history, where no
+    // claim row exists to arbitrate). Two IN-FLIGHT requests can both pass
+    // it; the atomic chain_claims row taken inside the handler's transaction
+    // is the real arbiter (see chain-claims.ts), and the post-commit
+    // read-back below flags the claim loser as stale. PERF-2: the committed
+    // winners were prefetched in one SELECT (prefetchChainWinners) — same
+    // decision rule as the old per-event isWinningChild(): the candidate
+    // wins iff its slot has no committed winner or the winner is itself.
+    let updateProjection = true
+    if (isChainMutating && candidate.fileId && candidate.cellId) {
+      const winner = chainWinners.get(
+        slotKey({
+          projectId: candidate.projectId,
+          fileId: candidate.fileId,
+          cellId: candidate.cellId,
+          parentKey: parentKeyOf(candidate.parentId),
+        }),
+      )
+      updateProjection = winner === undefined || winner === candidate.id
+    }
     // A chain-mutating event that does NOT advance the projection is a stale
     // sibling: it's still logged + 200-accepted, but the caller's change had
     // no visible effect. Report it so the client surfaces it instead of
@@ -306,18 +500,13 @@ export async function handleEventsWriteRequest(
     if (rawEvent.kind === 'target.cell.commit' && rawEvent.fileId && rawEvent.cellId) {
       const tp = rawEvent.payload as { sourceEventId?: string | null }
       if (tp.sourceEventId) {
-        const sourceRow = await db
-          .prepare(
-            `SELECT event_id FROM cells
-             WHERE project_id = ? AND file_id = ? AND cell_id = ? AND side = 'source'
-             LIMIT 1`,
-          )
-          .bind(rawEvent.projectId, rawEvent.fileId, rawEvent.cellId)
-          .first<{ event_id: string }>()
-        if (sourceRow && sourceRow.event_id !== tp.sourceEventId) {
+        const currentSourceEventId = sourceEventIds.get(
+          cellKeyOf(rawEvent.projectId, rawEvent.fileId, rawEvent.cellId),
+        )
+        if (currentSourceEventId && currentSourceEventId !== tp.sourceEventId) {
           staleSourceEntries.push({
             id: rawEvent.id,
-            currentSourceEventId: sourceRow.event_id,
+            currentSourceEventId,
           })
         }
       }
@@ -382,30 +571,23 @@ export async function handleEventsWriteRequest(
     //   2. validationNamedUsers — reject if caller is not in the allowlist
     //   3. allowSelfValidation=false — reject if caller is the cell's last editor
     if (rawEvent.kind === 'cell.validate') {
-      // Load project settings from project_settings table.
+      // Load project settings (memoized once per request per project —
+      // failure is non-fatal: skip enforcement rather than blocking all
+      // validates when settings are unavailable).
       let validationRoleFloor: string | undefined
       let validationNamedUsers: string[] | undefined
       let allowSelfValidation: boolean | undefined
-      try {
-        const settingsRow = await db
-          .prepare(`SELECT settings FROM project_settings WHERE project_id = ?`)
-          .bind(rawEvent.projectId)
-          .first<{ settings: string | null }>()
-        if (settingsRow?.settings) {
-          const parsed = JSON.parse(settingsRow.settings) as Record<string, unknown>
-          if (typeof parsed.validationRoleFloor === 'string') {
-            validationRoleFloor = parsed.validationRoleFloor as string
-          }
-          if (Array.isArray(parsed.validationNamedUsers)) {
-            validationNamedUsers = parsed.validationNamedUsers as string[]
-          }
-          if (typeof parsed.allowSelfValidation === 'boolean') {
-            allowSelfValidation = parsed.allowSelfValidation
-          }
+      const parsed = await readProjectSettings(rawEvent.projectId)
+      if (parsed) {
+        if (typeof parsed.validationRoleFloor === 'string') {
+          validationRoleFloor = parsed.validationRoleFloor as string
         }
-      } catch {
-        // settings load failure is non-fatal — skip enforcement rather than
-        // blocking all validates when settings are unavailable.
+        if (Array.isArray(parsed.validationNamedUsers)) {
+          validationNamedUsers = parsed.validationNamedUsers as string[]
+        }
+        if (typeof parsed.allowSelfValidation === 'boolean') {
+          allowSelfValidation = parsed.allowSelfValidation
+        }
       }
 
       // 1. Role floor check.
@@ -469,23 +651,15 @@ export async function handleEventsWriteRequest(
     if (rawEvent.kind === 'target.cell.commit') {
       const p = rawEvent.payload as { harmonize_origin?: unknown }
       if (p.harmonize_origin != null) {
-        // Load project settings to get harmonize_min_role.
-        let harmonizeMinRole: string | undefined
-        try {
-          const settingsRow = await db
-            .prepare(`SELECT settings FROM project_settings WHERE project_id = ?`)
-            .bind(rawEvent.projectId)
-            .first<{ settings: string | null }>()
-          if (settingsRow?.settings) {
-            const parsed = JSON.parse(settingsRow.settings) as Record<string, unknown>
-            if (typeof parsed.harmonize_min_role === 'string') {
-              harmonizeMinRole = parsed.harmonize_min_role
-            }
-          }
-        } catch {
-          // Settings load failure is non-fatal — apply hard floor rather than
-          // blocking all harmonize events when settings are unavailable.
-        }
+        // Load harmonize_min_role from project settings (memoized once per
+        // request per project — failure is non-fatal: apply the hard floor
+        // rather than blocking all harmonize events when settings are
+        // unavailable).
+        const parsed = await readProjectSettings(rawEvent.projectId)
+        const harmonizeMinRole =
+          typeof parsed?.harmonize_min_role === 'string'
+            ? parsed.harmonize_min_role
+            : undefined
         const HARMONIZE_FLOOR_MAP: Record<string, number> = {
           project_lead: ROLE.PROJECT_LEAD,
           maintainer: ROLE.MAINTAINER,
@@ -740,9 +914,9 @@ export async function handleEventsWriteRequest(
       for (const [project, entries] of byProject) {
         const id = env.ProjectSync.idFromName(project)
         const stub = env.ProjectSync.get(id)
-        for (const entry of entries) {
+        const messages = entries.map((entry) => {
           const frame = entry.eventFrame
-          const body = JSON.stringify({
+          return {
             t: 'event.applied',
             id: frame.id,
             kind: frame.kind,
@@ -752,22 +926,31 @@ export async function handleEventsWriteRequest(
             // Verified author — lets the author's own client skip the
             // "changed elsewhere" banner when its write bounces back.
             by: entry.author,
-          })
-          doFanOut.push(
-            stub.fetch('http://do.internal/__broadcast', {
-              method: 'POST',
-              headers: {
-                Authorization: `Bearer ${env.SYNC_SECRET_KEY}`,
-                'Content-Type': 'application/json',
-              },
-              body,
-            }).then(async (res) => {
-              if (!res.ok) console.warn(`[events/route] ProjectSync broadcast failed for ${project}: HTTP ${res.status}`)
-            }).catch((err) => {
-              console.warn('[events/route] ProjectSync broadcast error:', err)
-            }),
-          )
-        }
+          }
+        })
+        // PERF-8: ONE __broadcast subrequest per (project, request) — the
+        // per-event fan-out burned ~1 subrequest per committed event against
+        // the 1000/invocation cap. Single events keep the legacy one-message
+        // body (an old DO instance mid-rolling-deploy still understands it);
+        // larger batches use the additive broadcast.batch envelope, which the
+        // DO unpacks into the same per-event WS frames clients already parse.
+        const body = JSON.stringify(
+          messages.length === 1 ? messages[0] : { t: 'broadcast.batch', messages },
+        )
+        doFanOut.push(
+          stub.fetch('http://do.internal/__broadcast', {
+            method: 'POST',
+            headers: {
+              Authorization: `Bearer ${env.SYNC_SECRET_KEY}`,
+              'Content-Type': 'application/json',
+            },
+            body,
+          }).then(async (res) => {
+            if (!res.ok) console.warn(`[events/route] ProjectSync broadcast failed for ${project}: HTTP ${res.status}`)
+          }).catch((err) => {
+            console.warn('[events/route] ProjectSync broadcast error:', err)
+          }),
+        )
       }
       await Promise.all(doFanOut)
     }

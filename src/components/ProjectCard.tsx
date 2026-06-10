@@ -4,7 +4,9 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { MembershipAvatars } from "./MembershipAvatars"
+import { HealthRing } from "./HealthRing"
 import { useProjectMembers } from "@/hooks/useProjectMembers"
+import { useProjectHealth } from "@/hooks/useProjectHealth"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { roleName } from "@/lib/frontier/roles"
 
@@ -50,6 +52,7 @@ export function ProjectCard({
   // projects that have never been server-side (would 403/404 every time).
   const fetchKey = !isTrashed && hasServerSideExistence(project) ? project.id : null
   const { members } = useProjectMembers(fetchKey)
+  const { projectHealth } = useProjectHealth(fetchKey)
   const { session } = useFrontierSession()
 
   // First member with role >= MAINTAINER level is the canonical maintainer for
@@ -83,6 +86,22 @@ export function ProjectCard({
         <div className="flex items-start justify-between gap-2">
           <CardTitle className="text-lg">{project.name}</CardTitle>
           <div className="flex items-center gap-1.5">
+            {!isTrashed && projectHealth !== null && (
+              <HealthRing
+                health={projectHealth}
+                size={22}
+                strokeWidth={2.5}
+                className="shrink-0"
+                style={{ color: "var(--muted-foreground)" }}
+              >
+                <span
+                  className="text-[6px] font-bold leading-none"
+                  style={{ color: projectHealth <= 33 ? "#ef4444" : projectHealth <= 66 ? "#f59e0b" : "#22c55e" }}
+                >
+                  {projectHealth}
+                </span>
+              </HealthRing>
+            )}
             {!isTrashed && myRoleLabel && (
               <span
                 className="inline-flex items-center rounded-full bg-primary/10 text-primary px-2 py-0.5 text-[10px] font-medium capitalize"

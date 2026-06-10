@@ -466,14 +466,25 @@ export function useCells(opts: UseCellsOptions): UseCellsResult {
   // are appended so the row can't vanish from the table. Cells with a live
   // (unconfirmed) shadow are protected too: an unconfirmed buffer is by
   // definition not fresher than the shadowed write.
-  const mergeProtectedRows = useCallback((buffer: CellRow[], fetchStartSeq: number): CellRow[] => {
+  //
+  // `discardedCellIds` reports every protected cell whose INCOMING server
+  // rows were discarded by the merge (B1). The merged result is then not a
+  // faithful image of the server at the fetch's watermark — those rows may
+  // carry peer commits the merge dropped — so callers must not advance the
+  // `?since=` cursor past them (the next trigger re-delivers the range and
+  // merges cleanly once the local floor/shadow clears).
+  const mergeProtectedRows = useCallback((
+    buffer: CellRow[],
+    fetchStartSeq: number,
+  ): { rows: CellRow[]; discardedCellIds: Set<string> } => {
     const floors = cellFreshnessRef.current
     const shadows = optimisticEditsRef.current
-    if (floors.size === 0 && shadows.size === 0) return buffer
+    const discardedCellIds = new Set<string>()
+    if (floors.size === 0 && shadows.size === 0) return { rows: buffer, discardedCellIds }
     const protectedIds = new Set<string>()
     for (const [id, seq] of floors) if (seq > fetchStartSeq) protectedIds.add(id)
     for (const id of shadows.keys()) protectedIds.add(id)
-    if (protectedIds.size === 0) return buffer
+    if (protectedIds.size === 0) return { rows: buffer, discardedCellIds }
     // Current (fresher) rows for protected cells, keyed by cellId|side.
     const keep = new Map<string, CellRow>()
     for (const r of rowsRef.current) {
@@ -485,6 +496,10 @@ export function useCells(opts: UseCellsOptions): UseCellsResult {
         out.push(r)
         continue
       }
+      // The incoming server row is discarded either way below (replaced by
+      // the fresher local row, or dropped) — record it so the caller holds
+      // the watermark back (B1).
+      discardedCellIds.add(r.cellId)
       const k = `${r.cellId}|${r.side}`
       const cur = keep.get(k)
       // No current row for this side means a fresher read said it doesn't
@@ -499,7 +514,7 @@ export function useCells(opts: UseCellsOptions): UseCellsResult {
     // missing source row means the cell postdates the snapshot — tail is
     // the best position available until the next fresh fetch.
     for (const r of keep.values()) out.push(r)
-    return out
+    return { rows: out, discardedCellIds }
   }, [])
 
   // `soft`: a same-file refetch (revalidate after a commit, focus/visibility
@@ -606,21 +621,31 @@ export function useCells(opts: UseCellsOptions): UseCellsResult {
         const result = await fetchCellsDelta(projectId, fileId, since, token)
         if (generationRef.current !== gen) return
         if (result.kind === "delta") {
+          // B1: if the protected-row merge discarded any of the delta's rows
+          // (a local write is fresher), the cursor must NOT advance past them
+          // — those rows can carry a peer commit the merge dropped, and a
+          // cursor beyond it would skip that commit on every future ?since=
+          // (split-brain that the IDB cache then persists across reloads).
+          // Holding the cursor at `since` costs one re-delivered delta per
+          // trigger, only while local edits are actively in flight.
+          let nextWatermark = result.maxServerSeq
           if (result.changedCellIds.length > 0) {
             // Confirm shadows against the raw server rows BEFORE the merge,
             // mirroring the full-stream path: only a fetch that postdates a
             // shadow's write may clear it.
             clearConfirmedShadows(result.cells, deltaStartSeq)
             const merged = mergeCellsDelta(rowsRef.current, result.changedCellIds, result.cells)
-            rowsRef.current = mergeProtectedRows(merged, deltaStartSeq)
+            const { rows: kept, discardedCellIds } = mergeProtectedRows(merged, deltaStartSeq)
+            rowsRef.current = kept
             rebuildFromCache()
-            void writeCellsCache(projectId, fileId, rowsRef.current, result.maxServerSeq)
+            if (discardedCellIds.size > 0) nextWatermark = since
+            void writeCellsCache(projectId, fileId, rowsRef.current, nextWatermark)
           } else if (result.maxServerSeq !== since) {
             // Watermark moved on row-less events (file.rename etc.) — advance
             // the cursor so those events aren't re-scanned forever.
             void writeCellsCache(projectId, fileId, rowsRef.current, result.maxServerSeq)
           }
-          maxServerSeqRef.current = result.maxServerSeq
+          maxServerSeqRef.current = nextWatermark
           setIsLoading(false)
           return
         }
@@ -663,20 +688,53 @@ export function useCells(opts: UseCellsOptions): UseCellsResult {
       // The TARGET stream's first page carries the earliest watermark of the
       // whole two-stream snapshot — the safe `?since=` cursor: anything that
       // lands mid-stream has a higher seq, so the next delta re-fetches it.
+      //
+      // B2 (torn snapshot): the server paginates by OFFSET, so a row that
+      // shifts across a page boundary while the stream is in flight can be
+      // skipped entirely — and a skipped-but-unchanged cell is never
+      // re-delivered by any later delta. The tell is a page-to-page
+      // `maxServerSeq` bump within a side-stream; when seen, the snapshot's
+      // rows are kept (better than blanking) but NO cursor is stored, so the
+      // next trigger full-streams once and self-heals.
       let streamMaxSeq: number | null = null
+      let streamTorn = false
+      let cursorSeen = false
+      const trackStreamMeta = () => {
+        let sideFirst: number | null = null
+        let sideSeen = false
+        return (meta: { maxServerSeq?: number | null }) => {
+          const v = typeof meta.maxServerSeq === "number" ? meta.maxServerSeq : null
+          if (!cursorSeen) {
+            cursorSeen = true
+            streamMaxSeq = v
+          }
+          if (!sideSeen) {
+            sideSeen = true
+            sideFirst = v
+          } else if (v !== sideFirst) {
+            streamTorn = true
+          }
+        }
+      }
       await streamFileCells(
         projectId,
         fileId,
         token,
         (rows) => pushRows(rows, false),
         "target",
-        (meta) => {
-          streamMaxSeq = typeof meta.maxServerSeq === "number" ? meta.maxServerSeq : null
-        },
+        trackStreamMeta(),
       )
       if (generationRef.current !== gen) return
-      await streamFileCells(projectId, fileId, token, (rows) => pushRows(rows, true), "source")
+      await streamFileCells(
+        projectId,
+        fileId,
+        token,
+        (rows) => pushRows(rows, true),
+        "source",
+        trackStreamMeta(),
+      )
       if (generationRef.current !== gen) return
+      let discardedProtected = false
       if (effectiveSoft) {
         // Confirm shadows against the SERVER buffer before it becomes rowsRef,
         // so a stale buffer (target snapshotted pre-commit) does NOT confirm
@@ -684,7 +742,9 @@ export function useCells(opts: UseCellsOptions): UseCellsResult {
         clearConfirmedShadows(buffer, startSeq)
         // Swap in the buffer, retaining rows for any cell mutated locally
         // after this fetch's snapshot began (FRO-247).
-        rowsRef.current = mergeProtectedRows(buffer, startSeq)
+        const { rows: kept, discardedCellIds } = mergeProtectedRows(buffer, startSeq)
+        rowsRef.current = kept
+        discardedProtected = discardedCellIds.size > 0
       }
       // Final rebuild: the source pass paints per page, but a target-only or
       // empty-source file yields no source page to trigger one — and the
@@ -694,8 +754,13 @@ export function useCells(opts: UseCellsOptions): UseCellsResult {
       // Persist the freshly-loaded snapshot (+ its delta cursor). Best-effort;
       // failures are swallowed inside writeCellsCache so a hostile IDB never
       // breaks the load path.
-      maxServerSeqRef.current = streamMaxSeq
-      void writeCellsCache(projectId, fileId, rowsRef.current, streamMaxSeq ?? undefined)
+      //
+      // B1/B2: a torn stream, or a swap that discarded protected rows, is not
+      // a faithful server image at any single seq — store NO cursor so the
+      // next trigger full-streams once and self-heals.
+      const watermark = streamTorn || discardedProtected ? null : streamMaxSeq
+      maxServerSeqRef.current = watermark
+      void writeCellsCache(projectId, fileId, rowsRef.current, watermark ?? undefined)
       // Always clear loading on completion — including when a soft refetch
       // finishes after a hard load that got superseded — so the skeleton can
       // never get stuck on.

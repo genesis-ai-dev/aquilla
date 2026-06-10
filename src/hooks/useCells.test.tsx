@@ -18,9 +18,11 @@ const fetchByIdsMock = vi.fn<(projectId: string, fileId: string, cellIds: string
 // Seam for the M2-1 conditional refetch (?since= delta). Only consulted when
 // the hook holds a watermark (cache hit with maxServerSeq, or streamMeta).
 const fetchDeltaMock = vi.fn<(projectId: string, fileId: string, since: number, jwt: string) => Promise<unknown>>()
-// Watermark the streamFileCells mock reports via onMeta (first target page).
-// undefined = pre-M2-1 server → the hook keeps full-streaming.
-const streamMeta: { maxServerSeq?: number } = {}
+// Watermark the streamFileCells mock reports via onMeta. `maxServerSeq` is
+// the single-value case (every page agrees); `perPage` overrides it with one
+// value per page index so B2 tests can stage a mid-stream watermark bump
+// (the torn-snapshot tell). undefined = pre-M2-1 server → keeps full-streaming.
+const streamMeta: { maxServerSeq?: number; perPage?: Array<number | undefined> } = {}
 // Optional override: a queue of pages to deliver one-at-a-time. When non-empty,
 // the streamFileCells mock pulls from here instead of calling fetchAllMock.
 const pagesMock: { queue: CellRow[][]; pendingResolvers: Array<() => void> } = {
@@ -46,21 +48,33 @@ vi.mock("@/lib/sync/cells-read", () => ({
     side?: "source" | "target",
     onMeta?: (meta: { maxServerSeq?: number | null }) => void,
   ) => {
-    if (onMeta) onMeta({ maxServerSeq: streamMeta.maxServerSeq })
+    // onMeta fires once per page (matching the real streamFileCells): with
+    // `perPage` staged, page i reports perPage[i]; otherwise every page
+    // reports the single `maxServerSeq`.
+    const fireMeta = (pageIndex: number) => {
+      if (!onMeta) return
+      const per = streamMeta.perPage
+      onMeta({
+        maxServerSeq: per ? per[Math.min(pageIndex, per.length - 1)] : streamMeta.maxServerSeq,
+      })
+    }
     if (pagesMock.queue.length > 0) {
       // Streaming/pagination fixtures are source pages; the target pass yields
       // nothing so the source pass drains the queue.
       if (side === "target") {
+        fireMeta(0)
         await onPage([], true)
         return
       }
       const pages = pagesMock.queue.splice(0)
       for (let i = 0; i < pages.length; i++) {
+        fireMeta(i)
         const cont = await onPage(pages[i], i === pages.length - 1)
         if (cont === false) return
       }
       return
     }
+    fireMeta(0)
     let rows: CellRow[]
     if (side === "source" && sideCache !== null) {
       rows = sideCache
@@ -86,6 +100,10 @@ vi.mock("@/lib/sync/cells-read", () => ({
 // cache hit. mergeCellsDelta stays REAL (importOriginal) so the conditional
 // refetch tests exercise the actual lib merge, not a stand-in.
 const cacheEntry: { value: { rows: CellRow[]; maxServerSeq?: number } | null } = { value: null }
+// Every writeCellsCache call is captured so B1/B2 tests can assert what
+// watermark (if any) would have been PERSISTED to IDB — the persisted cursor
+// is what makes a bad watermark sticky across reloads.
+const cacheWrites: Array<{ rows: CellRow[]; maxServerSeq: number | undefined }> = []
 vi.mock("@/lib/sync/cells-cache", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/sync/cells-cache")>()
   return {
@@ -94,7 +112,14 @@ vi.mock("@/lib/sync/cells-cache", async (importOriginal) => {
       cacheEntry.value
         ? { key: "k", maxLastEditAt: 0, cachedAt: 0, ...cacheEntry.value }
         : null,
-    writeCellsCache: async () => {},
+    writeCellsCache: async (
+      _projectId: string,
+      _fileId: string,
+      rows: CellRow[],
+      maxServerSeq?: number,
+    ) => {
+      cacheWrites.push({ rows, maxServerSeq })
+    },
     resetCellsCacheConnectionForTests: async () => {},
   }
 })
@@ -130,7 +155,9 @@ beforeEach(() => {
   pagesMock.pendingResolvers = []
   sideCache = null
   cacheEntry.value = null
+  cacheWrites.length = 0
   delete streamMeta.maxServerSeq
+  delete streamMeta.perPage
 })
 
 describe("useCells (Phase 2a, D1-backed)", () => {
@@ -947,5 +974,180 @@ describe("useCells conditional refetch (M2-1)", () => {
     await waitFor(() => expect(result.current.isLoading).toBe(false))
     // The local write survives the merge.
     expect(result.current.cells[0].translated).toBe("mine")
+  })
+
+  it("a delta whose protected-cell rows were discarded does NOT advance the watermark; the peer edit re-delivers once the floor clears (B1)", async () => {
+    cacheEntry.value = {
+      rows: [
+        makeRow({ cellId: "c1", side: "source", value: "src" }),
+        makeRow({ cellId: "c1", side: "target", value: "old" }),
+      ],
+      maxServerSeq: 1,
+    }
+    // Stall the first delta until the local edit lands.
+    let resolveDelta: (v: unknown) => void = () => {}
+    fetchDeltaMock.mockImplementationOnce(
+      () => new Promise((resolve) => { resolveDelta = resolve }),
+    )
+    const { result } = renderHook(() =>
+      useCells({ projectId: "p", fileId: "f", getToken, enabled: true }),
+    )
+    await waitFor(() => expect(result.current.cells).toHaveLength(1))
+    await waitFor(() => expect(fetchDeltaMock).toHaveBeenCalledTimes(1))
+
+    // Local edit AFTER the delta snapshot began → c1 is floor/shadow-protected.
+    act(() => { result.current.applyOptimisticTargetEdit("c1", { value: "mine" }) })
+
+    // The delta resolves carrying a peer commit (E2) for the SAME cell. The
+    // merge rightly discards it (the local write is fresher) — but the cursor
+    // must NOT advance past E2, or every future ?since= starts beyond the
+    // peer's committed edit and it is skipped forever (split-brain that IDB
+    // then persists across reloads).
+    act(() => {
+      resolveDelta({
+        kind: "delta",
+        changedCellIds: ["c1"],
+        cells: [
+          makeRow({ cellId: "c1", side: "source", value: "src" }),
+          makeRow({ cellId: "c1", side: "target", value: "peer-E2", eventId: "ev-E2" }),
+        ],
+        maxServerSeq: 2,
+      })
+    })
+    await waitFor(() => expect(cacheWrites.length).toBeGreaterThan(0))
+    expect(result.current.cells[0].translated).toBe("mine")
+    // The persisted cursor stayed at the request's `since` — not past E2.
+    expect(cacheWrites.at(-1)?.maxServerSeq).toBe(1)
+
+    // The own write confirms via the targeted read-back → shadow clears and
+    // the freshness floor settles (no local mutation outpaces the next fetch).
+    fetchByIdsMock.mockResolvedValueOnce([
+      makeRow({ cellId: "c1", side: "source", value: "src" }),
+      makeRow({ cellId: "c1", side: "target", value: "mine", eventId: "ev-mine" }),
+    ])
+    act(() => { result.current.revalidateCell("c1") })
+    await waitFor(() => expect(result.current.cells[0].targetEventId).toBe("ev-mine"))
+
+    // The next trigger re-sends ?since=1 (NOT 2): the held-back range is
+    // re-delivered and the cell's current server row now merges.
+    fetchDeltaMock.mockResolvedValueOnce({
+      kind: "delta",
+      changedCellIds: ["c1"],
+      cells: [
+        makeRow({ cellId: "c1", side: "source", value: "src" }),
+        makeRow({ cellId: "c1", side: "target", value: "peer-E2-final", eventId: "ev-E2-final" }),
+      ],
+      maxServerSeq: 3,
+    })
+    act(() => { result.current.revalidate() })
+    await waitFor(() => expect(fetchDeltaMock).toHaveBeenCalledTimes(2))
+    expect(fetchDeltaMock).toHaveBeenLastCalledWith("p", "f", 1, "fake-jwt")
+    await waitFor(() => expect(result.current.cells[0].translated).toBe("peer-E2-final"))
+  })
+
+  it("a soft full re-stream that discarded protected rows persists NO watermark — the next trigger full-streams (B1)", async () => {
+    // Cold load: pre-M2-1 response shape, so no cursor is minted yet.
+    fetchAllMock.mockResolvedValueOnce([
+      makeRow({ cellId: "c1", side: "source", value: "src" }),
+      makeRow({ cellId: "c1", side: "target", value: "old" }),
+    ])
+    const { result } = renderHook(() =>
+      useCells({ projectId: "p", fileId: "f", getToken, enabled: true }),
+    )
+    await waitFor(() => expect(result.current.cells).toHaveLength(1))
+
+    // A soft refetch goes in flight against an M2-1 server (watermark now
+    // reported). Its snapshot is STALE — it predates the local edit below.
+    streamMeta.maxServerSeq = 5
+    let release!: () => void
+    const gate = new Promise<void>((r) => { release = r })
+    fetchAllMock.mockImplementationOnce(async () => {
+      await gate
+      return [
+        makeRow({ cellId: "c1", side: "source", value: "src" }),
+        makeRow({ cellId: "c1", side: "target", value: "old" }),
+      ]
+    })
+    act(() => { result.current.revalidate() })
+    await act(async () => {})
+
+    // Local edit while the stream is in flight → c1's rows are protected.
+    act(() => { result.current.applyOptimisticTargetEdit("c1", { value: "mine" }) })
+
+    await act(async () => { release(); await gate })
+    await waitFor(() => expect(result.current.isLoading).toBe(false))
+    expect(result.current.cells[0].translated).toBe("mine")
+    // The swap discarded the stale server rows for c1, so the stored snapshot
+    // is NOT a faithful image of the server at seq 5 — no cursor may be
+    // persisted with it.
+    expect(cacheWrites.at(-1)?.maxServerSeq).toBeUndefined()
+
+    // The next trigger full-streams (never a delta) and, now postdating the
+    // edit, confirms the committed value.
+    fetchAllMock.mockResolvedValueOnce([
+      makeRow({ cellId: "c1", side: "source", value: "src" }),
+      makeRow({ cellId: "c1", side: "target", value: "mine", validated: true }),
+    ])
+    act(() => { result.current.revalidate() })
+    await waitFor(() => expect(result.current.cells[0].status).toBe("validated"))
+    expect(fetchDeltaMock).not.toHaveBeenCalled()
+  })
+
+  it("a torn full stream (mid-stream watermark bump) stores NO cursor — the next trigger full-streams and self-heals (B2)", async () => {
+    // The server paginates by offset: rows can shift across page boundaries
+    // while the stream is in flight, skipping a cell entirely. The tell is a
+    // page-to-page maxServerSeq bump. A torn snapshot must not mint a ?since=
+    // cursor — the skipped cell never "changes" again, so no delta would ever
+    // re-deliver it and the torn state would persist in IDB forever.
+    streamMeta.maxServerSeq = 5
+    streamMeta.perPage = [5, 9] // the event log advanced between source pages
+    pagesMock.queue = [
+      [makeRow({ cellId: "a", side: "source", value: "A" })],
+      // 'b' was skipped: a deletion above it shifted offsets mid-stream.
+      [makeRow({ cellId: "c", side: "source", value: "C" })],
+    ]
+    const { result } = renderHook(() =>
+      useCells({ projectId: "p", fileId: "f", getToken, enabled: true }),
+    )
+    await waitFor(() => expect(result.current.cells).toHaveLength(2))
+    // The torn snapshot's rows are kept (better than blanking the view) but
+    // no watermark was persisted alongside them.
+    expect(cacheWrites.at(-1)?.maxServerSeq).toBeUndefined()
+
+    // Next trigger: no cursor ⇒ no delta request; the full re-stream delivers
+    // a consistent snapshot including the skipped cell, and mints a cursor.
+    delete streamMeta.perPage
+    streamMeta.maxServerSeq = 9
+    fetchAllMock.mockResolvedValueOnce([
+      makeRow({ cellId: "a", side: "source", value: "A" }),
+      makeRow({ cellId: "b", side: "source", value: "B" }),
+      makeRow({ cellId: "c", side: "source", value: "C" }),
+    ])
+    act(() => { result.current.revalidate() })
+    await waitFor(() => expect(result.current.cells).toHaveLength(3))
+    expect(fetchDeltaMock).not.toHaveBeenCalled()
+    expect(cacheWrites.at(-1)?.maxServerSeq).toBe(9)
+  })
+
+  it("a consistent multi-page stream still mints the first page's cursor (B2 control)", async () => {
+    streamMeta.maxServerSeq = 7
+    streamMeta.perPage = [7, 7]
+    pagesMock.queue = [
+      [makeRow({ cellId: "a", side: "source", value: "A" })],
+      [makeRow({ cellId: "b", side: "source", value: "B" })],
+    ]
+    const { result } = renderHook(() =>
+      useCells({ projectId: "p", fileId: "f", getToken, enabled: true }),
+    )
+    await waitFor(() => expect(result.current.cells).toHaveLength(2))
+    expect(cacheWrites.at(-1)?.maxServerSeq).toBe(7)
+
+    // The minted cursor drives the delta path on the next trigger.
+    fetchDeltaMock.mockResolvedValueOnce({
+      kind: "delta", changedCellIds: [], cells: [], maxServerSeq: 7,
+    })
+    act(() => { result.current.revalidate() })
+    await waitFor(() => expect(fetchDeltaMock).toHaveBeenCalledTimes(1))
+    expect(fetchDeltaMock).toHaveBeenCalledWith("p", "f", 7, "fake-jwt")
   })
 })

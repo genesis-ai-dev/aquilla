@@ -1,0 +1,154 @@
+/**
+ * FRO-282: Login page tests
+ *
+ * Covers:
+ *  - Page renders username + password fields and a Sign in button
+ *  - Successful login navigates to /
+ *  - Auth error shown in the form
+ *  - "Forgot password?" link switches to forgot-password mode
+ *  - "Create an account" link points to /onboarding
+ */
+
+import { describe, it, expect, vi, beforeEach } from "vitest"
+import { render, screen, waitFor, fireEvent } from "@testing-library/react"
+import { MemoryRouter, Routes, Route } from "react-router-dom"
+import { Login } from "./Login"
+
+// ---------------------------------------------------------------------------
+// Module mocks
+// ---------------------------------------------------------------------------
+
+const mockLogin = vi.fn()
+vi.mock("@/hooks/useFrontierSession", () => ({
+  useFrontierSession: () => ({ login: mockLogin }),
+}))
+
+// Mock FrontierForgotPasswordForm to avoid pulling in its own deps in unit tests.
+vi.mock("@/components/git-import/FrontierForgotPasswordForm", () => ({
+  FrontierForgotPasswordForm: ({ onBack }: { onBack: () => void }) => (
+    <div>
+      <p>Forgot password form</p>
+      <button onClick={onBack}>Back to login</button>
+    </div>
+  ),
+}))
+
+vi.mock("@/lib/frontier/auth", () => ({
+  FrontierAuthError: class FrontierAuthError extends Error {
+    status: number
+    constructor(message: string, status = 400) {
+      super(message)
+      this.status = status
+    }
+  },
+}))
+
+const navigate = vi.fn()
+vi.mock("react-router-dom", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("react-router-dom")>()),
+  useNavigate: () => navigate,
+}))
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+function renderLogin() {
+  return render(
+    <MemoryRouter initialEntries={["/login"]}>
+      <Routes>
+        <Route path="/login" element={<Login />} />
+      </Routes>
+    </MemoryRouter>,
+  )
+}
+
+beforeEach(() => {
+  vi.clearAllMocks()
+  navigate.mockReset()
+})
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+describe("Login page — rendering", () => {
+  it("renders username/email and password fields", () => {
+    renderLogin()
+    expect(screen.getByLabelText(/aquilla username or email/i)).toBeInTheDocument()
+    // Use exact label text to avoid matching the 'Show password' aria-label button.
+    expect(screen.getByLabelText("Password")).toBeInTheDocument()
+  })
+
+  it("renders a Sign in button (disabled when fields are empty)", () => {
+    renderLogin()
+    expect(screen.getByRole("button", { name: /^sign in$/i })).toBeDisabled()
+  })
+
+  it("renders a 'Create an account' link pointing to /onboarding", () => {
+    renderLogin()
+    const link = screen.getByRole("link", { name: /create an account/i })
+    expect(link).toHaveAttribute("href", "/onboarding")
+  })
+})
+
+describe("Login page — success path", () => {
+  it("calls login and navigates to / on success", async () => {
+    mockLogin.mockResolvedValue({ username: "alice", jwt: "tok" })
+    renderLogin()
+
+    fireEvent.change(screen.getByLabelText(/aquilla username or email/i), {
+      target: { value: "alice" },
+    })
+    fireEvent.change(screen.getByLabelText("Password"), {
+      target: { value: "secret" },
+    })
+
+    const btn = screen.getByRole("button", { name: /^sign in$/i })
+    expect(btn).not.toBeDisabled()
+    fireEvent.click(btn)
+
+    await waitFor(() => {
+      expect(mockLogin).toHaveBeenCalledWith("alice", "secret")
+    })
+    expect(navigate).toHaveBeenCalledWith("/", { replace: true })
+  })
+})
+
+describe("Login page — error handling", () => {
+  it("shows auth error message when login fails", async () => {
+    const { FrontierAuthError } = await import("@/lib/frontier/auth")
+    mockLogin.mockRejectedValue(new FrontierAuthError("Invalid credentials", 401))
+    renderLogin()
+
+    fireEvent.change(screen.getByLabelText(/aquilla username or email/i), {
+      target: { value: "alice" },
+    })
+    fireEvent.change(screen.getByLabelText("Password"), {
+      target: { value: "wrong" },
+    })
+    fireEvent.click(screen.getByRole("button", { name: /^sign in$/i }))
+
+    await waitFor(() => {
+      expect(screen.getByText("Invalid credentials")).toBeInTheDocument()
+    })
+    expect(navigate).not.toHaveBeenCalled()
+  })
+})
+
+describe("Login page — forgot password flow", () => {
+  it("switches to forgot-password mode when link is clicked", () => {
+    renderLogin()
+    fireEvent.click(screen.getByRole("button", { name: /forgot password/i }))
+    expect(screen.getByText("Forgot password form")).toBeInTheDocument()
+  })
+
+  it("returns to login mode from forgot-password form", () => {
+    renderLogin()
+    fireEvent.click(screen.getByRole("button", { name: /forgot password/i }))
+    expect(screen.getByText("Forgot password form")).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole("button", { name: /back to login/i }))
+    expect(screen.getByLabelText(/aquilla username or email/i)).toBeInTheDocument()
+  })
+})

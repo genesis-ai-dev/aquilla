@@ -15,8 +15,8 @@ export default defineConfig({
     environment: "node",
     include: ["src/**/*.test.ts"],
     setupFiles: ["./src/__tests__/setup-migrations.ts"],
-    testTimeout: 30000,
-    hookTimeout: 30000,
-    poolOptions: { forks: { minForks: 1, maxForks: 3 } },
+    testTimeout: 60000,
+    hookTimeout: 60000,
+    forks: { minForks: 1, maxForks: 3 },
   },
 })

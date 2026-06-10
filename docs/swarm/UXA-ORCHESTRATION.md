@@ -96,3 +96,44 @@ fetch-helpers chain FRO-281 → 293; EditorTable strings last: FRO-290 after 297
 ## §M Merge log
 
 (append: date · WS · branch · sha · tsc · vitest)
+
+- 2026-06-10 · FRO-269 consent · swarm/fro-269 · 3788435 (FF) · tsc 0 · vitest green (gate exit 0)
+- 2026-06-10 · FRO-275 join-page · 49d8771 (merge of b1d7704) · tsc 0 · vitest green (same gate). First agent died mid-work; finisher completed.
+- 2026-06-10 · FRO-266 error boundary · 778cc7d (merge of 66b3e83) · tsc 0 · gate: root vitest 2346/2346, sync-worker 501/501 (exit 0)
+- 2026-06-10 · FRO-276 USFM honesty · 6d11a37 (merge of c2966bd) · same gate green. sync-worker `tsc --noEmit` has PRE-EXISTING errors in old test files (CellRow/EventRow index sigs) — baseline; npm test green.
+- 2026-06-10 · FRO-268 characterization · 0de0699 (merge of 62612bf) · gate pending (auth-worker tests included next run)
+
+- 2026-06-10 · prior gate (268) green: tsc 0 · auth-worker 193 pass/18 skip · sync-worker + root vitest green (exit 0)
+- 2026-06-10 · FRO-294 deadline AoE · dd5091e (merge of f2fc334) · NOTE: real logic was client-side src/lib/frontier/portfolio.ts (audit's auth-worker pointer was stale)
+- 2026-06-10 · FRO-291 delete confirms · 8ca16c8 (merge of 059d97b)
+- 2026-06-10 · FRO-265 AI caps · 34db5e0 (merge of a8feacc) · log-only default; AI_BUDGET_ENFORCE=true to enforce; migration 0034_ai_usage_daily
+- 2026-06-10 · FRO-270 reset-password + 404 · f83c607 (merge of d5bd243) · gate pending
+
+- 2026-06-10 · gate (through fro-270 + hotfix d1a40aa + fro-273 90d95c0) green: tsc 0, all suites (exit 0)
+- 2026-06-10 · FRO-273 read-only editor · 90d95c0 (merge of 3d2217c)
+- 2026-06-10 · FRO-289 RLS backstop · fbe4712 (merge of 8d92c4f) · PGlite can't test role-level policy filtering — staging Neon verification is a deploy-time TODO; NOT applied to live
+- 2026-06-10 · FRO-283 invite truth · ffbc0b6 (merge of be930d8) · email binding ENFORCED; follow-up flagged: JoinPage pre-warn on email mismatch
+- 2026-06-10 · FRO-279 validated threshold · merge of 781e839 · spec says read-time, projection-time chosen + documented; backfill renumbered 0034→0035 (collision with rls_backstop) · gate pending
+
+- 2026-06-10 · gate (through fro-279 + renumber) green exit 0
+- 2026-06-10 · merged batch: FRO-274 e527f68 (595dd4f) · FRO-277 0360c45 (0c40dc2) · FRO-286 8f4d194 (6681e27, REMOVE path per spec Q25) · FRO-284 0d11eb4 (bd72317; sync-worker route.ts ctx wiring auto-merged with 279) · gate pending
+- NOTE: FRO-284 needs RESEND_API_KEY/EMAIL_FROM/BASE_URL in sync-worker env before staging deploy; extractMentions inlined copy must stay in sync with comment-helpers.
+
+### Resume state (2026-06-10 late)
+- Merged on integration (gate-verified unless noted): 269,275,266,276,268,294,291,265,270,273,289,283,279,274,277,286,284,285,282,295,280,271,278 + main@7b1ed43 absorbed (media-lens + neon-migrate guard). Gate on this tip: RUNNING (then promote to main via merge commit).
+- Fixed-not-yet-merged: FRO-287 e6ba354 (⚠ needs 1-line glue: pass existingFiles into ImportDialog from ProjectWorkspace — apply after 272 lands).
+- In flight: FRO-281 (error mapping), FRO-272 (file trash), FRO-292 (AI-drafted).
+- Not yet dispatched: 288 (PW lock), 293 (after 281), 296 (PW lock), 267 (after 287/282), tail 297→290→298, then singleton UI-QA over all SWARM-TODOs, then final promote + report.
+- Deploy-time TODOs accumulating: apply migrations 0034_rls_backstop/0035_backfill(+272/292's) via scripts/neon-migrate.ts (CI ledger check will flag until applied); FRO-279 backfill; FRO-284 sync-worker env vars; FRO-289 staging RLS verification.
+- fro-291 rescue stash: media-lens WIP turned out to be the other actor's work, since committed to main as 5750005 — stash is REDUNDANT; safe to drop after user confirms.
+- Mid-stream agent deaths: 9 (275,291,289,279,283,286,282,287 + partial); finishers recovered all.
+
+### Incidents
+- FRO-275: first agent died after ~15 lines; finisher respawned into same worktree — Fixed.
+- FRO-291: agent died mid-test-work AND its worktree contained FOREIGN media-timeline WIP
+  (TimelineAddMedia, attach-media, pg-migrations dev-stack, launch.json, TRACES pd6 note) —
+  likely a stash mishap (stash list gained "WIP on swarm/fro-291"). Salvage: agent-owned files
+  committed as c18681a; foreign WIP preserved as labeled stash
+  "rescue: foreign media-timeline WIP found in fro-291 worktree 2026-06-10 — do not drop"
+  (older "WIP on swarm/fro-291" stash also left untouched). SURFACE TO USER at report time.
+  Finisher dispatched with stash commands forbidden.

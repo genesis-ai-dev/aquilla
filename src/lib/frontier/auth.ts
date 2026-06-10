@@ -115,6 +115,61 @@ export async function requestPasswordReset(email: string): Promise<void> {
 }
 
 /**
+ * Verify a password-reset token before showing the new-password form.
+ * Returns normally on success; throws FrontierAuthError on invalid/expired.
+ *
+ * Server contract: POST /api/v2/auth/password-reset/verify { token, username }
+ *   200 → { message: "Token is valid" }
+ *   400 → { error: "Invalid token" | "Token expired" }
+ */
+export async function verifyResetToken(token: string, username: string): Promise<void> {
+  const res = await fetch(`${AUTH_BASE}/api/v2/auth/password-reset/verify`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ token, username }),
+  });
+  if (!res.ok) {
+    let message = "Invalid or expired reset link";
+    try {
+      const body = (await res.json()) as { error?: string };
+      if (body.error) message = body.error;
+    } catch {
+      // keep generic
+    }
+    throw new FrontierAuthError(message, res.status);
+  }
+}
+
+/**
+ * Perform the actual password reset.
+ * Server contract: POST /api/v2/auth/password-reset/reset { token, username, new_password }
+ *   200 → { message: "Password reset successful" }
+ *   400 → { error: "Invalid token" | "Token expired" }
+ *   500 → { error: "Failed to reset password" }
+ */
+export async function resetPassword(
+  token: string,
+  username: string,
+  newPassword: string,
+): Promise<void> {
+  const res = await fetch(`${AUTH_BASE}/api/v2/auth/password-reset/reset`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ token, username, new_password: newPassword }),
+  });
+  if (!res.ok) {
+    let message = "Failed to reset password";
+    try {
+      const body = (await res.json()) as { error?: string };
+      if (body.error) message = body.error;
+    } catch {
+      // keep generic
+    }
+    throw new FrontierAuthError(message, res.status);
+  }
+}
+
+/**
  * Decode the `sub` claim from a JWT (base64url payload, no signature
  * verification needed here — the server already verified the password before
  * issuing it). Returns null if the token is malformed.

@@ -34,6 +34,10 @@ const CORS_HEADERS: Record<string, string> = {
   // each route still enforces what it actually accepts (405 otherwise).
   "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
   "Access-Control-Allow-Headers": "Authorization, Content-Type",
+  // FRO-276: expose custom response headers so the browser-side fetch() can
+  // read them via res.headers.get(). Without Expose-Headers, only the CORS
+  // "safelisted" headers (Content-Type, etc.) are readable from JS.
+  "Access-Control-Expose-Headers": "X-Export-Mode, X-Usfm-Lossy-Verse-Count",
   "Access-Control-Max-Age": "86400",
   Vary: "Origin",
 }

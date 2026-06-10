@@ -17,9 +17,24 @@
 // Graceful degradation: helpers return null on failure (no jwt, HTTP error,
 // network error). Callers surface null as "couldn't create / preview / accept"
 // and log — the UI shows a retry path.
+//
+// Preview functions (previewServerInvite, previewMultiInvite) return a
+// discriminated result so callers can distinguish:
+//   {ok: true, data} — preview loaded successfully
+//   {ok: false, reason: 'expired'}  — HTTP 410 (token used or expired)
+//   {ok: false, reason: 'invalid'}  — HTTP 404 (unknown token)
+//   {ok: false, reason: 'network'}  — fetch threw (offline, DNS failure, etc.)
 
 import { AUTH_API_URL } from "./sync-token"
 import { ROLE } from "@/lib/frontier/roles"
+
+/** Reason codes for a failed invite preview. */
+export type InvitePreviewFailReason = "expired" | "invalid" | "network"
+
+/** Discriminated result returned by preview functions. */
+export type InvitePreviewResult<T> =
+  | { ok: true; data: T }
+  | { ok: false; reason: InvitePreviewFailReason }
 
 export interface ServerInviteCreated {
   token: string
@@ -73,7 +88,7 @@ export async function createServerInvite(
   try {
     const body: Record<string, unknown> = { role }
     if (email && email.trim().length > 0) body.email = email.trim()
-    // SWARM-TODO: confirm server accepts expires_in_days or equivalent TTL field.
+    // Pass expires_in_days to server (null = no expiry; omit = server default 30 days).
     if (expiresInDays !== undefined) body.expires_in_days = expiresInDays
     const res = await fetch(
       `${apiUrl}/api/v2/projects/${encodeURIComponent(projectId)}/invites`,
@@ -102,27 +117,31 @@ export async function createServerInvite(
 /**
  * GET /api/v2/projects/invite-preview/:token — public, no JWT required.
  *
- * Returns project + role metadata so the JoinPage can render context
- * before the recipient signs in. 404 (unknown token) and 410 (used /
- * expired) both surface as null with a console warning; the page renders
- * an "invite no longer valid" empty state.
+ * Returns a discriminated result so callers can distinguish "still loading"
+ * from specific failure modes:
+ *   {ok:true, data}               — preview loaded
+ *   {ok:false, reason:'expired'}  — HTTP 410 (token used or expired)
+ *   {ok:false, reason:'invalid'}  — HTTP 404 (unknown token)
+ *   {ok:false, reason:'network'}  — fetch threw (offline, DNS failure)
  */
 export async function previewServerInvite(
   token: string,
   apiUrl: string = AUTH_API_URL
-): Promise<ServerInvitePreview | null> {
+): Promise<InvitePreviewResult<ServerInvitePreview>> {
   try {
     const res = await fetch(
       `${apiUrl}/api/v2/projects/invite-preview/${encodeURIComponent(token)}`
     )
     if (!res.ok) {
-      console.warn(`[invites] previewServerInvite → HTTP ${res.status}`)
-      return null
+      const reason: InvitePreviewFailReason =
+        res.status === 410 ? "expired" : "invalid"
+      console.warn(`[invites] previewServerInvite → HTTP ${res.status} (${reason})`)
+      return { ok: false, reason }
     }
-    return (await res.json()) as ServerInvitePreview
+    return { ok: true, data: (await res.json()) as ServerInvitePreview }
   } catch (err) {
     console.warn("[invites] previewServerInvite failed:", err)
-    return null
+    return { ok: false, reason: "network" }
   }
 }
 
@@ -158,6 +177,75 @@ export async function acceptServerInvite(
   }
 }
 
+// ── Active invite list + revoke ────────────────────────────────────────────
+
+export interface ActiveProjectInvite {
+  token: string
+  role: { level: number; name: string }
+  createdAt: string
+  expiresAt: string | null
+  /** Non-null when the invite was minted for a specific email. */
+  email: string | null
+}
+
+/**
+ * GET /api/v2/projects/:projectId/invites — list active (unused + unexpired) invites.
+ * Requires project_lead+ role on the project. Returns null on auth/permission error.
+ */
+export async function listProjectInvites(
+  jwt: string,
+  projectId: string,
+  apiUrl: string = AUTH_API_URL
+): Promise<ActiveProjectInvite[] | null> {
+  try {
+    const res = await fetch(
+      `${apiUrl}/api/v2/projects/${encodeURIComponent(projectId)}/invites`,
+      {
+        headers: { Authorization: `Bearer ${jwt}` },
+      }
+    )
+    if (!res.ok) {
+      console.warn(`[invites] listProjectInvites ${projectId} → HTTP ${res.status}`)
+      return null
+    }
+    const body = (await res.json()) as { invites: ActiveProjectInvite[] }
+    return body.invites
+  } catch (err) {
+    console.warn("[invites] listProjectInvites failed:", err)
+    return null
+  }
+}
+
+/**
+ * DELETE /api/v2/projects/:projectId/invites/:token — revoke an unused invite.
+ * Returns true when the invite was deleted, false on 403/404 or network error.
+ */
+export async function revokeProjectInvite(
+  jwt: string,
+  projectId: string,
+  token: string,
+  apiUrl: string = AUTH_API_URL
+): Promise<boolean> {
+  try {
+    const res = await fetch(
+      `${apiUrl}/api/v2/projects/${encodeURIComponent(projectId)}/invites/${encodeURIComponent(token)}`,
+      {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${jwt}` },
+      }
+    )
+    if (!res.ok) {
+      console.warn(`[invites] revokeProjectInvite ${token} → HTTP ${res.status}`)
+      return false
+    }
+    const body = (await res.json()) as { removed: boolean }
+    return body.removed
+  } catch (err) {
+    console.warn("[invites] revokeProjectInvite failed:", err)
+    return false
+  }
+}
+
 // ── Multi-project invite (one token spanning N projects) ───────────────────
 // The org-admin MultiProjectInviteDialog mints these; the endpoints live in
 // auth-worker/routes/invites.ts. The preview/accept query project_invites by
@@ -176,21 +264,31 @@ export interface MultiInviteAccepted {
   accepted: { projectId: string; role: number }[]
 }
 
-/** GET /api/v2/invites/:token/preview — public; lists every project the token grants. */
+/**
+ * GET /api/v2/invites/:token/preview — public; lists every project the token grants.
+ *
+ * Returns a discriminated result (same shape as previewServerInvite):
+ *   {ok:true, data}               — preview loaded
+ *   {ok:false, reason:'expired'}  — HTTP 410
+ *   {ok:false, reason:'invalid'}  — HTTP 404 (or other non-2xx)
+ *   {ok:false, reason:'network'}  — fetch threw
+ */
 export async function previewMultiInvite(
   token: string,
   apiUrl: string = AUTH_API_URL
-): Promise<MultiInvitePreview | null> {
+): Promise<InvitePreviewResult<MultiInvitePreview>> {
   try {
     const res = await fetch(`${apiUrl}/api/v2/invites/${encodeURIComponent(token)}/preview`)
     if (!res.ok) {
-      console.warn(`[invites] previewMultiInvite → HTTP ${res.status}`)
-      return null
+      const reason: InvitePreviewFailReason =
+        res.status === 410 ? "expired" : "invalid"
+      console.warn(`[invites] previewMultiInvite → HTTP ${res.status} (${reason})`)
+      return { ok: false, reason }
     }
-    return (await res.json()) as MultiInvitePreview
+    return { ok: true, data: (await res.json()) as MultiInvitePreview }
   } catch (err) {
     console.warn("[invites] previewMultiInvite failed:", err)
-    return null
+    return { ok: false, reason: "network" }
   }
 }
 

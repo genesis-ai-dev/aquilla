@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { describe, it, expect, vi, afterEach } from "vitest"
-import { createServerInvite, acceptServerInvite } from "./invites"
+import { createServerInvite, acceptServerInvite, previewServerInvite, previewMultiInvite } from "./invites"
 
 const API = "https://api.example.test"
 const originalFetch = global.fetch
@@ -98,6 +98,64 @@ describe("createServerInvite", () => {
     await createServerInvite("j", "p", 400, API, "   ")
     const body = JSON.parse(fetchMock.mock.calls[0][1]!.body as string) as Record<string, unknown>
     expect(body).not.toHaveProperty("email")
+  })
+})
+
+describe("previewServerInvite", () => {
+  afterEach(() => { global.fetch = originalFetch })
+
+  it("returns {ok:true, data} on 200", async () => {
+    const payload = { projectId: "p1", projectName: "Genesis", role: { level: 400, name: "contributor" }, expiresAt: null, email: null }
+    global.fetch = mockFetch(200, payload) as unknown as typeof fetch
+    const result = await previewServerInvite("tok", API)
+    expect(result).toEqual({ ok: true, data: payload })
+  })
+
+  it("returns {ok:false, reason:'expired'} on 410", async () => {
+    global.fetch = mockFetch(410, { error: "expired" }) as unknown as typeof fetch
+    const result = await previewServerInvite("tok", API)
+    expect(result).toEqual({ ok: false, reason: "expired" })
+  })
+
+  it("returns {ok:false, reason:'invalid'} on 404", async () => {
+    global.fetch = mockFetch(404, { error: "not found" }) as unknown as typeof fetch
+    const result = await previewServerInvite("tok", API)
+    expect(result).toEqual({ ok: false, reason: "invalid" })
+  })
+
+  it("returns {ok:false, reason:'network'} on fetch throw", async () => {
+    global.fetch = vi.fn(async () => { throw new Error("offline") }) as unknown as typeof fetch
+    const result = await previewServerInvite("tok", API)
+    expect(result).toEqual({ ok: false, reason: "network" })
+  })
+})
+
+describe("previewMultiInvite", () => {
+  afterEach(() => { global.fetch = originalFetch })
+
+  it("returns {ok:true, data} on 200", async () => {
+    const payload = { token: "tok", role: { level: 400, name: "contributor" }, expiresAt: null, projects: [] }
+    global.fetch = mockFetch(200, payload) as unknown as typeof fetch
+    const result = await previewMultiInvite("tok", API)
+    expect(result).toEqual({ ok: true, data: payload })
+  })
+
+  it("returns {ok:false, reason:'expired'} on 410", async () => {
+    global.fetch = mockFetch(410, { error: "expired" }) as unknown as typeof fetch
+    const result = await previewMultiInvite("tok", API)
+    expect(result).toEqual({ ok: false, reason: "expired" })
+  })
+
+  it("returns {ok:false, reason:'invalid'} on 404", async () => {
+    global.fetch = mockFetch(404, {}) as unknown as typeof fetch
+    const result = await previewMultiInvite("tok", API)
+    expect(result).toEqual({ ok: false, reason: "invalid" })
+  })
+
+  it("returns {ok:false, reason:'network'} on fetch throw", async () => {
+    global.fetch = vi.fn(async () => { throw new Error("offline") }) as unknown as typeof fetch
+    const result = await previewMultiInvite("tok", API)
+    expect(result).toEqual({ ok: false, reason: "network" })
   })
 })
 

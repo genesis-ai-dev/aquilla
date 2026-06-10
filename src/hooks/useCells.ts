@@ -164,8 +164,11 @@ export function buildCellData(
 
   // Prefer the target row's `validated` flag as the source of truth for the
   // simple "is it green?" UI. When no stats are present, this is the only
-  // available signal — D1 already encodes the "validators-meet-threshold"
-  // gate at the projection layer.
+  // available signal — D1 encodes the "validators-meet-threshold" gate at the
+  // projection layer (FRO-279 made this threshold-aware; FRO-280 aligns all
+  // client progress surfaces to consume this flag). Falls back to the
+  // activeValidators count only when the server flag is absent (local projects
+  // or mid-migration states).
   const validatedForStatus =
     target?.validated ?? activeValidators.length >= requiredValidations
 
@@ -673,6 +676,15 @@ export function useCells(opts: UseCellsOptions): UseCellsResult {
   // the active file changes. peekOutboxBatch returns rows in enqueuedAt asc
   // order, so iterating once and writing into a Map yields last-write-wins
   // per cellId — matching the order the server will eventually apply them in.
+  //
+  // FRO-274: `failed` (quarantined) records are EXCLUDED from the overlay so a
+  // 403-rejected commit no longer pins the rejected text as live cell content.
+  // They remain visible in the outbox inspector (usePendingOutboxRecords keeps
+  // all statuses for that purpose). When a record transitions to `failed`, we
+  // also clear its optimistic shadow so the cell reverts to the server value
+  // instead of showing the rejected text indefinitely. The write-clock is
+  // respected: we only clear the shadow for the specific cellId whose event
+  // failed — other cells' shadows are unaffected.
   useEffect(() => {
     if (!enabled || !fileId) {
       pendingOverlayRef.current = new Map()
@@ -690,6 +702,24 @@ export function useCells(opts: UseCellsOptions): UseCellsResult {
         if (k !== "target.cell.commit" && k !== "target.cell.create") continue
         const cellId = r.event.cellId
         if (!cellId) continue
+        // FRO-274: skip quarantined (failed) records — they must not drive cell
+        // content in the overlay; the inspector still shows them.
+        if ((r.status ?? "pending") === "failed") {
+          // Clear the optimistic shadow for this cell so it reverts to the
+          // server projection. Respect the write-clock: only clear if no
+          // NEWER own-write for this cell has been recorded after the
+          // quarantined event — if a newer write exists, its shadow should
+          // stay authoritative until confirmed by a postdating server read.
+          const shadow = optimisticEditsRef.current.get(cellId)
+          const p = r.event.payload as { value?: string }
+          if (shadow && typeof p.value === "string" && shadow.value === p.value) {
+            // The shadow still holds the same rejected value — clear it so the
+            // cell reverts to the server projection. A different value means
+            // the user already made a superseding edit; leave that shadow alone.
+            optimisticEditsRef.current.delete(cellId)
+          }
+          continue
+        }
         const p = r.event.payload as { value?: string; valueHtml?: string }
         if (typeof p.value !== "string") continue
         next.set(cellId, { value: p.value, valueHtml: p.valueHtml })

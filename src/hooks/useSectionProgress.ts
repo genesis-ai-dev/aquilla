@@ -80,6 +80,7 @@ function rowsToProgressCells(rows: CellRow[]): {
   globalReferences?: string[]
   translated: string
   activeValidators: string[]
+  validated: boolean
 }[] {
   const sources = new Map<string, CellRow>()
   const targets = new Map<string, CellRow>()
@@ -102,7 +103,17 @@ function rowsToProgressCells(rows: CellRow[]): {
       section: canonical ? sectionLabelFromCanonical(canonical) : undefined,
       globalReferences: canonical ? [canonical] : undefined,
       translated: target?.value ?? "",
-      activeValidators: target?.validated ? [target.lastEditor ?? "unknown"] : [],
+      // FRO-280 (audit F-P2): pass the server-projected flag directly so
+      // computeSectionProgress consumes it instead of re-deriving from
+      // activeValidators. The activeValidators slot is left empty here because
+      // the projection does not return per-cell validator lists — only the
+      // aggregate threshold gate. The textValidationLevels multi-bar relies on
+      // activeValidators.length, but without individual validator identities
+      // from the server we cannot populate it; it stays at the single-slot
+      // level-0 bar (% of cells with validated=true). Full per-validator
+      // decomposition is deferred to when the validator-list grammar lands.
+      activeValidators: [],
+      validated: target?.validated ?? false,
     }
   })
 }

@@ -2,6 +2,7 @@ import { useState, useCallback } from "react"
 import { useNavigate } from "react-router-dom"
 import type { ProjectRecord } from "@/lib/parsers/types"
 import { hasAnalyticsConsentBeenSet } from "@/lib/analytics-consent"
+import { useActiveOrg } from "@/context/OrgContext"
 import { WelcomeStep } from "./steps/WelcomeStep"
 import { PrivacyStep } from "./steps/PrivacyStep"
 import { SignInStep } from "./steps/SignInStep"
@@ -13,6 +14,7 @@ const TOTAL_STEPS = 6
 
 export function OnboardingWizard() {
   const navigate = useNavigate()
+  const { refresh: refreshOrgs } = useActiveOrg()
   const [step, setStep] = useState(1)
   const [displayName, setDisplayName] = useState("")
   const [createdProject, setCreatedProject] = useState<ProjectRecord | null>(null)
@@ -29,6 +31,26 @@ export function OnboardingWizard() {
     const p = Math.max(s - 1, 1)
     return p === 2 && skipPrivacy ? 1 : p
   }), [skipPrivacy])
+
+  /**
+   * FRO-282: called when the user completes a LOGIN (not signup) in SignInStep.
+   * If they already have orgs, skip Name + Project steps and land on dashboard.
+   * refreshOrgs() now returns the freshly loaded list so we don't race against
+   * a stale closure (the `orgs` state value captured at callback creation time
+   * may not reflect the post-login server state).
+   */
+  const handleLoginComplete = useCallback(async () => {
+    // Force a fresh fetch; the return value is the authoritative post-login list.
+    const freshOrgs = await refreshOrgs()
+    const alreadyOnboarded = localStorage.getItem("codex:onboardingComplete") === "true"
+    if (alreadyOnboarded || freshOrgs.length > 0) {
+      localStorage.setItem("codex:onboardingComplete", "true")
+      navigate("/")
+    } else {
+      // Brand-new account with no orgs yet — continue the signup wizard.
+      next()
+    }
+  }, [refreshOrgs, navigate, next])
 
   const handleProjectCreated = useCallback((project: ProjectRecord) => {
     setCreatedProject(project)
@@ -76,7 +98,7 @@ export function OnboardingWizard() {
         {/* Steps */}
         {step === 1 && <WelcomeStep onNext={next} />}
         {step === 2 && <PrivacyStep onNext={next} onBack={back} />}
-        {step === 3 && <SignInStep onNext={next} onBack={back} />}
+        {step === 3 && <SignInStep onNext={next} onBack={back} onLoginComplete={handleLoginComplete} />}
         {step === 4 && (
           <NameStep
             value={displayName}

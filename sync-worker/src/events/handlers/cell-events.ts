@@ -33,6 +33,12 @@ export interface HandleCellEventOptions {
    * child race) and only the `events` row should be persisted.
    */
   updateProjection: boolean
+  /**
+   * FRO-279: project-level threshold for cells.validated.
+   * Forwarded to buildEventProjectionStmts for cell.validate / cell.unvalidate.
+   * Default 1 (N=1 projects: byte-identical behavior).
+   */
+  validationCount?: number
 }
 
 /** Cell-level kinds that this handler accepts. */
@@ -99,7 +105,9 @@ export function handleCellEvent(
       clientTs: event.clientTs,
       serverTs,
     }
-    projectionTouches = buildEventProjectionStmts(db, persisted, stmts)
+    projectionTouches = buildEventProjectionStmts(db, persisted, stmts, {
+      validationCount: opts.validationCount,
+    })
   }
 
   const eventFrame: Extract<RealtimeMessage, { t: 'event' }> = {

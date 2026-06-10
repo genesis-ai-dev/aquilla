@@ -1,0 +1,286 @@
+// Best-effort comment notification emails for sync-worker.
+//
+// This module mirrors the NotificationEmailPayload + sendNotificationEmail
+// shape from auth-worker/src/services/email.ts. It exists as a separate
+// file because sync-worker and auth-worker are distinct CF Workers and
+// cannot share source modules at runtime; the two files must stay in sync
+// on the NotificationEmailPayload shape.
+//
+// Provider-agnostic: reads RESEND_API_KEY from env. When the
+// Resend→CF Email Service swap lands (followup/remove-resend-cloudflare-email),
+// this function is the only sync-worker callsite that needs updating.
+//
+// extractMentions is inlined here (duplicated from src/lib/comments/comment-helpers.ts)
+// to avoid a cross-package import that violates the SPA↔worker boundary.
+// KEEP IN SYNC with src/lib/comments/comment-helpers.ts extractMentions.
+
+/**
+ * Extract @username mentions from a comment body.
+ * Mirrors src/lib/comments/comment-helpers.ts extractMentions — keep in sync.
+ */
+export function extractMentions(text: string): string[] {
+  const mentions = new Set<string>()
+  const re = /(?:^|\s)@([a-zA-Z][a-zA-Z0-9_]*)/g
+  let match: RegExpExecArray | null
+  while ((match = re.exec(text)) !== null) {
+    mentions.add(match[1])
+  }
+  return Array.from(mentions)
+}
+
+export interface NotificationEmailPayload {
+  /** Display name of the person who posted the comment. */
+  authorDisplayName: string
+  /** Notification kind — controls subject + headline copy. */
+  kind: 'mention' | 'reply'
+  /** Project display name. */
+  projectName: string
+  /** Plain-text excerpt of the comment body (≤200 chars). */
+  excerpt: string
+  /** Deep link to the project's comments page. */
+  commentsUrl: string
+}
+
+export interface NotificationEnv {
+  RESEND_API_KEY?: string
+  EMAIL_FROM?: string
+}
+
+interface ResendErrorResponse {
+  message?: string
+}
+
+function buildNotificationHtml(p: NotificationEmailPayload): string {
+  const headline =
+    p.kind === 'mention'
+      ? `${p.authorDisplayName} mentioned you in <strong>${p.projectName}</strong>`
+      : `${p.authorDisplayName} replied to a thread in <strong>${p.projectName}</strong>`
+  const truncated =
+    p.excerpt.length > 200 ? p.excerpt.slice(0, 197) + '…' : p.excerpt
+  return `
+    <html>
+      <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #111;">
+        <div style="max-width: 600px; margin: 0 auto; padding: 20px;">
+          <p>${headline}:</p>
+          <blockquote style="border-left: 3px solid #e5e7eb; padding-left: 12px; color: #374151; margin: 12px 0;">
+            ${truncated}
+          </blockquote>
+          <p style="margin: 20px 0; text-align: center;">
+            <a href="${p.commentsUrl}"
+               style="display: inline-block; padding: 12px 24px; background-color: #2563eb; color: white; text-decoration: none; border-radius: 6px;">
+              View comment
+            </a>
+          </p>
+          <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 20px 0;">
+          <p style="color: #6b7280; font-size: 0.875rem;">
+            You are receiving this because you were mentioned or participated in this thread.
+          </p>
+        </div>
+      </body>
+    </html>
+  `.trim()
+}
+
+/**
+ * Send one notification email (fire-and-forget safe — caller uses waitUntil).
+ * No-ops when RESEND_API_KEY is absent so dev/test never require email config.
+ * Throws on provider error so the caller can log failures without blocking the
+ * comment write.
+ */
+export async function sendNotificationEmail(
+  env: NotificationEnv,
+  toEmail: string,
+  payload: NotificationEmailPayload,
+): Promise<void> {
+  if (!env.RESEND_API_KEY) return
+  const from = env.EMAIL_FROM ?? 'noreply@frontierrnd.com'
+  const subject =
+    payload.kind === 'mention'
+      ? `${payload.authorDisplayName} mentioned you in ${payload.projectName}`
+      : `New reply in ${payload.projectName}`
+  const html = buildNotificationHtml(payload)
+  const text =
+    payload.kind === 'mention'
+      ? `${payload.authorDisplayName} mentioned you in ${payload.projectName}.\n\n${payload.excerpt}\n\nView: ${payload.commentsUrl}`
+      : `${payload.authorDisplayName} replied in ${payload.projectName}.\n\n${payload.excerpt}\n\nView: ${payload.commentsUrl}`
+
+  const response = await fetch('https://api.resend.com/emails', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${env.RESEND_API_KEY}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ from, to: [toEmail], subject, html, text }),
+  })
+
+  if (!response.ok) {
+    let errorMessage = `Failed to send notification email: ${response.status}`
+    try {
+      const errorBody = (await response.json()) as ResendErrorResponse
+      if (errorBody?.message) errorMessage = `Failed to send notification email: ${errorBody.message}`
+    } catch {
+      // ignore JSON parse errors
+    }
+    throw new Error(errorMessage)
+  }
+}
+
+// ── Recipient resolution ──────────────────────────────────────────────────
+
+/**
+ * Derive notification recipients for a comment.create event.
+ *
+ * Recipients = mentions + thread-participants (all prior authors in same
+ * parentCommentId chain, i.e. the root thread) minus the comment author.
+ * Returned as a de-duped array of usernames.
+ */
+export function deriveRecipientUsernames(opts: {
+  author: string
+  mentionedUsernames: string[]
+  threadParticipantUsernames: string[]
+}): string[] {
+  const recipients = new Set<string>([
+    ...opts.mentionedUsernames,
+    ...opts.threadParticipantUsernames,
+  ])
+  recipients.delete(opts.author)
+  return Array.from(recipients)
+}
+
+/**
+ * Look up emails for a list of usernames from the `users` table.
+ * Returns a map of username → email (only entries that exist in the DB).
+ */
+export async function resolveUserEmails(
+  db: AquillaDb,
+  usernames: string[],
+): Promise<Map<string, string>> {
+  if (usernames.length === 0) return new Map()
+
+  // Parameterised IN clause — one placeholder per username.
+  const placeholders = usernames.map(() => '?').join(', ')
+  const rows = await db
+    .prepare(`SELECT username, email FROM users WHERE username IN (${placeholders})`)
+    .bind(...usernames)
+    .all<{ username: string; email: string }>()
+
+  const result = new Map<string, string>()
+  for (const row of rows.results) {
+    result.set(row.username, row.email)
+  }
+  return result
+}
+
+/**
+ * Look up thread-participant usernames for a comment thread.
+ *
+ * For a reply (parentCommentId !== null): returns all distinct author_ids of
+ * comments in the thread (root + other replies with the same parent).
+ * For a new top-level comment: no prior thread participants — returns [].
+ */
+export async function getThreadParticipants(
+  db: AquillaDb,
+  projectId: string,
+  parentCommentId: string | null,
+): Promise<string[]> {
+  if (!parentCommentId) return []
+
+  // The root and all its replies share the same thread root id.
+  // We want authors of the root comment and any existing replies.
+  const rows = await db
+    .prepare(
+      `SELECT DISTINCT author_id FROM comments
+       WHERE project_id = ?
+         AND (comment_id = ? OR parent_comment_id = ?)
+         AND deleted_at IS NULL`,
+    )
+    .bind(projectId, parentCommentId, parentCommentId)
+    .all<{ author_id: string }>()
+
+  return rows.results.map((r) => r.author_id)
+}
+
+/**
+ * Look up the project display name. Returns null if not found.
+ */
+export async function getProjectName(
+  db: AquillaDb,
+  projectId: string,
+): Promise<string | null> {
+  const row = await db
+    .prepare(`SELECT name FROM projects WHERE id = ? LIMIT 1`)
+    .bind(projectId)
+    .first<{ name: string }>()
+  return row?.name ?? null
+}
+
+// ── Orchestrator ──────────────────────────────────────────────────────────
+
+export interface CommentNotificationOpts {
+  env: NotificationEnv
+  db: AquillaDb
+  baseUrl: string
+  projectId: string
+  author: string
+  body: string
+  parentCommentId: string | null
+}
+
+/**
+ * Fire all mention/reply notifications for a comment.create event.
+ * Best-effort — individual send failures are logged but never re-thrown
+ * so a broken email provider cannot block the comment write path.
+ *
+ * Called via ctx.waitUntil() from the events route after DB commit.
+ */
+export async function sendCommentNotifications(
+  opts: CommentNotificationOpts,
+): Promise<void> {
+  try {
+    const {
+      env, db, baseUrl, projectId, author, body, parentCommentId,
+    } = opts
+
+    const mentionedUsernames = extractMentions(body)
+    const threadParticipants = await getThreadParticipants(db, projectId, parentCommentId)
+    const recipientUsernames = deriveRecipientUsernames({
+      author,
+      mentionedUsernames,
+      threadParticipantUsernames: threadParticipants,
+    })
+
+    if (recipientUsernames.length === 0) return
+
+    const [emailMap, projectName] = await Promise.all([
+      resolveUserEmails(db, recipientUsernames),
+      getProjectName(db, projectId),
+    ])
+
+    const commentsUrl = `${baseUrl}/project/${projectId}/comments`
+    const excerpt = body.slice(0, 200)
+    const authorDisplay = author
+
+    const sends: Promise<void>[] = []
+    for (const username of recipientUsernames) {
+      const email = emailMap.get(username)
+      if (!email) continue
+      const isMentioned = mentionedUsernames.includes(username)
+      const kind: 'mention' | 'reply' = isMentioned ? 'mention' : 'reply'
+      sends.push(
+        sendNotificationEmail(env, email, {
+          authorDisplayName: authorDisplay,
+          kind,
+          projectName: projectName ?? projectId,
+          excerpt,
+          commentsUrl,
+        }).catch((err) => {
+          console.warn(`[comment-notifications] failed to send to ${username}:`, err)
+        }),
+      )
+    }
+    await Promise.all(sends)
+  } catch (err) {
+    // Top-level catch: notification failure must never propagate.
+    console.warn('[comment-notifications] orchestration error:', err)
+  }
+}

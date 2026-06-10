@@ -6,6 +6,16 @@ import { clearAllLocalData } from "@/lib/store/project-index"
 import { useAccounts } from "@/hooks/useAccounts"
 import { purgeAudioCachesOnSignOut } from "@/lib/audio/cache-cleanup"
 import posthog from "@/lib/posthog"
+import { isAnalyticsEnabled } from "@/lib/analytics-consent"
+
+/** Returns the hex SHA-256 of a string using Web Crypto (available in all modern browsers). */
+async function sha256Hex(input: string): Promise<string> {
+  const encoded = new TextEncoder().encode(input)
+  const hashBuffer = await crypto.subtle.digest("SHA-256", encoded)
+  return Array.from(new Uint8Array(hashBuffer))
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("")
+}
 
 export function useFrontierSession() {
   const { active, loading } = useAccounts()
@@ -13,15 +23,18 @@ export function useFrontierSession() {
 
   const login = useCallback(async (username: string, password: string) => {
     const session = await doLogin({ username, password })
-    posthog.identify(session.username, { username: session.username })
-    posthog.capture("user logged in", { username: session.username })
+    const distinctId = await sha256Hex(session.username)
+    posthog.identify(distinctId)
+    posthog.capture("user logged in")
     return session
   }, [])
 
   const register = useCallback(async (username: string, email: string, password: string) => {
     const session = await doRegister({ username, email, password })
-    posthog.identify(session.username, { username: session.username, email })
-    posthog.capture("user signed up", { username: session.username })
+    const distinctId = await sha256Hex(session.username)
+    const personProps = isAnalyticsEnabled() ? { email } : {}
+    posthog.identify(distinctId, personProps)
+    posthog.capture("user signed up")
     return session
   }, [])
 

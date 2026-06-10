@@ -29,7 +29,7 @@
  *   - maintainer(600)+ required to create/rename/delete groups and manage group membership
  *   - owner(700) required to add/remove org members
  *   - maintainer(600)+ required to create project (into a specific org)
- *   - contributor(400)+ required to delete a file projection
+ *   - project_lead(500)+ required to delete a file projection (raised from 400 by FRO-271)
  *   - maintainer(600)+ required to set deadline
  *   - owner(700) required to archive / restore project
  */

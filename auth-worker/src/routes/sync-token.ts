@@ -67,19 +67,31 @@ syncToken.post(
     const user = c.get("user")
     const { projectId, fileId, projectName } = c.req.valid("json")
 
-    // Cheap existence + archived check first so we can short-circuit on
-    // archived and branch to auto-register when the project is unknown.
+    // Cheap existence + lifecycle check first so we can short-circuit on
+    // archived/frozen and branch to auto-register when the project is unknown.
+    //
+    // FRO-285 (Open Question 11): is_active=false means "frozen/dormant" per
+    // the schema comment. Token TTL is 15 min (SYNC_TOKEN_TTL_SECONDS=900), so
+    // a mint-time check is sufficient — any token minted before a freeze
+    // expires within 15 min naturally. Reads are not blocked by the sync-token
+    // path (clients use GET /cells, not sync-token, for read-only access), so
+    // rejecting here only blocks write-capable token mints.
     const project = await c.env.AQUILLA_PG.prepare(
-      `SELECT id, archived_at FROM projects WHERE id = ?`,
+      `SELECT id, archived_at, is_active FROM projects WHERE id = ?`,
     )
       .bind(projectId)
-      .first<{ id: string; archived_at: string | null }>()
+      .first<{ id: string; archived_at: string | null; is_active: boolean }>()
 
     let resolved: RoleResolution | null = null
 
     if (project) {
       if (project.archived_at) {
         return c.json({ error: "Project is archived" }, 403)
+      }
+      // FRO-285: frozen projects block new write-capable token mints.
+      // is_active is a BOOLEAN NOT NULL DEFAULT TRUE column (migration 0033).
+      if (!project.is_active) {
+        return c.json({ error: "Project is frozen" }, 403)
       }
       // AD-12 max-wins across direct + group + org + creator.
       resolved = await resolveProjectRole(c.env, user, projectId)

@@ -2,6 +2,10 @@
 // per spec Q32). Org owners can raise or lower the floor via org settings
 // (FRO-253). A viewer who can read a project should NOT be able to pull a full
 // deliverable export unless the org has explicitly lowered the floor.
+//
+// FRO-276: the route also counts verses whose original span contained
+// intra-verse markers that plain-text substitution drops, and surfaces that
+// count as the X-Usfm-Lossy-Verse-Count response header.
 import { describe, it, expect } from "vitest"
 import { sign } from "hono/jwt"
 import { handleExportSourceRequest, type ExportRouteEnv } from "../events/export-route"
@@ -13,6 +17,9 @@ const SECRET = "export-tests-secret"
  * Accepts an optional `orgSettings` JSON string to simulate the org_settings row.
  * Query routing: the first call to `first` returns `projectRow`, subsequent
  * calls return `orgSettingsRow`, then `blobRow`.
+ *
+ * The `cells` option seeds the translated target-cell rows returned by the
+ * cells JOIN query (5th prepare call).
  */
 function makeStubDb(
   options: {
@@ -20,25 +27,21 @@ function makeStubDb(
     orgSettings?: string
     /** file_source_blobs row; null = 404. */
     blob?: { format: string; raw_source: string } | null
+    /** Translated cell rows: [{canonical_ref, value}]. Empty by default. */
+    cells?: { canonical_ref: string; value: string }[]
   } = {},
 ): ExportRouteEnv["AQUILLA_PG"] {
-  const { orgSettings, blob = null } = options
+  const { orgSettings, blob = null, cells = [] } = options
   // Call counter per `prepare` invocation to route to the right row.
   const calls: unknown[] = []
-  const respond = (val: unknown) => ({
-    bind: (..._args: unknown[]) => ({
-      first: async () => val,
-      all: async () => ({ results: [] }),
-    }),
-  })
 
   // Query sequence in handleExportSourceRequest:
   //   1. resolveExportFloor → projects (org_id)
   //   2. resolveExportFloor → org_settings (settings)
   //   3. file_source_blobs (blob)
   //   4. files (name) — only if blob found
-  //   5. cells (all)
-  const responses = [
+  //   5. cells JOIN (all rows)
+  const responses: unknown[] = [
     { org_id: 1 },                                                // 1. project row
     orgSettings != null ? { settings: orgSettings } : null,       // 2. org_settings row
     blob,                                                          // 3. blob row
@@ -50,7 +53,13 @@ function makeStubDb(
     prepare: () => {
       const row = responses[idx++] ?? null
       calls.push(row)
-      return respond(row)
+      return {
+        bind: (..._args: unknown[]) => ({
+          first: async () => row,
+          // 5th call is the cells JOIN — return the seeded rows
+          all: async () => ({ results: cells }),
+        }),
+      }
     },
   } as unknown as ExportRouteEnv["AQUILLA_PG"]
 }
@@ -129,5 +138,82 @@ describe("export role gate with org exportMinRole (FRO-253)", () => {
     // Maintainer should still pass (fallback to 600 default)
     const res = await handleExportSourceRequest(exportReq(await makeToken(600)), env)
     expect(res?.status).toBe(404) // gate passed
+  })
+})
+
+// ---------------------------------------------------------------------------
+// FRO-276: X-Usfm-Lossy-Verse-Count response header
+// ---------------------------------------------------------------------------
+
+const FOOTNOTED_USFM = `\\id MAT
+\\c 1
+\\v 4 ...\\f + \\fr 1:4 \\ft (Ruth 4:19,20)\\f*
+\\v 5 plain text verse`
+
+const PLAIN_USFM = `\\id GEN
+\\c 1
+\\v 1 In the beginning.
+\\v 2 The earth was without form.`
+
+describe("X-Usfm-Lossy-Verse-Count header (FRO-276)", () => {
+  it("emits header=0 when export has no translated verses (all fall back to source)", async () => {
+    const env: ExportRouteEnv = {
+      SYNC_SECRET_KEY: SECRET,
+      AQUILLA_PG: makeStubDb({
+        blob: { format: "usfm", raw_source: FOOTNOTED_USFM },
+        cells: [], // no translated cells
+      }),
+    }
+    const res = await handleExportSourceRequest(exportReq(await makeToken(600)), env)
+    expect(res?.status).toBe(200)
+    expect(res?.headers.get("X-Usfm-Lossy-Verse-Count")).toBe("0")
+  })
+
+  it("emits header=0 when the translated verse has no intra-verse markers", async () => {
+    const env: ExportRouteEnv = {
+      SYNC_SECRET_KEY: SECRET,
+      AQUILLA_PG: makeStubDb({
+        blob: { format: "usfm", raw_source: PLAIN_USFM },
+        cells: [
+          { canonical_ref: "GEN 1:1", value: "Au commencement." },
+          { canonical_ref: "GEN 1:2", value: "La terre était informe." },
+        ],
+      }),
+    }
+    const res = await handleExportSourceRequest(exportReq(await makeToken(600)), env)
+    expect(res?.status).toBe(200)
+    expect(res?.headers.get("X-Usfm-Lossy-Verse-Count")).toBe("0")
+  })
+
+  it("emits header=1 when one translated verse had a footnote in the original span", async () => {
+    const env: ExportRouteEnv = {
+      SYNC_SECRET_KEY: SECRET,
+      AQUILLA_PG: makeStubDb({
+        blob: { format: "usfm", raw_source: FOOTNOTED_USFM },
+        cells: [
+          // MAT 1:4 has a footnote in its original span — lossy
+          { canonical_ref: "MAT 1:4", value: "translated footnoted verse" },
+        ],
+      }),
+    }
+    const res = await handleExportSourceRequest(exportReq(await makeToken(600)), env)
+    expect(res?.status).toBe(200)
+    expect(res?.headers.get("X-Usfm-Lossy-Verse-Count")).toBe("1")
+  })
+
+  it("does NOT count a verse override as lossy when the original had no markers", async () => {
+    const env: ExportRouteEnv = {
+      SYNC_SECRET_KEY: SECRET,
+      AQUILLA_PG: makeStubDb({
+        blob: { format: "usfm", raw_source: FOOTNOTED_USFM },
+        cells: [
+          // MAT 1:5 is plain — translation is NOT lossy
+          { canonical_ref: "MAT 1:5", value: "translated plain verse" },
+        ],
+      }),
+    }
+    const res = await handleExportSourceRequest(exportReq(await makeToken(600)), env)
+    expect(res?.status).toBe(200)
+    expect(res?.headers.get("X-Usfm-Lossy-Verse-Count")).toBe("0")
   })
 })

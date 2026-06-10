@@ -51,6 +51,19 @@ export interface Env {
   OPENROUTER_API_KEY?: string
   DEFAULT_LLM_MODEL?: string
 
+  // AI budget + allowlist controls (FRO-265).
+  // AI_ALLOWED_MODELS: comma-separated list of permitted OpenRouter model IDs.
+  //   Unset → uses the hardcoded default list in lib/ai-budget.ts.
+  AI_ALLOWED_MODELS?: string
+  // AI_USER_DAILY_REQUEST_LIMIT: max requests per user per UTC day. Default: 500.
+  AI_USER_DAILY_REQUEST_LIMIT?: string
+  // AI_GLOBAL_DAILY_REQUEST_LIMIT: aggregate daily ceiling across all users. Default: 5000.
+  AI_GLOBAL_DAILY_REQUEST_LIMIT?: string
+  // AI_BUDGET_ENFORCE: set to "true" to enforce limits with 429s.
+  //   Default (unset / "false"): LOG-ONLY mode — over-budget requests are logged
+  //   but allowed through. Flip to "true" after sizing thresholds.
+  AI_BUDGET_ENFORCE?: string
+
   /**
    * When set to "1", exposes `/__test__/reset` and skips authentication on
    * sensitive routes that the E2E harness needs to seed. NEVER set in

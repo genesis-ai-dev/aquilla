@@ -214,7 +214,12 @@ CREATE TABLE files (
     filled_count   INTEGER NOT NULL DEFAULT 0,
     -- FRO-272: soft-delete tombstone. NULL = active; epoch-ms = tombstoned.
     -- Cells + audio retained; R2 wipe deferred (see migration 0036).
-    deleted_at     BIGINT DEFAULT NULL
+    deleted_at     BIGINT DEFAULT NULL,
+    -- FRO-292: target cells currently marked ai_drafted=1 (machine-drafted, not yet
+    -- human-edited or validated). Recomputed by fileCountersRecomputeStmt on every
+    -- target.cell.commit or cell.validate projection. Forward-only: 0 for all cells
+    -- predating migration 0037.
+    ai_drafted_count INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE cells (
@@ -235,6 +240,11 @@ CREATE TABLE cells (
     word_count        INTEGER NOT NULL DEFAULT 0,
     content_hash      TEXT,
     endorsement_count INTEGER NOT NULL DEFAULT 0,
+    -- FRO-292: 1 when this target cell was machine-drafted (ai_suggestion=true on the
+    -- committing event) and has not yet been human-edited or validated. Cleared to 0
+    -- by any subsequent human target.cell.commit or cell.validate. Forward-only:
+    -- historical commits without the ai_suggestion field default to 0.
+    ai_drafted        INTEGER NOT NULL DEFAULT 0,
     start_ms          BIGINT,
     end_ms            BIGINT,
     medium            TEXT,

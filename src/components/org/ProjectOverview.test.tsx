@@ -41,6 +41,7 @@ vi.mock("@/lib/frontier/portfolio", () => ({
   audioPct: (p: { audioCells: number; totalCells: number }) => (p.totalCells > 0 ? p.audioCells / p.totalCells : 0),
   translatedPct: (p: { filledCells: number; totalCells: number }) => (p.totalCells > 0 ? p.filledCells / p.totalCells : 0),
   validatedPct: (p: { validatedCells: number; totalCells: number }) => (p.totalCells > 0 ? p.validatedCells / p.totalCells : 0),
+  aiDraftedPct: (p: { aiDraftedCells: number; totalCells: number }) => (p.totalCells > 0 ? p.aiDraftedCells / p.totalCells : 0),
   recordedMinutes: (p: { recordedMs: number }) => Math.round(p.recordedMs / 60000),
   deadlineStatus: () => _deadlineStatusResult,
 }))
@@ -112,7 +113,7 @@ describe("deriveProjectStatus", () => {
   function makePortfolio(opts: Partial<PortfolioProject> = {}): PortfolioProject {
     return {
       id: "p1", name: "Test", totalCells: 100, filledCells: 50, validatedCells: 20,
-      audioCells: 0, recordedMs: 0, lastEditAt: null, deadlineAt: null, ...opts,
+      aiDraftedCells: 0, audioCells: 0, recordedMs: 0, lastEditAt: null, deadlineAt: null, ...opts,
     }
   }
 
@@ -157,6 +158,7 @@ describe("ProjectOverview per-metric conditionality (FRO-168)", () => {
     })
     getPortfolio.mockResolvedValue([{
       id: "p1", name: "John", totalCells: 100, filledCells: 80, validatedCells: 50,
+      aiDraftedCells: 0,
       audioCells: 0, // no audio
       recordedMs: 0, lastEditAt: null, deadlineAt: null,
     }])
@@ -180,6 +182,7 @@ describe("ProjectOverview per-metric conditionality (FRO-168)", () => {
       id: "p1", name: "John", totalCells: 100,
       filledCells: 0, // no text
       validatedCells: 0,
+      aiDraftedCells: 0,
       audioCells: 60, // audio present
       recordedMs: 90000, lastEditAt: null, deadlineAt: null,
     }])
@@ -330,6 +333,7 @@ describe("ProjectOverview audio progress (FRO-160)", () => {
         totalCells: 100,
         filledCells: 80,
         validatedCells: 50,
+        aiDraftedCells: 0,
         audioCells: 30,   // 30 cells have recordings → 30%
         recordedMs: 90000,
         lastEditAt: Date.now(),
@@ -362,6 +366,7 @@ describe("ProjectOverview audio progress (FRO-160)", () => {
         totalCells: 100,
         filledCells: 80,
         validatedCells: 50,
+        aiDraftedCells: 0,
         audioCells: 0,    // no recordings at all → correct 0%
         recordedMs: 0,
         lastEditAt: Date.now(),
@@ -376,5 +381,59 @@ describe("ProjectOverview audio progress (FRO-160)", () => {
     await waitFor(() => expect(screen.getAllByText("Translated").length).toBeGreaterThan(0))
     // Audio should be hidden
     expect(screen.queryByText("Audio")).not.toBeInTheDocument()
+  })
+})
+
+// ── FRO-292: AI-drafted segment ─────────────────────────────────────────────
+
+describe("ProjectOverview AI-drafted segment (FRO-292)", () => {
+  // WHY: manager-facing overview must surface AI-drafted volume as a distinct
+  // third segment so owners (Wendi/Anna) know how much AI batch output is
+  // awaiting human review, not counting it as "human-translated" work.
+
+  it("shows AI Drafted tile and bar when aiDraftedCells > 0", async () => {
+    fetchSyncToken.mockResolvedValue({ token: "tok" })
+    fetchProjectFiles.mockResolvedValue([])
+    useProject.mockReturnValue({
+      project: projectRecord({ level: 400, files: [{ id: "f1", name: "GEN", type: "usfm", createdAt: "x", cellCount: 10 }] }),
+      status: "ready", refresh,
+    })
+    getPortfolio.mockResolvedValue([{
+      id: "p1", name: "John", totalCells: 100,
+      filledCells: 80,
+      validatedCells: 30,
+      aiDraftedCells: 40, // 40 AI-drafted cells awaiting review
+      audioCells: 0,
+      recordedMs: 0, lastEditAt: null, deadlineAt: null,
+    }])
+    renderOverview()
+
+    // "AI Drafted" tile and bar must appear when aiDraftedCells > 0
+    await waitFor(() => expect(screen.getAllByText("AI Drafted").length).toBeGreaterThan(0))
+    // 40/100 = 40% should appear somewhere in the progress section
+    const pctLabels = screen.getAllByText(/^\d+%$/)
+    expect(pctLabels.map((el) => el.textContent)).toContain("40%")
+  })
+
+  it("hides AI Drafted segment when aiDraftedCells = 0 (human-translated project or pre-marker history)", async () => {
+    // WHY: forward-only honesty — projects whose AI commits predate the marker
+    // show aiDraftedCells = 0 and must NOT show a misleading "0% AI Drafted" tile.
+    fetchSyncToken.mockResolvedValue({ token: "tok" })
+    fetchProjectFiles.mockResolvedValue([])
+    useProject.mockReturnValue({
+      project: projectRecord({ level: 400, files: [{ id: "f1", name: "GEN", type: "usfm", createdAt: "x", cellCount: 10 }] }),
+      status: "ready", refresh,
+    })
+    getPortfolio.mockResolvedValue([{
+      id: "p1", name: "John", totalCells: 100,
+      filledCells: 80, validatedCells: 50,
+      aiDraftedCells: 0, // no tracked AI drafts
+      audioCells: 0, recordedMs: 0, lastEditAt: null, deadlineAt: null,
+    }])
+    renderOverview()
+
+    await waitFor(() => expect(screen.getAllByText("Translated").length).toBeGreaterThan(0))
+    // "AI Drafted" must NOT appear when count is 0 (forward-only honest rendering)
+    expect(screen.queryByText("AI Drafted")).not.toBeInTheDocument()
   })
 })

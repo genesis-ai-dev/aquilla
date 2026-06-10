@@ -107,10 +107,10 @@ describe('dispatchEvent', () => {
     const outcome = dispatchEvent(makeNoOpD1(), authed, 9999, { updateProjection: true })
     expect(outcome.ok).toBe(true)
     if (!outcome.ok) throw new Error('unreachable')
-    // 1 events INSERT + 1 validator UPSERT + 1 validated recompute
-    // + 1 endorsement_count recompute (AD-14 pass 1) + 1 files-counter
-    // recompute (approved_count moves) = 5
-    expect(outcome.result.stmts.length).toBe(5)
+    // 1 events INSERT + 1 validator UPSERT + 1 ai_drafted clear (FRO-292)
+    // + 1 validated recompute + 1 endorsement_count recompute (AD-14 pass 1)
+    // + 1 files-counter recompute (approved_count moves) = 6
+    expect(outcome.result.stmts.length).toBe(6)
     expect(outcome.result.dirtyTables).toContain('cell_validators')
     expect(outcome.result.dirtyTables).toContain('files')
   })

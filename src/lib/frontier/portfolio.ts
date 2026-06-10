@@ -9,6 +9,12 @@ export interface PortfolioProject {
   validatedCells: number
   /** Target cells with content: the "translated" count (distinct from validated). */
   filledCells: number
+  /**
+   * FRO-292: target cells that were machine-drafted (AI completion path) and have
+   * not yet been human-edited or validated. 0 for projects predating this marker —
+   * historical AI commits are indistinguishable from human edits (forward-only).
+   */
+  aiDraftedCells: number
   lastEditAt: number | null
   audioCells: number
   recordedMs: number
@@ -31,6 +37,14 @@ export function validatedPct(p: PortfolioProject): number {
 /** translated (has-content) fraction 0..1 (0 when no cells). */
 export function translatedPct(p: PortfolioProject): number {
   return p.totalCells > 0 ? p.filledCells / p.totalCells : 0
+}
+
+/**
+ * FRO-292: fraction of cells that are AI-drafted and awaiting human review, 0..1.
+ * 0 for projects that predate the provenance marker (forward-only, honest).
+ */
+export function aiDraftedPct(p: PortfolioProject): number {
+  return p.totalCells > 0 ? p.aiDraftedCells / p.totalCells : 0
 }
 
 /** fraction of cells that have audio, 0..1 (0 when no cells). */

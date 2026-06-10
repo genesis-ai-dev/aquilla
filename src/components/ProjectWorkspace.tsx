@@ -1113,6 +1113,10 @@ export function ProjectWorkspace() {
       sourceEventId: cell.sourceEventId ?? null,
       value: text,
       author,
+      // FRO-292: tag AI-generated commits so the server projection can
+      // track ai_drafted on the cell row. A human edit (no aiSuggestion)
+      // will clear it on the next commit.
+      aiSuggestion: true,
     })
     await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
     await refreshOutboxPending()

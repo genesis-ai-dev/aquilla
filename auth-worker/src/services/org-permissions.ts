@@ -773,16 +773,17 @@ export async function detachGroupProject(env: Env, groupId: number, projectId: s
   await env.AQUILLA_PG.prepare("DELETE FROM group_project_grants WHERE group_id = ? AND project_id = ?").bind(groupId, projectId).run()
 }
 
-export interface PortfolioRow { id: string; name: string; totalCells: number; validatedCells: number; filledCells: number; lastEditAt: number | null; audioCells: number; recordedMs: number; deadlineAt: string | null }
+export interface PortfolioRow { id: string; name: string; totalCells: number; validatedCells: number; filledCells: number; lastEditAt: number | null; audioCells: number; recordedMs: number; deadlineAt: string | null; aiDraftedCells: number }
 
 /** Per-project rollup over the org's non-archived projects (derive-on-read, one GROUP BY). */
 export async function getOrgPortfolio(env: Env, orgId: number): Promise<PortfolioRow[]> {
   const rows = await env.AQUILLA_PG.prepare(
     `SELECT p.id AS id, p.name AS name, p.deadline_at AS deadline_at,
-            COALESCE(SUM(f.cell_count), 0)     AS total_cells,
-            COALESCE(SUM(f.approved_count), 0) AS validated_cells,
-            COALESCE(SUM(f.filled_count), 0)   AS filled_cells,
-            MAX(f.last_edit_at)                AS last_edit_at,
+            COALESCE(SUM(f.cell_count), 0)          AS total_cells,
+            COALESCE(SUM(f.approved_count), 0)      AS validated_cells,
+            COALESCE(SUM(f.filled_count), 0)        AS filled_cells,
+            COALESCE(SUM(f.ai_drafted_count), 0)    AS ai_drafted_cells,
+            MAX(f.last_edit_at)                     AS last_edit_at,
             (SELECT COUNT(DISTINCT ca.cell_id) FROM cell_audio ca
               WHERE ca.project_id = p.id AND ca.deleted = 0)                    AS audio_cells,
             (SELECT COALESCE(SUM(ca.duration_ms), 0) FROM cell_audio ca
@@ -792,13 +793,14 @@ export async function getOrgPortfolio(env: Env, orgId: number): Promise<Portfoli
       WHERE p.org_id = ? AND p.archived_at IS NULL
       GROUP BY p.id, p.name
       ORDER BY LOWER(p.name)`,
-  ).bind(orgId).all<{ id: string; name: string; deadline_at: string | null; total_cells: number; validated_cells: number; filled_cells: number; last_edit_at: number | null; audio_cells: number; recorded_ms: number }>()
+  ).bind(orgId).all<{ id: string; name: string; deadline_at: string | null; total_cells: number; validated_cells: number; filled_cells: number; ai_drafted_cells: number; last_edit_at: number | null; audio_cells: number; recorded_ms: number }>()
   return (rows.results ?? []).map((r) => ({
     id: r.id,
     name: r.name,
     totalCells: r.total_cells,
     validatedCells: r.validated_cells,
     filledCells: r.filled_cells,
+    aiDraftedCells: r.ai_drafted_cells,
     lastEditAt: r.last_edit_at,
     audioCells: r.audio_cells,
     recordedMs: r.recorded_ms,

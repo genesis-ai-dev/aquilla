@@ -70,7 +70,9 @@ import { flushOutboxBatch } from "@/lib/sync/outbox-flush"
 import { runDiarization, type DiarizationPhase } from "@/lib/diarization/run-diarization"
 import { useCellsAuditStatsWithOverlay } from "@/hooks/useCellsAuditStatsWithOverlay"
 import { useComments } from "@/hooks/useComments"
-import { Film, Scale, MessagesSquare, Share2, Settings as SettingsIcon, Lock, ClipboardList, Trash2, Undo2, Search as SearchIcon, Sparkles, Mic2, Download, BookMarked, BookOpen, Users } from "lucide-react"
+import { Film, Scale, MessagesSquare, Share2, Settings as SettingsIcon, Lock, ClipboardList, Trash2, Undo2, Search as SearchIcon, Sparkles, Mic2, Download, BookMarked, BookOpen, Users, MessageSquare } from "lucide-react"
+import { ChatPanel } from "./ChatPanel"
+import { useChat } from "@/hooks/useChat"
 import { cn } from "@/lib/utils"
 import { restoreProject } from "@/lib/store/project-index"
 import { AppShell } from "./AppShell"
@@ -409,6 +411,7 @@ export function ProjectWorkspace() {
   const [parallelMode, setParallelMode] = useState<ParallelPanelMode>("search")
   const [parallelScope, setParallelScope] = useState<ParallelPanelScope>("project")
   const [shareOpen, setShareOpen] = useState(false)
+  const [chatOpen, setChatOpen] = useState(false)
   const [aiSetupOpen, setAiSetupOpen] = useState(false)
   const [recordingCellId, setRecordingCellId] = useState<string | null>(null)
   // "Make a character from this voice" dialog (Cast studio). Owned here so the
@@ -1088,6 +1091,14 @@ export function ProjectWorkspace() {
     project?.completionSettings, project?.sourceLanguage || "", project?.targetLanguage || "", branchingSearch, branchingSearchPassages, frontierSession, commitCompletedCell, rules, allProjectCells
   )
 
+  // FRO-175: workspace AI chat panel
+  const chat = useChat({
+    settings: project?.completionSettings,
+    session: frontierSession,
+    sourceLanguage: project?.sourceLanguage || "",
+    targetLanguage: project?.targetLanguage || "",
+  })
+
   // ── Back-translation: statistical primary path + optional LLM polish ────────
   //
   // Generation strategy (per spec):
@@ -1508,6 +1519,8 @@ export function ProjectWorkspace() {
   const [cellLockHolders, setCellLockHolders] = useState<Map<string, string>>(() => new Map())
   const [cellsWithRemoteChange, setCellsWithRemoteChange] = useState<Set<string>>(() => new Set())
   const focusedCellIdRef = useRef<string | null>(null)
+  // FRO-175: reactive version of focusedCellIdRef for the chat panel's context wiring.
+  const [focusedCellId, setFocusedCellId] = useState<string | null>(null)
   const reconcilerRef = useRef<import("@/lib/sync/ws-reconciler").WsReconciler | null>(null)
   // Read the current file list inside the WS connect path without making it a
   // reconnect trigger — otherwise every file-list change (e.g. each batch of a
@@ -1640,6 +1653,7 @@ export function ProjectWorkspace() {
   const writeLocTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const handleClaimCell = useCallback((cellId: string) => {
     focusedCellIdRef.current = cellId
+    setFocusedCellId(cellId) // FRO-175: reactive for chat panel context
     reconcilerRef.current?.send({ t: "focus.claim", cellId })
     // Debounce last-location cell write (500 ms) so rapid focus events
     // don't hammer localStorage.
@@ -1653,6 +1667,7 @@ export function ProjectWorkspace() {
   }, [projectId, activeFileId, currentUsername])
   const handleReleaseCell = useCallback((cellId: string) => {
     if (focusedCellIdRef.current === cellId) focusedCellIdRef.current = null
+    setFocusedCellId(null) // FRO-175: clear reactive focused cell
     reconcilerRef.current?.send({ t: "focus.release", cellId })
   }, [])
   const handleAckRemoteChange = useCallback((cellId: string) => {
@@ -2350,6 +2365,17 @@ export function ProjectWorkspace() {
               >
                 <SearchIcon className="h-4 w-4" />
               </Button>
+              {/* FRO-175: AI chat panel toggle */}
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => setChatOpen((o) => !o)}
+                title="AI chat (copilot)"
+                aria-label="Open AI chat"
+                aria-pressed={chatOpen}
+              >
+                <MessageSquare className="h-4 w-4" />
+              </Button>
               <NextUnfinishedButton
                 onClick={handleJumpNextUnfinished}
                 disabled={!activeFileId || !hasUnfinished}
@@ -2851,6 +2877,22 @@ export function ProjectWorkspace() {
         open={shareOpen} onOpenChange={setShareOpen}
         projectId={projectId!}
         onSharesChanged={refreshChecklistShares}
+      />
+      {/* FRO-175: AI chat panel */}
+      <ChatPanel
+        open={chatOpen}
+        onOpenChange={setChatOpen}
+        chat={chat}
+        currentCell={(() => {
+          if (!focusedCellId) return null
+          const cell = cells.find((c) => c.id === focusedCellId)
+          if (!cell) return null
+          return {
+            sourceText: cell.original,
+            translatedText: cell.translated,
+            context: cell.context ?? undefined,
+          }
+        })()}
       />
       <VideoAttachmentDialog
         open={videoDialogOpen} onOpenChange={setVideoDialogOpen}

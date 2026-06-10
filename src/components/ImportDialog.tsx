@@ -41,7 +41,7 @@ import {
 import { languagesEqual } from "@/lib/language-normalize"
 import { EBibleTargetReviewPanel } from "@/components/EBibleTargetReviewPanel"
 
-type Screen = "landing" | "upload" | "ebible" | "macula" | "tn" | "direction"
+type Screen = "landing" | "upload" | "ebible" | "macula" | "tn" | "direction" | "result"
 
 interface ImportDialogProps {
   open: boolean
@@ -94,6 +94,13 @@ export function ImportDialog({
     refs: FileReference[]
     inferredLanguages?: { sourceLanguage?: string; targetLanguage?: string }
   } | null>(null)
+  // FRO-277: holds the partial-import result (skipped books) so the user can
+  // read and copy the report before the dialog closes.
+  const [importResult, setImportResult] = useState<{
+    refs: FileReference[]
+    inferredLanguages?: { sourceLanguage?: string; targetLanguage?: string }
+    skipped: { book: string; reason: string }[]
+  } | null>(null)
   const [directionSource, setDirectionSource] = useState("")
   const [directionTarget, setDirectionTarget] = useState("")
   // Guard against double-clicks on "Set direction".
@@ -110,6 +117,7 @@ export function ImportDialog({
     if (open) {
       setScreen("landing")
       setPendingImport(null)
+      setImportResult(null)
       setConfirming(false)
       setConfirmError(null)
       flushingRef.current = false
@@ -142,8 +150,32 @@ export function ImportDialog({
   // Called by child panels when they finish importing. If the language
   // direction is ambiguous (source==target or target is empty after source is
   // set), show the one-time direction prompt instead of closing immediately.
+  // FRO-277: accepts an optional `skipped` array — if any books were skipped,
+  // the result screen is shown FIRST so the user can read/copy the report before
+  // the dialog auto-closes or they explicitly dismiss.
   const handleChildImported = useCallback(
-    async (refs: FileReference[], inferredLanguages?: { sourceLanguage?: string; targetLanguage?: string }) => {
+    async (
+      refs: FileReference[],
+      inferredLanguages?: { sourceLanguage?: string; targetLanguage?: string },
+      skippedBooks?: { book: string; reason: string }[],
+    ) => {
+      // FRO-277: partial import — show result screen first, hold the close.
+      if (skippedBooks && skippedBooks.length > 0) {
+        setImportResult({ refs, inferredLanguages, skipped: skippedBooks })
+        setScreen("result")
+        // Persist per-project so a re-show is possible (bonus scope).
+        try {
+          const key = `codex.lastImportReport.${projectId}`
+          localStorage.setItem(
+            key,
+            JSON.stringify({ ts: Date.now(), skipped: skippedBooks, importedCount: refs.length }),
+          )
+        } catch {
+          // localStorage unavailable — ignore
+        }
+        return
+      }
+
       const effectiveSource = (inferredLanguages?.sourceLanguage || sourceLanguage).trim()
       const effectiveTarget = (inferredLanguages?.targetLanguage || targetLanguage).trim()
 
@@ -173,6 +205,18 @@ export function ImportDialog({
     },
     [sourceLanguage, targetLanguage, projectId, onImported, onOpenChange],
   )
+
+  // FRO-277: called from ResultPanel when the user explicitly dismisses the
+  // import-result screen. At this point we flush the actual onImported callback
+  // and close. If the result also triggers a direction prompt, we fall through
+  // the normal direction-screen path.
+  const handleResultDismiss = useCallback(async () => {
+    if (!importResult) return
+    const { refs, inferredLanguages } = importResult
+    setImportResult(null)
+    // Run through the normal post-import flow (direction prompt if needed).
+    await handleChildImported(refs, inferredLanguages)
+  }, [importResult, handleChildImported])
 
   // BLOCKER 1 fix: values confirmed via DirectionPanel are EXPLICIT — they
   // replace current values, not merely fill empty slots.
@@ -231,6 +275,8 @@ export function ImportDialog({
               "Import"
             ) : screen === "direction" ? (
               "Set translation direction"
+            ) : screen === "result" ? (
+              "Import complete — some books skipped"
             ) : (
               <div className="flex items-center gap-2">
                 <button
@@ -316,6 +362,15 @@ export function ImportDialog({
             onSkip={handleDirectionSkip}
             confirming={confirming}
             error={confirmError}
+          />
+        )}
+
+        {/* FRO-277: partial-import result screen */}
+        {screen === "result" && importResult && (
+          <ImportResultPanel
+            importedCount={importResult.refs.length}
+            skipped={importResult.skipped}
+            onDismiss={handleResultDismiss}
           />
         )}
       </DialogContent>
@@ -406,7 +461,8 @@ interface UploadPanelProps {
   sourceLanguage: string
   targetLanguage: string
   getToken: (fileId: string) => Promise<string | null>
-  onImported: (refs: FileReference[], inferredLanguages?: { sourceLanguage?: string; targetLanguage?: string }) => void | Promise<void>
+  /** FRO-277: third argument carries skipped books for partial Paratext imports. */
+  onImported: (refs: FileReference[], inferredLanguages?: { sourceLanguage?: string; targetLanguage?: string }, skipped?: { book: string; reason: string }[]) => void | Promise<void>
   ttsSettings?: ProjectTtsSettings
   onCastUpdated?: (settings: Partial<ProjectTtsSettings>) => void | Promise<void>
 }
@@ -597,7 +653,9 @@ interface ParatextChoiceProps {
   sourceLanguage: string
   targetLanguage: string
   getToken: (fileId: string) => Promise<string | null>
-  onImported: (refs: FileReference[], inferredLanguages?: { sourceLanguage?: string; targetLanguage?: string }) => void | Promise<void>
+  /** FRO-277: third argument carries skipped books from a partial import so the
+   *  parent can show the result screen before closing. */
+  onImported: (refs: FileReference[], inferredLanguages?: { sourceLanguage?: string; targetLanguage?: string }, skipped?: { book: string; reason: string }[]) => void | Promise<void>
   onCancel: () => void
 }
 
@@ -625,13 +683,11 @@ function ParatextChoice({
     setMode("importing"); setError(null); setPhase("Reading project…"); setProgress(null)
     try {
       const { refs, settings, skipped } = await importParatextProject(entries, ctx, onProgress)
-      if (skipped.length) {
-        setError(`Imported ${refs.length}; skipped ${skipped.length}: ${skipped.slice(0, 3).map((s) => s.book).join(", ")}`)
-      }
       // Propagate language inferred from Paratext Settings.xml so the project
       // can seed its sourceLanguage when it was unset (FRO-249).
       const inferredLang = settings.languageIsoCode || settings.language
-      await onImported(refs, inferredLang ? { sourceLanguage: inferredLang } : undefined)
+      // FRO-277: pass skipped up so the parent can show the result screen.
+      await onImported(refs, inferredLang ? { sourceLanguage: inferredLang } : undefined, skipped.length ? skipped : undefined)
     } catch (err) {
       setError(err instanceof Error ? err.message : "Import failed"); setMode("choose")
     }
@@ -659,13 +715,14 @@ function ParatextChoice({
       // WARN d fix: use languageCode (e.g. "eng") not sel.id ("eng-engKJV") as the source language.
       const selSourceLang = sel.languageCode || sel.id
       const { refs, settings, skipped } = await importParatextAsTarget(entries, sourceVerses, { ...ctx, sourceLanguage: selSourceLang }, onProgress)
-      if (skipped.length) setError(`Imported ${refs.length}; skipped ${skipped.length}`)
       // The Paratext project IS the target; selSourceLang is the eBible source language.
       // Propagate both so the project's source/target direction is set (FRO-249).
       const inferredTargetLang = settings.languageIsoCode || settings.language
+      // FRO-277: pass skipped up so the parent can show the result screen.
       await onImported(
         refs,
         { sourceLanguage: selSourceLang, targetLanguage: inferredTargetLang || undefined },
+        skipped.length ? skipped : undefined,
       )
     } catch (err) {
       setError(err instanceof Error ? err.message : "Import failed"); setMode("pickSource")
@@ -1200,6 +1257,78 @@ function DirectionPanel({
           disabled={confirmDisabled}
         >
           {confirming ? "Setting…" : "Set direction"}
+        </Button>
+      </div>
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Import result panel — FRO-277
+// Shows the full skip report after a partial Paratext import. The user must
+// explicitly dismiss (or copy and then dismiss) before the dialog closes.
+// ---------------------------------------------------------------------------
+
+interface ImportResultPanelProps {
+  importedCount: number
+  skipped: { book: string; reason: string }[]
+  onDismiss: () => void | Promise<void>
+}
+
+function ImportResultPanel({ importedCount, skipped, onDismiss }: ImportResultPanelProps) {
+  const [copied, setCopied] = useState(false)
+  const [dismissing, setDismissing] = useState(false)
+
+  const reportText = [
+    `Import complete: ${importedCount} book${importedCount === 1 ? "" : "s"} imported, ${skipped.length} skipped.`,
+    "",
+    "Skipped books:",
+    ...skipped.map((s) => `  ${s.book}: ${s.reason}`),
+  ].join("\n")
+
+  async function handleCopy() {
+    try {
+      await navigator.clipboard.writeText(reportText)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
+    } catch {
+      // Clipboard not available — ignore
+    }
+  }
+
+  async function handleDismiss() {
+    if (dismissing) return
+    setDismissing(true)
+    try {
+      await onDismiss()
+    } finally {
+      setDismissing(false)
+    }
+  }
+
+  return (
+    <div className="flex flex-col gap-4 py-2">
+      <p className="text-sm text-muted-foreground">
+        <span className="font-medium text-foreground">{importedCount}</span> book{importedCount === 1 ? "" : "s"} imported
+        successfully; <span className="font-medium text-amber-600">{skipped.length}</span> could not be imported.
+        Review the list below and copy it before closing.
+      </p>
+      <ScrollArea className="h-56 rounded-md border bg-muted/30 p-3">
+        <ul className="space-y-1">
+          {skipped.map((s, i) => (
+            <li key={i} className="text-xs">
+              <span className="font-medium">{s.book}</span>
+              <span className="text-muted-foreground"> — {s.reason}</span>
+            </li>
+          ))}
+        </ul>
+      </ScrollArea>
+      <div className="flex justify-between gap-2">
+        <Button variant="outline" size="sm" onClick={handleCopy} disabled={dismissing}>
+          {copied ? "Copied!" : "Copy report"}
+        </Button>
+        <Button size="sm" onClick={handleDismiss} disabled={dismissing}>
+          {dismissing ? "Closing…" : "Close"}
         </Button>
       </div>
     </div>

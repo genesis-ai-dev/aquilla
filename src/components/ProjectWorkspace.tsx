@@ -65,7 +65,10 @@ import {
   buildFileScopedTokenFetcher,
   buildProjectAwareMinter,
 } from "@/lib/sync/cqrs-bridge"
-import { emitTargetCellCommit, emitCellBacktranslationSet, emitFileRename, emitFileDelete, emitFileRestore } from "@/lib/sync/events-emit"
+import { emitTargetCellCommit, emitCellBacktranslationSet, emitFileRename, emitFileDelete, emitFileRestore, emitCellValidate } from "@/lib/sync/events-emit"
+import { canPerform } from "@/lib/sync/role-policy"
+import { useFocusLock } from "@/hooks/useFocusLock"
+import type { WsReconciler } from "@/lib/sync/ws-reconciler"
 import { flushOutboxBatch } from "@/lib/sync/outbox-flush"
 import { runDiarization, type DiarizationPhase } from "@/lib/diarization/run-diarization"
 import { attachMediaFileToTimeline, attachMediaUrlToTimeline } from "@/lib/timeline/attach-media"
@@ -1702,6 +1705,10 @@ export function ProjectWorkspace() {
   )
   const [focusedCellCanonicalRef, setFocusedCellCanonicalRef] = useState<string | null>(null)
   const reconcilerRef = useRef<import("@/lib/sync/ws-reconciler").WsReconciler | null>(null)
+  // FRO-288: Reactive reconciler state so useFocusLock can access it.
+  // reconcilerRef is still the write target (set inside the async connect effect)
+  // and is used by the claim/release callbacks declared below.
+  const [liveReconciler, setLiveReconciler] = useState<WsReconciler | null>(null)
   // Read the current file list inside the WS connect path without making it a
   // reconnect trigger — otherwise every file-list change (e.g. each batch of a
   // large import landing) tears the socket down and recreates it.
@@ -1780,6 +1787,9 @@ export function ProjectWorkspace() {
                 })
               }
             } else if (msg.t === "presence") {
+              // FRO-288: forward presence snapshots to the focus-lock hook so
+              // it can update heldBy when another user holds our focused cell.
+              focusLockFeedFrameRef.current(msg)
               const next = new Map<string, string>()
               for (const u of msg.users) {
                 if (!u.focusedCell) continue
@@ -1788,6 +1798,9 @@ export function ProjectWorkspace() {
               }
               setCellLockHolders(next)
             } else if (msg.t === "lock.claimed") {
+              // FRO-288: forward lock.claimed to the hook so it can update
+              // isHeld / heldBy and stop our renewal timer on takeover.
+              focusLockFeedFrameRef.current(msg)
               if (msg.by.userId === currentUsername) return
               setCellLockHolders((cur) => {
                 if (cur.get(msg.cellId) === msg.by.userId) return cur
@@ -1796,6 +1809,8 @@ export function ProjectWorkspace() {
                 return next
               })
             } else if (msg.t === "lock.released") {
+              // FRO-288: forward lock.released so the hook clears heldBy.
+              focusLockFeedFrameRef.current(msg)
               setCellLockHolders((cur) => {
                 if (!cur.has(msg.cellId)) return cur
                 const next = new Map(cur)
@@ -1822,13 +1837,31 @@ export function ProjectWorkspace() {
         },
       )
       reconcilerRef.current = reconciler
+      setLiveReconciler(reconciler)
     })()
     return () => {
       cancelled = true
       reconcilerRef.current = null
+      setLiveReconciler(null)
       reconciler?.close()
     }
   }, [project?.id, frontierSession?.jwt, getTokenForFile, revalidateCells, revalidateCell, currentUsername, refresh])
+
+  // FRO-288: workspace-level focus-lock with renewal.
+  // useFocusLock is driven by focusedCellId (the reactive mirror of
+  // focusedCellIdRef) and liveReconciler (set once the async WS connect
+  // resolves). The hook starts a half-period renewal timer on every claim(),
+  // so the 30s DO lease never expires mid-edit under normal activity.
+  // feedFrameRef lets the onMessage handler (inside the connect effect closure)
+  // forward lock.claimed / lock.released / presence frames to the hook without
+  // breaking hook call order.
+  const [focusLockState, focusLockFeedFrame] = useFocusLock({
+    reconciler: liveReconciler,
+    cellId: focusedCellId,
+    currentUserId: currentUsername,
+  })
+  const focusLockFeedFrameRef = useRef(focusLockFeedFrame)
+  useEffect(() => { focusLockFeedFrameRef.current = focusLockFeedFrame }, [focusLockFeedFrame])
 
   const writeLocTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const handleClaimCell = useCallback((cellId: string) => {
@@ -1837,7 +1870,10 @@ export function ProjectWorkspace() {
     // FRO-179: update TN sidebar with the focused cell's canonicalRef.
     const focusedCell = cells.find((c) => c.id === cellId)
     setFocusedCellCanonicalRef(focusedCell?.group ?? null)
-    reconcilerRef.current?.send({ t: "focus.claim", cellId })
+    // FRO-288: focusLockState.claim() replaces the bare focus.claim send.
+    // The hook sends focus.claim and starts the half-period renewal timer so
+    // the 30s DO lease never silently expires mid-edit.
+    focusLockState.claim()
     // Debounce last-location cell write (500 ms) so rapid focus events
     // don't hammer localStorage.
     if (writeLocTimerRef.current !== null) clearTimeout(writeLocTimerRef.current)
@@ -1847,15 +1883,17 @@ export function ProjectWorkspace() {
       writeLastLocation(currentUsername, projectId, { fileId: activeFileId, cellId })
     }, 500)
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [projectId, activeFileId, currentUsername])
+  }, [projectId, activeFileId, currentUsername, focusLockState.claim])
   const handleReleaseCell = useCallback((cellId: string) => {
     if (focusedCellIdRef.current === cellId) focusedCellIdRef.current = null
     // Deliberately keep focusedCellId / focusedCellCanonicalRef: the chat
     // panel and TN sidebar need the *last* focused cell as context — clicking
     // away (e.g. to open chat) releases the focus lock but shouldn't drop the
     // context the user was just working in. Both reset on file switch below.
-    reconcilerRef.current?.send({ t: "focus.release", cellId })
-  }, [])
+    // FRO-288: hook's release() sends focus.release + stops renewal timer.
+    focusLockState.release()
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [focusLockState.release])
   // Last-focused context is per-file: a cell from the previous file is stale
   // once the user opens another one.
   useEffect(() => {
@@ -2277,8 +2315,33 @@ export function ProjectWorkspace() {
       completeBatch(untranslated)
     },
     runExport: openExportFlow,
+    // FRO-288: wire batch-validate through the real validation event path.
+    // Called AFTER the user confirms via PrimaryActionButton's confirmation
+    // dialog (requiresConfirmation in registry.ts). Role floor is enforced
+    // server-side; we mirror-check here to avoid queueing guaranteed-403
+    // events (same pattern as emitValidationChange in EditorTable).
     runBatchValidate: () => {
-      console.info("batch-validate triggered (placeholder runner)")
+      if (!project?.id || !activeFileId) return
+      if (!canPerform("cell.validate", project.syncRole?.level ?? null)) return
+      const validatable = cells.filter(
+        (c) => c.fileId === activeFileId && !!c.targetEventId,
+      )
+      if (validatable.length === 0) return
+      void (async () => {
+        for (const cell of validatable) {
+          await emitCellValidate({
+            projectId: project.id,
+            fileId: cell.fileId,
+            cellId: cell.id,
+            editEventId: cell.targetEventId!,
+            author: currentUsername,
+          })
+        }
+        await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
+        await refreshOutboxPending()
+        revalidateAuditStats()
+        for (const cell of validatable) revalidateCell(cell.id)
+      })()
     },
     runAgentInput: () => {
       console.info("agent-input triggered (placeholder runner)")
@@ -2303,7 +2366,7 @@ export function ProjectWorkspace() {
       })
     },
     navigate,
-  }), [activeFileId, completeBatch, cells, project, frontierSession, currentUsername, navigate, openImportFlow, openExportFlow])
+  }), [activeFileId, completeBatch, cells, project, frontierSession, currentUsername, navigate, openImportFlow, openExportFlow, getTokenForProjectFile, refreshOutboxPending, revalidateAuditStats, revalidateCell])
 
   const handleCellCommitted = useCallback(async (cellId?: string) => {
     // Capture before async work — another edit could arrive during the flush.
@@ -2953,6 +3016,23 @@ export function ProjectWorkspace() {
                 >
                   Dismiss
                 </button>
+              </div>
+            )}
+            {/* FRO-288: focus-lock takeover banner — shown when another user
+                claims the cell we are currently editing. The cell becomes
+                read-only via lockHolderLabel; this banner makes the takeover
+                VISIBLE so the user knows their in-flight edit was not saved
+                and can copy their text before moving away. Without this the
+                only signal was a console.warn inside handleEditorCommit. */}
+            {focusLockState.heldBy && focusedCellId && (
+              <div
+                role="alert"
+                aria-live="assertive"
+                className="flex items-center justify-between gap-2 bg-amber-50 px-4 py-2 text-xs text-amber-800 dark:bg-amber-950 dark:text-amber-300"
+              >
+                <span>
+                  {focusLockState.heldBy.userId} is now editing this cell — your editor is read-only. Copy any unsaved text before moving away.
+                </span>
               </div>
             )}
           </>

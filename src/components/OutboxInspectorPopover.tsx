@@ -281,7 +281,7 @@ export function OutboxInspectorPopover({ trigger, records, onRetryNow }: Props) 
         side="top"
         align="end"
         sideOffset={6}
-        aria-label="Outbox inspector"
+        aria-label="Pending changes"
       >
         <header className="shrink-0 border-b border-border bg-popover px-3 py-2.5">
           <div className="flex items-baseline justify-between gap-2">

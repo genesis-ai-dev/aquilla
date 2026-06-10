@@ -31,7 +31,7 @@ export function CompletionBulkProgressBanner() {
         <button
           type="button"
           onClick={cancelBatchCompletion}
-          title="Stop AI completions"
+          title="Stop translating"
           className="ml-1 rounded p-0.5 text-muted-foreground hover:text-foreground"
         >
           <X className="h-3.5 w-3.5" />

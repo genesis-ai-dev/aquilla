@@ -1517,10 +1517,10 @@ function SelectionTermActions({
           onMouseDown={handleButtonMouseDown}
           onClick={onAddToTermbase}
           className="inline-flex items-center gap-1 rounded-md bg-primary px-2 py-1 text-[11px] font-medium text-primary-foreground shadow-neu-sm hover:bg-primary/90"
-          title={`Add "${sourceSelection}" to the termbase as a draft concept`}
+          title={`Add "${sourceSelection}" to the term base as a draft concept`}
         >
           <BookOpen className="h-3 w-3" aria-hidden />
-          Add to termbase
+          Add to term base
         </button>
       )}
     </div>
@@ -2961,7 +2961,7 @@ function EditorRow({
                           ? "AI service unavailable — try again shortly"
                           : isLoading
                             ? "Generating…"
-                            : "Generate translation"
+                            : "Translate with AI"
                 }
                 onClick={() => {
                   if (isLoading) return
@@ -3220,8 +3220,8 @@ function EditorRow({
                   </p>
                   <p>
                     {cellNeedsAttention
-                      ? "Needs attention — this cell's retrieval neighborhood hasn't been validated yet (AD-14)."
-                      : "No attention needed — enough of this cell's neighborhood is validated."}
+                      ? "Needs attention — nearby context cells haven't been validated yet."
+                      : "No attention needed — enough nearby context is validated."}
                   </p>
                 </div>
               ),

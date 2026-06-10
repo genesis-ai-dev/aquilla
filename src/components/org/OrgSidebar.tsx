@@ -24,7 +24,9 @@ export function OrgSidebar() {
 
   return (
     <div className="flex h-full flex-col gap-1 p-2">
-      <OrgSwitcher />
+      <div data-tour="org-switcher">
+        <OrgSwitcher />
+      </div>
       <nav className="mt-2 flex flex-1 flex-col gap-0.5">
         {/* FRO-243: data-tour anchors for product tour steps */}
         <NavLink to="/" end className={link} data-tour="nav-overview">Overview</NavLink>

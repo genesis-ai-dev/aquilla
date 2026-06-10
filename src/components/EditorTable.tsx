@@ -1611,6 +1611,9 @@ function EditorRow({
   // Controls the confirm dialog shown before creating the draft concept.
   const [showAddConceptDialog, setShowAddConceptDialog] = useState(false)
   const pendingTargetEventIdRef = useRef<string | null>(cell.targetEventId ?? null)
+  // RES-4: local error state for enqueue failures (IDB quota, role errors).
+  // Surfaces a compact inline message below the editor instead of swallowing.
+  const [enqueueError, setEnqueueError] = useState<string | null>(null)
   /** voice-chip drag-over state: the voiceId being dragged over this cell's audio area */
   const [dragOverVoiceId, setDragOverVoiceId] = useState<string | null>(null)
   // FRO-237: mic-denied help popover state — rendered as an inline popover so
@@ -1716,11 +1719,20 @@ function EditorRow({
     // cell's cached infractions are invalidated. The server projection
     // arrives via `onCellCommitted` -> revalidate and overwrites this.
     onOptimisticEdit?.(cell.id, { value, valueHtml })
-    void emitTargetCellCommit({
+    setEnqueueError(null)
+    // RACE-3/QW-2: use the pending event id (the last event WE enqueued for this
+    // cell) as parentId rather than the projection value. The projection row may
+    // lag by a round-trip when a second idle-commit fires before the read-back
+    // confirms; chaining from the projection value would make it a sibling of
+    // our own earlier event and dead-letter it. pendingTargetEventIdRef is
+    // updated from cell.targetEventId whenever the projection confirms (effect
+    // at line ~1621), so it stays correct once the server catches up.
+    const parentId = pendingTargetEventIdRef.current ?? cell.sourceEventId ?? null
+    emitTargetCellCommit({
       projectId: project.id,
       fileId: cell.fileId,
       cellId: cell.id,
-      parentId: cell.targetEventId ?? cell.sourceEventId ?? null,
+      parentId,
       sourceEventId: cell.sourceEventId ?? null,
       value,
       valueHtml,
@@ -1729,9 +1741,19 @@ function EditorRow({
       pendingTargetEventIdRef.current = eventId
       void onCellCommitted?.(cell.id)
     }).catch((err) => {
-      console.warn("[editor-commit] enqueue failed:", err)
+      // RES-4/M1-3: enqueue failure (IDB quota, private-mode, InsufficientRoleError)
+      // must be loud. Revert the optimistic patch so the cell doesn't show
+      // "saved" styling for an event that exists nowhere durable.
+      console.error("[editor-commit] enqueue failed:", err)
+      const msg = err instanceof Error ? err.message : "Could not save — please try again"
+      setEnqueueError(msg)
+      // Revert the optimistic patch to the last confirmed projection value.
+      onOptimisticEdit?.(cell.id, {
+        value: cell.translated ?? "",
+        valueHtml: cell.translatedHtml ?? "",
+      })
     })
-  }, [editable, project.id, cell.fileId, cell.id, cell.targetEventId, cell.sourceEventId, username, onCellCommitted, onOptimisticEdit, lockHolderLabel])
+  }, [editable, project.id, cell.fileId, cell.id, cell.translated, cell.translatedHtml, cell.sourceEventId, username, onCellCommitted, onOptimisticEdit, lockHolderLabel])
 
   // Terminology apply (spec 2c): REPLACE the active target selection with the
   // chosen rendering. The Apply affordance is only surfaced when there was a
@@ -2718,6 +2740,21 @@ function EditorRow({
                 blocks accept/commit. */}
             <PreAcceptanceWarningBand warnings={preAcceptanceWarnings} className="mt-1" />
             {error && <p className="mt-0.5 text-xs text-destructive">{error}</p>}
+            {/* RES-4: enqueue failure (IDB quota, permission denied). Renders a
+                dismissible inline error so the user knows their typing was not
+                saved rather than seeing the "saved" style silently. */}
+            {enqueueError && (
+              <p className="mt-0.5 flex items-center gap-1 text-xs text-destructive">
+                <span>{enqueueError}</span>
+                <button
+                  type="button"
+                  className="ml-auto shrink-0 underline"
+                  onClick={() => setEnqueueError(null)}
+                >
+                  Dismiss
+                </button>
+              </p>
+            )}
           </div>
         </div>
 

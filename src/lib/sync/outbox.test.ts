@@ -10,6 +10,9 @@ import {
   peekPendingOutboxBatch,
   resetOutboxConnectionForTests,
   OUTBOX_MAX_ATTEMPTS,
+  quarantineOutboxEvents,
+  requeueTransientlyFailedOutboxEvents,
+  stampOutboxError,
 } from "./outbox"
 import type { CqrsRawEvent } from "./outbox-types"
 import { CQRS_SCHEMA_VERSION } from "./outbox-types"
@@ -161,5 +164,68 @@ describe("cqrs outbox", () => {
 
     const pending = await peekPendingOutboxBatch(10)
     expect(pending.map((r) => r.id)).toEqual(["e2"])
+  })
+
+  // ── RES-2: requeueTransientlyFailedOutboxEvents ────────────────────────────
+
+  it("requeueTransientlyFailedOutboxEvents revives status-0 failed records back to pending", async () => {
+    await enqueueOutboxEvent(sample)
+    // Simulate a transient failure that was stamped (no budget burn) but
+    // somehow the record ends up in `failed` state (e.g. from a prior version
+    // that used markOutboxAttempt for network errors).
+    for (let i = 0; i < OUTBOX_MAX_ATTEMPTS; i++) {
+      await markOutboxAttempt(["e1"], { error: { status: 0, reason: "network error" } })
+    }
+    const beforeRevive = await peekOutboxBatch(10)
+    expect(beforeRevive[0].status).toBe("failed")
+
+    await requeueTransientlyFailedOutboxEvents()
+
+    const afterRevive = await peekOutboxBatch(10)
+    expect(afterRevive[0].status).toBe("pending")
+    expect(afterRevive[0].attempts).toBe(0)
+    expect(afterRevive[0].lastError).toBe(null)
+  })
+
+  it("requeueTransientlyFailedOutboxEvents revives 5xx-failed records but leaves 4xx quarantines", async () => {
+    await enqueueOutboxEvent(sample)
+    const sample2: CqrsRawEvent<"target.cell.commit"> = { ...sample, id: "e2" }
+    await enqueueOutboxEvent(sample2)
+
+    // e1: simulate 5xx failures hitting cap (transient)
+    for (let i = 0; i < OUTBOX_MAX_ATTEMPTS; i++) {
+      await markOutboxAttempt(["e1"], { error: { status: 503, reason: "service unavailable" } })
+    }
+    // e2: quarantined by 403 (permanent)
+    await quarantineOutboxEvents(["e2"], { status: 403, reason: "forbidden" })
+
+    const beforeRevive = await peekOutboxBatch(10)
+    expect(beforeRevive.find(r => r.id === "e1")?.status).toBe("failed")
+    expect(beforeRevive.find(r => r.id === "e2")?.status).toBe("failed")
+
+    await requeueTransientlyFailedOutboxEvents()
+
+    const afterRevive = await peekOutboxBatch(10)
+    // e1 (5xx) should be revived.
+    expect(afterRevive.find(r => r.id === "e1")?.status).toBe("pending")
+    // e2 (403) should remain failed — 4xx quarantines must survive reconnect.
+    expect(afterRevive.find(r => r.id === "e2")?.status).toBe("failed")
+  })
+
+  it("requeueTransientlyFailedOutboxEvents is a no-op when there are no failed records", async () => {
+    await enqueueOutboxEvent(sample)
+    // e1 is pending, not failed.
+    await requeueTransientlyFailedOutboxEvents()
+    const rows = await peekOutboxBatch(10)
+    expect(rows[0].status).toBe("pending")
+  })
+
+  it("stampOutboxError does NOT increment attempts (used for transient failures)", async () => {
+    await enqueueOutboxEvent(sample)
+    await stampOutboxError(["e1"], { status: 0, reason: "network error" })
+    const rows = await peekOutboxBatch(10)
+    expect(rows[0].attempts).toBe(0) // never bumped
+    expect(rows[0].lastError).toMatchObject({ status: 0, reason: "network error" })
+    expect(rows[0].status).toBe("pending") // still pending
   })
 })

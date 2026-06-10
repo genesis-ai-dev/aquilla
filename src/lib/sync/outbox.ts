@@ -393,6 +393,57 @@ export async function requeueOutboxEvents(ids: string[]): Promise<void> {
   notifyOutboxChanged()
 }
 
+/**
+ * RES-2: Re-enqueue all `failed` records that failed due to transient errors
+ * (status 0 or 5xx, stamped WITHOUT burning the budget by stampOutboxError).
+ * Records permanently quarantined by 4xx errors are left untouched.
+ *
+ * Call this on network reconnect or authEpoch change so a temporary outage
+ * (short connectivity loss, server restart) doesn't permanently strand edits
+ * after the max-attempt cap would have been reached under the old policy.
+ * The caller should also call flushNow() to drain immediately.
+ */
+export async function requeueTransientlyFailedOutboxEvents(): Promise<void> {
+  let db: IDBDatabase
+  try {
+    db = await openDb()
+  } catch {
+    return
+  }
+  await new Promise<void>((resolve) => {
+    const tx = db.transaction(STORE, "readwrite")
+    tx.onerror = () => resolve()
+    tx.oncomplete = () => resolve()
+    const store = tx.objectStore(STORE)
+    const req = store.openCursor()
+    req.onsuccess = () => {
+      const cursor = req.result
+      if (!cursor) return
+      const rec = cursor.value as Partial<OutboxRecord>
+      // Only revive records whose last error was transient (status 0 or 5xx).
+      // 4xx quarantines are permanent and must survive a reconnect.
+      if (
+        rec.status === "failed" &&
+        rec.lastError != null &&
+        (rec.lastError.status === 0 || rec.lastError.status >= 500)
+      ) {
+        const next: OutboxRecord = {
+          id: rec.id!,
+          enqueuedAt: rec.enqueuedAt ?? Date.now(),
+          event: rec.event!,
+          attempts: 0,
+          lastAttemptAt: null,
+          lastError: null,
+          status: "pending",
+        }
+        cursor.update(next)
+      }
+      cursor.continue()
+    }
+  })
+  notifyOutboxChanged()
+}
+
 export async function removeOutboxEvents(ids: string[]): Promise<void> {
   if (ids.length === 0) return
   const db = await openDb()

@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef, useCallback } from "react"
 import { flushOutboxBatch, type StaleSiblingEntry, type TokenMintResult } from "@/lib/sync/outbox-flush"
-import { outboxPendingCount, outboxFailedCount, subscribeToOutbox } from "@/lib/sync/outbox"
+import { outboxPendingCount, outboxFailedCount, subscribeToOutbox, requeueTransientlyFailedOutboxEvents } from "@/lib/sync/outbox"
 
 const BASE_INTERVAL_MS = 5000
 const MAX_BACKOFF_MS = 60_000
@@ -136,10 +136,22 @@ export function useOutboxFlusher(options: UseOutboxFlusherOptions): {
       }
     }
 
+    // RACE-4: in-flight guard for the no-Web-Locks fallback. Prevents a slow
+    // flush tick from overlapping the next interval tick and double-POSTing the
+    // same events. The Web Locks path is already protected by the lock itself.
+    let fallbackInFlight = false
+
     const tick = async () => {
       if (cancelled) return
       if (typeof navigator !== "undefined" && !navigator.onLine) return
-      await runFlushCycle()
+      // Reentrancy guard: skip this tick if a prior flush is still running.
+      if (fallbackInFlight) return
+      fallbackInFlight = true
+      try {
+        await runFlushCycle()
+      } finally {
+        fallbackInFlight = false
+      }
     }
 
     if (typeof navigator === "undefined" || !navigator.locks) {
@@ -189,24 +201,30 @@ export function useOutboxFlusher(options: UseOutboxFlusherOptions): {
     }
   }, [options.enabled, refreshPending])
 
-  // Network reconnect → drain immediately rather than waiting out the backoff.
+  // Network reconnect → requeue transiently-failed records + drain immediately
+  // rather than waiting out the backoff. RES-2: records that failed due to
+  // status 0 / 5xx (no budget burn) get revived so they can retry now.
   useEffect(() => {
     if (!options.enabled) return
     if (typeof window === "undefined") return
-    const onOnline = () => flushNow()
+    const onOnline = () => {
+      void requeueTransientlyFailedOutboxEvents().then(() => flushNow())
+    }
     window.addEventListener("online", onOnline)
     return () => window.removeEventListener("online", onOnline)
   }, [options.enabled, flushNow])
 
   // Auth identity changed (sign-in / re-auth / account switch) → a previously
-  // un-mintable queue may now succeed; reset backoff and flush now. Skip the
-  // initial mount (no prior epoch) so we don't double-flush on first load.
+  // un-mintable queue may now succeed; requeue transient failures, reset backoff
+  // and flush now. Skip the initial mount (no prior epoch) so we don't double-flush.
   const prevEpoch = useRef<UseOutboxFlusherOptions["authEpoch"]>(options.authEpoch)
   useEffect(() => {
     if (!options.enabled) return
     if (prevEpoch.current !== options.authEpoch) {
       prevEpoch.current = options.authEpoch
-      flushNow()
+      // RES-2: auth epoch change may fix token-mint failures that stamped status
+      // on records without burning the budget. Revive them so they retry now.
+      void requeueTransientlyFailedOutboxEvents().then(() => flushNow())
     }
   }, [options.enabled, options.authEpoch, flushNow])
 

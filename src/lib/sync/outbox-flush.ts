@@ -179,6 +179,8 @@ export async function flushOutboxBatch(deps: FlushDeps): Promise<{
   const url = `${syncWorkerHttpOrigin()}/events`
   let res: Response
   try {
+    // RES-6: 15s hard timeout so a hung connection doesn't strand the flusher.
+    // AbortError is caught below and treated as transient (no budget burn).
     res = await fetchFn(url, {
       method: "POST",
       headers: {
@@ -186,12 +188,17 @@ export async function flushOutboxBatch(deps: FlushDeps): Promise<{
         Authorization: `Bearer ${token}`,
       },
       body: JSON.stringify({ events }),
+      signal: AbortSignal.timeout(15_000),
     })
   } catch (err) {
-    const reason = err instanceof Error ? err.message : "network error"
-    await markOutboxAttempt(
+    // RES-2: network throws (including AbortError/timeout) are transient — do NOT
+    // burn the attempt budget. Use stampOutboxError (same policy as token-mint
+    // failures) so the flusher can auto-recover when connectivity is restored.
+    const isTimeout = err instanceof Error && err.name === "TimeoutError"
+    const reason = isTimeout ? "request timed out" : (err instanceof Error ? err.message : "network error")
+    await stampOutboxError(
       batch.map((r) => r.id),
-      { error: { status: 0, reason } },
+      { status: 0, reason },
     )
     return { posted: events.length, accepted: 0, networkError: true, authError: false, quarantined: 0, staleSiblingCount: 0, staleSourceCount: 0 }
   }
@@ -199,8 +206,8 @@ export async function flushOutboxBatch(deps: FlushDeps): Promise<{
   if (!res.ok) {
     // A whole-batch 403 is non-retryable (wrong project scope / role too low):
     // quarantine so the flusher advances to the next file instead of looping
-    // on this one forever. 401 and 5xx remain transient (token re-mint / server
-    // hiccup), so they keep their retry budget.
+    // on this one forever. 401 and 5xx are transient (token re-mint / server
+    // hiccup) — RES-2: stamp error WITHOUT burning the retry budget.
     if (res.status === 403) {
       await quarantineOutboxEvents(
         batch.map((r) => r.id),
@@ -208,9 +215,10 @@ export async function flushOutboxBatch(deps: FlushDeps): Promise<{
       )
       return { posted: events.length, accepted: 0, networkError: false, authError: false, quarantined: batch.length, staleSiblingCount: 0, staleSourceCount: 0 }
     }
-    await markOutboxAttempt(
+    // RES-2: 5xx and 401 are transient — stamp without burning budget.
+    await stampOutboxError(
       batch.map((r) => r.id),
-      { error: { status: res.status, reason: `HTTP ${res.status}` } },
+      { status: res.status, reason: `HTTP ${res.status}` },
     )
     return { posted: events.length, accepted: 0, networkError: true, authError: false, quarantined: 0, staleSiblingCount: 0, staleSourceCount: 0 }
   }

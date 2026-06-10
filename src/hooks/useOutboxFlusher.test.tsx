@@ -35,13 +35,15 @@ vi.mock("@/lib/sync/outbox", async (importOriginal) => {
     ...orig,
     outboxPendingCount: vi.fn().mockResolvedValue(0),
     outboxFailedCount: vi.fn().mockResolvedValue(0),
+    requeueTransientlyFailedOutboxEvents: vi.fn().mockResolvedValue(undefined),
   }
 })
 
 import { flushOutboxBatch } from "@/lib/sync/outbox-flush"
-import { outboxPendingCount } from "@/lib/sync/outbox"
+import { outboxPendingCount, requeueTransientlyFailedOutboxEvents } from "@/lib/sync/outbox"
 const mockFlush = flushOutboxBatch as ReturnType<typeof vi.fn>
 const mockPendingCount = outboxPendingCount as ReturnType<typeof vi.fn>
+const mockRequeue = requeueTransientlyFailedOutboxEvents as ReturnType<typeof vi.fn>
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -66,6 +68,8 @@ beforeEach(() => {
   mockFlush.mockResolvedValue(NOTHING)
   mockPendingCount.mockReset()
   mockPendingCount.mockResolvedValue(0)
+  mockRequeue.mockReset()
+  mockRequeue.mockResolvedValue(undefined)
 
   // Snapshot the original descriptors so we can restore them
   originalOnLine =
@@ -217,6 +221,86 @@ describe("useOutboxFlusher", () => {
       await vi.advanceTimersByTimeAsync(5_000)
     })
     expect(mockFlush.mock.calls.length).toBe(callsBefore)
+  })
+
+  // -- RACE-4/M1-5: reentrancy guard (interval fallback) ─────────────────────
+
+  it("RACE-4: does not overlap flush ticks when a flush takes longer than the interval (interval fallback)", async () => {
+    Object.defineProperty(navigator, "locks", {
+      value: undefined,
+      configurable: true,
+    })
+
+    // Make the flush take longer than the interval (7s when interval is 5s).
+    let resolveSlow: (() => void) | null = null
+    mockFlush.mockImplementation(
+      () =>
+        new Promise<typeof NOTHING>((resolve) => {
+          resolveSlow = () => resolve(NOTHING)
+        }),
+    )
+
+    renderHook(() =>
+      useOutboxFlusher({ enabled: true, getTokenForFile: TOKEN_FN }),
+    )
+
+    // Initial tick fires immediately — flush is in flight (slow)
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0)
+    })
+    expect(mockFlush).toHaveBeenCalledTimes(1)
+
+    // Advance past the interval (5s) — the reentrancy guard must block a second tick.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5_000)
+    })
+    // Only 1 call — the in-flight guard must have blocked the second interval tick.
+    expect(mockFlush).toHaveBeenCalledTimes(1)
+
+    // Resolve the slow flush — the guard clears.
+    await act(async () => {
+      resolveSlow?.()
+    })
+
+    // Next interval tick can now proceed.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5_000)
+    })
+    expect(mockFlush).toHaveBeenCalledTimes(2)
+  })
+
+  // -- RES-2: auto-requeue on online event ───────────────────────────────────
+
+  it("RES-2: calls requeueTransientlyFailedOutboxEvents when the online event fires", async () => {
+    Object.defineProperty(navigator, "locks", {
+      value: undefined,
+      configurable: true,
+    })
+    Object.defineProperty(navigator, "onLine", {
+      value: true,
+      configurable: true,
+      writable: true,
+    })
+    mockFlush.mockResolvedValue(SUCCESS)
+
+    renderHook(() =>
+      useOutboxFlusher({ enabled: true, getTokenForFile: TOKEN_FN }),
+    )
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0)
+    })
+
+    const callsBefore = mockRequeue.mock.calls.length
+
+    // Fire the online event.
+    await act(async () => {
+      window.dispatchEvent(new Event("online"))
+      await vi.advanceTimersByTimeAsync(0)
+    })
+
+    // requeueTransientlyFailedOutboxEvents must have been called.
+    expect(mockRequeue.mock.calls.length).toBeGreaterThan(callsBefore)
   })
 
   // -- Backoff reset on success ----------------------------------------------

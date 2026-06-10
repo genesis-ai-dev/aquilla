@@ -6,7 +6,7 @@ import { ProjectsList } from "./ProjectsList"
 
 // Default: signed-in. Type-cast to allow null session in signed-out tests.
 type FakeSession = { jwt: string; username: string; createdAt: string } | null
-const mockUseFrontierSession = vi.fn<[], { session: FakeSession; loading: boolean }>(() => ({ session: { jwt: "jwt", username: "anna", createdAt: "x" }, loading: false }))
+const mockUseFrontierSession = vi.fn<() => { session: FakeSession; loading: boolean }>(() => ({ session: { jwt: "jwt", username: "anna", createdAt: "x" }, loading: false }))
 vi.mock("@/hooks/useFrontierSession", () => ({ useFrontierSession: () => mockUseFrontierSession() }))
 vi.mock("@/lib/frontier/orgs", () => ({ listMyOrgs: vi.fn(async () => [{ id: 7, name: "Come and See", role: { level: 700, name: "owner" } }]) }))
 vi.mock("@/components/AccountSwitcher", () => ({ AccountSwitcher: () => null }))

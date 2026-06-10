@@ -115,6 +115,10 @@ fetch-helpers chain FRO-281 → 293; EditorTable strings last: FRO-290 after 297
 - 2026-06-10 · FRO-283 invite truth · ffbc0b6 (merge of be930d8) · email binding ENFORCED; follow-up flagged: JoinPage pre-warn on email mismatch
 - 2026-06-10 · FRO-279 validated threshold · merge of 781e839 · spec says read-time, projection-time chosen + documented; backfill renumbered 0034→0035 (collision with rls_backstop) · gate pending
 
+- 2026-06-10 · gate (through fro-279 + renumber) green exit 0
+- 2026-06-10 · merged batch: FRO-274 e527f68 (595dd4f) · FRO-277 0360c45 (0c40dc2) · FRO-286 8f4d194 (6681e27, REMOVE path per spec Q25) · FRO-284 0d11eb4 (bd72317; sync-worker route.ts ctx wiring auto-merged with 279) · gate pending
+- NOTE: FRO-284 needs RESEND_API_KEY/EMAIL_FROM/BASE_URL in sync-worker env before staging deploy; extractMentions inlined copy must stay in sync with comment-helpers.
+
 ### Incidents
 - FRO-275: first agent died after ~15 lines; finisher respawned into same worktree — Fixed.
 - FRO-291: agent died mid-test-work AND its worktree contained FOREIGN media-timeline WIP

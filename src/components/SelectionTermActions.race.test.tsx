@@ -24,7 +24,7 @@
  * the fix matters, not just that the happy path works.
  */
 
-import React, { useCallback, useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { render, screen, fireEvent, act } from "@testing-library/react"
 

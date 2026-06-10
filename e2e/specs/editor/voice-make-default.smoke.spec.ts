@@ -8,17 +8,21 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const SAMPLE_MD = path.resolve(__dirname, "../../fixtures/sample.md")
 
 /**
- * CharacterModal — "Make default" button.
+ * CharacterModal — "Make narrator" button.
  *
  * VoiceLibraryPanel shows a voice row for each character. Clicking a row
- * opens CharacterModal in edit mode, which shows a "Make default" button
- * in the footer (when the voice is not already the default).
+ * opens CharacterModal in edit mode, which shows a "Make narrator" button
+ * in the footer (when the voice is not already the narrator/default).
  *
  * This spec: create a voice → click its row to open CharacterModal in edit
- * mode → verify "Make default" button is visible → click it → verify the
- * "Default character" badge replaces the button.
+ * mode → verify "Make narrator" button is visible → click it → verify the
+ * "Narrator (default)" badge replaces the button.
+ *
+ * Note: the button was previously named "Make default" and the badge was
+ * "Default character". Both were renamed to "Make narrator" / "Narrator (default)"
+ * to better communicate the narrator role in multi-voice projects.
  */
-test("CharacterModal Make default sets the voice as default", async ({ alice }) => {
+test("CharacterModal Make narrator sets the voice as narrator/default", async ({ alice }) => {
   const dash = new Dashboard(alice)
   await dash.goto()
   const name = `MakeDefault ${Date.now()}`
@@ -60,12 +64,12 @@ test("CharacterModal Make default sets the voice as default", async ({ alice }) 
   const editDialog = alice.getByRole("dialog")
   await expect(editDialog).toBeVisible({ timeout: 5_000 })
 
-  // "Make default" button is in the footer.
-  const makeDefaultBtn = editDialog.getByRole("button", { name: /Make default/i })
-  await expect(makeDefaultBtn).toBeVisible({ timeout: 3_000 })
-  await makeDefaultBtn.click()
+  // "Make narrator" button is in the footer (renamed from "Make default").
+  const makeNarratorBtn = editDialog.getByRole("button", { name: /Make narrator/i })
+  await expect(makeNarratorBtn).toBeVisible({ timeout: 3_000 })
+  await makeNarratorBtn.click()
 
-  // After clicking, the button becomes "Default character" badge.
-  await expect(editDialog.getByText(/Default character/i)).toBeVisible({ timeout: 3_000 })
-  await expect(makeDefaultBtn).not.toBeVisible()
+  // After clicking, the button becomes "Narrator (default)" badge (renamed from "Default character").
+  await expect(editDialog.getByText(/Narrator \(default\)/i)).toBeVisible({ timeout: 3_000 })
+  await expect(makeNarratorBtn).not.toBeVisible()
 })

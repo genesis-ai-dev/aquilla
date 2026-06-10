@@ -9,14 +9,18 @@
 // file name. The translator's in-progress state is what gets exported —
 // empty cells fall back to the source verse so the file stays valid USFM.
 //
-// Auth: sync-token JWT scoped to projectId; maintainer (600) required per spec
-// Q32 — exporting the deliverable is a privileged action, not a read.
+// Auth: sync-token JWT scoped to projectId; role floor = max(MAINTAINER, org
+// exportMinRole setting). Default org floor = MAINTAINER (600) per spec Q32.
+// Org owners can RAISE the floor (e.g., OWNER only) or LOWER it (e.g.,
+// CONTRIBUTOR) via org settings — see FRO-253. Current behavior (maintainer)
+// is preserved when no exportMinRole is set.
 //
 // Returns null if the URL doesn't match (chainable in the fetch dispatcher).
 
 import { verifyTokenForProject } from "../auth"
 import { withCors } from "../cors"
 import { ROLE } from "./role-policy"
+import { resolveExportFloor } from "./export-floor"
 import {
   parseUsfmLossless,
   serializeUsfmLossless,
@@ -55,11 +59,13 @@ export async function handleExportSourceRequest(
   if (!auth.ok) {
     return withCors(new Response(auth.reason, { status: auth.status }), request)
   }
-  // Q32: a deliverable export is gated at maintainer (600) — a viewer who can
-  // read the project should not be able to pull a full export of it.
-  if (auth.claims.role < ROLE.MAINTAINER) {
+  // FRO-253: resolve the org-level export floor. Default = MAINTAINER (600).
+  // The org may raise it (e.g., OWNER) or lower it (e.g., CONTRIBUTOR).
+  const exportFloor = await resolveExportFloor(db, projectId)
+  if (auth.claims.role < exportFloor) {
+    const floorName = exportFloor === ROLE.MAINTAINER ? "maintainer" : `role level ${exportFloor}`
     return withCors(
-      new Response("maintainer role required to export", { status: 403 }),
+      new Response(`${floorName} role required to export`, { status: 403 }),
       request,
     )
   }
@@ -87,6 +93,53 @@ export async function handleExportSourceRequest(
     .bind(fileId, projectId)
     .first<{ name: string }>()
   const fileName = fileMeta?.name || `${fileId}.sfm`
+
+  if (blob.format === "docx" || blob.format === "pptx") {
+    // FRO-233: For binary Office formats (DOCX/PPTX) the server serves the
+    // raw side-car bytes as-is (base64-decoded back to binary). The client is
+    // responsible for XML-injection of translations using JSZip + DOMParser —
+    // the worker lacks a ZIP reader library and adding jszip would be a new
+    // heavy dependency (flagged per HARD LIMITS). The raw bytes are sufficient
+    // for a client-side "open in Word with structure intact" export.
+    //
+    // SWARM-TODO(FRO-233-server-inject): if a future wave adds jszip to the
+    // sync-worker (or implements a DecompressionStream-based ZIP reader), the
+    // client-side injection path can be replaced by a lossless server-side
+    // serializer that mirrors serializeUsfmLossless.
+    const mimeType = blob.format === "docx"
+      ? "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+      : "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+    const ext = blob.format === "docx" ? ".docx" : ".pptx"
+    const downloadName = fileName.endsWith(ext) ? fileName : `${fileName}${ext}`
+
+    // Decode base64 side-car back to binary.
+    let binary: Uint8Array
+    try {
+      const cleaned = blob.raw_source.replace(/\s/g, "")
+      const b64 = atob(cleaned)
+      binary = new Uint8Array(b64.length)
+      for (let i = 0; i < b64.length; i++) binary[i] = b64.charCodeAt(i)
+    } catch {
+      return withCors(
+        new Response("side-car bytes corrupted — re-import to restore", { status: 500 }),
+        request,
+      )
+    }
+
+    return withCors(
+      new Response(binary, {
+        status: 200,
+        headers: {
+          "Content-Type": mimeType,
+          "Content-Disposition": `attachment; filename="${downloadName.replace(/"/g, "")}"`,
+          // Signal to client: this is a raw side-car, not injection-substituted.
+          // The client should perform its own XML injection using the cells it holds.
+          "X-Export-Mode": "raw-sidecar",
+        },
+      }),
+      request,
+    )
+  }
 
   if (blob.format !== "usfm") {
     return withCors(
@@ -142,3 +195,6 @@ export async function handleExportSourceRequest(
     request,
   )
 }
+
+// resolveExportFloor is now in ./export-floor.ts (shared with export-bundle-route.ts).
+// Imported above — see FRO-253 note in that module for behavior and caveats.

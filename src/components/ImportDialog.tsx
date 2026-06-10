@@ -29,8 +29,9 @@ import {
   parseEBibleCorpus,
   type EBibleTranslation,
 } from "@/lib/parsers/ebible"
+import { languagesEqual } from "@/lib/language-normalize"
 
-type Screen = "landing" | "upload" | "ebible"
+type Screen = "landing" | "upload" | "ebible" | "direction"
 
 interface ImportDialogProps {
   open: boolean
@@ -41,7 +42,7 @@ interface ImportDialogProps {
   targetLanguage: string
   /** Mints a sync-token scoped to (projectId, fileId) for the bulk upload. */
   getToken: (fileId: string) => Promise<string | null>
-  onImported: (refs: FileReference[]) => void | Promise<void>
+  onImported: (refs: FileReference[], inferredLanguages?: { sourceLanguage?: string; targetLanguage?: string; explicit?: boolean }) => void | Promise<void>
   /** Optional: current project TTS settings. When provided alongside
    *  `onCastUpdated`, VTT/SRT imports with `<v Name>` tags will create cast
    *  members and cell assignments in a single batched write. */
@@ -49,6 +50,11 @@ interface ImportDialogProps {
   /** Callback to persist updated TTS settings (voices + castAssignments) after
    *  a subtitle import that contained speaker tags. */
   onCastUpdated?: (settings: Partial<ProjectTtsSettings>) => void | Promise<void>
+}
+
+/** localStorage key used to persist the per-project "skip direction prompt" choice. */
+function skipStorageKey(projectId: string) {
+  return `codex.importDirectionSkipped.${projectId}`
 }
 
 export function ImportDialog({
@@ -64,19 +70,148 @@ export function ImportDialog({
   onCastUpdated,
 }: ImportDialogProps) {
   const [screen, setScreen] = useState<Screen>("landing")
+  // Holds refs + inferred languages while waiting for the user to set direction.
+  const [pendingImport, setPendingImport] = useState<{
+    refs: FileReference[]
+    inferredLanguages?: { sourceLanguage?: string; targetLanguage?: string }
+  } | null>(null)
+  const [directionSource, setDirectionSource] = useState("")
+  const [directionTarget, setDirectionTarget] = useState("")
+  // Guard against double-clicks on "Set direction".
+  const [confirming, setConfirming] = useState(false)
+  // FRO-249 fix: inline error shown when onImported throws from the direction screen.
+  const [confirmError, setConfirmError] = useState<string | null>(null)
+  // FRO-249 fix (Fix 3): guard against Radix delivering onOpenChange(false) twice
+  // in the same macrotask (closure-captured pendingImport stays non-null until
+  // the re-render). Consumed synchronously so the second call is a no-op.
+  const flushingRef = useRef(false)
 
   // Reset to landing each time the dialog opens.
   useEffect(() => {
-    if (open) setScreen("landing")
+    if (open) {
+      setScreen("landing")
+      setPendingImport(null)
+      setConfirming(false)
+      setConfirmError(null)
+      flushingRef.current = false
+    }
   }, [open])
 
+  // BLOCKER 2: intercept dialog close — if we're on the direction screen with a
+  // pending import, flush it via the skip path before propagating the close so
+  // the imported files are never silently dropped.
+  const handleOpenChange = useCallback(
+    (nextOpen: boolean) => {
+      if (!nextOpen && pendingImport !== null) {
+        // Fix 3: bail if we already started a flush this macrotask.
+        if (flushingRef.current) {
+          onOpenChange(nextOpen)
+          return
+        }
+        flushingRef.current = true
+        // Flush the pending import without language overrides (skip semantics).
+        void Promise.resolve(onImported(pendingImport.refs, pendingImport.inferredLanguages)).catch((err: unknown) => {
+          console.warn("[ImportDialog] flush-on-close failed:", err)
+        })
+        setPendingImport(null)
+      }
+      onOpenChange(nextOpen)
+    },
+    [pendingImport, onImported, onOpenChange],
+  )
+
+  // Called by child panels when they finish importing. If the language
+  // direction is ambiguous (source==target or target is empty after source is
+  // set), show the one-time direction prompt instead of closing immediately.
+  const handleChildImported = useCallback(
+    async (refs: FileReference[], inferredLanguages?: { sourceLanguage?: string; targetLanguage?: string }) => {
+      const effectiveSource = (inferredLanguages?.sourceLanguage || sourceLanguage).trim()
+      const effectiveTarget = (inferredLanguages?.targetLanguage || targetLanguage).trim()
+
+      // Direction is ambiguous when: both empty, target is unset, or source==target
+      // (using the normalizer so "French"=="fra" doesn't spuriously trigger this).
+      // Small fix: also fire when both are empty (""=="" would otherwise pass the
+      // effectiveSource!=="" gate and silently leave source==target=="").
+      const bothEmpty = effectiveSource === "" && effectiveTarget === ""
+      const needsDirection =
+        bothEmpty ||
+        (effectiveSource !== "" && (effectiveTarget === "" || languagesEqual(effectiveSource, effectiveTarget)))
+
+      // Respect the persisted per-project skip choice so we don't re-prompt on
+      // every import once the user has deliberately deferred direction setup.
+      const skipped = localStorage.getItem(skipStorageKey(projectId)) === "true"
+
+      if (needsDirection && !skipped) {
+        setPendingImport({ refs, inferredLanguages })
+        setDirectionSource(effectiveSource)
+        setDirectionTarget(languagesEqual(effectiveSource, effectiveTarget) ? "" : effectiveTarget)
+        setScreen("direction")
+        return
+      }
+
+      await onImported(refs, inferredLanguages)
+      onOpenChange(false)
+    },
+    [sourceLanguage, targetLanguage, projectId, onImported, onOpenChange],
+  )
+
+  // BLOCKER 1 fix: values confirmed via DirectionPanel are EXPLICIT — they
+  // replace current values, not merely fill empty slots.
+  async function handleDirectionConfirm() {
+    if (!pendingImport || confirming) return
+    // FRO-249 fix: clear inline error from any previous attempt.
+    setConfirmError(null)
+    setConfirming(true)
+    const captured = pendingImport
+    // Null out synchronously as a double-click guard.
+    setPendingImport(null)
+    try {
+      const mergedLanguages = {
+        ...(captured.inferredLanguages ?? {}),
+        sourceLanguage: directionSource.trim() || captured.inferredLanguages?.sourceLanguage,
+        targetLanguage: directionTarget.trim() || undefined,
+        // BLOCKER 1: mark as explicit so handleImported in ProjectWorkspace
+        // REPLACES current values instead of only filling empty slots.
+        explicit: true,
+      }
+      await onImported(captured.refs, mergedLanguages)
+      onOpenChange(false)
+    } catch (err: unknown) {
+      // FRO-249 fix: on failure restore the direction screen so the user can
+      // retry or skip. The rejection MUST NOT escape as an unhandled rejection.
+      setPendingImport(captured)
+      const message = err instanceof Error ? err.message : String(err)
+      setConfirmError(`Couldn't save your import — please try again. (${message})`)
+    } finally {
+      setConfirming(false)
+    }
+  }
+
+  function handleDirectionSkip() {
+    if (!pendingImport) return
+    // Persist the skip so re-imports don't re-prompt this project.
+    try {
+      localStorage.setItem(skipStorageKey(projectId), "true")
+    } catch {
+      // localStorage may be unavailable in some environments — ignore silently.
+    }
+    const captured = pendingImport
+    setPendingImport(null)
+    void Promise.resolve(onImported(captured.refs, captured.inferredLanguages)).catch((err: unknown) => {
+      console.warn("[ImportDialog] skip flush failed:", err)
+    })
+    onOpenChange(false)
+  }
+
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent className="max-w-2xl">
         <DialogHeader>
           <DialogTitle>
             {screen === "landing" ? (
               "Import"
+            ) : screen === "direction" ? (
+              "Set translation direction"
             ) : (
               <div className="flex items-center gap-2">
                 <button
@@ -106,10 +241,7 @@ export function ImportDialog({
             getToken={getToken}
             ttsSettings={ttsSettings}
             onCastUpdated={onCastUpdated}
-            onImported={async (refs) => {
-              await onImported(refs)
-              onOpenChange(false)
-            }}
+            onImported={handleChildImported}
           />
         )}
 
@@ -120,10 +252,22 @@ export function ImportDialog({
             sourceLanguage={sourceLanguage}
             targetLanguage={targetLanguage}
             getToken={getToken}
-            onImported={async (ref) => {
-              await onImported([ref])
-              onOpenChange(false)
+            onImported={async (ref, inferredLanguages) => {
+              await handleChildImported([ref], inferredLanguages)
             }}
+          />
+        )}
+
+        {screen === "direction" && (
+          <DirectionPanel
+            sourceLanguage={directionSource}
+            targetLanguage={directionTarget}
+            onSourceChange={setDirectionSource}
+            onTargetChange={setDirectionTarget}
+            onConfirm={handleDirectionConfirm}
+            onSkip={handleDirectionSkip}
+            confirming={confirming}
+            error={confirmError}
           />
         )}
       </DialogContent>
@@ -160,9 +304,12 @@ function ImportLanding({ onSelect }: ImportLandingProps) {
         onClick={() => onSelect("ebible")}
         className="rounded-lg border p-4 text-left transition-colors hover:border-primary hover:bg-primary/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
       >
-        <p className="text-sm font-medium">eBible Corpus</p>
+        <p className="text-sm font-medium">
+          eBible Corpus
+          <span className="ml-1.5 text-xs font-normal text-muted-foreground">(public Bible library)</span>
+        </p>
         <p className="mt-1 text-xs text-muted-foreground">
-          Import a redistributable Bible translation directly from the BibleNLP/ebible corpus.
+          A public library of openly-licensed Bible translations from around the world. Pick any redistributable version and import it directly — no file download needed.
         </p>
       </button>
 
@@ -208,7 +355,7 @@ interface UploadPanelProps {
   sourceLanguage: string
   targetLanguage: string
   getToken: (fileId: string) => Promise<string | null>
-  onImported: (refs: FileReference[]) => void | Promise<void>
+  onImported: (refs: FileReference[], inferredLanguages?: { sourceLanguage?: string; targetLanguage?: string }) => void | Promise<void>
   ttsSettings?: ProjectTtsSettings
   onCastUpdated?: (settings: Partial<ProjectTtsSettings>) => void | Promise<void>
 }
@@ -377,9 +524,13 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, getT
               />
             </Button>
           </div>
-          <p className="mt-2 text-xs text-muted-foreground">
-            Files: MD, DOCX, PPTX, TXT, VTT, SRT, USFM, XLIFF / XLF, TMX, CSV, TSV · or a Paratext project (.zip or folder)
-          </p>
+          <div className="mt-3 space-y-1 text-xs text-muted-foreground">
+            <p><span className="font-medium text-foreground/70">Scripture</span> — USFM, USX, SFM</p>
+            <p><span className="font-medium text-foreground/70">Translation</span> — XLIFF/XLF, TMX, CSV/TSV</p>
+            <p><span className="font-medium text-foreground/70">Documents</span> — DOCX, TXT, MD, PPTX</p>
+            <p><span className="font-medium text-foreground/70">Subtitles</span> — VTT, SRT</p>
+            <p><span className="font-medium text-foreground/70">Paratext project</span> — .zip or folder</p>
+          </div>
         </>
       )}
       {error && <p className="mt-2 text-sm text-destructive">{error}</p>}
@@ -395,7 +546,7 @@ interface ParatextChoiceProps {
   sourceLanguage: string
   targetLanguage: string
   getToken: (fileId: string) => Promise<string | null>
-  onImported: (refs: FileReference[]) => void | Promise<void>
+  onImported: (refs: FileReference[], inferredLanguages?: { sourceLanguage?: string; targetLanguage?: string }) => void | Promise<void>
   onCancel: () => void
 }
 
@@ -422,11 +573,14 @@ function ParatextChoice({
   async function runSource() {
     setMode("importing"); setError(null); setPhase("Reading project…"); setProgress(null)
     try {
-      const { refs, skipped } = await importParatextProject(entries, ctx, onProgress)
+      const { refs, settings, skipped } = await importParatextProject(entries, ctx, onProgress)
       if (skipped.length) {
         setError(`Imported ${refs.length}; skipped ${skipped.length}: ${skipped.slice(0, 3).map((s) => s.book).join(", ")}`)
       }
-      await onImported(refs)
+      // Propagate language inferred from Paratext Settings.xml so the project
+      // can seed its sourceLanguage when it was unset (FRO-249).
+      const inferredLang = settings.languageIsoCode || settings.language
+      await onImported(refs, inferredLang ? { sourceLanguage: inferredLang } : undefined)
     } catch (err) {
       setError(err instanceof Error ? err.message : "Import failed"); setMode("choose")
     }
@@ -451,9 +605,17 @@ function ParatextChoice({
         ref: s.globalReferences?.[0] ?? s.context,
         text: s.original,
       }))
-      const { refs, skipped } = await importParatextAsTarget(entries, sourceVerses, { ...ctx, sourceLanguage: sel.id }, onProgress)
+      // WARN d fix: use languageCode (e.g. "eng") not sel.id ("eng-engKJV") as the source language.
+      const selSourceLang = sel.languageCode || sel.id
+      const { refs, settings, skipped } = await importParatextAsTarget(entries, sourceVerses, { ...ctx, sourceLanguage: selSourceLang }, onProgress)
       if (skipped.length) setError(`Imported ${refs.length}; skipped ${skipped.length}`)
-      await onImported(refs)
+      // The Paratext project IS the target; selSourceLang is the eBible source language.
+      // Propagate both so the project's source/target direction is set (FRO-249).
+      const inferredTargetLang = settings.languageIsoCode || settings.language
+      await onImported(
+        refs,
+        { sourceLanguage: selSourceLang, targetLanguage: inferredTargetLang || undefined },
+      )
     } catch (err) {
       setError(err instanceof Error ? err.message : "Import failed"); setMode("pickSource")
     }
@@ -554,7 +716,7 @@ interface EBiblePanelProps {
   sourceLanguage: string
   targetLanguage: string
   getToken: (fileId: string) => Promise<string | null>
-  onImported: (ref: FileReference) => void | Promise<void>
+  onImported: (ref: FileReference, inferredLanguages?: { sourceLanguage?: string; targetLanguage?: string }) => void | Promise<void>
 }
 
 function EBiblePanel({ projectId, username, sourceLanguage, targetLanguage, getToken, onImported }: EBiblePanelProps) {
@@ -617,7 +779,9 @@ function EBiblePanel({ projectId, username, sourceLanguage, targetLanguage, getT
         setProgress,
         abortRef.current.signal
       )
-      await onImported(ref)
+      // Propagate the eBible translation's language code as the inferred
+      // sourceLanguage so the project can seed it when unset (FRO-249).
+      await onImported(ref, { sourceLanguage: selected.languageCode || selected.id })
     } catch (err) {
       setImportErr(err instanceof Error ? err.message : "Import failed")
     } finally {
@@ -731,6 +895,98 @@ function EBiblePanel({ projectId, username, sourceLanguage, targetLanguage, getT
       <div className="flex justify-end">
         <Button onClick={handleImport} disabled={!selected || importing}>
           {importing ? "Importing..." : "Import"}
+        </Button>
+      </div>
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Direction prompt — shown once when source/target are ambiguous (FRO-249)
+// ---------------------------------------------------------------------------
+
+interface DirectionPanelProps {
+  sourceLanguage: string
+  targetLanguage: string
+  onSourceChange: (v: string) => void
+  onTargetChange: (v: string) => void
+  onConfirm: () => void
+  onSkip: () => void
+  confirming?: boolean
+  /** FRO-249: shown inline when onImported throws so the user can retry. */
+  error?: string | null
+}
+
+/** One-time prompt shown after import when source==target or target is unset.
+ *  The user enters source and target language so back-translation and QA rules
+ *  operate against the correct language pair.
+ *
+ *  WARN c: both fields are editable — explicit user input always wins over the
+ *  project's existing values (consistent with BLOCKER 1 explicit-wins fix). */
+function DirectionPanel({
+  sourceLanguage,
+  targetLanguage,
+  onSourceChange,
+  onTargetChange,
+  onConfirm,
+  onSkip,
+  confirming = false,
+  error = null,
+}: DirectionPanelProps) {
+  // WARN e: use normalizer so "French"=="fra" registers as same and blocks confirm.
+  const targetTrimmed = targetLanguage.trim()
+  const sourceTrimmed = sourceLanguage.trim()
+  const confirmDisabled =
+    confirming ||
+    !targetTrimmed ||
+    languagesEqual(targetTrimmed, sourceTrimmed)
+
+  return (
+    <div className="flex flex-col gap-4 py-2">
+      <p className="text-sm text-muted-foreground">
+        We detected the source language from the imported project. Please confirm the
+        source and set the target language so back-translation and QA rules work correctly.
+      </p>
+      <div className="grid grid-cols-2 gap-4">
+        <div>
+          <label className="mb-1 block text-xs font-medium text-muted-foreground" htmlFor="dl-source">
+            Source language
+          </label>
+          <Input
+            id="dl-source"
+            value={sourceLanguage}
+            onChange={(e) => onSourceChange(e.target.value)}
+            placeholder="e.g. English, arb, hbo"
+          />
+        </div>
+        <div>
+          <label className="mb-1 block text-xs font-medium text-muted-foreground" htmlFor="dl-target">
+            Target language <span className="text-destructive">*</span>
+          </label>
+          <Input
+            id="dl-target"
+            value={targetLanguage}
+            onChange={(e) => onTargetChange(e.target.value)}
+            placeholder="e.g. Spanish, fra, swh"
+            autoFocus
+          />
+        </div>
+      </div>
+      <p className="text-xs text-muted-foreground">
+        You can change these later in <strong>Project Settings → Project Info</strong>.
+      </p>
+      {/* FRO-249: restore direction screen on failure so the user can retry */}
+      {error && <p className="text-sm text-destructive" role="alert">{error}</p>}
+      <div className="flex justify-end gap-2">
+        <Button variant="ghost" size="sm" onClick={onSkip} disabled={confirming}>
+          Skip for now
+        </Button>
+        <Button
+          size="sm"
+          onClick={onConfirm}
+          disabled={confirmDisabled}
+        >
+          {confirming ? "Setting…" : "Set direction"}
         </Button>
       </div>
     </div>

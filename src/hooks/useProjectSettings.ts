@@ -11,7 +11,12 @@ import {
 } from "@/lib/sync/project-settings"
 import posthog from "@/lib/posthog"
 
-const EDIT_ROLE_FLOOR = ROLE.PROJECT_LEAD
+// Floor aligned with the server's SETTINGS_WRITE_MIN_ROLE = ROLE.MAINTAINER (600).
+// Spec (01-personas-and-roles.md §Role ladder): "Invite / remove members; change
+// project settings (languages, system prompt, validation rules, health) — maintainer"
+// (row 600). Lowering the floor to PROJECT_LEAD (500) would widen server permissions
+// without spec support — do not change without a matching auth-worker update + spec citation.
+const EDIT_ROLE_FLOOR = ROLE.MAINTAINER
 
 export type CannotEditReason = "offline" | "role" | null
 
@@ -47,7 +52,8 @@ export interface UseProjectSettings {
   refresh: () => Promise<ProjectSettingsResponse | null>
   /** Apply a partial settings update. Optimistic local update, server PATCH,
    *  conflict-snap on 409, returns outcome. Blocked when offline or below
-   *  PROJECT_LEAD. */
+   *  MAINTAINER (600). Server-forbidden writes are surfaced as blocked and
+   *  the optimistic overlay is rolled back — no silent local divergence. */
   patch: (partial: ProjectWideSettings) => Promise<PatchOutcome>
 }
 
@@ -311,25 +317,51 @@ export function useProjectSettings(
   }, [hasFetched, server, canEdit, local, jwt, projectId])
 
   const patch = useCallback(async (partial: ProjectWideSettings): Promise<PatchOutcome> => {
-    // Apply locally *before* the gates. The original implementation gated the
-    // entire write — including the local IDB / local-state mirror — behind
-    // jwt+online+role, which silently dropped every edit on unsynced or
-    // offline projects. For the synced-no-perm case the local apply is
-    // reverted by the next server fetch anyway (callers gate the UI with
-    // `disabled={!canEditShared && synced}` so users don't see a phantom
-    // edit); for unsynced projects this is the only place the value ever
-    // lands. setLocal is synchronous so the next render reflects it; the
-    // patchProject write to IDB is fire-and-forget.
-    setLocal((prev) => ({ ...prev, ...partial }))
-    if (projectId) {
-      void patchProject(projectId, (existing) => ({ ...existing, ...partial })).catch((err) => {
-        console.warn("[useProjectSettings] local IDB patch failed", err)
-      })
-    }
+    // Gate logic for local apply vs. server write:
+    //
+    // 1. No jwt or no projectId → error immediately (no session/project).
+    // 2. Offline → apply locally (preserve work, server reconciles on reconnect).
+    // 3. roleLevel === null → unsynced project (server has no record of this
+    //    project); apply locally only, no server roundtrip. Same as original.
+    // 4. roleLevel < EDIT_ROLE_FLOOR → synced project, below floor. DO NOT apply
+    //    locally — this was the root cause of FRO-255 silent divergence. The
+    //    server would reject, leaving stale IDB data the user can't clear.
+    // 5. roleLevel >= EDIT_ROLE_FLOOR → optimistic local apply happens *after*
+    //    this block, just before the serialized server write.
 
     if (!projectId || !jwt) return { kind: "error", message: "no session or project" }
-    if (!isOnlineRef.current) return { kind: "blocked", reason: "offline" }
-    if (roleLevel == null || roleLevel < EDIT_ROLE_FLOOR) return { kind: "blocked", reason: "role" }
+
+    if (!isOnlineRef.current) {
+      // Offline — apply locally so work isn't lost; server will reconcile on reconnect.
+      setLocal((prev) => ({ ...prev, ...partial }))
+      void patchProject(projectId, (existing) => ({ ...existing, ...partial })).catch((err) => {
+        console.warn("[useProjectSettings] local IDB patch failed (offline)", err)
+      })
+      return { kind: "blocked", reason: "offline" }
+    }
+
+    if (roleLevel == null) {
+      // Unsynced project — only local storage exists; no server to write to.
+      setLocal((prev) => ({ ...prev, ...partial }))
+      void patchProject(projectId, (existing) => ({ ...existing, ...partial })).catch((err) => {
+        console.warn("[useProjectSettings] local IDB patch failed (unsynced)", err)
+      })
+      return { kind: "blocked", reason: "role" }
+    }
+
+    if (roleLevel < EDIT_ROLE_FLOOR) {
+      // Synced project below floor — do NOT apply locally; the server will
+      // reject and we'd silently diverge (the original FRO-255 bug).
+      return { kind: "blocked", reason: "role" }
+    }
+
+    // Optimistic local apply for synced+online+authorized path. We apply here
+    // (after the role guard) rather than before it so a below-floor user never
+    // writes stale data to IDB on a synced project.
+    setLocal((prev) => ({ ...prev, ...partial }))
+    void patchProject(projectId, (existing) => ({ ...existing, ...partial })).catch((err) => {
+      console.warn("[useProjectSettings] local IDB patch failed", err)
+    })
 
     // Serialize the network write so it can't race the one-shot migration or a
     // prior user patch. Reading server state from the ref *inside* the
@@ -395,10 +427,57 @@ export function useProjectSettings(
       return { kind: "conflict", latest: result.latest }
     }
     if (result.kind === "forbidden") {
-      void refresh() // revert optimistic by re-fetching truth
+      // Server rejected the write (role check failed at the API layer). Roll back
+      // the optimistic local state we applied above — do not silently retain the
+      // rejected value per FRO-255 acceptance criteria.
+      void refresh() // revert optimistic overlay by re-fetching truth
+      const snapTarget = serverRef.current?.settings ?? {}
+      setLocal((prev) => {
+        // Remove keys from partial that the server rejected; keep anything
+        // that wasn't part of this write attempt.
+        const next = { ...prev }
+        for (const key of Object.keys(partial) as (keyof ProjectWideSettings)[]) {
+          if (key in snapTarget) {
+            next[key] = snapTarget[key] as any
+          } else {
+            delete next[key]
+          }
+        }
+        return next
+      })
+      void patchProject(projectId, (existing) => {
+        // Roll back IDB keys to server truth for the keys in partial.
+        const next = { ...existing }
+        for (const key of Object.keys(partial)) {
+          if (key in snapTarget) {
+            ;(next as any)[key] = (snapTarget as any)[key]
+          }
+        }
+        return next
+      }).catch((err) => {
+        console.warn("[useProjectSettings] local IDB forbidden-rollback failed", err)
+      })
+      posthog.capture("project settings write forbidden", {
+        project_id: projectId,
+        role_level: roleLevel,
+      })
       return { kind: "blocked", reason: "role" }
     }
+    // Network/server error — roll back optimistic local apply so IDB doesn't
+    // permanently diverge from server truth.
     void refresh()
+    setLocal((prev) => {
+      const snapTarget = serverRef.current?.settings ?? {}
+      const next = { ...prev }
+      for (const key of Object.keys(partial) as (keyof ProjectWideSettings)[]) {
+        if (key in snapTarget) {
+          next[key] = snapTarget[key] as any
+        } else {
+          delete next[key]
+        }
+      }
+      return next
+    })
     return { kind: "error", message: result.message }
   }, [projectId, jwt, roleLevel, refresh, runSerialized])
 

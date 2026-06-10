@@ -30,15 +30,10 @@ const ProjectWorkspace = lazy(() =>
 const ProjectSettings = lazy(() =>
   import("@/components/ProjectSettings").then((m) => ({ default: m.ProjectSettings })),
 )
-// FRO-194: RulesPage is now rendered inside ProjectWorkspace shell.
-// The lazy import is kept for any lingering direct imports; the route
-// below now points to ProjectWorkspace which handles the /rules path.
-const CommentsPage = lazy(() =>
-  import("@/components/CommentsPage").then((m) => ({ default: m.CommentsPage })),
-)
-const LivingMemoryPage = lazy(() =>
-  import("@/components/LivingMemoryPage").then((m) => ({ default: m.LivingMemoryPage })),
-)
+// FRO-254: CommentsPage / LivingMemoryPage / TerminologyPage are now rendered
+// inside ProjectWorkspace shell (lazy-imported there). The routes below all
+// point to ProjectWorkspace; the shell detects the path suffix and swaps only
+// the main content area. These top-level lazy imports are intentionally removed.
 const MembersPage = lazy(() =>
   import("@/pages/MembersPage").then((m) => ({ default: m.MembersPage })),
 )
@@ -57,10 +52,6 @@ const AdminConsole = lazy(() =>
 const DebugView = lazy(() =>
   import("@/components/DebugView").then((m) => ({ default: m.DebugView })),
 )
-const TerminologyPage = lazy(() =>
-  import("@/components/TerminologyPage").then((m) => ({ default: m.TerminologyPage })),
-)
-
 void hydratePrefetchStatus()
 void probeOpfsAvailability()
 
@@ -163,9 +154,14 @@ function AppRoutes() {
         <Route path="/project/:id/rules" element={<ProjectWorkspace />} />
         {/* ISSUE-3 fix: /voice deep-link — workspace detects suffix and activates audio lens. */}
         <Route path="/project/:id/voice" element={<ProjectWorkspace />} />
-        <Route path="/project/:id/terminology" element={<TerminologyPage />} />
-        <Route path="/project/:id/comments" element={<CommentsPage />} />
-        <Route path="/project/:id/memory" element={<LivingMemoryPage />} />
+        {/* FRO-254: terminology/comments/memory now render inside the ProjectWorkspace shell
+            (fixed sidebar + top bar + bottom status bar). The shell detects the path suffix
+            and swaps only the main content area, same pattern as /rules. */}
+        <Route path="/project/:id/terminology" element={<ProjectWorkspace />} />
+        <Route path="/project/:id/comments" element={<ProjectWorkspace />} />
+        <Route path="/project/:id/memory" element={<ProjectWorkspace />} />
+        {/* FRO-180: per-project members management inside the ProjectWorkspace shell. */}
+        <Route path="/project/:id/members" element={<ProjectWorkspace />} />
 
         {/* Lazy — org admin pages */}
         <Route path="/settings" element={<Settings />} />

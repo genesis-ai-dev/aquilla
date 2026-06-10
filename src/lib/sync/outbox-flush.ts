@@ -75,12 +75,24 @@ export interface FlushDeps {
 function groupOldestFileFirst(records: OutboxRecord[]): OutboxRecord[] {
   if (records.length === 0) return []
   const fid = records[0].event.fileId
-  if (!fid) return records.slice(0, MAX_BATCH)
+  // BLOCKER 2 fix: when the head record has no fileId (project-scoped comment.* event),
+  // only include other no-fileId comment.* records from the same project in the batch.
+  // This prevents mixing sentinel-token events with file-scoped events, which caused
+  // the file-scoped siblings to 403 ("token scoped to different file") and get
+  // permanently quarantined even though they were perfectly valid events.
+  if (!fid) {
+    const headProjectId = records[0].event.projectId
+    const batch: OutboxRecord[] = []
+    for (const r of records) {
+      if (!r.event.fileId && r.event.projectId === headProjectId && batch.length < MAX_BATCH) {
+        batch.push(r)
+      }
+    }
+    return batch
+  }
   const same: OutboxRecord[] = []
-  const rest: OutboxRecord[] = []
   for (const r of records) {
     if (r.event.fileId === fid && same.length < MAX_BATCH) same.push(r)
-    else rest.push(r)
   }
   return same
 }
@@ -113,11 +125,28 @@ export async function flushOutboxBatch(deps: FlushDeps): Promise<{
   const batch = groupOldestFileFirst(records)
   const fileId = batch[0].event.fileId
   if (!fileId) {
-    await removeOutboxEvents([batch[0].id])
-    return { posted: 0, accepted: 0, networkError: false, authError: false, quarantined: 0, staleSiblingCount: 0, staleSourceCount: 0 }
+    // FRO-228: comment.* events with project scope carry no fileId in the
+    // envelope (the scope lives in the payload). Historically these were
+    // dropped here, silently discarding resolves/edits/deletes. For comment.*
+    // kinds without a fileId we use a project-sentinel so the token fetcher
+    // can mint a project-scoped sync-token — the server only checks projectId
+    // for comment auth, not fileId. All other no-fileId events (legacy cell
+    // events without an envelope fileId) are still dropped as before to prevent
+    // them from wedging the queue.
+    const isCommentKind = batch[0].event.kind.startsWith('comment.')
+    if (!isCommentKind) {
+      await removeOutboxEvents([batch[0].id])
+      return { posted: 0, accepted: 0, networkError: false, authError: false, quarantined: 0, staleSiblingCount: 0, staleSourceCount: 0 }
+    }
+    // Fall through with a sentinel fileId so the flusher can mint a token.
+    // The sentinel is never sent to the server — it's only for /sync-token.
   }
   const projectId = batch[0].event.projectId
-  const mint = await deps.getTokenForFile(projectId, fileId)
+  // For comment.* events without a fileId, use a sentinel that the identity
+  // server accepts (any non-empty string; the sync-worker ignores fileId on
+  // comment auth). Events WITH a fileId always use their own for correct scope.
+  const tokenFileId = fileId ?? '__project__'
+  const mint = await deps.getTokenForFile(projectId, tokenFileId)
   if (!mint.token) {
     // Token mint failed. Distinguish permanent from transient so a single
     // un-mintable file can't head-of-line block the rest of the queue (the

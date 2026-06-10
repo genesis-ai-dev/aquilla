@@ -7,6 +7,7 @@ import {
   resolveDecayConfig,
   DECAY_DEFAULTS,
   DEFAULT_DECAY_WARN_THRESHOLD,
+  CELL_NEEDS_ATTENTION_STATUS,
 } from "./decay-engine"
 import type { CellData } from "@/hooks/useCells"
 
@@ -106,5 +107,28 @@ describe("resolveDecayConfig", () => {
     const cfg = resolveDecayConfig(undefined, 1)
     expect(cellHealth(1, cfg.endorsementTarget)).toBe(100)
     expect(needsAttention(1, cfg)).toBe(false)
+  })
+})
+
+// FRO-232: guard the exact user-visible status string shown in the cell popover
+// when the cell needs attention. The string must not duplicate "needs attention"
+// (the popover header already carries that label) and must use domain vocabulary
+// (passage/context rather than "neighborhood").
+describe("CELL_NEEDS_ATTENTION_STATUS (FRO-232)", () => {
+  it("does not contain the word 'neighborhood'", () => {
+    expect(CELL_NEEDS_ATTENTION_STATUS.toLowerCase()).not.toContain("neighborhood")
+  })
+
+  it("does not duplicate 'needs attention' within the string", () => {
+    const lower = CELL_NEEDS_ATTENTION_STATUS.toLowerCase()
+    const firstIdx = lower.indexOf("needs attention")
+    const lastIdx = lower.lastIndexOf("needs attention")
+    expect(firstIdx).toBe(lastIdx) // only one occurrence (or none at all)
+  })
+
+  it("is the expected exact string (FRO-232 regression guard)", () => {
+    expect(CELL_NEEDS_ATTENTION_STATUS).toBe(
+      "This cell's passage context hasn't been validated yet.",
+    )
   })
 })

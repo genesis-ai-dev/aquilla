@@ -1,5 +1,5 @@
 /**
- * InterlinearAlignmentPanel — FRO-207
+ * InterlinearAlignmentPanel — FRO-207 / FRO-240 / FRO-241
  *
  * Renders source↔target word alignment links for a single cell in the BT
  * expansion tab. Mirrors Paratext's guess→approve interaction:
@@ -11,20 +11,27 @@
  * Confirm/Invalidate call the interlinear.ts API, then persist the mutation as
  * an AlignmentSeed via the `onSeedChange` callback (parent writes to
  * project-settings so it survives reload and feeds back into the model).
+ *
+ * FRO-241: When `hasSufficientData` is false the panel shows an "insufficient
+ * data" empty state instead of spurious low-confidence suggestions.
+ *
+ * FRO-240: ✓/✕ buttons carry descriptive aria-labels + title attributes that
+ * explain how the action feeds the interlinear training loop.
  */
 
 import { useMemo } from "react"
-import { Check, X } from "lucide-react"
+import { Check, X, HelpCircle } from "lucide-react"
 import {
   alignCell,
   confirmAlignment,
   invalidateAlignment,
-  CONFIDENCE_AMBER,
   CONFIDENCE_HIGH,
+  CONFIDENCE_AMBER,
+  MIN_PAIRS_FOR_MEANINGFUL_ALIGNMENT,
   type AlignmentModel,
   type AlignmentLink,
+  type AlignmentSeed,
 } from "@/lib/completion/interlinear"
-import type { AlignmentSeed } from "@/lib/completion/interlinear"
 import { cn } from "@/lib/utils"
 
 export interface InterlinearAlignmentPanelProps {
@@ -43,7 +50,10 @@ export interface InterlinearAlignmentPanelProps {
 
 function confidenceLabel(confidence: number): string {
   if (confidence >= CONFIDENCE_HIGH) return "high"
-  if (confidence >= CONFIDENCE_AMBER) return "amber"
+  // CONFIDENCE_AMBER = 0.3 — amber band used for styling only (alignCell already
+  // filters by CONFIDENCE_HIGH, so this branch only fires for confirmed/invalidated
+  // seeds re-rendered below the threshold).
+  if (confidence >= 0.3) return "amber"
   return "low"
 }
 
@@ -117,21 +127,23 @@ function AlignmentRow({
       {/* Action buttons — only when not already decided */}
       {!confirmed && !invalidated && (
         <>
+          {/* FRO-240: title/aria-label explains that confirming teaches the glosser */}
           <button
             type="button"
             onClick={onConfirm}
             className="shrink-0 rounded p-0.5 text-muted-foreground hover:bg-emerald-500/20 hover:text-emerald-700 dark:hover:text-emerald-300"
-            title="Confirm alignment"
-            aria-label={`Confirm ${link.srcToken} → ${link.tgtToken}`}
+            title={`Confirm: mark "${link.srcToken} → ${link.tgtToken}" as a correct word-level alignment. Confirmed pairs teach the statistical glosser and improve future back-translations.`}
+            aria-label={`Confirm alignment: ${link.srcToken} translates as ${link.tgtToken}. This teaches the glosser.`}
           >
             <Check className="h-3 w-3" />
           </button>
+          {/* FRO-240: title/aria-label explains that invalidating penalizes incorrect suggestions */}
           <button
             type="button"
             onClick={onInvalidate}
             className="shrink-0 rounded p-0.5 text-muted-foreground hover:bg-destructive/20 hover:text-destructive"
-            title="Invalidate alignment"
-            aria-label={`Invalidate ${link.srcToken} → ${link.tgtToken}`}
+            title={`Reject: mark "${link.srcToken} → ${link.tgtToken}" as an incorrect alignment. Rejected pairs are penalized so this suggestion won't appear again.`}
+            aria-label={`Reject alignment: ${link.srcToken} does not translate as ${link.tgtToken}. This penalizes the glosser suggestion.`}
           >
             <X className="h-3 w-3" />
           </button>
@@ -154,10 +166,38 @@ export function InterlinearAlignmentPanel({
   confirmedSeeds,
   onSeedChange,
 }: InterlinearAlignmentPanelProps) {
+  // FRO-241: derive whether the model has enough pairs for non-random results.
+  // AlignmentModel.pairCount is the number of (source, target) verse pairs used
+  // to train it — read directly from the model so the parent doesn't need to
+  // thread an extra prop.
+  const hasSufficientData =
+    alignmentModel != null &&
+    alignmentModel.pairCount >= MIN_PAIRS_FOR_MEANINGFUL_ALIGNMENT
+
+  // FRO-241: only compute links when there is sufficient data — avoids wasting
+  // cycles on a model that would only produce noise.
   const links: AlignmentLink[] = useMemo(() => {
+    if (!hasSufficientData) return []
     if (!alignmentModel || !sourceText.trim() || !targetText.trim()) return []
-    return alignCell(sourceText, targetText, alignmentModel, { threshold: CONFIDENCE_AMBER })
-  }, [alignmentModel, sourceText, targetText])
+    // FRO-241: threshold raised to CONFIDENCE_HIGH (0.6) so only high-confidence
+    // alignments are surfaced — low-confidence guesses from a small corpus are
+    // suppressed rather than presented as equivalent to confident ones.
+    return alignCell(sourceText, targetText, alignmentModel, { threshold: CONFIDENCE_HIGH })
+  }, [hasSufficientData, alignmentModel, sourceText, targetText])
+
+  // FRO-241 training loop fix: the amber band (0.3–0.6) was the primary path
+  // for small corpora to feed AlignmentSeeds back — raising the display floor
+  // to 0.6 severed it. Keep those links accessible via a collapsed disclosure
+  // so confirm/invalidate stays reachable without adding noise to the main view.
+  const amberLinks: AlignmentLink[] = useMemo(() => {
+    if (!hasSufficientData) return []
+    if (!alignmentModel || !sourceText.trim() || !targetText.trim()) return []
+    // Compute ALL links at the amber floor, then exclude the high-confidence ones
+    // already shown in the main section to avoid duplicates.
+    const allAmber = alignCell(sourceText, targetText, alignmentModel, { threshold: CONFIDENCE_AMBER })
+    const highKeys = new Set(links.map((l) => `${l.srcToken}|${l.tgtToken}`))
+    return allAmber.filter((l) => !highKeys.has(`${l.srcToken}|${l.tgtToken}`))
+  }, [hasSufficientData, alignmentModel, sourceText, targetText, links])
 
   const confirmedSet = useMemo(() => {
     const s = new Set<string>()
@@ -176,7 +216,6 @@ export function InterlinearAlignmentPanel({
   }, [confirmedSeeds])
 
   if (!alignmentModel) return null
-  if (links.length === 0) return null
 
   const handleConfirm = (link: AlignmentLink) => {
     confirmAlignment(link.srcToken, link.tgtToken, alignmentModel)
@@ -188,18 +227,51 @@ export function InterlinearAlignmentPanel({
     onSeedChange({ srcToken: link.srcToken, tgtToken: link.tgtToken, weight: -1 })
   }
 
-  const highLinks = links.filter((l) => l.confidence >= CONFIDENCE_HIGH)
-  const amberLinks = links.filter((l) => l.confidence >= CONFIDENCE_AMBER && l.confidence < CONFIDENCE_HIGH)
+  // FRO-241: insufficient-data empty state — shown instead of junk alignments
+  // when the project hasn't translated enough sentences for meaningful signal.
+  if (!hasSufficientData) {
+    return (
+      <div className="flex flex-col gap-1.5">
+        <div className="flex items-center gap-1">
+          {/* FRO-241: legend/help tooltip for the Alignment section */}
+          <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+            Alignment
+          </span>
+          <span
+            title="Word-level alignment links source and target tokens using a statistical model built from your translated cells. Confirm (✓) correct alignments to improve future back-translations; reject (✕) incorrect ones to penalize bad suggestions."
+            className="cursor-help text-muted-foreground/60 hover:text-muted-foreground"
+          >
+            <HelpCircle className="h-3 w-3" />
+          </span>
+        </div>
+        <p className="rounded-lg bg-muted/50 px-3 py-2.5 text-xs text-muted-foreground">
+          Keep translating — word-level alignments become meaningful once more sentences are validated.
+        </p>
+      </div>
+    )
+  }
+
+  // With sufficient data but no links in either band: hide the section entirely.
+  if (links.length === 0 && amberLinks.length === 0) return null
 
   return (
     <div className="flex flex-col gap-1.5">
-      <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-        Alignment
-      </span>
+      <div className="flex items-center gap-1">
+        {/* FRO-241: legend/help tooltip for the Alignment section (FRO-240: explains ✓/✕ controls) */}
+        <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+          Alignment
+        </span>
+        <span
+          title="Word-level alignment: the statistical model links source and target tokens based on your translated cells. Confirm (✓) correct pairs to teach the glosser; reject (✕) wrong ones to penalize them. Both actions improve future back-translations. Only high-confidence (≥60%) suggestions are shown."
+          className="cursor-help text-muted-foreground/60 hover:text-muted-foreground"
+        >
+          <HelpCircle className="h-3 w-3" />
+        </span>
+      </div>
 
-      {highLinks.length > 0 && (
+      {links.length > 0 && (
         <div className="flex flex-col gap-0.5">
-          {highLinks.map((link) => {
+          {links.map((link) => {
             const key = `${link.srcToken}|${link.tgtToken}`
             return (
               <AlignmentRow
@@ -215,25 +287,35 @@ export function InterlinearAlignmentPanel({
         </div>
       )}
 
+      {/* FRO-241 training loop fix: collapsed opt-in disclosure for the
+          amber band (0.3–0.6). Small corpora plateau below 0.6 and can
+          never train past it if confirm/invalidate is unreachable. The
+          disclosure is closed by default so it adds no visual noise for
+          projects with sufficient data — users who need to confirm weak
+          links can expand it. Count in the summary keeps them aware it
+          exists without forcing it on them. */}
       {amberLinks.length > 0 && (
-        <div className="flex flex-col gap-0.5">
-          <span className="text-[9px] uppercase tracking-wide text-amber-600 dark:text-amber-400">
-            Needs confirmation
-          </span>
-          {amberLinks.map((link) => {
-            const key = `${link.srcToken}|${link.tgtToken}`
-            return (
-              <AlignmentRow
-                key={key}
-                link={link}
-                confirmed={confirmedSet.has(key)}
-                invalidated={invalidatedSet.has(key)}
-                onConfirm={() => handleConfirm(link)}
-                onInvalidate={() => handleInvalidate(link)}
-              />
-            )
-          })}
-        </div>
+        <details className="rounded-md border border-amber-500/20 bg-amber-500/5">
+          <summary className="cursor-pointer select-none px-2 py-1 text-[10px] font-medium text-amber-700 dark:text-amber-400 hover:text-amber-800 dark:hover:text-amber-300 list-none flex items-center gap-1">
+            <span className="flex-1">Needs confirmation ({amberLinks.length})</span>
+            <span className="text-[9px] text-muted-foreground/60">30–59%</span>
+          </summary>
+          <div className="flex flex-col gap-0.5 px-1 pb-1.5 pt-0.5">
+            {amberLinks.map((link) => {
+              const key = `${link.srcToken}|${link.tgtToken}`
+              return (
+                <AlignmentRow
+                  key={key}
+                  link={link}
+                  confirmed={confirmedSet.has(key)}
+                  invalidated={invalidatedSet.has(key)}
+                  onConfirm={() => handleConfirm(link)}
+                  onInvalidate={() => handleInvalidate(link)}
+                />
+              )
+            })}
+          </div>
+        </details>
       )}
     </div>
   )

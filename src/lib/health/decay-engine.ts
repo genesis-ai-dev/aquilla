@@ -45,6 +45,14 @@ export const DEFAULT_ENDORSEMENT_TARGET = 5
 /** Decay above which the cell editor shows a "needs attention" marker. */
 export const DEFAULT_DECAY_WARN_THRESHOLD = 0.66
 
+/**
+ * FRO-232: user-visible status text shown in the cell popover when a cell
+ * needs attention due to insufficient validation in its passage context.
+ * Single source of truth — tested in decay-engine.test.ts.
+ */
+export const CELL_NEEDS_ATTENTION_STATUS =
+  "This cell's passage context hasn't been validated yet."
+
 export interface DecayConfig {
   endorsementTarget: number
   decayWarnThreshold: number

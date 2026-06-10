@@ -27,6 +27,14 @@ type SearchFn = (
 ) => Promise<ScoredPair[]>
 import type { CellData } from "./useCells"
 import { buildPrompt, buildBatchPrompt, complete, resolveProvider, DEFAULT_SYSTEM_PROMPT, collectValidatedPairs, type PassageExample } from "@/lib/completion/completion-service"
+import {
+  resetBatchCompletionState,
+  clearBatchCompletionProgress,
+  incrementBatchCompletionDone,
+  isBatchCompletionCancelled,
+  getBatchCompletionSignal,
+  cancelBatchCompletion,
+} from "@/lib/completion/batch-completion"
 import type { TranslationRule } from "@/lib/parsers/types"
 import type { PassageHit } from "./useSearchIndex"
 import { useFrontierHealth } from "@/lib/completion/frontier-health"
@@ -119,7 +127,7 @@ export function useCompletion(
   // with a clear "service unavailable" message — never to gate setup.
   const isAvailable = provider === "frontier" ? frontierAvailable : true
 
-  const completeSingle = useCallback(async (cell: CellData) => {
+  const completeSingle = useCallback(async (cell: CellData, signal?: AbortSignal) => {
     if (!isConfigured || !isAvailable) return
 
     setCompleting((p) => new Map(p).set(cell.id, "searching"))
@@ -162,6 +170,7 @@ export function useCompletion(
         onChunk: (text) => {
           setPreviews((p) => new Map(p).set(cell.id, text))
         },
+        signal,
       })
       posthog.capture("ai translation completed", {
         provider,
@@ -179,6 +188,13 @@ export function useCompletion(
       setPreviews((p) => { const m = new Map(p); m.delete(cell.id); return m })
       setCompleting((p) => { const m = new Map(p); m.delete(cell.id); return m })
     } catch (err) {
+      // AbortError: the user stopped the run — clear state without persisting
+      // an error entry (no stuck spinner, no error badge on the cell).
+      if (err instanceof DOMException && err.name === "AbortError") {
+        setPreviews((p) => { const m = new Map(p); m.delete(cell.id); return m })
+        setCompleting((p) => { const m = new Map(p); m.delete(cell.id); return m })
+        return
+      }
       posthog.captureException(err instanceof Error ? err : new Error(String(err)))
       setCompleting((p) => new Map(p).set(cell.id, "error"))
       setErrors((p) => new Map(p).set(cell.id, err instanceof Error ? err.message : "Failed"))
@@ -191,6 +207,13 @@ export function useCompletion(
   // alignment risk in exchange for cross-verse context. Cells whose tag is
   // missing/malformed in the response fall through to single-cell completion;
   // the batch as a whole does not fail.
+  //
+  // FRO-235: Integrated with batch-completion progress store. The banner shows
+  // progress and exposes a Stop button. Abort semantics:
+  //   - cancelBatchCompletion() sets the cancel flag AND calls AbortController.abort().
+  //   - The driver checks isBatchCompletionCancelled() before each chunk.
+  //   - The in-flight fetch/stream receives the AbortSignal and terminates immediately.
+  //   - Already-committed cells are unaffected; partial streaming text is discarded.
   const completeBatch = useCallback(async (cells: CellData[]) => {
     if (!isConfigured || !isAvailable) return
 
@@ -209,132 +232,214 @@ export function useCompletion(
       max_cells_per_call: MAX_CELLS_PER_CALL,
     })
 
+    // FRO-235 fix: resetBatchCompletionState supersedes any live run (cancels it)
+    // and returns a fresh run ID. Every flag check, increment, and the
+    // finally-clear pass this ID so a stale run cannot affect us.
+    const runId = resetBatchCompletionState(cells.length)
+
     let priorBatch: { source: string; target: string }[] = []
     const fallbackQueue: CellData[] = []
 
-    for (const chunk of chunks) {
-      for (const c of chunk) setCompleting((p) => new Map(p).set(c.id, "searching"))
-      const concatenated = chunk.map((c) => c.original).join(" ")
-      let passages: PassageHit[] = []
-      try {
-        passages = await searchPassages(concatenated, 3, 2)
-      } catch (err) {
-        console.warn("[useCompletion] passage retrieval failed:", err)
-      }
-      const flatExamples: ScoredPair[] = passages.flatMap((p) =>
-        p.cells.filter((c) => c.hit).map((c) => ({
-          cellId: c.cellId, fileId: p.fileId, source: c.source, target: c.target,
-          score: 1, matchedTokens: [], coverageWeight: 1,
-        }))
-      )
-      const llmAuthor = effectiveSettings.model || "frontier-default"
-      for (const c of chunk) {
-        setExamples((p) => new Map(p).set(c.id, flatExamples))
-        setCompleting((p) => new Map(p).set(c.id, "generating"))
-      }
+    try {
+      for (const chunk of chunks) {
+        // Stop starting new sub-batches if cancelled between chunks.
+        if (isBatchCompletionCancelled(runId)) break
 
-      const filledText = new Map<number, string>()
-      const completedRe = /<v(\d+)>([\s\S]*?)<\/v\1>/g
-      const consumeFull = (full: string) => {
-        completedRe.lastIndex = 0
-        let m: RegExpExecArray | null
-        while ((m = completedRe.exec(full)) !== null) {
-          const idx = Number(m[1])
-          if (filledText.has(idx)) continue
-          const cell = chunk[idx - 1]
-          if (!cell) continue
-          const text = m[2].trim()
-          setPreviews((p) => new Map(p).set(cell.id, text))
-          filledText.set(idx, text)
+        for (const c of chunk) setCompleting((p) => new Map(p).set(c.id, "searching"))
+        const concatenated = chunk.map((c) => c.original).join(" ")
+        let passages: PassageHit[] = []
+        try {
+          passages = await searchPassages(concatenated, 3, 2)
+        } catch (err) {
+          console.warn("[useCompletion] passage retrieval failed:", err)
         }
-      }
 
-      const examplesForPrompt: PassageExample[] = passages.map((p) => ({
-        cells: p.cells.map((c) => ({ source: c.source, target: c.target })),
-      }))
-      // Use the chunk's concatenated text as the relevance query so validated
-      // pairs about the same topic/terms are ranked highest.
-      const batchTopK = effectiveSettings.top_k ?? 5
-      const batchValidatedPairs = allCells
-        ? collectValidatedPairs(allCells, concatenated, batchTopK)
-        : []
-      const messages = buildBatchPrompt({
-        sourceLanguage, targetLanguage,
-        systemPrompt: effectiveSettings.systemPrompt || DEFAULT_SYSTEM_PROMPT,
-        cells: chunk.map((c) => ({ source: c.original })),
-        examples: examplesForPrompt,
-        priorBatch: priorBatch.length ? priorBatch : undefined,
-        rules,
-        validatedPairs: batchValidatedPairs,
-        exampleFormat: effectiveSettings.fewShotExampleFormat,
-      })
-
-      let result = ""
-      try {
-        result = await complete({
-          settings: effectiveSettings, session, messages,
-          stream: true,
-          onChunk: (full) => consumeFull(full),
-        })
-      } catch (err) {
-        // Whole sub-batch failed before any cell received content — mark every
-        // still-generating cell in this chunk as errored and stop. Don't
-        // advance to subsequent sub-batches: if the model/network is down
-        // there's no point trying again 30 cells later.
-        const msg = err instanceof Error ? err.message : "Failed"
-        for (let i = 0; i < chunk.length; i++) {
-          if (filledText.has(i + 1)) continue
-          const c = chunk[i]
-          setCompleting((p) => new Map(p).set(c.id, "error"))
-          setErrors((p) => new Map(p).set(c.id, msg))
-        }
-        posthog.captureException(err instanceof Error ? err : new Error(String(err)))
-        return
-      }
-
-      consumeFull(result)
-
-      for (let i = 0; i < chunk.length; i++) {
-        const cell = chunk[i]
-        const text = filledText.get(i + 1)
-        if (text !== undefined) {
-          if (commitCompletedCell) {
-            await commitCompletedCell(cell, text, llmAuthor)
+        // If we were superseded while awaiting searchPassages, bail out cleanly.
+        if (isBatchCompletionCancelled(runId)) {
+          for (const c of chunk) {
+            setPreviews((p) => { const m = new Map(p); m.delete(c.id); return m })
+            setCompleting((p) => { const m = new Map(p); m.delete(c.id); return m })
           }
-          // FRO-211: clear state once committed — no inline review step.
+          break
+        }
+
+        const flatExamples: ScoredPair[] = passages.flatMap((p) =>
+          p.cells.filter((c) => c.hit).map((c) => ({
+            cellId: c.cellId, fileId: p.fileId, source: c.source, target: c.target,
+            score: 1, matchedTokens: [], coverageWeight: 1,
+          }))
+        )
+        const llmAuthor = effectiveSettings.model || "frontier-default"
+        for (const c of chunk) {
+          setExamples((p) => new Map(p).set(c.id, flatExamples))
+          setCompleting((p) => new Map(p).set(c.id, "generating"))
+        }
+
+        const filledText = new Map<number, string>()
+        const completedRe = /<v(\d+)>([\s\S]*?)<\/v\1>/g
+        const consumeFull = (full: string) => {
+          completedRe.lastIndex = 0
+          let m: RegExpExecArray | null
+          while ((m = completedRe.exec(full)) !== null) {
+            const idx = Number(m[1])
+            if (filledText.has(idx)) continue
+            const cell = chunk[idx - 1]
+            if (!cell) continue
+            const text = m[2].trim()
+            setPreviews((p) => new Map(p).set(cell.id, text))
+            filledText.set(idx, text)
+          }
+        }
+
+        const examplesForPrompt: PassageExample[] = passages.map((p) => ({
+          cells: p.cells.map((c) => ({ source: c.source, target: c.target })),
+        }))
+        // Use the chunk's concatenated text as the relevance query so validated
+        // pairs about the same topic/terms are ranked highest.
+        const batchTopK = effectiveSettings.top_k ?? 5
+        const batchValidatedPairs = allCells
+          ? collectValidatedPairs(allCells, concatenated, batchTopK)
+          : []
+        const messages = buildBatchPrompt({
+          sourceLanguage, targetLanguage,
+          systemPrompt: effectiveSettings.systemPrompt || DEFAULT_SYSTEM_PROMPT,
+          cells: chunk.map((c) => ({ source: c.original })),
+          examples: examplesForPrompt,
+          priorBatch: priorBatch.length ? priorBatch : undefined,
+          rules,
+          validatedPairs: batchValidatedPairs,
+          exampleFormat: effectiveSettings.fewShotExampleFormat,
+        })
+
+        let result = ""
+        try {
+          result = await complete({
+            settings: effectiveSettings, session, messages,
+            stream: true,
+            onChunk: (full) => consumeFull(full),
+            // FRO-235 fix: getBatchCompletionSignal(runId) returns an
+            // already-aborted signal when this run has been superseded.
+            signal: getBatchCompletionSignal(runId),
+          })
+        } catch (err) {
+          // AbortError: user cancelled (or run superseded) — clear all
+          // still-pending cells cleanly.
+          if (err instanceof DOMException && err.name === "AbortError") {
+            for (let i = 0; i < chunk.length; i++) {
+              const c = chunk[i]
+              setPreviews((p) => { const m = new Map(p); m.delete(c.id); return m })
+              setCompleting((p) => { const m = new Map(p); m.delete(c.id); return m })
+            }
+            break
+          }
+          // Whole sub-batch failed before any cell received content — mark every
+          // still-generating cell in this chunk as errored and stop. Don't
+          // advance to subsequent sub-batches: if the model/network is down
+          // there's no point trying again 30 cells later.
+          const msg = err instanceof Error ? err.message : "Failed"
+          for (let i = 0; i < chunk.length; i++) {
+            if (filledText.has(i + 1)) continue
+            const c = chunk[i]
+            setCompleting((p) => new Map(p).set(c.id, "error"))
+            setErrors((p) => new Map(p).set(c.id, msg))
+          }
+          posthog.captureException(err instanceof Error ? err : new Error(String(err)))
+          return
+        }
+
+        consumeFull(result)
+
+        // FRO-235 fix: only commit and increment done when this run is still
+        // live. If superseded between the await and here, skip commits so the
+        // cancelled run does not persist AI text or inflate run B's counter.
+        if (isBatchCompletionCancelled(runId)) {
+          for (let i = 0; i < chunk.length; i++) {
+            const c = chunk[i]
+            setPreviews((p) => { const m = new Map(p); m.delete(c.id); return m })
+            setCompleting((p) => { const m = new Map(p); m.delete(c.id); return m })
+          }
+          break
+        }
+
+        for (let i = 0; i < chunk.length; i++) {
+          const cell = chunk[i]
+          const text = filledText.get(i + 1)
+          if (text !== undefined) {
+            if (commitCompletedCell) {
+              await commitCompletedCell(cell, text, llmAuthor)
+            }
+            // FRO-235 fix: after await, re-check — another Start could have
+            // superseded us during the commit. If so, do not increment or clear.
+            if (isBatchCompletionCancelled(runId)) {
+              setPreviews((p) => { const m = new Map(p); m.delete(cell.id); return m })
+              setCompleting((p) => { const m = new Map(p); m.delete(cell.id); return m })
+              // Clear remaining cells in this chunk then bail from the outer loop.
+              for (let j = i + 1; j < chunk.length; j++) {
+                const c = chunk[j]
+                setPreviews((p) => { const m = new Map(p); m.delete(c.id); return m })
+                setCompleting((p) => { const m = new Map(p); m.delete(c.id); return m })
+              }
+              break
+            }
+            // FRO-211: clear state once committed — no inline review step.
+            setPreviews((p) => { const m = new Map(p); m.delete(cell.id); return m })
+            setCompleting((p) => { const m = new Map(p); m.delete(cell.id); return m })
+            incrementBatchCompletionDone(runId)
+          } else {
+            fallbackQueue.push(cell)
+          }
+        }
+
+        // If we broke out of the inner loop due to supersession, stop chunks.
+        if (isBatchCompletionCancelled(runId)) break
+
+        // Carry the just-translated cells into the next sub-batch as continuity
+        // few-shot.
+        priorBatch = chunk
+          .map((c, i) => {
+            const t = filledText.get(i + 1)
+            return t ? { source: c.original, target: t } : null
+          })
+          .filter((x): x is { source: string; target: string } => x !== null)
+
+        posthog.capture("ai batch translation chunk completed", {
+          provider,
+          model: effectiveSettings.model || "frontier-default",
+          cell_count: chunk.length,
+          filled_count: filledText.size,
+          fallback_count: chunk.length - filledText.size,
+          example_count: flatExamples.length,
+          validated_pair_count: batchValidatedPairs.length,
+          rule_count: (rules ?? []).filter((r) => r.enabled).length,
+        })
+      }
+
+      // Per-cell fallback for any cells whose <vN> never closed — only if not cancelled.
+      if (!isBatchCompletionCancelled(runId)) {
+        for (const cell of fallbackQueue) {
+          if (isBatchCompletionCancelled(runId)) break
+          // FRO-235 fix: thread the batch signal into completeSingle so it is
+          // visible to Stop during a batch. getBatchCompletionSignal(runId)
+          // returns an already-aborted signal if this run has been superseded.
+          await completeSingle(cell, getBatchCompletionSignal(runId))
+          // Only increment if the run is still live after the await.
+          if (!isBatchCompletionCancelled(runId)) {
+            incrementBatchCompletionDone(runId)
+          }
+        }
+      } else {
+        // Clear pending fallback cells without erroring them.
+        for (const cell of fallbackQueue) {
           setPreviews((p) => { const m = new Map(p); m.delete(cell.id); return m })
           setCompleting((p) => { const m = new Map(p); m.delete(cell.id); return m })
-        } else {
-          fallbackQueue.push(cell)
         }
       }
-
-      // Carry the just-translated cells into the next sub-batch as continuity
-      // few-shot.
-      priorBatch = chunk
-        .map((c, i) => {
-          const t = filledText.get(i + 1)
-          return t ? { source: c.original, target: t } : null
-        })
-        .filter((x): x is { source: string; target: string } => x !== null)
-
-      posthog.capture("ai batch translation chunk completed", {
-        provider,
-        model: effectiveSettings.model || "frontier-default",
-        cell_count: chunk.length,
-        filled_count: filledText.size,
-        fallback_count: chunk.length - filledText.size,
-        example_count: flatExamples.length,
-        validated_pair_count: batchValidatedPairs.length,
-        rule_count: (rules ?? []).filter((r) => r.enabled).length,
-      })
-    }
-
-    // Per-cell fallback for any cells whose <vN> never closed.
-    for (const cell of fallbackQueue) {
-      await completeSingle(cell)
+    } finally {
+      // FRO-235 fix: clearBatchCompletionProgress(runId) is a no-op when runId
+      // !== _currentRunId — a finishing run A cannot null run B's banner.
+      clearBatchCompletionProgress(runId)
     }
   }, [effectiveSettings, isConfigured, isAvailable, sourceLanguage, targetLanguage, searchPassages, session, provider, completeSingle, commitCompletedCell, rules, allCells])
 
-  return { completeSingle, completeBatch, isConfigured, isAvailable, completing, examples, errors, previews }
+  return { completeSingle, completeBatch, cancelCompletion: cancelBatchCompletion, isConfigured, isAvailable, completing, examples, errors, previews }
 }

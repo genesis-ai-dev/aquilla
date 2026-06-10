@@ -144,6 +144,51 @@ export async function removeProjectMember(
   }
 }
 
+export interface RevokeAllResult {
+  /** True when a direct project_members row was deleted. */
+  removed: boolean
+  /**
+   * Every grant path the target had (including non-removable ones like org,
+   * group, creator). The UI uses this to inform the caller which paths still
+   * grant access even after the direct grant was removed.
+   */
+  grantPaths: Array<{
+    source: string
+    level: number
+    name: string
+    /** True iff this path was (or can be) removed by revoke-all. */
+    removable: boolean
+    /** Human-readable hint for non-removable paths. */
+    hint?: string
+  }>
+}
+
+/**
+ * POST /api/v2/projects/:projectId/members/:userId/revoke-all
+ *
+ * Removes the target user's direct project_members row and returns the full
+ * set of grant paths so the UI can explain which paths still grant access.
+ * Requires MAINTAINER (600)+ on the project. Throws on non-2xx.
+ */
+export async function revokeAllProjectAccess(
+  jwt: string,
+  projectId: string,
+  userId: number,
+): Promise<RevokeAllResult> {
+  const res = await fetch(
+    `${FRONTIER_BASE}/api/v2/projects/${encodeURIComponent(projectId)}/members/${userId}/revoke-all`,
+    {
+      method: "POST",
+      headers: authHeaders(jwt),
+    },
+  )
+  if (!res.ok) {
+    const text = await res.text()
+    throw new Error(`revokeAllProjectAccess failed: HTTP ${res.status} — ${text}`)
+  }
+  return (await res.json()) as RevokeAllResult
+}
+
 export interface RemoteProjectCreateResult {
   id: string
   name: string

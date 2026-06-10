@@ -17,7 +17,7 @@ import { useProjectPermissions } from "@/hooks/useProjectPermissions"
 import { emitTargetCellCommit, emitCellValidate, emitCellUnvalidate, emitCellWaive, emitCellUnwaive } from "@/lib/sync/events-emit"
 import { ExamplePanel } from "./ExamplePanel"
 import { HighlightedText, buildHighlightsFromExamples } from "./HighlightedText"
-import { needsAttention, resolveDecayConfig } from "@/lib/health/decay-engine"
+import { needsAttention, resolveDecayConfig, CELL_NEEDS_ATTENTION_STATUS } from "@/lib/health/decay-engine"
 import { readValidationCount } from "@/lib/progress/read-validation-count"
 import { StaleSourceIndicator } from "./StaleSourceIndicator"
 import { HealthRing } from "./HealthRing"
@@ -48,7 +48,9 @@ import { CellAiStatusPopover } from "./CellAiStatusPopover"
 import { CellNumberPill } from "./cell/CellNumberPill"
 import { InterlinearAlignmentPanel } from "./InterlinearAlignmentPanel"
 import { CellVoicePanel } from "./cell/CellVoicePanel"
-import { CellAudioRecordButton } from "./CellAudioRecordButton"
+// CellAudioRecordButton: getUnsupportedReason used by the rail mic denied-help
+// popover (FRO-237). The component itself is no longer in the overflow popover.
+import { getUnsupportedReason } from "./CellAudioRecordButton"
 import { useMicPermission } from "@/hooks/useMicPermission"
 import { assignedCastVoiceId, findVoice } from "@/lib/audio/voices"
 import { useNavigate } from "react-router-dom"
@@ -62,6 +64,7 @@ import { TermLookupPopover } from "./TermLookupPopover"
 import type { Concept } from "@/lib/terminology/types"
 import { PreAcceptanceWarningBand } from "./PreAcceptanceWarningBand"
 import { detectPreAcceptanceWarnings } from "@/lib/terminology/preacceptance"
+import { useFileFontSize, setFileViewPref, MIN_FONT_SIZE, MAX_FONT_SIZE, FONT_SIZE_STEP } from "@/lib/store/file-view-prefs"
 
 // Per-row render counter. Always accumulated when perf logging is on (cheap)
 // but NOT auto-logged — render logs would flood the console and push the
@@ -542,6 +545,29 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
 
   const ruleMap = useMemo(() => new Map(rules.map((r) => [r.id, r])), [rules])
 
+  // FRO-251: per-file font size. Persisted in localStorage keyed by fileId.
+  const editorFileId = cells[0]?.fileId ?? null
+  const fontSize = useFileFontSize(editorFileId)
+
+  // FRO-250: sticky chapter indicator. Derives the "current section" label from
+  // the first visible virtual item so the reader always knows which chapter/
+  // section they're in without scrolling back to a section heading.
+  const sectionByIndex = useMemo(() => {
+    const out: string[] = []
+    let lastLabel = ""
+    for (const cell of displayCells) {
+      const firstRef = cell.globalReferences?.find((r) => r && r.trim().length > 0)
+      if (firstRef) {
+        const colon = firstRef.indexOf(":")
+        lastLabel = (colon >= 0 ? firstRef.slice(0, colon) : firstRef).trim()
+      } else if (cell.section?.trim()) {
+        lastLabel = cell.section.trim()
+      }
+      out.push(lastLabel)
+    }
+    return out
+  }, [displayCells])
+
   const virtualizer = useVirtualizer({
     count: displayCells.length,
     getScrollElement: () => parentRef.current,
@@ -837,27 +863,79 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     return cellsRef.current.slice(startIndex, startIndex + count)
   }, [])
 
+  // FRO-250: derive the current section label from the first row whose top
+  // edge is at or past the current scroll position. Using getVirtualItems()[0]
+  // is wrong because the virtualizer pre-renders overscan rows ABOVE the
+  // viewport — that item can be a full chapter above the visible area, making
+  // the sticky label lag by ~one chapter at section boundaries.
+  // getVirtualItemForOffset(scrollOffset) returns the item that spans that
+  // pixel, giving us the true first-visible row without overscan noise.
+  const scrollOffset = virtualizer.scrollOffset ?? 0
+  const firstVisibleItem = virtualizer.getVirtualItemForOffset(scrollOffset)
+  const firstVisibleIndex = firstVisibleItem?.index ?? 0
+  const currentSectionLabel = sectionByIndex[firstVisibleIndex] ?? ""
+
   return (
     <div ref={parentRef} className="h-full overflow-auto" onMouseUp={handleMouseUp}>
-      <div className={cn("sticky top-0 z-10 grid gap-2 border-b border-border bg-background px-4 py-2 text-xs font-medium uppercase tracking-wide text-muted-foreground", gridCols)}>
-        <div />
-        {/* In Audio mode the left column carries per-line voice controls, not
-            source text, so label it "Controls" (no source-language badge). */}
-        <div className="flex items-center gap-2">
-          {audioLens ? "Controls" : "Source"}
-          {!audioLens && project.sourceLanguage && (
-            <span className="rounded-full bg-muted px-2 py-0.5 text-[10px] font-normal normal-case tracking-normal text-muted-foreground">
-              {project.sourceLanguage}
+      <div className="sticky top-0 z-10 bg-background">
+        {/* FRO-250: sticky section/chapter indicator strip. Appears above the
+            column header when the file has section-tagged cells. Keeps the
+            reader oriented while scrolling through long Bible chapters. */}
+        {currentSectionLabel && (
+          <div className="flex items-center gap-1.5 border-b border-border/40 px-4 py-0.5">
+            <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/60">
+              {currentSectionLabel}
             </span>
-          )}
-        </div>
-        <div className="flex items-center gap-2 pl-3">
-          Target
-          {project.targetLanguage && (
-            <span className="rounded-full bg-muted px-2 py-0.5 text-[10px] font-normal normal-case tracking-normal text-muted-foreground">
-              {project.targetLanguage}
-            </span>
-          )}
+          </div>
+        )}
+        <div className={cn("grid gap-2 border-b border-border px-4 py-2 text-xs font-medium uppercase tracking-wide text-muted-foreground", gridCols)}>
+          <div />
+          {/* In Audio mode the left column carries per-line voice controls, not
+              source text, so label it "Controls" (no source-language badge). */}
+          <div className="flex items-center gap-2">
+            {audioLens ? "Controls" : "Source"}
+            {!audioLens && project.sourceLanguage && (
+              <span className="rounded-full bg-muted px-2 py-0.5 text-[10px] font-normal normal-case tracking-normal text-muted-foreground">
+                {project.sourceLanguage}
+              </span>
+            )}
+          </div>
+          <div className="flex items-center gap-2 pl-3">
+            Target
+            {project.targetLanguage && (
+              <span className="rounded-full bg-muted px-2 py-0.5 text-[10px] font-normal normal-case tracking-normal text-muted-foreground">
+                {project.targetLanguage}
+              </span>
+            )}
+            {/* FRO-251: per-file font size control — pinned to right end of
+                Target label row so it stays accessible without crowding column
+                headers. */}
+            {editorFileId && (
+              <span className="ml-auto flex items-center gap-1 normal-case tracking-normal font-normal">
+                <button
+                  type="button"
+                  aria-label="Decrease font size"
+                  title="Decrease font size"
+                  disabled={fontSize <= MIN_FONT_SIZE}
+                  onClick={() => setFileViewPref(editorFileId, { fontSize: Math.max(MIN_FONT_SIZE, fontSize - FONT_SIZE_STEP) })}
+                  className="flex h-5 w-5 items-center justify-center rounded hover:bg-muted/80 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                >
+                  <span className="text-[11px] leading-none select-none">A−</span>
+                </button>
+                <span className="tabular-nums text-[10px] text-muted-foreground w-7 text-center">{fontSize}px</span>
+                <button
+                  type="button"
+                  aria-label="Increase font size"
+                  title="Increase font size"
+                  disabled={fontSize >= MAX_FONT_SIZE}
+                  onClick={() => setFileViewPref(editorFileId, { fontSize: Math.min(MAX_FONT_SIZE, fontSize + FONT_SIZE_STEP) })}
+                  className="flex h-5 w-5 items-center justify-center rounded hover:bg-muted/80 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                >
+                  <span className="text-[11px] leading-none select-none">A+</span>
+                </button>
+              </span>
+            )}
+          </div>
         </div>
       </div>
 
@@ -955,6 +1033,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
                 getTokenForFile={getTokenForFile}
                 alignmentModel={alignmentModel}
                 onAlignmentSeedChange={onAlignmentSeedChange}
+                fontSize={fontSize}
               />
             </div>
           )
@@ -1051,6 +1130,8 @@ interface MemoizedRowProps {
   alignmentModel?: import("@/lib/completion/interlinear").AlignmentModel | null
   /** FRO-207: Called when user confirms/invalidates an alignment. */
   onAlignmentSeedChange?: (seed: import("@/lib/completion/interlinear").AlignmentSeed) => void
+  /** FRO-251: per-file font size in px. Defaults to 14 when absent. */
+  fontSize?: number
 }
 
 const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
@@ -1065,6 +1146,7 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
     getTokenForFile,
     alignmentModel,
     onAlignmentSeedChange,
+    fontSize,
     project, username, editable, isCompletionConfigured, isCompletionAvailable,
     ruleMap, onCompleteSingle, onInfractionClick,
     isBacktranslationConfigured, onBacktranslate, onSaveBacktranslation,
@@ -1195,6 +1277,7 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
         onClaimCell={onClaimCell}
         onReleaseCell={onReleaseCell}
         onAckRemoteChange={onAckRemoteChange}
+        fontSize={fontSize}
       />
     </div>
   )
@@ -1272,6 +1355,8 @@ interface EditorRowProps {
   onAddConceptFromSelection?: (sourceTerm: string) => void | Promise<void>
   onAssignVoice?: (cellId: string, voiceId: string) => void
   getTokenForFile?: (fileId: string) => Promise<string | null>
+  /** FRO-251: per-file font size in px. Defaults to 14 when absent. */
+  fontSize?: number
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -1404,6 +1489,7 @@ function EditorRow({
   getTokenForFile,
   alignmentModel,
   onAlignmentSeedChange,
+  fontSize = 14,
 }: EditorRowProps) {
   const [openRuleId, setOpenRuleId] = useState<string | null>(null)
   const [openRuleAnchor, setOpenRuleAnchor] = useState<HTMLElement | null>(null)
@@ -1421,6 +1507,9 @@ function EditorRow({
   const pendingTargetEventIdRef = useRef<string | null>(cell.targetEventId ?? null)
   /** voice-chip drag-over state: the voiceId being dragged over this cell's audio area */
   const [dragOverVoiceId, setDragOverVoiceId] = useState<string | null>(null)
+  // FRO-237: mic-denied help popover state — rendered as an inline popover so
+  // the rail button stays ENABLED when mic is blocked and routes click here.
+  const [showMicDeniedHelp, setShowMicDeniedHelp] = useState(false)
 
   useEffect(() => {
     if (cell.targetEventId) pendingTargetEventIdRef.current = cell.targetEventId
@@ -1573,6 +1662,21 @@ function EditorRow({
     setSourceSelection(null)
     window.getSelection()?.removeAllRanges()
   }, [sourceSelection, onAddConceptFromSelection])
+
+  // FRO-248: clear source selection when the browser selection collapses (user
+  // clicked elsewhere or selected text in a different row). This prevents the
+  // "Add to termbase" toolbar from floating over a different row's content.
+  useEffect(() => {
+    if (!sourceSelection) return
+    const handleSelectionChange = () => {
+      const sel = window.getSelection()
+      if (!sel || sel.isCollapsed || sel.toString().trim() === "") {
+        setSourceSelection(null)
+      }
+    }
+    document.addEventListener("selectionchange", handleSelectionChange)
+    return () => document.removeEventListener("selectionchange", handleSelectionChange)
+  }, [sourceSelection])
 
   // Slice 4: advisory pre-acceptance terminology warnings for the AI copilot.
   // Computed against the completion text (the streaming preview while loading,
@@ -1879,7 +1983,7 @@ function EditorRow({
             <li className="flex items-start gap-1.5 px-1 py-1 text-xs">
               <span aria-hidden className="mt-1 h-1.5 w-1.5 shrink-0 rounded-full bg-amber-500" />
               <span className="flex-1 text-muted-foreground">
-                Neighborhood not yet validated — needs attention.
+                {CELL_NEEDS_ATTENTION_STATUS}
               </span>
             </li>
           )}
@@ -2020,6 +2124,9 @@ function EditorRow({
     const next = e.relatedTarget as Node | null
     if (next && rowRef.current?.contains(next)) return
     setHasFocusWithin(false)
+    // FRO-248: clear source-text selection when focus leaves this row so the
+    // "Add to termbase" toolbar never floats over a different row's content.
+    setSourceSelection(null)
   }
   const handleRowClick = (e: React.MouseEvent) => {
     // Cmd/Ctrl-click → toggle multi-select. Wins even over text editors and
@@ -2239,6 +2346,7 @@ function EditorRow({
               isSynthBusy && "opacity-70",
             )}
             dir={sourceTextDirection}
+            style={{ fontSize: `${fontSize}px`, lineHeight: "1.6" }}
             onMouseUp={onAddConceptFromSelection ? handleSourceMouseUp : undefined}
           >
             {/* Slice 5: add-from-selection affordance. Appears when a source
@@ -2305,6 +2413,7 @@ function EditorRow({
             isSynthBusy && "opacity-70",
           )}
           dir={targetTextDirection}
+          style={{ fontSize: `${fontSize}px`, lineHeight: "1.6" }}
         >
           {/* SWARM-TODO(voice-a5): "Voice together" multi-cell selection gives
               no visual feedback and the action bar never appears. Root cause:
@@ -2511,15 +2620,79 @@ function EditorRow({
                 onMouseEnter={onDragEnter}
               />
 
-              {/* ⋯ overflow — play/record, TTS, comments, seek-to-cue */}
-              {(hasAudio || onOpenRecording || (cell.translated.trim().length > 0) || onOpenComments || onSeekToCue) && (
+              {/* FRO-237: Direct mic button on the rail when no audio — one-click
+                  action without needing to open a popover ("just hit the record
+                  mic — quick action"). Replaces the redundant Record item inside
+                  the ⋯ popover. When audio IS present, FRO-236's Play icon on
+                  the overflow button already gives a direct play affordance.
+                  WARN fix: the button must NOT be disabled when micDenied —
+                  disabled elements receive no mouse events, so the "click for
+                  help" affordance is unreachable. Instead keep it enabled and
+                  route clicks to the denied-help popover. */}
+              {!hasAudio && onOpenRecording && editable && (() => {
+                const unsupportedReason = getUnsupportedReason()
+                const isUnsupported = unsupportedReason !== null
+                const micTooltip = micDenied
+                  ? "Microphone access blocked — click for help"
+                  : isUnsupported
+                    ? `Recording unavailable — ${unsupportedReason}`
+                    : "Record audio"
+                return (
+                  <div className="relative">
+                    <RailButton
+                      icon={<Mic className="h-3.5 w-3.5" />}
+                      tooltip={micTooltip}
+                      onClick={() => {
+                        if (micDenied) { setShowMicDeniedHelp((v) => !v); return }
+                        if (!isUnsupported) onOpenRecording(cell.id)
+                      }}
+                      toneClass={
+                        micDenied
+                          ? "text-amber-500/70 hover:text-amber-500"
+                          : isUnsupported
+                            ? "cursor-not-allowed text-muted-foreground/30"
+                            : undefined
+                      }
+                      // NEVER disable when micDenied — that kills mouse events
+                      // and makes the help popover unreachable.
+                      disabled={isUnsupported && !micDenied}
+                    />
+                    {/* Mic-denied help popover — replicates CellAudioRecordButton's
+                        pattern so behaviour is consistent across the two surfaces. */}
+                    {micDenied && showMicDeniedHelp && (
+                      <span
+                        role="tooltip"
+                        className="absolute bottom-full right-0 z-50 mb-1 w-52 rounded-md border bg-popover px-3 py-2 text-[11px] leading-snug text-popover-foreground shadow-md"
+                      >
+                        <strong className="block font-semibold">Microphone blocked</strong>
+                        <span className="mt-0.5 block text-muted-foreground">
+                          Open your browser&apos;s site settings (🔒 in the address bar) and allow microphone access, then reload the page.
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => setShowMicDeniedHelp(false)}
+                          className="mt-1.5 text-[10px] underline text-muted-foreground hover:text-foreground"
+                        >
+                          Dismiss
+                        </button>
+                      </span>
+                    )}
+                  </div>
+                )
+              })()}
+
+              {/* ⋯ overflow — play/record (when audio), TTS, comments, seek-to-cue.
+                  FRO-236: when there's recorded audio, show a Play icon with
+                  an emerald dot so the audio affordance is visible at-a-glance
+                  without opening the popover. */}
+              {(hasAudio || (cell.translated.trim().length > 0) || onOpenComments || onSeekToCue) && (
                 <Popover>
                   <PopoverTrigger
                     render={
                       <button
                         type="button"
                         aria-label="More cell actions"
-                        title="More actions"
+                        title={hasAudio ? "More actions (has recorded audio)" : "More actions"}
                         className={cn(
                           "flex h-6 w-6 items-center justify-center rounded-full",
                           "transition-[transform,color,background-color] duration-150 ease-out",
@@ -2530,20 +2703,34 @@ function EditorRow({
                             : "text-muted-foreground/70 hover:text-foreground",
                         )}
                       >
-                        <MoreHorizontal className="h-3.5 w-3.5" />
-                        {openCommentCount > 0 && (
+                        {hasAudio ? (
+                          <Play className="h-3.5 w-3.5" />
+                        ) : (
+                          <MoreHorizontal className="h-3.5 w-3.5" />
+                        )}
+                        {/* Comments dot takes priority (more urgent). Audio dot
+                            is emerald — distinct from primary/amber/red. */}
+                        {openCommentCount > 0 ? (
                           <span
                             aria-hidden
                             className="pointer-events-none absolute right-0.5 top-0.5 h-1.5 w-1.5 rounded-full bg-primary ring-2 ring-background"
                           />
-                        )}
+                        ) : hasAudio ? (
+                          <span
+                            aria-hidden
+                            title="Recorded audio attached"
+                            className="pointer-events-none absolute right-0.5 top-0.5 h-1.5 w-1.5 rounded-full bg-emerald-500 ring-2 ring-background"
+                          />
+                        ) : null}
                       </button>
                     }
                   />
                   <PopoverContent side="bottom" align="end" className="w-48 rounded-xl p-1.5">
                     <div className="flex flex-col gap-0.5">
-                      {/* Play / Record */}
-                      {hasAudio ? (
+                      {/* Play — only shown when audio exists (FRO-237: record
+                          moved to a direct rail button so the popover stays
+                          uncluttered). */}
+                      {hasAudio && (
                         <button
                           type="button"
                           onClick={() => {
@@ -2552,6 +2739,7 @@ function EditorRow({
                             else void audioController.play()
                           }}
                           disabled={audioController.state === "loading"}
+                          aria-label={audioController.isPlaying ? "Pause audio" : "Play audio"}
                           className={cn(
                             "flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-xs",
                             "hover:bg-muted/60 disabled:cursor-not-allowed disabled:opacity-40",
@@ -2565,16 +2753,7 @@ function EditorRow({
                           )}
                           {audioController.isPlaying ? "Pause" : "Play audio"}
                         </button>
-                      ) : onOpenRecording ? (
-                        <div className="flex items-center gap-2 rounded-lg px-2 py-0.5">
-                          <CellAudioRecordButton
-                            onOpenRecording={() => onOpenRecording(cell.id)}
-                            disabled={!editable || !onOpenRecording}
-                            micDenied={micDenied}
-                          />
-                          <span className="text-xs text-foreground">Record audio</span>
-                        </div>
-                      ) : null}
+                      )}
 
                       {/* TTS */}
                       {cell.translated.trim().length > 0 && (

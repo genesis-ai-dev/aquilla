@@ -7,6 +7,8 @@ import { WorkspaceSkeleton } from "./WorkspaceSkeleton"
 import { TabStrip } from "./TabStrip"
 import { useWorkspaceTabs, readLastActiveFileId } from "@/hooks/useWorkspaceTabs"
 import { readLastLocation, writeLastLocation } from "@/lib/frontier/last-location-store"
+import { ROLE } from "@/lib/frontier/roles"
+import { languagesEqual } from "@/lib/language-normalize"
 import { useCells } from "@/hooks/useCells"
 import { useStaleSourceCells } from "@/hooks/useStaleSourceCells"
 import { useSearchIndex } from "@/hooks/useSearchIndex"
@@ -98,6 +100,7 @@ import { readValidationCount } from "@/lib/progress/read-validation-count"
 import { useSetupChecklist } from "@/hooks/useSetupChecklist"
 import { SetupChecklistDrawer } from "./onboarding/SetupChecklistDrawer"
 import { SystemPromptNudge } from "./onboarding/SystemPromptNudge"
+import { CompletionBulkProgressBanner } from "./CompletionBulkProgressBanner"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { NextUnfinishedButton } from "./NextUnfinishedButton"
 import { useNextUnfinished } from "@/hooks/useNextUnfinished"
@@ -127,6 +130,48 @@ const ImportDialog = lazy(() =>
 const ExportDialog = lazy(() =>
   import("./ExportDialog").then((mod) => ({ default: mod.ExportDialog })),
 )
+
+// FRO-254: In-project views rendered inside the editor shell. Lazy-loaded so
+// the heavy workspace chunk doesn't pull them in for every route.
+const CommentsPageContent = lazy(() =>
+  import("./CommentsPage").then((mod) => ({ default: mod.CommentsPage })),
+)
+const LivingMemoryPageContent = lazy(() =>
+  import("./LivingMemoryPage").then((mod) => ({ default: mod.LivingMemoryPage })),
+)
+const TerminologyPageContent = lazy(() =>
+  import("./TerminologyPage").then((mod) => ({ default: mod.TerminologyPage })),
+)
+// FRO-180: per-project members management surface.
+const ProjectMembersPageContent = lazy(() =>
+  import("./ProjectMembersPage").then((mod) => ({ default: mod.ProjectMembersPage })),
+)
+
+// FRO-249 fix (Fix 2): module-level promise chain that serializes
+// handleImported's getProject→updateProject read-modify-write so that
+// concurrent imports don't race and the last write doesn't silently drop
+// earlier refs. This is module-scoped (not component-scoped) deliberately —
+// a single ProjectWorkspace is mounted at a time and the chain must survive
+// between React re-renders.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+let _lastImportWrite: Promise<any> = Promise.resolve(undefined)
+
+// ── FRO-234: pure guard — exported for unit testing ───────────────────────────
+/**
+ * Returns true iff the completion-settings save should actually patch
+ * systemPrompt on the server. Guards against two failure modes:
+ *   1. Empty-prompt clobber: buildCompletionSettings() materialises "" by
+ *      default, so provider-only saves would erase the server prompt.
+ *   2. Under-MAINTAINER write: sub-600 callers 403 server-side; skipping
+ *      avoids IDB/server divergence (same floor as handleImported).
+ */
+export function shouldPatchSystemPrompt(
+  systemPrompt: string | null | undefined,
+  roleLevel: number,
+): boolean {
+  if (!systemPrompt || systemPrompt.trim().length === 0) return false
+  return roleLevel >= ROLE.MAINTAINER
+}
 
 export function ProjectWorkspace() {
   const { id: projectId, fileId: routeFileId } = useParams<{ id: string; fileId?: string }>()
@@ -160,6 +205,15 @@ export function ProjectWorkspace() {
   // across reloads would need server backing; the in-session state is what the
   // X button and "apply" flows actually need.)
   const [suggestionsDismissed, setSuggestionsDismissed] = useState(false)
+  // FRO-249/FRO-255 fix (Fix 4): transient notice shown when the user explicitly
+  // confirmed a direction but their role is below MAINTAINER (600) so the change
+  // could not be saved project-wide. Auto-dismissed after 6 s.
+  const [directionRoleNotice, setDirectionRoleNotice] = useState<string | null>(null)
+  useEffect(() => {
+    if (!directionRoleNotice) return
+    const t = setTimeout(() => setDirectionRoleNotice(null), 6000)
+    return () => clearTimeout(t)
+  }, [directionRoleNotice])
   useEffect(() => {
     optimisticFileIdsRef.current = new Set()
     setOptimisticFiles([])
@@ -268,12 +322,17 @@ export function ProjectWorkspace() {
   useEffect(() => {
     if (!project || !projectId) return
 
-    // The /rules surface deliberately has no file in the URL — don't treat it
-    // as "no file selected" and bounce back to the editor, or the Rules surface
-    // becomes unreachable. (The header Editor/Rules toggle was removed; the
-    // bottom-left Rules nav is the only entry point, so this redirect must not
-    // fight it.)
-    if (location.pathname.endsWith("/rules")) return
+    // The in-project overlay surfaces (/rules, /comments, /memory, /terminology,
+    // /members) deliberately carry no file in the URL — don't treat that as
+    // "no file selected" and bounce back to the editor, or these surfaces become
+    // unreachable. (FRO-194 added /rules; FRO-254 adds the others; FRO-180 adds /members.)
+    if (
+      location.pathname.endsWith("/rules") ||
+      location.pathname.endsWith("/comments") ||
+      location.pathname.endsWith("/memory") ||
+      location.pathname.endsWith("/terminology") ||
+      location.pathname.endsWith("/members")
+    ) return
 
     // A file is already in the URL: leave it unless the project genuinely
     // doesn't have it (and it isn't a still-pending optimistic import).
@@ -328,11 +387,17 @@ export function ProjectWorkspace() {
   const [drawerRuleId, setDrawerRuleId] = useState<string | null>(null)
   const [searchParams] = useSearchParams()
 
-  // Center surface — "editor" or "rules". Derived from the URL path so
-  // /project/:id/rules deep-links work and the shell never unmounts. The
-  // bottom-left sidebar Rules nav item drives navigation here (the header
-  // toggle was removed — see FRO-194 follow-up).
-  const centerSurface: "editor" | "rules" = location.pathname.endsWith("/rules") ? "rules" : "editor"
+  // Center surface — derived from the URL path so deep-links work and the
+  // shell (sidebar + top bar + bottom status bar) never unmounts.
+  // FRO-194 added "rules"; FRO-254 adds "comments", "memory", "terminology";
+  // FRO-180 adds "members".
+  const centerSurface: "editor" | "rules" | "comments" | "memory" | "terminology" | "members" =
+    location.pathname.endsWith("/rules") ? "rules" :
+    location.pathname.endsWith("/comments") ? "comments" :
+    location.pathname.endsWith("/memory") ? "memory" :
+    location.pathname.endsWith("/terminology") ? "terminology" :
+    location.pathname.endsWith("/members") ? "members" :
+    "editor"
 
   useEffect(() => {
     const open = searchParams.get("openRule")
@@ -750,7 +815,17 @@ export function ProjectWorkspace() {
     requestPromotion,
     patch: patchOrgSettings,
     version: orgSettingsVersion,
-  } = useOrgSettings(activeOrg?.id, activeOrg?.role?.level)
+    canExport: canExportByOrgPolicy,
+    hasFetched: orgSettingsFetched,
+  } = useOrgSettings(
+    activeOrg?.id,
+    activeOrg?.role?.level,
+    // FRO-253 WARN fix: compare the project-resolved role (AD-12 max-wins), not
+    // the raw org role. A user with org VIEWER + direct project MAINTAINER grant
+    // must pass a floor of MAINTAINER. syncRole.level is the max-wins result
+    // written by the sync-token onRole callback above.
+    project?.syncRole?.level ?? null,
+  )
 
   // FRO-194: also destructure rule CRUD for RulesSurface (patchSettings is the
   // sync function; it matches the PatchSharedFn signature from useProjectSettings).
@@ -764,6 +839,7 @@ export function ProjectWorkspace() {
     comments: allProjectComments,
     addComment: addCommentEvent,
     resolveThread: resolveCommentThread,
+    refresh: refreshComments,
   } = useComments({
     projectId: project?.id ?? null,
     getToken: getTokenForFile,
@@ -787,9 +863,42 @@ export function ProjectWorkspace() {
     })
   }, [project?.id, activeFileId, addCommentEvent])
 
-  const resolveThread = useCallback(async (_cellId: string, threadId: string, _msg?: string) => {
+  const resolveThread = useCallback(async (cellId: string, threadId: string, msg?: string) => {
+    if (!project?.id) return
+    // FRO-252 fix: derive the fileId from the thread's own record, not from
+    // activeFileId. Using activeFileId caused two bugs:
+    //   (a) Resolving with a reply from the /comments shell (no file open) dropped
+    //       the reply silently because activeFileId was null.
+    //   (b) The reply was scoped to the CURRENTLY OPEN file even when the thread
+    //       belonged to a different file.
+    // allProjectComments is from the same useComments instance, so the lookup
+    // is always consistent with the resolve event's target.
+    const threadRecord = allProjectComments.find((c) => c.commentId === threadId)
+    const threadFileId = threadRecord?.fileId ?? null
+
+    if (msg?.trim()) {
+      // Prefer the thread's own fileId; fall back to activeFileId as a last
+      // resort (e.g. the comment was created against the current file before
+      // the server confirmed its fileId into allProjectComments).
+      const replyFileId = threadFileId ?? activeFileId
+      if (replyFileId) {
+        await addCommentEvent({
+          scope: { kind: "cell", fileId: replyFileId, cellId },
+          body: msg.trim(),
+          parentCommentId: threadId,
+        })
+      } else {
+        // No fileId available — add as a project-scoped reply so the message
+        // is not silently lost.
+        await addCommentEvent({
+          scope: { kind: "project" },
+          body: msg.trim(),
+          parentCommentId: threadId,
+        })
+      }
+    }
     await resolveCommentThread(threadId, true)
-  }, [resolveCommentThread])
+  }, [project?.id, activeFileId, allProjectComments, addCommentEvent, resolveCommentThread])
 
   const reopenThread = useCallback(async (_cellId: string, threadId: string) => {
     await resolveCommentThread(threadId, false)
@@ -1443,6 +1552,15 @@ export function ProjectWorkspace() {
                 refresh()
                 return
               }
+              // FRO-228: comment.* events are non-chain-mutating and carry no
+              // cell in the WS frame. Refresh the comments projection so the
+              // server-persisted comment surfaces after the outbox flushes —
+              // especially important for remote collaborators who never had the
+              // optimistic state.
+              if (msg.kind?.startsWith("comment.") && msg.project === pid) {
+                void refreshComments()
+                return
+              }
               if (!msg.cell || msg.project !== pid) return
               // Targeted single-cell refetch — avoids re-streaming every
               // cell in the file for one remote change. Falls back to a
@@ -1584,9 +1702,18 @@ export function ProjectWorkspace() {
   const perms = useProjectPermissions(project)
   const isReadOnly = !perms.canEditContent
 
-  const { state: checklistState, dismissed: checklistDismissed, dismiss: dismissChecklist, refreshShares: refreshChecklistShares } = useSetupChecklist(project ?? null)
+  const { state: checklistState, dismissed: checklistDismissed, dismiss: dismissChecklist, refreshShares: refreshChecklistShares, shouldAutoOpen: checklistShouldAutoOpen, markAutoShown: markChecklistAutoShown } = useSetupChecklist(project ?? null)
   const [checklistOpen, setChecklistOpen] = useState(false)
   const [showChipTooltip, setShowChipTooltip] = useState(false)
+
+  // FRO-244: Auto-open the setup checklist once per project when the checklist
+  // is incomplete and has never been shown. markChecklistAutoShown() records the
+  // shown-once flag so subsequent visits / project switches don't re-nag.
+  useEffect(() => {
+    if (!checklistShouldAutoOpen) return
+    setChecklistOpen(true)
+    markChecklistAutoShown()
+  }, [checklistShouldAutoOpen, markChecklistAutoShown])
 
   const handleChecklistOpenChange = useCallback((next: boolean) => {
     setChecklistOpen(next)
@@ -1603,11 +1730,38 @@ export function ProjectWorkspace() {
     }
   }, [checklistDismissed, dismissChecklist])
 
-  const handleProjectUpdated = useCallback(async (_updated: ProjectRecord | undefined) => {
-    // The caller (useSaveCompletionSettings, etc.) already persisted to IDB.
-    // We just need to refresh the in-memory project state.
+  const handleProjectUpdated = useCallback(async (updated: ProjectRecord | undefined) => {
+    // FRO-234: When a step component saves (e.g. AiInstructionsStep via
+    // useSaveCompletionSettings), it writes to IDB and hands us the updated
+    // record. We must also push the change through patchSettings so that
+    // useProjectSettings.local reflects it — that overlay is what
+    // deriveChecklistState reads to compute aiInstructions. Without this call,
+    // the checklist step never flips to complete because useProject.refresh()
+    // fetches from the server (not IDB) and the server-overlay wins.
+    //
+    // WARN: only patch when the updated record carries a NON-EMPTY systemPrompt.
+    // buildCompletionSettings() materialises systemPrompt as "" by default, so a
+    // provider-only save (Device B changing the AI provider with no local prompt)
+    // would otherwise WIPE the server-side prompt project-wide.
+    //
+    // Also gate on MAINTAINER (600) — same floor as handleImported — so viewers
+    // and editors can't inadvertently overwrite project-wide settings they have
+    // no server authority to change.
+    const systemPrompt = updated?.completionSettings?.systemPrompt
+    const roleLevel = project?.syncRole?.level ?? 0
+    if (shouldPatchSystemPrompt(systemPrompt, roleLevel)) {
+      void patchSettings({ systemPrompt: systemPrompt! })
+    } else if (systemPrompt !== undefined && systemPrompt !== null && systemPrompt.trim().length === 0) {
+      // Empty prompt from a provider-only save — silently skip to avoid clobbering the server.
+    } else if (systemPrompt && roleLevel < ROLE.MAINTAINER) {
+      console.warn(
+        `[FRO-234] skipping systemPrompt patch — role ${roleLevel} is below server floor ${ROLE.MAINTAINER}. ` +
+        "A sub-MAINTAINER device cannot write project-wide AI instructions.",
+      )
+    }
+    // Also refresh the server-fetched base record so other fields stay in sync.
     refresh()
-  }, [refresh])
+  }, [refresh, patchSettings, project?.syncRole?.level])
 
   // All hooks below must live above the early return so hook count is stable
   // across renders (React throws "Rendered more hooks" otherwise).
@@ -1802,8 +1956,14 @@ export function ProjectWorkspace() {
   }, [project])
 
   const openExportFlow = useCallback(() => {
+    // FRO-253 (b fix): do NOT fire the action on an optimistic pre-fetch canExport value.
+    // The button may render optimistically (canExport=true before settings load) but the
+    // ACTION must wait until org settings have been fetched so we gate on the real floor.
+    if (!orgSettingsFetched) return
+    // If org policy disallows export (explicit floor set and user below it), no-op.
+    if (!canExportByOrgPolicy) return
     setExportOpen(true)
-  }, [])
+  }, [orgSettingsFetched, canExportByOrgPolicy])
 
   const actionArgs = useMemo(() => ({
     openImport: openImportFlow,
@@ -1914,25 +2074,125 @@ export function ProjectWorkspace() {
     )
   }
 
-  async function handleImported(refs: FileReference[]) {
+  async function handleImported(
+    refs: FileReference[],
+    inferredLanguages?: { sourceLanguage?: string; targetLanguage?: string; explicit?: boolean },
+  ) {
     if (!project) return
-    const localProject = await getProject(project.id).catch(() => undefined)
-    const baseProject = localProject ?? project
-    const nextFiles = [...baseProject.files]
-    const seenFileIds = new Set(nextFiles.map((file) => file.id))
-    for (const ref of refs) {
-      if (seenFileIds.has(ref.id)) continue
-      nextFiles.push(ref)
-      seenFileIds.add(ref.id)
+    // FRO-249 fix (Fix 2): serialize the read-modify-write through a module-level
+    // promise chain so concurrent imports don't race on the project.files array.
+    // Each call appends to _lastImportWrite; if the previous call fails the chain
+    // still proceeds (catch → undefined) so one bad import can't wedge all future ones.
+    // The chain resolves with the fresh baseProject so the language-seed block
+    // below (which also needs a fresh read) can reuse it without a second IDB call.
+    const projectSnapshot = project // capture before the await boundary
+    _lastImportWrite = _lastImportWrite
+      .catch(() => undefined) // absorb prior failures so the chain is never stuck
+      .then(async () => {
+        // WARN a fix: read fresh project state rather than the render-closure value —
+        // imports can take minutes; a language set mid-import must not be clobbered.
+        const localProject = await getProject(projectSnapshot.id).catch(() => undefined)
+        const baseProject = localProject ?? projectSnapshot
+        const nextFiles = [...baseProject.files]
+        const seenFileIds = new Set(nextFiles.map((file) => file.id))
+        for (const ref of refs) {
+          if (seenFileIds.has(ref.id)) continue
+          nextFiles.push(ref)
+          seenFileIds.add(ref.id)
+        }
+        await updateProject({
+          ...projectSnapshot,
+          ...baseProject,
+          sourceLanguage: projectSnapshot.sourceLanguage || baseProject.sourceLanguage,
+          targetLanguage: projectSnapshot.targetLanguage || baseProject.targetLanguage,
+          syncRole: projectSnapshot.syncRole ?? baseProject.syncRole,
+          files: nextFiles,
+        })
+        return baseProject
+      })
+    // Await and capture baseProject for the language-seed block below.
+    const baseProject = await _lastImportWrite
+    // FRO-249: seed source/target language from import metadata.
+    //
+    // Two modes (determined by `inferredLanguages.explicit`):
+    //   - EXPLICIT (user confirmed via DirectionPanel): values REPLACE current
+    //     ones when the current target is empty OR equals the current source
+    //     (the broken source==target state). This is BLOCKER 1's fix.
+    //   - INFERRED (metadata-only, no explicit confirmation): only fills EMPTY
+    //     slots, never overwrites an intentionally configured language.
+    //
+    // WARN a: use `baseProject` (freshly read above) for the emptiness test,
+    //   not the stale render-closure `project`.
+    //
+    // WARN b: only attempt the settings PATCH when the caller's role meets the
+    //   SERVER floor (MAINTAINER=600). Below that, patchSettings applies the
+    //   change locally to IDB then 403s server-side, causing per-device language
+    //   divergence. We skip the call entirely to avoid that split-brain.
+    //   NOTE: EDIT_ROLE_FLOOR in useProjectSettings.ts is PROJECT_LEAD (500) —
+    //   that mismatch vs the server's MAINTAINER (600) is a separate issue
+    //   flagged for follow-up (see Linear comment on FRO-249).
+    if (inferredLanguages && baseProject) {
+      const { explicit, sourceLanguage: inSrc, targetLanguage: inTgt } = inferredLanguages
+      // Read from baseProject (fresh) for the emptiness decision (WARN a).
+      const currentSource = baseProject.sourceLanguage?.trim() || ""
+      const currentTarget = baseProject.targetLanguage?.trim() || ""
+
+      let newSource: string
+      let newTarget: string
+
+      if (explicit) {
+        // BLOCKER 1: explicit answer from DirectionPanel wins.
+        // Replace when current target is empty OR equals current source (broken state).
+        const targetBroken = currentTarget === "" || languagesEqual(currentTarget, currentSource)
+        newSource = (inSrc?.trim() || currentSource)
+        newTarget = targetBroken
+          ? (inTgt?.trim() || currentTarget)
+          : currentTarget
+      } else {
+        // Inferred-only: fill empty slots only.
+        newSource = currentSource || inSrc?.trim() || ""
+        newTarget = currentTarget || inTgt?.trim() || ""
+      }
+
+      // Distinct source/target is the key invariant — skip if both would end
+      // up as the same value (WARN e: use normalizer for comparison).
+      const sourceDiffers = newSource !== currentSource
+      const targetDiffers = newTarget !== currentTarget
+      const resultDistinct = !languagesEqual(newSource, newTarget)
+
+      if ((sourceDiffers || targetDiffers) && resultDistinct && (newSource || newTarget)) {
+        const patch: Record<string, string> = {}
+        if (sourceDiffers && newSource) patch.sourceLanguage = newSource
+        if (targetDiffers && newTarget) patch.targetLanguage = newTarget
+
+        if (Object.keys(patch).length > 0) {
+          // WARN b fix: gate on the SERVER role floor (MAINTAINER=600) to prevent
+          // the local-only half-apply when the server will 403 us anyway.
+          const roleLevel = baseProject.syncRole?.level ?? 0
+          const serverFloor = ROLE.MAINTAINER // 600
+          if (roleLevel >= serverFloor) {
+            void patchSettings(patch).then((outcome) => {
+              if (outcome.kind !== "ok") {
+                console.warn("[FRO-249] language seed returned non-ok:", outcome)
+              }
+            }).catch((err) => {
+              console.warn("[FRO-249] failed to seed language settings after import:", err)
+            })
+          } else {
+            // FRO-249/FRO-255 fix (Fix 4): surface this to the user — a silent
+            // console.warn left the dialog implying success. The import itself
+            // succeeded; only the project-wide language setting was skipped.
+            console.warn(
+              `[FRO-249] skipping language seed — role ${roleLevel} is below server floor ${serverFloor}. ` +
+              "Mismatch note: EDIT_ROLE_FLOOR in useProjectSettings is PROJECT_LEAD(500) but server requires MAINTAINER(600); tracked for follow-up.",
+            )
+            setDirectionRoleNotice(
+              "Your direction choice couldn't be saved project-wide — it needs a maintainer. It will apply locally.",
+            )
+          }
+        }
+      }
     }
-    await updateProject({
-      ...project,
-      ...baseProject,
-      sourceLanguage: project.sourceLanguage || baseProject.sourceLanguage,
-      targetLanguage: project.targetLanguage || baseProject.targetLanguage,
-      syncRole: project.syncRole ?? baseProject.syncRole,
-      files: nextFiles,
-    })
     optimisticFileIdsRef.current = new Set([
       ...optimisticFileIdsRef.current,
       ...refs.map((ref) => ref.id),
@@ -1990,6 +2250,7 @@ export function ProjectWorkspace() {
               onDelete={(fileId) => setPendingDeleteId(fileId)}
               onApplySuggestion={handleApplyOneSuggestion}
               onRenameCorpus={handleRenameCorpus}
+              canExportByOrgPolicy={canExportByOrgPolicy}
             />
             {lens === "audio" && project && (
               <VoiceSidebar
@@ -2093,15 +2354,18 @@ export function ProjectWorkspace() {
                 onClick={handleJumpNextUnfinished}
                 disabled={!activeFileId || !hasUnfinished}
               />
-              <Button
-                variant="ghost"
-                size="icon"
-                onClick={openExportFlow}
-                title="Export file"
-                aria-label="Export file"
-              >
-                <Download className="h-4 w-4" />
-              </Button>
+              {/* FRO-253: hide export button when org policy disallows it */}
+              {canExportByOrgPolicy && (
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={openExportFlow}
+                  title="Export file"
+                  aria-label="Export file"
+                >
+                  <Download className="h-4 w-4" />
+                </Button>
+              )}
             </div>
 
             <div className="mx-1 h-5 w-px bg-border" aria-hidden="true" />
@@ -2192,6 +2456,10 @@ export function ProjectWorkspace() {
                 onCustomize={() => setChecklistOpen(true)}
               />
             )}
+            {/* FRO-235: AI completion progress + stop control */}
+            <div className="px-3 py-1 empty:hidden">
+              <CompletionBulkProgressBanner />
+            </div>
             {isSubtitleFile && videoSrc && (
               <ResizableVideoPanel>
                 {(height) => (
@@ -2291,6 +2559,36 @@ export function ProjectWorkspace() {
             canRequestPromotion={canRequestPromotion}
             requestPromotion={requestPromotion}
           />
+        ) : centerSurface === "comments" ? (
+          // FRO-254: Comments page inside the shell — back button in the page
+          // navigates to /project/:id, which the restore-location effect turns
+          // into the user's last open file (including scroll position).
+          <div className="h-full overflow-y-auto">
+            <Suspense fallback={<div className="flex h-full items-center justify-center text-sm text-muted-foreground">Loading comments…</div>}>
+              <CommentsPageContent />
+            </Suspense>
+          </div>
+        ) : centerSurface === "memory" ? (
+          // FRO-254: Living Memory page inside the shell.
+          <div className="h-full overflow-y-auto">
+            <Suspense fallback={<div className="flex h-full items-center justify-center text-sm text-muted-foreground">Loading living memory…</div>}>
+              <LivingMemoryPageContent />
+            </Suspense>
+          </div>
+        ) : centerSurface === "terminology" ? (
+          // FRO-254: Terminology page inside the shell.
+          <div className="h-full overflow-y-auto">
+            <Suspense fallback={<div className="flex h-full items-center justify-center text-sm text-muted-foreground">Loading terminology…</div>}>
+              <TerminologyPageContent />
+            </Suspense>
+          </div>
+        ) : centerSurface === "members" ? (
+          // FRO-180: Per-project members management inside the shell.
+          <div className="h-full overflow-y-auto">
+            <Suspense fallback={<div className="flex h-full items-center justify-center text-sm text-muted-foreground">Loading members…</div>}>
+              <ProjectMembersPageContent />
+            </Suspense>
+          </div>
         ) : cellAreaState.kind === "ready" ? (
           <EditorTable
             ref={editorRef} project={project} cells={cellsWithBacktranslation}
@@ -2361,6 +2659,8 @@ export function ProjectWorkspace() {
           <CellAreaPlaceholder
             state={cellAreaState}
             fileName={activeFile?.name}
+            hasFiles={projectFiles.length > 0}
+            filesLoaded={status === "ready"}
             onImportClick={openImportFlow}
           />
         )}
@@ -2496,16 +2796,28 @@ export function ProjectWorkspace() {
           ttsSettings={tts.settings}
           onCastUpdated={(patch) => tts.saveTts(patch)} />
       </Suspense>
+      {/* FRO-249/FRO-255 fix (Fix 4): transient notice when direction couldn't be saved project-wide */}
+      {directionRoleNotice && (
+        <div
+          role="status"
+          aria-live="polite"
+          className="fixed bottom-4 right-4 z-60 max-w-sm rounded border bg-background px-3 py-2 text-sm text-foreground shadow-md"
+        >
+          {directionRoleNotice}
+        </div>
+      )}
       <Suspense fallback={null}>
         <ExportDialog
           open={exportOpen}
           onOpenChange={setExportOpen}
+          canExport={canExportByOrgPolicy}
           cells={cells}
           projectId={project.id}
           projectName={project.name ?? project.id}
           activeFileId={activeFileId ?? null}
           activeFileName={activeFile?.name ?? null}
           isUsfmFile={activeFile?.type === "usfm"}
+          isDocxFile={activeFile?.type === "docx"}
           projectFiles={project.files.map((f) => ({ id: f.id, name: f.name, type: f.type }))}
           sourceLanguage={project.sourceLanguage}
           targetLanguage={project.targetLanguage}
@@ -2653,7 +2965,22 @@ function ScrollToGroupHandler({ cells, editorRef }: ScrollToGroupHandlerProps) {
   const editorScroll = useEditorScroll()
 
   useEffect(() => {
-    const { group: groupId, section: sectionLabel } = editorScroll.consume()
+    const pending = editorScroll.pending
+    if (!pending) return
+    const { group: groupId, section: sectionLabel, fileId: targetFileId } = pending
+
+    // FRO-250/254: only consume() when the current cells belong to the requested
+    // file. During a file-switch the cells array may still reflect the OLD file
+    // while the pending request already carries the NEW file's id — consuming
+    // early would match against stale cells and either scroll nowhere or jump to
+    // the wrong verse, then burn the request before the new file's cells arrive.
+    const currentFileId = cells[0]?.fileId ?? null
+    if (targetFileId !== null && currentFileId !== targetFileId) {
+      // Leave the request pending until cells have been replaced.
+      return
+    }
+
+    editorScroll.consume()
     if (!groupId && !sectionLabel) return
 
     let idx = -1
@@ -2662,6 +2989,20 @@ function ScrollToGroupHandler({ cells, editorRef }: ScrollToGroupHandlerProps) {
       idx = cells.findIndex((c) => c.section === sectionLabel)
       // Fallback: match by group
       if (idx < 0) idx = cells.findIndex((c) => (c.group ?? "Ungrouped") === sectionLabel)
+      // FRO-250: match by globalReferences prefix — the sidebar's chapter labels
+      // are derived as "BOOK CH" from the first globalReference (e.g. "GEN 1"
+      // from "GEN 1:1"), so we match the first cell whose first ref starts with
+      // "LABEL:" or equals LABEL exactly. This lets sidebar chapter clicks scroll
+      // to the right verse even when cells have no explicit `section` field.
+      if (idx < 0) {
+        idx = cells.findIndex((c) => {
+          const ref = c.globalReferences?.find((r) => r && r.trim().length > 0)
+          if (!ref) return false
+          const colonIdx = ref.indexOf(":")
+          const prefix = (colonIdx >= 0 ? ref.slice(0, colonIdx) : ref).trim()
+          return prefix === sectionLabel
+        })
+      }
     } else if (groupId) {
       idx = cells.findIndex((c) => (c.group ?? "Ungrouped") === groupId)
     }

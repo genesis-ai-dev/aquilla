@@ -2,17 +2,18 @@ import { test, expect } from "../../helpers/multi-user"
 import { Dashboard } from "../../helpers/page-objects/Dashboard"
 
 /**
- * CellAreaPlaceholder — "No file selected" empty state.
+ * CellAreaPlaceholder — empty-state variants (FRO-149).
  *
- * When a project is opened but no file has been selected, the editor area
- * renders CellAreaPlaceholder with state.kind="no-file", showing:
- *   - "No file selected" heading
- *   - "Pick a file from the sidebar to start translating." description
+ * Two cases:
+ *   A. Project has ZERO files → show "No files yet" + "Import a file" CTA button.
+ *      The old "pick a file from the sidebar" message is wrong here (sidebar is empty).
+ *   B. Project has files but none is selected → show "No file selected" +
+ *      "Pick a file from the sidebar" (original copy, sidebar is populated).
  *
- * This spec: open a project workspace without opening a file → verify the
- * "No file selected" empty state is shown.
+ * Case B is hard to exercise reliably in smoke tests (the workspace auto-selects
+ * the only file when there is one). We focus on Case A here.
  */
-test("editor shows No file selected placeholder when no file is open", async ({ alice }) => {
+test("editor shows Import a file CTA when project has no files", async ({ alice }) => {
   const dash = new Dashboard(alice)
   await dash.goto()
   const name = `NoFile ${Date.now()}`
@@ -27,11 +28,16 @@ test("editor shows No file selected placeholder when no file is open", async ({ 
   await alice.goto(`/project/${projectId}`)
   await alice.waitForLoadState("networkidle")
 
-  // "No file selected" heading is visible in the editor area.
-  await expect(alice.getByText(/No file selected/i).first()).toBeVisible({ timeout: 10_000 })
+  // "No files yet" heading is visible when the project has no imported files.
+  await expect(alice.getByText(/No files yet/i).first()).toBeVisible({ timeout: 10_000 })
 
-  // Description text is also present.
+  // "Import a file" CTA button is shown (not the sidebar instruction).
+  await expect(
+    alice.getByRole("button", { name: /Import a file/i }).first()
+  ).toBeVisible({ timeout: 3_000 })
+
+  // The "Pick a file from the sidebar" copy must NOT appear (sidebar is empty).
   await expect(
     alice.getByText(/Pick a file from the sidebar/i).first()
-  ).toBeVisible({ timeout: 3_000 })
+  ).not.toBeVisible()
 })

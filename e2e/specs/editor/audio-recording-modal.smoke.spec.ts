@@ -8,7 +8,12 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const SAMPLE_MD = path.resolve(__dirname, "../../fixtures/sample.md")
 
 /**
- * AudioRecordingModal — opens from the cell action popover "Record audio" button.
+ * AudioRecordingModal — opens from the direct mic rail button (FRO-237).
+ *
+ * FRO-237: Record audio was moved from the ⋯ overflow popover to a direct
+ * mic button on the CellActionRail (aria-label="Record audio"). This spec
+ * opens the modal via the rail mic button directly, without going through
+ * the ⋯ popover.
  *
  * The modal opens in "idle" phase and shows:
  *   - sr-only DialogTitle "Record audio — …"
@@ -18,7 +23,7 @@ const SAMPLE_MD = path.resolve(__dirname, "../../fixtures/sample.md")
  * This spec opens the modal and verifies the idle state renders.
  * It does NOT start recording (no microphone needed for this check).
  */
-test("audio recording modal opens in idle state from cell action popover", async ({ alice }) => {
+test("audio recording modal opens in idle state from rail mic button", async ({ alice }) => {
   const dash = new Dashboard(alice)
   await dash.goto()
   const name = `Record ${Date.now()}`
@@ -30,20 +35,16 @@ test("audio recording modal opens in idle state from cell action popover", async
   await ws.openFileBySubstring("sample")
   await ws.waitForEditor()
 
-  // Hover cell to reveal the action rail, then open the popover.
+  // Hover cell to reveal the action rail.
   const row = ws.cellRow(0)
   await row.scrollIntoViewIfNeeded()
   await row.hover()
 
-  // Click "More cell actions" button to open the popover.
-  const moreBtn = row.locator('[aria-label="More cell actions"]')
-  await expect(moreBtn).toBeVisible({ timeout: 5_000 })
-  await moreBtn.click()
-
-  // The popover is portaled to body — find "Record audio" button.
-  const recordAudioBtn = alice.locator('button[title="Record audio"]')
-  await expect(recordAudioBtn).toBeVisible({ timeout: 3_000 })
-  await recordAudioBtn.click()
+  // FRO-237: click the direct rail mic button (aria-label="Record audio").
+  // This replaces the old flow that opened the ⋯ popover first.
+  const micRailBtn = row.locator('button[aria-label="Record audio"]')
+  await expect(micRailBtn).toBeVisible({ timeout: 5_000 })
+  await micRailBtn.click()
 
   // AudioRecordingModal opens as a Dialog.
   const dialog = alice.getByRole("dialog")

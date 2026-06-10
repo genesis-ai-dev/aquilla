@@ -122,3 +122,48 @@ GATE: tsc 0 · sync-worker 428/428 · root vitest 1629 pass / 2 baseline · buil
 Production-readiness loop STOPPED — surgical/obvious spec-behind backlog drained. Cron 3db58d64 deleted.
 Shipped Waves 5–9: ~23 surgical/medium spec-conformance fixes, all on main+dev (@ 2ebf398), staging auto-deploying.
 Remaining backlog = large/architectural/HITL (need product input, not autonomous build): FRO-173 (audio legacy backfill — data decision), 175 (chat panel), 176 (snapshots), 177 (search-replace), 178 (macula), 179 (TN import), 180 (per-project members), 181 (AD-14 confidence — in-flight design), 183 (terminology data model), 186 (harmonization), 190 (HealthRing-on-card — gated on AD-14), 191 (download-target-bible), 192 (assignment UI), 193 (detach-from-source).
+
+---
+
+# PD4 — "highest priority issues" wave (2026-06-09, orchestrator session 6a7f0938)
+
+Base: main `ca8b068` (pd3 converged + promoted minutes earlier). Integration `swarm/pd4-integration`.
+Scope per user: highest-priority eligible issues only — NOT a full queue drain.
+
+## §0 STOP checklist (PD4)
+- [x] FRO-233/180/255/258/231 Fixed (verified); FRO-173 honestly blocked (product decision: backfill legacy audio A/B/C) — released to Todo w/ Linear note.
+- [x] Integration green: tsc 0 · vitest 1966 pass / 27 pre-existing baseline (6 files, identical to base) · build exit 0.
+- [x] auth-worker touched → tsc 0 + 184/184. sync-worker untouched (docs-only in 173).
+- [x] Live-UI QA (central slot, local seeded stack): 231 PASS · 258 PASS · 180 PASS · 255 PARTIAL (OWNER path live; sub-600 floor covered by 20 unit tests) · 233 PARTIAL (import+dialog live; export fetch blocked by preview-iframe tooling; 13 unit tests) · 173 PARTIAL (no fake mic in tooling; 7/7+5/5 unit). 0 new bugs. See UI-QA-PUNCHLIST.md §PD4.
+- [x] Promoted to main (ff) with main checkout clean.
+- [x] Gaps traced in docs/swarm/TRACES.md §PD4.
+
+## §EXCLUDED (PD4)
+- FRO-227, FRO-224, FRO-215 — Dispatched today by pd3 (homepage-claims verification); claims recent, below priority bar. NOT reclaimed.
+- All other Medium/Low Todos (FRO-243/214/192/191/190/181/186/183/179/178/177/176/175/221/223/246/209/193) — below the "highest priority" bar this run.
+- FRO-257, FRO-145 — archived junk.
+- PROTECTED (dirty in user's staging checkout — forbidden to all agents): auth-worker/src/routes/projects.ts, auth-worker/src/services/email.ts, auth-worker/src/types.ts, auth-worker/wrangler.toml, auth-worker/.dev.vars.example, docs/STAGING.md.
+
+## §3 PD4 registry + wave plan (single wave, file-disjoint)
+| WS | FRO | Pri | Branch | Owns (primary) | Status |
+|---|---|---|---|---|---|
+| export-fmt | 233 | High | swarm/fro-233 | src/lib/export/exporters/docx.ts(+test), ExportDialog.tsx | dispatched (reclaimed stale pd3 handoff) |
+| members-page | 180 | High | swarm/fro-180 | NEW ProjectMembersPage + App.tsx route line; NEW auth-worker route file if needed | dispatched |
+| audio-gap | 173 | High | swarm/fro-173 | investigation report docs/swarm/AUDIO-GAP-FRO173.md; importer fix only if evidence demands | dispatched |
+| settings-floor | 255 | Med | swarm/fro-255 | src/hooks/useProjectSettings.ts(+test), settings read-only affordances | dispatched |
+| share-modal | 258 | Med | swarm/fro-258 | SharePanel.tsx / MembersPanel.tsx (modal layout only) | dispatched |
+| search-popover | 231 | Med | swarm/fro-231 | editor search popover (likely EditorTable.tsx search section) | dispatched |
+
+Cross-cut rules: only members-page may touch App.tsx (one route line); only search-popover may touch EditorTable.tsx; only share-modal may touch SharePanel/MembersPanel; only export-fmt may touch ExportDialog/exporters; only settings-floor may touch useProjectSettings.
+
+## §M PD4 merge log
+- 2026-06-09 · search-popover(231) · 8f897b7→merge 92c2b78 · ParallelPassagesPanel.tsx:316 pl-4 pr-10 + flex-wrap (controls clear DialogClose X) · tsc 0 · agent vitest: 27 pre-existing fails, 0 new.
+- 2026-06-09 · share-modal(258) · 39d7ce7→merge bb19db5 · SharePanel.tsx DialogContent flex-col max-h-[85vh] + scrollable tab body; MembersPanel.tsx ul max-h-[50vh] overflow-y-auto, min-w-0+truncate rows · tsc 0 · 27 pre-existing, 0 new.
+- 2026-06-09 · audio-gap(173) · ee6a1e6 · docs-only: AUDIO-GAP-FRO173.md — VERDICT: legacy audio EXISTS (CodexCell attachments; importer explicitly deferred it, --no-lfs); backfill path COMPLETE but never run (scripts/migrate-all.ts --audio --apply, canary via --only); post-cutover record→projection path verified sound (7/7 + 5/5 targeted tests) · BLOCKED on product decision (backfill A / accept B / wontfix C) — release to Todo at convergence w/ note.
+- 2026-06-09 · settings-floor(255) · 8b67711→merge 0f557ba · spec 01-personas-and-roles.md role-600 owns "change project settings" → server unchanged, client EDIT_ROLE_FLOOR 500→600; below-floor read-only w/ tooltip; below-floor writes no longer touch IDB; forbidden/error responses roll back optimistic overlay (setLocal reversal + patchProject) · tsc 0 · settings tests 20/20 · SWARM-TODOs: useOrgSettings same pattern (chip spawned), ProjectWorkspace.tsx:2124/:2180 stale comments, useRules patchShared fire-and-forget.
+- 2026-06-09 · members-page(180) · merge of swarm/fro-180 · NEW ProjectMembersPage(+11 tests) + auth-worker/src/routes/project-members.ts revoke-all endpoint + index.ts reg + members.ts client helper; App.tsx 1 route; ProjectWorkspace surface swap (10 lines); protected files untouched · tsc 0 · auth-worker 184/184 · SWARM-TODO: group-detach on revoke-all (spec divergence, follow-up issue).
+- 2026-06-09 · export-fmt(233) · af3b5d6→merge 47d47d7 · docx.ts extractDominantRpr + clone rPr onto injected run (bold/italic/sz/rFonts survive); +6 tests (13/13 on integration) · tsc 0 · 27 pre-existing, 0 new · SWARM-TODO: mixed-format paragraphs collapse to dominant rPr (needs import-time run map) · agent moved FRO-233 → Fixed; spec AC-2a amendment drafted in Linear comment, ORCHESTRATOR to apply in ~/frontierrnd/aquilla-specs/04-features/export-and-legacy-import.md.
+
+## §CLAIMS (PD4)
+- FRO-233: was already Dispatched+assigned (pd3 agent handoff comment 2026-06-09 21:39Z explicitly ended its slice → stale claim, reclaimed by PD4 finisher).
+- FRO-180/173/255/258/231: claimed Todo→Dispatched by PD4 orchestrator before spawn.

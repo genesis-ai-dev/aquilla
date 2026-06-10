@@ -20,9 +20,10 @@ import { exportXliff } from "./exporters/xliff"
 import { exportTmx } from "./exporters/tmx"
 
 /** Formats handled by the project-zip path (excludes server-side USFM,
- *  audio-by-character which has its own orchestrator, and vtt which needs
- *  per-project ttsSettings not available in the zip path). */
-export type TextExportFormat = Exclude<ExportFormat, "usfm" | "audio-by-character" | "vtt">
+ *  audio-by-character which has its own orchestrator, vtt which needs
+ *  per-project ttsSettings not available in the zip path, and docx which
+ *  requires the raw sidecar bytes from the server — not just cells). */
+export type TextExportFormat = Exclude<ExportFormat, "usfm" | "audio-by-character" | "vtt" | "docx">
 
 export interface ProjectFileCellsInput {
   fileId: string

@@ -8,6 +8,13 @@ import type { TranslationRule, PromotionRequest } from "@/lib/parsers/types"
 export interface OrgWideSettings {
   rules?: TranslationRule[]
   promotionRequests?: PromotionRequest[]
+  /**
+   * FRO-253: Minimum role level required to export project deliverables.
+   * Default (when absent) = MAINTAINER (600) per spec Q32. Org owners can
+   * lower it (e.g., CONTRIBUTOR = 400) or raise it (e.g., OWNER = 700).
+   * Matched against the sync-token role on every export/download request.
+   */
+  exportMinRole?: number
 }
 
 export interface OrgSettingsResponse {

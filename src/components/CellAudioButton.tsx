@@ -1,6 +1,7 @@
 // src/components/CellAudioButton.tsx
 // Compact ▶/⏸ button. The audio controller is owned by the parent EditorRow
 // so the button and the waveform stay in lock-step on play / pause / seek.
+// FRO-238: aria-label mirrors title so screen-readers and test selectors work.
 
 import { AlertCircle, CloudDownload, CloudOff, FileQuestion, Loader2, Pause, Play, Trash2 } from "lucide-react"
 import { cn } from "@/lib/utils"
@@ -37,6 +38,7 @@ export function CellAudioButton({ controller, hidden }: Props) {
       onPointerEnter={state === "cloud" ? () => { void play() } : undefined}
       disabled={state === "loading"}
       title={tooltip}
+      aria-label={tooltip}
       className={cn(
         "flex h-5 w-5 items-center justify-center rounded-full transition-[transform,color] duration-150 ease-out active:scale-[0.92] hover:bg-muted/60",
         state === "error"

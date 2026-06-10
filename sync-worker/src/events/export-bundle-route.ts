@@ -5,8 +5,9 @@
 // target translations overlaid (same per-file logic as handleExportSourceRequest,
 // applied across all files and packaged into one .zip).
 //
-// Auth: sync-token JWT scoped to projectId; maintainer (600) required per spec
-// Q32 — pulling the whole deliverable is a privileged action, not a read.
+// Auth: sync-token JWT scoped to projectId; role floor = org's exportMinRole
+// setting (default MAINTAINER / 600 per spec Q32 — see FRO-253). Org owners
+// can raise or lower the floor via org settings.
 //
 // Returns null if the URL doesn't match (chainable in the fetch dispatcher).
 // PURE-ADDITIVE: a new file that reuses usfm-lossless + a dependency-free zip
@@ -15,6 +16,7 @@
 import { verifyTokenForProject } from "../auth"
 import { withCors } from "../cors"
 import { ROLE } from "./role-policy"
+import { resolveExportFloor } from "./export-floor"
 import { parseUsfmLossless, serializeUsfmLossless } from "../lib/usfm-lossless"
 import { makeZip, type ZipEntry } from "../lib/zip"
 
@@ -55,9 +57,12 @@ export async function handleExportBundleRequest(
   if (!auth.ok) {
     return withCors(new Response(auth.reason, { status: auth.status }), request)
   }
-  if (auth.claims.role < ROLE.MAINTAINER) {
+  // FRO-253: org-level export floor (defaults to MAINTAINER if unset).
+  const exportFloor = await resolveExportFloor(db, projectId)
+  if (auth.claims.role < exportFloor) {
+    const floorName = exportFloor === ROLE.MAINTAINER ? "maintainer" : `role level ${exportFloor}`
     return withCors(
-      new Response("maintainer role required to export", { status: 403 }),
+      new Response(`${floorName} role required to export`, { status: 403 }),
       request,
     )
   }
@@ -122,3 +127,6 @@ export async function handleExportBundleRequest(
     request,
   )
 }
+
+// resolveExportFloor is now in ./export-floor.ts (shared with export-route.ts).
+// Imported above — see FRO-253 note in that module for behavior and caveats.

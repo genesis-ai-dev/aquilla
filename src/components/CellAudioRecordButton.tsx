@@ -14,7 +14,7 @@ interface Props {
   micDenied?: boolean
 }
 
-function getUnsupportedReason(): string | null {
+export function getUnsupportedReason(): string | null {
   if (typeof navigator === "undefined" || typeof window === "undefined") return "Browser API unavailable"
   if (typeof MediaRecorder === "undefined") return "MediaRecorder not supported in this browser"
   if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {

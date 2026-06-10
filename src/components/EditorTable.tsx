@@ -65,6 +65,7 @@ import type { Concept } from "@/lib/terminology/types"
 import { PreAcceptanceWarningBand } from "./PreAcceptanceWarningBand"
 import { detectPreAcceptanceWarnings } from "@/lib/terminology/preacceptance"
 import { useFileFontSize, setFileViewPref, MIN_FONT_SIZE, MAX_FONT_SIZE, FONT_SIZE_STEP } from "@/lib/store/file-view-prefs"
+import { AddConceptDialog } from "./AddConceptDialog"
 
 // Per-row render counter. Always accumulated when perf logging is on (cheap)
 // but NOT auto-logged — render logs would flood the console and push the
@@ -1360,6 +1361,79 @@ interface EditorRowProps {
 }
 
 // ────────────────────────────────────────────────────────────────────────────
+// SelectionTermActions — floating action bar shown when source text is selected.
+// Shows "Add to termbase" when the callback is wired, and a "View term" lookup
+// popover when the selection matches an existing active concept (FRO-260).
+// ────────────────────────────────────────────────────────────────────────────
+
+interface SelectionTermActionsProps {
+  sourceSelection: string
+  concepts: Concept[]
+  onAddToTermbase?: () => void
+  onTermApply: (rendering: string) => void
+}
+
+function SelectionTermActions({
+  sourceSelection,
+  concepts,
+  onAddToTermbase,
+  onTermApply,
+}: SelectionTermActionsProps) {
+  const activeConcepts = useMemo(
+    () => concepts.filter((c) => c.status === "active"),
+    [concepts],
+  )
+  // Case-insensitive substring match — same heuristic as TermLookupPopover.
+  const hasMatch = useMemo(
+    () =>
+      activeConcepts.some((c) =>
+        c.sourceTerm.toLowerCase().includes(sourceSelection.toLowerCase()) ||
+        sourceSelection.toLowerCase().includes(c.sourceTerm.toLowerCase()),
+      ),
+    [activeConcepts, sourceSelection],
+  )
+
+  return (
+    <div
+      className="absolute right-1 top-0 z-10 flex items-center gap-1"
+      dir="ltr"
+    >
+      {/* Lookup popover: only when selection matches an existing active concept */}
+      {hasMatch && (
+        <TermLookupPopover
+          sourceTerm={sourceSelection}
+          concepts={activeConcepts}
+          onApply={onTermApply}
+        >
+          <button
+            type="button"
+            onMouseDown={(e) => e.preventDefault()}
+            className="inline-flex items-center gap-1 rounded-md border border-primary/30 bg-background px-2 py-1 text-[11px] font-medium text-primary shadow-neu-sm hover:bg-primary/10"
+            title={`Look up "${sourceSelection}" in the term base`}
+          >
+            <BookOpen className="h-3 w-3" aria-hidden />
+            View term
+          </button>
+        </TermLookupPopover>
+      )}
+      {/* Add to termbase: only when the callback is wired */}
+      {onAddToTermbase && (
+        <button
+          type="button"
+          onMouseDown={(e) => e.preventDefault()}
+          onClick={onAddToTermbase}
+          className="inline-flex items-center gap-1 rounded-md bg-primary px-2 py-1 text-[11px] font-medium text-primary-foreground shadow-neu-sm hover:bg-primary/90"
+          title={`Add "${sourceSelection}" to the termbase as a draft concept`}
+        >
+          <BookOpen className="h-3 w-3" aria-hidden />
+          Add to termbase
+        </button>
+      )}
+    </div>
+  )
+}
+
+// ────────────────────────────────────────────────────────────────────────────
 // SourceWithTermLookup — renders source plain text with per-word
 // TermLookupPopover triggers for any word that matches an active concept.
 // Words that have no matching concept render as plain text (no popover cost).
@@ -1504,6 +1578,8 @@ function EditorRow({
   // Add-from-selection (Slice 5): the source-side text the user has selected,
   // surfaced as an "Add to termbase" affordance. Null when nothing selected.
   const [sourceSelection, setSourceSelection] = useState<string | null>(null)
+  // Controls the confirm dialog shown before creating the draft concept.
+  const [showAddConceptDialog, setShowAddConceptDialog] = useState(false)
   const pendingTargetEventIdRef = useRef<string | null>(cell.targetEventId ?? null)
   /** voice-chip drag-over state: the voiceId being dragged over this cell's audio area */
   const [dragOverVoiceId, setDragOverVoiceId] = useState<string | null>(null)
@@ -1656,12 +1732,22 @@ function EditorRow({
     setSourceSelection(text.length > 0 ? text : null)
   }, [onAddConceptFromSelection])
 
+  // Opens the confirm dialog — actual creation happens in handleAddConceptConfirm.
   const handleAddSelectionToTermbase = useCallback(() => {
     if (!sourceSelection) return
-    void onAddConceptFromSelection?.(sourceSelection)
+    setShowAddConceptDialog(true)
+  }, [sourceSelection])
+
+  const handleAddConceptConfirm = useCallback(async (term: string) => {
+    await onAddConceptFromSelection?.(term)
+    setShowAddConceptDialog(false)
     setSourceSelection(null)
     window.getSelection()?.removeAllRanges()
-  }, [sourceSelection, onAddConceptFromSelection])
+  }, [onAddConceptFromSelection])
+
+  const handleAddConceptCancel = useCallback(() => {
+    setShowAddConceptDialog(false)
+  }, [])
 
   // FRO-248: clear source selection when the browser selection collapses (user
   // clicked elsewhere or selected text in a different row). This prevents the
@@ -2354,19 +2440,16 @@ function EditorRow({
             onMouseUp={onAddConceptFromSelection ? handleSourceMouseUp : undefined}
           >
             {/* Slice 5: add-from-selection affordance. Appears when a source
-                token is selected; promotes the selection to a DRAFT concept. */}
-            {sourceSelection && onAddConceptFromSelection && (
-              <button
-                type="button"
-                dir="ltr"
-                className="absolute right-1 top-0 z-10 inline-flex items-center gap-1 rounded-md bg-primary px-2 py-1 text-[11px] font-medium text-primary-foreground shadow-neu-sm hover:bg-primary/90"
-                onMouseDown={(e) => e.preventDefault()}
-                onClick={handleAddSelectionToTermbase}
-                title={`Add "${sourceSelection}" to the termbase as a draft concept`}
-              >
-                <BookOpen className="h-3 w-3" aria-hidden />
-                Add to termbase
-              </button>
+                token is selected; promotes the selection to a DRAFT concept.
+                When the selected text matches an existing active concept a
+                "View term" button also appears for quick lookup (FRO-260). */}
+            {sourceSelection && (
+              <SelectionTermActions
+                sourceSelection={sourceSelection}
+                concepts={project.terminology ?? []}
+                onAddToTermbase={onAddConceptFromSelection ? handleAddSelectionToTermbase : undefined}
+                onTermApply={handleTermApply}
+              />
             )}
             <div className="mb-1 flex items-center gap-1 text-xs text-muted-foreground" dir="ltr">
               <span>{cell.context}</span>
@@ -3337,6 +3420,17 @@ function EditorRow({
           />
         )
       })()}
+
+      {/* Add-from-selection confirm dialog (FRO-260). Mounted per-row so it
+          is scoped to the cell whose selection triggered it. */}
+      {onAddConceptFromSelection && (
+        <AddConceptDialog
+          open={showAddConceptDialog}
+          sourceTerm={sourceSelection ?? ""}
+          onConfirm={handleAddConceptConfirm}
+          onCancel={handleAddConceptCancel}
+        />
+      )}
     </div>
   )
 }

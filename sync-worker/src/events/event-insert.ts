@@ -27,6 +27,8 @@
 //     dropped). Harmless — server_seq is an ordering key, not a count — and
 //     rare: POST /events pre-checks idempotency before building statements.
 
+import type { AquillaDb, AquillaStatement } from '../../../db/shim/postgres'
+
 /** Minimal event shape needed to write the canonical `events` row. */
 export interface EventInsertRow {
   id: string

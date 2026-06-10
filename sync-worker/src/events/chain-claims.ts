@@ -26,6 +26,8 @@
 // (parent_id IS NULL) use the '<null>' sentinel — the same sentinel
 // rebuild.ts uses in its in-memory childKey.
 
+import type { AquillaDb, AquillaStatement } from '../../../db/shim/postgres'
+
 /** Sentinel for genesis events (parent_id IS NULL) in chain_claims.parent_key. */
 export const GENESIS_PARENT_KEY = '<null>'
 

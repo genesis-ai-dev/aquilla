@@ -3,6 +3,7 @@
 // trigger a guarded reload rather than an error screen.
 
 import { describe, it, expect, vi, afterEach, beforeEach } from "vitest"
+import type { ReactNode } from "react"
 import { render, screen } from "@testing-library/react"
 import { ErrorBoundary, captureException } from "./ErrorBoundary"
 import posthog from "@/lib/posthog"
@@ -32,7 +33,7 @@ afterEach(() => {
 
 // --- helpers ------------------------------------------------------------
 
-function ThrowingChild({ message }: { message: string }) {
+function ThrowingChild({ message }: { message: string }): ReactNode {
   throw new Error(message)
 }
 

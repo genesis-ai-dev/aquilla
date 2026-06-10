@@ -10,6 +10,7 @@ import { fetchCellAudio, parseFrontierAudioUrl } from "@/lib/audio/upload"
 import { makeAudioSyncTokenFetcher } from "@/lib/audio/sync-token-fetcher"
 import { decodePeaks } from "@/lib/audio/peaks"
 import { peaksCacheGet, peaksCachePut } from "@/lib/audio/peaks-cache"
+import { audioCacheGet, audioCachePut, audioCacheEvict } from "@/lib/audio/bytes-cache"
 import {
   type ActiveAudioController,
   clearActiveAudioIf,
@@ -215,6 +216,14 @@ export function useCellAudio(
 
     const p = (async () => {
       try {
+        // L2 cache check (CACHE-5): audio is immutable per audioId, so a hit
+        // here is always valid — no re-download needed.
+        const cached = await audioCacheGet(frontier.audioId, frontier.ext)
+        if (cached) {
+          bytesRef.current = cached
+          return cached
+        }
+
         const bytes = await fetchCellAudio({
           projectId: project.id,
           fileId,
@@ -223,6 +232,8 @@ export function useCellAudio(
           getSyncToken,
         })
         bytesRef.current = bytes
+        // Write through to L2 cache; non-fatal if OPFS is unavailable.
+        void audioCachePut(frontier.audioId, frontier.ext, bytes)
         return bytes
       } catch (e) {
         // F10: distinguish permanent deletion (404) from transient errors.
@@ -231,6 +242,9 @@ export function useCellAudio(
         const is404 =
           (e && typeof e === "object" && "status" in e && (e as { status: unknown }).status === 404)
         if (is404) {
+          // Evict any stale cached bytes for this audioId (e.g. partially
+          // written entry from a previous failed upload).
+          void audioCacheEvict(frontier.audioId, frontier.ext)
           throw {
             kind: "audio-deleted",
             message: "This audio recording has been deleted and cannot be played.",

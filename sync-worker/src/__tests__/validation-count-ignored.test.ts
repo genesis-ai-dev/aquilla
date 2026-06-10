@@ -1,21 +1,21 @@
-// FRO-268 — Characterization tests: freeze the validated-flip semantics as they
-// exist TODAY so future changes (FRO-279) flip them intentionally.
+// FRO-268 — Characterization tests: originally frozen the OLD (wrong) behavior
+// where validationCount was ignored.  FRO-279 has landed: tests below now
+// assert the CORRECT threshold-aware behavior.
 //
-// Key finding (audit F-B1):
-//   `project_settings.validationCount` is NEVER read by sync-worker.  The
-//   `cells.validated` flag is set to 1 as soon as COUNT(*) > 0 in
-//   `cell_validators` for the current chain head — i.e., a SINGLE endorsement
-//   marks the cell validated regardless of the project threshold.
+// Key fix (audit F-B1 → FRO-279):
+//   `project_settings.validationCount` is NOW read by sync-worker.  The
+//   `cells.validated` flag is set to 1 only when COUNT(*) >= validationCount in
+//   `cell_validators` for the current chain head.
 //
-//   event-projection.ts:480-487:
+//   event-projection.ts:
 //     SET validated = (
-//       SELECT CASE WHEN COUNT(*) > 0 THEN 1 ELSE 0 END
+//       SELECT CASE WHEN COUNT(*) >= ? THEN 1 ELSE 0 END
 //       FROM cell_validators WHERE ... AND event_id = cells.event_id
 //     )
 //
-// These tests document that current (wrong) behavior so a grep on
-// "CHARACTERIZATION (audit F-B1)" surfaces every place to flip when FRO-279
-// lands.
+// Tests that previously pinned the wrong behavior are now updated (intentionally
+// flipped per FRO-279 scope).  Grep "CHARACTERIZATION (audit F-B1)" to find
+// every assertion that was updated.
 
 import { describe, it, expect, vi } from 'vitest'
 
@@ -140,51 +140,46 @@ async function validateAndRead(db: AquillaDb, validator: string, evtId: string) 
   return row
 }
 
-// ── Core characterization: COUNT(*) > 0 flip ────────────────────────────────
+// ── Core behavior: COUNT(*) >= validationCount threshold ────────────────────
 
-describe('CHARACTERIZATION (audit F-B1): cells.validated flips on first endorsement', () => {
-  // CHARACTERIZATION (audit F-B1): intentionally frozen wrong behavior;
-  // FRO-279 will flip this — validated should require COUNT >= validationCount.
-  it('cell becomes validated=1 after exactly one endorsement (no settings)', async () => {
+describe('FRO-279: cells.validated respects validationCount threshold', () => {
+  // N=1 (default): 1 endorsement → validated=1 (byte-identical to old behavior)
+  it('cell becomes validated=1 after exactly one endorsement (no settings, default N=1)', async () => {
     const { db } = await makeTestDb()
     await seedFileAndCell(db, 'alice')
 
     const row = await validateAndRead(db, 'bob', 'evt-char-val-1')
-    // CHARACTERIZATION: 1 endorsement → validated=1 even though the spec
-    // default (validationCount=1) would also pass.  The important thing is
-    // this documents the raw COUNT(*) > 0 behavior at event-projection.ts:481.
+    // N=1 default: COUNT(*) >= 1 → validated.
     expect(Number(row?.validated)).toBe(1)
   })
 
-  // CHARACTERIZATION (audit F-B1): intentionally frozen wrong behavior;
-  // FRO-279 will flip this — with validationCount=2 the flip must NOT happen
-  // after only 1 validator.
-  it('cell becomes validated=1 after ONE endorsement even when validationCount=2', async () => {
+  // CHARACTERIZATION (audit F-B1) — FLIPPED by FRO-279:
+  // Old: server ignored validationCount; 1 endorsement always flipped validated.
+  // New: with validationCount=2, 1 endorsement must NOT flip validated.
+  it('cell stays validated=0 after ONE endorsement when validationCount=2', async () => {
     const { db } = await makeTestDb()
     await seedFileAndCell(db, 'alice')
-    // Set validationCount=2 — the server MUST ignore this (today)
     await setSettings(db, { validationCount: 2 })
 
     // Only one validator endorses
     const row = await validateAndRead(db, 'bob', 'evt-char-val-count2-single')
 
-    // CHARACTERIZATION: server ignores validationCount; 1 endorsement flips validated.
-    // When FRO-279 lands this assertion must be inverted (1 should NOT be validated
-    // until a second endorser sends cell.validate).
-    expect(Number(row?.validated)).toBe(1)
+    // FRO-279: threshold=2, only 1 endorser → NOT validated yet.
+    expect(Number(row?.validated)).toBe(0)
   })
 
-  // CHARACTERIZATION (audit F-B1): intentionally frozen wrong behavior;
-  // FRO-279 will flip this — validationCount=5 should still be ignored today.
-  it('cell becomes validated=1 after ONE endorsement even when validationCount=5', async () => {
+  // CHARACTERIZATION (audit F-B1) — FLIPPED by FRO-279:
+  // Old: server ignored validationCount; 1 endorsement always flipped validated.
+  // New: with validationCount=5, 1 endorsement must NOT flip validated.
+  it('cell stays validated=0 after ONE endorsement when validationCount=5', async () => {
     const { db } = await makeTestDb()
     await seedFileAndCell(db, 'alice')
     await setSettings(db, { validationCount: 5 })
 
     const row = await validateAndRead(db, 'carol', 'evt-char-val-count5-single')
 
-    // CHARACTERIZATION: validationCount=5, only 1 endorser → still flips validated.
-    expect(Number(row?.validated)).toBe(1)
+    // FRO-279: threshold=5, only 1 endorser → NOT validated.
+    expect(Number(row?.validated)).toBe(0)
   })
 
   it('cell returns to validated=0 after cell.validate is removed (unvalidate)', async () => {
@@ -254,6 +249,79 @@ describe('CHARACTERIZATION (audit F-B1): cells.validated flips on first endorsem
       .first<{ validated: number | boolean }>()
     // Chain head moved — old validators are on stale event_id, so validated resets
     expect(Number(row?.validated)).toBe(0)
+  })
+})
+
+// ── FRO-279: N=2 full workflow ────────────────────────────────────────────
+
+describe('FRO-279: N=2 threshold — full validate/unvalidate lifecycle', () => {
+  it('1st endorsement does NOT flip validated; 2nd endorsement DOES flip it', async () => {
+    const { db } = await makeTestDb()
+    await seedFileAndCell(db, 'alice')
+    await setSettings(db, { validationCount: 2 })
+
+    // First validator
+    const row1 = await validateAndRead(db, 'bob', 'evt-n2-v1')
+    expect(Number(row1?.validated)).toBe(0)
+
+    // Second validator
+    const row2 = await validateAndRead(db, 'carol', 'evt-n2-v2')
+    expect(Number(row2?.validated)).toBe(1)
+  })
+
+  it('unvalidating one of two validators drops validated back to 0', async () => {
+    const { db } = await makeTestDb()
+    await seedFileAndCell(db, 'alice')
+    await setSettings(db, { validationCount: 2 })
+
+    // Both validate
+    await validateAndRead(db, 'bob', 'evt-n2-unval-v1')
+    await validateAndRead(db, 'carol', 'evt-n2-unval-v2')
+
+    // Confirm it's 1
+    const before = await db
+      .prepare(
+        `SELECT validated FROM cells
+         WHERE project_id = 'proj-char' AND file_id = 'file-char'
+           AND cell_id = 'cell-char-1' AND side = 'target'`,
+      )
+      .first<{ validated: number | boolean }>()
+    expect(Number(before?.validated)).toBe(1)
+
+    // Carol unvalidates — now only bob remains (COUNT=1 < threshold=2)
+    const ownerTok = await token(700, 'owner')
+    const unvalEvt: RawEvent<'cell.unvalidate'> = {
+      id: 'evt-n2-unval-u1',
+      schemaVersion: 1,
+      kind: 'cell.unvalidate',
+      projectId: 'proj-char',
+      fileId: 'file-char',
+      cellId: 'cell-char-1',
+      parentId: 'evt-char-commit',
+      author: 'carol',
+      payload: { editEventId: 'evt-n2-unval-v2', targetUsername: 'carol' },
+      clientTs: 400,
+    }
+    const res = await post(db, [unvalEvt], ownerTok)
+    expect(res.rejected).toHaveLength(0)
+
+    const after = await db
+      .prepare(
+        `SELECT validated FROM cells
+         WHERE project_id = 'proj-char' AND file_id = 'file-char'
+           AND cell_id = 'cell-char-1' AND side = 'target'`,
+      )
+      .first<{ validated: number | boolean }>()
+    expect(Number(after?.validated)).toBe(0)
+  })
+
+  it('N=1 (explicit) is byte-identical to default: 1 endorsement flips validated', async () => {
+    const { db } = await makeTestDb()
+    await seedFileAndCell(db, 'alice')
+    await setSettings(db, { validationCount: 1 })
+
+    const row = await validateAndRead(db, 'bob', 'evt-n1-explicit-v1')
+    expect(Number(row?.validated)).toBe(1)
   })
 })
 

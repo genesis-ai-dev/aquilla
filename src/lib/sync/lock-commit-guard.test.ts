@@ -13,6 +13,11 @@
 // internals (which would require a 50+-prop harness).
 
 import { describe, it, expect } from "vitest"
+import {
+  applyPresenceFrame,
+  applyLockClaimed,
+  applyLockReleased,
+} from "./cell-lock-state"
 
 // ── Helpers mirroring the production implementation ──────────────────────────
 
@@ -124,6 +129,171 @@ describe("RACE-5 commit-time lock guard", () => {
 
       lockMap.delete("cell-Y")
       expect(checkLockHolder("cell-Y")).toBeNull()
+    })
+  })
+})
+
+// ── B4: object-identity invariant for setState bail-out ───────────────────────
+//
+// React's functional-updater (and direct setState) bails — skips re-render —
+// when the new value is reference-equal to the current state.  The original
+// ProjectWorkspace handlers for lock.claimed and lock.released mutated the
+// shared Map in place *before* calling setState, so the bail check always
+// fired and the UI never updated for lone lock frames.
+//
+// The helpers in cell-lock-state.ts always return a NEW Map.  These tests pin
+// that contract so a future regression is caught immediately.
+
+describe("B4 — cell-lock-state helpers never alias input (bail-out invariant)", () => {
+  describe("applyPresenceFrame", () => {
+    it("returns a new Map (never the same reference)", () => {
+      const users = [{ userId: "alice", focusedCell: "GEN 1:1" }]
+      const result = applyPresenceFrame(users, "bob")
+      // The helper builds from scratch — there is no prior map to alias
+      expect(result).toBeInstanceOf(Map)
+      expect(result.get("GEN 1:1")).toBe("alice")
+    })
+
+    it("excludes the current user's focusedCell", () => {
+      const users = [
+        { userId: "alice", focusedCell: "GEN 1:1" },
+        { userId: "me", focusedCell: "GEN 1:2" },
+      ]
+      const result = applyPresenceFrame(users, "me")
+      expect(result.has("GEN 1:2")).toBe(false)
+      expect(result.get("GEN 1:1")).toBe("alice")
+    })
+
+    it("excludes users with no focusedCell", () => {
+      const users = [{ userId: "alice" }]
+      const result = applyPresenceFrame(users, "bob")
+      expect(result.size).toBe(0)
+    })
+  })
+
+  describe("applyLockClaimed", () => {
+    it("returns a Map with a different identity from the input", () => {
+      const current = new Map<string, string>([["GEN 1:1", "alice"]])
+      const result = applyLockClaimed(current, "GEN 1:2", "bob")
+      expect(result).not.toBe(current)
+    })
+
+    it("includes the new claim in the returned Map", () => {
+      const current = new Map<string, string>()
+      const result = applyLockClaimed(current, "GEN 1:1", "alice")
+      expect(result.get("GEN 1:1")).toBe("alice")
+    })
+
+    it("preserves existing entries", () => {
+      const current = new Map<string, string>([["GEN 1:1", "alice"]])
+      const result = applyLockClaimed(current, "GEN 1:2", "bob")
+      expect(result.get("GEN 1:1")).toBe("alice")
+      expect(result.get("GEN 1:2")).toBe("bob")
+    })
+
+    it("does NOT mutate the input Map (critical: prevents React bail-out)", () => {
+      const current = new Map<string, string>()
+      applyLockClaimed(current, "GEN 1:1", "alice")
+      // The original map must remain unchanged — if it were mutated the
+      // React functional updater would see the new value already in `cur`
+      // and bail out, skipping the re-render.
+      expect(current.size).toBe(0)
+    })
+  })
+
+  describe("applyLockReleased", () => {
+    it("returns a Map with a different identity from the input", () => {
+      const current = new Map<string, string>([["GEN 1:1", "alice"]])
+      const result = applyLockReleased(current, "GEN 1:1")
+      expect(result).not.toBe(current)
+    })
+
+    it("removes the released cell from the returned Map", () => {
+      const current = new Map<string, string>([["GEN 1:1", "alice"]])
+      const result = applyLockReleased(current, "GEN 1:1")
+      expect(result.has("GEN 1:1")).toBe(false)
+    })
+
+    it("does NOT mutate the input Map (critical: prevents React bail-out)", () => {
+      const current = new Map<string, string>([["GEN 1:1", "alice"]])
+      applyLockReleased(current, "GEN 1:1")
+      // The original map must still contain the entry — if it were deleted
+      // in-place the updater's `!cur.has(cellId)` check would bail, skipping
+      // the re-render and leaving the cell visually locked forever.
+      expect(current.get("GEN 1:1")).toBe("alice")
+    })
+
+    it("returns an empty Map when removing the only entry", () => {
+      const current = new Map<string, string>([["GEN 1:1", "alice"]])
+      const result = applyLockReleased(current, "GEN 1:1")
+      expect(result.size).toBe(0)
+    })
+
+    it("returns a map without the entry even if it was absent (idempotent)", () => {
+      const current = new Map<string, string>()
+      const result = applyLockReleased(current, "GEN 1:1")
+      expect(result.has("GEN 1:1")).toBe(false)
+      expect(result).not.toBe(current)
+    })
+  })
+
+  describe("frame sequence: presence -> lock.claimed -> lone lock.released", () => {
+    // This is the exact sequence from the B4 bug report.
+    // The sweep-expired-leases path broadcasts lock.released with NO trailing
+    // presence frame.  If lock.released mutated the shared Map in place, the
+    // React bail-out would fire and the cell would stay visually locked.
+
+    it("produces distinct Map objects on every step (no object aliasing)", () => {
+      // Simulate the ref + setState calls using the helpers.
+      // In production code:
+      //   cellLockHoldersRef.current = newMap
+      //   setCellLockHolders(newMap)   ← same object
+      //
+      // Each step captures what the ref / state would hold after the frame.
+
+      // Step 1: presence frame
+      const afterPresence = applyPresenceFrame(
+        [{ userId: "alice", focusedCell: "GEN 1:1" }],
+        "me",
+      )
+      expect(afterPresence.get("GEN 1:1")).toBe("alice")
+
+      // Step 2: lock.claimed (alice explicitly claims GEN 1:1)
+      const afterClaimed = applyLockClaimed(afterPresence, "GEN 1:1", "alice")
+      expect(afterClaimed).not.toBe(afterPresence) // new identity → re-render fires
+      expect(afterClaimed.get("GEN 1:1")).toBe("alice")
+
+      // Step 3: lone lock.released (lease sweep — no trailing presence frame)
+      const afterReleased = applyLockReleased(afterClaimed, "GEN 1:1")
+      expect(afterReleased).not.toBe(afterClaimed) // new identity → re-render fires
+      expect(afterReleased.has("GEN 1:1")).toBe(false)
+
+      // Critically: the intermediate maps are unchanged
+      expect(afterPresence.get("GEN 1:1")).toBe("alice") // step-1 map untouched
+      expect(afterClaimed.get("GEN 1:1")).toBe("alice")  // step-2 map untouched
+    })
+
+    it("ref reflects release immediately (RACE-5 synchrony preserved)", () => {
+      // Simulate the ref pointer — always updated synchronously with the new Map.
+      let refCurrent: Map<string, string> = new Map()
+
+      // presence frame
+      refCurrent = applyPresenceFrame(
+        [{ userId: "alice", focusedCell: "GEN 1:1" }],
+        "me",
+      )
+
+      // lock.claimed
+      refCurrent = applyLockClaimed(refCurrent, "GEN 1:1", "alice")
+      expect(refCurrent.get("GEN 1:1")).toBe("alice")
+
+      // lone lock.released
+      refCurrent = applyLockReleased(refCurrent, "GEN 1:1")
+
+      // The ref must immediately reflect the release — checkLockHolder must
+      // return null so a commit is not wrongly blocked.
+      const checkLockHolder = (cellId: string) => refCurrent.get(cellId) ?? null
+      expect(checkLockHolder("GEN 1:1")).toBeNull()
     })
   })
 })

@@ -66,6 +66,7 @@ import {
   buildProjectAwareMinter,
 } from "@/lib/sync/cqrs-bridge"
 import { emitTargetCellCommit, emitCellBacktranslationSet, emitFileRename } from "@/lib/sync/events-emit"
+import { applyPresenceFrame, applyLockClaimed, applyLockReleased } from "@/lib/sync/cell-lock-state"
 import { flushOutboxBatch } from "@/lib/sync/outbox-flush"
 import { runDiarization, type DiarizationPhase } from "@/lib/diarization/run-diarization"
 import { attachMediaFileToTimeline, attachMediaUrlToTimeline } from "@/lib/timeline/attach-media"
@@ -1776,35 +1777,34 @@ export function ProjectWorkspace() {
                 })
               }
             } else if (msg.t === "presence") {
-              const next = new Map<string, string>()
-              for (const u of msg.users) {
-                if (!u.focusedCell) continue
-                if (u.userId === currentUsername) continue
-                next.set(u.focusedCell, u.userId)
-              }
+              // B4 fix: applyPresenceFrame always returns a NEW Map, so ref and
+              // state never share the same object — subsequent handlers cannot
+              // cause React's bail-out by mutating the shared instance in place.
               // RACE-5: update ref synchronously so checkLockHolder reads
               // the latest state even before the React re-render completes.
+              const next = applyPresenceFrame(msg.users, currentUsername)
               cellLockHoldersRef.current = next
               setCellLockHolders(next)
             } else if (msg.t === "lock.claimed") {
               if (msg.by.userId === currentUsername) return
-              // RACE-5: sync the ref immediately (before React re-render).
-              cellLockHoldersRef.current.set(msg.cellId, msg.by.userId)
-              setCellLockHolders((cur) => {
-                if (cur.get(msg.cellId) === msg.by.userId) return cur
-                const next = new Map(cur)
-                next.set(msg.cellId, msg.by.userId)
-                return next
-              })
+              // B4 fix: build ONE new Map from the ref (authoritative, always
+              // current), assign to ref synchronously (RACE-5 preserved), and
+              // pass that same new Map to setState — new identity guarantees
+              // React re-renders even when this is a lone lock.claimed frame.
+              const next = applyLockClaimed(
+                cellLockHoldersRef.current,
+                msg.cellId,
+                msg.by.userId,
+              )
+              cellLockHoldersRef.current = next
+              setCellLockHolders(next)
             } else if (msg.t === "lock.released") {
-              // RACE-5: sync the ref immediately (before React re-render).
-              cellLockHoldersRef.current.delete(msg.cellId)
-              setCellLockHolders((cur) => {
-                if (!cur.has(msg.cellId)) return cur
-                const next = new Map(cur)
-                next.delete(msg.cellId)
-                return next
-              })
+              // B4 fix: same pattern — new Map from ref, sync ref, direct setState.
+              // Prevents the bail-out that left cells visually locked after a
+              // lease-expiry sweep (which broadcasts a lone lock.released frame).
+              const next = applyLockReleased(cellLockHoldersRef.current, msg.cellId)
+              cellLockHoldersRef.current = next
+              setCellLockHolders(next)
             } else if (msg.t === "project.archived") {
               if (msg.project !== pid) return
               void patchProject(pid, (p) => {

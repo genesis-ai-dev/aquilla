@@ -10,6 +10,7 @@
 // retry-able transient error (5xx) or as an auth problem (401/403).
 
 import { syncWorkerHttpOrigin } from "./sync-worker-url"
+import { timeoutSignal } from "./fetch-timeout"
 import type { CellRow, CellsPage, FileSummary } from "./cells-read-types"
 // Re-export so consumers (e.g. org/ProjectOverview) can import FileSummary from
 // the read-API module rather than reaching into cells-read-types directly.
@@ -42,14 +43,12 @@ function authHeaders(jwt: string): Record<string, string> {
 // browser's multi-minute socket timeout — soft refetches are dropped while a
 // fetch is in flight, so one wedged request blocks every later trigger. A
 // timeout rejects like a network error: callers keep the cached view and the
-// next trigger (focus, WS poke) retries. Guarded for older WebKit.
+// next trigger (focus, WS poke) retries. `timeoutSignal` is the shared
+// older-WebKit guard (see fetch-timeout.ts) used by reads and writes alike.
 const READ_TIMEOUT_MS = 15_000
-function readTimeoutSignal(): AbortSignal | undefined {
-  return typeof AbortSignal.timeout === "function" ? AbortSignal.timeout(READ_TIMEOUT_MS) : undefined
-}
 
 function fetchInit(jwt: string): RequestInit {
-  return { headers: authHeaders(jwt), signal: readTimeoutSignal() }
+  return { headers: authHeaders(jwt), signal: timeoutSignal(READ_TIMEOUT_MS) }
 }
 
 /**

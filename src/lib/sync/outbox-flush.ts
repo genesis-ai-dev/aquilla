@@ -13,6 +13,7 @@ import {
   type OutboxRecord,
 } from "./outbox"
 import { syncWorkerHttpOrigin } from "./sync-worker-url"
+import { timeoutSignal } from "./fetch-timeout"
 
 const MAX_BATCH = 100
 
@@ -181,6 +182,8 @@ export async function flushOutboxBatch(deps: FlushDeps): Promise<{
   try {
     // RES-6: 15s hard timeout so a hung connection doesn't strand the flusher.
     // AbortError is caught below and treated as transient (no budget burn).
+    // Feature-detected (B3): AbortSignal.timeout is missing on older WebKit —
+    // calling it unconditionally threw here BEFORE the fetch, bricking writes.
     res = await fetchFn(url, {
       method: "POST",
       headers: {
@@ -188,7 +191,7 @@ export async function flushOutboxBatch(deps: FlushDeps): Promise<{
         Authorization: `Bearer ${token}`,
       },
       body: JSON.stringify({ events }),
-      signal: AbortSignal.timeout(15_000),
+      signal: timeoutSignal(15_000),
     })
   } catch (err) {
     // RES-2: network throws (including AbortError/timeout) are transient — do NOT
@@ -214,6 +217,17 @@ export async function flushOutboxBatch(deps: FlushDeps): Promise<{
         { status: 403, reason: `HTTP 403` },
       )
       return { posted: events.length, accepted: 0, networkError: false, authError: false, quarantined: batch.length, staleSiblingCount: 0, staleSourceCount: 0 }
+    }
+    // N1: any other whole-request 4xx (400/404/413/422…) is deterministic —
+    // the same batch fails the same way forever, so it must burn the retry
+    // budget (markOutboxAttempt) and surface as `failed` at the cap instead
+    // of looping invisibly. 401 stays transient: a fresh token can fix it.
+    if (res.status >= 400 && res.status < 500 && res.status !== 401) {
+      await markOutboxAttempt(
+        batch.map((r) => r.id),
+        { error: { status: res.status, reason: `HTTP ${res.status}` } },
+      )
+      return { posted: events.length, accepted: 0, networkError: true, authError: false, quarantined: 0, staleSiblingCount: 0, staleSourceCount: 0 }
     }
     // RES-2: 5xx and 401 are transient — stamp without burning budget.
     await stampOutboxError(

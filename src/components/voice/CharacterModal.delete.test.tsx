@@ -6,7 +6,7 @@
  * character; onDelete fires only after checkbox+confirm.
  */
 
-import { describe, it, expect, vi, beforeEach } from "vitest"
+import { describe, it, expect, vi, beforeEach, type Mock } from "vitest"
 import { render, screen, fireEvent, waitFor } from "@testing-library/react"
 import { CharacterModal } from "./CharacterModal"
 import type { Voice } from "@/lib/parsers/types"
@@ -90,10 +90,10 @@ function renderModal({
 // ── Tests ─────────────────────────────────────────────────────────────────
 
 describe("CharacterModal delete confirm (FRO-291)", () => {
-  let onDeleteMock: ReturnType<typeof vi.fn>
+  let onDeleteMock: Mock<() => void>
 
   beforeEach(() => {
-    onDeleteMock = vi.fn()
+    onDeleteMock = vi.fn<() => void>()
   })
 
   it("does NOT call onDelete immediately when Delete button is clicked", async () => {

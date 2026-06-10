@@ -32,11 +32,9 @@ export type ParallelPanelSide = "both" | "source" | "target"
  * `handleReplaceAll` function that:
  *   1. Maps each diff.cellId → cells.find(c => c.id === diff.cellId) to get
  *      the current parentId (c.currentEventId) and sourceEventId (c.sourceEventId).
- *   2. Calls emitTargetCellCommit for each diff with retainValidations=retainValidations,
- *      searchQuery=findQuery, replaceString=replaceQuery.
+ *   2. Calls emitTargetCellCommit for each diff with searchQuery=findQuery,
+ *      replaceString=replaceQuery.
  *   3. Calls revalidateCells() after all commits are enqueued, then onAfterReplace?.().
- * Also add `retainValidations` as a boolean prop (default false) if you want
- * ProjectWorkspace to control the default toggle state.
  */
 export interface ReplaceAllPayload {
   diffs: CellReplaceDiff[]
@@ -44,7 +42,13 @@ export interface ReplaceAllPayload {
   totalSkipped: number
   findQuery: string
   replaceQuery: string
-  retainValidations: boolean
+  /**
+   * Always false — the "Retain my validations" checkbox was removed (FRO-286).
+   * Replacing text advances the cell's chain head; per Q25 (event-anchored
+   * validation) prior validations drop automatically and must be re-reviewed.
+   * Field kept for backward compat with the ProjectWorkspace call site.
+   */
+  retainValidations: false
 }
 
 interface ParallelPassagesPanelProps {
@@ -284,7 +288,6 @@ interface ReplaceSectionProps {
 
 function ReplaceSection({ query, results, isReadOnly, onAfterReplace }: ReplaceSectionProps) {
   const [replaceValue, setReplaceValue] = useState("")
-  const [retainValidations, setRetainValidations] = useState(false)
   const [applying, setApplying] = useState(false)
   const [lastResult, setLastResult] = useState<{ replaced: number; skipped: number } | null>(null)
 
@@ -330,7 +333,7 @@ function ReplaceSection({ query, results, isReadOnly, onAfterReplace }: ReplaceS
       totalSkipped,
       findQuery: query,
       replaceQuery: replaceValue,
-      retainValidations,
+      retainValidations: false,
     }
     try {
       await onAfterReplace?.(payload)
@@ -352,23 +355,10 @@ function ReplaceSection({ query, results, isReadOnly, onAfterReplace }: ReplaceS
         disabled={isReadOnly || applying}
       />
 
-      {/* Retain validations toggle */}
-      <label className="flex items-center gap-2 text-xs text-muted-foreground select-none cursor-pointer">
-        <input
-          type="checkbox"
-          checked={retainValidations}
-          onChange={(e) => setRetainValidations(e.target.checked)}
-          className="rounded"
-          disabled={isReadOnly || applying}
-        />
-        <span>Retain my validations</span>
-        <span
-          className="text-[10px] text-muted-foreground/60"
-          title="When on, prior reviewer validations carry forward to the new cell version instead of being dropped."
-        >
-          (?)
-        </span>
-      </label>
+      {/* Honest copy: replacing text advances the cell head, dropping prior validations per Q25. */}
+      <p className="text-xs text-muted-foreground" role="note">
+        Replacing text clears validation — it must be re-reviewed.
+      </p>
 
       {/* Skipped count notice */}
       {totalSkipped > 0 && (

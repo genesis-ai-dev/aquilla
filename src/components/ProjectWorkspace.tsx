@@ -2068,7 +2068,6 @@ export function ProjectWorkspace() {
         sourceEventId: cell.sourceEventId ?? null,
         value: diff.after,
         author: currentUsername,
-        retainValidations: payload.retainValidations,
         searchQuery: payload.findQuery,
         replaceString: payload.replaceQuery,
       })

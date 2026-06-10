@@ -618,6 +618,7 @@ projects.post(
     }
 
     const { username, role } = c.req.valid("json")
+    // Caller cannot grant a role higher than their own level.
     if (role > callerRole.level) {
       return c.json(
         { error: `cannot grant role ${role} as ${callerRole.name} (${callerRole.level})` },
@@ -629,6 +630,27 @@ projects.post(
     if (!target) return c.json({ error: "user not found" }, 404)
     if (target.id === user.id) {
       return c.json({ error: "cannot grant role to self" }, 400)
+    }
+
+    // FRO-285 (F-B6): target-level cap — you cannot add-over (change the role
+    // of) a member whose current level is >= yours, unless you are owner (700).
+    // Owners may modify any member. For a new member (no existing row), this
+    // check is a no-op (existing.role_level will be 0).
+    if (callerRole.level < ROLE.OWNER) {
+      const existing = await c.env.AQUILLA_PG.prepare(
+        "SELECT role_level FROM project_members WHERE project_id = ? AND user_id = ?",
+      )
+        .bind(projectId, target.id)
+        .first<{ role_level: number }>()
+      const targetCurrentLevel = existing ? Number(existing.role_level) : 0
+      if (targetCurrentLevel >= callerRole.level) {
+        return c.json(
+          {
+            error: `cannot modify a member whose current role (${targetCurrentLevel}) is >= your role (${callerRole.level})`,
+          },
+          403,
+        )
+      }
     }
 
     await c.env.AQUILLA_PG.prepare(
@@ -677,6 +699,18 @@ projects.delete("/:projectId/members/:userId", authMiddleware, async (c) => {
     return c.json(
       { error: "user has no direct project membership; remove from org instead" },
       409,
+    )
+  }
+
+  // FRO-285 (F-B6): target-level cap — you cannot delete the project_members
+  // row of a user whose current level is >= yours, unless you are owner (700).
+  const targetCurrentLevel = Number(existing.role_level)
+  if (callerRole.level < ROLE.OWNER && targetCurrentLevel >= callerRole.level) {
+    return c.json(
+      {
+        error: `cannot remove a member whose role (${targetCurrentLevel}) is >= your role (${callerRole.level})`,
+      },
+      403,
     )
   }
 

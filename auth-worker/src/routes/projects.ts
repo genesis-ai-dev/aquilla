@@ -238,7 +238,7 @@ projects.get("/", authMiddleware, async (c) => {
   //   ?11    : orgFilter (NULL or number) — IS NULL check (no-filter case)
   //   ?12    : orgFilter (NULL or number) — equality check (filter case)
   const rows = await c.env.AQUILLA_PG.prepare(
-    `SELECT p.id, p.name, p.org_id, p.archived_at,
+    `SELECT p.id, p.name, p.org_id, p.archived_at, p.is_active,
             GREATEST(
               COALESCE(pm.role_level, 0),
               COALESCE(gg.max_grant,  0),
@@ -295,6 +295,7 @@ projects.get("/", authMiddleware, async (c) => {
       name: string
       org_id: number | null
       archived_at: string | null
+      is_active: boolean
       role_level: number
       role_source: "creator" | "override" | "org" | "group"
     }>()
@@ -308,6 +309,7 @@ projects.get("/", authMiddleware, async (c) => {
       name: row.name,
       orgId: row.org_id,
       archivedAt: row.archived_at,
+      isActive: row.is_active,
       role: {
         level: row.role_level,
         name: roleNameFor(row.role_level),
@@ -330,7 +332,7 @@ projects.get("/:projectId", authMiddleware, async (c) => {
   if (!role) return c.json({ error: "not found or no access" }, 403)
 
   const row = await c.env.AQUILLA_PG.prepare(
-    `SELECT p.id, p.name, p.archived_at, p.archived_by,
+    `SELECT p.id, p.name, p.archived_at, p.archived_by, p.is_active,
             u.username AS archived_by_username
        FROM projects p
        LEFT JOIN users u ON u.id = p.archived_by
@@ -343,6 +345,7 @@ projects.get("/:projectId", authMiddleware, async (c) => {
       archived_at: string | null
       archived_by: number | null
       archived_by_username: string | null
+      is_active: boolean
     }>()
 
   if (!row) return c.json({ error: "not found" }, 404)
@@ -357,6 +360,7 @@ projects.get("/:projectId", authMiddleware, async (c) => {
     archivedBy: row.archived_by
       ? { id: row.archived_by, username: row.archived_by_username }
       : null,
+    isActive: row.is_active,
     role: { level: role.level, name: role.name, source: role.source },
     files,
   })
@@ -440,6 +444,29 @@ projects.delete("/:projectId/archive", authMiddleware, async (c) => {
   c.executionCtx.waitUntil(notifySyncWorkerOfArchive(c.env, projectId, null, null))
 
   return c.json({ ok: true })
+})
+
+// ──────────────────────────────────────────────────────────────────────────
+// PATCH /api/v2/projects/:projectId/lifecycle — toggle active/inactive
+//   Role gate: project_lead+ (level >= 500), matching invite-creation gate.
+//   Body: { isActive: boolean }
+//   Response: { ok: true, isActive: boolean }
+// ──────────────────────────────────────────────────────────────────────────
+
+const lifecycleBody = z.object({ isActive: z.boolean() })
+projects.patch("/:projectId/lifecycle", authMiddleware, zValidator("json", lifecycleBody), async (c) => {
+  const user = c.get("user")
+  const projectId = c.req.param("projectId") as string
+  const role = await resolveProjectRole(c.env, user, projectId)
+  if (!role) return c.json({ error: "not found or no access" }, 403)
+  if (role.level < 500) return c.json({ error: "project_lead+ required to change lifecycle" }, 403)
+  const { isActive } = c.req.valid("json")
+  await c.env.AQUILLA_PG.prepare(
+    "UPDATE projects SET is_active = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+  )
+    .bind(isActive, projectId)
+    .run()
+  return c.json({ ok: true, isActive })
 })
 
 // ──────────────────────────────────────────────────────────────────────────

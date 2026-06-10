@@ -4,13 +4,18 @@
  *   2. Standards     — authored standards entries  (kind="standard")
  *   3. Recent Examples — validated source→target pairs (read-only)
  *
- * SWARM-TODO(living-memory): add nav entry in ProjectWorkspace nav items
- *   (e.g. next to Rules / Comments) pointing to /project/:id/memory.
+ * Edit access is gated at MAINTAINER (600) via useProjectSettings.canEdit.
+ * Below-floor users see read-only affordances with a tooltip naming the
+ * required role, mirroring the FRO-255 pattern in useProjectSettings.
+ *
+ * Layout: FRO-254 renders this page inside the ProjectWorkspace shell
+ * (centerSurface === "memory"), so this component owns only the content
+ * area — no full-page header, no back button.
  */
 
 import React, { useMemo, useState } from "react"
 import { useParams, useNavigate } from "react-router-dom"
-import { ArrowLeft, BookOpen, Users, AlertTriangle, Plus, Pencil, Trash2 } from "lucide-react"
+import { BookOpen, Users, AlertTriangle, Plus, Pencil, Trash2, Lock, ExternalLink, Brain } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
@@ -23,10 +28,17 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip"
 import { useLivingMemory } from "@/hooks/useLivingMemory"
 import type { LivingMemoryCell } from "@/hooks/useLivingMemory"
 import { useLiveness } from "@/hooks/useLiveness"
 import { useProject } from "@/hooks/useProject"
+import { useProjectSettings } from "@/hooks/useProjectSettings"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import type { LivingMemoryEntry } from "@/lib/parsers/types"
 
@@ -82,12 +94,12 @@ function LivingMemorySkeleton() {
   )
 }
 
-// ── Empty state ────────────────────────────────────────────────────────────
+// ── Empty state for Recent Examples ───────────────────────────────────────
 
-function LivingMemoryEmpty() {
+function RecentExamplesEmpty() {
   return (
     <div
-      className="flex flex-col items-center justify-center gap-4 py-24 text-muted-foreground"
+      className="flex flex-col items-center justify-center gap-4 py-12 text-muted-foreground"
       role="status"
       aria-label="No validated translations"
     >
@@ -97,8 +109,9 @@ function LivingMemoryEmpty() {
       <div className="flex flex-col items-center gap-1.5 text-center">
         <p className="text-sm font-medium text-foreground/70">No validated translations yet</p>
         <p className="text-xs text-muted-foreground max-w-xs leading-relaxed">
-          Validated cells will appear here once translators and reviewers reach the required
-          validation threshold.
+          When translators and reviewers reach the required validation threshold on a cell, that
+          source&thinsp;&rarr;&thinsp;target pair appears here. The AI draws on these pairs in
+          every subsequent draft.
         </p>
       </div>
     </div>
@@ -161,16 +174,15 @@ function ValidatedCellCard({ cell }: { cell: LivingMemoryCell }) {
 
 function FileGroupHeading({ fileName }: { fileName: string }) {
   return (
-    <h2 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mt-6 mb-2 px-0.5 first:mt-0 flex items-center gap-2">
+    <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mt-6 mb-2 px-0.5 first:mt-0 flex items-center gap-2">
       <span className="flex-1 truncate">{fileName}</span>
-    </h2>
+    </h3>
   )
 }
 
 // ── Grouped cell list ──────────────────────────────────────────────────────
 
 function CellList({ cells }: { cells: LivingMemoryCell[] }) {
-  // Group cells by file while preserving sort order.
   const groups = useMemo(() => {
     const seen: string[] = []
     const byFile = new Map<string, { fileName: string; cells: LivingMemoryCell[] }>()
@@ -237,13 +249,46 @@ function EntryForm({ initialText = "", onSave, onCancel }: EntryFormProps) {
   )
 }
 
+// ── Role-lock icon with tooltip ────────────────────────────────────────────
+
+function RoleLockTooltip({ reason }: { reason: "offline" | "role" | null }) {
+  if (reason === null) return null
+  const message =
+    reason === "offline"
+      ? "You are offline. Reconnect to edit."
+      : "Editing requires Maintainer role (600) or above."
+  return (
+    <TooltipProvider>
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <span
+              aria-label={message}
+              className="inline-flex items-center text-muted-foreground/50"
+            />
+          }
+        >
+          <Lock className="h-3 w-3" aria-hidden="true" />
+        </TooltipTrigger>
+        <TooltipContent side="left" className="max-w-[200px] text-xs">
+          {message}
+        </TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
+  )
+}
+
 // ── Authored entries section ───────────────────────────────────────────────
 
 interface AuthoredEntriesSectionProps {
   title: string
+  description: string
+  placeholder: string
+  example: string
   kind: LivingMemoryEntry["kind"]
   entries: LivingMemoryEntry[]
   canEdit: boolean
+  reasonCannotEdit: "offline" | "role" | null
   onAdd: (text: string) => void
   onUpdate: (id: string, text: string) => void
   onDelete: (id: string) => void
@@ -251,9 +296,13 @@ interface AuthoredEntriesSectionProps {
 
 function AuthoredEntriesSection({
   title,
+  description,
+  placeholder,
+  example,
   kind,
   entries,
   canEdit,
+  reasonCannotEdit,
   onAdd,
   onUpdate,
   onDelete,
@@ -266,7 +315,7 @@ function AuthoredEntriesSection({
 
   return (
     <section aria-label={title} className="mb-8">
-      <div className="flex items-center gap-2 mb-3">
+      <div className="flex items-center gap-2 mb-1">
         <h2 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider flex-1">
           {title}
         </h2>
@@ -282,7 +331,10 @@ function AuthoredEntriesSection({
             Add
           </Button>
         )}
+        {!canEdit && <RoleLockTooltip reason={reasonCannotEdit} />}
       </div>
+
+      <p className="text-xs text-muted-foreground mb-3 leading-relaxed">{description}</p>
 
       {adding && (
         <div className="mb-3">
@@ -294,9 +346,13 @@ function AuthoredEntriesSection({
       )}
 
       {filtered.length === 0 && !adding ? (
-        <p className="text-xs text-muted-foreground/60 italic py-2">
-          No {title.toLowerCase()} yet.{canEdit ? " Click Add to create one." : ""}
-        </p>
+        <div className="rounded-lg border border-dashed border-border/60 px-4 py-5 flex flex-col gap-1.5">
+          <p className="text-xs text-muted-foreground/60 italic">{placeholder}</p>
+          <p className="text-xs text-muted-foreground/50">
+            <span className="font-medium not-italic text-muted-foreground/70">Example: </span>
+            {example}
+          </p>
+        </div>
       ) : (
         <div className="flex flex-col gap-2">
           {filtered.map((entry) => (
@@ -373,6 +429,9 @@ function AuthoredEntriesSection({
 }
 
 // ── Page ──────────────────────────────────────────────────────────────────
+// FRO-254: rendered inside ProjectWorkspace's AppShell (centerSurface===
+// "memory") in a h-full overflow-y-auto wrapper. No full-page header or
+// back-button chrome here — the shell owns that. Content scrolls naturally.
 
 export function LivingMemoryPage() {
   const { id: projectId } = useParams<{ id: string }>()
@@ -384,14 +443,22 @@ export function LivingMemoryPage() {
 
   const { state: livenessState, label: livenessLabel } = useLiveness(cells.length)
 
-  const { project, loading: projectLoading, patchSettings } = useProject(projectId ?? "")
+  const { project, loading: projectLoading } = useProject(projectId ?? "")
+
+  // Role-aware edit gate: mirrors the FRO-255 pattern — get roleLevel from
+  // syncRole, pass to useProjectSettings which enforces MAINTAINER (600) floor.
+  const roleLevel = project?.syncRole?.level ?? null
+  const { canEdit, reasonCannotEdit, patch: patchSettings } = useProjectSettings(
+    projectId ?? null,
+    roleLevel,
+  )
+
   const { session } = useFrontierSession()
 
+  // While the project hasn't loaded yet, canEdit is false (roleLevel is null).
+  // This correctly shows read-only affordances before the role is known.
+  const entriesReady = !projectLoading && project != null
   const entries = project?.livingMemoryEntries ?? []
-  // canEdit mirrors TerminologyPage — patchSettings is blocked internally when
-  // offline or below PROJECT_LEAD, so we allow the UI and let the patch report
-  // the block. We only hide edit controls while project hasn't loaded.
-  const canEdit = !projectLoading && project != null
 
   const author = session?.username ?? "unknown"
 
@@ -411,47 +478,65 @@ export function LivingMemoryPage() {
   }
 
   return (
-    <div className="flex flex-col min-h-screen">
-      {/* Header */}
-      <header className="flex items-center gap-2 px-4 py-3 border-b shrink-0 bg-background/95 backdrop-blur-xs sticky top-0 z-10">
-        <Button
-          variant="ghost"
-          size="icon"
-          className="h-7 w-7 shrink-0"
-          onClick={() => navigate(`/project/${projectId}`)}
-          aria-label="Back to project"
-        >
-          <ArrowLeft className="h-4 w-4" aria-hidden="true" />
-        </Button>
-        <div className="flex-1 min-w-0">
-          <h1 className="text-sm font-semibold leading-none">Living Memory</h1>
-          <p className="text-xs text-muted-foreground mt-0.5 leading-none">
-            Confirmed source&thinsp;&rarr;&thinsp;target pairs
-          </p>
+    <div className="flex flex-col">
+      {/* Page header — purpose + liveness (no back button: shell owns nav) */}
+      <div className="px-4 pt-4 pb-3 max-w-2xl mx-auto w-full">
+        <div className="flex items-start gap-3 mb-3">
+          <div className="rounded-xl bg-muted/60 p-2 shrink-0 mt-0.5">
+            <Brain className="h-5 w-5 text-muted-foreground/80" aria-hidden="true" />
+          </div>
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-2 mb-1">
+              <h1 className="text-sm font-semibold leading-none">Living Memory</h1>
+              <span
+                aria-label={livenessLabel}
+                title={livenessLabel}
+                className={[
+                  "h-2 w-2 shrink-0 rounded-full transition-colors",
+                  livenessState === "offline"
+                    ? "bg-red-500"
+                    : livenessState === "updating"
+                      ? "bg-amber-400 animate-pulse"
+                      : "bg-emerald-500",
+                ].join(" ")}
+              />
+              {isLoading ? (
+                <Skeleton className="h-4 w-20 rounded-full" aria-label="Loading count" />
+              ) : (
+                <Badge variant="secondary" className="text-[10px] tabular-nums">
+                  {cells.length.toLocaleString()} validated
+                </Badge>
+              )}
+            </div>
+            <p className="text-xs text-muted-foreground leading-relaxed">
+              Your team's encoded voice and standards — the project context the AI draws on
+              for every new draft. It grows with each validation, correction, and instruction
+              your team adds.
+            </p>
+          </div>
         </div>
-        {isLoading ? (
-          <Skeleton className="h-5 w-20 rounded-full shrink-0" aria-label="Loading count" />
-        ) : (
-          <Badge variant="secondary" className="shrink-0 tabular-nums">
-            {cells.length.toLocaleString()} validated
-          </Badge>
-        )}
-        <span
-          aria-label={livenessLabel}
-          title={livenessLabel}
-          className={[
-            "h-2 w-2 shrink-0 rounded-full transition-colors",
-            livenessState === "offline" ? "bg-red-500" :
-            livenessState === "updating" ? "bg-amber-400 animate-pulse" :
-            "bg-emerald-500",
-          ].join(" ")}
-        />
-      </header>
+
+        {/* Cross-link to Terminology */}
+        <div className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-muted/40 border border-border/50 text-xs text-muted-foreground">
+          <ExternalLink className="h-3 w-3 shrink-0" aria-hidden="true" />
+          <span>
+            <strong className="font-medium text-foreground/70">Terminology</strong> captures
+            your project's key terms and preferred renderings.{" "}
+          </span>
+          <button
+            onClick={() => navigate(`/project/${projectId}/terminology`)}
+            className="underline text-foreground/60 hover:text-foreground transition-colors shrink-0"
+            aria-label="Go to Terminology page"
+          >
+            Open Terminology
+          </button>
+        </div>
+      </div>
 
       {/* Truncation warning */}
       {isTruncated && (
         <div
-          className="flex items-start gap-2 px-4 py-2.5 text-xs text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/30 border-b border-amber-200/60 dark:border-amber-800/40"
+          className="flex items-start gap-2 px-4 py-2.5 text-xs text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/30 border-y border-amber-200/60 dark:border-amber-800/40"
           role="alert"
         >
           <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" aria-hidden="true" />
@@ -464,47 +549,58 @@ export function LivingMemoryPage() {
         </div>
       )}
 
-      {/* Body — primary content scrolls with the window, not a nested
-          container (see aquilla-specs 09-design-and-ux.md, "one primary
-          scroll"). The sticky header stays pinned to the viewport top. */}
-      <div className="flex-1">
-        <div className="px-4 py-4 max-w-2xl mx-auto">
-          {/* Instructions section */}
-          <AuthoredEntriesSection
-            title="Instructions"
-            kind="instruction"
-            entries={entries}
-            canEdit={canEdit}
-            onAdd={(text) => handleAdd("instruction", text)}
-            onUpdate={handleUpdate}
-            onDelete={handleDelete}
-          />
+      {/* Body — content in a max-width column */}
+      <div className="flex-1 px-4 py-4 max-w-2xl mx-auto w-full">
 
-          {/* Standards section */}
-          <AuthoredEntriesSection
-            title="Standards"
-            kind="standard"
-            entries={entries}
-            canEdit={canEdit}
-            onAdd={(text) => handleAdd("standard", text)}
-            onUpdate={handleUpdate}
-            onDelete={handleDelete}
-          />
+        {/* Instructions section */}
+        <AuthoredEntriesSection
+          title="Instructions"
+          description="Tell the AI what this project is about — audience, tone, formality, special handling. These appear in every draft prompt."
+          placeholder="No instructions yet."
+          example={`"Translate into formal Swahili for an adult literacy audience. Avoid theological jargon unless the source uses it."`}
+          kind="instruction"
+          entries={entries}
+          canEdit={entriesReady && canEdit}
+          reasonCannotEdit={entriesReady ? reasonCannotEdit : "role"}
+          onAdd={(text) => handleAdd("instruction", text)}
+          onUpdate={handleUpdate}
+          onDelete={handleDelete}
+        />
 
-          {/* Recent Examples (validated cells) */}
-          <section aria-label="Recent Examples">
-            <h2 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3">
+        {/* Standards section */}
+        <AuthoredEntriesSection
+          title="Standards"
+          description="Project-wide quality rules the AI checks its drafts against. Capture decisions your team keeps revisiting."
+          placeholder="No standards yet."
+          example={`"Always preserve proper nouns untranslated. Numbers in source must appear as numerals in target."`}
+          kind="standard"
+          entries={entries}
+          canEdit={entriesReady && canEdit}
+          reasonCannotEdit={entriesReady ? reasonCannotEdit : "role"}
+          onAdd={(text) => handleAdd("standard", text)}
+          onUpdate={handleUpdate}
+          onDelete={handleDelete}
+        />
+
+        {/* Recent Examples */}
+        <section aria-label="Recent Examples" className="mb-8">
+          <div className="flex items-center gap-2 mb-1">
+            <h2 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
               Recent Examples
             </h2>
-            {isLoading ? (
-              <LivingMemorySkeleton />
-            ) : isEmpty ? (
-              <LivingMemoryEmpty />
-            ) : (
-              <CellList cells={cells} />
-            )}
-          </section>
-        </div>
+          </div>
+          <p className="text-xs text-muted-foreground mb-3 leading-relaxed">
+            Human-validated source&thinsp;&rarr;&thinsp;target pairs the AI uses as in-context
+            examples. These are the translations your team has agreed on.
+          </p>
+          {isLoading ? (
+            <LivingMemorySkeleton />
+          ) : isEmpty ? (
+            <RecentExamplesEmpty />
+          ) : (
+            <CellList cells={cells} />
+          )}
+        </section>
       </div>
     </div>
   )

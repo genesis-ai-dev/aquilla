@@ -1,6 +1,7 @@
 import { describe, it, expect, afterEach, beforeEach, vi } from "vitest"
 import { render, screen, waitFor } from "@testing-library/react"
 import { MemoryRouter } from "react-router-dom"
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { OrgProvider } from "@/context/OrgContext"
 import { MembersPage } from "./MembersPage"
 
@@ -79,12 +80,16 @@ afterEach(() => vi.restoreAllMocks())
 
 describe("MembersPage active-org", () => {
   it("renders members for the active org (42)", async () => {
+    // QueryClientProvider: the org shell's AccountSwitcher reaches useAccounts,
+    // which clears the React Query cache on account switch (FRO-212).
     render(
-      <MemoryRouter>
-        <OrgProvider>
-          <MembersPage />
-        </OrgProvider>
-      </MemoryRouter>,
+      <QueryClientProvider client={new QueryClient()}>
+        <MemoryRouter>
+          <OrgProvider>
+            <MembersPage />
+          </OrgProvider>
+        </MemoryRouter>
+      </QueryClientProvider>,
     )
     // The active org's name now appears in more than one place (the OrgSidebar
     // switcher + the "People in <org>" heading) since MembersPage renders inside

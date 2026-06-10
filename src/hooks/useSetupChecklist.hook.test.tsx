@@ -1,9 +1,17 @@
 import { describe, it, expect, beforeEach } from "vitest"
 import { renderHook, act, waitFor } from "@testing-library/react"
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
+import type { ReactNode } from "react"
 import { IDBFactory } from "fake-indexeddb"
 import { useSetupChecklist } from "./useSetupChecklist"
 import { createProject, getProject, _resetDbForTesting } from "@/lib/store/project-index"
 import type { ProjectRecord } from "@/lib/parsers/types"
+
+// useSetupChecklist reaches useAccounts (via useFrontierSession), which needs
+// a QueryClientProvider since FRO-212 — same as the app root in main.tsx.
+const wrapper = ({ children }: { children: ReactNode }) => (
+  <QueryClientProvider client={new QueryClient()}>{children}</QueryClientProvider>
+)
 
 function mkProject(id: string, overrides: Partial<ProjectRecord> = {}): ProjectRecord {
   return {
@@ -29,7 +37,7 @@ describe("useSetupChecklist — dismiss persistence", () => {
     await createProject(initial)
     const { result, rerender } = renderHook(
       ({ project }) => useSetupChecklist(project),
-      { initialProps: { project: initial } }
+      { initialProps: { project: initial }, wrapper }
     )
     await act(async () => { await result.current.dismiss() })
     expect(result.current.dismissed).toBe(true)
@@ -48,7 +56,7 @@ describe("useSetupChecklist — dismiss persistence", () => {
     await createProject(b)
     const { result, rerender } = renderHook(
       ({ project }) => useSetupChecklist(project),
-      { initialProps: { project: a } }
+      { initialProps: { project: a }, wrapper }
     )
     await act(async () => { await result.current.dismiss() })
     expect(result.current.dismissed).toBe(true)
@@ -62,7 +70,7 @@ describe("useSetupChecklist — dismiss persistence", () => {
   it("persists to IDB", async () => {
     const initial = mkProject("p1")
     await createProject(initial)
-    const { result } = renderHook(() => useSetupChecklist(initial))
+    const { result } = renderHook(() => useSetupChecklist(initial), { wrapper })
     await act(async () => { await result.current.dismiss() })
     const stored = await getProject("p1")
     expect(stored?.setupChecklistDismissed).toBe(true)
@@ -71,7 +79,7 @@ describe("useSetupChecklist — dismiss persistence", () => {
   it("sets dismissed true immediately after dismiss call", async () => {
     const initial = mkProject("p1")
     await createProject(initial)
-    const { result } = renderHook(() => useSetupChecklist(initial))
+    const { result } = renderHook(() => useSetupChecklist(initial), { wrapper })
     expect(result.current.dismissed).toBe(false)
     await act(async () => { await result.current.dismiss() })
     expect(result.current.dismissed).toBe(true)

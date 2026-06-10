@@ -65,6 +65,7 @@ import type { Concept } from "@/lib/terminology/types"
 import { PreAcceptanceWarningBand } from "./PreAcceptanceWarningBand"
 import { detectPreAcceptanceWarnings } from "@/lib/terminology/preacceptance"
 import { useFileFontSizes } from "@/lib/store/file-view-prefs"
+import { AddConceptDialog } from "./AddConceptDialog"
 
 // Per-row render counter. Always accumulated when perf logging is on (cheap)
 // but NOT auto-logged — render logs would flood the console and push the
@@ -424,6 +425,10 @@ interface EditorTableProps {
   /** FRO-207: Called when the user confirms or invalidates an alignment seed.
    *  Parent persists via project-settings and rebuilds the model. */
   onAlignmentSeedChange?: (seed: import("@/lib/completion/interlinear").AlignmentSeed) => void
+  /** FRO-192: Map of cellId → {username, scopeLabel} for cells that have an
+   *  active assignment. The map is built in ProjectWorkspace from getMyAssignments
+   *  (member's own inbox) and getProjectAssignments (manager workload). */
+  assignmentsByCellId?: ReadonlyMap<string, { username: string; scopeLabel: string }>
 }
 
 export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(function EditorTable({
@@ -449,6 +454,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   getTokenForFile,
   alignmentModel,
   onAlignmentSeedChange,
+  assignmentsByCellId,
 }, ref) {
   const permissions = useProjectPermissions(project)
   const canEdit = permissions.canEditContent
@@ -1008,6 +1014,8 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
                 onAlignmentSeedChange={onAlignmentSeedChange}
                 sourceFontSize={sourceFontSize}
                 targetFontSize={targetFontSize}
+                assigneeLabel={assignmentsByCellId?.get(cell.id)?.username ?? null}
+                assigneeNote={assignmentsByCellId?.get(cell.id)?.scopeLabel ?? null}
               />
             </div>
           )
@@ -1108,6 +1116,10 @@ interface MemoizedRowProps {
   sourceFontSize?: number
   /** FRO-251: per-file target-column font size in px. Defaults to 14 when absent. */
   targetFontSize?: number
+  /** FRO-192: username of the assignee for this cell. Null = no assignment. */
+  assigneeLabel?: string | null
+  /** FRO-192: scope label for the assignment tooltip. */
+  assigneeNote?: string | null
 }
 
 const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
@@ -1135,6 +1147,8 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
     onCellCommitted, onOptimisticEdit, lockHolderLabel, remoteChangedWhileFocused,
     onClaimCell, onReleaseCell, onAckRemoteChange,
     isStaleSource,
+    assigneeLabel,
+    assigneeNote,
   } = props
 
   const cellId = cell.id
@@ -1256,6 +1270,8 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
         onAckRemoteChange={onAckRemoteChange}
         sourceFontSize={sourceFontSize}
         targetFontSize={targetFontSize}
+        assigneeLabel={assigneeLabel}
+        assigneeNote={assigneeNote}
       />
     </div>
   )
@@ -1337,6 +1353,100 @@ interface EditorRowProps {
   sourceFontSize?: number
   /** FRO-251: per-file target-column font size in px. Defaults to 14 when absent. */
   targetFontSize?: number
+  /** FRO-192: username of the assignee for this cell. Null = no assignment. */
+  assigneeLabel?: string | null
+  /** FRO-192: scope label for the assignment tooltip. */
+  assigneeNote?: string | null
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// SelectionTermActions — floating action bar shown when source text is selected.
+// Shows "Add to termbase" when the callback is wired, and a "View term" lookup
+// popover when the selection matches an existing active concept (FRO-260).
+// ────────────────────────────────────────────────────────────────────────────
+
+interface SelectionTermActionsProps {
+  sourceSelection: string
+  concepts: Concept[]
+  onAddToTermbase?: () => void
+  onTermApply: (rendering: string) => void
+  /** FRO-260: called on mousedown so the parent can suppress selectionchange clearing. */
+  onToolbarMouseDown?: () => void
+  /** FRO-260: called on mouseup/mouseleave so the parent resets the guard. */
+  onToolbarMouseUp?: () => void
+}
+
+function SelectionTermActions({
+  sourceSelection,
+  concepts,
+  onAddToTermbase,
+  onTermApply,
+  onToolbarMouseDown,
+  onToolbarMouseUp,
+}: SelectionTermActionsProps) {
+  const activeConcepts = useMemo(
+    () => concepts.filter((c) => c.status === "active"),
+    [concepts],
+  )
+  // Case-insensitive substring match — same heuristic as TermLookupPopover.
+  const hasMatch = useMemo(
+    () =>
+      activeConcepts.some((c) =>
+        c.sourceTerm.toLowerCase().includes(sourceSelection.toLowerCase()) ||
+        sourceSelection.toLowerCase().includes(c.sourceTerm.toLowerCase()),
+      ),
+    [activeConcepts, sourceSelection],
+  )
+
+  // FRO-260: shared mousedown handler for all toolbar buttons.
+  // e.preventDefault() preserves the browser text selection (prevents focus
+  // shift). onToolbarMouseDown() sets a flag that suppresses the FRO-248
+  // selectionchange guard so that onClick still sees a non-null selection.
+  const handleButtonMouseDown = (e: React.MouseEvent) => {
+    e.preventDefault()
+    onToolbarMouseDown?.()
+  }
+
+  return (
+    <div
+      className="absolute right-1 top-0 z-10 flex items-center gap-1"
+      dir="ltr"
+      onMouseUp={onToolbarMouseUp}
+      onMouseLeave={onToolbarMouseUp}
+    >
+      {/* Lookup popover: only when selection matches an existing active concept */}
+      {hasMatch && (
+        <TermLookupPopover
+          sourceTerm={sourceSelection}
+          concepts={activeConcepts}
+          onApply={onTermApply}
+        >
+          <button
+            type="button"
+            onMouseDown={handleButtonMouseDown}
+            className="inline-flex items-center gap-1 rounded-md border border-primary/30 bg-background px-2 py-1 text-[11px] font-medium text-primary shadow-neu-sm hover:bg-primary/10"
+            title={`Look up "${sourceSelection}" in the term base`}
+          >
+            <BookOpen className="h-3 w-3" aria-hidden />
+            View term
+          </button>
+        </TermLookupPopover>
+      )}
+      {/* Add to termbase: only when the callback is wired */}
+      {onAddToTermbase && (
+        <button
+          type="button"
+          onMouseDown={handleButtonMouseDown}
+          onClick={onAddToTermbase}
+          className="inline-flex items-center gap-1 rounded-md bg-primary px-2 py-1 text-[11px] font-medium text-primary-foreground shadow-neu-sm hover:bg-primary/90"
+          title={`Add "${sourceSelection}" to the termbase as a draft concept`}
+        >
+          <BookOpen className="h-3 w-3" aria-hidden />
+          Add to termbase
+        </button>
+      )}
+    </div>
+  )
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -1473,6 +1583,8 @@ function EditorRow({
   onAlignmentSeedChange,
   sourceFontSize = 14,
   targetFontSize = 14,
+  assigneeLabel,
+  assigneeNote,
 }: EditorRowProps) {
   const [openRuleId, setOpenRuleId] = useState<string | null>(null)
   const [openRuleAnchor, setOpenRuleAnchor] = useState<HTMLElement | null>(null)
@@ -1487,6 +1599,17 @@ function EditorRow({
   // Add-from-selection (Slice 5): the source-side text the user has selected,
   // surfaced as an "Add to termbase" affordance. Null when nothing selected.
   const [sourceSelection, setSourceSelection] = useState<string | null>(null)
+  // FRO-260: ref mirror of sourceSelection so onClick handlers can read the
+  // captured text even if a selectionchange event already cleared the React
+  // state (the mousedown-before-click race that collapses the browser selection
+  // before the click callback fires).
+  const capturedSelectionRef = useRef<string | null>(null)
+  // FRO-260: set to true while the user is pressing down on a SelectionTermActions
+  // toolbar button, so the FRO-248 selectionchange guard doesn't clear
+  // sourceSelection before onClick fires.
+  const toolbarMouseDownRef = useRef(false)
+  // Controls the confirm dialog shown before creating the draft concept.
+  const [showAddConceptDialog, setShowAddConceptDialog] = useState(false)
   const pendingTargetEventIdRef = useRef<string | null>(cell.targetEventId ?? null)
   /** voice-chip drag-over state: the voiceId being dragged over this cell's audio area */
   const [dragOverVoiceId, setDragOverVoiceId] = useState<string | null>(null)
@@ -1636,22 +1759,60 @@ function EditorRow({
     if (!onAddConceptFromSelection) return
     const sel = window.getSelection()
     const text = sel && !sel.isCollapsed ? sel.toString().trim() : ""
-    setSourceSelection(text.length > 0 ? text : null)
+    const captured = text.length > 0 ? text : null
+    // FRO-260: keep the ref in sync with state so onClick handlers can read
+    // the captured text even after the selectionchange race clears the state.
+    capturedSelectionRef.current = captured
+    setSourceSelection(captured)
   }, [onAddConceptFromSelection])
 
+  // Opens the confirm dialog — actual creation happens in handleAddConceptConfirm.
+  // FRO-260: read from capturedSelectionRef (not sourceSelection state) so the
+  // dialog opens even when the selectionchange event already cleared the state
+  // before this onClick fires (the mousedown-blur race).
   const handleAddSelectionToTermbase = useCallback(() => {
-    if (!sourceSelection) return
-    void onAddConceptFromSelection?.(sourceSelection)
+    const text = capturedSelectionRef.current
+    if (!text) return
+    // Re-sync state so AddConceptDialog receives the correct pre-fill term even
+    // if the selectionchange handler cleared it between mousedown and click.
+    setSourceSelection(text)
+    setShowAddConceptDialog(true)
+  }, [])
+
+  const handleAddConceptConfirm = useCallback(async (term: string) => {
+    await onAddConceptFromSelection?.(term)
+    setShowAddConceptDialog(false)
+    capturedSelectionRef.current = null
     setSourceSelection(null)
     window.getSelection()?.removeAllRanges()
-  }, [sourceSelection, onAddConceptFromSelection])
+  }, [onAddConceptFromSelection])
+
+  const handleAddConceptCancel = useCallback(() => {
+    setShowAddConceptDialog(false)
+  }, [])
+
+  // FRO-260: toolbar mouse-down/up guards used by the selectionchange handler.
+  // Set when the user presses down on a SelectionTermActions button so the
+  // FRO-248 selectionchange guard knows not to clear sourceSelection before the
+  // click callback fires. Cleared on mouseup or mouseleave.
+  const handleToolbarMouseDown = useCallback(() => {
+    toolbarMouseDownRef.current = true
+  }, [])
+  const handleToolbarMouseUp = useCallback(() => {
+    toolbarMouseDownRef.current = false
+  }, [])
 
   // FRO-248: clear source selection when the browser selection collapses (user
   // clicked elsewhere or selected text in a different row). This prevents the
   // "Add to termbase" toolbar from floating over a different row's content.
+  // FRO-260: guard — do NOT clear when the user is pressing down on a toolbar
+  // button (toolbarMouseDownRef=true). The selectionchange fires before onClick
+  // in the mousedown-click sequence; clearing here would make onClick see null.
   useEffect(() => {
     if (!sourceSelection) return
     const handleSelectionChange = () => {
+      // Suppress if the user is mid-click on the SelectionTermActions toolbar.
+      if (toolbarMouseDownRef.current) return
       const sel = window.getSelection()
       if (!sel || sel.isCollapsed || sel.toString().trim() === "") {
         setSourceSelection(null)
@@ -2113,6 +2274,7 @@ function EditorRow({
     setHasFocusWithin(false)
     // FRO-248: clear source-text selection when focus leaves this row so the
     // "Add to termbase" toolbar never floats over a different row's content.
+    capturedSelectionRef.current = null
     setSourceSelection(null)
   }
   const handleRowClick = (e: React.MouseEvent) => {
@@ -2292,6 +2454,16 @@ function EditorRow({
           {(isSynthBusy || isSynthError) && (
             <SynthStatusBadge status={synthStatus} cellId={cell.id} projectId={project.id} onOpenAudioSetup={onOpenAudioSetup} />
           )}
+          {/* FRO-192: assignee avatar chip — shows initials of the member
+              this cell is assigned to. Tooltip = username + scope label. */}
+          {assigneeLabel && (
+            <span
+              title={assigneeNote ? `Assigned to ${assigneeLabel} (${assigneeNote})` : `Assigned to ${assigneeLabel}`}
+              className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-indigo-100 text-[8px] font-semibold uppercase text-indigo-700 ring-1 ring-indigo-300 dark:bg-indigo-900 dark:text-indigo-300 dark:ring-indigo-700"
+            >
+              {assigneeLabel.slice(0, 2)}
+            </span>
+          )}
         </div>
 
         {/* Source column. In Audio mode there's no need for source text to
@@ -2337,19 +2509,18 @@ function EditorRow({
             onMouseUp={onAddConceptFromSelection ? handleSourceMouseUp : undefined}
           >
             {/* Slice 5: add-from-selection affordance. Appears when a source
-                token is selected; promotes the selection to a DRAFT concept. */}
-            {sourceSelection && onAddConceptFromSelection && (
-              <button
-                type="button"
-                dir="ltr"
-                className="absolute right-1 top-0 z-10 inline-flex items-center gap-1 rounded-md bg-primary px-2 py-1 text-[11px] font-medium text-primary-foreground shadow-neu-sm hover:bg-primary/90"
-                onMouseDown={(e) => e.preventDefault()}
-                onClick={handleAddSelectionToTermbase}
-                title={`Add "${sourceSelection}" to the termbase as a draft concept`}
-              >
-                <BookOpen className="h-3 w-3" aria-hidden />
-                Add to termbase
-              </button>
+                token is selected; promotes the selection to a DRAFT concept.
+                When the selected text matches an existing active concept a
+                "View term" button also appears for quick lookup (FRO-260). */}
+            {sourceSelection && (
+              <SelectionTermActions
+                sourceSelection={sourceSelection}
+                concepts={project.terminology ?? []}
+                onAddToTermbase={onAddConceptFromSelection ? handleAddSelectionToTermbase : undefined}
+                onTermApply={handleTermApply}
+                onToolbarMouseDown={handleToolbarMouseDown}
+                onToolbarMouseUp={handleToolbarMouseUp}
+              />
             )}
             <div className="mb-1 flex items-center gap-1 text-xs text-muted-foreground" dir="ltr">
               <span>{cell.context}</span>
@@ -3321,6 +3492,17 @@ function EditorRow({
           />
         )
       })()}
+
+      {/* Add-from-selection confirm dialog (FRO-260). Mounted per-row so it
+          is scoped to the cell whose selection triggered it. */}
+      {onAddConceptFromSelection && (
+        <AddConceptDialog
+          open={showAddConceptDialog}
+          sourceTerm={sourceSelection ?? ""}
+          onConfirm={handleAddConceptConfirm}
+          onCancel={handleAddConceptCancel}
+        />
+      )}
     </div>
   )
 }

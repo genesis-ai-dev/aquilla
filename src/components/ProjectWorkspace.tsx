@@ -70,9 +70,12 @@ import { flushOutboxBatch } from "@/lib/sync/outbox-flush"
 import { runDiarization, type DiarizationPhase } from "@/lib/diarization/run-diarization"
 import { useCellsAuditStatsWithOverlay } from "@/hooks/useCellsAuditStatsWithOverlay"
 import { useComments } from "@/hooks/useComments"
-import { Film, Scale, MessagesSquare, Share2, Settings as SettingsIcon, Lock, ClipboardList, Trash2, Undo2, Search as SearchIcon, Sparkles, Mic2, Download, BookMarked, BookOpen, Users, MessageSquare, Camera } from "lucide-react"
+import { Film, Scale, MessagesSquare, Share2, Settings as SettingsIcon, Lock, ClipboardList, Trash2, Undo2, Search as SearchIcon, Sparkles, Mic2, Download, BookMarked, BookOpen, Users, MessageSquare, Camera, UserCheck } from "lucide-react"
 import { ChatPanel } from "./ChatPanel"
 import { useChat } from "@/hooks/useChat"
+import { TranslationNotesSidebar, readTnSidebarVisible, writeTnSidebarVisible } from "./TranslationNotesSidebar"
+import { InactiveProjectBanner } from "./InactiveProjectBanner"
+import { useProjectLifecycle } from "@/hooks/useProjectLifecycle"
 import { cn } from "@/lib/utils"
 import { restoreProject } from "@/lib/store/project-index"
 import { AppShell } from "./AppShell"
@@ -118,6 +121,12 @@ import type { Concept } from "@/lib/terminology/types"
 import { buildGlosser, type BtSeed } from "@/lib/completion/bt-glosser"
 import { buildAlignmentModel } from "@/lib/completion/interlinear"
 import { buildStatisticalBt } from "@/lib/completion/bt-auto"
+// FRO-192: assignment work-pickup UI
+import { AssignModal } from "./AssignModal"
+import { ProjectAssignedToMe } from "./ProjectAssignedToMe"
+import { getMyAssignments, getProjectAssignments, type MyAssignment, type AssigneeWorkload } from "@/lib/sync/assignments"
+import { useProjectMembers } from "@/hooks/useProjectMembers"
+import { getSelectedIds } from "@/lib/audio/selection"
 
 // Import runs inline in the workspace (upload + eBible corpus tabs). The
 // AD-11 plan carves import into a standalone apps/import Worker, but that
@@ -426,6 +435,12 @@ export function ProjectWorkspace() {
   // specific line's take, and the rail's button can open it for a manual pick.
   const [makeCharacterOpen, setMakeCharacterOpen] = useState(false)
   const [makeCharacterSeedCellId, setMakeCharacterSeedCellId] = useState<string | null>(null)
+  // FRO-192: Assign… modal
+  const [assignModalOpen, setAssignModalOpen] = useState(false)
+  // Increment to force a refresh of the assignments pickup panel after a new
+  // assignment is created. The EditorTable assignmentsByCellId map is also
+  // rebuilt on the same tick.
+  const [assignmentsRefreshKey, setAssignmentsRefreshKey] = useState(0)
   // After "Voice together" synthesizes one combined clip, hold its result so
   // the manual boundary editor can open for the user to mark per-line slices.
   const [combinedEditor, setCombinedEditor] = useState<CombinedVoiceResult | null>(null)
@@ -472,6 +487,9 @@ export function ProjectWorkspace() {
   useEffect(() => {
     jwtRef.current = frontierSession?.jwt ?? null
   }, [frontierSession?.jwt])
+
+  // FRO-214 (orchestrator glue): frozen-project state for the workspace banner.
+  const { isFrozen, toggle: toggleLifecycle, busy: lifecycleBusy } = useProjectLifecycle(projectId ?? "", project, () => refresh())
 
   const getTokenForFile = useMemo(() => {
     if (!project?.id) {
@@ -935,6 +953,17 @@ export function ProjectWorkspace() {
     return all
   }, [fileCells])
 
+  // FRO-191 (orchestrator glue): existing-cell refs for the eBible "into target
+  // column" import mode. CellData.group carries the canonical ref.
+  const importSourceCells = useMemo(() => allProjectCells.map((c) => ({
+    cellId: c.id,
+    fileId: c.fileId,
+    targetEventId: c.targetEventId,
+    sourceEventId: c.sourceEventId,
+    translated: c.translated ?? "",
+    canonicalRef: c.group,
+  })), [allProjectCells])
+
   const { search, searchPassages } = useSearchIndex(project?.files || [], allProjectCells)
 
   // AD-13 branching-search adapters — single-cell completion's few-shot
@@ -1107,6 +1136,7 @@ export function ProjectWorkspace() {
     session: frontierSession,
     sourceLanguage: project?.sourceLanguage || "",
     targetLanguage: project?.targetLanguage || "",
+    currentFileName: activeFile?.name,
   })
 
   // ── Back-translation: statistical primary path + optional LLM polish ────────
@@ -1360,6 +1390,70 @@ export function ProjectWorkspace() {
     persistBt(cell, btText, polished)
   }, [persistBt])
 
+  // ── FRO-192: assignment data ──────────────────────────────────────────────
+  // Members list: used by AssignModal for the assignee picker and for building
+  // the username→userId reverse map.
+  const { members: projectMembers } = useProjectMembers(project?.id ?? null)
+
+  // Current user's open assignments in this project, fetched once on mount and
+  // on each new assignment (assignmentsRefreshKey increment).
+  const [myAssignments, setMyAssignments] = useState<MyAssignment[]>([])
+  // Manager's view: per-assignee open workload in this project.
+  // Fetched eagerly so the data is warm when the manager opens the assign modal.
+  const [_projectWorkload, setProjectWorkload] = useState<AssigneeWorkload[]>([])
+  const currentRoleLevel = project?.syncRole?.level ?? 0
+  const canAssignWork = currentRoleLevel >= ROLE.PROJECT_LEAD
+  const jwt = frontierSession?.jwt ?? null
+
+  useEffect(() => {
+    if (!jwt || !project?.id) return
+    let cancelled = false
+    void getMyAssignments(jwt, project.id)
+      .then((data) => { if (!cancelled) setMyAssignments(data) })
+      .catch(() => { /* silently ignore — no assignments or no server access */ })
+    return () => { cancelled = true }
+  }, [jwt, project?.id, assignmentsRefreshKey])
+
+  useEffect(() => {
+    if (!jwt || !project?.id || !canAssignWork) return
+    let cancelled = false
+    void getProjectAssignments(jwt, project.id)
+      .then((data) => { if (!cancelled) setProjectWorkload(data) })
+      .catch(() => { /* silently ignore */ })
+    return () => { cancelled = true }
+  }, [jwt, project?.id, canAssignWork, assignmentsRefreshKey])
+
+  // Build a cellId → {username, scopeLabel} map for the EditorTable gutter.
+  // Strategy: match each cell against the active assignments using fileId and
+  // globalReferences prefix (chapter LIKE 'BOOK CH:%').
+  const assignmentsByCellId = useMemo((): ReadonlyMap<string, { username: string; scopeLabel: string }> => {
+    const map = new Map<string, { username: string; scopeLabel: string }>()
+    if (myAssignments.length === 0 || !activeFileId) return map
+    for (const a of myAssignments) {
+      if (a.projectId !== project?.id) continue
+      // For this file's cells, mark all cells (book-scope) or only chapter-matched ones.
+      for (const cell of cells) {
+        if (cell.fileId !== activeFileId) continue
+        if (a.scopeKind === "chapters") {
+          // Match: globalReferences[0] starts with "CHAPTER:" where CHAPTER is
+          // one of the chapters listed in scopeLabel (e.g. "GEN 1, GEN 2 in Genesis").
+          // We parse chapter tokens as the comma-separated prefix before " in ".
+          const beforeIn = a.scopeLabel.split(" in ")[0] ?? a.scopeLabel
+          const chapters = beforeIn.split(",").map((s) => s.trim()).filter(Boolean)
+          const ref = cell.globalReferences?.[0] ?? ""
+          const refChapter = ref.includes(":") ? ref.slice(0, ref.indexOf(":")).trim() : ref.trim()
+          if (chapters.some((ch) => ch === refChapter)) {
+            map.set(cell.id, { username: currentUsername, scopeLabel: a.scopeLabel })
+          }
+        } else {
+          // Book scope: all cells in the file are assigned.
+          map.set(cell.id, { username: currentUsername, scopeLabel: a.scopeLabel })
+        }
+      }
+    }
+    return map
+  }, [myAssignments, cells, activeFileId, project?.id, currentUsername])
+
   // Merge in-memory BT cache into cells array for display.
   // Also restore localStorage BTs for cells not yet in the cache (reload recovery).
   const cellsWithBacktranslation = useMemo(() => {
@@ -1442,6 +1536,28 @@ export function ProjectWorkspace() {
   const jumpToCellId = useCallback((cellId: string) => {
     const idx = cells.findIndex((c) => c.id === cellId)
     if (idx >= 0) editorRef.current?.scrollToCellIndex(idx)
+  }, [cells])
+
+  // FRO-192: jump to the first cell matching an assignment's scopeLabel.
+  // Uses the same globalReferences prefix match as assignmentsByCellId build.
+  const jumpToScopeLabel = useCallback((scopeLabel: string) => {
+    const chapterPart = scopeLabel.split(" in ")[0]?.trim() ?? scopeLabel
+    const chapters = chapterPart.split(",").map((s) => s.trim()).filter(Boolean)
+    let idx = -1
+    for (const ch of chapters) {
+      idx = cells.findIndex((c) => {
+        const ref = c.globalReferences?.[0] ?? ""
+        const refChapter = ref.includes(":") ? ref.slice(0, ref.indexOf(":")).trim() : ref.trim()
+        if (refChapter === ch) return true
+        // Fallback: section match
+        if (c.section === ch) return true
+        return false
+      })
+      if (idx >= 0) break
+    }
+    // If no chapter match, try scopeLabel against file name (book scope)
+    if (idx < 0) idx = 0  // scroll to top as best effort
+    editorRef.current?.scrollToCellIndex(idx)
   }, [cells])
 
   // ── last-location: write on file change ──────────────────────────────────
@@ -1531,6 +1647,12 @@ export function ProjectWorkspace() {
   const focusedCellIdRef = useRef<string | null>(null)
   // FRO-175: reactive version of focusedCellIdRef for the chat panel's context wiring.
   const [focusedCellId, setFocusedCellId] = useState<string | null>(null)
+  // FRO-179: TN sidebar visibility + canonicalRef of the focused cell.
+  // Hidden by default; toggled via the View settings menu.
+  const [tnSidebarVisible, setTnSidebarVisible] = useState<boolean>(() =>
+    projectId ? readTnSidebarVisible(projectId) : false,
+  )
+  const [focusedCellCanonicalRef, setFocusedCellCanonicalRef] = useState<string | null>(null)
   const reconcilerRef = useRef<import("@/lib/sync/ws-reconciler").WsReconciler | null>(null)
   // Read the current file list inside the WS connect path without making it a
   // reconnect trigger — otherwise every file-list change (e.g. each batch of a
@@ -1664,6 +1786,9 @@ export function ProjectWorkspace() {
   const handleClaimCell = useCallback((cellId: string) => {
     focusedCellIdRef.current = cellId
     setFocusedCellId(cellId) // FRO-175: reactive for chat panel context
+    // FRO-179: update TN sidebar with the focused cell's canonicalRef.
+    const focusedCell = cells.find((c) => c.id === cellId)
+    setFocusedCellCanonicalRef(focusedCell?.group ?? null)
     reconcilerRef.current?.send({ t: "focus.claim", cellId })
     // Debounce last-location cell write (500 ms) so rapid focus events
     // don't hammer localStorage.
@@ -1677,9 +1802,18 @@ export function ProjectWorkspace() {
   }, [projectId, activeFileId, currentUsername])
   const handleReleaseCell = useCallback((cellId: string) => {
     if (focusedCellIdRef.current === cellId) focusedCellIdRef.current = null
-    setFocusedCellId(null) // FRO-175: clear reactive focused cell
+    // Deliberately keep focusedCellId / focusedCellCanonicalRef: the chat
+    // panel and TN sidebar need the *last* focused cell as context — clicking
+    // away (e.g. to open chat) releases the focus lock but shouldn't drop the
+    // context the user was just working in. Both reset on file switch below.
     reconcilerRef.current?.send({ t: "focus.release", cellId })
   }, [])
+  // Last-focused context is per-file: a cell from the previous file is stale
+  // once the user opens another one.
+  useEffect(() => {
+    setFocusedCellId(null)
+    setFocusedCellCanonicalRef(null)
+  }, [activeFileId])
   const handleAckRemoteChange = useCallback((cellId: string) => {
     setCellsWithRemoteChange((cur) => {
       if (!cur.has(cellId)) return cur
@@ -2333,6 +2467,19 @@ export function ProjectWorkspace() {
               />
             )}
             <SidebarProjectSection items={projectNavItems} />
+            {/* FRO-192: member's per-project assignment pickup panel.
+                Only renders when the user has active assignments in this project
+                (component self-hides on empty/loading). Scoped to "mine" so
+                managers see only their own tasks here; the org-level oversight
+                table lives in AssignedToMe (org shell). */}
+            {project?.id && jwt && (
+              <ProjectAssignedToMe
+                projectId={project.id}
+                jwt={jwt}
+                onJumpToScopeLabel={jumpToScopeLabel}
+                refreshKey={assignmentsRefreshKey}
+              />
+            )}
             <div className="mt-auto border-t px-2 pb-2 pt-2">
               <AccountSwitcher variant="sidebar" />
             </div>
@@ -2392,6 +2539,7 @@ export function ProjectWorkspace() {
                 sourceTextDirection={fileMeta.sourceTextDirection}
                 targetTextDirection={fileMeta.targetTextDirection}
                 cellLabelsEnabled={cellLabelsEnabled}
+                tnSidebarEnabled={tnSidebarVisible}
                 rtlHintDismissed={fileMeta.rtlHintDismissed}
                 sourceFontSize={fontSizes.source}
                 targetFontSize={fontSizes.target}
@@ -2401,6 +2549,10 @@ export function ProjectWorkspace() {
                 onCellLabelsChange={setCellLabelsEnabled}
                 onSourceFontSizeChange={(v) => { if (activeFileId) setFileViewPref(activeFileId, { sourceFontSize: v }) }}
                 onTargetFontSizeChange={(v) => { if (activeFileId) setFileViewPref(activeFileId, { targetFontSize: v }) }}
+                onTnSidebarChange={(v) => {
+                  setTnSidebarVisible(v)
+                  if (projectId) writeTnSidebarVisible(projectId, v)
+                }}
                 onDismissRtlHint={fileMeta.dismissRtlHint}
               />
               <Button
@@ -2441,6 +2593,18 @@ export function ProjectWorkspace() {
                   aria-label="Export file"
                 >
                   <Download className="h-4 w-4" />
+                </Button>
+              )}
+              {/* FRO-192: Assign… button — visible only to project_lead+ */}
+              {canAssignWork && activeFileId && (
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={() => setAssignModalOpen(true)}
+                  title="Assign work to a member"
+                  aria-label="Assign work"
+                >
+                  <UserCheck className="h-4 w-4" />
                 </Button>
               )}
             </div>
@@ -2531,6 +2695,16 @@ export function ProjectWorkspace() {
                 project={project}
                 onProjectUpdated={handleProjectUpdated}
                 onCustomize={() => setChecklistOpen(true)}
+              />
+            )}
+            {/* FRO-214 (orchestrator glue): frozen-project banner — surfaces the
+                reactivate affordance instead of letting edits through. */}
+            {isFrozen && project && (
+              <InactiveProjectBanner
+                projectName={project.name}
+                canReactivate={(project.syncRole?.level ?? 0) >= 500}
+                busy={lifecycleBusy}
+                onReactivate={() => { const j = jwtRef.current; if (j) void toggleLifecycle(j) }}
               />
             )}
             {/* FRO-235: AI completion progress + stop control */}
@@ -2738,6 +2912,7 @@ export function ProjectWorkspace() {
             onReleaseCell={handleReleaseCell}
             onAckRemoteChange={handleAckRemoteChange}
             staleCellIds={staleCellIds}
+            assignmentsByCellId={assignmentsByCellId}
           />
         ) : (
           <CellAreaPlaceholder
@@ -2750,6 +2925,19 @@ export function ProjectWorkspace() {
         )}
         aside={
           <>
+            {/* FRO-179: Translation Notes sidebar — shown when a TN file exists
+                and a translation cell with a matching canonicalRef is focused. */}
+            <TranslationNotesSidebar
+              projectId={projectId!}
+              canonicalRef={focusedCellCanonicalRef}
+              getToken={getTokenForFile}
+              visible={tnSidebarVisible}
+              onToggle={() => {
+                const next = !tnSidebarVisible
+                setTnSidebarVisible(next)
+                if (projectId) writeTnSidebarVisible(projectId, next)
+              }}
+            />
             {drawerRuleId && (
               <RuleDrawer
                 rule={drawerRule}
@@ -2837,6 +3025,22 @@ export function ProjectWorkspace() {
           onUpdated={handleProjectUpdated}
         />
       )}
+      {/* FRO-192: Assign work modal */}
+      {project && canAssignWork && (
+        <AssignModal
+          open={assignModalOpen}
+          onOpenChange={setAssignModalOpen}
+          projectId={project.id}
+          activeFileId={activeFileId}
+          projectFiles={projectFiles}
+          members={projectMembers}
+          roleLevel={currentRoleLevel}
+          selectedCellIds={getSelectedIds()}
+          jwt={jwt ?? ""}
+          author={currentUsername}
+          onAssigned={() => setAssignmentsRefreshKey((k) => k + 1)}
+        />
+      )}
       {project && (
         <AudioRecordingModal
           open={recordingCellId !== null}
@@ -2877,6 +3081,7 @@ export function ProjectWorkspace() {
           getToken={getTokenForFile}
           sourceLanguage={project.sourceLanguage} targetLanguage={project.targetLanguage}
           onImported={handleImported}
+          sourceCells={importSourceCells}
           ttsSettings={tts.settings}
           onCastUpdated={(patch) => tts.saveTts(patch)} />
       </Suspense>

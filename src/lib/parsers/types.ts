@@ -324,6 +324,12 @@ export interface ProjectRecord {
    *   allowSelfValidation is false.
    */
   allowSelfValidation?: boolean
+  /**
+   * FRO-186: minimum role to trigger a harmonization sweep on this project.
+   * Default (absent) = project_lead (500). Configurable up to maintainer (600).
+   * Lowering below project_lead is not allowed (hard floor per spec).
+   */
+  harmonize_min_role?: "project_lead" | "maintainer"
   /** Cached flag — set true when any cell first writes audio. Avoids scanning every file's Y.Doc on load. */
   hasAnyAudioData?: boolean
   /** When and how to fetch audio bytes from the storage backend. Default: "lazy". */
@@ -336,6 +342,14 @@ export interface ProjectRecord {
   /** Display name of whoever archived the project. Populated from frontier-
    * server's response, or from the local session for purely local projects. */
   deletedBy?: string
+  /**
+   * Active/inactive lifecycle state (migration 0033, FRO-214).
+   * Absent or true = active (normal, editable). false = inactive (frozen).
+   * Inactive projects are visible in the list but block edits until reactivated.
+   * DISTINCT from deletedAt (Trash): inactive keeps the project in the normal
+   * listing (with a filter) while Trash hides it entirely.
+   */
+  isActive?: boolean
   /** Cached sync role from the most recent /sync-token response. Lets the
    * Dashboard show the owner-only "Move to Trash" action without a round-trip
    * per card. Stale values are tolerable — server re-validates on every

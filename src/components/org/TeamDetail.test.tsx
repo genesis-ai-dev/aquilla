@@ -1,6 +1,7 @@
 import { describe, it, expect, afterEach, beforeEach, vi } from "vitest"
 import { render, screen, waitFor, act, fireEvent } from "@testing-library/react"
 import { MemoryRouter, Routes, Route } from "react-router-dom"
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { OrgProvider } from "@/context/OrgContext"
 import { TeamDetail } from "./TeamDetail"
 
@@ -34,12 +35,16 @@ vi.mock("@/lib/frontier/teams", () => ({
 vi.mock("@/lib/sync/cloud-projects", () => ({ fetchAccessibleProjects: vi.fn(async () => []) }))
 
 function renderDetail() {
+  // QueryClientProvider: the org shell's AccountSwitcher reaches useAccounts,
+  // which clears the React Query cache on account switch (FRO-212).
   return render(
-    <MemoryRouter initialEntries={["/teams/10"]}>
-      <OrgProvider>
-        <Routes><Route path="/teams/:groupId" element={<TeamDetail />} /></Routes>
-      </OrgProvider>
-    </MemoryRouter>,
+    <QueryClientProvider client={new QueryClient()}>
+      <MemoryRouter initialEntries={["/teams/10"]}>
+        <OrgProvider>
+          <Routes><Route path="/teams/:groupId" element={<TeamDetail />} /></Routes>
+        </OrgProvider>
+      </MemoryRouter>
+    </QueryClientProvider>,
   )
 }
 

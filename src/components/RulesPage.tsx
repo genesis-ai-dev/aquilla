@@ -11,7 +11,11 @@ import { useLivingMemory } from "@/hooks/useLivingMemory"
 import { RuleCreateDialog } from "./RuleCreateDialog"
 import { RuleSuggestDialog } from "./RuleSuggestDialog"
 import { BuiltinChecksList } from "./BuiltinChecksList"
+import { FixReviewPanel } from "./FixReviewPanel"
+import type { FixProposal } from "@/lib/rules/autofix"
+import { ROLE } from "@/lib/sync/role-policy"
 import type { ProjectRecord, RuleAutofix, TranslationRule } from "@/lib/parsers/types"
+import { checkRulesForCell } from "@/lib/rules/rule-engine"
 
 export function RulesPage() {
   const { id } = useParams<{ id: string }>()
@@ -45,9 +49,79 @@ export function RulesPage() {
     }
   }, [searchParams, project])
 
-  const { patch: patchShared } = useProjectSettings(id ?? null, project?.syncRole?.level ?? null)
+  const { patch: patchShared, settings: projectWideSettings } = useProjectSettings(id ?? null, project?.syncRole?.level ?? null)
   const { userRules, builtinRules, addRule, updateRule, deleteRule, setBuiltinOverride } = useRules(project, refresh, patchShared)
   const { cells: validatedCells } = useLivingMemory({ projectId: id ?? "" })
+
+  // FRO-186: harmonize sweep panel state.
+  const [harmonizeRule, setHarmonizeRule] = useState<TranslationRule | null>(null)
+  const [harmonizeProposal, setHarmonizeProposal] = useState<FixProposal | null>(null)
+
+  // Derive harmonize_min_role gate from project settings and current role.
+  const harmonizeMinRole = projectWideSettings.harmonize_min_role
+  const userRoleLevel = project?.syncRole?.level ?? null
+  const userCanHarmonize = useMemo(() => {
+    if (userRoleLevel == null) return true // fail-open; server authoritative
+    const FLOOR_MAP: Record<string, number> = {
+      project_lead: ROLE.PROJECT_LEAD,
+      maintainer: ROLE.MAINTAINER,
+    }
+    const floor = FLOOR_MAP[harmonizeMinRole ?? "project_lead"] ?? ROLE.PROJECT_LEAD
+    return userRoleLevel >= floor
+  }, [userRoleLevel, harmonizeMinRole])
+
+  function handleHarmonize(rule: TranslationRule, _violationCount: number) {
+    // Build a stub proposal. In v1, if the rule has a regex autofix, the
+    // proposal is a regex-replace with empty previews (the worker hasn't run
+    // the actual sweep yet — the FixReviewPanel will show 0 previews ready;
+    // real sweep population via worker dispatch is a follow-on task).
+    // For now, use a "none" proposal if there is no autofix, directing the
+    // user to add one.
+    if (rule.autofix) {
+      const proposal: FixProposal = {
+        kind: "regex-replace",
+        pattern: rule.autofix.pattern,
+        replacement: rule.autofix.replacement,
+        flags: rule.autofix.flags,
+        previews: [],
+      }
+      setHarmonizeProposal(proposal)
+    } else {
+      setHarmonizeProposal({ kind: "none", reason: "This check has no auto-fix defined. Add one in the Rules section below, then retry." })
+    }
+    setHarmonizeRule(rule)
+  }
+
+  function handleHarmonizeApply(_selectedCellIds: Set<string>) {
+    // SWARM-TODO: wire to emitCellHarmonize per cell once the sweep-population
+    // worker path is implemented. For now just close the panel.
+    // Click-path: Rules → builtin-check row → "Harmonize all (N)" → FixReviewPanel
+    //   → type rule name → Apply N selected → here.
+    setHarmonizeRule(null)
+    setHarmonizeProposal(null)
+  }
+
+  // FRO-186: derive per-cell infractions for builtin checks over the project
+  // scope (all validated cells from useLivingMemory, up to MAX_FILES=40 files).
+  // Scope rationale: FixReviewPanel's multi-cell harmonize sweep targets the
+  // whole project, so infraction counts must be project-wide.
+  // Performance: O(cells × builtinRules). builtinRules is ≤9; validatedCells
+  // is bounded to the first 40 files. checkRulesForCell is pure and fast
+  // (regex cache prevents recompilation). The memo only re-runs when cells or
+  // rules change — not on every render.
+  const enabledBuiltinRules = useMemo(
+    () => builtinRules.filter((r) => r.enabled),
+    [builtinRules],
+  )
+  const builtinInfractions = useMemo(() => {
+    const out = new Map<string, import("@/lib/parsers/types").RuleInfraction[]>()
+    if (enabledBuiltinRules.length === 0 || validatedCells.length === 0) return out
+    for (const cell of validatedCells) {
+      const cellInf = checkRulesForCell(cell, cell.fileId, enabledBuiltinRules)
+      if (cellInf.length > 0) out.set(cell.id, cellInf)
+    }
+    return out
+  }, [validatedCells, enabledBuiltinRules])
 
   const usageSummary = useMemo(() => {
     const u = project?.usage
@@ -68,6 +142,29 @@ export function RulesPage() {
 
   return (
     <div className="min-h-screen bg-background">
+      {/* FRO-186: Harmonize sweep panel (multi-cell FixReviewPanel). */}
+      {harmonizeRule && harmonizeProposal && (
+        <FixReviewPanel
+          open={true}
+          rule={harmonizeRule}
+          proposal={harmonizeProposal}
+          onClose={() => { setHarmonizeRule(null); setHarmonizeProposal(null) }}
+          onApply={handleHarmonizeApply}
+          onAmendRule={() => {
+            setHarmonizeRule(null)
+            setHarmonizeProposal(null)
+            // Navigate to the rule row so the user can add an autofix.
+            if (harmonizeRule) {
+              setExpandedRuleId(harmonizeRule.id)
+              requestAnimationFrame(() => {
+                document.getElementById(`rule-row-${harmonizeRule.id}`)
+                  ?.scrollIntoView({ behavior: "smooth", block: "center" })
+              })
+            }
+          }}
+          confirmPhrase={harmonizeRule.name}
+        />
+      )}
       <header className="flex items-center gap-4 border-b px-4 py-2">
         <Button variant="ghost" size="sm" onClick={() => navigate(`/project/${id}`)}>
           <ArrowLeft className="mr-1 h-4 w-4" /> Back to Editor
@@ -87,11 +184,12 @@ export function RulesPage() {
           <p className="text-xs text-muted-foreground" title="LLM usage on this project">{usageSummary}</p>
         )}
 
-        {/* TODO(lqa-plan-b): wire real infractions when worker dispatch lands. */}
         <BuiltinChecksList
           builtinRules={builtinRules}
-          infractions={new Map()}
+          infractions={builtinInfractions}
           onSetOverride={setBuiltinOverride}
+          onHarmonize={handleHarmonize}
+          canHarmonize={userCanHarmonize}
         />
 
         <Card>

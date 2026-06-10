@@ -87,6 +87,7 @@ interface Baseline {
   validationRoleFloor: "reviewer" | "project_lead" | "maintainer"
   validationNamedUsers: string[]
   allowSelfValidation: boolean
+  harmonize_min_role: "project_lead" | "maintainer"
   decaySettings: DecaySettings | undefined
   audioMediaStrategy: AudioMediaStrategy
 }
@@ -117,6 +118,7 @@ function buildBaseline(project: ProjectRecord): Baseline {
     validationRoleFloor: project.validationRoleFloor ?? "reviewer",
     validationNamedUsers: project.validationNamedUsers ?? [],
     allowSelfValidation: project.allowSelfValidation ?? true,
+    harmonize_min_role: project.harmonize_min_role ?? "project_lead",
     decaySettings: project.decaySettings,
     audioMediaStrategy: project.audioMediaStrategy ?? "lazy",
   }
@@ -199,6 +201,8 @@ export function ProjectSettings() {
   const [validationRoleFloor, setValidationRoleFloor] = useState<"reviewer" | "project_lead" | "maintainer">("reviewer")
   const [validationNamedUsers, setValidationNamedUsers] = useState<string[]>([])
   const [allowSelfValidation, setAllowSelfValidation] = useState(true)
+  // FRO-186: harmonize_min_role — project_lead floor, configurable up to maintainer.
+  const [harmonizeMinRole, setHarmonizeMinRole] = useState<"project_lead" | "maintainer">("project_lead")
   const [decaySettings, setDecaySettings] = useState<DecaySettings | undefined>(undefined)
   const [audioMediaStrategy, setAudioMediaStrategy] = useState<AudioMediaStrategy>("lazy")
 
@@ -240,6 +244,7 @@ export function ProjectSettings() {
     setValidationRoleFloor(b.validationRoleFloor)
     setValidationNamedUsers(b.validationNamedUsers)
     setAllowSelfValidation(b.allowSelfValidation)
+    setHarmonizeMinRole(b.harmonize_min_role)
     setDecaySettings(b.decaySettings)
     setAudioMediaStrategy(b.audioMediaStrategy)
   }, [])
@@ -282,6 +287,7 @@ export function ProjectSettings() {
       validationRoleFloor !== baseline.validationRoleFloor ||
       JSON.stringify(validationNamedUsers) !== JSON.stringify(baseline.validationNamedUsers) ||
       allowSelfValidation !== baseline.allowSelfValidation ||
+      harmonizeMinRole !== baseline.harmonize_min_role ||
       audioMediaStrategy !== baseline.audioMediaStrategy ||
       !decayEqual(decaySettings, baseline.decaySettings)
     )
@@ -291,7 +297,7 @@ export function ProjectSettings() {
     topK, contextSize, useOnlyValidatedExamples, fewShotExampleFormat, mainChatLanguage,
     autoSyncEnabled, autoSyncInterval, validationCount, validationCountAudio,
     validationRoleFloor, validationNamedUsers, allowSelfValidation,
-    audioMediaStrategy, decaySettings,
+    harmonizeMinRole, audioMediaStrategy, decaySettings,
   ])
 
   // Warn before browser-level navigation (back button, tab close, reload).
@@ -414,6 +420,7 @@ export function ProjectSettings() {
         sharedUpdates.validationNamedUsers = validationNamedUsers
       }
       if (allowSelfValidation !== baseline.allowSelfValidation) sharedUpdates.allowSelfValidation = allowSelfValidation
+      if (harmonizeMinRole !== baseline.harmonize_min_role) sharedUpdates.harmonize_min_role = harmonizeMinRole
 
       if (Object.keys(sharedUpdates).length > 0) {
         const out = await patchShared(sharedUpdates)
@@ -466,6 +473,7 @@ export function ProjectSettings() {
         validationRoleFloor,
         validationNamedUsers,
         allowSelfValidation,
+        harmonize_min_role: harmonizeMinRole,
         decaySettings,
         audioMediaStrategy,
       }
@@ -485,7 +493,7 @@ export function ProjectSettings() {
     model, maxTokens, temperature, systemPrompt, llmHealthPenalty,
     topK, contextSize, useOnlyValidatedExamples, fewShotExampleFormat, mainChatLanguage,
     autoSyncEnabled, autoSyncInterval, validationCount, validationCountAudio,
-    validationRoleFloor, validationNamedUsers, allowSelfValidation,
+    validationRoleFloor, validationNamedUsers, allowSelfValidation, harmonizeMinRole,
     audioMediaStrategy, decaySettings, patchShared, refresh, applyBaseline,
   ])
 
@@ -995,6 +1003,36 @@ export function ProjectSettings() {
               }}
             />
           </div>
+        )}
+
+        {/* FRO-186: Harmonization settings — harmonize_min_role floor. */}
+        {visibleSections.some((s) => s.id === "section-validation") && (
+          <Card>
+            <CardHeader>
+              <CardTitle>Harmonization</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="harmonize-min-role">Minimum role to run a harmonization sweep</Label>
+                <DisabledFieldTooltip disabled={!canEditShared} tooltip={sharedDisabledTooltip ?? null}>
+                  <select
+                    id="harmonize-min-role"
+                    disabled={!canEditShared}
+                    value={harmonizeMinRole}
+                    onChange={(e) => setHarmonizeMinRole(e.target.value as "project_lead" | "maintainer")}
+                    className="flex h-9 w-48 rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    <option value="project_lead">Project Lead (default)</option>
+                    <option value="maintainer">Maintainer</option>
+                  </select>
+                </DisabledFieldTooltip>
+                <p className="text-xs text-muted-foreground">
+                  Only users with at least this role can open a harmonization sweep on this project.
+                  The floor cannot be lowered below Project Lead (hard floor per spec).
+                </p>
+              </div>
+            </CardContent>
+          </Card>
         )}
 
         {visibleSections.some((s) => s.id === "section-audio-media") && (

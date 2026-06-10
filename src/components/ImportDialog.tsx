@@ -13,11 +13,18 @@ import {
   importFile,
   importEBible,
   importMacula,
+  importTranslationNotes,
   importParatextProject,
   importParatextAsTarget,
+  prepareEBibleTargetImport,
+  applyEBibleTargetImport,
   type EBibleProgress,
+  type EBibleTargetProgress,
+  type EBibleMatchResult,
   type MaculaProgress,
+  type TnProgress,
   type ParatextImportProgress,
+  type SourceCellRef,
 } from "@/lib/import"
 import type { FileReference, ProjectTtsSettings } from "@/lib/parsers/types"
 import { buildCastAdditions } from "@/lib/import/cast-from-speakers"
@@ -32,8 +39,9 @@ import {
   type EBibleTranslation,
 } from "@/lib/parsers/ebible"
 import { languagesEqual } from "@/lib/language-normalize"
+import { EBibleTargetReviewPanel } from "@/components/EBibleTargetReviewPanel"
 
-type Screen = "landing" | "upload" | "ebible" | "macula" | "direction"
+type Screen = "landing" | "upload" | "ebible" | "macula" | "tn" | "direction"
 
 interface ImportDialogProps {
   open: boolean
@@ -52,6 +60,14 @@ interface ImportDialogProps {
   /** Callback to persist updated TTS settings (voices + castAssignments) after
    *  a subtitle import that contained speaker tags. */
   onCastUpdated?: (settings: Partial<ProjectTtsSettings>) => void | Promise<void>
+  /**
+   * Optional: existing source cells to support the "into target" eBible import
+   * mode (FRO-191). When provided, the eBible panel shows a mode toggle so the
+   * user can import a translation into the target column of an existing file.
+   * Each cell needs at minimum: cellId, fileId, translated, canonicalRef, and
+   * the AD-2 parentId fields (targetEventId / sourceEventId).
+   */
+  sourceCells?: SourceCellRef[]
 }
 
 /** localStorage key used to persist the per-project "skip direction prompt" choice. */
@@ -70,6 +86,7 @@ export function ImportDialog({
   onImported,
   ttsSettings,
   onCastUpdated,
+  sourceCells,
 }: ImportDialogProps) {
   const [screen, setScreen] = useState<Screen>("landing")
   // Holds refs + inferred languages while waiting for the user to set direction.
@@ -224,7 +241,7 @@ export function ImportDialog({
                 >
                   ←
                 </button>
-                {screen === "upload" ? "Upload Files" : screen === "macula" ? "Macula Hebrew + Greek" : "eBible Corpus"}
+                {screen === "upload" ? "Upload Files" : screen === "macula" ? "Macula Hebrew + Greek" : screen === "tn" ? "Translation Notes (TSV)" : "eBible Corpus"}
               </div>
             )}
           </DialogTitle>
@@ -254,8 +271,12 @@ export function ImportDialog({
             sourceLanguage={sourceLanguage}
             targetLanguage={targetLanguage}
             getToken={getToken}
+            sourceCells={sourceCells}
             onImported={async (ref, inferredLanguages) => {
               await handleChildImported([ref], inferredLanguages)
+            }}
+            onTargetImported={() => {
+              onOpenChange(false)
             }}
           />
         )}
@@ -270,6 +291,17 @@ export function ImportDialog({
               // Pass the first detected language as the project's inferred source
               // only when the project's current source language is unset.
               await handleChildImported(refs)
+            }}
+          />
+        )}
+
+        {screen === "tn" && (
+          <TnPanel
+            projectId={projectId}
+            username={username}
+            getToken={getToken}
+            onImported={async (ref) => {
+              await handleChildImported([ref])
             }}
           />
         )}
@@ -353,16 +385,17 @@ function ImportLanding({ onSelect }: ImportLandingProps) {
         </p>
       </div>
 
-      {/* Translation Notes — coming soon (FRO-179) */}
-      <div
-        title="Coming soon — Translation Notes import is tracked in FRO-179"
-        className="cursor-not-allowed rounded-lg border border-dashed p-4 text-left opacity-50"
+      {/* Translation Notes — active (FRO-179) */}
+      <button
+        type="button"
+        onClick={() => onSelect("tn")}
+        className="rounded-lg border p-4 text-left transition-colors hover:border-primary hover:bg-primary/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
       >
-        <p className="text-sm font-medium">Translation Notes</p>
+        <p className="text-sm font-medium">Translation Notes (TSV)</p>
         <p className="mt-1 text-xs text-muted-foreground">
-          TSV / MD Translation Notes. Coming soon.
+          Upload unfoldingWord-style TN files. Notes appear in a sidebar when you focus a translation cell at the matching verse.
         </p>
-      </div>
+      </button>
     </div>
   )
 }
@@ -735,9 +768,22 @@ interface EBiblePanelProps {
   targetLanguage: string
   getToken: (fileId: string) => Promise<string | null>
   onImported: (ref: FileReference, inferredLanguages?: { sourceLanguage?: string; targetLanguage?: string }) => void | Promise<void>
+  /** When provided, enables the "into target" mode toggle (FRO-191). */
+  sourceCells?: SourceCellRef[]
+  /** Called after a successful target-column import (no new FileReference). */
+  onTargetImported?: () => void
 }
 
-function EBiblePanel({ projectId, username, sourceLanguage, targetLanguage, getToken, onImported }: EBiblePanelProps) {
+type EBiblePanelMode = "source" | "target"
+type EBibleTargetStep = "pick" | "review" | "applying" | "done"
+
+function EBiblePanel({ projectId, username, sourceLanguage, targetLanguage, getToken, sourceCells, onImported, onTargetImported }: EBiblePanelProps) {
+  const [mode, setMode] = useState<EBiblePanelMode>("source")
+  const [targetStep, setTargetStep] = useState<EBibleTargetStep>("pick")
+  const [matchResult, setMatchResult] = useState<EBibleMatchResult | null>(null)
+  const [targetProgress, setTargetProgress] = useState<EBibleTargetProgress | null>(null)
+  const [targetErr, setTargetErr] = useState<string | null>(null)
+
   const [translations, setTranslations] = useState<EBibleTranslation[] | null>(null)
   const [loadErr, setLoadErr] = useState<string | null>(null)
   const [query, setQuery] = useState("")
@@ -813,19 +859,146 @@ function EBiblePanel({ projectId, username, sourceLanguage, targetLanguage, getT
     return () => abortRef.current?.abort()
   }, [])
 
+  // ---------------------------------------------------------------------------
+  // Target-import handlers (FRO-191)
+  // ---------------------------------------------------------------------------
+
+  async function handlePrepareTarget() {
+    if (!selected || !sourceCells || importing) return
+    setImporting(true)
+    setTargetErr(null)
+    setTargetProgress({ phase: "download", received: 0, total: 0 })
+    abortRef.current = new AbortController()
+    try {
+      const result = await prepareEBibleTargetImport(
+        selected,
+        sourceCells,
+        setTargetProgress,
+        abortRef.current.signal,
+      )
+      setMatchResult(result)
+      setTargetStep("review")
+    } catch (err) {
+      setTargetErr(err instanceof Error ? err.message : "Preparation failed")
+    } finally {
+      setImporting(false)
+      abortRef.current = null
+    }
+  }
+
+  async function handleApplyTarget(selectedCellIds: Set<string>) {
+    if (!matchResult || !selected) return
+    setTargetStep("applying")
+    setTargetErr(null)
+    try {
+      await applyEBibleTargetImport(
+        matchResult,
+        selectedCellIds,
+        { projectId, author: username, getToken },
+        setTargetProgress,
+      )
+      setTargetStep("done")
+    } catch (err) {
+      setTargetErr(err instanceof Error ? err.message : "Apply failed")
+      setTargetStep("review")
+    }
+  }
+
+  // ── Target: "applying" spinner ──────────────────────────────────────────────
+  if (mode === "target" && targetStep === "applying") {
+    return (
+      <div className="mx-auto w-full max-w-sm py-8 text-center">
+        <p className="text-sm font-medium">
+          {targetProgress?.phase === "save" && targetProgress.cellsTotal
+            ? `Committing ${(targetProgress.cellsEnqueued ?? 0).toLocaleString()} / ${targetProgress.cellsTotal.toLocaleString()} verses…`
+            : "Committing verses…"}
+        </p>
+        {targetProgress?.phase === "save" && targetProgress.cellsTotal ? (
+          <div className="mx-auto mt-3 h-2 w-full max-w-xs overflow-hidden rounded-full bg-muted">
+            <div
+              className="h-full bg-primary transition-all"
+              style={{ width: `${Math.round(((targetProgress.cellsEnqueued ?? 0) / targetProgress.cellsTotal) * 100)}%` }}
+            />
+          </div>
+        ) : (
+          <p className="mt-2 text-xs text-muted-foreground">Working…</p>
+        )}
+      </div>
+    )
+  }
+
+  // ── Target: "done" confirmation ─────────────────────────────────────────────
+  if (mode === "target" && targetStep === "done") {
+    return (
+      <div className="flex flex-col items-center gap-4 py-8 text-center">
+        <p className="text-sm font-medium">Target verses committed.</p>
+        <p className="text-xs text-muted-foreground">
+          The target column will update as the server projection lands.
+        </p>
+        <Button size="sm" onClick={() => onTargetImported?.()}>Close</Button>
+      </div>
+    )
+  }
+
+  // ── Target: "review" step ──────────────────────────────────────────────────
+  if (mode === "target" && targetStep === "review" && matchResult && selected) {
+    return (
+      <EBibleTargetReviewPanel
+        translation={selected}
+        matchResult={matchResult}
+        onApply={handleApplyTarget}
+        onCancel={() => {
+          setTargetStep("pick")
+          setMatchResult(null)
+        }}
+      />
+    )
+  }
+
+  // ── Shared translation picker ────────────────────────────────────────────────
   return (
     <div className="flex flex-col gap-3">
+      {/* Mode toggle — only shown when target-import is possible */}
+      {sourceCells && sourceCells.length > 0 && (
+        <div className="flex gap-1 rounded-md border p-1 text-xs">
+          <button
+            type="button"
+            onClick={() => setMode("source")}
+            className={cn(
+              "flex-1 rounded px-2 py-1 transition-colors",
+              mode === "source" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground",
+            )}
+          >
+            New source file
+          </button>
+          <button
+            type="button"
+            onClick={() => setMode("target")}
+            className={cn(
+              "flex-1 rounded px-2 py-1 transition-colors",
+              mode === "target" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground",
+            )}
+          >
+            Into target column
+          </button>
+        </div>
+      )}
+
       <p className="text-xs text-muted-foreground">
-        Import a Bible translation directly from the{" "}
-        <a
-          href="https://github.com/BibleNLP/ebible"
-          target="_blank"
-          rel="noreferrer"
-          className="underline"
-        >
-          BibleNLP/ebible corpus
-        </a>
-        . Only redistributable translations are included.
+        {mode === "source" ? (
+          <>
+            Import a Bible translation directly from the{" "}
+            <a href="https://github.com/BibleNLP/ebible" target="_blank" rel="noreferrer" className="underline">
+              BibleNLP/ebible corpus
+            </a>
+            . Only redistributable translations are included.
+          </>
+        ) : (
+          <>
+            Match eBible verses to existing source cells by canonical reference (e.g. GEN 1:1) and
+            fill the target column. A review step lets you keep or replace any existing target content.
+          </>
+        )}
       </p>
 
       <Input
@@ -885,7 +1058,8 @@ function EBiblePanel({ projectId, username, sourceLanguage, targetLanguage, getT
         </div>
       )}
 
-      {progress && (
+      {/* Source mode: show source-upload progress */}
+      {mode === "source" && progress && (
         <div className="text-xs text-muted-foreground">
           <p>
             {progress.phase === "download"
@@ -908,12 +1082,33 @@ function EBiblePanel({ projectId, username, sourceLanguage, targetLanguage, getT
           ) : null}
         </div>
       )}
+
+      {/* Target mode: show prepare-step progress */}
+      {mode === "target" && targetProgress && (
+        <div className="text-xs text-muted-foreground">
+          <p>
+            {targetProgress.phase === "download"
+              ? `Downloading ${selected?.id ?? ""}… ${formatProgress(targetProgress.received, targetProgress.total)}`
+              : targetProgress.phase === "parse"
+                ? "Parsing verses…"
+                : "Matching verses to source cells…"}
+          </p>
+        </div>
+      )}
+
       {importErr && <p className="text-sm text-destructive">{importErr}</p>}
+      {targetErr && <p className="text-sm text-destructive">{targetErr}</p>}
 
       <div className="flex justify-end">
-        <Button onClick={handleImport} disabled={!selected || importing}>
-          {importing ? "Importing..." : "Import"}
-        </Button>
+        {mode === "source" ? (
+          <Button onClick={handleImport} disabled={!selected || importing}>
+            {importing ? "Importing..." : "Import"}
+          </Button>
+        ) : (
+          <Button onClick={handlePrepareTarget} disabled={!selected || importing || !sourceCells?.length}>
+            {importing ? "Preparing…" : "Next: Review matches"}
+          </Button>
+        )}
       </div>
     </div>
   )
@@ -1090,6 +1285,106 @@ function MaculaPanel({ projectId, username, getToken, onImported }: MaculaPanelP
                   style={{ width: `${Math.round(((progress.cellsEnqueued ?? 0) / progress.cellsTotal) * 100)}%` }}
                 />
               </div>
+            </>
+          )}
+        </div>
+      )}
+      {error && <p className="text-sm text-destructive">{error}</p>}
+      <div className="flex justify-end">
+        <Button onClick={handleImport} disabled={!file || importing}>
+          {importing ? "Importing…" : "Import"}
+        </Button>
+      </div>
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Translation Notes (TSV) panel (FRO-179)
+// ---------------------------------------------------------------------------
+
+interface TnPanelProps {
+  projectId: string
+  username: string
+  getToken: (fileId: string) => Promise<string | null>
+  onImported: (ref: FileReference) => void | Promise<void>
+}
+
+function TnPanel({ projectId, username, getToken, onImported }: TnPanelProps) {
+  const [importing, setImporting] = useState(false)
+  const [progress, setProgress] = useState<TnProgress | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const [file, setFile] = useState<File | null>(null)
+
+  async function handleImport() {
+    if (!file || importing) return
+    setImporting(true)
+    setError(null)
+    setProgress({ phase: "parse" })
+    try {
+      const ref = await importTranslationNotes(
+        file,
+        { projectId, author: username, getToken },
+        setProgress,
+      )
+      await onImported(ref)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Import failed")
+    } finally {
+      setImporting(false)
+      setProgress(null)
+    }
+  }
+
+  return (
+    <div className="flex flex-col gap-4 py-2">
+      <p className="text-xs text-muted-foreground">
+        Upload an{" "}
+        <a
+          href="https://door43.org/u/Door43-Catalog/en_tn/"
+          target="_blank"
+          rel="noreferrer"
+          className="underline"
+        >
+          unfoldingWord-style Translation Notes
+        </a>{" "}
+        TSV file. Each row becomes a note cell; notes appear in a sidebar when you focus a
+        translation cell at the matching verse reference.
+      </p>
+      <div className="flex flex-col gap-2">
+        <Button variant="outline" size="sm" nativeButton={false} render={<label className="cursor-pointer" />}>
+          {file ? file.name : "Choose Translation Notes TSV"}
+          <input
+            type="file"
+            className="hidden"
+            accept=".tsv,.txt,.csv"
+            onChange={(e) => {
+              const f = e.target.files?.[0] ?? null
+              setFile(f)
+              setError(null)
+            }}
+            disabled={importing}
+          />
+        </Button>
+        {file && !importing && (
+          <p className="text-xs text-muted-foreground">{file.name} — {(file.size / 1024).toFixed(0)} KB</p>
+        )}
+      </div>
+      {progress && (
+        <div className="text-xs text-muted-foreground">
+          {progress.phase === "parse" && "Parsing translation notes…"}
+          {progress.phase === "save" && progress.cellsTotal && (
+            <>
+              <p>Uploading: {(progress.cellsEnqueued ?? 0).toLocaleString()} / {progress.cellsTotal.toLocaleString()} notes</p>
+              <div className="mt-1.5 h-2 w-full overflow-hidden rounded-full bg-muted">
+                <div
+                  className="h-full bg-primary transition-all"
+                  style={{ width: `${Math.round(((progress.cellsEnqueued ?? 0) / progress.cellsTotal) * 100)}%` }}
+                />
+              </div>
+              {progress.skippedCount ? (
+                <p className="mt-1 text-yellow-600">{progress.skippedCount} rows skipped (missing canonical reference)</p>
+              ) : null}
             </>
           )}
         </div>

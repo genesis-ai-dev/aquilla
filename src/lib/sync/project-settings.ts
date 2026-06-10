@@ -28,6 +28,12 @@ export interface ProjectWideSettings {
   validationRoleFloor?: "reviewer" | "project_lead" | "maintainer"
   validationNamedUsers?: string[]
   allowSelfValidation?: boolean
+  /**
+   * FRO-186: minimum role level required to trigger a harmonization sweep on
+   * this project. Default (absent) = project_lead (500). Configurable up to
+   * maintainer (600); lowering below project_lead is not allowed (hard floor).
+   */
+  harmonize_min_role?: "project_lead" | "maintainer"
   /** Synced voice profiles (voice library, cast, default voice, engine). The
    *  Gemini apiKey is deliberately omitted — it stays device-local. */
   ttsSettings?: Omit<ProjectTtsSettings, "apiKey">

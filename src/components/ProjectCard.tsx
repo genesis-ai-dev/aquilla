@@ -1,10 +1,12 @@
-import { GitBranch, MoreVertical, Trash2, Undo2 } from "lucide-react"
+import { GitBranch, MoreVertical, PauseCircle, Trash2, Undo2 } from "lucide-react"
 import type { ProjectRecord } from "@/lib/parsers/types"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { MembershipAvatars } from "./MembershipAvatars"
+import { HealthRing } from "./HealthRing"
 import { useProjectMembers } from "@/hooks/useProjectMembers"
+import { useProjectHealth } from "@/hooks/useProjectHealth"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { roleName } from "@/lib/frontier/roles"
 
@@ -34,6 +36,10 @@ interface ProjectCardProps {
    * is swapped for a Restore button. */
   variant?: "active" | "trashed"
   onRestore?: () => void
+  /** Show the Mark Inactive / Reactivate action in the overflow menu.
+   * Only shown to callers with project_lead+ role. */
+  canToggleLifecycle?: boolean
+  onToggleLifecycle?: () => void
 }
 
 export function ProjectCard({
@@ -43,13 +49,18 @@ export function ProjectCard({
   onTrash,
   variant = "active",
   onRestore,
+  canToggleLifecycle,
+  onToggleLifecycle,
 }: ProjectCardProps) {
   const isGit = project.origin?.kind === "git"
   const isTrashed = variant === "trashed"
+  // isActive absent or true → active; explicit false → inactive (frozen)
+  const isInactive = project.isActive === false
   // Skip the fetch entirely for trashed cards (irrelevant) and for local-only
   // projects that have never been server-side (would 403/404 every time).
   const fetchKey = !isTrashed && hasServerSideExistence(project) ? project.id : null
   const { members } = useProjectMembers(fetchKey)
+  const { projectHealth } = useProjectHealth(fetchKey)
   const { session } = useFrontierSession()
 
   // First member with role >= MAINTAINER level is the canonical maintainer for
@@ -76,13 +87,40 @@ export function ProjectCard({
 
   return (
     <Card
-      className={`${isTrashed ? "opacity-70" : "cursor-pointer hover:shadow-neu-lg"} transition-shadow`}
+      className={`${isTrashed ? "opacity-70" : "cursor-pointer hover:shadow-neu-lg"} ${isInactive && !isTrashed ? "opacity-60" : ""} transition-shadow`}
       onClick={isTrashed ? undefined : onClick}
+      data-testid={isInactive && !isTrashed ? "inactive-project-card" : undefined}
     >
       <CardHeader className="pb-2">
         <div className="flex items-start justify-between gap-2">
           <CardTitle className="text-lg">{project.name}</CardTitle>
           <div className="flex items-center gap-1.5">
+            {!isTrashed && projectHealth !== null && (
+              <HealthRing
+                health={projectHealth}
+                size={22}
+                strokeWidth={2.5}
+                className="shrink-0"
+                style={{ color: "var(--muted-foreground)" }}
+              >
+                <span
+                  className="text-[6px] font-bold leading-none"
+                  style={{ color: projectHealth <= 33 ? "#ef4444" : projectHealth <= 66 ? "#f59e0b" : "#22c55e" }}
+                >
+                  {projectHealth}
+                </span>
+              </HealthRing>
+            )}
+            {!isTrashed && isInactive && (
+              <span
+                className="inline-flex items-center gap-1 rounded-full bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300 px-2 py-0.5 text-[10px] font-medium"
+                title="This project is inactive and cannot be edited until reactivated"
+                data-testid="inactive-badge"
+              >
+                <PauseCircle className="h-3 w-3" aria-hidden />
+                Inactive
+              </span>
+            )}
             {!isTrashed && myRoleLabel && (
               <span
                 className="inline-flex items-center rounded-full bg-primary/10 text-primary px-2 py-0.5 text-[10px] font-medium capitalize"
@@ -96,7 +134,7 @@ export function ProjectCard({
                 <GitBranch className="h-3 w-3" /> git
               </span>
             )}
-            {!isTrashed && canTrash && onTrash && (
+            {!isTrashed && (canTrash || canToggleLifecycle) && (
               <Popover>
                 <PopoverTrigger
                   render={
@@ -112,20 +150,36 @@ export function ProjectCard({
                   <MoreVertical className="h-4 w-4" />
                 </PopoverTrigger>
                 <PopoverContent
-                  className="w-44 p-1"
+                  className="w-48 p-1"
                   onClick={(e) => e.stopPropagation()}
                 >
-                  <button
-                    type="button"
-                    className="flex w-full items-center gap-2 rounded-xl px-2 py-1.5 text-sm text-destructive hover:bg-destructive/10"
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      onTrash()
-                    }}
-                  >
-                    <Trash2 className="h-4 w-4" />
-                    Move to Trash
-                  </button>
+                  {canToggleLifecycle && onToggleLifecycle && (
+                    <button
+                      type="button"
+                      className="flex w-full items-center gap-2 rounded-xl px-2 py-1.5 text-sm text-muted-foreground hover:bg-muted"
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        onToggleLifecycle()
+                      }}
+                      data-testid="toggle-lifecycle-button"
+                    >
+                      <PauseCircle className="h-4 w-4" />
+                      {isInactive ? "Mark as Active" : "Mark as Inactive"}
+                    </button>
+                  )}
+                  {canTrash && onTrash && (
+                    <button
+                      type="button"
+                      className="flex w-full items-center gap-2 rounded-xl px-2 py-1.5 text-sm text-destructive hover:bg-destructive/10"
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        onTrash()
+                      }}
+                    >
+                      <Trash2 className="h-4 w-4" />
+                      Move to Trash
+                    </button>
+                  )}
                 </PopoverContent>
               </Popover>
             )}

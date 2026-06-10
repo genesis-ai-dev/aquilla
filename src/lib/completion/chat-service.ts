@@ -48,11 +48,17 @@ export function buildChatMessages(options: {
   cellContext: CellContext | null
   sourceLanguage: string
   targetLanguage: string
+  /** Name of the file open in the editor, if any. */
+  fileName?: string
 }): ChatMessage[] {
-  const { history, userMessage, cellContext, sourceLanguage, targetLanguage } = options
+  const { history, userMessage, cellContext, sourceLanguage, targetLanguage, fileName } = options
 
   let systemContent = CHAT_SYSTEM_PROMPT
   systemContent += `\n\nProject languages: source = ${sourceLanguage || "unknown"}, target = ${targetLanguage || "unknown"}.`
+
+  if (fileName) {
+    systemContent += `\nThe user currently has the file "${fileName}" open in the editor.`
+  }
 
   if (cellContext) {
     systemContent +=

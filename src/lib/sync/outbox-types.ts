@@ -124,6 +124,20 @@ export interface OutboxEventPayloads {
      */
     search_query?: string
     replace_string?: string
+    /**
+     * FRO-186 / harmonization: when present, tags this commit as a harmonize
+     * sweep event (`cell.commit.harmonize` variant per AD-2). The server uses
+     * this to trigger the AD-14 endorsement-revocation cascade and the
+     * harmonize-affected-validation comment thread. Only set by emitCellHarmonize.
+     */
+    harmonize_origin?: {
+      /** Stable id of the built-in check or custom rule that drove the sweep. */
+      rule_or_check_id: string
+      /** How the replacement was computed. */
+      proposal_kind: "cached-regex" | "batch-regex" | "per-cell"
+      /** Optional id linking per-cell proposals back to a parent sweep session. */
+      parent_proposal_id?: string
+    }
   }
   "target.cell.delete": Record<string, never>
   "target.cell.reorder": {

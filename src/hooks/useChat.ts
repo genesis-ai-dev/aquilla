@@ -25,6 +25,8 @@ export interface UseChatOptions {
   session: FrontierSession | null
   sourceLanguage: string
   targetLanguage: string
+  /** Name of the file currently open in the editor, included as chat context. */
+  currentFileName?: string
 }
 
 export interface UseChatReturn {
@@ -43,7 +45,7 @@ export interface UseChatReturn {
 }
 
 export function useChat(options: UseChatOptions): UseChatReturn {
-  const { settings, session, sourceLanguage, targetLanguage } = options
+  const { settings, session, sourceLanguage, targetLanguage, currentFileName } = options
 
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [streamingText, setStreamingText] = useState("")
@@ -84,6 +86,7 @@ export function useChat(options: UseChatOptions): UseChatReturn {
         cellContext: includeCellContext ? cellContext : null,
         sourceLanguage,
         targetLanguage,
+        fileName: currentFileName,
       })
 
       let accumulated = ""
@@ -125,7 +128,7 @@ export function useChat(options: UseChatOptions): UseChatReturn {
         abortRef.current = null
       }
     },
-    [messages, isStreaming, settings, session, sourceLanguage, targetLanguage, includeCellContext],
+    [messages, isStreaming, settings, session, sourceLanguage, targetLanguage, includeCellContext, currentFileName],
   )
 
   const stopStreaming = useCallback(() => {

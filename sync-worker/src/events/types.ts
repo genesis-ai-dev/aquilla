@@ -128,6 +128,20 @@ export interface EventPayloads {
      * Null for target-owned cells with no source counterpart.
      */
     sourceEventId?: string | null
+    /**
+     * FRO-186 / harmonization: when present, tags this commit as a harmonize
+     * sweep event (cell.commit.harmonize variant per AD-2). The route layer
+     * uses this field to enforce harmonize_min_role and to trigger the AD-14
+     * endorsement-revocation cascade. Only set by the harmonize sweep path.
+     */
+    harmonize_origin?: {
+      /** Stable id of the built-in check or custom rule that drove the sweep. */
+      rule_or_check_id: string
+      /** How the replacement was computed. */
+      proposal_kind: 'cached-regex' | 'batch-regex' | 'per-cell'
+      /** Optional id linking per-cell proposals back to a parent sweep session. */
+      parent_proposal_id?: string
+    }
   }
   'target.cell.delete': Record<string, never>
   'target.cell.reorder': {

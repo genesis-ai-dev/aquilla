@@ -2,6 +2,7 @@ import { Suspense, lazy } from "react"
 import { Routes, Route } from "react-router-dom"
 import { hasAuthHintCookie } from "@/lib/frontier/session-store"
 import { OrgHome } from "@/components/org/OrgHome"
+import { ProductTourProvider } from "@/context/ProductTourContext"
 import { ProjectsList } from "@/components/org/ProjectsList"
 import { ArchivedProjects } from "@/components/org/ArchivedProjects"
 import { ProjectOverview } from "@/components/org/ProjectOverview"
@@ -115,7 +116,12 @@ export default function App() {
       <SyncFreezeOverlay />
       <OrgProvider>
         <OutboxProvider>
-          <AppRoutes />
+          {/* FRO-243: ProductTourProvider mounts once here; the tour portal
+              renders into document.body so it is route-agnostic. The context
+              value (openTour) is consumed by OrgSidebar's "Take the tour" button. */}
+          <ProductTourProvider>
+            <AppRoutes />
+          </ProductTourProvider>
         </OutboxProvider>
       </OrgProvider>
       <AiModelConsentDialog />

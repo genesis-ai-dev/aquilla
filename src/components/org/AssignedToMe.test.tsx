@@ -17,10 +17,10 @@ vi.mock("@/lib/frontier/portfolio", () => ({
     { id: "pb", name: "Mark" },
   ]),
 }))
-vi.mock("@/lib/sync/assignments", () => ({ getMyAssignments: vi.fn() }))
+vi.mock("@/lib/sync/assignments", () => ({ getMyAssignmentsForOrg: vi.fn() }))
 
-import { getMyAssignments } from "@/lib/sync/assignments"
-const mockGetMy = vi.mocked(getMyAssignments)
+import { getMyAssignmentsForOrg } from "@/lib/sync/assignments"
+const mockGetMy = vi.mocked(getMyAssignmentsForOrg)
 
 beforeEach(() => {
   localStorage.clear()
@@ -40,18 +40,20 @@ function renderInbox() {
 
 describe("AssignedToMe", () => {
   it("aggregates the caller's open assignments across projects with progress", async () => {
-    mockGetMy.mockImplementation(async (_jwt: string, projectId: string) =>
-      projectId === "pa"
-        ? [{ assignmentId: "a1", projectId: "pa", scopeKind: "books", scopeLabel: "John", deadline: "2026-06-30", note: null, cellsTotal: 10, cellsDone: 4, createdAt: 200 }]
-        : [{ assignmentId: "a2", projectId: "pb", scopeKind: "chapters", scopeLabel: "Mark · MRK 1", deadline: null, note: null, cellsTotal: 5, cellsDone: 5, createdAt: 100 }],
-    )
+    // One org-level request (GET /orgs/:orgId/assignments/mine) replaces the
+    // old per-project fan-out — rows arrive with projectName attached.
+    mockGetMy.mockResolvedValue([
+      { assignmentId: "a1", projectId: "pa", projectName: "John", scopeKind: "books", scopeLabel: "John", deadline: "2026-06-30", note: null, cellsTotal: 10, cellsDone: 4, createdAt: 200 },
+      { assignmentId: "a2", projectId: "pb", projectName: "Mark", scopeKind: "chapters", scopeLabel: "Mark · MRK 1", deadline: null, note: null, cellsTotal: 5, cellsDone: 5, createdAt: 100 },
+    ])
     renderInbox()
 
-    await waitFor(() => expect(screen.getByText("John")).toBeInTheDocument())
+    await waitFor(() => expect(screen.getAllByText("John").length).toBeGreaterThan(0))
     expect(screen.getByText("Mark · MRK 1")).toBeInTheDocument()
     expect(screen.getByText("4/10 cells · 40%")).toBeInTheDocument()
     expect(screen.getByText("5/5 cells · 100%")).toBeInTheDocument()
     expect(screen.getByText("Due 2026-06-30")).toBeInTheDocument()
+    expect(mockGetMy).toHaveBeenCalledWith("jwt", 1)
   })
 
   it("shows an empty state when there are no assignments", async () => {
@@ -60,16 +62,15 @@ describe("AssignedToMe", () => {
     await waitFor(() => expect(screen.getByText("You have no open assignments.")).toBeInTheDocument())
   })
 
-  it("skips projects the caller cannot read (allSettled tolerates a 403)", async () => {
-    mockGetMy.mockImplementation(async (_jwt: string, projectId: string) => {
-      if (projectId === "pa") {
-        return [{ assignmentId: "a1", projectId: "pa", scopeKind: "books", scopeLabel: "John", deadline: null, note: null, cellsTotal: 2, cellsDone: 1, createdAt: 1 }]
-      }
-      throw new Error("getMyAssignments failed: HTTP 403")
-    })
+  it("surfaces a failed org-level read as an error (no silent empty state)", async () => {
+    // The single org read has no per-project fallback — a failure must be
+    // visible, not rendered as "no assignments".
+    mockGetMy.mockRejectedValue(new Error("getMyAssignmentsForOrg failed: HTTP 403"))
     renderInbox()
 
-    await waitFor(() => expect(screen.getByText("John")).toBeInTheDocument())
-    expect(screen.getByText("1/2 cells · 50%")).toBeInTheDocument()
+    await waitFor(() =>
+      expect(screen.getByText(/getMyAssignmentsForOrg failed: HTTP 403/)).toBeInTheDocument(),
+    )
+    expect(screen.queryByText("You have no open assignments.")).not.toBeInTheDocument()
   })
 })

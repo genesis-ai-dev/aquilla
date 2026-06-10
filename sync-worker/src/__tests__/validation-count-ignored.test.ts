@@ -291,7 +291,7 @@ describe('CHARACTERIZATION: files.approved_count follows cells.validated', () =>
       cellId: 'cell-char-1',
       parentId: 'evt-char-commit',
       author: 'bob',
-      payload: { targetUsername: 'bob' },
+      payload: { editEventId: 'evt-char-ac-unval-v1', targetUsername: 'bob' },
       clientTs: 300,
     }
     await post(db, [unvalEvt], ownerTok)

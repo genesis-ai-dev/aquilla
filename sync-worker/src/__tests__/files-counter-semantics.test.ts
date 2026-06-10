@@ -96,6 +96,7 @@ async function commitCell(
   evtId: string,
   value: string,
   author = 'alice',
+  parentId: string | null = null,
 ) {
   const tok = await token(400, author)
   const evt: RawEvent<'target.cell.commit'> = {
@@ -105,7 +106,7 @@ async function commitCell(
     projectId: PROJECT,
     fileId: FILE,
     cellId,
-    parentId: null,
+    parentId,
     author,
     payload: { value, valueHtml: `<p>${value}</p>` },
     clientTs: 100,
@@ -178,8 +179,8 @@ describe('files.filled_count — target cells with non-empty trimmed content', (
     const { db } = await makeTestDb()
     await seedFile(db)
     await commitCell(db, 'cell-a', 'evt-ctr-fill', 'has text')
-    // Overwrite with empty
-    await commitCell(db, 'cell-a', 'evt-ctr-empty', '', 'alice')
+    // Overwrite with empty — parentId must be the prior commit to win the AD-2 chain slot
+    await commitCell(db, 'cell-a', 'evt-ctr-empty', '', 'alice', 'evt-ctr-fill')
     const counts = await readFileCounts(db)
     expect(Number(counts?.filled_count)).toBe(0)
   })
@@ -188,7 +189,8 @@ describe('files.filled_count — target cells with non-empty trimmed content', (
     const { db } = await makeTestDb()
     await seedFile(db)
     await commitCell(db, 'cell-a', 'evt-ctr-fill-v1', 'version one')
-    await commitCell(db, 'cell-a', 'evt-ctr-fill-v2', 'version two', 'alice')
+    // parentId = v1 to win the AD-2 chain slot
+    await commitCell(db, 'cell-a', 'evt-ctr-fill-v2', 'version two', 'alice', 'evt-ctr-fill-v1')
     const counts = await readFileCounts(db)
     // full recompute, not double-increment
     expect(Number(counts?.filled_count)).toBe(1)
@@ -236,7 +238,8 @@ describe('files.approved_count — target cells with validated=1', () => {
     expect(Number(before?.approved_count)).toBe(1)
 
     // Author edits → chain head moves, old validator is stale
-    await commitCell(db, 'cell-e1', 'evt-ctr-ce1-v2', 'revised text', 'alice')
+    // parentId = prior commit to win the AD-2 chain slot
+    await commitCell(db, 'cell-e1', 'evt-ctr-ce1-v2', 'revised text', 'alice', 'evt-ctr-ce1')
 
     const after = await readFileCounts(db)
     expect(Number(after?.approved_count)).toBe(0)
@@ -258,7 +261,8 @@ describe('files.cell_count — COUNT(DISTINCT cell_id) across source + target', 
     const { db } = await makeTestDb()
     await seedFile(db)
     await commitCell(db, 'cell-cnt-same', 'evt-ctr-cnt-s1', 'v1')
-    await commitCell(db, 'cell-cnt-same', 'evt-ctr-cnt-s2', 'v2', 'alice')
+    // parentId = s1 to win the AD-2 chain slot
+    await commitCell(db, 'cell-cnt-same', 'evt-ctr-cnt-s2', 'v2', 'alice', 'evt-ctr-cnt-s1')
     const counts = await readFileCounts(db)
     // DISTINCT cell_id — still 1, not 2
     expect(Number(counts?.cell_count)).toBe(1)

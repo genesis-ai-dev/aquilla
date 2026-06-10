@@ -1633,6 +1633,10 @@ function EditorRow({
   // (cell commit, validate, waive). The message persists until dismissed so
   // the user has time to copy their text before reloading.
   const [writeError, setWriteError] = useState<string | null>(null)
+  // FRO-278: confirm dialog shown when Generate is triggered on a non-empty
+  // cell. True = dialog is open; clicking Confirm calls onCompleteSingle,
+  // clicking Cancel discards the pending action (nothing committed).
+  const [showGenerateConfirm, setShowGenerateConfirm] = useState(false)
 
   useEffect(() => {
     if (cell.targetEventId) pendingTargetEventIdRef.current = cell.targetEventId
@@ -2827,7 +2831,14 @@ function EditorRow({
                     editable &&
                     !isAnonymous
                   ) {
-                    onCompleteSingle(cell)
+                    // FRO-278: if the cell already has human text, confirm
+                    // before letting the AI overwrite it. Empty cells proceed
+                    // immediately (byte-identical to previous behavior).
+                    if (cell.translated.trim()) {
+                      setShowGenerateConfirm(true)
+                    } else {
+                      onCompleteSingle(cell)
+                    }
                   }
                 }}
                 disabled={
@@ -3566,6 +3577,82 @@ function EditorRow({
           onCancel={handleAddConceptCancel}
         />
       )}
+
+      {/* FRO-278: confirm before AI Generate overwrites non-empty cell. */}
+      <GenerateOverwriteDialog
+        open={showGenerateConfirm}
+        isValidated={cell.status === "validated"}
+        onConfirm={() => {
+          setShowGenerateConfirm(false)
+          onCompleteSingle(cell)
+        }}
+        onCancel={() => setShowGenerateConfirm(false)}
+      />
     </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// FRO-278 — GenerateOverwriteDialog
+// ---------------------------------------------------------------------------
+// Lightweight confirm dialog shown when the user clicks AI Generate on a cell
+// that already contains human-authored text. The copy is escalated when the
+// cell has been validated so the expert understands validation will be cleared.
+//
+// Cancel semantics: nothing is committed, no completion is triggered. The user
+// returns to the cell in its current state. We chose "never start" over
+// "start-then-discard" because an in-progress stream would occupy the cell's
+// "generating" state and confuse the UX on cancel.
+// ---------------------------------------------------------------------------
+
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from "@/components/ui/dialog"
+import { Button } from "@/components/ui/button"
+
+interface GenerateOverwriteDialogProps {
+  open: boolean
+  /** True when cell.status === "validated" — escalates the dialog copy. */
+  isValidated: boolean
+  onConfirm: () => void
+  onCancel: () => void
+}
+
+export function GenerateOverwriteDialog({
+  open,
+  isValidated,
+  onConfirm,
+  onCancel,
+}: GenerateOverwriteDialogProps) {
+  const title = isValidated
+    ? "Replace validated translation?"
+    : "Replace existing translation?"
+
+  const description = isValidated
+    ? "This cell is validated — replacing it clears the validation. The current text is preserved in cell history and can be recovered."
+    : "Replace the existing translation? The current text is preserved in cell history and can be recovered."
+
+  return (
+    <Dialog open={open} onOpenChange={(isOpen) => { if (!isOpen) onCancel() }}>
+      <DialogContent aria-labelledby="gen-overwrite-title" aria-describedby="gen-overwrite-desc">
+        <DialogHeader>
+          <DialogTitle id="gen-overwrite-title">{title}</DialogTitle>
+          <DialogDescription id="gen-overwrite-desc">{description}</DialogDescription>
+        </DialogHeader>
+        <DialogFooter>
+          <Button variant="outline" onClick={onCancel}>
+            Cancel
+          </Button>
+          <Button variant="destructive" onClick={onConfirm}>
+            Replace
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   )
 }

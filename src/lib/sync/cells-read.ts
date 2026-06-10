@@ -34,8 +34,22 @@ async function readJson<T>(res: Response): Promise<T> {
   return (await res.json()) as T
 }
 
-function authHeaders(jwt: string): HeadersInit {
+function authHeaders(jwt: string): Record<string, string> {
   return { Authorization: `Bearer ${jwt}` }
+}
+
+// RES-6: a hung connection must not strand the editor skeleton until the
+// browser's multi-minute socket timeout — soft refetches are dropped while a
+// fetch is in flight, so one wedged request blocks every later trigger. A
+// timeout rejects like a network error: callers keep the cached view and the
+// next trigger (focus, WS poke) retries. Guarded for older WebKit.
+const READ_TIMEOUT_MS = 15_000
+function readTimeoutSignal(): AbortSignal | undefined {
+  return typeof AbortSignal.timeout === "function" ? AbortSignal.timeout(READ_TIMEOUT_MS) : undefined
+}
+
+function fetchInit(jwt: string): RequestInit {
+  return { headers: authHeaders(jwt), signal: readTimeoutSignal() }
 }
 
 /**
@@ -50,7 +64,7 @@ export async function fetchProjectFiles(
   jwt: string,
 ): Promise<FileSummary[]> {
   const url = `${syncWorkerHttpOrigin()}/api/v1/projects/${encodeURIComponent(projectId)}/files`
-  const res = await fetch(url, { headers: authHeaders(jwt) })
+  const res = await fetch(url, fetchInit(jwt))
   const body = await readJson<{ files: FileSummary[] }>(res)
   return body.files
 }
@@ -68,7 +82,7 @@ export async function fetchFile(
   const url =
     `${syncWorkerHttpOrigin()}/api/v1/projects/${encodeURIComponent(projectId)}` +
     `/files/${encodeURIComponent(fileId)}`
-  const res = await fetch(url, { headers: authHeaders(jwt) })
+  const res = await fetch(url, fetchInit(jwt))
   const body = await readJson<{ file: FileSummary }>(res)
   return body.file
 }
@@ -83,6 +97,13 @@ export interface FetchFileCellsOptions {
   cursor?: string
 }
 
+/** Full-read page plus the M2-1 watermark. Extends the shared `CellsPage`
+ *  locally (cells-read-types is owned elsewhere this wave); `maxServerSeq`
+ *  is absent when talking to a pre-M2-1 server. */
+export interface CellsPageWithMeta extends CellsPage {
+  maxServerSeq?: number | null
+}
+
 /**
  * GET /api/v1/projects/:projectId/files/:fileId/cells
  *
@@ -94,7 +115,7 @@ export async function fetchFileCells(
   fileId: string,
   opts: FetchFileCellsOptions,
   jwt: string,
-): Promise<CellsPage> {
+): Promise<CellsPageWithMeta> {
   const params = new URLSearchParams()
   if (opts.side) params.set("side", opts.side)
   if (typeof opts.limit === "number") params.set("limit", String(opts.limit))
@@ -104,8 +125,55 @@ export async function fetchFileCells(
     `${syncWorkerHttpOrigin()}/api/v1/projects/${encodeURIComponent(projectId)}` +
     `/files/${encodeURIComponent(fileId)}/cells` +
     (qs ? `?${qs}` : "")
-  const res = await fetch(url, { headers: authHeaders(jwt) })
-  return await readJson<CellsPage>(res)
+  const res = await fetch(url, fetchInit(jwt))
+  return await readJson<CellsPageWithMeta>(res)
+}
+
+/** Outcome of a `?since=` conditional read (audit M2-1). */
+export type CellsDeltaResult =
+  /** Changed cells since the cursor. A `changedCellIds` entry with no row in
+   *  `cells` was deleted. Empty arrays = nothing changed (the cheap common
+   *  case for focus revalidation). */
+  | { kind: "delta"; changedCellIds: string[]; cells: CellRow[]; maxServerSeq: number }
+  /** Server says the delta is bigger than a full read is worth — or this is
+   *  a pre-M2-1 server that ignored `since` (no `delta` marker in the body).
+   *  Caller falls back to the full stream. */
+  | { kind: "resync" }
+
+/**
+ * One conditional request against the cells read route: `?since=<serverSeq>`.
+ *
+ * Deliberately NOT using `If-None-Match`: the sync-worker's CORS allowlist
+ * (`Access-Control-Allow-Headers` in sync-worker/src/cors.ts) doesn't cover
+ * it, and an empty delta response answers "nothing changed" just as cheaply
+ * (one indexed seq-range probe) without a preflight-breaking header.
+ */
+export async function fetchCellsDelta(
+  projectId: string,
+  fileId: string,
+  since: number,
+  jwt: string,
+): Promise<CellsDeltaResult> {
+  const url =
+    `${syncWorkerHttpOrigin()}/api/v1/projects/${encodeURIComponent(projectId)}` +
+    `/files/${encodeURIComponent(fileId)}/cells?since=${encodeURIComponent(String(since))}`
+  const res = await fetch(url, fetchInit(jwt))
+  const body = await readJson<{
+    delta?: boolean
+    resync?: boolean
+    changedCellIds?: string[]
+    cells?: CellRow[]
+    maxServerSeq?: number
+  }>(res)
+  if (body.delta === true && typeof body.maxServerSeq === "number") {
+    return {
+      kind: "delta",
+      changedCellIds: body.changedCellIds ?? [],
+      cells: body.cells ?? [],
+      maxServerSeq: body.maxServerSeq,
+    }
+  }
+  return { kind: "resync" }
 }
 
 /**
@@ -127,7 +195,7 @@ export async function fetchCellsByIds(
   const url =
     `${syncWorkerHttpOrigin()}/api/v1/projects/${encodeURIComponent(projectId)}` +
     `/files/${encodeURIComponent(fileId)}/cells?${params.toString()}`
-  const res = await fetch(url, { headers: authHeaders(jwt) })
+  const res = await fetch(url, fetchInit(jwt))
   const page = await readJson<CellsPage>(res)
   return page.cells
 }
@@ -141,6 +209,11 @@ export async function fetchCellsByIds(
  * `onPage` may return `false` (or a Promise resolving to `false`) to abort
  * pagination — typically because the caller switched files mid-stream and
  * the in-flight result is no longer wanted.
+ *
+ * `onMeta` (optional) fires once with the FIRST page's `maxServerSeq`. The
+ * first page's watermark is the safe `?since=` cursor for the whole stream:
+ * anything that lands mid-stream has a higher seq, so the next delta
+ * re-fetches it (at worst re-delivering rows a later page already carried).
  */
 export async function streamFileCells(
   projectId: string,
@@ -148,6 +221,7 @@ export async function streamFileCells(
   jwt: string,
   onPage: (rows: CellRow[], isLast: boolean) => boolean | void | Promise<boolean | void>,
   side?: "source" | "target",
+  onMeta?: (meta: { maxServerSeq?: number | null }) => void,
 ): Promise<void> {
   let cursor: string | undefined
   // Hard cap on page iterations as a safety belt against a malformed nextCursor
@@ -155,6 +229,7 @@ export async function streamFileCells(
   const MAX_PAGES = 100
   for (let i = 0; i < MAX_PAGES; i++) {
     const page = await fetchFileCells(projectId, fileId, { side, cursor }, jwt)
+    if (i === 0 && onMeta) onMeta({ maxServerSeq: page.maxServerSeq })
     const nextCursor = page.nextCursor ?? undefined
     const isLast = nextCursor === undefined
     const cont = await onPage(page.cells, isLast)

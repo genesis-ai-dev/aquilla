@@ -345,7 +345,7 @@ describe("useCells (Phase 2a, D1-backed)", () => {
     expect(result.current.cells[0].validationStatus).toBe("none")
 
     const stats2 = new Map<string, CellAuditStats>([
-      ["c1", { cellId: "c1", editCount: 1, contentHash: "", lastEditAt: 0, lastEditEventId: "ev1", activeValidators: ["alice"] }],
+      ["c1", { cellId: "c1", editCount: 1, contentHash: "", lastEditAt: 0, lastEditEventId: "ev1", activeValidators: ["alice"], waivers: [] }],
     ])
     rerender({ stats: stats2 })
     await waitFor(() => expect(result.current.cells[0].validationStatus).toBe("self"))

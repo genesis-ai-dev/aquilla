@@ -23,6 +23,7 @@ import { handleEventsReadRequest } from "./events/read-route"
 import { handleEventsWriteRequest } from "./events/route"
 import { handleFilesReadRequest } from "./events/files-read-route"
 import { handleBulkImportRequest } from "./events/import-route"
+import { handleBulkMorphImportRequest } from "./events/import-morph-route"
 import { handleMigrateIngestRequest } from "./events/migrate-ingest-route"
 import { handleMigrateSettingsRequest } from "./events/migrate-settings-route"
 import { handleMigrateProjectRequest } from "./events/migrate-project-route"
@@ -204,6 +205,8 @@ export default {
     if (branchingSearchResponse) return withCors(branchingSearchResponse, request)
     const bulkImportResponse = await handleBulkImportRequest(request, env)
     if (bulkImportResponse) return bulkImportResponse
+    const bulkMorphImportResponse = await handleBulkMorphImportRequest(request, env)
+    if (bulkMorphImportResponse) return bulkMorphImportResponse
     const migrateIngestResponse = await handleMigrateIngestRequest(request, env)
     if (migrateIngestResponse) return migrateIngestResponse
     const migrateSettingsResponse = await handleMigrateSettingsRequest(request, env)

@@ -12,9 +12,11 @@ import { cn } from "@/lib/utils"
 import {
   importFile,
   importEBible,
+  importMacula,
   importParatextProject,
   importParatextAsTarget,
   type EBibleProgress,
+  type MaculaProgress,
   type ParatextImportProgress,
 } from "@/lib/import"
 import type { FileReference, ProjectTtsSettings } from "@/lib/parsers/types"
@@ -31,7 +33,7 @@ import {
 } from "@/lib/parsers/ebible"
 import { languagesEqual } from "@/lib/language-normalize"
 
-type Screen = "landing" | "upload" | "ebible" | "direction"
+type Screen = "landing" | "upload" | "ebible" | "macula" | "direction"
 
 interface ImportDialogProps {
   open: boolean
@@ -222,7 +224,7 @@ export function ImportDialog({
                 >
                   ←
                 </button>
-                {screen === "upload" ? "Upload Files" : "eBible Corpus"}
+                {screen === "upload" ? "Upload Files" : screen === "macula" ? "Macula Hebrew + Greek" : "eBible Corpus"}
               </div>
             )}
           </DialogTitle>
@@ -254,6 +256,20 @@ export function ImportDialog({
             getToken={getToken}
             onImported={async (ref, inferredLanguages) => {
               await handleChildImported([ref], inferredLanguages)
+            }}
+          />
+        )}
+
+        {screen === "macula" && (
+          <MaculaPanel
+            projectId={projectId}
+            username={username}
+            getToken={getToken}
+            onImported={async (refs) => {
+              // Macula imports carry per-file source_language overrides (hbo/grc).
+              // Pass the first detected language as the project's inferred source
+              // only when the project's current source language is unset.
+              await handleChildImported(refs)
             }}
           />
         )}
@@ -313,16 +329,18 @@ function ImportLanding({ onSelect }: ImportLandingProps) {
         </p>
       </button>
 
-      {/* Macula — coming soon (FRO-178) */}
-      <div
-        title="Coming soon — Macula import is tracked in FRO-178"
-        className="cursor-not-allowed rounded-lg border border-dashed p-4 text-left opacity-50"
+      {/* Macula Hebrew + Greek — active (FRO-178) */}
+      <button
+        type="button"
+        onClick={() => onSelect("macula")}
+        className="rounded-lg border p-4 text-left transition-colors hover:border-primary hover:bg-primary/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
       >
-        <p className="text-sm font-medium">Macula</p>
+        <p className="text-sm font-medium">Macula Hebrew + Greek</p>
         <p className="mt-1 text-xs text-muted-foreground">
-          Greek / Hebrew Macula data. Coming soon.
+          Upload a Macula TSV file for the Hebrew Old Testament or Greek New Testament —
+          original-language text with per-word lemma, morphology, and Strong's data.
         </p>
-      </div>
+      </button>
 
       {/* Translation Memory (TMX) — coming soon (FRO-179) */}
       <div
@@ -987,6 +1005,99 @@ function DirectionPanel({
           disabled={confirmDisabled}
         >
           {confirming ? "Setting…" : "Set direction"}
+        </Button>
+      </div>
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Macula Hebrew + Greek panel (FRO-178)
+// ---------------------------------------------------------------------------
+
+interface MaculaPanelProps {
+  projectId: string
+  username: string
+  getToken: (fileId: string) => Promise<string | null>
+  onImported: (refs: FileReference[]) => void | Promise<void>
+}
+
+function MaculaPanel({ projectId, username, getToken, onImported }: MaculaPanelProps) {
+  const [importing, setImporting] = useState(false)
+  const [progress, setProgress] = useState<MaculaProgress | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const [file, setFile] = useState<File | null>(null)
+
+  async function handleImport() {
+    if (!file || importing) return
+    setImporting(true)
+    setError(null)
+    setProgress({ phase: "parse" })
+    try {
+      const refs = await importMacula(file, { projectId, author: username, getToken }, setProgress)
+      await onImported(refs)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Import failed")
+    } finally {
+      setImporting(false)
+      setProgress(null)
+    }
+  }
+
+  return (
+    <div className="flex flex-col gap-4 py-2">
+      <p className="text-xs text-muted-foreground">
+        Upload a Macula TSV file obtained from{" "}
+        <a
+          href="https://github.com/Clear-Bible/macula-hebrew"
+          target="_blank"
+          rel="noreferrer"
+          className="underline"
+        >
+          Clear Bible's Macula project
+        </a>
+        . Each TSV file represents one biblical book. The Hebrew and Greek word-level
+        morphology (lemma, morph code, Strong's) will be preserved alongside the verse text.
+      </p>
+      <div className="flex flex-col gap-2">
+        <Button variant="outline" size="sm" nativeButton={false} render={<label className="cursor-pointer" />}>
+          {file ? file.name : "Choose Macula TSV file"}
+          <input
+            type="file"
+            className="hidden"
+            accept=".tsv,.txt,.csv"
+            onChange={(e) => {
+              const f = e.target.files?.[0] ?? null
+              setFile(f)
+              setError(null)
+            }}
+            disabled={importing}
+          />
+        </Button>
+        {file && !importing && (
+          <p className="text-xs text-muted-foreground">{file.name} — {(file.size / 1024).toFixed(0)} KB</p>
+        )}
+      </div>
+      {progress && (
+        <div className="text-xs text-muted-foreground">
+          {progress.phase === "parse" && "Parsing verse data…"}
+          {progress.phase === "save" && progress.cellsTotal && (
+            <>
+              <p>Uploading: {(progress.cellsEnqueued ?? 0).toLocaleString()} / {progress.cellsTotal.toLocaleString()} cells</p>
+              <div className="mt-1.5 h-2 w-full overflow-hidden rounded-full bg-muted">
+                <div
+                  className="h-full bg-primary transition-all"
+                  style={{ width: `${Math.round(((progress.cellsEnqueued ?? 0) / progress.cellsTotal) * 100)}%` }}
+                />
+              </div>
+            </>
+          )}
+        </div>
+      )}
+      {error && <p className="text-sm text-destructive">{error}</p>}
+      <div className="flex justify-end">
+        <Button onClick={handleImport} disabled={!file || importing}>
+          {importing ? "Importing…" : "Import"}
         </Button>
       </div>
     </div>

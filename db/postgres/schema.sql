@@ -379,6 +379,20 @@ CREATE TABLE snapshots (
     deleted_at  TIMESTAMPTZ
 );
 
+-- Migration 0032: per-word morphology for Macula Hebrew + Greek (FRO-178)
+CREATE TABLE cell_word_morph (
+    project_id  TEXT NOT NULL,
+    file_id     TEXT NOT NULL,
+    cell_id     TEXT NOT NULL,
+    word_seq    INTEGER NOT NULL,   -- 1-based position within the cell
+    surface     TEXT NOT NULL,      -- surface form as it appears in the text
+    lemma       TEXT,               -- dictionary lemma
+    morph_code  TEXT,               -- morphology code (e.g. Macula/OSHB/Robinson format)
+    strongs_h   TEXT,               -- Strong's Hebrew number (e.g. H1234), NULL for Greek
+    strongs_g   TEXT,               -- Strong's Greek number (e.g. G1234), NULL for Hebrew
+    PRIMARY KEY (project_id, file_id, cell_id, word_seq)
+);
+
 -- ────────────────────────────── indexes ─────────────────────────────────
 
 CREATE INDEX idx_activity_logs_timestamp ON activity_logs(timestamp);
@@ -387,6 +401,8 @@ CREATE INDEX assignment_cells_by_assignment ON assignment_cells(assignment_id);
 CREATE INDEX assignments_assignee ON assignments(assignee_user_id);
 CREATE INDEX assignments_project ON assignments(project_id);
 CREATE INDEX idx_cell_audio_file ON cell_audio(project_id, file_id) WHERE deleted = 0;
+CREATE INDEX idx_cell_word_morph_file ON cell_word_morph(project_id, file_id);
+CREATE INDEX idx_cell_word_morph_lemma ON cell_word_morph(lemma) WHERE lemma IS NOT NULL;
 CREATE INDEX idx_cell_bt_cell ON cell_backtranslations(project_id, file_id, cell_id, created_at DESC);
 CREATE INDEX idx_cell_bt_file ON cell_backtranslations(project_id, file_id);
 CREATE INDEX idx_cell_validators_cell ON cell_validators(project_id, file_id, cell_id);

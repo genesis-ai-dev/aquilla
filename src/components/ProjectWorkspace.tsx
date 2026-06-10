@@ -1683,6 +1683,10 @@ export function ProjectWorkspace() {
   // Durable Object for presence + focus locks + `event.applied` broadcasts.
   // The outbox flusher (above) ships writes; this connection drives reads.
   const [cellLockHolders, setCellLockHolders] = useState<Map<string, string>>(() => new Map())
+  // RACE-5: ref that mirrors cellLockHolders, updated synchronously on each WS
+  // frame so handleEditorCommit (checkLockHolder) always reads the latest state
+  // rather than a stale React closure captured at the last render.
+  const cellLockHoldersRef = useRef<Map<string, string>>(new Map())
   const [cellsWithRemoteChange, setCellsWithRemoteChange] = useState<Set<string>>(() => new Set())
   const focusedCellIdRef = useRef<string | null>(null)
   // FRO-175: reactive version of focusedCellIdRef for the chat panel's context wiring.
@@ -1778,9 +1782,14 @@ export function ProjectWorkspace() {
                 if (u.userId === currentUsername) continue
                 next.set(u.focusedCell, u.userId)
               }
+              // RACE-5: update ref synchronously so checkLockHolder reads
+              // the latest state even before the React re-render completes.
+              cellLockHoldersRef.current = next
               setCellLockHolders(next)
             } else if (msg.t === "lock.claimed") {
               if (msg.by.userId === currentUsername) return
+              // RACE-5: sync the ref immediately (before React re-render).
+              cellLockHoldersRef.current.set(msg.cellId, msg.by.userId)
               setCellLockHolders((cur) => {
                 if (cur.get(msg.cellId) === msg.by.userId) return cur
                 const next = new Map(cur)
@@ -1788,6 +1797,8 @@ export function ProjectWorkspace() {
                 return next
               })
             } else if (msg.t === "lock.released") {
+              // RACE-5: sync the ref immediately (before React re-render).
+              cellLockHoldersRef.current.delete(msg.cellId)
               setCellLockHolders((cur) => {
                 if (!cur.has(msg.cellId)) return cur
                 const next = new Map(cur)
@@ -1862,6 +1873,13 @@ export function ProjectWorkspace() {
       return next
     })
   }, [])
+
+  // RACE-5: ref-backed lock check passed to EditorTable for commit-time
+  // enforcement. Reads cellLockHoldersRef (updated synchronously on every
+  // WS frame) so a debounce-queued commit can't slip through a stale render.
+  // Returns the holder label, or null when the cell is free.
+  const checkLockHolder = useCallback((cellId: string) =>
+    cellLockHoldersRef.current.get(cellId) ?? null, [])
 
   // Drives the editor-area rendering: loading skeleton vs. empty state vs.
   // EditorTable. Centralizes the decision so we don't flash between states
@@ -2283,6 +2301,27 @@ export function ProjectWorkspace() {
     return (
       <div className="p-8 text-muted-foreground">
         This project isn't on this device. <button className="underline" onClick={goToProjects}>Sign in</button> to open it from the cloud.
+      </div>
+    )
+  }
+  // RES-5: distinguish server-unreachable from a genuinely missing project.
+  // A 5xx / network error means the project *may* exist — show a retry CTA
+  // rather than the misleading "not found" message.
+  if (status === "unreachable") {
+    return (
+      <div className="p-8">
+        <div className="flex items-center justify-between gap-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm dark:border-amber-800 dark:bg-amber-950">
+          <span className="text-amber-800 dark:text-amber-200">
+            Can't reach the server — your project may still be available.
+          </span>
+          <button
+            type="button"
+            onClick={refresh}
+            className="shrink-0 rounded-md bg-amber-800 px-3 py-1.5 text-xs font-medium text-white hover:bg-amber-700 dark:bg-amber-700 dark:hover:bg-amber-600"
+          >
+            Retry
+          </button>
+        </div>
       </div>
     )
   }
@@ -2953,6 +2992,7 @@ export function ProjectWorkspace() {
             onClaimCell={handleClaimCell}
             onReleaseCell={handleReleaseCell}
             onAckRemoteChange={handleAckRemoteChange}
+            checkLockHolder={checkLockHolder}
             staleCellIds={staleCellIds}
             assignmentsByCellId={assignmentsByCellId}
           />

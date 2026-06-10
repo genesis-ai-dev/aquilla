@@ -434,6 +434,14 @@ interface EditorTableProps {
    *  active assignment. The map is built in ProjectWorkspace from getMyAssignments
    *  (member's own inbox) and getProjectAssignments (manager workload). */
   assignmentsByCellId?: ReadonlyMap<string, { username: string; scopeLabel: string }>
+  /**
+   * RACE-5: ref-backed lock check for commit-time enforcement. Reads the live
+   * lock map (updated synchronously on each WS frame) so a commit queued just
+   * after a `lock.claimed` frame arrives can't slip through a stale React render.
+   * Returns the holder userId/label, or null when the cell is free.
+   * Optional — when absent the existing `lockHolderLabel` prop is the only guard.
+   */
+  checkLockHolder?: (cellId: string) => string | null
 }
 
 export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(function EditorTable({
@@ -461,6 +469,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   alignmentModel,
   onAlignmentSeedChange,
   assignmentsByCellId,
+  checkLockHolder,
 }, ref) {
   const permissions = useProjectPermissions(project)
   const canEdit = permissions.canEditContent
@@ -1022,6 +1031,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
                 targetFontSize={targetFontSize}
                 assigneeLabel={assignmentsByCellId?.get(cell.id)?.username ?? null}
                 assigneeNote={assignmentsByCellId?.get(cell.id)?.scopeLabel ?? null}
+                checkLockHolder={checkLockHolder}
               />
             </div>
           )
@@ -1130,6 +1140,8 @@ interface MemoizedRowProps {
   assigneeLabel?: string | null
   /** FRO-192: scope label for the assignment tooltip. */
   assigneeNote?: string | null
+  /** RACE-5: ref-backed live lock check — see EditorTableProps.checkLockHolder. */
+  checkLockHolder?: (cellId: string) => string | null
 }
 
 const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
@@ -1159,6 +1171,7 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
     isStaleSource,
     assigneeLabel,
     assigneeNote,
+    checkLockHolder,
   } = props
 
   const cellId = cell.id
@@ -1282,6 +1295,7 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
         targetFontSize={targetFontSize}
         assigneeLabel={assigneeLabel}
         assigneeNote={assigneeNote}
+        checkLockHolder={checkLockHolder}
       />
     </div>
   )
@@ -1367,6 +1381,8 @@ interface EditorRowProps {
   assigneeLabel?: string | null
   /** FRO-192: scope label for the assignment tooltip. */
   assigneeNote?: string | null
+  /** RACE-5: ref-backed live lock check — see EditorTableProps.checkLockHolder. */
+  checkLockHolder?: (cellId: string) => string | null
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -1595,6 +1611,7 @@ function EditorRow({
   targetFontSize = 14,
   assigneeLabel,
   assigneeNote,
+  checkLockHolder,
 }: EditorRowProps) {
   const [openRuleId, setOpenRuleId] = useState<string | null>(null)
   const [openRuleAnchor, setOpenRuleAnchor] = useState<HTMLElement | null>(null)
@@ -1713,13 +1730,16 @@ function EditorRow({
   const handleEditorCommit = useCallback(({ value, valueHtml }: { value: string; valueHtml: string }) => {
     if (!editable) return
     if (!project.id) return
-    // F4 — Lock re-check at commit time. If another user now holds the lock
-    // (lockHolderLabel is set at call time), the editor should already be
-    // read-only, but the idle timer or an in-flight blur event may have
-    // queued a commit just before or after the lock was taken. Abort and
-    // trigger a soft revalidate so the user sees the latest projection.
-    if (lockHolderLabel) {
-      console.warn("[editor-commit] aborting: lock held by", lockHolderLabel)
+    // RACE-5 — Lock re-check at commit time. Uses the ref-backed `checkLockHolder`
+    // (updated synchronously on every WS frame) as the authoritative source so
+    // a commit queued in the debounce window just after another user's
+    // `lock.claimed` arrives can't slip through a stale React render.
+    // `lockHolderLabel` (from the last render) is the fallback when offline
+    // or when `checkLockHolder` is not wired. Advisory: never blocks when the
+    // socket is down (offline edits still flow through; FWW handles conflicts).
+    const liveHolder = checkLockHolder?.(cell.id) ?? lockHolderLabel
+    if (liveHolder) {
+      console.warn("[editor-commit] aborting: lock held by", liveHolder)
       void onCellCommitted?.(cell.id)
       return
     }
@@ -1763,7 +1783,7 @@ function EditorRow({
         valueHtml: cell.translatedHtml ?? "",
       })
     })
-  }, [editable, project.id, cell.fileId, cell.id, cell.translated, cell.translatedHtml, cell.sourceEventId, username, onCellCommitted, onOptimisticEdit, lockHolderLabel])
+  }, [editable, project.id, cell.fileId, cell.id, cell.translated, cell.translatedHtml, cell.sourceEventId, username, onCellCommitted, onOptimisticEdit, lockHolderLabel, checkLockHolder])
 
   // Terminology apply (spec 2c): REPLACE the active target selection with the
   // chosen rendering. The Apply affordance is only surfaced when there was a

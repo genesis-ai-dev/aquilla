@@ -4,13 +4,13 @@ const CHANGE_EVENT = "codex:analytics-consent-changed"
 export function isAnalyticsEnabled(): boolean {
   if (typeof window === "undefined") return false
   const raw = window.localStorage.getItem(STORAGE_KEY)
-  return raw === null ? true : raw === "true"
+  return raw === null ? false : raw === "true"
 }
 
 /**
  * True once the user has made an explicit analytics choice (the key exists in
- * localStorage). Distinct from isAnalyticsEnabled(), which returns the default
- * (true) when no choice has been recorded yet. Used to skip the onboarding
+ * localStorage). Distinct from isAnalyticsEnabled(), which returns false (the
+ * default) when no choice has been recorded yet. Used to skip the onboarding
  * privacy step on subsequent runs.
  */
 export function hasAnalyticsConsentBeenSet(): boolean {

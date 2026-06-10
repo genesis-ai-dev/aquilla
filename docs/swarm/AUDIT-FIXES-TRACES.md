@@ -13,6 +13,24 @@ Pick these up in a later wave or session. Source: docs/AUDIT-2026-06-10.md.
 - **PERF-9 retention/GC, CACHE-6 audio Range, CACHE-7 eBible mirror, RACE-10 token single-flight**: audit non-goals for now.
 - **onnxruntime-web nightly pin** (DEPS-4): needs a deliberate upgrade+test pass, not a swarm side-effect.
 
+## Adversarial review panel — non-blocker findings (2026-06-10, integration @ wave 2)
+
+Blockers (7) were fixed by the aud-fix-{client,locks,server} branches; these non-blockers remain open:
+
+- RACE-3 partial: pendingTargetEventIdRef doesn't survive virtualized row unmount/remount (EditorTable ~1640) — same behavior as pre-fix main, not a regression; consider hoisting the pending-parent map to EditorTable keyed by cellId.
+- Counter-row-lock serialization (RACE-1 core) is argued + simulated, never truly concurrent — PGlite is single-connection. Add a 2-connection Docker-postgres integration test when ports/infra allow.
+- broadcast.batch envelope dropped by OLD DO instances during a rolling deploy (clients reconcile via revalidate; delta-read makes that reliable post-fix). Deploy sync-worker at a quiet time.
+- Import chunk slicing can open a tx with cells/files statements before any event insert — theoretical lock-order inversion vs interactive writers (import-route ~290).
+- Rolling-deploy window: claim-vs-LWW winner mismatch possible while old+new workers coexist (TRACES already notes the seq variant).
+- Settings failure-as-null memo broadens fail-open from one event to the whole request (route.ts readProjectSettings memo).
+- React Compiler correctness rules downgraded to WARN while the Compiler is active in prod builds — burn down the ~30-file warning list, then re-promote to error.
+- deploy-workers detect job can skip deploy on force-push/unreachable event.before.
+- Audio OPFS cache + 1-year immutable header are browser-profile-scoped, not account-scoped — acceptable for cooperative few-user model; revisit for shared devices.
+- Same-user concurrent double-accept of an invite now 410s the loser (was 200) — cosmetic.
+- DO resets presence.focusedCell on new connections → client lock map can read false-free until next lock frame (fix-locks agent asked to verify and report).
+- Duplicate-request replay of a committed winner can regress cells.event_id (pre-existing, preserved by design).
+- In-flight claim losers still broadcast event.applied (harmless no-op refetch).
+
 ## Agent-reported TODOs (wave 1)
 
 **DEPLOY BLOCKER — `db/postgres/migrations/0034_server_seq_allocator.sql`** (project_seq_counters + chain_claims, idempotent) must be applied to LIVE NEON and the staging DB **before** deploying sync-worker, or every event write 500s (D1→Neon drift failure mode). Long-lived dev Postgres containers need it too (`applyPgSchemaIfMissing` only runs schema.sql on empty DBs). Rolling-deploy window: old workers still allocate MAX+1; collisions during the window surface as loud 500 + retry (self-heals).

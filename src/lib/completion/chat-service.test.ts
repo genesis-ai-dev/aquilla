@@ -127,6 +127,31 @@ describe("buildChatMessages", () => {
     expect(msgs[3].content).toBe("Follow-up")
   })
 
+  it("includes the open file name in the system message when provided", () => {
+    // The chat must know which file the user is working in — "the AI chat
+    // doesn't know the file I had open" was a real user complaint.
+    const msgs = buildChatMessages({
+      history: [],
+      userMessage: "Where am I?",
+      cellContext: null,
+      sourceLanguage: "English",
+      targetLanguage: "French",
+      fileName: "GEN.usfm",
+    })
+    expect(msgs[0].content).toContain('"GEN.usfm"')
+  })
+
+  it("omits file context when no file is open", () => {
+    const msgs = buildChatMessages({
+      history: [],
+      userMessage: "General question",
+      cellContext: null,
+      sourceLanguage: "English",
+      targetLanguage: "French",
+    })
+    expect(msgs[0].content).not.toContain("open in the editor")
+  })
+
   it("includes source and target language in system message", () => {
     const msgs = buildChatMessages({
       history: [],

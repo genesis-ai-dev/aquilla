@@ -10,11 +10,13 @@ interface ViewSettingsMenuProps {
   sourceTextDirection: "ltr" | "rtl"
   targetTextDirection: "ltr" | "rtl"
   cellLabelsEnabled: boolean
+  tnSidebarEnabled: boolean
   rtlHintDismissed?: boolean
   onLineNumbersChange: (v: boolean) => void
   onSourceTextDirectionChange: (v: "ltr" | "rtl") => void
   onTargetTextDirectionChange: (v: "ltr" | "rtl") => void
   onCellLabelsChange: (v: boolean) => void
+  onTnSidebarChange: (v: boolean) => void
   onDismissRtlHint?: () => void
 }
 
@@ -24,11 +26,13 @@ export function ViewSettingsMenu({
   sourceTextDirection,
   targetTextDirection,
   cellLabelsEnabled,
+  tnSidebarEnabled,
   rtlHintDismissed = true,
   onLineNumbersChange,
   onSourceTextDirectionChange,
   onTargetTextDirectionChange,
   onCellLabelsChange,
+  onTnSidebarChange,
   onDismissRtlHint,
 }: ViewSettingsMenuProps) {
   const rtlDetected = sourceTextDirection === "rtl" || targetTextDirection === "rtl"
@@ -129,6 +133,13 @@ export function ViewSettingsMenu({
               >
                 <span>Show cell labels</span>
                 <Pill on={cellLabelsEnabled} />
+              </Menu.Item>
+              <Menu.Item
+                onClick={() => onTnSidebarChange(!tnSidebarEnabled)}
+                className="flex cursor-pointer select-none items-center justify-between gap-2 rounded-lg px-2 py-1.5 text-sm outline-none data-[highlighted]:bg-accent"
+              >
+                <span>Show translation notes</span>
+                <Pill on={tnSidebarEnabled} />
               </Menu.Item>
               <div className="-mx-1 my-1.5 h-px rounded-full shadow-neu-inset" role="separator" />
               <div className="px-2 py-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">

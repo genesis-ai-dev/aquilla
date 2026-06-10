@@ -14,7 +14,8 @@
 //   Import → Translation Notes card → upload fixture → open biblical file →
 //   focus a cell at GEN 1:1 → sidebar slides in showing all TN rows for GEN 1:1.
 //   Multiple TN files separated by thin divider with file name header.
-//   Toggle button in header closes/opens the sidebar; preference persisted in
+//   Hidden by default; enabled via "Show translation notes" in the View
+//   settings menu (or the X in the sidebar header). Preference persisted in
 //   localStorage scoped to (projectId).
 
 import { useEffect, useState, useCallback } from "react"
@@ -57,11 +58,12 @@ function sidebarVisibilityKey(projectId: string): string {
 }
 
 export function readTnSidebarVisible(projectId: string): boolean {
+  // Hidden by default — opt in via the View settings menu.
   try {
     const v = window.localStorage.getItem(sidebarVisibilityKey(projectId))
-    return v !== "false"
+    return v === "true"
   } catch {
-    return true
+    return false
   }
 }
 
@@ -160,21 +162,9 @@ export function TranslationNotesSidebar({
   }, [visible, canonicalRef, fetchNotes])
 
   if (!visible) {
-    // Show a collapsed toggle button so the user can reopen the sidebar.
-    return (
-      <button
-        type="button"
-        aria-label="Show translation notes"
-        onClick={onToggle}
-        className={cn(
-          "flex flex-col items-center justify-center gap-1 rounded-l border border-r-0 bg-background px-1.5 py-3 text-xs text-muted-foreground shadow-sm transition-colors hover:bg-accent hover:text-foreground",
-          className,
-        )}
-      >
-        <BookOpen className="h-4 w-4 shrink-0" />
-        <span className="[writing-mode:vertical-rl] rotate-180 text-[10px]">TN</span>
-      </button>
-    )
+    // Fully hidden — re-enabled via "Show translation notes" in the View
+    // settings menu, not an always-present rail button.
+    return null
   }
 
   // Group notes by file name so multiple TN files are separated visually.

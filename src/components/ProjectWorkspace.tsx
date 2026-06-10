@@ -1132,6 +1132,7 @@ export function ProjectWorkspace() {
     session: frontierSession,
     sourceLanguage: project?.sourceLanguage || "",
     targetLanguage: project?.targetLanguage || "",
+    currentFileName: activeFile?.name,
   })
 
   // ── Back-translation: statistical primary path + optional LLM polish ────────
@@ -1643,8 +1644,9 @@ export function ProjectWorkspace() {
   // FRO-175: reactive version of focusedCellIdRef for the chat panel's context wiring.
   const [focusedCellId, setFocusedCellId] = useState<string | null>(null)
   // FRO-179: TN sidebar visibility + canonicalRef of the focused cell.
+  // Hidden by default; toggled via the View settings menu.
   const [tnSidebarVisible, setTnSidebarVisible] = useState<boolean>(() =>
-    projectId ? readTnSidebarVisible(projectId) : true,
+    projectId ? readTnSidebarVisible(projectId) : false,
   )
   const [focusedCellCanonicalRef, setFocusedCellCanonicalRef] = useState<string | null>(null)
   const reconcilerRef = useRef<import("@/lib/sync/ws-reconciler").WsReconciler | null>(null)
@@ -1796,10 +1798,18 @@ export function ProjectWorkspace() {
   }, [projectId, activeFileId, currentUsername])
   const handleReleaseCell = useCallback((cellId: string) => {
     if (focusedCellIdRef.current === cellId) focusedCellIdRef.current = null
-    setFocusedCellId(null) // FRO-175: clear reactive focused cell
-    setFocusedCellCanonicalRef(null) // FRO-179: clear TN sidebar ref
+    // Deliberately keep focusedCellId / focusedCellCanonicalRef: the chat
+    // panel and TN sidebar need the *last* focused cell as context — clicking
+    // away (e.g. to open chat) releases the focus lock but shouldn't drop the
+    // context the user was just working in. Both reset on file switch below.
     reconcilerRef.current?.send({ t: "focus.release", cellId })
   }, [])
+  // Last-focused context is per-file: a cell from the previous file is stale
+  // once the user opens another one.
+  useEffect(() => {
+    setFocusedCellId(null)
+    setFocusedCellCanonicalRef(null)
+  }, [activeFileId])
   const handleAckRemoteChange = useCallback((cellId: string) => {
     setCellsWithRemoteChange((cur) => {
       if (!cur.has(cellId)) return cur
@@ -2525,11 +2535,16 @@ export function ProjectWorkspace() {
                 sourceTextDirection={fileMeta.sourceTextDirection}
                 targetTextDirection={fileMeta.targetTextDirection}
                 cellLabelsEnabled={cellLabelsEnabled}
+                tnSidebarEnabled={tnSidebarVisible}
                 rtlHintDismissed={fileMeta.rtlHintDismissed}
                 onLineNumbersChange={fileMeta.setLineNumbersEnabled}
                 onSourceTextDirectionChange={fileMeta.setSourceTextDirection}
                 onTargetTextDirectionChange={fileMeta.setTargetTextDirection}
                 onCellLabelsChange={setCellLabelsEnabled}
+                onTnSidebarChange={(v) => {
+                  setTnSidebarVisible(v)
+                  if (projectId) writeTnSidebarVisible(projectId, v)
+                }}
                 onDismissRtlHint={fileMeta.dismissRtlHint}
               />
               <Button

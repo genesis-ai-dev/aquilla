@@ -40,8 +40,9 @@ import {
 } from "@/lib/parsers/ebible"
 import { languagesEqual } from "@/lib/language-normalize"
 import { EBibleTargetReviewPanel } from "@/components/EBibleTargetReviewPanel"
+import { detectCollisions, type CollisionResult } from "@/lib/import-collision"
 
-type Screen = "landing" | "upload" | "ebible" | "macula" | "tn" | "direction" | "result"
+type Screen = "landing" | "upload" | "ebible" | "macula" | "tn" | "direction" | "result" | "collision"
 
 interface ImportDialogProps {
   open: boolean
@@ -68,6 +69,13 @@ interface ImportDialogProps {
    * the AD-2 parentId fields (targetEventId / sourceEventId).
    */
   sourceCells?: SourceCellRef[]
+  /**
+   * FRO-287: files already in the project. Used by the collision guard to detect
+   * re-imports and offer Skip / Import as duplicate choices.
+   * Only `name` is required; bookCode is not yet on FileReference so we match by
+   * name only. Fresh projects (empty array or absent) skip the detection step.
+   */
+  existingFiles?: { name: string }[]
 }
 
 /** localStorage key used to persist the per-project "skip direction prompt" choice. */
@@ -87,6 +95,7 @@ export function ImportDialog({
   ttsSettings,
   onCastUpdated,
   sourceCells,
+  existingFiles,
 }: ImportDialogProps) {
   const [screen, setScreen] = useState<Screen>("landing")
   // Holds refs + inferred languages while waiting for the user to set direction.
@@ -107,6 +116,12 @@ export function ImportDialog({
   const [confirming, setConfirming] = useState(false)
   // FRO-249 fix: inline error shown when onImported throws from the direction screen.
   const [confirmError, setConfirmError] = useState<string | null>(null)
+  // FRO-287: collision state — populated when a re-import is detected.
+  const [collisionState, setCollisionState] = useState<{
+    collisions: CollisionResult[]
+    // Callback that continues the pending import once the user resolves collisions.
+    proceed: (skipKeys: ReadonlySet<string>) => void | Promise<void>
+  } | null>(null)
   // FRO-249 fix (Fix 3): guard against Radix delivering onOpenChange(false) twice
   // in the same macrotask (closure-captured pendingImport stays non-null until
   // the re-render). Consumed synchronously so the second call is a no-op.
@@ -118,6 +133,7 @@ export function ImportDialog({
       setScreen("landing")
       setPendingImport(null)
       setImportResult(null)
+      setCollisionState(null)
       setConfirming(false)
       setConfirmError(null)
       flushingRef.current = false
@@ -283,6 +299,8 @@ export function ImportDialog({
               "Set translation direction"
             ) : screen === "result" ? (
               "Import complete — some books skipped"
+            ) : screen === "collision" ? (
+              "Re-import detected"
             ) : (
               <div className="flex items-center gap-2">
                 <button
@@ -312,6 +330,11 @@ export function ImportDialog({
             getToken={getToken}
             ttsSettings={ttsSettings}
             onCastUpdated={onCastUpdated}
+            existingFiles={existingFiles}
+            onCollision={(collisions, proceed) => {
+              setCollisionState({ collisions, proceed })
+              setScreen("collision")
+            }}
             onImported={handleChildImported}
           />
         )}
@@ -377,6 +400,22 @@ export function ImportDialog({
             importedCount={importResult.refs.length}
             skipped={importResult.skipped}
             onDismiss={handleResultDismiss}
+          />
+        )}
+
+        {/* FRO-287: collision guard — shown when re-importing into an existing project */}
+        {screen === "collision" && collisionState && (
+          <CollisionPanel
+            collisions={collisionState.collisions}
+            onResolve={async (skipKeys) => {
+              setCollisionState(null)
+              setScreen("upload")
+              await collisionState.proceed(skipKeys)
+            }}
+            onCancel={() => {
+              setCollisionState(null)
+              setScreen("upload")
+            }}
           />
         )}
       </DialogContent>
@@ -471,9 +510,16 @@ interface UploadPanelProps {
   onImported: (refs: FileReference[], inferredLanguages?: { sourceLanguage?: string; targetLanguage?: string }, skipped?: { book: string; reason: string }[]) => void | Promise<void>
   ttsSettings?: ProjectTtsSettings
   onCastUpdated?: (settings: Partial<ProjectTtsSettings>) => void | Promise<void>
+  /**
+   * FRO-287: files already in the project. Passed to detectCollisions before
+   * any import starts; on collision, onCollision is called instead of proceeding.
+   */
+  existingFiles?: { name: string }[]
+  /** FRO-287: called when collisions are detected; parent shows the collision screen. */
+  onCollision?: (collisions: CollisionResult[], proceed: (skipKeys: ReadonlySet<string>) => void | Promise<void>) => void
 }
 
-function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, getToken, onImported, ttsSettings, onCastUpdated }: UploadPanelProps) {
+function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, getToken, onImported, ttsSettings, onCastUpdated, existingFiles, onCollision }: UploadPanelProps) {
   const [importing, setImporting] = useState(false)
   const [dragOver, setDragOver] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -497,6 +543,31 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, getT
         return
       }
 
+      // FRO-287: single-file collision check before parsing/uploading.
+      if (existingFiles && existingFiles.length > 0 && onCollision) {
+        const incoming = list.map((f) => ({ name: f.name }))
+        const collisions = detectCollisions(incoming, existingFiles)
+        if (collisions.length > 0) {
+          // Pause and ask the user; once resolved, re-run with a skipKeys set.
+          onCollision(collisions, async (skipKeys) => {
+            // Filter out skipped files and proceed with the rest.
+            const filtered = list.filter((f) => !skipKeys.has(f.name.trim().toLowerCase()))
+            if (filtered.length === 0) return
+            await doImportFiles(filtered)
+          })
+          return
+        }
+      }
+
+      await doImportFiles(list)
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [projectId, username, sourceLanguage, targetLanguage, getToken, onImported, ttsSettings, onCastUpdated, existingFiles, onCollision]
+  )
+
+  /** Inner helper: import a resolved list of files (after collision resolution). */
+  const doImportFiles = useCallback(
+    async (list: File[]) => {
       setImporting(true)
       setProgress(null)
       const allRefs: FileReference[] = []
@@ -572,6 +643,8 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, getT
         getToken={getToken}
         onImported={onImported}
         onCancel={() => setParatextChoice(null)}
+        existingFiles={existingFiles}
+        onCollision={onCollision}
       />
     )
   }
@@ -663,6 +736,10 @@ interface ParatextChoiceProps {
    *  parent can show the result screen before closing. */
   onImported: (refs: FileReference[], inferredLanguages?: { sourceLanguage?: string; targetLanguage?: string }, skipped?: { book: string; reason: string }[]) => void | Promise<void>
   onCancel: () => void
+  /** FRO-287: files already in the project; used for collision detection. */
+  existingFiles?: { name: string }[]
+  /** FRO-287: called when collisions are detected before running the import. */
+  onCollision?: (collisions: CollisionResult[], proceed: (skipKeys: ReadonlySet<string>) => void | Promise<void>) => void
 }
 
 /** Source-vs-target choice for a detected Paratext project. Source imports the
@@ -670,6 +747,7 @@ interface ParatextChoiceProps {
  *  translation against an eBible source picked here (aligned by verse ref). */
 function ParatextChoice({
   entries, bookCount, projectId, username, sourceLanguage, targetLanguage, getToken, onImported, onCancel,
+  existingFiles, onCollision,
 }: ParatextChoiceProps) {
   const [mode, setMode] = useState<"choose" | "pickSource" | "importing">("choose")
   const [phase, setPhase] = useState("")
@@ -685,18 +763,37 @@ function ParatextChoice({
     setProgress({ count: p.booksDone, total: p.booksTotal })
   }
 
-  async function runSource() {
+  async function runSourceWithSkipKeys(skipKeys: ReadonlySet<string>) {
     setMode("importing"); setError(null); setPhase("Reading project…"); setProgress(null)
     try {
-      const { refs, settings, skipped } = await importParatextProject(entries, ctx, onProgress)
-      // Propagate language inferred from Paratext Settings.xml so the project
-      // can seed its sourceLanguage when it was unset (FRO-249).
+      const { refs, settings, skipped } = await importParatextProject(entries, { ...ctx, skipKeys }, onProgress)
       const inferredLang = settings.languageIsoCode || settings.language
-      // FRO-277: pass skipped up so the parent can show the result screen.
       await onImported(refs, inferredLang ? { sourceLanguage: inferredLang } : undefined, skipped.length ? skipped : undefined)
     } catch (err) {
       setError(err instanceof Error ? err.message : "Import failed"); setMode("choose")
     }
+  }
+
+  async function runSource() {
+    // FRO-287: collision check before running the import.
+    if (existingFiles && existingFiles.length > 0 && onCollision) {
+      const detected = detectParatextProject(entries)
+      if (detected) {
+        // Derive collision candidates from the SFM entry filenames.
+        // The bookId is the uppercase stem (e.g. "GEN" from "GEN.usfm").
+        const incoming = detected.sfmEntries.map((e) => {
+          const stem = e.name.replace(/\.(sfm|usfm)$/i, "").replace(/.*\//, "")
+          const bookCode = stem.toUpperCase()
+          return { name: stem, bookCode }
+        })
+        const collisions = detectCollisions(incoming, existingFiles)
+        if (collisions.length > 0) {
+          onCollision(collisions, (skipKeys) => runSourceWithSkipKeys(skipKeys))
+          return
+        }
+      }
+    }
+    await runSourceWithSkipKeys(new Set())
   }
 
   async function startTarget() {
@@ -710,7 +807,7 @@ function ParatextChoice({
     }
   }
 
-  async function runTarget(sel: EBibleTranslation) {
+  async function runTargetWithSkipKeys(sel: EBibleTranslation, skipKeys: ReadonlySet<string>) {
     setMode("importing"); setError(null); setPhase(`Fetching source: ${sel.title}…`); setProgress(null)
     try {
       const corpus = await fetchTranslationText(sel.id, () => {})
@@ -718,13 +815,9 @@ function ParatextChoice({
         ref: s.globalReferences?.[0] ?? s.context,
         text: s.original,
       }))
-      // WARN d fix: use languageCode (e.g. "eng") not sel.id ("eng-engKJV") as the source language.
       const selSourceLang = sel.languageCode || sel.id
-      const { refs, settings, skipped } = await importParatextAsTarget(entries, sourceVerses, { ...ctx, sourceLanguage: selSourceLang }, onProgress)
-      // The Paratext project IS the target; selSourceLang is the eBible source language.
-      // Propagate both so the project's source/target direction is set (FRO-249).
+      const { refs, settings, skipped } = await importParatextAsTarget(entries, sourceVerses, { ...ctx, sourceLanguage: selSourceLang, skipKeys }, onProgress)
       const inferredTargetLang = settings.languageIsoCode || settings.language
-      // FRO-277: pass skipped up so the parent can show the result screen.
       await onImported(
         refs,
         { sourceLanguage: selSourceLang, targetLanguage: inferredTargetLang || undefined },
@@ -733,6 +826,25 @@ function ParatextChoice({
     } catch (err) {
       setError(err instanceof Error ? err.message : "Import failed"); setMode("pickSource")
     }
+  }
+
+  async function runTarget(sel: EBibleTranslation) {
+    // FRO-287: collision check before fetching source corpus.
+    if (existingFiles && existingFiles.length > 0 && onCollision) {
+      const detected = detectParatextProject(entries)
+      if (detected) {
+        const incoming = detected.sfmEntries.map((e) => {
+          const stem = e.name.replace(/\.(sfm|usfm)$/i, "").replace(/.*\//, "")
+          return { name: stem, bookCode: stem.toUpperCase() }
+        })
+        const collisions = detectCollisions(incoming, existingFiles)
+        if (collisions.length > 0) {
+          onCollision(collisions, (skipKeys) => runTargetWithSkipKeys(sel, skipKeys))
+          return
+        }
+      }
+    }
+    await runTargetWithSkipKeys(sel, new Set())
   }
 
   const filtered = useMemo(() => {
@@ -1335,6 +1447,171 @@ function ImportResultPanel({ importedCount, skipped, onDismiss }: ImportResultPa
         </Button>
         <Button size="sm" onClick={handleDismiss} disabled={dismissing}>
           {dismissing ? "Closing…" : "Close"}
+        </Button>
+      </div>
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Collision guard panel — FRO-287
+// Shown when re-importing into a project that already has matching files.
+// Offers Skip / Import as duplicate per collision. Apply-to-all toggle lets
+// the user resolve the whole batch in one click.
+//
+// Replace-existing is NOT included in this pass because superseding the
+// content of existing cells would require a cross-file cell-update write path
+// that doesn't exist yet (the import pipeline only creates new cells). The UI
+// doesn't show a "Replace" button rather than showing a disabled one so users
+// aren't confused by a grayed-out option.
+// ---------------------------------------------------------------------------
+
+type CollisionChoice = "skip" | "duplicate"
+
+interface CollisionPanelProps {
+  collisions: CollisionResult[]
+  onResolve: (skipKeys: ReadonlySet<string>) => void | Promise<void>
+  onCancel: () => void
+}
+
+/** Per-collision prompt with apply-to-all toggle. */
+function CollisionPanel({ collisions, onResolve, onCancel }: CollisionPanelProps) {
+  // Map from incoming name → choice. Default is "skip" (safe default).
+  const [choices, setChoices] = useState<Map<string, CollisionChoice>>(() => {
+    const m = new Map<string, CollisionChoice>()
+    for (const c of collisions) m.set(c.name, "skip")
+    return m
+  })
+  const [resolving, setResolving] = useState(false)
+
+  function setAll(choice: CollisionChoice) {
+    setChoices((prev) => {
+      const next = new Map(prev)
+      for (const key of next.keys()) next.set(key, choice)
+      return next
+    })
+  }
+
+  function toggle(name: string) {
+    setChoices((prev) => {
+      const next = new Map(prev)
+      next.set(name, prev.get(name) === "skip" ? "duplicate" : "skip")
+      return next
+    })
+  }
+
+  async function handleConfirm() {
+    if (resolving) return
+    setResolving(true)
+    try {
+      // Build skipKeys: normalized keys for every item the user chose to skip.
+      const skipKeys = new Set<string>()
+      for (const [name, choice] of choices) {
+        if (choice === "skip") {
+          // Key must match what importFile / importParatextProject checks.
+          // bookCode (uppercase) or normalized name (lowercase trimmed).
+          const collision = collisions.find((c) => c.name === name)
+          if (collision?.bookCode) {
+            skipKeys.add(collision.bookCode.toUpperCase())
+          } else {
+            skipKeys.add(name.trim().toLowerCase())
+          }
+        }
+      }
+      await onResolve(skipKeys)
+    } finally {
+      setResolving(false)
+    }
+  }
+
+  const allSkip = [...choices.values()].every((v) => v === "skip")
+  const allDup = [...choices.values()].every((v) => v === "duplicate")
+
+  return (
+    <div className="flex flex-col gap-4 py-2">
+      <p className="text-sm text-muted-foreground">
+        The following {collisions.length === 1 ? "file already exists" : `${collisions.length} files already exist`} in this
+        project. Choose what to do with each one.
+      </p>
+
+      {/* Apply-to-all row */}
+      <div className="flex items-center gap-2 text-xs">
+        <span className="text-muted-foreground">Apply to all:</span>
+        <button
+          type="button"
+          onClick={() => setAll("skip")}
+          className={cn(
+            "rounded border px-2 py-0.5 transition-colors",
+            allSkip ? "border-primary bg-primary/10 text-primary" : "border-muted text-muted-foreground hover:border-foreground/40",
+          )}
+        >
+          Skip all
+        </button>
+        <button
+          type="button"
+          onClick={() => setAll("duplicate")}
+          className={cn(
+            "rounded border px-2 py-0.5 transition-colors",
+            allDup ? "border-primary bg-primary/10 text-primary" : "border-muted text-muted-foreground hover:border-foreground/40",
+          )}
+        >
+          Import all as duplicates
+        </button>
+      </div>
+
+      {/* Per-collision rows */}
+      <ScrollArea className="max-h-64 rounded-md border">
+        <ul className="divide-y">
+          {collisions.map((c) => {
+            const choice = choices.get(c.name) ?? "skip"
+            return (
+              <li key={c.name} className="flex items-center justify-between gap-3 px-3 py-2">
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm font-medium">{c.name}</p>
+                  <p className="truncate text-xs text-muted-foreground">
+                    Existing: {c.existingName}
+                    {c.bookCode ? ` (${c.bookCode})` : ""}
+                  </p>
+                </div>
+                {/* Toggle between Skip and Duplicate */}
+                <div className="flex shrink-0 gap-1 text-xs">
+                  <button
+                    type="button"
+                    onClick={() => choice !== "skip" && toggle(c.name)}
+                    className={cn(
+                      "rounded border px-2 py-0.5 transition-colors",
+                      choice === "skip"
+                        ? "border-primary bg-primary/10 text-primary"
+                        : "border-muted text-muted-foreground hover:border-foreground/40",
+                    )}
+                  >
+                    Skip
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => choice !== "duplicate" && toggle(c.name)}
+                    className={cn(
+                      "rounded border px-2 py-0.5 transition-colors",
+                      choice === "duplicate"
+                        ? "border-primary bg-primary/10 text-primary"
+                        : "border-muted text-muted-foreground hover:border-foreground/40",
+                    )}
+                  >
+                    Import as duplicate
+                  </button>
+                </div>
+              </li>
+            )
+          })}
+        </ul>
+      </ScrollArea>
+
+      <div className="flex justify-end gap-2">
+        <Button variant="ghost" size="sm" onClick={onCancel} disabled={resolving}>
+          Cancel
+        </Button>
+        <Button size="sm" onClick={handleConfirm} disabled={resolving}>
+          {resolving ? "Continuing…" : "Continue"}
         </Button>
       </div>
     </div>

@@ -19,6 +19,7 @@
 
 import type { Env } from "../types"
 import type { AuthUser, RoleResolution } from "../types"
+import { isPlatformAdminUsername } from "../middleware/platform-admin"
 
 export const ROLE_NAMES: Record<number, string> = {
   100: "viewer",
@@ -162,16 +163,22 @@ async function resolveProjectRoleInternal(
   if (org) contributions.push({ source: "org", level: org.role_level })
   if (project.created_by === user.id)
     contributions.push({ source: "creator", level: 700 })
+  // Platform operators (PLATFORM_ADMINS allowlist) get owner-level on every
+  // project — the cross-tenant support/oversight path. Lowest tie priority so
+  // a genuine grant keeps attribution when the admin is also a real member.
+  if (isPlatformAdminUsername(env, user.username))
+    contributions.push({ source: "platform", level: 700 })
 
   if (contributions.length === 0) return null
 
-  // Max-wins. On ties, declaration order (override > group > org > creator)
-  // wins attribution — see RoleResolution.source jsdoc.
+  // Max-wins. On ties, declaration order (override > group > org > creator >
+  // platform) wins attribution — see RoleResolution.source jsdoc.
   const sourcePriority: Record<ResolvedRole["source"], number> = {
     override: 4,
     group: 3,
     org: 2,
     creator: 1,
+    platform: 0,
   }
   contributions.sort((a, b) => {
     if (a.level !== b.level) return b.level - a.level

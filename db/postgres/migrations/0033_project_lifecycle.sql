@@ -5,4 +5,6 @@
 -- DISTINCT from archived_at (Trash): archived removes the project from normal
 -- listing; inactive keeps it visible but blocks edits until reactivated.
 -- Default TRUE so all existing projects are treated as active on upgrade.
-ALTER TABLE projects ADD COLUMN is_active BOOLEAN NOT NULL DEFAULT TRUE;
+-- Idempotent: IF NOT EXISTS guard prevents errors on re-runs (the dev-stack
+-- baseline catch-up may run this against a DB that already has the column).
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS is_active BOOLEAN NOT NULL DEFAULT TRUE;

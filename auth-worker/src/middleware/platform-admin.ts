@@ -26,11 +26,19 @@ export const parsePlatformAdmins = (env: Env): Set<string> => {
   )
 }
 
+/**
+ * Context-free allowlist check, usable from services (no hono Context).
+ * The permission resolvers call this to grant platform operators owner-level
+ * access on every org/project — see resolveProjectRole / getEffectiveOrgRole.
+ */
+export const isPlatformAdminUsername = (env: Env, username: string): boolean =>
+  parsePlatformAdmins(env).has(username)
+
 /** True when the hydrated request user is a platform operator. */
 export const isPlatformAdmin = (c: Context<AuthHonoEnv>): boolean => {
   const user = c.get("user")
   if (!user) return false
-  return parsePlatformAdmins(c.env).has(user.username)
+  return isPlatformAdminUsername(c.env, user.username)
 }
 
 /**

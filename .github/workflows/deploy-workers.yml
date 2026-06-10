@@ -55,9 +55,40 @@ jobs:
           echo "$changed" | grep -q '^sync-worker/' && echo "sync=true" >> "$GITHUB_OUTPUT" || echo "sync=false" >> "$GITHUB_OUTPUT"
           echo "$changed" | grep -q '^auth-worker/' && echo "auth=true" >> "$GITHUB_OUTPUT" || echo "auth=false" >> "$GITHUB_OUTPUT"
 
-  sync-worker:
+  # Prod deploys are blocked until the live Neon schema is current — the
+  # recurring 500 class (FRO-135/150/158, projects.is_active) was a worker
+  # deploy referencing columns whose migration was never applied to Neon.
+  # `neon-migrate status` is read-only: it checks the schema_migrations ledger
+  # and diffs db/postgres/schema.sql against live information_schema. On a
+  # failure, apply pending migrations from a laptop (npm run neon:apply) and
+  # re-run the deploy. Requires NEON_PG_* repo secrets (prod/default branch
+  # of Neon project sweet-paper-88472094); fails closed if they're missing.
+  # Staging-branch deploys are not guarded (staging Neon branch has its own
+  # host; point NEON_PG_HOST at it to check manually).
+  schema-guard:
     needs: detect
-    if: needs.detect.outputs.sync == 'true'
+    if: github.ref == 'refs/heads/main' && (needs.detect.outputs.sync == 'true' || needs.detect.outputs.auth == 'true')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Check live Neon schema is current
+        env:
+          NEON_PG_HOST: ${{ secrets.NEON_PG_HOST }}
+          NEON_PG_DB: ${{ secrets.NEON_PG_DB }}
+          NEON_PG_ROLE: ${{ secrets.NEON_PG_ROLE }}
+          NEON_PG_PASSWORD: ${{ secrets.NEON_PG_PASSWORD }}
+        run: npx tsx scripts/neon-migrate.ts status
+
+  sync-worker:
+    # !failure() && !cancelled(): run when schema-guard passed OR was skipped
+    # (staging/dev pushes), but never when it failed.
+    needs: [detect, schema-guard]
+    if: ${{ !failure() && !cancelled() && needs.detect.outputs.sync == 'true' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -92,8 +123,8 @@ jobs:
           command: deploy ${{ github.ref == 'refs/heads/main' && ' ' || github.ref == 'refs/heads/staging' && '--env=staging' || '--env=development' }}
 
   auth-worker:
-    needs: detect
-    if: needs.detect.outputs.auth == 'true'
+    needs: [detect, schema-guard]
+    if: ${{ !failure() && !cancelled() && needs.detect.outputs.auth == 'true' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -120,13 +151,10 @@ jobs:
         working-directory: auth-worker
 
       # NOTE: Postgres (Neon) is the only datastore — the D1→Neon cutover is
-      # complete. Schema changes are applied by hand against Neon, NOT in CI:
-      #   set -a; . ./.env; set +a
-      #   npx tsx scripts/pg.ts db/postgres/schema.sql
-      # The old `wrangler d1 migrations apply aquilla-db` step was removed: it
-      # targeted a D1 nothing reads anymore. TODO(FRO): if automated Neon schema
-      # application is wanted, add a step that runs scripts/pg.ts against the
-      # prod/staging Neon branch here (before the deploy below).
+      # complete. Schema changes are applied by hand against Neon, NOT in CI
+      # (npm run neon:apply, which records them in the schema_migrations
+      # ledger). The schema-guard job above fails this deploy if the live
+      # schema is behind db/postgres/migrations/.
       - name: Deploy auth-worker
         uses: cloudflare/wrangler-action@v3
         with:

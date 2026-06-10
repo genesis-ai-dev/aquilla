@@ -24,6 +24,7 @@ import { HealthRing } from "./HealthRing"
 import { TranslatedEditor } from "./TranslatedEditor"
 import { CellWaveform } from "./CellWaveform"
 import { CellAudioButton } from "./CellAudioButton"
+import { TimelineAddMedia } from "./TimelineAddMedia"
 import { CellTtsButton } from "./CellTtsButton"
 import { CellTranscriptPreview } from "./CellTranscriptPreview"
 import { CellActionRail, RailButton, isInteractiveTarget } from "./CellActionRail"
@@ -345,6 +346,10 @@ interface EditorTableProps {
   orderedBy?: OrderedBy
   /** Switch to the Audio lens and open the cast/voice library (error recovery). */
   onOpenAudioSetup?: () => void
+  /** Media-lens empty state: attach a clip to THIS file (upload / direct URL).
+   *  When absent, the empty state falls back to the static hint. */
+  onAttachMediaFile?: (file: File) => Promise<void>
+  onAttachMediaUrl?: (url: string) => Promise<void>
   /** Called after a successful `target.cell.commit` enqueue so the parent
    *  refetches the cells projection. */
   onCellCommitted?: (cellId: string) => void | Promise<void>
@@ -443,6 +448,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   lineNumbersEnabled, cellLabelsEnabled, sourceTextDirection, targetTextDirection,
   isAnonymous, onJumpToCell, onAiSetupNeeded, onOpenRecording,
   audioLens, onOpenAudioSetup,
+  onAttachMediaFile, onAttachMediaUrl,
   orderedBy,
   onProjectChanged, onAddConceptFromSelection, onAssignVoice,
   onCellCommitted,
@@ -1022,11 +1028,15 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
         })}
       </div>
       {isTimeOrdered && displayCells.length === 0 && (
-        <div className="px-4 py-10 text-center text-sm text-muted-foreground">
-          {audioLens
-            ? "No media segments yet. Import an audio or video file, or record a take, to populate the media layer."
-            : "No text segments in this file."}
-        </div>
+        audioLens && canEdit && onAttachMediaFile && onAttachMediaUrl ? (
+          <TimelineAddMedia onAttachFile={onAttachMediaFile} onAttachUrl={onAttachMediaUrl} />
+        ) : (
+          <div className="px-4 py-10 text-center text-sm text-muted-foreground">
+            {audioLens
+              ? "No media segments yet. Import an audio or video file, or record a take, to populate the media layer."
+              : "No text segments in this file."}
+          </div>
+        )
       )}
     </div>
   )

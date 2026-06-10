@@ -6,6 +6,20 @@
       "runtimeExecutable": "npm",
       "runtimeArgs": ["run", "dev:vite", "--", "--port", "5180", "--strictPort"],
       "port": 5180
+    },
+    {
+      "name": "stack-qa",
+      "runtimeExecutable": "env",
+      "runtimeArgs": [
+        "DEV_STACK_IDENTITY_PORT=18788",
+        "DEV_STACK_SYNC_PORT=18789",
+        "npm",
+        "run",
+        "dev",
+        "--",
+        "--vite-port=15173"
+      ],
+      "port": 15173
     }
   ]
 }

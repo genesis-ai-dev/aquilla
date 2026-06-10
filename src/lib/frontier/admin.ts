@@ -74,6 +74,21 @@ export interface AdminActivity {
 }
 
 /**
+ * One PLATFORM_ADMINS allowlist entry. `hasAccount: false` means the name is
+ * allowlisted in wrangler.toml but no user row matches it (typo or
+ * not-yet-registered) — surfaced so the list stays auditable from the UI.
+ */
+export interface AdminAdmin {
+  username: string
+  hasAccount: boolean
+  userId?: number
+  email?: string
+  displayName?: string | null
+  createdAt?: string
+  lastActiveAt?: string | null
+}
+
+/**
  * Probe whether the current session is a platform admin. Resolves to false on
  * 403 (ordinary user) and re-throws only on unexpected transport/server
  * errors, so callers can gate UI without a try/catch for the common case.
@@ -84,6 +99,12 @@ export async function getAdminMe(jwt: string): Promise<boolean> {
   if (!res.ok) throw new Error(`getAdminMe failed: HTTP ${res.status}`)
   const body = (await res.json()) as { isPlatformAdmin?: boolean }
   return body.isPlatformAdmin === true
+}
+
+export async function getAdminAdmins(jwt: string): Promise<AdminAdmin[]> {
+  const res = await fetchWithTimeout(`${FRONTIER_BASE}/api/v2/admin/admins`, { headers: authHeaders(jwt) })
+  if (!res.ok) throw new Error(`getAdminAdmins failed: HTTP ${res.status}`)
+  return ((await res.json()) as { admins: AdminAdmin[] }).admins
 }
 
 export async function getAdminOverview(jwt: string): Promise<AdminOverview> {

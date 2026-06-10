@@ -100,6 +100,9 @@ export interface OrgSummary {
   id: number
   name: string | null
   role: OrgRole
+  /** True when the org is visible only via the PLATFORM_ADMINS allowlist
+   *  (not a genuine membership). Server appends these after real orgs. */
+  viaPlatformAdmin?: boolean
 }
 
 export async function listMyOrgs(jwt: string): Promise<OrgSummary[]> {

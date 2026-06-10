@@ -169,6 +169,8 @@ describe("audio R2 endpoints", () => {
     )) as Response
     expect(get.status).toBe(200)
     expect(get.headers.get("Content-Type")).toBe("audio/webm")
+    // CACHE-5: audio is immutable per audioId; browsers may cache it for a year.
+    expect(get.headers.get("Cache-Control")).toBe("private, max-age=31536000, immutable")
     const out = new Uint8Array(await get.arrayBuffer())
     expect(Array.from(out)).toEqual([7, 7, 7, 7, 7])
   })

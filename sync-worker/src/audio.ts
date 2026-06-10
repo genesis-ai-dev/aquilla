@@ -147,13 +147,18 @@ export async function handleAudioRequest(
   const buf = await obj.arrayBuffer()
   const contentType =
     obj.httpMetadata?.contentType || "application/octet-stream"
+  // Audio objects are addressed by audioId, which is a stable UUIDv7-based
+  // identifier that never changes for a given recording. A new recording
+  // always gets a new audioId, so the bytes are truly immutable.
+  // `private` prevents CDN/shared-proxy caching of authed responses; the
+  // browser is safe to cache the full 1-year TTL (CACHE-5).
   return withAudioCors(
     new Response(buf, {
       status: 200,
       headers: {
         "Content-Type": contentType,
         "Content-Length": String(buf.byteLength),
-        "Cache-Control": "private, max-age=0, must-revalidate",
+        "Cache-Control": "private, max-age=31536000, immutable",
       },
     }),
   )

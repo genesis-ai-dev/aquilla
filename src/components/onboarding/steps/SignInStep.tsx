@@ -9,7 +9,20 @@ import { Check } from "lucide-react"
 
 type Mode = "signup" | "login" | "forgot"
 
-export function SignInStep({ onNext, onBack }: { onNext: () => void; onBack: () => void }) {
+export function SignInStep({
+  onNext,
+  onBack,
+  onLoginComplete,
+}: {
+  onNext: () => void
+  onBack: () => void
+  /**
+   * FRO-282: called instead of onNext when the user completes a LOGIN (not
+   * signup). The wizard can inspect existing orgs/projects and skip the
+   * Name + Project steps for returning users.
+   */
+  onLoginComplete?: () => void
+}) {
   const { session } = useFrontierSession()
   // Default new visitors to signup; the loop's "joiner" path is rare here
   // (joiners arrive via invite links, not the onboarding wizard).
@@ -55,7 +68,7 @@ export function SignInStep({ onNext, onBack }: { onNext: () => void; onBack: () 
       {mode === "signup" && <FrontierSignupForm onSuccess={onNext} />}
       {mode === "login" && (
         <FrontierLoginForm
-          onSuccess={onNext}
+          onSuccess={onLoginComplete ?? onNext}
           onForgotPassword={() => setMode("forgot")}
         />
       )}

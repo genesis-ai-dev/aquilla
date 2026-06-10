@@ -21,12 +21,6 @@ test("member access row expands and collapses project access details", async ({ 
   await alice.goto("/members")
   await alice.waitForLoadState("networkidle")
 
-  // Ensure we're in Roster view (default).
-  const rosterBtn = alice.getByRole("button", { name: /^Roster$/i })
-  if (await rosterBtn.isVisible({ timeout: 2_000 }).catch(() => false)) {
-    await rosterBtn.click()
-  }
-
   // Find bob's MemberAccessRow button.
   const bobRow = alice.locator("li").filter({ hasText: "bob" }).first()
   await expect(bobRow).toBeVisible({ timeout: 10_000 })

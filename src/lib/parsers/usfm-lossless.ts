@@ -332,6 +332,34 @@ export function serializeUsfmLossless(
   return parts.join("")
 }
 
+/** Return true when the verse text span contains intra-verse USFM markers
+ *  that plain-text cell replacement will silently drop.
+ *
+ *  We detect three classes of markers that translators cannot round-trip back
+ *  once the cell's value is substituted as plain text:
+ *
+ *  1. Footnotes / cross-references: \f...\f*, \fe...\fe*, \x...\x*
+ *  2. Poetry / paragraph breaks inside the span: \q, \q1-4, \qc, \qm, \qm1-3,
+ *     \p, \m, \pi, \pc, \pr, \mi, \nb, \b, \li, \li1-4, \lim, \lim1-4
+ *  3. Character-level markers: \wj, \nd, \add, \bk, \dc, \k, \tl, \sig,
+ *     \pn, \png, \addpn, \qt, \qs, \fqa, \fq, \ft (inline note content),
+ *     \w, \rb (ruby), \jmp, \fig, \pro
+ *
+ *  The test is intentionally broad: if the verse text has ANY line-start marker
+ *  that is not pure whitespace, OR any inline \marker tag (backslash not
+ *  at a line-start but mid-text), the verse has structure. */
+export function hasIntraVerseMarkers(verseText: string): boolean {
+  // Line-start USFM markers inside the verse span (e.g. \q1, \p, \m, \b, \li).
+  // These appear at the start of a line within the verse text.
+  if (/(?:^|\n)\\[a-z]+\d*/.test(verseText)) return true
+  // Inline character markers and note wrappers (\f, \x, \wj, \nd, etc.):
+  // a backslash NOT at line start (i.e. mid-line). The verse text as captured
+  // by the parser begins right after the verse number so the first character
+  // is content, not a line marker — any \ anywhere is intra-verse markup.
+  if (/\\./.test(verseText)) return true
+  return false
+}
+
 /** Strip the leading BOM, if any. Useful for hashing comparisons that should
  *  ignore BOM differences. */
 export function stripBom(s: string): string {

@@ -34,7 +34,15 @@ export class SourceExportError extends Error {
   }
 }
 
-export async function downloadSourceFile(args: DownloadSourceArgs): Promise<void> {
+export interface DownloadSourceResult {
+  /** FRO-276: number of translated verses whose original USFM span contained
+   *  intra-verse markers (footnotes, poetry, character markers) that were
+   *  dropped by plain-text substitution. 0 = genuinely lossless round-trip.
+   *  `null` if the server did not return the header (older route version). */
+  lossyVerseCount: number | null
+}
+
+export async function downloadSourceFile(args: DownloadSourceArgs): Promise<DownloadSourceResult> {
   const token = await args.getToken(args.fileId)
   if (!token) throw new SourceExportError("Couldn't get an export token — sign in and try again.")
   const url =
@@ -52,8 +60,13 @@ export async function downloadSourceFile(args: DownloadSourceArgs): Promise<void
       res.status,
     )
   }
+  // FRO-276: read the lossy-verse count header before consuming the body.
+  const lossyHeader = res.headers.get("X-Usfm-Lossy-Verse-Count")
+  const lossyVerseCount = lossyHeader !== null ? parseInt(lossyHeader, 10) : null
+
   const blob = await res.blob()
   triggerDownload(blob, args.downloadName)
+  return { lossyVerseCount }
 }
 
 /**

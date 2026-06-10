@@ -44,13 +44,32 @@ export function recordedMinutes(p: PortfolioProject): number {
 
 export type DeadlineStatus = "overdue" | "soon" | "ok"
 
+/**
+ * Convention: "Anywhere on Earth" (AoE) deadline semantics.
+ *
+ * A deadline of "YYYY-MM-DD" is NOT overdue until that calendar day has ended
+ * everywhere on Earth, including UTC-12 (Baker Island / Howland Island).
+ * UTC-12 is 12 hours behind UTC, so end-of-day UTC-12 = next calendar day at
+ * 12:00:00 UTC. We add a 1-day + 12-hour grace past the deadline date's UTC
+ * midnight:  overdue when now_utc >= deadline_utc_midnight + 36 hours.
+ *
+ * This ensures:
+ *   - A project due TODAY is never "overdue" during that calendar day anywhere.
+ *   - A project due YESTERDAY is always "overdue" (more than 36h has passed).
+ */
+function isDeadlineOverdue(deadlineUtcMidnight: number, nowMs: number): boolean {
+  const AOE_GRACE_MS = (24 + 12) * 60 * 60 * 1000 // 36 hours
+  return nowMs >= deadlineUtcMidnight + AOE_GRACE_MS
+}
+
 /** null when no deadline; "overdue" past due; "soon" within 7 days; else "ok". */
 export function deadlineStatus(p: PortfolioProject, now: number): DeadlineStatus | null {
   if (!p.deadlineAt) return null
-  const t = Date.parse(p.deadlineAt)
+  const t = Date.parse(p.deadlineAt) // "YYYY-MM-DD" → UTC midnight of that date
   if (Number.isNaN(t)) return null
-  if (t < now) return "overdue"
-  if (t - now <= 7 * 24 * 60 * 60 * 1000) return "soon"
+  if (isDeadlineOverdue(t, now)) return "overdue"
+  // "soon": within 7 days, measured from AoE end-of-deadline-day to now
+  if (t + (24 + 12) * 60 * 60 * 1000 - now <= 7 * 24 * 60 * 60 * 1000) return "soon"
   return "ok"
 }
 

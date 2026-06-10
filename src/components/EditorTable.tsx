@@ -13,7 +13,8 @@ import { getCellPref, setCellPref } from "@/lib/store/audio-cell-prefs"
 import type { ScoredPair } from "@/lib/search/dual-index"
 import type { TranslationRule, RuleInfraction, ProjectRecord, Voice, ProjectTtsSettings, OrderedBy } from "@/lib/parsers/types"
 import { sortByLens, hasTiming } from "@/lib/timeline/derive"
-import { useProjectPermissions } from "@/hooks/useProjectPermissions"
+import { useEditorCapabilities } from "@/hooks/useProjectPermissions"
+import { canPerform } from "@/lib/sync/role-policy"
 import { emitTargetCellCommit, emitCellValidate, emitCellUnvalidate, emitCellWaive, emitCellUnwaive } from "@/lib/sync/events-emit"
 import { ExamplePanel } from "./ExamplePanel"
 import { HighlightedText, buildHighlightsFromExamples } from "./HighlightedText"
@@ -471,8 +472,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   assignmentsByCellId,
   checkLockHolder,
 }, ref) {
-  const permissions = useProjectPermissions(project)
-  const canEdit = permissions.canEditContent
+  const { canEdit, canValidate, readOnlyLabel } = useEditorCapabilities(project)
   // Probe mic permission once (shared across all rows) so the help affordance
   // on CellAudioRecordButton activates when the user has blocked the mic.
   const { micDenied } = useMicPermission(audioLens !== null)
@@ -910,6 +910,13 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
             </span>
           </div>
         )}
+        {/* FRO-273: role badge — shown for read-only roles (viewer/commenter/reviewer) */}
+        {readOnlyLabel && (
+          <div className="flex items-center gap-2 border-b bg-amber-50 px-4 py-2 text-xs text-amber-900 dark:bg-amber-950/40 dark:text-amber-300">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-3.5 w-3.5 flex-shrink-0"><rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+            {readOnlyLabel}
+          </div>
+        )}
         <div className={cn("grid gap-2 border-b border-border px-4 py-2 text-xs font-medium uppercase tracking-wide text-muted-foreground", gridCols)}>
           <div />
           {/* In Audio mode the left column carries per-line voice controls, not
@@ -975,6 +982,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
                 isStaleSource={staleCellIds?.has(cell.id) ?? false}
                 username={username}
                 editable={canEdit}
+                canValidate={canValidate}
                 onCellCommitted={onCellCommitted}
                 onOptimisticEdit={onOptimisticEdit}
                 lockHolderLabel={cellLockHolders?.get(cell.id) ?? null}
@@ -1069,6 +1077,8 @@ interface MemoizedRowProps {
   cell: CellData
   username: string
   editable: boolean
+  /** FRO-273: reviewer (300) can validate but not edit. True whenever role ≥ REVIEWER. */
+  canValidate: boolean
   /** Phase 5 / AD-9: source has advanced since this target was last committed.
    *  Resolved once per file by the parent (membership look-up) so this prop
    *  is just a stable boolean — preserves the row's React.memo invariant. */
@@ -1158,7 +1168,7 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
     onAlignmentSeedChange,
     sourceFontSize,
     targetFontSize,
-    project, username, editable, isCompletionConfigured, isCompletionAvailable,
+    project, username, editable, canValidate, isCompletionConfigured, isCompletionAvailable,
     ruleMap, onCompleteSingle, onInfractionClick,
     isBacktranslationConfigured, onBacktranslate, onSaveBacktranslation,
     onOpenComments, onOpenHistory,
@@ -1235,6 +1245,7 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
         cell={cell}
         username={username}
         editable={editable}
+        canValidate={canValidate}
         isStaleSource={isStaleSource}
         isCompletionConfigured={isCompletionConfigured}
         isCompletionAvailable={isCompletionAvailable}
@@ -1306,6 +1317,8 @@ interface EditorRowProps {
   cell: CellData
   username: string
   editable: boolean
+  /** FRO-273: reviewer (300) can validate but not edit. True whenever role ≥ REVIEWER. */
+  canValidate: boolean
   /** Phase 5 / AD-9 — true when the source has advanced since the last
    *  target commit. Renders a small warning badge next to the validation
    *  status. Computed once-per-file by the parent. */
@@ -1589,7 +1602,7 @@ function SourceWithTermLookup({
 }
 
 function EditorRow({
-  project, cell, username, editable, isCompletionConfigured, isCompletionAvailable, isLoading,
+  project, cell, username, editable, canValidate, isCompletionConfigured, isCompletionAvailable, isLoading,
   completionPreview, loadingPhase,
   cellExamples, highlights, error, health,
   cellInfractions, waivedInfractions, ruleMap,
@@ -1640,12 +1653,19 @@ function EditorRow({
   const pendingTargetEventIdRef = useRef<string | null>(cell.targetEventId ?? null)
   // RES-4: local error state for enqueue failures (IDB quota, role errors).
   // Surfaces a compact inline message below the editor instead of swallowing.
-  const [enqueueError, setEnqueueError] = useState<string | null>(null)
   /** voice-chip drag-over state: the voiceId being dragged over this cell's audio area */
   const [dragOverVoiceId, setDragOverVoiceId] = useState<string | null>(null)
   // FRO-237: mic-denied help popover state — rendered as an inline popover so
   // the rail button stays ENABLED when mic is blocked and routes click here.
   const [showMicDeniedHelp, setShowMicDeniedHelp] = useState(false)
+  // FRO-274: write-failure banner state. Set when any outbox enqueue fails
+  // (cell commit, validate, waive). The message persists until dismissed so
+  // the user has time to copy their text before reloading.
+  const [writeError, setWriteError] = useState<string | null>(null)
+  // FRO-278: confirm dialog shown when Generate is triggered on a non-empty
+  // cell. True = dialog is open; clicking Confirm calls onCompleteSingle,
+  // clicking Cancel discards the pending action (nothing committed).
+  const [showGenerateConfirm, setShowGenerateConfirm] = useState(false)
 
   useEffect(() => {
     if (cell.targetEventId) pendingTargetEventIdRef.current = cell.targetEventId
@@ -1680,6 +1700,9 @@ function EditorRow({
       void onCellCommitted?.(cell.id)
     }).catch((err) => {
       console.warn("[waive] emit failed:", err)
+      // FRO-274: surface enqueue failure to the user so they know the waive
+      // didn't persist locally — silent failure is the worst failure mode.
+      setWriteError("Couldn't save this change locally — copy your text and reload.")
     })
   }, [project.id, cell.fileId, cell.id, username, onCellCommitted])
 
@@ -1696,6 +1719,8 @@ function EditorRow({
       void onCellCommitted?.(cell.id)
     }).catch((err) => {
       console.warn("[unwaive] emit failed:", err)
+      // FRO-274: surface enqueue failure inline.
+      setWriteError("Couldn't save this change locally — copy your text and reload.")
     })
   }, [project.id, cell.fileId, cell.id, username, onCellCommitted])
 
@@ -1730,6 +1755,14 @@ function EditorRow({
   const handleEditorCommit = useCallback(({ value, valueHtml }: { value: string; valueHtml: string }) => {
     if (!editable) return
     if (!project.id) return
+    // FRO-273: belt-and-suspenders role-mirror check. `editable` is already
+    // false for roles < CONTRIBUTOR, so this guard only fires in the unlikely
+    // race where `editable` hasn't updated yet after a role downgrade — it
+    // prevents a guaranteed-403 event from entering the durable outbox.
+    if (!canPerform("target.cell.commit", project.syncRole?.level ?? null)) {
+      console.warn("[editor-commit] aborting: role too low for target.cell.commit")
+      return
+    }
     // RACE-5 — Lock re-check at commit time. Uses the ref-backed `checkLockHolder`
     // (updated synchronously on every WS frame) as the authoritative source so
     // a commit queued in the debounce window just after another user's
@@ -1749,7 +1782,7 @@ function EditorRow({
     // cell's cached infractions are invalidated. The server projection
     // arrives via `onCellCommitted` -> revalidate and overwrites this.
     onOptimisticEdit?.(cell.id, { value, valueHtml })
-    setEnqueueError(null)
+    setWriteError(null)
     // RACE-3/QW-2: use the pending event id (the last event WE enqueued for this
     // cell) as parentId rather than the projection value. The projection row may
     // lag by a round-trip when a second idle-commit fires before the read-back
@@ -1776,14 +1809,14 @@ function EditorRow({
       // "saved" styling for an event that exists nowhere durable.
       console.error("[editor-commit] enqueue failed:", err)
       const msg = err instanceof Error ? err.message : "Could not save — please try again"
-      setEnqueueError(msg)
+      setWriteError(msg)
       // Revert the optimistic patch to the last confirmed projection value.
       onOptimisticEdit?.(cell.id, {
         value: cell.translated ?? "",
         valueHtml: cell.translatedHtml ?? "",
       })
     })
-  }, [editable, project.id, cell.fileId, cell.id, cell.translated, cell.translatedHtml, cell.sourceEventId, username, onCellCommitted, onOptimisticEdit, lockHolderLabel, checkLockHolder])
+  }, [editable, project.id, project.syncRole?.level, cell.fileId, cell.id, cell.translated, cell.translatedHtml, cell.sourceEventId, username, onCellCommitted, onOptimisticEdit, lockHolderLabel, checkLockHolder])
 
   // Terminology apply (spec 2c): REPLACE the active target selection with the
   // chosen rendering. The Apply affordance is only surfaced when there was a
@@ -1902,6 +1935,13 @@ function EditorRow({
   }, [])
 
   const emitValidationChange = useCallback((validated: boolean) => {
+    // FRO-273: role-mirror guard — viewer/commenter should never reach here
+    // (canValidate=false disables the button) but guard defensively so a
+    // guaranteed-403 never enters the outbox.
+    if (!canPerform(validated ? "cell.validate" : "cell.unvalidate", project.syncRole?.level ?? null)) {
+      console.warn("[validate] aborting: role too low for", validated ? "cell.validate" : "cell.unvalidate")
+      return
+    }
     const editEventId = cell.targetEventId ?? pendingTargetEventIdRef.current
     if (!project.id || !editEventId) return
     const emit = validated ? emitCellValidate : emitCellUnvalidate
@@ -1915,8 +1955,10 @@ function EditorRow({
       void onCellCommitted?.(cell.id)
     }).catch((err) => {
       console.warn(`[${validated ? "validate" : "unvalidate"}] emit failed:`, err)
+      // FRO-274: surface enqueue failure inline.
+      setWriteError("Couldn't save this change locally — copy your text and reload.")
     })
-  }, [cell.fileId, cell.id, cell.targetEventId, project.id, username, onCellCommitted])
+  }, [cell.fileId, cell.id, cell.targetEventId, project.id, project.syncRole?.level, username, onCellCommitted])
 
   const handleEditorFocus = useCallback(() => {
     onClaimCell?.(cell.id)
@@ -2054,7 +2096,7 @@ function EditorRow({
     // "keyboard" fires when activated via Space/Enter; "trigger-press" fires
     // on pointer press. Both should validate on first touch (not open popover).
     if (details.reason === "trigger-press" || details.reason === "keyboard") {
-      if (editable && !isSelfValidated) {
+      if (canValidate && !isSelfValidated) {
         emitValidationChange(true)
         details.cancel()
         return
@@ -2073,15 +2115,15 @@ function EditorRow({
   // icon; we render Circle with fill="currentColor"). Matches codex-editor
   // desktop AudioValidationStatusIcon's circle-filled codicon.
   // full-self = fully validated and current user is one of the validators (double-check, green)
-  // full-others = fully validated but current user has NOT validated (double-check, teal/muted)
+  // full-others = fully validated but current user has NOT validated (double-check, green)
   const ValidationIcon =
     vs === "full-self" || vs === "full-others" ? CheckCheck :
     vs === "self" ? Check :
     Circle
   const validationColorClass =
-    vs === "full-self" ? "text-emerald-500" :
-    vs === "full-others" ? "text-teal-400" :
-    vs === "self" ? "text-emerald-500" :
+    vs === "full-self" ? "text-green-500" :
+    vs === "full-others" ? "text-green-500" :
+    vs === "self" ? "text-green-500" :
     vs === "others" ? "text-muted-foreground/60" :
     "text-muted-foreground/30"
 
@@ -2434,12 +2476,12 @@ function EditorRow({
                       "active:scale-[0.88] disabled:cursor-not-allowed disabled:opacity-30",
                       "hover:bg-muted/80",
                       validationColorClass,
-                      vs === "none" && "hover:text-emerald-500",
-                      vs === "others" && "hover:text-emerald-500",
-                      vs === "full-others" && "hover:text-emerald-500",
+                      vs === "none" && "hover:text-green-500",
+                      vs === "others" && "hover:text-green-500",
+                      vs === "full-others" && "hover:text-green-500",
                     )}
                     title={healthTooltip}
-                    disabled={!editable}
+                    disabled={!canValidate}
                   >
                     <HealthRing
                       health={healthValue}
@@ -2472,7 +2514,7 @@ function EditorRow({
                       cell.activeValidators.map((v) => (
                         <li key={v} className="flex items-center justify-between gap-2 rounded px-1 py-1 text-xs hover:bg-muted/50">
                           <span className="truncate">{v}{v === username ? " (you)" : ""}</span>
-                          {v === username && editable && (
+                          {v === username && canValidate && (
                             <button
                               type="button"
                               className="flex-shrink-0 rounded p-0.5 text-muted-foreground/70 transition-colors hover:bg-destructive/10 hover:text-destructive"
@@ -2770,20 +2812,26 @@ function EditorRow({
                 blocks accept/commit. */}
             <PreAcceptanceWarningBand warnings={preAcceptanceWarnings} className="mt-1" />
             {error && <p className="mt-0.5 text-xs text-destructive">{error}</p>}
-            {/* RES-4: enqueue failure (IDB quota, permission denied). Renders a
-                dismissible inline error so the user knows their typing was not
-                saved rather than seeing the "saved" style silently. */}
-            {enqueueError && (
-              <p className="mt-0.5 flex items-center gap-1 text-xs text-destructive">
-                <span>{enqueueError}</span>
+            {/* FRO-274: write-failure banner — shown when an outbox enqueue
+                fails (IndexedDB unavailable, quota exceeded, etc.). The user
+                must be told immediately so they can copy their text before
+                reloading rather than silently losing it. */}
+            {writeError && (
+              <div
+                role="alert"
+                aria-live="assertive"
+                className="mt-1 flex items-start justify-between gap-2 rounded-xl bg-destructive/10 px-2.5 py-1.5 text-[11px] text-destructive shadow-neu-sm dark:bg-destructive/20"
+              >
+                <span>{writeError}</span>
                 <button
                   type="button"
-                  className="ml-auto shrink-0 underline"
-                  onClick={() => setEnqueueError(null)}
+                  aria-label="Dismiss"
+                  onClick={() => setWriteError(null)}
+                  className="shrink-0 rounded-full px-1.5 py-0.5 text-destructive hover:bg-destructive/20"
                 >
-                  Dismiss
+                  ✕
                 </button>
-              </p>
+              </div>
             )}
           </div>
         </div>
@@ -2831,7 +2879,14 @@ function EditorRow({
                     editable &&
                     !isAnonymous
                   ) {
-                    onCompleteSingle(cell)
+                    // FRO-278: if the cell already has human text, confirm
+                    // before letting the AI overwrite it. Empty cells proceed
+                    // immediately (byte-identical to previous behavior).
+                    if (cell.translated.trim()) {
+                      setShowGenerateConfirm(true)
+                    } else {
+                      onCompleteSingle(cell)
+                    }
                   }
                 }}
                 disabled={
@@ -3570,6 +3625,82 @@ function EditorRow({
           onCancel={handleAddConceptCancel}
         />
       )}
+
+      {/* FRO-278: confirm before AI Generate overwrites non-empty cell. */}
+      <GenerateOverwriteDialog
+        open={showGenerateConfirm}
+        isValidated={cell.status === "validated"}
+        onConfirm={() => {
+          setShowGenerateConfirm(false)
+          onCompleteSingle(cell)
+        }}
+        onCancel={() => setShowGenerateConfirm(false)}
+      />
     </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// FRO-278 — GenerateOverwriteDialog
+// ---------------------------------------------------------------------------
+// Lightweight confirm dialog shown when the user clicks AI Generate on a cell
+// that already contains human-authored text. The copy is escalated when the
+// cell has been validated so the expert understands validation will be cleared.
+//
+// Cancel semantics: nothing is committed, no completion is triggered. The user
+// returns to the cell in its current state. We chose "never start" over
+// "start-then-discard" because an in-progress stream would occupy the cell's
+// "generating" state and confuse the UX on cancel.
+// ---------------------------------------------------------------------------
+
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from "@/components/ui/dialog"
+import { Button } from "@/components/ui/button"
+
+interface GenerateOverwriteDialogProps {
+  open: boolean
+  /** True when cell.status === "validated" — escalates the dialog copy. */
+  isValidated: boolean
+  onConfirm: () => void
+  onCancel: () => void
+}
+
+export function GenerateOverwriteDialog({
+  open,
+  isValidated,
+  onConfirm,
+  onCancel,
+}: GenerateOverwriteDialogProps) {
+  const title = isValidated
+    ? "Replace validated translation?"
+    : "Replace existing translation?"
+
+  const description = isValidated
+    ? "This cell is validated — replacing it clears the validation. The current text is preserved in cell history and can be recovered."
+    : "Replace the existing translation? The current text is preserved in cell history and can be recovered."
+
+  return (
+    <Dialog open={open} onOpenChange={(isOpen) => { if (!isOpen) onCancel() }}>
+      <DialogContent aria-labelledby="gen-overwrite-title" aria-describedby="gen-overwrite-desc">
+        <DialogHeader>
+          <DialogTitle id="gen-overwrite-title">{title}</DialogTitle>
+          <DialogDescription id="gen-overwrite-desc">{description}</DialogDescription>
+        </DialogHeader>
+        <DialogFooter>
+          <Button variant="outline" onClick={onCancel}>
+            Cancel
+          </Button>
+          <Button variant="destructive" onClick={onConfirm}>
+            Replace
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   )
 }

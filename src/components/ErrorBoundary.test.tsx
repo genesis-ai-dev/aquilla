@@ -1,117 +1,177 @@
-// RES-3 (QW-4): Tests for ErrorBoundary — verifies that a throwing child
-// renders the recovery UI, captureException is called, and chunk-load errors
-// trigger a guarded reload rather than an error screen.
+/**
+ * FRO-266: Tests for global error boundary + crash telemetry.
+ */
 
-import { describe, it, expect, vi, afterEach, beforeEach } from "vitest"
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
 import type { ReactNode } from "react"
-import { render, screen } from "@testing-library/react"
-import { ErrorBoundary, captureException } from "./ErrorBoundary"
-import posthog from "@/lib/posthog"
+import { render, screen, fireEvent } from "@testing-library/react"
+import { ErrorBoundary } from "./ErrorBoundary"
 
-// --- posthog mock -------------------------------------------------------
-// vi.mock is hoisted — the factory cannot reference variables declared in
-// the module scope. Use vi.fn() inside the factory directly; we retrieve
-// the mock handles via vi.mocked() in individual tests.
-
+// ---------------------------------------------------------------------------
+// Mock posthog so captureException calls are interceptable without a real
+// PostHog key / network connection.
+// ---------------------------------------------------------------------------
 vi.mock("@/lib/posthog", () => ({
   default: {
-    capture: vi.fn(),
     captureException: vi.fn(),
+    capture: vi.fn(),
   },
 }))
 
-// Suppress console.error noise from React's error boundary machinery.
-const originalError = console.error
-beforeEach(() => {
-  console.error = vi.fn()
-  sessionStorage.clear()
-})
-afterEach(() => {
-  console.error = originalError
-  vi.restoreAllMocks()
-})
+import posthog from "@/lib/posthog"
 
-// --- helpers ------------------------------------------------------------
-
-function ThrowingChild({ message }: { message: string }): ReactNode {
-  throw new Error(message)
+// ---------------------------------------------------------------------------
+// Helper: a component that always throws during render.
+// ---------------------------------------------------------------------------
+function AlwaysThrows(): never {
+  throw new Error("test render error")
 }
 
-// --- tests --------------------------------------------------------------
+// Suppress React's console.error output for expected boundary errors.
+let consoleErrorSpy: ReturnType<typeof vi.spyOn>
+beforeEach(() => {
+  consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+})
+afterEach(() => {
+  consoleErrorSpy.mockRestore()
+  vi.clearAllMocks()
+})
 
+// ---------------------------------------------------------------------------
+// Boundary rendering tests
+// ---------------------------------------------------------------------------
 describe("ErrorBoundary", () => {
-  it("renders children normally when nothing throws", () => {
+  it("renders children when no error occurs", () => {
     render(
       <ErrorBoundary>
-        <span>all good</span>
+        <div data-testid="child">hello</div>
       </ErrorBoundary>,
     )
-    expect(screen.getByText("all good")).toBeInTheDocument()
+    expect(screen.getByTestId("child")).toBeInTheDocument()
   })
 
-  it("renders the recovery UI when a child throws", () => {
+  it("renders the fallback screen when a child throws", () => {
     render(
       <ErrorBoundary>
-        <ThrowingChild message="boom" />
+        <AlwaysThrows />
       </ErrorBoundary>,
     )
-    // Recovery heading should be visible
+    // Branded recovery screen must be visible (not white screen).
     expect(screen.getByText("Something went wrong")).toBeInTheDocument()
-    // Reload button should be present
+    expect(screen.getByText(/Your work is saved locally/)).toBeInTheDocument()
     expect(screen.getByRole("button", { name: /reload/i })).toBeInTheDocument()
   })
 
   it("calls posthog.captureException when a child throws", () => {
-    const captureExceptionMock = vi.mocked(posthog.captureException)
-    captureExceptionMock.mockClear()
-
     render(
       <ErrorBoundary>
-        <ThrowingChild message="captured error" />
+        <AlwaysThrows />
       </ErrorBoundary>,
     )
-    // React may call componentDidCatch more than once (StrictMode double-invoke).
-    expect(captureExceptionMock.mock.calls.length).toBeGreaterThanOrEqual(1)
-    const [err] = captureExceptionMock.mock.calls[0]
-    expect(err instanceof Error).toBe(true)
-    expect((err as Error).message).toBe("captured error")
+    expect(posthog.captureException).toHaveBeenCalledWith(
+      expect.objectContaining({ message: "test render error" }),
+      expect.objectContaining({ properties: expect.objectContaining({ source: "react_error_boundary" }) }),
+    )
   })
 
-  it("shows a chunk-load specific message for chunk load errors", () => {
-    // Simulate a chunk-load error. The guard also attempts to reload — we need
-    // to mock sessionStorage so the reload branch thinks it already ran.
-    sessionStorage.setItem("aq:chunk-reload-attempted", "1")
+  it("reload button calls window.location.reload", () => {
+    const reloadSpy = vi.fn()
+    Object.defineProperty(window, "location", {
+      value: { ...window.location, reload: reloadSpy },
+      writable: true,
+    })
 
     render(
       <ErrorBoundary>
-        <ThrowingChild message="Failed to fetch dynamically imported module" />
+        <AlwaysThrows />
       </ErrorBoundary>,
     )
-    expect(screen.getByText(/app updated/i)).toBeInTheDocument()
-    expect(screen.getByRole("button", { name: /reload/i })).toBeInTheDocument()
+    const button = screen.getByRole("button", { name: /reload/i })
+    fireEvent.click(button)
+    expect(reloadSpy).toHaveBeenCalledOnce()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Window global handler registration tests
+// ---------------------------------------------------------------------------
+describe("window error handlers", () => {
+  it("window.onerror handler is registered and forwards to posthog.captureException", () => {
+    const err = new Error("global error")
+    const event = new ErrorEvent("error", { error: err, message: err.message })
+    window.dispatchEvent(event)
+    expect(posthog.captureException).toHaveBeenCalledWith(
+      err,
+      expect.objectContaining({ properties: expect.objectContaining({ source: "window.onerror" }) }),
+    )
   })
 
-  it("does not reload-loop: only reloads once on chunk errors (sessionStorage guard)", () => {
-    const reloadSpy = vi.spyOn(window.location, "reload").mockImplementation(() => {})
+  it("unhandledrejection handler is registered and forwards to posthog.captureException", () => {
+    const err = new Error("rejection error")
+    // happy-dom does not expose PromiseRejectionEvent; synthesise via CustomEvent
+    // so the listener receives the same shape our handler expects (event.reason).
+    const event = Object.assign(new CustomEvent("unhandledrejection"), { reason: err })
+    window.dispatchEvent(event)
+    expect(posthog.captureException).toHaveBeenCalledWith(
+      err,
+      expect.objectContaining({ properties: expect.objectContaining({ source: "unhandledrejection" }) }),
+    )
+  })
+})
 
-    // First error — no flag set yet; should trigger reload
+// ---------------------------------------------------------------------------
+// Chunk-load recovery (RES-3 / audit QW-4): stale lazy chunks after a redeploy
+// get ONE automatic reload (sessionStorage-guarded), then the "App updated"
+// fallback.
+// ---------------------------------------------------------------------------
+describe("chunk-load recovery", () => {
+  function ThrowsChunkError(): ReactNode {
+    throw new Error("Failed to fetch dynamically imported module: /assets/x.js")
+  }
+
+  beforeEach(() => {
+    sessionStorage.clear()
+  })
+
+  it("reloads once on the first chunk error in a session", () => {
+    const reloadSpy = vi.fn()
+    Object.defineProperty(window, "location", {
+      value: { ...window.location, reload: reloadSpy },
+      writable: true,
+    })
     render(
       <ErrorBoundary>
-        <ThrowingChild message="Failed to fetch dynamically imported module" />
+        <ThrowsChunkError />
       </ErrorBoundary>,
     )
     expect(reloadSpy).toHaveBeenCalledOnce()
     expect(sessionStorage.getItem("aq:chunk-reload-attempted")).toBe("1")
   })
 
-  it("captureException is safe when posthog is not initialized", () => {
-    // This should never throw even with a null/undefined posthog-like object.
-    expect(() => captureException(new Error("test"), {})).not.toThrow()
+  it("shows the 'App updated' fallback instead of reload-looping when the flag is set", () => {
+    sessionStorage.setItem("aq:chunk-reload-attempted", "1")
+    const reloadSpy = vi.fn()
+    Object.defineProperty(window, "location", {
+      value: { ...window.location, reload: reloadSpy },
+      writable: true,
+    })
+    render(
+      <ErrorBoundary>
+        <ThrowsChunkError />
+      </ErrorBoundary>,
+    )
+    expect(reloadSpy).not.toHaveBeenCalled()
+    expect(screen.getByText(/app updated/i)).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: /reload/i })).toBeInTheDocument()
   })
 
-  it("captureException is safe when given a non-Error value", () => {
-    expect(() => captureException("string error")).not.toThrow()
-    expect(() => captureException(undefined)).not.toThrow()
-    expect(() => captureException(null)).not.toThrow()
+  it("non-chunk errors do not consume the chunk-reload flag", () => {
+    render(
+      <ErrorBoundary>
+        <AlwaysThrows />
+      </ErrorBoundary>,
+    )
+    expect(sessionStorage.getItem("aq:chunk-reload-attempted")).toBeNull()
+    expect(screen.getByText("Something went wrong")).toBeInTheDocument()
   })
 })

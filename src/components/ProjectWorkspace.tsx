@@ -423,6 +423,13 @@ export function ProjectWorkspace() {
     const open = searchParams.get("openRule")
     if (open) setDrawerRuleId(open)
   }, [searchParams])
+
+  // FRO-295: CommentsPage deep-links here with ?cellId=<id>. Park the value so
+  // the scroll-restore effect (below) can consume it once cells are loaded.
+  useEffect(() => {
+    const cellId = searchParams.get("cellId")
+    if (cellId) pendingCellScrollRef.current = cellId
+  }, [searchParams])
   const [commentsCellId, setCommentsCellId] = useState<string | null>(null)
   const [historyCellId, setHistoryCellId] = useState<string | null>(null)
   const [parallelOpen, setParallelOpen] = useState(false)
@@ -595,6 +602,9 @@ export function ProjectWorkspace() {
   // user clicks "View in history" (we navigate them to the conflict — they
   // shouldn't have to dismiss separately).
   const [staleSourceBannerDismissed, setStaleSourceBannerDismissed] = useState(0)
+  // FRO-274: write-failure banner for BT persist failures (outbox enqueue
+  // fails — IndexedDB unavailable, quota exceeded, etc.).
+  const [btWriteError, setBtWriteError] = useState<string | null>(null)
   const showStaleSiblingBanner =
     outboxStaleSiblingCount > 0 && outboxStaleSiblingEntries.length > 0
   const showStaleSourceBanner = outboxStaleSourceCount > staleSourceBannerDismissed
@@ -1336,8 +1346,12 @@ export function ProjectWorkspace() {
       author: currentUsername,
     }).catch((err) => {
       console.warn("[bt-persist] outbox emit failed:", err)
+      // FRO-274: surface enqueue failure so the user knows the BT didn't
+      // persist to the server queue. The in-memory + localStorage copies
+      // still exist, but they need to reload to re-queue.
+      setBtWriteError("Couldn't save the back-translation locally — copy your text and reload.")
     })
-  }, [project?.id, currentUsername])
+  }, [project?.id, currentUsername, setBtWriteError])
 
   // ── Keep stable refs in sync every render (FRO-203) ────────────────────
   // These allow commitCompletedCell / handleCellCommitted (declared earlier or
@@ -2119,7 +2133,6 @@ export function ProjectWorkspace() {
         sourceEventId: cell.sourceEventId ?? null,
         value: diff.after,
         author: currentUsername,
-        retainValidations: payload.retainValidations,
         searchQuery: payload.findQuery,
         replaceString: payload.replaceQuery,
       })
@@ -2522,7 +2535,7 @@ export function ProjectWorkspace() {
                 setMoveTargetId(fileId)
                 setMoveCorpus(project.files.find((f) => f.id === fileId)?.corpusMarker ?? "")
               }}
-              onDelete={(fileId) => setPendingDeleteId(fileId)}
+              onDelete={currentRoleLevel >= ROLE.PROJECT_LEAD ? (fileId) => setPendingDeleteId(fileId) : undefined}
               onApplySuggestion={handleApplyOneSuggestion}
               onRenameCorpus={handleRenameCorpus}
               canExportByOrgPolicy={canExportByOrgPolicy}
@@ -2861,6 +2874,26 @@ export function ProjectWorkspace() {
                   type="button"
                   onClick={() => setStaleSourceBannerDismissed(outboxStaleSourceCount)}
                   className="ml-2 rounded bg-blue-200/60 px-2 py-0.5 hover:bg-blue-200 dark:bg-blue-800/50 dark:hover:bg-blue-800"
+                >
+                  Dismiss
+                </button>
+              </div>
+            )}
+            {/* FRO-274: BT write-failure banner — shown when the BT persist
+                outbox enqueue fails. The user must copy their work before
+                reloading since the in-memory cache won't survive a reload
+                once localStorage quota is hit. */}
+            {btWriteError && (
+              <div
+                role="alert"
+                aria-live="assertive"
+                className="flex items-center justify-between gap-2 bg-destructive/10 px-4 py-2 text-xs text-destructive dark:bg-destructive/20"
+              >
+                <span>{btWriteError}</span>
+                <button
+                  type="button"
+                  onClick={() => setBtWriteError(null)}
+                  className="ml-2 rounded bg-destructive/20 px-2 py-0.5 hover:bg-destructive/30"
                 >
                   Dismiss
                 </button>
@@ -3250,10 +3283,11 @@ export function ProjectWorkspace() {
         title="Delete file"
         description={(() => {
           const f = pendingDeleteId ? project.files.find((x) => x.id === pendingDeleteId) : null
-          return f ? `Remove "${f.name}" from this project? The underlying data is not deleted from disk.` : ""
+          return f ? `Delete "${f.name}"? This permanently deletes the file's cells and all recorded audio for it. This cannot be undone.` : ""
         })()}
         confirmLabel="Delete"
-        checkboxLabel="I understand this removes the file from the project."
+        checkboxLabel="I understand this permanently deletes all cells and audio for this file."
+        variant="destructive"
         onConfirm={() => { if (pendingDeleteId) handleDeleteFile(pendingDeleteId); setPendingDeleteId(null) }}
       />
       {moveTargetId !== null && (

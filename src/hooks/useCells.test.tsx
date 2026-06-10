@@ -859,6 +859,41 @@ describe("useCells conditional refetch (M2-1)", () => {
     fetchAllMock.mockResolvedValueOnce([
       makeRow({ cellId: "c1", side: "source", value: "src" }),
       makeRow({ cellId: "c1", side: "target", value: "old" }),
+
+// ---------------------------------------------------------------------------
+// FRO-274: quarantined outbox records excluded from overlay; shadow cleared
+// ---------------------------------------------------------------------------
+describe("FRO-274: quarantined outbox filtering and shadow clear", () => {
+  // Import outbox helpers — they use fake-indexeddb from the global setup.
+  // We need to reset IDB state between tests to avoid bleed.
+  let enqueue: typeof import("@/lib/sync/outbox").enqueueOutboxEvent
+  let quarantine: typeof import("@/lib/sync/outbox").quarantineOutboxEvents
+  let resetConn: typeof import("@/lib/sync/outbox").resetOutboxConnectionForTests
+
+  beforeEach(async () => {
+    // Dynamically import so the module is fresh; reset + delete the DB.
+    const outboxMod = await import("@/lib/sync/outbox")
+    enqueue = outboxMod.enqueueOutboxEvent
+    quarantine = outboxMod.quarantineOutboxEvents
+    resetConn = outboxMod.resetOutboxConnectionForTests
+    await resetConn()
+    await new Promise<void>((resolve) => {
+      const d = indexedDB.deleteDatabase("aquilla-cqrs-outbox")
+      d.onsuccess = () => resolve()
+      d.onerror = () => resolve()
+      d.onblocked = () => resolve()
+    })
+    fetchAllMock.mockReset()
+    fetchByIdsMock.mockReset()
+    fetchByIdsMock.mockResolvedValue([])
+    sideCache = null
+  })
+
+  it("quarantined (failed) outbox record is excluded from the pending overlay", async () => {
+    // Stage rows: c1 already has a server target value.
+    fetchAllMock.mockResolvedValueOnce([
+      makeRow({ cellId: "c1", side: "source", value: "src" }),
+      makeRow({ cellId: "c1", side: "target", value: "server-value" }),
     ])
     const { result } = renderHook(() =>
       useCells({ projectId: "proj-a", fileId: "file-x", getToken, enabled: true }),
@@ -1149,5 +1184,99 @@ describe("useCells conditional refetch (M2-1)", () => {
     act(() => { result.current.revalidate() })
     await waitFor(() => expect(fetchDeltaMock).toHaveBeenCalledTimes(1))
     expect(fetchDeltaMock).toHaveBeenCalledWith("p", "f", 7, "fake-jwt")
+
+    expect(result.current.cells[0].translated).toBe("server-value")
+
+    // Enqueue a commit event for c1 → overlay shows the pending value.
+    const { CQRS_SCHEMA_VERSION } = await import("@/lib/sync/outbox-types")
+    await act(async () => {
+      await enqueue({
+        id: "ev-c1",
+        schemaVersion: CQRS_SCHEMA_VERSION,
+        kind: "target.cell.commit",
+        projectId: "proj-a",
+        fileId: "file-x",
+        cellId: "c1",
+        author: "alice",
+        payload: { value: "pending-value", valueHtml: "<p>pending-value</p>" },
+        clientTs: Date.now(),
+      })
+    })
+    await waitFor(() => expect(result.current.cells[0].translated).toBe("pending-value"))
+    expect(result.current.cells[0].hasPendingEdit).toBe(true)
+
+    // Quarantine the event (403 rejection) → overlay must STOP showing pending.
+    await act(async () => {
+      await quarantine(["ev-c1"], { status: 403, reason: "forbidden" })
+    })
+    // After quarantine the overlay no longer applies the rejected value.
+    await waitFor(() => expect(result.current.cells[0].hasPendingEdit).toBeFalsy())
+    // Cell reverts to server value (shadow also cleared since the same value
+    // was in both overlay and shadow).
+    await waitFor(() => expect(result.current.cells[0].translated).toBe("server-value"))
+  })
+
+  it("shadow is cleared on quarantine only for the cell whose event failed (FRO-274 + FRO-247 write-clock preserved)", async () => {
+    // Two cells: c1 committed (quarantined), c2 committed (still pending).
+    // c2's shadow must not be touched.
+    fetchAllMock.mockResolvedValueOnce([
+      makeRow({ cellId: "c1", side: "source", value: "S1" }),
+      makeRow({ cellId: "c1", side: "target", value: "s1-server" }),
+      makeRow({ cellId: "c2", side: "source", value: "S2" }),
+      makeRow({ cellId: "c2", side: "target", value: "s2-server" }),
+    ])
+    const { result } = renderHook(() =>
+      useCells({ projectId: "proj-a", fileId: "file-x", getToken, enabled: true }),
+    )
+    await waitFor(() => expect(result.current.cells).toHaveLength(2))
+
+    // Apply optimistic edits for both cells (simulates commits recorded by applyOptimisticTargetEdit).
+    act(() => {
+      result.current.applyOptimisticTargetEdit("c1", { value: "c1-optimistic" })
+      result.current.applyOptimisticTargetEdit("c2", { value: "c2-optimistic" })
+    })
+    expect(result.current.cells.find((c) => c.id === "c1")?.translated).toBe("c1-optimistic")
+    expect(result.current.cells.find((c) => c.id === "c2")?.translated).toBe("c2-optimistic")
+
+    // Enqueue events in the outbox so the quarantine has something to operate on.
+    const { CQRS_SCHEMA_VERSION } = await import("@/lib/sync/outbox-types")
+    await act(async () => {
+      await enqueue({
+        id: "ev-c1",
+        schemaVersion: CQRS_SCHEMA_VERSION,
+        kind: "target.cell.commit",
+        projectId: "proj-a",
+        fileId: "file-x",
+        cellId: "c1",
+        author: "alice",
+        payload: { value: "c1-optimistic" },
+        clientTs: Date.now(),
+      })
+      await enqueue({
+        id: "ev-c2",
+        schemaVersion: CQRS_SCHEMA_VERSION,
+        kind: "target.cell.commit",
+        projectId: "proj-a",
+        fileId: "file-x",
+        cellId: "c2",
+        author: "alice",
+        payload: { value: "c2-optimistic" },
+        clientTs: Date.now(),
+      })
+    })
+
+    // Quarantine ONLY c1.
+    await act(async () => {
+      await quarantine(["ev-c1"], { status: 403, reason: "forbidden" })
+    })
+
+    // c1 shadow cleared; c2 shadow untouched.
+    await waitFor(() => {
+      const c1 = result.current.cells.find((c) => c.id === "c1")
+      return c1?.translated === "s1-server"
+    })
+    const c2After = result.current.cells.find((c) => c.id === "c2")
+    expect(c2After?.translated).toBe("c2-optimistic")
+    expect(c2After?.hasPendingEdit).toBe(true)
   })
 })

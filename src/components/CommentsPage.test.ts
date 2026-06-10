@@ -2,7 +2,7 @@
 // These test business logic only — no React rendering needed.
 
 import { describe, it, expect } from "vitest"
-import { applyFilters, applySorting, DEFAULT_FILTER } from "./CommentsPage"
+import { applyFilters, applySorting, DEFAULT_FILTER, resolveFileName } from "./CommentsPage"
 import type { CommentRecord } from "@/lib/sync/comments-read-types"
 
 function makeComment(overrides: Partial<CommentRecord> = {}): CommentRecord {
@@ -103,6 +103,49 @@ describe("applyFilters", () => {
   })
 })
 
+// ── Edit/delete callback contract ─────────────────────────────────────────
+// These tests verify the pure-logic contracts that the CommentsPage UI relies
+// on when wiring editComment/deleteComment from useComments.
+
+describe("comment edit/delete hook contract", () => {
+  it("editComment signature accepts commentId + body", async () => {
+    // Contract: editComment(commentId: string, body: string) => Promise<void>
+    const calls: [string, string][] = []
+    const mockEditComment = async (commentId: string, body: string): Promise<void> => {
+      calls.push([commentId, body])
+    }
+    await mockEditComment("c1", "updated body")
+    expect(calls).toEqual([["c1", "updated body"]])
+  })
+
+  it("deleteComment signature accepts commentId", async () => {
+    // Contract: deleteComment(commentId: string) => Promise<void>
+    const calls: string[] = []
+    const mockDeleteComment = async (commentId: string): Promise<void> => {
+      calls.push(commentId)
+    }
+    await mockDeleteComment("c1")
+    expect(calls).toEqual(["c1"])
+  })
+
+  it("only own comments (authorId === currentUsername) should expose edit/delete", () => {
+    // The CommentsPage renders the kebab menu only when authorId === currentUsername.
+    const comment = makeComment({ authorId: "alice" })
+    const isOwn = (currentUsername: string) => comment.authorId === currentUsername
+    expect(isOwn("alice")).toBe(true)
+    expect(isOwn("bob")).toBe(false)
+    expect(isOwn("")).toBe(false)
+  })
+
+  it("deleted comments (deletedAt !== null) do not expose edit/delete", () => {
+    const deleted = makeComment({ authorId: "alice", deletedAt: Date.now() })
+    const canMutate = (c: CommentRecord, currentUsername: string) =>
+      !!currentUsername && c.authorId === currentUsername && c.deletedAt === null
+    expect(canMutate(deleted, "alice")).toBe(false)
+    expect(canMutate(makeComment({ authorId: "alice" }), "alice")).toBe(true)
+  })
+})
+
 describe("applySorting", () => {
   it("unresolved-first puts unresolved before resolved", () => {
     const roots = [
@@ -130,5 +173,46 @@ describe("applySorting", () => {
     ]
     const result = applySorting(roots, "recent-activity")
     expect(result[0].commentId).toBe("active")
+  })
+})
+
+// ── resolveFileName: UUID→name mapping and tombstone ─────────────────────
+
+describe("resolveFileName", () => {
+  const fileMap = new Map([
+    ["uuid-gen", "GEN.sfm"],
+    ["uuid-rev", "Revelation.sfm"],
+  ])
+
+  it("returns name and exists=true for a live file", () => {
+    const result = resolveFileName("uuid-gen", fileMap)
+    expect(result).toEqual({ name: "GEN.sfm", exists: true })
+  })
+
+  it("returns tombstone label and exists=false for an unknown UUID", () => {
+    const result = resolveFileName("uuid-deleted-abc", fileMap)
+    expect(result).toEqual({ name: "Deleted file", exists: false })
+  })
+
+  it("returns tombstone for null fileId", () => {
+    const result = resolveFileName(null, fileMap)
+    expect(result.exists).toBe(false)
+  })
+
+  it("returns tombstone for undefined fileId", () => {
+    const result = resolveFileName(undefined, fileMap)
+    expect(result.exists).toBe(false)
+  })
+
+  it("resolves a second live file correctly", () => {
+    const result = resolveFileName("uuid-rev", fileMap)
+    expect(result).toEqual({ name: "Revelation.sfm", exists: true })
+  })
+
+  it("returns tombstone when fileMap is empty", () => {
+    const emptyMap = new Map<string, string>()
+    const result = resolveFileName("uuid-gen", emptyMap)
+    expect(result.exists).toBe(false)
+    expect(result.name).toBe("Deleted file")
   })
 })

@@ -11,7 +11,9 @@ interface OrgContextValue {
   setActiveOrg: (id: number) => void
   isLoading: boolean
   error: string | null
-  refresh: () => Promise<void>
+  /** Fetch the latest org list. Returns the freshly loaded orgs so callers
+   *  that need the result immediately don't race against a stale closure. */
+  refresh: () => Promise<OrgSummary[]>
 }
 
 const OrgContext = createContext<OrgContextValue | null>(null)
@@ -27,15 +29,17 @@ export function OrgProvider({ children }: { children: ReactNode }) {
   const [isLoading, setLoading] = useState<boolean>(!!jwt)
   const [error, setError] = useState<string | null>(null)
 
-  const refresh = useCallback(async () => {
-    if (!jwt) { setOrgs([]); return }
+  const refresh = useCallback(async (): Promise<OrgSummary[]> => {
+    if (!jwt) { setOrgs([]); return [] }
     setLoading(true); setError(null)
     try {
       const list = await listMyOrgs(jwt)
       setOrgs(list)
       setActiveOrgId((cur) => (cur != null && list.some((o) => o.id === cur) ? cur : list[0]?.id ?? null))
+      return list
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
+      return []
     } finally {
       setLoading(false)
     }

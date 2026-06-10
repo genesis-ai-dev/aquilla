@@ -142,7 +142,7 @@ export function MultiProjectInviteDialog({
 
   return (
     <Dialog open={open} onOpenChange={(v) => (v ? onOpenChange(v) : handleClose())}>
-      <DialogContent className="max-w-xl">
+      <DialogContent className="w-full max-w-xl overflow-hidden">
         <DialogHeader>
           <DialogTitle>Invite to projects</DialogTitle>
           <DialogDescription>
@@ -154,7 +154,7 @@ export function MultiProjectInviteDialog({
           </DialogDescription>
         </DialogHeader>
 
-        <div className="space-y-4">
+        <div className="min-w-0 space-y-4">
           <div className="space-y-1.5">
             <Label htmlFor="invite-username" className="text-xs">
               Aquilla username
@@ -179,7 +179,7 @@ export function MultiProjectInviteDialog({
                 No projects available — create one first or check back when sync completes.
               </p>
             ) : (
-              <ul className="mt-1.5 max-h-64 overflow-y-auto rounded border divide-y">
+              <ul className="mt-1.5 max-h-64 overflow-y-auto overflow-x-hidden rounded border divide-y">
                 {projects.map((p) => {
                   const isSelected = p.id in selections
                   const errorMsg = perProjectError[p.id]
@@ -187,60 +187,65 @@ export function MultiProjectInviteDialog({
                   return (
                     <li
                       key={p.id}
-                      className={`flex items-center gap-2 px-3 py-2 text-sm ${
+                      className={`px-3 py-2 text-sm ${
                         isSelected ? "bg-muted/40" : ""
                       }`}
                     >
-                      <button
-                        type="button"
-                        role="checkbox"
-                        aria-checked={isSelected}
-                        aria-label={`Select ${p.name}`}
-                        onClick={() => toggleProject(p.id)}
-                        disabled={busy}
-                        className={`flex h-5 w-5 shrink-0 items-center justify-center rounded border-2 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 disabled:opacity-50 ${
-                          isSelected
-                            ? "bg-primary border-primary text-primary-foreground"
-                            : "border-muted-foreground/50 bg-background hover:border-primary hover:bg-accent"
-                        }`}
-                      >
-                        {isSelected && <Check className="h-3.5 w-3.5" />}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => toggleProject(p.id)}
-                        disabled={busy}
-                        className="flex-1 min-w-0 truncate text-left hover:text-foreground disabled:opacity-50"
-                      >
-                        {p.name}
-                      </button>
-                      {isDone ? (
-                        <span className="text-[10px] text-emerald-600 dark:text-emerald-400 inline-flex items-center gap-1">
-                          <Check className="h-3 w-3" /> added
-                        </span>
-                      ) : isSelected ? (
-                        <select
-                          className="rounded border bg-background px-2 py-1 text-xs"
-                          value={selections[p.id]}
-                          onChange={(e) =>
-                            setProjectRole(p.id, Number(e.target.value) as RoleLevel)
-                          }
+                      <div className="grid min-w-0 grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2">
+                        <button
+                          type="button"
+                          role="checkbox"
+                          aria-checked={isSelected}
+                          aria-label={`Select ${p.name}`}
+                          onClick={() => toggleProject(p.id)}
                           disabled={busy}
+                          className={`flex h-5 w-5 shrink-0 items-center justify-center rounded border-2 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 disabled:opacity-50 ${
+                            isSelected
+                              ? "bg-primary border-primary text-primary-foreground"
+                              : "border-muted-foreground/50 bg-background hover:border-primary hover:bg-accent"
+                          }`}
                         >
-                          {roleChoices.map((r) => (
-                            <option key={r.level} value={r.level}>
-                              {r.name}
-                            </option>
-                          ))}
-                        </select>
-                      ) : null}
+                          {isSelected && <Check className="h-3.5 w-3.5" />}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => toggleProject(p.id)}
+                          disabled={busy}
+                          title={p.name}
+                          className="min-w-0 truncate text-left hover:text-foreground disabled:opacity-50"
+                        >
+                          {p.name}
+                        </button>
+                        {isDone ? (
+                          <span className="shrink-0 text-[10px] text-emerald-600 dark:text-emerald-400 inline-flex items-center gap-1">
+                            <Check className="h-3 w-3" /> added
+                          </span>
+                        ) : isSelected ? (
+                          <select
+                            className="shrink-0 max-w-[8.5rem] rounded border bg-background px-2 py-1 text-xs"
+                            value={selections[p.id]}
+                            onChange={(e) =>
+                              setProjectRole(p.id, Number(e.target.value) as RoleLevel)
+                            }
+                            disabled={busy}
+                          >
+                            {roleChoices.map((r) => (
+                              <option key={r.level} value={r.level}>
+                                {r.name}
+                              </option>
+                            ))}
+                          </select>
+                        ) : (
+                          <span aria-hidden className="w-0" />
+                        )}
+                      </div>
                       {errorMsg && (
-                        <span
-                          className="text-[10px] text-destructive max-w-[10rem] truncate"
+                        <p
+                          className="mt-1 pl-7 text-[10px] text-destructive break-words"
                           title={errorMsg}
                         >
                           {errorMsg}
-                        </span>
+                        </p>
                       )}
                     </li>
                   )

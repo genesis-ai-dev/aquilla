@@ -192,9 +192,55 @@ describe("TerminologyPage", () => {
     })
   })
 
-  // ── Delete ─────────────────────────────────────────────────────────────────
+  // ── Delete (FRO-291: gated by checkbox-confirm) ───────────────────────────
 
-  it("removes a concept after delete is called and resolves", async () => {
+  it("does NOT call deleteConcept immediately when delete button is clicked (FRO-291)", async () => {
+    const existing = makeConcept()
+    const projectWithConcept = makeProjectWithConcepts([existing])
+    vi.mocked(useProject).mockReturnValue({
+      project: projectWithConcept,
+      loading: false,
+      status: "ready",
+      isError: false,
+      refresh: vi.fn(),
+      patchSettings: mockPatchSettings,
+    })
+
+    renderPage()
+    await waitFor(() => expect(screen.getByTestId("concept-row")).toBeInTheDocument())
+
+    fireEvent.click(screen.getByRole("button", { name: /Delete concept πνεῦμα/i }))
+
+    // Dialog opens; deleteConcept must NOT have been called yet
+    expect(deleteConcept).not.toHaveBeenCalled()
+    await waitFor(() => expect(screen.getByRole("dialog")).toBeInTheDocument())
+  })
+
+  it("cancel on confirm dialog leaves data untouched (FRO-291)", async () => {
+    const existing = makeConcept()
+    const projectWithConcept = makeProjectWithConcepts([existing])
+    vi.mocked(useProject).mockReturnValue({
+      project: projectWithConcept,
+      loading: false,
+      status: "ready",
+      isError: false,
+      refresh: vi.fn(),
+      patchSettings: mockPatchSettings,
+    })
+
+    renderPage()
+    await waitFor(() => expect(screen.getByTestId("concept-row")).toBeInTheDocument())
+
+    fireEvent.click(screen.getByRole("button", { name: /Delete concept πνεῦμα/i }))
+    await waitFor(() => expect(screen.getByRole("dialog")).toBeInTheDocument())
+
+    fireEvent.click(screen.getByRole("button", { name: /^Cancel$/i }))
+
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument())
+    expect(deleteConcept).not.toHaveBeenCalled()
+  })
+
+  it("removes a concept after confirm dialog checkbox+confirm (FRO-291)", async () => {
     const existing = makeConcept()
     const projectWithConcept = makeProjectWithConcepts([existing])
     const projectAfterDelete = makeProjectWithConcepts([])
@@ -225,11 +271,20 @@ describe("TerminologyPage", () => {
     })
 
     renderPage()
-
     await waitFor(() => expect(screen.getByTestId("concept-row")).toBeInTheDocument())
 
-    // Delete
+    // Open confirm dialog
     fireEvent.click(screen.getByRole("button", { name: /Delete concept πνεῦμα/i }))
+    await waitFor(() => expect(screen.getByRole("dialog")).toBeInTheDocument())
+
+    // Confirm button disabled until checkbox checked
+    const confirmBtn = screen.getByRole("button", { name: /^Delete concept$/i })
+    expect(confirmBtn).toBeDisabled()
+
+    // Check the checkbox and confirm
+    fireEvent.click(screen.getByRole("checkbox"))
+    expect(confirmBtn).not.toBeDisabled()
+    fireEvent.click(confirmBtn)
 
     await waitFor(() => {
       expect(deleteConcept).toHaveBeenCalledWith(

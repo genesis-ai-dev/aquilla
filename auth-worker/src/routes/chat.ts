@@ -18,6 +18,7 @@ import { zValidator } from "@hono/zod-validator"
 import { z } from "zod"
 import type { Env, Variables } from "../types"
 import { authMiddleware } from "../middleware/auth"
+import { runAiGuard } from "../lib/ai-budget"
 
 const chat = new Hono<{ Bindings: Env; Variables: Variables }>()
 
@@ -78,6 +79,13 @@ chat.post(
 
     const request = c.req.valid("json")
     const model = resolveModel(c.env, request.model)
+
+    // AI guard: model allowlist + per-user/global daily budget (FRO-265).
+    const user = c.get("user")
+    const guard = await runAiGuard(model, user.id, c.env.AQUILLA_PG, c.env)
+    if (!guard.ok) {
+      return c.json(guard.body, guard.status)
+    }
 
     try {
       const upstream = await fetch(OPENROUTER_URL, {

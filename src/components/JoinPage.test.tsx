@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest"
 import { render, screen, waitFor } from "@testing-library/react"
 import { MemoryRouter, Routes, Route } from "react-router-dom"
 import { JoinPage } from "./JoinPage"
-import { acceptServerInvite, previewMultiInvite, acceptMultiInvite } from "@/lib/sync/invites"
+import { acceptServerInvite, previewMultiInvite, acceptMultiInvite, previewServerInvite } from "@/lib/sync/invites"
 
 const navigate = vi.fn()
 vi.mock("react-router-dom", async (i) => ({
@@ -12,8 +12,8 @@ vi.mock("react-router-dom", async (i) => ({
 
 vi.mock("@/lib/sync/invites", () => ({
   acceptServerInvite: vi.fn(async () => ({ projectId: "p1" })),
-  previewServerInvite: vi.fn(async () => ({ projectName: "John", role: { level: 400, name: "contributor" }, email: null })),
-  previewMultiInvite: vi.fn(async () => null),
+  previewServerInvite: vi.fn(async () => ({ ok: true, data: { projectName: "John", role: { level: 400, name: "contributor" }, email: null } })),
+  previewMultiInvite: vi.fn(async () => ({ ok: false, reason: "invalid" })),
   acceptMultiInvite: vi.fn(async () => null),
 }))
 
@@ -60,13 +60,16 @@ describe("JoinPage inline auth", () => {
 
   it("shows a multi-project preview (N projects) when signed out", async () => {
     vi.mocked(previewMultiInvite).mockResolvedValueOnce({
-      token: "tok",
-      role: { level: 400, name: "contributor" },
-      expiresAt: null,
-      projects: [
-        { projectId: "pa", projectName: "John", archived: false },
-        { projectId: "pb", projectName: "Mark", archived: false },
-      ],
+      ok: true,
+      data: {
+        token: "tok",
+        role: { level: 400, name: "contributor" },
+        expiresAt: null,
+        projects: [
+          { projectId: "pa", projectName: "John", archived: false },
+          { projectId: "pb", projectName: "Mark", archived: false },
+        ],
+      },
     })
     renderJoin()
     expect(await screen.findByText("John")).toBeInTheDocument()
@@ -76,10 +79,13 @@ describe("JoinPage inline auth", () => {
 
   it("redeems a multi-project token via acceptMultiInvite", async () => {
     vi.mocked(previewMultiInvite).mockResolvedValueOnce({
-      token: "tok",
-      role: { level: 400, name: "contributor" },
-      expiresAt: null,
-      projects: [{ projectId: "pa", projectName: "John", archived: false }],
+      ok: true,
+      data: {
+        token: "tok",
+        role: { level: 400, name: "contributor" },
+        expiresAt: null,
+        projects: [{ projectId: "pa", projectName: "John", archived: false }],
+      },
     })
     vi.mocked(acceptMultiInvite).mockResolvedValueOnce({
       token: "tok",
@@ -89,5 +95,44 @@ describe("JoinPage inline auth", () => {
     renderJoin()
     await waitFor(() => expect(acceptMultiInvite).toHaveBeenCalledWith("jwt", "tok"))
     expect(navigate).toHaveBeenCalledWith("/project/pa") // first accepted project
+  })
+})
+
+describe("JoinPage preview error states (signed-out)", () => {
+  it("shows 'no longer valid' error and no signup form when preview returns expired", async () => {
+    vi.mocked(previewMultiInvite).mockResolvedValueOnce({ ok: false, reason: "expired" })
+    vi.mocked(previewServerInvite).mockResolvedValueOnce({ ok: false, reason: "expired" })
+    renderJoin()
+    expect(await screen.findByText("This invite link is no longer valid")).toBeInTheDocument()
+    expect(screen.queryByText("do-signup")).not.toBeInTheDocument()
+    expect(screen.queryByText("do-login")).not.toBeInTheDocument()
+    expect(screen.getByText("Back to projects")).toBeInTheDocument()
+  })
+
+  it("shows 'no longer valid' error and no signup form when preview returns invalid", async () => {
+    vi.mocked(previewMultiInvite).mockResolvedValueOnce({ ok: false, reason: "invalid" })
+    vi.mocked(previewServerInvite).mockResolvedValueOnce({ ok: false, reason: "invalid" })
+    renderJoin()
+    expect(await screen.findByText("This invite link is no longer valid")).toBeInTheDocument()
+    expect(screen.queryByText("do-signup")).not.toBeInTheDocument()
+    expect(screen.queryByText("do-login")).not.toBeInTheDocument()
+  })
+
+  it("shows network error with retry affordance when preview fails with network reason", async () => {
+    vi.mocked(previewMultiInvite).mockResolvedValueOnce({ ok: false, reason: "network" })
+    vi.mocked(previewServerInvite).mockResolvedValueOnce({ ok: false, reason: "network" })
+    renderJoin()
+    expect(await screen.findByText("Couldn't load invitation")).toBeInTheDocument()
+    expect(screen.getByText("Try again")).toBeInTheDocument()
+    expect(screen.queryByText("do-signup")).not.toBeInTheDocument()
+    expect(screen.queryByText("do-login")).not.toBeInTheDocument()
+  })
+
+  it("valid preview unaffected — shows signup form when preview loads ok", async () => {
+    // Default mock already returns {ok:true, data:{projectName:"John",...}}
+    renderJoin()
+    expect(await screen.findByText("John")).toBeInTheDocument()
+    expect(screen.getByText("do-login")).toBeInTheDocument()
+    expect(screen.queryByText("This invite link is no longer valid")).not.toBeInTheDocument()
   })
 })

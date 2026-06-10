@@ -147,6 +147,12 @@ export function buildEventProjectionStmts(
      * unset (ungated writes, identical to the previous behavior).
      */
     chainGate?: ChainSlot
+    /**
+     * FRO-279: project-level threshold for cells.validated.
+     * `cells.validated` flips to 1 when the cell has at least this many
+     * current-head validators. Default 1 (N=1 projects: byte-identical behavior).
+     */
+    validationCount?: number
   },
 ): ProjectionTouches[] {
   // Gate fragments for chain-advancing cells writes. `gateWhere` suffixes an
@@ -496,15 +502,19 @@ export function buildEventProjectionStmts(
       }
 
       // Recompute the denormalized `cells.validated` flag against the
-      // CURRENT chain head (`cells.event_id`). Validating an old edit no
-      // longer marks a freshly-committed cell as approved — matching the
-      // intent of AD-2 (the chain head is the only state that's "current").
+      // CURRENT chain head (`cells.event_id`). A cell is "validated" when
+      // the number of current-head validators meets the project threshold.
+      //
+      // FRO-279: threshold is `opts.validationCount` (default 1). N=1
+      // projects are byte-identical to the old COUNT(*) > 0 behavior.
+      // The threshold is bound as a parameter so no SQL string interpolation.
+      const validationThreshold = Math.max(1, opts?.validationCount ?? 1)
       stmts.push(
         db
           .prepare(
             `UPDATE cells
             SET validated = (
-              SELECT CASE WHEN COUNT(*) > 0 THEN 1 ELSE 0 END
+              SELECT CASE WHEN COUNT(*) >= ? THEN 1 ELSE 0 END
               FROM cell_validators
               WHERE project_id = ?
                 AND file_id    = ?
@@ -514,6 +524,7 @@ export function buildEventProjectionStmts(
             WHERE project_id = ? AND file_id = ? AND cell_id = ? AND side = 'target'`,
           )
           .bind(
+            validationThreshold,
             event.projectId,
             event.fileId,
             event.cellId,

@@ -494,6 +494,15 @@ CREATE INDEX idx_snapshots_project_active ON snapshots(project_id, snapshot_ts D
 CREATE INDEX idx_users_email ON users(email);
 CREATE INDEX idx_users_username ON users(username);
 
+-- FRO-265: AI budget counters (0034_ai_usage_daily.sql)
+CREATE TABLE IF NOT EXISTS ai_usage_daily (
+  user_id       INTEGER     NOT NULL,
+  date_utc      DATE        NOT NULL,
+  request_count INTEGER     NOT NULL DEFAULT 0,
+  PRIMARY KEY (user_id, date_utc)
+);
+CREATE INDEX IF NOT EXISTS idx_ai_usage_daily_date ON ai_usage_daily(date_utc);
+
 -- ───────────────────────── post-migration notes ─────────────────────────
 -- After the bulk data load (Stage C), reset each identity sequence so new
 -- inserts don't collide with migrated ids:

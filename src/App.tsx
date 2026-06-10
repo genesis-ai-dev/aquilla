@@ -10,6 +10,9 @@ import { ProjectOverview } from "@/components/org/ProjectOverview"
 import { AssignedToMe } from "@/components/org/AssignedToMe"
 import { JoinPage } from "@/components/JoinPage"
 import { OnboardingWizard } from "@/components/onboarding/OnboardingWizard"
+import { ResetPassword } from "@/pages/ResetPassword"
+import { Login } from "@/pages/Login"
+import { NotFound } from "@/pages/NotFound"
 import { DevLoginRoute } from "@/components/DevLoginRoute"
 import { DevLogoutRoute } from "@/components/DevLogoutRoute"
 import { Preferences } from "@/pages/Preferences"
@@ -147,6 +150,10 @@ function AppRoutes() {
         <Route path="/assigned" element={<AssignedToMe />} />
         <Route path="/join/:token" element={<JoinPage />} />
         <Route path="/onboarding" element={<OnboardingWizard />} />
+        {/* FRO-282: dedicated login — eagerly loaded (public, no auth required) */}
+        <Route path="/login" element={<Login />} />
+        {/* FRO-270: account recovery — eagerly loaded (public, no auth required) */}
+        <Route path="/reset-password" element={<ResetPassword />} />
         {/* Dev-only auto-login/logout — see components/DevLoginRoute.tsx */}
         <Route path="/__dev/login" element={<DevLoginRoute />} />
         <Route path="/__dev/logout" element={<DevLogoutRoute />} />
@@ -190,6 +197,9 @@ function AppRoutes() {
         <Route path="/project/:id/debug" element={<DebugView />} />
         <Route path="/project/:id/settings/debug" element={<DebugView />} />
         <Route path="/project/:id/comments/debug" element={<DebugView />} />
+
+        {/* FRO-270: catch-all 404 — must be last (audit finding F-IA3) */}
+        <Route path="*" element={<NotFound />} />
       </Routes>
     </Suspense>
   )

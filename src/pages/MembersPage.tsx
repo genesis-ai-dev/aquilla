@@ -1,8 +1,6 @@
 import { useState } from "react"
 import {
   Clock,
-  Grid3x3,
-  List,
   Loader2,
   Mail,
   Users,
@@ -18,15 +16,12 @@ import { useAccessibleProjects } from "@/hooks/useAccessibleProjects"
 import { useOrgInvites } from "@/hooks/useOrgInvites"
 import { MembersPanel, type MembersPanelMember } from "@/components/MembersPanel"
 import { MultiProjectInviteDialog } from "@/components/MultiProjectInviteDialog"
-import { MembersMatrixView } from "@/components/MembersMatrixView"
 import { RemoveOrgMemberDialog } from "@/components/RemoveOrgMemberDialog"
 import { MemberAccessRow } from "@/components/org/MemberAccessPanel"
 import { ROLE, ORG_ROLE_PICKER, roleName } from "@/lib/frontier/roles"
 import { formatRelativeTime } from "@/lib/time/relative"
 import type { OrgMemberProject, PendingOrgInvite } from "@/lib/frontier/orgs"
 import { useActiveOrg } from "@/context/OrgContext"
-
-type View = "roster" | "matrix"
 
 const ORG_ROLE_DESCRIPTIONS: Record<number, string> = {
   [ROLE.VIEWER]: "Read-only across all projects",
@@ -138,7 +133,6 @@ function MembersPageContent({ orgId, orgName }: MembersPageContentProps) {
   const { projects: accessibleProjects, refresh: refreshProjects } = useAccessibleProjects()
   const [removeTarget, setRemoveTarget] = useState<{ userId: number; username: string } | null>(null)
   const [multiInviteOpen, setMultiInviteOpen] = useState(false)
-  const [view, setView] = useState<View>("roster")
 
   const panelMembers: MembersPanelMember[] = members.map((m) => ({
     userId: m.userId,
@@ -180,63 +174,30 @@ function MembersPageContent({ orgId, orgName }: MembersPageContentProps) {
         </span>
       </div>
 
-      {/* View toggle: Roster (per-member detail + add/remove) vs Matrix
-          (members × projects scan view for coverage and concentration risk). */}
-      <div className="mb-3 inline-flex rounded-md border bg-muted/20 p-0.5">
-        <button
-          type="button"
-          onClick={() => setView("roster")}
-          className={`inline-flex items-center gap-1.5 rounded px-2.5 py-1 text-xs ${
-            view === "roster"
-              ? "bg-background shadow-sm text-foreground"
-              : "text-muted-foreground hover:text-foreground"
-          }`}
-        >
-          <List className="h-3.5 w-3.5" />
-          Roster
-        </button>
-        <button
-          type="button"
-          onClick={() => setView("matrix")}
-          className={`inline-flex items-center gap-1.5 rounded px-2.5 py-1 text-xs ${
-            view === "matrix"
-              ? "bg-background shadow-sm text-foreground"
-              : "text-muted-foreground hover:text-foreground"
-          }`}
-        >
-          <Grid3x3 className="h-3.5 w-3.5" />
-          Matrix
-        </button>
-      </div>
-
       {membersError && (
         <p className="mb-2 text-xs text-destructive">{membersError}</p>
       )}
 
-      {view === "roster" ? (
-        membersLoading && members.length === 0 ? (
-          <div className="flex items-center justify-center py-12 text-muted-foreground">
-            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-            <span className="text-sm">Loading members…</span>
-          </div>
-        ) : (
-          <div className="space-y-4">
-            <RosterWithProjectChips
-              orgId={orgId}
-              panelMembers={panelMembers}
-              listMemberProjects={listMemberProjects}
-              add={add}
-              remove={remove}
-              callerUserId={callerUserId}
-              onRequestRemove={(userId, username) =>
-                setRemoveTarget({ userId, username })
-              }
-            />
-            <PendingInvitesSection orgId={orgId} />
-          </div>
-        )
+      {membersLoading && members.length === 0 ? (
+        <div className="flex items-center justify-center py-12 text-muted-foreground">
+          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+          <span className="text-sm">Loading members…</span>
+        </div>
       ) : (
-        <MembersMatrixView />
+        <div className="space-y-4">
+          <RosterWithProjectChips
+            orgId={orgId}
+            panelMembers={panelMembers}
+            listMemberProjects={listMemberProjects}
+            add={add}
+            remove={remove}
+            callerUserId={callerUserId}
+            onRequestRemove={(userId, username) =>
+              setRemoveTarget({ userId, username })
+            }
+          />
+          <PendingInvitesSection orgId={orgId} />
+        </div>
       )}
 
       {removeTarget && (
@@ -321,7 +282,7 @@ function RosterWithProjectChips({
 
       <div className="rounded border bg-muted/20 p-3">
         <p className="mb-2 text-xs font-medium text-muted-foreground">
-          Effective access — why each member can reach each project
+          Project access — expand a member to see per-project roles
         </p>
         <ul className="divide-y">
           {panelMembers.map((m) => (

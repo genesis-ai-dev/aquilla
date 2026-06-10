@@ -93,6 +93,12 @@ declare global {
       /** Public base URL of THIS worker (incl. /sync prefix in prod) so Modal
        *  can reach the diarization audio + callback routes. */
       DIARIZATION_PUBLIC_BASE?: string
+      /** Optional — Resend API key for outbound transactional email (notifications). */
+      RESEND_API_KEY?: string
+      /** Optional — From address for transactional email. Defaults to noreply@frontierrnd.com. */
+      EMAIL_FROM?: string
+      /** Optional — Base URL for deep links in notification emails (e.g. https://aquilla.app). */
+      BASE_URL?: string
     }
   }
 }
@@ -230,7 +236,7 @@ export default {
     if (exportSourceResponse) return exportSourceResponse
     const exportBundleResponse = await handleExportBundleRequest(request, env)
     if (exportBundleResponse) return exportBundleResponse
-    const eventsWriteResponse = await handleEventsWriteRequest(request, env)
+    const eventsWriteResponse = await handleEventsWriteRequest(request, env, ctx)
     if (eventsWriteResponse) return withCors(eventsWriteResponse, request)
 
     const projectSyncResponse = routeProjectSync(request, env)

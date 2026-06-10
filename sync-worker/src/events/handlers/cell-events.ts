@@ -48,6 +48,12 @@ export interface HandleCellEventOptions {
    * The affected file is reported back via DispatchResult.counterFile.
    */
   deferFileCounters?: boolean
+  /**
+   * FRO-279: project-level threshold for cells.validated.
+   * Forwarded to buildEventProjectionStmts for cell.validate / cell.unvalidate.
+   * Default 1 (N=1 projects: byte-identical behavior).
+   */
+  validationCount?: number
 }
 
 /** Cell-level kinds that this handler accepts. */
@@ -125,6 +131,7 @@ export function handleCellEvent(
     projectionTouches = buildEventProjectionStmts(db, persisted, stmts, {
       deferFileCounters: opts.deferFileCounters,
       chainGate,
+      validationCount: opts.validationCount,
     })
     if (opts.deferFileCounters && event.fileId && projectionTouches.includes('files')) {
       counterFile = { projectId: event.projectId, fileId: event.fileId }

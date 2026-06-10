@@ -1,10 +1,46 @@
-// RES-3 (QW-4): Top-level error boundary. Catches render errors that would
-// otherwise leave the user on a permanent white screen. Reports via PostHog
-// and renders a minimal recovery UI. See docs/AUDIT-2026-06-10.md §3.3.
+/**
+ * FRO-266: Global error boundary + crash telemetry.
+ *
+ * Wraps the router output so that any unhandled render throw shows a branded
+ * recovery screen rather than a white screen of death. Also registers
+ * window.onerror + unhandledrejection handlers that funnel uncaught errors into
+ * posthog.captureException (consent-gated via the posthog module which already
+ * respects isAnalyticsEnabled() on init and responds to onAnalyticsConsentChange).
+ *
+ * SWARM-TODO(FRO-266): UI-QA — force a render throw (e.g. via a dev-only query
+ * param ?__crash=1 or React devtools) and confirm the branded recovery screen
+ * appears (not a white screen) AND a PostHog "app_crash" exception event lands
+ * in the PostHog event stream.
+ */
 
 import { Component, type ErrorInfo, type ReactNode } from "react"
+import { AlertTriangle } from "lucide-react"
 import posthog from "@/lib/posthog"
 
+// ---------------------------------------------------------------------------
+// Dev-only crash trigger: appending ?__crash=1 to any URL while
+// import.meta.env.DEV is true renders a component that immediately throws,
+// letting you manually verify the boundary + PostHog telemetry without needing
+// React DevTools or a production-style error injection.
+// ---------------------------------------------------------------------------
+function DevCrashTrigger() {
+  if (import.meta.env.DEV && typeof window !== "undefined") {
+    const params = new URLSearchParams(window.location.search)
+    if (params.get("__crash") === "1") {
+      throw new Error("[DEV] intentional crash triggered by ?__crash=1")
+    }
+  }
+  return null
+}
+
+// ---------------------------------------------------------------------------
+// Chunk-load recovery (RES-3 / audit QW-4): after a redeploy, stale lazy-route
+// chunks 404 ("Failed to fetch dynamically imported module" etc.). One forced
+// reload usually fixes it (the new HTML references the new chunk hashes). The
+// sessionStorage flag guards against a reload loop on a genuinely broken
+// deploy; it is re-armed on the next successful page load so a later deploy
+// mid-session gets its own one-shot reload.
+// ---------------------------------------------------------------------------
 const CHUNK_LOAD_PATTERNS = [
   "Failed to fetch dynamically imported module",
   "Importing a module script failed",
@@ -12,13 +48,109 @@ const CHUNK_LOAD_PATTERNS = [
   "ChunkLoadError",
 ]
 
-function isChunkLoadError(err: unknown): boolean {
+export function isChunkLoadError(err: unknown): boolean {
   const msg = err instanceof Error ? err.message : String(err)
   return CHUNK_LOAD_PATTERNS.some((p) => msg.includes(p))
 }
 
-const CHUNK_RELOAD_KEY = "aq:chunk-reload-attempted"
+export const CHUNK_RELOAD_KEY = "aq:chunk-reload-attempted"
 
+/** True if this error triggered the one-shot reload (caller should bail). */
+function maybeReloadForChunkError(err: unknown): boolean {
+  if (!isChunkLoadError(err)) return false
+  try {
+    if (sessionStorage.getItem(CHUNK_RELOAD_KEY)) return false
+    sessionStorage.setItem(CHUNK_RELOAD_KEY, "1")
+  } catch {
+    return false // sessionStorage unavailable — fall through to the error UI
+  }
+  window.location.reload()
+  return true
+}
+
+// ---------------------------------------------------------------------------
+// Window-level error handlers — registered once when the module first loads.
+// Both forward to posthog.captureException; consent-gating is already baked
+// into posthog.ts (opt_out_capturing_by_default + onAnalyticsConsentChange).
+// ---------------------------------------------------------------------------
+if (typeof window !== "undefined") {
+  window.addEventListener("error", (event: ErrorEvent) => {
+    const err = event.error instanceof Error
+      ? event.error
+      : new Error(event.message || "Unknown window.onerror")
+    posthog.captureException(err, { properties: { source: "window.onerror" } })
+    maybeReloadForChunkError(err)
+  })
+
+  window.addEventListener("unhandledrejection", (event: PromiseRejectionEvent) => {
+    const err = event.reason instanceof Error
+      ? event.reason
+      : new Error(String(event.reason ?? "Unhandled promise rejection"))
+    posthog.captureException(err, { properties: { source: "unhandledrejection" } })
+    maybeReloadForChunkError(err)
+  })
+
+  // Re-arm the one-shot chunk reload once a page load has succeeded. Lazy
+  // chunks load on navigation — after `load` — so clearing here cannot re-arm
+  // a tight loop: each reload only re-arms once the page has fully booted.
+  const clearChunkReloadFlag = () => {
+    try {
+      sessionStorage.removeItem(CHUNK_RELOAD_KEY)
+    } catch {
+      // sessionStorage unavailable — nothing to re-arm
+    }
+  }
+  if (document.readyState === "complete") {
+    clearChunkReloadFlag()
+  } else {
+    window.addEventListener("load", clearChunkReloadFlag, { once: true })
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Fallback screen — styled to match existing empty-state pattern from
+// CellAreaPlaceholder.tsx (centred icon + title + description + action button).
+// Uses min-h-screen + document scroll per the scroll-model rule (not h-screen
+// flex tricks).
+// ---------------------------------------------------------------------------
+function ErrorFallback({
+  onReload,
+  isChunkError,
+}: {
+  onReload: () => void
+  isChunkError?: boolean
+}) {
+  return (
+    <div className="min-h-screen flex items-center justify-center p-8">
+      <div className="flex max-w-sm flex-col items-center gap-2 text-center">
+        <div className="text-muted-foreground">
+          <AlertTriangle className="h-10 w-10" aria-hidden />
+        </div>
+        <h3 className="text-base font-medium">
+          {isChunkError ? "App updated — reload needed" : "Something went wrong"}
+        </h3>
+        <p className="text-sm text-muted-foreground">
+          {isChunkError
+            ? "A new version of the app was deployed. Your work is saved locally — reload to pick it up."
+            : "An unexpected error occurred. Your work is saved locally — reload to continue."}
+        </p>
+        <div className="mt-2">
+          <button
+            type="button"
+            onClick={onReload}
+            className="inline-flex items-center gap-1.5 rounded-full bg-card px-3 py-1.5 text-sm shadow-neu-sm transition-all hover:shadow-neu active:shadow-neu-pressed"
+          >
+            Reload
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Class component — required by React for error boundaries.
+// ---------------------------------------------------------------------------
 interface Props {
   children: ReactNode
 }
@@ -28,97 +160,46 @@ interface State {
   isChunkError: boolean
 }
 
-/**
- * Class component because `componentDidCatch` is only available on class
- * components (React 19 still doesn't expose it as a hook). Wraps the entire
- * application above the route Suspense so any render throw is caught here
- * rather than crashing the whole tab.
- */
 export class ErrorBoundary extends Component<Props, State> {
-  state: State = { hasError: false, isChunkError: false }
-
-  static getDerivedStateFromError(error: Error): State {
-    return {
-      hasError: true,
-      isChunkError: isChunkLoadError(error),
-    }
+  constructor(props: Props) {
+    super(props)
+    this.state = { hasError: false, isChunkError: false }
   }
 
-  componentDidCatch(error: Error, info: ErrorInfo): void {
-    // Never throw from here — a throw in componentDidCatch would swallow the
-    // original error and leave the app in a partially recovered state.
-    try {
-      captureException(error, { extra: { componentStack: info.componentStack } })
-    } catch {
-      // Safety: if PostHog itself throws (opted-out, uninitialized, etc.) we
-      // must not propagate — the boundary is already handling an error.
-    }
+  static getDerivedStateFromError(error: Error): State {
+    return { hasError: true, isChunkError: isChunkLoadError(error) }
+  }
 
-    if (isChunkLoadError(error)) {
-      // Guard against a broken deploy that 404s on every chunk: only reload once
-      // per session so a genuinely broken deploy doesn't loop forever.
-      if (!sessionStorage.getItem(CHUNK_RELOAD_KEY)) {
-        sessionStorage.setItem(CHUNK_RELOAD_KEY, "1")
-        window.location.reload()
-        return
-      }
-    }
+  componentDidCatch(error: Error, info: ErrorInfo) {
+    posthog.captureException(error, {
+      properties: {
+        source: "react_error_boundary",
+        componentStack: info.componentStack,
+      },
+    })
+    // Stale-chunk render throws get one automatic reload before showing the
+    // "App updated" fallback (see maybeReloadForChunkError above).
+    maybeReloadForChunkError(error)
+  }
 
-    if (import.meta.env.DEV) {
-      // In dev, surface the error loudly so DX isn't degraded.
-      console.error("[ErrorBoundary] Caught render error:", error, info)
-    }
+  private handleReload = () => {
+    window.location.reload()
   }
 
   render() {
-    if (!this.state.hasError) return this.props.children
-
-    const { isChunkError } = this.state
-
-    return (
-      <div className="flex min-h-screen flex-col items-center justify-center gap-4 bg-background p-8 text-center">
-        <div className="max-w-md space-y-3">
-          <h1 className="text-lg font-semibold text-foreground">
-            {isChunkError ? "App updated — reload needed" : "Something went wrong"}
-          </h1>
-          <p className="text-sm text-muted-foreground">
-            {isChunkError
-              ? "A newer version of the app was deployed. Reload the page to get the latest."
-              : "An unexpected error occurred. Reloading usually fixes it."}
-          </p>
-          <button
-            type="button"
-            onClick={() => window.location.reload()}
-            className="inline-flex h-9 items-center rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground shadow-sm hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-          >
-            Reload
-          </button>
-        </div>
-      </div>
-    )
-  }
-}
-
-/**
- * Safe PostHog exception capture. Works whether PostHog is initialized, opted
- * out, or the key is absent. Never throws.
- */
-export function captureException(
-  error: unknown,
-  extra?: Record<string, unknown>,
-): void {
-  try {
-    if (typeof posthog?.captureException === "function") {
-      posthog.captureException(error, extra)
-    } else if (typeof posthog?.capture === "function") {
-      // Fallback: captureException may not exist in older posthog-js builds.
-      posthog.capture("$exception", {
-        $exception_message: error instanceof Error ? error.message : String(error),
-        $exception_type: error instanceof Error ? error.constructor.name : typeof error,
-        ...extra,
-      })
+    if (this.state.hasError) {
+      return (
+        <ErrorFallback
+          onReload={this.handleReload}
+          isChunkError={this.state.isChunkError}
+        />
+      )
     }
-  } catch {
-    // Safety: never throw from the error-reporting path.
+    return (
+      <>
+        <DevCrashTrigger />
+        {this.props.children}
+      </>
+    )
   }
 }

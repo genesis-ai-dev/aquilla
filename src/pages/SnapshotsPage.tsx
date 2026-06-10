@@ -23,6 +23,7 @@ import { Badge } from "@/components/ui/badge"
 import { useSnapshots, type Snapshot, type RestoreResult } from "@/hooks/useSnapshots"
 import { SnapshotCreateDialog } from "@/components/SnapshotCreateDialog"
 import { SnapshotRestoreDialog } from "@/components/SnapshotRestoreDialog"
+import { ConfirmActionDialog } from "@/components/ConfirmActionDialog"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { buildFileScopedTokenFetcher } from "@/lib/sync/cqrs-bridge"
 import { useProject } from "@/hooks/useProject"
@@ -40,6 +41,8 @@ export function SnapshotsPage() {
   const [createOpen, setCreateOpen] = useState(false)
   const [restoreTarget, setRestoreTarget] = useState<Snapshot | null>(null)
   const [lastRestoreResult, setLastRestoreResult] = useState<RestoreResult | null>(null)
+  // FRO-291: pending delete confirmation state.
+  const [pendingDeleteSnap, setPendingDeleteSnap] = useState<Snapshot | null>(null)
 
   // Project-scoped token fetcher — snapshots route uses verifyTokenForProject
   // so any file-scoped token for the project works; we use the sentinel.
@@ -65,7 +68,6 @@ export function SnapshotsPage() {
   }
 
   async function handleDelete(snap: Snapshot) {
-    if (!window.confirm(`Delete snapshot "${snap.name}"? This cannot be undone.`)) return
     try {
       await remove(snap.id)
     } catch (err) {
@@ -187,7 +189,7 @@ export function SnapshotsPage() {
                         variant="ghost"
                         size="icon"
                         className="text-muted-foreground hover:text-destructive"
-                        onClick={() => void handleDelete(snap)}
+                        onClick={() => setPendingDeleteSnap(snap)}
                         title="Delete snapshot"
                       >
                         <Trash2 className="h-3.5 w-3.5" />
@@ -214,6 +216,22 @@ export function SnapshotsPage() {
         snapshot={restoreTarget}
         onRestore={restore}
         onRestored={handleRestored}
+      />
+
+      {/* FRO-291: checkbox-confirm before deleting a snapshot */}
+      <ConfirmActionDialog
+        open={pendingDeleteSnap !== null}
+        onOpenChange={(v) => { if (!v) setPendingDeleteSnap(null) }}
+        title="Delete snapshot"
+        description={
+          pendingDeleteSnap
+            ? `Delete "${pendingDeleteSnap.name}"? This permanently removes the snapshot for everyone in the project and cannot be undone.`
+            : "Delete this snapshot? This cannot be undone."
+        }
+        confirmLabel="Delete snapshot"
+        checkboxLabel="I understand this permanently deletes the snapshot for everyone in the project."
+        variant="destructive"
+        onConfirm={() => { if (pendingDeleteSnap) void handleDelete(pendingDeleteSnap) }}
       />
     </div>
   )

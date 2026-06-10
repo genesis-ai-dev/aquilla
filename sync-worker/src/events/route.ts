@@ -40,6 +40,7 @@ import {
 import { broadcastRealtime } from './broadcast'
 import type { BroadcastEnv } from './broadcast'
 import { ROLE } from './role-policy'
+import { sendCommentNotifications } from '../notification-email'
 
 // Max statements per batch() transaction — a conservative self-imposed cap (Postgres has no hard limit; keeps any single transaction bounded).
 const BATCH_LIMIT = 100
@@ -52,6 +53,11 @@ export interface EventsRouteEnv {
   /** Optional — when present, successful DB commits fan-out event.applied frames
    * to connected WebSocket clients via the per-project ProjectSync DO. */
   ProjectSync?: DurableObjectNamespace
+  /** Optional — when present, outbound notification emails are sent on comment.create. */
+  RESEND_API_KEY?: string
+  EMAIL_FROM?: string
+  /** Base URL for deep links in notification emails (e.g. https://aquilla.app). */
+  BASE_URL?: string
 }
 
 interface AcceptedEntry {
@@ -222,10 +228,14 @@ async function prefetchSourceEventIds(
  *   }
  *
  * Returns null if the URL doesn't match (chainable in the fetch dispatcher).
+ *
+ * `ctx` is optional — when provided, notification emails for comment.create
+ * events are fired via ctx.waitUntil so they never block the response.
  */
 export async function handleEventsWriteRequest(
   request: Request,
   env: EventsRouteEnv,
+  ctx?: Pick<ExecutionContext, 'waitUntil'>,
 ): Promise<Response | null> {
   // 1. URL match.
   const url = new URL(request.url)
@@ -565,78 +575,92 @@ export async function handleEventsWriteRequest(
       }
     }
 
-    // ── Validation config enforcement (FRO-189) ───────────────────────────
-    // Enforce project-level validation settings for cell.validate events:
+    // ── Validation config enforcement (FRO-189) + threshold (FRO-279) ───────
+    // For cell.validate events:
     //   1. validationRoleFloor — reject if caller's role < configured floor
     //   2. validationNamedUsers — reject if caller is not in the allowlist
     //   3. allowSelfValidation=false — reject if caller is the cell's last editor
-    if (rawEvent.kind === 'cell.validate') {
-      // Load project settings (memoized once per request per project —
-      // failure is non-fatal: skip enforcement rather than blocking all
-      // validates when settings are unavailable).
-      let validationRoleFloor: string | undefined
-      let validationNamedUsers: string[] | undefined
-      let allowSelfValidation: boolean | undefined
+    //   4. (FRO-279) validationCount — read for the projection's threshold recompute
+    // For cell.unvalidate events:
+    //   The FRO-189 role/named/self checks do NOT apply (unvalidation is always
+    //   allowed by the authorized caller). But the projection still needs the
+    //   threshold so the validated flag re-derives correctly after the removal.
+    //
+    // `validationCountForDispatch` is populated here and forwarded to dispatchEvent.
+    // Settings are read via readProjectSettings (memoized once per request per
+    // project — failure is non-fatal: skip enforcement rather than blocking all
+    // validates when settings are unavailable).
+    let validationCountForDispatch: number | undefined
+    if (rawEvent.kind === 'cell.validate' || rawEvent.kind === 'cell.unvalidate') {
       const parsed = await readProjectSettings(rawEvent.projectId)
-      if (parsed) {
-        if (typeof parsed.validationRoleFloor === 'string') {
-          validationRoleFloor = parsed.validationRoleFloor as string
-        }
-        if (Array.isArray(parsed.validationNamedUsers)) {
-          validationNamedUsers = parsed.validationNamedUsers as string[]
-        }
-        if (typeof parsed.allowSelfValidation === 'boolean') {
-          allowSelfValidation = parsed.allowSelfValidation
-        }
+      if (parsed && typeof parsed.validationCount === 'number' && parsed.validationCount >= 1) {
+        validationCountForDispatch = parsed.validationCount as number
       }
-
-      // 1. Role floor check.
-      if (validationRoleFloor != null) {
-        const FLOOR_MAP: Record<string, number> = {
-          reviewer: ROLE.REVIEWER,
-          project_lead: ROLE.PROJECT_LEAD,
-          maintainer: ROLE.MAINTAINER,
+      // FRO-189 checks are only for cell.validate.
+      if (rawEvent.kind === 'cell.validate') {
+        let validationRoleFloor: string | undefined
+        let validationNamedUsers: string[] | undefined
+        let allowSelfValidation: boolean | undefined
+        if (parsed) {
+          if (typeof parsed.validationRoleFloor === 'string') {
+            validationRoleFloor = parsed.validationRoleFloor as string
+          }
+          if (Array.isArray(parsed.validationNamedUsers)) {
+            validationNamedUsers = parsed.validationNamedUsers as string[]
+          }
+          if (typeof parsed.allowSelfValidation === 'boolean') {
+            allowSelfValidation = parsed.allowSelfValidation
+          }
         }
-        const floorLevel = FLOOR_MAP[validationRoleFloor]
-        if (floorLevel != null && callerRole < floorLevel) {
-          rejected.push({
-            id: rawEvent.id ?? '(unknown)',
-            status: 403,
-            reason: `role too low to validate (project requires ${validationRoleFloor} or above)`,
-          })
-          continue
-        }
-      }
 
-      // 2. Named-user allowlist check.
-      if (validationNamedUsers != null && validationNamedUsers.length > 0) {
-        if (!validationNamedUsers.includes(callerUsername)) {
-          rejected.push({
-            id: rawEvent.id ?? '(unknown)',
-            status: 403,
-            reason: `user '${callerUsername}' is not in the project's validator allowlist`,
-          })
-          continue
+        // 1. Role floor check.
+        if (validationRoleFloor != null) {
+          const FLOOR_MAP: Record<string, number> = {
+            reviewer: ROLE.REVIEWER,
+            project_lead: ROLE.PROJECT_LEAD,
+            maintainer: ROLE.MAINTAINER,
+          }
+          const floorLevel = FLOOR_MAP[validationRoleFloor]
+          if (floorLevel != null && callerRole < floorLevel) {
+            rejected.push({
+              id: rawEvent.id ?? '(unknown)',
+              status: 403,
+              reason: `role too low to validate (project requires ${validationRoleFloor} or above)`,
+            })
+            continue
+          }
         }
-      }
 
-      // 3. Self-validation check.
-      if (allowSelfValidation === false && rawEvent.fileId && rawEvent.cellId) {
-        const cellRow = await db
-          .prepare(
-            `SELECT last_editor FROM cells
-             WHERE project_id = ? AND file_id = ? AND cell_id = ? AND side = 'target'
-             LIMIT 1`,
-          )
-          .bind(rawEvent.projectId, rawEvent.fileId, rawEvent.cellId)
-          .first<{ last_editor: string | null }>()
-        if (cellRow && cellRow.last_editor === callerUsername) {
-          rejected.push({
-            id: rawEvent.id ?? '(unknown)',
-            status: 403,
-            reason: `self-validation is not allowed on this project`,
-          })
-          continue
+        // 2. Named-user allowlist check.
+        if (validationNamedUsers != null && validationNamedUsers.length > 0) {
+          if (!validationNamedUsers.includes(callerUsername)) {
+            rejected.push({
+              id: rawEvent.id ?? '(unknown)',
+              status: 403,
+              reason: `user '${callerUsername}' is not in the project's validator allowlist`,
+            })
+            continue
+          }
+        }
+
+        // 3. Self-validation check.
+        if (allowSelfValidation === false && rawEvent.fileId && rawEvent.cellId) {
+          const cellRow = await db
+            .prepare(
+              `SELECT last_editor FROM cells
+               WHERE project_id = ? AND file_id = ? AND cell_id = ? AND side = 'target'
+               LIMIT 1`,
+            )
+            .bind(rawEvent.projectId, rawEvent.fileId, rawEvent.cellId)
+            .first<{ last_editor: string | null }>()
+          if (cellRow && cellRow.last_editor === callerUsername) {
+            rejected.push({
+              id: rawEvent.id ?? '(unknown)',
+              status: 403,
+              reason: `self-validation is not allowed on this project`,
+            })
+            continue
+          }
         }
       }
     }
@@ -687,6 +711,7 @@ export async function handleEventsWriteRequest(
     const outcome = dispatchEvent(db, authResult.event, serverTs, {
       updateProjection,
       deferFileCounters: true,
+      validationCount: validationCountForDispatch,
     })
     if (!outcome.ok) {
       rejected.push({
@@ -859,6 +884,38 @@ export async function handleEventsWriteRequest(
     }
 
     await flagClaimLosers(committedEntries)
+
+    // Comment notifications — fire-and-forget via ctx.waitUntil so they
+    // never delay the response. Only fires for comment.create events.
+    if (ctx && env.AQUILLA_PG) {
+      const baseUrl = env.BASE_URL ?? 'https://aquilla.app'
+      for (const entry of committedEntries) {
+        if (entry.eventFrame.kind === 'comment.create') {
+          // Retrieve the original raw event payload by matching event id.
+          const rawEvent = rawEvents.find((e) => e.id === entry.id)
+          if (rawEvent) {
+            const p = rawEvent.payload as {
+              commentId?: string
+              body?: string
+              parentCommentId?: string | null
+            }
+            const body = p.body ?? ''
+            const parentCommentId = p.parentCommentId ?? null
+            ctx.waitUntil(
+              sendCommentNotifications({
+                env,
+                db: env.AQUILLA_PG!,
+                baseUrl,
+                projectId: rawEvent.projectId,
+                author: entry.author,
+                body,
+                parentCommentId,
+              }),
+            )
+          }
+        }
+      }
+    }
 
     // Broadcast — non-fatal.
     if (env.FileSync && env.SYNC_SECRET_KEY) {

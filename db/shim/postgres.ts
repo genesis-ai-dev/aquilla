@@ -20,6 +20,32 @@
 //
 // Caveat: `?`→`$n` is textual; it assumes `?` appears only as a placeholder
 // (true for this codebase — string literals use single quotes).
+//
+// RLS / identity threading (FRO-289)
+// ------------------------------------
+// In production, workers connect as the `app_runtime` Postgres role (see
+// db/postgres/migrations/0034_rls_backstop.sql).  RLS policies on the
+// project-scoped tables read `current_setting('app.user_id', true)` to
+// determine which rows are visible.
+//
+// Two entry points control identity:
+//
+//   db.withUser(userId)  — returns a new PostgresDb whose every query
+//     wraps in a transaction with `SET LOCAL app.user_id = '<userId>'`.
+//     Use for every authenticated request.
+//
+//   db.asAdmin()  — returns a new PostgresDb that runs with
+//     `SET LOCAL app.user_id = ''`, bypassing identity-gated RLS.
+//     For identity-less code paths (migration helpers, rebuild,
+//     diarization callback, admin routes that already run as the owner
+//     role on Neon).  Must be called explicitly; never used implicitly.
+//
+// Implementation note: `SET LOCAL` is transaction-scoped.  Because routes
+// mostly use individual prepare().bind().run() calls (not batch()), every
+// query execution wraps in a mini-transaction to make SET LOCAL effective.
+// This is correct with Hyperdrive connection pooling: the SET LOCAL is
+// never visible to a different request's connection.
+
 import postgres from "postgres"
 
 /** Result metadata returned alongside every statement's rows. */
@@ -74,23 +100,64 @@ function meta(rowCount: number, rowsRead: number): AquillaMeta {
   return { changes: rowCount, rows_written: rowCount, rows_read: rowsRead, last_row_id: 0, duration: 0, served_by: "shim" }
 }
 
+/** Identity mode for RLS threading. */
+type IdentityMode =
+  | { kind: "none" }                  // no identity — bare db handle, no SET LOCAL
+  | { kind: "user"; userId: string }  // authenticated user path
+  | { kind: "admin" }                 // explicit admin bypass
+
+/**
+ * Apply the identity SET LOCAL inside a transaction, then call `fn`.
+ * Used by both batch() and individual query calls when identity is set.
+ */
+async function withIdentity<T>(
+  executor: PgExecutor,
+  mode: IdentityMode,
+  fn: (tx: PgExecutor) => Promise<T>,
+): Promise<T> {
+  return executor.begin(async (tx) => {
+    if (mode.kind === "user") {
+      // SET LOCAL does not accept bind parameters ($1) in any Postgres version
+      // (GUC assignment syntax).  userId is always a String(numericId) coming
+      // from withUser() — numeric, safe to embed directly.
+      await tx.run(`SET LOCAL app.user_id = '${mode.userId}'`, [])
+    } else if (mode.kind === "admin") {
+      await tx.run("SET LOCAL app.user_id = ''", [])
+    }
+    // kind === "none": no SET LOCAL — bare executor (identity-less, no RLS in tests)
+    return fn(tx)
+  })
+}
+
 class PgStatement implements AquillaStatement {
-  private exec: PgExecutor
+  private executor: PgExecutor
+  private mode: IdentityMode
   private query: string
   private args: unknown[]
 
-  constructor(exec: PgExecutor, query: string, args: unknown[] = []) {
-    this.exec = exec
+  constructor(executor: PgExecutor, mode: IdentityMode, query: string, args: unknown[] = []) {
+    this.executor = executor
+    this.mode = mode
     this.query = query
     this.args = args
   }
 
   bind(...args: unknown[]): PgStatement {
-    return new PgStatement(this.exec, this.query, args)
+    return new PgStatement(this.executor, this.mode, this.query, args)
+  }
+
+  private async runQuery(): Promise<{ rows: Record<string, unknown>[]; rowCount: number }> {
+    const pgQuery = toPg(this.query)
+    const args = this.args
+    if (this.mode.kind === "none") {
+      return this.executor.run(pgQuery, args)
+    }
+    // Wrap in a transaction so SET LOCAL takes effect.
+    return withIdentity(this.executor, this.mode, (tx) => tx.run(pgQuery, args))
   }
 
   async all<T = Record<string, unknown>>(): Promise<AquillaResult<T>> {
-    const { rows, rowCount } = await this.exec.run(toPg(this.query), this.args)
+    const { rows, rowCount } = await this.runQuery()
     return { results: rows as unknown as T[], success: true as const, meta: meta(rowCount, rows.length) }
   }
 
@@ -100,40 +167,75 @@ class PgStatement implements AquillaStatement {
   }
 
   async first<T = unknown>(colName?: string): Promise<T | null> {
-    const { rows } = await this.exec.run(toPg(this.query), this.args)
+    const { rows } = await this.runQuery()
     const row = rows[0]
     if (row == null) return null
     return (colName != null ? (row[colName] as T) : (row as unknown as T))
   }
 
   async raw<T = unknown[]>(): Promise<T[]> {
-    const { rows } = await this.exec.run(toPg(this.query), this.args)
+    const { rows } = await this.runQuery()
     return rows.map((r) => Object.values(r) as unknown as T)
   }
 
+  /** Re-bind this statement onto a specific executor (used inside batch). */
   _on(tx: PgExecutor) {
-    return new PgStatement(tx, this.query, this.args)
+    return new PgStatement(tx, { kind: "none" }, this.query, this.args)
   }
 }
 
 export class PostgresDb implements AquillaDb {
   private executor: PgExecutor
+  private mode: IdentityMode
 
-  constructor(executor: PgExecutor) {
+  constructor(executor: PgExecutor, mode: IdentityMode = { kind: "none" }) {
     this.executor = executor
+    this.mode = mode
+  }
+
+  /**
+   * Return a new handle that threads the given numeric user id into every
+   * query via `SET LOCAL app.user_id = '<userId>'` (inside a transaction).
+   * Use at the request boundary for all authenticated paths.
+   *
+   * Pass null to explicitly clear a previously set identity (reverts to
+   * bare handle — no SET LOCAL, no RLS enforcement).
+   */
+  withUser(userId: number | string | null): PostgresDb {
+    if (userId == null) return new PostgresDb(this.executor, { kind: "none" })
+    return new PostgresDb(this.executor, { kind: "user", userId: String(userId) })
+  }
+
+  /**
+   * Return a new handle that runs every query with `SET LOCAL app.user_id = ''`,
+   * bypassing identity-gated RLS.  Callers MUST already be authorised through
+   * a non-DB mechanism (SYNC_SECRET_KEY, DIARIZATION_SHARED_SECRET,
+   * PLATFORM_ADMINS gate, etc.).
+   *
+   * Named call sites (FRO-289 audit — see db/postgres/RLS.md §Named asAdmin call sites):
+   *   sync-worker: rebuild, rebuild-fts, migrate-*, import, import-morph,
+   *                diarization callback, admin/files
+   *   auth-worker: routes/admin.ts (platform-admin cross-tenant reads)
+   */
+  asAdmin(): PostgresDb {
+    return new PostgresDb(this.executor, { kind: "admin" })
   }
 
   prepare(query: string): PgStatement {
-    return new PgStatement(this.executor, query)
+    return new PgStatement(this.executor, this.mode, query)
   }
 
   /** One batch = one atomic transaction; returns one result per statement. */
   async batch<T = Record<string, unknown>>(stmts: AquillaStatement[]): Promise<AquillaResult<T>[]> {
-    return this.executor.begin(async (tx) => {
+    const run = async (tx: PgExecutor): Promise<AquillaResult<T>[]> => {
       const out: AquillaResult<T>[] = []
       for (const s of stmts) out.push(await (s as PgStatement)._on(tx).all<T>())
       return out
-    })
+    }
+    if (this.mode.kind === "none") {
+      return this.executor.begin(run)
+    }
+    return withIdentity(this.executor, this.mode, run)
   }
 
   /** Run statements with no bound params. */

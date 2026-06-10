@@ -40,6 +40,12 @@ export interface DispatchOptions {
    * back via DispatchResult.counterFile.
    */
   deferFileCounters?: boolean
+  /**
+   * FRO-279: project-level threshold for cells.validated.
+   * Passed through to buildEventProjectionStmts for cell.validate /
+   * cell.unvalidate events. Default 1 (N=1 projects: byte-identical behavior).
+   */
+  validationCount?: number
 }
 
 /**

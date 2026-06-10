@@ -1390,6 +1390,10 @@ interface SelectionTermActionsProps {
   concepts: Concept[]
   onAddToTermbase?: () => void
   onTermApply: (rendering: string) => void
+  /** FRO-260: called on mousedown so the parent can suppress selectionchange clearing. */
+  onToolbarMouseDown?: () => void
+  /** FRO-260: called on mouseup/mouseleave so the parent resets the guard. */
+  onToolbarMouseUp?: () => void
 }
 
 function SelectionTermActions({
@@ -1397,6 +1401,8 @@ function SelectionTermActions({
   concepts,
   onAddToTermbase,
   onTermApply,
+  onToolbarMouseDown,
+  onToolbarMouseUp,
 }: SelectionTermActionsProps) {
   const activeConcepts = useMemo(
     () => concepts.filter((c) => c.status === "active"),
@@ -1412,10 +1418,21 @@ function SelectionTermActions({
     [activeConcepts, sourceSelection],
   )
 
+  // FRO-260: shared mousedown handler for all toolbar buttons.
+  // e.preventDefault() preserves the browser text selection (prevents focus
+  // shift). onToolbarMouseDown() sets a flag that suppresses the FRO-248
+  // selectionchange guard so that onClick still sees a non-null selection.
+  const handleButtonMouseDown = (e: React.MouseEvent) => {
+    e.preventDefault()
+    onToolbarMouseDown?.()
+  }
+
   return (
     <div
       className="absolute right-1 top-0 z-10 flex items-center gap-1"
       dir="ltr"
+      onMouseUp={onToolbarMouseUp}
+      onMouseLeave={onToolbarMouseUp}
     >
       {/* Lookup popover: only when selection matches an existing active concept */}
       {hasMatch && (
@@ -1426,7 +1443,7 @@ function SelectionTermActions({
         >
           <button
             type="button"
-            onMouseDown={(e) => e.preventDefault()}
+            onMouseDown={handleButtonMouseDown}
             className="inline-flex items-center gap-1 rounded-md border border-primary/30 bg-background px-2 py-1 text-[11px] font-medium text-primary shadow-neu-sm hover:bg-primary/10"
             title={`Look up "${sourceSelection}" in the term base`}
           >
@@ -1439,7 +1456,7 @@ function SelectionTermActions({
       {onAddToTermbase && (
         <button
           type="button"
-          onMouseDown={(e) => e.preventDefault()}
+          onMouseDown={handleButtonMouseDown}
           onClick={onAddToTermbase}
           className="inline-flex items-center gap-1 rounded-md bg-primary px-2 py-1 text-[11px] font-medium text-primary-foreground shadow-neu-sm hover:bg-primary/90"
           title={`Add "${sourceSelection}" to the termbase as a draft concept`}
@@ -1599,6 +1616,15 @@ function EditorRow({
   // Add-from-selection (Slice 5): the source-side text the user has selected,
   // surfaced as an "Add to termbase" affordance. Null when nothing selected.
   const [sourceSelection, setSourceSelection] = useState<string | null>(null)
+  // FRO-260: ref mirror of sourceSelection so onClick handlers can read the
+  // captured text even if a selectionchange event already cleared the React
+  // state (the mousedown-before-click race that collapses the browser selection
+  // before the click callback fires).
+  const capturedSelectionRef = useRef<string | null>(null)
+  // FRO-260: set to true while the user is pressing down on a SelectionTermActions
+  // toolbar button, so the FRO-248 selectionchange guard doesn't clear
+  // sourceSelection before onClick fires.
+  const toolbarMouseDownRef = useRef(false)
   // Controls the confirm dialog shown before creating the draft concept.
   const [showAddConceptDialog, setShowAddConceptDialog] = useState(false)
   const pendingTargetEventIdRef = useRef<string | null>(cell.targetEventId ?? null)
@@ -1750,18 +1776,30 @@ function EditorRow({
     if (!onAddConceptFromSelection) return
     const sel = window.getSelection()
     const text = sel && !sel.isCollapsed ? sel.toString().trim() : ""
-    setSourceSelection(text.length > 0 ? text : null)
+    const captured = text.length > 0 ? text : null
+    // FRO-260: keep the ref in sync with state so onClick handlers can read
+    // the captured text even after the selectionchange race clears the state.
+    capturedSelectionRef.current = captured
+    setSourceSelection(captured)
   }, [onAddConceptFromSelection])
 
   // Opens the confirm dialog — actual creation happens in handleAddConceptConfirm.
+  // FRO-260: read from capturedSelectionRef (not sourceSelection state) so the
+  // dialog opens even when the selectionchange event already cleared the state
+  // before this onClick fires (the mousedown-blur race).
   const handleAddSelectionToTermbase = useCallback(() => {
-    if (!sourceSelection) return
+    const text = capturedSelectionRef.current
+    if (!text) return
+    // Re-sync state so AddConceptDialog receives the correct pre-fill term even
+    // if the selectionchange handler cleared it between mousedown and click.
+    setSourceSelection(text)
     setShowAddConceptDialog(true)
-  }, [sourceSelection])
+  }, [])
 
   const handleAddConceptConfirm = useCallback(async (term: string) => {
     await onAddConceptFromSelection?.(term)
     setShowAddConceptDialog(false)
+    capturedSelectionRef.current = null
     setSourceSelection(null)
     window.getSelection()?.removeAllRanges()
   }, [onAddConceptFromSelection])
@@ -1770,12 +1808,28 @@ function EditorRow({
     setShowAddConceptDialog(false)
   }, [])
 
+  // FRO-260: toolbar mouse-down/up guards used by the selectionchange handler.
+  // Set when the user presses down on a SelectionTermActions button so the
+  // FRO-248 selectionchange guard knows not to clear sourceSelection before the
+  // click callback fires. Cleared on mouseup or mouseleave.
+  const handleToolbarMouseDown = useCallback(() => {
+    toolbarMouseDownRef.current = true
+  }, [])
+  const handleToolbarMouseUp = useCallback(() => {
+    toolbarMouseDownRef.current = false
+  }, [])
+
   // FRO-248: clear source selection when the browser selection collapses (user
   // clicked elsewhere or selected text in a different row). This prevents the
   // "Add to termbase" toolbar from floating over a different row's content.
+  // FRO-260: guard — do NOT clear when the user is pressing down on a toolbar
+  // button (toolbarMouseDownRef=true). The selectionchange fires before onClick
+  // in the mousedown-click sequence; clearing here would make onClick see null.
   useEffect(() => {
     if (!sourceSelection) return
     const handleSelectionChange = () => {
+      // Suppress if the user is mid-click on the SelectionTermActions toolbar.
+      if (toolbarMouseDownRef.current) return
       const sel = window.getSelection()
       if (!sel || sel.isCollapsed || sel.toString().trim() === "") {
         setSourceSelection(null)
@@ -2237,6 +2291,7 @@ function EditorRow({
     setHasFocusWithin(false)
     // FRO-248: clear source-text selection when focus leaves this row so the
     // "Add to termbase" toolbar never floats over a different row's content.
+    capturedSelectionRef.current = null
     setSourceSelection(null)
   }
   const handleRowClick = (e: React.MouseEvent) => {
@@ -2480,6 +2535,8 @@ function EditorRow({
                 concepts={project.terminology ?? []}
                 onAddToTermbase={onAddConceptFromSelection ? handleAddSelectionToTermbase : undefined}
                 onTermApply={handleTermApply}
+                onToolbarMouseDown={handleToolbarMouseDown}
+                onToolbarMouseUp={handleToolbarMouseUp}
               />
             )}
             <div className="mb-1 flex items-center gap-1 text-xs text-muted-foreground" dir="ltr">

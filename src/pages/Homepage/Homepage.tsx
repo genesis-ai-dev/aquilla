@@ -184,10 +184,12 @@ export function Homepage() {
               { i: <IconText2 />, t: "Text" },
               { i: <IconWave2 />, t: "Audio" },
               { i: <IconFilm2 />, t: "Video" },
-              { i: <IconPic2 />, t: "Images" },
-              { i: <IconBook2 />, t: "Oral stories" },
+              { i: <IconPic2 />, t: "Images", soon: true },
+              { i: <IconBook2 />, t: "Oral stories", soon: true },
             ].map((m) => (
-              <span className="aq-modal-tag" key={m.t}>{m.i}{m.t}</span>
+              <span className="aq-modal-tag" key={m.t} title={m.soon ? "Coming soon" : undefined} style={m.soon ? { opacity: 0.55 } : undefined}>
+                {m.i}{m.t}{m.soon ? <span style={{ fontSize: "10px", marginLeft: 4, opacity: 0.7, verticalAlign: "super" }}>soon</span> : null}
+              </span>
             ))}
           </div>
         </section>

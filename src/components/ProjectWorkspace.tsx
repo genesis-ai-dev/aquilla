@@ -74,6 +74,8 @@ import { Film, Scale, MessagesSquare, Share2, Settings as SettingsIcon, Lock, Cl
 import { ChatPanel } from "./ChatPanel"
 import { useChat } from "@/hooks/useChat"
 import { TranslationNotesSidebar, readTnSidebarVisible, writeTnSidebarVisible } from "./TranslationNotesSidebar"
+import { InactiveProjectBanner } from "./InactiveProjectBanner"
+import { useProjectLifecycle } from "@/hooks/useProjectLifecycle"
 import { cn } from "@/lib/utils"
 import { restoreProject } from "@/lib/store/project-index"
 import { AppShell } from "./AppShell"
@@ -484,6 +486,9 @@ export function ProjectWorkspace() {
   useEffect(() => {
     jwtRef.current = frontierSession?.jwt ?? null
   }, [frontierSession?.jwt])
+
+  // FRO-214 (orchestrator glue): frozen-project state for the workspace banner.
+  const { isFrozen, toggle: toggleLifecycle, busy: lifecycleBusy } = useProjectLifecycle(projectId ?? "", project, () => refresh())
 
   const getTokenForFile = useMemo(() => {
     if (!project?.id) {
@@ -943,6 +948,17 @@ export function ProjectWorkspace() {
     for (const [, fc] of fileCells) all.push(...fc)
     return all
   }, [fileCells])
+
+  // FRO-191 (orchestrator glue): existing-cell refs for the eBible "into target
+  // column" import mode. CellData.group carries the canonical ref.
+  const importSourceCells = useMemo(() => allProjectCells.map((c) => ({
+    cellId: c.id,
+    fileId: c.fileId,
+    targetEventId: c.targetEventId,
+    sourceEventId: c.sourceEventId,
+    translated: c.translated ?? "",
+    canonicalRef: c.group,
+  })), [allProjectCells])
 
   const { search, searchPassages } = useSearchIndex(project?.files || [], allProjectCells)
 
@@ -2658,6 +2674,16 @@ export function ProjectWorkspace() {
                 onCustomize={() => setChecklistOpen(true)}
               />
             )}
+            {/* FRO-214 (orchestrator glue): frozen-project banner — surfaces the
+                reactivate affordance instead of letting edits through. */}
+            {isFrozen && project && (
+              <InactiveProjectBanner
+                projectName={project.name}
+                canReactivate={(project.syncRole?.level ?? 0) >= 500}
+                busy={lifecycleBusy}
+                onReactivate={() => { const j = jwtRef.current; if (j) void toggleLifecycle(j) }}
+              />
+            )}
             {/* FRO-235: AI completion progress + stop control */}
             <div className="px-3 py-1 empty:hidden">
               <CompletionBulkProgressBanner />
@@ -3032,6 +3058,7 @@ export function ProjectWorkspace() {
           getToken={getTokenForFile}
           sourceLanguage={project.sourceLanguage} targetLanguage={project.targetLanguage}
           onImported={handleImported}
+          sourceCells={importSourceCells}
           ttsSettings={tts.settings}
           onCastUpdated={(patch) => tts.saveTts(patch)} />
       </Suspense>

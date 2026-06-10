@@ -50,6 +50,7 @@ export { FileSync } from "./file-sync-legacy"
 import { makePostgres } from "../../db/shim/postgres"
 
 declare global {
+  // eslint-disable-next-line @typescript-eslint/no-namespace -- Cloudflare namespace augmentation requires this syntax
   namespace Cloudflare {
     interface Env {
       /**

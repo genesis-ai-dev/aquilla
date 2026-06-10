@@ -263,7 +263,7 @@ export function branchingSearch(
   // Outer loop: seed → drain → maybe restart.
   // Loop guard: results.length < topK AND restartsLeft >= 0 at entry.
   while (results.length < settings.topK) {
-    let branches: string[][] = [queryTokens.slice()]
+    const branches: string[][] = [queryTokens.slice()]
 
     while (results.length < settings.topK && branches.length > 0) {
       let bestScore = 0

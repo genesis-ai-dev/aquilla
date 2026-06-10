@@ -101,6 +101,7 @@ function readTag(xml: string, tag: string): string {
 /** Strong RTL Unicode ranges: Hebrew, Arabic, Syriac, Thaana, NKo, Samaritan,
  *  Arabic Supplement/Extended, Arabic Presentation Forms. */
 const RTL_CHAR_RE =
+  // eslint-disable-next-line no-irregular-whitespace -- literal Unicode range endpoints for RTL script detection; U+FEFF (BOM) is the upper bound of Arabic Presentation Forms
   /[֐-׿؀-ۿ܀-ݏݐ-ݿހ-޿߀-߿ࠀ-࠿ࢠ-ࣿיִ-﷿ﹰ-﻿]/
 
 /** Heuristic: does this text lean right-to-left? True when >20% of the first

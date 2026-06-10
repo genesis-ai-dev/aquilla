@@ -19,6 +19,7 @@ import {
 // Count line-start `\v N` occurrences — the "ground truth" verse count.
 // Same line-start anchoring as the parser, so it tolerates BOM and CRLF.
 function countVerseLines(raw: string): number {
+  // eslint-disable-next-line no-irregular-whitespace -- intentional BOM (U+FEFF) to optionally match USFM files that start with a byte-order mark
   const RE = /(?:^﻿?|\n)\\v[ \t]+\S+/g
   let n = 0
   while (RE.exec(raw) !== null) n++

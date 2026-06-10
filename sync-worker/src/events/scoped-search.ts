@@ -99,7 +99,7 @@ export function sanitizeFtsQuery(raw: string): string | null {
   // Drop FTS5 syntax punctuation: quotes, parens, colons, asterisks, pluses,
   // minuses. Keep letters, digits, whitespace, and dashes-internal-to-words
   // (we collapse runs of non-word into a single space below).
-  const cleaned = raw.replace(/["()*:+\-]/g, " ")
+  const cleaned = raw.replace(/["()*:+-]/g, " ")
   // Split into bare tokens; reject the FTS reserved keywords case-insensitively
   // by lowercasing the comparison.
   const RESERVED = new Set(["and", "or", "not", "near"])
@@ -128,7 +128,7 @@ export function sanitizeFtsQuery(raw: string): string | null {
  * "no results".
  */
 export function sanitizeFtsExactPhrase(raw: string): string | null {
-  const cleaned = raw.replace(/["()*:+\-]/g, " ")
+  const cleaned = raw.replace(/["()*:+-]/g, " ")
   const RESERVED = new Set(["and", "or", "not", "near"])
   const tokens = cleaned
     .split(/\s+/)

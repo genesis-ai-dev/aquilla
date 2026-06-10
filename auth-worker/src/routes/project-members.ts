@@ -18,7 +18,6 @@
 //     { removed: false, grantPaths: [...] } (not an error).
 
 import { Hono } from "hono"
-import { zValidator } from "@hono/zod-validator"
 import { z } from "zod"
 import { authMiddleware, type AuthHonoEnv } from "../middleware/auth"
 import { ROLE } from "../types"

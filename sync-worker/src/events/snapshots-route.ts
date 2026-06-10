@@ -195,7 +195,7 @@ export async function handleSnapshotsRequest(
     const now = Date.now()
     let restored = 0
     let skippedIdentical = 0
-    let skippedConcurrent = 0
+    const skippedConcurrent = 0
 
     // Emit one target.cell.commit per cell that differs from current value.
     // We INSERT into events + update cells in a single batch per chunk.

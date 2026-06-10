@@ -15,6 +15,7 @@ import { FixReviewPanel } from "./FixReviewPanel"
 import type { FixProposal } from "@/lib/rules/autofix"
 import { ROLE } from "@/lib/sync/role-policy"
 import type { ProjectRecord, RuleAutofix, TranslationRule } from "@/lib/parsers/types"
+import { checkRulesForCell } from "@/lib/rules/rule-engine"
 
 export function RulesPage() {
   const { id } = useParams<{ id: string }>()
@@ -100,6 +101,28 @@ export function RulesPage() {
     setHarmonizeProposal(null)
   }
 
+  // FRO-186: derive per-cell infractions for builtin checks over the project
+  // scope (all validated cells from useLivingMemory, up to MAX_FILES=40 files).
+  // Scope rationale: FixReviewPanel's multi-cell harmonize sweep targets the
+  // whole project, so infraction counts must be project-wide.
+  // Performance: O(cells × builtinRules). builtinRules is ≤9; validatedCells
+  // is bounded to the first 40 files. checkRulesForCell is pure and fast
+  // (regex cache prevents recompilation). The memo only re-runs when cells or
+  // rules change — not on every render.
+  const enabledBuiltinRules = useMemo(
+    () => builtinRules.filter((r) => r.enabled),
+    [builtinRules],
+  )
+  const builtinInfractions = useMemo(() => {
+    const out = new Map<string, import("@/lib/parsers/types").RuleInfraction[]>()
+    if (enabledBuiltinRules.length === 0 || validatedCells.length === 0) return out
+    for (const cell of validatedCells) {
+      const cellInf = checkRulesForCell(cell, cell.fileId, enabledBuiltinRules)
+      if (cellInf.length > 0) out.set(cell.id, cellInf)
+    }
+    return out
+  }, [validatedCells, enabledBuiltinRules])
+
   const usageSummary = useMemo(() => {
     const u = project?.usage
     if (!u) return null
@@ -161,10 +184,9 @@ export function RulesPage() {
           <p className="text-xs text-muted-foreground" title="LLM usage on this project">{usageSummary}</p>
         )}
 
-        {/* TODO(lqa-plan-b): wire real infractions when worker dispatch lands. */}
         <BuiltinChecksList
           builtinRules={builtinRules}
-          infractions={new Map()}
+          infractions={builtinInfractions}
           onSetOverride={setBuiltinOverride}
           onHarmonize={handleHarmonize}
           canHarmonize={userCanHarmonize}

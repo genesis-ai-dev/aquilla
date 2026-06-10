@@ -57,9 +57,7 @@
 | Rules       | Rule editor autofix preview shows before/after        | `e2e/specs/rules/rule-editor-autofix-preview.smoke.spec.ts`   |   ✅   |
 | Projects    | Status chip shows Overdue/Due-soon by deadline        | `e2e/specs/projects/project-status-chip.smoke.spec.ts`        |   ✅   |
 | Projects    | Living memory back navigation                         | `e2e/specs/projects/living-memory-back-nav.smoke.spec.ts`     |   ✅   |
-| Orgs        | Members matrix sole-owner concentration risk          | `e2e/specs/orgs/members-matrix-sole-owner.smoke.spec.ts`      |   ✅   |
-| Orgs        | MembersPage Roster/Matrix view toggle switches views  | `e2e/specs/projects/members-matrix.smoke.spec.ts`             |   ✅   |
-| Orgs        | Members matrix access-help tooltip                    | `e2e/specs/orgs/members-matrix-access-help.smoke.spec.ts`     |   ✅   |
+| Orgs        | Members page roster with expandable project access    | `e2e/specs/projects/members-matrix.smoke.spec.ts`             |   ✅   |
 | Orgs        | Team detail access-level help indicator               | `e2e/specs/orgs/team-detail-access-level-help.smoke.spec.ts`  |   ✅   |
 | Collab      | BT edit locked for reviewer role                      | `e2e/specs/collab/bt-edit-locked-for-reviewer.smoke.spec.ts`  |   ✅   |
 | Orgs        | Pending invite targeted-email chip vs open-link badge | `e2e/specs/orgs/pending-invite-targeted-chip.smoke.spec.ts`   |   ✅   |
@@ -68,7 +66,6 @@
 | Projects    | Cross-project termbase subscribe and unsubscribe      | `e2e/specs/projects/termbase-subscribe-unsubscribe.smoke.spec.ts` | ✅ |
 | Editor      | Video attachment Remove attachment clears saved URL   | `e2e/specs/editor/video-attachment-remove.smoke.spec.ts`          |   ✅   |
 | Projects    | Living memory Recent Examples ValidatedCellCard       | `e2e/specs/projects/living-memory-validated-cell-card.smoke.spec.ts` | ✅ |
-| Orgs        | Members matrix org-wide badge for inherited access    | `e2e/specs/orgs/members-matrix-org-wide-badge.smoke.spec.ts`      |   ✅   |
 | Editor      | Delete file confirm dialog requires checkbox          | `e2e/specs/editor/delete-file-confirm-dialog.smoke.spec.ts`       |   ✅   |
 | Editor      | RTL detection hint shows and can be dismissed         | `e2e/specs/editor/rtl-hint-dismiss.smoke.spec.ts`                 |   ✅   |
 | Projects    | Project settings discard-changes dialog (Keep editing / Discard) | `e2e/specs/projects/project-settings-discard-unsaved.smoke.spec.ts` | ✅ |
@@ -127,14 +124,10 @@
 | Projects    | Multi-project invite submit from share panel          | `e2e/specs/projects/multi-project-invite-submit.smoke.spec.ts` |   ✅   |
 | Orgs        | Org rename from org switcher                          | `e2e/specs/orgs/org-switcher-rename.smoke.spec.ts` + `org-rename.smoke.spec.ts` | ✅ |
 | Orgs        | Org settings page renders and shows rename            | `e2e/specs/orgs/org-settings.smoke.spec.ts` + `org-settings-rename.smoke.spec.ts` | ✅ |
-| Orgs        | Members matrix drill-down row per member              | `e2e/specs/orgs/members-matrix-drill-down.smoke.spec.ts`      |   ✅   |
-| Orgs        | Members matrix add role via cell editor               | `e2e/specs/orgs/members-matrix-add-role.smoke.spec.ts`        |   ✅   |
-| Orgs        | Members matrix remove role via cell editor            | `e2e/specs/orgs/members-matrix-remove-role.smoke.spec.ts`     |   ✅   |
 | Orgs        | Member access panel expand shows per-project access   | `e2e/specs/orgs/member-access-panel-expand.smoke.spec.ts`     |   ✅   |
 | Orgs        | Assigned to me page shows inbox                       | `e2e/specs/orgs/assigned-to-me-page.smoke.spec.ts` + `assigned.smoke.spec.ts` | ✅ |
 | Orgs        | Preferences page analytics toggle                     | `e2e/specs/orgs/preferences-analytics-toggle.smoke.spec.ts` + `preferences-analytics-disabled-warning.smoke.spec.ts` | ✅ |
 | Orgs        | Preferences AI provider expand/save/clear             | `e2e/specs/orgs/preferences-ai-provider.smoke.spec.ts` + `preferences-ai-provider-expand.smoke.spec.ts` + `preferences-ai-provider-save.smoke.spec.ts` | ✅ |
-| Orgs        | Access model legend dialog opens                      | `e2e/specs/orgs/access-model-legend.smoke.spec.ts`            |   ✅   |
 | Orgs        | Team create, rename, edit description                 | `e2e/specs/orgs/teams.smoke.spec.ts` + `team-rename.smoke.spec.ts` + `team-edit-description.smoke.spec.ts` | ✅ |
 | Orgs        | Team add/remove member, change role                   | `e2e/specs/orgs/team-add-member.smoke.spec.ts` + `team-remove-member.smoke.spec.ts` + `team-member-role-change.smoke.spec.ts` | ✅ |
 | Orgs        | Team attach/detach project                            | `e2e/specs/orgs/team-attach-project.smoke.spec.ts` + `team-detach-project.smoke.spec.ts` | ✅ |

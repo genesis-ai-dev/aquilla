@@ -80,3 +80,23 @@ Both features shipped to spec for v1-core. These tails were deliberately deferre
 - [OPEN] (fro178-morph-surfacing) Macula import populates cell_word_morph (migration 0032) and imports as a normal source file, but no editor surface renders morphology yet. Follow-up UI: per-word morph popover/interlinear. — src/lib/parsers/macula.ts, sync-worker/src/events/import-morph-route.ts.
 - [OPEN] (fro175-chat-tails) Chat panel: cross-session persistence (needs table/IDB) + markdown rendering in bubbles deliberately deferred. — src/components/ChatPanel.tsx, src/hooks/useChat.ts.
 - [HITL] (fro215-homepage-flags) 4 marketing-claim judgment calls for the user in docs/swarm/HOMEPAGE-AUDIT-215.md (stats attribution, partner-band consent, JESUS Film trademark, "system learns" claim). RESOLVED 2026-06-09: the audit's 5th flag ("BT not delivered") was a FALSE NEGATIVE from a stale claims audit — wave-1 UI-QA verified BT live (statistical gloss + optional LLM polish); audit doc corrected.
+
+---
+
+## PD6 wave (2026-06-10) — FRO-262/263/264 [re-append; first append was clobbered by concurrent session]
+
+Orchestration: docs/swarm/PD6-ORCHESTRATION.md. Base main@cfd4470 → promoted main@9628782 (--no-ff).
+- [DONE] FRO-262 tour copy + org-switcher step (743c78e) — UI-QA PASS.
+- [DONE] FRO-263 hero subtitle centering + .aq-blitz-verse same-reset fix (de03d11) — UI-QA PASS.
+- [DONE] FRO-264 team edit button/no-wipe rename/project links (a25de34) + server description in
+  getOrgGroupDetail (db0a005) — UI-QA PARTIAL: description-prefill not live-verified (user's own
+  dev stack held :8788, browser hit old server — which DID verify the defensive no-wipe path);
+  server half covered by groups-read.test.ts. Sub-600 gating not live-verified (pre-existing gate,
+  restyle-only change). Follow-up QA: re-check prefill once deployed.
+- [DONE] Orchestrator fix 7cdb650: rls-backstop.test.ts TS7022 (UXA FRO-289 file) broke
+  `cd auth-worker && tsc --noEmit` on main — 3-line annotation.
+- [OPEN] (pd6-syncworker-tsc-debt) `cd sync-worker && npx tsc --noEmit` is RED on main with ~60
+  errors in TEST files only (CellRow/EventRow/CellsFtsRow not assignable to Record<string,unknown>
+  in pg-test-db helper signatures; node:fs resolution in pg-test-db.ts). Pre-existing (last touch
+  4728e9c D1-redact); runtime tests green 552/552. Nobody's gate runs sync-worker tsc. Needs its
+  own pass — helper signature loosening + tsconfig types entry.

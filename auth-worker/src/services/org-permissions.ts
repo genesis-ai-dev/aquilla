@@ -632,6 +632,7 @@ export async function listOrgGroups(
 export interface OrgGroupDetail {
   id: number
   name: string
+  description: string | null
   members: Array<{ userId: number; username: string; roleLevel: number | null }>
   projects: Array<{ id: string; name: string; grantedRoleLevel: number }>
 }
@@ -643,10 +644,10 @@ export async function getOrgGroupDetail(
   groupId: number,
 ): Promise<OrgGroupDetail | null> {
   const group = await env.AQUILLA_PG.prepare(
-    "SELECT id, name FROM groups WHERE id = ? AND org_id = ?",
+    "SELECT id, name, description FROM groups WHERE id = ? AND org_id = ?",
   )
     .bind(groupId, orgId)
-    .first<{ id: number; name: string }>()
+    .first<{ id: number; name: string; description: string | null }>()
   if (!group) return null
 
   const members = await env.AQUILLA_PG.prepare(
@@ -673,6 +674,7 @@ export async function getOrgGroupDetail(
   return {
     id: group.id,
     name: group.name,
+    description: group.description ?? null,
     members: (members.results ?? []).map((m) => ({ userId: m.user_id, username: m.username, roleLevel: m.role_level })),
     projects: (projects.results ?? []).map((p) => ({ id: p.id, name: p.name, grantedRoleLevel: p.granted })),
   }

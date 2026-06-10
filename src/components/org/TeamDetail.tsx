@@ -3,6 +3,7 @@ import { useNavigate, useParams } from "react-router-dom"
 import { AppShell } from "@/components/AppShell"
 import { OrgSidebar } from "./OrgSidebar"
 import { OrgBreadcrumb } from "./OrgBreadcrumb"
+import { Button } from "@/components/ui/button"
 import { useActiveOrg } from "@/context/OrgContext"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import {
@@ -113,7 +114,15 @@ export function TeamDetail() {
 
   async function handleSave() {
     if (!jwt || activeOrgId == null || groupIdNum == null) return
-    await updateTeam(jwt, activeOrgId, groupIdNum, { name: editName, description: editDescription })
+    // Defensive: only include description in the PATCH payload if the server already
+    // returned one (team.description !== undefined) OR the user explicitly typed a
+    // non-empty value. This prevents a name-only rename silently wiping the description
+    // on older server builds that don't yet return description in the detail payload.
+    const patch: { name: string; description?: string } = { name: editName }
+    if (team?.description !== undefined || editDescription !== "") {
+      patch.description = editDescription
+    }
+    await updateTeam(jwt, activeOrgId, groupIdNum, patch)
     setEditing(false)
     await refetch()
   }
@@ -167,7 +176,7 @@ export function TeamDetail() {
 
   function handleEditOpen() {
     setEditName(team?.name ?? "")
-    setEditDescription("")
+    setEditDescription(team?.description ?? "")
     setEditing(true)
   }
 
@@ -190,20 +199,22 @@ export function TeamDetail() {
                   <h1 className="text-lg font-semibold">{team.name}</h1>
                   {isAdmin && !editing && (
                     <>
-                      <button
+                      <Button
                         type="button"
-                        className="text-xs text-muted-foreground underline"
+                        variant="outline"
+                        size="sm"
                         onClick={handleEditOpen}
                       >
                         Edit
-                      </button>
-                      <button
+                      </Button>
+                      <Button
                         type="button"
-                        className="text-xs text-destructive underline"
+                        variant="destructive"
+                        size="sm"
                         onClick={() => setConfirmDelete(true)}
                       >
                         Delete team
-                      </button>
+                      </Button>
                     </>
                   )}
                 </div>
@@ -446,7 +457,13 @@ export function TeamDetail() {
                 <ul className="space-y-2">
                   {(team?.projects ?? []).map((p) => (
                     <li key={p.id} className="flex items-center justify-between rounded-lg border px-4 py-2 text-sm">
-                      <span className="font-medium">{p.name}</span>
+                      <button
+                        type="button"
+                        className="font-medium text-left hover:underline"
+                        onClick={() => navigate(`/projects/${p.id}`)}
+                      >
+                        {p.name}
+                      </button>
                       <div className="flex items-center gap-2">
                         {isAdmin ? (
                           <>

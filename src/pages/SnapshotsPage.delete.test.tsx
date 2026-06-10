@@ -110,8 +110,10 @@ describe("SnapshotsPage snapshot delete confirm (FRO-291)", () => {
 
     fireEvent.click(screen.getByTitle("Delete snapshot"))
 
-    await waitFor(() => expect(screen.getByText(/Delete snapshot/i)).toBeInTheDocument())
-    expect(screen.getByText(/everyone in the project/i)).toBeInTheDocument()
+    await waitFor(() =>
+      expect(screen.getByRole("heading", { name: /Delete snapshot/i })).toBeInTheDocument()
+    )
+    expect(screen.getAllByText(/everyone in the project/i).length).toBeGreaterThan(0)
   })
 
   it("cancel leaves remove uncalled", async () => {

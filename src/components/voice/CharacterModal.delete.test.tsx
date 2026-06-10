@@ -19,7 +19,7 @@ vi.mock("@/lib/audio/tts", () => ({
 vi.mock("@/lib/audio/tts-providers", () => ({
   normalizeVoiceForProvider: vi.fn((v: Voice) => v),
   defaultVoiceNameForProvider: vi.fn(() => "en-US-Standard-A"),
-  TTS_PROVIDER_INFOS: {},
+  TTS_PROVIDER_INFOS: [],
 }))
 vi.mock("@/lib/audio/gemini-tts", () => ({
   GEMINI_TTS_VOICES: [],
@@ -110,9 +110,9 @@ describe("CharacterModal delete confirm (FRO-291)", () => {
     fireEvent.click(screen.getByRole("button", { name: /^Delete$/i }))
 
     await waitFor(() => {
-      expect(screen.getByText(/Delete character/i)).toBeInTheDocument()
+      expect(screen.getByRole("heading", { name: /Delete character/i })).toBeInTheDocument()
     })
-    expect(screen.getByText(/everyone in the project/i)).toBeInTheDocument()
+    expect(screen.getAllByText(/everyone in the project/i).length).toBeGreaterThan(0)
   })
 
   it("cancel leaves onDelete uncalled and closes dialog", async () => {
@@ -132,7 +132,9 @@ describe("CharacterModal delete confirm (FRO-291)", () => {
     renderModal({ onDelete: onDeleteMock })
 
     fireEvent.click(screen.getByRole("button", { name: /^Delete$/i }))
-    await waitFor(() => expect(screen.getByText(/Delete character/i)).toBeInTheDocument())
+    await waitFor(() =>
+      expect(screen.getByRole("heading", { name: /Delete character/i })).toBeInTheDocument()
+    )
 
     // Confirm button is disabled before checkbox
     const confirmBtn = screen.getByRole("button", { name: /^Delete character$/i })

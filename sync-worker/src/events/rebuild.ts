@@ -201,7 +201,36 @@ export async function handleRebuildProjectionRequest(
     .bind(Date.now(), projectId)
     .run()
 
-  // 5. Counts.
+  // 5. Mark the rebuild for warm delta clients (audit B5). A rebuild changes
+  //    projection rows without minting events, so MAX(server_seq) — the
+  //    GET /cells delta + ETag watermark — does not move and every warm
+  //    client's `?since=` would return an empty delta (and If-None-Match
+  //    would 304) forever, pinning pre-rebuild values in the client's
+  //    persistent IDB cache. Allocate one seq through the same per-project
+  //    counter the live path uses (event-insert.ts; same seeding, same
+  //    GREATEST self-heal) and record it as rebuilt_seq: the read route
+  //    resyncs any cursor below it and folds it into the ETag.
+  //
+  //    Allocating — rather than copying last_seq — makes the marker STRICTLY
+  //    greater than every cursor a client could hold pre-rebuild, so even a
+  //    fully caught-up client (since == MAX(server_seq) == last_seq) trips
+  //    the `since < rebuilt_seq` resync. The consumed seq is a harmless gap,
+  //    exactly like an idempotent replay's.
+  const rebuiltSeqRaw = await db
+    .prepare(
+      `INSERT INTO project_seq_counters (project_id, last_seq, rebuilt_seq)
+       SELECT ?, seed.next_seq, seed.next_seq
+       FROM (SELECT COALESCE((SELECT MAX(server_seq) FROM events WHERE project_id = ?), 0) + 1 AS next_seq) seed
+       ON CONFLICT (project_id) DO UPDATE SET
+         last_seq    = GREATEST(project_seq_counters.last_seq + 1, excluded.last_seq),
+         rebuilt_seq = GREATEST(project_seq_counters.last_seq + 1, excluded.last_seq)
+       RETURNING last_seq`,
+    )
+    .bind(projectId, projectId)
+    .first<number | string | bigint>('last_seq')
+  const rebuiltSeq = Number(rebuiltSeqRaw ?? 0)
+
+  // 6. Counts.
   const [cellsResult, validatorsResult] = await Promise.all([
     db
       .prepare('SELECT COUNT(*) as cnt FROM cells WHERE project_id = ?')
@@ -222,6 +251,7 @@ export async function handleRebuildProjectionRequest(
     statementsApplied,
     cellsAfter: cellsResult?.cnt ?? 0,
     validatorsAfter: validatorsResult?.cnt ?? 0,
+    rebuiltSeq,
     startedAt,
     completedAt,
     note: 'Rebuild is not atomic; if the worker died mid-rebuild, projection rows may be incomplete. Re-run this endpoint to recover.',

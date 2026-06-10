@@ -28,7 +28,7 @@ import type { FileReference } from "@/lib/parsers/types"
 import { fileOrderedBy } from "@/lib/parsers/types"
 import type { CellData } from "@/hooks/useCells"
 import { useWorkspaceSearch } from "@/hooks/useWorkspaceSearch"
-import { ParallelPassagesPanel, type ParallelPanelMode, type ParallelPanelScope } from "./ParallelPassagesPanel"
+import { ParallelPassagesPanel, type ParallelPanelMode, type ParallelPanelScope, type ReplaceAllPayload } from "./ParallelPassagesPanel"
 import type { EditorTableHandle } from "./EditorTable"
 import type { WorkspaceSearchResult } from "@/hooks/useWorkspaceSearch"
 import { StatusBar } from "./StatusBar"
@@ -70,7 +70,7 @@ import { flushOutboxBatch } from "@/lib/sync/outbox-flush"
 import { runDiarization, type DiarizationPhase } from "@/lib/diarization/run-diarization"
 import { useCellsAuditStatsWithOverlay } from "@/hooks/useCellsAuditStatsWithOverlay"
 import { useComments } from "@/hooks/useComments"
-import { Film, Scale, MessagesSquare, Share2, Settings as SettingsIcon, Lock, ClipboardList, Trash2, Undo2, Search as SearchIcon, Sparkles, Mic2, Download, BookMarked, BookOpen, Users, MessageSquare } from "lucide-react"
+import { Film, Scale, MessagesSquare, Share2, Settings as SettingsIcon, Lock, ClipboardList, Trash2, Undo2, Search as SearchIcon, Sparkles, Mic2, Download, BookMarked, BookOpen, Users, MessageSquare, Camera } from "lucide-react"
 import { ChatPanel } from "./ChatPanel"
 import { useChat } from "@/hooks/useChat"
 import { cn } from "@/lib/utils"
@@ -147,6 +147,10 @@ const TerminologyPageContent = lazy(() =>
 // FRO-180: per-project members management surface.
 const ProjectMembersPageContent = lazy(() =>
   import("./ProjectMembersPage").then((mod) => ({ default: mod.ProjectMembersPage })),
+)
+// FRO-176: named snapshots surface (inside the shell per FRO-254).
+const SnapshotsPageContent = lazy(() =>
+  import("@/pages/SnapshotsPage").then((mod) => ({ default: mod.SnapshotsPage })),
 )
 
 // FRO-249 fix (Fix 2): module-level promise chain that serializes
@@ -333,7 +337,8 @@ export function ProjectWorkspace() {
       location.pathname.endsWith("/comments") ||
       location.pathname.endsWith("/memory") ||
       location.pathname.endsWith("/terminology") ||
-      location.pathname.endsWith("/members")
+      location.pathname.endsWith("/members") ||
+      location.pathname.endsWith("/snapshots")
     ) return
 
     // A file is already in the URL: leave it unless the project genuinely
@@ -393,12 +398,13 @@ export function ProjectWorkspace() {
   // shell (sidebar + top bar + bottom status bar) never unmounts.
   // FRO-194 added "rules"; FRO-254 adds "comments", "memory", "terminology";
   // FRO-180 adds "members".
-  const centerSurface: "editor" | "rules" | "comments" | "memory" | "terminology" | "members" =
+  const centerSurface: "editor" | "rules" | "comments" | "memory" | "terminology" | "members" | "snapshots" =
     location.pathname.endsWith("/rules") ? "rules" :
     location.pathname.endsWith("/comments") ? "comments" :
     location.pathname.endsWith("/memory") ? "memory" :
     location.pathname.endsWith("/terminology") ? "terminology" :
     location.pathname.endsWith("/members") ? "members" :
+    location.pathname.endsWith("/snapshots") ? "snapshots" :
     "editor"
 
   useEffect(() => {
@@ -1898,6 +1904,41 @@ export function ProjectWorkspace() {
     setSuggestionsDismissed(false)
   }, [])
 
+  // FRO-177 (orchestrator glue): apply Replace-mode diffs through the standard
+  // target-commit path — optimistic patch first for visible rows (write-clock
+  // keeps own writes authoritative), then one outbox flush for the batch.
+  const handleReplaceAll = useCallback(async (payload: ReplaceAllPayload) => {
+    if (!project?.id || isReadOnly) return
+    const byId = new Map(allProjectCells.map((c) => [c.id, c]))
+    const touched: string[] = []
+    for (const diff of payload.diffs) {
+      const cell = byId.get(diff.cellId)
+      if (!cell) continue
+      if (cell.fileId === activeFileId) applyOptimisticTargetEdit(cell.id, { value: diff.after })
+      await emitTargetCellCommit({
+        projectId: project.id,
+        fileId: cell.fileId,
+        cellId: cell.id,
+        parentId: cell.targetEventId ?? cell.sourceEventId ?? null,
+        sourceEventId: cell.sourceEventId ?? null,
+        value: diff.after,
+        author: currentUsername,
+        retainValidations: payload.retainValidations,
+        searchQuery: payload.findQuery,
+        replaceString: payload.replaceQuery,
+      })
+      touched.push(cell.id)
+    }
+    if (touched.length === 0) return
+    await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
+    await refreshOutboxPending()
+    revalidateAuditStats()
+    for (const id of touched) {
+      if (byId.get(id)?.fileId === activeFileId) revalidateCell(id)
+    }
+    rebuildSearchIndex()
+  }, [project?.id, isReadOnly, allProjectCells, activeFileId, applyOptimisticTargetEdit, currentUsername, getTokenForProjectFile, refreshOutboxPending, revalidateAuditStats, revalidateCell, rebuildSearchIndex])
+
   const projectNavItems = useMemo(() => {
     const items = [
       { id: "rules", label: "Rules", icon: Scale,
@@ -1909,6 +1950,8 @@ export function ProjectWorkspace() {
         onClick: () => navigate(`/project/${projectId}/comments`) },
       { id: "living-memory", label: "Memory", icon: BookMarked,
         onClick: () => navigate(`/project/${projectId}/memory`) },
+      { id: "snapshots", label: "Snapshots", icon: Camera,
+        onClick: () => navigate(`/project/${projectId}/snapshots`) },
       // SWARM-TODO(voice-a7): "Voice" nav button toggles the Audio/Text lens
       // (current intentional behavior, fixed in a prior wave to avoid the
       // one-way-trap). QA now reports this is AMBIGUOUS: users expect a nav
@@ -2615,6 +2658,13 @@ export function ProjectWorkspace() {
               <ProjectMembersPageContent />
             </Suspense>
           </div>
+        ) : centerSurface === "snapshots" ? (
+          // FRO-176: Named snapshots inside the shell (per FRO-254).
+          <div className="h-full overflow-y-auto">
+            <Suspense fallback={<div className="flex h-full items-center justify-center text-sm text-muted-foreground">Loading snapshots…</div>}>
+              <SnapshotsPageContent />
+            </Suspense>
+          </div>
         ) : cellAreaState.kind === "ready" ? (
           <EditorTable
             ref={editorRef} project={project} cells={cellsWithBacktranslation}
@@ -2872,6 +2922,7 @@ export function ProjectWorkspace() {
         username={currentUsername}
         isReadOnly={isReadOnly}
         onAfterReplace={rebuildSearchIndex}
+        onReplaceAll={handleReplaceAll}
       />
       <SharePanel
         open={shareOpen} onOpenChange={setShareOpen}

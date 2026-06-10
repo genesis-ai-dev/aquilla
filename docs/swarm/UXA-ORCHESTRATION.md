@@ -96,3 +96,19 @@ fetch-helpers chain FRO-281 → 293; EditorTable strings last: FRO-290 after 297
 ## §M Merge log
 
 (append: date · WS · branch · sha · tsc · vitest)
+
+- 2026-06-10 · FRO-269 consent · swarm/fro-269 · 3788435 (FF) · tsc 0 · vitest green (gate exit 0)
+- 2026-06-10 · FRO-275 join-page · 49d8771 (merge of b1d7704) · tsc 0 · vitest green (same gate). First agent died mid-work; finisher completed.
+- 2026-06-10 · FRO-266 error boundary · 778cc7d (merge of 66b3e83) · tsc 0 · gate: root vitest 2346/2346, sync-worker 501/501 (exit 0)
+- 2026-06-10 · FRO-276 USFM honesty · 6d11a37 (merge of c2966bd) · same gate green. sync-worker `tsc --noEmit` has PRE-EXISTING errors in old test files (CellRow/EventRow index sigs) — baseline; npm test green.
+- 2026-06-10 · FRO-268 characterization · 0de0699 (merge of 62612bf) · gate pending (auth-worker tests included next run)
+
+### Incidents
+- FRO-275: first agent died after ~15 lines; finisher respawned into same worktree — Fixed.
+- FRO-291: agent died mid-test-work AND its worktree contained FOREIGN media-timeline WIP
+  (TimelineAddMedia, attach-media, pg-migrations dev-stack, launch.json, TRACES pd6 note) —
+  likely a stash mishap (stash list gained "WIP on swarm/fro-291"). Salvage: agent-owned files
+  committed as c18681a; foreign WIP preserved as labeled stash
+  "rescue: foreign media-timeline WIP found in fro-291 worktree 2026-06-10 — do not drop"
+  (older "WIP on swarm/fro-291" stash also left untouched). SURFACE TO USER at report time.
+  Finisher dispatched with stash commands forbidden.

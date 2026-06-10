@@ -11,7 +11,7 @@
 // disabled until the audio-attachment + validate-via-events grammars land.
 
 import { useCallback, useEffect, useMemo, useState } from "react"
-import { Languages, Loader2, Sparkles, X } from "lucide-react"
+import { Languages, Loader2, Sparkles, Wand2, X } from "lucide-react"
 import type { CellData } from "@/hooks/useCells"
 import type { ProjectRecord } from "@/lib/parsers/types"
 import type { FrontierSession } from "@/lib/frontier/types"
@@ -31,6 +31,18 @@ interface Props {
   audioMode?: boolean
   /** Synthesize the selected cells as one continuous clip + slice per cell. */
   onVoiceTogether?: (cells: CellData[]) => Promise<void> | void
+  /**
+   * FRO-186: called when the user clicks "Harmonize…" on the selection bar.
+   * Receives the subset of selected cells that have at least one active
+   * fix-review proposal. The parent opens FixReviewPanel in multi-cell scope.
+   * Optional — when absent the button is not rendered.
+   */
+  onHarmonize?: (cells: CellData[]) => void
+  /**
+   * FRO-186: whether the current user has the harmonize_min_role.
+   * When false, the button is disabled (server is still authoritative).
+   */
+  canHarmonize?: boolean
 }
 
 type Running =
@@ -39,7 +51,7 @@ type Running =
   | { kind: "validate" }
   | { kind: "voice" }
 
-export function SelectionBar({ project, cells, username, completeBatch, audioMode, onVoiceTogether }: Props) {
+export function SelectionBar({ project, cells, username, completeBatch, audioMode, onVoiceTogether, onHarmonize, canHarmonize = true }: Props) {
   const selected = useSelectedIds()
   const [running, setRunning] = useState<Running>({ kind: "idle" })
   const [toastMsg, setToastMsg] = useState<string | null>(null)
@@ -90,6 +102,13 @@ export function SelectionBar({ project, cells, username, completeBatch, audioMod
   const allHaveTranslation = selectedCells.length > 0 && selectedCells.every((c) => c.translated.trim())
   const voiceableCount = useMemo(
     () => selectedCells.filter((c) => c.type !== "paratext" && c.translated.trim()).length,
+    [selectedCells],
+  )
+  // FRO-186: cells with at least one infraction or fix proposal — v1 minimum:
+  // show affordance when ≥ 1 selected cell has a translated value (proxy for
+  // "may have violations"; real infraction data wires in when worker lands).
+  const harmonizableCount = useMemo(
+    () => selectedCells.filter((c) => c.translated.trim()).length,
     [selectedCells],
   )
   const isBusy = running.kind !== "idle"
@@ -296,6 +315,30 @@ export function SelectionBar({ project, cells, username, completeBatch, audioMod
           </span>
         )}
       </Button>
+      {/* FRO-186: Harmonize affordance — appears when ≥ 1 selected cell has a
+          translation (v1 minimum per spec). Disabled when canHarmonize=false
+          (role too low) or onHarmonize callback not provided. */}
+      {onHarmonize != null && harmonizableCount > 0 && (
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          onClick={() => onHarmonize(selectedCells.filter((c) => c.translated.trim()))}
+          disabled={isBusy || !canHarmonize}
+          title={
+            !canHarmonize
+              ? "You need project lead role to run a harmonization sweep"
+              : `Open harmonize sweep for ${harmonizableCount} selected cell${harmonizableCount === 1 ? "" : "s"}`
+          }
+          data-testid="selection-harmonize-btn"
+        >
+          <Wand2 className="mr-1 h-3.5 w-3.5" />
+          Harmonize…
+          <span className="ml-1 rounded-full bg-muted px-1.5 py-0.5 tabular-nums text-muted-foreground">
+            {harmonizableCount}
+          </span>
+        </Button>
+      )}
         </>
       )}
       <Button

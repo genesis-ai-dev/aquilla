@@ -1,4 +1,6 @@
 import { useMemo } from "react"
+import { Wand2 } from "lucide-react"
+import { Button } from "@/components/ui/button"
 import type {
   TranslationRule,
   RuleInfraction,
@@ -11,9 +13,22 @@ interface Props {
   builtinRules: TranslationRule[]
   infractions: Map<string, RuleInfraction[]>
   onSetOverride: (id: BuiltinCheckId, override: AlgorithmicCheckOverride) => void
+  /**
+   * FRO-186: called when the user clicks "Harmonize all (N)" on a check row.
+   * Receives the rule whose check has violations (has an auto-fix). The parent
+   * opens FixReviewPanel in multi-cell scope for the harmonization sweep.
+   * Optional — when absent the button is not rendered (preserves back-compat).
+   */
+  onHarmonize?: (rule: TranslationRule, violationCount: number) => void
+  /**
+   * FRO-186: whether the current user has the harmonize_min_role.
+   * When false, the "Harmonize all" button is disabled. Defaults to true
+   * when omitted (fail-open; server is authoritative).
+   */
+  canHarmonize?: boolean
 }
 
-export function BuiltinChecksList({ builtinRules, infractions, onSetOverride }: Props) {
+export function BuiltinChecksList({ builtinRules, infractions, onSetOverride, onHarmonize, canHarmonize = true }: Props) {
   const counts = useMemo(() => {
     const c = new Map<string, number>()
     for (const cellInfractions of infractions.values()) {
@@ -35,6 +50,9 @@ export function BuiltinChecksList({ builtinRules, infractions, onSetOverride }: 
           const checkId = rule.check.checkId
           const def = BUILTIN_CHECKS[checkId]
           const count = counts.get(rule.id) ?? 0
+          // FRO-186: show "Harmonize all (N)" when the check has violations and
+          // the parent has supplied the onHarmonize callback.
+          const showHarmonize = onHarmonize != null && count > 0
           return (
             <li
               key={rule.id}
@@ -49,6 +67,23 @@ export function BuiltinChecksList({ builtinRules, infractions, onSetOverride }: 
                 <div className="text-xs text-muted-foreground tabular-nums">
                   {count} violation{count === 1 ? "" : "s"}
                 </div>
+              )}
+              {showHarmonize && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={!canHarmonize}
+                  title={
+                    !canHarmonize
+                      ? "You need project lead role to run a harmonization sweep"
+                      : `Harmonize all ${count} violation${count === 1 ? "" : "s"} for this check`
+                  }
+                  onClick={() => onHarmonize(rule, count)}
+                  data-testid="harmonize-all-btn"
+                >
+                  <Wand2 className="mr-1 h-3.5 w-3.5" />
+                  Harmonize all ({count})
+                </Button>
               )}
               <select
                 className="h-7 px-2 text-xs border rounded-sm bg-background"

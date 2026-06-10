@@ -454,6 +454,55 @@ export async function handleEventsWriteRequest(
       }
     }
 
+    // ── Harmonize config enforcement (FRO-186) ────────────────────────────
+    // Enforce project-level harmonize_min_role for target.cell.commit events
+    // that carry a harmonize_origin payload (the cell.commit.harmonize variant
+    // per AD-2). The base role gate (authorize) already confirmed the caller
+    // is CONTRIBUTOR+; this additive check raises the floor to project_lead(500)
+    // by default, configurable up to maintainer(600) via harmonize_min_role.
+    // Lowering below project_lead is not allowed (hard floor per spec).
+    if (rawEvent.kind === 'target.cell.commit') {
+      const p = rawEvent.payload as { harmonize_origin?: unknown }
+      if (p.harmonize_origin != null) {
+        // Load project settings to get harmonize_min_role.
+        let harmonizeMinRole: string | undefined
+        try {
+          const settingsRow = await db
+            .prepare(`SELECT settings FROM project_settings WHERE project_id = ?`)
+            .bind(rawEvent.projectId)
+            .first<{ settings: string | null }>()
+          if (settingsRow?.settings) {
+            const parsed = JSON.parse(settingsRow.settings) as Record<string, unknown>
+            if (typeof parsed.harmonize_min_role === 'string') {
+              harmonizeMinRole = parsed.harmonize_min_role
+            }
+          }
+        } catch {
+          // Settings load failure is non-fatal — apply hard floor rather than
+          // blocking all harmonize events when settings are unavailable.
+        }
+        const HARMONIZE_FLOOR_MAP: Record<string, number> = {
+          project_lead: ROLE.PROJECT_LEAD,
+          maintainer: ROLE.MAINTAINER,
+        }
+        // Default floor: project_lead(500). Configured floor may only raise it.
+        const configuredFloor = harmonizeMinRole != null
+          ? (HARMONIZE_FLOOR_MAP[harmonizeMinRole] ?? ROLE.PROJECT_LEAD)
+          : ROLE.PROJECT_LEAD
+        // Hard floor: never allow below project_lead(500).
+        const effectiveFloor = Math.max(configuredFloor, ROLE.PROJECT_LEAD)
+        if (callerRole < effectiveFloor) {
+          const requiredName = effectiveFloor >= ROLE.MAINTAINER ? 'maintainer' : 'project_lead'
+          rejected.push({
+            id: rawEvent.id ?? '(unknown)',
+            status: 403,
+            reason: `role too low to harmonize (project requires ${requiredName} or above)`,
+          })
+          continue
+        }
+      }
+    }
+
     // Dispatch.
     const outcome = dispatchEvent(db, authResult.event, serverTs, {
       updateProjection,

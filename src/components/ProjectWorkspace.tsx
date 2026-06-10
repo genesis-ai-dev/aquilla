@@ -633,6 +633,11 @@ export function ProjectWorkspace() {
   // the time onCellCommitted fires.
   const lastOptimisticEditRef = useRef<{ cellId: string; translatedText: string } | null>(null)
 
+  // RACE-3/QW-2: per-cell pending event id for the AI completion commit path.
+  // Mirrors the per-row pendingTargetEventIdRef in EditorRow. Keyed by cellId
+  // so concurrent completions on different cells don't cross-contaminate.
+  const pendingCompletionEventIdRef = useRef<Map<string, string>>(new Map())
+
   // Stable refs so that callbacks declared BEFORE glosser/persistBt (in React
   // hook order) can still call the latest version without stale-closure issues.
   // Updated unconditionally each render — refs never cause re-renders.
@@ -1065,15 +1070,22 @@ export function ProjectWorkspace() {
     // gen — producing the "two events at 5:08, second one identical to
     // 2:28" history pattern.
     applyOptimisticTargetEdit(cell.id, { value: text })
-    await emitTargetCellCommit({
+    // RACE-3/QW-2: use the pending event id for this cell (last AI-completion
+    // commit we enqueued) as parentId, falling back to the projection value.
+    // This prevents a second rapid completion commit from becoming a sibling
+    // of the first (which the server dead-letters) when the read-back hasn't
+    // landed yet.
+    const parentId = pendingCompletionEventIdRef.current.get(cell.id) ?? cell.targetEventId ?? cell.sourceEventId ?? null
+    const eventId = await emitTargetCellCommit({
       projectId: project.id,
       fileId: cell.fileId,
       cellId: cell.id,
-      parentId: cell.targetEventId ?? cell.sourceEventId ?? null,
+      parentId,
       sourceEventId: cell.sourceEventId ?? null,
       value: text,
       author,
     })
+    pendingCompletionEventIdRef.current.set(cell.id, eventId)
     await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
     await refreshOutboxPending()
     revalidateAuditStats()

@@ -674,4 +674,94 @@ describe("flushOutboxBatch", () => {
     expect(capturedBodies[1][0].id).toBe("cell-after-comment")
     expect(await outboxPendingCount()).toBe(0)
   })
+
+  // ── RES-2/M1-4: transient failures must NOT burn the retry budget ─────────
+
+  it("RES-2: network throw (status 0) stamps error but does NOT increment attempts", async () => {
+    await enqueueOutboxEvent(makeEvent("e1", "f1"))
+
+    const fetchMock = vi.fn().mockRejectedValue(new TypeError("Failed to fetch"))
+    await flushOutboxBatch({
+      getTokenForFile: TOKEN_FN,
+      fetchImpl: fetchMock as unknown as typeof fetch,
+    })
+
+    const rows = await peekOutboxBatch(10)
+    expect(rows).toHaveLength(1)
+    // Attempts must NOT be incremented — stampOutboxError doesn't bump the cap.
+    expect(rows[0].attempts).toBe(0)
+    expect(rows[0].lastError).toMatchObject({ status: 0 })
+    expect(rows[0].status).toBe("pending")
+  })
+
+  it("RES-2: 5xx response stamps error but does NOT increment attempts", async () => {
+    await enqueueOutboxEvent(makeEvent("e1", "f1"))
+
+    const fetchMock = vi.fn().mockResolvedValue(new Response("Internal Server Error", { status: 500 }))
+    await flushOutboxBatch({
+      getTokenForFile: TOKEN_FN,
+      fetchImpl: fetchMock as unknown as typeof fetch,
+    })
+
+    const rows = await peekOutboxBatch(10)
+    expect(rows[0].attempts).toBe(0)
+    expect(rows[0].lastError).toMatchObject({ status: 500 })
+    expect(rows[0].status).toBe("pending")
+  })
+
+  it("RES-2: 4xx (non-403/401) remains permanent — burns the attempt budget and eventually quarantines", async () => {
+    // 400 Bad Request = programmer error (wrong shape) → should be removed as
+    // a permanent rejection, not treated as transient.
+    await enqueueOutboxEvent(makeEvent("e1", "f1"))
+
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse({ accepted: [], rejected: [{ id: "e1", status: 400, reason: "bad shape" }] }),
+    )
+    await flushOutboxBatch({
+      getTokenForFile: TOKEN_FN,
+      fetchImpl: fetchMock as unknown as typeof fetch,
+    })
+
+    // 400 rejected events are removed from the outbox (permanent, per existing policy).
+    expect(await outboxPendingCount()).toBe(0)
+  })
+
+  it("RES-2: a transient-failed record does NOT reach failed status across multiple 5xx flushes (no budget burn)", async () => {
+    await enqueueOutboxEvent(makeEvent("e1", "f1"))
+
+    const fetchMock = vi.fn().mockResolvedValue(new Response("Service Unavailable", { status: 503 }))
+    // Flush many times — with the old policy (markOutboxAttempt) this would
+    // cap at OUTBOX_MAX_ATTEMPTS and flip to failed. With the new policy
+    // (stampOutboxError for transient) the record stays pending indefinitely.
+    for (let i = 0; i < 10; i++) {
+      await flushOutboxBatch({
+        getTokenForFile: TOKEN_FN,
+        fetchImpl: fetchMock as unknown as typeof fetch,
+      })
+    }
+
+    const rows = await peekOutboxBatch(10)
+    expect(rows).toHaveLength(1)
+    expect(rows[0].attempts).toBe(0) // never incremented
+    expect(rows[0].status).toBe("pending") // never flipped to failed
+  })
+
+  // ── RES-6/M2-5: AbortSignal.timeout propagation ──────────────────────────
+
+  it("RES-6: AbortError (timeout) is treated as transient — stamps error, does NOT burn budget", async () => {
+    await enqueueOutboxEvent(makeEvent("e1", "f1"))
+
+    const abortErr = Object.assign(new Error("The operation timed out."), { name: "TimeoutError" })
+    const fetchMock = vi.fn().mockRejectedValue(abortErr)
+    const result = await flushOutboxBatch({
+      getTokenForFile: TOKEN_FN,
+      fetchImpl: fetchMock as unknown as typeof fetch,
+    })
+
+    expect(result.networkError).toBe(true)
+    const rows = await peekOutboxBatch(10)
+    expect(rows[0].attempts).toBe(0) // no budget burn
+    expect(rows[0].lastError).toMatchObject({ status: 0, reason: "request timed out" })
+    expect(rows[0].status).toBe("pending")
+  })
 })

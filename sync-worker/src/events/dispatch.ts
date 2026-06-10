@@ -34,6 +34,12 @@ export interface DispatchOptions {
    * parent-chain guard before calling here.
    */
   updateProjection: boolean
+  /**
+   * FRO-279: project-level threshold for cells.validated.
+   * Passed through to buildEventProjectionStmts for cell.validate /
+   * cell.unvalidate events. Default 1 (N=1 projects: byte-identical behavior).
+   */
+  validationCount?: number
 }
 
 /**
@@ -71,7 +77,7 @@ export function dispatchEvent(
           db,
           authed as AuthorizedEvent<CellEventKind>,
           serverTs,
-          opts,
+          { updateProjection: opts.updateProjection, validationCount: opts.validationCount },
         ),
       }
 

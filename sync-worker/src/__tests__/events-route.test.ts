@@ -410,6 +410,106 @@ describe('POST /events — cell.validate', () => {
   })
 })
 
+// ── PERF-2: request-scoped query batching ──────────────────────────────
+
+/**
+ * Wrap an AquillaDb so every statement EXECUTION outside `batch()` is
+ * counted (one execution ≈ one Hyperdrive round-trip in prod). Statements
+ * passed to `batch()` are unwrapped back to the shim's own objects because
+ * PostgresDb.batch reaches into their internals (`_on`).
+ */
+function makeCountingDb(db: AquillaDb): { db: AquillaDb; counts: { statements: number; batches: number } } {
+  const counts = { statements: 0, batches: 0 }
+  const originals = new WeakMap<AquillaStatement, AquillaStatement>()
+  const wrapStmt = (stmt: AquillaStatement): AquillaStatement => {
+    const wrapped: AquillaStatement = {
+      bind: (...args: unknown[]) => wrapStmt(stmt.bind(...args)),
+      all: <T,>() => { counts.statements++; return stmt.all<T>() },
+      run: <T,>() => { counts.statements++; return stmt.run<T>() },
+      first: <T,>(colName?: string) => { counts.statements++; return stmt.first<T>(colName) },
+      raw: <T,>() => { counts.statements++; return stmt.raw<T>() },
+    }
+    originals.set(wrapped, stmt)
+    return wrapped
+  }
+  const counting: AquillaDb = {
+    prepare: (query) => wrapStmt(db.prepare(query)),
+    batch: <T,>(stmts: AquillaStatement[]) => {
+      counts.batches++
+      return db.batch<T>(stmts.map((s) => originals.get(s) ?? s))
+    },
+    exec: (query) => db.exec(query),
+    close: () => db.close(),
+  }
+  return { db: counting, counts }
+}
+
+describe('POST /events — PERF-2 batched pre-checks', () => {
+  // One request of 3n events exercising every formerly-per-event pre-check:
+  // n creates + n pinned commits (idempotency + AD-2 chain pre-check +
+  // F5 source-pin) and n validates (project_settings).
+  function makeBatch(n: number): RawEvent[] {
+    const events: RawEvent[] = []
+    for (let i = 0; i < n; i++) {
+      const cell = `cell-${i}`
+      events.push(
+        targetCreate({
+          id: `evt-create-${i}`,
+          cellId: cell,
+          payload: { cellId: cell, value: `v${i}` },
+        }),
+        targetCommit({
+          id: `evt-commit-${i}`,
+          cellId: cell,
+          parentId: `evt-create-${i}`,
+          payload: { value: `w${i}`, valueHtml: `<p>w${i}</p>`, sourceEventId: `pin-${i}` },
+        }),
+        validate({
+          id: `evt-validate-${i}`,
+          cellId: cell,
+          parentId: `evt-create-${i}`,
+          payload: { editEventId: `evt-commit-${i}` },
+        }),
+      )
+    }
+    return events
+  }
+
+  async function statementsFor(n: number): Promise<number> {
+    const token = await makeToken()
+    const { db } = await makeTestDb()
+    // Settings row present so the validate path actually reads settings.
+    await db
+      .prepare(
+        `INSERT INTO project_settings (project_id, settings, version, updated_at)
+         VALUES (?, ?, 1, CURRENT_TIMESTAMP)`,
+      )
+      .bind('proj-a', '{}')
+      .run()
+    const { db: counting, counts } = makeCountingDb(db)
+    const res = await handleEventsWriteRequest(
+      await makeRequest(makeBatch(n), token),
+      makeEnv(counting),
+    )
+    const body = (await res!.json()) as any
+    expect(body.accepted).toHaveLength(3 * n)
+    expect(body.rejected).toHaveLength(0)
+    expect(body.stale).toHaveLength(0)
+    expect(body.staleSource).toHaveLength(0)
+    return counts.statements
+  }
+
+  it('pre-check queries do not scale with batch size (one batched read per concern, not per event)', async () => {
+    // The WHY: a 100-event outbox flush used to cost ~2N+ serial Hyperdrive
+    // round-trips in pre-checks alone (idempotency, isWinningChild, source
+    // pin, settings — audit PERF-2). Each concern must now be ONE batched
+    // read per request, so the count is identical for 2 and 8 events of the
+    // same kind mix. Any reintroduced per-event query fails this.
+    const [small, large] = [await statementsFor(2), await statementsFor(8)]
+    expect(large).toBe(small)
+  }, 120_000)
+})
+
 // ── ProjectSync fan-out ────────────────────────────────────────────────
 
 describe('POST /events — ProjectSync event.applied fan-out', () => {
@@ -448,5 +548,34 @@ describe('POST /events — ProjectSync event.applied fan-out', () => {
     expect(applied.length).toBe(1)
     expect(applied[0].cell).toBe('cell-1')
     expect(applied[0].by).toBe('alice')
+  })
+
+  it('batches all of a project\'s frames into ONE __broadcast subrequest (PERF-8)', async () => {
+    // The WHY: per-event fan-out burned ~1 subrequest per committed event
+    // against Cloudflare's 1000-subrequest cap, so a large flush could
+    // starve the request of subrequest budget. Multi-event requests must
+    // send a single broadcast.batch envelope per project; the DO unpacks it
+    // into the same per-event WS frames (see unpackBroadcastBody tests).
+    const token = await makeToken({ username: 'alice' })
+    const { db } = await makeTestDb()
+    const { env, bodies } = makeProjectSyncEnv(db)
+
+    const events = [
+      targetCreate({ id: 'e1', cellId: 'c1', payload: { cellId: 'c1', value: '1' } }),
+      targetCreate({ id: 'e2', cellId: 'c2', payload: { cellId: 'c2', value: '2' } }),
+      targetCreate({ id: 'e3', cellId: 'c3', payload: { cellId: 'c3', value: '3' } }),
+    ]
+    const res = await handleEventsWriteRequest(await makeRequest(events, token), env)
+    expect(res?.status).toBe(200)
+
+    expect(bodies).toHaveLength(1)
+    expect(bodies[0].t).toBe('broadcast.batch')
+    const messages = bodies[0].messages as Array<Record<string, unknown>>
+    expect(messages.map((m) => m.id)).toEqual(['e1', 'e2', 'e3'])
+    for (const m of messages) {
+      expect(m.t).toBe('event.applied')
+      expect(m.by).toBe('alice')
+      expect(m.project).toBe('proj-a')
+    }
   })
 })

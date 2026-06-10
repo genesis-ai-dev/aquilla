@@ -27,6 +27,7 @@ import {
   parseProjectDoClientMessage,
   PROJECT_DO_DEFAULT_LEASE_MS,
   sweepExpiredLeases,
+  unpackBroadcastBody,
   type LockState,
   type PresenceState,
   type ProjectDoServerMessage,
@@ -70,13 +71,19 @@ export class ProjectSync extends DurableObject<DOEnv> {
       if (!expected || auth !== expected) {
         return new Response("unauthorized", { status: 401 })
       }
-      let body: ProjectDoServerMessage
+      let body: unknown
       try {
-        body = (await request.json()) as ProjectDoServerMessage
+        body = await request.json()
       } catch {
         return new Response("bad request", { status: 400 })
       }
-      this.broadcastToAll(body)
+      // PERF-8: the body is either a single ServerMessage (legacy callers,
+      // e.g. archive-broadcast) or a broadcast.batch envelope carrying all
+      // of a project's frames for one POST /events request. Clients receive
+      // one WS frame per message either way.
+      for (const msg of unpackBroadcastBody(body)) {
+        this.broadcastToAll(msg)
+      }
       return Response.json({ ok: true, recipients: this.connections.size })
     }
 

@@ -70,6 +70,37 @@ export type ProjectDoServerMessage =
   | ServerLockReleased
   | ServerProjectArchived
 
+/**
+ * Additive `__broadcast` envelope (PERF-8): POST /events batches all of a
+ * project's `event.applied` frames into ONE subrequest per (project, request)
+ * instead of one per committed event. The DO unpacks it into the same
+ * per-message WS frames clients already parse — the client protocol is
+ * unchanged.
+ */
+export interface ProjectDoBroadcastBatch {
+  t: "broadcast.batch"
+  messages: ProjectDoServerMessage[]
+}
+
+/**
+ * Unpack a `__broadcast` POST body into the server frames to fan out.
+ *
+ * Accepts BOTH the legacy single-message body (any JSON value — mirroring the
+ * old handler's cast-and-broadcast leniency; callers are trusted internal
+ * workers behind the SYNC_SECRET_KEY gate) and the batched envelope above.
+ * A malformed envelope (non-array `messages`) yields no frames rather than
+ * leaking the raw envelope to WS clients.
+ */
+export function unpackBroadcastBody(body: unknown): ProjectDoServerMessage[] {
+  if (body && typeof body === "object" && !Array.isArray(body)) {
+    const m = body as Record<string, unknown>
+    if (m.t === "broadcast.batch") {
+      return Array.isArray(m.messages) ? (m.messages as ProjectDoServerMessage[]) : []
+    }
+  }
+  return [body as ProjectDoServerMessage]
+}
+
 // ── Client → server frames ───────────────────────────────────────────────
 
 export interface ClientOutboxEvent {

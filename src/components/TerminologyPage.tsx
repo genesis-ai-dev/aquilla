@@ -49,6 +49,7 @@ import type { CandidateTerm } from "@/lib/terminology/candidates"
 import { TerminologyViolationsInbox } from "@/components/TerminologyViolationsInbox"
 import { TerminologyReviewQueue } from "@/components/TerminologyReviewQueue"
 import { TerminologyMergeDialog } from "@/components/TerminologyMergeDialog"
+import { ConfirmActionDialog } from "@/components/ConfirmActionDialog"
 
 // ────────────────────────────────────────────────────────────────────────────
 // Rendering status chip helpers
@@ -848,6 +849,11 @@ export function TerminologyPage() {
   const [importOpen, setImportOpen] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [drillDownConcept, setDrillDownConcept] = useState<Concept | null>(null)
+  // FRO-291: pending delete confirmation state.
+  const [pendingDeleteConceptId, setPendingDeleteConceptId] = useState<string | null>(null)
+  const pendingDeleteConcept = pendingDeleteConceptId
+    ? concepts.find((c) => c.id === pendingDeleteConceptId) ?? null
+    : null
 
   const handleDrillDown = useCallback((concept: Concept) => {
     setDrillDownConcept(concept)
@@ -1277,7 +1283,7 @@ export function TerminologyPage() {
                         key={concept.id}
                         concept={concept}
                         onEdit={setEditTarget}
-                        onDelete={handleDelete}
+                        onDelete={setPendingDeleteConceptId}
                         onDrillDown={handleDrillDown}
                         canManage={canManageTermbase}
                       />
@@ -1324,6 +1330,22 @@ export function TerminologyPage() {
         onOpenChange={setMergeOpen}
         concepts={concepts}
         onMerge={handleMerge}
+      />
+
+      {/* FRO-291: checkbox-confirm before deleting a concept */}
+      <ConfirmActionDialog
+        open={pendingDeleteConceptId !== null}
+        onOpenChange={(v) => { if (!v) setPendingDeleteConceptId(null) }}
+        title="Delete concept"
+        description={
+          pendingDeleteConcept
+            ? `Delete "${pendingDeleteConcept.sourceTerm}"? This removes the concept and all its renderings for everyone in the project and cannot be undone.`
+            : "Delete this concept? This removes it for everyone in the project and cannot be undone."
+        }
+        confirmLabel="Delete concept"
+        checkboxLabel="I understand this deletes the concept and all its renderings for everyone in the project."
+        variant="destructive"
+        onConfirm={() => { if (pendingDeleteConceptId) handleDelete(pendingDeleteConceptId) }}
       />
     </div>
   )

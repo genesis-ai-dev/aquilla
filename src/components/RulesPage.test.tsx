@@ -1,18 +1,16 @@
 /**
- * RulesPage.test.tsx — FRO-186 regression guard.
+ * RulesPage.test.tsx — FRO-186 regression guard + FRO-291 delete-confirm guard.
  *
- * Verifies that the "Harmonize all (N)" trigger in BuiltinChecksList renders
- * with N > 0 when validated project cells contain real violations. The test
- * exercises the REAL derivation path (checkRulesForCell in rule-engine.ts) — no
- * injected infractions map. Mocked: data-loading hooks and router; the rule
- * engine, builtin registry, and BuiltinChecksList receive zero mocking.
+ * FRO-186: Verifies that the "Harmonize all (N)" trigger in BuiltinChecksList renders
+ * with N > 0 when validated project cells contain real violations.
+ * FRO-291: Verifies that rule delete is gated by checkbox-confirm dialog.
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest"
-import { render, screen } from "@testing-library/react"
+import { render, screen, fireEvent, waitFor } from "@testing-library/react"
 import { MemoryRouter, Route, Routes } from "react-router-dom"
 import { RulesPage } from "./RulesPage"
-import type { ProjectRecord } from "@/lib/parsers/types"
+import type { ProjectRecord, TranslationRule } from "@/lib/parsers/types"
 import type { CellData } from "@/hooks/useCells"
 import type { LivingMemoryCell } from "@/hooks/useLivingMemory"
 
@@ -51,19 +49,24 @@ vi.mock("@/hooks/useLivingMemory", () => ({
 // Expose a project stub so useRules sees a real builtinRules array.
 // We use the real resolveBuiltinRules path, but short-circuit the hook's
 // refresh / patch helpers so they don't need IDB.
+// userRulesStub and deleteRuleMock are controllable per-test for FRO-291 tests.
+let userRulesStub: TranslationRule[] = []
+const deleteRuleMock = vi.fn()
 vi.mock("@/hooks/useRules", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/hooks/useRules")>()
   const { resolveBuiltinRules } = await import("@/lib/lqa/builtin-resolver")
+  const builtins = resolveBuiltinRules(undefined)
   return {
     ...actual,
     useRules: (_project: unknown) => ({
-      rules: resolveBuiltinRules(undefined),
-      userRules: [],
-      builtinRules: resolveBuiltinRules(undefined),
+      rules: builtins,
+      // Read userRulesStub dynamically so per-test assignments take effect.
+      get userRules() { return userRulesStub },
+      builtinRules: builtins,
       penalties: { major: 15, minor: 5 },
       addRule: vi.fn(),
       updateRule: vi.fn(),
-      deleteRule: vi.fn(),
+      get deleteRule() { return deleteRuleMock },
       updatePenalties: vi.fn(),
       setBuiltinOverride: vi.fn(),
     }),
@@ -134,6 +137,8 @@ function renderRulesPage() {
 describe("RulesPage infraction derivation (FRO-186)", () => {
   beforeEach(async () => {
     cellsStub = []
+    userRulesStub = []
+    deleteRuleMock.mockReset()
     const { getProject } = await import("@/lib/store/project-index")
     vi.mocked(getProject).mockResolvedValue(makeProject())
   })
@@ -180,5 +185,94 @@ describe("RulesPage infraction derivation (FRO-186)", () => {
     expect(row.textContent).toMatch(/2/)
     // And the button shows (2).
     expect(row.textContent).toMatch(/Harmonize all \(2\)/)
+  })
+})
+
+// ── FRO-291: rule delete confirmation guard ────────────────────────────────
+
+function makeUserRule(overrides: Partial<TranslationRule> = {}): TranslationRule {
+  return {
+    id: "rule-1",
+    name: "Test rule",
+    description: "A test rule",
+    pattern: "foo",
+    severity: "minor",
+    enabled: true,
+    ...overrides,
+  } as TranslationRule
+}
+
+describe("RulesPage rule delete confirm (FRO-291)", () => {
+  beforeEach(async () => {
+    cellsStub = []
+    userRulesStub = []
+    deleteRuleMock.mockReset()
+    const { getProject } = await import("@/lib/store/project-index")
+    vi.mocked(getProject).mockResolvedValue(makeProject())
+  })
+
+  it("does NOT call deleteRule immediately when trash button is clicked", async () => {
+    userRulesStub = [makeUserRule()]
+    renderRulesPage()
+    await new Promise((r) => setTimeout(r, 0))
+
+    const deleteBtn = await screen.findByRole("button", { name: /Delete rule Test rule/i })
+    fireEvent.click(deleteBtn)
+
+    // deleteRule must NOT have been called yet — confirm dialog should be open
+    expect(deleteRuleMock).not.toHaveBeenCalled()
+  })
+
+  it("shows the confirm dialog with consequence copy when trash button is clicked", async () => {
+    userRulesStub = [makeUserRule()]
+    renderRulesPage()
+    await new Promise((r) => setTimeout(r, 0))
+
+    const deleteBtn = await screen.findByRole("button", { name: /Delete rule Test rule/i })
+    fireEvent.click(deleteBtn)
+
+    await waitFor(() => {
+      expect(screen.getByRole("dialog")).toBeInTheDocument()
+    })
+    expect(screen.getByRole("heading", { name: /Delete rule/i })).toBeInTheDocument()
+    expect(screen.getAllByText(/everyone in the project/i).length).toBeGreaterThan(0)
+  })
+
+  it("cancel closes the dialog without calling deleteRule", async () => {
+    userRulesStub = [makeUserRule()]
+    renderRulesPage()
+    await new Promise((r) => setTimeout(r, 0))
+
+    const deleteBtn = await screen.findByRole("button", { name: /Delete rule Test rule/i })
+    fireEvent.click(deleteBtn)
+    await waitFor(() => expect(screen.getByRole("dialog")).toBeInTheDocument())
+
+    fireEvent.click(screen.getByRole("button", { name: /^Cancel$/i }))
+
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument())
+    expect(deleteRuleMock).not.toHaveBeenCalled()
+  })
+
+  it("calls deleteRule only after checkbox is checked and confirm is clicked", async () => {
+    userRulesStub = [makeUserRule()]
+    renderRulesPage()
+    await new Promise((r) => setTimeout(r, 0))
+
+    const deleteBtn = await screen.findByRole("button", { name: /Delete rule Test rule/i })
+    fireEvent.click(deleteBtn)
+    await waitFor(() => expect(screen.getByRole("dialog")).toBeInTheDocument())
+
+    // Confirm button is disabled until checkbox is checked
+    const confirmBtn = screen.getByRole("button", { name: /^Delete rule$/i })
+    expect(confirmBtn).toBeDisabled()
+
+    // Check the checkbox
+    const checkbox = screen.getByRole("checkbox")
+    fireEvent.click(checkbox)
+    expect(confirmBtn).not.toBeDisabled()
+
+    // Now confirm
+    fireEvent.click(confirmBtn)
+    expect(deleteRuleMock).toHaveBeenCalledWith("rule-1")
   })
 })

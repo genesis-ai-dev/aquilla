@@ -11,12 +11,15 @@ interface ConfirmActionDialogProps {
   description: string
   confirmLabel: string
   checkboxLabel?: string
+  /** Button variant for the confirm action. Defaults to "default". */
+  variant?: "default" | "destructive"
   onConfirm: () => void
 }
 
 export function ConfirmActionDialog({
   open, onOpenChange, title, description, confirmLabel,
   checkboxLabel = "I understand this action.",
+  variant = "default",
   onConfirm,
 }: ConfirmActionDialogProps) {
   const [checked, setChecked] = useState(false)
@@ -39,6 +42,7 @@ export function ConfirmActionDialog({
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
           <Button
+            variant={variant}
             disabled={!checked}
             onClick={() => { onConfirm(); onOpenChange(false) }}
           >

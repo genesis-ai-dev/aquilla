@@ -109,6 +109,12 @@ fetch-helpers chain FRO-281 → 293; EditorTable strings last: FRO-290 after 297
 - 2026-06-10 · FRO-265 AI caps · 34db5e0 (merge of a8feacc) · log-only default; AI_BUDGET_ENFORCE=true to enforce; migration 0034_ai_usage_daily
 - 2026-06-10 · FRO-270 reset-password + 404 · f83c607 (merge of d5bd243) · gate pending
 
+- 2026-06-10 · gate (through fro-270 + hotfix d1a40aa + fro-273 90d95c0) green: tsc 0, all suites (exit 0)
+- 2026-06-10 · FRO-273 read-only editor · 90d95c0 (merge of 3d2217c)
+- 2026-06-10 · FRO-289 RLS backstop · fbe4712 (merge of 8d92c4f) · PGlite can't test role-level policy filtering — staging Neon verification is a deploy-time TODO; NOT applied to live
+- 2026-06-10 · FRO-283 invite truth · ffbc0b6 (merge of be930d8) · email binding ENFORCED; follow-up flagged: JoinPage pre-warn on email mismatch
+- 2026-06-10 · FRO-279 validated threshold · merge of 781e839 · spec says read-time, projection-time chosen + documented; backfill renumbered 0034→0035 (collision with rls_backstop) · gate pending
+
 ### Incidents
 - FRO-275: first agent died after ~15 lines; finisher respawned into same worktree — Fixed.
 - FRO-291: agent died mid-test-work AND its worktree contained FOREIGN media-timeline WIP

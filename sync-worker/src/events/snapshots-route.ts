@@ -21,6 +21,7 @@
 import { verifyTokenForProject } from "../auth"
 import { ROLE } from "./role-policy"
 import { buildEventInsertStmt } from "./event-insert"
+import { buildChainClaimStmt } from "./chain-claims"
 
 export interface SnapshotsRouteEnv {
   AQUILLA_PG?: AquillaDb
@@ -193,12 +194,25 @@ export async function handleSnapshotsRequest(
     }
 
     const now = Date.now()
-    let restored = 0
     let skippedIdentical = 0
-    const skippedConcurrent = 0
 
-    // Emit one target.cell.commit per cell that differs from current value.
-    // We INSERT into events + update cells in a single batch per chunk.
+    // Emit one restore commit per cell that differs from the snapshot value.
+    // Each restored cell contributes exactly THREE statements (audit B6),
+    // which must land in the SAME transaction, in this order:
+    //   1. the canonical `events` INSERT — allocator bump first, so the
+    //      per-project counter row-lock is acquired in the same order as
+    //      POST /events and restore serializes with live commits;
+    //   2. the AD-2 chain claim for the slot this commit contends
+    //      (parent_key = the head the CAS targets), mirroring
+    //      handlers/cell-events.ts. Without it the restore event takes a
+    //      chain slot in the log WITHOUT a claim row, so a racing live
+    //      commit on the same head could claim the slot and win live
+    //      arbitration while a later rebuild replay (lowest server_seq wins)
+    //      picks the restore — silently flipping the winner;
+    //   3. the cells CAS, gated BOTH on the head still matching (no
+    //      concurrent edit landed between our SELECT and this transaction)
+    //      AND on holding the claim.
+    const STMTS_PER_CELL = 3
     const CHUNK = 50
     const stmts: AquillaStatement[] = []
 
@@ -250,16 +264,37 @@ export async function handleSnapshotsRequest(
         }),
       )
 
+      // Claim the chain slot this commit contends — the slot's parent_key is
+      // the head the CAS below targets (never null: cells.event_id is NOT
+      // NULL), matching parentKeyOf(parentId) on the live path.
+      stmts.push(
+        buildChainClaimStmt(
+          db,
+          {
+            projectId: cell.project_id,
+            fileId: cell.file_id,
+            cellId: cell.cell_id,
+            parentKey: cell.current_event_id,
+          },
+          newEventId,
+        ),
+      )
+
       // Update cells projection only if event_id still matches current head
-      // (i.e. no concurrent edit landed between our SELECT and this UPDATE).
+      // (no concurrent edit landed between our SELECT and this UPDATE) AND
+      // this event holds the chain claim (no racing live commit took the
+      // slot). `value` is the RAW snapshot text — exactly what a rebuild
+      // replay of this same commit event writes (event-projection.ts), so
+      // live == rebuild holds for the value column too.
       stmts.push(
         db.prepare(`
           UPDATE cells
           SET value = ?, event_id = ?, last_editor = ?, last_edit_at = ?
           WHERE project_id = ? AND file_id = ? AND cell_id = ?
             AND event_id = ?
+            AND EXISTS (SELECT 1 FROM chain_claims WHERE project_id = ? AND file_id = ? AND cell_id = ? AND parent_key = ? AND event_id = ?)
         `).bind(
-          JSON.stringify({ value: snapValue }),
+          snapValue,
           newEventId,
           callerUsername,
           now,
@@ -267,24 +302,42 @@ export async function handleSnapshotsRequest(
           cell.file_id,
           cell.cell_id,
           cell.current_event_id,
+          cell.project_id,
+          cell.file_id,
+          cell.cell_id,
+          cell.current_event_id,
+          newEventId,
         ),
       )
-
-      restored++
     }
 
-    // Commit in CHUNK-sized batches.
-    for (let i = 0; i < stmts.length; i += CHUNK * 2) {
-      await db.batch(stmts.slice(i, i + CHUNK * 2))
+    // Commit in CHUNK-sized batches (one transaction each). Slices step in
+    // STMTS_PER_CELL multiples so a cell's triplet is never split across
+    // transactions. restored/skippedConcurrent are derived from the CAS
+    // row-counts — the pre-transaction SELECT cannot know whether a
+    // concurrent commit wins the race before these batches run (audit B6:
+    // the old counters were computed before the transaction and were wrong
+    // under exactly that race).
+    let restored = 0
+    let skippedConcurrent = 0
+    for (let i = 0; i < stmts.length; i += CHUNK * STMTS_PER_CELL) {
+      const results = await db.batch(stmts.slice(i, i + CHUNK * STMTS_PER_CELL))
+      // The CAS is the last statement of each triplet.
+      for (let j = STMTS_PER_CELL - 1; j < results.length; j += STMTS_PER_CELL) {
+        if (results[j].meta.changes > 0) restored++
+        else skippedConcurrent++
+      }
     }
 
     return Response.json({
       restored,
       skippedIdentical,
       skippedConcurrent,
-      message: restored === 0
-        ? "No changes — snapshot matches current state."
-        : `Restored ${restored} cells.`,
+      message: restored > 0
+        ? `Restored ${restored} cells.`
+        : skippedConcurrent > 0
+          ? `No cells restored — ${skippedConcurrent} changed concurrently; re-run restore if still wanted.`
+          : "No changes — snapshot matches current state.",
     })
   }
 

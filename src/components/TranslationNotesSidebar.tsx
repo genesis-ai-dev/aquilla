@@ -22,6 +22,14 @@ import { fetchProjectFiles, fetchFileCells } from "@/lib/sync/cells-read"
 import { cn } from "@/lib/utils"
 import { BookOpen, X } from "lucide-react"
 
+// Sentinel fileId for project-scoped token mints (no specific file).
+// Must match the "__project__" sentinel used by SnapshotsPage, useComments,
+// and the sync-worker's authorize.ts — the auth-worker accepts any fileId
+// string but verifyTokenForProject only checks the projectId claim, so any
+// value works for read-only project-scoped routes.  Using the established
+// sentinel keeps the pattern consistent and future-proof.
+const PROJECT_SENTINEL_FILE_ID = "__project__"
+
 export interface TnNote {
   /** Source file name */
   fileName: string
@@ -81,10 +89,11 @@ export function TranslationNotesSidebar({
     setLoading(true)
     setError(null)
     try {
-      // Get a project-scoped token to fetch the file list. We use a stable
-      // fileId of "list" as a placeholder — the token endpoint accepts any
-      // fileId for read-only project-scoped operations.
-      const jwt = await getToken("list")
+      // Get a project-scoped token to fetch the file list.  We use the
+      // established "__project__" sentinel — the same one that SnapshotsPage
+      // and useComments use for project-level reads — so the minted JWT is
+      // recognisably project-scoped rather than an arbitrary placeholder.
+      const jwt = await getToken(PROJECT_SENTINEL_FILE_ID)
       if (!jwt) {
         setNotes([])
         return

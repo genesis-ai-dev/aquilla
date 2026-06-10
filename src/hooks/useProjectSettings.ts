@@ -188,6 +188,7 @@ export function useProjectSettings(
           ...(got.settings.systemPrompt != null
             ? {
                 completionSettings: {
+                  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- spread of partial settings object; exact shape depends on runtime migration state
                   ...(existing.completionSettings ?? ({} as any)),
                   systemPrompt: got.settings.systemPrompt,
                 },
@@ -295,6 +296,7 @@ export function useProjectSettings(
       )
       if (!aliveRef.current) return
       const nonEmptyCount = Object.keys(local).filter((k) => {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any -- dynamic key indexing into settings object; TS can't narrow string-keyed access
         const v = (local as any)[k]
         return v !== "" && v != null
       }).length
@@ -367,7 +369,7 @@ export function useProjectSettings(
     // prior user patch. Reading server state from the ref *inside* the
     // serialized callback means we always see the version bumped by the
     // writer ahead of us in the queue.
-    let result: PatchResult = await runSerialized(async () => {
+    const result: PatchResult = await runSerialized(async () => {
       // Fetch the latest server snapshot right before the write. This is the
       // belt-and-suspenders fix for the persistent 409s: even with our write
       // queue and live `serverRef`, the cached version can drift from the
@@ -438,6 +440,7 @@ export function useProjectSettings(
         const next = { ...prev }
         for (const key of Object.keys(partial) as (keyof ProjectWideSettings)[]) {
           if (key in snapTarget) {
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any -- dynamic key assignment; TS can't narrow the value type for string-keyed writes on a record type
             next[key] = snapTarget[key] as any
           } else {
             delete next[key]
@@ -450,6 +453,7 @@ export function useProjectSettings(
         const next = { ...existing }
         for (const key of Object.keys(partial)) {
           if (key in snapTarget) {
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any -- dynamic key assignment during IDB rollback; string-keyed writes require any cast
             ;(next as any)[key] = (snapTarget as any)[key]
           }
         }
@@ -471,6 +475,7 @@ export function useProjectSettings(
       const next = { ...prev }
       for (const key of Object.keys(partial) as (keyof ProjectWideSettings)[]) {
         if (key in snapTarget) {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any -- dynamic key assignment during optimistic rollback; TS can't narrow string-keyed writes
           next[key] = snapTarget[key] as any
         } else {
           delete next[key]

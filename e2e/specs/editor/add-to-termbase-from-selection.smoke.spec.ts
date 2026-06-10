@@ -54,7 +54,7 @@ test("selecting source text reveals Add to termbase button and creates draft con
   // EditorTable renders source text in a div with the original content.
   const sourceArea = alice.locator('[aria-label="Source text"], .source-text, [data-cell-type="source"]').first()
 
-  let addBtn = alice.getByRole("button", { name: /Add to termbase/i })
+  const addBtn = alice.getByRole("button", { name: /Add to termbase/i })
 
   if (await sourceArea.isVisible({ timeout: 3_000 })) {
     // Triple-click selects all text in the element.

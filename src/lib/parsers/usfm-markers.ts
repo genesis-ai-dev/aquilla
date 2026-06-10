@@ -225,7 +225,7 @@ const MARKERS: Record<string, MarkerSpec> = {
  *    io2→io) — but only when the digit-stripped base is itself known, so we
  *    don't mangle a genuinely distinct marker. */
 export function normalizeMarker(raw: string): string {
-  let n = raw.replace(/^\\/, "").replace(/^\+/, "").replace(/\*$/, "")
+  const n = raw.replace(/^\\/, "").replace(/^\+/, "").replace(/\*$/, "")
   if (MARKERS[n]) return n
   const stripped = n.replace(/\d+$/, "")
   if (stripped !== n && MARKERS[stripped]) return stripped

@@ -165,6 +165,7 @@ function findLineMarkers(raw: string): LineMarker[] {
   // Group 2: marker name
   // Group 3: optional whitespace between marker and rest
   // Group 4: rest of line
+  // eslint-disable-next-line no-irregular-whitespace -- intentional BOM (U+FEFF) to optionally match USFM files that start with a byte-order mark
   const RE = /(?:^(﻿)?|\n)\\([a-z]+\d*)([ \t]+)?([^\n]*)/g
   const out: LineMarker[] = []
   let m: RegExpExecArray | null

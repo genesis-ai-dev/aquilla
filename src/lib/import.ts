@@ -57,6 +57,221 @@ export interface EBibleProgress {
   cellsTotal?: number
 }
 
+// ---------------------------------------------------------------------------
+// eBible → target column (FRO-191)
+// ---------------------------------------------------------------------------
+
+/**
+ * Minimal cell descriptor passed into matchEBibleToSourceCells — callers
+ * supply only the fields the matcher actually needs, drawn from CellData.
+ */
+export interface SourceCellRef {
+  /** Logical cell id (shared between source + target rows). */
+  cellId: string
+  /** File this cell belongs to — needed so commits are scoped correctly. */
+  fileId: string
+  /** AD-2 chain head for the target row; undefined → no target commit yet. */
+  targetEventId?: string
+  /** AD-9 staleness pin — source cell's event_id. Used as parentId for a
+   *  genesis target commit when targetEventId is absent. */
+  sourceEventId?: string
+  /** Current target text (may be empty). Non-empty → conflict. */
+  translated: string
+  /** Canonical reference, e.g. "GEN 1:1". Must match the vref vocabulary. */
+  canonicalRef?: string | null
+}
+
+/** One cell's match result: the incoming eBible text paired with the source cell. */
+export interface EBibleMatchedCell {
+  cellId: string
+  fileId: string
+  /** Incoming eBible text for this ref. */
+  incomingText: string
+  /** Existing target content (empty string when cell has no target yet). */
+  currentText: string
+  /** True when `currentText` is non-empty — user must choose keep vs. replace. */
+  hasConflict: boolean
+  /** AD-2 parentId to use when emitting the commit. */
+  parentId: string
+  /** Canonical reference, e.g. "GEN 1:1" — for display. */
+  ref: string
+}
+
+/** Orphan verse: present in the incoming eBible but matched no source cell. */
+export interface EBibleOrphan {
+  ref: string
+  text: string
+}
+
+export interface EBibleMatchResult {
+  matched: EBibleMatchedCell[]
+  orphans: EBibleOrphan[]
+  /** Cells the incoming corpus never had a verse for (the rare inverse orphan).
+   *  Surfaced for completeness — typically 0 for whole-Bible imports. */
+  unmatchedSourceCount: number
+}
+
+export type EBibleTargetPhase = "download" | "parse" | "match" | "save"
+export interface EBibleTargetProgress {
+  phase: EBibleTargetPhase
+  received?: number
+  total?: number
+  cellsEnqueued?: number
+  cellsTotal?: number
+}
+
+/**
+ * Match parsed eBible verses to an existing set of source cells by canonical
+ * reference. The canonical ref on each source cell is the `canonicalRef` field
+ * (e.g. "GEN 1:1" from `TranslatableString.group`). Matching is exact — same
+ * casing and spacing convention as the eBible vref list.
+ *
+ * Exported so tests can exercise matching in isolation.
+ */
+export function matchEBibleToSourceCells(
+  verses: Array<{ ref: string; text: string }>,
+  sourceCells: SourceCellRef[],
+): EBibleMatchResult {
+  // Build a map from canonicalRef → source cell. When multiple source cells
+  // share the same ref (duplicate refs in the source file), the first one wins.
+  const byRef = new Map<string, SourceCellRef>()
+  for (const cell of sourceCells) {
+    const ref = cell.canonicalRef
+    if (ref && !byRef.has(ref)) {
+      byRef.set(ref, cell)
+    }
+  }
+
+  const matchedRefs = new Set<string>()
+  const matched: EBibleMatchedCell[] = []
+  const orphans: EBibleOrphan[] = []
+
+  for (const verse of verses) {
+    const cell = byRef.get(verse.ref)
+    if (!cell) {
+      orphans.push({ ref: verse.ref, text: verse.text })
+      continue
+    }
+    matchedRefs.add(verse.ref)
+    const currentText = cell.translated ?? ""
+    // AD-2 parentId: chain off existing targetEventId if present, else off the
+    // source cell's sourceEventId (genesis target commit). Fallback to empty
+    // string only when neither is available (rare legacy cells with no event id).
+    const parentId = cell.targetEventId ?? cell.sourceEventId ?? ""
+    matched.push({
+      cellId: cell.cellId,
+      fileId: cell.fileId,
+      incomingText: verse.text,
+      currentText,
+      hasConflict: currentText.trim().length > 0,
+      parentId,
+      ref: verse.ref,
+    })
+  }
+
+  const unmatchedSourceCount = sourceCells.filter(
+    (c) => c.canonicalRef && !matchedRefs.has(c.canonicalRef),
+  ).length
+
+  return { matched, orphans, unmatchedSourceCount }
+}
+
+/**
+ * Download a specific eBible translation, parse it, and match its verses
+ * against the provided source cells. Returns the match result so the caller
+ * can show a review screen before committing.
+ */
+export async function prepareEBibleTargetImport(
+  translation: EBibleTranslation,
+  sourceCells: SourceCellRef[],
+  onProgress?: (p: EBibleTargetProgress) => void,
+  signal?: AbortSignal,
+): Promise<EBibleMatchResult> {
+  onProgress?.({ phase: "download", received: 0, total: 0 })
+
+  const corpusText = await fetchTranslationText(
+    translation.id,
+    (received, total) => onProgress?.({ phase: "download", received, total }),
+    signal,
+  )
+
+  onProgress?.({ phase: "parse" })
+  const strings = parseEBibleCorpus(corpusText)
+  if (strings.length === 0) {
+    throw new Error(
+      `"${translation.title}" is not available for download. ` +
+      `The eBible corpus file exists but contains no text — ` +
+      `this translation may be restricted due to copyright.`,
+    )
+  }
+
+  const verses = strings.map((s) => ({
+    ref: s.globalReferences?.[0] ?? s.context,
+    text: s.original,
+  }))
+
+  onProgress?.({ phase: "match" })
+  return matchEBibleToSourceCells(verses, sourceCells)
+}
+
+/**
+ * Emit target.cell.commit events for the approved cells. `selectedCellIds` is
+ * the set the user approved in the review screen — subset of matchResult.matched.
+ * Cells with hasConflict=true and not in selectedCellIds are kept (skipped).
+ *
+ * parentId handling: each MatchedCell already carries the correct AD-2 parentId
+ * (targetEventId ?? sourceEventId), so commits are always properly chained.
+ */
+export async function applyEBibleTargetImport(
+  matchResult: EBibleMatchResult,
+  selectedCellIds: Set<string>,
+  ctx: Pick<ImportContext, "projectId" | "author" | "getToken" | "signal">,
+  onProgress?: (p: EBibleTargetProgress) => void,
+): Promise<{ committedCount: number; skippedCount: number }> {
+  const toCommit = matchResult.matched.filter((m) => selectedCellIds.has(m.cellId))
+  if (toCommit.length === 0) {
+    return { committedCount: 0, skippedCount: matchResult.matched.length }
+  }
+
+  // Group by fileId — each file needs its own token.
+  const byFile = new Map<string, EBibleMatchedCell[]>()
+  for (const m of toCommit) {
+    const arr = byFile.get(m.fileId) ?? []
+    arr.push(m)
+    byFile.set(m.fileId, arr)
+  }
+
+  onProgress?.({ phase: "save", cellsEnqueued: 0, cellsTotal: toCommit.length })
+  let totalEnqueued = 0
+
+  for (const [fileId, cells] of byFile) {
+    const commits: TargetCommit[] = cells
+      .filter((c) => c.parentId) // skip cells with no chain parent (edge case)
+      .map((c) => ({
+        id: uuidv7(),
+        cellId: c.cellId,
+        parentId: c.parentId,
+        value: c.incomingText,
+      }))
+
+    await bulkUploadTargetCommits({
+      projectId: ctx.projectId,
+      fileId,
+      author: ctx.author,
+      commits,
+      getToken: ctx.getToken,
+      signal: ctx.signal,
+      onProgress: (count) => {
+        totalEnqueued += count
+        onProgress?.({ phase: "save", cellsEnqueued: totalEnqueued, cellsTotal: toCommit.length })
+      },
+    })
+  }
+
+  const skippedCount = matchResult.matched.length - toCommit.length
+  return { committedCount: toCommit.length, skippedCount }
+}
+
 export type MaculaImportPhase = "parse" | "save" | "morph"
 export interface MaculaProgress {
   phase: MaculaImportPhase

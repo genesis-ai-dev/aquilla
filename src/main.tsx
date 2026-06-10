@@ -9,6 +9,7 @@ import { applyTheme } from "./branding/apply-theme"
 import { BrandProvider } from "./branding/BrandProvider"
 import { ThemeModeProvider } from "./branding/ThemeMode"
 import { ColorThemeProvider } from "./branding/ColorTheme"
+import { ErrorBoundary } from "./components/ErrorBoundary"
 // Buffer/crypto/etc. provided by vite-plugin-node-polyfills (see vite.config.ts)
 
 applyTheme(brand)
@@ -27,16 +28,18 @@ const queryClient = new QueryClient({
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
-    <QueryClientProvider client={queryClient}>
-      <BrandProvider>
-        <ThemeModeProvider>
-          <ColorThemeProvider>
-            <BrowserRouter>
-              <App />
-            </BrowserRouter>
-          </ColorThemeProvider>
-        </ThemeModeProvider>
-      </BrandProvider>
-    </QueryClientProvider>
+    <ErrorBoundary>
+      <QueryClientProvider client={queryClient}>
+        <BrandProvider>
+          <ThemeModeProvider>
+            <ColorThemeProvider>
+              <BrowserRouter>
+                <App />
+              </BrowserRouter>
+            </ColorThemeProvider>
+          </ThemeModeProvider>
+        </BrandProvider>
+      </QueryClientProvider>
+    </ErrorBoundary>
   </StrictMode>
 )

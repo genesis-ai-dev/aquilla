@@ -64,7 +64,6 @@ Recommended fix (wave-2 `aud-lock-client` scope or standalone):
   — OR, after upsetting the presence entry, immediately re-broadcast any active locks for
   that user via `lock.claimed` frames to all connections (including the new one) so client
   maps are correct again. The latter also fixes the reconnecting client's own lock-map gap.
->>>>>>> swarm/aud-fix-locks
 
 ## Agent-reported TODOs (wave 1)
 

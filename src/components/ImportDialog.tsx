@@ -71,9 +71,9 @@ interface ImportDialogProps {
   sourceCells?: SourceCellRef[]
   /**
    * FRO-287: files already in the project. Used by the collision guard to detect
-   * re-imports and offer Skip / Import as duplicate choices.
-   * Only `name` is required; bookCode is not yet on FileReference so we match by
-   * name only. Fresh projects (empty array or absent) skip the detection step.
+   * re-imports and offer Skip / Import as duplicate choices. Wired from
+   * ProjectWorkspace (FRO-272 glue); FileReference satisfies { name }.
+   * Fresh projects (empty array or absent) skip the detection step.
    */
   existingFiles?: { name: string }[]
 }

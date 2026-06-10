@@ -32,6 +32,7 @@ interface FileRowRaw {
   filled_count: number
   word_count: number
   last_edit_at: number | null
+  deleted_at: number | null
 }
 
 interface FileSummary {
@@ -54,6 +55,8 @@ interface FileSummary {
   filledCount: number
   wordCount: number
   lastEditAt: number | null
+  /** FRO-272: epoch-ms when this file was soft-deleted, or null if active. */
+  deletedAt: number | null
 }
 
 function mapRow(row: FileRowRaw): FileSummary {
@@ -79,9 +82,13 @@ function mapRow(row: FileRowRaw): FileSummary {
     filledCount: row.filled_count,
     wordCount: row.word_count,
     lastEditAt: row.last_edit_at,
+    deletedAt: row.deleted_at ?? null,
   }
 }
 
+// Active listing:  GET /api/v1/projects/:projectId/files
+// Single file:     GET /api/v1/projects/:projectId/files/:fileId
+// Trash listing:   GET /api/v1/projects/:projectId/files?trash=1
 const PATH_RE = /^\/api\/v1\/projects\/([^/]+)\/files(?:\/([^/]+))?$/
 
 export async function handleFilesReadRequest(
@@ -116,7 +123,10 @@ export async function handleFilesReadRequest(
 
   const columns =
     "id, project_id, name, role, kind, event_id, meta, " +
-    "cell_count, approved_count, filled_count, word_count, last_edit_at"
+    "cell_count, approved_count, filled_count, word_count, last_edit_at, deleted_at"
+
+  // ?trash=1 returns soft-deleted files only; default returns active files only.
+  const trash = url.searchParams.get("trash") === "1"
 
   if (fileId) {
     const sql = `SELECT ${columns} FROM files WHERE project_id = ? AND id = ?`
@@ -127,8 +137,9 @@ export async function handleFilesReadRequest(
     return Response.json({ file: mapRow(row) })
   }
 
+  const tombstoneFilter = trash ? "deleted_at IS NOT NULL" : "deleted_at IS NULL"
   const sql =
-    `SELECT ${columns} FROM files WHERE project_id = ? ` +
+    `SELECT ${columns} FROM files WHERE project_id = ? AND ${tombstoneFilter} ` +
     `ORDER BY last_edit_at DESC NULLS LAST, name ASC`
   const result = await env.AQUILLA_PG.prepare(sql)
     .bind(projectId)

@@ -16,6 +16,7 @@ import type { EventKind } from './types'
 import { handleCellEvent, type CellEventKind } from './handlers/cell-events'
 import { handleFileCreate } from './handlers/file-create'
 import { handleFileRename } from './handlers/file-rename'
+import { handleFileDelete, handleFileRestore } from './handlers/file-delete-restore'
 import { handleCommentEvent, type CommentEventKind } from './handlers/comment-events'
 import { handleAssignmentEvent, type AssignmentEventKind } from './handlers/assignment-events'
 import type { DispatchResult } from './handlers/types'
@@ -97,6 +98,26 @@ export function dispatchEvent(
         result: handleFileRename(
           db,
           authed as AuthorizedEvent<'file.rename'>,
+          serverTs,
+        ),
+      }
+
+    case 'file.delete':
+      return {
+        ok: true,
+        result: handleFileDelete(
+          db,
+          authed as AuthorizedEvent<'file.delete'>,
+          serverTs,
+        ),
+      }
+
+    case 'file.restore':
+      return {
+        ok: true,
+        result: handleFileRestore(
+          db,
+          authed as AuthorizedEvent<'file.restore'>,
           serverTs,
         ),
       }

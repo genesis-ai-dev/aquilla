@@ -47,6 +47,12 @@ export type EventKind =
   // File label rename (contributor-level). Non-chain-mutating — updates the
   // file's display name on the existing row; does not move cells.event_id.
   | 'file.rename'
+  // Soft-delete a file (project_lead+). Non-chain-mutating — stamps
+  // `files.deleted_at`; cells and audio are retained. R2 wipe is deferred.
+  | 'file.delete'
+  // Restore a soft-deleted file (project_lead+). Non-chain-mutating — clears
+  // `files.deleted_at`. Cells and audio remain intact throughout.
+  | 'file.restore'
   // Comments (non-chain-mutating; contributor-level).
   | 'comment.create'
   | 'comment.edit'
@@ -224,6 +230,12 @@ export interface EventPayloads {
     /** New display name for the file in the project sidebar. */
     name: string
   }
+  // Soft-delete a file. Non-chain-mutating; parentId omitted.
+  // Stamps `files.deleted_at`; cells and audio are retained (R2 wipe deferred).
+  'file.delete': Record<string, never>
+  // Restore a soft-deleted file. Non-chain-mutating; parentId omitted.
+  // Clears `files.deleted_at`. All cells and audio remain intact.
+  'file.restore': Record<string, never>
 
   // ── Comments (non-chain-mutating) ──────────────────────────────────────
   'comment.create': {

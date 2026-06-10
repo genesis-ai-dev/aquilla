@@ -41,6 +41,8 @@ export interface ProjectStateResponse {
   gitlabProjectId: number | null
   archivedAt: string | null
   archivedBy: { id: number; username: string } | null
+  /** Active/inactive lifecycle (migration 0033). Absent = active (compat). */
+  isActive?: boolean
   role: { level: number; name: string; source: string }
   /** Populated by the codex-db.files join. Optional only because old
    *  deployments may not have shipped the join yet — current servers

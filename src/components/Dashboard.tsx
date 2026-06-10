@@ -22,10 +22,13 @@ import { useBrand } from "@/branding/use-brand"
 import {
   fetchAccessibleProjects,
   minimalProjectRecord,
+  toggleProjectLifecycle,
   type CloudProjectSummary,
 } from "@/lib/sync/cloud-projects"
 import { filterCloudOnly } from "@/lib/projects/dedupe-cloud"
 import posthog from "@/lib/posthog"
+
+type LifecycleFilter = "active" | "inactive" | "all"
 
 export function Dashboard() {
   const [projects, setProjects] = useState<ProjectRecord[]>([])
@@ -36,6 +39,8 @@ export function Dashboard() {
   const [pendingTrashId, setPendingTrashId] = useState<string | null>(null)
   const [trashExpanded, setTrashExpanded] = useState(false)
   const [errorToast, setErrorToast] = useState<string | null>(null)
+  const [lifecycleFilter, setLifecycleFilter] = useState<LifecycleFilter>("active")
+  const [_pendingLifecycleId, setPendingLifecycleId] = useState<string | null>(null)
   const { session } = useFrontierSession()
   const navigate = useNavigate()
   const brand = useBrand()
@@ -149,6 +154,42 @@ export function Dashboard() {
     return false
   }
 
+  // project_lead+ (>=500) can toggle lifecycle.
+  function canToggleLifecycle(p: ProjectRecord): boolean {
+    return (p.syncRole?.level ?? 0) >= 500
+  }
+
+  async function handleToggleLifecycle(projectId: string) {
+    const project = projects.find((p) => p.id === projectId)
+    if (!project || !session?.jwt) return
+    const nextActive = project.isActive === false // frozen → activate; else → deactivate
+    try {
+      await toggleProjectLifecycle(session.jwt, projectId, nextActive)
+      posthog.capture("project lifecycle toggled", {
+        project_id: projectId,
+        is_active: nextActive,
+      })
+      // Optimistic update in local state
+      setProjects((prev) =>
+        prev.map((p) => p.id === projectId ? { ...p, isActive: nextActive } : p),
+      )
+    } catch (err) {
+      setErrorToast(
+        `Couldn't update lifecycle: ${err instanceof Error ? err.message : String(err)}`,
+      )
+    } finally {
+      setPendingLifecycleId(null)
+    }
+  }
+
+  // Apply the three-position lifecycle filter to local + cloud projects.
+  const filteredProjects = useMemo(() => {
+    if (lifecycleFilter === "all") return projects
+    if (lifecycleFilter === "inactive") return projects.filter((p) => p.isActive === false)
+    // "active" = default; treat absent isActive as active
+    return projects.filter((p) => p.isActive !== false)
+  }, [projects, lifecycleFilter])
+
   // Onboarding gate: only steer first-time users into the wizard. A signed-in
   // user with cloud projects on another device should land on the dashboard
   // and see those projects, not the "create your first project" flow. Wait
@@ -156,6 +197,7 @@ export function Dashboard() {
   const onboardingComplete = localStorage.getItem("codex:onboardingComplete") === "true"
   const hasAnyProject =
     projects.length > 0 || trashed.length > 0 || cloudProjects.length > 0
+  const hasInactive = projects.some((p) => p.isActive === false)
   const cloudReady = !session?.jwt || cloudProjectsLoaded
   if (!loading && cloudReady && !onboardingComplete && !hasAnyProject) {
     return <Navigate to="/onboarding" replace />
@@ -187,24 +229,56 @@ export function Dashboard() {
       </header>
       <main className="px-6 py-6">
         <section>
-          <h2 className="mb-3 text-sm font-semibold text-muted-foreground">Your projects</h2>
+          <div className="mb-3 flex items-center justify-between gap-2 flex-wrap">
+            <h2 className="text-sm font-semibold text-muted-foreground">Your projects</h2>
+            {/* Three-position lifecycle filter — only shown when any inactive project exists */}
+            {hasInactive && (
+              <div
+                className="flex items-center gap-0.5 rounded-lg bg-muted p-0.5 text-xs font-medium"
+                role="group"
+                aria-label="Project status filter"
+                data-testid="lifecycle-filter"
+              >
+                {(["active", "inactive", "all"] as LifecycleFilter[]).map((f) => (
+                  <button
+                    key={f}
+                    type="button"
+                    onClick={() => setLifecycleFilter(f)}
+                    className={`rounded-md px-2.5 py-1 capitalize transition-colors ${
+                      lifecycleFilter === f
+                        ? "bg-background shadow-sm text-foreground"
+                        : "text-muted-foreground hover:text-foreground"
+                    }`}
+                    aria-pressed={lifecycleFilter === f}
+                    data-testid={`lifecycle-filter-${f}`}
+                  >
+                    {f}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
           {loading && projects.length === 0 ? (
             <ProjectCardGridSkeleton count={3} />
-          ) : projects.length === 0 ? (
+          ) : filteredProjects.length === 0 ? (
             <p className="text-sm text-muted-foreground">
-              {session
-                ? "No local projects yet. Import one from Frontier below or create a new one."
-                : "No projects yet. Create one or log in to import from Frontier."}
+              {projects.length === 0
+                ? session
+                  ? "No local projects yet. Import one from Frontier below or create a new one."
+                  : "No projects yet. Create one or log in to import from Frontier."
+                : `No ${lifecycleFilter} projects.`}
             </p>
           ) : (
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-              {projects.map((p) => (
+              {filteredProjects.map((p) => (
                 <ProjectCard
                   key={p.id}
                   project={p}
                   onClick={() => navigate(`/project/${p.id}`)}
                   canTrash={canTrash(p)}
                   onTrash={() => setPendingTrashId(p.id)}
+                  canToggleLifecycle={canToggleLifecycle(p)}
+                  onToggleLifecycle={() => handleToggleLifecycle(p.id)}
                 />
               ))}
             </div>

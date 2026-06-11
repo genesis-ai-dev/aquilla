@@ -3,12 +3,13 @@
  *
  * Unit tests for the useChat hook.
  * Covers: message history append, streaming state, cell-context toggle,
- *         error handling, abort/stop.
+ *         error recovery (failed sends stay visible, retry/dismiss),
+ *         regenerate, persistence, abort/stop.
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
 import { renderHook, act } from "@testing-library/react"
-import { useChat } from "./useChat"
+import { useChat, mapChatError } from "./useChat"
 import type { CompletionSettings } from "@/lib/parsers/types"
 import type { FrontierSession } from "@/lib/frontier/types"
 
@@ -26,7 +27,7 @@ vi.mock("@/lib/completion/chat-service", () => ({
   chatIsConfigured: vi.fn(() => true),
 }))
 
-import { sendChatMessage, chatIsConfigured } from "@/lib/completion/chat-service"
+import { sendChatMessage, chatIsConfigured, buildChatMessages } from "@/lib/completion/chat-service"
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -84,6 +85,7 @@ Object.defineProperty(window, "localStorage", { value: localStorageMock })
 
 describe("useChat", () => {
   beforeEach(() => {
+    localStorageMock.clear()
     vi.mocked(chatIsConfigured).mockReturnValue(true)
     vi.mocked(sendChatMessage).mockResolvedValue("AI reply")
   })
@@ -96,7 +98,6 @@ describe("useChat", () => {
     const { result } = makeHook()
     expect(result.current.messages).toEqual([])
     expect(result.current.isStreaming).toBe(false)
-    expect(result.current.error).toBeNull()
   })
 
   it("appends user message and assistant reply to history after a turn", async () => {
@@ -110,6 +111,19 @@ describe("useChat", () => {
     expect(msgs).toHaveLength(2)
     expect(msgs[0]).toMatchObject({ role: "user", content: "Hello" })
     expect(msgs[1]).toMatchObject({ role: "assistant", content: "AI reply" })
+  })
+
+  it("stamps new messages with a ts timestamp", async () => {
+    const { result } = makeHook()
+
+    await act(async () => {
+      await result.current.sendMessage("Hello", null)
+    })
+
+    for (const msg of result.current.messages) {
+      expect(typeof msg.ts).toBe("number")
+      expect(msg.id).toBeTruthy()
+    }
   })
 
   it("keeps history growing across multiple turns", async () => {
@@ -138,7 +152,6 @@ describe("useChat", () => {
       await result.current.sendMessage("test", CELL_CTX)
     })
 
-    const { buildChatMessages } = await import("@/lib/completion/chat-service")
     expect(buildChatMessages).toHaveBeenCalledWith(
       expect.objectContaining({ cellContext: CELL_CTX }),
     )
@@ -153,14 +166,24 @@ describe("useChat", () => {
       await result.current.sendMessage("test", CELL_CTX)
     })
 
-    const { buildChatMessages } = await import("@/lib/completion/chat-service")
     expect(buildChatMessages).toHaveBeenCalledWith(
       expect.objectContaining({ cellContext: null }),
     )
   })
 
-  it("sets error state and rolls back user message on failure", async () => {
-    vi.mocked(sendChatMessage).mockRejectedValueOnce(new Error("Network error"))
+  it("persists includeCellContext per project and restores it on remount", () => {
+    const { result, unmount } = makeHook("proj-ctx")
+    act(() => { result.current.setIncludeCellContext(false) })
+    unmount()
+
+    const { result: result2 } = makeHook("proj-ctx")
+    expect(result2.current.includeCellContext).toBe(false)
+  })
+
+  // ── Error recovery (spec: failed sends stay visible, no rollback) ────────
+
+  it("keeps the failed user message visible with failed status instead of rolling back", async () => {
+    vi.mocked(sendChatMessage).mockRejectedValueOnce(new Error("Completion failed: 500 boom"))
 
     const { result } = makeHook()
 
@@ -168,10 +191,125 @@ describe("useChat", () => {
       await result.current.sendMessage("will fail", null)
     })
 
-    expect(result.current.error).toBe("Network error")
-    // Message was rolled back to empty history
+    expect(result.current.messages).toHaveLength(1)
+    const failed = result.current.messages[0]
+    expect(failed).toMatchObject({
+      role: "user",
+      content: "will fail",
+      status: "failed",
+      errorMessage: "Something went wrong.",
+    })
+    expect(failed.errorDetail).toContain("boom")
+  })
+
+  it("maps known errors to human copy", () => {
+    expect(mapChatError(new Error("Sign in to use Frontier AI.")).message).toBe("Sign in to use AI chat.")
+    expect(mapChatError(new Error("Completion failed: 401 unauthorized")).message).toBe("Sign in to use AI chat.")
+    expect(mapChatError(new Error("Frontier AI limit reached: Out of credits.")).message).toBe(
+      "AI limit reached — try again later.",
+    )
+    expect(mapChatError(new Error("Completion failed: 429 too many requests")).message).toBe(
+      "AI limit reached — try again later.",
+    )
+    expect(mapChatError(new TypeError("Failed to fetch")).message).toBe("Connection lost — retry?")
+    expect(mapChatError(new Error("kaboom")).message).toBe("Something went wrong.")
+  })
+
+  it("retryMessage re-sends a failed message without duplicating it", async () => {
+    vi.mocked(sendChatMessage).mockRejectedValueOnce(new Error("Failed to fetch"))
+
+    const { result } = makeHook()
+
+    await act(async () => {
+      await result.current.sendMessage("retry me", null)
+    })
+    expect(result.current.messages).toHaveLength(1)
+    const failedId = result.current.messages[0].id
+
+    vi.mocked(sendChatMessage).mockResolvedValueOnce("Recovered reply")
+    await act(async () => {
+      await result.current.retryMessage(failedId, null)
+    })
+
+    expect(result.current.messages).toHaveLength(2)
+    expect(result.current.messages[0]).toMatchObject({
+      role: "user",
+      content: "retry me",
+      id: failedId,
+    })
+    expect(result.current.messages[0].status).toBeUndefined()
+    expect(result.current.messages[1]).toMatchObject({ role: "assistant", content: "Recovered reply" })
+  })
+
+  it("dismissMessage removes a failed message", async () => {
+    vi.mocked(sendChatMessage).mockRejectedValueOnce(new Error("Failed to fetch"))
+
+    const { result } = makeHook()
+
+    await act(async () => {
+      await result.current.sendMessage("dismiss me", null)
+    })
+    const failedId = result.current.messages[0].id
+
+    act(() => { result.current.dismissMessage(failedId) })
     expect(result.current.messages).toHaveLength(0)
   })
+
+  it("excludes failed messages from the LLM history on subsequent sends", async () => {
+    vi.mocked(sendChatMessage).mockRejectedValueOnce(new Error("Failed to fetch"))
+
+    const { result } = makeHook()
+
+    await act(async () => {
+      await result.current.sendMessage("failed turn", null)
+    })
+
+    vi.mocked(sendChatMessage).mockResolvedValueOnce("ok")
+    await act(async () => {
+      await result.current.sendMessage("next turn", null)
+    })
+
+    const lastBuild = vi.mocked(buildChatMessages).mock.calls.at(-1)![0]
+    expect(lastBuild.history).toEqual([])
+  })
+
+  // ── Regenerate ───────────────────────────────────────────────────────────
+
+  it("regenerate removes the last assistant reply and re-sends the prior user turn", async () => {
+    const { result } = makeHook()
+
+    await act(async () => {
+      await result.current.sendMessage("Question", null)
+    })
+    expect(result.current.messages).toHaveLength(2)
+
+    vi.mocked(sendChatMessage).mockResolvedValueOnce("Better reply")
+    await act(async () => {
+      await result.current.regenerate(null)
+    })
+
+    expect(result.current.messages).toHaveLength(2)
+    expect(result.current.messages[0]).toMatchObject({ role: "user", content: "Question" })
+    expect(result.current.messages[1]).toMatchObject({ role: "assistant", content: "Better reply" })
+  })
+
+  it("regenerate is a no-op when the last message is not an assistant reply", async () => {
+    vi.mocked(sendChatMessage).mockRejectedValueOnce(new Error("Failed to fetch"))
+    const { result } = makeHook()
+
+    await act(async () => {
+      await result.current.sendMessage("failed", null)
+    })
+    vi.mocked(sendChatMessage).mockClear()
+
+    await act(async () => {
+      await result.current.regenerate(null)
+    })
+
+    expect(sendChatMessage).not.toHaveBeenCalled()
+  })
+
+  // ── Misc ────────────────────────────────────────────────────────────────
 
   it("clearHistory resets to empty state", async () => {
     const { result } = makeHook()
@@ -184,7 +322,6 @@ describe("useChat", () => {
     act(() => { result.current.clearHistory() })
 
     expect(result.current.messages).toHaveLength(0)
-    expect(result.current.error).toBeNull()
   })
 
   it("ignores empty / whitespace-only messages", async () => {
@@ -199,7 +336,6 @@ describe("useChat", () => {
   })
 
   it("persists and reloads history from localStorage when projectId is given", async () => {
-    localStorageMock.clear()
     const { result, unmount } = makeHook("proj-abc")
 
     await act(async () => {
@@ -215,8 +351,23 @@ describe("useChat", () => {
     expect(result2.current.messages[0]).toMatchObject({ role: "user", content: "Persist me" })
   })
 
+  it("tolerates legacy persisted messages without id/ts", () => {
+    localStorageMock.setItem(
+      "chat-history:proj-legacy",
+      JSON.stringify([
+        { role: "user", content: "old question" },
+        { role: "assistant", content: "old answer" },
+      ]),
+    )
+
+    const { result } = makeHook("proj-legacy")
+    expect(result.current.messages).toHaveLength(2)
+    // ids are assigned on load so list keys / retry / dismiss work
+    expect(result.current.messages[0].id).toBeTruthy()
+    expect(result.current.messages[0].ts).toBeUndefined()
+  })
+
   it("does not persist history when projectId is omitted", async () => {
-    localStorageMock.clear()
     const { result, unmount } = makeHook() // no projectId
 
     await act(async () => {
@@ -244,19 +395,14 @@ describe("useChat", () => {
     })
 
     const { result } = makeHook()
-    const streamingSnapshots: string[] = []
 
-    // We need to observe streamingText during the call — capture it from re-renders
-    const originalSend = result.current.sendMessage
     await act(async () => {
-      await originalSend("hi", null)
+      await result.current.sendMessage("hi", null)
     })
 
     // After completion, streamingText is cleared and message is in history
     expect(result.current.streamingText).toBe("")
     const last = result.current.messages[result.current.messages.length - 1]
     expect(last.content).toBe("Hello world")
-
-    void streamingSnapshots // suppress unused warning
   })
 })

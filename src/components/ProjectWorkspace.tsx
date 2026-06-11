@@ -76,7 +76,6 @@ import { attachMediaFileToTimeline, attachMediaUrlToTimeline } from "@/lib/timel
 import { useCellsAuditStatsWithOverlay } from "@/hooks/useCellsAuditStatsWithOverlay"
 import { useComments } from "@/hooks/useComments"
 import { Film, Scale, MessagesSquare, Share2, Settings as SettingsIcon, Lock, ClipboardList, Trash2, Undo2, Sparkles, Mic2, Download, BookMarked, BookOpen, Users, UserCheck, Eye, ArrowRight } from "lucide-react"
-import { ChatPanel } from "./ChatPanel"
 import { ChatDockPanel } from "./ChatDockPanel"
 import { SearchDockPanel } from "./SearchDockPanel"
 import { SearchResultsView } from "./search/SearchResultsView"
@@ -460,7 +459,6 @@ export function ProjectWorkspace() {
   const [parallelMode, setParallelMode] = useState<ParallelPanelMode>("search")
   const [parallelScope, setParallelScope] = useState<ParallelPanelScope>("project")
   const [shareOpen, setShareOpen] = useState(false)
-  const [chatOpen, setChatOpen] = useState(false)
   // FRO-308: left dock active tab (null = collapsed rail only)
   const [dockTab, setDockTab] = useState<DockTab | null>("files")
   // FRO-309: expanded search results overlay in the main area
@@ -3571,23 +3569,6 @@ export function ProjectWorkspace() {
         open={shareOpen} onOpenChange={setShareOpen}
         projectId={projectId!}
         onSharesChanged={refreshChecklistShares}
-      />
-      {/* FRO-175: AI chat panel */}
-      <ChatPanel
-        open={chatOpen}
-        onOpenChange={setChatOpen}
-        chat={chat}
-        onInsertIntoCell={handleChatInsertIntoCell}
-        currentCell={(() => {
-          if (!focusedCellId) return null
-          const cell = cells.find((c) => c.id === focusedCellId)
-          if (!cell) return null
-          return {
-            sourceText: cell.original,
-            translatedText: cell.translated,
-            context: cell.context ?? undefined,
-          }
-        })()}
       />
       <VideoAttachmentDialog
         open={videoDialogOpen} onOpenChange={setVideoDialogOpen}

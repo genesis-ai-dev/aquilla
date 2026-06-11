@@ -1,14 +1,13 @@
 /**
- * ChatPanel.test.tsx — chat UX improvements
+ * ChatDockPanel.test.tsx — chat UX improvements
  *
- * Both chat shells (Sheet + dock) must render assistant markdown and the
- * message actions through the shared chat components. The Sheet variant has
- * no UI entry point on main right now, so this test is its only coverage.
+ * The dock shell must render assistant markdown, the message actions, and
+ * composer/error behavior through the shared chat components
+ * (src/components/chat/). This is the panel-level coverage for those pieces.
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { render, screen, fireEvent } from "@testing-library/react"
-import { ChatPanel } from "./ChatPanel"
 import { ChatDockPanel } from "./ChatDockPanel"
 import type { UseChatReturn, UiChatMessage, CellContext } from "@/hooks/useChat"
 
@@ -43,17 +42,9 @@ beforeEach(() => {
   Object.defineProperty(HTMLElement.prototype, "scrollTo", { value: vi.fn(), writable: true })
 })
 
-describe("ChatPanel (sheet)", () => {
+describe("ChatDockPanel", () => {
   it("renders assistant markdown and message actions", () => {
-    render(
-      <ChatPanel
-        open
-        onOpenChange={vi.fn()}
-        chat={makeChat()}
-        currentCell={CELL}
-        onInsertIntoCell={vi.fn()}
-      />,
-    )
+    render(<ChatDockPanel chat={makeChat()} currentCell={CELL} onInsertIntoCell={vi.fn()} />)
     expect(screen.getByRole("heading", { name: "Notes" })).toBeInTheDocument()
     expect(screen.getByText("bold")).toBeInTheDocument()
     expect(screen.getByText("code line")).toBeInTheDocument()
@@ -64,35 +55,19 @@ describe("ChatPanel (sheet)", () => {
   })
 
   it("hides Insert into cell when no cell is focused", () => {
-    render(
-      <ChatPanel
-        open
-        onOpenChange={vi.fn()}
-        chat={makeChat()}
-        currentCell={null}
-        onInsertIntoCell={vi.fn()}
-      />,
-    )
+    render(<ChatDockPanel chat={makeChat()} currentCell={null} onInsertIntoCell={vi.fn()} />)
     expect(screen.queryByRole("button", { name: "Insert into cell" })).not.toBeInTheDocument()
   })
 
   it("sends on Enter and newlines on Shift+Enter", () => {
     const chat = makeChat()
-    render(<ChatPanel open onOpenChange={vi.fn()} chat={chat} currentCell={null} />)
+    render(<ChatDockPanel chat={chat} currentCell={null} />)
     const ta = screen.getByPlaceholderText(/Ask a question/)
     fireEvent.change(ta, { target: { value: "hello" } })
     fireEvent.keyDown(ta, { key: "Enter", shiftKey: true })
     expect(chat.sendMessage).not.toHaveBeenCalled()
     fireEvent.keyDown(ta, { key: "Enter" })
     expect(chat.sendMessage).toHaveBeenCalledWith("hello", null)
-  })
-})
-
-describe("ChatDockPanel (dock)", () => {
-  it("renders assistant markdown through the same shared components", () => {
-    render(<ChatDockPanel chat={makeChat()} currentCell={CELL} onInsertIntoCell={vi.fn()} />)
-    expect(screen.getByRole("heading", { name: "Notes" })).toBeInTheDocument()
-    expect(screen.getByRole("button", { name: "Insert into cell" })).toBeInTheDocument()
   })
 
   it("shows failed messages with Retry and Dismiss", () => {

@@ -22,7 +22,7 @@ export function PrivacyStep({ onNext, onBack }: { onNext: () => void; onBack: ()
         </div>
         <h2 className="text-2xl font-semibold">Help us improve</h2>
         <p className="text-sm text-muted-foreground">
-          We use anonymous product analytics to understand which features people use and where things go wrong.
+          We use product analytics to understand which features people use and where things go wrong.
         </p>
       </div>
 
@@ -30,7 +30,7 @@ export function PrivacyStep({ onNext, onBack }: { onNext: () => void; onBack: ()
         <div className="flex items-start justify-between gap-4">
           <div className="space-y-1">
             <Label htmlFor="analytics-consent" className="text-sm font-medium">
-              Share anonymous usage data
+              Share usage data
             </Label>
             <p className="text-xs text-muted-foreground">
               Includes events like project creation, exports, and AI translations. Never the contents of your

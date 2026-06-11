@@ -38,7 +38,7 @@ export function Preferences() {
                 <div className="flex items-start justify-between gap-4">
                   <div className="space-y-1">
                     <Label htmlFor="analytics-consent" className="text-sm font-medium">
-                      Share anonymous usage data
+                      Share usage data
                     </Label>
                     <p className="text-xs text-muted-foreground">
                       Events like project creation, exports, and AI translations. Never the contents of your

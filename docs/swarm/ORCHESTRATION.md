@@ -2,6 +2,113 @@
 
 ---
 
+# 🆕🆕🆕🆕 CURRENT GOAL (2026-06-10 PD7) — Drain Prototype Debugging Todo/Backlog dev queue
+
+> **This block is the active goal.** Everything below is reference-only from prior swarms.
+> Driver: `/swarm Prototype Debugging` — Todo/Backlog only; skip Dev Verification Needed / Ready for QA. Sonnet agents.
+
+## §0 STOP checklist (PD7)
+- [ ] Every eligible Todo/Backlog issue at **Fixed**, **Dev Verification Needed**, or honestly **blocked** with a Linear note.
+- [ ] Integration `swarm/pd7-integration` green: `npx tsc -b --noEmit` + `npx vitest run`; `npm run build` before promotion; worker tsc/test if touched.
+- [ ] Live-UI QA (singleton) walked each fix's SWARM-TODO before Fixed.
+- [ ] Promoted to main only with main clean apart from protected untracked (`pd5-settings-text.txt`, `tn-fixture.tsv`) + this file.
+- [ ] Gaps traced in `docs/swarm/TRACES.md`.
+
+## §EXCLUDED (PD7)
+- 14 issues already merged-on-main, reconciled → Dev Verification Needed in Linear: FRO-324/305/300/301/302/306/257/258/304/312/221/218/169/179.
+- FRO-173 — real data gap (cell_audio empty), not a code bug; investigation on main d675e63. Linear-commented, left Todo for human.
+- FRO-246 — needs a new TTS demo asset (content decision). Linear-commented.
+- FRO-227/224 — Dispatched homepage-claims verification owned by a prior dispatch; not reclaimed.
+- FRO-209 — likely fixed by FRO-270 (/reset-password shipped in UX-audit swarm); UI-QA agent verifies, then dup/close.
+
+## §1 Operating model (PD7)
+- Integration `swarm/pd7-integration` (worktree `.worktrees/pd7-integration`, off main `412f800`, node_modules ×3 symlinked).
+- Agents: sonnet, manual worktrees off live integration tip (NEVER isolation:worktree). Commit only; no push/deploy/status-advance beyond Dispatched→Fixed per /issue.
+- Claim = orchestrator flips issue → Dispatched before spawn.
+
+## §3 Workstream registry + wave plan (PD7)
+| WS | FRO | Title | Pri | Branch | Owns | Wave | Status |
+|---|---|---|---|---|---|---|---|
+| A | 323+321+322 | Invite cluster: bulk-add visibility, typeahead privacy, path consolidation | High | swarm/pd7-invites | MembersPage.tsx, invite picker, SharePanel invite tab, auth-worker invite/search endpoints | 1 | in-flight |
+| B | 308+320 | Left sidebar rework + AI chat docked into left bar | Med | swarm/pd7-sidebar | AppShell/sidebar, ChatPanel placement, ProjectWorkspace panel docking | 1 | in-flight |
+| C | 310 | Import flow: client-side parse preview-before-confirm + beta flags | Med | swarm/pd7-import | ImportDialog.tsx, src/lib/import.ts | 1 | in-flight |
+| D | 317 | Footnotes: toggle + inline render + edit | Med | swarm/pd7-footnotes | EditorTable cell rendering, footnote lib | 1 | in-flight |
+| E | 319 | Audio take-switch feedback + spam-safety | Med | swarm/pd7-audio | audio panel/take components | 1 | in-flight |
+| F | 313 | Plain-text export option | Low | swarm/pd7-export | export-service, ExportDialog | 1 | in-flight |
+| G | 303 | AI chat: streaming, history, non-blocking, real cell context | Med | swarm/pd7-chat | ChatPanel internals (after B) | 2 | — |
+| H | 314+315+316 | Importers: spreadsheet col-mapping, cell-labels template, finished-translation import | Med | swarm/pd7-importers | parsers, ImportDialog (after C) | 2 | — |
+| I | 318 | Milestones: event-log model + UI + sidebar nav + sticky anchor | High | swarm/pd7-milestones | sync-worker events (additive), milestones UI (after B) | 2 | — |
+| J | 309 | Search UX: jump-in-context + expand-all (after B's dock) | Med | swarm/pd7-search | search panel/results | 2 | — |
+| K | 311 | AI metrics: post-edit magnitude over time (simplest) | Med | swarm/pd7-metrics | metrics surface | 2 | — |
+| L | 307 | Report-a-problem → PostHog session capture | Med | swarm/pd7-report | new component + posthog lib | 2 | — |
+| M | 259 | /projects refactor | Low | swarm/pd7-projects | ProjectsPage | 3 | — |
+| N | 193 | AD-9 detach-from-source | Low | swarm/pd7-detach | settings + sync-worker event | 3 | — |
+| O | 183 | Terminology spec gaps (scope: decompose first) | Med | — | — | 3 | needs decomposition |
+
+## §M Merge log (PD7)
+- 2026-06-10 · integration `swarm/pd7-integration` created off main `412f800`. Reconciliation DONE: 14 issues → Dev Verification Needed w/ commit-ref comments (FRO-257 comment failed — issue archived; status updated). FRO-173/246 commented, left Todo.
+- 2026-06-10 · Wave 1 CLAIMED (→Dispatched) + dispatched, 6 sonnet agents on manual worktrees off integration tip 412f800: A invites(323+321+322), B sidebar+chat(308+320), C import-preview(310), D footnotes(317), E audio-takes(319), F txt-export(313).
+- 2026-06-10 · **E (FRO-319) MERGED** → integration 5b8efbe (orchestrator fixed 1 unused-var tsc error in test). tsc 0 · full vitest GREEN · FRO-319 Fixed by agent.
+- 2026-06-10 · ⚠️ API-522 outage killed agents A/B/C/D/F mid-flight. F had committed 9d1c0ab — orchestrator verified (tsc 0, export tests 68/68), **F (FRO-313) MERGED** → integration, FRO-313 → Fixed + comment. A/B/C/D respawned as FINISHERS into the same worktrees (A effectively fresh).
+- 2026-06-10 · **C (FRO-310) MERGED** → integration (finisher completed; FRO-310 Fixed by agent). Orchestrator fixed 3 FRO-287 collision tests broken by the new preview step (mock parseFile + walk preview-confirm) @ 5e087d7+amend.
+- 2026-06-10 · **B (FRO-308+320) MERGED** → integration 2eba17a (finisher; AppShell back-compat `sidebar` alias). FRO-308/320 → Fixed by orchestrator (320's comment blocked by permission classifier — status set, no comment).
+- 2026-06-10 · **★ INTEGRATION GREEN post-wave-1-partial: tsc 0 · vitest 2658/2658.** Footnotes finisher died 2× more (API flaky) — finisher #3 dispatched with commit-early discipline. Invites agent still in flight.
+- 2026-06-10 · **Wave 2 dispatched** (5 sonnet agents, worktrees off live integration tip): G chat(303), H importers(316+314+315), J search(309), K metrics(311). L report-problem(307) deferred until a slot frees. In-flight total 6.
+- 2026-06-10 · **G (FRO-303) MERGED** (streaming pre-existed; thread history via localStorage; cell context confirmed) — Fixed by agent. **L (FRO-307) dispatched** into freed slot.
+- 2026-06-10 · **D (FRO-317) MERGED** (finisher #3 16c9d76; orchestrator did the ProjectWorkspace wiring: useFootnotesPreference → ViewSettingsMenu + EditorTable). USFM edit-safe; DOCX read-only.
+- 2026-06-10 · **J (FRO-309) MERGED** 6203563 (click-to-jump + SearchResultsView expand-all) — Fixed by agent.
+- 2026-06-10 · **A (FRO-323+321+322) MERGED** 0f03b8b. 323: server path proven correct w/ round-trip test, real-world cause = role-floor/stale-hook, "park" typo absent; 321: scoped /users/search?scoped=1 + /projects?minRole=600; 322: mode toggle + honest "Add to projects" label (full email-batch unification traced). Spec updated in aquilla-specs. All three Fixed by agent.
+- 2026-06-10 · **★ GATE GREEN: tsc 0 · vitest 2685/2685 · auth-worker tsc 0 + 266/266.**
+- 2026-06-10 · **Wave 3 dispatched:** M /projects-refactor(259), N detach-AD9(193). In flight: H importers, K metrics, L report, M, N (5).
+- 2026-06-10 · **K (FRO-311) MERGED** 0e5e301 (NED post-edit metrics, derive-on-read off target.cell.commit ai_suggestion provenance; Settings → AI Metrics). **L (FRO-307) MERGED** 89fa42f (Report-a-problem → PostHog + replay URL; consent-off honest copy path; "anonymous usage data"→"usage data").
+- 2026-06-10 · **H (FRO-316+314+315) MERGED** 78a610d. ⚠️ ORCHESTRATOR INTERVENTION: FRO-314's apply path wrote cast names into TARGET TEXT via real commits (corruption). Disabled at e073ab7 (template+preview kept); **FRO-314 reopened → Todo** w/ unblocker comment (needs cell.label.set-style event). 316/315 sound (zero-dep XLSX via DecompressionStream; paired import reuses FRO-191 matcher).
+- 2026-06-10 · **M (FRO-259) MERGED** 34396d6 (Linear-style /projects rows + filter/sort; created/updated cols traced — list endpoint lacks fields). TeamDetail "pre-existing fail" claim NOT reproduced on integration (suite green).
+- 2026-06-10 · **FRO-183 DECOMPOSED** → children FRO-327/328/329 (v1 trio, agent dispatched on swarm/pd7-terminology) + FRO-330 (data-model DECISION for Ryder, Todo). Deferred: verdict pipeline, dictionaries, org subscriptions.
+- 2026-06-10 · **N (FRO-193) MERGED** 7b5ba29 (SourceLinkSection + typed-DETACH confirm; project.link-source event added additively to sync-worker; snapshot burst via pre-existing auth-worker snapshotSourceCells; markers clear by pointer-match). Gates: tsc 0 · sync-worker 585/585 · auth-worker 266/266.
+- 2026-06-10 · **★ npm run build PASS** on integration (pre-detach tip).
+
+---
+
+# 🆕🆕🆕 CURRENT GOAL (2026-06-11) — QoL sweep (Prototype Debugging simple issues)
+
+> **This block is the active goal.** Everything below is reference-only from prior swarms.
+
+## §0 STOP checklist
+- [ ] Every eligible issue at **Fixed** or honestly **blocked** with a Linear note.
+- [ ] Integration green: `npx tsc -b --noEmit` + `npx vitest run`; `npm run build` passes before promotion.
+- [ ] Promoted to main only with main's working tree clean apart from untracked files.
+- [ ] Each fix verified; spec reconciled per `/issue` Step 2.5.
+- [ ] Remaining gaps traced in `docs/swarm/TRACES.md`.
+
+## §EXCLUDED
+- FRO-257/FRO-258 — wave 2 (file overlap with wave 1; combined into one agent)
+- FRO-304/FRO-312 — wave 2 (file overlap with FRO-305 on ProjectSettings.tsx; combined into one agent)
+
+## §1 Operating model
+- Integration `swarm/qol-integration` (worktree `.worktrees/qol-integration`, off main `89e87e1`, node_modules symlinked).
+- Each agent → manual worktree off integration tip. sonnet model.
+- Agents commit to their branch, NEVER push/deploy/promote.
+- Merge: branch → integration → verify → log §M. Promote integration → main (ff) when green AND main clean.
+- Protected untracked: `pd5-settings-text.txt`, `tn-fixture.tsv`.
+
+## §3 Workstream registry
+| FRO | Title | Pri | Branch | Owns | Status |
+|---|---|---|---|---|---|
+| 324 | Drop trailing ellipsis on "Invite to projects" button | Low | swarm/fro-324@3b95ca0 | MembersPage.tsx | merged-main |
+| 305 | Default top_k to 15 | Low | swarm/fro-305 | ProjectSettings.tsx, useCompletion.ts | merged-main |
+| 300 | Outbox indicator position jump on reconnect | Low | swarm/fro-300 | SyncStatusIndicator.tsx | merged-main |
+| 301 | Term mining stopwords + phrase splitting | Med | swarm/fro-301@f973719 | candidates.ts | merged-main |
+| 302 | Setup walkthrough: import files first | Med | swarm/fro-302 | onboarding/, useSetupChecklist.ts, ProjectWorkspace.tsx | merged-main |
+| 306 | Reframe health as staleness + rule violations | Med | swarm/fro-306 | EditorTable.tsx, DecaySettingsSection.tsx | merged-main |
+| 257+258 | Modal/Share scroll overflow (combined) | Med | swarm/fro-257-258 | SharePanel.tsx, MembersPanel.tsx | merged-main |
+| 304+312 | Consolidate AI config in settings (combined) | Med | swarm/fro-304-312 | ProjectSettings.tsx, VoiceLibraryPanel.tsx | merged-main |
+
+## §M Merge log
+- 2026-06-11 · integration `swarm/qol-integration` created off main `89e87e1`. Wave 1 (6 agents) dispatched.
+- 2026-06-11 · **Wave 1 ALL MERGED** → integration. FRO-324 (FF), FRO-305, FRO-300, FRO-301 (orchestrator finished commit after agent timeout), FRO-302 (new ImportFilesStep), FRO-306. **Gate: tsc 0 · vitest 2640/2640 · all green.** Wave 2 dispatched: FRO-257+258 (modal overflow), FRO-304+312 (AI config consolidation).
+
+---
+
 # 🆕🆕 CURRENT GOAL (2026-06-04) — Drain the `Prototype Debugging` Linear Todo queue via parallel `/issue` workflows
 
 > **This block is the active goal.** Everything below CONVERGED and is reference-only.

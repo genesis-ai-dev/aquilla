@@ -4,6 +4,9 @@ import { Dashboard } from "../../helpers/page-objects/Dashboard"
 /**
  * ProjectSettings — Termbase Sharing section.
  *
+ * SKIPPED: section hidden via SHOW_TERMBASE_SHARING_IN_SETTINGS in ProjectSettings.tsx
+ * (2026-06-11). Re-enable when that flag is true.
+ *
  * TermbaseSharingSection renders (when org is set):
  *   - CardTitle "Termbase Sharing"
  *   - Switch with aria-label="Publish termbase to org"
@@ -14,7 +17,7 @@ import { Dashboard } from "../../helpers/page-objects/Dashboard"
  * NOTE: We don't actually toggle since that calls an API endpoint that
  * persists state and could affect other tests. We just verify the UI renders.
  */
-test("project settings termbase sharing section renders publish toggle", async ({ alice }) => {
+test.skip("project settings termbase sharing section renders publish toggle", async ({ alice }) => {
   const dash = new Dashboard(alice)
   await dash.goto()
   const name = `TermShare ${Date.now()}`

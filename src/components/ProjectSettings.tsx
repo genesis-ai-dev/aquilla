@@ -43,6 +43,26 @@ import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { usePostEditMetrics } from "@/lib/metrics/use-post-edit-metrics"
 import { PostEditMetricsSection } from "@/components/metrics/PostEditMetricsSection"
 
+/**
+ * =============================================================================
+ * TERMBASE SHARING — HIDDEN FROM PROJECT SETTINGS (intentional, 2026-06-11)
+ * =============================================================================
+ *
+ * The Term Base Sharing section (publish/subscribe across org projects) is
+ * implemented but not ready to expose in the UI yet. Keep the code — flip this
+ * flag to `true` when we want it back in settings nav + main content.
+ *
+ * Also re-enable the skipped smoke specs:
+ *   - e2e/specs/projects/project-settings-termbase-sharing.smoke.spec.ts
+ *   - e2e/specs/projects/project-settings-termbase-publish-toggle.smoke.spec.ts
+ *   - e2e/specs/projects/termbase-subscribe-unsubscribe.smoke.spec.ts
+ *
+ * Backend routes + TermbaseSharingSection.tsx remain live; only settings UI
+ * entry points are gated here.
+ * =============================================================================
+ */
+const SHOW_TERMBASE_SHARING_IN_SETTINGS = false
+
 // Well-known OpenAI-compatible providers.
 const CUSTOM_PRESETS: { id: string; label: string; endpoint: string; requiresKey: boolean; keyHint?: string }[] = [
   { id: "local", label: "Local / self-hosted (no key)", endpoint: "http://localhost:8000", requiresKey: false },
@@ -574,7 +594,7 @@ export function ProjectSettings() {
     { id: "section-audio-media", label: "Audio Media", keywords: ["audio media strategy", "lazy", "eager"] },
     { id: "section-git-sync", label: "Git Sync", keywords: ["git", "sync", "auto sync", "interval", "branch", "clone"], visible: hasGitOrigin },
     { id: "section-terminology", label: "Terminology", keywords: ["terminology", "termbase", "glossary", "concepts"] },
-    { id: "section-termbase-sharing", label: "Term Base Sharing", keywords: ["term base", "termbase", "publish", "subscribe", "org", "shared", "glossary"] },
+    { id: "section-termbase-sharing", label: "Term Base Sharing", keywords: ["term base", "termbase", "publish", "subscribe", "org", "shared", "glossary"], visible: SHOW_TERMBASE_SHARING_IN_SETTINGS },
     { id: "section-ai-metrics", label: "AI Metrics", keywords: ["post-edit", "edit distance", "ai metrics", "magnitude", "levenshtein", "ned", "biblica"] },
   ]
 
@@ -1154,7 +1174,7 @@ export function ProjectSettings() {
             </CardContent>
           </Card>
         )}
-        {id && visibleSections.some((s) => s.id === "section-termbase-sharing") && (
+        {id && SHOW_TERMBASE_SHARING_IN_SETTINGS && visibleSections.some((s) => s.id === "section-termbase-sharing") && (
           <TermbaseSharingSection
             projectId={id}
             orgId={org?.id ?? null}

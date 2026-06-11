@@ -4,6 +4,9 @@ import { Dashboard } from "../../helpers/page-objects/Dashboard"
 /**
  * TermbaseSharingSection — cross-project subscribe / unsubscribe.
  *
+ * SKIPPED: section hidden via SHOW_TERMBASE_SHARING_IN_SETTINGS in ProjectSettings.tsx
+ * (2026-06-11). Re-enable when that flag is true.
+ *
  * TermbaseSharingSection.tsx (src/components/ProjectSettings/TermbaseSharingSection.tsx):
  *   - When a project has published its termbase to the org, OTHER projects
  *     in the same org see it listed under "Available in your org".
@@ -19,7 +22,7 @@ import { Dashboard } from "../../helpers/page-objects/Dashboard"
  *   5. "Unsubscribe from {name}" button is visible.
  *   6. Click it → subscribed list is empty again.
  */
-test("termbase subscribe and unsubscribe between two projects", async ({ alice }) => {
+test.skip("termbase subscribe and unsubscribe between two projects", async ({ alice }) => {
   const dash = new Dashboard(alice)
   await dash.goto()
 

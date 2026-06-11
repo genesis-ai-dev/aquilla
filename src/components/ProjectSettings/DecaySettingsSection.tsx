@@ -30,11 +30,11 @@ export function DecaySettingsSection({
 
   return (
     <details className="rounded-lg border p-3" title={disabled ? disabledTooltip : undefined}>
-      <summary className="cursor-pointer text-sm font-medium">Decay &amp; health</summary>
+      <summary className="cursor-pointer text-sm font-medium">Staleness &amp; health</summary>
       <div className="mt-3 space-y-4">
         <p className="text-xs text-muted-foreground">
           Cell health is a confidence score derived from validated neighboring cells in the
-          example-retrieval graph. Health is <code>1 − mean(decay)</code> over translated cells.
+          example-retrieval graph. Cells that are far from validated neighbors are considered stale.
         </p>
 
         <div>
@@ -74,7 +74,7 @@ export function DecaySettingsSection({
             }}
           />
           <p className="mt-1 text-xs text-muted-foreground">
-            Decay above this shows the cell&apos;s &quot;needs attention&quot; marker (0–1). Default {DECAY_DEFAULTS.decayWarnThreshold}.
+            Staleness above this threshold shows the cell&apos;s &quot;needs attention&quot; marker (0–1). Default {DECAY_DEFAULTS.decayWarnThreshold}.
           </p>
         </div>
       </div>

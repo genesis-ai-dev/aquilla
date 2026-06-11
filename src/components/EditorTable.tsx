@@ -3248,7 +3248,7 @@ function EditorRow({
             {
               value: "health",
               icon: <Activity className="h-3 w-3" />,
-              label: "Decay",
+              label: "Staleness",
               content: (
                 <div className="space-y-1.5 py-3 text-xs text-muted-foreground">
                   <p>

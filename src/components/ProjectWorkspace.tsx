@@ -75,7 +75,7 @@ import { runDiarization, type DiarizationPhase } from "@/lib/diarization/run-dia
 import { attachMediaFileToTimeline, attachMediaUrlToTimeline } from "@/lib/timeline/attach-media"
 import { useCellsAuditStatsWithOverlay } from "@/hooks/useCellsAuditStatsWithOverlay"
 import { useComments } from "@/hooks/useComments"
-import { Film, Scale, MessagesSquare, Share2, Settings as SettingsIcon, Lock, ClipboardList, Trash2, Undo2, Sparkles, Mic2, Download, BookMarked, BookOpen, Users, UserCheck, Eye, ArrowRight } from "lucide-react"
+import { Film, Scale, MessagesSquare, Share2, Settings as SettingsIcon, Lock, ClipboardList, Trash2, Undo2, Sparkles, Mic2, Download, BookMarked, BookOpen, Users, UserCheck, Eye, ArrowRight, PanelLeftClose } from "lucide-react"
 import { ChatPanel } from "./ChatPanel"
 import { ChatDockPanel } from "./ChatDockPanel"
 import { SearchDockPanel } from "./SearchDockPanel"
@@ -2352,9 +2352,15 @@ export function ProjectWorkspace() {
             returnTo: workspaceReturnPath(projectId, activeFileId),
           }))
         } },
+      // FRO-272: trash moved out of the always-visible files footer into the
+      // "More" menu — it opens a dialog now (project_lead+ only).
+      ...(currentRoleLevel >= ROLE.PROJECT_LEAD
+        ? [{ id: "trash", label: "Recently deleted", icon: Trash2,
+            onClick: () => setTrashOpen(true) }]
+        : []),
     ]
     return items
-  }, [projectId, activeFileId, navigate, openCommentCount, lens, setLens])
+  }, [projectId, activeFileId, navigate, openCommentCount, lens, setLens, currentRoleLevel])
 
   // Phase 2c-gamma: countTranscribeTargets/countSynthTargets lived in bulk-audio
   // (Y.Doc-coupled). They're zeroed until the audio-attachment event grammar
@@ -2800,6 +2806,19 @@ export function ProjectWorkspace() {
       <ScrollToGroupHandler cells={cells} editorRef={editorRef} />
       {/* FRO-308: currentCell for chat panel — derived from focusedCellId */}
       <AppShell
+        logoAccessory={
+          dockTab !== null ? (
+            <button
+              type="button"
+              title="Collapse sidebar"
+              aria-label="Collapse sidebar"
+              onClick={() => setDockTab(null)}
+              className="flex h-7 w-7 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-accent/60 hover:text-foreground"
+            >
+              <PanelLeftClose className="h-3.5 w-3.5" />
+            </button>
+          ) : null
+        }
         leftDock={
           <LeftDock
             storageKey={projectId}
@@ -2816,7 +2835,6 @@ export function ProjectWorkspace() {
                 )}
                 <ExpandableFileList
                   projectId={projectId!}
-                  projectName={project.name}
                   files={project.files}
                   activeFileId={activeFileId}
                   fileProgress={fileProgress}
@@ -2834,54 +2852,6 @@ export function ProjectWorkspace() {
                   onRenameCorpus={handleRenameCorpus}
                   canExportByOrgPolicy={canExportByOrgPolicy}
                 />
-                {/* FRO-272: "Recently deleted" trash section (project_lead+). */}
-                {currentRoleLevel >= ROLE.PROJECT_LEAD && (
-                  <div className="px-2 pb-1">
-                    <button
-                      type="button"
-                      className="flex w-full items-center gap-1 rounded px-1 py-1 text-xs text-muted-foreground hover:bg-accent hover:text-foreground"
-                      onClick={() => setTrashOpen((v) => !v)}
-                      aria-expanded={trashOpen}
-                    >
-                      <Trash2 className="size-3 shrink-0" />
-                      <span className="flex-1 truncate text-left">Recently deleted</span>
-                      {deletedFiles.length > 0 && (
-                        <span className="tabular-nums">{deletedFiles.length}</span>
-                      )}
-                    </button>
-                    {trashOpen && (
-                      <div className="mt-1 space-y-0.5">
-                        {deletedFiles.length === 0 && (
-                          <p className="px-2 py-1 text-xs text-muted-foreground">No recently deleted files.</p>
-                        )}
-                        {deletedFiles.map((f) => (
-                          <div key={f.fileId} className="flex items-center gap-1 rounded px-1 py-0.5 text-xs hover:bg-accent">
-                            <span className="flex-1 truncate text-muted-foreground">{f.name}</span>
-                            <button
-                              type="button"
-                              className="shrink-0 rounded px-1 py-0.5 text-xs hover:bg-muted"
-                              title="Restore file — cells and audio come back intact"
-                              onClick={() => void handleRestoreFile(f.fileId)}
-                            >
-                              Restore
-                            </button>
-                            <button
-                              type="button"
-                              className="shrink-0 rounded px-1 py-0.5 text-xs text-destructive hover:bg-destructive/10"
-                              title="Delete forever — permanently wipes R2 media"
-                              onClick={() => void handlePurgeFile(f.fileId)}
-                            >
-                              Delete forever
-                            </button>
-                          </div>
-                        ))}
-                        <p className="px-1 pt-1 text-[10px] leading-snug text-muted-foreground">
-                          Files are kept for 30 days. "Delete forever" permanently wipes media.
-                        </p>
-                      </div>
-                    )}
-                  </div>
-                )}
                 {lens === "audio" && project && (
                   <VoiceSidebar
                     cells={cells}
@@ -3602,12 +3572,48 @@ export function ProjectWorkspace() {
         title="Move file to Recently deleted"
         description={(() => {
           const f = pendingDeleteId ? project.files.find((x) => x.id === pendingDeleteId) : null
-          return f ? `Move "${f.name}" to Recently deleted? Cells and audio are kept for 30 days. You can restore the file or permanently delete it from the Recently deleted section in the sidebar.` : ""
+          return f ? `Move "${f.name}" to Recently deleted? Cells and audio are kept for 30 days. You can restore the file or permanently delete it from "Recently deleted" in the sidebar's More menu.` : ""
         })()}
         confirmLabel="Move to Recently deleted"
         variant="destructive"
         onConfirm={() => { if (pendingDeleteId) { void handleDeleteFile(pendingDeleteId) } setPendingDeleteId(null) }}
       />
+      {/* FRO-272: "Recently deleted" trash list — opened from the sidebar's
+          More menu (project_lead+); was an inline expander in the files panel. */}
+      <Dialog open={trashOpen} onOpenChange={setTrashOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader><DialogTitle>Recently deleted</DialogTitle></DialogHeader>
+          <div className="space-y-0.5">
+            {deletedFiles.length === 0 && (
+              <p className="px-1 py-1 text-sm text-muted-foreground">No recently deleted files.</p>
+            )}
+            {deletedFiles.map((f) => (
+              <div key={f.fileId} className="flex items-center gap-2 rounded px-1 py-1 text-sm hover:bg-accent">
+                <span className="flex-1 truncate text-muted-foreground">{f.name}</span>
+                <button
+                  type="button"
+                  className="shrink-0 rounded px-1.5 py-0.5 text-xs hover:bg-muted"
+                  title="Restore file — cells and audio come back intact"
+                  onClick={() => void handleRestoreFile(f.fileId)}
+                >
+                  Restore
+                </button>
+                <button
+                  type="button"
+                  className="shrink-0 rounded px-1.5 py-0.5 text-xs text-destructive hover:bg-destructive/10"
+                  title="Delete forever — permanently wipes R2 media"
+                  onClick={() => void handlePurgeFile(f.fileId)}
+                >
+                  Delete forever
+                </button>
+              </div>
+            ))}
+            <p className="px-1 pt-2 text-xs leading-snug text-muted-foreground">
+              Files are kept for 30 days. "Delete forever" permanently wipes media.
+            </p>
+          </div>
+        </DialogContent>
+      </Dialog>
       {moveTargetId !== null && (
         <MoveToCorpusDialog
           // Remount per-open so internal state resets cleanly without an effect.

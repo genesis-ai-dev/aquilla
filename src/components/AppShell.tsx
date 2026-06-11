@@ -36,9 +36,12 @@ interface Props {
   /** Brand logo mark rendered at the top of the dock rail — passed here so
    * AppShell can stay the single source for the logo placement. */
   logoSlot?: ReactNode
+  /** Rendered to the right of the logo (e.g. the workspace's collapse-sidebar
+   * toggle) so rail controls live in the logo row, not the dock footer. */
+  logoAccessory?: ReactNode
 }
 
-export function AppShell({ leftDock, sidebar, logoSlot, header, statusBar, beforeMain, main, aside }: Props) {
+export function AppShell({ leftDock, sidebar, logoSlot, logoAccessory, header, statusBar, beforeMain, main, aside }: Props) {
   const dockContent = leftDock ?? sidebar
   // Optional read (not useBrand) — the shell is rendered by page tests that
   // don't mount BrandProvider; the logo link is chrome, not a hard dependency.
@@ -70,13 +73,20 @@ export function AppShell({ leftDock, sidebar, logoSlot, header, statusBar, befor
           !leftDock && "w-56",
         )}
       >
-        {resolvedLogo && <div className="shrink-0">{resolvedLogo}</div>}
+        {(resolvedLogo || logoAccessory) && (
+          <div className="flex shrink-0 items-center justify-between">
+            {resolvedLogo}
+            {logoAccessory && <div className="mr-2 mt-2 shrink-0">{logoAccessory}</div>}
+          </div>
+        )}
         <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">{dockContent}</div>
         {!leftDock && (
-          <>
+          <div className="flex shrink-0 items-center">
+            <div className="min-w-0 flex-1">
+              <VersionTag />
+            </div>
             <ReportProblemButton /> {/* FRO-307 */}
-            <VersionTag />
-          </>
+          </div>
         )}
       </aside>
       <div className="flex min-w-0 flex-1 flex-col overflow-hidden">

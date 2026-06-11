@@ -27,8 +27,7 @@ import {
   Files,
   MessageSquare,
   Search,
-  ChevronLeft,
-  ChevronRight,
+  PanelLeftOpen,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { ReportProblemButton } from "@/components/ReportProblemButton/ReportProblemButton"
@@ -247,22 +246,18 @@ export function LeftDock({
 
   const dockWidth = isOpen ? width : RAIL_WIDTH
 
-  const collapseButton = (
+  // Collapse (when open) lives next to the logo at the top of the rail — see
+  // AppShell's logoAccessory slot. The dock only renders the EXPAND affordance
+  // on the collapsed 40px icon strip.
+  const expandButton = (
     <button
       type="button"
-      title={isOpen ? "Collapse sidebar" : "Expand sidebar"}
-      aria-label={isOpen ? "Collapse sidebar" : "Expand sidebar"}
-      onClick={() => setActiveTab(isOpen ? null : "files")}
-      className={cn(
-        "flex items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-accent/60 hover:text-foreground",
-        isTopRail && isOpen ? "mx-2 mb-1 mt-auto h-7 w-full" : "mb-2 mt-auto h-7 w-7",
-      )}
+      title="Expand sidebar"
+      aria-label="Expand sidebar"
+      onClick={() => setActiveTab("files")}
+      className="mt-1 flex h-7 w-7 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-accent/60 hover:text-foreground"
     >
-     {isOpen ? (
-        <ChevronLeft className="h-3.5 w-3.5" />
-      ) : (
-        <ChevronRight className="h-3.5 w-3.5" />
-      )}
+      <PanelLeftOpen className="h-3.5 w-3.5" />
     </button>
   )
 
@@ -302,19 +297,18 @@ export function LeftDock({
               {activeTab && panels[activeTab]}
             </div>
             {resizeHandle}
-            {collapseButton}
           </>
         ) : (
           // Left-rail (always), or top-rail collapsed: vertical 40px icon strip + optional panel
           <>
             <div className="flex h-full w-10 shrink-0 flex-col items-center">
+              {!isOpen && expandButton}
               <TabRail
                 activeTab={activeTab}
                 chatBadge={chatBadge}
                 onTabClick={handleRailIconClick}
                 orientation="left"
               />
-              {collapseButton}
             </div>
             {isOpen && (
               <>
@@ -328,8 +322,12 @@ export function LeftDock({
         )}
       </div>
 
-      <ReportProblemButton />
-      <VersionTag />
+      <div className="flex shrink-0 items-center">
+        <div className="min-w-0 flex-1">
+          <VersionTag />
+        </div>
+        <ReportProblemButton />
+      </div>
     </div>
   )
 }

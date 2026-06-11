@@ -9,10 +9,8 @@ import { groupByCorpus } from "@/lib/sidebar/group-by-corpus"
 import { useEditorScroll } from "@/context/EditorScrollContext"
 import { FileSectionGrid } from "./sidebar/FileSectionGrid"
 import { cn } from "@/lib/utils"
-import { Archive } from "lucide-react"
 import {
   downloadSourceFile,
-  downloadProjectZip,
   SourceExportError,
 } from "@/lib/sync/source-export"
 
@@ -22,8 +20,6 @@ interface FileStats { translated: number; validated: number; total: number }
 
 interface Props {
   projectId: string
-  /** Display name used for the project-zip filename. Falls back to projectId. */
-  projectName?: string
   files: FileReference[]
   activeFileId: string | null
   fileProgress: Map<string, FileStats>
@@ -39,15 +35,15 @@ interface Props {
   onRenameCorpus?: (oldMarker: string, newMarker: string) => void
   /**
    * FRO-253 (a fix): whether org policy allows export. When false, the
-   * "Export all books (.zip)" button and per-file export menu items are hidden
-   * so dashboard affordances match the workspace. Defaults to true (no gate)
-   * for callers that haven't wired up org settings.
+   * per-file export menu items are hidden so dashboard affordances match
+   * the workspace. Defaults to true (no gate) for callers that haven't
+   * wired up org settings.
    */
   canExportByOrgPolicy?: boolean
 }
 
 export function ExpandableFileList({
-  projectId, projectName, files, activeFileId, fileProgress,
+  projectId, files, activeFileId, fileProgress,
   suggestionFileIds, validationCount, getTokenForFile, onSelectFile, onRename, onMove, onDelete,
   onApplySuggestion, onRenameCorpus, canExportByOrgPolicy = true,
 }: Props) {
@@ -60,13 +56,7 @@ export function ExpandableFileList({
   const [filter, setFilter] = useState("")
   const [editingCorpus, setEditingCorpus] = useState<string | null>(null)
   const [exportToast, setExportToast] = useState<{ msg: string; tone: "ok" | "err" } | null>(null)
-  const [zipExporting, setZipExporting] = useState<{ done: number; total: number } | null>(null)
   const { requestScrollToSection } = useEditorScroll()
-
-  const exportableCount = useMemo(
-    () => files.filter((f) => EXPORTABLE_FILE_TYPES.has(f.type)).length,
-    [files],
-  )
 
   // Auto-dismiss the export toast after a few seconds — mirrors the Dashboard
   // errorToast pattern (no external toast lib in this codebase).
@@ -84,8 +74,8 @@ export function ExpandableFileList({
 
   return (
     <>
-      <div className="flex items-center gap-1 px-2 py-2">
-        <div className="relative flex-1">
+      <div className="px-2 py-2">
+        <div className="relative">
           <SearchIcon className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
           <input
             type="text"
@@ -113,23 +103,6 @@ export function ExpandableFileList({
             </button>
           )}
         </div>
-        {/* FRO-253 (a fix): hide export affordances when org policy disallows it */}
-        {exportableCount > 1 && canExportByOrgPolicy && (
-          <button
-            onClick={exportAllUsfm}
-            disabled={!!zipExporting}
-            className="flex h-7 shrink-0 items-center justify-center gap-1 rounded-lg px-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-50"
-            title={`Export all ${exportableCount} books (.zip)`}
-            aria-label={`Export all ${exportableCount} books (.zip)`}
-          >
-            <Archive className="h-3.5 w-3.5" />
-            {zipExporting && (
-              <span className="text-[10px] tabular-nums">
-                {zipExporting.done}/{zipExporting.total}
-              </span>
-            )}
-          </button>
-        )}
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
         <div className="p-2 space-y-2">
@@ -294,26 +267,4 @@ export function ExpandableFileList({
     }
   }
 
-  async function exportAllUsfm() {
-    if (zipExporting) return
-    setZipExporting({ done: 0, total: exportableCount })
-    try {
-      const result = await downloadProjectZip({
-        projectId,
-        projectName: projectName ?? projectId,
-        files: files.map((f) => ({ id: f.id, name: f.name, type: f.type })),
-        getToken: getTokenForFile,
-        onProgress: (done, total) => setZipExporting({ done, total }),
-      })
-      const msg = result.skipped.length === 0
-        ? `Exported ${result.exported} books to .zip`
-        : `Exported ${result.exported}; skipped ${result.skipped.length} (older imports — re-import to enable)`
-      setExportToast({ msg, tone: result.skipped.length === 0 ? "ok" : "err" })
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : "Project export failed."
-      setExportToast({ msg, tone: "err" })
-    } finally {
-      setZipExporting(null)
-    }
-  }
 }

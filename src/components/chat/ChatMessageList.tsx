@@ -16,6 +16,7 @@ import type { UiChatMessage, CellContext } from "@/hooks/useChat"
 import { ChatMessageBubble } from "./ChatMessageBubble"
 import { ChatConfirmDialog } from "./ChatConfirmDialog"
 import { markdownToPlainText } from "./markdown-plain"
+import { useSmoothedText } from "./useSmoothedText"
 
 const NEAR_BOTTOM_PX = 48
 
@@ -52,6 +53,10 @@ export function ChatMessageList({
   const [showJump, setShowJump] = useState(false)
   const [pendingInsert, setPendingInsert] = useState<string | null>(null)
 
+  // Presentation-only smoothing of the raw stream: reveals at an even pace
+  // instead of mirroring bursty network chunks. Flushes when streaming ends.
+  const smoothedText = useSmoothedText(streamingText, isStreaming)
+
   const handleScroll = useCallback(() => {
     const el = scrollRef.current
     if (!el) return
@@ -61,15 +66,23 @@ export function ChatMessageList({
   }, [])
 
   // New content: follow only when already at the bottom; otherwise show pill.
+  // While streaming this fires once per smoothed-reveal frame; the follow is a
+  // direct scrollTop assignment (no smooth animation to queue), a single
+  // read/write against layout the browser computes for the frame anyway — not
+  // a thrash loop. setShowJump(true) repeats are bailed out by React.
   useEffect(() => {
     const el = scrollRef.current
     if (!el) return
     if (atBottomRef.current) {
-      el.scrollTo({ top: el.scrollHeight, behavior: isStreaming ? "auto" : "smooth" })
-    } else if (messages.length > 0 || streamingText) {
+      if (isStreaming) {
+        el.scrollTop = el.scrollHeight
+      } else {
+        el.scrollTo({ top: el.scrollHeight, behavior: "smooth" })
+      }
+    } else if (messages.length > 0 || smoothedText) {
       setShowJump(true)
     }
-  }, [messages, streamingText, isStreaming])
+  }, [messages, smoothedText, isStreaming])
 
   const jumpToLatest = useCallback(() => {
     const el = scrollRef.current
@@ -130,10 +143,10 @@ export function ChatMessageList({
             />
           ))}
 
-          {/* Streaming in-progress reply */}
+          {/* Streaming in-progress reply (smoothed reveal of the raw stream) */}
           {isStreaming && (
             <ChatMessageBubble
-              message={{ id: "streaming", role: "assistant", content: streamingText }}
+              message={{ id: "streaming", role: "assistant", content: smoothedText }}
               compact={compact}
               isStreaming
             />

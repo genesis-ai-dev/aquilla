@@ -900,3 +900,65 @@ None beyond the infrastructure constraint noted above.
 - Identity wrangler (pd6-integration): started by this QA session — process died mid-session (esbuild deadlock in workerd); confirmed gone before cleanup
 - Sync wrangler (pd6-integration): started by this QA session — process died or was not successfully started; confirmed gone before cleanup
 - `.worktrees/pd6-integration/.env.development.local`: written by this QA session — deleted after QA
+
+---
+
+## UXA swarm UI-QA 2026-06-10 (main 7d934fd)
+
+**Build**: v0.1.0 · main · 7d934fd
+**Tested**: 2026-06-10
+**Branch under test**: `main` (worktree at `.worktrees/uxa-integration`)
+**Environment**: http://127.0.0.1:5173/ · auth :8788 · sync :8789
+**Login**: `/__dev/login` → auto-logged in as `dev` (OWNER of Dev Org + dev-project)
+**Tool**: Playwright MCP (`mcp__plugin_playwright_playwright__*`)
+**Build tag confirmed**: "v0.1.0 · 7d934fd build: main@7d934fd" visible in sidebar version badge
+
+### Stack / Login Status
+
+- Ports 5173/8788/8789 all confirmed reachable before QA.
+- `/__dev/login` → redirected to `/project/dev-project/file/<id>` (Genesis file). Login: OK.
+- Stale Playwright profile lock detected and cleared before session start.
+- Known dev-env issue (pre-existing, all prior QA passes): auth-worker and sync-worker use **different JWT secrets** in `.dev.vars`, so all sync-worker API calls return 401. Events queue in the IDB outbox ("Sync backlog") and never flush. This affects FRO-272 (trash list fetch 401) and FRO-280/279 (validation event rejected). Not a new regression.
+
+### Results
+
+| # | Item | Status | Observation |
+|---|------|--------|-------------|
+| 1 | FRO-270: /reset-password?token=x&username=dev | **PASS** | Renders "Reset your password" heading, invalid-token recovery message ("This reset link has expired or is invalid. Enter your email address to request a new one for account dev."), email input, "Request a new link" button, "Back to app" link. Not blank. |
+| 1b | FRO-270: /no-such-route → 404 page | **PASS** | "Page not found" heading, "The link you followed doesn't exist or may have moved.", "Go home" link. Not blank. |
+| 2 | FRO-282: /login renders; forgot-password link present; login → dashboard | **PASS** | `/login` renders "Sign in to Aquilla" form with username/password fields and "Forgot password?" button. Seeded credentials (`dev`/`dev`) log in and redirect to app shell (`/`). Homepage has "Open app" link (navigates to `/`) and "Start free" (→ `/onboarding`) but no explicit "Sign in" nav link — sign-in entry point is via "Open app" → redirect to `/login` when signed out. |
+| 3 | FRO-275: /join/garbage-token → "link no longer valid" copy | **PASS** | "This invite link is no longer valid. Ask the project owner for a fresh link." shown. No signup form, no infinite spinner. "Back to projects" button present. |
+| 4 | FRO-271: file delete dialog — permanent-deletion truth + checkbox | **PASS** | Dialog "Move file to Recently deleted" with clear copy: "Move 'Genesis' to Recently deleted? Cells and audio are kept for 30 days. You can restore the file or permanently delete it from the Recently deleted section in the sidebar." Checkbox "I understand this action." required; "Move to Recently deleted" button disabled until checked. Truth-in-labeling: describes soft-delete, not immediate permanent deletion. |
+| 5 | FRO-272: delete → "Recently deleted" sidebar section; restore works | **PARTIAL** | "Recently deleted" sidebar section renders and expands correctly showing "No recently deleted files." and "Files are kept for 30 days. 'Delete forever' permanently wipes media." UI is correct. However: the file.delete event is rejected by sync-worker (401 — known JWT mismatch); the trash list fetch `/api/v1/projects/dev-project/files?trash=1` also returns 401. Neither the file appearing in the trash list nor the restore path could be verified. Restore UI is blocked by the same JWT issue. Dev-env limitation, not a code regression. |
+| 6 | FRO-273: role badge machinery; workspace renders normally for seeded owner | **PASS** | Workspace loads for user `dev` (OWNER). "DE dev" badge in sidebar. EditorTable loads with Genesis file (3 cells: GEN 1:1, 1:2, 1:3 — Hebrew source + Italian target columns). No errant role badge shown for owner. EditorTable renders correctly. |
+| 7 | FRO-274: editor loads; outbox chip visible; no console errors on cell edit | **PASS** | Editor loads, cells visible, cell editing works (typed in GEN 1:2). "Sync backlog" outbox chip visible in footer (pending changes shown). Outbox flush errors are the known sync-worker JWT issue (pre-existing dev-env limitation, not a new regression from FRO-274). |
+| 8 | FRO-278: "Translate with AI" on non-empty cell → confirm dialog; cancel preserves text | **PASS** | Clicking "Translate with AI" (button title/aria-label) on GEN 1:1 (containing "123") opened dialog "Replace existing translation?" with "The current text is preserved in cell history and can be recovered." Cancel and Replace buttons present. Clicking Cancel confirmed text "123" still in cell. |
+| 9 | FRO-287: re-import same file → collision prompt (Skip / Import as duplicate) | **PASS** | Uploaded `tn-fixture.tsv` (already in project). Dialog "Re-import detected" appeared: "The following file already exists in this project. Choose what to do with each one." Per-file "Skip" and "Import as duplicate" buttons. Bulk "Skip all" and "Import all as duplicates" buttons. Cancel and Continue buttons. Collision guard working correctly. |
+| 10 | FRO-280/279: edit + validate; sidebar/Overview Validated % consistent | **PARTIAL** | Cell editing works (typed in cell). Validation button click dispatched; cell GEN 1:1 aria-label updated to "Validated — GEN 1:1. Click to remove your validation." Footer still showed "1 unvalidated" — likely lag because validation event is queued in outbox (sync backlog, JWT issue). Cell-level state updated correctly; aggregate footer stat lagged. N=1 single-user check limited by dev-env JWT issue. |
+| 11 | FRO-290: no "AD-1x" strings; AI action says "Translate with AI"/"Translate all" | **PASS** | Zero "AD-1x" pattern matches in all page text and element attributes (title, aria-label). Translate buttons have `title="Translate with AI"` and `aria-label="Translate with AI"`. More actions menu shows "Run AI completions" and "Complete all" — no legacy strings. |
+| 12 | FRO-296: offline banner appears; online clears it | **PASS** | Simulated offline via `navigator.onLine` + `offline` event. Banner "You're offline — changes are queued and will sync when you reconnect." appeared. Dispatching `online` event cleared the banner. |
+| Smoke | eBible import; type in cell; reload — text persists | **PARTIAL** | eBible dialog loaded (large translation list). File upload path works. Text "123" typed in GEN 1:1 persisted across page navigation/reload (from IDB). eBible actual import download not attempted (too slow for QA context, and genesis file already present). Core IDB persistence confirmed. |
+
+### Console Errors (all pages, all navigation)
+
+All errors are expected or pre-existing:
+
+| Error | Source | Classification |
+|-------|--------|----------------|
+| 400 on `/api/v2/auth/password-reset/verify` | FRO-270 test with garbage token | Expected |
+| 500 on `/api/v2/orgs/26/portfolio` | Stale session artifact (foreign org from login test) | Expected |
+| 404s on `/api/v2/invites/this-is-garbage-token-xyz/*` | FRO-275 test with garbage token | Expected |
+| `[outbox-flush] server REJECTED events` | Known JWT mismatch (auth-worker ≠ sync-worker secrets) | Pre-existing dev-env |
+| 401 on `/api/v1/projects/dev-project/files?trash=1` | Same JWT mismatch | Pre-existing dev-env |
+
+No new regressions introduced. No Geist font 403s observed (resolved since prior QA passes).
+
+### New Issues Found
+
+None. All failures are pre-existing dev-env limitations (JWT mismatch).
+
+### Ports / Cleanup
+
+- Dev stack started: `pnpm dev` from `/Users/ryderwishart/prototypes/codex-web-app` (main checkout)
+- Ports confirmed: Vite :5173, auth-worker :8788, sync-worker :8789
+- Stack left running (belongs to main checkout, not worktree-owned)

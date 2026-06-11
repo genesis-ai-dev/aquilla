@@ -308,7 +308,7 @@ function arrayBufferToBase64(buffer: ArrayBuffer): string {
   return btoa(binary)
 }
 
-interface ImportResult {
+export interface ImportResult {
   name: string
   strings: TranslatableString[]
   /** Raw source bytes for round-trip-fidelity formats (USFM today). Stored
@@ -1179,7 +1179,7 @@ export async function importParatextAsTarget(
   return { refs, settings: project.settings, skipped }
 }
 
-async function parseFile(file: File, fileType: FileType): Promise<ImportResult[]> {
+export async function parseFile(file: File, fileType: FileType): Promise<ImportResult[]> {
   switch (fileType) {
     case "txt": {
       const text = await file.text()

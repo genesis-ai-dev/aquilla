@@ -2,12 +2,12 @@ export type DockRailPosition = "left" | "top"
 
 const STORAGE_KEY = "codex:dockRailPosition"
 const CHANGE_EVENT = "codex:dock-rail-position-changed"
-const DEFAULT: DockRailPosition = "left"
+const DEFAULT: DockRailPosition = "top"
 
 export function getDockRailPosition(): DockRailPosition {
   if (typeof window === "undefined") return DEFAULT
   const raw = window.localStorage.getItem(STORAGE_KEY)
-  return raw === "top" ? "top" : DEFAULT
+  return raw === "left" ? "left" : DEFAULT
 }
 
 export function setDockRailPosition(position: DockRailPosition): void {

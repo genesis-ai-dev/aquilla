@@ -14,8 +14,10 @@ import {
   importEBible,
   importMacula,
   importTranslationNotes,
-  importParatextProject,
+  prepareParatextProject,
+  commitParatextProject,
   importParatextAsTarget,
+  type ParatextPlan,
   prepareEBibleTargetImport,
   applyEBibleTargetImport,
   parseFile,
@@ -1019,31 +1021,70 @@ interface ParatextChoiceProps {
   onCollision?: (collisions: CollisionResult[], proceed: (skipKeys: ReadonlySet<string>) => void | Promise<void>) => void
 }
 
-/** Source-vs-target choice for a detected Paratext project. Source imports the
- *  books as a reference text; target pairs the consultant's in-progress
- *  translation against an eBible source picked here (aligned by verse ref). */
+/** Preview + source-vs-target choice for a detected Paratext project (FRO-310:
+ *  everything parses client-side up front; nothing uploads until the user
+ *  confirms). Source imports the books as a reference text; target pairs the
+ *  consultant's in-progress translation against an eBible source picked here
+ *  (aligned by verse ref). */
 function ParatextChoice({
   entries, bookCount, projectId, username, sourceLanguage, targetLanguage, getToken, onImported, onCancel,
   existingFiles, onCollision,
 }: ParatextChoiceProps) {
   const [mode, setMode] = useState<"choose" | "pickSource" | "importing">("choose")
+  const [plan, setPlan] = useState<ParatextPlan | null>(null)
   const [phase, setPhase] = useState("")
-  const [progress, setProgress] = useState<{ count: number; total: number } | null>(null)
+  const [progress, setProgress] = useState<{ count: number; total: number; bookLabel: string } | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [translations, setTranslations] = useState<EBibleTranslation[] | null>(null)
   const [query, setQuery] = useState("")
+  // Books the user unchecked in the preview (uppercase bookIds → skipKeys).
+  const [excluded, setExcluded] = useState<ReadonlySet<string>>(new Set())
+  const [expandedBook, setExpandedBook] = useState<string | null>(null)
 
   const ctx = { projectId, author: username, sourceLanguage, targetLanguage, getToken }
 
+  // FRO-310: parse the whole project client-side on mount — fast (no network),
+  // so the preview appears immediately and the user confirms before any upload.
+  useEffect(() => {
+    let cancelled = false
+    prepareParatextProject(entries)
+      .then((p) => { if (!cancelled) setPlan(p) })
+      .catch((err) => { if (!cancelled) setError(err instanceof Error ? err.message : "Couldn't read the project") })
+    return () => { cancelled = true }
+  }, [entries])
+
   function onProgress(p: ParatextImportProgress) {
-    setPhase(p.phase === "parse" ? `Importing ${p.book ?? "book"}…` : `Imported ${p.booksDone}/${p.booksTotal} books`)
-    setProgress({ count: p.booksDone, total: p.booksTotal })
+    const bookLabel = p.book
+      ? `${p.book} · book ${Math.min(p.booksDone + 1, p.booksTotal)} of ${p.booksTotal}`
+      : `${p.booksDone} / ${p.booksTotal} books`
+    setPhase(p.book ? `Uploading ${p.book}…` : "Uploading…")
+    // Prefer the per-chunk cell counts (smooth bar); fall back to books.
+    if (p.cellsTotal != null && p.cellsTotal > 0) {
+      setProgress({ count: p.cellsDone ?? 0, total: p.cellsTotal, bookLabel })
+    } else {
+      setProgress({ count: p.booksDone, total: p.booksTotal, bookLabel })
+    }
+  }
+
+  /** Preview exclusions + collision-prompt skips, merged. */
+  function mergedSkipKeys(collisionSkips: ReadonlySet<string>): ReadonlySet<string> {
+    return new Set([...excluded, ...collisionSkips])
+  }
+
+  /** Collision candidates: included books only, from the parsed plan. */
+  function detectPlanCollisions(p: ParatextPlan): CollisionResult[] {
+    if (!existingFiles || existingFiles.length === 0) return []
+    const incoming = p.books
+      .filter((b) => !excluded.has(b.book.bookId.toUpperCase()))
+      .map((b) => ({ name: b.book.displayName, bookCode: b.book.bookId }))
+    return detectCollisions(incoming, existingFiles)
   }
 
   async function runSourceWithSkipKeys(skipKeys: ReadonlySet<string>) {
-    setMode("importing"); setError(null); setPhase("Reading project…"); setProgress(null)
+    if (!plan) return
+    setMode("importing"); setError(null); setPhase("Uploading…"); setProgress(null)
     try {
-      const { refs, settings, skipped } = await importParatextProject(entries, { ...ctx, skipKeys }, onProgress)
+      const { refs, settings, skipped } = await commitParatextProject(plan, { ...ctx, skipKeys: mergedSkipKeys(skipKeys) }, onProgress)
       const inferredLang = settings.languageIsoCode || settings.language
       await onImported(refs, inferredLang ? { sourceLanguage: inferredLang } : undefined, skipped.length ? skipped : undefined)
     } catch (err) {
@@ -1052,22 +1093,13 @@ function ParatextChoice({
   }
 
   async function runSource() {
+    if (!plan) return
     // FRO-287: collision check before running the import.
-    if (existingFiles && existingFiles.length > 0 && onCollision) {
-      const detected = detectParatextProject(entries)
-      if (detected) {
-        // Derive collision candidates from the SFM entry filenames.
-        // The bookId is the uppercase stem (e.g. "GEN" from "GEN.usfm").
-        const incoming = detected.sfmEntries.map((e) => {
-          const stem = e.name.replace(/\.(sfm|usfm)$/i, "").replace(/.*\//, "")
-          const bookCode = stem.toUpperCase()
-          return { name: stem, bookCode }
-        })
-        const collisions = detectCollisions(incoming, existingFiles)
-        if (collisions.length > 0) {
-          onCollision(collisions, (skipKeys) => runSourceWithSkipKeys(skipKeys))
-          return
-        }
+    if (onCollision) {
+      const collisions = detectPlanCollisions(plan)
+      if (collisions.length > 0) {
+        onCollision(collisions, (skipKeys) => runSourceWithSkipKeys(skipKeys))
+        return
       }
     }
     await runSourceWithSkipKeys(new Set())
@@ -1085,6 +1117,7 @@ function ParatextChoice({
   }
 
   async function runTargetWithSkipKeys(sel: EBibleTranslation, skipKeys: ReadonlySet<string>) {
+    if (!plan) return
     setMode("importing"); setError(null); setPhase(`Fetching source: ${sel.title}…`); setProgress(null)
     try {
       const corpus = await fetchTranslationText(sel.id, () => {})
@@ -1093,7 +1126,7 @@ function ParatextChoice({
         text: s.original,
       }))
       const selSourceLang = sel.languageCode || sel.id
-      const { refs, settings, skipped } = await importParatextAsTarget(entries, sourceVerses, { ...ctx, sourceLanguage: selSourceLang, skipKeys }, onProgress)
+      const { refs, settings, skipped } = await importParatextAsTarget(plan, sourceVerses, { ...ctx, sourceLanguage: selSourceLang, skipKeys: mergedSkipKeys(skipKeys) }, onProgress)
       const inferredTargetLang = settings.languageIsoCode || settings.language
       await onImported(
         refs,
@@ -1106,19 +1139,13 @@ function ParatextChoice({
   }
 
   async function runTarget(sel: EBibleTranslation) {
+    if (!plan) return
     // FRO-287: collision check before fetching source corpus.
-    if (existingFiles && existingFiles.length > 0 && onCollision) {
-      const detected = detectParatextProject(entries)
-      if (detected) {
-        const incoming = detected.sfmEntries.map((e) => {
-          const stem = e.name.replace(/\.(sfm|usfm)$/i, "").replace(/.*\//, "")
-          return { name: stem, bookCode: stem.toUpperCase() }
-        })
-        const collisions = detectCollisions(incoming, existingFiles)
-        if (collisions.length > 0) {
-          onCollision(collisions, (skipKeys) => runTargetWithSkipKeys(sel, skipKeys))
-          return
-        }
+    if (onCollision) {
+      const collisions = detectPlanCollisions(plan)
+      if (collisions.length > 0) {
+        onCollision(collisions, (skipKeys) => runTargetWithSkipKeys(sel, skipKeys))
+        return
       }
     }
     await runTargetWithSkipKeys(sel, new Set())
@@ -1147,7 +1174,9 @@ function ParatextChoice({
             <div className="mt-3 h-2 w-full overflow-hidden rounded-full bg-muted">
               <div className="h-full bg-primary transition-all" style={{ width: `${Math.round((progress.count / progress.total) * 100)}%` }} />
             </div>
-            <p className="mt-1.5 text-xs text-muted-foreground">{progress.count} / {progress.total} books</p>
+            <p className="mt-1.5 text-xs text-muted-foreground">
+              {progress.count.toLocaleString()} / {progress.total.toLocaleString()} cells · {progress.bookLabel}
+            </p>
           </>
         )}
         {error && <p className="mt-2 text-sm text-destructive">{error}</p>}
@@ -1189,18 +1218,87 @@ function ParatextChoice({
     )
   }
 
+  // Preview screen (FRO-310): everything below is parsed, nothing is uploaded.
+  const includedBooks = plan?.books.filter((b) => !excluded.has(b.book.bookId.toUpperCase())) ?? []
+  const includedCells = includedBooks.reduce((n, b) => n + b.cellCount, 0)
+  const language = plan ? (plan.project.settings.language || plan.project.settings.languageIsoCode || "") : ""
+
+  function toggleBook(bookId: string) {
+    const key = bookId.toUpperCase()
+    setExcluded((prev) => {
+      const next = new Set(prev)
+      if (next.has(key)) next.delete(key)
+      else next.add(key)
+      return next
+    })
+  }
+
   return (
-    <div className="flex flex-col gap-4 py-4">
+    <div className="flex flex-col gap-3 py-2">
       <div>
-        <p className="text-sm font-medium">Paratext project detected — {bookCount} book{bookCount === 1 ? "" : "s"}</p>
-        <p className="text-xs text-muted-foreground">How should we bring it in?</p>
+        <p className="text-sm font-medium">
+          Paratext project detected — {plan ? plan.books.length : bookCount} book{(plan ? plan.books.length : bookCount) === 1 ? "" : "s"}
+        </p>
+        <p className="text-xs text-muted-foreground">
+          {plan
+            ? <>{language && <>Language: {language} · </>}{includedCells.toLocaleString()} cells parsed in your browser — review, then choose how to bring it in.</>
+            : "Reading project…"}
+        </p>
       </div>
+      {plan && (
+        <ScrollArea className="max-h-56 rounded border">
+          <ul className="divide-y">
+            {plan.books.map((b) => {
+              const key = b.book.bookId.toUpperCase()
+              const included = !excluded.has(key)
+              const expanded = expandedBook === key
+              return (
+                <li key={key}>
+                  <div className="flex items-center gap-2 px-3 py-1.5">
+                    <input
+                      type="checkbox"
+                      checked={included}
+                      onChange={() => toggleBook(b.book.bookId)}
+                      aria-label={`Include ${b.book.displayName}`}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setExpandedBook(expanded ? null : key)}
+                      className="flex min-w-0 flex-1 items-baseline gap-2 text-left"
+                      title="Show the first parsed cells"
+                    >
+                      <span className={`truncate text-sm ${included ? "" : "text-muted-foreground line-through"}`}>{b.book.displayName}</span>
+                      <span className="shrink-0 text-xs text-muted-foreground">
+                        {b.book.bookId} · {b.cellCount.toLocaleString()} cells
+                        {b.duplicateRefs.length > 0 && <span className="text-amber-600"> · {b.duplicateRefs.length} duplicate ref{b.duplicateRefs.length === 1 ? "" : "s"}</span>}
+                      </span>
+                    </button>
+                  </div>
+                  {expanded && (
+                    <ul className="space-y-1 px-3 pb-2 pl-9">
+                      {b.strings.slice(0, 4).map((s) => (
+                        <li key={s.id} className="truncate text-xs text-muted-foreground">
+                          <span className="font-medium">{s.context}</span> {s.original}
+                        </li>
+                      ))}
+                      {b.strings.length > 4 && (
+                        <li className="text-xs text-muted-foreground/70">… {(b.strings.length - 4).toLocaleString()} more</li>
+                      )}
+                    </ul>
+                  )}
+                </li>
+              )
+            })}
+          </ul>
+        </ScrollArea>
+      )}
+      <p className="text-xs text-muted-foreground">How should we bring it in?</p>
       <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-        <button type="button" onClick={runSource} className="rounded-lg border p-3 text-left transition-colors hover:border-primary hover:bg-primary/5">
+        <button type="button" onClick={runSource} disabled={!plan || includedBooks.length === 0} className="rounded-lg border p-3 text-left transition-colors hover:border-primary hover:bg-primary/5 disabled:cursor-not-allowed disabled:opacity-50">
           <p className="text-sm font-medium">Source text</p>
           <p className="mt-1 text-xs text-muted-foreground">A reference Bible to translate from. Books import as source cells.</p>
         </button>
-        <button type="button" onClick={startTarget} className="rounded-lg border p-3 text-left transition-colors hover:border-primary hover:bg-primary/5">
+        <button type="button" onClick={startTarget} disabled={!plan || includedBooks.length === 0} className="rounded-lg border p-3 text-left transition-colors hover:border-primary hover:bg-primary/5 disabled:cursor-not-allowed disabled:opacity-50">
           <p className="text-sm font-medium">Translation in progress</p>
           <p className="mt-1 text-xs text-muted-foreground">Your team's target text. We'll pair it with a source Bible by verse.</p>
         </button>

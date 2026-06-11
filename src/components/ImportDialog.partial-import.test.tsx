@@ -26,7 +26,9 @@ vi.mock("@/lib/import", () => ({
   importEBible: vi.fn(),
   importMacula: vi.fn(),
   importTranslationNotes: vi.fn(),
-  importParatextProject: vi.fn(),
+  // FRO-310: ParatextChoice parses on mount (prepare) and uploads on confirm (commit).
+  prepareParatextProject: vi.fn(),
+  commitParatextProject: vi.fn(),
   importParatextAsTarget: vi.fn(),
   prepareEBibleTargetImport: vi.fn(),
   applyEBibleTargetImport: vi.fn(),
@@ -53,7 +55,7 @@ vi.mock("@/components/ui/scroll-area", () => ({
 }))
 
 import { ImportDialog } from "./ImportDialog"
-import { importParatextProject } from "@/lib/import"
+import { prepareParatextProject, commitParatextProject } from "@/lib/import"
 import { detectParatextProject } from "@/lib/parsers/paratext-project"
 import { filesToProjectEntries } from "@/lib/import/file-entries"
 
@@ -80,7 +82,22 @@ function setupParatextMocks(skipped: { book: string; reason: string }[]) {
   vi.mocked(detectParatextProject).mockReturnValue({
     sfmEntries: [{ name: "GEN.usfm", file: mockFile }],
   } as never)
-  vi.mocked(importParatextProject).mockResolvedValue({
+  // FRO-310: the preview screen renders from the prepared plan before any upload.
+  vi.mocked(prepareParatextProject).mockResolvedValue({
+    project: { settings: { language: "hbo" }, bookNames: new Map(), books: [] },
+    books: [
+      {
+        book: { fileName: "GEN.usfm", bookId: "GEN", displayName: "Genesis", corpusMarker: "OT", order: 1, rawSource: "", verseCount: 2 },
+        strings: [
+          { id: "s1", original: "In the beginning", translated: "", context: "GEN 1:1", group: "GEN 1:1" },
+          { id: "s2", original: "And the earth", translated: "", context: "GEN 1:2", group: "GEN 1:2" },
+        ],
+        duplicateRefs: [],
+        cellCount: 2,
+      },
+    ],
+  } as never)
+  vi.mocked(commitParatextProject).mockResolvedValue({
     refs: [{ fileId: "f1" }] as never,
     settings: { language: "hbo" },
     skipped,
@@ -188,6 +205,39 @@ describe("FRO-277 — partial import holds dialog open", () => {
     const text = vi.mocked(navigator.clipboard.writeText).mock.calls[0][0] as string
     expect(text).toContain("Ruth")
     expect(text).toContain("unrecognized book code RUT")
+  })
+
+  it("FRO-310: preview gates the upload — commit fires only on confirm, with unchecked books excluded", async () => {
+    setupParatextMocks([])
+    render(<ImportDialog {...baseProps} />)
+
+    fireEvent.click(screen.getByText("Upload Files"))
+    const fileInput = document.querySelector('input[type="file"]') as HTMLInputElement
+    await act(async () => {
+      Object.defineProperty(fileInput, "files", { value: [mockFile], configurable: true })
+      fireEvent.change(fileInput)
+      await new Promise((r) => setTimeout(r, 0))
+    })
+
+    // Preview rendered from the client-side parse: book row with cell count.
+    expect(await screen.findByText("Genesis")).toBeInTheDocument()
+    expect(screen.getByText(/GEN · 2 cells/)).toBeInTheDocument()
+    // Nothing uploaded yet — preview-before-commit.
+    expect(commitParatextProject).not.toHaveBeenCalled()
+
+    // Unchecking the only book disables both import actions.
+    fireEvent.click(screen.getByLabelText("Include Genesis"))
+    expect(screen.getByText("Source text").closest("button")).toBeDisabled()
+
+    // Re-include and confirm — commit runs with no skipKeys.
+    fireEvent.click(screen.getByLabelText("Include Genesis"))
+    await act(async () => {
+      fireEvent.click(screen.getByText("Source text"))
+      await new Promise((r) => setTimeout(r, 0))
+    })
+    expect(commitParatextProject).toHaveBeenCalledOnce()
+    const ctxArg = vi.mocked(commitParatextProject).mock.calls[0][1]
+    expect([...(ctxArg.skipKeys ?? [])]).toEqual([])
   })
 
   it("clean import (skipped=[]) auto-closes: onImported fired, no result screen", async () => {

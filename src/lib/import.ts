@@ -27,6 +27,8 @@ import { extractVttStrings, extractSrtStrings } from "./parsers/subtitle"
 import { parseUsfmLossless } from "./parsers/usfm-lossless"
 import {
   assembleParatextProject,
+  type ParatextBook,
+  type ParatextProject,
   type ProjectEntry,
 } from "./parsers/paratext-project"
 import { buildBilingualPlan, type SourceVerse } from "./parsers/paratext-pairing"
@@ -990,6 +992,48 @@ export interface ParatextImportProgress {
   book?: string
   booksDone: number
   booksTotal: number
+  /** Cells uploaded so far / total across the whole import (per-chunk
+   *  granularity from the bulk uploader) — drives a smooth progress bar
+   *  instead of one tick per book. Absent during the parse phase. */
+  cellsDone?: number
+  cellsTotal?: number
+}
+
+/** One book parsed and ready to commit — preview metadata plus the exact
+ *  strings the commit phase will upload (parsed once, client-side). */
+export interface ParatextBookPlan {
+  book: ParatextBook
+  strings: TranslatableString[]
+  /** Verse refs that appear more than once in the book (surfaced in preview). */
+  duplicateRefs: string[]
+  cellCount: number
+}
+
+/** A fully client-side-parsed Paratext project: everything the preview screen
+ *  needs, and everything the commit phase uploads. Nothing has touched the
+ *  network when this exists (FRO-310 preview-before-confirm). */
+export interface ParatextPlan {
+  project: ParatextProject
+  books: ParatextBookPlan[]
+}
+
+/**
+ * Parse a Paratext project entirely client-side — no uploads. Fast (pure
+ * parsing), so the dialog can show a preview of every book's cells before the
+ * user confirms the import.
+ */
+export async function prepareParatextProject(entries: ProjectEntry[]): Promise<ParatextPlan> {
+  const project = await assembleParatextProject(entries)
+  if (!project) {
+    throw new Error(
+      "That doesn't look like a Paratext project — no Settings.xml (or .ssf) with USFM books was found.",
+    )
+  }
+  const books: ParatextBookPlan[] = project.books.map((book) => {
+    const { strings, duplicateRefs } = usfmSectionToStrings(book.rawSource)
+    return { book, strings, duplicateRefs, cellCount: strings.length }
+  })
+  return { project, books }
 }
 
 export interface ParatextImportResult {
@@ -1015,40 +1059,69 @@ export async function importParatextProject(
   ctx: ImportContext,
   onProgress?: (p: ParatextImportProgress) => void,
 ): Promise<ParatextImportResult> {
-  const project = await assembleParatextProject(entries)
-  if (!project) {
-    throw new Error(
-      "That doesn't look like a Paratext project — no Settings.xml (or .ssf) with USFM books was found.",
-    )
-  }
+  onProgress?.({ phase: "parse", booksDone: 0, booksTotal: 0 })
+  const plan = await prepareParatextProject(entries)
+  return commitParatextProject(plan, ctx, onProgress)
+}
 
+/**
+ * Upload a prepared (client-side-parsed, user-confirmed) Paratext plan: each
+ * book becomes one Aquilla File via the bulk endpoint. Progress fires per
+ * upload chunk (cellsDone/cellsTotal across the whole plan), not just per
+ * book, so the dialog bar moves every couple of seconds even on big books.
+ */
+export async function commitParatextProject(
+  plan: ParatextPlan,
+  ctx: ImportContext,
+  onProgress?: (p: ParatextImportProgress) => void,
+): Promise<ParatextImportResult> {
   const refs: FileReference[] = []
   const skipped: { book: string; reason: string }[] = []
-  const total = project.books.length
+  const total = plan.books.length
   // Source language defaults to the project's ISO code so the Aquilla project
   // inherits it (caller may override per source/target choice).
-  const bookCtx: ImportContext = {
+  const baseCtx: ImportContext = {
     ...ctx,
-    sourceLanguage: project.settings.languageIsoCode || ctx.sourceLanguage,
+    sourceLanguage: plan.project.settings.languageIsoCode || ctx.sourceLanguage,
   }
+  const isSkipped = (bookId: string) => ctx.skipKeys?.has(bookId.toUpperCase()) ?? false
+  const cellsTotal = plan.books.reduce(
+    (n, b) => n + (isSkipped(b.book.bookId) ? 0 : b.cellCount),
+    0,
+  )
 
   let done = 0
-  for (const book of project.books) {
-    onProgress?.({ phase: "parse", book: book.displayName, booksDone: done, booksTotal: total })
-    // FRO-287: honour skip decisions from the collision prompt.
-    if (ctx.skipKeys?.has(book.bookId.toUpperCase())) {
+  let cellsUploaded = 0
+  for (const bookPlan of plan.books) {
+    const book = bookPlan.book
+    onProgress?.({
+      phase: "save", book: book.displayName, booksDone: done, booksTotal: total,
+      cellsDone: cellsUploaded, cellsTotal,
+    })
+    // FRO-287 / preview toggles: honour skip decisions.
+    if (isSkipped(book.bookId)) {
       skipped.push({ book: book.displayName, reason: "skipped by user" })
       done++
-      onProgress?.({ phase: "save", booksDone: done, booksTotal: total })
+      onProgress?.({ phase: "save", booksDone: done, booksTotal: total, cellsDone: cellsUploaded, cellsTotal })
       continue
     }
     try {
-      const { strings } = usfmSectionToStrings(book.rawSource)
+      const cellsBefore = cellsUploaded
+      const bookCtx: ImportContext = {
+        ...baseCtx,
+        onCellEnqueued: (uploaded, totalForBook) => {
+          onProgress?.({
+            phase: "save", book: book.displayName, booksDone: done, booksTotal: total,
+            cellsDone: cellsBefore + uploaded, cellsTotal,
+          })
+          ctx.onCellEnqueued?.(uploaded, totalForBook)
+        },
+      }
       // USFM books have no speaker tags — ignore speakerPairs.
       const { ref } = await emitParsedFile(
         {
           name: book.displayName,
-          strings,
+          strings: bookPlan.strings,
           rawSource: book.rawSource,
           rawSourceFormat: "usfm",
           bookCode: book.bookId,
@@ -1059,14 +1132,15 @@ export async function importParatextProject(
         bookCtx,
       )
       refs.push(ref)
+      cellsUploaded = cellsBefore + bookPlan.cellCount
     } catch (err) {
       skipped.push({ book: book.displayName, reason: err instanceof Error ? err.message : String(err) })
     }
     done++
-    onProgress?.({ phase: "save", booksDone: done, booksTotal: total })
+    onProgress?.({ phase: "save", book: book.displayName, booksDone: done, booksTotal: total, cellsDone: cellsUploaded, cellsTotal })
   }
 
-  return { refs, settings: project.settings, skipped }
+  return { refs, settings: plan.project.settings, skipped }
 }
 
 /**
@@ -1081,30 +1155,36 @@ export async function importParatextProject(
  * source.
  */
 export async function importParatextAsTarget(
-  entries: ProjectEntry[],
+  plan: ParatextPlan,
   sourceVerses: SourceVerse[],
   ctx: ImportContext,
   onProgress?: (p: ParatextImportProgress) => void,
 ): Promise<ParatextImportResult> {
-  const project = await assembleParatextProject(entries)
-  if (!project) {
-    throw new Error(
-      "That doesn't look like a Paratext project — no Settings.xml (or .ssf) with USFM books was found.",
-    )
-  }
+  const project = plan.project
   const plans = buildBilingualPlan(project.books, sourceVerses, project.bookNames)
   const refs: FileReference[] = []
   const skipped: { book: string; reason: string }[] = []
   const total = plans.length
+  const isSkipped = (bookId: string) => ctx.skipKeys?.has(bookId.toUpperCase()) ?? false
+  // Overall cell budget: source cells + target commits per non-skipped book.
+  const cellsTotal = plans.reduce(
+    (n, p) =>
+      n + (isSkipped(p.bookId) ? 0 : p.cells.length + p.cells.filter((c) => c.targetText).length),
+    0,
+  )
+  let cellsUploaded = 0
   let done = 0
 
-  for (const plan of plans) {
-    onProgress?.({ phase: "parse", book: plan.displayName, booksDone: done, booksTotal: total })
-    // FRO-287: honour skip decisions from the collision prompt.
-    if (ctx.skipKeys?.has(plan.bookId.toUpperCase())) {
-      skipped.push({ book: plan.displayName, reason: "skipped by user" })
+  for (const bookPlan of plans) {
+    onProgress?.({
+      phase: "save", book: bookPlan.displayName, booksDone: done, booksTotal: total,
+      cellsDone: cellsUploaded, cellsTotal,
+    })
+    // FRO-287 / preview toggles: honour skip decisions.
+    if (isSkipped(bookPlan.bookId)) {
+      skipped.push({ book: bookPlan.displayName, reason: "skipped by user" })
       done++
-      onProgress?.({ phase: "save", booksDone: done, booksTotal: total })
+      onProgress?.({ phase: "save", booksDone: done, booksTotal: total, cellsDone: cellsUploaded, cellsTotal })
       continue
     }
     try {
@@ -1114,7 +1194,7 @@ export async function importParatextAsTarget(
       const cells: BulkImportCell[] = []
       const targets: TargetCommit[] = []
       let prevCellId: string | null = null
-      for (const c of plan.cells) {
+      for (const c of bookPlan.cells) {
         const sourceEventId = uuidv7()
         cells.push({
           id: sourceEventId,
@@ -1130,12 +1210,20 @@ export async function importParatextAsTarget(
         }
       }
 
+      const cellsBefore = cellsUploaded
+      const bookProgress = (uploaded: number) => {
+        onProgress?.({
+          phase: "save", book: bookPlan.displayName, booksDone: done, booksTotal: total,
+          cellsDone: cellsBefore + uploaded, cellsTotal,
+        })
+      }
+
       await bulkUploadSource({
         projectId: ctx.projectId,
         fileId,
         file: {
           id: uuidv7(),
-          name: plan.displayName,
+          name: bookPlan.displayName,
           fileType: "usfm",
           role: "target",
           kind: "usfm",
@@ -1143,12 +1231,13 @@ export async function importParatextAsTarget(
           parserVersion: "paratext-target-v1",
           sourceLanguage: ctx.sourceLanguage,
           targetLanguage: ctx.targetLanguage,
-          bookCode: plan.bookId,
+          bookCode: bookPlan.bookId,
         },
         cells,
-        rawSource: plan.rawSource,
+        rawSource: bookPlan.rawSource,
         rawSourceFormat: "usfm",
         getToken: ctx.getToken,
+        onProgress: (uploaded) => bookProgress(uploaded),
         signal: ctx.signal,
       })
 
@@ -1158,22 +1247,24 @@ export async function importParatextAsTarget(
         author: ctx.author,
         commits: targets,
         getToken: ctx.getToken,
+        onProgress: (uploaded) => bookProgress(cells.length + uploaded),
         signal: ctx.signal,
       })
 
       refs.push({
         id: fileId,
-        name: plan.displayName,
+        name: bookPlan.displayName,
         type: "usfm",
         createdAt: new Date().toISOString(),
         cellCount: cells.length,
-        ...(plan.corpusMarker ? { corpusMarker: plan.corpusMarker } : {}),
+        ...(bookPlan.corpusMarker ? { corpusMarker: bookPlan.corpusMarker } : {}),
       })
+      cellsUploaded = cellsBefore + cells.length + targets.length
     } catch (err) {
-      skipped.push({ book: plan.displayName, reason: err instanceof Error ? err.message : String(err) })
+      skipped.push({ book: bookPlan.displayName, reason: err instanceof Error ? err.message : String(err) })
     }
     done++
-    onProgress?.({ phase: "save", booksDone: done, booksTotal: total })
+    onProgress?.({ phase: "save", book: bookPlan.displayName, booksDone: done, booksTotal: total, cellsDone: cellsUploaded, cellsTotal })
   }
 
   return { refs, settings: project.settings, skipped }

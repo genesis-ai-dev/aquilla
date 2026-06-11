@@ -15,7 +15,7 @@
  */
 
 import { useState, useCallback, useRef, useEffect } from "react"
-import { Search, Replace, BookOpen, X } from "lucide-react"
+import { Search, Replace, BookOpen, X, Maximize2 } from "lucide-react"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
@@ -40,6 +40,8 @@ export interface SearchDockPanelProps {
   onReplaceAll?: (payload: ReplaceAllPayload) => void
   /** Called when user wants to open the full ParallelPassagesPanel dialog */
   onOpenFullPanel?: () => void
+  /** FRO-309: Called when user wants to expand all results into the main area */
+  onExpandResults?: (query: string) => void
 }
 
 export function SearchDockPanel({
@@ -52,6 +54,7 @@ export function SearchDockPanel({
   onClearResults,
   onSelect,
   onOpenFullPanel,
+  onExpandResults,
 }: SearchDockPanelProps) {
   const [mode, setMode] = useState<SearchDockMode>("search")
   const [query, setQuery] = useState("")
@@ -201,6 +204,24 @@ export function SearchDockPanel({
         )}
         {results.length > 0 && (
           <div className="space-y-0.5">
+            {/* FRO-309: Expand-all action */}
+            {onExpandResults && (
+              <div className="flex items-center justify-between pb-0.5 pt-0.5">
+                <span className="text-[10px] text-muted-foreground">
+                  {results.length} result{results.length !== 1 ? "s" : ""}
+                </span>
+                <button
+                  type="button"
+                  title="Expand all results in main area"
+                  aria-label="Expand all results"
+                  onClick={() => onExpandResults(query)}
+                  className="flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
+                >
+                  <Maximize2 className="h-2.5 w-2.5" />
+                  Expand all
+                </button>
+              </div>
+            )}
             {results.slice(0, 50).map((r) => (
               <button
                 key={`${r.fileId}:${r.cellId}`}

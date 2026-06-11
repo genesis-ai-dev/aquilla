@@ -75,3 +75,16 @@ Wave 2 dispatched off `d72f3d7`: aud-delta-read (M2-1+PERF-4+RES-6) · aud-batch
 **Final gate (merged tree, `52a5c36`)**: tsc clean · lint 0 errors · root 2540/2540 (296 files) · auth-worker 235/235 · sync-worker 573/573 · `pnpm build` + brand check OK.
 
 **DEPLOY ORDER**: `pnpm neon:apply` (migrations 0034/0035/0036 — idempotent) against the target DB BEFORE deploying sync-worker anywhere (staging branch included; deploy-workers schema-guard only guards main).
+
+## Promotion (2026-06-10 evening)
+
+- Third main merge `6d27c0c` (PD6 promotion: FRO-262/263/264 + ai_drafted + FRO-293 session-expiry) and fourth main merge `5832d9c` (FRO-288 focus-lock hook, FRO-296/297, FRO-290 copy pass, sync-worker test-tsc cleanup) hand-resolved; lock handlers compose FRO-288 hook feed + B4 new-Map-per-frame; ProjectsList composes RES-5 unreachable + FRO-293 notify.
+- Final gate round 4 (tip pre-promotion): lint 0 errors · root 2636/2636 · auth-worker green · sync-worker green · build + brand check OK · tsc clean.
+- UI-QA: golden path PASSED (first agent, before session-limit kill); focused re-run of delta-reads/unreachable/?__crash=1 dispatched — verdict lands post-promotion; findings become follow-ups.
+- Promoted to main via fast-forward.
+
+### DEPLOY RUNBOOK (do before deploying workers anywhere)
+1. `pnpm neon:apply` against PROD Neon (migrations 0034 allocator+claims, 0035 watermark index, 0036 rebuilt_seq — all idempotent). The deploy-workers schema-guard fails closed on main pushes if drift remains (needs NEON_PG_* repo secrets set).
+2. Same against the STAGING Neon branch BEFORE pushing `dev` (dev-branch worker deploys bypass the schema guard).
+3. Deploy sync-worker at a quiet time (rolling window: old workers still allocate MAX+1; collisions surface as loud 500 + client retry, self-heals).
+4. Open human decision: staging BASE_URL (dev.aquilla.app vs staging.aquilla.app) in auth-worker/wrangler.toml [env.staging].

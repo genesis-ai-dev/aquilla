@@ -21,7 +21,7 @@ export function SyncStatusIndicator({ status, className }: SyncStatusIndicatorPr
   const { dot, label, tooltip } = describeStatus(status)
   return (
     <span
-      className={cn("inline-flex items-center gap-1.5 text-xs", className)}
+      className={cn("inline-flex min-w-[5.5rem] items-center gap-1.5 text-xs shrink-0", className)}
       title={tooltip}
       aria-label={tooltip}
     >

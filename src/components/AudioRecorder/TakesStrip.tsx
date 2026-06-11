@@ -27,8 +27,22 @@ export function TakesStrip({ projectId, fileId, cellId, takes, selectedAudioId, 
   const [playingId, setPlayingId] = useState<string | null>(null)
   const [loadingId, setLoadingId] = useState<string | null>(null)
   const [busyId, setBusyId] = useState<string | null>(null)
+  // Optimistic selection: immediately reflects the last user intent while the
+  // server round-trip is in flight. Cleared once the server-confirmed
+  // selectedAudioId prop catches up (or reverted on error).
+  const [optimisticSelectedId, setOptimisticSelectedId] = useState<string | null>(null)
+  // Tracks the audioId of the most-recently-requested circle so rapid clicks
+  // converge: only the last click's outcome updates UI state.
+  const latestCircleRef = useRef<string | null>(null)
   const audioRef = useRef<HTMLAudioElement | null>(null)
   const urlRef = useRef<string | null>(null)
+
+  // Clear optimistic override once the server-confirmed prop catches up.
+  useEffect(() => {
+    if (optimisticSelectedId !== null && selectedAudioId === optimisticSelectedId) {
+      setOptimisticSelectedId(null)
+    }
+  }, [selectedAudioId, optimisticSelectedId])
 
   const stopPlayback = useCallback(() => {
     if (audioRef.current) { audioRef.current.pause(); audioRef.current = null }
@@ -67,15 +81,25 @@ export function TakesStrip({ projectId, fileId, cellId, takes, selectedAudioId, 
   }, [playingId, stopPlayback, session, projectId, fileId])
 
   const circle = useCallback(async (audioId: string) => {
-    if (audioId === selectedAudioId) return
+    // Effective selected = optimistic override if in-flight, else server value.
+    const effectiveSelected = optimisticSelectedId ?? selectedAudioId
+    if (audioId === effectiveSelected) return
+    // Optimistic: show selection immediately (user's latest intent wins).
+    setOptimisticSelectedId(audioId)
+    latestCircleRef.current = audioId
     setBusyId(audioId)
     try {
       await emitCellAudioSelect({ projectId, fileId, cellId, audioId, slot: "recording", author })
       notifyAudioAttachmentsChanged(fileId)
+    } catch {
+      // Only revert optimistic state if this is still the latest click.
+      if (latestCircleRef.current === audioId) {
+        setOptimisticSelectedId(null)
+      }
     } finally {
       setBusyId((cur) => (cur === audioId ? null : cur))
     }
-  }, [selectedAudioId, projectId, fileId, cellId, author])
+  }, [optimisticSelectedId, selectedAudioId, projectId, fileId, cellId, author])
 
   const remove = useCallback(async (audioId: string) => {
     setBusyId(audioId)
@@ -97,10 +121,14 @@ export function TakesStrip({ projectId, fileId, cellId, takes, selectedAudioId, 
       </div>
       <div className="flex flex-wrap gap-1.5">
         {takes.map((att, i) => {
-          const isCircled = att.audioId === selectedAudioId
+          // Use optimistic override while in-flight; fall back to server value.
+          const effectiveSelectedId = optimisticSelectedId ?? selectedAudioId
+          const isCircled = att.audioId === effectiveSelectedId
           const isPlaying = att.audioId === playingId
           const isLoading = att.audioId === loadingId
           const isBusy = att.audioId === busyId
+          // Disable all circle buttons while any selection switch is in flight.
+          const isSelectInFlight = busyId !== null
           return (
             <div
               key={att.audioId}
@@ -128,7 +156,7 @@ export function TakesStrip({ projectId, fileId, cellId, takes, selectedAudioId, 
               <button
                 type="button"
                 onClick={() => void circle(att.audioId)}
-                disabled={isBusy || isCircled}
+                disabled={isSelectInFlight || isCircled}
                 title={isCircled ? "Active take" : "Use this take"}
                 className={cn(
                   "flex h-6 w-6 items-center justify-center rounded-full",

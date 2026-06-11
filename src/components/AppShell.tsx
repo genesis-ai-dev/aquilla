@@ -1,6 +1,8 @@
 import { useContext, type ReactNode } from "react"
 import { BrandContext } from "@/branding/use-brand"
 import { VersionTag } from "./VersionBadge"
+// FRO-307: always-available report button (3 lines: import + mount in left rail)
+import { ReportProblemButton } from "./ReportProblemButton/ReportProblemButton"
 
 // Project-wide z-index scale (Tailwind v4 dynamic):
 //   (no z) — in-flow chrome (workspace header, status bar, sidebar). It sits
@@ -61,6 +63,7 @@ export function AppShell({ leftDock, sidebar, logoSlot, header, statusBar, befor
       <aside className="relative z-10 flex shrink-0 flex-col overflow-hidden">
         {resolvedLogo}
         {dockContent}
+        <ReportProblemButton /> {/* FRO-307 */}
         <VersionTag />
       </aside>
       <div className="flex min-w-0 flex-1 flex-col overflow-hidden">

@@ -22,7 +22,7 @@ describe("Preferences", () => {
   it("renders personal preference sections", () => {
     render(<MemoryRouter><OrgProvider><Preferences /></OrgProvider></MemoryRouter>)
     expect(screen.getByRole("heading", { name: "Preferences" })).toBeInTheDocument()
-    expect(screen.getByText("Share anonymous usage data")).toBeInTheDocument()
+    expect(screen.getByText("Share usage data")).toBeInTheDocument()
     expect(screen.getByText("provider section")).toBeInTheDocument()
   })
 })

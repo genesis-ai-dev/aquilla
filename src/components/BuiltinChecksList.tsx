@@ -1,6 +1,16 @@
 import { useMemo } from "react"
 import { Wand2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { Switch } from "@/components/ui/switch"
+import { Badge } from "@/components/ui/badge"
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import type {
   TranslationRule,
   RuleInfraction,
@@ -9,22 +19,16 @@ import type {
 } from "@/lib/parsers/types"
 import { BUILTIN_CHECKS } from "@/lib/lqa/builtin-registry"
 
+const SEVERITY_OPTIONS: { value: "major" | "minor"; label: string }[] = [
+  { value: "major", label: "Major" },
+  { value: "minor", label: "Minor" },
+]
+
 interface Props {
   builtinRules: TranslationRule[]
   infractions: Map<string, RuleInfraction[]>
   onSetOverride: (id: BuiltinCheckId, override: AlgorithmicCheckOverride) => void
-  /**
-   * FRO-186: called when the user clicks "Harmonize all (N)" on a check row.
-   * Receives the rule whose check has violations (has an auto-fix). The parent
-   * opens FixReviewPanel in multi-cell scope for the harmonization sweep.
-   * Optional — when absent the button is not rendered (preserves back-compat).
-   */
   onHarmonize?: (rule: TranslationRule, violationCount: number) => void
-  /**
-   * FRO-186: whether the current user has the harmonize_min_role.
-   * When false, the "Harmonize all" button is disabled. Defaults to true
-   * when omitted (fail-open; server is authoritative).
-   */
   canHarmonize?: boolean
 }
 
@@ -40,8 +44,8 @@ export function BuiltinChecksList({ builtinRules, infractions, onSetOverride, on
   }, [infractions])
 
   return (
-    <div className="border rounded-md">
-      <div className="px-4 py-2 border-b bg-muted/30 text-sm font-medium">
+    <div className="rounded-md border">
+      <div className="border-b bg-muted/30 px-4 py-2 text-sm font-medium">
         Built-in checks
       </div>
       <ul className="divide-y">
@@ -50,8 +54,6 @@ export function BuiltinChecksList({ builtinRules, infractions, onSetOverride, on
           const checkId = rule.check.checkId
           const def = BUILTIN_CHECKS[checkId]
           const count = counts.get(rule.id) ?? 0
-          // FRO-186: show "Harmonize all (N)" when the check has violations and
-          // the parent has supplied the onHarmonize callback.
           const showHarmonize = onHarmonize != null && count > 0
           return (
             <li
@@ -59,14 +61,14 @@ export function BuiltinChecksList({ builtinRules, infractions, onSetOverride, on
               data-testid="builtin-row"
               className="flex items-center gap-3 px-4 py-3 text-sm"
             >
-              <div className="flex-1 min-w-0">
+              <div className="min-w-0 flex-1">
                 <div className="font-medium">{def.name}</div>
-                <div className="text-muted-foreground text-xs truncate">{def.description}</div>
+                <div className="text-xs text-muted-foreground truncate">{def.description}</div>
               </div>
               {count > 0 && (
-                <div className="text-xs text-muted-foreground tabular-nums">
+                <Badge variant="secondary" className="tabular-nums">
                   {count} violation{count === 1 ? "" : "s"}
-                </div>
+                </Badge>
               )}
               {showHarmonize && (
                 <Button
@@ -81,28 +83,37 @@ export function BuiltinChecksList({ builtinRules, infractions, onSetOverride, on
                   onClick={() => onHarmonize(rule, count)}
                   data-testid="harmonize-all-btn"
                 >
-                  <Wand2 className="mr-1 h-3.5 w-3.5" />
+                  <Wand2 data-icon="inline-start" />
                   Harmonize all ({count})
                 </Button>
               )}
-              <select
-                className="h-7 px-2 text-xs border rounded-sm bg-background"
+              <Select
+                items={SEVERITY_OPTIONS}
                 value={rule.severity}
-                aria-label={`${def.name} severity`}
-                onChange={(e) => onSetOverride(checkId, {
+                onValueChange={(v) => onSetOverride(checkId, {
                   enabled: rule.enabled,
-                  severity: e.target.value as "major" | "minor",
+                  severity: (v ?? rule.severity) as "major" | "minor",
                 })}
               >
-                <option value="major">Major</option>
-                <option value="minor">Minor</option>
-              </select>
-              <input
-                type="checkbox"
+                <SelectTrigger size="sm" className="text-xs" aria-label={`${def.name} severity`}>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectGroup>
+                    {SEVERITY_OPTIONS.map((o) => (
+                      <SelectItem key={o.value} value={o.value}>
+                        {o.label}
+                      </SelectItem>
+                    ))}
+                  </SelectGroup>
+                </SelectContent>
+              </Select>
+              <Switch
+                size="sm"
                 checked={rule.enabled}
                 aria-label={`${def.name} enabled`}
-                onChange={(e) => onSetOverride(checkId, {
-                  enabled: e.target.checked,
+                onCheckedChange={(checked) => onSetOverride(checkId, {
+                  enabled: checked,
                   severity: rule.severity,
                 })}
               />

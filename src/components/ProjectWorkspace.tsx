@@ -2990,7 +2990,7 @@ export function ProjectWorkspace() {
             {project && centerSurface === "rules" && (
               <>
                 <Button variant="outline" size="sm" onClick={() => navigate(`/project/${projectId}/terminology`)}>
-                  <BookOpen className="mr-1 h-3.5 w-3.5" />
+                  <BookOpen data-icon="inline-start" />
                   Terminology
                 </Button>
                 <RuleImportDialog

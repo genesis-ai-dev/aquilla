@@ -13,6 +13,7 @@ import { useRef, useEffect, useState, type KeyboardEvent } from "react"
 import { MessageSquare, Trash2, Square, Pin, PinOff } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
+import { cellTextForDisplay, truncateCellText } from "@/lib/cell-text"
 import type { UseChatReturn, CellContext } from "@/hooks/useChat"
 
 export interface ChatDockPanelProps {
@@ -117,16 +118,20 @@ export function ChatDockPanel({ chat, currentCell }: ChatDockPanelProps) {
               : "Cell context on"
             : "No cell context"}
         </button>
-        {includeCellContext && currentCell && (
-          <span
-            className="truncate text-[10px] text-muted-foreground"
-            title={currentCell.sourceText}
-          >
-            {currentCell.sourceText.length > 30
-              ? currentCell.sourceText.slice(0, 30) + "…"
-              : currentCell.sourceText}
-          </span>
-        )}
+        {includeCellContext && currentCell && (() => {
+          const preview =
+            cellTextForDisplay(currentCell.sourceText) ||
+            cellTextForDisplay(currentCell.translatedText)
+          if (!preview) return null
+          return (
+            <span
+              className="truncate text-[10px] text-muted-foreground"
+              title={preview}
+            >
+              {truncateCellText(preview, 30)}
+            </span>
+          )
+        })()}
       </div>
 
       {/* Message list */}

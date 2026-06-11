@@ -11,6 +11,7 @@
 import type { CompletionSettings } from "@/lib/parsers/types"
 import type { FrontierSession } from "@/lib/frontier/types"
 import { complete, resolveProvider } from "./completion-service"
+import { cellTextForDisplay } from "@/lib/cell-text"
 import { getUserProviderOverride } from "@/lib/store/user-provider-override"
 
 // ── Types ──────────────────────────────────────────────────────────────────
@@ -61,10 +62,12 @@ export function buildChatMessages(options: {
   }
 
   if (cellContext) {
+    const sourceText = cellTextForDisplay(cellContext.sourceText)
+    const translatedText = cellTextForDisplay(cellContext.translatedText)
     systemContent +=
       `\n\nCurrent cell (for context):\n` +
-      `  Source: ${cellContext.sourceText}\n` +
-      (cellContext.translatedText ? `  Current translation: ${cellContext.translatedText}\n` : "") +
+      (sourceText ? `  Source: ${sourceText}\n` : "") +
+      (translatedText ? `  Current translation: ${translatedText}\n` : "") +
       (cellContext.context ? `  Reference: ${cellContext.context}\n` : "")
   }
 

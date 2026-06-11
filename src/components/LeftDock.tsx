@@ -10,6 +10,7 @@
  * Collapsed: renders a narrow rail of icon buttons only (no labels).
  * Expanded: shows the full panel at a user-draggable width.
  *
+ * Tab rail position (left vs top) is a user preference — see Preferences.
  * Width is persisted to localStorage per-project; defaults to 256px.
  * Min-width: 200px. Max-width: 520px.
  */
@@ -22,10 +23,19 @@ import {
   type ReactNode,
   type MouseEvent as ReactMouseEvent,
 } from "react"
-import { Files, MessageSquare, Search, ChevronLeft, ChevronRight } from "lucide-react"
+import {
+  Files,
+  MessageSquare,
+  Search,
+  ChevronLeft,
+  ChevronRight,
+  ChevronUp,
+  ChevronDown,
+} from "lucide-react"
 import { cn } from "@/lib/utils"
 import { ReportProblemButton } from "@/components/ReportProblemButton/ReportProblemButton"
 import { VersionTag } from "@/components/VersionBadge"
+import { useDockRailPosition } from "@/hooks/useDockRailPosition"
 
 // ---------------------------------------------------------------------------
 // Types
@@ -67,6 +77,77 @@ const TAB_META: { id: DockTab; icon: typeof Files; label: string }[] = [
 ]
 
 // ---------------------------------------------------------------------------
+// Tab rail
+// ---------------------------------------------------------------------------
+
+interface TabRailProps {
+  activeTab: DockTab | null
+  chatBadge?: number
+  onTabClick: (tab: DockTab) => void
+  orientation: "left" | "top"
+}
+
+function TabRail({ activeTab, chatBadge, onTabClick, orientation }: TabRailProps) {
+  const isTop = orientation === "top"
+
+  return (
+    <div
+      className={cn(
+        isTop
+          ? "mx-2 mt-2 flex min-w-0 items-center gap-0.5 rounded-full p-1 neu-inset"
+          : "flex h-full w-10 shrink-0 flex-col items-center gap-1 pt-2",
+      )}
+    >
+      {TAB_META.map(({ id, icon: Icon, label }) => {
+        const isActive = activeTab === id
+        return (
+          <button
+            key={id}
+            type="button"
+            title={label}
+            aria-label={label}
+            aria-pressed={isActive}
+            onClick={() => onTabClick(id)}
+            className={cn(
+              "relative flex items-center justify-center transition-colors",
+              isTop
+                ? cn(
+                    "h-7 flex-1 gap-1.5 rounded-full px-2 text-xs",
+                    isActive
+                      ? "bg-card font-medium text-foreground shadow-neu-xs"
+                      : "text-muted-foreground hover:text-foreground",
+                  )
+                : cn(
+                    "h-8 w-8 rounded-lg",
+                    isActive
+                      ? "bg-accent text-foreground"
+                      : "text-muted-foreground hover:bg-accent/60 hover:text-foreground",
+                  ),
+            )}
+          >
+            <Icon className={cn(isTop ? "h-3 w-3" : "h-4 w-4")} />
+            {isTop && <span className="truncate">{label}</span>}
+            {id === "chat" && chatBadge != null && chatBadge > 0 && (
+              <span
+                aria-label={`${chatBadge} unread`}
+                className={cn(
+                  "flex items-center justify-center rounded-full bg-primary text-primary-foreground",
+                  isTop
+                    ? "ml-0.5 h-4 min-w-4 px-1 text-[9px]"
+                    : "absolute -right-0.5 -top-0.5 h-3.5 w-3.5 text-[9px]",
+                )}
+              >
+                {chatBadge > 9 ? "9+" : chatBadge}
+              </span>
+            )}
+          </button>
+        )
+      })}
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
 // LeftDock
 // ---------------------------------------------------------------------------
 
@@ -79,6 +160,9 @@ export function LeftDock({
   activeTab: controlledTab,
   onActiveTabChange,
 }: LeftDockProps) {
+  const { position: railPosition } = useDockRailPosition()
+  const isTopRail = railPosition === "top"
+
   // ---- collapsed / expanded ------------------------------------------------
   // null = dock is collapsed (rail only), string = expanded with that tab active
   const [internalTab, setInternalTab] = useState<DockTab | null>("files")
@@ -163,83 +247,99 @@ export function LeftDock({
     search: searchPanel,
   }
 
-  const dockWidth = isOpen ? width : RAIL_WIDTH
+  const dockWidth = isOpen || isTopRail ? width : RAIL_WIDTH
+
+  const collapseButton = (
+    <button
+      type="button"
+      title={isOpen ? "Collapse sidebar" : "Expand sidebar"}
+      aria-label={isOpen ? "Collapse sidebar" : "Expand sidebar"}
+      onClick={() => setActiveTab(isOpen ? null : "files")}
+      className={cn(
+        "flex items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-accent/60 hover:text-foreground",
+        isTopRail ? "mx-2 mb-1 h-7 w-full" : "mb-2 mt-auto h-7 w-7",
+      )}
+    >
+      {isTopRail ? (
+        isOpen ? (
+          <ChevronUp className="h-3.5 w-3.5" />
+        ) : (
+          <ChevronDown className="h-3.5 w-3.5" />
+        )
+      ) : isOpen ? (
+        <ChevronLeft className="h-3.5 w-3.5" />
+      ) : (
+        <ChevronRight className="h-3.5 w-3.5" />
+      )}
+    </button>
+  )
 
   return (
     <div
       className="relative flex min-h-0 min-w-0 flex-1 select-none flex-col overflow-hidden"
       style={{ width: dockWidth }}
     >
-      <div className="relative flex min-h-0 flex-1 overflow-hidden">
-      {/* ── Rail of icon tabs ── */}
-      <div className="flex h-full w-10 shrink-0 flex-col items-center gap-1 pt-2">
-        {TAB_META.map(({ id, icon: Icon, label }) => {
-          const isActive = activeTab === id
-          return (
-            <button
-              key={id}
-              type="button"
-              title={label}
-              aria-label={label}
-              aria-pressed={isActive}
-              onClick={() => handleRailIconClick(id)}
-              className={cn(
-                "relative flex h-8 w-8 items-center justify-center rounded-lg transition-colors",
-                isActive
-                  ? "bg-accent text-foreground"
-                  : "text-muted-foreground hover:bg-accent/60 hover:text-foreground",
-              )}
-            >
-              <Icon className="h-4 w-4" />
-              {id === "chat" && chatBadge != null && chatBadge > 0 && (
-                <span
-                  aria-label={`${chatBadge} unread`}
-                  className="absolute -right-0.5 -top-0.5 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-primary text-[9px] text-primary-foreground"
-                >
-                  {chatBadge > 9 ? "9+" : chatBadge}
-                </span>
-              )}
-            </button>
-          )
-        })}
-
-        {/* Collapse / expand toggle at the bottom of the rail */}
-        <button
-          type="button"
-          title={isOpen ? "Collapse sidebar" : "Expand sidebar"}
-          aria-label={isOpen ? "Collapse sidebar" : "Expand sidebar"}
-          onClick={() => setActiveTab(isOpen ? null : "files")}
-          className="mt-auto mb-2 flex h-7 w-7 items-center justify-center rounded-lg text-muted-foreground hover:bg-accent/60 hover:text-foreground transition-colors"
-        >
-          {isOpen ? (
-            <ChevronLeft className="h-3.5 w-3.5" />
-          ) : (
-            <ChevronRight className="h-3.5 w-3.5" />
-          )}
-        </button>
-      </div>
-
-      {/* ── Expanded panel body ── */}
-      {isOpen && (
-        <>
-          {/* Panel content */}
-          <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
-            {activeTab && panels[activeTab]}
-          </div>
-
-          {/* Resize handle — right edge */}
-          <div
-            onMouseDown={handleDragStart}
-            className={cn(
-              "absolute right-0 top-0 h-full w-1 cursor-col-resize",
-              "hover:bg-primary/30 active:bg-primary/50 transition-colors",
-              "z-10",
+      <div
+        className={cn(
+          "relative flex min-h-0 flex-1 overflow-hidden",
+          isTopRail ? "flex-col" : "flex-row",
+        )}
+      >
+        {isTopRail ? (
+          <>
+            <TabRail
+              activeTab={activeTab}
+              chatBadge={chatBadge}
+              onTabClick={handleRailIconClick}
+              orientation="top"
+            />
+            {isOpen && (
+              <>
+                <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+                  {activeTab && panels[activeTab]}
+                </div>
+                <div
+                  onMouseDown={handleDragStart}
+                  className={cn(
+                    "absolute right-0 top-0 h-full w-1 cursor-col-resize",
+                    "z-10 transition-colors hover:bg-primary/30 active:bg-primary/50",
+                  )}
+                  aria-hidden
+                  title="Drag to resize"
+                />
+              </>
             )}
-            aria-hidden
-            title="Drag to resize"
-          />
-        </>
-      )}
+            {collapseButton}
+          </>
+        ) : (
+          <>
+            <div className="flex h-full w-10 shrink-0 flex-col items-center">
+              <TabRail
+                activeTab={activeTab}
+                chatBadge={chatBadge}
+                onTabClick={handleRailIconClick}
+                orientation="left"
+              />
+              {collapseButton}
+            </div>
+            {isOpen && (
+              <>
+                <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
+                  {activeTab && panels[activeTab]}
+                </div>
+                <div
+                  onMouseDown={handleDragStart}
+                  className={cn(
+                    "absolute right-0 top-0 h-full w-1 cursor-col-resize",
+                    "z-10 transition-colors hover:bg-primary/30 active:bg-primary/50",
+                  )}
+                  aria-hidden
+                  title="Drag to resize"
+                />
+              </>
+            )}
+          </>
+        )}
       </div>
 
       <ReportProblemButton />

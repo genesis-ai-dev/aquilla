@@ -34,8 +34,9 @@ function detectBibleBook(file: FileReference): RenameSuggestion | null {
   const name = getBookName(codeMatch)!
   const corpus = getTestament(codeMatch)!
 
-  // No suggestion needed if both name and corpus already match
-  if (file.name === name && file.corpusMarker === corpus) return null
+  // Friendly label already applied. corpusMarker is client-local (not on the
+  // server projection) and is often missing after reload — don't re-prompt.
+  if (file.name === name) return null
 
   return {
     fileId: file.id,

@@ -11,7 +11,7 @@ export interface WorkspaceTab {
 interface PersistedState {
   tabs: WorkspaceTab[]
   /** Last file the user actually had open. Survives navigation to Project
-   *  subpages (Rules/Comments/Snapshots/...) so returning to the workspace
+   *  subpages (Rules/Comments/Memory/...) so returning to the workspace
    *  re-opens the same file instead of dropping to an empty view (#38). */
   lastActiveFileId?: string
 }

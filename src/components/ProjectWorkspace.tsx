@@ -22,7 +22,7 @@ import { useCellConfidence } from "@/hooks/useCellConfidence"
 import { useRules } from "@/hooks/useRules"
 import { useOrgSettings } from "@/hooks/useOrgSettings"
 import { useActiveOrg } from "@/context/OrgContext"
-import { updateProject, patchProject, getProject } from "@/lib/store/project-index"
+import { updateProject, patchProject, getProject, mergeServerProjectWithLocalCache } from "@/lib/store/project-index"
 import { MAX_BATCH_COMPLETIONS } from "@/lib/workspace-actions/registry"
 import type { FileReference } from "@/lib/parsers/types"
 import { fileOrderedBy } from "@/lib/parsers/types"
@@ -75,7 +75,7 @@ import { runDiarization, type DiarizationPhase } from "@/lib/diarization/run-dia
 import { attachMediaFileToTimeline, attachMediaUrlToTimeline } from "@/lib/timeline/attach-media"
 import { useCellsAuditStatsWithOverlay } from "@/hooks/useCellsAuditStatsWithOverlay"
 import { useComments } from "@/hooks/useComments"
-import { Film, Scale, MessagesSquare, Share2, Settings as SettingsIcon, Lock, ClipboardList, Trash2, Undo2, Sparkles, Mic2, Download, BookMarked, BookOpen, Users, Camera, UserCheck, Eye, ArrowRight } from "lucide-react"
+import { Film, Scale, MessagesSquare, Share2, Settings as SettingsIcon, Lock, ClipboardList, Trash2, Undo2, Sparkles, Mic2, Download, BookMarked, BookOpen, Users, UserCheck, Eye, ArrowRight } from "lucide-react"
 import { ChatPanel } from "./ChatPanel"
 import { ChatDockPanel } from "./ChatDockPanel"
 import { SearchDockPanel } from "./SearchDockPanel"
@@ -106,6 +106,7 @@ import { useFootnotesPreference } from "@/hooks/useFootnotesPreference"
 import { useFileFontSizes, setFileViewPref } from "@/lib/store/file-view-prefs"
 import { EditorScrollProvider, useEditorScroll } from "@/context/EditorScrollContext"
 import { detectSuggestions, type RenameSuggestion } from "@/lib/file-labeling/detect"
+import { applySuggestions, buildUndo } from "@/lib/file-labeling/apply"
 import { renameFile, moveFileToCorpus, renameCorpus, deleteFile } from "@/lib/store/file-operations"
 import { deleteFileProjection } from "@/lib/sync/file-projection"
 import { fetchDeletedFiles } from "@/lib/sync/cells-read"
@@ -170,11 +171,6 @@ const TerminologyPageContent = lazy(() =>
 const ProjectMembersPageContent = lazy(() =>
   import("./ProjectMembersPage").then((mod) => ({ default: mod.ProjectMembersPage })),
 )
-// FRO-176: named snapshots surface (inside the shell per FRO-254).
-const SnapshotsPageContent = lazy(() =>
-  import("@/pages/SnapshotsPage").then((mod) => ({ default: mod.SnapshotsPage })),
-)
-
 // FRO-249 fix (Fix 2): module-level promise chain that serializes
 // handleImported's getProject→updateProject read-modify-write so that
 // concurrent imports don't race and the last write doesn't silently drop
@@ -208,6 +204,25 @@ export function ProjectWorkspace() {
     navigate("/")
   }, [navigate])
   const { project: loadedProject, status, refresh, patchSettings } = useProject(projectId!)
+  // Client-local overlays (corpusMarker, originalName, suggestionsDismissedAt)
+  // live in IDB; merge them onto the server-fetched record on load and after
+  // each local patch so rename suggestions don't loop on every open.
+  const [clientProject, setClientProject] = useState<ProjectRecord | null>(null)
+
+  useEffect(() => {
+    if (!loadedProject) {
+      setClientProject(null)
+      return
+    }
+    let cancelled = false
+    void getProject(loadedProject.id).then((local) => {
+      if (cancelled) return
+      setClientProject(mergeServerProjectWithLocalCache(loadedProject, local))
+    })
+    return () => { cancelled = true }
+  }, [loadedProject])
+
+  const hydratedProject = clientProject ?? loadedProject
 
   const [selectedFileId, setSelectedFileId] = useState<string | null>(routeFileId ?? null)
   const activeFileId = routeFileId ?? selectedFileId
@@ -247,10 +262,11 @@ export function ProjectWorkspace() {
     setOptimisticFiles([])
     setOptimisticRenames(new Map())
     setSuggestionsDismissed(false)
+    setClientProject(null)
   }, [projectId])
 
   const projectFiles = useMemo(() => {
-    const serverFiles = loadedProject?.files ?? []
+    const serverFiles = hydratedProject?.files ?? []
     // Overlay optimistic renames so the new label shows instantly and
     // detectSuggestions drops the applied file from the banner. Reconciled away
     // by the effect below once the server read reflects the new name.
@@ -265,31 +281,31 @@ export function ProjectWorkspace() {
     const seen = new Set(base.map((file) => file.id))
     const pending = optimisticFiles.filter((file) => !seen.has(file.id))
     return pending.length > 0 ? [...base, ...pending] : base
-  }, [loadedProject?.files, optimisticFiles, optimisticRenames])
+  }, [hydratedProject?.files, optimisticFiles, optimisticRenames])
 
   const project = useMemo<ProjectRecord | null>(() => {
-    if (!loadedProject) return null
-    if (projectFiles === loadedProject.files) return loadedProject
-    return { ...loadedProject, files: projectFiles }
-  }, [loadedProject, projectFiles])
+    if (!hydratedProject) return null
+    if (projectFiles === hydratedProject.files) return hydratedProject
+    return { ...hydratedProject, files: projectFiles }
+  }, [hydratedProject, projectFiles])
 
   useEffect(() => {
-    if (!loadedProject || optimisticFiles.length === 0) return
-    const serverIds = new Set(loadedProject.files.map((file) => file.id))
+    if (!hydratedProject || optimisticFiles.length === 0) return
+    const serverIds = new Set(hydratedProject.files.map((file) => file.id))
     setOptimisticFiles((current) => {
       const next = current.filter((file) => !serverIds.has(file.id))
       optimisticFileIdsRef.current = new Set(next.map((file) => file.id))
       return next
     })
-  }, [loadedProject, optimisticFiles.length])
+  }, [hydratedProject, optimisticFiles.length])
 
   // Drop an optimistic rename once the server read carries the new name.
   useEffect(() => {
-    if (!loadedProject || optimisticRenames.size === 0) return
+    if (!hydratedProject || optimisticRenames.size === 0) return
     setOptimisticRenames((current) => {
       let changed = false
       const next = new Map(current)
-      for (const file of loadedProject.files) {
+      for (const file of hydratedProject.files) {
         if (next.get(file.id) === file.name) {
           next.delete(file.id)
           changed = true
@@ -297,7 +313,7 @@ export function ProjectWorkspace() {
       }
       return changed ? next : current
     })
-  }, [loadedProject, optimisticRenames.size])
+  }, [hydratedProject, optimisticRenames.size])
 
   const fileIds = useMemo(() => projectFiles.map((f) => f.id), [projectFiles])
   useEffect(() => {
@@ -359,8 +375,7 @@ export function ProjectWorkspace() {
       location.pathname.endsWith("/comments") ||
       location.pathname.endsWith("/memory") ||
       location.pathname.endsWith("/terminology") ||
-      location.pathname.endsWith("/members") ||
-      location.pathname.endsWith("/snapshots")
+      location.pathname.endsWith("/members")
     ) return
 
     // A file is already in the URL: leave it unless the project genuinely
@@ -420,13 +435,12 @@ export function ProjectWorkspace() {
   // shell (sidebar + top bar + bottom status bar) never unmounts.
   // FRO-194 added "rules"; FRO-254 adds "comments", "memory", "terminology";
   // FRO-180 adds "members".
-  const centerSurface: "editor" | "rules" | "comments" | "memory" | "terminology" | "members" | "snapshots" =
+  const centerSurface: "editor" | "rules" | "comments" | "memory" | "terminology" | "members" =
     location.pathname.endsWith("/rules") ? "rules" :
     location.pathname.endsWith("/comments") ? "comments" :
     location.pathname.endsWith("/memory") ? "memory" :
     location.pathname.endsWith("/terminology") ? "terminology" :
     location.pathname.endsWith("/members") ? "members" :
-    location.pathname.endsWith("/snapshots") ? "snapshots" :
     "editor"
 
   useEffect(() => {
@@ -2058,7 +2072,7 @@ export function ProjectWorkspace() {
     [project]
   )
   const bannerSuggestions = useMemo(() => {
-    if (!project || suggestionsDismissed) return []
+    if (!project || suggestionsDismissed || project.suggestionsDismissedAt) return []
     return suggestions
   }, [project, suggestions, suggestionsDismissed])
   const suggestionFileIds = useMemo(
@@ -2077,7 +2091,7 @@ export function ProjectWorkspace() {
     return Array.from(set).sort((a, b) => a.localeCompare(b))
   }, [project?.files])
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null)
-  const [undo, setUndo] = useState<{ renames: Array<{ fileId: string; name: string }> } | null>(null)
+  const [undo, setUndo] = useState<{ chosen: RenameSuggestion[] } | null>(null)
   // FRO-272: soft-deleted ("Recently deleted") files fetched from the server.
   const [deletedFiles, setDeletedFiles] = useState<FileSummary[]>([])
   const [trashOpen, setTrashOpen] = useState(false)
@@ -2193,14 +2207,37 @@ export function ProjectWorkspace() {
 
   const handleApplySuggestions = useCallback(async (chosen: RenameSuggestion[]) => {
     if (!project || chosen.length === 0) return
-    // Capture originals for a 10s undo, then apply the friendly labels. Applied
-    // files drop out of the banner on their own (detectSuggestions no longer
-    // matches once name === suggestion); unchosen suggestions correctly remain.
-    const originals = chosen.map((s) => ({ fileId: s.fileId, name: s.currentName }))
-    await applyRenames(chosen.map((s) => ({ fileId: s.fileId, name: s.suggestedName })))
-    setUndo({ renames: originals })
-    setTimeout(() => setUndo((u) => (u?.renames === originals ? null : u)), 10000)
-  }, [project, applyRenames])
+    const next = applySuggestions(project, chosen)
+    // Optimistic: surface new labels instantly and drop applied files from the banner.
+    setOptimisticRenames((current) => {
+      const map = new Map(current)
+      for (const s of chosen) map.set(s.fileId, s.suggestedName)
+      return map
+    })
+    setClientProject(next)
+    // Persist corpus/originalName locally (server file.rename only carries name).
+    await updateProject(next)
+    const nameChanges = chosen.filter((s) => s.currentName !== s.suggestedName)
+    if (nameChanges.length > 0) {
+      try {
+        await Promise.all(
+          nameChanges.map((s) =>
+            emitFileRename({
+              projectId: project.id,
+              fileId: s.fileId,
+              name: s.suggestedName,
+              author: currentUsername,
+            }),
+          ),
+        )
+      } catch (e) {
+        console.error("[rename] file.rename emit failed during suggestion apply", e)
+      }
+    }
+    refresh()
+    setUndo({ chosen })
+    setTimeout(() => setUndo((u) => (u?.chosen === chosen ? null : u)), 10000)
+  }, [project, currentUsername, refresh])
 
   const handleApplyOneSuggestion = useCallback(async (fileId: string) => {
     if (!project) return
@@ -2215,13 +2252,23 @@ export function ProjectWorkspace() {
     refresh()
   }, [project, refresh])
 
-  const handleDismissBanner = useCallback(() => {
+  const handleDismissBanner = useCallback(async () => {
     setSuggestionsDismissed(true)
-  }, [])
+    if (!project) return
+    const dismissedAt = new Date().toISOString()
+    const next = { ...project, suggestionsDismissedAt: dismissedAt }
+    setClientProject(next)
+    await updateProject(next)
+  }, [project])
 
-  const handleReinviteSuggestions = useCallback(() => {
+  const handleReinviteSuggestions = useCallback(async () => {
     setSuggestionsDismissed(false)
-  }, [])
+    if (!project) return
+    const next = { ...project }
+    delete next.suggestionsDismissedAt
+    setClientProject(next)
+    await updateProject(next)
+  }, [project])
 
   // FRO-177 (orchestrator glue): apply Replace-mode diffs through the standard
   // target-commit path — optimistic patch first for visible rows (write-clock
@@ -2268,8 +2315,6 @@ export function ProjectWorkspace() {
         onClick: () => navigate(`/project/${projectId}/comments`) },
       { id: "living-memory", label: "Memory", icon: BookMarked,
         onClick: () => navigate(`/project/${projectId}/memory`) },
-      { id: "snapshots", label: "Snapshots", icon: Camera,
-        onClick: () => navigate(`/project/${projectId}/snapshots`) },
       // SWARM-TODO(voice-a7): "Voice" nav button toggles the Audio/Text lens
       // (current intentional behavior, fixed in a prior wave to avoid the
       // one-way-trap). QA now reports this is AMBIGUOUS: users expect a nav
@@ -2506,7 +2551,7 @@ export function ProjectWorkspace() {
             onClick: () => setVideoDialogOpen(true),
           }]
         : []),
-      ...(suggestions.length > 0 && suggestionsDismissed
+      ...(suggestions.length > 0 && (suggestionsDismissed || project?.suggestionsDismissedAt)
         ? [{
             id: "redetect-suggestions",
             label: `Show ${suggestions.length} file name suggestion${suggestions.length === 1 ? "" : "s"}`,
@@ -2538,6 +2583,7 @@ export function ProjectWorkspace() {
     isSubtitleFile,
     suggestions.length,
     suggestionsDismissed,
+    project?.suggestionsDismissedAt,
     handleReinviteSuggestions,
   ])
 
@@ -3196,13 +3242,6 @@ export function ProjectWorkspace() {
               <ProjectMembersPageContent />
             </Suspense>
           </div>
-        ) : centerSurface === "snapshots" ? (
-          // FRO-176: Named snapshots inside the shell (per FRO-254).
-          <div className="h-full overflow-y-auto">
-            <Suspense fallback={<div className="flex h-full items-center justify-center text-sm text-muted-foreground">Loading snapshots…</div>}>
-              <SnapshotsPageContent />
-            </Suspense>
-          </div>
         ) : cellAreaState.kind === "ready" ? (
           // FRO-309: relative wrapper so the search-expanded overlay can cover the editor
           <div className="relative h-full w-full">
@@ -3574,8 +3613,28 @@ export function ProjectWorkspace() {
         <div className="fixed bottom-4 right-4 z-60 flex items-center gap-2 rounded-lg bg-card px-3 py-2 text-sm shadow-neu">
           <span>Applied renames.</span>
           <Button size="sm" variant="outline" onClick={() => {
-            if (!undo) return
-            void applyRenames(undo.renames)
+            if (!project || !undo) return
+            const reverted = buildUndo(project, undo.chosen)
+            setClientProject(reverted)
+            void updateProject(reverted)
+            const nameChanges = undo.chosen.filter((s) => s.currentName !== s.suggestedName)
+            if (nameChanges.length > 0) {
+              void Promise.all(
+                nameChanges.map((s) =>
+                  emitFileRename({
+                    projectId: project.id,
+                    fileId: s.fileId,
+                    name: s.currentName,
+                    author: currentUsername,
+                  }),
+                ),
+              ).then(() => refresh())
+            }
+            setOptimisticRenames((current) => {
+              const next = new Map(current)
+              for (const s of undo.chosen) next.delete(s.fileId)
+              return next
+            })
             setUndo(null)
           }}>Undo</Button>
         </div>

@@ -5,6 +5,7 @@ import type { WorkspaceTab } from "@/hooks/useWorkspaceTabs"
 interface FileMeta {
   id: string
   name: string
+  originalName?: string
 }
 
 interface Props {
@@ -15,21 +16,39 @@ interface Props {
   onClose: (tabId: string) => void
 }
 
-function fileNameFor(files: readonly FileMeta[], fileId: string): string {
-  return files.find((f) => f.id === fileId)?.name ?? fileId
+const UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+
+function looksLikeUuid(value: string): boolean {
+  return UUID_RE.test(value.trim())
+}
+
+/** Tab label for humans — never the internal file id. */
+export function fileNameFor(files: readonly FileMeta[], fileId: string): string | null {
+  const file = files.find((f) => f.id === fileId)
+  if (!file) return null
+  for (const candidate of [file.name, file.originalName]) {
+    const trimmed = candidate?.trim()
+    if (!trimmed || trimmed === fileId || looksLikeUuid(trimmed)) continue
+    return trimmed
+  }
+  return "Untitled file"
 }
 
 export function TabStrip({ tabs, activeTabId, files, onActivate, onClose }: Props) {
-  if (tabs.length === 0) return null
+  const visibleTabs = tabs.flatMap((tab) => {
+    const name = fileNameFor(files, tab.fileId)
+    return name ? [{ tab, name }] : []
+  })
+  if (visibleTabs.length === 0) return null
   return (
     <div
       role="tablist"
       aria-label="Open files"
       className="relative z-10 flex items-stretch gap-1.5 overflow-x-auto border-b border-border px-2 py-1.5"
     >
-      {tabs.map((tab) => {
+      {visibleTabs.map(({ tab, name }) => {
         const active = tab.id === activeTabId
-        const name = fileNameFor(files, tab.fileId)
         return (
           <div
             key={tab.id}

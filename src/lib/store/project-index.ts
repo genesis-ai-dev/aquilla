@@ -153,6 +153,31 @@ export async function patchProject(
   return next
 }
 
+/** Overlay client-local file metadata from IDB onto a server-fetched project. */
+export function mergeServerProjectWithLocalCache(
+  server: ProjectRecord,
+  local: ProjectRecord | undefined,
+): ProjectRecord {
+  if (!local) return server
+  const localById = new Map(local.files.map((f) => [f.id, f]))
+  const files = server.files.map((f) => {
+    const cached = localById.get(f.id)
+    if (!cached) return f
+    return {
+      ...f,
+      ...(cached.corpusMarker !== undefined ? { corpusMarker: cached.corpusMarker } : {}),
+      ...(cached.originalName !== undefined ? { originalName: cached.originalName } : {}),
+    }
+  })
+  return {
+    ...server,
+    files,
+    ...(local.suggestionsDismissedAt
+      ? { suggestionsDismissedAt: local.suggestionsDismissedAt }
+      : {}),
+  }
+}
+
 export async function deleteProject(id: string): Promise<void> {
   const db = await getDb()
   await db.delete("projects", id)

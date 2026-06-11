@@ -22,6 +22,7 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet"
 import { cn } from "@/lib/utils"
+import { cellTextForDisplay, truncateCellText } from "@/lib/cell-text"
 import type { UseChatReturn, CellContext } from "@/hooks/useChat"
 
 // ---------------------------------------------------------------------------
@@ -152,13 +153,17 @@ export function ChatPanel({ open, onOpenChange, chat, currentCell }: ChatPanelPr
                 : "Cell context on"
               : "No cell context"}
           </button>
-          {includeCellContext && currentCell && (
-            <span className="truncate text-[11px] text-muted-foreground" title={currentCell.sourceText}>
-              {currentCell.sourceText.length > 40
-                ? currentCell.sourceText.slice(0, 40) + "…"
-                : currentCell.sourceText}
-            </span>
-          )}
+          {includeCellContext && currentCell && (() => {
+            const preview =
+              cellTextForDisplay(currentCell.sourceText) ||
+              cellTextForDisplay(currentCell.translatedText)
+            if (!preview) return null
+            return (
+              <span className="truncate text-[11px] text-muted-foreground" title={preview}>
+                {truncateCellText(preview, 40)}
+              </span>
+            )
+          })()}
         </div>
 
         {/* Message list */}

@@ -43,12 +43,9 @@ describe("detectSuggestions — bible-book", () => {
     })])
     expect(detectSuggestions(p)).toHaveLength(0)
   })
-  it("suggests corpus update when name is canonical but corpus is missing", () => {
+  it("does not re-suggest when the friendly book name is already applied", () => {
     const p = mkProject([mkFile({ id: "6", name: "Genesis", type: "usfm" })])
-    const s = detectSuggestions(p)
-    expect(s[0]).toMatchObject({
-      suggestedName: "Genesis", suggestedCorpus: "OT",
-    })
+    expect(detectSuggestions(p)).toHaveLength(0)
   })
   it("ignores non-scripture types", () => {
     const p = mkProject([mkFile({ id: "7", name: "gen.docx", type: "docx" })])

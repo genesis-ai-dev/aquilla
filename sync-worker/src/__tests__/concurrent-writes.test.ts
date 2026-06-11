@@ -15,9 +15,7 @@
 //   (b) two chain-mutating children of one parent: exactly one advances the
 //       projection, the loser is reported via the response `stale` array
 //       (the client banner contract) while still landing in `events`.
-//   (c) snapshot restore allocates seqs through the same allocator
-//       (conflict-safe — no MAX+1 self-race, no naked INSERT).
-//   (d) rebuild's tie-break (first sibling by server_seq) agrees with the
+//   (c) rebuild's tie-break (first sibling by server_seq) agrees with the
 //       live outcome, so replay == live.
 
 import { describe, it, expect, beforeEach } from 'vitest'
@@ -32,7 +30,6 @@ vi.mock('partyserver', () => ({
 
 import { handleEventsWriteRequest } from '../events/route'
 import { handleRebuildProjectionRequest } from '../events/rebuild'
-import { handleSnapshotsRequest } from '../events/snapshots-route'
 import { handleBulkImportRequest } from '../events/import-route'
 import { makeTestDb, type TestDb } from './helpers/pg-test-db'
 import { makeTestToken } from './helpers/auth'
@@ -320,56 +317,6 @@ describe('per-project server_seq allocator (RACE-1 / PERF-5)', () => {
     const seqs = rows.map((r) => Number(r.server_seq))
     expect(new Set(seqs).size).toBe(seqs.length)
     expect(await counterValue(t)).toBe(Math.max(...seqs))
-    await assertNoGhostHeads(t)
-  })
-})
-
-// ── (c) snapshot restore is conflict-safe ──────────────────────────────────
-
-describe('snapshot restore allocates seqs through the allocator (RACE-1)', () => {
-  it('restore events get fresh unique seqs and advance the shared counter', async () => {
-    // History: cell-1 committed "old" then "new"; snapshot taken in between.
-    await t.pg.query(
-      `INSERT INTO events (id, schema_version, project_id, file_id, cell_id, parent_id, kind, author, payload, client_ts, server_ts, server_seq) VALUES
-       ('evt-old', 1, $1, $2, 'cell-1', NULL,      'target.cell.commit', 'alice', '{"value":"old"}', 1000, 1000, 1),
-       ('evt-new', 1, $1, $2, 'cell-1', 'evt-old', 'target.cell.commit', 'alice', '{"value":"new"}', 2000, 2000, 2)`,
-      [PROJECT, FILE],
-    )
-    await t.pg.query(
-      `INSERT INTO cells (project_id, file_id, cell_id, side, value, event_id, last_edit_at)
-       VALUES ($1, $2, 'cell-1', 'target', 'new', 'evt-new', 2000)`,
-      [PROJECT, FILE],
-    )
-    await t.pg.query(
-      `INSERT INTO snapshots (id, project_id, name, created_by, snapshot_ts)
-       VALUES ('snap-1', $1, 'before the rewrite', 'alice', 1500)`,
-      [PROJECT],
-    )
-
-    const token = await makeTestToken(SECRET, { projectId: PROJECT, fileId: FILE, role: 600 })
-    const req = new Request(
-      `https://worker/api/v1/projects/${PROJECT}/snapshots/snap-1/restore`,
-      { method: 'POST', headers: { Authorization: `Bearer ${token}` } },
-    )
-    const res = await handleSnapshotsRequest(req, { AQUILLA_PG: t.db, SYNC_SECRET_KEY: SECRET })
-    expect(res).not.toBeNull()
-    expect(res!.status).toBe(200)
-    const body = (await res!.json()) as { restored: number }
-    expect(body.restored).toBe(1)
-
-    const rows = await eventRows(t)
-    const seqs = rows.map((r) => Number(r.server_seq))
-    expect(new Set(seqs).size).toBe(seqs.length)
-
-    // The restore commit chained off the current head and won it.
-    const head = await headOf(t)
-    expect(head?.event_id).not.toBe('evt-new')
-    const restoreEvent = rows.find((r) => r.id === head?.event_id)
-    expect(restoreEvent).toBeDefined()
-    expect(Number(restoreEvent!.server_seq)).toBe(3)
-
-    // Restore went through the shared allocator — the counter advanced with it.
-    expect(await counterValue(t)).toBe(3)
     await assertNoGhostHeads(t)
   })
 })

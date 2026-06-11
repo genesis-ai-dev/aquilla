@@ -41,6 +41,7 @@ async function makeAuthorized<K extends EventKind>(kind: K, role = 500) {
     'assignment.create': { assignmentId: 'as-1', scopeKind: 'books', scope: [{ fileId: 'file-x' }], scopeLabel: 'Genesis', assigneeUserId: 2 },
     'assignment.reassign': { assignmentId: 'as-1', assigneeUserId: 3 },
     'assignment.unassign': { assignmentId: 'as-1' },
+    'project.link-source': { sourceProjectId: 'upstream-proj-1' },
   }
 
   const raw = {

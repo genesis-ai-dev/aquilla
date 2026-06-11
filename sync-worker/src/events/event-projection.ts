@@ -1037,6 +1037,16 @@ case 'cell.audio.attach': {
       )
     }
 
+    case 'project.link-source': {
+      // AD-9: no sync-worker projection needed — projects.source_project_id
+      // is owned by auth-worker. dispatch.ts handles this kind directly and
+      // never calls buildEventProjectionStmts for it; this case is here for
+      // TypeScript exhaustiveness only.
+      throw new Error(
+        `buildEventProjectionStmts: project.link-source is handled by dispatch.ts, not here (event id: ${event.id})`,
+      )
+    }
+
     default: {
       // Defensive exhaustiveness check. If a new EventKind is added without
       // a case here this triggers a TS compile error.

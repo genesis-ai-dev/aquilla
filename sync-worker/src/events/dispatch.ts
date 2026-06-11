@@ -13,6 +13,7 @@
 
 import type { AuthorizedEvent } from './authorize'
 import type { EventKind } from './types'
+import type { RealtimeMessage } from './realtime'
 import { handleCellEvent, type CellEventKind } from './handlers/cell-events'
 import { handleFileCreate } from './handlers/file-create'
 import { handleFileRename } from './handlers/file-rename'
@@ -163,6 +164,23 @@ export function dispatchEvent(
           serverTs,
         ),
       }
+
+    case 'project.link-source': {
+      // AD-9: emitted by auth-worker on link/detach. No projection writes
+      // needed in sync-worker — `projects.source_project_id` is the auth-
+      // worker's table and the stale-source route reads it live from that
+      // source. This case exists purely to satisfy the exhaustiveness check.
+      const linkFrame: Extract<RealtimeMessage, { t: 'event' }> = {
+        v: 1,
+        t: 'event',
+        id: authed.event.id,
+        kind: authed.event.kind,
+        project: authed.event.projectId,
+        file: authed.event.fileId,
+        ts: serverTs,
+      }
+      return { ok: true, result: { stmts: [], eventFrame: linkFrame, dirtyTables: [] } }
+    }
 
     default: {
       // Exhaustiveness check.

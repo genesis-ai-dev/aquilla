@@ -31,6 +31,12 @@ export interface CloudProjectSummary {
   /** Active/inactive lifecycle state (migration 0033). Absent = assume active
    *  (older API versions that don't return the field). */
   isActive?: boolean
+  /**
+   * AD-9: upstream source project id for linked-target projects. Null / absent
+   * means self-contained. Returned by the single-project endpoint; list
+   * endpoint may omit (older servers).
+   */
+  sourceProjectId?: string | null
   role: {
     level: number
     name: string
@@ -220,7 +226,41 @@ export function minimalProjectRecord(summary: CloudProjectSummary): ProjectRecor
   if (summary.isActive === false) {
     record.isActive = false
   }
+  // AD-9: propagate source link (null = no upstream; undefined = field absent)
+  if (summary.sourceProjectId !== undefined) {
+    record.sourceProjectId = summary.sourceProjectId
+  }
   return record
+}
+
+/**
+ * POST /api/v2/projects/:id/detach-source — detach a linked-target project
+ * from its upstream source. Clears `source_project_id`, emits a
+ * `project.link-source` event with null payload, and bursts source cell
+ * snapshots. project_lead+ only (server-enforced).
+ *
+ * Returns the count of snapshottedCells on success; throws on non-2xx.
+ */
+export async function detachProjectSource(
+  jwt: string,
+  projectId: string,
+  apiUrl: string = FRONTIER_API_URL,
+): Promise<{ previousSourceProjectId: string; snapshottedCellCount: number }> {
+  const res = await fetch(
+    `${apiUrl}/api/v2/projects/${encodeURIComponent(projectId)}/detach-source`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${jwt}`,
+      },
+    },
+  )
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({ error: `HTTP ${res.status}` })) as { error?: string }
+    throw new UserError(res.status, body.error ?? `HTTP ${res.status}`, "project")
+  }
+  return res.json() as Promise<{ previousSourceProjectId: string; snapshottedCellCount: number }>
 }
 
 /**

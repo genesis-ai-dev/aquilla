@@ -671,6 +671,8 @@ describe('isChainMutatingKind', () => {
     'cell.audio.remove': false,
     'file.create': false,
     'file.rename': false,
+    'file.delete': false,
+    'file.restore': false,
     'comment.create': false,
     'comment.edit': false,
     'comment.delete': false,
@@ -679,6 +681,7 @@ describe('isChainMutatingKind', () => {
     'assignment.create': false,
     'assignment.reassign': false,
     'assignment.unassign': false,
+    'project.link-source': false,
   }
 
   it('classifies every EventKind exactly as the old route deny-list did', () => {

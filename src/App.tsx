@@ -11,6 +11,7 @@ import { JoinPage } from "@/components/JoinPage"
 import { OnboardingWizard } from "@/components/onboarding/OnboardingWizard"
 import { ResetPassword } from "@/pages/ResetPassword"
 import { Login } from "@/pages/Login"
+import { PrivacyPolicy } from "@/pages/PrivacyPolicy"
 import { NotFound } from "@/pages/NotFound"
 import { DevLoginRoute } from "@/components/DevLoginRoute"
 import { DevLogoutRoute } from "@/components/DevLogoutRoute"
@@ -154,6 +155,7 @@ function AppRoutes() {
         <Route path="/login" element={<Login />} />
         {/* FRO-270: account recovery — eagerly loaded (public, no auth required) */}
         <Route path="/reset-password" element={<ResetPassword />} />
+        <Route path="/privacy-policy" element={<PrivacyPolicy />} />
         {/* Dev-only auto-login/logout — see components/DevLoginRoute.tsx */}
         <Route path="/__dev/login" element={<DevLoginRoute />} />
         <Route path="/__dev/logout" element={<DevLogoutRoute />} />

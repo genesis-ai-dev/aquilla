@@ -4,7 +4,7 @@ const CHANGE_EVENT = "codex:analytics-consent-changed"
 export function isAnalyticsEnabled(): boolean {
   if (typeof window === "undefined") return false
   const raw = window.localStorage.getItem(STORAGE_KEY)
-  return raw === null ? false : raw === "true"
+  return raw === null ? true : raw === "true"
 }
 
 /**

@@ -10,13 +10,18 @@ if (typeof window !== "undefined" && KEY) {
     persistence: "localStorage+cookie",
     capture_pageview: true,
     autocapture: false,
-    disable_session_recording: true,
+    disable_session_recording: !isAnalyticsEnabled(),
     opt_out_capturing_by_default: !isAnalyticsEnabled(),
   })
 
   onAnalyticsConsentChange((enabled) => {
-    if (enabled) posthog.opt_in_capturing()
-    else posthog.opt_out_capturing()
+    if (enabled) {
+      posthog.opt_in_capturing()
+      posthog.startSessionRecording()
+    } else {
+      posthog.opt_out_capturing()
+      posthog.stopSessionRecording()
+    }
   })
 }
 

@@ -33,8 +33,8 @@ export function PrivacyStep({ onNext, onBack }: { onNext: () => void; onBack: ()
               Share usage data
             </Label>
             <p className="text-xs text-muted-foreground">
-              Includes events like project creation, exports, and AI translations. Never the contents of your
-              translations or files.
+              Helps us provide support and improve Aquilla for everyone. Includes usage events
+              and session recordings for diagnosing issues.
             </p>
           </div>
           <Switch
@@ -60,7 +60,10 @@ export function PrivacyStep({ onNext, onBack }: { onNext: () => void; onBack: ()
       </div>
 
       <p className="text-center text-xs text-muted-foreground">
-        You can change this anytime in Settings.
+        You can change this anytime in Settings. Read our{" "}
+        <a href="/privacy-policy" target="_blank" rel="noopener noreferrer" className="underline underline-offset-2">
+          Privacy Policy
+        </a>.
       </p>
     </div>
   )

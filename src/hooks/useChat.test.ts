@@ -351,6 +351,38 @@ describe("useChat", () => {
     expect(result2.current.messages[0]).toMatchObject({ role: "user", content: "Persist me" })
   })
 
+  it("hydrates persisted history/context when projectId arrives after mount (async project load)", async () => {
+    localStorageMock.setItem(
+      "chat-history:proj-late",
+      JSON.stringify([{ role: "user", content: "from storage" }]),
+    )
+    localStorageMock.setItem("chat-include-cell-context:proj-late", "false")
+
+    // Mount without projectId (project record not loaded yet)…
+    const { result, rerender } = renderHook(
+      ({ projectId }: { projectId?: string }) =>
+        useChat({
+          settings: SETTINGS,
+          session: SESSION,
+          sourceLanguage: "English",
+          targetLanguage: "French",
+          projectId,
+        }),
+      { initialProps: { projectId: undefined as string | undefined } },
+    )
+    expect(result.current.messages).toHaveLength(0)
+
+    // …then the project loads and projectId becomes available.
+    rerender({ projectId: "proj-late" })
+
+    expect(result.current.messages).toHaveLength(1)
+    expect(result.current.messages[0]).toMatchObject({ role: "user", content: "from storage" })
+    expect(result.current.includeCellContext).toBe(false)
+    // The save effect must not have wiped storage with the pre-hydration [].
+    const raw = localStorageMock.getItem("chat-history:proj-late")
+    expect(JSON.parse(raw!)).toHaveLength(1)
+  })
+
   it("tolerates legacy persisted messages without id/ts", () => {
     localStorageMock.setItem(
       "chat-history:proj-legacy",

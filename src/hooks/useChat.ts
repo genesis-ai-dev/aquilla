@@ -152,6 +152,18 @@ export function useChat(options: UseChatOptions): UseChatReturn {
     loadIncludeCellContext(projectId),
   )
 
+  // ProjectWorkspace mounts before the project record loads, so projectId is
+  // often undefined on first render. Hydrate persisted state when it arrives —
+  // and never persist until hydration has happened for the current projectId,
+  // otherwise the save effect wipes stored history with the initial [].
+  const hydratedForRef = useRef<string | undefined>(projectId)
+  useEffect(() => {
+    if (!projectId || hydratedForRef.current === projectId) return
+    hydratedForRef.current = projectId
+    setMessages(loadHistory(projectId))
+    setIncludeCellContextState(loadIncludeCellContext(projectId))
+  }, [projectId])
+
   const setIncludeCellContext = useCallback(
     (v: boolean) => {
       setIncludeCellContextState(v)
@@ -166,8 +178,9 @@ export function useChat(options: UseChatOptions): UseChatReturn {
     [projectId],
   )
 
-  // Persist history whenever messages change.
+  // Persist history whenever messages change (only after hydration).
   useEffect(() => {
+    if (hydratedForRef.current !== projectId) return
     saveHistory(projectId, messages)
   }, [projectId, messages])
 

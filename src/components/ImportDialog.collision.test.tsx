@@ -26,6 +26,10 @@ vi.mock("@/lib/import", () => ({
   importParatextAsTarget: vi.fn(),
   prepareEBibleTargetImport: vi.fn(),
   applyEBibleTargetImport: vi.fn(),
+  // FRO-310: preview phase parses client-side before commit
+  parseFile: vi.fn(async () => [
+    { name: "genesis.usfm", strings: [{ id: "s1", original: "content" }] },
+  ]),
 }))
 vi.mock("@/lib/import/cast-from-speakers", () => ({ buildCastAdditions: vi.fn(() => ({})) }))
 vi.mock("@/lib/import/file-entries", () => ({
@@ -69,6 +73,16 @@ function setupSingleFileMocks() {
   vi.mocked(filesToProjectEntries).mockResolvedValue([])
   vi.mocked(detectParatextProject).mockReturnValue(null)
   vi.mocked(importFile).mockResolvedValue({ refs: [{ fileId: "new-ref" } as never], speakerPairs: [] })
+}
+
+/** FRO-310: click through the preview-before-confirm screen. */
+async function confirmPreview() {
+  const confirmBtn = await screen.findByRole("button", { name: /confirm import/i })
+  await act(async () => {
+    fireEvent.click(confirmBtn)
+    await new Promise((r) => setTimeout(r, 0))
+    await new Promise((r) => setTimeout(r, 0))
+  })
 }
 
 /** Navigate to the Upload panel and drop the colliding file. */
@@ -173,6 +187,9 @@ describe("FRO-287 — collision guard intercepts re-imports", () => {
       await new Promise((r) => setTimeout(r, 0))
     })
 
+    // FRO-310: the preview screen now sits between resolution and commit
+    await confirmPreview()
+
     // importFile must have been called (duplicate path)
     await waitFor(() => expect(importFile).toHaveBeenCalledOnce())
   })
@@ -193,6 +210,9 @@ describe("FRO-287 — collision guard intercepts re-imports", () => {
     // Collision screen must NOT appear
     expect(screen.queryByText(/re-import detected/i)).toBeNull()
 
+    // FRO-310: preview-before-confirm — commit happens after Confirm import
+    await confirmPreview()
+
     // importFile must have been called (fresh project, no guard)
     await waitFor(() => expect(importFile).toHaveBeenCalledOnce())
   })
@@ -211,6 +231,7 @@ describe("FRO-287 — collision guard intercepts re-imports", () => {
     await dropCollidingFile()
 
     expect(screen.queryByText(/re-import detected/i)).toBeNull()
+    await confirmPreview()
     await waitFor(() => expect(importFile).toHaveBeenCalledOnce())
   })
 

@@ -36,6 +36,8 @@ test("share panel members tab role select changes member's role", async ({ alice
   await ws.waitForEditor()
 
   // Open Share panel.
+  // Share lives in the sidebar "More" menu (sidebar cleanup).
+  await alice.getByRole("button", { name: /More project options/i }).click()
   const shareBtn = alice.getByRole("button", { name: /^Share$/i })
   await shareBtn.click()
   const dialog = alice.getByRole("dialog")

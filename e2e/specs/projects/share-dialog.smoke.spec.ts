@@ -27,6 +27,8 @@ test("share dialog opens with Members and Invite link tabs", async ({ alice }) =
   await ws.waitForEditor()
 
   // The "Share" button is in the workspace sidebar nav.
+  // Share lives in the sidebar "More" menu (sidebar cleanup).
+  await alice.getByRole("button", { name: /More project options/i }).click()
   const shareBtn = alice.getByRole("button", { name: /^Share$/i })
   await expect(shareBtn).toBeVisible({ timeout: 5_000 })
   await shareBtn.click()

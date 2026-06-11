@@ -84,24 +84,8 @@ export function ExpandableFileList({
 
   return (
     <>
-      {/* FRO-253 (a fix): hide export affordances when org policy disallows it */}
-      {exportableCount > 1 && canExportByOrgPolicy && (
-        <div className="px-2 pt-2">
-          <button
-            onClick={exportAllUsfm}
-            disabled={!!zipExporting}
-            className="flex w-full items-center justify-center gap-1.5 rounded-xl bg-background py-1.5 text-xs shadow-neu-inset transition-opacity hover:opacity-80 disabled:opacity-50"
-            title={`Download all ${exportableCount} .SFM books as a .zip`}
-          >
-            <Archive className="h-3.5 w-3.5" />
-            {zipExporting
-              ? `Exporting ${zipExporting.done}/${zipExporting.total}…`
-              : `Export all ${exportableCount} books (.zip)`}
-          </button>
-        </div>
-      )}
-      <div className="px-2 py-2">
-        <div className="relative">
+      <div className="flex items-center gap-1 px-2 py-2">
+        <div className="relative flex-1">
           <SearchIcon className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
           <input
             type="text"
@@ -129,6 +113,23 @@ export function ExpandableFileList({
             </button>
           )}
         </div>
+        {/* FRO-253 (a fix): hide export affordances when org policy disallows it */}
+        {exportableCount > 1 && canExportByOrgPolicy && (
+          <button
+            onClick={exportAllUsfm}
+            disabled={!!zipExporting}
+            className="flex h-7 shrink-0 items-center justify-center gap-1 rounded-lg px-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-50"
+            title={`Export all ${exportableCount} books (.zip)`}
+            aria-label={`Export all ${exportableCount} books (.zip)`}
+          >
+            <Archive className="h-3.5 w-3.5" />
+            {zipExporting && (
+              <span className="text-[10px] tabular-nums">
+                {zipExporting.done}/{zipExporting.total}
+              </span>
+            )}
+          </button>
+        )}
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
         <div className="p-2 space-y-2">

@@ -36,6 +36,8 @@ test("targeted invite chip appears on /members when invite has a recipient email
   await ws.waitForEditor()
 
   // Open Share panel → Invite link tab.
+  // Share lives in the sidebar "More" menu (sidebar cleanup).
+  await alice.getByRole("button", { name: /More project options/i }).click()
   const shareBtn = alice.getByRole("button", { name: /^Share$/i })
   await shareBtn.click()
   const dialog = alice.getByRole("dialog")

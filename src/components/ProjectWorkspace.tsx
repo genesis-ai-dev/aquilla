@@ -2320,7 +2320,9 @@ export function ProjectWorkspace() {
         onClick: () => navigate(`/project/${projectId}/rules`) },
       { id: "terminology", label: "Terminology", icon: BookOpen,
         onClick: () => navigate(`/project/${projectId}/terminology`) },
-      { id: "comments", label: "Comments", icon: MessagesSquare,
+      // Pinned: Comments carries a live unread count, so it stays visible;
+      // everything unpinned collapses into the sidebar "More" menu.
+      { id: "comments", label: "Comments", icon: MessagesSquare, pinned: true,
         badge: Array.from(openCommentCount.values()).reduce((a, b) => a + b, 0),
         onClick: () => navigate(`/project/${projectId}/comments`) },
       { id: "living-memory", label: "Memory", icon: BookMarked,

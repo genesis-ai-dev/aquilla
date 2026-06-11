@@ -1,4 +1,6 @@
-import type { LucideIcon } from "lucide-react"
+import { useState } from "react"
+import { MoreHorizontal, type LucideIcon } from "lucide-react"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { cn } from "@/lib/utils"
 
 export interface ProjectNavItem {
@@ -6,6 +8,8 @@ export interface ProjectNavItem {
   label: string
   icon: LucideIcon
   badge?: number
+  /** Pinned items render as always-visible rows; the rest live in "More". */
+  pinned?: boolean
   onClick: () => void
 }
 
@@ -13,28 +17,76 @@ interface Props {
   items: ProjectNavItem[]
 }
 
-export function SidebarProjectSection({ items }: Props) {
+function NavRow({ item, onAfterClick }: { item: ProjectNavItem; onAfterClick?: () => void }) {
   return (
-    <div className="px-2 py-2">
-      <div className="px-1 pb-1.5 text-[10px] uppercase tracking-wide text-muted-foreground">
-        Project
-      </div>
-      <div className="space-y-1">
-        {items.map((item) => (
-          <button
-            key={item.id}
-            className={cn(
-              "flex w-full items-center gap-2 rounded-xl bg-card px-2 py-1.5 text-sm transition-shadow hover:shadow-neu-xs",
-            )}
-            onClick={item.onClick}
-          >
-            <item.icon className="h-4 w-4 text-muted-foreground" />
-            <span className="flex-1 text-left">{item.label}</span>
-            {item.badge != null && item.badge > 0 && (
-              <span className="rounded-full px-1.5 text-[10px] text-primary shadow-neu-inset">{item.badge}</span>
-            )}
-          </button>
+    <button
+      className={cn(
+        "flex h-7 w-full items-center gap-2 rounded-lg px-2 text-[13px] text-muted-foreground transition-colors",
+        "hover:bg-accent hover:text-foreground focus-visible:bg-accent focus-visible:outline-none",
+      )}
+      onClick={() => {
+        item.onClick()
+        onAfterClick?.()
+      }}
+    >
+      <item.icon className="h-3.5 w-3.5 shrink-0" />
+      <span className="flex-1 truncate text-left">{item.label}</span>
+      {item.badge != null && item.badge > 0 && (
+        <span className="rounded-full px-1.5 text-[10px] tabular-nums text-primary shadow-neu-inset">
+          {item.badge}
+        </span>
+      )}
+    </button>
+  )
+}
+
+export function SidebarProjectSection({ items }: Props) {
+  const [moreOpen, setMoreOpen] = useState(false)
+  const pinned = items.filter((i) => i.pinned)
+  const overflow = items.filter((i) => !i.pinned)
+  // Surface overflow badge activity (e.g. unread counts) on the More row so
+  // tucking an item away never hides live information.
+  const overflowBadge = overflow.reduce((sum, i) => sum + (i.badge ?? 0), 0)
+
+  return (
+    <div className="px-2 py-1">
+      <div className="space-y-0.5">
+        {pinned.map((item) => (
+          <NavRow key={item.id} item={item} />
         ))}
+        {overflow.length > 0 && (
+          <Popover open={moreOpen} onOpenChange={setMoreOpen}>
+            <PopoverTrigger
+              render={
+                <button
+                  // Distinct accessible name: the workspace header already has a
+                  // button named exactly "More" (OverflowMenu).
+                  aria-label="More project options"
+                  className={cn(
+                    "flex h-7 w-full items-center gap-2 rounded-lg px-2 text-[13px] transition-colors",
+                    "hover:bg-accent hover:text-foreground focus-visible:bg-accent focus-visible:outline-none",
+                    moreOpen ? "bg-accent text-foreground" : "text-muted-foreground",
+                  )}
+                >
+                  <MoreHorizontal className="h-3.5 w-3.5 shrink-0" />
+                  <span className="flex-1 truncate text-left">More</span>
+                  {overflowBadge > 0 && (
+                    <span className="rounded-full px-1.5 text-[10px] tabular-nums text-primary shadow-neu-inset">
+                      {overflowBadge}
+                    </span>
+                  )}
+                </button>
+              }
+            />
+            <PopoverContent side="top" align="start" className="min-w-[180px] rounded-xl p-1">
+              <div className="flex flex-col">
+                {overflow.map((item) => (
+                  <NavRow key={item.id} item={item} onAfterClick={() => setMoreOpen(false)} />
+                ))}
+              </div>
+            </PopoverContent>
+          </Popover>
+        )}
       </div>
     </div>
   )

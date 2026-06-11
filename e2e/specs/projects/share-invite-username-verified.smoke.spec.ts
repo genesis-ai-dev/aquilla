@@ -36,6 +36,8 @@ test("share panel username typeahead shows Verified Aquilla user badge", async (
   await alice.waitForLoadState("networkidle")
 
   // Open Share panel.
+  // Share lives in the sidebar "More" menu (sidebar cleanup).
+  await alice.getByRole("button", { name: /More project options/i }).click()
   const shareBtn = alice.getByRole("button", { name: /^Share$/i })
   await expect(shareBtn).toBeVisible({ timeout: 10_000 })
   await shareBtn.click()

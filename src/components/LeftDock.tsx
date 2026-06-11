@@ -29,8 +29,6 @@ import {
   Search,
   ChevronLeft,
   ChevronRight,
-  ChevronUp,
-  ChevronDown,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { ReportProblemButton } from "@/components/ReportProblemButton/ReportProblemButton"
@@ -309,8 +307,7 @@ export function LeftDock({
         ) : (
           // Left-rail (always), or top-rail collapsed: vertical 40px icon strip + optional panel
           <>
-            <div data-ryder="hello"
-            className="flex h-full w-10 shrink-0 flex-col items-center">
+            <div className="flex h-full w-10 shrink-0 flex-col items-center">
               <TabRail
                 activeTab={activeTab}
                 chatBadge={chatBadge}

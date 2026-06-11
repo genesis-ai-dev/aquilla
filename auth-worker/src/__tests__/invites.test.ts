@@ -369,6 +369,8 @@ describe("POST /api/v2/invites/:token/accept — idempotency and race guard", ()
       .bind("proj-multi-3")
       .first<{ user_id: number }>()
     expect(member).toBeNull()
+  })
+})
 
 // ── FRO-283: email enforcement ─────────────────────────────────────────────
 describe("accept-invite: email-bound enforcement (FRO-283)", () => {
@@ -574,6 +576,115 @@ describe("GET /api/v2/projects/:id/invites (FRO-283)", () => {
       env,
     )
     expect(res.status).toBe(403)
+  })
+})
+
+// ── FRO-323: POST /api/v2/projects/:id/members → GET /api/v2/projects ─────
+//
+// Root cause confirmed: the direct-add path inserts into project_members and
+// the project-list query's WHERE includes `OR pm.user_id = ?` (bound to the
+// invitee's user.id). This test exercises the full round-trip to verify that
+// an invited user sees the project in their GET /api/v2/projects response.
+describe("FRO-323: add-member round-trip — invited user sees project in project list", () => {
+  it("project appears in invitee GET /api/v2/projects after POST /projects/:id/members", async () => {
+    await seedUser(100, "maintainer")
+    await seedUser(101, "invitee")
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO projects (id, name, org_id, created_by) VALUES (?, ?, NULL, 100)",
+    )
+      .bind("proj-fro323", "Genesis Project")
+      .run()
+
+    // Maintainer adds invitee directly
+    const addRes = await app.request(
+      "/api/v2/projects/proj-fro323/members",
+      {
+        method: "POST",
+        headers: authHeader(await jwtFor("maintainer")),
+        body: JSON.stringify({ username: "invitee", role: 400 }),
+      },
+      env,
+    )
+    expect(addRes.status).toBe(200)
+
+    // Invitee's GET /api/v2/projects must include the project
+    const listRes = await app.request(
+      "/api/v2/projects",
+      { method: "GET", headers: authHeader(await jwtFor("invitee")) },
+      env,
+    )
+    expect(listRes.status).toBe(200)
+    const { projects } = (await listRes.json()) as { projects: Array<{ id: string }> }
+    const found = projects.some((p) => p.id === "proj-fro323")
+    expect(found).toBe(true)
+  })
+
+  it("invitee does NOT see project before being added", async () => {
+    await seedUser(102, "other-maintainer")
+    await seedUser(103, "not-yet-invited")
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO projects (id, name, org_id, created_by) VALUES (?, ?, NULL, 102)",
+    )
+      .bind("proj-fro323-b", "Private Project")
+      .run()
+
+    const listRes = await app.request(
+      "/api/v2/projects",
+      { method: "GET", headers: authHeader(await jwtFor("not-yet-invited")) },
+      env,
+    )
+    expect(listRes.status).toBe(200)
+    const { projects } = (await listRes.json()) as { projects: Array<{ id: string }> }
+    expect(projects.some((p) => p.id === "proj-fro323-b")).toBe(false)
+  })
+
+  it("project list honours ?minRole filter (FRO-321)", async () => {
+    await seedUser(104, "multi-role-user")
+    await seedUser(105, "owner-of-two")
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO projects (id, name, org_id, created_by) VALUES (?, ?, NULL, 105)",
+    )
+      .bind("proj-maintainer", "Maintainer Project")
+      .run()
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO projects (id, name, org_id, created_by) VALUES (?, ?, NULL, 105)",
+    )
+      .bind("proj-contributor", "Contributor Project")
+      .run()
+
+    // Add multi-role-user as maintainer (600) to one project, contributor (400) to another
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO project_members (project_id, user_id, role_level, granted_by) VALUES (?, ?, ?, 105)",
+    )
+      .bind("proj-maintainer", 104, 600)
+      .run()
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO project_members (project_id, user_id, role_level, granted_by) VALUES (?, ?, ?, 105)",
+    )
+      .bind("proj-contributor", 104, 400)
+      .run()
+
+    // Without minRole: sees both
+    const allRes = await app.request(
+      "/api/v2/projects",
+      { method: "GET", headers: authHeader(await jwtFor("multi-role-user")) },
+      env,
+    )
+    expect(allRes.status).toBe(200)
+    const { projects: allProjects } = (await allRes.json()) as { projects: Array<{ id: string }> }
+    expect(allProjects.some((p) => p.id === "proj-maintainer")).toBe(true)
+    expect(allProjects.some((p) => p.id === "proj-contributor")).toBe(true)
+
+    // With minRole=600: sees only the maintainer project
+    const filteredRes = await app.request(
+      "/api/v2/projects?minRole=600",
+      { method: "GET", headers: authHeader(await jwtFor("multi-role-user")) },
+      env,
+    )
+    expect(filteredRes.status).toBe(200)
+    const { projects: filtered } = (await filteredRes.json()) as { projects: Array<{ id: string }> }
+    expect(filtered.some((p) => p.id === "proj-maintainer")).toBe(true)
+    expect(filtered.some((p) => p.id === "proj-contributor")).toBe(false)
   })
 })
 

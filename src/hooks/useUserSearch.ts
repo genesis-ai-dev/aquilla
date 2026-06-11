@@ -35,23 +35,23 @@ const DEFAULT_LIMIT = 10
 /**
  * Debounced username prefix-search for the Add-member typeahead.
  *
- * - Fires GET /api/v2/users/search?prefix=X&limit=N after `debounceMs`
- *   of input idle. Below the 2-char minimum the hook short-circuits
- *   and reports `needsMorePrefix = true` without a request.
+ * - Fires GET /api/v2/users/search?prefix=X&limit=N[&scoped=1] after
+ *   `debounceMs` of input idle. Below the 2-char minimum the hook
+ *   short-circuits and reports `needsMorePrefix = true` without a request.
  * - Cancels in-flight requests when the query changes; out-of-order
  *   responses for stale queries are dropped.
  * - Treats network or HTTP errors as "no results" silently — the
  *   typeahead degrades to a plain input without erroring loudly.
  *
- * Why a fresh hook instead of reusing existing patterns: the
- * debounced-cancel-on-change semantics are different from the
- * fire-once-on-mount pattern we use for org/members; conflating them
- * would make this hook awkward to reason about.
+ * FRO-321: When `scoped=true` (default), results are scoped to org/project-
+ * overlap users. Pass `scoped=false` only for surfaces that intentionally
+ * allow global search (none currently).
  */
 export function useUserSearch(
   query: string,
   debounceMs: number = DEFAULT_DEBOUNCE_MS,
-  limit: number = DEFAULT_LIMIT
+  limit: number = DEFAULT_LIMIT,
+  scoped: boolean = true,
 ): UseUserSearch {
   const { session } = useFrontierSession()
   const jwt = session?.jwt ?? null
@@ -91,8 +91,9 @@ export function useUserSearch(
     setLoading(true)
     setLastFetchOk(false)
 
+    const scopeParam = scoped ? "&scoped=1" : ""
     fetch(
-      `${FRONTIER_BASE}/api/v2/users/search?prefix=${encodeURIComponent(trimmed)}&limit=${limit}`,
+      `${FRONTIER_BASE}/api/v2/users/search?prefix=${encodeURIComponent(trimmed)}&limit=${limit}${scopeParam}`,
       {
         headers: { Authorization: `Bearer ${jwt}` },
         signal: controller.signal,
@@ -128,7 +129,7 @@ export function useUserSearch(
       })
 
     return () => controller.abort()
-  }, [debouncedQuery, jwt, limit])
+  }, [debouncedQuery, jwt, limit, scoped])
 
   return {
     query: debouncedQuery,

@@ -228,6 +228,15 @@ projects.get("/", authMiddleware, async (c) => {
   const wantArchived = archivedParam === "true" || archivedParam === "1"
   const archivedClause = wantArchived ? "p.archived_at IS NOT NULL" : "p.archived_at IS NULL"
 
+  // FRO-321: minRole filter — callers can pass ?minRole=600 to see only
+  // projects where their resolved role >= the threshold (e.g. maintainer for
+  // the invite picker). Ignored when isAdmin (admins resolve as 700 everywhere).
+  const minRoleParam = c.req.query("minRole")
+  const minRole = minRoleParam != null && minRoleParam !== "" ? Number(minRoleParam) : null
+  if (minRole !== null && (!Number.isFinite(minRole) || minRole < 100 || minRole > 700)) {
+    return c.json({ error: "invalid minRole" }, 400)
+  }
+
   // Platform operators see every project (the WHERE access predicate is
   // bypassed below); their effective role is forced to 700/"platform" in the
   // JS mapping, mirroring the resolver in project-permissions.ts.
@@ -310,11 +319,17 @@ projects.get("/", authMiddleware, async (c) => {
       role_source: "creator" | "override" | "org" | "group"
     }>()
 
-  const projectIds = (rows.results ?? []).map((r) => r.id)
+  // FRO-321: apply minRole filter before loading files (avoid extra DB round-trip).
+  const allRows = rows.results ?? []
+  const filteredRows = minRole !== null && !isAdmin
+    ? allRows.filter((r) => r.role_level >= minRole)
+    : allRows
+
+  const projectIds = filteredRows.map((r) => r.id)
   const filesByProject = await loadFilesByProject(c.env, projectIds)
 
   return c.json({
-    projects: (rows.results ?? []).map((row) => {
+    projects: filteredRows.map((row) => {
       // Platform operators resolve as owner everywhere (resolveProjectRole's
       // "platform" path); a genuine 700-level grant keeps its attribution.
       const role =

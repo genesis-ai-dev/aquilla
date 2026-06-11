@@ -91,9 +91,14 @@ export async function fetchAccessibleProjectsResult(
   jwt: string,
   orgId?: number,
   apiUrl: string = FRONTIER_API_URL,
+  minRole?: number,
 ): Promise<ProjectsResult> {
   try {
-    const url = orgId != null ? `${apiUrl}/api/v2/projects?orgId=${orgId}` : `${apiUrl}/api/v2/projects`
+    const params = new URLSearchParams()
+    if (orgId != null) params.set("orgId", String(orgId))
+    if (minRole != null) params.set("minRole", String(minRole))
+    const qs = params.toString()
+    const url = qs ? `${apiUrl}/api/v2/projects?${qs}` : `${apiUrl}/api/v2/projects`
     const res = await fetch(url, {
       method: "GET",
       headers: { Authorization: `Bearer ${jwt}` },
@@ -126,8 +131,9 @@ export async function fetchAccessibleProjects(
   jwt: string,
   orgId?: number,
   apiUrl: string = FRONTIER_API_URL,
+  minRole?: number,
 ): Promise<CloudProjectSummary[]> {
-  const result = await fetchAccessibleProjectsResult(jwt, orgId, apiUrl)
+  const result = await fetchAccessibleProjectsResult(jwt, orgId, apiUrl, minRole)
   return result.ok ? result.projects : []
 }
 

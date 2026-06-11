@@ -322,7 +322,7 @@ export function ImportDialog({
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
-      <DialogContent className="max-w-2xl">
+      <DialogContent className="flex max-h-[90dvh] max-w-2xl flex-col">
         <DialogHeader>
           <DialogTitle>
             {screen === "landing" ? (
@@ -366,6 +366,8 @@ export function ImportDialog({
             )}
           </DialogTitle>
         </DialogHeader>
+
+        <div className="min-h-0 overflow-y-auto">
 
         {screen === "landing" && (
           <ImportLanding
@@ -570,6 +572,7 @@ export function ImportDialog({
             }}
           />
         )}
+        </div>
       </DialogContent>
     </Dialog>
   )

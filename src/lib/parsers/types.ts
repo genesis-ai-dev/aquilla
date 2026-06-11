@@ -350,6 +350,12 @@ export interface ProjectRecord {
    * listing (with a filter) while Trash hides it entirely.
    */
   isActive?: boolean
+  /**
+   * AD-9: upstream source project id for linked-target projects. Null / absent
+   * means this project is self-contained (or is itself a source). Set by the
+   * auth-worker's /link-source endpoint; cleared by /detach-source.
+   */
+  sourceProjectId?: string | null
   /** Cached sync role from the most recent /sync-token response. Lets the
    * Dashboard show the owner-only "Move to Trash" action without a round-trip
    * per card. Stale values are tolerable — server re-validates on every

@@ -92,6 +92,12 @@ export const REQUIRED_ROLE: Record<EventKind, number> = {
   'assignment.create': ROLE.PROJECT_LEAD,
   'assignment.reassign': ROLE.PROJECT_LEAD,
   'assignment.unassign': ROLE.PROJECT_LEAD,
+
+  // AD-9: project.link-source is authored by auth-worker on behalf of a
+  // project_lead+ actor. The sync-worker accepts it read-only (no client
+  // route writes this kind directly); guard at PROJECT_LEAD to match the
+  // auth-worker gate.
+  'project.link-source': ROLE.PROJECT_LEAD,
 }
 
 export function requiredRoleFor(kind: EventKind): number {

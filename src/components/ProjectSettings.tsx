@@ -32,6 +32,7 @@ import { ValidationSettingsSection } from "./ProjectSettings/ValidationSettingsS
 import { DecaySettingsSection } from "./ProjectSettings/DecaySettingsSection"
 import { AudioMediaStrategySection } from "./ProjectSettings/AudioMediaStrategySection"
 import { TermbaseSharingSection } from "./ProjectSettings/TermbaseSharingSection"
+import { SourceLinkSection } from "./ProjectSettings/SourceLinkSection"
 import { useOrg } from "@/hooks/useOrg"
 import { ApiKeyField } from "./ApiKeyField"
 import { SettingsNav, useScrollSpy, type SettingsSection } from "./ProjectSettings/SettingsNav"
@@ -535,8 +536,10 @@ export function ProjectSettings() {
 
   // ── Settings sections definition ──────────────────────────────────────────
   const hasGitOrigin = project?.origin?.kind === "git"
+  const hasSourceLink = typeof project?.sourceProjectId === "string" && !!project.sourceProjectId
 
   const ALL_SECTIONS: SettingsSection[] = [
+    { id: "section-source-link", label: "Source link", keywords: ["source", "linked", "upstream", "detach"], visible: hasSourceLink },
     { id: "section-project-info", label: "Project Info", keywords: ["name", "source language", "target language"] },
     { id: "section-user", label: "User", keywords: ["username", "author"] },
     { id: "section-ai-instructions", label: "AI Instructions", keywords: ["system prompt", "ai", "llm", "instructions"] },
@@ -662,6 +665,14 @@ export function ProjectSettings() {
               ✕
             </button>
           </div>
+        )}
+        {hasSourceLink && project?.sourceProjectId && visibleSections.some((s) => s.id === "section-source-link") && (
+          <SourceLinkSection
+            projectId={id!}
+            sourceProjectId={project.sourceProjectId}
+            onDetached={refresh}
+            roleLevel={project?.syncRole?.level ?? null}
+          />
         )}
         {visibleSections.some((s) => s.id === "section-project-info") && (
           <Card id="section-project-info">

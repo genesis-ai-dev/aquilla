@@ -43,6 +43,11 @@ export interface ProjectStateResponse {
   archivedBy: { id: number; username: string } | null
   /** Active/inactive lifecycle (migration 0033). Absent = active (compat). */
   isActive?: boolean
+  /**
+   * AD-9: upstream source project id for linked-target projects. Null / absent
+   * means self-contained (or is itself a source).
+   */
+  sourceProjectId?: string | null
   role: { level: number; name: string; source: string }
   /** Populated by the codex-db.files join. Optional only because old
    *  deployments may not have shipped the join yet — current servers

@@ -67,6 +67,12 @@ export type EventKind =
   | 'assignment.create'
   | 'assignment.reassign'
   | 'assignment.unassign'
+  // AD-9 source-link lifecycle. Non-chain-mutating; project-level. Emitted by
+  // auth-worker on link-source and detach-source. The payload carries
+  // `sourceProjectId` (non-null = link established; null = link cleared /
+  // detached). sync-worker receives this via the shared events table and uses
+  // it to invalidate any cached upstream-resolution in the stale-source route.
+  | 'project.link-source'
 
 // ── Comment scope ─────────────────────────────────────────────────────────
 
@@ -309,6 +315,17 @@ export interface EventPayloads {
   }
   'assignment.unassign': {
     assignmentId: string
+  }
+
+  // ── AD-9 source-link lifecycle (project-level, non-chain-mutating) ─────────
+  // Emitted by auth-worker on both link-source (sourceProjectId non-null) and
+  // detach-source (sourceProjectId null). sync-worker receives this event
+  // when it consumes the shared events table; it does not currently gate any
+  // cell chain mutations on this event but the kind must be in the union so
+  // the exhaustiveness check in dispatch.ts can handle it.
+  'project.link-source': {
+    /** Non-null = link established / updated. Null = link cleared (detached). */
+    sourceProjectId: string | null
   }
 }
 

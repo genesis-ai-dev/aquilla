@@ -11,13 +11,29 @@ import type { ProjectRecord } from "@/lib/parsers/types"
 import { notifySessionExpired } from "@/lib/errors/session-expired-signal"
 
 export function ProjectsList() {
-  const { activeOrgId, isLoading: orgLoading } = useActiveOrg()
+  const { activeOrgId, isLoading: orgLoading, error: orgError, refresh: refreshOrgs } = useActiveOrg()
   const { session, loading: sessionLoading } = useFrontierSession()
   const jwt = session?.jwt ?? null
   const navigate = useNavigate()
   const [projects, setProjects] = useState<CloudProjectSummary[]>([])
   const [loading, setLoading] = useState(false)
   const [unreachable, setUnreachable] = useState(false)
+
+  // RES-5 (UI-QA follow-up): when the ORGS fetch fails, activeOrgId stays null,
+  // loadProjects() never runs, and the page used to fall through to the
+  // misleading "No projects in this org yet." empty state. Treat a failed org
+  // load with no resolved org as unreachable too.
+  const orgsUnreachable = !orgLoading && orgError != null && activeOrgId == null
+
+  function retryUnreachable() {
+    if (orgsUnreachable) {
+      // refresh() re-fetches orgs; on success activeOrgId resolves and the
+      // [jwt, activeOrgId] effect re-runs loadProjects automatically.
+      void refreshOrgs()
+    } else {
+      loadProjects()
+    }
+  }
 
   function loadProjects() {
     if (!jwt || activeOrgId == null) return
@@ -96,14 +112,14 @@ export function ProjectsList() {
       statusBar={null}
       main={
         <div className="h-full overflow-y-auto p-6">
-          {isPageLoading ? <p className="text-sm text-muted-foreground">Loading…</p> : unreachable ? (
+          {isPageLoading ? <p className="text-sm text-muted-foreground">Loading…</p> : unreachable || orgsUnreachable ? (
             <div className="flex items-center justify-between gap-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm dark:border-amber-800 dark:bg-amber-950">
               <span className="text-amber-800 dark:text-amber-200">
                 Can't reach the server — project list unavailable.
               </span>
               <button
                 type="button"
-                onClick={loadProjects}
+                onClick={retryUnreachable}
                 className="shrink-0 rounded-md bg-amber-800 px-3 py-1.5 text-xs font-medium text-white hover:bg-amber-700 dark:bg-amber-700 dark:hover:bg-amber-600"
               >
                 Retry

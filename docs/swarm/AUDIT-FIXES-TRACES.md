@@ -81,3 +81,15 @@ Recommended fix (wave-2 `aud-lock-client` scope or standalone):
 - useProject 'unreachable' has no auto-retry on 'online' event (manual Retry only).
 - do-locks: claimed pre-existing tsc errors in some sync-worker test files (CellRow/EventRow index signatures) — root tsc -b is clean; verify at final gate.
 - server-seq risks for review panel: claim-gating chosen over cells-CAS (deliberate, preserves RACE-8 semantics + rebuild parity); in-flight claim losers still broadcast (harmless no-op refetch); stale read-back best-effort; id-replays consume seqs (gaps).
+
+## UI-QA verdict (post-promotion, 2026-06-10 evening)
+
+- Delta reads (M2-1/PERF-4): **PASS** — initial load `?since=7`, blur/focus = ONE `?since=9` request, post-commit revalidate is `?cellIds=`-scoped; zero full re-streams observed.
+- Error boundary (FRO-266): **PASS** — `?__crash=1` renders branded recovery screen; crash captured.
+- RES-5 unreachable: **FAIL → fixed** in `fix/res5-orgs-unreachable` — orgs-fetch failure left activeOrgId null so ProjectsList fell to false "No projects"; now gated on org-load success with Retry → refreshOrgs().
+
+Same-class follow-ups (open):
+- OrgHome ("/") shows "0 Projects" stat under the same orgs-fetch outage — apply the orgsUnreachable pattern there.
+- Editor renders "<file> is empty" when the cells read 500s (observed under stale-schema stack) — should be an error state, not an empty state.
+- Dev-only nit: ErrorBoundary Reload keeps `?__crash=1` in the URL so the dev trigger re-crashes (harmless in prod).
+- Shared dev Postgres container (`aquilla-dev-pg`) is at migration 0033 — dev-stack's applyPgSchemaIfMissing only seeds empty DBs; run migrations 0034-0036 against it (or use a fresh container) or every cells read 500s in a way the browser misreports as CORS. This live-reproduced the exact deploy-drift failure mode the runbook warns about.

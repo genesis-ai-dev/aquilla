@@ -60,3 +60,41 @@ describe("ProjectsList", () => {
     expect(link.getAttribute("href")).toMatch(/\/login\?next=.*projects/)
   })
 })
+
+// RES-5 follow-up (UI-QA 2026-06-10): when the ORGS fetch fails, activeOrgId
+// never resolves and loadProjects() never runs — the page used to fall through
+// to a false "No projects in this org yet." empty state. It must show the
+// unreachable banner instead.
+describe("ProjectsList — orgs fetch failure (RES-5)", () => {
+  it("shows the unreachable banner, not the empty state, when the orgs fetch fails", async () => {
+    const { listMyOrgs } = await import("@/lib/frontier/orgs")
+    vi.mocked(listMyOrgs).mockRejectedValueOnce(new Error("network down"))
+
+    render(<MemoryRouter><OrgProvider><ProjectsList /></OrgProvider></MemoryRouter>)
+
+    await waitFor(() => {
+      expect(screen.getByText(/can't reach the server/i)).toBeInTheDocument()
+    })
+    expect(screen.getByRole("button", { name: /retry/i })).toBeInTheDocument()
+    expect(screen.queryByText(/no projects in this org yet/i)).not.toBeInTheDocument()
+    // The projects fetch never ran (no org id) — and must not be needed for
+    // the banner to appear.
+    expect(fetchAccessibleProjectsResultMock).not.toHaveBeenCalled()
+  })
+
+  it("Retry after an orgs failure re-fetches orgs and recovers to the project grid", async () => {
+    const { listMyOrgs } = await import("@/lib/frontier/orgs")
+    vi.mocked(listMyOrgs).mockRejectedValueOnce(new Error("network down"))
+    fetchAccessibleProjectsResultMock.mockResolvedValue({
+      ok: true,
+      projects: [{ id: "p1", name: "John", orgId: 7, role: { level: 700, name: "owner", source: "creator" }, files: [] }],
+    })
+
+    render(<MemoryRouter><OrgProvider><ProjectsList /></OrgProvider></MemoryRouter>)
+    const retry = await screen.findByRole("button", { name: /retry/i })
+    retry.click()
+
+    await waitFor(() => expect(screen.getByText("John")).toBeInTheDocument())
+    expect(screen.queryByText(/can't reach the server/i)).not.toBeInTheDocument()
+  })
+})

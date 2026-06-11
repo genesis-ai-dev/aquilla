@@ -66,6 +66,9 @@
 - 2026-06-10 · **FRO-183 DECOMPOSED** → children FRO-327/328/329 (v1 trio, agent dispatched on swarm/pd7-terminology) + FRO-330 (data-model DECISION for Ryder, Todo). Deferred: verdict pipeline, dictionaries, org subscriptions.
 - 2026-06-10 · **N (FRO-193) MERGED** 7b5ba29 (SourceLinkSection + typed-DETACH confirm; project.link-source event added additively to sync-worker; snapshot burst via pre-existing auth-worker snapshotSourceCells; markers clear by pointer-match). Gates: tsc 0 · sync-worker 585/585 · auth-worker 266/266.
 - 2026-06-10 · **★ npm run build PASS** on integration (pre-detach tip).
+- 2026-06-10 · **O (FRO-327/328/329)**: agent found all three ALREADY implemented on the branch base (prior swarm work) — verified green, issues → Fixed. NOTE: review-queue role gate is project_lead(500) vs spec's maintainer(600); FRO-330 = data-model decision for Ryder.
+- 2026-06-10 · **Live-UI QA (singleton, 2 attempts — first killed): ALL 17 CHECKS PASS** → UI-QA-PUNCHLIST.md §PD7. Env-only caveats: local sync-worker CORS/import-500, chat needs OPENROUTER key, footnote render needs a \f-bearing USFM. FRO-209 verified: /reset-password renders (fixed by FRO-270).
+- 2026-06-10 · **★★ PROMOTED TO MAIN (ff-only): 412f800 → 5dea6c6** (+6845/−229, 68 files). Gates at promotion: tsc 0 · vitest 2736/2736 · sync-worker 585/585 · auth-worker 266/266 · build PASS · UI-QA GO. **PD7 SWARM CONVERGED.** Open remainders: FRO-314 (reopened, needs cell-label event), FRO-330 (decision), FRO-183 umbrella, FRO-173/246 (human), FRO-227/224 (prior dispatch).
 
 ---
 

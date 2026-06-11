@@ -100,3 +100,28 @@ Orchestration: docs/swarm/PD6-ORCHESTRATION.md. Base main@cfd4470 → promoted m
   in pg-test-db helper signatures; node:fs resolution in pg-test-db.ts). Pre-existing (last touch
   4728e9c D1-redact); runtime tests green 552/552. Nobody's gate runs sync-worker tsc. Needs its
   own pass — helper signature loosening + tsconfig types entry.
+
+---
+
+## UXA swarm (2026-06-10) — UX Journey Audit, FRO-265..298 — CONVERGED
+
+All 34 issues Fixed + promoted to main (final UI-QA on 7d934fd; punchlist 6c63e85).
+Orchestration: docs/swarm/UXA-ORCHESTRATION.md. Open follow-ups:
+
+- [OPEN] (uxa-deploy-migrations) Migrations NOT applied to live Neon: db/postgres 0034_rls_backstop,
+  0035_backfill_validation_count_threshold (FRO-279 backfill), 0036_files_soft_delete, 0037_cells_ai_drafted;
+  auth-worker 0034_ai_usage_daily. Apply via scripts/neon-migrate.ts; CI ledger check flags until applied.
+- [OPEN] (uxa-rls-staging) FRO-289 RLS: PGlite can't test role-level policy enforcement — verify on a
+  staging Neon branch (runtime role + policies) before trusting; rollback = per-table DISABLE RLS.
+- [OPEN] (uxa-284-env) FRO-284 mention emails need RESEND_API_KEY/EMAIL_FROM/BASE_URL in sync-worker env.
+- [OPEN] (uxa-265-enforce) FRO-265 AI caps ship LOG-ONLY (AI_BUDGET_ENFORCE unset); flip to "true" after
+  sizing thresholds (defaults: user 500/day, global 5000/day).
+- [OPEN] (uxa-dev-jwt-mismatch) Pre-existing dev-env bug: auth-worker vs sync-worker JWT secrets differ in
+  .dev.vars → all sync API calls 401 on the dev stack; blocked full UI-QA of FRO-272 restore + FRO-279/280
+  aggregate %. Fix .dev.vars parity; re-verify those two flows.
+- [OPEN] (uxa-validation-history-dead) ValidationHistoryTimeline is dead UI (validationHistory always []);
+  EditorTable was locked during FRO-298 — delete in a follow-up.
+- [OPEN] (uxa-283-joinpage-prewarn) JoinPage doesn't pre-warn on invite email mismatch (server now enforces;
+  user learns via 403) — small UX follow-up.
+- [NOTE] (uxa-291-rescue-stash) Stash "rescue: foreign media-timeline WIP found in fro-291 worktree" is
+  REDUNDANT (that WIP was the user's media-lens work, committed as 5750005) — safe to drop after confirming.

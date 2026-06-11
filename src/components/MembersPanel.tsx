@@ -80,11 +80,11 @@ export function MembersPanel({
 
   return (
     <div className="flex flex-col gap-4">
-      <ul className="max-h-[50vh] divide-y overflow-y-auto overscroll-contain rounded border">
+      <ul className="max-h-[50vh] divide-y overflow-x-hidden overflow-y-auto overscroll-contain rounded border">
         {members.map((m) => {
           const isSelf = callerUserId !== null && m.userId === callerUserId;
           return (
-            <li key={m.userId} className="flex min-w-0 items-center gap-3 px-3 py-2">
+            <li key={m.userId} className="flex min-w-0 items-center gap-3 overflow-x-hidden px-3 py-2">
               <span className="min-w-0 truncate font-medium">{m.username}</span>
               <span className="text-xs text-muted-foreground">{m.roleName}</span>
               {m.source === "org" && (

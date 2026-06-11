@@ -79,6 +79,7 @@ import { Film, Scale, MessagesSquare, Share2, Settings as SettingsIcon, Lock, Cl
 import { ChatPanel } from "./ChatPanel"
 import { ChatDockPanel } from "./ChatDockPanel"
 import { SearchDockPanel } from "./SearchDockPanel"
+import { SearchResultsView } from "./search/SearchResultsView"
 import { LeftDock, type DockTab } from "./LeftDock"
 import { useChat } from "@/hooks/useChat"
 import { TranslationNotesSidebar, readTnSidebarVisible, writeTnSidebarVisible } from "./TranslationNotesSidebar"
@@ -448,6 +449,8 @@ export function ProjectWorkspace() {
   const [chatOpen, setChatOpen] = useState(false)
   // FRO-308: left dock active tab (null = collapsed rail only)
   const [dockTab, setDockTab] = useState<DockTab | null>("files")
+  // FRO-309: expanded search results overlay in the main area
+  const [searchExpandedQuery, setSearchExpandedQuery] = useState<string | null>(null)
   const [aiSetupOpen, setAiSetupOpen] = useState(false)
   const [recordingCellId, setRecordingCellId] = useState<string | null>(null)
   // "Make a character from this voice" dialog (Cast studio). Owned here so the
@@ -2788,6 +2791,7 @@ export function ProjectWorkspace() {
                   setParallelScope(activeFileId ? "file" : "project")
                   setParallelOpen(true)
                 }}
+                onExpandResults={(q) => setSearchExpandedQuery(q)}
               />
             }
           />
@@ -3205,7 +3209,23 @@ export function ProjectWorkspace() {
             </Suspense>
           </div>
         ) : cellAreaState.kind === "ready" ? (
-          <EditorTable
+          // FRO-309: relative wrapper so the search-expanded overlay can cover the editor
+          <div className="relative h-full w-full">
+            {/* FRO-309: Expanded search results overlay */}
+            {searchExpandedQuery !== null && (
+              <div className="absolute inset-0 z-20 bg-background">
+                <SearchResultsView
+                  query={searchExpandedQuery}
+                  results={searchResults}
+                  onJumpToResult={(result) => {
+                    setSearchExpandedQuery(null)
+                    void handleSearchSelect(result, searchExpandedQuery)
+                  }}
+                  onClose={() => setSearchExpandedQuery(null)}
+                />
+              </div>
+            )}
+            <EditorTable
             ref={editorRef} project={project} cells={cellsWithBacktranslation}
             username={currentUsername}
             isCompletionConfigured={isConfigured} isCompletionAvailable={isCompletionAvailable} completing={completing}
@@ -3274,6 +3294,7 @@ export function ProjectWorkspace() {
             staleCellIds={staleCellIds}
             assignmentsByCellId={assignmentsByCellId}
           />
+          </div>
         ) : (
           <CellAreaPlaceholder
             state={cellAreaState}

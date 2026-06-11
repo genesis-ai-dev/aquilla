@@ -75,7 +75,7 @@ import { runDiarization, type DiarizationPhase } from "@/lib/diarization/run-dia
 import { attachMediaFileToTimeline, attachMediaUrlToTimeline } from "@/lib/timeline/attach-media"
 import { useCellsAuditStatsWithOverlay } from "@/hooks/useCellsAuditStatsWithOverlay"
 import { useComments } from "@/hooks/useComments"
-import { Film, Scale, MessagesSquare, Share2, Settings as SettingsIcon, Lock, ClipboardList, Trash2, Undo2, Search as SearchIcon, Sparkles, Mic2, Download, BookMarked, BookOpen, Users, MessageSquare, Camera, UserCheck } from "lucide-react"
+import { Film, Scale, MessagesSquare, Share2, Settings as SettingsIcon, Lock, ClipboardList, Trash2, Undo2, Search as SearchIcon, Sparkles, Mic2, Download, BookMarked, BookOpen, Users, MessageSquare, UserCheck } from "lucide-react"
 import { ChatPanel } from "./ChatPanel"
 import { ChatDockPanel } from "./ChatDockPanel"
 import { SearchDockPanel } from "./SearchDockPanel"
@@ -171,11 +171,6 @@ const TerminologyPageContent = lazy(() =>
 const ProjectMembersPageContent = lazy(() =>
   import("./ProjectMembersPage").then((mod) => ({ default: mod.ProjectMembersPage })),
 )
-// FRO-176: named snapshots surface (inside the shell per FRO-254).
-const SnapshotsPageContent = lazy(() =>
-  import("@/pages/SnapshotsPage").then((mod) => ({ default: mod.SnapshotsPage })),
-)
-
 // FRO-249 fix (Fix 2): module-level promise chain that serializes
 // handleImported's getProject→updateProject read-modify-write so that
 // concurrent imports don't race and the last write doesn't silently drop
@@ -360,8 +355,7 @@ export function ProjectWorkspace() {
       location.pathname.endsWith("/comments") ||
       location.pathname.endsWith("/memory") ||
       location.pathname.endsWith("/terminology") ||
-      location.pathname.endsWith("/members") ||
-      location.pathname.endsWith("/snapshots")
+      location.pathname.endsWith("/members")
     ) return
 
     // A file is already in the URL: leave it unless the project genuinely
@@ -421,13 +415,12 @@ export function ProjectWorkspace() {
   // shell (sidebar + top bar + bottom status bar) never unmounts.
   // FRO-194 added "rules"; FRO-254 adds "comments", "memory", "terminology";
   // FRO-180 adds "members".
-  const centerSurface: "editor" | "rules" | "comments" | "memory" | "terminology" | "members" | "snapshots" =
+  const centerSurface: "editor" | "rules" | "comments" | "memory" | "terminology" | "members" =
     location.pathname.endsWith("/rules") ? "rules" :
     location.pathname.endsWith("/comments") ? "comments" :
     location.pathname.endsWith("/memory") ? "memory" :
     location.pathname.endsWith("/terminology") ? "terminology" :
     location.pathname.endsWith("/members") ? "members" :
-    location.pathname.endsWith("/snapshots") ? "snapshots" :
     "editor"
 
   useEffect(() => {
@@ -2268,8 +2261,6 @@ export function ProjectWorkspace() {
         onClick: () => navigate(`/project/${projectId}/comments`) },
       { id: "living-memory", label: "Memory", icon: BookMarked,
         onClick: () => navigate(`/project/${projectId}/memory`) },
-      { id: "snapshots", label: "Snapshots", icon: Camera,
-        onClick: () => navigate(`/project/${projectId}/snapshots`) },
       // SWARM-TODO(voice-a7): "Voice" nav button toggles the Audio/Text lens
       // (current intentional behavior, fixed in a prior wave to avoid the
       // one-way-trap). QA now reports this is AMBIGUOUS: users expect a nav
@@ -3204,13 +3195,6 @@ export function ProjectWorkspace() {
           <div className="h-full overflow-y-auto">
             <Suspense fallback={<div className="flex h-full items-center justify-center text-sm text-muted-foreground">Loading members…</div>}>
               <ProjectMembersPageContent />
-            </Suspense>
-          </div>
-        ) : centerSurface === "snapshots" ? (
-          // FRO-176: Named snapshots inside the shell (per FRO-254).
-          <div className="h-full overflow-y-auto">
-            <Suspense fallback={<div className="flex h-full items-center justify-center text-sm text-muted-foreground">Loading snapshots…</div>}>
-              <SnapshotsPageContent />
             </Suspense>
           </div>
         ) : cellAreaState.kind === "ready" ? (

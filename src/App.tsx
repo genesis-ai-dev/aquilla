@@ -178,9 +178,6 @@ function AppRoutes() {
         <Route path="/project/:id/memory" element={<ProjectWorkspace />} />
         {/* FRO-180: per-project members management inside the ProjectWorkspace shell. */}
         <Route path="/project/:id/members" element={<ProjectWorkspace />} />
-        {/* FRO-176: named snapshots — renders inside the ProjectWorkspace shell
-            per FRO-254 (every in-project view keeps the fixed sidebar/top/bottom). */}
-        <Route path="/project/:id/snapshots" element={<ProjectWorkspace />} />
 
         {/* Lazy — org admin pages */}
         <Route path="/settings" element={<Settings />} />

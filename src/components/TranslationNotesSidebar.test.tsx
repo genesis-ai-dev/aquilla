@@ -1,5 +1,5 @@
 // FRO-179 fix: the sidebar must mint its project-level token with the
-// established "__project__" sentinel (shared with useComments / SnapshotsPage /
+// established "__project__" sentinel (shared with useComments /
 // sync-worker authorize.ts), NOT an ad-hoc placeholder like "list". An ad-hoc
 // fileId mints a token scoped to a nonexistent file — accepted by some
 // validators, rejected by stricter ones — and the inconsistency is exactly how

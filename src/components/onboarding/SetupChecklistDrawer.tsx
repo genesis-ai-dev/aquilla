@@ -10,6 +10,7 @@ import {
 import type { ChecklistState } from "@/hooks/useSetupChecklist"
 import type { ProjectRecord } from "@/lib/parsers/types"
 import { ChecklistItem } from "./checklist/ChecklistItem"
+import { ImportFilesStep } from "./checklist/ImportFilesStep"
 import { AiInstructionsStep } from "./checklist/AiInstructionsStep"
 import { InviteStep } from "./checklist/InviteStep"
 import { ComingSoonStep } from "./checklist/ComingSoonStep"
@@ -24,6 +25,9 @@ interface SetupChecklistDrawerProps {
   onSharesChanged: () => void
   /** Persist dismissal and close the drawer. Surfaced as "All set" when 100%. */
   onDismiss: () => void
+  /** Opens the project's import dialog (owned by the parent). Required to
+   *  power the "Import files" first step. */
+  onOpenImport?: () => void
 }
 
 export function SetupChecklistDrawer({
@@ -34,6 +38,7 @@ export function SetupChecklistDrawer({
   onProjectUpdated,
   onSharesChanged,
   onDismiss,
+  onOpenImport,
 }: SetupChecklistDrawerProps) {
   const allDone = state.completedCount === state.totalCount && state.totalCount > 0
   const progress = state.totalCount === 0 ? 0 : state.completedCount / state.totalCount
@@ -57,6 +62,20 @@ export function SetupChecklistDrawer({
         </SheetHeader>
 
         <div className="flex-1 min-h-0 overflow-y-auto p-4 space-y-3">
+          <ChecklistItem
+            title="Import files"
+            description="Bring in your source text first — USFM, plain text, or other supported formats. Everything else works on specific files."
+            complete={state.importFiles}
+          >
+            <ImportFilesStep
+              project={project}
+              onOpenImport={() => {
+                onOpenChange(false)
+                onOpenImport?.()
+              }}
+            />
+          </ChecklistItem>
+
           <ChecklistItem
             title="Set translation instructions"
             description="A short system prompt that shapes tone, formality, and style. Shared with everyone in this project."

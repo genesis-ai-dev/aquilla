@@ -1249,7 +1249,9 @@ function ParatextChoice({
         </p>
       </div>
       {plan && (
-        <ScrollArea className="max-h-56 rounded border">
+        // Native overflow scroll: ScrollArea's size-full viewport can't resolve
+        // against a max-h-only root, so long book lists paint past the border.
+        <div className="max-h-56 overflow-y-auto rounded border">
           <ul className="divide-y">
             {plan.books.map((b) => {
               const key = b.book.bookId.toUpperCase()
@@ -1293,7 +1295,7 @@ function ParatextChoice({
               )
             })}
           </ul>
-        </ScrollArea>
+        </div>
       )}
       <p className="text-xs text-muted-foreground">How should we bring it in?</p>
       <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
@@ -1937,8 +1939,9 @@ function CollisionPanel({ collisions, onResolve, onCancel }: CollisionPanelProps
         </button>
       </div>
 
-      {/* Per-collision rows */}
-      <ScrollArea className="max-h-64 rounded-md border">
+      {/* Per-collision rows. Native overflow scroll — see PreviewPanel note on
+          the ScrollArea max-h footgun. */}
+      <div className="max-h-64 overflow-y-auto rounded-md border">
         <ul className="divide-y">
           {collisions.map((c) => {
             const choice = choices.get(c.name) ?? "skip"
@@ -1982,7 +1985,7 @@ function CollisionPanel({ collisions, onResolve, onCancel }: CollisionPanelProps
             )
           })}
         </ul>
-      </ScrollArea>
+      </div>
 
       <div className="flex justify-end gap-2">
         <Button variant="ghost" size="sm" onClick={onCancel} disabled={resolving}>

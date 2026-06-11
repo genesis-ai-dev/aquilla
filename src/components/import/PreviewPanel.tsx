@@ -10,7 +10,6 @@
 
 import { useState } from "react"
 import { Button } from "@/components/ui/button"
-import { ScrollArea } from "@/components/ui/scroll-area"
 import type { ImportResult } from "@/lib/import"
 
 export interface PreviewPanelProps {
@@ -51,7 +50,9 @@ export function PreviewPanel({ results, onConfirm, onCancel }: PreviewPanelProps
         </p>
       </div>
 
-      <ScrollArea className="max-h-80 rounded-md border">
+      {/* Native overflow scroll: ScrollArea's size-full viewport can't resolve
+          against a max-h-only root, so content paints past the border. */}
+      <div className="max-h-80 overflow-y-auto rounded-md border">
         <div className="divide-y">
           {results.map((r, ri) => (
             <div key={ri} className="p-3">
@@ -87,7 +88,7 @@ export function PreviewPanel({ results, onConfirm, onCancel }: PreviewPanelProps
             </div>
           ))}
         </div>
-      </ScrollArea>
+      </div>
 
       <div className="flex justify-end gap-2">
         <Button variant="ghost" size="sm" onClick={onCancel} disabled={confirming}>

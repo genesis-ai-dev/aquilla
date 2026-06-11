@@ -101,6 +101,7 @@ import { SuggestionBanner } from "./SuggestionBanner"
 import { ConfirmActionDialog } from "./ConfirmActionDialog"
 import { PeerPresence } from "./PeerPresence"
 import { ViewSettingsMenu } from "./ViewSettingsMenu"
+import { useFootnotesPreference } from "@/hooks/useFootnotesPreference"
 import { useFileFontSizes, setFileViewPref } from "@/lib/store/file-view-prefs"
 import { EditorScrollProvider, useEditorScroll } from "@/context/EditorScrollContext"
 import { detectSuggestions, type RenameSuggestion } from "@/lib/file-labeling/detect"
@@ -754,6 +755,7 @@ export function ProjectWorkspace() {
   }, [findNextUnfinished])
   const fileMeta = useFileMeta(activeFileId, project?.sourceLanguage, project?.targetLanguage)
   const [cellLabelsEnabled, setCellLabelsEnabled] = useCellLabelsPreference(projectId!)
+  const [footnotesInlineEnabled, setFootnotesInlineEnabled] = useFootnotesPreference(projectId!)
   // FRO-251: per-file, per-side font sizes — adjusted from the View settings
   // (eye) menu, rendered by EditorTable.
   const fontSizes = useFileFontSizes(activeFileId)
@@ -2847,6 +2849,8 @@ export function ProjectWorkspace() {
                 sourceTextDirection={fileMeta.sourceTextDirection}
                 targetTextDirection={fileMeta.targetTextDirection}
                 cellLabelsEnabled={cellLabelsEnabled}
+                footnotesInlineEnabled={footnotesInlineEnabled}
+                onFootnotesInlineChange={setFootnotesInlineEnabled}
                 tnSidebarEnabled={tnSidebarVisible}
                 rtlHintDismissed={fileMeta.rtlHintDismissed}
                 sourceFontSize={fontSizes.source}
@@ -3208,6 +3212,7 @@ export function ProjectWorkspace() {
         ) : cellAreaState.kind === "ready" ? (
           <EditorTable
             ref={editorRef} project={project} cells={cellsWithBacktranslation}
+            showFootnotesInline={footnotesInlineEnabled}
             username={currentUsername}
             isCompletionConfigured={isConfigured} isCompletionAvailable={isCompletionAvailable} completing={completing}
             examples={examples} errors={errors} previews={previews}

@@ -18,6 +18,7 @@ import {
   importParatextAsTarget,
   prepareEBibleTargetImport,
   applyEBibleTargetImport,
+  parseFile,
   type EBibleProgress,
   type EBibleTargetProgress,
   type EBibleMatchResult,
@@ -25,8 +26,11 @@ import {
   type TnProgress,
   type ParatextImportProgress,
   type SourceCellRef,
+  type ImportResult,
 } from "@/lib/import"
+import { PreviewPanel } from "@/components/import/PreviewPanel"
 import type { FileReference, ProjectTtsSettings } from "@/lib/parsers/types"
+import { detectFileType, isMediaFileType } from "@/lib/parsers/types"
 import { buildCastAdditions } from "@/lib/import/cast-from-speakers"
 import { v7 as uuidv7 } from "uuid"
 import { filesToProjectEntries } from "@/lib/import/file-entries"
@@ -51,7 +55,7 @@ import {
   IMPORT_COLLISION_DUPLICATED,
 } from "@/lib/analytics-events"
 
-type Screen = "landing" | "upload" | "ebible" | "macula" | "tn" | "direction" | "result" | "collision"
+type Screen = "landing" | "upload" | "preview" | "ebible" | "macula" | "tn" | "direction" | "result" | "collision"
 
 interface ImportDialogProps {
   open: boolean
@@ -131,6 +135,12 @@ export function ImportDialog({
     // Callback that continues the pending import once the user resolves collisions.
     proceed: (skipKeys: ReadonlySet<string>) => void | Promise<void>
   } | null>(null)
+  // FRO-310: preview state — parsed results waiting for user confirmation before upload.
+  const [previewState, setPreviewState] = useState<{
+    results: ImportResult[]
+    /** Commits the parsed results to the server once user confirms. */
+    commit: () => void | Promise<void>
+  } | null>(null)
   // FRO-249 fix (Fix 3): guard against Radix delivering onOpenChange(false) twice
   // in the same macrotask (closure-captured pendingImport stays non-null until
   // the re-render). Consumed synchronously so the second call is a no-op.
@@ -143,6 +153,7 @@ export function ImportDialog({
       setPendingImport(null)
       setImportResult(null)
       setCollisionState(null)
+      setPreviewState(null)
       setConfirming(false)
       setConfirmError(null)
       flushingRef.current = false
@@ -319,6 +330,18 @@ export function ImportDialog({
               "Import complete — some books skipped"
             ) : screen === "collision" ? (
               "Re-import detected"
+            ) : screen === "preview" ? (
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => { setPreviewState(null); setScreen("upload") }}
+                  className="rounded p-0.5 text-muted-foreground hover:text-foreground transition-colors"
+                  aria-label="Back to file selection"
+                >
+                  ←
+                </button>
+                Preview
+              </div>
             ) : (
               <div className="flex items-center gap-2">
                 <button
@@ -361,6 +384,10 @@ export function ImportDialog({
               })
               setCollisionState({ collisions, proceed })
               setScreen("collision")
+            }}
+            onPreview={(results, commit) => {
+              setPreviewState({ results, commit })
+              setScreen("preview")
             }}
             onImported={handleChildImported}
           />
@@ -430,6 +457,20 @@ export function ImportDialog({
           />
         )}
 
+        {/* FRO-310: preview — parsed cells waiting for user confirmation before upload */}
+        {screen === "preview" && previewState && (
+          <PreviewPanel
+            results={previewState.results}
+            onConfirm={async () => {
+              await previewState.commit()
+            }}
+            onCancel={() => {
+              setPreviewState(null)
+              setScreen("upload")
+            }}
+          />
+        )}
+
         {/* FRO-287: collision guard — shown when re-importing into an existing project */}
         {screen === "collision" && collisionState && (
           <CollisionPanel
@@ -462,6 +503,19 @@ export function ImportDialog({
         )}
       </DialogContent>
     </Dialog>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Beta badge — mirrors codex-editor's convention of flagging not-ready importers.
+// FRO-310: shown on Macula and Translation Notes importers.
+// ---------------------------------------------------------------------------
+
+function BetaBadge() {
+  return (
+    <span className="inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-medium bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-400 border border-amber-200 dark:border-amber-800">
+      Beta
+    </span>
   )
 }
 
@@ -503,13 +557,16 @@ function ImportLanding({ onSelect }: ImportLandingProps) {
         </p>
       </button>
 
-      {/* Macula Hebrew + Greek — active (FRO-178) */}
+      {/* Macula Hebrew + Greek — beta (FRO-178, FRO-310) */}
       <button
         type="button"
         onClick={() => onSelect("macula")}
         className="rounded-lg border p-4 text-left transition-colors hover:border-primary hover:bg-primary/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
       >
-        <p className="text-sm font-medium">Macula Hebrew + Greek</p>
+        <p className="text-sm font-medium flex items-center gap-1.5">
+          Macula Hebrew + Greek
+          <BetaBadge />
+        </p>
         <p className="mt-1 text-xs text-muted-foreground">
           Upload a Macula TSV file for the Hebrew Old Testament or Greek New Testament —
           original-language text with per-word lemma, morphology, and Strong's data.
@@ -527,13 +584,13 @@ function ImportLanding({ onSelect }: ImportLandingProps) {
         </p>
       </div>
 
-      {/* Translation Notes — active (FRO-179) */}
+      {/* Translation Notes — beta (FRO-179, FRO-310) */}
       <button
         type="button"
         onClick={() => onSelect("tn")}
         className="rounded-lg border p-4 text-left transition-colors hover:border-primary hover:bg-primary/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
       >
-        <p className="text-sm font-medium">Translation Notes (TSV)</p>
+        <p className="text-sm font-medium flex items-center gap-1.5">Translation Notes (TSV) <BetaBadge /></p>
         <p className="mt-1 text-xs text-muted-foreground">
           Upload unfoldingWord-style TN files. Notes appear in a sidebar when you focus a translation cell at the matching verse.
         </p>
@@ -559,9 +616,14 @@ interface UploadPanelProps {
   existingFiles?: { name: string }[]
   /** FRO-287: called when collisions are detected; parent shows the collision screen. */
   onCollision?: (collisions: CollisionResult[], proceed: (skipKeys: ReadonlySet<string>) => void | Promise<void>) => void
+  /**
+   * FRO-310: called after client-side parsing completes, before any upload.
+   * Parent shows a preview screen; commit() triggers the actual bulk upload.
+   */
+  onPreview?: (results: ImportResult[], commit: () => Promise<void>) => void
 }
 
-function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, getToken, onImported, ttsSettings, onCastUpdated, existingFiles, onCollision }: UploadPanelProps) {
+function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, getToken, onImported, ttsSettings, onCastUpdated, existingFiles, onCollision, onPreview }: UploadPanelProps) {
   const [importing, setImporting] = useState(false)
   const [dragOver, setDragOver] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -607,17 +669,79 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, getT
     [projectId, username, sourceLanguage, targetLanguage, getToken, onImported, ttsSettings, onCastUpdated, existingFiles, onCollision]
   )
 
-  /** Inner helper: import a resolved list of files (after collision resolution). */
+  /** Inner helper: import a resolved list of files (after collision resolution).
+   *
+   * FRO-310: when `onPreview` is provided, this splits into two phases:
+   *   1. Parse phase — reads all files locally, shows a preview
+   *   2. Commit phase — uploads after user confirms
+   * Media files bypass preview (they have no text cells to show).
+   */
   const doImportFiles = useCallback(
     async (list: File[]) => {
       setImporting(true)
       setProgress(null)
+      setError(null)
+
+      // ── Phase 1: parse ────────────────────────────────────────────────────
+      // Separate text files (previewable) from media files (upload directly).
+      const textFiles: File[] = []
+      const mediaFiles: File[] = []
+      for (const file of list) {
+        const ft = detectFileType(file.name)
+        if (ft && isMediaFileType(ft)) {
+          mediaFiles.push(file)
+        } else {
+          textFiles.push(file)
+        }
+      }
+
+      // Parse text files client-side for the preview.
+      const allParsedResults: ImportResult[] = []
+      if (textFiles.length > 0 && onPreview) {
+        try {
+          for (const file of textFiles) {
+            setPhase(`Reading ${file.name}…`)
+            const ft = detectFileType(file.name)
+            if (!ft) continue
+            const results = await parseFile(file, ft)
+            allParsedResults.push(...results)
+          }
+        } catch (err) {
+          setError(err instanceof Error ? err.message : "Parse failed")
+          setImporting(false)
+          setPhase("")
+          return
+        }
+        setImporting(false)
+        setPhase("")
+
+        // Hand off to parent to show the preview screen.
+        // The commit closure does the actual upload.
+        onPreview(allParsedResults, async () => {
+          await doCommit(list)
+        })
+        return
+      }
+
+      // No preview (media-only batch, or no onPreview callback) — commit immediately.
+      await doCommit(list)
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [projectId, username, sourceLanguage, targetLanguage, getToken, onImported, ttsSettings, onCastUpdated, onPreview]
+  )
+
+  /** Upload all files (called after preview confirmation, or directly for media). */
+  const doCommit = useCallback(
+    async (list: File[]) => {
+      setImporting(true)
+      setProgress(null)
+      setPhase("")
       const allRefs: FileReference[] = []
       // Accumulate speaker pairs across all subtitle files in this batch.
       const allSpeakerPairs: { cellId: string; speaker: string | undefined }[] = []
       try {
         for (const file of list) {
-          setPhase(`Parsing ${file.name}…`)
+          setPhase(`Uploading ${file.name}…`)
           setProgress(null)
           // importFile returns speakerPairs from the SAME buildBulkCellsWithSpeakers
           // call that minted the uploaded cells — cellIds are guaranteed to match.

@@ -257,7 +257,7 @@ export function LeftDock({
       onClick={() => setActiveTab(isOpen ? null : "files")}
       className={cn(
         "flex items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-accent/60 hover:text-foreground",
-        isTopRail ? "mx-2 mb-1 h-7 w-full" : "mb-2 mt-auto h-7 w-7",
+        isTopRail ? "mx-2 mb-1 mt-auto h-7 w-full" : "mb-2 mt-auto h-7 w-7",
       )}
     >
       {isTopRail ? (

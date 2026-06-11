@@ -1741,6 +1741,16 @@ export function ProjectWorkspace() {
   const focusedCellIdRef = useRef<string | null>(null)
   // FRO-175: reactive version of focusedCellIdRef for the chat panel's context wiring.
   const [focusedCellId, setFocusedCellId] = useState<string | null>(null)
+
+  // Chat "Insert into cell": commit the reply text through the same path
+  // single-cell AI completion uses (FRO-247 write-clock semantics hold).
+  const handleChatInsertIntoCell = useCallback(async (text: string) => {
+    if (!focusedCellId) return
+    const cell = cells.find((c) => c.id === focusedCellId)
+    if (!cell) return
+    await commitCompletedCell(cell, text, currentUsername)
+  }, [focusedCellId, cells, commitCompletedCell, currentUsername])
+
   // FRO-179: TN sidebar visibility + canonicalRef of the focused cell.
   // Hidden by default; toggled via the View settings menu.
   const [tnSidebarVisible, setTnSidebarVisible] = useState<boolean>(() =>
@@ -2906,6 +2916,7 @@ export function ProjectWorkspace() {
             chatPanel={
               <ChatDockPanel
                 chat={chat}
+                onInsertIntoCell={handleChatInsertIntoCell}
                 currentCell={(() => {
                   if (!focusedCellId) return null
                   const cell = cells.find((c) => c.id === focusedCellId)
@@ -3566,6 +3577,7 @@ export function ProjectWorkspace() {
         open={chatOpen}
         onOpenChange={setChatOpen}
         chat={chat}
+        onInsertIntoCell={handleChatInsertIntoCell}
         currentCell={(() => {
           if (!focusedCellId) return null
           const cell = cells.find((c) => c.id === focusedCellId)

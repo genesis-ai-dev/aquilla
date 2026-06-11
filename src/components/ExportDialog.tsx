@@ -29,6 +29,7 @@ import { exportCsv } from "@/lib/export/exporters/csv"
 import { exportXliff } from "@/lib/export/exporters/xliff"
 import { exportTmx } from "@/lib/export/exporters/tmx"
 import { exportVtt } from "@/lib/export/exporters/vtt"
+import { exportPlainTextDump } from "@/lib/export/exporters/plain-text-dump"
 import { buildProjectZip } from "@/lib/export/project-zip-export"
 import type { TextExportFormat } from "@/lib/export/project-zip-export"
 import { previewAudioByCharacter } from "@/lib/export/audio-by-character"
@@ -36,7 +37,7 @@ import { useProjectCells } from "@/hooks/useProjectCells"
 import type { CellData } from "@/hooks/useCells"
 import type { ProjectTtsSettings } from "@/lib/parsers/types"
 
-export type ExportFormat = "usfm" | "txt" | "md" | "tsv" | "csv" | "xlf" | "tmx" | "vtt" | "audio-by-character" | "docx"
+export type ExportFormat = "usfm" | "txt" | "md" | "tsv" | "csv" | "xlf" | "tmx" | "vtt" | "audio-by-character" | "docx" | "plain-text-dump"
 export type ExportScope = "file" | "project"
 
 interface FormatOption {
@@ -120,6 +121,14 @@ const FORMAT_OPTIONS: FormatOption[] = [
     description: "One WAV per cast member — each character's clips concatenated, best-available audio (recording → generated). Concatenated order = document order. Trim-honoring deferred; clips export full-length.",
     lossy: false,
   },
+  // Advanced-only option — not shown in the main format list.
+  {
+    id: "plain-text-dump",
+    label: "Plain-text dump",
+    ext: ".txt",
+    description: "Every translated segment, one per line. Quick content extraction only.",
+    lossy: true,
+  },
 ]
 
 interface ExportDialogProps {
@@ -187,9 +196,11 @@ export function ExportDialog({
 
   const [format, setFormat] = useState<ExportFormat>(isUsfmFile ? "usfm" : isDocxFile ? "docx" : "tsv")
   const [scope, setScope] = useState<ExportScope>("file")
+  const [advancedOpen, setAdvancedOpen] = useState(false)
+  const [dumpIncludeRefs, setDumpIncludeRefs] = useState(false)
 
-  // audio-by-character, vtt, and docx only support file scope — enforce that invariant.
-  const fileOnlyFormats = ["audio-by-character", "vtt", "docx"] as const
+  // audio-by-character, vtt, docx, and plain-text-dump only support file scope.
+  const fileOnlyFormats = ["audio-by-character", "vtt", "docx", "plain-text-dump"] as const
   const isFileOnlyFormat = fileOnlyFormats.includes(format as typeof fileOnlyFormats[number])
   const effectiveScope: ExportScope = isFileOnlyFormat ? "file" : scope
 
@@ -213,7 +224,7 @@ export function ExportDialog({
   // Load cells for all project files when project scope is selected and the
   // format is a client-side one. Disabled until the user actually picks
   // project scope so we don't fan-out N fetches on dialog open.
-  const projectScopeEnabled = scope === "project" && format !== "usfm" && format !== "audio-by-character" && format !== "vtt" && format !== "docx"
+  const projectScopeEnabled = scope === "project" && format !== "usfm" && format !== "audio-by-character" && format !== "vtt" && format !== "docx" && format !== "plain-text-dump"
 
   const { files: projectFileCells, isLoading: projectCellsLoading, isTruncated } =
     useProjectCells({
@@ -338,6 +349,12 @@ export function ExportDialog({
           case "vtt":
             blob = exportVtt(cells, ttsSettings)
             break
+          case "plain-text-dump":
+            blob = exportPlainTextDump(cells, {
+              title: activeFileName ?? undefined,
+              includeRefs: dumpIncludeRefs,
+            })
+            break
           default:
             throw new Error(`Unknown format: ${format}`)
         }
@@ -376,6 +393,7 @@ export function ExportDialog({
             {FORMAT_OPTIONS.filter((f) => {
               if (f.id === "usfm") return isUsfmFile
               if (f.id === "docx") return isDocxFile // FRO-233: only for docx imports
+              if (f.id === "plain-text-dump") return false // shown in Advanced section only
               return true
             }).map((f) => (
               <label
@@ -521,6 +539,76 @@ export function ExportDialog({
             </span>
           </div>
         )}
+
+        {/* Advanced section: plain-text dump */}
+        <details
+          open={advancedOpen}
+          onToggle={(e) => setAdvancedOpen((e.currentTarget as HTMLDetailsElement).open)}
+          className="group"
+        >
+          <summary className="cursor-pointer text-xs font-medium text-muted-foreground uppercase tracking-wide select-none list-none flex items-center gap-1 hover:text-foreground transition-colors">
+            <span
+              className={
+                "inline-block transition-transform " +
+                (advancedOpen ? "rotate-90" : "rotate-0")
+              }
+              aria-hidden="true"
+            >
+              ›
+            </span>
+            Advanced
+          </summary>
+          <div className="mt-2.5 flex flex-col gap-2.5 pl-3 border-l border-border/40">
+            {/* Plain-text dump */}
+            <label
+              className={
+                "flex items-start gap-2.5 rounded-xl px-2.5 py-2 cursor-pointer transition-colors " +
+                (format === "plain-text-dump"
+                  ? "bg-accent/60 ring-1 ring-ring/20"
+                  : "hover:bg-accent/40")
+              }
+            >
+              <input
+                type="radio"
+                name="export-format"
+                value="plain-text-dump"
+                checked={format === "plain-text-dump"}
+                onChange={() => setFormat("plain-text-dump")}
+                className="mt-0.5 shrink-0 accent-primary"
+                aria-label="Plain-text dump (.txt)"
+              />
+              <span className="flex flex-col gap-0.5 min-w-0">
+                <span className="text-sm font-medium leading-tight flex items-baseline gap-1.5 flex-wrap">
+                  Plain-text dump
+                  <span className="text-xs text-muted-foreground font-normal font-mono">.txt</span>
+                  <span className="text-[10px] text-amber-600 dark:text-amber-400 font-semibold uppercase tracking-wider">
+                    lossy
+                  </span>
+                </span>
+                <span className="text-xs text-muted-foreground leading-relaxed">
+                  Every translated segment, one per line — for quick content extraction.{" "}
+                  <strong className="font-medium text-foreground/70">What this loses:</strong>{" "}
+                  footnotes, cross-references, poetry layout, headings, paragraph markers,
+                  bold/italic character markup, back-translations, validation state, and
+                  untranslated segments. Not suitable for re-import.
+                </span>
+                {format === "plain-text-dump" && (
+                  <label className="flex items-center gap-1.5 mt-1 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={dumpIncludeRefs}
+                      onChange={(e) => setDumpIncludeRefs(e.target.checked)}
+                      className="accent-primary"
+                    />
+                    <span className="text-xs text-muted-foreground">
+                      Prefix each line with canonical ref (e.g. <code className="font-mono">GEN 1:1</code>)
+                    </span>
+                  </label>
+                )}
+              </span>
+            </label>
+          </div>
+        </details>
 
         {/* Status feedback */}
         {status.kind !== "idle" && (

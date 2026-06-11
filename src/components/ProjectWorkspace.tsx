@@ -1203,6 +1203,7 @@ export function ProjectWorkspace() {
     sourceLanguage: project?.sourceLanguage || "",
     targetLanguage: project?.targetLanguage || "",
     currentFileName: activeFile?.name,
+    projectId: project?.id,
   })
 
   // ── Back-translation: statistical primary path + optional LLM polish ────────

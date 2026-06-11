@@ -54,16 +54,29 @@ const CELL_CTX = {
   context: "GEN 1:1",
 }
 
-function makeHook() {
+function makeHook(projectId?: string) {
   return renderHook(() =>
     useChat({
       settings: SETTINGS,
       session: SESSION,
       sourceLanguage: "English",
       targetLanguage: "French",
+      projectId,
     }),
   )
 }
+
+// Minimal localStorage mock for persistence tests
+const localStorageMock = (() => {
+  let store: Record<string, string> = {}
+  return {
+    getItem: (key: string) => store[key] ?? null,
+    setItem: (key: string, value: string) => { store[key] = value },
+    removeItem: (key: string) => { delete store[key] },
+    clear: () => { store = {} },
+  }
+})()
+Object.defineProperty(window, "localStorage", { value: localStorageMock })
 
 // ---------------------------------------------------------------------------
 // Tests
@@ -183,6 +196,37 @@ describe("useChat", () => {
 
     expect(sendChatMessage).not.toHaveBeenCalled()
     expect(result.current.messages).toHaveLength(0)
+  })
+
+  it("persists and reloads history from localStorage when projectId is given", async () => {
+    localStorageMock.clear()
+    const { result, unmount } = makeHook("proj-abc")
+
+    await act(async () => {
+      await result.current.sendMessage("Persist me", null)
+    })
+
+    expect(result.current.messages).toHaveLength(2)
+    unmount()
+
+    // Re-mount a new hook instance; it should reload from localStorage
+    const { result: result2 } = makeHook("proj-abc")
+    expect(result2.current.messages).toHaveLength(2)
+    expect(result2.current.messages[0]).toMatchObject({ role: "user", content: "Persist me" })
+  })
+
+  it("does not persist history when projectId is omitted", async () => {
+    localStorageMock.clear()
+    const { result, unmount } = makeHook() // no projectId
+
+    await act(async () => {
+      await result.current.sendMessage("Ephemeral", null)
+    })
+
+    unmount()
+
+    // Nothing should be in storage
+    expect(localStorageMock.getItem("chat-history:undefined")).toBeNull()
   })
 
   it("reflects isConfigured from chatIsConfigured", () => {

@@ -7,7 +7,7 @@
  * Delegates all LLM calls to chat-service.ts (which reuses completion-service.ts).
  */
 
-import { useState, useCallback, useRef } from "react"
+import { useState, useCallback, useRef, useEffect } from "react"
 import type { CompletionSettings } from "@/lib/parsers/types"
 import type { FrontierSession } from "@/lib/frontier/types"
 import {
@@ -27,6 +27,42 @@ export interface UseChatOptions {
   targetLanguage: string
   /** Name of the file currently open in the editor, included as chat context. */
   currentFileName?: string
+  /**
+   * Project identifier used to scope chat history persistence.
+   * If omitted, history is in-memory only (not persisted).
+   */
+  projectId?: string
+}
+
+// ── localStorage persistence helpers ─────────────────────────────────────
+
+const MAX_PERSISTED_MESSAGES = 200
+
+function storageKey(projectId: string): string {
+  return `chat-history:${projectId}`
+}
+
+function loadHistory(projectId: string | undefined): ChatMessage[] {
+  if (!projectId || typeof window === "undefined") return []
+  try {
+    const raw = window.localStorage.getItem(storageKey(projectId))
+    if (!raw) return []
+    const parsed = JSON.parse(raw)
+    if (!Array.isArray(parsed)) return []
+    return parsed as ChatMessage[]
+  } catch {
+    return []
+  }
+}
+
+function saveHistory(projectId: string | undefined, messages: ChatMessage[]): void {
+  if (!projectId || typeof window === "undefined") return
+  try {
+    const trimmed = messages.slice(-MAX_PERSISTED_MESSAGES)
+    window.localStorage.setItem(storageKey(projectId), JSON.stringify(trimmed))
+  } catch {
+    // Storage full or unavailable — silently ignore.
+  }
 }
 
 export interface UseChatReturn {
@@ -45,13 +81,18 @@ export interface UseChatReturn {
 }
 
 export function useChat(options: UseChatOptions): UseChatReturn {
-  const { settings, session, sourceLanguage, targetLanguage, currentFileName } = options
+  const { settings, session, sourceLanguage, targetLanguage, currentFileName, projectId } = options
 
-  const [messages, setMessages] = useState<ChatMessage[]>([])
+  const [messages, setMessages] = useState<ChatMessage[]>(() => loadHistory(projectId))
   const [streamingText, setStreamingText] = useState("")
   const [isStreaming, setIsStreaming] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [includeCellContext, setIncludeCellContext] = useState(true)
+
+  // Persist history whenever messages change.
+  useEffect(() => {
+    saveHistory(projectId, messages)
+  }, [projectId, messages])
 
   // AbortController for the in-flight request.
   const abortRef = useRef<AbortController | null>(null)

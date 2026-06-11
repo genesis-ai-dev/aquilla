@@ -77,6 +77,9 @@ import { useCellsAuditStatsWithOverlay } from "@/hooks/useCellsAuditStatsWithOve
 import { useComments } from "@/hooks/useComments"
 import { Film, Scale, MessagesSquare, Share2, Settings as SettingsIcon, Lock, ClipboardList, Trash2, Undo2, Search as SearchIcon, Sparkles, Mic2, Download, BookMarked, BookOpen, Users, MessageSquare, Camera, UserCheck } from "lucide-react"
 import { ChatPanel } from "./ChatPanel"
+import { ChatDockPanel } from "./ChatDockPanel"
+import { SearchDockPanel } from "./SearchDockPanel"
+import { LeftDock, type DockTab } from "./LeftDock"
 import { useChat } from "@/hooks/useChat"
 import { TranslationNotesSidebar, readTnSidebarVisible, writeTnSidebarVisible } from "./TranslationNotesSidebar"
 import { InactiveProjectBanner } from "./InactiveProjectBanner"
@@ -443,6 +446,8 @@ export function ProjectWorkspace() {
   const [parallelScope, setParallelScope] = useState<ParallelPanelScope>("project")
   const [shareOpen, setShareOpen] = useState(false)
   const [chatOpen, setChatOpen] = useState(false)
+  // FRO-308: left dock active tab (null = collapsed rail only)
+  const [dockTab, setDockTab] = useState<DockTab | null>("files")
   const [aiSetupOpen, setAiSetupOpen] = useState(false)
   const [recordingCellId, setRecordingCellId] = useState<string | null>(null)
   // "Make a character from this voice" dialog (Cast studio). Owned here so the
@@ -2631,122 +2636,161 @@ export function ProjectWorkspace() {
     <EditorScrollProvider>
       {/* ScrollToGroupHandler must live inside EditorScrollProvider so it can call useEditorScroll */}
       <ScrollToGroupHandler cells={cells} editorRef={editorRef} />
+      {/* FRO-308: currentCell for chat panel — derived from focusedCellId */}
       <AppShell
-        sidebar={
-          <>
-            {lens !== "audio" && (
-              <>
-                <SuggestionBanner
-                  suggestions={bannerSuggestions}
-                  onApply={handleApplySuggestions}
-                  onDismiss={handleDismissBanner}
+        leftDock={
+          <LeftDock
+            storageKey={projectId}
+            activeTab={dockTab}
+            onActiveTabChange={setDockTab}
+            filesPanel={
+              <div className="flex h-full flex-col overflow-y-auto overflow-x-hidden">
+                {lens !== "audio" && (
+                  <SuggestionBanner
+                    suggestions={bannerSuggestions}
+                    onApply={handleApplySuggestions}
+                    onDismiss={handleDismissBanner}
+                  />
+                )}
+                <ExpandableFileList
+                  projectId={projectId!}
+                  projectName={project.name}
+                  files={project.files}
+                  activeFileId={activeFileId}
+                  fileProgress={fileProgress}
+                  suggestionFileIds={suggestionFileIds}
+                  validationCount={validationCount}
+                  getTokenForFile={getTokenForFile}
+                  onSelectFile={workspaceTabs.openFile}
+                  onRename={handleRename}
+                  onMove={(fileId) => {
+                    setMoveTargetId(fileId)
+                    setMoveCorpus(project.files.find((f) => f.id === fileId)?.corpusMarker ?? "")
+                  }}
+                  onDelete={currentRoleLevel >= ROLE.PROJECT_LEAD ? (fileId) => setPendingDeleteId(fileId) : undefined}
+                  onApplySuggestion={handleApplyOneSuggestion}
+                  onRenameCorpus={handleRenameCorpus}
+                  canExportByOrgPolicy={canExportByOrgPolicy}
                 />
-              </>
-            )}
-            <ExpandableFileList
-              projectId={projectId!}
-              projectName={project.name}
-              files={project.files}
-              activeFileId={activeFileId}
-              fileProgress={fileProgress}
-              suggestionFileIds={suggestionFileIds}
-              validationCount={validationCount}
-              getTokenForFile={getTokenForFile}
-              onSelectFile={workspaceTabs.openFile}
-              onRename={handleRename}
-              onMove={(fileId) => {
-                setMoveTargetId(fileId)
-                setMoveCorpus(project.files.find((f) => f.id === fileId)?.corpusMarker ?? "")
-              }}
-              onDelete={currentRoleLevel >= ROLE.PROJECT_LEAD ? (fileId) => setPendingDeleteId(fileId) : undefined}
-              onApplySuggestion={handleApplyOneSuggestion}
-              onRenameCorpus={handleRenameCorpus}
-              canExportByOrgPolicy={canExportByOrgPolicy}
-            />
-            {/* FRO-272: "Recently deleted" trash section (project_lead+). */}
-            {currentRoleLevel >= ROLE.PROJECT_LEAD && (
-              <div className="px-2 pb-1">
-                <button
-                  type="button"
-                  className="flex w-full items-center gap-1 rounded px-1 py-1 text-xs text-muted-foreground hover:bg-accent hover:text-foreground"
-                  onClick={() => setTrashOpen((v) => !v)}
-                  aria-expanded={trashOpen}
-                >
-                  <Trash2 className="size-3 shrink-0" />
-                  <span className="flex-1 truncate text-left">Recently deleted</span>
-                  {deletedFiles.length > 0 && (
-                    <span className="tabular-nums">{deletedFiles.length}</span>
-                  )}
-                </button>
-                {trashOpen && (
-                  <div className="mt-1 space-y-0.5">
-                    {deletedFiles.length === 0 && (
-                      <p className="px-2 py-1 text-xs text-muted-foreground">No recently deleted files.</p>
-                    )}
-                    {deletedFiles.map((f) => (
-                      <div key={f.fileId} className="flex items-center gap-1 rounded px-1 py-0.5 text-xs hover:bg-accent">
-                        <span className="flex-1 truncate text-muted-foreground">{f.name}</span>
-                        <button
-                          type="button"
-                          className="shrink-0 rounded px-1 py-0.5 text-xs hover:bg-muted"
-                          title="Restore file — cells and audio come back intact"
-                          onClick={() => void handleRestoreFile(f.fileId)}
-                        >
-                          Restore
-                        </button>
-                        <button
-                          type="button"
-                          className="shrink-0 rounded px-1 py-0.5 text-xs text-destructive hover:bg-destructive/10"
-                          title="Delete forever — permanently wipes R2 media"
-                          onClick={() => void handlePurgeFile(f.fileId)}
-                        >
-                          Delete forever
-                        </button>
+                {/* FRO-272: "Recently deleted" trash section (project_lead+). */}
+                {currentRoleLevel >= ROLE.PROJECT_LEAD && (
+                  <div className="px-2 pb-1">
+                    <button
+                      type="button"
+                      className="flex w-full items-center gap-1 rounded px-1 py-1 text-xs text-muted-foreground hover:bg-accent hover:text-foreground"
+                      onClick={() => setTrashOpen((v) => !v)}
+                      aria-expanded={trashOpen}
+                    >
+                      <Trash2 className="size-3 shrink-0" />
+                      <span className="flex-1 truncate text-left">Recently deleted</span>
+                      {deletedFiles.length > 0 && (
+                        <span className="tabular-nums">{deletedFiles.length}</span>
+                      )}
+                    </button>
+                    {trashOpen && (
+                      <div className="mt-1 space-y-0.5">
+                        {deletedFiles.length === 0 && (
+                          <p className="px-2 py-1 text-xs text-muted-foreground">No recently deleted files.</p>
+                        )}
+                        {deletedFiles.map((f) => (
+                          <div key={f.fileId} className="flex items-center gap-1 rounded px-1 py-0.5 text-xs hover:bg-accent">
+                            <span className="flex-1 truncate text-muted-foreground">{f.name}</span>
+                            <button
+                              type="button"
+                              className="shrink-0 rounded px-1 py-0.5 text-xs hover:bg-muted"
+                              title="Restore file — cells and audio come back intact"
+                              onClick={() => void handleRestoreFile(f.fileId)}
+                            >
+                              Restore
+                            </button>
+                            <button
+                              type="button"
+                              className="shrink-0 rounded px-1 py-0.5 text-xs text-destructive hover:bg-destructive/10"
+                              title="Delete forever — permanently wipes R2 media"
+                              onClick={() => void handlePurgeFile(f.fileId)}
+                            >
+                              Delete forever
+                            </button>
+                          </div>
+                        ))}
+                        <p className="px-1 pt-1 text-[10px] leading-snug text-muted-foreground">
+                          Files are kept for 30 days. "Delete forever" permanently wipes media.
+                        </p>
                       </div>
-                    ))}
-                    <p className="px-1 pt-1 text-[10px] leading-snug text-muted-foreground">
-                      Files are kept for 30 days. "Delete forever" permanently wipes media.
-                    </p>
+                    )}
                   </div>
                 )}
+                {lens === "audio" && project && (
+                  <VoiceSidebar
+                    cells={cells}
+                    project={audioProject ?? project}
+                    projectId={project.id}
+                    tts={tts}
+                    session={frontierSession ?? null}
+                    username={currentUsername}
+                    targetLanguage={project.targetLanguage}
+                    fileId={activeFileId}
+                    cloneOpen={makeCharacterOpen}
+                    onCloneOpenChange={(open) => {
+                      setMakeCharacterOpen(open)
+                      if (!open) setMakeCharacterSeedCellId(null)
+                    }}
+                    cloneSeedCellId={makeCharacterSeedCellId}
+                  />
+                )}
+                <SidebarProjectSection items={projectNavItems} />
+                {/* FRO-192: member's per-project assignment pickup panel. */}
+                {project?.id && jwt && (
+                  <ProjectAssignedToMe
+                    projectId={project.id}
+                    jwt={jwt}
+                    onJumpToScopeLabel={jumpToScopeLabel}
+                    refreshKey={assignmentsRefreshKey}
+                  />
+                )}
+                <div className="mt-auto border-t px-2 pb-2 pt-2">
+                  <AccountSwitcher variant="sidebar" />
+                </div>
               </div>
-            )}
-            {lens === "audio" && project && (
-              <VoiceSidebar
-                cells={cells}
-                project={audioProject ?? project}
-                projectId={project.id}
-                tts={tts}
-                session={frontierSession ?? null}
-                username={currentUsername}
-                targetLanguage={project.targetLanguage}
-                fileId={activeFileId}
-                cloneOpen={makeCharacterOpen}
-                onCloneOpenChange={(open) => {
-                  setMakeCharacterOpen(open)
-                  if (!open) setMakeCharacterSeedCellId(null)
+            }
+            chatPanel={
+              <ChatDockPanel
+                chat={chat}
+                currentCell={(() => {
+                  if (!focusedCellId) return null
+                  const cell = cells.find((c) => c.id === focusedCellId)
+                  if (!cell) return null
+                  return {
+                    sourceText: cell.original,
+                    translatedText: cell.translated,
+                    context: cell.context ?? undefined,
+                  }
+                })()}
+              />
+            }
+            searchPanel={
+              <SearchDockPanel
+                activeFileId={activeFileId}
+                activeFileName={activeFileId ? project.files.find((f) => f.id === activeFileId)?.name ?? null : null}
+                loading={searchLoading}
+                ready={searchReady}
+                results={searchResults}
+                onReady={buildIndex}
+                onSearch={(q, opts) => void runSearch(q, opts)}
+                onSearchPassages={runSearchPassages}
+                onClearResults={clearSearchResults}
+                onSelect={handleSearchSelect}
+                isReadOnly={isReadOnly}
+                onAfterReplace={rebuildSearchIndex}
+                onReplaceAll={handleReplaceAll}
+                onOpenFullPanel={() => {
+                  setParallelMode("search")
+                  setParallelScope(activeFileId ? "file" : "project")
+                  setParallelOpen(true)
                 }}
-                cloneSeedCellId={makeCharacterSeedCellId}
               />
-            )}
-            <SidebarProjectSection items={projectNavItems} />
-            {/* FRO-192: member's per-project assignment pickup panel.
-                Only renders when the user has active assignments in this project
-                (component self-hides on empty/loading). Scoped to "mine" so
-                managers see only their own tasks here; the org-level oversight
-                table lives in AssignedToMe (org shell). */}
-            {project?.id && jwt && (
-              <ProjectAssignedToMe
-                projectId={project.id}
-                jwt={jwt}
-                onJumpToScopeLabel={jumpToScopeLabel}
-                refreshKey={assignmentsRefreshKey}
-              />
-            )}
-            <div className="mt-auto border-t px-2 pb-2 pt-2">
-              <AccountSwitcher variant="sidebar" />
-            </div>
-          </>
+            }
+          />
         }
         header={
           <WorkspaceHeader
@@ -2818,27 +2862,38 @@ export function ProjectWorkspace() {
                 }}
                 onDismissRtlHint={fileMeta.dismissRtlHint}
               />
+              {/* FRO-308: Search button opens the search dock tab (quick search)
+                  or falls back to full ParallelPassagesPanel dialog via ⌘F */}
               <Button
                 variant="ghost"
                 size="icon"
                 onClick={() => {
-                  setParallelMode("search")
-                  setParallelScope(activeFileId ? "file" : "project")
-                  setParallelOpen(true)
+                  if (dockTab === "search") {
+                    setDockTab(null)
+                  } else {
+                    setDockTab("search")
+                  }
                 }}
-                title="Search & replace (⌘F)"
-                aria-label="Search & replace"
+                title="Search (dock)"
+                aria-label="Search"
+                aria-pressed={dockTab === "search"}
               >
                 <SearchIcon className="h-4 w-4" />
               </Button>
-              {/* FRO-175: AI chat panel toggle */}
+              {/* FRO-320: AI chat button opens the chat dock tab */}
               <Button
                 variant="ghost"
                 size="icon"
-                onClick={() => setChatOpen((o) => !o)}
+                onClick={() => {
+                  if (dockTab === "chat") {
+                    setDockTab(null)
+                  } else {
+                    setDockTab("chat")
+                  }
+                }}
                 title="AI chat (copilot)"
                 aria-label="Open AI chat"
-                aria-pressed={chatOpen}
+                aria-pressed={dockTab === "chat"}
               >
                 <MessageSquare className="h-4 w-4" />
               </Button>

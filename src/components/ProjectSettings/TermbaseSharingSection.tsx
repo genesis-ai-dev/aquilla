@@ -39,6 +39,12 @@ function errMsg(e: unknown): string {
 }
 
 /**
+ * =============================================================================
+ * HIDDEN FROM SETTINGS UI — see SHOW_TERMBASE_SHARING_IN_SETTINGS in
+ * ProjectSettings.tsx (false since 2026-06-11). Component + API remain; not
+ * mounted until that flag is flipped back to true.
+ * =============================================================================
+ *
  * Project Settings section for org termbase publish/subscribe (spec Slices 6-7,
  * aquilla terminology.md §"Termbase — sharing across projects").
  *

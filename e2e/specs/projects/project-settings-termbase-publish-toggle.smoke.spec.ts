@@ -4,6 +4,9 @@ import { Dashboard } from "../../helpers/page-objects/Dashboard"
 /**
  * TermbaseSharingSection — toggling the "Publish termbase to org" switch.
  *
+ * SKIPPED: section hidden via SHOW_TERMBASE_SHARING_IN_SETTINGS in ProjectSettings.tsx
+ * (2026-06-11). Re-enable when that flag is true.
+ *
  * TermbaseSharingSection.tsx renders a Switch (aria-label="Publish termbase
  * to org") that calls togglePublish() on change. Enabling it publishes the
  * project's termbase to the org; disabling unpublishes it.
@@ -15,7 +18,7 @@ import { Dashboard } from "../../helpers/page-objects/Dashboard"
  * Note: the switch is only interactive when the caller is the project owner
  * (canManage = true). Alice always owns her own projects.
  */
-test("termbase sharing publish switch toggles on and off", async ({ alice }) => {
+test.skip("termbase sharing publish switch toggles on and off", async ({ alice }) => {
   const dash = new Dashboard(alice)
   await dash.goto()
   const name = `TermShare ${Date.now()}`

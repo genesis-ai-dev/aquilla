@@ -17,7 +17,6 @@ import { Button } from "@/components/ui/button"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import type { SourceCellRef } from "@/lib/import"
 import { generateLabelTemplate, parseCsvRows } from "@/lib/parsers/spreadsheet"
-import { applyEBibleTargetImport } from "@/lib/import"
 
 export interface LabelImportPanelProps {
   projectId: string
@@ -28,12 +27,10 @@ export interface LabelImportPanelProps {
   onCancel: () => void
 }
 
+// projectId/username/getToken/onImported are unused while the apply path is
+// held (FRO-314-cast-events) but stay in the props contract for the re-enable.
 export function LabelImportPanel({
-  projectId,
-  username,
   sourceCells,
-  getToken,
-  onImported,
   onCancel,
 }: LabelImportPanelProps) {
   const [phase, setPhase] = useState<"idle" | "importing" | "done">("idle")
@@ -98,41 +95,16 @@ export function LabelImportPanel({
    *  type (tracked separately). This panel currently imports cast names only
    *  when target column text equals the cast name as a placeholder. */
   async function handleImport() {
-    if (!preview || preview.length === 0) return
-    setPhase("importing")
-    setError(null)
-    try {
-      // Build a match result: ref → sourceCellRef → target commit with cast name as text
-      // SWARM-TODO: proper cast assignment requires a dedicated event; for now
-      // we apply cast name to the "translated" field which populates in the UI.
-      const byRef = new Map(sourceCells.filter(c => c.canonicalRef).map(c => [c.canonicalRef!, c]))
-      const matched = preview
-        .map(({ ref, castName }) => {
-          const cell = byRef.get(ref)
-          if (!cell) return null
-          return {
-            cellId: cell.cellId,
-            fileId: cell.fileId,
-            incomingText: castName,
-            currentText: cell.translated ?? "",
-            hasConflict: Boolean((cell.translated ?? "").trim()),
-            parentId: cell.targetEventId ?? cell.sourceEventId ?? "",
-            ref,
-          }
-        })
-        .filter((m): m is NonNullable<typeof m> => m !== null && Boolean(m.parentId))
-
-      await applyEBibleTargetImport(
-        { matched, orphans: [], unmatchedSourceCount: 0 },
-        new Set(matched.map(m => m.cellId)),
-        { projectId, author: username, getToken },
-      )
-      setPhase("done")
-      onImported()
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Import failed")
-      setPhase("idle")
-    }
+    // FRO-314 HOLD: applying labels to EXISTING cells has no safe server path yet.
+    // The only available write (applyEBibleTargetImport) would commit cast names
+    // into the TARGET TEXT column — corrupting translations. Until a dedicated
+    // cast/label event exists (SWARM-TODO FRO-314-cast-events), importing is
+    // disabled; template download + preview/validation still work.
+    setError(
+      "Applying labels to existing cells isn't supported yet — it requires dedicated " +
+      "cast-label support on the server. Your file was validated; nothing was imported.",
+    )
+    setPhase("idle")
   }
 
   return (

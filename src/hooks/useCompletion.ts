@@ -55,7 +55,7 @@ const FALLBACK_SETTINGS: CompletionSettings = {
   temperature: 0.3,
   systemPrompt: DEFAULT_SYSTEM_PROMPT,
   llmHealthPenalty: 0.1,
-  top_k: 5,
+  top_k: 15,
   contextSize: "medium",
   useOnlyValidatedExamples: false,
   main_chat_language: "",
@@ -134,7 +134,7 @@ export function useCompletion(
     // top_k controls how many search-retrieved examples are requested.
     // When useOnlyValidatedExamples is true, skip search-retrieved examples
     // and rely solely on collectValidatedPairs (validated-only examples).
-    const topK = effectiveSettings.top_k ?? 5
+    const topK = effectiveSettings.top_k ?? 15
     let found: ScoredPair[] = []
     try {
       if (!effectiveSettings.useOnlyValidatedExamples) {
@@ -296,7 +296,7 @@ export function useCompletion(
         }))
         // Use the chunk's concatenated text as the relevance query so validated
         // pairs about the same topic/terms are ranked highest.
-        const batchTopK = effectiveSettings.top_k ?? 5
+        const batchTopK = effectiveSettings.top_k ?? 15
         const batchValidatedPairs = allCells
           ? collectValidatedPairs(allCells, concatenated, batchTopK)
           : []

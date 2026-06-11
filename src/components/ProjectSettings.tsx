@@ -106,7 +106,7 @@ function buildBaseline(project: ProjectRecord): Baseline {
     temperature: project.completionSettings?.temperature ?? 0.3,
     systemPrompt: project.completionSettings?.systemPrompt || DEFAULT_SYSTEM_PROMPT,
     llmHealthPenalty: project.completionSettings?.llmHealthPenalty ?? 0.1,
-    top_k: project.completionSettings?.top_k ?? 5,
+    top_k: project.completionSettings?.top_k ?? 15,
     contextSize: project.completionSettings?.contextSize ?? "medium",
     useOnlyValidatedExamples: project.completionSettings?.useOnlyValidatedExamples ?? false,
     main_chat_language: project.completionSettings?.main_chat_language ?? "",
@@ -189,7 +189,7 @@ export function ProjectSettings() {
   const [temperature, setTemperature] = useState(0.3)
   const [systemPrompt, setSystemPrompt] = useState(DEFAULT_SYSTEM_PROMPT)
   const [llmHealthPenalty, setLlmHealthPenalty] = useState(0.1)
-  const [topK, setTopK] = useState(5)
+  const [topK, setTopK] = useState(15)
   const [contextSize, setContextSize] = useState<ContextSize>("medium")
   const [useOnlyValidatedExamples, setUseOnlyValidatedExamples] = useState(false)
   const [fewShotExampleFormat, setFewShotExampleFormat] = useState<"source-and-target" | "target-only">("source-and-target")

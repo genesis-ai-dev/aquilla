@@ -95,11 +95,12 @@ Orchestration: docs/swarm/PD6-ORCHESTRATION.md. Base main@cfd4470 → promoted m
   restyle-only change). Follow-up QA: re-check prefill once deployed.
 - [DONE] Orchestrator fix 7cdb650: rls-backstop.test.ts TS7022 (UXA FRO-289 file) broke
   `cd auth-worker && tsc --noEmit` on main — 3-line annotation.
-- [OPEN] (pd6-syncworker-tsc-debt) `cd sync-worker && npx tsc --noEmit` is RED on main with ~60
+- [DONE] (pd6-syncworker-tsc-debt) `cd sync-worker && npx tsc --noEmit` was RED on main with ~60
   errors in TEST files only (CellRow/EventRow/CellsFtsRow not assignable to Record<string,unknown>
   in pg-test-db helper signatures; node:fs resolution in pg-test-db.ts). Pre-existing (last touch
-  4728e9c D1-redact); runtime tests green 552/552. Nobody's gate runs sync-worker tsc. Needs its
-  own pass — helper signature loosening + tsconfig types entry.
+  4728e9c D1-redact). Resolved 2026-06-10: Seed/seedRows widened to `ReadonlyArray<object>` (one
+  internal cast, no call-site casts) + `"node"` added to tsconfig types (matches auth-worker).
+  tsc exits 0; runtime tests stayed green 552/552.
 
 ---
 

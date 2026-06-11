@@ -38,6 +38,9 @@ import { SettingsNav, useScrollSpy, type SettingsSection } from "./ProjectSettin
 import { readValidationCount, readValidationCountAudio } from "@/lib/progress/read-validation-count"
 import { setUserApiKey, useUserApiKey } from "@/lib/store/user-api-keys"
 import type { ProjectWideSettings } from "@/lib/sync/project-settings"
+import { useFrontierSession } from "@/hooks/useFrontierSession"
+import { usePostEditMetrics } from "@/lib/metrics/use-post-edit-metrics"
+import { PostEditMetricsSection } from "@/components/metrics/PostEditMetricsSection"
 
 // Well-known OpenAI-compatible providers.
 const CUSTOM_PRESETS: { id: string; label: string; endpoint: string; requiresKey: boolean; keyHint?: string }[] = [
@@ -162,6 +165,27 @@ export function ProjectSettings() {
   // server calls re-validate org-membership / org-ownership, so a mismatch just
   // yields graceful empty/403 states.
   const { org } = useOrg()
+
+  // FRO-311: AI post-edit metrics
+  const { session } = useFrontierSession()
+  const isCloudProject = !!(project?.syncRole)
+  const metricsFiles = useMemo(
+    () => (project?.files ?? []).map((f) => ({ id: f.id, name: f.name })),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [(project?.files ?? []).map((f) => f.id).join(",")],
+  )
+  const getJwt = useCallback(() => session?.jwt ?? null, [session?.jwt])
+  const {
+    metrics: postEditMetrics,
+    isLoading: metricsLoading,
+    isError: metricsError,
+    revalidate: revalidateMetrics,
+  } = usePostEditMetrics({
+    projectId: isCloudProject ? (id ?? null) : null,
+    files: metricsFiles,
+    getJwt,
+    enabled: isCloudProject && !!id,
+  })
 
   // Server enforces MAINTAINER (600) for settings writes — show the correct
   // floor in the read-only tooltip so users know what role they need.
@@ -548,6 +572,7 @@ export function ProjectSettings() {
     { id: "section-git-sync", label: "Git Sync", keywords: ["git", "sync", "auto sync", "interval", "branch", "clone"], visible: hasGitOrigin },
     { id: "section-terminology", label: "Terminology", keywords: ["terminology", "termbase", "glossary", "concepts"] },
     { id: "section-termbase-sharing", label: "Term Base Sharing", keywords: ["term base", "termbase", "publish", "subscribe", "org", "shared", "glossary"] },
+    { id: "section-ai-metrics", label: "AI Metrics", keywords: ["post-edit", "edit distance", "ai metrics", "magnitude", "levenshtein", "ned", "biblica"] },
   ]
 
   // ── Search filter ──────────────────────────────────────────────────────────
@@ -1123,6 +1148,16 @@ export function ProjectSettings() {
             projectId={id}
             orgId={org?.id ?? null}
             roleLevel={project?.syncRole?.level ?? null}
+          />
+        )}
+
+        {visibleSections.some((s) => s.id === "section-ai-metrics") && (
+          <PostEditMetricsSection
+            metrics={postEditMetrics}
+            isLoading={metricsLoading}
+            isError={metricsError}
+            isCloudProject={isCloudProject}
+            onRevalidate={revalidateMetrics}
           />
         )}
 

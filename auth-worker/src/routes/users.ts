@@ -8,6 +8,7 @@ import { authMiddleware, type AuthHonoEnv } from "../middleware/auth"
 import {
   lookupUserByUsername,
   searchUsersByPrefix,
+  searchUsersByScopedPrefix,
 } from "../services/user-lookup"
 
 const SEARCH_MIN_PREFIX_LEN = 2
@@ -37,12 +38,18 @@ users.get("/lookup", async (c) => {
 })
 
 /**
- * GET /api/v2/users/search?prefix=X&limit=N
+ * GET /api/v2/users/search?prefix=X&limit=N[&scoped=1]
  *
  * Username prefix search for the Add-member typeahead. Empty result set
  * returns 200 with an empty array.
+ *
+ * FRO-321: When ?scoped=1 (the invite picker's default), results are limited
+ * to users that share an org or maintainer-accessible project with the caller.
+ * Exact-match lookup for out-of-scope users is done via GET /users/lookup, which
+ * does not confirm-or-deny on miss for privacy reasons.
  */
 users.get("/search", async (c) => {
+  const user = c.get("user")
   const prefix = c.req.query("prefix")?.trim() ?? ""
   if (prefix.length < SEARCH_MIN_PREFIX_LEN) {
     return c.json(
@@ -60,7 +67,14 @@ users.get("/search", async (c) => {
     }
   }
 
-  const matches = await searchUsersByPrefix(c.env, prefix, limit)
+  // FRO-321: ?scoped=1 restricts results to org/project-overlap users.
+  // Default is unscoped for backward compat; new invite picker passes scoped=1.
+  const scoped = c.req.query("scoped") === "1" || c.req.query("scoped") === "true"
+
+  const matches = scoped
+    ? await searchUsersByScopedPrefix(c.env, user.id, prefix, limit)
+    : await searchUsersByPrefix(c.env, prefix, limit)
+
   return c.json({ users: matches })
 })
 

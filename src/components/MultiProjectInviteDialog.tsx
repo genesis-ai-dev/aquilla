@@ -29,10 +29,16 @@ interface MultiProjectInviteDialogProps {
 }
 
 /**
- * Operational PM's bulk-add flow. Type a username, multi-select projects,
- * pick a role per project, hit Invite. Each project gets its own
- * POST /projects/:id/members; failures are surfaced per-row so the
- * operator knows which ones landed.
+ * FRO-322: Unified add-to-projects dialog.
+ *
+ * - Username mode (existing Aquilla user): multi-select projects, pick a
+ *   role per project, hit Invite. Each project gets a direct membership grant
+ *   via POST /projects/:id/members.
+ *
+ * - Email mode (new user): the dialog explains that email-based invites are
+ *   per-project (one magic-link per project) and shows a CTA to the per-project
+ *   Share panel for each selected project. This is honest about what the path is
+ *   rather than silently routing them back to username.
  *
  * Why per-project role (not "set all to role X"): translation projects
  * have meaningful per-project role variation — someone might be Translator
@@ -48,11 +54,6 @@ export function MultiProjectInviteDialog({
   onSuccess,
 }: MultiProjectInviteDialogProps) {
   const { session } = useFrontierSession()
-  // Username-only here. Multi-project email invites would need N tokens
-  // (one per project), each bearing the same email — awkward UX. The
-  // single-project email-invite path lives in SharePanel; once the
-  // recipient signs up there, they become a known user the operator
-  // can bulk-add by username from this dialog.
   const [recipient, setRecipient] = useState<RecipientValue>({
     mode: "username",
     raw: "",
@@ -64,8 +65,11 @@ export function MultiProjectInviteDialog({
   const [done, setDone] = useState<Record<string, "ok"> | null>(null)
 
   const selectedIds = useMemo(() => Object.keys(selections), [selections])
+  const isEmailMode = recipient.mode === "email"
   const canSubmit =
     !busy && recipient.raw.trim().length > 0 && selectedIds.length > 0 && Boolean(session?.jwt)
+  // Email mode: no server action — guide the operator to per-project Share panels.
+  const canShowEmailGuide = isEmailMode && selectedIds.length > 0
 
   function toggleProject(projectId: string) {
     setSelections((prev) => {
@@ -145,32 +149,31 @@ export function MultiProjectInviteDialog({
     <Dialog open={open} onOpenChange={(v) => (v ? onOpenChange(v) : handleClose())}>
       <DialogContent className="w-full max-w-xl overflow-hidden">
         <DialogHeader>
-          <DialogTitle>Invite to projects</DialogTitle>
+          <DialogTitle>Add to projects</DialogTitle>
           <DialogDescription>
-            Add someone to multiple projects in one step. They get
-            <strong className="font-medium"> project-only access</strong>{" "}
-            — org-wide membership is unchanged. If the person is already in
-            your org, this adds project-level overrides on top of their
-            existing org role.
+            {recipient.mode === "email"
+              ? "Email invites are per-project. Select projects below — each will get its own invite link via the Share panel."
+              : "Add an existing Aquilla user to multiple projects in one step. They get project-only access — org-wide membership is unchanged."}
           </DialogDescription>
         </DialogHeader>
 
         <div className="min-w-0 space-y-4">
           <div className="space-y-1.5">
-            <Label htmlFor="invite-username" className="text-xs">
-              Aquilla username
+            <Label htmlFor="invite-recipient" className="text-xs">
+              Recipient
             </Label>
             <UsernameTypeahead
               value={recipient}
               onChange={setRecipient}
               disabled={busy}
-              inputId="invite-username"
-              showModeToggle={false}
+              inputId="invite-recipient"
+              showModeToggle={true}
             />
-            <p className="text-[10px] text-muted-foreground">
-              Invite by email is in the per-project Share panel — once they
-              sign up, you can bulk-add them here.
-            </p>
+            {recipient.mode === "email" && (
+              <p className="text-[10px] text-muted-foreground">
+                Select projects below, then use each project&apos;s Share panel to send the invite link.
+              </p>
+            )}
           </div>
 
           <div>
@@ -268,6 +271,35 @@ export function MultiProjectInviteDialog({
             )}
           </div>
 
+          {/* FRO-322: email-mode guide — direct operator to per-project Share panels */}
+          {canShowEmailGuide && (
+            <div className="rounded border bg-muted/30 p-3 space-y-2 text-xs">
+              <p className="font-medium text-muted-foreground">
+                Email invites are sent per-project via each project&apos;s Share panel.
+                Open each project and use the Share tab to send a magic-link invite.
+              </p>
+              <ul className="space-y-1">
+                {selectedIds.map((id) => {
+                  const p = projects.find((x) => x.id === id)
+                  if (!p) return null
+                  return (
+                    <li key={id}>
+                      <a
+                        href={`/project/${id}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-1 text-primary hover:underline"
+                        onClick={handleClose}
+                      >
+                        Open {p.name} →
+                      </a>
+                    </li>
+                  )
+                })}
+              </ul>
+            </div>
+          )}
+
           {topError && (
             <p className="text-xs text-destructive">{topError}</p>
           )}
@@ -277,16 +309,18 @@ export function MultiProjectInviteDialog({
               <X className="mr-1 h-4 w-4" />
               {done ? "Close" : "Cancel"}
             </Button>
-            <Button onClick={handleInvite} disabled={!canSubmit}>
-              {busy ? (
-                <>
-                  <Loader2 className="mr-1 h-4 w-4 animate-spin" />
-                  Inviting…
-                </>
-              ) : (
-                <>Invite</>
-              )}
-            </Button>
+            {!isEmailMode && (
+              <Button onClick={handleInvite} disabled={!canSubmit}>
+                {busy ? (
+                  <>
+                    <Loader2 className="mr-1 h-4 w-4 animate-spin" />
+                    Adding…
+                  </>
+                ) : (
+                  <>Add to projects</>
+                )}
+              </Button>
+            )}
           </div>
         </div>
       </DialogContent>

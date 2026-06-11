@@ -90,6 +90,7 @@ interface Baseline {
   harmonize_min_role: "project_lead" | "maintainer"
   decaySettings: DecaySettings | undefined
   audioMediaStrategy: AudioMediaStrategy
+  geminiApiKey: string
 }
 
 function buildBaseline(project: ProjectRecord): Baseline {
@@ -121,6 +122,7 @@ function buildBaseline(project: ProjectRecord): Baseline {
     harmonize_min_role: project.harmonize_min_role ?? "project_lead",
     decaySettings: project.decaySettings,
     audioMediaStrategy: project.audioMediaStrategy ?? "lazy",
+    geminiApiKey: project.ttsSettings?.apiKey ?? "",
   }
 }
 
@@ -210,6 +212,10 @@ export function ProjectSettings() {
   // synced, no race with the project save flow. Kept on its own immediate-save
   // path so the deferred-save bar isn't responsible for cross-project state.
   const completionUserKey = useUserApiKey("completion") ?? ""
+  const geminiUserKey = useUserApiKey("gemini-tts") ?? ""
+
+  // Gemini TTS API key — stored in ttsSettings.apiKey (project-level).
+  const [geminiApiKey, setGeminiApiKey] = useState("")
 
   const [models, setModels] = useState<string[]>([])
   const [connecting, setConnecting] = useState(false)
@@ -247,6 +253,7 @@ export function ProjectSettings() {
     setHarmonizeMinRole(b.harmonize_min_role)
     setDecaySettings(b.decaySettings)
     setAudioMediaStrategy(b.audioMediaStrategy)
+    setGeminiApiKey(b.geminiApiKey)
   }, [])
 
   // Seed once when the project first loads. We intentionally don't reseed on
@@ -289,7 +296,8 @@ export function ProjectSettings() {
       allowSelfValidation !== baseline.allowSelfValidation ||
       harmonizeMinRole !== baseline.harmonize_min_role ||
       audioMediaStrategy !== baseline.audioMediaStrategy ||
-      !decayEqual(decaySettings, baseline.decaySettings)
+      !decayEqual(decaySettings, baseline.decaySettings) ||
+      geminiApiKey !== baseline.geminiApiKey
     )
   }, [
     baseline, name, sourceLanguage, targetLanguage, username, provider, endpoint, apiKey,
@@ -297,7 +305,7 @@ export function ProjectSettings() {
     topK, contextSize, useOnlyValidatedExamples, fewShotExampleFormat, mainChatLanguage,
     autoSyncEnabled, autoSyncInterval, validationCount, validationCountAudio,
     validationRoleFloor, validationNamedUsers, allowSelfValidation,
-    harmonizeMinRole, audioMediaStrategy, decaySettings,
+    harmonizeMinRole, audioMediaStrategy, decaySettings, geminiApiKey,
   ])
 
   // Warn before browser-level navigation (back button, tab close, reload).
@@ -387,6 +395,7 @@ export function ProjectSettings() {
       if (username !== baseline.username) localUpdates.username = username
       if (!decayEqual(decaySettings, baseline.decaySettings)) localUpdates.decaySettings = decaySettings
       if (audioMediaStrategy !== baseline.audioMediaStrategy) localUpdates.audioMediaStrategy = audioMediaStrategy
+      // geminiApiKey handled below after `latest` is fetched, so voices/castAssignments are preserved.
       if (
         autoSyncEnabled !== baseline.autoSyncEnabled ||
         autoSyncInterval !== baseline.autoSyncInterval
@@ -396,15 +405,20 @@ export function ProjectSettings() {
         }
       }
 
+      const geminiKeyChanged = geminiApiKey !== baseline.geminiApiKey
       const hasLocalWork =
-        Object.keys(localUpdates).length > 0 || Object.keys(completionUpdates).length > 0
+        Object.keys(localUpdates).length > 0 || Object.keys(completionUpdates).length > 0 || geminiKeyChanged
       if (hasLocalWork) {
         const latest = await getProject(id)
         if (!latest) throw new Error("Project not found")
         const nextCompletion = Object.keys(completionUpdates).length
           ? buildCompletionSettings(latest.completionSettings, completionUpdates)
           : latest.completionSettings
-        await updateProject({ ...latest, ...localUpdates, completionSettings: nextCompletion })
+        // Merge geminiApiKey into ttsSettings so voices/castAssignments are preserved.
+        const nextTtsSettings = geminiKeyChanged
+          ? { ...latest.ttsSettings, apiKey: geminiApiKey || undefined }
+          : latest.ttsSettings
+        await updateProject({ ...latest, ...localUpdates, completionSettings: nextCompletion, ttsSettings: nextTtsSettings })
       }
 
       const sharedUpdates: ProjectWideSettings = {}
@@ -476,6 +490,7 @@ export function ProjectSettings() {
         harmonize_min_role: harmonizeMinRole,
         decaySettings,
         audioMediaStrategy,
+        geminiApiKey,
       }
       setBaseline(newBaseline)
       // Refresh `useProject` in the background so other components see the
@@ -494,7 +509,7 @@ export function ProjectSettings() {
     topK, contextSize, useOnlyValidatedExamples, fewShotExampleFormat, mainChatLanguage,
     autoSyncEnabled, autoSyncInterval, validationCount, validationCountAudio,
     validationRoleFloor, validationNamedUsers, allowSelfValidation, harmonizeMinRole,
-    audioMediaStrategy, decaySettings, patchShared, refresh, applyBaseline,
+    audioMediaStrategy, decaySettings, geminiApiKey, patchShared, refresh, applyBaseline,
   ])
 
   const handleSaveAndClose = useCallback(async () => {
@@ -526,7 +541,7 @@ export function ProjectSettings() {
     { id: "section-user", label: "User", keywords: ["username", "author"] },
     { id: "section-ai-instructions", label: "AI Instructions", keywords: ["system prompt", "ai", "llm", "instructions"] },
     { id: "section-advanced-llm", label: "Advanced LLM", keywords: ["provider", "endpoint", "api key", "model", "temperature", "max tokens", "health penalty", "frontier", "openai", "custom"] },
-    { id: "section-voice", label: "Voice", keywords: ["tts", "voice studio", "audio", "gemini"] },
+    { id: "section-voice", label: "Voice", keywords: ["tts", "voice studio", "audio", "gemini", "api key", "tts key"] },
     { id: "section-decay", label: "Decay", keywords: ["decay", "decay threshold", "half life"] },
     { id: "section-validation", label: "Validation", keywords: ["validation count", "approvals", "audio validation"] },
     { id: "section-audio-media", label: "Audio Media", keywords: ["audio media strategy", "lazy", "eager"] },
@@ -959,17 +974,28 @@ export function ProjectSettings() {
                 <Sparkles className="h-4 w-4 text-primary" /> Voice
               </CardTitle>
             </CardHeader>
-            <CardContent className="flex items-center justify-between gap-4">
-              <p className="text-sm text-muted-foreground">
-                The TTS engine, Gemini API key, voice library, and voice cloning now live in the Voice Studio.
-              </p>
-              <Button variant="outline" onClick={() => {
-                // Set the Audio lens preference before navigating so the workspace opens in audio mode.
-                try { window.localStorage.setItem(`codex:editorLens:${id}`, "audio") } catch { /* ignore */ }
-                requestNavigate(`/project/${id}`)
-              }} className="shrink-0">
-                Open Voice Studio
-              </Button>
+            <CardContent className="space-y-4">
+              <ApiKeyField
+                label="Gemini API key"
+                placeholder="AIza..."
+                projectKey={geminiApiKey}
+                userKey={geminiUserKey}
+                onProjectKeyChange={setGeminiApiKey}
+                onUserKeyChange={(v) => setUserApiKey("gemini-tts", v)}
+                help="Used for Gemini-powered text-to-speech. Get a key at aistudio.google.com/apikey. Sent directly to Google; never uploaded to Frontier."
+              />
+              <div className="flex items-center justify-between gap-4 pt-1">
+                <p className="text-sm text-muted-foreground">
+                  Voice library and cast assignments live in the Voice Studio.
+                </p>
+                <Button variant="outline" onClick={() => {
+                  // Set the Audio lens preference before navigating so the workspace opens in audio mode.
+                  try { window.localStorage.setItem(`codex:editorLens:${id}`, "audio") } catch { /* ignore */ }
+                  requestNavigate(`/project/${id}`)
+                }} className="shrink-0">
+                  Open Voice Studio
+                </Button>
+              </div>
             </CardContent>
           </Card>
         )}

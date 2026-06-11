@@ -1,29 +1,26 @@
-// The Voice Studio's left rail: a calm CAST ROSTER. The shared Gemini key sits
-// in a small collapsible bit at the top; below it is one flat list of voices
+// The Voice Studio's left rail: a calm CAST ROSTER. One flat list of voices
 // (color dot, name, the engine it uses, line count, default star, a "Cloned"
 // badge when it has a reference) plus "+ New voice".
 //
 // EVERY voice is the same primitive: a TTS engine + that engine's base voice,
 // optionally with a reference recording layered on top to "clone a timbre". The
 // engine is now PER-VOICE (chosen in the modal), so there's no project-level
-// engine picker here — only the shared Gemini API key. A voice with a reference
-// is what we used to call a "clone"; the only visual distinction is a small
-// violet "Cloned" badge — not a separate section.
+// engine picker here. The Gemini API key is configured in Project Settings.
+// A voice with a reference is what we used to call a "clone"; the only visual
+// distinction is a small violet "Cloned" badge — not a separate section.
 //
 // Crafting a voice is a focused act — clicking a voice (or "+ New voice") opens
 // the CharacterModal (the "voice creator"), not an always-open inline inspector.
 
 import { useCallback, useEffect, useRef, useState } from "react"
-import { KeyRound, Plus, Sparkles, Star, Users } from "lucide-react"
+import { Plus, Sparkles, Star, Users } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 import type { ProjectTtsSettings, TtsProvider, Voice } from "@/lib/parsers/types"
 import type { CellData } from "@/hooks/useCells"
 import { PRESET_VOICES } from "@/lib/audio/voices"
 import { DEFAULT_TTS_PROVIDER, TTS_PROVIDER_INFOS } from "@/lib/audio/tts-providers"
-import { useAnyGeminiKeyError } from "@/lib/audio/tts"
-import { setUserApiKey, useUserApiKey } from "@/lib/store/user-api-keys"
-import { ApiKeyField } from "@/components/ApiKeyField"
+import { useUserApiKey } from "@/lib/store/user-api-keys"
 import { CharacterModal } from "@/components/voice/CharacterModal"
 import type { FrontierSession } from "@/lib/frontier/types"
 
@@ -80,7 +77,6 @@ export function VoiceLibraryPanel({
   const [defaultVoiceId, setDefaultVoiceId] = useState<string | undefined>(undefined)
   const [localSelectedId, setLocalSelectedId] = useState<string>("")
   const seededRef = useRef<string | null>(null)
-  const [keyOpen, setKeyOpen] = useState(false)
   const [editing, setEditing] = useState<Editing>({ kind: "closed" })
 
   // Seed the local library once per project. The studio mounts this only after
@@ -96,20 +92,6 @@ export function VoiceLibraryPanel({
   }, [projectId, settings])
 
   const selectedId = selectedVoiceId ?? localSelectedId
-
-  // Engine is per-voice now; a key is "needed" when any voice runs on Gemini
-  // (the default when provider is absent) and no shared key is set yet.
-  const anyGeminiVoice = voices.some((v) => (v.provider ?? DEFAULT_TTS_PROVIDER) === "gemini")
-  const needsKey = anyGeminiVoice && !apiKey
-  // A6: distinguish "no key at all" from "key entered but invalid/rejected".
-  // When a key IS present but synthesis has failed due to a key error, show
-  // "Key invalid" so the user knows the key value was tried and rejected.
-  const hasKeyError = useAnyGeminiKeyError()
-  const keyBadgeLabel = needsKey
-    ? "Key needed"
-    : (anyGeminiVoice && apiKey && hasKeyError)
-      ? "Key invalid"
-      : null
 
   const select = useCallback((id: string) => {
     setLocalSelectedId(id)
@@ -178,42 +160,6 @@ export function VoiceLibraryPanel({
       </div>
 
       <div className="min-h-0 flex-1 space-y-3 overflow-y-auto p-3">
-        {/* Gemini API key — a shared credential across all Gemini voices (engine
-            is now per-voice, set in the voice creator). Kept here as a small
-            collapsible since Gemini is the default engine. */}
-        <div className="overflow-hidden rounded-xl border bg-muted/20">
-          <button
-            type="button"
-            onClick={() => setKeyOpen((v) => !v)}
-            className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs font-medium"
-          >
-            <KeyRound className="h-3.5 w-3.5 text-muted-foreground" />
-            Gemini API key
-            {keyBadgeLabel && (
-              <span className="ml-auto inline-flex items-center gap-1 rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium text-amber-700 dark:bg-amber-950/40 dark:text-amber-300">
-                <KeyRound className="h-2.5 w-2.5" /> {keyBadgeLabel}
-              </span>
-            )}
-          </button>
-          {(keyOpen || needsKey || (anyGeminiVoice && apiKey && hasKeyError)) && (
-            <div className="space-y-3 border-t px-3 py-3">
-              <ApiKeyField
-                label="Gemini API key"
-                placeholder="AIza..."
-                projectKey={settings?.apiKey ?? ""}
-                userKey={userKey ?? ""}
-                onProjectKeyChange={(v) => void onSettingsChange({ apiKey: v || undefined })}
-                onUserKeyChange={(v) => setUserApiKey("gemini-tts", v)}
-                help={needsKey
-                  ? "Get a key at aistudio.google.com/apikey. Sent directly to Google; never uploaded to Frontier."
-                  : hasKeyError
-                    ? "This key was rejected by Google. Check it's correct at aistudio.google.com/apikey."
-                    : "Sent directly to Google. Never uploaded to Frontier."}
-              />
-            </div>
-          )}
-        </div>
-
         {/* Cast roster — one flat list. Every voice is the same primitive (an
             engine + base voice, optionally with a clone reference); a clone is
             marked only by a small violet badge. Click opens the creator; drag

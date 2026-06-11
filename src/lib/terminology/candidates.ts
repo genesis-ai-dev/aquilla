@@ -23,6 +23,146 @@
 import type { Concept } from "./types"
 import { matchesTerm } from "./match"
 
+/**
+ * Common English stopwords. Candidates that consist *entirely* of these tokens
+ * are dropped from the output; multi-word candidates that contain stopwords as
+ * connectors (e.g. "Lord of hosts") are kept.
+ *
+ * Bible-translation context: we intentionally keep theologically loaded words
+ * even when they are common function words in general English (e.g. "the" is
+ * dropped but "LORD" would be kept if it appeared — however since tokenization
+ * is lowercased it becomes "lord" which is NOT in this set).
+ */
+export const ENGLISH_STOPWORDS: ReadonlySet<string> = new Set([
+  "a",
+  "an",
+  "the",
+  "and",
+  "or",
+  "but",
+  "nor",
+  "so",
+  "yet",
+  "for",
+  "to",
+  "of",
+  "in",
+  "on",
+  "at",
+  "by",
+  "up",
+  "as",
+  "is",
+  "it",
+  "its",
+  "be",
+  "am",
+  "are",
+  "was",
+  "were",
+  "been",
+  "being",
+  "have",
+  "has",
+  "had",
+  "do",
+  "does",
+  "did",
+  "not",
+  "no",
+  "nor",
+  "with",
+  "that",
+  "this",
+  "these",
+  "those",
+  "i",
+  "me",
+  "my",
+  "we",
+  "us",
+  "our",
+  "you",
+  "your",
+  "he",
+  "him",
+  "his",
+  "she",
+  "her",
+  "they",
+  "them",
+  "their",
+  "what",
+  "which",
+  "who",
+  "whom",
+  "how",
+  "when",
+  "where",
+  "why",
+  "all",
+  "any",
+  "each",
+  "few",
+  "more",
+  "most",
+  "other",
+  "some",
+  "such",
+  "than",
+  "then",
+  "from",
+  "into",
+  "onto",
+  "upon",
+  "also",
+  "just",
+  "will",
+  "would",
+  "could",
+  "should",
+  "may",
+  "might",
+  "shall",
+  "can",
+  "about",
+  "after",
+  "before",
+  "between",
+  "through",
+  "during",
+  "while",
+  "if",
+  "so",
+  "out",
+  "off",
+  "over",
+  "under",
+  "again",
+  "further",
+  "once",
+  "here",
+  "there",
+  "both",
+  "own",
+  "same",
+  "very",
+  "now",
+  "s", // possessive artefact from tokenization of e.g. "God's"
+])
+
+/**
+ * Returns true if every token in the candidate is a stopword. Such candidates
+ * carry no termhood signal and are filtered from the output.
+ *
+ * Multi-word candidates that contain stopwords as *connectors* between content
+ * words (e.g. "ark of the covenant", "Lord of hosts") return false and are
+ * kept — the stopwords are interior, not the whole phrase.
+ */
+function isAllStopwords(tokens: string[]): boolean {
+  return tokens.every((t) => ENGLISH_STOPWORDS.has(t))
+}
+
 export interface CandidateTerm {
   /** The surface term (normalized, space-joined tokens). */
   term: string
@@ -59,6 +199,14 @@ export interface ExtractCandidatesOptions {
    * super-linear n-gram + containment work. Default: no cap.
    */
   maxCorpusStrings?: number
+  /**
+   * When true (default), candidates whose tokens are ALL English stopwords
+   * (e.g. "the", "and of", "it is") are removed from the output. Multi-word
+   * candidates that contain stopwords as connectors (e.g. "ark of the covenant")
+   * are NOT removed — only those where every token is a stopword.
+   * Set to false to disable this filter.
+   */
+  filterStopwords?: boolean
 }
 
 const MAX_NGRAM = 5
@@ -69,10 +217,57 @@ const DEFAULT_MAX_RESULTS = 100
  * Tokenize a string into lowercase word tokens. Unicode-aware: keeps letters
  * and numbers (any script), drops punctuation/whitespace. Source-language
  * agnostic — no script-specific assumptions.
+ *
+ * Phrase segmentation rules:
+ * - Sentence-ending punctuation (. ! ? ; :) and quotation/bracket pairs always
+ *   break a phrase boundary so n-grams never span across clauses.
+ * - Hyphens between word characters are treated as whitespace (split), because
+ *   "well-known" is two tokens in running text context.
+ * - Apostrophes inside a word (contractions, possessives) cause the apostrophe
+ *   and any immediately following letters to be dropped as a suffix artefact
+ *   (e.g. "God's" → "god", "don't" → "don"). This avoids the noisy "s", "t",
+ *   "re", "ve" artefact tokens that would otherwise pollute the candidate set.
+ *
+ * Note: The corpus string is treated as a single sentence boundary for n-gram
+ * building (n-grams do not cross corpus-string boundaries). Within a string,
+ * the tokenizer now emits an explicit SENTENCE_BREAK sentinel (empty string)
+ * wherever sentence-ending punctuation occurs, so the caller can split on it
+ * and prevent n-grams from bridging clause boundaries.
  */
-function tokenize(text: string): string[] {
-  const matches = text.toLowerCase().match(/[\p{L}\p{N}]+/gu)
-  return matches ? matches : []
+export function tokenizeWithBreaks(text: string): string[] {
+  // Step 1: strip apostrophe-suffixes (possessives, contractions).
+  // "God's" → "God", "don't" → "don", "they've" → "they"
+  const decontracted = text.replace(/[''’][\p{L}]*/gu, "")
+
+  // Step 2: replace sentence-breaking punctuation with a sentinel we can
+  // detect later. Use a space-padded pipe so it tokenizes as its own "word".
+  const sentenceBreaks = decontracted.replace(/[.!?;:,—–—–]+/g, " | ")
+
+  // Step 3: replace hyphens between word chars with spaces (split compound words).
+  const dehyphenated = sentenceBreaks.replace(/(?<=[\p{L}\p{N}])-(?=[\p{L}\p{N}])/gu, " ")
+
+  // Step 4: extract tokens (letters + numbers), keeping the "|" sentinel.
+  const raw = dehyphenated.toLowerCase().match(/[|]|[\p{L}\p{N}]+/gu)
+  return raw ?? []
+}
+
+/**
+ * Split a token array on "|" sentinels, yielding sub-arrays that never cross
+ * a sentence boundary. Empty sub-arrays (back-to-back sentinels) are dropped.
+ */
+function splitOnSentenceBreaks(tokens: string[]): string[][] {
+  const sentences: string[][] = []
+  let current: string[] = []
+  for (const t of tokens) {
+    if (t === "|") {
+      if (current.length > 0) sentences.push(current)
+      current = []
+    } else {
+      current.push(t)
+    }
+  }
+  if (current.length > 0) sentences.push(current)
+  return sentences
 }
 
 interface NgramStats {
@@ -94,22 +289,25 @@ function buildNgrams(corpus: string[]): Map<string, NgramStats> {
   const ngrams = new Map<string, NgramStats>()
 
   for (const text of corpus) {
-    const tokens = tokenize(text)
-    for (let n = 1; n <= MAX_NGRAM; n++) {
-      for (let i = 0; i + n <= tokens.length; i++) {
-        const slice = tokens.slice(i, i + n)
-        const key = slice.join(" ")
-        let stat = ngrams.get(key)
-        if (!stat) {
-          stat = { tokens: slice, frequency: 0, contextCounts: new Map() }
-          ngrams.set(key, stat)
+    // Split on sentence-break sentinels so n-grams never span clause boundaries.
+    const sentences = splitOnSentenceBreaks(tokenizeWithBreaks(text))
+    for (const tokens of sentences) {
+      for (let n = 1; n <= MAX_NGRAM; n++) {
+        for (let i = 0; i + n <= tokens.length; i++) {
+          const slice = tokens.slice(i, i + n)
+          const key = slice.join(" ")
+          let stat = ngrams.get(key)
+          if (!stat) {
+            stat = { tokens: slice, frequency: 0, contextCounts: new Map() }
+            ngrams.set(key, stat)
+          }
+          stat.frequency += 1
+          // Record immediate left and right neighbours as context words.
+          const left = i > 0 ? tokens[i - 1] : undefined
+          const right = i + n < tokens.length ? tokens[i + n] : undefined
+          if (left) stat.contextCounts.set(left, (stat.contextCounts.get(left) ?? 0) + 1)
+          if (right) stat.contextCounts.set(right, (stat.contextCounts.get(right) ?? 0) + 1)
         }
-        stat.frequency += 1
-        // Record immediate left and right neighbours as context words.
-        const left = i > 0 ? tokens[i - 1] : undefined
-        const right = i + n < tokens.length ? tokens[i + n] : undefined
-        if (left) stat.contextCounts.set(left, (stat.contextCounts.get(left) ?? 0) + 1)
-        if (right) stat.contextCounts.set(right, (stat.contextCounts.get(right) ?? 0) + 1)
       }
     }
   }
@@ -279,10 +477,15 @@ export function extractCandidates(
 
   const ngrams = buildNgrams(boundedCorpus)
 
-  // Candidate pool: meet the frequency floor.
-  const keys = [...ngrams.keys()].filter(
-    (k) => ngrams.get(k)!.frequency >= minTermFreq,
-  )
+  const doFilterStopwords = opts.filterStopwords !== false // default true
+
+  // Candidate pool: meet the frequency floor, then drop all-stopword candidates.
+  const keys = [...ngrams.keys()].filter((k) => {
+    const stat = ngrams.get(k)!
+    if (stat.frequency < minTermFreq) return false
+    if (doFilterStopwords && isAllStopwords(stat.tokens)) return false
+    return true
+  })
   if (keys.length === 0) return []
 
   const supersOf = buildContainment(keys, ngrams)

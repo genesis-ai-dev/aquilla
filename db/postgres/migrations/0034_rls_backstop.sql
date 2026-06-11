@@ -56,7 +56,6 @@
 --   ALTER TABLE cell_validators DISABLE ROW LEVEL SECURITY;
 --   ALTER TABLE cell_audio      DISABLE ROW LEVEL SECURITY;
 --   ALTER TABLE project_settings DISABLE ROW LEVEL SECURITY;
---   ALTER TABLE snapshots       DISABLE ROW LEVEL SECURITY;
 -- Re-enable when confident all call sites SET LOCAL correctly:
 --   ALTER TABLE cells           ENABLE ROW LEVEL SECURITY;
 --   -- (repeat for each table)
@@ -106,7 +105,6 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE
     diarization_jobs,
     file_source_blobs,
     checkpoints,
-    snapshots,
     cell_word_morph
 TO app_runtime;
 
@@ -250,13 +248,7 @@ CREATE POLICY rls_project_settings_project_access ON project_settings
   TO app_runtime
   USING (app_user_can_access_project(project_id));
 
--- snapshots
-ALTER TABLE snapshots ENABLE ROW LEVEL SECURITY;
-ALTER TABLE snapshots FORCE ROW LEVEL SECURITY;
-
-DROP POLICY IF EXISTS rls_snapshots_project_access ON snapshots;
-CREATE POLICY rls_snapshots_project_access ON snapshots
-  AS PERMISSIVE
-  FOR ALL
-  TO app_runtime
-  USING (app_user_can_access_project(project_id));
+-- snapshots: originally granted + RLS'd here, but the table was dropped in
+-- 0039_drop_snapshots.sql. References removed so this file applies cleanly
+-- against the current schema.sql (e.g. in tests); the neon-migrate ledger
+-- records 0034 by name, so live Neon (which ran the original) is unaffected.

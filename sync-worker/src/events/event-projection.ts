@@ -124,6 +124,94 @@ export function fileCountersRecomputeStmt(
     )
 }
 
+/**
+ * Bulk variant of the `source.cell.create` cells upsert (POST /import fast
+ * path) — one multi-row INSERT instead of one statement per cell, because the
+ * Postgres shim executes batch statements as sequential round trips. MUST stay
+ * column-for-column identical to the single-row insert in
+ * buildEventProjectionStmts' source.cell.create case (no chain gate: bulk
+ * import is genesis-only, the same ungated shape the route used before).
+ *
+ * Rows are deduped by (cell_id) keeping the LAST occurrence — Postgres errors
+ * on a multi-row ON CONFLICT DO UPDATE touching the same row twice, and
+ * last-wins matches what the sequential per-row upserts did.
+ */
+export function buildBulkSourceCellCreateStmt(
+  db: AquillaDb,
+  events: PersistedEvent[],
+): AquillaStatement {
+  if (events.length === 0) throw new Error('buildBulkSourceCellCreateStmt: empty events')
+  const byCell = new Map<string, PersistedEvent>()
+  for (const event of events) {
+    const p = event.payload as EventPayloads['source.cell.create']
+    const cellId = p.cellId ?? event.cellId
+    if (!event.fileId) throw new Error(`source.cell.create event ${event.id} is missing fileId`)
+    if (!cellId) throw new Error(`source.cell.create event ${event.id} is missing cellId`)
+    byCell.set(cellId, event)
+  }
+  const rows = [...byCell.values()]
+  const binds: unknown[] = []
+  for (const event of rows) {
+    const p = event.payload as EventPayloads['source.cell.create']
+    const value = p.value ?? ''
+    binds.push(
+      event.projectId,
+      event.fileId,
+      p.cellId ?? event.cellId,
+      'source',
+      value,
+      p.valueHtml ?? null,
+      p.type ?? null,
+      p.canonicalRef ?? null,
+      p.anchorCellId ?? null,
+      event.id,
+      event.author,
+      event.serverTs,
+      countWords(value),
+      contentHash(value),
+      p.startMs ?? null,
+      p.endMs ?? null,
+      p.medium ?? null,
+      p.sequenceIndex ?? null,
+      p.transcription ?? null,
+      p.cameraState ?? null,
+    )
+  }
+  const placeholders = Array(rows.length)
+    .fill('(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?)')
+    .join(',\n')
+  return db
+    .prepare(
+      `INSERT INTO cells (
+        project_id, file_id, cell_id, side, value, value_html, type,
+        canonical_ref, anchor_cell_id, event_id, source_event_id,
+        last_editor, last_edit_at, validated, word_count, content_hash,
+        start_ms, end_ms,
+        medium, sequence_index, transcription, camera_state
+      ) VALUES ${placeholders}
+      ON CONFLICT(project_id, file_id, cell_id, side) DO UPDATE SET
+        side           = excluded.side,
+        value          = excluded.value,
+        value_html     = excluded.value_html,
+        type           = excluded.type,
+        canonical_ref  = excluded.canonical_ref,
+        anchor_cell_id = excluded.anchor_cell_id,
+        event_id       = excluded.event_id,
+        source_event_id = NULL,
+        last_editor    = excluded.last_editor,
+        last_edit_at   = excluded.last_edit_at,
+        word_count     = excluded.word_count,
+        content_hash   = excluded.content_hash,
+        start_ms       = excluded.start_ms,
+        end_ms         = excluded.end_ms,
+        medium         = excluded.medium,
+        sequence_index = excluded.sequence_index,
+        transcription  = excluded.transcription,
+        camera_state   = excluded.camera_state`,
+    )
+    .bind(...binds)
+}
+
 /** Caller hint: which projection tables this event will touch. */
 export type ProjectionTouches = 'cells' | 'cell_validators' | 'cell_waivers' | 'files' | 'cell_audio' | 'comments' | 'cell_backtranslations'
 
@@ -205,6 +293,9 @@ export function buildEventProjectionStmts(
       // Both create kinds are genesis events on the cell's chain — their
       // event_id IS the new row's chain head. source_event_id is null on
       // both sides at create time; target commits set it later.
+      //
+      // NOTE: buildBulkSourceCellCreateStmt (above) mirrors this insert for
+      // the bulk-import path — change them together.
 
       // FTS5 maintenance (pre-DML): delete the old indexed value if a cells
       // row already exists for this key. No-op when this is a genuine first

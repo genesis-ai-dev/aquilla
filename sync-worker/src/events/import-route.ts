@@ -12,12 +12,14 @@
 //     projection is an upsert, so replaying a chunk is naturally safe.
 //   - parent-chain: a genesis create with no existing sibling always wins.
 //
-// So this route skips both reads and just builds + batches the same statements
-// the dispatcher would (it reuses `buildEventProjectionStmts` verbatim, so the
-// rows are byte-identical). server_seq comes from the shared per-project
-// allocator (event-insert.ts). The client streams cells in large chunks; each
-// request does real work (dozens of DB batches) instead of a single
-// 100-event hop.
+// So this route skips both reads and writes the same rows the dispatcher
+// would, but SET-BASED: one server_seq range allocation per request
+// (event-insert.ts allocateSeqRange), then multi-row INSERTs for the events
+// log and the cells projection. The Postgres shim executes batch statements
+// as sequential round trips, so the old 2-statements-per-cell shape cost
+// ~3000 round trips (~100s of wall clock) per 1500-cell chunk; the bulk
+// shape is ~6 statements per chunk. Rows stay byte-identical to the
+// dispatcher's (buildBulkSourceCellCreateStmt mirrors the single-row case).
 //
 // Auth mirrors authorize(): a valid `aud=sync` token scoped to (projectId,
 // fileId), role >= PROJECT_LEAD (source.* is importer/lead-only per
@@ -28,12 +30,16 @@ import { ROLE } from './role-policy'
 import { withCors } from '../cors'
 import {
   buildEventProjectionStmts,
+  buildBulkSourceCellCreateStmt,
   fileCountersRecomputeStmt,
   type PersistedEvent,
 } from './event-projection'
-import { buildEventInsertStmt } from './event-insert'
+import { allocateSeqRange, buildBulkEventInsertStmt } from './event-insert'
 
-const BATCH_LIMIT = 100
+/** Rows per multi-row INSERT. Bounded by postgres.js's 65,534-bind-param
+ *  ceiling: events rows bind 12 params, cells rows 20 → 1000 rows stays an
+ *  order of magnitude under it while keeping SQL text small. */
+const BULK_ROWS = 1000
 
 export interface ImportRouteEnv {
   AQUILLA_PG?: AquillaDb
@@ -97,28 +103,6 @@ function isImportBody(x: unknown): x is ImportBody {
     typeof b.projectId === 'string' &&
     typeof b.fileId === 'string' &&
     Array.isArray(b.cells)
-  )
-}
-
-/** Append the canonical events-row INSERT for one persisted event, mirroring
- *  handlers/cell-events.ts so bulk-import rows match dispatcher rows exactly.
- *  server_seq comes from the shared per-project allocator (event-insert.ts);
- *  id-replays are skipped via ON CONFLICT (id) DO NOTHING. */
-function pushEventInsert(db: AquillaDb, e: PersistedEvent, stmts: AquillaStatement[]): void {
-  stmts.push(
-    buildEventInsertStmt(db, {
-      id: e.id,
-      schemaVersion: e.schemaVersion,
-      projectId: e.projectId,
-      fileId: e.fileId ?? null,
-      cellId: e.cellId ?? null,
-      parentId: e.parentId ?? null,
-      kind: e.kind,
-      author: e.author,
-      payloadJson: JSON.stringify(e.payload),
-      clientTs: e.clientTs,
-      serverTs: e.serverTs,
-    }),
   )
 }
 
@@ -186,9 +170,10 @@ export async function handleBulkImportRequest(
   const stmts: AquillaStatement[] = []
 
   // file.create (first chunk only).
+  let fileEvent: PersistedEvent | null = null
   if (body.file) {
     const f = body.file
-    const fileEvent: PersistedEvent = {
+    fileEvent = {
       id: f.id,
       schemaVersion: 1,
       projectId: body.projectId,
@@ -215,7 +200,6 @@ export async function handleBulkImportRequest(
       clientTs,
       serverTs: serverTs++,
     }
-    pushEventInsert(db, fileEvent, stmts)
     buildEventProjectionStmts(db, fileEvent, stmts)
 
     // Side-car raw source for round-trip-fidelity formats. Only written on the
@@ -239,6 +223,7 @@ export async function handleBulkImportRequest(
 
   // source.cell.create per cell — genesis (parent_id = null), chained by
   // anchorCellId in the payload.
+  const cellEvents: PersistedEvent[] = []
   for (const cell of body.cells) {
     if (typeof cell.id !== 'string' || typeof cell.cellId !== 'string') {
       return withCors(
@@ -270,27 +255,54 @@ export async function handleBulkImportRequest(
       clientTs,
       serverTs: serverTs++,
     }
-    pushEventInsert(db, cellEvent, stmts)
-    // Defer per-cell file-counter recomputes (cell_count, word_count, etc.)
-    // to avoid O(cells²) UPDATE overhead on Postgres. A single recompute runs
-    // after all cells have been inserted instead of once per cell. This prevents
-    // the first chunk from taking tens of seconds and appearing "stuck at 0%"
-    // when importing large Bibles (FRO-135).
-    buildEventProjectionStmts(db, cellEvent, stmts, { deferFileCounters: true })
+    cellEvents.push(cellEvent)
   }
 
-  // One final file-counter recompute per (project, file) pair: counts all cells
-  // in the DB that belong to this file (including those from prior chunks of the
-  // same import if the client retries). Self-healing by design — always correct.
-  stmts.push(fileCountersRecomputeStmt(db, body.projectId, body.fileId, serverTs))
-
-  // Commit in batch-limit chunks. file.create contributes 2 statements
-  // (event + files INSERT); each cell contributes 2 statements (event + cells
-  // INSERT); the single trailing file-counter recompute is 1 statement.
   try {
-    for (let i = 0; i < stmts.length; i += BATCH_LIMIT) {
-      await db.batch(stmts.slice(i, i + BATCH_LIMIT))
+    // One counter bump reserves a contiguous server_seq block for every event
+    // in this request (file.create first, then cells in payload order — the
+    // same ordering the old per-statement allocator produced).
+    const allEvents = fileEvent ? [fileEvent, ...cellEvents] : cellEvents
+    if (allEvents.length > 0) {
+      const seqBase = await allocateSeqRange(db, body.projectId, allEvents.length)
+      for (let i = 0; i < allEvents.length; i += BULK_ROWS) {
+        const chunk = allEvents.slice(i, i + BULK_ROWS)
+        stmts.push(
+          buildBulkEventInsertStmt(
+            db,
+            chunk.map((e, j) => ({
+              id: e.id,
+              schemaVersion: e.schemaVersion,
+              projectId: e.projectId,
+              fileId: e.fileId ?? null,
+              cellId: e.cellId ?? null,
+              parentId: e.parentId ?? null,
+              kind: e.kind,
+              author: e.author,
+              payloadJson: JSON.stringify(e.payload),
+              clientTs: e.clientTs,
+              serverTs: e.serverTs,
+              serverSeq: seqBase + i + j,
+            })),
+          ),
+        )
+      }
     }
+
+    // Cells projection, multi-row. File counters are deferred to one trailing
+    // recompute (FRO-135) — per-cell recomputes were O(cells²).
+    for (let i = 0; i < cellEvents.length; i += BULK_ROWS) {
+      stmts.push(buildBulkSourceCellCreateStmt(db, cellEvents.slice(i, i + BULK_ROWS)))
+    }
+
+    // One final file-counter recompute per (project, file) pair: counts all cells
+    // in the DB that belong to this file (including those from prior chunks of the
+    // same import if the client retries). Self-healing by design — always correct.
+    stmts.push(fileCountersRecomputeStmt(db, body.projectId, body.fileId, serverTs))
+
+    // ~6 statements per request (vs ~3000 in the per-cell shape), committed in
+    // one transaction.
+    await db.batch(stmts)
   } catch (err) {
     return withCors(
       Response.json({ error: `DB batch failed: ${String(err)}` }, { status: 500 }),

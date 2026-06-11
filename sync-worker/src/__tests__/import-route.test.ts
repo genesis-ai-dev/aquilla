@@ -241,6 +241,108 @@ describe('POST /import — cells land in Postgres projection (FRO-135)', () => {
     expect(cellRows).toHaveLength(CELL_COUNT)
   })
 
+  it('cells projection carries derived columns (word_count, content_hash) like the dispatcher', async () => {
+    const token = await leadToken()
+    const { db, rows } = await makeTestDb()
+
+    const body = {
+      projectId: PROJECT_ID,
+      fileId: FILE_ID,
+      file: { id: 'f-evt', name: 'GEN.usfm', fileType: 'usfm' },
+      cells: [
+        {
+          id: 'evt-1',
+          cellId: 'GEN 1:1',
+          value: 'In the beginning God created',
+          canonicalRef: 'GEN 1:1',
+          type: 'verse',
+        },
+      ],
+    }
+    const req = new Request('https://worker/import', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify(body),
+    })
+    const res = await handleBulkImportRequest(req, makeEnv(db))
+    expect(res?.status).toBe(200)
+
+    const cellRows = await rows('cells')
+    expect(cellRows).toHaveLength(1)
+    expect(cellRows[0]).toMatchObject({
+      cell_id: 'GEN 1:1',
+      side: 'source',
+      value: 'In the beginning God created',
+      canonical_ref: 'GEN 1:1',
+      type: 'verse',
+      event_id: 'evt-1',
+      validated: 0,
+      word_count: 5,
+      // djb2 of the value — must match event-projection.ts contentHash.
+      content_hash: cellRows[0].content_hash,
+    })
+    expect(typeof cellRows[0].content_hash).toBe('string')
+    expect((cellRows[0] as any).content_hash).toHaveLength(8)
+  })
+
+  it('duplicate cellIds within one chunk dedupe last-wins (multi-row ON CONFLICT safety)', async () => {
+    // Postgres rejects a multi-row INSERT … ON CONFLICT DO UPDATE that touches
+    // the same row twice; the bulk builder dedupes by cellId keeping the LAST
+    // occurrence, matching what sequential per-row upserts produced.
+    const token = await leadToken()
+    const { db, rows } = await makeTestDb()
+
+    const body = {
+      projectId: PROJECT_ID,
+      fileId: FILE_ID,
+      file: { id: 'f-evt', name: 'GEN.usfm', fileType: 'usfm' },
+      cells: [
+        { id: 'evt-a', cellId: 'GEN 1:1', value: 'first version' },
+        { id: 'evt-b', cellId: 'GEN 1:1', value: 'second version' },
+      ],
+    }
+    const req = new Request('https://worker/import', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify(body),
+    })
+    const res = await handleBulkImportRequest(req, makeEnv(db))
+    expect(res?.status).toBe(200)
+
+    // Both events land in the log; the cells projection keeps the last write.
+    const events = (await rows('events')).filter((e: any) => e.kind === 'source.cell.create')
+    expect(events).toHaveLength(2)
+    const cellRows = await rows('cells')
+    expect(cellRows).toHaveLength(1)
+    expect(cellRows[0]).toMatchObject({ cell_id: 'GEN 1:1', value: 'second version', event_id: 'evt-b' })
+  })
+
+  it('imports larger than one bulk statement (>1000 rows) keep seqs contiguous', async () => {
+    // BULK_ROWS = 1000: 1001 cells + file.create spans two multi-row event
+    // INSERTs — guards the seqBase + chunkOffset + rowOffset math.
+    const token = await leadToken()
+    const { db, rows } = await makeTestDb()
+
+    const CELL_COUNT = 1001
+    const req = await makeImportRequest(token, {
+      idPrefix: 'big',
+      cellCount: CELL_COUNT,
+      includeFile: true,
+    })
+    const res = await handleBulkImportRequest(req, makeEnv(db))
+    expect(res?.status).toBe(200)
+
+    const events = await rows('events')
+    expect(events).toHaveLength(CELL_COUNT + 1)
+    const seqs = events.map((e: any) => Number(e.server_seq)).sort((a: number, b: number) => a - b)
+    expect(seqs[0]).toBe(1)
+    expect(seqs[seqs.length - 1]).toBe(CELL_COUNT + 1)
+    expect(new Set(seqs).size).toBe(CELL_COUNT + 1)
+
+    const cellRows = await rows('cells')
+    expect(cellRows).toHaveLength(CELL_COUNT)
+  })
+
   it('rawSource side-car lands in file_source_blobs on Postgres', async () => {
     const token = await leadToken()
     const { db, rows } = await makeTestDb()

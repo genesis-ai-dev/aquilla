@@ -79,3 +79,84 @@ export function buildEventInsertStmt(db: AquillaDb, e: EventInsertRow): AquillaS
       e.serverTs,
     )
 }
+
+// ---------------------------------------------------------------------------
+// Bulk variant (POST /import fast path)
+// ---------------------------------------------------------------------------
+//
+// The per-event CTE above costs one DB round trip per event; through the
+// Postgres shim a 1500-cell chunk became ~3000 sequential round trips
+// (~30ms each ≈ 100s/book — FRO-310 follow-up). Bulk imports instead
+// allocate the whole seq block in ONE counter bump, then write all rows in
+// multi-row INSERTs with explicit seqs.
+//
+// Race-safety is the same property as the single-row CTE: the counter row's
+// lock serializes concurrent same-project allocators, so blocks never
+// overlap, and seqs handed out here are ≤ the counter — any later writer
+// (bulk or per-event) allocates strictly above. Replays consume a block and
+// drop the rows on ON CONFLICT (id) — seq gaps, harmless by design (see
+// header note on gaps).
+
+const SEQ_RANGE_ALLOC_SQL = `INSERT INTO project_seq_counters (project_id, last_seq)
+VALUES (?, COALESCE((SELECT MAX(server_seq) FROM events WHERE project_id = ?), 0) + ?)
+ON CONFLICT (project_id) DO UPDATE SET
+  last_seq = GREATEST(project_seq_counters.last_seq + ?, excluded.last_seq)
+RETURNING last_seq`
+
+/** Atomically allocate `n` consecutive server_seqs for a project; returns the
+ *  FIRST seq of the block (rows get base, base+1, …, base+n-1). */
+export async function allocateSeqRange(
+  db: AquillaDb,
+  projectId: string,
+  n: number,
+): Promise<number> {
+  if (n <= 0) throw new Error(`allocateSeqRange: n must be positive, got ${n}`)
+  const last = await db
+    .prepare(SEQ_RANGE_ALLOC_SQL)
+    .bind(projectId, projectId, n, n)
+    .first<number>('last_seq')
+  if (last == null) throw new Error('allocateSeqRange: counter bump returned no row')
+  return Number(last) - n + 1
+}
+
+/** One pre-allocated seq per row (from allocateSeqRange). */
+export type SeqEventInsertRow = EventInsertRow & { serverSeq: number }
+
+const EVENT_COLS = 12
+
+/** Multi-row events INSERT with explicit pre-allocated server_seqs. Rows are
+ *  byte-identical to buildEventInsertStmt's; ON CONFLICT (id) DO NOTHING keeps
+ *  the same qualified idempotency (duplicate ids within one statement are
+ *  silently dropped, matching sequential replay semantics). */
+export function buildBulkEventInsertStmt(db: AquillaDb, rows: SeqEventInsertRow[]): AquillaStatement {
+  if (rows.length === 0) throw new Error('buildBulkEventInsertStmt: empty rows')
+  const placeholders = Array(rows.length)
+    .fill(`(${Array(EVENT_COLS).fill('?').join(', ')})`)
+    .join(',\n')
+  const binds: unknown[] = []
+  for (const e of rows) {
+    binds.push(
+      e.id,
+      e.schemaVersion,
+      e.projectId,
+      e.fileId,
+      e.cellId,
+      e.parentId,
+      e.kind,
+      e.author,
+      e.payloadJson,
+      e.clientTs,
+      e.serverTs,
+      e.serverSeq,
+    )
+  }
+  return db
+    .prepare(
+      `INSERT INTO events (
+  id, schema_version, project_id, file_id, cell_id, parent_id, kind,
+  author, payload, client_ts, server_ts, server_seq
+) VALUES ${placeholders}
+ON CONFLICT (id) DO NOTHING`,
+    )
+    .bind(...binds)
+}

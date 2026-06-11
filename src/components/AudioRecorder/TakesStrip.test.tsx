@@ -74,7 +74,7 @@ describe("TakesStrip", () => {
       () => new Promise<string>((res) => { resolveSelect = () => res("evt-ok") }),
     )
 
-    const { container } = render(
+    render(
       <TakesStrip {...common} takes={[take("a", 1000), take("b", 1000)]} selectedAudioId="b" />,
     )
 

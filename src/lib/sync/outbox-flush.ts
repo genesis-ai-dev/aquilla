@@ -14,6 +14,8 @@ import {
 } from "./outbox"
 import { syncWorkerHttpOrigin } from "./sync-worker-url"
 import { timeoutSignal } from "./fetch-timeout"
+import posthog from "@/lib/posthog"
+import { OUTBOX_QUARANTINED } from "@/lib/analytics-events"
 
 const MAX_BATCH = 100
 
@@ -157,6 +159,11 @@ export async function flushOutboxBatch(deps: FlushDeps): Promise<{
       // No access to THIS event's project — e.g. it was queued under a
       // different account/role. Re-auth won't fix it. Quarantine the batch and
       // let the flusher advance to the next file, exactly like a 403 on POST.
+      posthog.capture(OUTBOX_QUARANTINED, {
+        count: batch.length,
+        reason: "token-mint-403",
+        project_id: projectId,
+      })
       await quarantineOutboxEvents(
         batch.map((r) => r.id),
         { status: 403, reason: "no access to this change's project" },
@@ -212,6 +219,11 @@ export async function flushOutboxBatch(deps: FlushDeps): Promise<{
     // on this one forever. 401 and 5xx are transient (token re-mint / server
     // hiccup) — RES-2: stamp error WITHOUT burning the retry budget.
     if (res.status === 403) {
+      posthog.capture(OUTBOX_QUARANTINED, {
+        count: batch.length,
+        reason: "post-403",
+        project_id: projectId,
+      })
       await quarantineOutboxEvents(
         batch.map((r) => r.id),
         { status: 403, reason: `HTTP 403` },
@@ -299,6 +311,13 @@ export async function flushOutboxBatch(deps: FlushDeps): Promise<{
   const forbiddenIds = (body.rejected ?? [])
     .filter((r) => r.status === 403 && !acceptedIds.has(r.id))
     .map((r) => r.id)
+  if (forbiddenIds.length > 0) {
+    posthog.capture(OUTBOX_QUARANTINED, {
+      count: forbiddenIds.length,
+      reason: "server-rejected-403",
+      project_id: projectId,
+    })
+  }
   for (const id of forbiddenIds) {
     await quarantineOutboxEvents([id], rejectionByid.get(id) ?? { status: 403, reason: "forbidden" })
   }

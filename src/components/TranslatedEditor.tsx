@@ -91,6 +91,18 @@ interface TranslatedEditorProps {
    * The caller is responsible for opening TermLookupPopover.
    */
   onTermChipClick?: (term: string, anchor: HTMLElement) => void
+  /**
+   * FRO-297: Accessible label for the target editor textbox.
+   * Should include the cell reference and validation state,
+   * e.g. "GEN 1:1 — validated". Announced by screen readers.
+   */
+  ariaLabel?: string
+  /**
+   * FRO-297: Called when the user presses Escape while editing.
+   * The editor commits any pending changes (via blur) and signals
+   * the parent to return focus to the grid row wrapper.
+   */
+  onEscapeToGrid?: () => void
 }
 
 export function TranslatedEditor({
@@ -116,11 +128,15 @@ export function TranslatedEditor({
   onNavigateCell,
   terminologyConcepts,
   onTermChipClick,
+  ariaLabel,
+  onEscapeToGrid,
 }: TranslatedEditorProps) {
   // Held in a ref so the editor's keydown handler — created once per cellId —
   // always sees the latest navigation callback without re-creating the editor.
   const onNavigateCellRef = useRef(onNavigateCell)
   useEffect(() => { onNavigateCellRef.current = onNavigateCell }, [onNavigateCell])
+  const onEscapeToGridRef = useRef(onEscapeToGrid)
+  useEffect(() => { onEscapeToGridRef.current = onEscapeToGrid }, [onEscapeToGrid])
   const latestViolationStateRef = useRef({
     infractions: infractions ?? [],
     ruleSeverity: ruleSeverity ?? new Map<string, "major" | "minor">(),
@@ -174,6 +190,13 @@ export function TranslatedEditor({
     ],
     editorProps: {
       attributes: {
+        // FRO-297: expose explicit textbox role + accessible label so screen
+        // readers announce "GEN 1:1 — validated, editing" instead of the
+        // generic ProseMirror contenteditable. aria-multiline signals that
+        // Enter creates a new line, not submits (consistent with TipTap usage).
+        role: "textbox",
+        "aria-multiline": "true",
+        ...(ariaLabel ? { "aria-label": ariaLabel } : {}),
         class: cn(
           // The surrounding neu-inset well in EditorTable already reads as an
           // input, so the editor surface itself stays transparent — no flat
@@ -191,7 +214,18 @@ export function TranslatedEditor({
       // Cell navigation. Tab/Shift+Tab always step cells; Up/Down step cells
       // only at the first/last visual line so the caret can still move between
       // wrapped lines within a multi-line cell. Left/Right are untouched.
+      // FRO-297: Escape commits pending work (via blur) and signals the parent
+      // to return keyboard focus to the grid-row wrapper, exiting edit mode.
       handleKeyDown(view, event) {
+        // FRO-297: Esc — commit-and-exit back to grid focus.
+        if (event.key === "Escape") {
+          event.preventDefault()
+          // Blur the editor — this triggers the onBlur commit path so any
+          // pending idle edits are flushed before focus moves to the row.
+          view.dom.blur()
+          onEscapeToGridRef.current?.()
+          return true
+        }
         const navigate = onNavigateCellRef.current
         if (!navigate) return false
         if (event.key === "Tab") {

@@ -374,7 +374,7 @@ function TermbaseImportDialog({
     <Dialog open={open} onOpenChange={(next) => { if (!next) handleClose() }}>
       <DialogContent className="max-w-md">
         <DialogHeader>
-          <DialogTitle>Import termbase</DialogTitle>
+          <DialogTitle>Import term base</DialogTitle>
         </DialogHeader>
 
         {/* Format tab strip */}
@@ -695,7 +695,7 @@ export function TerminologyPage() {
   // Role-gating: project_lead+ (level >= 500) may manage termbase definitions.
   const hasOrigin = Boolean(project?.origin)
   const canManageTermbase = canEditTermbase(project?.syncRole, hasOrigin)
-  const termbaseGateTip = "Requires Project Lead role or higher to manage termbase definitions."
+  const termbaseGateTip = "Requires Project Lead role or higher to manage term base definitions."
 
   // Cell editing in the drill-down is allowed for contributor+ (level >= 400),
   // or always for local (no-origin) projects.
@@ -929,7 +929,7 @@ export function TerminologyPage() {
     async (candidate: CandidateTerm) => {
       if (!project) return
       if (!canManageTermbase) {
-        setError("Requires Project Lead role or higher to manage termbase definitions.")
+        setError("Requires Project Lead role or higher to manage term base definitions.")
         return
       }
       // Skip if a concept with this source term already exists.

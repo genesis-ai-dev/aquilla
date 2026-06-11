@@ -655,6 +655,24 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     })
   }, [virtualizer])
 
+  // FRO-297: Focus the grid-row wrapper div (not TipTap) at `index`.
+  // Used for Esc-to-grid and arrow-key navigation while NOT in edit mode.
+  // The wrapper div has tabIndex={0} so it can receive programmatic focus.
+  const focusGridRowByIndex = useCallback((index: number) => {
+    const list = cellsRef.current
+    if (index < 0 || index >= list.length) return
+    const targetId = list[index].id
+    virtualizer.scrollToIndex(index, { align: "center" })
+    requestAnimationFrame(() => {
+      const root = parentRef.current
+      if (!root) return
+      const rowEl = root.querySelector<HTMLElement>(
+        `[data-cell-id="${CSS.escape(targetId)}"] [data-grid-row]`,
+      )
+      rowEl?.focus()
+    })
+  }, [virtualizer])
+
   // Resolve a navigation request from a cell editor (Up/Down/Tab) to the
   // adjacent cell and focus it. Out-of-range steps (top/bottom edge) no-op.
   const handleNavigateCell = useCallback((cellId: string, direction: "prev" | "next") => {
@@ -662,6 +680,21 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     if (idx < 0) return
     focusCellEditorByIndex(direction === "next" ? idx + 1 : idx - 1)
   }, [findCellIndex, focusCellEditorByIndex])
+
+  // FRO-297: Esc from a cell editor — commit-and-return to grid row focus.
+  const handleEscapeToGrid = useCallback((cellId: string) => {
+    const idx = findCellIndex(cellId)
+    if (idx < 0) return
+    focusGridRowByIndex(idx)
+  }, [findCellIndex, focusGridRowByIndex])
+
+  // FRO-297: Arrow-key (or j/k) navigation within the grid (row focused, not TipTap).
+  // This is called from the row's own keydown when focus is on the grid row wrapper.
+  const handleGridRowKeyNav = useCallback((cellId: string, direction: "prev" | "next") => {
+    const idx = findCellIndex(cellId)
+    if (idx < 0) return
+    focusGridRowByIndex(direction === "next" ? idx + 1 : idx - 1)
+  }, [findCellIndex, focusGridRowByIndex])
 
   const selectRangeByIndexes = useCallback((anchorIndex: number, focusIndex: number) => {
     const list = cellsRef.current
@@ -1031,6 +1064,8 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
                 onDragEnter={handleDragEnter}
                 onSelectionPointerDown={handleSelectionPointerDown}
                 onNavigateCell={handleNavigateCell}
+                onEscapeToGrid={handleEscapeToGrid}
+                onGridRowKeyNav={handleGridRowKeyNav}
                 getVoiceTakeCells={getVoiceTakeCells}
                 getTokenForFile={getTokenForFile}
                 alignmentModel={alignmentModel}
@@ -1136,6 +1171,10 @@ interface MemoizedRowProps {
     e: React.PointerEvent<HTMLButtonElement>,
   ) => void
   onNavigateCell: (cellId: string, direction: "prev" | "next") => void
+  /** FRO-297: Called when Esc is pressed inside a cell editor — returns focus to the grid row. */
+  onEscapeToGrid: (cellId: string) => void
+  /** FRO-297: Arrow-key navigation while grid-row (not TipTap) is focused. */
+  onGridRowKeyNav: (cellId: string, direction: "prev" | "next") => void
   getVoiceTakeCells: (startIndex: number, count: number) => CellData[]
   getTokenForFile?: (fileId: string) => Promise<string | null>
   /** FRO-207: Pre-built interlinear alignment model. */
@@ -1162,6 +1201,8 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
     onDragStart: onDragStartParent, onDragEnter: onDragEnterParent,
     onSelectionPointerDown: onSelectionPointerDownParent,
     onNavigateCell: onNavigateCellParent,
+    onEscapeToGrid: onEscapeToGridParent,
+    onGridRowKeyNav: onGridRowKeyNavParent,
     getVoiceTakeCells,
     getTokenForFile,
     alignmentModel,
@@ -1230,6 +1271,14 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
     (direction: "prev" | "next") => onNavigateCellParent(cellId, direction),
     [onNavigateCellParent, cellId],
   )
+  const handleEscapeToGrid = useCallback(
+    () => onEscapeToGridParent(cellId),
+    [onEscapeToGridParent, cellId],
+  )
+  const handleGridRowKeyNav = useCallback(
+    (direction: "prev" | "next") => onGridRowKeyNavParent(cellId, direction),
+    [onGridRowKeyNavParent, cellId],
+  )
 
   return (
     <div
@@ -1291,6 +1340,8 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
         onDragEnter={handleDragEnter}
         onSelectionPointerDown={handleSelectionPointerDown}
         onNavigateCell={handleNavigateCell}
+        onEscapeToGrid={handleEscapeToGrid}
+        onGridRowKeyNav={handleGridRowKeyNav}
         getVoiceTakeCells={getVoiceTakeCells}
         getTokenForFile={getTokenForFile}
         alignmentModel={alignmentModel}
@@ -1367,6 +1418,10 @@ interface EditorRowProps {
   onDragEnter: () => void
   onSelectionPointerDown: (e: React.PointerEvent<HTMLButtonElement>) => void
   onNavigateCell: (direction: "prev" | "next") => void
+  /** FRO-297: Esc inside TipTap — commit + return focus to the grid row wrapper. */
+  onEscapeToGrid: () => void
+  /** FRO-297: Arrow/j/k navigation while grid row wrapper is focused (not TipTap). */
+  onGridRowKeyNav: (direction: "prev" | "next") => void
   getVoiceTakeCells: (startIndex: number, count: number) => CellData[]
   rowIndex: number
   lineNumbersEnabled: boolean
@@ -1478,10 +1533,10 @@ function SelectionTermActions({
           onMouseDown={handleButtonMouseDown}
           onClick={onAddToTermbase}
           className="inline-flex items-center gap-1 rounded-md bg-primary px-2 py-1 text-[11px] font-medium text-primary-foreground shadow-neu-sm hover:bg-primary/90"
-          title={`Add "${sourceSelection}" to the termbase as a draft concept`}
+          title={`Add "${sourceSelection}" to the term base as a draft concept`}
         >
           <BookOpen className="h-3 w-3" aria-hidden />
-          Add to termbase
+          Add to term base
         </button>
       )}
     </div>
@@ -1611,6 +1666,7 @@ function EditorRow({
   openCommentCount, onOpenComments, onOpenHistory,
   isActiveCue: _isActiveCue, onSeekToCue,
   onDragStart, onDragEnter, onSelectionPointerDown, onNavigateCell,
+  onEscapeToGrid, onGridRowKeyNav,
   rowIndex, lineNumbersEnabled, cellLabelsEnabled, sourceTextDirection, targetTextDirection, gridCols,
   isAnonymous, onAiSetupNeeded, onOpenRecording, micDenied,
   audioLens, onOpenAudioSetup, onAssignVoice, onAddConceptFromSelection,
@@ -2416,6 +2472,41 @@ function EditorRow({
   const isSynthBusy = synthStatus.kind === "loading" || synthStatus.kind === "synthesizing"
   const isSynthError = synthStatus.kind === "error"
 
+  // FRO-297: Accessible label for the target editor textbox.
+  // Format: "<ref> — <state>" so screen readers announce context on focus.
+  // Uses cell.context (the canonical reference like "GEN 1:1") when available,
+  // falls back to globalReferences[0], then rowIndex+1.
+  const cellRef = cell.context?.trim()
+    || cell.globalReferences?.[0]?.trim()
+    || `row ${rowIndex + 1}`
+  const cellStateLabel =
+    cell.status === "validated" ? "validated" :
+    cell.status === "empty" ? "empty" :
+    isSelfValidated ? "self-validated" :
+    "unvalidated"
+  const editorAriaLabel = `${cellRef} — ${cellStateLabel}`
+
+  // FRO-297: Grid-row keydown handler. Fires when the row wrapper div has
+  // focus (not TipTap). Arrow keys / j / k navigate between rows; Enter
+  // moves focus into the cell's TipTap editor (entering edit mode).
+  const handleGridRowKeyDown = useCallback((e: React.KeyboardEvent<HTMLDivElement>) => {
+    // Only act when the grid row wrapper itself is focused, not a child element
+    // (child interactive elements handle their own keyboard events).
+    if (e.target !== e.currentTarget) return
+    if (e.key === "ArrowDown" || e.key === "j") {
+      e.preventDefault()
+      onGridRowKeyNav("next")
+    } else if (e.key === "ArrowUp" || e.key === "k") {
+      e.preventDefault()
+      onGridRowKeyNav("prev")
+    } else if (e.key === "Enter") {
+      e.preventDefault()
+      // Enter edit mode: focus the TipTap editor for this row.
+      const pm = rowRef.current?.querySelector<HTMLElement>(".ProseMirror")
+      pm?.focus()
+    }
+  }, [onGridRowKeyNav])
+
   return (
     // Each cell is a flat row in a continuous list — no dividers; rows separate
     // by spacing and hover/selection overlays alone (Linear's quietest list).
@@ -2424,11 +2515,21 @@ function EditorRow({
     <div>
       <div
         ref={rowRef}
+        // FRO-297: tabIndex={0} makes the row wrapper a focus stop for
+        // grid-level keyboard navigation (ArrowUp/Down, j/k, Enter).
+        // focus-visible:outline shows a subtle ring when navigating by
+        // keyboard so the focused row is clear to sighted keyboard users.
+        data-grid-row
+        tabIndex={0}
+        aria-label={`${cellRef} cell`}
         className={cn(
           // Flat row in a continuous list: tinted by hover/selection overlays,
           // not shadows. Depth is gone by design — the Linear model reserves
           // elevation for floating layers.
           "group relative grid gap-2 overflow-hidden px-4 py-2 transition-colors duration-150 ease-out",
+          // Keyboard-focus ring for the grid row (only when focused directly,
+          // not via a child element — :focus-visible + :not(:focus-within:not(:focus))).
+          "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 focus-visible:ring-inset",
           // Hover/active well via a subtle background overlay.
           "hover:bg-muted/50",
           expanded && "bg-muted/50",
@@ -2452,6 +2553,7 @@ function EditorRow({
         onBlurCapture={handleRowBlurCapture}
         onMouseDownCapture={handleRowMouseDownCapture}
         onClick={handleRowClick}
+        onKeyDown={handleGridRowKeyDown}
       >
         {/* Left gutter — the number pill pins to the top-left and the
             validation circle to the bottom-left of the card. The number pill is
@@ -2471,6 +2573,18 @@ function EditorRow({
                 render={
                   <button
                     type="button"
+                    // FRO-297: button role + aria-pressed so screen readers
+                    // announce the validated/unvalidated toggle state.
+                    // aria-pressed mirrors whether the current user has validated.
+                    // aria-label provides full context ("Validate GEN 1:1").
+                    aria-pressed={isSelfValidated}
+                    aria-label={
+                      isSelfValidated
+                        ? `Validated — ${cellRef}. Click to remove your validation.`
+                        : vs === "full-others" || vs === "others"
+                          ? `Validated by others — ${cellRef}. Click to add your validation.`
+                          : `Validate ${cellRef}`
+                    }
                     className={cn(
                       "relative flex h-6 w-6 items-center justify-center rounded-full transition-[transform,color,background-color] duration-150 ease-out",
                       "active:scale-[0.88] disabled:cursor-not-allowed disabled:opacity-30",
@@ -2739,6 +2853,8 @@ function EditorRow({
                 onNavigateCell={onNavigateCell}
                 terminologyConcepts={project.terminology ?? []}
                 onTermChipClick={handleTermChipClick}
+                ariaLabel={editorAriaLabel}
+                onEscapeToGrid={onEscapeToGrid}
               />
               {/* FRO-204: Terminology chip popover — controlled via termChipState.
                   Anchored to the chip DOM element that was clicked. Apply is
@@ -2812,6 +2928,24 @@ function EditorRow({
                 blocks accept/commit. */}
             <PreAcceptanceWarningBand warnings={preAcceptanceWarnings} className="mt-1" />
             {error && <p className="mt-0.5 text-xs text-destructive">{error}</p>}
+            {/* FRO-297: polite live region for transient inline feedback that
+                is NOT already assertive (FRO-274 write-failure banners use
+                role="alert" aria-live="assertive" — don't double-announce those).
+                This region announces completion-phase transitions ("Generating…")
+                and other non-critical status changes to screen readers. */}
+            <div
+              aria-live="polite"
+              aria-atomic="true"
+              className="sr-only"
+            >
+              {isLoading && !completionPreview
+                ? (loadingPhase === "searching"
+                    ? `${cellRef}: Looking up similar examples…`
+                    : `${cellRef}: Generating translation…`)
+                : isLoading && completionPreview
+                  ? `${cellRef}: Translation preview available`
+                  : null}
+            </div>
             {/* FRO-274: write-failure banner — shown when an outbox enqueue
                 fails (IndexedDB unavailable, quota exceeded, etc.). The user
                 must be told immediately so they can copy their text before
@@ -2865,7 +2999,7 @@ function EditorRow({
                           ? "AI service unavailable — try again shortly"
                           : isLoading
                             ? "Generating…"
-                            : "Generate translation"
+                            : "Translate with AI"
                 }
                 onClick={() => {
                   if (isLoading) return
@@ -3124,8 +3258,8 @@ function EditorRow({
                   </p>
                   <p>
                     {cellNeedsAttention
-                      ? "Needs attention — this cell's retrieval neighborhood hasn't been validated yet (AD-14)."
-                      : "No attention needed — enough of this cell's neighborhood is validated."}
+                      ? "Needs attention — nearby context cells haven't been validated yet."
+                      : "No attention needed — enough nearby context is validated."}
                   </p>
                 </div>
               ),

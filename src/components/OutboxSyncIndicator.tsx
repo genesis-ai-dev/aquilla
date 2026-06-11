@@ -47,10 +47,10 @@ export function OutboxSyncIndicator({
     tone === "warning"
       ? `${failedCount} change(s) could not be synced after repeated attempts. Click to inspect.`
       : tone === "stuck"
-        ? "Could not sync audit events to the server. Edits are still saved locally. Click to inspect."
+        ? "Could not sync changes to the server. Edits are still saved locally. Click to review."
         : tone === "queued"
-          ? `${pendingCount} change(s) queued for server sync. Click to inspect.`
-          : "All audit events synced. Click to inspect the queue."
+          ? `${pendingCount} change(s) queued for server sync. Click to review.`
+          : "All changes synced. Click to review pending changes."
 
   const trigger = <ChipButton label={label} title={title} tone={tone} className={className} />
 

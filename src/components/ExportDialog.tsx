@@ -52,7 +52,7 @@ const FORMAT_OPTIONS: FormatOption[] = [
     id: "usfm",
     label: "USFM",
     ext: ".SFM",
-    description: "Round-trip USFM with translations injected back into the original markup. Requires server side-car bytes (re-import to enable for older files).",
+    description: "Round-trip USFM with translations injected back into the original markup. Requires the original file data on the server (re-import to enable for older files).",
     lossy: false,
   },
   {
@@ -61,7 +61,7 @@ const FORMAT_OPTIONS: FormatOption[] = [
     id: "docx",
     label: "Word (.docx)",
     ext: ".docx",
-    description: "Translations injected back into the original Word document. Paragraph/heading structure is preserved; per-run bold/italic inside translated paragraphs is not preserved. Requires the original file to have been imported after round-trip side-car support (files > 512 KB at import may not have a side-car).",
+    description: "Translations injected back into the original Word document. Paragraph/heading structure is preserved; per-run bold/italic inside translated paragraphs is not preserved. Requires the original file to have been imported after round-trip export support was added (files larger than 512 KB at import may not support this).",
     lossy: false,
   },
   {

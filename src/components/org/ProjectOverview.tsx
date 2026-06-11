@@ -440,7 +440,7 @@ export function ProjectOverview() {
                             label="AI Drafted"
                             pct={aiDraftedPct(audio)}
                             colorClass="text-violet-600"
-                            tooltip="Cells drafted by AI (via 'Complete all') that have not yet been human-edited or validated. A human edit or validation will move them into the Translated or Validated counts. Only cells committed after this marker was introduced are tracked — earlier AI commits are indistinguishable from human edits."
+                            tooltip="Cells drafted by AI (via 'Translate all') that have not yet been human-edited or validated. A human edit or validation will move them into the Translated or Validated counts. Only cells committed after this marker was introduced are tracked — earlier AI commits are indistinguishable from human edits."
                           />
                         )}
                         <StatTile label="Validated" pct={validatedPct(audio)} colorClass="text-emerald-600" />

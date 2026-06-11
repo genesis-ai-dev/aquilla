@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { ChevronDown, ChevronRight } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -21,6 +21,8 @@ export function PersonalProviderSection() {
   const [model, setModel] = useState("")
   const [apiKey, setApiKey] = useState("")
   const [hasOverride, setHasOverride] = useState(false)
+  const [saved, setSaved] = useState(false)
+  const savedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   // Read once on mount; localStorage is sync but cheap and the section is hidden by default.
   useEffect(() => {
@@ -43,6 +45,9 @@ export function PersonalProviderSection() {
       apiKey: apiKey.trim() || undefined,
     })
     setHasOverride(true)
+    setSaved(true)
+    if (savedTimerRef.current) clearTimeout(savedTimerRef.current)
+    savedTimerRef.current = setTimeout(() => setSaved(false), 2500)
   }
 
   function handleClear() {
@@ -131,9 +136,16 @@ export function PersonalProviderSection() {
           </div>
 
           <div className="flex items-center justify-between gap-2 pt-2">
-            <Button onClick={handleSave} disabled={!canSave} size="sm">
-              {hasOverride ? "Update override" : "Save override"}
-            </Button>
+            <div className="flex items-center gap-3">
+              <Button onClick={handleSave} disabled={!canSave} size="sm">
+                {hasOverride ? "Update override" : "Save override"}
+              </Button>
+              {saved && (
+                <span className="text-xs text-green-600 dark:text-green-400" role="status" data-testid="provider-override-saved">
+                  Saved
+                </span>
+              )}
+            </div>
             {hasOverride && (
               <Button variant="ghost" size="sm" onClick={handleClear}>
                 Remove override

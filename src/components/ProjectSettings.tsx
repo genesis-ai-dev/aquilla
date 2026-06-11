@@ -532,7 +532,7 @@ export function ProjectSettings() {
     { id: "section-audio-media", label: "Audio Media", keywords: ["audio media strategy", "lazy", "eager"] },
     { id: "section-git-sync", label: "Git Sync", keywords: ["git", "sync", "auto sync", "interval", "branch", "clone"], visible: hasGitOrigin },
     { id: "section-terminology", label: "Terminology", keywords: ["terminology", "termbase", "glossary", "concepts"] },
-    { id: "section-termbase-sharing", label: "Termbase Sharing", keywords: ["termbase", "publish", "subscribe", "org", "shared", "glossary"] },
+    { id: "section-termbase-sharing", label: "Term Base Sharing", keywords: ["term base", "termbase", "publish", "subscribe", "org", "shared", "glossary"] },
   ]
 
   // ── Search filter ──────────────────────────────────────────────────────────
@@ -729,7 +729,7 @@ export function ProjectSettings() {
                     onChange={(e) => setTopK(Math.max(1, Math.min(20, Number(e.target.value))))}
                   />
                   <p className="text-xs text-muted-foreground">
-                    How many few-shot examples the AI retrieves per completion (1–20). Default: 5.
+                    How many reference examples the AI retrieves per translation (1–20). Default: 5.
                   </p>
                 </div>
 
@@ -774,13 +774,13 @@ export function ProjectSettings() {
                   <div>
                     <Label htmlFor="validated-only">Validated examples only</Label>
                     <p className="mt-0.5 text-xs text-muted-foreground">
-                      When on, only human-validated cells are used as few-shot examples — unvalidated search results are excluded.
+                      When on, only human-validated cells are used as reference examples — unvalidated results are excluded.
                     </p>
                   </div>
                 </div>
 
                 <div className="space-y-1">
-                  <Label htmlFor="few-shot-example-format">Example format</Label>
+                  <Label htmlFor="few-shot-example-format">Reference example format</Label>
                   <select
                     id="few-shot-example-format"
                     value={fewShotExampleFormat}
@@ -1084,7 +1084,7 @@ export function ProjectSettings() {
             </CardHeader>
             <CardContent className="flex items-center justify-between gap-4">
               <p className="text-sm text-muted-foreground">
-                Manage approved terms, renderings, and the project glossary (termbase).
+                Manage approved terms, renderings, and the project glossary (term base).
               </p>
               <Button variant="outline" onClick={() => requestNavigate(`/project/${id}/terminology`)} className="shrink-0">
                 Open Terminology Library

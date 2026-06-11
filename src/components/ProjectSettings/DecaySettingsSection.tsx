@@ -33,8 +33,8 @@ export function DecaySettingsSection({
       <summary className="cursor-pointer text-sm font-medium">Decay &amp; health</summary>
       <div className="mt-3 space-y-4">
         <p className="text-xs text-muted-foreground">
-          Cell health is confidence derived from validated neighbors in the example-retrieval
-          graph (AD-14). Health is <code>1 − mean(decay)</code> over translated cells.
+          Cell health is a confidence score derived from validated neighboring cells in the
+          example-retrieval graph. Health is <code>1 − mean(decay)</code> over translated cells.
         </p>
 
         <div>

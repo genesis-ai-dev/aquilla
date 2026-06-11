@@ -61,7 +61,7 @@ export const CellTranscriptPreview = forwardRef<HTMLDivElement, Props>(function 
     : "text-emerald-600 dark:text-emerald-400"
 
   const headline = isStale
-    ? `Cell text was edited — karaoke timings are out of date`
+    ? `Cell text was edited — word timings are out of date`
     : matches
       ? `Whisper heard the cell exactly · ${timings.length} word${timings.length === 1 ? "" : "s"}`
       : alignedToCellText

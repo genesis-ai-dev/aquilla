@@ -197,13 +197,13 @@ export function TermbaseSharingSection({ projectId, orgId, roleLevel }: Props) {
     return (
       <Card id="section-termbase-sharing">
         <CardHeader>
-          <CardTitle>Termbase Sharing</CardTitle>
+          <CardTitle>Term Base Sharing</CardTitle>
         </CardHeader>
         <CardContent>
           <p className="text-sm text-muted-foreground">
-            Termbase sharing is available for org-owned projects only. Move this
+            Term base sharing is available for org-owned projects only. Move this
             project into an organization to publish or subscribe to shared
-            termbases.
+            term bases.
           </p>
         </CardContent>
       </Card>
@@ -228,7 +228,7 @@ export function TermbaseSharingSection({ projectId, orgId, roleLevel }: Props) {
         {/* Publish toggle */}
         <div className="flex items-start justify-between gap-4">
           <div>
-            <p className="text-sm font-medium">Publish this termbase to the org</p>
+            <p className="text-sm font-medium">Publish this term base to the org</p>
             <p className="text-sm text-muted-foreground">
               Lets other projects in your organization subscribe to this
               project&apos;s approved terms.
@@ -238,21 +238,21 @@ export function TermbaseSharingSection({ projectId, orgId, roleLevel }: Props) {
             checked={published}
             onCheckedChange={togglePublish}
             disabled={!canManage || busy || loading}
-            aria-label="Publish termbase to org"
+            aria-label="Publish term base to org"
           />
         </div>
 
         {!canManage && (
           <p className="text-xs text-muted-foreground">
             Maintainer (or higher) on an org-owned project is required to manage
-            termbase sharing.
+            term base sharing.
           </p>
         )}
 
         {/* Current subscriptions */}
         <div>
           <p className="mb-2 text-sm font-medium">
-            Subscribed termbases{" "}
+            Subscribed term bases{" "}
             <span className="font-normal text-muted-foreground">
               (drag to set priority — top = highest precedence)
             </span>
@@ -261,7 +261,7 @@ export function TermbaseSharingSection({ projectId, orgId, roleLevel }: Props) {
             <p className="text-sm text-muted-foreground">Loading subscriptions…</p>
           ) : subscriptions.length === 0 ? (
             <p className="text-sm text-muted-foreground">
-              Not subscribed to any termbases yet.
+              Not subscribed to any term bases yet.
             </p>
           ) : (
             <ul className="flex flex-col gap-1">
@@ -312,7 +312,7 @@ export function TermbaseSharingSection({ projectId, orgId, roleLevel }: Props) {
               <p className="text-sm text-muted-foreground">Loading…</p>
             ) : available.length === 0 ? (
               <p className="text-sm text-muted-foreground">
-                No other published termbases in your organization.
+                No other published term bases in your organization.
               </p>
             ) : (
               <ul className="flex flex-col gap-1">

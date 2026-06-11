@@ -27,8 +27,10 @@ function pgliteExecutor(db: PGlite): PgExecutor {
 }
 
 /** Seed data: { tableName: rowObjects[] } — column names must match the schema.
+ *  Rows are `object` (not `Record<string, unknown>`) so typed interface rows
+ *  like CellRow/EventRow, which lack index signatures, are accepted as-is.
  *  `cells_fts` is ignored (Postgres maintains FTS via the generated column). */
-export type Seed = Partial<Record<string, Array<Record<string, unknown>>>>
+export type Seed = Partial<Record<string, ReadonlyArray<object>>>
 
 export interface TestDb {
   /** Cast to AquillaDb — the shim is structurally compatible for the methods used. */
@@ -84,10 +86,10 @@ function typeDefault(type: string): unknown {
 // Seed rows tolerantly (the legacy fake had no constraints): drop unknown +
 // generated columns, and auto-fill required (NOT NULL, no default) columns the
 // seed omits with a type-appropriate placeholder so real-PG constraints pass.
-async function seedRows(pg: PGlite, table: string, rows: Array<Record<string, unknown>>) {
+async function seedRows(pg: PGlite, table: string, rows: ReadonlyArray<object>) {
   if (rows.length === 0) return
   const meta = await tableMeta(pg, table)
-  for (const row of rows) {
+  for (const row of rows as ReadonlyArray<Record<string, unknown>>) {
     const cols: string[] = []
     const vals: unknown[] = []
     for (const m of meta) {

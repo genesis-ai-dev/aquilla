@@ -260,9 +260,7 @@ export function LeftDock({
         isTopRail && isOpen ? "mx-2 mb-1 mt-auto h-7 w-full" : "mb-2 mt-auto h-7 w-7",
       )}
     >
-      {isTopRail && isOpen ? (
-        <ChevronUp className="h-3.5 w-3.5" />
-      ) : isOpen ? (
+     {isOpen ? (
         <ChevronLeft className="h-3.5 w-3.5" />
       ) : (
         <ChevronRight className="h-3.5 w-3.5" />
@@ -284,7 +282,7 @@ export function LeftDock({
 
   return (
     <div
-      className="relative flex min-h-0 min-w-0 flex-1 select-none flex-col overflow-hidden"
+      className="relative flex min-h-0 min-w-0 flex-1 select-none flex-col overflow-hidden m-auto"
       style={{ width: dockWidth }}
     >
       <div
@@ -311,7 +309,8 @@ export function LeftDock({
         ) : (
           // Left-rail (always), or top-rail collapsed: vertical 40px icon strip + optional panel
           <>
-            <div className="flex h-full w-10 shrink-0 flex-col items-center">
+            <div data-ryder="hello"
+            className="flex h-full w-10 shrink-0 flex-col items-center">
               <TabRail
                 activeTab={activeTab}
                 chatBadge={chatBadge}

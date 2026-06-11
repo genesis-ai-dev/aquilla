@@ -22,7 +22,11 @@
 // First-run side effects (idempotent):
 //   * Copies each backend's `.dev.vars.example` → `.dev.vars` if missing.
 //   * Applies auth-worker's D1 migrations to the local sqlite.
-// Both steps are safe to run on every boot.
+//   * Loads db/postgres/schema.sql into the local Postgres on first create,
+//     and on every later boot reconciles drift additively (CREATE TABLE /
+//     ADD COLUMN IF NOT EXISTS for anything schema.sql has that the live
+//     container lacks — never drops data).
+// All steps are safe to run on every boot.
 //
 // Lifecycle: writes a managed `.env.development.local` so the Vite client
 // bundle picks up the local Worker URLs, then deletes it on shutdown so
@@ -245,7 +249,7 @@ async function ensureLocalPostgres(): Promise<void> {
     startLocalPgContainer()
   }
   await waitForPostgres(PG_URL)
-  await applyPgSchemaIfMissing(PG_URL)
+  await ensurePgSchema(PG_URL)
 }
 
 function hasDocker(): boolean {
@@ -307,20 +311,154 @@ async function waitForPostgres(url: string): Promise<void> {
   throw new Error(`[dev-stack] Postgres at ${url} never became reachable: ${String(lastErr)}`)
 }
 
-async function applyPgSchemaIfMissing(url: string): Promise<void> {
+async function ensurePgSchema(url: string): Promise<void> {
   const { Client } = await import("pg")
   const client = new Client({ connectionString: url })
   await client.connect()
   try {
+    const { readFileSync } = await import("node:fs")
+    const schemaSql = readFileSync(SCHEMA_FILE, "utf8")
     const { rows } = await client.query(
       "select to_regclass('public.users') as t",
     )
-    if (rows[0]?.t) return // schema already present
-    console.log("[dev-stack] loading Postgres schema (db/postgres/schema.sql)…")
-    const { readFileSync } = await import("node:fs")
-    await client.query(readFileSync(SCHEMA_FILE, "utf8"))
+    if (!rows[0]?.t) {
+      console.log("[dev-stack] loading Postgres schema (db/postgres/schema.sql)…")
+      await client.query(schemaSql)
+      return
+    }
+    // Schema already present: a long-lived container only ever saw the
+    // schema.sql that existed when it was first created, so it drifts behind
+    // as new tables/columns land (e.g. project_seq_counters, cells.ai_drafted
+    // — observed 2026-06-11 as column-not-found 500s). Patch additively.
+    await reconcilePgSchema(client, schemaSql)
   } finally {
     await client.end()
+  }
+}
+
+type SchemaTable = {
+  /** Full CREATE TABLE block, with IF NOT EXISTS forced in. */
+  createSql: string
+  columns: Array<{ name: string; def: string }>
+}
+
+/**
+ * Parse schema.sql into table blocks + column definitions + index statements.
+ * Relies on the file's regular shape (also assumed by scripts/neon-migrate.ts,
+ * which gates prod deploys on the same parse): blocks open with
+ * `CREATE TABLE name (`, one column per line, close with `);`, and every
+ * CREATE INDEX is a single line.
+ */
+function parsePgSchema(sql: string): {
+  tables: Map<string, SchemaTable>
+  indexesByTable: Map<string, string[]>
+} {
+  const tables = new Map<string, SchemaTable>()
+  const indexesByTable = new Map<string, string[]>()
+  let current: SchemaTable | null = null
+  let block: string[] = []
+  for (const raw of sql.split("\n")) {
+    const line = raw.replace(/--.*$/, "").trimEnd()
+    const trimmed = line.trim()
+    if (current === null) {
+      const table = trimmed.match(
+        /^CREATE TABLE (?:IF NOT EXISTS )?([A-Za-z_][A-Za-z0-9_]*)\s*\($/i,
+      )
+      if (table) {
+        current = { createSql: "", columns: [] }
+        block = [`CREATE TABLE IF NOT EXISTS ${table[1]} (`]
+        tables.set(table[1].toLowerCase(), current)
+        continue
+      }
+      const index = trimmed.match(
+        /^CREATE\s+(UNIQUE\s+)?INDEX\s+(?:IF NOT EXISTS\s+)?\S+\s+ON\s+([A-Za-z_][A-Za-z0-9_]*)/i,
+      )
+      if (index) {
+        const tableName = index[2].toLowerCase()
+        const stmt = /IF NOT EXISTS/i.test(trimmed)
+          ? trimmed
+          : trimmed.replace(
+              /^CREATE\s+(UNIQUE\s+)?INDEX\s+/i,
+              (_, uniq) => `CREATE ${uniq ? "UNIQUE " : ""}INDEX IF NOT EXISTS `,
+            )
+        if (!indexesByTable.has(tableName)) indexesByTable.set(tableName, [])
+        indexesByTable.get(tableName)!.push(stmt)
+      }
+      continue
+    }
+    block.push(line)
+    if (trimmed.startsWith(")")) {
+      current.createSql = block.join("\n")
+      current = null
+      continue
+    }
+    const first = trimmed.split(/[\s(,]/)[0]
+    if (!first) continue
+    if (/^(PRIMARY|UNIQUE|CHECK|CONSTRAINT|FOREIGN|EXCLUDE)$/i.test(first)) continue
+    current.columns.push({
+      name: first.toLowerCase(),
+      def: trimmed.replace(/,\s*$/, ""),
+    })
+  }
+  return { tables, indexesByTable }
+}
+
+/**
+ * Additive-only drift repair: create tables (plus their indexes) and add
+ * columns that schema.sql has but the live container lacks. Never drops or
+ * rewrites anything, so it's safe on every boot.
+ */
+async function reconcilePgSchema(
+  client: import("pg").Client,
+  schemaSql: string,
+): Promise<void> {
+  const { tables, indexesByTable } = parsePgSchema(schemaSql)
+  const { rows } = await client.query(
+    `SELECT table_name, column_name FROM information_schema.columns
+     WHERE table_schema = 'public'`,
+  )
+  const live = new Map<string, Set<string>>()
+  for (const r of rows as { table_name: string; column_name: string }[]) {
+    if (!live.has(r.table_name)) live.set(r.table_name, new Set())
+    live.get(r.table_name)!.add(r.column_name)
+  }
+
+  const run = async (sql: string, what: string): Promise<void> => {
+    try {
+      await client.query(sql)
+    } catch (err) {
+      throw new Error(
+        `[dev-stack] schema reconcile failed while ${what}:\n${sql}\n${String(err)}\n` +
+          `Fix by hand (e.g. the column may need a DEFAULT to backfill existing rows), ` +
+          `or as a last resort delete the ${LOCAL_PG_CONTAINER} container to rebuild from scratch (loses local data).`,
+      )
+    }
+  }
+
+  const patched: string[] = []
+  for (const [name, table] of tables) {
+    const liveCols = live.get(name)
+    if (!liveCols) {
+      await run(table.createSql, `creating table ${name}`)
+      for (const idx of indexesByTable.get(name) ?? []) {
+        await run(idx, `creating an index on ${name}`)
+      }
+      patched.push(`created table ${name}`)
+      continue
+    }
+    for (const col of table.columns) {
+      if (liveCols.has(col.name)) continue
+      await run(
+        `ALTER TABLE ${name} ADD COLUMN IF NOT EXISTS ${col.def}`,
+        `adding column ${name}.${col.name}`,
+      )
+      patched.push(`added column ${name}.${col.name}`)
+    }
+  }
+  if (patched.length) {
+    console.log(
+      `[dev-stack] local Postgres schema patched from db/postgres/schema.sql: ${patched.join(", ")}`,
+    )
   }
 }
 

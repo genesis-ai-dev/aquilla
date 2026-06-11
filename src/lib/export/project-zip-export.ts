@@ -23,7 +23,7 @@ import { exportTmx } from "./exporters/tmx"
  *  audio-by-character which has its own orchestrator, vtt which needs
  *  per-project ttsSettings not available in the zip path, and docx which
  *  requires the raw sidecar bytes from the server — not just cells). */
-export type TextExportFormat = Exclude<ExportFormat, "usfm" | "audio-by-character" | "vtt" | "docx">
+export type TextExportFormat = Exclude<ExportFormat, "usfm" | "audio-by-character" | "vtt" | "docx" | "plain-text-dump">
 
 export interface ProjectFileCellsInput {
   fileId: string

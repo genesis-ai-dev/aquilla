@@ -12,6 +12,8 @@ interface ViewSettingsMenuProps {
   targetTextDirection: "ltr" | "rtl"
   cellLabelsEnabled: boolean
   tnSidebarEnabled: boolean
+  /** FRO-317: show USFM \f...\f* footnotes as a distinct panel below each cell. */
+  footnotesInlineEnabled?: boolean
   rtlHintDismissed?: boolean
   /** Per-file source-column font size in px. */
   sourceFontSize: number
@@ -24,6 +26,7 @@ interface ViewSettingsMenuProps {
   onSourceFontSizeChange: (v: number) => void
   onTargetFontSizeChange: (v: number) => void
   onTnSidebarChange: (v: boolean) => void
+  onFootnotesInlineChange?: (v: boolean) => void
   onDismissRtlHint?: () => void
 }
 
@@ -34,6 +37,7 @@ export function ViewSettingsMenu({
   targetTextDirection,
   cellLabelsEnabled,
   tnSidebarEnabled,
+  footnotesInlineEnabled = false,
   rtlHintDismissed = true,
   sourceFontSize,
   targetFontSize,
@@ -44,6 +48,7 @@ export function ViewSettingsMenu({
   onSourceFontSizeChange,
   onTargetFontSizeChange,
   onTnSidebarChange,
+  onFootnotesInlineChange,
   onDismissRtlHint,
 }: ViewSettingsMenuProps) {
   const rtlDetected = sourceTextDirection === "rtl" || targetTextDirection === "rtl"
@@ -152,6 +157,16 @@ export function ViewSettingsMenu({
                 <span>Show translation notes</span>
                 <Pill on={tnSidebarEnabled} />
               </Menu.Item>
+              {onFootnotesInlineChange && (
+                <Menu.Item
+                  disabled={!fileOpen}
+                  onClick={() => onFootnotesInlineChange(!footnotesInlineEnabled)}
+                  className="flex cursor-pointer select-none items-center justify-between gap-2 rounded-lg px-2 py-1.5 text-sm outline-none data-[highlighted]:bg-accent data-[disabled]:opacity-50"
+                >
+                  <span>Show footnotes inline</span>
+                  <Pill on={footnotesInlineEnabled} />
+                </Menu.Item>
+              )}
               <div className="-mx-1 my-1.5 h-px rounded-full shadow-neu-inset" role="separator" />
               <div className="px-2 py-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
                 Text Direction

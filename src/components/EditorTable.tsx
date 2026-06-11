@@ -68,6 +68,9 @@ import { PreAcceptanceWarningBand } from "./PreAcceptanceWarningBand"
 import { detectPreAcceptanceWarnings } from "@/lib/terminology/preacceptance"
 import { useFileFontSizes } from "@/lib/store/file-view-prefs"
 import { AddConceptDialog } from "./AddConceptDialog"
+import { FootnoteInline } from "./footnotes/FootnoteInline"
+import { extractUsfmFootnotes } from "@/lib/footnotes/extract"
+import { spliceFootnoteText } from "@/lib/footnotes/splice"
 
 // Per-row render counter. Always accumulated when perf logging is on (cheap)
 // but NOT auto-logged — render logs would flood the console and push the
@@ -443,6 +446,11 @@ interface EditorTableProps {
    * Optional — when absent the existing `lockHolderLabel` prop is the only guard.
    */
   checkLockHolder?: (cellId: string) => string | null
+  /**
+   * FRO-317: when true, USFM \f...\f* footnotes render as a distinct panel
+   * immediately below each cell row. Editing is safe only for USFM files.
+   */
+  showFootnotesInline?: boolean
 }
 
 export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(function EditorTable({
@@ -1191,6 +1199,8 @@ interface MemoizedRowProps {
   assigneeNote?: string | null
   /** RACE-5: ref-backed live lock check — see EditorTableProps.checkLockHolder. */
   checkLockHolder?: (cellId: string) => string | null
+  /** FRO-317: when true, USFM \f...\f* footnotes render below each cell. */
+  showFootnotesInline?: boolean
 }
 
 const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {

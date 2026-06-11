@@ -479,6 +479,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   onAlignmentSeedChange,
   assignmentsByCellId,
   checkLockHolder,
+  showFootnotesInline,
 }, ref) {
   const { canEdit, canValidate, readOnlyLabel } = useEditorCapabilities(project)
   // Probe mic permission once (shared across all rows) so the help affordance
@@ -1083,6 +1084,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
                 assigneeLabel={assignmentsByCellId?.get(cell.id)?.username ?? null}
                 assigneeNote={assignmentsByCellId?.get(cell.id)?.scopeLabel ?? null}
                 checkLockHolder={checkLockHolder}
+                showFootnotesInline={showFootnotesInline}
               />
             </div>
           )
@@ -1233,6 +1235,7 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
     assigneeLabel,
     assigneeNote,
     checkLockHolder,
+    showFootnotesInline,
   } = props
 
   const cellId = cell.id
@@ -1368,6 +1371,7 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
         assigneeLabel={assigneeLabel}
         assigneeNote={assigneeNote}
         checkLockHolder={checkLockHolder}
+        showFootnotesInline={showFootnotesInline}
       />
     </div>
   )
@@ -1461,6 +1465,8 @@ interface EditorRowProps {
   assigneeNote?: string | null
   /** RACE-5: ref-backed live lock check — see EditorTableProps.checkLockHolder. */
   checkLockHolder?: (cellId: string) => string | null
+  /** FRO-317: when true, USFM \f...\f* footnotes render below the cell row. */
+  showFootnotesInline?: boolean
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -1691,6 +1697,7 @@ function EditorRow({
   assigneeLabel,
   assigneeNote,
   checkLockHolder,
+  showFootnotesInline,
 }: EditorRowProps) {
   const [openRuleId, setOpenRuleId] = useState<string | null>(null)
   const [openRuleAnchor, setOpenRuleAnchor] = useState<HTMLElement | null>(null)
@@ -3780,6 +3787,27 @@ function EditorRow({
         }}
         onCancel={() => setShowGenerateConfirm(false)}
       />
+
+      {/* FRO-317: inline footnotes panel — rendered only when enabled and the
+          cell has at least one USFM \f...\f* footnote in source or target. */}
+      {showFootnotesInline && (() => {
+        const srcFootnotes = extractUsfmFootnotes(cell.original ?? "")
+        const tgtFootnotes = extractUsfmFootnotes(cell.translated ?? "")
+        if (srcFootnotes.length === 0 && tgtFootnotes.length === 0) return null
+        const isDocx = (cell.fileId ?? "").endsWith(".docx")
+        return (
+          <FootnoteInline
+            sourceFootnotes={srcFootnotes}
+            targetFootnotes={tgtFootnotes}
+            editable={editable}
+            isDocx={isDocx}
+            onSave={(footnoteIndex, newText) => {
+              const updated = spliceFootnoteText(cell.translated ?? "", footnoteIndex, newText)
+              handleEditorCommit({ value: updated, valueHtml: updated })
+            }}
+          />
+        )
+      })()}
     </div>
   )
 }

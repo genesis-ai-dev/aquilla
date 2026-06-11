@@ -447,7 +447,7 @@ export interface CompletionSettings {
 
   /**
    * How many few-shot examples to retrieve per completion call.
-   * Spec key: `top_k`. Default 5.
+   * Spec key: `top_k`. Default 15.
    */
   top_k?: number
 

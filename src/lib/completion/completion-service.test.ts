@@ -661,7 +661,7 @@ describe("buildBatchPrompt with rules and validatedPairs", () => {
 // ---------------------------------------------------------------------------
 
 describe("CompletionSettings v1 retrieval fields", () => {
-  it("FALLBACK_SETTINGS-style defaults: top_k=5, contextSize=medium, useOnlyValidatedExamples=false, main_chat_language empty", () => {
+  it("FALLBACK_SETTINGS-style defaults: top_k=15, contextSize=medium, useOnlyValidatedExamples=false, main_chat_language empty", () => {
     const settings: CompletionSettings = {
       endpoint: "",
       model: "",
@@ -669,12 +669,12 @@ describe("CompletionSettings v1 retrieval fields", () => {
       temperature: 0.3,
       systemPrompt: DEFAULT_SYSTEM_PROMPT,
       // v1 defaults applied explicitly (mirrors FALLBACK_SETTINGS in useCompletion)
-      top_k: 5,
+      top_k: 15,
       contextSize: "medium",
       useOnlyValidatedExamples: false,
       main_chat_language: "",
     }
-    expect(settings.top_k).toBe(5)
+    expect(settings.top_k).toBe(15)
     expect(settings.contextSize).toBe("medium")
     expect(settings.useOnlyValidatedExamples).toBe(false)
     expect(settings.main_chat_language).toBe("")

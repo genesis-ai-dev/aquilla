@@ -37,17 +37,9 @@ test("comments page Go to cell navigates to the cell in editor", async ({ alice 
   await row.scrollIntoViewIfNeeded()
   await row.hover()
 
-  const moreBtn = row.locator("button[aria-label*='More'], button[title*='More'], button[aria-label*='action']").first()
-  if (await moreBtn.isVisible({ timeout: 2_000 }).catch(() => false)) {
-    await moreBtn.click()
-  } else {
-    await row.locator("button[aria-label*='comment'], button[title*='comment']").first().click()
-  }
-
-  const addCommentBtn = alice.getByRole("menuitem", { name: /add comment/i })
-    .or(alice.getByRole("button", { name: /add comment/i }))
-  await expect(addCommentBtn.first()).toBeVisible({ timeout: 5_000 })
-  await addCommentBtn.first().click()
+  const addCommentBtn = row.locator('button[aria-label="Add comment"]')
+  await expect(addCommentBtn).toBeVisible({ timeout: 5_000 })
+  await addCommentBtn.click()
 
   const drawer = alice.locator("[data-testid='comments-drawer']").first()
   await expect(drawer).toBeVisible({ timeout: 5_000 })

@@ -145,9 +145,9 @@
 | Editor      | /project/:id/voice deep-link activates audio lens     | `e2e/specs/editor/voice-deep-link.smoke.spec.ts`              |   ✅   |
 | Editor      | Cell history drawer shows edit history                | `e2e/specs/editor/cell-history-drawer.smoke.spec.ts`          |   ✅   |
 | Editor      | HistoryDrawer show/hide intermediate edits toggle     | `e2e/specs/editor/history-drawer-intermediate-edits.smoke.spec.ts` | ✅ |
-| Editor      | EditorTable 'More cell actions' popover Add comment   | `e2e/specs/editor/cell-more-actions-popover.smoke.spec.ts`    |   ✅   |
+| Editor      | CellActionRail direct Add comment opens drawer        | `e2e/specs/editor/cell-more-actions-popover.smoke.spec.ts`    |   ✅   |
 | Editor      | CellActionsMenu "More actions" → History opens drawer | `e2e/specs/editor/cell-actions-menu-history.smoke.spec.ts`   |   ✅   |
-| Editor      | CellActionsMenu "More actions" → Add comment opens drawer | `e2e/specs/editor/cell-actions-menu-add-comment.smoke.spec.ts` | ✅ |
+| Editor      | CellActionRail direct Add comment opens drawer        | `e2e/specs/editor/cell-actions-menu-add-comment.smoke.spec.ts` | ✅ |
 | Editor      | Sidebar file filter narrows list; Clear restores it   | `e2e/specs/editor/sidebar-file-filter.smoke.spec.ts`          |   ✅   |
 | Editor      | Decay breakdown popover opens from cell indicator     | `e2e/specs/editor/decay-breakdown-popover.smoke.spec.ts`      |   ✅   |
 | Editor      | Sync status indicator in workspace status bar         | `e2e/specs/editor/sync-status-indicator.smoke.spec.ts`        |   ✅   |

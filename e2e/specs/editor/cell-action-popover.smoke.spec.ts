@@ -8,25 +8,13 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const SAMPLE_MD = path.resolve(__dirname, "../../fixtures/sample.md")
 
 /**
- * Cell action rail and overflow popover ("More cell actions").
+ * Cell action rail — direct icon buttons (no ⋯ overflow popover).
  *
- * FRO-237: "Record audio" was moved from the ⋯ overflow popover to a direct
- * mic button on the CellActionRail (aria-label="Record audio"). The ⋯ popover
- * now contains "Add comment" (and other items) but NOT "Record audio".
- *
- * The rail mic button:
- *   - aria-label="Record audio" when mic is allowed
- *   - aria-label="Microphone access blocked — click for help" when denied
- *   - Always enabled (never disabled) — even when mic is denied, it routes
- *     click to the help popover instead of being dead.
- *
- * The ⋯ overflow button:
- *   - Visible when the cell has translated text, comments, audio, or a cue.
- *   - aria-label="More cell actions"
- *   - "Add comment" is always present when comments hook is wired.
- *   - "Record audio" text is NOT in the ⋯ popover anymore (FRO-237).
+ * FRO-237: mic is a direct rail button (aria-label="Record audio").
+ * Comments, TTS, and play-audio are also direct rail icons; the down-caret
+ * opens the expanded row panel for lower-frequency actions.
  */
-test("cell action rail shows direct mic button by aria-label; overflow popover shows Add comment", async ({ alice }) => {
+test("cell action rail shows direct mic and Add comment buttons", async ({ alice }) => {
   const dash = new Dashboard(alice)
   await dash.goto()
   const name = `CellPopover ${Date.now()}`
@@ -42,19 +30,9 @@ test("cell action rail shows direct mic button by aria-label; overflow popover s
   const row = ws.cellRow(0)
   await row.hover()
 
-  // FRO-237: mic is now a direct rail button on the action rail (not inside the ⋯ popover).
-  // The aria-label is "Record audio" (normal) or "Microphone access blocked — click for help" (denied).
   const micRailBtn = row.locator('button[aria-label="Record audio"]')
   await expect(micRailBtn).toBeVisible({ timeout: 5_000 })
 
-  // Click the "More cell actions" overflow button.
-  const moreBtn = row.locator('button[aria-label="More cell actions"]')
-  await expect(moreBtn).toBeVisible({ timeout: 5_000 })
-  await moreBtn.click()
-
-  // "Add comment" button is always present when no comments exist yet.
-  await expect(alice.getByText("Add comment").first()).toBeVisible({ timeout: 3_000 })
-
-  // Dismiss the popover by pressing Escape.
-  await alice.keyboard.press("Escape")
+  const addCommentBtn = row.locator('button[aria-label="Add comment"]')
+  await expect(addCommentBtn).toBeVisible({ timeout: 5_000 })
 })

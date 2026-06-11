@@ -45,14 +45,9 @@ test("comment stale indicator appears when translation changes after thread was 
   await row.scrollIntoViewIfNeeded()
   await row.hover()
 
-  const moreBtn = row.locator('button[aria-label="More cell actions"]')
-  await expect(moreBtn).toBeVisible({ timeout: 5_000 })
-  await moreBtn.click()
-
-  const addCommentBtn = alice.getByRole("menuitem", { name: /add comment/i })
-    .or(alice.getByRole("button", { name: /add comment/i }))
-  await expect(addCommentBtn.first()).toBeVisible({ timeout: 5_000 })
-  await addCommentBtn.first().click()
+  const addCommentBtn = row.locator('button[aria-label="Add comment"]')
+  await expect(addCommentBtn).toBeVisible({ timeout: 5_000 })
+  await addCommentBtn.click()
 
   const drawer = alice.locator("[data-testid='comments-drawer']").first()
   await expect(drawer).toBeVisible({ timeout: 5_000 })
@@ -79,8 +74,7 @@ test("comment stale indicator appears when translation changes after thread was 
 
   // Step 4: Re-open the CommentsDrawer for cell 0.
   await row.hover()
-  await moreBtn.click()
-  await addCommentBtn.first().click()
+  await addCommentBtn.click()
   const drawer2 = alice.locator("[data-testid='comments-drawer']").first()
   await expect(drawer2).toBeVisible({ timeout: 5_000 })
   await expect(drawer2).toContainText(commentText, { timeout: 5_000 })

@@ -29,17 +29,12 @@ test("comments page Show resolved checkbox reveals resolved threads", async ({ a
   await ws.openFileBySubstring("sample")
   await ws.waitForEditor()
 
-  // Open "More cell actions" for the first row and add a comment.
   const row = ws.cellRow(0)
   await row.scrollIntoViewIfNeeded()
   await row.hover()
-  const moreBtn = row.locator('button[aria-label="More cell actions"]')
-  await expect(moreBtn).toBeVisible({ timeout: 5_000 })
-  await moreBtn.click()
-
-  const addCommentItem = alice.getByRole("menuitem", { name: /add comment/i })
-  await expect(addCommentItem).toBeVisible({ timeout: 3_000 })
-  await addCommentItem.click()
+  const addCommentBtn = row.locator('button[aria-label="Add comment"]')
+  await expect(addCommentBtn).toBeVisible({ timeout: 5_000 })
+  await addCommentBtn.click()
 
   // Post a comment.
   const commentText = `resolved-comment-${Date.now()}`

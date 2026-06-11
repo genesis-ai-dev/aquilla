@@ -36,17 +36,20 @@ export function ChatDockPanel({ chat, currentCell }: ChatDockPanelProps) {
   } = chat
 
   const [draft, setDraft] = useState("")
-  const bottomRef = useRef<HTMLDivElement>(null)
+  const messagesRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
 
-  // Auto-scroll to the bottom when new content arrives.
+  // Auto-scroll within the message list only — never scrollIntoView, which
+  // walks ancestor scroll containers (the aside rail) and drifts chrome up.
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" })
+    const el = messagesRef.current
+    if (!el) return
+    el.scrollTo({ top: el.scrollHeight, behavior: "smooth" })
   }, [messages, streamingText])
 
-  // Focus the textarea when the panel mounts.
+  // Focus the textarea when the panel mounts without scrolling ancestors.
   useEffect(() => {
-    setTimeout(() => textareaRef.current?.focus(), 50)
+    setTimeout(() => textareaRef.current?.focus({ preventScroll: true }), 50)
   }, [])
 
   function handleSend() {
@@ -127,7 +130,7 @@ export function ChatDockPanel({ chat, currentCell }: ChatDockPanelProps) {
       </div>
 
       {/* Message list */}
-      <div className="flex-1 overflow-y-auto">
+      <div ref={messagesRef} className="flex-1 overflow-y-auto">
         {!isConfigured && messages.length === 0 && !isStreaming && (
           <div className="p-3 text-xs text-muted-foreground">
             Configure an AI provider in project settings to start chatting.
@@ -151,7 +154,6 @@ export function ChatDockPanel({ chat, currentCell }: ChatDockPanelProps) {
             <DockChatBubble role="assistant" content={streamingText} isStreaming />
           )}
         </div>
-        <div ref={bottomRef} />
       </div>
 
       {/* Error banner */}

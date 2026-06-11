@@ -1,4 +1,5 @@
 import { useContext, type ReactNode } from "react"
+import { cn } from "@/lib/utils"
 import { BrandContext } from "@/branding/use-brand"
 import { VersionTag } from "./VersionBadge"
 // FRO-307: always-available report button (3 lines: import + mount in left rail)
@@ -60,11 +61,23 @@ export function AppShell({ leftDock, sidebar, logoSlot, header, statusBar, befor
     <div className="flex h-screen min-w-0 bg-sidebar">
       {/* FRO-308: Left dock — width is controlled by LeftDock itself (resizable + collapsible).
           The aside wrapper is kept so the logo can live above the dock rail. */}
-      <aside className="relative z-10 flex shrink-0 flex-col overflow-hidden">
-        {resolvedLogo}
-        {dockContent}
-        <ReportProblemButton /> {/* FRO-307 */}
-        <VersionTag />
+      <aside
+        className={cn(
+          "relative z-10 flex min-h-0 min-w-0 shrink-0 flex-col overflow-hidden",
+          // Org pages use a fixed-width sidebar; project workspace width is
+          // owned by LeftDock (resizable). Footer chrome for the dock lives
+          // inside LeftDock so a long branch name can't stretch the rail.
+          !leftDock && "w-56",
+        )}
+      >
+        {resolvedLogo && <div className="shrink-0">{resolvedLogo}</div>}
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">{dockContent}</div>
+        {!leftDock && (
+          <>
+            <ReportProblemButton /> {/* FRO-307 */}
+            <VersionTag />
+          </>
+        )}
       </aside>
       <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
         {header}

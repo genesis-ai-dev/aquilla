@@ -24,6 +24,8 @@ import {
 } from "react"
 import { Files, MessageSquare, Search, ChevronLeft, ChevronRight } from "lucide-react"
 import { cn } from "@/lib/utils"
+import { ReportProblemButton } from "@/components/ReportProblemButton/ReportProblemButton"
+import { VersionTag } from "@/components/VersionBadge"
 
 // ---------------------------------------------------------------------------
 // Types
@@ -56,6 +58,7 @@ export interface LeftDockProps {
 const MIN_WIDTH = 200
 const MAX_WIDTH = 520
 const DEFAULT_WIDTH = 256
+const RAIL_WIDTH = 40
 
 const TAB_META: { id: DockTab; icon: typeof Files; label: string }[] = [
   { id: "files", icon: Files, label: "Files" },
@@ -160,11 +163,14 @@ export function LeftDock({
     search: searchPanel,
   }
 
+  const dockWidth = isOpen ? width : RAIL_WIDTH
+
   return (
     <div
-      className="relative flex h-full shrink-0 select-none"
-      style={{ width: isOpen ? width : undefined }}
+      className="relative flex min-h-0 min-w-0 flex-1 select-none flex-col overflow-hidden"
+      style={{ width: dockWidth }}
     >
+      <div className="relative flex min-h-0 flex-1 overflow-hidden">
       {/* ── Rail of icon tabs ── */}
       <div className="flex h-full w-10 shrink-0 flex-col items-center gap-1 pt-2">
         {TAB_META.map(({ id, icon: Icon, label }) => {
@@ -234,6 +240,10 @@ export function LeftDock({
           />
         </>
       )}
+      </div>
+
+      <ReportProblemButton />
+      <VersionTag />
     </div>
   )
 }

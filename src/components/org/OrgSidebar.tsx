@@ -23,7 +23,7 @@ export function OrgSidebar() {
   }, [openTour])
 
   return (
-    <div className="flex h-full flex-col gap-1 p-2">
+    <div className="flex h-full min-w-0 flex-col gap-1 overflow-hidden p-2">
       <div data-tour="org-switcher">
         <OrgSwitcher />
       </div>

@@ -28,25 +28,13 @@ test("alice posts a comment on a cell and it appears in the drawer", async ({ al
   await ws.openFileBySubstring("sample")
   await ws.waitForEditor()
 
-  // Hover the first cell to reveal the action popover trigger.
   const row = ws.cellRow(0)
   await row.scrollIntoViewIfNeeded()
   await row.hover()
 
-  // Open the "More cell actions" popover (⋯ or similar button).
-  const moreBtn = row.locator("button[aria-label*='More'], button[title*='More'], button[aria-label*='action']").first()
-  if (await moreBtn.isVisible({ timeout: 2_000 }).catch(() => false)) {
-    await moreBtn.click()
-  } else {
-    // Fallback: look for an "Add comment" button directly on the row.
-    await row.locator("button[aria-label*='comment'], button[title*='comment']").first().click()
-  }
-
-  // Click "Add comment" in the popover.
-  const addCommentBtn = alice.getByRole("menuitem", { name: /add comment/i })
-    .or(alice.getByRole("button", { name: /add comment/i }))
-  await expect(addCommentBtn.first()).toBeVisible({ timeout: 5_000 })
-  await addCommentBtn.first().click()
+  const addCommentBtn = row.locator('button[aria-label="Add comment"]')
+  await expect(addCommentBtn).toBeVisible({ timeout: 5_000 })
+  await addCommentBtn.click()
 
   // CommentsDrawer should now be open. The drawer renders as a div with
   // data-testid="comments-drawer" (no aria-label or semantic landmark).

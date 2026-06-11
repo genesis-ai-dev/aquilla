@@ -8,22 +8,9 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const SAMPLE_MD = path.resolve(__dirname, "../../fixtures/sample.md")
 
 /**
- * CellActionsMenu — "More actions" → "Add comment" opens comments drawer.
- *
- * CellActionsMenu.tsx renders "Add comment" as the first menu item when
- * `onAddComment` is wired (it always is in ProjectWorkspace). Clicking it
- * calls `onAddComment(cellId)`, which opens the CommentsDrawer.
- *
- * This tests the specific "More actions" → "Add comment" click path —
- * distinct from the direct comment button on the row rail (if present).
- *
- * Steps:
- *   1. Import sample.md.
- *   2. Hover first row → click "More actions".
- *   3. Click "Add comment" in the popover.
- *   4. Verify CommentsDrawer (data-testid="comments-drawer") opens.
+ * CellActionRail direct "Add comment" button opens CommentsDrawer.
  */
-test("More actions menu Add comment opens the comments drawer", async ({ alice }) => {
+test("rail Add comment button opens the comments drawer", async ({ alice }) => {
   const dash = new Dashboard(alice)
   await dash.goto()
   const name = `CellActComment ${Date.now()}`
@@ -40,15 +27,9 @@ test("More actions menu Add comment opens the comments drawer", async ({ alice }
   await row.scrollIntoViewIfNeeded()
   await row.hover()
 
-  // Click the "More actions" button (CellActionsMenu trigger).
-  const moreBtn = row.locator('button[aria-label="More actions"], button[title="More actions"]').first()
-  await expect(moreBtn).toBeVisible({ timeout: 8_000 })
-  await moreBtn.click()
-
-  // Click "Add comment" in the popover menu.
-  const addCommentItem = alice.locator('[role="menuitem"]').filter({ hasText: /Add comment/i }).first()
-  await expect(addCommentItem).toBeVisible({ timeout: 5_000 })
-  await addCommentItem.click()
+  const addCommentBtn = row.locator('button[aria-label="Add comment"]').first()
+  await expect(addCommentBtn).toBeVisible({ timeout: 8_000 })
+  await addCommentBtn.click()
 
   // CommentsDrawer should open.
   const drawer = alice.locator('[data-testid="comments-drawer"]')

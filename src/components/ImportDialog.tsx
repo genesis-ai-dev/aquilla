@@ -54,8 +54,11 @@ import {
   IMPORT_COLLISION_SKIPPED,
   IMPORT_COLLISION_DUPLICATED,
 } from "@/lib/analytics-events"
+import { SpreadsheetImportPanel } from "@/components/import/SpreadsheetImportPanel"
+import { LabelImportPanel } from "@/components/import/LabelImportPanel"
+import { PairedImportPanel } from "@/components/import/PairedImportPanel"
 
-type Screen = "landing" | "upload" | "preview" | "ebible" | "macula" | "tn" | "direction" | "result" | "collision"
+type Screen = "landing" | "upload" | "preview" | "ebible" | "macula" | "tn" | "direction" | "result" | "collision" | "spreadsheet" | "labels" | "paired"
 
 interface ImportDialogProps {
   open: boolean
@@ -352,7 +355,13 @@ export function ImportDialog({
                 >
                   ←
                 </button>
-                {screen === "upload" ? "Upload Files" : screen === "macula" ? "Macula Hebrew + Greek" : screen === "tn" ? "Translation Notes (TSV)" : "eBible Corpus"}
+                {screen === "upload" ? "Upload Files"
+                  : screen === "macula" ? "Macula Hebrew + Greek"
+                  : screen === "tn" ? "Translation Notes (TSV)"
+                  : screen === "spreadsheet" ? "Spreadsheet (CSV / XLSX)"
+                  : screen === "labels" ? "Cell Labels / Cast"
+                  : screen === "paired" ? "Paired Translation Import"
+                  : "eBible Corpus"}
               </div>
             )}
           </DialogTitle>
@@ -433,6 +442,66 @@ export function ImportDialog({
               await handleChildImported([ref])
             }}
           />
+        )}
+
+        {/* FRO-316: Spreadsheet importer (CSV / XLSX) with on-the-fly column mapping */}
+        {screen === "spreadsheet" && (
+          <SpreadsheetImportPanel
+            projectId={projectId}
+            username={username}
+            sourceLanguage={sourceLanguage}
+            targetLanguage={targetLanguage}
+            getToken={getToken}
+            ttsSettings={ttsSettings}
+            onCastUpdated={onCastUpdated}
+            onPreview={(results, commit) => {
+              setPreviewState({ results, commit })
+              setScreen("preview")
+            }}
+            onImported={async (refs) => {
+              await handleChildImported(refs)
+            }}
+            onCancel={() => setScreen("landing")}
+          />
+        )}
+
+        {/* FRO-314: Cell labels / cast import via downloadable template */}
+        {screen === "labels" && sourceCells && sourceCells.length > 0 && (
+          <LabelImportPanel
+            projectId={projectId}
+            username={username}
+            sourceCells={sourceCells}
+            getToken={getToken}
+            onImported={() => {
+              onOpenChange(false)
+            }}
+            onCancel={() => setScreen("landing")}
+          />
+        )}
+        {screen === "labels" && (!sourceCells || sourceCells.length === 0) && (
+          <div className="py-4 text-center text-sm text-muted-foreground">
+            Cell labels require an existing source file in this project. Import source files first, then return here.
+          </div>
+        )}
+
+        {/* FRO-315: Paired source+target import (translation memory) */}
+        {screen === "paired" && sourceCells && sourceCells.length > 0 && (
+          <PairedImportPanel
+            projectId={projectId}
+            username={username}
+            sourceCells={sourceCells}
+            getToken={getToken}
+            onImported={(committedCount) => {
+              posthog.capture(IMPORT_SUCCEEDED, { file_count: committedCount, project_id: projectId })
+              onOpenChange(false)
+            }}
+            onCancel={() => setScreen("landing")}
+          />
+        )}
+        {screen === "paired" && (!sourceCells || sourceCells.length === 0) && (
+          <div className="py-4 text-center text-sm text-muted-foreground">
+            Paired translation import requires existing source cells in this project. Import source files first.
+          </div>
         )}
 
         {screen === "direction" && (
@@ -570,6 +639,48 @@ function ImportLanding({ onSelect }: ImportLandingProps) {
         <p className="mt-1 text-xs text-muted-foreground">
           Upload a Macula TSV file for the Hebrew Old Testament or Greek New Testament —
           original-language text with per-word lemma, morphology, and Strong's data.
+        </p>
+      </button>
+
+      {/* FRO-316: Spreadsheet importer — beta */}
+      <button
+        type="button"
+        onClick={() => onSelect("spreadsheet")}
+        className="rounded-lg border p-4 text-left transition-colors hover:border-primary hover:bg-primary/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      >
+        <p className="text-sm font-medium flex items-center gap-1.5">
+          Spreadsheet (CSV / XLSX) <BetaBadge />
+        </p>
+        <p className="mt-1 text-xs text-muted-foreground">
+          Import any CSV or Excel spreadsheet. Map which column is source, target, cell label, cast name, or timestamp at import time.
+        </p>
+      </button>
+
+      {/* FRO-314: Cell labels / cast import — beta */}
+      <button
+        type="button"
+        onClick={() => onSelect("labels")}
+        className="rounded-lg border p-4 text-left transition-colors hover:border-primary hover:bg-primary/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      >
+        <p className="text-sm font-medium flex items-center gap-1.5">
+          Cell Labels / Cast <BetaBadge />
+        </p>
+        <p className="mt-1 text-xs text-muted-foreground">
+          Download a spreadsheet template pre-filled with your project's cell references, fill in cast names, then re-upload to label cells.
+        </p>
+      </button>
+
+      {/* FRO-315: Paired translation import — beta */}
+      <button
+        type="button"
+        onClick={() => onSelect("paired")}
+        className="rounded-lg border p-4 text-left transition-colors hover:border-primary hover:bg-primary/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      >
+        <p className="text-sm font-medium flex items-center gap-1.5">
+          Paired Translation Import <BetaBadge />
+        </p>
+        <p className="mt-1 text-xs text-muted-foreground">
+          Import a finished translation (source + target pairs) from a spreadsheet to populate the target column and build translation memory.
         </p>
       </button>
 

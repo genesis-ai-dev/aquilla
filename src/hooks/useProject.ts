@@ -36,6 +36,7 @@ function overlaySettings(record: ProjectRecord, settings: ProjectWideSettings): 
   }
   if (settings.rules != null) next.rules = settings.rules
   if (settings.rulePenalties != null) next.rulePenalties = settings.rulePenalties
+  if (settings.algorithmicChecks != null) next.algorithmicChecks = settings.algorithmicChecks
   if (settings.terminology != null) next.terminology = settings.terminology
   if (settings.livingMemoryEntries != null) next.livingMemoryEntries = settings.livingMemoryEntries
   if (settings.validationCount != null) next.validationCount = settings.validationCount

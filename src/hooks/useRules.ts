@@ -109,13 +109,21 @@ export function useRules(
     override: AlgorithmicCheckOverride,
   ) => {
     if (!project) return
-    await patchProject(project.id, (p) => ({
+    const updated = await patchProject(project.id, (p) => ({
       ...p,
       algorithmicChecks: { ...(p.algorithmicChecks ?? {}), [checkId]: override },
     }))
-    // algorithmicChecks is device-local; not synced to D1.
+    // Sync to D1 like `rules`/`rulePenalties`: under AD-3 the read path is the
+    // server projection, so an IDB-only write here is invisible to useProject.
+    // Top-level settings keys replace wholesale — send the full merged map.
+    void patchShared?.({
+      algorithmicChecks: updated?.algorithmicChecks ?? {
+        ...(project.algorithmicChecks ?? {}),
+        [checkId]: override,
+      },
+    })
     refresh()
-  }, [project, refresh])
+  }, [project, refresh, patchShared])
 
   return {
     rules,

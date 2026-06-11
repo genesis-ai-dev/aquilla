@@ -3,6 +3,8 @@ import type {
   TranslationRule,
   RulePenalties,
   ProjectTtsSettings,
+  AlgorithmicCheckOverride,
+  BuiltinCheckId,
 } from "@/lib/parsers/types"
 import type { Concept } from "@/lib/terminology/types"
 import type { LivingMemoryEntry } from "@/lib/parsers/types"
@@ -23,6 +25,11 @@ export interface ProjectWideSettings {
   systemPrompt?: string
   rules?: TranslationRule[]
   rulePenalties?: RulePenalties
+  /** Built-in check overrides (enable/severity). Synced like `rules` —
+   *  replacing this key replaces the whole map, so writers must send the
+   *  full merged object. Project-wide so LQA severity is consistent across
+   *  devices/members (same rationale as `rulePenalties`). */
+  algorithmicChecks?: Partial<Record<BuiltinCheckId, AlgorithmicCheckOverride>>
   validationCount?: number
   validationCountAudio?: number
   validationRoleFloor?: "reviewer" | "project_lead" | "maintainer"

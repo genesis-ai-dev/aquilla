@@ -167,7 +167,7 @@ function MembersPageContent({ orgId, orgName }: MembersPageContentProps) {
           disabled={accessibleProjects.length === 0}
         >
           <UsersRound className="mr-1.5 h-4 w-4" />
-          Invite to projects…
+          Invite to projects
         </Button>
         <span className="text-[11px] text-muted-foreground">
           Add someone to specific projects without granting org-wide access.

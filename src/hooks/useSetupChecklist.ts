@@ -29,6 +29,7 @@ export function markSetupAutoShown(projectId: string): void {
 }
 
 export interface ChecklistState {
+  importFiles: boolean
   aiInstructions: boolean
   collaborators: boolean
   aiModels: boolean
@@ -49,12 +50,15 @@ export interface ChecklistState {
 export function deriveChecklistState(
   settings: Partial<CompletionSettings> | undefined,
   collaboratorReach: number,
-  aiModelsReady: boolean
+  aiModelsReady: boolean,
+  fileCount: number = 0
 ): ChecklistState {
+  const importFiles = fileCount > 0
   const aiInstructions = Boolean(settings?.systemPrompt?.trim())
   const collaborators = collaboratorReach > 0
-  const items = [aiInstructions, collaborators, aiModelsReady]
+  const items = [importFiles, aiInstructions, collaborators, aiModelsReady]
   return {
+    importFiles,
     aiInstructions,
     collaborators,
     aiModels: aiModelsReady,
@@ -146,6 +150,7 @@ export function useSetupChecklist(project: ProjectRecord | null) {
     project?.completionSettings,
     memberCount,
     aiModelsReady,
+    project?.files?.length ?? 0,
   )
 
   const dismiss = useCallback(async () => {

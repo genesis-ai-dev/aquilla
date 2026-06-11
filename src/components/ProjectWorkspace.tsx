@@ -3320,6 +3320,7 @@ export function ProjectWorkspace() {
             void dismissChecklist()
             setChecklistOpen(false)
           }}
+          onOpenImport={() => setImportOpen(true)}
         />
       )}
       {project && (

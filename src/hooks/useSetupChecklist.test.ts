@@ -3,12 +3,24 @@ import { deriveChecklistState, wasSetupAutoShown, markSetupAutoShown } from "./u
 
 describe("deriveChecklistState", () => {
   it("returns all incomplete when project has no settings", () => {
-    const state = deriveChecklistState({}, 0, false)
+    const state = deriveChecklistState({}, 0, false, 0)
+    expect(state.importFiles).toBe(false)
     expect(state.aiInstructions).toBe(false)
     expect(state.collaborators).toBe(false)
     expect(state.aiModels).toBe(false)
     expect(state.completedCount).toBe(0)
-    expect(state.totalCount).toBe(3)
+    expect(state.totalCount).toBe(4)
+  })
+
+  // FRO-302: import files is the first step and completes when fileCount > 0
+  it("FRO-302: marks importFiles complete when fileCount > 0", () => {
+    const state = deriveChecklistState({}, 0, false, 1)
+    expect(state.importFiles).toBe(true)
+  })
+
+  it("FRO-302: importFiles is false when fileCount is 0", () => {
+    const state = deriveChecklistState({}, 0, false, 0)
+    expect(state.importFiles).toBe(false)
   })
 
   it("marks aiInstructions complete when systemPrompt is non-empty", () => {
@@ -34,10 +46,11 @@ describe("deriveChecklistState", () => {
     const state = deriveChecklistState(
       { endpoint: "x", model: "m", maxTokens: 512, temperature: 0.3, systemPrompt: "y", llmHealthPenalty: 0.1 },
       1,
-      true
+      true,
+      3
     )
-    expect(state.completedCount).toBe(3)
-    expect(state.totalCount).toBe(3)
+    expect(state.completedCount).toBe(4)
+    expect(state.totalCount).toBe(4)
   })
 
   // FRO-234: saving instructions must mark the step complete. The systemPrompt

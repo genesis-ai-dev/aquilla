@@ -6,7 +6,7 @@ import { CellAreaPlaceholder } from "./CellAreaPlaceholder"
 import { WorkspaceSkeleton } from "./WorkspaceSkeleton"
 import { TabStrip } from "./TabStrip"
 import { useWorkspaceTabs, readLastActiveFileId } from "@/hooks/useWorkspaceTabs"
-import { readLastLocation, writeLastLocation } from "@/lib/frontier/last-location-store"
+import { clearLastLocation, readLastLocation, writeLastLocation } from "@/lib/frontier/last-location-store"
 import { ROLE } from "@/lib/frontier/roles"
 import { languagesEqual } from "@/lib/language-normalize"
 import { useCells } from "@/hooks/useCells"
@@ -44,6 +44,8 @@ import { CombinedBoundaryEditor } from "./voice/CombinedBoundaryEditor"
 import { useProjectTts } from "@/hooks/useProjectTts"
 import { RuleDrawer } from "./RuleDrawer"
 import { RulesSurface } from "./RulesSurface"
+import { RuleImportDialog } from "./RuleImportDialog"
+import { RuleSuggestFromEditsDialog } from "./RuleSuggestFromEditsDialog"
 import { CommentsDrawer } from "./CommentsDrawer"
 import { HistoryDrawer } from "./HistoryDrawer"
 import { SharePanel } from "./SharePanel"
@@ -327,6 +329,20 @@ export function ProjectWorkspace() {
     setActiveFileId,
   })
 
+  const allTabsClosedRef = useRef(false)
+  const handleCloseTab = useCallback(
+    (tabId: string) => {
+      const isLastTab =
+        workspaceTabs.tabs.length === 1 && workspaceTabs.tabs[0]?.id === tabId
+      if (isLastTab && projectId) {
+        allTabsClosedRef.current = true
+        clearLastLocation(currentUsernameRef.current, projectId)
+      }
+      workspaceTabs.closeTab(tabId)
+    },
+    [workspaceTabs, projectId],
+  )
+
   // Single source of truth for the fileId in the URL. This used to be two
   // separate effects — one that *restored* a file when the URL had none
   // (after a detour through Rules/Comments), and one further down
@@ -392,6 +408,12 @@ export function ProjectWorkspace() {
       return
     }
 
+    // User explicitly closed all tabs — don't auto-restore a file.
+    if (allTabsClosedRef.current) {
+      allTabsClosedRef.current = false
+      return
+    }
+
     // No file in the URL: restore the last/only file if there is a valid one.
     // Prefer the richer per-user last-location store; fall back to the
     // legacy readLastActiveFileId (tabs-only) for backward compat.
@@ -442,6 +464,8 @@ export function ProjectWorkspace() {
     location.pathname.endsWith("/terminology") ? "terminology" :
     location.pathname.endsWith("/members") ? "members" :
     "editor"
+
+  const [editingRuleId, setEditingRuleId] = useState<string | "new" | null>(null)
 
   useEffect(() => {
     const open = searchParams.get("openRule")
@@ -2963,6 +2987,33 @@ export function ProjectWorkspace() {
               />
             )}
 
+            {project && centerSurface === "rules" && (
+              <>
+                <Button variant="outline" size="sm" onClick={() => navigate(`/project/${projectId}/terminology`)}>
+                  <BookOpen className="mr-1 h-3.5 w-3.5" />
+                  Terminology
+                </Button>
+                <RuleImportDialog
+                  completionSettings={project.completionSettings}
+                  onAdd={addRule}
+                  projectId={projectId!}
+                />
+                <RuleSuggestFromEditsDialog
+                  completionSettings={project.completionSettings}
+                  onAdd={addRule}
+                  projectId={projectId!}
+                  cells={cells}
+                />
+                <Button
+                  size="sm"
+                  onClick={() => setEditingRuleId("new")}
+                  disabled={editingRuleId !== null}
+                >
+                  + Add Rule
+                </Button>
+              </>
+            )}
+
             <PrimaryActionButton ctx={actionCtx} run={actionArgs} />
 
             {/* FRO-331: hidden trigger — opened from ⋯ menu; keeps RTL hint anchored here. */}
@@ -3001,7 +3052,7 @@ export function ProjectWorkspace() {
               activeTabId={workspaceTabs.activeTabId}
               files={projectFiles}
               onActivate={workspaceTabs.activateTab}
-              onClose={workspaceTabs.closeTab}
+              onClose={handleCloseTab}
             />
             {project && activeFileId && (
               <>
@@ -3194,6 +3245,8 @@ export function ProjectWorkspace() {
             promotionRequests={promotionRequests}
             canRequestPromotion={canRequestPromotion}
             requestPromotion={requestPromotion}
+            editingRuleId={editingRuleId}
+            setEditingRuleId={setEditingRuleId}
           />
         ) : centerSurface === "comments" ? (
           // FRO-254: Comments page inside the shell — back button in the page

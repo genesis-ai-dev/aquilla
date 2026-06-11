@@ -7,7 +7,7 @@
  */
 import { useState, useMemo, useEffect } from "react"
 import { useNavigate, useSearchParams } from "react-router-dom"
-import { AlertTriangle, AlertCircle, Trash2, Wand2, ChevronDown, ChevronUp, BookOpen, Pencil, ArrowUpCircle, Building2, Lock, Clock } from "lucide-react"
+import { AlertTriangle, AlertCircle, Trash2, Wand2, ChevronDown, ChevronUp, Pencil, ArrowUpCircle, Building2, Lock, Clock } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Switch } from "@/components/ui/switch"
@@ -16,9 +16,7 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog"
 import { BuiltinChecksList } from "./BuiltinChecksList"
-import { RuleSuggestFromEditsDialog } from "./RuleSuggestFromEditsDialog"
 import { RuleEditor } from "./RuleEditor"
-import { RuleImportDialog } from "./RuleImportDialog"
 import type { ProjectRecord, RuleAutofix, TranslationRule, PromotionRequest } from "@/lib/parsers/types"
 import type { useRules } from "@/hooks/useRules"
 import type { CellData } from "@/hooks/useCells"
@@ -52,6 +50,8 @@ interface Props {
   canRequestPromotion?: boolean
   /** Submit a promotion request for a project rule. */
   requestPromotion?: (rule: TranslationRule, sourceProjectId: string) => Promise<PromotionRequestResult | { kind: "blocked" }>
+  editingRuleId: string | "new" | null
+  setEditingRuleId: (id: string | "new" | null) => void
 }
 
 export function RulesSurface({
@@ -71,12 +71,12 @@ export function RulesSurface({
   promotionRequests = [],
   canRequestPromotion = false,
   requestPromotion,
+  editingRuleId,
+  setEditingRuleId,
 }: Props) {
   const navigate = useNavigate()
   const [searchParams, setSearchParams] = useSearchParams()
   const [expandedRuleId, setExpandedRuleId] = useState<string | null>(null)
-  // FRO-195: inline create/edit state — null = closed, "new" = create, ruleId = edit
-  const [editingRuleId, setEditingRuleId] = useState<string | "new" | null>(null)
   // Promote-to-org confirmation dialog state.
   const [promoteRule, setPromoteRule] = useState<TranslationRule | null>(null)
   const [promoting, setPromoting] = useState(false)
@@ -195,37 +195,6 @@ export function RulesSurface({
   return (
     <div className="h-full overflow-y-auto">
       <div className="mx-auto max-w-2xl space-y-6 p-6">
-        {/* Action toolbar */}
-        <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm" onClick={() => navigate(`/project/${projectId}/terminology`)}>
-            <BookOpen className="mr-1 h-3.5 w-3.5" />
-            Terminology
-          </Button>
-          <div className="flex-1" />
-          {/* SWARM-TODO(FRO-196): RuleImportDialog — bulk import via document drop/paste */}
-          <RuleImportDialog
-            completionSettings={project?.completionSettings}
-            onAdd={addRule}
-            projectId={projectId}
-          />
-          {/* FRO-198: suggest rules from mined edits — repeated corrections + recent edits + validated pairs.
-              Receives the full cell list; the validated-pair path filters by status internally. */}
-          <RuleSuggestFromEditsDialog
-            completionSettings={project?.completionSettings}
-            onAdd={addRule}
-            projectId={projectId}
-            cells={cells}
-          />
-          {/* FRO-195: inline create surface replaces the dialog */}
-          <Button
-            size="sm"
-            onClick={() => setEditingRuleId("new")}
-            disabled={editingRuleId !== null}
-          >
-            + Add Rule
-          </Button>
-        </div>
-
         {/* FRO-195: inline rule editor (create mode) */}
         {editingRuleId === "new" && (
           <RuleEditor

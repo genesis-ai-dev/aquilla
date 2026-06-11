@@ -63,6 +63,17 @@ export function readLastLocation(
   return found?.loc ?? null
 }
 
+export function clearLastLocation(
+  userId: string,
+  projectId: string,
+): void {
+  const entries = readAll()
+  const filtered = entries.filter(
+    (e) => !(e.userId === userId && e.projectId === projectId),
+  )
+  if (filtered.length !== entries.length) writeAll(filtered)
+}
+
 /** Write (or update) the last-known location for a user+project pair.
  *  The entry is promoted to the front of the LRU list. The list is capped
  *  at MAX_ENTRIES (oldest entries dropped when over the limit). */

@@ -247,7 +247,7 @@ export function LeftDock({
     search: searchPanel,
   }
 
-  const dockWidth = isOpen || isTopRail ? width : RAIL_WIDTH
+  const dockWidth = isOpen ? width : RAIL_WIDTH
 
   const collapseButton = (
     <button
@@ -257,21 +257,29 @@ export function LeftDock({
       onClick={() => setActiveTab(isOpen ? null : "files")}
       className={cn(
         "flex items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-accent/60 hover:text-foreground",
-        isTopRail ? "mx-2 mb-1 mt-auto h-7 w-full" : "mb-2 mt-auto h-7 w-7",
+        isTopRail && isOpen ? "mx-2 mb-1 mt-auto h-7 w-full" : "mb-2 mt-auto h-7 w-7",
       )}
     >
-      {isTopRail ? (
-        isOpen ? (
-          <ChevronUp className="h-3.5 w-3.5" />
-        ) : (
-          <ChevronDown className="h-3.5 w-3.5" />
-        )
+      {isTopRail && isOpen ? (
+        <ChevronUp className="h-3.5 w-3.5" />
       ) : isOpen ? (
         <ChevronLeft className="h-3.5 w-3.5" />
       ) : (
         <ChevronRight className="h-3.5 w-3.5" />
       )}
     </button>
+  )
+
+  const resizeHandle = (
+    <div
+      onMouseDown={handleDragStart}
+      className={cn(
+        "absolute right-0 top-0 h-full w-1 cursor-col-resize",
+        "z-10 transition-colors hover:bg-primary/30 active:bg-primary/50",
+      )}
+      aria-hidden
+      title="Drag to resize"
+    />
   )
 
   return (
@@ -282,10 +290,11 @@ export function LeftDock({
       <div
         className={cn(
           "relative flex min-h-0 flex-1 overflow-hidden",
-          isTopRail ? "flex-col" : "flex-row",
+          isTopRail && isOpen ? "flex-col" : "flex-row",
         )}
       >
-        {isTopRail ? (
+        {isTopRail && isOpen ? (
+          // Top-rail expanded: horizontal tab bar + panel below
           <>
             <TabRail
               activeTab={activeTab}
@@ -293,25 +302,14 @@ export function LeftDock({
               onTabClick={handleRailIconClick}
               orientation="top"
             />
-            {isOpen && (
-              <>
-                <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
-                  {activeTab && panels[activeTab]}
-                </div>
-                <div
-                  onMouseDown={handleDragStart}
-                  className={cn(
-                    "absolute right-0 top-0 h-full w-1 cursor-col-resize",
-                    "z-10 transition-colors hover:bg-primary/30 active:bg-primary/50",
-                  )}
-                  aria-hidden
-                  title="Drag to resize"
-                />
-              </>
-            )}
+            <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+              {activeTab && panels[activeTab]}
+            </div>
+            {resizeHandle}
             {collapseButton}
           </>
         ) : (
+          // Left-rail (always), or top-rail collapsed: vertical 40px icon strip + optional panel
           <>
             <div className="flex h-full w-10 shrink-0 flex-col items-center">
               <TabRail
@@ -327,15 +325,7 @@ export function LeftDock({
                 <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
                   {activeTab && panels[activeTab]}
                 </div>
-                <div
-                  onMouseDown={handleDragStart}
-                  className={cn(
-                    "absolute right-0 top-0 h-full w-1 cursor-col-resize",
-                    "z-10 transition-colors hover:bg-primary/30 active:bg-primary/50",
-                  )}
-                  aria-hidden
-                  title="Drag to resize"
-                />
+                {resizeHandle}
               </>
             )}
           </>

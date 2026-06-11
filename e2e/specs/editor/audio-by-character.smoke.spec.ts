@@ -1,7 +1,7 @@
 // E2E smoke test for the "Audio by character" export option.
 //
 // Selectors verified live against the running app (ExportDialog):
-//   - toolbar opener:  button "Export file"
+//   - toolbar opener:  header ⋯ menu → "Export file" (FRO-331)
 //   - format option:   text "Audio by character" (the radio's <label>)
 //   - scope lock:      "Whole project" radio is disabled for this format
 //   - empty preview:   "No cells with audio found in this file."
@@ -35,8 +35,8 @@ test("alice sees Audio-by-character export, scope-locked to file, and gets a zip
   await ws.openFileBySubstring("sample")
   await ws.waitForEditor()
 
-  // Open the export dialog.
-  await alice.getByRole("button", { name: "Export file" }).click()
+  // Open the export dialog from the header overflow menu (FRO-331).
+  await ws.openExportDialog()
   const dialog = alice.getByRole("dialog")
   await expect(dialog).toBeVisible({ timeout: 5_000 })
 

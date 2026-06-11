@@ -28,10 +28,8 @@ test("export dialog scope toggle switches between file and project", async ({ al
   await ws.openFileBySubstring("sample")
   await ws.waitForEditor()
 
-  // Open the export dialog.
-  const exportBtn = alice.getByRole("button", { name: /^Export$/i }).first()
-  await expect(exportBtn).toBeVisible({ timeout: 5_000 })
-  await exportBtn.click()
+  // Open the export dialog from the header overflow menu (FRO-331).
+  await ws.openExportDialog()
 
   const dialog = alice.getByRole("dialog")
   await expect(dialog).toBeVisible({ timeout: 5_000 })

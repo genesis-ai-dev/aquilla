@@ -33,12 +33,8 @@ test("view settings Show cell labels toggle persists state across open/close", a
   await ws.openFileBySubstring("sample")
   await ws.waitForEditor()
 
-  const viewSettingsBtn = alice.getByRole("button", { name: /View settings/i })
-    .or(alice.locator('[title="View settings"]'))
-
   // Open menu and capture initial state of the "Show cell labels" pill.
-  await expect(viewSettingsBtn.first()).toBeVisible({ timeout: 10_000 })
-  await viewSettingsBtn.first().click()
+  await ws.openViewSettingsMenu()
 
   const cellLabelsText = alice.getByText(/Show cell labels/i).first()
   await expect(cellLabelsText).toBeVisible({ timeout: 3_000 })
@@ -52,7 +48,7 @@ test("view settings Show cell labels toggle persists state across open/close", a
   await expect(cellLabelsText).not.toBeVisible({ timeout: 3_000 })
 
   // Reopen and verify the pill flipped.
-  await viewSettingsBtn.first().click()
+  await ws.openViewSettingsMenu()
   await expect(cellLabelsText).toBeVisible({ timeout: 3_000 })
 
   const toggledPill = await alice.locator("span").filter({ hasText: /^(On|Off)$/ }).first().textContent()
@@ -60,7 +56,7 @@ test("view settings Show cell labels toggle persists state across open/close", a
 
   // Toggle back.
   await cellLabelsText.click()
-  await viewSettingsBtn.first().click()
+  await ws.openViewSettingsMenu()
   await expect(cellLabelsText).toBeVisible({ timeout: 3_000 })
 
   const revertedPill = await alice.locator("span").filter({ hasText: /^(On|Off)$/ }).first().textContent()

@@ -1,11 +1,17 @@
-import { useState, useEffect } from "react"
+import { useState, useEffect, forwardRef, useImperativeHandle } from "react"
 import { Menu } from "@base-ui/react/menu"
 import { Eye, X, Languages } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 import { MIN_FONT_SIZE, MAX_FONT_SIZE, FONT_SIZE_STEP } from "@/lib/store/file-view-prefs"
 
+export interface ViewSettingsMenuHandle {
+  open: () => void
+}
+
 interface ViewSettingsMenuProps {
+  /** When true, the eye trigger is visually hidden — open via ref/imperative handle or RTL hint. */
+  hideTrigger?: boolean
   fileOpen: boolean
   lineNumbersEnabled: boolean
   sourceTextDirection: "ltr" | "rtl"
@@ -30,7 +36,8 @@ interface ViewSettingsMenuProps {
   onDismissRtlHint?: () => void
 }
 
-export function ViewSettingsMenu({
+export const ViewSettingsMenu = forwardRef<ViewSettingsMenuHandle, ViewSettingsMenuProps>(function ViewSettingsMenu({
+  hideTrigger = false,
   fileOpen,
   lineNumbersEnabled,
   sourceTextDirection,
@@ -50,11 +57,15 @@ export function ViewSettingsMenu({
   onTnSidebarChange,
   onFootnotesInlineChange,
   onDismissRtlHint,
-}: ViewSettingsMenuProps) {
+}, ref) {
   const rtlDetected = sourceTextDirection === "rtl" || targetTextDirection === "rtl"
   const showHint = fileOpen && rtlDetected && !rtlHintDismissed
   const [menuOpen, setMenuOpen] = useState(false)
   const [hintVisible, setHintVisible] = useState(showHint)
+
+  useImperativeHandle(ref, () => ({
+    open: () => setMenuOpen(true),
+  }))
 
   // Sync hint visibility with detection state — if user opens the menu, the
   // hint collapses silently (they're seeing the settings now).
@@ -120,9 +131,15 @@ export function ViewSettingsMenu({
       <Menu.Root open={menuOpen} onOpenChange={setMenuOpen}>
         <Menu.Trigger
           render={
-            <Button variant="ghost" size="icon" title="View settings" className="relative">
+            <Button
+              variant="ghost"
+              size="icon"
+              title="View settings"
+              aria-label="View settings"
+              className={cn("relative", hideTrigger && "sr-only")}
+            >
               <Eye className="h-4 w-4" />
-              {showHint && (
+              {showHint && !hideTrigger && (
                 <span
                   className="absolute right-1 top-1 h-1.5 w-1.5 rounded-full bg-primary ring-2 ring-background"
                   aria-hidden="true"
@@ -211,7 +228,7 @@ export function ViewSettingsMenu({
       </Menu.Root>
     </div>
   )
-}
+})
 
 function Pill({ on }: { on: boolean }) {
   return (

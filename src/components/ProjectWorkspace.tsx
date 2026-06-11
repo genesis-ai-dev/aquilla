@@ -75,7 +75,7 @@ import { runDiarization, type DiarizationPhase } from "@/lib/diarization/run-dia
 import { attachMediaFileToTimeline, attachMediaUrlToTimeline } from "@/lib/timeline/attach-media"
 import { useCellsAuditStatsWithOverlay } from "@/hooks/useCellsAuditStatsWithOverlay"
 import { useComments } from "@/hooks/useComments"
-import { Film, Scale, MessagesSquare, Share2, Settings as SettingsIcon, Lock, ClipboardList, Trash2, Undo2, Search as SearchIcon, Sparkles, Mic2, Download, BookMarked, BookOpen, Users, MessageSquare, Camera, UserCheck } from "lucide-react"
+import { Film, Scale, MessagesSquare, Share2, Settings as SettingsIcon, Lock, ClipboardList, Trash2, Undo2, Sparkles, Mic2, Download, BookMarked, BookOpen, Users, Camera, UserCheck, Eye, ArrowRight } from "lucide-react"
 import { ChatPanel } from "./ChatPanel"
 import { ChatDockPanel } from "./ChatDockPanel"
 import { SearchDockPanel } from "./SearchDockPanel"
@@ -86,7 +86,6 @@ import { TranslationNotesSidebar, readTnSidebarVisible, writeTnSidebarVisible } 
 import { InactiveProjectBanner } from "./InactiveProjectBanner"
 import { OfflineBanner } from "./OfflineBanner"
 import { useProjectLifecycle } from "@/hooks/useProjectLifecycle"
-import { cn } from "@/lib/utils"
 import { restoreProject } from "@/lib/store/project-index"
 import { AppShell } from "./AppShell"
 import { WorkspaceHeader } from "./WorkspaceHeader"
@@ -101,7 +100,8 @@ import { SidebarProjectSection } from "./SidebarProjectSection"
 import { SuggestionBanner } from "./SuggestionBanner"
 import { ConfirmActionDialog } from "./ConfirmActionDialog"
 import { PeerPresence } from "./PeerPresence"
-import { ViewSettingsMenu } from "./ViewSettingsMenu"
+import { ViewSettingsMenu, type ViewSettingsMenuHandle } from "./ViewSettingsMenu"
+import type { OverflowMenuItem } from "./OverflowMenu"
 import { useFootnotesPreference } from "@/hooks/useFootnotesPreference"
 import { useFileFontSizes, setFileViewPref } from "@/lib/store/file-view-prefs"
 import { EditorScrollProvider, useEditorScroll } from "@/context/EditorScrollContext"
@@ -121,7 +121,6 @@ import { SetupChecklistDrawer } from "./onboarding/SetupChecklistDrawer"
 import { SystemPromptNudge } from "./onboarding/SystemPromptNudge"
 import { CompletionBulkProgressBanner } from "./CompletionBulkProgressBanner"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
-import { NextUnfinishedButton } from "./NextUnfinishedButton"
 import { useNextUnfinished } from "@/hooks/useNextUnfinished"
 import { AiSetupDialog } from "./AiSetupDialog"
 import {
@@ -487,6 +486,7 @@ export function ProjectWorkspace() {
     navigate(`/project/${projectId}/settings`)
   }, [navigate, projectId])
   const editorRef = useRef<EditorTableHandle>(null)
+  const viewSettingsRef = useRef<ViewSettingsMenuHandle>(null)
   // Holds a cellId to scroll to once cells are loaded after a restore-location
   // navigation. Set during the restore effect, consumed (and cleared) by a
   // separate effect that fires when `cells` are available.
@@ -2443,6 +2443,104 @@ export function ProjectWorkspace() {
     }
   }, [getTokenForProjectFile, refreshOutboxPending, revalidateAuditStats, revalidateCell, revalidateCells])
 
+  const workspaceHeaderMenuItems = useMemo((): OverflowMenuItem[] => {
+    const diarizeLabel =
+      diarizePhase === "starting" || diarizePhase === "running"
+        ? "Diarizing…"
+        : diarizePhase === "applying"
+          ? "Applying…"
+          : diarizeError
+            ? "Diarize failed"
+            : "Diarize"
+
+    const items: OverflowMenuItem[] = [
+      {
+        id: "view-settings",
+        label: "View settings",
+        icon: Eye,
+        onClick: () => viewSettingsRef.current?.open(),
+      },
+      {
+        id: "next-unfinished",
+        label: "Next unfinished",
+        icon: ArrowRight,
+        disabled: !activeFileId || !hasUnfinished,
+        onClick: handleJumpNextUnfinished,
+      },
+    ]
+
+    if (canExportByOrgPolicy) {
+      items.push({
+        id: "export-file",
+        label: "Export file",
+        icon: Download,
+        onClick: openExportFlow,
+      })
+    }
+
+    if (canAssignWork && activeFileId) {
+      items.push({
+        id: "assign-work",
+        label: "Assign work",
+        icon: UserCheck,
+        onClick: () => setAssignModalOpen(true),
+      })
+    }
+
+    if (lens === "audio" && canDiarize) {
+      items.push({
+        id: "diarize",
+        label: diarizeLabel,
+        icon: Users,
+        disabled: diarizeBusy,
+        onClick: handleDiarize,
+      })
+    }
+
+    const contextual: OverflowMenuItem[] = [
+      ...(isSubtitleFile
+        ? [{
+            id: "attach-video",
+            label: "Attach video",
+            icon: Film,
+            onClick: () => setVideoDialogOpen(true),
+          }]
+        : []),
+      ...(suggestions.length > 0 && suggestionsDismissed
+        ? [{
+            id: "redetect-suggestions",
+            label: `Show ${suggestions.length} file name suggestion${suggestions.length === 1 ? "" : "s"}`,
+            icon: Sparkles,
+            onClick: handleReinviteSuggestions,
+          }]
+        : []),
+    ]
+
+    if (contextual.length > 0) {
+      items.push({ id: "sep-contextual", type: "separator" })
+      items.push(...contextual)
+    }
+
+    return items
+  }, [
+    activeFileId,
+    hasUnfinished,
+    handleJumpNextUnfinished,
+    canExportByOrgPolicy,
+    openExportFlow,
+    canAssignWork,
+    lens,
+    canDiarize,
+    diarizePhase,
+    diarizeError,
+    diarizeBusy,
+    handleDiarize,
+    isSubtitleFile,
+    suggestions.length,
+    suggestionsDismissed,
+    handleReinviteSuggestions,
+  ])
+
   if (status === "loading") return <WorkspaceSkeleton />
   if (status === "no-session") {
     return (
@@ -2803,24 +2901,7 @@ export function ProjectWorkspace() {
           <WorkspaceHeader
             project={project}
             onBack={goToProjects}
-            extraMenuItems={[
-              ...(isSubtitleFile
-                ? [{
-                    id: "attach-video",
-                    label: "Attach video",
-                    icon: Film,
-                    onClick: () => setVideoDialogOpen(true),
-                  }]
-                : []),
-              ...(suggestions.length > 0 && suggestionsDismissed
-                ? [{
-                    id: "redetect-suggestions",
-                    label: `Show ${suggestions.length} file name suggestion${suggestions.length === 1 ? "" : "s"}`,
-                    icon: Sparkles,
-                    onClick: handleReinviteSuggestions,
-                  }]
-                : []),
-            ]}
+            extraMenuItems={workspaceHeaderMenuItems}
           >
             {/* Contextual onboarding status — self-removes once setup completes. */}
             {checklistState.totalCount > 0 && checklistState.completedCount < checklistState.totalCount && (
@@ -2845,100 +2926,6 @@ export function ProjectWorkspace() {
               </TooltipProvider>
             )}
 
-            {/* Utility tools — icon-only, grouped tight so they read as one set. */}
-            <div className="flex items-center gap-0.5">
-              <ViewSettingsMenu
-                fileOpen={Boolean(activeFileId)}
-                lineNumbersEnabled={fileMeta.lineNumbersEnabled}
-                sourceTextDirection={fileMeta.sourceTextDirection}
-                targetTextDirection={fileMeta.targetTextDirection}
-                cellLabelsEnabled={cellLabelsEnabled}
-                footnotesInlineEnabled={footnotesInlineEnabled}
-                onFootnotesInlineChange={setFootnotesInlineEnabled}
-                tnSidebarEnabled={tnSidebarVisible}
-                rtlHintDismissed={fileMeta.rtlHintDismissed}
-                sourceFontSize={fontSizes.source}
-                targetFontSize={fontSizes.target}
-                onLineNumbersChange={fileMeta.setLineNumbersEnabled}
-                onSourceTextDirectionChange={fileMeta.setSourceTextDirection}
-                onTargetTextDirectionChange={fileMeta.setTargetTextDirection}
-                onCellLabelsChange={setCellLabelsEnabled}
-                onSourceFontSizeChange={(v) => { if (activeFileId) setFileViewPref(activeFileId, { sourceFontSize: v }) }}
-                onTargetFontSizeChange={(v) => { if (activeFileId) setFileViewPref(activeFileId, { targetFontSize: v }) }}
-                onTnSidebarChange={(v) => {
-                  setTnSidebarVisible(v)
-                  if (projectId) writeTnSidebarVisible(projectId, v)
-                }}
-                onDismissRtlHint={fileMeta.dismissRtlHint}
-              />
-              {/* FRO-308: Search button opens the search dock tab (quick search)
-                  or falls back to full ParallelPassagesPanel dialog via ⌘F */}
-              <Button
-                variant="ghost"
-                size="icon"
-                onClick={() => {
-                  if (dockTab === "search") {
-                    setDockTab(null)
-                  } else {
-                    setDockTab("search")
-                  }
-                }}
-                title="Search (dock)"
-                aria-label="Search"
-                aria-pressed={dockTab === "search"}
-              >
-                <SearchIcon className="h-4 w-4" />
-              </Button>
-              {/* FRO-320: AI chat button opens the chat dock tab */}
-              <Button
-                variant="ghost"
-                size="icon"
-                onClick={() => {
-                  if (dockTab === "chat") {
-                    setDockTab(null)
-                  } else {
-                    setDockTab("chat")
-                  }
-                }}
-                title="AI chat (copilot)"
-                aria-label="Open AI chat"
-                aria-pressed={dockTab === "chat"}
-              >
-                <MessageSquare className="h-4 w-4" />
-              </Button>
-              <NextUnfinishedButton
-                onClick={handleJumpNextUnfinished}
-                disabled={!activeFileId || !hasUnfinished}
-              />
-              {/* FRO-253: hide export button when org policy disallows it */}
-              {canExportByOrgPolicy && (
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  onClick={openExportFlow}
-                  title="Export file"
-                  aria-label="Export file"
-                >
-                  <Download className="h-4 w-4" />
-                </Button>
-              )}
-              {/* FRO-192: Assign… button — visible only to project_lead+ */}
-              {canAssignWork && activeFileId && (
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  onClick={() => setAssignModalOpen(true)}
-                  title="Assign work to a member"
-                  aria-label="Assign work"
-                >
-                  <UserCheck className="h-4 w-4" />
-                </Button>
-              )}
-            </div>
-
-            <div className="mx-1 h-5 w-px bg-border" aria-hidden="true" />
-
-            {/* Primary zone — mode toggle + the one prominent action. */}
             {project && centerSurface === "editor" && (
               <EditorModeToggle
                 lens={lens}
@@ -2946,33 +2933,36 @@ export function ProjectWorkspace() {
                 timeOrdered={activeFile ? fileOrderedBy(activeFile) === "time" : false}
               />
             )}
-            {lens === "audio" && canDiarize && (
-              <button
-                type="button"
-                onClick={handleDiarize}
-                disabled={diarizeBusy}
-                title={
-                  diarizeError
-                    ? `Diarization failed: ${diarizeError}`
-                    : "Split this clip into per-speaker segments (pyannote)"
-                }
-                className={cn(
-                  "flex items-center gap-1 rounded-full px-2.5 py-1 text-xs transition-shadow",
-                  diarizeBusy ? "text-muted-foreground" : "bg-card shadow-neu-xs hover:shadow-neu-sm",
-                  diarizeError && "text-red-500",
-                )}
-              >
-                <Users className="h-3 w-3" />
-                {diarizePhase === "starting" || diarizePhase === "running"
-                  ? "Diarizing…"
-                  : diarizePhase === "applying"
-                    ? "Applying…"
-                    : diarizeError
-                      ? "Diarize failed"
-                      : "Diarize"}
-              </button>
-            )}
+
             <PrimaryActionButton ctx={actionCtx} run={actionArgs} />
+
+            {/* FRO-331: hidden trigger — opened from ⋯ menu; keeps RTL hint anchored here. */}
+            <ViewSettingsMenu
+              ref={viewSettingsRef}
+              hideTrigger
+              fileOpen={Boolean(activeFileId)}
+              lineNumbersEnabled={fileMeta.lineNumbersEnabled}
+              sourceTextDirection={fileMeta.sourceTextDirection}
+              targetTextDirection={fileMeta.targetTextDirection}
+              cellLabelsEnabled={cellLabelsEnabled}
+              footnotesInlineEnabled={footnotesInlineEnabled}
+              onFootnotesInlineChange={setFootnotesInlineEnabled}
+              tnSidebarEnabled={tnSidebarVisible}
+              rtlHintDismissed={fileMeta.rtlHintDismissed}
+              sourceFontSize={fontSizes.source}
+              targetFontSize={fontSizes.target}
+              onLineNumbersChange={fileMeta.setLineNumbersEnabled}
+              onSourceTextDirectionChange={fileMeta.setSourceTextDirection}
+              onTargetTextDirectionChange={fileMeta.setTargetTextDirection}
+              onCellLabelsChange={setCellLabelsEnabled}
+              onSourceFontSizeChange={(v) => { if (activeFileId) setFileViewPref(activeFileId, { sourceFontSize: v }) }}
+              onTargetFontSizeChange={(v) => { if (activeFileId) setFileViewPref(activeFileId, { targetFontSize: v }) }}
+              onTnSidebarChange={(v) => {
+                setTnSidebarVisible(v)
+                if (projectId) writeTnSidebarVisible(projectId, v)
+              }}
+              onDismissRtlHint={fileMeta.dismissRtlHint}
+            />
           </WorkspaceHeader>
         }
         beforeMain={

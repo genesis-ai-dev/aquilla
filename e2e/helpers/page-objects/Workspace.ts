@@ -112,4 +112,29 @@ export class Workspace {
     // Wait longer to accommodate the sync round-trip under load.
     await expect(validationButton).toHaveAttribute("title", /validated/, { timeout: 15_000 })
   }
+
+  /** Open the workspace header ⋯ overflow menu (OverflowMenu). */
+  async openHeaderOverflowMenu(): Promise<void> {
+    const moreBtn = this.page.getByRole("button", { name: /^More$/i })
+    await expect(moreBtn).toBeVisible({ timeout: 10_000 })
+    await moreBtn.click()
+  }
+
+  /** FRO-331: view settings live in the header overflow menu. */
+  async openViewSettingsMenu(): Promise<void> {
+    await this.openHeaderOverflowMenu()
+    await this.page.getByRole("menuitem", { name: /View settings/i }).click()
+  }
+
+  /** FRO-331: export file action lives in the header overflow menu. */
+  async openExportDialog(): Promise<void> {
+    await this.openHeaderOverflowMenu()
+    await this.page.getByRole("menuitem", { name: /Export file/i }).click()
+  }
+
+  /** FRO-331: next unfinished lives in the header overflow menu. */
+  async jumpNextUnfinished(): Promise<void> {
+    await this.openHeaderOverflowMenu()
+    await this.page.getByRole("menuitem", { name: /Next unfinished/i }).click()
+  }
 }

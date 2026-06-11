@@ -10,7 +10,7 @@ const SAMPLE_MD = path.resolve(__dirname, "../../fixtures/sample.md")
 /**
  * ViewSettingsMenu — text direction toggle.
  *
- * The menu (opened via the "View settings" button) has two menu items:
+ * The menu (opened via header ⋯ → "View settings", FRO-331) has two menu items:
  *   - "Source" — toggles source text direction LTR ↔ RTL
  *   - "Target" — toggles target text direction LTR ↔ RTL
  * Each shows a DirPill badge with the current direction text ("LTR" or "RTL").
@@ -30,11 +30,8 @@ test("view settings text direction Source toggle switches LTR to RTL", async ({ 
   await ws.openFileBySubstring("sample")
   await ws.waitForEditor()
 
-  // Open the view settings menu.
-  const viewSettingsBtn = alice.getByRole("button", { name: /View settings/i })
-    .or(alice.locator('button[title="View settings"]'))
-  await expect(viewSettingsBtn.first()).toBeVisible({ timeout: 10_000 })
-  await viewSettingsBtn.first().click()
+  // Open the view settings menu from the header overflow menu (FRO-331).
+  await ws.openViewSettingsMenu()
 
   // "Source" menu item is visible showing "LTR".
   const sourceItem = alice.getByRole("menuitem", { name: /Source/i })
@@ -45,7 +42,7 @@ test("view settings text direction Source toggle switches LTR to RTL", async ({ 
   await sourceItem.click()
 
   // Reopen menu (clicking a menu item closes it).
-  await viewSettingsBtn.first().click()
+  await ws.openViewSettingsMenu()
 
   // Source now shows "RTL".
   const sourceItem2 = alice.getByRole("menuitem", { name: /Source/i })
@@ -54,7 +51,7 @@ test("view settings text direction Source toggle switches LTR to RTL", async ({ 
 
   // Toggle back to LTR.
   await sourceItem2.click()
-  await viewSettingsBtn.first().click()
+  await ws.openViewSettingsMenu()
   const sourceItem3 = alice.getByRole("menuitem", { name: /Source/i })
   await expect(sourceItem3.getByText("LTR")).toBeVisible({ timeout: 2_000 })
 

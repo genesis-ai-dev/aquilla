@@ -12,8 +12,9 @@ interface Props {
 
 export function WorkspaceHeader({ project, onBack, children, extraMenuItems }: Props) {
   const items: OverflowMenuItem[] = [
-    { id: "close", label: "Close project", icon: X, onClick: onBack },
     ...(extraMenuItems ?? []),
+    { id: "sep-close", type: "separator" },
+    { id: "close", label: "Close project", icon: X, onClick: onBack },
   ]
   return (
     <header className="relative z-30 flex items-center gap-3 px-4 py-2">

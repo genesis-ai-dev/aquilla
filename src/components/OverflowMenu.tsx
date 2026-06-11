@@ -7,9 +7,11 @@ import { ColorThemePicker } from "@/branding/ColorTheme"
 
 export interface OverflowMenuItem {
   id: string
-  label: string
-  icon: ComponentType<{ className?: string }>
-  onClick: () => void
+  type?: "item" | "separator"
+  label?: string
+  icon?: ComponentType<{ className?: string }>
+  onClick?: () => void
+  disabled?: boolean
 }
 
 interface Props {
@@ -55,15 +57,26 @@ export function OverflowMenu({ items, includeTheme = true }: Props) {
         {/* z-40 on Positioner, not Popup — see ui/tooltip.tsx for rationale. */}
         <Menu.Positioner sideOffset={4} align="end" className="z-40">
           <Menu.Popup className="min-w-48 rounded-xl border bg-popover p-1 text-popover-foreground shadow-soft-lg">
-            {items.map((item) => (
-              <Menu.Item key={item.id} onClick={item.onClick} className={ITEM_CLASS}>
-                <item.icon className="h-4 w-4" />
-                <span>{item.label}</span>
-              </Menu.Item>
-            ))}
+            {items.map((item) =>
+              item.type === "separator" ? (
+                <div key={item.id} className="my-1 h-px bg-border" role="separator" />
+              ) : (
+                <Menu.Item
+                  key={item.id}
+                  disabled={item.disabled}
+                  onClick={item.onClick}
+                  className={ITEM_CLASS}
+                >
+                  {item.icon && <item.icon className="h-4 w-4" />}
+                  <span>{item.label}</span>
+                </Menu.Item>
+              ),
+            )}
             {includeTheme && (
               <>
-                {items.length > 0 && <div className="my-1 h-px bg-border" role="separator" />}
+                {items.some((item) => item.type !== "separator") && (
+                  <div className="my-1 h-px bg-border" role="separator" />
+                )}
                 <div className="flex items-center justify-between gap-2 px-2 py-1 text-sm">
                   <span className="text-muted-foreground">Theme</span>
                   <ThemeToggle />

@@ -34,10 +34,8 @@ test("export dialog opens and downloads a TSV file for the open file", async ({ 
   await ws.openFileBySubstring("sample")
   await ws.waitForEditor()
 
-  // 1. Open the export dialog.
-  const exportBtn = alice.locator('button[aria-label="Export file"]')
-  await expect(exportBtn).toBeVisible({ timeout: 5_000 })
-  await exportBtn.click()
+  // 1. Open the export dialog from the header overflow menu (FRO-331).
+  await ws.openExportDialog()
 
   // The dialog should appear with the title "Export".
   const dialog = alice.getByRole("dialog")

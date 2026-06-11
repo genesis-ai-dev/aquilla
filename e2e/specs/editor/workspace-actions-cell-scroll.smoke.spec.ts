@@ -36,13 +36,8 @@ test("next unfinished button advances past validated cell or shows all-done stat
   await ws.editCell(0, "Fini")
   await ws.validateCell(0)
 
-  // Click Next Unfinished button (aria-label in NextUnfinishedButton.tsx).
-  const nextBtn = alice.locator('button[aria-label="Next unfinished cell"]')
-    .or(alice.locator('button[title="Next unfinished cell"]'))
-    .or(alice.getByRole("button", { name: /Next unfinished/i }))
-    .first()
-  await expect(nextBtn).toBeVisible({ timeout: 5_000 })
-  await nextBtn.click()
+  // Next unfinished lives in the header overflow menu (FRO-331).
+  await ws.jumpNextUnfinished()
 
   // Either all cells are done (toast) or we scrolled to the next cell.
   // The editor table should still be visible in either case.

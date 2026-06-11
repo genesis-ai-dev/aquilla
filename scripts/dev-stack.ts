@@ -100,9 +100,13 @@ const args = process.argv.slice(2)
 const WITHOUT_SYNC = args.includes("--no-sync")
 const VERBOSE = args.includes("--verbose") || process.env.DEV_STACK_VERBOSE === "1"
 const VITE_PORT_ARG = args.find((a) => a.startsWith("--vite-port="))
+// Also accept bare `--port <N>` forwarded by `npm run dev -- --port 1420`
+const PORT_IDX = args.indexOf("--port")
 const VITE_PORT = VITE_PORT_ARG
   ? Number(VITE_PORT_ARG.split("=")[1])
-  : DEFAULT_VITE_PORT
+  : PORT_IDX !== -1 && args[PORT_IDX + 1]
+    ? Number(args[PORT_IDX + 1])
+    : DEFAULT_VITE_PORT
 
 const MANAGED_ENV_FILE = path.join(REPO_ROOT, ".env.development.local")
 const ENV_FILE_HEADER =

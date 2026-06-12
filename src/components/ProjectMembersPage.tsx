@@ -126,9 +126,20 @@ export function ProjectMembersPage() {
 
 // ──────────────────────────────────────────────────────────────────────────
 // Members tab
+//
+// Exported (FRO-335) so the org-side ProjectOverview (/projects/:id) can
+// embed the same members add/change-role/revoke surface the in-project
+// members page offers — one implementation, two surfaces.
 // ──────────────────────────────────────────────────────────────────────────
 
-function MembersTab({ projectId }: { projectId: string }) {
+export function MembersTab({
+  projectId,
+  className = "mx-auto max-w-2xl space-y-6",
+}: {
+  projectId: string
+  /** Layout wrapper classes; override when embedding outside the members page. */
+  className?: string
+}) {
   const { session } = useFrontierSession()
   const { members, isLoading, error, refresh, add, remove } = useProjectMembers(projectId)
   const callerMaxRole = ROLE.MAINTAINER
@@ -165,7 +176,7 @@ function MembersTab({ projectId }: { projectId: string }) {
   const grantableRoles = PROJECT_ROLE_OPTIONS.filter((r) => r.level <= callerMaxRole)
 
   return (
-    <div className="mx-auto max-w-2xl space-y-6">
+    <div className={className}>
       {/* Error banner */}
       {error && (
         <div className="flex items-center gap-2 rounded border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">

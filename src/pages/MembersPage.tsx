@@ -18,6 +18,7 @@ import { MembersPanel, type MembersPanelMember } from "@/components/MembersPanel
 import { MultiProjectInviteDialog } from "@/components/MultiProjectInviteDialog"
 import { RemoveOrgMemberDialog } from "@/components/RemoveOrgMemberDialog"
 import { MemberAccessRow } from "@/components/org/MemberAccessPanel"
+import { ExternalCollaboratorsSection } from "@/components/org/ExternalCollaboratorsSection"
 import { ROLE, ORG_ROLE_PICKER, roleName } from "@/lib/frontier/roles"
 import { formatRelativeTime } from "@/lib/time/relative"
 import type { OrgMemberProject, PendingOrgInvite } from "@/lib/frontier/orgs"
@@ -128,6 +129,9 @@ interface MembersPageContentProps {
 
 function MembersPageContent({ orgId, orgName }: MembersPageContentProps) {
   const callerUserId = null // FrontierSession has no userId; server enforces self-block.
+  const { activeOrg } = useActiveOrg()
+  // FRO-326: the External-collaborators governance view is maintainer+ only.
+  const canGovern = (activeOrg?.role.level ?? 0) >= ROLE.MAINTAINER
   const { members, isLoading: membersLoading, error: membersError, add, remove, listMemberProjects, refresh } =
     useOrgMembers(orgId)
   const { projects: accessibleProjects, refresh: refreshProjects } = useAccessibleProjects()
@@ -198,6 +202,12 @@ function MembersPageContent({ orgId, orgName }: MembersPageContentProps) {
             }
           />
           <PendingInvitesSection orgId={orgId} />
+          {canGovern && (
+            <ExternalCollaboratorsSection
+              orgId={orgId}
+              orgMemberIds={members.map((m) => m.userId)}
+            />
+          )}
         </div>
       )}
 

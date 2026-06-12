@@ -129,6 +129,77 @@ invites.post(
 )
 
 // ──────────────────────────────────────────────────────────────────────────
+// GET /api/v2/invites/mine — pending invites addressed to the caller
+// (FRO-326). Email-targeted invites only: open links carry no recipient
+// identity and stay out-of-band by design. Privacy per FRO-321 — a user
+// sees only invites whose email matches their own account email. Rows
+// sharing a token (multi-project invites) are grouped into one entry.
+//
+// Registered before /:token/preview so "mine" is never parsed as a token.
+// ──────────────────────────────────────────────────────────────────────────
+
+invites.get("/mine", authMiddleware, async (c) => {
+  const user = c.get("user")
+
+  const rows = await c.env.AQUILLA_PG.prepare(
+    `SELECT pi.token AS token,
+            pi.project_id AS project_id,
+            p.name AS project_name,
+            pi.role_level AS role_level,
+            cu.username AS created_by_username,
+            pi.created_at AS created_at,
+            pi.expires_at AS expires_at
+       FROM project_invites pi
+       JOIN projects p ON p.id = pi.project_id
+       JOIN users cu ON cu.id = pi.created_by
+      WHERE LOWER(pi.email) = LOWER(?)
+        AND pi.used_by IS NULL
+        AND (pi.expires_at IS NULL OR pi.expires_at > CURRENT_TIMESTAMP)
+        AND p.archived_at IS NULL
+      ORDER BY pi.created_at DESC`,
+  )
+    .bind(user.email)
+    .all<{
+      token: string
+      project_id: string
+      project_name: string
+      role_level: number
+      created_by_username: string
+      created_at: string
+      expires_at: string | null
+    }>()
+
+  const byToken = new Map<
+    string,
+    {
+      token: string
+      role: { level: number; name: string }
+      createdBy: string
+      createdAt: string
+      expiresAt: string | null
+      projects: Array<{ projectId: string; projectName: string }>
+    }
+  >()
+  for (const r of rows.results ?? []) {
+    let entry = byToken.get(r.token)
+    if (!entry) {
+      entry = {
+        token: r.token,
+        role: { level: r.role_level, name: roleNameFor(r.role_level) },
+        createdBy: r.created_by_username,
+        createdAt: r.created_at,
+        expiresAt: r.expires_at,
+        projects: [],
+      }
+      byToken.set(r.token, entry)
+    }
+    entry.projects.push({ projectId: r.project_id, projectName: r.project_name })
+  }
+
+  return c.json({ invites: Array.from(byToken.values()) })
+})
+
+// ──────────────────────────────────────────────────────────────────────────
 // GET /api/v2/invites/:token/preview — public; returns the list of project
 // names + the shared role so the JoinPage can render a confirmation card
 // before the user accepts.
@@ -216,7 +287,7 @@ invites.post("/:token/accept", authMiddleware, async (c) => {
 
   const rows = await c.env.AQUILLA_PG.prepare(
     `SELECT token, project_id, role_level, created_by, created_at,
-            expires_at, used_by, used_at
+            expires_at, used_by, used_at, email
        FROM project_invites WHERE token = ?`,
   )
     .bind(token)
@@ -236,9 +307,34 @@ invites.post("/:token/accept", authMiddleware, async (c) => {
     }
   }
 
+  // Email-bound invites: require the redeemer's account email to match
+  // (case-insensitive), mirroring the legacy single-project accept (FRO-283).
+  // JoinPage prefers THIS endpoint even for single-project tokens, so the
+  // check must live here too or the binding is a dead letter (FRO-326).
+  // All rows share the token's email; sample the first.
+  if (first.email && first.email.toLowerCase() !== user.email.toLowerCase()) {
+    return c.json(
+      { error: "This invite was sent to a different email address." },
+      403,
+    )
+  }
+
+  // Archived projects can't be joined via invite (mirrors legacy accept).
+  const archivedRows = await c.env.AQUILLA_PG.prepare(
+    `SELECT id FROM projects
+      WHERE id IN (${invitesForToken.map(() => "?").join(",")})
+        AND archived_at IS NOT NULL`,
+  )
+    .bind(...invitesForToken.map((r) => r.project_id))
+    .all<{ id: string }>()
+  const archivedIds = new Set((archivedRows.results ?? []).map((r) => r.id))
+
   const accepted: Array<{ projectId: string; role: number }> = []
 
   for (const invite of invitesForToken) {
+    if (archivedIds.has(invite.project_id)) {
+      continue
+    }
     // Row already stamped by a *different* user — a second person with the
     // same single-use link. Skip rather than 410-ing the whole multi-accept
     // so any remaining unused rows still flow.
@@ -310,6 +406,11 @@ invites.post("/:token/accept", authMiddleware, async (c) => {
   }
 
   if (accepted.length === 0) {
+    // Honest failure reason: every row pointing at an archived project is
+    // a different situation than a spent single-use link.
+    if (invitesForToken.every((r) => archivedIds.has(r.project_id))) {
+      return c.json({ error: "This project has been archived." }, 410)
+    }
     return c.json({ error: "Invite already used" }, 410)
   }
 

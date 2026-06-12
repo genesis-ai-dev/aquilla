@@ -8,6 +8,7 @@ import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { getPortfolio, translatedPct, validatedPct, attentionRank, audioPct, deadlineStatus, type PortfolioProject } from "@/lib/frontier/portfolio"
 import { fetchAccessibleProjects, type CloudProjectSummary } from "@/lib/sync/cloud-projects"
 import { partitionSharedProjects } from "@/lib/frontier/shared-projects"
+import { listMyPendingInvites, type MyPendingInvite } from "@/lib/sync/invites"
 import { WorkloadRollup } from "./WorkloadRollup"
 import { UserError } from "@/lib/errors/user-error"
 import { notifySessionExpired } from "@/lib/errors/session-expired-signal"
@@ -45,6 +46,9 @@ export function OrgHome() {
   // FRO-335: projects shared from orgs the caller isn't a member of
   // (invite-link / bulk-add grants) — the org portfolio above can't see them.
   const [sharedProjects, setSharedProjects] = useState<CloudProjectSummary[]>([])
+  // FRO-326: unredeemed invites addressed to the caller's email — without
+  // this card, an invite whose link never arrived is undiscoverable in-app.
+  const [pendingInvites, setPendingInvites] = useState<MyPendingInvite[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [query, setQuery] = useState("")
@@ -86,6 +90,16 @@ export function OrgHome() {
       .catch(() => { if (!cancelled) setSharedProjects([]) })
     return () => { cancelled = true }
   }, [jwt, orgs, activeOrgId, orgLoading])
+
+  // FRO-326: received-invites surface. Org-independent (matched by email).
+  useEffect(() => {
+    if (!jwt) { setPendingInvites([]); return }
+    let cancelled = false
+    listMyPendingInvites(jwt)
+      .then((list) => { if (!cancelled) setPendingInvites(list) })
+      .catch(() => { if (!cancelled) setPendingInvites([]) })
+    return () => { cancelled = true }
+  }, [jwt])
 
   // Signed-out state: session finished loading but no JWT.
   // Never show zero-stat fake-empty cards for unauthenticated visitors.
@@ -166,6 +180,36 @@ export function OrgHome() {
               <div className="rounded-lg border p-4">
                 <h1 className="text-lg font-semibold">{activeOrg?.name ?? "Workspace"}</h1>
               </div>
+
+              {/* FRO-326: received invites — the user has been invited but
+                  hasn't accepted yet. Without this, an invite whose email/link
+                  never arrived is undiscoverable in-app. */}
+              {pendingInvites.length > 0 && (
+                <section data-testid="pending-invitations" className="space-y-2">
+                  <h2 className="text-sm font-medium text-muted-foreground">Pending invitations</h2>
+                  <div className="rounded-lg border divide-y">
+                    {pendingInvites.map((inv) => (
+                      <div key={inv.token} className="flex flex-wrap items-center gap-3 p-4">
+                        <div className="flex-1 min-w-0">
+                          <p className="truncate text-sm font-medium">
+                            {inv.projects.map((p) => p.projectName).join(", ")}
+                          </p>
+                          <p className="text-xs text-muted-foreground">
+                            Invited by {inv.createdBy} as {inv.role.name.replace(/_/g, " ")}
+                            {inv.expiresAt ? ` · expires ${new Date(inv.expiresAt).toLocaleDateString()}` : ""}
+                          </p>
+                        </div>
+                        <Link
+                          to={`/join/${inv.token}`}
+                          className="shrink-0 rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground hover:bg-primary/90"
+                        >
+                          Review &amp; accept
+                        </Link>
+                      </div>
+                    ))}
+                  </div>
+                </section>
+              )}
 
               {/* Rollup strip */}
               <div className="grid grid-cols-6 gap-4">

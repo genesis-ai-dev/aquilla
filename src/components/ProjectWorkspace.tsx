@@ -1249,6 +1249,23 @@ export function ProjectWorkspace() {
     projectId: project?.id,
   })
 
+  // Translation agent (chat dock Agent mode): live cell lookup for proposal
+  // lint + chain heads, and the post-apply flush/revalidate sequence — the
+  // same steps commitCompletedCell runs after its own enqueue.
+  const resolveCellById = useCallback(
+    (cellId: string) => cellsRef.current.find((c) => c.id === cellId),
+    [],
+  )
+  const handleAgentApplied = useCallback(
+    async (_eventIds: string[], cellIds: string[]) => {
+      await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
+      await refreshOutboxPending()
+      revalidateAuditStats()
+      for (const cellId of cellIds) revalidateCell(cellId)
+    },
+    [getTokenForProjectFile, refreshOutboxPending, revalidateAuditStats, revalidateCell],
+  )
+
   // ── Back-translation: statistical primary path + optional LLM polish ────────
   //
   // Generation strategy (per spec):
@@ -2923,6 +2940,19 @@ export function ProjectWorkspace() {
                     context: cell.context ?? undefined,
                   }
                 })()}
+                agent={{
+                  projectId: project.id,
+                  jwt,
+                  author: currentUsername,
+                  roleLevel: currentRoleLevel,
+                  context: {
+                    fileId: activeFileId ?? undefined,
+                    cellId: focusedCellId ?? undefined,
+                  },
+                  rules,
+                  resolveCell: resolveCellById,
+                  onApplied: handleAgentApplied,
+                }}
               />
             }
             searchPanel={

@@ -70,6 +70,7 @@ import adminRoutes from "./routes/admin"
 import testResetRoutes from "./routes/test-reset"
 import devSeedRoutes from "./routes/dev-seed"
 import chatRoutes from "./routes/chat"
+import agentRoutes from "./routes/agent"
 import parseDocumentRoutes from "./routes/parse-document"
 import termbaseSubscriptionRoutes from "./routes/termbase-subscriptions"
 
@@ -132,6 +133,7 @@ app.get("/", (c) =>
       "/api/v2/admin/*",
       "/api/v2/health",
       "/api/v1/chat/completions",
+      "/api/v1/ai/agent/run",
     ],
   }),
 )
@@ -173,6 +175,10 @@ app.route("/api/v2/invites", invitesRoutes)
 // path is kept at /api/v1/chat/completions so the codex-web client doesn't
 // need to change — it just points VITE_CHAT_BASE at api.aquilla.app/chat.
 app.route("/api/v1/chat", chatRoutes)
+// Translation agent (SSE) — one-tool SQL agent, staged-write proposals.
+// Same auth + AI-guard path as chat; see routes/agent.ts and the 2026-06-12
+// translation-agent design/implementation-plan specs.
+app.route("/api/v1/ai/agent", agentRoutes)
 app.route("/api/v2/parse-document", parseDocumentRoutes)
 
 // Test-only reset endpoint (WRANGLER_LOCAL only — see routes/test-reset.ts).
@@ -216,7 +222,15 @@ app.fetch = (async (request: Request, env: Env, ctx: ExecutionContext): Promise<
   const shim = makePostgres(env.HYPERDRIVE.connectionString)
   // Drop HYPERDRIVE so the prefix-strip middleware's re-entrant app.fetch reuses
   // this shim (via reqEnv.AQUILLA_PG) instead of opening a second connection.
-  const reqEnv = { ...env, AQUILLA_PG: shim as unknown as AquillaDb, HYPERDRIVE: undefined }
+  // PG_CONNECTION_STRING: streaming routes (routes/agent.ts) must open their
+  // own connection — the request-scoped shim below is closed as soon as the
+  // Response returns, which is BEFORE an SSE stream body finishes.
+  const reqEnv = {
+    ...env,
+    AQUILLA_PG: shim as unknown as AquillaDb,
+    HYPERDRIVE: undefined,
+    PG_CONNECTION_STRING: env.HYPERDRIVE.connectionString,
+  }
   try {
     return await baseFetch(request, reqEnv, ctx)
   } finally {

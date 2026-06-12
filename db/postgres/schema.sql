@@ -505,6 +505,26 @@ CREATE TABLE IF NOT EXISTS ai_usage_daily (
 );
 CREATE INDEX IF NOT EXISTS idx_ai_usage_daily_date ON ai_usage_daily(date_utc);
 
+-- Translation agent run ledger (0040_agent_runs.sql). One row per
+-- POST /api/v1/ai/agent/run; staged commits carry payload.agent_run_id →
+-- run_id for attribution / undo-run / cost rollups.
+CREATE TABLE IF NOT EXISTS agent_runs (
+    run_id      TEXT PRIMARY KEY,
+    project_id  TEXT NOT NULL,
+    user_id     BIGINT NOT NULL,
+    username    TEXT NOT NULL,
+    prompt      TEXT NOT NULL,
+    model       TEXT NOT NULL,
+    status      TEXT NOT NULL DEFAULT 'running', -- running|ok|capped|error
+    prompt_tokens     BIGINT NOT NULL DEFAULT 0,
+    completion_tokens BIGINT NOT NULL DEFAULT 0,
+    cost_cents  DOUBLE PRECISION NOT NULL DEFAULT 0,
+    steps       INTEGER NOT NULL DEFAULT 0,
+    started_at  BIGINT NOT NULL,
+    ended_at    BIGINT
+);
+CREATE INDEX IF NOT EXISTS idx_agent_runs_project ON agent_runs (project_id, started_at DESC);
+
 -- ───────────────────────── post-migration notes ─────────────────────────
 -- After the bulk data load (Stage C), reset each identity sequence so new
 -- inserts don't collide with migrated ids:

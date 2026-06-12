@@ -50,6 +50,12 @@ export interface Env {
   // on 2026-05-26 — see routes/chat.ts).
   OPENROUTER_API_KEY?: string
   DEFAULT_LLM_MODEL?: string
+  /** Dev/e2e only: override the OpenRouter API base (e.g. the scripted mock
+   *  in scripts/mock-openrouter.ts). Never set in prod. */
+  OPENROUTER_BASE_URL?: string
+  /** Injected by index.ts (never configured): raw Postgres connection string
+   *  so streaming routes can open a connection that outlives the Response. */
+  PG_CONNECTION_STRING?: string
 
   // AI budget + allowlist controls (FRO-265).
   // AI_ALLOWED_MODELS: comma-separated list of permitted OpenRouter model IDs.

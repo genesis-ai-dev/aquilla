@@ -89,18 +89,13 @@ export function JoinPage() {
     if (!token) {
       setPhase("error")
       setError("Invalid invite link")
-      return
     }
-    if (sessionLoading) return
-    if (!session?.jwt) {
-      // Stay on the preview card. The user clicks "Sign in" to continue.
-      setPhase("initial")
-      return
-    }
-    // Logged in: redeem immediately.
-    void redeem(session.jwt)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [token, session?.jwt, sessionLoading])
+    // Signed-in users land on the confirmation card and accept explicitly
+    // (FRO-335: silent auto-accept on link-open meant no user-facing signal
+    // that access was just granted — and contradicted the join-via-invite-link
+    // spec's confirmation step). Signed-out users see the same preview with
+    // inline auth; after signing in they land on the confirmation too.
+  }, [token])
 
   async function redeem(jwt: string) {
     if (!token) return
@@ -136,10 +131,75 @@ export function JoinPage() {
 
   const isSignedOut = !sessionLoading && !session?.jwt
   const showPreviewCard = isSignedOut && phase === "initial"
-  // Preview failed while signed-out — show error instead of auth form.
-  const previewFailed = showPreviewCard && previewLoadState !== null
+  // FRO-335: signed-in users confirm explicitly instead of auto-accepting.
+  const showConfirmCard = !sessionLoading && !!session?.jwt && phase === "initial"
+  // Preview failed — show error instead of auth form / accept button. A
+  // network failure only blocks the signed-out card (signed-in users can
+  // still accept; the accept endpoint is the authority on token validity).
+  const previewFailed =
+    (showPreviewCard && previewLoadState !== null) ||
+    (showConfirmCard && previewLoadState !== null && previewLoadState !== "network")
   // Preview is still in flight (null state and no data yet).
-  const previewLoading = showPreviewCard && preview === null && previewLoadState === null
+  const previewLoading =
+    (showPreviewCard || showConfirmCard) && preview === null && previewLoadState === null
+
+  // Invite summary — shared by the signed-out (auth) and signed-in (confirm)
+  // branches.
+  const previewSummary =
+    preview?.kind === "single" ? (
+      <div className="rounded-md border bg-muted/30 p-3 space-y-1.5">
+        <p className="text-sm">
+          Project:{" "}
+          <strong className="font-medium">{preview.data.projectName}</strong>
+        </p>
+        <p className="text-xs text-muted-foreground">
+          You'll join as{" "}
+          <span className="capitalize">
+            {preview.data.role.name.replace(/_/g, " ")}
+          </span>
+          {preview.data.email && (
+            <>
+              {" "}— invitation sent to{" "}
+              <span className="font-mono">{preview.data.email}</span>
+            </>
+          )}
+          .
+        </p>
+      </div>
+    ) : preview?.kind === "multi" ? (
+      <div className="rounded-md border bg-muted/30 p-3 space-y-1.5">
+        <p className="text-sm">
+          You're invited to{" "}
+          <strong className="font-medium">
+            {preview.data.projects.length} project
+            {preview.data.projects.length === 1 ? "" : "s"}
+          </strong>
+          :
+        </p>
+        <ul className="list-disc space-y-0.5 pl-4 text-xs text-muted-foreground">
+          {preview.data.projects.map((p) => (
+            <li key={p.projectId}>
+              {p.projectName}
+              {p.archived ? " (archived)" : ""}
+            </li>
+          ))}
+        </ul>
+        <p className="text-xs text-muted-foreground">
+          You'll join each as{" "}
+          <span className="capitalize">
+            {preview.data.role.name.replace(/_/g, " ")}
+          </span>
+          .
+        </p>
+      </div>
+    ) : previewLoading ? (
+      <div className="flex items-center gap-2 py-1">
+        <Spinner className="text-muted-foreground" />
+        <p className="text-xs text-muted-foreground">
+          Loading invitation details…
+        </p>
+      </div>
+    ) : null
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-background p-4">
@@ -147,7 +207,9 @@ export function JoinPage() {
         <CardHeader>
           <CardTitle className="flex items-center gap-2 text-lg">
             <Users className="h-5 w-5" />
-            {showPreviewCard && !previewFailed ? "You're invited" : "Joining Project"}
+            {(showPreviewCard || showConfirmCard) && !previewFailed
+              ? "You're invited"
+              : "Joining Project"}
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-3">
@@ -191,64 +253,29 @@ export function JoinPage() {
                 Back to projects
               </Button>
             </div>
+          ) : showConfirmCard ? (
+            // FRO-335: explicit accept step (spec join-via-invite-link Step 2:
+            // "Token valid, recipient already signed in → JoinPage shows
+            // confirmation"). Access is granted only on the button click, so
+            // gaining membership is always a visible, deliberate action.
+            <div className="space-y-3">
+              {previewSummary}
+              <Button
+                className="w-full"
+                onClick={() => session?.jwt && void redeem(session.jwt)}
+                disabled={previewLoading}
+              >
+                Accept invitation
+              </Button>
+              <Button variant="outline" onClick={() => navigate("/")} className="w-full">
+                Not now
+              </Button>
+            </div>
           ) : showPreviewCard ? (
             <div className="space-y-3">
-              {preview?.kind === "single" ? (
-                <div className="rounded-md border bg-muted/30 p-3 space-y-1.5">
-                  <p className="text-sm">
-                    Project:{" "}
-                    <strong className="font-medium">{preview.data.projectName}</strong>
-                  </p>
-                  <p className="text-xs text-muted-foreground">
-                    You'll join as{" "}
-                    <span className="capitalize">
-                      {preview.data.role.name.replace(/_/g, " ")}
-                    </span>
-                    {preview.data.email && (
-                      <>
-                        {" "}— invitation sent to{" "}
-                        <span className="font-mono">{preview.data.email}</span>
-                      </>
-                    )}
-                    .
-                  </p>
-                </div>
-              ) : preview?.kind === "multi" ? (
-                <div className="rounded-md border bg-muted/30 p-3 space-y-1.5">
-                  <p className="text-sm">
-                    You're invited to{" "}
-                    <strong className="font-medium">
-                      {preview.data.projects.length} project
-                      {preview.data.projects.length === 1 ? "" : "s"}
-                    </strong>
-                    :
-                  </p>
-                  <ul className="list-disc space-y-0.5 pl-4 text-xs text-muted-foreground">
-                    {preview.data.projects.map((p) => (
-                      <li key={p.projectId}>
-                        {p.projectName}
-                        {p.archived ? " (archived)" : ""}
-                      </li>
-                    ))}
-                  </ul>
-                  <p className="text-xs text-muted-foreground">
-                    You'll join each as{" "}
-                    <span className="capitalize">
-                      {preview.data.role.name.replace(/_/g, " ")}
-                    </span>
-                    .
-                  </p>
-                </div>
-              ) : previewLoading ? (
-                <div className="flex items-center gap-2 py-1">
-                  <Spinner className="text-muted-foreground" />
-                  <p className="text-xs text-muted-foreground">
-                    Loading invitation details…
-                  </p>
-                </div>
-              ) : null}
-              {/* Inline auth — on success the session updates and the redeem
-                  effect above fires automatically, so the user never leaves. */}
+              {previewSummary}
+              {/* Inline auth — on success the session updates and the page
+                  swaps to the confirmation card so the user accepts explicitly. */}
               <div className="rounded-md border p-3">
                 {authMode === "login" && (
                   <div className="space-y-3">
@@ -288,7 +315,7 @@ export function JoinPage() {
                 )}
               </div>
               <p className="text-[10px] text-muted-foreground text-center">
-                You'll join the moment you sign in — no need to come back.
+                After you sign in, you'll confirm and join — no need to come back.
               </p>
             </div>
           ) : phase === "redeeming" ? (

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
-import { render, screen, waitFor } from "@testing-library/react"
+import { render, screen, waitFor, fireEvent } from "@testing-library/react"
 import { MemoryRouter, Routes, Route } from "react-router-dom"
 import { JoinPage } from "./JoinPage"
 import { acceptServerInvite, previewMultiInvite, acceptMultiInvite, previewServerInvite } from "@/lib/sync/invites"
@@ -51,9 +51,20 @@ describe("JoinPage inline auth", () => {
     expect(navigate).not.toHaveBeenCalledWith("/")
   })
 
-  it("redeems automatically once a session exists", async () => {
+  // FRO-335: signed-in users must NOT be auto-joined on link-open — access is
+  // granted only on an explicit "Accept invitation" click, so there's always
+  // a user-facing signal that membership just changed (spec
+  // join-via-invite-link Step 2 confirmation).
+  it("shows a confirmation card when signed in and redeems only on Accept", async () => {
     sessionValue = { session: { jwt: "jwt" }, loading: false }
     renderJoin()
+    const accept = await screen.findByRole("button", { name: /accept invitation/i })
+    // Preview rendered, nothing redeemed yet.
+    expect(await screen.findByText("John")).toBeInTheDocument()
+    expect(acceptServerInvite).not.toHaveBeenCalled()
+    expect(acceptMultiInvite).not.toHaveBeenCalled()
+
+    fireEvent.click(accept)
     await waitFor(() => expect(acceptServerInvite).toHaveBeenCalledWith("jwt", "tok"))
     expect(navigate).toHaveBeenCalledWith("/project/p1")
   })
@@ -77,7 +88,7 @@ describe("JoinPage inline auth", () => {
     expect(screen.getByText("do-login")).toBeInTheDocument() // inline auth still shows
   })
 
-  it("redeems a multi-project token via acceptMultiInvite", async () => {
+  it("redeems a multi-project token via acceptMultiInvite after Accept", async () => {
     vi.mocked(previewMultiInvite).mockResolvedValueOnce({
       ok: true,
       data: {
@@ -93,6 +104,7 @@ describe("JoinPage inline auth", () => {
     })
     sessionValue = { session: { jwt: "jwt" }, loading: false }
     renderJoin()
+    fireEvent.click(await screen.findByRole("button", { name: /accept invitation/i }))
     await waitFor(() => expect(acceptMultiInvite).toHaveBeenCalledWith("jwt", "tok"))
     expect(navigate).toHaveBeenCalledWith("/project/pa") // first accepted project
   })

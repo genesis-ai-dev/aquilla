@@ -6,6 +6,7 @@ import { OrgBreadcrumb } from "./OrgBreadcrumb"
 import { useActiveOrg } from "@/context/OrgContext"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { fetchAccessibleProjectsResult, type CloudProjectSummary } from "@/lib/sync/cloud-projects"
+import { partitionSharedProjects } from "@/lib/frontier/shared-projects"
 import { ProjectCreateDialog } from "@/components/ProjectCreateDialog"
 import type { ProjectRecord } from "@/lib/parsers/types"
 import { notifySessionExpired } from "@/lib/errors/session-expired-signal"
@@ -63,9 +64,35 @@ function SortButton({
   )
 }
 
+// ── Project row (shared by the org list and the "Shared with you" list) ─────
+function ProjectRow({ project: p, onOpen }: { project: CloudProjectSummary; onOpen: () => void }) {
+  return (
+    <li>
+      <button
+        type="button"
+        onClick={onOpen}
+        className="grid w-full grid-cols-[1fr_auto] items-center gap-x-4 py-2.5 text-left hover:bg-accent/30 sm:grid-cols-[1fr_120px]"
+      >
+        {/* Name + status badge */}
+        <span className="flex min-w-0 items-center gap-2">
+          <span className="truncate text-sm font-medium">{p.name}</span>
+          {p.isActive === false && (
+            <span className="shrink-0 rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
+              inactive
+            </span>
+          )}
+        </span>
+
+        {/* Role */}
+        <span className="shrink-0 text-xs text-muted-foreground">{p.role.name}</span>
+      </button>
+    </li>
+  )
+}
+
 // ── Main component ───────────────────────────────────────────────────────────
 export function ProjectsList() {
-  const { activeOrgId, isLoading: orgLoading, error: orgError, refresh: refreshOrgs } = useActiveOrg()
+  const { activeOrgId, orgs, isLoading: orgLoading, error: orgError, refresh: refreshOrgs } = useActiveOrg()
   const { session, loading: sessionLoading } = useFrontierSession()
   const jwt = session?.jwt ?? null
   const navigate = useNavigate()
@@ -97,7 +124,11 @@ export function ProjectsList() {
     let cancelled = false
     setLoading(true)
     setUnreachable(false)
-    fetchAccessibleProjectsResult(jwt, activeOrgId)
+    // FRO-335: fetch UNfiltered — the server returns every project the caller
+    // can access across all grant paths. We partition client-side so projects
+    // shared from orgs the caller doesn't belong to (magic-link invite,
+    // bulk-add) still surface instead of being org-filtered into oblivion.
+    fetchAccessibleProjectsResult(jwt)
       .then((result) => {
         if (cancelled) return
         if (result.ok) {
@@ -134,11 +165,25 @@ export function ProjectsList() {
     }
   }
 
+  // FRO-335: projects in orgs the caller is not a member of (invite-link /
+  // bulk-add grants) render in their own "Shared with you" section — they
+  // belong to no org the switcher can reach.
+  const { inActiveOrg, sharedWithMe } = useMemo(
+    () => partitionSharedProjects(projects, orgs, activeOrgId),
+    [projects, orgs, activeOrgId],
+  )
+
   const filtered = useMemo(() => {
     const q = filter.trim().toLowerCase()
-    const list = q ? projects.filter((p) => p.name.toLowerCase().includes(q)) : projects
+    const list = q ? inActiveOrg.filter((p) => p.name.toLowerCase().includes(q)) : inActiveOrg
     return sortProjects(list, sortKey, sortDir)
-  }, [projects, filter, sortKey, sortDir])
+  }, [inActiveOrg, filter, sortKey, sortDir])
+
+  const filteredShared = useMemo(() => {
+    const q = filter.trim().toLowerCase()
+    const list = q ? sharedWithMe.filter((p) => p.name.toLowerCase().includes(q)) : sharedWithMe
+    return sortProjects(list, sortKey, sortDir)
+  }, [sharedWithMe, filter, sortKey, sortDir])
 
   // Signed-out or org-less: session finished loading but no JWT.
   if (!sessionLoading && !orgLoading && !jwt) {
@@ -210,7 +255,8 @@ export function ProjectsList() {
                   className="h-8 w-full max-w-xs rounded-md border bg-background px-3 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
                 />
                 <span className="text-xs text-muted-foreground">
-                  {filtered.length} {filtered.length === 1 ? "project" : "projects"}
+                  {filtered.length + filteredShared.length}{" "}
+                  {filtered.length + filteredShared.length === 1 ? "project" : "projects"}
                 </span>
               </div>
 
@@ -240,28 +286,25 @@ export function ProjectsList() {
               ) : (
                 <ul className="divide-y">
                   {filtered.map((p) => (
-                    <li key={p.id}>
-                      <button
-                        type="button"
-                        onClick={() => navigate(`/projects/${p.id}`)}
-                        className="grid w-full grid-cols-[1fr_auto] items-center gap-x-4 py-2.5 text-left hover:bg-accent/30 sm:grid-cols-[1fr_120px]"
-                      >
-                        {/* Name + status badge */}
-                        <span className="flex min-w-0 items-center gap-2">
-                          <span className="truncate text-sm font-medium">{p.name}</span>
-                          {p.isActive === false && (
-                            <span className="shrink-0 rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
-                              inactive
-                            </span>
-                          )}
-                        </span>
-
-                        {/* Role */}
-                        <span className="shrink-0 text-xs text-muted-foreground">{p.role.name}</span>
-                      </button>
-                    </li>
+                    <ProjectRow key={p.id} project={p} onOpen={() => navigate(`/projects/${p.id}`)} />
                   ))}
                 </ul>
+              )}
+
+              {/* FRO-335: projects shared from orgs the caller doesn't belong
+                  to (magic-link invite, bulk-add by username). Without this
+                  section they're URL-accessible but unreachable from any nav. */}
+              {filteredShared.length > 0 && (
+                <section className="mt-4" data-testid="shared-with-you">
+                  <h2 className="border-b pb-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                    Shared with you
+                  </h2>
+                  <ul className="divide-y">
+                    {filteredShared.map((p) => (
+                      <ProjectRow key={p.id} project={p} onOpen={() => navigate(`/projects/${p.id}`)} />
+                    ))}
+                  </ul>
+                </section>
               )}
             </div>
           )}

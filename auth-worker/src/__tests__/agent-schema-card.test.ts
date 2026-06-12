@@ -82,6 +82,38 @@ describe("buildSystemPrompt — role filtering", () => {
     expect(prompt).toContain("cookbook FIRST")
   })
 
+  // Second real-model run (2026-06-12): the model found the right verse but
+  // stalled to ask "what language?" and "this one or the first one?" — both
+  // derivable. These pins keep the prompt answering them pre-emptively.
+  it("states the language pair and bans asking for it; absent pair → infer, don't stall", () => {
+    const withPair = buildSystemPrompt({
+      ...baseCtx,
+      roleLevel: 400,
+      sourceLanguage: "English",
+      targetLanguage: "Punjabi",
+    })
+    expect(withPair).toContain("from English into Punjabi")
+    expect(withPair).toContain("never ask the user what language")
+
+    const withoutPair = buildSystemPrompt({ ...baseCtx, roleLevel: 400 })
+    expect(withoutPair).toContain("infer it from the project's existing target text")
+    expect(withoutPair).toContain("do not stall the run to ask")
+  })
+
+  it("anchors 'next'/'previous' to the focused cell when one is pinned", () => {
+    const withCell = buildSystemPrompt({ ...baseCtx, roleLevel: 400, fileId: "f1", cellId: "c1" })
+    expect(withCell).toContain("relative to the focused cell :cell")
+
+    const withoutCell = buildSystemPrompt({ ...baseCtx, roleLevel: 400, fileId: "f1" })
+    expect(withoutCell).not.toContain("relative to the focused cell")
+  })
+
+  it("tells the model to act-then-approve instead of asking permission", () => {
+    const prompt = buildSystemPrompt({ ...baseCtx, roleLevel: 400 })
+    expect(prompt).toContain("staging IS the confirmation mechanism")
+    expect(prompt).toContain("at most ONE question")
+  })
+
   it("grounds the situation when a file is focused — name, kind, and relative-reference rule", () => {
     const unfocused = buildSystemPrompt({ ...baseCtx, roleLevel: 400 })
     expect(unfocused).not.toContain("## Current situation")

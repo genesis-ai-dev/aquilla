@@ -230,21 +230,37 @@ async function runAgentLoop({ env, body, user, roleLevel, runId, signal, send }:
     aliases,
   }
 
-  // Situational grounding: resolve the focused file's name/kind so the prompt
-  // can anchor relative requests ("this file", "segment 8") instead of leaving
-  // the model to reverse-engineer the project. One cheap lookup per run.
+  // Situational grounding: resolve the focused file's name/kind and the
+  // project's language pair so the prompt can anchor relative requests
+  // ("this file", "segment 8") and the translation direction instead of
+  // leaving the model to reverse-engineer the project — or worse, stall the
+  // run to ask "what language?". Best-effort, cheap lookups.
   let focusedFile: { name?: string; kind?: string } = {}
-  if (body.context?.fileId) {
-    try {
+  let languages: { sourceLanguage?: string; targetLanguage?: string } = {}
+  try {
+    if (body.context?.fileId) {
       const row = await env.AQUILLA_PG.prepare(
         "SELECT name, kind FROM files WHERE project_id = ? AND id = ?",
       )
         .bind(body.projectId, body.context.fileId)
         .first<{ name: string; kind: string | null }>()
       if (row) focusedFile = { name: row.name, kind: row.kind ?? undefined }
-    } catch {
-      /* prompt grounding is best-effort — the run proceeds without it */
     }
+    const settings = await env.AQUILLA_PG.prepare(
+      `SELECT settings::jsonb ->> 'sourceLanguage' AS source_language,
+              settings::jsonb ->> 'targetLanguage' AS target_language
+       FROM project_settings WHERE project_id = ?`,
+    )
+      .bind(body.projectId)
+      .first<{ source_language: string | null; target_language: string | null }>()
+    if (settings) {
+      languages = {
+        sourceLanguage: settings.source_language ?? undefined,
+        targetLanguage: settings.target_language ?? undefined,
+      }
+    }
+  } catch {
+    /* prompt grounding is best-effort — the run proceeds without it */
   }
 
   const convo: ConvoMessage[] = [
@@ -258,6 +274,8 @@ async function runAgentLoop({ env, body, user, roleLevel, runId, signal, send }:
         cellId: body.context?.cellId,
         fileName: focusedFile.name,
         fileKind: focusedFile.kind,
+        sourceLanguage: languages.sourceLanguage,
+        targetLanguage: languages.targetLanguage,
       }),
     },
     ...body.messages,

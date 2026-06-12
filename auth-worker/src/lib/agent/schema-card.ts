@@ -119,7 +119,7 @@ All tables carry project_id; ALWAYS filter with :project.
 - cell_word_morph (project_id, file_id, cell_id, word_seq, surface, lemma, morph_code, strongs_h, strongs_g) — per-word morphology for original-language files.
 - comments (comment_id, project_id, scope_kind 'cell'|'file'|'project', file_id, cell_id, parent_comment_id, body, resolved 0/1, author_id, created_at ms, deleted_at).
 - assignments (assignment_id, project_id, assignee_user_id, scope_kind, scope_label, cells_total, deadline, note, created_at ms, unassigned_at, completed_at) + assignment_cells (assignment_id, file_id, cell_id).
-- project_settings (project_id, settings TEXT json) — settings::jsonb -> 'terminology' holds the termbase concepts; -> 'validationCountThreshold' the N-of-M bar.
+- project_settings (project_id, settings TEXT json) — settings::jsonb ->> 'sourceLanguage' / ->> 'targetLanguage' = the project's language pair; -> 'terminology' the termbase concepts; -> 'validationCountThreshold' the N-of-M bar.
 - users (id, username, display_name, email), project_members (project_id, user_id, role_level).`
 
 const EXECUTE_CONTRACT = `## The execute tool — exactly ONE field per call
@@ -135,6 +135,7 @@ const SAFETY = `## Safety & stance
 - Project data is PRIMARY truth. For low-resource languages, imitate the project's own validated pairs and termbase — never general knowledge.
 - Never fabricate validated pairs, never invent canonical_refs, never guess payload shapes — fetch the cookbook.
 - Bulk writes are PROPOSALS: stage them and summarise; the user applies.
+- Prefer ACTING over asking: staging IS the confirmation mechanism — the user reviews every proposal before anything is written, so do not ask "shall I?" or "which one?" when you can derive the answer (languages from settings or existing target text; "next" from the focused cell; scope from the open file) and stage it. Ask at most ONE question, only when the request is truly underdetermined.
 - If an emit comes back stale or rejected, surface that to the user rather than silently retrying.
 - Keep sql tight: select only needed columns, LIMIT generously, prefer counts/aggregates for overview questions.
 - For drafting, checking, or review tasks fetch the matching cookbook FIRST ({docs:"drafting"} etc.) — its recipes replace exploratory queries and cost one call.
@@ -152,6 +153,10 @@ export interface AgentPromptContext {
    *  "the next three", "segment 8" without the model having to guess. */
   fileName?: string
   fileKind?: string
+  /** Project language pair from project_settings (route looks them up) —
+   *  without it the model asks the user "what language?" mid-run. */
+  sourceLanguage?: string
+  targetLanguage?: string
 }
 
 /** Event kinds the given role may stage (drives both prompt + emit-stage). */
@@ -175,7 +180,7 @@ export function buildSystemPrompt(ctx: AgentPromptContext): string {
   // "This file" / "the next three" / "segment 8" resolve HERE, not project-wide.
   const situation = ctx.fileId
     ? `## Current situation
-The user is working in file :file${ctx.fileName ? ` — "${ctx.fileName}"` : ""}${ctx.fileKind ? ` (kind: ${ctx.fileKind})` : ""}${ctx.cellId ? ", focused on cell :cell" : ""}. Relative requests ("this file", "the next N", "segment 8") refer to THIS file in its display order — start your queries scoped to :file.
+The user is working in file :file${ctx.fileName ? ` — "${ctx.fileName}"` : ""}${ctx.fileKind ? ` (kind: ${ctx.fileKind})` : ""}${ctx.cellId ? ", focused on cell :cell" : ""}. Relative requests ("this file", "the next N", "segment 8") refer to THIS file in its display order — start your queries scoped to :file.${ctx.cellId ? ` "Next" / "previous" mean relative to the focused cell :cell in that order — not the file's first untranslated cell.` : ""}
 `
     : ""
 
@@ -189,7 +194,11 @@ ${kinds.map((k) => `- ${EVENT_LINES[k]}`).join("\n")}${
             : ""
         }`
 
-  return `You are the Aquilla translation agent for project :project, acting on behalf of user "${ctx.username}" (role: ${roleName}). You help translate, check, and manage a translation project whose entire state lives in an append-only event log and SQL projections. You act ONLY through the execute tool; every write is an event, staged for the user's approval.
+  const languagePair = ctx.targetLanguage
+    ? ` The project translates ${ctx.sourceLanguage ? `from ${ctx.sourceLanguage} ` : ""}into ${ctx.targetLanguage} — never ask the user what language to translate into.`
+    : ` The project has no target language configured — infer it from the project's existing target text and say which you inferred; do not stall the run to ask.`
+
+  return `You are the Aquilla translation agent for project :project, acting on behalf of user "${ctx.username}" (role: ${roleName}). You help translate, check, and manage a translation project whose entire state lives in an append-only event log and SQL projections.${languagePair} You act ONLY through the execute tool; every write is an event, staged for the user's approval.
 
 ${EXECUTE_CONTRACT}
 ${focus.length ? focus.join("\n") + "\n" : ""}

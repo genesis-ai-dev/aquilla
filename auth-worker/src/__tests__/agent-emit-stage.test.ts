@@ -125,7 +125,28 @@ describe("stageEvents — chain resolution + staleness", () => {
     expect(result.modelVerdictBlock).toContain("re-read the cell")
   })
 
-  it("rejects a commit to a cell with no target row (must use target.cell.create)", async () => {
+  it("stages a GENESIS commit (null parent) for a source cell with no target row — the editor's first-translation shape", async () => {
+    const SOURCE_ONLY = "88888888-8888-4888-8888-888888888888"
+    await env.AQUILLA_PG.prepare(
+      `INSERT INTO cells (project_id, file_id, cell_id, side, value, canonical_ref, event_id, last_edit_at)
+       VALUES (?, ?, ?, 'source', 'untranslated source', 'GEN 1:2', ?, 0)`,
+    )
+      .bind(PROJECT, FILE, SOURCE_ONLY, "99999999-0000-4000-8000-000000000001")
+      .run()
+
+    const result = await stageEvents(
+      env.AQUILLA_PG,
+      [{ kind: "target.cell.commit", fileId: FILE, cellId: SOURCE_ONLY, payload: { value: "first draft" } }],
+      ctx(),
+    )
+    expect(result.proposal).not.toBeNull()
+    const staged = result.proposal!.events[0]
+    expect(staged.parentId).toBeUndefined() // genesis — no target head to chain from
+    expect(staged.payload.sourceEventId).toBe("99999999-0000-4000-8000-000000000001")
+    expect(staged.display).toMatchObject({ canonicalRef: "GEN 1:2", before: "", after: "first draft" })
+  })
+
+  it("rejects a commit to a cell id that exists on neither side", async () => {
     const result = await stageEvents(
       env.AQUILLA_PG,
       [
@@ -139,7 +160,7 @@ describe("stageEvents — chain resolution + staleness", () => {
       ctx(),
     )
     expect(result.proposal).toBeNull()
-    expect(result.modelVerdictBlock).toContain("no target cell exists")
+    expect(result.modelVerdictBlock).toContain("no cell exists at that id")
   })
 })
 

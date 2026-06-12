@@ -207,22 +207,27 @@ async function stageOne(
         pair.target?.canonical_ref ?? pair.source?.canonical_ref ?? undefined
 
       if (TARGET_CHAIN_KINDS.has(kind)) {
-        if (!pair.target) {
+        if (!pair.target && !pair.source) {
           return {
             kind: "rejected",
-            reason: "no target cell exists at that id — use target.cell.create",
+            reason: "no cell exists at that id — re-read the file",
           }
         }
-        // Staleness pre-check: a parent the model pinned that is no longer
-        // the head means it drafted against superseded text.
-        if (suppliedParentId && suppliedParentId !== pair.target.event_id) {
-          return {
-            kind: "stale",
-            reason: `parent superseded — current head is ${ctx.aliases.alias(pair.target.event_id, "e")}; re-read the cell and redraft`,
+        // First translation of an existing source cell is a genesis commit
+        // (parentId null) — the same shape the editor emits when a user types
+        // into an empty target. Only a known target head becomes the parent.
+        if (pair.target) {
+          // Staleness pre-check: a parent the model pinned that is no longer
+          // the head means it drafted against superseded text.
+          if (suppliedParentId && suppliedParentId !== pair.target.event_id) {
+            return {
+              kind: "stale",
+              reason: `parent superseded — current head is ${ctx.aliases.alias(pair.target.event_id, "e")}; re-read the cell and redraft`,
+            }
           }
+          parentId = pair.target.event_id
         }
-        parentId = pair.target.event_id
-        display.before = pair.target.value
+        display.before = pair.target?.value ?? ""
         if (typeof payload.value !== "string") {
           return { kind: "rejected", reason: "target.cell.commit payload needs a string `value`" }
         }

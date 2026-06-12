@@ -22,10 +22,18 @@ import { stageEvents, type AgentProposal, type EmitStageContext } from "../lib/a
 import { getCookbook } from "../lib/agent/docs"
 import { buildSystemPrompt } from "../lib/agent/schema-card"
 import { insertAgentRun, finishAgentRun } from "../lib/agent/runs"
+import { makePostgres } from "../../../db/shim/postgres"
 
 const agent = new Hono<{ Bindings: Env; Variables: Variables }>()
 
+// Overridable so the dev stack / e2e can point the loop at a scripted mock
+// (scripts/mock-openrouter.ts) when no real key is configured. Prod ignores it.
 const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
+function resolveOpenRouterUrl(env: Env): string {
+  return env.OPENROUTER_BASE_URL
+    ? `${env.OPENROUTER_BASE_URL.replace(/\/$/, "")}/chat/completions`
+    : OPENROUTER_URL
+}
 /** Haiku-class default from the existing allowlist (lib/ai-budget.ts). */
 const AGENT_MODEL = "anthropic/claude-haiku-4-5"
 const MAX_TOOL_ITERATIONS = 8
@@ -133,7 +141,12 @@ agent.post("/run", authMiddleware, zValidator("json", runRequestSchema), async (
     return c.json(guard.body, guard.status)
   }
 
-  const env = c.env
+  // The request-scoped AQUILLA_PG shim is closed when this Response returns
+  // (index.ts finally) — before the SSE body finishes. The run owns its own
+  // connection for the loop's lifetime; tests (no PG_CONNECTION_STRING)
+  // keep using the injected AQUILLA_PG.
+  const runShim = c.env.PG_CONNECTION_STRING ? makePostgres(c.env.PG_CONNECTION_STRING) : null
+  const env: Env = runShim ? { ...c.env, AQUILLA_PG: runShim as unknown as Env["AQUILLA_PG"] } : c.env
   const signal = c.req.raw.signal
   const runId = crypto.randomUUID()
   const lastUserMessage = [...body.messages].reverse().find((m) => m.role === "user")
@@ -163,11 +176,18 @@ agent.post("/run", authMiddleware, zValidator("json", runRequestSchema), async (
             /* controller already closed (client gone) */
           }
         })
-        .finally(() => {
+        .finally(async () => {
           try {
             controller.close()
           } catch {
             /* already closed */
+          }
+          if (runShim) {
+            try {
+              await runShim.close()
+            } catch {
+              /* connection already gone */
+            }
           }
         })
     },
@@ -250,7 +270,7 @@ async function runAgentLoop({ env, body, user, roleLevel, runId, signal, send }:
         break
       }
 
-      const upstream = await fetch(OPENROUTER_URL, {
+      const upstream = await fetch(resolveOpenRouterUrl(env), {
         method: "POST",
         headers: {
           Authorization: `Bearer ${env.OPENROUTER_API_KEY}`,

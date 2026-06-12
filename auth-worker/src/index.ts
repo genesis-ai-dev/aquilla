@@ -222,7 +222,15 @@ app.fetch = (async (request: Request, env: Env, ctx: ExecutionContext): Promise<
   const shim = makePostgres(env.HYPERDRIVE.connectionString)
   // Drop HYPERDRIVE so the prefix-strip middleware's re-entrant app.fetch reuses
   // this shim (via reqEnv.AQUILLA_PG) instead of opening a second connection.
-  const reqEnv = { ...env, AQUILLA_PG: shim as unknown as AquillaDb, HYPERDRIVE: undefined }
+  // PG_CONNECTION_STRING: streaming routes (routes/agent.ts) must open their
+  // own connection — the request-scoped shim below is closed as soon as the
+  // Response returns, which is BEFORE an SSE stream body finishes.
+  const reqEnv = {
+    ...env,
+    AQUILLA_PG: shim as unknown as AquillaDb,
+    HYPERDRIVE: undefined,
+    PG_CONNECTION_STRING: env.HYPERDRIVE.connectionString,
+  }
   try {
     return await baseFetch(request, reqEnv, ctx)
   } finally {

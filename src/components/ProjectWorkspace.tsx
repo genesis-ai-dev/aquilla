@@ -158,6 +158,12 @@ const ExportDialog = lazy(() =>
   import("./ExportDialog").then((mod) => ({ default: mod.ExportDialog })),
 )
 
+// File-scoped target import: populate the open file's target column from
+// USFM or a spreadsheet. Lazy — pulls in the XLSX parser.
+const FileTargetImportDialog = lazy(() =>
+  import("./FileTargetImportDialog").then((mod) => ({ default: mod.FileTargetImportDialog })),
+)
+
 // FRO-254: In-project views rendered inside the editor shell. Lazy-loaded so
 // the heavy workspace chunk doesn't pull them in for every route.
 const CommentsPageContent = lazy(() =>
@@ -449,6 +455,8 @@ export function ProjectWorkspace() {
     redirectTo,
   ])
   const [importOpen, setImportOpen] = useState(false)
+  // File-scoped target import dialog ("Import translations into this file").
+  const [fileImportOpen, setFileImportOpen] = useState(false)
   const [exportOpen, setExportOpen] = useState(false)
   const [drawerRuleId, setDrawerRuleId] = useState<string | null>(null)
   const [searchParams] = useSearchParams()
@@ -1061,6 +1069,18 @@ export function ProjectWorkspace() {
     translated: c.translated ?? "",
     canonicalRef: c.group,
   })), [allProjectCells])
+
+  // File-scoped target import: the open file's cells in display order, with
+  // source text so the review screen can show alignment.
+  const fileTargetCells = useMemo(() => cells.map((c) => ({
+    cellId: c.id,
+    fileId: c.fileId,
+    targetEventId: c.targetEventId,
+    sourceEventId: c.sourceEventId,
+    translated: c.translated ?? "",
+    canonicalRef: c.group,
+    original: c.original,
+  })), [cells])
 
   const { search, searchPassages } = useSearchIndex(project?.files || [], allProjectCells)
 
@@ -2493,6 +2513,10 @@ export function ProjectWorkspace() {
       console.info("agent-input triggered (placeholder runner)")
     },
     runImportWip: openImportFlow,
+    runImportIntoFile: () => {
+      if (!activeFileId) return
+      setFileImportOpen(true)
+    },
     runTranscribeAll: () => {
       if (!activeFileId || !project) return
       void runBatchTranscribeAll({
@@ -3571,6 +3595,20 @@ export function ProjectWorkspace() {
           onCastUpdated={(patch) => tts.saveTts(patch)}
           existingFiles={project.files} />
       </Suspense>
+      {activeFileId && (
+        <Suspense fallback={null}>
+          <FileTargetImportDialog
+            open={fileImportOpen}
+            onOpenChange={setFileImportOpen}
+            projectId={project.id}
+            username={currentUsername}
+            fileName={activeFile?.name ?? "this file"}
+            cells={fileTargetCells}
+            getToken={getTokenForFile}
+            onImported={() => revalidateCells()}
+          />
+        </Suspense>
+      )}
       {/* FRO-249/FRO-255 fix (Fix 4): transient notice when direction couldn't be saved project-wide */}
       {directionRoleNotice && (
         <div

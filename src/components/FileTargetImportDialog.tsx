@@ -1,0 +1,82 @@
+/**
+ * Dialog host for the file-scoped target import (FileTargetImportPanel):
+ * populate the OPEN file's target column from USFM or a spreadsheet.
+ * Opened from the workspace action menu ("Import translations into this file").
+ */
+
+import { useEffect, useState } from "react"
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
+import { FileTargetImportPanel } from "@/components/import/FileTargetImportPanel"
+import type { FileTargetCellRef } from "@/lib/import-file-target"
+import posthog from "@/lib/posthog"
+import { IMPORT_STARTED, IMPORT_SUCCEEDED } from "@/lib/analytics-events"
+
+export interface FileTargetImportDialogProps {
+  open: boolean
+  onOpenChange: (open: boolean) => void
+  projectId: string
+  username: string
+  fileName: string
+  /** The open file's cells, in display order. */
+  cells: FileTargetCellRef[]
+  /** Mints a sync-token scoped to (projectId, fileId) for the commit upload. */
+  getToken: (fileId: string) => Promise<string | null>
+  /** Fired after commits land so the workspace can revalidate cells. */
+  onImported: (committedCount: number) => void
+}
+
+export function FileTargetImportDialog({
+  open,
+  onOpenChange,
+  projectId,
+  username,
+  fileName,
+  cells,
+  getToken,
+  onImported,
+}: FileTargetImportDialogProps) {
+  // Remount the panel each time the dialog opens so a previous run's step
+  // state never leaks into the next one.
+  const [panelKey, setPanelKey] = useState(0)
+  useEffect(() => {
+    if (open) {
+      setPanelKey((k) => k + 1)
+      posthog.capture(IMPORT_STARTED, { import_type: "file-target", project_id: projectId })
+    }
+  }, [open, projectId])
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-lg">
+        <DialogHeader>
+          <DialogTitle>Import translations</DialogTitle>
+        </DialogHeader>
+        <div className="min-h-0 overflow-y-auto">
+          <FileTargetImportPanel
+            key={panelKey}
+            projectId={projectId}
+            username={username}
+            fileName={fileName}
+            cells={cells}
+            getToken={getToken}
+            onImported={(committedCount) => {
+              posthog.capture(IMPORT_SUCCEEDED, {
+                import_type: "file-target",
+                file_count: committedCount,
+                project_id: projectId,
+              })
+              onImported(committedCount)
+              onOpenChange(false)
+            }}
+            onCancel={() => onOpenChange(false)}
+          />
+        </div>
+      </DialogContent>
+    </Dialog>
+  )
+}

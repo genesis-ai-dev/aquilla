@@ -32,6 +32,13 @@ export interface ColumnMappingPanelProps {
   onConfirm: (mapping: ColumnMapping, hasHeader: boolean) => void
   /** Called when the user cancels — return to file selection. */
   onCancel: () => void
+  /**
+   * "create" (default): full mapping for importing a new file — source required.
+   * "target": populate an existing file's target column — target is required
+   * instead; ref is optional (no ref → rows match cells by order); source,
+   * cast, and timestamp columns are hidden since they don't apply.
+   */
+  mode?: "create" | "target"
 }
 
 const PREVIEW_ROWS = 5
@@ -83,7 +90,8 @@ function ColSelect({
   )
 }
 
-export function ColumnMappingPanel({ sheet, onConfirm, onCancel }: ColumnMappingPanelProps) {
+export function ColumnMappingPanel({ sheet, onConfirm, onCancel, mode = "create" }: ColumnMappingPanelProps) {
+  const targetMode = mode === "target"
   const rows = sheet.rows
   const firstRow = rows[0] ?? []
   const [hasHeader, setHasHeader] = useState(true)
@@ -117,14 +125,16 @@ export function ColumnMappingPanel({ sheet, onConfirm, onCancel }: ColumnMapping
 
   const previewRows = (hasHeader ? rows.slice(1) : rows).slice(0, PREVIEW_ROWS)
 
-  const canConfirm = mapping.sourceCol !== null
+  const canConfirm = targetMode ? mapping.targetCol !== null : mapping.sourceCol !== null
 
   return (
     <div className="flex flex-col gap-4 py-2">
       <div>
         <p className="text-sm font-medium">Map columns</p>
         <p className="text-xs text-muted-foreground">
-          Tell us which column contains each piece of data. Only "Source text" is required.
+          {targetMode
+            ? "Pick the column with the translations. Map a ref column to match by reference; leave it unmapped to match rows to cells in order."
+            : 'Tell us which column contains each piece of data. Only "Source text" is required.'}
         </p>
       </div>
 
@@ -139,18 +149,21 @@ export function ColumnMappingPanel({ sheet, onConfirm, onCancel }: ColumnMapping
 
       {/* Column selectors */}
       <div className="flex flex-col gap-2">
-        <ColSelect
-          label="Source text"
-          headers={headers}
-          value={mapping.sourceCol}
-          onChange={(v) => set("sourceCol", v)}
-          required
-        />
+        {!targetMode && (
+          <ColSelect
+            label="Source text"
+            headers={headers}
+            value={mapping.sourceCol}
+            onChange={(v) => set("sourceCol", v)}
+            required
+          />
+        )}
         <ColSelect
           label="Target translation"
           headers={headers}
           value={mapping.targetCol}
           onChange={(v) => set("targetCol", v)}
+          required={targetMode}
         />
         <ColSelect
           label="Cell label / ref"
@@ -158,24 +171,28 @@ export function ColumnMappingPanel({ sheet, onConfirm, onCancel }: ColumnMapping
           value={mapping.labelCol}
           onChange={(v) => set("labelCol", v)}
         />
-        <ColSelect
-          label="Cast / character"
-          headers={headers}
-          value={mapping.castCol}
-          onChange={(v) => set("castCol", v)}
-        />
-        <ColSelect
-          label="Start timestamp"
-          headers={headers}
-          value={mapping.startCol}
-          onChange={(v) => set("startCol", v)}
-        />
-        <ColSelect
-          label="End timestamp"
-          headers={headers}
-          value={mapping.endCol}
-          onChange={(v) => set("endCol", v)}
-        />
+        {!targetMode && (
+          <>
+            <ColSelect
+              label="Cast / character"
+              headers={headers}
+              value={mapping.castCol}
+              onChange={(v) => set("castCol", v)}
+            />
+            <ColSelect
+              label="Start timestamp"
+              headers={headers}
+              value={mapping.startCol}
+              onChange={(v) => set("startCol", v)}
+            />
+            <ColSelect
+              label="End timestamp"
+              headers={headers}
+              value={mapping.endCol}
+              onChange={(v) => set("endCol", v)}
+            />
+          </>
+        )}
       </div>
 
       {/* Data preview table */}

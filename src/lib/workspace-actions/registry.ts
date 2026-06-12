@@ -116,6 +116,11 @@ export const workspaceActions: WorkspaceAction[] = [
     run: (_c, args) => args.runImportWip(),
   },
   {
+    id: "import-into-file", label: "Import translations into this file", icon: Upload, group: "secondary",
+    isAvailable: (c) => c.activeFileId != null,
+    run: (_c, args) => args.runImportIntoFile(),
+  },
+  {
     id: "transcribe-all", label: "Transcribe all audio", icon: Mic, group: "secondary",
     isAvailable: (c) => c.activeFileId != null && (c.audioCounts?.untranscribed ?? 0) > 0,
     requiresConfirmation: {

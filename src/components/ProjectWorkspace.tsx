@@ -77,7 +77,7 @@ import { runDiarization, type DiarizationPhase } from "@/lib/diarization/run-dia
 import { attachMediaFileToTimeline, attachMediaUrlToTimeline } from "@/lib/timeline/attach-media"
 import { useCellsAuditStatsWithOverlay } from "@/hooks/useCellsAuditStatsWithOverlay"
 import { useComments } from "@/hooks/useComments"
-import { Film, Scale, MessagesSquare, Share2, Settings as SettingsIcon, Lock, ClipboardList, Trash2, Undo2, Sparkles, Mic2, Download, BookMarked, BookOpen, Users, UserCheck, Eye, ArrowRight, PanelLeftClose } from "lucide-react"
+import { Film, Scale, MessagesSquare, Share2, Settings as SettingsIcon, Lock, ClipboardList, Trash2, Undo2, Sparkles, Mic2, BookMarked, BookOpen, Users, UserCheck, Eye, ArrowRight, PanelLeftClose } from "lucide-react"
 import { ChatPanel } from "./ChatPanel"
 import { ChatDockPanel } from "./ChatDockPanel"
 import { SearchDockPanel } from "./SearchDockPanel"
@@ -2427,8 +2427,9 @@ export function ProjectWorkspace() {
     project: project!,
     activeFileId,
     fileProgress,
+    canExportByOrgPolicy,
     audioCounts,
-  }), [project, activeFileId, fileProgress, audioCounts])
+  }), [project, activeFileId, fileProgress, canExportByOrgPolicy, audioCounts])
 
   const openImportFlow = useCallback(() => {
     if (!project) return
@@ -2573,14 +2574,8 @@ export function ProjectWorkspace() {
       },
     ]
 
-    if (canExportByOrgPolicy) {
-      items.push({
-        id: "export-file",
-        label: "Export file",
-        icon: Download,
-        onClick: openExportFlow,
-      })
-    }
+    // Export intentionally absent here — it lives in the primary-action
+    // dropdown (workspace-actions registry), and duplicating it was noise.
 
     if (canAssignWork && activeFileId) {
       items.push({
@@ -2630,8 +2625,6 @@ export function ProjectWorkspace() {
     activeFileId,
     hasUnfinished,
     handleJumpNextUnfinished,
-    canExportByOrgPolicy,
-    openExportFlow,
     canAssignWork,
     lens,
     canDiarize,
@@ -2922,6 +2915,30 @@ export function ProjectWorkspace() {
                   />
                 )}
                 <div className="mt-auto border-t px-2 pb-2 pt-2">
+                  {/* Contextual onboarding status — self-removes once setup
+                      completes. Sidebar-footer placement (Linear-style) keeps
+                      transient onboarding state out of the action header. */}
+                  {checklistState.totalCount > 0 && checklistState.completedCount < checklistState.totalCount && (
+                    <TooltipProvider delay={0}>
+                      <Tooltip open={showChipTooltip} onOpenChange={setShowChipTooltip}>
+                        <TooltipTrigger
+                          render={
+                            <button
+                              onClick={() => { setShowChipTooltip(false); setChecklistOpen(true) }}
+                              className="mb-1 flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-[11px] font-medium text-muted-foreground hover:bg-accent hover:text-foreground"
+                              title="Open setup checklist"
+                            />
+                          }
+                        >
+                          <ClipboardList className="h-3 w-3" />
+                          Setup: {checklistState.completedCount}/{checklistState.totalCount}
+                        </TooltipTrigger>
+                        <TooltipContent side="right">
+                          Reopen the setup checklist anytime from here.
+                        </TooltipContent>
+                      </Tooltip>
+                    </TooltipProvider>
+                  )}
                   <AccountSwitcher variant="sidebar" />
                 </div>
               </div>
@@ -2987,37 +3004,6 @@ export function ProjectWorkspace() {
             onBack={goToProjects}
             extraMenuItems={workspaceHeaderMenuItems}
           >
-            {/* Contextual onboarding status — self-removes once setup completes. */}
-            {checklistState.totalCount > 0 && checklistState.completedCount < checklistState.totalCount && (
-              <TooltipProvider delay={0}>
-                <Tooltip open={showChipTooltip} onOpenChange={setShowChipTooltip}>
-                  <TooltipTrigger
-                    render={
-                      <button
-                        onClick={() => { setShowChipTooltip(false); setChecklistOpen(true) }}
-                        className="flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-medium text-muted-foreground hover:bg-accent"
-                        title="Open setup checklist"
-                      />
-                    }
-                  >
-                    <ClipboardList className="h-3 w-3" />
-                    Setup: {checklistState.completedCount}/{checklistState.totalCount}
-                  </TooltipTrigger>
-                  <TooltipContent side="bottom">
-                    Reopen the setup checklist anytime from here.
-                  </TooltipContent>
-                </Tooltip>
-              </TooltipProvider>
-            )}
-
-            {project && centerSurface === "editor" && (
-              <EditorModeToggle
-                lens={lens}
-                onChange={(l) => setLens(l)}
-                timeOrdered={activeFile ? fileOrderedBy(activeFile) === "time" : false}
-              />
-            )}
-
             {project && centerSurface === "rules" && (
               <>
                 <Button variant="outline" size="sm" onClick={() => navigate(`/project/${projectId}/terminology`)}>
@@ -3084,6 +3070,17 @@ export function ProjectWorkspace() {
               files={projectFiles}
               onActivate={workspaceTabs.activateTab}
               onClose={handleCloseTab}
+              trailing={
+                // Per-file view-mode control — lives with the content it
+                // affects, not in the global header (which holds actions).
+                project && centerSurface === "editor" && activeFileId ? (
+                  <EditorModeToggle
+                    lens={lens}
+                    onChange={(l) => setLens(l)}
+                    timeOrdered={activeFile ? fileOrderedBy(activeFile) === "time" : false}
+                  />
+                ) : undefined
+              }
             />
             {project && activeFileId && (
               <>

@@ -36,7 +36,10 @@ function resolveOpenRouterUrl(env: Env): string {
 }
 /** Haiku-class default from the existing allowlist (lib/ai-budget.ts). */
 const AGENT_MODEL = "anthropic/claude-haiku-4-5"
-const MAX_TOOL_ITERATIONS = 8
+// Counted per model round that runs sql/emit (docs-only rounds are free).
+// Sized for: recipe query + exemplars + draft emit + one lint-redraft emit,
+// with headroom for error recovery (battery case 2 capped at 8 mid-redraft).
+const MAX_TOOL_ITERATIONS = 12
 const TOKEN_CEILING = 60_000
 /** code_result summaries are truncated for the UI per the contract. */
 const RESULT_SUMMARY_MAX = 2000
@@ -298,7 +301,7 @@ async function runAgentLoop({ env, body, user, roleLevel, runId, signal, send }:
       }
       if (iteration >= MAX_TOOL_ITERATIONS) {
         status = "capped"
-        send({ type: "error", message: "Tool-iteration cap reached (8) — run stopped." })
+        send({ type: "error", message: `Tool-iteration cap reached (${MAX_TOOL_ITERATIONS}) — run stopped.` })
         break
       }
       if (promptTokens + completionTokens > TOKEN_CEILING) {
@@ -353,7 +356,19 @@ async function runAgentLoop({ env, body, user, roleLevel, runId, signal, send }:
       const toolCalls = message.tool_calls ?? []
       if (toolCalls.length === 0) break // final prose — the run is complete
 
-      iteration++
+      // Cookbook fetches are constant-cost and risk-free — a docs-only round
+      // does not consume iteration budget. Otherwise a run that reads the
+      // cookbook, explores, and then gets a NEEDS REVIEW lint verdict on its
+      // first emit can be capped before the redraft (battery case 2).
+      const docsOnly = toolCalls.every((call) => {
+        try {
+          const args = JSON.parse(call.function.arguments ?? "{}") as Record<string, unknown>
+          return typeof args.docs === "string" && args.sql === undefined && args.emit === undefined
+        } catch {
+          return false
+        }
+      })
+      if (!docsOnly) iteration++
       for (const call of toolCalls) {
         steps++
         const result = await executeToolCall(call, {

@@ -111,7 +111,7 @@ All tables carry project_id; ALWAYS filter with :project.
   · Full-text search: WHERE value_tsv @@ to_tsquery('simple', 'word & other'). Never SELECT value_tsv.
   · "Untranslated" ⇔ target side row with value = '' (or no target row).
 - files (id, project_id, name, kind, role, book_code, source_file_id, cell_count, filled_count, approved_count, ai_drafted_count, word_count, last_edit_at, deleted_at) — deleted_at IS NULL = active.
-- events (id, project_id, file_id, cell_id, kind, author, payload TEXT json, client_ts, server_ts ms, parent_id, server_seq) — full append-only history; payload::jsonb to query inside.
+- events (id, project_id, file_id, cell_id, kind, author, payload TEXT json, client_ts, server_ts ms, parent_id, server_seq) — full append-only history; payload::jsonb to query inside. Timestamps are epoch ms — render them for humans (to_timestamp(server_ts/1000)::date or similar), never raw.
 - cell_validators (project_id, file_id, cell_id, event_id, username, decided_ts) — one row per validator per cell.
 - cell_waivers (project_id, file_id, cell_id, rule_id, reason, waived_by, waived_ts).
 - cell_backtranslations (project_id, file_id, cell_id, target_event_id, bt_text, polished 0/1, author, created_at).
@@ -137,7 +137,7 @@ const DRAFTING_RECIPE = `## Canonical drafting recipe (the 80% case — use this
 {docs:"drafting"} covers variants (chapter scope, terminology, back-translation).`
 
 const EXECUTE_CONTRACT = `## The execute tool — exactly ONE field per call
-- {sql: "SELECT …"} — one read-only SELECT (CTEs via WITH allowed). 4s timeout; 200 rows max (overflow is flagged). Results come back as a pipe table: ∅ = NULL; UUIDs are aliased (#c1 cells, #e1 events, #f1 files) and you may use those aliases (and :vars) directly in later sql/emit calls. Aliases are OPAQUE handles assigned in first-seen order — they carry no document order or numbering; NEVER show them to the user or treat #c8 as "segment 8" (use canonical_ref / sequence position when talking to the user).
+- {sql: "SELECT …"} — one read-only SELECT (CTEs via WITH allowed). 4s timeout; 200 rows max (overflow is flagged). Results come back as a pipe table: ∅ = NULL; UUIDs are aliased (#c1 cells, #e1 events, #f1 files) and you may use those aliases (and :vars) directly in later sql/emit calls. Aliases are OPAQUE handles assigned in first-seen order — they carry no document order or numbering; NEVER show them to the user — not even in parentheses — and never treat #c8 as "segment 8" (use canonical_ref / sequence position when talking to the user).
 - {emit: [{kind, fileId?, cellId?, payload}]} — STAGE events for the user to approve. Nothing is written until the user clicks Apply. The result tells you, per event: staged / rejected (with reason) / stale (re-read and redraft). Use aliases/:vars for ids.
 - {docs: "topic"} — fetch a cookbook: drafting | checking | terminology | validation | history | assignments | files-and-refs. Read the relevant cookbook BEFORE your first emit of that kind.
 

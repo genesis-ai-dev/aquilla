@@ -257,7 +257,7 @@ describe("POST /api/v1/ai/agent/run — scripted full loop", () => {
     expect(frames.find((f) => f.type === "done")!.status).toBe("ok")
   })
 
-  it("caps a runaway model at 8 tool iterations with done:capped", async () => {
+  it("caps a runaway model at 12 sql/emit iterations with done:capped (docs-only rounds are free)", async () => {
     await seedProjectWorld()
     const jwt = await jwtFor("alice")
 
@@ -273,15 +273,15 @@ describe("POST /api/v1/ai/agent/run — scripted full loop", () => {
 
     const res = await postRun(jwt)
     const frames = parseFrames(await res.text())
-    expect(calls).toBe(8) // 8 model turns, each returning a tool call
-    expect(frames.filter((f) => f.type === "code_result")).toHaveLength(8)
+    expect(calls).toBe(12) // 12 sql model turns, each returning a tool call
+    expect(frames.filter((f) => f.type === "code_result")).toHaveLength(12)
     expect(frames.find((f) => f.type === "error")!.message).toContain("Tool-iteration cap")
     expect(frames.find((f) => f.type === "done")!.status).toBe("capped")
 
     const run = await env.AQUILLA_PG.prepare("SELECT status, steps FROM agent_runs")
       .first<{ status: string; steps: number }>()
     expect(run!.status).toBe("capped")
-    expect(run!.steps).toBe(8)
+    expect(run!.steps).toBe(12)
   })
 
   it("surfaces upstream failure as error frame + done:error + ledger status", async () => {

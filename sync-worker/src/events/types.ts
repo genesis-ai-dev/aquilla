@@ -150,6 +150,13 @@ export interface EventPayloads {
      */
     ai_suggestion?: true
     /**
+     * Translation agent provenance: id of the agent_runs row whose staged
+     * proposal produced this commit (always paired with ai_suggestion). Links
+     * the event to the run ledger for observability and compensating-event
+     * rollback. Absent on human edits and plain AI completions.
+     */
+    agent_run_id?: string
+    /**
      * FRO-186 / harmonization: when present, tags this commit as a harmonize
      * sweep event (cell.commit.harmonize variant per AD-2). The route layer
      * uses this field to enforce harmonize_min_role and to trigger the AD-14

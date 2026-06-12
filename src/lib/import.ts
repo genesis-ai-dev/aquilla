@@ -43,6 +43,11 @@ import {
   parseEBibleCorpus,
   type EBibleTranslation,
 } from "./parsers/ebible"
+import {
+  fetchHelloaoComplete,
+  parseHelloaoComplete,
+  type HelloaoTranslation,
+} from "./parsers/helloao"
 import { parseXliff } from "./parsers/xliff"
 import { parseTmx } from "./parsers/tmx"
 import { parseCsvBilingual } from "./parsers/csv-bilingual"
@@ -493,6 +498,57 @@ export async function importEBible(
   const { ref } = await emitParsedFile(
     { name: fileName, strings },
     "ebible",
+    {
+      ...ctx,
+      signal: signal ?? ctx.signal,
+      onCellEnqueued: (count, total) => {
+        onProgress?.({ phase: "save", cellsEnqueued: count, cellsTotal: total })
+        ctx.onCellEnqueued?.(count, total)
+      },
+    },
+  )
+  return ref
+}
+
+/**
+ * Import a Hello AO (bible.helloao.org) translation as a source file.
+ *
+ * Always fetches the whole-translation bulk endpoint (`complete.json`) in a
+ * single request — never per-chapter fan-out — and filters to `selectedBooks`
+ * (USFM codes; null/empty = whole bible) client-side. Reuses EBibleProgress
+ * since the phases are identical.
+ */
+export async function importHelloao(
+  translation: HelloaoTranslation,
+  selectedBooks: ReadonlySet<string> | null,
+  ctx: ImportContext,
+  onProgress?: (p: EBibleProgress) => void,
+  signal?: AbortSignal,
+): Promise<FileReference> {
+  onProgress?.({ phase: "download", received: 0, total: 0 })
+
+  const complete = await fetchHelloaoComplete(
+    translation.id,
+    (received, total) => onProgress?.({ phase: "download", received, total }),
+    signal,
+  )
+
+  onProgress?.({ phase: "parse" })
+  const strings = parseHelloaoComplete(complete, selectedBooks)
+  if (strings.length === 0) {
+    throw new Error(
+      `"${translation.englishName || translation.name}" downloaded but produced no verses — ` +
+      `check the book selection and try again.`
+    )
+  }
+
+  onProgress?.({ phase: "save", cellsEnqueued: 0, cellsTotal: strings.length })
+
+  const fileName = `${translation.englishName || translation.name} (${translation.id})`
+
+  const { ref } = await emitParsedFile(
+    { name: fileName, strings },
+    "helloao",
     {
       ...ctx,
       signal: signal ?? ctx.signal,
@@ -1359,6 +1415,8 @@ export async function parseFile(file: File, fileType: FileType): Promise<ImportR
     }
     case "ebible":
       throw new Error("eBible translations import via importEBible(), not importFile()")
+    case "helloao":
+      throw new Error("Hello AO translations import via importHelloao(), not importFile()")
     case "audio":
     case "video":
       // Media files have no text parser; importFile() routes them to

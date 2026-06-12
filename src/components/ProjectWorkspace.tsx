@@ -25,7 +25,7 @@ import { useActiveOrg } from "@/context/OrgContext"
 import { updateProject, patchProject, getProject, mergeServerProjectWithLocalCache } from "@/lib/store/project-index"
 import { MAX_BATCH_COMPLETIONS } from "@/lib/workspace-actions/registry"
 import type { FileReference } from "@/lib/parsers/types"
-import { fileOrderedBy } from "@/lib/parsers/types"
+import { fileOrderedBy, fileTypeHasSections } from "@/lib/parsers/types"
 import type { CellData } from "@/hooks/useCells"
 import { useWorkspaceSearch } from "@/hooks/useWorkspaceSearch"
 import { ParallelPassagesPanel, type ParallelPanelMode, type ParallelPanelScope, type ReplaceAllPayload } from "./ParallelPassagesPanel"
@@ -85,6 +85,7 @@ import { SearchResultsView } from "./search/SearchResultsView"
 import { LeftDock, type DockTab } from "./LeftDock"
 import { useChat } from "@/hooks/useChat"
 import { TranslationNotesSidebar, readTnSidebarVisible, writeTnSidebarVisible } from "./TranslationNotesSidebar"
+import { ParallelBiblesSidebar, readParallelBiblesOpen, writeParallelBiblesOpen } from "./ParallelBiblesSidebar"
 import { InactiveProjectBanner } from "./InactiveProjectBanner"
 import { OfflineBanner } from "./OfflineBanner"
 import { useProjectLifecycle } from "@/hooks/useProjectLifecycle"
@@ -1798,6 +1799,17 @@ export function ProjectWorkspace() {
     projectId ? readTnSidebarVisible(projectId) : false,
   )
   const [focusedCellCanonicalRef, setFocusedCellCanonicalRef] = useState<string | null>(null)
+  // Parallel-bibles sidebar (helloao): open state persisted per project, plus
+  // the canonical ref of the first visible editor row (scroll-tracked).
+  const [parallelBiblesOpen, setParallelBiblesOpen] = useState<boolean>(() =>
+    projectId ? readParallelBiblesOpen(projectId) : false,
+  )
+  const [visibleCellRef, setVisibleCellRef] = useState<string | null>(null)
+  // Drop the tracked ref when switching files so the previous file's verse
+  // doesn't leak into the new file's panel (the new EditorTable re-fires).
+  useEffect(() => {
+    setVisibleCellRef(null)
+  }, [activeFileId])
   const reconcilerRef = useRef<import("@/lib/sync/ws-reconciler").WsReconciler | null>(null)
   // FRO-288: Reactive reconciler state so useFocusLock can access it.
   // reconcilerRef is still the write target (set inside the async connect effect)
@@ -3394,6 +3406,7 @@ export function ProjectWorkspace() {
             checkLockHolder={checkLockHolder}
             staleCellIds={staleCellIds}
             assignmentsByCellId={assignmentsByCellId}
+            onVisibleRefChange={setVisibleCellRef}
           />
           </div>
         ) : (
@@ -3407,6 +3420,20 @@ export function ProjectWorkspace() {
         )}
         aside={
           <>
+            {/* Parallel Bibles (helloao): edge tab → slide-out panel showing the
+                scroll-tracked verse in other bible versions. Scripture files only. */}
+            {centerSurface === "editor" && activeFile && fileTypeHasSections(activeFile.type) && (
+              <ParallelBiblesSidebar
+                key={activeFile.id}
+                trackedRef={visibleCellRef}
+                open={parallelBiblesOpen}
+                onToggle={() => {
+                  const next = !parallelBiblesOpen
+                  setParallelBiblesOpen(next)
+                  if (projectId) writeParallelBiblesOpen(projectId, next)
+                }}
+              />
+            )}
             {/* FRO-179: Translation Notes sidebar — shown when a TN file exists
                 and a translation cell with a matching canonicalRef is focused. */}
             <TranslationNotesSidebar

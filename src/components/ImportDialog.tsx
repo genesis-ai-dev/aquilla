@@ -13,6 +13,7 @@ import { cn } from "@/lib/utils"
 import {
   importFile,
   importEBible,
+  importHelloao,
   importMacula,
   importTranslationNotes,
   prepareParatextProject,
@@ -45,6 +46,13 @@ import {
   parseEBibleCorpus,
   type EBibleTranslation,
 } from "@/lib/parsers/ebible"
+import {
+  fetchHelloaoTranslations,
+  fetchHelloaoBooks,
+  type HelloaoTranslation,
+  type HelloaoBook,
+} from "@/lib/parsers/helloao"
+import { getTestament } from "@/lib/codex-editor/bible-books"
 import { languagesEqual } from "@/lib/language-normalize"
 import { EBibleTargetReviewPanel } from "@/components/EBibleTargetReviewPanel"
 import { detectCollisions, type CollisionResult } from "@/lib/import-collision"
@@ -61,7 +69,7 @@ import { SpreadsheetImportPanel } from "@/components/import/SpreadsheetImportPan
 import { LabelImportPanel } from "@/components/import/LabelImportPanel"
 import { PairedImportPanel } from "@/components/import/PairedImportPanel"
 
-type Screen = "landing" | "upload" | "preview" | "ebible" | "macula" | "tn" | "direction" | "result" | "collision" | "spreadsheet" | "labels" | "paired"
+type Screen = "landing" | "upload" | "preview" | "ebible" | "helloao" | "macula" | "tn" | "direction" | "result" | "collision" | "spreadsheet" | "labels" | "paired"
 
 interface ImportDialogProps {
   open: boolean
@@ -359,6 +367,7 @@ export function ImportDialog({
                   ←
                 </button>
                 {screen === "upload" ? "Upload Files"
+                  : screen === "helloao" ? "Bible API (helloao.org)"
                   : screen === "macula" ? "Macula Hebrew + Greek"
                   : screen === "tn" ? "Translation Notes (TSV)"
                   : screen === "spreadsheet" ? "Spreadsheet (CSV / XLSX)"
@@ -420,6 +429,19 @@ export function ImportDialog({
             }}
             onTargetImported={() => {
               onOpenChange(false)
+            }}
+          />
+        )}
+
+        {screen === "helloao" && (
+          <HelloaoPanel
+            projectId={projectId}
+            username={username}
+            sourceLanguage={sourceLanguage}
+            targetLanguage={targetLanguage}
+            getToken={getToken}
+            onImported={async (ref, inferredLanguages) => {
+              await handleChildImported([ref], inferredLanguages)
             }}
           />
         )}
@@ -629,6 +651,22 @@ function ImportLanding({ onSelect }: ImportLandingProps) {
         </p>
         <p className="mt-1 text-xs text-muted-foreground">
           A public library of openly-licensed Bible translations from around the world. Pick any redistributable version and import it directly — no file download needed.
+        </p>
+      </button>
+
+      {/* Hello AO Free Use Bible API — active */}
+      <button
+        type="button"
+        onClick={() => onSelect("helloao")}
+        className="rounded-lg border p-4 text-left transition-colors hover:border-primary hover:bg-primary/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      >
+        <p className="text-sm font-medium">
+          Bible API
+          <span className="ml-1.5 text-xs font-normal text-muted-foreground">(helloao.org)</span>
+        </p>
+        <p className="mt-1 text-xs text-muted-foreground">
+          Over 1,000 Bible translations with headings and formatting from the Free Use Bible API.
+          Import the whole bible, one testament, or just the books you pick.
         </p>
       </button>
 
@@ -1665,6 +1703,303 @@ function EBiblePanel({ projectId, username, sourceLanguage, targetLanguage, getT
           </Button>
         )}
       </div>
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Hello AO Free Use Bible API panel — pick a translation, then choose books
+// (whole bible / testament / per-book), then import. One bulk complete.json
+// request per import; selection filters client-side (never per-chapter calls).
+// ---------------------------------------------------------------------------
+
+interface HelloaoPanelProps {
+  projectId: string
+  username: string
+  sourceLanguage: string
+  targetLanguage: string
+  getToken: (fileId: string) => Promise<string | null>
+  onImported: (ref: FileReference, inferredLanguages?: { sourceLanguage?: string; targetLanguage?: string }) => void | Promise<void>
+}
+
+function HelloaoPanel({ projectId, username, sourceLanguage, targetLanguage, getToken, onImported }: HelloaoPanelProps) {
+  const [translations, setTranslations] = useState<HelloaoTranslation[] | null>(null)
+  const [loadErr, setLoadErr] = useState<string | null>(null)
+  const [query, setQuery] = useState("")
+  const [selected, setSelected] = useState<HelloaoTranslation | null>(null)
+
+  // Book-selection step: loaded when a translation is chosen.
+  const [books, setBooks] = useState<HelloaoBook[] | null>(null)
+  const [booksErr, setBooksErr] = useState<string | null>(null)
+  const [checkedBooks, setCheckedBooks] = useState<Set<string>>(new Set())
+
+  const [progress, setProgress] = useState<EBibleProgress | null>(null)
+  const [importing, setImporting] = useState(false)
+  const [importErr, setImportErr] = useState<string | null>(null)
+  const abortRef = useRef<AbortController | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    fetchHelloaoTranslations()
+      .then((list) => {
+        if (!cancelled) setTranslations(list)
+      })
+      .catch((err) => {
+        if (!cancelled) setLoadErr(err instanceof Error ? err.message : String(err))
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  // Cancel any in-flight download when panel unmounts (e.g. dialog closed)
+  useEffect(() => {
+    return () => abortRef.current?.abort()
+  }, [])
+
+  const filtered = useMemo(() => {
+    if (!translations) return []
+    const q = query.trim().toLowerCase()
+    if (!q) return translations.slice(0, 200)
+    return translations
+      .filter(
+        (t) =>
+          t.id.toLowerCase().includes(q) ||
+          t.name.toLowerCase().includes(q) ||
+          t.englishName.toLowerCase().includes(q) ||
+          t.languageEnglishName.toLowerCase().includes(q) ||
+          t.languageName.toLowerCase().includes(q)
+      )
+      .slice(0, 200)
+  }, [translations, query])
+
+  function handleSelect(t: HelloaoTranslation) {
+    setSelected(t)
+    setBooks(null)
+    setBooksErr(null)
+    setCheckedBooks(new Set())
+    fetchHelloaoBooks(t.id)
+      .then((list) => {
+        setBooks(list)
+        // Default: everything selected (whole bible).
+        setCheckedBooks(new Set(list.map((b) => b.id)))
+      })
+      .catch((err) => {
+        setBooksErr(err instanceof Error ? err.message : String(err))
+      })
+  }
+
+  function applyPreset(preset: "all" | "OT" | "NT") {
+    if (!books) return
+    if (preset === "all") {
+      setCheckedBooks(new Set(books.map((b) => b.id)))
+    } else {
+      setCheckedBooks(new Set(books.filter((b) => getTestament(b.id) === preset).map((b) => b.id)))
+    }
+  }
+
+  function toggleBook(id: string) {
+    setCheckedBooks((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  async function handleImport() {
+    if (!selected || !books || checkedBooks.size === 0 || importing) return
+    setImporting(true)
+    setImportErr(null)
+    setProgress({ phase: "download", received: 0, total: 0 })
+    abortRef.current = new AbortController()
+
+    try {
+      // Whole-bible selection passes null so the parser skips no books.
+      const selection = checkedBooks.size === books.length ? null : checkedBooks
+      const ref = await importHelloao(
+        selected,
+        selection,
+        {
+          projectId,
+          author: username,
+          sourceLanguage,
+          targetLanguage,
+          getToken,
+        },
+        setProgress,
+        abortRef.current.signal
+      )
+      await onImported(ref, { sourceLanguage: selected.language || undefined })
+    } catch (err) {
+      setImportErr(err instanceof Error ? err.message : "Import failed")
+    } finally {
+      setImporting(false)
+      abortRef.current = null
+    }
+  }
+
+  const selectedVerseCount = useMemo(() => {
+    if (!books) return 0
+    return books.reduce((sum, b) => sum + (checkedBooks.has(b.id) ? b.totalNumberOfVerses : 0), 0)
+  }, [books, checkedBooks])
+
+  // ── Book-selection step ─────────────────────────────────────────────────────
+  if (selected) {
+    return (
+      <div className="flex flex-col gap-3">
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            disabled={importing}
+            onClick={() => setSelected(null)}
+            className="rounded p-0.5 text-muted-foreground hover:text-foreground transition-colors"
+            aria-label="Back to translation list"
+          >
+            ←
+          </button>
+          <div className="min-w-0">
+            <p className="truncate text-sm font-medium">{selected.englishName || selected.name}</p>
+            <p className="text-xs text-muted-foreground">
+              {selected.languageEnglishName || selected.languageName} ·{" "}
+              <a href={selected.licenseUrl} target="_blank" rel="noreferrer" className="underline">
+                license
+              </a>
+            </p>
+          </div>
+        </div>
+
+        {booksErr ? (
+          <p className="text-sm text-destructive">Failed to load books: {booksErr}</p>
+        ) : !books ? (
+          <p className="text-sm text-muted-foreground">Loading books…</p>
+        ) : (
+          <>
+            <div className="flex items-center gap-1.5">
+              <Button size="sm" variant="outline" disabled={importing} onClick={() => applyPreset("all")}>
+                Whole bible
+              </Button>
+              <Button size="sm" variant="outline" disabled={importing} onClick={() => applyPreset("OT")}>
+                Old Testament
+              </Button>
+              <Button size="sm" variant="outline" disabled={importing} onClick={() => applyPreset("NT")}>
+                New Testament
+              </Button>
+              <span className="ml-auto text-xs text-muted-foreground">
+                {checkedBooks.size} of {books.length} books
+              </span>
+            </div>
+
+            <ScrollArea className="h-64 rounded-md border">
+              <ul className="grid grid-cols-2 gap-x-2 p-2 sm:grid-cols-3">
+                {books.map((b) => (
+                  <li key={b.id}>
+                    <label className="flex cursor-pointer items-center gap-2 rounded px-1.5 py-1 text-sm hover:bg-accent">
+                      <Checkbox
+                        checked={checkedBooks.has(b.id)}
+                        disabled={importing}
+                        onCheckedChange={() => toggleBook(b.id)}
+                      />
+                      <span className="truncate">{b.commonName || b.name}</span>
+                    </label>
+                  </li>
+                ))}
+              </ul>
+            </ScrollArea>
+          </>
+        )}
+
+        {progress && (
+          <div className="text-xs text-muted-foreground">
+            <p>
+              {progress.phase === "download"
+                ? `Downloading ${selected.id}… ${formatProgress(progress.received, progress.total)}`
+                : progress.phase === "parse"
+                  ? "Parsing verses…"
+                  : progress.cellsTotal
+                    ? `Uploading verses: ${(progress.cellsEnqueued ?? 0).toLocaleString()} / ${progress.cellsTotal.toLocaleString()}`
+                    : "Uploading to project…"}
+            </p>
+            {progress.phase === "save" && progress.cellsTotal ? (
+              <div className="mt-1.5 h-2 w-full overflow-hidden rounded-full bg-muted">
+                <div
+                  className="h-full bg-primary transition-all"
+                  style={{
+                    width: `${Math.round(((progress.cellsEnqueued ?? 0) / progress.cellsTotal) * 100)}%`,
+                  }}
+                />
+              </div>
+            ) : null}
+          </div>
+        )}
+
+        {importErr && <p className="text-sm text-destructive">{importErr}</p>}
+
+        <div className="flex items-center justify-end gap-3">
+          {books && checkedBooks.size > 0 && (
+            <span className="text-xs text-muted-foreground">
+              ~{selectedVerseCount.toLocaleString()} verses
+            </span>
+          )}
+          <Button onClick={handleImport} disabled={!books || checkedBooks.size === 0 || importing}>
+            {importing ? "Importing..." : "Import"}
+          </Button>
+        </div>
+      </div>
+    )
+  }
+
+  // ── Translation picker step ─────────────────────────────────────────────────
+  return (
+    <div className="flex flex-col gap-3">
+      <p className="text-xs text-muted-foreground">
+        Import a Bible translation from the{" "}
+        <a href="https://bible.helloao.org/docs/" target="_blank" rel="noreferrer" className="underline">
+          Free Use Bible API
+        </a>{" "}
+        — over 1,000 versions with section headings and formatting. You can import the whole
+        bible, a single testament, or individual books.
+      </p>
+
+      <Input
+        placeholder="Search by language, name, or id (e.g. 'eng', 'BSB')"
+        value={query}
+        onChange={(e) => setQuery(e.target.value)}
+        disabled={!translations}
+      />
+
+      {loadErr ? (
+        <p className="text-sm text-destructive">Failed to load list: {loadErr}</p>
+      ) : !translations ? (
+        <p className="text-sm text-muted-foreground">Loading translations...</p>
+      ) : (
+        <ScrollArea className="h-72 rounded-md border">
+          <ul className="divide-y">
+            {filtered.length === 0 && (
+              <li className="p-3 text-sm text-muted-foreground">No matches.</li>
+            )}
+            {filtered.map((t) => (
+              <li key={t.id}>
+                <button
+                  type="button"
+                  onClick={() => handleSelect(t)}
+                  className="flex w-full flex-col items-start gap-0.5 px-3 py-2 text-left text-sm transition-colors hover:bg-accent"
+                >
+                  <div className="flex w-full items-center justify-between gap-2">
+                    <span className="font-medium">{t.englishName || t.name}</span>
+                    <span className="shrink-0 font-mono text-xs text-muted-foreground">
+                      {t.id}
+                    </span>
+                  </div>
+                  <span className="text-xs text-muted-foreground">
+                    {t.languageEnglishName || t.languageName} · {t.numberOfBooks} books
+                  </span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        </ScrollArea>
+      )}
     </div>
   )
 }

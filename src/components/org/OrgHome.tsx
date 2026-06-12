@@ -6,6 +6,8 @@ import { OrgBreadcrumb } from "./OrgBreadcrumb"
 import { useActiveOrg } from "@/context/OrgContext"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { getPortfolio, translatedPct, validatedPct, attentionRank, audioPct, deadlineStatus, type PortfolioProject } from "@/lib/frontier/portfolio"
+import { fetchAccessibleProjects, type CloudProjectSummary } from "@/lib/sync/cloud-projects"
+import { partitionSharedProjects } from "@/lib/frontier/shared-projects"
 import { WorkloadRollup } from "./WorkloadRollup"
 import { UserError } from "@/lib/errors/user-error"
 import { notifySessionExpired } from "@/lib/errors/session-expired-signal"
@@ -35,11 +37,14 @@ export function activityStatus(p: PortfolioProject, now: number): ActivityStatus
 }
 
 export function OrgHome() {
-  const { activeOrg, activeOrgId, isLoading: orgLoading } = useActiveOrg()
+  const { activeOrg, activeOrgId, orgs, isLoading: orgLoading } = useActiveOrg()
   const { session, loading: sessionLoading } = useFrontierSession()
   const jwt = session?.jwt ?? null
 
   const [projects, setProjects] = useState<PortfolioProject[]>([])
+  // FRO-335: projects shared from orgs the caller isn't a member of
+  // (invite-link / bulk-add grants) — the org portfolio above can't see them.
+  const [sharedProjects, setSharedProjects] = useState<CloudProjectSummary[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [query, setQuery] = useState("")
@@ -67,6 +72,20 @@ export function OrgHome() {
       })
     return () => { cancelled = true }
   }, [jwt, activeOrgId])
+
+  // FRO-335: surface cross-org grants on the Overview too — otherwise a user
+  // whose only project arrived via an invite link sees an empty dashboard.
+  useEffect(() => {
+    if (!jwt || orgLoading) return
+    let cancelled = false
+    fetchAccessibleProjects(jwt)
+      .then((all) => {
+        if (cancelled) return
+        setSharedProjects(partitionSharedProjects(all, orgs, activeOrgId).sharedWithMe)
+      })
+      .catch(() => { if (!cancelled) setSharedProjects([]) })
+    return () => { cancelled = true }
+  }, [jwt, orgs, activeOrgId, orgLoading])
 
   // Signed-out state: session finished loading but no JWT.
   // Never show zero-stat fake-empty cards for unauthenticated visitors.
@@ -267,6 +286,27 @@ export function OrgHome() {
                     )
                   })}
                 </div>
+              )}
+
+              {/* FRO-335: cross-org projects (invite-link / bulk-add grants).
+                  Listed separately — they're not part of this org's portfolio,
+                  but hiding them made them unreachable from every nav surface. */}
+              {sharedProjects.length > 0 && (
+                <section data-testid="shared-with-you" className="space-y-2">
+                  <h2 className="text-sm font-medium text-muted-foreground">Shared with you</h2>
+                  <div className="rounded-lg border divide-y">
+                    {sharedProjects.map((p) => (
+                      <Link
+                        key={p.id}
+                        to={`/projects/${p.id}`}
+                        className="flex items-center gap-4 p-4 hover:bg-muted/50 transition-colors"
+                      >
+                        <p className="flex-1 min-w-0 truncate font-medium">{p.name}</p>
+                        <span className="shrink-0 text-xs text-muted-foreground">{p.role.name}</span>
+                      </Link>
+                    ))}
+                  </div>
+                </section>
               )}
 
               {jwt && activeOrgId != null && <WorkloadRollup jwt={jwt} orgId={activeOrgId} />}

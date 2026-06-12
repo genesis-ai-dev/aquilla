@@ -19,6 +19,7 @@ import { Search, Replace, BookOpen, X, Maximize2 } from "lucide-react"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
+import { MarkedSnippet } from "@/components/search/MarkedSnippet"
 import type { WorkspaceSearchResult } from "@/hooks/useWorkspaceSearch"
 import type { ReplaceAllPayload } from "./ParallelPassagesPanel"
 
@@ -232,7 +233,7 @@ export function SearchDockPanel({
                 {r.context && (
                   <span className="block text-[10px] text-muted-foreground">{r.context}</span>
                 )}
-                <span className="block truncate">{r.snippet || r.original}</span>
+                <span className="block truncate"><MarkedSnippet text={r.snippet || r.original} /></span>
               </button>
             ))}
             {results.length > 50 && (

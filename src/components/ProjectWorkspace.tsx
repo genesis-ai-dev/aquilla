@@ -25,7 +25,7 @@ import { useActiveOrg } from "@/context/OrgContext"
 import { updateProject, patchProject, getProject, mergeServerProjectWithLocalCache } from "@/lib/store/project-index"
 import { MAX_BATCH_COMPLETIONS } from "@/lib/workspace-actions/registry"
 import type { FileReference } from "@/lib/parsers/types"
-import { fileOrderedBy } from "@/lib/parsers/types"
+import { fileOrderedBy, fileTypeHasSections } from "@/lib/parsers/types"
 import type { CellData } from "@/hooks/useCells"
 import { useWorkspaceSearch } from "@/hooks/useWorkspaceSearch"
 import { ParallelPassagesPanel, type ParallelPanelMode, type ParallelPanelScope, type ReplaceAllPayload } from "./ParallelPassagesPanel"
@@ -77,7 +77,7 @@ import { runDiarization, type DiarizationPhase } from "@/lib/diarization/run-dia
 import { attachMediaFileToTimeline, attachMediaUrlToTimeline } from "@/lib/timeline/attach-media"
 import { useCellsAuditStatsWithOverlay } from "@/hooks/useCellsAuditStatsWithOverlay"
 import { useComments } from "@/hooks/useComments"
-import { Film, Scale, MessagesSquare, Share2, Settings as SettingsIcon, Lock, ClipboardList, Trash2, Undo2, Sparkles, Mic2, Download, BookMarked, BookOpen, Users, UserCheck, Eye, ArrowRight, PanelLeftClose } from "lucide-react"
+import { Film, Scale, MessagesSquare, Share2, Settings as SettingsIcon, Lock, ClipboardList, Trash2, Undo2, Sparkles, Mic2, BookMarked, BookOpen, Users, UserCheck, Eye, ArrowRight, PanelLeftClose } from "lucide-react"
 import { ChatPanel } from "./ChatPanel"
 import { ChatDockPanel } from "./ChatDockPanel"
 import { SearchDockPanel } from "./SearchDockPanel"
@@ -85,6 +85,7 @@ import { SearchResultsView } from "./search/SearchResultsView"
 import { LeftDock, type DockTab } from "./LeftDock"
 import { useChat } from "@/hooks/useChat"
 import { TranslationNotesSidebar, readTnSidebarVisible, writeTnSidebarVisible } from "./TranslationNotesSidebar"
+import { ParallelBiblesSidebar, readParallelBiblesOpen, writeParallelBiblesOpen } from "./ParallelBiblesSidebar"
 import { InactiveProjectBanner } from "./InactiveProjectBanner"
 import { OfflineBanner } from "./OfflineBanner"
 import { useProjectLifecycle } from "@/hooks/useProjectLifecycle"
@@ -1818,6 +1819,19 @@ export function ProjectWorkspace() {
     projectId ? readTnSidebarVisible(projectId) : false,
   )
   const [focusedCellCanonicalRef, setFocusedCellCanonicalRef] = useState<string | null>(null)
+  // Parallel-bibles sidebar (helloao): open state persisted per project, plus
+  // the canonical ref the panel follows. Fed by two signals, most recent
+  // wins: the first visible editor row (scroll) and the focused cell
+  // (click / tab navigation in handleClaimCell).
+  const [parallelBiblesOpen, setParallelBiblesOpen] = useState<boolean>(() =>
+    projectId ? readParallelBiblesOpen(projectId) : false,
+  )
+  const [trackedCellRef, setTrackedCellRef] = useState<string | null>(null)
+  // Drop the tracked ref when switching files so the previous file's verse
+  // doesn't leak into the new file's panel (the new EditorTable re-fires).
+  useEffect(() => {
+    setTrackedCellRef(null)
+  }, [activeFileId])
   const reconcilerRef = useRef<import("@/lib/sync/ws-reconciler").WsReconciler | null>(null)
   // FRO-288: Reactive reconciler state so useFocusLock can access it.
   // reconcilerRef is still the write target (set inside the async connect effect)
@@ -1990,6 +2004,9 @@ export function ProjectWorkspace() {
     // FRO-179: update TN sidebar with the focused cell's canonicalRef.
     const focusedCell = cells.find((c) => c.id === cellId)
     setFocusedCellCanonicalRef(focusedCell?.group ?? null)
+    // Parallel-bibles panel: navigating to a cell is a stronger "looking at"
+    // signal than the scroll position — the panel follows whichever moved last.
+    if (focusedCell?.group) setTrackedCellRef(focusedCell.group)
     // FRO-288: focusLockState.claim() replaces the bare focus.claim send.
     // The hook sends focus.claim and starts the half-period renewal timer so
     // the 30s DO lease never silently expires mid-edit.
@@ -2447,8 +2464,9 @@ export function ProjectWorkspace() {
     project: project!,
     activeFileId,
     fileProgress,
+    canExportByOrgPolicy,
     audioCounts,
-  }), [project, activeFileId, fileProgress, audioCounts])
+  }), [project, activeFileId, fileProgress, canExportByOrgPolicy, audioCounts])
 
   const openImportFlow = useCallback(() => {
     if (!project) return
@@ -2597,14 +2615,8 @@ export function ProjectWorkspace() {
       },
     ]
 
-    if (canExportByOrgPolicy) {
-      items.push({
-        id: "export-file",
-        label: "Export file",
-        icon: Download,
-        onClick: openExportFlow,
-      })
-    }
+    // Export intentionally absent here — it lives in the primary-action
+    // dropdown (workspace-actions registry), and duplicating it was noise.
 
     if (canAssignWork && activeFileId) {
       items.push({
@@ -2654,8 +2666,6 @@ export function ProjectWorkspace() {
     activeFileId,
     hasUnfinished,
     handleJumpNextUnfinished,
-    canExportByOrgPolicy,
-    openExportFlow,
     canAssignWork,
     lens,
     canDiarize,
@@ -2946,6 +2956,30 @@ export function ProjectWorkspace() {
                   />
                 )}
                 <div className="mt-auto border-t px-2 pb-2 pt-2">
+                  {/* Contextual onboarding status — self-removes once setup
+                      completes. Sidebar-footer placement (Linear-style) keeps
+                      transient onboarding state out of the action header. */}
+                  {checklistState.totalCount > 0 && checklistState.completedCount < checklistState.totalCount && (
+                    <TooltipProvider delay={0}>
+                      <Tooltip open={showChipTooltip} onOpenChange={setShowChipTooltip}>
+                        <TooltipTrigger
+                          render={
+                            <button
+                              onClick={() => { setShowChipTooltip(false); setChecklistOpen(true) }}
+                              className="mb-1 flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-[11px] font-medium text-muted-foreground hover:bg-accent hover:text-foreground"
+                              title="Open setup checklist"
+                            />
+                          }
+                        >
+                          <ClipboardList className="h-3 w-3" />
+                          Setup: {checklistState.completedCount}/{checklistState.totalCount}
+                        </TooltipTrigger>
+                        <TooltipContent side="right">
+                          Reopen the setup checklist anytime from here.
+                        </TooltipContent>
+                      </Tooltip>
+                    </TooltipProvider>
+                  )}
                   <AccountSwitcher variant="sidebar" />
                 </div>
               </div>
@@ -3011,37 +3045,6 @@ export function ProjectWorkspace() {
             onBack={goToProjects}
             extraMenuItems={workspaceHeaderMenuItems}
           >
-            {/* Contextual onboarding status — self-removes once setup completes. */}
-            {checklistState.totalCount > 0 && checklistState.completedCount < checklistState.totalCount && (
-              <TooltipProvider delay={0}>
-                <Tooltip open={showChipTooltip} onOpenChange={setShowChipTooltip}>
-                  <TooltipTrigger
-                    render={
-                      <button
-                        onClick={() => { setShowChipTooltip(false); setChecklistOpen(true) }}
-                        className="flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-medium text-muted-foreground hover:bg-accent"
-                        title="Open setup checklist"
-                      />
-                    }
-                  >
-                    <ClipboardList className="h-3 w-3" />
-                    Setup: {checklistState.completedCount}/{checklistState.totalCount}
-                  </TooltipTrigger>
-                  <TooltipContent side="bottom">
-                    Reopen the setup checklist anytime from here.
-                  </TooltipContent>
-                </Tooltip>
-              </TooltipProvider>
-            )}
-
-            {project && centerSurface === "editor" && (
-              <EditorModeToggle
-                lens={lens}
-                onChange={(l) => setLens(l)}
-                timeOrdered={activeFile ? fileOrderedBy(activeFile) === "time" : false}
-              />
-            )}
-
             {project && centerSurface === "rules" && (
               <>
                 <Button variant="outline" size="sm" onClick={() => navigate(`/project/${projectId}/terminology`)}>
@@ -3108,6 +3111,17 @@ export function ProjectWorkspace() {
               files={projectFiles}
               onActivate={workspaceTabs.activateTab}
               onClose={handleCloseTab}
+              trailing={
+                // Per-file view-mode control — lives with the content it
+                // affects, not in the global header (which holds actions).
+                project && centerSurface === "editor" && activeFileId ? (
+                  <EditorModeToggle
+                    lens={lens}
+                    onChange={(l) => setLens(l)}
+                    timeOrdered={activeFile ? fileOrderedBy(activeFile) === "time" : false}
+                  />
+                ) : undefined
+              }
             />
             {project && activeFileId && (
               <>
@@ -3419,6 +3433,7 @@ export function ProjectWorkspace() {
             checkLockHolder={checkLockHolder}
             staleCellIds={staleCellIds}
             assignmentsByCellId={assignmentsByCellId}
+            onVisibleRefChange={setTrackedCellRef}
           />
           </div>
         ) : (
@@ -3432,6 +3447,20 @@ export function ProjectWorkspace() {
         )}
         aside={
           <>
+            {/* Parallel Bibles (helloao): edge tab → slide-out panel showing the
+                scroll-tracked verse in other bible versions. Scripture files only. */}
+            {centerSurface === "editor" && activeFile && fileTypeHasSections(activeFile.type) && (
+              <ParallelBiblesSidebar
+                key={activeFile.id}
+                trackedRef={trackedCellRef}
+                open={parallelBiblesOpen}
+                onToggle={() => {
+                  const next = !parallelBiblesOpen
+                  setParallelBiblesOpen(next)
+                  if (projectId) writeParallelBiblesOpen(projectId, next)
+                }}
+              />
+            )}
             {/* FRO-179: Translation Notes sidebar — shown when a TN file exists
                 and a translation cell with a matching canonicalRef is focused. */}
             <TranslationNotesSidebar

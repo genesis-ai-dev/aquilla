@@ -1,5 +1,7 @@
+import type { ReactNode } from "react"
 import { X } from "lucide-react"
 import { cn } from "@/lib/utils"
+import { looksLikeUuid } from "@/lib/uuid"
 import type { WorkspaceTab } from "@/hooks/useWorkspaceTabs"
 
 interface FileMeta {
@@ -14,13 +16,9 @@ interface Props {
   files: readonly FileMeta[]
   onActivate: (tabId: string) => void
   onClose: (tabId: string) => void
-}
-
-const UUID_RE =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
-
-function looksLikeUuid(value: string): boolean {
-  return UUID_RE.test(value.trim())
+  /** Right-aligned slot for per-file view controls (e.g. the Text/Audio lens
+   *  toggle) — they belong on the content row, not in the global header. */
+  trailing?: ReactNode
 }
 
 /** Tab label for humans — never the internal file id. */
@@ -35,12 +33,12 @@ export function fileNameFor(files: readonly FileMeta[], fileId: string): string 
   return "Untitled file"
 }
 
-export function TabStrip({ tabs, activeTabId, files, onActivate, onClose }: Props) {
+export function TabStrip({ tabs, activeTabId, files, onActivate, onClose, trailing }: Props) {
   const visibleTabs = tabs.flatMap((tab) => {
     const name = fileNameFor(files, tab.fileId)
     return name ? [{ tab, name }] : []
   })
-  if (visibleTabs.length === 0) return null
+  if (visibleTabs.length === 0 && !trailing) return null
   return (
     <div
       role="tablist"
@@ -49,6 +47,10 @@ export function TabStrip({ tabs, activeTabId, files, onActivate, onClose }: Prop
     >
       {visibleTabs.map(({ tab, name }) => {
         const active = tab.id === activeTabId
+        // Section ids that never got a human label come through as raw UUIDs —
+        // suppress those rather than printing machine ids in the pill.
+        const sectionLabel =
+          tab.sectionLabel && !looksLikeUuid(tab.sectionLabel) ? tab.sectionLabel : null
         return (
           <div
             key={tab.id}
@@ -65,11 +67,11 @@ export function TabStrip({ tabs, activeTabId, files, onActivate, onClose }: Prop
               type="button"
               onClick={() => onActivate(tab.id)}
               className="flex max-w-[200px] items-center gap-1.5 truncate text-left"
-              title={tab.sectionLabel ? `${name} · ${tab.sectionLabel}` : name}
+              title={sectionLabel ? `${name} · ${sectionLabel}` : name}
             >
               <span className="truncate font-medium">{name}</span>
-              {tab.sectionLabel && (
-                <span className="truncate text-muted-foreground/80">· {tab.sectionLabel}</span>
+              {sectionLabel && (
+                <span className="truncate text-muted-foreground/80">· {sectionLabel}</span>
               )}
             </button>
             <button
@@ -86,6 +88,9 @@ export function TabStrip({ tabs, activeTabId, files, onActivate, onClose }: Prop
           </div>
         )
       })}
+      {trailing && (
+        <div className="ml-auto flex shrink-0 items-center pl-2">{trailing}</div>
+      )}
     </div>
   )
 }

@@ -12,6 +12,9 @@ export interface WorkspaceActionContext {
   project: ProjectRecord
   activeFileId: string | null
   fileProgress: Map<string, FileProgressEntry>
+  /** Org export-policy floor (FRO-253). When false, Export is hidden from the
+   *  action menu — openExportFlow no-ops anyway, but don't show a dead item. */
+  canExportByOrgPolicy?: boolean
   /** Counts driving the bulk audio actions in the secondary action group. */
   audioCounts?: {
     /** Cells with a recording but no Whisper timings yet. */

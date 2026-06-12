@@ -58,6 +58,7 @@ import { useMicPermission } from "@/hooks/useMicPermission"
 import { assignedCastVoiceId, findVoice } from "@/lib/audio/voices"
 import { useNavigate } from "react-router-dom"
 import { cn } from "@/lib/utils"
+import { looksLikeUuid } from "@/lib/uuid"
 import { isPerfLogEnabled } from "@/lib/perf-log"
 import { partitionInfractions } from "@/lib/rules/waivers"
 import { ViolationPopover } from "./ViolationPopover"
@@ -439,6 +440,10 @@ interface EditorTableProps {
    *  active assignment. The map is built in ProjectWorkspace from getMyAssignments
    *  (member's own inbox) and getProjectAssignments (manager workload). */
   assignmentsByCellId?: ReadonlyMap<string, { username: string; scopeLabel: string }>
+  /** Fired when the first visible row's canonical ref changes while scrolling
+   *  (e.g. "GEN 1:1"). Drives the parallel-bibles sidebar's auto-tracking.
+   *  Null when the visible cell carries no ref. */
+  onVisibleRefChange?: (ref: string | null) => void
   /**
    * RACE-5: ref-backed lock check for commit-time enforcement. Reads the live
    * lock map (updated synchronously on each WS frame) so a commit queued just
@@ -481,6 +486,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   assignmentsByCellId,
   checkLockHolder,
   showFootnotesInline,
+  onVisibleRefChange,
 }, ref) {
   const { canEdit, canValidate, readOnlyLabel } = useEditorCapabilities(project)
   // Probe mic permission once (shared across all rows) so the help affordance
@@ -940,13 +946,21 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   const firstVisibleIndex = firstVisibleItem?.index ?? 0
   const currentSectionLabel = sectionByIndex[firstVisibleIndex] ?? ""
 
+  // Parallel-bibles sidebar tracking: report the first visible row's canonical
+  // ref as the user scrolls. Keyed on the derived ref string (not scrollOffset)
+  // so the effect only fires on actual row changes, not every scrolled pixel.
+  const firstVisibleRef = displayCells[firstVisibleIndex]?.group || null
+  useEffect(() => {
+    onVisibleRefChange?.(firstVisibleRef)
+  }, [firstVisibleRef, onVisibleRefChange])
+
   return (
     <div ref={parentRef} className="h-full overflow-auto" onMouseUp={handleMouseUp}>
       <div className="sticky top-0 z-10 bg-background">
         {/* FRO-250: sticky section/chapter indicator strip. Appears above the
             column header when the file has section-tagged cells. Keeps the
             reader oriented while scrolling through long Bible chapters. */}
-        {currentSectionLabel && (
+        {currentSectionLabel && !looksLikeUuid(currentSectionLabel) && (
           <div className="flex items-center gap-1.5 border-b border-border/40 px-4 py-0.5">
             <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/60">
               {currentSectionLabel}

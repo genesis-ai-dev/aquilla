@@ -146,6 +146,39 @@ describe("stageEvents — chain resolution + staleness", () => {
     expect(staged.display).toMatchObject({ canonicalRef: "GEN 1:2", before: "", after: "first draft" })
   })
 
+  it("surfaces deterministic lint (NEEDS REVIEW) in the verdict block so the model can redraft", async () => {
+    await env.AQUILLA_PG.prepare(
+      `INSERT INTO project_settings (project_id, settings) VALUES (?, ?)
+       ON CONFLICT (project_id) DO UPDATE SET settings = EXCLUDED.settings`,
+    )
+      .bind(
+        PROJECT,
+        JSON.stringify({
+          rules: [
+            {
+              id: "r1",
+              name: "No 'beginning' transliteration",
+              enabled: true,
+              check: { type: "target-forbids", targetPattern: "beginnito*" },
+            },
+          ],
+        }),
+      )
+      .run()
+
+    const result = await stageEvents(
+      env.AQUILLA_PG,
+      [{ kind: "target.cell.commit", fileId: FILE, cellId: CELL, payload: { value: "En el beginnito" } }],
+      ctx(),
+    )
+    // Lint does not block staging — the user still sees the proposal — but the
+    // model is told exactly what to fix and to re-emit.
+    expect(result.proposal).not.toBeNull()
+    expect(result.modelVerdictBlock).toContain("NEEDS REVIEW")
+    expect(result.modelVerdictBlock).toContain("No 'beginning' transliteration")
+    expect(result.modelVerdictBlock).toContain("re-emit")
+  })
+
   it("rejects a commit to a cell id that exists on neither side", async () => {
     const result = await stageEvents(
       env.AQUILLA_PG,

@@ -120,7 +120,21 @@ All tables carry project_id; ALWAYS filter with :project.
 - comments (comment_id, project_id, scope_kind 'cell'|'file'|'project', file_id, cell_id, parent_comment_id, body, resolved 0/1, author_id, created_at ms, deleted_at).
 - assignments (assignment_id, project_id, assignee_user_id, scope_kind, scope_label, cells_total, deadline, note, created_at ms, unassigned_at, completed_at) + assignment_cells (assignment_id, file_id, cell_id).
 - project_settings (project_id, settings TEXT json) — settings::jsonb ->> 'sourceLanguage' / ->> 'targetLanguage' = the project's language pair; -> 'terminology' the termbase concepts; -> 'validationCountThreshold' the N-of-M bar.
-- users (id, username, display_name, email), project_members (project_id, user_id, role_level).`
+- users (id, username, display_name, email), project_members (project_id, user_id, role_level).
+- information_schema is queryable WITHOUT :project — your escape hatch when a column/table is not documented here.`
+
+// Inlined for commit-capable roles only (the prompt's role-filtering property:
+// a reviewer's card must not contain target.cell.commit at all). Drafting is
+// the 80% case, so its canonical recipe is L1, not a docs() call away — both
+// 2026-06-12 real-model runs meandered instead of fetching the cookbook.
+const DRAFTING_RECIPE = `## Canonical drafting recipe (the 80% case — use this, do not re-derive it)
+1. Work list in display order (sequence files shown; scripture → ORDER BY canonical_ref):
+   SELECT s.cell_id, s.canonical_ref, s.sequence_index, s.value AS source_text
+   FROM cells s LEFT JOIN cells t ON t.project_id=s.project_id AND t.file_id=s.file_id AND t.cell_id=s.cell_id AND t.side='target'
+   WHERE s.project_id=:project AND s.file_id=:file AND s.side='source' AND (t.value IS NULL OR t.value='') ORDER BY s.sequence_index LIMIT 10
+2. Style exemplars: a few validated pairs from this file (JOIN cell_validators) — imitate them.
+3. Draft into the project's target language, then ONE emit with all commits: [{kind:"target.cell.commit", fileId, cellId, payload:{value}}…]. The verdict block reports rule violations (NEEDS REVIEW) — fix and re-emit those before answering.
+{docs:"drafting"} covers variants (chapter scope, terminology, back-translation).`
 
 const EXECUTE_CONTRACT = `## The execute tool — exactly ONE field per call
 - {sql: "SELECT …"} — one read-only SELECT (CTEs via WITH allowed). 4s timeout; 200 rows max (overflow is flagged). Results come back as a pipe table: ∅ = NULL; UUIDs are aliased (#c1 cells, #e1 events, #f1 files) and you may use those aliases (and :vars) directly in later sql/emit calls. Aliases are OPAQUE handles assigned in first-seen order — they carry no document order or numbering; NEVER show them to the user or treat #c8 as "segment 8" (use canonical_ref / sequence position when talking to the user).
@@ -203,7 +217,7 @@ ${kinds.map((k) => `- ${EVENT_LINES[k]}`).join("\n")}${
 ${EXECUTE_CONTRACT}
 ${focus.length ? focus.join("\n") + "\n" : ""}
 ${situation}${SCHEMA_CARD}
-
+${kinds.includes("target.cell.commit") ? `\n${DRAFTING_RECIPE}\n` : ""}
 ${eventCard}
 
 ${SAFETY}`

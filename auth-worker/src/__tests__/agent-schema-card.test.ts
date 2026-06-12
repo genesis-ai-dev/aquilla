@@ -82,6 +82,20 @@ describe("buildSystemPrompt — role filtering", () => {
     expect(prompt).toContain("cookbook FIRST")
   })
 
+  // Budget mirrors frequency: drafting is the 80% case, so its canonical
+  // recipe lives in L1 — both 2026-06-12 real-model runs meandered through
+  // exploratory SQL instead of fetching the L2 cookbook.
+  it("inlines the canonical drafting recipe for commit-capable roles only", () => {
+    const contributor = buildSystemPrompt({ ...baseCtx, roleLevel: 400 })
+    expect(contributor).toContain("Canonical drafting recipe")
+    expect(contributor).toContain("information_schema is queryable WITHOUT :project")
+
+    // A reviewer cannot commit, so the recipe (which names the event kind)
+    // must be absent — same property as the event-card filtering.
+    const reviewer = buildSystemPrompt({ ...baseCtx, roleLevel: 300 })
+    expect(reviewer).not.toContain("Canonical drafting recipe")
+  })
+
   // Second real-model run (2026-06-12): the model found the right verse but
   // stalled to ask "what language?" and "this one or the first one?" — both
   // derivable. These pins keep the prompt answering them pre-emptively.

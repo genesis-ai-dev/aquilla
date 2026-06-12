@@ -61,6 +61,43 @@ describe("buildSystemPrompt — role filtering", () => {
     const prompt = buildSystemPrompt({ ...baseCtx, roleLevel: AGENT_ROLE.OWNER })
     expect(prompt.split("\n").length).toBeLessThanOrEqual(250)
   })
+
+  // First real-model run (2026-06-12): the model treated #c aliases as the
+  // user's segment numbers and could not order a sequence file. These pins
+  // keep the card teaching what that run proved it must teach.
+  it("declares aliases opaque and bans showing them to the user", () => {
+    const prompt = buildSystemPrompt({ ...baseCtx, roleLevel: 400 })
+    expect(prompt).toContain("OPAQUE")
+    expect(prompt).toContain("NEVER show them to the user")
+  })
+
+  it("teaches ordering per file kind, including sequence_index for segments", () => {
+    const prompt = buildSystemPrompt({ ...baseCtx, roleLevel: 400 })
+    expect(prompt).toContain("sequence_index")
+    expect(prompt).toContain('"segment 8"')
+  })
+
+  it("nudges cookbook-first for task-shaped work", () => {
+    const prompt = buildSystemPrompt({ ...baseCtx, roleLevel: 400 })
+    expect(prompt).toContain("cookbook FIRST")
+  })
+
+  it("grounds the situation when a file is focused — name, kind, and relative-reference rule", () => {
+    const unfocused = buildSystemPrompt({ ...baseCtx, roleLevel: 400 })
+    expect(unfocused).not.toContain("## Current situation")
+
+    const focused = buildSystemPrompt({
+      ...baseCtx,
+      roleLevel: 400,
+      fileId: "f1",
+      fileName: "Ruth",
+      fileKind: "sequence",
+    })
+    expect(focused).toContain("## Current situation")
+    expect(focused).toContain('"Ruth"')
+    expect(focused).toContain("kind: sequence")
+    expect(focused).toContain("refer to THIS file")
+  })
 })
 
 describe("AGENT_REQUIRED_ROLE — mirror of sync-worker role-policy.ts", () => {

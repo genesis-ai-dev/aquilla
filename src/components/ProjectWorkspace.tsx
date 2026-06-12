@@ -2949,6 +2949,7 @@ export function ProjectWorkspace() {
                     fileId: activeFileId ?? undefined,
                     cellId: focusedCellId ?? undefined,
                   },
+                  fileName: activeFile?.name,
                   rules,
                   resolveCell: resolveCellById,
                   onApplied: handleAgentApplied,

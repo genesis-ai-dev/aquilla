@@ -15,6 +15,9 @@ export interface ChatContextPinProps {
   onToggle: (v: boolean) => void
   currentCell: CellContext | null
   compact?: boolean
+  /** Open file's name — shown when no cell is focused so the pill is honest
+   *  about file-level context still being sent (agent dock). */
+  fileName?: string
 }
 
 export function ChatContextPin({
@@ -22,6 +25,7 @@ export function ChatContextPin({
   onToggle,
   currentCell,
   compact,
+  fileName,
 }: ChatContextPinProps) {
   const preview =
     includeCellContext && currentCell
@@ -60,7 +64,9 @@ export function ChatContextPin({
           ? currentCell.context
             ? `Cell: ${currentCell.context}`
             : "Cell context on"
-          : "No cell context"}
+          : includeCellContext && fileName
+            ? `File: ${fileName}`
+            : "No cell context"}
       </button>
       {preview && (
         <span

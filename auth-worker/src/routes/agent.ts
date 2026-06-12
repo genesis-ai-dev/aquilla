@@ -230,6 +230,23 @@ async function runAgentLoop({ env, body, user, roleLevel, runId, signal, send }:
     aliases,
   }
 
+  // Situational grounding: resolve the focused file's name/kind so the prompt
+  // can anchor relative requests ("this file", "segment 8") instead of leaving
+  // the model to reverse-engineer the project. One cheap lookup per run.
+  let focusedFile: { name?: string; kind?: string } = {}
+  if (body.context?.fileId) {
+    try {
+      const row = await env.AQUILLA_PG.prepare(
+        "SELECT name, kind FROM files WHERE project_id = ? AND id = ?",
+      )
+        .bind(body.projectId, body.context.fileId)
+        .first<{ name: string; kind: string | null }>()
+      if (row) focusedFile = { name: row.name, kind: row.kind ?? undefined }
+    } catch {
+      /* prompt grounding is best-effort — the run proceeds without it */
+    }
+  }
+
   const convo: ConvoMessage[] = [
     {
       role: "system",
@@ -239,6 +256,8 @@ async function runAgentLoop({ env, body, user, roleLevel, runId, signal, send }:
         roleLevel,
         fileId: body.context?.fileId,
         cellId: body.context?.cellId,
+        fileName: focusedFile.name,
+        fileKind: focusedFile.kind,
       }),
     },
     ...body.messages,

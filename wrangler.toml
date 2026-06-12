@@ -1,3 +1,8 @@
+# BETA_FLAG — build-time toggle (VITE_BETA_FLAG).
+# Defaults to "1" (badge visible). To disable the beta badge, build with:
+#   VITE_BETA_FLAG=0 pnpm deploy:aquilla:spa
+# Or set VITE_BETA_FLAG=0 in CI env vars / Cloudflare Pages build settings.
+
 # aquilla-web — Workers-with-static-assets deploy of the SPA (aquilla brand).
 #
 # This replaces the `codex-web` Cloudflare Pages project for the aquilla brand.

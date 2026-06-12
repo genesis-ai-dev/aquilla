@@ -39,6 +39,7 @@ export default defineConfig(({ mode }) => ({
   envPrefix: ["VITE_", "TAURI_ENV_"],
   define: {
     "import.meta.env.VITE_BRAND": JSON.stringify(brandId),
+    "import.meta.env.VITE_BETA_FLAG": JSON.stringify(process.env.VITE_BETA_FLAG ?? "1"),
     __APP_VERSION__: JSON.stringify(pkgVersion),
     __APP_BRANCH__: JSON.stringify(buildBranch),
     __APP_SHA__: JSON.stringify(buildSha),

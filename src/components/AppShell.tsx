@@ -2,6 +2,7 @@ import { useContext, type ReactNode } from "react"
 import { cn } from "@/lib/utils"
 import { BrandContext } from "@/branding/use-brand"
 import { VersionTag } from "./VersionBadge"
+import { BetaBadge } from "./BetaBadge"
 // FRO-307: always-available report button (3 lines: import + mount in left rail)
 import { ReportProblemButton } from "./ReportProblemButton/ReportProblemButton"
 
@@ -76,6 +77,7 @@ export function AppShell({ leftDock, sidebar, logoSlot, logoAccessory, header, s
         {(resolvedLogo || logoAccessory) && (
           <div className="flex shrink-0 items-center justify-between">
             {resolvedLogo}
+            <BetaBadge />
             {logoAccessory && <div className="mr-2 mt-2 shrink-0">{logoAccessory}</div>}
           </div>
         )}

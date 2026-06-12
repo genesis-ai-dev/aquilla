@@ -1,22 +1,21 @@
-/**
- * FRO-282: /login page
- *
- * Dedicated login page for returning users — avoids the onboarding wizard
- * defaulting to signup. On success, navigates to `/` (dashboard).
- *
- * Links:
- *  - "Forgot password?" → /reset-password (FRO-270)
- *  - "New here?" → /onboarding (signup wizard)
- *
- * Route root: min-h-screen + document scroll (per scroll-model rule).
- */
-
 import { useState, type FormEvent } from "react"
 import { useNavigate, useSearchParams } from "react-router-dom"
 import { Eye, EyeOff } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import {
+  Field,
+  FieldError,
+  FieldGroup,
+  FieldLabel,
+} from "@/components/ui/field"
+import {
+  InputGroup,
+  InputGroupAddon,
+  InputGroupButton,
+  InputGroupInput,
+} from "@/components/ui/input-group"
 import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
+import { Spinner } from "@/components/ui/spinner"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { FrontierAuthError } from "@/lib/frontier/auth"
 import { FrontierForgotPasswordForm } from "@/components/git-import/FrontierForgotPasswordForm"
@@ -28,9 +27,6 @@ export function Login() {
   const [searchParams] = useSearchParams()
   const { login } = useFrontierSession()
 
-  // ?next= preserves the originating route so users return to where they were
-  // after signing in (e.g. /projects, /project/:id).
-  // Only honour same-origin paths (starts with "/") to prevent open-redirect.
   const rawNext = searchParams.get("next") ?? ""
   const next = rawNext.startsWith("/") ? rawNext : "/"
 
@@ -57,68 +53,68 @@ export function Login() {
 
   return (
     <div className="min-h-screen flex items-center justify-center p-8">
-      <div className="w-full max-w-sm space-y-6">
-        <div className="text-center space-y-1">
-          <h1 className="text-2xl font-semibold">
-            {mode === "login" ? "Sign in to Aquilla" : "Reset your password"}
-          </h1>
-          {mode === "login" && (
-            <p className="text-sm text-muted-foreground">
-              Welcome back — enter your credentials to continue.
-            </p>
-          )}
-        </div>
+      <div className="flex w-full max-w-sm flex-col gap-6">
+        <h1 className="text-center text-2xl font-semibold">
+          {mode === "login" ? "Sign in" : "Reset your password"}
+        </h1>
 
         {mode === "forgot" ? (
           <FrontierForgotPasswordForm onBack={() => setMode("login")} />
         ) : (
-          <form onSubmit={onSubmit} className="space-y-4">
-            <div>
-              <Label htmlFor="login-user">Aquilla username or email</Label>
-              <Input
-                id="login-user"
-                value={username}
-                onChange={(e) => setUsername(e.target.value)}
-                autoComplete="username"
-                autoFocus
-              />
-            </div>
-            <div>
-              <div className="flex items-center justify-between">
-                <Label htmlFor="login-pass">Password</Label>
-                <button
-                  type="button"
-                  onClick={() => setMode("forgot")}
-                  className="text-xs text-muted-foreground underline-offset-4 hover:underline"
-                >
-                  Forgot password?
-                </button>
-              </div>
-              <div className="relative">
+          <form onSubmit={onSubmit} className="flex flex-col gap-4">
+            <FieldGroup>
+              <Field>
+                <FieldLabel htmlFor="login-user">
+                  Username or email
+                </FieldLabel>
                 <Input
-                  id="login-pass"
-                  type={showPassword ? "text" : "password"}
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  autoComplete="current-password"
-                  className="pr-10"
+                  id="login-user"
+                  value={username}
+                  onChange={(e) => setUsername(e.target.value)}
+                  autoComplete="username"
+                  autoFocus
                 />
-                <button
-                  type="button"
-                  onClick={() => setShowPassword((v) => !v)}
-                  aria-label={showPassword ? "Hide password" : "Show password"}
-                  className="absolute inset-y-0 right-0 flex items-center px-3 text-muted-foreground hover:text-foreground"
-                >
-                  {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                </button>
-              </div>
-            </div>
-            {error && <p className="text-sm text-destructive">{error}</p>}
+              </Field>
+              <Field>
+                <div className="flex items-center justify-between">
+                  <FieldLabel htmlFor="login-pass">Password</FieldLabel>
+                  <button
+                    type="button"
+                    onClick={() => setMode("forgot")}
+                    className="text-xs text-muted-foreground underline-offset-4 hover:underline"
+                  >
+                    Forgot password?
+                  </button>
+                </div>
+                <InputGroup>
+                  <InputGroupInput
+                    id="login-pass"
+                    type={showPassword ? "text" : "password"}
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    autoComplete="current-password"
+                  />
+                  <InputGroupAddon align="inline-end">
+                    <InputGroupButton
+                      size="icon-xs"
+                      onClick={() => setShowPassword((v) => !v)}
+                      aria-label={
+                        showPassword ? "Hide password" : "Show password"
+                      }
+                    >
+                      {showPassword ? <EyeOff /> : <Eye />}
+                    </InputGroupButton>
+                  </InputGroupAddon>
+                </InputGroup>
+              </Field>
+            </FieldGroup>
+            {error && <FieldError>{error}</FieldError>}
             <Button
               type="submit"
               disabled={busy || !username || !password}
               className="w-full"
             >
+              {busy && <Spinner data-icon="inline-start" />}
               {busy ? "Signing in…" : "Sign in"}
             </Button>
           </form>

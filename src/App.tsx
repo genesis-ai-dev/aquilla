@@ -25,6 +25,7 @@ import { AudioBulkProgressBanner } from "@/components/AudioBulkProgressBanner"
 import { PrivateModeBanner } from "@/components/PrivateModeBanner"
 import { SessionExpiredBanner } from "@/components/SessionExpiredBanner"
 import { VersionBadge } from "@/components/VersionBadge"
+import { UpdateBanner } from "@/components/UpdateBanner"
 import { hydratePrefetchStatus } from "@/lib/audio/prefetch"
 import { probeOpfsAvailability } from "@/lib/storage/opfs-availability"
 import { useGlobalAudioShortcuts } from "@/hooks/useGlobalAudioShortcuts"
@@ -136,6 +137,7 @@ export default function App() {
       <AudioBulkProgressBanner />
       <GlobalAudioShortcuts />
       <VersionBadge />
+      <UpdateBanner />
     </SyncingProvider>
   )
 }

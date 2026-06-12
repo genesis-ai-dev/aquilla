@@ -1,7 +1,7 @@
 /// <reference types="vitest" />
 import path from "path"
 import { execFileSync } from "node:child_process"
-import { readFileSync } from "node:fs"
+import { readFileSync, writeFileSync, mkdirSync } from "node:fs"
 import { defineConfig } from "vite"
 import react, { reactCompilerPreset } from "@vitejs/plugin-react"
 import babel from "@rolldown/plugin-babel"
@@ -89,6 +89,13 @@ export default defineConfig(({ mode }) => ({
       globals: { Buffer: true, global: true, process: true },
     }),
     brandingHtmlPlugin(brand),
+    {
+      name: "version-json",
+      writeBundle() {
+        mkdirSync("dist", { recursive: true })
+        writeFileSync("dist/version.json", JSON.stringify({ sha: buildSha }))
+      },
+    },
   ],
   resolve: {
     alias: {

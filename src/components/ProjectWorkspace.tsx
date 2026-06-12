@@ -1800,15 +1800,17 @@ export function ProjectWorkspace() {
   )
   const [focusedCellCanonicalRef, setFocusedCellCanonicalRef] = useState<string | null>(null)
   // Parallel-bibles sidebar (helloao): open state persisted per project, plus
-  // the canonical ref of the first visible editor row (scroll-tracked).
+  // the canonical ref the panel follows. Fed by two signals, most recent
+  // wins: the first visible editor row (scroll) and the focused cell
+  // (click / tab navigation in handleClaimCell).
   const [parallelBiblesOpen, setParallelBiblesOpen] = useState<boolean>(() =>
     projectId ? readParallelBiblesOpen(projectId) : false,
   )
-  const [visibleCellRef, setVisibleCellRef] = useState<string | null>(null)
+  const [trackedCellRef, setTrackedCellRef] = useState<string | null>(null)
   // Drop the tracked ref when switching files so the previous file's verse
   // doesn't leak into the new file's panel (the new EditorTable re-fires).
   useEffect(() => {
-    setVisibleCellRef(null)
+    setTrackedCellRef(null)
   }, [activeFileId])
   const reconcilerRef = useRef<import("@/lib/sync/ws-reconciler").WsReconciler | null>(null)
   // FRO-288: Reactive reconciler state so useFocusLock can access it.
@@ -1982,6 +1984,9 @@ export function ProjectWorkspace() {
     // FRO-179: update TN sidebar with the focused cell's canonicalRef.
     const focusedCell = cells.find((c) => c.id === cellId)
     setFocusedCellCanonicalRef(focusedCell?.group ?? null)
+    // Parallel-bibles panel: navigating to a cell is a stronger "looking at"
+    // signal than the scroll position — the panel follows whichever moved last.
+    if (focusedCell?.group) setTrackedCellRef(focusedCell.group)
     // FRO-288: focusLockState.claim() replaces the bare focus.claim send.
     // The hook sends focus.claim and starts the half-period renewal timer so
     // the 30s DO lease never silently expires mid-edit.
@@ -3406,7 +3411,7 @@ export function ProjectWorkspace() {
             checkLockHolder={checkLockHolder}
             staleCellIds={staleCellIds}
             assignmentsByCellId={assignmentsByCellId}
-            onVisibleRefChange={setVisibleCellRef}
+            onVisibleRefChange={setTrackedCellRef}
           />
           </div>
         ) : (
@@ -3425,7 +3430,7 @@ export function ProjectWorkspace() {
             {centerSurface === "editor" && activeFile && fileTypeHasSections(activeFile.type) && (
               <ParallelBiblesSidebar
                 key={activeFile.id}
-                trackedRef={visibleCellRef}
+                trackedRef={trackedCellRef}
                 open={parallelBiblesOpen}
                 onToggle={() => {
                   const next = !parallelBiblesOpen

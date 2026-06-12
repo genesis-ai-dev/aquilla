@@ -49,6 +49,13 @@ vi.mock("@/lib/frontier/portfolio", async (importActual) => {
 // portfolio-focused assertions below are unaffected.
 vi.mock("@/lib/sync/assignments", () => ({ getWorkload: vi.fn(async () => []) }))
 
+// FRO-326: pending-invites card data source. Default empty; individual tests
+// override to assert the card renders.
+const listMyPendingInvitesMock = vi.fn(async (): Promise<unknown[]> => [])
+vi.mock("@/lib/sync/invites", () => ({
+  listMyPendingInvites: () => listMyPendingInvitesMock(),
+}))
+
 beforeEach(() => {
   localStorage.clear()
   mockUseFrontierSession.mockReturnValue({ session: { jwt: "jwt", username: "anna", createdAt: "x" }, loading: false })
@@ -68,6 +75,34 @@ describe("OrgHome", () => {
     render(<MemoryRouter><OrgProvider><OrgHome /></OrgProvider></MemoryRouter>)
     await waitFor(() => expect(screen.getByText("Legacy Translation")).toBeInTheDocument())
     expect(screen.getByText("New Testament")).toBeInTheDocument()
+  })
+
+  // FRO-326: an invite addressed to the user's email must be discoverable
+  // in-app — the email/link may never have arrived. Review & accept routes
+  // to the /join/:token confirmation page (explicit accept per FRO-335).
+  it("renders the Pending invitations card with a Review & accept link", async () => {
+    listMyPendingInvitesMock.mockResolvedValueOnce([
+      {
+        token: "tok-pending-1",
+        role: { level: 400, name: "contributor" },
+        createdBy: "wendi",
+        createdAt: "2026-06-12T00:00:00Z",
+        expiresAt: null,
+        projects: [{ projectId: "p9", projectName: "Ruth Translation" }],
+      },
+    ])
+    render(<MemoryRouter><OrgProvider><OrgHome /></OrgProvider></MemoryRouter>)
+    const card = await screen.findByTestId("pending-invitations")
+    expect(card).toHaveTextContent("Ruth Translation")
+    expect(card).toHaveTextContent(/invited by wendi/i)
+    const link = screen.getByRole("link", { name: /review & accept/i })
+    expect(link.getAttribute("href")).toBe("/join/tok-pending-1")
+  })
+
+  it("renders no Pending invitations card when there are none", async () => {
+    render(<MemoryRouter><OrgProvider><OrgHome /></OrgProvider></MemoryRouter>)
+    await waitFor(() => expect(screen.getByText("Legacy Translation")).toBeInTheDocument())
+    expect(screen.queryByTestId("pending-invitations")).not.toBeInTheDocument()
   })
 
   it("shows the project count in the rollup strip", async () => {

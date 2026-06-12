@@ -316,3 +316,39 @@ export async function acceptMultiInvite(
     return null
   }
 }
+
+// ── Received invites (FRO-326) ─────────────────────────────────────────────
+
+export interface MyPendingInvite {
+  token: string
+  role: { level: number; name: string }
+  createdBy: string
+  createdAt: string
+  expiresAt: string | null
+  projects: { projectId: string; projectName: string }[]
+}
+
+/**
+ * GET /api/v2/invites/mine — unredeemed, unexpired invites addressed to the
+ * caller's account email (FRO-326). Open links carry no recipient identity
+ * and never appear here. Returns [] on any failure — the dashboard card
+ * simply doesn't render rather than erroring.
+ */
+export async function listMyPendingInvites(
+  jwt: string,
+  apiUrl: string = AUTH_API_URL
+): Promise<MyPendingInvite[]> {
+  try {
+    const res = await fetch(`${apiUrl}/api/v2/invites/mine`, {
+      headers: { Authorization: `Bearer ${jwt}` },
+    })
+    if (!res.ok) {
+      console.warn(`[invites] listMyPendingInvites → HTTP ${res.status}`)
+      return []
+    }
+    return ((await res.json()) as { invites: MyPendingInvite[] }).invites
+  } catch (err) {
+    console.warn("[invites] listMyPendingInvites failed:", err)
+    return []
+  }
+}
